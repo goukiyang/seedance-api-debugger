@@ -1,0 +1,222 @@
+/**
+ * 资产存储服务
+ * - 图片：原始文件 + 2:3 缩略图
+ * - 视频/音频：仅原始文件
+ */
+
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import sharp from 'sharp';
+import { v4 as uuidv4 } from 'uuid';
+import { prisma } from '@/lib/prisma';
+
+// ============================================================================
+// 目录配置
+// ============================================================================
+
+const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
+const ASSETS_DIR = path.join(UPLOAD_DIR, 'assets');
+const THUMBS_DIR = path.join(UPLOAD_DIR, 'thumbs');
+
+// 确保目录存在
+function ensureDirs() {
+  [ASSETS_DIR, THUMBS_DIR].forEach((dir) => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  });
+}
+
+// ============================================================================
+// Hash 计算（去重）
+// ============================================================================
+
+function computeHash(buffer: Buffer): string {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+// ============================================================================
+// 缩略图生成（2:3 比例）
+// ============================================================================
+
+async function generateThumbnail(
+  buffer: Buffer,
+  mimeType: string
+): Promise<{ thumbPath: string; width: number; height: number }> {
+  const thumbWidth = 300;
+  const thumbHeight = 450; // 2:3
+
+  const thumbBuffer = await sharp(buffer)
+    .resize(thumbWidth, thumbHeight, {
+      fit: 'cover',
+      position: 'center',
+    })
+    .toFormat(mimeTypeToSharpFormat(mimeType), { quality: 85 })
+    .toBuffer();
+
+  const thumbHash = computeHash(thumbBuffer);
+  const ext = mimeTypeToExt(mimeType);
+  const thumbFileName = `${thumbHash}_thumb.${ext}`;
+  const thumbPath = path.join(THUMBS_DIR, thumbFileName);
+
+  fs.writeFileSync(thumbPath, thumbBuffer);
+
+  return {
+    thumbPath: `/uploads/thumbs/${thumbFileName}`,
+    width: thumbWidth,
+    height: thumbHeight,
+  };
+}
+
+// ============================================================================
+// 工具函数
+// ============================================================================
+
+function mimeTypeToExt(mimeType: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/bmp': 'bmp',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+    'audio/mpeg': 'mp3',
+    'audio/wav': 'wav',
+    'audio/ogg': 'ogg',
+  };
+  return map[mimeType] || 'bin';
+}
+
+function mimeTypeToSharpFormat(mimeType: string): keyof sharp.FormatEnum {
+  const map: Record<string, keyof sharp.FormatEnum> = {
+    'image/jpeg': 'jpeg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+  };
+  return map[mimeType] || 'jpeg';
+}
+
+function getAssetType(mimeType: string): 'image' | 'video' | 'audio' {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  return 'image';
+}
+
+// ============================================================================
+// 核心 API
+// ============================================================================
+
+export interface UploadResult {
+  assetId: string;
+  originalUrl: string;
+  thumbnailUrl: string | null;
+  hash: string;
+  width?: number;
+  height?: number;
+}
+
+export async function uploadAsset(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<UploadResult> {
+  ensureDirs();
+
+  const hash = computeHash(buffer);
+  const ext = mimeTypeToExt(mimeType);
+  const assetType = getAssetType(mimeType);
+
+  // 检查是否已存在（通过 hash 去重）
+  const existing = await prisma.asset.findUnique({ where: { hash } });
+  if (existing) {
+    return {
+      assetId: existing.id,
+      originalUrl: existing.original_url,
+      thumbnailUrl: existing.thumbnail_url,
+      hash: existing.hash ?? '',
+      width: existing.width ?? undefined,
+      height: existing.height ?? undefined,
+    };
+  }
+
+  // 保存原始文件
+  const storedFileName = `${hash}.${ext}`;
+  const filePath = path.join(ASSETS_DIR, storedFileName);
+  fs.writeFileSync(filePath, buffer);
+
+  let thumbnailUrl: string | null = null;
+  let width: number | null = null;
+  let height: number | null = null;
+
+  // 图片生成缩略图 + 读取尺寸
+  if (assetType === 'image') {
+    const metadata = await sharp(buffer).metadata();
+    width = metadata.width ?? null;
+    height = metadata.height ?? null;
+
+    const thumbResult = await generateThumbnail(buffer, mimeType);
+    thumbnailUrl = thumbResult.thumbPath;
+  }
+
+  // 写入数据库
+  const asset = await prisma.asset.create({
+    data: {
+      id: uuidv4(),
+      owner_id: 'default-user',
+      type: assetType,
+      original_url: `/uploads/assets/${storedFileName}`,
+      thumbnail_url: thumbnailUrl,
+      file_name: fileName,
+      mime_type: mimeType,
+      width,
+      height,
+      file_size: buffer.length,
+      hash,
+    },
+  });
+
+  return {
+    assetId: asset.id,
+    originalUrl: asset.original_url,
+    thumbnailUrl: asset.thumbnail_url,
+    hash: asset.hash ?? '',
+    width: asset.width ?? undefined,
+    height: asset.height ?? undefined,
+  };
+}
+
+export async function getAssetById(id: string) {
+  return prisma.asset.findUnique({
+    where: { id },
+    include: {
+      workspace_assets: {
+        include: { workspace: true },
+        orderBy: { sort_order: 'asc' },
+      },
+    },
+  });
+}
+
+export async function deleteAsset(id: string) {
+  const asset = await prisma.asset.findUnique({ where: { id } });
+  if (!asset) return;
+
+  // 删除文件
+  const originalPath = path.join(process.cwd(), 'public', asset.original_url);
+  if (fs.existsSync(originalPath)) {
+    fs.unlinkSync(originalPath);
+  }
+  if (asset.thumbnail_url) {
+    const thumbPath = path.join(process.cwd(), 'public', asset.thumbnail_url);
+    if (fs.existsSync(thumbPath)) {
+      fs.unlinkSync(thumbPath);
+    }
+  }
+
+  await prisma.asset.delete({ where: { id } });
+}

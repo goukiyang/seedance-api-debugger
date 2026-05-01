@@ -1,0 +1,179 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model VideoTask {
+  id                       String    @id @default(cuid())
+  provider                 String
+  model                    String
+  generation_mode          String
+  prompt                  String
+
+  ratio                    String?
+  duration                 Int?
+  resolution               String?
+  seed                     Int?
+  generate_audio           Boolean   @default(true)
+  return_last_frame        Boolean   @default(false)
+  watermark                Boolean   @default(false)
+
+  reference_image_urls     String?
+  reference_video_urls     String?
+  reference_audio_urls     String?
+  first_frame_url          String?
+  last_frame_url           String?
+  frame_image_urls         String?
+
+  callback_url             String?
+  execution_expires_after  Int?
+
+  local_status             String    @default("draft")
+  provider_task_id         String?
+  provider_status          String?
+  result_video_url         String?
+  result_last_frame_url   String?
+  local_video_path         String?
+
+  raw_create_response      String?
+  raw_status_response      String?
+  error_message           String?
+  params_json              String?
+  reference_images_json   String?  // 参考图调试信息（含 base64 解析状态）
+  provider_payload_json   String?  // 发送给 provider 的最终 payload
+
+  // 关联 workspace 和快照（通过 GenerationTaskSnapshot.task 侧建立关系）
+  workspace_id             String?
+  snapshot_id             String?   @unique
+
+  workspace                Workspace?               @relation(fields: [workspace_id], references: [id])
+
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
+  completed_at             DateTime?
+}
+
+// ============================================================================
+// 资产管理系统
+// ============================================================================
+
+// 上传的文件（图片/视频/音频）
+model Asset {
+  id             String    @id @default(cuid())
+  owner_id       String    // 固定为 "default-user"，后续支持多用户时扩展
+  type           String    // image | video | audio
+
+  // 存储路径
+  original_url   String    // /uploads/assets/{hash}.{ext}
+  thumbnail_url  String?   // /uploads/thumbs/{hash}_thumb.{ext}  (2:3 比例)
+
+  // 文件元信息
+  file_name      String
+  mime_type      String
+  width          Int?
+  height         Int?
+  file_size      Int       // bytes
+
+  // 去重
+  hash           String?   @unique
+
+  created_at     DateTime  @default(now())
+
+  // 关联
+  workspace_assets     WorkspaceAsset[]
+  collection_items    AssetCollectionItem[]
+  collections_cover    AssetCollection[]     @relation("CollectionCover")
+}
+
+// 工作区：管理当前会话的参考素材
+model Workspace {
+  id           String    @id @default(cuid())
+  owner_id     String    @default("default-user")
+  name         String    @default("默认工作台")
+  status       String    @default("active") // active | archived
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  // 关联
+  assets       WorkspaceAsset[]
+  snapshots    GenerationTaskSnapshot[]
+  tasks        VideoTask[]
+}
+
+// Workspace <-> Asset 关联表（含排序和角色）
+model WorkspaceAsset {
+  id           String   @id @default(cuid())
+  workspace_id String
+  asset_id     String
+  sort_order   Int      @default(0)   // 决定 图1/图2/图3 顺序
+  role         String?              // reference_image | first_frame | last_frame | reference_video | reference_audio
+  created_at   DateTime @default(now())
+
+  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  asset        Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+
+  @@unique([workspace_id, asset_id])
+}
+
+// 图片集：保存/复用素材组合
+model AssetCollection {
+  id           String    @id @default(cuid())
+  owner_id     String    @default("default-user")
+  name         String
+  description String?
+  visibility  String    @default("private") // private | public
+  cover_asset_id String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  // 关联
+  items        AssetCollectionItem[]
+  cover_asset  Asset?    @relation("CollectionCover", fields: [cover_asset_id], references: [id])
+}
+
+// 图片集条目
+model AssetCollectionItem {
+  id           String   @id @default(cuid())
+  collection_id String
+  asset_id     String
+  sort_order   Int      @default(0)
+  role         String?
+  created_at   DateTime @default(now())
+
+  collection   AssetCollection @relation(fields: [collection_id], references: [id], onDelete: Cascade)
+  asset        Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+
+  @@unique([collection_id, asset_id])
+}
+
+// 任务快照：生成时的参数 + 素材状态冻结
+model GenerationTaskSnapshot {
+  id                    String   @id @default(cuid())
+  task_id               String?  // 可选关联 VideoTask
+  workspace_id          String?
+
+  // 生成参数
+  generation_mode       String
+  prompt_raw            String   // 用户原始 prompt（含 图1 图2 等引用）
+  prompt_rendered       String   // 渲染后（将 图N 替换为实际 URL）
+
+  // 素材映射：{ "图1": assetId, "图2": assetId }
+  asset_mapping_json    String?  // JSON
+
+  // 完整 content 数组
+  content_json          String?  // JSON
+
+  // API 发送的原始 payload
+  provider_payload_json String?
+
+  created_at            DateTime @default(now())
+
+  workspace     Workspace?  @relation(fields: [workspace_id], references: [id])
+}

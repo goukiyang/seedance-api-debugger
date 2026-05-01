@@ -1,0 +1,136 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { createVideoTask, isApiKeyConfigured } from '@/lib/provider/jimeng';
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const originalTaskId = params.id;
+
+    if (!isApiKeyConfigured()) {
+      return NextResponse.json(
+        { error: 'API key not configured', message: '请在环境变量中配置 SEEDANCE_API_KEY' },
+        { status: 500 }
+      );
+    }
+
+    const originalTask = await prisma.videoTask.findUnique({
+      where: { id: originalTaskId },
+    });
+
+    if (!originalTask) {
+      return NextResponse.json(
+        { error: 'Task not found', message: `Task ${originalTaskId} not found` },
+        { status: 404 }
+      );
+    }
+
+    let paramsJson: Record<string, unknown> = {};
+    try {
+      if (originalTask.params_json) {
+        paramsJson = JSON.parse(originalTask.params_json);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Parse reference arrays
+    const referenceImageUrls = originalTask.reference_image_urls
+      ? JSON.parse(originalTask.reference_image_urls) as string[]
+      : [];
+    const referenceVideoUrls = originalTask.reference_video_urls
+      ? JSON.parse(originalTask.reference_video_urls) as string[]
+      : [];
+    const referenceAudioUrls = originalTask.reference_audio_urls
+      ? JSON.parse(originalTask.reference_audio_urls) as string[]
+      : [];
+    const frameImageUrls = originalTask.frame_image_urls
+      ? JSON.parse(originalTask.frame_image_urls) as string[]
+      : [];
+
+    // Create new local task
+    const newTask = await prisma.videoTask.create({
+      data: {
+        provider: originalTask.provider,
+        model: originalTask.model,
+        generation_mode: originalTask.generation_mode,
+        prompt: originalTask.prompt,
+        ratio: originalTask.ratio ?? '16:9',
+        duration: originalTask.duration ?? 5,
+        resolution: originalTask.resolution ?? '480p',
+        seed: originalTask.seed ?? -1,
+        generate_audio: originalTask.generate_audio,
+        return_last_frame: originalTask.return_last_frame,
+        watermark: originalTask.watermark,
+        reference_image_urls: originalTask.reference_image_urls,
+        reference_video_urls: originalTask.reference_video_urls,
+        reference_audio_urls: originalTask.reference_audio_urls,
+        first_frame_url: originalTask.first_frame_url,
+        last_frame_url: originalTask.last_frame_url,
+        frame_image_urls: originalTask.frame_image_urls,
+        workspace_id: originalTask.workspace_id,
+        params_json: originalTask.params_json,
+        local_status: 'submitted',
+      },
+    });
+
+    try {
+      const providerResult = await createVideoTask({
+        prompt: originalTask.prompt,
+        generation_mode: originalTask.generation_mode as 'all_in_one_reference' | 'first_last_frame' | 'smart_multi_frame',
+        ratio: originalTask.ratio as '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' || '16:9',
+        duration: originalTask.duration as 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 || 5,
+        resolution: originalTask.resolution as '480p' | '720p' || '480p',
+        seed: originalTask.seed ?? -1,
+        generate_audio: originalTask.generate_audio,
+        return_last_frame: originalTask.return_last_frame,
+        watermark: originalTask.watermark,
+        reference_image_urls: referenceImageUrls,
+        reference_video_urls: referenceVideoUrls,
+        reference_audio_urls: referenceAudioUrls,
+        first_frame_url: originalTask.first_frame_url ?? undefined,
+        last_frame_url: originalTask.last_frame_url ?? undefined,
+        frame_image_urls: frameImageUrls,
+      });
+
+      const updatedTask = await prisma.videoTask.update({
+        where: { id: newTask.id },
+        data: {
+          provider_task_id: providerResult.provider_task_id,
+          raw_create_response: JSON.stringify(providerResult.raw),
+        },
+      });
+
+      return NextResponse.json({
+        id: updatedTask.id,
+        provider_task_id: updatedTask.provider_task_id,
+        status: updatedTask.local_status,
+        created_at: updatedTask.created_at,
+      });
+    } catch (apiError) {
+      await prisma.videoTask.update({
+        where: { id: newTask.id },
+        data: {
+          local_status: 'failed',
+          error_message: apiError instanceof Error ? apiError.message : 'Unknown error',
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: 'API call failed',
+          message: apiError instanceof Error ? apiError.message : 'Unknown error',
+        },
+        { status: 500 }
+      );
+    }
+  } catch (error) {
+    console.error('[RetryTask] Error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
+  }
+}
