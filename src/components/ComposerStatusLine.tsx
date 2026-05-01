@@ -37,11 +37,9 @@ export function ComposerStatusLine({ blockingError, usedRefs, hasPrompt, hasAsse
 
   return (
     <div className="composer-status-ok">
-      {items.reduce((acc, node, i) => {
-        if (i > 0) acc.push(<span key={`sep-${i}`} className="text-white/25">|</span>);
-        acc.push(node);
-        return acc;
-      }, [] as React.ReactNode[])}
+      {items.flatMap((node, i) =>
+        i > 0 ? [<span key={`sep-${i}`} className="text-white/25">|</span>, node] : [node]
+      )}
     </div>
   );
 }

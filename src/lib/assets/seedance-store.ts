@@ -35,7 +35,7 @@ export const seedanceStore = {
 
   /** 按 providerAssetId 获取 */
   getByProviderId(providerAssetId: string): LocalAssetRecord | undefined {
-    for (const record of store.values()) {
+    for (const record of Array.from(store.values())) {
       if (record.providerAssetId === providerAssetId) return record;
     }
     return undefined;
@@ -65,7 +65,7 @@ export const seedanceStore = {
 
   /** 按 providerAssetId 更新 */
   updateByProviderId(providerAssetId: string, patch: Partial<Pick<LocalAssetRecord, 'name' | 'status' | 'providerPreviewUrl'>>): LocalAssetRecord | undefined {
-    for (const [localId, record] of store.entries()) {
+    for (const [localId, record] of Array.from(store.entries())) {
       if (record.providerAssetId === providerAssetId) {
         const updated: LocalAssetRecord = {
           ...record,

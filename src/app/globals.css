@@ -1249,7 +1249,7 @@ a {
 
 /* 页面主体 */
 .composer-main {
-  padding: 40px 48px 320px;
+  padding: 40px 48px 80px;
   max-width: 1440px;
   margin: 0 auto;
 }

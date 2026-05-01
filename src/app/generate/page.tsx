@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import { SeedanceAssetPanel } from '@/components/SeedanceAssetPanel';
+import { useComposerHeight } from '@/lib/context/ComposerHeightContext';
 
 // ============================================================================
 // Types
@@ -30,6 +31,7 @@ interface TaskItem {
 // ============================================================================
 
 export default function GeneratePage() {
+  const { composerHeight } = useComposerHeight();
   // ---- Collections ----
   const [collections, setCollections] = useState<AssetCollection[]>([]);
 
@@ -224,7 +226,7 @@ export default function GeneratePage() {
       </header>
 
       {/* ===== 页面主体 ===== */}
-      <main className="composer-main">
+      <main className="composer-main" style={{ paddingBottom: composerHeight + 56 }}>
 
         {/* Hero 空状态 */}
         <div className="composer-hero">
