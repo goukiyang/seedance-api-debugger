@@ -206,9 +206,9 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   };
 
   return (
-    <div style={{
-      position: 'fixed', bottom: 24, left: 50, transform: 'translateX(-50%)',
-      width: 'calc(100% - 96px)', maxWidth: 900, zIndex: 60,
+    <div data-testid="seedance-asset-panel" style={{
+      position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+      width: 'calc(100% - 96px)', maxWidth: 900, zIndex: 1000,
       backgroundColor: 'rgba(11,18,32,0.98)', border: '1px solid rgba(255,255,255,0.12)',
       borderRadius: 20, padding: 20,
       boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
@@ -322,14 +322,38 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '20px 0' }}>暂无资产，上方创建</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {assets.map((asset) => (
-                <div key={asset.localId} style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, border: `1px solid rgba(255,255,255,${asset.status === 'Active' ? '0.06' : '0.2'})`, fontSize: 11 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>{asset.name}</span>
-                    {statusBadge(asset.status)}
-                  </div>
-                  <div style={{ color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', fontSize: 9, marginBottom: 4, wordBreak: 'break-all' }}>
-                    DB: {asset.localId.slice(0, 12)}... | 官方: {asset.providerAssetId}
+              {assets.map((asset) => {
+                const previewUrl = asset.providerPreviewUrl || asset.originalUrl;
+
+                return (
+                <div key={asset.localId} data-testid="seedance-asset-row" style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, border: `1px solid rgba(255,255,255,${asset.status === 'Active' ? '0.06' : '0.2'})`, fontSize: 11 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <div style={{ position: 'relative', flex: '0 0 auto', width: 44, height: 44, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 9, fontFamily: 'monospace' }}>
+                      <span>IMG</span>
+                      {previewUrl && (
+                        <img
+                          src={previewUrl}
+                          alt={asset.name}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', backgroundColor: 'rgba(255,255,255,0.06)' }}
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
+                        <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</span>
+                        {statusBadge(asset.status)}
+                      </div>
+                      <div style={{ color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', fontSize: 9, marginBottom: 4, wordBreak: 'break-all' }}>
+                        DB: {asset.localId.slice(0, 12)}... | 官方: {asset.providerAssetId}
+                      </div>
+                      <div style={{ color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', fontSize: 9, marginBottom: 4, wordBreak: 'break-all' }}>
+                        官方状态: {asset.providerStatus || '(未同步)'} | 预览: {previewUrl || '(无)'}
+                      </div>
+                      <div style={{ color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', fontSize: 9, marginBottom: 4, wordBreak: 'break-all' }}>
+                        原始URL: {asset.originalUrl || '(无)'}
+                      </div>
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     <button
@@ -372,7 +396,8 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -401,7 +426,8 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                 ['官方ID', detail.asset.providerAssetId],
                 ['名称', detail.asset.name],
                 ['类型', detail.asset.assetType],
-                ['状态', detail.asset.status],
+                ['本地状态', detail.asset.status],
+                ['官方状态', detail.asset.providerStatus || '(无)'],
                 ['官方预览', detail.asset.providerPreviewUrl || '(无)'],
                 ['用户URL', detail.asset.originalUrl],
                 ['创建时间', detail.asset.createdAt],

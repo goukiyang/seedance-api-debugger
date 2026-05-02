@@ -2,8 +2,8 @@
  * 公网上传模块
  *
  * 支持按优先级自动选择：
- * 1. 火山引擎 TOS（推荐，与 Seedance 同体系）
- * 2. Cloudflare R2
+ * 1. Cloudflare R2
+ * 2. 火山引擎 TOS
  * 3. 本地 public 目录（公网需部署后可用）
  * 4. 本地（localhost，仅本地预览）
  *
@@ -76,17 +76,7 @@ interface StorageConfig {
 }
 
 function getStorageConfig(): StorageConfig {
-  // 优先检查 TOS
-  if (
-    process.env.TOS_REGION &&
-    process.env.TOS_BUCKET &&
-    process.env.TOS_ACCESS_KEY &&
-    process.env.TOS_SECRET_KEY
-  ) {
-    return { provider: 'tos', isPubliclyReachable: true };
-  }
-
-  // 检查 R2
+  // 优先检查 R2
   if (
     process.env.R2_ACCOUNT_ID &&
     process.env.R2_ACCESS_KEY_ID &&
@@ -94,6 +84,16 @@ function getStorageConfig(): StorageConfig {
     process.env.R2_BUCKET
   ) {
     return { provider: 'r2', isPubliclyReachable: true };
+  }
+
+  // 检查 TOS
+  if (
+    process.env.TOS_REGION &&
+    process.env.TOS_BUCKET &&
+    process.env.TOS_ACCESS_KEY &&
+    process.env.TOS_SECRET_KEY
+  ) {
+    return { provider: 'tos', isPubliclyReachable: true };
   }
 
   // 检查公网静态目录（已有公网域名）
@@ -149,6 +149,10 @@ async function uploadToTOS(buffer: Buffer, fileName: string, mimeType: string): 
 async function uploadToR2(buffer: Buffer, fileName: string, mimeType: string): Promise<{ publicUrl: string; key: string }> {
   const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL } = process.env;
 
+  if (!R2_PUBLIC_BASE_URL || !isPubliclyReachableUrl(R2_PUBLIC_BASE_URL)) {
+    throw new Error('R2_PUBLIC_BASE_URL 未配置为公网地址，无法生成可被 Seedance 下载的 publicUrl');
+  }
+
   const client = new S3Client({
     region: 'auto',
     endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -169,9 +173,7 @@ async function uploadToR2(buffer: Buffer, fileName: string, mimeType: string): P
     ContentType: mimeType,
   }));
 
-  const publicUrl = R2_PUBLIC_BASE_URL
-    ? `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`
-    : `https://${R2_ACCOUNT_ID}.r2.dev/${R2_BUCKET}/${key}`;
+  const publicUrl = `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`;
 
   return { publicUrl, key };
 }
@@ -249,7 +251,7 @@ export interface PublicUploadResult {
 /**
  * 统一公网上传函数
  *
- * 按优先级自动选择 TOS > R2 > local-public > local
+ * 按优先级自动选择 R2 > TOS > local-public > local
  * - 如果有公网对象存储：上传并返回公网 URL
  * - 如果只有本地上传：返回 localhost URL，标记 warning
  *
