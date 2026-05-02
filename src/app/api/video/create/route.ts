@@ -239,25 +239,29 @@ interface PreparedReferenceImage {
 }
 
 /**
- * 统一准备参考图：公网 URL + 必要时调用 asset/create
+ * 统一准备参考图：公网 URL + R2 上传 + asset/create 追踪
  *
- * 核心原则：
- * 1. 视频生成接口传公网 HTTPS URL（image_url.url），不传 assetId
- * 2. asset/create 用于追踪记录和复用，不改变生成传参
- * 3. 纹身图（已有公网 URL）跳过上传，直接用 URL
- * 4. 上传图（R2 URL）有公网 URL，跳过 asset/create
- * 5. 本地路径图（已改为 R2 上传，original_url 存公网 URL）直接用
+ * 核心原则（绝对不可违反）：
+ * 1. 视频生成接口只接受公网 HTTPS URL，不接受 base64，不接受本地路径
+ * 2. 如果 original_url 是本地路径，必须上传 R2 得公网 URL，再继续
+ * 3. asset/create 用于追踪记录，不改变视频生成传参
+ * 4. asset/create 失败不影响生成（只记录失败，不阻断）
+ * 5. R2 上传失败 → 报错阻断，不走 base64 fallback
  *
  * @param workspaceId 当前 workspace ID
- * @returns 准备好的参考图数组（已去重，已公网化）
+ * @returns 准备好的参考图数组（全部公网 HTTPS URL）
  */
 async function prepareReferenceImagesForSeedance(workspaceId: string): Promise<{
   preparedImages: PreparedReferenceImage[];
+  prepareErrors: string[];
   summary: {
     total: number;
-    withPublicUrl: number;
+    publicUrl: number;
+    r2Uploaded: number;
     withProviderAssetId: number;
     skipped: number;
+    hasLocalPath: boolean;
+    hasBase64: boolean;
   };
 }> {
   console.log('\n========== Step 3: Prepare Reference Images ==========');
@@ -271,9 +275,14 @@ async function prepareReferenceImagesForSeedance(workspaceId: string): Promise<{
 
   const imageAssets = wsAssets.filter((wa) => wa.asset.type === 'image').slice(0, 9);
   const preparedImages: PreparedReferenceImage[] = [];
-  let withPublicUrl = 0;
+  const prepareErrors: string[] = [];
+
+  let publicUrl = 0;
+  let r2Uploaded = 0;
   let withProviderAssetId = 0;
   let skipped = 0;
+  let hasLocalPath = false;
+  let hasBase64 = false;
 
   for (let i = 0; i < imageAssets.length; i++) {
     const wa = imageAssets[i];
@@ -282,55 +291,100 @@ async function prepareReferenceImagesForSeedance(workspaceId: string): Promise<{
     const isPublicUrl = originalUrl.startsWith('https://') && !isLocalhostHost(originalUrl);
     const isR2Url = originalUrl.includes('.r2.') || originalUrl.includes('r2.dev') || originalUrl.includes('.toscdn.');
     const isExternalUrl = isPublicUrl && !isR2Url;
+    const isLocalPath = originalUrl.startsWith('/');
 
-    console.log(`  [${i + 1}] ${asset.file_name || 'untitled'} | ${getUrlHost(originalUrl)} | ${isPublicUrl ? '✅公网' : '❌非公网'} | ${isR2Url ? 'R2' : isExternalUrl ? '外部' : 'local'}`);
+    console.log(`  [${i + 1}] ${asset.file_name || 'untitled'} | ${getUrlHost(originalUrl)} | ${isPublicUrl ? '公网' : '非公网'} | ${isR2Url ? 'R2' : isExternalUrl ? '外部' : isLocalPath ? '本地路径' : '未知'}`);
 
-    // 2. 判断 sourceType
-    let sourceType: PreparedReferenceImage['sourceType'] = 'upload';
-    if (isExternalUrl) {
-      sourceType = 'external';
-    } else if (isR2Url) {
-      sourceType = 'upload';
-    }
-
-    // 3. 公网 URL → 直接用
+    // === Case 1: 已是公网 HTTPS URL → 直接用 ===
     if (isPublicUrl) {
-      withPublicUrl++;
+      publicUrl++;
+      const sourceType: PreparedReferenceImage['sourceType'] = isR2Url ? 'upload' : 'external';
       preparedImages.push({
         name: asset.file_name || `图${i + 1}`,
         originalUrl,
         sourceType,
         order: i,
       });
-      console.log(`       → 直接使用公网 URL: ${getUrlHost(originalUrl)}`);
+      console.log(`       -> 直接使用公网 URL: ${getUrlHost(originalUrl)}`);
       continue;
     }
 
-    // 4. 非公网 URL（如本地路径）→ 尝试转 base64
-    // 注意：正常上传已走 R2，这里理论上不会走到。但如果走到，仍尝试 base64 fallback
-    console.log(`       ⚠ 非公网 URL，尝试 base64 fallback: ${originalUrl}`);
-    const base64 = await convertLocalImageToBase64(originalUrl);
-    if (base64 && base64.startsWith('data:')) {
-      withPublicUrl++;
+    // === Case 2: 本地路径 -> 必须上传 R2 得公网 URL ===
+    if (isLocalPath) {
+      hasLocalPath = true;
+      console.log(`       ! 本地路径，强制上传 R2...`);
+
+      const localFilePath = path.join(process.cwd(), 'public', originalUrl);
+      if (!fs.existsSync(localFilePath)) {
+        skipped++;
+        prepareErrors.push(`[${i + 1}] 本地文件不存在: ${originalUrl}`);
+        console.log(`       X 本地文件不存在，跳过`);
+        continue;
+      }
+
+      const buffer = fs.readFileSync(localFilePath);
+      const ext = path.extname(localFilePath).slice(1).toLowerCase();
+      const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+      const mimeType = mimeMap[ext] || 'image/jpeg';
+
+      // 上传 R2/TOS
+      let r2PublicUrl: string | null = null;
+      let uploadError: string | null = null;
+      try {
+        const { uploadPublicAsset } = await import('@/lib/assets/public-storage');
+        const pubResult = await uploadPublicAsset(buffer, asset.file_name || `image.${ext}`, mimeType);
+        r2PublicUrl = pubResult.publicUrl;
+        console.log(`       OK R2 上传成功: ${getUrlHost(r2PublicUrl)}`);
+      } catch (err) {
+        uploadError = err instanceof Error ? err.message : String(err);
+        console.log(`       X R2 上传失败: ${uploadError}`);
+      }
+
+      if (!r2PublicUrl) {
+        skipped++;
+        prepareErrors.push(`[${i + 1}] R2 上传失败: ${uploadError}，无法为 Seedance 准备参考图`);
+        // 绝对不走 base64 fallback
+        continue;
+      }
+
+      // 更新数据库 original_url 为公网 URL（下次不再重复上传）
+      try {
+        await prisma.asset.update({
+          where: { id: asset.id },
+          data: { original_url: r2PublicUrl },
+        });
+        console.log(`       OK DB original_url 已更新为 R2 URL`);
+      } catch (err) {
+        console.log(`       ! DB 更新失败（不影响生成）: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      r2Uploaded++;
       preparedImages.push({
         name: asset.file_name || `图${i + 1}`,
-        originalUrl: base64, // base64 格式作为 fallback
+        originalUrl: r2PublicUrl,
         sourceType: 'upload',
         order: i,
       });
-      console.log(`       → base64 fallback 成功 (${Math.round(base64.length * 0.75 / 1024)}KB)`);
-    } else {
-      skipped++;
-      console.log(`       → 跳过（无法准备: ${originalUrl}）`);
+      continue;
     }
+
+    // === Case 3: 其他非公网 URL -> 跳过 ===
+    skipped++;
+    prepareErrors.push(`[${i + 1}] 非公网 URL 不可用: ${originalUrl}`);
+    console.log(`       X 非公网 URL，跳过`);
   }
 
-  console.log(`\n  准备完成: ${preparedImages.length} 张可用 | 公网 ${withPublicUrl} | providerAssetId ${withProviderAssetId} | 跳过 ${skipped}`);
+  console.log(`\n  准备完成: ${preparedImages.length} 张可用 | 公网 ${publicUrl} | R2上传 ${r2Uploaded} | 跳过 ${skipped}`);
+  console.log(`  hasLocalPath: ${hasLocalPath} | hasBase64: ${hasBase64}`);
+  if (prepareErrors.length > 0) {
+    console.log(`  错误: ${prepareErrors.join('; ')}`);
+  }
   console.log('================================================\n');
 
   return {
     preparedImages,
-    summary: { total: imageAssets.length, withPublicUrl, withProviderAssetId, skipped },
+    prepareErrors,
+    summary: { total: imageAssets.length, publicUrl, r2Uploaded, withProviderAssetId, skipped, hasLocalPath, hasBase64 },
   };
 }
 
@@ -476,8 +530,25 @@ export async function POST(request: NextRequest) {
     // 前端已简化为：上传 → workspace → 后台自动准备
 
     // ---- Workspace 素材自动注入 + 统一准备（核心链路）----
-    // Step 3: 统一准备参考图：公网化 + 脱敏 + 日志
-    const { preparedImages, summary: prepSummary } = await prepareReferenceImagesForSeedance(workspaceId);
+    // Step 3: 统一准备参考图：公网化 + R2 上传 + 脱敏 + 日志
+    const { preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImagesForSeedance(workspaceId);
+
+    // 如果没有任何可用参考图（且用户未填 prompt），允许空图生成
+    // 如果有图但全部跳过，说明参考图准备失败
+    if (prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
+      return NextResponse.json(
+        {
+          error: 'REFERENCE_IMAGE_NOT_PUBLIC',
+          message: '参考图无法生成公网 URL，无法用于 Seedance 生成',
+          details: {
+            total: prepSummary.total,
+            skipped: prepSummary.skipped,
+            errors: prepareErrors,
+          },
+        },
+        { status: 400 }
+      );
+    }
 
     let referenceImageUrls: string[] = [];
     let referenceVideoUrls: string[] = body.reference_video_urls ? [...body.reference_video_urls] : [];
@@ -691,23 +762,29 @@ export async function POST(request: NextRequest) {
       : 'text_to_video';
 
     // ---- Build provider_payload for snapshot (without base64, only metadata) ----
+    // 新的 payload summary：明确 no localhost, no base64, no local path
+    const payloadReferenceHosts = Array.from(new Set(preparedImages.map((img) => getUrlHost(img.originalUrl))));
+    const hasLocalPathInPayload = preparedImages.some((img) => img.originalUrl.startsWith('/'));
+    const hasBase64InPayload = preparedImages.some((img) => img.originalUrl.startsWith('data:'));
+
     const providerPayloadDebug = {
       model: 'dreamina-seedance-2-0-260128',
       generation_mode: generationMode,
       resolved_mode: resolvedMode,
       prompt: promptRendered,
       content_item_count: content.length,
-      reference_images_count: referenceImageBase64Data.length,
-      reference_images_debug: referenceImagesDebug,
-      first_frame_base64_status: firstFrameBase64 ? 'resolved' : 'none',
-      last_frame_base64_status: lastFrameBase64 ? 'resolved' : 'none',
-      ratio,
-      duration,
-      resolution,
-      seed,
-      generate_audio: generateAudio,
-      watermark,
-      // Full content array (with truncated base64 for readability)
+      // 新的参考图 summary
+      referenceFieldName: 'content[].image_url.url',
+      usingField: 'originalUrl (公网 HTTPS URL)',
+      referenceCount: preparedImages.length,
+      referenceHosts: payloadReferenceHosts,
+      referencePrepareSummary: prepSummary,
+      // 严格校验：禁止出现这些
+      NO_LOCALHOST: !payloadReferenceHosts.some((h) => h.includes('localhost') || h.includes('127.0.0.1')),
+      NO_LOCAL_PATH: !hasLocalPathInPayload,
+      NO_BASE64: !hasBase64InPayload,
+      prepareErrors,
+      // Full content array (truncated base64 for readability)
       content: content.map((item) => {
         if (item.type === 'image_url' && item.image_url?.url.startsWith('data:')) {
           return { type: item.type, role: item.role, image_url: { url: item.image_url.url.slice(0, 60) + '...(base64 data)' } };
