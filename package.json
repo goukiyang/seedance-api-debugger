@@ -13,7 +13,9 @@
     "test:api": "tsx scripts/test-seedance-api.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1041.0",
     "@prisma/client": "^5.16.1",
+    "@volcengine/tos-sdk": "^2.9.1",
     "dotenv": "^16.4.5",
     "next": "14.2.5",
     "react": "^18",

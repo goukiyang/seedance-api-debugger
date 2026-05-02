@@ -158,9 +158,30 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       const data = await res.json();
       if (!res.ok) {
         setUploadMsg(`❌ ${data.error}`);
+      } else if (data.closedLoop === false) {
+        // 公网上传未闭环
+        const provider = data.storageProvider || 'local';
+        const msgs = [
+          `✅ 文件上传成功 (${provider})`,
+          `URL: ${(data.publicUrl || '').slice(0, 60)}...`,
+        ];
+        if (data.reason === 'URL_NOT_PUBLIC') {
+          msgs.push('⚠️ 当前 URL 不是公网，Seedance 官方无法访问。');
+          msgs.push('请配置公网对象存储（TOS/R2）以完成闭环。');
+        } else if (data.reason === 'PROVIDER_CREATE_FAILED') {
+          msgs.push(`❌ 官方 create 失败：${data.error}`);
+        }
+        setUploadMsg(msgs.join('\n'));
+        // 半闭环也刷新列表
+        await loadAssets();
       } else {
-        setUploadMsg(`✅ 上传成功：${data.providerAssetId}`);
-        if (data.warning) setUploadMsg(prev => `${prev}\n⚠️ ${data.warning}`);
+        // 完整闭环
+        setUploadMsg(
+          `✅ 上传成功 (${data.storageProvider || 'local'})\n` +
+          `providerAssetId: ${data.providerAssetId}\n` +
+          `publicUrl: ${(data.publicUrl || '').slice(0, 60)}...` +
+          (data.warning ? `\n⚠️ ${data.warning}` : '')
+        );
         setUploadFile(null);
         setUploadName('');
         if (fileInputRef.current) fileInputRef.current.value = '';

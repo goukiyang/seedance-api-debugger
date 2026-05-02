@@ -1,19 +1,22 @@
 /**
  * POST /api/assets/upload-and-create
- * 本地上传 + 自动创建 Seedance Asset
+ * 本地上传 + 公网存储 + 自动创建 Seedance Asset
  *
- * 流程：本地文件 → 保存到 /uploads → 调用官方 /asset/create → 写入 SeedanceAsset 表
+ * 流程：
+ *   本地文件 → 公网上传（优先 TOS/R2，回退 local） → publicUrl
+ *   → 调官方 /asset/create → 写入 SeedanceAsset 表
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { uploadAsset } from '@/lib/assets/storage';
+import { uploadPublicAsset } from '@/lib/assets/public-storage';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
+import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// 允许的图片类型（本阶段只支持图片）
+// 允许的图片类型
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -43,32 +46,45 @@ export async function POST(request: NextRequest) {
 
     const assetName = name || file.name || 'Untitled';
 
-    // Step 1: 本地上传（复用已有 uploadAsset，返回 /uploads/assets/xxx 相对路径）
+    // Step 1: 公网上传（TOS > R2 > local-public > local）
     const buffer = Buffer.from(await file.arrayBuffer());
-    const uploadResult = await uploadAsset(buffer, file.name, file.type);
+    const uploadResult = await uploadPublicAsset(buffer, file.name, file.type);
 
-    // Step 2: 构造公网 URL
-    // 注意：本地开发环境下这是 localhost URL，Seedance 官方无法访问
-    // 正式环境需要配置公网域名或对象存储
-    const localUrl = uploadResult.originalUrl; // 例如 /uploads/assets/xxx.jpg
-    const publicUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}${localUrl}`;
+    // Step 2: URL 可达性判断
+    const isPublic = uploadResult.isPubliclyReachable || isPubliclyReachableUrl(uploadResult.publicUrl);
 
-    // Step 3: 调用官方 /asset/create
+    if (!isPublic) {
+      // 非公网 URL，直接返回半闭环状态，不调用官方 API
+      return NextResponse.json({
+        success: true,
+        closedLoop: false,
+        reason: 'URL_NOT_PUBLIC',
+        message: uploadResult.warning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。请配置公网对象存储（TOS/R2）。',
+        storageProvider: uploadResult.storageProvider,
+        publicUrl: uploadResult.publicUrl,
+        storageKey: uploadResult.storageKey,
+        size: uploadResult.size,
+      });
+    }
+
+    // Step 3: 公网 URL，调用官方 /asset/create
     const createResult = await createAsset({
       assetType: 'Image',
-      url: publicUrl,
+      url: uploadResult.publicUrl,
       name: assetName,
     });
 
-    // 官方 API 调用失败
     if (createResult.error) {
       return NextResponse.json({
         success: false,
+        closedLoop: false,
+        reason: 'PROVIDER_CREATE_FAILED',
         error: `官方 /asset/create 失败：${createResult.error}`,
-        upload: { localUrl, publicUrl },
-        warning: publicUrl.includes('localhost')
-          ? 'localhost URL — Seedance 官方可能无法访问。'
-          : undefined,
+        storageProvider: uploadResult.storageProvider,
+        publicUrl: uploadResult.publicUrl,
+        storageKey: uploadResult.storageKey,
+        size: uploadResult.size,
+        warning: uploadResult.warning,
       }, { status: 502 });
     }
 
@@ -77,19 +93,20 @@ export async function POST(request: NextRequest) {
       providerAssetId: createResult.data!.providerAssetId,
       assetType: 'Image',
       name: assetName,
-      originalUrl: publicUrl,
+      originalUrl: uploadResult.publicUrl,
       rawProviderResponse: JSON.stringify(createResult.data!.rawResponse),
     });
 
     return NextResponse.json({
       success: true,
+      closedLoop: true,
+      storageProvider: uploadResult.storageProvider,
+      publicUrl: uploadResult.publicUrl,
+      storageKey: uploadResult.storageKey,
+      size: uploadResult.size,
       asset: record,
-      upload: { localUrl, publicUrl },
       providerAssetId: createResult.data!.providerAssetId,
-      isPublicUrl: publicUrl.startsWith('http'),
-      warning: publicUrl.includes('localhost')
-        ? 'localhost URL — Seedance 官方可能无法访问。如需真实闭环，需要公网域名或对象存储。'
-        : undefined,
+      warning: uploadResult.warning,
     });
   } catch (error) {
     console.error('[UploadAndCreate] Error:', error);
