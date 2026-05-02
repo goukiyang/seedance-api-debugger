@@ -35,6 +35,7 @@ interface SeedanceAssetSelectorProps {
   value: SelectedReferenceAsset[];
   onChange: (assets: SelectedReferenceAsset[]) => void;
   max?: number;
+  onClose?: () => void;
 }
 
 const MAX_ASSETS_DEFAULT = 9;
@@ -223,6 +224,7 @@ export function SeedanceAssetSelector({
   value,
   onChange,
   max = MAX_ASSETS_DEFAULT,
+  onClose,
 }: SeedanceAssetSelectorProps) {
   const [showPicker, setShowPicker] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
@@ -386,7 +388,10 @@ export function SeedanceAssetSelector({
       {showPicker && (
         <AssetGrid
           onSelect={handleSelect}
-          onClose={() => setShowPicker(false)}
+          onClose={() => {
+            setShowPicker(false);
+            onClose?.();
+          }}
         />
       )}
     </>
