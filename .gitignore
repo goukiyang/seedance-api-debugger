@@ -31,6 +31,10 @@ Thumbs.db
 # Storage (local uploads)
 storage/
 
+# API test scripts (may contain secrets)
+test-api.sh
+/scripts/*.sh
+
 # Database
 *.db
 prisma/*.db
