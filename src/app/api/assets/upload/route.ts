@@ -1,10 +1,13 @@
 /**
  * POST /api/assets/upload
  * 上传单个文件（图片/视频/音频）
+ * - 优先使用公网上传（R2/TOS），返回公网 HTTPS URL
+ * - 回退本地存储（development / 未配置公网存储时）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadAsset } from '@/lib/assets/storage';
+import { uploadPublicAsset } from '@/lib/assets/public-storage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -41,20 +44,68 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const result = await uploadAsset(buffer, file.name, file.type);
+
+    // 优先公网上传（R2/TOS → 公网 HTTPS URL，可被 Seedance 直接下载）
+    // 只有未配置公网存储时才回退本地
+    let uploadResult: {
+      assetId: string;
+      originalUrl: string;
+      thumbnailUrl: string | null;
+      width?: number;
+      height?: number;
+      fileName: string;
+      fileSize: number;
+      mimeType: string;
+      hash: string;
+      isPubliclyReachable: boolean;
+      storageProvider?: string;
+      publicUploadWarning?: string;
+    };
+
+    try {
+      const pubResult = await uploadPublicAsset(buffer, file.name, file.type);
+      console.log(`[Upload] 公网上传成功: ${pubResult.storageProvider} → ${pubResult.publicUrl}`);
+      // 公网上传成功后，创建本地 asset 记录，original_url 存公网 URL
+      const localResult = await uploadAsset(buffer, file.name, file.type);
+      uploadResult = {
+        ...localResult,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        isPubliclyReachable: pubResult.isPubliclyReachable,
+        storageProvider: pubResult.storageProvider,
+        publicUploadWarning: pubResult.warning,
+      };
+      // 关键：original_url 使用公网 URL，Seedance 可直接下载
+      uploadResult.originalUrl = pubResult.publicUrl;
+    } catch (pubError) {
+      // 公网上传失败，打印警告但不阻断，使用本地 URL
+      const localResult = await uploadAsset(buffer, file.name, file.type);
+      uploadResult = {
+        ...localResult,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        isPubliclyReachable: false,
+        publicUploadWarning: `公网上传失败: ${pubError instanceof Error ? pubError.message : String(pubError)}，已回退到本地存储。Seedance 无法访问本地 URL。`,
+      };
+    }
 
     return NextResponse.json({
       success: true,
       asset: {
-        id: result.assetId,
-        originalUrl: result.originalUrl,
-        thumbnailUrl: result.thumbnailUrl,
-        width: result.width,
-        height: result.height,
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType: file.type,
-        hash: result.hash,
+        id: uploadResult.assetId,
+        originalUrl: uploadResult.originalUrl,
+        thumbnailUrl: uploadResult.thumbnailUrl,
+        width: uploadResult.width,
+        height: uploadResult.height,
+        fileName: uploadResult.fileName,
+        fileSize: uploadResult.fileSize,
+        mimeType: uploadResult.mimeType,
+        hash: uploadResult.hash,
+        isPubliclyReachable: uploadResult.isPubliclyReachable,
+        storageProvider: uploadResult.storageProvider,
+        warning: uploadResult.publicUploadWarning,
       },
     });
   } catch (error) {

@@ -40,6 +40,7 @@ export default function GeneratePage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDebug, setErrorDebug] = useState<object | null>(null);
 
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
@@ -121,12 +122,15 @@ export default function GeneratePage() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.message || data.error || '创建任务失败');
+        // 提取结构化调试信息（在 throw 之前设置）
+        setErrorDebug(data._debug || null);
+        throw new Error(data.message || data.error || `创建失败 (HTTP ${res.status})`);
       }
 
       setResult(data);
+      setErrorDebug(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      // errorDebug 已在上面的 !res.ok 分支设置好了
     } finally {
       setSubmitting(false);
     }
@@ -174,6 +178,7 @@ export default function GeneratePage() {
   const handleReset = useCallback(() => {
     setResult(null);
     setError(null);
+    setErrorDebug(null);
   }, []);
 
   // ============================================================================
@@ -294,6 +299,7 @@ export default function GeneratePage() {
         onCollectionNew={handleCollectionNew}
         onSubmit={handleSubmit}
         submitError={error}
+        submitErrorDebug={errorDebug}
         isSubmitting={submitting}
         result={result}
         onReset={handleReset}

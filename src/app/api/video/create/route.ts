@@ -52,6 +52,180 @@ function computePayloadHash(payload: object): string {
 }
 
 // ============================================================================
+// Reference Image Diagnostics (图片诊断)
+// ============================================================================
+
+interface RefImageDiagnostic {
+  index: number;
+  label: string;
+  originalUrl: string;
+  urlType: 'LOCAL' | 'BASE64' | 'HTTPS_EXTERNAL' | 'DATA_URI' | 'RELATIVE' | 'UNKNOWN';
+  urlHost: string;
+  isHttps: boolean;
+  isPubliclyReachable: boolean;
+  fileSize: number;
+  mimeType: string;
+  status: 'ok' | 'warning' | 'error';
+  reason?: string;
+}
+
+function isPubliclyReachableUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '0.0.0.0' || u.hostname === '[::1]') return false;
+    if (u.hostname.startsWith('192.168.') || u.hostname.startsWith('10.') || u.hostname.startsWith('127.')) return false;
+    if (u.hostname.startsWith('169.254.') || u.hostname.endsWith('.local')) return false;
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch { return false; }
+}
+
+function getUrlHost(url: string): string {
+  if (!url || url.startsWith('data:')) return 'inline-base64';
+  if (url.startsWith('/')) return 'relative-path';
+  try { return new URL(url).hostname; }
+  catch { return 'unknown'; }
+}
+
+function getUrlType(url: string): RefImageDiagnostic['urlType'] {
+  if (url.startsWith('data:')) return 'DATA_URI';
+  if (url.startsWith('/')) return 'RELATIVE';
+  if (url.startsWith('http://')) return 'HTTPS_EXTERNAL';
+  if (url.startsWith('https://')) return 'HTTPS_EXTERNAL';
+  if (url.startsWith('localhost') || url.includes('127.0.0.1')) return 'LOCAL';
+  return 'UNKNOWN';
+}
+
+/**
+ * 诊断所有参考图，返回诊断结果和建议
+ */
+async function diagnoseReferenceImages(
+  urls: string[],
+  base64Data: string[]
+): Promise<{
+  diagnostics: RefImageDiagnostic[];
+  totalPayloadSizeKb: number;
+  hasLocalUrls: boolean;
+  hasNonPublicUrls: boolean;
+}> {
+  const diagnostics: RefImageDiagnostic[] = [];
+  let totalPayloadSizeKb = 0;
+  let hasLocalUrls = false;
+  let hasNonPublicUrls = false;
+
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    const base64 = base64Data[i];
+    const urlType = getUrlType(url);
+    const urlHost = getUrlHost(url);
+    const isHttps = url.startsWith('https://');
+    const isPublic = isPubliclyReachableUrl(url);
+
+    let fileSize = 0;
+    let mimeType = 'unknown';
+
+    if (base64 && base64.startsWith('data:')) {
+      // 估算 base64 大小（base64 ≈ 4/3 原始大小）
+      const base64Content = base64.split(',')[1] || '';
+      fileSize = Math.round((base64Content.length * 3) / 4);
+      mimeType = base64.match(/data:([^;]+)/)?.[1] || 'image/unknown';
+      totalPayloadSizeKb += Math.round(fileSize / 1024);
+
+      const diagnostic: RefImageDiagnostic = {
+        index: i + 1,
+        label: `图${i + 1}`,
+        originalUrl: url,
+        urlType,
+        urlHost,
+        isHttps,
+        isPubliclyReachable: false, // base64 不需要网络访问
+        fileSize,
+        mimeType,
+        status: 'ok',
+      };
+
+      if (fileSize > 10 * 1024 * 1024) { // > 10MB base64
+        diagnostic.status = 'warning';
+        diagnostic.reason = `base64 图片过大 (${(fileSize / 1024 / 1024).toFixed(1)}MB)，可能导致网关超时`;
+      }
+
+      diagnostics.push(diagnostic);
+    } else if (url.startsWith('/uploads/')) {
+      hasLocalUrls = true;
+      hasNonPublicUrls = true;
+      const filePath = path.join(process.cwd(), 'public', url);
+      if (fs.existsSync(filePath)) {
+        const stat = fs.statSync(filePath);
+        fileSize = stat.size;
+        const ext = path.extname(filePath).slice(1).toLowerCase();
+        const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+        mimeType = mimeMap[ext] || 'image/jpeg';
+      }
+      diagnostics.push({
+        index: i + 1,
+        label: `图${i + 1}`,
+        originalUrl: url,
+        urlType: 'LOCAL',
+        urlHost: 'localhost',
+        isHttps: false,
+        isPubliclyReachable: false,
+        fileSize,
+        mimeType,
+        status: 'error',
+        reason: '本地路径，Seedance 无法访问。将尝试转 base64，但大图可能超时。',
+      });
+    } else if (urlType === 'HTTPS_EXTERNAL') {
+      if (!isPublic) {
+        hasNonPublicUrls = true;
+        diagnostics.push({
+          index: i + 1,
+          label: `图${i + 1}`,
+          originalUrl: url,
+          urlType,
+          urlHost,
+          isHttps,
+          isPubliclyReachable: false,
+          fileSize,
+          mimeType,
+          status: 'error',
+          reason: `URL 不可公网访问 (${urlHost})`,
+        });
+      } else {
+        diagnostics.push({
+          index: i + 1,
+          label: `图${i + 1}`,
+          originalUrl: url,
+          urlType,
+          urlHost,
+          isHttps,
+          isPubliclyReachable: true,
+          fileSize,
+          mimeType,
+          status: 'ok',
+        });
+      }
+    } else {
+      hasNonPublicUrls = true;
+      diagnostics.push({
+        index: i + 1,
+        label: `图${i + 1}`,
+        originalUrl: url,
+        urlType,
+        urlHost,
+        isHttps,
+        isPubliclyReachable: false,
+        fileSize,
+        mimeType,
+        status: 'error',
+        reason: `非标准 URL 类型: ${urlType}`,
+      });
+    }
+  }
+
+  return { diagnostics, totalPayloadSizeKb, hasLocalUrls, hasNonPublicUrls };
+}
+
+// ============================================================================
 // Image URL → base64 conversion
 // ============================================================================
 
@@ -310,6 +484,18 @@ export async function POST(request: NextRequest) {
       generationMode
     );
 
+    // ---- Reference Image Diagnostics ----
+    const refDiag = await diagnoseReferenceImages(referenceImageUrls, []);
+    console.log('\n========== Reference Image Diagnostics ==========');
+    console.log(`Total: ${refDiag.diagnostics.length} images, ~${refDiag.totalPayloadSizeKb}KB base64 estimate`);
+    console.log(`Has local URLs: ${refDiag.hasLocalUrls}`);
+    console.log(`Has non-public URLs: ${refDiag.hasNonPublicUrls}`);
+    for (const d of refDiag.diagnostics) {
+      const sizeKb = d.fileSize > 0 ? `${(d.fileSize / 1024).toFixed(0)}KB` : 'unknown';
+      console.log(`  [${d.index}] ${d.label}: ${d.urlType} | ${d.urlHost} | ${d.mimeType} | ${sizeKb} | ${d.status}${d.reason ? ` | ⚠ ${d.reason}` : ''}`);
+    }
+    console.log('================================================\n');
+
     // ---- Resolve local image URLs → base64 (for external provider access) ----
     // Build reference_images_debug for snapshot/DB storage
     const referenceImagesDebug: Array<{
@@ -482,7 +668,16 @@ export async function POST(request: NextRequest) {
         execution_expires_after: body.execution_expires_after || null,
         workspace_id: workspaceId,
         snapshot_id: snapshot.id,
-        params_json: JSON.stringify({ ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, referenceAssets }),
+        params_json: JSON.stringify({
+          ratio, duration, resolution, seed,
+          generateAudio, returnLastFrame, watermark,
+          referenceAssets,
+          referenceImageDiagnostics: refDiag.diagnostics.map((d) => ({
+            index: d.index, label: d.label, urlType: d.urlType,
+            urlHost: d.urlHost, fileSize: d.fileSize, status: d.status, reason: d.reason,
+          })),
+          base64EstimateKb: refDiag.totalPayloadSizeKb,
+        }),
         // 新增：参考图调试信息（包含 base64 解析状态）
         reference_images_json: JSON.stringify(referenceImagesDebug, null, 2),
         // 新增：最终 provider payload（完整 content 数组）
@@ -524,11 +719,58 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // 从错误中提取 provider context
+      const errWithCtx = apiError as Error & { providerContext?: unknown };
+      const providerCtx = errWithCtx.providerContext as {
+        httpStatus?: number;
+        source?: string;
+        code?: string;
+        requestId?: string;
+        payloadSummary?: unknown;
+      } | undefined;
+
+      // 构造友好的中文错误消息
+      const statusCode = providerCtx?.httpStatus;
+      const errMsg = apiError instanceof Error ? apiError.message : 'Unknown error';
+
+      let userMessage = '创建任务失败';
+      if (statusCode === 524) {
+        userMessage = refDiag.hasLocalUrls
+          ? 'Seedance 创建任务超时。参考图中包含本地图片（需转 base64），大图可能导致网关超时。建议：重新上传为公网可访问的图片，或使用更小的图片。'
+          : 'Seedance 服务响应超时，可能因参考图无法被正常下载。';
+      } else if (statusCode) {
+        userMessage = `创建任务失败（HTTP ${statusCode}）: ${errMsg}`;
+      }
+
       return NextResponse.json(
         {
           error: 'API call failed',
-          message: apiError instanceof Error ? apiError.message : 'Unknown error',
+          message: userMessage,
           snapshot_id: snapshot.id,
+          // 结构化调试信息
+          _debug: {
+            providerContext: providerCtx ? {
+              httpStatus: providerCtx.httpStatus,
+              source: providerCtx.source,
+              code: providerCtx.code,
+              requestId: providerCtx.requestId,
+              payloadSummary: providerCtx.payloadSummary,
+            } : undefined,
+            referenceImageDiagnostics: refDiag.diagnostics.map((d) => ({
+              index: d.index,
+              label: d.label,
+              urlType: d.urlType,
+              urlHost: d.urlHost,
+              mimeType: d.mimeType,
+              fileSizeBytes: d.fileSize,
+              status: d.status,
+              reason: d.reason,
+            })),
+            base64EstimateKb: refDiag.totalPayloadSizeKb,
+            hasLocalUrls: refDiag.hasLocalUrls,
+            hasNonPublicUrls: refDiag.hasNonPublicUrls,
+            providerReferenceField: 'reference_image_base64_data (local) / reference_image_urls (external)',
+          },
         },
         { status: 500 }
       );

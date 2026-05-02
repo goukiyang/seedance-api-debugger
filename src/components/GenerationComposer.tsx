@@ -43,6 +43,7 @@ interface Props {
     referenceAssets?: SelectedReferenceAsset[];
   }) => Promise<void>;
   submitError: string | null;
+  submitErrorDebug?: object | null;
   isSubmitting: boolean;
   result: { id: string; provider_task_id: string; prompt_rendered?: string } | null;
   onReset: () => void;
@@ -55,6 +56,7 @@ export function GenerationComposer({
   onCollectionNew,
   onSubmit,
   submitError,
+  submitErrorDebug,
   isSubmitting,
   result,
   onReset,
@@ -213,6 +215,7 @@ export function GenerationComposer({
             <ErrorTranslator
               error={submitError}
               rawError={submitError}
+              debugInfo={submitErrorDebug as Parameters<typeof ErrorTranslator>[0]['debugInfo']}
               onRetry={() => {}}
               onCopy={() => { navigator.clipboard.writeText(submitError); }}
             />

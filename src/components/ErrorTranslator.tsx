@@ -5,37 +5,119 @@
  * P0-5: 错误翻译系统
  * - 将原始 API 错误码翻译成用户友好的中文
  * - 提供可能原因和操作建议
+ * - 支持结构化 _debug 信息（524 + 参考图诊断）
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
+
+// ---- Types ----
+
+interface RefDiagItem {
+  index: number;
+  label: string;
+  urlType: string;
+  urlHost: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  status: string;
+  reason?: string;
+}
+
+interface ProviderContext {
+  httpStatus?: number;
+  source?: string;
+  code?: string;
+  requestId?: string;
+  payloadSummary?: unknown;
+}
+
+interface DebugInfo {
+  providerContext?: ProviderContext;
+  referenceImageDiagnostics?: RefDiagItem[];
+  base64EstimateKb?: number;
+  hasLocalUrls?: boolean;
+  hasNonPublicUrls?: boolean;
+  providerReferenceField?: string;
+}
 
 interface Props {
   error: string;
   /** 原始错误信息 */
   rawError?: string;
+  /** 结构化调试信息 */
+  debugInfo?: DebugInfo;
   onRetry?: () => void;
   onCopy?: () => void;
 }
 
-/** 错误码翻译表 */
-function translateError(error: string): {
+// ---- Helpers ----
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// ---- Error Classification ----
+
+interface TranslatedError {
   code: string;
   title: string;
   reasons: string[];
   actions: Array<{ label: string; action?: 'retry' | 'copy' | 'debug' }>;
-} | null {
+  showDiagnostics?: boolean;
+  debugInfo?: DebugInfo;
+}
+
+function translateError(error: string, debugInfo?: DebugInfo): TranslatedError | null {
   const lower = error.toLowerCase();
+  const ctx = debugInfo?.providerContext;
+  const diags = debugInfo?.referenceImageDiagnostics;
+  const hasLocalUrls = debugInfo?.hasLocalUrls;
+  const hasNonPublic = debugInfo?.hasNonPublicUrls;
+
+  // 524 超时 — 重点处理
+  if (error.includes('524') || lower.includes('524') || ctx?.httpStatus === 524) {
+    const reasons: string[] = [];
+    if (hasLocalUrls) {
+      reasons.push('参考图中包含本地图片（需转 base64），大图导致 JSON payload 过大 → 网关超时');
+    }
+    if (hasNonPublic) {
+      reasons.push('参考图 URL 不是公网可访问地址，Seedance 无法下载');
+    }
+    if (!hasLocalUrls && !hasNonPublic) {
+      reasons.push('Seedance 服务端网关超时，可能因并发过高或上游处理超时');
+    }
+    if (diags?.length) {
+      const largeImages = diags.filter((d) => d.fileSizeBytes > 2 * 1024 * 1024);
+      if (largeImages.length) {
+        reasons.push(`包含 ${largeImages.length} 张超过 2MB 的图片，建议压缩后使用`);
+      }
+    }
+
+    return {
+      code: '524',
+      title: '创建失败：Seedance 服务响应超时',
+      reasons,
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+        { label: '查看诊断', action: 'debug' },
+      ],
+      showDiagnostics: true,
+      debugInfo,
+    };
+  }
 
   // 554 错误
-  if (error.includes('554') || error.includes('554') || lower.includes('554')) {
+  if (error.includes('554') || lower.includes('554')) {
     return {
       code: '554',
       title: '服务返回错误 (554)',
       reasons: [
-        '当前参数组合不被服务支持（如比例/时长/分辨率不兼容）',
-        '素材上传成功但生成接口引用失败',
+        '当前参数组合不被服务支持',
         'API 限流、额度不足或服务异常',
-        '当前模式与素材数量不匹配',
         '服务端处理超时或内部错误',
       ],
       actions: [
@@ -43,6 +125,8 @@ function translateError(error: string): {
         { label: '复制错误', action: 'copy' },
         { label: '查看调试信息', action: 'debug' },
       ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
     };
   }
 
@@ -54,10 +138,8 @@ function translateError(error: string): {
       reasons: [
         'API Key 未配置或已过期',
         'API Key 权限不足',
-        '请求头格式错误',
       ],
       actions: [
-        { label: '检查 API 配置', action: 'debug' },
         { label: '复制错误', action: 'copy' },
       ],
     };
@@ -71,10 +153,8 @@ function translateError(error: string): {
       reasons: [
         'API Key 没有该接口的访问权限',
         '账户余额不足或额度用尽',
-        '当前 IP 不在白名单中',
       ],
       actions: [
-        { label: '检查 API 配置', action: 'debug' },
         { label: '复制错误', action: 'copy' },
       ],
     };
@@ -107,7 +187,6 @@ function translateError(error: string): {
         '上传接口异常',
       ],
       actions: [
-        { label: '检查素材', action: 'debug' },
         { label: '复制错误', action: 'copy' },
       ],
     };
@@ -125,7 +204,6 @@ function translateError(error: string): {
       actions: [
         { label: '重新提交', action: 'retry' },
         { label: '复制错误', action: 'copy' },
-        { label: '查看调试信息', action: 'debug' },
       ],
     };
   }
@@ -134,11 +212,73 @@ function translateError(error: string): {
   return null;
 }
 
-export function ErrorTranslator({ error, rawError, onRetry, onCopy }: Props) {
-  const translated = translateError(error);
+// ---- Diagnostics Panel ----
+
+function DiagnosticsPanel({ debugInfo }: { debugInfo: DebugInfo }) {
+  const [expanded, setExpanded] = useState(false);
+  const ctx = debugInfo.providerContext;
+  const diags = debugInfo.referenceImageDiagnostics;
+
+  return (
+    <div className="mt-3 border border-gray-700 rounded p-2 bg-gray-900/50">
+      <button
+        className="w-full text-left text-xs text-gray-400 flex items-center justify-between"
+        onClick={() => setExpanded((p) => !p)}
+      >
+        <span>📊 参考图诊断 ({diags?.length ?? 0} 张)</span>
+        <span>{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-1">
+          {ctx && (
+            <div className="text-xs text-gray-500 mb-2">
+              HTTP {ctx.httpStatus} · {ctx.source} · {ctx.code}
+              {ctx.requestId && <span className="ml-2 text-gray-600">RequestId: {ctx.requestId}</span>}
+              {debugInfo.base64EstimateKb && (
+                <span className="ml-2">· base64 估算 ~{debugInfo.base64EstimateKb} KB</span>
+              )}
+              {debugInfo.hasLocalUrls && <span className="ml-2 text-yellow-500">⚠ 含本地图片</span>}
+              {debugInfo.hasNonPublicUrls && <span className="ml-2 text-red-400">⚠ 含不可公网访问的 URL</span>}
+            </div>
+          )}
+
+          {diags?.map((d) => (
+            <div key={d.index} className={`text-xs p-1.5 rounded ${d.status === 'ok' ? 'bg-gray-800' : d.status === 'warning' ? 'bg-yellow-900/30 border border-yellow-700' : 'bg-red-900/30 border border-red-700'}`}>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-300">[{d.index}] {d.label}</span>
+                <span className="text-gray-500">{d.urlType}</span>
+                <span className="text-gray-400">{d.urlHost}</span>
+                <span className="text-gray-500">{d.mimeType}</span>
+                {d.fileSizeBytes > 0 && <span className="text-gray-500">{formatBytes(d.fileSizeBytes)}</span>}
+                <span className={`ml-auto text-xs px-1.5 py-0.5 rounded ${d.status === 'ok' ? 'bg-green-900 text-green-400' : d.status === 'warning' ? 'bg-yellow-900 text-yellow-400' : 'bg-red-900 text-red-400'}`}>
+                  {d.status}
+                </span>
+              </div>
+              {d.reason && (
+                <div className="mt-0.5 text-gray-400">{d.reason}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Main Component ----
+
+export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }: Props) {
+  const translated = translateError(error, debugInfo);
+  const [showAllDebug, setShowAllDebug] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    const content = JSON.stringify({ error, debugInfo }, null, 2);
+    navigator.clipboard.writeText(content).catch(() => {});
+    onCopy?.();
+  }, [error, debugInfo, onCopy]);
 
   if (!translated) {
-    // 无匹配翻译，显示原始错误
     return (
       <div className="alert alert-error">
         <div className="text-xs font-medium mb-1">创建失败</div>
@@ -147,10 +287,16 @@ export function ErrorTranslator({ error, rawError, onRetry, onCopy }: Props) {
           {onRetry && (
             <button className="btn btn-sm btn-danger" onClick={onRetry}>重新提交</button>
           )}
-          {onCopy && (
-            <button className="btn btn-sm btn-secondary" onClick={onCopy}>复制错误</button>
-          )}
+          <button className="btn btn-sm btn-secondary" onClick={handleCopy}>复制错误</button>
         </div>
+        {debugInfo && (
+          <details className="mt-2" onToggle={(e) => setShowAllDebug((e.target as HTMLDetailsElement).open)}>
+            <summary className="text-xs text-gray-400 cursor-pointer">展开调试信息</summary>
+            <pre className="mt-1 bg-gray-900 p-2 rounded text-xs text-gray-400 overflow-x-auto max-h-48">
+              {JSON.stringify(debugInfo, null, 2)}
+            </pre>
+          </details>
+        )}
       </div>
     );
   }
@@ -177,7 +323,7 @@ export function ErrorTranslator({ error, rawError, onRetry, onCopy }: Props) {
           }
           if (action.action === 'copy') {
             return (
-              <button key={i} className="btn btn-sm btn-secondary" onClick={onCopy}>
+              <button key={i} className="btn btn-sm btn-secondary" onClick={handleCopy}>
                 {action.label}
               </button>
             );
@@ -185,11 +331,16 @@ export function ErrorTranslator({ error, rawError, onRetry, onCopy }: Props) {
           return null;
         })}
       </div>
-      {/* 调试信息折叠 */}
+
+      {translated.showDiagnostics && debugInfo && (
+        <DiagnosticsPanel debugInfo={debugInfo} />
+      )}
+
+      {/* 展开原始错误 */}
       {rawError && (
-        <details className="mt-3">
+        <details className="mt-2">
           <summary className="text-xs text-gray-400 cursor-pointer">展开原始错误</summary>
-          <div className="mt-2 bg-gray-50 p-2 rounded text-xs font-mono break-all text-gray-600 max-h-40 overflow-y-auto">
+          <div className="mt-1 bg-gray-900 p-2 rounded text-xs font-mono text-gray-500 max-h-40 overflow-y-auto break-all">
             {rawError}
           </div>
         </details>
