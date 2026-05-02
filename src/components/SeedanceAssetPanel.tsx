@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { LocalAssetRecord } from '@/lib/provider/seedance-assets-types';
 
 interface AssetPanelProps {
@@ -20,6 +20,13 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+
+  // 本地上传相关
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadName, setUploadName] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 加载列表
   const loadAssets = useCallback(async () => {
@@ -138,6 +145,34 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
     }
   }, [detailId, loadAssets]);
 
+  // 本地上传 + 创建 Seedance Asset
+  const handleLocalUpload = useCallback(async () => {
+    if (!uploadFile) return;
+    setUploading(true);
+    setUploadMsg(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', uploadFile);
+      if (uploadName.trim()) formData.append('name', uploadName.trim());
+      const res = await fetch('/api/assets/upload-and-create', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) {
+        setUploadMsg(`❌ ${data.error}`);
+      } else {
+        setUploadMsg(`✅ 上传成功：${data.providerAssetId}`);
+        if (data.warning) setUploadMsg(prev => `${prev}\n⚠️ ${data.warning}`);
+        setUploadFile(null);
+        setUploadName('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        await loadAssets();
+      }
+    } catch {
+      setUploadMsg('❌ 网络错误');
+    } finally {
+      setUploading(false);
+    }
+  }, [uploadFile, uploadName, loadAssets]);
+
   if (!visible) return null;
 
   const statusBadge = (s: string) => {
@@ -206,6 +241,47 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
             </div>
             {actionMsg && (
               <div style={{ fontSize: 11, color: actionMsg.startsWith('✅') ? '#4ade80' : '#f87171', marginTop: 8 }}>{actionMsg}</div>
+            )}
+          </div>
+
+          {/* 本地上传测试区 */}
+          <div style={{ marginBottom: 16, padding: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.7)', marginBottom: 10 }}>本地上传 → 自动创建资产</div>
+            <div style={{ marginBottom: 8 }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setUploadFile(f);
+                  if (f && !uploadName) setUploadName(f.name.replace(/\.[^.]+$/, ''));
+                }}
+                style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)' }}
+              />
+              {uploadFile && (
+                <span style={{ fontSize: 11, color: '#4ade80', marginLeft: 8 }}>
+                  已选: {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)}KB)
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={uploadName}
+                onChange={(e) => setUploadName(e.target.value)}
+                placeholder="资产名称（默认用文件名）"
+                style={{ flex: 1, padding: '7px 10px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: 'white', fontSize: 12, outline: 'none' }}
+              />
+              <button
+                onClick={handleLocalUpload}
+                disabled={uploading || !uploadFile}
+                style={{ padding: '7px 16px', backgroundColor: uploading ? '#1d4ed8' : '#059669', color: 'white', border: 'none', borderRadius: 8, fontSize: 12, cursor: uploading || !uploadFile ? 'not-allowed' : 'pointer', opacity: (uploading || !uploadFile) ? 0.6 : 1 }}
+              >
+                {uploading ? '上传中...' : '上传并创建'}
+              </button>
+            </div>
+            {uploadMsg && (
+              <div style={{ fontSize: 11, color: uploadMsg.startsWith('✅') ? '#4ade80' : uploadMsg.includes('⚠️') ? '#fbbf24' : '#f87171', marginTop: 8, whiteSpace: 'pre-line' }}>{uploadMsg}</div>
             )}
           </div>
 

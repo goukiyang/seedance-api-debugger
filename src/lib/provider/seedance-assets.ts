@@ -183,10 +183,32 @@ export async function createAsset(params: {
   });
 
   if (res.error) return { error: res.error };
+
+  // API 可能返回 HTTP 200 但 body 含 error（如 URL 不可访问）
+  const body = res.data;
+  if (!body) return { error: '官方 API 响应为空' };
+
+  // 检查 ResponseMetadata 中的 errorMessage（标准格式）
+  const metaError = (body.ResponseMetadata as unknown as Record<string, unknown>)?.errorMessage as string | undefined;
+  if (metaError) return { error: `官方 API 错误：${metaError}` };
+
+  // 检查 ResponseMetadata.Error.Code（官方错误格式，如 InvalidParameter.Download）
+  const metaErrorCode = (body.ResponseMetadata as unknown as Record<string, unknown>)?.Error as Record<string, unknown> | undefined;
+  if (metaErrorCode) {
+    const code = metaErrorCode.Code as string | undefined;
+    const msg = metaErrorCode.Message as string | undefined;
+    return { error: `官方 API 错误：${code || 'UnknownError'}${msg ? ` - ${msg}` : ''}` };
+  }
+
+  // 检查 Result 是否存在
+  if (!((body as unknown as Record<string, unknown>).Result)) {
+    return { error: `官方 API 响应缺少 Result：${JSON.stringify(body).slice(0, 200)}` };
+  }
+
   return {
     data: {
-      providerAssetId: res.data!.Result.Id,
-      rawResponse: res.data!,
+      providerAssetId: ((body as unknown as Record<string, { Id?: string }>).Result!).Id!,
+      rawResponse: body,
     },
   };
 }
