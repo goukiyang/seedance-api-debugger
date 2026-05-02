@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     const assetName = name || file.name || 'Untitled';
 
-    // Step 1: 公网上传（TOS > R2 > local-public > local）
+    // Step 1: 公网上传（R2 > TOS > local-public > local）
     const buffer = Buffer.from(await file.arrayBuffer());
     const uploadResult = await uploadPublicAsset(buffer, file.name, file.type);
 
