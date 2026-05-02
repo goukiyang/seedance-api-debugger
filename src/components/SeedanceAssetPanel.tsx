@@ -58,6 +58,10 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       const data = await res.json();
       if (!res.ok) {
         setActionMsg(`❌ 创建失败：${data.error}`);
+      } else if (data.reused === true) {
+        // 复用已有资产
+        setActionMsg(`🔄 ${data.message}`);
+        await loadAssets();
       } else {
         setActionMsg(`✅ 创建成功：${data.asset.providerAssetId}`);
         setUrl('');
@@ -158,6 +162,16 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       const data = await res.json();
       if (!res.ok) {
         setUploadMsg(`❌ ${data.error}`);
+      } else if (data.reused === true) {
+        // 复用已有资产
+        setUploadMsg(
+          `🔄 ${data.message}\n` +
+          `providerAssetId: ${data.providerAssetId}`
+        );
+        setUploadFile(null);
+        setUploadName('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        await loadAssets();
       } else if (data.closedLoop === false) {
         // 公网上传未闭环
         const provider = data.storageProvider || 'local';
@@ -175,9 +189,9 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
         // 半闭环也刷新列表
         await loadAssets();
       } else {
-        // 完整闭环
+        // 完整闭环（新建）
         setUploadMsg(
-          `✅ 上传成功 (${data.storageProvider || 'local'})\n` +
+          `✅ 上传成功，Seedance Asset 创建成功 (${data.storageProvider || 'local'})\n` +
           `providerAssetId: ${data.providerAssetId}\n` +
           `publicUrl: ${(data.publicUrl || '').slice(0, 60)}...` +
           (data.warning ? `\n⚠️ ${data.warning}` : '')

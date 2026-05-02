@@ -104,11 +104,19 @@ model SeedanceAsset {
   group_id             String?
   project_name         String?
 
+  // 去重字段
+  file_hash           String?    // sha256(文件buffer)，用于本地文件去重
+  storage_provider    String?    // tos | r2 | local，用于 R2/TOS 去重
+  storage_key         String?    // 对象存储 key，用于 storage 去重
+
   created_at           DateTime  @default(now())
   updated_at           DateTime  @updatedAt
 
   @@index([provider_asset_id])
   @@index([provider, provider_asset_id])
+  @@index([file_hash])
+  @@index([original_url])
+  @@index([storage_provider, storage_key])
 }
 
 // ============================================================================

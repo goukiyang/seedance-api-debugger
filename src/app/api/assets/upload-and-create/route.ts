@@ -2,12 +2,16 @@
  * POST /api/assets/upload-and-create
  * 本地上传 + 公网存储 + 自动创建 Seedance Asset
  *
- * 流程：
- *   本地文件 → 公网上传（优先 TOS/R2，回退 local） → publicUrl
- *   → 调官方 /asset/create → 写入 SeedanceAsset 表
+ * 去重流程：
+ *   1. 接收文件 → 计算 sha256 fileHash
+ *   2. 按 fileHash 查 Active 资产 → 命中则复用
+ *   3. 否则上传 R2/TOS → 得 publicUrl
+ *   4. 按 storageProvider+storageKey 查 Active 资产 → 命中则复用（同一 R2 key）
+ *   5. 否则调官方 /asset/create → 写入数据库（带存储元数据）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import * as crypto from 'crypto';
 import { uploadPublicAsset } from '@/lib/assets/public-storage';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
@@ -45,21 +49,36 @@ export async function POST(request: NextRequest) {
     }
 
     const assetName = name || file.name || 'Untitled';
-
-    // Step 1: 公网上传（R2 > TOS > local-public > local）
     const buffer = Buffer.from(await file.arrayBuffer());
-    const uploadResult = await uploadPublicAsset(buffer, file.name, file.type);
 
-    // Step 2: URL 可达性判断
+    // Step 1: 计算文件 hash
+    const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+    // Step 2: 按 fileHash 查 Active 资产
+    const existingByHash = await seedanceAssetRepository.findActiveByFileHash(fileHash);
+    if (existingByHash) {
+      return NextResponse.json({
+        success: true,
+        closedLoop: true,
+        reused: true,
+        reuseReason: 'FILE_HASH_MATCH',
+        message: '已检测到相同图片，已复用已有资产。',
+        storageProvider: existingByHash.provider,
+        asset: existingByHash,
+        providerAssetId: existingByHash.providerAssetId,
+      });
+    }
+
+    // Step 3: 上传公网存储（R2 > TOS > local-public > local）
+    const uploadResult = await uploadPublicAsset(buffer, file.name, file.type);
     const isPublic = uploadResult.isPubliclyReachable || isPubliclyReachableUrl(uploadResult.publicUrl);
 
     if (!isPublic) {
-      // 非公网 URL，直接返回半闭环状态，不调用官方 API
       return NextResponse.json({
         success: true,
         closedLoop: false,
-        reason: 'URL_NOT_PUBLIC',
-        message: uploadResult.warning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。请配置公网对象存储（TOS/R2）。',
+        reused: false,
+        message: uploadResult.warning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。',
         storageProvider: uploadResult.storageProvider,
         publicUrl: uploadResult.publicUrl,
         storageKey: uploadResult.storageKey,
@@ -67,7 +86,27 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 3: 公网 URL，调用官方 /asset/create
+    // Step 4: 按 storageKey 查 Active 资产（同 R2 key 不重复上传）
+    if (uploadResult.storageProvider && uploadResult.storageKey) {
+      const existingByKey = await seedanceAssetRepository.findActiveByStorageKey(
+        uploadResult.storageProvider,
+        uploadResult.storageKey
+      );
+      if (existingByKey) {
+        return NextResponse.json({
+          success: true,
+          closedLoop: true,
+          reused: true,
+          reuseReason: 'STORAGE_KEY_MATCH',
+          message: '已检测到相同存储资产，已复用已有资产。',
+          storageProvider: uploadResult.storageProvider,
+          asset: existingByKey,
+          providerAssetId: existingByKey.providerAssetId,
+        });
+      }
+    }
+
+    // Step 5: 调官方 /asset/create
     const createResult = await createAsset({
       assetType: 'Image',
       url: uploadResult.publicUrl,
@@ -78,8 +117,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: false,
         closedLoop: false,
-        reason: 'PROVIDER_CREATE_FAILED',
-        error: `官方 /asset/create 失败：${createResult.error}`,
+        reused: false,
+        message: `官方 /asset/create 失败：${createResult.error}`,
         storageProvider: uploadResult.storageProvider,
         publicUrl: uploadResult.publicUrl,
         storageKey: uploadResult.storageKey,
@@ -88,18 +127,23 @@ export async function POST(request: NextRequest) {
       }, { status: 502 });
     }
 
-    // Step 4: 写入 SeedanceAsset 表
-    const record = await seedanceAssetRepository.create({
+    // Step 6: 写入数据库（带存储元数据）
+    const record = await seedanceAssetRepository.createWithStorageMetadata({
       providerAssetId: createResult.data!.providerAssetId,
       assetType: 'Image',
       name: assetName,
       originalUrl: uploadResult.publicUrl,
       rawProviderResponse: JSON.stringify(createResult.data!.rawResponse),
+      fileHash,
+      storageProvider: uploadResult.storageProvider,
+      storageKey: uploadResult.storageKey,
     });
 
     return NextResponse.json({
       success: true,
       closedLoop: true,
+      reused: false,
+      message: '上传成功，Seedance Asset 创建成功。',
       storageProvider: uploadResult.storageProvider,
       publicUrl: uploadResult.publicUrl,
       storageKey: uploadResult.storageKey,

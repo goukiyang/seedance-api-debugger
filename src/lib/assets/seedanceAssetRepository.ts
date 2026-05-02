@@ -25,6 +25,9 @@ function toApiRecord(r: {
   delete_error: string | null;
   group_id: string | null;
   project_name: string | null;
+  file_hash: string | null;
+  storage_provider: string | null;
+  storage_key: string | null;
   created_at: Date;
   updated_at: Date;
 }): LocalAssetRecord {
@@ -172,5 +175,88 @@ export const seedanceAssetRepository = {
   async count(includeDeleted = false): Promise<number> {
     const where = includeDeleted ? {} : { local_status: { notIn: ['Deleted', 'ProviderDeleted'] } };
     return prisma.seedanceAsset.count({ where });
+  },
+
+  // ============================================================================
+  // 去重查询（只查 Active）
+  // ============================================================================
+
+  /** 按 fileHash 查找 Active 资产 */
+  async findActiveByFileHash(fileHash: string): Promise<LocalAssetRecord | null> {
+    const record = await prisma.seedanceAsset.findFirst({
+      where: {
+        file_hash: fileHash,
+        local_status: 'Active',
+        provider: 'seedance',
+      },
+    });
+    return record ? toApiRecord(record) : null;
+  },
+
+  /** 按 originalUrl 查找 Active 资产 */
+  async findActiveByOriginalUrl(originalUrl: string): Promise<LocalAssetRecord | null> {
+    const record = await prisma.seedanceAsset.findFirst({
+      where: {
+        original_url: originalUrl,
+        local_status: 'Active',
+        provider: 'seedance',
+      },
+    });
+    return record ? toApiRecord(record) : null;
+  },
+
+  /** 按 storageProvider + storageKey 查找 Active 资产 */
+  async findActiveByStorageKey(storageProvider: string, storageKey: string): Promise<LocalAssetRecord | null> {
+    const record = await prisma.seedanceAsset.findFirst({
+      where: {
+        storage_provider: storageProvider,
+        storage_key: storageKey,
+        local_status: 'Active',
+        provider: 'seedance',
+      },
+    });
+    return record ? toApiRecord(record) : null;
+  },
+
+  // ============================================================================
+  // 带存储元数据的创建
+  // ============================================================================
+
+  /** 创建记录（带存储元数据） */
+  async createWithStorageMetadata(data: {
+    providerAssetId: string;
+    assetType: string;
+    name: string;
+    originalUrl: string;
+    providerPreviewUrl?: string;
+    providerStatus?: string;
+    rawProviderResponse?: string;
+    fileHash?: string;
+    storageProvider?: string;
+    storageKey?: string;
+  }): Promise<LocalAssetRecord> {
+    const record = await prisma.seedanceAsset.create({
+      data: {
+        provider: 'seedance',
+        provider_asset_id: data.providerAssetId,
+        asset_type: data.assetType,
+        name: data.name,
+        original_url: data.originalUrl,
+        provider_preview_url: data.providerPreviewUrl ?? null,
+        provider_status: data.providerStatus ?? null,
+        local_status: 'Active',
+        raw_provider_response: data.rawProviderResponse ?? null,
+        last_synced_at: null,
+        deleted_at: null,
+        provider_deleted_at: null,
+        delete_error: null,
+        group_id: null,
+        project_name: null,
+        file_hash: data.fileHash ?? null,
+        storage_provider: data.storageProvider ?? null,
+        storage_key: data.storageKey ?? null,
+      },
+    });
+    return toApiRecord(record);
   },
 };
