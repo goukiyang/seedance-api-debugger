@@ -37,11 +37,24 @@ interface VideoTask {
   raw_create_response: string | null;
   raw_status_response: string | null;
   error_message: string | null;
+  params_json: string | null;
   reference_images_json: string | null;
   provider_payload_json: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+}
+
+// Seedance 参考图资产元数据（与 generate/page.tsx 的 SelectedReferenceAsset 对应）
+interface ReferenceAssetMeta {
+  localAssetId: string;
+  provider: string;
+  providerAssetId: string;
+  name: string;
+  originalUrl: string;
+  providerPreviewUrl?: string | null;
+  providerStatus?: string | null;
+  order: number;
 }
 
 // ============================================================================
@@ -720,6 +733,70 @@ export default function TaskDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Seedance 参考图资产 */}
+      {(() => {
+        const refAssets: ReferenceAssetMeta[] = [];
+        if (task.params_json) {
+          try {
+            const params = JSON.parse(task.params_json);
+            if (Array.isArray(params.referenceAssets)) {
+              refAssets.push(...params.referenceAssets);
+            }
+          } catch {}
+        }
+        if (refAssets.length === 0) return null;
+        const sorted = [...refAssets].sort((a, b) => a.order - b.order);
+
+        return (
+          <div className="card">
+            <h2 className="section-title">
+              Seedance 参考图资产
+              <span className="ml-2 text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">
+                {sorted.length} 张
+              </span>
+            </h2>
+            <div className="flex flex-wrap gap-3">
+              {sorted.map((asset, i) => {
+                const imgUrl = asset.providerPreviewUrl || asset.originalUrl;
+                return (
+                  <div key={asset.localAssetId} className="flex flex-col gap-1">
+                    <div
+                      className="relative rounded overflow-hidden flex-shrink-0"
+                      style={{ width: 64, height: 86 }}
+                    >
+                      {imgUrl ? (
+                        <img
+                          src={imgUrl}
+                          alt={asset.name}
+                          className="w-full h-full object-cover"
+                          style={{ background: 'rgba(255,255,255,0.05)' }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : null}
+                      {/* 序号 */}
+                      <div
+                        className="absolute top-0 left-0 w-full h-full rounded flex items-center justify-center"
+                        style={{ background: 'rgba(59,130,246,0.5)' }}
+                      >
+                        <span className="text-white font-bold text-sm">{i + 1}</span>
+                      </div>
+                    </div>
+                    <span className="text-xs text-gray-500 truncate max-w-[64px]" title={asset.name}>
+                      {asset.name}
+                    </span>
+                    <span className="text-xs text-gray-400 truncate max-w-[64px]" title={asset.providerAssetId}>
+                      {asset.providerAssetId}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 操作 */}
       <div className="card">

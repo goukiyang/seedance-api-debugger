@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
+import type { SelectedReferenceAsset } from '@/components/SeedanceAssetSelector';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import { SeedanceAssetPanel } from '@/components/SeedanceAssetPanel';
 import { useComposerHeight } from '@/lib/context/ComposerHeightContext';
@@ -84,10 +85,17 @@ export default function GeneratePage() {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
+    referenceAssets?: SelectedReferenceAsset[];
   }) => {
     setSubmitting(true);
     setError(null);
     setResult(null);
+
+    // 从 referenceAssets 提取 originalUrl 作为参考图
+    const referenceImageUrls = (params.referenceAssets || [])
+      .filter((a) => a.originalUrl)
+      .sort((a, b) => a.order - b.order)
+      .map((a) => a.originalUrl);
 
     try {
       const res = await fetch('/api/video/create', {
@@ -106,6 +114,7 @@ export default function GeneratePage() {
           generate_audio: params.generateAudio,
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
+          reference_image_urls: referenceImageUrls,
         }),
       });
 

@@ -182,6 +182,22 @@ export async function POST(request: NextRequest) {
     // ---- Workspace Resolution ----
     const { id: workspaceId } = await getOrCreateWorkspace(tabId);
 
+    // ---- Reference Assets 元数据（Seedance 资产完整信息）----
+    // 前端从 Seedance 资产选择器传来，保存到 params_json 用于任务详情回看
+    interface ReferenceAssetMeta {
+      localAssetId: string;
+      provider: string;
+      providerAssetId: string;
+      name: string;
+      originalUrl: string;
+      providerPreviewUrl?: string | null;
+      providerStatus?: string | null;
+      order: number;
+    }
+    const referenceAssets: ReferenceAssetMeta[] = Array.isArray(body.reference_assets)
+      ? body.reference_assets.filter((a: ReferenceAssetMeta) => a && a.localAssetId && a.originalUrl)
+      : [];
+
     // ---- Workspace 素材自动注入 ----
     let referenceImageUrls: string[] = body.reference_image_urls ? [...body.reference_image_urls] : [];
     let referenceVideoUrls: string[] = body.reference_video_urls ? [...body.reference_video_urls] : [];
@@ -466,7 +482,7 @@ export async function POST(request: NextRequest) {
         execution_expires_after: body.execution_expires_after || null,
         workspace_id: workspaceId,
         snapshot_id: snapshot.id,
-        params_json: JSON.stringify({ ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark }),
+        params_json: JSON.stringify({ ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, referenceAssets }),
         // 新增：参考图调试信息（包含 base64 解析状态）
         reference_images_json: JSON.stringify(referenceImagesDebug, null, 2),
         // 新增：最终 provider payload（完整 content 数组）
