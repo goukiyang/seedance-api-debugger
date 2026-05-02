@@ -17,7 +17,6 @@ import { PromptEditor } from '@/components/PromptEditor';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
-import { SeedanceAssetSelector, type SelectedReferenceAsset } from '@/components/SeedanceAssetSelector';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
@@ -40,7 +39,6 @@ interface Props {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
-    referenceAssets?: SelectedReferenceAsset[];
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
@@ -74,14 +72,6 @@ export function GenerationComposer({
   const [generateAudio, setGenerateAudio] = useState(false);
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
-  const [referenceAssets, setReferenceAssets] = useState<SelectedReferenceAsset[]>([]);
-
-  // 提交成功后或新建任务时清除参考图
-  useEffect(() => {
-    if (result) {
-      setReferenceAssets([]);
-    }
-  }, [result]);
 
   // ============================================================================
   // Validation
@@ -128,8 +118,8 @@ export function GenerationComposer({
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
-    await onSubmit({ prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, referenceAssets });
-  }, [canSubmit, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, referenceAssets]);
+    await onSubmit({ prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark });
+  }, [canSubmit, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
     if (workspace.assets.length > 0) {
@@ -185,13 +175,6 @@ export function GenerationComposer({
           onPreview={handlePreview}
           generationMode={generationMode}
           loading={workspace.loading}
-        />
-
-        {/* Seedance 参考图资产选择器 */}
-        <SeedanceAssetSelector
-          value={referenceAssets}
-          onChange={setReferenceAssets}
-          max={9}
         />
 
         {/* 提示词输入 */}

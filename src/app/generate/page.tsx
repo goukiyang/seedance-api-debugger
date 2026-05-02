@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
-import type { SelectedReferenceAsset } from '@/components/SeedanceAssetSelector';
 import { GenerationComposer } from '@/components/GenerationComposer';
-import { SeedanceAssetPanel } from '@/components/SeedanceAssetPanel';
 import { useComposerHeight } from '@/lib/context/ComposerHeightContext';
 
 // ============================================================================
@@ -45,7 +43,6 @@ export default function GeneratePage() {
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
   const [showDebug, setShowDebug] = useState(false);
-  const [showAssetPanel, setShowAssetPanel] = useState(false);
 
   // ============================================================================
   // Load collections
@@ -86,17 +83,10 @@ export default function GeneratePage() {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
-    referenceAssets?: SelectedReferenceAsset[];
   }) => {
     setSubmitting(true);
     setError(null);
     setResult(null);
-
-    // 从 referenceAssets 提取 originalUrl 作为参考图
-    const referenceImageUrls = (params.referenceAssets || [])
-      .filter((a) => a.originalUrl)
-      .sort((a, b) => a.order - b.order)
-      .map((a) => a.originalUrl);
 
     try {
       const res = await fetch('/api/video/create', {
@@ -115,14 +105,13 @@ export default function GeneratePage() {
           generate_audio: params.generateAudio,
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
-          reference_image_urls: referenceImageUrls,
+          // workspace assets 完全由 route.ts 自动注入
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        // 提取结构化调试信息（在 throw 之前设置）
         setErrorDebug(data._debug || null);
         throw new Error(data.message || data.error || `创建失败 (HTTP ${res.status})`);
       }
@@ -219,13 +208,6 @@ export default function GeneratePage() {
             <button className="composer-topbar-nav-btn">素材库</button>
             <Link href="/tasks" className="composer-topbar-nav-btn">历史任务</Link>
             <Link href="/config" className="composer-topbar-nav-btn">设置</Link>
-            <button
-              className="composer-topbar-nav-btn"
-              onClick={() => setShowAssetPanel(true)}
-              style={{ background: showAssetPanel ? 'rgba(37,99,235,0.2)' : undefined }}
-            >
-              资产管理
-            </button>
           </nav>
         </div>
         <div className="composer-topbar-right">
@@ -303,12 +285,6 @@ export default function GeneratePage() {
         isSubmitting={submitting}
         result={result}
         onReset={handleReset}
-      />
-
-      {/* Seedance 资产管理测试入口 */}
-      <SeedanceAssetPanel
-        visible={showAssetPanel}
-        onClose={() => setShowAssetPanel(false)}
       />
     </div>
   );

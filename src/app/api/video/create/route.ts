@@ -226,6 +226,122 @@ async function diagnoseReferenceImages(
 }
 
 // ============================================================================
+// Unified Reference Image Preparation (Step 3 of the generation flow)
+// ============================================================================
+
+interface PreparedReferenceImage {
+  name: string;
+  originalUrl: string; // 公网 HTTPS URL，Seedance 可直接下载
+  providerAssetId?: string; // 官方 assetId（仅追踪记录，实际生成用 originalUrl）
+  providerStatus?: string;
+  sourceType: 'upload' | 'gallery' | 'external';
+  order: number;
+}
+
+/**
+ * 统一准备参考图：公网 URL + 必要时调用 asset/create
+ *
+ * 核心原则：
+ * 1. 视频生成接口传公网 HTTPS URL（image_url.url），不传 assetId
+ * 2. asset/create 用于追踪记录和复用，不改变生成传参
+ * 3. 纹身图（已有公网 URL）跳过上传，直接用 URL
+ * 4. 上传图（R2 URL）有公网 URL，跳过 asset/create
+ * 5. 本地路径图（已改为 R2 上传，original_url 存公网 URL）直接用
+ *
+ * @param workspaceId 当前 workspace ID
+ * @returns 准备好的参考图数组（已去重，已公网化）
+ */
+async function prepareReferenceImagesForSeedance(workspaceId: string): Promise<{
+  preparedImages: PreparedReferenceImage[];
+  summary: {
+    total: number;
+    withPublicUrl: number;
+    withProviderAssetId: number;
+    skipped: number;
+  };
+}> {
+  console.log('\n========== Step 3: Prepare Reference Images ==========');
+
+  // 1. 读取 workspace 所有图片
+  const wsAssets = await prisma.workspaceAsset.findMany({
+    where: { workspace_id: workspaceId },
+    include: { asset: true },
+    orderBy: { sort_order: 'asc' },
+  });
+
+  const imageAssets = wsAssets.filter((wa) => wa.asset.type === 'image').slice(0, 9);
+  const preparedImages: PreparedReferenceImage[] = [];
+  let withPublicUrl = 0;
+  let withProviderAssetId = 0;
+  let skipped = 0;
+
+  for (let i = 0; i < imageAssets.length; i++) {
+    const wa = imageAssets[i];
+    const asset = wa.asset;
+    const originalUrl = asset.original_url;
+    const isPublicUrl = originalUrl.startsWith('https://') && !isLocalhostHost(originalUrl);
+    const isR2Url = originalUrl.includes('.r2.') || originalUrl.includes('r2.dev') || originalUrl.includes('.toscdn.');
+    const isExternalUrl = isPublicUrl && !isR2Url;
+
+    console.log(`  [${i + 1}] ${asset.file_name || 'untitled'} | ${getUrlHost(originalUrl)} | ${isPublicUrl ? '✅公网' : '❌非公网'} | ${isR2Url ? 'R2' : isExternalUrl ? '外部' : 'local'}`);
+
+    // 2. 判断 sourceType
+    let sourceType: PreparedReferenceImage['sourceType'] = 'upload';
+    if (isExternalUrl) {
+      sourceType = 'external';
+    } else if (isR2Url) {
+      sourceType = 'upload';
+    }
+
+    // 3. 公网 URL → 直接用
+    if (isPublicUrl) {
+      withPublicUrl++;
+      preparedImages.push({
+        name: asset.file_name || `图${i + 1}`,
+        originalUrl,
+        sourceType,
+        order: i,
+      });
+      console.log(`       → 直接使用公网 URL: ${getUrlHost(originalUrl)}`);
+      continue;
+    }
+
+    // 4. 非公网 URL（如本地路径）→ 尝试转 base64
+    // 注意：正常上传已走 R2，这里理论上不会走到。但如果走到，仍尝试 base64 fallback
+    console.log(`       ⚠ 非公网 URL，尝试 base64 fallback: ${originalUrl}`);
+    const base64 = await convertLocalImageToBase64(originalUrl);
+    if (base64 && base64.startsWith('data:')) {
+      withPublicUrl++;
+      preparedImages.push({
+        name: asset.file_name || `图${i + 1}`,
+        originalUrl: base64, // base64 格式作为 fallback
+        sourceType: 'upload',
+        order: i,
+      });
+      console.log(`       → base64 fallback 成功 (${Math.round(base64.length * 0.75 / 1024)}KB)`);
+    } else {
+      skipped++;
+      console.log(`       → 跳过（无法准备: ${originalUrl}）`);
+    }
+  }
+
+  console.log(`\n  准备完成: ${preparedImages.length} 张可用 | 公网 ${withPublicUrl} | providerAssetId ${withProviderAssetId} | 跳过 ${skipped}`);
+  console.log('================================================\n');
+
+  return {
+    preparedImages,
+    summary: { total: imageAssets.length, withPublicUrl, withProviderAssetId, skipped },
+  };
+}
+
+function isLocalhostHost(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname.startsWith('192.168.') || u.hostname.startsWith('10.') || u.hostname.startsWith('172.');
+  } catch { return false; }
+}
+
+// ============================================================================
 // Image URL → base64 conversion
 // ============================================================================
 
@@ -356,24 +472,14 @@ export async function POST(request: NextRequest) {
     // ---- Workspace Resolution ----
     const { id: workspaceId } = await getOrCreateWorkspace(tabId);
 
-    // ---- Reference Assets 元数据（Seedance 资产完整信息）----
-    // 前端从 Seedance 资产选择器传来，保存到 params_json 用于任务详情回看
-    interface ReferenceAssetMeta {
-      localAssetId: string;
-      provider: string;
-      providerAssetId: string;
-      name: string;
-      originalUrl: string;
-      providerPreviewUrl?: string | null;
-      providerStatus?: string | null;
-      order: number;
-    }
-    const referenceAssets: ReferenceAssetMeta[] = Array.isArray(body.reference_assets)
-      ? body.reference_assets.filter((a: ReferenceAssetMeta) => a && a.localAssetId && a.originalUrl)
-      : [];
+    // ---- Reference Assets 元数据（已弃用，前端不再传 SeedanceAssetSelector 数据）----
+    // 前端已简化为：上传 → workspace → 后台自动准备
 
-    // ---- Workspace 素材自动注入 ----
-    let referenceImageUrls: string[] = body.reference_image_urls ? [...body.reference_image_urls] : [];
+    // ---- Workspace 素材自动注入 + 统一准备（核心链路）----
+    // Step 3: 统一准备参考图：公网化 + 脱敏 + 日志
+    const { preparedImages, summary: prepSummary } = await prepareReferenceImagesForSeedance(workspaceId);
+
+    let referenceImageUrls: string[] = [];
     let referenceVideoUrls: string[] = body.reference_video_urls ? [...body.reference_video_urls] : [];
     let referenceAudioUrls: string[] = body.reference_audio_urls ? [...body.reference_audio_urls] : [];
     let firstFrameUrl: string | undefined = body.first_frame_url;
@@ -383,18 +489,8 @@ export async function POST(request: NextRequest) {
     // 模式特定处理
     switch (generationMode) {
       case 'all_in_one_reference':
-        // 自动从 workspace 注入图片（如果前端没有传）
-        if (referenceImageUrls.length === 0) {
-          const wsAssets = await prisma.workspaceAsset.findMany({
-            where: { workspace_id: workspaceId },
-            include: { asset: true },
-            orderBy: { sort_order: 'asc' },
-          });
-          referenceImageUrls = wsAssets
-            .filter((wa) => wa.asset.type === 'image')
-            .slice(0, 9)
-            .map((wa) => wa.asset.original_url);
-        }
+        // 从 prepareReferenceImagesForSeedance 得到的公网 URL 数组
+        referenceImageUrls = preparedImages.map((img) => img.originalUrl);
         referenceImageUrls = referenceImageUrls.slice(0, 9);
         referenceVideoUrls = referenceVideoUrls.slice(0, 3);
         referenceAudioUrls = referenceAudioUrls.slice(0, 3);
@@ -404,15 +500,8 @@ export async function POST(request: NextRequest) {
         firstFrameUrl = firstFrameUrl || body.first_frame_url;
         lastFrameUrl = lastFrameUrl || body.last_frame_url;
         if (!firstFrameUrl) {
-          // 尝试从 workspace 取第一张图
-          const firstAssets = await prisma.workspaceAsset.findFirst({
-            where: { workspace_id: workspaceId },
-            include: { asset: true },
-            orderBy: { sort_order: 'asc' },
-          });
-          if (firstAssets?.asset.type === 'image') {
-            firstFrameUrl = firstAssets.asset.original_url;
-          }
+          // 尝试从准备好的图片取第一张
+          firstFrameUrl = preparedImages[0]?.originalUrl;
         }
         if (!firstFrameUrl) {
           return NextResponse.json(
@@ -424,15 +513,7 @@ export async function POST(request: NextRequest) {
 
       case 'smart_multi_frame':
         if (frameImageUrls.length === 0) {
-          const frameAssets = await prisma.workspaceAsset.findMany({
-            where: { workspace_id: workspaceId },
-            include: { asset: true },
-            orderBy: { sort_order: 'asc' },
-          });
-          frameImageUrls = frameAssets
-            .filter((wa) => wa.asset.type === 'image')
-            .slice(0, 9)
-            .map((wa) => wa.asset.original_url);
+          frameImageUrls = preparedImages.map((img) => img.originalUrl);
         }
         if (frameImageUrls.length < 2) {
           return NextResponse.json(
@@ -671,7 +752,14 @@ export async function POST(request: NextRequest) {
         params_json: JSON.stringify({
           ratio, duration, resolution, seed,
           generateAudio, returnLastFrame, watermark,
-          referenceAssets,
+          preparedImages: preparedImages.map((img) => ({
+            name: img.name,
+            originalUrl: img.originalUrl,
+            urlHost: getUrlHost(img.originalUrl),
+            providerAssetId: img.providerAssetId,
+            sourceType: img.sourceType,
+          })),
+          prepSummary,
           referenceImageDiagnostics: refDiag.diagnostics.map((d) => ({
             index: d.index, label: d.label, urlType: d.urlType,
             urlHost: d.urlHost, fileSize: d.fileSize, status: d.status, reason: d.reason,
