@@ -40,6 +40,27 @@ export default function GeneratePage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitErrorDebug, setSubmitErrorDebug] = useState<{
+    requestIdLocal?: string;
+    snapshot_id?: string;
+    providerContext?: {
+      httpStatus: number;
+      source: string;
+      code: string;
+      providerMessage?: string;
+      requestId?: string;
+      payloadSummary?: {
+        endpoint: string;
+        model: string;
+        generationMode: string;
+        promptLength: number;
+        contentItemCount: number;
+        referenceImageCount: number;
+        referenceImageHosts: string[];
+        totalPayloadSizeKb: number;
+      };
+    };
+  } | undefined>(undefined);
 
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
@@ -121,12 +142,17 @@ export default function GeneratePage() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.message || data.error || '创建任务失败');
+        // 提取后端调试信息（脱敏的 ProviderContext）
+        const debugInfo = data._debug ?? null;
+        const err = new Error(data.message || data.error || '创建任务失败') as Error & { _debug?: unknown };
+        err._debug = debugInfo;
+        throw err;
       }
 
       setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+      setSubmitErrorDebug((err as Error & { _debug?: unknown })._debug as typeof submitErrorDebug ?? undefined);
     } finally {
       setSubmitting(false);
     }
@@ -174,6 +200,7 @@ export default function GeneratePage() {
   const handleReset = useCallback(() => {
     setResult(null);
     setError(null);
+    setSubmitErrorDebug(undefined);
   }, []);
 
   // ============================================================================
@@ -294,6 +321,7 @@ export default function GeneratePage() {
         onCollectionNew={handleCollectionNew}
         onSubmit={handleSubmit}
         submitError={error}
+        submitErrorDebug={submitErrorDebug}
         isSubmitting={submitting}
         result={result}
         onReset={handleReset}

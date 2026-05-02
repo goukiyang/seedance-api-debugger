@@ -43,6 +43,28 @@ interface Props {
     referenceAssets?: SelectedReferenceAsset[];
   }) => Promise<void>;
   submitError: string | null;
+  /** 后端返回的结构化调试信息 */
+  submitErrorDebug?: {
+    requestIdLocal?: string;
+    snapshot_id?: string;
+    providerContext?: {
+      httpStatus: number;
+      source: string;
+      code: string;
+      providerMessage?: string;
+      requestId?: string;
+      payloadSummary?: {
+        endpoint: string;
+        model: string;
+        generationMode: string;
+        promptLength: number;
+        contentItemCount: number;
+        referenceImageCount: number;
+        referenceImageHosts: string[];
+        totalPayloadSizeKb: number;
+      };
+    };
+  };
   isSubmitting: boolean;
   result: { id: string; provider_task_id: string; prompt_rendered?: string } | null;
   onReset: () => void;
@@ -55,6 +77,7 @@ export function GenerationComposer({
   onCollectionNew,
   onSubmit,
   submitError,
+  submitErrorDebug,
   isSubmitting,
   result,
   onReset,
@@ -207,13 +230,14 @@ export function GenerationComposer({
           hasBlockingUpload={Object.values(workspace.uploadStatuses).some((s) => s === 'uploading' || s === 'failed')}
         />
 
-        {/* 错误 */}
+        {/* 错误：失败后保留现场（不自动清空），用户可直接重新提交 */}
         {submitError && (
           <div className="composer-error-wrap">
             <ErrorTranslator
               error={submitError}
+              debugInfo={submitErrorDebug}
               rawError={submitError}
-              onRetry={() => {}}
+              onRetry={onReset}
               onCopy={() => { navigator.clipboard.writeText(submitError); }}
             />
           </div>
