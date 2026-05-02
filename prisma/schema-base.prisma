@@ -1,0 +1,132 @@
+// Schema without SeedanceAsset — 用于 diff 对比
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model VideoTask {
+  id                       String    @id @default(cuid())
+  provider                 String
+  model                    String
+  generation_mode          String
+  prompt                  String
+  ratio                    String?
+  duration                 Int?
+  resolution               String?
+  seed                     Int?
+  generate_audio           Boolean   @default(true)
+  return_last_frame        Boolean   @default(false)
+  watermark                Boolean   @default(false)
+  reference_image_urls     String?
+  reference_video_urls     String?
+  reference_audio_urls     String?
+  first_frame_url          String?
+  last_frame_url           String?
+  frame_image_urls         String?
+  callback_url             String?
+  execution_expires_after  Int?
+  local_status             String    @default("draft")
+  provider_task_id         String?
+  provider_status          String?
+  result_video_url         String?
+  result_last_frame_url   String?
+  local_video_path         String?
+  raw_create_response      String?
+  raw_status_response      String?
+  error_message           String?
+  params_json              String?
+  reference_images_json   String?
+  provider_payload_json   String?
+  workspace_id             String?
+  snapshot_id             String?   @unique
+  workspace                Workspace?               @relation(fields: [workspace_id], references: [id])
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
+  completed_at             DateTime?
+}
+
+model Asset {
+  id             String    @id @default(cuid())
+  owner_id       String
+  type           String
+  original_url   String
+  thumbnail_url  String?
+  file_name      String
+  mime_type      String
+  width          Int?
+  height         Int?
+  file_size      Int
+  hash           String?   @unique
+  created_at     DateTime  @default(now())
+  workspace_assets     WorkspaceAsset[]
+  collection_items    AssetCollectionItem[]
+  collections_cover    AssetCollection[]     @relation("CollectionCover")
+}
+
+model Workspace {
+  id           String    @id @default(cuid())
+  owner_id     String    @default("default-user")
+  name         String    @default("默认工作台")
+  status       String    @default("active")
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  assets       WorkspaceAsset[]
+  snapshots    GenerationTaskSnapshot[]
+  tasks        VideoTask[]
+}
+
+model WorkspaceAsset {
+  id           String   @id @default(cuid())
+  workspace_id String
+  asset_id     String
+  sort_order   Int      @default(0)
+  role         String?
+  created_at   DateTime @default(now())
+  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  asset        Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  @@unique([workspace_id, asset_id])
+}
+
+model AssetCollection {
+  id           String    @id @default(cuid())
+  owner_id     String    @default("default-user")
+  name         String
+  description String?
+  visibility  String    @default("private")
+  cover_asset_id String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  items        AssetCollectionItem[]
+  cover_asset  Asset?    @relation("CollectionCover", fields: [cover_asset_id], references: [id])
+}
+
+model AssetCollectionItem {
+  id           String   @id @default(cuid())
+  collection_id String
+  asset_id     String
+  sort_order   Int      @default(0)
+  role         String?
+  created_at   DateTime @default(now())
+  collection   AssetCollection @relation(fields: [collection_id], references: [id], onDelete: Cascade)
+  asset        Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  @@unique([collection_id, asset_id])
+}
+
+model GenerationTaskSnapshot {
+  id                    String   @id @default(cuid())
+  task_id               String?
+  workspace_id          String?
+  generation_mode       String
+  prompt_raw            String
+  prompt_rendered       String
+  asset_mapping_json    String?
+  content_json          String?
+  provider_payload_json String?
+  created_at            DateTime @default(now())
+  workspace     Workspace?  @relation(fields: [workspace_id], references: [id])
+}
