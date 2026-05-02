@@ -376,6 +376,29 @@ export default function TaskDetailPage() {
     setQuerying(false);
   };
 
+  // 重新查询结果 — 强制刷新最新结果（可用于"其实生成好了但前端没更新"的情况）
+  const handleReQueryResult = async () => {
+    setQuerying(true);
+    // 直接调用 status API 强制 getResult
+    try {
+      const res = await fetch(`/api/video/status/${taskId}`);
+      const data = await res.json();
+      if (res.ok) {
+        const hadVideoBefore = task?.result_video_url;
+        setTask(data);
+        setVideoError(false);
+        // 如果之前没有视频，现在有了，说明结果刚就绪
+        if (data.result_video_url && !hadVideoBefore) {
+          alert('视频已就绪，请刷新查看');
+        }
+      }
+    } catch (error) {
+      console.error('Re-query failed:', error);
+    } finally {
+      setQuerying(false);
+    }
+  };
+
   const handleRetry = async () => {
     setRetrying(true);
     try {
@@ -816,6 +839,16 @@ export default function TaskDetailPage() {
               '查询状态'
             )}
           </button>
+
+          {['submitted', 'running'].includes(task.local_status) && (
+            <button
+              className="btn btn-secondary"
+              onClick={handleReQueryResult}
+              disabled={querying}
+            >
+              {querying ? '查询中...' : '重新查询结果'}
+            </button>
+          )}
 
           <label className="flex items-center gap-2">
             <span className="text-sm">自动轮询 (5秒)</span>

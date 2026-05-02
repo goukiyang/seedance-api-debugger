@@ -24,6 +24,14 @@ const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
 const MAX_REFS = 9;
 
+interface PolledTask {
+  id: string;
+  local_status: string;
+  provider_status: string | null;
+  result_video_url: string | null;
+  error_message: string | null;
+}
+
 interface Props {
   collections: AssetCollection[];
   onCollectionLoad: (collectionId: string) => Promise<void>;
@@ -44,6 +52,8 @@ interface Props {
   submitErrorDebug?: object | null;
   isSubmitting: boolean;
   result: { id: string; provider_task_id: string; prompt_rendered?: string } | null;
+  polledResult: PolledTask | null;
+  isPolling: boolean;
   onReset: () => void;
 }
 
@@ -57,6 +67,8 @@ export function GenerationComposer({
   submitErrorDebug,
   isSubmitting,
   result,
+  polledResult,
+  isPolling,
   onReset,
 }: Props) {
   const workspace = useWorkspace();
@@ -212,6 +224,36 @@ export function GenerationComposer({
               <span className="composer-result-label">任务已创建</span>
               <span className="composer-result-id">{result.id.slice(0, 8)}...</span>
             </div>
+
+            {isPolling && !polledResult && (
+              <div className="composer-polling-hint">正在查询结果...</div>
+            )}
+
+            {polledResult && polledResult.local_status === 'succeeded' && polledResult.result_video_url && (
+              <div className="composer-result-video">
+                <div className="composer-result-video-label">✅ 视频生成完成</div>
+                <video
+                  key={polledResult.result_video_url}
+                  controls
+                  playsInline
+                  style={{ width: '100%', maxHeight: 280, borderRadius: 8 }}
+                  src={polledResult.result_video_url}
+                />
+              </div>
+            )}
+
+            {polledResult && polledResult.local_status === 'failed' && (
+              <div className="composer-result-error">
+                ❌ 生成失败：{polledResult.error_message || '未知错误'}
+              </div>
+            )}
+
+            {polledResult && !['succeeded', 'failed', 'cancelled'].includes(polledResult.local_status) && (
+              <div className="composer-polling-hint">
+                ⏳ {isPolling ? '生成中，正在查询结果...' : '请手动查看任务详情'}
+              </div>
+            )}
+
             <div className="composer-result-actions">
               <a href={`/tasks/${result.id}`} className="composer-result-link">查看详情 →</a>
               <button type="button" className="composer-result-reset" onClick={onReset}>

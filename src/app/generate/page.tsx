@@ -25,6 +25,14 @@ interface TaskItem {
   created_at: string;
 }
 
+interface PolledTask {
+  id: string;
+  local_status: string;
+  provider_status: string | null;
+  result_video_url: string | null;
+  error_message: string | null;
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -43,6 +51,10 @@ export default function GeneratePage() {
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
   const [showDebug, setShowDebug] = useState(false);
+
+  // ---- Result Polling ----
+  const [polledResult, setPolledResult] = useState<PolledTask | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
 
   // ============================================================================
   // Load collections
@@ -68,6 +80,54 @@ export default function GeneratePage() {
       })
       .catch(() => {});
   }, []);
+
+  // ============================================================================
+  // Result Polling — poll result task until terminal state
+  // ============================================================================
+
+  useEffect(() => {
+    if (!result?.id) return;
+
+    setIsPolling(true);
+    setPolledResult(null);
+
+    let intervalId: ReturnType<typeof setInterval>;
+    let pollCount = 0;
+    const MAX_POLLS = 120; // ~10 minutes at 5s interval
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/video/status/${result.id}`);
+        if (!res.ok) return;
+        const data: PolledTask = await res.json();
+        setPolledResult(data);
+        pollCount++;
+
+        if (['succeeded', 'failed', 'cancelled'].includes(data.local_status)) {
+          clearInterval(intervalId);
+          setIsPolling(false);
+          // refresh task list so the card shows updated status
+          fetch('/api/video/list')
+            .then((r) => r.json())
+            .then((d) => setRecentTasks((d.tasks || []).slice(0, 6)))
+            .catch(() => {});
+        } else if (pollCount >= MAX_POLLS) {
+          clearInterval(intervalId);
+          setIsPolling(false);
+        }
+      } catch {
+        // non-critical polling error, keep polling
+      }
+    };
+
+    poll();
+    intervalId = setInterval(poll, 5000);
+
+    return () => {
+      clearInterval(intervalId);
+      setIsPolling(false);
+    };
+  }, [result?.id]);
 
   // ============================================================================
   // Submit
@@ -168,6 +228,8 @@ export default function GeneratePage() {
     setResult(null);
     setError(null);
     setErrorDebug(null);
+    setPolledResult(null);
+    setIsPolling(false);
   }, []);
 
   // ============================================================================
@@ -284,6 +346,8 @@ export default function GeneratePage() {
         submitErrorDebug={errorDebug}
         isSubmitting={submitting}
         result={result}
+        polledResult={polledResult}
+        isPolling={isPolling}
         onReset={handleReset}
       />
     </div>

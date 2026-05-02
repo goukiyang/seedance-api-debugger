@@ -77,10 +77,19 @@ export async function GET(
       } catch (apiError) {
         console.error('Provider status query error:', apiError);
 
-        // API 错误时返回当前状态
+        // API 错误时也更新状态（标记为 running，让前端继续轮询）
+        const updateData: Record<string, unknown> = {
+          provider_status: 'unknown',
+          local_status: 'running',
+          raw_status_response: JSON.stringify({ error: apiError instanceof Error ? apiError.message : String(apiError) }),
+        };
+        const updatedTask = await prisma.videoTask.update({
+          where: { id: taskId },
+          data: updateData,
+        });
         return NextResponse.json({
-          ...task,
-          error_message: task.error_message || (apiError instanceof Error ? apiError.message : 'Failed to query status'),
+          ...updatedTask,
+          error_message: updatedTask.error_message || (apiError instanceof Error ? apiError.message : 'Failed to query status'),
         });
       }
     }

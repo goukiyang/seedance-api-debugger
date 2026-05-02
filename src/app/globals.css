@@ -2024,6 +2024,42 @@ a {
   color: white;
 }
 
+.composer-result {
+  flex-wrap: wrap;
+}
+
+.composer-polling-hint {
+  width: 100%;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 6px 0 2px;
+}
+
+.composer-result-video {
+  width: 100%;
+  margin-top: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.composer-result-video-label {
+  font-size: 12px;
+  color: #4ade80;
+  padding: 6px 10px 0;
+}
+
+.composer-result-video video {
+  display: block;
+}
+
+.composer-result-error {
+  width: 100%;
+  font-size: 12px;
+  color: #f87171;
+  margin: 6px 0 2px;
+}
+
 /* Composer 对话框 */
 .composer-dialog-backdrop {
   position: fixed;
