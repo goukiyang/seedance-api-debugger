@@ -1,24 +1,21 @@
 /**
  * DELETE /api/assets/[id]/provider-delete
  * 彻底删除官方 Seedance asset
- * 警告：这是不可逆操作，请确认后再调用
+ * 警告：不可逆操作
  *
- * 调用前检查：
- * 1. 资产确实存在
- * 2. 资产状态不是 ProviderDeleted
- * 3. 用户明确触发
+ * TODO: 未来接入生成任务后，需增加“是否被任务引用”检查
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteAsset } from '@/lib/provider/seedance-assets';
-import { seedanceStore } from '@/lib/assets/seedance-store';
+import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const record = seedanceStore.get(params.id);
+    const record = await seedanceAssetRepository.get(params.id);
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
     }
@@ -32,7 +29,7 @@ export async function DELETE(
 
     if (result.error) {
       // 官方删除失败，标记为失败状态
-      seedanceStore.update(params.id, { status: 'DeleteFailed' });
+      await seedanceAssetRepository.markDeleteFailed(params.id, result.error);
       return NextResponse.json(
         { error: `官方删除失败：${result.error}` },
         { status: 502 }
@@ -40,8 +37,7 @@ export async function DELETE(
     }
 
     // 官方删除成功
-    seedanceStore.update(params.id, { status: 'ProviderDeleted' });
-    const updated = seedanceStore.get(params.id);
+    const updated = await seedanceAssetRepository.markProviderDeleted(params.id);
 
     return NextResponse.json({
       success: true,

@@ -14,6 +14,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ asset?: LocalAssetRecord; error?: string; providerSyncError?: string } | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -24,13 +25,13 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const loadAssets = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/assets/list');
+      const res = await fetch(`/api/assets/list?includeDeleted=${includeDeleted}`);
       const data = await res.json();
       setAssets(data.assets || []);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [includeDeleted]);
 
   useEffect(() => {
     if (visible) loadAssets();
@@ -42,7 +43,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
     setCreating(true);
     setActionMsg(null);
     try {
-      const res = await fetch('/api/assets/from-url', {
+      const res = await fetch('/api/assets/create-from-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url.trim(), name: name.trim() }),
@@ -209,21 +210,29 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
           </div>
 
           {/* 列表 */}
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.5)', marginBottom: 8 }}>
-            本地资产列表（{assets.length}）
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.5)' }}>
+              本地资产列表（{assets.length}）
+            </div>
+            <button
+              onClick={() => { setIncludeDeleted(!includeDeleted); }}
+              style={{ fontSize: 10, padding: '2px 8px', backgroundColor: includeDeleted ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, color: includeDeleted ? '#fbbf24' : 'rgba(255,255,255,0.5)', cursor: 'pointer' }}
+            >
+              {includeDeleted ? '已显示已删除' : '显示已删除'}
+            </button>
           </div>
           {assets.length === 0 ? (
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '20px 0' }}>暂无资产，上方创建</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {assets.map((asset) => (
-                <div key={asset.localId} style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', fontSize: 11 }}>
+                <div key={asset.localId} style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, border: `1px solid rgba(255,255,255,${asset.status === 'Active' ? '0.06' : '0.2'})`, fontSize: 11 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                     <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>{asset.name}</span>
                     {statusBadge(asset.status)}
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, marginBottom: 6, wordBreak: 'break-all' }}>
-                    ID: {asset.providerAssetId}
+                  <div style={{ color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', fontSize: 9, marginBottom: 4, wordBreak: 'break-all' }}>
+                    DB: {asset.localId.slice(0, 12)}... | 官方: {asset.providerAssetId}
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     <button

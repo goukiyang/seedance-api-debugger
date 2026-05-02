@@ -23,8 +23,10 @@ export interface LocalAssetRecord {
   name: string; // 资产名称
   originalUrl: string; // 用户提交的公网 URL
   providerPreviewUrl: string; // 官方查询返回的预览 URL
-  status: 'Active' | 'Deleted' | 'ProviderDeleted' | 'DeleteFailed' | 'Unknown';
+  providerStatus: string; // 官方状态 Active/Deleted 等
+  status: 'Active' | 'Deleted' | 'ProviderDeleted' | 'DeleteFailed' | 'Unknown'; // 本地状态
   rawProviderResponse: string; // JSON 原始返回
+  deletedAt: string; // 软删除时间
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }

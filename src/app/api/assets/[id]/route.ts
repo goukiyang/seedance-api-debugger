@@ -1,33 +1,34 @@
 /**
- * GET /api/assets/[id]          — 查询单条资产
- * PATCH /api/assets/[id]        — 更新资产（名称或状态）
- * DELETE /api/assets/[id]       — 软删除：从列表移除，不删官方 asset
+ * GET /api/assets/[id]          — 查询单条资产 + 同步官方详情
+ * PATCH /api/assets/[id]        — 更新资产（名称）
+ * DELETE /api/assets/[id]         — 软删除：本地状态改为 Deleted，不删官方 asset
  *
  * 真正的官方删除走 /api/assets/[id]/provider-delete
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAsset, updateAsset as providerUpdate, deleteAsset as providerDelete } from '@/lib/provider/seedance-assets';
-import { seedanceStore } from '@/lib/assets/seedance-store';
+import { getAsset, updateAsset as providerUpdate } from '@/lib/provider/seedance-assets';
+import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const record = seedanceStore.get(params.id);
+    const record = await seedanceAssetRepository.get(params.id);
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
     }
 
     // 同步查询官方最新详情
     const result = await getAsset({ providerAssetId: record.providerAssetId });
+
     if (result.error) {
-      // 官方查询失败时返回本地记录，标记状态
+      const syncFailed = result.statusCode === 404 ? 'ProviderDeleted' : 'Unknown';
       return NextResponse.json({
         asset: {
           ...record,
-          status: result.statusCode === 404 ? 'ProviderDeleted' : 'Unknown',
+          status: syncFailed,
           providerPreviewUrl: '',
         },
         providerSyncError: result.error,
@@ -36,9 +37,11 @@ export async function GET(
 
     // 更新本地记录的预览 URL 和状态
     const { item } = result.data!;
-    const updated = seedanceStore.update(params.id, {
+    const updated = await seedanceAssetRepository.update(params.id, {
       providerPreviewUrl: item.url,
-      status: item.status === 'Active' ? 'Active' : 'Unknown',
+      providerStatus: item.status,
+      rawProviderResponse: JSON.stringify(item),
+      lastSyncedAt: new Date(),
     });
 
     return NextResponse.json({ asset: updated ?? record });
@@ -59,7 +62,7 @@ export async function PATCH(
     const body = await request.json();
     const { name } = body as { name?: string };
 
-    const record = seedanceStore.get(params.id);
+    const record = await seedanceAssetRepository.get(params.id);
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
     }
@@ -75,8 +78,8 @@ export async function PATCH(
       }
     }
 
-    // 更新本地
-    const updated = seedanceStore.update(params.id, {
+    // 更新本地数据库
+    const updated = await seedanceAssetRepository.update(params.id, {
       name: name ? name.trim() : record.name,
     });
 
@@ -95,13 +98,13 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const record = seedanceStore.get(params.id);
+    const record = await seedanceAssetRepository.get(params.id);
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
     }
 
     // 软删除：只改状态，不删官方 asset
-    const updated = seedanceStore.update(params.id, { status: 'Deleted' });
+    const updated = await seedanceAssetRepository.softDelete(params.id);
 
     return NextResponse.json({
       success: true,

@@ -61,7 +61,58 @@ model VideoTask {
 }
 
 // ============================================================================
-// 资产管理系统
+// Seedance 资产管理（官方 asset 持久化）
+// ============================================================================
+
+// 注意：本表存储通过公网 URL 从 Seedance 官方创建的资产记录
+// 与本地 Asset 表（存储本地上传文件）是两套独立系统
+model SeedanceAsset {
+  id                   String    @id @default(cuid())
+  provider             String    @default("seedance") // 固定 seedance
+  provider_asset_id    String    // 官方返回的 asset-xxxx
+  asset_type           String    @default("Image") // Image | Video | Audio
+  name                 String
+
+  // 用户提交的公网 URL
+  original_url         String
+
+  // 官方详情同步回来的预览 URL（临时签名 URL，过期需重新同步）
+  provider_preview_url String?
+
+  // 官方状态
+  provider_status      String?
+
+  // 本地状态：Active | Deleted | ProviderDeleted | DeleteFailed
+  local_status         String    @default("Active")
+
+  // 官方原始返回 JSON
+  raw_provider_response String?
+
+  // 最近一次同步官方详情的时间
+  last_synced_at       DateTime?
+
+  // 本地软删除时间
+  deleted_at           DateTime?
+
+  // 官方彻底删除时间
+  provider_deleted_at  DateTime?
+
+  // 官方删除失败原因
+  delete_error         String?
+
+  // 预留字段
+  group_id             String?
+  project_name         String?
+
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  @@index([provider_asset_id])
+  @@index([provider, provider_asset_id])
+}
+
+// ============================================================================
+// 资产管理系统（本地文件上传）
 // ============================================================================
 
 // 上传的文件（图片/视频/音频）

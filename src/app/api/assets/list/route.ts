@@ -1,17 +1,17 @@
 /**
  * GET /api/assets/list
- * 列出本地 Seedance 资产记录
+ * 从数据库读取 Seedance 资产记录
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { seedanceStore } from '@/lib/assets/seedance-store';
+import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
     const includeDeleted = url.searchParams.get('includeDeleted') === 'true';
 
-    const assets = seedanceStore.list(includeDeleted);
+    const assets = await seedanceAssetRepository.list(includeDeleted);
     return NextResponse.json({ assets, count: assets.length });
   } catch (err) {
     console.error('[SeedanceListAssets] Error:', err);

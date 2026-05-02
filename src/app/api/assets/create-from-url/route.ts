@@ -1,11 +1,11 @@
 /**
- * POST /api/assets/from-url
- * 公网图片 URL → 创建 Seedance asset → 本地保存
+ * POST /api/assets/create-from-url
+ * 公网图片 URL → 创建 Seedance asset → 数据库保存
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAsset } from '@/lib/provider/seedance-assets';
-import { seedanceStore } from '@/lib/assets/seedance-store';
+import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,15 +32,12 @@ export async function POST(request: NextRequest) {
 
     const { providerAssetId, rawResponse } = result.data!;
 
-    // 保存到本地内存
-    const record = seedanceStore.create({
-      provider: 'seedance',
+    // 写入数据库
+    const record = await seedanceAssetRepository.create({
       providerAssetId,
       assetType: 'Image',
       name: name.trim(),
       originalUrl: url.trim(),
-      providerPreviewUrl: '',
-      status: 'Active',
       rawProviderResponse: JSON.stringify(rawResponse),
     });
 
