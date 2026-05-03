@@ -16,6 +16,9 @@ interface CreateResponse {
   status: string;
   created_at: string;
   prompt_rendered?: string;
+  estimated_cost?: number;
+  frozen_cost?: number;
+  deduplicated?: boolean;
 }
 
 interface TaskItem {
@@ -137,6 +140,11 @@ export default function GeneratePage() {
             .then((r) => r.json())
             .then((d) => setRecentTasks((d.tasks || []).slice(0, 6)))
             .catch(() => {});
+          // refresh credit display after settlement
+          fetch('/api/me/credits')
+            .then((r) => r.ok ? r.json() : null)
+            .then((d) => { if (d) setCredits(d); })
+            .catch(() => {});
         } else if (pollCount >= MAX_POLLS) {
           clearInterval(intervalId);
           setIsPolling(false);
@@ -174,8 +182,10 @@ export default function GeneratePage() {
     setError(null);
     setResult(null);
 
+    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
     try {
-      const res = await fetch('/api/video/create', {
+      const res = await fetch('/api/tasks/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -191,7 +201,7 @@ export default function GeneratePage() {
           generate_audio: params.generateAudio,
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
-          // workspace assets 完全由 route.ts 自动注入
+          idempotency_key: idempotencyKey,
         }),
       });
 
@@ -204,8 +214,14 @@ export default function GeneratePage() {
 
       setResult(data);
       setErrorDebug(null);
+
+      // Refresh credit display after freeze
+      fetch('/api/me/credits')
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) setCredits(d); })
+        .catch(() => {});
     } catch (err) {
-      // errorDebug 已在上面的 !res.ok 分支设置好了
+      if (err instanceof Error) setError(err.message);
     } finally {
       setSubmitting(false);
     }

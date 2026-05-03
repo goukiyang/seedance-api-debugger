@@ -17,6 +17,7 @@ import { PromptEditor } from '@/components/PromptEditor';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
+import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
@@ -118,6 +119,10 @@ export function GenerationComposer({
   }, [prompt, isSubmitting, workspace.uploadStatuses, workspace.assets.length, generationMode, validation]);
 
   const canSubmit = blockingError === null && !isSubmitting;
+
+  const estimatedPoints = useMemo(() => {
+    return calculateEstimatedCostClient(resolution, duration);
+  }, [resolution, duration]);
 
   // 已引用图号
   const usedRefs = useMemo(() => {
@@ -269,6 +274,7 @@ export function GenerationComposer({
           ratio={ratio}
           duration={duration}
           resolution={resolution}
+          points={estimatedPoints}
           canSubmit={canSubmit}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}

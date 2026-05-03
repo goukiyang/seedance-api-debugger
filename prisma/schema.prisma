@@ -45,19 +45,37 @@ model VideoTask {
   raw_create_response      String?
   raw_status_response      String?
   error_message           String?
+  error_code               String?
   params_json              String?
-  reference_images_json   String?  // 参考图调试信息（含 base64 解析状态）
-  provider_payload_json   String?  // 发送给 provider 的最终 payload
+  reference_images_json   String?
+  provider_payload_json   String?
 
-  // 关联 workspace 和快照（通过 GenerationTaskSnapshot.task 侧建立关系）
+  // 关联 workspace 和快照
   workspace_id             String?
   snapshot_id             String?   @unique
 
+  // 用户关联（P0-B）
+  user_id                  String?
+
+  // 点数与计费（P0-B）
+  estimated_cost           Float?
+  actual_cost              Float?
+  frozen_cost              Float?
+  refund_amount            Float?
+  pricing_snapshot         String?
+  pricing_rule_id          String?
+  idempotency_key          String?
+
   workspace                Workspace?               @relation(fields: [workspace_id], references: [id])
+  user                     User?                    @relation(fields: [user_id], references: [id])
 
   created_at               DateTime  @default(now())
   updated_at               DateTime  @updatedAt
   completed_at             DateTime?
+
+  @@unique([user_id, idempotency_key])
+  @@index([user_id])
+  @@index([local_status])
 }
 
 // ============================================================================
@@ -79,6 +97,7 @@ model User {
   credit_account CreditAccount?
   credit_ledger   CreditLedger[]
   operation_logs  OperationLog[]
+  tasks           VideoTask[]
 
   @@index([username])
   @@index([email])
