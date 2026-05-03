@@ -2,18 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
-
-const LONG_FROZEN_HOURS = 2;
-
-function buildRefundRelevantWhere(): Prisma.VideoTaskWhereInput {
-  return {
-    OR: [
-      { frozen_cost: { gt: 0 }, local_status: { in: ['failed', 'cancelled'] } },
-      { frozen_cost: { gt: 0 }, created_at: { lte: new Date(Date.now() - LONG_FROZEN_HOURS * 60 * 60 * 1000) } },
-      { actual_cost: { gt: 0 }, refund_amount: null },
-    ],
-  };
-}
+import { buildRefundRelevantWhere, getLongFrozenCutoff, getTaskAttentionFlags } from '@/lib/admin-task-attention';
 
 export async function GET(request: NextRequest) {
   try {
@@ -64,7 +53,7 @@ export async function GET(request: NextRequest) {
   }
   if (Object.keys(createdAt).length > 0) where.created_at = createdAt;
 
-  const longFrozenCutoff = new Date(Date.now() - LONG_FROZEN_HOURS * 60 * 60 * 1000);
+  const longFrozenCutoff = getLongFrozenCutoff();
   let attentionTaskIds: string[] | null = null;
 
   if (attention === 'failed') {
@@ -190,13 +179,7 @@ export async function GET(request: NextRequest) {
     tasks: tasks.map((task) => ({
       ...task,
       attention_flags: {
-        abnormal: abnormalIds.has(task.id),
-        still_frozen: (task.frozen_cost ?? 0) > 0,
-        long_frozen: (task.frozen_cost ?? 0) > 0 && new Date(task.created_at) <= longFrozenCutoff,
-        refund_relevant:
-          ((task.frozen_cost ?? 0) > 0 && ['failed', 'cancelled'].includes(task.local_status)) ||
-          ((task.frozen_cost ?? 0) > 0 && new Date(task.created_at) <= longFrozenCutoff) ||
-          ((task.actual_cost ?? 0) > 0 && (task.refund_amount ?? 0) === 0),
+        ...getTaskAttentionFlags(task, abnormalIds),
       },
       latest_operation: (logMap.get(task.id) || [])[0] || null,
     })),

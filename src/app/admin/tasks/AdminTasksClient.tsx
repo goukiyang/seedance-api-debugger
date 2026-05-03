@@ -105,6 +105,17 @@ interface Pagination {
   total_pages: number;
 }
 
+interface AdminTaskFilters {
+  user: string;
+  status: string;
+  model: string;
+  from: string;
+  to: string;
+  frozen: boolean;
+  attention: string;
+  page: number;
+}
+
 const inputStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
@@ -188,7 +199,13 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default function AdminTasksClient({ currentUser }: { currentUser: SessionUser }) {
+export default function AdminTasksClient({
+  currentUser,
+  initialFilters,
+}: {
+  currentUser: SessionUser;
+  initialFilters?: Partial<AdminTaskFilters>;
+}) {
   const [tasks, setTasks] = useState<AdminTaskListItem[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [pagination, setPagination] = useState<Pagination | null>(null);
@@ -201,7 +218,7 @@ export default function AdminTasksClient({ currentUser }: { currentUser: Session
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [actionLoading, setActionLoading] = useState('');
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<AdminTaskFilters>({
     user: '',
     status: '',
     model: '',
@@ -210,6 +227,7 @@ export default function AdminTasksClient({ currentUser }: { currentUser: Session
     frozen: false,
     attention: 'exceptions',
     page: 1,
+    ...initialFilters,
   });
 
   const selectedTask = useMemo(
