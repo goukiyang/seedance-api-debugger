@@ -33,6 +33,14 @@ interface PolledTask {
   error_message: string | null;
 }
 
+interface CreditSummary {
+  balance: number;
+  frozen_credits: number;
+  available: number;
+  monthly_used: number;
+  total_used: number;
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -56,6 +64,9 @@ export default function GeneratePage() {
   const [polledResult, setPolledResult] = useState<PolledTask | null>(null);
   const [isPolling, setIsPolling] = useState(false);
 
+  // ---- Credit Summary ----
+  const [credits, setCredits] = useState<CreditSummary | null>(null);
+
   // ============================================================================
   // Load collections
   // ============================================================================
@@ -64,6 +75,21 @@ export default function GeneratePage() {
     fetch('/api/collections')
       .then((r) => r.json())
       .then((d) => setCollections(d.collections || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/me/credits')
+      .then((r) => {
+        if (r.status === 401) {
+          window.location.href = '/login';
+          return null;
+        }
+        return r.json();
+      })
+      .then((d) => {
+        if (d) setCredits(d);
+      })
       .catch(() => {});
   }, []);
 
@@ -255,6 +281,10 @@ export default function GeneratePage() {
     return prompt.slice(0, maxLen) + '...';
   }
 
+  function formatCredit(value: number | undefined): string {
+    return Math.max(0, Math.floor(value || 0)).toString();
+  }
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -273,6 +303,15 @@ export default function GeneratePage() {
           </nav>
         </div>
         <div className="composer-topbar-right">
+          {credits && (
+            <Link
+              href="/tasks"
+              className="composer-topbar-nav-btn"
+              title="查看点数流水"
+            >
+              可用 {formatCredit(credits.available)} 点 ｜ 冻结 {formatCredit(credits.frozen_credits)} 点 ｜ 本月已用 {formatCredit(credits.monthly_used)} 点
+            </Link>
+          )}
           <button
             className="composer-topbar-icon-btn"
             onClick={() => setShowDebug(!showDebug)}

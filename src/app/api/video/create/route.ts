@@ -18,6 +18,7 @@ import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { buildContentArray } from '@/lib/provider/jimeng';
+import { getSession } from '@/lib/auth/session';
 import type { CreateVideoInput, GenerationMode } from '@/types';
 import type { AssetMapping } from '@/lib/assets/collection';
 
@@ -476,6 +477,14 @@ async function resolveReferenceImageUrls(urls: string[]): Promise<{
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized', message: '请先登录后再生成视频' },
+        { status: 401 },
+      );
+    }
+
     // ---- API Key Check ----
     if (!isApiKeyConfigured()) {
       return NextResponse.json(

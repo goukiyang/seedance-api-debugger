@@ -10,6 +10,7 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
+    "seed:admin": "tsx scripts/seed-admin.ts",
     "test:api": "tsx scripts/test-seedance-api.ts"
   },
   "dependencies": {

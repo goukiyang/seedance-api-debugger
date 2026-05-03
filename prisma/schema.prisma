@@ -61,6 +61,86 @@ model VideoTask {
 }
 
 // ============================================================================
+// 用户与权限系统
+// ============================================================================
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  email        String   @unique
+  password_hash String
+  role         String   @default("user") // admin | user
+  status       String   @default("active") // active | disabled
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  last_login_at DateTime?
+
+  credit_account CreditAccount?
+  credit_ledger   CreditLedger[]
+  operation_logs  OperationLog[]
+
+  @@index([username])
+  @@index([email])
+  @@index([status])
+}
+
+// 点数账户
+model CreditAccount {
+  id             String   @id @default(cuid())
+  user_id        String   @unique
+  balance        Float    @default(0)
+  frozen_credits Float    @default(0)
+  monthly_used   Float    @default(0)
+  total_used     Float    @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+}
+
+// 点数流水
+model CreditLedger {
+  id            String   @id @default(cuid())
+  user_id       String
+  type          String   // admin_grant | admin_deduct | system_adjust | task_freeze | task_success_deduct | task_failed_refund | manual_refund | periodic_grant
+  amount        Float
+  balance_before Float
+  balance_after  Float
+  frozen_before Float?
+  frozen_after  Float?
+  related_task_id String?
+  operator_id   String?
+  reason        String?
+  created_at    DateTime @default(now())
+
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([type])
+  @@index([created_at])
+}
+
+// 操作日志
+model OperationLog {
+  id          String   @id @default(cuid())
+  operator_id String
+  action      String
+  target_type String?
+  target_id   String?
+  detail      String?
+  created_at  DateTime @default(now())
+
+  operator    User     @relation(fields: [operator_id], references: [id], onDelete: Cascade)
+
+  @@index([operator_id])
+  @@index([target_type, target_id])
+  @@index([created_at])
+}
+
+// ============================================================================
 // Seedance 资产管理（官方 asset 持久化）
 // ============================================================================
 
