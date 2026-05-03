@@ -15,6 +15,19 @@ export interface SessionUser {
 export const SESSION_COOKIE = 'session';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
 
+function signSessionValue(value: string): string {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(value).digest('base64');
+}
+
+function isValidSignature(value: string, signature: string): boolean {
+  const providedBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(signSessionValue(value));
+  return (
+    providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  );
+}
+
 export async function getSession(): Promise<SessionUser | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
@@ -23,15 +36,13 @@ export async function getSession(): Promise<SessionUser | null> {
   try {
     const parts = token.split('.');
     if (parts.length !== 2) return null;
-    const [userId, sig] = parts;
-    const payload = Buffer.from(userId, 'base64').toString('utf8');
-    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
-    const providedBuffer = Buffer.from(sig);
-    const expectedBuffer = Buffer.from(expected);
-    if (
-      providedBuffer.length !== expectedBuffer.length ||
-      !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
-    ) {
+    const [encodedUserId, sig] = parts;
+    const payload = Buffer.from(encodedUserId, 'base64').toString('utf8');
+    if (!payload) return null;
+
+    const isCurrentToken = isValidSignature(encodedUserId, sig);
+    const isLegacyToken = isValidSignature(payload, sig);
+    if (!isCurrentToken && !isLegacyToken) {
       return null;
     }
 
@@ -53,7 +64,7 @@ export async function getSession(): Promise<SessionUser | null> {
 
 export async function createSession(userId: string): Promise<string> {
   const payload = Buffer.from(userId).toString('base64');
-  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
+  const sig = signSessionValue(payload);
   return `${payload}.${sig}`;
 }
 
