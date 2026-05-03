@@ -38,3 +38,7 @@ test-api.sh
 # Database
 *.db
 prisma/*.db
+
+# Runtime uploads (keep directory structure only)
+public/uploads/*
+!public/uploads/.gitkeep
