@@ -4,6 +4,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
+import { guessFileNameFromUrl } from '@/lib/resources';
 
 // ============================================================================
 // Workspace 管理
@@ -158,4 +159,50 @@ export async function clearWorkspace(workspaceId: string) {
   await prisma.workspaceAsset.deleteMany({
     where: { workspace_id: workspaceId },
   });
+}
+
+function guessMimeTypeFromUrl(url: string): string {
+  const normalized = url.toLowerCase();
+  if (normalized.endsWith('.png')) return 'image/png';
+  if (normalized.endsWith('.webp')) return 'image/webp';
+  if (normalized.endsWith('.gif')) return 'image/gif';
+  if (normalized.endsWith('.bmp')) return 'image/bmp';
+  return 'image/jpeg';
+}
+
+export async function findOrCreateExternalImageAsset(params: {
+  url: string;
+  name: string;
+  thumbnailUrl?: string | null;
+}): Promise<string> {
+  const existing = await prisma.asset.findFirst({
+    where: {
+      owner_id: 'default-user',
+      type: 'image',
+      original_url: params.url,
+    },
+    orderBy: { created_at: 'desc' },
+  });
+
+  if (existing) {
+    return existing.id;
+  }
+
+  const asset = await prisma.asset.create({
+    data: {
+      id: uuidv4(),
+      owner_id: 'default-user',
+      type: 'image',
+      original_url: params.url,
+      thumbnail_url: params.thumbnailUrl ?? params.url,
+      file_name: guessFileNameFromUrl(params.url, params.name),
+      mime_type: guessMimeTypeFromUrl(params.url),
+      width: null,
+      height: null,
+      file_size: 0,
+      hash: null,
+    },
+  });
+
+  return asset.id;
 }

@@ -313,7 +313,7 @@ export default function GeneratePage() {
           <span className="composer-topbar-logo">Seedance 2.0</span>
           <nav className="composer-topbar-nav">
             <button className="composer-topbar-nav-btn active">创建视频</button>
-            <button className="composer-topbar-nav-btn">素材库</button>
+            <Link href="/resources" className="composer-topbar-nav-btn">素材库</Link>
             <Link href="/tasks" className="composer-topbar-nav-btn">历史任务</Link>
             <Link href="/config" className="composer-topbar-nav-btn">设置</Link>
           </nav>

@@ -18,6 +18,7 @@ import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
+import { DEFAULT_GENERATION_DRAFT, GENERATION_DRAFT_STORAGE_KEY, sanitizeGenerationDraft } from '@/lib/generation-draft';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
@@ -85,6 +86,43 @@ export function GenerationComposer({
   const [generateAudio, setGenerateAudio] = useState(false);
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(GENERATION_DRAFT_STORAGE_KEY);
+      const savedDraft = raw ? sanitizeGenerationDraft(JSON.parse(raw)) : DEFAULT_GENERATION_DRAFT;
+      setGenerationMode(savedDraft.generationMode);
+      setPrompt(savedDraft.prompt);
+      setRatio(savedDraft.ratio);
+      setDuration(savedDraft.duration);
+      setResolution(savedDraft.resolution);
+      setSeed(savedDraft.seed);
+      setGenerateAudio(savedDraft.generateAudio);
+      setReturnLastFrame(savedDraft.returnLastFrame);
+      setWatermark(savedDraft.watermark);
+    } catch {
+      // ignore invalid stored drafts
+    } finally {
+      setDraftHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+
+    sessionStorage.setItem(GENERATION_DRAFT_STORAGE_KEY, JSON.stringify({
+      prompt,
+      generationMode,
+      ratio,
+      duration,
+      resolution,
+      seed,
+      generateAudio,
+      returnLastFrame,
+      watermark,
+    }));
+  }, [draftHydrated, duration, generateAudio, generationMode, prompt, ratio, resolution, returnLastFrame, seed, watermark]);
 
   // ============================================================================
   // Validation
@@ -179,6 +217,19 @@ export function GenerationComposer({
   const handlePreview = useCallback((url: string) => {
     setPreviewUrl(url);
   }, []);
+
+  const handleResetComposer = useCallback(() => {
+    setGenerationMode(DEFAULT_GENERATION_MODE);
+    setPrompt('');
+    setRatio(DEFAULT_RATIO);
+    setDuration(DEFAULT_DURATION);
+    setResolution(DEFAULT_RESOLUTION);
+    setSeed(-1);
+    setGenerateAudio(false);
+    setReturnLastFrame(false);
+    setWatermark(false);
+    onReset();
+  }, [onReset]);
 
   // ============================================================================
   // Render
@@ -275,7 +326,7 @@ export function GenerationComposer({
 
             <div className="composer-result-actions">
               <a href={`/tasks/${result.id}`} className="composer-result-link">查看详情 →</a>
-              <button type="button" className="composer-result-reset" onClick={onReset}>
+              <button type="button" className="composer-result-reset" onClick={handleResetComposer}>
                 新建任务
               </button>
             </div>
