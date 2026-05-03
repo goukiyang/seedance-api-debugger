@@ -98,6 +98,7 @@ model User {
   credit_ledger   CreditLedger[]
   operation_logs  OperationLog[]
   tasks           VideoTask[]
+  resource_access SharedResourceUser[]
 
   @@index([username])
   @@index([email])
@@ -334,4 +335,58 @@ model GenerationTaskSnapshot {
   created_at            DateTime @default(now())
 
   workspace     Workspace?  @relation(fields: [workspace_id], references: [id])
+}
+
+model SharedResource {
+  id               String               @id @default(cuid())
+  name             String
+  resource_type    String
+  preview_url      String?
+  description      String?
+  visibility_scope String               @default("private") // private | specific_users | all_users | admin_only
+  status           String               @default("active") // active | disabled
+  disabled_at      DateTime?
+  created_at       DateTime             @default(now())
+  updated_at       DateTime             @updatedAt
+
+  scoped_users     SharedResourceUser[]
+
+  @@index([visibility_scope, status])
+  @@index([resource_type, status])
+  @@index([created_at])
+}
+
+model SharedResourceUser {
+  id           String         @id @default(cuid())
+  resource_id  String
+  user_id      String
+  created_at   DateTime       @default(now())
+
+  resource     SharedResource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([resource_id, user_id])
+  @@index([user_id])
+}
+
+model PricingRule {
+  id                     String   @id @default(cuid())
+  rule_key               String
+  name                   String
+  model                  String
+  resolution             String
+  is_fast                Boolean  @default(false)
+  base_cost_per_second   Float
+  internal_multiplier    Float    @default(1)
+  final_cost_per_second  Float
+  version                Int      @default(1)
+  status                 String   @default("active") // active | disabled
+  effective_at           DateTime @default(now())
+  supersedes_rule_id     String?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+
+  @@unique([rule_key, version])
+  @@index([model, resolution, is_fast, status, effective_at])
+  @@index([status, effective_at])
 }

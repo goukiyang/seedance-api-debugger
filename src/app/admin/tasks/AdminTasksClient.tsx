@@ -329,6 +329,8 @@ export default function AdminTasksClient({ currentUser }: { currentUser: Session
           <div>{currentUser.name} · {currentUser.email}</div>
           <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <Link href="/admin/users" style={{ ...buttonStyle, textDecoration: 'none' }}>用户与点数</Link>
+            <Link href="/admin/resources" style={{ ...buttonStyle, textDecoration: 'none', background: '#334155' }}>资源</Link>
+            <Link href="/admin/pricing" style={{ ...buttonStyle, textDecoration: 'none', background: '#334155' }}>计费规则</Link>
           </div>
         </div>
       </header>

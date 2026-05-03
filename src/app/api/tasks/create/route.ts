@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
-import { calculateEstimatedCost } from '@/lib/pricing';
+import { getPricingSnapshot } from '@/lib/pricing';
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
@@ -18,6 +18,7 @@ const VALID_GENERATION_MODES: GenerationMode[] = [
 const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p'];
+const DEFAULT_MODEL = 'dreamina-seedance-2-0-260128';
 
 export async function POST(request: NextRequest) {
   let user;
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
 
   // --- Pricing ---
-  const pricing = calculateEstimatedCost(resolution, duration);
+  const pricing = await getPricingSnapshot({ model: DEFAULT_MODEL, resolution, duration, isFast: false });
   const estimatedCost = pricing.estimatedCost;
 
   // --- Idempotency ---
@@ -176,7 +177,7 @@ export async function POST(request: NextRequest) {
       const task = await tx.videoTask.create({
         data: {
           provider: 'seedance',
-          model: 'dreamina-seedance-2-0-260128',
+          model: DEFAULT_MODEL,
           generation_mode: generationMode,
           prompt: body.prompt.trim(),
           ratio,

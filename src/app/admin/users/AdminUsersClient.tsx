@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { SessionUser } from '@/lib/auth/session';
 
@@ -217,8 +218,13 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13 }}>管理员后台</div>
           <h1 style={{ margin: '4px 0 0', fontSize: 26 }}>用户与点数管理</h1>
         </div>
-        <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
-          {currentUser.name} · {currentUser.email}
+        <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, textAlign: 'right' }}>
+          <div>{currentUser.name} · {currentUser.email}</div>
+          <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <Link href="/admin/tasks" style={{ ...buttonStyle, textDecoration: 'none' }}>任务</Link>
+            <Link href="/admin/resources" style={{ ...buttonStyle, textDecoration: 'none', background: '#334155' }}>资源</Link>
+            <Link href="/admin/pricing" style={{ ...buttonStyle, textDecoration: 'none', background: '#334155' }}>计费规则</Link>
+          </div>
         </div>
       </header>
 

@@ -120,8 +120,22 @@ export function GenerationComposer({
 
   const canSubmit = blockingError === null && !isSubmitting;
 
-  const estimatedPoints = useMemo(() => {
-    return calculateEstimatedCostClient(resolution, duration);
+  const [estimatedPoints, setEstimatedPoints] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    calculateEstimatedCostClient(resolution, duration)
+      .then((value) => {
+        if (!cancelled) setEstimatedPoints(value);
+      })
+      .catch(() => {
+        if (!cancelled) setEstimatedPoints(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [resolution, duration]);
 
   // 已引用图号

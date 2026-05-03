@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
-import { calculateEstimatedCost } from '@/lib/pricing';
+import { getPricingSnapshot } from '@/lib/pricing';
 import type { VideoResolution, VideoDuration } from '@/types';
+
+const DEFAULT_MODEL = 'dreamina-seedance-2-0-260128';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,7 +16,7 @@ export async function GET(request: NextRequest) {
   const resolution = (searchParams.get('resolution') || '720p') as VideoResolution;
   const duration = parseInt(searchParams.get('duration') || '5', 10) as VideoDuration;
 
-  const pricing = calculateEstimatedCost(resolution, duration);
+  const pricing = await getPricingSnapshot({ model: DEFAULT_MODEL, resolution, duration, isFast: false });
 
   return NextResponse.json(pricing);
 }
