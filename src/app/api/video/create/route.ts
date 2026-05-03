@@ -484,6 +484,12 @@ export async function POST(request: NextRequest) {
         { status: 401 },
       );
     }
+    if (user.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Forbidden', message: '该接口仅管理员可用，请使用任务创建接口生成视频' },
+        { status: 403 },
+      );
+    }
 
     // ---- API Key Check ----
     if (!isApiKeyConfigured()) {

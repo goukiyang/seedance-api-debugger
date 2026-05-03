@@ -1,12 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { createVideoTask, isApiKeyConfigured } from '@/lib/provider/jimeng';
+import { getSession } from '@/lib/auth/session';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized', message: '请先登录后再重试视频任务' },
+        { status: 401 },
+      );
+    }
+    if (user.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Forbidden', message: '该接口仅管理员可用，请使用任务创建接口重新提交' },
+        { status: 403 },
+      );
+    }
+
     const originalTaskId = params.id;
 
     if (!isApiKeyConfigured()) {

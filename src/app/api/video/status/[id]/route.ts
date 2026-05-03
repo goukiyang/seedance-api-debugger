@@ -9,6 +9,10 @@ export async function GET(
 ) {
   try {
     const taskId = params.id;
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
+    }
 
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
@@ -21,13 +25,11 @@ export async function GET(
       );
     }
 
-    // --- Auth: user-bound tasks require login + ownership (admin can see all) ---
-    if (task.user_id) {
-      const user = await getSession();
-      if (!user) {
-        return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
+    if (user.role !== 'admin') {
+      if (!task.user_id) {
+        return NextResponse.json({ error: '权限不足', message: '无权查看此任务' }, { status: 403 });
       }
-      if (user.role !== 'admin' && user.id !== task.user_id) {
+      if (user.id !== task.user_id) {
         return NextResponse.json({ error: '权限不足', message: '无权查看此任务' }, { status: 403 });
       }
     }
