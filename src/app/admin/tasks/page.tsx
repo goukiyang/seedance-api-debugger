@@ -1,0 +1,11 @@
+import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth/session';
+import AdminTasksClient from './AdminTasksClient';
+
+export default async function AdminTasksPage() {
+  const user = await getSession();
+  if (!user) redirect('/login');
+  if (user.role !== 'admin') redirect('/generate');
+
+  return <AdminTasksClient currentUser={user} />;
+}
