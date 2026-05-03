@@ -25,5 +25,36 @@ export async function GET(request: NextRequest) {
     prisma.creditLedger.count({ where: { user_id: user.id } }),
   ]);
 
-  return NextResponse.json({ records, total, page, page_size: pageSize });
+  const relatedTaskIds = Array.from(
+    new Set(records.map((record) => record.related_task_id).filter((taskId): taskId is string => Boolean(taskId))),
+  );
+
+  const relatedTasks = relatedTaskIds.length > 0
+    ? await prisma.videoTask.findMany({
+        where: {
+          id: { in: relatedTaskIds },
+          user_id: user.id,
+        },
+        select: {
+          id: true,
+          prompt: true,
+          local_status: true,
+          model: true,
+          created_at: true,
+        },
+      })
+    : [];
+
+  const taskMap = new Map(relatedTasks.map((task) => [task.id, task]));
+
+  return NextResponse.json({
+    records: records.map((record) => ({
+      ...record,
+      related_task: record.related_task_id ? taskMap.get(record.related_task_id) ?? null : null,
+    })),
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: Math.ceil(total / pageSize),
+  });
 }

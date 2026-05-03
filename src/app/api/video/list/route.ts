@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
-    const where = user.role === 'admin' ? {} : { user_id: user.id };
+    const where = { user_id: user.id };
 
     const total = await prisma.videoTask.count({ where });
 
@@ -29,12 +29,21 @@ export async function GET(request: NextRequest) {
         id: true,
         provider_task_id: true,
         prompt: true,
+        model: true,
         generation_mode: true,
         local_status: true,
+        resolution: true,
+        duration: true,
+        estimated_cost: true,
+        actual_cost: true,
+        frozen_cost: true,
+        refund_amount: true,
+        pricing_snapshot: true,
+        result_video_url: true,
+        error_message: true,
         local_video_path: true,
         created_at: true,
         completed_at: true,
-        user_id: true,
       },
     });
 
