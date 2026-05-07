@@ -5,6 +5,23 @@ export interface NavItem {
   prefixMatch?: boolean;
 }
 
+export const shellRoutes = [
+  '/dashboard',
+  '/generate/quick',
+  '/videos',
+  '/collections',
+  '/templates',
+  '/points',
+  '/help',
+  '/admin',
+  '/admin/points',
+  '/admin/tasks',
+  '/admin/exceptions',
+  '/admin/resources',
+  '/admin/pricing',
+  '/admin/feedback',
+] as const;
+
 export const userNavItems: NavItem[] = [
   { label: '控制台', href: '/dashboard' },
   { label: '快速生成', href: '/generate/quick' },
@@ -34,4 +51,8 @@ export function isNavItemActive(pathname: string, item: NavItem) {
   return candidates.some((candidate) => (
     pathname === candidate || (item.prefixMatch ? pathname.startsWith(`${candidate}/`) : false)
   ));
+}
+
+export function shouldUseNavigationShell(pathname: string) {
+  return shellRoutes.includes(pathname as (typeof shellRoutes)[number]);
 }

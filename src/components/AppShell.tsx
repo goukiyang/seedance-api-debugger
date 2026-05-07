@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import TopNav from './TopNav';
 import SideNav from './SideNav';
+import { shouldUseNavigationShell } from '@/lib/navigation';
 
 interface SessionUserSummary {
   name: string;
@@ -15,16 +16,12 @@ interface CreditSummary {
   available: number;
 }
 
-const SHELL_HIDDEN_PATHS = ['/login'];
-
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [user, setUser] = useState<SessionUserSummary | null>(null);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
 
-  const showShell = useMemo(() => (
-    !SHELL_HIDDEN_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
-  ), [pathname]);
+  const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
 
   useEffect(() => {
     if (!showShell) return;
