@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import TopNav from './TopNav';
 import SideNav from './SideNav';
+import FeedbackWidget from './FeedbackWidget';
 import { shouldUseNavigationShell } from '@/lib/navigation';
 
 interface SessionUserSummary {
@@ -73,7 +74,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [showShell, user, pathname]);
 
   if (!showShell) {
-    return <>{children}</>;
+    return (
+      <>
+        {children}
+        <FeedbackWidget />
+      </>
+    );
   }
 
   return (
@@ -85,6 +91,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      <FeedbackWidget />
     </div>
   );
 }

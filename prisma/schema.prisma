@@ -98,10 +98,35 @@ model User {
   credit_ledger   CreditLedger[]
   operation_logs  OperationLog[]
   tasks           VideoTask[]
+  feedbacks       Feedback[]
 
   @@index([username])
   @@index([email])
   @@index([status])
+}
+
+model Feedback {
+  id              String    @id @default(cuid())
+  user_id         String?
+  task_id         String?
+  content         String
+  image_urls_json String?
+  page_url        String?
+  pathname        String?
+  user_agent      String?
+  status          String    @default("new") // new | reviewed | archived
+  admin_note      String?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  archived_at     DateTime?
+  archived_by     String?
+
+  user            User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([status])
+  @@index([pathname])
+  @@index([created_at])
 }
 
 // 点数账户
