@@ -3,8 +3,8 @@ import './globals.css';
 import ClientLayout from './ClientLayout';
 
 export const metadata: Metadata = {
-  title: '视频生成 API 调试器',
-  description: '即梦/Seedance 视频生成 API 调试工具',
+  title: 'Seedance 2.0 内部平台',
+  description: 'Seedance 2.0 统一工作台，覆盖生成、任务、素材与后台管理导航。',
 };
 
 export default function RootLayout({

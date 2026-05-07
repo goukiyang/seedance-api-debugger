@@ -11,12 +11,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get('next');
+
     // 如果已登录直接跳转
     fetch('/api/auth/me')
       .then(r => r.json())
       .then(d => {
         if (d.user) {
-          router.replace(d.user.role === 'admin' ? '/admin/users' : '/generate');
+          router.replace(next || '/dashboard');
         }
       })
       .catch(() => {});
@@ -41,12 +43,8 @@ export default function LoginPage() {
         return;
       }
 
-      // 登录成功，跳转
-      if (data.user.role === 'admin') {
-        router.replace('/admin/users');
-      } else {
-        router.replace('/generate');
-      }
+      const next = new URLSearchParams(window.location.search).get('next');
+      router.replace(next || '/dashboard');
     } catch {
       setError('网络错误，请重试');
       setLoading(false);
