@@ -22,6 +22,11 @@ export const shellRoutes = [
   '/admin/feedback',
 ] as const;
 
+const shellRoutePrefixes = [
+  '/tasks',
+  '/admin/users',
+] as const;
+
 export const userNavItems: NavItem[] = [
   { label: '控制台', href: '/dashboard' },
   { label: '快速生成', href: '/generate/quick' },
@@ -54,5 +59,8 @@ export function isNavItemActive(pathname: string, item: NavItem) {
 }
 
 export function shouldUseNavigationShell(pathname: string) {
-  return shellRoutes.includes(pathname as (typeof shellRoutes)[number]);
+  return (
+    shellRoutes.includes(pathname as (typeof shellRoutes)[number]) ||
+    shellRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+  );
 }

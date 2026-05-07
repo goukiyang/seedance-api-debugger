@@ -310,12 +310,14 @@ export default function GeneratePage() {
       {/* ===== 顶部导航栏 ===== */}
       <header className="composer-topbar">
         <div className="composer-topbar-left">
-          <span className="composer-topbar-logo">Seedance 2.0</span>
+          <Link href="/dashboard" className="composer-topbar-logo">Seedance 2.0</Link>
           <nav className="composer-topbar-nav">
-            <button className="composer-topbar-nav-btn active">创建视频</button>
-            <button className="composer-topbar-nav-btn">素材库</button>
-            <Link href="/tasks" className="composer-topbar-nav-btn">历史任务</Link>
-            <Link href="/config" className="composer-topbar-nav-btn">设置</Link>
+            <Link href="/dashboard" className="composer-topbar-nav-btn">控制台</Link>
+            <Link href="/generate/quick" className="composer-topbar-nav-btn">快速生成</Link>
+            <Link href="/generate" className="composer-topbar-nav-btn active">生成视频</Link>
+            <Link href="/collections" className="composer-topbar-nav-btn">素材分组</Link>
+            <Link href="/tasks" className="composer-topbar-nav-btn">我的任务</Link>
+            <Link href="/points" className="composer-topbar-nav-btn">积分流水</Link>
           </nav>
         </div>
         <div className="composer-topbar-right">

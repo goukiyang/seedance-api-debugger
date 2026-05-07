@@ -23,9 +23,10 @@ export async function getSession(): Promise<SessionUser | null> {
   try {
     const parts = token.split('.');
     if (parts.length !== 2) return null;
-    const [userId, sig] = parts;
-    const payload = Buffer.from(userId, 'base64').toString('utf8');
-    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
+    const [userIdB64, sig] = parts;
+    // 注意：createSession 签名时 update 的是 base64 字符串本身（payload），
+    // 因此这里也必须用 userIdB64 做 HMAC，不能先解码。
+    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(userIdB64).digest('base64');
     const providedBuffer = Buffer.from(sig);
     const expectedBuffer = Buffer.from(expected);
     if (
@@ -35,8 +36,9 @@ export async function getSession(): Promise<SessionUser | null> {
       return null;
     }
 
+    const userId = Buffer.from(userIdB64, 'base64').toString('utf8');
     const user = await prisma.user.findUnique({
-      where: { id: payload },
+      where: { id: userId },
       select: {
         id: true, name: true, username: true, email: true,
         role: true, status: true,
