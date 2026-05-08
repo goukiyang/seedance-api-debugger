@@ -53,6 +53,11 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function feedbackExportFilename(date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `feedback_export_${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}.pdf`;
+}
+
 export default function AdminFeedbackClient({ currentUserName }: { currentUserName: string }) {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -159,19 +164,19 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
 
   const exportBatch = async () => {
     if (!selectedIds.length) {
-      setError('请选择反馈');
+      setError('请先选择要导出的反馈');
       return;
     }
     const response = await fetch('/api/admin/feedback/export-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: selectedIds }),
+      body: JSON.stringify({ feedbackIds: selectedIds }),
     });
     if (!response.ok) {
-      setError('批量 PDF 下载失败');
+      setError('导出 PDF 失败');
       return;
     }
-    downloadBlob(await response.blob(), 'feedback-batch.pdf');
+    downloadBlob(await response.blob(), feedbackExportFilename());
   };
 
   return (
@@ -216,7 +221,19 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
 
       <section style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
         <button type="button" onClick={() => archive(selectedIds)} style={secondaryButtonStyle}>批量归档</button>
-        <button type="button" onClick={exportBatch} style={secondaryButtonStyle}>批量下载 PDF</button>
+        <button
+          type="button"
+          onClick={exportBatch}
+          disabled={!selectedIds.length}
+          title={selectedIds.length ? '将勾选反馈合并导出为一个 PDF' : '请先选择要导出的反馈'}
+          style={{
+            ...secondaryButtonStyle,
+            opacity: selectedIds.length ? 1 : 0.45,
+            cursor: selectedIds.length ? 'pointer' : 'not-allowed',
+          }}
+        >
+          导出 PDF
+        </button>
         <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>已选择 {selectedIds.length} 条</span>
       </section>
 
@@ -374,4 +391,3 @@ const thStyle: React.CSSProperties = { textAlign: 'left', padding: 12, whiteSpac
 const tdStyle: React.CSSProperties = { padding: 12, verticalAlign: 'top', color: 'rgba(255,255,255,0.82)' };
 const dtStyle: React.CSSProperties = { color: 'rgba(255,255,255,0.52)' };
 const ddStyle: React.CSSProperties = { margin: 0, color: 'rgba(255,255,255,0.88)', wordBreak: 'break-word' };
-
