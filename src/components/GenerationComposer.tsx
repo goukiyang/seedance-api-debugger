@@ -22,7 +22,7 @@ import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
 const DEFAULT_DURATION: VideoDuration = 5;
-const DEFAULT_RESOLUTION: VideoResolution = '480p';
+const DEFAULT_RESOLUTION: VideoResolution = '720p';
 const MAX_REFS = 9;
 
 interface PolledTask {
@@ -52,9 +52,14 @@ interface Props {
   submitError: string | null;
   submitErrorDebug?: object | null;
   isSubmitting: boolean;
-  result: { id: string; provider_task_id: string; prompt_rendered?: string } | null;
+  result: { id: string; provider_task_id?: string; prompt_rendered?: string; frozen_cost?: number } | null;
   polledResult: PolledTask | null;
   isPolling: boolean;
+  credits: {
+    available: number;
+    frozen_credits: number;
+    monthly_used: number;
+  } | null;
   onReset: () => void;
 }
 
@@ -70,6 +75,7 @@ export function GenerationComposer({
   result,
   polledResult,
   isPolling,
+  credits,
   onReset,
 }: Props) {
   const workspace = useWorkspace();
@@ -118,11 +124,28 @@ export function GenerationComposer({
     return null;
   }, [prompt, isSubmitting, workspace.uploadStatuses, workspace.assets.length, generationMode, validation]);
 
-  const canSubmit = blockingError === null && !isSubmitting;
-
-  const estimatedPoints = useMemo(() => {
+  const pricing = useMemo(() => {
     return calculateEstimatedCostClient(resolution, duration);
   }, [resolution, duration]);
+
+  const estimatedPoints = pricing?.estimatedCost ?? null;
+  const hasPricingRule = pricing !== null;
+  const hasUploading = Object.values(workspace.uploadStatuses).some((s) => s === 'uploading');
+  const availableCredits = credits?.available ?? 0;
+  const insufficientCredits = estimatedPoints !== null && credits !== null && availableCredits < estimatedPoints;
+  const estimatedRemaining = estimatedPoints !== null && credits !== null ? availableCredits - estimatedPoints : null;
+
+  const canSubmit = blockingError === null && !isSubmitting && hasPricingRule && credits !== null && !insufficientCredits;
+
+  const submitLabel = useMemo(() => {
+    if (isSubmitting) return '正在创建任务';
+    if (!prompt.trim()) return '输入提示词后生成';
+    if (hasUploading) return '等待素材上传完成';
+    if (blockingError) return '请完善参数';
+    if (!hasPricingRule) return '当前参数暂无计费规则';
+    if (insufficientCredits && estimatedPoints !== null) return `点数不足，需 ${estimatedPoints} 点`;
+    return '确认生成并冻结点数';
+  }, [isSubmitting, prompt, hasUploading, blockingError, hasPricingRule, insufficientCredits, estimatedPoints]);
 
   // 已引用图号
   const usedRefs = useMemo(() => {
@@ -173,116 +196,144 @@ export function GenerationComposer({
   return (
     <>
       <div className="generation-composer">
-        {/* 图集工具条 */}
-        <ImageSetToolbar
-          collections={collections}
-          onLoad={handleLoadCollection}
-          onSave={handleSaveCollection}
-          onNew={handleNewCollection}
-          loading={workspace.loading}
-        />
+        <div className="composer-workbench-main">
+          {/* 图集工具条 */}
+          <ImageSetToolbar
+            collections={collections}
+            onLoad={handleLoadCollection}
+            onSave={handleSaveCollection}
+            onNew={handleNewCollection}
+            loading={workspace.loading}
+          />
 
-        {/* 缩略图行 */}
-        <ReferenceStrip
-          assets={workspace.assets}
-          uploadStatuses={workspace.uploadStatuses}
-          onUpload={workspace.uploadAsset}
-          onRemove={handleRemove}
-          onReorder={handleReorder}
-          onPreview={handlePreview}
-          generationMode={generationMode}
-          loading={workspace.loading}
-        />
+          {/* 缩略图行 */}
+          <ReferenceStrip
+            assets={workspace.assets}
+            uploadStatuses={workspace.uploadStatuses}
+            onUpload={workspace.uploadAsset}
+            onRemove={handleRemove}
+            onReorder={handleReorder}
+            onPreview={handlePreview}
+            generationMode={generationMode}
+            loading={workspace.loading}
+          />
 
-        {/* 提示词输入 */}
-        <PromptEditor
-          value={prompt}
-          onChange={setPrompt}
-        />
+          {/* 提示词输入 */}
+          <PromptEditor
+            value={prompt}
+            onChange={setPrompt}
+          />
 
-        {/* 状态行 */}
-        <ComposerStatusLine
-          blockingError={blockingError}
-          usedRefs={usedRefs}
-          hasPrompt={prompt.trim().length > 0}
-          hasAssets={workspace.assets.length > 0}
-          hasBlockingUpload={Object.values(workspace.uploadStatuses).some((s) => s === 'uploading' || s === 'failed')}
-        />
+          {/* 状态行 */}
+          <ComposerStatusLine
+            blockingError={blockingError}
+            usedRefs={usedRefs}
+            hasPrompt={prompt.trim().length > 0}
+            hasAssets={workspace.assets.length > 0}
+            hasBlockingUpload={Object.values(workspace.uploadStatuses).some((s) => s === 'uploading' || s === 'failed')}
+          />
 
-        {/* 错误 */}
-        {submitError && (
-          <div className="composer-error-wrap">
-            <ErrorTranslator
-              error={submitError}
-              rawError={submitError}
-              debugInfo={submitErrorDebug as Parameters<typeof ErrorTranslator>[0]['debugInfo']}
-              onRetry={() => {}}
-              onCopy={() => { navigator.clipboard.writeText(submitError); }}
-            />
-          </div>
-        )}
-
-        {/* 结果 */}
-        {result && (
-          <div className="composer-result">
-            <div className="composer-result-info">
-              <span className="composer-result-label">任务已创建</span>
-              <span className="composer-result-id">{result.id.slice(0, 8)}...</span>
+          {/* 错误 */}
+          {submitError && (
+            <div className="composer-error-wrap">
+              <ErrorTranslator
+                error={submitError}
+                rawError={submitError}
+                debugInfo={submitErrorDebug as Parameters<typeof ErrorTranslator>[0]['debugInfo']}
+                onRetry={() => {}}
+                onCopy={() => { navigator.clipboard.writeText(submitError); }}
+              />
             </div>
+          )}
 
-            {isPolling && !polledResult && (
-              <div className="composer-polling-hint">正在查询结果...</div>
-            )}
-
-            {polledResult && polledResult.local_status === 'succeeded' && polledResult.result_video_url && (
-              <div className="composer-result-video">
-                <div className="composer-result-video-label">✅ 视频生成完成</div>
-                <video
-                  key={polledResult.result_video_url}
-                  controls
-                  playsInline
-                  style={{ width: '100%', maxHeight: 280, borderRadius: 8 }}
-                  src={polledResult.result_video_url}
-                />
+          {/* 结果 */}
+          {result && (
+            <div className="composer-result">
+              <div className="composer-result-info">
+                <span className="composer-result-label">任务已创建</span>
+                <span className="composer-result-id">已冻结 {result.frozen_cost ?? estimatedPoints ?? 0} 点，可在「我的记录」查看进度</span>
               </div>
-            )}
 
-            {polledResult && polledResult.local_status === 'failed' && (
-              <div className="composer-result-error">
-                ❌ 生成失败：{polledResult.error_message || '未知错误'}
+              {isPolling && !polledResult && (
+                <div className="composer-polling-hint">正在查询结果...</div>
+              )}
+
+              {polledResult && polledResult.local_status === 'succeeded' && polledResult.result_video_url && (
+                <div className="composer-result-video">
+                  <div className="composer-result-video-label">视频生成完成</div>
+                  <video
+                    key={polledResult.result_video_url}
+                    controls
+                    playsInline
+                    style={{ width: '100%', maxHeight: 280, borderRadius: 8 }}
+                    src={polledResult.result_video_url}
+                  />
+                </div>
+              )}
+
+              {polledResult && polledResult.local_status === 'failed' && (
+                <div className="composer-result-error">
+                  生成失败：{polledResult.error_message || '未知错误'}
+                </div>
+              )}
+
+              {polledResult && !['succeeded', 'failed', 'cancelled'].includes(polledResult.local_status) && (
+                <div className="composer-polling-hint">
+                  {isPolling ? '生成中，正在查询结果...' : '请手动查看任务详情'}
+                </div>
+              )}
+
+              <div className="composer-result-actions">
+                <a href={`/tasks/${result.id}`} className="composer-result-link">查看详情 →</a>
+                <button type="button" className="composer-result-reset" onClick={onReset}>
+                  新建任务
+                </button>
               </div>
-            )}
-
-            {polledResult && !['succeeded', 'failed', 'cancelled'].includes(polledResult.local_status) && (
-              <div className="composer-polling-hint">
-                ⏳ {isPolling ? '生成中，正在查询结果...' : '请手动查看任务详情'}
-              </div>
-            )}
-
-            <div className="composer-result-actions">
-              <a href={`/tasks/${result.id}`} className="composer-result-link">查看详情 →</a>
-              <button type="button" className="composer-result-reset" onClick={onReset}>
-                新建任务
-              </button>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* 参数栏 */}
-        <ComposerActionBar
-          generationMode={generationMode}
-          ratio={ratio}
-          duration={duration}
-          resolution={resolution}
-          points={estimatedPoints}
-          canSubmit={canSubmit}
-          isSubmitting={isSubmitting}
-          onSubmit={handleSubmit}
-          onModeChange={setGenerationMode}
-          onRatioChange={setRatio}
-          onDurationChange={setDuration}
-          onResolutionChange={setResolution}
-        />
+          {/* 参数栏 */}
+          <ComposerActionBar
+            generationMode={generationMode}
+            ratio={ratio}
+            duration={duration}
+            resolution={resolution}
+            points={estimatedPoints}
+            canSubmit={canSubmit}
+            isSubmitting={isSubmitting}
+            onSubmit={handleSubmit}
+            onModeChange={setGenerationMode}
+            onRatioChange={setRatio}
+            onDurationChange={setDuration}
+            onResolutionChange={setResolution}
+            showSubmit={false}
+          />
+        </div>
+
+        <aside className="composer-billing-panel">
+          <div className="composer-billing-header">
+            <span>本次预计消耗</span>
+            <strong>{estimatedPoints !== null ? `${estimatedPoints} 点` : '暂无规则'}</strong>
+          </div>
+          <div className="composer-billing-row">
+            <span>生成后预计剩余</span>
+            <strong>{estimatedRemaining !== null ? `${Math.max(0, Math.floor(estimatedRemaining))} 点` : '-'}</strong>
+          </div>
+          <div className="composer-billing-rule">
+            <span>计费规则</span>
+            <p>{pricing ? `${pricing.model} / ${pricing.resolution} / ${pricing.duration} 秒` : '当前参数暂无计费规则'}</p>
+            <p>{pricing ? pricing.formula : '请切换为 720p、5 秒后生成'}</p>
+          </div>
+          <div className="composer-billing-refund">失败返还：任务创建失败或生成失败会释放冻结点数。</div>
+          <button
+            type="button"
+            className="composer-freeze-submit-btn"
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+          >
+            {submitLabel}
+          </button>
+        </aside>
       </div>
 
       {/* 预览弹窗 */}

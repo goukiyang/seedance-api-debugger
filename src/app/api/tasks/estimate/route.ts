@@ -15,6 +15,12 @@ export async function GET(request: NextRequest) {
   const duration = parseInt(searchParams.get('duration') || '5', 10) as VideoDuration;
 
   const pricing = calculateEstimatedCost(resolution, duration);
+  if (!pricing) {
+    return NextResponse.json(
+      { error: 'NO_PRICING_RULE', message: '当前参数暂无计费规则' },
+      { status: 404 },
+    );
+  }
 
   return NextResponse.json(pricing);
 }

@@ -12,7 +12,7 @@ import { useComposerHeight } from '@/lib/context/ComposerHeightContext';
 
 interface CreateResponse {
   id: string;
-  provider_task_id: string;
+  provider_task_id?: string;
   status: string;
   created_at: string;
   prompt_rendered?: string;
@@ -26,6 +26,12 @@ interface TaskItem {
   prompt: string;
   local_status: string;
   created_at: string;
+  model?: string | null;
+  resolution?: string | null;
+  duration?: number | null;
+  estimated_cost?: number | null;
+  actual_cost?: number | null;
+  frozen_cost?: number | null;
 }
 
 interface PolledTask {
@@ -69,6 +75,7 @@ export default function GeneratePage() {
 
   // ---- Credit Summary ----
   const [credits, setCredits] = useState<CreditSummary | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // ============================================================================
   // Load collections
@@ -95,6 +102,12 @@ export default function GeneratePage() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = window.setTimeout(() => setToastMessage(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
 
   // ============================================================================
   // Load recent tasks
@@ -214,6 +227,22 @@ export default function GeneratePage() {
 
       setResult(data);
       setErrorDebug(null);
+      setToastMessage(`任务已创建，已冻结 ${data.frozen_cost ?? data.estimated_cost ?? 0} 点，可在「我的记录」查看进度`);
+      setRecentTasks((prev) => [
+        {
+          id: data.id,
+          prompt: params.prompt,
+          local_status: data.status || 'submitted',
+          created_at: data.created_at || new Date().toISOString(),
+          model: 'Seedance 2.0',
+          resolution: params.resolution,
+          duration: params.duration,
+          estimated_cost: data.estimated_cost ?? null,
+          frozen_cost: data.frozen_cost ?? data.estimated_cost ?? null,
+          actual_cost: null,
+        },
+        ...prev.filter((task) => task.id !== data.id),
+      ].slice(0, 6));
 
       // Refresh credit display after freeze
       fetch('/api/me/credits')
@@ -301,12 +330,33 @@ export default function GeneratePage() {
     return Math.max(0, Math.floor(value || 0)).toString();
   }
 
+  function getStatusLabel(status: string): string {
+    if (status === 'submitted' || status === 'running') return '生成中';
+    if (status === 'succeeded') return '已完成';
+    if (status === 'failed') return '失败';
+    if (status === 'cancelled') return '已取消';
+    return status;
+  }
+
+  function getCostLabel(task: TaskItem): string {
+    if ((task.actual_cost ?? 0) > 0) return `已消耗 ${formatCredit(task.actual_cost ?? 0)} 点`;
+    if ((task.frozen_cost ?? 0) > 0) return `已冻结 ${formatCredit(task.frozen_cost ?? 0)} 点`;
+    if ((task.estimated_cost ?? 0) > 0) return `预计 ${formatCredit(task.estimated_cost ?? 0)} 点`;
+    return '未计费';
+  }
+
   // ============================================================================
   // Render
   // ============================================================================
 
   return (
     <div className="composer-page">
+      {toastMessage && (
+        <div className="composer-toast" role="status">
+          {toastMessage}
+        </div>
+      )}
+
       {/* ===== 顶部导航栏 ===== */}
       <header className="composer-topbar">
         <div className="composer-topbar-left">
@@ -374,14 +424,20 @@ export default function GeneratePage() {
                   <div className="composer-task-card-prompt">
                     {truncatePrompt(task.prompt)}
                   </div>
+                  <div className="composer-task-card-details">
+                    <span>{task.model || 'Seedance 2.0'}</span>
+                    <span>{task.resolution || '-'}</span>
+                    <span>{task.duration ? `${task.duration} 秒` : '-'}</span>
+                  </div>
                   <div className="composer-task-card-meta">
                     <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
                     <span className={`composer-task-card-status ${task.local_status}`}>
-                      {task.local_status === 'submitted' ? '排队中' :
-                       task.local_status === 'running' ? '生成中' :
-                       task.local_status === 'succeeded' ? '已完成' :
-                       task.local_status === 'failed' ? '失败' : task.local_status}
+                      {getStatusLabel(task.local_status)}
                     </span>
+                  </div>
+                  <div className="composer-task-card-footer">
+                    <span>{getCostLabel(task)}</span>
+                    <span>查看详情</span>
                   </div>
                 </Link>
               ))}
@@ -403,6 +459,7 @@ export default function GeneratePage() {
         result={result}
         polledResult={polledResult}
         isPolling={isPolling}
+        credits={credits}
         onReset={handleReset}
       />
     </div>

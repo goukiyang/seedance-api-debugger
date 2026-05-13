@@ -10,9 +10,10 @@ interface Props {
   ratio: VideoRatio;
   duration: VideoDuration;
   resolution: VideoResolution;
-  points?: number;
+  points?: number | null;
   canSubmit: boolean;
   isSubmitting: boolean;
+  showSubmit?: boolean;
   onSubmit: () => void;
   onModeChange: (m: GenerationMode) => void;
   onRatioChange: (r: VideoRatio) => void;
@@ -28,6 +29,7 @@ export function ComposerActionBar({
   points = 45,
   canSubmit,
   isSubmitting,
+  showSubmit = true,
   onSubmit,
   onModeChange,
   onRatioChange,
@@ -154,25 +156,26 @@ export function ComposerActionBar({
         </div>
       </div>
 
-      {/* 右侧：点数 + 提交按钮 */}
-      <div className="composer-action-right">
-        <div className="composer-points">✦ {points}</div>
+      {showSubmit && (
+        <div className="composer-action-right">
+          <div className="composer-points">{points !== null ? `预计 ${points} 点` : '暂无计费规则'}</div>
 
-        <button
-          type="button"
-          className="composer-submit-btn"
-          disabled={!canSubmit || isSubmitting}
-          onClick={onSubmit}
-        >
-          {isSubmitting ? (
-            <span className="loading" style={{ width: 20, height: 20, borderWidth: 2 }} />
-          ) : (
-            <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-              <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
-        </button>
-      </div>
+          <button
+            type="button"
+            className="composer-submit-btn"
+            disabled={!canSubmit || isSubmitting}
+            onClick={onSubmit}
+          >
+            {isSubmitting ? (
+              <span className="loading" style={{ width: 20, height: 20, borderWidth: 2 }} />
+            ) : (
+              <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

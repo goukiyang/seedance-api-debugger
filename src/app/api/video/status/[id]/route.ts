@@ -68,7 +68,7 @@ export async function GET(
           updateData.completed_at = new Date();
         }
 
-        const updatedTask = await prisma.videoTask.update({
+        let updatedTask = await prisma.videoTask.update({
           where: { id: taskId },
           data: updateData,
         });
@@ -76,6 +76,7 @@ export async function GET(
         // --- Settlement: only for user-bound tasks with frozen_cost > 0 ---
         if (isTerminal && task.user_id && task.frozen_cost && task.frozen_cost > 0) {
           await settleTask(taskId, task.user_id, task.frozen_cost, statusResult.local_status);
+          updatedTask = await prisma.videoTask.findUniqueOrThrow({ where: { id: taskId } });
         }
 
         const ledgerEntries = await getTaskLedgerEntries(taskId, user.id);

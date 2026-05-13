@@ -19,11 +19,15 @@ export interface PricingSnapshot {
 export function calculateEstimatedCost(
   resolution: VideoResolution | string,
   duration: VideoDuration | number,
-): PricingSnapshot {
-  const baseCostPerSecond = resolution === '720p' ? 12 : 8;
+): PricingSnapshot | null {
+  if (resolution !== '720p' || duration !== 5) {
+    return null;
+  }
+
+  const baseCostPerSecond = 12;
   const internalMultiplier = 1.0;
   const finalCostPerSecond = baseCostPerSecond * internalMultiplier;
-  const estimatedCost = Math.ceil(finalCostPerSecond * (duration as number));
+  const estimatedCost = finalCostPerSecond * duration;
 
   return {
     model: 'Seedance 2.0',
@@ -33,7 +37,7 @@ export function calculateEstimatedCost(
     internalMultiplier,
     finalCostPerSecond,
     estimatedCost,
-    formula: `ceil(${baseCostPerSecond} × ${internalMultiplier} × ${duration}) = ${estimatedCost}`,
+    formula: `${baseCostPerSecond} × ${internalMultiplier} × ${duration} = ${estimatedCost}`,
     pricingRuleId: DEFAULT_PRICING_RULE_ID,
     pricingRuleVersion: DEFAULT_PRICING_RULE_VERSION,
   };

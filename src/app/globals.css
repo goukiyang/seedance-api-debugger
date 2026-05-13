@@ -1166,6 +1166,22 @@ a {
   color: white;
 }
 
+.composer-toast {
+  position: fixed;
+  top: 62px;
+  right: 20px;
+  z-index: 90;
+  max-width: min(420px, calc(100vw - 40px));
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 8px;
+  background: rgba(13, 30, 24, 0.96);
+  color: rgba(240, 253, 244, 0.95);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Composer 顶部导航栏 */
 .composer-topbar {
   height: 48px;
@@ -1304,7 +1320,7 @@ a {
 .composer-task-card {
   background-color: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 16px;
   cursor: pointer;
   transition: all 0.2s;
@@ -1329,6 +1345,28 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.composer-task-card-details,
+.composer-task-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.composer-task-card-details span,
+.composer-task-card-footer span {
+  min-width: 0;
+}
+
+.composer-task-card-footer {
+  margin: 12px 0 0;
+  color: rgba(255, 255, 255, 0.58);
 }
 
 .composer-task-card-time {
@@ -1343,7 +1381,8 @@ a {
   font-weight: 500;
 }
 
-.composer-task-card-status.queued {
+.composer-task-card-status.queued,
+.composer-task-card-status.submitted {
   background-color: rgba(59, 130, 246, 0.2);
   color: #60a5fa;
 }
@@ -1372,13 +1411,100 @@ a {
   width: calc(100% - 96px);
   max-width: 1420px;
   z-index: 50;
-  border-radius: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 286px;
+  gap: 18px;
+  align-items: stretch;
+  border-radius: 18px;
   border: 1px solid rgba(59, 130, 246, 0.35);
   background-color: rgba(11, 18, 32, 0.95);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   box-shadow: 0 0 60px rgba(37, 99, 235, 0.2), 0 8px 32px rgba(0, 0, 0, 0.4);
   padding: 20px 24px;
+}
+
+.composer-workbench-main {
+  min-width: 0;
+}
+
+.composer-billing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  padding-left: 18px;
+}
+
+.composer-billing-header,
+.composer-billing-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composer-billing-header span,
+.composer-billing-row span,
+.composer-billing-rule span {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+}
+
+.composer-billing-header strong {
+  color: white;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.composer-billing-row strong {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 14px;
+}
+
+.composer-billing-rule {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 10px;
+}
+
+.composer-billing-rule p {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.composer-billing-refund {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.composer-freeze-submit-btn {
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+  padding: 10px 12px;
+  transition: background-color 0.18s, transform 0.18s;
+}
+
+.composer-freeze-submit-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.composer-freeze-submit-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 /* Composer 图集工具条 */
@@ -2401,4 +2527,43 @@ a {
   border-top: 1px solid #f1f5f9;
   background-color: #fafafa;
   padding: 14px;
+}
+
+@media (max-width: 980px) {
+  .composer-main {
+    padding: 24px 16px 420px;
+  }
+
+  .generation-composer {
+    bottom: 12px;
+    width: calc(100% - 24px);
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .composer-billing-panel {
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-left: 0;
+    padding-top: 14px;
+  }
+
+  .composer-topbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .composer-topbar-left,
+  .composer-topbar-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .composer-topbar-nav {
+    overflow-x: auto;
+  }
 }

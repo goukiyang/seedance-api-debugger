@@ -57,6 +57,9 @@ export async function POST(request: NextRequest) {
 
   // --- Pricing ---
   const pricing = calculateEstimatedCost(resolution, duration);
+  if (!pricing) {
+    return errorJson('当前参数暂无计费规则', 400);
+  }
   const estimatedCost = pricing.estimatedCost;
 
   // --- Idempotency ---
