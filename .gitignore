@@ -6,6 +6,7 @@
 # Next.js build
 .next/
 out/
+.vercel/
 
 # Dependencies
 node_modules/
