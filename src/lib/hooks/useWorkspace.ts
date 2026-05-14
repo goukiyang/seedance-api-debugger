@@ -30,6 +30,11 @@ export interface UseWorkspaceResult {
   uploadStatuses: Record<string, UploadStatus>;
   // P0-1: 上传素材（带状态追踪）
   uploadAsset: (file: File) => Promise<void>;
+  addReferenceImages: (referenceImageIds: string[]) => Promise<void>;
+  loadReferenceAlbum: (albumId: string) => Promise<void>;
+  saveCurrentAsReferenceAlbum: (name: string) => Promise<string>;
+  createReferenceAlbum: (name: string) => Promise<string>;
+  clearAssets: () => Promise<void>;
   removeAsset: (assetId: string) => Promise<void>;
   reorderAssets: (newOrder: Array<{ assetId: string; sortOrder: number }>) => Promise<void>;
   validatePrompt: (prompt: string) => Promise<{ valid: boolean; missing: string[] }>;
@@ -152,6 +157,125 @@ export function useWorkspace(): UseWorkspaceResult {
     }
   }, [fetchWorkspace]);
 
+  const addReferenceImages = useCallback(async (referenceImageIds: string[]) => {
+    if (referenceImageIds.length === 0) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/workspace/assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tab-id': tabIdRef.current,
+        },
+        body: JSON.stringify({ referenceImageIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Add reference images failed');
+      await fetchWorkspace();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Add reference images failed');
+      setLoading(false);
+      throw err;
+    }
+  }, [fetchWorkspace]);
+
+  const loadReferenceAlbum = useCallback(async (albumId: string) => {
+    setLoading(true);
+    try {
+      const detailRes = await fetch(`/api/reference-albums/${albumId}`);
+      const detail = await detailRes.json();
+      if (!detailRes.ok) throw new Error(detail.error || detail.message || 'Load reference album failed');
+      const referenceImageIds = (detail.images || []).map((image: { id: string }) => image.id).slice(0, 9);
+      const res = await fetch('/api/workspace/assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tab-id': tabIdRef.current,
+        },
+        body: JSON.stringify({ referenceImageIds, replace: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Load reference album failed');
+      await fetchWorkspace();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Load reference album failed');
+      setLoading(false);
+      throw err;
+    }
+  }, [fetchWorkspace]);
+
+  const createReferenceAlbum = useCallback(async (name: string) => {
+    const res = await fetch('/api/reference-albums', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, album_type: 'personal' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || 'Create reference album failed');
+    return data.album.id as string;
+  }, []);
+
+  const clearAssets = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/workspace/assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tab-id': tabIdRef.current,
+        },
+        body: JSON.stringify({ replace: true, referenceImageIds: [] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Clear workspace failed');
+      await fetchWorkspace();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Clear workspace failed');
+      setLoading(false);
+      throw err;
+    }
+  }, [fetchWorkspace]);
+
+  const saveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
+    const albumId = await createReferenceAlbum(name);
+    const assetIds = (workspace?.assets || [])
+      .filter((asset) => !asset.referenceImageId)
+      .map((asset) => asset.assetId);
+    const referenceImageIds = (workspace?.assets || [])
+      .map((asset) => asset.referenceImageId)
+      .filter((id): id is string => Boolean(id));
+    if (assetIds.length > 0 || referenceImageIds.length > 0) {
+      const res = await fetch(`/api/reference-albums/${albumId}/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset_ids: assetIds, reference_image_ids: referenceImageIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Save current references failed');
+
+      const savedReferenceImageIds = Array.isArray(data.images)
+        ? data.images.map((image: { id?: string }) => image.id).filter((id: string | undefined): id is string => Boolean(id))
+        : [];
+
+      if (savedReferenceImageIds.length > 0) {
+        const workspaceRes = await fetch('/api/workspace/assets', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tab-id': tabIdRef.current,
+          },
+          body: JSON.stringify({ referenceImageIds: savedReferenceImageIds, replace: true }),
+        });
+        const workspaceData = await workspaceRes.json();
+        if (!workspaceRes.ok) {
+          throw new Error(workspaceData.error || workspaceData.message || 'Load saved reference album failed');
+        }
+        await fetchWorkspace();
+      }
+    }
+    return albumId;
+  }, [createReferenceAlbum, fetchWorkspace, workspace?.assets]);
+
   // P0-1: 设置 frame 角色
   const setAssetFrameRole = useCallback(async (assetId: string, role: FrameRole) => {
     try {
@@ -227,6 +351,11 @@ export function useWorkspace(): UseWorkspaceResult {
     assets: workspace?.assets ?? [],
     uploadStatuses,
     uploadAsset,
+    addReferenceImages,
+    loadReferenceAlbum,
+    saveCurrentAsReferenceAlbum,
+    createReferenceAlbum,
+    clearAssets,
     removeAsset,
     reorderAssets,
     validatePrompt,

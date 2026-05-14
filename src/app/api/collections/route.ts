@@ -8,12 +8,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { createCollection, getCollections } from '@/lib/assets/collection';
+import { getSession } from '@/lib/auth/session';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
   try {
-    const collections = await getCollections();
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
+    const collections = await getCollections(user.id);
     return NextResponse.json({ collections });
   } catch (error) {
     console.error('[GetCollections] Error:', error);
@@ -26,6 +30,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
     const body = await request.json();
     const { name, description, visibility } = body;
 
@@ -34,9 +41,9 @@ export async function POST(request: NextRequest) {
     }
 
     const tabId = request.headers.get('x-tab-id') || 'default';
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
 
-    const collection = await createCollection(name, workspaceId, { description, visibility });
+    const collection = await createCollection(name, workspaceId, { description, visibility, ownerId: user.id });
 
     return NextResponse.json({ collection }, { status: 201 });
   } catch (error) {

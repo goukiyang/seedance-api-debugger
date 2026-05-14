@@ -8,8 +8,9 @@ import FeedbackWidget from './FeedbackWidget';
 import { shouldUseNavigationShell } from '@/lib/navigation';
 
 interface SessionUserSummary {
-  name: string;
-  username: string;
+  name: string | null;
+  username: string | null;
+  email: string | null;
   role: 'admin' | 'user';
 }
 
@@ -21,6 +22,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [user, setUser] = useState<SessionUserSummary | null>(null);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
+  const [loadingUser, setLoadingUser] = useState(false);
 
   const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
 
@@ -28,6 +30,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!showShell) return;
 
     let cancelled = false;
+    setLoadingUser(true);
 
     fetch('/api/auth/me', { cache: 'no-store' })
       .then((response) => response.json())
@@ -42,6 +45,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => {
         if (!cancelled) {
           setUser(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingUser(false);
         }
       });
 
@@ -84,7 +92,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="shell-root">
-      <TopNav userName={user?.name || user?.username} availableCredits={credits?.available ?? null} />
+      <TopNav user={user} loadingUser={loadingUser} availableCredits={credits?.available ?? null} />
       <div className="shell-body">
         <SideNav isAdmin={user?.role === 'admin'} />
         <main className="shell-content">

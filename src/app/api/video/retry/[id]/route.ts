@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { createVideoTask, isApiKeyConfigured } from '@/lib/provider/jimeng';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { getProjectForGeneration } from '@/lib/projects/permissions';
 
 export async function POST(
   request: NextRequest,
@@ -40,6 +41,16 @@ export async function POST(
         { error: 'Task not found', message: `Task ${originalTaskId} not found` },
         { status: 404 }
       );
+    }
+
+    let retryProject;
+    try {
+      retryProject = await getProjectForGeneration(user, originalTask.project_id || null);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      throw error;
     }
 
     let paramsJson: Record<string, unknown> = {};
@@ -86,6 +97,12 @@ export async function POST(
         last_frame_url: originalTask.last_frame_url,
         frame_image_urls: originalTask.frame_image_urls,
         workspace_id: originalTask.workspace_id,
+        user_id: originalTask.user_id || user.id,
+        owner_user_id: originalTask.owner_user_id || originalTask.user_id || user.id,
+        project_id: retryProject.id,
+        visibility: originalTask.visibility,
+        billing_scope: originalTask.billing_scope || 'user',
+        billing_account_id: originalTask.billing_account_id || originalTask.user_id || user.id,
         params_json: originalTask.params_json,
         local_status: 'submitted',
       },

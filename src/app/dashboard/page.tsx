@@ -1,9 +1,11 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 
 export default async function DashboardPage() {
   const user = await getSession();
-  const isAdmin = user?.role === 'admin';
+  if (!user) redirect('/login');
+  if (user.role !== 'admin') redirect('/generate');
 
   return (
     <div>
@@ -17,56 +19,42 @@ export default async function DashboardPage() {
       <div className="card">
         <h2 className="section-title">常用入口</h2>
         <div className="shell-link-grid">
-          <Link href="/generate/quick" className="shell-link-card">
-            <strong>快速生成</strong>
-            <span>进入轻量化生成入口，后续用于承载快速发起任务的流程。</span>
-          </Link>
           <Link href="/generate" className="shell-link-card">
             <strong>生成视频</strong>
             <span>进入现有完整生成页面，保留当前可用的任务创建与最近任务能力。</span>
+          </Link>
+          <Link href="/projects" className="shell-link-card">
+            <strong>我的项目</strong>
+            <span>创建项目、查看参与项目，并从项目空间进入生成内容。</span>
           </Link>
           <Link href="/tasks" className="shell-link-card">
             <strong>我的任务</strong>
             <span>查看任务进度、结果列表以及已存在的任务详情页面。</span>
           </Link>
-          <Link href="/videos" className="shell-link-card">
-            <strong>视频库</strong>
-            <span>后续用于浏览生成结果、沉淀视频资产与统一管理成片。</span>
-          </Link>
           <Link href="/collections" className="shell-link-card">
-            <strong>素材分组</strong>
-            <span>后续用于管理参考图分组、共享素材与可复用输入资源。</span>
-          </Link>
-          <Link href="/points" className="shell-link-card">
-            <strong>积分流水</strong>
-            <span>后续用于查看可用积分、消耗明细以及结算相关记录。</span>
+            <strong>参考图集</strong>
+            <span>管理个人、项目和共享参考图，并把图集图片作为生成参考图继续使用。</span>
           </Link>
         </div>
       </div>
 
-      {isAdmin && (
-        <div className="card">
-          <h2 className="section-title">管理快捷入口</h2>
-          <div className="shell-link-grid">
-            <Link href="/admin" className="shell-link-card">
-              <strong>管理总览</strong>
-              <span>后续用于承载平台总览、运行状态与管理端快捷入口。</span>
-            </Link>
-            <Link href="/admin/users" className="shell-link-card">
-              <strong>用户管理</strong>
-              <span>进入现有用户与积分操作页面，保留当前可工作的管理能力。</span>
-            </Link>
-            <Link href="/admin/tasks" className="shell-link-card">
-              <strong>任务管理</strong>
-              <span>后续用于集中查看任务队列、审核状态与人工处理入口。</span>
-            </Link>
-            <Link href="/admin/feedback" className="shell-link-card">
-              <strong>反馈管理</strong>
-              <span>后续用于承载反馈工单、问题追踪与处理流程。</span>
-            </Link>
-          </div>
+      <div className="card">
+        <h2 className="section-title">管理快捷入口</h2>
+        <div className="shell-link-grid">
+          <Link href="/admin/users" className="shell-link-card">
+            <strong>用户管理</strong>
+            <span>进入现有用户与积分操作页面，保留当前可工作的管理能力。</span>
+          </Link>
+          <Link href="/admin/projects" className="shell-link-card">
+            <strong>项目管理</strong>
+            <span>查看全部项目、进入项目详情并直接添加项目成员。</span>
+          </Link>
+          <Link href="/admin/feedback" className="shell-link-card">
+            <strong>反馈管理</strong>
+            <span>查看用户反馈、导出反馈材料，并跟进已提交的问题。</span>
+          </Link>
         </div>
-      )}
+      </div>
     </div>
   );
 }

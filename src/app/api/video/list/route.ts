@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
+import { AuthError } from '@/lib/auth/session';
+import { getTaskWhereForUser } from '@/lib/projects/permissions';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +20,8 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
-    const where = user.role === 'admin' ? {} : { user_id: user.id };
+    const projectId = searchParams.get('project_id');
+    const where = await getTaskWhereForUser(user, projectId);
 
     const total = await prisma.videoTask.count({ where });
 
@@ -35,6 +40,11 @@ export async function GET(request: NextRequest) {
         created_at: true,
         completed_at: true,
         user_id: true,
+        owner_user_id: true,
+        project_id: true,
+        project: {
+          select: { id: true, name: true, type: true },
+        },
       },
     });
 
@@ -48,6 +58,12 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: 'Forbidden', message: error.message },
+        { status: error.status },
+      );
+    }
     console.error('List tasks error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },

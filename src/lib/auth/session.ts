@@ -9,7 +9,11 @@ export interface SessionUser {
   username: string;
   email: string;
   role: 'admin' | 'user';
-  status: 'active' | 'disabled';
+  account_type: 'internal' | 'external';
+  user_profile: string;
+  feature_profile_id: string | null;
+  status: 'active' | 'disabled' | 'pending' | 'expired';
+  expires_at: Date | null;
 }
 
 export const SESSION_COOKIE = 'session';
@@ -39,14 +43,16 @@ export async function getSession(): Promise<SessionUser | null> {
     const userId = Buffer.from(userIdB64, 'base64').toString('utf8');
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true, name: true, username: true, email: true,
-        role: true, status: true,
-      },
+	      select: {
+	        id: true, name: true, username: true, email: true,
+	        role: true, account_type: true, user_profile: true, feature_profile_id: true, status: true, expires_at: true,
+	      },
     });
-    if (!user || user.status === 'disabled') return null;
+    if (!user || user.status !== 'active') return null;
+    if (user.expires_at && user.expires_at.getTime() <= Date.now()) return null;
 
     if (user.role !== 'admin' && user.role !== 'user') return null;
+    if (user.account_type !== 'internal' && user.account_type !== 'external') return null;
     return user as SessionUser;
   } catch {
     return null;
@@ -83,11 +89,16 @@ export async function login(
 
   const token = await createSession(user.id);
   const role = user.role === 'admin' ? 'admin' : 'user';
-  return {
-    user: {
-      id: user.id, name: user.name, username: user.username,
-      email: user.email, role, status: 'active',
-    },
+	  const accountType = user.account_type === 'external' ? 'external' : 'internal';
+	  return {
+	    user: {
+	      id: user.id, name: user.name, username: user.username,
+	      email: user.email, role, account_type: accountType,
+	      user_profile: user.user_profile || 'other',
+	      feature_profile_id: user.feature_profile_id,
+	      status: 'active',
+	      expires_at: user.expires_at,
+	    },
     token,
   };
 }

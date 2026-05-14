@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getVideoTaskStatus, mapProviderStatus } from '@/lib/provider/jimeng';
 import { getSession } from '@/lib/auth/session';
+import { AuthError } from '@/lib/auth/session';
+import { assertCanViewTask } from '@/lib/projects/permissions';
+import { recordTaskCostSettlement } from '@/lib/costs/ledger';
 
 export async function GET(
   request: NextRequest,
@@ -16,6 +19,9 @@ export async function GET(
 
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
+      include: {
+        project: { select: { id: true, name: true, type: true } },
+      },
     });
 
     if (!task) {
@@ -25,13 +31,13 @@ export async function GET(
       );
     }
 
-    if (user.role !== 'admin') {
-      if (!task.user_id) {
-        return NextResponse.json({ error: '权限不足', message: '无权查看此任务' }, { status: 403 });
+    try {
+      await assertCanViewTask(user, task);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
       }
-      if (user.id !== task.user_id) {
-        return NextResponse.json({ error: '权限不足', message: '无权查看此任务' }, { status: 403 });
-      }
+      throw error;
     }
 
     if (task.provider_task_id) {
@@ -74,7 +80,7 @@ export async function GET(
           updateData.completed_at = new Date();
         }
 
-        const updatedTask = await prisma.videoTask.update({
+        await prisma.videoTask.update({
           where: { id: taskId },
           data: updateData,
         });
@@ -84,7 +90,14 @@ export async function GET(
           await settleTask(taskId, task.user_id, task.frozen_cost, statusResult.local_status);
         }
 
-        return NextResponse.json(updatedTask);
+        const responseTask = await prisma.videoTask.findUnique({
+          where: { id: taskId },
+          include: {
+            project: { select: { id: true, name: true, type: true } },
+          },
+        });
+
+        return NextResponse.json(responseTask);
       } catch (apiError) {
         console.error('Provider status query error:', apiError);
 
@@ -93,10 +106,22 @@ export async function GET(
           local_status: 'running',
           raw_status_response: JSON.stringify({ error: apiError instanceof Error ? apiError.message : String(apiError) }),
         };
-        const updatedTask = await prisma.videoTask.update({
+        await prisma.videoTask.update({
           where: { id: taskId },
           data: updateData,
         });
+        const updatedTask = await prisma.videoTask.findUnique({
+          where: { id: taskId },
+          include: {
+            project: { select: { id: true, name: true, type: true } },
+          },
+        });
+        if (!updatedTask) {
+          return NextResponse.json(
+            { error: 'Task not found', message: `Task ${taskId} not found` },
+            { status: 404 },
+          );
+        }
         return NextResponse.json({
           ...updatedTask,
           error_message: updatedTask.error_message || (apiError instanceof Error ? apiError.message : 'Failed to query status'),
@@ -171,6 +196,8 @@ async function settleTask(
           reason: `任务成功，扣除 ${actualCost} 点`,
         },
       });
+
+      await recordTaskCostSettlement(tx, freshTask, terminalStatus, userId);
     } else {
       // failed / cancelled → full refund
       await tx.videoTask.update({
@@ -196,6 +223,8 @@ async function settleTask(
           reason: `任务${terminalStatus === 'failed' ? '失败' : '取消'}，返还冻结 ${frozenAmount} 点`,
         },
       });
+
+      await recordTaskCostSettlement(tx, freshTask, terminalStatus, userId);
     }
   });
 }

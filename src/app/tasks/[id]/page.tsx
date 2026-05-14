@@ -37,12 +37,33 @@ interface VideoTask {
   raw_create_response: string | null;
   raw_status_response: string | null;
   error_message: string | null;
+  project_id: string | null;
+  project?: { id: string; name: string; type: string } | null;
+  estimated_cost: number | null;
+  actual_cost: number | null;
+  frozen_cost: number | null;
+  refund_amount: number | null;
+  provider_cost_status: string;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_cost_currency: string | null;
+  provider_cost_confirmed_at: string | null;
+  cost_allocation_status: string;
   params_json: string | null;
   reference_images_json: string | null;
   provider_payload_json: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  my_role?: string | null;
+  can_manage_project?: boolean;
 }
 
 // Seedance 参考图资产元数据（与 generate/page.tsx 的 SelectedReferenceAsset 对应）
@@ -289,6 +310,24 @@ function getStatusText(status: string) {
   return textMap[status] || status;
 }
 
+function costStatusLabel(status: string) {
+  if (status === 'estimated_by_rule') return '规则预估';
+  if (status === 'provisional_settled') return '临时结算';
+  if (status === 'official_confirmed') return '官方确认';
+  if (status === 'reconciled') return '已对账';
+  if (status === 'failed_no_charge') return '失败未收费';
+  if (status === 'unknown') return '待确认';
+  if (status === 'disputed') return '异常';
+  return '未记录';
+}
+
+function formatAmountMinor(amount: number | null | undefined, currency?: string | null): string {
+  if (amount === null || amount === undefined) return '待官方确认';
+  const value = amount / 100;
+  if (currency === 'USD') return `$${value.toFixed(2)}`;
+  return `¥${value.toFixed(2)}`;
+}
+
 function formatJson(str: string | null): string {
   if (!str) return '{}';
   try {
@@ -313,10 +352,15 @@ export default function TaskDetailPage() {
   const taskId = params.id as string;
 
   const [task, setTask] = useState<VideoTask | null>(null);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [querying, setQuerying] = useState(false);
   const [autoPoll, setAutoPoll] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [movingProject, setMovingProject] = useState(false);
+  const [targetProjectId, setTargetProjectId] = useState('');
+  const [moveReason, setMoveReason] = useState('项目成本归属调整');
+  const [moveMessage, setMoveMessage] = useState('');
 
   // 下载状态
   const [downloading, setDownloading] = useState(false);
@@ -339,6 +383,7 @@ export default function TaskDetailPage() {
       const data = await res.json();
       if (res.ok) {
         setTask(data);
+        setTargetProjectId(data.project_id || '');
         setVideoError(false);
       }
     } catch (error) {
@@ -348,9 +393,27 @@ export default function TaskDetailPage() {
     }
   }, [taskId]);
 
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch('/api/projects?include_archived=true&include_all=true', { cache: 'no-store' });
+      const data = await res.json();
+      if (res.ok) {
+        setProjects((data.projects || []).filter((project: ProjectOption) => (
+          project.status === 'active' && project.type !== 'system'
+        )));
+      }
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTask();
   }, [fetchTask]);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
 
   // Auto polling
   useEffect(() => {
@@ -415,6 +478,34 @@ export default function TaskDetailPage() {
       alert(`重试失败: ${error}`);
     } finally {
       setRetrying(false);
+    }
+  };
+
+  const handleMoveProject = async () => {
+    if (!task || !targetProjectId || targetProjectId === task.project_id) return;
+    setMovingProject(true);
+    setMoveMessage('');
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/project`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: targetProjectId,
+          reason: moveReason,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMoveMessage(data.error || data.message || '移动项目失败');
+        return;
+      }
+      setTask(data.task);
+      setTargetProjectId(data.task.project_id || '');
+      setMoveMessage('任务已移动，成本归属流水已记录');
+    } catch (error) {
+      setMoveMessage(error instanceof Error ? error.message : '移动项目失败');
+    } finally {
+      setMovingProject(false);
     }
   };
 
@@ -546,6 +637,33 @@ export default function TaskDetailPage() {
           <div className="info-item">
             <span className="info-label">Provider 任务 ID</span>
             <span className="info-value">{task.provider_task_id || '-'}</span>
+          </div>
+          <div className="info-item">
+            <span className="info-label">所属项目</span>
+            <span className="info-value">
+              {task.project ? (
+                <Link className="table-link" href={`/projects/${task.project.id}`}>{task.project.name}</Link>
+              ) : (
+                <span className="text-red">未归属</span>
+              )}
+            </span>
+          </div>
+          <div className="info-item">
+            <span className="info-label">成本状态</span>
+            <span className="info-value">{costStatusLabel(task.provider_cost_status)} · {task.cost_allocation_status}</span>
+          </div>
+          <div className="info-item">
+            <span className="info-label">官方成本</span>
+            <span className="info-value">
+              {formatAmountMinor(task.provider_final_amount_minor ?? task.provider_official_amount_minor, task.provider_cost_currency)}
+              {task.provider_cost_confirmed_at ? ` · ${new Date(task.provider_cost_confirmed_at).toLocaleString('zh-CN')}` : ''}
+            </span>
+          </div>
+          <div className="info-item">
+            <span className="info-label">点数结算</span>
+            <span className="info-value">
+              预估 {task.estimated_cost ?? '-'} · 扣除 {task.actual_cost ?? '-'} · 冻结 {task.frozen_cost ?? 0} · 返还 {task.refund_amount ?? 0}
+            </span>
           </div>
           <div className="info-item">
             <span className="info-label">模型</span>
@@ -824,6 +942,35 @@ export default function TaskDetailPage() {
       {/* 操作 */}
       <div className="card">
         <h2 className="section-title">操作</h2>
+        <div className="project-move-panel mb-4">
+          <div>
+            <div className="info-label">移动到其他项目</div>
+            <p className="text-gray text-sm mt-1">用于修正选错项目后的项目成本归属，旧账本不会被覆盖，会追加转移记录。</p>
+          </div>
+          <select className="input" value={targetProjectId} onChange={(event) => setTargetProjectId(event.target.value)}>
+            <option value="">选择目标项目</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}{project.type === 'personal' ? ' · 个人' : ''}
+              </option>
+            ))}
+          </select>
+          <input
+            className="input"
+            value={moveReason}
+            onChange={(event) => setMoveReason(event.target.value)}
+            placeholder="移动原因"
+          />
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={handleMoveProject}
+            disabled={movingProject || !targetProjectId || targetProjectId === task.project_id}
+          >
+            {movingProject ? '移动中...' : '移动项目'}
+          </button>
+          {moveMessage && <p className="text-sm text-gray">{moveMessage}</p>}
+        </div>
         <div className="flex items-center gap-4 mb-4">
           <button
             className="btn btn-primary"

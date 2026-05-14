@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth/session';
+import { AuthError } from '@/lib/auth/session';
+import { assertCanViewTask } from '@/lib/projects/permissions';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -19,6 +22,14 @@ export async function POST(
   const taskId = params.id;
 
   try {
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized', message: '请先登录后再下载视频' },
+        { status: 401 },
+      );
+    }
+
     // 1. 查询任务
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
@@ -29,6 +40,18 @@ export async function POST(
         { success: false, error: 'Task not found', message: `Task ${taskId} not found` },
         { status: 404 }
       );
+    }
+
+    try {
+      await assertCanViewTask(user, task);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json(
+          { success: false, error: 'Forbidden', message: error.message },
+          { status: error.status },
+        );
+      }
+      throw error;
     }
 
     // 2. 检查是否有视频 URL

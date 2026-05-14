@@ -20,6 +20,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const { id } = context.params;
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return errorJson('用户不存在', 404);
+  if (user.status === 'deleted') return errorJson('已删除用户不能启用', 400);
 
   await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id }, data: { status: 'active' } });

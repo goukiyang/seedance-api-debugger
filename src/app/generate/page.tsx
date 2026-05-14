@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
-import { useComposerHeight } from '@/lib/context/ComposerHeightContext';
+import AccountMenu, { type AccountMenuUser } from '@/components/AccountMenu';
 
 // ============================================================================
 // Types
@@ -44,12 +44,43 @@ interface CreditSummary {
   total_used: number;
 }
 
+interface ProjectOption {
+  id: string;
+  name: string;
+  type: string;
+  owner_user_id: string;
+  my_role: string | null;
+  can_generate?: boolean;
+  owner?: { name: string | null; username: string | null };
+  _count?: { tasks: number; reference_albums?: number };
+}
+
+interface AuthMeResponse {
+  user: AccountMenuUser | null;
+}
+
+function projectOwnerName(project: ProjectOption): string {
+  const name = project.owner?.name?.trim();
+  const username = project.owner?.username?.trim();
+  if (name && username && name !== username) return `${name}（${username}）`;
+  return name || username || project.owner_user_id;
+}
+
+function projectDisplayName(project: ProjectOption): string {
+  if (project.type === 'personal') return '个人空间';
+  return project.name;
+}
+
+function projectDisplayLabel(project: ProjectOption, hasDuplicateName: boolean): string {
+  const name = projectDisplayName(project);
+  return hasDuplicateName ? `${name} · ${projectOwnerName(project)}` : name;
+}
+
 // ============================================================================
 // Component
 // ============================================================================
 
 export default function GeneratePage() {
-  const { composerHeight } = useComposerHeight();
   // ---- Collections ----
   const [collections, setCollections] = useState<AssetCollection[]>([]);
 
@@ -61,7 +92,6 @@ export default function GeneratePage() {
 
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
-  const [showDebug, setShowDebug] = useState(false);
 
   // ---- Result Polling ----
   const [polledResult, setPolledResult] = useState<PolledTask | null>(null);
@@ -69,10 +99,42 @@ export default function GeneratePage() {
 
   // ---- Credit Summary ----
   const [credits, setCredits] = useState<CreditSummary | null>(null);
+  const [currentUser, setCurrentUser] = useState<AccountMenuUser | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+
+  // ---- Current Project ----
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
 
   // ============================================================================
   // Load collections
   // ============================================================================
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data: AuthMeResponse) => {
+        if (!cancelled) {
+          setCurrentUser(data.user || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCurrentUser(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingUser(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     fetch('/api/collections')
@@ -92,6 +154,27 @@ export default function GeneratePage() {
       })
       .then((d) => {
         if (d) setCredits(d);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/projects')
+      .then((r) => {
+        if (r.status === 401) {
+          window.location.href = '/login';
+          return null;
+        }
+        return r.json();
+      })
+      .then((d) => {
+        if (!d) return;
+        const list: ProjectOption[] = (d.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
+        setProjects(list);
+        const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
+        const requested = requestedProjectId ? list.find((project) => project.id === requestedProjectId) : null;
+        const personal = list.find((project) => project.type === 'personal');
+        setSelectedProjectId((requested || personal || list[0])?.id || '');
       })
       .catch(() => {});
   }, []);
@@ -177,6 +260,7 @@ export default function GeneratePage() {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
+    referenceImageIds?: string[];
   }) => {
     setSubmitting(true);
     setError(null);
@@ -202,6 +286,8 @@ export default function GeneratePage() {
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
           idempotency_key: idempotencyKey,
+          project_id: selectedProjectId || undefined,
+          reference_image_ids: params.referenceImageIds || [],
         }),
       });
 
@@ -225,7 +311,7 @@ export default function GeneratePage() {
     } finally {
       setSubmitting(false);
     }
-  }, []);
+  }, [selectedProjectId]);
 
   // ============================================================================
   // Collection handlers
@@ -301,6 +387,12 @@ export default function GeneratePage() {
     return Math.max(0, Math.floor(value || 0)).toString();
   }
 
+  const projectNameCounts = projects.reduce<Record<string, number>>((counts, project) => {
+    const name = projectDisplayName(project);
+    counts[name] = (counts[name] || 0) + 1;
+    return counts;
+  }, {});
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -310,38 +402,29 @@ export default function GeneratePage() {
       {/* ===== 顶部导航栏 ===== */}
       <header className="composer-topbar">
         <div className="composer-topbar-left">
-          <Link href="/dashboard" className="composer-topbar-logo">Seedance 2.0</Link>
+            <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
           <nav className="composer-topbar-nav">
-            <Link href="/dashboard" className="composer-topbar-nav-btn">控制台</Link>
-            <Link href="/generate/quick" className="composer-topbar-nav-btn">快速生成</Link>
             <Link href="/generate" className="composer-topbar-nav-btn active">生成视频</Link>
-            <Link href="/collections" className="composer-topbar-nav-btn">素材分组</Link>
+            <Link href="/projects" className="composer-topbar-nav-btn">我的项目</Link>
+            <Link href="/collections" className="composer-topbar-nav-btn">参考图集</Link>
             <Link href="/tasks" className="composer-topbar-nav-btn">我的任务</Link>
-            <Link href="/points" className="composer-topbar-nav-btn">积分流水</Link>
           </nav>
         </div>
         <div className="composer-topbar-right">
           {credits && (
-            <Link
-              href="/tasks"
+            <div
               className="composer-topbar-nav-btn"
-              title="查看点数流水"
+              title="当前点数"
             >
               可用 {formatCredit(credits.available)} 点 ｜ 冻结 {formatCredit(credits.frozen_credits)} 点 ｜ 本月已用 {formatCredit(credits.monthly_used)} 点
-            </Link>
+            </div>
           )}
-          <button
-            className="composer-topbar-icon-btn"
-            onClick={() => setShowDebug(!showDebug)}
-            title="调试"
-          >
-            🐛
-          </button>
+          <AccountMenu user={currentUser} loading={loadingUser} variant="composer" />
         </div>
       </header>
 
       {/* ===== 页面主体 ===== */}
-      <main className="composer-main" style={{ paddingBottom: composerHeight + 56 }}>
+      <main className="composer-main">
 
         {/* Hero 空状态 */}
         <div className="composer-hero">
@@ -353,14 +436,49 @@ export default function GeneratePage() {
           </p>
         </div>
 
-        {/* 调试区 */}
-        {showDebug && (
-          <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 16, marginBottom: 40, fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
-            <div style={{ fontWeight: 600, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>调试信息</div>
-            <div>最近任务数：{recentTasks.length}</div>
-            <div>图集数：{collections.length}</div>
-          </div>
-        )}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: 16,
+          color: 'rgba(255,255,255,0.62)',
+          fontSize: 14,
+        }}>
+          <span>保存到：</span>
+          {projects.length > 0 ? (
+            <select
+              className="input"
+              style={{ width: 260, maxWidth: '100%', padding: '8px 12px' }}
+              value={selectedProjectId}
+              onChange={(event) => setSelectedProjectId(event.target.value)}
+              title="本次生成的任务和结果会写入所选空间"
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {projectDisplayLabel(project, projectNameCounts[projectDisplayName(project)] > 1)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-red">暂无可生成项目</span>
+          )}
+        </div>
+
+        <GenerationComposer
+          collections={collections}
+          onCollectionLoad={handleCollectionLoad}
+          onCollectionSave={handleCollectionSave}
+          onCollectionNew={handleCollectionNew}
+          onSubmit={handleSubmit}
+          submitError={error}
+          submitErrorDebug={errorDebug}
+          isSubmitting={submitting}
+          result={result}
+          polledResult={polledResult}
+          isPolling={isPolling}
+          onReset={handleReset}
+        />
 
         {/* 最近任务 */}
         {recentTasks.length > 0 && (
@@ -391,22 +509,6 @@ export default function GeneratePage() {
           </div>
         )}
       </main>
-
-      {/* ===== 固定底部 Composer ===== */}
-      <GenerationComposer
-        collections={collections}
-        onCollectionLoad={handleCollectionLoad}
-        onCollectionSave={handleCollectionSave}
-        onCollectionNew={handleCollectionNew}
-        onSubmit={handleSubmit}
-        submitError={error}
-        submitErrorDebug={errorDebug}
-        isSubmitting={submitting}
-        result={result}
-        polledResult={polledResult}
-        isPolling={isPolling}
-        onReset={handleReset}
-      />
     </div>
   );
 }

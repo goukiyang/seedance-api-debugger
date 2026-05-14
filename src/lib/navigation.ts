@@ -6,47 +6,33 @@ export interface NavItem {
 }
 
 export const shellRoutes = [
-  '/dashboard',
-  '/generate/quick',
-  '/videos',
+  '/account',
+  '/projects',
   '/collections',
-  '/templates',
-  '/points',
-  '/help',
-  '/admin',
-  '/admin/points',
-  '/admin/tasks',
-  '/admin/exceptions',
-  '/admin/resources',
-  '/admin/pricing',
+  '/admin/projects',
+  '/admin/costs',
   '/admin/feedback',
 ] as const;
 
 const shellRoutePrefixes = [
   '/tasks',
+  '/projects',
+  '/collections',
   '/admin/users',
+  '/admin/costs',
 ] as const;
 
 export const userNavItems: NavItem[] = [
-  { label: '控制台', href: '/dashboard' },
-  { label: '快速生成', href: '/generate/quick' },
   { label: '生成视频', href: '/generate' },
+  { label: '我的项目', href: '/projects', prefixMatch: true },
+  { label: '参考图集', href: '/collections', prefixMatch: true },
   { label: '我的任务', href: '/tasks', prefixMatch: true },
-  { label: '视频库', href: '/videos' },
-  { label: '素材分组', href: '/collections' },
-  { label: '模板中心', href: '/templates' },
-  { label: '积分流水', href: '/points' },
-  { label: '反馈帮助', href: '/help' },
 ];
 
 export const adminNavItems: NavItem[] = [
-  { label: '管理总览', href: '/admin' },
   { label: '用户管理', href: '/admin/users' },
-  { label: '积分管理', href: '/admin/points' },
-  { label: '任务管理', href: '/admin/tasks' },
-  { label: '异常任务', href: '/admin/exceptions' },
-  { label: '资源管理', href: '/admin/resources' },
-  { label: '计费规则', href: '/admin/pricing' },
+  { label: '项目管理', href: '/admin/projects' },
+  { label: '成本复盘', href: '/admin/costs' },
   { label: '反馈管理', href: '/admin/feedback' },
 ];
 

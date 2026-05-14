@@ -26,6 +26,8 @@ export interface CreateVideoInput {
   watermark?: boolean;
   // 全能参考模式素材（local URL 或 base64 data URL）
   reference_image_urls?: string[];
+  reference_album_ids?: string[];
+  reference_image_ids?: string[];
   reference_video_urls?: string[];
   reference_audio_urls?: string[];
   // base64 格式的图片数据（用于本地相对路径，上传给外部 provider）
@@ -61,6 +63,8 @@ export interface CreateVideoInput {
   watermark?: boolean;
   // 全能参考模式素材（local URL 或 base64 data URL）
   reference_image_urls?: string[];
+  reference_album_ids?: string[];
+  reference_image_ids?: string[];
   reference_video_urls?: string[];
   reference_audio_urls?: string[];
   // base64 格式的图片数据（用于本地相对路径，上传给外部 provider）
@@ -121,6 +125,8 @@ export interface VideoTask {
   return_last_frame?: boolean;
   watermark?: boolean;
   reference_image_urls?: string[];
+  reference_album_ids?: string[];
+  reference_image_ids?: string[];
   reference_video_urls?: string[];
   reference_audio_urls?: string[];
   first_frame_url?: string;
@@ -222,6 +228,9 @@ export interface Asset {
 export interface WorkspaceAssetItem {
   id: string;
   assetId: string;
+  referenceImageId?: string | null;
+  referenceAlbumId?: string | null;
+  referenceAlbumName?: string | null;
   sortOrder: number;
   role: string | null;
   type: AssetType;

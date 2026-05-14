@@ -1,7 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+
+type LoginUser = {
+  role?: string;
+};
+
+function defaultLanding(user?: LoginUser | null) {
+  return user?.role === 'admin' ? '/dashboard' : '/generate';
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,7 +27,7 @@ export default function LoginPage() {
       .then(r => r.json())
       .then(d => {
         if (d.user) {
-          router.replace(next || '/dashboard');
+          router.replace(next || defaultLanding(d.user));
         }
       })
       .catch(() => {});
@@ -44,7 +53,7 @@ export default function LoginPage() {
       }
 
       const next = new URLSearchParams(window.location.search).get('next');
-      router.replace(next || '/dashboard');
+      router.replace(next || defaultLanding(data.user));
     } catch {
       setError('网络错误，请重试');
       setLoading(false);
@@ -170,7 +179,8 @@ export default function LoginPage() {
           fontSize: 12,
           color: 'rgba(255,255,255,0.3)',
         }}>
-          遇到问题？联系管理员
+          没有账号？ <Link href="/register" style={{ color: '#a5b4fc', textDecoration: 'none' }}>公司邮箱注册</Link>
+          <div style={{ marginTop: 8 }}>遇到问题？联系管理员</div>
         </div>
       </div>
     </div>

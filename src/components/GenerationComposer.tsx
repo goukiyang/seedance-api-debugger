@@ -17,6 +17,7 @@ import { PromptEditor } from '@/components/PromptEditor';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
+import { ReferenceAlbumPicker } from '@/components/ReferenceAlbumPicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
@@ -31,6 +32,39 @@ interface PolledTask {
   provider_status: string | null;
   result_video_url: string | null;
   error_message: string | null;
+}
+
+interface ReferenceAlbumOption {
+  id: string;
+  name: string;
+  image_count: number;
+  album_type: string;
+  project?: { name: string } | null;
+  permissions?: { use?: boolean; edit?: boolean };
+}
+
+function inferSingleReferenceAlbum(assets: WorkspaceAssetItem[]): { id: string; name: string } | null {
+  if (assets.length === 0) return null;
+
+  const firstAlbumId = assets[0].referenceAlbumId;
+  const firstAlbumName = assets[0].referenceAlbumName;
+  if (!firstAlbumId || !firstAlbumName) return null;
+
+  const allFromSameAlbum = assets.every((asset) => {
+    return asset.referenceAlbumId === firstAlbumId && asset.referenceAlbumName === firstAlbumName;
+  });
+
+  return allFromSameAlbum ? { id: firstAlbumId, name: firstAlbumName } : null;
+}
+
+function dedupeReferenceAlbums(albums: ReferenceAlbumOption[]): ReferenceAlbumOption[] {
+  const seen = new Set<string>();
+  return albums.filter((album) => {
+    const key = album.name.trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 interface Props {
@@ -48,6 +82,7 @@ interface Props {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
+    referenceImageIds: string[];
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
@@ -74,6 +109,10 @@ export function GenerationComposer({
 }: Props) {
   const workspace = useWorkspace();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [showAlbumPicker, setShowAlbumPicker] = useState(false);
+  const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
+  const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
+  const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
 
   // Composer 内部状态（受控于参数 props 透传）
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
@@ -129,14 +168,49 @@ export function GenerationComposer({
     return validation.referencedFigures.map((n) => `图${n}`);
   }, [validation.referencedFigures]);
 
+  const refreshReferenceAlbums = useCallback(async () => {
+    try {
+      const res = await fetch('/api/reference-albums?scope=all');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '图集读取失败');
+      setReferenceAlbums(dedupeReferenceAlbums(data.albums || []));
+    } catch {
+      setReferenceAlbums([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshReferenceAlbums();
+  }, [refreshReferenceAlbums]);
+
+  useEffect(() => {
+    if (workspace.assets.length === 0) return;
+    const inferredAlbum = inferSingleReferenceAlbum(workspace.assets);
+    setCurrentReferenceAlbumId(inferredAlbum?.id ?? null);
+    setCurrentReferenceAlbumName(inferredAlbum?.name ?? null);
+  }, [workspace.assets]);
+
   // ============================================================================
   // Handlers
   // ============================================================================
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
-    await onSubmit({ prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark });
-  }, [canSubmit, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark]);
+    await onSubmit({
+      prompt,
+      generationMode,
+      ratio,
+      duration,
+      resolution,
+      seed,
+      generateAudio,
+      returnLastFrame,
+      watermark,
+      referenceImageIds: workspace.assets
+        .map((asset) => asset.referenceImageId)
+        .filter((id): id is string => Boolean(id)),
+    });
+  }, [canSubmit, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, workspace.assets]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
     if (workspace.assets.length > 0) {
@@ -156,15 +230,46 @@ export function GenerationComposer({
 
   const handleRemove = useCallback(async (assetId: string) => {
     await workspace.removeAsset(assetId);
-  }, [workspace]);
+  }, [workspace, refreshReferenceAlbums]);
 
   const handleReorder = useCallback(async (newOrder: Array<{ assetId: string; sortOrder: number }>) => {
     await workspace.reorderAssets(newOrder);
-  }, [workspace]);
+  }, [workspace, refreshReferenceAlbums]);
 
   const handlePreview = useCallback((url: string) => {
     setPreviewUrl(url);
   }, []);
+
+  const handleAddReferenceImages = useCallback(async (referenceImageIds: string[]) => {
+    await workspace.addReferenceImages(referenceImageIds);
+    await refreshReferenceAlbums();
+  }, [workspace, refreshReferenceAlbums]);
+
+  const handleLoadReferenceAlbum = useCallback(async (albumId: string, albumName: string) => {
+    if (workspace.assets.length > 0) {
+      const ok = window.confirm('切换图集会替换当前参考图列表，确定继续？');
+      if (!ok) return;
+    }
+    await workspace.loadReferenceAlbum(albumId);
+    setCurrentReferenceAlbumId(albumId);
+    setCurrentReferenceAlbumName(albumName);
+  }, [workspace]);
+
+  const handleSaveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
+    if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考图');
+    const albumId = await workspace.saveCurrentAsReferenceAlbum(name);
+    setCurrentReferenceAlbumId(albumId);
+    setCurrentReferenceAlbumName(name);
+    await refreshReferenceAlbums();
+  }, [workspace, refreshReferenceAlbums]);
+
+  const handleCreateReferenceAlbum = useCallback(async (name: string) => {
+    const albumId = await workspace.createReferenceAlbum(name);
+    await workspace.clearAssets();
+    setCurrentReferenceAlbumId(albumId);
+    setCurrentReferenceAlbumName(name);
+    await refreshReferenceAlbums();
+  }, [workspace, refreshReferenceAlbums]);
 
   // ============================================================================
   // Render
@@ -179,6 +284,13 @@ export function GenerationComposer({
           onLoad={handleLoadCollection}
           onSave={handleSaveCollection}
           onNew={handleNewCollection}
+          onOpenReferenceAlbums={() => setShowAlbumPicker(true)}
+          referenceAlbums={referenceAlbums}
+          currentReferenceAlbumId={currentReferenceAlbumId}
+          currentReferenceAlbumName={currentReferenceAlbumName}
+          onReferenceAlbumLoad={handleLoadReferenceAlbum}
+          onReferenceAlbumSaveCurrent={handleSaveCurrentAsReferenceAlbum}
+          onReferenceAlbumCreate={handleCreateReferenceAlbum}
           loading={workspace.loading}
         />
 
@@ -306,6 +418,13 @@ export function GenerationComposer({
           </div>
         </div>
       )}
+
+      <ReferenceAlbumPicker
+        open={showAlbumPicker}
+        currentCount={workspace.assets.length}
+        onClose={() => setShowAlbumPicker(false)}
+        onConfirm={handleAddReferenceImages}
+      />
     </>
   );
 }

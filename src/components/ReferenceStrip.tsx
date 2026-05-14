@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 import { ReferenceThumb } from '@/components/ReferenceThumb';
 import { AddReferenceCard } from '@/components/AddReferenceCard';
@@ -28,6 +28,33 @@ function getFrameRole(asset: WorkspaceAssetItem, idx: number, assets: WorkspaceA
   return null;
 }
 
+function getItemKey(asset: WorkspaceAssetItem): string {
+  return asset.id || asset.assetId;
+}
+
+function clampIndex(index: number, max: number): number {
+  return Math.max(0, Math.min(index, max));
+}
+
+function moveAssetToInsertIndex(
+  items: WorkspaceAssetItem[],
+  sourceKey: string,
+  rawInsertIndex: number
+): WorkspaceAssetItem[] {
+  const sourceIdx = items.findIndex((item) => getItemKey(item) === sourceKey);
+  if (sourceIdx < 0) return items;
+
+  const next = [...items];
+  const [source] = next.splice(sourceIdx, 1);
+  const insertIndex = clampIndex(
+    rawInsertIndex > sourceIdx ? rawInsertIndex - 1 : rawInsertIndex,
+    next.length
+  );
+
+  next.splice(insertIndex, 0, source);
+  return next;
+}
+
 export function ReferenceStrip({
   assets,
   uploadStatuses,
@@ -38,54 +65,140 @@ export function ReferenceStrip({
   generationMode,
   loading = false,
 }: Props) {
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [orderedAssets, setOrderedAssets] = useState<WorkspaceAssetItem[]>(assets);
+  const [draggedKey, setDraggedKey] = useState<string | null>(null);
+  const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropzoneRef = useRef<HTMLDivElement>(null);
+  const orderedAssetsRef = useRef<WorkspaceAssetItem[]>(assets);
+  const pointerDragRef = useRef<{
+    sourceKey: string;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    originalAssets: WorkspaceAssetItem[];
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    orderedAssetsRef.current = orderedAssets;
+  }, [orderedAssets]);
+
+  useEffect(() => {
+    if (pointerDragRef.current) return;
+    setOrderedAssets(assets);
+    orderedAssetsRef.current = assets;
+  }, [assets]);
 
   // ============================================================================
   // Drag & Drop
   // ============================================================================
 
-  const handleDragStart = useCallback((e: React.DragEvent, asset: WorkspaceAssetItem) => {
-    setDraggedId(asset.assetId);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', asset.assetId);
-  }, []);
+  const getInsertIndexAtPoint = useCallback((clientX: number) => {
+    const items = Array.from(
+      dropzoneRef.current?.querySelectorAll<HTMLElement>('[data-ref-item-key]') ?? []
+    );
+    if (items.length === 0) return 0;
 
-  const handleDragOver = useCallback((e: React.DragEvent, assetId: string) => {
-    e.preventDefault();
-    if (assetId !== draggedId) {
-      setDragOverId(assetId);
+    for (let idx = 0; idx < items.length; idx += 1) {
+      const item = items[idx];
+      const rect = item.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      if (clientX < centerX) return idx;
     }
-  }, [draggedId]);
 
-  const handleDragLeave = useCallback(() => {
-    setDragOverId(null);
+    return items.length;
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent, targetId: string) => {
+  const resetPointerDrag = useCallback(() => {
+    pointerDragRef.current = null;
+    setDraggedKey(null);
+    setDragInsertIndex(null);
+  }, []);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent, asset: WorkspaceAssetItem) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.ref-thumb-remove')) return;
+    if (uploading || loading) return;
+
+    const sourceKey = getItemKey(asset);
+    pointerDragRef.current = {
+      sourceKey,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      originalAssets: orderedAssetsRef.current,
+    };
+    suppressClickRef.current = false;
+    setDraggedKey(sourceKey);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [loading, uploading]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    const drag = pointerDragRef.current;
+    if (!drag) return;
+
+    const deltaX = Math.abs(e.clientX - drag.startX);
+    const deltaY = Math.abs(e.clientY - drag.startY);
+    if (deltaX < 4 && deltaY < 4) return;
+
+    drag.moved = true;
+    suppressClickRef.current = true;
+    const insertIndex = getInsertIndexAtPoint(e.clientX);
+    const nextOrder = moveAssetToInsertIndex(
+      orderedAssetsRef.current,
+      drag.sourceKey,
+      insertIndex
+    );
+
+    orderedAssetsRef.current = nextOrder;
+    setOrderedAssets(nextOrder);
+    setDragInsertIndex(insertIndex);
+  }, [getInsertIndexAtPoint]);
+
+  const handlePointerUp = useCallback(async (e: React.PointerEvent) => {
+    const drag = pointerDragRef.current;
+    if (!drag) return;
+
+    const finalOrder = orderedAssetsRef.current;
+
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+
+    resetPointerDrag();
+
+    if (drag.moved) {
+      suppressClickRef.current = true;
+      const changed = finalOrder.some((asset, index) => {
+        return getItemKey(asset) !== getItemKey(drag.originalAssets[index]);
+      });
+
+      if (changed) {
+        await onReorder(finalOrder.map((asset, index) => ({
+          assetId: asset.assetId,
+          sortOrder: index,
+        })));
+      }
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
+  }, [onReorder, resetPointerDrag]);
+
+  const handlePointerCancel = useCallback((e: React.PointerEvent) => {
+    resetPointerDrag();
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, [resetPointerDrag]);
+
+  const handleClickCapture = useCallback((e: React.MouseEvent) => {
+    if (!suppressClickRef.current) return;
     e.preventDefault();
-    setDraggedId(null);
-    setDragOverId(null);
-
-    const sourceId = e.dataTransfer.getData('text/plain');
-    if (!sourceId || sourceId === targetId) return;
-
-    const sourceIdx = assets.findIndex((a) => a.assetId === sourceId);
-    const targetIdx = assets.findIndex((a) => a.assetId === targetId);
-    if (sourceIdx === -1 || targetIdx === -1) return;
-
-    const newAssets = [...assets];
-    const [removed] = newAssets.splice(sourceIdx, 1);
-    newAssets.splice(targetIdx, 0, removed);
-
-    await onReorder(newAssets.map((a, i) => ({ assetId: a.assetId, sortOrder: i })));
-  }, [assets, onReorder]);
-
-  const handleDragEnd = useCallback(() => {
-    setDraggedId(null);
-    setDragOverId(null);
+    e.stopPropagation();
+    suppressClickRef.current = false;
   }, []);
 
   // ============================================================================
@@ -126,7 +239,7 @@ export function ReferenceStrip({
     }
   }, [onUpload]);
 
-  const displayAssets = assets.slice(0, MAX_REFS);
+  const displayAssets = orderedAssets.slice(0, MAX_REFS);
   const hasMore = assets.length > MAX_REFS;
 
   // ============================================================================
@@ -147,29 +260,34 @@ export function ReferenceStrip({
 
       {/* 拖放区：缩略图 + 添加卡片 */}
       <div
+        ref={dropzoneRef}
         className="ref-strip-dropzone"
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
         onDrop={handleDropZone}
       >
         {displayAssets.map((asset, idx) => {
+          const itemKey = getItemKey(asset);
           const uploadStatus = uploadStatuses[asset.assetId] ?? 'uploaded';
-          const frameRole = getFrameRole(asset, idx, assets, generationMode);
-          const isDragging = draggedId === asset.assetId;
-          const isDragOver = dragOverId === asset.assetId;
+          const frameRole = getFrameRole(asset, idx, orderedAssets, generationMode);
+          const isDragging = draggedKey === itemKey;
+          const isInsertBefore = dragInsertIndex === idx && !isDragging;
+          const isInsertAfter = dragInsertIndex === displayAssets.length && idx === displayAssets.length - 1;
 
           return (
             <div
-              key={asset.assetId}
-              draggable
-              onDragStart={(e) => handleDragStart(e, asset)}
-              onDragOver={(e) => handleDragOver(e, asset.assetId)}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => handleDrop(e, asset.assetId)}
-              onDragEnd={handleDragEnd}
+              key={itemKey}
+              data-ref-item-key={itemKey}
+              onPointerDown={(e) => handlePointerDown(e, asset)}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
+              onClickCapture={handleClickCapture}
+              onDragStart={(e) => e.preventDefault()}
               className={[
                 'ref-thumb-wrap',
                 isDragging ? 'ref-thumb-dragging' : '',
-                isDragOver ? 'ref-thumb-drag-over' : '',
+                isInsertBefore ? 'ref-thumb-insert-before' : '',
+                isInsertAfter ? 'ref-thumb-insert-after' : '',
               ].filter(Boolean).join(' ')}
             >
               <ReferenceThumb

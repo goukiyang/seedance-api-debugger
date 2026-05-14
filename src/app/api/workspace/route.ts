@@ -8,15 +8,19 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWorkspace, getWorkspaceWithAssets } from '@/lib/assets/workspace';
+import { getSession } from '@/lib/auth/session';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
     // 从 header 获取 tabId（前端设置）
     const tabId = request.headers.get('x-tab-id') || 'default';
 
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
     const workspace = await getWorkspaceWithAssets(workspaceId);
 
     if (!workspace) {
@@ -35,10 +39,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
     const body = await request.json().catch(() => ({}));
     const tabId = body.tabId || request.headers.get('x-tab-id') || 'default';
 
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
     const workspace = await getWorkspaceWithAssets(workspaceId);
 
     return NextResponse.json({ workspace });

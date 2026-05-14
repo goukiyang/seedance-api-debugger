@@ -19,6 +19,8 @@ import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/c
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { buildContentArray } from '@/lib/provider/jimeng';
 import { getSession } from '@/lib/auth/session';
+import { AuthError } from '@/lib/auth/session';
+import { getProjectForGeneration } from '@/lib/projects/permissions';
 import type { CreateVideoInput, GenerationMode } from '@/types';
 import type { AssetMapping } from '@/lib/assets/collection';
 
@@ -538,8 +540,21 @@ export async function POST(request: NextRequest) {
     const returnLastFrame = body.return_last_frame !== undefined ? Boolean(body.return_last_frame) : false;
     const watermark = body.watermark !== undefined ? Boolean(body.watermark) : false;
 
+    let project;
+    try {
+      project = await getProjectForGeneration(
+        user,
+        typeof body.project_id === 'string' && body.project_id.trim() ? body.project_id.trim() : null,
+      );
+    } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({ error: 'Forbidden', message: error.message }, { status: error.status });
+      }
+      throw error;
+    }
+
     // ---- Workspace Resolution ----
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
 
     // ---- Reference Assets 元数据（已弃用，前端不再传 SeedanceAssetSelector 数据）----
     // 前端已简化为：上传 → workspace → 后台自动准备
@@ -841,6 +856,12 @@ export async function POST(request: NextRequest) {
         execution_expires_after: body.execution_expires_after || null,
         workspace_id: workspaceId,
         snapshot_id: snapshot.id,
+        user_id: user.id,
+        owner_user_id: user.id,
+        project_id: project.id,
+        visibility: project.type === 'personal' ? 'private' : 'project',
+        billing_scope: 'user',
+        billing_account_id: user.id,
         params_json: JSON.stringify({
           ratio, duration, resolution, seed,
           generateAudio, returnLastFrame, watermark,
@@ -886,6 +907,7 @@ export async function POST(request: NextRequest) {
         created_at: updatedTask.created_at,
         generation_mode: updatedTask.generation_mode,
         workspace_id: workspaceId,
+        project_id: project.id,
         snapshot_id: snapshot.id,
         prompt_rendered: promptRendered,
         asset_mapping: assetMapping,

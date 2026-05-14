@@ -28,6 +28,19 @@ function ensureDirs() {
   });
 }
 
+function isLocalUploadUrl(url: string | null | undefined): url is string {
+  return Boolean(url && url.startsWith('/uploads/'));
+}
+
+function localPublicPath(url: string): string {
+  return path.join(process.cwd(), 'public', url.replace(/^\/+/, ''));
+}
+
+function localUploadExists(url: string | null | undefined): boolean {
+  if (!isLocalUploadUrl(url)) return true;
+  return fs.existsSync(localPublicPath(url));
+}
+
 // ============================================================================
 // Hash 计算（去重）
 // ============================================================================
@@ -123,7 +136,8 @@ export interface UploadResult {
 export async function uploadAsset(
   buffer: Buffer,
   fileName: string,
-  mimeType: string
+  mimeType: string,
+  ownerId = 'default-user'
 ): Promise<UploadResult> {
   ensureDirs();
 
@@ -134,13 +148,48 @@ export async function uploadAsset(
   // 检查是否已存在（通过 hash 去重）
   const existing = await prisma.asset.findUnique({ where: { hash } });
   if (existing) {
+    const updates: {
+      original_url?: string;
+      thumbnail_url?: string | null;
+      width?: number | null;
+      height?: number | null;
+    } = {};
+    let thumbnailUrl = existing.thumbnail_url;
+    let width = existing.width;
+    let height = existing.height;
+
+    if (isLocalUploadUrl(existing.original_url) && !localUploadExists(existing.original_url)) {
+      const storedFileName = `${hash}.${ext}`;
+      const filePath = path.join(ASSETS_DIR, storedFileName);
+      fs.writeFileSync(filePath, buffer);
+      updates.original_url = `/uploads/assets/${storedFileName}`;
+    }
+
+    if (assetType === 'image' && (!existing.thumbnail_url || !localUploadExists(existing.thumbnail_url))) {
+      const metadata = await sharp(buffer).metadata();
+      width = metadata.width ?? null;
+      height = metadata.height ?? null;
+      const thumbResult = await generateThumbnail(buffer, mimeType);
+      thumbnailUrl = thumbResult.thumbPath;
+      updates.thumbnail_url = thumbResult.thumbPath;
+      updates.width = width;
+      updates.height = height;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await prisma.asset.update({
+        where: { id: existing.id },
+        data: updates,
+      });
+    }
+
     return {
       assetId: existing.id,
-      originalUrl: existing.original_url,
-      thumbnailUrl: existing.thumbnail_url,
+      originalUrl: (updates.original_url as string | undefined) ?? existing.original_url,
+      thumbnailUrl,
       hash: existing.hash ?? '',
-      width: existing.width ?? undefined,
-      height: existing.height ?? undefined,
+      width: width ?? undefined,
+      height: height ?? undefined,
     };
   }
 
@@ -167,7 +216,7 @@ export async function uploadAsset(
   const asset = await prisma.asset.create({
     data: {
       id: uuidv4(),
-      owner_id: 'default-user',
+      owner_id: ownerId,
       type: assetType,
       original_url: `/uploads/assets/${storedFileName}`,
       thumbnail_url: thumbnailUrl,

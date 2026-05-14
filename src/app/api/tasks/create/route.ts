@@ -8,6 +8,19 @@ import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
+import { AuthError } from '@/lib/auth/session';
+import { getProjectForGeneration } from '@/lib/projects/permissions';
+import {
+  createProviderApiRequest,
+  markProviderApiRequestAccepted,
+  markProviderApiRequestFailed,
+  recordTaskCostEstimate,
+  recordTaskCostSettlement,
+} from '@/lib/costs/ledger';
+import {
+  getAuthorizedReferenceImagesForUse,
+  uniquePreserveOrder,
+} from '@/lib/reference-albums/permissions';
 import type { CreateVideoInput, GenerationMode, VideoResolution, VideoDuration } from '@/types';
 
 const VALID_GENERATION_MODES: GenerationMode[] = [
@@ -55,6 +68,17 @@ export async function POST(request: NextRequest) {
   if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
 
+  let project;
+  try {
+    project = await getProjectForGeneration(
+      user,
+      typeof body.project_id === 'string' && body.project_id.trim() ? body.project_id.trim() : null,
+    );
+  } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
+    throw error;
+  }
+
   // --- Pricing ---
   const pricing = calculateEstimatedCost(resolution, duration);
   const estimatedCost = pricing.estimatedCost;
@@ -79,7 +103,54 @@ export async function POST(request: NextRequest) {
 
   // --- Workspace + Reference Image Preparation ---
   const tabId = request.headers.get('x-tab-id') || 'default';
-  const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+  const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
+
+  const requestedReferenceImageIds = uniquePreserveOrder(
+    Array.isArray(body.reference_image_ids)
+      ? body.reference_image_ids
+      : Array.isArray(body.referenceImageIds)
+        ? body.referenceImageIds
+        : [],
+  );
+
+  const workspaceReferenceImageIds = uniquePreserveOrder(
+    (await prisma.workspaceAsset.findMany({
+      where: {
+        workspace_id: workspaceId,
+        reference_image_id: { not: null },
+      },
+      orderBy: { sort_order: 'asc' },
+      select: { reference_image_id: true },
+    })).map((item) => item.reference_image_id || ''),
+  );
+
+  if (requestedReferenceImageIds.length > 0) {
+    const workspaceIdSet = new Set(workspaceReferenceImageIds);
+    const missingFromWorkspace = requestedReferenceImageIds.filter((id) => !workspaceIdSet.has(id));
+    if (missingFromWorkspace.length > 0) {
+      return NextResponse.json(
+        { error: 'REFERENCE_IMAGE_NOT_IN_WORKSPACE', message: '参考图必须先加入当前生成工作台' },
+        { status: 400 },
+      );
+    }
+  }
+
+  const generationReferenceImageIds = requestedReferenceImageIds.length > 0
+    ? requestedReferenceImageIds
+    : workspaceReferenceImageIds;
+  if (generationReferenceImageIds.length > 9) {
+    return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+  }
+  let generationReferenceImages: Awaited<ReturnType<typeof getAuthorizedReferenceImagesForUse>> = [];
+  try {
+    generationReferenceImages = generationReferenceImageIds.length > 0
+      ? await getAuthorizedReferenceImagesForUse(user, generationReferenceImageIds)
+      : [];
+  } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
+    throw error;
+  }
+  const generationReferenceAlbumIds = uniquePreserveOrder(generationReferenceImages.map((image) => image.album_id));
 
   const { preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(workspaceId);
 
@@ -160,6 +231,20 @@ export async function POST(request: NextRequest) {
 
   // --- Credit check + freeze + create single VideoTask in ONE transaction ---
   let taskId: string;
+  let createdTask!: {
+    id: string;
+    user_id: string | null;
+    owner_user_id: string | null;
+    project_id: string | null;
+    provider: string;
+    provider_task_id: string | null;
+    model: string;
+    resolution: string | null;
+    duration: number | null;
+    estimated_cost: number | null;
+    pricing_rule_id: string | null;
+    pricing_snapshot: string | null;
+  };
   try {
     const result = await prisma.$transaction(async (tx) => {
       const account = await tx.creditAccount.findUnique({ where: { user_id: user.id } });
@@ -187,6 +272,8 @@ export async function POST(request: NextRequest) {
           return_last_frame: returnLastFrame,
           watermark,
           reference_image_urls: referenceImageUrls.length > 0 ? JSON.stringify(referenceImageUrls) : null,
+          reference_album_ids: generationReferenceAlbumIds.length > 0 ? JSON.stringify(generationReferenceAlbumIds) : null,
+          reference_image_ids: generationReferenceImageIds.length > 0 ? JSON.stringify(generationReferenceImageIds) : null,
           reference_video_urls: referenceVideoUrls.length > 0 ? JSON.stringify(referenceVideoUrls) : null,
           reference_audio_urls: referenceAudioUrls.length > 0 ? JSON.stringify(referenceAudioUrls) : null,
           first_frame_url: firstFrameUrl || null,
@@ -194,16 +281,23 @@ export async function POST(request: NextRequest) {
           frame_image_urls: frameImageUrls.length > 0 ? JSON.stringify(frameImageUrls) : null,
           local_status: 'submitted',
           user_id: user.id,
+          owner_user_id: user.id,
+          project_id: project.id,
+          visibility: project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
           frozen_cost: estimatedCost,
           pricing_snapshot: JSON.stringify(pricing),
           pricing_rule_id: pricing.pricingRuleId,
           idempotency_key: idempotencyKey || null,
+          billing_scope: 'user',
+          billing_account_id: user.id,
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
           params_json: JSON.stringify({
             ratio, duration, resolution, seed,
             generateAudio, returnLastFrame, watermark,
+            referenceAlbumIds: generationReferenceAlbumIds,
+            referenceImageIds: generationReferenceImageIds,
             preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
             prepSummary,
           }),
@@ -232,10 +326,29 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await tx.operationLog.create({
+        data: {
+          operator_id: user.id,
+          action: 'generation_create',
+          target_type: 'VideoTask',
+          target_id: task.id,
+          detail: JSON.stringify({
+            project_id: project.id,
+            owner_user_id: user.id,
+            estimated_cost: estimatedCost,
+            reference_album_ids: generationReferenceAlbumIds,
+            reference_image_ids: generationReferenceImageIds,
+          }),
+        },
+      });
+
+      await recordTaskCostEstimate(tx, task, pricing, user.id);
+
       return task;
     });
 
     taskId = result.id;
+    createdTask = result;
   } catch (err) {
     if (err instanceof CreditError) {
       return NextResponse.json({ error: err.code, message: err.message }, { status: 400 });
@@ -244,7 +357,17 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Call Seedance provider DIRECTLY (no internal HTTP) ---
+  let providerRequestId: string | null = null;
   try {
+    const providerRequest = await createProviderApiRequest({
+      task: createdTask,
+      endpoint: 'seedance.createVideoTask',
+      method: 'POST',
+      idempotencyKey: idempotencyKey || null,
+      requestPayload: providerInput,
+    });
+    providerRequestId = providerRequest.id;
+
     const providerResult = await createVideoTask(providerInput);
 
     await prisma.videoTask.update({
@@ -256,6 +379,18 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await markProviderApiRequestAccepted({
+      requestId: providerRequest.id,
+      task: { ...createdTask, provider_task_id: providerResult.provider_task_id },
+      providerTaskId: providerResult.provider_task_id,
+      responseSummary: {
+        provider_task_id: providerResult.provider_task_id,
+        response_keys: providerResult.raw && typeof providerResult.raw === 'object'
+          ? Object.keys(providerResult.raw as Record<string, unknown>)
+          : [],
+      },
+    });
+
     return NextResponse.json({
       id: taskId,
       provider_task_id: providerResult.provider_task_id,
@@ -264,12 +399,22 @@ export async function POST(request: NextRequest) {
       frozen_cost: estimatedCost,
       pricing,
       workspace_id: workspaceId,
+      project_id: project.id,
       snapshot_id: snapshot.id,
       prompt_rendered: promptRendered,
       asset_mapping: assetMapping,
+      reference_album_ids: generationReferenceAlbumIds,
+      reference_image_ids: generationReferenceImageIds,
       created_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (providerRequestId) {
+      await markProviderApiRequestFailed({
+        requestId: providerRequestId,
+        errorCode: 'PROVIDER_CREATE_FAILED',
+        errorMessage: err instanceof Error ? err.message : 'Seedance 调用异常',
+      }).catch(() => {});
+    }
     await handleProviderFailure(
       taskId,
       user.id,
@@ -295,7 +440,7 @@ async function handleProviderFailure(
   errorMessage: string,
 ) {
   await prisma.$transaction(async (tx) => {
-    await tx.videoTask.update({
+    const failedTask = await tx.videoTask.update({
       where: { id: taskId },
       data: {
         local_status: 'failed',
@@ -331,6 +476,8 @@ async function handleProviderFailure(
         reason: `任务创建失败，返还冻结 ${frozenAmount} 点`,
       },
     });
+
+    await recordTaskCostSettlement(tx, failedTask, 'failed', userId);
   });
 }
 

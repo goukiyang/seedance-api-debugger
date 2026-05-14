@@ -4,20 +4,27 @@
 
 import { prisma } from '@/lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
 
 // ============================================================================
 // Workspace 管理
 // ============================================================================
 
+function localUploadExists(url: string | null): boolean {
+  if (!url || !url.startsWith('/uploads/')) return true;
+  return fs.existsSync(path.join(process.cwd(), 'public', url.replace(/^\/+/, '')));
+}
+
 /**
  * 获取或创建当前用户的活跃工作区
  * 每个浏览器 tab 有独立 workspace（通过 tabId 区分）
  */
-export async function getOrCreateWorkspace(tabId: string): Promise<{ id: string }> {
+export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-user'): Promise<{ id: string }> {
   // 尝试查找现有 active workspace
   let workspace = await prisma.workspace.findFirst({
     where: {
-      owner_id: 'default-user',
+      owner_id: ownerId,
       status: 'active',
     },
     orderBy: { updated_at: 'desc' },
@@ -27,7 +34,7 @@ export async function getOrCreateWorkspace(tabId: string): Promise<{ id: string 
     workspace = await prisma.workspace.create({
       data: {
         id: uuidv4(),
-        owner_id: 'default-user',
+        owner_id: ownerId,
         name: '默认工作台',
         status: 'active',
       },
@@ -49,7 +56,16 @@ export async function getWorkspaceWithAssets(workspaceId: string) {
 
   const workspaceAssets = await prisma.workspaceAsset.findMany({
     where: { workspace_id: workspaceId },
-    include: { asset: true },
+    include: {
+      asset: true,
+      reference_image: {
+        include: {
+          album: {
+            select: { id: true, name: true, status: true },
+          },
+        },
+      },
+    },
     orderBy: { sort_order: 'asc' },
   });
 
@@ -58,11 +74,14 @@ export async function getWorkspaceWithAssets(workspaceId: string) {
     assets: workspaceAssets.map((wa) => ({
       id: wa.id,
       assetId: wa.asset.id,
+      referenceImageId: wa.reference_image_id,
+      referenceAlbumId: wa.reference_image?.album.status === 'active' ? wa.reference_image.album.id : null,
+      referenceAlbumName: wa.reference_image?.album.status === 'active' ? wa.reference_image.album.name : null,
       sortOrder: wa.sort_order,
       role: wa.role,
       type: wa.asset.type,
       originalUrl: wa.asset.original_url,
-      thumbnailUrl: wa.asset.thumbnail_url,
+      thumbnailUrl: localUploadExists(wa.asset.thumbnail_url) ? wa.asset.thumbnail_url : null,
       fileName: wa.asset.file_name,
       width: wa.asset.width,
       height: wa.asset.height,
@@ -83,8 +102,17 @@ export async function getWorkspaceWithAssets(workspaceId: string) {
 export async function addAssetToWorkspace(
   workspaceId: string,
   assetId: string,
-  role?: string
+  role?: string,
+  ownerId = 'default-user',
+  options?: { referenceImageId?: string; allowSharedAsset?: boolean },
 ): Promise<string> {
+  const asset = await prisma.asset.findFirst({
+    where: options?.allowSharedAsset || ownerId === 'default-user'
+      ? { id: assetId }
+      : { id: assetId, owner_id: ownerId },
+  });
+  if (!asset) throw new Error('Asset not found or permission denied');
+
   // 检查是否已在工作区
   const existing = await prisma.workspaceAsset.findUnique({
     where: {
@@ -103,6 +131,7 @@ export async function addAssetToWorkspace(
       data: {
         sort_order: (maxOrder._max.sort_order ?? 0) + 1,
         role: role ?? existing.role,
+        reference_image_id: options?.referenceImageId ?? existing.reference_image_id,
       },
     });
     return existing.id;
@@ -118,6 +147,7 @@ export async function addAssetToWorkspace(
       id: uuidv4(),
       workspace_id: workspaceId,
       asset_id: assetId,
+      reference_image_id: options?.referenceImageId ?? null,
       sort_order: (maxOrder._max.sort_order ?? 0) + 1,
       role: role,
     },

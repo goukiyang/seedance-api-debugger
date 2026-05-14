@@ -8,12 +8,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadAsset } from '@/lib/assets/storage';
 import { uploadPublicAsset } from '@/lib/assets/public-storage';
+import { getSession } from '@/lib/auth/session';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
 
@@ -66,7 +70,7 @@ export async function POST(request: NextRequest) {
       const pubResult = await uploadPublicAsset(buffer, file.name, file.type);
       console.log(`[Upload] 公网上传成功: ${pubResult.storageProvider} → ${pubResult.publicUrl}`);
       // 公网上传成功后，创建本地 asset 记录，original_url 存公网 URL
-      const localResult = await uploadAsset(buffer, file.name, file.type);
+      const localResult = await uploadAsset(buffer, file.name, file.type, user.id);
       uploadResult = {
         ...localResult,
         fileName: file.name,
@@ -80,7 +84,7 @@ export async function POST(request: NextRequest) {
       uploadResult.originalUrl = pubResult.publicUrl;
     } catch (pubError) {
       // 公网上传失败，打印警告但不阻断，使用本地 URL
-      const localResult = await uploadAsset(buffer, file.name, file.type);
+      const localResult = await uploadAsset(buffer, file.name, file.type, user.id);
       uploadResult = {
         ...localResult,
         fileName: file.name,
