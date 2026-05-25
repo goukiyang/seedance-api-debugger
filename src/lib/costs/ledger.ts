@@ -12,6 +12,7 @@ export type CostTaskSnapshot = {
   project_id: string | null;
   provider: string;
   provider_task_id?: string | null;
+  provider_client_request_id?: string | null;
   model: string;
   resolution?: string | null;
   duration?: number | null;
@@ -19,6 +20,22 @@ export type CostTaskSnapshot = {
   pricing_rule_id?: string | null;
   pricing_snapshot?: string | null;
 };
+
+export type ProviderReportedChargeParams = {
+  actualCost: number | string | Prisma.Decimal;
+  currency: string;
+  billingStatus?: string | null;
+  billingTime?: Date | number | string | null;
+  usage?: unknown;
+  providerTaskId?: string | null;
+  clientRequestId?: string | null;
+  raw?: unknown;
+  reason?: string | null;
+};
+
+const PRISMA_INT_MAX = 2_147_483_647;
+const MICROS_PER_UNIT = 1_000_000;
+const MICROS_PER_MINOR_UNIT = 10_000;
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value, (_key, current) => {
@@ -42,6 +59,122 @@ function providerName(task: Pick<CostTaskSnapshot, 'provider'>) {
 
 export function officialChargeIdempotencyKey(provider: string | null | undefined, officialChargeId: string) {
   return `official_charge:${provider || 'seedance'}:${officialChargeId.trim()}`;
+}
+
+function assertPrismaInt(value: number, fieldName: string) {
+  if (!Number.isInteger(value) || value < 0 || value > PRISMA_INT_MAX) {
+    throw new Error(`${fieldName} 超出当前 Int 字段可保存范围`);
+  }
+  return value;
+}
+
+function decimalStringToMicros(input: string) {
+  const normalized = input.trim().replace(/[,，]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    throw new Error('actualCost 必须是非负数字');
+  }
+
+  const [wholePart, fractionPart = ''] = normalized.split('.');
+  const paddedFraction = fractionPart.slice(0, 6).padEnd(6, '0');
+  let micros = (BigInt(wholePart) * BigInt(MICROS_PER_UNIT)) + BigInt(paddedFraction || '0');
+
+  if (fractionPart.length > 6 && Number(fractionPart[6]) >= 5) {
+    micros += BigInt(1);
+  }
+
+  if (micros > BigInt(PRISMA_INT_MAX)) {
+    throw new Error('actualCost micros 超出当前 Int 字段可保存范围');
+  }
+
+  return Number(micros);
+}
+
+function amountToMicros(value: ProviderReportedChargeParams['actualCost']) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0) throw new Error('actualCost 必须是非负数字');
+    return assertPrismaInt(Math.round(value * MICROS_PER_UNIT), 'actualCost micros');
+  }
+
+  return decimalStringToMicros(value.toString());
+}
+
+function microsToAmountMinor(amountMicros: number) {
+  if (amountMicros % MICROS_PER_MINOR_UNIT !== 0) return null;
+  return assertPrismaInt(amountMicros / MICROS_PER_MINOR_UNIT, 'amount_minor');
+}
+
+function microsToDecimalString(amountMicros: number) {
+  const whole = Math.floor(amountMicros / MICROS_PER_UNIT);
+  const fraction = `${amountMicros % MICROS_PER_UNIT}`.padStart(6, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : `${whole}`;
+}
+
+function parseBillingTime(value: ProviderReportedChargeParams['billingTime']) {
+  if (value === undefined || value === null || value === '') return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) throw new Error('billingTime 不是有效时间');
+    return value;
+  }
+
+  const numericValue = typeof value === 'number'
+    ? value
+    : /^\d+(\.\d+)?$/.test(value.trim())
+      ? Number(value.trim())
+      : null;
+
+  if (numericValue !== null) {
+    if (!Number.isFinite(numericValue) || numericValue < 0) throw new Error('billingTime 不是有效时间');
+    const timestamp = numericValue > 10_000_000_000 ? numericValue : numericValue * 1000;
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) throw new Error('billingTime 不是有效时间');
+    return parsed;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error('billingTime 不是有效时间');
+  return parsed;
+}
+
+function safeJson(value: unknown) {
+  if (value === undefined || value === null) return null;
+  try {
+    return stableJson(value);
+  } catch {
+    return JSON.stringify({ value: String(value) });
+  }
+}
+
+function usageMetric(usage: unknown, task: CostTaskSnapshot) {
+  if (usage && typeof usage === 'object') {
+    const usageRecord = usage as Record<string, unknown>;
+    const totalTokens = Number(usageRecord.total_tokens ?? usageRecord.completion_tokens);
+    if (Number.isFinite(totalTokens) && totalTokens >= 0) {
+      return { quantity: totalTokens, unit: 'token' };
+    }
+  }
+
+  return {
+    quantity: task.duration || null,
+    unit: task.duration === null || task.duration === undefined ? null : 'video_second',
+  };
+}
+
+function providerReportedOfficialChargeId(params: {
+  providerTaskId?: string | null;
+  clientRequestId?: string | null;
+  taskId: string;
+  billingTime: Date | null;
+  amountMicros: number;
+  currency: string;
+}) {
+  const externalIdentity = params.providerTaskId?.trim()
+    ? `provider_task:${params.providerTaskId.trim()}`
+    : params.clientRequestId?.trim()
+      ? `client_request:${params.clientRequestId.trim()}`
+      : `task:${params.taskId}`;
+  const billingIdentity = params.billingTime ? params.billingTime.toISOString() : 'billing_time:unknown';
+  return `provider_usage:${externalIdentity}:${billingIdentity}:${params.amountMicros}:${params.currency}`;
 }
 
 function costSnapshot(task: CostTaskSnapshot, pricing?: PricingSnapshot | null) {
@@ -445,4 +578,155 @@ export async function recordTaskOfficialCharge(
   });
 
   return { ledger, deduplicated: false };
+}
+
+export async function recordProviderReportedCharge(
+  tx: LedgerClient,
+  task: CostTaskSnapshot,
+  params: ProviderReportedChargeParams,
+  createdBy?: string | null,
+) {
+  const currency = params.currency.trim().toUpperCase();
+  if (!currency) throw new Error('currency 不能为空');
+
+  const provider = providerName(task);
+  const amountMicros = amountToMicros(params.actualCost);
+  const amountMinor = microsToAmountMinor(amountMicros);
+  const billingTime = parseBillingTime(params.billingTime);
+  const billingStatus = params.billingStatus?.trim() || null;
+  const providerTaskId = params.providerTaskId?.trim() || task.provider_task_id || null;
+  const clientRequestId = params.clientRequestId?.trim() || task.provider_client_request_id || null;
+  const officialChargeId = providerReportedOfficialChargeId({
+    providerTaskId,
+    clientRequestId,
+    taskId: task.id,
+    billingTime,
+    amountMicros,
+    currency,
+  });
+  const idempotencyKey = officialChargeIdempotencyKey(provider, officialChargeId);
+  const usage = usageMetric(params.usage, task);
+  const occurredAt = billingTime || new Date();
+  const usageSnapshot = safeJson(params.usage);
+  const rawSnapshot = safeJson(params.raw);
+  const providerCostSnapshot = safeJson({
+    source: 'provider_get_result',
+    provider,
+    providerTaskId,
+    clientRequestId,
+    billingStatus,
+    billingTime: billingTime?.toISOString() || null,
+    actualCost: microsToDecimalString(amountMicros),
+    amountMicros,
+    amountMinor,
+    currency,
+    usage: params.usage ?? null,
+    raw: params.raw ?? null,
+    task: {
+      id: task.id,
+      projectId: task.project_id,
+      userId: task.user_id || task.owner_user_id || null,
+      model: task.model,
+      resolution: task.resolution || null,
+      duration: task.duration || null,
+      pricingRuleId: task.pricing_rule_id || null,
+    },
+    officialChargeId,
+    idempotencyKey,
+  });
+
+  const existing = await tx.costLedger.findUnique({
+    where: { idempotency_key: idempotencyKey },
+    include: { allocations: true },
+  });
+
+  if (existing) {
+    if (existing.task_id && existing.task_id !== task.id) {
+      throw new Error('Provider 上报扣费已关联其他任务，不能重复用于当前任务');
+    }
+    return {
+      ledger: existing,
+      deduplicated: true,
+      officialChargeId,
+      idempotencyKey,
+      amountMicros,
+      amountMinor,
+    };
+  }
+
+  const ledgerData = {
+    source_type: 'official_bill',
+    source_id: officialChargeId,
+    task_id: task.id,
+    user_id: task.user_id || task.owner_user_id || null,
+    project_id: task.project_id,
+    provider_name: provider,
+    provider_task_id: providerTaskId,
+    event_type: 'official_charge',
+    amount_minor: amountMinor,
+    amount_micros: amountMicros,
+    currency,
+    usage_quantity: usage.quantity,
+    usage_unit: usage.unit,
+    cost_source: 'provider_usage',
+    confidence: 'confirmed',
+    pricing_rule_id: task.pricing_rule_id || null,
+    pricing_snapshot: providerCostSnapshot,
+    official_charge_id: officialChargeId,
+    reason: params.reason || 'Provider getResult 上报实际扣费',
+    idempotency_key: idempotencyKey,
+    occurred_at: occurredAt,
+    created_by: createdBy || null,
+  } as Prisma.CostLedgerUncheckedCreateInput;
+
+  const ledger = await tx.costLedger.create({ data: ledgerData });
+
+  const allocationData = {
+    ledger_id: ledger.id,
+    allocation_type: task.project_id ? 'project' : 'unallocated',
+    allocation_id: task.project_id || 'unallocated',
+    task_id: task.id,
+    user_id: task.user_id || task.owner_user_id || null,
+    project_id: task.project_id,
+    amount_minor: amountMinor,
+    amount_micros: amountMicros,
+    currency,
+    usage_quantity: usage.quantity,
+    usage_unit: usage.unit,
+    reason: task.project_id ? 'Provider 实际扣费归属到任务当前项目' : '任务暂无项目归属，Provider 实际扣费暂未归属',
+    created_by: createdBy || null,
+  } as Prisma.CostAllocationUncheckedCreateInput;
+
+  await tx.costAllocation.create({ data: allocationData });
+
+  const taskUpdateData = {
+    provider_task_id: providerTaskId || undefined,
+    provider_client_request_id: clientRequestId || undefined,
+    provider_official_amount_minor: amountMinor,
+    provider_final_amount_minor: amountMinor,
+    provider_official_amount_micros: amountMicros,
+    provider_final_amount_micros: amountMicros,
+    provider_cost_currency: currency,
+    provider_cost_status: 'official_confirmed',
+    provider_cost_confirmed_at: occurredAt,
+    provider_billing_status: billingStatus,
+    provider_billing_time: billingTime,
+    provider_usage_snapshot: usageSnapshot,
+    provider_cost_snapshot: providerCostSnapshot || rawSnapshot,
+    cost_allocation_status: task.project_id ? 'allocated' : 'unallocated',
+  } as Prisma.VideoTaskUncheckedUpdateInput;
+
+  await tx.videoTask.update({
+    where: { id: task.id },
+    data: taskUpdateData,
+  });
+
+  return {
+    ledger,
+    deduplicated: false,
+    officialChargeId,
+    idempotencyKey,
+    amountMicros,
+    amountMinor,
+  };
 }

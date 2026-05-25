@@ -16,10 +16,43 @@ type RouteContext = {
   };
 };
 
+const EDITABLE_STATUSES = new Set(['active', 'disabled', 'pending', 'expired']);
+
 function normalizeText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function hasOwn(body: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(body, key);
+}
+
+function parseExpiresAt(value: unknown): Date | null | 'invalid' {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') return 'invalid';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T23:59:59.999+08:00`)
+    : new Date(value);
+  return Number.isNaN(date.getTime()) ? 'invalid' : date;
+}
+
+function canUseAdminSession(user: { role: string; status: string; expires_at: Date | null }) {
+  return user.role === 'admin'
+    && user.status === 'active'
+    && (!user.expires_at || user.expires_at.getTime() > Date.now());
+}
+
+function activeAdminWhere(excludeUserId?: string) {
+  return {
+    role: 'admin',
+    status: 'active',
+    id: excludeUserId ? { not: excludeUserId } : undefined,
+    OR: [
+      { expires_at: null },
+      { expires_at: { gt: new Date() } },
+    ],
+  };
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
@@ -74,21 +107,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const { id } = context.params;
-  const body = await request.json();
+  const body = await request.json() as Record<string, unknown>;
   const name = normalizeText(body.name);
   const username = normalizeText(body.username);
   const email = normalizeText(body.email)?.toLowerCase();
   const password = typeof body.password === 'string' && body.password.length > 0 ? body.password : undefined;
   const role = body.role === 'admin' || body.role === 'user' ? body.role : undefined;
   const accountType = body.account_type === 'internal' || body.account_type === 'external' ? body.account_type : undefined;
+  const status = typeof body.status === 'string' && EDITABLE_STATUSES.has(body.status) ? body.status : undefined;
   const userProfileWasProvided = body.user_profile !== undefined;
   const featureProfileWasProvided = body.feature_profile_id !== undefined;
+  const expiresAtWasProvided = hasOwn(body, 'expires_at');
+  const reason = normalizeText(body.reason);
+
+  if (!reason) return errorJson('reason 为必填', 400);
 
   const existing = await prisma.user.findUnique({ where: { id } });
   if (!existing) return errorJson('用户不存在', 404);
   if (existing.status === 'deleted') return errorJson('用户不存在', 404);
 
   const nextAccountType = accountType || (existing.account_type === 'external' ? 'external' : 'internal');
+  const nextStatus = status || existing.status;
   const nextUserProfile = nextAccountType === 'external'
     ? 'other'
     : userProfileWasProvided
@@ -113,23 +152,38 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (conflict) return errorJson('用户名已被占用', 409);
   }
   const nextEmail = email || existing.email;
-  if (nextAccountType === 'internal' && !isCompanyEmail(nextEmail)) {
+  const nextRole = nextAccountType === 'external' ? 'user' : role || existing.role;
+  const switchingToInternal = nextAccountType === 'internal' && existing.account_type !== 'internal';
+  const changingInternalEmail = nextAccountType === 'internal' && Boolean(email && email !== existing.email);
+  const promotingAdmin = nextAccountType === 'internal' && nextRole === 'admin' && existing.role !== 'admin';
+  if (
+    nextAccountType === 'internal'
+    && (switchingToInternal || changingInternalEmail || promotingAdmin)
+    && !isCompanyEmail(nextEmail)
+  ) {
     return errorJson('内部账号必须使用 @youdoogo.com 公司邮箱', 400);
   }
-  const nextRole = role || existing.role;
   if (nextRole === 'admin' && nextAccountType !== 'internal') {
     return errorJson('管理员必须是内部账号', 400);
   }
-  if (role === 'user' && existing.role === 'admin') {
-    if (id === admin.id) return errorJson('不能将当前登录管理员降级', 400);
-    const activeAdminCount = await prisma.user.count({
-      where: {
-        role: 'admin',
-        status: { notIn: ['deleted', 'disabled'] },
-      },
-    });
-    if (activeAdminCount <= 1) {
-      return errorJson('不能降级最后一个可用管理员账号', 400);
+  const parsedExpiresAt = expiresAtWasProvided ? parseExpiresAt(body.expires_at) : existing.expires_at;
+  if (parsedExpiresAt === 'invalid') return errorJson('expires_at 格式不正确', 400);
+  const nextExpiresAt = parsedExpiresAt;
+  if (nextStatus === 'active' && nextExpiresAt && nextExpiresAt.getTime() <= Date.now()) {
+    return errorJson('启用账号的过期时间必须晚于当前时间', 400);
+  }
+
+  const wasUsableAdmin = canUseAdminSession(existing);
+  const willBeUsableAdmin = canUseAdminSession({
+    role: nextRole,
+    status: nextStatus,
+    expires_at: nextExpiresAt,
+  });
+  if (wasUsableAdmin && !willBeUsableAdmin) {
+    if (id === admin.id) return errorJson('不能让当前登录管理员失去后台访问权限', 400);
+    const otherActiveAdminCount = await prisma.user.count({ where: activeAdminWhere(id) });
+    if (otherActiveAdminCount <= 0) {
+      return errorJson('不能移除最后一个可用管理员账号', 400);
     }
   }
 
@@ -137,10 +191,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (name) updateData.name = name;
   if (username) updateData.username = username;
   if (email) updateData.email = email;
-  if (role) updateData.role = role;
+  if (nextRole !== existing.role) updateData.role = nextRole;
   if (accountType) updateData.account_type = accountType;
+  if (status) updateData.status = status;
   if (userProfileWasProvided || accountType) updateData.user_profile = nextUserProfile;
   if (featureProfileWasProvided || accountType || userProfileWasProvided) updateData.feature_profile_id = nextFeatureProfileId;
+  if (expiresAtWasProvided) updateData.expires_at = nextExpiresAt;
   if (password) updateData.password_hash = hashPassword(password);
 
   if (Object.keys(updateData).length === 0) {
@@ -156,11 +212,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         name: true,
         username: true,
         email: true,
-	        role: true,
-	        account_type: true,
-	        user_profile: true,
-	        feature_profile_id: true,
-	        status: true,
+        role: true,
+        account_type: true,
+        user_profile: true,
+        feature_profile_id: true,
+        status: true,
         expires_at: true,
         created_at: true,
         updated_at: true,
@@ -170,25 +226,36 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     await tx.operationLog.create({
       data: {
         operator_id: admin.id,
-        action: 'update_user',
+        action: nextRole !== existing.role ? 'update_user_role' : 'update_user_account_attributes',
         target_type: 'User',
         target_id: id,
-	        detail: JSON.stringify({
-	          updated_fields: Object.keys(updateData),
-	          before: {
-	            role: existing.role,
-	            account_type: existing.account_type,
-	            user_profile: existing.user_profile,
-	            feature_profile_id: existing.feature_profile_id,
-	          },
-	          after: {
-	            role: user.role,
-	            account_type: user.account_type,
-	            user_profile: user.user_profile,
-	            feature_profile_id: user.feature_profile_id,
-	          },
-	        }),
-	      },
+        detail: JSON.stringify({
+          reason,
+          updated_fields: Object.keys(updateData),
+          before: {
+            name: existing.name,
+            username: existing.username,
+            email: existing.email,
+            role: existing.role,
+            account_type: existing.account_type,
+            user_profile: existing.user_profile,
+            feature_profile_id: existing.feature_profile_id,
+            status: existing.status,
+            expires_at: existing.expires_at,
+          },
+          after: {
+            name: user.name,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            account_type: user.account_type,
+            user_profile: user.user_profile,
+            feature_profile_id: user.feature_profile_id,
+            status: user.status,
+            expires_at: user.expires_at,
+          },
+        }),
+      },
     });
 
     return user;
@@ -213,14 +280,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user || user.status === 'deleted') return errorJson('用户不存在', 404);
 
-  if (user.role === 'admin') {
-    const activeAdminCount = await prisma.user.count({
-      where: {
-        role: 'admin',
-        status: { notIn: ['deleted', 'disabled'] },
-      },
-    });
-    if (activeAdminCount <= 1) {
+  if (canUseAdminSession(user)) {
+    const otherActiveAdminCount = await prisma.user.count({ where: activeAdminWhere(id) });
+    if (otherActiveAdminCount <= 0) {
       return errorJson('不能删除最后一个可用管理员账号', 400);
     }
   }

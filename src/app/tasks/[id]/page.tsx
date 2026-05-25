@@ -46,9 +46,17 @@ interface VideoTask {
   provider_cost_status: string;
   provider_official_amount_minor: number | null;
   provider_final_amount_minor: number | null;
+  provider_official_amount_micros?: number | null;
+  provider_final_amount_micros?: number | null;
   provider_cost_currency: string | null;
   provider_cost_confirmed_at: string | null;
+  provider_billing_status?: string | null;
+  provider_billing_time?: string | number | null;
+  provider_usage_snapshot?: string | null;
+  provider_client_request_id?: string | null;
   cost_allocation_status: string;
+  cost_ledgers?: OfficialChargeLedger[];
+  costLedgers?: OfficialChargeLedger[];
   params_json: string | null;
   reference_images_json: string | null;
   provider_payload_json: string | null;
@@ -64,6 +72,36 @@ interface ProjectOption {
   status: string;
   my_role?: string | null;
   can_manage_project?: boolean;
+}
+
+interface OfficialChargeLedger {
+  id: string;
+  event_type?: string | null;
+  amount_minor?: number | null;
+  amount_micros?: number | null;
+  currency?: string | null;
+  provider_task_id?: string | null;
+  billing_status?: string | null;
+  billing_time?: string | number | null;
+  usage_total_tokens?: number | null;
+  usage_quantity?: number | null;
+  usage_unit?: string | null;
+  official_charge_id?: string | null;
+  confidence?: string | null;
+  cost_source?: string | null;
+  occurred_at?: string | null;
+  created_at?: string | null;
+}
+
+interface ProviderBillingMeta {
+  actualCost: number | null;
+  currency: string | null;
+  billingStatus: string | null;
+  billingTime: string | number | null;
+  usageTotalTokens: number | null;
+  completionTokens: number | null;
+  providerTaskId: string | null;
+  clientRequestId: string | null;
 }
 
 // Seedance 参考图资产元数据（与 generate/page.tsx 的 SelectedReferenceAsset 对应）
@@ -126,7 +164,7 @@ function ReferenceImageDebug({ task, refImagesDebug, providerPayload }: Referenc
   const referenceImages = parseJsonArray(task.reference_image_urls);
 
   return (
-    <div className="card">
+    <div className="task-debug-block">
       <div className="flex items-center justify-between mb-4">
         <h2 className="section-title mb-0">
           参考图调试信息
@@ -328,6 +366,19 @@ function formatAmountMinor(amount: number | null | undefined, currency?: string 
   return `¥${value.toFixed(2)}`;
 }
 
+function formatProviderAmount(amount: number | null | undefined, currency?: string | null): string {
+  if (amount === null || amount === undefined) return '待官方确认';
+  const text = Number.isInteger(amount) ? amount.toFixed(2) : amount.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+  return currency ? `${text} ${currency}` : text;
+}
+
+function formatLedgerAmount(ledger: OfficialChargeLedger): string {
+  if (ledger.amount_micros !== null && ledger.amount_micros !== undefined) {
+    return formatProviderAmount(ledger.amount_micros / 1_000_000, ledger.currency);
+  }
+  return formatAmountMinor(ledger.amount_minor, ledger.currency);
+}
+
 function formatJson(str: string | null): string {
   if (!str) return '{}';
   try {
@@ -346,6 +397,222 @@ function parseJsonArray(str: string | null): string[] {
   }
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('zh-CN');
+}
+
+function formatBillingTime(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'number') {
+    const millis = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(millis).toLocaleString('zh-CN');
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && /^\d+(\.\d+)?$/.test(value)) {
+    return formatBillingTime(numeric);
+  }
+  return formatDateTime(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function pickStringValue(record: Record<string, unknown> | null, keys: string[]): string | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function pickNumberValue(record: Record<string, unknown> | null, keys: string[]): number | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+function usageTotalTokensFrom(value: unknown): { total: number | null; completion: number | null } {
+  const usage = typeof value === 'string' ? parseJsonObject(value) : asRecord(value);
+  return {
+    total: pickNumberValue(usage, ['total_tokens', 'totalTokens']),
+    completion: pickNumberValue(usage, ['completion_tokens', 'completionTokens']),
+  };
+}
+
+function extractProviderBilling(task: VideoTask): ProviderBillingMeta {
+  const raw = parseJsonObject(task.raw_status_response);
+  const rawCandidates = [
+    raw,
+    asRecord(raw?.data),
+    asRecord(raw?.result),
+    asRecord(raw?.response),
+  ].filter(Boolean) as Record<string, unknown>[];
+  const firstWithValue = (keys: string[]) => {
+    for (const candidate of rawCandidates) {
+      const value = pickStringValue(candidate, keys);
+      if (value) return value;
+    }
+    return null;
+  };
+  const firstNumberWithValue = (keys: string[]) => {
+    for (const candidate of rawCandidates) {
+      const value = pickNumberValue(candidate, keys);
+      if (value !== null) return value;
+    }
+    return null;
+  };
+  const usageSnapshot = parseJsonObject(task.provider_usage_snapshot);
+  const usageFromRaw = rawCandidates.map((candidate) => candidate.usage).find((value) => value !== undefined);
+  const usage = usageTotalTokensFrom(usageSnapshot || usageFromRaw);
+
+  return {
+    actualCost: firstNumberWithValue(['actual_cost', 'actualCost']),
+    currency: task.provider_cost_currency || firstWithValue(['currency_or_credit_type', 'currencyOrCreditType', 'currency']),
+    billingStatus: task.provider_billing_status || firstWithValue(['billing_status', 'billingStatus']),
+    billingTime: task.provider_billing_time || firstNumberWithValue(['billing_time', 'billingTime']) || firstWithValue(['billing_time', 'billingTime']),
+    usageTotalTokens: usage.total,
+    completionTokens: usage.completion,
+    providerTaskId: task.provider_task_id || firstWithValue(['provider_task_id', 'providerTaskId', 'task_id', 'id']),
+    clientRequestId: task.provider_client_request_id || firstWithValue(['clientRequestId', 'client_request_id', 'client_requestId']),
+  };
+}
+
+function normalizeOfficialChargeLedger(value: unknown): OfficialChargeLedger | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const eventType = pickStringValue(record, ['event_type', 'eventType']);
+  if (eventType && eventType !== 'official_charge') return null;
+  const id = pickStringValue(record, ['id', 'ledger_id', 'ledgerId']);
+  if (!id) return null;
+  return {
+    id,
+    event_type: eventType || 'official_charge',
+    amount_minor: pickNumberValue(record, ['amount_minor', 'amountMinor']),
+    amount_micros: pickNumberValue(record, ['amount_micros', 'amountMicros']),
+    currency: pickStringValue(record, ['currency']),
+    provider_task_id: pickStringValue(record, ['provider_task_id', 'providerTaskId']),
+    billing_status: pickStringValue(record, ['billing_status', 'billingStatus']),
+    billing_time: pickStringValue(record, ['billing_time', 'billingTime']) || pickNumberValue(record, ['billing_time', 'billingTime']),
+    usage_total_tokens: pickNumberValue(record, ['usage_total_tokens', 'usageTotalTokens', 'total_tokens', 'totalTokens']),
+    usage_quantity: pickNumberValue(record, ['usage_quantity', 'usageQuantity']),
+    usage_unit: pickStringValue(record, ['usage_unit', 'usageUnit']),
+    official_charge_id: pickStringValue(record, ['official_charge_id', 'officialChargeId']),
+    confidence: pickStringValue(record, ['confidence']),
+    cost_source: pickStringValue(record, ['cost_source', 'costSource']),
+    occurred_at: pickStringValue(record, ['occurred_at', 'occurredAt']),
+    created_at: pickStringValue(record, ['created_at', 'createdAt']),
+  };
+}
+
+function extractEmbeddedOfficialCharges(task: VideoTask): OfficialChargeLedger[] {
+  const candidates = [
+    task.cost_ledgers,
+    task.costLedgers,
+    (task as unknown as { official_charge_ledgers?: unknown[] }).official_charge_ledgers,
+    (task as unknown as { officialCharges?: unknown[] }).officialCharges,
+  ];
+  return candidates
+    .flatMap((candidate) => Array.isArray(candidate) ? candidate : [])
+    .map(normalizeOfficialChargeLedger)
+    .filter((ledger): ledger is OfficialChargeLedger => Boolean(ledger));
+}
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = '';
+  let quoted = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    const next = line[i + 1];
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      i += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      cells.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells;
+}
+
+function parseCostLedgerCsv(csv: string, taskId: string): OfficialChargeLedger[] {
+  const lines = csv.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]);
+
+  return lines.slice(1).map((line) => {
+    const cells = parseCsvLine(line);
+    return headers.reduce<Record<string, string>>((row, header, index) => {
+      row[header] = cells[index] || '';
+      return row;
+    }, {});
+  }).filter((row) => row.task_id === taskId && row.event_type === 'official_charge').map((row) => normalizeOfficialChargeLedger({
+    id: row.ledger_id,
+    event_type: row.event_type,
+    amount_minor: row.amount_minor,
+    currency: row.currency,
+    provider_task_id: row.provider_task_id,
+    usage_quantity: row.usage_quantity,
+    usage_unit: row.usage_unit,
+    official_charge_id: row.official_charge_id,
+    confidence: row.confidence,
+    cost_source: row.cost_source,
+    occurred_at: row.occurred_at,
+    created_at: row.created_at,
+  })).filter((ledger): ledger is OfficialChargeLedger => Boolean(ledger));
+}
+
+function mergeLedgers(current: OfficialChargeLedger[], incoming: OfficialChargeLedger[]) {
+  const map = new Map<string, OfficialChargeLedger>();
+  [...current, ...incoming].forEach((ledger) => {
+    map.set(ledger.id, { ...map.get(ledger.id), ...ledger });
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    const aTime = new Date(a.occurred_at || a.created_at || 0).getTime();
+    const bTime = new Date(b.occurred_at || b.created_at || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+function shortId(value: string | null | undefined, length = 10): string {
+  if (!value) return '-';
+  if (value.length <= length) return value;
+  return `${value.slice(0, length)}...`;
+}
+
+function truncateUrl(value: string, length = 56): string {
+  if (value.length <= length) return value;
+  return `${value.slice(0, length)}...`;
+}
+
 export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -361,6 +628,8 @@ export default function TaskDetailPage() {
   const [targetProjectId, setTargetProjectId] = useState('');
   const [moveReason, setMoveReason] = useState('项目成本归属调整');
   const [moveMessage, setMoveMessage] = useState('');
+  const [officialCharges, setOfficialCharges] = useState<OfficialChargeLedger[]>([]);
+  const [officialChargeStatus, setOfficialChargeStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
 
   // 下载状态
   const [downloading, setDownloading] = useState(false);
@@ -385,6 +654,11 @@ export default function TaskDetailPage() {
         setTask(data);
         setTargetProjectId(data.project_id || '');
         setVideoError(false);
+        const embeddedLedgers = extractEmbeddedOfficialCharges(data);
+        if (embeddedLedgers.length > 0) {
+          setOfficialCharges((current) => mergeLedgers(current, embeddedLedgers));
+          setOfficialChargeStatus('ready');
+        }
       }
     } catch (error) {
       console.error('Failed to fetch task:', error);
@@ -407,6 +681,24 @@ export default function TaskDetailPage() {
     }
   }, []);
 
+  const fetchOfficialCharges = useCallback(async () => {
+    setOfficialChargeStatus('loading');
+    try {
+      const res = await fetch('/api/admin/costs/export', { cache: 'no-store' });
+      if (!res.ok) {
+        setOfficialChargeStatus((current) => current === 'ready' ? current : 'unavailable');
+        return;
+      }
+      const csv = await res.text();
+      const ledgers = parseCostLedgerCsv(csv, taskId);
+      setOfficialCharges((current) => mergeLedgers(current, ledgers));
+      setOfficialChargeStatus('ready');
+    } catch (error) {
+      console.error('Failed to fetch official charge ledgers:', error);
+      setOfficialChargeStatus((current) => current === 'ready' ? current : 'error');
+    }
+  }, [taskId]);
+
   useEffect(() => {
     fetchTask();
   }, [fetchTask]);
@@ -414,6 +706,10 @@ export default function TaskDetailPage() {
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  useEffect(() => {
+    fetchOfficialCharges();
+  }, [fetchOfficialCharges]);
 
   // Auto polling
   useEffect(() => {
@@ -436,6 +732,7 @@ export default function TaskDetailPage() {
   const queryStatus = async () => {
     setQuerying(true);
     await fetchTask();
+    await fetchOfficialCharges();
     setQuerying(false);
   };
 
@@ -450,6 +747,12 @@ export default function TaskDetailPage() {
         const hadVideoBefore = task?.result_video_url;
         setTask(data);
         setVideoError(false);
+        const embeddedLedgers = extractEmbeddedOfficialCharges(data);
+        if (embeddedLedgers.length > 0) {
+          setOfficialCharges((current) => mergeLedgers(current, embeddedLedgers));
+          setOfficialChargeStatus('ready');
+        }
+        await fetchOfficialCharges();
         // 如果之前没有视频，现在有了，说明结果刚就绪
         if (data.result_video_url && !hadVideoBefore) {
           alert('视频已就绪，请刷新查看');
@@ -619,615 +922,601 @@ export default function TaskDetailPage() {
     }
   })();
 
+  const referenceAssets: ReferenceAssetMeta[] = (() => {
+    if (!task.params_json) return [];
+    try {
+      const params = JSON.parse(task.params_json);
+      if (!Array.isArray(params.referenceAssets)) return [];
+      return [...params.referenceAssets].sort((a, b) => a.order - b.order);
+    } catch {
+      return [];
+    }
+  })();
+
+  const refImagesDebug: RefImageDebugEntry[] = (() => {
+    if (!task.reference_images_json) return [];
+    try {
+      const parsed = JSON.parse(task.reference_images_json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  const providerPayload: ProviderPayloadDebug = (() => {
+    if (!task.provider_payload_json) return {};
+    try {
+      return JSON.parse(task.provider_payload_json);
+    } catch {
+      return {};
+    }
+  })();
+
+  const providerBilling = extractProviderBilling(task);
+  const hasResultVideo = task.local_status === 'succeeded' && !!videoSrc;
+  const isProcessing = ['submitted', 'running'].includes(task.local_status);
+  const modeLabel = GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
+  const resolvedModeLabel = resolvedMode && resolvedMode !== task.generation_mode ? resolvedMode : null;
+  const resultStateTitle = task.local_status === 'failed'
+    ? '生成失败'
+    : isProcessing
+      ? '生成中'
+      : hasResultVideo
+        ? '生成结果'
+        : '暂无结果';
+
+  const parameterItems = [
+    { label: '模型', value: task.model || 'Seedance 2.0' },
+    { label: '模式', value: modeLabel },
+    { label: '比例', value: task.ratio || '-' },
+    { label: '时长', value: task.duration ? `${task.duration} 秒` : '-' },
+    { label: '分辨率', value: task.resolution || '-' },
+    { label: '随机种子', value: task.seed === -1 ? '随机' : (task.seed ?? '-') },
+    { label: '音频', value: task.generate_audio ? '开启' : '关闭' },
+    { label: '尾帧', value: task.return_last_frame ? '返回' : '不返回' },
+    { label: '水印', value: task.watermark ? '开启' : '关闭' },
+  ];
+
+  const timelineItems = [
+    { label: '创建', value: formatDateTime(task.created_at) },
+    { label: '更新', value: formatDateTime(task.updated_at) },
+    { label: '完成', value: formatDateTime(task.completed_at) },
+  ];
+  const officialCostMicros = task.provider_final_amount_micros ?? task.provider_official_amount_micros;
+  const officialCostMinor = task.provider_final_amount_minor ?? task.provider_official_amount_minor;
+  const officialCostText = officialCostMicros !== null && officialCostMicros !== undefined
+    ? formatProviderAmount(officialCostMicros / 1_000_000, task.provider_cost_currency)
+    : officialCostMinor !== null && officialCostMinor !== undefined
+      ? formatAmountMinor(officialCostMinor, task.provider_cost_currency)
+      : formatProviderAmount(providerBilling.actualCost, providerBilling.currency);
+  const officialBillingTime = providerBilling.billingTime || task.provider_cost_confirmed_at;
+
   return (
-    <div>
-      <div className="page-header">
-        <h1 className="page-title">任务详情</h1>
-        <p className="page-description">查看任务详细信息和生成结果</p>
-      </div>
-
-      {/* 基本信息 */}
-      <div className="card">
-        <h2 className="section-title">基本信息</h2>
-        <div className="info-grid">
-          <div className="info-item">
-            <span className="info-label">本地任务 ID</span>
-            <span className="info-value">{task.id}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">Provider 任务 ID</span>
-            <span className="info-value">{task.provider_task_id || '-'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">所属项目</span>
-            <span className="info-value">
-              {task.project ? (
-                <Link className="table-link" href={`/projects/${task.project.id}`}>{task.project.name}</Link>
-              ) : (
-                <span className="text-red">未归属</span>
-              )}
-            </span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">成本状态</span>
-            <span className="info-value">{costStatusLabel(task.provider_cost_status)} · {task.cost_allocation_status}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">官方成本</span>
-            <span className="info-value">
-              {formatAmountMinor(task.provider_final_amount_minor ?? task.provider_official_amount_minor, task.provider_cost_currency)}
-              {task.provider_cost_confirmed_at ? ` · ${new Date(task.provider_cost_confirmed_at).toLocaleString('zh-CN')}` : ''}
-            </span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">点数结算</span>
-            <span className="info-value">
-              预估 {task.estimated_cost ?? '-'} · 扣除 {task.actual_cost ?? '-'} · 冻结 {task.frozen_cost ?? 0} · 返还 {task.refund_amount ?? 0}
-            </span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">模型</span>
-            <span className="info-value">Seedance 2.0</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">生成模式</span>
-            <span className="info-value">{GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">Resolved 模式</span>
-            <span className="info-value">
-              {(() => {
-                if (!resolvedMode || resolvedMode === task.generation_mode) return '-';
-                return (
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    resolvedMode === 'text_to_video' ? 'bg-gray-100 text-gray-600' :
-                    resolvedMode === 'all_in_one_reference' ? 'bg-blue-100 text-blue-700' :
-                    'bg-purple-100 text-purple-700'
-                  }`}>
-                    {resolvedMode}
-                  </span>
-                );
-              })()}
-            </span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">本地状态</span>
-            <span className="info-value">
-              <span className={`status-badge ${getStatusClass(task.local_status)}`}>
-                {getStatusText(task.local_status)}
-              </span>
-            </span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">Provider 状态</span>
-            <span className="info-value">{task.provider_status || '-'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">创建时间</span>
-            <span className="info-value">
-              {new Date(task.created_at).toLocaleString('zh-CN')}
-            </span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">更新时间</span>
-            <span className="info-value">
-              {new Date(task.updated_at).toLocaleString('zh-CN')}
-            </span>
-          </div>
-          {task.completed_at && (
-            <div className="info-item">
-              <span className="info-label">完成时间</span>
-              <span className="info-value">
-                {new Date(task.completed_at).toLocaleString('zh-CN')}
-              </span>
-            </div>
-          )}
-          
-          {/* Provider 返回的扩展字段 */}
-          {task.local_status === 'succeeded' && (
-            <>
-              <div className="info-item">
-                <span className="info-label">Provider 模型</span>
-                <span className="info-value font-mono text-xs">{task.model || '-'}</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Provider 分辨率</span>
-                <span className="info-value">{task.resolution || '-'}</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Provider 比例</span>
-                <span className="info-value">{task.ratio || '-'}</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Provider 时长</span>
-                <span className="info-value">{task.duration ? `${task.duration}秒` : '-'}</span>
-              </div>
-            </>
-          )}
+    <div className="task-detail-page">
+      <div className="task-detail-header">
+        <div className="task-detail-nav">
+          <Link href="/tasks" className="task-detail-back">返回任务列表</Link>
+          <Link href="/generate" className="btn btn-primary">创建新任务</Link>
         </div>
-      </div>
-
-      {/* 提交参数 */}
-      <div className="card">
-        <h2 className="section-title">提交参数</h2>
-        <div className="info-grid">
-          <div className="info-item" style={{ gridColumn: '1 / -1' }}>
-            <span className="info-label">提示词</span>
-            <span className="info-value" style={{ whiteSpace: 'pre-wrap' }}>
-              {task.prompt}
-            </span>
-          </div>
-          
-          {/* 生成参数 */}
-          <div className="info-item">
-            <span className="info-label">比例</span>
-            <span className="info-value">{task.ratio || '-'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">时长</span>
-            <span className="info-value">{task.duration ? `${task.duration}秒` : '-'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">分辨率</span>
-            <span className="info-value">{task.resolution || '-'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">随机种子</span>
-            <span className="info-value">{task.seed === -1 ? '随机' : task.seed || '-'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">生成音频</span>
-            <span className="info-value">{task.generate_audio ? '是' : '否'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">返回尾帧</span>
-            <span className="info-value">{task.return_last_frame ? '是' : '否'}</span>
-          </div>
-          <div className="info-item">
-            <span className="info-label">水印</span>
-            <span className="info-value">{task.watermark ? '是' : '否'}</span>
-          </div>
-
-          {/* 全能参考素材 */}
-          {task.generation_mode === 'all_in_one_reference' && referenceImages.length > 0 && (
-            <div className="info-item" style={{ gridColumn: '1 / -1' }}>
-              <span className="info-label">参考图片 ({referenceImages.length})</span>
-              <div className="space-y-1 mt-1">
-                {referenceImages.map((url, i) => (
-                  <div key={i} className="text-sm">
-                    <span className="text-gray">@图片{i + 1}:</span>{' '}
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="table-link">
-                      {url.substring(0, 60)}...
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {task.generation_mode === 'all_in_one_reference' && referenceVideos.length > 0 && (
-            <div className="info-item" style={{ gridColumn: '1 / -1' }}>
-              <span className="info-label">参考视频 ({referenceVideos.length})</span>
-              <div className="space-y-1 mt-1">
-                {referenceVideos.map((url, i) => (
-                  <div key={i} className="text-sm">
-                    <span className="text-gray">@视频{i + 1}:</span>{' '}
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="table-link">
-                      {url.substring(0, 60)}...
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {task.generation_mode === 'all_in_one_reference' && referenceAudios.length > 0 && (
-            <div className="info-item" style={{ gridColumn: '1 / -1' }}>
-              <span className="info-label">参考音频 ({referenceAudios.length})</span>
-              <div className="space-y-1 mt-1">
-                {referenceAudios.map((url, i) => (
-                  <div key={i} className="text-sm">
-                    <span className="text-gray">@音频{i + 1}:</span>{' '}
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="table-link">
-                      {url.substring(0, 60)}...
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 首尾帧素材 */}
-          {task.generation_mode === 'first_last_frame' && task.first_frame_url && (
-            <div className="info-item" style={{ gridColumn: '1 / -1' }}>
-              <span className="info-label">首帧图片</span>
-              <a href={task.first_frame_url} target="_blank" rel="noopener noreferrer" className="table-link">
-                {task.first_frame_url}
-              </a>
-            </div>
-          )}
-
-          {task.generation_mode === 'first_last_frame' && task.last_frame_url && (
-            <div className="info-item" style={{ gridColumn: '1 / -1' }}>
-              <span className="info-label">尾帧图片</span>
-              <a href={task.last_frame_url} target="_blank" rel="noopener noreferrer" className="table-link">
-                {task.last_frame_url}
-              </a>
-            </div>
-          )}
-
-          {/* 智能多帧素材 */}
-          {task.generation_mode === 'smart_multi_frame' && frameImages.length > 0 && (
-            <div className="info-item" style={{ gridColumn: '1 / -1' }}>
-              <span className="info-label">多帧图片 ({frameImages.length})</span>
-              <div className="space-y-1 mt-1">
-                {frameImages.map((url, i) => (
-                  <div key={i} className="text-sm">
-                    <span className="text-gray">第{i + 1}帧:</span>{' '}
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="table-link">
-                      {url.substring(0, 60)}...
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Seedance 参考图资产 */}
-      {(() => {
-        const refAssets: ReferenceAssetMeta[] = [];
-        if (task.params_json) {
-          try {
-            const params = JSON.parse(task.params_json);
-            if (Array.isArray(params.referenceAssets)) {
-              refAssets.push(...params.referenceAssets);
-            }
-          } catch {}
-        }
-        if (refAssets.length === 0) return null;
-        const sorted = [...refAssets].sort((a, b) => a.order - b.order);
-
-        return (
-          <div className="card">
-            <h2 className="section-title">
-              Seedance 参考图资产
-              <span className="ml-2 text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">
-                {sorted.length} 张
-              </span>
-            </h2>
-            <div className="flex flex-wrap gap-3">
-              {sorted.map((asset, i) => {
-                const imgUrl = asset.providerPreviewUrl || asset.originalUrl;
-                return (
-                  <div key={asset.localAssetId} className="flex flex-col gap-1">
-                    <div
-                      className="relative rounded overflow-hidden flex-shrink-0"
-                      style={{ width: 64, height: 86 }}
-                    >
-                      {imgUrl ? (
-                        <img
-                          src={imgUrl}
-                          alt={asset.name}
-                          className="w-full h-full object-cover"
-                          style={{ background: 'rgba(255,255,255,0.05)' }}
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                          }}
-                        />
-                      ) : null}
-                      {/* 序号 */}
-                      <div
-                        className="absolute top-0 left-0 w-full h-full rounded flex items-center justify-center"
-                        style={{ background: 'rgba(59,130,246,0.5)' }}
-                      >
-                        <span className="text-white font-bold text-sm">{i + 1}</span>
-                      </div>
-                    </div>
-                    <span className="text-xs text-gray-500 truncate max-w-[64px]" title={asset.name}>
-                      {asset.name}
-                    </span>
-                    <span className="text-xs text-gray-400 truncate max-w-[64px]" title={asset.providerAssetId}>
-                      {asset.providerAssetId}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* 操作 */}
-      <div className="card">
-        <h2 className="section-title">操作</h2>
-        <div className="project-move-panel mb-4">
+        <div className="task-detail-title-row">
           <div>
-            <div className="info-label">移动到其他项目</div>
-            <p className="text-gray text-sm mt-1">用于修正选错项目后的项目成本归属，旧账本不会被覆盖，会追加转移记录。</p>
+            <div className="task-detail-kicker">任务 {shortId(task.id, 12)}</div>
+            <h1 className="task-detail-title">{resultStateTitle}</h1>
+            <p className="task-detail-subtitle">{task.prompt || '无提示词'}</p>
           </div>
-          <select className="input" value={targetProjectId} onChange={(event) => setTargetProjectId(event.target.value)}>
-            <option value="">选择目标项目</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}{project.type === 'personal' ? ' · 个人' : ''}
-              </option>
-            ))}
-          </select>
-          <input
-            className="input"
-            value={moveReason}
-            onChange={(event) => setMoveReason(event.target.value)}
-            placeholder="移动原因"
-          />
-          <button
-            className="btn btn-secondary"
-            type="button"
-            onClick={handleMoveProject}
-            disabled={movingProject || !targetProjectId || targetProjectId === task.project_id}
-          >
-            {movingProject ? '移动中...' : '移动项目'}
-          </button>
-          {moveMessage && <p className="text-sm text-gray">{moveMessage}</p>}
-        </div>
-        <div className="flex items-center gap-4 mb-4">
-          <button
-            className="btn btn-primary"
-            onClick={queryStatus}
-            disabled={querying}
-          >
-            {querying ? (
-              <>
-                <span className="loading" style={{ marginRight: 8 }}></span>
-                查询中...
-              </>
-            ) : (
-              '查询状态'
-            )}
-          </button>
-
-          {['submitted', 'running'].includes(task.local_status) && (
-            <button
-              className="btn btn-secondary"
-              onClick={handleReQueryResult}
-              disabled={querying}
-            >
-              {querying ? '查询中...' : '重新查询结果'}
-            </button>
-          )}
-
-          <label className="flex items-center gap-2">
-            <span className="text-sm">自动轮询 (5秒)</span>
-            <div className="toggle-switch">
-              <input
-                type="checkbox"
-                checked={autoPoll}
-                onChange={(e) => setAutoPoll(e.target.checked)}
-              />
-              <span className="toggle-slider"></span>
-            </div>
-          </label>
-
-          {task.local_status === 'failed' && (
-            <button
-              className="btn btn-danger"
-              onClick={handleRetry}
-              disabled={retrying}
-            >
-              {retrying ? '重试中...' : '重新生成'}
-            </button>
-          )}
+          <span className={`status-badge ${getStatusClass(task.local_status)}`}>
+            {getStatusText(task.local_status)}
+          </span>
         </div>
       </div>
 
-      {/* 生成结果 */}
-      {task.local_status === 'succeeded' && (task.result_video_url || task.local_video_path) && (
-        <div className="card">
-          <h2 className="section-title">生成结果</h2>
-          
-          {/* 视频播放器 */}
-          <div className="video-preview mb-4">
-            <video
-              key={videoSrc}
-              controls
-              playsInline
-              style={{ width: '100%', borderRadius: 8 }}
-              src={videoSrc}
-              onError={() => setVideoError(true)}
-              onCanPlay={() => setVideoError(false)}
-            >
-              您的浏览器不支持视频播放
-            </video>
-          </div>
-
-          {/* 预览失败提示 */}
-          {videoError && (
-            <div className="alert alert-warning mb-4">
-              <p className="mb-2">⚠️ 视频预览可能失败，请尝试以下操作：</p>
-              <div className="flex gap-2 flex-wrap">
-                <button className="btn btn-secondary" onClick={handleOpenUrl}>
-                  直接打开视频链接
+      <div className="task-detail-layout">
+        <main className="task-detail-main">
+          <section className="task-detail-card task-result-panel">
+            <div className="task-card-head">
+              <div>
+                <h2>生成结果</h2>
+                <p>{hasLocalVideo ? '本地已保存' : task.result_video_url ? '远程结果可用' : '等待 Provider 返回结果'}</p>
+              </div>
+              <div className="task-action-row">
+                <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
+                  {querying ? '查询中...' : '查询状态'}
                 </button>
-                <button className="btn btn-secondary" onClick={handleCopyUrl}>
-                  {copied ? '已复制!' : '复制视频 URL'}
-                </button>
+                {isProcessing && (
+                  <button className="btn btn-secondary" onClick={handleReQueryResult} disabled={querying}>
+                    {querying ? '查询中...' : '重新查询结果'}
+                  </button>
+                )}
+                {task.local_status === 'failed' && (
+                  <button className="btn btn-danger" onClick={handleRetry} disabled={retrying}>
+                    {retrying ? '重试中...' : '重新生成'}
+                  </button>
+                )}
               </div>
             </div>
-          )}
 
-          {/* 尾帧图片 */}
-          {task.result_last_frame_url && (
-            <div className="mb-4">
-              <span className="info-label">尾帧图片</span>
-              <div className="mt-2">
-                <img 
-                  src={task.result_last_frame_url} 
-                  alt="Last Frame" 
-                  style={{ maxWidth: '100%', borderRadius: 8 }}
+            <div className="task-result-stage">
+              {hasResultVideo ? (
+                <video
+                  key={videoSrc}
+                  controls
+                  playsInline
+                  src={videoSrc}
+                  onError={() => setVideoError(true)}
+                  onCanPlay={() => setVideoError(false)}
+                >
+                  您的浏览器不支持视频播放
+                </video>
+              ) : (
+                <div className={`task-result-empty task-result-empty-${task.local_status}`}>
+                  <strong>{resultStateTitle}</strong>
+                  <span>
+                    {task.local_status === 'failed'
+                      ? (task.error_message || 'Provider 返回失败，请查看下方错误信息或重试。')
+                      : isProcessing
+                        ? '任务仍在生成中，可手动查询或开启自动轮询。'
+                        : '当前任务还没有可播放的视频结果。'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {videoError && (
+              <div className="alert alert-warning">
+                视频预览失败。可以直接打开远程链接，或复制 URL 到浏览器检查。
+              </div>
+            )}
+
+            {task.result_last_frame_url && (
+              <div className="task-last-frame">
+                <span className="task-muted-label">尾帧图片</span>
+                <img
+                  src={task.result_last_frame_url}
+                  alt="Last Frame"
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = 'none';
                   }}
                 />
               </div>
-            </div>
-          )}
-
-          {/* 本地视频状态 */}
-          {hasLocalVideo ? (
-            <div className="alert alert-success mb-4">
-              ✅ 本地视频已保存: {task.local_video_path}
-            </div>
-          ) : (
-            <div className="alert alert-info mb-4">
-              💡 提示: 建议转存到本地以便长期保存
-            </div>
-          )}
-
-          {/* 下载按钮 */}
-          <div className="flex gap-2 flex-wrap">
-            <button 
-              className="btn btn-secondary" 
-              onClick={handleOpenUrl}
-              disabled={!task.result_video_url}
-            >
-              直接打开远程视频
-            </button>
-
-            <button 
-              className="btn btn-secondary" 
-              onClick={handleCopyUrl}
-              disabled={!task.result_video_url}
-            >
-              {copied ? '✅ 已复制' : '复制视频 URL'}
-            </button>
-
-            <button 
-              className="btn btn-primary" 
-              onClick={handleDownloadToLocal}
-              disabled={downloading || hasLocalVideo}
-            >
-              {downloading ? '下载中...' : hasLocalVideo ? '已保存到本地' : '转存到本地'}
-            </button>
-
-            {downloadError && (
-              <button 
-                className="btn btn-secondary" 
-                onClick={handleDownloadToLocal}
-              >
-                重试下载
-              </button>
             )}
-          </div>
 
-          {/* 下载进度条 */}
-          {(downloading || downloadProgress) && (
-            <div className="mt-4">
-              {/* 进度条容器 */}
-              <div className="mb-2">
-                <div className="flex justify-between text-xs text-gray-500 mb-1">
-                  <span>{downloading ? '下载中...' : '下载状态'}</span>
+            <div className="task-result-actions">
+              <button className="btn btn-secondary" onClick={handleOpenUrl} disabled={!task.result_video_url}>
+                打开远程视频
+              </button>
+              <button className="btn btn-secondary" onClick={handleCopyUrl} disabled={!task.result_video_url}>
+                {copied ? '已复制' : '复制视频 URL'}
+              </button>
+              <button className="btn btn-primary" onClick={handleDownloadToLocal} disabled={downloading || hasLocalVideo || !task.result_video_url}>
+                {downloading ? '下载中...' : hasLocalVideo ? '已保存到本地' : '转存到本地'}
+              </button>
+              {downloadError && (
+                <button className="btn btn-secondary" onClick={handleDownloadToLocal}>
+                  重试下载
+                </button>
+              )}
+              <label className="task-poll-toggle">
+                <span>自动轮询</span>
+                <div className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={autoPoll}
+                    onChange={(e) => setAutoPoll(e.target.checked)}
+                  />
+                  <span className="toggle-slider"></span>
+                </div>
+              </label>
+            </div>
+
+            {(downloading || downloadProgress) && (
+              <div className="task-download-state">
+                <div className="task-download-meta">
+                  <span>{downloading ? '下载中' : '下载状态'}</span>
                   <span>{downloadPercent}%{downloadSpeed && ` · ${downloadSpeed}`}</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      downloadError ? 'bg-red-500' : downloading ? 'bg-blue-500 animate-pulse' : 'bg-green-500'
-                    }`}
+                <div className="task-progress-track">
+                  <div
+                    className={`task-progress-fill ${downloadError ? 'is-error' : downloading ? 'is-running' : 'is-done'}`}
                     style={{ width: `${downloadPercent}%` }}
                   />
                 </div>
+                <p className={downloadError ? 'task-download-error' : ''}>{downloadProgress}</p>
               </div>
-              
-              {/* 状态文字 */}
-              <div className={`text-sm ${downloadError ? 'text-red-500' : 'text-gray-600'}`}>
-                {downloadProgress}
+            )}
+          </section>
+
+          {task.local_status === 'failed' && task.error_message && (
+            <section className="task-detail-card task-error-card">
+              <div className="task-card-head">
+                <h2>错误信息</h2>
+              </div>
+              <p>{task.error_message}</p>
+            </section>
+          )}
+
+          <section className="task-detail-card">
+            <div className="task-card-head">
+              <div>
+                <h2>官方扣费明细</h2>
+                <p>这里展示 Provider 官方真实成本；它和用户内部点数扣除是两套账。</p>
               </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* 错误信息 */}
-      {task.local_status === 'failed' && task.error_message && (
-        <div className="card">
-          <h2 className="section-title">错误信息</h2>
-          <div className="alert alert-error">
-            {task.error_message}
-          </div>
-        </div>
-      )}
-
-      {/* ===== 参考图调试信息区块 ===== */}
-      {(() => {
-        const refImagesDebug: RefImageDebugEntry[] = [];
-        if (task.reference_images_json) {
-          try {
-            const parsed = JSON.parse(task.reference_images_json);
-            if (Array.isArray(parsed)) refImagesDebug.push(...parsed);
-          } catch {}
-        }
-
-        const providerPayload: ProviderPayloadDebug = {};
-        if (task.provider_payload_json) {
-          try { Object.assign(providerPayload, JSON.parse(task.provider_payload_json)); } catch {}
-        }
-
-        return (
-          <ReferenceImageDebug
-            task={task}
-            refImagesDebug={refImagesDebug}
-            providerPayload={providerPayload}
-          />
-        );
-      })()}
-
-      {/* 原始响应 */}
-      <div className="card">
-        <h2 className="section-title">原始响应</h2>
-
-        <div className="collapsible mb-4">
-          <div
-            className="collapsible-header"
-            onClick={() => setShowCreateResponse(!showCreateResponse)}
-          >
-            <span>创建任务响应 (raw_create_response)</span>
-            <span>{showCreateResponse ? '▼' : '▶'}</span>
-          </div>
-          {showCreateResponse && (
-            <div className="collapsible-content">
-              <div className="json-viewer">
-                {formatJson(task.raw_create_response)}
+            <div className="task-param-grid">
+              <div className="task-param-item">
+                <span>官方成本状态</span>
+                <strong>{costStatusLabel(task.provider_cost_status)}</strong>
+              </div>
+              <div className="task-param-item">
+                <span>官方真实成本</span>
+                <strong>{officialCostText}</strong>
+              </div>
+              <div className="task-param-item">
+                <span>Provider 返回扣费</span>
+                <strong>{formatProviderAmount(providerBilling.actualCost, providerBilling.currency)}</strong>
+              </div>
+              <div className="task-param-item">
+                <span>billing_status</span>
+                <strong>{providerBilling.billingStatus || '待官方确认'}</strong>
+              </div>
+              <div className="task-param-item">
+                <span>billing_time</span>
+                <strong>{formatBillingTime(officialBillingTime)}</strong>
+              </div>
+              <div className="task-param-item">
+                <span>usage total_tokens</span>
+                <strong>{providerBilling.usageTotalTokens ?? '待官方确认'}</strong>
+              </div>
+              <div className="task-param-item">
+                <span>provider_task_id</span>
+                <strong title={providerBilling.providerTaskId || ''}>{shortId(providerBilling.providerTaskId, 16)}</strong>
+              </div>
+              <div className="task-param-item">
+                <span>clientRequestId</span>
+                <strong title={providerBilling.clientRequestId || ''}>{shortId(providerBilling.clientRequestId, 16)}</strong>
               </div>
             </div>
-          )}
-        </div>
 
-        <div className="collapsible">
-          <div
-            className="collapsible-header"
-            onClick={() => setShowStatusResponse(!showStatusResponse)}
-          >
-            <span>状态查询响应 (raw_status_response)</span>
-            <span>{showStatusResponse ? '▼' : '▶'}</span>
-          </div>
-          {showStatusResponse && (
-            <div className="collapsible-content">
-              <div className="json-viewer">
-                {formatJson(task.raw_status_response)}
+            {officialChargeStatus === 'loading' && officialCharges.length === 0 && (
+              <div className="task-empty-line">正在读取 official_charge 账本...</div>
+            )}
+
+            {officialCharges.length > 0 ? (
+              <div className="task-reference-list">
+                {officialCharges.map((ledger) => {
+                  const ledgerBillingTime = ledger.billing_time || officialBillingTime || ledger.occurred_at;
+                  const ledgerUsageTokens = ledger.usage_total_tokens ?? providerBilling.usageTotalTokens;
+                  return (
+                    <div key={ledger.id} className="task-empty-line">
+                      <div className="task-param-grid" style={{ marginBottom: 0 }}>
+                        <div className="task-param-item">
+                          <span>ledger_id</span>
+                          <strong title={ledger.id}>{shortId(ledger.id, 18)}</strong>
+                        </div>
+                        <div className="task-param-item">
+                          <span>金额</span>
+                          <strong>{formatLedgerAmount(ledger)}</strong>
+                        </div>
+                        <div className="task-param-item">
+                          <span>币种</span>
+                          <strong>{ledger.currency || providerBilling.currency || '-'}</strong>
+                        </div>
+                        <div className="task-param-item">
+                          <span>billing_status</span>
+                          <strong>{ledger.billing_status || providerBilling.billingStatus || '待官方确认'}</strong>
+                        </div>
+                        <div className="task-param-item">
+                          <span>billing_time / occurred_at</span>
+                          <strong>{formatBillingTime(ledgerBillingTime)}</strong>
+                        </div>
+                        <div className="task-param-item">
+                          <span>usage total_tokens</span>
+                          <strong>{ledgerUsageTokens ?? '待官方确认'}</strong>
+                        </div>
+                        <div className="task-param-item">
+                          <span>provider_task_id</span>
+                          <strong title={ledger.provider_task_id || providerBilling.providerTaskId || ''}>
+                            {shortId(ledger.provider_task_id || providerBilling.providerTaskId, 16)}
+                          </strong>
+                        </div>
+                        <div className="task-param-item">
+                          <span>official_charge_id</span>
+                          <strong title={ledger.official_charge_id || ''}>{shortId(ledger.official_charge_id, 16)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : officialChargeStatus !== 'loading' ? (
+              <div className="task-empty-line">
+                暂无该任务的 official_charge 账本记录。
+                {officialChargeStatus === 'unavailable'
+                  ? ' 当前账号可能没有读取总账权限，已显示任务和 Provider 返回字段作为兜底。'
+                  : ' 等 Seedance 返回 actual_cost 并完成入账后，这里会出现对应账本行。'}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="task-detail-card">
+            <div className="task-card-head">
+              <div>
+                <h2>提示词与参考素材</h2>
+                <p>按提交时的顺序展示，便于对应提示词里的图 1、图 2。</p>
               </div>
             </div>
-          )}
-        </div>
-      </div>
 
-      <div className="flex gap-4 mt-4">
-        <Link href="/tasks" className="btn btn-secondary">
-          返回列表
-        </Link>
-        <Link href="/generate" className="btn btn-primary">
-          创建新任务
-        </Link>
+            <div className="task-prompt-box">{task.prompt || '无提示词'}</div>
+
+            <div className="task-param-grid">
+              {parameterItems.map((item) => (
+                <div key={item.label} className="task-param-item">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+              {resolvedModeLabel && (
+                <div className="task-param-item">
+                  <span>Resolved 模式</span>
+                  <strong>{resolvedModeLabel}</strong>
+                </div>
+              )}
+            </div>
+
+            {(referenceImages.length > 0 || referenceVideos.length > 0 || referenceAudios.length > 0 || frameImages.length > 0 || task.first_frame_url || task.last_frame_url) ? (
+              <div className="task-reference-section">
+                {referenceImages.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">参考图片 ({referenceImages.length})</div>
+                    <div className="task-reference-grid">
+                      {referenceImages.map((url, i) => (
+                        <a key={url + i} className="task-reference-thumb" href={url} target="_blank" rel="noopener noreferrer" title={url}>
+                          <img src={url} alt={`参考图片 ${i + 1}`} />
+                          <span>图 {i + 1}</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {frameImages.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">多帧图片 ({frameImages.length})</div>
+                    <div className="task-reference-list">
+                      {frameImages.map((url, i) => (
+                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
+                          第 {i + 1} 帧 · {truncateUrl(url)}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(task.first_frame_url || task.last_frame_url) && (
+                  <div>
+                    <div className="task-muted-label">首尾帧</div>
+                    <div className="task-reference-list">
+                      {task.first_frame_url && (
+                        <a href={task.first_frame_url} target="_blank" rel="noopener noreferrer">
+                          首帧 · {truncateUrl(task.first_frame_url)}
+                        </a>
+                      )}
+                      {task.last_frame_url && (
+                        <a href={task.last_frame_url} target="_blank" rel="noopener noreferrer">
+                          尾帧 · {truncateUrl(task.last_frame_url)}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {referenceVideos.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">参考视频 ({referenceVideos.length})</div>
+                    <div className="task-reference-list">
+                      {referenceVideos.map((url, i) => (
+                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
+                          视频 {i + 1} · {truncateUrl(url)}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {referenceAudios.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">参考音频 ({referenceAudios.length})</div>
+                    <div className="task-reference-list">
+                      {referenceAudios.map((url, i) => (
+                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
+                          音频 {i + 1} · {truncateUrl(url)}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="task-empty-line">本任务没有参考素材。</div>
+            )}
+          </section>
+
+          {referenceAssets.length > 0 && (
+            <section className="task-detail-card">
+              <div className="task-card-head">
+                <div>
+                  <h2>Seedance 参考图资产</h2>
+                  <p>{referenceAssets.length} 张 Provider 资产，按提交顺序展示。</p>
+                </div>
+              </div>
+              <div className="task-asset-grid">
+                {referenceAssets.map((asset, i) => {
+                  const imgUrl = asset.providerPreviewUrl || asset.originalUrl;
+                  return (
+                    <div key={asset.localAssetId} className="task-asset-thumb">
+                      <div className="task-asset-image">
+                        {imgUrl ? (
+                          <img
+                            src={imgUrl}
+                            alt={asset.name}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+                        <span>{i + 1}</span>
+                      </div>
+                      <strong title={asset.name}>{asset.name}</strong>
+                      <small title={asset.providerAssetId}>{shortId(asset.providerAssetId, 12)}</small>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <details className="task-detail-card task-manage-panel">
+            <summary>项目归属调整</summary>
+            <div className="project-move-panel task-project-move">
+              <div>
+                <div className="info-label">移动到其他项目</div>
+                <p className="text-gray text-sm">用于修正选错项目后的成本归属，旧账本不会被覆盖，会追加转移记录。</p>
+              </div>
+              <select className="input" value={targetProjectId} onChange={(event) => setTargetProjectId(event.target.value)}>
+                <option value="">选择目标项目</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}{project.type === 'personal' ? ' · 个人' : ''}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="input"
+                value={moveReason}
+                onChange={(event) => setMoveReason(event.target.value)}
+                placeholder="移动原因"
+              />
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={handleMoveProject}
+                disabled={movingProject || !targetProjectId || targetProjectId === task.project_id}
+              >
+                {movingProject ? '移动中...' : '移动项目'}
+              </button>
+              {moveMessage && <p className="task-move-message">{moveMessage}</p>}
+            </div>
+          </details>
+
+          <details className="task-detail-card task-technical-panel">
+            <summary>技术调试与原始响应</summary>
+            <ReferenceImageDebug
+              task={task}
+              refImagesDebug={refImagesDebug}
+              providerPayload={providerPayload}
+            />
+
+            <div className="task-raw-grid">
+              <div className="collapsible">
+                <div
+                  className="collapsible-header"
+                  onClick={() => setShowCreateResponse(!showCreateResponse)}
+                >
+                  <span>创建任务响应</span>
+                  <span>{showCreateResponse ? '收起' : '展开'}</span>
+                </div>
+                {showCreateResponse && (
+                  <div className="collapsible-content">
+                    <div className="json-viewer">
+                      {formatJson(task.raw_create_response)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="collapsible">
+                <div
+                  className="collapsible-header"
+                  onClick={() => setShowStatusResponse(!showStatusResponse)}
+                >
+                  <span>状态查询响应</span>
+                  <span>{showStatusResponse ? '收起' : '展开'}</span>
+                </div>
+                {showStatusResponse && (
+                  <div className="collapsible-content">
+                    <div className="json-viewer">
+                      {formatJson(task.raw_status_response)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </details>
+        </main>
+
+        <aside className="task-detail-sidebar">
+          <section className="task-side-card">
+            <h2>任务概览</h2>
+            <div className="task-summary-list">
+              <div>
+                <span>项目</span>
+                <strong>
+                  {task.project ? (
+                    <Link className="table-link" href={`/projects/${task.project.id}`}>{task.project.name}</Link>
+                  ) : (
+                    <span className="text-red">未归属</span>
+                  )}
+                </strong>
+              </div>
+              <div>
+                <span>Provider 状态</span>
+                <strong>{task.provider_status || '-'}</strong>
+              </div>
+              <div>
+                <span>官方成本状态</span>
+                <strong>{costStatusLabel(task.provider_cost_status)} · {task.cost_allocation_status}</strong>
+              </div>
+              <div>
+                <span>官方真实成本</span>
+                <strong>{officialCostText}</strong>
+              </div>
+              <div>
+                <span>内部点数扣除</span>
+                <strong>预估 {task.estimated_cost ?? '-'} / 冻结 {task.frozen_cost ?? 0} / 扣除 {task.actual_cost ?? '-'} / 返还 {task.refund_amount ?? 0}</strong>
+              </div>
+              <div>
+                <span>official_charge 账本</span>
+                <strong>{officialCharges.length > 0 ? `${officialCharges.length} 条` : '待官方确认'}</strong>
+              </div>
+              <div>
+                <span>本地任务 ID</span>
+                <strong title={task.id}>{shortId(task.id, 14)}</strong>
+              </div>
+              <div>
+                <span>Provider ID</span>
+                <strong title={task.provider_task_id || ''}>{shortId(task.provider_task_id, 14)}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="task-side-card">
+            <h2>时间线</h2>
+            <div className="task-summary-list">
+              {timelineItems.map((item) => (
+                <div key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+              {task.provider_cost_confirmed_at && (
+                <div>
+                  <span>成本确认</span>
+                  <strong>{formatDateTime(task.provider_cost_confirmed_at)}</strong>
+                </div>
+              )}
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );

@@ -10,7 +10,16 @@ type RegisterUser = {
 };
 
 function defaultLanding(user?: RegisterUser | null) {
-  return user?.role === 'admin' ? '/dashboard' : '/generate';
+  return '/generate';
+}
+
+function safeLandingPath(value: string | null | undefined, fallback: string) {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return fallback;
+  return value;
+}
+
+function currentOriginLandingUrl(value: string | null | undefined, fallback: string) {
+  return new URL(safeLandingPath(value, fallback), window.location.origin).toString();
 }
 
 export default function RegisterPage() {
@@ -25,6 +34,8 @@ export default function RegisterPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [feishuLoading, setFeishuLoading] = useState(false);
+  const [emailRegisterOpen, setEmailRegisterOpen] = useState(false);
 
   const normalizeEmailPrefix = (value: string) => {
     const normalized = value.trim().toLowerCase();
@@ -38,10 +49,14 @@ export default function RegisterPage() {
 
   useEffect(() => {
     const next = new URLSearchParams(window.location.search).get('next');
+    if (next && !safeLandingPath(next, '')) {
+      window.history.replaceState(null, '', '/register');
+    }
+
     fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => {
-        if (data.user) router.replace(next || defaultLanding(data.user));
+        if (data.user) router.replace(safeLandingPath(next, defaultLanding(data.user)));
       })
       .catch(() => {});
   }, [router]);
@@ -89,7 +104,7 @@ export default function RegisterPage() {
       }
       if (data.user) {
         const next = new URLSearchParams(window.location.search).get('next');
-        router.replace(next || defaultLanding(data.user));
+        router.replace(safeLandingPath(next, defaultLanding(data.user)));
         return;
       }
       setCodeSent(true);
@@ -125,11 +140,54 @@ export default function RegisterPage() {
         return;
       }
       const next = new URLSearchParams(window.location.search).get('next');
-      router.replace(next || defaultLanding(data.user));
+      router.replace(safeLandingPath(next, defaultLanding(data.user)));
     } catch {
       setError('网络错误，请重试');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFeishuLogin = async () => {
+    setError('');
+    setMessage('');
+    setDebugCode('');
+    setFeishuLoading(true);
+
+    try {
+      const next = new URLSearchParams(window.location.search).get('next');
+      const params = new URLSearchParams();
+      const safeNext = safeLandingPath(next, '');
+      if (safeNext) params.set('next', safeNext);
+
+      const res = await fetch(`/api/auth/feishu/authorize-url${params.size ? `?${params.toString()}` : ''}`, {
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.code === 'disabled' || data.code === 'not_configured') {
+          const cliRes = await fetch('/api/auth/feishu/cli-login', {
+            method: 'POST',
+            cache: 'no-store',
+          });
+          const cliData = await cliRes.json();
+          if (!cliRes.ok) {
+            setError(cliData.error || data.error || '飞书登录暂不可用');
+            setFeishuLoading(false);
+            return;
+          }
+          window.location.assign(currentOriginLandingUrl(safeNext, defaultLanding(cliData.user)));
+          return;
+        }
+
+        setError(data.error || '飞书登录暂不可用');
+        setFeishuLoading(false);
+        return;
+      }
+      window.location.assign(data.authorize_url);
+    } catch {
+      setError('飞书登录初始化失败，请重试');
+      setFeishuLoading(false);
     }
   };
 
@@ -177,138 +235,182 @@ export default function RegisterPage() {
             marginBottom: 8,
             letterSpacing: 2,
           }}>Seedance 2.0</div>
-          <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)' }}>公司邮箱注册</div>
+          <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)' }}>内部平台</div>
         </div>
 
-        <form onSubmit={codeSent ? verifyAndRegister : requestCode} noValidate>
-          <div style={{ marginBottom: 16 }}>
-            <label style={labelStyle}>用户名</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              disabled={codeSent || loading}
-              style={inputStyle}
-              placeholder="不填则使用邮箱前缀"
-            />
-          </div>
+        <button
+          type="button"
+          onClick={handleFeishuLogin}
+          disabled={loading || feishuLoading}
+          style={{
+            width: '100%',
+            padding: '12px',
+            background: feishuLoading ? 'rgba(36, 116, 255, 0.5)' : '#2474ff',
+            border: 'none',
+            borderRadius: 8,
+            color: '#f8fbff',
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: loading || feishuLoading ? 'not-allowed' : 'pointer',
+            transition: 'background 0.2s',
+          }}
+        >
+          {feishuLoading ? '正在前往飞书...' : '使用飞书登录 / 注册'}
+        </button>
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={labelStyle}>公司邮箱</label>
-            <div style={{
-              display: 'flex',
-              alignItems: 'stretch',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 8,
-              overflow: 'hidden',
-            }}>
+        <button
+          type="button"
+          aria-expanded={emailRegisterOpen}
+          onClick={() => setEmailRegisterOpen((value) => !value)}
+          disabled={loading || feishuLoading || codeSent}
+          style={{
+            width: '100%',
+            marginTop: 14,
+            padding: '11px 12px',
+            background: 'transparent',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 8,
+            color: 'rgba(255,255,255,0.76)',
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: loading || feishuLoading || codeSent ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {emailRegisterOpen ? '收起账号密码方式' : '使用账号密码登录'}
+        </button>
+
+        {(error || message || debugCode) && (
+          <div style={{
+            padding: '10px 12px',
+            background: error ? 'rgba(255,80,80,0.1)' : 'rgba(74,222,128,0.1)',
+            border: error ? '1px solid rgba(255,80,80,0.3)' : '1px solid rgba(74,222,128,0.25)',
+            borderRadius: 8,
+            color: error ? '#ff6060' : '#86efac',
+            fontSize: 13,
+            marginTop: 16,
+            marginBottom: emailRegisterOpen ? 16 : 0,
+          }}>
+            {error || message}
+            {debugCode && (
+              <div style={{ marginTop: 6, color: 'rgba(255,255,255,0.75)' }}>
+                开发环境验证码：{debugCode}
+              </div>
+            )}
+          </div>
+        )}
+
+        {emailRegisterOpen && (
+          <form onSubmit={codeSent ? verifyAndRegister : requestCode} noValidate style={{ marginTop: 18 }}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>用户名</label>
               <input
                 type="text"
-                value={emailPrefix}
-                onChange={(event) => setEmailPrefix(normalizeEmailPrefix(event.target.value))}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
                 disabled={codeSent || loading}
-                style={{
-                  ...inputStyle,
-                  minWidth: 0,
-                  background: 'transparent',
-                  border: 'none',
-                  borderRadius: 0,
-                }}
-                placeholder="name"
-                autoComplete="username"
+                style={inputStyle}
+                placeholder="不填则使用邮箱前缀"
               />
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '0 12px',
-                color: 'rgba(255,255,255,0.62)',
-                borderLeft: '1px solid rgba(255,255,255,0.1)',
-                whiteSpace: 'nowrap',
-                fontSize: 14,
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>公司邮箱</label>
+              <div style={{
+                display: 'flex',
+                alignItems: 'stretch',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 8,
+                overflow: 'hidden',
               }}>
-                {COMPANY_EMAIL_DOMAIN}
-              </span>
-            </div>
-          </div>
-
-          {!codeSent && (
-            <>
-              <div style={{ marginBottom: 16 }}>
-                <label style={labelStyle}>密码</label>
                 <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  style={inputStyle}
-                  placeholder="至少 8 位"
+                  type="text"
+                  value={emailPrefix}
+                  onChange={(event) => setEmailPrefix(normalizeEmailPrefix(event.target.value))}
+                  disabled={codeSent || loading}
+                  style={{
+                    ...inputStyle,
+                    minWidth: 0,
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: 0,
+                  }}
+                  placeholder="name"
+                  autoComplete="username"
                 />
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '0 12px',
+                  color: 'rgba(255,255,255,0.62)',
+                  borderLeft: '1px solid rgba(255,255,255,0.1)',
+                  whiteSpace: 'nowrap',
+                  fontSize: 14,
+                }}>
+                  {COMPANY_EMAIL_DOMAIN}
+                </span>
               </div>
-              <div style={{ marginBottom: 20 }}>
-                <label style={labelStyle}>确认密码</label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  style={inputStyle}
-                  placeholder="再次输入密码"
-                />
-              </div>
-            </>
-          )}
-
-          {codeSent && (
-            <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>邮箱验证码</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={code}
-                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                style={{ ...inputStyle, letterSpacing: 4 }}
-                placeholder="6 位验证码"
-              />
             </div>
-          )}
 
-          {(error || message || debugCode) && (
-            <div style={{
-              padding: '10px 12px',
-              background: error ? 'rgba(255,80,80,0.1)' : 'rgba(74,222,128,0.1)',
-              border: error ? '1px solid rgba(255,80,80,0.3)' : '1px solid rgba(74,222,128,0.25)',
-              borderRadius: 8,
-              color: error ? '#ff6060' : '#86efac',
-              fontSize: 13,
-              marginBottom: 16,
-            }}>
-              {error || message}
-              {debugCode && (
-                <div style={{ marginTop: 6, color: 'rgba(255,255,255,0.75)' }}>
-                  开发环境验证码：{debugCode}
+            {!codeSent && (
+              <>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={labelStyle}>密码</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    style={inputStyle}
+                    placeholder="至少 8 位"
+                  />
                 </div>
-              )}
-            </div>
-          )}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={labelStyle}>确认密码</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    style={inputStyle}
+                    placeholder="再次输入密码"
+                  />
+                </div>
+              </>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '12px',
-              background: loading ? 'rgba(99,102,241,0.5)' : '#6366f1',
-              border: 'none',
-              borderRadius: 8,
-              color: '#fff',
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: loading ? 'not-allowed' : 'pointer',
-              transition: 'background 0.2s',
-            }}
-          >
-            {loading ? '处理中...' : codeSent ? '验证并注册' : '注册并进入'}
-          </button>
-        </form>
+            {codeSent && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={labelStyle}>邮箱验证码</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  style={{ ...inputStyle, letterSpacing: 4 }}
+                  placeholder="6 位验证码"
+                />
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || feishuLoading}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: loading || feishuLoading ? 'rgba(99,102,241,0.5)' : '#6366f1',
+                border: 'none',
+                borderRadius: 8,
+                color: '#fff',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: loading || feishuLoading ? 'not-allowed' : 'pointer',
+                transition: 'background 0.2s',
+              }}
+            >
+              {loading ? '处理中...' : codeSent ? '验证并注册' : '注册并进入'}
+            </button>
+          </form>
+        )}
 
         {codeSent && (
           <button

@@ -109,12 +109,19 @@ export async function POST(
     });
 
     try {
+      await prisma.videoTask.update({
+        where: { id: newTask.id },
+        data: { provider_client_request_id: newTask.id },
+      });
+
       const providerResult = await createVideoTask({
         prompt: originalTask.prompt,
         generation_mode: originalTask.generation_mode as 'all_in_one_reference' | 'first_last_frame' | 'smart_multi_frame',
         ratio: originalTask.ratio as '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' || '16:9',
         duration: originalTask.duration as 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 || 5,
-        resolution: originalTask.resolution as '480p' | '720p' || '480p',
+        resolution: originalTask.resolution as '480p' | '720p' | '1080p' || '480p',
+        clientRequestId: newTask.id,
+        client_request_id: newTask.id,
         seed: originalTask.seed ?? -1,
         generate_audio: originalTask.generate_audio,
         return_last_frame: originalTask.return_last_frame,

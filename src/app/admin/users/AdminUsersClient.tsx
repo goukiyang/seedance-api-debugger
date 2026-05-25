@@ -52,6 +52,26 @@ interface LedgerRecord {
   };
 }
 
+interface EditUserForm {
+  name: string;
+  username: string;
+  email: string;
+  role: 'admin' | 'user';
+  account_type: 'internal' | 'external';
+  user_profile: string;
+  feature_profile_id: string;
+  status: string;
+  expires_at: string;
+  reason: string;
+}
+
+const USER_STATUS_OPTIONS = [
+  { value: 'active', label: '启用', description: '可以登录和使用平台。' },
+  { value: 'disabled', label: '禁用', description: '临时封停，历史数据保留。' },
+  { value: 'pending', label: '待开通', description: '账号保留，但暂不允许登录。' },
+  { value: 'expired', label: '已过期', description: '协作到期，不允许继续登录。' },
+];
+
 const inputStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
@@ -97,11 +117,33 @@ function statusLabel(value: string) {
   if (value === 'disabled') return '禁用';
   if (value === 'pending') return '待开通';
   if (value === 'expired') return '已过期';
+  if (value === 'deleted') return '已删除';
   return value;
 }
 
 function resolveAccountType(value: string): AccountType {
   return value === 'external' ? 'external' : 'internal';
+}
+
+function formatDateInput(value: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
+function buildEditUserForm(user: AdminUser): EditUserForm {
+  return {
+    name: user.name,
+    username: user.username,
+    email: user.email,
+    role: user.role === 'admin' ? 'admin' : 'user',
+    account_type: user.account_type === 'external' ? 'external' : 'internal',
+    user_profile: user.user_profile || 'other',
+    feature_profile_id: user.feature_profile_id || 'standard_internal',
+    status: user.status || 'active',
+    expires_at: formatDateInput(user.expires_at),
+    reason: '账户属性调整',
+  };
 }
 
 export default function AdminUsersClient({ currentUser }: { currentUser: SessionUser }) {
@@ -149,6 +191,12 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     feature_profile_id: 'auto',
     reason: '用户类型调整',
   });
+  const [mergeForm, setMergeForm] = useState({
+    target_user_id: '',
+    reason: '重复账号数据合并',
+  });
+  const [editingUserId, setEditingUserId] = useState('');
+  const [editUserForm, setEditUserForm] = useState<EditUserForm | null>(null);
 
   const filteredUsers = useMemo(() => {
     const keyword = filters.search.trim().toLowerCase();
@@ -170,6 +218,26 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     const selected = new Set(selectedUserIds);
     return users.filter((user) => selected.has(user.id));
   }, [selectedUserIds, users]);
+  const mergeTargetUser = useMemo(
+    () => users.find((user) => user.id === mergeForm.target_user_id) || null,
+    [mergeForm.target_user_id, users],
+  );
+  const mergeSourceUsers = useMemo(
+    () => selectedUsers.filter((user) => user.id !== mergeForm.target_user_id),
+    [mergeForm.target_user_id, selectedUsers],
+  );
+  const mergeAdminSources = useMemo(
+    () => mergeSourceUsers.filter((user) => user.role === 'admin'),
+    [mergeSourceUsers],
+  );
+  const mergeCreditPreview = useMemo(() => ({
+    balance: mergeSourceUsers.reduce((total, user) => total + (user.credit_account?.balance || 0), 0),
+    frozen: mergeSourceUsers.reduce((total, user) => total + (user.credit_account?.frozen_credits || 0), 0),
+  }), [mergeSourceUsers]);
+  const editingUser = useMemo(
+    () => users.find((user) => user.id === editingUserId) || null,
+    [editingUserId, users],
+  );
   const filteredUserIds = useMemo(() => filteredUsers.map((user) => user.id), [filteredUsers]);
   const allFilteredSelected = filteredUserIds.length > 0 && filteredUserIds.every((id) => selectedUserIds.includes(id));
   const suggestedBulkFeatureProfileId = getDefaultFeatureProfileId('internal', normalizeUserProfile(bulkProfileForm.user_profile));
@@ -177,6 +245,12 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     resolveAccountType(newUser.account_type),
     normalizeUserProfile(newUser.user_profile),
   );
+  const suggestedEditUserFeatureProfileId = editUserForm
+    ? getDefaultFeatureProfileId(
+      editUserForm.account_type,
+      normalizeUserProfile(editUserForm.user_profile),
+    )
+    : 'standard_internal';
 
   const loadUsers = async () => {
     const res = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -389,6 +463,157 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     await refresh();
   };
 
+  const mergeUsers = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+
+    const reason = mergeForm.reason.trim();
+    if (!mergeTargetUser) {
+      setError('请选择保留账号');
+      return;
+    }
+    if (mergeTargetUser.status !== 'active') {
+      setError('保留账号必须是启用状态');
+      return;
+    }
+    if (mergeSourceUsers.length === 0) {
+      setError('请选择至少一个被合并账号');
+      return;
+    }
+    if (mergeAdminSources.length > 0) {
+      setError(`管理员账号不能作为被合并账号：${mergeAdminSources.map((user) => user.username).join('、')}`);
+      return;
+    }
+    if (!reason) {
+      setError('请输入合并原因');
+      return;
+    }
+
+    const sourceNames = mergeSourceUsers.slice(0, 4).map((user) => user.name || user.username).join('、');
+    const moreText = mergeSourceUsers.length > 4 ? ` 等 ${mergeSourceUsers.length} 个账号` : '';
+    const confirmText = [
+      `确认把 ${sourceNames}${moreText} 合并到 ${mergeTargetUser.name || mergeTargetUser.username}？`,
+      '源账号会软删除并无法登录，业务数据会迁移到保留账号。',
+      '点数会以合并汇总流水转入保留账号，源账号原始流水保留用于审计。',
+      `原因：${reason}`,
+    ].join('\n');
+    if (!window.confirm(confirmText)) return;
+
+    const res = await fetch('/api/admin/users/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_user_id: mergeTargetUser.id,
+        source_user_ids: mergeSourceUsers.map((user) => user.id),
+        reason,
+        confirm: true,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || '账号合并失败');
+      return;
+    }
+
+    setMessage(`已合并 ${data.source_count || mergeSourceUsers.length} 个账号，迁移任务 ${data.counts?.video_tasks || 0} 条`);
+    setSelectedUserIds([]);
+    setMergeForm({ target_user_id: mergeTargetUser.id, reason: '重复账号数据合并' });
+    await refresh();
+  };
+
+  const openEditUser = (user: AdminUser) => {
+    setEditingUserId(user.id);
+    setEditUserForm(buildEditUserForm(user));
+    setError('');
+    setMessage('');
+  };
+
+  const updateEditUserForm = (patch: Partial<EditUserForm>) => {
+    setEditUserForm((current) => {
+      if (!current) return current;
+      const next = { ...current, ...patch };
+      if (patch.account_type === 'external') {
+        next.role = 'user';
+        next.user_profile = 'other';
+        next.feature_profile_id = 'external_limited';
+      }
+      if (patch.user_profile !== undefined && next.account_type === 'internal') {
+        next.feature_profile_id = 'auto';
+      }
+      return next;
+    });
+  };
+
+  const saveEditedUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+
+    if (!editingUser || !editUserForm) {
+      setError('请选择要编辑的用户');
+      return;
+    }
+
+    const reason = editUserForm.reason.trim();
+    if (!reason) {
+      setError('请输入修改原因');
+      return;
+    }
+    const needsCompanyEmail = editUserForm.account_type === 'internal'
+      && (
+        editingUser.account_type !== 'internal'
+        || editUserForm.email.toLowerCase() !== editingUser.email.toLowerCase()
+        || (editUserForm.role === 'admin' && editingUser.role !== 'admin')
+      );
+    if (needsCompanyEmail && !editUserForm.email.toLowerCase().endsWith('@youdoogo.com')) {
+      setError('内部账号必须使用 @youdoogo.com 公司邮箱');
+      return;
+    }
+
+    const sensitiveChanges = [
+      editingUser.role !== editUserForm.role ? `系统身份：${editingUser.role === 'admin' ? '管理员' : '普通用户'} → ${editUserForm.role === 'admin' ? '管理员' : '普通用户'}` : '',
+      editingUser.status !== editUserForm.status ? `状态：${statusLabel(editingUser.status)} → ${statusLabel(editUserForm.status)}` : '',
+      editingUser.account_type !== editUserForm.account_type ? `账号来源：${accountTypeLabel(editingUser.account_type)} → ${accountTypeLabel(editUserForm.account_type)}` : '',
+    ].filter(Boolean);
+    const confirmText = sensitiveChanges.length > 0
+      ? `确认保存 ${editingUser.name || editingUser.username} 的账户属性？\n${sensitiveChanges.join('\n')}\n\n原因：${reason}`
+      : `确认保存 ${editingUser.name || editingUser.username} 的账户属性？\n原因：${reason}`;
+    if (!window.confirm(confirmText)) return;
+
+    const res = await fetch(`/api/admin/users/${editingUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: editUserForm.name,
+        username: editUserForm.username,
+        email: editUserForm.email,
+        role: editUserForm.role,
+        account_type: editUserForm.account_type,
+        user_profile: editUserForm.user_profile,
+        feature_profile_id: editUserForm.feature_profile_id === 'auto' ? undefined : editUserForm.feature_profile_id,
+        status: editUserForm.status,
+        expires_at: editUserForm.expires_at || null,
+        reason,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || '保存用户属性失败');
+      return;
+    }
+
+    setMessage('用户属性已更新');
+    await refresh();
+    setEditingUserId(data.user?.id || editingUser.id);
+    setEditUserForm(buildEditUserForm({
+      ...editingUser,
+      ...data.user,
+      credit_account: editingUser.credit_account,
+      last_login_at: editingUser.last_login_at,
+    }));
+  };
+
   const toggleUser = async (user: AdminUser) => {
     const action = user.status === 'active' ? 'disable' : 'enable';
     const label = action === 'disable' ? '禁用' : '启用';
@@ -562,6 +787,13 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                       <td style={{ padding: 12, minWidth: 250 }}>
                         <button
                           type="button"
+                          style={{ ...buttonStyle, background: editingUserId === user.id ? '#2563eb' : '#475569', padding: '7px 10px', marginRight: 8 }}
+                          onClick={() => openEditUser(user)}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
                           style={{ ...buttonStyle, background: '#334155', padding: '7px 10px', marginRight: 8 }}
                           onClick={() => selectOnlyUser(user.id)}
                         >
@@ -601,6 +833,154 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
         </div>
 
         <div style={{ display: 'grid', gap: 16 }}>
+          {editingUser && editUserForm ? (
+            <form onSubmit={saveEditedUser} style={{ ...panelStyle, borderColor: 'rgba(34,197,94,0.28)', background: 'rgba(15,23,42,0.72)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontWeight: 800 }}>账户属性</div>
+                  <div style={{ color: 'rgba(255,255,255,0.48)', fontSize: 12, marginTop: 4 }}>
+                    {editingUser.username} · {editingUser.email}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  style={{ ...buttonStyle, background: '#334155', padding: '7px 10px' }}
+                  onClick={() => {
+                    setEditingUserId('');
+                    setEditUserForm(null);
+                  }}
+                >
+                  关闭
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <input
+                    style={inputStyle}
+                    placeholder="用户名"
+                    value={editUserForm.name}
+                    onChange={(event) => updateEditUserForm({ name: event.target.value })}
+                  />
+                  <input
+                    style={inputStyle}
+                    placeholder="账号"
+                    value={editUserForm.username}
+                    onChange={(event) => updateEditUserForm({ username: event.target.value })}
+                  />
+                </div>
+                <input
+                  style={inputStyle}
+                  placeholder="邮箱"
+                  value={editUserForm.email}
+                  onChange={(event) => updateEditUserForm({ email: event.target.value })}
+                />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <select
+                    style={inputStyle}
+                    value={editUserForm.account_type}
+                    onChange={(event) => updateEditUserForm({ account_type: resolveAccountType(event.target.value) })}
+                  >
+                    <option value="internal">内部账号</option>
+                    <option value="external">外部账号，预留</option>
+                  </select>
+                  <select
+                    style={inputStyle}
+                    value={editUserForm.role}
+                    onChange={(event) => updateEditUserForm({ role: event.target.value === 'admin' ? 'admin' : 'user' })}
+                    disabled={editUserForm.account_type === 'external'}
+                  >
+                    <option value="user">普通用户</option>
+                    <option value="admin">管理员</option>
+                  </select>
+                </div>
+
+                <div style={{
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 8,
+                  padding: 10,
+                  background: editUserForm.role === 'admin' ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.035)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.56)', marginBottom: 4 }}>管理员身份</div>
+                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                    {editUserForm.role === 'admin'
+                      ? '可进入后台、管理用户、发放点数并查看成本数据。'
+                      : '只能使用用户端功能，不能进入管理员后台。'}
+                  </div>
+                  {editUserForm.account_type === 'external' && (
+                    <div style={{ color: '#fca5a5', fontSize: 12, marginTop: 6 }}>
+                      外部账号不能设为管理员，保存时会保持普通用户。
+                    </div>
+                  )}
+                </div>
+
+                <select
+                  style={inputStyle}
+                  value={editUserForm.user_profile}
+                  onChange={(event) => updateEditUserForm({ user_profile: event.target.value })}
+                  disabled={editUserForm.account_type === 'external'}
+                >
+                  {USER_PROFILE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <select
+                  style={inputStyle}
+                  value={editUserForm.feature_profile_id}
+                  onChange={(event) => updateEditUserForm({ feature_profile_id: event.target.value })}
+                  disabled={editUserForm.account_type === 'external'}
+                >
+                  <option value="auto">自动建议：{getFeatureProfileLabel(suggestedEditUserFeatureProfileId)}</option>
+                  {FEATURE_PROFILE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <select
+                    style={inputStyle}
+                    value={editUserForm.status}
+                    onChange={(event) => updateEditUserForm({ status: event.target.value })}
+                  >
+                    {USER_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <input
+                    style={inputStyle}
+                    type="date"
+                    value={editUserForm.expires_at}
+                    onChange={(event) => updateEditUserForm({ expires_at: event.target.value })}
+                  />
+                </div>
+
+                <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: 10 }}>
+                  <div style={{ color: 'rgba(255,255,255,0.56)', fontSize: 12, marginBottom: 6 }}>影响预览</div>
+                  <div style={{ display: 'grid', gap: 4, color: 'rgba(255,255,255,0.72)', fontSize: 12 }}>
+                    <div>来源：{accountTypeLabel(editUserForm.account_type)}</div>
+                    <div>系统身份：{editUserForm.role === 'admin' ? '管理员' : '普通用户'}</div>
+                    <div>组织分类：{getUserProfileLabel(editUserForm.user_profile)}</div>
+                    <div>能力档案：{getFeatureProfileLabel(editUserForm.feature_profile_id === 'auto' ? suggestedEditUserFeatureProfileId : editUserForm.feature_profile_id)}</div>
+                    <div>状态：{statusLabel(editUserForm.status)}{editUserForm.expires_at ? `，到期 ${editUserForm.expires_at}` : '，长期有效'}</div>
+                    <div style={{ color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>账户属性不会自动改点数，点数仍走流水。</div>
+                  </div>
+                </div>
+
+                <input
+                  style={inputStyle}
+                  placeholder="修改原因，必填"
+                  value={editUserForm.reason}
+                  onChange={(event) => updateEditUserForm({ reason: event.target.value })}
+                />
+                <button type="submit" style={{ ...buttonStyle, background: '#16a34a' }}>
+                  保存账户属性
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div style={{ ...panelStyle, color: 'rgba(255,255,255,0.58)' }}>
+              <div style={{ fontWeight: 700, color: '#fff', marginBottom: 8 }}>账户属性</div>
+              <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+                从左侧用户列表点击“编辑”，可设置账号来源、组织分类、能力档案、管理员身份、状态和过期时间。
+              </div>
+            </div>
+          )}
+
           <form onSubmit={bulkUpdateProfiles} style={{ ...panelStyle, borderColor: 'rgba(59,130,246,0.35)', background: 'rgba(59,130,246,0.08)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontWeight: 700 }}>批量修改用户类型</div>
@@ -641,6 +1021,68 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                 disabled={selectedUserIds.length === 0}
               >
                 修改已选用户
+              </button>
+            </div>
+          </form>
+
+          <form onSubmit={mergeUsers} style={{ ...panelStyle, borderColor: 'rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontWeight: 700 }}>合并重复账号</div>
+              <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
+                源账号 {mergeSourceUsers.length} 个
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <select
+                style={inputStyle}
+                value={mergeForm.target_user_id}
+                onChange={(event) => setMergeForm({ ...mergeForm, target_user_id: event.target.value })}
+              >
+                <option value="">选择最终保留账号</option>
+                {users
+                  .filter((user) => user.status === 'active')
+                  .map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} ({user.username}){user.role === 'admin' ? ' · 管理员' : ''}
+                    </option>
+                  ))}
+              </select>
+
+              <div style={{
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 8,
+                padding: 10,
+                color: 'rgba(255,255,255,0.72)',
+                fontSize: 12,
+                lineHeight: 1.7,
+              }}>
+                <div>先在左侧勾选要被合并的账号，再选择最终保留账号。</div>
+                <div>源账号会软删除，任务、项目、图集、成本归属会转到保留账号。</div>
+                <div>点数转入：余额 {formatNumber(mergeCreditPreview.balance)} 点，冻结 {formatNumber(mergeCreditPreview.frozen)} 点。</div>
+                <div style={{ color: '#fbbf24' }}>管理员账号不能作为源账号，只能作为保留账号。</div>
+                {mergeAdminSources.length > 0 && (
+                  <div style={{ color: '#fca5a5', marginTop: 4 }}>
+                    当前已选包含管理员：{mergeAdminSources.map((user) => user.username).join('、')}
+                  </div>
+                )}
+              </div>
+
+              <input
+                style={inputStyle}
+                placeholder="合并原因，必填"
+                value={mergeForm.reason}
+                onChange={(event) => setMergeForm({ ...mergeForm, reason: event.target.value })}
+              />
+              <button
+                style={{
+                  ...buttonStyle,
+                  background: mergeTargetUser && mergeSourceUsers.length > 0 && mergeAdminSources.length === 0 ? '#d97706' : '#334155',
+                  cursor: mergeTargetUser && mergeSourceUsers.length > 0 && mergeAdminSources.length === 0 ? 'pointer' : 'not-allowed',
+                }}
+                type="submit"
+                disabled={!mergeTargetUser || mergeSourceUsers.length === 0 || mergeAdminSources.length > 0}
+              >
+                合并到保留账号
               </button>
             </div>
           </form>

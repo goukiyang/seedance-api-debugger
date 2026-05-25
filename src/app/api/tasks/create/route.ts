@@ -30,7 +30,7 @@ const VALID_GENERATION_MODES: GenerationMode[] = [
 ];
 const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-const VALID_RESOLUTIONS = ['480p', '720p'];
+const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 
 export async function POST(request: NextRequest) {
   let user;
@@ -359,6 +359,13 @@ export async function POST(request: NextRequest) {
   // --- Call Seedance provider DIRECTLY (no internal HTTP) ---
   let providerRequestId: string | null = null;
   try {
+    providerInput.clientRequestId = taskId;
+    providerInput.client_request_id = taskId;
+    await prisma.videoTask.update({
+      where: { id: taskId },
+      data: { provider_client_request_id: taskId },
+    });
+
     const providerRequest = await createProviderApiRequest({
       task: createdTask,
       endpoint: 'seedance.createVideoTask',

@@ -36,7 +36,7 @@ const DEFAULT_MODEL = 'dreamina-seedance-2-0-260128';
 
 const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-const VALID_RESOLUTIONS = ['480p', '720p'];
+const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 const VALID_GENERATION_MODES: GenerationMode[] = [
   'all_in_one_reference',
   'first_last_frame',
@@ -889,6 +889,13 @@ export async function POST(request: NextRequest) {
 
     // ---- Step1: Call Provider API ----
     try {
+      input.clientRequestId = localTask.id;
+      input.client_request_id = localTask.id;
+      await prisma.videoTask.update({
+        where: { id: localTask.id },
+        data: { provider_client_request_id: localTask.id },
+      });
+
       const providerResult = await createVideoTask(input);
 
       // 更新本地任务，保存 provider_task_id 和 raw response

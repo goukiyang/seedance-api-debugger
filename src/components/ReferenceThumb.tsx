@@ -9,10 +9,11 @@ interface Props {
   uploadStatus?: UploadStatus;
   frameRole?: FrameRole;
   onRemove: (assetId: string) => void;
+  onReplace: (assetId: string) => void;
   onPreview: (url: string) => void;
 }
 
-export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameRole, onRemove, onPreview }: Props) {
+export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameRole, onRemove, onReplace, onPreview }: Props) {
   const src = asset.thumbnailUrl || asset.originalUrl;
   const fallbackSrc = asset.thumbnailUrl && asset.originalUrl && asset.thumbnailUrl !== asset.originalUrl
     ? asset.originalUrl
@@ -84,9 +85,27 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       {/* 删除按钮 */}
       <button
         type="button"
+        className="ref-thumb-replace"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onReplace(asset.assetId);
+        }}
+        title="替换"
+        aria-label={`替换图${index + 1}`}
+      >
+        ↺
+      </button>
+      <button
+        type="button"
         className="ref-thumb-remove"
-        onClick={() => onRemove(asset.assetId)}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove(asset.assetId);
+        }}
         title="移除"
+        aria-label={`移除图${index + 1}`}
       >
         ×
       </button>

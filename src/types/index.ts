@@ -7,8 +7,8 @@ export type VideoRatio = '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
 // Video duration options (4-15 秒)
 export type VideoDuration = 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
 
-// Video resolution options (480p, 720p)
-export type VideoResolution = '480p' | '720p';
+// Video resolution options (480p, 720p, 1080p)
+export type VideoResolution = '480p' | '720p' | '1080p';
 
 // Local status enum
 export type LocalStatus = 'draft' | 'submitted' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -44,6 +44,9 @@ export interface CreateVideoInput {
   // 回调参数
   callback_url?: string;
   execution_expires_after?: number;
+  // Provider 幂等 / 查询参数；发送给 Seedance 时使用 clientRequestId
+  clientRequestId?: string;
+  client_request_id?: string;
 }
 
 // ============================================================================
@@ -81,6 +84,9 @@ export interface CreateVideoInput {
   // 回调参数
   callback_url?: string;
   execution_expires_after?: number;
+  // Provider 幂等 / 查询参数；发送给 Seedance 时使用 clientRequestId
+  clientRequestId?: string;
+  client_request_id?: string;
 }
 
 // Step1: 创建任务返回
@@ -107,6 +113,11 @@ export interface ProviderStatusResponse {
   service_tier?: string;
   execution_expires_after?: number;
   usage?: unknown;
+  actual_cost?: number;
+  currency_or_credit_type?: string;
+  billing_status?: string;
+  billing_time?: number;
+  client_request_id?: string;
   raw: unknown;
 }
 
@@ -177,7 +188,7 @@ export interface APIError {
 // 常量定义
 export const RATIO_OPTIONS: VideoRatio[] = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 export const DURATION_OPTIONS: VideoDuration[] = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-export const RESOLUTION_OPTIONS: VideoResolution[] = ['480p', '720p'];
+export const RESOLUTION_OPTIONS: VideoResolution[] = ['480p', '720p', '1080p'];
 export const DEFAULT_RATIO: VideoRatio = '16:9';
 export const DEFAULT_DURATION: VideoDuration = 5;
 export const DEFAULT_RESOLUTION: VideoResolution = '720p';

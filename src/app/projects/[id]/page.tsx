@@ -38,6 +38,8 @@ interface TaskItem {
   prompt: string;
   local_status: string;
   provider_task_id: string | null;
+  result_video_url?: string | null;
+  local_video_path?: string | null;
   owner_user_id: string | null;
   user_id: string | null;
   estimated_cost: number | null;
@@ -46,7 +48,10 @@ interface TaskItem {
   provider_cost_status: string;
   provider_official_amount_minor: number | null;
   provider_final_amount_minor: number | null;
+  provider_official_amount_micros?: number | null;
+  provider_final_amount_micros?: number | null;
   provider_cost_currency: string | null;
+  provider_billing_status?: string | null;
   created_at: string;
   owner?: { id: string; name: string; username: string } | null;
   user?: { id: string; name: string; username: string } | null;
@@ -84,11 +89,51 @@ interface ProjectReviewSummary {
   charged_credits: number;
   refunded_credits: number;
   official_cost_minor: number;
+  official_cost_micros?: number;
   official_cost_currency: string | null;
+  official_cost_totals?: Array<{ currency: string; amount_minor: number; amount_micros: number }>;
   official_pending_count: number;
   cost_unknown_count: number;
   high_cost_tasks: ReviewTaskItem[];
   failed_tasks: ReviewTaskItem[];
+}
+
+interface CostLedgerItem {
+  id: string;
+  source_type: string;
+  source_id: string | null;
+  task_id: string | null;
+  user_id: string | null;
+  project_id: string | null;
+  provider_name: string;
+  provider_task_id: string | null;
+  event_type: string;
+  amount_minor: number | null;
+  amount_micros: number | null;
+  currency: string | null;
+  usage_quantity: number | null;
+  usage_unit: string | null;
+  cost_source: string;
+  confidence: string;
+  official_charge_id: string | null;
+  reason: string | null;
+  occurred_at: string;
+  created_at: string;
+  user?: { id: string; name: string; username: string; email: string } | null;
+  task?: (TaskItem & {
+    provider_official_amount_micros?: number | null;
+    provider_final_amount_micros?: number | null;
+    provider_billing_status?: string | null;
+  }) | null;
+  allocations?: Array<{
+    id: string;
+    allocation_type: string;
+    allocation_id: string;
+    amount_minor: number | null;
+    amount_micros: number | null;
+    currency: string | null;
+    reason: string | null;
+  }>;
 }
 
 function projectDisplayName(project: ProjectDetail): string {
@@ -122,6 +167,37 @@ function formatAmountMinor(amount: number | null | undefined, currency?: string 
   return `¥${value.toFixed(2)}`;
 }
 
+function currencyPrefix(currency?: string | null): string {
+  if (currency === 'USD') return '$';
+  if (!currency || currency === 'CNY') return '¥';
+  return `${currency} `;
+}
+
+function formatAmountMicros(amount: number | null | undefined, currency?: string | null): string {
+  if (amount === null || amount === undefined) return '待官方确认';
+  const value = amount / 1000000;
+  return `${currencyPrefix(currency)}${value.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  })}`;
+}
+
+function formatLedgerAmount(item: {
+  amount_micros?: number | null;
+  amount_minor?: number | null;
+  currency?: string | null;
+}): string {
+  if (item.amount_micros !== null && item.amount_micros !== undefined) {
+    return formatAmountMicros(item.amount_micros, item.currency);
+  }
+  return formatAmountMinor(item.amount_minor, item.currency);
+}
+
+function formatCostTotals(totals?: Array<{ currency: string; amount_minor: number; amount_micros: number }>): string {
+  if (!totals || totals.length === 0) return '待官方确认';
+  return totals.map((item) => formatAmountMicros(item.amount_micros, item.currency)).join(' · ');
+}
+
 function costStatusLabel(status: string): string {
   if (status === 'estimated_by_rule') return '规则预估';
   if (status === 'provisional_settled') return '临时结算';
@@ -133,8 +209,39 @@ function costStatusLabel(status: string): string {
   return '未记录';
 }
 
+function costEventLabel(eventType: string): string {
+  if (eventType === 'official_charge') return '官方扣费';
+  if (eventType === 'adjustment') return '调整';
+  if (eventType === 'reversal') return '冲正';
+  return eventType;
+}
+
+function confidenceLabel(confidence: string): string {
+  if (confidence === 'confirmed') return '已确认';
+  if (confidence === 'reconciled') return '已对账';
+  if (confidence === 'provisional') return '临时';
+  if (confidence === 'estimated') return '预估';
+  if (confidence === 'disputed') return '异常';
+  if (confidence === 'unknown') return '待确认';
+  return confidence || '-';
+}
+
 function taskOwnerLabel(task: TaskItem | ReviewTaskItem): string {
   return task.owner?.name || task.owner?.username || task.user?.name || task.user?.username || '-';
+}
+
+function ledgerOwnerLabel(ledger: CostLedgerItem): string {
+  return ledger.task ? taskOwnerLabel(ledger.task) : ledger.user?.name || ledger.user?.username || '-';
+}
+
+function safeVideoSrc(url?: string | null): string | null {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return url;
+  return null;
+}
+
+function providerTaskIdLabel(ledger: CostLedgerItem): string {
+  return ledger.provider_task_id || ledger.task?.provider_task_id || '-';
 }
 
 export default function ProjectDetailPage() {
@@ -142,6 +249,7 @@ export default function ProjectDetailPage() {
   const projectId = params.id;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [costLedgers, setCostLedgers] = useState<CostLedgerItem[]>([]);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumItem[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ProjectReviewSummary | null>(null);
   const [permissions, setPermissions] = useState<ProjectPermissions>({
@@ -179,6 +287,7 @@ export default function ProjectDetailPage() {
       setEditName(data.project?.name || '');
       setEditDescription(data.project?.description || '');
       setTasks(data.tasks || []);
+      setCostLedgers(data.cost_ledgers || []);
       setReferenceAlbums(data.reference_albums || []);
       setReviewSummary(data.review_summary || null);
       setPermissions(data.permissions || {
@@ -386,7 +495,11 @@ export default function ProjectDetailPage() {
           </div>
           <div className="stat-card">
             <span className="stat-label">官方成本</span>
-            <strong className="stat-value">{formatAmountMinor(reviewSummary?.official_cost_minor, reviewSummary?.official_cost_currency)}</strong>
+            <strong className="stat-value">
+              {reviewSummary?.official_cost_totals
+                ? formatCostTotals(reviewSummary.official_cost_totals)
+                : formatAmountMinor(reviewSummary?.official_cost_minor, reviewSummary?.official_cost_currency)}
+            </strong>
             <span className="stat-sub">待确认 {reviewSummary?.official_pending_count ?? 0} 条</span>
           </div>
           <div className="stat-card">
@@ -424,6 +537,114 @@ export default function ProjectDetailPage() {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h2 className="section-title mb-0">官方真实成本明细</h2>
+            <p className="text-gray text-sm mt-2">按 official_charge / adjustment / reversal 账本行展示，可从每笔成本追到视频任务。</p>
+          </div>
+          <span className="text-gray text-sm">最近 {costLedgers.length} 条</span>
+        </div>
+
+        {costLedgers.length === 0 ? (
+          <p className="text-gray">暂无官方真实成本账本。Seedance 返回实际扣费后，或管理员录入官方账单后会显示在这里。</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>视频 / 任务</th>
+                <th>创建人</th>
+                <th>Provider Task</th>
+                <th>官方成本</th>
+                <th>成本状态</th>
+                <th>时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {costLedgers.map((ledger) => {
+                const task = ledger.task;
+                const videoUrl = safeVideoSrc(task?.result_video_url || task?.local_video_path);
+                const providerTaskId = providerTaskIdLabel(ledger);
+
+                return (
+                  <tr key={ledger.id}>
+                    <td>
+                      <div className="flex items-center" style={{ gap: 10, minWidth: 300 }}>
+                        {videoUrl ? (
+                          <video
+                            src={videoUrl}
+                            muted
+                            preload="metadata"
+                            style={{ width: 72, height: 44, objectFit: 'cover', borderRadius: 8, background: 'rgba(15,23,42,0.8)' }}
+                          />
+                        ) : (
+                          <div style={{
+                            width: 72,
+                            height: 44,
+                            borderRadius: 8,
+                            display: 'grid',
+                            placeItems: 'center',
+                            background: 'rgba(15,23,42,0.8)',
+                            color: 'rgba(148,163,184,0.95)',
+                            fontSize: 12,
+                          }}>
+                            无视频
+                          </div>
+                        )}
+                        <div style={{ minWidth: 0 }}>
+                          {task ? (
+                            <Link className="link truncate" style={{ display: 'block', maxWidth: 320 }} href={`/tasks/${task.id}`} title={task.prompt || task.id}>
+                              {task.prompt || task.id}
+                            </Link>
+                          ) : (
+                            <span className="truncate" style={{ display: 'block', maxWidth: 320 }} title={ledger.reason || ledger.source_id || ledger.id}>
+                              {ledger.reason || ledger.source_id || ledger.id}
+                            </span>
+                          )}
+                          <span className="text-gray text-sm">
+                            {task?.local_status || ledger.source_type} · {costEventLabel(ledger.event_type)}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{ledgerOwnerLabel(ledger)}</td>
+                    <td>
+                      <span title={providerTaskId} style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                        {providerTaskId === '-' ? '-' : `${providerTaskId.slice(0, 18)}${providerTaskId.length > 18 ? '...' : ''}`}
+                      </span>
+                    </td>
+                    <td>
+                      <strong>{formatLedgerAmount(ledger)}</strong>
+                      {ledger.allocations && ledger.allocations.length > 0 && (
+                        <div className="text-gray text-sm">
+                          项目分摊 {formatLedgerAmount(ledger.allocations[0])}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <span>{task ? costStatusLabel(task.provider_cost_status) : confidenceLabel(ledger.confidence)}</span>
+                      <div className="text-gray text-sm">
+                        {confidenceLabel(ledger.confidence)}
+                        {task?.provider_billing_status ? ` · ${task.provider_billing_status}` : ''}
+                      </div>
+                    </td>
+                    <td>{new Date(ledger.occurred_at || ledger.created_at).toLocaleString('zh-CN')}</td>
+                    <td>
+                      {task ? (
+                        <Link className="link" href={`/tasks/${task.id}`}>查看任务</Link>
+                      ) : (
+                        <span className="text-gray">无任务</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
 

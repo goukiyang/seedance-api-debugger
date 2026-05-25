@@ -119,6 +119,9 @@ export function useWorkspace(): UseWorkspaceResult {
   const replaceAsset = useCallback(async (assetId: string, file: File) => {
     setUploadStatuses((prev) => ({ ...prev, [assetId]: 'uploading' }));
     try {
+      const currentAssets = workspace?.assets ?? [];
+      const targetAsset = currentAssets.find((asset) => asset.assetId === assetId);
+
       const formData = new FormData();
       formData.append('file', file);
 
@@ -128,22 +131,44 @@ export function useWorkspace(): UseWorkspaceResult {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Upload failed');
+      const nextAssetId = data.asset?.id as string | undefined;
+      if (!nextAssetId) throw new Error('Upload response missing asset id');
 
-      // 更新 workspace 中的 assetId
-      await fetch('/api/workspace/assets', {
+      const addRes = await fetch('/api/workspace/assets', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-tab-id': tabIdRef.current,
         },
-        body: JSON.stringify({ assetId: data.asset.id }),
+        body: JSON.stringify({ assetId: nextAssetId, role: targetAsset?.role || 'reference_image' }),
       });
+      const addData = await addRes.json();
+      if (!addRes.ok) throw new Error(addData.error || addData.message || 'Replace failed');
 
-      // 移除旧的 asset
-      await fetch(`/api/workspace/assets/${assetId}`, {
+      const removeRes = await fetch(`/api/workspace/assets/${assetId}`, {
         method: 'DELETE',
         headers: { 'x-tab-id': tabIdRef.current },
       });
+      const removeData = await removeRes.json();
+      if (!removeRes.ok) throw new Error(removeData.error || removeData.message || 'Replace failed');
+
+      if (targetAsset) {
+        const nextOrder = currentAssets
+          .map((asset) => asset.assetId === assetId ? nextAssetId : asset.assetId)
+          .filter((id, index, ids) => ids.indexOf(id) === index)
+          .map((id, index) => ({ assetId: id, sortOrder: index }));
+
+        const reorderRes = await fetch('/api/workspace/assets/reorder', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tab-id': tabIdRef.current,
+          },
+          body: JSON.stringify({ order: nextOrder }),
+        });
+        const reorderData = await reorderRes.json();
+        if (!reorderRes.ok) throw new Error(reorderData.error || reorderData.message || 'Replace failed');
+      }
 
       await fetchWorkspace();
       setUploadStatuses((prev) => {
@@ -155,7 +180,7 @@ export function useWorkspace(): UseWorkspaceResult {
       setError(err instanceof Error ? err.message : 'Replace failed');
       setUploadStatuses((prev) => ({ ...prev, [assetId]: 'failed' }));
     }
-  }, [fetchWorkspace]);
+  }, [fetchWorkspace, workspace?.assets]);
 
   const addReferenceImages = useCallback(async (referenceImageIds: string[]) => {
     if (referenceImageIds.length === 0) return;

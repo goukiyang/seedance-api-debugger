@@ -9,6 +9,12 @@ type RouteContext = {
   };
 };
 
+function canUseAdminSession(user: { role: string; status: string; expires_at: Date | null }) {
+  return user.role === 'admin'
+    && user.status === 'active'
+    && (!user.expires_at || user.expires_at.getTime() > Date.now());
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   let admin: SessionUser;
   try {
@@ -23,14 +29,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return errorJson('用户不存在', 404);
   if (user.status === 'deleted') return errorJson('用户不存在', 404);
-  if (user.role === 'admin') {
-    const activeAdminCount = await prisma.user.count({
+  if (canUseAdminSession(user)) {
+    const otherActiveAdminCount = await prisma.user.count({
       where: {
         role: 'admin',
-        status: { notIn: ['deleted', 'disabled'] },
+        status: 'active',
+        id: { not: id },
+        OR: [
+          { expires_at: null },
+          { expires_at: { gt: new Date() } },
+        ],
       },
     });
-    if (activeAdminCount <= 1) return errorJson('不能禁用最后一个可用管理员账号', 400);
+    if (otherActiveAdminCount <= 0) return errorJson('不能禁用最后一个可用管理员账号', 400);
   }
 
   await prisma.$transaction(async (tx) => {

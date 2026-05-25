@@ -1,0 +1,1957 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI 工作团队画布</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: oklch(0.962 0.006 185);
+        --panel: oklch(0.991 0.004 185);
+        --panel-2: oklch(0.975 0.007 185);
+        --ink: oklch(0.225 0.018 188);
+        --muted: oklch(0.49 0.018 188);
+        --faint: oklch(0.66 0.014 188);
+        --line: oklch(0.89 0.01 188);
+        --line-strong: oklch(0.78 0.018 188);
+        --accent: oklch(0.58 0.105 174);
+        --accent-ink: oklch(0.27 0.07 174);
+        --accent-soft: oklch(0.94 0.035 174);
+        --warn: oklch(0.64 0.12 62);
+        --warn-soft: oklch(0.95 0.05 70);
+        --blue: oklch(0.56 0.08 230);
+        --blue-soft: oklch(0.94 0.03 230);
+        --rose: oklch(0.58 0.09 25);
+        --rose-soft: oklch(0.95 0.035 25);
+        --green: oklch(0.55 0.09 148);
+        --green-soft: oklch(0.94 0.035 148);
+        --shadow: 0 18px 50px rgba(24, 37, 38, 0.12);
+        --radius: 8px;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --display: "Songti SC", "STSong", "Noto Serif CJK SC", ui-serif, serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 14px;
+      }
+
+      button,
+      textarea,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: 56px minmax(0, 1fr);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 16px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(250, 252, 250, 0.94);
+        backdrop-filter: blur(12px);
+        position: relative;
+        z-index: 20;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-width: 0;
+      }
+
+      .mark {
+        width: 30px;
+        height: 30px;
+        border: 1px solid var(--accent-ink);
+        border-radius: 7px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr 1fr;
+        overflow: hidden;
+        flex: 0 0 auto;
+      }
+
+      .mark span:nth-child(1) {
+        background: var(--accent);
+      }
+
+      .mark span:nth-child(2) {
+        background: var(--warn);
+      }
+
+      .mark span:nth-child(3) {
+        background: var(--panel);
+      }
+
+      .mark span:nth-child(4) {
+        background: var(--rose);
+      }
+
+      .brand-title {
+        min-width: 0;
+      }
+
+      .brand-title strong {
+        display: block;
+        font-family: var(--display);
+        font-size: 24px;
+        font-weight: 800;
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      .brand-title small {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .flow-strip {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .step-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--panel);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .step-pill.current {
+        color: var(--accent-ink);
+        border-color: color-mix(in oklch, var(--accent) 42%, var(--line));
+        background: var(--accent-soft);
+      }
+
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        flex: 0 0 auto;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .button {
+        height: 34px;
+        border-radius: 7px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--ink);
+        padding: 0 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+      }
+
+      .button:hover {
+        border-color: var(--line-strong);
+        background: var(--panel-2);
+      }
+
+      .button:active {
+        transform: translateY(1px);
+      }
+
+      .button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: oklch(0.985 0.004 185);
+      }
+
+      .button.primary:hover {
+        background: oklch(0.54 0.11 174);
+      }
+
+      .button.ghost {
+        background: transparent;
+      }
+
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 76px minmax(720px, 1fr) 322px;
+      }
+
+      .tool-rail {
+        min-height: 0;
+        border-right: 1px solid var(--line);
+        background: var(--panel-2);
+        display: grid;
+        grid-template-rows: 1fr auto;
+        padding: 10px 8px;
+        gap: 12px;
+        z-index: 12;
+      }
+
+      .tool-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .tool {
+        width: 58px;
+        min-height: 58px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        display: grid;
+        place-items: center;
+        gap: 2px;
+        padding: 6px 4px;
+        position: relative;
+      }
+
+      .tool:hover,
+      .tool.active {
+        border-color: var(--line);
+        background: var(--panel);
+        color: var(--ink);
+      }
+
+      .tool-shape {
+        width: 22px;
+        height: 22px;
+        border: 1px solid currentColor;
+        border-radius: 6px;
+        position: relative;
+      }
+
+      .tool-shape.role::after {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1px solid currentColor;
+        position: absolute;
+        left: 6px;
+        top: 4px;
+      }
+
+      .tool-shape.toolbox::after {
+        content: "";
+        position: absolute;
+        left: 4px;
+        right: 4px;
+        top: 7px;
+        border-top: 1px solid currentColor;
+      }
+
+      .tool-shape.data::before,
+      .tool-shape.data::after {
+        content: "";
+        position: absolute;
+        left: 4px;
+        right: 4px;
+        border-top: 1px solid currentColor;
+      }
+
+      .tool-shape.data::before {
+        top: 6px;
+      }
+
+      .tool-shape.data::after {
+        top: 13px;
+      }
+
+      .tool-shape.gate {
+        transform: rotate(45deg);
+        border-radius: 4px;
+      }
+
+      .tool-shape.bundle::before {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border: 1px solid currentColor;
+        border-radius: 3px;
+      }
+
+      .tool-shape.template::before,
+      .tool-shape.template::after {
+        content: "";
+        position: absolute;
+        width: 6px;
+        height: 6px;
+        border: 1px solid currentColor;
+        border-radius: 2px;
+        top: 7px;
+      }
+
+      .tool-shape.template::before {
+        left: 4px;
+      }
+
+      .tool-shape.template::after {
+        right: 4px;
+      }
+
+      .tool span:last-child {
+        font-size: 12px;
+        line-height: 1;
+      }
+
+      .rail-tip {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 8px;
+        padding: 8px 7px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        text-align: center;
+      }
+
+      .canvas-shell {
+        min-height: 0;
+        position: relative;
+        overflow: hidden;
+        background:
+          linear-gradient(var(--line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--line) 1px, transparent 1px),
+          linear-gradient(var(--panel-2), var(--bg));
+        background-size: 28px 28px, 28px 28px, auto;
+      }
+
+      .canvas-toolbar {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        pointer-events: none;
+        z-index: 8;
+      }
+
+      .canvas-toolbar > * {
+        pointer-events: auto;
+      }
+
+      .view-tabs,
+      .canvas-tools {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(250, 252, 250, 0.92);
+        padding: 4px;
+        box-shadow: 0 10px 30px rgba(24, 37, 38, 0.08);
+      }
+
+      .tab,
+      .icon-button {
+        height: 28px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        padding: 0 9px;
+      }
+
+      .tab.active,
+      .icon-button:hover {
+        background: var(--panel);
+        color: var(--ink);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+
+      .canvas {
+        position: absolute;
+        inset: 0;
+        transform: scale(0.82);
+        transform-origin: 0 0;
+      }
+
+      .links {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        overflow: visible;
+      }
+
+      .link-line {
+        stroke: color-mix(in oklch, var(--accent) 52%, var(--line-strong));
+        stroke-width: 3.1;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+        filter: drop-shadow(0 1px 0 rgba(250, 252, 250, 0.9));
+      }
+
+      .link-halo {
+        stroke: rgba(250, 252, 250, 0.92);
+        stroke-width: 8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+      }
+
+      .link-line.muted {
+        stroke: var(--line-strong);
+        stroke-width: 2.5;
+        stroke-dasharray: 5 6;
+      }
+
+      .link-line.assist {
+        stroke: color-mix(in oklch, var(--accent) 38%, var(--line-strong));
+        stroke-width: 2.6;
+        stroke-dasharray: 7 7;
+      }
+
+      .link-dot {
+        fill: var(--panel);
+        stroke: color-mix(in oklch, var(--accent) 58%, var(--line-strong));
+        stroke-width: 1.7;
+      }
+
+      .link-dot.muted {
+        stroke: var(--line-strong);
+      }
+
+      .link-label {
+        font-size: 12px;
+        font-weight: 650;
+        fill: var(--accent-ink);
+        paint-order: stroke;
+        stroke: var(--bg);
+        stroke-width: 7px;
+        stroke-linejoin: round;
+      }
+
+      .node {
+        position: absolute;
+        width: 186px;
+        min-height: 122px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 12px 30px rgba(24, 37, 38, 0.1);
+        padding: 12px;
+        user-select: none;
+        touch-action: none;
+        transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+      }
+
+      .node:hover {
+        border-color: color-mix(in oklch, var(--accent) 45%, var(--line-strong));
+      }
+
+      .node.selected {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent), var(--shadow);
+      }
+
+      .node.running {
+        border-color: var(--blue);
+      }
+
+      .node.done {
+        border-color: var(--green);
+      }
+
+      .node.blocked {
+        border-color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .node-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .role-name {
+        font-weight: 700;
+        font-size: 16px;
+        line-height: 1.2;
+      }
+
+      .role-sub {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.3;
+      }
+
+      .node-menu-dot {
+        width: 24px;
+        height: 24px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        background: transparent;
+        flex: 0 0 auto;
+      }
+
+      .node-menu-dot::before {
+        content: "";
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 5px 0 currentColor, 0 -5px 0 currentColor;
+      }
+
+      .node-body {
+        margin-top: 12px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .mini-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .status-tag {
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        white-space: nowrap;
+      }
+
+      .status-tag.ready {
+        border-color: color-mix(in oklch, var(--accent) 34%, var(--line));
+        background: var(--accent-soft);
+        color: var(--accent-ink);
+      }
+
+      .status-tag.running {
+        border-color: color-mix(in oklch, var(--blue) 44%, var(--line));
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .status-tag.done {
+        border-color: color-mix(in oklch, var(--green) 44%, var(--line));
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .status-tag.blocked {
+        border-color: color-mix(in oklch, var(--warn) 50%, var(--line));
+        background: var(--warn-soft);
+        color: oklch(0.42 0.11 62);
+      }
+
+      .capsules {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+
+      .capsule {
+        height: 22px;
+        padding: 0 7px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        font-size: 12px;
+        background: var(--panel-2);
+      }
+
+      .start-card,
+      .result-card {
+        position: absolute;
+        width: 244px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 12px 30px rgba(24, 37, 38, 0.08);
+        padding: 14px;
+        z-index: 2;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
+        transition: border-color 150ms ease, box-shadow 150ms ease;
+      }
+
+      .start-card:hover,
+      .result-card:hover {
+        border-color: color-mix(in oklch, var(--accent) 45%, var(--line-strong));
+      }
+
+      .start-card.dragging,
+      .result-card.dragging,
+      .canvas-hint.dragging,
+      .node.dragging {
+        cursor: grabbing;
+        box-shadow: var(--shadow);
+        z-index: 9;
+      }
+
+      .start-card {
+        left: 130px;
+        top: 96px;
+      }
+
+      .result-card {
+        left: 180px;
+        top: 540px;
+      }
+
+      .card-kicker {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 5px;
+      }
+
+      .card-title {
+        font-family: var(--display);
+        font-weight: 750;
+        font-size: 26px;
+        line-height: 1.25;
+      }
+
+      .card-copy {
+        margin-top: 8px;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .canvas-hint {
+        position: absolute;
+        left: 22px;
+        bottom: 118px;
+        width: 220px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(250, 252, 250, 0.92);
+        padding: 10px 11px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+        z-index: 6;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
+      }
+
+      .prompt-dock {
+        position: absolute;
+        left: 50%;
+        bottom: 18px;
+        width: min(760px, calc(100% - 48px));
+        transform: translateX(-50%);
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        background: rgba(250, 252, 250, 0.96);
+        box-shadow: var(--shadow);
+        padding: 10px;
+        z-index: 10;
+      }
+
+      .prompt-box {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: end;
+      }
+
+      .prompt-input {
+        min-height: 48px;
+        max-height: 120px;
+        resize: vertical;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+        line-height: 1.5;
+        padding: 4px 2px;
+      }
+
+      .prompt-input::placeholder {
+        color: var(--faint);
+      }
+
+      .prompt-actions {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding-bottom: 2px;
+      }
+
+      .quick-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding-top: 8px;
+        border-top: 1px solid var(--line);
+        margin-top: 8px;
+      }
+
+      .quick-chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        height: 26px;
+        padding: 0 9px;
+        font-size: 12px;
+      }
+
+      .quick-chip:hover {
+        color: var(--ink);
+        background: var(--panel);
+      }
+
+      .inspector {
+        min-height: 0;
+        border-left: 1px solid var(--line);
+        background: var(--panel);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        z-index: 12;
+      }
+
+      .inspector-head {
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+
+      .inspector-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .inspector-title strong {
+        font-family: var(--display);
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      .inspector-body {
+        overflow: auto;
+        padding: 14px 16px 18px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .field {
+        display: grid;
+        gap: 7px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .field textarea,
+      .field input,
+      .field select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--ink);
+        padding: 9px 10px;
+        outline: 0;
+      }
+
+      .field textarea {
+        min-height: 82px;
+        resize: vertical;
+        line-height: 1.45;
+      }
+
+      .field textarea:focus,
+      .field input:focus,
+      .field select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 18%, transparent);
+      }
+
+      .tool-checks {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      .check {
+        min-height: 34px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+        padding: 0 9px;
+        color: var(--muted);
+      }
+
+      .check input {
+        accent-color: var(--accent);
+        width: auto;
+        flex: 0 0 auto;
+      }
+
+      .rules {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .rule {
+        display: grid;
+        grid-template-columns: 82px minmax(0, 1fr);
+        gap: 10px;
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel-2);
+      }
+
+      .rule:last-child {
+        border-bottom: 0;
+      }
+
+      .rule b {
+        font-size: 12px;
+      }
+
+      .rule span {
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .inspector-foot {
+        display: grid;
+        gap: 8px;
+        padding: 12px 16px 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .run-panel {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        border-radius: 8px;
+        padding: 11px;
+      }
+
+      .run-panel strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 8px;
+      }
+
+      .progress {
+        height: 6px;
+        border-radius: 999px;
+        background: var(--line);
+        overflow: hidden;
+      }
+
+      .progress span {
+        display: block;
+        height: 100%;
+        width: 100%;
+        transform: scaleX(0.38);
+        transform-origin: left center;
+        background: var(--accent);
+        transition: transform 300ms ease;
+      }
+
+      .progress-meta {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .context-menu {
+        position: fixed;
+        width: 178px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        padding: 6px;
+        z-index: 40;
+        display: none;
+      }
+
+      .context-menu.show {
+        display: block;
+      }
+
+      .menu-item {
+        width: 100%;
+        min-height: 32px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--ink);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 9px;
+        text-align: left;
+      }
+
+      .menu-item:hover {
+        background: var(--panel-2);
+      }
+
+      .menu-item.danger {
+        color: var(--rose);
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        top: 70px;
+        transform: translateX(-50%) translateY(-12px);
+        opacity: 0;
+        pointer-events: none;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        padding: 9px 13px;
+        color: var(--ink);
+        z-index: 60;
+        transition: opacity 180ms ease, transform 180ms ease;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @media (max-width: 1060px) {
+        .workspace {
+          grid-template-columns: 66px minmax(540px, 1fr);
+        }
+
+        .inspector {
+          position: absolute;
+          right: 12px;
+          top: 70px;
+          bottom: 86px;
+          width: 312px;
+          box-shadow: var(--shadow);
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .topbar {
+          grid-template-columns: 240px minmax(0, 1fr) auto;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .topbar {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+
+        .flow-strip {
+          display: none;
+        }
+
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .tool-rail {
+          position: absolute;
+          left: 10px;
+          top: 68px;
+          bottom: 96px;
+          width: 62px;
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          box-shadow: var(--shadow);
+        }
+
+        .inspector {
+          display: none;
+        }
+
+        .node {
+          width: 172px;
+        }
+
+        .prompt-dock {
+          width: calc(100% - 24px);
+        }
+
+        .prompt-box {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand" aria-label="产品名称">
+          <div class="mark" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <div class="brand-title">
+            <strong>AI 工作团队画布</strong>
+            <small>一句目标生成团队，画布里微调，最后拿结果包</small>
+          </div>
+        </div>
+
+        <div class="flow-strip" aria-label="运行阶段">
+          <span class="step-pill current"><i class="dot"></i>理解目标</span>
+          <span class="step-pill"><i class="dot"></i>生成角色</span>
+          <span class="step-pill"><i class="dot"></i>串联关系</span>
+          <span class="step-pill"><i class="dot"></i>执行任务</span>
+          <span class="step-pill"><i class="dot"></i>交付结果</span>
+        </div>
+
+        <div class="top-actions">
+          <button class="button ghost" id="simplifyTop">帮我简化</button>
+          <button class="button" id="saveSnapshot">保存版本</button>
+          <button class="button primary" id="runTop">开始工作</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="tool-rail" aria-label="工具栏">
+          <div class="tool-list">
+            <button class="tool active" data-add="role">
+              <span class="tool-shape role"></span>
+              <span>角色</span>
+            </button>
+            <button class="tool" data-add="tool">
+              <span class="tool-shape toolbox"></span>
+              <span>工具</span>
+            </button>
+            <button class="tool" data-add="data">
+              <span class="tool-shape data"></span>
+              <span>资料</span>
+            </button>
+            <button class="tool" data-add="gate">
+              <span class="tool-shape gate"></span>
+              <span>确认</span>
+            </button>
+            <button class="tool" data-add="bundle">
+              <span class="tool-shape bundle"></span>
+              <span>整合</span>
+            </button>
+            <button class="tool" data-add="template">
+              <span class="tool-shape template"></span>
+              <span>模板</span>
+            </button>
+          </div>
+          <div class="rail-tip">点一下放入画布，也可以从底部直接说目标。</div>
+        </aside>
+
+        <section class="canvas-shell" aria-label="无限画布">
+          <div class="canvas-toolbar">
+            <div class="view-tabs">
+              <button class="tab active">团队图</button>
+              <button class="tab">执行流</button>
+              <button class="tab">结果包</button>
+            </div>
+            <div class="canvas-tools">
+              <button class="icon-button" id="autoLayout" title="自动整理画布">整理</button>
+              <button class="icon-button" id="zoomOut" title="缩小画布">－</button>
+              <button class="icon-button" id="zoomReset" title="回到默认视图">82%</button>
+              <button class="icon-button" id="zoomIn" title="放大画布">＋</button>
+            </div>
+          </div>
+
+          <div class="canvas" id="canvas">
+            <svg class="links" id="links" viewBox="0 0 1200 900" aria-hidden="true">
+              <defs>
+                <marker id="arrowHead" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="strokeWidth">
+                  <path d="M1 1 L10 5.5 L1 10 Z" fill="oklch(0.58 0.105 174)"></path>
+                </marker>
+                <marker id="arrowHeadMuted" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="strokeWidth">
+                  <path d="M1 1 L10 5.5 L1 10 Z" fill="oklch(0.78 0.018 188)"></path>
+                </marker>
+              </defs>
+              <path class="link-line muted" marker-end="url(#arrowHeadMuted)" d="M 374 182 C 382 182, 390 181, 400 181"></path>
+              <path class="link-line" marker-end="url(#arrowHead)" d="M 586 181 C 616 181, 620 154, 640 154"></path>
+              <path class="link-line" marker-end="url(#arrowHead)" d="M 733 214 C 733 278, 580 295, 496 306"></path>
+              <path class="link-line" marker-end="url(#arrowHead)" d="M 650 214 C 600 275, 330 315, 263 350"></path>
+              <path class="link-line" marker-end="url(#arrowHead)" d="M 356 414 C 370 430, 382 398, 400 368"></path>
+              <path class="link-line" marker-end="url(#arrowHead)" d="M 586 368 C 610 368, 626 391, 640 391"></path>
+              <path class="link-line" marker-end="url(#arrowHead)" d="M 356 414 C 470 470, 560 425, 640 391"></path>
+              <path class="link-line" marker-end="url(#arrowHead)" d="M 733 452 C 735 500, 690 545, 626 566"></path>
+              <path class="link-line muted" marker-end="url(#arrowHeadMuted)" d="M 520 628 C 430 646, 360 642, 302 620"></path>
+              <text class="link-label" x="386" y="171" text-anchor="middle">目标</text>
+              <text class="link-label" x="612" y="166" text-anchor="middle">拆解</text>
+              <text class="link-label" x="620" y="273" text-anchor="middle">方向</text>
+              <text class="link-label" x="459" y="285" text-anchor="middle">标准</text>
+              <text class="link-label" x="382" y="401" text-anchor="middle">补位</text>
+              <text class="link-label" x="614" y="359" text-anchor="middle">主稿</text>
+              <text class="link-label" x="506" y="444" text-anchor="middle">体验</text>
+              <text class="link-label" x="704" y="504" text-anchor="middle">通过</text>
+              <text class="link-label" x="410" y="642" text-anchor="middle">交付</text>
+            </svg>
+
+            <article class="start-card" id="startCard">
+              <div class="card-kicker">当前目标</div>
+              <div class="card-title">把一件模糊任务变成可执行的 AI 工作队</div>
+              <div class="card-copy">你只需要描述结果。系统负责拆角色、串关系、生成交付结构。</div>
+            </article>
+
+            <article class="node selected" data-node="planner" style="left: 400px; top: 118px;">
+              <div class="node-header">
+                <div>
+                  <div class="role-name">任务拆解员</div>
+                  <div class="role-sub">把目标拆成步骤和验收口径</div>
+                </div>
+                <button class="node-menu-dot" aria-label="更多"></button>
+              </div>
+              <div class="node-body">
+                <div class="mini-row"><span>状态</span><span class="status-tag ready">待执行</span></div>
+                <div class="capsules"><span class="capsule">拆任务</span><span class="capsule">排顺序</span></div>
+              </div>
+            </article>
+
+            <article class="node" data-node="director" style="left: 730px; top: 92px;">
+              <div class="node-header">
+                <div>
+                  <div class="role-name">方向负责人</div>
+                  <div class="role-sub">定标准，决定什么算好</div>
+                </div>
+                <button class="node-menu-dot" aria-label="更多"></button>
+              </div>
+              <div class="node-body">
+                <div class="mini-row"><span>状态</span><span class="status-tag ready">待执行</span></div>
+                <div class="capsules"><span class="capsule">风格</span><span class="capsule">边界</span></div>
+              </div>
+            </article>
+
+            <article class="node" data-node="builder" style="left: 430px; top: 306px;">
+              <div class="node-header">
+                <div>
+                  <div class="role-name">主创执行员</div>
+                  <div class="role-sub">把方向变成第一版成果</div>
+                </div>
+                <button class="node-menu-dot" aria-label="更多"></button>
+              </div>
+              <div class="node-body">
+                <div class="mini-row"><span>状态</span><span class="status-tag ready">待执行</span></div>
+                <div class="capsules"><span class="capsule">生成</span><span class="capsule">整合</span></div>
+              </div>
+            </article>
+
+            <article class="node" data-node="visual" style="left: 170px; top: 350px;">
+              <div class="node-header">
+                <div>
+                  <div class="role-name">视觉顾问</div>
+                  <div class="role-sub">补审美、布局和呈现细节</div>
+                </div>
+                <button class="node-menu-dot" aria-label="更多"></button>
+              </div>
+              <div class="node-body">
+                <div class="mini-row"><span>状态</span><span class="status-tag ready">待执行</span></div>
+                <div class="capsules"><span class="capsule">版式</span><span class="capsule">视觉</span></div>
+              </div>
+            </article>
+
+            <article class="node" data-node="reviewer" style="left: 730px; top: 330px;">
+              <div class="node-header">
+                <div>
+                  <div class="role-name">挑刺审核员</div>
+                  <div class="role-sub">找漏洞、歧义和偷懒的地方</div>
+                </div>
+                <button class="node-menu-dot" aria-label="更多"></button>
+              </div>
+              <div class="node-body">
+                <div class="mini-row"><span>状态</span><span class="status-tag ready">待执行</span></div>
+                <div class="capsules"><span class="capsule">风险</span><span class="capsule">返工点</span></div>
+              </div>
+            </article>
+
+            <article class="node" data-node="integrator" style="left: 610px; top: 525px;">
+              <div class="node-header">
+                <div>
+                  <div class="role-name">最终整合员</div>
+                  <div class="role-sub">只收已通过内容，生成结果包</div>
+                </div>
+                <button class="node-menu-dot" aria-label="更多"></button>
+              </div>
+              <div class="node-body">
+                <div class="mini-row"><span>状态</span><span class="status-tag ready">待执行</span></div>
+                <div class="capsules"><span class="capsule">汇总</span><span class="capsule">交付</span></div>
+              </div>
+            </article>
+
+            <article class="result-card" id="resultCard">
+              <div class="card-kicker">结果包</div>
+              <div class="card-title" id="resultTitle">等待开始工作</div>
+              <div class="card-copy" id="resultText">运行后这里会收齐每个角色的正式产出、被打回原因和最终交付版本。</div>
+            </article>
+          </div>
+
+          <div class="canvas-hint" id="canvasHint">右键角色可以改职责、回复格式、工具权限和连接关系。拖动角色时，关系线会自动跟随。</div>
+
+          <div class="prompt-dock" role="region" aria-label="目标输入">
+            <div class="prompt-box">
+              <textarea class="prompt-input" id="goalInput" rows="2">帮我把导演组流程做成一个可复用的 AI 工作团队画布，要求我少操作，系统多自动。</textarea>
+              <div class="prompt-actions">
+                <button class="button" id="generateTeam">生成团队</button>
+                <button class="button primary" id="runPrompt">开始工作</button>
+              </div>
+            </div>
+            <div class="quick-row">
+              <button class="quick-chip" data-prompt="少一点角色，只保留必须的人">少一点角色</button>
+              <button class="quick-chip" data-prompt="把每个角色的回复格式写清楚">补回复格式</button>
+              <button class="quick-chip" data-prompt="帮我找这个流程最容易卡住的地方">找卡点</button>
+              <button class="quick-chip" data-prompt="把最终交付包变成中文清单">中文结果包</button>
+            </div>
+          </div>
+        </section>
+
+        <aside class="inspector" aria-label="角色设置">
+          <div class="inspector-head">
+            <div class="eyebrow">当前选中</div>
+            <div class="inspector-title">
+              <strong id="inspectorName">任务拆解员</strong>
+              <span class="status-tag ready" id="inspectorStatus">待执行</span>
+            </div>
+          </div>
+
+          <div class="inspector-body">
+            <div class="field">
+              <label for="rolePosition">角色定位</label>
+              <input id="rolePosition" value="流程启动后的第一位角色，负责把模糊目标拆成可执行任务。" />
+            </div>
+
+            <div class="field">
+              <label for="roleDuty">职责</label>
+              <textarea id="roleDuty">拆解用户目标，判断需要哪些角色，生成第一版执行顺序和验收口径。</textarea>
+            </div>
+
+            <div class="field">
+              <label for="replyFormat">回复格式</label>
+              <textarea id="replyFormat">1. 我理解的目标
+2. 需要的角色
+3. 每个角色的任务
+4. 需要用户确认的问题</textarea>
+            </div>
+
+            <div class="field">
+              <label>可用工具</label>
+              <div class="tool-checks">
+                <label class="check"><input type="checkbox" checked /> 搜索资料</label>
+                <label class="check"><input type="checkbox" checked /> 调用模型</label>
+                <label class="check"><input type="checkbox" /> 读文件</label>
+                <label class="check"><input type="checkbox" /> 发消息</label>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>工作关系</label>
+              <div class="rules" id="relationshipRules">
+                <div class="rule"><b>接收</b><span>来自用户目标和当前项目资料</span></div>
+                <div class="rule"><b>交给</b><span>方向负责人，主创执行员</span></div>
+                <div class="rule"><b>确认点</b><span>任务拆解完成后，只问一个最关键问题</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="inspector-foot">
+            <div class="run-panel">
+              <strong>本次运行</strong>
+              <div class="progress"><span id="progressBar"></span></div>
+              <div class="progress-meta" id="progressMeta">还没开始。点“开始工作”后，团队会按关系线执行并生成结果包。</div>
+            </div>
+            <button class="button primary" id="applyRole">保存这个角色</button>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <div class="context-menu" id="contextMenu" role="menu">
+      <button class="menu-item" data-action="duty">改职责<span>↵</span></button>
+      <button class="menu-item" data-action="format">改回复格式<span>⌘</span></button>
+      <button class="menu-item" data-action="tool">换工具<span>＋</span></button>
+      <button class="menu-item" data-action="connect">连接到<span>→</span></button>
+      <button class="menu-item" data-action="copy">复制角色<span></span></button>
+      <button class="menu-item danger" data-action="delete">删除<span></span></button>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">已更新</div>
+
+    <script>
+      const canvas = document.getElementById("canvas");
+      const links = document.getElementById("links");
+      const contextMenu = document.getElementById("contextMenu");
+      const toast = document.getElementById("toast");
+      const progressBar = document.getElementById("progressBar");
+      const progressMeta = document.getElementById("progressMeta");
+      const resultTitle = document.getElementById("resultTitle");
+      const resultText = document.getElementById("resultText");
+      const goalInput = document.getElementById("goalInput");
+
+      const nodeData = {
+        planner: {
+          name: "任务拆解员",
+          status: "待执行",
+          position: "流程启动后的第一位角色，负责把模糊目标拆成可执行任务。",
+          duty: "拆解用户目标，判断需要哪些角色，生成第一版执行顺序和验收口径。",
+          format: "1. 我理解的目标\n2. 需要的角色\n3. 每个角色的任务\n4. 需要用户确认的问题",
+          receive: "来自用户目标和当前项目资料",
+          handoff: "方向负责人，主创执行员",
+          gate: "任务拆解完成后，只问一个最关键问题"
+        },
+        director: {
+          name: "方向负责人",
+          status: "待执行",
+          position: "把用户的模糊偏好变成明确方向，避免团队各做各的。",
+          duty: "确定审美、边界、优先级和验收标准。必要时打回任务拆解员。",
+          format: "1. 方向判断\n2. 必须满足的标准\n3. 不要做的事\n4. 给执行员的指令",
+          receive: "任务拆解员的执行顺序",
+          handoff: "主创执行员，视觉顾问",
+          gate: "方向不清时请求用户确认"
+        },
+        builder: {
+          name: "主创执行员",
+          status: "待执行",
+          position: "负责生成第一版主要成果，不让流程停在讨论层。",
+          duty: "根据方向负责人给出的标准生成主稿，并标注缺口和需要协作的部分。",
+          format: "1. 第一版成果\n2. 关键取舍\n3. 需要补位的内容\n4. 自检问题",
+          receive: "方向负责人和任务拆解员",
+          handoff: "视觉顾问，挑刺审核员",
+          gate: "第一版完成后进入审核，不默认问用户"
+        },
+        visual: {
+          name: "视觉顾问",
+          status: "待执行",
+          position: "从呈现和使用体验角度把成果变得更轻、更好用。",
+          duty: "检查布局、层级、措辞密度和视觉负担，提出可直接应用的修改。",
+          format: "1. 视觉问题\n2. 简化建议\n3. 必须保留的核心\n4. 可删除的内容",
+          receive: "方向负责人和主创执行员",
+          handoff: "主创执行员，挑刺审核员",
+          gate: "只在影响方向时请求确认"
+        },
+        reviewer: {
+          name: "挑刺审核员",
+          status: "待执行",
+          position: "专门找问题，防止系统产出看起来完整但实际不好用。",
+          duty: "检查逻辑漏洞、用户成本、过度设计、缺失功能和执行风险。",
+          format: "1. 必修问题\n2. 可选优化\n3. 可能误导用户的地方\n4. 是否通过",
+          receive: "主创执行员和视觉顾问",
+          handoff: "最终整合员，必要时打回对应角色",
+          gate: "发现阻断问题时打回，不让结果进入交付包"
+        },
+        integrator: {
+          name: "最终整合员",
+          status: "待执行",
+          position: "只读取通过审核的内容，输出用户能直接使用的最终结果包。",
+          duty: "整合各角色产出，去重，排序，生成最终交付清单和下一步建议。",
+          format: "1. 最终结果\n2. 已采纳修改\n3. 风险与未决问题\n4. 下一步最小动作",
+          receive: "所有已通过的角色产出",
+          handoff: "用户",
+          gate: "交付前给用户一个锁定或返工选择"
+        }
+      };
+
+      const connections = [
+        { from: "startCard", to: "planner", label: "目标", muted: true, labelOffset: [0, -10] },
+        { from: "planner", to: "director", label: "拆解", labelOffset: [0, -10] },
+        { from: "director", to: "builder", label: "方向", labelOffset: [16, -6] },
+        { from: "director", to: "visual", label: "标准", assist: true, labelOffset: [-28, -8] },
+        { from: "builder", to: "visual", label: "补位", assist: true, labelOffset: [0, 14] },
+        { from: "builder", to: "reviewer", label: "主稿", labelOffset: [0, -12] },
+        { from: "visual", to: "reviewer", label: "体验", assist: true, labelOffset: [0, 18] },
+        { from: "reviewer", to: "integrator", label: "通过", labelOffset: [20, -2] },
+        { from: "integrator", to: "resultCard", label: "交付", muted: true, labelOffset: [-8, -8] }
+      ];
+
+      const order = ["planner", "director", "builder", "visual", "reviewer", "integrator"];
+      let selectedId = "planner";
+      let toastTimer = null;
+      let nodeCounter = 1;
+      let dragState = null;
+      let scale = 0.82;
+
+      function getElement(id) {
+        if (id === "startCard") return document.getElementById("startCard");
+        if (id === "resultCard") return document.getElementById("resultCard");
+        return document.querySelector(`[data-node="${id}"]`);
+      }
+
+      function rectOf(element) {
+        return {
+          x: element.offsetLeft + element.offsetWidth / 2,
+          y: element.offsetTop + element.offsetHeight / 2,
+          width: element.offsetWidth,
+          height: element.offsetHeight
+        };
+      }
+
+      function portPoint(rect, port, offset = 0) {
+        const halfW = rect.width / 2;
+        const halfH = rect.height / 2;
+        if (port === "left") return { x: rect.x - halfW, y: rect.y + offset };
+        if (port === "right") return { x: rect.x + halfW, y: rect.y + offset };
+        if (port === "top") return { x: rect.x + offset, y: rect.y - halfH };
+        return { x: rect.x + offset, y: rect.y + halfH };
+      }
+
+      function portVector(port) {
+        if (port === "left") return { x: -1, y: 0 };
+        if (port === "right") return { x: 1, y: 0 };
+        if (port === "top") return { x: 0, y: -1 };
+        return { x: 0, y: 1 };
+      }
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function autoPorts(fromRect, toRect) {
+        const dx = toRect.x - fromRect.x;
+        const dy = toRect.y - fromRect.y;
+        const normalizedX = Math.abs(dx) / Math.max(1, (fromRect.width + toRect.width) / 2);
+        const normalizedY = Math.abs(dy) / Math.max(1, (fromRect.height + toRect.height) / 2);
+
+        if (normalizedX >= normalizedY) {
+          return dx >= 0
+            ? { fromPort: "right", toPort: "left" }
+            : { fromPort: "left", toPort: "right" };
+        }
+
+        return dy >= 0
+          ? { fromPort: "bottom", toPort: "top" }
+          : { fromPort: "top", toPort: "bottom" };
+      }
+
+      function autoPortOffset(rect, port, otherRect, spread = 0) {
+        if (port === "left" || port === "right") {
+          return clamp(otherRect.y - rect.y + spread, rect.height * -0.32, rect.height * 0.32);
+        }
+
+        return clamp(otherRect.x - rect.x + spread, rect.width * -0.32, rect.width * 0.32);
+      }
+
+      function cubicPoint(a, c1, c2, b, t) {
+        const mt = 1 - t;
+        return {
+          x: mt ** 3 * a.x + 3 * mt ** 2 * t * c1.x + 3 * mt * t ** 2 * c2.x + t ** 3 * b.x,
+          y: mt ** 3 * a.y + 3 * mt ** 2 * t * c1.y + 3 * mt * t ** 2 * c2.y + t ** 3 * b.y
+        };
+      }
+
+      function curveFor(a, b, fromPort, toPort) {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distance = Math.hypot(dx, dy);
+        const bend = Math.min(150, Math.max(48, distance * 0.36));
+        const fromVector = portVector(fromPort);
+        const toVector = portVector(toPort);
+        return {
+          c1: { x: a.x + fromVector.x * bend, y: a.y + fromVector.y * bend },
+          c2: { x: b.x + toVector.x * bend, y: b.y + toVector.y * bend }
+        };
+      }
+
+      function installLinkMarkers() {
+        links.insertAdjacentHTML("afterbegin", `
+          <defs>
+            <marker id="arrowHead" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="strokeWidth">
+              <path d="M1 1 L10 5.5 L1 10 Z" fill="oklch(0.58 0.105 174)"></path>
+            </marker>
+            <marker id="arrowHeadMuted" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="strokeWidth">
+              <path d="M1 1 L10 5.5 L1 10 Z" fill="oklch(0.78 0.018 188)"></path>
+            </marker>
+          </defs>
+        `);
+      }
+
+      function updateLinks() {
+        links.innerHTML = "";
+        links.setAttribute("viewBox", `0 0 ${canvas.offsetWidth} ${canvas.offsetHeight}`);
+        installLinkMarkers();
+
+        connections.forEach((connection) => {
+          const fromEl = getElement(connection.from);
+          const toEl = getElement(connection.to);
+          if (!fromEl || !toEl) return;
+
+          const fromRect = rectOf(fromEl);
+          const toRect = rectOf(toEl);
+          const ports = autoPorts(fromRect, toRect);
+          const fromPort = connection.fromPort || ports.fromPort;
+          const toPort = connection.toPort || ports.toPort;
+          const spread = connection.assist ? 12 : 0;
+          const fromOffset = connection.fromOffset ?? autoPortOffset(fromRect, fromPort, toRect, spread);
+          const toOffset = connection.toOffset ?? autoPortOffset(toRect, toPort, fromRect, -spread);
+          const a = portPoint(fromRect, fromPort, fromOffset);
+          const b = portPoint(toRect, toPort, toOffset);
+          const { c1, c2 } = curveFor(a, b, fromPort, toPort);
+          const labelPoint = cubicPoint(a, c1, c2, b, 0.5);
+          const muted = Boolean(connection.muted);
+          const assist = Boolean(connection.assist);
+
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          const curve = `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${c1.x.toFixed(1)} ${c1.y.toFixed(1)}, ${c2.x.toFixed(1)} ${c2.y.toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+          const halo = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          halo.setAttribute("d", curve);
+          halo.setAttribute("class", "link-halo");
+          links.appendChild(halo);
+
+          path.setAttribute("d", curve);
+          path.setAttribute("class", muted ? "link-line muted" : assist ? "link-line assist" : "link-line");
+          path.setAttribute("marker-end", muted ? "url(#arrowHeadMuted)" : "url(#arrowHead)");
+          links.appendChild(path);
+
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("x", labelPoint.x + (connection.labelOffset?.[0] || 0));
+          text.setAttribute("y", labelPoint.y - 8 + (connection.labelOffset?.[1] || 0));
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("class", "link-label");
+          text.textContent = connection.label;
+          links.appendChild(text);
+        });
+      }
+
+      function selectNode(id) {
+        selectedId = id;
+        document.querySelectorAll(".node").forEach((node) => {
+          node.classList.toggle("selected", node.dataset.node === id);
+        });
+
+        const data = nodeData[id];
+        if (!data) return;
+
+        document.getElementById("inspectorName").textContent = data.name;
+        document.getElementById("inspectorStatus").textContent = data.status;
+        document.getElementById("rolePosition").value = data.position;
+        document.getElementById("roleDuty").value = data.duty;
+        document.getElementById("replyFormat").value = data.format;
+        document.getElementById("relationshipRules").innerHTML = `
+          <div class="rule"><b>接收</b><span>${data.receive}</span></div>
+          <div class="rule"><b>交给</b><span>${data.handoff}</span></div>
+          <div class="rule"><b>确认点</b><span>${data.gate}</span></div>
+        `;
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("show"), 1600);
+      }
+
+      function setNodeStatus(id, status, statusClass) {
+        const node = getElement(id);
+        const tag = node?.querySelector(".status-tag");
+        if (!node || !tag) return;
+
+        node.classList.remove("running", "done", "blocked");
+        tag.classList.remove("ready", "running", "done", "blocked");
+        if (statusClass) {
+          node.classList.add(statusClass);
+          tag.classList.add(statusClass);
+        } else {
+          tag.classList.add("ready");
+        }
+
+        tag.textContent = status;
+        if (nodeData[id]) nodeData[id].status = status;
+        if (selectedId === id) {
+          document.getElementById("inspectorStatus").textContent = status;
+          document.getElementById("inspectorStatus").className = `status-tag ${statusClass || "ready"}`;
+        }
+      }
+
+      function runWorkflow() {
+        showToast("团队开始工作");
+        resultTitle.textContent = "正在收集角色产出";
+        resultText.textContent = "系统会先拆任务，再定方向，生成第一版，补视觉体验，最后审核并整合。";
+        progressBar.style.transform = "scaleX(0.12)";
+        progressMeta.textContent = "正在理解目标。";
+
+        order.forEach((id, index) => {
+          window.setTimeout(() => {
+            order.forEach((item, i) => {
+              if (i < index) setNodeStatus(item, "已完成", "done");
+              if (i === index) setNodeStatus(item, "执行中", "running");
+            });
+            progressBar.style.transform = `scaleX(${(18 + index * 13) / 100})`;
+            progressMeta.textContent = `当前执行：${nodeData[id].name}`;
+          }, index * 420);
+        });
+
+        window.setTimeout(() => {
+          order.forEach((id) => setNodeStatus(id, "已完成", "done"));
+          progressBar.style.transform = "scaleX(1)";
+          progressMeta.textContent = "结果包已生成，可继续追问、指定返工或锁定最终版。";
+          resultTitle.textContent = "已生成可执行结果包";
+          resultText.textContent = "包含：角色分工、工作关系、确认点、输出格式、风险清单和下一步最小实现动作。";
+          showToast("结果包已生成");
+        }, order.length * 420 + 300);
+      }
+
+      function resetTeam() {
+        order.forEach((id) => setNodeStatus(id, "待执行", ""));
+        progressBar.style.transform = "scaleX(0.38)";
+        progressMeta.textContent = "已按目标重新生成团队。右键任意角色可以继续改细节。";
+        resultTitle.textContent = "团队已更新";
+        resultText.textContent = "系统保留 6 个必要角色：拆解、方向、主创、视觉、审核、整合。";
+        showToast("已按目标生成团队");
+      }
+
+      function addNode(type) {
+        const id = `newRole${nodeCounter++}`;
+        const nameMap = {
+          role: "新角色",
+          tool: "工具模块",
+          data: "资料模块",
+          gate: "确认点",
+          bundle: "整合包",
+          template: "流程模板"
+        };
+        const node = document.createElement("article");
+        node.className = "node";
+        node.dataset.node = id;
+        node.style.left = `${190 + nodeCounter * 18}px`;
+        node.style.top = `${150 + nodeCounter * 14}px`;
+        node.innerHTML = `
+          <div class="node-header">
+            <div>
+              <div class="role-name">${nameMap[type] || "新模块"}</div>
+              <div class="role-sub">右键设置它的职责和连接关系</div>
+            </div>
+            <button class="node-menu-dot" aria-label="更多"></button>
+          </div>
+          <div class="node-body">
+            <div class="mini-row"><span>状态</span><span class="status-tag ready">待设置</span></div>
+            <div class="capsules"><span class="capsule">可配置</span></div>
+          </div>
+        `;
+
+        nodeData[id] = {
+          name: nameMap[type] || "新模块",
+          status: "待设置",
+          position: "用户从工具栏放入画布的新模块。",
+          duty: "点击这里写清楚它负责什么，不负责什么。",
+          format: "1. 输出内容\n2. 判断依据\n3. 交给谁",
+          receive: "用户手动连接的上游模块",
+          handoff: "用户手动连接的下游模块",
+          gate: "按需设置"
+        };
+
+        canvas.appendChild(node);
+        bindNode(node);
+        selectNode(id);
+        updateLinks();
+        showToast("已放入画布");
+      }
+
+      function saveRole() {
+        const data = nodeData[selectedId];
+        if (!data) return;
+
+        data.position = document.getElementById("rolePosition").value;
+        data.duty = document.getElementById("roleDuty").value;
+        data.format = document.getElementById("replyFormat").value;
+        showToast("角色设置已保存");
+      }
+
+      function simplifyTeam() {
+        setNodeStatus("visual", "可选", "blocked");
+        progressMeta.textContent = "已给出最小团队建议：保留拆解、方向、主创、审核、整合；视觉顾问可按项目开启。";
+        resultTitle.textContent = "最小团队建议";
+        resultText.textContent = "懒人模式：一条目标进入，系统自动生成必要角色。用户只在方向不清或结果锁定时出现。";
+        showToast("已切到懒人模式");
+      }
+
+      function bindNode(node) {
+        node.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          const target = event.target;
+          if (target.closest("button")) return;
+
+          selectNode(node.dataset.node);
+          startCanvasDrag(node, event, true);
+        });
+
+        node.addEventListener("pointermove", (event) => {
+          moveCanvasDrag(node, event);
+        });
+
+        node.addEventListener("pointerup", () => endDrag(node));
+        node.addEventListener("pointercancel", () => endDrag(node));
+
+        node.addEventListener("click", () => selectNode(node.dataset.node));
+
+        node.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          selectNode(node.dataset.node);
+          contextMenu.style.left = `${event.clientX}px`;
+          contextMenu.style.top = `${event.clientY}px`;
+          contextMenu.classList.add("show");
+        });
+
+        node.querySelector(".node-menu-dot")?.addEventListener("click", (event) => {
+          event.stopPropagation();
+          selectNode(node.dataset.node);
+          const rect = event.currentTarget.getBoundingClientRect();
+          contextMenu.style.left = `${rect.left - 130}px`;
+          contextMenu.style.top = `${rect.bottom + 6}px`;
+          contextMenu.classList.add("show");
+        });
+      }
+
+      function startCanvasDrag(element, event, updatesLinks) {
+        const rect = element.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        dragState = {
+          node: element,
+          mode: "canvas",
+          updatesLinks,
+          offsetX: event.clientX - rect.left,
+          offsetY: event.clientY - rect.top,
+          canvasLeft: canvasRect.left,
+          canvasTop: canvasRect.top
+        };
+        element.classList.add("dragging");
+        element.setPointerCapture(event.pointerId);
+      }
+
+      function moveCanvasDrag(element, event) {
+        if (!dragState || dragState.node !== element || dragState.mode !== "canvas") return;
+        const x = (event.clientX - dragState.canvasLeft - dragState.offsetX) / scale;
+        const y = (event.clientY - dragState.canvasTop - dragState.offsetY) / scale;
+        element.style.left = `${Math.max(90, x)}px`;
+        element.style.top = `${Math.max(74, y)}px`;
+        if (dragState.updatesLinks) updateLinks();
+      }
+
+      function bindCanvasCard(card) {
+        card.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          if (event.target.closest("button")) return;
+          startCanvasDrag(card, event, true);
+        });
+
+        card.addEventListener("pointermove", (event) => moveCanvasDrag(card, event));
+        card.addEventListener("pointerup", () => endDrag(card));
+        card.addEventListener("pointercancel", () => endDrag(card));
+      }
+
+      function bindFreeHint(hint) {
+        hint.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          const rect = hint.getBoundingClientRect();
+          const parentRect = hint.offsetParent.getBoundingClientRect();
+          hint.style.left = `${rect.left - parentRect.left}px`;
+          hint.style.top = `${rect.top - parentRect.top}px`;
+          hint.style.bottom = "auto";
+          dragState = {
+            node: hint,
+            mode: "shell",
+            offsetX: event.clientX - rect.left,
+            offsetY: event.clientY - rect.top,
+            parentLeft: parentRect.left,
+            parentTop: parentRect.top
+          };
+          hint.classList.add("dragging");
+          hint.setPointerCapture(event.pointerId);
+        });
+
+        hint.addEventListener("pointermove", (event) => {
+          if (!dragState || dragState.node !== hint || dragState.mode !== "shell") return;
+          hint.style.left = `${Math.max(10, event.clientX - dragState.parentLeft - dragState.offsetX)}px`;
+          hint.style.top = `${Math.max(58, event.clientY - dragState.parentTop - dragState.offsetY)}px`;
+        });
+
+        hint.addEventListener("pointerup", () => endDrag(hint));
+        hint.addEventListener("pointercancel", () => endDrag(hint));
+      }
+
+      function endDrag(element) {
+        if (!dragState || dragState.node !== element) return;
+        element.classList.remove("dragging");
+        dragState = null;
+        updateLinks();
+      }
+
+      function autoLayout() {
+        const positions = {
+          startCard: [130, 96],
+          planner: [400, 118],
+          director: [730, 92],
+          builder: [430, 306],
+          visual: [170, 350],
+          reviewer: [730, 330],
+          integrator: [610, 525],
+          resultCard: [180, 540]
+        };
+        Object.entries(positions).forEach(([id, [x, y]]) => {
+          const node = getElement(id);
+          if (!node) return;
+          node.style.left = `${x}px`;
+          node.style.top = `${y}px`;
+        });
+        updateLinks();
+        showToast("画布已整理");
+      }
+
+      function setScale(nextScale) {
+        scale = Math.min(1.2, Math.max(0.72, nextScale));
+        canvas.style.transform = `scale(${scale})`;
+        document.getElementById("zoomReset").textContent = `${Math.round(scale * 100)}%`;
+        window.requestAnimationFrame(updateLinks);
+      }
+
+      document.querySelectorAll(".node").forEach(bindNode);
+      document.querySelectorAll(".start-card, .result-card").forEach(bindCanvasCard);
+      bindFreeHint(document.getElementById("canvasHint"));
+      document.querySelectorAll("[data-add]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".tool").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          addNode(button.dataset.add);
+        });
+      });
+
+      document.querySelectorAll(".quick-chip").forEach((button) => {
+        button.addEventListener("click", () => {
+          goalInput.value = `${goalInput.value}\n${button.dataset.prompt}`;
+          showToast("已加入目标");
+        });
+      });
+
+      contextMenu.addEventListener("click", (event) => {
+        const item = event.target.closest(".menu-item");
+        if (!item) return;
+        const action = item.dataset.action;
+        contextMenu.classList.remove("show");
+
+        if (action === "delete") {
+          const node = getElement(selectedId);
+          if (node && selectedId.startsWith("newRole")) {
+            node.remove();
+            delete nodeData[selectedId];
+            selectedId = "planner";
+            selectNode(selectedId);
+            updateLinks();
+            showToast("已删除");
+          } else {
+            showToast("默认角色先保留，避免流程断链");
+          }
+          return;
+        }
+
+        const actionText = {
+          duty: "已定位到职责设置",
+          format: "已定位到回复格式",
+          tool: "已定位到工具权限",
+          connect: "连接关系稍后从画布拖线",
+          copy: "已复制一个角色到画布"
+        };
+
+        if (action === "copy") {
+          addNode("role");
+        } else {
+          showToast(actionText[action] || "已更新");
+        }
+      });
+
+      document.addEventListener("click", (event) => {
+        if (!event.target.closest(".context-menu")) {
+          contextMenu.classList.remove("show");
+        }
+      });
+
+      document.getElementById("generateTeam").addEventListener("click", resetTeam);
+      document.getElementById("runPrompt").addEventListener("click", runWorkflow);
+      document.getElementById("runTop").addEventListener("click", runWorkflow);
+      document.getElementById("simplifyTop").addEventListener("click", simplifyTeam);
+      document.getElementById("applyRole").addEventListener("click", saveRole);
+      document.getElementById("saveSnapshot").addEventListener("click", () => showToast("已保存当前画布版本"));
+      document.getElementById("autoLayout").addEventListener("click", autoLayout);
+      document.getElementById("zoomIn").addEventListener("click", () => setScale(scale + 0.08));
+      document.getElementById("zoomOut").addEventListener("click", () => setScale(scale - 0.08));
+      document.getElementById("zoomReset").addEventListener("click", () => setScale(0.82));
+
+      window.addEventListener("resize", updateLinks);
+      selectNode("planner");
+      updateLinks();
+    </script>
+  </body>
+</html>

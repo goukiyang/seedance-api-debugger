@@ -6,6 +6,39 @@ import { assertCanManageProject, assertCanManageProjectMembers, assertCanViewPro
 
 export const dynamic = 'force-dynamic';
 
+const OFFICIAL_PROJECT_COST_EVENTS = ['official_charge', 'adjustment', 'reversal'];
+
+function normalizeCurrency(currency: string | null | undefined) {
+  return (currency || 'CNY').trim().toUpperCase();
+}
+
+function buildCostTotals(
+  microsRows: Array<{ currency: string | null; _sum: { amount_micros: number | null } }>,
+  minorRows: Array<{ currency: string | null; _sum: { amount_minor: number | null } }>,
+) {
+  const totals = new Map<string, { currency: string; amount_micros: number; amount_minor: number }>();
+
+  for (const row of microsRows) {
+    const currency = normalizeCurrency(row.currency);
+    const amountMicros = row._sum.amount_micros || 0;
+    const existing = totals.get(currency) || { currency, amount_micros: 0, amount_minor: 0 };
+    existing.amount_micros += amountMicros;
+    existing.amount_minor += Math.round(amountMicros / 10000);
+    totals.set(currency, existing);
+  }
+
+  for (const row of minorRows) {
+    const currency = normalizeCurrency(row.currency);
+    const amountMinor = row._sum.amount_minor || 0;
+    const existing = totals.get(currency) || { currency, amount_micros: 0, amount_minor: 0 };
+    existing.amount_minor += amountMinor;
+    existing.amount_micros += amountMinor * 10000;
+    totals.set(currency, existing);
+  }
+
+  return Array.from(totals.values()).sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
@@ -77,7 +110,10 @@ export async function GET(
         provider_cost_status: true,
         provider_official_amount_minor: true,
         provider_final_amount_minor: true,
+        provider_official_amount_micros: true,
+        provider_final_amount_micros: true,
         provider_cost_currency: true,
+        provider_billing_status: true,
         created_at: true,
         completed_at: true,
         owner: { select: { id: true, name: true, username: true } },
@@ -85,13 +121,25 @@ export async function GET(
       },
     });
 
+    const projectCostWhere = {
+      event_type: { in: OFFICIAL_PROJECT_COST_EVENTS },
+      OR: [
+        { project_id: params.id },
+        { allocations: { some: { project_id: params.id } } },
+      ],
+    };
+
     const [
       taskCount,
       succeededCount,
       failedCount,
       runningCount,
       creditTotals,
-      officialCostTotals,
+      officialAllocationMicrosTotals,
+      officialAllocationMinorFallbackTotals,
+      officialDirectMicrosTotals,
+      officialDirectMinorFallbackTotals,
+      costLedgers,
       officialPendingCount,
       costUnknownCount,
       highCostTasks,
@@ -109,13 +157,105 @@ export async function GET(
           refund_amount: true,
         },
       }),
-      prisma.costLedger.aggregate({
+      prisma.costAllocation.groupBy({
+        by: ['currency'],
         where: {
           project_id: params.id,
-          event_type: { in: ['official_charge', 'adjustment', 'reversal'] },
+          ledger: { event_type: { in: OFFICIAL_PROJECT_COST_EVENTS } },
+          amount_micros: { not: null },
+        },
+        _sum: { amount_micros: true },
+      }),
+      prisma.costAllocation.groupBy({
+        by: ['currency'],
+        where: {
+          project_id: params.id,
+          ledger: { event_type: { in: OFFICIAL_PROJECT_COST_EVENTS } },
+          amount_micros: null,
           amount_minor: { not: null },
         },
         _sum: { amount_minor: true },
+      }),
+      prisma.costLedger.groupBy({
+        by: ['currency'],
+        where: {
+          event_type: { in: OFFICIAL_PROJECT_COST_EVENTS },
+          project_id: params.id,
+          allocations: { none: {} },
+          amount_micros: { not: null },
+        },
+        _sum: { amount_micros: true },
+      }),
+      prisma.costLedger.groupBy({
+        by: ['currency'],
+        where: {
+          event_type: { in: OFFICIAL_PROJECT_COST_EVENTS },
+          project_id: params.id,
+          allocations: { none: {} },
+          amount_micros: null,
+          amount_minor: { not: null },
+        },
+        _sum: { amount_minor: true },
+      }),
+      prisma.costLedger.findMany({
+        where: projectCostWhere,
+        orderBy: [{ occurred_at: 'desc' }, { created_at: 'desc' }],
+        take: 80,
+        select: {
+          id: true,
+          source_type: true,
+          source_id: true,
+          task_id: true,
+          user_id: true,
+          project_id: true,
+          provider_name: true,
+          provider_task_id: true,
+          event_type: true,
+          amount_minor: true,
+          amount_micros: true,
+          currency: true,
+          usage_quantity: true,
+          usage_unit: true,
+          cost_source: true,
+          confidence: true,
+          official_charge_id: true,
+          reason: true,
+          occurred_at: true,
+          created_at: true,
+          user: { select: { id: true, name: true, username: true, email: true } },
+          task: {
+            select: {
+              id: true,
+              prompt: true,
+              local_status: true,
+              provider_task_id: true,
+              result_video_url: true,
+              local_video_path: true,
+              provider_cost_status: true,
+              provider_official_amount_minor: true,
+              provider_final_amount_minor: true,
+              provider_official_amount_micros: true,
+              provider_final_amount_micros: true,
+              provider_cost_currency: true,
+              provider_billing_status: true,
+              created_at: true,
+              owner: { select: { id: true, name: true, username: true } },
+              user: { select: { id: true, name: true, username: true } },
+            },
+          },
+          allocations: {
+            where: { project_id: params.id },
+            select: {
+              id: true,
+              allocation_type: true,
+              allocation_id: true,
+              amount_minor: true,
+              amount_micros: true,
+              currency: true,
+              reason: true,
+            },
+          },
+        },
       }),
       prisma.videoTask.count({
         where: {
@@ -160,7 +300,11 @@ export async function GET(
       }),
     ]);
 
-    const officialCostMinor = officialCostTotals._sum.amount_minor || 0;
+    const officialCostTotals = buildCostTotals(
+      [...officialAllocationMicrosTotals, ...officialDirectMicrosTotals],
+      [...officialAllocationMinorFallbackTotals, ...officialDirectMinorFallbackTotals],
+    );
+    const primaryOfficialCost = officialCostTotals[0] || null;
     const reviewSummary = {
       task_count: taskCount,
       succeeded_count: succeededCount,
@@ -170,8 +314,10 @@ export async function GET(
       estimated_credits: creditTotals._sum.estimated_cost || 0,
       charged_credits: creditTotals._sum.actual_cost || 0,
       refunded_credits: creditTotals._sum.refund_amount || 0,
-      official_cost_minor: officialCostMinor,
-      official_cost_currency: officialCostMinor > 0 ? 'CNY' : null,
+      official_cost_minor: primaryOfficialCost?.amount_minor || 0,
+      official_cost_micros: primaryOfficialCost?.amount_micros || 0,
+      official_cost_currency: primaryOfficialCost?.currency || null,
+      official_cost_totals: officialCostTotals,
       official_pending_count: officialPendingCount,
       cost_unknown_count: costUnknownCount,
       high_cost_tasks: highCostTasks,
@@ -185,6 +331,7 @@ export async function GET(
         image_count: album._count.images,
       })),
       tasks,
+      cost_ledgers: costLedgers,
       review_summary: reviewSummary,
       permissions: {
         role: access.role,

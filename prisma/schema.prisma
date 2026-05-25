@@ -81,6 +81,12 @@ model VideoTask {
   provider_rule_amount_minor      Int?
   provider_official_amount_minor  Int?
   provider_final_amount_minor     Int?
+  provider_official_amount_micros Int?
+  provider_final_amount_micros    Int?
+  provider_billing_status         String?
+  provider_billing_time           DateTime?
+  provider_usage_snapshot         String?
+  provider_client_request_id      String?
   provider_cost_confirmed_at      DateTime?
   provider_cost_reconciled_at     DateTime?
   cost_allocation_status          String    @default("allocated") // allocated | unallocated | partially_allocated
@@ -102,6 +108,9 @@ model VideoTask {
   @@index([owner_user_id])
   @@index([project_id])
   @@index([local_status])
+  @@index([provider_task_id])
+  @@index([provider_client_request_id])
+  @@index([provider_cost_status])
 }
 
 // ============================================================================
@@ -109,20 +118,30 @@ model VideoTask {
 // ============================================================================
 
 model User {
-  id                 String    @id @default(cuid())
-  name               String
-  username           String    @unique
-  email              String    @unique
-  password_hash      String
-  role               String    @default("user") // admin | user
-  account_type       String    @default("internal") // internal | external
-  status             String    @default("active") // active | disabled | pending | expired
-  user_profile       String    @default("other") // core_video | core_animation | core_design | noncore_planning | noncore_ops | noncore_pm | other
-  feature_profile_id String?
-  expires_at         DateTime?
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
-  last_login_at      DateTime?
+  id                    String    @id @default(cuid())
+  name                  String
+  username              String    @unique
+  email                 String    @unique
+  password_hash         String
+  role                  String    @default("user") // admin | user
+  account_type          String    @default("internal") // internal | external
+  status                String    @default("active") // active | disabled | pending | expired
+  user_profile          String    @default("other") // core_video | core_animation | core_design | noncore_planning | noncore_ops | noncore_pm | other
+  feature_profile_id    String?
+  expires_at            DateTime?
+  mobile                String?
+  avatar_url            String?
+  feishu_user_id        String?   @unique
+  feishu_open_id        String?   @unique
+  feishu_union_id       String?
+  feishu_tenant_key     String?
+  feishu_employee_no    String?
+  feishu_department_ids String?
+  feishu_raw_profile    String?
+  last_feishu_sync_at   DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+  last_login_at         DateTime?
 
   credit_account          CreditAccount?
   credit_ledger           CreditLedger[]
@@ -134,6 +153,7 @@ model User {
   created_album_shares    AlbumShare[]    @relation("AlbumShareCreator")
   owned_projects          Project[]       @relation("ProjectOwner")
   created_projects        Project[]       @relation("ProjectCreator")
+  canvas_documents        CanvasDocument[] @relation("CanvasDocumentOwner")
   project_memberships     ProjectMember[] @relation("ProjectMemberUser")
   joined_project_members  ProjectMember[] @relation("ProjectMemberJoinedBy")
   created_project_invites ProjectInvite[] @relation("ProjectInviteCreatedBy")
@@ -147,6 +167,8 @@ model User {
   @@index([account_type])
   @@index([user_profile])
   @@index([status])
+  @@index([feishu_union_id])
+  @@index([feishu_tenant_key])
 }
 
 model Project {
@@ -168,6 +190,7 @@ model Project {
   members ProjectMember[]
   invites ProjectInvite[]
   tasks   VideoTask[]
+  canvas_documents CanvasDocument[]
   reference_albums ReferenceAlbum[]
   reference_images ReferenceImage[]
   provider_api_requests ProviderApiRequest[]
@@ -180,6 +203,26 @@ model Project {
   @@index([type])
   @@index([visibility])
   @@index([status])
+}
+
+model CanvasDocument {
+  id                        String   @id @default(cuid())
+  owner_user_id             String
+  project_id                String?
+  title                     String
+  document_json             String
+  active_generation_node_id String?
+  status                    String   @default("active") // active | archived | deleted
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  owner   User     @relation("CanvasDocumentOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([status])
+  @@index([updated_at])
 }
 
 model ProjectMember {
@@ -358,6 +401,7 @@ model CostLedger {
   event_type            String    // estimate | provider_request_submitted | rule_settlement | official_charge | refund | reversal | adjustment | allocation
   amount_minor          Int?
   currency              String?
+  amount_micros         Int?
   usage_quantity        Float?
   usage_unit            String?
   cost_source           String    // rule | provider_usage | official_bill | manual
@@ -399,6 +443,7 @@ model CostAllocation {
   user_id         String?
   project_id      String?
   amount_minor    Int?
+  amount_micros   Int?
   currency        String?
   usage_quantity  Float?
   usage_unit      String?

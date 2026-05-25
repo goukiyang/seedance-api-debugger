@@ -69,6 +69,19 @@ function dedupeReferenceAlbums(albums: ReferenceAlbumOption[]): ReferenceAlbumOp
 
 interface Props {
   collections: AssetCollection[];
+  reuseDraft?: {
+    taskId: string;
+    reuseKey: number;
+    prompt: string;
+    generationMode: GenerationMode;
+    ratio: VideoRatio;
+    duration: VideoDuration;
+    resolution: VideoResolution;
+    seed: number;
+    generateAudio: boolean;
+    returnLastFrame: boolean;
+    watermark: boolean;
+  } | null;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
@@ -106,8 +119,10 @@ export function GenerationComposer({
   polledResult,
   isPolling,
   onReset,
+  reuseDraft,
 }: Props) {
   const workspace = useWorkspace();
+  const appliedReuseDraftRef = React.useRef<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
@@ -190,6 +205,22 @@ export function GenerationComposer({
     setCurrentReferenceAlbumName(inferredAlbum?.name ?? null);
   }, [workspace.assets]);
 
+  useEffect(() => {
+    const reuseKey = reuseDraft ? `${reuseDraft.taskId}:${reuseDraft.reuseKey}` : null;
+    if (!reuseDraft || appliedReuseDraftRef.current === reuseKey) return;
+    appliedReuseDraftRef.current = reuseKey;
+    setPrompt(reuseDraft.prompt);
+    setGenerationMode(reuseDraft.generationMode);
+    setRatio(reuseDraft.ratio);
+    setDuration(reuseDraft.duration);
+    setResolution(reuseDraft.resolution);
+    setSeed(reuseDraft.seed);
+    setGenerateAudio(reuseDraft.generateAudio);
+    setReturnLastFrame(reuseDraft.returnLastFrame);
+    setWatermark(reuseDraft.watermark);
+    void workspace.refresh();
+  }, [reuseDraft, workspace]);
+
   // ============================================================================
   // Handlers
   // ============================================================================
@@ -234,6 +265,11 @@ export function GenerationComposer({
 
   const handleReorder = useCallback(async (newOrder: Array<{ assetId: string; sortOrder: number }>) => {
     await workspace.reorderAssets(newOrder);
+  }, [workspace, refreshReferenceAlbums]);
+
+  const handleReplace = useCallback(async (assetId: string, file: File) => {
+    await workspace.replaceAsset(assetId, file);
+    await refreshReferenceAlbums();
   }, [workspace, refreshReferenceAlbums]);
 
   const handlePreview = useCallback((url: string) => {
@@ -301,6 +337,7 @@ export function GenerationComposer({
           onUpload={workspace.uploadAsset}
           onRemove={handleRemove}
           onReorder={handleReorder}
+          onReplace={handleReplace}
           onPreview={handlePreview}
           generationMode={generationMode}
           loading={workspace.loading}

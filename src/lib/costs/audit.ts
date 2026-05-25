@@ -21,17 +21,18 @@ function countDuplicateProviderTaskIds(rows: Array<{ provider_task_id: string | 
     .slice(0, 10);
 }
 
-function sumMinorByCurrency(rows: Array<{ amount_minor: number | null; currency: string | null }>) {
+function sumCostByCurrency(rows: Array<{ amount_minor: number | null; amount_micros: number | null; currency: string | null }>) {
   const totals = new Map<string, number>();
 
   rows.forEach((row) => {
-    if (row.amount_minor === null) return;
+    if (row.amount_micros === null && row.amount_minor === null) return;
     const currency = row.currency || 'UNKNOWN';
-    totals.set(currency, (totals.get(currency) || 0) + row.amount_minor);
+    const amountMicros = row.amount_micros ?? (row.amount_minor as number) * 10_000;
+    totals.set(currency, (totals.get(currency) || 0) + amountMicros);
   });
 
   return Array.from(totals.entries())
-    .map(([currency, amount_minor]) => ({ currency, amount_minor }))
+    .map(([currency, amount_micros]) => ({ currency, amount_micros, amount_minor: Math.round(amount_micros / 10_000) }))
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
@@ -55,11 +56,14 @@ export async function getCostLedgerAuditSummary() {
     prisma.costAllocation.count(),
     prisma.costLedger.findMany({
       where: { event_type: 'official_charge' },
-      select: { id: true, amount_minor: true, currency: true },
+      select: { id: true, amount_minor: true, amount_micros: true, currency: true },
     }),
     prisma.costLedger.count({
       where: {
-        amount_minor: { not: null },
+        OR: [
+          { amount_minor: { not: null } },
+          { amount_micros: { not: null } },
+        ],
         allocations: { none: {} },
       },
     }),
@@ -126,6 +130,7 @@ export async function getCostLedgerAuditSummary() {
         },
         select: {
           amount_minor: true,
+          amount_micros: true,
           currency: true,
         },
       })
@@ -144,8 +149,8 @@ export async function getCostLedgerAuditSummary() {
     ledger_count: ledgerCount,
     allocation_count: allocationCount,
     official_charge_count: officialChargeLedgers.length,
-    official_ledger_totals: sumMinorByCurrency(officialChargeLedgers),
-    official_allocation_totals: sumMinorByCurrency(officialAllocations),
+    official_ledger_totals: sumCostByCurrency(officialChargeLedgers),
+    official_allocation_totals: sumCostByCurrency(officialAllocations),
     amount_ledgers_without_allocation_count: amountLedgersWithoutAllocationCount,
     terminal_tasks_without_cost_ledger_count: terminalTasksWithoutCostLedgerCount,
     official_confirmed_tasks_without_charge_ledger_count: officialConfirmedTasksWithoutChargeLedgerCount,

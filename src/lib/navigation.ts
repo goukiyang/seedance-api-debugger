@@ -9,9 +9,14 @@ export const shellRoutes = [
   '/account',
   '/projects',
   '/collections',
+  '/generate/canvas',
   '/admin/projects',
   '/admin/costs',
   '/admin/feedback',
+] as const;
+
+const topbarOnlyShellRoutes = [
+  '/generate/canvas',
 ] as const;
 
 const shellRoutePrefixes = [
@@ -23,7 +28,7 @@ const shellRoutePrefixes = [
 ] as const;
 
 export const userNavItems: NavItem[] = [
-  { label: '生成视频', href: '/generate' },
+  { label: '生成视频', href: '/generate', prefixMatch: true },
   { label: '我的项目', href: '/projects', prefixMatch: true },
   { label: '参考图集', href: '/collections', prefixMatch: true },
   { label: '我的任务', href: '/tasks', prefixMatch: true },
@@ -49,4 +54,8 @@ export function shouldUseNavigationShell(pathname: string) {
     shellRoutes.includes(pathname as (typeof shellRoutes)[number]) ||
     shellRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
   );
+}
+
+export function shouldUseTopbarOnlyShell(pathname: string) {
+  return topbarOnlyShellRoutes.includes(pathname as (typeof topbarOnlyShellRoutes)[number]);
 }

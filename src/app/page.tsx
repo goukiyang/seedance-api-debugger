@@ -3,5 +3,6 @@ import { getSession } from '@/lib/auth/session';
 
 export default async function Home() {
   const user = await getSession();
-  redirect(user?.role === 'admin' ? '/dashboard' : '/generate');
+  if (!user) redirect('/register');
+  redirect('/generate');
 }

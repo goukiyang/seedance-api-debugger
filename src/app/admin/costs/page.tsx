@@ -15,6 +15,24 @@ function formatAmountMinor(amount: number | null | undefined, currency?: string 
   return `¥${value.toFixed(2)}`;
 }
 
+function formatAmountMicros(amount: number | null | undefined, currency?: string | null) {
+  if (amount === null || amount === undefined) return '待官方确认';
+  const value = amount / 1_000_000;
+  const text = value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+  return currency ? `${text} ${currency}` : text;
+}
+
+function formatCostAmount(item: {
+  amount_micros?: number | null;
+  amount_minor?: number | null;
+  currency?: string | null;
+}) {
+  if (item.amount_micros !== null && item.amount_micros !== undefined) {
+    return formatAmountMicros(item.amount_micros, item.currency);
+  }
+  return formatAmountMinor(item.amount_minor, item.currency);
+}
+
 function costStatusLabel(status: string) {
   if (status === 'estimated_by_rule') return '规则预估';
   if (status === 'provisional_settled') return '临时结算';
@@ -33,9 +51,23 @@ function taskOwnerLabel(task: {
   return task.owner?.name || task.owner?.username || task.user?.name || task.user?.username || '-';
 }
 
-function formatCurrencyTotals(totals: Array<{ currency: string; amount_minor: number }>) {
+function formatCurrencyTotals(totals: Array<{ currency: string; amount_minor: number; amount_micros?: number }>) {
   if (totals.length === 0) return '待官方确认';
-  return totals.map((item) => formatAmountMinor(item.amount_minor, item.currency)).join(' · ');
+  return totals.map((item) => formatCostAmount(item)).join(' · ');
+}
+
+function sumCostRowsByCurrency(rows: Array<{ amount_minor: number | null; amount_micros: number | null; currency: string | null }>) {
+  const totals = new Map<string, { currency: string; amount_minor: number; amount_micros: number }>();
+  rows.forEach((row) => {
+    if (row.amount_micros === null && row.amount_minor === null) return;
+    const currency = row.currency || 'UNKNOWN';
+    const amountMicros = row.amount_micros ?? (row.amount_minor as number) * 10_000;
+    const existing = totals.get(currency) || { currency, amount_minor: 0, amount_micros: 0 };
+    existing.amount_micros += amountMicros;
+    existing.amount_minor += Math.round(amountMicros / 10_000);
+    totals.set(currency, existing);
+  });
+  return Array.from(totals.values()).sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
 function auditStatusText(count: number) {
@@ -54,7 +86,7 @@ export default async function AdminCostsPage() {
     unknownCostCount,
     failedPossibleChargeCount,
     unallocatedCount,
-    officialCostTotals,
+    officialCostRows,
     recentIssues,
     failedRequests,
     auditSummary,
@@ -76,12 +108,15 @@ export default async function AdminCostsPage() {
       },
     }),
     prisma.costAllocation.count({ where: { allocation_type: 'unallocated' } }),
-    prisma.costLedger.aggregate({
+    prisma.costLedger.findMany({
       where: {
         event_type: { in: ['official_charge', 'adjustment', 'reversal'] },
-        amount_minor: { not: null },
+        OR: [
+          { amount_minor: { not: null } },
+          { amount_micros: { not: null } },
+        ],
       },
-      _sum: { amount_minor: true },
+      select: { amount_minor: true, amount_micros: true, currency: true },
     }),
     prisma.videoTask.findMany({
       where: {
@@ -105,6 +140,7 @@ export default async function AdminCostsPage() {
         provider_task_id: true,
         provider_cost_status: true,
         provider_official_amount_minor: true,
+        provider_official_amount_micros: true,
         provider_cost_currency: true,
         created_at: true,
         project: { select: { id: true, name: true } },
@@ -128,6 +164,7 @@ export default async function AdminCostsPage() {
     }),
     getCostLedgerAuditSummary(),
   ]);
+  const officialCostTotals = sumCostRowsByCurrency(officialCostRows);
 
   const auditChecks = [
     {
@@ -184,7 +221,7 @@ export default async function AdminCostsPage() {
         </div>
         <div className="stat-card">
           <span className="stat-label">官方成本</span>
-          <strong className="stat-value">{formatAmountMinor(officialCostTotals._sum.amount_minor, 'CNY')}</strong>
+          <strong className="stat-value">{formatCurrencyTotals(officialCostTotals)}</strong>
           <span className="stat-sub">未接官方扣费时显示待确认</span>
         </div>
         <div className="stat-card">
@@ -306,7 +343,11 @@ export default async function AdminCostsPage() {
                   <td>{task.local_status}</td>
                   <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
                   <td>{costStatusLabel(task.provider_cost_status)}</td>
-                  <td>{formatAmountMinor(task.provider_official_amount_minor, task.provider_cost_currency)}</td>
+                  <td>{formatCostAmount({
+                    amount_micros: task.provider_official_amount_micros,
+                    amount_minor: task.provider_official_amount_minor,
+                    currency: task.provider_cost_currency,
+                  })}</td>
                   <td><Link className="link" href={`/tasks/${task.id}`}>详情</Link></td>
                 </tr>
               ))}

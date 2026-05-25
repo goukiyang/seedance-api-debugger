@@ -5,12 +5,13 @@ import { usePathname } from 'next/navigation';
 import TopNav from './TopNav';
 import SideNav from './SideNav';
 import FeedbackWidget from './FeedbackWidget';
-import { shouldUseNavigationShell } from '@/lib/navigation';
+import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
 
 interface SessionUserSummary {
   name: string | null;
   username: string | null;
   email: string | null;
+  avatar_url?: string | null;
   role: 'admin' | 'user';
 }
 
@@ -25,6 +26,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [loadingUser, setLoadingUser] = useState(false);
 
   const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
+  const topbarOnlyShell = useMemo(() => shouldUseTopbarOnlyShell(pathname), [pathname]);
 
   useEffect(() => {
     if (!showShell) return;
@@ -93,9 +95,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell-root">
       <TopNav user={user} loadingUser={loadingUser} availableCredits={credits?.available ?? null} />
-      <div className="shell-body">
-        <SideNav isAdmin={user?.role === 'admin'} />
-        <main className="shell-content">
+      <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}`}>
+        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} />}
+        <main className={`shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`}>
           {children}
         </main>
       </div>

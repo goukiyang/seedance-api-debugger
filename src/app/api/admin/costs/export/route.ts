@@ -14,13 +14,18 @@ function formatAllocationSummary(allocations: Array<{
   allocation_type: string;
   allocation_id: string;
   amount_minor: number | null;
+  amount_micros: number | null;
   currency: string | null;
   usage_quantity: number | null;
   usage_unit: string | null;
 }>) {
   return allocations
     .map((allocation) => {
-      const amount = allocation.amount_minor === null ? '' : `${allocation.amount_minor}${allocation.currency ? ` ${allocation.currency}` : ''}`;
+      const amount = allocation.amount_micros !== null
+        ? `${allocation.amount_micros} micros${allocation.currency ? ` ${allocation.currency}` : ''}`
+        : allocation.amount_minor === null
+          ? ''
+          : `${allocation.amount_minor}${allocation.currency ? ` ${allocation.currency}` : ''}`;
       const usage = allocation.usage_quantity === null ? '' : `${allocation.usage_quantity} ${allocation.usage_unit || ''}`.trim();
       return [
         `${allocation.allocation_type}:${allocation.allocation_id}`,
@@ -50,6 +55,7 @@ export async function GET(request: NextRequest) {
         provider_task_id: true,
         event_type: true,
         amount_minor: true,
+        amount_micros: true,
         currency: true,
         usage_quantity: true,
         usage_unit: true,
@@ -85,6 +91,7 @@ export async function GET(request: NextRequest) {
             allocation_type: true,
             allocation_id: true,
             amount_minor: true,
+            amount_micros: true,
             currency: true,
             usage_quantity: true,
             usage_unit: true,
@@ -121,6 +128,7 @@ export async function GET(request: NextRequest) {
       'user_name',
       'user_email',
       'amount_minor',
+      'amount_micros',
       'currency',
       'usage_quantity',
       'usage_unit',
@@ -160,6 +168,7 @@ export async function GET(request: NextRequest) {
       ledger.user?.name || ledger.user?.username,
       ledger.user?.email,
       ledger.amount_minor,
+      ledger.amount_micros,
       ledger.currency,
       ledger.usage_quantity,
       ledger.usage_unit,

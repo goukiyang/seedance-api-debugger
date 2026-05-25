@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import Link from 'next/link';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
@@ -48,16 +48,35 @@ interface ProjectOption {
   id: string;
   name: string;
   type: string;
+  status?: string;
   owner_user_id: string;
   my_role: string | null;
   can_generate?: boolean;
+  can_manage_project?: boolean;
   owner?: { name: string | null; username: string | null };
   _count?: { tasks: number; reference_albums?: number };
+}
+
+interface ReuseDraft {
+  taskId: string;
+  reuseKey: number;
+  prompt: string;
+  generationMode: GenerationMode;
+  ratio: VideoRatio;
+  duration: VideoDuration;
+  resolution: VideoResolution;
+  seed: number;
+  generateAudio: boolean;
+  returnLastFrame: boolean;
+  watermark: boolean;
+  projectId: string | null;
 }
 
 interface AuthMeResponse {
   user: AccountMenuUser | null;
 }
+
+const PROJECT_STORAGE_KEY = 'generate_project_id';
 
 function projectOwnerName(project: ProjectOption): string {
   const name = project.owner?.name?.trim();
@@ -105,6 +124,16 @@ export default function GeneratePage() {
   // ---- Current Project ----
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
+  const [projectConfirmAction, setProjectConfirmAction] = useState<'delete' | 'archive' | null>(null);
+  const [reuseDraft, setReuseDraft] = useState<ReuseDraft | null>(null);
+  const [reuseMessage, setReuseMessage] = useState('');
+  const [reuseLoading, setReuseLoading] = useState(false);
+  const [reusingTaskId, setReusingTaskId] = useState<string | null>(null);
 
   // ============================================================================
   // Load collections
@@ -158,26 +187,230 @@ export default function GeneratePage() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    fetch('/api/projects')
-      .then((r) => {
-        if (r.status === 401) {
-          window.location.href = '/login';
-          return null;
-        }
-        return r.json();
-      })
-      .then((d) => {
-        if (!d) return;
-        const list: ProjectOption[] = (d.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
-        setProjects(list);
-        const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
-        const requested = requestedProjectId ? list.find((project) => project.id === requestedProjectId) : null;
+  const loadProjects = useCallback(async (options: {
+    preferredProjectId?: string | null;
+    keepSelected?: boolean;
+  } = {}) => {
+    setLoadingProjects(true);
+    try {
+      const res = await fetch('/api/projects', { cache: 'no-store' });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      const data = await res.json();
+      const list: ProjectOption[] = (data.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
+      setProjects(list);
+
+      const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
+      const rememberedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+      const preferredId = options.preferredProjectId || requestedProjectId || rememberedProjectId || '';
+
+      setSelectedProjectId((current) => {
+        const preferred = preferredId ? list.find((project) => project.id === preferredId) : null;
+        if (preferred) return preferred.id;
+
+        const currentProject = options.keepSelected !== false && current
+          ? list.find((project) => project.id === current)
+          : null;
+        if (currentProject) return currentProject.id;
+
         const personal = list.find((project) => project.type === 'personal');
-        setSelectedProjectId((requested || personal || list[0])?.id || '');
-      })
-      .catch(() => {});
+        return (personal || list[0])?.id || '';
+      });
+    } catch {
+      setProjectMessage({ type: 'error', text: '项目列表加载失败，请刷新后重试' });
+    } finally {
+      setLoadingProjects(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadProjects({ keepSelected: false });
+  }, [loadProjects]);
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
+    setProjectConfirmAction(null);
+  }, [selectedProjectId]);
+
+  const handleCreateProject = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = projectName.trim();
+    if (!name) {
+      setProjectMessage({ type: 'error', text: '项目名称不能为空' });
+      return;
+    }
+
+    setProjectBusy(true);
+    setProjectMessage(null);
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type: 'team' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '新建项目失败');
+
+      setProjectName('');
+      setProjectCreateOpen(false);
+      setProjectMessage({ type: 'success', text: `已新建项目「${data.project.name}」` });
+      await loadProjects({ preferredProjectId: data.project.id, keepSelected: false });
+    } catch (err) {
+      setProjectMessage({ type: 'error', text: err instanceof Error ? err.message : '新建项目失败' });
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [loadProjects, projectName]);
+
+  const handleProjectRemoval = useCallback(async () => {
+    const project = projects.find((item) => item.id === selectedProjectId);
+    if (!project) return;
+
+    const hasContent = (project._count?.tasks || 0) > 0 || (project._count?.reference_albums || 0) > 0;
+    const action = hasContent ? 'archive' : 'delete';
+
+    if (project.type === 'personal' || project.type === 'system') {
+      setProjectMessage({ type: 'error', text: '默认项目不能删除' });
+      return;
+    }
+    if (!project.can_manage_project) {
+      setProjectMessage({ type: 'error', text: '你没有权限管理这个项目' });
+      return;
+    }
+    if (projectConfirmAction !== action) {
+      setProjectConfirmAction(action);
+      setProjectMessage({
+        type: 'info',
+        text: action === 'archive'
+          ? `项目「${projectDisplayName(project)}」已有任务或图集，再点一次归档。归档后历史记录仍保留。`
+          : `再点一次删除空项目「${projectDisplayName(project)}」。`,
+      });
+      return;
+    }
+
+    setProjectBusy(true);
+    setProjectMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: action === 'archive' ? 'PATCH' : 'DELETE',
+        headers: action === 'archive' ? { 'Content-Type': 'application/json' } : undefined,
+        body: action === 'archive' ? JSON.stringify({ action: 'archive' }) : undefined,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (action === 'delete' && typeof data.error === 'string' && data.error.includes('归档')) {
+          setProjectConfirmAction('archive');
+          setProjectMessage({
+            type: 'info',
+            text: '项目已有历史内容，删除会断链；请再次点击归档项目。',
+          });
+          return;
+        }
+        throw new Error(data.message || data.error || '项目操作失败');
+      }
+
+      setProjectConfirmAction(null);
+      setProjectMessage({
+        type: 'success',
+        text: action === 'archive' ? `已归档项目「${projectDisplayName(project)}」` : `已删除项目「${projectDisplayName(project)}」`,
+      });
+      await loadProjects({ keepSelected: false });
+    } catch (err) {
+      setProjectMessage({ type: 'error', text: err instanceof Error ? err.message : '项目操作失败' });
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [loadProjects, projectConfirmAction, projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!projectMessage) return;
+    if (projectMessage.type === 'error') return;
+    const timeoutId = window.setTimeout(() => {
+      setProjectMessage(null);
+      if (projectMessage.type === 'info') setProjectConfirmAction(null);
+    }, 3600);
+    return () => window.clearTimeout(timeoutId);
+  }, [projectMessage]);
+
+  useEffect(() => {
+    if (!reuseDraft?.projectId) return;
+    if (projects.some((project) => project.id === reuseDraft.projectId)) {
+      setSelectedProjectId(reuseDraft.projectId);
+    }
+  }, [projects, reuseDraft?.projectId]);
+
+  const loadReusableTask = useCallback(async (
+    taskId: string,
+    options: { clearUrl?: boolean; scrollToComposer?: boolean } = {},
+  ) => {
+    setReuseLoading(true);
+    setReusingTaskId(taskId);
+    setReuseMessage('正在载入旧任务...');
+    setResult(null);
+    setError(null);
+    setErrorDebug(null);
+    setPolledResult(null);
+    setIsPolling(false);
+
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/reuse`, {
+        method: 'POST',
+        headers: {
+          'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || '复用任务失败');
+      }
+      setReuseDraft({
+        taskId: data.draft.task_id,
+        reuseKey: Date.now(),
+        prompt: data.draft.prompt || '',
+        generationMode: data.draft.generation_mode || 'all_in_one_reference',
+        ratio: data.draft.ratio || '16:9',
+        duration: data.draft.duration || 5,
+        resolution: data.draft.resolution || '480p',
+        seed: data.draft.seed ?? -1,
+        generateAudio: Boolean(data.draft.generate_audio),
+        returnLastFrame: Boolean(data.draft.return_last_frame),
+        watermark: Boolean(data.draft.watermark),
+        projectId: data.draft.project_id || null,
+      });
+      const skipped = data.skipped_references || 0;
+      const restored = data.restored_references || 0;
+      setReuseMessage(
+        skipped > 0
+          ? `已回填旧任务，恢复 ${restored} 张参考图，${skipped} 张未能恢复`
+          : `已回填旧任务，恢复 ${restored} 张参考图`,
+      );
+      if (options.clearUrl) {
+        window.history.replaceState(null, '', '/generate');
+      }
+      if (options.scrollToComposer !== false) {
+        requestAnimationFrame(() => {
+          document.querySelector('.generation-composer')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        });
+      }
+    } catch (err) {
+      setReuseMessage(err instanceof Error ? err.message : '复用任务失败');
+    } finally {
+      setReuseLoading(false);
+      setReusingTaskId(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    const reuseTaskId = new URLSearchParams(window.location.search).get('reuse_task_id');
+    if (!reuseTaskId) return;
+    void loadReusableTask(reuseTaskId, { clearUrl: true });
+  }, [loadReusableTask]);
 
   // ============================================================================
   // Load recent tasks
@@ -392,6 +625,26 @@ export default function GeneratePage() {
     counts[name] = (counts[name] || 0) + 1;
     return counts;
   }, {});
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
+  const selectedProjectHasContent = Boolean(
+    (selectedProject?._count?.tasks || 0) > 0 || (selectedProject?._count?.reference_albums || 0) > 0,
+  );
+  const selectedProjectCanRemove = Boolean(
+    selectedProject
+    && selectedProject.can_manage_project
+    && selectedProject.type !== 'personal'
+    && selectedProject.type !== 'system',
+  );
+  const projectRemovalLabel = selectedProjectHasContent ? '归档项目' : '删除项目';
+  const projectRemovalTitle = !selectedProject
+    ? '先选择项目'
+    : selectedProject.type === 'personal'
+      ? '默认项目不能删除'
+      : !selectedProject.can_manage_project
+        ? '你没有权限管理这个项目'
+        : selectedProjectHasContent
+          ? '项目已有历史内容，只能归档'
+          : '删除空项目';
 
   // ============================================================================
   // Render
@@ -434,39 +687,112 @@ export default function GeneratePage() {
           <p className="composer-hero-sub">
             上传参考图，描述你想生成的画面，Seedance 2.0 帮你实现
           </p>
+          <div className="composer-hero-actions">
+            <Link href="/generate/canvas" className="composer-hero-action composer-hero-action-primary">
+              进入画布模式
+            </Link>
+            <Link href="/projects" className="composer-hero-action composer-hero-action-secondary">
+              查看我的项目
+            </Link>
+          </div>
         </div>
 
-        <div style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 10,
-          marginBottom: 16,
-          color: 'rgba(255,255,255,0.62)',
-          fontSize: 14,
-        }}>
-          <span>保存到：</span>
-          {projects.length > 0 ? (
-            <select
-              className="input"
-              style={{ width: 260, maxWidth: '100%', padding: '8px 12px' }}
-              value={selectedProjectId}
-              onChange={(event) => setSelectedProjectId(event.target.value)}
-              title="本次生成的任务和结果会写入所选空间"
-            >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {projectDisplayLabel(project, projectNameCounts[projectDisplayName(project)] > 1)}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="text-red">暂无可生成项目</span>
+        <div className="composer-project-panel">
+          <div className="composer-project-row">
+            <div className="composer-project-copy">
+              <span className="composer-project-label">保存到</span>
+              <span className="composer-project-help">本次生成的任务、成本和结果会写入所选项目。</span>
+            </div>
+
+            <div className="composer-project-controls">
+              {projects.length > 0 ? (
+                <select
+                  className="composer-project-select"
+                  value={selectedProjectId}
+                  onChange={(event) => setSelectedProjectId(event.target.value)}
+                  title="本次生成的任务和结果会写入所选项目"
+                  disabled={loadingProjects || projectBusy}
+                >
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {projectDisplayLabel(project, projectNameCounts[projectDisplayName(project)] > 1)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="composer-project-empty">
+                  {loadingProjects ? '正在加载项目...' : '暂无可生成项目'}
+                </span>
+              )}
+
+              <button
+                type="button"
+                className="composer-project-btn composer-project-btn-primary"
+                onClick={() => {
+                  setProjectCreateOpen((open) => !open);
+                  setProjectConfirmAction(null);
+                  setProjectMessage(null);
+                }}
+                disabled={projectBusy}
+              >
+                新建项目
+              </button>
+              <button
+                type="button"
+                className="composer-project-btn composer-project-btn-danger"
+                onClick={() => void handleProjectRemoval()}
+                disabled={!selectedProjectCanRemove || projectBusy}
+                title={projectRemovalTitle}
+              >
+                {projectBusy && projectConfirmAction ? '处理中...' : projectRemovalLabel}
+              </button>
+            </div>
+          </div>
+
+          {projectCreateOpen && (
+            <form className="composer-project-create" onSubmit={handleCreateProject}>
+              <input
+                className="composer-project-input"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                placeholder="输入项目名称"
+                maxLength={40}
+                autoFocus
+              />
+              <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy}>
+                {projectBusy ? '创建中...' : '创建'}
+              </button>
+              <button
+                type="button"
+                className="composer-project-btn"
+                onClick={() => {
+                  setProjectCreateOpen(false);
+                  setProjectName('');
+                  setProjectMessage(null);
+                }}
+                disabled={projectBusy}
+              >
+                取消
+              </button>
+            </form>
+          )}
+
+          {projectMessage && (
+            <div className={`composer-project-message ${projectMessage.type}`}>
+              {projectMessage.text}
+            </div>
           )}
         </div>
 
+        {reuseMessage && (
+          <div className={`composer-prefill-notice ${reuseLoading ? 'is-loading' : ''}`}>
+            {reuseMessage}
+          </div>
+        )}
+
         <GenerationComposer
           collections={collections}
+          reuseDraft={reuseDraft}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
           onCollectionNew={handleCollectionNew}
@@ -486,24 +812,33 @@ export default function GeneratePage() {
             <div className="composer-recent-title">最近任务</div>
             <div className="composer-recent-grid">
               {recentTasks.map((task) => (
-                <Link
+                <article
                   key={task.id}
-                  href={`/tasks/${task.id}`}
                   className="composer-task-card"
                 >
-                  <div className="composer-task-card-prompt">
-                    {truncatePrompt(task.prompt)}
-                  </div>
-                  <div className="composer-task-card-meta">
-                    <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
-                    <span className={`composer-task-card-status ${task.local_status}`}>
-                      {task.local_status === 'submitted' ? '排队中' :
-                       task.local_status === 'running' ? '生成中' :
-                       task.local_status === 'succeeded' ? '已完成' :
-                       task.local_status === 'failed' ? '失败' : task.local_status}
-                    </span>
-                  </div>
-                </Link>
+                  <Link href={`/tasks/${task.id}`} className="composer-task-card-link">
+                    <div className="composer-task-card-prompt">
+                      {truncatePrompt(task.prompt)}
+                    </div>
+                    <div className="composer-task-card-meta">
+                      <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
+                      <span className={`composer-task-card-status ${task.local_status}`}>
+                        {task.local_status === 'submitted' ? '排队中' :
+                         task.local_status === 'running' ? '生成中' :
+                         task.local_status === 'succeeded' ? '已完成' :
+                         task.local_status === 'failed' ? '失败' : task.local_status}
+                      </span>
+                    </div>
+                  </Link>
+                  <button
+                    type="button"
+                    className="composer-task-card-reuse"
+                    disabled={reuseLoading}
+                    onClick={() => loadReusableTask(task.id)}
+                  >
+                    {reusingTaskId === task.id ? '回填中...' : '重新生成'}
+                  </button>
+                </article>
               ))}
             </div>
           </div>

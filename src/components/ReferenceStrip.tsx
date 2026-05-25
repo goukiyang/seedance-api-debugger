@@ -13,6 +13,7 @@ interface Props {
   onUpload: (file: File) => Promise<void>;
   onRemove: (assetId: string) => Promise<void>;
   onReorder: (newOrder: Array<{ assetId: string; sortOrder: number }>) => Promise<void>;
+  onReplace: (assetId: string, file: File) => Promise<void>;
   onPreview: (url: string) => void;
   generationMode?: string;
   loading?: boolean;
@@ -55,12 +56,17 @@ function moveAssetToInsertIndex(
   return next;
 }
 
+function dragHasFiles(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes('Files');
+}
+
 export function ReferenceStrip({
   assets,
   uploadStatuses,
   onUpload,
   onRemove,
   onReorder,
+  onReplace,
   onPreview,
   generationMode,
   loading = false,
@@ -68,8 +74,11 @@ export function ReferenceStrip({
   const [orderedAssets, setOrderedAssets] = useState<WorkspaceAssetItem[]>(assets);
   const [draggedKey, setDraggedKey] = useState<string | null>(null);
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
+  const [dropReplaceKey, setDropReplaceKey] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const replaceTargetAssetIdRef = useRef<string | null>(null);
   const dropzoneRef = useRef<HTMLDivElement>(null);
   const orderedAssetsRef = useRef<WorkspaceAssetItem[]>(assets);
   const pointerDragRef = useRef<{
@@ -119,7 +128,7 @@ export function ReferenceStrip({
 
   const handlePointerDown = useCallback((e: React.PointerEvent, asset: WorkspaceAssetItem) => {
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('.ref-thumb-remove')) return;
+    if ((e.target as HTMLElement).closest('.ref-thumb-remove, .ref-thumb-replace')) return;
     if (uploading || loading) return;
 
     const sourceKey = getItemKey(asset);
@@ -219,6 +228,34 @@ export function ReferenceStrip({
     }
   }, [onUpload]);
 
+  const replaceAssetWithFile = useCallback(async (assetId: string, file: File) => {
+    setUploading(true);
+    try {
+      await onReplace(assetId, file);
+    } finally {
+      setUploading(false);
+      setDropReplaceKey(null);
+    }
+  }, [onReplace]);
+
+  const handleReplaceFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const targetAssetId = replaceTargetAssetIdRef.current;
+    replaceTargetAssetIdRef.current = null;
+    if (!file || !targetAssetId) return;
+    try {
+      await replaceAssetWithFile(targetAssetId, file);
+    } finally {
+      if (replaceInputRef.current) replaceInputRef.current.value = '';
+    }
+  }, [replaceAssetWithFile]);
+
+  const handleReplaceClick = useCallback((assetId: string) => {
+    if (uploading || loading) return;
+    replaceTargetAssetIdRef.current = assetId;
+    replaceInputRef.current?.click();
+  }, [loading, uploading]);
+
   const handleAddClick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -239,6 +276,17 @@ export function ReferenceStrip({
     }
   }, [onUpload]);
 
+  const handleReplaceDrop = useCallback(async (e: React.DragEvent, asset: WorkspaceAssetItem) => {
+    const files = Array.from(e.dataTransfer.files).filter(
+      (f) => f.type.startsWith('image/') || f.type.startsWith('video/') || f.type.startsWith('audio/')
+    );
+    if (files.length === 0) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    await replaceAssetWithFile(asset.assetId, files[0]);
+  }, [replaceAssetWithFile]);
+
   const displayAssets = orderedAssets.slice(0, MAX_REFS);
   const hasMore = assets.length > MAX_REFS;
 
@@ -256,6 +304,13 @@ export function ReferenceStrip({
         multiple
         style={{ display: 'none' }}
         onChange={handleFileChange}
+      />
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept="image/*,video/*,audio/*"
+        style={{ display: 'none' }}
+        onChange={handleReplaceFileChange}
       />
 
       {/* 拖放区：缩略图 + 添加卡片 */}
@@ -281,6 +336,20 @@ export function ReferenceStrip({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerCancel}
+              onDragEnter={(e) => {
+                if (dragHasFiles(e.dataTransfer)) setDropReplaceKey(itemKey);
+              }}
+              onDragOver={(e) => {
+                if (!dragHasFiles(e.dataTransfer)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'copy';
+                setDropReplaceKey(itemKey);
+              }}
+              onDragLeave={() => {
+                setDropReplaceKey((current) => current === itemKey ? null : current);
+              }}
+              onDrop={(e) => void handleReplaceDrop(e, asset)}
               onClickCapture={handleClickCapture}
               onDragStart={(e) => e.preventDefault()}
               className={[
@@ -288,6 +357,7 @@ export function ReferenceStrip({
                 isDragging ? 'ref-thumb-dragging' : '',
                 isInsertBefore ? 'ref-thumb-insert-before' : '',
                 isInsertAfter ? 'ref-thumb-insert-after' : '',
+                dropReplaceKey === itemKey ? 'ref-thumb-replace-target' : '',
               ].filter(Boolean).join(' ')}
             >
               <ReferenceThumb
@@ -296,6 +366,7 @@ export function ReferenceStrip({
                 uploadStatus={uploadStatus}
                 frameRole={frameRole}
                 onRemove={onRemove}
+                onReplace={handleReplaceClick}
                 onPreview={onPreview}
               />
             </div>
