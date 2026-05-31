@@ -53,6 +53,23 @@ export function formatCurrencyAmount(value: number, currency?: string | null, di
   return normalized ? `${text} ${normalized}` : text;
 }
 
+export function formatCnyAmountFixed(value: number) {
+  return `¥${value.toFixed(2)}`;
+}
+
+export function formatCurrencyAmountWithFixedCny(value: number, currency?: string | null) {
+  const normalized = normalizeCurrency(currency);
+  const text = value.toFixed(2);
+
+  if (normalized === 'USD') {
+    return `$${text} USD（约 ${formatCnyAmountFixed(usdToCny(value))}）`;
+  }
+  if (normalized === 'CNY') {
+    return `¥${text}`;
+  }
+  return normalized ? `${text} ${normalized}` : text;
+}
+
 export function formatAmountMinorWithCny(amount: number | null | undefined, currency?: string | null) {
   if (amount === null || amount === undefined) return '待官方确认';
   return formatCurrencyAmount(amount / 100, currency, 2);
@@ -61,6 +78,16 @@ export function formatAmountMinorWithCny(amount: number | null | undefined, curr
 export function formatAmountMicrosWithCny(amount: number | null | undefined, currency?: string | null) {
   if (amount === null || amount === undefined) return '待官方确认';
   return formatCurrencyAmount(amount / 1_000_000, currency, 6);
+}
+
+export function formatAmountMinorWithFixedCny(amount: number | null | undefined, currency?: string | null) {
+  if (amount === null || amount === undefined) return '待官方确认';
+  return formatCurrencyAmountWithFixedCny(amount / 100, currency);
+}
+
+export function formatAmountMicrosWithFixedCny(amount: number | null | undefined, currency?: string | null) {
+  if (amount === null || amount === undefined) return '待官方确认';
+  return formatCurrencyAmountWithFixedCny(amount / 1_000_000, currency);
 }
 
 export function formatUsdCnyEstimateFromInput(amount: string, currency: string) {

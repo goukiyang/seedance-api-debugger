@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Eye, EyeOff, RefreshCcw, RotateCcw, Search } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
-import { formatAmountMicrosWithCny, formatAmountMinorWithCny } from '@/lib/costs/currency';
+import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 
 type OutputOwner = {
   id: string;
@@ -167,13 +167,17 @@ function sourceLabel(output: OutputItem) {
   return output.source_label || output.source_type || '未知';
 }
 
-function costText(output: OutputItem) {
+function officialChargeText(output: OutputItem) {
   if (output.provider_official_amount_micros !== null && output.provider_official_amount_micros !== undefined) {
-    return formatAmountMicrosWithCny(output.provider_official_amount_micros, output.provider_cost_currency);
+    return formatAmountMicrosWithFixedCny(output.provider_official_amount_micros, output.provider_cost_currency);
   }
   if (output.provider_official_amount_minor !== null && output.provider_official_amount_minor !== undefined) {
-    return formatAmountMinorWithCny(output.provider_official_amount_minor, output.provider_cost_currency);
+    return formatAmountMinorWithFixedCny(output.provider_official_amount_minor, output.provider_cost_currency);
   }
+  return '待官方确认';
+}
+
+function pointCostText(output: OutputItem) {
   if (output.actual_cost !== null && output.actual_cost !== undefined) return `点数 ${output.actual_cost}`;
   if (output.frozen_cost) return `冻结 ${output.frozen_cost}`;
   if (output.estimated_cost !== null && output.estimated_cost !== undefined) return `预估 ${output.estimated_cost}`;
@@ -547,8 +551,9 @@ export default function AdminOutputsClient() {
 
                   <div className="outputs-item-side">
                     <div className="outputs-cost">
-                      <span>成本</span>
-                      <strong>{costText(output)}</strong>
+                      <span>实际扣除</span>
+                      <strong>{officialChargeText(output)}</strong>
+                      <small>{pointCostText(output)}</small>
                     </div>
                     <div className="outputs-actions">
                       <Link className="btn btn-secondary" href={`/tasks/${output.id}`}>

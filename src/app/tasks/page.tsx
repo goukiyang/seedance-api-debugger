@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import type { GenerationMode } from '@/types';
 import { GENERATION_MODE_LABELS } from '@/types';
 
@@ -24,6 +25,9 @@ interface Task {
   actual_cost: number | null;
   frozen_cost: number | null;
   refund_amount: number | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
   reference_image_ids: string | null;
   reference_image_urls: string | null;
   created_at: string;
@@ -101,6 +105,16 @@ function taskCostText(task: Task): string {
   if (task.estimated_cost !== null && task.estimated_cost !== undefined) return `预估 ${task.estimated_cost}`;
   if (task.refund_amount && task.refund_amount > 0) return `返还 ${task.refund_amount}`;
   return '未记录';
+}
+
+function taskOfficialChargeText(task: Task): string {
+  if (task.provider_official_amount_micros !== null && task.provider_official_amount_micros !== undefined) {
+    return formatAmountMicrosWithFixedCny(task.provider_official_amount_micros, task.provider_cost_currency);
+  }
+  if (task.provider_official_amount_minor !== null && task.provider_official_amount_minor !== undefined) {
+    return formatAmountMinorWithFixedCny(task.provider_official_amount_minor, task.provider_cost_currency);
+  }
+  return '待官方确认';
 }
 
 type TaskPreviewModel = {
@@ -293,6 +307,10 @@ export default function TasksPage() {
                         <div>
                           <span>参考图</span>
                           <strong>{referenceCount > 0 ? `${referenceCount} 张` : '无'}</strong>
+                        </div>
+                        <div>
+                          <span>实际扣除</span>
+                          <strong>{taskOfficialChargeText(task)}</strong>
                         </div>
                         <div>
                           <span>点数</span>

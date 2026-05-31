@@ -659,6 +659,14 @@ a {
   overflow-wrap: anywhere;
 }
 
+.outputs-cost small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .outputs-actions {
   display: grid;
   gap: 8px;
