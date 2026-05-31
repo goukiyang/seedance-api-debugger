@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import AccountMenu, { type AccountMenuUser } from '@/components/AccountMenu';
+import type { AccountMenuUser } from '@/components/AccountMenu';
+import ComposerTopbar from '@/components/ComposerTopbar';
 import {
   createBlankCanvasDocument,
   normalizeCanvasDocumentInput,
@@ -94,10 +95,6 @@ function formatTime(dateStr: string) {
   } catch {
     return '';
   }
-}
-
-function formatCredit(value: number | undefined) {
-  return Math.max(0, Math.floor(value || 0)).toString();
 }
 
 function blankEditorValue(title = '未命名画布') {
@@ -400,26 +397,7 @@ export default function CanvasBetaWorkspace() {
 
   return (
     <div className="composer-page">
-      <header className="composer-topbar">
-        <div className="composer-topbar-left">
-          <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
-          <nav className="composer-topbar-nav">
-            <Link href="/generate" className="composer-topbar-nav-btn">标准生成</Link>
-            <Link href="/generate/canvas" className="composer-topbar-nav-btn active">画布模式</Link>
-            <Link href="/projects" className="composer-topbar-nav-btn">我的项目</Link>
-            <Link href="/collections" className="composer-topbar-nav-btn">参考图集</Link>
-            <Link href="/tasks" className="composer-topbar-nav-btn">我的任务</Link>
-          </nav>
-        </div>
-        <div className="composer-topbar-right">
-          {credits && (
-            <div className="composer-topbar-nav-btn" title="当前点数">
-              可用 {formatCredit(credits.available)} 点 ｜ 冻结 {formatCredit(credits.frozen_credits)} 点 ｜ 本月已用 {formatCredit(credits.monthly_used)} 点
-            </div>
-          )}
-          <AccountMenu user={currentUser} loading={loadingUser} variant="composer" />
-        </div>
-      </header>
+      <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
 
       <main className={styles.page}>
         <section className={styles.hero}>

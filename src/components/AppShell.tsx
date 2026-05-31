@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import TopNav from './TopNav';
+import ComposerTopbar from './ComposerTopbar';
 import SideNav from './SideNav';
 import FeedbackWidget from './FeedbackWidget';
 import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
@@ -17,6 +17,8 @@ interface SessionUserSummary {
 
 interface CreditSummary {
   available: number;
+  frozen_credits: number;
+  monthly_used: number;
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -94,7 +96,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="shell-root">
-      <TopNav user={user} loadingUser={loadingUser} availableCredits={credits?.available ?? null} />
+      <ComposerTopbar user={user} loadingUser={loadingUser} credits={credits} />
       <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}`}>
         {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} />}
         <main className={`shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`}>

@@ -3578,7 +3578,11 @@ a {
 
 /* Composer 顶部导航栏 */
 .composer-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 60;
   height: 48px;
+  width: 100%;
   background-color: #0B1220;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
@@ -3773,6 +3777,258 @@ a {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.composer-project-picker {
+  position: relative;
+  width: min(460px, 48vw);
+}
+
+.composer-project-trigger {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.48);
+  color: rgba(248, 250, 252, 0.94);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.composer-project-trigger:hover:not(:disabled),
+.composer-project-trigger[aria-expanded="true"] {
+  border-color: rgba(96, 165, 250, 0.56);
+  background: rgba(15, 23, 42, 0.74);
+}
+
+.composer-project-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.composer-project-trigger-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(37, 99, 235, 0.22);
+  color: #bfdbfe;
+}
+
+.composer-project-trigger-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.composer-project-trigger-label,
+.composer-project-menu-subtitle,
+.composer-project-option-meta {
+  color: rgba(203, 213, 225, 0.58);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.composer-project-trigger-name {
+  overflow: hidden;
+  color: rgba(248, 250, 252, 0.96);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-project-trigger-meta {
+  overflow: hidden;
+  color: rgba(203, 213, 225, 0.58);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-project-trigger-chevron {
+  color: rgba(203, 213, 225, 0.7);
+}
+
+.composer-project-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 55;
+  width: min(520px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(10, 17, 31, 0.98);
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
+}
+
+.composer-project-menu-head,
+.composer-project-menu-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+}
+
+.composer-project-menu-head {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.composer-project-menu-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.composer-project-menu-title {
+  color: rgba(248, 250, 252, 0.94);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.composer-project-menu-action,
+.composer-project-menu-link,
+.composer-project-menu-danger {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(248, 250, 252, 0.86);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 11px;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.composer-project-menu-action {
+  border-color: rgba(96, 165, 250, 0.38);
+  color: #dbeafe;
+}
+
+.composer-project-menu-action:hover:not(:disabled),
+.composer-project-menu-link:hover,
+.composer-project-menu-danger:hover:not(:disabled) {
+  border-color: rgba(147, 197, 253, 0.52);
+  background: rgba(30, 41, 59, 0.88);
+  color: white;
+}
+
+.composer-project-menu-action:disabled,
+.composer-project-menu-danger:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.composer-project-create-inline {
+  margin: 10px;
+  justify-content: stretch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.composer-project-create-inline .composer-project-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.composer-project-list {
+  max-height: min(340px, calc(100vh - 260px));
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.composer-project-option {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.86);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.composer-project-option:hover,
+.composer-project-option.active {
+  border-color: rgba(96, 165, 250, 0.26);
+  background: rgba(30, 64, 175, 0.22);
+  color: white;
+}
+
+.composer-project-option-mark {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: rgba(191, 219, 254, 0.86);
+}
+
+.composer-project-option.active .composer-project-option-mark {
+  background: rgba(37, 99, 235, 0.32);
+  color: #dbeafe;
+}
+
+.composer-project-option-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.composer-project-option-name {
+  overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-project-list-empty {
+  padding: 18px 12px;
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.composer-project-menu-footer {
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.composer-project-menu-danger {
+  border-color: rgba(248, 113, 113, 0.26);
+  color: rgba(254, 202, 202, 0.92);
+}
+
+.composer-project-menu-danger.confirming {
+  border-color: rgba(251, 146, 60, 0.46);
+  color: rgba(255, 237, 213, 0.96);
 }
 
 .composer-project-select,
@@ -4797,6 +5053,23 @@ a {
     align-items: stretch;
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .composer-project-picker,
+  .composer-project-menu {
+    width: 100%;
+  }
+
+  .composer-project-menu {
+    right: auto;
+    left: 0;
+  }
+
+  .composer-project-menu-head,
+  .composer-project-menu-footer,
+  .composer-project-create-inline {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .composer-project-select,

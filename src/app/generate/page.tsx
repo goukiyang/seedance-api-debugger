@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
 import Link from 'next/link';
+import { Archive, Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
-import AccountMenu, { type AccountMenuUser } from '@/components/AccountMenu';
+import type { AccountMenuUser } from '@/components/AccountMenu';
+import ComposerTopbar from '@/components/ComposerTopbar';
 
 // ============================================================================
 // Types
@@ -98,6 +100,13 @@ function projectDisplayLabel(project: ProjectOption, hasDuplicateName: boolean):
   return hasDuplicateName ? `${name} · ${projectOwnerName(project)}` : name;
 }
 
+function projectMetaLabel(project: ProjectOption): string {
+  const kind = project.type === 'personal' ? '个人默认' : project.type === 'system' ? '系统项目' : '团队项目';
+  const taskCount = project._count?.tasks || 0;
+  const albumCount = project._count?.reference_albums || 0;
+  return `${kind} · ${taskCount} 任务 · ${albumCount} 图集`;
+}
+
 type TaskPreviewModel = {
   kind: 'image' | 'empty';
   src?: string;
@@ -139,6 +148,8 @@ function RecentTaskPreview({ task }: { task: TaskItem }) {
 // ============================================================================
 
 export default function GeneratePage() {
+  const projectPickerRef = useRef<HTMLDivElement | null>(null);
+
   // ---- Collections ----
   const [collections, setCollections] = useState<AssetCollection[]>([]);
 
@@ -165,6 +176,7 @@ export default function GeneratePage() {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
@@ -274,6 +286,31 @@ export default function GeneratePage() {
     setProjectConfirmAction(null);
   }, [selectedProjectId]);
 
+  useEffect(() => {
+    if (!projectPickerOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!projectPickerRef.current?.contains(event.target as Node)) {
+        setProjectPickerOpen(false);
+        setProjectCreateOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setProjectPickerOpen(false);
+        setProjectCreateOpen(false);
+        setProjectConfirmAction(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [projectPickerOpen]);
+
   const handleCreateProject = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const name = projectName.trim();
@@ -295,6 +332,7 @@ export default function GeneratePage() {
 
       setProjectName('');
       setProjectCreateOpen(false);
+      setProjectPickerOpen(false);
       setProjectMessage({ type: 'success', text: `已新建项目「${data.project.name}」` });
       await loadProjects({ preferredProjectId: data.project.id, keepSelected: false });
     } catch (err) {
@@ -655,16 +693,20 @@ export default function GeneratePage() {
     return prompt.slice(0, maxLen) + '...';
   }
 
-  function formatCredit(value: number | undefined): string {
-    return Math.max(0, Math.floor(value || 0)).toString();
-  }
-
   const projectNameCounts = projects.reduce<Record<string, number>>((counts, project) => {
     const name = projectDisplayName(project);
     counts[name] = (counts[name] || 0) + 1;
     return counts;
   }, {});
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
+  const selectedProjectLabel = selectedProject
+    ? projectDisplayLabel(selectedProject, projectNameCounts[projectDisplayName(selectedProject)] > 1)
+    : loadingProjects
+      ? '正在加载项目...'
+      : '暂无可生成项目';
+  const selectedProjectMeta = selectedProject
+    ? projectMetaLabel(selectedProject)
+    : '新建一个项目后即可保存任务、成本和结果。';
   const selectedProjectHasContent = Boolean(
     (selectedProject?._count?.tasks || 0) > 0 || (selectedProject?._count?.reference_albums || 0) > 0,
   );
@@ -692,28 +734,7 @@ export default function GeneratePage() {
   return (
     <div className="composer-page">
       {/* ===== 顶部导航栏 ===== */}
-      <header className="composer-topbar">
-        <div className="composer-topbar-left">
-            <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
-          <nav className="composer-topbar-nav">
-            <Link href="/generate" className="composer-topbar-nav-btn active">生成视频</Link>
-            <Link href="/projects" className="composer-topbar-nav-btn">我的项目</Link>
-            <Link href="/collections" className="composer-topbar-nav-btn">参考图集</Link>
-            <Link href="/tasks" className="composer-topbar-nav-btn">我的任务</Link>
-          </nav>
-        </div>
-        <div className="composer-topbar-right">
-          {credits && (
-            <div
-              className="composer-topbar-nav-btn"
-              title="当前点数"
-            >
-              可用 {formatCredit(credits.available)} 点 ｜ 冻结 {formatCredit(credits.frozen_credits)} 点 ｜ 本月已用 {formatCredit(credits.monthly_used)} 点
-            </div>
-          )}
-          <AccountMenu user={currentUser} loading={loadingUser} variant="composer" />
-        </div>
-      </header>
+      <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
 
       {/* ===== 页面主体 ===== */}
       <main className="composer-main">
@@ -744,77 +765,144 @@ export default function GeneratePage() {
             </div>
 
             <div className="composer-project-controls">
-              {projects.length > 0 ? (
-                <select
-                  className="composer-project-select"
-                  value={selectedProjectId}
-                  onChange={(event) => setSelectedProjectId(event.target.value)}
-                  title="本次生成的任务和结果会写入所选项目"
+              <div className="composer-project-picker" ref={projectPickerRef}>
+                <button
+                  type="button"
+                  className="composer-project-trigger"
+                  onClick={() => setProjectPickerOpen((open) => !open)}
                   disabled={loadingProjects || projectBusy}
+                  aria-expanded={projectPickerOpen}
+                  aria-haspopup="dialog"
+                  title="本次生成的任务和结果会写入所选项目"
                 >
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {projectDisplayLabel(project, projectNameCounts[projectDisplayName(project)] > 1)}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="composer-project-empty">
-                  {loadingProjects ? '正在加载项目...' : '暂无可生成项目'}
-                </span>
-              )}
+                  <span className="composer-project-trigger-icon" aria-hidden="true">
+                    <Folder size={16} />
+                  </span>
+                  <span className="composer-project-trigger-copy">
+                    <span className="composer-project-trigger-label">当前项目</span>
+                    <span className="composer-project-trigger-name">{selectedProjectLabel}</span>
+                    <span className="composer-project-trigger-meta">{selectedProjectMeta}</span>
+                  </span>
+                  <ChevronDown className="composer-project-trigger-chevron" size={16} aria-hidden="true" />
+                </button>
 
-              <button
-                type="button"
-                className="composer-project-btn composer-project-btn-primary"
-                onClick={() => {
-                  setProjectCreateOpen((open) => !open);
-                  setProjectConfirmAction(null);
-                  setProjectMessage(null);
-                }}
-                disabled={projectBusy}
-              >
-                新建项目
-              </button>
-              <button
-                type="button"
-                className="composer-project-btn composer-project-btn-danger"
-                onClick={() => void handleProjectRemoval()}
-                disabled={!selectedProjectCanRemove || projectBusy}
-                title={projectRemovalTitle}
-              >
-                {projectBusy && projectConfirmAction ? '处理中...' : projectRemovalLabel}
-              </button>
+                {projectPickerOpen && (
+                  <div className="composer-project-menu" role="dialog" aria-label="项目列表">
+                    <div className="composer-project-menu-head">
+                      <div>
+                        <span className="composer-project-menu-title">项目列表</span>
+                        <span className="composer-project-menu-subtitle">{projects.length} 个可生成项目</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="composer-project-menu-action"
+                        onClick={() => {
+                          setProjectCreateOpen((open) => !open);
+                          setProjectConfirmAction(null);
+                          setProjectMessage(null);
+                        }}
+                        disabled={projectBusy}
+                      >
+                        <Plus size={15} aria-hidden="true" />
+                        新建项目
+                      </button>
+                    </div>
+
+                    {projectCreateOpen && (
+                      <form className="composer-project-create composer-project-create-inline" onSubmit={handleCreateProject}>
+                        <input
+                          className="composer-project-input"
+                          value={projectName}
+                          onChange={(event) => setProjectName(event.target.value)}
+                          placeholder="输入项目名称"
+                          maxLength={40}
+                          autoFocus
+                        />
+                        <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy}>
+                          {projectBusy ? '创建中...' : '创建'}
+                        </button>
+                        <button
+                          type="button"
+                          className="composer-project-btn"
+                          onClick={() => {
+                            setProjectCreateOpen(false);
+                            setProjectName('');
+                            setProjectMessage(null);
+                          }}
+                          disabled={projectBusy}
+                        >
+                          取消
+                        </button>
+                      </form>
+                    )}
+
+                    <div className="composer-project-list" role="listbox" aria-label="选择保存项目">
+                      {loadingProjects ? (
+                        <div className="composer-project-list-empty">正在加载项目...</div>
+                      ) : projects.length === 0 ? (
+                        <div className="composer-project-list-empty">暂无可生成项目，先新建一个项目。</div>
+                      ) : (
+                        projects.map((project) => {
+                          const duplicateName = projectNameCounts[projectDisplayName(project)] > 1;
+                          const isSelected = project.id === selectedProjectId;
+                          return (
+                            <button
+                              key={project.id}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelected}
+                              className={`composer-project-option${isSelected ? ' active' : ''}`}
+                              onClick={() => {
+                                setSelectedProjectId(project.id);
+                                setProjectPickerOpen(false);
+                                setProjectCreateOpen(false);
+                                setProjectConfirmAction(null);
+                                setProjectMessage(null);
+                              }}
+                            >
+                              <span className="composer-project-option-mark" aria-hidden="true">
+                                {isSelected ? <Check size={16} /> : <Folder size={16} />}
+                              </span>
+                              <span className="composer-project-option-copy">
+                                <span className="composer-project-option-name">
+                                  {projectDisplayLabel(project, duplicateName)}
+                                </span>
+                                <span className="composer-project-option-meta">
+                                  {projectMetaLabel(project)}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="composer-project-menu-footer">
+                      <button
+                        type="button"
+                        className={`composer-project-menu-danger${projectConfirmAction ? ' confirming' : ''}`}
+                        onClick={() => void handleProjectRemoval()}
+                        disabled={!selectedProjectCanRemove || projectBusy}
+                        title={projectRemovalTitle}
+                      >
+                        {selectedProjectHasContent ? <Archive size={15} aria-hidden="true" /> : <Trash2 size={15} aria-hidden="true" />}
+                        {projectBusy && projectConfirmAction
+                          ? '处理中...'
+                          : projectConfirmAction === 'archive'
+                            ? '确认归档'
+                            : projectConfirmAction === 'delete'
+                              ? '确认删除'
+                              : projectRemovalLabel}
+                      </button>
+                      <Link href="/projects" className="composer-project-menu-link">
+                        项目管理
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-
-          {projectCreateOpen && (
-            <form className="composer-project-create" onSubmit={handleCreateProject}>
-              <input
-                className="composer-project-input"
-                value={projectName}
-                onChange={(event) => setProjectName(event.target.value)}
-                placeholder="输入项目名称"
-                maxLength={40}
-                autoFocus
-              />
-              <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy}>
-                {projectBusy ? '创建中...' : '创建'}
-              </button>
-              <button
-                type="button"
-                className="composer-project-btn"
-                onClick={() => {
-                  setProjectCreateOpen(false);
-                  setProjectName('');
-                  setProjectMessage(null);
-                }}
-                disabled={projectBusy}
-              >
-                取消
-              </button>
-            </form>
-          )}
 
           {projectMessage && (
             <div className={`composer-project-message ${projectMessage.type}`}>
