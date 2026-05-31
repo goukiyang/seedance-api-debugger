@@ -71,6 +71,7 @@ export async function POST(
         project_id: true,
         owner_user_id: true,
         user_id: true,
+        retention_status: true,
       },
     });
 

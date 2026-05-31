@@ -21,7 +21,12 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
     const projectId = searchParams.get('project_id');
-    const where = await getTaskWhereForUser(user, projectId);
+    const includeAll = user.role === 'admin' && searchParams.get('include_all') === 'true';
+    const includeDeleted = user.role === 'admin' && searchParams.get('include_deleted') === 'true';
+    const where = await getTaskWhereForUser(user, projectId, {
+      includeAdminAll: includeAll,
+      includeDeleted,
+    });
 
     const total = await prisma.videoTask.count({ where });
 
@@ -40,6 +45,7 @@ export async function GET(request: NextRequest) {
         resolution: true,
         local_status: true,
         result_video_url: true,
+        result_last_frame_url: true,
         local_video_path: true,
         error_message: true,
         estimated_cost: true,
@@ -50,6 +56,14 @@ export async function GET(request: NextRequest) {
         reference_image_urls: true,
         created_at: true,
         completed_at: true,
+        retention_status: true,
+        user_deleted_at: true,
+        user_deleted_by: true,
+        admin_hidden_at: true,
+        admin_hidden_by: true,
+        restored_at: true,
+        restored_by: true,
+        delete_reason: true,
         user_id: true,
         owner_user_id: true,
         project_id: true,

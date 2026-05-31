@@ -1,10 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getVideoTaskStatus, mapProviderStatus } from '@/lib/provider/jimeng';
-import { getSession } from '@/lib/auth/session';
-import { AuthError } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '@/lib/costs/ledger';
+import { settleTaskCredits } from '@/lib/credits/policy';
+
+export const dynamic = 'force-dynamic';
+
+const TERMINAL_LOCAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
+const FINAL_PROVIDER_COST_STATUSES = new Set(['official_confirmed', 'reconciled', 'failed_no_charge']);
+
+type ProviderCostCacheableTask = {
+  local_status: string | null;
+  provider_cost_status: string | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
+};
+
+function isTerminalLocalStatus(status: string | null) {
+  return TERMINAL_LOCAL_STATUSES.has(status || '');
+}
+
+function hasPersistedProviderCharge(task: ProviderCostCacheableTask) {
+  if (!task.provider_cost_currency) return false;
+  return (
+    task.provider_official_amount_minor !== null ||
+    task.provider_final_amount_minor !== null ||
+    task.provider_official_amount_micros !== null ||
+    task.provider_final_amount_micros !== null
+  );
+}
+
+function shouldReadLocalFinalCost(task: ProviderCostCacheableTask, forceProviderRefresh: boolean) {
+  if (forceProviderRefresh) return false;
+  if (!isTerminalLocalStatus(task.local_status)) return false;
+  if (FINAL_PROVIDER_COST_STATUSES.has(task.provider_cost_status || '')) return true;
+  return hasPersistedProviderCharge(task);
+}
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +48,8 @@ export async function GET(
 ) {
   try {
     const taskId = params.id;
+    const forceProviderRefresh = request.nextUrl.searchParams.get('refresh') === 'true'
+      || request.nextUrl.searchParams.get('force_refresh') === 'true';
     const user = await getSession();
     if (!user) {
       return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
@@ -41,6 +79,10 @@ export async function GET(
     }
 
     if (task.provider_task_id) {
+      if (shouldReadLocalFinalCost(task, forceProviderRefresh)) {
+        return NextResponse.json(task);
+      }
+
       try {
         const statusResult = await getVideoTaskStatus(task.provider_task_id);
 
@@ -76,7 +118,7 @@ export async function GET(
           updateData.error_message = statusResult.error_message;
         }
 
-        const isTerminal = ['succeeded', 'failed', 'cancelled'].includes(statusResult.local_status);
+        const isTerminal = isTerminalLocalStatus(statusResult.local_status);
         if (isTerminal && !task.completed_at) {
           updateData.completed_at = new Date();
         }
@@ -106,7 +148,7 @@ export async function GET(
 
         const updateData: Record<string, unknown> = {
           provider_status: 'unknown',
-          local_status: 'running',
+          local_status: isTerminalLocalStatus(task.local_status) ? task.local_status : 'running',
           raw_status_response: JSON.stringify({ error: apiError instanceof Error ? apiError.message : String(apiError) }),
         };
         await prisma.videoTask.update({
@@ -279,9 +321,6 @@ async function settleTask(
     const freshTask = await tx.videoTask.findUnique({ where: { id: taskId } });
     if (!freshTask || !freshTask.frozen_cost || freshTask.frozen_cost <= 0) return;
 
-    const account = await tx.creditAccount.findUnique({ where: { user_id: userId } });
-    if (!account) return;
-
     // Double-check: no duplicate ledger entry for this task settlement
     const existingSettlement = await tx.creditLedger.findFirst({
       where: {
@@ -291,69 +330,62 @@ async function settleTask(
     });
     if (existingSettlement) return;
 
-    const frozenBefore = account.frozen_credits;
-    const frozenAfter = Math.max(0, frozenBefore - frozenAmount);
+    const settlement = await settleTaskCredits(tx, {
+      taskId,
+      userId,
+      terminalStatus,
+      frozenAmount,
+      freezeSnapshot: freshTask.credit_freeze_snapshot,
+    });
 
     if (terminalStatus === 'succeeded') {
-      const actualCost = frozenAmount;
-
-      await tx.videoTask.update({
+      const settledTask = await tx.videoTask.update({
         where: { id: taskId },
-        data: { frozen_cost: 0, actual_cost: actualCost },
-      });
-
-      await tx.creditAccount.update({
-        where: { user_id: userId },
-        data: {
-          balance: account.balance - actualCost,
-          frozen_credits: frozenAfter,
-          monthly_used: account.monthly_used + actualCost,
-          total_used: account.total_used + actualCost,
-        },
+        data: { frozen_cost: 0, actual_cost: settlement.actualCost },
       });
 
       await tx.creditLedger.create({
         data: {
           user_id: userId,
           type: 'task_success_deduct',
-          amount: -actualCost,
-          balance_before: account.balance,
-          balance_after: account.balance - actualCost,
-          frozen_before: frozenBefore,
-          frozen_after: frozenAfter,
+          amount: -settlement.actualCost,
+          balance_before: settlement.balanceBefore,
+          balance_after: settlement.balanceAfter,
+          frozen_before: settlement.frozenBefore,
+          frozen_after: settlement.frozenAfter,
           related_task_id: taskId,
-          reason: `任务成功，扣除 ${actualCost} 点`,
+          reason: `任务成功，扣除 ${settlement.actualCost} 点`,
+          metadata_json: JSON.stringify({ allocations: settlement.allocations }),
         },
       });
 
-      await recordTaskCostSettlement(tx, freshTask, terminalStatus, userId);
+      await recordTaskCostSettlement(tx, settledTask, terminalStatus, userId);
     } else {
       // failed / cancelled → full refund
-      await tx.videoTask.update({
+      const settledTask = await tx.videoTask.update({
         where: { id: taskId },
-        data: { frozen_cost: 0, refund_amount: frozenAmount },
-      });
-
-      await tx.creditAccount.update({
-        where: { user_id: userId },
-        data: { frozen_credits: frozenAfter },
+        data: { frozen_cost: 0, actual_cost: 0, refund_amount: settlement.refundedAmount },
       });
 
       await tx.creditLedger.create({
         data: {
           user_id: userId,
           type: 'task_failed_refund',
-          amount: frozenAmount,
-          balance_before: account.balance,
-          balance_after: account.balance,
-          frozen_before: frozenBefore,
-          frozen_after: frozenAfter,
+          amount: settlement.refundedAmount,
+          balance_before: settlement.balanceBefore,
+          balance_after: settlement.balanceAfter,
+          frozen_before: settlement.frozenBefore,
+          frozen_after: settlement.frozenAfter,
           related_task_id: taskId,
-          reason: `任务${terminalStatus === 'failed' ? '失败' : '取消'}，返还冻结 ${frozenAmount} 点`,
+          reason: `任务${terminalStatus === 'failed' ? '失败' : '取消'}，返还冻结 ${settlement.refundedAmount} 点`,
+          metadata_json: JSON.stringify({
+            allocations: settlement.allocations,
+            expired_closed: settlement.expiredClosedAmount,
+          }),
         },
       });
 
-      await recordTaskCostSettlement(tx, freshTask, terminalStatus, userId);
+      await recordTaskCostSettlement(tx, settledTask, terminalStatus, userId);
     }
   });
 }

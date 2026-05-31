@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
+import PageBanner from '@/components/PageBanner';
 
 export default async function DashboardPage() {
   const user = await getSession();
@@ -9,12 +10,11 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">控制台</h1>
-        <p className="page-description">
-          这里是统一导航入口，可快速前往生成、任务、素材与后台管理等主要页面。
-        </p>
-      </div>
+      <PageBanner
+        eyebrow="平台入口"
+        title="控制台"
+        description="统一导航入口，可快速前往生成、任务、素材与后台管理等主要页面。"
+      />
 
       <div className="card">
         <h2 className="section-title">常用入口</h2>

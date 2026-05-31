@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import PageBanner from '@/components/PageBanner';
+import PaginationControls from '@/components/PaginationControls';
 
 type Scope = 'mine' | 'project' | 'shared' | 'public' | 'all';
 
@@ -39,6 +41,8 @@ const TABS: Array<{ value: Scope; label: string }> = [
   { value: 'all', label: '全部图集' },
 ];
 
+const ALBUMS_PAGE_SIZE = 12;
+
 export default function ReferenceAlbumsClient() {
   const [scope, setScope] = useState<Scope>('mine');
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
@@ -49,6 +53,7 @@ export default function ReferenceAlbumsClient() {
   const [description, setDescription] = useState('');
   const [albumType, setAlbumType] = useState<'personal' | 'project'>('personal');
   const [projectId, setProjectId] = useState('');
+  const [page, setPage] = useState(1);
 
   const projectChoices = useMemo(
     () => projects.filter((project) => project.can_manage_assets),
@@ -58,6 +63,13 @@ export default function ReferenceAlbumsClient() {
   function projectDisplayName(project: ProjectOption) {
     return project.type === 'personal' ? '个人空间' : project.name;
   }
+
+  const totalPages = Math.max(1, Math.ceil(albums.length / ALBUMS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedAlbums = albums.slice(
+    (currentPage - 1) * ALBUMS_PAGE_SIZE,
+    currentPage * ALBUMS_PAGE_SIZE,
+  );
 
   const loadAlbums = () => {
     setLoading(true);
@@ -69,6 +81,7 @@ export default function ReferenceAlbumsClient() {
       .then(({ ok, data }) => {
         if (!ok) throw new Error(data.error || data.message || '图集读取失败');
         setAlbums(data.albums || []);
+        setPage(1);
       })
       .catch((err) => setError(err instanceof Error ? err.message : '图集读取失败'))
       .finally(() => setLoading(false));
@@ -125,10 +138,11 @@ export default function ReferenceAlbumsClient() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">参考图集</h1>
-        <p className="page-description">管理可被生成流程调用的参考资产库，支持个人、项目、共享与公共图集。</p>
-      </div>
+      <PageBanner
+        eyebrow="参考资产"
+        title="参考图集"
+        description="管理可被生成流程调用的参考资产库，支持个人、项目、共享与公共图集。"
+      />
 
       <div className="album-tabs">
         {TABS.map((tab) => (
@@ -136,7 +150,10 @@ export default function ReferenceAlbumsClient() {
             key={tab.value}
             type="button"
             className={scope === tab.value ? 'active' : ''}
-            onClick={() => setScope(tab.value)}
+            onClick={() => {
+              setScope(tab.value);
+              setPage(1);
+            }}
           >
             {tab.label}
           </button>
@@ -176,7 +193,7 @@ export default function ReferenceAlbumsClient() {
         ) : albums.length === 0 ? (
           <div className="album-empty">暂无图集</div>
         ) : (
-          albums.map((album) => (
+          pagedAlbums.map((album) => (
             <Link key={album.id} href={`/collections/${album.id}`} className="album-card">
               <div className="album-card-cover">
                 {album.image_count > 0 ? `${album.image_count} 张` : '空图集'}
@@ -202,6 +219,14 @@ export default function ReferenceAlbumsClient() {
           ))
         )}
       </div>
+      <PaginationControls
+        page={currentPage}
+        totalPages={totalPages}
+        total={albums.length}
+        pageSize={ALBUMS_PAGE_SIZE}
+        label="图集"
+        onPageChange={setPage}
+      />
     </div>
   );
 }

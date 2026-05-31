@@ -1,7 +1,12 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { NextRequest, NextResponse } from 'next/server';
-import { FeishuAuthError, loginWithFeishuProfile, type FeishuProfile } from '@/lib/auth/feishu';
+import {
+  FeishuAuthError,
+  isFeishuCliLoginEnabledForHost,
+  loginWithFeishuProfile,
+  type FeishuProfile,
+} from '@/lib/auth/feishu';
 import { setSessionCookie } from '@/lib/auth/session-cookie';
 
 export const dynamic = 'force-dynamic';
@@ -11,17 +16,6 @@ const execFileAsync = promisify(execFile);
 function envBool(value: string | undefined, fallback = false) {
   if (value == null || value === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
-}
-
-function isLocalRequest(request: NextRequest) {
-  const host = request.nextUrl.hostname;
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
-}
-
-function isCliLoginEnabled(request: NextRequest) {
-  const explicit = process.env.FEISHU_CLI_LOGIN_ENABLED;
-  if (explicit != null && explicit !== '') return envBool(explicit);
-  return process.env.NODE_ENV !== 'production' && isLocalRequest(request);
 }
 
 function stringValue(value: unknown): string | null {
@@ -74,7 +68,7 @@ async function getCliUserProfile() {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isCliLoginEnabled(request)) {
+  if (!isFeishuCliLoginEnabledForHost(request.nextUrl.hostname)) {
     return NextResponse.json({ error: '飞书 CLI 登录未启用', code: 'cli_login_disabled' }, { status: 403 });
   }
 

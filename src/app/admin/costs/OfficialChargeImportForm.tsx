@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { formatAmountMinorWithCny, usdToCnyRateText } from '@/lib/costs/currency';
 
 type ImportResult = {
   row_number: number;
@@ -39,9 +40,7 @@ const STATUS_LABELS: Record<ImportResult['status'], string> = {
 
 function formatAmountMinor(amount: number | null | undefined, currency?: string) {
   if (amount === null || amount === undefined) return '-';
-  const value = amount / 100;
-  if (currency === 'USD') return `$${value.toFixed(2)}`;
-  return `¥${value.toFixed(2)}`;
+  return formatAmountMinorWithCny(amount, currency);
 }
 
 function summaryText(summary?: Record<string, number>) {
@@ -103,6 +102,9 @@ export default function OfficialChargeImportForm() {
             <option value="CNY">CNY</option>
             <option value="USD">USD</option>
           </select>
+          {defaultCurrency === 'USD' ? (
+            <div className="form-hint">导入预览会按 {usdToCnyRateText()} 显示人民币参考值。</div>
+          ) : null}
         </div>
         <div className="form-group">
           <label className="form-label" htmlFor="official-import-reason">默认备注</label>

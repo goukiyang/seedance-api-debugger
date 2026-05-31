@@ -30,6 +30,17 @@ export interface SessionUser {
 export const SESSION_COOKIE = 'session';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
 
+export function parseSessionCookie(rawCookie: string): string | null {
+  const cookieHeader = rawCookie.trim();
+  const prefix = `${SESSION_COOKIE}=`;
+  const match = cookieHeader
+    .split(';')
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(prefix));
+  if (!match) return null;
+  return match.slice(prefix.length);
+}
+
 function parseJsonArray(value: string | null): string[] {
   if (!value) return [];
   try {
@@ -44,7 +55,11 @@ export async function getSession(): Promise<SessionUser | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
+  return getSessionByToken(token);
+}
 
+export async function getSessionByToken(token?: string | null): Promise<SessionUser | null> {
+  if (!token) return null;
   try {
     const parts = token.split('.');
     if (parts.length !== 2) return null;

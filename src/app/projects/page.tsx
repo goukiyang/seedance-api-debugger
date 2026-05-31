@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import PageBanner from '@/components/PageBanner';
+import PaginationControls from '@/components/PaginationControls';
 
 interface ProjectItem {
   id: string;
@@ -48,10 +50,13 @@ function projectStatusLabel(status: string): string {
   return status;
 }
 
+const PROJECTS_PAGE_SIZE = 12;
+
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
+  const [page, setPage] = useState(1);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [message, setMessage] = useState('');
@@ -129,13 +134,20 @@ export default function ProjectsPage() {
   const visibleProjects = projects.filter((project) => activeTab === 'active' ? project.status === 'active' : project.status === 'archived');
   const activeCount = projects.filter((project) => project.status === 'active').length;
   const archivedCount = projects.filter((project) => project.status === 'archived').length;
+  const totalPages = Math.max(1, Math.ceil(visibleProjects.length / PROJECTS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedProjects = visibleProjects.slice(
+    (currentPage - 1) * PROJECTS_PAGE_SIZE,
+    currentPage * PROJECTS_PAGE_SIZE,
+  );
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">我的项目</h1>
-        <p className="page-description">项目是生成内容的归属空间；只有项目成员才能查看项目内任务和结果。</p>
-      </div>
+      <PageBanner
+        eyebrow="项目"
+        title="我的项目"
+        description="项目是生成内容的归属空间；只有项目成员才能查看项目内任务和结果。"
+      />
 
       {(message || error) && (
         <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
@@ -172,14 +184,20 @@ export default function ProjectsPage() {
             <button
               className={`btn ${activeTab === 'active' ? 'btn-primary' : 'btn-secondary'}`}
               type="button"
-              onClick={() => setActiveTab('active')}
+              onClick={() => {
+                setActiveTab('active');
+                setPage(1);
+              }}
             >
               进行中 {activeCount}
             </button>
             <button
               className={`btn ${activeTab === 'archived' ? 'btn-primary' : 'btn-secondary'}`}
               type="button"
-              onClick={() => setActiveTab('archived')}
+              onClick={() => {
+                setActiveTab('archived');
+                setPage(1);
+              }}
             >
               已归档 {archivedCount}
             </button>
@@ -190,8 +208,9 @@ export default function ProjectsPage() {
         ) : visibleProjects.length === 0 ? (
           <p className="text-gray">{activeTab === 'active' ? '暂无进行中的项目' : '暂无归档项目'}</p>
         ) : (
-          <div className="shell-link-grid">
-            {visibleProjects.map((project) => {
+          <>
+            <div className="shell-link-grid">
+            {pagedProjects.map((project) => {
               const displayName = projectDisplayName(project);
               return (
               <div key={project.id} className="shell-link-card">
@@ -236,7 +255,16 @@ export default function ProjectsPage() {
               </div>
               );
             })}
-          </div>
+            </div>
+            <PaginationControls
+              page={currentPage}
+              totalPages={totalPages}
+              total={visibleProjects.length}
+              pageSize={PROJECTS_PAGE_SIZE}
+              label="项目"
+              onPageChange={setPage}
+            />
+          </>
         )}
       </div>
     </div>

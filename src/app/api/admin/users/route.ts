@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
 import type { SessionUser } from '@/lib/auth/session';
-import { isCompanyEmail } from '@/lib/auth/registration/config';
+import { grantInitialCredits, getCreditPolicy, resolveInitialGrantAmount } from '@/lib/credits/policy';
 import {
   getDefaultFeatureProfileId,
   normalizeFeatureProfileId,
@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
     return errorJson('权限不足', 403);
   }
 
+  const now = new Date();
   const users = await prisma.user.findMany({
     where: { status: { not: 'deleted' } },
     select: {
@@ -31,8 +32,11 @@ export async function GET(request: NextRequest) {
 	      role: true,
 	      account_type: true,
 	      user_profile: true,
-	      feature_profile_id: true,
-	      status: true,
+      feature_profile_id: true,
+      status: true,
+      feishu_user_id: true,
+      feishu_open_id: true,
+      feishu_union_id: true,
       expires_at: true,
       created_at: true,
       last_login_at: true,
@@ -44,11 +48,38 @@ export async function GET(request: NextRequest) {
           total_used: true,
         },
       },
+      credit_buckets: {
+        where: {
+          source_type: 'daily_quota',
+          status: 'active',
+          OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+        },
+        select: {
+          amount_total: true,
+          amount_remaining: true,
+          frozen_amount: true,
+          expires_at: true,
+        },
+      },
     },
     orderBy: { created_at: 'desc' },
   });
 
-  return NextResponse.json({ users });
+  return NextResponse.json({
+    users: users.map((user) => ({
+      ...user,
+      credit_quota: {
+        daily_total: user.credit_buckets.reduce((total, bucket) => total + bucket.amount_total, 0),
+        daily_remaining: user.credit_buckets.reduce((total, bucket) => total + bucket.amount_remaining, 0),
+        daily_frozen: user.credit_buckets.reduce((total, bucket) => total + bucket.frozen_amount, 0),
+        daily_expires_at: user.credit_buckets
+          .map((bucket) => bucket.expires_at)
+          .filter(Boolean)
+          .sort((a, b) => Number(a) - Number(b))[0] || null,
+      },
+      credit_buckets: undefined,
+    })),
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -71,7 +102,11 @@ export async function POST(request: NextRequest) {
 	    const featureProfileId = accountType === 'external'
 	      ? 'external_limited'
 	      : normalizeFeatureProfileId(body.feature_profile_id) || getDefaultFeatureProfileId(accountType, userProfile);
-	    const initialCredits = Number(body.initial_credits ?? body.initialCredits ?? 0);
+      const initialCreditsInput = body.initial_credits ?? body.initialCredits;
+      const policy = await getCreditPolicy();
+	    const initialCredits = initialCreditsInput == null
+        ? resolveInitialGrantAmount(policy, { role, account_type: accountType }, 'admin_create')
+        : Number(initialCreditsInput);
 	    const reason = normalizeText(body.reason) || '创建用户初始点数';
 
     if (!name || !username || !email || !password) {
@@ -79,9 +114,6 @@ export async function POST(request: NextRequest) {
     }
 	    if (!Number.isFinite(initialCredits) || initialCredits < 0) {
 	      return errorJson('initial_credits 必须为非负数', 400);
-	    }
-	    if (accountType === 'internal' && !isCompanyEmail(email)) {
-	      return errorJson('内部账号必须使用 @youdoogo.com 公司邮箱', 400);
 	    }
 	    if (role === 'admin' && accountType !== 'internal') {
 	      return errorJson('管理员必须是内部账号', 400);
@@ -110,26 +142,16 @@ export async function POST(request: NextRequest) {
       await tx.creditAccount.create({
         data: {
           user_id: user.id,
-          balance: initialCredits,
+          balance: 0,
           frozen_credits: 0,
         },
       });
 
-      if (initialCredits > 0) {
-        await tx.creditLedger.create({
-          data: {
-            user_id: user.id,
-            type: 'admin_grant',
-            amount: initialCredits,
-            balance_before: 0,
-            balance_after: initialCredits,
-            frozen_before: 0,
-            frozen_after: 0,
-            operator_id: admin.id,
-            reason,
-          },
-        });
-      }
+      const initialGrant = await grantInitialCredits(tx, user, 'admin_create', {
+        amount: initialCredits,
+        operatorId: admin.id,
+        reason,
+      });
 
       const defaultProject = await tx.project.create({
         data: {
@@ -166,7 +188,7 @@ export async function POST(request: NextRequest) {
 	            account_type: accountType,
 	            user_profile: userProfile,
 	            feature_profile_id: featureProfileId,
-	            initial_credits: initialCredits,
+	            initial_credits: initialGrant.amount,
 	          }),
         },
       });

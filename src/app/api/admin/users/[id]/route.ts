@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
 import type { SessionUser } from '@/lib/auth/session';
-import { isCompanyEmail } from '@/lib/auth/registration/config';
 import {
   getDefaultFeatureProfileId,
   normalizeFeatureProfileId,
@@ -73,8 +72,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
 	      role: true,
 	      account_type: true,
 	      user_profile: true,
-	      feature_profile_id: true,
-	      status: true,
+      feature_profile_id: true,
+      status: true,
+      feishu_user_id: true,
+      feishu_open_id: true,
+      feishu_union_id: true,
       expires_at: true,
       created_at: true,
       updated_at: true,
@@ -126,7 +128,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (!existing) return errorJson('用户不存在', 404);
   if (existing.status === 'deleted') return errorJson('用户不存在', 404);
 
-  const nextAccountType = accountType || (existing.account_type === 'external' ? 'external' : 'internal');
+  const hasFeishuBinding = Boolean(existing.feishu_user_id || existing.feishu_open_id || existing.feishu_union_id);
+  const requestedRole = role || existing.role;
+  const requestedAccountType = accountType || (existing.account_type === 'external' ? 'external' : 'internal');
+  const nextAccountType = requestedRole === 'admin' && hasFeishuBinding
+    ? 'internal'
+    : requestedAccountType;
+  const accountTypeChanged = nextAccountType !== existing.account_type;
   const nextStatus = status || existing.status;
   const nextUserProfile = nextAccountType === 'external'
     ? 'other'
@@ -134,12 +142,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       ? normalizeUserProfile(body.user_profile)
       : normalizeUserProfile(existing.user_profile);
   const explicitFeatureProfileId = featureProfileWasProvided
-    ? normalizeFeatureProfileId(body.feature_profile_id)
-    : null;
+      ? normalizeFeatureProfileId(body.feature_profile_id)
+      : null;
   const nextFeatureProfileId = nextAccountType === 'external'
     ? 'external_limited'
     : explicitFeatureProfileId
-      || ((featureProfileWasProvided || accountType || userProfileWasProvided)
+      || ((featureProfileWasProvided || accountType || accountTypeChanged || userProfileWasProvided)
         ? getDefaultFeatureProfileId(nextAccountType, nextUserProfile)
         : existing.feature_profile_id);
 
@@ -151,18 +159,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const conflict = await prisma.user.findFirst({ where: { id: { not: id }, username } });
     if (conflict) return errorJson('用户名已被占用', 409);
   }
-  const nextEmail = email || existing.email;
-  const nextRole = nextAccountType === 'external' ? 'user' : role || existing.role;
-  const switchingToInternal = nextAccountType === 'internal' && existing.account_type !== 'internal';
-  const changingInternalEmail = nextAccountType === 'internal' && Boolean(email && email !== existing.email);
-  const promotingAdmin = nextAccountType === 'internal' && nextRole === 'admin' && existing.role !== 'admin';
-  if (
-    nextAccountType === 'internal'
-    && (switchingToInternal || changingInternalEmail || promotingAdmin)
-    && !isCompanyEmail(nextEmail)
-  ) {
-    return errorJson('内部账号必须使用 @youdoogo.com 公司邮箱', 400);
-  }
+  const nextRole = nextAccountType === 'external' ? 'user' : requestedRole;
   if (nextRole === 'admin' && nextAccountType !== 'internal') {
     return errorJson('管理员必须是内部账号', 400);
   }
@@ -192,10 +189,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (username) updateData.username = username;
   if (email) updateData.email = email;
   if (nextRole !== existing.role) updateData.role = nextRole;
-  if (accountType) updateData.account_type = accountType;
+  if (nextAccountType !== existing.account_type || accountType) updateData.account_type = nextAccountType;
   if (status) updateData.status = status;
-  if (userProfileWasProvided || accountType) updateData.user_profile = nextUserProfile;
-  if (featureProfileWasProvided || accountType || userProfileWasProvided) updateData.feature_profile_id = nextFeatureProfileId;
+  if (userProfileWasProvided || accountType || accountTypeChanged) updateData.user_profile = nextUserProfile;
+  if (featureProfileWasProvided || accountType || accountTypeChanged || userProfileWasProvided) updateData.feature_profile_id = nextFeatureProfileId;
   if (expiresAtWasProvided) updateData.expires_at = nextExpiresAt;
   if (password) updateData.password_hash = hashPassword(password);
 
@@ -217,6 +214,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         user_profile: true,
         feature_profile_id: true,
         status: true,
+        feishu_user_id: true,
+        feishu_open_id: true,
+        feishu_union_id: true,
         expires_at: true,
         created_at: true,
         updated_at: true,

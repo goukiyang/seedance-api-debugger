@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import PageBanner from '@/components/PageBanner';
 
 interface AlbumDetail {
   id: string;
@@ -187,13 +188,13 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
 
   return (
     <div>
-      <div className="page-header">
-        <Link href="/collections" className="text-link">← 返回参考图集</Link>
-        <h1 className="page-title">{album?.name || '参考图集'}</h1>
-        <p className="page-description">
-          {album?.description || '图集图片会继承图集权限；取消共享后，被授权用户不能继续访问或使用。'}
-        </p>
-      </div>
+      <PageBanner
+        backHref="/collections"
+        backLabel="返回参考图集"
+        eyebrow="图集详情"
+        title={album?.name || '参考图集'}
+        description={album?.description || '图集图片会继承图集权限；取消共享后，被授权用户不能继续访问或使用。'}
+      />
 
       {error && <div className="album-error">{error}</div>}
 

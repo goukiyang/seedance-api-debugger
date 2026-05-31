@@ -25,6 +25,9 @@ interface TaskItem {
   id: string;
   prompt: string;
   local_status: string;
+  result_video_url: string | null;
+  result_last_frame_url: string | null;
+  local_video_path: string | null;
   created_at: string;
 }
 
@@ -93,6 +96,42 @@ function projectDisplayName(project: ProjectOption): string {
 function projectDisplayLabel(project: ProjectOption, hasDuplicateName: boolean): string {
   const name = projectDisplayName(project);
   return hasDuplicateName ? `${name} · ${projectOwnerName(project)}` : name;
+}
+
+type TaskPreviewModel = {
+  kind: 'image' | 'empty';
+  src?: string;
+  label: string;
+};
+
+function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPreviewModel {
+  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
+  const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
+
+  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
+    return { kind: 'image', src: thumbnailSrc, label: '视频帧' };
+  }
+
+  return { kind: 'empty', label: ['submitted', 'running'].includes(task.local_status) ? '等待视频帧' : '暂无视频帧' };
+}
+
+function RecentTaskPreview({ task }: { task: TaskItem }) {
+  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
+  const preview = getRecentTaskPreview(task, failedSrcs);
+  const markFailed = (src?: string) => {
+    if (!src) return;
+    setFailedSrcs((current) => current.includes(src) ? current : [...current, src]);
+  };
+
+  return (
+    <div className={`composer-task-card-preview composer-task-card-preview-${preview.kind}`}>
+      {preview.kind === 'image' && preview.src && (
+        <img src={preview.src} alt="任务截图" loading="lazy" onError={() => markFailed(preview.src)} />
+      )}
+      {preview.kind === 'empty' && <span>{preview.label}</span>}
+      <small>{preview.label}</small>
+    </div>
+  );
 }
 
 // ============================================================================
@@ -817,17 +856,20 @@ export default function GeneratePage() {
                   className="composer-task-card"
                 >
                   <Link href={`/tasks/${task.id}`} className="composer-task-card-link">
-                    <div className="composer-task-card-prompt">
-                      {truncatePrompt(task.prompt)}
-                    </div>
-                    <div className="composer-task-card-meta">
-                      <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
-                      <span className={`composer-task-card-status ${task.local_status}`}>
-                        {task.local_status === 'submitted' ? '排队中' :
-                         task.local_status === 'running' ? '生成中' :
-                         task.local_status === 'succeeded' ? '已完成' :
-                         task.local_status === 'failed' ? '失败' : task.local_status}
-                      </span>
+                    <RecentTaskPreview task={task} />
+                    <div className="composer-task-card-body">
+                      <div className="composer-task-card-prompt">
+                        {truncatePrompt(task.prompt)}
+                      </div>
+                      <div className="composer-task-card-meta">
+                        <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
+                        <span className={`composer-task-card-status ${task.local_status}`}>
+                          {task.local_status === 'submitted' ? '排队中' :
+                           task.local_status === 'running' ? '生成中' :
+                           task.local_status === 'succeeded' ? '已完成' :
+                           task.local_status === 'failed' ? '失败' : task.local_status}
+                        </span>
+                      </div>
                     </div>
                   </Link>
                   <button

@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
     if (!['grant', 'deduct', 'adjust'].includes(type)) {
       return errorJson('type 必须是 grant / deduct / adjust', 400);
     }
-    if (typeof amount !== 'number' || amount <= 0) {
-      return errorJson('amount 必须为正数', 400);
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || (type !== 'adjust' && amount <= 0)) {
+      return errorJson(type === 'adjust' ? 'amount 必须为大于等于 0 的数字' : 'amount 必须为正数', 400);
     }
     if (!reason || reason.trim() === '') {
       return errorJson('reason 为必填', 400);
@@ -40,18 +40,24 @@ export async function POST(request: NextRequest) {
       const account = await tx.creditAccount.findUnique({ where: { user_id } });
       if (!account) throw new Error('点数账户不存在');
 
-      // deduct 只允许扣可用余额
+      // deduct 只允许扣长期可用余额；每日配额由任务消费，不做后台手工扣减。
       if (type === 'deduct') {
         const available = account.balance - account.frozen_credits;
         if (amount > available) {
           throw new Error(`可用余额不足，当前可用 ${available.toFixed(2)}`);
         }
       }
+      if (type === 'adjust' && amount < account.frozen_credits) {
+        throw new Error(`修正后的长期余额不能低于已冻结点数 ${account.frozen_credits.toFixed(2)}`);
+      }
 
       const balanceBefore = account.balance;
-      const newBalance = type === 'deduct'
-        ? balanceBefore - amount
-        : balanceBefore + amount;
+      const newBalance = type === 'grant'
+        ? balanceBefore + amount
+        : type === 'deduct'
+          ? balanceBefore - amount
+          : amount;
+      const ledgerAmount = newBalance - balanceBefore;
 
       await tx.creditAccount.update({
         where: { user_id },
@@ -62,13 +68,19 @@ export async function POST(request: NextRequest) {
         data: {
           user_id,
           type: ledgerType,
-          amount: type === 'deduct' ? -amount : amount,
+          amount: ledgerAmount,
           balance_before: balanceBefore,
           balance_after: newBalance,
           frozen_before: account.frozen_credits,
           frozen_after: account.frozen_credits,
           operator_id: admin.id,
           reason: reason.trim(),
+          metadata_json: JSON.stringify({
+            operation: type,
+            requested_amount: amount,
+            delta: ledgerAmount,
+            scope: 'long_term_balance',
+          }),
         },
       });
 
@@ -78,7 +90,7 @@ export async function POST(request: NextRequest) {
           action: 'credit_adjust',
           target_type: 'User',
           target_id: user_id,
-          detail: JSON.stringify({ type, amount, reason, balance_before: balanceBefore, balance_after: newBalance }),
+          detail: JSON.stringify({ type, amount, delta: ledgerAmount, reason, balance_before: balanceBefore, balance_after: newBalance }),
         },
       });
 

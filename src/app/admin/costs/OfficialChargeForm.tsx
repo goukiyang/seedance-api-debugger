@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
+import { formatUsdCnyEstimateFromInput } from '@/lib/costs/currency';
 
 type PendingTaskOption = {
   id: string;
@@ -23,6 +24,7 @@ export default function OfficialChargeForm({ pendingTasks }: { pendingTasks: Pen
   const [reason, setReason] = useState('管理员录入官方实际扣费');
   const [submitting, setSubmitting] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
+  const cnyEstimate = formatUsdCnyEstimateFromInput(amount, currency);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -97,6 +99,7 @@ export default function OfficialChargeForm({ pendingTasks }: { pendingTasks: Pen
             inputMode="decimal"
             required
           />
+          {cnyEstimate ? <div className="form-hint">{cnyEstimate}</div> : null}
         </div>
 
         <div className="form-group">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import {
   Background,
@@ -138,10 +138,13 @@ interface ProjectOption {
   id: string;
   name: string;
   type: string;
+  status?: string;
   owner_user_id: string;
   my_role: string | null;
   can_generate?: boolean;
+  can_manage_project?: boolean;
   owner?: { name: string | null; username: string | null };
+  _count?: { tasks?: number; reference_albums?: number; members?: number };
 }
 
 interface CanvasSummary {
@@ -503,6 +506,12 @@ function CanvasWorkspace() {
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
+  const [projectConfirmAction, setProjectConfirmAction] = useState<'delete' | 'archive' | null>(null);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
   const [canExportCanvasJson, setCanExportCanvasJson] = useState(false);
 
@@ -546,6 +555,37 @@ function CanvasWorkspace() {
   );
 
   const selectedProjectLabel = selectedProject ? projectDisplayLabel(selectedProject, duplicateProjectNames) : '未选择项目';
+  const selectedProjectTaskCount = selectedProject?._count?.tasks || 0;
+  const selectedProjectAlbumCount = selectedProject?._count?.reference_albums || 0;
+  const selectedProjectHasContent = selectedProjectTaskCount > 0 || selectedProjectAlbumCount > 0;
+  const selectedProjectCanRemove = Boolean(
+    selectedProject
+    && selectedProject.can_manage_project
+    && selectedProject.type !== 'personal'
+    && selectedProject.type !== 'system',
+  );
+  const selectedProjectTypeLabel = selectedProject?.type === 'personal'
+    ? '个人空间'
+    : selectedProject?.type === 'team'
+      ? '团队项目'
+      : selectedProject?.type || '项目';
+  const selectedProjectRoleLabel = selectedProject?.my_role === 'owner'
+    ? '所有者'
+    : selectedProject?.my_role === 'admin'
+      ? '管理员'
+      : selectedProject?.my_role === 'member'
+        ? '成员'
+        : selectedProject?.my_role || '可生成';
+  const projectRemovalLabel = selectedProjectHasContent ? '归档' : '删除';
+  const projectRemovalTitle = !selectedProject
+    ? '先选择项目'
+    : selectedProject.type === 'personal' || selectedProject.type === 'system'
+      ? '默认项目不能删除'
+      : !selectedProject.can_manage_project
+        ? '你没有权限管理这个项目'
+        : selectedProjectHasContent
+          ? '项目已有历史内容，只能归档'
+          : '删除空项目';
   const currentCanvasLabel = currentCanvasSummary?.title || canvasTitle || '未命名画布';
   const currentCanvasMeta = currentCanvasSummary?.updatedAt ? `最近保存 ${formatTime(currentCanvasSummary.updatedAt)}` : '尚未保存';
 
@@ -580,6 +620,41 @@ function CanvasWorkspace() {
     setPreview(buildSeedanceRequest([], [], ''));
     setCanvasStatus('新画布，尚未保存');
   }, [setEdges, setNodes]);
+
+  const loadProjects = useCallback(async (options: { preferredProjectId?: string | null; keepSelected?: boolean } = {}) => {
+    setLoadingProjects(true);
+    try {
+      const response = await fetch(apiUrl('/api/projects'), { cache: 'no-store' });
+      if (response.status === 401) {
+        window.location.href = '/login?next=/generate/canvas';
+        return;
+      }
+
+      const payload = await response.json();
+      const availableProjects: ProjectOption[] = (payload.projects || []).filter(
+        (project: ProjectOption) => project.can_generate !== false,
+      );
+      setProjects(availableProjects);
+
+      const rememberedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY) || '';
+      const preferredId = options.preferredProjectId || rememberedProjectId;
+      setSelectedProjectId((current) => {
+        const preferredProject = preferredId ? availableProjects.find((project) => project.id === preferredId) : null;
+        if (preferredProject) return preferredProject.id;
+
+        const currentProject = options.keepSelected !== false && current
+          ? availableProjects.find((project) => project.id === current)
+          : null;
+        if (currentProject) return currentProject.id;
+
+        return (availableProjects.find((project) => project.type === 'personal') || availableProjects[0])?.id || '';
+      });
+    } catch {
+      setProjectMessage({ type: 'error', text: '项目列表加载失败，请刷新后重试。' });
+    } finally {
+      setLoadingProjects(false);
+    }
+  }, []);
 
   const loadCanvas = useCallback(async (id: string, options?: { silent?: boolean }) => {
     if (!id) return;
@@ -624,6 +699,96 @@ function CanvasWorkspace() {
     }
   }, [loadCanvas, newBlankCanvas, selectedProjectId]);
 
+  const handleCreateProject = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = projectName.trim();
+    if (!name) {
+      setProjectMessage({ type: 'error', text: '项目名称不能为空。' });
+      return;
+    }
+
+    setProjectBusy(true);
+    setProjectMessage(null);
+    try {
+      const response = await fetch(apiUrl('/api/projects'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type: 'team' }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !isRecord(payload.project) || typeof payload.project.id !== 'string') {
+        throw new Error(apiError(payload, '新建项目失败。'));
+      }
+
+      setProjectName('');
+      setProjectCreateOpen(false);
+      setProjectConfirmAction(null);
+      setProjectMessage({ type: 'success', text: `已新建项目「${typeof payload.project.name === 'string' ? payload.project.name : name}」。` });
+      await loadProjects({ preferredProjectId: payload.project.id, keepSelected: false });
+    } catch (error) {
+      setProjectMessage({ type: 'error', text: error instanceof Error ? error.message : '新建项目失败。' });
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [loadProjects, projectName]);
+
+  const handleProjectRemoval = useCallback(async () => {
+    if (!selectedProject) return;
+
+    if (selectedProject.type === 'personal' || selectedProject.type === 'system') {
+      setProjectMessage({ type: 'error', text: '默认项目不能删除。' });
+      return;
+    }
+    if (!selectedProject.can_manage_project) {
+      setProjectMessage({ type: 'error', text: '你没有权限管理这个项目。' });
+      return;
+    }
+
+    const action = selectedProjectHasContent ? 'archive' : 'delete';
+    if (projectConfirmAction !== action) {
+      setProjectConfirmAction(action);
+      setProjectMessage({
+        type: 'info',
+        text: action === 'archive'
+          ? `项目「${projectDisplayName(selectedProject)}」已有任务或图集，再点一次归档，历史记录会保留。`
+          : `再点一次删除空项目「${projectDisplayName(selectedProject)}」。`,
+      });
+      return;
+    }
+
+    setProjectBusy(true);
+    setProjectMessage(null);
+    try {
+      const response = await fetch(apiUrl(`/api/projects/${encodeURIComponent(selectedProject.id)}`), {
+        method: action === 'archive' ? 'PATCH' : 'DELETE',
+        headers: action === 'archive' ? { 'Content-Type': 'application/json' } : undefined,
+        body: action === 'archive' ? JSON.stringify({ action: 'archive' }) : undefined,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        if (action === 'delete' && isRecord(payload) && typeof payload.error === 'string' && payload.error.includes('归档')) {
+          setProjectConfirmAction('archive');
+          setProjectMessage({ type: 'info', text: '项目已有历史内容，删除会断链；请再次点击归档。' });
+          return;
+        }
+        throw new Error(apiError(payload, '项目操作失败。'));
+      }
+
+      setProjectConfirmAction(null);
+      setProjectMessage({
+        type: 'success',
+        text: action === 'archive'
+          ? `已归档项目「${projectDisplayName(selectedProject)}」。`
+          : `已删除项目「${projectDisplayName(selectedProject)}」。`,
+      });
+      await loadProjects({ keepSelected: false });
+    } catch (error) {
+      setProjectMessage({ type: 'error', text: error instanceof Error ? error.message : '项目操作失败。' });
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [loadProjects, projectConfirmAction, selectedProject, selectedProjectHasContent]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -649,38 +814,17 @@ function CanvasWorkspace() {
       })
       .catch(() => {});
 
-    fetch('/api/projects', { cache: 'no-store' })
-      .then((response) => {
-        if (response.status === 401) {
-          window.location.href = '/login?next=/generate/canvas';
-          return null;
-        }
-        return response.json();
-      })
-      .then((payload) => {
-        if (!payload || cancelled) return;
-        const availableProjects: ProjectOption[] = (payload.projects || []).filter(
-          (project: ProjectOption) => project.can_generate !== false,
-        );
-        setProjects(availableProjects);
-
-        const rememberedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY) || '';
-        const preferredProject =
-          availableProjects.find((project) => project.id === rememberedProjectId)
-          || availableProjects.find((project) => project.type === 'personal')
-          || availableProjects[0];
-        setSelectedProjectId(preferredProject?.id || '');
-      })
-      .catch(() => {});
+    void loadProjects({ keepSelected: false });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadProjects]);
 
   useEffect(() => {
     if (!selectedProjectId) return;
     window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
+    setProjectConfirmAction(null);
     void refreshCanvasList().catch((error) => {
       setCanvasStatus(error instanceof Error ? error.message : '读取画布列表失败。');
     });
@@ -693,6 +837,15 @@ function CanvasWorkspace() {
     }
     window.localStorage.setItem(CANVAS_STORAGE_KEY, currentCanvasId);
   }, [currentCanvasId]);
+
+  useEffect(() => {
+    if (!projectMessage || projectMessage.type === 'error') return;
+    const timeoutId = window.setTimeout(() => {
+      setProjectMessage(null);
+      if (projectMessage.type === 'info') setProjectConfirmAction(null);
+    }, 3600);
+    return () => window.clearTimeout(timeoutId);
+  }, [projectMessage]);
 
   const refreshPreviewFor = useCallback((nextNodes: SeedanceCanvasNode[], nextEdges: Edge[], generationId = activeGenerationId) => {
     const syncedNodes = syncGenerationInputs(nextNodes, nextEdges);
@@ -1426,25 +1579,120 @@ function CanvasWorkspace() {
             <button type="button" onClick={() => addGenerationCard(undefined, 'seedance-2.0', true)}>＋ Agent 生成卡</button>
           </section>
 
-          <section className="canvas-manager-panel">
+          <section className="canvas-manager-panel canvas-project-panel">
             <div className="config-panel-header">
               <div>
                 <h2>当前项目</h2>
                 <p className="muted tiny">画布保存、任务创建和成本归属都会写入所选项目。</p>
               </div>
+              <button
+                type="button"
+                onClick={() => void loadProjects({ keepSelected: true })}
+                disabled={loadingProjects || projectBusy}
+              >
+                刷新
+              </button>
             </div>
-            <select
-              className="canvas-select"
-              value={selectedProjectId}
-              onChange={(event) => setSelectedProjectId(event.target.value)}
-            >
-              <option value="">选择项目…</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {projectDisplayLabel(project, duplicateProjectNames)}
-                </option>
-              ))}
-            </select>
+
+            <div className="canvas-project-switcher">
+              {projects.length > 0 ? (
+                <select
+                  className="canvas-select canvas-project-select"
+                  value={selectedProjectId}
+                  onChange={(event) => setSelectedProjectId(event.target.value)}
+                  disabled={loadingProjects || projectBusy}
+                >
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {projectDisplayLabel(project, duplicateProjectNames)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="canvas-project-empty">
+                  {loadingProjects ? '正在加载项目...' : '暂无可生成项目'}
+                </div>
+              )}
+
+              <div className="canvas-project-actions">
+                <button
+                  type="button"
+                  className="canvas-project-action canvas-project-action-primary"
+                  onClick={() => {
+                    setProjectCreateOpen((open) => !open);
+                    setProjectConfirmAction(null);
+                    setProjectMessage(null);
+                  }}
+                  disabled={projectBusy}
+                >
+                  新建
+                </button>
+                <Link
+                  className={`canvas-project-action canvas-project-action-link ${selectedProject ? '' : 'disabled'}`}
+                  href={selectedProject ? `/projects/${encodeURIComponent(selectedProject.id)}` : '/projects'}
+                  aria-disabled={!selectedProject}
+                >
+                  管理
+                </Link>
+                <button
+                  type="button"
+                  className="canvas-project-action canvas-project-action-danger"
+                  onClick={() => void handleProjectRemoval()}
+                  disabled={!selectedProjectCanRemove || projectBusy}
+                  title={projectRemovalTitle}
+                >
+                  {projectBusy && projectConfirmAction ? '处理中' : projectRemovalLabel}
+                </button>
+              </div>
+            </div>
+
+            {selectedProject && (
+              <div className="canvas-project-summary" title={selectedProjectLabel}>
+                <span>{selectedProjectTypeLabel}</span>
+                <span>{selectedProjectRoleLabel}</span>
+                <span>{selectedProjectTaskCount} 任务</span>
+                <span>{selectedProjectAlbumCount} 图集</span>
+              </div>
+            )}
+
+            {projectCreateOpen && (
+              <form className="canvas-project-create" onSubmit={handleCreateProject}>
+                <input
+                  className="canvas-project-input"
+                  value={projectName}
+                  onChange={(event) => setProjectName(event.target.value)}
+                  placeholder="输入项目名称"
+                  maxLength={40}
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="canvas-project-action canvas-project-action-primary"
+                  disabled={projectBusy}
+                >
+                  {projectBusy ? '创建中' : '创建'}
+                </button>
+                <button
+                  type="button"
+                  className="canvas-project-action"
+                  onClick={() => {
+                    setProjectCreateOpen(false);
+                    setProjectName('');
+                    setProjectMessage(null);
+                  }}
+                  disabled={projectBusy}
+                >
+                  取消
+                </button>
+              </form>
+            )}
+
+            {projectMessage && (
+              <div className={`canvas-project-message ${projectMessage.type}`}>
+                {projectMessage.text}
+              </div>
+            )}
+
             <p className="muted tiny">
               可用 {formatCredit(credits?.available)} 点 · 冻结 {formatCredit(credits?.frozen_credits)} 点 · 本月已用 {formatCredit(credits?.monthly_used)} 点
             </p>

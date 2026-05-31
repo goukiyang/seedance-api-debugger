@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { getFeatureProfileLabel, getUserProfileLabel } from '@/lib/users/profiles';
+import PageBanner from '@/components/PageBanner';
 
 function formatDate(value: Date | null) {
   if (!value) return '无';
@@ -41,10 +42,7 @@ export default async function AccountPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">个人页</h1>
-        <p className="page-description">查看当前登录账号、权限和积分状态。</p>
-      </div>
+      <PageBanner eyebrow="账户" title="个人页" description="查看当前登录账号、权限和积分状态。" />
 
       <div className="card">
         <h2 className="section-title">账号信息</h2>

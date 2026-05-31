@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { grantInitialCredits } from '@/lib/credits/policy';
 import { usernameBaseFromEmail } from './config';
 
 async function generateUniqueUsername(tx: Prisma.TransactionClient, email: string): Promise<string> {
@@ -42,6 +43,11 @@ export async function createRegisteredUser(
       balance: 0,
       frozen_credits: 0,
     },
+  });
+
+  await grantInitialCredits(tx, user, 'self_register', {
+    operatorId: user.id,
+    reason: '邮箱注册新用户初始点数',
   });
 
   const project = await tx.project.create({

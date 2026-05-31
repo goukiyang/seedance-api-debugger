@@ -8,8 +8,8 @@ import {
   REGISTER_CHALLENGE_COOKIE,
   REGISTER_CODE_TTL_SECONDS,
   isRegisterEmailVerificationEnabled,
-  isCompanyEmail,
-  normalizeCompanyEmail,
+  isValidRegisterEmail,
+  normalizeEmail,
   normalizeText,
 } from '@/lib/auth/registration/config';
 import {
@@ -26,15 +26,15 @@ const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const email = normalizeCompanyEmail(body.email);
+    const email = normalizeEmail(body.email);
     const name = normalizeText(body.name);
     const password = typeof body.password === 'string' ? body.password : '';
 
     if (!email || !password) {
       return NextResponse.json({ error: '邮箱和密码不能为空' }, { status: 400 });
     }
-    if (!isCompanyEmail(email)) {
-      return NextResponse.json({ error: '请使用 @youdoogo.com 公司邮箱注册' }, { status: 400 });
+    if (!isValidRegisterEmail(email)) {
+      return NextResponse.json({ error: '请输入有效邮箱' }, { status: 400 });
     }
     if (password.length < MIN_REGISTER_PASSWORD_LENGTH) {
       return NextResponse.json({ error: `密码至少需要 ${MIN_REGISTER_PASSWORD_LENGTH} 位` }, { status: 400 });

@@ -83,6 +83,137 @@
   font-size: 12px;
 }
 .canvas-full-workspace .canvas-select option { background: #1e2432; color: #fff; }
+.canvas-full-workspace .canvas-project-panel .config-panel-header {
+  align-items: flex-start;
+}
+.canvas-full-workspace .canvas-project-switcher {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.canvas-full-workspace .canvas-project-select {
+  min-height: 34px;
+}
+.canvas-full-workspace .canvas-project-empty {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  color: rgba(255,255,255,.68);
+  font-size: 12px;
+  background: rgba(0,0,0,.16);
+}
+.canvas-full-workspace .canvas-project-actions,
+.canvas-full-workspace .canvas-project-create {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+.canvas-full-workspace .canvas-project-action,
+.canvas-full-workspace .canvas-project-action-link {
+  min-width: 0;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: #1e2432;
+  color: #fff;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.canvas-full-workspace .canvas-project-action:hover:not(:disabled),
+.canvas-full-workspace .canvas-project-action-link:hover {
+  background: #2b3346;
+}
+.canvas-full-workspace .canvas-project-action-primary {
+  border-color: rgba(139,183,255,.42);
+  background: rgba(74,163,255,.20);
+}
+.canvas-full-workspace .canvas-project-action-danger {
+  border-color: rgba(255,111,111,.28);
+  color: #ffd0d0;
+}
+.canvas-full-workspace .canvas-project-action-danger:hover:not(:disabled) {
+  border-color: rgba(255,111,111,.48);
+  background: rgba(127,29,29,.26);
+}
+.canvas-full-workspace .canvas-project-action:disabled,
+.canvas-full-workspace .canvas-project-action-link.disabled,
+.canvas-full-workspace .canvas-project-select:disabled {
+  cursor: not-allowed;
+  opacity: .46;
+}
+.canvas-full-workspace .canvas-project-action-link.disabled {
+  pointer-events: none;
+}
+.canvas-full-workspace .canvas-project-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.canvas-full-workspace .canvas-project-summary span {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 7px;
+  color: rgba(255,255,255,.72);
+  font-size: 11px;
+  line-height: 1.1;
+  background: rgba(0,0,0,.16);
+}
+.canvas-full-workspace .canvas-project-create {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 8px;
+  background: rgba(0,0,0,.14);
+}
+.canvas-full-workspace .canvas-project-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 8px;
+  background: rgba(0,0,0,.22);
+  color: #fff;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12px;
+}
+.canvas-full-workspace .canvas-project-message {
+  padding: 8px 9px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 8px;
+  color: rgba(255,255,255,.78);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  background: rgba(0,0,0,.14);
+}
+.canvas-full-workspace .canvas-project-message.success {
+  border-color: rgba(22,199,132,.28);
+  color: #b7f7d4;
+}
+.canvas-full-workspace .canvas-project-message.error {
+  border-color: rgba(255,111,111,.30);
+  color: #ffd0d0;
+}
+.canvas-full-workspace .canvas-project-message.info {
+  border-color: rgba(139,183,255,.30);
+  color: #d7e5ff;
+}
 .canvas-full-workspace .canvas-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
 .canvas-full-workspace .canvas-actions button { min-width: 0; padding: 8px 8px; font-size: 12px; }
 .canvas-full-workspace .canvas-status { overflow-wrap: anywhere; }
@@ -131,7 +262,7 @@
 .canvas-full-workspace .context-menu button {
   text-align: left;
   padding: 8px 10px;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .canvas-full-workspace .context-menu button:active {
   transform: scale(0.96);
@@ -172,7 +303,7 @@
   border-radius: 999px;
   background: #3e4a6b;
   border: 2px solid rgba(255, 255, 255, 0.9);
-  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background-color 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   box-shadow: 0 2px 6px rgba(0,0,0,.6);
 }
 .canvas-full-workspace .react-flow__handle:hover::after, .canvas-full-workspace .react-flow__handle.connecting::after {
@@ -253,7 +384,7 @@
   font-size: 12px;
   margin: 0;
   padding: 0 4px;
-  transition: left .22s ease, top .22s ease, width .22s ease;
+  transition: color .22s ease;
 }
 .canvas-full-workspace .liblib-node-title input {
   flex: 1;
@@ -291,7 +422,7 @@
   -webkit-backdrop-filter: blur(24px);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 16px 34px rgba(0,0,0,.28);
   overflow: hidden;
-  transition: width .22s ease, height .22s ease, border-radius .22s ease;
+  transition: border-radius .22s ease;
 }
 .canvas-full-workspace .liblib-video-frame.ratio-16-9 { aspect-ratio: 16 / 9; height: auto; }
 .canvas-full-workspace .liblib-video-frame.ratio-9-16 { aspect-ratio: 9 / 16; width: auto; }
@@ -376,7 +507,7 @@
   font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.02em;
-  transition: all .2s ease;
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease, opacity .2s ease;
   -webkit-font-smoothing: antialiased;
 }
 .canvas-full-workspace .liblib-tabs button:hover {
@@ -1750,6 +1881,7 @@
 .canvas-full-workspace .node-select,
 .canvas-full-workspace .node-textarea,
 .canvas-full-workspace .canvas-title-field input,
+.canvas-full-workspace .canvas-project-input,
 .canvas-full-workspace .canvas-select,
 .canvas-full-workspace .config-form input,
 .canvas-full-workspace .config-form select,

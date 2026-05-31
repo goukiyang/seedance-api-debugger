@@ -36,6 +36,9 @@ export async function POST(
     if (invite.project.status !== 'active') {
       return NextResponse.json({ error: '项目当前不可加入' }, { status: 403 });
     }
+    if (!['team', 'public'].includes(invite.project.type)) {
+      return NextResponse.json({ error: '个人空间或系统项目不能通过邀请加入' }, { status: 403 });
+    }
 
     const role = normalizeProjectRole(invite.default_role);
     const member = await prisma.$transaction(async (tx) => {

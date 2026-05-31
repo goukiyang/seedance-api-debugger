@@ -11,6 +11,13 @@ import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/pr
 import { AuthError } from '@/lib/auth/session';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import {
+  authenticateCodexVideoApi,
+  CodexApiAuthError,
+  hasCodexApiAuthSignal,
+  webRequestSource,
+  type GenerationRequestSource,
+} from '@/lib/integrations/codex';
+import {
   createProviderApiRequest,
   markProviderApiRequestAccepted,
   markProviderApiRequestFailed,
@@ -21,6 +28,13 @@ import {
   getAuthorizedReferenceImagesForUse,
   uniquePreserveOrder,
 } from '@/lib/reference-albums/permissions';
+import {
+  ensureWorkspaceImageAssetsHaveReferenceImages,
+  importReferenceImageUrlsToSite,
+  ReferenceImportError,
+} from '@/lib/assets/reference-import';
+import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
+import { evaluatePaidGenerationGuard, paidGenerationGuardError } from '@/lib/tasks/paid-generation-guard';
 import type { CreateVideoInput, GenerationMode, VideoResolution, VideoDuration } from '@/types';
 
 const VALID_GENERATION_MODES: GenerationMode[] = [
@@ -34,10 +48,25 @@ const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 
 export async function POST(request: NextRequest) {
   let user;
-  try {
-    user = await getSessionUser(request);
-  } catch {
-    return errorJson('请先登录后再生成视频', 401);
+  let requestSource: GenerationRequestSource = webRequestSource(request);
+
+  if (hasCodexApiAuthSignal(request)) {
+    try {
+      const codexContext = await authenticateCodexVideoApi(request);
+      user = codexContext.user;
+      requestSource = codexContext.source;
+    } catch (error) {
+      if (error instanceof CodexApiAuthError) {
+        return errorJson(error.message, error.status);
+      }
+      throw error;
+    }
+  } else {
+    try {
+      user = await getSessionUser(request);
+    } catch {
+      return errorJson('请先登录后再生成视频', 401);
+    }
   }
 
   if (user.status !== 'active') {
@@ -68,6 +97,11 @@ export async function POST(request: NextRequest) {
   if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
 
+  const paidGenerationGuard = evaluatePaidGenerationGuard({ request, body, requestSource });
+  if (!paidGenerationGuard.allowed) {
+    return NextResponse.json(paidGenerationGuardError(paidGenerationGuard), { status: 403 });
+  }
+
   let project;
   try {
     project = await getProjectForGeneration(
@@ -97,21 +131,96 @@ export async function POST(request: NextRequest) {
         frozen_cost: existing.frozen_cost,
         created_at: existing.created_at,
         deduplicated: true,
+        source_type: existing.source_type,
+        source_label: existing.source_label,
+        source_request_id: existing.source_request_id,
       });
     }
   }
 
   // --- Workspace + Reference Image Preparation ---
   const tabId = request.headers.get('x-tab-id') || 'default';
+  const bodySourceRequestId = typeof body.source_request_id === 'string' && body.source_request_id.trim()
+    ? body.source_request_id.trim()
+    : typeof body.codex_request_id === 'string' && body.codex_request_id.trim()
+      ? body.codex_request_id.trim()
+      : null;
+  const sourceRequestId = requestSource.source_request_id || bodySourceRequestId || idempotencyKey || null;
+  const sourceMetadata: Record<string, unknown> = {
+    ...requestSource.source_metadata,
+    tab_id: tabId,
+    idempotency_key: idempotencyKey || null,
+    body_source_request_id: bodySourceRequestId,
+    client_name: typeof body.client_name === 'string' && body.client_name.trim() ? body.client_name.trim() : null,
+    paid_generation_guard: paidGenerationGuard.metadata,
+  };
   const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
 
-  const requestedReferenceImageIds = uniquePreserveOrder(
+  let requestedReferenceImageIds = uniquePreserveOrder(
     Array.isArray(body.reference_image_ids)
       ? body.reference_image_ids
       : Array.isArray(body.referenceImageIds)
         ? body.referenceImageIds
         : [],
   );
+
+  let requestedReferenceImageUrls = uniquePreserveOrder(
+    Array.isArray(body.reference_image_urls)
+      ? body.reference_image_urls
+      : Array.isArray(body.referenceImageUrls)
+        ? body.referenceImageUrls
+        : [],
+  );
+
+  if (requestedReferenceImageIds.length + requestedReferenceImageUrls.length > 9) {
+    return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+  }
+
+  if (requestSource.source_type === 'codex_api' && requestedReferenceImageUrls.length > 0) {
+    try {
+      const importedReferences = await importReferenceImageUrlsToSite({
+        user,
+        workspaceId,
+        projectId: project.id,
+        sourceRequestId,
+        sourceLabel: requestSource.source_label,
+        urls: requestedReferenceImageUrls,
+      });
+      requestedReferenceImageIds = uniquePreserveOrder([
+        ...requestedReferenceImageIds,
+        ...importedReferences.map((item) => item.referenceImageId),
+      ]);
+      requestedReferenceImageUrls = [];
+      sourceMetadata.imported_reference_images = importedReferences.map((item) => ({
+        asset_id: item.assetId,
+        reference_image_id: item.referenceImageId,
+        original_url: item.originalUrl,
+      }));
+    } catch (error) {
+      if (error instanceof ReferenceImportError) {
+        return NextResponse.json(
+          { error: error.code, message: error.message },
+          { status: error.status },
+        );
+      }
+      throw error;
+    }
+  }
+
+  const workspaceReferenceBackfill = await ensureWorkspaceImageAssetsHaveReferenceImages({
+    user,
+    workspaceId,
+    projectId: project.id,
+    sourceRequestId,
+    sourceLabel: requestSource.source_label,
+    metadataSource: requestSource.source_type === 'codex_api' ? 'codex_api_workspace' : 'web_workspace',
+  });
+  if (workspaceReferenceBackfill.length > 0) {
+    sourceMetadata.workspace_reference_backfill = workspaceReferenceBackfill.map((item) => ({
+      asset_id: item.assetId,
+      reference_image_id: item.referenceImageId,
+    }));
+  }
 
   const workspaceReferenceImageIds = uniquePreserveOrder(
     (await prisma.workspaceAsset.findMany({
@@ -135,9 +244,15 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length > 9) {
+    return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+  }
+
   const generationReferenceImageIds = requestedReferenceImageIds.length > 0
     ? requestedReferenceImageIds
-    : workspaceReferenceImageIds;
+    : requestedReferenceImageUrls.length > 0
+      ? []
+      : workspaceReferenceImageIds;
   if (generationReferenceImageIds.length > 9) {
     return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
   }
@@ -152,7 +267,11 @@ export async function POST(request: NextRequest) {
   }
   const generationReferenceAlbumIds = uniquePreserveOrder(generationReferenceImages.map((image) => image.album_id));
 
-  const { preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(workspaceId);
+  const { preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(
+    workspaceId,
+    generationReferenceImageIds,
+    requestedReferenceImageUrls,
+  );
 
   if (prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
     return NextResponse.json(
@@ -247,23 +366,16 @@ export async function POST(request: NextRequest) {
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const account = await tx.creditAccount.findUnique({ where: { user_id: user.id } });
-      if (!account) throw new CreditError('点数账户不存在，请联系管理员', 'NO_ACCOUNT');
-
-      const availableCredits = account.balance - account.frozen_credits;
-      if (availableCredits < estimatedCost) {
-        throw new CreditError(
-          `点数不足，需要 ${estimatedCost} 点，当前可用 ${Math.floor(availableCredits)} 点`,
-          'INSUFFICIENT_CREDITS',
-        );
-      }
-
       const task = await tx.videoTask.create({
         data: {
           provider: 'seedance',
           model: 'dreamina-seedance-2-0-260128',
           generation_mode: generationMode,
           prompt: body.prompt.trim(),
+          source_type: requestSource.source_type,
+          source_label: requestSource.source_label,
+          source_request_id: sourceRequestId,
+          source_metadata_json: JSON.stringify(sourceMetadata),
           ratio,
           duration,
           resolution,
@@ -300,16 +412,35 @@ export async function POST(request: NextRequest) {
             referenceImageIds: generationReferenceImageIds,
             preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
             prepSummary,
+            source: {
+              type: requestSource.source_type,
+              label: requestSource.source_label,
+              requestId: sourceRequestId,
+              paidGenerationGuard: paidGenerationGuard.metadata,
+            },
           }),
         },
       });
 
-      const frozenBefore = account.frozen_credits;
-      const frozenAfter = frozenBefore + estimatedCost;
+      let freeze;
+      try {
+        freeze = await allocateTaskCredits(tx, {
+          id: user.id,
+          role: user.role,
+          account_type: user.account_type,
+          user_profile: user.user_profile,
+          status: user.status,
+        }, estimatedCost, task.id);
+      } catch (error) {
+        throw new CreditError(
+          error instanceof Error ? error.message : '点数不足',
+          'INSUFFICIENT_CREDITS',
+        );
+      }
 
-      await tx.creditAccount.update({
-        where: { user_id: user.id },
-        data: { frozen_credits: frozenAfter },
+      await tx.videoTask.update({
+        where: { id: task.id },
+        data: { credit_freeze_snapshot: freeze.snapshot },
       });
 
       await tx.creditLedger.create({
@@ -317,19 +448,20 @@ export async function POST(request: NextRequest) {
           user_id: user.id,
           type: 'task_freeze',
           amount: -estimatedCost,
-          balance_before: account.balance,
-          balance_after: account.balance,
-          frozen_before: frozenBefore,
-          frozen_after: frozenAfter,
+          balance_before: freeze.balance_before,
+          balance_after: freeze.balance_after,
+          frozen_before: freeze.frozen_before,
+          frozen_after: freeze.frozen_after,
           related_task_id: task.id,
           reason: `任务创建冻结 ${estimatedCost} 点`,
+          metadata_json: JSON.stringify({ allocations: freeze.allocations }),
         },
       });
 
       await tx.operationLog.create({
         data: {
           operator_id: user.id,
-          action: 'generation_create',
+          action: requestSource.source_type === 'codex_api' ? 'generation_create_codex_api' : 'generation_create',
           target_type: 'VideoTask',
           target_id: task.id,
           detail: JSON.stringify({
@@ -338,6 +470,10 @@ export async function POST(request: NextRequest) {
             estimated_cost: estimatedCost,
             reference_album_ids: generationReferenceAlbumIds,
             reference_image_ids: generationReferenceImageIds,
+            source_type: requestSource.source_type,
+            source_label: requestSource.source_label,
+            source_request_id: sourceRequestId,
+            paid_generation_guard: paidGenerationGuard.metadata,
           }),
         },
       });
@@ -371,7 +507,15 @@ export async function POST(request: NextRequest) {
       endpoint: 'seedance.createVideoTask',
       method: 'POST',
       idempotencyKey: idempotencyKey || null,
-      requestPayload: providerInput,
+      requestPayload: {
+        ...providerInput,
+        source: {
+          type: requestSource.source_type,
+          label: requestSource.source_label,
+          requestId: sourceRequestId,
+          paidGenerationGuard: paidGenerationGuard.metadata,
+        },
+      },
     });
     providerRequestId = providerRequest.id;
 
@@ -412,6 +556,9 @@ export async function POST(request: NextRequest) {
       asset_mapping: assetMapping,
       reference_album_ids: generationReferenceAlbumIds,
       reference_image_ids: generationReferenceImageIds,
+      source_type: requestSource.source_type,
+      source_label: requestSource.source_label,
+      source_request_id: sourceRequestId,
       created_at: new Date().toISOString(),
     });
   } catch (err) {
@@ -447,40 +594,59 @@ async function handleProviderFailure(
   errorMessage: string,
 ) {
   await prisma.$transaction(async (tx) => {
-    const failedTask = await tx.videoTask.update({
+    const existingSettlement = await tx.creditLedger.findFirst({
+      where: {
+        related_task_id: taskId,
+        type: { in: ['task_success_deduct', 'task_failed_refund'] },
+      },
+    });
+    if (existingSettlement) return;
+
+    const taskBeforeSettlement = await tx.videoTask.findUnique({ where: { id: taskId } });
+    if (!taskBeforeSettlement) return;
+
+    await tx.videoTask.update({
       where: { id: taskId },
       data: {
         local_status: 'failed',
         error_message: errorMessage,
         error_code: 'PROVIDER_CREATE_FAILED',
         completed_at: new Date(),
-        frozen_cost: 0,
-        refund_amount: frozenAmount,
       },
     });
 
-    const account = await tx.creditAccount.findUnique({ where: { user_id: userId } });
-    if (!account) return;
+    const settlement = await settleTaskCredits(tx, {
+      taskId,
+      userId,
+      terminalStatus: 'failed',
+      frozenAmount,
+      freezeSnapshot: taskBeforeSettlement.credit_freeze_snapshot,
+    });
 
-    const frozenBefore = account.frozen_credits;
-    const frozenAfter = Math.max(0, frozenBefore - frozenAmount);
-
-    await tx.creditAccount.update({
-      where: { user_id: userId },
-      data: { frozen_credits: frozenAfter },
+    const failedTask = await tx.videoTask.update({
+      where: { id: taskId },
+      data: {
+        frozen_cost: 0,
+        actual_cost: 0,
+        refund_amount: settlement.refundedAmount,
+      },
     });
 
     await tx.creditLedger.create({
       data: {
         user_id: userId,
         type: 'task_failed_refund',
-        amount: frozenAmount,
-        balance_before: account.balance,
-        balance_after: account.balance,
-        frozen_before: frozenBefore,
-        frozen_after: frozenAfter,
+        amount: settlement.refundedAmount,
+        balance_before: settlement.balanceBefore,
+        balance_after: settlement.balanceAfter,
+        frozen_before: settlement.frozenBefore,
+        frozen_after: settlement.frozenAfter,
         related_task_id: taskId,
-        reason: `任务创建失败，返还冻结 ${frozenAmount} 点`,
+        reason: `任务创建失败，返还冻结 ${settlement.refundedAmount} 点`,
+        metadata_json: JSON.stringify({
+          allocations: settlement.allocations,
+          expired_closed: settlement.expiredClosedAmount,
+        }),
       },
     });
 
@@ -496,81 +662,176 @@ interface PreparedRefImage {
   order: number;
 }
 
-async function prepareReferenceImages(workspaceId: string): Promise<{
+async function prepareReferenceImages(
+  workspaceId: string,
+  preferredReferenceImageIds: string[] = [],
+  preferredReferenceImageUrls: string[] = [],
+): Promise<{
   preparedImages: PreparedRefImage[];
   prepareErrors: string[];
   summary: { total: number; publicUrl: number; r2Uploaded: number; skipped: number; hasLocalPath: boolean };
 }> {
-  const wsAssets = await prisma.workspaceAsset.findMany({
+  const selectedIds = uniquePreserveOrder(preferredReferenceImageIds).slice(0, 9);
+  const selectedReferenceImageUrls = uniquePreserveOrder(preferredReferenceImageUrls).slice(0, 9);
+  const prepareErrors: string[] = [];
+  let skipped = 0;
+
+  let imageItems: Array<{ asset: { id: string; file_name: string | null; original_url: string; type: string } | null; originalUrl: string }> = [];
+
+  const workspaceReferenceAssets = await prisma.workspaceAsset.findMany({
     where: { workspace_id: workspaceId },
     include: { asset: true },
     orderBy: { sort_order: 'asc' },
   });
 
-  const imageAssets = wsAssets.filter((wa) => wa.asset.type === 'image').slice(0, 9);
+  if (selectedIds.length > 0) {
+    const workspaceMap = new Map<string, NonNullable<typeof workspaceReferenceAssets[number]['asset']>>();
+    for (const wa of workspaceReferenceAssets) {
+      if (wa.reference_image_id) {
+        workspaceMap.set(wa.reference_image_id, wa.asset);
+      }
+    }
+
+    for (const referenceImageId of selectedIds) {
+      const asset = workspaceMap.get(referenceImageId);
+      if (!asset) {
+        prepareErrors.push(`[${referenceImageId}] 参考图未在当前生成工作台内`);
+        skipped += 1;
+        continue;
+      }
+
+      if (asset.type !== 'image') {
+        prepareErrors.push(`[${referenceImageId}] 参考图素材不是图片`);
+        skipped += 1;
+        continue;
+      }
+
+      imageItems.push({ asset, originalUrl: asset.original_url });
+    }
+  } else if (selectedReferenceImageUrls.length > 0) {
+    const matchedAssets = await prisma.asset.findMany({
+      where: { original_url: { in: selectedReferenceImageUrls } },
+    });
+    const matchedByUrl = new Map(matchedAssets.map((asset) => [asset.original_url, asset]));
+
+    for (const rawUrl of selectedReferenceImageUrls) {
+      const asset = matchedByUrl.get(rawUrl) ?? null;
+      if (asset && asset.type !== 'image') {
+        prepareErrors.push(`[${rawUrl}] 参考图素材不是图片`);
+        skipped += 1;
+        continue;
+      }
+      imageItems.push({ asset: asset ? {
+        id: asset.id,
+        file_name: asset.file_name,
+        original_url: asset.original_url,
+        type: asset.type,
+      } : null, originalUrl: rawUrl });
+    }
+  } else {
+    imageItems = workspaceReferenceAssets
+      .filter((item) => item.asset.type === 'image')
+      .map((item) => ({ asset: {
+        id: item.asset.id,
+        file_name: item.asset.file_name,
+        original_url: item.asset.original_url,
+        type: item.asset.type,
+      }, originalUrl: item.asset.original_url }));
+  }
+
+  imageItems = imageItems.slice(0, 9);
+
   const preparedImages: PreparedRefImage[] = [];
-  const prepareErrors: string[] = [];
   let publicUrl = 0;
   let r2Uploaded = 0;
-  let skipped = 0;
   let hasLocalPath = false;
 
-  for (let i = 0; i < imageAssets.length; i++) {
-    const wa = imageAssets[i];
-    const asset = wa.asset;
-    const originalUrl = asset.original_url;
+  for (let i = 0; i < imageItems.length; i++) {
+    const item = imageItems[i];
+    const originalUrl = item.originalUrl;
     const isPublicUrl = originalUrl.startsWith('https://') && !isLocalhostHost(originalUrl);
+    const isR2 = originalUrl.includes('.r2.') || originalUrl.includes('r2.dev') || originalUrl.includes('.toscdn.');
     const isLocalPath = originalUrl.startsWith('/');
 
     if (isPublicUrl) {
-      publicUrl++;
-      const isR2 = originalUrl.includes('.r2.') || originalUrl.includes('r2.dev') || originalUrl.includes('.toscdn.');
-      preparedImages.push({ name: asset.file_name || `图${i + 1}`, originalUrl, sourceType: isR2 ? 'upload' : 'external', order: i });
+      publicUrl += 1;
+      preparedImages.push({
+        name: item.asset?.file_name || `图${i + 1}`,
+        originalUrl,
+        sourceType: isR2 ? 'upload' : 'external',
+        order: i,
+      });
       continue;
     }
 
     if (isLocalPath) {
       hasLocalPath = true;
-      const localFilePath = path.join(process.cwd(), 'public', originalUrl);
+      const localFilePath = path.join(process.cwd(), 'public', originalUrl.replace(/^\/+/, ''));
       if (!fs.existsSync(localFilePath)) {
-        skipped++;
+        skipped += 1;
         prepareErrors.push(`[${i + 1}] 本地文件不存在: ${originalUrl}`);
         continue;
       }
 
       const buffer = fs.readFileSync(localFilePath);
       const ext = path.extname(localFilePath).slice(1).toLowerCase();
-      const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+      const mimeMap: Record<string, string> = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        bmp: 'image/bmp',
+      };
       const mimeType = mimeMap[ext] || 'image/jpeg';
 
       let r2PublicUrl: string | null = null;
       try {
         const { uploadPublicAsset } = await import('@/lib/assets/public-storage');
-        const pubResult = await uploadPublicAsset(buffer, asset.file_name || `image.${ext}`, mimeType);
+        const fileName = item.asset?.file_name || path.basename(originalUrl) || `image.${ext}`;
+        const pubResult = await uploadPublicAsset(buffer, fileName, mimeType);
         r2PublicUrl = pubResult.publicUrl;
       } catch (err) {
-        skipped++;
+        skipped += 1;
         prepareErrors.push(`[${i + 1}] R2 上传失败: ${err instanceof Error ? err.message : String(err)}`);
         continue;
       }
 
-      try {
-        await prisma.asset.update({ where: { id: asset.id }, data: { original_url: r2PublicUrl } });
-      } catch { /* non-critical */ }
+      if (item.asset?.id) {
+        await prisma.asset.update({
+          where: { id: item.asset.id },
+          data: { original_url: r2PublicUrl },
+        }).catch(() => {});
+      }
 
-      r2Uploaded++;
-      preparedImages.push({ name: asset.file_name || `图${i + 1}`, originalUrl: r2PublicUrl, sourceType: 'upload', order: i });
+      r2Uploaded += 1;
+      preparedImages.push({
+        name: item.asset?.file_name || `图${i + 1}`,
+        originalUrl: r2PublicUrl,
+        sourceType: 'upload',
+        order: i,
+      });
       continue;
     }
 
-    skipped++;
+    skipped += 1;
     prepareErrors.push(`[${i + 1}] 非公网 URL: ${originalUrl}`);
   }
 
   return {
     preparedImages,
     prepareErrors,
-    summary: { total: imageAssets.length, publicUrl, r2Uploaded, skipped, hasLocalPath },
+    summary: {
+      total: selectedIds.length > 0
+        ? selectedIds.length
+        : selectedReferenceImageUrls.length > 0
+          ? selectedReferenceImageUrls.length
+          : imageItems.length,
+      publicUrl,
+      r2Uploaded,
+      skipped,
+      hasLocalPath,
+    },
   };
 }
 

@@ -3,9 +3,19 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import {
+  ArrowLeft,
+  Copy,
+  Download,
+  ExternalLink,
+  PlayCircle,
+  RefreshCcw,
+  RotateCcw,
+} from 'lucide-react';
 import type { GenerationMode } from '@/types';
 import { GENERATION_MODE_LABELS } from '@/types';
 import { ThumbnailCard } from '@/components/ThumbnailCard';
+import { formatAmountMicrosWithCny, formatAmountMinorWithCny } from '@/lib/costs/currency';
 
 interface VideoTask {
   id: string;
@@ -55,6 +65,14 @@ interface VideoTask {
   provider_usage_snapshot?: string | null;
   provider_client_request_id?: string | null;
   cost_allocation_status: string;
+  retention_status: string;
+  user_deleted_at: string | null;
+  user_deleted_by: string | null;
+  admin_hidden_at: string | null;
+  admin_hidden_by: string | null;
+  restored_at: string | null;
+  restored_by: string | null;
+  delete_reason: string | null;
   cost_ledgers?: OfficialChargeLedger[];
   costLedgers?: OfficialChargeLedger[];
   params_json: string | null;
@@ -151,6 +169,12 @@ interface ReferenceImageDebugProps {
   providerPayload: ProviderPayloadDebug;
 }
 
+function referenceDebugStatusClass(status: RefImageDebugEntry['status']) {
+  if (status === 'resolved') return 'bg-green-200 text-green-800';
+  if (status === 'failed') return 'bg-red-200 text-red-800';
+  return 'bg-gray-200 text-zinc-900';
+}
+
 function ReferenceImageDebug({ task, refImagesDebug, providerPayload }: ReferenceImageDebugProps) {
   const [showDebug, setShowDebug] = useState(false);
 
@@ -229,10 +253,7 @@ function ReferenceImageDebug({ task, refImagesDebug, providerPayload }: Referenc
                 }`}>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{img.label}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${
-                      img.status === 'resolved' ? 'bg-green-200 text-green-800' :
-                      img.status === 'failed' ? 'bg-red-200 text-red-800' : 'bg-gray-200 text-gray-600'
-                    }`}>
+                    <span className={`px-1.5 py-0.5 rounded text-xs ${referenceDebugStatusClass(img.status)}`}>
                       {img.status === 'resolved' ? '✓ base64 已解析' :
                        img.status === 'failed' ? '✗ 解析失败' : '跳过'}
                     </span>
@@ -290,7 +311,7 @@ function ReferenceImageDebug({ task, refImagesDebug, providerPayload }: Referenc
                         <span className="font-medium text-gray-700">[{i + 1}]</span>{' '}
                         <span className="text-blue-600">{String(itemWithUnknown.type || '')}</span>
                         {itemWithUnknown.role ? <span className="ml-1 text-gray-500">({String(itemWithUnknown.role)})</span> : null}
-                        {itemWithUnknown.text ? <span className="ml-1 text-gray-600 truncate max-w-xs">"{String(itemWithUnknown.text).slice(0, 60)}..."</span> : null}
+                        {itemWithUnknown.text ? <span className="ml-1 text-gray-600 truncate max-w-xs">&quot;{String(itemWithUnknown.text).slice(0, 60)}...&quot;</span> : null}
                         {itemWithUnknown.image_url ? <span className="ml-1 text-green-600 break-all">{String((itemWithUnknown.image_url as Record<string, unknown>).url || '').slice(0, 80)}</span> : null}
                       </div>
                     );
@@ -348,6 +369,20 @@ function getStatusText(status: string) {
   return textMap[status] || status;
 }
 
+function getRetentionClass(status: string) {
+  if (status === 'user_deleted') return 'status-failed';
+  if (status === 'admin_hidden') return 'status-cancelled';
+  if (status === 'retained') return 'status-running';
+  return 'status-succeeded';
+}
+
+function getRetentionText(status: string) {
+  if (status === 'user_deleted') return '用户已移除';
+  if (status === 'admin_hidden') return '管理员隐藏';
+  if (status === 'retained') return '留存';
+  return '可见';
+}
+
 function costStatusLabel(status: string) {
   if (status === 'estimated_by_rule') return '规则预估';
   if (status === 'provisional_settled') return '临时结算';
@@ -360,16 +395,12 @@ function costStatusLabel(status: string) {
 }
 
 function formatAmountMinor(amount: number | null | undefined, currency?: string | null): string {
-  if (amount === null || amount === undefined) return '待官方确认';
-  const value = amount / 100;
-  if (currency === 'USD') return `$${value.toFixed(2)}`;
-  return `¥${value.toFixed(2)}`;
+  return formatAmountMinorWithCny(amount, currency);
 }
 
 function formatProviderAmount(amount: number | null | undefined, currency?: string | null): string {
   if (amount === null || amount === undefined) return '待官方确认';
-  const text = Number.isInteger(amount) ? amount.toFixed(2) : amount.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
-  return currency ? `${text} ${currency}` : text;
+  return formatAmountMicrosWithCny(Math.round(amount * 1_000_000), currency);
 }
 
 function formatLedgerAmount(ledger: OfficialChargeLedger): string {
@@ -630,6 +661,7 @@ export default function TaskDetailPage() {
   const [moveMessage, setMoveMessage] = useState('');
   const [officialCharges, setOfficialCharges] = useState<OfficialChargeLedger[]>([]);
   const [officialChargeStatus, setOfficialChargeStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
+  const [taskLoadError, setTaskLoadError] = useState<string | null>(null);
 
   // 下载状态
   const [downloading, setDownloading] = useState(false);
@@ -641,30 +673,48 @@ export default function TaskDetailPage() {
   // 视频预览错误状态
   const [videoError, setVideoError] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [openingVideo, setOpeningVideo] = useState(false);
+  const [copyingLink, setCopyingLink] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   // 显示原始响应
   const [showCreateResponse, setShowCreateResponse] = useState(false);
   const [showStatusResponse, setShowStatusResponse] = useState(false);
 
-  const fetchTask = useCallback(async () => {
+  const fetchTask = useCallback(async (forceProviderRefresh = false): Promise<VideoTask | null> => {
     try {
-      const res = await fetch(`/api/video/status/${taskId}`);
-      const data = await res.json();
+      const statusUrl = forceProviderRefresh
+        ? `/api/video/status/${taskId}?refresh=true`
+        : `/api/video/status/${taskId}`;
+      const res = await fetch(statusUrl, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setTask(data);
-        setTargetProjectId(data.project_id || '');
+        const nextTask = data as VideoTask;
+        setTask(nextTask);
+        setTaskLoadError(null);
+        setTargetProjectId(nextTask.project_id || '');
         setVideoError(false);
-        const embeddedLedgers = extractEmbeddedOfficialCharges(data);
+        const embeddedLedgers = extractEmbeddedOfficialCharges(nextTask);
         if (embeddedLedgers.length > 0) {
           setOfficialCharges((current) => mergeLedgers(current, embeddedLedgers));
           setOfficialChargeStatus('ready');
         }
+        return nextTask;
       }
+      const message = typeof data?.message === 'string'
+        ? data.message
+        : (typeof data?.error === 'string' ? data.error : `HTTP ${res.status}`);
+      setTaskLoadError(message);
     } catch (error) {
       console.error('Failed to fetch task:', error);
+      setTaskLoadError(error instanceof Error ? error.message : '任务加载失败');
     } finally {
       setLoading(false);
     }
+    return null;
   }, [taskId]);
 
   const fetchProjects = useCallback(async () => {
@@ -731,38 +781,9 @@ export default function TaskDetailPage() {
 
   const queryStatus = async () => {
     setQuerying(true);
-    await fetchTask();
+    await fetchTask(true);
     await fetchOfficialCharges();
     setQuerying(false);
-  };
-
-  // 重新查询结果 — 强制刷新最新结果（可用于"其实生成好了但前端没更新"的情况）
-  const handleReQueryResult = async () => {
-    setQuerying(true);
-    // 直接调用 status API 强制 getResult
-    try {
-      const res = await fetch(`/api/video/status/${taskId}`);
-      const data = await res.json();
-      if (res.ok) {
-        const hadVideoBefore = task?.result_video_url;
-        setTask(data);
-        setVideoError(false);
-        const embeddedLedgers = extractEmbeddedOfficialCharges(data);
-        if (embeddedLedgers.length > 0) {
-          setOfficialCharges((current) => mergeLedgers(current, embeddedLedgers));
-          setOfficialChargeStatus('ready');
-        }
-        await fetchOfficialCharges();
-        // 如果之前没有视频，现在有了，说明结果刚就绪
-        if (data.result_video_url && !hadVideoBefore) {
-          alert('视频已就绪，请刷新查看');
-        }
-      }
-    } catch (error) {
-      console.error('Re-query failed:', error);
-    } finally {
-      setQuerying(false);
-    }
   };
 
   const handleRetry = async () => {
@@ -812,19 +833,25 @@ export default function TaskDetailPage() {
     }
   };
 
-  // 后端下载视频（支持进度追踪）
-  const handleDownloadToLocal = async () => {
-    if (!task) return;
-    
+  const downloadVideoToLocal = async (sourceTask: VideoTask): Promise<string | null> => {
+    if (sourceTask.local_video_path) {
+      return sourceTask.local_video_path;
+    }
+    if (!sourceTask.result_video_url) {
+      const errorMsg = '当前任务没有可用的视频链接';
+      setDownloadError(errorMsg);
+      setDownloadProgress(`下载失败: ${errorMsg}`);
+      return null;
+    }
+
     setDownloading(true);
     setDownloadProgress('正在下载视频...');
     setDownloadPercent(0);
     setDownloadSpeed('');
     setDownloadError(null);
+    setOpenError(null);
     
     const startTime = Date.now();
-    let lastUpdateTime = startTime;
-    let lastBytes = 0;
     
     try {
       const res = await fetch(`/api/video/download/${taskId}`, {
@@ -832,47 +859,93 @@ export default function TaskDetailPage() {
       });
       const data = await res.json();
       
-      if (res.ok && data.success) {
+      if (res.ok && data.success && data.local_video_path) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         const fileSizeMB = (data.file_size / 1024 / 1024).toFixed(2);
         
-        setDownloadProgress(`✅ 下载完成! 文件大小: ${fileSizeMB} MB，耗时: ${elapsed}s`);
+        setDownloadProgress(`下载完成，文件大小: ${fileSizeMB} MB，耗时: ${elapsed}s`);
         setDownloadPercent(100);
         setDownloadSpeed('');
         
-        // 如果文件已存在，提示用户
         if (data.already_exists) {
-          setDownloadProgress(`✅ 视频已存在于本地: ${fileSizeMB} MB`);
+          setDownloadProgress(`视频已存在于本地: ${fileSizeMB} MB`);
         }
         
-        await fetchTask();
+        const localVideoPath = data.local_video_path as string;
+        setTask((current) => (
+          current ? { ...current, local_video_path: localVideoPath } : current
+        ));
+        return localVideoPath;
       } else {
         const errorMsg = data.message || data.error || '未知错误';
         setDownloadError(errorMsg);
-        setDownloadProgress(`❌ 下载失败: ${errorMsg}`);
+        setDownloadProgress(`下载失败: ${errorMsg}`);
+        return null;
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       setDownloadError(errorMsg);
-      setDownloadProgress(`❌ 下载失败: ${errorMsg}`);
+      setDownloadProgress(`下载失败: ${errorMsg}`);
+      return null;
     } finally {
       setDownloading(false);
     }
   };
 
-  // 复制视频 URL
-  const handleCopyUrl = () => {
-    if (task?.result_video_url) {
-      navigator.clipboard.writeText(task.result_video_url);
+  // 后端下载视频（支持进度追踪）
+  const handleDownloadToLocal = async () => {
+    if (!task) return;
+    await downloadVideoToLocal(task);
+  };
+
+  // 复制可长期使用的本地视频 URL，不再复制会过期的 Provider 外链
+  const handleCopyUrl = async () => {
+    if (!task) return;
+    setCopyingLink(true);
+    setOpenError(null);
+
+    try {
+      const localVideoPath = task.local_video_path || await downloadVideoToLocal(task);
+      if (!localVideoPath) {
+        setOpenError('无法生成可复制的本地链接，Provider 外链可能已过期。');
+        return;
+      }
+
+      const videoUrl = new URL(localVideoPath, window.location.origin).toString();
+      await navigator.clipboard.writeText(videoUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } finally {
+      setCopyingLink(false);
     }
   };
 
-  // 直接打开视频 URL
-  const handleOpenUrl = () => {
-    if (task?.result_video_url) {
-      window.open(task.result_video_url, '_blank');
+  // 打开同源视频，避免第三方签名外链过期或被内置浏览器拦截
+  const handleOpenVideo = async () => {
+    if (!task) return;
+    setOpeningVideo(true);
+    setOpenError(null);
+
+    try {
+      let localVideoPath = task.local_video_path || await downloadVideoToLocal(task);
+
+      if (!localVideoPath && task.result_video_url) {
+        setOpenError('外链可能已过期，正在刷新任务状态...');
+        const refreshedTask = await fetchTask(true);
+        if (refreshedTask) {
+          localVideoPath = refreshedTask.local_video_path || await downloadVideoToLocal(refreshedTask);
+        }
+      }
+
+      if (!localVideoPath) {
+        setOpenError('视频链接暂不可用。请刷新任务状态后重试，或重新生成。');
+        return;
+      }
+
+      const localUrl = new URL(localVideoPath, window.location.origin).toString();
+      window.location.assign(localUrl);
+    } finally {
+      setOpeningVideo(false);
     }
   };
 
@@ -896,7 +969,7 @@ export default function TaskDetailPage() {
   if (!task) {
     return (
       <div className="card">
-        <p className="text-red">任务不存在</p>
+        <p className="text-red">{taskLoadError || '任务不存在'}</p>
         <Link href="/tasks" className="btn btn-secondary mt-4">
           返回列表
         </Link>
@@ -910,6 +983,7 @@ export default function TaskDetailPage() {
   const frameImages = parseJsonArray(task.frame_image_urls);
   const videoSrc = getVideoSrc();
   const hasLocalVideo = !!task.local_video_path;
+  const hasPlayableVideo = !!(task.local_video_path || task.result_video_url);
   
   // 从 provider_payload_json 解析 resolved_mode
   const resolvedMode = (() => {
@@ -964,6 +1038,19 @@ export default function TaskDetailPage() {
       : hasResultVideo
         ? '生成结果'
         : '暂无结果';
+  const resultDecisionBody = task.local_status === 'failed'
+    ? '这次没有产出可用视频，可以复用输入重新生成。'
+    : isProcessing
+      ? '任务还在生成中，可以刷新状态或开启自动轮询。'
+      : hasResultVideo
+        ? '先看结果，再决定保存、复制链接或复用输入继续调整。'
+        : '暂时没有可播放链接，可以重新查询结果。';
+  const resultStorageText = hasLocalVideo
+    ? '本地已保存'
+    : task.result_video_url
+      ? '远程链接可用'
+      : '没有视频链接';
+  const shouldShowRefresh = isProcessing || !task.result_video_url || task.local_status === 'failed';
 
   const parameterItems = [
     { label: '模型', value: task.model || 'Seedance 2.0' },
@@ -971,17 +1058,15 @@ export default function TaskDetailPage() {
     { label: '比例', value: task.ratio || '-' },
     { label: '时长', value: task.duration ? `${task.duration} 秒` : '-' },
     { label: '分辨率', value: task.resolution || '-' },
+  ];
+  const advancedParameterItems = [
     { label: '随机种子', value: task.seed === -1 ? '随机' : (task.seed ?? '-') },
     { label: '音频', value: task.generate_audio ? '开启' : '关闭' },
     { label: '尾帧', value: task.return_last_frame ? '返回' : '不返回' },
     { label: '水印', value: task.watermark ? '开启' : '关闭' },
+    ...(resolvedModeLabel ? [{ label: 'Resolved 模式', value: resolvedModeLabel }] : []),
   ];
 
-  const timelineItems = [
-    { label: '创建', value: formatDateTime(task.created_at) },
-    { label: '更新', value: formatDateTime(task.updated_at) },
-    { label: '完成', value: formatDateTime(task.completed_at) },
-  ];
   const officialCostMicros = task.provider_final_amount_micros ?? task.provider_official_amount_micros;
   const officialCostMinor = task.provider_final_amount_minor ?? task.provider_official_amount_minor;
   const officialCostText = officialCostMicros !== null && officialCostMicros !== undefined
@@ -990,45 +1075,61 @@ export default function TaskDetailPage() {
       ? formatAmountMinor(officialCostMinor, task.provider_cost_currency)
       : formatProviderAmount(providerBilling.actualCost, providerBilling.currency);
   const officialBillingTime = providerBilling.billingTime || task.provider_cost_confirmed_at;
+  const inputChips = [
+    modeLabel,
+    task.ratio,
+    task.duration ? `${task.duration}s` : null,
+    task.resolution,
+    referenceImages.length > 0 ? `${referenceImages.length} 张参考图` : null,
+  ].filter(Boolean);
 
   return (
     <div className="task-detail-page">
-      <div className="task-detail-header">
-        <div className="task-detail-nav">
-          <Link href="/tasks" className="task-detail-back">返回任务列表</Link>
-          <Link href="/generate" className="btn btn-primary">创建新任务</Link>
-        </div>
-        <div className="task-detail-title-row">
-          <div>
-            <div className="task-detail-kicker">任务 {shortId(task.id, 12)}</div>
-            <h1 className="task-detail-title">{resultStateTitle}</h1>
-            <p className="task-detail-subtitle">{task.prompt || '无提示词'}</p>
-          </div>
+      <div className="task-result-topbar">
+        <Link href="/tasks" className="task-detail-back">
+          <ArrowLeft size={16} aria-hidden="true" />
+          返回任务
+        </Link>
+        <div className="task-result-topbar-actions">
           <span className={`status-badge ${getStatusClass(task.local_status)}`}>
             {getStatusText(task.local_status)}
           </span>
+          {task.retention_status && task.retention_status !== 'active' && (
+            <span className={`status-badge ${getRetentionClass(task.retention_status)}`}>
+              {getRetentionText(task.retention_status)}
+            </span>
+          )}
+          <Link href="/generate" className="btn btn-secondary">
+            <PlayCircle size={16} aria-hidden="true" />
+            新任务
+          </Link>
         </div>
       </div>
+
+      {task.retention_status && task.retention_status !== 'active' && (
+        <div className="alert alert-warning">
+          当前任务处于「{getRetentionText(task.retention_status)}」状态。管理员可审计和恢复，普通用户入口默认不可见。
+        </div>
+      )}
 
       <div className="task-detail-layout">
         <main className="task-detail-main">
           <section className="task-detail-card task-result-panel">
             <div className="task-card-head">
               <div>
-                <h2>生成结果</h2>
-                <p>{hasLocalVideo ? '本地已保存' : task.result_video_url ? '远程结果可用' : '等待 Provider 返回结果'}</p>
+                <h1 className="task-result-title">{resultStateTitle}</h1>
+                <p>{resultDecisionBody}</p>
               </div>
               <div className="task-action-row">
-                <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
-                  {querying ? '查询中...' : '查询状态'}
-                </button>
-                {isProcessing && (
-                  <button className="btn btn-secondary" onClick={handleReQueryResult} disabled={querying}>
-                    {querying ? '查询中...' : '重新查询结果'}
+                {shouldShowRefresh && (
+                  <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
+                    <RefreshCcw size={16} aria-hidden="true" />
+                    {querying ? '查询中...' : '刷新结果'}
                   </button>
                 )}
                 {task.local_status === 'failed' && (
                   <button className="btn btn-danger" onClick={handleRetry} disabled={retrying}>
+                    <RotateCcw size={16} aria-hidden="true" />
                     {retrying ? '重试中...' : '重新生成'}
                   </button>
                 )}
@@ -1052,10 +1153,10 @@ export default function TaskDetailPage() {
                   <strong>{resultStateTitle}</strong>
                   <span>
                     {task.local_status === 'failed'
-                      ? (task.error_message || 'Provider 返回失败，请查看下方错误信息或重试。')
+                      ? (task.error_message || '生成失败，可以复用输入重新生成。')
                       : isProcessing
-                        ? '任务仍在生成中，可手动查询或开启自动轮询。'
-                        : '当前任务还没有可播放的视频结果。'}
+                        ? '生成中，可刷新结果或开启自动轮询。'
+                        : resultDecisionBody}
                   </span>
                 </div>
               )}
@@ -1063,8 +1164,11 @@ export default function TaskDetailPage() {
 
             {videoError && (
               <div className="alert alert-warning">
-                视频预览失败。可以直接打开远程链接，或复制 URL 到浏览器检查。
+                视频预览失败。可以保存到本地后打开，或复制链接检查。
               </div>
+            )}
+            {openError && (
+              <div className="alert alert-warning">{openError}</div>
             )}
 
             {task.result_last_frame_url && (
@@ -1081,31 +1185,47 @@ export default function TaskDetailPage() {
             )}
 
             <div className="task-result-actions">
-              <button className="btn btn-secondary" onClick={handleOpenUrl} disabled={!task.result_video_url}>
-                打开远程视频
-              </button>
-              <button className="btn btn-secondary" onClick={handleCopyUrl} disabled={!task.result_video_url}>
-                {copied ? '已复制' : '复制视频 URL'}
-              </button>
-              <button className="btn btn-primary" onClick={handleDownloadToLocal} disabled={downloading || hasLocalVideo || !task.result_video_url}>
-                {downloading ? '下载中...' : hasLocalVideo ? '已保存到本地' : '转存到本地'}
-              </button>
-              {downloadError && (
-                <button className="btn btn-secondary" onClick={handleDownloadToLocal}>
-                  重试下载
+              {hasPlayableVideo && (
+                <>
+                  {task.result_video_url && (
+                    <button className="btn btn-primary" onClick={handleDownloadToLocal} disabled={downloading || hasLocalVideo}>
+                      <Download size={16} aria-hidden="true" />
+                      {downloading ? '保存中...' : hasLocalVideo ? '已保存' : '保存视频'}
+                    </button>
+                  )}
+                  <button className="btn btn-secondary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
+                    <ExternalLink size={16} aria-hidden="true" />
+                    {openingVideo ? '打开中...' : '打开视频'}
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => void handleCopyUrl()} disabled={copyingLink || downloading}>
+                    <Copy size={16} aria-hidden="true" />
+                    {copyingLink ? '复制中...' : copied ? '已复制' : hasLocalVideo ? '复制本地链接' : '保存并复制'}
+                  </button>
+                </>
+              )}
+              <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-secondary">
+                <RotateCcw size={16} aria-hidden="true" />
+                复用输入
+              </Link>
+              {downloadError && task.result_video_url && (
+                <button className="btn btn-secondary" onClick={handleDownloadToLocal} disabled={downloading}>
+                  <Download size={16} aria-hidden="true" />
+                  {downloading ? '重试中...' : '重试保存'}
                 </button>
               )}
-              <label className="task-poll-toggle">
-                <span>自动轮询</span>
-                <div className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={autoPoll}
-                    onChange={(e) => setAutoPoll(e.target.checked)}
-                  />
-                  <span className="toggle-slider"></span>
-                </div>
-              </label>
+              {isProcessing && (
+                <label className="task-poll-toggle">
+                  <span>自动轮询</span>
+                  <div className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoPoll}
+                      onChange={(e) => setAutoPoll(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </div>
+                </label>
+              )}
             </div>
 
             {(downloading || downloadProgress) && (
@@ -1128,7 +1248,7 @@ export default function TaskDetailPage() {
           {task.local_status === 'failed' && task.error_message && (
             <section className="task-detail-card task-error-card">
               <div className="task-card-head">
-                <h2>错误信息</h2>
+                <h2>失败原因</h2>
               </div>
               <p>{task.error_message}</p>
             </section>
@@ -1137,9 +1257,158 @@ export default function TaskDetailPage() {
           <section className="task-detail-card">
             <div className="task-card-head">
               <div>
-                <h2>官方扣费明细</h2>
-                <p>这里展示 Provider 官方真实成本；它和用户内部点数扣除是两套账。</p>
+                <h2>输入摘要</h2>
+                <p>{inputChips.join(' · ') || '无参数记录'}</p>
               </div>
+            </div>
+
+            <div className="task-input-chips">
+              {inputChips.map((item) => (
+                <span key={String(item)}>{item}</span>
+              ))}
+            </div>
+
+            <details className="task-inline-details">
+              <summary>查看提示词和完整参数</summary>
+              <div className="task-prompt-box">{task.prompt || '无提示词'}</div>
+              <div className="task-param-grid">
+                {[...parameterItems, ...advancedParameterItems].map((item) => (
+                  <div key={item.label} className="task-param-item">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            {(referenceImages.length > 0 || referenceVideos.length > 0 || referenceAudios.length > 0 || frameImages.length > 0 || task.first_frame_url || task.last_frame_url) ? (
+              <div className="task-reference-section">
+                {referenceImages.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">参考图片 ({referenceImages.length})</div>
+                    <div className="task-reference-grid">
+                      {referenceImages.map((url, i) => (
+                        <a key={url + i} className="task-reference-thumb" href={url} target="_blank" rel="noopener noreferrer" title={url}>
+                          <img src={url} alt={`参考图片 ${i + 1}`} />
+                          <span>图 {i + 1}</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {frameImages.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">多帧图片 ({frameImages.length})</div>
+                    <div className="task-reference-list">
+                      {frameImages.map((url, i) => (
+                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
+                          第 {i + 1} 帧 · {truncateUrl(url)}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(task.first_frame_url || task.last_frame_url) && (
+                  <div>
+                    <div className="task-muted-label">首尾帧</div>
+                    <div className="task-reference-list">
+                      {task.first_frame_url && (
+                        <a href={task.first_frame_url} target="_blank" rel="noopener noreferrer">
+                          首帧 · {truncateUrl(task.first_frame_url)}
+                        </a>
+                      )}
+                      {task.last_frame_url && (
+                        <a href={task.last_frame_url} target="_blank" rel="noopener noreferrer">
+                          尾帧 · {truncateUrl(task.last_frame_url)}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {referenceVideos.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">参考视频 ({referenceVideos.length})</div>
+                    <div className="task-reference-list">
+                      {referenceVideos.map((url, i) => (
+                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
+                          视频 {i + 1} · {truncateUrl(url)}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {referenceAudios.length > 0 && (
+                  <div>
+                    <div className="task-muted-label">参考音频 ({referenceAudios.length})</div>
+                    <div className="task-reference-list">
+                      {referenceAudios.map((url, i) => (
+                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
+                          音频 {i + 1} · {truncateUrl(url)}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="task-empty-line">本任务没有参考素材。</div>
+            )}
+          </section>
+
+          {referenceAssets.length > 0 && (
+            <section className="task-detail-card">
+              <div className="task-card-head">
+                <div>
+                  <h2>参考图</h2>
+                  <p>{referenceAssets.length} 张，按提交顺序。</p>
+                </div>
+              </div>
+              <div className="task-asset-grid">
+                {referenceAssets.map((asset, i) => {
+                  const imgUrl = asset.providerPreviewUrl || asset.originalUrl;
+                  return (
+                    <div key={asset.localAssetId} className="task-asset-thumb">
+                      <div className="task-asset-image">
+                        {imgUrl ? (
+                          <img
+                            src={imgUrl}
+                            alt={asset.name}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+                        <span>{i + 1}</span>
+                      </div>
+                      <strong title={asset.name}>{asset.name}</strong>
+                      <small title={asset.providerAssetId}>{shortId(asset.providerAssetId, 12)}</small>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <details className="task-detail-card task-ops-panel">
+            <summary>排障与账务</summary>
+            <div className="task-card-head task-details-head">
+              <div>
+                <h2>运维信息</h2>
+                <p>平时不需要看。只有查失败、查扣费、改项目归属时使用。</p>
+              </div>
+            </div>
+
+            <div className="task-ops-summary">
+              <div><span>任务 ID</span><strong title={task.id}>{shortId(task.id, 16)}</strong></div>
+              <div><span>Provider ID</span><strong title={task.provider_task_id || ''}>{shortId(task.provider_task_id, 16)}</strong></div>
+              <div><span>Provider 状态</span><strong>{task.provider_status || '-'}</strong></div>
+              <div><span>完成时间</span><strong>{formatDateTime(task.completed_at)}</strong></div>
+              <div><span>视频来源</span><strong>{resultStorageText}</strong></div>
+              <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
             </div>
 
             <div className="task-param-grid">
@@ -1236,146 +1505,7 @@ export default function TaskDetailPage() {
                   : ' 等 Seedance 返回 actual_cost 并完成入账后，这里会出现对应账本行。'}
               </div>
             ) : null}
-          </section>
-
-          <section className="task-detail-card">
-            <div className="task-card-head">
-              <div>
-                <h2>提示词与参考素材</h2>
-                <p>按提交时的顺序展示，便于对应提示词里的图 1、图 2。</p>
-              </div>
-            </div>
-
-            <div className="task-prompt-box">{task.prompt || '无提示词'}</div>
-
-            <div className="task-param-grid">
-              {parameterItems.map((item) => (
-                <div key={item.label} className="task-param-item">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))}
-              {resolvedModeLabel && (
-                <div className="task-param-item">
-                  <span>Resolved 模式</span>
-                  <strong>{resolvedModeLabel}</strong>
-                </div>
-              )}
-            </div>
-
-            {(referenceImages.length > 0 || referenceVideos.length > 0 || referenceAudios.length > 0 || frameImages.length > 0 || task.first_frame_url || task.last_frame_url) ? (
-              <div className="task-reference-section">
-                {referenceImages.length > 0 && (
-                  <div>
-                    <div className="task-muted-label">参考图片 ({referenceImages.length})</div>
-                    <div className="task-reference-grid">
-                      {referenceImages.map((url, i) => (
-                        <a key={url + i} className="task-reference-thumb" href={url} target="_blank" rel="noopener noreferrer" title={url}>
-                          <img src={url} alt={`参考图片 ${i + 1}`} />
-                          <span>图 {i + 1}</span>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {frameImages.length > 0 && (
-                  <div>
-                    <div className="task-muted-label">多帧图片 ({frameImages.length})</div>
-                    <div className="task-reference-list">
-                      {frameImages.map((url, i) => (
-                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
-                          第 {i + 1} 帧 · {truncateUrl(url)}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {(task.first_frame_url || task.last_frame_url) && (
-                  <div>
-                    <div className="task-muted-label">首尾帧</div>
-                    <div className="task-reference-list">
-                      {task.first_frame_url && (
-                        <a href={task.first_frame_url} target="_blank" rel="noopener noreferrer">
-                          首帧 · {truncateUrl(task.first_frame_url)}
-                        </a>
-                      )}
-                      {task.last_frame_url && (
-                        <a href={task.last_frame_url} target="_blank" rel="noopener noreferrer">
-                          尾帧 · {truncateUrl(task.last_frame_url)}
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {referenceVideos.length > 0 && (
-                  <div>
-                    <div className="task-muted-label">参考视频 ({referenceVideos.length})</div>
-                    <div className="task-reference-list">
-                      {referenceVideos.map((url, i) => (
-                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
-                          视频 {i + 1} · {truncateUrl(url)}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {referenceAudios.length > 0 && (
-                  <div>
-                    <div className="task-muted-label">参考音频 ({referenceAudios.length})</div>
-                    <div className="task-reference-list">
-                      {referenceAudios.map((url, i) => (
-                        <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
-                          音频 {i + 1} · {truncateUrl(url)}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="task-empty-line">本任务没有参考素材。</div>
-            )}
-          </section>
-
-          {referenceAssets.length > 0 && (
-            <section className="task-detail-card">
-              <div className="task-card-head">
-                <div>
-                  <h2>Seedance 参考图资产</h2>
-                  <p>{referenceAssets.length} 张 Provider 资产，按提交顺序展示。</p>
-                </div>
-              </div>
-              <div className="task-asset-grid">
-                {referenceAssets.map((asset, i) => {
-                  const imgUrl = asset.providerPreviewUrl || asset.originalUrl;
-                  return (
-                    <div key={asset.localAssetId} className="task-asset-thumb">
-                      <div className="task-asset-image">
-                        {imgUrl ? (
-                          <img
-                            src={imgUrl}
-                            alt={asset.name}
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                        ) : null}
-                        <span>{i + 1}</span>
-                      </div>
-                      <strong title={asset.name}>{asset.name}</strong>
-                      <small title={asset.providerAssetId}>{shortId(asset.providerAssetId, 12)}</small>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          <details className="task-detail-card task-manage-panel">
+            <details className="task-subdetails task-manage-panel">
             <summary>项目归属调整</summary>
             <div className="project-move-panel task-project-move">
               <div>
@@ -1406,9 +1536,9 @@ export default function TaskDetailPage() {
               </button>
               {moveMessage && <p className="task-move-message">{moveMessage}</p>}
             </div>
-          </details>
+            </details>
 
-          <details className="task-detail-card task-technical-panel">
+            <details className="task-subdetails task-technical-panel">
             <summary>技术调试与原始响应</summary>
             <ReferenceImageDebug
               task={task}
@@ -1451,72 +1581,9 @@ export default function TaskDetailPage() {
                 )}
               </div>
             </div>
+            </details>
           </details>
         </main>
-
-        <aside className="task-detail-sidebar">
-          <section className="task-side-card">
-            <h2>任务概览</h2>
-            <div className="task-summary-list">
-              <div>
-                <span>项目</span>
-                <strong>
-                  {task.project ? (
-                    <Link className="table-link" href={`/projects/${task.project.id}`}>{task.project.name}</Link>
-                  ) : (
-                    <span className="text-red">未归属</span>
-                  )}
-                </strong>
-              </div>
-              <div>
-                <span>Provider 状态</span>
-                <strong>{task.provider_status || '-'}</strong>
-              </div>
-              <div>
-                <span>官方成本状态</span>
-                <strong>{costStatusLabel(task.provider_cost_status)} · {task.cost_allocation_status}</strong>
-              </div>
-              <div>
-                <span>官方真实成本</span>
-                <strong>{officialCostText}</strong>
-              </div>
-              <div>
-                <span>内部点数扣除</span>
-                <strong>预估 {task.estimated_cost ?? '-'} / 冻结 {task.frozen_cost ?? 0} / 扣除 {task.actual_cost ?? '-'} / 返还 {task.refund_amount ?? 0}</strong>
-              </div>
-              <div>
-                <span>official_charge 账本</span>
-                <strong>{officialCharges.length > 0 ? `${officialCharges.length} 条` : '待官方确认'}</strong>
-              </div>
-              <div>
-                <span>本地任务 ID</span>
-                <strong title={task.id}>{shortId(task.id, 14)}</strong>
-              </div>
-              <div>
-                <span>Provider ID</span>
-                <strong title={task.provider_task_id || ''}>{shortId(task.provider_task_id, 14)}</strong>
-              </div>
-            </div>
-          </section>
-
-          <section className="task-side-card">
-            <h2>时间线</h2>
-            <div className="task-summary-list">
-              {timelineItems.map((item) => (
-                <div key={item.label}>
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))}
-              {task.provider_cost_confirmed_at && (
-                <div>
-                  <span>成本确认</span>
-                  <strong>{formatDateTime(task.provider_cost_confirmed_at)}</strong>
-                </div>
-              )}
-            </div>
-          </section>
-        </aside>
       </div>
     </div>
   );

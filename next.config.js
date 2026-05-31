@@ -1,5 +1,9 @@
+const distDir = process.env.NEXT_DIST_DIR?.trim();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  ...(distDir ? { distDir } : {}),
+
   // 允许访问 public 目录下的上传文件
   // 文件保存到 public/uploads/，通过 /uploads/... 路径访问
 

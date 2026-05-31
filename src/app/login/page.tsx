@@ -97,6 +97,12 @@ export default function LoginPage({
       const data = await res.json();
       if (!res.ok) {
         if (data.code === 'disabled' || data.code === 'not_configured') {
+          if (!data.cli_login_available) {
+            setError(data.error || '飞书登录暂不可用');
+            setFeishuLoading(false);
+            return;
+          }
+
           const cliRes = await fetch('/api/auth/feishu/cli-login', {
             method: 'POST',
             cache: 'no-store',
@@ -155,14 +161,13 @@ export default function LoginPage({
           style={{
             width: '100%',
             padding: '12px',
-            background: feishuLoading ? 'rgba(36, 116, 255, 0.5)' : '#2474ff',
+            background: feishuLoading ? 'rgba(29, 78, 216, 0.52)' : '#1d4ed8',
             border: 'none',
             borderRadius: 8,
-            color: '#f8fbff',
+            color: '#f8fafc',
             fontSize: 14,
             fontWeight: 700,
             cursor: loading || feishuLoading ? 'not-allowed' : 'pointer',
-            transition: 'background 0.2s',
           }}
         >
           {feishuLoading ? '正在前往飞书...' : '使用飞书登录'}
@@ -276,7 +281,6 @@ export default function LoginPage({
                 fontSize: 14,
                 fontWeight: 600,
                 cursor: loading ? 'not-allowed' : 'pointer',
-                transition: 'background 0.2s',
               }}
             >
               {loading ? '登录中...' : '登录'}
@@ -290,7 +294,7 @@ export default function LoginPage({
           fontSize: 12,
           color: 'rgba(255,255,255,0.3)',
         }}>
-          没有账号？ <Link href="/register" style={{ color: '#a5b4fc', textDecoration: 'none' }}>公司邮箱注册</Link>
+          没有账号？ <Link href="/register" style={{ color: '#a5b4fc', textDecoration: 'none' }}>邮箱注册</Link>
           <div style={{ marginTop: 8 }}>遇到问题？联系管理员</div>
         </div>
       </div>

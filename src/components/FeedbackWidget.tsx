@@ -281,7 +281,6 @@ export default function FeedbackWidget() {
           cursor: 'pointer',
           fontSize: 24,
           lineHeight: '56px',
-          transition: 'transform 160ms ease, background 160ms ease',
         }}
         onMouseEnter={(event) => { event.currentTarget.style.transform = 'scale(1.06)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.transform = 'scale(1)'; }}

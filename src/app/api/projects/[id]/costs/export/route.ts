@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanViewProject } from '@/lib/projects/permissions';
+import { amountMinorToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,8 +60,11 @@ export async function GET(
       'charged_credits',
       'refunded_credits',
       'official_cost_minor',
+      'official_cost_cny_estimate',
       'final_cost_minor',
+      'final_cost_cny_estimate',
       'cost_currency',
+      'cny_estimate_rate',
       'cost_status',
       'provider_task_id',
       'created_at',
@@ -80,8 +84,11 @@ export async function GET(
       task.actual_cost ?? '',
       task.refund_amount ?? '',
       task.provider_official_amount_minor ?? '',
+      amountMinorToCnyEstimate(task.provider_official_amount_minor, task.provider_cost_currency),
       task.provider_final_amount_minor ?? '',
+      amountMinorToCnyEstimate(task.provider_final_amount_minor, task.provider_cost_currency),
       task.provider_cost_currency || '',
+      task.provider_cost_currency === 'USD' ? usdToCnyRateText() : '',
       task.provider_cost_status,
       task.provider_task_id || '',
       task.created_at.toISOString(),

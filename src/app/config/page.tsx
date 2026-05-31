@@ -36,28 +36,22 @@ export default function ConfigPage() {
     setTesting(true);
     setTestResult(null);
 
-    // Simple test: try to call create with dummy data to see if API is reachable
     try {
-      const res = await fetch('/api/video/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: 'test connection',
-          mode: 'text_to_video',
-          ratio: '16:9',
-          duration: 5,
-          resolution: '720p',
-        }),
+      const res = await fetch('/api/config', {
+        method: 'GET',
+        cache: 'no-store',
       });
 
       const data = await res.json();
 
       if (res.ok) {
-        setTestResult({ success: true, message: 'API 连接成功！' });
-      } else if (data.error === 'API key not configured') {
-        setTestResult({ success: false, message: 'API Key 未配置' });
+        if (data?.api_key_configured) {
+          setTestResult({ success: true, message: `API 配置可用，当前 Provider: ${data.provider} / ${data.model}` });
+        } else {
+          setTestResult({ success: false, message: 'API Key 未配置，无法发起生成任务' });
+        }
       } else {
-        setTestResult({ success: false, message: `API 响应: ${data.message || data.error}` });
+        setTestResult({ success: false, message: `API 配置异常: ${data.message || data.error}` });
       }
     } catch (error) {
       setTestResult({
@@ -127,7 +121,7 @@ export default function ConfigPage() {
                 测试中...
               </>
             ) : (
-              '测试连接'
+              '测试配置可用性'
             )}
           </button>
 
@@ -260,86 +254,14 @@ JIMENG_API_KEY=your_api_key_here`}
           </div>
         </div>
 
-        {/* 资产列表 */}
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-2">4. 资产列表 (ListAssets)</h3>
-          <p className="text-xs text-gray mb-2">
-            支持 <code>Filter</code> 按名称过滤，<code>PageNumber</code>/<code>PageSize</code> 分页
-          </p>
-          <div className="json-viewer">
-{`curl -X POST "https://etc.seedance-api.net/server/asset/list" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "apiKey": "YOUR_API_KEY",
-    "PageNumber": 1,
-    "PageSize": 10,
-    "Filter": {
-      "Name": "asset"
-    }
-  }'
-
-# 响应示例:
-{
-  "ResponseMetadata": {
-    "RequestId": "2026042301267890E55B1005067556DDA8",
-    "Action": "ListAssets",
-    "Version": "2024-01-01",
-    "Service": "ark",
-    "Region": "ap-southeast-1"
-  },
-  "Result": {
-    "Items": [{
-      "Id": "asset-20260423005034-afdj8",
-      "Name": "asset1",
-      "URL": "https://ark-media-asset-ap-southeast-1...jpg?X-Tos-Expires=43200&X-Tos-Signature=...",
-      "AssetType": "Image",
-      "GroupId": "group-20260423000634-agbr5",
-      "Status": "Active",
-      "CreateTime": "2026-04-23T16:15:23Z",
-      "UpdateTime": "2026-04-23T16:55:39Z",
-      "ProjectName": "default"
-    }],
-    "TotalCount": 1,
-    "PageNumber": 1,
-    "PageSize": 10
-  }
-}`}
-          </div>
+        <div className="flex gap-4">
+          <Link href="/generate" className="btn btn-primary">
+            去生成视频
+          </Link>
+          <Link href="/tasks" className="btn btn-secondary">
+            查看任务列表
+          </Link>
         </div>
-
-        {/* 删除资产 */}
-        <div className="mt-6">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">5. 删除资产 (DeleteAsset)</h3>
-          <div className="json-viewer">
-{`curl -X POST "https://etc.seedance-api.net/server/asset/delete" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "apiKey": "YOUR_API_KEY",
-    "Id": "asset-20260423005034-afdj8"
-  }'
-
-# 响应示例:
-{
-  "ResponseMetadata": {
-    "RequestId": "202604230104562317CF0BD03E9251ECAC",
-    "Action": "DeleteAsset",
-    "Version": "2024-01-01",
-    "Service": "ark",
-    "Region": "ap-southeast-1"
-  },
-  "Result": {}
-}`}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex gap-4">
-        <Link href="/generate" className="btn btn-primary">
-          去生成视频
-        </Link>
-        <Link href="/tasks" className="btn btn-secondary">
-          查看任务列表
-        </Link>
       </div>
     </div>
   );

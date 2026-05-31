@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
+import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,9 @@ export async function GET(request: NextRequest) {
         task: {
           select: {
             prompt: true,
+            source_type: true,
+            source_label: true,
+            source_request_id: true,
             local_status: true,
             model: true,
             resolution: true,
@@ -118,6 +122,9 @@ export async function GET(request: NextRequest) {
       'provider_http_status',
       'provider_error_code',
       'task_id',
+      'task_source_type',
+      'task_source_label',
+      'task_source_request_id',
       'task_status',
       'task_model',
       'task_resolution',
@@ -130,6 +137,8 @@ export async function GET(request: NextRequest) {
       'amount_minor',
       'amount_micros',
       'currency',
+      'cny_estimate',
+      'cny_estimate_rate',
       'usage_quantity',
       'usage_unit',
       'official_charge_id',
@@ -158,6 +167,9 @@ export async function GET(request: NextRequest) {
       ledger.provider_request?.http_status,
       ledger.provider_request?.error_code,
       ledger.task_id,
+      ledger.task?.source_type,
+      ledger.task?.source_label,
+      ledger.task?.source_request_id,
       ledger.task?.local_status,
       ledger.task?.model,
       ledger.task?.resolution,
@@ -170,6 +182,8 @@ export async function GET(request: NextRequest) {
       ledger.amount_minor,
       ledger.amount_micros,
       ledger.currency,
+      costAmountToCnyEstimate(ledger),
+      ledger.currency === 'USD' ? usdToCnyRateText() : '',
       ledger.usage_quantity,
       ledger.usage_unit,
       ledger.official_charge_id,

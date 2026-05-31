@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import PageBanner from '@/components/PageBanner';
+import { formatAmountMicrosWithCny, formatAmountMinorWithCny } from '@/lib/costs/currency';
 
 interface ProjectDetail {
   id: string;
@@ -161,25 +163,11 @@ function canDeleteProject(project: ProjectDetail): boolean {
 }
 
 function formatAmountMinor(amount: number | null | undefined, currency?: string | null): string {
-  if (amount === null || amount === undefined) return '待官方确认';
-  const value = amount / 100;
-  if (currency === 'USD') return `$${value.toFixed(2)}`;
-  return `¥${value.toFixed(2)}`;
-}
-
-function currencyPrefix(currency?: string | null): string {
-  if (currency === 'USD') return '$';
-  if (!currency || currency === 'CNY') return '¥';
-  return `${currency} `;
+  return formatAmountMinorWithCny(amount, currency);
 }
 
 function formatAmountMicros(amount: number | null | undefined, currency?: string | null): string {
-  if (amount === null || amount === undefined) return '待官方确认';
-  const value = amount / 1000000;
-  return `${currencyPrefix(currency)}${value.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  })}`;
+  return formatAmountMicrosWithCny(amount, currency);
 }
 
 function formatLedgerAmount(item: {
@@ -431,10 +419,13 @@ export default function ProjectDetailPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">{projectDisplayName(project)}</h1>
-        <p className="page-description">{project.description || '项目中的生成任务、参考图集和成员协作。'}</p>
-      </div>
+      <PageBanner
+        eyebrow="项目详情"
+        title={projectDisplayName(project)}
+        description={project.description || '项目中的生成任务、参考图集和成员协作。'}
+        backHref="/projects"
+        backLabel="返回项目"
+      />
 
       {(message || error) && (
         <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>

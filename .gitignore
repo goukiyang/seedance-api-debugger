@@ -5,6 +5,9 @@
 
 # Next.js build
 .next/
+.next-dev/
+.next-prod/
+.next.bad-*/
 out/
 .vercel/
 
@@ -43,3 +46,7 @@ prisma/*.db
 # Runtime uploads (keep directory structure only)
 public/uploads/*
 !public/uploads/.gitkeep
+
+# Runtime generated videos and thumbnails
+public/videos/*
+public/videos/thumbnails/*

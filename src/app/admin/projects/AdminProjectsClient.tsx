@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import PageBanner from '@/components/PageBanner';
+import PaginationControls from '@/components/PaginationControls';
 
 interface ProjectItem {
   id: string;
@@ -34,9 +36,12 @@ function projectDisplayName(project: ProjectItem): string {
   return project.name;
 }
 
+const ADMIN_PROJECTS_PAGE_SIZE = 20;
+
 export default function AdminProjectsClient() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -58,6 +63,13 @@ export default function AdminProjectsClient() {
   useEffect(() => {
     loadProjects();
   }, []);
+
+  const totalPages = Math.max(1, Math.ceil(projects.length / ADMIN_PROJECTS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedProjects = projects.slice(
+    (currentPage - 1) * ADMIN_PROJECTS_PAGE_SIZE,
+    currentPage * ADMIN_PROJECTS_PAGE_SIZE,
+  );
 
   const updateProjectStatus = async (project: ProjectItem, action: 'archive' | 'restore') => {
     setMessage('');
@@ -101,10 +113,11 @@ export default function AdminProjectsClient() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">项目管理</h1>
-        <p className="page-description">管理员可查看全部项目，归档协作项目，或删除没有内容的空协作项目。</p>
-      </div>
+      <PageBanner
+        eyebrow="管理员后台"
+        title="项目管理"
+        description="管理员可查看全部项目，归档协作项目，或删除没有内容的空协作项目。"
+      />
 
       <div className="card">
         {message && <p className="text-green">{message}</p>}
@@ -126,7 +139,7 @@ export default function AdminProjectsClient() {
               </tr>
             </thead>
             <tbody>
-              {projects.map((project) => (
+              {pagedProjects.map((project) => (
                 <tr key={project.id}>
                   <td>{projectDisplayName(project)}</td>
                   <td>{project.type} / {project.visibility}</td>
@@ -168,6 +181,14 @@ export default function AdminProjectsClient() {
             </tbody>
           </table>
         )}
+        <PaginationControls
+          page={currentPage}
+          totalPages={totalPages}
+          total={projects.length}
+          pageSize={ADMIN_PROJECTS_PAGE_SIZE}
+          label="项目"
+          onPageChange={setPage}
+        />
       </div>
     </div>
   );

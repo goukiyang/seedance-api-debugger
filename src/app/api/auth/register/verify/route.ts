@@ -4,8 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { createSession } from '@/lib/auth/session';
 import {
   REGISTER_CHALLENGE_COOKIE,
-  isCompanyEmail,
-  normalizeCompanyEmail,
+  isValidRegisterEmail,
+  normalizeEmail,
   normalizeText,
 } from '@/lib/auth/registration/config';
 import {
@@ -20,14 +20,14 @@ const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const email = normalizeCompanyEmail(body.email);
+    const email = normalizeEmail(body.email);
     const code = normalizeText(body.code);
 
     if (!email || !code) {
       return NextResponse.json({ error: '邮箱和验证码不能为空' }, { status: 400 });
     }
-    if (!isCompanyEmail(email)) {
-      return NextResponse.json({ error: '请使用 @youdoogo.com 公司邮箱注册' }, { status: 400 });
+    if (!isValidRegisterEmail(email)) {
+      return NextResponse.json({ error: '请输入有效邮箱' }, { status: 400 });
     }
 
     const cookieStore = await cookies();

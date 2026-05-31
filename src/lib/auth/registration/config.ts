@@ -1,4 +1,3 @@
-export const COMPANY_EMAIL_DOMAIN = '@youdoogo.com';
 export const REGISTER_CHALLENGE_COOKIE = 'register_challenge';
 export const REGISTER_CODE_TTL_SECONDS = 10 * 60;
 export const MIN_REGISTER_PASSWORD_LENGTH = 8;
@@ -15,15 +14,8 @@ export function normalizeEmail(value: unknown): string {
   return normalizeText(value).toLowerCase();
 }
 
-export function normalizeCompanyEmail(value: unknown): string {
-  const input = normalizeEmail(value);
-  if (!input) return '';
-  if (input.includes('@')) return input;
-  return `${input}${COMPANY_EMAIL_DOMAIN}`;
-}
-
-export function isCompanyEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.endsWith(COMPANY_EMAIL_DOMAIN);
+export function isValidRegisterEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 export function usernameBaseFromEmail(email: string): string {

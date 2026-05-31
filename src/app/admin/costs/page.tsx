@@ -3,23 +3,25 @@ import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
+import PageBanner from '@/components/PageBanner';
+import {
+  formatAmountMicrosWithCny,
+  formatAmountMinorWithCny,
+  formatCurrencyAmount,
+  usdToCnyRateText,
+} from '@/lib/costs/currency';
 import OfficialChargeForm from './OfficialChargeForm';
 import OfficialChargeImportForm from './OfficialChargeImportForm';
+import ProviderBalancePanel from './ProviderBalancePanel';
 
 export const dynamic = 'force-dynamic';
 
 function formatAmountMinor(amount: number | null | undefined, currency?: string | null) {
-  if (amount === null || amount === undefined) return '待官方确认';
-  const value = amount / 100;
-  if (currency === 'USD') return `$${value.toFixed(2)}`;
-  return `¥${value.toFixed(2)}`;
+  return formatAmountMinorWithCny(amount, currency);
 }
 
 function formatAmountMicros(amount: number | null | undefined, currency?: string | null) {
-  if (amount === null || amount === undefined) return '待官方确认';
-  const value = amount / 1_000_000;
-  const text = value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
-  return currency ? `${text} ${currency}` : text;
+  return formatAmountMicrosWithCny(amount, currency);
 }
 
 function formatCostAmount(item: {
@@ -74,6 +76,48 @@ function auditStatusText(count: number) {
   return count === 0 ? '正常' : `${count} 条`;
 }
 
+function providerBalanceSnapshotDto(snapshot: {
+  id: string;
+  provider_name: string;
+  provider_account_id: string | null;
+  balance_kind: string;
+  amount_decimal: string | null;
+  amount_minor: number | null;
+  currency: string | null;
+  quota_amount: number | null;
+  quota_unit: string | null;
+  source: string;
+  status: string;
+  note: string | null;
+  error_message: string | null;
+  fetched_at: Date;
+  created_at: Date;
+}) {
+  return {
+    ...snapshot,
+    fetched_at: snapshot.fetched_at.toISOString(),
+    created_at: snapshot.created_at.toISOString(),
+  };
+}
+
+function formatProviderBalanceAmount(snapshot: ReturnType<typeof providerBalanceSnapshotDto> | null) {
+  if (!snapshot) return '未录入';
+  if (snapshot.amount_decimal && snapshot.currency) {
+    return formatCurrencyAmount(Number(snapshot.amount_decimal), snapshot.currency, 2);
+  }
+  if (snapshot.quota_amount !== null && snapshot.quota_amount !== undefined) {
+    return `${snapshot.quota_amount} ${snapshot.quota_unit || 'quota'}`;
+  }
+  return '未识别';
+}
+
+function providerBalanceHint(snapshot: ReturnType<typeof providerBalanceSnapshotDto> | null, syncEnabled: boolean) {
+  if (!snapshot) return syncEnabled ? '可从供应商拉取或手动固化' : '下方手动录入余额后会显示在这里';
+  if (snapshot.status === 'failed') return '最近一次拉取失败，请检查余额接口';
+  const source = snapshot.source === 'manual' ? '手动记录' : '供应商接口';
+  return `${source} · ${new Date(snapshot.fetched_at).toLocaleString('zh-CN')}`;
+}
+
 export default async function AdminCostsPage() {
   const user = await getSession();
   if (!user) redirect('/login');
@@ -90,6 +134,7 @@ export default async function AdminCostsPage() {
     recentIssues,
     failedRequests,
     auditSummary,
+    providerBalanceSnapshots,
   ] = await Promise.all([
     prisma.videoTask.count(),
     prisma.videoTask.count({ where: { local_status: { in: ['succeeded', 'failed', 'cancelled'] } } }),
@@ -134,6 +179,8 @@ export default async function AdminCostsPage() {
       select: {
         id: true,
         prompt: true,
+        source_type: true,
+        source_label: true,
         local_status: true,
         estimated_cost: true,
         actual_cost: true,
@@ -163,8 +210,16 @@ export default async function AdminCostsPage() {
       },
     }),
     getCostLedgerAuditSummary(),
+    prisma.providerAccountSnapshot.findMany({
+      where: { provider_name: 'seedance' },
+      orderBy: { fetched_at: 'desc' },
+      take: 10,
+    }),
   ]);
   const officialCostTotals = sumCostRowsByCurrency(officialCostRows);
+  const providerBalanceViews = providerBalanceSnapshots.map(providerBalanceSnapshotDto);
+  const latestProviderBalance = providerBalanceViews[0] || null;
+  const providerBalanceSyncEnabled = Boolean(process.env.SEEDANCE_BALANCE_ENDPOINT?.trim());
 
   const auditChecks = [
     {
@@ -201,17 +256,21 @@ export default async function AdminCostsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="flex items-center justify-between" style={{ gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h1 className="page-title">成本复盘</h1>
-            <p className="page-description">先看待确认和异常，再回到项目复盘。官方实际扣费接入后会进入这里对账。</p>
-          </div>
-          <Link className="btn btn-secondary" href="/api/admin/costs/export">
-            导出总账 CSV
-          </Link>
-        </div>
-      </div>
+      <PageBanner
+        eyebrow="管理员后台"
+        title="计费与成本复盘"
+        description="余额看供应商账户是否还能继续生成，成本看任务、项目和官方扣费能否闭环对账。"
+        actions={(
+          <>
+            <Link className="btn btn-secondary" href="/admin">
+              返回后台总览
+            </Link>
+            <Link className="btn btn-secondary" href="/api/admin/costs/export">
+              导出总账 CSV
+            </Link>
+          </>
+        )}
+      />
 
       <div className="stats-grid">
         <div className="stat-card">
@@ -222,7 +281,12 @@ export default async function AdminCostsPage() {
         <div className="stat-card">
           <span className="stat-label">官方成本</span>
           <strong className="stat-value">{formatCurrencyTotals(officialCostTotals)}</strong>
-          <span className="stat-sub">未接官方扣费时显示待确认</span>
+          <span className="stat-sub">USD 折人民币按 {usdToCnyRateText()}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">供应商余额</span>
+          <strong className="stat-value">{formatProviderBalanceAmount(latestProviderBalance)}</strong>
+          <span className="stat-sub">{providerBalanceHint(latestProviderBalance, providerBalanceSyncEnabled)}</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">待确认成本</span>
@@ -235,6 +299,12 @@ export default async function AdminCostsPage() {
           <span className="stat-sub">未归属 {unallocatedCount} · 失败待判 {failedPossibleChargeCount}</span>
         </div>
       </div>
+
+      <ProviderBalancePanel
+        latest={latestProviderBalance}
+        snapshots={providerBalanceViews}
+        syncEnabled={providerBalanceSyncEnabled}
+      />
 
       <div className="card">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
@@ -317,6 +387,7 @@ export default async function AdminCostsPage() {
             <thead>
               <tr>
                 <th>任务</th>
+                <th>来源</th>
                 <th>项目</th>
                 <th>创建者</th>
                 <th>状态</th>
@@ -332,6 +403,7 @@ export default async function AdminCostsPage() {
                   <td className="truncate" style={{ maxWidth: 300 }} title={task.prompt}>
                     {task.prompt || task.id}
                   </td>
+                  <td>{task.source_type === 'codex_api' ? (task.source_label || 'Codex API') : (task.source_label || 'Web UI')}</td>
                   <td>
                     {task.project ? (
                       <Link className="link" href={`/projects/${task.project.id}`}>{task.project.name}</Link>

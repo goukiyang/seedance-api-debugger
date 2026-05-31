@@ -6,12 +6,17 @@ export interface NavItem {
 }
 
 export const shellRoutes = [
+  '/workbench',
   '/account',
   '/projects',
   '/collections',
+  '/cutout',
   '/generate/canvas',
+  '/admin',
   '/admin/projects',
+  '/admin/outputs',
   '/admin/costs',
+  '/admin/integrations',
   '/admin/feedback',
 ] as const;
 
@@ -24,20 +29,27 @@ const shellRoutePrefixes = [
   '/projects',
   '/collections',
   '/admin/users',
+  '/admin/outputs',
   '/admin/costs',
+  '/admin/integrations',
 ] as const;
 
 export const userNavItems: NavItem[] = [
   { label: '生成视频', href: '/generate', prefixMatch: true },
+  { label: '视频工作台', href: '/workbench', prefixMatch: true },
+  { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
   { label: '我的项目', href: '/projects', prefixMatch: true },
   { label: '参考图集', href: '/collections', prefixMatch: true },
   { label: '我的任务', href: '/tasks', prefixMatch: true },
 ];
 
 export const adminNavItems: NavItem[] = [
+  { label: '后台总览', href: '/admin' },
   { label: '用户管理', href: '/admin/users' },
   { label: '项目管理', href: '/admin/projects' },
-  { label: '成本复盘', href: '/admin/costs' },
+  { label: '产出留存', href: '/admin/outputs' },
+  { label: '计费与成本', href: '/admin/costs' },
+  { label: '接口配置', href: '/admin/integrations' },
   { label: '反馈管理', href: '/admin/feedback' },
 ];
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import PageBanner from '@/components/PageBanner';
+import PaginationControls from '@/components/PaginationControls';
 import type { GenerationMode } from '@/types';
 import { GENERATION_MODE_LABELS } from '@/types';
 
@@ -15,6 +17,7 @@ interface Task {
   resolution: string | null;
   local_status: string;
   result_video_url: string | null;
+  result_last_frame_url: string | null;
   local_video_path: string | null;
   error_message: string | null;
   estimated_cost: number | null;
@@ -25,6 +28,12 @@ interface Task {
   reference_image_urls: string | null;
   created_at: string;
   completed_at: string | null;
+  retention_status?: string | null;
+  user_deleted_at?: string | null;
+  user_deleted_by?: string | null;
+  admin_hidden_at?: string | null;
+  admin_hidden_by?: string | null;
+  delete_reason?: string | null;
   project?: { id: string; name: string; type: string } | null;
 }
 
@@ -94,11 +103,73 @@ function taskCostText(task: Task): string {
   return '未记录';
 }
 
+type TaskPreviewModel = {
+  kind: 'image' | 'empty';
+  src?: string;
+  label: string;
+};
+
+function getTaskPreview(task: Task, failedSrcs: string[] = []): TaskPreviewModel {
+  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
+  const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
+
+  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
+    return { kind: 'image', src: thumbnailSrc, label: '视频帧' };
+  }
+
+  if (task.local_status === 'failed') {
+    return { kind: 'empty', label: '失败无视频帧' };
+  }
+
+  if (['submitted', 'running'].includes(task.local_status)) {
+    return { kind: 'empty', label: '等待视频帧' };
+  }
+
+  return { kind: 'empty', label: '暂无视频帧' };
+}
+
+function TaskPreview({ task }: { task: Task }) {
+  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
+  const preview = getTaskPreview(task, failedSrcs);
+  const markFailed = (src?: string) => {
+    if (!src) return;
+    setFailedSrcs((current) => current.includes(src) ? current : [...current, src]);
+  };
+
+  return (
+    <Link
+      href={`/tasks/${task.id}`}
+      className={`tasks-preview tasks-preview-${preview.kind}`}
+      aria-label={`查看任务 ${task.id} 的截图和详情`}
+    >
+      {preview.kind === 'image' && preview.src && (
+        <img
+          src={preview.src}
+          alt="任务截图"
+          loading="lazy"
+          onError={() => markFailed(preview.src)}
+        />
+      )}
+      {preview.kind === 'empty' && (
+        <div className="tasks-preview-empty">
+          <span>{getStatusText(task.local_status)}</span>
+        </div>
+      )}
+      <span className="tasks-preview-label">
+        {preview.label}
+      </span>
+    </Link>
+  );
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchTasks();
@@ -109,32 +180,67 @@ export default function TasksPage() {
     try {
       const res = await fetch(`/api/video/list?page=${page}&limit=20`);
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '任务加载失败');
       setTasks(data.tasks || []);
       setPagination(data.pagination || null);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
+      setError(error instanceof Error ? error.message : '任务加载失败');
     } finally {
       setLoading(false);
     }
   };
 
+  const removeTask = async (task: Task) => {
+    if (!window.confirm('从我的任务列表移除此记录？管理员仍可在后台留存区审计和恢复。')) return;
+
+    setDeletingTaskId(task.id);
+    setMessage('');
+    setError('');
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '用户从任务列表移除' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '移除失败');
+
+      setTasks((current) => current.filter((item) => item.id !== task.id));
+      setPagination((current) => current
+        ? { ...current, total: Math.max(0, current.total - 1) }
+        : current);
+      setMessage('任务已从你的列表移除，管理员仍可在后台留存区查看。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '移除失败');
+    } finally {
+      setDeletingTaskId(null);
+    }
+  };
+
   return (
     <div className="tasks-page">
-      <div className="tasks-header">
-        <div>
-          <div className="task-detail-kicker">我的任务</div>
-          <h1 className="tasks-title">任务列表</h1>
-          <p className="tasks-description">查看生成进度、复用历史提示词和参考图。</p>
-        </div>
-        <div className="tasks-header-actions">
+      <PageBanner
+        eyebrow="我的任务"
+        title="任务列表"
+        description="查看生成进度、复用历史提示词和参考图。"
+        actions={(
+          <>
           <button className="btn btn-secondary" onClick={fetchTasks}>
             刷新列表
           </button>
           <Link href="/generate" className="btn btn-primary">
             创建新任务
           </Link>
+          </>
+        )}
+      />
+
+      {(message || error) && (
+        <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
+          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
         </div>
-      </div>
+      )}
 
       <div className="tasks-list-shell">
         {loading ? (
@@ -155,6 +261,8 @@ export default function TasksPage() {
                 const modeLabel = GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
                 return (
                   <article key={task.id} className="tasks-card">
+                    <TaskPreview task={task} />
+
                     <div className="tasks-card-main">
                       <div className="tasks-card-topline">
                         <span className={`status-badge ${getStatusClass(task.local_status)}`}>
@@ -208,34 +316,29 @@ export default function TasksPage() {
                       <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
                         重新生成
                       </Link>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={deletingTaskId === task.id}
+                        onClick={() => void removeTask(task)}
+                      >
+                        {deletingTaskId === task.id ? '移除中...' : '从列表移除'}
+                      </button>
                     </div>
                   </article>
                 );
               })}
             </div>
 
-            {pagination && pagination.total_pages > 1 && (
-              <div className="tasks-pagination">
-                <span className="text-sm text-gray">
-                  第 {pagination.page} / {pagination.total_pages} 页，共 {pagination.total} 条
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    className="btn btn-secondary"
-                    disabled={page <= 1}
-                    onClick={() => setPage(page - 1)}
-                  >
-                    上一页
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    disabled={page >= pagination.total_pages}
-                    onClick={() => setPage(page + 1)}
-                  >
-                    下一页
-                  </button>
-                </div>
-              </div>
+            {pagination && (
+              <PaginationControls
+                page={pagination.page}
+                totalPages={pagination.total_pages}
+                total={pagination.total}
+                pageSize={pagination.limit}
+                label="任务"
+                onPageChange={setPage}
+              />
             )}
           </>
         )}

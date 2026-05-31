@@ -509,6 +509,15 @@ export async function recordTaskOfficialCharge(
   const provider = providerName(task);
   const usageQuantity = task.duration || null;
   const idempotencyKey = officialChargeIdempotencyKey(provider, officialChargeId);
+  const occurredAt = params.occurredAt || new Date();
+  const taskUpdateData = {
+    provider_official_amount_minor: params.amountMinor,
+    provider_final_amount_minor: params.amountMinor,
+    provider_cost_currency: currency,
+    provider_cost_status: 'official_confirmed',
+    provider_cost_confirmed_at: occurredAt,
+    cost_allocation_status: task.project_id ? 'allocated' : 'unallocated',
+  } as Prisma.VideoTaskUncheckedUpdateInput;
 
   const existing = await tx.costLedger.findUnique({
     where: { idempotency_key: idempotencyKey },
@@ -519,6 +528,13 @@ export async function recordTaskOfficialCharge(
     if (existing.task_id && existing.task_id !== task.id) {
       throw new Error('官方扣费 ID 已关联其他任务，不能重复用于当前任务');
     }
+    await tx.videoTask.update({
+      where: { id: task.id },
+      data: {
+        ...taskUpdateData,
+        provider_cost_confirmed_at: existing.occurred_at || occurredAt,
+      },
+    });
     return { ledger: existing, deduplicated: true };
   }
 
@@ -543,7 +559,7 @@ export async function recordTaskOfficialCharge(
       official_charge_id: officialChargeId,
       reason: params.reason || '录入官方实际扣费',
       idempotency_key: idempotencyKey,
-      occurred_at: params.occurredAt || new Date(),
+      occurred_at: occurredAt,
       created_by: params.createdBy || null,
     },
   });
@@ -567,14 +583,7 @@ export async function recordTaskOfficialCharge(
 
   await tx.videoTask.update({
     where: { id: task.id },
-    data: {
-      provider_official_amount_minor: params.amountMinor,
-      provider_final_amount_minor: params.amountMinor,
-      provider_cost_currency: currency,
-      provider_cost_status: 'official_confirmed',
-      provider_cost_confirmed_at: params.occurredAt || new Date(),
-      cost_allocation_status: task.project_id ? 'allocated' : 'unallocated',
-    },
+    data: taskUpdateData,
   });
 
   return { ledger, deduplicated: false };
@@ -634,6 +643,22 @@ export async function recordProviderReportedCharge(
     officialChargeId,
     idempotencyKey,
   });
+  const taskUpdateData = {
+    provider_task_id: providerTaskId || undefined,
+    provider_client_request_id: clientRequestId || undefined,
+    provider_official_amount_minor: amountMinor,
+    provider_final_amount_minor: amountMinor,
+    provider_official_amount_micros: amountMicros,
+    provider_final_amount_micros: amountMicros,
+    provider_cost_currency: currency,
+    provider_cost_status: 'official_confirmed',
+    provider_cost_confirmed_at: occurredAt,
+    provider_billing_status: billingStatus,
+    provider_billing_time: billingTime,
+    provider_usage_snapshot: usageSnapshot,
+    provider_cost_snapshot: providerCostSnapshot || rawSnapshot,
+    cost_allocation_status: task.project_id ? 'allocated' : 'unallocated',
+  } as Prisma.VideoTaskUncheckedUpdateInput;
 
   const existing = await tx.costLedger.findUnique({
     where: { idempotency_key: idempotencyKey },
@@ -644,6 +669,14 @@ export async function recordProviderReportedCharge(
     if (existing.task_id && existing.task_id !== task.id) {
       throw new Error('Provider 上报扣费已关联其他任务，不能重复用于当前任务');
     }
+    await tx.videoTask.update({
+      where: { id: task.id },
+      data: {
+        ...taskUpdateData,
+        provider_cost_confirmed_at: existing.occurred_at || occurredAt,
+        provider_cost_snapshot: existing.pricing_snapshot || providerCostSnapshot || rawSnapshot,
+      },
+    });
     return {
       ledger: existing,
       deduplicated: true,
@@ -698,23 +731,6 @@ export async function recordProviderReportedCharge(
   } as Prisma.CostAllocationUncheckedCreateInput;
 
   await tx.costAllocation.create({ data: allocationData });
-
-  const taskUpdateData = {
-    provider_task_id: providerTaskId || undefined,
-    provider_client_request_id: clientRequestId || undefined,
-    provider_official_amount_minor: amountMinor,
-    provider_final_amount_minor: amountMinor,
-    provider_official_amount_micros: amountMicros,
-    provider_final_amount_micros: amountMicros,
-    provider_cost_currency: currency,
-    provider_cost_status: 'official_confirmed',
-    provider_cost_confirmed_at: occurredAt,
-    provider_billing_status: billingStatus,
-    provider_billing_time: billingTime,
-    provider_usage_snapshot: usageSnapshot,
-    provider_cost_snapshot: providerCostSnapshot || rawSnapshot,
-    cost_allocation_status: task.project_id ? 'allocated' : 'unallocated',
-  } as Prisma.VideoTaskUncheckedUpdateInput;
 
   await tx.videoTask.update({
     where: { id: task.id },

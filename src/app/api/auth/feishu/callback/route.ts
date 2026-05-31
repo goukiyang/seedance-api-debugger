@@ -9,8 +9,25 @@ import { setSessionCookie } from '@/lib/auth/session-cookie';
 
 export const dynamic = 'force-dynamic';
 
+function originFromUrl(value: string | undefined) {
+  if (!value) return '';
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '';
+  }
+}
+
+function publicAuthOrigin(request: NextRequest) {
+  return originFromUrl(process.env.NEXT_PUBLIC_BASE_URL)
+    || originFromUrl(process.env.BASE_URL)
+    || originFromUrl(process.env.NEXTAUTH_URL)
+    || originFromUrl(process.env.FEISHU_REDIRECT_URI)
+    || new URL(request.url).origin;
+}
+
 function callbackPageUrl(request: NextRequest, params: Record<string, string>) {
-  const url = new URL('/auth/feishu/callback', request.url);
+  const url = new URL('/auth/feishu/callback', publicAuthOrigin(request));
   for (const [key, value] of Object.entries(params)) {
     if (value) url.searchParams.set(key, value);
   }
@@ -45,7 +62,7 @@ export async function GET(request: NextRequest) {
   if (!storedState) return clearStateCookie(redirectToCallbackPage(request, { error: 'invalid_state' }));
 
   try {
-    const result = await loginWithFeishuCode(code, new URL(request.url).origin);
+    const result = await loginWithFeishuCode(code, publicAuthOrigin(request));
     const response = redirectToCallbackPage(request, {
       status: 'success',
       next: storedState.next,

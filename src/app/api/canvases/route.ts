@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
             ...(projectId ? { project_id: projectId } : {}),
             OR: [
               { owner_user_id: user.id },
-              { project_id: { in: await getAccessibleProjectIds(user) } },
+              { project_id: { in: await getAccessibleProjectIds(user, { includeAdminAll: false }) } },
             ],
           },
           orderBy: [{ updated_at: 'desc' }],

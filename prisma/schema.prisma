@@ -16,6 +16,10 @@ model VideoTask {
   model           String
   generation_mode String
   prompt          String
+  source_type     String  @default("web") // web | codex_api
+  source_label    String?
+  source_request_id String?
+  source_metadata_json String?
 
   ratio             String?
   duration          Int?
@@ -62,21 +66,32 @@ model VideoTask {
   project_id    String?
   visibility    String  @default("project") // private | project | selected | public
 
+  // 产出留存与用户删除（管理员仍可审计）
+  retention_status String    @default("active") // active | user_deleted | admin_hidden | retained
+  user_deleted_at  DateTime?
+  user_deleted_by  String?
+  admin_hidden_at  DateTime?
+  admin_hidden_by  String?
+  restored_at      DateTime?
+  restored_by      String?
+  delete_reason    String?
+
   // 点数与计费（P0-B）
-  estimated_cost     Float?
-  actual_cost        Float?
-  frozen_cost        Float?
-  refund_amount      Float?
-  pricing_snapshot   String?
-  pricing_rule_id    String?
-  idempotency_key    String?
-  billing_scope      String  @default("user") // user | project | system
-  billing_account_id String?
+  estimated_cost         Float?
+  actual_cost            Float?
+  frozen_cost            Float?
+  refund_amount          Float?
+  credit_freeze_snapshot String?
+  pricing_snapshot       String?
+  pricing_rule_id        String?
+  idempotency_key        String?
+  billing_scope          String  @default("user") // user | project | system
+  billing_account_id     String?
 
   // 外部成本复盘（真实官方扣费接入前先保存状态与快照，不把点数当现金成本）
-  provider_cost_status        String    @default("not_recorded") // not_recorded | estimated_by_rule | provisional_settled | official_confirmed | reconciled | disputed | unknown
-  provider_cost_snapshot      String?
-  provider_cost_currency      String?
+  provider_cost_status            String    @default("not_recorded") // not_recorded | estimated_by_rule | provisional_settled | official_confirmed | reconciled | disputed | unknown
+  provider_cost_snapshot          String?
+  provider_cost_currency          String?
   provider_estimated_amount_minor Int?
   provider_rule_amount_minor      Int?
   provider_official_amount_minor  Int?
@@ -91,10 +106,10 @@ model VideoTask {
   provider_cost_reconciled_at     DateTime?
   cost_allocation_status          String    @default("allocated") // allocated | unallocated | partially_allocated
 
-  workspace Workspace? @relation(fields: [workspace_id], references: [id])
-  user      User?      @relation("VideoTaskUser", fields: [user_id], references: [id])
-  owner     User?      @relation("VideoTaskOwner", fields: [owner_user_id], references: [id])
-  project   Project?   @relation(fields: [project_id], references: [id])
+  workspace             Workspace?           @relation(fields: [workspace_id], references: [id])
+  user                  User?                @relation("VideoTaskUser", fields: [user_id], references: [id])
+  owner                 User?                @relation("VideoTaskOwner", fields: [owner_user_id], references: [id])
+  project               Project?             @relation(fields: [project_id], references: [id])
   provider_api_requests ProviderApiRequest[]
   cost_ledgers          CostLedger[]
   cost_allocations      CostAllocation[]
@@ -107,10 +122,14 @@ model VideoTask {
   @@index([user_id])
   @@index([owner_user_id])
   @@index([project_id])
+  @@index([source_type])
+  @@index([source_request_id])
   @@index([local_status])
   @@index([provider_task_id])
   @@index([provider_client_request_id])
   @@index([provider_cost_status])
+  @@index([retention_status])
+  @@index([user_deleted_at])
 }
 
 // ============================================================================
@@ -145,21 +164,24 @@ model User {
 
   credit_account          CreditAccount?
   credit_ledger           CreditLedger[]
+  credit_buckets          CreditBucket[]
   operation_logs          OperationLog[]
-  tasks                   VideoTask[]     @relation("VideoTaskUser")
-  owned_tasks             VideoTask[]     @relation("VideoTaskOwner")
-  reference_albums        ReferenceAlbum[] @relation("ReferenceAlbumOwner")
-  reference_images        ReferenceImage[] @relation("ReferenceImageOwner")
-  created_album_shares    AlbumShare[]    @relation("AlbumShareCreator")
-  owned_projects          Project[]       @relation("ProjectOwner")
-  created_projects        Project[]       @relation("ProjectCreator")
-  canvas_documents        CanvasDocument[] @relation("CanvasDocumentOwner")
-  project_memberships     ProjectMember[] @relation("ProjectMemberUser")
-  joined_project_members  ProjectMember[] @relation("ProjectMemberJoinedBy")
-  created_project_invites ProjectInvite[] @relation("ProjectInviteCreatedBy")
+  tasks                   VideoTask[]          @relation("VideoTaskUser")
+  owned_tasks             VideoTask[]          @relation("VideoTaskOwner")
+  reference_albums        ReferenceAlbum[]     @relation("ReferenceAlbumOwner")
+  reference_images        ReferenceImage[]     @relation("ReferenceImageOwner")
+  created_album_shares    AlbumShare[]         @relation("AlbumShareCreator")
+  owned_projects          Project[]            @relation("ProjectOwner")
+  created_projects        Project[]            @relation("ProjectCreator")
+  canvas_documents        CanvasDocument[]     @relation("CanvasDocumentOwner")
+  project_memberships     ProjectMember[]      @relation("ProjectMemberUser")
+  joined_project_members  ProjectMember[]      @relation("ProjectMemberJoinedBy")
+  created_project_invites ProjectInvite[]      @relation("ProjectInviteCreatedBy")
   provider_api_requests   ProviderApiRequest[]
   cost_ledgers            CostLedger[]
   cost_allocations        CostAllocation[]
+  content_audit_actions   ContentAuditLog[]    @relation("ContentAuditActor")
+  content_audit_owned     ContentAuditLog[]    @relation("ContentAuditOwner")
   feedbacks               Feedback[]
 
   @@index([username])
@@ -169,6 +191,17 @@ model User {
   @@index([status])
   @@index([feishu_union_id])
   @@index([feishu_tenant_key])
+}
+
+model PlatformSetting {
+  id         String   @id @default(cuid())
+  key        String   @unique
+  value_json String
+  updated_by String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([key])
 }
 
 model Project {
@@ -185,17 +218,18 @@ model Project {
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
 
-  owner   User            @relation("ProjectOwner", fields: [owner_user_id], references: [id])
-  creator User            @relation("ProjectCreator", fields: [created_by], references: [id])
-  members ProjectMember[]
-  invites ProjectInvite[]
-  tasks   VideoTask[]
-  canvas_documents CanvasDocument[]
-  reference_albums ReferenceAlbum[]
-  reference_images ReferenceImage[]
+  owner                 User                 @relation("ProjectOwner", fields: [owner_user_id], references: [id])
+  creator               User                 @relation("ProjectCreator", fields: [created_by], references: [id])
+  members               ProjectMember[]
+  invites               ProjectInvite[]
+  tasks                 VideoTask[]
+  canvas_documents      CanvasDocument[]
+  reference_albums      ReferenceAlbum[]
+  reference_images      ReferenceImage[]
   provider_api_requests ProviderApiRequest[]
   cost_ledgers          CostLedger[]
   cost_allocations      CostAllocation[]
+  content_audit_logs    ContentAuditLog[]
 
   @@index([workspace_id])
   @@index([owner_user_id])
@@ -308,11 +342,39 @@ model CreditAccount {
   @@index([user_id])
 }
 
+// 可过期额度桶。长期点数仍走 CreditAccount.balance；每日配额等临时额度走 bucket。
+model CreditBucket {
+  id               String    @id @default(cuid())
+  user_id          String
+  source_type      String // daily_quota
+  amount_total     Float
+  amount_remaining Float
+  frozen_amount    Float     @default(0)
+  quota_date       String?
+  expires_at       DateTime?
+  status           String    @default("active") // active | expired | exhausted | cancelled
+  policy_key       String?
+  policy_snapshot  String?
+  idempotency_key  String?   @unique
+  created_by       String?
+  metadata_json    String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([source_type])
+  @@index([quota_date])
+  @@index([status])
+  @@index([expires_at])
+}
+
 // 点数流水
 model CreditLedger {
   id              String   @id @default(cuid())
   user_id         String
-  type            String // admin_grant | admin_deduct | system_adjust | task_freeze | task_success_deduct | task_failed_refund | manual_refund | periodic_grant
+  type            String // admin_grant | admin_deduct | system_adjust | task_freeze | task_success_deduct | task_failed_refund | manual_refund | periodic_grant | new_user_initial_grant | daily_quota_grant | daily_quota_expire | expired_refund_closed
   amount          Float
   balance_before  Float
   balance_after   Float
@@ -321,6 +383,8 @@ model CreditLedger {
   related_task_id String?
   operator_id     String?
   reason          String?
+  idempotency_key String?
+  metadata_json   String?
   created_at      DateTime @default(now())
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -328,6 +392,7 @@ model CreditLedger {
   @@index([user_id])
   @@index([type])
   @@index([created_at])
+  @@index([idempotency_key])
 }
 
 // 操作日志
@@ -344,6 +409,29 @@ model OperationLog {
 
   @@index([operator_id])
   @@index([target_type, target_id])
+  @@index([created_at])
+}
+
+model ContentAuditLog {
+  id            String   @id @default(cuid())
+  actor_user_id String?
+  action        String
+  content_type  String
+  content_id    String
+  owner_user_id String?
+  project_id    String?
+  detail_json   String?
+  created_at    DateTime @default(now())
+
+  actor   User?    @relation("ContentAuditActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
+  owner   User?    @relation("ContentAuditOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([actor_user_id])
+  @@index([content_type, content_id])
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([action])
   @@index([created_at])
 }
 
@@ -373,9 +461,9 @@ model ProviderApiRequest {
   completed_at          DateTime?
   created_at            DateTime  @default(now())
 
-  task    VideoTask? @relation(fields: [task_id], references: [id], onDelete: SetNull)
-  user    User?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  project Project?   @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  task         VideoTask?   @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  user         User?        @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  project      Project?     @relation(fields: [project_id], references: [id], onDelete: SetNull)
   cost_ledgers CostLedger[]
 
   @@index([task_id])
@@ -388,32 +476,32 @@ model ProviderApiRequest {
 }
 
 model CostLedger {
-  id                    String    @id @default(cuid())
-  source_type           String    // task | provider_request | official_bill | adjustment | transfer
-  source_id             String?
-  task_id               String?
-  user_id               String?
-  project_id            String?
-  provider_request_id   String?
-  provider_name         String
-  provider_account_id   String?
-  provider_task_id      String?
-  event_type            String    // estimate | provider_request_submitted | rule_settlement | official_charge | refund | reversal | adjustment | allocation
-  amount_minor          Int?
-  currency              String?
-  amount_micros         Int?
-  usage_quantity        Float?
-  usage_unit            String?
-  cost_source           String    // rule | provider_usage | official_bill | manual
-  confidence            String    // estimated | provisional | confirmed | reconciled | unknown | disputed
-  pricing_rule_id       String?
-  pricing_snapshot      String?
-  official_charge_id    String?
-  reason                String?
-  idempotency_key       String?   @unique
-  occurred_at           DateTime  @default(now())
-  created_by            String?
-  created_at            DateTime  @default(now())
+  id                  String   @id @default(cuid())
+  source_type         String // task | provider_request | official_bill | adjustment | transfer
+  source_id           String?
+  task_id             String?
+  user_id             String?
+  project_id          String?
+  provider_request_id String?
+  provider_name       String
+  provider_account_id String?
+  provider_task_id    String?
+  event_type          String // estimate | provider_request_submitted | rule_settlement | official_charge | refund | reversal | adjustment | allocation
+  amount_minor        Int?
+  currency            String?
+  amount_micros       Int?
+  usage_quantity      Float?
+  usage_unit          String?
+  cost_source         String // rule | provider_usage | official_bill | manual
+  confidence          String // estimated | provisional | confirmed | reconciled | unknown | disputed
+  pricing_rule_id     String?
+  pricing_snapshot    String?
+  official_charge_id  String?
+  reason              String?
+  idempotency_key     String?  @unique
+  occurred_at         DateTime @default(now())
+  created_by          String?
+  created_at          DateTime @default(now())
 
   task             VideoTask?          @relation(fields: [task_id], references: [id], onDelete: SetNull)
   user             User?               @relation(fields: [user_id], references: [id], onDelete: SetNull)
@@ -437,7 +525,7 @@ model CostLedger {
 model CostAllocation {
   id              String   @id @default(cuid())
   ledger_id       String
-  allocation_type String   // project | user | task | cost_center | unallocated
+  allocation_type String // project | user | task | cost_center | unallocated
   allocation_id   String
   task_id         String?
   user_id         String?
@@ -462,6 +550,33 @@ model CostAllocation {
   @@index([task_id])
   @@index([user_id])
   @@index([project_id])
+  @@index([created_at])
+}
+
+model ProviderAccountSnapshot {
+  id                  String   @id @default(cuid())
+  provider_name       String   @default("seedance")
+  provider_account_id String?
+  balance_kind        String   @default("prepaid") // prepaid | quota | unknown
+  amount_decimal      String?
+  amount_minor        Int?
+  currency            String?
+  quota_amount        Float?
+  quota_unit          String?
+  source              String   @default("provider_api") // provider_api | manual
+  status              String   @default("synced") // synced | manual | failed
+  raw_snapshot        String?
+  note                String?
+  error_message       String?
+  fetched_at          DateTime @default(now())
+  created_by          String?
+  created_at          DateTime @default(now())
+
+  @@index([provider_name])
+  @@index([provider_account_id])
+  @@index([status])
+  @@index([source])
+  @@index([fetched_at])
   @@index([created_at])
 }
 
@@ -574,16 +689,16 @@ model Workspace {
 
 // Workspace <-> Asset 关联表（含排序和角色）
 model WorkspaceAsset {
-  id           String   @id @default(cuid())
-  workspace_id String
-  asset_id     String
+  id                 String   @id @default(cuid())
+  workspace_id       String
+  asset_id           String
   reference_image_id String?
-  sort_order   Int      @default(0) // 决定 图1/图2/图3 顺序
-  role         String? // reference_image | first_frame | last_frame | reference_video | reference_audio
-  created_at   DateTime @default(now())
+  sort_order         Int      @default(0) // 决定 图1/图2/图3 顺序
+  role               String? // reference_image | first_frame | last_frame | reference_video | reference_audio
+  created_at         DateTime @default(now())
 
-  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  asset     Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  workspace       Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  asset           Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
   reference_image ReferenceImage? @relation(fields: [reference_image_id], references: [id], onDelete: SetNull)
 
   @@unique([workspace_id, asset_id])
@@ -608,8 +723,8 @@ model ReferenceAlbum {
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
 
-  owner  User     @relation("ReferenceAlbumOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
-  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  owner   User             @relation("ReferenceAlbumOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project Project?         @relation(fields: [project_id], references: [id], onDelete: SetNull)
   images  ReferenceImage[]
   shares  AlbumShare[]
 
@@ -639,10 +754,10 @@ model ReferenceImage {
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
 
-  album ReferenceAlbum @relation(fields: [album_id], references: [id], onDelete: Cascade)
-  owner User           @relation("ReferenceImageOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
-  project Project?     @relation(fields: [project_id], references: [id], onDelete: SetNull)
-  asset Asset?         @relation(fields: [asset_id], references: [id], onDelete: SetNull)
+  album            ReferenceAlbum   @relation(fields: [album_id], references: [id], onDelete: Cascade)
+  owner            User             @relation("ReferenceImageOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project          Project?         @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  asset            Asset?           @relation(fields: [asset_id], references: [id], onDelete: SetNull)
   workspace_assets WorkspaceAsset[]
 
   @@index([album_id])
@@ -655,15 +770,15 @@ model ReferenceImage {
 }
 
 model AlbumShare {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   album_id         String
   grantee_type     String // user | project
   grantee_id       String
   permissions_json String
   created_by       String
   expires_at       DateTime?
-  status           String   @default("active") // active | revoked | expired
-  created_at       DateTime @default(now())
+  status           String    @default("active") // active | revoked | expired
+  created_at       DateTime  @default(now())
 
   album   ReferenceAlbum @relation(fields: [album_id], references: [id], onDelete: Cascade)
   creator User           @relation("AlbumShareCreator", fields: [created_by], references: [id], onDelete: Cascade)

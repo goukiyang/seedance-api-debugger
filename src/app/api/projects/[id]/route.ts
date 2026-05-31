@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProject, assertCanManageProjectMembers, assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
+import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,9 +91,12 @@ export async function GET(
         _count: { select: { images: { where: { status: 'active' } } } },
       },
     });
+    const taskVisibilityWhere = user.role === 'admin'
+      ? { project_id: params.id }
+      : { project_id: params.id, retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } };
 
     const tasks = await prisma.videoTask.findMany({
-      where: { project_id: params.id },
+      where: taskVisibilityWhere,
       orderBy: { created_at: 'desc' },
       take: 50,
       select: {
@@ -145,12 +149,12 @@ export async function GET(
       highCostTasks,
       failedTasks,
     ] = await Promise.all([
-      prisma.videoTask.count({ where: { project_id: params.id } }),
-      prisma.videoTask.count({ where: { project_id: params.id, local_status: 'succeeded' } }),
-      prisma.videoTask.count({ where: { project_id: params.id, local_status: { in: ['failed', 'cancelled'] } } }),
-      prisma.videoTask.count({ where: { project_id: params.id, local_status: { in: ['submitted', 'running'] } } }),
+      prisma.videoTask.count({ where: taskVisibilityWhere }),
+      prisma.videoTask.count({ where: { ...taskVisibilityWhere, local_status: 'succeeded' } }),
+      prisma.videoTask.count({ where: { ...taskVisibilityWhere, local_status: { in: ['failed', 'cancelled'] } } }),
+      prisma.videoTask.count({ where: { ...taskVisibilityWhere, local_status: { in: ['submitted', 'running'] } } }),
       prisma.videoTask.aggregate({
-        where: { project_id: params.id },
+        where: taskVisibilityWhere,
         _sum: {
           estimated_cost: true,
           actual_cost: true,
@@ -259,16 +263,16 @@ export async function GET(
       }),
       prisma.videoTask.count({
         where: {
-          project_id: params.id,
+          ...taskVisibilityWhere,
           local_status: { in: ['succeeded', 'failed', 'cancelled'] },
           provider_cost_status: { notIn: ['official_confirmed', 'reconciled', 'failed_no_charge'] },
         },
       }),
       prisma.videoTask.count({
-        where: { project_id: params.id, provider_cost_status: { in: ['unknown', 'disputed'] } },
+        where: { ...taskVisibilityWhere, provider_cost_status: { in: ['unknown', 'disputed'] } },
       }),
       prisma.videoTask.findMany({
-        where: { project_id: params.id },
+        where: taskVisibilityWhere,
         orderBy: [{ actual_cost: 'desc' }, { estimated_cost: 'desc' }, { created_at: 'desc' }],
         take: 8,
         select: {
@@ -284,7 +288,7 @@ export async function GET(
         },
       }),
       prisma.videoTask.findMany({
-        where: { project_id: params.id, local_status: { in: ['failed', 'cancelled'] } },
+        where: { ...taskVisibilityWhere, local_status: { in: ['failed', 'cancelled'] } },
         orderBy: { created_at: 'desc' },
         take: 8,
         select: {

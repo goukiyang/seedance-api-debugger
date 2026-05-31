@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { ensureDefaultProjectForUser, logProjectAction } from '@/lib/projects/permissions';
+import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,10 @@ export async function GET(request: NextRequest) {
           type: { not: 'system' },
           OR: [
             { owner_user_id: user.id },
-            { members: { some: { user_id: user.id, status: 'active' } } },
+            {
+              type: { in: ['team', 'public'] },
+              members: { some: { user_id: user.id, status: 'active' } },
+            },
           ],
         };
 
@@ -39,7 +43,9 @@ export async function GET(request: NextRequest) {
         _count: {
           select: {
             members: true,
-            tasks: true,
+            tasks: includeAll
+              ? true
+              : { where: { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } } },
             reference_albums: { where: { status: { not: 'deleted' } } },
           },
         },
@@ -57,7 +63,8 @@ export async function GET(request: NextRequest) {
           my_role: myRole,
           can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
           can_manage_project: myRole === 'admin' || myRole === 'project_owner',
-          can_manage_members: myRole === 'admin' || myRole === 'project_owner',
+          can_manage_members: (myRole === 'admin' || myRole === 'project_owner')
+            && ['team', 'public'].includes(project.type),
           can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
         };
       }),

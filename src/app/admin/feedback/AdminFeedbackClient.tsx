@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import PageBanner from '@/components/PageBanner';
+import PaginationControls from '@/components/PaginationControls';
 
 type FeedbackUser = {
   id: string;
@@ -23,6 +25,15 @@ type FeedbackItem = {
   created_at: string;
   user: FeedbackUser | null;
 };
+
+type FeedbackPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+const FEEDBACK_PAGE_SIZE = 50;
 
 function parseImages(value: string | null) {
   if (!value) return [];
@@ -70,10 +81,12 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<FeedbackPagination | null>(null);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
-  const load = async () => {
+  const load = async (pageNumber = page) => {
     setLoading(true);
     setError('');
     const params = new URLSearchParams();
@@ -81,13 +94,22 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
     if (hasImage) params.set('hasImage', hasImage);
     if (keyword) params.set('keyword', keyword);
     if (pagePath) params.set('pagePath', pagePath);
-    params.set('pageSize', '50');
+    params.set('page', String(pageNumber));
+    params.set('pageSize', String(FEEDBACK_PAGE_SIZE));
 
     try {
       const response = await fetch(`/api/admin/feedback?${params.toString()}`, { cache: 'no-store' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '加载反馈失败');
       setItems(data.items || []);
+      const total = Number(data.total || 0);
+      const pageSize = Number(data.pageSize || FEEDBACK_PAGE_SIZE);
+      setPagination({
+        page: Number(data.page || pageNumber),
+        pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      });
       setSelectedIds((current) => current.filter((id) => (data.items || []).some((item: FeedbackItem) => item.id === id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载反馈失败');
@@ -97,7 +119,7 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
   };
 
   useEffect(() => {
-    load();
+    void load(page);
   }, [status, hasImage]);
 
   useEffect(() => {
@@ -132,7 +154,7 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
     }
     setMessage('已归档');
     setActive(null);
-    await load();
+    await load(page);
   };
 
   const saveDetail = async () => {
@@ -150,7 +172,7 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
     }
     setMessage('已保存');
     setActive(data.feedback);
-    await load();
+    await load(page);
   };
 
   const exportSingle = async (id: string) => {
@@ -180,14 +202,14 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
   };
 
   return (
-    <main style={{ minHeight: '100vh', background: '#101116', color: '#fff', padding: 24 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13 }}>管理员后台</div>
-          <h1 style={{ margin: '4px 0 0', fontSize: 26 }}>反馈管理</h1>
-        </div>
-        <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{currentUserName}</div>
-      </header>
+    <main className="admin-users-page" style={{ minHeight: '100vh', background: '#101116', color: '#fff', padding: 24 }}>
+      <PageBanner
+        tone="dark"
+        eyebrow="管理员后台"
+        title="反馈管理"
+        description="查看、归档、备注和导出用户提交的反馈材料。"
+        actions={<div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{currentUserName}</div>}
+      />
 
       {(message || error) && (
         <div style={{
@@ -203,20 +225,29 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
       )}
 
       <section style={{ display: 'grid', gridTemplateColumns: '160px 160px 1fr 1fr auto', gap: 10, alignItems: 'center', marginBottom: 14 }}>
-        <select value={status} onChange={(event) => setStatus(event.target.value)} style={controlStyle}>
+        <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }} style={controlStyle}>
           <option value="">全部状态</option>
           <option value="new">新反馈</option>
           <option value="reviewed">已查看</option>
           <option value="archived">已归档</option>
         </select>
-        <select value={hasImage} onChange={(event) => setHasImage(event.target.value)} style={controlStyle}>
+        <select value={hasImage} onChange={(event) => { setHasImage(event.target.value); setPage(1); }} style={controlStyle}>
           <option value="">全部图片</option>
           <option value="true">有图片</option>
           <option value="false">无图片</option>
         </select>
         <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索内容、用户、任务" style={controlStyle} />
         <input value={pagePath} onChange={(event) => setPagePath(event.target.value)} placeholder="页面路径" style={controlStyle} />
-        <button type="button" onClick={load} style={primaryButtonStyle}>筛选</button>
+        <button
+          type="button"
+          onClick={() => {
+            setPage(1);
+            void load(1);
+          }}
+          style={primaryButtonStyle}
+        >
+          筛选
+        </button>
       </section>
 
       <section style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -294,6 +325,21 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
               )}
             </tbody>
           </table>
+        </div>
+        <div style={{ padding: '0 16px 16px' }}>
+          {pagination && (
+            <PaginationControls
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              pageSize={pagination.pageSize}
+              label="反馈"
+              onPageChange={(nextPage) => {
+                setPage(nextPage);
+                void load(nextPage);
+              }}
+            />
+          )}
         </div>
       </div>
 

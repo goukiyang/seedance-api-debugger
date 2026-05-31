@@ -1,11 +1,25 @@
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import type { SessionUser } from '@/lib/auth/session';
+import {
+  isTaskHiddenFromRegularUsers,
+  USER_VISIBLE_TASK_RETENTION_STATUSES,
+} from '@/lib/tasks/retention';
 
 export type ProjectRole = 'project_owner' | 'editor' | 'member' | 'viewer';
 
 const ACTIVE_MEMBER_STATUS = 'active';
 const DELETED_PROJECT_STATUS = 'deleted';
+const SHARABLE_PROJECT_TYPES = ['team', 'public'];
+
+type ProjectAccessOptions = {
+  includeAdminAll?: boolean;
+  includeDeleted?: boolean;
+};
+
+function isSharableProjectType(type: string) {
+  return SHARABLE_PROJECT_TYPES.includes(type);
+}
 
 export async function logProjectAction(
   actorUserId: string,
@@ -91,8 +105,10 @@ export async function ensureDefaultProjectForUser(userId: string) {
   return project;
 }
 
-export async function getAccessibleProjectIds(user: SessionUser) {
-  if (user.role === 'admin') {
+export async function getAccessibleProjectIds(user: SessionUser, options: ProjectAccessOptions = {}) {
+  const includeAdminAll = options.includeAdminAll ?? true;
+
+  if (user.role === 'admin' && includeAdminAll) {
     const projects = await prisma.project.findMany({
       where: { status: { not: DELETED_PROJECT_STATUS } },
       select: { id: true },
@@ -105,7 +121,10 @@ export async function getAccessibleProjectIds(user: SessionUser) {
       where: {
         user_id: user.id,
         status: ACTIVE_MEMBER_STATUS,
-        project: { status: { not: DELETED_PROJECT_STATUS } },
+        project: {
+          status: { not: DELETED_PROJECT_STATUS },
+          type: { in: SHARABLE_PROJECT_TYPES },
+        },
       },
       select: { project_id: true },
     }),
@@ -154,12 +173,12 @@ export async function getProjectAccess(user: SessionUser, projectId: string) {
       canView: true,
       canGenerate: project.status === 'active' && project.type !== 'system',
       canManageProject: true,
-      canManageMembers: true,
+      canManageMembers: isSharableProjectType(project.type),
       canManageAssets: project.status === 'active' && project.type !== 'system',
     };
   }
 
-  const membership = project.members[0];
+  const membership = isSharableProjectType(project.type) ? project.members[0] : null;
   const isOwner = project.owner_user_id === user.id;
   const activeRole = membership?.status === ACTIVE_MEMBER_STATUS ? membership.role : null;
   const role = (isOwner ? 'project_owner' : activeRole) as ProjectRole | null;
@@ -167,7 +186,7 @@ export async function getProjectAccess(user: SessionUser, projectId: string) {
   const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
   const canGenerate = canView && isActiveNonSystem && role !== 'viewer';
   const canManageProject = role === 'project_owner';
-  const canManageMembers = role === 'project_owner';
+  const canManageMembers = role === 'project_owner' && isSharableProjectType(project.type);
   const canManageAssets = isActiveNonSystem && (role === 'project_owner' || role === 'editor');
 
   return { project, role, canView, canGenerate, canManageProject, canManageMembers, canManageAssets };
@@ -219,8 +238,13 @@ export async function assertCanViewTask(user: SessionUser, task: {
   project_id: string | null;
   owner_user_id?: string | null;
   user_id?: string | null;
+  retention_status?: string | null;
 }) {
   if (user.role === 'admin') return;
+
+  if (isTaskHiddenFromRegularUsers(task)) {
+    throw new AuthError('任务不存在或已删除', 404);
+  }
 
   if (task.project_id) {
     await assertCanViewProject(user, task.project_id);
@@ -233,24 +257,37 @@ export async function assertCanViewTask(user: SessionUser, task: {
   throw new AuthError('无权查看此任务', 403);
 }
 
-export async function getTaskWhereForUser(user: SessionUser, projectId?: string | null) {
-  if (user.role === 'admin') {
-    return projectId ? { project_id: projectId } : {};
+export async function getTaskWhereForUser(
+  user: SessionUser,
+  projectId?: string | null,
+  options: ProjectAccessOptions = {},
+) {
+  const includeAdminAll = options.includeAdminAll ?? true;
+  const includeDeleted = options.includeDeleted ?? false;
+  const retentionWhere = includeDeleted
+    ? null
+    : { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } };
+  const withRetention = (where: Record<string, unknown>) => (
+    retentionWhere ? { AND: [where, retentionWhere] } : where
+  );
+
+  if (user.role === 'admin' && includeAdminAll) {
+    return withRetention(projectId ? { project_id: projectId } : {});
   }
 
   if (projectId) {
     await assertCanViewProject(user, projectId);
-    return { project_id: projectId };
+    return withRetention({ project_id: projectId });
   }
 
-  const projectIds = await getAccessibleProjectIds(user);
-  return {
+  const projectIds = await getAccessibleProjectIds(user, { includeAdminAll });
+  return withRetention({
     OR: [
       { project_id: { in: projectIds } },
       { project_id: null, owner_user_id: user.id },
       { project_id: null, user_id: user.id },
     ],
-  };
+  });
 }
 
 export function normalizeProjectRole(role: unknown): ProjectRole {

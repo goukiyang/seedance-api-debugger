@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import PageBanner from '@/components/PageBanner';
+import PaginationControls from '@/components/PaginationControls';
 import type { SessionUser } from '@/lib/auth/session';
 import {
   FEATURE_PROFILE_OPTIONS,
@@ -19,6 +21,13 @@ interface CreditAccount {
   total_used?: number;
 }
 
+interface CreditQuota {
+  daily_total: number;
+  daily_remaining: number;
+  daily_frozen: number;
+  daily_expires_at: string | null;
+}
+
 interface AdminUser {
   id: string;
   name: string;
@@ -29,10 +38,34 @@ interface AdminUser {
   user_profile: string;
   feature_profile_id: string | null;
   status: string;
+  feishu_user_id?: string | null;
+  feishu_open_id?: string | null;
+  feishu_union_id?: string | null;
   expires_at: string | null;
   created_at: string;
   last_login_at: string | null;
   credit_account: CreditAccount | null;
+  credit_quota?: CreditQuota | null;
+}
+
+interface CreditPolicy {
+  initial_grant: {
+    enabled: boolean;
+    internal_default: number;
+    external_default: number;
+    apply_to_self_register: boolean;
+    apply_to_feishu_auto_create: boolean;
+    apply_to_admin_create_default: boolean;
+  };
+  daily_quota: {
+    enabled: boolean;
+    timezone: 'Asia/Shanghai';
+    internal_default: number;
+    external_default: number;
+    profile_overrides: Record<string, number>;
+    valid_hours: number;
+    clear_unused_on_expire: boolean;
+  };
 }
 
 interface LedgerRecord {
@@ -50,6 +83,13 @@ interface LedgerRecord {
     name: string;
     username: string;
   };
+}
+
+interface LedgerPagination {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
 }
 
 interface EditUserForm {
@@ -71,6 +111,37 @@ const USER_STATUS_OPTIONS = [
   { value: 'pending', label: '待开通', description: '账号保留，但暂不允许登录。' },
   { value: 'expired', label: '已过期', description: '协作到期，不允许继续登录。' },
 ];
+
+const USERS_PAGE_SIZE = 20;
+const LEDGER_PAGE_SIZE = 50;
+
+const CREDIT_POLICY_DEFAULT: CreditPolicy = {
+  initial_grant: {
+    enabled: true,
+    internal_default: 0,
+    external_default: 0,
+    apply_to_self_register: true,
+    apply_to_feishu_auto_create: true,
+    apply_to_admin_create_default: true,
+  },
+  daily_quota: {
+    enabled: false,
+    timezone: 'Asia/Shanghai',
+    internal_default: 0,
+    external_default: 0,
+    profile_overrides: {
+      core_video: 0,
+      core_animation: 0,
+      core_design: 0,
+      noncore_planning: 0,
+      noncore_ops: 0,
+      noncore_pm: 0,
+      other: 0,
+    },
+    valid_hours: 24,
+    clear_unused_on_expire: true,
+  },
+};
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -125,10 +196,69 @@ function resolveAccountType(value: string): AccountType {
   return value === 'external' ? 'external' : 'internal';
 }
 
+function hasFeishuBinding(user: AdminUser | null | undefined) {
+  return Boolean(user?.feishu_user_id || user?.feishu_open_id || user?.feishu_union_id);
+}
+
 function formatDateInput(value: string | null) {
   if (!value) return '';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
+function numberOrZero(value: unknown) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function normalizeCreditPolicy(value: unknown): CreditPolicy {
+  const policy = value && typeof value === 'object' ? value as Partial<CreditPolicy> : {};
+  const initial = (policy.initial_grant || {}) as Partial<CreditPolicy['initial_grant']>;
+  const daily = (policy.daily_quota || {}) as Partial<CreditPolicy['daily_quota']>;
+  const overrides = daily.profile_overrides && typeof daily.profile_overrides === 'object'
+    ? daily.profile_overrides
+    : {};
+
+  return {
+    initial_grant: {
+      enabled: initial.enabled !== false,
+      internal_default: numberOrZero(initial.internal_default),
+      external_default: numberOrZero(initial.external_default),
+      apply_to_self_register: initial.apply_to_self_register !== false,
+      apply_to_feishu_auto_create: initial.apply_to_feishu_auto_create !== false,
+      apply_to_admin_create_default: initial.apply_to_admin_create_default !== false,
+    },
+    daily_quota: {
+      enabled: daily.enabled === true,
+      timezone: 'Asia/Shanghai',
+      internal_default: numberOrZero(daily.internal_default),
+      external_default: numberOrZero(daily.external_default),
+      profile_overrides: {
+        ...CREDIT_POLICY_DEFAULT.daily_quota.profile_overrides,
+        ...Object.fromEntries(Object.entries(overrides).map(([key, amount]) => [key, numberOrZero(amount)])),
+      },
+      valid_hours: Math.min(168, Math.max(1, Number(daily.valid_hours) || 24)),
+      clear_unused_on_expire: daily.clear_unused_on_expire !== false,
+    },
+  };
+}
+
+function estimateInitialGrant(policy: CreditPolicy, role: string, accountType: string) {
+  if (!policy.initial_grant.enabled || role === 'admin' || !policy.initial_grant.apply_to_admin_create_default) return 0;
+  return accountType === 'external'
+    ? policy.initial_grant.external_default
+    : policy.initial_grant.internal_default;
+}
+
+function estimateDailyQuota(policy: CreditPolicy, user: Pick<AdminUser, 'role' | 'account_type' | 'user_profile'> | {
+  role: string;
+  account_type: string;
+  user_profile: string;
+}) {
+  if (!policy.daily_quota.enabled || user.role === 'admin') return 0;
+  if (user.account_type === 'external') return policy.daily_quota.external_default;
+  const override = policy.daily_quota.profile_overrides[user.user_profile || 'other'];
+  return override && override > 0 ? override : policy.daily_quota.internal_default;
 }
 
 function buildEditUserForm(user: AdminUser): EditUserForm {
@@ -152,6 +282,11 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [creditPolicy, setCreditPolicy] = useState<CreditPolicy>(CREDIT_POLICY_DEFAULT);
+  const [policySaving, setPolicySaving] = useState(false);
+  const [userPage, setUserPage] = useState(1);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerPagination, setLedgerPagination] = useState<LedgerPagination | null>(null);
 
   const [filters, setFilters] = useState({
     search: '',
@@ -209,6 +344,12 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return [user.name, user.username, user.email].some((value) => value.toLowerCase().includes(keyword));
     });
   }, [filters, users]);
+  const userTotalPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
+  const currentUserPage = Math.min(userPage, userTotalPages);
+  const pagedUsers = filteredUsers.slice(
+    (currentUserPage - 1) * USERS_PAGE_SIZE,
+    currentUserPage * USERS_PAGE_SIZE,
+  );
 
   const selectedUser = useMemo(
     () => users.find((user) => user.id === creditForm.user_id),
@@ -251,6 +392,18 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       normalizeUserProfile(editUserForm.user_profile),
     )
     : 'standard_internal';
+  const suggestedNewUserInitialCredits = useMemo(
+    () => estimateInitialGrant(creditPolicy, newUser.role, newUser.account_type),
+    [creditPolicy, newUser.account_type, newUser.role],
+  );
+  const suggestedNewUserDailyQuota = useMemo(
+    () => estimateDailyQuota(creditPolicy, {
+      role: newUser.role,
+      account_type: newUser.account_type,
+      user_profile: newUser.user_profile,
+    }),
+    [creditPolicy, newUser.account_type, newUser.role, newUser.user_profile],
+  );
 
   const loadUsers = async () => {
     const res = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -259,18 +412,33 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     setUsers(data.users || []);
   };
 
-  const loadLedger = async () => {
-    const res = await fetch('/api/admin/credits/ledger?page_size=50', { cache: 'no-store' });
+  const loadLedger = async (pageNumber = ledgerPage) => {
+    const res = await fetch(`/api/admin/credits/ledger?page=${pageNumber}&page_size=${LEDGER_PAGE_SIZE}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('无法加载点数流水');
     const data = await res.json();
     setLedger(data.records || []);
+    const total = Number(data.total || 0);
+    const pageSize = Number(data.page_size || LEDGER_PAGE_SIZE);
+    setLedgerPagination({
+      page: Number(data.page || pageNumber),
+      page_size: pageSize,
+      total,
+      total_pages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  };
+
+  const loadPolicy = async () => {
+    const res = await fetch('/api/admin/credits/policy', { cache: 'no-store' });
+    if (!res.ok) throw new Error('无法加载点数策略');
+    const data = await res.json();
+    setCreditPolicy(normalizeCreditPolicy(data.policy));
   };
 
   const refresh = async () => {
     setLoading(true);
     setError('');
     try {
-      await Promise.all([loadUsers(), loadLedger()]);
+      await Promise.all([loadUsers(), loadLedger(ledgerPage), loadPolicy()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败');
     } finally {
@@ -281,6 +449,61 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    setUserPage(1);
+  }, [filters]);
+
+  const updateInitialPolicy = (patch: Partial<CreditPolicy['initial_grant']>) => {
+    setCreditPolicy((current) => ({
+      ...current,
+      initial_grant: { ...current.initial_grant, ...patch },
+    }));
+  };
+
+  const updateDailyPolicy = (patch: Partial<CreditPolicy['daily_quota']>) => {
+    setCreditPolicy((current) => ({
+      ...current,
+      daily_quota: { ...current.daily_quota, ...patch },
+    }));
+  };
+
+  const updateDailyOverride = (profile: string, amount: number) => {
+    setCreditPolicy((current) => ({
+      ...current,
+      daily_quota: {
+        ...current.daily_quota,
+        profile_overrides: {
+          ...current.daily_quota.profile_overrides,
+          [profile]: numberOrZero(amount),
+        },
+      },
+    }));
+  };
+
+  const saveCreditPolicy = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+    setPolicySaving(true);
+    try {
+      const res = await fetch('/api/admin/credits/policy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(creditPolicy),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || '保存点数策略失败');
+        return;
+      }
+      setCreditPolicy(normalizeCreditPolicy(data.policy));
+      setMessage('点数策略已保存');
+      await refresh();
+    } finally {
+      setPolicySaving(false);
+    }
+  };
 
   const createUser = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -310,7 +533,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       account_type: 'internal',
       user_profile: 'other',
       feature_profile_id: 'auto',
-      initial_credits: '0',
+      initial_credits: String(estimateInitialGrant(creditPolicy, 'user', 'internal')),
       reason: '创建用户初始点数',
     });
     await refresh();
@@ -325,11 +548,16 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
     const amount = Number(creditForm.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!Number.isFinite(amount) || amount < 0 || (creditForm.type !== 'adjust' && amount <= 0)) {
       setError('请输入正确的点数');
       return;
     }
-    const ok = window.confirm(`确认对 ${selectedUser.name} 执行点数操作？`);
+    const operationLabel = creditForm.type === 'grant'
+      ? `发放 ${amount} 点`
+      : creditForm.type === 'deduct'
+        ? `扣减 ${amount} 点长期余额`
+        : `把长期余额修正为 ${amount} 点`;
+    const ok = window.confirm(`确认对 ${selectedUser.name} ${operationLabel}？`);
     if (!ok) return;
 
     const res = await fetch('/api/admin/credits/adjust', {
@@ -538,6 +766,16 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
         next.user_profile = 'other';
         next.feature_profile_id = 'external_limited';
       }
+      if (patch.account_type === 'internal' && current.account_type === 'external') {
+        next.feature_profile_id = 'auto';
+      }
+      if (patch.role === 'admin') {
+        next.role = 'admin';
+        if (next.account_type === 'external') {
+          next.account_type = 'internal';
+          next.feature_profile_id = 'auto';
+        }
+      }
       if (patch.user_profile !== undefined && next.account_type === 'internal') {
         next.feature_profile_id = 'auto';
       }
@@ -560,17 +798,6 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       setError('请输入修改原因');
       return;
     }
-    const needsCompanyEmail = editUserForm.account_type === 'internal'
-      && (
-        editingUser.account_type !== 'internal'
-        || editUserForm.email.toLowerCase() !== editingUser.email.toLowerCase()
-        || (editUserForm.role === 'admin' && editingUser.role !== 'admin')
-      );
-    if (needsCompanyEmail && !editUserForm.email.toLowerCase().endsWith('@youdoogo.com')) {
-      setError('内部账号必须使用 @youdoogo.com 公司邮箱');
-      return;
-    }
-
     const sensitiveChanges = [
       editingUser.role !== editUserForm.role ? `系统身份：${editingUser.role === 'admin' ? '管理员' : '普通用户'} → ${editUserForm.role === 'admin' ? '管理员' : '普通用户'}` : '',
       editingUser.status !== editUserForm.status ? `状态：${statusLabel(editingUser.status)} → ${statusLabel(editUserForm.status)}` : '',
@@ -657,16 +884,18 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   };
 
   return (
-    <main style={{ minHeight: '100vh', background: '#0f0f13', color: '#fff', padding: 24 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13 }}>管理员后台</div>
-          <h1 style={{ margin: '4px 0 0', fontSize: 26 }}>用户与点数管理</h1>
-        </div>
-        <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
+    <main className="admin-users-page" style={{ minHeight: '100vh', background: '#0f0f13', color: '#fff', padding: 24 }}>
+      <PageBanner
+        tone="dark"
+        eyebrow="管理员后台"
+        title="用户与点数管理"
+        description="管理账号属性、点数策略、手工调整、批量发放和重复账号合并。"
+        actions={(
+          <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
           {currentUser.name} · {currentUser.email}
         </div>
-      </header>
+        )}
+      />
 
       {(message || error) && (
         <div style={{
@@ -750,9 +979,15 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map((user) => {
+                {pagedUsers.map((user) => {
                   const balance = user.credit_account?.balance || 0;
                   const frozen = user.credit_account?.frozen_credits || 0;
+                  const dailyRemaining = user.credit_quota?.daily_remaining || 0;
+                  const dailyFrozen = user.credit_quota?.daily_frozen || 0;
+                  const dailyTotal = user.credit_quota?.daily_total || 0;
+                  const longAvailable = Math.max(0, balance - frozen);
+                  const totalAvailable = longAvailable + dailyRemaining;
+                  const totalFrozen = frozen + dailyFrozen;
                   return (
                     <tr key={user.id} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                       <td style={{ padding: 12 }}>
@@ -767,7 +1002,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                         <div style={{ fontWeight: 700 }}>{user.name}</div>
                         <div style={{ color: 'rgba(255,255,255,0.45)' }}>{user.username} · {user.email}</div>
                         <div style={{ color: 'rgba(255,255,255,0.38)', fontSize: 12, marginTop: 4 }}>
-                          {accountTypeLabel(user.account_type)} · {user.role === 'admin' ? '管理员' : '普通用户'}
+                          {accountTypeLabel(user.account_type)} · {user.role === 'admin' ? '管理员' : '普通用户'}{hasFeishuBinding(user) ? ' · 飞书' : ''}
                         </div>
                       </td>
                       <td style={{ padding: 12, minWidth: 180 }}>
@@ -776,11 +1011,16 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                           {getFeatureProfileLabel(user.feature_profile_id)}
                         </div>
                       </td>
-                      <td style={{ padding: 12, textAlign: 'right', minWidth: 130 }}>
-                        <div>可用 {formatNumber(balance - frozen)}</div>
+                      <td style={{ padding: 12, textAlign: 'right', minWidth: 150 }}>
+                        <div>可用 {formatNumber(totalAvailable)}</div>
                         <div style={{ color: 'rgba(255,255,255,0.45)', marginTop: 4 }}>
-                          余额 {formatNumber(balance)} / 冻结 {formatNumber(frozen)}
+                          长期 {formatNumber(balance)} / 冻结 {formatNumber(totalFrozen)}
                         </div>
+                        {dailyTotal > 0 && (
+                          <div style={{ color: 'rgba(147,197,253,0.9)', marginTop: 4, fontSize: 12 }}>
+                            今日 {formatNumber(dailyRemaining)} / {formatNumber(dailyTotal)}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: 12 }}>{statusLabel(user.status)}</td>
                       <td style={{ padding: 12 }}>{formatDate(user.last_login_at)}</td>
@@ -830,9 +1070,124 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
               </tbody>
             </table>
           </div>
+          <div style={{ padding: '0 16px 16px' }}>
+            <PaginationControls
+              page={currentUserPage}
+              totalPages={userTotalPages}
+              total={filteredUsers.length}
+              pageSize={USERS_PAGE_SIZE}
+              label="用户"
+              onPageChange={setUserPage}
+            />
+          </div>
         </div>
 
         <div style={{ display: 'grid', gap: 16 }}>
+          <form onSubmit={saveCreditPolicy} style={{ ...panelStyle, borderColor: 'rgba(14,165,233,0.32)', background: 'rgba(14,165,233,0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
+              <div>
+                <div style={{ fontWeight: 800 }}>点数策略</div>
+                <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 4 }}>
+                  管新用户初始点数和每日固定额度；任务消费优先用每日额度，再用长期余额。
+                </div>
+              </div>
+              <button type="submit" style={{ ...buttonStyle, background: policySaving ? '#334155' : '#0284c7', padding: '8px 12px' }} disabled={policySaving}>
+                {policySaving ? '保存中' : '保存策略'}
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, marginBottom: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={creditPolicy.initial_grant.enabled}
+                    onChange={(event) => updateInitialPolicy({ enabled: event.target.checked })}
+                  />
+                  新用户初始点数
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    min="0"
+                    placeholder="内部新用户默认点数"
+                    value={creditPolicy.initial_grant.internal_default}
+                    onChange={(event) => updateInitialPolicy({ internal_default: numberOrZero(event.target.value) })}
+                  />
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    min="0"
+                    placeholder="外部新用户默认点数"
+                    value={creditPolicy.initial_grant.external_default}
+                    onChange={(event) => updateInitialPolicy({ external_default: numberOrZero(event.target.value) })}
+                  />
+                </div>
+                <div style={{ display: 'grid', gap: 6, marginTop: 10, color: 'rgba(255,255,255,0.66)', fontSize: 12 }}>
+                  <label><input type="checkbox" checked={creditPolicy.initial_grant.apply_to_self_register} onChange={(event) => updateInitialPolicy({ apply_to_self_register: event.target.checked })} /> 注册用户自动发放</label>
+                  <label><input type="checkbox" checked={creditPolicy.initial_grant.apply_to_feishu_auto_create} onChange={(event) => updateInitialPolicy({ apply_to_feishu_auto_create: event.target.checked })} /> 飞书首次登录自动发放</label>
+                  <label><input type="checkbox" checked={creditPolicy.initial_grant.apply_to_admin_create_default} onChange={(event) => updateInitialPolicy({ apply_to_admin_create_default: event.target.checked })} /> 管理员创建用户默认套用</label>
+                </div>
+              </div>
+
+              <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, marginBottom: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={creditPolicy.daily_quota.enabled}
+                    onChange={(event) => updateDailyPolicy({ enabled: event.target.checked })}
+                  />
+                  每日固定额度
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    min="0"
+                    placeholder="内部默认"
+                    value={creditPolicy.daily_quota.internal_default}
+                    onChange={(event) => updateDailyPolicy({ internal_default: numberOrZero(event.target.value) })}
+                  />
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    min="0"
+                    placeholder="外部默认"
+                    value={creditPolicy.daily_quota.external_default}
+                    onChange={(event) => updateDailyPolicy({ external_default: numberOrZero(event.target.value) })}
+                  />
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    min="1"
+                    max="168"
+                    placeholder="有效小时"
+                    value={creditPolicy.daily_quota.valid_hours}
+                    onChange={(event) => updateDailyPolicy({ valid_hours: Math.min(168, Math.max(1, Number(event.target.value) || 24)) })}
+                  />
+                </div>
+                <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, margin: '8px 0' }}>
+                  每日额度按上海时间懒发放；过期未使用会清零，已冻结额度等任务结算后关闭或返还。
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {USER_PROFILE_OPTIONS.map((option) => (
+                    <label key={option.value} style={{ display: 'grid', gap: 4, color: 'rgba(255,255,255,0.62)', fontSize: 12 }}>
+                      {option.label}
+                      <input
+                        style={inputStyle}
+                        type="number"
+                        min="0"
+                        value={creditPolicy.daily_quota.profile_overrides[option.value] || 0}
+                        onChange={(event) => updateDailyOverride(option.value, Number(event.target.value))}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </form>
+
           {editingUser && editUserForm ? (
             <form onSubmit={saveEditedUser} style={{ ...panelStyle, borderColor: 'rgba(34,197,94,0.28)', background: 'rgba(15,23,42,0.72)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
@@ -889,7 +1244,6 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                     style={inputStyle}
                     value={editUserForm.role}
                     onChange={(event) => updateEditUserForm({ role: event.target.value === 'admin' ? 'admin' : 'user' })}
-                    disabled={editUserForm.account_type === 'external'}
                   >
                     <option value="user">普通用户</option>
                     <option value="admin">管理员</option>
@@ -910,7 +1264,12 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                   </div>
                   {editUserForm.account_type === 'external' && (
                     <div style={{ color: '#fca5a5', fontSize: 12, marginTop: 6 }}>
-                      外部账号不能设为管理员，保存时会保持普通用户。
+                      选择管理员会自动切换为内部账号；外部账号只能作为普通用户保留。
+                    </div>
+                  )}
+                  {hasFeishuBinding(editingUser) && (
+                    <div style={{ color: '#93c5fd', fontSize: 12, marginTop: 6 }}>
+                      已绑定飞书，设为管理员时后端会按内部账号兜底处理。
                     </div>
                   )}
                 </div>
@@ -1131,7 +1490,16 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
               <input style={inputStyle} placeholder="账号" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} />
               <input style={inputStyle} placeholder="邮箱" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
               <input style={inputStyle} type="password" placeholder="初始密码" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
-              <select style={inputStyle} value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
+              <select
+                style={inputStyle}
+                value={newUser.role}
+                onChange={(e) => setNewUser({
+                  ...newUser,
+                  role: e.target.value,
+                  account_type: e.target.value === 'admin' ? 'internal' : newUser.account_type,
+                  feature_profile_id: e.target.value === 'admin' && newUser.account_type === 'external' ? 'auto' : newUser.feature_profile_id,
+                })}
+              >
                 <option value="user">普通用户</option>
                 <option value="admin">管理员</option>
               </select>
@@ -1141,6 +1509,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                 onChange={(e) => setNewUser({
                   ...newUser,
                   account_type: e.target.value,
+                  role: e.target.value === 'external' ? 'user' : newUser.role,
                   user_profile: e.target.value === 'external' ? 'other' : newUser.user_profile,
                   feature_profile_id: 'auto',
                 })}
@@ -1160,7 +1529,19 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                 <option value="auto">自动建议：{getFeatureProfileLabel(suggestedNewUserFeatureProfileId)}</option>
                 {FEATURE_PROFILE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
-              <input style={inputStyle} type="number" min="0" placeholder="初始点数" value={newUser.initial_credits} onChange={(e) => setNewUser({ ...newUser, initial_credits: e.target.value })} />
+              <div style={{ display: 'grid', gap: 6 }}>
+                <input style={inputStyle} type="number" min="0" placeholder="初始点数" value={newUser.initial_credits} onChange={(e) => setNewUser({ ...newUser, initial_credits: e.target.value })} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
+                  <span>当前策略建议初始 {formatNumber(suggestedNewUserInitialCredits)} 点，每日额度 {formatNumber(suggestedNewUserDailyQuota)} 点。</span>
+                  <button
+                    type="button"
+                    style={{ ...buttonStyle, background: '#334155', padding: '6px 8px', fontSize: 12 }}
+                    onClick={() => setNewUser({ ...newUser, initial_credits: String(suggestedNewUserInitialCredits) })}
+                  >
+                    套用策略
+                  </button>
+                </div>
+              </div>
               <input style={inputStyle} placeholder="原因" value={newUser.reason} onChange={(e) => setNewUser({ ...newUser, reason: e.target.value })} />
               <button style={buttonStyle} type="submit">创建用户</button>
             </div>
@@ -1176,10 +1557,20 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
               <select style={inputStyle} value={creditForm.type} onChange={(e) => setCreditForm({ ...creditForm, type: e.target.value })}>
                 <option value="grant">发放</option>
                 <option value="deduct">扣减</option>
-                <option value="adjust">修正</option>
+                <option value="adjust">修正为</option>
               </select>
-              <input style={inputStyle} type="number" min="0" placeholder="点数" value={creditForm.amount} onChange={(e) => setCreditForm({ ...creditForm, amount: e.target.value })} />
+              <input
+                style={inputStyle}
+                type="number"
+                min="0"
+                placeholder={creditForm.type === 'grant' ? '发放点数' : creditForm.type === 'deduct' ? '扣减点数' : '修正后的长期余额'}
+                value={creditForm.amount}
+                onChange={(e) => setCreditForm({ ...creditForm, amount: e.target.value })}
+              />
               <input style={inputStyle} placeholder="原因，必填" value={creditForm.reason} onChange={(e) => setCreditForm({ ...creditForm, reason: e.target.value })} />
+              <div style={{ color: 'rgba(255,255,255,0.48)', fontSize: 12, lineHeight: 1.6 }}>
+                手工操作只影响长期余额；每日固定额度由策略自动发放和过期清零。
+              </div>
               <button style={buttonStyle} type="submit">确认点数操作</button>
             </div>
           </form>
@@ -1220,6 +1611,21 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
               )}
             </tbody>
           </table>
+        </div>
+        <div style={{ padding: '0 16px 16px' }}>
+          {ledgerPagination && (
+            <PaginationControls
+              page={ledgerPagination.page}
+              totalPages={ledgerPagination.total_pages}
+              total={ledgerPagination.total}
+              pageSize={ledgerPagination.page_size}
+              label="流水"
+              onPageChange={(nextPage) => {
+                setLedgerPage(nextPage);
+                void loadLedger(nextPage);
+              }}
+            />
+          )}
         </div>
       </section>
     </main>

@@ -4,6 +4,7 @@ import {
   createFeishuOAuthState,
   FEISHU_STATE_COOKIE,
   FeishuAuthError,
+  isFeishuCliLoginEnabledForHost,
 } from '@/lib/auth/feishu';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +32,11 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (error) {
     if (error instanceof FeishuAuthError) {
-      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+      return NextResponse.json({
+        error: error.message,
+        code: error.code,
+        cli_login_available: isFeishuCliLoginEnabledForHost(request.nextUrl.hostname),
+      }, { status: error.status });
     }
     console.error('[Feishu authorize-url]', error);
     return NextResponse.json({ error: '飞书登录初始化失败' }, { status: 500 });

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { Prisma, User } from '@prisma/client';
+import { grantInitialCredits } from '@/lib/credits/policy';
 import { prisma } from '@/lib/prisma';
 import { getDefaultFeatureProfileId } from '@/lib/users/profiles';
 import { hashPassword } from './password';
@@ -70,6 +71,12 @@ let tenantAccessTokenCache: TokenCache | null = null;
 function envBool(value: string | undefined, fallback = false) {
   if (value == null || value === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}
+
+export function isFeishuCliLoginEnabledForHost(hostname: string) {
+  const explicit = process.env.FEISHU_CLI_LOGIN_ENABLED;
+  if (explicit != null && explicit !== '') return envBool(explicit);
+  return process.env.NODE_ENV !== 'production' && ['localhost', '127.0.0.1', '::1'].includes(hostname);
 }
 
 function splitEnvList(value: string | undefined) {
@@ -576,6 +583,11 @@ async function createFeishuUser(tx: Prisma.TransactionClient, profile: FeishuPro
       balance: 0,
       frozen_credits: 0,
     },
+  });
+
+  await grantInitialCredits(tx, user, 'feishu_auto_create', {
+    operatorId: user.id,
+    reason: '飞书新用户初始点数',
   });
 
   const project = await tx.project.create({

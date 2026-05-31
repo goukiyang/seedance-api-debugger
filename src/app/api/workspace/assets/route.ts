@@ -10,6 +10,10 @@ import { prisma } from '@/lib/prisma';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
 import { getSession } from '@/lib/auth/session';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
+import {
+  attachAssetToSiteReferenceImage,
+  ReferenceImportError,
+} from '@/lib/assets/reference-import';
 
 export async function POST(request: NextRequest) {
   try {
@@ -67,10 +71,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, workspaceAssetIds, workspaceId });
     }
 
+    const asset = await prisma.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true, type: true },
+    });
+    if (!asset) {
+      return NextResponse.json({ error: 'Asset not found or permission denied' }, { status: 404 });
+    }
+
+    if (asset.type === 'image') {
+      const reference = await attachAssetToSiteReferenceImage(
+        {
+          user,
+          workspaceId,
+          sourceLabel: 'Web UI',
+          role: role || 'reference_image',
+          albumName: '生成工作台参考图',
+          albumDescription: '生成工作台自动归档的参考图',
+          metadataSource: 'workspace_upload',
+        },
+        asset.id,
+      );
+      return NextResponse.json({
+        success: true,
+        workspaceAssetId: reference.workspaceAssetId,
+        referenceImageId: reference.referenceImageId,
+        workspaceId,
+      });
+    }
+
     const waId = await addAssetToWorkspace(workspaceId, assetId, role, user.id);
 
     return NextResponse.json({ success: true, workspaceAssetId: waId, workspaceId });
   } catch (error) {
+    if (error instanceof ReferenceImportError) {
+      return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
+    }
     console.error('[AddAssetToWorkspace] Error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed' },

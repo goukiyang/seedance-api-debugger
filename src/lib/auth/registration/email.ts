@@ -19,7 +19,7 @@ function emailHtml(code: string): string {
   return `
     <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
       <h2>Seedance 2.0 注册验证码</h2>
-      <p>你的公司邮箱注册验证码是：</p>
+      <p>你的邮箱注册验证码是：</p>
       <p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p>
       <p>验证码 10 分钟内有效。如果不是你本人操作，请忽略这封邮件。</p>
     </div>

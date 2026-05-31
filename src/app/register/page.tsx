@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { COMPANY_EMAIL_DOMAIN } from '@/lib/auth/registration/config';
 
 type RegisterUser = {
   role?: string;
@@ -25,7 +24,7 @@ function currentOriginLandingUrl(value: string | null | undefined, fallback: str
 export default function RegisterPage() {
   const router = useRouter();
   const [name, setName] = useState('');
-  const [emailPrefix, setEmailPrefix] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [code, setCode] = useState('');
@@ -37,15 +36,7 @@ export default function RegisterPage() {
   const [feishuLoading, setFeishuLoading] = useState(false);
   const [emailRegisterOpen, setEmailRegisterOpen] = useState(false);
 
-  const normalizeEmailPrefix = (value: string) => {
-    const normalized = value.trim().toLowerCase();
-    if (normalized.endsWith(COMPANY_EMAIL_DOMAIN)) {
-      return normalized.slice(0, -COMPANY_EMAIL_DOMAIN.length);
-    }
-    return normalized.replace(/\s/g, '');
-  };
-
-  const fullEmail = () => `${normalizeEmailPrefix(emailPrefix)}${COMPANY_EMAIL_DOMAIN}`;
+  const normalizedEmail = () => email.trim().toLowerCase();
 
   useEffect(() => {
     const next = new URLSearchParams(window.location.search).get('next');
@@ -62,13 +53,13 @@ export default function RegisterPage() {
   }, [router]);
 
   const validateBaseFields = () => {
-    const normalizedPrefix = normalizeEmailPrefix(emailPrefix);
-    if (!normalizedPrefix) {
-      setError('请输入公司邮箱前缀');
+    const nextEmail = normalizedEmail();
+    if (!nextEmail) {
+      setError('请输入邮箱');
       return false;
     }
-    if (normalizedPrefix.includes('@') || !/^[a-z0-9._-]+$/.test(normalizedPrefix)) {
-      setError('邮箱前缀只能包含字母、数字、点、下划线或短横线');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      setError('请输入有效邮箱');
       return false;
     }
     if (password.length < 8) {
@@ -89,13 +80,13 @@ export default function RegisterPage() {
     setDebugCode('');
     if (!validateBaseFields()) return;
 
-    const email = fullEmail();
+    const registerEmail = normalizedEmail();
     setLoading(true);
     try {
       const res = await fetch('/api/auth/register/request-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ name, email: registerEmail, password }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -108,7 +99,7 @@ export default function RegisterPage() {
         return;
       }
       setCodeSent(true);
-      setMessage(`验证码已发送至 ${email}，请查收公司邮箱`);
+      setMessage(`验证码已发送至 ${registerEmail}，请查收邮箱`);
       if (data.debug_code) setDebugCode(data.debug_code);
     } catch {
       setError('网络错误，请重试');
@@ -127,12 +118,12 @@ export default function RegisterPage() {
     }
 
     setLoading(true);
-    const email = fullEmail();
+    const registerEmail = normalizedEmail();
     try {
       const res = await fetch('/api/auth/register/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ email: registerEmail, code }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -245,14 +236,13 @@ export default function RegisterPage() {
           style={{
             width: '100%',
             padding: '12px',
-            background: feishuLoading ? 'rgba(36, 116, 255, 0.5)' : '#2474ff',
+            background: feishuLoading ? 'rgba(29, 78, 216, 0.52)' : '#1d4ed8',
             border: 'none',
             borderRadius: 8,
-            color: '#f8fbff',
+            color: '#f8fafc',
             fontSize: 14,
             fontWeight: 700,
             cursor: loading || feishuLoading ? 'not-allowed' : 'pointer',
-            transition: 'background 0.2s',
           }}
         >
           {feishuLoading ? '正在前往飞书...' : '使用飞书登录 / 注册'}
@@ -276,7 +266,7 @@ export default function RegisterPage() {
             cursor: loading || feishuLoading || codeSent ? 'not-allowed' : 'pointer',
           }}
         >
-          {emailRegisterOpen ? '收起账号密码方式' : '使用账号密码登录'}
+          {emailRegisterOpen ? '收起邮箱注册' : '使用邮箱注册'}
         </button>
 
         {(error || message || debugCode) && (
@@ -314,42 +304,16 @@ export default function RegisterPage() {
             </div>
 
             <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>公司邮箱</label>
-              <div style={{
-                display: 'flex',
-                alignItems: 'stretch',
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 8,
-                overflow: 'hidden',
-              }}>
-                <input
-                  type="text"
-                  value={emailPrefix}
-                  onChange={(event) => setEmailPrefix(normalizeEmailPrefix(event.target.value))}
-                  disabled={codeSent || loading}
-                  style={{
-                    ...inputStyle,
-                    minWidth: 0,
-                    background: 'transparent',
-                    border: 'none',
-                    borderRadius: 0,
-                  }}
-                  placeholder="name"
-                  autoComplete="username"
-                />
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '0 12px',
-                  color: 'rgba(255,255,255,0.62)',
-                  borderLeft: '1px solid rgba(255,255,255,0.1)',
-                  whiteSpace: 'nowrap',
-                  fontSize: 14,
-                }}>
-                  {COMPANY_EMAIL_DOMAIN}
-                </span>
-              </div>
+              <label style={labelStyle}>邮箱</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value.trim().toLowerCase())}
+                disabled={codeSent || loading}
+                style={inputStyle}
+                placeholder="name@example.com"
+                autoComplete="email"
+              />
             </div>
 
             {!codeSent && (
@@ -404,7 +368,6 @@ export default function RegisterPage() {
                 fontSize: 14,
                 fontWeight: 600,
                 cursor: loading || feishuLoading ? 'not-allowed' : 'pointer',
-                transition: 'background 0.2s',
               }}
             >
               {loading ? '处理中...' : codeSent ? '验证并注册' : '注册并进入'}
@@ -434,7 +397,7 @@ export default function RegisterPage() {
               cursor: loading ? 'not-allowed' : 'pointer',
             }}
           >
-            修改邮箱或重新发送
+            修改邮箱或重发验证码
           </button>
         )}
 
