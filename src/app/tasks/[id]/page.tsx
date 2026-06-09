@@ -911,7 +911,7 @@ export default function TaskDetailPage() {
         return;
       }
 
-      const videoUrl = new URL(localVideoPath, window.location.origin).toString();
+      const videoUrl = new URL(`/api/video/play/${task.id}`, window.location.origin).toString();
       await navigator.clipboard.writeText(videoUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -942,7 +942,7 @@ export default function TaskDetailPage() {
         return;
       }
 
-      const localUrl = new URL(localVideoPath, window.location.origin).toString();
+      const localUrl = new URL(`/api/video/play/${task.id}`, window.location.origin).toString();
       window.location.assign(localUrl);
     } finally {
       setOpeningVideo(false);
@@ -953,7 +953,7 @@ export default function TaskDetailPage() {
   const getVideoSrc = () => {
     if (!task) return '';
     if (task.local_video_path) {
-      return task.local_video_path;
+      return `/api/video/play/${task.id}`;
     }
     return task.result_video_url || '';
   };

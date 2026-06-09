@@ -136,7 +136,7 @@ export function GenerationComposer({
   const [duration, setDuration] = useState<VideoDuration>(DEFAULT_DURATION);
   const [resolution, setResolution] = useState<VideoResolution>(DEFAULT_RESOLUTION);
   const [seed, setSeed] = useState<number>(-1);
-  const [generateAudio, setGenerateAudio] = useState(false);
+  const [generateAudio, setGenerateAudio] = useState(true);
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
 
