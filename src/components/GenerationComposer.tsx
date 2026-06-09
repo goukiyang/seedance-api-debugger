@@ -215,7 +215,7 @@ export function GenerationComposer({
     setDuration(reuseDraft.duration);
     setResolution(reuseDraft.resolution);
     setSeed(reuseDraft.seed);
-    setGenerateAudio(reuseDraft.generateAudio);
+    setGenerateAudio(true);
     setReturnLastFrame(reuseDraft.returnLastFrame);
     setWatermark(reuseDraft.watermark);
     void workspace.refresh();

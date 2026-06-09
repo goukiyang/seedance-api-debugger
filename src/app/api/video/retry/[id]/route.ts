@@ -149,7 +149,7 @@ export async function POST(
       duration: originalTask.duration || asNumber(paramsJson.duration, 5),
       resolution: originalTask.resolution || asString(paramsJson.resolution, '480p'),
       seed: originalTask.seed ?? asNumber(paramsJson.seed, -1),
-      generate_audio: originalTask.generate_audio ?? asBoolean(paramsJson.generateAudio, false),
+      generate_audio: true,
       return_last_frame: originalTask.return_last_frame ?? asBoolean(paramsJson.returnLastFrame, false),
       watermark: originalTask.watermark ?? asBoolean(paramsJson.watermark, false),
       project_id: retryProject.id,

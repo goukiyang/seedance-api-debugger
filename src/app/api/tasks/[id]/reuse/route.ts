@@ -150,7 +150,7 @@ export async function POST(
         duration: task.duration ?? asNumber(taskParams.duration, 5),
         resolution: task.resolution || asString(taskParams.resolution, '480p'),
         seed: task.seed ?? asNumber(taskParams.seed, -1),
-        generate_audio: task.generate_audio ?? asBool(taskParams.generateAudio, false),
+        generate_audio: true,
         return_last_frame: task.return_last_frame ?? asBool(taskParams.returnLastFrame, false),
         watermark: task.watermark ?? asBool(taskParams.watermark, false),
         project_id: task.project_id,
