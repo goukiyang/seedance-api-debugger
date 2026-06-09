@@ -64,7 +64,7 @@ export async function GET(
 
   const task = await prisma.videoTask.findUnique({
     where: { id: taskId },
-    select: { local_video_path: true },
+    select: { local_video_path: true, result_video_url: true },
   });
 
   if (!task) {
@@ -72,47 +72,50 @@ export async function GET(
   }
 
   const absolutePath = localPublicVideoPath(task.local_video_path);
-  if (!absolutePath) {
-    return NextResponse.json({ error: '本地视频未就绪' }, { status: 404 });
+  if (absolutePath) {
+    let info;
+    try {
+      info = await stat(absolutePath);
+    } catch {
+      info = null;
+    }
+
+    if (info?.isFile() && info.size > 0) {
+      const fileSize = info.size;
+      const range = parseRange(request.headers.get('range'), fileSize);
+      const baseHeaders: Record<string, string> = {
+        'Content-Type': MIME_TYPE,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'private, max-age=0, must-revalidate',
+      };
+
+      if (range) {
+        const length = range.end - range.start + 1;
+        const stream = createReadStream(absolutePath, { start: range.start, end: range.end });
+        return new NextResponse(nodeStreamToWebReadable(stream), {
+          status: 206,
+          headers: {
+            ...baseHeaders,
+            'Content-Range': `bytes ${range.start}-${range.end}/${fileSize}`,
+            'Content-Length': String(length),
+          },
+        });
+      }
+
+      const stream = createReadStream(absolutePath);
+      return new NextResponse(nodeStreamToWebReadable(stream), {
+        status: 200,
+        headers: {
+          ...baseHeaders,
+          'Content-Length': String(fileSize),
+        },
+      });
+    }
   }
 
-  let info;
-  try {
-    info = await stat(absolutePath);
-  } catch {
-    return NextResponse.json({ error: '本地视频文件不存在' }, { status: 404 });
-  }
-  if (!info.isFile() || info.size <= 0) {
-    return NextResponse.json({ error: '本地视频文件为空' }, { status: 404 });
+  if (task.result_video_url) {
+    return NextResponse.redirect(task.result_video_url, 302);
   }
 
-  const fileSize = info.size;
-  const range = parseRange(request.headers.get('range'), fileSize);
-  const baseHeaders: Record<string, string> = {
-    'Content-Type': MIME_TYPE,
-    'Accept-Ranges': 'bytes',
-    'Cache-Control': 'private, max-age=0, must-revalidate',
-  };
-
-  if (range) {
-    const length = range.end - range.start + 1;
-    const stream = createReadStream(absolutePath, { start: range.start, end: range.end });
-    return new NextResponse(nodeStreamToWebReadable(stream), {
-      status: 206,
-      headers: {
-        ...baseHeaders,
-        'Content-Range': `bytes ${range.start}-${range.end}/${fileSize}`,
-        'Content-Length': String(length),
-      },
-    });
-  }
-
-  const stream = createReadStream(absolutePath);
-  return new NextResponse(nodeStreamToWebReadable(stream), {
-    status: 200,
-    headers: {
-      ...baseHeaders,
-      'Content-Length': String(fileSize),
-    },
-  });
+  return NextResponse.json({ error: '本地视频未就绪且没有可用的 Provider 链接' }, { status: 404 });
 }
