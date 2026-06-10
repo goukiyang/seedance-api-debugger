@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import { displayUserName } from '@/lib/users/display';
 
 type FeedbackUser = {
   id: string;
@@ -52,7 +53,7 @@ function statusLabel(status: string) {
 }
 
 function submitter(item: FeedbackItem) {
-  return item.user ? `${item.user.name} / ${item.user.username}` : '未登录用户';
+  return item.user ? displayUserName(item.user) : '未登录用户';
 }
 
 function downloadBlob(blob: Blob, filename: string) {

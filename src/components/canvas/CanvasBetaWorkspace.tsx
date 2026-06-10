@@ -9,6 +9,7 @@ import {
   normalizeCanvasDocumentInput,
   summarizeCanvasDocument,
 } from '@/lib/canvas/document';
+import { displayUserName } from '@/lib/users/display';
 import styles from './CanvasBetaWorkspace.module.css';
 
 interface CreditSummary {
@@ -67,10 +68,11 @@ const PROJECT_STORAGE_KEY = 'canvas_beta_project_id';
 const CANVAS_STORAGE_KEY = 'canvas_beta_id';
 
 function projectOwnerName(project: ProjectOption) {
-  const name = project.owner?.name?.trim();
-  const username = project.owner?.username?.trim();
-  if (name && username && name !== username) return `${name}（${username}）`;
-  return name || username || project.owner_user_id;
+  return displayUserName({
+    id: project.owner_user_id,
+    name: project.owner?.name,
+    username: project.owner?.username,
+  });
 }
 
 function projectDisplayName(project: ProjectOption) {

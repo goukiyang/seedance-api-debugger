@@ -50,6 +50,32 @@ function pickNumber(record: Record<string, unknown>, keys: string[]): number | u
   return undefined;
 }
 
+function redactProviderResponseForLog(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactProviderResponseForLog(item));
+  }
+
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((acc, [key, current]) => {
+    const normalizedKey = key.toLowerCase();
+    if (
+      normalizedKey.includes('token') ||
+      normalizedKey.includes('secret') ||
+      normalizedKey.includes('signature') ||
+      normalizedKey.includes('authorization') ||
+      normalizedKey.includes('api_key')
+    ) {
+      acc[key] = '[redacted]';
+    } else if (normalizedKey.includes('url') && typeof current === 'string') {
+      acc[key] = maskVideoUrl(current);
+    } else {
+      acc[key] = redactProviderResponseForLog(current);
+    }
+    return acc;
+  }, {});
+}
+
 // ============================================================================
 // Provider Config
 // ============================================================================
@@ -386,7 +412,7 @@ export async function getVideoTaskStatus(
     }
 
     console.log(`[Status] HTTP Status: ${response.status}`);
-    console.log(`[Status] Response:`, JSON.stringify(data, null, 2));
+    console.log(`[Status] Response:`, JSON.stringify(redactProviderResponseForLog(data), null, 2));
 
     if (!response.ok) {
       throw new Error(`Get video task failed: ${response.status} ${JSON.stringify(data)}`);

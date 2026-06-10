@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { formatCurrencyAmount, formatUsdCnyEstimateFromInput } from '@/lib/costs/currency';
+import { formatCurrencyAmountWithFixedCny, formatUsdCnyEstimateFromInput } from '@/lib/costs/currency';
 
 export type ProviderBalanceSnapshotView = {
   id: string;
@@ -46,7 +46,7 @@ function snapshotSourceLabel(source: string) {
 function formatSnapshotAmount(snapshot: ProviderBalanceSnapshotView | null) {
   if (!snapshot) return '暂无快照';
   if (snapshot.amount_decimal && snapshot.currency) {
-    return formatCurrencyAmount(Number(snapshot.amount_decimal), snapshot.currency, 2);
+    return formatCurrencyAmountWithFixedCny(Number(snapshot.amount_decimal), snapshot.currency);
   }
   if (snapshot.quota_amount !== null && snapshot.quota_amount !== undefined) {
     return `${snapshot.quota_amount} ${snapshot.quota_unit || 'quota'}`;

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
 import type { GenerationMode } from '@/types';
 import { GENERATION_MODE_LABELS } from '@/types';
 
@@ -27,7 +28,9 @@ interface Task {
   refund_amount: number | null;
   provider_cost_currency: string | null;
   provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
   provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
   reference_image_ids: string | null;
   reference_image_urls: string | null;
   created_at: string;
@@ -108,11 +111,13 @@ function taskCostText(task: Task): string {
 }
 
 function taskOfficialChargeText(task: Task): string {
-  if (task.provider_official_amount_micros !== null && task.provider_official_amount_micros !== undefined) {
-    return formatAmountMicrosWithFixedCny(task.provider_official_amount_micros, task.provider_cost_currency);
+  const amountMicros = task.provider_final_amount_micros ?? task.provider_official_amount_micros;
+  if (amountMicros !== null && amountMicros !== undefined) {
+    return formatAmountMicrosWithFixedCny(amountMicros, task.provider_cost_currency);
   }
-  if (task.provider_official_amount_minor !== null && task.provider_official_amount_minor !== undefined) {
-    return formatAmountMinorWithFixedCny(task.provider_official_amount_minor, task.provider_cost_currency);
+  const amountMinor = task.provider_final_amount_minor ?? task.provider_official_amount_minor;
+  if (amountMinor !== null && amountMinor !== undefined) {
+    return formatAmountMinorWithFixedCny(amountMinor, task.provider_cost_currency);
   }
   return '待官方确认';
 }
@@ -152,7 +157,7 @@ function TaskPreview({ task }: { task: Task }) {
 
   return (
     <Link
-      href={`/tasks/${task.id}`}
+      href={taskDetailHref(task.id, '/tasks')}
       className={`tasks-preview tasks-preview-${preview.kind}`}
       aria-label={`查看任务 ${task.id} 的截图和详情`}
     >
@@ -328,7 +333,7 @@ export default function TasksPage() {
                     </div>
 
                     <div className="tasks-card-actions">
-                      <Link href={`/tasks/${task.id}`} className="btn btn-secondary">
+                      <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
                         查看详情
                       </Link>
                       <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-primary">

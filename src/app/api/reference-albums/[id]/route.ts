@@ -25,6 +25,9 @@ export async function GET(
       orderBy: { sort_order: 'asc' },
       include: { asset: { select: { id: true, type: true, file_name: true, width: true, height: true, file_size: true, mime_type: true } } },
     });
+    const coverImageId = album.cover_image_id && images.some((image) => image.id === album.cover_image_id)
+      ? album.cover_image_id
+      : images[0]?.id || null;
 
     return NextResponse.json({
       album: {
@@ -37,6 +40,7 @@ export async function GET(
         album_type: album.album_type,
         visibility: album.visibility,
         cover_image_id: album.cover_image_id,
+        cover_image_url: coverImageId ? `/api/reference-images/${coverImageId}/content?variant=thumbnail` : null,
         status: album.status,
         created_at: album.created_at,
         updated_at: album.updated_at,
@@ -135,23 +139,20 @@ export async function DELETE(
     await assertCanEditAlbum(user, params.id);
     await prisma.referenceAlbum.update({
       where: { id: params.id },
-      data: { status: 'deleted' },
-    });
-    await prisma.referenceImage.updateMany({
-      where: { album_id: params.id },
-      data: { status: 'deleted' },
+      data: { status: 'archived' },
     });
 
     await prisma.operationLog.create({
       data: {
         operator_id: user.id,
-        action: 'reference_album_delete',
+        action: 'reference_album_archive',
         target_type: 'ReferenceAlbum',
         target_id: params.id,
+        detail: JSON.stringify({ preserved_reference_images: true }),
       },
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, archived: true });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

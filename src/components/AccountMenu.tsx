@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import {
+  displayUserInitials,
+  displayUserName,
+  userAvatarColor,
+} from '@/lib/users/display';
 
 export interface AccountMenuUser {
   name?: string | null;
@@ -17,34 +22,12 @@ interface AccountMenuProps {
   variant?: 'shell' | 'composer';
 }
 
-const avatarPalette = [
-  '#324264',
-  '#3f3a5f',
-  '#2f4b45',
-  '#4d3f32',
-  '#3b4354',
-  '#4a3745',
-];
-
 function avatarLabel(user: AccountMenuUser | null | undefined, displayName: string | undefined) {
-  const raw = displayName || user?.email || user?.username || 'U';
-  const localPart = raw.includes('@') ? raw.split('@')[0] : raw;
-  const segments = localPart
-    .trim()
-    .split(/[\s._-]+/)
-    .filter(Boolean);
-
-  if (segments.length >= 2) {
-    return `${segments[0][0] || ''}${segments[1][0] || ''}`.toUpperCase();
-  }
-
-  return Array.from(segments[0] || localPart.trim() || 'U').slice(0, 2).join('').toUpperCase();
+  return displayUserInitials({ ...user, name: displayName || user?.name });
 }
 
 function avatarColor(user: AccountMenuUser | null | undefined, displayName: string | undefined) {
-  const source = `${user?.email || ''}${user?.username || ''}${displayName || ''}`;
-  const hash = Array.from(source || 'user').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return avatarPalette[hash % avatarPalette.length];
+  return userAvatarColor({ ...user, name: displayName || user?.name });
 }
 
 function roleLabel(user: AccountMenuUser | null | undefined) {
@@ -57,7 +40,7 @@ export default function AccountMenu({ user, loading = false, variant = 'shell' }
   const [loggingOut, setLoggingOut] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
-  const displayName = user?.name?.trim() || user?.username?.trim() || user?.email?.trim();
+  const displayName = user ? displayUserName(user) : '';
   const className = `account-menu account-menu-${variant}`;
   const label = avatarLabel(user, displayName);
   const fallbackColor = avatarColor(user, displayName);

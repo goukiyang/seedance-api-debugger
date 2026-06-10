@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
+import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
 
 type UserSelectorType = 'id' | 'email' | 'username';
 
@@ -52,7 +53,7 @@ function selectorLabel(type: UserSelectorType) {
 function linkedUserText(config: CodexConfig) {
   if (!config.linked_user) return '未匹配到用户';
   const user = config.linked_user;
-  return `${user.name || user.username} · ${user.email} · ${user.status}`;
+  return `${displayUserName(user)} · ${displayUserSubtitle(user) || user.id.slice(0, 8)} · ${user.status}`;
 }
 
 export default function AdminIntegrationsClient() {

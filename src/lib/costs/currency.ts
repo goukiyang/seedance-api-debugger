@@ -16,6 +16,15 @@ function formatMoney(value: number, digits: number) {
   return digits <= 2 ? value.toFixed(digits) : trimFixed(value, digits);
 }
 
+function formatFixedMoneyWithFloor(value: number, prefix = '', suffix = '') {
+  const abs = Math.abs(value);
+  if (value !== 0 && abs < 0.01) {
+    const floor = `${prefix}0.01${suffix}`;
+    return value < 0 ? `> -${floor}` : `< ${floor}`;
+  }
+  return `${prefix}${value.toFixed(2)}${suffix}`;
+}
+
 function cnyDigits(value: number) {
   const abs = Math.abs(value);
   if (abs > 0 && abs < 0.01) return 6;
@@ -26,6 +35,16 @@ function cnyDigits(value: number) {
 function normalizeCurrency(currency?: string | null) {
   return currency?.trim().toUpperCase() || '';
 }
+
+export type ProviderUsdChargeInput = {
+  provider_cost_currency?: string | null;
+  provider_final_amount_micros?: number | null;
+  provider_official_amount_micros?: number | null;
+  provider_final_amount_minor?: number | null;
+  provider_official_amount_minor?: number | null;
+  provider_actual_cost?: number | null;
+  provider_actual_cost_currency?: string | null;
+};
 
 export function usdToCny(value: number) {
   return value * USD_TO_CNY_RATE;
@@ -54,19 +73,19 @@ export function formatCurrencyAmount(value: number, currency?: string | null, di
 }
 
 export function formatCnyAmountFixed(value: number) {
-  return `¥${value.toFixed(2)}`;
+  return formatFixedMoneyWithFloor(value, '¥');
 }
 
 export function formatCurrencyAmountWithFixedCny(value: number, currency?: string | null) {
   const normalized = normalizeCurrency(currency);
-  const text = value.toFixed(2);
 
   if (normalized === 'USD') {
-    return `$${text} USD（约 ${formatCnyAmountFixed(usdToCny(value))}）`;
+    return `${formatFixedMoneyWithFloor(value, '$', ' USD')}（约 ${formatCnyAmountFixed(usdToCny(value))}）`;
   }
   if (normalized === 'CNY') {
-    return `¥${text}`;
+    return formatCnyAmountFixed(value);
   }
+  const text = formatFixedMoneyWithFloor(value);
   return normalized ? `${text} ${normalized}` : text;
 }
 
@@ -90,25 +109,46 @@ export function formatAmountMicrosWithFixedCny(amount: number | null | undefined
   return formatCurrencyAmountWithFixedCny(amount / 1_000_000, currency);
 }
 
+export function formatProviderUsdCharge(input: ProviderUsdChargeInput): string | null {
+  const currency = normalizeCurrency(input.provider_cost_currency || input.provider_actual_cost_currency);
+  if (currency !== 'USD') return null;
+
+  const amountMicros = input.provider_final_amount_micros ?? input.provider_official_amount_micros;
+  if (amountMicros !== null && amountMicros !== undefined) {
+    return formatCurrencyAmountWithFixedCny(amountMicros / 1_000_000, currency);
+  }
+
+  const amountMinor = input.provider_final_amount_minor ?? input.provider_official_amount_minor;
+  if (amountMinor !== null && amountMinor !== undefined) {
+    return formatCurrencyAmountWithFixedCny(amountMinor / 100, currency);
+  }
+
+  if (input.provider_actual_cost !== null && input.provider_actual_cost !== undefined) {
+    return formatCurrencyAmountWithFixedCny(input.provider_actual_cost, currency);
+  }
+
+  return null;
+}
+
 export function formatUsdCnyEstimateFromInput(amount: string, currency: string) {
   if (normalizeCurrency(currency) !== 'USD') return '';
   const normalizedAmount = amount.trim().replace(/[,，]/g, '');
   if (!normalizedAmount) return '';
   const value = Number(normalizedAmount);
   if (!Number.isFinite(value) || value < 0) return '';
-  return `约 ${formatCnyAmount(usdToCny(value))}，按 ${usdToCnyRateText()}`;
+  return `约 ${formatCnyAmountFixed(usdToCny(value))}，按 ${usdToCnyRateText()}`;
 }
 
 export function amountMinorToCnyEstimate(amount: number | null | undefined, currency?: string | null) {
   if (amount === null || amount === undefined) return '';
   if (normalizeCurrency(currency) !== 'USD') return '';
-  return formatCnyAmount(usdToCny(amount / 100));
+  return formatCnyAmountFixed(usdToCny(amount / 100));
 }
 
 export function amountMicrosToCnyEstimate(amount: number | null | undefined, currency?: string | null) {
   if (amount === null || amount === undefined) return '';
   if (normalizeCurrency(currency) !== 'USD') return '';
-  return formatCnyAmount(usdToCny(amount / 1_000_000));
+  return formatCnyAmountFixed(usdToCny(amount / 1_000_000));
 }
 
 export function costAmountToCnyEstimate(input: {

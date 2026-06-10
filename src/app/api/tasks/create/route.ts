@@ -35,6 +35,7 @@ import {
 } from '@/lib/assets/reference-import';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { evaluatePaidGenerationGuard, paidGenerationGuardError } from '@/lib/tasks/paid-generation-guard';
+import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import type { CreateVideoInput, GenerationMode, VideoResolution, VideoDuration } from '@/types';
 
 const VALID_GENERATION_MODES: GenerationMode[] = [
@@ -541,6 +542,8 @@ export async function POST(request: NextRequest) {
           : [],
       },
     });
+
+    startTaskLocalization(taskId);
 
     return NextResponse.json({
       id: taskId,

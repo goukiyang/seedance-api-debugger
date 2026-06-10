@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
+import { displayUserName } from '@/lib/users/display';
 
 interface AlbumDetail {
   id: string;
@@ -10,6 +11,9 @@ interface AlbumDetail {
   description: string | null;
   album_type: string;
   visibility: string;
+  cover_image_id: string | null;
+  cover_image_url: string | null;
+  status: string;
   image_count: number;
   owner?: { name: string; username: string };
   project?: { name: string } | null;
@@ -184,6 +188,47 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
     loadAlbum();
   };
 
+  const handleRenameAlbum = async () => {
+    if (!album) return;
+    const nextName = window.prompt('输入新的图集名称', album.name)?.trim();
+    if (!nextName || nextName === album.name) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reference-albums/${album.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nextName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '重命名失败');
+      setAlbum((current) => current ? { ...current, name: data.album?.name || nextName } : current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重命名失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAlbum = async () => {
+    if (!album) return;
+    const confirmed = window.confirm(`删除图集「${album.name}」？图集会从列表隐藏，历史任务引用的参考图仍会保留。`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reference-albums/${album.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || '删除图集失败');
+      window.location.href = '/collections';
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除图集失败');
+      setLoading(false);
+    }
+  };
+
   if (!album && loading) return <div className="card">读取中...</div>;
 
   return (
@@ -202,7 +247,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         <>
           <div className="album-detail-summary">
             <span>{album.image_count} 张图片</span>
-            <span>创建者：{album.owner?.name || album.owner?.username || '-'}</span>
+            <span>创建者：{displayUserName(album.owner)}</span>
             <span>项目：{album.project?.name || '-'}</span>
             <span>范围：{album.visibility}</span>
             <span>权限：{album.permissions.view ? '可查看' : ''} {album.permissions.use ? '可生成' : ''} {album.permissions.edit ? '可编辑' : ''}</span>
@@ -213,6 +258,8 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
               <>
                 <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUpload} />
                 <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading}>上传图片到图集</button>
+                <button type="button" onClick={handleRenameAlbum} disabled={loading}>重命名图集</button>
+                <button type="button" className="danger" onClick={handleDeleteAlbum} disabled={loading}>删除图集</button>
               </>
             )}
             {album.permissions.use && (

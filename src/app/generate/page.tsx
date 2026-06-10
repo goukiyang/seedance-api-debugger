@@ -7,6 +7,13 @@ import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetC
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
+import { formatProviderUsdCharge } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
+import {
+  normalizeGenerationDefaults,
+  type GenerationDefaults,
+} from '@/lib/preferences/generation';
+import { displayUserName } from '@/lib/users/display';
 
 // ============================================================================
 // Types
@@ -30,6 +37,11 @@ interface TaskItem {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
   created_at: string;
 }
 
@@ -39,6 +51,11 @@ interface PolledTask {
   provider_status: string | null;
   result_video_url: string | null;
   error_message: string | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
 }
 
 interface CreditSummary {
@@ -77,17 +94,42 @@ interface ReuseDraft {
   projectId: string | null;
 }
 
+type GeneratePageUser = AccountMenuUser & { id: string };
+
 interface AuthMeResponse {
-  user: AccountMenuUser | null;
+  user: GeneratePageUser | null;
 }
 
 const PROJECT_STORAGE_KEY = 'generate_project_id';
+const GENERATION_PREFERENCE_STORAGE_PREFIX = 'generation_defaults_v1:';
+
+function generationPreferenceStorageKey(userId: string) {
+  return `${GENERATION_PREFERENCE_STORAGE_PREFIX}${userId}`;
+}
+
+function readLocalGenerationDefaults(userId: string): GenerationDefaults | null {
+  try {
+    const raw = window.localStorage.getItem(generationPreferenceStorageKey(userId));
+    return raw ? normalizeGenerationDefaults(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalGenerationDefaults(userId: string, settings: GenerationDefaults) {
+  try {
+    window.localStorage.setItem(generationPreferenceStorageKey(userId), JSON.stringify(settings));
+  } catch {
+    // 偏好缓存失败不影响生成。
+  }
+}
 
 function projectOwnerName(project: ProjectOption): string {
-  const name = project.owner?.name?.trim();
-  const username = project.owner?.username?.trim();
-  if (name && username && name !== username) return `${name}（${username}）`;
-  return name || username || project.owner_user_id;
+  return displayUserName({
+    id: project.owner_user_id,
+    name: project.owner?.name,
+    username: project.owner?.username,
+  });
 }
 
 function projectDisplayName(project: ProjectOption): string {
@@ -149,6 +191,7 @@ function RecentTaskPreview({ task }: { task: TaskItem }) {
 
 export default function GeneratePage() {
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
+  const appliedPreferenceProjectRef = useRef(false);
 
   // ---- Collections ----
   const [collections, setCollections] = useState<AssetCollection[]>([]);
@@ -158,6 +201,7 @@ export default function GeneratePage() {
   const [result, setResult] = useState<CreateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorDebug, setErrorDebug] = useState<object | null>(null);
+  const [generationDefaults, setGenerationDefaults] = useState<GenerationDefaults | null>(null);
 
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
@@ -165,10 +209,11 @@ export default function GeneratePage() {
   // ---- Result Polling ----
   const [polledResult, setPolledResult] = useState<PolledTask | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [activePollingTaskIds, setActivePollingTaskIds] = useState<string[]>([]);
 
   // ---- Credit Summary ----
   const [credits, setCredits] = useState<CreditSummary | null>(null);
-  const [currentUser, setCurrentUser] = useState<AccountMenuUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<GeneratePageUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
   // ---- Current Project ----
@@ -215,6 +260,35 @@ export default function GeneratePage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let cancelled = false;
+    const localFallback = readLocalGenerationDefaults(currentUser.id);
+
+    const applySettings = (settings: GenerationDefaults | null) => {
+      if (!settings || cancelled) return;
+      setGenerationDefaults(settings);
+      if (settings.projectId) {
+        window.localStorage.setItem(PROJECT_STORAGE_KEY, settings.projectId);
+      }
+      writeLocalGenerationDefaults(currentUser.id, settings);
+    };
+
+    fetch('/api/me/preferences/generation', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        const settings = data?.settings ? normalizeGenerationDefaults(data.settings) : localFallback;
+        applySettings(settings);
+      })
+      .catch(() => {
+        applySettings(localFallback);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     fetch('/api/collections')
@@ -285,6 +359,18 @@ export default function GeneratePage() {
     window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
     setProjectConfirmAction(null);
   }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (appliedPreferenceProjectRef.current) return;
+    if (!generationDefaults?.projectId || projects.length === 0) return;
+    const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
+    if (requestedProjectId || reuseDraft?.projectId) return;
+
+    const preferred = projects.find((project) => project.id === generationDefaults.projectId);
+    if (!preferred) return;
+    appliedPreferenceProjectRef.current = true;
+    setSelectedProjectId(preferred.id);
+  }, [generationDefaults?.projectId, projects, reuseDraft?.projectId]);
 
   useEffect(() => {
     if (!projectPickerOpen) return;
@@ -430,7 +516,6 @@ export default function GeneratePage() {
     setError(null);
     setErrorDebug(null);
     setPolledResult(null);
-    setIsPolling(false);
 
     try {
       const res = await fetch(`/api/tasks/${taskId}/reuse`, {
@@ -504,61 +589,135 @@ export default function GeneratePage() {
   }, []);
 
   // ============================================================================
-  // Result Polling — poll result task until terminal state
+  // Result Polling — poll queued tasks without blocking the composer
   // ============================================================================
 
   useEffect(() => {
-    if (!result?.id) return;
+    if (activePollingTaskIds.length === 0) {
+      setIsPolling(false);
+      return;
+    }
 
     setIsPolling(true);
-    setPolledResult(null);
-
-    let intervalId: ReturnType<typeof setInterval>;
+    let cancelled = false;
     let pollCount = 0;
     const MAX_POLLS = 120; // ~10 minutes at 5s interval
 
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/video/status/${result.id}`);
-        if (!res.ok) return;
-        const data: PolledTask = await res.json();
-        setPolledResult(data);
-        pollCount++;
+    const refreshRecentTasks = () => {
+      fetch('/api/video/list')
+        .then((r) => r.json())
+        .then((d) => setRecentTasks((d.tasks || []).slice(0, 6)))
+        .catch(() => {});
+    };
 
-        if (['succeeded', 'failed', 'cancelled'].includes(data.local_status)) {
-          clearInterval(intervalId);
-          setIsPolling(false);
-          // refresh task list so the card shows updated status
-          fetch('/api/video/list')
-            .then((r) => r.json())
-            .then((d) => setRecentTasks((d.tasks || []).slice(0, 6)))
-            .catch(() => {});
-          // refresh credit display after settlement
-          fetch('/api/me/credits')
-            .then((r) => r.ok ? r.json() : null)
-            .then((d) => { if (d) setCredits(d); })
-            .catch(() => {});
-        } else if (pollCount >= MAX_POLLS) {
-          clearInterval(intervalId);
-          setIsPolling(false);
+    const refreshCredits = () => {
+      fetch('/api/me/credits')
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) setCredits(d); })
+        .catch(() => {});
+    };
+
+    const poll = async () => {
+      pollCount += 1;
+      const terminalIds: string[] = [];
+
+      await Promise.all(activePollingTaskIds.map(async (taskId) => {
+        try {
+          const res = await fetch(`/api/video/status/${taskId}`);
+          if (!res.ok) return;
+          const data: PolledTask = await res.json();
+          if (cancelled) return;
+
+          setPolledResult(data);
+          setRecentTasks((current) => current.map((task) => (
+            task.id === data.id
+              ? {
+                  ...task,
+                  local_status: data.local_status,
+                  result_video_url: data.result_video_url,
+                  provider_cost_currency: data.provider_cost_currency,
+                  provider_official_amount_minor: data.provider_official_amount_minor,
+                  provider_final_amount_minor: data.provider_final_amount_minor,
+                  provider_official_amount_micros: data.provider_official_amount_micros,
+                  provider_final_amount_micros: data.provider_final_amount_micros,
+                }
+              : task
+          )));
+
+          if (['succeeded', 'failed', 'cancelled'].includes(data.local_status)) {
+            terminalIds.push(taskId);
+          }
+        } catch {
+          // non-critical polling error, keep polling
         }
-      } catch {
-        // non-critical polling error, keep polling
+      }));
+
+      if (cancelled) return;
+
+      if (terminalIds.length > 0) {
+        setActivePollingTaskIds((current) => current.filter((id) => !terminalIds.includes(id)));
+        refreshRecentTasks();
+        refreshCredits();
+      } else if (pollCount >= MAX_POLLS) {
+        setActivePollingTaskIds([]);
       }
     };
 
     poll();
-    intervalId = setInterval(poll, 5000);
+    const intervalId = setInterval(poll, 5000);
 
     return () => {
+      cancelled = true;
       clearInterval(intervalId);
-      setIsPolling(false);
     };
+  }, [activePollingTaskIds]);
+
+  useEffect(() => {
+    if (!result?.id) return;
+    const timeout = setTimeout(() => {
+      setResult((current) => current?.id === result.id ? null : current);
+    }, 6000);
+    return () => clearTimeout(timeout);
   }, [result?.id]);
 
   // ============================================================================
   // Submit
   // ============================================================================
+
+  const saveGenerationDefaults = useCallback((params: {
+    generationMode: GenerationMode;
+    ratio: VideoRatio;
+    duration: VideoDuration;
+    resolution: VideoResolution;
+    generateAudio: boolean;
+    returnLastFrame: boolean;
+    watermark: boolean;
+  }) => {
+    const settings: GenerationDefaults = {
+      generationMode: params.generationMode,
+      ratio: params.ratio,
+      duration: params.duration,
+      resolution: params.resolution,
+      generateAudio: params.generateAudio,
+      returnLastFrame: params.returnLastFrame,
+      watermark: params.watermark,
+      seedMode: 'random',
+      projectId: selectedProjectId || null,
+    };
+
+    setGenerationDefaults(settings);
+    if (currentUser?.id) {
+      writeLocalGenerationDefaults(currentUser.id, settings);
+    }
+
+    fetch('/api/me/preferences/generation', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings }),
+    }).catch(() => {
+      // 偏好保存失败不影响生成任务。
+    });
+  }, [currentUser?.id, selectedProjectId]);
 
   const handleSubmit = useCallback(async (params: {
     prompt: string;
@@ -610,6 +769,29 @@ export default function GeneratePage() {
 
       setResult(data);
       setErrorDebug(null);
+      setPolledResult(null);
+      setActivePollingTaskIds((current) => [
+        data.id,
+        ...current.filter((id) => id !== data.id),
+      ].slice(0, 6));
+      setRecentTasks((current) => [
+        {
+          id: data.id,
+          prompt: params.prompt,
+          local_status: data.status || 'submitted',
+          result_video_url: null,
+          result_last_frame_url: null,
+          local_video_path: null,
+          provider_cost_currency: null,
+          provider_official_amount_minor: null,
+          provider_final_amount_minor: null,
+          provider_official_amount_micros: null,
+          provider_final_amount_micros: null,
+          created_at: data.created_at,
+        },
+        ...current.filter((task) => task.id !== data.id),
+      ].slice(0, 6));
+      saveGenerationDefaults(params);
 
       // Refresh credit display after freeze
       fetch('/api/me/credits')
@@ -621,7 +803,7 @@ export default function GeneratePage() {
     } finally {
       setSubmitting(false);
     }
-  }, [selectedProjectId]);
+  }, [saveGenerationDefaults, selectedProjectId]);
 
   // ============================================================================
   // Collection handlers
@@ -666,8 +848,6 @@ export default function GeneratePage() {
     setResult(null);
     setError(null);
     setErrorDebug(null);
-    setPolledResult(null);
-    setIsPolling(false);
   }, []);
 
   // ============================================================================
@@ -919,6 +1099,7 @@ export default function GeneratePage() {
 
         <GenerationComposer
           collections={collections}
+          initialSettings={generationDefaults}
           reuseDraft={reuseDraft}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
@@ -938,12 +1119,15 @@ export default function GeneratePage() {
           <div className="composer-recent">
             <div className="composer-recent-title">最近任务</div>
             <div className="composer-recent-grid">
-              {recentTasks.map((task) => (
+              {recentTasks.map((task) => {
+                const chargeText = formatProviderUsdCharge(task);
+
+                return (
                 <article
                   key={task.id}
                   className="composer-task-card"
                 >
-                  <Link href={`/tasks/${task.id}`} className="composer-task-card-link">
+                  <Link href={taskDetailHref(task.id, '/generate')} className="composer-task-card-link">
                     <RecentTaskPreview task={task} />
                     <div className="composer-task-card-body">
                       <div className="composer-task-card-prompt">
@@ -951,6 +1135,11 @@ export default function GeneratePage() {
                       </div>
                       <div className="composer-task-card-meta">
                         <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
+                        {chargeText && (
+                          <span className="composer-task-card-charge" title={`实际扣除 ${chargeText}`}>
+                            实扣 {chargeText}
+                          </span>
+                        )}
                         <span className={`composer-task-card-status ${task.local_status}`}>
                           {task.local_status === 'submitted' ? '排队中' :
                            task.local_status === 'running' ? '生成中' :
@@ -969,7 +1158,8 @@ export default function GeneratePage() {
                     {reusingTaskId === task.id ? '回填中...' : '重新生成'}
                   </button>
                 </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

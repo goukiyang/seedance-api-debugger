@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { displayUserName } from '@/lib/users/display';
 
 type AlbumScope = 'mine' | 'project' | 'shared' | 'public';
 
@@ -128,7 +129,7 @@ export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }:
         <div className="album-picker-header">
           <div>
             <h3>选择参考图</h3>
-            <p>最多 9 张，顺序会进入生成工作台并对应图1、图2、图3。</p>
+            <p>最多 9 张，顺序会进入生成工作台并对应 @图片1、@图片2、@图片3。</p>
           </div>
           <button type="button" className="album-picker-close" onClick={onClose}>×</button>
         </div>
@@ -161,7 +162,7 @@ export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }:
                   onClick={() => setSelectedAlbumId(album.id)}
                 >
                   <strong>{album.name}</strong>
-                  <span>{album.image_count} 张 · {album.project?.name || album.owner?.name || album.owner?.username || '个人'}</span>
+                  <span>{album.image_count} 张 · {album.project?.name || (album.owner ? displayUserName(album.owner) : '个人')}</span>
                 </button>
               ))
             )}

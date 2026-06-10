@@ -5,11 +5,13 @@ import { getSession } from '@/lib/auth/session';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
 import PageBanner from '@/components/PageBanner';
 import {
-  formatAmountMicrosWithCny,
-  formatAmountMinorWithCny,
-  formatCurrencyAmount,
+  formatAmountMicrosWithFixedCny,
+  formatAmountMinorWithFixedCny,
+  formatCurrencyAmountWithFixedCny,
   usdToCnyRateText,
 } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
+import { displayUserName } from '@/lib/users/display';
 import OfficialChargeForm from './OfficialChargeForm';
 import OfficialChargeImportForm from './OfficialChargeImportForm';
 import ProviderBalancePanel from './ProviderBalancePanel';
@@ -17,11 +19,11 @@ import ProviderBalancePanel from './ProviderBalancePanel';
 export const dynamic = 'force-dynamic';
 
 function formatAmountMinor(amount: number | null | undefined, currency?: string | null) {
-  return formatAmountMinorWithCny(amount, currency);
+  return formatAmountMinorWithFixedCny(amount, currency);
 }
 
 function formatAmountMicros(amount: number | null | undefined, currency?: string | null) {
-  return formatAmountMicrosWithCny(amount, currency);
+  return formatAmountMicrosWithFixedCny(amount, currency);
 }
 
 function formatCostAmount(item: {
@@ -50,7 +52,7 @@ function taskOwnerLabel(task: {
   owner?: { name: string; username: string } | null;
   user?: { name: string; username: string } | null;
 }) {
-  return task.owner?.name || task.owner?.username || task.user?.name || task.user?.username || '-';
+  return displayUserName(task.owner || task.user);
 }
 
 function formatCurrencyTotals(totals: Array<{ currency: string; amount_minor: number; amount_micros?: number }>) {
@@ -103,7 +105,7 @@ function providerBalanceSnapshotDto(snapshot: {
 function formatProviderBalanceAmount(snapshot: ReturnType<typeof providerBalanceSnapshotDto> | null) {
   if (!snapshot) return '未录入';
   if (snapshot.amount_decimal && snapshot.currency) {
-    return formatCurrencyAmount(Number(snapshot.amount_decimal), snapshot.currency, 2);
+    return formatCurrencyAmountWithFixedCny(Number(snapshot.amount_decimal), snapshot.currency);
   }
   if (snapshot.quota_amount !== null && snapshot.quota_amount !== undefined) {
     return `${snapshot.quota_amount} ${snapshot.quota_unit || 'quota'}`;
@@ -265,6 +267,9 @@ export default async function AdminCostsPage() {
             <Link className="btn btn-secondary" href="/admin">
               返回后台总览
             </Link>
+            <Link className="btn btn-secondary" href="/admin/points">
+              点数账本
+            </Link>
             <Link className="btn btn-secondary" href="/api/admin/costs/export">
               导出总账 CSV
             </Link>
@@ -306,7 +311,7 @@ export default async function AdminCostsPage() {
         syncEnabled={providerBalanceSyncEnabled}
       />
 
-      <div className="card">
+      <div className="card" id="audit-checks">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 className="section-title mb-0">账本自检</h2>
@@ -378,7 +383,7 @@ export default async function AdminCostsPage() {
 
       <OfficialChargeImportForm />
 
-      <div className="card">
+      <div className="card" id="pending-costs">
         <h2 className="section-title">待处理队列</h2>
         {recentIssues.length === 0 ? (
           <p className="text-gray">当前没有成本待办。</p>
@@ -420,7 +425,7 @@ export default async function AdminCostsPage() {
                     amount_minor: task.provider_official_amount_minor,
                     currency: task.provider_cost_currency,
                   })}</td>
-                  <td><Link className="link" href={`/tasks/${task.id}`}>详情</Link></td>
+                  <td><Link className="link" href={taskDetailHref(task.id, '/admin/costs')}>详情</Link></td>
                 </tr>
               ))}
             </tbody>
@@ -428,7 +433,7 @@ export default async function AdminCostsPage() {
         )}
       </div>
 
-      <div className="card">
+      <div className="card" id="provider-errors">
         <h2 className="section-title">Provider 请求异常</h2>
         {failedRequests.length === 0 ? (
           <p className="text-gray">暂无失败的外部请求记录。</p>
@@ -449,7 +454,7 @@ export default async function AdminCostsPage() {
                   <td>{new Date(request.created_at).toLocaleString('zh-CN')}</td>
                   <td>{request.provider_name}</td>
                   <td>{request.project ? <Link className="link" href={`/projects/${request.project.id}`}>{request.project.name}</Link> : '-'}</td>
-                  <td>{request.task_id ? <Link className="link" href={`/tasks/${request.task_id}`}>{request.task_id.slice(0, 10)}...</Link> : '-'}</td>
+                  <td>{request.task_id ? <Link className="link" href={taskDetailHref(request.task_id, '/admin/costs')}>{request.task_id.slice(0, 10)}...</Link> : '-'}</td>
                   <td className="truncate" style={{ maxWidth: 360 }} title={request.error_message || ''}>{request.error_message || '-'}</td>
                 </tr>
               ))}
@@ -481,7 +486,7 @@ export default async function AdminCostsPage() {
                   <td>{ledger.event_type}</td>
                   <td>{ledger.project ? <Link className="link" href={`/projects/${ledger.project_id}`}>{ledger.project.name}</Link> : '-'}</td>
                   <td className="truncate" style={{ maxWidth: 320 }}>
-                    {ledger.task_id ? <Link className="link" href={`/tasks/${ledger.task_id}`}>{ledger.task?.prompt || ledger.task_id}</Link> : '-'}
+                    {ledger.task_id ? <Link className="link" href={taskDetailHref(ledger.task_id, '/admin/costs')}>{ledger.task?.prompt || ledger.task_id}</Link> : '-'}
                   </td>
                   <td>{formatAmountMinor(ledger.amount_minor, ledger.currency)}</td>
                   <td>{ledger.confidence}</td>

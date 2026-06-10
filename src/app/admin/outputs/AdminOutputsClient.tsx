@@ -2,16 +2,22 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, RefreshCcw, RotateCcw, Search } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
+import { displayUserName } from '@/lib/users/display';
 
 type OutputOwner = {
   id: string;
   name: string | null;
   username: string;
   email: string;
+  avatar_url?: string | null;
+  account_type?: string | null;
 } | null;
 
 interface OutputItem {
@@ -101,13 +107,13 @@ const retentionTabs = [
   ['admin_hidden', '管理员隐藏'],
 ] as const;
 
-function userLabel(user: OutputOwner) {
-  if (!user) return '-';
-  const name = user.name?.trim();
-  const username = user.username?.trim();
-  if (name && username && name !== username) return `${name}（${username}）`;
-  return name || username || user.email;
-}
+const resolutionOptions = [
+  ['', '全部清晰度'],
+  ['480p', '480p'],
+  ['720p', '720p'],
+  ['1080p', '1080p'],
+  ['unknown', '未记录'],
+] as const;
 
 function shortId(value: string | null | undefined, length = 10) {
   if (!value) return '-';
@@ -253,7 +259,7 @@ function OutputFramePreview({ output }: { output: OutputItem }) {
 
   return (
     <Link
-      href={`/tasks/${output.id}`}
+      href={taskDetailHref(output.id, '/admin/outputs')}
       className={`outputs-preview outputs-preview-${preview.kind}`}
       aria-label={`查看产出 ${output.id} 的视频帧和详情`}
     >
@@ -273,14 +279,18 @@ function OutputFramePreview({ output }: { output: OutputItem }) {
 }
 
 export default function AdminOutputsClient() {
+  const searchParams = useSearchParams();
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [summary, setSummary] = useState<OutputsResponse['summary'] | null>(null);
   const [pagination, setPagination] = useState<OutputsResponse['pagination'] | null>(null);
-  const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState('');
-  const [retentionStatus, setRetentionStatus] = useState('');
-  const [ownerUserId, setOwnerUserId] = useState('');
-  const [projectId, setProjectId] = useState('');
+  const [keyword, setKeyword] = useState(() => searchParams.get('keyword') || '');
+  const [status, setStatus] = useState(() => searchParams.get('status') || '');
+  const [retentionStatus, setRetentionStatus] = useState(() => searchParams.get('retention_status') || '');
+  const [ownerUserId, setOwnerUserId] = useState(() => searchParams.get('owner_user_id') || '');
+  const [projectId, setProjectId] = useState(() => searchParams.get('project_id') || '');
+  const [resolution, setResolution] = useState(() => searchParams.get('resolution') || '');
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get('date_from') || '');
+  const [dateTo, setDateTo] = useState(() => searchParams.get('date_to') || '');
   const [includeDeleted, setIncludeDeleted] = useState(true);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -299,8 +309,11 @@ export default function AdminOutputsClient() {
     if (retentionStatus) params.set('retention_status', retentionStatus);
     if (ownerUserId.trim()) params.set('owner_user_id', ownerUserId.trim());
     if (projectId.trim()) params.set('project_id', projectId.trim());
+    if (resolution) params.set('resolution', resolution);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
     return params.toString();
-  }, [includeDeleted, keyword, ownerUserId, page, projectId, retentionStatus, status]);
+  }, [dateFrom, dateTo, includeDeleted, keyword, ownerUserId, page, projectId, resolution, retentionStatus, status]);
 
   const loadOutputs = async () => {
     setLoading(true);
@@ -358,6 +371,9 @@ export default function AdminOutputsClient() {
     setRetentionStatus('');
     setOwnerUserId('');
     setProjectId('');
+    setResolution('');
+    setDateFrom('');
+    setDateTo('');
     setIncludeDeleted(true);
     setConfirmingHideId(null);
     setPage(1);
@@ -451,6 +467,29 @@ export default function AdminOutputsClient() {
               <select className="input" value={retentionStatus} onChange={(event) => { setRetentionStatus(event.target.value); setPage(1); }}>
                 {retentionOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
+              <select className="input" value={resolution} onChange={(event) => { setResolution(event.target.value); setPage(1); }}>
+                {resolutionOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <input
+                className="input"
+                type="date"
+                value={dateFrom}
+                onChange={(event) => {
+                  setDateFrom(event.target.value);
+                  setPage(1);
+                }}
+                aria-label="开始日期"
+              />
+              <input
+                className="input"
+                type="date"
+                value={dateTo}
+                onChange={(event) => {
+                  setDateTo(event.target.value);
+                  setPage(1);
+                }}
+                aria-label="结束日期"
+              />
               <input
                 className="input"
                 value={ownerUserId}
@@ -517,13 +556,13 @@ export default function AdminOutputsClient() {
                       <span>{sourceSummary(output)}</span>
                     </div>
 
-                    <Link className="outputs-item-title" href={`/tasks/${output.id}`}>
+                    <Link className="outputs-item-title" href={taskDetailHref(output.id, '/admin/outputs')}>
                       {truncate(output.prompt || '无提示词', 112)}
                     </Link>
 
                     <div className="outputs-item-meta">
                       <span>{outputPrimaryMeta(output, referenceCount)}</span>
-                      <span>{userLabel(output.owner)}</span>
+                      <UserIdentityBadge user={output.owner} size="sm" showEmail />
                       {output.project ? (
                         <Link href={`/projects/${output.project.id}`}>{output.project.name}</Link>
                       ) : (
@@ -542,9 +581,9 @@ export default function AdminOutputsClient() {
                         <span>成本状态：{output.provider_cost_status}</span>
                         <span>留存：{deletionSummary(output)}</span>
                         {output.delete_reason && <span>原因：{output.delete_reason}</span>}
-                        {output.user_deleted_by_user && <span>操作人：{userLabel(output.user_deleted_by_user)}</span>}
-                        {output.admin_hidden_by_user && <span>操作人：{userLabel(output.admin_hidden_by_user)}</span>}
-                        {output.restored_by_user && <span>恢复人：{userLabel(output.restored_by_user)}</span>}
+                        {output.user_deleted_by_user && <span>操作人：{displayUserName(output.user_deleted_by_user)}</span>}
+                        {output.admin_hidden_by_user && <span>操作人：{displayUserName(output.admin_hidden_by_user)}</span>}
+                        {output.restored_by_user && <span>恢复人：{displayUserName(output.restored_by_user)}</span>}
                       </div>
                     </details>
                   </div>
@@ -556,7 +595,7 @@ export default function AdminOutputsClient() {
                       <small>{pointCostText(output)}</small>
                     </div>
                     <div className="outputs-actions">
-                      <Link className="btn btn-secondary" href={`/tasks/${output.id}`}>
+                      <Link className="btn btn-secondary" href={taskDetailHref(output.id, '/admin/outputs')}>
                         <Eye size={15} />
                         详情
                       </Link>

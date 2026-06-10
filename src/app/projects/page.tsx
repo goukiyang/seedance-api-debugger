@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import { displayUserName } from '@/lib/users/display';
 
 interface ProjectItem {
   id: string;
@@ -24,10 +25,11 @@ function canManageProject(project: ProjectItem): boolean {
 }
 
 function projectOwnerName(project: ProjectItem): string {
-  const name = project.owner?.name?.trim();
-  const username = project.owner?.username?.trim();
-  if (name && username && name !== username) return `${name}（${username}）`;
-  return name || username || project.owner_user_id;
+  return displayUserName({
+    id: project.owner_user_id,
+    name: project.owner?.name,
+    username: project.owner?.username,
+  });
 }
 
 function projectDisplayName(project: ProjectItem): string {

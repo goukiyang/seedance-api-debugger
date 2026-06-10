@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import { displayUserName } from '@/lib/users/display';
 
 type Scope = 'mine' | 'project' | 'shared' | 'public' | 'all';
 
@@ -21,6 +22,8 @@ interface AlbumItem {
   description: string | null;
   album_type: string;
   visibility: string;
+  cover_image_id: string | null;
+  cover_image_url: string | null;
   image_count: number;
   updated_at: string;
   owner?: { name: string; username: string };
@@ -54,6 +57,8 @@ export default function ReferenceAlbumsClient() {
   const [albumType, setAlbumType] = useState<'personal' | 'project'>('personal');
   const [projectId, setProjectId] = useState('');
   const [page, setPage] = useState(1);
+  const [actionAlbumId, setActionAlbumId] = useState<string | null>(null);
+  const [failedCoverIds, setFailedCoverIds] = useState<Set<string>>(() => new Set());
 
   const projectChoices = useMemo(
     () => projects.filter((project) => project.can_manage_assets),
@@ -136,6 +141,50 @@ export default function ReferenceAlbumsClient() {
     }
   };
 
+  const handleRenameAlbum = async (album: AlbumItem) => {
+    const nextName = window.prompt('输入新的图集名称', album.name)?.trim();
+    if (!nextName || nextName === album.name) return;
+
+    setActionAlbumId(album.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reference-albums/${album.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nextName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '重命名失败');
+      setAlbums((current) => current.map((item) => (
+        item.id === album.id
+          ? { ...item, name: data.album?.name || nextName, updated_at: data.album?.updated_at || item.updated_at }
+          : item
+      )));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重命名失败');
+    } finally {
+      setActionAlbumId(null);
+    }
+  };
+
+  const handleDeleteAlbum = async (album: AlbumItem) => {
+    const confirmed = window.confirm(`删除图集「${album.name}」？图集会从列表隐藏，历史任务引用的参考图仍会保留。`);
+    if (!confirmed) return;
+
+    setActionAlbumId(album.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reference-albums/${album.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || '删除图集失败');
+      setAlbums((current) => current.filter((item) => item.id !== album.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除图集失败');
+    } finally {
+      setActionAlbumId(null);
+    }
+  };
+
   return (
     <div>
       <PageBanner
@@ -193,30 +242,53 @@ export default function ReferenceAlbumsClient() {
         ) : albums.length === 0 ? (
           <div className="album-empty">暂无图集</div>
         ) : (
-          pagedAlbums.map((album) => (
-            <Link key={album.id} href={`/collections/${album.id}`} className="album-card">
-              <div className="album-card-cover">
-                {album.image_count > 0 ? `${album.image_count} 张` : '空图集'}
-              </div>
-              <div className="album-card-body">
-                <div className="album-card-title">{album.name}</div>
-                <div className="album-card-meta">
-                  <span>{album.project?.name || (album.album_type === 'project' ? '项目图集' : '个人图集')}</span>
-                  <span>{album.owner?.name || album.owner?.username || '-'}</span>
-                </div>
-                <div className="album-card-perms">
-                  {album.permissions.view && <span>可查看</span>}
-                  {album.permissions.use && <span>可生成</span>}
-                  {album.permissions.copy && <span>可复制</span>}
-                  {album.permissions.edit && <span>可编辑</span>}
-                </div>
-                <div className="album-card-footer">
-                  <span>{album.visibility}</span>
-                  <span>{new Date(album.updated_at).toLocaleDateString('zh-CN')}</span>
-                </div>
-              </div>
-            </Link>
-          ))
+          pagedAlbums.map((album) => {
+            const coverFailed = failedCoverIds.has(album.id);
+            return (
+              <article key={album.id} className="album-card">
+                <Link href={`/collections/${album.id}`} className="album-card-main">
+                  <div className="album-card-cover">
+                    {album.cover_image_url && !coverFailed ? (
+                      <img
+                        src={album.cover_image_url}
+                        alt={`${album.name} 封面`}
+                        onError={() => setFailedCoverIds((current) => new Set(current).add(album.id))}
+                      />
+                    ) : (
+                      <span>{album.image_count > 0 ? `${album.image_count} 张` : '空图集'}</span>
+                    )}
+                  </div>
+                  <div className="album-card-body">
+                    <div className="album-card-title">{album.name}</div>
+                    <div className="album-card-meta">
+                      <span>{album.project?.name || (album.album_type === 'project' ? '项目图集' : '个人图集')}</span>
+                      <span>{displayUserName(album.owner)}</span>
+                    </div>
+                    <div className="album-card-perms">
+                      {album.permissions.view && <span>可查看</span>}
+                      {album.permissions.use && <span>可生成</span>}
+                      {album.permissions.copy && <span>可复制</span>}
+                      {album.permissions.edit && <span>可编辑</span>}
+                    </div>
+                    <div className="album-card-footer">
+                      <span>{album.visibility}</span>
+                      <span>{new Date(album.updated_at).toLocaleDateString('zh-CN')}</span>
+                    </div>
+                  </div>
+                </Link>
+                {album.permissions.edit && (
+                  <div className="album-card-actions" aria-label={`${album.name} 管理动作`}>
+                    <button type="button" onClick={() => handleRenameAlbum(album)} disabled={actionAlbumId === album.id}>
+                      重命名
+                    </button>
+                    <button type="button" className="danger" onClick={() => handleDeleteAlbum(album)} disabled={actionAlbumId === album.id}>
+                      删除
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })
         )}
       </div>
       <PaginationControls

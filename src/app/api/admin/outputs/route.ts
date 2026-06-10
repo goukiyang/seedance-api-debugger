@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 const VALID_TASK_STATUSES = new Set(['draft', 'submitted', 'running', 'succeeded', 'failed', 'cancelled']);
 const VALID_RETENTION_STATUSES = new Set(['active', 'user_deleted', 'admin_hidden', 'retained']);
+const VALID_RESOLUTIONS = new Set(['480p', '720p', '1080p', 'unknown']);
 
 function parsePositiveInt(value: string | null, fallback: number, max: number) {
   const numericValue = Number(value);
@@ -25,12 +26,21 @@ function parseDate(value: string | null, endOfDay = false) {
   return date;
 }
 
+function normalizeResolution(value: string | null) {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === '480p' || normalized === '720p' || normalized === '1080p') return normalized;
+  if (normalized === 'unknown') return 'unknown';
+  return null;
+}
+
 function buildWhere(searchParams: URLSearchParams): Prisma.VideoTaskWhereInput {
   const where: Prisma.VideoTaskWhereInput = {};
+  const andFilters: Prisma.VideoTaskWhereInput[] = [];
   const localStatus = searchParams.get('status');
   const retentionStatus = searchParams.get('retention_status');
   const ownerUserId = searchParams.get('owner_user_id');
   const projectId = searchParams.get('project_id');
+  const resolution = normalizeResolution(searchParams.get('resolution'));
   const keyword = (searchParams.get('keyword') || '').trim();
   const dateFrom = parseDate(searchParams.get('date_from'));
   const dateTo = parseDate(searchParams.get('date_to'), true);
@@ -46,8 +56,27 @@ function buildWhere(searchParams: URLSearchParams): Prisma.VideoTaskWhereInput {
     where.retention_status = { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] };
   }
 
-  if (ownerUserId) where.owner_user_id = ownerUserId;
-  if (projectId) where.project_id = projectId;
+  if (ownerUserId) {
+    andFilters.push({
+      OR: [
+        { owner_user_id: ownerUserId },
+        { user_id: ownerUserId },
+      ],
+    });
+  }
+  if (projectId) where.project_id = projectId === 'unassigned' ? null : projectId;
+  if (resolution && VALID_RESOLUTIONS.has(resolution)) {
+    if (resolution === 'unknown') {
+      andFilters.push({
+        OR: [
+          { resolution: null },
+          { resolution: { notIn: ['480p', '720p', '1080p'] } },
+        ],
+      });
+    } else {
+      where.resolution = resolution;
+    }
+  }
 
   if (dateFrom || dateTo) {
     where.created_at = {
@@ -68,16 +97,29 @@ function buildWhere(searchParams: URLSearchParams): Prisma.VideoTaskWhereInput {
     ];
   }
 
+  if (andFilters.length > 0) {
+    where.AND = andFilters;
+  }
+
   return where;
 }
 
-function userSummary(user: { id: string; name: string | null; username: string; email: string } | null | undefined) {
+function userSummary(user: {
+  id: string;
+  name: string | null;
+  username: string;
+  email: string;
+  avatar_url: string | null;
+  account_type: string;
+} | null | undefined) {
   if (!user) return null;
   return {
     id: user.id,
     name: user.name,
     username: user.username,
     email: user.email,
+    avatar_url: user.avatar_url,
+    account_type: user.account_type,
   };
 }
 
@@ -137,8 +179,8 @@ export async function GET(request: NextRequest) {
           delete_reason: true,
           created_at: true,
           completed_at: true,
-          owner: { select: { id: true, name: true, username: true, email: true } },
-          user: { select: { id: true, name: true, username: true, email: true } },
+          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
           project: { select: { id: true, name: true, type: true, status: true } },
         },
       }),
@@ -160,7 +202,7 @@ export async function GET(request: NextRequest) {
     const actors = actorIds.length > 0
       ? await prisma.user.findMany({
           where: { id: { in: actorIds } },
-          select: { id: true, name: true, username: true, email: true },
+          select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true },
         })
       : [];
     const actorById = new Map(actors.map((actor) => [actor.id, actor]));

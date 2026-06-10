@@ -26,6 +26,7 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 import { AudioCard, GenerationCard, ImageCard, TextCard, VideoCard } from './nodes';
+import { displayUserName } from '@/lib/users/display';
 import { buildSeedanceRequest, exportCanvas, syncGenerationInputs } from './seedanceApi';
 import { initialEdges, initialNodes } from './seedanceCanvas';
 import type {
@@ -323,10 +324,11 @@ function extractVideoUrl(data: unknown) {
 }
 
 function projectOwnerName(project: ProjectOption) {
-  const name = project.owner?.name?.trim();
-  const username = project.owner?.username?.trim();
-  if (name && username && name !== username) return `${name}（${username}）`;
-  return name || username || project.owner_user_id;
+  return displayUserName({
+    id: project.owner_user_id,
+    name: project.owner?.name,
+    username: project.owner?.username,
+  });
 }
 
 function projectDisplayName(project: ProjectOption) {

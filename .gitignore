@@ -41,7 +41,11 @@ test-api.sh
 
 # Database
 *.db
+*.db.backup*
+*.db.bak*
 prisma/*.db
+prisma/*.db.backup*
+prisma/*.db.bak*
 
 # Runtime uploads (keep directory structure only)
 public/uploads/*

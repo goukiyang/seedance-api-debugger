@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import { formatUsdCnyEstimateFromInput } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
 
 type PendingTaskOption = {
   id: string;
@@ -149,7 +150,7 @@ export default function OfficialChargeForm({ pendingTasks }: { pendingTasks: Pen
         <div className={`alert ${submitState.type === 'success' ? 'alert-success' : 'alert-error'} mt-4`}>
           {submitState.message}
           {submitState.type === 'success' && submitState.taskId ? (
-            <Link className="link" style={{ marginLeft: 8 }} href={`/tasks/${submitState.taskId}`}>查看任务</Link>
+            <Link className="link" style={{ marginLeft: 8 }} href={taskDetailHref(submitState.taskId, '/admin/costs')}>查看任务</Link>
           ) : null}
         </div>
       )}

@@ -18,9 +18,9 @@ export async function GET(request: NextRequest) {
     const now = new Date();
 
     const baseWhere = user.role === 'admin'
-      ? { status: { not: 'deleted' } }
+      ? { status: 'active' }
       : {
-          status: { not: 'deleted' },
+          status: 'active',
           OR: [
             { owner_user_id: user.id },
             { project_id: { in: accessibleProjectIds } },
@@ -57,16 +57,38 @@ export async function GET(request: NextRequest) {
             OR: [{ expires_at: null }, { expires_at: { gt: now } }],
           },
         },
+        images: {
+          where: { status: 'active' },
+          orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
+          select: { id: true },
+          take: 1,
+        },
         _count: { select: { images: { where: { status: 'active' } } } },
       },
     });
+
+    const activeCoverIds = new Set(
+      (
+        await prisma.referenceImage.findMany({
+          where: {
+            id: {
+              in: albums
+                .map((album) => album.cover_image_id)
+                .filter((id): id is string => Boolean(id)),
+            },
+            status: 'active',
+          },
+          select: { id: true },
+        })
+      ).map((image) => image.id),
+    );
 
     const filtered = [];
     for (const album of albums) {
       if (!matchesScope(album, scope, user.id, accessibleProjectIds, requestedProjectId)) continue;
       const access = await getAlbumAccess(user, album);
       if (!access.permissions.view) continue;
-      filtered.push(serializeAlbum(album, access));
+      filtered.push(serializeAlbum(album, access, activeCoverIds));
     }
 
     return NextResponse.json({ albums: filtered });
@@ -202,10 +224,16 @@ function serializeAlbum(
     updated_at: Date;
     owner: { id: string; name: string; username: string; account_type: string };
     project: { id: string; name: string; owner_user_id: string; status: string } | null;
+    images: Array<{ id: string }>;
     _count: { images: number };
   },
   access: Awaited<ReturnType<typeof getAlbumAccess>>,
+  activeCoverIds: Set<string>,
 ) {
+  const coverImageId = album.cover_image_id && activeCoverIds.has(album.cover_image_id)
+    ? album.cover_image_id
+    : album.images[0]?.id || null;
+
   return {
     id: album.id,
     workspace_id: album.workspace_id,
@@ -216,6 +244,7 @@ function serializeAlbum(
     album_type: album.album_type,
     visibility: album.visibility,
     cover_image_id: album.cover_image_id,
+    cover_image_url: coverImageId ? `/api/reference-images/${coverImageId}/content?variant=thumbnail` : null,
     status: album.status,
     created_at: album.created_at,
     updated_at: album.updated_at,

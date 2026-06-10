@@ -1,87 +1,34 @@
-import { execFile } from 'child_process';
-import path from 'path';
-import { promisify } from 'util';
-import { mkdir, readFile, rename, stat, unlink } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
+import { cacheTaskVideoToLocal, type CacheableVideoTask } from '@/lib/video/local-cache';
+import {
+  ensureTaskThumbnail,
+  isSafeTaskId,
+  localPublicVideoPath,
+  fileExists,
+  thumbnailFilePath,
+} from '@/lib/video/thumbnail';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const execFileAsync = promisify(execFile);
-const THUMBNAIL_DIR = path.join(process.cwd(), 'public', 'videos', 'thumbnails');
-const PUBLIC_VIDEO_ROOT = path.join(process.cwd(), 'public');
-const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
-
-function isSafeTaskId(taskId: string) {
-  return /^[a-z0-9_-]{8,80}$/i.test(taskId);
-}
-
-async function fileExists(filePath: string) {
-  try {
-    const info = await stat(filePath);
-    return info.isFile() && info.size > 0;
-  } catch {
-    return false;
-  }
-}
-
-function localPublicVideoPath(localVideoPath: string | null) {
-  if (!localVideoPath || !localVideoPath.startsWith('/videos/')) return null;
-  if (localVideoPath.includes('..')) return null;
-  return path.join(PUBLIC_VIDEO_ROOT, localVideoPath.slice(1));
-}
-
-function isRemoteAssetUrl(value: string | null) {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-async function resolveThumbnailSources(task: {
-  local_video_path: string | null;
-  result_video_url: string | null;
-  result_last_frame_url: string | null;
-}) {
-  const sources: string[] = [];
+async function ensureLocalVideoForThumbnail(task: CacheableVideoTask) {
   const localVideo = localPublicVideoPath(task.local_video_path);
-  if (localVideo && await fileExists(localVideo)) sources.push(localVideo);
-  if (isRemoteAssetUrl(task.result_video_url)) sources.push(task.result_video_url as string);
-  if (isRemoteAssetUrl(task.result_last_frame_url)) sources.push(task.result_last_frame_url as string);
-  return sources;
-}
+  if (localVideo && await fileExists(localVideo)) return task;
+  if (task.local_status !== 'succeeded' || !task.result_video_url) return task;
 
-async function generateThumbnail(source: string, outputPath: string) {
-  const tempPath = `${outputPath}.${process.pid}.${Date.now()}.tmp.jpg`;
-  try {
-    await execFileAsync(FFMPEG_BIN, [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-y',
-      '-ss',
-      '0.5',
-      '-i',
-      source,
-      '-frames:v',
-      '1',
-      '-vf',
-      'scale=360:-2',
-      '-q:v',
-      '4',
-      tempPath,
-    ], { timeout: 30_000, maxBuffer: 1024 * 1024 });
-    await rename(tempPath, outputPath);
-  } catch (error) {
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
-  }
+  const cacheResult = await cacheTaskVideoToLocal(task);
+  if (!cacheResult.success || !cacheResult.local_video_path) return task;
+
+  return {
+    ...task,
+    local_video_path: cacheResult.local_video_path,
+    result_video_url: cacheResult.result_video_url || task.result_video_url,
+    result_last_frame_url: cacheResult.result_last_frame_url || task.result_last_frame_url,
+  };
 }
 
 async function imageResponse(filePath: string) {
@@ -109,12 +56,6 @@ export async function GET(
       return NextResponse.json({ error: '任务 ID 无效' }, { status: 400 });
     }
 
-    await mkdir(THUMBNAIL_DIR, { recursive: true });
-    const thumbnailPath = path.join(THUMBNAIL_DIR, `${taskId}.jpg`);
-    if (await fileExists(thumbnailPath)) {
-      return imageResponse(thumbnailPath);
-    }
-
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
       select: {
@@ -122,6 +63,8 @@ export async function GET(
         local_video_path: true,
         result_video_url: true,
         result_last_frame_url: true,
+        local_status: true,
+        provider_task_id: true,
         project_id: true,
         owner_user_id: true,
         user_id: true,
@@ -135,21 +78,13 @@ export async function GET(
 
     await assertCanViewTask(user, task);
 
-    const sources = await resolveThumbnailSources(task);
-    if (sources.length === 0) {
-      return NextResponse.json({ error: '没有可抽帧的视频' }, { status: 404 });
+    const taskWithLocalVideo = await ensureLocalVideoForThumbnail(task);
+    const thumbnailResult = await ensureTaskThumbnail(taskWithLocalVideo, { allowRemoteFallback: true });
+    if (!thumbnailResult.success) {
+      return NextResponse.json({ error: thumbnailResult.message || '视频截图不可用' }, { status: 404 });
     }
 
-    for (const source of sources) {
-      try {
-        await generateThumbnail(source, thumbnailPath);
-        return imageResponse(thumbnailPath);
-      } catch {
-        await unlink(thumbnailPath).catch(() => undefined);
-      }
-    }
-
-    return NextResponse.json({ error: '视频截图不可用' }, { status: 404 });
+    return imageResponse(thumbnailFilePath(taskId));
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

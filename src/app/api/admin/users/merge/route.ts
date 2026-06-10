@@ -22,6 +22,20 @@ type AlbumUserShare = {
   created_at: Date;
 };
 
+type MergeUserIdentity = {
+  id: string;
+  feishu_user_id: string | null;
+  feishu_open_id: string | null;
+  feishu_union_id: string | null;
+  feishu_tenant_key: string | null;
+  feishu_employee_no: string | null;
+  feishu_department_ids: string | null;
+  feishu_raw_profile: string | null;
+  last_feishu_sync_at: Date | null;
+  mobile: string | null;
+  avatar_url: string | null;
+};
+
 function normalizeText(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -92,6 +106,31 @@ function sum(items: Array<number | null | undefined>): number {
   return items.reduce<number>((total, item) => total + (Number(item ?? 0) || 0), 0);
 }
 
+function hasFeishuIdentity(user: MergeUserIdentity) {
+  return Boolean(user.feishu_user_id || user.feishu_open_id || user.feishu_union_id || user.mobile);
+}
+
+function feishuIdentityScore(user: MergeUserIdentity) {
+  return [
+    user.last_feishu_sync_at?.getTime() || 0,
+    user.feishu_user_id ? 1 : 0,
+    user.feishu_open_id ? 1 : 0,
+  ];
+}
+
+function pickPrimaryFeishuIdentity(users: MergeUserIdentity[]) {
+  return users
+    .filter(hasFeishuIdentity)
+    .sort((left, right) => {
+      const leftScore = feishuIdentityScore(left);
+      const rightScore = feishuIdentityScore(right);
+      for (let index = 0; index < leftScore.length; index += 1) {
+        if (leftScore[index] !== rightScore[index]) return rightScore[index] - leftScore[index];
+      }
+      return 0;
+    })[0] || null;
+}
+
 export async function POST(request: NextRequest) {
   let admin;
   try {
@@ -150,6 +189,7 @@ export async function POST(request: NextRequest) {
       assets: 0,
       asset_collections: 0,
     };
+    const primaryFeishuIdentity = pickPrimaryFeishuIdentity([targetUser, ...sourceUsers]);
 
     const targetAccount = await tx.creditAccount.upsert({
       where: { user_id: targetUserId },
@@ -437,6 +477,40 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (primaryFeishuIdentity) {
+      await tx.user.updateMany({
+        where: { id: { in: sourceUserIds } },
+        data: {
+          feishu_user_id: null,
+          feishu_open_id: null,
+          feishu_union_id: null,
+          feishu_tenant_key: null,
+          feishu_employee_no: null,
+          feishu_department_ids: null,
+          feishu_raw_profile: null,
+          last_feishu_sync_at: null,
+          mobile: null,
+          avatar_url: null,
+        },
+      });
+
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: {
+          feishu_user_id: primaryFeishuIdentity.feishu_user_id,
+          feishu_open_id: primaryFeishuIdentity.feishu_open_id,
+          feishu_union_id: primaryFeishuIdentity.feishu_union_id,
+          feishu_tenant_key: primaryFeishuIdentity.feishu_tenant_key,
+          feishu_employee_no: primaryFeishuIdentity.feishu_employee_no,
+          feishu_department_ids: primaryFeishuIdentity.feishu_department_ids,
+          feishu_raw_profile: primaryFeishuIdentity.feishu_raw_profile,
+          last_feishu_sync_at: primaryFeishuIdentity.last_feishu_sync_at,
+          mobile: primaryFeishuIdentity.mobile,
+          avatar_url: primaryFeishuIdentity.avatar_url,
+        },
+      });
+    }
+
     await tx.user.updateMany({
       where: { id: { in: sourceUserIds } },
       data: { status: 'deleted' },
@@ -456,6 +530,13 @@ export async function POST(request: NextRequest) {
             email: targetUser.email,
             role: targetUser.role,
           },
+          feishu_identity_transfer: primaryFeishuIdentity
+            ? {
+              from_user_id: primaryFeishuIdentity.id,
+              to_user_id: targetUserId,
+              source_users_cleared: sourceUserIds,
+            }
+            : null,
           source_users: sourceUsers.map((user) => ({
             id: user.id,
             username: user.username,

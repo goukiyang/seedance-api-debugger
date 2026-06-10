@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -15,7 +15,15 @@ import {
 import type { GenerationMode } from '@/types';
 import { GENERATION_MODE_LABELS } from '@/types';
 import { ThumbnailCard } from '@/components/ThumbnailCard';
-import { formatAmountMicrosWithCny, formatAmountMinorWithCny } from '@/lib/costs/currency';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
+import {
+  formatAmountMicrosWithFixedCny,
+  formatAmountMinorWithFixedCny,
+  formatCurrencyAmountWithFixedCny,
+  formatProviderUsdCharge,
+} from '@/lib/costs/currency';
+import { sanitizeReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
+import type { DisplayUser } from '@/lib/users/display';
 
 interface VideoTask {
   id: string;
@@ -23,6 +31,9 @@ interface VideoTask {
   model: string;
   generation_mode: GenerationMode;
   prompt: string;
+  source_type: string;
+  source_label: string | null;
+  source_request_id: string | null;
   ratio: string | null;
   duration: number | null;
   resolution: string | null;
@@ -49,6 +60,9 @@ interface VideoTask {
   error_message: string | null;
   project_id: string | null;
   project?: { id: string; name: string; type: string } | null;
+  owner?: DisplayUser | null;
+  user?: DisplayUser | null;
+  submitted_user?: DisplayUser | null;
   estimated_cost: number | null;
   actual_cost: number | null;
   frozen_cost: number | null;
@@ -394,18 +408,30 @@ function costStatusLabel(status: string) {
   return '未记录';
 }
 
+function taskSourceLabel(task: Pick<VideoTask, 'source_type' | 'source_label'>) {
+  if (task.source_type === 'codex_api') return task.source_label || 'Codex API';
+  if (task.source_type === 'web') return task.source_label || 'Web UI';
+  return task.source_label || task.source_type || '未知来源';
+}
+
 function formatAmountMinor(amount: number | null | undefined, currency?: string | null): string {
-  return formatAmountMinorWithCny(amount, currency);
+  return formatAmountMinorWithFixedCny(amount, currency);
 }
 
 function formatProviderAmount(amount: number | null | undefined, currency?: string | null): string {
   if (amount === null || amount === undefined) return '待官方确认';
-  return formatAmountMicrosWithCny(Math.round(amount * 1_000_000), currency);
+  return formatCurrencyAmountWithFixedCny(amount, currency);
+}
+
+function formatCreditPoints(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined) return '待结算';
+  const rounded = Number.isInteger(amount) ? amount.toFixed(0) : amount.toFixed(2);
+  return `${rounded} 点`;
 }
 
 function formatLedgerAmount(ledger: OfficialChargeLedger): string {
   if (ledger.amount_micros !== null && ledger.amount_micros !== undefined) {
-    return formatProviderAmount(ledger.amount_micros / 1_000_000, ledger.currency);
+    return formatAmountMicrosWithFixedCny(ledger.amount_micros, ledger.currency);
   }
   return formatAmountMinor(ledger.amount_minor, ledger.currency);
 }
@@ -430,7 +456,33 @@ function parseJsonArray(str: string | null): string[] {
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN');
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('zh-CN');
+}
+
+function formatRelativeTime(value: string | null | undefined, now = Date.now()): string {
+  if (!value) return '-';
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return '-';
+  const diffSeconds = Math.max(0, Math.floor((now - time) / 1000));
+
+  if (diffSeconds < 60) return '刚刚';
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} 小时前`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays} 天前`;
+
+  return new Date(value).toLocaleDateString('zh-CN');
+}
+
+function formatTaskTime(value: string | null | undefined) {
+  return {
+    relative: formatRelativeTime(value),
+    absolute: formatDateTime(value),
+  };
 }
 
 function formatBillingTime(value: string | number | null | undefined): string {
@@ -644,10 +696,20 @@ function truncateUrl(value: string, length = 56): string {
   return `${value.slice(0, length)}...`;
 }
 
+function promptPreview(value: string | null | undefined) {
+  if (!value?.trim()) return '无提示词';
+  const lines = value.trim().split(/\r?\n/);
+  const shortLines = lines.slice(0, 5).join('\n');
+  return shortLines.length > 360 ? `${shortLines.slice(0, 360)}...` : shortLines;
+}
+
 export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const taskId = params.id as string;
+  const returnTo = sanitizeReturnTo(searchParams.get('return_to'));
+  const returnLabel = taskReturnLabel(returnTo);
 
   const [task, setTask] = useState<VideoTask | null>(null);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -673,6 +735,7 @@ export default function TaskDetailPage() {
   // 视频预览错误状态
   const [videoError, setVideoError] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
   const [openingVideo, setOpeningVideo] = useState(false);
   const [copyingLink, setCopyingLink] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -794,7 +857,7 @@ export default function TaskDetailPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        router.push(`/tasks/${data.id}`);
+        router.push(taskDetailHref(data.id, returnTo));
       } else {
         alert(`重试失败: ${data.message}`);
       }
@@ -949,6 +1012,13 @@ export default function TaskDetailPage() {
     }
   };
 
+  const handleCopyPrompt = async () => {
+    if (!task?.prompt) return;
+    await navigator.clipboard.writeText(task.prompt);
+    setPromptCopied(true);
+    setTimeout(() => setPromptCopied(false), 2000);
+  };
+
   // 获取视频播放源
   const getVideoSrc = () => {
     if (!task) return '';
@@ -970,8 +1040,8 @@ export default function TaskDetailPage() {
     return (
       <div className="card">
         <p className="text-red">{taskLoadError || '任务不存在'}</p>
-        <Link href="/tasks" className="btn btn-secondary mt-4">
-          返回列表
+        <Link href={returnTo} className="btn btn-secondary mt-4">
+          {returnLabel}
         </Link>
       </div>
     );
@@ -1048,9 +1118,12 @@ export default function TaskDetailPage() {
   const resultStorageText = hasLocalVideo
     ? '本地已保存'
     : task.result_video_url
-      ? '远程链接可用'
+      ? '远程链接待保存'
       : '没有视频链接';
-  const shouldShowRefresh = isProcessing || !task.result_video_url || task.local_status === 'failed';
+  const shouldShowRefresh = isProcessing
+    || !task.result_video_url
+    || (task.local_status === 'succeeded' && !task.local_video_path)
+    || task.local_status === 'failed';
 
   const parameterItems = [
     { label: '模型', value: task.model || 'Seedance 2.0' },
@@ -1075,6 +1148,30 @@ export default function TaskDetailPage() {
       ? formatAmountMinor(officialCostMinor, task.provider_cost_currency)
       : formatProviderAmount(providerBilling.actualCost, providerBilling.currency);
   const officialBillingTime = providerBilling.billingTime || task.provider_cost_confirmed_at;
+  const resultChargeBadgeText = formatProviderUsdCharge({
+    ...task,
+    provider_actual_cost: providerBilling.actualCost,
+    provider_actual_cost_currency: providerBilling.currency,
+  });
+  const taskCompletedTime = formatTaskTime(task.completed_at || task.updated_at);
+  const taskCompletedTimePrefix = task.completed_at ? '生成于' : '更新于';
+  const taskCompletedExactLabel = task.completed_at ? '精确时间' : '更新时间';
+  const taskCreditText = task.actual_cost !== null && task.actual_cost !== undefined
+    ? formatCreditPoints(task.actual_cost)
+    : task.frozen_cost !== null && task.frozen_cost !== undefined
+      ? `冻结 ${formatCreditPoints(task.frozen_cost)}`
+      : '待结算';
+  const resultPrimaryAction = task.local_status === 'failed'
+    ? 'reuse'
+    : isProcessing
+      ? 'refresh'
+      : hasPlayableVideo && !hasLocalVideo && task.result_video_url
+        ? 'save'
+        : hasPlayableVideo
+          ? 'open'
+          : shouldShowRefresh
+            ? 'refresh'
+            : 'reuse';
   const inputChips = [
     modeLabel,
     task.ratio,
@@ -1082,13 +1179,23 @@ export default function TaskDetailPage() {
     task.resolution,
     referenceImages.length > 0 ? `${referenceImages.length} 张参考图` : null,
   ].filter(Boolean);
+  const referenceSummaryItems = [
+    referenceImages.length > 0 ? `参考图 ${referenceImages.length}` : null,
+    frameImages.length > 0 ? `多帧 ${frameImages.length}` : null,
+    task.first_frame_url ? '首帧' : null,
+    task.last_frame_url ? '尾帧' : null,
+    referenceVideos.length > 0 ? `参考视频 ${referenceVideos.length}` : null,
+    referenceAudios.length > 0 ? `参考音频 ${referenceAudios.length}` : null,
+  ].filter(Boolean);
+  const taskOwner = task.owner || task.submitted_user || task.user || null;
+  const taskSourceText = taskSourceLabel(task);
 
   return (
     <div className="task-detail-page">
       <div className="task-result-topbar">
-        <Link href="/tasks" className="task-detail-back">
+        <Link href={returnTo} className="task-detail-back">
           <ArrowLeft size={16} aria-hidden="true" />
-          返回任务
+          {returnLabel}
         </Link>
         <div className="task-result-topbar-actions">
           <span className={`status-badge ${getStatusClass(task.local_status)}`}>
@@ -1114,18 +1221,139 @@ export default function TaskDetailPage() {
 
       <div className="task-detail-layout">
         <main className="task-detail-main">
-          <section className="task-detail-card task-result-panel">
-            <div className="task-card-head">
-              <div>
-                <h1 className="task-result-title">{resultStateTitle}</h1>
-                <p>{resultDecisionBody}</p>
+          <div className="task-result-workspace">
+            <section className="task-detail-card task-result-panel">
+              <div className="task-card-head task-result-head">
+                <div className="task-result-copy">
+                  <h1 className="task-result-title">{resultStateTitle}</h1>
+                  <p>{resultDecisionBody}</p>
+                  {resultChargeBadgeText && (
+                    <div className="task-result-cost-pill" title={`实际扣费 ${resultChargeBadgeText}`}>
+                      <span>实际扣费</span>
+                      <strong>{resultChargeBadgeText}</strong>
+                    </div>
+                  )}
+                </div>
+                <div className="task-action-row task-primary-action">
+                  {resultPrimaryAction === 'reuse' && (
+                    <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
+                      <RotateCcw size={16} aria-hidden="true" />
+                      复用输入
+                    </Link>
+                  )}
+                  {resultPrimaryAction === 'refresh' && (
+                    <button className="btn btn-primary" onClick={queryStatus} disabled={querying}>
+                      <RefreshCcw size={16} aria-hidden="true" />
+                      {querying ? '查询中...' : '刷新结果'}
+                    </button>
+                  )}
+                  {resultPrimaryAction === 'save' && (
+                    <button className="btn btn-primary" onClick={handleDownloadToLocal} disabled={downloading}>
+                      <Download size={16} aria-hidden="true" />
+                      {downloading ? '保存中...' : '保存视频'}
+                    </button>
+                  )}
+                  {resultPrimaryAction === 'open' && (
+                    <button className="btn btn-primary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
+                      <ExternalLink size={16} aria-hidden="true" />
+                      {openingVideo ? '打开中...' : '打开视频'}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="task-action-row">
-                {shouldShowRefresh && (
+
+              <div className="task-result-identity-bar">
+                <UserIdentityBadge user={taskOwner} subtitle="生成者" />
+                <div className="task-result-origin-meta">
+                  <span>项目：{task.project?.name || '未归属项目'}</span>
+                  <span>来源：{taskSourceText}</span>
+                  {task.source_request_id && <span>请求：{shortId(task.source_request_id, 14)}</span>}
+                </div>
+              </div>
+
+              <div className="task-result-stage">
+                {hasResultVideo ? (
+                  <>
+                    <video
+                      key={videoSrc}
+                      controls
+                      playsInline
+                      src={videoSrc}
+                      onError={() => setVideoError(true)}
+                      onCanPlay={() => setVideoError(false)}
+                    >
+                      您的浏览器不支持视频播放
+                    </video>
+                  </>
+                ) : (
+                  <div className={`task-result-empty task-result-empty-${task.local_status}`}>
+                    <strong>{resultStateTitle}</strong>
+                    <span>
+                      {task.local_status === 'failed'
+                        ? (task.error_message || '生成失败，可以复用输入重新生成。')
+                        : isProcessing
+                          ? '生成中，可刷新结果或开启自动轮询。'
+                          : resultDecisionBody}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="task-result-storage-row">
+                <span>{resultStorageText}</span>
+                {!hasLocalVideo && task.result_video_url && <strong>建议保存为本地长期链接</strong>}
+                {hasLocalVideo && <strong>可复制同源链接</strong>}
+              </div>
+
+              {videoError && (
+                <div className="alert alert-warning task-action-guidance">
+                  <strong>视频预览失败。</strong>
+                  <span>优先保存到本地，再打开视频或复制本地链接；仍失败时刷新结果或复用输入。</span>
+                </div>
+              )}
+              {openError && (
+                <div className="alert alert-warning">{openError}</div>
+              )}
+
+              {task.result_last_frame_url && (
+                <details className="task-inline-details task-last-frame-details">
+                  <summary>查看尾帧图片</summary>
+                  <div className="task-last-frame">
+                    <img
+                      src={task.result_last_frame_url}
+                      alt="Last Frame"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                </details>
+              )}
+
+              <div className="task-result-actions">
+                {shouldShowRefresh && resultPrimaryAction !== 'refresh' && (
                   <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
                     <RefreshCcw size={16} aria-hidden="true" />
                     {querying ? '查询中...' : '刷新结果'}
                   </button>
+                )}
+                {hasPlayableVideo && resultPrimaryAction !== 'open' && (
+                  <button className="btn btn-secondary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
+                    <ExternalLink size={16} aria-hidden="true" />
+                    {openingVideo ? '打开中...' : '打开视频'}
+                  </button>
+                )}
+                {hasPlayableVideo && (
+                  <button className="btn btn-secondary" onClick={() => void handleCopyUrl()} disabled={copyingLink || downloading}>
+                    <Copy size={16} aria-hidden="true" />
+                    {copyingLink ? '复制中...' : copied ? '已复制' : hasLocalVideo ? '复制本地链接' : '保存并复制'}
+                  </button>
+                )}
+                {resultPrimaryAction !== 'reuse' && (
+                  <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-secondary">
+                    <RotateCcw size={16} aria-hidden="true" />
+                    复用输入
+                  </Link>
                 )}
                 {task.local_status === 'failed' && (
                   <button className="btn btn-danger" onClick={handleRetry} disabled={retrying}>
@@ -1133,117 +1361,78 @@ export default function TaskDetailPage() {
                     {retrying ? '重试中...' : '重新生成'}
                   </button>
                 )}
-              </div>
-            </div>
-
-            <div className="task-result-stage">
-              {hasResultVideo ? (
-                <video
-                  key={videoSrc}
-                  controls
-                  playsInline
-                  src={videoSrc}
-                  onError={() => setVideoError(true)}
-                  onCanPlay={() => setVideoError(false)}
-                >
-                  您的浏览器不支持视频播放
-                </video>
-              ) : (
-                <div className={`task-result-empty task-result-empty-${task.local_status}`}>
-                  <strong>{resultStateTitle}</strong>
-                  <span>
-                    {task.local_status === 'failed'
-                      ? (task.error_message || '生成失败，可以复用输入重新生成。')
-                      : isProcessing
-                        ? '生成中，可刷新结果或开启自动轮询。'
-                        : resultDecisionBody}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {videoError && (
-              <div className="alert alert-warning">
-                视频预览失败。可以保存到本地后打开，或复制链接检查。
-              </div>
-            )}
-            {openError && (
-              <div className="alert alert-warning">{openError}</div>
-            )}
-
-            {task.result_last_frame_url && (
-              <div className="task-last-frame">
-                <span className="task-muted-label">尾帧图片</span>
-                <img
-                  src={task.result_last_frame_url}
-                  alt="Last Frame"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }}
-                />
-              </div>
-            )}
-
-            <div className="task-result-actions">
-              {hasPlayableVideo && (
-                <>
-                  {task.result_video_url && (
-                    <button className="btn btn-primary" onClick={handleDownloadToLocal} disabled={downloading || hasLocalVideo}>
-                      <Download size={16} aria-hidden="true" />
-                      {downloading ? '保存中...' : hasLocalVideo ? '已保存' : '保存视频'}
-                    </button>
-                  )}
-                  <button className="btn btn-secondary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
-                    <ExternalLink size={16} aria-hidden="true" />
-                    {openingVideo ? '打开中...' : '打开视频'}
+                {downloadError && task.result_video_url && (
+                  <button className="btn btn-secondary" onClick={handleDownloadToLocal} disabled={downloading}>
+                    <Download size={16} aria-hidden="true" />
+                    {downloading ? '重试中...' : '重试保存'}
                   </button>
-                  <button className="btn btn-secondary" onClick={() => void handleCopyUrl()} disabled={copyingLink || downloading}>
-                    <Copy size={16} aria-hidden="true" />
-                    {copyingLink ? '复制中...' : copied ? '已复制' : hasLocalVideo ? '复制本地链接' : '保存并复制'}
-                  </button>
-                </>
-              )}
-              <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-secondary">
-                <RotateCcw size={16} aria-hidden="true" />
-                复用输入
-              </Link>
-              {downloadError && task.result_video_url && (
-                <button className="btn btn-secondary" onClick={handleDownloadToLocal} disabled={downloading}>
-                  <Download size={16} aria-hidden="true" />
-                  {downloading ? '重试中...' : '重试保存'}
-                </button>
-              )}
-              {isProcessing && (
-                <label className="task-poll-toggle">
-                  <span>自动轮询</span>
-                  <div className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={autoPoll}
-                      onChange={(e) => setAutoPoll(e.target.checked)}
-                    />
-                    <span className="toggle-slider"></span>
+                )}
+                {isProcessing && (
+                  <label className="task-poll-toggle">
+                    <span>自动轮询</span>
+                    <div className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={autoPoll}
+                        onChange={(e) => setAutoPoll(e.target.checked)}
+                      />
+                      <span className="toggle-slider"></span>
+                    </div>
+                  </label>
+                )}
+              </div>
+
+              {(downloading || downloadProgress) && (
+                <div className="task-download-state">
+                  <div className="task-download-meta">
+                    <span>{downloading ? '下载中' : '下载状态'}</span>
+                    <span>{downloadPercent}%{downloadSpeed && ` · ${downloadSpeed}`}</span>
                   </div>
-                </label>
+                  <div className="task-progress-track">
+                    <div
+                      className={`task-progress-fill ${downloadError ? 'is-error' : downloading ? 'is-running' : 'is-done'}`}
+                      style={{ width: `${downloadPercent}%` }}
+                    />
+                  </div>
+                  <p className={downloadError ? 'task-download-error' : ''}>{downloadProgress}</p>
+                </div>
               )}
-            </div>
+            </section>
 
-            {(downloading || downloadProgress) && (
-              <div className="task-download-state">
-                <div className="task-download-meta">
-                  <span>{downloading ? '下载中' : '下载状态'}</span>
-                  <span>{downloadPercent}%{downloadSpeed && ` · ${downloadSpeed}`}</span>
-                </div>
-                <div className="task-progress-track">
-                  <div
-                    className={`task-progress-fill ${downloadError ? 'is-error' : downloading ? 'is-running' : 'is-done'}`}
-                    style={{ width: `${downloadPercent}%` }}
-                  />
-                </div>
-                <p className={downloadError ? 'task-download-error' : ''}>{downloadProgress}</p>
+            <aside className="task-detail-card task-decision-panel">
+              <div className="task-decision-head">
+                <span>本次任务</span>
+                <strong title={task.id}>{shortId(task.id, 16)}</strong>
               </div>
-            )}
-          </section>
+              <div className="task-decision-price">
+                <span>实际扣费</span>
+                <strong>{resultChargeBadgeText || '待官方确认'}</strong>
+                <small title={taskCompletedTime.absolute}>
+                  {taskCompletedTimePrefix} {taskCompletedTime.relative}
+                </small>
+              </div>
+              <div className="task-decision-list">
+                <div><span>点数扣除</span><strong>{taskCreditText}</strong></div>
+                <div><span>视频保存</span><strong>{resultStorageText}</strong></div>
+                <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
+                <div><span>输入</span><strong>{inputChips.join(' · ') || '无参数记录'}</strong></div>
+                <div>
+                  <span>{taskCompletedExactLabel}</span>
+                  <strong title={taskCompletedTime.absolute}>{taskCompletedTime.absolute}</strong>
+                </div>
+                <div><span>Provider 状态</span><strong>{task.provider_status || '-'}</strong></div>
+              </div>
+              <div className="task-decision-note">
+                {task.local_status === 'failed'
+                  ? '这次任务未产出可用视频，优先复用输入调整。'
+                  : hasLocalVideo
+                    ? '本地视频已可长期访问，可直接打开或复制链接。'
+                    : task.result_video_url
+                      ? '当前仍依赖远程链接，建议先保存到本地。'
+                      : '还没有可保存的视频链接，先刷新结果。'}
+              </div>
+            </aside>
+          </div>
 
           {task.local_status === 'failed' && task.error_message && (
             <section className="task-detail-card task-error-card">
@@ -1254,11 +1443,23 @@ export default function TaskDetailPage() {
             </section>
           )}
 
-          <section className="task-detail-card">
+          <section className="task-detail-card task-input-review">
             <div className="task-card-head">
               <div>
-                <h2>输入摘要</h2>
-                <p>{inputChips.join(' · ') || '无参数记录'}</p>
+                <h2>输入复盘</h2>
+                <p>{inputChips.join(' · ') || '无参数记录'}{referenceSummaryItems.length > 0 ? ` · ${referenceSummaryItems.join(' · ')}` : ''}</p>
+              </div>
+              <div className="task-action-row">
+                {task.prompt && (
+                  <button className="btn btn-secondary" type="button" onClick={handleCopyPrompt}>
+                    <Copy size={16} aria-hidden="true" />
+                    {promptCopied ? '已复制' : '复制提示词'}
+                  </button>
+                )}
+                <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-secondary">
+                  <RotateCcw size={16} aria-hidden="true" />
+                  复用输入
+                </Link>
               </div>
             </div>
 
@@ -1268,8 +1469,13 @@ export default function TaskDetailPage() {
               ))}
             </div>
 
+            <div className="task-prompt-preview">
+              <span>提示词</span>
+              <p>{promptPreview(task.prompt)}</p>
+            </div>
+
             <details className="task-inline-details">
-              <summary>查看提示词和完整参数</summary>
+              <summary>查看完整提示词和参数</summary>
               <div className="task-prompt-box">{task.prompt || '无提示词'}</div>
               <div className="task-param-grid">
                 {[...parameterItems, ...advancedParameterItems].map((item) => (
@@ -1287,13 +1493,25 @@ export default function TaskDetailPage() {
                   <div>
                     <div className="task-muted-label">参考图片 ({referenceImages.length})</div>
                     <div className="task-reference-grid">
-                      {referenceImages.map((url, i) => (
+                      {referenceImages.slice(0, 6).map((url, i) => (
                         <a key={url + i} className="task-reference-thumb" href={url} target="_blank" rel="noopener noreferrer" title={url}>
                           <img src={url} alt={`参考图片 ${i + 1}`} />
                           <span>图 {i + 1}</span>
                         </a>
                       ))}
                     </div>
+                    {referenceImages.length > 6 && (
+                      <details className="task-inline-details task-reference-more">
+                        <summary>查看全部参考图片</summary>
+                        <div className="task-reference-list">
+                          {referenceImages.slice(6).map((url, i) => (
+                            <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
+                              图 {i + 7} · {truncateUrl(url)}
+                            </a>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
 
@@ -1357,16 +1575,13 @@ export default function TaskDetailPage() {
             ) : (
               <div className="task-empty-line">本任务没有参考素材。</div>
             )}
-          </section>
 
-          {referenceAssets.length > 0 && (
-            <section className="task-detail-card">
-              <div className="task-card-head">
-                <div>
-                  <h2>参考图</h2>
-                  <p>{referenceAssets.length} 张，按提交顺序。</p>
+            {referenceAssets.length > 0 && (
+              <div className="task-reference-assets">
+                <div className="task-section-subhead">
+                  <span>Workspace 参考图</span>
+                  <strong>{referenceAssets.length} 张，按提交顺序</strong>
                 </div>
-              </div>
               <div className="task-asset-grid">
                 {referenceAssets.map((asset, i) => {
                   const imgUrl = asset.providerPreviewUrl || asset.originalUrl;
@@ -1390,15 +1605,16 @@ export default function TaskDetailPage() {
                   );
                 })}
               </div>
-            </section>
-          )}
+              </div>
+            )}
+          </section>
 
           <details className="task-detail-card task-ops-panel">
-            <summary>排障与账务</summary>
+            <summary>账务与排障</summary>
             <div className="task-card-head task-details-head">
               <div>
-                <h2>运维信息</h2>
-                <p>平时不需要看。只有查失败、查扣费、改项目归属时使用。</p>
+                <h2>高级信息</h2>
+                <p>普通查看结果时不用展开。查扣费、排查失败、修正项目归属时使用。</p>
               </div>
             </div>
 
@@ -1406,12 +1622,12 @@ export default function TaskDetailPage() {
               <div><span>任务 ID</span><strong title={task.id}>{shortId(task.id, 16)}</strong></div>
               <div><span>Provider ID</span><strong title={task.provider_task_id || ''}>{shortId(task.provider_task_id, 16)}</strong></div>
               <div><span>Provider 状态</span><strong>{task.provider_status || '-'}</strong></div>
-              <div><span>完成时间</span><strong>{formatDateTime(task.completed_at)}</strong></div>
+              <div><span>完成时间</span><strong>{formatTaskTime(task.completed_at).absolute}</strong></div>
               <div><span>视频来源</span><strong>{resultStorageText}</strong></div>
               <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
             </div>
 
-            <div className="task-param-grid">
+            <div className="task-param-grid task-billing-grid">
               <div className="task-param-item">
                 <span>官方成本状态</span>
                 <strong>{costStatusLabel(task.provider_cost_status)}</strong>
@@ -1506,7 +1722,7 @@ export default function TaskDetailPage() {
               </div>
             ) : null}
             <details className="task-subdetails task-manage-panel">
-            <summary>项目归属调整</summary>
+            <summary>管理操作：项目归属调整</summary>
             <div className="project-move-panel task-project-move">
               <div>
                 <div className="info-label">移动到其他项目</div>

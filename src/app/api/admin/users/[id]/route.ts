@@ -131,6 +131,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const hasFeishuBinding = Boolean(existing.feishu_user_id || existing.feishu_open_id || existing.feishu_union_id);
   const requestedRole = role || existing.role;
   const requestedAccountType = accountType || (existing.account_type === 'external' ? 'external' : 'internal');
+  if (requestedRole === 'admin' && requestedAccountType === 'external' && !hasFeishuBinding) {
+    return errorJson('管理员必须是内部账号；请先改为普通用户再切换外部账号', 400);
+  }
   const nextAccountType = requestedRole === 'admin' && hasFeishuBinding
     ? 'internal'
     : requestedAccountType;

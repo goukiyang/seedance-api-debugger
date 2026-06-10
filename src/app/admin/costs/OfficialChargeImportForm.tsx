@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { formatAmountMinorWithCny, usdToCnyRateText } from '@/lib/costs/currency';
+import { formatAmountMinorWithFixedCny, usdToCnyRateText } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
 
 type ImportResult = {
   row_number: number;
@@ -40,7 +41,7 @@ const STATUS_LABELS: Record<ImportResult['status'], string> = {
 
 function formatAmountMinor(amount: number | null | undefined, currency?: string) {
   if (amount === null || amount === undefined) return '-';
-  return formatAmountMinorWithCny(amount, currency);
+  return formatAmountMinorWithFixedCny(amount, currency);
 }
 
 function summaryText(summary?: Record<string, number>) {
@@ -161,7 +162,7 @@ export default function OfficialChargeImportForm() {
                   <td>{row.row_number}</td>
                   <td>{STATUS_LABELS[row.status]}</td>
                   <td>
-                    {row.task_id ? <Link className="link" href={`/tasks/${row.task_id}`}>{row.task_id.slice(0, 10)}...</Link> : '-'}
+                    {row.task_id ? <Link className="link" href={taskDetailHref(row.task_id, '/admin/costs')}>{row.task_id.slice(0, 10)}...</Link> : '-'}
                   </td>
                   <td>{row.official_charge_id || '-'}</td>
                   <td>{formatAmountMinor(row.amount_minor, row.currency)}</td>

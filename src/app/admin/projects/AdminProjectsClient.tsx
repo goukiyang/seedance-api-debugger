@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import { displayUserName } from '@/lib/users/display';
 
 interface ProjectItem {
   id: string;
@@ -17,10 +18,7 @@ interface ProjectItem {
 }
 
 function ownerLabel(project: ProjectItem): string {
-  const name = project.owner?.name?.trim();
-  const username = project.owner?.username?.trim();
-  if (name && username && name !== username) return `${name}（${username}）`;
-  return name || username || '-';
+  return displayUserName(project.owner);
 }
 
 function canArchive(project: ProjectItem): boolean {

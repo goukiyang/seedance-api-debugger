@@ -183,6 +183,7 @@ model User {
   content_audit_actions   ContentAuditLog[]    @relation("ContentAuditActor")
   content_audit_owned     ContentAuditLog[]    @relation("ContentAuditOwner")
   feedbacks               Feedback[]
+  preferences             UserPreference[]
 
   @@index([username])
   @@index([email])
@@ -201,6 +202,21 @@ model PlatformSetting {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@index([key])
+}
+
+model UserPreference {
+  id         String   @id @default(cuid())
+  user_id    String
+  key        String
+  value_json String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, key])
+  @@index([user_id])
   @@index([key])
 }
 

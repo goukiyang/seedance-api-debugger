@@ -19,6 +19,8 @@ import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
 import { ReferenceAlbumPicker } from '@/components/ReferenceAlbumPicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
+import { taskDetailHref } from '@/lib/navigation/return-to';
+import type { GenerationDefaults } from '@/lib/preferences/generation';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
@@ -32,6 +34,11 @@ interface PolledTask {
   provider_status: string | null;
   result_video_url: string | null;
   error_message: string | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
 }
 
 interface ReferenceAlbumOption {
@@ -69,6 +76,7 @@ function dedupeReferenceAlbums(albums: ReferenceAlbumOption[]): ReferenceAlbumOp
 
 interface Props {
   collections: AssetCollection[];
+  initialSettings?: GenerationDefaults | null;
   reuseDraft?: {
     taskId: string;
     reuseKey: number;
@@ -108,6 +116,7 @@ interface Props {
 
 export function GenerationComposer({
   collections,
+  initialSettings,
   onCollectionLoad,
   onCollectionSave,
   onCollectionNew,
@@ -123,11 +132,13 @@ export function GenerationComposer({
 }: Props) {
   const workspace = useWorkspace();
   const appliedReuseDraftRef = React.useRef<string | null>(null);
+  const appliedInitialSettingsRef = React.useRef(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
   const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
   const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
+  const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
 
   // Composer 内部状态（受控于参数 props 透传）
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
@@ -148,10 +159,8 @@ export function GenerationComposer({
     return checkPrompt(prompt, workspace.assets.length, duration);
   }, [prompt, workspace.assets.length, duration]);
 
-  // 严重阻塞错误
-  const blockingError = useMemo(() => {
+  const submitBlocker = useMemo(() => {
     if (!prompt.trim()) return '请填写提示词';
-    if (isSubmitting) return '提交中...';
 
     // 检查上传状态
     const hasUploading = Object.values(workspace.uploadStatuses).some((s) => s === 'uploading');
@@ -170,18 +179,50 @@ export function GenerationComposer({
       return `提示词引用了图${validation.maxMissing}，但当前只有 ${workspace.assets.length} 张素材`;
     }
     return null;
-  }, [prompt, isSubmitting, workspace.uploadStatuses, workspace.assets.length, generationMode, validation]);
+  }, [prompt, workspace.uploadStatuses, workspace.assets.length, generationMode, validation]);
 
-  const canSubmit = blockingError === null && !isSubmitting;
+  const composerStatus = useMemo(() => {
+    if (isSubmitting) {
+      return { message: '提交中...', tone: 'progress' as const };
+    }
+    if (!prompt.trim()) {
+      return {
+        message: '请填写提示词',
+        tone: hasAttemptedSubmit ? 'error' as const : 'hint' as const,
+      };
+    }
+    if (submitBlocker) {
+      const isUploading = submitBlocker.includes('上传中');
+      return { message: submitBlocker, tone: isUploading ? 'progress' as const : 'error' as const };
+    }
+    return { message: null, tone: 'ok' as const };
+  }, [hasAttemptedSubmit, isSubmitting, prompt, submitBlocker]);
+
+  const canPressSubmit = !isSubmitting;
 
   const estimatedPoints = useMemo(() => {
     return calculateEstimatedCostClient(resolution, duration);
   }, [resolution, duration]);
 
-  // 已引用图号
+  // 已按即梦 @图片N 规则引用的图片序号
   const usedRefs = useMemo(() => {
-    return validation.referencedFigures.map((n) => `图${n}`);
+    return validation.referencedFigures.map((n) => `图片${n}`);
   }, [validation.referencedFigures]);
+
+  const referenceLabels = useMemo(() => {
+    return workspace.assets.map((asset, index) => {
+      const label = `图片${index + 1}`;
+      const titleParts = [
+        label,
+        asset.fileName,
+        asset.referenceAlbumName ? `来自 ${asset.referenceAlbumName}` : null,
+      ].filter(Boolean);
+      return {
+        label,
+        title: titleParts.join(' · '),
+      };
+    });
+  }, [workspace.assets]);
 
   const refreshReferenceAlbums = useCallback(async () => {
     try {
@@ -210,6 +251,7 @@ export function GenerationComposer({
     if (!reuseDraft || appliedReuseDraftRef.current === reuseKey) return;
     appliedReuseDraftRef.current = reuseKey;
     setPrompt(reuseDraft.prompt);
+    setHasAttemptedSubmit(false);
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
     setDuration(reuseDraft.duration);
@@ -221,12 +263,27 @@ export function GenerationComposer({
     void workspace.refresh();
   }, [reuseDraft, workspace]);
 
+  useEffect(() => {
+    if (!initialSettings || appliedInitialSettingsRef.current || reuseDraft) return;
+    appliedInitialSettingsRef.current = true;
+    setGenerationMode(initialSettings.generationMode);
+    setRatio(initialSettings.ratio);
+    setDuration(initialSettings.duration);
+    setResolution(initialSettings.resolution);
+    setSeed(-1);
+    setGenerateAudio(initialSettings.generateAudio);
+    setReturnLastFrame(initialSettings.returnLastFrame);
+    setWatermark(initialSettings.watermark);
+    setHasAttemptedSubmit(false);
+  }, [initialSettings, reuseDraft]);
+
   // ============================================================================
   // Handlers
   // ============================================================================
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit) return;
+    setHasAttemptedSubmit(true);
+    if (submitBlocker || isSubmitting) return;
     await onSubmit({
       prompt,
       generationMode,
@@ -241,7 +298,7 @@ export function GenerationComposer({
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
     });
-  }, [canSubmit, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, workspace.assets]);
+  }, [submitBlocker, isSubmitting, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, workspace.assets]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
     if (workspace.assets.length > 0) {
@@ -347,11 +404,13 @@ export function GenerationComposer({
         <PromptEditor
           value={prompt}
           onChange={setPrompt}
+          referenceLabels={referenceLabels}
         />
 
         {/* 状态行 */}
         <ComposerStatusLine
-          blockingError={blockingError}
+          message={composerStatus.message}
+          tone={composerStatus.tone}
           usedRefs={usedRefs}
           hasPrompt={prompt.trim().length > 0}
           hasAssets={workspace.assets.length > 0}
@@ -371,47 +430,24 @@ export function GenerationComposer({
           </div>
         )}
 
-        {/* 结果 */}
+        {/* 入队提示：短暂展示，不阻塞下一次生成 */}
         {result && (
-          <div className="composer-result">
-            <div className="composer-result-info">
-              <span className="composer-result-label">任务已创建</span>
-              <span className="composer-result-id">{result.id.slice(0, 8)}...</span>
+          <div className="composer-queue-notice">
+            <div className="composer-queue-copy">
+              <span className="composer-queue-kicker">已加入队列</span>
+              <strong>任务已创建，可以继续创建下一段</strong>
+              <small>
+                {polledResult?.id === result.id && ['succeeded', 'failed', 'cancelled'].includes(polledResult.local_status)
+                  ? `当前状态：${polledResult.local_status === 'succeeded' ? '已完成' : polledResult.local_status === 'failed' ? '失败' : '已取消'}`
+                  : isPolling
+                    ? '系统正在后台查询生成进度，最近任务会自动更新。'
+                    : '任务已提交，最近任务会继续显示进度。'}
+              </small>
             </div>
-
-            {isPolling && !polledResult && (
-              <div className="composer-polling-hint">正在查询结果...</div>
-            )}
-
-            {polledResult && polledResult.local_status === 'succeeded' && polledResult.result_video_url && (
-              <div className="composer-result-video">
-                <div className="composer-result-video-label">✅ 视频生成完成</div>
-                <video
-                  key={polledResult.result_video_url}
-                  controls
-                  playsInline
-                  style={{ width: '100%', maxHeight: 280, borderRadius: 8 }}
-                  src={polledResult.result_video_url}
-                />
-              </div>
-            )}
-
-            {polledResult && polledResult.local_status === 'failed' && (
-              <div className="composer-result-error">
-                ❌ 生成失败：{polledResult.error_message || '未知错误'}
-              </div>
-            )}
-
-            {polledResult && !['succeeded', 'failed', 'cancelled'].includes(polledResult.local_status) && (
-              <div className="composer-polling-hint">
-                ⏳ {isPolling ? '生成中，正在查询结果...' : '请手动查看任务详情'}
-              </div>
-            )}
-
-            <div className="composer-result-actions">
-              <a href={`/tasks/${result.id}`} className="composer-result-link">查看详情 →</a>
+            <div className="composer-queue-actions">
+              <a href={taskDetailHref(result.id, '/generate')} className="composer-result-link">查看详情</a>
               <button type="button" className="composer-result-reset" onClick={onReset}>
-                新建任务
+                收起
               </button>
             </div>
           </div>
@@ -424,7 +460,7 @@ export function GenerationComposer({
           duration={duration}
           resolution={resolution}
           points={estimatedPoints}
-          canSubmit={canSubmit}
+          canSubmit={canPressSubmit}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
           onModeChange={setGenerationMode}

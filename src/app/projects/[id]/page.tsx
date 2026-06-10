@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
-import { formatAmountMicrosWithCny, formatAmountMinorWithCny } from '@/lib/costs/currency';
+import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
+import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
 
 interface ProjectDetail {
   id: string;
@@ -163,11 +165,11 @@ function canDeleteProject(project: ProjectDetail): boolean {
 }
 
 function formatAmountMinor(amount: number | null | undefined, currency?: string | null): string {
-  return formatAmountMinorWithCny(amount, currency);
+  return formatAmountMinorWithFixedCny(amount, currency);
 }
 
 function formatAmountMicros(amount: number | null | undefined, currency?: string | null): string {
-  return formatAmountMicrosWithCny(amount, currency);
+  return formatAmountMicrosWithFixedCny(amount, currency);
 }
 
 function formatLedgerAmount(item: {
@@ -215,11 +217,11 @@ function confidenceLabel(confidence: string): string {
 }
 
 function taskOwnerLabel(task: TaskItem | ReviewTaskItem): string {
-  return task.owner?.name || task.owner?.username || task.user?.name || task.user?.username || '-';
+  return displayUserName(task.owner || task.user);
 }
 
 function ledgerOwnerLabel(ledger: CostLedgerItem): string {
-  return ledger.task ? taskOwnerLabel(ledger.task) : ledger.user?.name || ledger.user?.username || '-';
+  return ledger.task ? taskOwnerLabel(ledger.task) : displayUserName(ledger.user);
 }
 
 function safeVideoSrc(url?: string | null): string | null {
@@ -235,6 +237,7 @@ function providerTaskIdLabel(ledger: CostLedgerItem): string {
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
+  const projectReturnTo = `/projects/${projectId}`;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [costLedgers, setCostLedgers] = useState<CostLedgerItem[]>([]);
@@ -517,7 +520,7 @@ export default function ProjectDetailPage() {
                 {reviewSummary.high_cost_tasks.map((task) => (
                   <tr key={task.id}>
                     <td className="truncate" style={{ maxWidth: 360 }}>
-                      <Link className="link" href={`/tasks/${task.id}`}>{task.prompt || task.id}</Link>
+                      <Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>{task.prompt || task.id}</Link>
                     </td>
                     <td>{taskOwnerLabel(task)}</td>
                     <td>{task.local_status}</td>
@@ -588,7 +591,7 @@ export default function ProjectDetailPage() {
                         )}
                         <div style={{ minWidth: 0 }}>
                           {task ? (
-                            <Link className="link truncate" style={{ display: 'block', maxWidth: 320 }} href={`/tasks/${task.id}`} title={task.prompt || task.id}>
+                            <Link className="link truncate" style={{ display: 'block', maxWidth: 320 }} href={taskDetailHref(task.id, projectReturnTo)} title={task.prompt || task.id}>
                               {task.prompt || task.id}
                             </Link>
                           ) : (
@@ -626,7 +629,7 @@ export default function ProjectDetailPage() {
                     <td>{new Date(ledger.occurred_at || ledger.created_at).toLocaleString('zh-CN')}</td>
                     <td>
                       {task ? (
-                        <Link className="link" href={`/tasks/${task.id}`}>查看任务</Link>
+                        <Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>查看任务</Link>
                       ) : (
                         <span className="text-gray">无任务</span>
                       )}
@@ -667,7 +670,7 @@ export default function ProjectDetailPage() {
                   <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
                   <td>{costStatusLabel(task.provider_cost_status)}</td>
                   <td>{new Date(task.created_at).toLocaleString('zh-CN')}</td>
-                  <td><Link className="link" href={`/tasks/${task.id}`}>详情</Link></td>
+                  <td><Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>详情</Link></td>
                 </tr>
               ))}
             </tbody>
@@ -720,7 +723,7 @@ export default function ProjectDetailPage() {
           <tbody>
             {project.members.map((member) => (
               <tr key={member.id}>
-                <td>{member.user.name} <span className="text-gray">({member.user.username})</span></td>
+                <td>{displayUserName(member.user)} <span className="text-gray">({displayUserSubtitle(member.user) || `ID ${member.user.id.slice(0, 8)}`})</span></td>
                 <td>{member.user.account_type}</td>
                 <td>{member.user.role}</td>
                 <td>{roleLabel(member.role)}</td>

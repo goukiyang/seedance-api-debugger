@@ -3,7 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanViewProject } from '@/lib/projects/permissions';
-import { amountMinorToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
+import { amountMicrosToCnyEstimate, amountMinorToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
+import { displayUserName } from '@/lib/users/display';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,8 @@ export async function GET(
         provider_cost_status: true,
         provider_official_amount_minor: true,
         provider_final_amount_minor: true,
+        provider_official_amount_micros: true,
+        provider_final_amount_micros: true,
         provider_cost_currency: true,
         created_at: true,
         completed_at: true,
@@ -60,8 +63,10 @@ export async function GET(
       'charged_credits',
       'refunded_credits',
       'official_cost_minor',
+      'official_cost_micros',
       'official_cost_cny_estimate',
       'final_cost_minor',
+      'final_cost_micros',
       'final_cost_cny_estimate',
       'cost_currency',
       'cny_estimate_rate',
@@ -75,7 +80,7 @@ export async function GET(
     const rows = tasks.map((task) => [
       task.id,
       task.project?.name || '',
-      task.owner?.name || task.owner?.username || task.user?.name || task.user?.username || '',
+      displayUserName(task.owner || task.user),
       task.local_status,
       task.model,
       task.resolution || '',
@@ -84,9 +89,15 @@ export async function GET(
       task.actual_cost ?? '',
       task.refund_amount ?? '',
       task.provider_official_amount_minor ?? '',
-      amountMinorToCnyEstimate(task.provider_official_amount_minor, task.provider_cost_currency),
+      task.provider_official_amount_micros ?? '',
+      task.provider_official_amount_micros !== null && task.provider_official_amount_micros !== undefined
+        ? amountMicrosToCnyEstimate(task.provider_official_amount_micros, task.provider_cost_currency)
+        : amountMinorToCnyEstimate(task.provider_official_amount_minor, task.provider_cost_currency),
       task.provider_final_amount_minor ?? '',
-      amountMinorToCnyEstimate(task.provider_final_amount_minor, task.provider_cost_currency),
+      task.provider_final_amount_micros ?? '',
+      task.provider_final_amount_micros !== null && task.provider_final_amount_micros !== undefined
+        ? amountMicrosToCnyEstimate(task.provider_final_amount_micros, task.provider_cost_currency)
+        : amountMinorToCnyEstimate(task.provider_final_amount_minor, task.provider_cost_currency),
       task.provider_cost_currency || '',
       task.provider_cost_currency === 'USD' ? usdToCnyRateText() : '',
       task.provider_cost_status,
