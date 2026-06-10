@@ -466,6 +466,7 @@ function buildTaskPayload(
     ratio: preview.aspectRatio,
     duration: Math.max(4, preview.durationSec),
     resolution: normalizeResolution(preview.quality),
+    generate_audio: preview.body.generate_audio,
     reference_video_urls: videoUrls,
     reference_audio_urls: audioUrls,
     idempotency_key: `canvas:${nodeId}:${Date.now()}`,

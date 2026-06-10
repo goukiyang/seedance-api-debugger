@@ -314,7 +314,7 @@ export async function POST(request: NextRequest) {
 
   // --- Build provider input ---
   const seed = body.seed ?? -1;
-  const generateAudio = body.generate_audio ?? false;
+  const generateAudio = body.generate_audio ?? true;
   const returnLastFrame = body.return_last_frame ?? false;
   const watermark = body.watermark ?? false;
 
