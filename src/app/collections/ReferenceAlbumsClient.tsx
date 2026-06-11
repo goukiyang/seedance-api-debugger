@@ -586,7 +586,7 @@ export default function ReferenceAlbumsClient() {
       </div>
 
       {submitAlbum && (
-      <section className="album-public-submit-panel">
+        <section className="album-public-submit-panel">
           <div>
             <h2>提交到公共图集</h2>
             <p>系统会复制一份公共版本，原图集仍保持私有或项目权限。</p>
