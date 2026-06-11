@@ -107,6 +107,7 @@ export default function ReferenceAlbumsClient() {
   const [submitName, setSubmitName] = useState('');
   const [submitDescription, setSubmitDescription] = useState('');
   const [submitNote, setSubmitNote] = useState('');
+  const [submitPendingSubmission, setSubmitPendingSubmission] = useState<PublicSubmission | null>(null);
   const [shareAlbum, setShareAlbum] = useState<AlbumItem | null>(null);
   const [page, setPage] = useState(1);
   const [actionAlbumId, setActionAlbumId] = useState<string | null>(null);
@@ -351,16 +352,32 @@ export default function ReferenceAlbumsClient() {
     }
   };
 
-  const openSubmitPanel = (album: AlbumItem) => {
+  const openSubmitPanel = async (album: AlbumItem) => {
     setSubmitAlbum(album);
+    setError(null);
+    setSubmitPendingSubmission(null);
     setSubmitName(album.name);
     setSubmitDescription(album.description || '');
     setSubmitNote('');
     setSubmitFolderId(folders[0]?.id || '');
-    setError(null);
+
+    try {
+      const res = await fetch(`/api/reference-albums/${album.id}/public-submissions`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const pending: PublicSubmission | null = data?.submission || null;
+      if (!pending || pending.status !== 'pending') return;
+      setSubmitPendingSubmission(pending);
+      setSubmitName(pending.name || album.name);
+      setSubmitDescription(pending.description || album.description || '');
+      setSubmitNote(pending.submit_note || '');
+      if (pending.public_folder_id) setSubmitFolderId(pending.public_folder_id);
+    } catch {
+      // ignore
+    }
   };
 
-  const handleSubmitToPublic = async () => {
+  const handleSubmitToPublic = async (replace = false) => {
     if (!submitAlbum) return;
     if (!submitFolderId) {
       setError('请先选择公共文件夹');
@@ -377,13 +394,23 @@ export default function ReferenceAlbumsClient() {
           name: submitName,
           description: submitDescription,
           submit_note: submitNote,
+          replace,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || '提交公共图集失败');
+      if (data.deduplicated) {
+        setSubmitPendingSubmission(data.submission || null);
+        setError('该图集已有待审核提交，请先确认覆盖重提，避免重复等待。');
+        return;
+      }
+
       setSubmitAlbum(null);
+      setSubmitPendingSubmission(null);
       setScope(isAdmin ? 'public' : scope);
-      setError(isAdmin ? '已复制到公共图集' : '已提交审核，管理员通过后会进入公共图集');
+      setError(isAdmin
+        ? data.replaced ? '已更新并同步到公共图集' : '已复制到公共图集'
+        : (replace ? '已覆盖重提，等待管理员审核' : '已提交审核，管理员通过后会进入公共图集'));
       loadAlbums();
       loadFolders();
       loadPendingSubmissions();
@@ -559,7 +586,7 @@ export default function ReferenceAlbumsClient() {
       </div>
 
       {submitAlbum && (
-        <section className="album-public-submit-panel">
+      <section className="album-public-submit-panel">
           <div>
             <h2>提交到公共图集</h2>
             <p>系统会复制一份公共版本，原图集仍保持私有或项目权限。</p>
@@ -574,12 +601,36 @@ export default function ReferenceAlbumsClient() {
             <input value={submitName} onChange={(event) => setSubmitName(event.target.value)} placeholder="公共图集名称" />
             <input value={submitDescription} onChange={(event) => setSubmitDescription(event.target.value)} placeholder="公共说明，可选" />
             <textarea value={submitNote} onChange={(event) => setSubmitNote(event.target.value)} placeholder="给管理员的说明，可选" />
+            {submitPendingSubmission && (
+              <div className="album-public-submit-pending">
+                当前已有待审核提交：{new Date(submitPendingSubmission.created_at).toLocaleString('zh-CN')}，
+                提交到 {submitPendingSubmission.public_folder?.name || '原文件夹'}
+              </div>
+            )}
           </div>
           <div className="album-public-submit-actions">
-            <button type="button" onClick={() => setSubmitAlbum(null)}>取消</button>
-            <button type="button" className="primary" onClick={handleSubmitToPublic} disabled={!submitFolderId || !submitName.trim() || actionAlbumId === submitAlbum.id}>
+            <button
+              type="button"
+              onClick={() => {
+                setSubmitAlbum(null);
+                setSubmitPendingSubmission(null);
+              }}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => handleSubmitToPublic()}
+              disabled={!submitFolderId || !submitName.trim() || actionAlbumId === submitAlbum.id}
+            >
               {isAdmin ? '直接复制到公共库' : '提交审核'}
             </button>
+            {submitPendingSubmission && !isAdmin && (
+              <button type="button" onClick={() => handleSubmitToPublic(true)} disabled={!submitFolderId || !submitName.trim() || actionAlbumId === submitAlbum.id}>
+                覆盖重提
+              </button>
+            )}
           </div>
         </section>
       )}

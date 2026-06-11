@@ -19,9 +19,14 @@ export async function GET(
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
+    const now = new Date();
     await assertCanShareAlbum(user, params.id);
     const shares = await prisma.albumShare.findMany({
-      where: { album_id: params.id, status: 'active' },
+      where: {
+        album_id: params.id,
+        status: 'active',
+        OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+      },
       orderBy: { created_at: 'desc' },
     });
     const grantees = await loadShareGrantees(shares);
