@@ -738,6 +738,7 @@ export default function TaskDetailPage() {
   const [promptCopied, setPromptCopied] = useState(false);
   const [openingVideo, setOpeningVideo] = useState(false);
   const [copyingLink, setCopyingLink] = useState(false);
+  const [browserDownloading, setBrowserDownloading] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
 
   // 显示原始响应
@@ -1009,6 +1010,31 @@ export default function TaskDetailPage() {
       window.location.assign(localUrl);
     } finally {
       setOpeningVideo(false);
+    }
+  };
+
+  const handleBrowserDownloadVideo = async () => {
+    if (!task) return;
+    setBrowserDownloading(true);
+    setOpenError(null);
+
+    try {
+      const localVideoPath = task.local_video_path || await downloadVideoToLocal(task);
+      if (!localVideoPath) {
+        setOpenError('视频还没有可下载的本地文件。请刷新结果后重试，或重新生成。');
+        return;
+      }
+
+      const videoUrl = new URL(`/api/video/play/${task.id}`, window.location.origin).toString();
+      const anchor = document.createElement('a');
+      anchor.href = videoUrl;
+      anchor.download = `seedance-${task.id}.mp4`;
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      setBrowserDownloading(false);
     }
   };
 
@@ -1354,6 +1380,17 @@ export default function TaskDetailPage() {
                     <RotateCcw size={16} aria-hidden="true" />
                     复用输入
                   </Link>
+                )}
+                {hasPlayableVideo && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleBrowserDownloadVideo}
+                    disabled={browserDownloading || downloading}
+                    title="下载本地视频文件"
+                  >
+                    <Download size={16} aria-hidden="true" />
+                    {browserDownloading || downloading ? '准备中...' : '下载视频'}
+                  </button>
                 )}
                 {task.local_status === 'failed' && (
                   <button className="btn btn-danger" onClick={handleRetry} disabled={retrying}>

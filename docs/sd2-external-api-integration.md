@@ -256,7 +256,56 @@ curl -sS "$BASE_URL/api/codex/video/create" \
   }'
 ```
 
-### 6.3 使用公网 HTTPS 图片
+### 6.3 在 prompt 中使用 `@图片N`
+
+如果外部 prompt 按即梦习惯写 `@图片1`、`@图片2` 或 `@图片 1`，调用方必须按同一顺序传入真实参考图。`@图片N` 本身只是 prompt 文本，不是独立 API 字段；后端不会仅凭文本去查找图片。
+
+使用站内上传返回的 `reference_image_id` 时：
+
+```json
+{
+  "prompt": "让 @图片1 中的产品进入 @图片2 的场景，镜头平稳推进，保持主体材质一致。",
+  "generation_mode": "all_in_one_reference",
+  "reference_image_ids": [
+    "reference_image_id_for_picture_1",
+    "reference_image_id_for_picture_2"
+  ],
+  "ratio": "16:9",
+  "duration": 5,
+  "resolution": "720p",
+  "idempotency_key": "ext-20260605-0003",
+  "client_name": "external-system"
+}
+```
+
+使用公网 URL 时同理：
+
+```json
+{
+  "prompt": "以 @图片1 的人物为主体，进入 @图片2 的室内空间。",
+  "generation_mode": "all_in_one_reference",
+  "reference_image_urls": [
+    "https://example.com/picture-1.jpg",
+    "https://example.com/picture-2.jpg"
+  ],
+  "ratio": "9:16",
+  "duration": 5,
+  "resolution": "720p",
+  "idempotency_key": "ext-20260605-0004",
+  "client_name": "external-system"
+}
+```
+
+顺序规则：
+
+- `@图片1` 对应数组第 1 项。
+- `@图片2` 对应数组第 2 项。
+- prompt 里出现 `@图片N`，但没有传第 N 张参考图时，Provider 只会看到一段无法绑定图片的文本。
+- 调整、删除或重排参考图后，必须同步调整 prompt 里的 `@图片N`。
+
+旧 prompt 中的 `@图1`、`图1` 只作为历史兼容，不建议外部新接入继续使用。
+
+### 6.4 使用公网 HTTPS 图片
 
 也可以直接传 `reference_image_urls`。URL 必须是公网可访问的 HTTPS 地址，不能是 localhost、内网 IP 或临时本地地址。
 
@@ -268,14 +317,14 @@ curl -sS "$BASE_URL/api/codex/video/create" \
   "ratio": "9:16",
   "duration": 5,
   "resolution": "720p",
-  "idempotency_key": "ext-20260605-0003",
+  "idempotency_key": "ext-20260605-0005",
   "client_name": "external-system"
 }
 ```
 
 Codex API 来源的 `reference_image_urls` 会被导入为站内素材和参考图，再进入生成链路。
 
-### 6.4 首尾帧转场：本地首尾帧先上传再创建
+### 6.5 首尾帧转场：本地首尾帧先上传再创建
 
 `first_last_frame` 可以不传普通 `reference_image_ids` / `reference_image_urls`，只依赖 `first_frame_url` 和 `last_frame_url`。这两个字段必须是 Provider 可访问的公开 HTTPS URL；本地文件需要先上传。
 
@@ -360,8 +409,8 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `reference_image_ids` | string[] | 站内参考图 ID，推荐使用上传接口返回值；`first_last_frame` 直接传 `first_frame_url` 时不要求提供 |
-| `reference_image_urls` | string[] | 公网 HTTPS 参考图 URL，最多 9 张；`first_last_frame` 直接传 `first_frame_url` 时不要求提供 |
+| `reference_image_ids` | string[] | 站内参考图 ID，推荐使用上传接口返回值；如果 prompt 使用 `@图片N`，数组顺序必须与 N 对应；`first_last_frame` 直接传 `first_frame_url` 时不要求提供 |
+| `reference_image_urls` | string[] | 公网 HTTPS 参考图 URL，最多 9 张；如果 prompt 使用 `@图片N`，数组顺序必须与 N 对应；`first_last_frame` 直接传 `first_frame_url` 时不要求提供 |
 | `first_frame_url` | string | Provider 可访问的首帧公开 HTTPS URL；本地文件必须先上传并使用 `asset.originalUrl` |
 | `last_frame_url` | string | Provider 可访问的尾帧公开 HTTPS URL；首尾帧转场强烈建议提供 |
 | `frame_image_urls` | string[] | 智能多帧图片 URL，至少 2 张 |

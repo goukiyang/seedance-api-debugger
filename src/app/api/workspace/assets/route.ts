@@ -23,6 +23,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { assetId, role } = body;
     const shouldReplace = body.replace === true;
+    const assetIds = uniquePreserveOrder(
+      Array.isArray(body.assetIds)
+        ? body.assetIds
+        : Array.isArray(body.asset_ids)
+          ? body.asset_ids
+          : (assetId ? [assetId] : []),
+    );
     const referenceImageIds = uniquePreserveOrder(
       Array.isArray(body.referenceImageIds)
         ? body.referenceImageIds
@@ -34,12 +41,12 @@ export async function POST(request: NextRequest) {
     const tabId = request.headers.get('x-tab-id') || 'default';
     const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
 
-    if (shouldReplace && !assetId && referenceImageIds.length === 0) {
+    if (shouldReplace && assetIds.length === 0 && referenceImageIds.length === 0) {
       await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
       return NextResponse.json({ success: true, workspaceAssetIds: [], workspaceId });
     }
 
-    if (!assetId && referenceImageIds.length === 0) {
+    if (assetIds.length === 0 && referenceImageIds.length === 0) {
       return NextResponse.json({ error: 'assetId required' }, { status: 400 });
     }
 
@@ -71,38 +78,62 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, workspaceAssetIds, workspaceId });
     }
 
-    const asset = await prisma.asset.findUnique({
-      where: { id: assetId },
-      select: { id: true, type: true },
+    if (shouldReplace) {
+      await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+    }
+
+    const existingWorkspaceAssets = await prisma.workspaceAsset.findMany({
+      where: { workspace_id: workspaceId, asset_id: { in: assetIds } },
+      select: { asset_id: true },
     });
-    if (!asset) {
-      return NextResponse.json({ error: 'Asset not found or permission denied' }, { status: 404 });
+    const existingAssetIdSet = new Set(existingWorkspaceAssets.map((item) => item.asset_id));
+    const existingCount = await prisma.workspaceAsset.count({ where: { workspace_id: workspaceId } });
+    const newAssetCount = assetIds.filter((id) => !existingAssetIdSet.has(id)).length;
+    if (existingCount + newAssetCount > 9) {
+      return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
     }
 
-    if (asset.type === 'image') {
-      const reference = await attachAssetToSiteReferenceImage(
-        {
-          user,
-          workspaceId,
-          sourceLabel: 'Web UI',
-          role: role || 'reference_image',
-          albumName: '生成工作台参考图',
-          albumDescription: '生成工作台自动归档的参考图',
-          metadataSource: 'workspace_upload',
-        },
-        asset.id,
-      );
-      return NextResponse.json({
-        success: true,
-        workspaceAssetId: reference.workspaceAssetId,
-        referenceImageId: reference.referenceImageId,
-        workspaceId,
+    const workspaceAssetIds: string[] = [];
+    const referenceImageIdsFromAssets: string[] = [];
+
+    for (const currentAssetId of assetIds) {
+      const asset = await prisma.asset.findFirst({
+        where: { id: currentAssetId, status: { not: 'deleted' } },
+        select: { id: true, type: true },
       });
+      if (!asset) {
+        return NextResponse.json({ error: 'Asset not found or permission denied' }, { status: 404 });
+      }
+
+      if (asset.type === 'image') {
+        const reference = await attachAssetToSiteReferenceImage(
+          {
+            user,
+            workspaceId,
+            sourceLabel: 'Web UI',
+            role: role || 'reference_image',
+            albumName: '生成工作台参考图',
+            albumDescription: '生成工作台自动归档的参考图',
+            metadataSource: 'workspace_upload',
+          },
+          asset.id,
+        );
+        workspaceAssetIds.push(reference.workspaceAssetId);
+        referenceImageIdsFromAssets.push(reference.referenceImageId);
+      } else {
+        const waId = await addAssetToWorkspace(workspaceId, asset.id, role, user.id);
+        workspaceAssetIds.push(waId);
+      }
     }
 
-    const waId = await addAssetToWorkspace(workspaceId, assetId, role, user.id);
-
-    return NextResponse.json({ success: true, workspaceAssetId: waId, workspaceId });
+    return NextResponse.json({
+      success: true,
+      workspaceAssetId: workspaceAssetIds[0] || null,
+      workspaceAssetIds,
+      referenceImageId: referenceImageIdsFromAssets[0] || null,
+      referenceImageIds: referenceImageIdsFromAssets,
+      workspaceId,
+    });
   } catch (error) {
     if (error instanceof ReferenceImportError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });

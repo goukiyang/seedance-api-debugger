@@ -1779,10 +1779,10 @@ Batch 10B：
 
 | 分层 | 内容 | 当前判断 | 证据/依据 | 后续动作 |
 |---|---|---|---|---|
-| 已本地闭环 | 权限隔离、返回来源、状态颜色、连续生成、最近任务轮询、图集封面/改名/归档、生成归属、显示名格式化、点数流水二级页、任务详情相对时间、prompt 放大编辑、当前素材 `@图片N` 插入 | 本地实现与验证已完成 | 前序批次记录、smoke/API 验证、`/admin/points` 落地记录；本轮 `tsc/lint/build/impeccable detect` 通过 | 部署后做生产回归 |
+| 已本地闭环 | 权限隔离、返回来源、状态颜色、连续生成、最近任务轮询、图集封面/改名/归档、生成归属、显示名格式化、点数流水二级页、任务详情相对时间、prompt 放大编辑、当前素材和图集选择 `@图片N` 插入 | 本地实现与验证已完成 | 前序批次记录、smoke/API 验证、`/admin/points` 落地记录；本轮 `tsc/lint/build/impeccable detect` 通过 | 部署后做生产回归 |
 | 已本地闭环 | 任务详情相对时间 | 已落地 Batch 8 | `src/app/tasks/[id]/page.tsx` 新增 `formatRelativeTime/formatTaskTime`，实际扣费旁展示“生成于/更新于 N 分钟前”，精确时间保留在审计行和 title | 生产任务详情回归 |
 | 已本地闭环 | prompt 放大/全屏编辑 | 已落地 Batch 9 | `src/components/PromptEditor.tsx` 新增大面板编辑、完成写回、取消确认和 Esc 退出；`src/app/globals.css` 补桌面/移动端样式 | 生产生成页回归 |
-| 已本地闭环，仍有后续扩展 | 当前素材 `@图片` 引用 | 已落地 Batch 10A | `GenerationComposer` 基于 `workspace.assets` 生成 `referenceLabels`；`PromptEditor` 插入 `@图片N`，提交仍走现有 `reference_image_ids` | 10B 图集选择仍待做 |
+| 已本地闭环，仍需生产抓包验收 | `@图片` 引用 | 已落地 Batch 10A/10B | `GenerationComposer` 基于 `workspace.assets` 生成 `referenceLabels`；`PromptEditor` 插入 `@图片N`；`ReferenceAlbumPicker` 选择图集图片后自动加入 workspace 并插入真实序号，提交仍走现有 `reference_image_ids` | 生产回归和 Payload 抓包仍待做 |
 | 已有入口但账务主体未完成 | 项目代付 | 未闭环 | `/admin/points` 已能查点数流水；项目额度账户、代付开关、冻结/扣除/退款优先级仍在 Spec 阶段 | 继续 Batch 7 Spec 阶段 2/3，不和 UI 小改混做 |
 | 已分析但待运营处理 | 反馈状态 | 未闭环 | 后台反馈仍可保留 `new`，不能因计划完成就标记 resolved | 等生产验证后再 reviewed/archived |
 
@@ -1799,7 +1799,7 @@ Batch 10B：
 1. Batch 8：任务详情相对时间。验收重点是实际扣费附近同时有相对时间和绝对时间。
 2. Batch 9：prompt 放大/全屏编辑。验收重点是完成写回、取消不污染、移动端不溢出。
 3. Batch 10A：当前素材 `@图片N` 插入。验收重点是 UI 文本、workspace 素材顺序和提交 payload 一致。
-4. Batch 10B：图集选择后再插入 `@图片N`。只有 10A 稳定后再做。
+4. Batch 10B：图集选择后再插入 `@图片N` 已本地落地；后续只做生产回归和 Payload 抓包，不触发未授权付费生成。
 5. Batch 7 项目代付：继续 Spec，先确认账务规则，再改 schema、账本和创建接口。
 
 ### 19.5 生产回归清单
@@ -1813,7 +1813,7 @@ Batch 10B：
 
 ### 19.6 本次检查结论
 
-当前反馈处理已经完成“需求理解闭环”和“规划闭环”，低风险 UI/权限/归属功能已完成本地实现闭环；本轮已补齐任务详情相对时间、prompt 放大编辑和当前素材 `@图片N` 插入。整体仍不能宣称“用户反馈全闭环”，因为 10B 图集选择、项目代付账务主体和生产环境回归仍未完成。后续执行应继续按 19.4 的顺序推进，避免把高风险账务和轻量体验改动混在一起。
+当前反馈处理已经完成“需求理解闭环”和“规划闭环”，低风险 UI/权限/归属功能已完成本地实现闭环；本轮已补齐任务详情相对时间、prompt 放大编辑、当前素材 `@图片N` 插入和图集选择后插入 `@图片N`。整体仍不能宣称“用户反馈全闭环”，因为项目代付账务主体和生产环境回归仍未完成，且 `@图片N` 仍需要生产登录态下的 Payload 抓包确认。后续执行应继续按 19.4 的顺序推进，避免把高风险账务和轻量体验改动混在一起。
 
 ---
 
@@ -1824,10 +1824,11 @@ Batch 10B：
 - Batch 8：任务详情相对时间。`src/app/tasks/[id]/page.tsx` 新增相对时间 helper，实际扣费旁显示“生成于/更新于 N 分钟前”，同时保留精确时间。
 - Batch 9：prompt 放大/全屏编辑。`src/components/PromptEditor.tsx` 支持大面板编辑，完成写回，取消确认，Esc 退出；样式写入 `src/app/globals.css`。
 - Batch 10A：当前素材 `@图片N` 插入。`src/components/GenerationComposer.tsx` 根据当前 workspace 素材生成引用标签，`PromptEditor` 在光标处插入 `@图片N`，不新增后端字段。
+- Batch 10B：图集选择 `@图片N` 插入。`ReferenceAlbumPicker` 选择参考图后交给 `GenerationComposer` 过滤已存在图片，只新增缺失项，成功后按真实 workspace 顺序追加 `@图片N`；失败时不写入 prompt。
 
 ### 20.2 仍未落地范围
 
-- Batch 10B：从图集选择图片并自动加入 workspace 后插入 `@图片N`。需要在 10A 生产回归后再做。
+- `@图片N` 生产/Payload 验收：需要真实登录态或请求拦截确认 prompt、workspace 缩略图和 `reference_image_ids` 顺序一致；未授权前不做真实付费生成。
 - Batch 7 项目代付：项目额度、代付开关、冻结、扣除、退款、外部 API `project_id` 规则仍停在 Spec 阶段。
 - 反馈状态处理：生产回归完成前，不把后台反馈误标成 resolved。
 
@@ -1836,13 +1837,18 @@ Batch 10B：
 - `npx tsc --noEmit --pretty false`：通过。
 - `npm run lint`：通过，仍有项目既有 `react-hooks/exhaustive-deps` 和 `@next/next/no-img-element` 警告。
 - `npm run build`：通过，65 个静态页生成完成。
+- `npx tsx -e "...checkPrompt(...)"`：通过，覆盖 `@图片1`、`@图片 2`、旧格式 `@图1` 和越界引用。
 - `npx impeccable detect src/components/PromptEditor.tsx`：通过，无输出。
+- `npx impeccable detect src/components/GenerationComposer.tsx`：通过，无输出。
+- `npx impeccable detect src/components/ReferenceAlbumPicker.tsx`：通过，无输出。
 - 本地 dev server：`http://127.0.0.1:3020` 可访问；未登录访问 `/generate` 会 307 跳转登录页，未绕过登录态做真实生成。
 
 ### 20.4 生产回归重点
 
 - 用已有登录态打开 `/generate`，确认大面板编辑、取消确认、完成写回和移动端布局。
 - 上传或选择 2 张当前素材，插入 `@图片1/@图片2`，确认 `PromptChecker` 不报缺图。
+- 从参考图集选择新增图片，确认缩略图进入 workspace，prompt 追加真实序号 `@图片N`。
+- 从参考图集选择已在 workspace 的图片，确认只插入已有序号，不重复占用 9 张上限。
 - 抓一次创建请求，确认提交 payload 的 `reference_image_ids` 与当前 workspace 素材一致。
 - 打开真实任务详情，确认实际扣费旁显示相对时间，审计行仍有绝对时间。
 
@@ -1852,4 +1858,5 @@ Batch 10B：
 - 兼容旧格式：`PromptChecker` 继续识别旧 prompt 里的 `@图N` / `图N`，避免历史提示词失效。
 - 用户可见文案：`PromptEditor`、`PromptChecker`、`ModeSelector`、`ReferenceAlbumPicker` 都改为官方 `@图片N` 口径。
 - 仍不新增后端字段：`@图片N` 只是 prompt 中的自然语言引用，真实素材仍由 `reference_image_ids` 传给生成接口。
+- 图集选择：选择器会识别已在工作台的 `referenceImageId`，重复选择只插入已有序号，不重复加入 workspace；新增图片成功加入后才插入对应 `@图片N`。
 - 闭环标准：插入 `@图片1` 后，校验能识别第 1 张参考图；提交请求仍包含对应 workspace 顺序下的 `reference_image_ids`。

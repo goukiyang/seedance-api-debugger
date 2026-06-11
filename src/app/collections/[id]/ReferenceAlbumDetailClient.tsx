@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
+import ShareAlbumDialog from '@/components/ShareAlbumDialog';
 import { displayUserName } from '@/lib/users/display';
 
 interface AlbumDetail {
@@ -26,6 +27,7 @@ interface AlbumDetail {
     edit: boolean;
   };
   can_share: boolean;
+  active_share_count: number;
 }
 
 interface ReferenceImageItem {
@@ -36,23 +38,13 @@ interface ReferenceImageItem {
   asset?: { file_name: string; width: number | null; height: number | null } | null;
 }
 
-interface ShareItem {
-  id: string;
-  grantee_type: string;
-  grantee_id: string;
-  permissions_json: string;
-  created_at: string;
-}
-
 export default function ReferenceAlbumDetailClient({ albumId }: { albumId: string }) {
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
-  const [shares, setShares] = useState<ShareItem[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [shareType, setShareType] = useState<'user' | 'project'>('user');
-  const [shareTarget, setShareTarget] = useState('');
+  const [showShareDialog, setShowShareDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadAlbum = () => {
@@ -69,20 +61,9 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
       .finally(() => setLoading(false));
   };
 
-  const loadShares = () => {
-    fetch(`/api/reference-albums/${albumId}/shares`)
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => setShares(data?.shares || []))
-      .catch(() => {});
-  };
-
   useEffect(() => {
     loadAlbum();
   }, [albumId]);
-
-  useEffect(() => {
-    if (album?.can_share) loadShares();
-  }, [album?.can_share, albumId]);
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -151,43 +132,6 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
     loadAlbum();
   };
 
-  const handleShare = async () => {
-    if (!shareTarget.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/reference-albums/${albumId}/shares`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          grantee_type: shareType,
-          grantee_id: shareTarget.trim(),
-          permissions: { view: true, use: true, copy: true, download: false, viewSource: false, edit: false },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || '共享失败');
-      setShareTarget('');
-      loadShares();
-      loadAlbum();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '共享失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const revokeShare = async (shareId: string) => {
-    const res = await fetch(`/api/album-shares/${shareId}`, { method: 'DELETE' });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error || data.message || '取消共享失败');
-      return;
-    }
-    loadShares();
-    loadAlbum();
-  };
-
   const handleRenameAlbum = async () => {
     if (!album) return;
     const nextName = window.prompt('输入新的图集名称', album.name)?.trim();
@@ -250,6 +194,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             <span>创建者：{displayUserName(album.owner)}</span>
             <span>项目：{album.project?.name || '-'}</span>
             <span>范围：{album.visibility}</span>
+            {album.can_share && <span>共享：{album.active_share_count || 0} 个对象</span>}
             <span>权限：{album.permissions.view ? '可查看' : ''} {album.permissions.use ? '可生成' : ''} {album.permissions.edit ? '可编辑' : ''}</span>
           </div>
 
@@ -265,6 +210,11 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             {album.permissions.use && (
               <button type="button" onClick={handleUseForGeneration} disabled={selectedImageIds.length === 0 || loading}>
                 作为参考图生成
+              </button>
+            )}
+            {album.can_share && !['public', 'system'].includes(album.album_type) && (
+              <button type="button" onClick={() => setShowShareDialog(true)} disabled={loading}>
+                {album.active_share_count > 0 ? '共享设置' : '转为共享图集'}
               </button>
             )}
           </div>
@@ -297,31 +247,12 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
               })
             )}
           </div>
-
-          {album.can_share && (
-            <div className="album-share-panel">
-              <h2>共享图集</h2>
-              <p>第一阶段支持共享给指定用户或项目，默认权限为查看、用于生成、复制。</p>
-              <div className="album-share-form">
-                <select value={shareType} onChange={(event) => setShareType(event.target.value as 'user' | 'project')}>
-                  <option value="user">用户</option>
-                  <option value="project">项目</option>
-                </select>
-                <input value={shareTarget} onChange={(event) => setShareTarget(event.target.value)} placeholder={shareType === 'user' ? '用户 ID' : '项目 ID'} />
-                <button type="button" onClick={handleShare} disabled={loading || !shareTarget.trim()}>共享</button>
-              </div>
-              <div className="album-share-list">
-                {shares.length === 0 ? (
-                  <span>暂无共享</span>
-                ) : shares.map((share) => (
-                  <div key={share.id}>
-                    <span>{share.grantee_type}: {share.grantee_id}</span>
-                    <button type="button" onClick={() => revokeShare(share.id)}>取消共享</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <ShareAlbumDialog
+            open={showShareDialog}
+            album={album}
+            onClose={() => setShowShareDialog(false)}
+            onChanged={loadAlbum}
+          />
         </>
       )}
     </div>

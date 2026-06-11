@@ -233,6 +233,7 @@ export interface Asset {
   height: number | null;
   file_size: number;
   hash: string | null;
+  status?: string;
   created_at: Date;
 }
 

@@ -88,4 +88,44 @@
 - 改动位置：`src/app/tasks/[id]/page.tsx`、`src/components/PromptEditor.tsx`、`src/components/GenerationComposer.tsx`、`src/app/globals.css`、`tasks/feedback-optimization-plan.md`、`tasks/todo.md`。
 - 怎么改：任务详情新增 `formatRelativeTime/formatTaskTime`；PromptEditor 增加大面板编辑、完成写回、取消确认和 Esc 退出；GenerationComposer 根据 `workspace.assets` 生成 `图片1/图片2` 标签并传给 PromptEditor；PromptEditor 在光标处插入 `@图片N`。
 - 验证结果：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/PromptEditor.tsx` 通过；本地 `/generate` 未登录会跳登录，未绕过登录态做真实生成。
-- 可复用经验：素材引用类需求不能只做 UI 文案；必须保证 prompt 标记、workspace 素材顺序和提交参数一致。官方主格式使用 `@图片N` / `@图片 N`，旧的 `@图N` / `图N` 只能作为兼容输入，不应作为主 UI 文案。跨图集选择属于下一阶段能力，不应混入当前素材轻量版。
+- 可复用经验：素材引用类需求不能只做 UI 文案；必须保证 prompt 标记、workspace 素材顺序和提交参数一致。官方主格式使用 `@图片N` / `@图片 N`，旧的 `@图N` / `图N` 只能作为兼容输入，不应作为主 UI 文案。跨图集选择必须先加入 workspace，再按真实顺序插入 `@图片N`，不能绕过实际 `reference_image_ids`。
+
+## 2026-06-10 - 图集选择 @图片N 必须过滤重复并延后写 prompt
+
+- 问题/背景：用户要求继续落地即梦官方 `@图片N` 规则，补齐从参考图集选择图片后自动加入工作台并插入 prompt 的 Batch 10B。
+- 诱因/根因：原 `ReferenceAlbumPicker` 只把图集图片加入 workspace，不会把对应 `@图片N` 写回提示词；如果重复选择已在 workspace 的参考图，还可能被 9 张上限误挡。
+- 当时思路：不新增后端字段，不改真实提交协议；前端先识别已存在 `referenceImageId`，只新增缺失图片，等加入成功后再按 workspace 的真实顺序插入 `@图片N`。
+- 改动位置：`src/components/GenerationComposer.tsx`、`src/components/ReferenceAlbumPicker.tsx`、`docs/sd2-external-api-integration.md`、`tasks/todo.md`、`tasks/feedback-optimization-plan.md`。
+- 怎么改：选择器接收当前 workspace 的 `referenceImageId` 列表；已存在图片不占新增名额；确认后 `GenerationComposer` 过滤重复 ID，计算已有和新增图片的真实 `图片N` 标签，API 调用失败时不写 prompt，成功后追加 `@图片N`。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npm run lint`、prompt reference smoke、`npx impeccable detect src/components/GenerationComposer.tsx`、`npx impeccable detect src/components/ReferenceAlbumPicker.tsx`、`npm run build` 均通过；未做真实付费生成。
+- 可复用经验：引用型 UI 必须把选择器、workspace 状态、prompt 标记和提交 payload 当成一个闭环验证；重复选择要复用已有序号，不能重复占用上限，也不能在后端加入失败时提前污染 prompt。
+
+## 2026-06-11 - 生成页最近任务无限下拉不能破坏轮询
+
+- 问题/背景：用户要求生成页“最近任务”不要固定 6 条，而是页面自然下滑，拉到一定程度再加载更多。
+- 诱因/根因：原 `src/app/generate/page.tsx` 在初始加载、终态刷新和提交成功三处都 `.slice(0, 6)`，导致历史任务不可继续浏览；如果只删除 slice，又会一次性拉太多缩略图和历史任务。
+- 当时思路：不改任务 API、不改扣费和 Provider；复用 `/api/video/list?page&limit`，在前端做小型时间线状态机，并把轮询刷新第一页改成 merge，避免覆盖已加载的更早页。
+- 改动位置：`src/app/generate/page.tsx`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：新增 `RECENT_TASK_PAGE_SIZE=12`、分页/加载/错误状态、`mergeTasksById` 和 `normalizeRecentTaskListResponse`；最近任务底部用 `IntersectionObserver` sentinel 自动加载下一页，并保留“加载更多/重试/到底”状态；提交成功只插顶部，不再裁剪旧列表。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/app/generate/page.tsx` 通过；本地未登录访问 `/generate` 307 跳转登录，`/api/video/list?page=1&limit=12` 返回 401，登录态滚动验收待补。
+- 可复用经验：无限下拉不是简单把 limit 调大；必须同时设计初始页、下一页、提交插入、轮询刷新、失败重试和到底状态，尤其不能让刷新第一页清空用户已经加载的历史页。
+
+## 2026-06-11 - 共享图集复用授权记录，不复制图集
+
+- 问题/背景：需要把已有个人/项目图集转为共享图集，同时已有公共图集文件夹和审核流也在演进。
+- 诱因/根因：共享图集和公共图集都涉及“别人能用”，但底层语义不同；如果混成一个流程，会把定向授权误做成复制到公共库，或让公共图集绕开审核。
+- 当时思路：共享图集只新增/更新 `AlbumShare` 授权，不复制图片、不复制图集；公共图集继续使用公共文件夹和提交审核流程。
+- 改动位置：`src/app/api/reference-albums/[id]/shares/route.ts`、`src/app/api/album-shares/[id]/route.ts`、`src/app/api/reference-albums/[id]/shares/revoke-all/route.ts`、`src/components/ShareAlbumDialog.tsx`、`src/app/collections/ReferenceAlbumsClient.tsx`、`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/globals.css`。
+- 怎么改：共享列表返回授权对象展示信息；补共享权限更新和关闭全部共享接口；列表和详情接入统一共享设置弹窗，支持权限预设、过期时间、单个移除和全部关闭。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/ShareAlbumDialog.tsx` 通过；未执行数据库写入和多账号浏览器验收。
+- 可复用经验：权限共享类需求先确认“授权同一资源”还是“复制成新资源”；共享图集应复用 `AlbumShare`，公共图集才走复制和审核。关闭全部共享必须恢复 visibility，但不能破坏项目图集原有项目权限。
+
+## 2026-06-11 - 上线前必须同步 SQLite schema
+
+- 问题/背景：参考图集页出现 `Internal server error`，公网日志报 `main.ReferenceAlbum.public_folder_id` 不存在，同时工作台日志报 `main.Asset.status` 和 `UserPreference` 缺失。
+- 诱因/根因：源码和 `.next-prod` 已包含公共图集、历史图片和用户生成偏好相关查询，但运行库 `prisma/dev.db` 没有同步对应 SQLite schema。
+- 当时思路：先从公网接口和 `/tmp/youdoo-site-sd2.err.log` 证实真实错误，再只补缺失的 additive schema，避免用全量 `db push` 扩大数据面。
+- 改动位置：`prisma/migrations/20260611100000_add_public_reference_album_workflow/migration.sql`、`prisma/migrations/20260611103000_add_asset_history_status/migration.sql`、`prisma/migrations/20260610083000_add_user_preferences/migration.sql`、`.next-prod`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
+- 怎么改：先备份 `prisma/dev.db` 到 `/Volumes/Data/Backups/video-api-debugger`，再应用缺失迁移；随后重新 build/restart `sd2`。本次发现 `youdoo-sites build sd2` 后新路由进入 `.next` 但没有进入 `.next-prod`，因此额外将 `.next` 安全同步到 `.next-prod` 后再次 restart。
+- 验证结果：schema 检查确认 `ReferenceAlbum.public_folder_id`、`ReferenceAlbumFolder`、`PublicAlbumSubmission`、`Asset.status`、`UserPreference` 均存在；`youdoo-sites status sd2` 显示 local/public 200；未登录请求 `/api/reference-albums?scope=mine` 和 `/api/reference-album-folders` 返回 401 而非 500/404；`/collections` 返回 307 到登录页。
+- 可复用经验：涉及 Prisma schema 的页面改动不能只 build 代码；上线闭环必须包含运行库 schema 检查、缺失迁移应用、确认新增 API route 真实存在于 `.next-prod`、service restart 和公网接口验证。未同步 DB 或 `.next-prod` 时，Next 构建通过不代表页面可运行。

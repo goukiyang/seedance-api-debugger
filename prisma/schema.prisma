@@ -11,14 +11,14 @@ datasource db {
 }
 
 model VideoTask {
-  id              String @id @default(cuid())
-  provider        String
-  model           String
-  generation_mode String
-  prompt          String
-  source_type     String  @default("web") // web | codex_api
-  source_label    String?
-  source_request_id String?
+  id                   String  @id @default(cuid())
+  provider             String
+  model                String
+  generation_mode      String
+  prompt               String
+  source_type          String  @default("web") // web | codex_api
+  source_label         String?
+  source_request_id    String?
   source_metadata_json String?
 
   ratio             String?
@@ -679,6 +679,8 @@ model Asset {
   // 去重
   hash String? @unique
 
+  status String @default("active") // active | hidden | deleted
+
   created_at DateTime @default(now())
 
   // 关联
@@ -686,6 +688,9 @@ model Asset {
   collection_items  AssetCollectionItem[]
   collections_cover AssetCollection[]     @relation("CollectionCover")
   reference_images  ReferenceImage[]
+
+  @@index([owner_id, type, status, created_at])
+  @@index([status])
 }
 
 // 工作区：管理当前会话的参考素材
@@ -726,30 +731,78 @@ model WorkspaceAsset {
 // ============================================================================
 
 model ReferenceAlbum {
-  id             String   @id @default(cuid())
-  workspace_id   String?
-  project_id     String?
-  owner_user_id  String
-  name           String
-  description    String?
-  album_type     String   @default("personal") // personal | project | public | system
-  visibility     String   @default("private") // private | project | shared | public
-  cover_image_id String?
-  status         String   @default("active") // active | archived | deleted
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  id               String   @id @default(cuid())
+  workspace_id     String?
+  project_id       String?
+  public_folder_id String?
+  owner_user_id    String
+  name             String
+  description      String?
+  album_type       String   @default("personal") // personal | project | public | system
+  visibility       String   @default("private") // private | project | shared | public
+  cover_image_id   String?
+  status           String   @default("active") // active | archived | deleted
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
 
-  owner   User             @relation("ReferenceAlbumOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
-  project Project?         @relation(fields: [project_id], references: [id], onDelete: SetNull)
-  images  ReferenceImage[]
-  shares  AlbumShare[]
+  owner        User                  @relation("ReferenceAlbumOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project      Project?              @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  publicFolder ReferenceAlbumFolder? @relation(fields: [public_folder_id], references: [id], onDelete: SetNull)
+  images       ReferenceImage[]
+  shares       AlbumShare[]
 
   @@index([workspace_id])
   @@index([project_id])
+  @@index([public_folder_id])
   @@index([owner_user_id])
   @@index([album_type])
   @@index([visibility])
   @@index([status])
+}
+
+model ReferenceAlbumFolder {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  scope       String   @default("public") // public
+  sort_order  Int      @default(0)
+  status      String   @default("active") // active | archived | deleted
+  created_by  String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  albums      ReferenceAlbum[]
+  submissions PublicAlbumSubmission[]
+
+  @@index([scope])
+  @@index([status])
+  @@index([sort_order])
+}
+
+model PublicAlbumSubmission {
+  id                   String    @id @default(cuid())
+  source_album_id      String
+  target_album_id      String?
+  public_folder_id     String?
+  submitted_by_user_id String
+  name                 String
+  description          String?
+  submit_note          String?
+  status               String    @default("pending") // pending | approved | rejected
+  review_note          String?
+  reviewed_by_user_id  String?
+  reviewed_at          DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  publicFolder ReferenceAlbumFolder? @relation(fields: [public_folder_id], references: [id], onDelete: SetNull)
+
+  @@index([source_album_id])
+  @@index([target_album_id])
+  @@index([public_folder_id])
+  @@index([submitted_by_user_id])
+  @@index([status])
+  @@unique([source_album_id, submitted_by_user_id, status])
 }
 
 model ReferenceImage {

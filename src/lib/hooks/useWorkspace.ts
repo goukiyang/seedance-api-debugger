@@ -30,6 +30,8 @@ export interface UseWorkspaceResult {
   uploadStatuses: Record<string, UploadStatus>;
   // P0-1: 上传素材（带状态追踪）
   uploadAsset: (file: File) => Promise<void>;
+  uploadAssetToHistory: (file: File) => Promise<string>;
+  addAssets: (assetIds: string[]) => Promise<void>;
   addReferenceImages: (referenceImageIds: string[]) => Promise<void>;
   loadReferenceAlbum: (albumId: string) => Promise<void>;
   saveCurrentAsReferenceAlbum: (name: string) => Promise<string>;
@@ -73,6 +75,21 @@ export function useWorkspace(): UseWorkspaceResult {
     fetchWorkspace();
   }, [fetchWorkspace]);
 
+  const uploadAssetToHistory = useCallback(async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/api/assets/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    const assetId = data.asset?.id as string | undefined;
+    if (!assetId) throw new Error('Upload response missing asset id');
+    return assetId;
+  }, []);
+
   // P0-1: 上传素材（带状态追踪）
   const uploadAsset = useCallback(async (file: File) => {
     // 生成临时占位 assetId
@@ -80,15 +97,7 @@ export function useWorkspace(): UseWorkspaceResult {
     setLoading(true);
     setUploadStatuses((prev) => ({ ...prev, [tempId]: 'uploading' }));
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const res = await fetch('/api/assets/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      const assetId = await uploadAssetToHistory(file);
 
       // 添加到 workspace
       await fetch('/api/workspace/assets', {
@@ -97,7 +106,7 @@ export function useWorkspace(): UseWorkspaceResult {
           'Content-Type': 'application/json',
           'x-tab-id': tabIdRef.current,
         },
-        body: JSON.stringify({ assetId: data.asset.id }),
+        body: JSON.stringify({ assetId }),
       });
 
       await fetchWorkspace();
@@ -113,7 +122,7 @@ export function useWorkspace(): UseWorkspaceResult {
       setUploadStatuses((prev) => ({ ...prev, [tempId]: 'failed' }));
       setLoading(false);
     }
-  }, [fetchWorkspace]);
+  }, [fetchWorkspace, uploadAssetToHistory]);
 
   // P0-1: 替换素材
   const replaceAsset = useCallback(async (assetId: string, file: File) => {
@@ -122,17 +131,7 @@ export function useWorkspace(): UseWorkspaceResult {
       const currentAssets = workspace?.assets ?? [];
       const targetAsset = currentAssets.find((asset) => asset.assetId === assetId);
 
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const res = await fetch('/api/assets/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      const nextAssetId = data.asset?.id as string | undefined;
-      if (!nextAssetId) throw new Error('Upload response missing asset id');
+      const nextAssetId = await uploadAssetToHistory(file);
 
       const addRes = await fetch('/api/workspace/assets', {
         method: 'POST',
@@ -180,7 +179,30 @@ export function useWorkspace(): UseWorkspaceResult {
       setError(err instanceof Error ? err.message : 'Replace failed');
       setUploadStatuses((prev) => ({ ...prev, [assetId]: 'failed' }));
     }
-  }, [fetchWorkspace, workspace?.assets]);
+  }, [fetchWorkspace, uploadAssetToHistory, workspace?.assets]);
+
+  const addAssets = useCallback(async (assetIds: string[]) => {
+    const cleanAssetIds = assetIds.map((id) => id.trim()).filter(Boolean);
+    if (cleanAssetIds.length === 0) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/workspace/assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tab-id': tabIdRef.current,
+        },
+        body: JSON.stringify({ assetIds: cleanAssetIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Add assets failed');
+      await fetchWorkspace();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Add assets failed');
+      setLoading(false);
+      throw err;
+    }
+  }, [fetchWorkspace]);
 
   const addReferenceImages = useCallback(async (referenceImageIds: string[]) => {
     if (referenceImageIds.length === 0) return;
@@ -376,6 +398,8 @@ export function useWorkspace(): UseWorkspaceResult {
     assets: workspace?.assets ?? [],
     uploadStatuses,
     uploadAsset,
+    uploadAssetToHistory,
+    addAssets,
     addReferenceImages,
     loadReferenceAlbum,
     saveCurrentAsReferenceAlbum,

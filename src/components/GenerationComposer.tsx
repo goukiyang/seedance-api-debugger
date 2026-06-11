@@ -18,6 +18,7 @@ import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
 import { ReferenceAlbumPicker } from '@/components/ReferenceAlbumPicker';
+import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
@@ -27,6 +28,7 @@ const DEFAULT_RATIO: VideoRatio = '16:9';
 const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
 const MAX_REFS = 9;
+const MAX_PROMPT_CHARS = 2000;
 
 interface PolledTask {
   id: string;
@@ -72,6 +74,22 @@ function dedupeReferenceAlbums(albums: ReferenceAlbumOption[]): ReferenceAlbumOp
     seen.add(key);
     return true;
   });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (!value || seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+function appendReferenceMarkers(value: string, labels: string[]): string {
+  if (labels.length === 0) return value;
+  const markers = labels.map((label) => `@${label}`).join(' ');
+  const separator = value.length === 0 || /\s$/.test(value) ? '' : ' ';
+  return `${value}${separator}${markers}`;
 }
 
 interface Props {
@@ -135,6 +153,7 @@ export function GenerationComposer({
   const appliedInitialSettingsRef = React.useRef(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
+  const [showUploadedImagePicker, setShowUploadedImagePicker] = useState(false);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
   const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
   const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
@@ -222,6 +241,12 @@ export function GenerationComposer({
         title: titleParts.join(' · '),
       };
     });
+  }, [workspace.assets]);
+
+  const currentReferenceImageIds = useMemo(() => {
+    return workspace.assets
+      .map((asset) => asset.referenceImageId)
+      .filter((id): id is string => Boolean(id));
   }, [workspace.assets]);
 
   const refreshReferenceAlbums = useCallback(async () => {
@@ -318,11 +343,11 @@ export function GenerationComposer({
 
   const handleRemove = useCallback(async (assetId: string) => {
     await workspace.removeAsset(assetId);
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace]);
 
   const handleReorder = useCallback(async (newOrder: Array<{ assetId: string; sortOrder: number }>) => {
     await workspace.reorderAssets(newOrder);
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace]);
 
   const handleReplace = useCallback(async (assetId: string, file: File) => {
     await workspace.replaceAsset(assetId, file);
@@ -334,8 +359,61 @@ export function GenerationComposer({
   }, []);
 
   const handleAddReferenceImages = useCallback(async (referenceImageIds: string[]) => {
-    await workspace.addReferenceImages(referenceImageIds);
+    const uniqueReferenceImageIds = uniqueStrings(referenceImageIds);
+    if (uniqueReferenceImageIds.length === 0) return;
+
+    const existingLabelByReferenceId = new Map<string, string>();
+    workspace.assets.forEach((asset, index) => {
+      if (asset.referenceImageId) {
+        existingLabelByReferenceId.set(asset.referenceImageId, `图片${index + 1}`);
+      }
+    });
+
+    const idsToAdd = uniqueReferenceImageIds.filter((id) => !existingLabelByReferenceId.has(id));
+    const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
+    if (idsToAdd.length > availableSlots) {
+      throw new Error(`单次生成最多选择 ${MAX_REFS} 张参考图，当前还可新增 ${availableSlots} 张`);
+    }
+
+    const labelByReferenceId = new Map(existingLabelByReferenceId);
+    idsToAdd.forEach((id, index) => {
+      labelByReferenceId.set(id, `图片${workspace.assets.length + index + 1}`);
+    });
+
+    const labelsToInsert = uniqueReferenceImageIds
+      .map((id) => labelByReferenceId.get(id))
+      .filter((label): label is string => Boolean(label));
+
+    const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
+    if (nextPrompt.length > MAX_PROMPT_CHARS) {
+      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
+    }
+
+    if (idsToAdd.length > 0) {
+      await workspace.addReferenceImages(idsToAdd);
+    }
     await refreshReferenceAlbums();
+    setPrompt((currentPrompt) => {
+      const next = appendReferenceMarkers(currentPrompt, labelsToInsert);
+      return next.length <= MAX_PROMPT_CHARS ? next : currentPrompt;
+    });
+  }, [prompt, workspace, refreshReferenceAlbums]);
+
+  const handleAddUploadedAssets = useCallback(async (assetIds: string[]) => {
+    const uniqueAssetIds = uniqueStrings(assetIds);
+    if (uniqueAssetIds.length === 0) return;
+
+    const existingAssetIds = new Set(workspace.assets.map((asset) => asset.assetId));
+    const idsToAdd = uniqueAssetIds.filter((id) => !existingAssetIds.has(id));
+    const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
+    if (idsToAdd.length > availableSlots) {
+      throw new Error(`单次生成最多选择 ${MAX_REFS} 张参考图，当前还可新增 ${availableSlots} 张`);
+    }
+
+    if (idsToAdd.length > 0) {
+      await workspace.addAssets(idsToAdd);
+      await refreshReferenceAlbums();
+    }
   }, [workspace, refreshReferenceAlbums]);
 
   const handleLoadReferenceAlbum = useCallback(async (albumId: string, albumName: string) => {
@@ -396,6 +474,7 @@ export function GenerationComposer({
           onReorder={handleReorder}
           onReplace={handleReplace}
           onPreview={handlePreview}
+          onOpenHistory={() => setShowUploadedImagePicker(true)}
           generationMode={generationMode}
           loading={workspace.loading}
         />
@@ -495,8 +574,18 @@ export function GenerationComposer({
       <ReferenceAlbumPicker
         open={showAlbumPicker}
         currentCount={workspace.assets.length}
+        currentReferenceImageIds={currentReferenceImageIds}
         onClose={() => setShowAlbumPicker(false)}
         onConfirm={handleAddReferenceImages}
+      />
+
+      <UploadedImagePicker
+        open={showUploadedImagePicker}
+        currentCount={workspace.assets.length}
+        currentAssetIds={workspace.assets.map((asset) => asset.assetId)}
+        onClose={() => setShowUploadedImagePicker(false)}
+        onUploadFile={workspace.uploadAssetToHistory}
+        onConfirm={handleAddUploadedAssets}
       />
     </>
   );

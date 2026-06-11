@@ -15,6 +15,7 @@ interface Props {
   onReorder: (newOrder: Array<{ assetId: string; sortOrder: number }>) => Promise<void>;
   onReplace: (assetId: string, file: File) => Promise<void>;
   onPreview: (url: string) => void;
+  onOpenHistory?: () => void;
   generationMode?: string;
   loading?: boolean;
 }
@@ -68,6 +69,7 @@ export function ReferenceStrip({
   onReorder,
   onReplace,
   onPreview,
+  onOpenHistory,
   generationMode,
   loading = false,
 }: Props) {
@@ -257,8 +259,12 @@ export function ReferenceStrip({
   }, [loading, uploading]);
 
   const handleAddClick = useCallback(() => {
+    if (onOpenHistory) {
+      onOpenHistory();
+      return;
+    }
     fileInputRef.current?.click();
-  }, []);
+  }, [onOpenHistory]);
 
   const handleDropZone = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();

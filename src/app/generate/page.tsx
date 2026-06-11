@@ -45,6 +45,20 @@ interface TaskItem {
   created_at: string;
 }
 
+interface TaskListPagination {
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+}
+
+interface TaskListResponse {
+  tasks?: TaskItem[];
+  pagination?: Partial<TaskListPagination>;
+  error?: string;
+  message?: string;
+}
+
 interface PolledTask {
   id: string;
   local_status: string;
@@ -95,6 +109,12 @@ interface ReuseDraft {
 }
 
 type GeneratePageUser = AccountMenuUser & { id: string };
+type ProjectRemovalAction = 'delete' | 'archive';
+
+interface ProjectRemovalTarget {
+  projectId: string;
+  action: ProjectRemovalAction;
+}
 
 interface AuthMeResponse {
   user: GeneratePageUser | null;
@@ -102,6 +122,42 @@ interface AuthMeResponse {
 
 const PROJECT_STORAGE_KEY = 'generate_project_id';
 const GENERATION_PREFERENCE_STORAGE_PREFIX = 'generation_defaults_v1:';
+const RECENT_TASK_PAGE_SIZE = 12;
+const MAX_ACTIVE_POLLING_TASKS = 12;
+
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function normalizeRecentTaskListResponse(data: TaskListResponse) {
+  const page = toPositiveInt(data.pagination?.page, 1);
+  const limit = toPositiveInt(data.pagination?.limit, RECENT_TASK_PAGE_SIZE);
+  const total = Math.max(0, toPositiveInt(data.pagination?.total, data.tasks?.length ?? 0));
+  const totalPagesFallback = Math.max(1, Math.ceil(total / limit));
+  return {
+    tasks: Array.isArray(data.tasks) ? data.tasks : [],
+    pagination: {
+      page,
+      limit,
+      total,
+      total_pages: toPositiveInt(data.pagination?.total_pages, totalPagesFallback),
+    },
+  };
+}
+
+function mergeTasksById(primary: TaskItem[], secondary: TaskItem[]): TaskItem[] {
+  const seen = new Set<string>();
+  return [...primary, ...secondary].filter((task) => {
+    if (!task.id || seen.has(task.id)) return false;
+    seen.add(task.id);
+    return true;
+  });
+}
+
+function formatRecentTaskChargeText(chargeText: string): string {
+  return chargeText.replace(/\s*USD(?=（|$)/g, '');
+}
 
 function generationPreferenceStorageKey(userId: string) {
   return `${GENERATION_PREFERENCE_STORAGE_PREFIX}${userId}`;
@@ -147,6 +203,33 @@ function projectMetaLabel(project: ProjectOption): string {
   const taskCount = project._count?.tasks || 0;
   const albumCount = project._count?.reference_albums || 0;
   return `${kind} · ${taskCount} 任务 · ${albumCount} 图集`;
+}
+
+function projectHasContent(project: ProjectOption): boolean {
+  return (project._count?.tasks || 0) > 0 || (project._count?.reference_albums || 0) > 0;
+}
+
+function projectCanRemove(project: ProjectOption): boolean {
+  return Boolean(
+    project.can_manage_project
+    && project.type !== 'personal'
+    && project.type !== 'system',
+  );
+}
+
+function projectRemovalAction(project: ProjectOption): ProjectRemovalAction {
+  return projectHasContent(project) ? 'archive' : 'delete';
+}
+
+function projectRemovalLabel(project: ProjectOption): string {
+  return projectHasContent(project) ? '归档' : '删除';
+}
+
+function projectRemovalTitle(project: ProjectOption): string {
+  if (project.type === 'personal') return '默认项目不能删除';
+  if (project.type === 'system') return '系统项目不能删除';
+  if (!project.can_manage_project) return '你没有权限管理这个项目';
+  return projectHasContent(project) ? '项目已有历史内容，只能归档' : '删除空项目';
 }
 
 type TaskPreviewModel = {
@@ -205,6 +288,15 @@ export default function GeneratePage() {
 
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
+  const [recentTasksPage, setRecentTasksPage] = useState(0);
+  const [recentTasksHasMore, setRecentTasksHasMore] = useState(false);
+  const [recentTasksLoadingInitial, setRecentTasksLoadingInitial] = useState(true);
+  const [recentTasksLoadingMore, setRecentTasksLoadingMore] = useState(false);
+  const [recentTasksError, setRecentTasksError] = useState('');
+  const recentTasksSentinelRef = useRef<HTMLDivElement | null>(null);
+  const recentTasksLoadingRef = useRef(false);
+  const recentTasksPageRef = useRef(0);
+  const recentTasksHasMoreRef = useRef(false);
 
   // ---- Result Polling ----
   const [polledResult, setPolledResult] = useState<PolledTask | null>(null);
@@ -225,7 +317,7 @@ export default function GeneratePage() {
   const [projectName, setProjectName] = useState('');
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
-  const [projectConfirmAction, setProjectConfirmAction] = useState<'delete' | 'archive' | null>(null);
+  const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(null);
   const [reuseDraft, setReuseDraft] = useState<ReuseDraft | null>(null);
   const [reuseMessage, setReuseMessage] = useState('');
   const [reuseLoading, setReuseLoading] = useState(false);
@@ -357,7 +449,7 @@ export default function GeneratePage() {
   useEffect(() => {
     if (!selectedProjectId) return;
     window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
-    setProjectConfirmAction(null);
+    setProjectRemovalTarget(null);
   }, [selectedProjectId]);
 
   useEffect(() => {
@@ -379,13 +471,14 @@ export default function GeneratePage() {
       if (!projectPickerRef.current?.contains(event.target as Node)) {
         setProjectPickerOpen(false);
         setProjectCreateOpen(false);
+        setProjectRemovalTarget(null);
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setProjectPickerOpen(false);
         setProjectCreateOpen(false);
-        setProjectConfirmAction(null);
+        setProjectRemovalTarget(null);
       }
     };
 
@@ -428,12 +521,8 @@ export default function GeneratePage() {
     }
   }, [loadProjects, projectName]);
 
-  const handleProjectRemoval = useCallback(async () => {
-    const project = projects.find((item) => item.id === selectedProjectId);
-    if (!project) return;
-
-    const hasContent = (project._count?.tasks || 0) > 0 || (project._count?.reference_albums || 0) > 0;
-    const action = hasContent ? 'archive' : 'delete';
+  const handleProjectRemoval = useCallback(async (project: ProjectOption) => {
+    const action = projectRemovalAction(project);
 
     if (project.type === 'personal' || project.type === 'system') {
       setProjectMessage({ type: 'error', text: '默认项目不能删除' });
@@ -443,8 +532,8 @@ export default function GeneratePage() {
       setProjectMessage({ type: 'error', text: '你没有权限管理这个项目' });
       return;
     }
-    if (projectConfirmAction !== action) {
-      setProjectConfirmAction(action);
+    if (projectRemovalTarget?.projectId !== project.id || projectRemovalTarget.action !== action) {
+      setProjectRemovalTarget({ projectId: project.id, action });
       setProjectMessage({
         type: 'info',
         text: action === 'archive'
@@ -465,7 +554,7 @@ export default function GeneratePage() {
       const data = await res.json();
       if (!res.ok) {
         if (action === 'delete' && typeof data.error === 'string' && data.error.includes('归档')) {
-          setProjectConfirmAction('archive');
+          setProjectRemovalTarget({ projectId: project.id, action: 'archive' });
           setProjectMessage({
             type: 'info',
             text: '项目已有历史内容，删除会断链；请再次点击归档项目。',
@@ -475,25 +564,28 @@ export default function GeneratePage() {
         throw new Error(data.message || data.error || '项目操作失败');
       }
 
-      setProjectConfirmAction(null);
+      setProjectRemovalTarget(null);
       setProjectMessage({
         type: 'success',
         text: action === 'archive' ? `已归档项目「${projectDisplayName(project)}」` : `已删除项目「${projectDisplayName(project)}」`,
       });
-      await loadProjects({ keepSelected: false });
+      await loadProjects({
+        preferredProjectId: project.id === selectedProjectId ? null : selectedProjectId,
+        keepSelected: project.id !== selectedProjectId,
+      });
     } catch (err) {
       setProjectMessage({ type: 'error', text: err instanceof Error ? err.message : '项目操作失败' });
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, projectConfirmAction, projects, selectedProjectId]);
+  }, [loadProjects, projectRemovalTarget, selectedProjectId]);
 
   useEffect(() => {
     if (!projectMessage) return;
     if (projectMessage.type === 'error') return;
     const timeoutId = window.setTimeout(() => {
       setProjectMessage(null);
-      if (projectMessage.type === 'info') setProjectConfirmAction(null);
+      if (projectMessage.type === 'info') setProjectRemovalTarget(null);
     }, 3600);
     return () => window.clearTimeout(timeoutId);
   }, [projectMessage]);
@@ -578,15 +670,88 @@ export default function GeneratePage() {
   // Load recent tasks
   // ============================================================================
 
-  useEffect(() => {
-    fetch('/api/video/list')
-      .then((r) => r.json())
-      .then((d) => {
-        const tasks: TaskItem[] = (d.tasks || []).slice(0, 6);
+  const loadRecentTasksPage = useCallback(async (
+    page: number,
+    mode: 'replace' | 'append' | 'merge-head' = 'append',
+  ) => {
+    if (recentTasksLoadingRef.current) return;
+    recentTasksLoadingRef.current = true;
+    setRecentTasksError('');
+    if (mode === 'replace') {
+      setRecentTasksLoadingInitial(true);
+    } else {
+      setRecentTasksLoadingMore(true);
+    }
+
+    try {
+      const res = await fetch(`/api/video/list?page=${page}&limit=${RECENT_TASK_PAGE_SIZE}`, {
+        cache: 'no-store',
+      });
+      const data = await res.json() as TaskListResponse;
+      if (!res.ok) {
+        throw new Error(data.message || data.error || '最近任务加载失败');
+      }
+
+      const { tasks, pagination } = normalizeRecentTaskListResponse(data);
+      if (mode === 'replace') {
         setRecentTasks(tasks);
-      })
-      .catch(() => {});
+        recentTasksPageRef.current = pagination.page;
+        setRecentTasksPage(pagination.page);
+      } else if (mode === 'merge-head') {
+        setRecentTasks((current) => mergeTasksById(tasks, current));
+      } else {
+        setRecentTasks((current) => mergeTasksById(current, tasks));
+        recentTasksPageRef.current = pagination.page;
+        setRecentTasksPage(pagination.page);
+      }
+
+      const currentPage = mode === 'merge-head'
+        ? Math.max(1, recentTasksPageRef.current)
+        : pagination.page;
+      const hasMore = currentPage < pagination.total_pages;
+      recentTasksHasMoreRef.current = hasMore;
+      setRecentTasksHasMore(hasMore);
+    } catch (err) {
+      setRecentTasksError(err instanceof Error ? err.message : '最近任务加载失败');
+    } finally {
+      recentTasksLoadingRef.current = false;
+      setRecentTasksLoadingInitial(false);
+      setRecentTasksLoadingMore(false);
+    }
   }, []);
+
+  const loadMoreRecentTasks = useCallback(() => {
+    if (recentTasksLoadingRef.current || !recentTasksHasMoreRef.current) return;
+    void loadRecentTasksPage(recentTasksPageRef.current + 1, 'append');
+  }, [loadRecentTasksPage]);
+
+  const retryRecentTasks = useCallback(() => {
+    const mode = recentTasks.length === 0 ? 'replace' : 'append';
+    const page = mode === 'replace' ? 1 : recentTasksPageRef.current + 1;
+    void loadRecentTasksPage(page, mode);
+  }, [loadRecentTasksPage, recentTasks.length]);
+
+  useEffect(() => {
+    void loadRecentTasksPage(1, 'replace');
+  }, [loadRecentTasksPage]);
+
+  useEffect(() => {
+    const sentinel = recentTasksSentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+    if (!recentTasksHasMore || recentTasksLoadingInitial || recentTasksLoadingMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadMoreRecentTasks();
+        }
+      },
+      { rootMargin: '360px 0px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMoreRecentTasks, recentTasksHasMore, recentTasksLoadingInitial, recentTasksLoadingMore, recentTasks.length]);
 
   // ============================================================================
   // Result Polling — poll queued tasks without blocking the composer
@@ -604,10 +769,7 @@ export default function GeneratePage() {
     const MAX_POLLS = 120; // ~10 minutes at 5s interval
 
     const refreshRecentTasks = () => {
-      fetch('/api/video/list')
-        .then((r) => r.json())
-        .then((d) => setRecentTasks((d.tasks || []).slice(0, 6)))
-        .catch(() => {});
+      void loadRecentTasksPage(1, 'merge-head');
     };
 
     const refreshCredits = () => {
@@ -670,7 +832,7 @@ export default function GeneratePage() {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [activePollingTaskIds]);
+  }, [activePollingTaskIds, loadRecentTasksPage]);
 
   useEffect(() => {
     if (!result?.id) return;
@@ -773,7 +935,7 @@ export default function GeneratePage() {
       setActivePollingTaskIds((current) => [
         data.id,
         ...current.filter((id) => id !== data.id),
-      ].slice(0, 6));
+      ].slice(0, MAX_ACTIVE_POLLING_TASKS));
       setRecentTasks((current) => [
         {
           id: data.id,
@@ -790,7 +952,7 @@ export default function GeneratePage() {
           created_at: data.created_at,
         },
         ...current.filter((task) => task.id !== data.id),
-      ].slice(0, 6));
+      ]);
       saveGenerationDefaults(params);
 
       // Refresh credit display after freeze
@@ -887,25 +1049,7 @@ export default function GeneratePage() {
   const selectedProjectMeta = selectedProject
     ? projectMetaLabel(selectedProject)
     : '新建一个项目后即可保存任务、成本和结果。';
-  const selectedProjectHasContent = Boolean(
-    (selectedProject?._count?.tasks || 0) > 0 || (selectedProject?._count?.reference_albums || 0) > 0,
-  );
-  const selectedProjectCanRemove = Boolean(
-    selectedProject
-    && selectedProject.can_manage_project
-    && selectedProject.type !== 'personal'
-    && selectedProject.type !== 'system',
-  );
-  const projectRemovalLabel = selectedProjectHasContent ? '归档项目' : '删除项目';
-  const projectRemovalTitle = !selectedProject
-    ? '先选择项目'
-    : selectedProject.type === 'personal'
-      ? '默认项目不能删除'
-      : !selectedProject.can_manage_project
-        ? '你没有权限管理这个项目'
-        : selectedProjectHasContent
-          ? '项目已有历史内容，只能归档'
-          : '删除空项目';
+  const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
 
   // ============================================================================
   // Render
@@ -978,7 +1122,7 @@ export default function GeneratePage() {
                         className="composer-project-menu-action"
                         onClick={() => {
                           setProjectCreateOpen((open) => !open);
-                          setProjectConfirmAction(null);
+                          setProjectRemovalTarget(null);
                           setProjectMessage(null);
                         }}
                         disabled={projectBusy}
@@ -1025,19 +1169,34 @@ export default function GeneratePage() {
                         projects.map((project) => {
                           const duplicateName = projectNameCounts[projectDisplayName(project)] > 1;
                           const isSelected = project.id === selectedProjectId;
+                          const canRemoveProject = projectCanRemove(project);
+                          const removalAction = projectRemovalAction(project);
+                          const isConfirmingRemoval = projectRemovalTarget?.projectId === project.id
+                            && projectRemovalTarget.action === removalAction;
+                          const selectProject = () => {
+                            if (projectBusy) return;
+                            setSelectedProjectId(project.id);
+                            setProjectPickerOpen(false);
+                            setProjectCreateOpen(false);
+                            setProjectRemovalTarget(null);
+                            setProjectMessage(null);
+                          };
                           return (
-                            <button
+                            <div
                               key={project.id}
-                              type="button"
                               role="option"
+                              tabIndex={0}
                               aria-selected={isSelected}
-                              className={`composer-project-option${isSelected ? ' active' : ''}`}
-                              onClick={() => {
-                                setSelectedProjectId(project.id);
-                                setProjectPickerOpen(false);
-                                setProjectCreateOpen(false);
-                                setProjectConfirmAction(null);
-                                setProjectMessage(null);
+                              className={[
+                                'composer-project-option',
+                                isSelected ? 'active' : '',
+                                isConfirmingRemoval ? 'confirming-removal' : '',
+                              ].filter(Boolean).join(' ')}
+                              onClick={selectProject}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                event.preventDefault();
+                                selectProject();
                               }}
                             >
                               <span className="composer-project-option-mark" aria-hidden="true">
@@ -1051,29 +1210,67 @@ export default function GeneratePage() {
                                   {projectMetaLabel(project)}
                                 </span>
                               </span>
-                            </button>
+                              {canRemoveProject && (
+                                <span
+                                  className="composer-project-option-actions"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  {isConfirmingRemoval ? (
+                                    <>
+                                      <span className="composer-project-option-confirm-text">
+                                        确认{removalAction === 'archive' ? '归档' : '删除'}？
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="composer-project-option-ghost"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setProjectRemovalTarget(null);
+                                          setProjectMessage(null);
+                                        }}
+                                        disabled={projectBusy}
+                                      >
+                                        取消
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="composer-project-option-danger"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          void handleProjectRemoval(project);
+                                        }}
+                                        disabled={projectBusy}
+                                      >
+                                        {projectBusy ? '处理中...' : `确认${projectRemovalLabel(project)}`}
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="composer-project-option-danger"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void handleProjectRemoval(project);
+                                      }}
+                                      disabled={projectBusy}
+                                      title={projectRemovalTitle(project)}
+                                      aria-label={`${projectRemovalLabel(project)}项目 ${projectDisplayName(project)}`}
+                                    >
+                                      {removalAction === 'archive'
+                                        ? <Archive size={14} aria-hidden="true" />
+                                        : <Trash2 size={14} aria-hidden="true" />}
+                                      <span>{projectRemovalLabel(project)}</span>
+                                    </button>
+                                  )}
+                                </span>
+                              )}
+                            </div>
                           );
                         })
                       )}
                     </div>
 
                     <div className="composer-project-menu-footer">
-                      <button
-                        type="button"
-                        className={`composer-project-menu-danger${projectConfirmAction ? ' confirming' : ''}`}
-                        onClick={() => void handleProjectRemoval()}
-                        disabled={!selectedProjectCanRemove || projectBusy}
-                        title={projectRemovalTitle}
-                      >
-                        {selectedProjectHasContent ? <Archive size={15} aria-hidden="true" /> : <Trash2 size={15} aria-hidden="true" />}
-                        {projectBusy && projectConfirmAction
-                          ? '处理中...'
-                          : projectConfirmAction === 'archive'
-                            ? '确认归档'
-                            : projectConfirmAction === 'delete'
-                              ? '确认删除'
-                              : projectRemovalLabel}
-                      </button>
                       <Link href="/projects" className="composer-project-menu-link">
                         项目管理
                       </Link>
@@ -1115,51 +1312,86 @@ export default function GeneratePage() {
         />
 
         {/* 最近任务 */}
-        {recentTasks.length > 0 && (
+        {showRecentTaskSurface && (
           <div className="composer-recent">
             <div className="composer-recent-title">最近任务</div>
-            <div className="composer-recent-grid">
-              {recentTasks.map((task) => {
-                const chargeText = formatProviderUsdCharge(task);
+            {recentTasks.length > 0 && (
+              <div className="composer-recent-grid">
+                {recentTasks.map((task) => {
+                  const chargeText = formatProviderUsdCharge(task);
+                  const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;
 
-                return (
-                <article
-                  key={task.id}
-                  className="composer-task-card"
+                  return (
+                    <article
+                      key={task.id}
+                      className="composer-task-card"
+                    >
+                      <Link href={taskDetailHref(task.id, '/generate')} className="composer-task-card-link">
+                        <RecentTaskPreview task={task} />
+                        <div className="composer-task-card-body">
+                          <div className="composer-task-card-prompt">
+                            {truncatePrompt(task.prompt)}
+                          </div>
+                          <div className="composer-task-card-meta">
+                            <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
+                            {recentTaskChargeText && (
+                              <span className="composer-task-card-charge" title={`实际扣除 ${recentTaskChargeText}`}>
+                                {recentTaskChargeText}
+                              </span>
+                            )}
+                            <span className={`composer-task-card-status ${task.local_status}`}>
+                              {task.local_status === 'submitted' ? '排队中' :
+                               task.local_status === 'running' ? '生成中' :
+                               task.local_status === 'succeeded' ? '已完成' :
+                               task.local_status === 'failed' ? '失败' : task.local_status}
+                            </span>
+                          </div>
+                        </div>
+                      </Link>
+                      <button
+                        type="button"
+                        className="composer-task-card-reuse"
+                        disabled={reuseLoading}
+                        onClick={() => loadReusableTask(task.id)}
+                      >
+                        {reusingTaskId === task.id ? '回填中...' : '重新生成'}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            <div ref={recentTasksSentinelRef} className="composer-recent-sentinel" aria-hidden="true" />
+            <div className="composer-recent-footer">
+              {recentTasks.length > 0 && (
+                <span className="composer-recent-count">
+                  已显示 {recentTasks.length} 条{recentTasksPage > 0 ? ` · 第 ${recentTasksPage} 页` : ''}
+                </span>
+              )}
+              {recentTasksLoadingInitial && (
+                <span className="composer-recent-loading">正在加载最近任务...</span>
+              )}
+              {!recentTasksLoadingInitial && recentTasksError && (
+                <span className="composer-recent-error">
+                  <span>{recentTasksError}</span>
+                  <button type="button" onClick={retryRecentTasks}>重试</button>
+                </span>
+              )}
+              {!recentTasksLoadingInitial && !recentTasksError && recentTasksLoadingMore && (
+                <span className="composer-recent-loading">正在加载更多任务...</span>
+              )}
+              {!recentTasksLoadingInitial && !recentTasksError && !recentTasksLoadingMore && recentTasksHasMore && (
+                <button
+                  type="button"
+                  className="composer-recent-load-more"
+                  onClick={loadMoreRecentTasks}
                 >
-                  <Link href={taskDetailHref(task.id, '/generate')} className="composer-task-card-link">
-                    <RecentTaskPreview task={task} />
-                    <div className="composer-task-card-body">
-                      <div className="composer-task-card-prompt">
-                        {truncatePrompt(task.prompt)}
-                      </div>
-                      <div className="composer-task-card-meta">
-                        <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
-                        {chargeText && (
-                          <span className="composer-task-card-charge" title={`实际扣除 ${chargeText}`}>
-                            实扣 {chargeText}
-                          </span>
-                        )}
-                        <span className={`composer-task-card-status ${task.local_status}`}>
-                          {task.local_status === 'submitted' ? '排队中' :
-                           task.local_status === 'running' ? '生成中' :
-                           task.local_status === 'succeeded' ? '已完成' :
-                           task.local_status === 'failed' ? '失败' : task.local_status}
-                        </span>
-                      </div>
-                    </div>
-                  </Link>
-                  <button
-                    type="button"
-                    className="composer-task-card-reuse"
-                    disabled={reuseLoading}
-                    onClick={() => loadReusableTask(task.id)}
-                  >
-                    {reusingTaskId === task.id ? '回填中...' : '重新生成'}
-                  </button>
-                </article>
-                );
-              })}
+                  加载更多
+                </button>
+              )}
+              {!recentTasksLoadingInitial && !recentTasksError && !recentTasksLoadingMore && !recentTasksHasMore && recentTasks.length > 0 && (
+                <span className="composer-recent-done">已加载全部最近任务</span>
+              )}
             </div>
           </div>
         )}

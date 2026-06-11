@@ -37,6 +37,7 @@ interface ReferenceImageItem {
 interface Props {
   open: boolean;
   currentCount: number;
+  currentReferenceImageIds?: string[];
   onClose: () => void;
   onConfirm: (referenceImageIds: string[]) => Promise<void>;
 }
@@ -48,7 +49,13 @@ const SCOPES: Array<{ value: AlbumScope; label: string }> = [
   { value: 'public', label: '公共图集' },
 ];
 
-export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }: Props) {
+export function ReferenceAlbumPicker({
+  open,
+  currentCount,
+  currentReferenceImageIds = [],
+  onClose,
+  onConfirm,
+}: Props) {
   const [scope, setScope] = useState<AlbumScope>('mine');
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('');
@@ -58,6 +65,14 @@ export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }:
   const [error, setError] = useState<string | null>(null);
 
   const remaining = Math.max(0, 9 - currentCount);
+  const currentReferenceImageIdSet = useMemo(
+    () => new Set(currentReferenceImageIds.filter(Boolean)),
+    [currentReferenceImageIds],
+  );
+  const selectedNewCount = useMemo(
+    () => selectedImageIds.filter((id) => !currentReferenceImageIdSet.has(id)).length,
+    [currentReferenceImageIdSet, selectedImageIds],
+  );
   const selectedAlbum = useMemo(
     () => albums.find((album) => album.id === selectedAlbumId) || null,
     [albums, selectedAlbumId],
@@ -103,7 +118,10 @@ export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }:
   const toggleImage = (imageId: string) => {
     setSelectedImageIds((prev) => {
       if (prev.includes(imageId)) return prev.filter((id) => id !== imageId);
-      if (prev.length >= remaining) return prev;
+      const isAlreadyInWorkspace = currentReferenceImageIdSet.has(imageId);
+      const prevNewCount = prev.filter((id) => !currentReferenceImageIdSet.has(id)).length;
+      const nextNewCount = prevNewCount + (isAlreadyInWorkspace ? 0 : 1);
+      if (nextNewCount > remaining) return prev;
       return [...prev, imageId];
     });
   };
@@ -178,16 +196,18 @@ export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }:
             )}
             {!loading && selectedAlbum?.permissions.use && images.map((image) => {
               const checked = selectedImageIds.includes(image.id);
+              const isAlreadyInWorkspace = currentReferenceImageIdSet.has(image.id);
+              const disabledByLimit = !checked && !isAlreadyInWorkspace && selectedNewCount >= remaining;
               return (
                 <button
                   key={image.id}
                   type="button"
                   className={checked ? 'selected' : ''}
                   onClick={() => toggleImage(image.id)}
-                  disabled={!checked && selectedImageIds.length >= remaining}
+                  disabled={disabledByLimit}
                 >
                   <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
-                  <span>{checked ? '已选择' : `图 ${image.sort_order + 1}`}</span>
+                  <span>{checked ? '已选择' : isAlreadyInWorkspace ? '已在工作台' : `图 ${image.sort_order + 1}`}</span>
                 </button>
               );
             })}
@@ -195,7 +215,7 @@ export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }:
         </div>
 
         <div className="album-picker-footer">
-          <span>已选 {selectedImageIds.length} 张，当前工作台还可加入 {remaining} 张</span>
+          <span>已选 {selectedImageIds.length} 张，其中新增 {selectedNewCount} 张，当前工作台还可新增 {remaining} 张</span>
           <div>
             <button type="button" className="album-picker-cancel" onClick={onClose}>取消</button>
             <button
@@ -204,7 +224,7 @@ export function ReferenceAlbumPicker({ open, currentCount, onClose, onConfirm }:
               onClick={handleConfirm}
               disabled={selectedImageIds.length === 0 || loading}
             >
-              加入参考图列表
+              加入并插入 @图片
             </button>
           </div>
         </div>

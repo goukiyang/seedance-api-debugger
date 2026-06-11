@@ -1115,7 +1115,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] Batch 8：任务详情相对时间；已在实际扣费附近显示“生成于/更新于 刚刚、N 分钟前、N 小时前、N 天前”，并保留绝对时间用于审计。
 - [x] Batch 9：提示词输入框放大/全屏编辑；已支持大面板编辑、完成写回、取消确认和 Esc 退出。
 - [x] Batch 10A：`@图片` 当前素材插入；已按即梦官方 `@图片N` 主格式从当前 workspace 素材生成插入按钮，`PromptChecker` 兼容 `@图片N/@图片 N/@图N/图N`，继续复用现有 `reference_image_ids`。
-- [ ] Batch 10B：`@图片` 图集选择；从参考图集选择图片，自动加入 workspace 并插入对应 `@图片N`，需在 10A 验收后再做。
+- [x] Batch 10B：`@图片` 图集选择；已实现从参考图集选择图片后，先加入 workspace，再插入对应 `@图片N`；生产/Payload 抓包仍按下方验收项保留。
 
 ### Batch 10 官方 `@图片N` 规则闭环 Todo
 
@@ -1128,9 +1128,9 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [ ] Payload 验收：抓一次创建请求，确认 prompt 包含 `@图片1/@图片2`，同时 `reference_image_ids` 顺序与当前 workspace 第 1、2 张参考图一致。
 - [ ] 非付费优先：Payload 验收优先用拦截、dry-run 或测试环境完成；如必须真实提交生成，先取得明确授权。
 - [ ] 删除/重排验收：删除或重排第 1 张参考图后，确认 `PromptChecker` 能提示引用越界或顺序变化风险，不能让 `@图片1` 静默指向错误素材。
-- [ ] 外部 API 说明补充：如果外部 prompt 使用 `@图片N`，文档必须说明调用方要按同一顺序传 `reference_image_ids` / `reference_image_urls`，否则 `@图片N` 只是无效文本。
-- [ ] Batch 10B 实现：从图集选择图片时，先加入 workspace，再按加入后的真实顺序插入 `@图片N`；失败时不得插入 prompt。
-- [ ] Batch 10B 去重：如果图集图片已在 workspace 中，直接插入已有序号，不重复加入 `reference_image_ids`。
+- [x] 外部 API 说明补充：如果外部 prompt 使用 `@图片N`，文档已说明调用方要按同一顺序传 `reference_image_ids` / `reference_image_urls`，否则 `@图片N` 只是无效文本。
+- [x] Batch 10B 实现：从图集选择图片时，先加入 workspace，再按加入后的真实顺序插入 `@图片N`；失败时不得插入 prompt。
+- [x] Batch 10B 去重：如果图集图片已在 workspace 中，直接插入已有序号，不重复加入 `reference_image_ids`；前端也允许在 9 张已满时选择已存在图片用于插入。
 - [ ] Batch 10B 验收：从图集选择图片后，确认 workspace 缩略图、prompt `@图片N`、提交 payload 三者顺序一致。
 
 ## 停止条件
@@ -1600,3 +1600,674 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 最近任务和任务详情金额胶囊允许换行，不再把长金额挤出文本区或压到缩略图上。
 - [x] 新增 `scripts/currency-format-smoke.ts` 覆盖 USD、CNY、空值和微金额边界。
 - [x] 上线 `sd2` 后公网 `/api/health` 返回 200；`youdoo-sites status` 显示 `sd2` 为 OK。
+
+---
+
+## 2026-06-11 生成页最近任务无限下拉计划
+
+### 需求本质
+
+- 用户表面需求：生成页的“最近任务”不要固定 6 条，可以一直往下延伸。
+- 本质目标：连续生成时，用户不离开 `/generate` 就能回看更早任务、复用历史任务、确认任务状态和成本，不被固定卡片数量打断。
+- 不可变约束：
+  - 生成页主目标仍是创建任务，最近任务不能抢占表单主流程。
+  - 不一次性加载全部历史任务，避免慢查询、首屏慢、缩略图请求过多。
+  - 不触发真实生成，不改变任务创建、扣费、轮询结算逻辑。
+  - 不绕过现有权限，继续复用 `/api/video/list` 的用户可见任务过滤。
+
+### 代码依据
+
+- `src/app/generate/page.tsx` 的 `GeneratePage` 当前只有 `recentTasks` 数组状态，初始加载调用 `fetch('/api/video/list')` 后 `(d.tasks || []).slice(0, 6)`。
+- `src/app/generate/page.tsx` 的轮询 `refreshRecentTasks` 也会重新取 `/api/video/list` 并 `slice(0, 6)`，导致更早任务永远不可见。
+- `src/app/generate/page.tsx` 的 `handleSubmit` 成功后把新任务插入最近任务顶部，并继续 `.slice(0, 6)`。
+- `src/app/generate/page.tsx` 的最近任务渲染区只在 `recentTasks.length > 0` 时显示，没有分页、加载中、加载失败、到底状态。
+- `src/app/api/video/list/route.ts` 已支持 `page`、`limit`、`pagination.total`、`pagination.total_pages`，并通过 `getTaskWhereForUser` 做权限过滤。
+- `src/app/tasks/page.tsx` 已经用 `/api/video/list?page=${page}&limit=20` 驱动分页任务列表，可作为分页字段口径参考。
+
+### 推荐方案
+
+- 采用“滚动到哨兵元素再加载下一页”的无限下拉。
+- 首屏加载第 1 页，建议 `limit=12`。原因：6 条太短，20 条对生成页首屏缩略图请求偏重，12 条在桌面网格和移动端列表之间更均衡。
+- 使用 `IntersectionObserver` 监听最近任务列表底部 sentinel，接近视口时加载下一页。
+- 保留一个“加载更多”按钮作为兜底，IntersectionObserver 不可用或失败时仍可手动加载。
+- 数据合并按 `task.id` 去重，新任务提交成功后只插入顶部，不重置已加载页。
+- 轮询更新只更新已加载列表里的任务；任务进入终态时可以刷新第一页并与当前列表合并，但不能把已加载的第 2 页以后清空。
+- 不把最近任务做成固定高度内部滚动区域，页面自然向下延伸。这样用户在生成页继续浏览历史时，浏览器滚动条就是时间线。
+
+### 有没有更优雅的方式
+
+- 更优雅方案不是“加一个无限滚动库”，而是把最近任务收敛成一个小型时间线状态机：`items`、`page`、`hasMore`、`loadingInitial`、`loadingMore`、`error`、`loadedIds`。
+- 这样不用引入依赖，也不会把固定 6 条的旧逻辑散在初始加载、轮询和提交成功三个地方。
+
+### 任务拆解
+
+- [x] Batch 11A：抽出最近任务分页状态。
+  - 修改 `src/app/generate/page.tsx`。
+  - 新增常量 `RECENT_TASK_PAGE_SIZE = 12`。
+  - 新增状态：
+    - `recentTasks`
+    - `recentTasksPage`
+    - `recentTasksHasMore`
+    - `recentTasksLoadingInitial`
+    - `recentTasksLoadingMore`
+    - `recentTasksError`
+  - 新增 helper：
+    - `mergeTasksById(current, incoming)`：按 `id` 去重，保留服务端排序，避免重复卡片。
+    - `normalizeRecentTaskListResponse(data)`：读取 `tasks` 和 `pagination`，统一容错。
+
+- [x] Batch 11B：改初始加载。
+  - 把当前 `useEffect(() => fetch('/api/video/list')...)` 改为 `loadRecentTasksPage(1, { replace: true })`。
+  - 请求 `/api/video/list?page=1&limit=12`。
+  - 成功后设置第一页任务、页码、`hasMore = page < total_pages`。
+  - 失败后显示可恢复错误，不影响生成表单使用。
+
+- [x] Batch 11C：实现滚动触发。
+  - 在最近任务列表底部添加 sentinel `div`，使用 `useRef<HTMLDivElement | null>`。
+  - `IntersectionObserver` 的 `rootMargin` 建议 `360px 0px`，让用户接近底部前预加载。
+  - 条件：`hasMore && !loadingInitial && !loadingMore` 才请求下一页。
+  - 组件卸载或依赖变化时 disconnect observer。
+  - 如果浏览器不支持 `IntersectionObserver`，展示“加载更多”按钮。
+
+- [x] Batch 11D：保留手动加载兜底。
+  - 在最近任务底部增加 footer：
+    - 加载中：`正在加载更多任务...`
+    - 可继续：按钮 `加载更多`
+    - 到底：`已加载全部最近任务`
+    - 错误：`加载失败` + `重试`
+  - UI 使用现有 product 风格，不做大卡片嵌套，不引入装饰性动效。
+
+- [x] Batch 11E：处理提交成功和轮询合并。
+  - `handleSubmit` 成功后，新任务插入 `recentTasks` 顶部，去重，不再 `.slice(0, 6)`。
+  - `activePollingTaskIds` 不再因为最近任务数量限制 `.slice(0, 6)`；可保留合理上限，例如 12 个活跃轮询 ID，防止异常批量提交造成轮询风暴。
+  - `refreshRecentTasks` 改成刷新第一页并 merge，不覆盖已加载更早任务。
+  - 单任务状态轮询继续按 `task.id` 更新已加载卡片。
+
+- [x] Batch 11F：视觉和响应式整理。
+  - 修改 `src/app/globals.css` 的 `.composer-recent`、`.composer-recent-grid` 附近样式。
+  - 增加 `.composer-recent-footer`、`.composer-recent-load-more`、`.composer-recent-sentinel`、`.composer-recent-error`。
+  - 移动端保持单列自然下滑，按钮不溢出，状态文字不遮挡缩略图。
+  - 不使用固定高度内滚动，不做 nested cards。
+
+- [ ] Batch 11G：验证和回归。
+  - 构造或使用已有任务超过 12 条的本地数据，确认首屏只加载第 1 页。
+  - 滚动到底部前触发第 2 页加载，任务卡片追加而不是替换。
+  - 继续滚动直到 `hasMore=false`，展示到底状态。
+  - 新建任务后，新任务出现在顶部，已加载的旧任务不丢。
+  - 运行中任务状态更新后，卡片状态、截图、金额仍更新。
+  - 当前代码、类型、lint、构建已通过；生产隔离构建、服务重启、公开静态资源验证已通过；登录态真实滚动验收待补。
+
+### 验收标准
+
+- [x] 构建产物层面确认生成页最近任务不再固定 6 条：生产 `.next-prod` 已包含 `limit=12`、`composer-recent-footer`、`加载更多`。
+- [x] 页面自然向下延伸，不出现固定高度内部滚动容器。
+- [x] 接近底部自动加载下一页，不是一次性拉取全部历史。
+- [x] 加载中、加载失败、重试、到底四种状态已在组件状态中覆盖且不挡住生成表单。
+- [x] 新任务提交后能立即进入顶部，旧任务分页结果不被清空。
+- [x] 后台轮询不会把已经加载的更早任务覆盖掉。
+- [x] 用户权限仍由 `/api/video/list` 控制，不新增越权数据面。
+- [ ] 登录态真实页面滚动验收：需要在已登录浏览器中确认首屏、滚动触发和按钮兜底的实际交互。
+
+### 验证命令
+
+- [x] `git diff --check -- src/app/generate/page.tsx src/app/globals.css tasks/todo.md`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] `npx impeccable detect src/app/generate/page.tsx`
+- [x] 隔离 worktree 验证：`npx tsc --noEmit --pretty false`
+- [x] 隔离 worktree 生产构建：`NEXT_DIST_DIR=.next-prod npm run build`
+- [x] 生产包验证：`.next-prod/BUILD_ID = V_IEwr1fh0mpmlS6VngzK`，生成页服务端包包含 `/api/video/list?page=${page}&limit=12`。
+- [x] 公开资源验证：`https://sd2.youdoodesign.com/_next/static/chunks/app/generate/page-beb93a5cfdf807fb.js` 包含 `composer-recent-footer` 和 `加载更多`。
+- [x] 服务验证：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2 --wait 5` 后 `sd2 running ok ok 200`。
+- [ ] 浏览器验证 `/generate`：
+  - 登录态下首屏显示最近任务。
+  - 滚动接近底部自动加载下一页。
+  - 手动按钮兜底可用。
+  - 移动端无横向溢出。
+  - 当前本地未登录访问 `/generate` 返回 `307 /login?next=%2Fgenerate`，`/api/video/list?page=1&limit=12` 返回 `401 Unauthorized`，说明路由和 API 正常受登录态保护；需要登录态补完整交互验收。
+
+### 风险与停止条件
+
+- 如果 `/api/video/list` 的分页在生产数据量下响应慢，先查 SQL 和索引，不在前端扩大 limit 硬扛。
+- 如果滚动触发导致重复请求，先修状态锁和 observer 生命周期，不靠防抖时间乱补。
+- 如果提交成功后刷新第一页会清空更早页，停止实现，先修 merge 逻辑。
+- 如果需要真实生成来验证新任务插入，只做用户明确授权后的付费操作；默认用已有任务或请求拦截验证。
+
+### Git Plan
+
+- 当前分支：`codex/minimal-feedback-loop`。
+- 当前工作区已有多处未提交修改，执行前必须再次 `git status`，只触碰本计划范围。
+- 预计修改文件：
+  - `src/app/generate/page.tsx`
+  - `src/app/globals.css`
+  - `tasks/todo.md`
+- 不修改：
+  - `src/app/api/video/list/route.ts`，除非实测发现分页响应或字段不足。
+  - `prisma/**`、扣费、Provider、任务创建接口。
+- 提交策略：本任务实现和样式可作为一个聚焦提交；如果发现 API 需要优化，另拆提交。
+
+### HARD-GATE
+
+- 本节是规划，不是实现。
+- 开始编码前需要确认：采用 `limit=12`、自然页面下滑、IntersectionObserver + 手动按钮兜底、提交成功只插顶部不清空已加载页。
+
+### 落地记录 - 2026-06-11
+
+- [x] `src/app/generate/page.tsx` 新增最近任务分页状态机，首屏请求 `/api/video/list?page=1&limit=12`。
+- [x] 最近任务底部新增 `IntersectionObserver` sentinel，接近底部自动请求下一页。
+- [x] 保留手动“加载更多”按钮，加载失败可重试，加载完成显示到底状态。
+- [x] 提交成功后新任务插入顶部，不再裁剪成 6 条；活跃轮询 ID 上限调整为 12。
+- [x] 轮询终态刷新第一页时使用 merge，不覆盖已加载的更早任务。
+- [x] `src/app/globals.css` 增加最近任务 footer、加载、错误、到底、移动端样式，不使用固定高度内部滚动容器。
+- [x] 本地验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/app/generate/page.tsx` 通过。
+- [x] 生产安排：在 `/Volumes/Data/Projects/worktrees/video-api-debugger/recent-tasks-infinite-scroll-deploy` 创建隔离 worktree，只应用 `src/app/generate/page.tsx` 和 `src/app/globals.css` 的本次差异。
+- [x] 生产构建：隔离 worktree 执行 `NEXT_DIST_DIR=.next-prod npm run build` 通过；仅有项目既有 `<img>` LCP lint warnings。
+- [x] 生产替换：新包同步为 `/Volumes/Data/Projects/video-api-debugger/.next-prod`；曾短暂被主工作区构建覆盖为 `v5AQDBjd5J9c7LhDxD0lN`，已重新覆盖为隔离 worktree 构建 `V_IEwr1fh0mpmlS6VngzK`。
+- [x] 回滚备份：主工作区构建包已备份到 `/Volumes/Data/Projects/video-api-debugger-deploy-backups/.next-prod.current-v5AQDBjd5J9c7LhDxD0lN-20260611225629`；该备份不是固定 6 的旧包，而是当前主工作区构建包。
+- [x] 生产重启：最终使用 `launchctl kickstart -k gui/$(id -u)/com.youdoo.site.sd2` 直接重启，避免再次触发任何构建同步；`sd2.youdoodesign.com` 公开 health 为 200。
+- [x] 公开资源验证：新 chunk `/_next/static/chunks/app/generate/page-beb93a5cfdf807fb.js` 已包含 `composer-recent-footer` 和 `加载更多`，说明刷新页面后会加载新前端包。
+- [x] 风险复核：主工作区构建 `v5AQDBjd5J9c7LhDxD0lN` 短暂生效时，`/tmp/youdoo-site-sd2.err.log` 出现 `/api/reference-albums` 的 Prisma `P2022 public_folder_id` 报错；最终隔离包中已搜不到 `public_folder_id`、公共图集新 API 路由和未跟踪新路由，判断该日志为短暂主工作区构建留下的历史记录。
+- [ ] 登录态浏览器验收：待用真实登录态打开 `/generate`，验证首屏 12 条、滚动加载下一页、手动按钮兜底和移动端无横向溢出。
+
+---
+
+## 2026-06-11 上传历史图片库与参考图选择弹窗计划
+
+### 需求本质
+
+- 用户表面需求：只要上传过的图片，都要出现在一个地方；可以增减、删除；后续点参考图时弹出小弹窗，里面展示曾经上传过的图片，底部有上传和取消按键。
+- 真实目标：把“曾经上传过的图片”变成可复用的个人图片池，减少重复上传，让生成页添加参考图更快。
+- 关键边界：
+  - 这是个人上传历史，不是公共图集，不进入公共审核。
+  - 公共图集用于共享和审核；上传历史用于个人复用，两者后续可以互通，但不能混成一个概念。
+  - 删除历史图片默认做软删除或隐藏，不物理删除已被任务、图集、工作台引用的文件。
+  - 不改变生成扣费、Provider 调用、任务创建参数口径。
+
+### 当前代码依据
+
+- `src/lib/hooks/useWorkspace.ts` 的 `uploadAsset`：生成页当前上传图片后，会调用 `/api/assets/upload`，再把返回的 `asset.id` 加到当前 workspace。
+- `src/components/ReferenceStrip.tsx` 的 `handleAddClick`：当前点击添加参考图会直接触发隐藏文件选择器，不会先展示历史图片库。
+- `src/components/ReferenceAlbumPicker.tsx` 的 `ReferenceAlbumPicker`：当前“选择参考图”只按图集读取 `ReferenceImage`，不是按上传过的 `Asset` 读取。
+- `src/app/api/workspace/assets/route.ts` 的 `POST`：已经支持通过 `assetId` 把资产加入 workspace，也支持通过 `referenceImageIds` 加入图集图片。
+- `src/app/api/assets/upload/route.ts`：上传入口已保存 `Asset`，并返回 `asset.id/originalUrl/thumbnailUrl`。
+- `prisma/schema.prisma` 的 `Asset`：已有 `owner_id/type/original_url/thumbnail_url/file_name/mime_type/width/height/file_size/hash/created_at`，可以作为历史上传图片库的数据基础。
+
+### 推荐产品方案
+
+采用“上传历史图片库”独立弹窗，而不是把历史图片塞进公共图集。
+
+- 生成页参考图区域的“添加”入口点击后，打开 `UploadedImagePicker` 弹窗。
+- 弹窗默认展示当前用户上传过的图片，按最近上传倒序。
+- 图片卡片支持：
+  - 缩略图预览。
+  - 文件名、尺寸、上传时间。
+  - 已在当前工作台的状态提示。
+  - 选中/取消选中。
+  - hover/focus 后出现删除历史图片按钮。
+- 底部操作建议：
+  - 左侧：`上传新图片`
+  - 右侧：`取消`、`加入参考图`
+- 用户原话“下方是一个上传和取消按键”可落地为首版简化：
+  - 未选图时：主按钮显示 `上传`
+  - 选中历史图后：主按钮显示 `加入参考图`
+  - 为避免歧义，推荐最终使用三按钮布局：`上传新图片 / 取消 / 加入参考图`。
+
+### 交互闭环
+
+1. 用户点击生成页参考图区域的添加卡片。
+2. 系统打开历史图片弹窗。
+3. 弹窗加载 `/api/assets/history?type=image&page=1&limit=40`。
+4. 用户可直接选择历史图片，也可点击上传新图片。
+5. 上传新图片成功后：
+   - 写入 `Asset`。
+   - 自动刷新历史列表。
+   - 默认选中新上传图片。
+6. 点击 `加入参考图`：
+   - 调用 `/api/workspace/assets`，传入选中的 `assetId` 列表。
+   - workspace 顺序追加，继续对应 `图1/图2/...` 和 `@图片N`。
+   - 弹窗关闭，参考图条刷新。
+7. 用户在弹窗里删除历史图片：
+   - 二次确认。
+   - 如果图片仍在当前 workspace，仅从历史库隐藏，不强制移出当前参考图。
+   - 已被任务、图集或历史记录引用的资产不物理删除。
+
+### 数据与 API 设计
+
+- 新增 `Asset.status`，建议默认 `active`，支持 `active | hidden | deleted`。
+- 新增迁移：
+  - `ALTER TABLE Asset ADD COLUMN status TEXT NOT NULL DEFAULT 'active';`
+  - 增加索引：`owner_id,type,status,created_at`。
+- 新增 API：`GET /api/assets/history`
+  - 只返回当前登录用户 `owner_id=user.id` 的图片资产。
+  - 默认过滤 `type='image'` 和 `status='active'`。
+  - 支持分页：`page/limit`。
+  - 返回字段：`id, thumbnailUrl, originalUrl, fileName, width, height, fileSize, mimeType, createdAt`。
+- 新增 API：`DELETE /api/assets/history/[id]`
+  - 校验 owner。
+  - 默认把 `Asset.status` 改为 `hidden`。
+  - 不删除物理文件，不删除任务引用。
+- 可选增强：`POST /api/assets/history/add-to-workspace`
+  - 也可以不新增，首版直接复用现有 `/api/workspace/assets` 的 `assetId` 能力。
+
+### 前端组件规划
+
+- 新增 `src/components/UploadedImagePicker.tsx`
+  - props：
+    - `open`
+    - `currentCount`
+    - `currentAssetIds`
+    - `onClose`
+    - `onUploadFiles(files)`
+    - `onConfirm(assetIds)`
+  - 状态：
+    - `items`
+    - `selectedAssetIds`
+    - `loading`
+    - `uploading`
+    - `deletingAssetId`
+    - `error`
+    - `page/hasMore`
+- 修改 `src/components/ReferenceStrip.tsx`
+  - `handleAddClick` 从直接 `fileInputRef.current?.click()` 改为打开历史图片弹窗。
+  - 保留拖拽上传和替换逻辑，不删除现有入口。
+  - 仍允许拖拽文件直接上传到参考图条，这是快速路径。
+- 修改 `src/components/GenerationComposer.tsx`
+  - 接入 `UploadedImagePicker`。
+  - 给 `ReferenceStrip` 传入打开弹窗的回调，或直接在 `ReferenceStrip` 内部渲染弹窗。
+  - 推荐弹窗状态放在 `GenerationComposer`，避免 `ReferenceStrip` 继续变胖。
+- 修改 `src/lib/hooks/useWorkspace.ts`
+  - 新增 `addAssets(assetIds: string[])` 或复用现有单个 `assetId` 添加逻辑扩展成批量。
+  - 保持 `uploadAsset(file)` 的现有行为：上传后仍加入当前工作台。
+  - 给弹窗上传新图时可增加 `uploadAssetToHistory(file, { addToWorkspace?: false })`，避免“上传只是进历史库”时自动加入工作台。
+
+### 任务拆解
+
+- [x] Batch 12A：数据模型与迁移规划。
+  - 给 `Asset` 增加 `status` 字段和索引。
+  - 确认老数据默认 `active`，不影响当前 workspace 和历史任务。
+  - 生成迁移文件，但不自动应用生产库。
+
+- [x] Batch 12B：历史图片 API。
+  - 新增 `GET /api/assets/history`。
+  - 新增 `DELETE /api/assets/history/[id]`。
+  - 接口统一使用 `getSession()`，按当前用户隔离数据。
+  - 不返回视频、音频，不返回隐藏资产。
+
+- [x] Batch 12C：workspace 批量加入能力。
+  - 扩展 `/api/workspace/assets` 支持 `assetIds` 数组。
+  - 保留现有 `assetId` 和 `referenceImageIds` 入参兼容。
+  - 继续限制最多 9 张参考图。
+  - 重复 asset 只更新排序，不重复插入。
+
+- [x] Batch 12D：新增 `UploadedImagePicker` 弹窗。
+  - 首屏加载最近 40 张图片。
+  - 图片网格支持选中、已在工作台、删除。
+  - 支持上传新图片，上传成功后刷新列表并默认选中。
+  - 底部操作固定：上传新图片、取消、加入参考图。
+  - 空状态提示用户可以上传第一张图片。
+
+- [x] Batch 12E：接入生成页参考图添加入口。
+  - 点击添加参考图打开历史图片弹窗。
+  - 拖拽上传、替换单张、删除当前参考图、排序保持原功能。
+  - 加入历史图片后，参考图条立即刷新。
+  - `@图片N` 顺序继续以 workspace 当前顺序为准。
+
+- [x] Batch 12F：样式与响应式。
+  - 在 `src/app/globals.css` 增加历史图片弹窗样式。
+  - 桌面端弹窗宽度建议 840-960px，图片网格稳定列宽。
+  - 移动端单列或双列，底部按钮不溢出。
+  - 删除按钮只在 hover/focus 后显现，移动端长按不可靠，移动端始终显示一个小删除入口。
+
+- [ ] Batch 12G：验证和验收。
+  - 用已有上传图片验证历史库可读。
+  - 上传新图片后确认出现在历史库。
+  - 从历史库选择图片加入 workspace，生成页参考图条增加。
+  - 删除历史图片后不再出现在弹窗，但当前任务/图集引用不坏。
+  - 已在当前工作台的图片不能重复占用 9 张上限。
+
+### 验收标准
+
+- [ ] 所有通过生成页上传过的图片，默认会进入历史图片库。
+- [ ] 点“添加参考图”先出现历史图片弹窗，而不是只打开系统文件选择器。
+- [ ] 弹窗内可以选择历史图片加入当前参考图条。
+- [ ] 弹窗内可以上传新图片，并在上传后立即出现在历史库。
+- [ ] 弹窗内可以删除历史图片，且必须二次确认。
+- [ ] 删除历史图片不破坏已生成任务、已有图集和当前工作台引用。
+- [ ] 仍然最多 9 张参考图，重复选择不会重复插入。
+- [ ] 原有拖拽上传、替换单张、删除当前参考图、排序能力保留。
+
+### 验证命令
+
+- [x] `git diff --check -- prisma/schema.prisma src/app/api/assets/history/route.ts src/app/api/assets/history/[id]/route.ts src/app/api/workspace/assets/route.ts src/lib/hooks/useWorkspace.ts src/components/GenerationComposer.tsx src/components/ReferenceStrip.tsx src/components/UploadedImagePicker.tsx src/app/globals.css tasks/todo.md`
+- [x] `npm run db:generate`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] `npx impeccable detect src/components/UploadedImagePicker.tsx`
+- [ ] 浏览器验证 `/generate`：
+  - 添加参考图打开历史图片弹窗。
+  - 上传新图片后自动刷新并可加入参考图。
+  - 删除历史图片需要二次确认。
+  - 移动端无横向溢出。
+
+### 风险与停止条件
+
+- 如果 `Asset` 当前被多个用户通过 hash 去重共用，必须先确认 owner 语义；不能因为一个用户隐藏历史图片影响另一个用户可见性。
+- 如果物理删除会影响任务结果、图集或 workspace，禁止物理删除，改为 `hidden`。
+- 如果 `/api/workspace/assets` 批量添加和现有 `referenceImageIds` 逻辑冲突，先保留单个添加循环，不改 reference image 逻辑。
+- 如果上传历史图片库和公共图集 UI 概念混淆，先停下调整文案和入口，不继续编码。
+- 如果需要真实生成验证，不执行付费生成，只验证上传、选择、workspace 参数。
+
+### 回滚策略
+
+- 前端回滚：恢复 `ReferenceStrip` 添加按钮为直接打开文件选择器。
+- API 回滚：保留 `Asset.status` 字段不使用，历史 API 下线不影响现有上传和 workspace。
+- 数据回滚：`hidden` 状态可批量恢复为 `active`；不做物理删除所以可恢复。
+
+### Git Plan
+
+- 当前工作区已有多处未提交修改，执行前必须再次 `git status`，只触碰本计划范围。
+- 预计修改文件：
+  - `prisma/schema.prisma`
+  - `prisma/migrations/<timestamp>_add_asset_history_status/migration.sql`
+  - `src/app/api/assets/history/route.ts`
+  - `src/app/api/assets/history/[id]/route.ts`
+  - `src/app/api/workspace/assets/route.ts`
+  - `src/lib/hooks/useWorkspace.ts`
+  - `src/components/UploadedImagePicker.tsx`
+  - `src/components/GenerationComposer.tsx`
+  - `src/components/ReferenceStrip.tsx`
+  - `src/app/globals.css`
+  - `tasks/todo.md`
+- 不修改：
+  - Provider 创建、扣费、任务结算逻辑。
+  - 公共图集审核流，除非后续明确要求“历史图片保存到图集/提交公共”。
+- 提交策略：
+  - 提交 1：数据模型和历史图片 API。
+  - 提交 2：workspace 批量加入与上传 hook。
+  - 提交 3：弹窗 UI 和生成页接入。
+
+### HARD-GATE
+
+- 本节是规划，不是实现。
+- 开始编码前需要确认：
+  - 历史图片库是个人私有，不进入公共图集。
+  - 删除使用软删除/隐藏，不物理删除文件。
+  - 添加参考图入口改为先弹历史图片库，但保留拖拽上传快速路径。
+  - 弹窗底部最终按钮采用 `上传新图片 / 取消 / 加入参考图`。
+
+### Review - 2026-06-11
+
+- [x] 已落地 `Asset.status` 和迁移文件 `20260611103000_add_asset_history_status`，用于历史图片隐藏，不物理删除文件。
+- [x] 已新增 `/api/assets/history` 和 `/api/assets/history/[id]`，支持当前用户图片历史列表和软删除隐藏。
+- [x] 已扩展 `/api/workspace/assets` 支持 `assetIds` 批量加入，保留 `assetId` 和 `referenceImageIds` 兼容。
+- [x] 已新增 `UploadedImagePicker`，支持历史图片选择、上传新图片、删除历史图片、加载更多和加入参考图。
+- [x] 已改造 `ReferenceStrip` 添加入口：点击添加参考图打开历史图片弹窗；拖拽上传、替换、删除、排序保留。
+- [x] 已在 `GenerationComposer` 接入历史图片弹窗和 `useWorkspace.addAssets/uploadAssetToHistory`。
+- [x] 已补历史图片弹窗样式和移动端响应式。
+- [x] 已验证：`npm run db:generate`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/UploadedImagePicker.tsx` 通过。
+- [ ] 未执行浏览器真实点击验收：本轮未应用数据库迁移，运行库缺少 `Asset.status` 时历史图片 API 会失败；需在目标环境应用迁移后再验收。
+
+---
+
+## 2026-06-11 图集转为共享图集功能计划
+
+### 需求本质
+
+- 用户表面需求：把已有图集转为共享图集。
+- 真实目标：让个人图集或项目图集可以授权给指定用户或项目使用，减少复制图集、重复上传和手动传图。
+- 关键边界：
+  - 共享图集不是公共图集。共享图集是定向授权；公共图集是管理员审核后进入公共文件夹。
+  - 共享图集不复制图片、不复制图集，只修改访问授权。
+  - 取消共享不能删除图集、图片、历史任务引用。
+  - 项目图集原有项目成员权限必须保留，额外共享只是增加授权对象。
+
+### 当前代码依据
+
+- `prisma/schema.prisma` 已有 `AlbumShare`，包含 `album_id/grantee_type/grantee_id/permissions_json/expires_at/status`。
+- `src/app/api/reference-albums/[id]/shares/route.ts` 已支持：
+  - `GET` 列出当前图集共享记录。
+  - `POST` 创建或更新共享记录。
+  - 创建共享后，如果图集 `visibility='private'`，会更新为 `visibility='shared'`。
+- `src/app/api/album-shares/[id]/route.ts` 已支持取消共享，并在没有 active share 时把 `visibility` 恢复为 `private` 或 `project`。
+- `src/lib/reference-albums/permissions.ts` 已按 `AlbumShare` 计算用户/项目共享权限。
+- `src/app/collections/[id]/ReferenceAlbumDetailClient.tsx` 已有“共享图集”区域，但当前要手填用户 ID / 项目 ID，缺少产品化“转为共享”流程。
+- `src/app/collections/ReferenceAlbumsClient.tsx` 当前卡片能展示 `shared` scope，但缺少图集卡片上的“共享设置”入口。
+
+### 推荐方案
+
+基于现有 `AlbumShare` 做“共享设置”弹窗，不新增共享表。
+
+- 图集列表卡片：
+  - 有 `can_share` 或 `permissions.edit` 时显示 `共享设置`。
+  - 私有图集第一次点击时文案可显示 `转为共享`。
+  - 已共享图集显示 `已共享` 状态和共享数量。
+- 图集详情页：
+  - 顶部操作区新增 `共享设置`。
+  - 替换当前手填 ID 的简陋分享区，保留共享列表能力。
+- 弹窗分区：
+  - 当前状态：私有 / 项目可见 / 已共享给 N 个对象 / 公共图集不可在此转共享。
+  - 添加共享对象：用户 / 项目。
+  - 权限预设：仅查看、可生成、可协作编辑。
+  - 已共享对象列表：展示对象类型、对象名或 ID、权限、过期时间、移除按钮。
+- 权限默认：
+  - 推荐默认 `可生成`：view + use + copy。
+  - 外部用户自动降权：不允许 download/viewSource/edit，沿用现有 API 逻辑。
+
+### 交互闭环
+
+1. 用户在图集列表或详情页点击 `转为共享` / `共享设置`。
+2. 系统打开共享设置弹窗，加载图集详情和 active shares。
+3. 用户选择共享对象类型：
+   - 用户：搜索或输入用户。
+   - 项目：搜索或选择项目。
+4. 用户选择权限预设，必要时展开高级权限。
+5. 点击 `保存共享`：
+   - 调用 `POST /api/reference-albums/:id/shares`。
+   - 图集 visibility 自动变为 `shared`。
+   - 刷新共享对象列表和图集卡片状态。
+6. 被授权用户进入“共享给我的”能看到图集，并按权限使用参考图。
+7. 用户移除共享对象：
+   - 调用 `DELETE /api/album-shares/:id`。
+   - 如果无 active shares，图集恢复为 private 或 project。
+8. 用户点击 `关闭全部共享`：
+   - 二次确认。
+   - 批量 revoke active shares。
+   - 图集状态恢复私有或项目可见。
+
+### 数据与 API 设计
+
+- 复用现有 `AlbumShare`，不新增表。
+- 建议增强 API：
+  - `PATCH /api/album-shares/[id]`
+    - 修改权限、过期时间、状态。
+  - `POST /api/reference-albums/[id]/shares/revoke-all`
+    - 一键关闭全部共享。
+  - `GET /api/reference-albums/[id]/shares`
+    - 返回时补充 grantee 展示信息：
+      - user：name/email/account_type/status。
+      - project：name/type/status。
+- 可选增强：
+  - `GET /api/users/search?q=...`
+  - `GET /api/projects?can_share_album=true`
+  - 如果现有搜索接口不足，首版可继续输入 ID，但 UI 必须解释清楚。
+
+### 前端组件规划
+
+- 新增 `src/components/ShareAlbumDialog.tsx`
+  - props：
+    - `open`
+    - `album`
+    - `shares`
+    - `onClose`
+    - `onRefresh`
+  - 状态：
+    - `targetType`
+    - `targetId`
+    - `permissionPreset`
+    - `customPermissions`
+    - `expiresAt`
+    - `saving`
+    - `error`
+- 修改 `src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`
+  - 用 `ShareAlbumDialog` 替换现有手填共享区。
+  - 顶部操作区增加 `共享设置`。
+  - 保留上传、重命名、删除、作为参考图生成等原功能。
+- 修改 `src/app/collections/ReferenceAlbumsClient.tsx`
+  - 卡片展示 `已共享` 状态。
+  - 卡片操作区新增 `共享设置`。
+  - 分享后刷新当前列表和共享数量。
+- 修改 `src/app/globals.css`
+  - 新增共享弹窗、权限预设、共享对象列表、危险操作按钮样式。
+  - 保持 8px 圆角、白底、蓝色主按钮、灰色次按钮，和现有图集页一致。
+
+### 权限预设
+
+- 仅查看：
+  - `view=true`
+  - `use=false`
+  - `copy=false`
+  - `download=false`
+  - `viewSource=false`
+  - `edit=false`
+- 可生成（推荐默认）：
+  - `view=true`
+  - `use=true`
+  - `copy=true`
+  - `download=false`
+  - `viewSource=false`
+  - `edit=false`
+- 可协作编辑：
+  - `view=true`
+  - `use=true`
+  - `copy=true`
+  - `download=false`
+  - `viewSource=false`
+  - `edit=true`
+  - 仅 owner/admin 或项目资产管理员可授权。
+
+### 任务拆解
+
+- [x] Batch 13A：补共享 API 展示信息。
+  - 增强 `GET /api/reference-albums/[id]/shares`，返回 grantee display 信息。
+  - 保留旧字段，兼容当前详情页。
+  - 验证外部用户权限降级不变。
+
+- [x] Batch 13B：补共享记录更新和关闭全部共享。
+  - 新增 `PATCH /api/album-shares/[id]`。
+  - 新增 `POST /api/reference-albums/[id]/shares/revoke-all`。
+  - 关闭全部共享后恢复 `visibility`。
+  - 写 operation log。
+
+- [x] Batch 13C：新增 `ShareAlbumDialog`。
+  - 支持用户/项目目标。
+  - 支持权限预设和高级权限展开。
+  - 支持过期时间可选。
+  - 支持共享对象列表、修改权限、移除对象、关闭全部共享。
+
+- [x] Batch 13D：接入图集详情页。
+  - 顶部操作区增加 `共享设置`。
+  - 替换当前“共享图集”手填 ID 区域。
+  - 成功共享后刷新 album 和 shares。
+  - 详情摘要显示共享状态和共享数量。
+
+- [x] Batch 13E：接入图集列表页。
+  - 卡片展示 `已共享` 标签。
+  - 操作区增加 `共享设置`。
+  - 列表接口如需共享数量，补 `_count.shares` 或 active share count。
+  - 保持原有提交公共、重命名、删除入口。
+
+- [x] Batch 13F：样式与响应式。
+  - 新增共享弹窗样式。
+  - 移动端按钮不溢出。
+  - 权限开关和共享对象列表在小屏可读。
+
+- [ ] Batch 13G：浏览器和多账号行为验收。
+  - 创建共享。
+  - 被共享用户可见。
+  - 按权限使用。
+  - 修改权限。
+  - 移除单个共享。
+  - 关闭全部共享。
+  - 确认公共图集和项目图集不被破坏。
+
+### 验收标准
+
+- [ ] 私有图集可以一键进入共享设置。
+- [ ] 可以共享给指定用户。
+- [ ] 可以共享给指定项目。
+- [ ] 被共享对象能在“共享给我的”看到图集。
+- [ ] 被共享对象能按权限查看、生成、复制。
+- [ ] 外部用户不会获得下载、查看源图、编辑权限。
+- [ ] 可以修改某个共享对象权限。
+- [ ] 可以移除某个共享对象。
+- [ ] 可以关闭全部共享并恢复图集原 visibility。
+- [ ] 共享操作不复制图集、不复制图片、不影响历史任务。
+- [ ] 公共图集仍走公共文件夹和审核流程，不被“共享设置”替代。
+
+### 验证命令
+
+- [x] `git diff --check`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] `npx impeccable detect src/components/ShareAlbumDialog.tsx`
+- [ ] 浏览器验证 `/collections` 和 `/collections/:id`：
+  - 打开共享设置。
+  - 添加用户/项目共享。
+  - 修改权限。
+  - 移除共享。
+  - 关闭全部共享。
+
+### 风险与停止条件
+
+- 如果用户/项目搜索能力不足，不要临时做不可靠模糊匹配；首版可输入 ID，但必须给清楚提示。
+- 如果共享图集与公共图集在文案上混淆，先停下调整文案。
+- 如果关闭全部共享会影响项目图集原项目权限，必须先修 visibility 恢复规则。
+- 如果权限预设和底层 `permissions_json` 不一致，先修权限序列化，不继续做 UI。
+- 如果需要用另一个真实账号验收，需用户提供已登录态或手动切换，不索取密码、token、cookie。
+
+### 回滚策略
+
+- 前端回滚：隐藏 `共享设置` 新入口，恢复旧的详情页共享区域。
+- API 回滚：保留现有 `POST/GET shares`，下线新增 `PATCH/revoke-all` 不影响旧共享。
+- 数据回滚：新增共享都是 `AlbumShare` 记录，可逐条 revoke；不涉及图片和任务数据删除。
+
+### Git Plan
+
+- 当前工作区已有多处未提交修改，落地前必须再次 `git status`，只触碰本计划范围。
+- 预计修改文件：
+  - `src/app/api/reference-albums/[id]/shares/route.ts`
+  - `src/app/api/album-shares/[id]/route.ts`
+  - `src/app/api/reference-albums/[id]/shares/revoke-all/route.ts`
+  - `src/components/ShareAlbumDialog.tsx`
+  - `src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`
+  - `src/app/collections/ReferenceAlbumsClient.tsx`
+  - `src/app/globals.css`
+  - `tasks/todo.md`
+- 不修改：
+  - 公共图集审核流。
+  - 历史图片库。
+  - Provider、扣费、生成任务逻辑。
+- 提交策略：
+  - 提交 1：共享 API 增强。
+  - 提交 2：共享设置弹窗。
+  - 提交 3：图集列表/详情页接入和样式。
+
+### HARD-GATE
+
+- 本节是规划，不是实现。
+- 开始编码前需要确认：
+  - 共享图集复用 `AlbumShare`，不新建共享表。
+  - “转为共享”是授权访问同一个图集，不复制图集。
+  - 默认权限采用 `可生成`。
+  - 公共图集继续走公共文件夹和审核流程，不并入共享设置。
+
+### Review - 2026-06-11
+
+- 已实现共享 API 增强：`GET /api/reference-albums/[id]/shares` 返回 grantee 展示信息和解析后的权限；`POST` 保留外部用户降权并返回统一结构。
+- 已新增共享管理能力：`PATCH /api/album-shares/[id]` 支持权限、过期时间、状态更新；`POST /api/reference-albums/[id]/shares/revoke-all` 支持关闭全部共享并恢复图集 visibility。
+- 已新增 `ShareAlbumDialog`：支持用户/项目 ID、权限预设、高级权限、过期时间、共享对象列表、修改权限、移除单个对象和关闭全部共享。
+- 已接入图集详情页和图集列表页：可管理图集显示 `转为共享` / `共享设置`，卡片和摘要显示 active share 数量；公共图集仍走公共文件夹和审核流程。
+- 已验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/ShareAlbumDialog.tsx` 通过；lint/build 仍输出项目既有 `<img>` 与 hook dependency warning。
+- 未执行浏览器和多账号行为验收：本轮未执行数据库写入或迁移命令；当前工作区已有前序图集/历史图片迁移未应用到运行库时，`/collections` 相关 API 可能先被缺表或缺列挡住。需在目标环境应用既有迁移后，再验证添加共享、共享给我的、权限修改、单个移除和关闭全部共享。

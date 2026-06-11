@@ -20,6 +20,12 @@ export async function GET(
 
     const album = await assertCanViewAlbum(user, params.id);
     const access = await getAlbumAccess(user, album);
+    const publicFolder = album.public_folder_id
+      ? await prisma.referenceAlbumFolder.findUnique({
+          where: { id: album.public_folder_id },
+          select: { id: true, name: true, description: true, sort_order: true, status: true },
+        })
+      : null;
     const images = await prisma.referenceImage.findMany({
       where: { album_id: album.id, status: 'active' },
       orderBy: { sort_order: 'asc' },
@@ -28,12 +34,20 @@ export async function GET(
     const coverImageId = album.cover_image_id && images.some((image) => image.id === album.cover_image_id)
       ? album.cover_image_id
       : images[0]?.id || null;
+    const activeShareCount = await prisma.albumShare.count({
+      where: {
+        album_id: album.id,
+        status: 'active',
+        OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }],
+      },
+    });
 
     return NextResponse.json({
       album: {
         id: album.id,
         workspace_id: album.workspace_id,
         project_id: album.project_id,
+        public_folder_id: album.public_folder_id,
         owner_user_id: album.owner_user_id,
         name: album.name,
         description: album.description,
@@ -46,9 +60,11 @@ export async function GET(
         updated_at: album.updated_at,
         owner: album.owner,
         project: album.project,
+        public_folder: publicFolder,
         image_count: album._count.images,
         permissions: access.permissions,
         can_share: access.canShare,
+        active_share_count: activeShareCount,
         access_role: access.role,
       },
       images: images.map((image) => ({
@@ -88,9 +104,9 @@ export async function PATCH(
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    await assertCanEditAlbum(user, params.id);
+    const albumForAccess = await assertCanEditAlbum(user, params.id);
     const body = await request.json();
-    const data: { name?: string; description?: string | null; status?: string } = {};
+    const data: { name?: string; description?: string | null; status?: string; public_folder_id?: string | null } = {};
 
     if (typeof body.name === 'string') {
       const name = body.name.trim();
@@ -99,6 +115,21 @@ export async function PATCH(
     }
     if (typeof body.description === 'string') data.description = body.description.trim() || null;
     if (['active', 'archived'].includes(body.status)) data.status = body.status;
+    if (typeof body.public_folder_id === 'string') {
+      if (albumForAccess.album_type !== 'public' && albumForAccess.album_type !== 'system') {
+        return NextResponse.json({ error: '只有公共图集可以移动公共文件夹' }, { status: 400 });
+      }
+      const folderId = body.public_folder_id.trim();
+      if (!folderId) {
+        data.public_folder_id = null;
+      } else {
+        const folder = await prisma.referenceAlbumFolder.findFirst({
+          where: { id: folderId, scope: 'public', status: 'active' },
+        });
+        if (!folder) return NextResponse.json({ error: '公共文件夹不存在或已删除' }, { status: 404 });
+        data.public_folder_id = folder.id;
+      }
+    }
 
     const album = await prisma.referenceAlbum.update({
       where: { id: params.id },
