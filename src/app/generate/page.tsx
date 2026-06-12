@@ -243,10 +243,10 @@ function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPr
   const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
 
   if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc, label: '视频帧' };
+    return { kind: 'image', src: thumbnailSrc, label: '任务预览' };
   }
 
-  return { kind: 'empty', label: ['submitted', 'running'].includes(task.local_status) ? '等待视频帧' : '暂无视频帧' };
+  return { kind: 'empty', label: ['submitted', 'running'].includes(task.local_status) ? '等待预览' : '暂无预览' };
 }
 
 function RecentTaskPreview({ task }: { task: TaskItem }) {
@@ -263,7 +263,7 @@ function RecentTaskPreview({ task }: { task: TaskItem }) {
         <img src={preview.src} alt="任务截图" loading="lazy" onError={() => markFailed(preview.src)} />
       )}
       {preview.kind === 'empty' && <span>{preview.label}</span>}
-      <small>{preview.label}</small>
+      {preview.kind === 'empty' && <small>{preview.label}</small>}
     </div>
   );
 }
@@ -1330,10 +1330,12 @@ export default function GeneratePage() {
                         <RecentTaskPreview task={task} />
                         <div className="composer-task-card-body">
                           <div className="composer-task-card-prompt">
+                            <time className="composer-task-card-prompt-time" dateTime={task.created_at}>
+                              {formatTime(task.created_at)}
+                            </time>
                             {truncatePrompt(task.prompt)}
                           </div>
                           <div className="composer-task-card-meta">
-                            <span className="composer-task-card-time">{formatTime(task.created_at)}</span>
                             {recentTaskChargeText && (
                               <span className="composer-task-card-charge" title={`实际扣除 ${recentTaskChargeText}`}>
                                 {recentTaskChargeText}
