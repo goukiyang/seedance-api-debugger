@@ -1333,7 +1333,9 @@ export default function GeneratePage() {
                             <time className="composer-task-card-prompt-time" dateTime={task.created_at}>
                               {formatTime(task.created_at)}
                             </time>
-                            {truncatePrompt(task.prompt)}
+                            <span className="composer-task-card-prompt-text">
+                              {truncatePrompt(task.prompt)}
+                            </span>
                           </div>
                           <div className="composer-task-card-meta">
                             {recentTaskChargeText && (

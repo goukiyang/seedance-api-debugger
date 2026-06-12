@@ -90,7 +90,7 @@ export default async function AdminPage() {
   const providerBalanceSyncEnabled = Boolean(process.env.SEEDANCE_BALANCE_ENDPOINT?.trim());
   const quickLinks = [
     { title: '计费与成本', desc: '余额快照、官方扣费、成本待办和账本自检', href: '/admin/costs' },
-    { title: '产出留存', desc: '检查视频帧、隐藏/恢复和任务归属追溯', href: '/admin/outputs' },
+    { title: '产出留存', desc: '检查预览、隐藏/恢复和任务归属追溯', href: '/admin/outputs' },
     { title: '用户与点数', desc: '账号、长期点数、每日配额和批量发放', href: '/admin/users' },
     { title: '点数流水', desc: '按用户、任务、类型和时间范围追溯点数账本', href: '/admin/points' },
     { title: '项目管理', desc: '项目归属、成员、邀请和成本归集边界', href: '/admin/projects' },

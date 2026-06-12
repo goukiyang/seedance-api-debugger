@@ -233,9 +233,9 @@ type OutputPreviewModel = {
 };
 
 function outputPreviewEmptyLabel(output: OutputItem) {
-  if (['submitted', 'running'].includes(output.local_status)) return '等待视频帧';
-  if (output.local_status === 'failed') return '失败无视频帧';
-  return '暂无视频帧';
+  if (['submitted', 'running'].includes(output.local_status)) return '等待预览';
+  if (output.local_status === 'failed') return '失败无预览';
+  return '暂无预览';
 }
 
 function getOutputPreview(output: OutputItem, failedSrcs: string[] = []): OutputPreviewModel {
@@ -243,7 +243,7 @@ function getOutputPreview(output: OutputItem, failedSrcs: string[] = []): Output
   const hasThumbnailSource = !!(output.local_video_path || output.result_video_url || output.result_last_frame_url);
 
   if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc, label: '视频帧' };
+    return { kind: 'image', src: thumbnailSrc, label: '预览图' };
   }
 
   return { kind: 'empty', label: outputPreviewEmptyLabel(output) };
@@ -261,12 +261,12 @@ function OutputFramePreview({ output }: { output: OutputItem }) {
     <Link
       href={taskDetailHref(output.id, '/admin/outputs')}
       className={`outputs-preview outputs-preview-${preview.kind}`}
-      aria-label={`查看产出 ${output.id} 的视频帧和详情`}
+      aria-label={`查看产出 ${output.id} 的预览图和详情`}
     >
       {preview.kind === 'image' && preview.src && (
         <img
           src={preview.src}
-          alt="产出视频帧"
+          alt="产出预览图"
           loading="lazy"
           onError={() => markFailed(preview.src)}
         />

@@ -145,18 +145,18 @@ function getTaskPreview(task: Task, failedSrcs: string[] = []): TaskPreviewModel
   const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
 
   if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc, label: '视频帧' };
+    return { kind: 'image', src: thumbnailSrc, label: '预览图' };
   }
 
   if (task.local_status === 'failed') {
-    return { kind: 'empty', label: '失败无视频帧' };
+    return { kind: 'empty', label: '失败无预览' };
   }
 
   if (['submitted', 'running'].includes(task.local_status)) {
-    return { kind: 'empty', label: '等待视频帧' };
+    return { kind: 'empty', label: '等待预览' };
   }
 
-  return { kind: 'empty', label: '暂无视频帧' };
+  return { kind: 'empty', label: '暂无预览' };
 }
 
 function TaskPreview({ task }: { task: Task }) {
