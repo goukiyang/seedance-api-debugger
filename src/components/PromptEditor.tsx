@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, ImagePlus, Maximize2, X } from 'lucide-react';
 
 interface ReferenceLabel {
@@ -17,6 +17,9 @@ interface Props {
 }
 
 const MAX_CHARS = 2000;
+const PROMPT_TEXTAREA_MAX_HEIGHT = 320;
+const PROMPT_TEXTAREA_MOBILE_MAX_HEIGHT = 280;
+const MOBILE_QUERY = '(max-width: 640px)';
 
 function insertTextAtRange(value: string, insertText: string, start: number, end: number) {
   const next = `${value.slice(0, start)}${insertText}${value.slice(end)}`;
@@ -24,6 +27,19 @@ function insertTextAtRange(value: string, insertText: string, start: number, end
     next,
     cursor: start + insertText.length,
   };
+}
+
+function getPromptTextareaMaxHeight() {
+  if (typeof window === 'undefined') return PROMPT_TEXTAREA_MAX_HEIGHT;
+  return window.matchMedia(MOBILE_QUERY).matches ? PROMPT_TEXTAREA_MOBILE_MAX_HEIGHT : PROMPT_TEXTAREA_MAX_HEIGHT;
+}
+
+function fitTextareaHeight(textarea: HTMLTextAreaElement) {
+  const maxHeight = getPromptTextareaMaxHeight();
+  textarea.style.height = 'auto';
+  const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+  textarea.style.height = `${nextHeight}px`;
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
 
 export function PromptEditor({
@@ -40,6 +56,12 @@ export function PromptEditor({
 
   const hasReferences = referenceLabels.length > 0;
   const canOpenExpanded = value.length <= MAX_CHARS;
+
+  const resizeMainTextarea = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    fitTextareaHeight(textarea);
+  }, []);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
@@ -104,6 +126,16 @@ export function PromptEditor({
     onChange(draft);
     setExpanded(false);
   }, [draft, onChange]);
+
+  useLayoutEffect(() => {
+    resizeMainTextarea();
+  }, [resizeMainTextarea, value]);
+
+  useEffect(() => {
+    const handleResize = () => resizeMainTextarea();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [resizeMainTextarea]);
 
   useEffect(() => {
     if (!expanded) return;

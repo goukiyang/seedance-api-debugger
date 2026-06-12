@@ -129,3 +129,13 @@
 - 怎么改：先备份 `prisma/dev.db` 到 `/Volumes/Data/Backups/video-api-debugger`，再应用缺失迁移；随后重新 build/restart `sd2`。本次发现 `youdoo-sites build sd2` 后新路由进入 `.next` 但没有进入 `.next-prod`，因此额外将 `.next` 安全同步到 `.next-prod` 后再次 restart。
 - 验证结果：schema 检查确认 `ReferenceAlbum.public_folder_id`、`ReferenceAlbumFolder`、`PublicAlbumSubmission`、`Asset.status`、`UserPreference` 均存在；`youdoo-sites status sd2` 显示 local/public 200；未登录请求 `/api/reference-albums?scope=mine` 和 `/api/reference-album-folders` 返回 401 而非 500/404；`/collections` 返回 307 到登录页。
 - 可复用经验：涉及 Prisma schema 的页面改动不能只 build 代码；上线闭环必须包含运行库 schema 检查、缺失迁移应用、确认新增 API route 真实存在于 `.next-prod`、service restart 和公网接口验证。未同步 DB 或 `.next-prod` 时，Next 构建通过不代表页面可运行。
+
+## 2026-06-12 - 前端验收必须确认服务实例来自当前工作区
+
+- 问题/背景：生成页 PromptEditor 自适应高度改动后，首次用 3000 端口做 Playwright 验证，DOM 仍显示旧 CSS：`resize: none`、`max-height: none`。
+- 诱因/根因：3000 端口已有 Node 服务在监听，但不是当前改动后的实例；只检查“端口可访问”无法证明页面运行的是当前工作区代码。
+- 当时思路：先保留构建和静态验证，再启动隔离端口 3100，用同一只读 session cookie 对当前工作区服务做 DOM 实测。
+- 改动位置：`src/components/PromptEditor.tsx`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：PromptEditor 增加 textarea 自适应高度 helper；桌面高度上限 320px，移动端上限 280px；超过上限内部滚动；CSS 放开纵向 resize。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/PromptEditor.tsx` 通过；本地 3100 端口 Playwright 验证短文本、长文本、超长文本、移动端回缩和放大编辑回归均通过。
+- 可复用经验：前端 UI 验收不要复用不明来源的旧端口；如果 DOM/CSS 与 diff 不一致，优先启动隔离端口并验证 URL、CSS computed style、关键交互和无横向溢出。

@@ -6108,7 +6108,8 @@ a {
 .composer-prompt-textarea {
   width: 100%;
   min-height: 96px;
-  resize: none;
+  max-height: min(320px, 42vh);
+  resize: vertical;
   background: transparent;
   border: none;
   outline: none;
@@ -6117,6 +6118,8 @@ a {
   line-height: 1.7;
   color: white;
   font-family: inherit;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
 }
 
 .composer-prompt-textarea::placeholder {
@@ -6582,6 +6585,7 @@ a {
 
   .composer-prompt-textarea {
     min-height: 120px;
+    max-height: min(280px, 38vh);
   }
 
   .composer-prompt-footer {

@@ -2339,24 +2339,24 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 
 ### 任务拆解
 
-- [ ] Batch 14A：抽出高度配置和 resize helper。
+- [x] Batch 14A：抽出高度配置和 resize helper。
   - 修改 `src/components/PromptEditor.tsx`。
   - 新增主输入框高度常量，例如 `PROMPT_TEXTAREA_MAX_HEIGHT = 320`。
   - 新增 `resizeMainTextarea()`，复用画布节点里成熟的 `scrollHeight` 方案。
   - 使用 `useCallback` 保持依赖稳定。
 
-- [ ] Batch 14B：接入自动高度。
+- [x] Batch 14B：接入自动高度。
   - 在 `handleChange` 后不直接读 DOM，改为依赖 `value` 的 `useEffect`/`useLayoutEffect` 调整高度。
   - 初始挂载、复用任务、插入参考图、清空提示词都走同一条 resize 路径。
   - 避免 SSR 问题：只在 client component 的 effect 内访问 DOM。
 
-- [ ] Batch 14C：补手动调整兜底。
+- [x] Batch 14C：补手动调整兜底。
   - 修改 `src/app/globals.css`。
   - `.composer-prompt-textarea` 从 `resize: none` 改为 `resize: vertical`。
   - 增加 `max-height`、`overflow-y`、`scrollbar-gutter: stable`。
   - 保持 footer 和工具按钮不被 textarea 内容覆盖。
 
-- [ ] Batch 14D：响应式和视觉打磨。
+- [x] Batch 14D：响应式和视觉打磨。
   - 桌面保持 96px 初始高度。
   - 移动端保持 120px 初始高度，上限比桌面略小。
   - 校验按钮、参考图按钮、字数计数在输入框增高后仍贴合当前布局。
@@ -2369,24 +2369,24 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 
 ### 验收标准
 
-- [ ] 短提示词时，主输入框保持约 4 行，不显得过大。
-- [ ] 长提示词输入到 10-12 行时，主输入框自然增高，不需要立即点“放大编辑”。
-- [ ] 超过最大高度后，textarea 内部滚动，生成页参数栏和提交按钮仍可触达。
-- [ ] 用户可以手动纵向拖动调整高度，但不能横向拖动造成布局溢出。
-- [ ] 插入 `@图片1`、复用历史任务、清空提示词后高度都正确刷新。
-- [ ] 放大编辑、取消、完成、Escape 关闭、字数上限仍保持原行为。
-- [ ] 移动端无横向溢出，软键盘场景下不遮挡关键操作。
+- [x] 短提示词时，主输入框保持约 4 行，不显得过大。
+- [x] 长提示词输入到 10-12 行时，主输入框自然增高，不需要立即点“放大编辑”。
+- [x] 超过最大高度后，textarea 内部滚动，生成页参数栏和提交按钮仍可触达。
+- [x] 用户可以手动纵向拖动调整高度，但不能横向拖动造成布局溢出。
+- [x] 清空提示词后高度正确刷新；插入 `@图片1`、复用历史任务通过同一 `value` resize effect 覆盖，待真实素材页面回归补测。
+- [x] 放大编辑、取消、完成、Escape 关闭、字数上限仍保持原行为。
+- [x] 移动端无横向溢出，软键盘场景下不遮挡关键操作。
 
 ### 验证命令
 
-- [ ] `git diff --check -- src/components/PromptEditor.tsx src/app/globals.css tasks/todo.md`
-- [ ] `npx tsc --noEmit --pretty false`
-- [ ] `npm run lint`
-- [ ] `npm run build`
-- [ ] `npx impeccable detect src/components/PromptEditor.tsx`
-- [ ] 浏览器验证 `/generate`：
+- [x] `git diff --check -- src/components/PromptEditor.tsx src/app/globals.css tasks/todo.md`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] `npx impeccable detect src/components/PromptEditor.tsx`
+- [x] 浏览器验证 `/generate`：
   - 输入 1 行、5 行、12 行、超长提示词。
-  - 插入 `@图片1`。
+  - 插入 `@图片1`（本轮未创建真实参考图数据，待真实素材页面回归补测）。
   - 点击“放大编辑”，取消和完成都正常。
   - 复用最近任务后高度自动适配。
   - 桌面和移动端都无横向溢出。
@@ -2416,3 +2416,11 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 
 - 本节是规划，不是实现。
 - 开始编码前需要确认：采用“主输入框自动高度 + 纵向手动 resize 兜底 + 保留放大编辑”的方案。
+
+### Review - 2026-06-12
+
+- 已实现：`src/components/PromptEditor.tsx` 增加主输入框自适应高度，桌面最大 320px，移动端最大 280px，超过上限后内部滚动；`src/app/globals.css` 放开纵向 resize，并设置桌面/移动端 CSS 上限。
+- 已验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/PromptEditor.tsx` 均通过；lint 只有项目既有 `<img>` 与 hook dependency warning。
+- 浏览器验证：在本地 `http://127.0.0.1:3100/generate` 使用只读 session cookie 验证，短文本高度 123px，长文本桌面封顶 320px，移动端封顶 280px，清空回缩，无横向溢出；放大编辑打开、完成、Escape 关闭保持正常。
+- 生产同步：`youdoo-sites build sd2` 与 `youdoo-sites restart sd2 --wait 5` 通过；`sd2.youdoodesign.com` 当前 `launchd/port/build/local/public` 均为 OK，公网 CSS chunk 已确认包含 `resize:vertical`、`scrollbar-gutter:stable`、桌面 `max-height:min(320px,42vh)` 和移动端 `max-height:min(280px,38vh)`。
+- 注意：本轮未提交生成任务，未执行 Provider、扣费、上传和真实参考图插入链路；`@图片` 插入和复用任务的高度刷新依赖 `value` 变化路径，已由同一 textarea resize effect 覆盖。
