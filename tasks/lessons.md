@@ -120,6 +120,16 @@
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/ShareAlbumDialog.tsx` 通过；未执行数据库写入和多账号浏览器验收。
 - 可复用经验：权限共享类需求先确认“授权同一资源”还是“复制成新资源”；共享图集应复用 `AlbumShare`，公共图集才走复制和审核。关闭全部共享必须恢复 visibility，但不能破坏项目图集原有项目权限。
 
+## 2026-06-13 - 预览区域不要用“视频帧”做用户可见标签
+
+- 问题/背景：用户反馈最近任务、任务列表和后台产出留存里的“视频帧”措辞会让人误以为金额或标签写在截图/视频内容上，要求去掉该说法。
+- 诱因/根因：页面把缩略图、视频预览和空状态都统一叫“视频帧”，这个词偏技术实现，不符合用户在卡片里快速识别任务内容的心智。
+- 当时思路：只改用户可见文案和最近任务卡正文层级，不改任务数据、预览来源、扣费、Provider 或隐藏/恢复逻辑。
+- 改动位置：`src/app/generate/page.tsx`、`src/app/tasks/page.tsx`、`src/app/admin/outputs/AdminOutputsClient.tsx`、`src/app/admin/page.tsx`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：把用户可见的“视频帧/等待视频帧/暂无视频帧/失败无视频帧”统一改为“预览图/等待预览/暂无预览/失败无预览”；最近任务卡提示词拆成日期和正文两段，日期前置，正文使用更小字号并限制两行。
+- 验证结果：`rg` 确认运行代码与任务文档无“视频帧”残留；`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 通过；本地 3100 浏览器验收 `/generate`、`/tasks`、`/admin/outputs` 均无“视频帧”，且 `/generate` 最近任务正文计算字号为 `8px`、桌面无横向溢出。
+- 可复用经验：预览卡片的标签应描述用户感知对象，优先用“预览/预览图/视频预览”，不要暴露“帧”这种实现词；金额、状态、标签必须放在卡片 UI 层，不能让用户误解为叠加在图片或视频内容上。
+
 ## 2026-06-11 - 上线前必须同步 SQLite schema
 
 - 问题/背景：参考图集页出现 `Internal server error`，公网日志报 `main.ReferenceAlbum.public_folder_id` 不存在，同时工作台日志报 `main.Asset.status` 和 `UserPreference` 缺失。
