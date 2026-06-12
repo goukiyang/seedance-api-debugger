@@ -2271,3 +2271,148 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - 已接入图集详情页和图集列表页：可管理图集显示 `转为共享` / `共享设置`，卡片和摘要显示 active share 数量；公共图集仍走公共文件夹和审核流程。
 - 已验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/ShareAlbumDialog.tsx` 通过；lint/build 仍输出项目既有 `<img>` 与 hook dependency warning。
 - 未执行浏览器和多账号行为验收：本轮未执行数据库写入或迁移命令；当前工作区已有前序图集/历史图片迁移未应用到运行库时，`/collections` 相关 API 可能先被缺表或缺列挡住。需在目标环境应用既有迁移后，再验证添加共享、共享给我的、权限修改、单个移除和关闭全部共享。
+
+---
+
+## 2026-06-12 生成提示词输入框自适应高度规划
+
+### 需求本质
+
+- 用户表面需求：生成页提示词输入框可以根据需要调整高度大小，或者自动适配。
+- 本质目标：用户写短提示词时不要被大输入框占空间；写长提示词、分镜、镜头运动、参考图说明时，不要被固定 4 行高度打断，也不要频繁打开“放大编辑”。
+- 不可变约束：
+  - 生成页主任务仍是快速提交生成，输入框不能把参考图、状态行、参数栏和提交按钮挤到难以触达。
+  - 不能破坏现有 `@图片1` 插入、字数限制、放大编辑弹层、焦点恢复和提交校验。
+  - 不改 Provider、扣费、任务创建、prompt 渲染和参考图解析逻辑。
+  - 移动端不能产生横向溢出，不能让 textarea 盖住 footer 工具条。
+
+### 当前代码依据
+
+- `src/components/PromptEditor.tsx` 的 `PromptEditor` 维护主输入框 `textareaRef` 和放大输入框 `expandedTextareaRef`，当前主输入框在 `handleChange` 中只做 2000 字限制，没有高度逻辑。
+- `src/components/PromptEditor.tsx` 第 177-187 行渲染主 textarea，固定 `rows={4}`，class 为 `.composer-prompt-textarea`。
+- `src/components/PromptEditor.tsx` 第 189-211 行渲染 footer，里面有规则提示、参考图按钮、“放大编辑”和字数计数；高度调整必须不遮挡这一排工具。
+- `src/components/PromptEditor.tsx` 第 214-248 行已有“放大编辑”弹层，适合承载长文案深度编辑，不需要再新增第二套大编辑器。
+- `src/app/globals.css` 第 6108-6120 行 `.composer-prompt-textarea` 当前 `min-height: 96px`、`resize: none`，导致用户既不能拖动，也不能自动长高。
+- `src/app/globals.css` 第 6583-6585 行移动端把 `.composer-prompt-textarea` 的 `min-height` 提到 `120px`，移动端规划需保留更舒适的初始高度。
+- `src/components/canvas/full/nodes.tsx` 第 298-306 行已有 textarea 自动增高参考实现：先设 `height=auto`，再取 `scrollHeight` 和 `maxHeight` 的较小值，超过上限后启用内部滚动。
+
+### 设计方向
+
+- 推荐方案：自动适配为主，手动 resize 作为兜底，放大编辑保留为深度编辑。
+- 主输入框初始高度：
+  - 桌面：约 4 行，保持当前 96px 左右。
+  - 移动端：约 5 行，保持当前 120px 左右。
+- 自动增长上限：
+  - 桌面：`min(320px, 42vh)`，足够写完整分镜，但不会吞掉生成参数和按钮。
+  - 移动端：`min(280px, 38vh)`，避免软键盘出现后页面被 textarea 占满。
+- 超过上限后：
+  - textarea 内部出现纵向滚动。
+  - footer 继续固定在输入框下方，不被内容覆盖。
+  - “放大编辑”仍然可用，作为长提示词整理模式。
+- 手动调整：
+  - 允许 `resize: vertical`，但配合 `min-height`/`max-height` 限制。
+  - 用户手动拖动后，本轮编辑优先尊重用户手动高度；后续清空或复用任务时可重新回到自动高度。
+
+### 有没有更优雅的方式
+
+- 更优雅方案不是简单把 CSS 改成 `resize: vertical`，那会让 footer、移动端和长 prompt 溢出不可控。
+- 更优雅方案是把 PromptEditor 变成“两级编辑”：
+  - 主态：自动高度，适合 1-12 行提示词，跟随用户输入自然扩展。
+  - 深度态：沿用现有放大编辑，适合长分镜、复杂运镜、逐秒说明。
+- 这样不用新增依赖，也不引入新的页面结构；只是补齐主输入框的高度状态机。
+
+### 交互细节
+
+- 输入时自动扩展：
+  - 每次 `value` 变化后，用 `requestAnimationFrame` 调整主 textarea 高度。
+  - 逻辑：`height='auto'` -> `nextHeight=Math.min(scrollHeight,maxHeight)` -> 设置 `height` -> 根据是否超过上限切换 `overflowY`。
+- 插入 `@图片N` 后自动扩展：
+  - `insertMainReference` 调用 `onChange(next)` 后，下一轮 `value` 变化触发 resize。
+  - 光标恢复逻辑保持不变。
+- 复用历史任务后自动扩展：
+  - `GenerationComposer` 通过 `setPrompt(reuseDraft.prompt)` 更新值，`PromptEditor` 根据 `value` 变化自动调整。
+- 清空提示词后回缩：
+  - 当 `value.trim()` 为空时，回到最小高度。
+- 放大编辑：
+  - 维持当前弹层，不强制自动增长。
+  - 可选增强：给 `.composer-prompt-expanded-textarea` 改为 `resize: vertical` 或让它占满 panel 剩余高度，但不作为第一批必须项。
+
+### 任务拆解
+
+- [ ] Batch 14A：抽出高度配置和 resize helper。
+  - 修改 `src/components/PromptEditor.tsx`。
+  - 新增主输入框高度常量，例如 `PROMPT_TEXTAREA_MAX_HEIGHT = 320`。
+  - 新增 `resizeMainTextarea()`，复用画布节点里成熟的 `scrollHeight` 方案。
+  - 使用 `useCallback` 保持依赖稳定。
+
+- [ ] Batch 14B：接入自动高度。
+  - 在 `handleChange` 后不直接读 DOM，改为依赖 `value` 的 `useEffect`/`useLayoutEffect` 调整高度。
+  - 初始挂载、复用任务、插入参考图、清空提示词都走同一条 resize 路径。
+  - 避免 SSR 问题：只在 client component 的 effect 内访问 DOM。
+
+- [ ] Batch 14C：补手动调整兜底。
+  - 修改 `src/app/globals.css`。
+  - `.composer-prompt-textarea` 从 `resize: none` 改为 `resize: vertical`。
+  - 增加 `max-height`、`overflow-y`、`scrollbar-gutter: stable`。
+  - 保持 footer 和工具按钮不被 textarea 内容覆盖。
+
+- [ ] Batch 14D：响应式和视觉打磨。
+  - 桌面保持 96px 初始高度。
+  - 移动端保持 120px 初始高度，上限比桌面略小。
+  - 校验按钮、参考图按钮、字数计数在输入框增高后仍贴合当前布局。
+  - 不新增解释性大段文案；只保留当前规则提示和放大编辑入口。
+
+- [ ] Batch 14E：可选深度编辑增强。
+  - 评估 `.composer-prompt-expanded-textarea` 是否允许 `resize: vertical`。
+  - 如果改，必须限制在弹层内部，不影响主页面滚动。
+  - 如果移动端体验不好，保持现状，不做额外改动。
+
+### 验收标准
+
+- [ ] 短提示词时，主输入框保持约 4 行，不显得过大。
+- [ ] 长提示词输入到 10-12 行时，主输入框自然增高，不需要立即点“放大编辑”。
+- [ ] 超过最大高度后，textarea 内部滚动，生成页参数栏和提交按钮仍可触达。
+- [ ] 用户可以手动纵向拖动调整高度，但不能横向拖动造成布局溢出。
+- [ ] 插入 `@图片1`、复用历史任务、清空提示词后高度都正确刷新。
+- [ ] 放大编辑、取消、完成、Escape 关闭、字数上限仍保持原行为。
+- [ ] 移动端无横向溢出，软键盘场景下不遮挡关键操作。
+
+### 验证命令
+
+- [ ] `git diff --check -- src/components/PromptEditor.tsx src/app/globals.css tasks/todo.md`
+- [ ] `npx tsc --noEmit --pretty false`
+- [ ] `npm run lint`
+- [ ] `npm run build`
+- [ ] `npx impeccable detect src/components/PromptEditor.tsx`
+- [ ] 浏览器验证 `/generate`：
+  - 输入 1 行、5 行、12 行、超长提示词。
+  - 插入 `@图片1`。
+  - 点击“放大编辑”，取消和完成都正常。
+  - 复用最近任务后高度自动适配。
+  - 桌面和移动端都无横向溢出。
+
+### 风险与停止条件
+
+- 如果自动高度造成页面频繁跳动，先降低自动增长上限或只在输入后下一帧调整，不用动画强行掩盖。
+- 如果手动 resize 和自动 resize 互相抢高度，优先保留自动高度，手动 resize 作为后续项。
+- 如果移动端软键盘导致提交按钮不可达，降低移动端最大高度。
+- 如果改动影响 `@图片` 插入光标位置、放大编辑草稿或提交校验，立即停止并先修 PromptEditor 状态流。
+
+### Git Plan
+
+- 当前分支：`codex/minimal-feedback-loop`。
+- 当前工作区已有多处未提交改动，落地前必须再次 `git status`，只触碰本计划范围。
+- 预计修改文件：
+  - `src/components/PromptEditor.tsx`
+  - `src/app/globals.css`
+  - `tasks/todo.md`
+- 不修改：
+  - `src/components/GenerationComposer.tsx`，除非 PromptEditor 需要新增明确 props。
+  - Provider、扣费、任务创建、prompt 解析、参考图上传和图集逻辑。
+- 上线策略：
+  - 如需同步 `sd2` 线上，继续使用隔离 worktree 构建，避免夹带当前工作区其它未提交改动。
+
+### HARD-GATE
+
+- 本节是规划，不是实现。
+- 开始编码前需要确认：采用“主输入框自动高度 + 纵向手动 resize 兜底 + 保留放大编辑”的方案。
