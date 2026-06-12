@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
   const ratio = body.ratio || '16:9';
   const duration: VideoDuration = body.duration || 5;
   const resolution: VideoResolution = body.resolution || '720p';
+  const resolutionApprovalConfirmed = body.resolution_approval_confirmed === true || body.resolutionApprovalConfirmed === true;
 
   if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
   if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
@@ -112,6 +113,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;
+  }
+
+  if (project.type !== 'personal' && resolution === '1080p' && !resolutionApprovalConfirmed) {
+    return errorJson('1080p 生成需要先确认审批通过', 403);
   }
 
   // --- Pricing ---
@@ -408,7 +413,7 @@ export async function POST(request: NextRequest) {
           snapshot_id: snapshot.id,
           params_json: JSON.stringify({
             ratio, duration, resolution, seed,
-            generateAudio, returnLastFrame, watermark,
+            generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
             referenceAlbumIds: generationReferenceAlbumIds,
             referenceImageIds: generationReferenceImageIds,
             preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),

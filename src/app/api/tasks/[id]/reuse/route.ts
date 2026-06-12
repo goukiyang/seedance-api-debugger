@@ -153,6 +153,7 @@ export async function POST(
         generate_audio: true,
         return_last_frame: task.return_last_frame ?? asBool(taskParams.returnLastFrame, false),
         watermark: task.watermark ?? asBool(taskParams.watermark, false),
+        resolution_approval_confirmed: asBool(taskParams.resolutionApprovalConfirmed, false),
         project_id: task.project_id,
       },
       workspace_id: workspaceId,

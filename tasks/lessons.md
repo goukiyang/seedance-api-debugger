@@ -130,6 +130,16 @@
 - 验证结果：`rg` 确认运行代码与任务文档无“视频帧”残留；`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 通过；本地 3100 浏览器验收 `/generate`、`/tasks`、`/admin/outputs` 均无“视频帧”，且 `/generate` 最近任务正文计算字号为 `8px`、桌面无横向溢出。
 - 可复用经验：预览卡片的标签应描述用户感知对象，优先用“预览/预览图/视频预览”，不要暴露“帧”这种实现词；金额、状态、标签必须放在卡片 UI 层，不能让用户误解为叠加在图片或视频内容上。
 
+## 2026-06-13 - 1080p 项目生成审批必须前后端双闸
+
+- 问题/背景：非个人项目的 1080p 生成会直接影响团队成本，需要在生成前显式确认审批，且复用/重试不能绕过该确认。
+- 诱因/根因：如果只在前端展示提示，API 直调仍可能创建 1080p 项目任务；如果只在后端拦截，用户不知道为什么无法提交。
+- 当时思路：前端在非个人项目 + 1080p 时显示确认复选框并禁用提交；后端 `/api/tasks/create` 再按项目类型和分辨率硬拦截；复用/重试草稿保留确认状态，避免参数丢失。
+- 改动位置：`src/components/GenerationComposer.tsx`、`src/app/generate/page.tsx`、`src/app/api/tasks/create/route.ts`、`src/app/api/tasks/[id]/reuse/route.ts`、`src/app/api/video/retry/[id]/route.ts`、`src/app/globals.css`。
+- 怎么改：提交参数新增 `resolution_approval_confirmed`；非个人项目 1080p 未确认时前端阻断并禁用按钮；后端创建任务前返回 403；任务 params 快照记录 `resolutionApprovalConfirmed`，复用/重试草稿带回该字段。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 通过；本地 3100 浏览器验收团队项目切到 1080p 时确认框出现且未勾选禁用提交，勾选后提交按钮恢复，切到 720p 后确认框消失；未触发真实生成。
+- 可复用经验：涉及成本或权限的生成限制必须“UI 可解释 + API 强制”，并把复用、重试、草稿恢复一起纳入同一条参数链路。
+
 ## 2026-06-11 - 上线前必须同步 SQLite schema
 
 - 问题/背景：参考图集页出现 `Internal server error`，公网日志报 `main.ReferenceAlbum.public_folder_id` 不存在，同时工作台日志报 `main.Asset.status` 和 `UserPreference` 缺失。

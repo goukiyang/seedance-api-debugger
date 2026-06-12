@@ -28,6 +28,18 @@ a {
   text-decoration: none;
 }
 
+.sr-only {
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .container {
   max-width: 1200px;
   margin: 0 auto;
@@ -5581,6 +5593,24 @@ a {
   color: rgba(255, 255, 255, 0.68);
 }
 
+.composer-resolution-approval {
+  margin-bottom: 10px;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.1);
+  color: rgba(253, 230, 138, 0.98);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.composer-resolution-approval input {
+  margin-top: 1px;
+}
+
 .composer-recent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -5666,7 +5696,9 @@ a {
 
 .composer-task-card-prompt {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 4px;
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.8);
@@ -5679,6 +5711,7 @@ a {
   display: block;
   font-size: 8px;
   line-height: 1.45;
+  min-width: 0;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;

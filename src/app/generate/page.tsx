@@ -105,6 +105,7 @@ interface ReuseDraft {
   generateAudio: boolean;
   returnLastFrame: boolean;
   watermark: boolean;
+  resolutionApprovalConfirmed?: boolean;
   projectId: string | null;
 }
 
@@ -128,6 +129,10 @@ const MAX_ACTIVE_POLLING_TASKS = 12;
 function toPositiveInt(value: unknown, fallback: number): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function normalizeRecentTaskListResponse(data: TaskListResponse) {
@@ -235,7 +240,6 @@ function projectRemovalTitle(project: ProjectOption): string {
 type TaskPreviewModel = {
   kind: 'image' | 'empty';
   src?: string;
-  label: string;
 };
 
 function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPreviewModel {
@@ -243,10 +247,10 @@ function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPr
   const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
 
   if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc, label: '任务预览' };
+    return { kind: 'image', src: thumbnailSrc };
   }
 
-  return { kind: 'empty', label: ['submitted', 'running'].includes(task.local_status) ? '等待预览' : '暂无预览' };
+  return { kind: 'empty' };
 }
 
 function RecentTaskPreview({ task }: { task: TaskItem }) {
@@ -262,8 +266,7 @@ function RecentTaskPreview({ task }: { task: TaskItem }) {
       {preview.kind === 'image' && preview.src && (
         <img src={preview.src} alt="任务截图" loading="lazy" onError={() => markFailed(preview.src)} />
       )}
-      {preview.kind === 'empty' && <span>{preview.label}</span>}
-      {preview.kind === 'empty' && <small>{preview.label}</small>}
+      {preview.kind === 'empty' && <span className="sr-only">{task.local_status === 'failed' ? '失败' : task.local_status}</span>}
     </div>
   );
 }
@@ -632,6 +635,7 @@ export default function GeneratePage() {
         generateAudio: Boolean(data.draft.generate_audio),
         returnLastFrame: Boolean(data.draft.return_last_frame),
         watermark: Boolean(data.draft.watermark),
+        resolutionApprovalConfirmed: asBoolean(data.draft.resolution_approval_confirmed, false),
         projectId: data.draft.project_id || null,
       });
       const skipped = data.skipped_references || 0;
@@ -891,6 +895,7 @@ export default function GeneratePage() {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
+    resolutionApprovalConfirmed: boolean;
     referenceImageIds?: string[];
   }) => {
     setSubmitting(true);
@@ -916,6 +921,7 @@ export default function GeneratePage() {
           generate_audio: params.generateAudio,
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
+          resolution_approval_confirmed: params.resolutionApprovalConfirmed,
           idempotency_key: idempotencyKey,
           project_id: selectedProjectId || undefined,
           reference_image_ids: params.referenceImageIds || [],
@@ -1298,6 +1304,7 @@ export default function GeneratePage() {
           collections={collections}
           initialSettings={generationDefaults}
           reuseDraft={reuseDraft}
+          require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
           onCollectionNew={handleCollectionNew}
@@ -1345,9 +1352,9 @@ export default function GeneratePage() {
                             )}
                             <span className={`composer-task-card-status ${task.local_status}`}>
                               {task.local_status === 'submitted' ? '排队中' :
-                               task.local_status === 'running' ? '生成中' :
-                               task.local_status === 'succeeded' ? '已完成' :
-                               task.local_status === 'failed' ? '失败' : task.local_status}
+                                task.local_status === 'running' ? '生成中' :
+                                task.local_status === 'succeeded' ? '已完成' :
+                                task.local_status === 'failed' ? '失败' : task.local_status}
                             </span>
                           </div>
                         </div>

@@ -112,10 +112,12 @@ interface Props {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
+    resolutionApprovalConfirmed?: boolean;
   } | null;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
+  require1080pApproval: boolean;
   onSubmit: (params: {
     prompt: string;
     generationMode: GenerationMode;
@@ -126,6 +128,7 @@ interface Props {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
+    resolutionApprovalConfirmed: boolean;
     referenceImageIds: string[];
   }) => Promise<void>;
   submitError: string | null;
@@ -152,6 +155,7 @@ export function GenerationComposer({
   isPolling,
   onReset,
   reuseDraft,
+  require1080pApproval,
 }: Props) {
   const workspace = useWorkspace();
   const appliedReuseDraftRef = React.useRef<string | null>(null);
@@ -179,6 +183,9 @@ export function GenerationComposer({
   const [generateAudio, setGenerateAudio] = useState(true);
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
+  const [resolutionApprovalConfirmed, setResolutionApprovalConfirmed] = useState(false);
+
+  const need1080pApproval = require1080pApproval && resolution === '1080p';
 
   // ============================================================================
   // Validation
@@ -207,8 +214,11 @@ export function GenerationComposer({
     if (!validation.valid) {
       return `提示词引用了图${validation.maxMissing}，但当前只有 ${workspace.assets.length} 张素材`;
     }
+    if (need1080pApproval && !resolutionApprovalConfirmed) {
+      return '1080p 生成需要先确认审批通过。';
+    }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.assets.length, generationMode, validation]);
+  }, [prompt, workspace.uploadStatuses, workspace.assets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -230,7 +240,7 @@ export function GenerationComposer({
     return { message: null, tone: 'ok' as const };
   }, [hasAttemptedSubmit, isSubmitting, mentionNotice, prompt, submitBlocker]);
 
-  const canPressSubmit = !isSubmitting;
+  const canPressSubmit = !isSubmitting && !(need1080pApproval && !resolutionApprovalConfirmed);
 
   const estimatedPoints = useMemo(() => {
     return calculateEstimatedCostClient(resolution, duration);
@@ -351,8 +361,11 @@ export function GenerationComposer({
     setGenerateAudio(true);
     setReturnLastFrame(reuseDraft.returnLastFrame);
     setWatermark(reuseDraft.watermark);
+    setResolutionApprovalConfirmed(
+      require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
+    );
     void workspace.refresh();
-  }, [reuseDraft, workspace]);
+  }, [reuseDraft, require1080pApproval, workspace]);
 
   useEffect(() => {
     if (!initialSettings || appliedInitialSettingsRef.current || reuseDraft) return;
@@ -365,8 +378,15 @@ export function GenerationComposer({
     setGenerateAudio(initialSettings.generateAudio);
     setReturnLastFrame(initialSettings.returnLastFrame);
     setWatermark(initialSettings.watermark);
+    setResolutionApprovalConfirmed(false);
     setHasAttemptedSubmit(false);
   }, [initialSettings, reuseDraft]);
+
+  useEffect(() => {
+    if (!need1080pApproval) {
+      setResolutionApprovalConfirmed(false);
+    }
+  }, [need1080pApproval]);
 
   // ============================================================================
   // Handlers
@@ -385,11 +405,28 @@ export function GenerationComposer({
       generateAudio,
       returnLastFrame,
       watermark,
+      resolutionApprovalConfirmed: need1080pApproval ? resolutionApprovalConfirmed : false,
       referenceImageIds: workspace.assets
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
     });
-  }, [submitBlocker, isSubmitting, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, workspace.assets]);
+  }, [
+    submitBlocker,
+    isSubmitting,
+    onSubmit,
+    prompt,
+    generationMode,
+    ratio,
+    duration,
+    resolution,
+    seed,
+    generateAudio,
+    returnLastFrame,
+    watermark,
+    need1080pApproval,
+    resolutionApprovalConfirmed,
+    workspace.assets,
+  ]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
     if (workspace.assets.length > 0) {
@@ -646,6 +683,17 @@ export function GenerationComposer({
               onCopy={() => { navigator.clipboard.writeText(submitError); }}
             />
           </div>
+        )}
+
+        {need1080pApproval && (
+          <label className="composer-resolution-approval">
+            <input
+              type="checkbox"
+              checked={resolutionApprovalConfirmed}
+              onChange={(event) => setResolutionApprovalConfirmed(event.currentTarget.checked)}
+            />
+            <span>我已确认该任务经过 1080p 审批，允许直接生成</span>
+          </label>
         )}
 
         {/* 入队提示：短暂展示，不阻塞下一次生成 */}

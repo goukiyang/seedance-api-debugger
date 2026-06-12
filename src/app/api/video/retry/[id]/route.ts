@@ -152,6 +152,7 @@ export async function POST(
       generate_audio: true,
       return_last_frame: originalTask.return_last_frame ?? asBoolean(paramsJson.returnLastFrame, false),
       watermark: originalTask.watermark ?? asBoolean(paramsJson.watermark, false),
+      resolution_approval_confirmed: asBoolean(paramsJson.resolutionApprovalConfirmed, false),
       project_id: retryProject.id,
       reference_image_urls: uniquePreserveOrder(preferredReferenceImageUrls),
       reference_video_urls: parseJsonArray(originalTask.reference_video_urls),
