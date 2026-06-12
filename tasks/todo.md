@@ -2424,3 +2424,289 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - 浏览器验证：在本地 `http://127.0.0.1:3100/generate` 使用只读 session cookie 验证，短文本高度 123px，长文本桌面封顶 320px，移动端封顶 280px，清空回缩，无横向溢出；放大编辑打开、完成、Escape 关闭保持正常。
 - 生产同步：`youdoo-sites build sd2` 与 `youdoo-sites restart sd2 --wait 5` 通过；`sd2.youdoodesign.com` 当前 `launchd/port/build/local/public` 均为 OK，公网 CSS chunk 已确认包含 `resize:vertical`、`scrollbar-gutter:stable`、桌面 `max-height:min(320px,42vh)` 和移动端 `max-height:min(280px,38vh)`。
 - 注意：本轮未提交生成任务，未执行 Provider、扣费、上传和真实参考图插入链路；`@图片` 插入和复用任务的高度刷新依赖 `value` 变化路径，已由同一 textarea resize effect 覆盖。
+
+---
+
+## 2026-06-12 批量下载视频闭环规划
+
+### 需求本质
+
+- 用户表面需求：在现有网站里批量下载视频。
+- 用户真实目标：在任务列表、生成结果或后台产出里选中一批视频，一次拿到可交付文件，不要逐条点开、保存、复制链接。
+- 最优体验目标：默认下载一个 ZIP 文件；小批量立即打包，大批量转后台任务，用户仍然只需要一次确认和一个下载结果。
+- 不可变约束：
+  - 必须复用现有单个视频缓存链路：`src/lib/video/local-cache.ts` 的 `cacheTaskVideoToLocal()`。
+  - 必须复用现有任务权限语义：普通用户只能下载自己可见任务，管理员可在后台产出留存范围内批量下载。
+  - 不改变 Provider 生成、扣费、任务创建和视频状态刷新逻辑。
+  - 不把已过期 Provider 外链直接交给用户；下载前优先缓存为同源本地文件。
+  - 大文件不能拖死 Next.js 请求或阻塞其它操作。
+
+### 当前代码依据
+
+- 单个保存接口：`src/app/api/video/download/[id]/route.ts`，已做登录、任务查询、`assertCanViewTask()` 权限校验、任务成功状态校验，并调用 `cacheTaskVideoToLocal()`。
+- 本地缓存实现：`src/lib/video/local-cache.ts`，固定保存到 `public/videos/{taskId}.mp4`，已有同任务并发去重 `activeCacheTasks`，可刷新过期外链。
+- 同源播放/下载接口：`src/app/api/video/play/[id]/route.ts`，支持本地文件 range 播放；本轮批量下载不能只依赖该接口，因为它当前只按 task id 取文件或重定向 provider URL。
+- 我的任务页：`src/app/tasks/page.tsx`，已有分页任务列表、任务状态、实际扣费、本地视频字段和单条“查看详情 / 重新生成 / 从列表移除”操作，适合做普通用户批量入口。
+- 项目列表页：`src/app/projects/page.tsx`，项目卡已有项目名、描述、负责人、成员数、任务数、图集数和 `管理 / 归档为只读 / 恢复` 操作；适合增加项目级 `下载视频包` 入口。
+- 任务详情页：`src/app/tasks/[id]/page.tsx`，已有保存视频、打开视频、复制本地链接、下载视频按钮，适合复用文案和状态语义。
+- 后台产出接口：`src/app/api/admin/outputs/route.ts`，已有管理员筛选、任务状态、项目、用户、成本、留存状态字段，适合做管理员批量导出入口。
+
+### 目标对齐
+
+| 用户目标 | 页面入口 | 第一批交付 | 后续增强 | 验收口径 |
+|---|---|---|---|---|
+| 下载某个项目的全部可交付视频 | `/projects` 项目卡 `下载视频包` | 项目卡按钮打开确认弹窗，按项目范围生成 ZIP | 项目全部历史视频超过阈值时自动创建后台任务 | 用户不需要进入项目详情或任务列表，也能拿到该项目视频包 |
+| 从多个任务里挑一部分下载 | `/tasks` 任务列表多选 | 勾选任务后即时 ZIP 下载 | 支持跨页选择、保存选择状态 | 用户能精确控制下载范围 |
+| 管理员按筛选条件导出产出 | `/admin/outputs` | 暂不放第一批，先保留规划 | 后台任务打包、按筛选结果全量导出 | 不阻塞普通用户侧闭环 |
+| 下载后可交付、可复盘 | ZIP 文件 + `manifest.csv` | 视频文件名可读，manifest 包含任务与成本字段 | 增加封面图、项目说明、失败明细页 | ZIP 解压后直接可用于交付和归档 |
+| 避免误点和系统卡死 | 确认弹窗 + 阈值策略 | 点击项目卡按钮后先确认；超过阈值不给同步打包 | 后台任务进度、完成通知、失败重试 | 大批量不会让页面长时间无响应 |
+
+### 第一批任务目标
+
+- P0：项目卡入口必须成立。用户在 `/projects` 看到项目卡时，可以直接点 `下载视频包`，不用先进入项目详情。
+- P0：下载结果必须是一个 ZIP，不是连续弹出多个 mp4 下载。
+- P0：ZIP 内必须有 `manifest.csv`，否则批量下载只是拿文件，不方便项目交付和追溯。
+- P0：服务端必须逐条任务做权限校验，项目卡入口不能绕过任务可见性。
+- P1：`/tasks` 多选入口同步做，满足“跨项目挑选几个结果下载”的场景。
+- P1：大批量第一批先明确提示超过阈值，不做同步打包；后台任务作为第二批闭环。
+- P2：管理员 `/admin/outputs` 复用，等用户侧体验稳定后再做。
+
+### 方案选择
+
+推荐组合：B 即时 ZIP 下载为默认，C 后台任务式打包作为大批量兜底。
+
+- 方案 A：前端逐个触发下载。
+  - 优点：最小改动。
+  - 缺点：浏览器多文件下载限制明显，用户会收到多个下载弹窗，文件组织差。
+  - 结论：不作为最终体验，只可作为开发期 fallback。
+- 方案 B：即时 ZIP 下载。
+  - 优点：用户只下载一个文件，符合“批量下载”的心智；可以附带 `manifest.csv`。
+  - 缺点：需要 ZIP 依赖或 Node 流式打包；超大批量可能请求超时。
+  - 结论：普通用户默认方案。
+- 方案 C：后台任务式打包。
+  - 优点：适合大批量、大文件、管理员导出，有进度和失败明细。
+  - 缺点：需要新增批量任务模型和清理策略。
+  - 结论：超过阈值自动切换，作为稳定兜底。
+- 方案 D：管理员导出到服务器目录。
+  - 优点：适合内部归档和 PPT 演示素材落盘。
+  - 缺点：不是普通用户自助体验。
+  - 结论：作为管理员后续增强，不进入第一批用户侧闭环。
+
+### 有没有更优雅的方式
+
+- 更优雅方案不是简单在任务列表里加很多“下载”按钮，而是把下载理解成“交付包生成”。
+- 用户侧看到的是一个轻量动作：选中视频 -> 批量下载 -> 获得 ZIP。
+- 系统侧用同一套 `bulk download job` 抽象承接即时打包和后台打包：小批量同步返回 ZIP，大批量创建 job，再复用相同的缓存、命名、manifest 和错误汇总逻辑。
+- 这样后续后台产出、项目页、生成页最近任务都可以复用同一个批量下载能力，而不是每个页面各写一套。
+
+### 交互设计
+
+- 普通用户入口：
+  - `/tasks` 任务列表增加批量选择模式。
+  - 每张任务卡左上或操作区出现 checkbox。
+  - 顶部 sticky 批量工具条显示：已选数量、可下载数量、不可下载数量、预计打包方式。
+  - 主按钮：`批量下载 ZIP`。
+  - 次按钮：`清空选择`。
+- 项目卡入口：
+  - `/projects` 项目卡增加 `下载` 或 `下载视频包` 按钮，和 `管理`、`归档为只读` 同层，但视觉上不抢主入口。
+  - 按钮语义不是下载项目卡，而是下载该项目下可见的已完成视频。
+  - 点击后打开项目级批量下载确认弹窗，展示项目名、可下载视频数、不可下载数、预计打包方式。
+  - 如果项目没有可下载视频，按钮 disabled，文案为 `暂无可下载视频` 或 hover 说明原因。
+  - 归档项目仍允许下载历史视频；归档只影响继续生成和新增素材，不影响历史交付包。
+- 选择规则：
+  - 默认只允许选择 `local_status === 'succeeded'` 且有 `local_video_path` 或 `result_video_url` 的任务。
+  - 不满足条件的任务 checkbox disabled，并在 tooltip 或状态文案里说明“生成未完成 / 无视频链接 / 已移除”。
+- 确认弹窗：
+  - 展示数量、任务范围、预计行为。
+  - 小批量：`将打包为 ZIP，可能需要几秒到几分钟。`
+  - 大批量：`将创建后台打包任务，完成后可回来下载。`
+  - 展示失败预警：外链可能过期、缓存失败会进入失败明细。
+- 下载结果：
+  - 即时 ZIP：浏览器下载一个 `seedance-videos-YYYYMMDD-HHmm.zip`。
+  - ZIP 内文件名：`001_任务短ID_项目名_分辨率_秒数.mp4`，避免只看到随机 ID。
+  - 附带 `manifest.csv`：任务 ID、项目、生成者、创建时间、完成时间、分辨率、秒数、比例、实际扣费、提示词摘要、文件名、状态。
+- 大批量后台任务：
+  - 弹窗切换为进度视图：待缓存、缓存中、已打包、失败数量。
+  - 完成后展示 `下载 ZIP`、`复制下载链接`、`查看失败明细`。
+- 管理员入口：
+  - 第一批做用户侧 `/projects` 项目卡和 `/tasks` 多选闭环。
+  - 第二批在 `/admin/outputs` 复用同样选择器和批量下载弹窗。
+  - 管理员可按当前筛选结果“下载当前页选中项”，后续再做“下载全部筛选结果”。
+
+### 数据与接口设计
+
+- 第一批即时接口：
+  - `POST /api/video/bulk-download`
+  - 入参：`{ taskIds?: string[], projectId?: string }`
+  - 行为：校验登录 -> 按 `taskIds` 或 `projectId` 查询任务 -> 逐条权限校验 -> 过滤可下载 -> 调用 `cacheTaskVideoToLocal()` -> 流式打包 ZIP -> 返回文件。
+  - 约束：`taskIds` 和 `projectId` 第一批二选一；项目卡入口传 `projectId`，任务列表入口传 `taskIds`。
+  - 限制：普通用户单次最多 20 个；管理员第一批最多 50 个；超过阈值返回 `requires_background_job: true`。
+- 第二批后台任务接口：
+  - `POST /api/video/download-batches`
+  - `GET /api/video/download-batches/[id]`
+  - `GET /api/video/download-batches/[id]/file`
+  - `POST /api/video/download-batches/[id]/retry-failed`
+- 建议新增模型：
+  - `VideoDownloadBatch`：`id/user_id/status/source/scope_json/zip_path/file_size/total_count/success_count/failed_count/error_message/expires_at/created_at/updated_at/completed_at`
+  - `VideoDownloadBatchItem`：`id/batch_id/task_id/status/local_video_path/file_name/file_size/error_message/created_at/updated_at`
+- 文件存放：
+  - 临时 ZIP：`storage/download-batches/{batchId}.zip` 或 `public/downloads/video-batches/{batchId}.zip`。
+  - 如果走 public 目录，必须用不可猜测 batch id，并在下载接口里校验权限后读取文件，不直接暴露目录列表。
+- 依赖选择：
+  - 已选 `yazl` 做 Node 流式 ZIP；`archiver` 当前版本在本项目 Next 构建中触发导出条件错误，不作为第一批依赖。
+  - 如果不想新增依赖，必须评估 Node 原生没有 ZIP 打包能力，手写 ZIP 不值得。
+
+### 执行任务拆解
+
+- [x] Batch 15A：补 ZIP 与批量下载基础设施 Spec。
+  - 明确依赖：使用 `yazl`。
+  - 明确阈值：普通用户 20 个或 1GB 内即时；超过转后台任务。
+  - 明确文件命名、CSV 字段、失败项结构。
+  - 明确 API 入参同时支持 `projectId` 和 `taskIds`，但第一批一次请求只能使用一种范围。
+  - 输出最终接口契约后再编码。
+
+- [x] Batch 15B：抽批量下载服务层。
+  - 新增 `src/lib/video/bulk-download.ts`。
+  - 封装项目范围任务查询、指定任务查询、权限校验、可下载状态判断、缓存调用、文件名生成、manifest 生成。
+  - 普通用户权限复用 `assertCanViewTask()`。
+  - 管理员路径后续复用，但第一批不开放全部筛选结果下载。
+
+- [x] Batch 15C：实现即时 ZIP API。
+  - 新增 `src/app/api/video/bulk-download/route.ts`。
+  - 接收 `taskIds` 或 `projectId`，拒绝空数组、重复 ID、范围冲突、超过阈值。
+  - `projectId` 模式按当前用户可见任务查询该项目下已完成视频，不信任前端传入数量。
+  - 对每个任务调用 `cacheTaskVideoToLocal()`，失败项写入 manifest，不让单个失败中断整包。
+  - 成功视频加入 ZIP；如果没有任何成功视频，返回 400 和失败明细。
+  - 响应 header 设置 `Content-Type: application/zip`、`Content-Disposition`。
+
+- [x] Batch 15D：任务列表批量选择 UI。
+  - 修改 `src/app/tasks/page.tsx`。
+  - 增加选择状态、可下载判断、批量工具条、确认弹窗、下载中状态、失败提示。
+  - 下载时用 `fetch` 获取 blob，再触发一个 ZIP 文件下载。
+  - 保留原有查看详情、重新生成、从列表移除功能，不改变现有单条操作。
+
+- [x] Batch 15E：项目卡下载入口。
+  - 修改 `src/app/projects/page.tsx`。
+  - 在项目卡操作区增加 `下载视频包` 入口；所有可见项目成员可见，空项目或没有已完成视频时 disabled。
+  - 点击后复用批量下载确认弹窗，下载范围固定为该项目下当前用户可见的已完成视频。
+  - 第一批下载该项目最近 N 个可下载视频并明确显示数量；如果用户要项目全部历史视频，必须走后台任务或服务端分页查询。
+  - 保留原有 `管理`、`恢复`、`归档为只读` 链路，不改变项目权限和归档语义。
+
+- [x] Batch 15F：体验与状态闭环。
+  - 下载中展示阶段：准备任务、缓存视频、打包 ZIP、开始下载。
+  - 成功后提示：已打包 X 个，失败 Y 个，失败明细可在 ZIP 的 manifest 中查看。
+  - 禁止重复点击；下载取消先不做，后续由后台任务承接。
+  - 移动端批量工具条不遮挡任务卡操作。
+
+- [ ] Batch 15G：大批量后台任务兜底。
+  - 新增 Prisma 模型和迁移。
+  - 新增 batch API。
+  - 新增后台进度页或弹窗轮询。
+  - 新增过期清理策略，避免 ZIP 无限占用磁盘。
+  - 该批次在即时 ZIP 稳定后再做。
+
+- [ ] Batch 15H：管理员产出留存复用。
+  - 修改 `src/app/admin/outputs/AdminOutputsClient.tsx`。
+  - 增加当前页多选批量下载。
+  - 后续评估“下载全部筛选结果”是否必须走后台任务，不能同步请求。
+
+### 验收标准
+
+- [x] 普通用户在 `/tasks` 可多选已完成、有视频链接的任务。
+- [x] 普通用户在 `/projects` 项目卡可直接发起该项目视频包下载。
+- [x] 未完成、失败、无视频链接的任务不能被选中，并有明确原因。
+- [x] 选中 1-20 个任务后，点击一次即可下载一个 ZIP。
+- [x] 项目卡下载会先展示确认弹窗，不会误点后立即开始大批量下载。
+- [x] ZIP 内视频文件名可读，不只有 task id。
+- [x] ZIP 内包含 `manifest.csv`，字段覆盖任务 ID、项目、生成者、时间、参数、扣费、提示词摘要和失败原因。
+- [x] 有本地视频的任务不重复拉取 Provider；无本地视频但外链有效时会先缓存。
+- [x] Provider 外链过期时，调用现有刷新逻辑；刷新失败不影响其它视频入包。
+- [x] 普通用户不能通过传入其它用户 taskId 下载无权限视频，manifest 也不能泄露无权任务的项目、生成者、提示词或扣费元数据。
+- [ ] 管理员入口上线前，后台 API 也必须做管理员鉴权，不能复用普通用户接口绕过权限。
+- [ ] 大批量超过阈值时不会让请求挂死，返回后台任务兜底提示或创建后台任务。
+- [x] 移动端无横向溢出，批量工具条和弹窗可关闭、可恢复。
+
+### 验证计划
+
+- 静态验证：
+  - `git diff --check`
+  - `npx tsc --noEmit --pretty false`
+  - `npm run lint`
+  - `npm run build`
+  - `npx impeccable detect src/app/tasks/page.tsx`
+- API 验证：
+  - 未登录请求 `POST /api/video/bulk-download` 返回 401。
+  - 空数组、重复 ID、超过阈值返回明确错误。
+  - 同时传 `taskIds` 和 `projectId` 返回范围冲突错误。
+  - `projectId` 模式只打包当前用户可见项目内任务。
+  - 普通用户传入无权 taskId 返回跳过或 403，不泄露视频。
+  - 混合成功/失败任务时，ZIP 仍生成，并在 manifest 里记录失败项。
+- 文件验证：
+  - 解压 ZIP，确认视频可播放。
+  - `manifest.csv` 编码可被 Excel/Numbers 打开。
+  - 文件名不包含 `/`、空字符、过长 prompt 或不可用字符。
+- 浏览器验证：
+  - `/tasks` 桌面多选、取消、确认下载、失败提示。
+  - 移动端宽度 390px 无横向溢出。
+  - 单条原有按钮仍正常。
+- 权限验证：
+  - 普通用户 A 不能下载用户 B 的私有任务。
+  - 项目成员权限按 `assertCanViewTask()` 保持一致。
+  - 管理员后台入口必须使用 admin API。
+
+### 风险与回滚
+
+- 风险：ZIP 依赖引入后构建体积或 Edge runtime 不兼容。
+  - 控制：API route 明确使用 Node runtime；依赖只在服务端 import。
+- 风险：大文件同步打包超时。
+  - 控制：设置数量和大小阈值；超过阈值走后台任务。
+- 风险：Provider 外链过期导致批量失败。
+  - 控制：复用 `cacheTaskVideoToLocal()` 的刷新逻辑；单个失败不影响整包。
+- 风险：磁盘占用增长。
+  - 控制：即时 ZIP 不落盘或短期临时文件；后台 ZIP 设置 `expires_at` 和清理脚本。
+- 风险：权限扩大。
+  - 控制：服务端逐条校验任务权限；ZIP 文件下载也校验 batch owner/admin。
+- 回滚：
+  - 前端隐藏批量下载入口。
+  - 保留现有单个下载接口不变。
+  - 若后台任务表已上线，只停止创建新 batch，不删除已有数据。
+
+### Git Plan
+
+- 当前分支：`codex/minimal-feedback-loop`。
+- 当前工作区：规划前干净。
+- 规划提交只修改 `tasks/todo.md`。
+- 实现前必须重新 `git status`，避免混入其它改动。
+- 第一批预计修改文件：
+  - `src/lib/video/bulk-download.ts`
+  - `src/app/api/video/bulk-download/route.ts`
+  - `src/app/tasks/page.tsx`
+  - `src/app/projects/page.tsx`
+  - `src/app/globals.css`
+  - `tasks/todo.md`
+  - `tasks/lessons.md`
+- 如果需要 ZIP 依赖，预计修改：
+  - `package.json`
+  - `package-lock.json`
+- 第二批后台任务预计修改：
+  - `prisma/schema.prisma`
+  - `prisma/migrations/*`
+  - `src/app/api/video/download-batches/*`
+  - `scripts/*` 清理脚本（如需要）
+- 完成实现和验证后，做聚焦提交并推送当前分支；如果 GitHub 网络仍失败，保留本地 commit 并明确报告。
+
+### HARD-GATE
+
+- 已确认并进入实现。
+- ZIP 依赖落地为 `yazl`，不是 `archiver`。
+- 第一批范围：用户侧 `/projects` 项目卡下载视频包 + `/tasks` 多选即时 ZIP；超过阈值先提示不支持大批量，后台任务放第二批。
+
+### Review - 2026-06-12
+
+- 已实现：新增 `POST /api/video/bulk-download`，支持 `taskIds` 和 `projectId` 二选一；新增批量下载服务层，复用 `cacheTaskVideoToLocal()`，打包 ZIP 和 `manifest.csv`。
+- 已实现：`/projects` 项目卡新增 `下载视频包` 入口，先展示项目级确认弹窗；`/tasks` 增加本页可下载任务多选、批量工具条和确认弹窗。
+- 已调整：ZIP 依赖从规划推荐的 `archiver` 改为 `yazl`，因为 `archiver` 当前 ESM 导出条件会导致 Next build 失败。
+- 已验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/app/projects/page.tsx`、`npx impeccable detect src/app/tasks/page.tsx` 通过。
+- 已验证：本地 `http://127.0.0.1:3100` API smoke 通过，未登录返回 401，范围冲突返回 400，`taskIds` 和 `projectId` 模式都能生成 ZIP；ZIP 内含 mp4 和 `manifest.csv`，文件名经 Python `zipfile` 验证正常。
+- 已验证：Playwright 检查 `/projects` 有项目下载按钮和确认弹窗，`/tasks` 有批量工具条和任务选择框，桌面与 390px 移动端无横向溢出。
+- 未完成：大批量后台任务、管理员 `/admin/outputs` 复用、跨页选择和后台 ZIP 清理策略仍保留为后续批次。

@@ -139,3 +139,13 @@
 - 怎么改：PromptEditor 增加 textarea 自适应高度 helper；桌面高度上限 320px，移动端上限 280px；超过上限内部滚动；CSS 放开纵向 resize。
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/PromptEditor.tsx` 通过；本地 3100 端口 Playwright 验证短文本、长文本、超长文本、移动端回缩和放大编辑回归均通过。
 - 可复用经验：前端 UI 验收不要复用不明来源的旧端口；如果 DOM/CSS 与 diff 不一致，优先启动隔离端口并验证 URL、CSS computed style、关键交互和无横向溢出。
+
+## 2026-06-12 - 批量下载视频先做即时 ZIP，再接后台任务
+
+- 问题/背景：用户希望在项目卡和任务列表里批量下载视频，优先满足项目页面“一键下载视频包”的应用体验。
+- 诱因/根因：原系统只有任务详情/结果页的单条视频下载入口，项目列表没有面向成果交付的下载动作；如果直接做“全部历史视频同步打包”，大项目会遇到请求超时、Provider 外链过期和权限边界变复杂的问题。
+- 当时思路：第一批先落地用户侧即时 ZIP：项目卡按当前用户可见项目任务打包，任务列表支持本页多选；超过 20 个转入后续后台任务规划，不在同步请求里硬撑。
+- 改动位置：`src/lib/video/bulk-download.ts`、`src/app/api/video/bulk-download/route.ts`、`src/lib/video/download-client.ts`、`src/app/projects/page.tsx`、`src/app/tasks/page.tsx`、`src/app/api/projects/route.ts`、`src/app/globals.css`。
+- 怎么改：新增批量下载服务层和 API；服务端逐条复用 `assertCanViewTask()` / `assertCanViewProject()` 做权限校验，复用 `cacheTaskVideoToLocal()` 拉取或刷新视频；ZIP 内写入视频文件和 `manifest.csv`，单个失败不影响其它成功视频入包；无权任务在 manifest 中只保留 taskId 和通用失败原因，不泄露项目、生成者、提示词或扣费元数据；项目卡和任务列表增加确认弹窗、下载中状态和移动端适配。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/app/projects/page.tsx`、`npx impeccable detect src/app/tasks/page.tsx`、本地 API smoke 和 Playwright 桌面/移动端检查通过。
+- 可复用经验：成果批量下载要先定义同步上限和后台兜底；ZIP 依赖必须经过真实 Next build 验证，`archiver` 在当前构建链路会因 ESM exports 条件失败，最终使用 `yazl` 更稳。

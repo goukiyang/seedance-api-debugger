@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import { displayUserName } from '@/lib/users/display';
+import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 
 interface ProjectItem {
   id: string;
@@ -16,6 +18,7 @@ interface ProjectItem {
   owner_user_id: string;
   updated_at: string;
   my_role: string | null;
+  downloadable_task_count?: number;
   owner?: { name: string | null; username: string | null };
   _count?: { members: number; tasks: number; reference_albums?: number };
 }
@@ -63,6 +66,8 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [downloadProject, setDownloadProject] = useState<ProjectItem | null>(null);
+  const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
 
   const loadProjects = async () => {
     setLoading(true);
@@ -126,6 +131,25 @@ export default function ProjectsPage() {
     }
     setMessage(`项目已${label}`);
     await loadProjects();
+  };
+
+  const handleProjectDownload = async () => {
+    if (!downloadProject) return;
+    const count = downloadProject.downloadable_task_count || 0;
+    if (count <= 0 || count > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT) return;
+
+    setError('');
+    setMessage('');
+    setDownloadingProjectId(downloadProject.id);
+    try {
+      const result = await downloadBulkVideoZip({ projectId: downloadProject.id });
+      setMessage(`已开始下载项目视频包：${result.success} 个视频${result.failed ? `，${result.failed} 个失败见 manifest` : ''}`);
+      setDownloadProject(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '项目视频包下载失败');
+    } finally {
+      setDownloadingProjectId(null);
+    }
   };
 
   const nameCounts = projects.reduce<Record<string, number>>((counts, project) => {
@@ -214,6 +238,8 @@ export default function ProjectsPage() {
             <div className="shell-link-grid">
             {pagedProjects.map((project) => {
               const displayName = projectDisplayName(project);
+              const downloadableCount = project.downloadable_task_count || 0;
+              const downloadTooLarge = downloadableCount > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT;
               return (
               <div key={project.id} className="shell-link-card">
                 <Link href={`/projects/${project.id}`} className="link">
@@ -232,9 +258,21 @@ export default function ProjectsPage() {
                   {' · '}任务 {project._count?.tasks ?? 0}
                   {' · '}图集 {project._count?.reference_albums ?? 0}
                 </span>
+                <span>可下载视频 {downloadableCount}</span>
                 <span>更新 {new Date(project.updated_at).toLocaleDateString('zh-CN')}</span>
-                {canManageProject(project) && (
-                  <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => setDownloadProject(project)}
+                    disabled={downloadableCount <= 0}
+                    title={downloadableCount <= 0 ? '该项目暂无可下载视频' : downloadTooLarge ? '视频数量超过第一批即时打包上限，后续走后台任务' : '下载该项目的视频包'}
+                  >
+                    <Download size={16} aria-hidden="true" />
+                    {downloadableCount <= 0 ? '暂无可下载视频' : '下载视频包'}
+                  </button>
+                  {canManageProject(project) && (
+                    <>
                     <Link className="btn btn-secondary" href={`/projects/${project.id}`}>
                       管理
                     </Link>
@@ -252,8 +290,9 @@ export default function ProjectsPage() {
                         归档为只读
                       </button>
                     )}
-                  </div>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
               );
             })}
@@ -269,6 +308,59 @@ export default function ProjectsPage() {
           </>
         )}
       </div>
+
+      {downloadProject && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="下载项目视频包">
+          <div className="modal-panel bulk-download-modal">
+            <div className="modal-header">
+              <div>
+                <h2>下载项目视频包</h2>
+                <p>{projectDisplayName(downloadProject)}</p>
+              </div>
+              <button className="modal-close" type="button" onClick={() => setDownloadProject(null)} aria-label="关闭">
+                ×
+              </button>
+            </div>
+            <div className="bulk-download-summary">
+              <div>
+                <span>可下载视频</span>
+                <strong>{downloadProject.downloadable_task_count || 0}</strong>
+              </div>
+              <div>
+                <span>即时打包上限</span>
+                <strong>{BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT}</strong>
+              </div>
+            </div>
+            {(downloadProject.downloadable_task_count || 0) > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT ? (
+              <p className="text-gray">
+                该项目视频数量超过第一批即时打包上限，后续会走后台任务打包。当前先不发起同步下载，避免页面长时间等待。
+              </p>
+            ) : (
+              <p className="text-gray">
+                将该项目下你可见的已完成视频打包为 ZIP，ZIP 内会包含视频文件和 manifest.csv。
+              </p>
+            )}
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setDownloadProject(null)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={handleProjectDownload}
+                disabled={
+                  downloadingProjectId === downloadProject.id
+                  || (downloadProject.downloadable_task_count || 0) <= 0
+                  || (downloadProject.downloadable_task_count || 0) > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT
+                }
+              >
+                <Download size={16} aria-hidden="true" />
+                {downloadingProjectId === downloadProject.id ? '打包中...' : '确认下载'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

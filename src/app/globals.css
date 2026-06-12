@@ -3060,6 +3060,41 @@ a {
   padding: 18px;
 }
 
+.bulk-download-toolbar {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.bulk-download-check {
+  align-items: center;
+  color: #1f2937;
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.bulk-download-toolbar-meta {
+  color: #64748b;
+  flex: 1 1 auto;
+  font-size: 13px;
+}
+
+.bulk-download-toolbar-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tasks-empty {
   align-items: flex-start;
   display: grid;
@@ -3090,6 +3125,7 @@ a {
   gap: 16px;
   grid-template-columns: minmax(148px, 184px) minmax(0, 1fr);
   padding: 18px;
+  position: relative;
   transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 }
 
@@ -3101,6 +3137,29 @@ a {
 
 .tasks-card-main {
   min-width: 0;
+}
+
+.tasks-card-select {
+  align-items: center;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid #dbe4ee;
+  border-radius: 7px;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  left: 26px;
+  position: absolute;
+  top: 26px;
+  width: 30px;
+  z-index: 2;
+}
+
+.tasks-card-select input {
+  cursor: pointer;
+}
+
+.tasks-card-select input:disabled {
+  cursor: not-allowed;
 }
 
 .tasks-preview {
@@ -3262,6 +3321,19 @@ a {
     padding: 16px;
   }
 
+  .bulk-download-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bulk-download-toolbar-actions {
+    width: 100%;
+  }
+
+  .bulk-download-toolbar-actions .btn {
+    flex: 1 1 auto;
+  }
+
   .tasks-list-shell,
   .tasks-card {
     padding: 14px;
@@ -3269,6 +3341,11 @@ a {
 
   .tasks-preview {
     max-width: none;
+  }
+
+  .tasks-card-select {
+    left: 22px;
+    top: 22px;
   }
 }
 
@@ -4031,6 +4108,130 @@ a {
   font-size: 13px;
   line-height: 1.6;
   color: #6b7280;
+}
+
+.modal-overlay {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 90;
+}
+
+.modal-panel {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+  color: #111827;
+  display: grid;
+  gap: 16px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 18px;
+  width: min(520px, calc(100vw - 48px));
+}
+
+.modal-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.modal-header h2 {
+  font-size: 18px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.modal-header p {
+  color: #64748b;
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.modal-close {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 18px;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  width: 32px;
+}
+
+.modal-close:hover {
+  background: #eef2f7;
+  color: #111827;
+}
+
+.modal-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.bulk-download-modal {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.bulk-download-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bulk-download-summary div {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-height: 70px;
+  padding: 12px;
+}
+
+.bulk-download-summary span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bulk-download-summary strong {
+  color: #111827;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+@media (max-width: 640px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .modal-panel,
+  .bulk-download-modal {
+    width: 100%;
+  }
+
+  .bulk-download-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-actions .btn {
+    flex: 1 1 auto;
+  }
 }
 
 .thumbnail-card:active {

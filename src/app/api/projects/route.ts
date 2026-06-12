@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { ensureDefaultProjectForUser, logProjectAction } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
+import { countDownloadableProjectTasks } from '@/lib/video/bulk-download';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +53,8 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    const downloadableCountByProject = await countDownloadableProjectTasks(projects.map((project) => project.id));
+
     return NextResponse.json({
       projects: projects.map((project) => {
         const myRole = includeAll
@@ -66,6 +69,7 @@ export async function GET(request: NextRequest) {
           can_manage_members: (myRole === 'admin' || myRole === 'project_owner')
             && ['team', 'public'].includes(project.type),
           can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
+          downloadable_task_count: downloadableCountByProject.get(project.id) || 0,
         };
       }),
     });

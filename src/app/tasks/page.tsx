@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 import type { GenerationMode } from '@/types';
 import { GENERATION_MODE_LABELS } from '@/types';
 
@@ -122,6 +124,16 @@ function taskOfficialChargeText(task: Task): string {
   return '待官方确认';
 }
 
+function isTaskDownloadable(task: Task) {
+  return task.local_status === 'succeeded' && Boolean(task.local_video_path || task.result_video_url);
+}
+
+function taskDownloadDisabledReason(task: Task) {
+  if (task.local_status !== 'succeeded') return '任务未完成，暂不能下载';
+  if (!task.local_video_path && !task.result_video_url) return '任务没有可用视频链接';
+  return '';
+}
+
 type TaskPreviewModel = {
   kind: 'image' | 'empty';
   src?: string;
@@ -189,6 +201,15 @@ export default function TasksPage() {
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+
+  const selectedSet = new Set(selectedTaskIds);
+  const downloadableTasks = tasks.filter(isTaskDownloadable);
+  const selectedTasks = tasks.filter((task) => selectedSet.has(task.id));
+  const selectedDownloadableTasks = selectedTasks.filter(isTaskDownloadable);
+  const selectedTooMany = selectedDownloadableTasks.length > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT;
 
   useEffect(() => {
     fetchTasks();
@@ -201,6 +222,7 @@ export default function TasksPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || '任务加载失败');
       setTasks(data.tasks || []);
+      setSelectedTaskIds([]);
       setPagination(data.pagination || null);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
@@ -226,6 +248,7 @@ export default function TasksPage() {
       if (!res.ok) throw new Error(data.error || data.message || '移除失败');
 
       setTasks((current) => current.filter((item) => item.id !== task.id));
+      setSelectedTaskIds((current) => current.filter((id) => id !== task.id));
       setPagination((current) => current
         ? { ...current, total: Math.max(0, current.total - 1) }
         : current);
@@ -234,6 +257,41 @@ export default function TasksPage() {
       setError(err instanceof Error ? err.message : '移除失败');
     } finally {
       setDeletingTaskId(null);
+    }
+  };
+
+  const toggleTaskSelection = (task: Task, checked: boolean) => {
+    if (!isTaskDownloadable(task)) return;
+    setSelectedTaskIds((current) => {
+      if (checked) return current.includes(task.id) ? current : [...current, task.id];
+      return current.filter((id) => id !== task.id);
+    });
+  };
+
+  const toggleCurrentPageDownloadable = (checked: boolean) => {
+    if (checked) {
+      setSelectedTaskIds(downloadableTasks.map((task) => task.id));
+    } else {
+      setSelectedTaskIds([]);
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    if (selectedDownloadableTasks.length === 0 || selectedTooMany) return;
+    setBulkDownloading(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await downloadBulkVideoZip({
+        taskIds: selectedDownloadableTasks.map((task) => task.id),
+      });
+      setMessage(`已开始下载视频包：${result.success} 个视频${result.failed ? `，${result.failed} 个失败见 manifest` : ''}`);
+      setBulkConfirmOpen(false);
+      setSelectedTaskIds([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '批量下载失败');
+    } finally {
+      setBulkDownloading(false);
     }
   };
 
@@ -274,12 +332,64 @@ export default function TasksPage() {
           </div>
         ) : (
           <>
+            <div className="bulk-download-toolbar">
+              <label className="bulk-download-check">
+                <input
+                  type="checkbox"
+                  checked={downloadableTasks.length > 0 && selectedDownloadableTasks.length === downloadableTasks.length}
+                  disabled={downloadableTasks.length === 0}
+                  onChange={(event) => toggleCurrentPageDownloadable(event.target.checked)}
+                />
+                <span>选择本页可下载视频</span>
+              </label>
+              <div className="bulk-download-toolbar-meta">
+                已选 {selectedDownloadableTasks.length} 个
+                {downloadableTasks.length > 0 && ` · 本页可下载 ${downloadableTasks.length} 个`}
+              </div>
+              <div className="bulk-download-toolbar-actions">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  disabled={selectedDownloadableTasks.length === 0 || selectedTooMany}
+                  onClick={() => setBulkConfirmOpen(true)}
+                  title={selectedTooMany ? `第一批最多支持 ${BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT} 个视频即时打包` : '将选中视频打包为 ZIP'}
+                >
+                  <Download size={16} aria-hidden="true" />
+                  批量下载 ZIP
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={selectedTaskIds.length === 0}
+                  onClick={() => setSelectedTaskIds([])}
+                >
+                  清空选择
+                </button>
+              </div>
+            </div>
+            {selectedTooMany && (
+              <div className="alert alert-warning">
+                第一批即时打包最多支持 {BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT} 个视频；更大批量后续走后台任务。
+              </div>
+            )}
             <div className="tasks-card-list">
               {tasks.map((task) => {
                 const referenceCount = taskReferenceCount(task);
                 const modeLabel = GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
+                const downloadable = isTaskDownloadable(task);
                 return (
                   <article key={task.id} className="tasks-card">
+                    <label
+                      className="tasks-card-select"
+                      title={downloadable ? '选择此视频加入批量下载' : taskDownloadDisabledReason(task)}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(task.id)}
+                        disabled={!downloadable}
+                        onChange={(event) => toggleTaskSelection(task, event.target.checked)}
+                      />
+                    </label>
                     <TaskPreview task={task} />
 
                     <div className="tasks-card-main">
@@ -366,6 +476,49 @@ export default function TasksPage() {
           </>
         )}
       </div>
+
+      {bulkConfirmOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="批量下载视频">
+          <div className="modal-panel bulk-download-modal">
+            <div className="modal-header">
+              <div>
+                <h2>批量下载视频</h2>
+                <p>将选中的已完成视频打包为 ZIP</p>
+              </div>
+              <button className="modal-close" type="button" onClick={() => setBulkConfirmOpen(false)} aria-label="关闭">
+                ×
+              </button>
+            </div>
+            <div className="bulk-download-summary">
+              <div>
+                <span>选中视频</span>
+                <strong>{selectedDownloadableTasks.length}</strong>
+              </div>
+              <div>
+                <span>即时打包上限</span>
+                <strong>{BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT}</strong>
+              </div>
+            </div>
+            <p className="text-gray">
+              ZIP 内会包含视频文件和 manifest.csv。外链过期的视频会先尝试刷新并缓存，失败项会写入 manifest。
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setBulkConfirmOpen(false)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={handleBulkDownload}
+                disabled={bulkDownloading || selectedDownloadableTasks.length === 0 || selectedTooMany}
+              >
+                <Download size={16} aria-hidden="true" />
+                {bulkDownloading ? '打包中...' : '确认下载'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
