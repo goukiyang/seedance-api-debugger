@@ -149,3 +149,13 @@
 - 怎么改：新增批量下载服务层和 API；服务端逐条复用 `assertCanViewTask()` / `assertCanViewProject()` 做权限校验，复用 `cacheTaskVideoToLocal()` 拉取或刷新视频；ZIP 内写入视频文件和 `manifest.csv`，单个失败不影响其它成功视频入包；无权任务在 manifest 中只保留 taskId 和通用失败原因，不泄露项目、生成者、提示词或扣费元数据；项目卡和任务列表增加确认弹窗、下载中状态和移动端适配。
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/app/projects/page.tsx`、`npx impeccable detect src/app/tasks/page.tsx`、本地 API smoke 和 Playwright 桌面/移动端检查通过。
 - 可复用经验：成果批量下载要先定义同步上限和后台兜底；ZIP 依赖必须经过真实 Next build 验证，`archiver` 在当前构建链路会因 ESM exports 条件失败，最终使用 `yazl` 更稳。
+
+## 2026-06-13 - `@ mention` 必须拆成公共解析和页面候选源
+
+- 问题/背景：用户要求还原即梦输入 `@` 自动弹窗体验，并把普通生成页和画布页的 `@` 能力合并。
+- 诱因/根因：普通 `/generate` 只有按钮插入 `@图片N`，画布 `/generate/canvas` 有自动弹窗但正则和替换逻辑写在节点组件里；历史图片加入 workspace 后也没有插回 prompt。
+- 当时思路：第一批先闭环真实图片绑定，不把主体库和 Prisma schema 混进基础弹窗；公共层只做无状态 mention 检测、替换、解析，普通页和画布页分别提供自己的候选源。
+- 改动位置：`src/lib/prompt/mention.ts`、`src/components/PromptMentionPopover.tsx`、`src/components/PromptEditor.tsx`、`src/components/GenerationComposer.tsx`、`src/components/PromptChecker.tsx`、`src/components/canvas/full/nodes.tsx`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：抽 `detectMentionAtCursor`、`replaceMentionRange`、`parseImageMentions`；PromptEditor 捕获当前 mention range，支持主输入框和放大编辑框；GenerationComposer 对当前图直接返回 `@图片N`，对历史/图集来源用 Promise 等选择器确认后返回真实序号；画布页复用公共检测和替换，但保持“已连线图片”候选。
+- 验证结果：共享 mention smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect` 三个目标通过；本地 3100 Playwright 验证 `/generate` 自动弹窗、键盘插入、图集来源插入、历史入口、放大编辑框、390px 无横向溢出，以及 `/generate/canvas` 生成卡 `@` 空状态不退化。
+- 可复用经验：引用型输入命令要把“候选展示”和“真实素材绑定”分离。异步选择历史/图集图片时，编辑器必须缓存 pending range，选择成功后再替换原 `@query`；不能退回 append 到末尾，也不能提交 provider 不理解的 `@主体名`。

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { Bot, Camera, ChevronUp, Copy, FileImage, Film, Music, ShieldCheck, Trash2, Type, Upload } from 'lucide-react';
 import type { AssetOption, AudioCardNode, GenerationLikeNode, ImageCardNode, ReferenceMode, SeedanceModel, TextCardNode, VideoCardNode } from './types';
+import { detectMentionAtCursor, replaceMentionAtCursor } from '@/lib/prompt/mention';
 
 const WAN27_MODELS: SeedanceModel[] = ['wan2.7-t2v-2026-04-25', 'wan2.7-i2v-2026-04-25', 'wan2.7-r2v'];
 const DEFAULT_SEEDANCE_CONSTRAINTS = '生成约束：避免水印、字幕、乱码文字、Logo、人物脸部变形、额外肢体、主体漂移、无关物体乱入；保持主体身份、服装、场景与镜头连续。';
@@ -314,34 +315,22 @@ export function GenerationCard({ id, data, selected }: NodeProps<GenerationLikeN
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
   const updateMentionState = (value: string, cursor: number | null) => {
-    if (cursor === null) {
+    const range = detectMentionAtCursor(value, cursor);
+    if (!range) {
       setMentionQuery(null);
       return;
     }
-    const beforeCursor = value.slice(0, cursor);
-    const match = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
-    if (!match) {
-      setMentionQuery(null);
-      return;
-    }
-    setMentionQuery(match[2] ?? '');
+    setMentionQuery(range.query);
     setActiveMentionIndex(0);
   };
   const insertMention = (asset: AssetOption) => {
     const refId = asset.refId ?? asset.label.split(' ')[0] ?? '@图片';
     const textarea = promptRef.current;
     const cursor = textarea?.selectionStart ?? data.prompt.length;
-    const beforeCursor = data.prompt.slice(0, cursor);
-    const afterCursor = data.prompt.slice(cursor);
-    const match = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
-    const start = match ? beforeCursor.length - (match[2]?.length ?? 0) - 1 : cursor;
-    const prefix = data.prompt.slice(0, start);
-    const needsTrailingSpace = afterCursor.length > 0 && !/^\s/.test(afterCursor);
-    const nextPrompt = `${prefix}${refId}${needsTrailingSpace ? ' ' : ''}${afterCursor}`;
+    const { next: nextPrompt, cursor: nextCursor } = replaceMentionAtCursor(data.prompt, cursor, refId);
     data.onDataChange?.(id, { prompt: nextPrompt });
     setMentionQuery(null);
     window.requestAnimationFrame(() => {
-      const nextCursor = prefix.length + refId.length + (needsTrailingSpace ? 1 : 0);
       promptRef.current?.focus();
       promptRef.current?.setSelectionRange(nextCursor, nextCursor);
       resizePromptTextarea();

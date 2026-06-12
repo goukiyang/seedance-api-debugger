@@ -14,6 +14,7 @@ import { useWorkspace } from '@/lib/hooks/useWorkspace';
 import { ImageSetToolbar } from '@/components/ImageSetToolbar';
 import { ReferenceStrip } from '@/components/ReferenceStrip';
 import { PromptEditor } from '@/components/PromptEditor';
+import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
@@ -92,6 +93,10 @@ function appendReferenceMarkers(value: string, labels: string[]): string {
   return `${value}${separator}${markers}`;
 }
 
+function formatReferenceTokens(labels: string[]): string {
+  return labels.map((label) => `@${label}`).join(' ');
+}
+
 interface Props {
   collections: AssetCollection[];
   initialSettings?: GenerationDefaults | null;
@@ -158,6 +163,11 @@ export function GenerationComposer({
   const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
   const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
+  const [mentionNotice, setMentionNotice] = useState<string | null>(null);
+  const pendingMentionRequestRef = React.useRef<{
+    source: 'history' | 'album';
+    resolve: (insertText: string | null) => void;
+  } | null>(null);
 
   // Composer 内部状态（受控于参数 props 透传）
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
@@ -204,6 +214,9 @@ export function GenerationComposer({
     if (isSubmitting) {
       return { message: '提交中...', tone: 'progress' as const };
     }
+    if (mentionNotice) {
+      return { message: mentionNotice, tone: 'hint' as const };
+    }
     if (!prompt.trim()) {
       return {
         message: '请填写提示词',
@@ -215,7 +228,7 @@ export function GenerationComposer({
       return { message: submitBlocker, tone: isUploading ? 'progress' as const : 'error' as const };
     }
     return { message: null, tone: 'ok' as const };
-  }, [hasAttemptedSubmit, isSubmitting, prompt, submitBlocker]);
+  }, [hasAttemptedSubmit, isSubmitting, mentionNotice, prompt, submitBlocker]);
 
   const canPressSubmit = !isSubmitting;
 
@@ -243,6 +256,53 @@ export function GenerationComposer({
     });
   }, [workspace.assets]);
 
+  const mentionCandidates = useMemo<PromptMentionCandidate[]>(() => {
+    const sourceDisabled = workspace.assets.length >= MAX_REFS;
+    return [
+      {
+        id: 'create-subject',
+        type: 'action',
+        action: 'create_subject',
+        label: '创建主体',
+        description: '主体库下一批开放，当前先用图集复用',
+      },
+      ...workspace.assets.map((asset, index): PromptMentionCandidate => {
+        const label = `图片${index + 1}`;
+        const titleParts = [
+          asset.fileName,
+          asset.referenceAlbumName ? `来自 ${asset.referenceAlbumName}` : null,
+        ].filter(Boolean);
+        return {
+          id: `image:${asset.assetId}`,
+          type: 'image',
+          token: `@${label}`,
+          label,
+          title: asset.fileName,
+          description: titleParts.join(' · '),
+          thumbnailUrl: asset.thumbnailUrl || asset.originalUrl,
+          referenceImageId: asset.referenceImageId,
+          assetId: asset.assetId,
+        };
+      }),
+      {
+        id: 'source:history',
+        type: 'source',
+        source: 'history',
+        label: '从历史图片选择',
+        description: sourceDisabled ? `已达 ${MAX_REFS} 张上限` : '选择曾经上传过的图片',
+        disabled: sourceDisabled,
+      },
+      {
+        id: 'source:album',
+        type: 'source',
+        source: 'album',
+        label: '从图集选择',
+        description: sourceDisabled ? `已达 ${MAX_REFS} 张上限` : '我的图集、项目图集、公共图集',
+        disabled: sourceDisabled,
+      },
+    ];
+  }, [workspace.assets]);
+
   const currentReferenceImageIds = useMemo(() => {
     return workspace.assets
       .map((asset) => asset.referenceImageId)
@@ -263,6 +323,12 @@ export function GenerationComposer({
   useEffect(() => {
     void refreshReferenceAlbums();
   }, [refreshReferenceAlbums]);
+
+  useEffect(() => {
+    if (!mentionNotice) return;
+    const timer = window.setTimeout(() => setMentionNotice(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [mentionNotice]);
 
   useEffect(() => {
     if (workspace.assets.length === 0) return;
@@ -358,9 +424,23 @@ export function GenerationComposer({
     setPreviewUrl(url);
   }, []);
 
-  const handleAddReferenceImages = useCallback(async (referenceImageIds: string[]) => {
+  const resolvePendingMentionRequest = useCallback((insertText: string | null) => {
+    if (!pendingMentionRequestRef.current) return;
+    pendingMentionRequestRef.current.resolve(insertText);
+    pendingMentionRequestRef.current = null;
+  }, []);
+
+  const handleMentionPickerClose = useCallback((source: 'history' | 'album') => {
+    if (source === 'history') setShowUploadedImagePicker(false);
+    if (source === 'album') setShowAlbumPicker(false);
+    if (pendingMentionRequestRef.current?.source === source) {
+      resolvePendingMentionRequest(null);
+    }
+  }, [resolvePendingMentionRequest]);
+
+  const addReferenceImagesAndGetLabels = useCallback(async (referenceImageIds: string[]) => {
     const uniqueReferenceImageIds = uniqueStrings(referenceImageIds);
-    if (uniqueReferenceImageIds.length === 0) return;
+    if (uniqueReferenceImageIds.length === 0) return [];
 
     const existingLabelByReferenceId = new Map<string, string>();
     workspace.assets.forEach((asset, index) => {
@@ -384,37 +464,94 @@ export function GenerationComposer({
       .map((id) => labelByReferenceId.get(id))
       .filter((label): label is string => Boolean(label));
 
-    const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
-    if (nextPrompt.length > MAX_PROMPT_CHARS) {
-      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
-    }
-
     if (idsToAdd.length > 0) {
       await workspace.addReferenceImages(idsToAdd);
     }
     await refreshReferenceAlbums();
+    return labelsToInsert;
+  }, [workspace, refreshReferenceAlbums]);
+
+  const handleAddReferenceImages = useCallback(async (referenceImageIds: string[]) => {
+    const labelsToInsert = await addReferenceImagesAndGetLabels(referenceImageIds);
+    const insertText = formatReferenceTokens(labelsToInsert);
+    if (pendingMentionRequestRef.current?.source === 'album') {
+      resolvePendingMentionRequest(insertText || null);
+      return;
+    }
+    const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
+    if (nextPrompt.length > MAX_PROMPT_CHARS) {
+      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
+    }
     setPrompt((currentPrompt) => {
       const next = appendReferenceMarkers(currentPrompt, labelsToInsert);
       return next.length <= MAX_PROMPT_CHARS ? next : currentPrompt;
     });
-  }, [prompt, workspace, refreshReferenceAlbums]);
+  }, [addReferenceImagesAndGetLabels, prompt, resolvePendingMentionRequest]);
 
-  const handleAddUploadedAssets = useCallback(async (assetIds: string[]) => {
+  const addUploadedAssetsAndGetLabels = useCallback(async (assetIds: string[]) => {
     const uniqueAssetIds = uniqueStrings(assetIds);
-    if (uniqueAssetIds.length === 0) return;
+    if (uniqueAssetIds.length === 0) return [];
 
-    const existingAssetIds = new Set(workspace.assets.map((asset) => asset.assetId));
-    const idsToAdd = uniqueAssetIds.filter((id) => !existingAssetIds.has(id));
+    const existingLabelByAssetId = new Map<string, string>();
+    workspace.assets.forEach((asset, index) => {
+      existingLabelByAssetId.set(asset.assetId, `图片${index + 1}`);
+    });
+
+    const idsToAdd = uniqueAssetIds.filter((id) => !existingLabelByAssetId.has(id));
     const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
     if (idsToAdd.length > availableSlots) {
       throw new Error(`单次生成最多选择 ${MAX_REFS} 张参考图，当前还可新增 ${availableSlots} 张`);
     }
 
+    const labelByAssetId = new Map(existingLabelByAssetId);
+    idsToAdd.forEach((id, index) => {
+      labelByAssetId.set(id, `图片${workspace.assets.length + index + 1}`);
+    });
+    const labelsToInsert = uniqueAssetIds
+      .map((id) => labelByAssetId.get(id))
+      .filter((label): label is string => Boolean(label));
+
     if (idsToAdd.length > 0) {
       await workspace.addAssets(idsToAdd);
       await refreshReferenceAlbums();
     }
+    return labelsToInsert;
   }, [workspace, refreshReferenceAlbums]);
+
+  const handleAddUploadedAssets = useCallback(async (assetIds: string[]) => {
+    const labelsToInsert = await addUploadedAssetsAndGetLabels(assetIds);
+    const insertText = formatReferenceTokens(labelsToInsert);
+    if (pendingMentionRequestRef.current?.source === 'history') {
+      resolvePendingMentionRequest(insertText || null);
+      return;
+    }
+    const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
+    if (nextPrompt.length > MAX_PROMPT_CHARS) {
+      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
+    }
+    setPrompt((currentPrompt) => {
+      const next = appendReferenceMarkers(currentPrompt, labelsToInsert);
+      return next.length <= MAX_PROMPT_CHARS ? next : currentPrompt;
+    });
+  }, [addUploadedAssetsAndGetLabels, prompt, resolvePendingMentionRequest]);
+
+  const handleMentionSelect = useCallback((candidate: PromptMentionCandidate) => {
+    if (candidate.type === 'image') return candidate.token;
+    if (candidate.type === 'action') {
+      setMentionNotice('主体能力将在第二批开放；当前可以先用图集保存和复用参考图。');
+      return null;
+    }
+    if (candidate.disabled) return null;
+    if (pendingMentionRequestRef.current) {
+      pendingMentionRequestRef.current.resolve(null);
+      pendingMentionRequestRef.current = null;
+    }
+    return new Promise<string | null>((resolve) => {
+      pendingMentionRequestRef.current = { source: candidate.source, resolve };
+      if (candidate.source === 'history') setShowUploadedImagePicker(true);
+      if (candidate.source === 'album') setShowAlbumPicker(true);
+    });
+  }, []);
 
   const handleLoadReferenceAlbum = useCallback(async (albumId: string, albumName: string) => {
     if (workspace.assets.length > 0) {
@@ -484,6 +621,8 @@ export function GenerationComposer({
           value={prompt}
           onChange={setPrompt}
           referenceLabels={referenceLabels}
+          mentionCandidates={mentionCandidates}
+          onMentionSelect={handleMentionSelect}
         />
 
         {/* 状态行 */}
@@ -575,7 +714,7 @@ export function GenerationComposer({
         open={showAlbumPicker}
         currentCount={workspace.assets.length}
         currentReferenceImageIds={currentReferenceImageIds}
-        onClose={() => setShowAlbumPicker(false)}
+        onClose={() => handleMentionPickerClose('album')}
         onConfirm={handleAddReferenceImages}
       />
 
@@ -583,7 +722,7 @@ export function GenerationComposer({
         open={showUploadedImagePicker}
         currentCount={workspace.assets.length}
         currentAssetIds={workspace.assets.map((asset) => asset.assetId)}
-        onClose={() => setShowUploadedImagePicker(false)}
+        onClose={() => handleMentionPickerClose('history')}
         onUploadFile={workspace.uploadAssetToHistory}
         onConfirm={handleAddUploadedAssets}
       />

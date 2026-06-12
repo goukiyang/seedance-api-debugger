@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
+import { parseImageMentions } from '@/lib/prompt/mention';
 
 interface Props {
   value: string;
@@ -42,9 +43,7 @@ export function checkPrompt(value: string, assetCount: number, paramDuration: nu
   const charCount = value.length;
 
   // 即梦官方参考格式是 @图片1 / @图片 1；兼容旧 prompt 中的 @图1 / 图1。
-  const figureMatches = Array.from(value.matchAll(/@?(?:图片|图)\s*(\d+)/g));
-  const unique = Array.from(new Set(figureMatches.map((match) => parseInt(match[1], 10))));
-  const referencedFigures = unique.sort((a, b) => a - b);
+  const referencedFigures = parseImageMentions(value);
   const maxReferenced = referencedFigures.length > 0 ? Math.max(...referencedFigures) : 0;
   const missingFigures = referencedFigures.filter((n) => n > assetCount);
   const maxMissing = missingFigures.length > 0 ? Math.max(...missingFigures) : 0;

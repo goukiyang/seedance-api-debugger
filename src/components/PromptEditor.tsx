@@ -2,6 +2,12 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, ImagePlus, Maximize2, X } from 'lucide-react';
+import { PromptMentionPopover, type PromptMentionCandidate } from '@/components/PromptMentionPopover';
+import {
+  detectMentionAtCursor,
+  replaceMentionRange,
+  type PromptMentionRange,
+} from '@/lib/prompt/mention';
 
 interface ReferenceLabel {
   label: string;
@@ -14,6 +20,8 @@ interface Props {
   onFormat?: () => void;
   referenceLabels?: ReferenceLabel[];
   onInsertReferenceLabel?: (label: string) => void;
+  mentionCandidates?: PromptMentionCandidate[];
+  onMentionSelect?: (candidate: PromptMentionCandidate) => Promise<string | null | undefined> | string | null | undefined;
 }
 
 const MAX_CHARS = 2000;
@@ -48,14 +56,38 @@ export function PromptEditor({
   onFormat,
   referenceLabels = [],
   onInsertReferenceLabel,
+  mentionCandidates = [],
+  onMentionSelect,
 }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [mentionState, setMentionState] = useState<{
+    target: 'main' | 'expanded';
+    range: PromptMentionRange;
+  } | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const activeMentionIndexRef = useRef(0);
+  const [mentionLoading, setMentionLoading] = useState(false);
 
   const hasReferences = referenceLabels.length > 0;
   const canOpenExpanded = value.length <= MAX_CHARS;
+  const visibleMentionCandidates = useMemo(() => {
+    if (!mentionState) return [];
+    const query = mentionState.range.query.trim().toLowerCase();
+    if (!query) return mentionCandidates;
+    return mentionCandidates.filter((candidate) => {
+      const haystack = [
+        candidate.label,
+        candidate.type === 'image' ? candidate.token : '',
+        candidate.type === 'image' ? candidate.title : '',
+        candidate.description || '',
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [mentionCandidates, mentionState]);
+  const showMentionMenu = Boolean(mentionState) && visibleMentionCandidates.length > 0;
 
   const resizeMainTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -63,19 +95,34 @@ export function PromptEditor({
     fitTextareaHeight(textarea);
   }, []);
 
+  const updateMentionState = useCallback((target: 'main' | 'expanded', text: string, cursor: number | null) => {
+    const range = detectMentionAtCursor(text, cursor);
+    if (!range) {
+      setMentionState(null);
+      setActiveMentionIndex(0);
+      activeMentionIndexRef.current = 0;
+      return;
+    }
+    setMentionState({ target, range });
+    setActiveMentionIndex(0);
+    activeMentionIndexRef.current = 0;
+  }, []);
+
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
     if (text.length <= MAX_CHARS) {
       onChange(text);
+      updateMentionState('main', text, e.target.selectionStart);
     }
-  }, [onChange]);
+  }, [onChange, updateMentionState]);
 
   const handleDraftChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
     if (text.length <= MAX_CHARS) {
       setDraft(text);
+      updateMentionState('expanded', text, e.target.selectionStart);
     }
-  }, []);
+  }, [updateMentionState]);
 
   const focusTextareaAt = useCallback((ref: React.RefObject<HTMLTextAreaElement>, cursor: number) => {
     window.requestAnimationFrame(() => {
@@ -109,9 +156,96 @@ export function PromptEditor({
     focusTextareaAt(expandedTextareaRef, cursor);
   }, [draft, focusTextareaAt]);
 
+  const applyMentionInsert = useCallback((
+    target: 'main' | 'expanded',
+    range: PromptMentionRange,
+    insertText: string,
+  ) => {
+    if (!insertText.trim()) return;
+    if (target === 'main') {
+      const { next, cursor } = replaceMentionRange(value, range, insertText);
+      if (next.length > MAX_CHARS) return;
+      onChange(next);
+      focusTextareaAt(textareaRef, cursor);
+      return;
+    }
+
+    const { next, cursor } = replaceMentionRange(draft, range, insertText);
+    if (next.length > MAX_CHARS) return;
+    setDraft(next);
+    focusTextareaAt(expandedTextareaRef, cursor);
+  }, [draft, focusTextareaAt, onChange, value]);
+
+  const selectMentionCandidate = useCallback(async (candidate: PromptMentionCandidate) => {
+    if (!mentionState || candidate.disabled) return;
+    const currentMention = mentionState;
+    const fallbackToken = candidate.type === 'image' ? candidate.token : null;
+    setMentionLoading(true);
+    try {
+      const resolvedToken = await onMentionSelect?.(candidate);
+      const insertText = resolvedToken || fallbackToken;
+      if (insertText) {
+        applyMentionInsert(currentMention.target, currentMention.range, insertText);
+      }
+      setMentionState(null);
+      setActiveMentionIndex(0);
+      activeMentionIndexRef.current = 0;
+    } finally {
+      setMentionLoading(false);
+    }
+  }, [applyMentionInsert, mentionState, onMentionSelect]);
+
+  const selectActiveMentionCandidate = useCallback(() => {
+    if (!showMentionMenu || visibleMentionCandidates.length === 0) return;
+    const enabledCandidates = visibleMentionCandidates.filter((candidate) => !candidate.disabled);
+    if (enabledCandidates.length === 0) return;
+    const currentIndex = activeMentionIndexRef.current;
+    const candidate = visibleMentionCandidates[currentIndex] && !visibleMentionCandidates[currentIndex].disabled
+      ? visibleMentionCandidates[currentIndex]
+      : enabledCandidates[0];
+    void selectMentionCandidate(candidate);
+  }, [selectMentionCandidate, showMentionMenu, visibleMentionCandidates]);
+
+  const handleMentionKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>, target: 'main' | 'expanded') => {
+    if (!mentionState || mentionState.target !== target) return false;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setMentionState(null);
+      setActiveMentionIndex(0);
+      activeMentionIndexRef.current = 0;
+      return true;
+    }
+    if (!showMentionMenu) return false;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveMentionIndex((index) => {
+        const next = (index + 1) % visibleMentionCandidates.length;
+        activeMentionIndexRef.current = next;
+        return next;
+      });
+      return true;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveMentionIndex((index) => {
+        const next = (index - 1 + visibleMentionCandidates.length) % visibleMentionCandidates.length;
+        activeMentionIndexRef.current = next;
+        return next;
+      });
+      return true;
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault();
+      selectActiveMentionCandidate();
+      return true;
+    }
+    return false;
+  }, [mentionState, selectActiveMentionCandidate, showMentionMenu, visibleMentionCandidates.length]);
+
   const openExpanded = useCallback(() => {
     setDraft(value);
     setExpanded(true);
+    setMentionState(null);
   }, [value]);
 
   const closeExpanded = useCallback(() => {
@@ -120,11 +254,13 @@ export function PromptEditor({
       if (!ok) return;
     }
     setExpanded(false);
+    setMentionState(null);
   }, [draft, value]);
 
   const commitExpanded = useCallback(() => {
     onChange(draft);
     setExpanded(false);
+    setMentionState(null);
   }, [draft, onChange]);
 
   useLayoutEffect(() => {
@@ -213,10 +349,24 @@ export function PromptEditor({
         className="composer-prompt-textarea"
         value={value}
         onChange={handleChange}
+        onKeyDown={(event) => { handleMentionKeyDown(event, 'main'); }}
+        onSelect={(event) => updateMentionState('main', event.currentTarget.value, event.currentTarget.selectionStart)}
         maxLength={MAX_CHARS}
-        placeholder="描述你想生成的视频内容，可使用 @图片1、@图片2 引用当前素材……"
+        placeholder="描述你想生成的视频内容，可输入 @ 选择当前素材或历史图片……"
         rows={4}
       />
+      {mentionState?.target === 'main' && (
+        <PromptMentionPopover
+          candidates={visibleMentionCandidates}
+          activeIndex={activeMentionIndex}
+          loading={mentionLoading}
+          onActiveIndexChange={(index) => {
+            activeMentionIndexRef.current = index;
+            setActiveMentionIndex(index);
+          }}
+          onSelect={(candidate) => { void selectMentionCandidate(candidate); }}
+        />
+      )}
 
       <div className="composer-prompt-footer">
         <div className="composer-prompt-tools">
@@ -260,14 +410,30 @@ export function PromptEditor({
               {expandedReferenceButtons}
             </div>
 
-            <textarea
-              ref={expandedTextareaRef}
-              className="composer-prompt-expanded-textarea"
-              value={draft}
-              onChange={handleDraftChange}
-              maxLength={MAX_CHARS}
-              placeholder="描述你想生成的视频内容，可使用 @图片1、@图片2 引用当前素材……"
-            />
+            <div className="composer-prompt-expanded-editor">
+              <textarea
+                ref={expandedTextareaRef}
+                className="composer-prompt-expanded-textarea"
+                value={draft}
+                onChange={handleDraftChange}
+                onKeyDown={(event) => { handleMentionKeyDown(event, 'expanded'); }}
+                onSelect={(event) => updateMentionState('expanded', event.currentTarget.value, event.currentTarget.selectionStart)}
+                maxLength={MAX_CHARS}
+                placeholder="描述你想生成的视频内容，可输入 @ 选择当前素材或历史图片……"
+              />
+              {mentionState?.target === 'expanded' && (
+                <PromptMentionPopover
+                  candidates={visibleMentionCandidates}
+                  activeIndex={activeMentionIndex}
+                  loading={mentionLoading}
+                  onActiveIndexChange={(index) => {
+                    activeMentionIndexRef.current = index;
+                    setActiveMentionIndex(index);
+                  }}
+                  onSelect={(candidate) => { void selectMentionCandidate(candidate); }}
+                />
+              )}
+            </div>
 
             <div className="composer-prompt-expanded-actions">
               <button type="button" className="composer-prompt-tool-button" onClick={closeExpanded}>

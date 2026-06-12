@@ -2710,3 +2710,452 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - 已验证：本地 `http://127.0.0.1:3100` API smoke 通过，未登录返回 401，范围冲突返回 400，`taskIds` 和 `projectId` 模式都能生成 ZIP；ZIP 内含 mp4 和 `manifest.csv`，文件名经 Python `zipfile` 验证正常。
 - 已验证：Playwright 检查 `/projects` 有项目下载按钮和确认弹窗，`/tasks` 有批量工具条和任务选择框，桌面与 390px 移动端无横向溢出。
 - 未完成：大批量后台任务、管理员 `/admin/outputs` 复用、跨页选择和后台 ZIP 清理策略仍保留为后续批次。
+
+---
+
+# Batch 16：生成页 `@` 自动弹窗与主体引用 Todo
+
+更新时间：2026-06-13
+
+目标页面：`/generate` 普通生成页，兼顾 `/generate/canvas` 画布生成卡。
+
+## 需求目标
+
+把即梦截图里的 `@` 交互还原到本站生成输入框：
+
+1. 用户在提示词输入框里输入 `@` 后自动弹出候选面板，不需要点按钮。
+2. 弹窗标题为“可能@的内容”，第一项是“+ 创建主体”。
+3. 第一批候选覆盖当前参考图、历史上传图片、图集图片，并全部闭环到真实 `referenceImageIds`。
+4. `+ 创建主体` 和已有主体候选保留为目标形态，但主体创建、主体管理和 `album_type=subject` 放第二批，不阻塞基础 `@` 弹窗上线。
+5. 选中候选后，必须替换当前光标前的 `@query`，不能粗暴追加到提示词末尾。
+6. 后端仍以 `referenceImageIds` 顺序绑定真实图片，prompt 里的 `@图片N` 只作为用户可读标记，不能误以为 provider 会自动解析主体名。
+7. 画布页已有的 `@` 自动弹窗不能退化，后续应复用共享解析逻辑，减少两套实现分叉。
+
+## 当前代码依据
+
+- `src/components/PromptEditor.tsx` 的 `PromptEditor`：
+  - 当前只有参考图按钮插入，`insertMainReference()` / `insertDraftReference()` 会把 `@图片N` 插到光标位置。
+  - 输入 `@` 不会自动弹窗。
+  - 主输入框和放大编辑框各维护一套插入逻辑，后续要统一。
+- `src/components/GenerationComposer.tsx` 的 `GenerationComposer`：
+  - `referenceLabels` 由 `workspace.assets` 顺序生成 `图片1`、`图片2`。
+  - `handleAddReferenceImages()` 会把图集图片加入工作台，并自动 append `@图片N` 到 prompt 末尾。
+  - `handleAddUploadedAssets()` 只把历史图片加入工作台，不会自动插入 `@图片N`。
+  - `handleSubmit()` 会把 `workspace.assets[*].referenceImageId` 按顺序传给 `referenceImageIds`。
+- `src/components/canvas/full/nodes.tsx` 的 `GenerationCard`：
+  - 画布页已有 `updateMentionState()`，用 `/(^|\s)@([^\s@]*)$/` 在输入 `@` 时打开候选。
+  - `insertMention()` 会替换当前 `@query`，支持方向键、Enter、Tab、Escape 和点击选择。
+  - 当前候选只来自已连线图片 `connectedImageAssets`。
+- `src/components/ReferenceAlbumPicker.tsx` 的 `ReferenceAlbumPicker`：
+  - 已支持我的图集、项目图集、共享给我的、公共图集。
+  - 确认按钮文案为“加入并插入 @图片”，但插入方式由 `GenerationComposer.handleAddReferenceImages()` 追加到末尾。
+- `src/components/UploadedImagePicker.tsx` 的 `UploadedImagePicker`：
+  - 已支持历史图片列表、上传新图片、选择、删除和加入参考图。
+  - 确认按钮当前是“加入参考图”，没有自动插入 `@图片N`。
+- `src/lib/hooks/useWorkspace.ts` 的 `useWorkspace`：
+  - `addAssets()` / `addReferenceImages()` 会调用 `/api/workspace/assets` 后刷新 workspace。
+  - 当前返回值是 `Promise<void>`，调用方需要用现有资产顺序推导新增后的 `图片N`。
+- `src/app/api/workspace/assets/route.ts` 的 `POST`：
+  - 支持 `assetIds` 和 `referenceImageIds` 两种加入方式。
+  - 历史上传图片加入 workspace 时会通过 `attachAssetToSiteReferenceImage()` 补齐站内参考图记录，并返回 `referenceImageIds`。
+- `src/components/PromptChecker.tsx` 的 `checkPrompt()`：
+  - 识别 `@图片1`、`@图片 1`，兼容 `@图1` / `图1`。
+  - 会检测 prompt 引用的图号是否超过当前素材数量。
+- `docs/sd2-external-api-integration.md`：
+  - 已明确 `@图片N` 本身只是 prompt 文本，真实绑定必须依赖 `reference_image_ids` / `referenceImageIds` 数组顺序。
+
+## 第一性原理
+
+`@` 不是装饰性输入提示，而是“把语义描述绑定到真实参考素材”的命令入口。
+
+用户真正需要的是：在写提示词的当下，用最短路径选择“我要引用哪个对象或图片”，系统自动把它转成当前 provider 能理解的 `@图片N + referenceImageIds 顺序绑定`。因此第一版必须优先闭环真实图片绑定，主体名只是更友好的展示与分组入口，不能在 provider 不支持时只插入 `@主体名`。
+
+有没有更优雅的方式：把普通生成页和画布页的 `@` 检测、替换、键盘交互抽成共享 mention 能力；页面只负责提供候选和处理“候选选中后如何加入 workspace”。这样既还原即梦体验，也避免继续维护两套 `@` 逻辑。
+
+## 页面逻辑与交互层级
+
+- 页面核心任务：在提示词编辑过程中快速选择并绑定参考素材。
+- 第一眼内容：
+  - 输入 `@` 后，光标附近出现“可能@的内容”弹窗。
+  - 第一项固定是“+ 创建主体”。第一批可作为入口占位或打开现有图集保存流程，不新增主体数据模型。
+  - 其后优先展示当前工作台参考图，带缩略图、`@图片N`、文件名或图集来源。
+  - 再展示“从历史图片选择”“从图集选择”这类来源动作，让不在 workspace 的图片也能通过同一入口加入并插入。
+  - 空状态明确提示“先上传或从历史图片选择”。
+- 最高频动作：
+  - 输入 `@`。
+  - 方向键选择候选。
+  - Enter/Tab 或点击插入。
+  - 继续输入文字。
+- 一级可见功能：
+  - 当前参考图候选。
+  - 创建主体入口（第一批展示入口，第二批完成主体库）。
+  - 最近/历史图片入口。
+- 二级功能：
+  - 图集选择、公共图集、共享图集、批量选择。
+  - 主体管理、主体重命名、主体删除。
+- 隐藏或延后功能：
+  - 主体创建、已有主体列表、主体重命名、主体删除。
+  - 复杂主体训练、跨项目主体权限、主体版本管理。
+  - provider 级主体语法，除非后续确认后端支持。
+- 主路径：
+  - 用户输入 `@` -> 弹窗打开 -> 选择当前参考图 -> prompt 当前 `@query` 被替换成 `@图片N` -> `PromptChecker` 显示引用正常 -> 提交时 `referenceImageIds` 顺序与 `@图片N` 对齐。
+- 复杂路径：
+  - 用户输入 `@` -> 选择历史图片或图集图片 -> 图片加入 workspace -> 系统计算新增后的 `图片N` -> 替换当前 `@query` -> 提交。
+- 状态要求：
+  - 无参考图：显示创建主体入口、上传图片、从历史图片选择、从图集选择。
+  - 正常：显示当前素材、历史图片入口、图集入口；主体候选第二批补齐。
+  - 达到 9 张上限：禁用会新增素材的候选，说明“最多 9 张”。
+  - 加载失败：弹窗内展示失败文案，但输入框仍可继续编辑。
+
+## 分期边界
+
+### 第一批：基础 `@ mention` 闭环
+
+第一批只解决“输入 `@` 自动弹窗 + 真实图片绑定”：
+
+- 抽公共 mention 解析/替换能力。
+- 普通 `/generate` 输入 `@` 自动弹出“可能@的内容”。
+- 当前工作台图片作为候选，选中后直接插入当前 `@图片N`。
+- 历史上传图片和图集图片可以从 `@` 弹窗进入选择，选中后先加入 workspace，再插入真实 `@图片N`。
+- 重复选择同一张图片时复用已有 `@图片N`，不重复加入 workspace。
+- 9 张上限、失败提示、键盘操作、移动端展示一次闭环。
+- 画布 `/generate/canvas` 复用共享 mention 解析/替换逻辑，但候选仍保持“已连线图片”。
+
+### 第二批：主体能力
+
+第二批再做“主体”：
+
+- 创建主体。
+- 已有主体候选，如 `export (1)`。
+- 主体图集或 `album_type=subject`。
+- 主体管理：重命名、删除、共享、权限、图片增减。
+- 选择主体后把主体图片加入 workspace，并插入对应 `@图片N`，而不是提交 `@主体名` 给 provider。
+
+## 推荐架构
+
+### 共享 mention 解析层
+
+新增 `src/lib/prompt/mention.ts`：
+
+- `detectMentionAtCursor(value, cursor)`：
+  - 返回当前光标前是否处于 `@query` 状态。
+  - 兼容行首、空格后、中文标点后输入 `@`。
+  - 不在邮箱、URL、已有完整 `@图片1` 中误触发。
+- `replaceMentionAtCursor(value, mention, insertText)`：
+  - 用候选文本替换当前 `@query`。
+  - 自动补一个尾随空格，避免和后文粘连。
+  - 返回 next value 和 next cursor。
+- `parseImageMentions(value)`：
+  - 从 `PromptChecker` 抽出或复用现有 `@图片N` 解析，避免两套正则。
+
+### 共享弹窗组件
+
+新增 `src/components/PromptMentionPopover.tsx`：
+
+- 接收候选列表、activeIndex、loading、empty、onSelect、onActiveChange。
+- 视觉上接近即梦：
+  - 标题“可能@的内容”。
+  - 第一行“+ 创建主体”。
+  - 候选行：缩略图、主标题、辅助信息。
+  - 紧凑深色浮层或跟随当前生成页主题的深色面板。
+- 交互：
+  - ArrowUp / ArrowDown 切换。
+  - Enter / Tab 选中。
+  - Escape 关闭。
+  - 鼠标按下选择时不要让 textarea 失焦导致 range 丢失。
+- 样式加入 `src/app/globals.css`，避免和画布页 `.mention-popover` 命名冲突。
+
+### 第一批候选模型
+
+第一批不实现完整主体库，先统一候选协议：
+
+```ts
+type MentionCandidate =
+  | { type: 'action'; action: 'create_subject'; label: '创建主体'; disabled?: boolean; description?: string }
+  | { type: 'image'; token: '@图片1'; label: '图片1'; title: string; thumbnailUrl?: string; referenceImageId?: string; assetId?: string }
+  | { type: 'source'; source: 'history' | 'album'; label: string; description?: string };
+```
+
+第一批候选顺序：
+
+1. `+ 创建主体`：先展示入口；如果主体功能未落地，点击后打开二期提示或复用“保存当前参考图为图集”的低风险入口。
+2. 当前 workspace 图片：`@图片1`、`@图片2`。
+3. 来源动作：`从历史图片选择`、`从图集选择`。
+
+第二批再扩展：
+
+```ts
+type SubjectMentionCandidate = {
+  type: 'subject';
+  token?: string;
+  subjectId: string;
+  label: string;
+  thumbnailUrl?: string;
+  count: number;
+};
+```
+
+### 普通生成页接入
+
+修改 `src/components/PromptEditor.tsx`：
+
+- 新增 props：
+  - `mentionCandidates`
+  - `onMentionSelect`
+  - `onCreateSubject`
+  - `onOpenMentionSource`
+- 主输入框和放大编辑框都支持输入 `@` 自动触发。
+- 保留现有 `@图片N` 按钮，不删除旧功能。
+- 选择候选时按当前 textarea 的 mention range 替换，不再只 append 到末尾。
+- 选择需要异步加入 workspace 的候选时，显示小 loading 状态，失败后保留原 prompt 和错误提示。
+
+修改 `src/components/GenerationComposer.tsx`：
+
+- 将 `referenceLabels` 扩展为 `mentionCandidates`：
+  - 当前 workspace 图片：直接插入 `@图片N`。
+  - 创建主体：第一批只做入口展示或低风险占位；完整创建流程第二批。
+  - 历史图片入口：打开 `UploadedImagePicker`，选择后插入到 pending mention range。
+  - 图集入口：打开 `ReferenceAlbumPicker`，选择后插入到 pending mention range。
+- 抽出“加入或复用图片并返回 label” helper：
+  - 传入 `assetIds` 或 `referenceImageIds`。
+  - 已在 workspace 的返回已有 `图片N`。
+  - 新增的根据当前 `workspace.assets.length` 和新增顺序返回 `图片N`。
+  - 加入失败时抛出明确错误。
+- 改造 `handleAddUploadedAssets()`：
+  - 普通从历史图片入口打开时，加入后也能插入 `@图片N`。
+  - 如果没有 pending mention range，则沿用当前行为或 append markers。
+- 改造 `handleAddReferenceImages()`：
+  - 支持 pending mention range 替换。
+  - 图集批量选择时插入多个 `@图片N`，顺序与 workspace 保持一致。
+
+### 主体功能第二批
+
+第二批不新增 provider 级主体语法，只把主体作为“可复用的一组参考图”来实现：
+
+- 候选展示可以显示主体名，例如 `export (1)`。
+- 选中主体后，把主体内图片加入 workspace，并插入对应 `@图片N`。
+- 如果主体只有 1 张，插入一个 `@图片N`。
+- 如果主体有多张，按主体内排序插入多个 `@图片N`。
+- “+ 创建主体”第二批可复用当前图集能力：
+  - 有当前参考图时：提示输入主体名，把当前参考图保存为主体图集。
+  - 没有参考图时：打开历史图片弹窗，选择图片后再输入主体名。
+- 数据模型优先复用 `ReferenceAlbum.album_type`：
+  - 如果已有 `subject` 或类似类型，沿用。
+  - 如果没有，第二批单独规划 Prisma schema 迁移，不在基础 `@` 弹窗批次偷改数据库。
+
+### 画布页合并
+
+修改 `src/components/canvas/full/nodes.tsx`：
+
+- 用 `src/lib/prompt/mention.ts` 替换本地 `updateMentionState()` 和 `insertMention()` 中的正则/替换逻辑。
+- 保持现有已连线图片候选、键盘操作和空状态文案。
+- 不在第一批强行把图集/历史图片入口塞进画布生成卡，避免破坏画布的“先连线再引用”模型。
+
+## 执行任务拆解
+
+- [x] Batch 16A：确认 `@` 交互 Spec 与验收口径。
+  - 明确第一批只实现公共 mention、自动弹窗、当前图片/历史图片/图集图片真实绑定。
+  - 明确主体创建、主体候选、`album_type=subject` 和主体管理全部放第二批。
+  - 明确普通生成页必须输入 `@` 自动触发。
+  - 明确不删除现有参考图按钮、历史图片弹窗、图集弹窗。
+  - 明确画布页只抽共享 mention 逻辑，不扩大图集能力。
+
+- [x] Batch 16B：抽共享 prompt mention 工具。
+  - 新增 `src/lib/prompt/mention.ts`。
+  - 覆盖检测、替换、解析 `@图片N`。
+  - 把 `PromptChecker.checkPrompt()` 里的图片引用解析改为复用共享函数。
+  - 用 `npx tsx -e` 或轻量测试文件验证边界：行首 `@`、空格后 `@`、中文后 `@`、替换 `@图`、不误伤邮箱。
+
+- [x] Batch 16C：新增通用候选弹窗组件。
+  - 新增 `src/components/PromptMentionPopover.tsx`。
+  - 支持标题、创建主体行、当前图片候选、历史/图集来源动作、空状态、loading、禁用态。
+  - 增加 `src/app/globals.css` 样式，尺寸稳定，移动端不溢出。
+  - 使用 lucide `Plus`、`Image` 或现有图标，不拉伸图标。
+
+- [x] Batch 16D：普通生成页 `PromptEditor` 自动触发。
+  - 修改 `src/components/PromptEditor.tsx`。
+  - 输入 `@` 自动打开弹窗。
+  - 输入 `@图` / `@图片` 可过滤候选。
+  - ArrowUp / ArrowDown / Enter / Tab / Escape 可用。
+  - 主输入框和放大编辑框行为一致。
+  - 保留现有 `@图片N` 按钮。
+
+- [x] Batch 16E：`GenerationComposer` 候选与 workspace 绑定闭环。
+  - 修改 `src/components/GenerationComposer.tsx`。
+  - 当前参考图候选展示缩略图、`@图片N`、文件名、图集来源。
+  - 历史图片和图集选择后，按 pending mention range 插入，不再只追加末尾。
+  - `UploadedImagePicker` 加入后也能自动插入 `@图片N`。
+  - 重复选择同一张图时复用已有 `@图片N`，不重复加入 workspace。
+  - 达到 9 张上限时禁用新增候选，并给出明确提示。
+  - 提交前仍用 `workspace.assets` 顺序生成 `referenceImageIds`。
+
+- [x] Batch 16F：第一批收口验证。
+  - 验证普通生成页当前图片、历史图片、图集图片三条链路。
+  - 验证重复选择、9 张上限、pending mention range 替换。
+  - 验证 payload `referenceImageIds` 顺序与 prompt `@图片N` 对齐。
+  - 验证不执行付费真实生成，除非用户明确授权。
+
+- [x] Batch 16G：画布页复用共享 mention 逻辑。
+  - 修改 `src/components/canvas/full/nodes.tsx`。
+  - 保持现有已连线图片候选。
+  - 只替换检测和插入函数，避免改变画布连线模型。
+  - 回归 `src/components/canvas/full/seedanceApi.ts` 的 prompt mention 引用逻辑。
+
+- [x] Batch 16H：样式与易用性打磨。
+  - 修改 `src/app/globals.css`。
+  - 弹窗跟随输入区，层级高于输入面板但不遮挡主要操作条。
+  - 候选图片保持正方形缩略图，不拉伸。
+  - 文案保持短句：`可能@的内容`、`创建主体`、`上传或选择图片`。
+  - 移动端宽度使用 `min(视口宽度 - 安全边距, 固定最大宽度)`。
+
+- [ ] Batch 16I：第二批主体能力规划。
+  - 先查 `ReferenceAlbum.album_type` 的现有取值和接口支持。
+  - 如果可复用图集类型，新增“创建主体”入口并保存为主体图集。
+  - 如果当前 schema 不支持主体类型且需要迁移，先停下单独规划 Prisma 变更，不在本批次偷改数据库。
+  - 主体候选选中后必须加入真实图片并插入 `@图片N`，不能只插 `@主体名`。
+
+- [x] Batch 16J：最终验证与闭环。
+  - 静态检查和构建通过。
+  - 浏览器验证 `/generate` 输入 `@` 自动弹窗。
+  - 选择当前参考图后，prompt 原位置变成 `@图片1`。
+  - 选择历史图片后，图片进入参考图条，prompt 原位置变成对应 `@图片N`。
+  - 选择图集多图后，prompt 插入多个 `@图片N`，顺序与参考图条一致。
+  - 达到 9 张时不能新增，并显示限制。
+  - `/generate/canvas` 原有 `@` 功能不回退。
+
+## 验收标准
+
+第一批必须通过：
+
+- [ ] `/generate` 输入框只要输入 `@` 就自动出现候选弹窗。
+- [ ] 弹窗标题显示“可能@的内容”。
+- [ ] 弹窗第一项是“+ 创建主体”，但第一批不要求完成主体库、主体管理和数据库迁移。
+- [ ] 当前参考图候选带缩略图，不把文字盖在图片上。
+- [ ] 点击或键盘选中当前参考图，会替换当前 `@query`，不是 append 到末尾。
+- [ ] 历史图片选择后，会自动加入参考图条并插入正确 `@图片N`。
+- [ ] 图集图片选择后，会自动加入参考图条并插入正确 `@图片N`。
+- [ ] 重复选择同一张图，不重复加入 workspace，复用原 `@图片N`。
+- [ ] `PromptChecker` 对插入后的 `@图片N` 显示引用正常。
+- [ ] 提交 payload 的 `referenceImageIds` 顺序与参考图条一致。
+- [ ] 达到 9 张上限时，新增候选禁用且文案明确。
+- [ ] 放大编辑框也支持输入 `@` 弹窗。
+- [ ] Escape 能关闭弹窗，不清空用户输入。
+- [ ] 方向键、Enter、Tab 可用。
+- [ ] `/generate/canvas` 已有 `@` 弹窗仍可用。
+- [ ] 桌面和 390px 移动端无横向溢出。
+
+第二批再验收：
+
+- [ ] `+ 创建主体` 能创建主体图集或主体记录。
+- [ ] `@` 弹窗展示已有主体，如 `export (1)`。
+- [ ] 选择主体后，把主体图片加入 workspace，并插入真实 `@图片N`。
+- [ ] 主体管理权限、共享、删除和重命名有明确规则。
+
+## 验证计划
+
+静态验证：
+
+```bash
+git diff --check
+npx tsc --noEmit --pretty false
+npm run lint
+npm run build
+npx impeccable detect src/components/PromptEditor.tsx
+npx impeccable detect src/components/PromptMentionPopover.tsx
+npx impeccable detect src/components/GenerationComposer.tsx
+```
+
+共享 mention 工具验证：
+
+```bash
+npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src/lib/prompt/mention'; console.log(detectMentionAtCursor('abc @图', 6)); console.log(replaceMentionAtCursor('abc @图 后文', 6, '@图片1'))"
+```
+
+浏览器验证：
+
+```text
+1. 打开 /generate。
+2. 上传或从历史图片加入一张参考图。
+3. 在 prompt 中间输入 @，确认自动弹窗出现。
+4. 选择 @图片1，确认替换发生在光标位置。
+5. 删除 prompt 中的 @图片1，再输入 @，选择历史图片入口，确认新图进入参考图条且 prompt 插入对应 @图片N。
+6. 打开放大编辑框，重复 @ 选择。
+7. 打开 /generate/canvas，连线图片卡和生成卡，输入 @，确认画布弹窗和键盘选择仍正常。
+```
+
+接口与数据验证：
+
+```text
+1. 创建普通生成任务前，在浏览器 Network 中确认 POST /api/tasks/create 的 referenceImageIds 顺序。
+2. 确认 prompt 中 @图片1 对应 referenceImageIds[0]。
+3. 历史图片加入 workspace 后，确认 /api/workspace/assets 返回 referenceImageIds，工作台刷新后可提交。
+4. 不执行付费真实生成，除非用户明确授权。
+```
+
+## 风险与回滚
+
+- 风险：主体功能需要 schema 支持。
+  - 控制：第一批只预留或展示创建主体入口，不做主体 schema；如果需要 Prisma 迁移，第二批单独规划。
+- 风险：异步加入历史图片后 workspace state 滞后，导致 `图片N` 计算错位。
+  - 控制：选中前用当前资产顺序预计算，加入后刷新 workspace，并用去重规则避免重复插入。
+- 风险：输入框失焦导致 selection range 丢失。
+  - 控制：弹窗点击使用 pointer down 阻止默认失焦，并缓存 pending mention range。
+- 风险：画布页逻辑被普通页改动影响。
+  - 控制：共享工具只抽无状态解析/替换，画布候选来源和连线模型保持原样。
+- 风险：`@主体名` 与 provider 实际绑定不一致。
+  - 控制：第一批不提交 `@主体名` 给 provider，只插入可绑定的 `@图片N`。
+- 回滚：
+  - 隐藏自动弹窗入口，保留原有 `@图片N` 按钮。
+  - 回退 `PromptEditor` 到按钮插入。
+  - 画布页若受影响，可临时恢复本地 `updateMentionState()` / `insertMention()`。
+
+## Git Plan
+
+- 当前分支：`codex/minimal-feedback-loop`。
+- 当前状态：规划前分支领先远端 2 个本地提交，工作区需在实现前再次确认。
+- 本轮对齐规划只修改 `tasks/todo.md`。
+- 第一批实现预计文件：
+  - 新增 `src/lib/prompt/mention.ts`
+  - 新增 `src/components/PromptMentionPopover.tsx`
+  - 修改 `src/components/PromptEditor.tsx`
+  - 修改 `src/components/GenerationComposer.tsx`
+  - 修改 `src/components/PromptChecker.tsx`
+  - 修改 `src/components/UploadedImagePicker.tsx`
+  - 修改 `src/components/ReferenceAlbumPicker.tsx`
+  - 修改 `src/components/canvas/full/nodes.tsx`
+  - 修改 `src/app/globals.css`
+  - 必要时修改 `tasks/lessons.md`
+- 第二批主体能力预计另行规划，可能涉及：
+  - `prisma/schema.prisma`
+  - `src/app/api/reference-albums/*`
+  - `src/lib/reference-albums/*`
+  - 主体管理相关组件
+- 提交分组建议：
+  - 提交 1：共享 mention 工具和 PromptChecker 复用。
+  - 提交 2：普通生成页自动弹窗和候选 UI。
+  - 提交 3：历史图片/图集图片加入 workspace 并替换 pending mention。
+  - 提交 4：画布页复用和验证修正。
+  - 主体能力单独开第二批提交，不混入第一批。
+- 完成实现和验证后，做聚焦提交；如果 GitHub 网络仍失败，保留本地 commit 并明确报告。
+
+## HARD-GATE
+
+- 当前只完成规划对齐，不编码。
+- 第一批进入实现前需要用户明确确认“开干 / 落地 / 执行”。
+- 第一批执行范围：公共 `@ mention`、普通生成页自动弹窗、当前图片/历史图片/图集图片真实绑定、画布页不退化。
+- 主体创建和主体库是第二批；如果执行中发现必须改 Prisma schema，立即停止并单独规划数据库变更。
+
+## Review - 2026-06-13
+
+- 已实现第一批：新增公共 `src/lib/prompt/mention.ts`，统一检测 `@query`、替换当前 mention range、解析 `@图片N`。
+- 已实现第一批：`src/components/PromptChecker.tsx` 复用共享 `parseImageMentions()`，避免图片引用正则分叉。
+- 已实现第一批：新增 `src/components/PromptMentionPopover.tsx`，支持“可能@的内容”、`+ 创建主体`、当前图片候选、历史/图集来源动作、loading、空状态、鼠标选择和高亮态。
+- 已实现第一批：`src/components/PromptEditor.tsx` 主输入框和放大编辑框输入 `@` 自动弹窗，支持过滤、Escape、方向键、Enter/Tab；修复快速 `ArrowDown` 后立刻 `Enter` 时 activeIndex 滞后的快捷键问题。
+- 已实现第一批：`src/components/GenerationComposer.tsx` 提供当前 workspace 图片候选；历史图片/图集来源选择后先加入或复用 workspace，再把真实 `@图片N` 插回 pending mention range；重复选择已在 workspace 的图复用原序号。
+- 已实现第一批：`src/components/canvas/full/nodes.tsx` 复用公共 mention 检测/替换，保持画布候选来源仍为已连线图片。
+- 已实现第一批：`src/app/globals.css` 增加弹窗样式，缩略图固定正方形，不遮盖图片，不产生移动端横向溢出。
+- 未实现第二批：主体创建、已有主体候选、`album_type=subject`、主体管理和 Prisma schema 变更仍保留为 Batch 16I。
+- 已验证：`git diff --check`、共享 mention 工具 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/PromptEditor.tsx`、`npx impeccable detect src/components/PromptMentionPopover.tsx`、`npx impeccable detect src/components/GenerationComposer.tsx` 通过。
+- 已验证：本地 3100 dev server 覆盖开发 session secret 后，`/generate` 输入 `@` 自动弹窗；第一项为“创建主体”；当前 5 张素材显示缩略图候选；键盘选择插入 `@图片1` 到原光标位置；图集来源选择已在工作台图片后插入 `@图片1`；历史图片入口可打开；放大编辑框支持 `@`；390px 移动端无横向溢出。
+- 已验证：`/generate/canvas` 新建生成卡后输入 `@` 仍显示原有“先把图片卡连到这张生成卡，才能 @ 选择。”空状态，画布 prompt 编辑未退化。
+- 未执行：未做真实付费生成；未为了验收新增历史图片到 workspace；未读取 `.env`。
