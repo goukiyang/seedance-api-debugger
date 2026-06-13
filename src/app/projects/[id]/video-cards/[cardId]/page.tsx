@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { formatAmountMicrosWithFixedCny } from '@/lib/costs/currency';
 import { displayUserName } from '@/lib/users/display';
@@ -58,8 +59,8 @@ interface TaskItem {
   provider_official_amount_micros?: number | null;
   provider_cost_currency?: string | null;
   created_at: string;
-  owner?: { id: string; name: string; username: string } | null;
-  user?: { id: string; name: string; username: string } | null;
+  owner?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
+  user?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
 }
 
 interface Permissions {
@@ -304,7 +305,7 @@ export default function VideoCardDetailPage() {
                     </div>
                     <div className="video-card-task-meta">
                       <span>{taskStatusLabel(task.local_status)}</span>
-                      <span>{displayUserName(task.owner || task.user)}</span>
+                      <UserIdentityBadge user={task.owner || task.user} size="sm" />
                       <span>点数 {task.actual_cost ?? task.estimated_cost ?? '-'}</span>
                       <span>官方 {officialMicros ? formatAmountMicrosWithFixedCny(officialMicros, task.provider_cost_currency) : '待确认'}</span>
                       <span>{new Date(task.created_at).toLocaleString('zh-CN')}</span>

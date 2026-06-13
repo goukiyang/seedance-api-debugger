@@ -73,7 +73,7 @@ export async function GET(
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         members: {
           where: { status: 'active' },
           orderBy: { joined_at: 'asc' },
@@ -142,8 +142,8 @@ export async function GET(
         completed_at: true,
         video_card_id: true,
         video_card: { select: { id: true, title: true, objective: true, status: true } },
-        owner: { select: { id: true, name: true, username: true } },
-        user: { select: { id: true, name: true, username: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       },
     });
 
@@ -151,7 +151,7 @@ export async function GET(
       where: { project_id: params.id },
       orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         current_best_task: {
           select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
         },
@@ -265,7 +265,7 @@ export async function GET(
           reason: true,
           occurred_at: true,
           created_at: true,
-          user: { select: { id: true, name: true, username: true, email: true } },
+          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
           task: {
             select: {
               id: true,
@@ -282,8 +282,8 @@ export async function GET(
               provider_cost_currency: true,
               provider_billing_status: true,
               created_at: true,
-              owner: { select: { id: true, name: true, username: true } },
-              user: { select: { id: true, name: true, username: true } },
+              owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+              user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
             },
           },
           allocations: {
@@ -322,8 +322,8 @@ export async function GET(
           actual_cost: true,
           provider_cost_status: true,
           created_at: true,
-          owner: { select: { name: true, username: true } },
-          user: { select: { name: true, username: true } },
+          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         },
       }),
       prisma.videoTask.findMany({

@@ -5660,8 +5660,8 @@ a {
   display: flex;
   align-items: baseline;
   flex-direction: row;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-wrap: nowrap;
+  gap: 6px;
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.8);
   margin-bottom: 12px;
@@ -5670,15 +5670,14 @@ a {
 
 .composer-task-card-prompt-text {
   color: rgba(255, 255, 255, 0.8);
-  display: block;
-  font-size: 8px;
+  display: inline-block;
+  flex: 1 1 auto;
+  font-size: 12px;
   line-height: 1.45;
   min-width: 0;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer-task-card-prompt-time {
@@ -5686,6 +5685,7 @@ a {
   font-size: 10px;
   font-weight: 600;
   display: inline-block;
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -9807,6 +9807,22 @@ a {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   font-size: 13px;
+}
+
+.video-card-meta .user-identity-badge,
+.video-card-task-meta .user-identity-badge {
+  color: inherit;
+  max-width: 220px;
+}
+
+.video-card-meta .user-identity-name,
+.video-card-task-meta .user-identity-name {
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.video-card-meta .user-identity-subtitle,
+.video-card-task-meta .user-identity-subtitle {
+  color: rgba(148, 163, 184, 0.95);
 }
 
 .video-card-actions,

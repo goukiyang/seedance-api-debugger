@@ -166,7 +166,6 @@ export function GenerationComposer({
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
   const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
   const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
-  const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [mentionNotice, setMentionNotice] = useState<string | null>(null);
   const pendingMentionRequestRef = React.useRef<{
     source: 'history' | 'album';
@@ -230,7 +229,7 @@ export function GenerationComposer({
     if (!prompt.trim()) {
       return {
         message: '请填写提示词',
-        tone: hasAttemptedSubmit ? 'error' as const : 'hint' as const,
+        tone: 'hint' as const,
       };
     }
     if (submitBlocker) {
@@ -238,7 +237,7 @@ export function GenerationComposer({
       return { message: submitBlocker, tone: isUploading ? 'progress' as const : 'error' as const };
     }
     return { message: null, tone: 'ok' as const };
-  }, [hasAttemptedSubmit, isSubmitting, mentionNotice, prompt, submitBlocker]);
+  }, [isSubmitting, mentionNotice, prompt, submitBlocker]);
 
   const canPressSubmit = !isSubmitting && !(need1080pApproval && !resolutionApprovalConfirmed);
 
@@ -352,7 +351,6 @@ export function GenerationComposer({
     if (!reuseDraft || appliedReuseDraftRef.current === reuseKey) return;
     appliedReuseDraftRef.current = reuseKey;
     setPrompt(reuseDraft.prompt);
-    setHasAttemptedSubmit(false);
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
     setDuration(reuseDraft.duration);
@@ -379,7 +377,6 @@ export function GenerationComposer({
     setReturnLastFrame(initialSettings.returnLastFrame);
     setWatermark(initialSettings.watermark);
     setResolutionApprovalConfirmed(false);
-    setHasAttemptedSubmit(false);
   }, [initialSettings, reuseDraft]);
 
   useEffect(() => {
@@ -393,7 +390,6 @@ export function GenerationComposer({
   // ============================================================================
 
   const handleSubmit = useCallback(async () => {
-    setHasAttemptedSubmit(true);
     if (submitBlocker || isSubmitting) return;
     await onSubmit({
       prompt,

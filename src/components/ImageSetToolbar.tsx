@@ -159,14 +159,14 @@ export function ImageSetToolbar({
             className="composer-toolbar-btn"
             onClick={() => setShowSaveDialog(true)}
           >
-            保存当前
+            保存素材为图集
           </button>
           <button
             type="button"
             className="composer-toolbar-btn"
             onClick={() => setShowNewDialog(true)}
           >
-            新建图集
+            创建空图集
           </button>
         </div>
       </div>
@@ -175,7 +175,7 @@ export function ImageSetToolbar({
         <div className="composer-toolbar-error">{actionError}</div>
       )}
 
-      {/* 保存当前图集对话框 */}
+      {/* 保存当前素材为图集对话框 */}
       {showSaveDialog && (
         <div className="composer-dialog-backdrop" onClick={() => setShowSaveDialog(false)}>
           <div className="composer-dialog" onClick={(e) => e.stopPropagation()}>
@@ -206,11 +206,11 @@ export function ImageSetToolbar({
         </div>
       )}
 
-      {/* 新建图集对话框 */}
+      {/* 创建空图集对话框 */}
       {showNewDialog && (
         <div className="composer-dialog-backdrop" onClick={() => setShowNewDialog(false)}>
           <div className="composer-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="composer-dialog-title">新建图集</div>
+            <div className="composer-dialog-title">创建空图集</div>
             <input
               type="text"
               className="composer-dialog-input"

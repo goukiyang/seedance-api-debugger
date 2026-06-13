@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
@@ -57,8 +58,8 @@ interface TaskItem {
   provider_cost_currency: string | null;
   provider_billing_status?: string | null;
   created_at: string;
-  owner?: { id: string; name: string; username: string } | null;
-  user?: { id: string; name: string; username: string } | null;
+  owner?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
+  user?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   video_card_id?: string | null;
   video_card?: { id: string; title: string; objective: string | null; status: string } | null;
 }
@@ -91,7 +92,7 @@ interface VideoCardItem {
   objective: string | null;
   status: string;
   owner_user_id: string | null;
-  owner?: { id: string; name: string; username: string; email?: string } | null;
+  owner?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   platform: string | null;
   ratio: string | null;
   duration: number | null;
@@ -126,8 +127,8 @@ interface ReviewTaskItem {
   provider_cost_status: string;
   error_message?: string | null;
   created_at: string;
-  owner?: { name: string; username: string } | null;
-  user?: { name: string; username: string } | null;
+  owner?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
+  user?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
 }
 
 interface ProjectReviewSummary {
@@ -279,6 +280,10 @@ function confidenceLabel(confidence: string): string {
 
 function taskOwnerLabel(task: TaskItem | ReviewTaskItem): string {
   return displayUserName(task.owner || task.user);
+}
+
+function taskOwnerUser(task: TaskItem | ReviewTaskItem) {
+  return task.owner || task.user || null;
 }
 
 function ledgerOwnerLabel(ledger: CostLedgerItem): string {
@@ -630,7 +635,7 @@ export default function ProjectDetailPage() {
                       <span>{card.ratio || '比例未定'}</span>
                       <span>{card.duration ? `${card.duration}s` : '时长未定'}</span>
                       <span>{card.target_resolution || '分辨率未定'}</span>
-                      <span>{displayUserName(card.owner)}</span>
+                      <UserIdentityBadge user={card.owner} size="sm" />
                     </div>
                     <div className="video-card-stats">
                       <span>生成 {summary?.task_count ?? 0}</span>
@@ -713,7 +718,7 @@ export default function ProjectDetailPage() {
                     <td className="truncate" style={{ maxWidth: 360 }}>
                       <Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>{task.prompt || task.id}</Link>
                     </td>
-                    <td>{taskOwnerLabel(task)}</td>
+                    <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>
                     <td>{task.local_status}</td>
                     <td>{task.actual_cost ?? task.estimated_cost ?? 0}</td>
                     <td>{costStatusLabel(task.provider_cost_status)}</td>
@@ -866,7 +871,7 @@ export default function ProjectDetailPage() {
                       <span className="text-gray">历史未归档</span>
                     )}
                   </td>
-                  <td>{taskOwnerLabel(task)}</td>
+                  <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>
                   <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
                   <td>{costStatusLabel(task.provider_cost_status)}</td>
                   <td>{new Date(task.created_at).toLocaleString('zh-CN')}</td>

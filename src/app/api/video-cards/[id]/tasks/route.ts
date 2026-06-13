@@ -65,8 +65,8 @@ export async function GET(
           video_card_id: true,
           project: { select: { id: true, name: true, type: true } },
           video_card: { select: { id: true, title: true, objective: true, status: true } },
-          owner: { select: { id: true, name: true, username: true } },
-          user: { select: { id: true, name: true, username: true } },
+          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         },
       }),
     ]);

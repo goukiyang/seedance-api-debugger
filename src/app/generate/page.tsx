@@ -1141,7 +1141,7 @@ export default function GeneratePage() {
   // Helpers
   // ============================================================================
 
-  function formatTime(dateStr: string): string {
+  function formatRecentTaskTime(dateStr: string): string {
     try {
       const d = new Date(dateStr);
       const now = new Date();
@@ -1149,7 +1149,18 @@ export default function GeneratePage() {
       if (diff < 60) return '刚刚';
       if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
       if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-      return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+      const days = Math.floor(diff / 86400);
+      if (days < 7) return `${days} 天前`;
+      if (days < 30) return `${Math.floor(days / 7)} 周前`;
+      return `${Math.floor(days / 30)} 个月前`;
+    } catch {
+      return '';
+    }
+  }
+
+  function formatAbsoluteTime(dateStr: string): string {
+    try {
+      return new Date(dateStr).toLocaleString('zh-CN');
     } catch {
       return '';
     }
@@ -1530,9 +1541,9 @@ export default function GeneratePage() {
                       <Link href={taskDetailHref(task.id, '/generate')} className="composer-task-card-link">
                         <RecentTaskPreview task={task} />
                         <div className="composer-task-card-body">
-                          <div className="composer-task-card-prompt">
+                          <div className="composer-task-card-prompt" title={`${formatAbsoluteTime(task.created_at)} · ${task.prompt}`}>
                             <time className="composer-task-card-prompt-time" dateTime={task.created_at}>
-                              {formatTime(task.created_at)}
+                              {formatRecentTaskTime(task.created_at)}
                             </time>
                             <span className="composer-task-card-prompt-text">
                               {truncatePrompt(task.prompt)}

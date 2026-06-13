@@ -82,7 +82,7 @@ export async function GET(
       where: { project_id: params.id },
       orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         current_best_task: {
           select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
         },
