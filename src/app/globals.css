@@ -9503,12 +9503,79 @@ a {
 }
 
 .composer-video-card-panel {
-  width: min(980px, calc(100vw - 32px));
+  width: 100%;
+  max-width: 1180px;
   margin: 0 auto 18px;
-  padding: 16px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.42);
+  overflow: hidden;
+}
+
+.composer-video-card-summary {
+  width: 100%;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px 10px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.16s ease;
+}
+
+.composer-video-card-summary:hover {
+  background: rgba(30, 41, 59, 0.36);
+}
+
+.composer-video-card-summary-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.composer-video-card-summary-main {
+  overflow: hidden;
+  color: rgba(248, 250, 252, 0.94);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-video-card-summary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(191, 219, 254, 0.92);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.composer-video-card-summary-icon {
+  transition: transform 0.16s ease;
+}
+
+.composer-video-card-panel.is-open .composer-video-card-summary-icon {
+  transform: rotate(180deg);
+}
+
+.composer-video-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.composer-video-card-body > .composer-project-row {
+  margin-top: 12px;
+  background: rgba(2, 6, 23, 0.28);
 }
 
 .composer-video-card-controls {
@@ -9573,6 +9640,10 @@ a {
 }
 
 @media (max-width: 760px) {
+  .composer-video-card-summary {
+    align-items: flex-start;
+  }
+
   .composer-video-card-create,
   .composer-video-card-controls {
     display: grid;

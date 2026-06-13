@@ -345,6 +345,7 @@ export default function GeneratePage() {
   const [videoCardObjective, setVideoCardObjective] = useState('');
   const [videoCardBusy, setVideoCardBusy] = useState(false);
   const [videoCardMessage, setVideoCardMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
+  const [videoCardPanelOpen, setVideoCardPanelOpen] = useState(false);
   const [reuseDraft, setReuseDraft] = useState<ReuseDraft | null>(null);
   const [reuseMessage, setReuseMessage] = useState('');
   const [reuseLoading, setReuseLoading] = useState(false);
@@ -1188,6 +1189,18 @@ export default function GeneratePage() {
     ? projectMetaLabel(selectedProject)
     : '新建一个项目后即可保存任务、成本和结果。';
   const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
+  const videoCardSummaryLabel = loadingVideoCards
+    ? '正在加载视频卡...'
+    : selectedVideoCard
+      ? `${selectedVideoCard.title}${selectedVideoCard.is_fallback ? '（历史归档）' : ''}`
+      : selectedProjectId
+        ? '未选择视频卡'
+        : '先选择项目';
+  const videoCardSummaryHelp = selectedVideoCard
+    ? selectedVideoCard.objective || '已绑定本次生成归属'
+    : selectedProjectId && videoCards.length === 0 && !loadingVideoCards
+      ? '当前项目还没有视频卡，展开后创建'
+      : '展开后可切换或创建视频卡';
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
 
   // ============================================================================
@@ -1427,76 +1440,97 @@ export default function GeneratePage() {
         )}
       </div>
 
-      <div className="composer-video-card-panel">
-        <div className="composer-project-row">
-          <div className="composer-project-copy">
+      <div className={`composer-video-card-panel ${videoCardPanelOpen ? 'is-open' : ''}`}>
+        <button
+          type="button"
+          className="composer-video-card-summary"
+          onClick={() => setVideoCardPanelOpen((open) => !open)}
+          aria-expanded={videoCardPanelOpen}
+        >
+          <span className="composer-video-card-summary-copy">
             <span className="composer-project-label">视频卡</span>
-            <span className="composer-project-help">本次生成必须归入一张视频卡，后续成本、最佳版和最终版都按卡追踪。</span>
-          </div>
-          <div className="composer-video-card-controls">
-            <select
-              className="composer-project-input"
-              value={selectedVideoCardId}
-              onChange={(event) => setSelectedVideoCardId(event.target.value)}
-              disabled={!selectedProjectId || loadingVideoCards || videoCardBusy}
-            >
-              <option value="">
-                {loadingVideoCards ? '正在加载视频卡...' : '选择视频卡'}
-              </option>
-              {videoCards.map((card) => (
-                <option key={card.id} value={card.id} disabled={card.status === 'sealed' || card.status === 'archived'}>
-                  {card.title}{card.is_fallback ? '（历史归档）' : ''}{card.summary ? ` · ${card.summary.task_count} 次` : ''}
-                </option>
-              ))}
-            </select>
+            <span className="composer-video-card-summary-main">{videoCardSummaryLabel}</span>
+            <span className="composer-project-help">{videoCardSummaryHelp}</span>
+          </span>
+          <span className="composer-video-card-summary-action">
+            {videoCardPanelOpen ? '收起' : '展开'}
+            <ChevronDown className="composer-video-card-summary-icon" size={16} aria-hidden="true" />
+          </span>
+        </button>
+
+        {videoCardPanelOpen && (
+          <div className="composer-video-card-body">
+            <div className="composer-project-row">
+              <div className="composer-project-copy">
+                <span className="composer-project-label">视频卡归属</span>
+                <span className="composer-project-help">本次生成必须归入一张视频卡，后续成本、最佳版和最终版都按卡追踪。</span>
+              </div>
+              <div className="composer-video-card-controls">
+                <select
+                  className="composer-project-input"
+                  value={selectedVideoCardId}
+                  onChange={(event) => setSelectedVideoCardId(event.target.value)}
+                  disabled={!selectedProjectId || loadingVideoCards || videoCardBusy}
+                >
+                  <option value="">
+                    {loadingVideoCards ? '正在加载视频卡...' : '选择视频卡'}
+                  </option>
+                  {videoCards.map((card) => (
+                    <option key={card.id} value={card.id} disabled={card.status === 'sealed' || card.status === 'archived'}>
+                      {card.title}{card.is_fallback ? '（历史归档）' : ''}{card.summary ? ` · ${card.summary.task_count} 次` : ''}
+                    </option>
+                  ))}
+                </select>
+                {selectedVideoCard && (
+                  <Link className="composer-video-card-link" href={`/video-cards/${selectedVideoCard.id}`}>
+                    查看视频卡
+                  </Link>
+                )}
+              </div>
+            </div>
+
             {selectedVideoCard && (
-              <Link className="composer-video-card-link" href={`/video-cards/${selectedVideoCard.id}`}>
-                查看视频卡
-              </Link>
+              <div className="composer-video-card-current">
+                <strong>{selectedVideoCard.title}</strong>
+                <span>{selectedVideoCard.objective || '未填写视频目标'}</span>
+              </div>
             )}
-          </div>
-        </div>
 
-        {selectedVideoCard && (
-          <div className="composer-video-card-current">
-            <strong>{selectedVideoCard.title}</strong>
-            <span>{selectedVideoCard.objective || '未填写视频目标'}</span>
-          </div>
-        )}
+            {selectedProjectId && videoCards.length === 0 && !loadingVideoCards && (
+              <div className="composer-video-card-empty">当前项目还没有视频卡。创建后才能提交生成。</div>
+            )}
 
-        {selectedProjectId && videoCards.length === 0 && !loadingVideoCards && (
-          <div className="composer-video-card-empty">当前项目还没有视频卡。创建后才能提交生成。</div>
-        )}
+            <form className="composer-video-card-create" onSubmit={handleCreateVideoCard}>
+              <input
+                className="composer-project-input"
+                value={videoCardTitle}
+                onChange={(event) => setVideoCardTitle(event.target.value)}
+                placeholder="新视频卡标题"
+                maxLength={80}
+                disabled={!selectedProjectId || videoCardBusy}
+              />
+              <input
+                className="composer-project-input"
+                value={videoCardObjective}
+                onChange={(event) => setVideoCardObjective(event.target.value)}
+                placeholder="视频目标，可选"
+                maxLength={160}
+                disabled={!selectedProjectId || videoCardBusy}
+              />
+              <button
+                className="composer-project-btn composer-project-btn-primary"
+                type="submit"
+                disabled={!selectedProjectId || videoCardBusy || !videoCardTitle.trim()}
+              >
+                {videoCardBusy ? '创建中...' : '创建视频卡'}
+              </button>
+            </form>
 
-        <form className="composer-video-card-create" onSubmit={handleCreateVideoCard}>
-          <input
-            className="composer-project-input"
-            value={videoCardTitle}
-            onChange={(event) => setVideoCardTitle(event.target.value)}
-            placeholder="新视频卡标题"
-            maxLength={80}
-            disabled={!selectedProjectId || videoCardBusy}
-          />
-          <input
-            className="composer-project-input"
-            value={videoCardObjective}
-            onChange={(event) => setVideoCardObjective(event.target.value)}
-            placeholder="视频目标，可选"
-            maxLength={160}
-            disabled={!selectedProjectId || videoCardBusy}
-          />
-          <button
-            className="composer-project-btn composer-project-btn-primary"
-            type="submit"
-            disabled={!selectedProjectId || videoCardBusy || !videoCardTitle.trim()}
-          >
-            {videoCardBusy ? '创建中...' : '创建视频卡'}
-          </button>
-        </form>
-
-        {videoCardMessage && (
-          <div className={`composer-project-message ${videoCardMessage.type}`}>
-            {videoCardMessage.text}
+            {videoCardMessage && (
+              <div className={`composer-project-message ${videoCardMessage.type}`}>
+                {videoCardMessage.text}
+              </div>
+            )}
           </div>
         )}
       </div>
