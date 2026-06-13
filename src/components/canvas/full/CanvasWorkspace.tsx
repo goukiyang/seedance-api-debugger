@@ -1715,7 +1715,7 @@ function CanvasWorkspace() {
                   <option value="">{loadingVideoCards ? '正在加载视频卡...' : '选择视频卡'}</option>
                   {videoCards.map((card) => (
                     <option key={card.id} value={card.id} disabled={card.status === 'sealed' || card.status === 'archived'}>
-                      {card.title}{card.is_fallback ? '（历史归档）' : ''}
+                      {card.title}
                     </option>
                   ))}
                 </select>

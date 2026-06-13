@@ -9787,6 +9787,11 @@ a {
   color: #86efac;
 }
 
+.video-card-task-role.candidate {
+  border-color: rgba(56, 189, 248, 0.32);
+  color: #7dd3fc;
+}
+
 .video-card-meta,
 .video-card-stats,
 .video-card-task-meta,

@@ -20,12 +20,17 @@
 
 目标：把已经上线的视频卡第一阶段补到可长期维护状态，避免后续 P1/P2 在不稳定基础上继续叠功能。
 
-- [ ] 核对当前 `tasks/todo.md`、需求文档和代码状态，把已完成的 P0 视频卡项标记为已落地，避免后续重复派单。
-- [ ] 核对 Prisma migration 链，确认 `CostLedger`、`CostAllocation`、`ProviderApiRequest`、`ProviderAccountSnapshot` 等已存在模型是否有完整迁移来源；缺失时补迁移或登记为历史 `db push` 风险。
-- [ ] 补齐视频卡详情页的“候选”标记入口，当前已有 `version_role=candidate` 口径，但 UI 主要是当前最佳和最终版。
-- [ ] 明确项目页是否保留历史/调试任务二级区域；如果保留，视觉层级必须低于视频卡，不能让用户误以为任务和视频卡同级。
+- [x] 核对当前 `tasks/todo.md`、需求文档和代码状态，把已完成的 P0 视频卡项标记为已落地，避免后续重复派单。
+- [x] 核对 Prisma migration 链，确认 `CostLedger`、`CostAllocation`、`ProviderApiRequest`、`ProviderAccountSnapshot` 等已存在模型是否有完整迁移来源；缺失时补迁移或登记为历史 `db push` 风险。
+- [x] 补齐视频卡详情页的“候选”标记入口，当前已有 `version_role=candidate` 口径，但 UI 主要是当前最佳和最终版。
+- [x] 明确项目页是否保留历史/调试任务二级区域；如果保留，视觉层级必须低于视频卡，不能让用户误以为任务和视频卡同级。
 - [ ] 为视频卡封板后的“重开”定义入口和限制，当前封板能阻止生成，但重开应进入审批中心任务包。
 - [ ] 复查 `scripts/backfill-video-cards.ts` 兜底卡标题和线上数据一致性，避免历史任务被重复归档或归到错误项目。
+
+本轮记录：
+
+- 2026-06-13：已确认 `VideoCard` 与 `VideoTask.video_card_id` 有迁移；`CostLedger`、`CostAllocation`、`ProviderApiRequest`、`ProviderAccountSnapshot` 在 schema 和本地 SQLite 中存在，但 migrations 目录没有对应建表迁移，后续任务包 B/K 必须先补可回放迁移或登记 baseline 策略。
+- 2026-06-13：视频卡详情页已补“标记候选”入口；候选可多选，当前最佳和最终版仍保持单选约束。
 
 验收：
 

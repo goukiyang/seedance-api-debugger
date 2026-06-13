@@ -1178,7 +1178,7 @@ export default function GeneratePage() {
   const videoCardSummaryLabel = loadingVideoCards
     ? '正在加载视频卡...'
     : selectedVideoCard
-      ? `${selectedVideoCard.title}${selectedVideoCard.is_fallback ? '（历史归档）' : ''}`
+      ? selectedVideoCard.title
       : selectedProjectId
         ? '未选择视频卡'
         : '先选择项目';
@@ -1427,7 +1427,7 @@ export default function GeneratePage() {
                   </option>
                   {videoCards.map((card) => (
                     <option key={card.id} value={card.id} disabled={card.status === 'sealed' || card.status === 'archived'}>
-                      {card.title}{card.is_fallback ? '（历史归档）' : ''}{card.summary ? ` · ${card.summary.task_count} 次` : ''}
+                      {card.title}{card.summary ? ` · ${card.summary.task_count} 次` : ''}
                     </option>
                   ))}
                 </select>

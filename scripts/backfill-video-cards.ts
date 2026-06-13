@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const APPLY = process.argv.includes('--apply');
-const FALLBACK_CARD_TITLE = '历史生成归档';
+const FALLBACK_CARD_TITLE = '生成记录';
 
 async function main() {
   const unassignedTasks = await prisma.videoTask.count({

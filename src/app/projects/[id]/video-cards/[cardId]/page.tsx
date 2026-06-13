@@ -277,7 +277,7 @@ export default function VideoCardDetailPage() {
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 className="section-title mb-0">生成记录</h2>
-            <p className="text-gray text-sm mt-2">当前最佳和最终版只能各保留一个；标记后任务详情仍保留完整审计信息。</p>
+            <p className="text-gray text-sm mt-2">候选可保留多个；当前最佳和最终版只能各保留一个，标记后任务详情仍保留完整审计信息。</p>
           </div>
           <span className="text-gray text-sm">{tasks.length} 条</span>
         </div>
@@ -311,6 +311,16 @@ export default function VideoCardDetailPage() {
                     </div>
                     {permissions.can_manage && (
                       <div className="video-card-task-actions">
+                        {task.version_role !== 'candidate' && task.version_role !== 'current_best' && task.version_role !== 'final' && (
+                          <button
+                            className="btn btn-secondary"
+                            type="button"
+                            disabled={busyTaskId === task.id}
+                            onClick={() => patchVideoCard({ candidate_task_id: task.id }, '已标记候选', task.id)}
+                          >
+                            标记候选
+                          </button>
+                        )}
                         <button
                           className="btn btn-secondary"
                           type="button"

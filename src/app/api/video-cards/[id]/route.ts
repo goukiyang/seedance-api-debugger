@@ -103,7 +103,7 @@ async function getSerializableVideoCard(id: string) {
 async function assertTaskInVideoCard(taskId: string, videoCardId: string) {
   const task = await prisma.videoTask.findUnique({
     where: { id: taskId },
-    select: { id: true, video_card_id: true, project_id: true },
+    select: { id: true, video_card_id: true, project_id: true, version_role: true },
   });
   if (!task || task.video_card_id !== videoCardId) {
     throw new AuthError('任务不属于此视频卡', 400);
@@ -190,11 +190,34 @@ export async function PATCH(
       : hasOwn(body, 'finalTaskId')
         ? asNullableString(body.finalTaskId)
         : undefined;
+    const candidateTaskId = hasOwn(body, 'candidate_task_id')
+      ? asNullableString(body.candidate_task_id)
+      : hasOwn(body, 'candidateTaskId')
+        ? asNullableString(body.candidateTaskId)
+        : undefined;
 
     if (currentBestTaskId) await assertTaskInVideoCard(currentBestTaskId, params.id);
     if (finalTaskId) await assertTaskInVideoCard(finalTaskId, params.id);
+    if (candidateTaskId) {
+      const task = await assertTaskInVideoCard(candidateTaskId, params.id);
+      if (
+        task.version_role === 'current_best'
+        || task.version_role === 'final'
+        || access.videoCard.current_best_task_id === candidateTaskId
+        || access.videoCard.final_task_id === candidateTaskId
+      ) {
+        return NextResponse.json({ error: '当前最佳或最终版不能降级为候选' }, { status: 400 });
+      }
+    }
 
     await prisma.$transaction(async (tx) => {
+      if (candidateTaskId !== undefined && candidateTaskId) {
+        await tx.videoTask.update({
+          where: { id: candidateTaskId },
+          data: { version_role: 'candidate' },
+        });
+      }
+
       if (currentBestTaskId !== undefined) {
         data.current_best_task_id = currentBestTaskId;
         await tx.videoTask.updateMany({
@@ -227,6 +250,7 @@ export async function PATCH(
     await logProjectAction(user.id, 'video_card_update', 'video_card', params.id, {
       project_id: access.videoCard.project_id,
       updated_fields: Object.keys(data),
+      candidate_task_id: candidateTaskId ?? undefined,
       current_best_task_id: currentBestTaskId ?? undefined,
       final_task_id: finalTaskId ?? undefined,
     });
