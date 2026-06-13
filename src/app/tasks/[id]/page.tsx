@@ -1301,7 +1301,7 @@ export default function TaskDetailPage() {
                   <span>项目：{task.project?.name || '未归属项目'}</span>
                   <span>
                     视频卡：{task.video_card ? (
-                      <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                      <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
                     ) : '历史未归档'}
                   </span>
                   <span>来源：{taskSourceText}</span>
@@ -1468,7 +1468,7 @@ export default function TaskDetailPage() {
                   <span>视频卡</span>
                   <strong>
                     {task.video_card ? (
-                      <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                      <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
                     ) : '历史未归档'}
                   </strong>
                 </div>
@@ -1686,7 +1686,7 @@ export default function TaskDetailPage() {
                 <span>视频卡</span>
                 <strong>
                   {task.video_card ? (
-                    <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                    <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
                   ) : '历史未归档'}
                 </strong>
               </div>

@@ -1729,7 +1729,10 @@ function CanvasWorkspace() {
                   ))}
                 </select>
                 {selectedVideoCardId ? (
-                  <Link className="canvas-project-action canvas-project-action-link" href={`/video-cards/${encodeURIComponent(selectedVideoCardId)}`}>
+                  <Link
+                    className="canvas-project-action canvas-project-action-link"
+                    href={`/projects/${encodeURIComponent(selectedProjectId)}/video-cards/${encodeURIComponent(selectedVideoCardId)}`}
+                  >
                     查看视频卡
                   </Link>
                 ) : (

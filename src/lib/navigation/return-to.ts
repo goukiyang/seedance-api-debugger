@@ -36,6 +36,7 @@ export function taskReturnLabel(returnTo: string | null | undefined) {
   if (safeReturnTo.startsWith('/admin/costs')) return '返回成本后台';
   if (safeReturnTo.startsWith('/admin')) return '返回后台';
   if (safeReturnTo.startsWith('/generate')) return '返回生成页';
+  if (/^\/projects\/[^/]+\/video-cards(\/|$)/.test(safeReturnTo)) return '返回视频卡';
   if (safeReturnTo.startsWith('/projects')) return '返回项目';
   if (safeReturnTo.startsWith('/video-cards')) return '返回视频卡';
   return '返回任务';

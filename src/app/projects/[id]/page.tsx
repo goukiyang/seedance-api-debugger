@@ -619,7 +619,7 @@ export default function ProjectDetailPage() {
                   <div className="video-card-main">
                     <div className="video-card-head">
                       <div>
-                        <Link className="video-card-title" href={`/video-cards/${card.id}`}>
+                        <Link className="video-card-title" href={`/projects/${project.id}/video-cards/${card.id}`}>
                           {card.title}
                         </Link>
                         <p className="video-card-objective">{card.objective || '未填写视频目标'}</p>
@@ -639,7 +639,7 @@ export default function ProjectDetailPage() {
                       <span>官方 {formatCostTotals(summary?.official_cost_totals)}</span>
                     </div>
                     <div className="video-card-actions">
-                      <Link className="btn btn-secondary" href={`/video-cards/${card.id}`}>
+                      <Link className="btn btn-secondary" href={`/projects/${project.id}/video-cards/${card.id}`}>
                         查看视频卡
                       </Link>
                       {permissions.can_generate && card.status !== 'sealed' && card.status !== 'archived' && (
@@ -861,7 +861,7 @@ export default function ProjectDetailPage() {
                   <td>{task.local_status}</td>
                   <td>
                     {task.video_card ? (
-                      <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                      <Link className="link" href={`/projects/${project.id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
                     ) : (
                       <span className="text-gray">历史未归档</span>
                     )}
