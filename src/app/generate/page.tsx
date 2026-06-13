@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
-import type { SelectedReferenceAsset } from '@/components/SeedanceAssetSelector';
 import { GenerationComposer } from '@/components/GenerationComposer';
-import { SeedanceAssetPanel } from '@/components/SeedanceAssetPanel';
 import { useComposerHeight } from '@/lib/context/ComposerHeightContext';
 
 // ============================================================================
@@ -18,6 +16,9 @@ interface CreateResponse {
   status: string;
   created_at: string;
   prompt_rendered?: string;
+  estimated_cost?: number;
+  frozen_cost?: number;
+  deduplicated?: boolean;
 }
 
 interface TaskItem {
@@ -25,6 +26,22 @@ interface TaskItem {
   prompt: string;
   local_status: string;
   created_at: string;
+}
+
+interface PolledTask {
+  id: string;
+  local_status: string;
+  provider_status: string | null;
+  result_video_url: string | null;
+  error_message: string | null;
+}
+
+interface CreditSummary {
+  balance: number;
+  frozen_credits: number;
+  available: number;
+  monthly_used: number;
+  total_used: number;
 }
 
 // ============================================================================
@@ -40,11 +57,18 @@ export default function GeneratePage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDebug, setErrorDebug] = useState<object | null>(null);
 
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
   const [showDebug, setShowDebug] = useState(false);
-  const [showAssetPanel, setShowAssetPanel] = useState(false);
+
+  // ---- Result Polling ----
+  const [polledResult, setPolledResult] = useState<PolledTask | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+
+  // ---- Credit Summary ----
+  const [credits, setCredits] = useState<CreditSummary | null>(null);
 
   // ============================================================================
   // Load collections
@@ -54,6 +78,21 @@ export default function GeneratePage() {
     fetch('/api/collections')
       .then((r) => r.json())
       .then((d) => setCollections(d.collections || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/me/credits')
+      .then((r) => {
+        if (r.status === 401) {
+          window.location.href = '/login';
+          return null;
+        }
+        return r.json();
+      })
+      .then((d) => {
+        if (d) setCredits(d);
+      })
       .catch(() => {});
   }, []);
 
@@ -72,6 +111,59 @@ export default function GeneratePage() {
   }, []);
 
   // ============================================================================
+  // Result Polling — poll result task until terminal state
+  // ============================================================================
+
+  useEffect(() => {
+    if (!result?.id) return;
+
+    setIsPolling(true);
+    setPolledResult(null);
+
+    let intervalId: ReturnType<typeof setInterval>;
+    let pollCount = 0;
+    const MAX_POLLS = 120; // ~10 minutes at 5s interval
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/video/status/${result.id}`);
+        if (!res.ok) return;
+        const data: PolledTask = await res.json();
+        setPolledResult(data);
+        pollCount++;
+
+        if (['succeeded', 'failed', 'cancelled'].includes(data.local_status)) {
+          clearInterval(intervalId);
+          setIsPolling(false);
+          // refresh task list so the card shows updated status
+          fetch('/api/video/list')
+            .then((r) => r.json())
+            .then((d) => setRecentTasks((d.tasks || []).slice(0, 6)))
+            .catch(() => {});
+          // refresh credit display after settlement
+          fetch('/api/me/credits')
+            .then((r) => r.ok ? r.json() : null)
+            .then((d) => { if (d) setCredits(d); })
+            .catch(() => {});
+        } else if (pollCount >= MAX_POLLS) {
+          clearInterval(intervalId);
+          setIsPolling(false);
+        }
+      } catch {
+        // non-critical polling error, keep polling
+      }
+    };
+
+    poll();
+    intervalId = setInterval(poll, 5000);
+
+    return () => {
+      clearInterval(intervalId);
+      setIsPolling(false);
+    };
+  }, [result?.id]);
+
+  // ============================================================================
   // Submit
   // ============================================================================
 
@@ -85,20 +177,15 @@ export default function GeneratePage() {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
-    referenceAssets?: SelectedReferenceAsset[];
   }) => {
     setSubmitting(true);
     setError(null);
     setResult(null);
 
-    // 从 referenceAssets 提取 originalUrl 作为参考图
-    const referenceImageUrls = (params.referenceAssets || [])
-      .filter((a) => a.originalUrl)
-      .sort((a, b) => a.order - b.order)
-      .map((a) => a.originalUrl);
+    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     try {
-      const res = await fetch('/api/video/create', {
+      const res = await fetch('/api/tasks/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -114,19 +201,27 @@ export default function GeneratePage() {
           generate_audio: params.generateAudio,
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
-          reference_image_urls: referenceImageUrls,
+          idempotency_key: idempotencyKey,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.message || data.error || '创建任务失败');
+        setErrorDebug(data._debug || null);
+        throw new Error(data.message || data.error || `创建失败 (HTTP ${res.status})`);
       }
 
       setResult(data);
+      setErrorDebug(null);
+
+      // Refresh credit display after freeze
+      fetch('/api/me/credits')
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) setCredits(d); })
+        .catch(() => {});
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      if (err instanceof Error) setError(err.message);
     } finally {
       setSubmitting(false);
     }
@@ -174,6 +269,9 @@ export default function GeneratePage() {
   const handleReset = useCallback(() => {
     setResult(null);
     setError(null);
+    setErrorDebug(null);
+    setPolledResult(null);
+    setIsPolling(false);
   }, []);
 
   // ============================================================================
@@ -199,6 +297,10 @@ export default function GeneratePage() {
     return prompt.slice(0, maxLen) + '...';
   }
 
+  function formatCredit(value: number | undefined): string {
+    return Math.max(0, Math.floor(value || 0)).toString();
+  }
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -211,19 +313,21 @@ export default function GeneratePage() {
           <span className="composer-topbar-logo">Seedance 2.0</span>
           <nav className="composer-topbar-nav">
             <button className="composer-topbar-nav-btn active">创建视频</button>
-            <button className="composer-topbar-nav-btn">素材库</button>
+            <Link href="/resources" className="composer-topbar-nav-btn">素材库</Link>
             <Link href="/tasks" className="composer-topbar-nav-btn">历史任务</Link>
             <Link href="/config" className="composer-topbar-nav-btn">设置</Link>
-            <button
-              className="composer-topbar-nav-btn"
-              onClick={() => setShowAssetPanel(true)}
-              style={{ background: showAssetPanel ? 'rgba(37,99,235,0.2)' : undefined }}
-            >
-              资产管理
-            </button>
           </nav>
         </div>
         <div className="composer-topbar-right">
+          {credits && (
+            <Link
+              href="/tasks"
+              className="composer-topbar-nav-btn"
+              title="查看点数流水"
+            >
+              可用 {formatCredit(credits.available)} 点 ｜ 冻结 {formatCredit(credits.frozen_credits)} 点 ｜ 本月已用 {formatCredit(credits.monthly_used)} 点
+            </Link>
+          )}
           <button
             className="composer-topbar-icon-btn"
             onClick={() => setShowDebug(!showDebug)}
@@ -294,15 +398,12 @@ export default function GeneratePage() {
         onCollectionNew={handleCollectionNew}
         onSubmit={handleSubmit}
         submitError={error}
+        submitErrorDebug={errorDebug}
         isSubmitting={submitting}
         result={result}
+        polledResult={polledResult}
+        isPolling={isPolling}
         onReset={handleReset}
-      />
-
-      {/* Seedance 资产管理测试入口 */}
-      <SeedanceAssetPanel
-        visible={showAssetPanel}
-        onClose={() => setShowAssetPanel(false)}
       />
     </div>
   );

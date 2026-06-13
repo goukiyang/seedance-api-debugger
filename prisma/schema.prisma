@@ -45,19 +45,119 @@ model VideoTask {
   raw_create_response      String?
   raw_status_response      String?
   error_message           String?
+  error_code               String?
   params_json              String?
-  reference_images_json   String?  // 参考图调试信息（含 base64 解析状态）
-  provider_payload_json   String?  // 发送给 provider 的最终 payload
+  reference_images_json   String?
+  provider_payload_json   String?
 
-  // 关联 workspace 和快照（通过 GenerationTaskSnapshot.task 侧建立关系）
+  // 关联 workspace 和快照
   workspace_id             String?
   snapshot_id             String?   @unique
 
+  // 用户关联（P0-B）
+  user_id                  String?
+
+  // 点数与计费（P0-B）
+  estimated_cost           Float?
+  actual_cost              Float?
+  frozen_cost              Float?
+  refund_amount            Float?
+  pricing_snapshot         String?
+  pricing_rule_id          String?
+  idempotency_key          String?
+
   workspace                Workspace?               @relation(fields: [workspace_id], references: [id])
+  user                     User?                    @relation(fields: [user_id], references: [id])
 
   created_at               DateTime  @default(now())
   updated_at               DateTime  @updatedAt
   completed_at             DateTime?
+
+  @@unique([user_id, idempotency_key])
+  @@index([user_id])
+  @@index([local_status])
+}
+
+// ============================================================================
+// 用户与权限系统
+// ============================================================================
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  email        String   @unique
+  password_hash String
+  role         String   @default("user") // admin | user
+  status       String   @default("active") // active | disabled
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  last_login_at DateTime?
+
+  credit_account CreditAccount?
+  credit_ledger   CreditLedger[]
+  operation_logs  OperationLog[]
+  tasks           VideoTask[]
+  resource_access SharedResourceUser[]
+
+  @@index([username])
+  @@index([email])
+  @@index([status])
+}
+
+// 点数账户
+model CreditAccount {
+  id             String   @id @default(cuid())
+  user_id        String   @unique
+  balance        Float    @default(0)
+  frozen_credits Float    @default(0)
+  monthly_used   Float    @default(0)
+  total_used     Float    @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+}
+
+// 点数流水
+model CreditLedger {
+  id            String   @id @default(cuid())
+  user_id       String
+  type          String   // admin_grant | admin_deduct | system_adjust | task_freeze | task_success_deduct | task_failed_refund | manual_refund | periodic_grant
+  amount        Float
+  balance_before Float
+  balance_after  Float
+  frozen_before Float?
+  frozen_after  Float?
+  related_task_id String?
+  operator_id   String?
+  reason        String?
+  created_at    DateTime @default(now())
+
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([type])
+  @@index([created_at])
+}
+
+// 操作日志
+model OperationLog {
+  id          String   @id @default(cuid())
+  operator_id String
+  action      String
+  target_type String?
+  target_id   String?
+  detail      String?
+  created_at  DateTime @default(now())
+
+  operator    User     @relation(fields: [operator_id], references: [id], onDelete: Cascade)
+
+  @@index([operator_id])
+  @@index([target_type, target_id])
+  @@index([created_at])
 }
 
 // ============================================================================
@@ -235,4 +335,58 @@ model GenerationTaskSnapshot {
   created_at            DateTime @default(now())
 
   workspace     Workspace?  @relation(fields: [workspace_id], references: [id])
+}
+
+model SharedResource {
+  id               String               @id @default(cuid())
+  name             String
+  resource_type    String
+  preview_url      String?
+  description      String?
+  visibility_scope String               @default("private") // private | specific_users | all_users | admin_only
+  status           String               @default("active") // active | disabled
+  disabled_at      DateTime?
+  created_at       DateTime             @default(now())
+  updated_at       DateTime             @updatedAt
+
+  scoped_users     SharedResourceUser[]
+
+  @@index([visibility_scope, status])
+  @@index([resource_type, status])
+  @@index([created_at])
+}
+
+model SharedResourceUser {
+  id           String         @id @default(cuid())
+  resource_id  String
+  user_id      String
+  created_at   DateTime       @default(now())
+
+  resource     SharedResource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([resource_id, user_id])
+  @@index([user_id])
+}
+
+model PricingRule {
+  id                     String   @id @default(cuid())
+  rule_key               String
+  name                   String
+  model                  String
+  resolution             String
+  is_fast                Boolean  @default(false)
+  base_cost_per_second   Float
+  internal_multiplier    Float    @default(1)
+  final_cost_per_second  Float
+  version                Int      @default(1)
+  status                 String   @default("active") // active | disabled
+  effective_at           DateTime @default(now())
+  supersedes_rule_id     String?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+
+  @@unique([rule_key, version])
+  @@index([model, resolution, is_fast, status, effective_at])
+  @@index([status, effective_at])
 }

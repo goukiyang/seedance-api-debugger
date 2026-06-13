@@ -17,13 +17,22 @@ import { PromptEditor } from '@/components/PromptEditor';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
-import { SeedanceAssetSelector, type SelectedReferenceAsset } from '@/components/SeedanceAssetSelector';
+import { calculateEstimatedCostClient } from '@/lib/pricing-client';
+import { DEFAULT_GENERATION_DRAFT, GENERATION_DRAFT_STORAGE_KEY, sanitizeGenerationDraft } from '@/lib/generation-draft';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
 const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
 const MAX_REFS = 9;
+
+interface PolledTask {
+  id: string;
+  local_status: string;
+  provider_status: string | null;
+  result_video_url: string | null;
+  error_message: string | null;
+}
 
 interface Props {
   collections: AssetCollection[];
@@ -40,11 +49,13 @@ interface Props {
     generateAudio: boolean;
     returnLastFrame: boolean;
     watermark: boolean;
-    referenceAssets?: SelectedReferenceAsset[];
   }) => Promise<void>;
   submitError: string | null;
+  submitErrorDebug?: object | null;
   isSubmitting: boolean;
   result: { id: string; provider_task_id: string; prompt_rendered?: string } | null;
+  polledResult: PolledTask | null;
+  isPolling: boolean;
   onReset: () => void;
 }
 
@@ -55,8 +66,11 @@ export function GenerationComposer({
   onCollectionNew,
   onSubmit,
   submitError,
+  submitErrorDebug,
   isSubmitting,
   result,
+  polledResult,
+  isPolling,
   onReset,
 }: Props) {
   const workspace = useWorkspace();
@@ -72,14 +86,43 @@ export function GenerationComposer({
   const [generateAudio, setGenerateAudio] = useState(false);
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
-  const [referenceAssets, setReferenceAssets] = useState<SelectedReferenceAsset[]>([]);
+  const [draftHydrated, setDraftHydrated] = useState(false);
 
-  // 提交成功后或新建任务时清除参考图
   useEffect(() => {
-    if (result) {
-      setReferenceAssets([]);
+    try {
+      const raw = sessionStorage.getItem(GENERATION_DRAFT_STORAGE_KEY);
+      const savedDraft = raw ? sanitizeGenerationDraft(JSON.parse(raw)) : DEFAULT_GENERATION_DRAFT;
+      setGenerationMode(savedDraft.generationMode);
+      setPrompt(savedDraft.prompt);
+      setRatio(savedDraft.ratio);
+      setDuration(savedDraft.duration);
+      setResolution(savedDraft.resolution);
+      setSeed(savedDraft.seed);
+      setGenerateAudio(savedDraft.generateAudio);
+      setReturnLastFrame(savedDraft.returnLastFrame);
+      setWatermark(savedDraft.watermark);
+    } catch {
+      // ignore invalid stored drafts
+    } finally {
+      setDraftHydrated(true);
     }
-  }, [result]);
+  }, []);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+
+    sessionStorage.setItem(GENERATION_DRAFT_STORAGE_KEY, JSON.stringify({
+      prompt,
+      generationMode,
+      ratio,
+      duration,
+      resolution,
+      seed,
+      generateAudio,
+      returnLastFrame,
+      watermark,
+    }));
+  }, [draftHydrated, duration, generateAudio, generationMode, prompt, ratio, resolution, returnLastFrame, seed, watermark]);
 
   // ============================================================================
   // Validation
@@ -115,6 +158,24 @@ export function GenerationComposer({
 
   const canSubmit = blockingError === null && !isSubmitting;
 
+  const [estimatedPoints, setEstimatedPoints] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    calculateEstimatedCostClient(resolution, duration)
+      .then((value) => {
+        if (!cancelled) setEstimatedPoints(value);
+      })
+      .catch(() => {
+        if (!cancelled) setEstimatedPoints(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolution, duration]);
+
   // 已引用图号
   const usedRefs = useMemo(() => {
     return validation.referencedFigures.map((n) => `图${n}`);
@@ -126,8 +187,8 @@ export function GenerationComposer({
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
-    await onSubmit({ prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, referenceAssets });
-  }, [canSubmit, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, referenceAssets]);
+    await onSubmit({ prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark });
+  }, [canSubmit, onSubmit, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
     if (workspace.assets.length > 0) {
@@ -157,6 +218,19 @@ export function GenerationComposer({
     setPreviewUrl(url);
   }, []);
 
+  const handleResetComposer = useCallback(() => {
+    setGenerationMode(DEFAULT_GENERATION_MODE);
+    setPrompt('');
+    setRatio(DEFAULT_RATIO);
+    setDuration(DEFAULT_DURATION);
+    setResolution(DEFAULT_RESOLUTION);
+    setSeed(-1);
+    setGenerateAudio(false);
+    setReturnLastFrame(false);
+    setWatermark(false);
+    onReset();
+  }, [onReset]);
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -185,13 +259,6 @@ export function GenerationComposer({
           loading={workspace.loading}
         />
 
-        {/* Seedance 参考图资产选择器 */}
-        <SeedanceAssetSelector
-          value={referenceAssets}
-          onChange={setReferenceAssets}
-          max={9}
-        />
-
         {/* 提示词输入 */}
         <PromptEditor
           value={prompt}
@@ -213,6 +280,7 @@ export function GenerationComposer({
             <ErrorTranslator
               error={submitError}
               rawError={submitError}
+              debugInfo={submitErrorDebug as Parameters<typeof ErrorTranslator>[0]['debugInfo']}
               onRetry={() => {}}
               onCopy={() => { navigator.clipboard.writeText(submitError); }}
             />
@@ -226,9 +294,39 @@ export function GenerationComposer({
               <span className="composer-result-label">任务已创建</span>
               <span className="composer-result-id">{result.id.slice(0, 8)}...</span>
             </div>
+
+            {isPolling && !polledResult && (
+              <div className="composer-polling-hint">正在查询结果...</div>
+            )}
+
+            {polledResult && polledResult.local_status === 'succeeded' && polledResult.result_video_url && (
+              <div className="composer-result-video">
+                <div className="composer-result-video-label">✅ 视频生成完成</div>
+                <video
+                  key={polledResult.result_video_url}
+                  controls
+                  playsInline
+                  style={{ width: '100%', maxHeight: 280, borderRadius: 8 }}
+                  src={polledResult.result_video_url}
+                />
+              </div>
+            )}
+
+            {polledResult && polledResult.local_status === 'failed' && (
+              <div className="composer-result-error">
+                ❌ 生成失败：{polledResult.error_message || '未知错误'}
+              </div>
+            )}
+
+            {polledResult && !['succeeded', 'failed', 'cancelled'].includes(polledResult.local_status) && (
+              <div className="composer-polling-hint">
+                ⏳ {isPolling ? '生成中，正在查询结果...' : '请手动查看任务详情'}
+              </div>
+            )}
+
             <div className="composer-result-actions">
               <a href={`/tasks/${result.id}`} className="composer-result-link">查看详情 →</a>
-              <button type="button" className="composer-result-reset" onClick={onReset}>
+              <button type="button" className="composer-result-reset" onClick={handleResetComposer}>
                 新建任务
               </button>
             </div>
@@ -241,6 +339,7 @@ export function GenerationComposer({
           ratio={ratio}
           duration={duration}
           resolution={resolution}
+          points={estimatedPoints}
           canSubmit={canSubmit}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}

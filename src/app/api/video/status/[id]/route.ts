@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getVideoTaskStatus, mapProviderStatus } from '@/lib/provider/jimeng';
+import { getSession } from '@/lib/auth/session';
+import { refreshTaskFromProvider } from '@/lib/video-task-admin';
 
 export async function GET(
   request: NextRequest,
@@ -8,84 +9,62 @@ export async function GET(
 ) {
   try {
     const taskId = params.id;
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
+    }
 
-    const task = await prisma.videoTask.findUnique({
-      where: { id: taskId },
+    const task = await prisma.videoTask.findFirst({
+      where: {
+        id: taskId,
+        user_id: user.id,
+      },
     });
 
     if (!task) {
       return NextResponse.json(
-        { error: 'Task not found', message: `Task ${taskId} not found` },
+        { error: 'Task not found', message: `Task ${taskId} not found or not accessible` },
         { status: 404 }
       );
     }
 
-    // 如果有 provider_task_id，查询 provider 状态
     if (task.provider_task_id) {
       try {
-        const statusResult = await getVideoTaskStatus(task.provider_task_id);
+        const updatedTask = await refreshTaskFromProvider(taskId);
+        const ledgerEntries = await getTaskLedgerEntries(taskId, user.id);
 
-        // 构建更新数据
+        return NextResponse.json({
+          ...updatedTask,
+          ledger_entries: ledgerEntries,
+        });
+      } catch (apiError) {
+        console.error('Provider status query error:', apiError);
+
         const updateData: Record<string, unknown> = {
-          provider_status: statusResult.provider_status,
-          local_status: statusResult.local_status,
-          raw_status_response: JSON.stringify(statusResult.raw),
+          provider_status: 'unknown',
+          local_status: 'running',
+          raw_status_response: JSON.stringify({ error: apiError instanceof Error ? apiError.message : String(apiError) }),
         };
-
-        // 如果成功，保存视频地址
-        if (statusResult.result_video_url) {
-          updateData.result_video_url = statusResult.result_video_url;
-        }
-        if (statusResult.result_last_frame_url) {
-          updateData.result_last_frame_url = statusResult.result_last_frame_url;
-        }
-
-        // 扩展字段
-        if (statusResult.provider_model) {
-          updateData.model = statusResult.provider_model;
-        }
-        if (statusResult.seed !== undefined) {
-          updateData.seed = statusResult.seed;
-        }
-        if (statusResult.resolution) {
-          updateData.resolution = statusResult.resolution;
-        }
-        if (statusResult.ratio) {
-          updateData.ratio = statusResult.ratio;
-        }
-        if (statusResult.duration !== undefined) {
-          updateData.duration = statusResult.duration;
-        }
-
-        // 保存错误信息
-        if (statusResult.error_message) {
-          updateData.error_message = statusResult.error_message;
-        }
-
-        // 终态时设置 completed_at
-        const isTerminal = ['succeeded', 'failed', 'cancelled'].includes(statusResult.local_status);
-        if (isTerminal && !task.completed_at) {
-          updateData.completed_at = new Date();
-        }
-
         const updatedTask = await prisma.videoTask.update({
           where: { id: taskId },
           data: updateData,
         });
+        const ledgerEntries = await getTaskLedgerEntries(taskId, user.id);
 
-        return NextResponse.json(updatedTask);
-      } catch (apiError) {
-        console.error('Provider status query error:', apiError);
-
-        // API 错误时返回当前状态
         return NextResponse.json({
-          ...task,
-          error_message: task.error_message || (apiError instanceof Error ? apiError.message : 'Failed to query status'),
+          ...updatedTask,
+          error_message: updatedTask.error_message || (apiError instanceof Error ? apiError.message : 'Failed to query status'),
+          ledger_entries: ledgerEntries,
         });
       }
     }
 
-    return NextResponse.json(task);
+    const ledgerEntries = await getTaskLedgerEntries(taskId, user.id);
+
+    return NextResponse.json({
+      ...task,
+      ledger_entries: ledgerEntries,
+    });
   } catch (error) {
     console.error('Get task status error:', error);
     return NextResponse.json(
@@ -93,4 +72,14 @@ export async function GET(
       { status: 500 }
     );
   }
+}
+
+async function getTaskLedgerEntries(taskId: string, userId: string) {
+  return prisma.creditLedger.findMany({
+    where: {
+      user_id: userId,
+      related_task_id: taskId,
+    },
+    orderBy: { created_at: 'asc' },
+  });
 }

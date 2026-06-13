@@ -1,18 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth/session';
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized', message: '请先登录后再查看任务列表' },
+        { status: 401 },
+      );
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
+    const where = { user_id: user.id };
 
-    // Get total count
-    const total = await prisma.videoTask.count();
+    const total = await prisma.videoTask.count({ where });
 
-    // Get tasks
     const tasks = await prisma.videoTask.findMany({
+      where,
       orderBy: { created_at: 'desc' },
       skip,
       take: limit,
@@ -20,8 +29,18 @@ export async function GET(request: NextRequest) {
         id: true,
         provider_task_id: true,
         prompt: true,
+        model: true,
         generation_mode: true,
         local_status: true,
+        resolution: true,
+        duration: true,
+        estimated_cost: true,
+        actual_cost: true,
+        frozen_cost: true,
+        refund_amount: true,
+        pricing_snapshot: true,
+        result_video_url: true,
+        error_message: true,
         local_video_path: true,
         created_at: true,
         completed_at: true,
