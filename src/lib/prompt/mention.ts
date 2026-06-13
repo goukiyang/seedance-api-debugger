@@ -57,7 +57,7 @@ export function replaceMentionRange(
 ): { next: string; cursor: number } {
   const before = value.slice(0, range.start);
   const after = value.slice(range.end);
-  const needsTrailingSpace = insertText.length > 0 && after.length > 0 && !/^\s/.test(after) && !/\s$/.test(insertText);
+  const needsTrailingSpace = insertText.length > 0 && !/^\s/.test(after) && !/\s$/.test(insertText);
   const finalInsert = needsTrailingSpace ? `${insertText} ` : insertText;
   return {
     next: `${before}${finalInsert}${after}`,
