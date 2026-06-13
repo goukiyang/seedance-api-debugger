@@ -33,20 +33,26 @@ async function main() {
             name,
             username,
             email,
-            password_hash: hashPassword(password),
-            role: 'admin',
-            status: 'active',
-          },
+	            password_hash: hashPassword(password),
+	            role: 'admin',
+	            account_type: 'internal',
+	            user_profile: 'other',
+	            feature_profile_id: 'standard_internal',
+	            status: 'active',
+	          },
         })
       : await tx.user.create({
           data: {
             name,
             username,
             email,
-            password_hash: hashPassword(password),
-            role: 'admin',
-            status: 'active',
-          },
+	            password_hash: hashPassword(password),
+	            role: 'admin',
+	            account_type: 'internal',
+	            user_profile: 'other',
+	            feature_profile_id: 'standard_internal',
+	            status: 'active',
+	          },
         });
 
     const account = await tx.creditAccount.upsert({

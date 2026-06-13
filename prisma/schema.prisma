@@ -11,71 +11,125 @@ datasource db {
 }
 
 model VideoTask {
-  id                       String    @id @default(cuid())
-  provider                 String
-  model                    String
-  generation_mode          String
-  prompt                  String
+  id                   String  @id @default(cuid())
+  provider             String
+  model                String
+  generation_mode      String
+  prompt               String
+  source_type          String  @default("web") // web | codex_api
+  source_label         String?
+  source_request_id    String?
+  source_metadata_json String?
 
-  ratio                    String?
-  duration                 Int?
-  resolution               String?
-  seed                     Int?
-  generate_audio           Boolean   @default(true)
-  return_last_frame        Boolean   @default(false)
-  watermark                Boolean   @default(false)
+  ratio             String?
+  duration          Int?
+  resolution        String?
+  seed              Int?
+  generate_audio    Boolean @default(true)
+  return_last_frame Boolean @default(false)
+  watermark         Boolean @default(false)
 
-  reference_image_urls     String?
-  reference_video_urls     String?
-  reference_audio_urls     String?
-  first_frame_url          String?
-  last_frame_url           String?
-  frame_image_urls         String?
+  reference_image_urls String?
+  reference_video_urls String?
+  reference_audio_urls String?
+  first_frame_url      String?
+  last_frame_url       String?
+  frame_image_urls     String?
 
-  callback_url             String?
-  execution_expires_after  Int?
+  callback_url            String?
+  execution_expires_after Int?
 
-  local_status             String    @default("draft")
-  provider_task_id         String?
-  provider_status          String?
-  result_video_url         String?
-  result_last_frame_url   String?
-  local_video_path         String?
+  local_status          String  @default("draft")
+  provider_task_id      String?
+  provider_status       String?
+  result_video_url      String?
+  result_last_frame_url String?
+  local_video_path      String?
 
-  raw_create_response      String?
-  raw_status_response      String?
-  error_message           String?
-  error_code               String?
-  params_json              String?
-  reference_images_json   String?
-  provider_payload_json   String?
+  raw_create_response   String?
+  raw_status_response   String?
+  error_message         String?
+  error_code            String?
+  reference_album_ids   String?
+  reference_image_ids   String?
+  params_json           String?
+  reference_images_json String?
+  provider_payload_json String?
 
   // 关联 workspace 和快照
-  workspace_id             String?
-  snapshot_id             String?   @unique
+  workspace_id String?
+  snapshot_id  String? @unique
 
   // 用户关联（P0-B）
-  user_id                  String?
+  user_id       String?
+  owner_user_id String?
+  project_id    String?
+  visibility    String  @default("project") // private | project | selected | public
+
+  // 产出留存与用户删除（管理员仍可审计）
+  retention_status String    @default("active") // active | user_deleted | admin_hidden | retained
+  user_deleted_at  DateTime?
+  user_deleted_by  String?
+  admin_hidden_at  DateTime?
+  admin_hidden_by  String?
+  restored_at      DateTime?
+  restored_by      String?
+  delete_reason    String?
 
   // 点数与计费（P0-B）
-  estimated_cost           Float?
-  actual_cost              Float?
-  frozen_cost              Float?
-  refund_amount            Float?
-  pricing_snapshot         String?
-  pricing_rule_id          String?
-  idempotency_key          String?
+  estimated_cost         Float?
+  actual_cost            Float?
+  frozen_cost            Float?
+  refund_amount          Float?
+  credit_freeze_snapshot String?
+  pricing_snapshot       String?
+  pricing_rule_id        String?
+  idempotency_key        String?
+  billing_scope          String  @default("user") // user | project | system
+  billing_account_id     String?
 
-  workspace                Workspace?               @relation(fields: [workspace_id], references: [id])
-  user                     User?                    @relation(fields: [user_id], references: [id])
+  // 外部成本复盘（真实官方扣费接入前先保存状态与快照，不把点数当现金成本）
+  provider_cost_status            String    @default("not_recorded") // not_recorded | estimated_by_rule | provisional_settled | official_confirmed | reconciled | disputed | unknown
+  provider_cost_snapshot          String?
+  provider_cost_currency          String?
+  provider_estimated_amount_minor Int?
+  provider_rule_amount_minor      Int?
+  provider_official_amount_minor  Int?
+  provider_final_amount_minor     Int?
+  provider_official_amount_micros Int?
+  provider_final_amount_micros    Int?
+  provider_billing_status         String?
+  provider_billing_time           DateTime?
+  provider_usage_snapshot         String?
+  provider_client_request_id      String?
+  provider_cost_confirmed_at      DateTime?
+  provider_cost_reconciled_at     DateTime?
+  cost_allocation_status          String    @default("allocated") // allocated | unallocated | partially_allocated
 
-  created_at               DateTime  @default(now())
-  updated_at               DateTime  @updatedAt
-  completed_at             DateTime?
+  workspace             Workspace?           @relation(fields: [workspace_id], references: [id])
+  user                  User?                @relation("VideoTaskUser", fields: [user_id], references: [id])
+  owner                 User?                @relation("VideoTaskOwner", fields: [owner_user_id], references: [id])
+  project               Project?             @relation(fields: [project_id], references: [id])
+  provider_api_requests ProviderApiRequest[]
+  cost_ledgers          CostLedger[]
+  cost_allocations      CostAllocation[]
+
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  completed_at DateTime?
 
   @@unique([user_id, idempotency_key])
   @@index([user_id])
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([source_type])
+  @@index([source_request_id])
   @@index([local_status])
+  @@index([provider_task_id])
+  @@index([provider_client_request_id])
+  @@index([provider_cost_status])
+  @@index([retention_status])
+  @@index([user_deleted_at])
 }
 
 // ============================================================================
@@ -83,25 +137,209 @@ model VideoTask {
 // ============================================================================
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  username     String   @unique
-  email        String   @unique
-  password_hash String
-  role         String   @default("user") // admin | user
-  status       String   @default("active") // active | disabled
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-  last_login_at DateTime?
+  id                    String    @id @default(cuid())
+  name                  String
+  username              String    @unique
+  email                 String    @unique
+  password_hash         String
+  role                  String    @default("user") // admin | user
+  account_type          String    @default("internal") // internal | external
+  status                String    @default("active") // active | disabled | pending | expired
+  user_profile          String    @default("other") // core_video | core_animation | core_design | noncore_planning | noncore_ops | noncore_pm | other
+  feature_profile_id    String?
+  expires_at            DateTime?
+  mobile                String?
+  avatar_url            String?
+  feishu_user_id        String?   @unique
+  feishu_open_id        String?   @unique
+  feishu_union_id       String?
+  feishu_tenant_key     String?
+  feishu_employee_no    String?
+  feishu_department_ids String?
+  feishu_raw_profile    String?
+  last_feishu_sync_at   DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+  last_login_at         DateTime?
 
-  credit_account CreditAccount?
-  credit_ledger   CreditLedger[]
-  operation_logs  OperationLog[]
-  tasks           VideoTask[]
+  credit_account          CreditAccount?
+  credit_ledger           CreditLedger[]
+  credit_buckets          CreditBucket[]
+  operation_logs          OperationLog[]
+  tasks                   VideoTask[]          @relation("VideoTaskUser")
+  owned_tasks             VideoTask[]          @relation("VideoTaskOwner")
+  reference_albums        ReferenceAlbum[]     @relation("ReferenceAlbumOwner")
+  reference_images        ReferenceImage[]     @relation("ReferenceImageOwner")
+  created_album_shares    AlbumShare[]         @relation("AlbumShareCreator")
+  owned_projects          Project[]            @relation("ProjectOwner")
+  created_projects        Project[]            @relation("ProjectCreator")
+  canvas_documents        CanvasDocument[]     @relation("CanvasDocumentOwner")
+  project_memberships     ProjectMember[]      @relation("ProjectMemberUser")
+  joined_project_members  ProjectMember[]      @relation("ProjectMemberJoinedBy")
+  created_project_invites ProjectInvite[]      @relation("ProjectInviteCreatedBy")
+  provider_api_requests   ProviderApiRequest[]
+  cost_ledgers            CostLedger[]
+  cost_allocations        CostAllocation[]
+  content_audit_actions   ContentAuditLog[]    @relation("ContentAuditActor")
+  content_audit_owned     ContentAuditLog[]    @relation("ContentAuditOwner")
+  feedbacks               Feedback[]
+  preferences             UserPreference[]
 
   @@index([username])
   @@index([email])
+  @@index([account_type])
+  @@index([user_profile])
   @@index([status])
+  @@index([feishu_union_id])
+  @@index([feishu_tenant_key])
+}
+
+model PlatformSetting {
+  id         String   @id @default(cuid())
+  key        String   @unique
+  value_json String
+  updated_by String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([key])
+}
+
+model UserPreference {
+  id         String   @id @default(cuid())
+  user_id    String
+  key        String
+  value_json String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, key])
+  @@index([user_id])
+  @@index([key])
+}
+
+model Project {
+  id            String    @id @default(cuid())
+  workspace_id  String?
+  name          String
+  description   String?
+  type          String    @default("team") // personal | team | public | system
+  visibility    String    @default("private") // private | internal_public | external_public | global_public
+  owner_user_id String
+  created_by    String
+  status        String    @default("active") // active | locked | archived | deleted
+  archived_at   DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  owner                 User                 @relation("ProjectOwner", fields: [owner_user_id], references: [id])
+  creator               User                 @relation("ProjectCreator", fields: [created_by], references: [id])
+  members               ProjectMember[]
+  invites               ProjectInvite[]
+  tasks                 VideoTask[]
+  canvas_documents      CanvasDocument[]
+  reference_albums      ReferenceAlbum[]
+  reference_images      ReferenceImage[]
+  provider_api_requests ProviderApiRequest[]
+  cost_ledgers          CostLedger[]
+  cost_allocations      CostAllocation[]
+  content_audit_logs    ContentAuditLog[]
+
+  @@index([workspace_id])
+  @@index([owner_user_id])
+  @@index([created_by])
+  @@index([type])
+  @@index([visibility])
+  @@index([status])
+}
+
+model CanvasDocument {
+  id                        String   @id @default(cuid())
+  owner_user_id             String
+  project_id                String?
+  title                     String
+  document_json             String
+  active_generation_node_id String?
+  status                    String   @default("active") // active | archived | deleted
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  owner   User     @relation("CanvasDocumentOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([status])
+  @@index([updated_at])
+}
+
+model ProjectMember {
+  id         String   @id @default(cuid())
+  project_id String
+  user_id    String
+  role       String   @default("member") // project_owner | editor | member | viewer
+  joined_by  String?
+  joined_at  DateTime @default(now())
+  status     String   @default("active") // active | removed
+
+  project  Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user     User    @relation("ProjectMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
+  joinedBy User?   @relation("ProjectMemberJoinedBy", fields: [joined_by], references: [id], onDelete: SetNull)
+
+  @@unique([project_id, user_id])
+  @@index([project_id])
+  @@index([user_id])
+  @@index([role])
+  @@index([status])
+}
+
+model ProjectInvite {
+  id                   String    @id @default(cuid())
+  project_id           String
+  token                String    @unique
+  default_role         String    @default("member")
+  allowed_account_type String?
+  max_uses             Int?
+  used_count           Int       @default(0)
+  expires_at           DateTime?
+  require_approval     Boolean   @default(false)
+  created_by           String
+  status               String    @default("active") // active | disabled | expired
+  created_at           DateTime  @default(now())
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  creator User    @relation("ProjectInviteCreatedBy", fields: [created_by], references: [id])
+
+  @@index([project_id])
+  @@index([created_by])
+  @@index([status])
+  @@index([expires_at])
+}
+
+model Feedback {
+  id              String    @id @default(cuid())
+  user_id         String?
+  task_id         String?
+  content         String
+  image_urls_json String?
+  page_url        String?
+  pathname        String?
+  user_agent      String?
+  status          String    @default("new") // new | reviewed | archived
+  admin_note      String?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  archived_at     DateTime?
+  archived_by     String?
+
+  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([status])
+  @@index([pathname])
+  @@index([created_at])
 }
 
 // 点数账户
@@ -115,31 +353,62 @@ model CreditAccount {
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
 
-  user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
 }
 
+// 可过期额度桶。长期点数仍走 CreditAccount.balance；每日配额等临时额度走 bucket。
+model CreditBucket {
+  id               String    @id @default(cuid())
+  user_id          String
+  source_type      String // daily_quota
+  amount_total     Float
+  amount_remaining Float
+  frozen_amount    Float     @default(0)
+  quota_date       String?
+  expires_at       DateTime?
+  status           String    @default("active") // active | expired | exhausted | cancelled
+  policy_key       String?
+  policy_snapshot  String?
+  idempotency_key  String?   @unique
+  created_by       String?
+  metadata_json    String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([source_type])
+  @@index([quota_date])
+  @@index([status])
+  @@index([expires_at])
+}
+
 // 点数流水
 model CreditLedger {
-  id            String   @id @default(cuid())
-  user_id       String
-  type          String   // admin_grant | admin_deduct | system_adjust | task_freeze | task_success_deduct | task_failed_refund | manual_refund | periodic_grant
-  amount        Float
-  balance_before Float
-  balance_after  Float
-  frozen_before Float?
-  frozen_after  Float?
+  id              String   @id @default(cuid())
+  user_id         String
+  type            String // admin_grant | admin_deduct | system_adjust | task_freeze | task_success_deduct | task_failed_refund | manual_refund | periodic_grant | new_user_initial_grant | daily_quota_grant | daily_quota_expire | expired_refund_closed
+  amount          Float
+  balance_before  Float
+  balance_after   Float
+  frozen_before   Float?
+  frozen_after    Float?
   related_task_id String?
-  operator_id   String?
-  reason        String?
-  created_at    DateTime @default(now())
+  operator_id     String?
+  reason          String?
+  idempotency_key String?
+  metadata_json   String?
+  created_at      DateTime @default(now())
 
-  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
   @@index([type])
   @@index([created_at])
+  @@index([idempotency_key])
 }
 
 // 操作日志
@@ -152,10 +421,178 @@ model OperationLog {
   detail      String?
   created_at  DateTime @default(now())
 
-  operator    User     @relation(fields: [operator_id], references: [id], onDelete: Cascade)
+  operator User @relation(fields: [operator_id], references: [id], onDelete: Cascade)
 
   @@index([operator_id])
   @@index([target_type, target_id])
+  @@index([created_at])
+}
+
+model ContentAuditLog {
+  id            String   @id @default(cuid())
+  actor_user_id String?
+  action        String
+  content_type  String
+  content_id    String
+  owner_user_id String?
+  project_id    String?
+  detail_json   String?
+  created_at    DateTime @default(now())
+
+  actor   User?    @relation("ContentAuditActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
+  owner   User?    @relation("ContentAuditOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([actor_user_id])
+  @@index([content_type, content_id])
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([action])
+  @@index([created_at])
+}
+
+// ============================================================================
+// 外部成本与项目复盘账本
+// ============================================================================
+
+model ProviderApiRequest {
+  id                    String    @id @default(cuid())
+  task_id               String?
+  user_id               String?
+  project_id            String?
+  provider_name         String
+  provider_account_id   String?
+  endpoint              String
+  method                String    @default("POST")
+  idempotency_key       String?
+  provider_request_id   String?
+  provider_task_id      String?
+  status                String    @default("pending") // pending | accepted | failed | timeout | unknown
+  http_status           Int?
+  error_code            String?
+  error_message         String?
+  request_hash          String?
+  response_summary_json String?
+  started_at            DateTime  @default(now())
+  completed_at          DateTime?
+  created_at            DateTime  @default(now())
+
+  task         VideoTask?   @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  user         User?        @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  project      Project?     @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  cost_ledgers CostLedger[]
+
+  @@index([task_id])
+  @@index([user_id])
+  @@index([project_id])
+  @@index([provider_name])
+  @@index([provider_task_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model CostLedger {
+  id                  String   @id @default(cuid())
+  source_type         String // task | provider_request | official_bill | adjustment | transfer
+  source_id           String?
+  task_id             String?
+  user_id             String?
+  project_id          String?
+  provider_request_id String?
+  provider_name       String
+  provider_account_id String?
+  provider_task_id    String?
+  event_type          String // estimate | provider_request_submitted | rule_settlement | official_charge | refund | reversal | adjustment | allocation
+  amount_minor        Int?
+  currency            String?
+  amount_micros       Int?
+  usage_quantity      Float?
+  usage_unit          String?
+  cost_source         String // rule | provider_usage | official_bill | manual
+  confidence          String // estimated | provisional | confirmed | reconciled | unknown | disputed
+  pricing_rule_id     String?
+  pricing_snapshot    String?
+  official_charge_id  String?
+  reason              String?
+  idempotency_key     String?  @unique
+  occurred_at         DateTime @default(now())
+  created_by          String?
+  created_at          DateTime @default(now())
+
+  task             VideoTask?          @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  user             User?               @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  project          Project?            @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  provider_request ProviderApiRequest? @relation(fields: [provider_request_id], references: [id], onDelete: SetNull)
+  allocations      CostAllocation[]
+
+  @@index([source_type, source_id])
+  @@index([task_id])
+  @@index([user_id])
+  @@index([project_id])
+  @@index([provider_request_id])
+  @@index([provider_name])
+  @@index([provider_task_id])
+  @@index([event_type])
+  @@index([confidence])
+  @@index([occurred_at])
+  @@index([created_at])
+}
+
+model CostAllocation {
+  id              String   @id @default(cuid())
+  ledger_id       String
+  allocation_type String // project | user | task | cost_center | unallocated
+  allocation_id   String
+  task_id         String?
+  user_id         String?
+  project_id      String?
+  amount_minor    Int?
+  amount_micros   Int?
+  currency        String?
+  usage_quantity  Float?
+  usage_unit      String?
+  reason          String?
+  rule_id         String?
+  created_by      String?
+  created_at      DateTime @default(now())
+
+  ledger  CostLedger @relation(fields: [ledger_id], references: [id], onDelete: Cascade)
+  task    VideoTask? @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  user    User?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  project Project?   @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([ledger_id])
+  @@index([allocation_type, allocation_id])
+  @@index([task_id])
+  @@index([user_id])
+  @@index([project_id])
+  @@index([created_at])
+}
+
+model ProviderAccountSnapshot {
+  id                  String   @id @default(cuid())
+  provider_name       String   @default("seedance")
+  provider_account_id String?
+  balance_kind        String   @default("prepaid") // prepaid | quota | unknown
+  amount_decimal      String?
+  amount_minor        Int?
+  currency            String?
+  quota_amount        Float?
+  quota_unit          String?
+  source              String   @default("provider_api") // provider_api | manual
+  status              String   @default("synced") // synced | manual | failed
+  raw_snapshot        String?
+  note                String?
+  error_message       String?
+  fetched_at          DateTime @default(now())
+  created_by          String?
+  created_at          DateTime @default(now())
+
+  @@index([provider_name])
+  @@index([provider_account_id])
+  @@index([status])
+  @@index([source])
+  @@index([fetched_at])
   @@index([created_at])
 }
 
@@ -166,50 +603,50 @@ model OperationLog {
 // 注意：本表存储通过公网 URL 从 Seedance 官方创建的资产记录
 // 与本地 Asset 表（存储本地上传文件）是两套独立系统
 model SeedanceAsset {
-  id                   String    @id @default(cuid())
-  provider             String    @default("seedance") // 固定 seedance
-  provider_asset_id    String    // 官方返回的 asset-xxxx
-  asset_type           String    @default("Image") // Image | Video | Audio
-  name                 String
+  id                String @id @default(cuid())
+  provider          String @default("seedance") // 固定 seedance
+  provider_asset_id String // 官方返回的 asset-xxxx
+  asset_type        String @default("Image") // Image | Video | Audio
+  name              String
 
   // 用户提交的公网 URL
-  original_url         String
+  original_url String
 
   // 官方详情同步回来的预览 URL（临时签名 URL，过期需重新同步）
   provider_preview_url String?
 
   // 官方状态
-  provider_status      String?
+  provider_status String?
 
   // 本地状态：Active | Deleted | ProviderDeleted | DeleteFailed
-  local_status         String    @default("Active")
+  local_status String @default("Active")
 
   // 官方原始返回 JSON
   raw_provider_response String?
 
   // 最近一次同步官方详情的时间
-  last_synced_at       DateTime?
+  last_synced_at DateTime?
 
   // 本地软删除时间
-  deleted_at           DateTime?
+  deleted_at DateTime?
 
   // 官方彻底删除时间
-  provider_deleted_at  DateTime?
+  provider_deleted_at DateTime?
 
   // 官方删除失败原因
-  delete_error         String?
+  delete_error String?
 
   // 预留字段
-  group_id             String?
-  project_name         String?
+  group_id     String?
+  project_name String?
 
   // 去重字段
-  file_hash           String?    // sha256(文件buffer)，用于本地文件去重
-  storage_provider    String?    // tos | r2 | local，用于 R2/TOS 去重
-  storage_key         String?    // 对象存储 key，用于 storage 去重
+  file_hash        String? // sha256(文件buffer)，用于本地文件去重
+  storage_provider String? // tos | r2 | local，用于 R2/TOS 去重
+  storage_key      String? // 对象存储 key，用于 storage 去重
 
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   @@index([provider_asset_id])
   @@index([provider, provider_asset_id])
@@ -224,114 +661,256 @@ model SeedanceAsset {
 
 // 上传的文件（图片/视频/音频）
 model Asset {
-  id             String    @id @default(cuid())
-  owner_id       String    // 固定为 "default-user"，后续支持多用户时扩展
-  type           String    // image | video | audio
+  id       String @id @default(cuid())
+  owner_id String // 固定为 "default-user"，后续支持多用户时扩展
+  type     String // image | video | audio
 
   // 存储路径
-  original_url   String    // /uploads/assets/{hash}.{ext}
-  thumbnail_url  String?   // /uploads/thumbs/{hash}_thumb.{ext}  (2:3 比例)
+  original_url  String // /uploads/assets/{hash}.{ext}
+  thumbnail_url String? // /uploads/thumbs/{hash}_thumb.{ext}  (2:3 比例)
 
   // 文件元信息
-  file_name      String
-  mime_type      String
-  width          Int?
-  height         Int?
-  file_size      Int       // bytes
+  file_name String
+  mime_type String
+  width     Int?
+  height    Int?
+  file_size Int // bytes
 
   // 去重
-  hash           String?   @unique
+  hash String? @unique
 
-  created_at     DateTime  @default(now())
+  status String @default("active") // active | hidden | deleted
+
+  created_at DateTime @default(now())
 
   // 关联
-  workspace_assets     WorkspaceAsset[]
-  collection_items    AssetCollectionItem[]
-  collections_cover    AssetCollection[]     @relation("CollectionCover")
+  workspace_assets  WorkspaceAsset[]
+  collection_items  AssetCollectionItem[]
+  collections_cover AssetCollection[]     @relation("CollectionCover")
+  reference_images  ReferenceImage[]
+
+  @@index([owner_id, type, status, created_at])
+  @@index([status])
 }
 
 // 工作区：管理当前会话的参考素材
 model Workspace {
-  id           String    @id @default(cuid())
-  owner_id     String    @default("default-user")
-  name         String    @default("默认工作台")
-  status       String    @default("active") // active | archived
-  created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
+  id         String   @id @default(cuid())
+  owner_id   String   @default("default-user")
+  name       String   @default("默认工作台")
+  status     String   @default("active") // active | archived
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   // 关联
-  assets       WorkspaceAsset[]
-  snapshots    GenerationTaskSnapshot[]
-  tasks        VideoTask[]
+  assets    WorkspaceAsset[]
+  snapshots GenerationTaskSnapshot[]
+  tasks     VideoTask[]
 }
 
 // Workspace <-> Asset 关联表（含排序和角色）
 model WorkspaceAsset {
-  id           String   @id @default(cuid())
-  workspace_id String
-  asset_id     String
-  sort_order   Int      @default(0)   // 决定 图1/图2/图3 顺序
-  role         String?              // reference_image | first_frame | last_frame | reference_video | reference_audio
-  created_at   DateTime @default(now())
+  id                 String   @id @default(cuid())
+  workspace_id       String
+  asset_id           String
+  reference_image_id String?
+  sort_order         Int      @default(0) // 决定 图1/图2/图3 顺序
+  role               String? // reference_image | first_frame | last_frame | reference_video | reference_audio
+  created_at         DateTime @default(now())
 
-  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  asset        Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  workspace       Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  asset           Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  reference_image ReferenceImage? @relation(fields: [reference_image_id], references: [id], onDelete: SetNull)
 
   @@unique([workspace_id, asset_id])
+  @@index([reference_image_id])
+}
+
+// ============================================================================
+// 参考图图集（可被生成流程调用的项目资产容器）
+// ============================================================================
+
+model ReferenceAlbum {
+  id               String   @id @default(cuid())
+  workspace_id     String?
+  project_id       String?
+  public_folder_id String?
+  owner_user_id    String
+  name             String
+  description      String?
+  album_type       String   @default("personal") // personal | project | public | system
+  visibility       String   @default("private") // private | project | shared | public
+  cover_image_id   String?
+  status           String   @default("active") // active | archived | deleted
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  owner        User                  @relation("ReferenceAlbumOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project      Project?              @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  publicFolder ReferenceAlbumFolder? @relation(fields: [public_folder_id], references: [id], onDelete: SetNull)
+  images       ReferenceImage[]
+  shares       AlbumShare[]
+
+  @@index([workspace_id])
+  @@index([project_id])
+  @@index([public_folder_id])
+  @@index([owner_user_id])
+  @@index([album_type])
+  @@index([visibility])
+  @@index([status])
+}
+
+model ReferenceAlbumFolder {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  scope       String   @default("public") // public
+  sort_order  Int      @default(0)
+  status      String   @default("active") // active | archived | deleted
+  created_by  String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  albums      ReferenceAlbum[]
+  submissions PublicAlbumSubmission[]
+
+  @@index([scope])
+  @@index([status])
+  @@index([sort_order])
+}
+
+model PublicAlbumSubmission {
+  id                   String    @id @default(cuid())
+  source_album_id      String
+  target_album_id      String?
+  public_folder_id     String?
+  submitted_by_user_id String
+  name                 String
+  description          String?
+  submit_note          String?
+  status               String    @default("pending") // pending | approved | rejected
+  review_note          String?
+  reviewed_by_user_id  String?
+  reviewed_at          DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  publicFolder ReferenceAlbumFolder? @relation(fields: [public_folder_id], references: [id], onDelete: SetNull)
+
+  @@index([source_album_id])
+  @@index([target_album_id])
+  @@index([public_folder_id])
+  @@index([submitted_by_user_id])
+  @@index([status])
+  @@unique([source_album_id, submitted_by_user_id, status])
+}
+
+model ReferenceImage {
+  id                String   @id @default(cuid())
+  album_id          String
+  workspace_id      String?
+  project_id        String?
+  owner_user_id     String
+  asset_id          String?
+  url               String
+  thumbnail_url     String?
+  source_type       String   @default("upload") // upload | generated | copied | shared
+  source_content_id String?
+  source_image_id   String?
+  sort_order        Int      @default(0)
+  metadata_json     String?
+  status            String   @default("active") // active | deleted
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  album            ReferenceAlbum   @relation(fields: [album_id], references: [id], onDelete: Cascade)
+  owner            User             @relation("ReferenceImageOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project          Project?         @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  asset            Asset?           @relation(fields: [asset_id], references: [id], onDelete: SetNull)
+  workspace_assets WorkspaceAsset[]
+
+  @@index([album_id])
+  @@index([workspace_id])
+  @@index([project_id])
+  @@index([owner_user_id])
+  @@index([asset_id])
+  @@index([source_image_id])
+  @@index([status])
+}
+
+model AlbumShare {
+  id               String    @id @default(cuid())
+  album_id         String
+  grantee_type     String // user | project
+  grantee_id       String
+  permissions_json String
+  created_by       String
+  expires_at       DateTime?
+  status           String    @default("active") // active | revoked | expired
+  created_at       DateTime  @default(now())
+
+  album   ReferenceAlbum @relation(fields: [album_id], references: [id], onDelete: Cascade)
+  creator User           @relation("AlbumShareCreator", fields: [created_by], references: [id], onDelete: Cascade)
+
+  @@unique([album_id, grantee_type, grantee_id])
+  @@index([album_id])
+  @@index([grantee_type, grantee_id])
+  @@index([created_by])
+  @@index([status])
 }
 
 // 图片集：保存/复用素材组合
 model AssetCollection {
-  id           String    @id @default(cuid())
-  owner_id     String    @default("default-user")
-  name         String
-  description String?
-  visibility  String    @default("private") // private | public
+  id             String   @id @default(cuid())
+  owner_id       String   @default("default-user")
+  name           String
+  description    String?
+  visibility     String   @default("private") // private | public
   cover_asset_id String?
-  created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
   // 关联
-  items        AssetCollectionItem[]
-  cover_asset  Asset?    @relation("CollectionCover", fields: [cover_asset_id], references: [id])
+  items       AssetCollectionItem[]
+  cover_asset Asset?                @relation("CollectionCover", fields: [cover_asset_id], references: [id])
 }
 
 // 图片集条目
 model AssetCollectionItem {
-  id           String   @id @default(cuid())
+  id            String   @id @default(cuid())
   collection_id String
-  asset_id     String
-  sort_order   Int      @default(0)
-  role         String?
-  created_at   DateTime @default(now())
+  asset_id      String
+  sort_order    Int      @default(0)
+  role          String?
+  created_at    DateTime @default(now())
 
-  collection   AssetCollection @relation(fields: [collection_id], references: [id], onDelete: Cascade)
-  asset        Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  collection AssetCollection @relation(fields: [collection_id], references: [id], onDelete: Cascade)
+  asset      Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
 
   @@unique([collection_id, asset_id])
 }
 
 // 任务快照：生成时的参数 + 素材状态冻结
 model GenerationTaskSnapshot {
-  id                    String   @id @default(cuid())
-  task_id               String?  // 可选关联 VideoTask
-  workspace_id          String?
+  id           String  @id @default(cuid())
+  task_id      String? // 可选关联 VideoTask
+  workspace_id String?
 
   // 生成参数
-  generation_mode       String
-  prompt_raw            String   // 用户原始 prompt（含 图1 图2 等引用）
-  prompt_rendered       String   // 渲染后（将 图N 替换为实际 URL）
+  generation_mode String
+  prompt_raw      String // 用户原始 prompt（含 图1 图2 等引用）
+  prompt_rendered String // 渲染后（将 图N 替换为实际 URL）
 
   // 素材映射：{ "图1": assetId, "图2": assetId }
-  asset_mapping_json    String?  // JSON
+  asset_mapping_json String? // JSON
 
   // 完整 content 数组
-  content_json          String?  // JSON
+  content_json String? // JSON
 
   // API 发送的原始 payload
   provider_payload_json String?
 
-  created_at            DateTime @default(now())
+  created_at DateTime @default(now())
 
-  workspace     Workspace?  @relation(fields: [workspace_id], references: [id])
+  workspace Workspace? @relation(fields: [workspace_id], references: [id])
 }

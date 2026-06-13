@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import * as fs from 'fs';
-import * as path from 'path';
-
-const DOWNLOAD_TIMEOUT_MS = 60 * 1000; // 60秒超时
+import { getSession } from '@/lib/auth/session';
+import { AuthError } from '@/lib/auth/session';
+import { assertCanViewTask } from '@/lib/projects/permissions';
+import { cacheTaskVideoToLocal } from '@/lib/video/local-cache';
 
 /**
  * POST /api/video/download/[id]
@@ -19,6 +19,14 @@ export async function POST(
   const taskId = params.id;
 
   try {
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized', message: '请先登录后再下载视频' },
+        { status: 401 },
+      );
+    }
+
     // 1. 查询任务
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
@@ -29,6 +37,18 @@ export async function POST(
         { success: false, error: 'Task not found', message: `Task ${taskId} not found` },
         { status: 404 }
       );
+    }
+
+    try {
+      await assertCanViewTask(user, task);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json(
+          { success: false, error: 'Forbidden', message: error.message },
+          { status: error.status },
+        );
+      }
+      throw error;
     }
 
     // 2. 检查是否有视频 URL
@@ -47,111 +67,25 @@ export async function POST(
       );
     }
 
-    // 保存到 public/videos 目录，Next.js 可直接访问
-    const storageDir = path.join(process.cwd(), 'public', 'videos');
-    const localFilePath = path.join(storageDir, `${taskId}.mp4`);
-    const publicVideoPath = `/videos/${taskId}.mp4`;
-
-    // 4. 检查本地文件是否已存在
-    if (fs.existsSync(localFilePath)) {
-      const fileSize = fs.statSync(localFilePath).size;
-      return NextResponse.json({
-        success: true,
-        message: 'Video already downloaded',
-        local_video_path: publicVideoPath,
-        file_size: fileSize,
-        already_exists: true,
-      });
-    }
-
-    // 5. 确保存储目录存在
-    if (!fs.existsSync(storageDir)) {
-      fs.mkdirSync(storageDir, { recursive: true });
-    }
-
-    // 6. 流式下载视频（支持大文件 + 超时控制）
-    console.log(`[Download] Fetching video from: ${task.result_video_url}`);
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
-
-    let response: Response;
-    try {
-      response = await fetch(task.result_video_url, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-          'Accept': 'video/mp4,*/*',
+    const result = await cacheTaskVideoToLocal(task);
+    if (!result.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: result.error || 'Download failed',
+          message: result.message || '视频保存失败',
         },
-        signal: controller.signal,
-      });
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-        return NextResponse.json(
-          { success: false, error: 'Download timeout', message: `下载超时（超过${DOWNLOAD_TIMEOUT_MS / 1000}秒），请重试或检查网络` },
-          { status: 408 }
-        );
-      }
-      throw fetchError;
-    }
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { success: false, error: 'Download failed', message: `下载失败: HTTP ${response.status}` },
-        { status: 502 }
+        { status: result.status || 500 },
       );
     }
-
-    const contentLength = response.headers.get('content-length');
-    const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
-
-    // 7. 流式写入文件（适合大文件）
-    const fileStream = fs.createWriteStream(localFilePath);
-    const reader = response.body?.getReader();
-    
-    if (!reader) {
-      return NextResponse.json(
-        { success: false, error: 'Stream error', message: '无法读取响应流' },
-        { status: 500 }
-      );
-    }
-
-    let receivedBytes = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        fileStream.write(Buffer.from(value));
-        receivedBytes += value.length;
-      }
-    } finally {
-      fileStream.end();
-    }
-
-    const fileSize = fs.statSync(localFilePath).size;
-
-    // 8. 验证文件大小（如果已知）
-    if (totalBytes > 0 && fileSize !== totalBytes) {
-      console.warn(`[Download] Size mismatch: expected ${totalBytes}, got ${fileSize}`);
-    }
-
-    // 9. 更新数据库
-    await prisma.videoTask.update({
-      where: { id: taskId },
-      data: { local_video_path: publicVideoPath },
-    });
-
-    console.log(`[Download] Video saved to: ${localFilePath}`);
-    console.log(`[Download] File size: ${fileSize} bytes`);
 
     return NextResponse.json({
       success: true,
-      message: 'Video downloaded successfully',
-      local_video_path: publicVideoPath,
-      file_size: fileSize,
-      download_time_ms: Date.now(),
+      message: result.already_exists ? 'Video already downloaded' : 'Video downloaded successfully',
+      local_video_path: result.local_video_path,
+      file_size: result.file_size,
+      already_exists: result.already_exists || false,
+      refreshed_url: result.refreshed_url || false,
     });
 
   } catch (error) {

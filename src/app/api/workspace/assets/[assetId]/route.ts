@@ -9,14 +9,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWorkspace, removeAssetFromWorkspace } from '@/lib/assets/workspace';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth/session';
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: { assetId: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
     const tabId = _request.headers.get('x-tab-id') || 'default';
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
     await removeAssetFromWorkspace(workspaceId, params.assetId);
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -33,11 +37,14 @@ export async function PATCH(
   { params }: { params: { assetId: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
     const body = await request.json();
     const { role } = body;
 
     const tabId = request.headers.get('x-tab-id') || 'default';
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
 
     // 找到 workspace asset 并更新 role
     const updated = await prisma.workspaceAsset.updateMany({

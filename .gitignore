@@ -5,7 +5,11 @@
 
 # Next.js build
 .next/
+.next-dev/
+.next-prod/
+.next.bad-*/
 out/
+.vercel/
 
 # Dependencies
 node_modules/
@@ -37,8 +41,16 @@ test-api.sh
 
 # Database
 *.db
+*.db.backup*
+*.db.bak*
 prisma/*.db
+prisma/*.db.backup*
+prisma/*.db.bak*
 
 # Runtime uploads (keep directory structure only)
 public/uploads/*
 !public/uploads/.gitkeep
+
+# Runtime generated videos and thumbnails
+public/videos/*
+public/videos/thumbnails/*

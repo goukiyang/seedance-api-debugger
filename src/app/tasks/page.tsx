@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Download } from 'lucide-react';
+import PageBanner from '@/components/PageBanner';
+import PaginationControls from '@/components/PaginationControls';
+import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
+import { taskDetailHref } from '@/lib/navigation/return-to';
+import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 import type { GenerationMode } from '@/types';
 import { GENERATION_MODE_LABELS } from '@/types';
 
@@ -10,10 +16,34 @@ interface Task {
   provider_task_id: string | null;
   prompt: string;
   generation_mode: GenerationMode;
+  ratio: string | null;
+  duration: number | null;
+  resolution: string | null;
   local_status: string;
+  result_video_url: string | null;
+  result_last_frame_url: string | null;
   local_video_path: string | null;
+  error_message: string | null;
+  estimated_cost: number | null;
+  actual_cost: number | null;
+  frozen_cost: number | null;
+  refund_amount: number | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
+  reference_image_ids: string | null;
+  reference_image_urls: string | null;
   created_at: string;
   completed_at: string | null;
+  retention_status?: string | null;
+  user_deleted_at?: string | null;
+  user_deleted_by?: string | null;
+  admin_hidden_at?: string | null;
+  admin_hidden_by?: string | null;
+  delete_reason?: string | null;
+  project?: { id: string; name: string; type: string } | null;
 }
 
 interface Pagination {
@@ -47,11 +77,139 @@ function getStatusText(status: string) {
   return textMap[status] || status;
 }
 
+function parseJsonArray(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('zh-CN');
+}
+
+function truncatePrompt(prompt: string, maxLen = 140): string {
+  if (prompt.length <= maxLen) return prompt;
+  return `${prompt.slice(0, maxLen)}...`;
+}
+
+function taskReferenceCount(task: Task): number {
+  const ids = parseJsonArray(task.reference_image_ids);
+  if (ids.length > 0) return ids.length;
+  return parseJsonArray(task.reference_image_urls).length;
+}
+
+function taskCostText(task: Task): string {
+  const actual = task.actual_cost ?? null;
+  if (actual !== null) return `扣除 ${actual}`;
+  if (task.frozen_cost && task.frozen_cost > 0) return `冻结 ${task.frozen_cost}`;
+  if (task.estimated_cost !== null && task.estimated_cost !== undefined) return `预估 ${task.estimated_cost}`;
+  if (task.refund_amount && task.refund_amount > 0) return `返还 ${task.refund_amount}`;
+  return '未记录';
+}
+
+function taskOfficialChargeText(task: Task): string {
+  const amountMicros = task.provider_final_amount_micros ?? task.provider_official_amount_micros;
+  if (amountMicros !== null && amountMicros !== undefined) {
+    return formatAmountMicrosWithFixedCny(amountMicros, task.provider_cost_currency);
+  }
+  const amountMinor = task.provider_final_amount_minor ?? task.provider_official_amount_minor;
+  if (amountMinor !== null && amountMinor !== undefined) {
+    return formatAmountMinorWithFixedCny(amountMinor, task.provider_cost_currency);
+  }
+  return '待官方确认';
+}
+
+function isTaskDownloadable(task: Task) {
+  return task.local_status === 'succeeded' && Boolean(task.local_video_path || task.result_video_url);
+}
+
+function taskDownloadDisabledReason(task: Task) {
+  if (task.local_status !== 'succeeded') return '任务未完成，暂不能下载';
+  if (!task.local_video_path && !task.result_video_url) return '任务没有可用视频链接';
+  return '';
+}
+
+type TaskPreviewModel = {
+  kind: 'image' | 'empty';
+  src?: string;
+  label: string;
+};
+
+function getTaskPreview(task: Task, failedSrcs: string[] = []): TaskPreviewModel {
+  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
+  const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
+
+  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
+    return { kind: 'image', src: thumbnailSrc, label: '预览图' };
+  }
+
+  if (task.local_status === 'failed') {
+    return { kind: 'empty', label: '失败无预览' };
+  }
+
+  if (['submitted', 'running'].includes(task.local_status)) {
+    return { kind: 'empty', label: '等待预览' };
+  }
+
+  return { kind: 'empty', label: '暂无预览' };
+}
+
+function TaskPreview({ task }: { task: Task }) {
+  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
+  const preview = getTaskPreview(task, failedSrcs);
+  const markFailed = (src?: string) => {
+    if (!src) return;
+    setFailedSrcs((current) => current.includes(src) ? current : [...current, src]);
+  };
+
+  return (
+    <Link
+      href={taskDetailHref(task.id, '/tasks')}
+      className={`tasks-preview tasks-preview-${preview.kind}`}
+      aria-label={`查看任务 ${task.id} 的截图和详情`}
+    >
+      {preview.kind === 'image' && preview.src && (
+        <img
+          src={preview.src}
+          alt="任务截图"
+          loading="lazy"
+          onError={() => markFailed(preview.src)}
+        />
+      )}
+      {preview.kind === 'empty' && (
+        <div className="tasks-preview-empty">
+          <span>{getStatusText(task.local_status)}</span>
+        </div>
+      )}
+      <span className="tasks-preview-label">
+        {preview.label}
+      </span>
+    </Link>
+  );
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+
+  const selectedSet = new Set(selectedTaskIds);
+  const downloadableTasks = tasks.filter(isTaskDownloadable);
+  const selectedTasks = tasks.filter((task) => selectedSet.has(task.id));
+  const selectedDownloadableTasks = selectedTasks.filter(isTaskDownloadable);
+  const selectedTooMany = selectedDownloadableTasks.length > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT;
 
   useEffect(() => {
     fetchTasks();
@@ -62,122 +220,305 @@ export default function TasksPage() {
     try {
       const res = await fetch(`/api/video/list?page=${page}&limit=20`);
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '任务加载失败');
       setTasks(data.tasks || []);
+      setSelectedTaskIds([]);
       setPagination(data.pagination || null);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
+      setError(error instanceof Error ? error.message : '任务加载失败');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div>
-      <div className="page-header">
-        <h1 className="page-title">任务列表</h1>
-        <p className="page-description">查看所有视频生成任务</p>
-      </div>
+  const removeTask = async (task: Task) => {
+    if (!window.confirm('从我的任务列表移除此记录？管理员仍可在后台留存区审计和恢复。')) return;
 
-      <div className="card">
+    setDeletingTaskId(task.id);
+    setMessage('');
+    setError('');
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '用户从任务列表移除' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '移除失败');
+
+      setTasks((current) => current.filter((item) => item.id !== task.id));
+      setSelectedTaskIds((current) => current.filter((id) => id !== task.id));
+      setPagination((current) => current
+        ? { ...current, total: Math.max(0, current.total - 1) }
+        : current);
+      setMessage('任务已从你的列表移除，管理员仍可在后台留存区查看。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '移除失败');
+    } finally {
+      setDeletingTaskId(null);
+    }
+  };
+
+  const toggleTaskSelection = (task: Task, checked: boolean) => {
+    if (!isTaskDownloadable(task)) return;
+    setSelectedTaskIds((current) => {
+      if (checked) return current.includes(task.id) ? current : [...current, task.id];
+      return current.filter((id) => id !== task.id);
+    });
+  };
+
+  const toggleCurrentPageDownloadable = (checked: boolean) => {
+    if (checked) {
+      setSelectedTaskIds(downloadableTasks.map((task) => task.id));
+    } else {
+      setSelectedTaskIds([]);
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    if (selectedDownloadableTasks.length === 0 || selectedTooMany) return;
+    setBulkDownloading(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await downloadBulkVideoZip({
+        taskIds: selectedDownloadableTasks.map((task) => task.id),
+      });
+      setMessage(`已开始下载视频包：${result.success} 个视频${result.failed ? `，${result.failed} 个失败见 manifest` : ''}`);
+      setBulkConfirmOpen(false);
+      setSelectedTaskIds([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '批量下载失败');
+    } finally {
+      setBulkDownloading(false);
+    }
+  };
+
+  return (
+    <div className="tasks-page">
+      <PageBanner
+        eyebrow="我的任务"
+        title="任务列表"
+        description="查看生成进度、复用历史提示词和参考图。"
+        actions={(
+          <>
+          <button className="btn btn-secondary" onClick={fetchTasks}>
+            刷新列表
+          </button>
+          <Link href="/generate" className="btn btn-primary">
+            创建新任务
+          </Link>
+          </>
+        )}
+      />
+
+      {(message || error) && (
+        <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
+          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+        </div>
+      )}
+
+      <div className="tasks-list-shell">
         {loading ? (
           <p className="text-gray">加载中...</p>
         ) : tasks.length === 0 ? (
-          <div>
-            <p className="text-gray mb-4">暂无任务</p>
+          <div className="tasks-empty">
+            <h2>暂无任务</h2>
+            <p>先创建一个视频任务，生成记录会出现在这里。</p>
             <Link href="/generate" className="btn btn-primary">
               创建第一个任务
             </Link>
           </div>
         ) : (
           <>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>任务 ID</th>
-                  <th>Provider ID</th>
-                  <th>模式</th>
-                  <th>提示词</th>
-                  <th>状态</th>
-                  <th>本地</th>
-                  <th>创建时间</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map((task) => (
-                  <tr key={task.id}>
-                    <td className="truncate" style={{ maxWidth: 100 }} title={task.id}>
-                      {task.id.substring(0, 12)}...
-                    </td>
-                    <td className="truncate" style={{ maxWidth: 80 }} title={task.provider_task_id || '-'}>
-                      {task.provider_task_id ? `${task.provider_task_id.substring(0, 10)}...` : '-'}
-                    </td>
-                    <td className="text-sm">
-                      {GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode}
-                    </td>
-                    <td className="truncate" style={{ maxWidth: 150 }} title={task.prompt}>
-                      {task.prompt}
-                    </td>
-                    <td>
-                      <span className={`status-badge ${getStatusClass(task.local_status)}`}>
-                        {getStatusText(task.local_status)}
-                      </span>
-                    </td>
-                    <td>
-                      {task.local_video_path ? (
-                        <span className="text-green" title={task.local_video_path}>✅ 已保存</span>
-                      ) : task.local_status === 'succeeded' ? (
-                        <span className="text-gray">远程</span>
-                      ) : '-'}
-                    </td>
-                    <td className="text-sm">
-                      {new Date(task.created_at).toLocaleString('zh-CN')}
-                    </td>
-                    <td>
-                      <Link href={`/tasks/${task.id}`} className="table-link">
+            <div className="bulk-download-toolbar">
+              <label className="bulk-download-check">
+                <input
+                  type="checkbox"
+                  checked={downloadableTasks.length > 0 && selectedDownloadableTasks.length === downloadableTasks.length}
+                  disabled={downloadableTasks.length === 0}
+                  onChange={(event) => toggleCurrentPageDownloadable(event.target.checked)}
+                />
+                <span>选择本页可下载视频</span>
+              </label>
+              <div className="bulk-download-toolbar-meta">
+                已选 {selectedDownloadableTasks.length} 个
+                {downloadableTasks.length > 0 && ` · 本页可下载 ${downloadableTasks.length} 个`}
+              </div>
+              <div className="bulk-download-toolbar-actions">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  disabled={selectedDownloadableTasks.length === 0 || selectedTooMany}
+                  onClick={() => setBulkConfirmOpen(true)}
+                  title={selectedTooMany ? `第一批最多支持 ${BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT} 个视频即时打包` : '将选中视频打包为 ZIP'}
+                >
+                  <Download size={16} aria-hidden="true" />
+                  批量下载 ZIP
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={selectedTaskIds.length === 0}
+                  onClick={() => setSelectedTaskIds([])}
+                >
+                  清空选择
+                </button>
+              </div>
+            </div>
+            {selectedTooMany && (
+              <div className="alert alert-warning">
+                第一批即时打包最多支持 {BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT} 个视频；更大批量后续走后台任务。
+              </div>
+            )}
+            <div className="tasks-card-list">
+              {tasks.map((task) => {
+                const referenceCount = taskReferenceCount(task);
+                const modeLabel = GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
+                const downloadable = isTaskDownloadable(task);
+                return (
+                  <article key={task.id} className="tasks-card">
+                    <label
+                      className="tasks-card-select"
+                      title={downloadable ? '选择此视频加入批量下载' : taskDownloadDisabledReason(task)}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(task.id)}
+                        disabled={!downloadable}
+                        onChange={(event) => toggleTaskSelection(task, event.target.checked)}
+                      />
+                    </label>
+                    <TaskPreview task={task} />
+
+                    <div className="tasks-card-main">
+                      <div className="tasks-card-topline">
+                        <span className={`status-badge ${getStatusClass(task.local_status)}`}>
+                          {getStatusText(task.local_status)}
+                        </span>
+                        <span className="tasks-card-id" title={task.id}>{task.id.slice(0, 12)}...</span>
+                        {task.project && (
+                          <Link href={`/projects/${task.project.id}`} className="tasks-project-link">
+                            {task.project.name}
+                          </Link>
+                        )}
+                      </div>
+                      <h2 className="tasks-card-title" title={task.prompt}>
+                        {truncatePrompt(task.prompt, 96)}
+                      </h2>
+                      {task.error_message && task.local_status === 'failed' && (
+                        <p className="tasks-card-error">{task.error_message}</p>
+                      )}
+                      <div className="tasks-meta-grid">
+                        <div>
+                          <span>模式</span>
+                          <strong>{modeLabel}</strong>
+                        </div>
+                        <div>
+                          <span>参数</span>
+                          <strong>{task.resolution || '-'} · {task.duration ? `${task.duration}s` : '-'} · {task.ratio || '-'}</strong>
+                        </div>
+                        <div>
+                          <span>参考图</span>
+                          <strong>{referenceCount > 0 ? `${referenceCount} 张` : '无'}</strong>
+                        </div>
+                        <div>
+                          <span>实际扣除</span>
+                          <strong>{taskOfficialChargeText(task)}</strong>
+                        </div>
+                        <div>
+                          <span>点数</span>
+                          <strong>{taskCostText(task)}</strong>
+                        </div>
+                        <div>
+                          <span>创建时间</span>
+                          <strong>{formatDate(task.created_at)}</strong>
+                        </div>
+                        <div>
+                          <span>完成时间</span>
+                          <strong>{formatDate(task.completed_at)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="tasks-card-actions">
+                      <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
                         查看详情
                       </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
+                        重新生成
+                      </Link>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={deletingTaskId === task.id}
+                        onClick={() => void removeTask(task)}
+                      >
+                        {deletingTaskId === task.id ? '移除中...' : '从列表移除'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
 
-            {pagination && pagination.total_pages > 1 && (
-              <div className="flex justify-between items-center mt-4">
-                <span className="text-sm text-gray">
-                  第 {pagination.page} / {pagination.total_pages} 页，共 {pagination.total} 条
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    className="btn btn-secondary"
-                    disabled={page <= 1}
-                    onClick={() => setPage(page - 1)}
-                  >
-                    上一页
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    disabled={page >= pagination.total_pages}
-                    onClick={() => setPage(page + 1)}
-                  >
-                    下一页
-                  </button>
-                </div>
-              </div>
+            {pagination && (
+              <PaginationControls
+                page={pagination.page}
+                totalPages={pagination.total_pages}
+                total={pagination.total}
+                pageSize={pagination.limit}
+                label="任务"
+                onPageChange={setPage}
+              />
             )}
           </>
         )}
       </div>
 
-      <div className="flex gap-4 mt-4">
-        <Link href="/generate" className="btn btn-primary">
-          创建新任务
-        </Link>
-        <button className="btn btn-secondary" onClick={fetchTasks}>
-          刷新列表
-        </button>
-      </div>
+      {bulkConfirmOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="批量下载视频">
+          <div className="modal-panel bulk-download-modal">
+            <div className="modal-header">
+              <div>
+                <h2>批量下载视频</h2>
+                <p>将选中的已完成视频打包为 ZIP</p>
+              </div>
+              <button className="modal-close" type="button" onClick={() => setBulkConfirmOpen(false)} aria-label="关闭">
+                ×
+              </button>
+            </div>
+            <div className="bulk-download-summary">
+              <div>
+                <span>选中视频</span>
+                <strong>{selectedDownloadableTasks.length}</strong>
+              </div>
+              <div>
+                <span>即时打包上限</span>
+                <strong>{BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT}</strong>
+              </div>
+            </div>
+            <p className="text-gray">
+              ZIP 内会包含视频文件和 manifest.csv。外链过期的视频会先尝试刷新并缓存，失败项会写入 manifest。
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setBulkConfirmOpen(false)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={handleBulkDownload}
+                disabled={bulkDownloading || selectedDownloadableTasks.length === 0 || selectedTooMany}
+              >
+                <Download size={16} aria-hidden="true" />
+                {bulkDownloading ? '打包中...' : '确认下载'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,17 +9,57 @@ export interface SessionUser {
   username: string;
   email: string;
   role: 'admin' | 'user';
-  status: 'active' | 'disabled';
+  account_type: 'internal' | 'external';
+  user_profile: string;
+  feature_profile_id: string | null;
+  status: 'active' | 'disabled' | 'pending' | 'expired';
+  expires_at: Date | null;
+  mobile?: string | null;
+  avatar_url?: string | null;
+  feishu?: {
+    user_id: string | null;
+    open_id: string | null;
+    union_id: string | null;
+    tenant_key: string | null;
+    employee_no: string | null;
+    department_ids: string[];
+    last_sync_at: Date | null;
+  };
 }
 
 export const SESSION_COOKIE = 'session';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
 
+export function parseSessionCookie(rawCookie: string): string | null {
+  const cookieHeader = rawCookie.trim();
+  const prefix = `${SESSION_COOKIE}=`;
+  const match = cookieHeader
+    .split(';')
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(prefix));
+  if (!match) return null;
+  return match.slice(prefix.length);
+}
+
+function parseJsonArray(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function getSession(): Promise<SessionUser | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
+  return getSessionByToken(token);
+}
 
+export async function getSessionByToken(token?: string | null): Promise<SessionUser | null> {
+  if (!token) return null;
   try {
     const parts = token.split('.');
     if (parts.length !== 2) return null;
@@ -40,14 +80,55 @@ export async function getSession(): Promise<SessionUser | null> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
-        id: true, name: true, username: true, email: true,
-        role: true, status: true,
+        id: true,
+        name: true,
+        username: true,
+        email: true,
+        role: true,
+        account_type: true,
+        user_profile: true,
+        feature_profile_id: true,
+        status: true,
+        expires_at: true,
+        mobile: true,
+        avatar_url: true,
+        feishu_user_id: true,
+        feishu_open_id: true,
+        feishu_union_id: true,
+        feishu_tenant_key: true,
+        feishu_employee_no: true,
+        feishu_department_ids: true,
+        last_feishu_sync_at: true,
       },
     });
-    if (!user || user.status === 'disabled') return null;
+    if (!user || user.status !== 'active') return null;
+    if (user.expires_at && user.expires_at.getTime() <= Date.now()) return null;
 
     if (user.role !== 'admin' && user.role !== 'user') return null;
-    return user as SessionUser;
+    if (user.account_type !== 'internal' && user.account_type !== 'external') return null;
+    return {
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      account_type: user.account_type,
+      user_profile: user.user_profile,
+      feature_profile_id: user.feature_profile_id,
+      status: user.status,
+      expires_at: user.expires_at,
+      mobile: user.mobile,
+      avatar_url: user.avatar_url,
+      feishu: {
+        user_id: user.feishu_user_id,
+        open_id: user.feishu_open_id,
+        union_id: user.feishu_union_id,
+        tenant_key: user.feishu_tenant_key,
+        employee_no: user.feishu_employee_no,
+        department_ids: parseJsonArray(user.feishu_department_ids),
+        last_sync_at: user.last_feishu_sync_at,
+      },
+    };
   } catch {
     return null;
   }
@@ -70,6 +151,13 @@ export async function login(
   });
   if (!user) return { error: '账号或密码错误', status: 401 };
   if (user.status === 'disabled') return { error: '账号已被禁用', status: 403 };
+  if (user.status === 'deleted') return { error: '账号或密码错误', status: 401 };
+  if (user.status === 'pending') return { error: '账号待开通，请联系管理员', status: 403 };
+  if (user.status === 'expired') return { error: '账号已过期，请联系管理员', status: 403 };
+  if (user.status !== 'active') return { error: '账号当前不可用', status: 403 };
+  if (user.expires_at && user.expires_at.getTime() <= Date.now()) {
+    return { error: '账号已过期，请联系管理员', status: 403 };
+  }
 
   if (!verifyPassword(password, user.password_hash)) {
     return { error: '账号或密码错误', status: 401 };
@@ -83,10 +171,16 @@ export async function login(
 
   const token = await createSession(user.id);
   const role = user.role === 'admin' ? 'admin' : 'user';
+  const accountType = user.account_type === 'external' ? 'external' : 'internal';
   return {
     user: {
       id: user.id, name: user.name, username: user.username,
-      email: user.email, role, status: 'active',
+      email: user.email, role, account_type: accountType,
+      user_profile: user.user_profile || 'other',
+      feature_profile_id: user.feature_profile_id,
+      status: 'active',
+      expires_at: user.expires_at,
+      avatar_url: user.avatar_url,
     },
     token,
   };

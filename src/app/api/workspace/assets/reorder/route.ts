@@ -7,9 +7,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWorkspace, updateWorkspaceAssetOrder } from '@/lib/assets/workspace';
+import { getSession } from '@/lib/auth/session';
 
 export async function PATCH(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
     const body = await request.json();
     const { order } = body;
 
@@ -18,7 +22,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const tabId = request.headers.get('x-tab-id') || 'default';
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId);
+    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
 
     await updateWorkspaceAssetOrder(workspaceId, order);
 

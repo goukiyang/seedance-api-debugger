@@ -2,20 +2,22 @@
 
 import React from 'react';
 
+type ComposerStatusTone = 'hint' | 'progress' | 'ok' | 'error';
+
 interface Props {
-  blockingError: string | null;
+  message: string | null;
+  tone: ComposerStatusTone;
   usedRefs: string[];
   hasPrompt: boolean;
   hasAssets: boolean;
   hasBlockingUpload: boolean;
 }
 
-export function ComposerStatusLine({ blockingError, usedRefs, hasPrompt, hasAssets, hasBlockingUpload }: Props) {
-  // 严重错误
-  if (blockingError) {
+export function ComposerStatusLine({ message, tone, usedRefs, hasAssets }: Props) {
+  if (message) {
     return (
-      <div className="composer-status-error">
-        ⚠ {blockingError}
+      <div className={`composer-status composer-status-${tone}`}>
+        {tone === 'error' ? '⚠ ' : null}{message}
       </div>
     );
   }
@@ -36,7 +38,7 @@ export function ComposerStatusLine({ blockingError, usedRefs, hasPrompt, hasAsse
   }
 
   return (
-    <div className="composer-status-ok">
+    <div className="composer-status composer-status-ok">
       {items.flatMap((node, i) =>
         i > 0 ? [<span key={`sep-${i}`} className="text-white/25">|</span>, node] : [node]
       )}

@@ -1,34 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { login } from '@/lib/auth/session';
+import { setSessionCookie } from '@/lib/auth/session-cookie';
 
-const COOKIE_NAME = 'session';
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+function safeRedirectPath(value: unknown, fallback: string) {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  if (!trimmed || !trimmed.startsWith('/') || trimmed.startsWith('//')) return fallback;
+  return trimmed;
+}
+
+function loginErrorRedirect(request: NextRequest, code: string) {
+  const url = new URL('/login', request.url);
+  url.searchParams.set('error', code);
+  return new NextResponse(null, {
+    status: 303,
+    headers: { Location: `${url.pathname}${url.search}` },
+  });
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const contentType = request.headers.get('content-type') || '';
+    const isFormSubmit = contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data');
+    const body = isFormSubmit
+      ? Object.fromEntries(await request.formData())
+      : await request.json();
     const { identifier, password } = body;
 
     if (!identifier || !password) {
+      if (isFormSubmit) return loginErrorRedirect(request, 'missing');
       return NextResponse.json({ error: '账号和密码不能为空' }, { status: 400 });
     }
 
-    const result = await login(identifier, password);
+    const result = await login(String(identifier), String(password));
 
     if ('error' in result) {
+      if (isFormSubmit) return loginErrorRedirect(request, 'invalid');
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    const cookieStore = await cookies();
-    cookieStore.set(COOKIE_NAME, result.token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: COOKIE_MAX_AGE,
-      path: '/',
-    });
+    if (isFormSubmit) {
+      const fallback = '/generate';
+      const response = new NextResponse(null, {
+        status: 303,
+        headers: { Location: safeRedirectPath(body.next, fallback) },
+      });
+      return setSessionCookie(response, result.token);
+    }
 
-    return NextResponse.json({ user: result.user });
+    const response = NextResponse.json({ user: result.user });
+    return setSessionCookie(response, result.token);
   } catch (err) {
     console.error('[Login]', err);
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });

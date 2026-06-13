@@ -6,13 +6,23 @@ const PROTECTED_PREFIXES = [
   '/dashboard',
   '/generate',
   '/tasks',
-  '/videos',
   '/collections',
   '/templates',
   '/points',
   '/help',
   '/config',
 ];
+
+function forwardedOrigin(request: NextRequest) {
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+
+  if (forwardedHost) {
+    return `${forwardedProto || 'https'}://${forwardedHost}`;
+  }
+
+  return request.nextUrl.origin;
+}
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -22,10 +32,9 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (token) return NextResponse.next();
 
-  const url = request.nextUrl.clone();
-  url.pathname = '/login';
-  url.searchParams.set('next', pathname);
-  return NextResponse.redirect(url);
+  const loginUrl = new URL('/login', forwardedOrigin(request));
+  loginUrl.searchParams.set('next', `${pathname}${request.nextUrl.search}`);
+  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
@@ -34,7 +43,6 @@ export const config = {
     '/dashboard/:path*',
     '/generate/:path*',
     '/tasks/:path*',
-    '/videos/:path*',
     '/collections/:path*',
     '/templates/:path*',
     '/points/:path*',

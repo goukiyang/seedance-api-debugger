@@ -3,7 +3,7 @@
 /**
  * ModeSelector — 生成模式选择器组件
  * P0-2: 模式闭环
- * - 展示每个模式的说明、素材要求、图号逻辑
+ * - 展示每个模式的说明、素材要求、引用逻辑
  * - 切换模式时自动校验素材数量并给出反馈
  * - 不满足条件时显示警告，阻止提交
  */
@@ -23,7 +23,7 @@ const MODE_INFO: Record<GenerationMode, {
   subtitle: string;
  适用场景: string;
   素材要求: string;
-  图号逻辑: string;
+  引用逻辑: string;
   最小素材: number;
   icon: string;
 }> = {
@@ -32,7 +32,7 @@ const MODE_INFO: Record<GenerationMode, {
     subtitle: '多图作为风格、角色、logo、画面参考',
     适用场景: '上传多张图片作为整体参考，AI 根据所有参考图生成视频',
     素材要求: '1 张以上',
-    图号逻辑: '图1、图2、图3... 均作为参考素材',
+    引用逻辑: '@图片1、@图片2、@图片3... 均作为参考素材',
     最小素材: 1,
     icon: '🎯',
   },
@@ -41,7 +41,7 @@ const MODE_INFO: Record<GenerationMode, {
     subtitle: '指定开头和结尾画面',
     适用场景: '上传首帧和尾帧图，AI 补全中间过渡动画',
     素材要求: '至少 2 张',
-    图号逻辑: '图1 = 首帧（视频开头），图2 = 尾帧（视频结尾）',
+    引用逻辑: '@图片1 = 首帧（视频开头），@图片2 = 尾帧（视频结尾）',
     最小素材: 2,
     icon: '↔️',
   },
@@ -50,7 +50,7 @@ const MODE_INFO: Record<GenerationMode, {
     subtitle: '多张图按顺序推进',
     适用场景: '上传多张图，AI 按顺序生成图与图之间的过渡视频',
     素材要求: '2 张以上',
-    图号逻辑: '图1 → 图2 → 图3 → ... 按顺序推进',
+    引用逻辑: '@图片1 → @图片2 → @图片3 → ... 按顺序推进',
     最小素材: 3,
     icon: '🎬',
   },
@@ -100,7 +100,7 @@ export function ModeSelector({ value, onChange, assetCount }: Props) {
                     <div className="mt-2 text-xs text-gray-600 space-y-1">
                       <div><span className="text-gray-400">适用场景：</span>{m.适用场景}</div>
                       <div><span className="text-gray-400">素材要求：</span>{m.素材要求}</div>
-                      <div><span className="text-gray-400">图号逻辑：</span>{m.图号逻辑}</div>
+                      <div><span className="text-gray-400">引用逻辑：</span>{m.引用逻辑}</div>
                     </div>
                   )}
                 </div>
@@ -118,7 +118,7 @@ export function ModeSelector({ value, onChange, assetCount }: Props) {
               <span className="mode-feedback-icon">✅</span>
               <span>首尾帧模式已启用</span>
               <span className="text-gray-400 ml-1">
-                图1 将作为视频开头，图2 将作为视频结尾
+                @图片1 将作为视频开头，@图片2 将作为视频结尾
               </span>
             </>
           ) : (
@@ -140,7 +140,7 @@ export function ModeSelector({ value, onChange, assetCount }: Props) {
               <span className="mode-feedback-icon">✅</span>
               <span>智能多帧模式已启用</span>
               <span className="text-gray-400 ml-1">
-                图1 → 图2 → 图3 按顺序推进
+                @图片1 → @图片2 → @图片3 按顺序推进
               </span>
             </>
           ) : (

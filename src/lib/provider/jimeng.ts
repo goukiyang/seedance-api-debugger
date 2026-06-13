@@ -27,6 +27,55 @@ function maskKey(key: string): string {
   return `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
 }
 
+function pickString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+
+  return undefined;
+}
+
+function pickNumber(record: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function redactProviderResponseForLog(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactProviderResponseForLog(item));
+  }
+
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((acc, [key, current]) => {
+    const normalizedKey = key.toLowerCase();
+    if (
+      normalizedKey.includes('token') ||
+      normalizedKey.includes('secret') ||
+      normalizedKey.includes('signature') ||
+      normalizedKey.includes('authorization') ||
+      normalizedKey.includes('api_key')
+    ) {
+      acc[key] = '[redacted]';
+    } else if (normalizedKey.includes('url') && typeof current === 'string') {
+      acc[key] = maskVideoUrl(current);
+    } else {
+      acc[key] = redactProviderResponseForLog(current);
+    }
+    return acc;
+  }, {});
+}
+
 // ============================================================================
 // Provider Config
 // ============================================================================
@@ -228,8 +277,12 @@ export async function createVideoTask(
     model,
     content,
   };
+  const clientRequestId = input.clientRequestId || input.client_request_id;
 
   // 添加可选参数
+  if (clientRequestId) {
+    payload.clientRequestId = clientRequestId;
+  }
   if (input.duration) {
     payload.duration = input.duration;
   }
@@ -267,6 +320,7 @@ export async function createVideoTask(
   console.log(`Ratio:     ${input.ratio || 'default'}`);
   console.log(`Resolution: ${input.resolution || 'default'}`);
   console.log(`Seed:      ${input.seed ?? 'random'}`);
+  console.log(`ClientReq: ${clientRequestId || '(none)'}`);
   console.log(`Content:   ${content.length} items`);
   console.log(`API Key:   ${maskKey(SEEDANCE_API_KEY)}`);
   console.log('================================================\n');
@@ -358,7 +412,7 @@ export async function getVideoTaskStatus(
     }
 
     console.log(`[Status] HTTP Status: ${response.status}`);
-    console.log(`[Status] Response:`, JSON.stringify(data, null, 2));
+    console.log(`[Status] Response:`, JSON.stringify(redactProviderResponseForLog(data), null, 2));
 
     if (!response.ok) {
       throw new Error(`Get video task failed: ${response.status} ${JSON.stringify(data)}`);
@@ -388,6 +442,12 @@ export async function getVideoTaskStatus(
     const serviceTier = data.service_tier as string | undefined;
     const executionExpiresAfter = data.execution_expires_after as number | undefined;
     const usage = data.usage as unknown | undefined;
+    const actualCost = pickNumber(data, ['actual_cost', 'actualCost']);
+    const currencyOrCreditType = pickString(data, ['currency_or_credit_type', 'currencyOrCreditType', 'currency']);
+    const billingStatus = pickString(data, ['billing_status', 'billingStatus']);
+    const billingTime = pickNumber(data, ['billing_time', 'billingTime']);
+    const clientRequestId = pickString(data, ['clientRequestId', 'client_request_id', 'client_requestId']);
+    const providerTaskIdFromRaw = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']) || providerTaskId;
 
     // 状态日志
     if (localStatus === 'succeeded') {
@@ -399,6 +459,7 @@ export async function getVideoTaskStatus(
       console.log(`   Ratio:     ${ratio || '(none)'}`);
       console.log(`   Duration:  ${duration ?? 'N/A'}s`);
       console.log(`   FPS:       ${framesPerSecond ?? 'N/A'}\n`);
+      console.log(`   Billing:   ${actualCost ?? 'N/A'} ${currencyOrCreditType || ''} (${billingStatus || 'unknown'})\n`);
     } else if (localStatus === 'failed') {
       console.log(`\n❌ Step2 Complete: status = failed`);
       console.log(`   Error: ${errorMessage || 'Unknown error'}\n`);
@@ -407,7 +468,7 @@ export async function getVideoTaskStatus(
     }
 
     return {
-      provider_task_id: providerTaskId,
+      provider_task_id: providerTaskIdFromRaw,
       provider_status: officialStatus || 'unknown',
       local_status: localStatus,
       result_video_url: resultVideoUrl,
@@ -423,6 +484,11 @@ export async function getVideoTaskStatus(
       service_tier: serviceTier,
       execution_expires_after: executionExpiresAfter,
       usage: usage,
+      actual_cost: actualCost,
+      currency_or_credit_type: currencyOrCreditType,
+      billing_status: billingStatus,
+      billing_time: billingTime,
+      client_request_id: clientRequestId,
       raw: data,
     };
   } catch (error) {

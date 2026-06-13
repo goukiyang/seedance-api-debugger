@@ -13,12 +13,13 @@ import type { GenerationMode } from '@/types';
 export async function createCollection(
   name: string,
   workspaceId: string,
-  options?: { description?: string; visibility?: string }
+  options?: { description?: string; visibility?: string; ownerId?: string }
 ) {
+  const ownerId = options?.ownerId || 'default-user';
   const collection = await prisma.assetCollection.create({
     data: {
       id: uuidv4(),
-      owner_id: 'default-user',
+      owner_id: ownerId,
       name,
       description: options?.description,
       visibility: options?.visibility ?? 'private',
@@ -47,9 +48,9 @@ export async function createCollection(
   return collection;
 }
 
-export async function getCollections() {
+export async function getCollections(ownerId = 'default-user') {
   return prisma.assetCollection.findMany({
-    where: { owner_id: 'default-user' },
+    where: { owner_id: ownerId },
     include: {
       cover_asset: true,
       _count: { select: { items: true } },
@@ -58,9 +59,9 @@ export async function getCollections() {
   });
 }
 
-export async function getCollectionById(id: string) {
-  return prisma.assetCollection.findUnique({
-    where: { id },
+export async function getCollectionById(id: string, ownerId = 'default-user') {
+  return prisma.assetCollection.findFirst({
+    where: ownerId === 'default-user' ? { id } : { id, owner_id: ownerId },
     include: {
       items: {
         include: { asset: true },

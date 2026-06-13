@@ -2,31 +2,39 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import TopNav from './TopNav';
+import ComposerTopbar from './ComposerTopbar';
 import SideNav from './SideNav';
-import { shouldUseNavigationShell } from '@/lib/navigation';
+import FeedbackWidget from './FeedbackWidget';
+import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
 
 interface SessionUserSummary {
-  name: string;
-  username: string;
+  name: string | null;
+  username: string | null;
+  email: string | null;
+  avatar_url?: string | null;
   role: 'admin' | 'user';
 }
 
 interface CreditSummary {
   available: number;
+  frozen_credits: number;
+  monthly_used: number;
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [user, setUser] = useState<SessionUserSummary | null>(null);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
+  const [loadingUser, setLoadingUser] = useState(false);
 
   const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
+  const topbarOnlyShell = useMemo(() => shouldUseTopbarOnlyShell(pathname), [pathname]);
 
   useEffect(() => {
     if (!showShell) return;
 
     let cancelled = false;
+    setLoadingUser(true);
 
     fetch('/api/auth/me', { cache: 'no-store' })
       .then((response) => response.json())
@@ -41,6 +49,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => {
         if (!cancelled) {
           setUser(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingUser(false);
         }
       });
 
@@ -73,18 +86,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [showShell, user, pathname]);
 
   if (!showShell) {
-    return <>{children}</>;
+    return (
+      <>
+        {children}
+        <FeedbackWidget />
+      </>
+    );
   }
 
   return (
     <div className="shell-root">
-      <TopNav userName={user?.name || user?.username} availableCredits={credits?.available ?? null} />
-      <div className="shell-body">
-        <SideNav isAdmin={user?.role === 'admin'} />
-        <main className="shell-content">
+      <ComposerTopbar user={user} loadingUser={loadingUser} credits={credits} />
+      <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}`}>
+        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} />}
+        <main className={`shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`}>
           {children}
         </main>
       </div>
+      <FeedbackWidget />
     </div>
   );
 }

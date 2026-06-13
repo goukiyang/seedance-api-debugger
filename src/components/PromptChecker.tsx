@@ -3,7 +3,7 @@
 /**
  * PromptChecker — 提示词检测与编辑组件
  * P0-3: 提示词闭环
- * - 解析图号引用（图1/图2/图3）
+ * - 解析图片引用（@图片1/@图片 1，兼容旧格式 @图1/图1）
  * - 检测时间冲突（提示词里的秒数 vs 参数选择）
  * - 字数统计
  * - 保留编号格式（#泡泡升标008）
@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
+import { parseImageMentions } from '@/lib/prompt/mention';
 
 interface Props {
   value: string;
@@ -41,10 +42,8 @@ export interface CheckResult {
 export function checkPrompt(value: string, assetCount: number, paramDuration: number): CheckResult {
   const charCount = value.length;
 
-  // 解析图号引用：图1、图2、图3 等（支持中文数字备选）
-  const figureMatches = value.match(/图(\d+)/g) || [];
-  const unique = Array.from(new Set(figureMatches.map((m) => parseInt(m.replace('图', ''), 10))));
-  const referencedFigures = unique.sort((a, b) => a - b);
+  // 即梦官方参考格式是 @图片1 / @图片 1；兼容旧 prompt 中的 @图1 / 图1。
+  const referencedFigures = parseImageMentions(value);
   const maxReferenced = referencedFigures.length > 0 ? Math.max(...referencedFigures) : 0;
   const missingFigures = referencedFigures.filter((n) => n > assetCount);
   const maxMissing = missingFigures.length > 0 ? Math.max(...missingFigures) : 0;
@@ -121,7 +120,7 @@ export function PromptChecker({ value, onChange, assetCount, duration, onValidat
                       : 'bg-red-100 text-red-600'
                   }`}
                 >
-                  图{n}
+                  图片{n}
                 </span>
               ))}
             </span>
@@ -130,9 +129,9 @@ export function PromptChecker({ value, onChange, assetCount, duration, onValidat
           <span className={result.valid ? 'text-green-600' : 'text-red-500'}>
             {result.valid
               ? result.referencedFigures.length > 0
-                ? '✓ 图号引用正常'
-                : '✓ 未引用图号'
-              : `❌ 引用了不存在的图号`}
+                ? '✓ 图片引用正常'
+                : '✓ 未引用图片'
+              : `❌ 引用了不存在的图片`}
           </span>
 
           {result.durationConflict && (
@@ -176,13 +175,13 @@ export function PromptChecker({ value, onChange, assetCount, duration, onValidat
         className="form-textarea"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="描述你想要生成的视频内容...&#10;使用图1、图2引用上传的素材"
+        placeholder="描述你想要生成的视频内容...&#10;使用 @图片1、@图片2 引用上传的素材"
         rows={4}
       />
 
       {/* 提示词底部提示 */}
       <p className="form-hint">
-        使用 <strong>图1</strong>、<strong>图2</strong> 引用上传的素材。
+        使用 <strong>@图片1</strong>、<strong>@图片2</strong> 引用上传的素材。
         {result.durationConflict && (
           <span className="text-orange-500 ml-2">
             提示：提示词提到 {result.promptDuration} 秒，当前参数为 {result.paramDuration} 秒，可考虑统一

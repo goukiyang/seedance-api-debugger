@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import PageBanner from './PageBanner';
 
 interface PagePlaceholderProps {
   title: string;
@@ -13,10 +14,7 @@ export default function PagePlaceholder({
 }: PagePlaceholderProps) {
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">{title}</h1>
-        <p className="page-description">{description}</p>
-      </div>
+      <PageBanner title={title} description={description} />
 
       <div className="card placeholder-card">
         <div className="placeholder-meta">

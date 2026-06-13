@@ -15,7 +15,7 @@ export default async function AdminPlaceholderPage({
 }: AdminPlaceholderPageProps) {
   const user = await getSession();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (user.role !== 'admin') redirect('/generate');
 
   return (
     <PagePlaceholder

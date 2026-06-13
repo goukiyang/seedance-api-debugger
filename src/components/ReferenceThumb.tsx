@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 
 interface Props {
@@ -9,14 +9,24 @@ interface Props {
   uploadStatus?: UploadStatus;
   frameRole?: FrameRole;
   onRemove: (assetId: string) => void;
+  onReplace: (assetId: string) => void;
   onPreview: (url: string) => void;
 }
 
-export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameRole, onRemove, onPreview }: Props) {
+export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameRole, onRemove, onReplace, onPreview }: Props) {
   const src = asset.thumbnailUrl || asset.originalUrl;
+  const fallbackSrc = asset.thumbnailUrl && asset.originalUrl && asset.thumbnailUrl !== asset.originalUrl
+    ? asset.originalUrl
+    : null;
   const isUploading = uploadStatus === 'uploading';
   const isFailed = uploadStatus === 'failed';
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [imageSrc, setImageSrc] = useState(src);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageSrc(src);
+    setImageFailed(false);
+  }, [src]);
 
   return (
     <div className="ref-thumb">
@@ -24,14 +34,23 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       <button
         type="button"
         className="ref-thumb-img-btn"
-        onClick={() => src && onPreview(src)}
+        onClick={() => imageSrc && !imageFailed && onPreview(imageSrc)}
       >
-        {src ? (
+        {imageSrc && !imageFailed ? (
           <img
-            src={src}
+            src={imageSrc}
             alt={`图${index + 1}`}
             className="ref-thumb-img"
             loading="lazy"
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+            onError={() => {
+              if (fallbackSrc && imageSrc !== fallbackSrc) {
+                setImageSrc(fallbackSrc);
+                return;
+              }
+              setImageFailed(true);
+            }}
           />
         ) : (
           <div className="ref-thumb-placeholder" />
@@ -66,9 +85,27 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       {/* 删除按钮 */}
       <button
         type="button"
+        className="ref-thumb-replace"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onReplace(asset.assetId);
+        }}
+        title="替换"
+        aria-label={`替换图${index + 1}`}
+      >
+        ↺
+      </button>
+      <button
+        type="button"
         className="ref-thumb-remove"
-        onClick={() => onRemove(asset.assetId)}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove(asset.assetId);
+        }}
         title="移除"
+        aria-label={`移除图${index + 1}`}
       >
         ×
       </button>

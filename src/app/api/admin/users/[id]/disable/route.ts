@@ -9,6 +9,12 @@ type RouteContext = {
   };
 };
 
+function canUseAdminSession(user: { role: string; status: string; expires_at: Date | null }) {
+  return user.role === 'admin'
+    && user.status === 'active'
+    && (!user.expires_at || user.expires_at.getTime() > Date.now());
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   let admin: SessionUser;
   try {
@@ -18,8 +24,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const { id } = context.params;
+  if (id === admin.id) return errorJson('不能禁用当前登录账号', 400);
+
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return errorJson('用户不存在', 404);
+  if (user.status === 'deleted') return errorJson('用户不存在', 404);
+  if (canUseAdminSession(user)) {
+    const otherActiveAdminCount = await prisma.user.count({
+      where: {
+        role: 'admin',
+        status: 'active',
+        id: { not: id },
+        OR: [
+          { expires_at: null },
+          { expires_at: { gt: new Date() } },
+        ],
+      },
+    });
+    if (otherActiveAdminCount <= 0) return errorJson('不能禁用最后一个可用管理员账号', 400);
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id }, data: { status: 'disabled' } });

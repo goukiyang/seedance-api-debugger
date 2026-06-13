@@ -6,10 +6,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
-    const url = new URL(request.url);
-    const includeDeleted = url.searchParams.get('includeDeleted') === 'true';
+    const includeDeleted = request.nextUrl.searchParams.get('includeDeleted') === 'true';
 
     const assets = await seedanceAssetRepository.list(includeDeleted);
     return NextResponse.json({ assets, count: assets.length });
