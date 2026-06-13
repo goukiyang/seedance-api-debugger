@@ -77,6 +77,7 @@ export async function POST(
         last_frame_url: true,
         frame_image_urls: true,
         project_id: true,
+        video_card_id: true,
         params_json: true,
       },
     });
@@ -92,6 +93,13 @@ export async function POST(
         return NextResponse.json({ error: '无权重试', message: error.message }, { status: error.status });
       }
       throw error;
+    }
+
+    if (!originalTask.video_card_id) {
+      return NextResponse.json(
+        { error: 'VIDEO_CARD_REQUIRED', message: '历史任务尚未归档到视频卡，不能直接重试' },
+        { status: 400 },
+      );
     }
 
     let retryProject;
@@ -154,6 +162,7 @@ export async function POST(
       watermark: originalTask.watermark ?? asBoolean(paramsJson.watermark, false),
       resolution_approval_confirmed: asBoolean(paramsJson.resolutionApprovalConfirmed, false),
       project_id: retryProject.id,
+      video_card_id: originalTask.video_card_id,
       reference_image_urls: uniquePreserveOrder(preferredReferenceImageUrls),
       reference_video_urls: parseJsonArray(originalTask.reference_video_urls),
       reference_audio_urls: parseJsonArray(originalTask.reference_audio_urls),

@@ -6,6 +6,7 @@ const ALLOWED_RETURN_PATHS = [
   '/admin',
   '/admin/outputs',
   '/projects',
+  '/video-cards',
 ] as const;
 
 function withoutQueryOrHash(value: string) {
@@ -36,6 +37,7 @@ export function taskReturnLabel(returnTo: string | null | undefined) {
   if (safeReturnTo.startsWith('/admin')) return '返回后台';
   if (safeReturnTo.startsWith('/generate')) return '返回生成页';
   if (safeReturnTo.startsWith('/projects')) return '返回项目';
+  if (safeReturnTo.startsWith('/video-cards')) return '返回视频卡';
   return '返回任务';
 }
 

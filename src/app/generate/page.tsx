@@ -24,6 +24,8 @@ interface CreateResponse {
   provider_task_id: string;
   status: string;
   created_at: string;
+  project_id?: string;
+  video_card_id?: string;
   prompt_rendered?: string;
   estimated_cost?: number;
   frozen_cost?: number;
@@ -42,6 +44,9 @@ interface TaskItem {
   provider_final_amount_minor: number | null;
   provider_official_amount_micros: number | null;
   provider_final_amount_micros: number | null;
+  project_id?: string | null;
+  video_card_id?: string | null;
+  video_card?: { id: string; title: string; objective: string | null; status: string; project_id?: string } | null;
   created_at: string;
 }
 
@@ -70,6 +75,8 @@ interface PolledTask {
   provider_final_amount_minor: number | null;
   provider_official_amount_micros: number | null;
   provider_final_amount_micros: number | null;
+  video_card_id?: string | null;
+  video_card?: { id: string; title: string; objective: string | null; status: string; project_id?: string } | null;
 }
 
 interface CreditSummary {
@@ -107,6 +114,17 @@ interface ReuseDraft {
   watermark: boolean;
   resolutionApprovalConfirmed?: boolean;
   projectId: string | null;
+  videoCardId: string | null;
+}
+
+interface VideoCardOption {
+  id: string;
+  project_id: string;
+  title: string;
+  objective: string | null;
+  status: string;
+  is_fallback?: boolean;
+  summary?: { task_count: number; charged_credits: number } | null;
 }
 
 type GeneratePageUser = AccountMenuUser & { id: string };
@@ -320,6 +338,13 @@ export default function GeneratePage() {
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(null);
+  const [videoCards, setVideoCards] = useState<VideoCardOption[]>([]);
+  const [selectedVideoCardId, setSelectedVideoCardId] = useState('');
+  const [loadingVideoCards, setLoadingVideoCards] = useState(false);
+  const [videoCardTitle, setVideoCardTitle] = useState('');
+  const [videoCardObjective, setVideoCardObjective] = useState('');
+  const [videoCardBusy, setVideoCardBusy] = useState(false);
+  const [videoCardMessage, setVideoCardMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [reuseDraft, setReuseDraft] = useState<ReuseDraft | null>(null);
   const [reuseMessage, setReuseMessage] = useState('');
   const [reuseLoading, setReuseLoading] = useState(false);
@@ -454,6 +479,51 @@ export default function GeneratePage() {
     setProjectRemovalTarget(null);
   }, [selectedProjectId]);
 
+  const loadVideoCards = useCallback(async (
+    projectId: string,
+    options: { preferredVideoCardId?: string | null; keepSelected?: boolean } = {},
+  ) => {
+    if (!projectId) {
+      setVideoCards([]);
+      setSelectedVideoCardId('');
+      return;
+    }
+    setLoadingVideoCards(true);
+    setVideoCardMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/video-cards`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '视频卡列表加载失败');
+      const list: VideoCardOption[] = data.video_cards || [];
+      setVideoCards(list);
+      const requestedVideoCardId = new URLSearchParams(window.location.search).get('video_card_id');
+      const preferredId = options.preferredVideoCardId || requestedVideoCardId || '';
+      setSelectedVideoCardId((current) => {
+        const preferred = preferredId ? list.find((card) => card.id === preferredId) : null;
+        if (preferred) return preferred.id;
+        const currentCard = options.keepSelected !== false && current
+          ? list.find((card) => card.id === current)
+          : null;
+        if (currentCard) return currentCard.id;
+        const active = list.find((card) => card.status !== 'sealed' && card.status !== 'archived');
+        return (active || list[0])?.id || '';
+      });
+    } catch (err) {
+      setVideoCards([]);
+      setSelectedVideoCardId('');
+      setVideoCardMessage({ type: 'error', text: err instanceof Error ? err.message : '视频卡列表加载失败' });
+    } finally {
+      setLoadingVideoCards(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadVideoCards(selectedProjectId, {
+      preferredVideoCardId: reuseDraft?.videoCardId || null,
+      keepSelected: true,
+    });
+  }, [loadVideoCards, selectedProjectId, reuseDraft?.videoCardId]);
+
   useEffect(() => {
     if (appliedPreferenceProjectRef.current) return;
     if (!generationDefaults?.projectId || projects.length === 0) return;
@@ -522,6 +592,46 @@ export default function GeneratePage() {
       setProjectBusy(false);
     }
   }, [loadProjects, projectName]);
+
+  const handleCreateVideoCard = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = videoCardTitle.trim();
+    if (!selectedProjectId) {
+      setVideoCardMessage({ type: 'error', text: '请先选择项目' });
+      return;
+    }
+    if (!title) {
+      setVideoCardMessage({ type: 'error', text: '视频卡标题不能为空' });
+      return;
+    }
+
+    setVideoCardBusy(true);
+    setVideoCardMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${selectedProjectId}/video-cards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          objective: videoCardObjective.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '创建视频卡失败');
+      setVideoCardTitle('');
+      setVideoCardObjective('');
+      setSelectedVideoCardId(data.video_card.id);
+      setVideoCardMessage({ type: 'success', text: `已创建视频卡「${data.video_card.title}」` });
+      await loadVideoCards(selectedProjectId, {
+        preferredVideoCardId: data.video_card.id,
+        keepSelected: false,
+      });
+    } catch (err) {
+      setVideoCardMessage({ type: 'error', text: err instanceof Error ? err.message : '创建视频卡失败' });
+    } finally {
+      setVideoCardBusy(false);
+    }
+  }, [loadVideoCards, selectedProjectId, videoCardObjective, videoCardTitle]);
 
   const handleProjectRemoval = useCallback(async (project: ProjectOption) => {
     const action = projectRemovalAction(project);
@@ -636,6 +746,7 @@ export default function GeneratePage() {
         watermark: Boolean(data.draft.watermark),
         resolutionApprovalConfirmed: asBoolean(data.draft.resolution_approval_confirmed, false),
         projectId: data.draft.project_id || null,
+        videoCardId: data.draft.video_card_id || null,
       });
       const skipped = data.skipped_references || 0;
       const restored = data.restored_references || 0;
@@ -901,6 +1012,18 @@ export default function GeneratePage() {
     setError(null);
     setResult(null);
 
+    const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
+    if (!selectedProjectId || !selectedVideoCard) {
+      setError('请先选择项目和视频卡');
+      setSubmitting(false);
+      return;
+    }
+    if (selectedVideoCard.status === 'sealed' || selectedVideoCard.status === 'archived') {
+      setError('当前视频卡已封板或归档，不能继续生成');
+      setSubmitting(false);
+      return;
+    }
+
     const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     try {
@@ -922,7 +1045,8 @@ export default function GeneratePage() {
           watermark: params.watermark,
           resolution_approval_confirmed: params.resolutionApprovalConfirmed,
           idempotency_key: idempotencyKey,
-          project_id: selectedProjectId || undefined,
+          project_id: selectedProjectId,
+          video_card_id: selectedVideoCard.id,
           reference_image_ids: params.referenceImageIds || [],
         }),
       });
@@ -954,6 +1078,15 @@ export default function GeneratePage() {
           provider_final_amount_minor: null,
           provider_official_amount_micros: null,
           provider_final_amount_micros: null,
+          project_id: data.project_id || selectedProjectId,
+          video_card_id: data.video_card_id || selectedVideoCard.id,
+          video_card: {
+            id: selectedVideoCard.id,
+            title: selectedVideoCard.title,
+            objective: selectedVideoCard.objective,
+            status: selectedVideoCard.status,
+            project_id: selectedVideoCard.project_id,
+          },
           created_at: data.created_at,
         },
         ...current.filter((task) => task.id !== data.id),
@@ -970,7 +1103,7 @@ export default function GeneratePage() {
     } finally {
       setSubmitting(false);
     }
-  }, [saveGenerationDefaults, selectedProjectId]);
+  }, [saveGenerationDefaults, selectedProjectId, selectedVideoCardId, videoCards]);
 
   // ============================================================================
   // Collection handlers
@@ -1054,6 +1187,7 @@ export default function GeneratePage() {
   const selectedProjectMeta = selectedProject
     ? projectMetaLabel(selectedProject)
     : '新建一个项目后即可保存任务、成本和结果。';
+  const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
 
   // ============================================================================
@@ -1286,12 +1420,86 @@ export default function GeneratePage() {
             </div>
           </div>
 
-          {projectMessage && (
-            <div className={`composer-project-message ${projectMessage.type}`}>
-              {projectMessage.text}
-            </div>
-          )}
+        {projectMessage && (
+          <div className={`composer-project-message ${projectMessage.type}`}>
+            {projectMessage.text}
+          </div>
+        )}
+      </div>
+
+      <div className="composer-video-card-panel">
+        <div className="composer-project-row">
+          <div className="composer-project-copy">
+            <span className="composer-project-label">视频卡</span>
+            <span className="composer-project-help">本次生成必须归入一张视频卡，后续成本、最佳版和最终版都按卡追踪。</span>
+          </div>
+          <div className="composer-video-card-controls">
+            <select
+              className="composer-project-input"
+              value={selectedVideoCardId}
+              onChange={(event) => setSelectedVideoCardId(event.target.value)}
+              disabled={!selectedProjectId || loadingVideoCards || videoCardBusy}
+            >
+              <option value="">
+                {loadingVideoCards ? '正在加载视频卡...' : '选择视频卡'}
+              </option>
+              {videoCards.map((card) => (
+                <option key={card.id} value={card.id} disabled={card.status === 'sealed' || card.status === 'archived'}>
+                  {card.title}{card.is_fallback ? '（历史归档）' : ''}{card.summary ? ` · ${card.summary.task_count} 次` : ''}
+                </option>
+              ))}
+            </select>
+            {selectedVideoCard && (
+              <Link className="composer-video-card-link" href={`/video-cards/${selectedVideoCard.id}`}>
+                查看视频卡
+              </Link>
+            )}
+          </div>
         </div>
+
+        {selectedVideoCard && (
+          <div className="composer-video-card-current">
+            <strong>{selectedVideoCard.title}</strong>
+            <span>{selectedVideoCard.objective || '未填写视频目标'}</span>
+          </div>
+        )}
+
+        {selectedProjectId && videoCards.length === 0 && !loadingVideoCards && (
+          <div className="composer-video-card-empty">当前项目还没有视频卡。创建后才能提交生成。</div>
+        )}
+
+        <form className="composer-video-card-create" onSubmit={handleCreateVideoCard}>
+          <input
+            className="composer-project-input"
+            value={videoCardTitle}
+            onChange={(event) => setVideoCardTitle(event.target.value)}
+            placeholder="新视频卡标题"
+            maxLength={80}
+            disabled={!selectedProjectId || videoCardBusy}
+          />
+          <input
+            className="composer-project-input"
+            value={videoCardObjective}
+            onChange={(event) => setVideoCardObjective(event.target.value)}
+            placeholder="视频目标，可选"
+            maxLength={160}
+            disabled={!selectedProjectId || videoCardBusy}
+          />
+          <button
+            className="composer-project-btn composer-project-btn-primary"
+            type="submit"
+            disabled={!selectedProjectId || videoCardBusy || !videoCardTitle.trim()}
+          >
+            {videoCardBusy ? '创建中...' : '创建视频卡'}
+          </button>
+        </form>
+
+        {videoCardMessage && (
+          <div className={`composer-project-message ${videoCardMessage.type}`}>
+            {videoCardMessage.text}
+          </div>
+        )}
+      </div>
 
         {reuseMessage && (
           <div className={`composer-prefill-notice ${reuseLoading ? 'is-loading' : ''}`}>
@@ -1342,6 +1550,9 @@ export default function GeneratePage() {
                             <span className="composer-task-card-prompt-text">
                               {truncatePrompt(task.prompt)}
                             </span>
+                          </div>
+                          <div className="composer-task-card-video-card">
+                            {task.video_card ? task.video_card.title : '历史未归档视频卡'}
                           </div>
                           <div className="composer-task-card-meta">
                             {recentTaskChargeText && (

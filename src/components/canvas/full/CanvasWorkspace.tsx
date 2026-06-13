@@ -148,6 +148,15 @@ interface ProjectOption {
   _count?: { tasks?: number; reference_albums?: number; members?: number };
 }
 
+interface VideoCardOption {
+  id: string;
+  project_id: string;
+  title: string;
+  objective: string | null;
+  status: string;
+  is_fallback?: boolean;
+}
+
 interface CanvasSummary {
   id: string;
   title: string;
@@ -427,6 +436,7 @@ function buildTaskPayload(
   syncedNodes: SeedanceCanvasNode[],
   nodeId: string,
   projectId: string,
+  videoCardId: string,
 ) {
   if (preview.provider !== 'volcengine-ark') {
     throw new Error('Wan 2.7 预览已迁入，但站内正式任务链路目前只接 Seedance 2.0 / Fast。');
@@ -465,6 +475,7 @@ function buildTaskPayload(
   const basePayload = {
     prompt: preview.prompt,
     project_id: projectId,
+    video_card_id: videoCardId,
     ratio: preview.aspectRatio,
     duration: Math.max(4, preview.durationSec),
     resolution: normalizeResolution(preview.quality),
@@ -509,6 +520,9 @@ function CanvasWorkspace() {
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [videoCards, setVideoCards] = useState<VideoCardOption[]>([]);
+  const [selectedVideoCardId, setSelectedVideoCardId] = useState('');
+  const [loadingVideoCards, setLoadingVideoCards] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
@@ -834,6 +848,41 @@ function CanvasWorkspace() {
   }, [refreshCanvasList, selectedProjectId]);
 
   useEffect(() => {
+    if (!selectedProjectId) {
+      setVideoCards([]);
+      setSelectedVideoCardId('');
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingVideoCards(true);
+    fetch(apiUrl(`/api/projects/${encodeURIComponent(selectedProjectId)}/video-cards`), { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('视频卡列表加载失败')))
+      .then((data) => {
+        if (cancelled) return;
+        const list: VideoCardOption[] = data.video_cards || [];
+        setVideoCards(list);
+        setSelectedVideoCardId((current) => {
+          if (current && list.some((card) => card.id === current)) return current;
+          const active = list.find((card) => card.status !== 'sealed' && card.status !== 'archived');
+          return (active || list[0])?.id || '';
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setVideoCards([]);
+        setSelectedVideoCardId('');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingVideoCards(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId]);
+
+  useEffect(() => {
     if (!currentCanvasId) {
       window.localStorage.removeItem(CANVAS_STORAGE_KEY);
       return;
@@ -995,6 +1044,10 @@ function CanvasWorkspace() {
       patchGenerationData(nodeId, { status: 'failed', generationNotice: '请先选择当前项目。' });
       return;
     }
+    if (!selectedVideoCardId) {
+      patchGenerationData(nodeId, { status: 'failed', generationNotice: '请先选择当前视频卡。新生成任务必须归档到视频卡。' });
+      return;
+    }
 
     patchGenerationData(nodeId, {
       status: 'generating',
@@ -1004,7 +1057,7 @@ function CanvasWorkspace() {
     });
 
     try {
-      const { payload, syncWorkspaceImageIds } = buildTaskPayload(nextPreview, syncedNodes, nodeId, selectedProjectId);
+      const { payload, syncWorkspaceImageIds } = buildTaskPayload(nextPreview, syncedNodes, nodeId, selectedProjectId, selectedVideoCardId);
       await addImageAssetsToWorkspace(syncWorkspaceImageIds);
 
       const createResponse = await fetch(apiUrl('/api/tasks/create'), {
@@ -1075,7 +1128,7 @@ function CanvasWorkspace() {
         generationNotice: error instanceof Error ? error.message : String(error),
       });
     }
-  }, [currentCanvasId, edges, nodes, patchGenerationData, persistGenerationResult, selectedProjectId]);
+  }, [currentCanvasId, edges, nodes, patchGenerationData, persistGenerationResult, selectedProjectId, selectedVideoCardId]);
 
   const handleDeleteNode = useCallback(
     (nodeId: string) => {
@@ -1655,6 +1708,33 @@ function CanvasWorkspace() {
                 <span>{selectedProjectRoleLabel}</span>
                 <span>{selectedProjectTaskCount} 任务</span>
                 <span>{selectedProjectAlbumCount} 图集</span>
+              </div>
+            )}
+
+            {selectedProject && (
+              <div className="canvas-project-video-card">
+                <label className="muted tiny" htmlFor="canvas-video-card-select">当前视频卡</label>
+                <select
+                  id="canvas-video-card-select"
+                  className="canvas-select canvas-project-select"
+                  value={selectedVideoCardId}
+                  onChange={(event) => setSelectedVideoCardId(event.target.value)}
+                  disabled={loadingVideoCards}
+                >
+                  <option value="">{loadingVideoCards ? '正在加载视频卡...' : '选择视频卡'}</option>
+                  {videoCards.map((card) => (
+                    <option key={card.id} value={card.id} disabled={card.status === 'sealed' || card.status === 'archived'}>
+                      {card.title}{card.is_fallback ? '（历史归档）' : ''}
+                    </option>
+                  ))}
+                </select>
+                {selectedVideoCardId ? (
+                  <Link className="canvas-project-action canvas-project-action-link" href={`/video-cards/${encodeURIComponent(selectedVideoCardId)}`}>
+                    查看视频卡
+                  </Link>
+                ) : (
+                  <span className="muted tiny">没有视频卡时不能创建正式任务。</span>
+                )}
               </div>
             )}
 

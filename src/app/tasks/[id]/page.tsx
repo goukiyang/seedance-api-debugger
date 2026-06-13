@@ -60,6 +60,8 @@ interface VideoTask {
   error_message: string | null;
   project_id: string | null;
   project?: { id: string; name: string; type: string } | null;
+  video_card_id: string | null;
+  video_card?: { id: string; title: string; objective: string | null; status: string; project_id: string } | null;
   owner?: DisplayUser | null;
   user?: DisplayUser | null;
   submitted_user?: DisplayUser | null;
@@ -1182,6 +1184,11 @@ export default function TaskDetailPage() {
   const taskCompletedTime = formatTaskTime(task.completed_at || task.updated_at);
   const taskCompletedTimePrefix = task.completed_at ? '生成于' : '更新于';
   const taskCompletedExactLabel = task.completed_at ? '精确时间' : '更新时间';
+  const reuseHref = `/generate?reuse_task_id=${encodeURIComponent(task.id)}${
+    task.project_id ? `&project_id=${encodeURIComponent(task.project_id)}` : ''
+  }${
+    task.video_card_id ? `&video_card_id=${encodeURIComponent(task.video_card_id)}` : ''
+  }`;
   const taskCreditText = task.actual_cost !== null && task.actual_cost !== undefined
     ? formatCreditPoints(task.actual_cost)
     : task.frozen_cost !== null && task.frozen_cost !== undefined
@@ -1262,7 +1269,7 @@ export default function TaskDetailPage() {
                 </div>
                 <div className="task-action-row task-primary-action">
                   {resultPrimaryAction === 'reuse' && (
-                    <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
+                    <Link href={reuseHref} className="btn btn-primary">
                       <RotateCcw size={16} aria-hidden="true" />
                       复用输入
                     </Link>
@@ -1292,6 +1299,11 @@ export default function TaskDetailPage() {
                 <UserIdentityBadge user={taskOwner} subtitle="生成者" />
                 <div className="task-result-origin-meta">
                   <span>项目：{task.project?.name || '未归属项目'}</span>
+                  <span>
+                    视频卡：{task.video_card ? (
+                      <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                    ) : '历史未归档'}
+                  </span>
                   <span>来源：{taskSourceText}</span>
                   {task.source_request_id && <span>请求：{shortId(task.source_request_id, 14)}</span>}
                 </div>
@@ -1376,7 +1388,7 @@ export default function TaskDetailPage() {
                   </button>
                 )}
                 {resultPrimaryAction !== 'reuse' && (
-                  <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-secondary">
+                  <Link href={reuseHref} className="btn btn-secondary">
                     <RotateCcw size={16} aria-hidden="true" />
                     复用输入
                   </Link>
@@ -1452,6 +1464,14 @@ export default function TaskDetailPage() {
                 <div><span>点数扣除</span><strong>{taskCreditText}</strong></div>
                 <div><span>视频保存</span><strong>{resultStorageText}</strong></div>
                 <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
+                <div>
+                  <span>视频卡</span>
+                  <strong>
+                    {task.video_card ? (
+                      <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                    ) : '历史未归档'}
+                  </strong>
+                </div>
                 <div><span>输入</span><strong>{inputChips.join(' · ') || '无参数记录'}</strong></div>
                 <div>
                   <span>{taskCompletedExactLabel}</span>
@@ -1493,7 +1513,7 @@ export default function TaskDetailPage() {
                     {promptCopied ? '已复制' : '复制提示词'}
                   </button>
                 )}
-                <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-secondary">
+                <Link href={reuseHref} className="btn btn-secondary">
                   <RotateCcw size={16} aria-hidden="true" />
                   复用输入
                 </Link>
@@ -1662,6 +1682,14 @@ export default function TaskDetailPage() {
               <div><span>完成时间</span><strong>{formatTaskTime(task.completed_at).absolute}</strong></div>
               <div><span>视频来源</span><strong>{resultStorageText}</strong></div>
               <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
+              <div>
+                <span>视频卡</span>
+                <strong>
+                  {task.video_card ? (
+                    <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                  ) : '历史未归档'}
+                </strong>
+              </div>
             </div>
 
             <div className="task-param-grid task-billing-grid">

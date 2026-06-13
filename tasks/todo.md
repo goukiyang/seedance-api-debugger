@@ -3159,3 +3159,109 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - 已验证：本地 3100 dev server 覆盖开发 session secret 后，`/generate` 输入 `@` 自动弹窗；第一项为“创建主体”；当前 5 张素材显示缩略图候选；键盘选择插入 `@图片1` 到原光标位置；图集来源选择已在工作台图片后插入 `@图片1`；历史图片入口可打开；放大编辑框支持 `@`；390px 移动端无横向溢出。
 - 已验证：`/generate/canvas` 新建生成卡后输入 `@` 仍显示原有“先把图片卡连到这张生成卡，才能 @ 选择。”空状态，画布 prompt 编辑未退化。
 - 未执行：未做真实付费生成；未为了验收新增历史图片到 workspace；未读取 `.env`。
+
+---
+
+# V1.2 P0 视频卡闭环总控 Todo
+
+更新时间：2026-06-13
+
+目标：按 `/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md` 第 44、45、47 节，先落地第一批 P0：项目下不再直接平铺生成结果，所有新生成必须归属到视频卡，项目页以视频卡为主视图，视频卡详情可管理该卡下的生成记录、再抽一次和成本聚合。
+
+## 当前总控判断
+
+- 第一批执行范围只覆盖 P0 视频卡闭环，不把飞书同步、方向分支、完整审批中心、复盘知识库和复杂预算预测混进本批。
+- 当前代码已有 `Project`、`ProjectMember`、`VideoTask.project_id`、个人点数冻结/结算、官方成本账本和项目详情页基础能力。
+- 当前代码缺少 `VideoCard`、`VideoTask.video_card_id`、视频卡 API、视频卡详情页、生成页视频卡选择和历史任务兜底归档。
+- 用户已明确授权总控 Agent 自动拆包、派发子 Agent、合并结果并最终验证，本轮不再等待逐条派任务。
+
+## 子 Agent 分工
+
+- [x] 后端数据/API 调研：Agent `019ebf42-f9fd-7d02-b57c-c58b487656c9`，负责 schema、权限、API、账本统计建议。
+- [x] 项目页/视频卡页 UI 调研：Agent `019ebf43-2447-7631-aa1b-1232dbb11def`，负责项目详情页、视频卡详情页和 UI 状态建议。
+- [x] 生成页/再抽一次链路调研：Agent `019ebf43-4ee0-7c62-8c92-1f6894646795`，负责生成提交字段、URL query、最近任务和复用链路建议。
+- [x] 迁移/验证/上线闭环调研：Agent `019ebf43-7cfa-7781-8ffc-7cc1c2f93200`，负责 SQLite 备份、Prisma Client、构建和 sd2 线上验证顺序。
+
+## 任务包与依赖
+
+- [x] Batch 0：总控调研与计划落地
+  - 读取需求文档第 44、45、47 节。
+  - 检查 `git status` 并创建隔离分支 `codex/video-card-p0-closure`。
+  - 派发 4 个并行只读调研子 Agent。
+  - 追加本总控计划到 `tasks/todo.md`。
+- [x] Batch 1：数据结构与权限 helper
+  - 修改 `prisma/schema.prisma`：新增 `VideoCard`，给 `VideoTask` 增加 `video_card_id`、版本角色字段和关系。
+  - 新增或扩展视频卡权限 helper，复用项目权限，不允许跨项目绑定。
+  - 新增视频卡聚合 helper，统一任务数、成功数、失败数、点数和官方成本统计。
+- [x] Batch 2：视频卡 API
+  - 新增 `GET/POST /api/projects/[id]/video-cards`。
+  - 新增 `GET/PATCH /api/video-cards/[id]`。
+  - 新增 `GET /api/video-cards/[id]/tasks`。
+  - API 返回视频卡聚合、当前最佳和最终版摘要。
+- [x] Batch 3：历史数据兜底归档
+  - 编写可重复执行的 backfill 脚本，为已有项目任务创建兜底视频卡并绑定 `video_card_id`。
+  - 默认先 dry-run，再在本地备份 SQLite 后执行。
+  - 保持 `project_id`、`CreditLedger`、`CostLedger` 原始账务不变。
+- [x] Batch 4：项目详情页改造
+  - `src/app/api/projects/[id]/route.ts` 返回视频卡列表和聚合。
+  - `src/app/projects/[id]/page.tsx` 默认展示视频卡列表，原“生成任务”降级为二级调试区。
+  - 新增“创建视频卡”和“在此卡生成”入口。
+- [x] Batch 5：视频卡详情页 / 工作台
+  - 新增 `/video-cards/[id]` 页面。
+  - 展示视频卡基础信息、生成记录、当前最佳、最终版、成本摘要。
+  - 提供“再抽一次”“标记候选”“标记当前最佳”“标记最终版”“封板”操作。
+- [x] Batch 6：生成页绑定视频卡
+  - `src/app/generate/page.tsx` 在选择项目后必须选择视频卡；项目没有视频卡时允许快速创建。
+  - 支持 `?project_id=` 和 `?video_card_id=` 进入生成页。
+  - `src/app/api/tasks/create/route.ts` 校验 `video_card_id` 属于当前项目并写入任务。
+  - 最近任务、任务详情和列表接口返回视频卡归属。
+- [x] Batch 7：复用 / 再抽一次归属
+  - `src/app/api/tasks/[id]/reuse/route.ts` 返回原任务 `video_card_id`。
+  - 从视频卡详情页或最近任务复用时默认归入当前视频卡。
+  - 封板视频卡默认阻止继续生成。
+- [ ] Batch 8：验证、提交、上线闭环
+  - 本地验证：Prisma Client、类型检查、lint、build、关键 API smoke。
+  - 数据验证：历史任务均有 `video_card_id`，新生成接口无卡拒绝，有卡通过到创建前校验阶段。
+  - Git：聚焦提交、推送分支、创建 rollback tag、验证远端可见。
+  - 线上：执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并公网验证页面/API/静态资源。
+
+## 文件冲突控制
+
+- `prisma/schema.prisma` 只由主线程修改，避免 schema 冲突。
+- `src/app/api/tasks/create/route.ts` 和 `src/app/generate/page.tsx` 涉及真实付费生成链路，主线程合并子 Agent 建议后集中修改。
+- 项目页和视频卡详情页可在 schema/API 稳定后再并行或连续修改。
+- 迁移脚本不直接改生产数据；先 dry-run 和备份，再执行本地/线上所需步骤。
+
+## 停止条件
+
+- 不自动跑真实付费生成任务，除非用户后续明确授权。
+- 如果 Prisma 迁移或 backfill 发现无法无损处理历史数据，停止并先输出数据风险。
+- 如果构建、类型检查或关键 API smoke 失败，不提交、不推送、不上线。
+- 如果线上 `sd2` build/restart/status 或公网验证失败，不汇报完成，先修复或明确阻塞。
+
+## Git Plan
+
+- 当前开发分支：`codex/video-card-p0-closure`。
+- base：`codex/minimal-feedback-loop` 当前远端同步状态。
+- 提交分组建议：
+  - 提交 1：schema、权限 helper、聚合 helper、backfill 脚本。
+  - 提交 2：视频卡 API。
+  - 提交 3：项目页和视频卡详情页。
+  - 提交 4：生成页绑定、任务创建校验、复用链路。
+  - 提交 5：验证修复、经验记录和版本登记。
+- 稳定回退点：完成验证后创建 `rollback/2026-06-13-video-card-p0` 并推送。
+
+## Review - 2026-06-13 本地实现与验证
+
+- 已实现 Batch 1：新增 `VideoCard` schema、`VideoTask.video_card_id`、版本角色字段、迁移 SQL、视频卡权限 helper 和视频卡聚合 helper。
+- 已实现 Batch 2：新增项目视频卡列表/创建 API、视频卡详情/PATCH API、视频卡任务列表 API。
+- 已实现 Batch 3：新增 `scripts/backfill-video-cards.ts`，默认 dry-run；本地 SQLite 已先备份到 `/Volumes/Data/Backups/video-api-debugger/dev-before-video-cards-20260613-130750.db`，再执行迁移和 `--apply`。
+- 已验证 Batch 3：本地创建 22 张兜底视频卡，迁移 124 个历史任务；`missing_card=0`、`cross_project=0`，`CreditLedger` 和 `CostLedger` 计数/汇总保持不变。
+- 已实现 Batch 4：项目详情 API 返回 `video_cards` 聚合；项目详情页主视图展示视频卡，原生成任务表降级为“历史 / 调试任务”。
+- 已实现 Batch 5：新增 `/video-cards/[id]` 工作台，展示基础信息、成本摘要、生成记录，并支持标记当前最佳、最终版和封板。
+- 已实现 Batch 6：标准生成页支持选择/快速创建视频卡；提交 `/api/tasks/create` 必须校验并写入 `video_card_id`；最近任务显示视频卡归属。
+- 已实现 Batch 6 补充：画布生成页也加载并传递 `video_card_id`，无视频卡时不发起正式生成。
+- 已实现 Batch 7：复用接口返回原任务 `video_card_id`；任务详情复用链接带 `project_id/video_card_id`；失败重试继承原视频卡，历史未归档任务会被明确拒绝。
+- 已验证：`npx prisma validate` 通过；`npm run db:generate` 通过；`npx tsc --noEmit --pretty false` 通过；`npm run lint` 通过，剩余为既有 `<img>` 和 hook warning；`npm run build` 通过，并生成 `/video-cards/[id]` 与新增 API routes。
+- 未执行：未跑真实付费生成任务。
+- 待完成 Batch 8：Git push、rollback tag、线上 `sd2` build/restart/status、公网验证和版本登记。

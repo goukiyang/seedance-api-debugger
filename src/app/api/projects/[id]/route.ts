@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProject, assertCanManageProjectMembers, assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
+import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,25 @@ function buildCostTotals(
   }
 
   return Array.from(totals.values()).sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+function serializeTaskPreview(task: null | {
+  id: string;
+  prompt: string;
+  local_status: string;
+  local_video_path: string | null;
+  result_video_url: string | null;
+  created_at: Date;
+}) {
+  if (!task) return null;
+  return {
+    id: task.id,
+    prompt: task.prompt,
+    local_status: task.local_status,
+    local_video_path: task.local_video_path,
+    result_video_url: task.result_video_url,
+    created_at: task.created_at,
+  };
 }
 
 export async function GET(
@@ -120,9 +140,28 @@ export async function GET(
         provider_billing_status: true,
         created_at: true,
         completed_at: true,
+        video_card_id: true,
+        video_card: { select: { id: true, title: true, objective: true, status: true } },
         owner: { select: { id: true, name: true, username: true } },
         user: { select: { id: true, name: true, username: true } },
       },
+    });
+
+    const videoCards = await prisma.videoCard.findMany({
+      where: { project_id: params.id },
+      orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
+      include: {
+        owner: { select: { id: true, name: true, username: true, email: true } },
+        current_best_task: {
+          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+        },
+        final_task: {
+          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+        },
+      },
+    });
+    const videoCardSummaryMap = await getVideoCardSummaryMap(videoCards.map((card) => card.id), {
+      taskWhere: user.role === 'admin' ? {} : { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } },
     });
 
     const projectCostWhere = {
@@ -334,6 +373,33 @@ export async function GET(
         ...album,
         image_count: album._count.images,
       })),
+      video_cards: videoCards.map((card) => {
+        const summary = videoCardSummaryMap.get(card.id);
+        return {
+          id: card.id,
+          project_id: card.project_id,
+          title: card.title,
+          objective: card.objective,
+          status: card.status,
+          owner_user_id: card.owner_user_id,
+          owner: card.owner,
+          platform: card.platform,
+          ratio: card.ratio,
+          duration: card.duration,
+          target_resolution: card.target_resolution,
+          budget_credits: card.budget_credits,
+          budget_currency: card.budget_currency,
+          current_best_task_id: card.current_best_task_id,
+          final_task_id: card.final_task_id,
+          current_best_task: serializeTaskPreview(card.current_best_task),
+          final_task: serializeTaskPreview(card.final_task),
+          is_fallback: card.is_fallback,
+          created_by: card.created_by,
+          created_at: card.created_at,
+          updated_at: card.updated_at,
+          summary: summary ? serializeVideoCardSummary(summary) : null,
+        };
+      }),
       tasks,
       cost_ledgers: costLedgers,
       review_summary: reviewSummary,

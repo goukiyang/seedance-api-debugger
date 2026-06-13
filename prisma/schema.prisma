@@ -64,7 +64,9 @@ model VideoTask {
   user_id       String?
   owner_user_id String?
   project_id    String?
+  video_card_id String?
   visibility    String  @default("project") // private | project | selected | public
+  version_role  String  @default("normal") // normal | candidate | current_best | final | discarded
 
   // 产出留存与用户删除（管理员仍可审计）
   retention_status String    @default("active") // active | user_deleted | admin_hidden | retained
@@ -110,6 +112,9 @@ model VideoTask {
   user                  User?                @relation("VideoTaskUser", fields: [user_id], references: [id])
   owner                 User?                @relation("VideoTaskOwner", fields: [owner_user_id], references: [id])
   project               Project?             @relation(fields: [project_id], references: [id])
+  video_card            VideoCard?           @relation("VideoCardTasks", fields: [video_card_id], references: [id], onDelete: SetNull)
+  current_best_for_cards VideoCard[]          @relation("VideoCardCurrentBest")
+  final_for_cards       VideoCard[]          @relation("VideoCardFinal")
   provider_api_requests ProviderApiRequest[]
   cost_ledgers          CostLedger[]
   cost_allocations      CostAllocation[]
@@ -122,6 +127,8 @@ model VideoTask {
   @@index([user_id])
   @@index([owner_user_id])
   @@index([project_id])
+  @@index([video_card_id])
+  @@index([version_role])
   @@index([source_type])
   @@index([source_request_id])
   @@index([local_status])
@@ -168,6 +175,9 @@ model User {
   operation_logs          OperationLog[]
   tasks                   VideoTask[]          @relation("VideoTaskUser")
   owned_tasks             VideoTask[]          @relation("VideoTaskOwner")
+  owned_video_cards       VideoCard[]          @relation("VideoCardOwner")
+  created_video_cards     VideoCard[]          @relation("VideoCardCreator")
+  sealed_video_cards      VideoCard[]          @relation("VideoCardSealer")
   reference_albums        ReferenceAlbum[]     @relation("ReferenceAlbumOwner")
   reference_images        ReferenceImage[]     @relation("ReferenceImageOwner")
   created_album_shares    AlbumShare[]         @relation("AlbumShareCreator")
@@ -238,6 +248,7 @@ model Project {
   creator               User                 @relation("ProjectCreator", fields: [created_by], references: [id])
   members               ProjectMember[]
   invites               ProjectInvite[]
+  video_cards           VideoCard[]
   tasks                 VideoTask[]
   canvas_documents      CanvasDocument[]
   reference_albums      ReferenceAlbum[]
@@ -253,6 +264,45 @@ model Project {
   @@index([type])
   @@index([visibility])
   @@index([status])
+}
+
+model VideoCard {
+  id                 String    @id @default(cuid())
+  project_id         String
+  title              String
+  objective          String?
+  status             String    @default("active") // draft | active | reviewing | finalized | sealed | archived
+  owner_user_id      String?
+  platform           String?
+  ratio              String?
+  duration           Int?
+  target_resolution  String?
+  budget_credits     Float?
+  budget_currency    String?   @default("credits")
+  current_best_task_id String?
+  final_task_id      String?
+  is_fallback        Boolean   @default(false)
+  created_by         String
+  sealed_at          DateTime?
+  sealed_by          String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  project           Project     @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  owner             User?       @relation("VideoCardOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  creator           User        @relation("VideoCardCreator", fields: [created_by], references: [id])
+  sealedBy          User?       @relation("VideoCardSealer", fields: [sealed_by], references: [id], onDelete: SetNull)
+  tasks             VideoTask[] @relation("VideoCardTasks")
+  current_best_task VideoTask?  @relation("VideoCardCurrentBest", fields: [current_best_task_id], references: [id], onDelete: SetNull)
+  final_task        VideoTask?  @relation("VideoCardFinal", fields: [final_task_id], references: [id], onDelete: SetNull)
+
+  @@index([project_id])
+  @@index([status])
+  @@index([owner_user_id])
+  @@index([created_by])
+  @@index([current_best_task_id])
+  @@index([final_task_id])
+  @@index([is_fallback])
 }
 
 model CanvasDocument {

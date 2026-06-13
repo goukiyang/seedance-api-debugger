@@ -59,6 +59,53 @@ interface TaskItem {
   created_at: string;
   owner?: { id: string; name: string; username: string } | null;
   user?: { id: string; name: string; username: string } | null;
+  video_card_id?: string | null;
+  video_card?: { id: string; title: string; objective: string | null; status: string } | null;
+}
+
+interface VideoCardSummary {
+  task_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  running_count: number;
+  estimated_credits: number;
+  charged_credits: number;
+  refunded_credits: number;
+  official_cost_totals: Array<{ currency: string; amount_minor: number; amount_micros: number }>;
+  resolution_distribution: Record<string, number>;
+}
+
+interface VideoCardPreviewTask {
+  id: string;
+  prompt: string;
+  local_status: string;
+  local_video_path: string | null;
+  result_video_url: string | null;
+  created_at: string;
+}
+
+interface VideoCardItem {
+  id: string;
+  project_id: string;
+  title: string;
+  objective: string | null;
+  status: string;
+  owner_user_id: string | null;
+  owner?: { id: string; name: string; username: string; email?: string } | null;
+  platform: string | null;
+  ratio: string | null;
+  duration: number | null;
+  target_resolution: string | null;
+  budget_credits: number | null;
+  budget_currency: string | null;
+  current_best_task_id: string | null;
+  final_task_id: string | null;
+  current_best_task: VideoCardPreviewTask | null;
+  final_task: VideoCardPreviewTask | null;
+  is_fallback: boolean;
+  created_at: string;
+  updated_at: string;
+  summary: VideoCardSummary | null;
 }
 
 interface ProjectPermissions {
@@ -160,6 +207,16 @@ function statusLabel(status: string): string {
   return status;
 }
 
+function videoCardStatusLabel(status: string): string {
+  if (status === 'draft') return '草稿';
+  if (status === 'active') return '生成中';
+  if (status === 'reviewing') return '评审中';
+  if (status === 'finalized') return '已定稿';
+  if (status === 'sealed') return '已封板';
+  if (status === 'archived') return '已归档';
+  return status || '-';
+}
+
 function canDeleteProject(project: ProjectDetail): boolean {
   return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
@@ -186,6 +243,10 @@ function formatLedgerAmount(item: {
 function formatCostTotals(totals?: Array<{ currency: string; amount_minor: number; amount_micros: number }>): string {
   if (!totals || totals.length === 0) return '待官方确认';
   return totals.map((item) => formatAmountMicros(item.amount_micros, item.currency)).join(' · ');
+}
+
+function videoCardPreviewTask(card: VideoCardItem) {
+  return card.final_task || card.current_best_task || null;
 }
 
 function costStatusLabel(status: string): string {
@@ -240,6 +301,7 @@ export default function ProjectDetailPage() {
   const projectReturnTo = `/projects/${projectId}`;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [videoCards, setVideoCards] = useState<VideoCardItem[]>([]);
   const [costLedgers, setCostLedgers] = useState<CostLedgerItem[]>([]);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumItem[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ProjectReviewSummary | null>(null);
@@ -258,6 +320,9 @@ export default function ProjectDetailPage() {
   const [joinUrl, setJoinUrl] = useState('');
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [videoCardTitle, setVideoCardTitle] = useState('');
+  const [videoCardObjective, setVideoCardObjective] = useState('');
+  const [creatingVideoCard, setCreatingVideoCard] = useState(false);
 
   const loadProject = async () => {
     setLoading(true);
@@ -278,6 +343,7 @@ export default function ProjectDetailPage() {
       setEditName(data.project?.name || '');
       setEditDescription(data.project?.description || '');
       setTasks(data.tasks || []);
+      setVideoCards(data.video_cards || []);
       setCostLedgers(data.cost_ledgers || []);
       setReferenceAlbums(data.reference_albums || []);
       setReviewSummary(data.review_summary || null);
@@ -407,6 +473,40 @@ export default function ProjectDetailPage() {
     await loadProject();
   };
 
+  const createVideoCard = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!project) return;
+    setError('');
+    setMessage('');
+    const title = videoCardTitle.trim();
+    if (!title) {
+      setError('请先填写视频卡标题');
+      return;
+    }
+    setCreatingVideoCard(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/video-cards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          objective: videoCardObjective.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || data.message || '创建视频卡失败');
+        return;
+      }
+      setVideoCardTitle('');
+      setVideoCardObjective('');
+      setMessage('视频卡已创建');
+      await loadProject();
+    } finally {
+      setCreatingVideoCard(false);
+    }
+  };
+
   if (loading) {
     return <div className="card"><p className="text-gray">加载中...</p></div>;
   }
@@ -456,13 +556,104 @@ export default function ProjectDetailPage() {
             </p>
           </div>
           {permissions.can_generate ? (
-            <Link href={`/generate?project_id=${project.id}`} className="btn btn-primary">
-              在此项目生成
-            </Link>
+            <a href="#project-video-cards" className="btn btn-primary">
+              选择视频卡生成
+            </a>
           ) : (
             <span className="text-gray text-sm">当前状态或权限不可生成</span>
           )}
         </div>
+      </div>
+
+      <div className="card" id="project-video-cards">
+        <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h2 className="section-title mb-0">视频卡</h2>
+            <p className="text-gray text-sm mt-2">每张视频卡对应一条视频目标，生成记录、最佳版本和成本都归档在卡内。</p>
+          </div>
+          <span className="text-gray text-sm">{videoCards.length} 张</span>
+        </div>
+
+        {permissions.can_generate && project.status === 'active' && (
+          <form className="video-card-create" onSubmit={createVideoCard}>
+            <input
+              className="input"
+              value={videoCardTitle}
+              onChange={(event) => setVideoCardTitle(event.target.value)}
+              placeholder="视频卡标题，例如：产品首屏宣传短片"
+              maxLength={80}
+            />
+            <input
+              className="input"
+              value={videoCardObjective}
+              onChange={(event) => setVideoCardObjective(event.target.value)}
+              placeholder="视频目标，可选"
+              maxLength={160}
+            />
+            <button className="btn btn-primary" type="submit" disabled={creatingVideoCard || !videoCardTitle.trim()}>
+              {creatingVideoCard ? '创建中...' : '创建视频卡'}
+            </button>
+          </form>
+        )}
+
+        {videoCards.length === 0 ? (
+          <div className="video-card-empty">
+            <strong>暂无视频卡</strong>
+            <span>先创建视频卡，再进入生成页；新生成任务必须绑定到具体视频卡。</span>
+          </div>
+        ) : (
+          <div className="video-card-grid">
+            {videoCards.map((card) => {
+              const previewTask = videoCardPreviewTask(card);
+              const previewUrl = safeVideoSrc(previewTask?.local_video_path || previewTask?.result_video_url);
+              const summary = card.summary;
+              return (
+                <article key={card.id} className="video-card-item">
+                  <div className="video-card-preview">
+                    {previewUrl ? (
+                      <video src={previewUrl} muted preload="metadata" />
+                    ) : (
+                      <span>{card.is_fallback ? '历史' : '待生成'}</span>
+                    )}
+                  </div>
+                  <div className="video-card-main">
+                    <div className="video-card-head">
+                      <div>
+                        <Link className="video-card-title" href={`/video-cards/${card.id}`}>
+                          {card.title}
+                        </Link>
+                        <p className="video-card-objective">{card.objective || '未填写视频目标'}</p>
+                      </div>
+                      <span className={`video-card-status ${card.status}`}>{videoCardStatusLabel(card.status)}</span>
+                    </div>
+                    <div className="video-card-meta">
+                      <span>{card.ratio || '比例未定'}</span>
+                      <span>{card.duration ? `${card.duration}s` : '时长未定'}</span>
+                      <span>{card.target_resolution || '分辨率未定'}</span>
+                      <span>{displayUserName(card.owner)}</span>
+                    </div>
+                    <div className="video-card-stats">
+                      <span>生成 {summary?.task_count ?? 0}</span>
+                      <span>成功 {summary?.succeeded_count ?? 0}</span>
+                      <span>点数 {summary?.charged_credits ?? 0}</span>
+                      <span>官方 {formatCostTotals(summary?.official_cost_totals)}</span>
+                    </div>
+                    <div className="video-card-actions">
+                      <Link className="btn btn-secondary" href={`/video-cards/${card.id}`}>
+                        查看视频卡
+                      </Link>
+                      {permissions.can_generate && card.status !== 'sealed' && card.status !== 'archived' && (
+                        <Link className="btn btn-primary" href={`/generate?project_id=${project.id}&video_card_id=${card.id}`}>
+                          在此卡生成
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -643,7 +834,8 @@ export default function ProjectDetailPage() {
       </div>
 
       <div className="card">
-        <h2 className="section-title">生成任务</h2>
+        <h2 className="section-title">历史 / 调试任务</h2>
+        <p className="text-gray text-sm mb-4">生成记录已按视频卡归档；这里保留最近任务明细，便于排查旧任务和成本账本。</p>
         {tasks.length === 0 ? (
           <p className="text-gray">暂无生成任务</p>
         ) : (
@@ -653,6 +845,7 @@ export default function ProjectDetailPage() {
                 <th>任务 ID</th>
                 <th>提示词</th>
                 <th>状态</th>
+                <th>视频卡</th>
                 <th>创建者</th>
                 <th>点数</th>
                 <th>成本状态</th>
@@ -666,6 +859,13 @@ export default function ProjectDetailPage() {
                   <td>{task.id.slice(0, 10)}...</td>
                   <td className="truncate" style={{ maxWidth: 280 }} title={task.prompt}>{task.prompt}</td>
                   <td>{task.local_status}</td>
+                  <td>
+                    {task.video_card ? (
+                      <Link className="link" href={`/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                    ) : (
+                      <span className="text-gray">历史未归档</span>
+                    )}
+                  </td>
                   <td>{taskOwnerLabel(task)}</td>
                   <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
                   <td>{costStatusLabel(task.provider_cost_status)}</td>

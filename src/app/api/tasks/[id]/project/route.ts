@@ -86,6 +86,8 @@ export async function PATCH(
         where: { id: task.id },
         data: {
           project_id: targetProjectId,
+          video_card_id: null,
+          version_role: 'normal',
           visibility: targetProject.type === 'personal' ? 'private' : 'project',
           cost_allocation_status: 'allocated',
         },

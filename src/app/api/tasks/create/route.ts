@@ -10,6 +10,7 @@ import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { AuthError } from '@/lib/auth/session';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import {
   authenticateCodexVideoApi,
   CodexApiAuthError,
@@ -104,12 +105,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(paidGenerationGuardError(paidGenerationGuard), { status: 403 });
   }
 
+  const requestedProjectId = typeof body.project_id === 'string' && body.project_id.trim()
+    ? body.project_id.trim()
+    : null;
+  const requestedVideoCardId = typeof body.video_card_id === 'string' && body.video_card_id.trim()
+    ? body.video_card_id.trim()
+    : typeof body.videoCardId === 'string' && body.videoCardId.trim()
+      ? body.videoCardId.trim()
+      : null;
+
+  if (!requestedVideoCardId) {
+    return errorJson('必须先选择视频卡，生成任务才能写入项目成本闭环', 400);
+  }
+
+  const requestedVideoCard = await prisma.videoCard.findUnique({
+    where: { id: requestedVideoCardId },
+    select: { id: true, project_id: true },
+  });
+  if (!requestedVideoCard) {
+    return errorJson('视频卡不存在', 404);
+  }
+  if (requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
+    return errorJson('视频卡不属于当前项目', 400);
+  }
+
   let project;
+  let videoCard;
   try {
-    project = await getProjectForGeneration(
-      user,
-      typeof body.project_id === 'string' && body.project_id.trim() ? body.project_id.trim() : null,
-    );
+    project = await getProjectForGeneration(user, requestedVideoCard.project_id);
+    const videoCardAccess = await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
+    videoCard = videoCardAccess.videoCard;
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;
@@ -130,6 +155,9 @@ export async function POST(request: NextRequest) {
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
     });
     if (existing) {
+      if (existing.video_card_id && existing.video_card_id !== videoCard.id) {
+        return errorJson('同一个幂等键已绑定到其他视频卡', 409);
+      }
       return NextResponse.json({
         id: existing.id,
         status: existing.local_status,
@@ -140,6 +168,8 @@ export async function POST(request: NextRequest) {
         source_type: existing.source_type,
         source_label: existing.source_label,
         source_request_id: existing.source_request_id,
+        project_id: existing.project_id,
+        video_card_id: existing.video_card_id,
       });
     }
   }
@@ -361,6 +391,7 @@ export async function POST(request: NextRequest) {
     user_id: string | null;
     owner_user_id: string | null;
     project_id: string | null;
+    video_card_id: string | null;
     provider: string;
     provider_task_id: string | null;
     model: string;
@@ -401,6 +432,7 @@ export async function POST(request: NextRequest) {
           user_id: user.id,
           owner_user_id: user.id,
           project_id: project.id,
+          video_card_id: videoCard.id,
           visibility: project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
           frozen_cost: estimatedCost,
@@ -416,6 +448,7 @@ export async function POST(request: NextRequest) {
             generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
             referenceAlbumIds: generationReferenceAlbumIds,
             referenceImageIds: generationReferenceImageIds,
+            videoCardId: videoCard.id,
             preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
             prepSummary,
             source: {
@@ -472,6 +505,7 @@ export async function POST(request: NextRequest) {
           target_id: task.id,
           detail: JSON.stringify({
             project_id: project.id,
+            video_card_id: videoCard.id,
             owner_user_id: user.id,
             estimated_cost: estimatedCost,
             reference_album_ids: generationReferenceAlbumIds,
@@ -559,6 +593,7 @@ export async function POST(request: NextRequest) {
       pricing,
       workspace_id: workspaceId,
       project_id: project.id,
+      video_card_id: videoCard.id,
       snapshot_id: snapshot.id,
       prompt_rendered: promptRendered,
       asset_mapping: assetMapping,

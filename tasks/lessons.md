@@ -209,3 +209,13 @@
 - 怎么改：抽 `detectMentionAtCursor`、`replaceMentionRange`、`parseImageMentions`；PromptEditor 捕获当前 mention range，支持主输入框和放大编辑框；GenerationComposer 对当前图直接返回 `@图片N`，对历史/图集来源用 Promise 等选择器确认后返回真实序号；画布页复用公共检测和替换，但保持“已连线图片”候选。
 - 验证结果：共享 mention smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect` 三个目标通过；本地 3100 Playwright 验证 `/generate` 自动弹窗、键盘插入、图集来源插入、历史入口、放大编辑框、390px 无横向溢出，以及 `/generate/canvas` 生成卡 `@` 空状态不退化。
 - 可复用经验：引用型输入命令要把“候选展示”和“真实素材绑定”分离。异步选择历史/图集图片时，编辑器必须缓存 pending range，选择成功后再替换原 `@query`；不能退回 append 到末尾，也不能提交 provider 不理解的 `@主体名`。
+
+## 2026-06-13 - 视频卡迁移先 nullable，再 backfill，再应用层强制
+
+- 问题/背景：V1.2 P0 要求所有新生成必须归属视频卡，但本地已有 124 条历史 `VideoTask` 只有 `project_id`，没有 `video_card_id`。
+- 诱因/根因：如果直接把 `VideoTask.video_card_id` 做成非空 FK，会卡住历史数据和 SQLite 迁移；如果只改前端选择视频卡，外部 API、画布生成、失败重试仍可能绕过归属。
+- 当时思路：第一批采用兼容迁移：DB 字段先 nullable，应用层对新任务强制 `video_card_id`；历史任务用兜底视频卡 backfill；账本不重写，只按任务当前卡归属聚合展示。
+- 改动位置：`prisma/schema.prisma`、`prisma/migrations/20260613160000_add_video_cards/migration.sql`、`scripts/backfill-video-cards.ts`、`src/lib/video-cards/*`、`src/app/api/tasks/create/route.ts`、`src/app/generate/page.tsx`、`src/components/canvas/full/CanvasWorkspace.tsx`。
+- 怎么改：新增 `VideoCard` 和 `VideoTask.video_card_id`；新增视频卡权限/聚合 helper；标准生成页和画布页都必须选择视频卡；复用/重试继承原卡；项目页主视图改为视频卡列表；任务详情能回到视频卡。
+- 验证结果：备份 `prisma/dev.db` 后应用迁移；backfill 创建 22 张兜底视频卡，迁移 124 个历史任务；SQL 验证 `missing_card=0`、`cross_project=0`，`CreditLedger` 和 `CostLedger` 计数/汇总不变；`prisma validate`、`tsc`、`lint`、`build` 通过。
+- 可复用经验：给历史数据补强归属关系时，先用 nullable 字段保护上线，再用可重复 dry-run/apply 脚本迁移旧数据；所有创建入口、复用入口、重试入口和画布入口必须同时补齐，否则“新任务必填”只是局部约束。

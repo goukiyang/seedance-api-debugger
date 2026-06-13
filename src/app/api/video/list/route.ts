@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
+import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,12 +22,15 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
     const projectId = searchParams.get('project_id');
+    const videoCardId = searchParams.get('video_card_id');
     const includeAll = user.role === 'admin' && searchParams.get('include_all') === 'true';
     const includeDeleted = user.role === 'admin' && searchParams.get('include_deleted') === 'true';
-    const where = await getTaskWhereForUser(user, projectId, {
+    const baseWhere = await getTaskWhereForUser(user, projectId, {
       includeAdminAll: includeAll,
       includeDeleted,
     });
+    if (videoCardId) await assertCanViewVideoCard(user, videoCardId);
+    const where = videoCardId ? { AND: [baseWhere, { video_card_id: videoCardId }] } : baseWhere;
 
     const total = await prisma.videoTask.count({ where });
 
@@ -72,8 +76,12 @@ export async function GET(request: NextRequest) {
         user_id: true,
         owner_user_id: true,
         project_id: true,
+        video_card_id: true,
         project: {
           select: { id: true, name: true, type: true },
+        },
+        video_card: {
+          select: { id: true, title: true, objective: true, status: true, project_id: true },
         },
       },
     });
