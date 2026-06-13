@@ -266,7 +266,6 @@ function RecentTaskPreview({ task }: { task: TaskItem }) {
       {preview.kind === 'image' && preview.src && (
         <img src={preview.src} alt="任务截图" loading="lazy" onError={() => markFailed(preview.src)} />
       )}
-      {preview.kind === 'empty' && <span className="sr-only">{task.local_status === 'failed' ? '失败' : task.local_status}</span>}
     </div>
   );
 }
