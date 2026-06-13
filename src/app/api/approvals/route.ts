@@ -4,7 +4,7 @@ import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
-import { createApprovalRequest, normalizeApprovalType } from '@/lib/approvals';
+import { createApprovalRequest, normalizeApprovalType, validateApprovalPayload } from '@/lib/approvals';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,12 +70,21 @@ export async function POST(request: NextRequest) {
     const videoCardId = optionalString(body.video_card_id ?? body.videoCardId);
     const taskId = optionalString(body.task_id ?? body.taskId);
     const reason = optionalString(body.reason);
+    const payload = typeof body.payload === 'object' && body.payload ? body.payload as Record<string, unknown> : undefined;
 
     if (!projectId && type !== 'project_create') {
       return NextResponse.json({ error: '此审批类型必须关联项目' }, { status: 400 });
     }
     if (projectId) await assertCanViewProject(user, projectId);
     if (videoCardId) await assertCanViewVideoCard(user, videoCardId);
+    try {
+      validateApprovalPayload({ type, projectId, payload });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : '审批参数无效' },
+        { status: 400 },
+      );
+    }
 
     const approval = await prisma.$transaction(async (tx) => createApprovalRequest(tx, {
       type,
@@ -89,7 +98,7 @@ export async function POST(request: NextRequest) {
         video_card_id: videoCardId,
         task_id: taskId,
       },
-      payload: typeof body.payload === 'object' && body.payload ? body.payload : undefined,
+      payload,
     }));
 
     await logProjectAction(user.id, 'approval_request_create', 'approval', approval.id, {

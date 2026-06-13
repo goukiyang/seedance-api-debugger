@@ -60,8 +60,8 @@ export async function PATCH(
 
     await logProjectAction(user.id, `approval_${action}`, 'approval', params.id, {
       type: approval.type,
-      project_id: approval.project_id,
-      video_card_id: approval.video_card_id,
+      project_id: updated.project_id,
+      video_card_id: updated.video_card_id,
     });
 
     const serializable = await prisma.approvalRecord.findUnique({
@@ -73,6 +73,9 @@ export async function PATCH(
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error('[Approvals] Decide error:', error);
     return NextResponse.json(

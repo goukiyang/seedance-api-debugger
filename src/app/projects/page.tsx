@@ -77,6 +77,7 @@ export default function ProjectsPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [billingMode, setBillingMode] = useState<'default' | 'budget'>('default');
+  const [initialBudgetCredits, setInitialBudgetCredits] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [downloadProject, setDownloadProject] = useState<ProjectItem | null>(null);
@@ -117,7 +118,10 @@ export default function ProjectsPage() {
       const params = new URLSearchParams({
         type: 'project_create',
         reason: `申请公共项目预算记账立项：${trimmedName}${trimmedDescription ? `。项目说明：${trimmedDescription}` : ''}`,
+        project_name: trimmedName,
       });
+      if (trimmedDescription) params.set('project_description', trimmedDescription);
+      if (initialBudgetCredits.trim()) params.set('initial_budget_credits', initialBudgetCredits.trim());
       window.location.href = `/approvals?${params.toString()}`;
       return;
     }
@@ -134,6 +138,7 @@ export default function ProjectsPage() {
     setName('');
     setDescription('');
     setBillingMode('default');
+    setInitialBudgetCredits('');
     setMessage('项目已创建，记账方式：默认记账（生成扣发起人的个人积分）');
     await loadProjects();
   };
@@ -253,6 +258,15 @@ export default function ProjectsPage() {
               </span>
             </label>
           </div>
+          {billingMode === 'budget' && (
+            <input
+              className="input"
+              value={initialBudgetCredits}
+              onChange={(event) => setInitialBudgetCredits(event.target.value)}
+              placeholder="初始项目预算点数，可选"
+              inputMode="decimal"
+            />
+          )}
           <button className="btn btn-primary" type="submit" disabled={!name.trim()}>
             {billingMode === 'budget' ? '发起预算记账立项审批' : '创建项目'}
           </button>

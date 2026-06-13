@@ -289,3 +289,13 @@
 - 怎么改：移动任务 API 新增目标视频卡校验，拒绝封板/归档目标卡，并在移出原最佳/最终版任务时清理原卡指针；视频卡 PATCH 禁止直接改 `status`，已封板/归档卡不能直接修改；任务详情管理面板增加目标视频卡选择；新增只读巡检脚本检查无项目、无视频卡、项目/卡错配、失效版本指针和封板后版本变更日志。
 - 验证结果：`npx tsc --noEmit --pretty false`、`npx tsx scripts/audit-video-card-invariants.ts`、`npm run lint` 通过；巡检脚本返回 0 个基础归档异常。
 - 可复用经验：业务不变量必须覆盖创建入口和所有二次变更入口。凡是会移动、重归档、封板、重开或改版本角色的 API，都要用同一套后端校验和只读巡检脚本证明没有制造孤儿任务或错配归属。
+
+## 2026-06-14 - 审批记录必须驱动真实业务副作用
+
+- 问题/背景：V1.2 要求公共项目立项、追加预算、1080p、比例变更和视频卡重开都通过审批闭环生效；旧审批中心只会把记录改成 approved/rejected。
+- 诱因/根因：只有 `ApprovalRecord` 表和审批页面，不代表公共项目已创建、预算已入账或高成本动作已受控；如果验收只看“有记录”，会继续产生假完成。
+- 当时思路：先落地公共项目立项和追加预算两条最小业务副作用，再用事务回滚 smoke 证明审批通过会改业务状态，审批拒绝不会改预算。
+- 改动位置：`src/lib/approvals.ts`、`src/app/api/approvals/route.ts`、`src/app/api/approvals/[id]/route.ts`、`src/app/approvals/page.tsx`、`src/app/projects/page.tsx`、`scripts/approval-effects-smoke.ts`。
+- 怎么改：`project_create` 通过后创建 `type='public'` 项目、项目负责人关系和预算账户；`budget_increase` 通过后调用 `adjustProjectBudget` 写入 `ProjectBudgetLedger`；拒绝只记录决策原因，不改预算。
+- 验证结果：`npx tsx scripts/approval-effects-smoke.ts` 通过，脚本验证公共项目创建、初始预算流水、追加预算通过入账、追加预算拒绝不入账、操作日志写入，并主动回滚测试数据。
+- 可复用经验：审批类需求的完成标准必须是“记录 + 权限 + 业务副作用 + 失败/拒绝不半更新 + 可回证验证”，不能把审批状态字段当成业务闭环。

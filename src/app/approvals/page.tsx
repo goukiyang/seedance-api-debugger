@@ -75,6 +75,9 @@ export default function ApprovalsPage() {
   const [videoCardId, setVideoCardId] = useState('');
   const [taskId, setTaskId] = useState('');
   const [reason, setReason] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [projectDescription, setProjectDescription] = useState('');
+  const [amountCredits, setAmountCredits] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const load = async () => {
@@ -107,8 +110,14 @@ export default function ApprovalsPage() {
     const params = new URLSearchParams(window.location.search);
     const requestedType = params.get('type');
     const requestedReason = params.get('reason');
+    const requestedProjectName = params.get('project_name');
+    const requestedProjectDescription = params.get('project_description');
+    const requestedInitialBudget = params.get('initial_budget_credits');
     if (isApprovalTypeValue(requestedType)) setType(requestedType);
     if (requestedReason) setReason(requestedReason);
+    if (requestedProjectName) setProjectName(requestedProjectName);
+    if (requestedProjectDescription) setProjectDescription(requestedProjectDescription);
+    if (requestedInitialBudget) setAmountCredits(requestedInitialBudget);
   }, []);
 
   const createApproval = async (event: React.FormEvent) => {
@@ -117,16 +126,26 @@ export default function ApprovalsPage() {
     setMessage('');
     setSubmitting(true);
     try {
+      const numericAmount = amountCredits.trim() ? Number(amountCredits.trim()) : 0;
+      const payload: Record<string, unknown> = { source: 'approvals_page' };
+      if (type === 'project_create') {
+        payload.project_name = projectName.trim();
+        payload.project_description = projectDescription.trim() || null;
+        payload.initial_budget_credits = Number.isFinite(numericAmount) ? numericAmount : 0;
+      }
+      if (type === 'budget_increase') {
+        payload.amount = numericAmount;
+      }
       const res = await fetch('/api/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type,
-          project_id: projectId.trim() || null,
+          project_id: type === 'project_create' ? null : projectId.trim() || null,
           video_card_id: videoCardId.trim() || null,
           task_id: taskId.trim() || null,
           reason: reason.trim() || null,
-          payload: { source: 'approvals_page' },
+          payload,
         }),
       });
       const data = await res.json();
@@ -136,6 +155,7 @@ export default function ApprovalsPage() {
       }
       setMessage('审批已发起');
       setReason('');
+      if (type !== 'project_create') setAmountCredits('');
       await load();
     } finally {
       setSubmitting(false);
@@ -186,11 +206,33 @@ export default function ApprovalsPage() {
             ))}
           </select>
           {type === 'project_create' && (
-            <p className="approval-form-hint">
-              公共项目立项通过后才使用预算记账；普通协作项目默认扣发起人的个人积分。
-            </p>
+            <>
+              <p className="approval-form-hint">
+                公共项目立项通过后会创建预算记账项目，并把申请人设为项目负责人。
+              </p>
+              <input className="input" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="公共项目名称" />
+              <input className="input" value={projectDescription} onChange={(event) => setProjectDescription(event.target.value)} placeholder="项目说明，可选" />
+              <input
+                className="input"
+                value={amountCredits}
+                onChange={(event) => setAmountCredits(event.target.value)}
+                placeholder="初始项目预算点数，可选"
+                inputMode="decimal"
+              />
+            </>
           )}
-          <input className="input" value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目 ID" />
+          {type !== 'project_create' && (
+            <input className="input" value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目 ID" />
+          )}
+          {type === 'budget_increase' && (
+            <input
+              className="input"
+              value={amountCredits}
+              onChange={(event) => setAmountCredits(event.target.value)}
+              placeholder="追加预算点数"
+              inputMode="decimal"
+            />
+          )}
           <input className="input" value={videoCardId} onChange={(event) => setVideoCardId(event.target.value)} placeholder="视频卡 ID，可选" />
           <input className="input" value={taskId} onChange={(event) => setTaskId(event.target.value)} placeholder="任务 ID，可选" />
           <input className="input" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="申请理由" />
