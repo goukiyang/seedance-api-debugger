@@ -1,3 +1,155 @@
+# 生成记录列表缩略图统一改造 Todo
+
+更新时间：2026-06-13
+
+目标：落实项目规则“所有生成记录列表最左侧必须是视频截图/缩略图”。所有能让用户扫生成记录、任务记录、产出留存、项目内任务、视频卡任务和成本待办的列表，都要在第一视觉列展示对应视频画面；没有截图时保留稳定占位，不能让提示词、日期、状态或金额顶到最左。
+
+## 第一性原理
+
+生成记录列表的核心不是“读一行文本”，而是“快速识别是哪条视频产出”。用户在后台、项目、视频卡和任务页之间切换时，最可靠的识别锚点是画面，不是任务 ID、提示词或金额。提示词可以很长且相似，金额和状态不能帮用户区分视频内容，所以缩略图必须成为每行的第一入口。
+
+产品 UI 方向：这是后台工具，不做装饰型改造。采用统一、稳定、可扫描的紧凑列表结构；缩略图作为首列，右侧再承载提示词、状态、项目、创建者、成本和操作。
+
+## 当前代码依据
+
+- 后台总览最近生成：`src/app/admin/AdminGenerationDashboardClient.tsx` 的 `recent_tasks` 渲染当前第一列是任务文本，没有截图；`src/lib/admin/generation-dashboard.ts` 已查询 `local_video_path`、`result_video_url`、`result_last_frame_url`，但 `DashboardRecentTask` 没把这些字段返回给客户端。
+- 产出留存：`src/app/admin/outputs/AdminOutputsClient.tsx` 已有 `OutputFramePreview`，列表最左侧是预览图，基本符合规则，需要统一占位和尺寸口径。
+- 我的任务：`src/app/tasks/page.tsx` 已有 `TaskPreview`，但批量选择 checkbox 在截图前面；需要把选择控件合并进缩略图列或覆盖在缩略图上，让截图仍是第一视觉入口。
+- 项目详情历史/调试任务：`src/app/projects/[id]/page.tsx` 的“历史 / 调试任务”表格当前第一列是任务 ID，没有缩略图；同页成本账本表已有视频预览，但使用 `<video>` 且取值顺序是 `result_video_url || local_video_path`，需要统一为截图优先、本地优先。
+- 视频卡详情生成记录：`src/app/projects/[id]/video-cards/[cardId]/page.tsx` 已有 `video-card-task-preview`，但使用视频标签而不是统一截图 API；需要对齐“截图首列”口径。
+- 生成页最近任务：`src/app/generate/page.tsx` 已有 `RecentTaskPreview`，卡片顶部先展示预览图；需要作为生成记录卡片特例验收，确认桌面/移动端截图仍是第一视觉入口。
+- 计费与成本待处理队列：`src/app/admin/costs/page.tsx` 的 `recentIssues` 表格当前第一列是提示词，没有缩略图；它本质是带成本异常的生成任务列表，应纳入本规则。
+
+## 目标范围
+
+- `/admin` 最近生成记录。
+- `/admin/outputs` 产出留存。
+- `/tasks` 我的任务列表。
+- `/projects/[id]` 历史/调试任务、项目成本账本里的任务行。
+- `/projects/[id]/video-cards/[cardId]` 生成记录。
+- `/generate` 最近任务卡片。
+- `/admin/costs` 待处理队列中以 `VideoTask` 为主体的任务行。
+
+不纳入本批：Provider 请求异常列表、纯账本汇总、项目列表、用户列表、图集列表。这些不是“生成记录列表”，除非行内直接代表一个视频任务。
+
+## 推荐实现方案
+
+### 1. 抽公共任务缩略图组件
+
+新增或复用公共组件，建议路径：
+
+- `src/components/TaskVideoThumbnail.tsx`
+
+职责：
+
+- 输入 `taskId`、`localVideoPath`、`resultVideoUrl`、`resultLastFrameUrl`、`status`、`href`、`size`。
+- 优先用 `/api/video/thumbnail/:taskId` 展示截图。
+- 只有存在 `local_video_path`、`result_video_url` 或 `result_last_frame_url` 时才尝试加载截图。
+- 图片加载失败后显示稳定占位：生成中、失败无预览、暂无截图、预览不可用。
+- 支持操作叠层：批量选择 checkbox、状态小标、可点击详情链接。
+- 固定宽高和 aspect-ratio，避免列表加载时跳动。
+
+### 2. 后端数据补齐
+
+- `src/lib/admin/generation-dashboard.ts`：把 `local_video_path`、`result_video_url`、`result_last_frame_url` 加入 `DashboardRecentTask` 返回结构。
+- `src/app/admin/costs/page.tsx`：确认 `recentIssues` 查询包含 `local_video_path`、`result_video_url`、`result_last_frame_url`。
+- 如某个列表 API 缺字段，只补对应列表需要的最小字段，不扩大返回敏感数据。
+
+### 3. 各列表接入
+
+- `/admin` 最近生成记录：表头新增“截图”作为第一列；每行最左渲染 `TaskVideoThumbnail`，任务文本移动到第二列。
+- `/admin/outputs`：保留现有首列预览，替换或对齐为公共组件；占位文案和尺寸统一。
+- `/tasks`：把 checkbox 放到缩略图内部左上角或缩略图旁同一首列内，保证截图仍是第一视觉入口。
+- `/projects/[id]` 历史/调试任务：第一列改为缩略图 + 短任务 ID，提示词放第二列。
+- `/projects/[id]` 成本账本任务行：改用缩略图组件，本地路径优先；非任务账本保留“无任务/无视频”占位。
+- `/projects/[id]/video-cards/[cardId]`：首列改用缩略图组件，保持现有卡片布局。
+- `/generate` 最近任务：保留卡片预览，但复用同一预览决策函数或组件，保证错误占位一致。
+- `/admin/costs` 待处理队列：第一列新增缩略图，任务提示词作为第二列。
+
+### 4. 样式与交互
+
+- 统一缩略图尺寸：
+  - 表格/后台紧凑列表：`88x56` 或 `96x60`。
+  - 卡片列表：保持现有卡片比例，但使用同一占位样式。
+- 缩略图必须不拉伸：`object-fit: cover`，容器固定 `aspect-ratio: 16 / 9`。
+- 占位不使用大段说明文字，只显示短状态：`生成中`、`失败`、`暂无截图`、`不可用`。
+- 鼠标 hover 缩略图可以显示“查看详情”，但不新增干扰主操作的复杂动画。
+- 移动端列表可以折叠成卡片，但缩略图仍位于卡片顶部或最左，不允许文本先出现。
+
+## 执行任务清单
+
+- [ ] 盘点所有生成记录列表现状截图，记录哪些已满足、哪些缺首列截图。
+- [ ] 新增 `TaskVideoThumbnail` 公共组件和必要类型。
+- [ ] 为公共组件补齐状态占位、图片错误降级、固定尺寸和可点击详情能力。
+- [ ] 补齐 `/admin` 最近生成记录返回字段：`local_video_path`、`result_video_url`、`result_last_frame_url`。
+- [ ] 补齐 `/admin/costs` 待处理队列任务字段。
+- [ ] 改造 `/admin` 最近生成记录首列截图。
+- [ ] 对齐 `/admin/outputs` 产出留存预览为公共缩略图口径。
+- [ ] 改造 `/tasks` 任务列表，把选择框并入缩略图首列。
+- [ ] 改造 `/projects/[id]` 历史/调试任务表格首列截图。
+- [ ] 改造 `/projects/[id]` 成本账本任务行，统一本地优先和截图占位。
+- [ ] 改造 `/projects/[id]/video-cards/[cardId]` 生成记录预览。
+- [ ] 检查 `/generate` 最近任务卡片，确保桌面/移动端截图是第一视觉入口。
+- [ ] 改造 `/admin/costs` 待处理队列首列截图。
+- [ ] 做桌面和移动端视觉验收，确认无横向溢出、无文本顶到最左、截图不拉伸。
+- [ ] 线上部署到 `sd2` 并验证公网页面已加载新 build。
+
+## 验收标准
+
+- 所有目标列表的第一视觉列都是视频截图/缩略图或稳定占位。
+- 有本地视频或远端视频的任务，优先请求 `/api/video/thumbnail/:taskId` 展示截图。
+- 没有截图来源、加载失败、生成中、失败任务，都有固定尺寸占位，不引发布局跳动。
+- 提示词、日期、状态、项目名、成本、操作都不能在截图之前出现。
+- `/admin`、`/admin/outputs`、`/tasks`、`/projects/[id]`、`/projects/[id]/video-cards/[cardId]`、`/generate`、`/admin/costs` 桌面和移动端均通过。
+- 不触发真实付费生成任务。
+- 不改变点数、成本、权限、隐藏/恢复、批量下载等业务逻辑。
+
+## 验证命令
+
+```bash
+git diff --check
+npm run lint
+NEXT_DIST_DIR=.next-prod-dry-run npm run build
+```
+
+线上闭环：
+
+```bash
+/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2
+/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2
+/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2
+```
+
+页面验收：
+
+- 刷新 `https://sd2.youdoodesign.com/admin`，最近生成记录左侧有截图。
+- 刷新 `https://sd2.youdoodesign.com/admin/outputs`，产出留存左侧有截图。
+- 刷新 `https://sd2.youdoodesign.com/tasks`，任务列表左侧第一视觉是截图，选择框不抢首列。
+- 刷新一个项目详情页，历史/调试任务和成本账本任务行左侧有截图。
+- 刷新一个视频卡详情页，生成记录左侧有截图。
+- 刷新 `https://sd2.youdoodesign.com/generate`，最近任务卡片截图仍然优先出现。
+- 刷新 `https://sd2.youdoodesign.com/admin/costs#pending-costs`，待处理队列左侧有截图。
+
+## Git Plan
+
+- 当前工作区已有若干未提交源码改动，执行前必须先确认这些改动归属；本任务不得把无关改动混入提交。
+- 推荐直接在当前 `codex/video-card-p0-closure` 分支继续，或如果现有改动不属于本任务，则创建干净 worktree 执行。
+- 提交分组：
+  - 提交 1：公共 `TaskVideoThumbnail` 组件和样式。
+  - 提交 2：后端/API 数据字段补齐。
+  - 提交 3：各列表接入缩略图。
+  - 提交 4：验收记录、经验记录、版本登记。
+- 完成后推送分支，创建 `rollback/YYYY-MM-DD-generation-list-thumbnails` 回退 tag，并验证远端可见。
+
+## 停止条件
+
+- 如果发现某个列表没有任务 ID 或无法安全访问 `/api/video/thumbnail/:taskId`，先停下补数据链路，不做纯前端假缩略图。
+- 如果现有未提交改动和本任务改动冲突，先报告冲突文件，不覆盖不属于本任务的内容。
+- 如果缩略图接口导致列表加载明显变慢，先补懒加载和失败缓存，不扩大为批量预取接口。
+- 如果需要数据库迁移，先单独评估，不在本批默认引入 schema 变更。
+
+---
+
 # SD2 自动本地化生成视频策略 Todo
 
 更新时间：2026-06-09
