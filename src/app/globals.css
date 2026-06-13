@@ -488,6 +488,113 @@ a {
   font-size: 14px;
 }
 
+.task-video-thumbnail {
+  aspect-ratio: 16 / 9;
+  background: #eef2f7;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  color: #64748b;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.task-video-thumbnail-compact {
+  flex: 0 0 88px;
+  height: 50px;
+  width: 88px;
+}
+
+.task-video-thumbnail-list {
+  flex: 0 0 112px;
+  height: 64px;
+  width: 112px;
+}
+
+.task-video-thumbnail-card {
+  aspect-ratio: 16 / 10;
+  width: 100%;
+}
+
+.task-video-thumbnail-dark {
+  background: rgba(2, 6, 23, 0.72);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
+}
+
+.task-video-thumbnail-hitbox,
+.task-video-thumbnail-frame {
+  display: block;
+  height: 100%;
+  text-decoration: none;
+  width: 100%;
+}
+
+.task-video-thumbnail-frame img {
+  background: #e5e7eb;
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.task-video-thumbnail-empty {
+  align-items: center;
+  display: grid;
+  font-size: 12px;
+  font-weight: 700;
+  height: 100%;
+  justify-items: center;
+  letter-spacing: 0;
+  line-height: 1.3;
+  padding: 8px;
+  text-align: center;
+  width: 100%;
+}
+
+.task-video-thumbnail-light.is-empty .task-video-thumbnail-empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    #f1f5f9,
+    #f1f5f9 10px,
+    #e8eef6 10px,
+    #e8eef6 20px
+  );
+}
+
+.task-video-thumbnail-dark.is-empty .task-video-thumbnail-empty {
+  background: rgba(15, 23, 42, 0.54);
+}
+
+.task-video-thumbnail-label {
+  background: rgba(15, 23, 42, 0.76);
+  border-radius: 6px;
+  bottom: 7px;
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 700;
+  left: 7px;
+  line-height: 1;
+  padding: 5px 7px;
+  position: absolute;
+}
+
+.task-video-thumbnail-overlay {
+  display: block;
+  left: 8px;
+  position: absolute;
+  top: 8px;
+  z-index: 2;
+}
+
+.task-video-thumbnail-overlay .tasks-card-select {
+  left: auto;
+  position: relative;
+  top: auto;
+}
+
 .outputs-item {
   align-items: start;
   background: #ffffff;
@@ -9366,7 +9473,7 @@ a {
 .admin-dashboard-recent-row {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(220px, 1.3fr) minmax(170px, 1fr) minmax(130px, 0.7fr) minmax(160px, 0.9fr) 80px 80px;
+  grid-template-columns: 88px minmax(220px, 1.3fr) minmax(170px, 1fr) minmax(130px, 0.7fr) minmax(160px, 0.9fr) 80px 80px;
 }
 
 .admin-dashboard-recent-head {
@@ -9452,7 +9559,7 @@ a {
 
   .admin-dashboard-recent-head,
   .admin-dashboard-recent-row {
-    grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.8fr) minmax(110px, 0.7fr);
+    grid-template-columns: 88px minmax(180px, 1fr) minmax(130px, 0.8fr);
   }
 
   .admin-dashboard-recent-head span:nth-child(n + 4),

@@ -7,6 +7,7 @@ import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetC
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
+import TaskVideoThumbnail from '@/components/TaskVideoThumbnail';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import {
@@ -250,36 +251,17 @@ function projectRemovalTitle(project: ProjectOption): string {
   return projectHasContent(project) ? '项目已有历史内容，只能归档' : '删除空项目';
 }
 
-type TaskPreviewModel = {
-  kind: 'image' | 'empty';
-  src?: string;
-};
-
-function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPreviewModel {
-  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
-  const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
-
-  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc };
-  }
-
-  return { kind: 'empty' };
-}
-
 function RecentTaskPreview({ task }: { task: TaskItem }) {
-  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
-  const preview = getRecentTaskPreview(task, failedSrcs);
-  const markFailed = (src?: string) => {
-    if (!src) return;
-    setFailedSrcs((current) => current.includes(src) ? current : [...current, src]);
-  };
-
   return (
-    <div className={`composer-task-card-preview composer-task-card-preview-${preview.kind}`}>
-      {preview.kind === 'image' && preview.src && (
-        <img src={preview.src} alt="任务截图" loading="lazy" onError={() => markFailed(preview.src)} />
-      )}
-    </div>
+    <TaskVideoThumbnail
+      taskId={task.id}
+      localVideoPath={task.local_video_path}
+      resultVideoUrl={task.result_video_url}
+      resultLastFrameUrl={task.result_last_frame_url}
+      status={task.local_status}
+      size="card"
+      tone="dark"
+    />
   );
 }
 

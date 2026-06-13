@@ -16,7 +16,7 @@
 - 产出留存：`src/app/admin/outputs/AdminOutputsClient.tsx` 已有 `OutputFramePreview`，列表最左侧是预览图，基本符合规则，需要统一占位和尺寸口径。
 - 我的任务：`src/app/tasks/page.tsx` 已有 `TaskPreview`，但批量选择 checkbox 在截图前面；需要把选择控件合并进缩略图列或覆盖在缩略图上，让截图仍是第一视觉入口。
 - 项目详情历史/调试任务：`src/app/projects/[id]/page.tsx` 的“历史 / 调试任务”表格当前第一列是任务 ID，没有缩略图；同页成本账本表已有视频预览，但使用 `<video>` 且取值顺序是 `result_video_url || local_video_path`，需要统一为截图优先、本地优先。
-- 视频卡详情生成记录：`src/app/projects/[id]/video-cards/[cardId]/page.tsx` 已有 `video-card-task-preview`，但使用视频标签而不是统一截图 API；需要对齐“截图首列”口径。
+- 视频卡详情生成记录：`src/app/projects/[id]/video-cards/[cardId]/page.tsx` 已有 `video-card-task-preview`，但使用视频标签而不是统一截图 API；需要对齐“截图首列”口径；`src/app/video-cards/[id]/page.tsx` 仅保留旧链接跳转。
 - 生成页最近任务：`src/app/generate/page.tsx` 已有 `RecentTaskPreview`，卡片顶部先展示预览图；需要作为生成记录卡片特例验收，确认桌面/移动端截图仍是第一视觉入口。
 - 计费与成本待处理队列：`src/app/admin/costs/page.tsx` 的 `recentIssues` 表格当前第一列是提示词，没有缩略图；它本质是带成本异常的生成任务列表，应纳入本规则。
 
@@ -62,7 +62,7 @@
 - `/tasks`：把 checkbox 放到缩略图内部左上角或缩略图旁同一首列内，保证截图仍是第一视觉入口。
 - `/projects/[id]` 历史/调试任务：第一列改为缩略图 + 短任务 ID，提示词放第二列。
 - `/projects/[id]` 成本账本任务行：改用缩略图组件，本地路径优先；非任务账本保留“无任务/无视频”占位。
-- `/projects/[id]/video-cards/[cardId]`：首列改用缩略图组件，保持现有卡片布局。
+- `/projects/[id]/video-cards/[cardId]`：首列改用缩略图组件，保持现有卡片布局；`/video-cards/[id]` 只负责跳转到项目内路径。
 - `/generate` 最近任务：保留卡片预览，但复用同一预览决策函数或组件，保证错误占位一致。
 - `/admin/costs` 待处理队列：第一列新增缩略图，任务提示词作为第二列。
 
@@ -78,21 +78,21 @@
 
 ## 执行任务清单
 
-- [ ] 盘点所有生成记录列表现状截图，记录哪些已满足、哪些缺首列截图。
-- [ ] 新增 `TaskVideoThumbnail` 公共组件和必要类型。
-- [ ] 为公共组件补齐状态占位、图片错误降级、固定尺寸和可点击详情能力。
-- [ ] 补齐 `/admin` 最近生成记录返回字段：`local_video_path`、`result_video_url`、`result_last_frame_url`。
-- [ ] 补齐 `/admin/costs` 待处理队列任务字段。
-- [ ] 改造 `/admin` 最近生成记录首列截图。
-- [ ] 对齐 `/admin/outputs` 产出留存预览为公共缩略图口径。
-- [ ] 改造 `/tasks` 任务列表，把选择框并入缩略图首列。
-- [ ] 改造 `/projects/[id]` 历史/调试任务表格首列截图。
-- [ ] 改造 `/projects/[id]` 成本账本任务行，统一本地优先和截图占位。
-- [ ] 改造 `/projects/[id]/video-cards/[cardId]` 生成记录预览。
-- [ ] 检查 `/generate` 最近任务卡片，确保桌面/移动端截图是第一视觉入口。
-- [ ] 改造 `/admin/costs` 待处理队列首列截图。
-- [ ] 做桌面和移动端视觉验收，确认无横向溢出、无文本顶到最左、截图不拉伸。
-- [ ] 线上部署到 `sd2` 并验证公网页面已加载新 build。
+- [x] 盘点所有生成记录列表现状截图，记录哪些已满足、哪些缺首列截图。
+- [x] 新增 `TaskVideoThumbnail` 公共组件和必要类型。
+- [x] 为公共组件补齐状态占位、图片错误降级、固定尺寸和可点击详情能力。
+- [x] 补齐 `/admin` 最近生成记录返回字段：`local_video_path`、`result_video_url`、`result_last_frame_url`。
+- [x] 补齐 `/admin/costs` 待处理队列任务字段。
+- [x] 改造 `/admin` 最近生成记录首列截图。
+- [x] 对齐 `/admin/outputs` 产出留存预览为公共缩略图口径。
+- [x] 改造 `/tasks` 任务列表，把选择框并入缩略图首列。
+- [x] 改造 `/projects/[id]` 历史/调试任务表格首列截图。
+- [x] 改造 `/projects/[id]` 成本账本任务行，统一本地优先和截图占位。
+- [x] 改造 `/projects/[id]/video-cards/[cardId]` 生成记录预览。
+- [x] 检查 `/generate` 最近任务卡片，确保桌面/移动端截图是第一视觉入口。
+- [x] 改造 `/admin/costs` 待处理队列首列截图。
+- [x] 做桌面和移动端静态布局验收：`next build` 路由构建通过，CSS 固定 `16 / 9` 或 `16 / 10`，公开 bundle 已包含 `TaskVideoThumbnail`；登录态浏览器快照因 ClickOps session 未能持久化，未作为本次证据。
+- [x] 线上部署到 `sd2` 并验证公网页面已加载新 build。
 
 ## 验收标准
 
@@ -147,6 +147,15 @@ NEXT_DIST_DIR=.next-prod-dry-run npm run build
 - 如果现有未提交改动和本任务改动冲突，先报告冲突文件，不覆盖不属于本任务的内容。
 - 如果缩略图接口导致列表加载明显变慢，先补懒加载和失败缓存，不扩大为批量预取接口。
 - 如果需要数据库迁移，先单独评估，不在本批默认引入 schema 变更。
+
+## Review - 2026-06-13
+
+- 已新增 `TaskVideoThumbnail` 公共组件，并统一 `/admin`、`/admin/outputs`、`/tasks`、`/projects/[id]`、`/projects/[id]/video-cards/[cardId]`、`/generate`、`/admin/costs` 的任务/产出列表缩略图口径。
+- 已补齐 `/admin` 驾驶舱、项目详情、项目视频卡、视频卡详情和成本待办的最小只读视频源字段；无 schema 变更、无数据库写入。
+- 已通过 `git diff --check`、`npm run lint`、`npx tsc --noEmit --pretty false`、`NEXT_DIST_DIR=.next-prod-dry-run npm run build`。
+- 已从干净 worktree 构建并同步到 `/Volumes/Data/Projects/video-api-debugger/.next-prod`，旧 build 已备份到 `/Volumes/Data/Backups/video-api-debugger-next-prod/.next-prod-before-generation-list-thumbnails-20260613-142449`。
+- 线上 `sd2` 已重启到 build `Ykc3Zjpn03LqHKntkwRnI`；`youdoo-sites status sd2`、公开 build manifest 和 `/api/config` 均返回正常。
+- ClickOps 浏览器 session 在 CLI 与直接 MCP 间未能持久化，未取得登录态页面截图；需要用户直接刷新当前登录浏览器确认视觉效果。
 
 ---
 

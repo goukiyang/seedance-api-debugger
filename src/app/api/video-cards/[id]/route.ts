@@ -37,6 +37,7 @@ function serializeTaskPreview(task: null | {
   local_status: string;
   local_video_path: string | null;
   result_video_url: string | null;
+  result_last_frame_url: string | null;
   created_at: Date;
 }) {
   if (!task) return null;
@@ -46,6 +47,7 @@ function serializeTaskPreview(task: null | {
     local_status: task.local_status,
     local_video_path: task.local_video_path,
     result_video_url: task.result_video_url,
+    result_last_frame_url: task.result_last_frame_url,
     created_at: task.created_at,
   };
 }
@@ -59,10 +61,10 @@ async function getSerializableVideoCard(id: string) {
       creator: { select: { id: true, name: true, username: true, email: true } },
       sealedBy: { select: { id: true, name: true, username: true, email: true } },
       current_best_task: {
-        select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+        select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
       },
       final_task: {
-        select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+        select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
       },
     },
   });

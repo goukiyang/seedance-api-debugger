@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import TaskVideoThumbnail from '@/components/TaskVideoThumbnail';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
@@ -43,6 +44,7 @@ interface TaskItem {
   local_status: string;
   provider_task_id: string | null;
   result_video_url?: string | null;
+  result_last_frame_url?: string | null;
   local_video_path?: string | null;
   owner_user_id: string | null;
   user_id: string | null;
@@ -81,6 +83,7 @@ interface VideoCardPreviewTask {
   local_status: string;
   local_video_path: string | null;
   result_video_url: string | null;
+  result_last_frame_url?: string | null;
   created_at: string;
 }
 
@@ -120,6 +123,9 @@ interface ReviewTaskItem {
   id: string;
   prompt: string;
   local_status: string;
+  result_video_url?: string | null;
+  result_last_frame_url?: string | null;
+  local_video_path?: string | null;
   estimated_cost: number | null;
   actual_cost?: number | null;
   refund_amount?: number | null;
@@ -283,12 +289,6 @@ function taskOwnerLabel(task: TaskItem | ReviewTaskItem): string {
 
 function ledgerOwnerLabel(ledger: CostLedgerItem): string {
   return ledger.task ? taskOwnerLabel(ledger.task) : displayUserName(ledger.user);
-}
-
-function safeVideoSrc(url?: string | null): string | null {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return url;
-  return null;
 }
 
 function providerTaskIdLabel(ledger: CostLedgerItem): string {
@@ -605,17 +605,25 @@ export default function ProjectDetailPage() {
           <div className="video-card-grid">
             {videoCards.map((card) => {
               const previewTask = videoCardPreviewTask(card);
-              const previewUrl = safeVideoSrc(previewTask?.local_video_path || previewTask?.result_video_url);
               const summary = card.summary;
               return (
                 <article key={card.id} className="video-card-item">
-                  <div className="video-card-preview">
-                    {previewUrl ? (
-                      <video src={previewUrl} muted preload="metadata" />
-                    ) : (
+                  {previewTask ? (
+                    <TaskVideoThumbnail
+                      taskId={previewTask.id}
+                      localVideoPath={previewTask.local_video_path}
+                      resultVideoUrl={previewTask.result_video_url}
+                      resultLastFrameUrl={previewTask.result_last_frame_url}
+                      status={previewTask.local_status}
+                      href={taskDetailHref(previewTask.id, projectReturnTo)}
+                      size="card"
+                      tone="dark"
+                    />
+                  ) : (
+                    <div className="video-card-preview">
                       <span>{card.is_fallback ? '历史' : '待生成'}</span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   <div className="video-card-main">
                     <div className="video-card-head">
                       <div>
@@ -700,6 +708,7 @@ export default function ProjectDetailPage() {
             <table className="table">
               <thead>
                 <tr>
+                  <th>截图</th>
                   <th>任务</th>
                   <th>创建者</th>
                   <th>状态</th>
@@ -710,6 +719,17 @@ export default function ProjectDetailPage() {
               <tbody>
                 {reviewSummary.high_cost_tasks.map((task) => (
                   <tr key={task.id}>
+                    <td>
+                      <TaskVideoThumbnail
+                        taskId={task.id}
+                        localVideoPath={task.local_video_path}
+                        resultVideoUrl={task.result_video_url}
+                        resultLastFrameUrl={task.result_last_frame_url}
+                        status={task.local_status}
+                        href={taskDetailHref(task.id, projectReturnTo)}
+                        size="compact"
+                      />
+                    </td>
                     <td className="truncate" style={{ maxWidth: 360 }}>
                       <Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>{task.prompt || task.id}</Link>
                     </td>
@@ -752,34 +772,21 @@ export default function ProjectDetailPage() {
             <tbody>
               {costLedgers.map((ledger) => {
                 const task = ledger.task;
-                const videoUrl = safeVideoSrc(task?.result_video_url || task?.local_video_path);
                 const providerTaskId = providerTaskIdLabel(ledger);
 
                 return (
                   <tr key={ledger.id}>
                     <td>
                       <div className="flex items-center" style={{ gap: 10, minWidth: 300 }}>
-                        {videoUrl ? (
-                          <video
-                            src={videoUrl}
-                            muted
-                            preload="metadata"
-                            style={{ width: 72, height: 44, objectFit: 'cover', borderRadius: 8, background: 'rgba(15,23,42,0.8)' }}
-                          />
-                        ) : (
-                          <div style={{
-                            width: 72,
-                            height: 44,
-                            borderRadius: 8,
-                            display: 'grid',
-                            placeItems: 'center',
-                            background: 'rgba(15,23,42,0.8)',
-                            color: 'rgba(148,163,184,0.95)',
-                            fontSize: 12,
-                          }}>
-                            无视频
-                          </div>
-                        )}
+                        <TaskVideoThumbnail
+                          taskId={task?.id || ledger.task_id || ledger.id}
+                          localVideoPath={task?.local_video_path}
+                          resultVideoUrl={task?.result_video_url}
+                          resultLastFrameUrl={task?.result_last_frame_url}
+                          status={task?.local_status}
+                          href={task ? taskDetailHref(task.id, projectReturnTo) : undefined}
+                          size="compact"
+                        />
                         <div style={{ minWidth: 0 }}>
                           {task ? (
                             <Link className="link truncate" style={{ display: 'block', maxWidth: 320 }} href={taskDetailHref(task.id, projectReturnTo)} title={task.prompt || task.id}>
@@ -842,6 +849,7 @@ export default function ProjectDetailPage() {
           <table className="table">
             <thead>
               <tr>
+                <th>截图</th>
                 <th>任务 ID</th>
                 <th>提示词</th>
                 <th>状态</th>
@@ -856,6 +864,17 @@ export default function ProjectDetailPage() {
             <tbody>
               {tasks.map((task) => (
                 <tr key={task.id}>
+                  <td>
+                    <TaskVideoThumbnail
+                      taskId={task.id}
+                      localVideoPath={task.local_video_path}
+                      resultVideoUrl={task.result_video_url}
+                      resultLastFrameUrl={task.result_last_frame_url}
+                      status={task.local_status}
+                      href={taskDetailHref(task.id, projectReturnTo)}
+                      size="compact"
+                    />
+                  </td>
                   <td>{task.id.slice(0, 10)}...</td>
                   <td className="truncate" style={{ maxWidth: 280 }} title={task.prompt}>{task.prompt}</td>
                   <td>{task.local_status}</td>

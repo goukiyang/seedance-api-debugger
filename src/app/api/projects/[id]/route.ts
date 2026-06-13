@@ -47,6 +47,7 @@ function serializeTaskPreview(task: null | {
   local_status: string;
   local_video_path: string | null;
   result_video_url: string | null;
+  result_last_frame_url: string | null;
   created_at: Date;
 }) {
   if (!task) return null;
@@ -56,6 +57,7 @@ function serializeTaskPreview(task: null | {
     local_status: task.local_status,
     local_video_path: task.local_video_path,
     result_video_url: task.result_video_url,
+    result_last_frame_url: task.result_last_frame_url,
     created_at: task.created_at,
   };
 }
@@ -125,6 +127,7 @@ export async function GET(
         local_status: true,
         provider_task_id: true,
         result_video_url: true,
+        result_last_frame_url: true,
         local_video_path: true,
         owner_user_id: true,
         user_id: true,
@@ -153,10 +156,10 @@ export async function GET(
       include: {
         owner: { select: { id: true, name: true, username: true, email: true } },
         current_best_task: {
-          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
@@ -273,6 +276,7 @@ export async function GET(
               local_status: true,
               provider_task_id: true,
               result_video_url: true,
+              result_last_frame_url: true,
               local_video_path: true,
               provider_cost_status: true,
               provider_official_amount_minor: true,
@@ -318,6 +322,9 @@ export async function GET(
           id: true,
           prompt: true,
           local_status: true,
+          result_video_url: true,
+          result_last_frame_url: true,
+          local_video_path: true,
           estimated_cost: true,
           actual_cost: true,
           provider_cost_status: true,
@@ -334,6 +341,9 @@ export async function GET(
           id: true,
           prompt: true,
           local_status: true,
+          result_video_url: true,
+          result_last_frame_url: true,
+          local_video_path: true,
           error_message: true,
           estimated_cost: true,
           refund_amount: true,

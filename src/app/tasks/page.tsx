@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import TaskVideoThumbnail from '@/components/TaskVideoThumbnail';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
@@ -132,65 +133,6 @@ function taskDownloadDisabledReason(task: Task) {
   if (task.local_status !== 'succeeded') return '任务未完成，暂不能下载';
   if (!task.local_video_path && !task.result_video_url) return '任务没有可用视频链接';
   return '';
-}
-
-type TaskPreviewModel = {
-  kind: 'image' | 'empty';
-  src?: string;
-  label: string;
-};
-
-function getTaskPreview(task: Task, failedSrcs: string[] = []): TaskPreviewModel {
-  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
-  const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
-
-  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc, label: '预览图' };
-  }
-
-  if (task.local_status === 'failed') {
-    return { kind: 'empty', label: '失败无预览' };
-  }
-
-  if (['submitted', 'running'].includes(task.local_status)) {
-    return { kind: 'empty', label: '等待预览' };
-  }
-
-  return { kind: 'empty', label: '暂无预览' };
-}
-
-function TaskPreview({ task }: { task: Task }) {
-  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
-  const preview = getTaskPreview(task, failedSrcs);
-  const markFailed = (src?: string) => {
-    if (!src) return;
-    setFailedSrcs((current) => current.includes(src) ? current : [...current, src]);
-  };
-
-  return (
-    <Link
-      href={taskDetailHref(task.id, '/tasks')}
-      className={`tasks-preview tasks-preview-${preview.kind}`}
-      aria-label={`查看任务 ${task.id} 的截图和详情`}
-    >
-      {preview.kind === 'image' && preview.src && (
-        <img
-          src={preview.src}
-          alt="任务截图"
-          loading="lazy"
-          onError={() => markFailed(preview.src)}
-        />
-      )}
-      {preview.kind === 'empty' && (
-        <div className="tasks-preview-empty">
-          <span>{getStatusText(task.local_status)}</span>
-        </div>
-      )}
-      <span className="tasks-preview-label">
-        {preview.label}
-      </span>
-    </Link>
-  );
 }
 
 export default function TasksPage() {
@@ -379,18 +321,27 @@ export default function TasksPage() {
                 const downloadable = isTaskDownloadable(task);
                 return (
                   <article key={task.id} className="tasks-card">
-                    <label
-                      className="tasks-card-select"
-                      title={downloadable ? '选择此视频加入批量下载' : taskDownloadDisabledReason(task)}
+                    <TaskVideoThumbnail
+                      taskId={task.id}
+                      localVideoPath={task.local_video_path}
+                      resultVideoUrl={task.result_video_url}
+                      resultLastFrameUrl={task.result_last_frame_url}
+                      status={task.local_status}
+                      href={taskDetailHref(task.id, '/tasks')}
+                      size="card"
                     >
-                      <input
-                        type="checkbox"
-                        checked={selectedSet.has(task.id)}
-                        disabled={!downloadable}
-                        onChange={(event) => toggleTaskSelection(task, event.target.checked)}
-                      />
-                    </label>
-                    <TaskPreview task={task} />
+                      <label
+                        className="tasks-card-select"
+                        title={downloadable ? '选择此视频加入批量下载' : taskDownloadDisabledReason(task)}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedSet.has(task.id)}
+                          disabled={!downloadable}
+                          onChange={(event) => toggleTaskSelection(task, event.target.checked)}
+                        />
+                      </label>
+                    </TaskVideoThumbnail>
 
                     <div className="tasks-card-main">
                       <div className="tasks-card-topline">

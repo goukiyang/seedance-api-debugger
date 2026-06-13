@@ -91,6 +91,9 @@ export type DashboardRecentTask = {
   official_amount_micros: number | null;
   official_amount_minor: number | null;
   official_currency: string | null;
+  result_video_url: string | null;
+  result_last_frame_url: string | null;
+  local_video_path: string | null;
   created_at: string;
   completed_at: string | null;
   owner: {
@@ -772,6 +775,9 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       official_amount_micros: task.provider_official_amount_micros,
       official_amount_minor: task.provider_official_amount_minor,
       official_currency: task.provider_cost_currency,
+      result_video_url: task.result_video_url,
+      result_last_frame_url: task.result_last_frame_url,
+      local_video_path: task.local_video_path,
       created_at: task.created_at.toISOString(),
       completed_at: task.completed_at?.toISOString() || null,
       owner: ownerSummary(task),

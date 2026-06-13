@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-13 - 生成记录列表缩略图必须公共化
+
+- 问题/背景：用户要求所有生成记录列表最左边一定要有视频截图，避免提示词、日期、状态或金额先出现，影响识别具体视频。
+- 诱因/根因：各页面分散实现预览逻辑；后台产出页、我的任务页和生成页有各自的截图组件，驾驶舱和成本待办缺首列截图，项目/视频卡页还直接使用 `<video>`。
+- 当时思路：把“截图来源判断、失败兜底、固定尺寸、详情跳转”抽成 `TaskVideoThumbnail`，页面只负责传任务 ID、视频源字段和状态；服务端列表只补最小只读字段。
+- 改动位置：`src/components/TaskVideoThumbnail.tsx`、`src/app/globals.css`、`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/admin/outputs/AdminOutputsClient.tsx`、`src/app/tasks/page.tsx`、`src/app/projects/[id]/page.tsx`、`src/app/projects/[id]/video-cards/[cardId]/page.tsx`、`src/app/video-cards/[id]/page.tsx` 兼容跳转、`src/app/generate/page.tsx`、`src/app/admin/costs/page.tsx`、相关项目/视频卡 API。
+- 怎么改：统一使用 `/api/video/thumbnail/:taskId`，有 `local_video_path`、`result_video_url` 或 `result_last_frame_url` 才请求截图；失败、生成中和无来源时显示固定占位；`/admin`、`/admin/costs`、项目和视频卡接口补齐 `result_last_frame_url`。
+- 验证结果：`git diff --check`、`npm run lint`、`npx tsc --noEmit --pretty false`、`NEXT_DIST_DIR=.next-prod-dry-run npm run build` 通过；已同步 `.next-prod` 并重启 `sd2`，线上 build `Ykc3Zjpn03LqHKntkwRnI` 的 manifest 和 `/api/config` 返回 200。
+- 可复用经验：生成记录的第一识别锚点是画面，不是文本；以后新增任何任务/产出/成本待办列表，先复用公共缩略图组件，再放提示词、金额和操作。
+
 ## 2026-06-10 - 官方金额默认双币种显示
 
 - 问题/背景：用户要求项目内显示金额时，要么同时显示美金和人民币，要么支持点击在两个币种之间切换。

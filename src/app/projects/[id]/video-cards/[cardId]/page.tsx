@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import TaskVideoThumbnail from '@/components/TaskVideoThumbnail';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { formatAmountMicrosWithFixedCny } from '@/lib/costs/currency';
 import { displayUserName } from '@/lib/users/display';
@@ -49,6 +50,7 @@ interface TaskItem {
   prompt: string;
   local_status: string;
   result_video_url: string | null;
+  result_last_frame_url?: string | null;
   local_video_path: string | null;
   estimated_cost: number | null;
   actual_cost: number | null;
@@ -93,12 +95,6 @@ function roleLabel(role: string) {
   if (role === 'candidate') return '候选';
   if (role === 'discarded') return '废弃';
   return '普通版本';
-}
-
-function safeVideoSrc(url?: string | null) {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return url;
-  return null;
 }
 
 function formatOfficialCost(totals?: Array<{ currency: string; amount_micros: number }>) {
@@ -290,13 +286,19 @@ export default function VideoCardDetailPage() {
         ) : (
           <div className="video-card-task-list">
             {tasks.map((task) => {
-              const videoUrl = safeVideoSrc(task.local_video_path || task.result_video_url);
               const officialMicros = task.provider_final_amount_micros ?? task.provider_official_amount_micros;
               return (
                 <article key={task.id} className="video-card-task-item">
-                  <div className="video-card-task-preview">
-                    {videoUrl ? <video src={videoUrl} muted preload="metadata" /> : <span>无视频</span>}
-                  </div>
+                  <TaskVideoThumbnail
+                    taskId={task.id}
+                    localVideoPath={task.local_video_path}
+                    resultVideoUrl={task.result_video_url}
+                    resultLastFrameUrl={task.result_last_frame_url}
+                    status={task.local_status}
+                    href={taskDetailHref(task.id, returnTo)}
+                    size="card"
+                    tone="dark"
+                  />
                   <div className="video-card-task-body">
                     <div className="video-card-task-head">
                       <Link className="link" href={taskDetailHref(task.id, returnTo)}>{task.prompt || task.id}</Link>
