@@ -28,6 +28,9 @@
 - `typecheck`：当前未发现独立脚本
 - `test`：当前未发现通用测试脚本；仅发现 `npm run test:api`，该脚本面向 Seedance 外部接口调试，不应默认作为本地回归测试执行
 - `build`：`npm run build`
+- `sd2` 线上构建：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`
+- `sd2` 线上重启：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2`
+- `sd2` 线上状态：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`
 - 数据库相关脚本：`npm run db:generate`、`npm run db:push`、`npm run db:studio`，默认不得执行会修改数据库状态的命令
 
 ## Codex 默认职责
@@ -37,6 +40,8 @@
 - 对高风险区域保持最小改动原则，必要时先要求 Claude Code 或用户补充只读分析。
 - 每次只处理当前任务，不顺手重构、不扩大范围、不隐式改变业务规则。
 - 修改后执行任务要求的验证命令；如命令缺失、环境缺失或用户明确禁止执行，应在汇报中如实说明。
+- 用户反馈线上 `sd2.youdoodesign.com`、当前浏览器页面或已发布页面仍未生效时，必须把线上部署作为任务范围：检查 `.next-prod/BUILD_ID`、执行 `youdoo-sites build sd2` 和 `youdoo-sites restart sd2`，再从公网 URL 验证新静态资源、关键 CSS/JS 文案或页面行为。
+- `youdoo-sites status sd2` 只能证明服务健康，不能证明代码已更新；完成线上 UI 修复时必须额外用公网 `_next/static/...` 资源、页面 DOM/截图或 API 响应证明新构建已加载。
 - 发现已有未提交改动时，不回滚、不覆盖非本轮产生的变更；若影响本轮任务，应先说明冲突和处理方式。
 - 输出汇报时明确列出实际修改文件、验证命令、验证结果、风险与遗留问题。
 
