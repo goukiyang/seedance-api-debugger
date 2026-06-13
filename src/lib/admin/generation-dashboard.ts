@@ -88,6 +88,9 @@ export type DashboardRecentTask = {
   estimated_cost: number | null;
   frozen_cost: number | null;
   refund_amount: number | null;
+  result_video_url: string | null;
+  result_last_frame_url: string | null;
+  local_video_path: string | null;
   official_amount_micros: number | null;
   official_amount_minor: number | null;
   official_currency: string | null;
@@ -769,6 +772,9 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       estimated_cost: task.estimated_cost,
       frozen_cost: task.frozen_cost,
       refund_amount: task.refund_amount,
+      result_video_url: task.result_video_url,
+      result_last_frame_url: task.result_last_frame_url,
+      local_video_path: task.local_video_path,
       official_amount_micros: task.provider_official_amount_micros,
       official_amount_minor: task.provider_official_amount_minor,
       official_currency: task.provider_cost_currency,

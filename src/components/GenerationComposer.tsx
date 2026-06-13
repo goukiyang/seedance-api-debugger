@@ -100,6 +100,12 @@ function formatReferenceTokens(labels: string[]): string {
 interface Props {
   collections: AssetCollection[];
   initialSettings?: GenerationDefaults | null;
+  lockedSettings?: {
+    sourceLabel: string;
+    ratio?: VideoRatio | null;
+    duration?: VideoDuration | null;
+    resolution?: VideoResolution | null;
+  } | null;
   reuseDraft?: {
     taskId: string;
     reuseKey: number;
@@ -143,6 +149,7 @@ interface Props {
 export function GenerationComposer({
   collections,
   initialSettings,
+  lockedSettings,
   onCollectionLoad,
   onCollectionSave,
   onCollectionNew,
@@ -185,6 +192,7 @@ export function GenerationComposer({
   const [resolutionApprovalConfirmed, setResolutionApprovalConfirmed] = useState(false);
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
+  const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
 
   // ============================================================================
   // Validation
@@ -378,6 +386,18 @@ export function GenerationComposer({
     setWatermark(initialSettings.watermark);
     setResolutionApprovalConfirmed(false);
   }, [initialSettings, reuseDraft]);
+
+  useEffect(() => {
+    if (!lockedSettings) return;
+    if (lockedSettings.ratio) setRatio(lockedSettings.ratio);
+    if (lockedSettings.duration) setDuration(lockedSettings.duration);
+    if (lockedSettings.resolution) setResolution(lockedSettings.resolution);
+  }, [
+    lockedSettings?.sourceLabel,
+    lockedSettings?.ratio,
+    lockedSettings?.duration,
+    lockedSettings?.resolution,
+  ]);
 
   useEffect(() => {
     if (!need1080pApproval) {
@@ -732,6 +752,10 @@ export function GenerationComposer({
           onRatioChange={setRatio}
           onDurationChange={setDuration}
           onResolutionChange={setResolution}
+          lockedRatio={Boolean(lockedSettings?.ratio)}
+          lockedDuration={Boolean(lockedSettings?.duration)}
+          lockedResolution={Boolean(lockedSettings?.resolution)}
+          lockReason={lockReason}
         />
       </div>
 

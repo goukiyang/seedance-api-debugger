@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     if (projectId) await assertCanViewProject(user, projectId);
     if (videoCardId) await assertCanViewVideoCard(user, videoCardId);
     try {
-      validateApprovalPayload({ type, projectId, payload });
+      validateApprovalPayload({ type, projectId, videoCardId, taskId, payload });
     } catch (error) {
       return NextResponse.json(
         { error: error instanceof Error ? error.message : '审批参数无效' },

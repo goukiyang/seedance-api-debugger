@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react'
 import Link from 'next/link';
 import { Archive, Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
+import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
@@ -123,7 +125,20 @@ interface VideoCardOption {
   title: string;
   objective: string | null;
   status: string;
+  platform?: string | null;
+  ratio?: string | null;
+  duration?: number | null;
+  target_resolution?: string | null;
+  ratio_locked?: boolean;
   is_fallback?: boolean;
+  summary?: { task_count: number; charged_credits: number } | null;
+}
+
+interface VideoBranchOption {
+  id: string;
+  title: string;
+  status: string;
+  is_primary: boolean;
   summary?: { task_count: number; charged_credits: number } | null;
 }
 
@@ -250,37 +265,16 @@ function projectRemovalTitle(project: ProjectOption): string {
   return projectHasContent(project) ? '项目已有历史内容，只能归档' : '删除空项目';
 }
 
-type TaskPreviewModel = {
-  kind: 'image' | 'empty';
-  src?: string;
-};
-
-function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPreviewModel {
-  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
-  const hasThumbnailSource = !!(task.local_video_path || task.result_video_url || task.result_last_frame_url);
-
-  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc };
-  }
-
-  return { kind: 'empty' };
+function asVideoRatio(value?: string | null): VideoRatio | null {
+  return RATIO_OPTIONS.includes(value as VideoRatio) ? value as VideoRatio : null;
 }
 
-function RecentTaskPreview({ task }: { task: TaskItem }) {
-  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
-  const preview = getRecentTaskPreview(task, failedSrcs);
-  const markFailed = (src?: string) => {
-    if (!src) return;
-    setFailedSrcs((current) => current.includes(src) ? current : [...current, src]);
-  };
+function asVideoDuration(value?: number | null): VideoDuration | null {
+  return DURATION_OPTIONS.includes(value as VideoDuration) ? value as VideoDuration : null;
+}
 
-  return (
-    <div className={`composer-task-card-preview composer-task-card-preview-${preview.kind}`}>
-      {preview.kind === 'image' && preview.src && (
-        <img src={preview.src} alt="任务截图" loading="lazy" onError={() => markFailed(preview.src)} />
-      )}
-    </div>
-  );
+function asVideoResolution(value?: string | null): VideoResolution | null {
+  return RESOLUTION_OPTIONS.includes(value as VideoResolution) ? value as VideoResolution : null;
 }
 
 // ============================================================================
@@ -332,9 +326,12 @@ export default function GeneratePage() {
   const [projectName, setProjectName] = useState('');
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
-  const [videoCards, setVideoCards] = useState<VideoCardOption[]>([]);
-  const [selectedVideoCardId, setSelectedVideoCardId] = useState('');
-  const [loadingVideoCards, setLoadingVideoCards] = useState(false);
+	  const [videoCards, setVideoCards] = useState<VideoCardOption[]>([]);
+	  const [selectedVideoCardId, setSelectedVideoCardId] = useState('');
+	  const [videoBranches, setVideoBranches] = useState<VideoBranchOption[]>([]);
+	  const [selectedVideoBranchId, setSelectedVideoBranchId] = useState('');
+	  const [loadingVideoBranches, setLoadingVideoBranches] = useState(false);
+	  const [loadingVideoCards, setLoadingVideoCards] = useState(false);
   const [videoCardTitle, setVideoCardTitle] = useState('');
   const [videoCardObjective, setVideoCardObjective] = useState('');
   const [videoCardBusy, setVideoCardBusy] = useState(false);
@@ -511,12 +508,48 @@ export default function GeneratePage() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadVideoCards(selectedProjectId, {
-      preferredVideoCardId: reuseDraft?.videoCardId || null,
-      keepSelected: true,
-    });
-  }, [loadVideoCards, selectedProjectId, reuseDraft?.videoCardId]);
+	  useEffect(() => {
+	    void loadVideoCards(selectedProjectId, {
+	      preferredVideoCardId: reuseDraft?.videoCardId || null,
+	      keepSelected: true,
+	    });
+	  }, [loadVideoCards, selectedProjectId, reuseDraft?.videoCardId]);
+
+	  useEffect(() => {
+	    if (!selectedVideoCardId) {
+	      setVideoBranches([]);
+	      setSelectedVideoBranchId('');
+	      return;
+	    }
+	    let cancelled = false;
+	    setLoadingVideoBranches(true);
+	    fetch(`/api/video-cards/${selectedVideoCardId}/branches`, { cache: 'no-store' })
+	      .then((res) => res.ok ? res.json() : { branches: [] })
+	      .then((data) => {
+	        if (cancelled) return;
+	        const list: VideoBranchOption[] = Array.isArray(data.branches) ? data.branches : [];
+	        const active = list.filter((branch) => ['exploring', 'candidate', 'primary'].includes(branch.status));
+	        setVideoBranches(active);
+	        const requestedBranchId = new URLSearchParams(window.location.search).get('video_branch_id');
+	        setSelectedVideoBranchId((current) => {
+	          if (requestedBranchId && active.some((branch) => branch.id === requestedBranchId)) return requestedBranchId;
+	          if (current && active.some((branch) => branch.id === current)) return current;
+	          return active.find((branch) => branch.is_primary)?.id || '';
+	        });
+	      })
+	      .catch(() => {
+	        if (!cancelled) {
+	          setVideoBranches([]);
+	          setSelectedVideoBranchId('');
+	        }
+	      })
+	      .finally(() => {
+	        if (!cancelled) setLoadingVideoBranches(false);
+	      });
+	    return () => {
+	      cancelled = true;
+	    };
+	  }, [selectedVideoCardId]);
 
   useEffect(() => {
     if (appliedPreferenceProjectRef.current) return;
@@ -1031,10 +1064,11 @@ export default function GeneratePage() {
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
           resolution_approval_confirmed: params.resolutionApprovalConfirmed,
-          idempotency_key: idempotencyKey,
-          project_id: selectedProjectId,
-          video_card_id: selectedVideoCard.id,
-          reference_image_ids: params.referenceImageIds || [],
+	          idempotency_key: idempotencyKey,
+	          project_id: selectedProjectId,
+	          video_card_id: selectedVideoCard.id,
+	          video_branch_id: selectedVideoBranchId || undefined,
+	          reference_image_ids: params.referenceImageIds || [],
         }),
       });
 
@@ -1090,7 +1124,7 @@ export default function GeneratePage() {
     } finally {
       setSubmitting(false);
     }
-  }, [saveGenerationDefaults, selectedProjectId, selectedVideoCardId, videoCards]);
+	  }, [saveGenerationDefaults, selectedProjectId, selectedVideoBranchId, selectedVideoCardId, videoCards]);
 
   // ============================================================================
   // Collection handlers
@@ -1182,11 +1216,26 @@ export default function GeneratePage() {
     : loadingProjects
       ? '正在加载项目...'
       : '暂无可生成项目';
-  const selectedProjectMeta = selectedProject
-    ? projectMetaLabel(selectedProject)
-    : '新建一个项目后即可保存任务、成本和结果。';
-  const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
-  const videoCardSummaryLabel = loadingVideoCards
+	  const selectedProjectMeta = selectedProject
+	    ? projectMetaLabel(selectedProject)
+	    : '新建一个项目后即可保存任务、成本和结果。';
+	  const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
+	  const selectedVideoCardLockedSettings = selectedVideoCard
+	    ? {
+	        sourceLabel: selectedVideoCard.title,
+	        ratio: asVideoRatio(selectedVideoCard.ratio),
+	        duration: asVideoDuration(selectedVideoCard.duration),
+	        resolution: asVideoResolution(selectedVideoCard.target_resolution),
+	      }
+	    : null;
+	  const selectedVideoCardSpecText = selectedVideoCard
+	    ? [
+	        selectedVideoCard.ratio || '比例未定',
+	        selectedVideoCard.duration ? `${selectedVideoCard.duration}s` : '时长未定',
+	        selectedVideoCard.target_resolution || '分辨率未定',
+	      ].join(' · ')
+	    : '';
+	  const videoCardSummaryLabel = loadingVideoCards
     ? '正在加载视频卡...'
     : selectedVideoCard
       ? selectedVideoCard.title
@@ -1453,14 +1502,34 @@ export default function GeneratePage() {
               </div>
             </div>
 
-            {selectedVideoCard && (
-              <div className="composer-video-card-current">
-                <strong>{selectedVideoCard.title}</strong>
-                <span>{selectedVideoCard.objective || '未填写视频目标'}</span>
-              </div>
-            )}
+	            {selectedVideoCard && (
+	              <div className="composer-video-card-current">
+	                <strong>{selectedVideoCard.title}</strong>
+	                <span>{selectedVideoCard.objective || '未填写视频目标'}</span>
+	                <small>{selectedVideoCardSpecText} · 生成参数将按视频卡规格继承</small>
+	              </div>
+	            )}
 
-            {selectedProjectId && videoCards.length === 0 && !loadingVideoCards && (
+	            {selectedVideoCard && (loadingVideoBranches || videoBranches.length > 0) && (
+	              <div className="composer-video-branch-row">
+	                <span>方向分支</span>
+	                <select
+	                  className="composer-project-input"
+	                  value={selectedVideoBranchId}
+	                  onChange={(event) => setSelectedVideoBranchId(event.target.value)}
+	                  disabled={loadingVideoBranches || videoCardBusy}
+	                >
+	                  <option value="">不指定方向</option>
+	                  {videoBranches.map((branch) => (
+	                    <option key={branch.id} value={branch.id}>
+	                      {branch.is_primary ? '主方向 · ' : ''}{branch.title}{branch.summary ? ` · ${branch.summary.task_count} 次` : ''}
+	                    </option>
+	                  ))}
+	                </select>
+	              </div>
+	            )}
+
+	            {selectedProjectId && videoCards.length === 0 && !loadingVideoCards && (
               <div className="composer-video-card-empty">当前项目还没有视频卡。创建后才能提交生成。</div>
             )}
 
@@ -1505,10 +1574,11 @@ export default function GeneratePage() {
           </div>
         )}
 
-        <GenerationComposer
-          collections={collections}
-          initialSettings={generationDefaults}
-          reuseDraft={reuseDraft}
+	        <GenerationComposer
+	          collections={collections}
+	          initialSettings={generationDefaults}
+	          lockedSettings={selectedVideoCardLockedSettings}
+	          reuseDraft={reuseDraft}
           require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
@@ -1539,7 +1609,15 @@ export default function GeneratePage() {
                       className="composer-task-card"
                     >
                       <Link href={taskDetailHref(task.id, '/generate')} className="composer-task-card-link">
-                        <RecentTaskPreview task={task} />
+	                        <TaskVideoThumbnail
+	                          taskId={task.id}
+	                          localVideoPath={task.local_video_path}
+	                          resultVideoUrl={task.result_video_url}
+	                          resultLastFrameUrl={task.result_last_frame_url}
+	                          status={task.local_status}
+	                          size="card"
+	                          className="composer-task-card-preview"
+	                        />
                         <div className="composer-task-card-body">
                           <div className="composer-task-card-prompt" title={`${formatAbsoluteTime(task.created_at)} · ${task.prompt}`}>
                             <time className="composer-task-card-prompt-time" dateTime={task.created_at}>

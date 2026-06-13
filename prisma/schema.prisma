@@ -61,12 +61,13 @@ model VideoTask {
   snapshot_id  String? @unique
 
   // 用户关联（P0-B）
-  user_id       String?
-  owner_user_id String?
-  project_id    String?
-  video_card_id String?
-  visibility    String  @default("project") // private | project | selected | public
-  version_role  String  @default("normal") // normal | candidate | current_best | final | discarded
+  user_id         String?
+  owner_user_id   String?
+  project_id      String?
+  video_card_id   String?
+  video_branch_id String?
+  visibility      String  @default("project") // private | project | selected | public
+  version_role    String  @default("normal") // normal | candidate | current_best | final | discarded
 
   // 产出留存与用户删除（管理员仍可审计）
   retention_status String    @default("active") // active | user_deleted | admin_hidden | retained
@@ -108,17 +109,19 @@ model VideoTask {
   provider_cost_reconciled_at     DateTime?
   cost_allocation_status          String    @default("allocated") // allocated | unallocated | partially_allocated
 
-  workspace             Workspace?           @relation(fields: [workspace_id], references: [id])
-  user                  User?                @relation("VideoTaskUser", fields: [user_id], references: [id])
-  owner                 User?                @relation("VideoTaskOwner", fields: [owner_user_id], references: [id])
-  project               Project?             @relation(fields: [project_id], references: [id])
-  video_card            VideoCard?           @relation("VideoCardTasks", fields: [video_card_id], references: [id], onDelete: SetNull)
+  workspace              Workspace?           @relation(fields: [workspace_id], references: [id])
+  user                   User?                @relation("VideoTaskUser", fields: [user_id], references: [id])
+  owner                  User?                @relation("VideoTaskOwner", fields: [owner_user_id], references: [id])
+  project                Project?             @relation(fields: [project_id], references: [id])
+  video_card             VideoCard?           @relation("VideoCardTasks", fields: [video_card_id], references: [id], onDelete: SetNull)
+  video_branch           VideoBranch?         @relation(fields: [video_branch_id], references: [id], onDelete: SetNull)
   current_best_for_cards VideoCard[]          @relation("VideoCardCurrentBest")
-  final_for_cards       VideoCard[]          @relation("VideoCardFinal")
-  provider_api_requests ProviderApiRequest[]
-  cost_ledgers          CostLedger[]
-  cost_allocations      CostAllocation[]
-  approval_records      ApprovalRecord[]
+  final_for_cards        VideoCard[]          @relation("VideoCardFinal")
+  provider_api_requests  ProviderApiRequest[]
+  cost_ledgers           CostLedger[]
+  cost_allocations       CostAllocation[]
+  approval_records       ApprovalRecord[]
+  approval_usages        ApprovalUsage[]
 
   created_at   DateTime  @default(now())
   updated_at   DateTime  @updatedAt
@@ -129,6 +132,7 @@ model VideoTask {
   @@index([owner_user_id])
   @@index([project_id])
   @@index([video_card_id])
+  @@index([video_branch_id])
   @@index([version_role])
   @@index([source_type])
   @@index([source_request_id])
@@ -193,8 +197,12 @@ model User {
   cost_allocations        CostAllocation[]
   content_audit_actions   ContentAuditLog[]    @relation("ContentAuditActor")
   content_audit_owned     ContentAuditLog[]    @relation("ContentAuditOwner")
-  approval_requests       ApprovalRecord[]      @relation("ApprovalRequester")
-  approval_decisions      ApprovalRecord[]      @relation("ApprovalApprover")
+  approval_requests       ApprovalRecord[]     @relation("ApprovalRequester")
+  approval_decisions      ApprovalRecord[]     @relation("ApprovalApprover")
+  approval_usages         ApprovalUsage[]      @relation("ApprovalUsageUser")
+  notification_targets    Notification[]       @relation("NotificationTarget")
+  notification_actors     Notification[]       @relation("NotificationActor")
+  generated_review_cards  ReviewCard[]         @relation("ReviewCardGenerator")
   feedbacks               Feedback[]
   preferences             UserPreference[]
 
@@ -247,8 +255,8 @@ model Project {
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
 
-  owner                 User                 @relation("ProjectOwner", fields: [owner_user_id], references: [id])
-  creator               User                 @relation("ProjectCreator", fields: [created_by], references: [id])
+  owner                 User                  @relation("ProjectOwner", fields: [owner_user_id], references: [id])
+  creator               User                  @relation("ProjectCreator", fields: [created_by], references: [id])
   members               ProjectMember[]
   invites               ProjectInvite[]
   video_cards           VideoCard[]
@@ -263,6 +271,9 @@ model Project {
   budget_ledgers        ProjectBudgetLedger[]
   approval_records      ApprovalRecord[]
   content_audit_logs    ContentAuditLog[]
+  feishu_requirements   FeishuRequirement[]
+  review_cards          ReviewCard[]
+  notifications         Notification[]
 
   @@index([workspace_id])
   @@index([owner_user_id])
@@ -273,35 +284,44 @@ model Project {
 }
 
 model VideoCard {
-  id                 String    @id @default(cuid())
-  project_id         String
-  title              String
-  objective          String?
-  status             String    @default("active") // draft | active | reviewing | finalized | sealed | archived
-  owner_user_id      String?
-  platform           String?
-  ratio              String?
-  duration           Int?
-  target_resolution  String?
-  budget_credits     Float?
-  budget_currency    String?   @default("credits")
+  id                   String    @id @default(cuid())
+  project_id           String
+  title                String
+  objective            String?
+  status               String    @default("active") // draft | active | reviewing | finalized | sealed | merged | archived | discarded
+  owner_user_id        String?
+  platform             String?
+  ratio                String?
+  duration             Int?
+  target_resolution    String?
+  original_ratio       String?
+  ratio_locked         Boolean   @default(false)
+  ratio_change_reason  String?
+  delivery_specs_json  String?
+  budget_credits       Float?
+  budget_currency      String?   @default("credits")
   current_best_task_id String?
-  final_task_id      String?
-  is_fallback        Boolean   @default(false)
-  created_by         String
-  sealed_at          DateTime?
-  sealed_by          String?
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
+  final_task_id        String?
+  is_fallback          Boolean   @default(false)
+  merged_into_card_id  String?
+  merged_at            DateTime?
+  merge_reason         String?
+  created_by           String
+  sealed_at            DateTime?
+  sealed_by            String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
-  project           Project     @relation(fields: [project_id], references: [id], onDelete: Cascade)
-  owner             User?       @relation("VideoCardOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
-  creator           User        @relation("VideoCardCreator", fields: [created_by], references: [id])
-  sealedBy          User?       @relation("VideoCardSealer", fields: [sealed_by], references: [id], onDelete: SetNull)
-  tasks             VideoTask[] @relation("VideoCardTasks")
-  current_best_task VideoTask?  @relation("VideoCardCurrentBest", fields: [current_best_task_id], references: [id], onDelete: SetNull)
-  final_task        VideoTask?  @relation("VideoCardFinal", fields: [final_task_id], references: [id], onDelete: SetNull)
+  project           Project          @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  owner             User?            @relation("VideoCardOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  creator           User             @relation("VideoCardCreator", fields: [created_by], references: [id])
+  sealedBy          User?            @relation("VideoCardSealer", fields: [sealed_by], references: [id], onDelete: SetNull)
+  tasks             VideoTask[]      @relation("VideoCardTasks")
+  current_best_task VideoTask?       @relation("VideoCardCurrentBest", fields: [current_best_task_id], references: [id], onDelete: SetNull)
+  final_task        VideoTask?       @relation("VideoCardFinal", fields: [final_task_id], references: [id], onDelete: SetNull)
   approval_records  ApprovalRecord[]
+  branches          VideoBranch[]
+  notifications     Notification[]
 
   @@index([project_id])
   @@index([status])
@@ -310,6 +330,30 @@ model VideoCard {
   @@index([current_best_task_id])
   @@index([final_task_id])
   @@index([is_fallback])
+  @@index([merged_into_card_id])
+}
+
+model VideoBranch {
+  id                    String    @id @default(cuid())
+  video_card_id         String
+  title                 String
+  description           String?
+  status                String    @default("exploring") // exploring | candidate | primary | closed | merged | promoted
+  is_primary            Boolean   @default(false)
+  promoted_card_id      String?
+  merged_into_branch_id String?
+  created_by            String
+  closed_at             DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  video_card VideoCard   @relation(fields: [video_card_id], references: [id], onDelete: Cascade)
+  tasks      VideoTask[]
+
+  @@index([video_card_id])
+  @@index([status])
+  @@index([is_primary])
+  @@index([promoted_card_id])
 }
 
 model CanvasDocument {
@@ -470,16 +514,19 @@ model CreditLedger {
 
 // 项目预算账户。公共项目从这里冻结、实扣和返还，避免混用个人点数余额。
 model ProjectBudgetAccount {
-  id             String   @id @default(cuid())
-  project_id     String   @unique
-  budget_credits Float    @default(0)
-  used_credits   Float    @default(0)
-  frozen_credits Float    @default(0)
-  currency       String   @default("credits")
-  status         String   @default("active") // active | frozen | exhausted | cancelled
-  created_by     String?
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  id                      String   @id @default(cuid())
+  project_id              String   @unique
+  budget_credits          Float    @default(0)
+  used_credits            Float    @default(0)
+  frozen_credits          Float    @default(0)
+  currency                String   @default("credits")
+  status                  String   @default("active") // active | frozen | exhausted | cancelled
+  freeze_reason           String?
+  reconciliation_status   String   @default("normal") // normal | pending | abnormal | reconciled
+  threshold_notified_json String?
+  created_by              String?
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
 
   project Project               @relation(fields: [project_id], references: [id], onDelete: Cascade)
   ledgers ProjectBudgetLedger[]
@@ -529,6 +576,10 @@ model ApprovalRecord {
   task_id                String?
   requester_user_id      String
   approver_user_id       String?
+  usage_limit            Int?
+  used_count             Int       @default(0)
+  effect_status          String    @default("pending") // pending | applied | failed | skipped
+  effect_error           String?
   reason                 String?
   decision_reason        String?
   scope_json             String?
@@ -539,11 +590,13 @@ model ApprovalRecord {
   created_at             DateTime  @default(now())
   updated_at             DateTime  @updatedAt
 
-  project   Project?   @relation(fields: [project_id], references: [id], onDelete: SetNull)
-  videoCard VideoCard? @relation(fields: [video_card_id], references: [id], onDelete: SetNull)
-  task      VideoTask? @relation(fields: [task_id], references: [id], onDelete: SetNull)
-  requester User       @relation("ApprovalRequester", fields: [requester_user_id], references: [id], onDelete: Cascade)
-  approver  User?      @relation("ApprovalApprover", fields: [approver_user_id], references: [id], onDelete: SetNull)
+  project       Project?        @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  videoCard     VideoCard?      @relation(fields: [video_card_id], references: [id], onDelete: SetNull)
+  task          VideoTask?      @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  requester     User            @relation("ApprovalRequester", fields: [requester_user_id], references: [id], onDelete: Cascade)
+  approver      User?           @relation("ApprovalApprover", fields: [approver_user_id], references: [id], onDelete: SetNull)
+  usages        ApprovalUsage[]
+  notifications Notification[]
 
   @@index([type])
   @@index([status])
@@ -553,6 +606,111 @@ model ApprovalRecord {
   @@index([requester_user_id])
   @@index([approver_user_id])
   @@index([expires_at])
+  @@index([created_at])
+}
+
+model ApprovalUsage {
+  id            String   @id @default(cuid())
+  approval_id   String
+  task_id       String?
+  user_id       String
+  amount        Int      @default(1)
+  metadata_json String?
+  created_at    DateTime @default(now())
+
+  approval ApprovalRecord @relation(fields: [approval_id], references: [id], onDelete: Cascade)
+  task     VideoTask?     @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  user     User           @relation("ApprovalUsageUser", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([approval_id, task_id])
+  @@index([approval_id])
+  @@index([task_id])
+  @@index([user_id])
+}
+
+model FeishuRequirement {
+  id                 String    @id @default(cuid())
+  app_token          String
+  table_id           String
+  record_id          String
+  idempotency_key    String    @unique
+  record_type        String    @default("project") // project | video_item
+  sync_status        String    @default("draft") // draft | synced | needs_input | failed | confirmed
+  raw_fields_json    String
+  project_draft_json String?
+  video_cards_json   String?
+  created_project_id String?
+  error_message      String?
+  last_synced_at     DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  created_project Project? @relation(fields: [created_project_id], references: [id], onDelete: SetNull)
+
+  @@unique([app_token, table_id, record_id])
+  @@index([sync_status])
+  @@index([created_project_id])
+}
+
+model ReviewCard {
+  id                        String   @id @default(cuid())
+  project_id                String
+  status                    String   @default("draft") // draft | generated | archived
+  summary_json              String
+  total_credits             Float    @default(0)
+  total_amount_micros       Int?
+  currency                  String?
+  video_card_count          Int      @default(0)
+  final_task_count          Int      @default(0)
+  failure_rate              Float    @default(0)
+  budget_suggestion_credits Float?
+  budget_suggestion_reason  String?
+  admin_note                String?
+  generated_by              String?
+  generated_at              DateTime @default(now())
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  project   Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  generator User?   @relation("ReviewCardGenerator", fields: [generated_by], references: [id], onDelete: SetNull)
+
+  @@index([project_id])
+  @@index([status])
+  @@index([generated_at])
+}
+
+model Notification {
+  id             String    @id @default(cuid())
+  type           String
+  channel        String    @default("in_app") // in_app | feishu
+  status         String    @default("pending") // pending | sent | read | failed
+  target_user_id String
+  actor_user_id  String?
+  project_id     String?
+  video_card_id  String?
+  approval_id    String?
+  title          String
+  body           String?
+  metadata_json  String?
+  sent_at        DateTime?
+  read_at        DateTime?
+  error_message  String?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  target    User            @relation("NotificationTarget", fields: [target_user_id], references: [id], onDelete: Cascade)
+  actor     User?           @relation("NotificationActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
+  project   Project?        @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  videoCard VideoCard?      @relation(fields: [video_card_id], references: [id], onDelete: SetNull)
+  approval  ApprovalRecord? @relation(fields: [approval_id], references: [id], onDelete: SetNull)
+
+  @@index([target_user_id])
+  @@index([actor_user_id])
+  @@index([project_id])
+  @@index([video_card_id])
+  @@index([approval_id])
+  @@index([type])
+  @@index([status])
   @@index([created_at])
 }
 
@@ -942,12 +1100,12 @@ model PublicAlbumSubmission {
 
   publicFolder ReferenceAlbumFolder? @relation(fields: [public_folder_id], references: [id], onDelete: SetNull)
 
+  @@unique([source_album_id, submitted_by_user_id, status])
   @@index([source_album_id])
   @@index([target_album_id])
   @@index([public_folder_id])
   @@index([submitted_by_user_id])
   @@index([status])
-  @@unique([source_album_id, submitted_by_user_id, status])
 }
 
 model ReferenceImage {

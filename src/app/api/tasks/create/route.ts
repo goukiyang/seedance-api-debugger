@@ -40,7 +40,8 @@ import {
   settleProjectTaskBudget,
   shouldBillProjectBudget,
 } from '@/lib/projects/budget';
-import { findValidApproval } from '@/lib/approvals';
+import { consumeApprovalForTask, findUsableApproval } from '@/lib/approvals';
+import { notifyProjectOwner } from '@/lib/notifications';
 import { evaluatePaidGenerationGuard, paidGenerationGuardError } from '@/lib/tasks/paid-generation-guard';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import type { CreateVideoInput, GenerationMode, VideoResolution, VideoDuration } from '@/types';
@@ -119,6 +120,16 @@ export async function POST(request: NextRequest) {
     : typeof body.videoCardId === 'string' && body.videoCardId.trim()
       ? body.videoCardId.trim()
       : null;
+  const requestedResolutionApprovalId = typeof body.resolution_approval_id === 'string' && body.resolution_approval_id.trim()
+    ? body.resolution_approval_id.trim()
+    : typeof body.resolutionApprovalId === 'string' && body.resolutionApprovalId.trim()
+      ? body.resolutionApprovalId.trim()
+      : null;
+  const requestedVideoBranchId = typeof body.video_branch_id === 'string' && body.video_branch_id.trim()
+    ? body.video_branch_id.trim()
+    : typeof body.videoBranchId === 'string' && body.videoBranchId.trim()
+      ? body.videoBranchId.trim()
+      : null;
 
   if (!requestedVideoCardId) {
     return errorJson('必须先选择视频卡，生成任务才能写入项目成本闭环', 400);
@@ -150,21 +161,38 @@ export async function POST(request: NextRequest) {
     if (!resolutionApprovalConfirmed) {
       return errorJson('1080p 生成需要先确认审批通过', 403);
     }
-    const approval = await prisma.$transaction((tx) => findValidApproval(tx, {
-      type: 'resolution_1080p',
-      projectId: project.id,
-      videoCardId: videoCard.id,
-    }));
+    const baselineTaskId = videoCard.final_task_id || videoCard.current_best_task_id;
+    const candidateCount = await prisma.videoTask.count({
+      where: {
+        video_card_id: videoCard.id,
+        version_role: { in: ['candidate', 'current_best', 'final'] },
+      },
+    });
+    if (!baselineTaskId && candidateCount === 0) {
+      return errorJson('1080p 必须基于候选、当前最佳或最终版任务，不能在无基准版本的视频卡上直接生成', 403);
+    }
+    const approval = requestedResolutionApprovalId
+      ? await prisma.approvalRecord.findFirst({
+          where: {
+            id: requestedResolutionApprovalId,
+            type: 'resolution_1080p',
+            status: 'approved',
+            project_id: project.id,
+            video_card_id: videoCard.id,
+          },
+        })
+      : await prisma.$transaction((tx) => findUsableApproval(tx, {
+          type: 'resolution_1080p',
+          projectId: project.id,
+          videoCardId: videoCard.id,
+        }));
     if (!approval) {
       const rejectedApproval = await prisma.approvalRecord.findFirst({
         where: {
           type: 'resolution_1080p',
           status: 'rejected',
           project_id: project.id,
-          OR: [
-            { video_card_id: videoCard.id },
-            { video_card_id: null },
-          ],
+          video_card_id: videoCard.id,
         },
         orderBy: [{ rejected_at: 'desc' }, { created_at: 'desc' }],
         select: { decision_reason: true, reason: true },
@@ -175,6 +203,48 @@ export async function POST(request: NextRequest) {
       }
       return errorJson('未找到有效的 1080p 审批记录，请先在审批中心申请并通过审批', 403);
     }
+    if (approval.video_card_id !== videoCard.id) {
+      return errorJson('1080p 审批必须绑定当前视频卡，不能跨视频卡或使用项目级通配审批', 403);
+    }
+    if (approval.usage_limit !== null && approval.used_count >= approval.usage_limit) {
+      return errorJson('1080p 审批额度已用尽，请重新申请', 403);
+    }
+    if (approval.expires_at && approval.expires_at <= new Date()) {
+      return errorJson('1080p 审批已过期，请重新申请', 403);
+    }
+    if (!approval.task_id) {
+      return errorJson('1080p 审批缺少基准任务，请重新申请', 403);
+    }
+    const approvalBaseTask = await prisma.videoTask.findUnique({
+      where: { id: approval.task_id },
+      select: { id: true, video_card_id: true, version_role: true },
+    });
+    if (
+      !approvalBaseTask
+      || approvalBaseTask.video_card_id !== videoCard.id
+      || !['candidate', 'current_best', 'final'].includes(approvalBaseTask.version_role)
+    ) {
+      return errorJson('1080p 审批基准任务不属于当前视频卡候选/当前最佳/最终版', 403);
+    }
+  }
+
+  if (videoCard.ratio_locked && videoCard.ratio && ratio !== videoCard.ratio) {
+    return errorJson(`此视频卡已锁定比例 ${videoCard.ratio}，变更比例需要先通过比例变更审批`, 403);
+  }
+
+  let videoBranch: { id: string; title: string; status: string; is_primary: boolean } | null = null;
+  if (requestedVideoBranchId) {
+    const branch = await prisma.videoBranch.findUnique({
+      where: { id: requestedVideoBranchId },
+      select: { id: true, video_card_id: true, title: true, status: true, is_primary: true },
+    });
+    if (!branch || branch.video_card_id !== videoCard.id) {
+      return errorJson('方向分支不属于当前视频卡', 400);
+    }
+    if (['closed', 'merged', 'promoted'].includes(branch.status)) {
+      return errorJson('方向分支已关闭、合并或升格，不能继续生成', 403);
+    }
+    videoBranch = branch;
   }
 
   // --- Pricing ---
@@ -420,6 +490,22 @@ export async function POST(request: NextRequest) {
     input: providerInput,
     providerPayloadJson: JSON.stringify({ content_item_count: content.length, referenceCount: preparedImages.length }),
   });
+  const taskParams = {
+    ratio, duration, resolution, seed,
+    generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
+    referenceAlbumIds: generationReferenceAlbumIds,
+    referenceImageIds: generationReferenceImageIds,
+    videoCardId: videoCard.id,
+    videoBranchId: videoBranch?.id || null,
+    preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
+    prepSummary,
+    source: {
+      type: requestSource.source_type,
+      label: requestSource.source_label,
+      requestId: sourceRequestId,
+      paidGenerationGuard: paidGenerationGuard.metadata,
+    },
+  };
 
   // --- Credit check + freeze + create single VideoTask in ONE transaction ---
   let taskId: string;
@@ -472,6 +558,7 @@ export async function POST(request: NextRequest) {
           owner_user_id: user.id,
           project_id: project.id,
           video_card_id: videoCard.id,
+          video_branch_id: videoBranch?.id || null,
           visibility: project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
           frozen_cost: estimatedCost,
@@ -482,23 +569,63 @@ export async function POST(request: NextRequest) {
           billing_account_id: billingAccountId,
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
-          params_json: JSON.stringify({
-            ratio, duration, resolution, seed,
-            generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
-            referenceAlbumIds: generationReferenceAlbumIds,
-            referenceImageIds: generationReferenceImageIds,
-            videoCardId: videoCard.id,
-            preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
-            prepSummary,
-            source: {
-              type: requestSource.source_type,
-              label: requestSource.source_label,
-              requestId: sourceRequestId,
-              paidGenerationGuard: paidGenerationGuard.metadata,
-            },
-          }),
+          params_json: JSON.stringify(taskParams),
         },
       });
+
+      if (project.type !== 'personal' && resolution === '1080p') {
+        const approval = requestedResolutionApprovalId
+          ? await tx.approvalRecord.findFirst({
+              where: {
+                id: requestedResolutionApprovalId,
+                type: 'resolution_1080p',
+                status: 'approved',
+                project_id: project.id,
+                video_card_id: videoCard.id,
+              },
+            })
+          : await findUsableApproval(tx, {
+              type: 'resolution_1080p',
+              projectId: project.id,
+              videoCardId: videoCard.id,
+            });
+        if (!approval) throw new Error('未找到可用的 1080p 审批额度');
+        if (approval.video_card_id !== videoCard.id) throw new Error('1080p 审批必须绑定当前视频卡');
+        if (!approval.task_id) throw new Error('1080p 审批缺少基准任务');
+        const baseTask = await tx.videoTask.findUnique({
+          where: { id: approval.task_id },
+          select: { id: true, video_card_id: true, version_role: true },
+        });
+        if (
+          !baseTask
+          || baseTask.video_card_id !== videoCard.id
+          || !['candidate', 'current_best', 'final'].includes(baseTask.version_role)
+        ) {
+          throw new Error('1080p 审批基准任务不属于当前视频卡候选/当前最佳/最终版');
+        }
+        await consumeApprovalForTask(tx, {
+          approvalId: approval.id,
+          taskId: task.id,
+          userId: user.id,
+          metadata: {
+            project_id: project.id,
+            video_card_id: videoCard.id,
+            baseline_task_id: approval.task_id,
+            resolution,
+            estimated_cost: estimatedCost,
+          },
+        });
+        await tx.videoTask.update({
+          where: { id: task.id },
+          data: {
+            params_json: JSON.stringify({
+              ...taskParams,
+              resolutionApprovalId: approval.id,
+              resolutionApprovalBaselineTaskId: approval.task_id,
+            }),
+          },
+        });
+      }
 
       let freezeSnapshot: string;
       try {
@@ -579,6 +706,21 @@ export async function POST(request: NextRequest) {
     createdTask = result;
   } catch (err) {
     if (err instanceof CreditError) {
+      if (err.code === 'INSUFFICIENT_PROJECT_BUDGET') {
+        await prisma.$transaction((tx) => notifyProjectOwner(tx, {
+          projectId: project.id,
+          actorUserId: user.id,
+          type: 'project_budget_insufficient',
+          title: '项目预算不足',
+          body: err.message,
+          metadata: {
+            attempted_cost: estimatedCost,
+            video_card_id: videoCard.id,
+          },
+        })).catch((notificationError) => {
+          console.error('[TasksCreate] Failed to notify project budget shortage:', notificationError);
+        });
+      }
       return NextResponse.json({ error: err.code, message: err.message }, { status: 400 });
     }
     throw err;
@@ -701,6 +843,20 @@ async function handleProviderFailure(
 
     const taskBeforeSettlement = await tx.videoTask.findUnique({ where: { id: taskId } });
     if (!taskBeforeSettlement) return;
+
+    const consumedApprovals = await tx.approvalUsage.findMany({
+      where: { task_id: taskId },
+      select: { approval_id: true },
+    });
+    if (consumedApprovals.length > 0) {
+      await tx.approvalUsage.deleteMany({ where: { task_id: taskId } });
+      for (const usage of consumedApprovals) {
+        await tx.approvalRecord.updateMany({
+          where: { id: usage.approval_id, used_count: { gt: 0 } },
+          data: { used_count: { decrement: 1 } },
+        });
+      }
+    }
 
     await tx.videoTask.update({
       where: { id: taskId },

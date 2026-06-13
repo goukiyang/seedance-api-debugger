@@ -78,6 +78,14 @@ export default function ApprovalsPage() {
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
   const [amountCredits, setAmountCredits] = useState('');
+  const [budgetPurpose, setBudgetPurpose] = useState('');
+  const [quotaCount, setQuotaCount] = useState('1');
+  const [estimatedBudgetCredits, setEstimatedBudgetCredits] = useState('');
+  const [intendedUse, setIntendedUse] = useState('');
+  const [targetRatio, setTargetRatio] = useState('');
+  const [changeReason, setChangeReason] = useState('');
+  const [reopenReason, setReopenReason] = useState('');
+  const [targetStatus, setTargetStatus] = useState('active');
   const [submitting, setSubmitting] = useState(false);
 
   const load = async () => {
@@ -113,11 +121,19 @@ export default function ApprovalsPage() {
     const requestedProjectName = params.get('project_name');
     const requestedProjectDescription = params.get('project_description');
     const requestedInitialBudget = params.get('initial_budget_credits');
+    const requestedVideoCardId = params.get('video_card_id');
+    const requestedTaskId = params.get('task_id');
+    const requestedTargetRatio = params.get('target_ratio');
+    const requestedTargetStatus = params.get('target_status');
     if (isApprovalTypeValue(requestedType)) setType(requestedType);
     if (requestedReason) setReason(requestedReason);
     if (requestedProjectName) setProjectName(requestedProjectName);
     if (requestedProjectDescription) setProjectDescription(requestedProjectDescription);
     if (requestedInitialBudget) setAmountCredits(requestedInitialBudget);
+    if (requestedVideoCardId) setVideoCardId(requestedVideoCardId);
+    if (requestedTaskId) setTaskId(requestedTaskId);
+    if (requestedTargetRatio) setTargetRatio(requestedTargetRatio);
+    if (requestedTargetStatus) setTargetStatus(requestedTargetStatus);
   }, []);
 
   const createApproval = async (event: React.FormEvent) => {
@@ -132,9 +148,24 @@ export default function ApprovalsPage() {
         payload.project_name = projectName.trim();
         payload.project_description = projectDescription.trim() || null;
         payload.initial_budget_credits = Number.isFinite(numericAmount) ? numericAmount : 0;
+        payload.budget_purpose = budgetPurpose.trim() || null;
       }
       if (type === 'budget_increase') {
         payload.amount = numericAmount;
+        payload.budget_purpose = budgetPurpose.trim();
+      }
+      if (type === 'resolution_1080p') {
+        payload.quota_count = quotaCount.trim() ? Number(quotaCount.trim()) : 1;
+        payload.estimated_budget_credits = estimatedBudgetCredits.trim() ? Number(estimatedBudgetCredits.trim()) : 0;
+        payload.intended_use = intendedUse.trim();
+      }
+      if (type === 'ratio_change') {
+        payload.target_ratio = targetRatio.trim();
+        payload.change_reason = changeReason.trim();
+      }
+      if (type === 'video_card_reopen') {
+        payload.reopen_reason = reopenReason.trim();
+        payload.target_status = targetStatus;
       }
       const res = await fetch('/api/approvals', {
         method: 'POST',
@@ -156,6 +187,10 @@ export default function ApprovalsPage() {
       setMessage('审批已发起');
       setReason('');
       if (type !== 'project_create') setAmountCredits('');
+      setBudgetPurpose('');
+      setIntendedUse('');
+      setChangeReason('');
+      setReopenReason('');
       await load();
     } finally {
       setSubmitting(false);
@@ -219,19 +254,58 @@ export default function ApprovalsPage() {
                 placeholder="初始项目预算点数，可选"
                 inputMode="decimal"
               />
+              <input className="input" value={budgetPurpose} onChange={(event) => setBudgetPurpose(event.target.value)} placeholder="预算用途，初始预算大于 0 时必填" />
             </>
           )}
           {type !== 'project_create' && (
             <input className="input" value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目 ID" />
           )}
           {type === 'budget_increase' && (
-            <input
-              className="input"
-              value={amountCredits}
-              onChange={(event) => setAmountCredits(event.target.value)}
-              placeholder="追加预算点数"
-              inputMode="decimal"
-            />
+            <>
+              <input
+                className="input"
+                value={amountCredits}
+                onChange={(event) => setAmountCredits(event.target.value)}
+                placeholder="追加预算点数"
+                inputMode="decimal"
+              />
+              <input className="input" value={budgetPurpose} onChange={(event) => setBudgetPurpose(event.target.value)} placeholder="预算用途" />
+            </>
+          )}
+          {type === 'resolution_1080p' && (
+            <>
+              <input
+                className="input"
+                value={quotaCount}
+                onChange={(event) => setQuotaCount(event.target.value)}
+                placeholder="1080p 额度次数"
+                inputMode="numeric"
+              />
+              <input
+                className="input"
+                value={estimatedBudgetCredits}
+                onChange={(event) => setEstimatedBudgetCredits(event.target.value)}
+                placeholder="预计额度预算点数"
+                inputMode="decimal"
+              />
+              <input className="input" value={intendedUse} onChange={(event) => setIntendedUse(event.target.value)} placeholder="预计用途" />
+            </>
+          )}
+          {type === 'ratio_change' && (
+            <>
+              <input className="input" value={targetRatio} onChange={(event) => setTargetRatio(event.target.value)} placeholder="目标比例，例如 16:9" />
+              <input className="input" value={changeReason} onChange={(event) => setChangeReason(event.target.value)} placeholder="比例变更原因" />
+            </>
+          )}
+          {type === 'video_card_reopen' && (
+            <>
+              <select className="input" value={targetStatus} onChange={(event) => setTargetStatus(event.target.value)}>
+                <option value="active">恢复为可生成</option>
+                <option value="reviewing">恢复为评审中</option>
+                <option value="draft">恢复为草稿</option>
+              </select>
+              <input className="input" value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} placeholder="重开原因" />
+            </>
           )}
           <input className="input" value={videoCardId} onChange={(event) => setVideoCardId(event.target.value)} placeholder="视频卡 ID，可选" />
           <input className="input" value={taskId} onChange={(event) => setTaskId(event.target.value)} placeholder="任务 ID，可选" />

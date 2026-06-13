@@ -2,10 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
+import { assertCanManageVideoCard, assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
+import { moveTasksBetweenVideoCards } from '@/lib/video-cards/workflow';
 
 export const dynamic = 'force-dynamic';
+
+function optionalString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function stringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim());
+}
 
 export async function GET(
   request: NextRequest,
@@ -85,6 +95,52 @@ export async function GET(
       return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
     }
     console.error('[VideoCardTasks] List error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  try {
+    const user = await getSession();
+    if (!user) {
+      return NextResponse.json({ error: '未登录', message: '请先登录后再整理视频卡任务' }, { status: 401 });
+    }
+
+    await assertCanManageVideoCard(user, params.id);
+    const body = await request.json();
+    const action = optionalString(body.action);
+    if (action !== 'move') {
+      return NextResponse.json({ error: 'action 必须是 move' }, { status: 400 });
+    }
+
+    const targetCardId = optionalString(body.target_video_card_id ?? body.targetVideoCardId);
+    if (!targetCardId) return NextResponse.json({ error: '必须选择目标视频卡' }, { status: 400 });
+    await assertCanManageVideoCard(user, targetCardId);
+
+    const result = await prisma.$transaction((tx) => moveTasksBetweenVideoCards(tx, {
+      sourceCardId: params.id,
+      targetCardId,
+      taskIds: stringList(body.task_ids ?? body.taskIds),
+      actorUserId: user.id,
+      reason: optionalString(body.reason),
+      targetBranchId: optionalString(body.target_branch_id ?? body.targetBranchId),
+    }));
+
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
+    }
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    console.error('[VideoCardTasks] Move error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 },

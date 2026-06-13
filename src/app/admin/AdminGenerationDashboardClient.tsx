@@ -7,6 +7,7 @@ import {
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
 } from '@/lib/costs/currency';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import type {
   DashboardBreakdownItem,
   DashboardCurrencyTotal,
@@ -634,6 +635,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
         </div>
         <div className="admin-dashboard-recent-table">
           <div className="admin-dashboard-recent-head">
+            <span>截图</span>
             <span>任务</span>
             <span>归属</span>
             <span>规格</span>
@@ -646,6 +648,16 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           ) : (
             dashboard.recent_tasks.map((task) => (
               <Link className="admin-dashboard-recent-row" href={task.href} key={task.id}>
+                <span>
+                  <TaskVideoThumbnail
+                    taskId={task.id}
+                    localVideoPath={task.local_video_path}
+                    resultVideoUrl={task.result_video_url}
+                    resultLastFrameUrl={task.result_last_frame_url}
+                    status={task.local_status}
+                    size="compact"
+                  />
+                </span>
                 <span>
                   <strong>{shortPrompt(task.prompt || task.id)}</strong>
                   <small>{dateTimeText(task.created_at)}</small>

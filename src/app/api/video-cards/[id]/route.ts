@@ -30,6 +30,29 @@ function hasOwn(body: Record<string, unknown>, key: string) {
   return Object.prototype.hasOwnProperty.call(body, key);
 }
 
+function serializeDeliverySpecs(card: {
+  delivery_specs_json?: string | null;
+  platform?: string | null;
+  ratio?: string | null;
+  duration?: number | null;
+  target_resolution?: string | null;
+}) {
+  if (card.delivery_specs_json) {
+    try {
+      const parsed = JSON.parse(card.delivery_specs_json);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // 规格快照解析失败时回退为当前字段，避免详情接口 500。
+    }
+  }
+  return {
+    platform: card.platform || null,
+    ratio: card.ratio || null,
+    duration: card.duration || null,
+    target_resolution: card.target_resolution || null,
+  };
+}
+
 function serializeTaskPreview(task: null | {
   id: string;
   prompt: string;
@@ -82,6 +105,13 @@ async function getSerializableVideoCard(id: string) {
     ratio: card.ratio,
     duration: card.duration,
     target_resolution: card.target_resolution,
+    original_ratio: card.original_ratio,
+    ratio_locked: card.ratio_locked,
+    ratio_change_reason: card.ratio_change_reason,
+    delivery_specs: serializeDeliverySpecs(card),
+    merged_into_card_id: card.merged_into_card_id,
+    merged_at: card.merged_at,
+    merge_reason: card.merge_reason,
     budget_credits: card.budget_credits,
     budget_currency: card.budget_currency,
     current_best_task_id: card.current_best_task_id,
@@ -176,7 +206,42 @@ export async function PATCH(
     }
     if (hasOwn(body, 'objective')) data.objective = asNullableString(body.objective);
     if (hasOwn(body, 'platform')) data.platform = asNullableString(body.platform);
-    if (hasOwn(body, 'ratio')) data.ratio = asNullableString(body.ratio);
+    if (hasOwn(body, 'ratio')) {
+      const nextRatio = asNullableString(body.ratio);
+      const ratioChanged = nextRatio !== access.videoCard.ratio;
+      if (ratioChanged && (
+        access.videoCard.project.type === 'public'
+        || access.videoCard.ratio_locked
+        || Boolean(access.videoCard.final_task_id)
+      )) {
+        return NextResponse.json(
+          { error: '此视频卡比例已进入交付规格约束，变更比例需要先走比例变更审批' },
+          { status: 403 },
+        );
+      }
+      data.ratio = nextRatio;
+      if (nextRatio && !access.videoCard.original_ratio) data.original_ratio = access.videoCard.ratio || nextRatio;
+      if (nextRatio) data.ratio_locked = true;
+    }
+    if (hasOwn(body, 'ratio_locked') || hasOwn(body, 'ratioLocked')) {
+      const nextLocked = body.ratio_locked ?? body.ratioLocked;
+      if (nextLocked === false) {
+        if (access.videoCard.project.type === 'public' || Boolean(access.videoCard.final_task_id)) {
+          return NextResponse.json(
+            { error: '公共项目或已有最终版的视频卡不能直接解锁比例，请走比例变更审批' },
+            { status: 403 },
+          );
+        }
+        const unlockReason = asOptionalString(body.ratio_unlock_reason ?? body.ratioUnlockReason);
+        if (!unlockReason) {
+          return NextResponse.json({ error: '解锁比例必须填写原因' }, { status: 400 });
+        }
+        data.ratio_locked = false;
+        data.ratio_change_reason = unlockReason;
+      } else if (nextLocked === true) {
+        data.ratio_locked = true;
+      }
+    }
     if (hasOwn(body, 'duration')) data.duration = asOptionalNumber(body.duration);
     if (hasOwn(body, 'target_resolution') || hasOwn(body, 'targetResolution')) {
       data.target_resolution = asNullableString(body.target_resolution ?? body.targetResolution);
@@ -186,6 +251,22 @@ export async function PATCH(
     }
     if (hasOwn(body, 'budget_currency') || hasOwn(body, 'budgetCurrency')) {
       data.budget_currency = asOptionalString(body.budget_currency ?? body.budgetCurrency) || 'credits';
+    }
+    if (
+      hasOwn(body, 'platform')
+      || hasOwn(body, 'ratio')
+      || hasOwn(body, 'duration')
+      || hasOwn(body, 'target_resolution')
+      || hasOwn(body, 'targetResolution')
+    ) {
+      data.delivery_specs_json = JSON.stringify({
+        platform: data.platform ?? access.videoCard.platform ?? null,
+        ratio: data.ratio ?? access.videoCard.ratio ?? null,
+        duration: data.duration ?? access.videoCard.duration ?? null,
+        target_resolution: data.target_resolution ?? access.videoCard.target_resolution ?? null,
+        source: 'video_card_update',
+        updated_by: user.id,
+      });
     }
     if (body.seal === true) {
       data.status = 'sealed';

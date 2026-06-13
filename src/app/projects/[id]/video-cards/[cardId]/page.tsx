@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { formatAmountMicrosWithFixedCny } from '@/lib/costs/currency';
@@ -50,6 +51,7 @@ interface TaskItem {
   prompt: string;
   local_status: string;
   result_video_url: string | null;
+  result_last_frame_url: string | null;
   local_video_path: string | null;
   estimated_cost: number | null;
   actual_cost: number | null;
@@ -61,6 +63,20 @@ interface TaskItem {
   created_at: string;
   owner?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   user?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
+}
+
+interface BranchItem {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  is_primary: boolean;
+  summary?: {
+    task_count: number;
+    estimated_credits: number;
+    charged_credits: number;
+    official_amount_micros: number;
+  };
 }
 
 interface Permissions {
@@ -75,7 +91,9 @@ function statusLabel(status: string) {
   if (status === 'reviewing') return '评审中';
   if (status === 'finalized') return '已定稿';
   if (status === 'sealed') return '已封板';
+  if (status === 'merged') return '已合并';
   if (status === 'archived') return '已归档';
+  if (status === 'discarded') return '已废弃';
   return status || '-';
 }
 
@@ -96,10 +114,14 @@ function roleLabel(role: string) {
   return '普通版本';
 }
 
-function safeVideoSrc(url?: string | null) {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return url;
-  return null;
+function branchStatusLabel(status: string) {
+  if (status === 'exploring') return '探索中';
+  if (status === 'candidate') return '候选方向';
+  if (status === 'primary') return '主方向';
+  if (status === 'closed') return '已关闭';
+  if (status === 'merged') return '已合并';
+  if (status === 'promoted') return '已升格';
+  return status || '-';
 }
 
 function formatOfficialCost(totals?: Array<{ currency: string; amount_micros: number }>) {
@@ -115,22 +137,39 @@ export default function VideoCardDetailPage() {
   const [videoCard, setVideoCard] = useState<VideoCardDetail | null>(null);
   const [permissions, setPermissions] = useState<Permissions>({ can_generate: false, can_manage: false, project_role: null });
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [branches, setBranches] = useState<BranchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busyTaskId, setBusyTaskId] = useState('');
   const [sealing, setSealing] = useState(false);
+  const [branchTitle, setBranchTitle] = useState('');
+  const [branchBusy, setBranchBusy] = useState(false);
+  const [branchMessage, setBranchMessage] = useState('');
+
+  const loadBranches = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/video-cards/${videoCardId}/branches`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '方向分支加载失败');
+      setBranches(data.branches || []);
+    } catch (err) {
+      setBranchMessage(err instanceof Error ? err.message : '方向分支加载失败');
+    }
+  }, [videoCardId]);
 
   const loadVideoCard = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [cardRes, tasksRes] = await Promise.all([
+      const [cardRes, tasksRes, branchesRes] = await Promise.all([
         fetch(`/api/video-cards/${videoCardId}`, { cache: 'no-store' }),
         fetch(`/api/video-cards/${videoCardId}/tasks?limit=80`, { cache: 'no-store' }),
+        fetch(`/api/video-cards/${videoCardId}/branches`, { cache: 'no-store' }),
       ]);
       const cardData = await cardRes.json();
       const tasksData = await tasksRes.json();
+      const branchesData = await branchesRes.json();
       if (!cardRes.ok) {
         setError(cardData.error || cardData.message || '视频卡加载失败');
         setVideoCard(null);
@@ -149,6 +188,7 @@ export default function VideoCardDetailPage() {
       setVideoCard(cardData.video_card);
       setPermissions(cardData.permissions || { can_generate: false, can_manage: false, project_role: null });
       setTasks(tasksData.tasks || []);
+      setBranches(branchesRes.ok ? branchesData.branches || [] : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : '视频卡加载失败');
     } finally {
@@ -187,6 +227,49 @@ export default function VideoCardDetailPage() {
     setSealing(true);
     await patchVideoCard({ seal: true }, '视频卡已封板');
     setSealing(false);
+  };
+
+  const createBranch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!branchTitle.trim()) return;
+    setBranchBusy(true);
+    setBranchMessage('');
+    try {
+      const res = await fetch(`/api/video-cards/${videoCardId}/branches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: branchTitle.trim(), confirm_over_limit: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '方向分支创建失败');
+      setBranchTitle('');
+      setBranchMessage('方向分支已创建');
+      await loadBranches();
+    } catch (err) {
+      setBranchMessage(err instanceof Error ? err.message : '方向分支创建失败');
+    } finally {
+      setBranchBusy(false);
+    }
+  };
+
+  const patchBranch = async (branchId: string, action: string, successText: string) => {
+    setBranchBusy(true);
+    setBranchMessage('');
+    try {
+      const res = await fetch(`/api/video-cards/${videoCardId}/branches/${branchId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '方向分支更新失败');
+      setBranchMessage(successText);
+      await loadBranches();
+    } catch (err) {
+      setBranchMessage(err instanceof Error ? err.message : '方向分支更新失败');
+    } finally {
+      setBranchBusy(false);
+    }
   };
 
   if (loading) return <div className="card"><p className="text-gray">加载中...</p></div>;
@@ -229,13 +312,29 @@ export default function VideoCardDetailPage() {
               </p>
             </div>
             <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap' }}>
-              {canGenerate && (
-                <Link className="btn btn-primary" href={`/generate?project_id=${videoCard.project_id}&video_card_id=${videoCard.id}`}>
-                  再生成
-                </Link>
-              )}
-              {permissions.can_manage && videoCard.status !== 'sealed' && (
-                <button className="btn btn-secondary" type="button" onClick={sealVideoCard} disabled={sealing}>
+	              {canGenerate && (
+	                <Link className="btn btn-primary" href={`/generate?project_id=${videoCard.project_id}&video_card_id=${videoCard.id}`}>
+	                  再生成
+	                </Link>
+	              )}
+	              {permissions.can_manage && (
+	                <Link
+	                  className="btn btn-secondary"
+	                  href={`/approvals?type=ratio_change&project_id=${videoCard.project_id}&video_card_id=${videoCard.id}&target_ratio=${encodeURIComponent(videoCard.ratio || '')}`}
+	                >
+	                  申请比例变更
+	                </Link>
+	              )}
+	              {permissions.can_manage && ['sealed', 'archived'].includes(videoCard.status) && (
+	                <Link
+	                  className="btn btn-secondary"
+	                  href={`/approvals?type=video_card_reopen&project_id=${videoCard.project_id}&video_card_id=${videoCard.id}&target_status=active`}
+	                >
+	                  申请重开
+	                </Link>
+	              )}
+	              {permissions.can_manage && ['draft', 'active', 'reviewing', 'finalized'].includes(videoCard.status) && (
+	                <button className="btn btn-secondary" type="button" onClick={sealVideoCard} disabled={sealing}>
                   {sealing ? '封板中...' : '封板'}
                 </button>
               )}
@@ -277,6 +376,66 @@ export default function VideoCardDetailPage() {
       <section className="card">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
+            <h2 className="section-title mb-0">方向分支</h2>
+            <p className="text-gray text-sm mt-2">同一视频卡内的创意探索路线；生成时可指定方向，成本仍计入当前视频卡和项目。</p>
+          </div>
+          {permissions.can_manage && (
+            <form className="video-branch-create" onSubmit={createBranch}>
+              <input
+                className="input"
+                value={branchTitle}
+                onChange={(event) => setBranchTitle(event.target.value)}
+                placeholder="新方向名称"
+                maxLength={80}
+              />
+              <button className="btn btn-secondary" type="submit" disabled={branchBusy || !branchTitle.trim()}>
+                新建方向
+              </button>
+            </form>
+          )}
+        </div>
+        {branchMessage && <p className="form-hint">{branchMessage}</p>}
+        {branches.length === 0 ? (
+          <p className="text-gray">暂无方向分支。可以先按默认主线生成，或创建一个探索方向。</p>
+        ) : (
+          <div className="video-branch-list">
+            {branches.map((branch) => (
+              <article className="video-branch-item" key={branch.id}>
+                <div>
+                  <strong>{branch.title}</strong>
+                  <span>{branch.description || branchStatusLabel(branch.status)}</span>
+                </div>
+                <div className="video-branch-meta">
+                  <span>{branch.is_primary ? '主方向' : branchStatusLabel(branch.status)}</span>
+                  <span>生成 {branch.summary?.task_count ?? 0}</span>
+                  <span>点数 {branch.summary?.charged_credits ?? 0}</span>
+                </div>
+                <div className="video-branch-actions">
+                  {canGenerate && ['exploring', 'candidate', 'primary'].includes(branch.status) && (
+                    <Link className="btn btn-primary" href={`/generate?project_id=${videoCard.project_id}&video_card_id=${videoCard.id}&video_branch_id=${branch.id}`}>
+                      在此方向生成
+                    </Link>
+                  )}
+                  {permissions.can_manage && !branch.is_primary && ['exploring', 'candidate'].includes(branch.status) && (
+                    <button className="btn btn-secondary" type="button" disabled={branchBusy} onClick={() => patchBranch(branch.id, 'set_primary', '已设为主方向')}>
+                      设为主方向
+                    </button>
+                  )}
+                  {permissions.can_manage && !branch.is_primary && ['exploring', 'candidate'].includes(branch.status) && (
+                    <button className="btn btn-secondary" type="button" disabled={branchBusy} onClick={() => patchBranch(branch.id, 'close', '方向已关闭')}>
+                      关闭
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div>
             <h2 className="section-title mb-0">生成记录</h2>
             <p className="text-gray text-sm mt-2">候选可保留多个；当前最佳和最终版只能各保留一个，标记后任务详情仍保留完整审计信息。</p>
           </div>
@@ -291,13 +450,19 @@ export default function VideoCardDetailPage() {
         ) : (
           <div className="video-card-task-list">
             {tasks.map((task) => {
-              const videoUrl = safeVideoSrc(task.local_video_path || task.result_video_url);
               const officialMicros = task.provider_final_amount_micros ?? task.provider_official_amount_micros;
               return (
                 <article key={task.id} className="video-card-task-item">
-                  <div className="video-card-task-preview">
-                    {videoUrl ? <video src={videoUrl} muted preload="metadata" /> : <span>无视频</span>}
-                  </div>
+                  <TaskVideoThumbnail
+                    taskId={task.id}
+                    localVideoPath={task.local_video_path}
+                    resultVideoUrl={task.result_video_url}
+                    resultLastFrameUrl={task.result_last_frame_url}
+                    status={task.local_status}
+                    href={taskDetailHref(task.id, returnTo)}
+                    size="medium"
+                    className="video-card-task-preview"
+                  />
                   <div className="video-card-task-body">
                     <div className="video-card-task-head">
                       <Link className="link" href={taskDetailHref(task.id, returnTo)}>{task.prompt || task.id}</Link>

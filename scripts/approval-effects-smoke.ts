@@ -55,6 +55,7 @@ async function main() {
           project_name: `Smoke Public Project ${suffix}`,
           project_description: 'created by approval-effects-smoke',
           initial_budget_credits: 120,
+          budget_purpose: 'smoke initial public project budget',
         },
       });
       const approvedProjectCreate = await decideApproval(tx, {
@@ -85,7 +86,7 @@ async function main() {
         requesterUserId: requester.id,
         projectId: project.id,
         reason: 'smoke rejected budget increase',
-        payload: { amount: 30 },
+        payload: { amount: 30, budget_purpose: 'smoke rejected budget purpose' },
       });
       await decideApproval(tx, {
         approvalId: rejectedBudget.id,
@@ -105,7 +106,7 @@ async function main() {
         requesterUserId: requester.id,
         projectId: project.id,
         reason: 'smoke approved budget increase',
-        payload: { amount: 45 },
+        payload: { amount: 45, budget_purpose: 'smoke approved budget purpose' },
       });
       await decideApproval(tx, {
         approvalId: approvedBudget.id,

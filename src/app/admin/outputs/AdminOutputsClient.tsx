@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, RefreshCcw, RotateCcw, Search } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
@@ -226,55 +227,18 @@ function sourceSummary(output: OutputItem) {
   return sourceLabel(output);
 }
 
-type OutputPreviewModel = {
-  kind: 'image' | 'empty';
-  src?: string;
-  label: string;
-};
-
-function outputPreviewEmptyLabel(output: OutputItem) {
-  if (['submitted', 'running'].includes(output.local_status)) return '等待预览';
-  if (output.local_status === 'failed') return '失败无预览';
-  return '暂无预览';
-}
-
-function getOutputPreview(output: OutputItem, failedSrcs: string[] = []): OutputPreviewModel {
-  const thumbnailSrc = `/api/video/thumbnail/${output.id}`;
-  const hasThumbnailSource = !!(output.local_video_path || output.result_video_url || output.result_last_frame_url);
-
-  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) {
-    return { kind: 'image', src: thumbnailSrc, label: '预览图' };
-  }
-
-  return { kind: 'empty', label: outputPreviewEmptyLabel(output) };
-}
-
 function OutputFramePreview({ output }: { output: OutputItem }) {
-  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
-  const preview = getOutputPreview(output, failedSrcs);
-  const markFailed = (src?: string) => {
-    if (!src) return;
-    setFailedSrcs((current) => current.includes(src) ? current : [...current, src]);
-  };
-
   return (
-    <Link
+    <TaskVideoThumbnail
+      taskId={output.id}
+      localVideoPath={output.local_video_path}
+      resultVideoUrl={output.result_video_url}
+      resultLastFrameUrl={output.result_last_frame_url}
+      status={output.local_status}
       href={taskDetailHref(output.id, '/admin/outputs')}
-      className={`outputs-preview outputs-preview-${preview.kind}`}
-      aria-label={`查看产出 ${output.id} 的预览图和详情`}
-    >
-      {preview.kind === 'image' && preview.src && (
-        <img
-          src={preview.src}
-          alt="产出预览图"
-          loading="lazy"
-          onError={() => markFailed(preview.src)}
-        />
-      )}
-      {preview.kind === 'empty' && (
-        <span>{preview.label}</span>
-      )}
-    </Link>
+      size="medium"
+      className="outputs-preview"
+    />
   );
 }
 

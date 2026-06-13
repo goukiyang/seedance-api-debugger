@@ -3,7 +3,7 @@ import { AuthError } from '@/lib/auth/session';
 import type { SessionUser } from '@/lib/auth/session';
 import { getProjectAccess } from '@/lib/projects/permissions';
 
-export const VIDEO_CARD_STATUSES = ['draft', 'active', 'reviewing', 'finalized', 'sealed', 'archived'] as const;
+export const VIDEO_CARD_STATUSES = ['draft', 'active', 'reviewing', 'finalized', 'sealed', 'merged', 'archived', 'discarded'] as const;
 export const VIDEO_CARD_GENERATABLE_STATUSES = ['draft', 'active', 'reviewing'] as const;
 
 export type VideoCardStatus = typeof VIDEO_CARD_STATUSES[number];

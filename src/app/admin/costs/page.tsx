@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
 import PageBanner from '@/components/PageBanner';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import {
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
@@ -197,8 +198,11 @@ export default async function AdminCostsPage() {
         prompt: true,
         source_type: true,
         source_label: true,
-        local_status: true,
-        estimated_cost: true,
+	        local_status: true,
+	        result_video_url: true,
+	        result_last_frame_url: true,
+	        local_video_path: true,
+	        estimated_cost: true,
         actual_cost: true,
         provider_task_id: true,
         provider_cost_status: true,
@@ -468,7 +472,8 @@ export default async function AdminCostsPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>任务</th>
+	                <th>截图</th>
+	                <th>任务</th>
                 <th>来源</th>
                 <th>项目</th>
                 <th>创建者</th>
@@ -481,10 +486,21 @@ export default async function AdminCostsPage() {
             </thead>
             <tbody>
               {recentIssues.map((task) => (
-                <tr key={task.id}>
-                  <td className="truncate" style={{ maxWidth: 300 }} title={task.prompt}>
-                    {task.prompt || task.id}
-                  </td>
+	                <tr key={task.id}>
+	                  <td>
+	                    <TaskVideoThumbnail
+	                      taskId={task.id}
+	                      localVideoPath={task.local_video_path}
+	                      resultVideoUrl={task.result_video_url}
+	                      resultLastFrameUrl={task.result_last_frame_url}
+	                      status={task.local_status}
+	                      href={taskDetailHref(task.id, '/admin/costs')}
+	                      size="compact"
+	                    />
+	                  </td>
+	                  <td className="truncate" style={{ maxWidth: 300 }} title={task.prompt}>
+	                    <Link className="link" href={taskDetailHref(task.id, '/admin/costs')}>{task.prompt || task.id}</Link>
+	                  </td>
                   <td>{task.source_type === 'codex_api' ? (task.source_label || 'Codex API') : (task.source_label || 'Web UI')}</td>
                   <td>
                     {task.project ? (

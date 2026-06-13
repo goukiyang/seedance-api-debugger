@@ -42,6 +42,29 @@ function serializeTaskPreview(task: null | {
   };
 }
 
+function serializeDeliverySpecs(card: {
+  delivery_specs_json?: string | null;
+  platform?: string | null;
+  ratio?: string | null;
+  duration?: number | null;
+  target_resolution?: string | null;
+}) {
+  if (card.delivery_specs_json) {
+    try {
+      const parsed = JSON.parse(card.delivery_specs_json);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // 规格快照解析失败时回退为当前字段，避免列表接口 500。
+    }
+  }
+  return {
+    platform: card.platform || null,
+    ratio: card.ratio || null,
+    duration: card.duration || null,
+    target_resolution: card.target_resolution || null,
+  };
+}
+
 function serializeVideoCard(card: any, summary: any) {
   return {
     id: card.id,
@@ -55,6 +78,13 @@ function serializeVideoCard(card: any, summary: any) {
     ratio: card.ratio,
     duration: card.duration,
     target_resolution: card.target_resolution,
+    original_ratio: card.original_ratio,
+    ratio_locked: card.ratio_locked,
+    ratio_change_reason: card.ratio_change_reason,
+    delivery_specs: serializeDeliverySpecs(card),
+    merged_into_card_id: card.merged_into_card_id,
+    merged_at: card.merged_at,
+    merge_reason: card.merge_reason,
     budget_credits: card.budget_credits,
     budget_currency: card.budget_currency,
     current_best_task_id: card.current_best_task_id,
@@ -133,6 +163,10 @@ export async function POST(
     }
 
     const status = normalizeVideoCardStatus(body.status, 'active');
+    const platform = asOptionalString(body.platform);
+    const ratio = asOptionalString(body.ratio);
+    const duration = asOptionalNumber(body.duration);
+    const targetResolution = asOptionalString(body.target_resolution ?? body.targetResolution);
     const card = await prisma.videoCard.create({
       data: {
         project_id: params.id,
@@ -140,10 +174,19 @@ export async function POST(
         objective: asOptionalString(body.objective),
         status,
         owner_user_id: user.id,
-        platform: asOptionalString(body.platform),
-        ratio: asOptionalString(body.ratio),
-        duration: asOptionalNumber(body.duration),
-        target_resolution: asOptionalString(body.target_resolution ?? body.targetResolution),
+        platform,
+        ratio,
+        original_ratio: ratio,
+        ratio_locked: Boolean(ratio),
+        duration,
+        target_resolution: targetResolution,
+        delivery_specs_json: JSON.stringify({
+          platform,
+          ratio,
+          duration,
+          target_resolution: targetResolution,
+          source: 'video_card_create',
+        }),
         budget_credits: asOptionalNumber(body.budget_credits ?? body.budgetCredits),
         budget_currency: asOptionalString(body.budget_currency ?? body.budgetCurrency) || 'credits',
         created_by: user.id,

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
@@ -44,6 +45,7 @@ interface TaskItem {
   local_status: string;
   provider_task_id: string | null;
   result_video_url?: string | null;
+  result_last_frame_url?: string | null;
   local_video_path?: string | null;
   owner_user_id: string | null;
   user_id: string | null;
@@ -82,6 +84,7 @@ interface VideoCardPreviewTask {
   local_status: string;
   local_video_path: string | null;
   result_video_url: string | null;
+  result_last_frame_url: string | null;
   created_at: string;
 }
 
@@ -141,6 +144,9 @@ interface ReviewTaskItem {
   refund_amount?: number | null;
   provider_cost_status: string;
   error_message?: string | null;
+  result_video_url?: string | null;
+  result_last_frame_url?: string | null;
+  local_video_path?: string | null;
   created_at: string;
   owner?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   user?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
@@ -229,7 +235,9 @@ function videoCardStatusLabel(status: string): string {
   if (status === 'reviewing') return '评审中';
   if (status === 'finalized') return '已定稿';
   if (status === 'sealed') return '已封板';
+  if (status === 'merged') return '已合并';
   if (status === 'archived') return '已归档';
+  if (status === 'discarded') return '已废弃';
   return status || '-';
 }
 
@@ -823,20 +831,32 @@ export default function ProjectDetailPage() {
           <div className="mt-6">
             <h3 className="section-title">高点数任务</h3>
             <table className="table">
-              <thead>
-                <tr>
-                  <th>任务</th>
-                  <th>创建者</th>
+	              <thead>
+	                <tr>
+	                  <th>截图</th>
+	                  <th>任务</th>
+	                  <th>创建者</th>
                   <th>状态</th>
                   <th>点数</th>
                   <th>成本状态</th>
                 </tr>
               </thead>
               <tbody>
-                {reviewSummary.high_cost_tasks.map((task) => (
-                  <tr key={task.id}>
-                    <td className="truncate" style={{ maxWidth: 360 }}>
-                      <Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>{task.prompt || task.id}</Link>
+	                {reviewSummary.high_cost_tasks.map((task) => (
+	                  <tr key={task.id}>
+	                    <td>
+	                      <TaskVideoThumbnail
+	                        taskId={task.id}
+	                        localVideoPath={task.local_video_path}
+	                        resultVideoUrl={task.result_video_url}
+	                        resultLastFrameUrl={task.result_last_frame_url}
+	                        status={task.local_status}
+	                        href={taskDetailHref(task.id, projectReturnTo)}
+	                        size="compact"
+	                      />
+	                    </td>
+	                    <td className="truncate" style={{ maxWidth: 360 }}>
+	                      <Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>{task.prompt || task.id}</Link>
                     </td>
                     <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>
                     <td>{task.local_status}</td>
@@ -876,35 +896,28 @@ export default function ProjectDetailPage() {
             </thead>
             <tbody>
               {costLedgers.map((ledger) => {
-                const task = ledger.task;
-                const videoUrl = safeVideoSrc(task?.result_video_url || task?.local_video_path);
-                const providerTaskId = providerTaskIdLabel(ledger);
+	                const task = ledger.task;
+	                const providerTaskId = providerTaskIdLabel(ledger);
 
                 return (
                   <tr key={ledger.id}>
-                    <td>
-                      <div className="flex items-center" style={{ gap: 10, minWidth: 300 }}>
-                        {videoUrl ? (
-                          <video
-                            src={videoUrl}
-                            muted
-                            preload="metadata"
-                            style={{ width: 72, height: 44, objectFit: 'cover', borderRadius: 8, background: 'rgba(15,23,42,0.8)' }}
-                          />
-                        ) : (
-                          <div style={{
-                            width: 72,
-                            height: 44,
-                            borderRadius: 8,
-                            display: 'grid',
-                            placeItems: 'center',
-                            background: 'rgba(15,23,42,0.8)',
-                            color: 'rgba(148,163,184,0.95)',
-                            fontSize: 12,
-                          }}>
-                            无视频
-                          </div>
-                        )}
+	                    <td>
+	                      <div className="flex items-center" style={{ gap: 10, minWidth: 300 }}>
+	                        {task ? (
+	                          <TaskVideoThumbnail
+	                            taskId={task.id}
+	                            localVideoPath={task.local_video_path}
+	                            resultVideoUrl={task.result_video_url}
+	                            resultLastFrameUrl={task.result_last_frame_url}
+	                            status={task.local_status}
+	                            href={taskDetailHref(task.id, projectReturnTo)}
+	                            size="compact"
+	                          />
+	                        ) : (
+	                          <span className="task-video-thumbnail task-video-thumbnail-compact">
+	                            <span className="task-video-thumbnail-placeholder">无任务</span>
+	                          </span>
+	                        )}
                         <div style={{ minWidth: 0 }}>
                           {task ? (
                             <Link className="link truncate" style={{ display: 'block', maxWidth: 320 }} href={taskDetailHref(task.id, projectReturnTo)} title={task.prompt || task.id}>
@@ -967,9 +980,9 @@ export default function ProjectDetailPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>任务 ID</th>
-                <th>提示词</th>
-                <th>状态</th>
+	                <th>截图</th>
+	                <th>任务</th>
+	                <th>状态</th>
                 <th>视频卡</th>
                 <th>创建者</th>
                 <th>点数</th>
@@ -980,9 +993,24 @@ export default function ProjectDetailPage() {
             </thead>
             <tbody>
               {tasks.map((task) => (
-                <tr key={task.id}>
-                  <td>{task.id.slice(0, 10)}...</td>
-                  <td className="truncate" style={{ maxWidth: 280 }} title={task.prompt}>{task.prompt}</td>
+	                <tr key={task.id}>
+	                  <td>
+	                    <TaskVideoThumbnail
+	                      taskId={task.id}
+	                      localVideoPath={task.local_video_path}
+	                      resultVideoUrl={task.result_video_url}
+	                      resultLastFrameUrl={task.result_last_frame_url}
+	                      status={task.local_status}
+	                      href={taskDetailHref(task.id, projectReturnTo)}
+	                      size="compact"
+	                    />
+	                  </td>
+	                  <td>
+	                    <Link className="link truncate" style={{ display: 'block', maxWidth: 280 }} href={taskDetailHref(task.id, projectReturnTo)} title={task.prompt}>
+	                      {task.prompt || task.id}
+	                    </Link>
+	                    <span className="text-gray text-sm">{task.id.slice(0, 10)}...</span>
+	                  </td>
                   <td>{task.local_status}</td>
                   <td>
                     {task.video_card ? (

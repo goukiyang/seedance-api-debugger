@@ -1,7 +1,9 @@
 import type { Prisma, Project } from '@prisma/client';
+import { notifyProjectOwner } from '@/lib/notifications';
 
 type BudgetClient = Prisma.TransactionClient;
 type ProjectBillingShape = Pick<Project, 'id' | 'type'>;
+const BUDGET_NOTIFICATION_THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 1] as const;
 
 export type ProjectBudgetSnapshot = {
   source_type: 'project_budget';
@@ -41,6 +43,72 @@ function parseProjectBudgetSnapshot(value: string | null | undefined, fallback: 
     // 老任务没有项目预算快照时走 fallback。
   }
   return fallback;
+}
+
+function parseNotifiedThresholds(value: string | null | undefined) {
+  if (!value) return new Set<number>();
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return new Set<number>();
+    return new Set(parsed.map((item) => Number(item)).filter((item) => Number.isFinite(item)));
+  } catch {
+    return new Set<number>();
+  }
+}
+
+function committedRatio(account: { budget_credits: number; used_credits: number; frozen_credits: number }) {
+  if (account.budget_credits <= 0) return 0;
+  return Math.min(1, (account.used_credits + account.frozen_credits) / account.budget_credits);
+}
+
+async function maybeNotifyBudgetThreshold(
+  tx: BudgetClient,
+  input: {
+    projectId: string;
+    accountId: string;
+    beforeRatio: number;
+    afterAccount: {
+      budget_credits: number;
+      used_credits: number;
+      frozen_credits: number;
+      threshold_notified_json: string | null;
+    };
+    actorUserId?: string | null;
+  },
+) {
+  try {
+    const afterRatio = committedRatio(input.afterAccount);
+    const notified = parseNotifiedThresholds(input.afterAccount.threshold_notified_json);
+    const crossed = BUDGET_NOTIFICATION_THRESHOLDS.filter((threshold) => {
+      return afterRatio >= threshold && input.beforeRatio < threshold && !notified.has(threshold);
+    });
+    if (crossed.length === 0) return;
+
+    const nextNotified = Array.from(new Set([...Array.from(notified), ...crossed])).sort((a, b) => a - b);
+    await tx.projectBudgetAccount.update({
+      where: { id: input.accountId },
+      data: { threshold_notified_json: JSON.stringify(nextNotified) },
+    });
+
+    const highest = crossed[crossed.length - 1];
+    const percent = Math.round(highest * 100);
+    await notifyProjectOwner(tx, {
+      projectId: input.projectId,
+      actorUserId: input.actorUserId,
+      type: 'project_budget_threshold',
+      title: `项目预算已达到 ${percent}%`,
+      body: `当前已用和冻结合计约 ${Math.round(afterRatio * 100)}%，请关注预算或发起追加预算审批。`,
+      metadata: {
+        threshold: highest,
+        committed_ratio: afterRatio,
+        budget_credits: input.afterAccount.budget_credits,
+        used_credits: input.afterAccount.used_credits,
+        frozen_credits: input.afterAccount.frozen_credits,
+      },
+    });
+  } catch (error) {
+    console.error('[ProjectBudget] Failed to create threshold notification:', error);
+  }
 }
 
 export async function ensureProjectBudgetAccount(
@@ -126,6 +194,7 @@ export async function adjustProjectBudget(
   }
 
   const account = await ensureProjectBudgetAccount(tx, input.projectId, input.operatorId);
+  const beforeRatio = committedRatio(account);
   const nextBudget = account.budget_credits + input.amount;
   const minimumBudget = account.used_credits + account.frozen_credits;
   if (nextBudget < minimumBudget) {
@@ -138,6 +207,14 @@ export async function adjustProjectBudget(
       budget_credits: nextBudget,
       status: nextBudget <= account.used_credits + account.frozen_credits ? 'exhausted' : 'active',
     },
+  });
+
+  await maybeNotifyBudgetThreshold(tx, {
+    projectId: input.projectId,
+    accountId: updated.id,
+    beforeRatio,
+    afterAccount: updated,
+    actorUserId: input.operatorId,
   });
 
   return tx.projectBudgetLedger.create({
@@ -196,6 +273,7 @@ export async function allocateProjectTaskBudget(
     throw new Error('项目预算不可用，请先追加预算或恢复预算状态');
   }
 
+  const beforeRatio = committedRatio(account);
   const available = account.budget_credits - account.used_credits - account.frozen_credits;
   if (input.amount > available) {
     throw new Error(`项目预算不足，需要 ${input.amount} 点，当前可用 ${Math.max(0, available)} 点`);
@@ -207,6 +285,14 @@ export async function allocateProjectTaskBudget(
       frozen_credits: account.frozen_credits + input.amount,
       status: available - input.amount <= 0 ? 'exhausted' : account.status,
     },
+  });
+
+  await maybeNotifyBudgetThreshold(tx, {
+    projectId: input.projectId,
+    accountId: updated.id,
+    beforeRatio,
+    afterAccount: updated,
+    actorUserId: input.operatorId,
   });
 
   await tx.projectBudgetLedger.create({
@@ -283,6 +369,7 @@ export async function settleProjectTaskBudget(
   const account = await tx.projectBudgetAccount.findUnique({ where: { id: snapshot.account_id } });
   if (!account) throw new Error('项目预算账户不存在');
 
+  const beforeRatio = committedRatio(account);
   const settledAmount = Math.min(account.frozen_credits, snapshot.amount);
   const succeeded = input.terminalStatus === 'succeeded';
   const nextFrozen = Math.max(0, account.frozen_credits - settledAmount);
@@ -297,6 +384,14 @@ export async function settleProjectTaskBudget(
       frozen_credits: nextFrozen,
       status: account.status === 'cancelled' ? account.status : nextStatus,
     },
+  });
+
+  await maybeNotifyBudgetThreshold(tx, {
+    projectId: input.projectId,
+    accountId: updated.id,
+    beforeRatio,
+    afterAccount: updated,
+    actorUserId: input.operatorId,
   });
 
   await tx.projectBudgetLedger.create({
