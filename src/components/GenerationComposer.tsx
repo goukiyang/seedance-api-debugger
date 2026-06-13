@@ -61,6 +61,10 @@ export function GenerationComposer({
 }: Props) {
   const workspace = useWorkspace();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Seedance 资产选择（内部管理，对用户透明）
+  const [referenceAssets, setReferenceAssets] = useState<SelectedReferenceAsset[]>([]);
+  // 控制 Seedance 资产选择弹窗
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
 
   // Composer 内部状态（受控于参数 props 透传）
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
@@ -72,7 +76,6 @@ export function GenerationComposer({
   const [generateAudio, setGenerateAudio] = useState(false);
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
-  const [referenceAssets, setReferenceAssets] = useState<SelectedReferenceAsset[]>([]);
 
   // 提交成功后或新建任务时清除参考图
   useEffect(() => {
@@ -80,6 +83,11 @@ export function GenerationComposer({
       setReferenceAssets([]);
     }
   }, [result]);
+
+  // ============================================================================
+  // 统一的参考图数量（workspace 素材 + Seedance 外部资产）
+  // ============================================================================
+  const totalRefCount = workspace.assets.length + referenceAssets.length;
 
   // ============================================================================
   // Validation
@@ -158,6 +166,17 @@ export function GenerationComposer({
   }, []);
 
   // ============================================================================
+  // Seedance 资产选择器回调
+  // ============================================================================
+
+  const handleSeedanceAssetChange = useCallback((assets: SelectedReferenceAsset[]) => {
+    // 限制最多 9 张（workspace + 外部资产合计）
+    const workspaceCount = workspace.assets.length;
+    const maxExternal = Math.max(0, MAX_REFS - workspaceCount);
+    setReferenceAssets(assets.slice(0, maxExternal));
+  }, [workspace.assets.length]);
+
+  // ============================================================================
   // Render
   // ============================================================================
 
@@ -173,7 +192,7 @@ export function GenerationComposer({
           loading={workspace.loading}
         />
 
-        {/* 缩略图行 */}
+        {/* 缩略图行（含上传入口 + 从资产库选择入口） */}
         <ReferenceStrip
           assets={workspace.assets}
           uploadStatuses={workspace.uploadStatuses}
@@ -183,13 +202,7 @@ export function GenerationComposer({
           onPreview={handlePreview}
           generationMode={generationMode}
           loading={workspace.loading}
-        />
-
-        {/* Seedance 参考图资产选择器 */}
-        <SeedanceAssetSelector
-          value={referenceAssets}
-          onChange={setReferenceAssets}
-          max={9}
+          onAssetPickerOpen={() => setShowAssetPicker(true)}
         />
 
         {/* 提示词输入 */}
@@ -198,13 +211,14 @@ export function GenerationComposer({
           onChange={setPrompt}
         />
 
-        {/* 状态行 */}
+        {/* 状态行 - 统一显示参考图总数 */}
         <ComposerStatusLine
           blockingError={blockingError}
           usedRefs={usedRefs}
           hasPrompt={prompt.trim().length > 0}
           hasAssets={workspace.assets.length > 0}
           hasBlockingUpload={Object.values(workspace.uploadStatuses).some((s) => s === 'uploading' || s === 'failed')}
+          totalRefCount={totalRefCount}
         />
 
         {/* 错误 */}
@@ -213,7 +227,7 @@ export function GenerationComposer({
             <ErrorTranslator
               error={submitError}
               rawError={submitError}
-              onRetry={() => {}}
+              onRetry={onReset}
               onCopy={() => { navigator.clipboard.writeText(submitError); }}
             />
           </div>
@@ -250,6 +264,16 @@ export function GenerationComposer({
           onResolutionChange={setResolution}
         />
       </div>
+
+      {/* Seedance 资产选择弹窗（对用户透明：入口在 ReferenceStrip 的"从资产库选择"） */}
+      {showAssetPicker && (
+        <SeedanceAssetSelector
+          value={referenceAssets}
+          onChange={handleSeedanceAssetChange}
+          max={Math.max(0, MAX_REFS - workspace.assets.length)}
+          onClose={() => setShowAssetPicker(false)}
+        />
+      )}
 
       {/* 预览弹窗 */}
       {previewUrl && (

@@ -16,6 +16,7 @@ interface Props {
   onPreview: (url: string) => void;
   generationMode?: string;
   loading?: boolean;
+  onAssetPickerOpen?: () => void;
 }
 
 function getFrameRole(asset: WorkspaceAssetItem, idx: number, assets: WorkspaceAssetItem[], mode?: string): FrameRole {
@@ -37,6 +38,7 @@ export function ReferenceStrip({
   onPreview,
   generationMode,
   loading = false,
+  onAssetPickerOpen,
 }: Props) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -188,6 +190,8 @@ export function ReferenceStrip({
           <AddReferenceCard
             onClick={handleAddClick}
             disabled={uploading || loading}
+            onSecondaryClick={onAssetPickerOpen}
+            secondaryLabel="从资产库选择"
           />
         )}
       </div>
