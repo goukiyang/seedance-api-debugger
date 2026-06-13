@@ -3219,7 +3219,7 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
   - `src/app/api/tasks/[id]/reuse/route.ts` 返回原任务 `video_card_id`。
   - 从视频卡详情页或最近任务复用时默认归入当前视频卡。
   - 封板视频卡默认阻止继续生成。
-- [ ] Batch 8：验证、提交、上线闭环
+- [x] Batch 8：验证、提交、上线闭环
   - 本地验证：Prisma Client、类型检查、lint、build、关键 API smoke。
   - 数据验证：历史任务均有 `video_card_id`，新生成接口无卡拒绝，有卡通过到创建前校验阶段。
   - Git：聚焦提交、推送分支、创建 rollback tag、验证远端可见。
@@ -3263,5 +3263,8 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - 已实现 Batch 6 补充：画布生成页也加载并传递 `video_card_id`，无视频卡时不发起正式生成。
 - 已实现 Batch 7：复用接口返回原任务 `video_card_id`；任务详情复用链接带 `project_id/video_card_id`；失败重试继承原视频卡，历史未归档任务会被明确拒绝。
 - 已验证：`npx prisma validate` 通过；`npm run db:generate` 通过；`npx tsc --noEmit --pretty false` 通过；`npm run lint` 通过，剩余为既有 `<img>` 和 hook warning；`npm run build` 通过，并生成 `/video-cards/[id]` 与新增 API routes。
+- 已完成 Batch 8：形成代码提交 `0960217 feat: 落地视频卡归属闭环`，推送分支 `codex/video-card-p0-closure`，创建并推送 rollback tag `rollback/2026-06-13-video-card-p0`；远端分支和 tag 均指向 `09602174d2daa7fd235e01707fbcd5e1018a652a`。
+- 已完成线上闭环：执行 `youdoo-sites build sd2` 生成 `.next-prod/BUILD_ID=Sn_qL3lHyDVIU5vS0B2LQ`，执行 `youdoo-sites restart sd2` 后 `youdoo-sites status sd2` 显示本地和公网健康检查正常。
+- 已完成公网验证：`https://sd2.youdoodesign.com/api/health` 返回 200，`/video-cards/test-nonexistent` 返回 200 页面，`/api/video-cards/test-nonexistent` 返回 401 鉴权响应而非 500，`/_next/static/Sn_qL3lHyDVIU5vS0B2LQ/_buildManifest.js` 返回 200。
+- 已登记版本：`/Volumes/Data/Projects/project-version-registry.md` 新增 `v0.4.0：视频卡归属闭环版`，记录分支、提交、rollback tag、部署目标、验证结果和数据库备份路径。
 - 未执行：未跑真实付费生成任务。
-- 待完成 Batch 8：Git push、rollback tag、线上 `sd2` build/restart/status、公网验证和版本登记。
