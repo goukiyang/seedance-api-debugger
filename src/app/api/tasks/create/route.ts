@@ -40,6 +40,7 @@ import {
   settleProjectTaskBudget,
   shouldBillProjectBudget,
 } from '@/lib/projects/budget';
+import { findValidApproval } from '@/lib/approvals';
 import { evaluatePaidGenerationGuard, paidGenerationGuardError } from '@/lib/tasks/paid-generation-guard';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import type { CreateVideoInput, GenerationMode, VideoResolution, VideoDuration } from '@/types';
@@ -145,8 +146,35 @@ export async function POST(request: NextRequest) {
     throw error;
   }
 
-  if (project.type !== 'personal' && resolution === '1080p' && !resolutionApprovalConfirmed) {
-    return errorJson('1080p 生成需要先确认审批通过', 403);
+  if (project.type !== 'personal' && resolution === '1080p') {
+    if (!resolutionApprovalConfirmed) {
+      return errorJson('1080p 生成需要先确认审批通过', 403);
+    }
+    const approval = await prisma.$transaction((tx) => findValidApproval(tx, {
+      type: 'resolution_1080p',
+      projectId: project.id,
+      videoCardId: videoCard.id,
+    }));
+    if (!approval) {
+      const rejectedApproval = await prisma.approvalRecord.findFirst({
+        where: {
+          type: 'resolution_1080p',
+          status: 'rejected',
+          project_id: project.id,
+          OR: [
+            { video_card_id: videoCard.id },
+            { video_card_id: null },
+          ],
+        },
+        orderBy: [{ rejected_at: 'desc' }, { created_at: 'desc' }],
+        select: { decision_reason: true, reason: true },
+      });
+      if (rejectedApproval) {
+        const reason = rejectedApproval.decision_reason || rejectedApproval.reason || '未填写原因';
+        return errorJson(`1080p 审批已拒绝：${reason}`, 403);
+      }
+      return errorJson('未找到有效的 1080p 审批记录，请先在审批中心申请并通过审批', 403);
+    }
   }
 
   // --- Pricing ---

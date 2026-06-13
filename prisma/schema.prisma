@@ -118,6 +118,7 @@ model VideoTask {
   provider_api_requests ProviderApiRequest[]
   cost_ledgers          CostLedger[]
   cost_allocations      CostAllocation[]
+  approval_records      ApprovalRecord[]
 
   created_at   DateTime  @default(now())
   updated_at   DateTime  @updatedAt
@@ -192,6 +193,8 @@ model User {
   cost_allocations        CostAllocation[]
   content_audit_actions   ContentAuditLog[]    @relation("ContentAuditActor")
   content_audit_owned     ContentAuditLog[]    @relation("ContentAuditOwner")
+  approval_requests       ApprovalRecord[]      @relation("ApprovalRequester")
+  approval_decisions      ApprovalRecord[]      @relation("ApprovalApprover")
   feedbacks               Feedback[]
   preferences             UserPreference[]
 
@@ -258,6 +261,7 @@ model Project {
   cost_allocations      CostAllocation[]
   budget_account        ProjectBudgetAccount?
   budget_ledgers        ProjectBudgetLedger[]
+  approval_records      ApprovalRecord[]
   content_audit_logs    ContentAuditLog[]
 
   @@index([workspace_id])
@@ -297,6 +301,7 @@ model VideoCard {
   tasks             VideoTask[] @relation("VideoCardTasks")
   current_best_task VideoTask?  @relation("VideoCardCurrentBest", fields: [current_best_task_id], references: [id], onDelete: SetNull)
   final_task        VideoTask?  @relation("VideoCardFinal", fields: [final_task_id], references: [id], onDelete: SetNull)
+  approval_records  ApprovalRecord[]
 
   @@index([project_id])
   @@index([status])
@@ -513,6 +518,42 @@ model ProjectBudgetLedger {
   @@index([operator_id])
   @@index([created_at])
   @@index([idempotency_key])
+}
+
+model ApprovalRecord {
+  id                     String    @id @default(cuid())
+  type                   String // project_create | budget_increase | resolution_1080p | ratio_change | video_card_reopen
+  status                 String    @default("pending") // pending | approved | rejected | expired | cancelled
+  project_id             String?
+  video_card_id          String?
+  task_id                String?
+  requester_user_id      String
+  approver_user_id       String?
+  reason                 String?
+  decision_reason        String?
+  scope_json             String?
+  requested_payload_json String?
+  approved_at            DateTime?
+  rejected_at            DateTime?
+  expires_at             DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  project   Project?   @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  videoCard VideoCard? @relation(fields: [video_card_id], references: [id], onDelete: SetNull)
+  task      VideoTask? @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  requester User       @relation("ApprovalRequester", fields: [requester_user_id], references: [id], onDelete: Cascade)
+  approver  User?      @relation("ApprovalApprover", fields: [approver_user_id], references: [id], onDelete: SetNull)
+
+  @@index([type])
+  @@index([status])
+  @@index([project_id])
+  @@index([video_card_id])
+  @@index([task_id])
+  @@index([requester_user_id])
+  @@index([approver_user_id])
+  @@index([expires_at])
+  @@index([created_at])
 }
 
 // 操作日志

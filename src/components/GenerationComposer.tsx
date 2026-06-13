@@ -688,7 +688,10 @@ export function GenerationComposer({
               checked={resolutionApprovalConfirmed}
               onChange={(event) => setResolutionApprovalConfirmed(event.currentTarget.checked)}
             />
-            <span>我已确认该任务经过 1080p 审批，允许直接生成</span>
+            <span>
+              我已确认审批中心存在有效 1080p 审批记录，允许直接生成
+              <a href="/approvals" target="_blank" rel="noreferrer">查看审批</a>
+            </span>
           </label>
         )}
 

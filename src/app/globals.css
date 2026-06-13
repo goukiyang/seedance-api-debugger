@@ -5607,6 +5607,32 @@ a {
   margin-top: 1px;
 }
 
+.composer-resolution-approval a {
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 600;
+  margin-left: 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.approval-form {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(160px, 0.8fr) repeat(4, minmax(0, 1fr)) auto;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 980px) {
+  .approval-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .composer-recent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
