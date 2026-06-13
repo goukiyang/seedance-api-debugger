@@ -250,6 +250,16 @@
 - 验证结果：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect`、`youdoo-sites build sd2`、`youdoo-sites restart sd2` 通过；公网新路径 200，旧路径 307 到项目内路径，`youdoo-sites status sd2` OK。
 - 可复用经验：用户指出“设计上不该同级”时，不能只改视觉或按钮；必须按信息架构检查数据归属、URL 层级、入口、返回链路、旧链接兼容和线上真实 URL。
 
+## 2026-06-13 - 高规格生成审批不能只靠前端确认
+
+- 问题/背景：V1.2 要求 1080p、预算、比例变更和视频卡重开都要可追溯审批；旧实现只有生成页复选框。
+- 诱因/根因：前端复选框只能表达用户声明，不能证明审批存在，也不能追溯申请人、处理人、理由、有效期和拒绝原因。
+- 当时思路：先建立统一 `ApprovalRecord` 和审批中心，再把 1080p 生成校验切到后端有效审批查询；生成页只保留显式确认和审批入口。
+- 改动位置：`prisma/schema.prisma`、`src/lib/approvals.ts`、`src/app/api/approvals/*`、`src/app/approvals/page.tsx`、`src/app/api/tasks/create/route.ts`、`src/components/GenerationComposer.tsx`。
+- 怎么改：新增审批记录表和 API；审批中心支持发起、通过、拒绝；非个人项目 1080p 生成必须查到 `resolution_1080p` 的 approved 且未过期记录，否则后端拒绝；最近 rejected 记录会把拒绝原因返回给生成页。
+- 验证结果：`npx prisma validate`、`npm run db:generate`、`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`NEXT_DIST_DIR=.next-prod-dry-run npm run build`、`/tmp` SQLite approval smoke、`youdoo-sites build/restart/status sd2` 和公网 `/approvals`/`api/approvals` 验证通过。
+- 可复用经验：任何高成本动作的“确认”都应拆成两层：前端确认只负责交互意图，后端必须验证可追溯审批实体；拒绝原因也要从审批记录回流到触发页面。
+
 ## 2026-06-13 - 反馈消单必须区分已验证闭环和高风险未闭环
 
 - 问题/背景：用户要求把反馈页未完成项一次性落地并自动消单，其中同时包含 UI 细节、生成者头像、通知中心和项目代付。
