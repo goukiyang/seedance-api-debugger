@@ -140,6 +140,16 @@
 - 验证结果：`npm run lint` 通过，仍只有项目既有 warning；`rg` 确认最近任务卡片实现中不再有空态文案节点。
 - 可复用经验：用户要求“不要显示某文字”时，优先删除渲染路径，不要只改成隐藏类或替换成读屏文本；对截图、缩略图、媒体占位这类视觉区域尤其要避免任何文字节点残留。
 
+## 2026-06-13 - 趋势图不能隐藏关键金额，部署必须用当前线上基线
+
+- 问题/背景：后台“每日生成量与成本”中，用户看不到 2026-06-12 的记录，也看到多天没有金额文字。
+- 诱因/根因：数据库中 2026-06-12 本身没有 `VideoTask`，但趋势图前端为了避免 SVG 标签拥挤，只对部分日期显示金额文本；同时部署时如果从偏旧 worktree 构建，会把当前线上视频卡功能回退。
+- 当时思路：先用 SQLite 按毫秒时间戳聚合核对真实每日数据，再修 UI 显示策略；构建时必须以当前线上主基线 `codex/video-card-p0-closure` 为准，而不是复用旧隔离 worktree。
+- 改动位置：`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/globals.css`、`.next-prod`、`/Volumes/Data/Projects/project-version-registry.md`。
+- 怎么改：在趋势卡片内增加“每日金额明细”网格，每个 bucket 都显示日期、官方额度、生成次数和生成秒数；零生成日期显示 `$0.00`，有任务但无官方金额显示“待官方确认”。
+- 验证结果：SQLite 聚合确认 2026-06-12 为 0 条，2026-06-11 为 20 条/238 秒/`$19.236434`；`npm run lint`、`NEXT_DIST_DIR=.next-prod-daily-cost-final npm run build` 通过；最终 `.next-prod/BUILD_ID=vQvEpiY67E45lQz-cl-sq`，公网 build manifest 200，`youdoo-sites status sd2` OK，远端分支和 rollback tag 可见。
+- 可复用经验：成本驾驶舱的关键金额不能只藏在 hover title 或抽样标签里；必须有完整可扫的明细。线上部署要先确认基线包含当前已上线功能，隔离 worktree 只能用于避免脏改动，不能替代基线校验。
+
 ## 2026-06-13 - 线上反馈必须检查 `.next-prod` 和重启服务
 
 - 问题/背景：最近任务卡片修复已经提交并推送，但用户在线上仍看到旧的日期位置、字号和“视频帧”文字。
