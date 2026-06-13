@@ -279,3 +279,13 @@
 - 怎么改：生成页最近任务改为相对时间和提示词同一行；空提示词保持 hint 色；图集按钮改成“保存素材为图集 / 创建空图集”；项目和视频卡任务列表复用 `UserIdentityBadge` 并补 `avatar_url/account_type`；只归档已验证的 5 条反馈。
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 通过；本地 3015 HTTP smoke 无 500；5 条已完成反馈归档，通知中心和项目代付反馈保持 `new`。
 - 可复用经验：反馈自动消单必须绑定“实现 + 验证 + 对应反馈 ID”；通知、预算、扣费、退款和 schema 迁移类反馈不能用 UI 改动替代，也不能在未完成 Spec 前归档。
+
+## 2026-06-14 - 视频卡归档不变量不能只靠新建入口
+
+- 问题/背景：V1.2 要求每个生成任务都归属项目和视频卡，但任务详情里的项目归属调整接口会把 `video_card_id` 清空；封板视频卡也仍可通过 PATCH 修改候选、当前最佳和最终版。
+- 诱因/根因：之前只在 `/api/tasks/create` 强制新任务选择视频卡，没有把后续移动、归档调整、封板后版本修改这些“二次变更入口”纳入同一不变量。
+- 当时思路：先修会破坏数据基础的入口，移动任务必须选择目标项目下的视频卡；封板/归档卡禁止直接修改；再增加只读巡检脚本，后续每批都能快速验证现有数据没有回退。
+- 改动位置：`src/app/api/tasks/[id]/project/route.ts`、`src/app/api/video-cards/[id]/route.ts`、`src/app/tasks/[id]/page.tsx`、`scripts/audit-video-card-invariants.ts`、`tasks/todo.md`。
+- 怎么改：移动任务 API 新增目标视频卡校验，拒绝封板/归档目标卡，并在移出原最佳/最终版任务时清理原卡指针；视频卡 PATCH 禁止直接改 `status`，已封板/归档卡不能直接修改；任务详情管理面板增加目标视频卡选择；新增只读巡检脚本检查无项目、无视频卡、项目/卡错配、失效版本指针和封板后版本变更日志。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npx tsx scripts/audit-video-card-invariants.ts`、`npm run lint` 通过；巡检脚本返回 0 个基础归档异常。
+- 可复用经验：业务不变量必须覆盖创建入口和所有二次变更入口。凡是会移动、重归档、封板、重开或改版本角色的 API，都要用同一套后端校验和只读巡检脚本证明没有制造孤儿任务或错配归属。

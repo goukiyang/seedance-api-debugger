@@ -6,7 +6,6 @@ import { logProjectAction } from '@/lib/projects/permissions';
 import {
   assertCanManageVideoCard,
   assertCanViewVideoCard,
-  normalizeVideoCardStatus,
 } from '@/lib/video-cards/permissions';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
 
@@ -154,6 +153,21 @@ export async function PATCH(
     const access = await assertCanManageVideoCard(user, params.id);
     const body = await request.json() as Record<string, unknown>;
     const data: Record<string, unknown> = {};
+    const lockedForDirectChanges = access.videoCard.status === 'sealed' || access.videoCard.status === 'archived';
+
+    if (hasOwn(body, 'status')) {
+      return NextResponse.json(
+        { error: '视频卡状态不能直接修改；封板请使用封板操作，重开或归档需要走审批/专用流程' },
+        { status: 400 },
+      );
+    }
+
+    if (lockedForDirectChanges && Object.keys(body).length > 0) {
+      return NextResponse.json(
+        { error: '视频卡已封板或归档，不能直接修改；如需继续请走重开审批或复制新视频卡' },
+        { status: 403 },
+      );
+    }
 
     if (hasOwn(body, 'title')) {
       const title = asOptionalString(body.title);
@@ -173,7 +187,6 @@ export async function PATCH(
     if (hasOwn(body, 'budget_currency') || hasOwn(body, 'budgetCurrency')) {
       data.budget_currency = asOptionalString(body.budget_currency ?? body.budgetCurrency) || 'credits';
     }
-    if (hasOwn(body, 'status')) data.status = normalizeVideoCardStatus(body.status, access.videoCard.status as any);
     if (body.seal === true) {
       data.status = 'sealed';
       data.sealed_at = new Date();

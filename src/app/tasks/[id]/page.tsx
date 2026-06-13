@@ -108,6 +108,13 @@ interface ProjectOption {
   can_manage_project?: boolean;
 }
 
+interface VideoCardOption {
+  id: string;
+  project_id: string;
+  title: string;
+  status: string;
+}
+
 interface OfficialChargeLedger {
   id: string;
   event_type?: string | null;
@@ -397,6 +404,16 @@ function getRetentionText(status: string) {
   if (status === 'admin_hidden') return '管理员隐藏';
   if (status === 'retained') return '留存';
   return '可见';
+}
+
+function videoCardStatusLabel(status: string) {
+  if (status === 'draft') return '草稿';
+  if (status === 'active') return '生成中';
+  if (status === 'reviewing') return '评审中';
+  if (status === 'finalized') return '已定稿';
+  if (status === 'sealed') return '已封板';
+  if (status === 'archived') return '已归档';
+  return status || '-';
 }
 
 function costStatusLabel(status: string) {
@@ -721,6 +738,9 @@ export default function TaskDetailPage() {
   const [retrying, setRetrying] = useState(false);
   const [movingProject, setMovingProject] = useState(false);
   const [targetProjectId, setTargetProjectId] = useState('');
+  const [targetVideoCardId, setTargetVideoCardId] = useState('');
+  const [targetVideoCards, setTargetVideoCards] = useState<VideoCardOption[]>([]);
+  const [loadingTargetVideoCards, setLoadingTargetVideoCards] = useState(false);
   const [moveReason, setMoveReason] = useState('项目成本归属调整');
   const [moveMessage, setMoveMessage] = useState('');
   const [officialCharges, setOfficialCharges] = useState<OfficialChargeLedger[]>([]);
@@ -762,6 +782,7 @@ export default function TaskDetailPage() {
         setTask(nextTask);
         setTaskLoadError(null);
         setTargetProjectId(nextTask.project_id || '');
+        setTargetVideoCardId('');
         setVideoError(false);
         const embeddedLedgers = extractEmbeddedOfficialCharges(nextTask);
         if (embeddedLedgers.length > 0) {
@@ -824,6 +845,43 @@ export default function TaskDetailPage() {
   }, [fetchProjects]);
 
   useEffect(() => {
+    if (!targetProjectId || targetProjectId === task?.project_id) {
+      setTargetVideoCards([]);
+      setTargetVideoCardId('');
+      setLoadingTargetVideoCards(false);
+      return;
+    }
+
+    let cancelled = false;
+    setTargetVideoCards([]);
+    setTargetVideoCardId('');
+    setLoadingTargetVideoCards(true);
+
+    fetch(`/api/projects/${targetProjectId}/video-cards`, { cache: 'no-store' })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || data.message || '目标项目视频卡加载失败');
+        }
+        const cards = Array.isArray(data.video_cards) ? data.video_cards : [];
+        const assignableCards = cards.filter((card: VideoCardOption) => (
+          card.status !== 'sealed' && card.status !== 'archived'
+        ));
+        if (!cancelled) setTargetVideoCards(assignableCards);
+      })
+      .catch((error) => {
+        if (!cancelled) setMoveMessage(error instanceof Error ? error.message : '目标项目视频卡加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTargetVideoCards(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetProjectId, task?.project_id]);
+
+  useEffect(() => {
     fetchOfficialCharges();
   }, [fetchOfficialCharges]);
 
@@ -872,7 +930,7 @@ export default function TaskDetailPage() {
   };
 
   const handleMoveProject = async () => {
-    if (!task || !targetProjectId || targetProjectId === task.project_id) return;
+    if (!task || !targetProjectId || targetProjectId === task.project_id || !targetVideoCardId) return;
     setMovingProject(true);
     setMoveMessage('');
     try {
@@ -881,6 +939,7 @@ export default function TaskDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: targetProjectId,
+          video_card_id: targetVideoCardId,
           reason: moveReason,
         }),
       });
@@ -891,6 +950,7 @@ export default function TaskDetailPage() {
       }
       setTask(data.task);
       setTargetProjectId(data.task.project_id || '');
+      setTargetVideoCardId(data.task.video_card_id || '');
       setMoveMessage('任务已移动，成本归属流水已记录');
     } catch (error) {
       setMoveMessage(error instanceof Error ? error.message : '移动项目失败');
@@ -1793,7 +1853,15 @@ export default function TaskDetailPage() {
                 <div className="info-label">移动到其他项目</div>
                 <p className="text-gray text-sm">用于修正选错项目后的成本归属，旧账本不会被覆盖，会追加转移记录。</p>
               </div>
-              <select className="input" value={targetProjectId} onChange={(event) => setTargetProjectId(event.target.value)}>
+              <select
+                className="input"
+                value={targetProjectId}
+                onChange={(event) => {
+                  setTargetProjectId(event.target.value);
+                  setTargetVideoCardId('');
+                  setMoveMessage('');
+                }}
+              >
                 <option value="">选择目标项目</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
@@ -1801,6 +1869,24 @@ export default function TaskDetailPage() {
                   </option>
                 ))}
               </select>
+              <select
+                className="input"
+                value={targetVideoCardId}
+                onChange={(event) => setTargetVideoCardId(event.target.value)}
+                disabled={!targetProjectId || targetProjectId === task.project_id || loadingTargetVideoCards}
+              >
+                <option value="">
+                  {loadingTargetVideoCards ? '加载目标视频卡...' : '选择目标视频卡'}
+                </option>
+                {targetVideoCards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    {card.title} · {videoCardStatusLabel(card.status)}
+                  </option>
+                ))}
+              </select>
+              {targetProjectId && targetProjectId !== task.project_id && !loadingTargetVideoCards && targetVideoCards.length === 0 && (
+                <p className="text-gray text-sm">目标项目没有可用视频卡，请先在目标项目中创建视频卡。</p>
+              )}
               <input
                 className="input"
                 value={moveReason}
@@ -1811,7 +1897,7 @@ export default function TaskDetailPage() {
                 className="btn btn-secondary"
                 type="button"
                 onClick={handleMoveProject}
-                disabled={movingProject || !targetProjectId || targetProjectId === task.project_id}
+                disabled={movingProject || !targetProjectId || targetProjectId === task.project_id || !targetVideoCardId}
               >
                 {movingProject ? '移动中...' : '移动项目'}
               </button>
