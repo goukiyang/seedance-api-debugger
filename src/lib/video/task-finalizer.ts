@@ -3,6 +3,7 @@ import { prisma } from '../prisma';
 import { getVideoTaskStatus } from '../provider/jimeng';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
+import { settleProjectTaskBudget } from '../projects/budget';
 import { cacheTaskVideoToLocal, type LocalVideoCacheResult } from './local-cache';
 import { ensureTaskThumbnail, type EnsureTaskThumbnailResult } from './thumbnail';
 
@@ -199,6 +200,32 @@ async function settleTask(
   await prisma.$transaction(async (tx) => {
     const freshTask = await tx.videoTask.findUnique({ where: { id: taskId } });
     if (!freshTask || !freshTask.frozen_cost || freshTask.frozen_cost <= 0) return;
+
+    if (freshTask.billing_scope === 'project' && freshTask.project_id) {
+      const existingProjectSettlement = await tx.projectBudgetLedger.findUnique({
+        where: { idempotency_key: `project_budget_settle:${taskId}` },
+      });
+      if (existingProjectSettlement) return;
+
+      const settlement = await settleProjectTaskBudget(tx, {
+        projectId: freshTask.project_id,
+        taskId,
+        terminalStatus,
+        frozenAmount,
+        freezeSnapshot: freshTask.credit_freeze_snapshot,
+        operatorId: userId,
+      });
+
+      const settledTask = await tx.videoTask.update({
+        where: { id: taskId },
+        data: terminalStatus === 'succeeded'
+          ? { frozen_cost: 0, actual_cost: settlement.actualCost }
+          : { frozen_cost: 0, actual_cost: 0, refund_amount: settlement.refundedAmount },
+      });
+
+      await recordTaskCostSettlement(tx, settledTask, terminalStatus, userId);
+      return;
+    }
 
     const existingSettlement = await tx.creditLedger.findFirst({
       where: {

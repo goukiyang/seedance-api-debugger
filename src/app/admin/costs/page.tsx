@@ -120,6 +120,19 @@ function providerBalanceHint(snapshot: ReturnType<typeof providerBalanceSnapshot
   return `${source} · ${new Date(snapshot.fetched_at).toLocaleString('zh-CN')}`;
 }
 
+function budgetRiskLabel(committedRatio: number, budgetCredits: number) {
+  if (budgetCredits <= 0) return '未设置';
+  if (committedRatio >= 1) return '已用尽';
+  if (committedRatio >= 0.9) return '高风险';
+  if (committedRatio >= 0.7) return '需关注';
+  return '正常';
+}
+
+function formatPoint(value: number | null | undefined) {
+  const amount = Number(value || 0);
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+}
+
 export default async function AdminCostsPage() {
   const user = await getSession();
   if (!user) redirect('/login');
@@ -137,6 +150,7 @@ export default async function AdminCostsPage() {
     failedRequests,
     auditSummary,
     providerBalanceSnapshots,
+    publicProjectBudgets,
   ] = await Promise.all([
     prisma.videoTask.count(),
     prisma.videoTask.count({ where: { local_status: { in: ['succeeded', 'failed', 'cancelled'] } } }),
@@ -216,6 +230,19 @@ export default async function AdminCostsPage() {
       where: { provider_name: 'seedance' },
       orderBy: { fetched_at: 'desc' },
       take: 10,
+    }),
+    prisma.project.findMany({
+      where: { type: 'public', status: { not: 'deleted' } },
+      orderBy: { updated_at: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        owner: { select: { name: true, username: true } },
+        budget_account: true,
+        _count: { select: { tasks: true, video_cards: true } },
+      },
     }),
   ]);
   const officialCostTotals = sumCostRowsByCurrency(officialCostRows);
@@ -310,6 +337,56 @@ export default async function AdminCostsPage() {
         snapshots={providerBalanceViews}
         syncEnabled={providerBalanceSyncEnabled}
       />
+
+      <div className="card" id="public-project-budgets">
+        <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h2 className="section-title mb-0">公共项目预算</h2>
+            <p className="text-gray text-sm mt-2">公共项目生成会优先冻结项目预算池，成功后实扣，失败或取消后释放。</p>
+          </div>
+          <span className="text-gray text-sm">{publicProjectBudgets.length} 个公共项目</span>
+        </div>
+        {publicProjectBudgets.length === 0 ? (
+          <p className="text-gray">暂无公共项目。</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>项目</th>
+                <th>负责人</th>
+                <th>预算</th>
+                <th>已用</th>
+                <th>冻结</th>
+                <th>剩余</th>
+                <th>风险</th>
+                <th>任务 / 视频卡</th>
+              </tr>
+            </thead>
+            <tbody>
+              {publicProjectBudgets.map((project) => {
+                const account = project.budget_account;
+                const budgetCredits = account?.budget_credits || 0;
+                const usedCredits = account?.used_credits || 0;
+                const frozenCredits = account?.frozen_credits || 0;
+                const availableCredits = Math.max(0, budgetCredits - usedCredits - frozenCredits);
+                const committedRatio = budgetCredits > 0 ? (usedCredits + frozenCredits) / budgetCredits : 0;
+                return (
+                  <tr key={project.id}>
+                    <td><Link className="link" href={`/projects/${project.id}`}>{project.name}</Link></td>
+                    <td>{displayUserName(project.owner)}</td>
+                    <td>{formatPoint(budgetCredits)}</td>
+                    <td>{formatPoint(usedCredits)}</td>
+                    <td>{formatPoint(frozenCredits)}</td>
+                    <td>{formatPoint(availableCredits)}</td>
+                    <td>{budgetRiskLabel(committedRatio, budgetCredits)}</td>
+                    <td>{project._count.tasks} / {project._count.video_cards}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="card" id="audit-checks">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>

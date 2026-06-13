@@ -117,6 +117,21 @@ interface ProjectPermissions {
   role: string;
 }
 
+interface ProjectBudgetSummary {
+  id: string | null;
+  project_id: string;
+  budget_credits: number;
+  used_credits: number;
+  frozen_credits: number;
+  available_credits: number;
+  currency: string;
+  status: string;
+  usage_ratio: number;
+  committed_ratio: number;
+  risk_level: 'normal' | 'warning' | 'critical' | 'exhausted';
+  updated_at: string | null;
+}
+
 interface ReviewTaskItem {
   id: string;
   prompt: string;
@@ -278,6 +293,18 @@ function confidenceLabel(confidence: string): string {
   return confidence || '-';
 }
 
+function budgetRiskLabel(level?: ProjectBudgetSummary['risk_level']) {
+  if (level === 'exhausted') return '已用尽';
+  if (level === 'critical') return '高风险';
+  if (level === 'warning') return '需关注';
+  return '正常';
+}
+
+function formatBudgetPoint(value: number | null | undefined) {
+  const amount = Number(value || 0);
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+}
+
 function taskOwnerLabel(task: TaskItem | ReviewTaskItem): string {
   return displayUserName(task.owner || task.user);
 }
@@ -310,6 +337,7 @@ export default function ProjectDetailPage() {
   const [costLedgers, setCostLedgers] = useState<CostLedgerItem[]>([]);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumItem[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ProjectReviewSummary | null>(null);
+  const [budget, setBudget] = useState<ProjectBudgetSummary | null>(null);
   const [permissions, setPermissions] = useState<ProjectPermissions>({
     can_manage_project: false,
     can_manage_members: false,
@@ -328,6 +356,8 @@ export default function ProjectDetailPage() {
   const [videoCardTitle, setVideoCardTitle] = useState('');
   const [videoCardObjective, setVideoCardObjective] = useState('');
   const [creatingVideoCard, setCreatingVideoCard] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState('');
+  const [savingBudget, setSavingBudget] = useState(false);
 
   const loadProject = async () => {
     setLoading(true);
@@ -352,6 +382,8 @@ export default function ProjectDetailPage() {
       setCostLedgers(data.cost_ledgers || []);
       setReferenceAlbums(data.reference_albums || []);
       setReviewSummary(data.review_summary || null);
+      setBudget(data.budget || null);
+      setBudgetDraft(data.budget ? String(data.budget.budget_credits) : '');
       setPermissions(data.permissions || {
         can_manage_project: false,
         can_manage_members: false,
@@ -512,6 +544,40 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const updateProjectBudget = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!project) return;
+    setError('');
+    setMessage('');
+    const budgetCredits = Number(budgetDraft);
+    if (!Number.isFinite(budgetCredits) || budgetCredits < 0) {
+      setError('预算必须是非负数字');
+      return;
+    }
+    setSavingBudget(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/budget`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          budget_credits: budgetCredits,
+          reason: '项目详情页调整预算',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || data.message || '更新预算失败');
+        return;
+      }
+      setBudget(data.budget || null);
+      setBudgetDraft(data.budget ? String(data.budget.budget_credits) : budgetDraft);
+      setMessage('项目预算已更新');
+      await loadProject();
+    } finally {
+      setSavingBudget(false);
+    }
+  };
+
   if (loading) {
     return <div className="card"><p className="text-gray">加载中...</p></div>;
   }
@@ -569,6 +635,60 @@ export default function ProjectDetailPage() {
           )}
         </div>
       </div>
+
+      {project.type === 'public' && budget && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <h2 className="section-title mb-0">项目预算</h2>
+              <p className="text-gray text-sm mt-2">
+                状态 {budgetRiskLabel(budget.risk_level)} · 已用 {Math.round(budget.usage_ratio * 100)}% · 含冻结 {Math.round(budget.committed_ratio * 100)}%
+              </p>
+            </div>
+            <span className={`project-budget-risk ${budget.risk_level}`}>{budgetRiskLabel(budget.risk_level)}</span>
+          </div>
+          <div className="stats-grid">
+            <div className="stat-card">
+              <span className="stat-label">预算总额</span>
+              <strong className="stat-value">{formatBudgetPoint(budget.budget_credits)}</strong>
+              <span className="stat-sub">{budget.currency}</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">已用</span>
+              <strong className="stat-value">{formatBudgetPoint(budget.used_credits)}</strong>
+              <span className="stat-sub">成功任务实扣</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">冻结</span>
+              <strong className="stat-value">{formatBudgetPoint(budget.frozen_credits)}</strong>
+              <span className="stat-sub">进行中任务预占</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">剩余</span>
+              <strong className="stat-value">{formatBudgetPoint(budget.available_credits)}</strong>
+              <span className="stat-sub">可继续生成</span>
+            </div>
+          </div>
+          {permissions.role === 'admin' ? (
+            <form className="project-budget-form" onSubmit={updateProjectBudget}>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value={budgetDraft}
+                onChange={(event) => setBudgetDraft(event.target.value)}
+                placeholder="预算点数"
+              />
+              <button className="btn btn-secondary" type="submit" disabled={savingBudget}>
+                {savingBudget ? '保存中...' : '更新预算'}
+              </button>
+            </form>
+          ) : (
+            <p className="text-gray text-sm mt-4">追加预算需要管理员处理。</p>
+          )}
+        </div>
+      )}
 
       <div className="card" id="project-video-cards">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>

@@ -35,6 +35,11 @@ import {
   ReferenceImportError,
 } from '@/lib/assets/reference-import';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
+import {
+  allocateProjectTaskBudget,
+  settleProjectTaskBudget,
+  shouldBillProjectBudget,
+} from '@/lib/projects/budget';
 import { evaluatePaidGenerationGuard, paidGenerationGuardError } from '@/lib/tasks/paid-generation-guard';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import type { CreateVideoInput, GenerationMode, VideoResolution, VideoDuration } from '@/types';
@@ -147,6 +152,8 @@ export async function POST(request: NextRequest) {
   // --- Pricing ---
   const pricing = calculateEstimatedCost(resolution, duration);
   const estimatedCost = pricing.estimatedCost;
+  const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
+  const billingAccountId = billingScope === 'project' ? project.id : user.id;
 
   // --- Idempotency ---
   const idempotencyKey: string | undefined = body.idempotency_key || undefined;
@@ -170,6 +177,8 @@ export async function POST(request: NextRequest) {
         source_request_id: existing.source_request_id,
         project_id: existing.project_id,
         video_card_id: existing.video_card_id,
+        billing_scope: existing.billing_scope,
+        billing_account_id: existing.billing_account_id,
       });
     }
   }
@@ -400,6 +409,8 @@ export async function POST(request: NextRequest) {
     estimated_cost: number | null;
     pricing_rule_id: string | null;
     pricing_snapshot: string | null;
+    billing_scope: string;
+    billing_account_id: string | null;
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -439,8 +450,8 @@ export async function POST(request: NextRequest) {
           pricing_snapshot: JSON.stringify(pricing),
           pricing_rule_id: pricing.pricingRuleId,
           idempotency_key: idempotencyKey || null,
-          billing_scope: 'user',
-          billing_account_id: user.id,
+          billing_scope: billingScope,
+          billing_account_id: billingAccountId,
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
           params_json: JSON.stringify({
@@ -461,40 +472,51 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      let freeze;
+      let freezeSnapshot: string;
       try {
-        freeze = await allocateTaskCredits(tx, {
-          id: user.id,
-          role: user.role,
-          account_type: user.account_type,
-          user_profile: user.user_profile,
-          status: user.status,
-        }, estimatedCost, task.id);
+        if (billingScope === 'project') {
+          const freeze = await allocateProjectTaskBudget(tx, {
+            projectId: project.id,
+            taskId: task.id,
+            amount: estimatedCost,
+            operatorId: user.id,
+          });
+          freezeSnapshot = freeze.snapshot;
+        } else {
+          const freeze = await allocateTaskCredits(tx, {
+            id: user.id,
+            role: user.role,
+            account_type: user.account_type,
+            user_profile: user.user_profile,
+            status: user.status,
+          }, estimatedCost, task.id);
+          freezeSnapshot = freeze.snapshot;
+
+          await tx.creditLedger.create({
+            data: {
+              user_id: user.id,
+              type: 'task_freeze',
+              amount: -estimatedCost,
+              balance_before: freeze.balance_before,
+              balance_after: freeze.balance_after,
+              frozen_before: freeze.frozen_before,
+              frozen_after: freeze.frozen_after,
+              related_task_id: task.id,
+              reason: `任务创建冻结 ${estimatedCost} 点`,
+              metadata_json: JSON.stringify({ allocations: freeze.allocations }),
+            },
+          });
+        }
       } catch (error) {
         throw new CreditError(
-          error instanceof Error ? error.message : '点数不足',
-          'INSUFFICIENT_CREDITS',
+          error instanceof Error ? error.message : billingScope === 'project' ? '项目预算不足' : '点数不足',
+          billingScope === 'project' ? 'INSUFFICIENT_PROJECT_BUDGET' : 'INSUFFICIENT_CREDITS',
         );
       }
 
       await tx.videoTask.update({
         where: { id: task.id },
-        data: { credit_freeze_snapshot: freeze.snapshot },
-      });
-
-      await tx.creditLedger.create({
-        data: {
-          user_id: user.id,
-          type: 'task_freeze',
-          amount: -estimatedCost,
-          balance_before: freeze.balance_before,
-          balance_after: freeze.balance_after,
-          frozen_before: freeze.frozen_before,
-          frozen_after: freeze.frozen_after,
-          related_task_id: task.id,
-          reason: `任务创建冻结 ${estimatedCost} 点`,
-          metadata_json: JSON.stringify({ allocations: freeze.allocations }),
-        },
+        data: { credit_freeze_snapshot: freezeSnapshot },
       });
 
       await tx.operationLog.create({
@@ -508,6 +530,8 @@ export async function POST(request: NextRequest) {
             video_card_id: videoCard.id,
             owner_user_id: user.id,
             estimated_cost: estimatedCost,
+            billing_scope: billingScope,
+            billing_account_id: billingAccountId,
             reference_album_ids: generationReferenceAlbumIds,
             reference_image_ids: generationReferenceImageIds,
             source_type: requestSource.source_type,
@@ -594,6 +618,8 @@ export async function POST(request: NextRequest) {
       workspace_id: workspaceId,
       project_id: project.id,
       video_card_id: videoCard.id,
+      billing_scope: billingScope,
+      billing_account_id: billingAccountId,
       snapshot_id: snapshot.id,
       prompt_rendered: promptRendered,
       asset_mapping: assetMapping,
@@ -657,6 +683,29 @@ async function handleProviderFailure(
         completed_at: new Date(),
       },
     });
+
+    if (taskBeforeSettlement.billing_scope === 'project' && taskBeforeSettlement.project_id) {
+      const settlement = await settleProjectTaskBudget(tx, {
+        projectId: taskBeforeSettlement.project_id,
+        taskId,
+        terminalStatus: 'failed',
+        frozenAmount,
+        freezeSnapshot: taskBeforeSettlement.credit_freeze_snapshot,
+        operatorId: userId,
+      });
+
+      const failedTask = await tx.videoTask.update({
+        where: { id: taskId },
+        data: {
+          frozen_cost: 0,
+          actual_cost: 0,
+          refund_amount: settlement.refundedAmount,
+        },
+      });
+
+      await recordTaskCostSettlement(tx, failedTask, 'failed', userId);
+      return;
+    }
 
     const settlement = await settleTaskCredits(tx, {
       taskId,

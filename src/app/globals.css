@@ -1992,6 +1992,40 @@ a {
   line-height: 1.2;
 }
 
+.project-budget-risk {
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+}
+
+.project-budget-risk.warning {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.project-budget-risk.critical,
+.project-budget-risk.exhausted {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #991b1b;
+}
+
+.project-budget-form {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  max-width: 420px;
+}
+
+.project-budget-form .input {
+  min-width: 0;
+}
+
 .admin-overview-page {
   display: grid;
   gap: 16px;

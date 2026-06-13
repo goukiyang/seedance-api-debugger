@@ -256,6 +256,8 @@ model Project {
   provider_api_requests ProviderApiRequest[]
   cost_ledgers          CostLedger[]
   cost_allocations      CostAllocation[]
+  budget_account        ProjectBudgetAccount?
+  budget_ledgers        ProjectBudgetLedger[]
   content_audit_logs    ContentAuditLog[]
 
   @@index([workspace_id])
@@ -457,6 +459,58 @@ model CreditLedger {
 
   @@index([user_id])
   @@index([type])
+  @@index([created_at])
+  @@index([idempotency_key])
+}
+
+// 项目预算账户。公共项目从这里冻结、实扣和返还，避免混用个人点数余额。
+model ProjectBudgetAccount {
+  id             String   @id @default(cuid())
+  project_id     String   @unique
+  budget_credits Float    @default(0)
+  used_credits   Float    @default(0)
+  frozen_credits Float    @default(0)
+  currency       String   @default("credits")
+  status         String   @default("active") // active | frozen | exhausted | cancelled
+  created_by     String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  project Project               @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  ledgers ProjectBudgetLedger[]
+
+  @@index([project_id])
+  @@index([status])
+}
+
+// 项目预算流水。记录预算追加、任务预占、成功实扣和失败释放。
+model ProjectBudgetLedger {
+  id              String   @id @default(cuid())
+  project_id      String
+  account_id      String
+  type            String // budget_grant | budget_adjust | task_freeze | task_success_deduct | task_failed_refund | task_freeze_release
+  amount          Float
+  budget_before   Float
+  budget_after    Float
+  used_before     Float
+  used_after      Float
+  frozen_before   Float
+  frozen_after    Float
+  related_task_id String?
+  operator_id     String?
+  reason          String?
+  idempotency_key String?  @unique
+  metadata_json   String?
+  created_at      DateTime @default(now())
+
+  project Project              @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  account ProjectBudgetAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([account_id])
+  @@index([type])
+  @@index([related_task_id])
+  @@index([operator_id])
   @@index([created_at])
   @@index([idempotency_key])
 }

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProject, assertCanManageProjectMembers, assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
+import { getProjectBudgetSummary } from '@/lib/projects/budget';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
 
@@ -347,6 +348,7 @@ export async function GET(
       [...officialAllocationMicrosTotals, ...officialDirectMicrosTotals],
       [...officialAllocationMinorFallbackTotals, ...officialDirectMinorFallbackTotals],
     );
+    const budgetSummary = await prisma.$transaction((tx) => getProjectBudgetSummary(tx, params.id));
     const primaryOfficialCost = officialCostTotals[0] || null;
     const reviewSummary = {
       task_count: taskCount,
@@ -402,6 +404,7 @@ export async function GET(
       }),
       tasks,
       cost_ledgers: costLedgers,
+      budget: budgetSummary,
       review_summary: reviewSummary,
       permissions: {
         role: access.role,
