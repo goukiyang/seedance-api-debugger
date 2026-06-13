@@ -9026,6 +9026,65 @@ a {
   color: transparent;
 }
 
+.admin-dashboard-trend-daily {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  margin-top: 12px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 2px 2px 4px;
+}
+
+.admin-dashboard-trend-day {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  min-height: 70px;
+  padding: 9px 10px;
+}
+
+.admin-dashboard-trend-day span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-dashboard-trend-day strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.admin-dashboard-trend-day small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.admin-dashboard-trend-day.has-cost {
+  border-color: #fed7aa;
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+.admin-dashboard-trend-day.needs-cost {
+  border-color: #fde68a;
+  box-shadow: inset 3px 0 0 #eab308;
+}
+
+.admin-dashboard-trend-day.is-empty {
+  background: #f8fafc;
+}
+
+.admin-dashboard-trend-day.is-empty strong,
+.admin-dashboard-trend-day.is-empty small {
+  color: #94a3b8;
+}
+
 .admin-dashboard-resolution-list,
 .admin-dashboard-breakdown-list {
   display: grid;
