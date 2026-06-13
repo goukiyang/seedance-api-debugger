@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-13 - 公共预算池上线必须先拆清读写边界
+
+- 问题/背景：公共项目生成改为项目预算池扣费，需要新增预算账户、预算流水、任务冻结、成功实扣、失败释放和项目页展示。
+- 诱因/根因：预算 summary 最初如果自动 upsert 账户，会让项目详情这类只读接口产生写库副作用；同时新代码依赖新增 SQLite 表，未同步 schema 会直接导致线上 500。
+- 当时思路：先确认运行库已有 `ProjectBudgetAccount` / `ProjectBudgetLedger`，再把 summary 改为缺账户返回 0 快照，只有预算调整和任务冻结等写动作才创建账户。
+- 改动位置：`prisma/schema.prisma`、`prisma/migrations/20260613212000_add_project_budget_accounts/migration.sql`、`src/lib/projects/budget.ts`、`src/app/api/tasks/create/route.ts`、`src/lib/video/task-finalizer.ts`。
+- 怎么改：公共项目按 `billing_scope=project` 走项目预算冻结/结算，个人项目保留 `CreditAccount` 路径；项目预算流水使用任务级幂等键防止重复冻结或重复实扣。
+- 验证结果：`npm run db:generate`、`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 通过；临时 SQLite migration smoke 通过；事务回滚 smoke 覆盖预算追加、冻结、重复冻结、成功结算和重复结算。
+- 可复用经验：账务类上线不能只看构建通过；必须同时验证运行库 schema、读接口无写副作用、冻结/结算幂等、失败释放和线上构建已加载。
+
 ## 2026-06-10 - 官方金额默认双币种显示
 
 - 问题/背景：用户要求项目内显示金额时，要么同时显示美金和人民币，要么支持点击在两个币种之间切换。
