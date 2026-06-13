@@ -239,3 +239,13 @@
 - 怎么改：项目内页面校验 `video_card.project_id === projectId`；旧路由查出项目后 307 跳转；任务详情返回文案优先识别项目内视频卡路径。
 - 验证结果：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect`、`youdoo-sites build sd2`、`youdoo-sites restart sd2` 通过；公网新路径 200，旧路径 307 到项目内路径，`youdoo-sites status sd2` OK。
 - 可复用经验：用户指出“设计上不该同级”时，不能只改视觉或按钮；必须按信息架构检查数据归属、URL 层级、入口、返回链路、旧链接兼容和线上真实 URL。
+
+## 2026-06-13 - 反馈消单必须区分已验证闭环和高风险未闭环
+
+- 问题/背景：用户要求把反馈页未完成项一次性落地并自动消单，其中同时包含 UI 细节、生成者头像、通知中心和项目代付。
+- 诱因/根因：反馈列表里既有低风险显示层问题，也有通知模型和项目代付账务闭环；如果把所有反馈都按同一粒度处理，容易把未完成的 schema/账本/结算需求误归档。
+- 当时思路：先把已具备清晰边界的 F1-F4 做成代码闭环和验证闭环，只归档对应反馈；F5 通知中心和 F6 项目代付保持未归档，继续受 Spec 和停止条件保护。
+- 改动位置：`src/app/generate/page.tsx`、`src/components/GenerationComposer.tsx`、`src/components/ImageSetToolbar.tsx`、`src/app/projects/[id]/page.tsx`、`src/app/projects/[id]/video-cards/[cardId]/page.tsx`、相关项目/视频卡 API、`tasks/todo.md`。
+- 怎么改：生成页最近任务改为相对时间和提示词同一行；空提示词保持 hint 色；图集按钮改成“保存素材为图集 / 创建空图集”；项目和视频卡任务列表复用 `UserIdentityBadge` 并补 `avatar_url/account_type`；只归档已验证的 5 条反馈。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 通过；本地 3015 HTTP smoke 无 500；5 条已完成反馈归档，通知中心和项目代付反馈保持 `new`。
+- 可复用经验：反馈自动消单必须绑定“实现 + 验证 + 对应反馈 ID”；通知、预算、扣费、退款和 schema 迁移类反馈不能用 UI 改动替代，也不能在未完成 Spec 前归档。
