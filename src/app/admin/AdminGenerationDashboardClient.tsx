@@ -243,6 +243,17 @@ function formatTrendCostShort(bucket: DashboardTrendBucket) {
   return `${amount.toFixed(2)} ${currency}`;
 }
 
+function formatTrendBucketCost(bucket: DashboardTrendBucket) {
+  if (bucket.official_costs.length) return formatCurrencyTotals(bucket.official_costs, '$0.00');
+  return bucket.task_count > 0 ? '待官方确认' : '$0.00';
+}
+
+function trendBucketClass(bucket: DashboardTrendBucket) {
+  if (bucket.official_costs.length) return 'has-cost';
+  if (bucket.task_count > 0) return 'needs-cost';
+  return 'is-empty';
+}
+
 function trendX(index: number, total: number) {
   if (total <= 1) return (TREND_CHART_LEFT + TREND_CHART_RIGHT) / 2;
   return TREND_CHART_LEFT + (index * (TREND_CHART_RIGHT - TREND_CHART_LEFT)) / (total - 1);
@@ -328,6 +339,15 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
           <span key={bucket.key} className={showTrendLabel(index, buckets.length) ? '' : 'is-muted'}>
             {showTrendLabel(index, buckets.length) ? bucket.label : ''}
           </span>
+        ))}
+      </div>
+      <div className="admin-dashboard-trend-daily" aria-label="每日金额明细">
+        {buckets.map((bucket) => (
+          <div className={`admin-dashboard-trend-day ${trendBucketClass(bucket)}`} key={`${bucket.key}-daily`}>
+            <span>{bucket.label}</span>
+            <strong>{formatTrendBucketCost(bucket)}</strong>
+            <small>{formatInteger(bucket.task_count)} 次 · {formatSeconds(bucket.duration_seconds)}</small>
+          </div>
         ))}
       </div>
     </div>
