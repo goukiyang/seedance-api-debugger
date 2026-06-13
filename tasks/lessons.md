@@ -140,6 +140,16 @@
 - 验证结果：`npm run lint` 通过，仍只有项目既有 warning；`rg` 确认最近任务卡片实现中不再有空态文案节点。
 - 可复用经验：用户要求“不要显示某文字”时，优先删除渲染路径，不要只改成隐藏类或替换成读屏文本；对截图、缩略图、媒体占位这类视觉区域尤其要避免任何文字节点残留。
 
+## 2026-06-13 - 线上反馈必须检查 `.next-prod` 和重启服务
+
+- 问题/背景：最近任务卡片修复已经提交并推送，但用户在线上仍看到旧的日期位置、字号和“视频帧”文字。
+- 诱因/根因：`sd2` 线上服务健康，但 `.next-prod/BUILD_ID` 仍停在 2026-06-12，说明生产构建没有同步到最新 2026-06-13 提交；Git 远端可见不等于线上已部署。
+- 当时思路：先用 `youdoo-sites status/doctor sd2` 排除外链和端口问题，再检查 `.next-prod` 时间戳和公开静态资源，最后执行生产构建与重启。
+- 改动位置：`.next-prod`、`com.youdoo.site.sd2` 运行实例、`/Volumes/Data/Projects/project-version-registry.md`。
+- 怎么改：运行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2` 重新生成 `.next-prod`，再运行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2`。
+- 验证结果：`youdoo-sites status sd2` 显示 launchd/port/build/local/public 均 OK；公开 build manifest `/_next/static/v7408tGryidB-EuLEW8-D/_buildManifest.js` 返回 200；公开 CSS 中 `.composer-task-card-prompt-text` 为 `font-size:8px`，公开 JS 中只剩 `composer-task-card-prompt-time` 和 `composer-task-card-prompt-text`，没有 `sr-only` 或“视频帧”。
+- 可复用经验：用户说“线上还是旧的”时，必须把部署当成单独闭环：检查 `.next-prod/BUILD_ID`、运行 `youdoo-sites build/restart`、再从公网静态资源和健康检查验证，不要只汇报 Git commit/push。
+
 ## 2026-06-13 - 1080p 项目生成审批必须前后端双闸
 
 - 问题/背景：非个人项目的 1080p 生成会直接影响团队成本，需要在生成前显式确认审批，且复用/重试不能绕过该确认。
