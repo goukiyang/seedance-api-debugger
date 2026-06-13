@@ -24,20 +24,23 @@
 - [x] 核对 Prisma migration 链，确认 `CostLedger`、`CostAllocation`、`ProviderApiRequest`、`ProviderAccountSnapshot` 等已存在模型是否有完整迁移来源；缺失时补迁移或登记为历史 `db push` 风险。
 - [x] 补齐视频卡详情页的“候选”标记入口，当前已有 `version_role=candidate` 口径，但 UI 主要是当前最佳和最终版。
 - [x] 明确项目页是否保留历史/调试任务二级区域；如果保留，视觉层级必须低于视频卡，不能让用户误以为任务和视频卡同级。
-- [ ] 为视频卡封板后的“重开”定义入口和限制，当前封板能阻止生成，但重开应进入审批中心任务包。
-- [ ] 复查 `scripts/backfill-video-cards.ts` 兜底卡标题和线上数据一致性，避免历史任务被重复归档或归到错误项目。
+- [x] 为视频卡封板后的“重开”定义入口和限制，当前封板能阻止生成，但重开应进入审批中心任务包。
+- [x] 复查 `scripts/backfill-video-cards.ts` 兜底卡标题和线上数据一致性，避免历史任务被重复归档或归到错误项目。
 
 本轮记录：
 
 - 2026-06-13：已确认 `VideoCard` 与 `VideoTask.video_card_id` 有迁移；`CostLedger`、`CostAllocation`、`ProviderApiRequest`、`ProviderAccountSnapshot` 在 schema 和本地 SQLite 中存在，但 migrations 目录没有对应建表迁移，后续任务包 B/K 必须先补可回放迁移或登记 baseline 策略。
 - 2026-06-13：视频卡详情页已补“标记候选”入口；候选可多选，当前最佳和最终版仍保持单选约束。
+- 2026-06-13：已补 `ProviderApiRequest`、`CostLedger`、`CostAllocation`、`ProviderAccountSnapshot` 的 baseline migration；在 `/tmp` SQLite 副本执行通过，未写原始库。
+- 2026-06-13：封板/归档卡的生成拦截已在 `src/lib/video-cards/permissions.ts` 的 `assertCanGenerateInVideoCard` 生效；重开入口定义为任务包 C 的 `video_card_reopen` 审批类型，必须有审批原因、申请人、审批人、有效期、目标状态和操作日志，审批通过后只能从 `sealed/finalized` 回到 `reviewing` 或 `active`，不得直接删除封板记录。
+- 2026-06-13：`scripts/backfill-video-cards.ts` dry-run 输出 `Video card backfill: no tasks need migration.`；本地库 `VideoCard` 统计为 `active=22`，兜底卡 `is_fallback=1/title=生成记录/count=22`，未发现重复待归档任务。
 
 验收：
 
-- [ ] 本地数据库查询确认 `project_id is not null and video_card_id is null` 的任务为 0。
-- [ ] 本地数据库查询确认 `VideoTask.project_id` 与所属 `VideoCard.project_id` 无错配。
-- [ ] 旧任务详情、项目页、视频卡页、管理员成本页无 500。
-- [ ] 公网项目内视频卡路径返回 200，旧 `/video-cards/:id` 能跳转到项目下路径。
+- [x] 本地数据库查询确认 `project_id is not null and video_card_id is null` 的任务为 0。
+- [x] 本地数据库查询确认 `VideoTask.project_id` 与所属 `VideoCard.project_id` 无错配。
+- [x] 旧任务详情、项目页、视频卡页、管理员成本页无 500。
+- [x] 公网项目内视频卡路径返回 200，旧 `/video-cards/:id` 能跳转到项目下路径。
 
 ## 任务包 B：公共项目预算闭环
 
