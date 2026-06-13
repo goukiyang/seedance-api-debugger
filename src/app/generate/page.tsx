@@ -130,11 +130,6 @@ interface VideoCardOption {
 type GeneratePageUser = AccountMenuUser & { id: string };
 type ProjectRemovalAction = 'delete' | 'archive';
 
-interface ProjectRemovalTarget {
-  projectId: string;
-  action: ProjectRemovalAction;
-}
-
 interface AuthMeResponse {
   user: GeneratePageUser | null;
 }
@@ -337,7 +332,6 @@ export default function GeneratePage() {
   const [projectName, setProjectName] = useState('');
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
-  const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(null);
   const [videoCards, setVideoCards] = useState<VideoCardOption[]>([]);
   const [selectedVideoCardId, setSelectedVideoCardId] = useState('');
   const [loadingVideoCards, setLoadingVideoCards] = useState(false);
@@ -477,7 +471,6 @@ export default function GeneratePage() {
   useEffect(() => {
     if (!selectedProjectId) return;
     window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
-    setProjectRemovalTarget(null);
   }, [selectedProjectId]);
 
   const loadVideoCards = useCallback(async (
@@ -544,14 +537,12 @@ export default function GeneratePage() {
       if (!projectPickerRef.current?.contains(event.target as Node)) {
         setProjectPickerOpen(false);
         setProjectCreateOpen(false);
-        setProjectRemovalTarget(null);
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setProjectPickerOpen(false);
         setProjectCreateOpen(false);
-        setProjectRemovalTarget(null);
       }
     };
 
@@ -645,14 +636,12 @@ export default function GeneratePage() {
       setProjectMessage({ type: 'error', text: '你没有权限管理这个项目' });
       return;
     }
-    if (projectRemovalTarget?.projectId !== project.id || projectRemovalTarget.action !== action) {
-      setProjectRemovalTarget({ projectId: project.id, action });
-      setProjectMessage({
-        type: 'info',
-        text: action === 'archive'
-          ? `项目「${projectDisplayName(project)}」已有任务或图集，再点一次归档。归档后历史记录仍保留。`
-          : `再点一次删除空项目「${projectDisplayName(project)}」。`,
-      });
+    const confirmed = window.confirm(
+      action === 'archive'
+        ? `确定归档项目「${projectDisplayName(project)}」吗？\n项目已有任务或图集，归档后历史记录仍保留。`
+        : `确定删除空项目「${projectDisplayName(project)}」吗？\n删除后不会出现在项目列表。`,
+    );
+    if (!confirmed) {
       return;
     }
 
@@ -667,17 +656,15 @@ export default function GeneratePage() {
       const data = await res.json();
       if (!res.ok) {
         if (action === 'delete' && typeof data.error === 'string' && data.error.includes('归档')) {
-          setProjectRemovalTarget({ projectId: project.id, action: 'archive' });
           setProjectMessage({
             type: 'info',
-            text: '项目已有历史内容，删除会断链；请再次点击归档项目。',
+            text: '项目已有历史内容，不能删除；请改为归档项目。',
           });
           return;
         }
         throw new Error(data.message || data.error || '项目操作失败');
       }
 
-      setProjectRemovalTarget(null);
       setProjectMessage({
         type: 'success',
         text: action === 'archive' ? `已归档项目「${projectDisplayName(project)}」` : `已删除项目「${projectDisplayName(project)}」`,
@@ -691,14 +678,13 @@ export default function GeneratePage() {
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, projectRemovalTarget, selectedProjectId]);
+  }, [loadProjects, selectedProjectId]);
 
   useEffect(() => {
     if (!projectMessage) return;
     if (projectMessage.type === 'error') return;
     const timeoutId = window.setTimeout(() => {
       setProjectMessage(null);
-      if (projectMessage.type === 'info') setProjectRemovalTarget(null);
     }, 3600);
     return () => window.clearTimeout(timeoutId);
   }, [projectMessage]);
@@ -1274,7 +1260,6 @@ export default function GeneratePage() {
                         className="composer-project-menu-action"
                         onClick={() => {
                           setProjectCreateOpen((open) => !open);
-                          setProjectRemovalTarget(null);
                           setProjectMessage(null);
                         }}
                         disabled={projectBusy}
@@ -1323,14 +1308,11 @@ export default function GeneratePage() {
                           const isSelected = project.id === selectedProjectId;
                           const canRemoveProject = projectCanRemove(project);
                           const removalAction = projectRemovalAction(project);
-                          const isConfirmingRemoval = projectRemovalTarget?.projectId === project.id
-                            && projectRemovalTarget.action === removalAction;
                           const selectProject = () => {
                             if (projectBusy) return;
                             setSelectedProjectId(project.id);
                             setProjectPickerOpen(false);
                             setProjectCreateOpen(false);
-                            setProjectRemovalTarget(null);
                             setProjectMessage(null);
                           };
                           return (
@@ -1342,7 +1324,6 @@ export default function GeneratePage() {
                               className={[
                                 'composer-project-option',
                                 isSelected ? 'active' : '',
-                                isConfirmingRemoval ? 'confirming-removal' : '',
                               ].filter(Boolean).join(' ')}
                               onClick={selectProject}
                               onKeyDown={(event) => {
@@ -1367,53 +1348,22 @@ export default function GeneratePage() {
                                   className="composer-project-option-actions"
                                   onClick={(event) => event.stopPropagation()}
                                 >
-                                  {isConfirmingRemoval ? (
-                                    <>
-                                      <span className="composer-project-option-confirm-text">
-                                        确认{removalAction === 'archive' ? '归档' : '删除'}？
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="composer-project-option-ghost"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setProjectRemovalTarget(null);
-                                          setProjectMessage(null);
-                                        }}
-                                        disabled={projectBusy}
-                                      >
-                                        取消
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="composer-project-option-danger"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          void handleProjectRemoval(project);
-                                        }}
-                                        disabled={projectBusy}
-                                      >
-                                        {projectBusy ? '处理中...' : `确认${projectRemovalLabel(project)}`}
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className="composer-project-option-danger"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        void handleProjectRemoval(project);
-                                      }}
-                                      disabled={projectBusy}
-                                      title={projectRemovalTitle(project)}
-                                      aria-label={`${projectRemovalLabel(project)}项目 ${projectDisplayName(project)}`}
-                                    >
-                                      {removalAction === 'archive'
-                                        ? <Archive size={14} aria-hidden="true" />
-                                        : <Trash2 size={14} aria-hidden="true" />}
-                                      <span>{projectRemovalLabel(project)}</span>
-                                    </button>
-                                  )}
+                                  <button
+                                    type="button"
+                                    className="composer-project-option-danger"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleProjectRemoval(project);
+                                    }}
+                                    disabled={projectBusy}
+                                    title={projectRemovalTitle(project)}
+                                    aria-label={`${projectRemovalLabel(project)}项目 ${projectDisplayName(project)}`}
+                                  >
+                                    {removalAction === 'archive'
+                                      ? <Archive size={14} aria-hidden="true" />
+                                      : <Trash2 size={14} aria-hidden="true" />}
+                                    <span>{projectRemovalLabel(project)}</span>
+                                  </button>
                                 </span>
                               )}
                             </div>

@@ -5308,11 +5308,6 @@ a {
   outline-offset: 2px;
 }
 
-.composer-project-option.confirming-removal {
-  border-color: rgba(248, 113, 113, 0.36);
-  background: rgba(127, 29, 29, 0.18);
-}
-
 .composer-project-option-mark {
   width: 28px;
   height: 28px;
@@ -5346,8 +5341,7 @@ a {
 }
 
 .composer-project-option:hover .composer-project-option-actions,
-.composer-project-option:focus-within .composer-project-option-actions,
-.composer-project-option.confirming-removal .composer-project-option-actions {
+.composer-project-option:focus-within .composer-project-option-actions {
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
@@ -5363,15 +5357,7 @@ a {
   white-space: nowrap;
 }
 
-.composer-project-option-confirm-text {
-  color: rgba(254, 226, 226, 0.94);
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.composer-project-option-danger,
-.composer-project-option-ghost {
+.composer-project-option-danger {
   min-height: 28px;
   align-items: center;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -5399,19 +5385,7 @@ a {
   color: #fee2e2;
 }
 
-.composer-project-option-ghost {
-  background: rgba(15, 23, 42, 0.58);
-  color: rgba(226, 232, 240, 0.74);
-}
-
-.composer-project-option-ghost:hover:not(:disabled) {
-  background: rgba(30, 41, 59, 0.8);
-  border-color: rgba(148, 163, 184, 0.32);
-  color: rgba(248, 250, 252, 0.94);
-}
-
-.composer-project-option-danger:disabled,
-.composer-project-option-ghost:disabled {
+.composer-project-option-danger:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -6915,10 +6889,6 @@ a {
     opacity: 1;
     pointer-events: auto;
     transform: none;
-  }
-
-  .composer-project-option.confirming-removal .composer-project-option-actions {
-    flex-wrap: wrap;
   }
 
   .composer-project-select,

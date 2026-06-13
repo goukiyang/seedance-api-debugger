@@ -528,7 +528,6 @@ function CanvasWorkspace() {
   const [projectName, setProjectName] = useState('');
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
-  const [projectConfirmAction, setProjectConfirmAction] = useState<'delete' | 'archive' | null>(null);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
   const [canExportCanvasJson, setCanExportCanvasJson] = useState(false);
 
@@ -739,7 +738,6 @@ function CanvasWorkspace() {
 
       setProjectName('');
       setProjectCreateOpen(false);
-      setProjectConfirmAction(null);
       setProjectMessage({ type: 'success', text: `已新建项目「${typeof payload.project.name === 'string' ? payload.project.name : name}」。` });
       await loadProjects({ preferredProjectId: payload.project.id, keepSelected: false });
     } catch (error) {
@@ -762,14 +760,12 @@ function CanvasWorkspace() {
     }
 
     const action = selectedProjectHasContent ? 'archive' : 'delete';
-    if (projectConfirmAction !== action) {
-      setProjectConfirmAction(action);
-      setProjectMessage({
-        type: 'info',
-        text: action === 'archive'
-          ? `项目「${projectDisplayName(selectedProject)}」已有任务或图集，再点一次归档，历史记录会保留。`
-          : `再点一次删除空项目「${projectDisplayName(selectedProject)}」。`,
-      });
+    const confirmed = window.confirm(
+      action === 'archive'
+        ? `确定归档项目「${projectDisplayName(selectedProject)}」吗？\n项目已有任务或图集，归档后历史记录仍保留。`
+        : `确定删除空项目「${projectDisplayName(selectedProject)}」吗？\n删除后不会出现在项目列表。`,
+    );
+    if (!confirmed) {
       return;
     }
 
@@ -784,14 +780,12 @@ function CanvasWorkspace() {
       const payload = await response.json();
       if (!response.ok) {
         if (action === 'delete' && isRecord(payload) && typeof payload.error === 'string' && payload.error.includes('归档')) {
-          setProjectConfirmAction('archive');
-          setProjectMessage({ type: 'info', text: '项目已有历史内容，删除会断链；请再次点击归档。' });
+          setProjectMessage({ type: 'info', text: '项目已有历史内容，不能删除；请改为归档。' });
           return;
         }
         throw new Error(apiError(payload, '项目操作失败。'));
       }
 
-      setProjectConfirmAction(null);
       setProjectMessage({
         type: 'success',
         text: action === 'archive'
@@ -804,7 +798,7 @@ function CanvasWorkspace() {
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, projectConfirmAction, selectedProject, selectedProjectHasContent]);
+  }, [loadProjects, selectedProject, selectedProjectHasContent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -841,7 +835,6 @@ function CanvasWorkspace() {
   useEffect(() => {
     if (!selectedProjectId) return;
     window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
-    setProjectConfirmAction(null);
     void refreshCanvasList().catch((error) => {
       setCanvasStatus(error instanceof Error ? error.message : '读取画布列表失败。');
     });
@@ -894,7 +887,6 @@ function CanvasWorkspace() {
     if (!projectMessage || projectMessage.type === 'error') return;
     const timeoutId = window.setTimeout(() => {
       setProjectMessage(null);
-      if (projectMessage.type === 'info') setProjectConfirmAction(null);
     }, 3600);
     return () => window.clearTimeout(timeoutId);
   }, [projectMessage]);
@@ -1676,7 +1668,6 @@ function CanvasWorkspace() {
                   className="canvas-project-action canvas-project-action-primary"
                   onClick={() => {
                     setProjectCreateOpen((open) => !open);
-                    setProjectConfirmAction(null);
                     setProjectMessage(null);
                   }}
                   disabled={projectBusy}
@@ -1697,7 +1688,7 @@ function CanvasWorkspace() {
                   disabled={!selectedProjectCanRemove || projectBusy}
                   title={projectRemovalTitle}
                 >
-                  {projectBusy && projectConfirmAction ? '处理中' : projectRemovalLabel}
+                  {projectBusy ? '处理中' : projectRemovalLabel}
                 </button>
               </div>
             </div>
