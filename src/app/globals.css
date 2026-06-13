@@ -4144,6 +4144,50 @@ a {
   color: #6b7280;
 }
 
+.project-billing-choice-group {
+  display: grid;
+  gap: 10px;
+}
+
+.project-billing-choice {
+  align-items: flex-start;
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.project-billing-choice:hover,
+.project-billing-choice.is-selected {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
+}
+
+.project-billing-choice input {
+  margin-top: 3px;
+}
+
+.project-billing-choice span {
+  display: grid;
+  gap: 4px;
+}
+
+.project-billing-choice strong {
+  color: #1f2937;
+  font-size: 14px;
+}
+
+.project-billing-choice small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .modal-overlay {
   align-items: center;
   background: rgba(15, 23, 42, 0.42);
@@ -5619,6 +5663,18 @@ a {
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(160px, 0.8fr) repeat(4, minmax(0, 1fr)) auto;
+}
+
+.approval-form-hint {
+  align-self: center;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1e3a8a;
+  font-size: 13px;
+  grid-column: 1 / -1;
+  line-height: 1.5;
+  padding: 10px 12px;
 }
 
 .approval-actions {

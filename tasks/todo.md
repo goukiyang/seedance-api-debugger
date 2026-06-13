@@ -63,6 +63,7 @@
 - 2026-06-13：项目详情页展示公共项目预算总额、已用、冻结、剩余和风险；后台成本页新增公共项目预算表。
 - 2026-06-13：SQLite 已备份到 `/Volumes/Data/Backups/video-api-debugger/dev-before-project-budget-20260613-211248.db`；已应用 `20260613212000_add_project_budget_accounts`，并只登记本条 migration。
 - 2026-06-13：`/tmp` SQLite smoke 已覆盖成功实扣、失败释放、预算不足拒绝和重复冻结幂等；失败释放结果为 `budget=20, used=0, frozen=0, available=20`。
+- 2026-06-13：补齐新建项目入口的记账方式说明；普通协作项目创建前明确为默认记账并扣发起人个人积分，预算记账会跳转审批中心发起公共项目立项，项目列表也显示当前记账模式。
 
 验收：
 

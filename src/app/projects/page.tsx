@@ -55,6 +55,18 @@ function projectStatusLabel(status: string): string {
   return status;
 }
 
+function projectBillingLabel(project: Pick<ProjectItem, 'type'>): string {
+  if (project.type === 'public') return '预算记账';
+  if (project.type === 'system') return '系统记账';
+  return '默认记账';
+}
+
+function projectBillingDescription(project: Pick<ProjectItem, 'type'>): string {
+  if (project.type === 'public') return '生成消耗从项目预算池冻结和实扣';
+  if (project.type === 'system') return '系统项目按平台规则归集成本';
+  return '生成消耗扣发起人的个人积分';
+}
+
 const PROJECTS_PAGE_SIZE = 12;
 
 export default function ProjectsPage() {
@@ -64,6 +76,7 @@ export default function ProjectsPage() {
   const [page, setPage] = useState(1);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [billingMode, setBillingMode] = useState<'default' | 'budget'>('default');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [downloadProject, setDownloadProject] = useState<ProjectItem | null>(null);
@@ -94,10 +107,24 @@ export default function ProjectsPage() {
     event.preventDefault();
     setError('');
     setMessage('');
+    const trimmedName = name.trim();
+    const trimmedDescription = description.trim();
+    if (!trimmedName) {
+      setError('项目名称不能为空');
+      return;
+    }
+    if (billingMode === 'budget') {
+      const params = new URLSearchParams({
+        type: 'project_create',
+        reason: `申请公共项目预算记账立项：${trimmedName}${trimmedDescription ? `。项目说明：${trimmedDescription}` : ''}`,
+      });
+      window.location.href = `/approvals?${params.toString()}`;
+      return;
+    }
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description }),
+      body: JSON.stringify({ name: trimmedName, description: trimmedDescription, type: 'team' }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -106,7 +133,8 @@ export default function ProjectsPage() {
     }
     setName('');
     setDescription('');
-    setMessage('项目已创建');
+    setBillingMode('default');
+    setMessage('项目已创建，记账方式：默认记账（生成扣发起人的个人积分）');
     await loadProjects();
   };
 
@@ -197,8 +225,36 @@ export default function ProjectsPage() {
             placeholder="项目说明（可选）"
             rows={3}
           />
+          <div className="project-billing-choice-group" role="radiogroup" aria-label="项目记账方式">
+            <label className={`project-billing-choice ${billingMode === 'default' ? 'is-selected' : ''}`}>
+              <input
+                type="radio"
+                name="projectBillingMode"
+                value="default"
+                checked={billingMode === 'default'}
+                onChange={() => setBillingMode('default')}
+              />
+              <span>
+                <strong>默认记账</strong>
+                <small>创建普通协作项目，生成消耗扣发起人的个人积分。</small>
+              </span>
+            </label>
+            <label className={`project-billing-choice ${billingMode === 'budget' ? 'is-selected' : ''}`}>
+              <input
+                type="radio"
+                name="projectBillingMode"
+                value="budget"
+                checked={billingMode === 'budget'}
+                onChange={() => setBillingMode('budget')}
+              />
+              <span>
+                <strong>预算记账</strong>
+                <small>用于公共项目，生成消耗走项目预算池；需要先发起公共项目立项审批。</small>
+              </span>
+            </label>
+          </div>
           <button className="btn btn-primary" type="submit" disabled={!name.trim()}>
-            创建项目
+            {billingMode === 'budget' ? '发起预算记账立项审批' : '创建项目'}
           </button>
         </form>
       </div>
@@ -257,6 +313,10 @@ export default function ProjectsPage() {
                   {' · '}成员 {project._count?.members ?? 0}
                   {' · '}任务 {project._count?.tasks ?? 0}
                   {' · '}图集 {project._count?.reference_albums ?? 0}
+                </span>
+                <span>
+                  记账：{projectBillingLabel(project)}
+                  {' · '}{projectBillingDescription(project)}
                 </span>
                 <span>可下载视频 {downloadableCount}</span>
                 <span>更新 {new Date(project.updated_at).toLocaleDateString('zh-CN')}</span>

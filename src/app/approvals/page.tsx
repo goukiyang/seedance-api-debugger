@@ -42,6 +42,12 @@ const APPROVAL_TYPE_OPTIONS = [
   ['project_create', '公共项目立项'],
 ] as const;
 
+const APPROVAL_TYPE_VALUES = APPROVAL_TYPE_OPTIONS.map(([value]) => value);
+
+function isApprovalTypeValue(value: string | null): value is typeof APPROVAL_TYPE_VALUES[number] {
+  return Boolean(value && APPROVAL_TYPE_VALUES.includes(value as typeof APPROVAL_TYPE_VALUES[number]));
+}
+
 function typeLabel(type: string) {
   return APPROVAL_TYPE_OPTIONS.find(([value]) => value === type)?.[1] || type;
 }
@@ -95,6 +101,14 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     load();
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedType = params.get('type');
+    const requestedReason = params.get('reason');
+    if (isApprovalTypeValue(requestedType)) setType(requestedType);
+    if (requestedReason) setReason(requestedReason);
   }, []);
 
   const createApproval = async (event: React.FormEvent) => {
@@ -171,6 +185,11 @@ export default function ApprovalsPage() {
               <option key={value} value={value}>{label}</option>
             ))}
           </select>
+          {type === 'project_create' && (
+            <p className="approval-form-hint">
+              公共项目立项通过后才使用预算记账；普通协作项目默认扣发起人的个人积分。
+            </p>
+          )}
           <input className="input" value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目 ID" />
           <input className="input" value={videoCardId} onChange={(event) => setVideoCardId(event.target.value)} placeholder="视频卡 ID，可选" />
           <input className="input" value={taskId} onChange={(event) => setTaskId(event.target.value)} placeholder="任务 ID，可选" />
