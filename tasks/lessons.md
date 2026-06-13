@@ -229,3 +229,13 @@
 - 怎么改：新增 `VideoCard` 和 `VideoTask.video_card_id`；新增视频卡权限/聚合 helper；标准生成页和画布页都必须选择视频卡；复用/重试继承原卡；项目页主视图改为视频卡列表；任务详情能回到视频卡。
 - 验证结果：备份 `prisma/dev.db` 后应用迁移；backfill 创建 22 张兜底视频卡，迁移 124 个历史任务；SQL 验证 `missing_card=0`、`cross_project=0`，`CreditLedger` 和 `CostLedger` 计数/汇总不变；`prisma validate`、`tsc`、`lint`、`build` 通过。
 - 可复用经验：给历史数据补强归属关系时，先用 nullable 字段保护上线，再用可重复 dry-run/apply 脚本迁移旧数据；所有创建入口、复用入口、重试入口和画布入口必须同时补齐，否则“新任务必填”只是局部约束。
+
+## 2026-06-13 - 视频卡必须按项目子资源验证信息架构
+
+- 问题/背景：用户指出视频卡不应该和项目同级；V1.2 第一阶段实际只完成了视频卡归属闭环，不等于整份需求已完成。
+- 诱因/根因：之前只检查“任务归属视频卡”和入口能访问，没有把 URL、入口层级、返回链路和线上部署一起按“项目 -> 视频卡 -> 生成记录”的信息架构验收。
+- 当时思路：把视频卡工作台迁到 `/projects/[id]/video-cards/[cardId]`，旧 `/video-cards/[id]` 只保留兼容跳转；所有项目页、任务页、生成页和画布页入口都指向项目内路径。
+- 改动位置：`src/app/projects/[id]/video-cards/[cardId]/page.tsx`、`src/app/video-cards/[id]/page.tsx`、`src/app/projects/[id]/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/generate/page.tsx`、`src/components/canvas/full/CanvasWorkspace.tsx`、`src/lib/navigation/return-to.ts`。
+- 怎么改：项目内页面校验 `video_card.project_id === projectId`；旧路由查出项目后 307 跳转；任务详情返回文案优先识别项目内视频卡路径。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect`、`youdoo-sites build sd2`、`youdoo-sites restart sd2` 通过；公网新路径 200，旧路径 307 到项目内路径，`youdoo-sites status sd2` OK。
+- 可复用经验：用户指出“设计上不该同级”时，不能只改视觉或按钮；必须按信息架构检查数据归属、URL 层级、入口、返回链路、旧链接兼容和线上真实 URL。
