@@ -1,116 +1,149 @@
 # V1.2 剩余模块落地 Todo
 
-更新时间：2026-06-13
+更新时间：2026-06-14
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
 
-验收结论：当前已落地第一批 P0 的核心视频卡闭环，包括 `VideoCard`、`VideoTask.video_card_id`、项目页视频卡列表、视频卡详情页、生成页绑定视频卡、再生成归属和视频卡成本聚合。整份 V1.2 还没有完整落地，剩余工作按依赖拆成以下任务包。
+最新验收结论：整份 V1.2 仍未完整落地。当前代码已经有视频卡 P0 归档入口、公共项目预算底座、审批记录表、审批中心页面、1080p 基础校验、新建项目“默认记账 / 预算记账”选择入口，但这些还没有形成完整业务闭环。后续执行必须以本 todo 为准，不得把“有模型/有页面/有审批记录”误判为“业务已闭环”。
+
+## 已落地基线，后续不要重复做
+
+- [x] `VideoCard` 基础模型、项目下视频卡列表、视频卡详情页、生成页绑定视频卡、再生成归属。
+- [x] 新生成任务后端要求 `video_card_id`，并校验视频卡属于当前项目。
+- [x] 本地样本库当前 `VideoTask.project_id is null` 为 0、`VideoTask.video_card_id is null` 为 0、任务项目与视频卡项目错配为 0。
+- [x] `ProjectBudgetAccount`、`ProjectBudgetLedger` 已存在，公共项目生成路径已有预算预占、成功实扣、失败释放和预算不足拒绝。
+- [x] `ApprovalRecord`、`/approvals`、`/api/approvals`、`/api/approvals/:id` 已存在。
+- [x] 非个人项目 1080p 生成已接入“有效 `resolution_1080p` 审批记录”后端校验。
+- [x] 新建项目页已出现“默认记账 / 预算记账”选择；默认记账创建普通协作项目，预算记账引导发起公共项目审批。
+- [x] 视频卡详情页已有候选、当前最佳、最终版和封板入口。
 
 ## 总体闭环目标
 
 - [ ] 每一笔生成消耗都有项目、视频卡、用户、点数、人民币成本和状态归属。
 - [ ] 公共项目消耗走项目预算池，不再混用个人积分口径。
-- [ ] 高成本动作有审批记录，包括公共项目、追加预算、1080p、比例变更、视频卡重开。
+- [ ] 高成本动作不仅有审批记录，还必须在审批通过后驱动业务状态变化，包括公共项目启用、追加预算入账、1080p 额度消耗、比例变更确认、视频卡重开。
 - [ ] 飞书需求入口能生成项目草稿和视频卡草稿。
 - [ ] 同一视频卡内可以管理方向分支，避免把探索版本错误拆成平级项目或平级视频卡。
 - [ ] 项目结束后生成复盘卡，并能反推下一次预算建议。
 - [ ] 线上 `sd2.youdoodesign.com` 每个阶段完成后都有构建、重启、公网验证和回滚点。
 
-## 任务包 A：P0 视频卡闭环补齐与迁移风险清理
+## 任务包 A：P0 现有闭环硬化与线上验收
 
-目标：把已经上线的视频卡第一阶段补到可长期维护状态，避免后续 P1/P2 在不稳定基础上继续叠功能。
+目标：把已经做出来的基础能力校准为可信基线，避免后续继续在“看起来完成”的状态上叠功能。
 
-- [x] 核对当前 `tasks/todo.md`、需求文档和代码状态，把已完成的 P0 视频卡项标记为已落地，避免后续重复派单。
-- [x] 核对 Prisma migration 链，确认 `CostLedger`、`CostAllocation`、`ProviderApiRequest`、`ProviderAccountSnapshot` 等已存在模型是否有完整迁移来源；缺失时补迁移或登记为历史 `db push` 风险。
-- [x] 补齐视频卡详情页的“候选”标记入口，当前已有 `version_role=candidate` 口径，但 UI 主要是当前最佳和最终版。
-- [x] 明确项目页是否保留历史/调试任务二级区域；如果保留，视觉层级必须低于视频卡，不能让用户误以为任务和视频卡同级。
-- [x] 为视频卡封板后的“重开”定义入口和限制，当前封板能阻止生成，但重开应进入审批中心任务包。
-- [x] 复查 `scripts/backfill-video-cards.ts` 兜底卡标题和线上数据一致性，避免历史任务被重复归档或归到错误项目。
+**主要文件：**
 
-本轮记录：
+- `src/app/projects/page.tsx`
+- `src/app/api/projects/route.ts`
+- `src/app/api/tasks/create/route.ts`
+- `src/app/api/tasks/[id]/project/route.ts`
+- `src/app/api/video-cards/[id]/route.ts`
+- `src/lib/video-cards/permissions.ts`
+- `scripts/backfill-video-cards.ts`
 
-- 2026-06-13：已确认 `VideoCard` 与 `VideoTask.video_card_id` 有迁移；`CostLedger`、`CostAllocation`、`ProviderApiRequest`、`ProviderAccountSnapshot` 在 schema 和本地 SQLite 中存在，但 migrations 目录没有对应建表迁移，后续任务包 B/K 必须先补可回放迁移或登记 baseline 策略。
-- 2026-06-13：视频卡详情页已补“标记候选”入口；候选可多选，当前最佳和最终版仍保持单选约束。
-- 2026-06-13：已补 `ProviderApiRequest`、`CostLedger`、`CostAllocation`、`ProviderAccountSnapshot` 的 baseline migration；在 `/tmp` SQLite 副本执行通过，未写原始库。
-- 2026-06-13：封板/归档卡的生成拦截已在 `src/lib/video-cards/permissions.ts` 的 `assertCanGenerateInVideoCard` 生效；重开入口定义为任务包 C 的 `video_card_reopen` 审批类型，必须有审批原因、申请人、审批人、有效期、目标状态和操作日志，审批通过后只能从 `sealed/finalized` 回到 `reviewing` 或 `active`，不得直接删除封板记录。
-- 2026-06-13：`scripts/backfill-video-cards.ts` dry-run 输出 `Video card backfill: no tasks need migration.`；本地库 `VideoCard` 统计为 `active=22`，兜底卡 `is_fallback=1/title=生成记录/count=22`，未发现重复待归档任务。
+**任务：**
 
-验收：
+- [ ] 重新验收新建项目页：用户必须在创建前看到“默认记账 / 预算记账”的差异、扣费对象、审批结果和下一步入口。
+- [ ] 验证线上 `sd2.youdoodesign.com/projects` 已加载包含记账选择的新构建，不只看本地代码。
+- [ ] 修复或禁用会清空 `video_card_id` 的任务移动项目路径；移动任务时必须要求选择目标视频卡，或进入未归档池。
+- [ ] 将 `VideoTask.project_id`、`VideoTask.video_card_id` 的全局不变量从“新建接口校验”升级为“所有入口都不能破坏”。
+- [ ] 已封板视频卡禁止继续修改候选、当前最佳、最终版；如需变更必须走重开或替换审批。
+- [ ] 视频卡封板后的重开不能只 PATCH `status`，必须有原因、审批记录和操作日志。
+- [ ] 增加只读巡检脚本：检查无项目任务、无视频卡任务、项目/视频卡错配、封板后仍变更版本角色。
 
-- [x] 本地数据库查询确认 `project_id is not null and video_card_id is null` 的任务为 0。
-- [x] 本地数据库查询确认 `VideoTask.project_id` 与所属 `VideoCard.project_id` 无错配。
-- [x] 旧任务详情、项目页、视频卡页、管理员成本页无 500。
-- [x] 公网项目内视频卡路径返回 200，旧 `/video-cards/:id` 能跳转到项目下路径。
+**验收：**
 
-## 任务包 B：公共项目预算闭环
+- [ ] 本地和线上新建项目页都能明确选择记账方式。
+- [ ] 所有任务归档路径不会产生 `video_card_id is null` 的新任务。
+- [ ] 封板视频卡不能直接改最终版。
+- [ ] 巡检脚本返回 0 个基础归档异常。
 
-目标：公共项目成为真实预算池，支持预占、实扣、返还、预算不足拦截和预算展示。
+## 任务包 B：公共项目立项、预算审批与预算入账闭环
 
-- [x] 为 `Project` 或独立预算表补齐预算字段：`budget_credits`、`budget_used_credits`、`budget_frozen_credits`、`budget_currency`、`budget_status`。
-- [x] 抽象预算账户：个人项目扣个人积分，公共项目扣项目预算，系统项目按现有规则单独处理。
-- [x] 生成任务创建时先做预算预占，写入冻结快照和幂等键。
-- [x] 任务成功后实扣项目预算，并写入成本/积分流水。
-- [x] 技术失败、Provider 创建失败、任务取消时释放预占或返还。
-- [x] 公共项目预算不足时阻止生成，并给出追加预算入口。
-- [x] 项目页展示预算总额、已用、冻结、剩余、预算状态和 70% / 90% / 100% 风险提示。
-- [x] 后台成本页增加公共预算视角：按项目、视频卡、负责人、时间范围查看消耗。
+目标：公共项目不只是“有预算表”，而是从立项审批、预算启用、追加预算到预算预警都形成闭环。
 
-本轮记录：
+**主要文件：**
 
-- 2026-06-13：新增 `ProjectBudgetAccount` 与 `ProjectBudgetLedger`，公共项目预算不再混入个人 `CreditAccount` / `CreditLedger`。
-- 2026-06-13：`src/lib/projects/budget.ts` 抽出预算调整、预占、结算、释放和摘要；`/api/tasks/create` 与 task finalizer 按 `billing_scope` 分流，`public` 项目走 `project`，其他项目保持 `user`。
-- 2026-06-13：新增 `/api/projects/:id/budget`，管理员可直接设置公共项目预算；项目负责人追加预算仍留给任务包 C 的审批中心。
-- 2026-06-13：项目详情页展示公共项目预算总额、已用、冻结、剩余和风险；后台成本页新增公共项目预算表。
-- 2026-06-13：SQLite 已备份到 `/Volumes/Data/Backups/video-api-debugger/dev-before-project-budget-20260613-211248.db`；已应用 `20260613212000_add_project_budget_accounts`，并只登记本条 migration。
-- 2026-06-13：`/tmp` SQLite smoke 已覆盖成功实扣、失败释放、预算不足拒绝和重复冻结幂等；失败释放结果为 `budget=20, used=0, frozen=0, available=20`。
-- 2026-06-13：补齐新建项目入口的记账方式说明；普通协作项目创建前明确为默认记账并扣发起人个人积分，预算记账会跳转审批中心发起公共项目立项，项目列表也显示当前记账模式。
+- `prisma/schema.prisma`
+- `src/app/projects/page.tsx`
+- `src/app/api/projects/route.ts`
+- `src/app/api/projects/[id]/budget/route.ts`
+- `src/app/api/approvals/route.ts`
+- `src/app/api/approvals/[id]/route.ts`
+- `src/lib/projects/budget.ts`
+- `src/lib/approvals.ts`
 
-验收：
+**任务：**
 
-- [x] 个人项目只扣个人积分。
-- [x] 公共项目只扣项目预算，不扣个人积分。
-- [x] 公共项目预算不足时生成请求被拒绝。
-- [x] 技术失败会释放冻结预算。
-- [x] 重复提交同一幂等键不会重复冻结或重复扣费。
+- [ ] 公共项目申请审批通过后，自动创建或启用 `type='public'` 项目，并初始化项目预算账户。
+- [ ] 预算记账申请必须记录预算金额、预算用途、申请原因、项目负责人、审批人和有效期。
+- [ ] 追加预算审批通过后必须调用 `adjustProjectBudget`，写入 `ProjectBudgetLedger`，并通知申请人/负责人。
+- [ ] 追加预算审批拒绝后，项目预算不变，生成页和项目页显示拒绝原因。
+- [ ] 预算账户补齐冻结原因、冻结恢复、异常对账状态；预算异常时阻止继续生成但允许整理视频卡和提交审批。
+- [ ] 项目预算支持 50% / 70% / 80% / 90% / 100% 阈值策略；最终阈值以 V1.2 文档和 UI 口径统一。
+- [ ] 人民币预算估算不能只用当前汇率展示；关键账务记录必须保留当时换算比例快照或明确记录为“展示时换算”。
 
-## 任务包 C：审批中心与 1080p 真审批
+**验收：**
 
-目标：把当前轻量确认升级为可追溯审批系统。
+- [ ] 预算记账申请通过后，系统内能看到公共项目和项目预算账户。
+- [ ] 追加预算审批通过后，预算总额真实增加并有流水。
+- [ ] 追加预算审批拒绝后，预算不变且可追溯。
+- [ ] 公共项目预算不足时不能生成，但可以提交追加预算审批。
 
-- [x] 新增 `ApprovalRecord` 数据结构。
-- [x] 审批类型包含：公共项目审批、追加预算审批、1080p 审批、比例变更审批、视频卡重开审批。
-- [x] 审批记录关联 `project_id`、`video_card_id`、`task_id`、`requester_user_id`、`approver_user_id`、`status`、`reason`、`approved_at`。
-- [x] 新增审批中心页面，支持待我审批、我发起的、已通过、已拒绝、已失效。
-- [x] 非个人项目 1080p 生成不再只靠前端复选框，后端必须校验有效审批。
-- [x] 追加预算、比例变更、视频卡重开接入同一审批中心。
-- [x] 审批通过、拒绝、过期时写入操作日志。
+## 任务包 C：审批中心业务联动与 1080p 额度
 
-本轮记录：
+目标：审批中心从“记录表”升级为“业务状态变更入口”。
 
-- 2026-06-13：新增 `ApprovalRecord` migration 和 `/api/approvals`、`/api/approvals/:id`，审批中心页面 `/approvals` 已接入列表、发起、通过和拒绝。
-- 2026-06-13：`/api/tasks/create` 的非个人项目 1080p 生成必须同时满足前端确认和有效 `resolution_1080p` approved 审批；没有有效审批时返回明确错误。
-- 2026-06-13：生成页 1080p 提示已改为“审批中心存在有效记录”，并提供审批中心入口。
-- 2026-06-13：SQLite 已备份到 `/Volumes/Data/Backups/video-api-debugger/dev-before-approvals-20260613-213422.db`；已应用 `20260613215000_add_approval_records`，并只登记本条 migration。
-- 2026-06-13：`/tmp` SQLite approval smoke 已验证：批准前查不到有效审批，批准后 `findValidApproval` 命中 `approved`。
+**主要文件：**
 
-验收：
+- `prisma/schema.prisma`
+- `src/lib/approvals.ts`
+- `src/app/approvals/page.tsx`
+- `src/app/api/approvals/route.ts`
+- `src/app/api/approvals/[id]/route.ts`
+- `src/app/api/tasks/create/route.ts`
+- `src/components/GenerationComposer.tsx`
 
-- [x] 没有有效 1080p 审批时不能生成 1080p。
-- [x] 审批通过后只能在审批约束范围内生成，例如限定项目、视频卡、分辨率和有效期。
-- [x] 审批拒绝后生成页展示明确原因。
-- [x] 管理员能追溯审批来源、理由和处理人。
+**任务：**
+
+- [ ] 为不同审批类型定义最小必填字段：公共项目、追加预算、1080p、比例变更、视频卡重开。
+- [ ] `decideApproval` 或审批处理 API 根据审批类型执行业务副作用，不允许只更新审批状态。
+- [ ] 1080p 审批必须绑定项目、视频卡、基准任务、申请理由、预计用途、额度次数、额度预算和有效期。
+- [ ] 1080p 生成时扣减审批额度；额度用尽、过期、跨视频卡或跨项目都必须拒绝。
+- [ ] 1080p 必须基于当前最佳、候选版本或已通过草稿，禁止没有通过草稿直接刷 1080p。
+- [ ] 比例变更审批通过后更新视频卡交付规格，并保留原始比例和变更原因。
+- [ ] 视频卡重开审批通过后恢复到允许生成的目标状态，并保留封板记录。
+- [ ] 审批通过、拒绝、失效、业务副作用成功/失败都写入 `OperationLog`。
+
+**验收：**
+
+- [ ] 每种审批通过后都有可观察的业务结果。
+- [ ] 1080p 审批不能被无限复用。
+- [ ] 无基准版本的视频卡不能申请或执行 1080p。
+- [ ] 审批失败不会产生半更新状态。
 
 ## 任务包 D：比例锁定与分辨率策略
 
 目标：降低错误比例和高规格生成造成的成本浪费。
 
-- [ ] 视频卡保存默认比例、目标分辨率、目标时长和平台。
+**主要文件：**
+
+- `prisma/schema.prisma`
+- `src/app/generate/page.tsx`
+- `src/components/GenerationComposer.tsx`
+- `src/components/ComposerActionBar.tsx`
+- `src/app/api/tasks/create/route.ts`
+- `src/app/api/video-cards/[id]/route.ts`
+
+**任务：**
+
+- [ ] 视频卡保存比例来源、是否锁定、目标分辨率、目标时长、平台和原始需求比例。
 - [ ] 从视频卡进入生成页时，默认继承并锁定比例、时长、目标分辨率。
 - [ ] 解锁比例必须填写原因，并写入操作日志。
-- [ ] 公共项目比例变更必须走审批中心。
-- [ ] 已有最终版后变更比例需要更高权限或审批。
-- [ ] 480p、720p、1080p 的使用门槛和文案按文档规则落地。
-- [ ] 1080p 必须绑定已通过版本或有效审批，不能绕过。
+- [ ] 公共项目偏离原始交付比例时，不能直接设为最终版，必须负责人确认或审批。
+- [ ] 已有最终版后变更比例需要更高权限或比例变更审批。
+- [ ] 480p、720p、1080p 的使用门槛和文案按 V1.2 文档规则落地。
+- [ ] 后端校验比例和分辨率策略，不能只靠前端提示。
 
 验收：
 
@@ -123,13 +156,26 @@
 
 目标：用飞书表单作为需求入口，生成项目草稿和视频卡草稿。
 
+**主要文件：**
+
+- `prisma/schema.prisma`
+- `src/lib/auth/feishu.ts`
+- `src/app/api/auth/feishu/*`
+- `src/app/api/projects/route.ts`
+- `src/app/api/projects/[id]/video-cards/route.ts`
+- 新增 `src/lib/feishu/*` 或等价同步模块
+- 新增 `src/app/api/feishu/*` 或等价同步 API
+
+**任务：**
+
 - [ ] 配置飞书多维表格字段：需求基础信息、使用场景、技术参数、视频条目信息。
-- [ ] 新增飞书需求同步接口或定时同步任务。
-- [ ] 飞书需求表生成 `Project` 草稿。
-- [ ] 视频条目表生成 `VideoCard` 草稿。
+- [ ] 新增需求记录模型，保存飞书 `app_token/table_id/record_id`、原始字段快照、同步状态、错误原因和幂等键。
+- [ ] 新增飞书需求同步接口或定时同步任务；第一版可手动触发，但必须幂等。
+- [ ] 飞书需求表先生成项目草稿，不直接生成正式项目。
+- [ ] 视频条目表生成 `VideoCard` 草稿，状态为待确认。
 - [ ] 无视频条目时生成“未拆分视频需求”草稿卡，并要求负责人补充。
 - [ ] 项目负责人确认后，项目和视频卡进入可制作状态。
-- [ ] 重复提交和重复同步必须幂等，不重复创建项目或视频卡。
+- [ ] 系统状态变化回写飞书：已立项、已生成项目、视频卡数量、待补充原因。
 - [ ] 同步失败要记录错误状态，不丢原始飞书记录 ID。
 
 验收：
@@ -143,12 +189,25 @@
 
 目标：让视频卡真正代表一条视频交付目标，避免同一目标被重复建卡或不同目标混在一张卡里。
 
-- [ ] 新建视频卡时检查同项目下相似卡，提示归入已有卡、继续新建或合并。
+**主要文件：**
+
+- `prisma/schema.prisma`
+- `src/app/api/projects/[id]/video-cards/route.ts`
+- `src/app/api/video-cards/[id]/route.ts`
+- `src/app/api/video-cards/[id]/tasks/route.ts`
+- `src/app/api/tasks/[id]/project/route.ts`
+- `src/app/projects/[id]/video-cards/[cardId]/page.tsx`
+- 新增视频卡归档/合并/拆分服务模块
+
+**任务：**
+
+- [ ] 新建视频卡时检查同项目下相似卡，提示归入已有卡、仍然新建或稍后整理。
 - [ ] 支持同项目内视频卡合并，原卡进入已合并状态并保留跳转关系。
-- [ ] 支持视频卡拆分，把部分生成记录移动到新视频卡。
+- [ ] 支持视频卡拆分，把部分生成记录或方向分支移动到新视频卡。
 - [ ] 支持生成记录移动归档到其他视频卡，展示归属随当前归档变化，但账本原始记录不被篡改。
 - [ ] 建立未归档池或异常归档列表，处理历史或异常任务。
 - [ ] 合并、拆分、移动都写操作日志，并保留操作者和原因。
+- [ ] 视频卡命名按“使用场景 + 内容目标 + 平台/比例”给出默认建议。
 
 验收：
 
@@ -161,14 +220,27 @@
 
 目标：同一视频卡内管理多条创意探索路线，而不是把每次探索拆成平级视频卡。
 
+**主要文件：**
+
+- `prisma/schema.prisma`
+- `src/app/projects/[id]/video-cards/[cardId]/page.tsx`
+- `src/app/generate/page.tsx`
+- `src/app/api/tasks/create/route.ts`
+- `src/lib/video-cards/summary.ts`
+- 新增 `src/app/api/video-cards/[id]/branches/*`
+- 新增 `src/lib/video-branches/*`
+
+**任务：**
+
 - [ ] 新增 `VideoBranch` 数据结构。
 - [ ] `VideoBranch` 关联 `video_card_id`。
 - [ ] `VideoTask` 增加 `video_branch_id`。
-- [ ] 视频卡详情页展示方向分支列表和当前主方向。
+- [ ] 视频卡详情页展示方向分支列表、分支状态和当前主方向。
 - [ ] 从方向分支内生成时，任务归入当前视频卡和当前分支。
 - [ ] 支持设置主方向、关闭方向、合并方向。
 - [ ] 支持方向升格为独立视频卡，并保留历史生成记录可追溯。
 - [ ] 分支成本计入视频卡和项目总消耗，同时支持单分支统计。
+- [ ] 限制活跃方向数量；超过阈值要求负责人确认。
 
 验收：
 
@@ -181,12 +253,24 @@
 
 目标：项目结束后沉淀预算依据，让下一次同类项目能更准地预估成本。
 
+**主要文件：**
+
+- `prisma/schema.prisma`
+- `src/app/api/projects/[id]/route.ts`
+- `src/app/projects/[id]/page.tsx`
+- `src/lib/video-cards/summary.ts`
+- 新增 `src/lib/review-cards/*`
+- 新增 `src/app/api/projects/[id]/review-card/*`
+
+**任务：**
+
 - [ ] 新增 `ReviewCard` 数据结构。
 - [ ] 项目结算或归档时生成复盘卡。
 - [ ] 复盘卡包含总点数、总金额、视频卡数量、最贵视频卡、最终版平均成本、分辨率占比、失败率、下次预算建议。
 - [ ] 支持按项目类型、平台、比例、时长、发布场景检索历史项目。
 - [ ] 新项目立项时读取历史复盘，给出建议预算和风险提示。
 - [ ] 复盘卡允许管理员补充人工结论，但不能改写原始账本。
+- [ ] 区分“实时聚合 review_summary”和“已归档复盘卡”，避免把临时统计当成知识库。
 
 验收：
 
@@ -199,13 +283,25 @@
 
 目标：关键成本节点主动提醒负责人和管理员，但不打断低风险操作。
 
+**主要文件：**
+
+- `prisma/schema.prisma`
+- `src/app/api/approvals/[id]/route.ts`
+- `src/lib/projects/budget.ts`
+- `src/app/api/tasks/create/route.ts`
+- 新增 `src/lib/notifications/*`
+- 新增 `src/app/api/notifications/*`
+
+**任务：**
+
 - [ ] 建立通知模型或事件表，记录通知类型、目标用户、关联项目/视频卡/审批、状态和发送结果。
-- [ ] 预算达到 70% / 90% / 100% 时提醒。
-- [ ] 视频卡生成次数过多或接近预算时提醒。
-- [ ] 1080p 审批通过/拒绝时提醒。
+- [ ] 预算达到 50% / 70% / 80% / 90% / 100% 中最终确认的阈值时提醒，并统一页面文案。
+- [ ] 视频卡生成次数过多或接近建议预算时提醒。
+- [ ] 公共项目审批、追加预算审批、1080p 审批通过/拒绝时提醒。
 - [ ] 项目预算不足时提醒。
-- [ ] 视频卡封板、重开、项目归档时提醒。
+- [ ] 视频卡封板、重开、项目归档、复盘卡生成时提醒。
 - [ ] 支持站内通知；飞书消息通知作为独立接入点，不把 token 或密钥写入日志。
+- [ ] 通知失败可重试或可追踪，不能吞掉错误。
 
 验收：
 
@@ -218,11 +314,23 @@
 
 目标：把 V1.2 的角色、状态、权限规则从隐式判断整理成可验证规则。
 
-- [ ] 梳理需求方、项目负责人、普通成员、管理员、系统任务的权限矩阵。
-- [ ] 显式定义项目状态机：草稿、待负责人确认、待管理员审批、已启用、预算不足、已暂停、结算中、已归档。
-- [ ] 显式定义视频卡状态机：草稿、未开始、生成中、评审中、1080p 审批中、已定稿、已封板、已合并、已归档。
+**主要文件：**
+
+- `prisma/schema.prisma`
+- `src/lib/projects/permissions.ts`
+- `src/lib/video-cards/permissions.ts`
+- `src/lib/taskStatus.ts`
+- `src/lib/approvals.ts`
+- `scripts/task-permission-matrix-smoke.ts`
+
+**任务：**
+
+- [ ] 梳理需求方、项目负责人、视频卡负责人、普通成员、只读观察者、管理员、系统任务的权限矩阵。
+- [ ] 显式定义项目状态机：草稿、待负责人确认、待管理员审批、已启用、预算不足、已暂停、结算中、已归档、已取消。
+- [ ] 显式定义视频卡状态机：草稿、待确认、未开始、生成中、评审中、1080p 审批中、高规格生成中、已定稿、已封板、已合并、已归档、已废弃。
+- [ ] 显式定义方向分支状态机：探索中、候选、主方向、已关闭、已合并、已升格为视频卡。
 - [ ] 所有状态变更走统一 helper，避免页面/API 各自写字符串。
-- [ ] 所有预算、审批、归档、合并、拆分、重开动作写 `OperationLog`。
+- [ ] 所有预算、审批、归档、合并、拆分、重开、比例解锁动作写 `OperationLog`。
 - [ ] 为关键权限路径补 smoke test 或脚本验证。
 
 验收：
@@ -243,6 +351,8 @@
 - [ ] 本地通过后执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
 - [ ] 公网验证新页面、API、静态资源和旧链接跳转。
 - [ ] 每个可回退节点创建清晰 commit，必要时创建 rollback tag。
+- [ ] 每个阶段更新 `/Volumes/Data/Projects/project-version-registry.md`，记录分支、commit、tag、部署目标和验证结果。
+- [ ] 每个线上 UI 变更必须验证公网 DOM/页面行为，不允许只用 `youdoo-sites status sd2` 证明完成。
 
 验收：
 
@@ -255,23 +365,27 @@
 
 ## 推荐执行顺序
 
-- [ ] 1. 先做任务包 A，清理 P0 遗留和迁移链风险。
-- [ ] 2. 做任务包 B 和 C，因为公共预算依赖审批中心。
-- [ ] 3. 做任务包 D，把比例锁定和 1080p 接入审批中心。
-- [ ] 4. 做任务包 F 和 G，完善视频卡内部结构和方向分支。
-- [ ] 5. 做任务包 H，基于已经稳定的成本、视频卡和分支数据生成复盘卡。
-- [ ] 6. 做任务包 I，补齐提醒。
-- [ ] 7. 做任务包 E，接入飞书立项；如果用户优先要求飞书入口，可提前，但必须先明确字段和幂等策略。
-- [ ] 8. 任务包 J、K 贯穿每个阶段，不单独拖到最后。
+- [ ] 1. 任务包 A：先修基础不变量和线上验收，尤其是新建项目记账方式、任务移动清空视频卡、封板后仍可改版本。
+- [ ] 2. 任务包 C：先让审批真正驱动业务；否则 B/D/F 的审批都会继续空转。
+- [ ] 3. 任务包 B：补公共项目立项和追加预算入账闭环。
+- [ ] 4. 任务包 D：比例锁定和 1080p 额度接入审批中心。
+- [ ] 5. 任务包 F：视频卡治理，解决重复、合并、拆分、移动归档。
+- [ ] 6. 任务包 G：方向分支，建立同卡多方向探索结构。
+- [ ] 7. 任务包 E：飞书立项入口；如果业务优先要飞书，可以提前到第 2 步，但必须先明确字段、幂等和状态回写。
+- [ ] 8. 任务包 H：复盘卡和预算反推，依赖前面账本、视频卡、分支稳定。
+- [ ] 9. 任务包 I：通知提醒，接入审批、预算、封板、复盘事件。
+- [ ] 10. 任务包 J、K 贯穿每个阶段，每完成一个业务包都同步补权限、状态机、审计、迁移、部署和回滚。
 
 ## 每个任务包的通用完成标准
 
 - [ ] 有明确数据模型、API、页面入口、权限规则和异常处理。
 - [ ] 有最小可运行验证命令，至少包含 `git diff --check`、`npm run lint`、必要时 `NEXT_DIST_DIR=.next-prod-dry-run npm run build`。
+- [ ] 有对应 smoke 或脚本验证，不能只靠页面目测。
 - [ ] 不触发真实付费生成，除非单独获得授权。
 - [ ] 不提交 `.env`、token、cookie、Provider 签名 URL、数据库备份或大型构建产物。
 - [ ] 完成后更新本 todo 勾选状态，并记录验证结果。
-- [ ] 线上变更必须验证 `youdoo-sites status sd2` 和公网 URL。
+- [ ] 线上变更必须执行 build/restart/status，并验证公网 URL、关键 DOM/文案/行为或静态资源已加载新版本。
+- [ ] 形成聚焦 commit、推送远端；需要稳定回退点时创建并推送 rollback tag。
 
 ---
 
