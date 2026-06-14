@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-14 - 新 App Router 客户端页上线前必须跑生产构建
+
+- 问题/背景：资产管理页 `/assets` 是客户端页面，使用 `useSearchParams()` 读取 `type=video` 初始筛选。
+- 诱因/根因：`tsc` 和 `lint` 都能通过，但 Next 生产构建会要求 `useSearchParams()` 位于 Suspense 边界内，否则预渲染 `/assets` 时失败。
+- 当时思路：不把未提交候选页面直接上线；先用独立 `NEXT_DIST_DIR=.next-prod-assets-dry-run npm run build` 验证真实生产构建，再修阻塞。
+- 改动位置：`src/app/assets/page.tsx`、命令 `NEXT_DIST_DIR=.next-prod-assets-dry-run npm run build`。
+- 怎么改：把真实页面内容拆为 `AssetsPageContent`，默认导出用 `Suspense` 包裹并提供稳定加载态；构建后清理 dry-run 目录，并撤掉 Next 自动写入 `tsconfig.json` 的临时 types 路径。
+- 验证结果：`DATABASE_URL=file:./prisma/dev.db npx tsc --noEmit --pretty false`、`npm run lint`、`NEXT_DIST_DIR=.next-prod-assets-dry-run npm run build` 通过。
+- 可复用经验：页面类候选功能只通过类型检查不够；涉及 App Router、`useSearchParams()`、动态路由或客户端数据拉取时，发布前必须跑一次生产构建，且用临时 `NEXT_DIST_DIR` 避免污染线上构建目录。
+
 ## 2026-06-14 - 模板 Agent 落地要优先保护现有数据库字段
 
 - 问题/背景：Seedance 2.0 模板驱动 Agent 工作台新增模板、规则、AgentRun、Memory 和任务快照字段，需要同步本地 SQLite 验证默认模板与四方案生成。

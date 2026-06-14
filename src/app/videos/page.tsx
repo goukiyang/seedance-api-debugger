@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
 export default function VideosPage() {
-  redirect('/tasks');
+  redirect('/assets?type=video');
 }
