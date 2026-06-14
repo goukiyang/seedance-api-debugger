@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Eye, FolderInput, RefreshCcw, Search, X } from 'lucide-react';
+import { Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
@@ -16,6 +16,7 @@ type AssetStatus = 'all' | 'succeeded' | 'running' | 'submitted' | 'failed' | 'c
 type AssetSort = 'created_desc' | 'created_asc' | 'completed_desc' | 'project' | 'user' | 'duration';
 type AssetGroup = 'date' | 'project' | 'user';
 type AssetCardSize = 'standard' | 'compact';
+type AssetBulkTarget = 'video_project' | 'album';
 type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `reference_image:${string}`;
 
 type SessionUser = {
@@ -48,6 +49,17 @@ type VideoCardItem = {
   title: string;
   status: string;
   project_id: string;
+};
+
+type ReferenceAlbumItem = {
+  id: string;
+  name: string;
+  album_type: string;
+  project_id: string | null;
+  image_count: number;
+  status?: string;
+  permissions?: { edit?: boolean };
+  project?: { id: string; name: string } | null;
 };
 
 type AssetLibraryItem = {
@@ -146,6 +158,9 @@ const cardSizeOptions: Array<{ id: AssetCardSize; label: string; title: string }
 ];
 
 const ASSET_CARD_SIZE_STORAGE_KEY = 'asset_library_card_size';
+const ASSET_BULK_TARGET_STORAGE_KEY = 'asset_library_bulk_target';
+const ASSET_BULK_ALBUM_STORAGE_KEY = 'asset_library_bulk_album_id';
+const WORKSPACE_TAB_ID_KEY = 'workspace_tab_id';
 
 function isAssetType(value: string | null): value is AssetType {
   return value === 'all' || value === 'video' || value === 'image' || value === 'reference';
@@ -153,6 +168,10 @@ function isAssetType(value: string | null): value is AssetType {
 
 function isAssetCardSize(value: string | null): value is AssetCardSize {
   return value === 'standard' || value === 'compact';
+}
+
+function isAssetBulkTarget(value: string | null): value is AssetBulkTarget {
+  return value === 'video_project' || value === 'album';
 }
 
 function readSavedAssetCardSize(): AssetCardSize {
@@ -163,6 +182,35 @@ function readSavedAssetCardSize(): AssetCardSize {
   } catch {
     return 'standard';
   }
+}
+
+function readSavedAssetBulkTarget(): AssetBulkTarget {
+  if (typeof window === 'undefined') return 'video_project';
+  try {
+    const value = window.localStorage.getItem(ASSET_BULK_TARGET_STORAGE_KEY);
+    return isAssetBulkTarget(value) ? value : 'video_project';
+  } catch {
+    return 'video_project';
+  }
+}
+
+function readSavedTargetAlbumId() {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.localStorage.getItem(ASSET_BULK_ALBUM_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function getOrCreateWorkspaceTabId() {
+  if (typeof window === 'undefined') return 'default';
+  let tabId = window.sessionStorage.getItem(WORKSPACE_TAB_ID_KEY);
+  if (!tabId) {
+    tabId = `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    window.sessionStorage.setItem(WORKSPACE_TAB_ID_KEY, tabId);
+  }
+  return tabId;
 }
 
 function statusLabel(status: string) {
@@ -238,6 +286,11 @@ function rectFromPoints(a: { x: number; y: number }, b: { x: number; y: number }
   };
 }
 
+function isReusableImageItem(item: AssetLibraryItem) {
+  return (item.source === 'asset' && item.kind === 'image' && Boolean(item.assetId))
+    || (item.source === 'reference_image' && Boolean(item.referenceImageId));
+}
+
 function AssetsPageContent() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [scope, setScope] = useState<AssetScope>('history');
@@ -264,9 +317,12 @@ function AssetsPageContent() {
   const [activeItem, setActiveItem] = useState<AssetLibraryItem | null>(null);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [movePanelOpen, setMovePanelOpen] = useState(false);
+  const [bulkTarget, setBulkTarget] = useState<AssetBulkTarget>(() => readSavedAssetBulkTarget());
   const [moveProjectId, setMoveProjectId] = useState('');
   const [moveVideoCardId, setMoveVideoCardId] = useState('');
   const [videoCards, setVideoCards] = useState<VideoCardItem[]>([]);
+  const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumItem[]>([]);
+  const [targetAlbumId, setTargetAlbumId] = useState(() => readSavedTargetAlbumId());
   const [moving, setMoving] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
 
@@ -284,6 +340,13 @@ function AssetsPageContent() {
     .filter((item) => item.source === 'video_task' && item.taskId && item.downloadable)
     .map((item) => item.taskId as string);
   const movableItemIds = selectedItems.filter((item) => item.movable).map((item) => item.id);
+  const reusableImageItems = selectedItems.filter(isReusableImageItem);
+  const reusableAssetIds = reusableImageItems
+    .filter((item) => item.source === 'asset' && item.assetId)
+    .map((item) => item.assetId as string);
+  const reusableReferenceImageIds = reusableImageItems
+    .filter((item) => item.source === 'reference_image' && item.referenceImageId)
+    .map((item) => item.referenceImageId as string);
   const manageableProjects = projects.filter((project) => project.can_manage_project);
 
   const groupedItems = useMemo(() => {
@@ -360,6 +423,30 @@ function AssetsPageContent() {
         });
     }
 
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    fetch('/api/reference-albums?scope=all', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (cancelled) return;
+        const editableAlbums = ((data?.albums || []) as ReferenceAlbumItem[])
+          .filter((album) => album.permissions?.edit && album.status !== 'deleted');
+        setReferenceAlbums(editableAlbums);
+        setTargetAlbumId((current) => (
+          current && editableAlbums.some((album) => album.id === current)
+            ? current
+            : editableAlbums[0]?.id || ''
+        ));
+      })
+      .catch(() => {
+        if (!cancelled) setReferenceAlbums([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -572,6 +659,90 @@ function AssetsPageContent() {
 
   const handleDownload = async () => {
     await downloadTaskIds(downloadableTaskIds);
+  };
+
+  const rememberBulkTarget = (target: AssetBulkTarget) => {
+    setBulkTarget(target);
+    try {
+      window.localStorage.setItem(ASSET_BULK_TARGET_STORAGE_KEY, target);
+    } catch {
+      // 偏好保存失败不影响当次操作。
+    }
+  };
+
+  const updateTargetAlbum = (albumId: string) => {
+    setTargetAlbumId(albumId);
+    try {
+      window.localStorage.setItem(ASSET_BULK_ALBUM_STORAGE_KEY, albumId);
+    } catch {
+      // 偏好保存失败不影响当次操作。
+    }
+  };
+
+  const handleAddImagesToWorkspace = async () => {
+    if (reusableImageItems.length === 0) {
+      setError('当前选择里没有可加入工作区的图片或参考素材');
+      return;
+    }
+    setMoving(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch('/api/workspace/assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tab-id': getOrCreateWorkspaceTabId(),
+        },
+        body: JSON.stringify({
+          assetIds: reusableAssetIds,
+          referenceImageIds: reusableReferenceImageIds,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || data.message || '加入工作区失败');
+      setMessage(`已加入生成工作区：${data.workspaceAssetIds?.length || reusableImageItems.length} 张参考图`);
+      clearSelection();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加入工作区失败');
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  const handleAddImagesToAlbum = async () => {
+    if (reusableImageItems.length === 0) {
+      setError('当前选择里没有可加入图集的图片或参考素材');
+      return;
+    }
+    if (!targetAlbumId) {
+      setError('请选择目标图集');
+      return;
+    }
+    setMoving(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch(`/api/reference-albums/${targetAlbumId}/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetIds: reusableAssetIds,
+          referenceImageIds: reusableReferenceImageIds,
+          source_type: 'copied',
+          metadata_json: { source: 'asset_library_bulk_add' },
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || data.message || '加入图集失败');
+      setMessage(`已加入图集：${data.images?.length || reusableImageItems.length} 张图片`);
+      clearSelection();
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加入图集失败');
+    } finally {
+      setMoving(false);
+    }
   };
 
   const handleBulkMove = async () => {
@@ -790,7 +961,7 @@ function AssetsPageContent() {
           <div>
             <strong>已选 {selectedIds.length} 个</strong>
             <span>
-              可下载 {downloadableTaskIds.length} 个，涉及项目 {new Set(selectedItems.map((item) => item.project?.id || 'unassigned')).size} 个
+              可下载 {downloadableTaskIds.length} 个，可移动视频 {movableItemIds.length} 个，可加入参考 {reusableImageItems.length} 个，涉及项目 {new Set(selectedItems.map((item) => item.project?.id || 'unassigned')).size} 个
               {isAdmin ? `，涉及用户 ${new Set(selectedItems.map((item) => item.owner?.id || 'unknown')).size} 位` : ''}
             </span>
           </div>
@@ -800,15 +971,37 @@ function AssetsPageContent() {
               <Download size={15} />
               下载视频（{downloadableTaskIds.length}/{selectedIds.length}）
             </button>
-            <button type="button" onClick={() => setMovePanelOpen((value) => !value)} disabled={movableItemIds.length === 0}>
+            <button type="button" onClick={handleAddImagesToWorkspace} disabled={moving || reusableImageItems.length === 0}>
+              <ImagePlus size={15} />
+              加入工作区（{reusableImageItems.length}/{selectedIds.length}）
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                rememberBulkTarget('album');
+                setMovePanelOpen((value) => bulkTarget === 'album' ? !value : true);
+              }}
+              disabled={reusableImageItems.length === 0}
+            >
+              <FolderPlus size={15} />
+              加入图集
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                rememberBulkTarget('video_project');
+                setMovePanelOpen((value) => bulkTarget === 'video_project' ? !value : true);
+              }}
+              disabled={movableItemIds.length === 0}
+            >
               <FolderInput size={15} />
-              移动到项目
+              移动视频
             </button>
           </div>
         </section>
       )}
 
-      {movePanelOpen && selectedIds.length > 0 && (
+      {movePanelOpen && selectedIds.length > 0 && bulkTarget === 'video_project' && (
         <section className="asset-library-move-panel">
           <div>
             <strong>移动视频任务</strong>
@@ -828,6 +1021,40 @@ function AssetsPageContent() {
           </select>
           <button type="button" onClick={handleBulkMove} disabled={moving || !moveProjectId || !moveVideoCardId}>
             {moving ? '移动中...' : '确认移动'}
+          </button>
+        </section>
+      )}
+
+      {movePanelOpen && selectedIds.length > 0 && bulkTarget === 'album' && (
+        <section className="asset-library-move-panel asset-library-album-panel">
+          <div>
+            <strong>加入参考图集</strong>
+            <span>只复制图片引用，不删除原资产；仅显示你可编辑的图集。</span>
+          </div>
+          {referenceAlbums.length > 0 ? (
+            <div className="asset-library-target-list" role="listbox" aria-label="选择目标图集">
+              {referenceAlbums.map((album) => {
+                const active = targetAlbumId === album.id;
+                return (
+                  <button
+                    key={album.id}
+                    type="button"
+                    className={active ? 'active' : ''}
+                    aria-selected={active}
+                    role="option"
+                    onClick={() => updateTargetAlbum(album.id)}
+                  >
+                    <strong>{album.name}</strong>
+                    <span>{album.project?.name || (album.album_type === 'personal' ? '个人图集' : '可编辑图集')} · {album.image_count} 张</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <span>暂无可编辑图集，请先到参考图集创建或取得编辑权限。</span>
+          )}
+          <button type="button" onClick={handleAddImagesToAlbum} disabled={moving || reusableImageItems.length === 0 || !targetAlbumId}>
+            {moving ? '加入中...' : '确认加入图集'}
           </button>
         </section>
       )}

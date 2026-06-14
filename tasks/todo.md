@@ -4633,7 +4633,7 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 线上目录已确认：当前 `sd2` 服务实际指向 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，本次最终代码已落在该目录并构建上线。
 - [x] 验证通过：`./node_modules/.bin/tsc --noEmit`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
 - [x] 公网验证通过：`https://sd2.youdoodesign.com/assets` 返回 200，资产页 bundle 返回 200，浏览器登录态加载出 61 张资产卡片，管理员“按用户查看”可见，单点选择和拖拽框选后批量栏可见，console 无前端错误。
-- [ ] 后续增强：把图片/参考素材批量移动到项目工作区或图集的能力单独设计；当前批量移动第一版只处理视频任务。
+- [x] 后续增强：把图片/参考素材批量加入生成工作区或参考图集；当前批量移动继续保留视频任务移动到项目/视频卡，图片动作不删除原资产。
 
 ## Review - 2026-06-14 模板设置交互与模块用途重构
 
@@ -4648,3 +4648,13 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 验证通过：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
 - [x] 公网验证通过：`https://sd2.youdoodesign.com/template-generate` 页面 HTML 命中中文模板选择和视频卡选择结构；公网 CSS 命中 `template-selector-list`、`template-video-card-list`、`template-choice-row` 和 `width:66.666vw`；公网 JS 命中“强制插入”“仅参考”“模块用途”“分段策略”“提示词预览”，且未命中 `Prompt 预览`、`Temporal 策略`、`Logo 应`、`品牌 Logo`；最新 BUILD_ID 为 `nFjBGa98YRgWFd8iqdvPz`。
 - [ ] 未执行：未跑真实付费视频生成；未修改 Prisma schema。
+
+## Review - 2026-06-15 资产页图片批量动作补齐
+
+- [x] 资产页选择图片或参考素材后，批量栏新增“加入工作区”和“加入图集”。
+- [x] “加入工作区”复用现有 `/api/workspace/assets`，支持 `assetIds` 和 `referenceImageIds`，沿用同一浏览器会话的 `workspace_tab_id`。
+- [x] “加入图集”复用现有 `/api/reference-albums/[id]/images`，只展示当前用户可编辑的图集，并用按钮列表点击选择目标图集。
+- [x] 视频任务原有“移动视频”继续走目标项目 + 视频卡逻辑，未改变扣费、项目成本归属和视频卡规则。
+- [x] 批量目标模式和最后选择的目标图集会写入本地 `localStorage`，下次进入资产页自动恢复。
+- [x] 本地验证通过：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npm run build`。
+- [ ] 线上部署与公网验证待执行：需先临时隔离当前运行目录内非本轮未提交改动，避免无关改动随 `sd2` 构建一起上线。

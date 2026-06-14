@@ -12834,8 +12834,45 @@ a {
   border-color: oklch(0.34 0.02 245);
 }
 
+.asset-library-album-panel {
+  align-items: stretch;
+}
+
 .asset-library-move-panel select {
   min-width: 220px;
+}
+
+.asset-library-target-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  flex: 1 1 360px;
+  max-height: 144px;
+  overflow-y: auto;
+}
+
+.asset-library-target-list button {
+  justify-content: flex-start;
+  align-items: flex-start;
+  min-height: 54px;
+  text-align: left;
+  display: grid;
+  gap: 3px;
+}
+
+.asset-library-target-list button.active {
+  border-color: oklch(0.7 0.09 188);
+  background: oklch(0.28 0.028 210);
+}
+
+.asset-library-target-list button strong {
+  color: oklch(0.95 0.01 245);
+  font-size: 13px;
+}
+
+.asset-library-target-list button span {
+  color: oklch(0.7 0.018 245);
+  font-size: 12px;
 }
 
 .asset-library-content {
