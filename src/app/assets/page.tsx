@@ -141,12 +141,28 @@ const groupOptions: Array<{ id: AssetGroup; label: string; adminOnly?: boolean }
 ];
 
 const cardSizeOptions: Array<{ id: AssetCardSize; label: string; title: string }> = [
-  { id: 'standard', label: '标准', title: '标准资产卡片尺寸' },
-  { id: 'compact', label: '2/3', title: '2/3 尺寸资产卡片' },
+  { id: 'standard', label: '大', title: '大尺寸资产卡片' },
+  { id: 'compact', label: '小', title: '小尺寸资产卡片' },
 ];
+
+const ASSET_CARD_SIZE_STORAGE_KEY = 'asset_library_card_size';
 
 function isAssetType(value: string | null): value is AssetType {
   return value === 'all' || value === 'video' || value === 'image' || value === 'reference';
+}
+
+function isAssetCardSize(value: string | null): value is AssetCardSize {
+  return value === 'standard' || value === 'compact';
+}
+
+function readSavedAssetCardSize(): AssetCardSize {
+  if (typeof window === 'undefined') return 'standard';
+  try {
+    const value = window.localStorage.getItem(ASSET_CARD_SIZE_STORAGE_KEY);
+    return isAssetCardSize(value) ? value : 'standard';
+  } catch {
+    return 'standard';
+  }
 }
 
 function statusLabel(status: string) {
@@ -229,7 +245,7 @@ function AssetsPageContent() {
   const [status, setStatus] = useState<AssetStatus>('all');
   const [sort, setSort] = useState<AssetSort>('created_desc');
   const [groupBy, setGroupBy] = useState<AssetGroup>('date');
-  const [cardSize, setCardSize] = useState<AssetCardSize>('standard');
+  const [cardSize, setCardSize] = useState<AssetCardSize>(() => readSavedAssetCardSize());
   const [projectId, setProjectId] = useState('');
   const [ownerUserId, setOwnerUserId] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -597,6 +613,15 @@ function AssetsPageContent() {
     setReloadToken((value) => value + 1);
   };
 
+  const updateCardSize = (value: AssetCardSize) => {
+    setCardSize(value);
+    try {
+      window.localStorage.setItem(ASSET_CARD_SIZE_STORAGE_KEY, value);
+    } catch {
+      // localStorage 可能被浏览器隐私设置禁用，不影响本次页面内切换。
+    }
+  };
+
   const marqueeRect = marquee
     ? rectFromPoints({ x: marquee.startX, y: marquee.startY }, { x: marquee.currentX, y: marquee.currentY })
     : null;
@@ -677,7 +702,7 @@ function AssetsPageContent() {
               className={cardSize === option.id ? 'active' : ''}
               title={option.title}
               aria-pressed={cardSize === option.id}
-              onClick={() => setCardSize(option.id)}
+              onClick={() => updateCardSize(option.id)}
             >
               {option.label}
             </button>
