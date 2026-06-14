@@ -292,7 +292,7 @@ type SelectionState = {
 - 本轮已落地：模板编辑抽屉按 `模块 / 规则 / 资产` 重构，支持模块预览、素材缩略图、规则逐条新增/编辑/删除/启停/优先级。
 - 本轮已落地：Agent 执行链路详情改为 9 步 Trace，支持复制 Trace ID、导出脱敏报告、自动刷新、规则命中、输入输出对比和时间线耗时。
 - 本轮已落地：模板生成最近任务保持截图第一视觉入口，并在管理员态提供直达执行链路入口。
-- 本轮待闭环：`sd2.youdoodesign.com/template-generate` 线上部署和登录态视觉走查。
+- 本轮已闭环：`sd2.youdoodesign.com/template-generate` 线上部署、公网页面和静态资源验证完成；登录态视觉走查可继续在真实账号下复核。
 - Prompt 编辑当前由 `src/components/PromptEditor.tsx` 承载，已有 `@图片N` mention 和放大编辑。
 - 画布页已有轻量 Agent 卡入口，位置在 `src/components/canvas/full/nodes.tsx`，但它不是本 PRD 的主入口。
 - `/templates` 当前在 `src/app/templates/page.tsx` 直接重定向到 `/generate`；模板管理第一版已通过 `/generate` 内管理员右侧抽屉承载。
@@ -657,7 +657,7 @@ type SelectionState = {
 - 已验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/templates/TemplateGenerateClient.tsx src/components/GenerationComposer.tsx src/components/templates/TemplateEditorDrawer.tsx 'src/app/admin/agent-runs/[id]/page.tsx'` 通过。
 - 已验证：本地 dev server `http://localhost:3100/template-generate` 返回 200，HTML 包含 `模板生成工作台` 和 `app/template-generate/page.js`；`http://localhost:3100/generate` 仍按普通生成页登录保护跳转 `/login?next=%2Fgenerate`。
 - 未验证：Playwright 未安装，未完成自动截图和登录态交互验收；当前验证以构建、HTML smoke 和无登录态路由为准。
-- 未执行：尚未部署 `sd2`，线上 `sd2.youdoodesign.com/template-generate` 未闭环；登录态视觉走查仍待部署后或可复用登录态下实测。
+- 已部署：`sd2` 已完成 build/restart/status；公网 `/template-generate` 200，HTML 命中“模板生成工作台”和模板页静态 chunk，静态 chunk 200；登录态视觉走查仍可在真实账号下继续复核。
 
 ## 已落地基线，后续不要重复做
 
