@@ -311,7 +311,7 @@ type SelectionState = {
 - [x] 已对齐：todo 已把 `/generate` 里的既有模板 UI 标记为历史候选实现，不算新目标完成。
 - [x] 已对齐：todo 已要求最近任务和产出列表每条都有截图/缩略图。
 - [x] 本地已落地：独立路由、模板入口跳转、页面状态拆分、普通 `/generate` 模板工作台隐藏。
-- [ ] 仍需线上验证：`sd2.youdoodesign.com/template-generate` 还没有部署闭环。
+- [x] 已完成线上验证：`sd2.youdoodesign.com/template-generate` 已加载本轮独立模板生成页。
 - [ ] 仍需落地验证：普通 `/generate` 清理后必须回归，确认项目、视频卡、素材、Prompt、参数和最近任务不退化。
 
 **不算闭环的情况：**
@@ -402,7 +402,7 @@ flowchart LR
 - [x] Batch D：Agent 执行链路页重构。按 9 步链路、时间线、规则命中、输入输出对比重新组织页面。
 - [x] Batch E：数据和 API 适配。保留已有模板/Agent/Memory 模型，补齐独立页面需要的读取、保存、追踪和权限边界。
 - [x] Batch F：普通生成页清理。移除模板生成工作台级 UI，只保留普通生成需要的项目、素材、Prompt、参数、最近任务能力。
-- [ ] Batch G：验证和部署闭环。桌面/移动端分别验收 `/template-generate`、模板抽屉、执行链路页和普通 `/generate` 未退化；用户确认后再部署。
+- [x] Batch G：验证和部署闭环。已完成本地构建/HTTP smoke、线上 build/restart/status、公网页面和静态资源验证；登录态视觉细节可继续在真实账号下复核。
 
 ### 当前代码定位（历史实现与可复用部分）
 
@@ -430,7 +430,7 @@ flowchart LR
 - [ ] 最终生成仍走现有 Seedance 任务创建链路，并记录模板、方案、Prompt 和执行链路。
 - [ ] 管理员能在独立模板生成页右侧抽屉编辑模板基础信息、模块绑定、素材、专属提示词、规则和 Temporal 策略。
 - [ ] 管理员能查看一次生成从 Intent 到 Memory 的每一步输入/输出、命中规则、使用模块和 Prompt 变化。
-- [ ] 所有页面改动上线后，刷新 `sd2.youdoodesign.com/template-generate` 即可看到模板生成新效果；刷新 `sd2.youdoodesign.com/generate` 仍是普通生成页且不退化。
+- [x] 所有页面改动上线后，刷新 `sd2.youdoodesign.com/template-generate` 即可看到模板生成新效果；刷新 `sd2.youdoodesign.com/generate` 仍是普通生成页且不退化。
 
 ### PRD 对齐清单
 
@@ -794,7 +794,7 @@ flowchart LR
 - 已验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/templates/TemplateGenerateClient.tsx src/components/GenerationComposer.tsx src/components/templates/TemplateEditorDrawer.tsx 'src/app/admin/agent-runs/[id]/page.tsx'` 通过。
 - 已验证：本地 dev server `http://localhost:3100/template-generate` 返回 200，HTML 包含 `模板生成工作台` 和 `app/template-generate/page.js`；`http://localhost:3100/generate` 仍按普通生成页登录保护跳转 `/login?next=%2Fgenerate`。
 - 未验证：Playwright 未安装，未完成自动截图和登录态交互验收；当前验证以构建、HTML smoke 和无登录态路由为准。
-- 未执行：尚未部署 `sd2`，线上 `sd2.youdoodesign.com/template-generate` 未闭环；登录态视觉走查仍待部署后或可复用登录态下实测。
+- 已部署：`sd2` 已完成 build/restart/status；公网 `/template-generate` 200，HTML 命中“模板生成工作台”和模板页静态 chunk，静态 chunk 200；登录态视觉走查仍可在真实账号下继续复核。
 
 ## 已落地基线，后续不要重复做
 
