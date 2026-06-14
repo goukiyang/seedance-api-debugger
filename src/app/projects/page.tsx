@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { displayUserName } from '@/lib/users/display';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 
@@ -29,8 +30,19 @@ interface ReviewBudgetSuggestion {
   risk_hint: string;
 }
 
+type ProjectAction = 'archive' | 'restore' | 'delete';
+
+type PendingProjectAction = {
+  project: ProjectItem;
+  action: ProjectAction;
+};
+
 function canManageProject(project: ProjectItem): boolean {
   return project.my_role === 'admin' || project.my_role === 'project_owner';
+}
+
+function canDeleteProject(project: ProjectItem): boolean {
+  return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
 
 function projectOwnerName(project: ProjectItem): string {
@@ -73,6 +85,15 @@ function projectBillingDescription(project: Pick<ProjectItem, 'type'>): string {
   return '生成消耗扣发起人的个人积分';
 }
 
+function projectActionMeta(project: ProjectItem): string {
+  return [
+    projectStatusLabel(project.status),
+    `负责人 ${projectOwnerName(project)}`,
+    `任务 ${project._count?.tasks ?? 0}`,
+    `图集 ${project._count?.reference_albums ?? 0}`,
+  ].join(' · ');
+}
+
 const PROJECTS_PAGE_SIZE = 12;
 
 export default function ProjectsPage() {
@@ -89,6 +110,8 @@ export default function ProjectsPage() {
   const [error, setError] = useState('');
   const [downloadProject, setDownloadProject] = useState<ProjectItem | null>(null);
   const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
+  const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction | null>(null);
+  const [projectActionBusy, setProjectActionBusy] = useState(false);
 
   const loadProjects = async () => {
     setLoading(true);
@@ -180,27 +203,41 @@ export default function ProjectsPage() {
     await loadProjects();
   };
 
-  const updateProjectStatus = async (project: ProjectItem, action: 'archive' | 'restore') => {
+  const requestProjectAction = (project: ProjectItem, action: ProjectAction) => {
     setError('');
     setMessage('');
-    const label = action === 'archive' ? '归档为只读' : '恢复';
-    const description = action === 'archive'
-      ? '归档后项目仍可查看，但不能继续生成或新增素材。'
-      : '恢复后项目可继续生成和新增素材。';
-    if (!window.confirm(`确定${label}「${projectDisplayName(project)}」吗？\n${description}`)) return;
+    setPendingProjectAction({ project, action });
+  };
 
-    const res = await fetch(`/api/projects/${project.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || `${label}项目失败`);
-      return;
+  const confirmProjectAction = async () => {
+    if (!pendingProjectAction) return;
+
+    const { project, action } = pendingProjectAction;
+    const label = action === 'archive' ? '归档为只读' : action === 'restore' ? '恢复' : '删除';
+
+    setProjectActionBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, action === 'delete'
+        ? { method: 'DELETE' }
+        : {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action }),
+          });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || data.message || `${label}项目失败`);
+        return;
+      }
+      setPendingProjectAction(null);
+      setMessage(action === 'delete' ? '项目已删除' : `项目已${label}`);
+      await loadProjects();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${label}项目失败`);
+      setPendingProjectAction(null);
+    } finally {
+      setProjectActionBusy(false);
     }
-    setMessage(`项目已${label}`);
-    await loadProjects();
   };
 
   const handleProjectDownload = async () => {
@@ -409,19 +446,28 @@ export default function ProjectsPage() {
                       管理
                     </Link>
                     {project.status === 'archived' ? (
-                      <button className="btn btn-secondary" type="button" onClick={() => updateProjectStatus(project, 'restore')}>
+                      <button className="btn btn-secondary" type="button" onClick={() => requestProjectAction(project, 'restore')}>
                         恢复
                       </button>
                     ) : (
                       <button
                         className="btn btn-secondary"
                         type="button"
-                        onClick={() => updateProjectStatus(project, 'archive')}
+                        onClick={() => requestProjectAction(project, 'archive')}
                         disabled={project.type !== 'team'}
                       >
                         归档为只读
                       </button>
                     )}
+                    <button
+                      className="btn btn-danger"
+                      type="button"
+                      onClick={() => requestProjectAction(project, 'delete')}
+                      disabled={!canDeleteProject(project)}
+                      title={canDeleteProject(project) ? '删除空协作项目' : '仅没有任务和图集的协作项目可删除'}
+                    >
+                      删除空项目
+                    </button>
                     </>
                   )}
                 </div>
@@ -492,6 +538,17 @@ export default function ProjectsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {pendingProjectAction && (
+        <ProjectActionConfirmModal
+          action={pendingProjectAction.action}
+          projectName={projectDisplayName(pendingProjectAction.project)}
+          meta={projectActionMeta(pendingProjectAction.project)}
+          busy={projectActionBusy}
+          onCancel={() => setPendingProjectAction(null)}
+          onConfirm={() => void confirmProjectAction()}
+        />
       )}
     </div>
   );

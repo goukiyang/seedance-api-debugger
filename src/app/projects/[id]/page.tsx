@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
@@ -149,6 +150,8 @@ interface ProjectBudgetSummary {
   updated_at: string | null;
 }
 
+type ProjectAction = 'archive' | 'restore' | 'delete';
+
 interface ArchiveAnomalies {
   total_count: number;
   unfiled_tasks: Array<{
@@ -280,6 +283,15 @@ function canDeleteProject(project: ProjectDetail): boolean {
   return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
 
+function projectActionMeta(project: ProjectDetail): string {
+  return [
+    statusLabel(project.status),
+    `成员 ${project._count?.members ?? 0}`,
+    `任务 ${project._count?.tasks ?? 0}`,
+    `图集 ${project._count?.reference_albums ?? 0}`,
+  ].join(' · ');
+}
+
 function formatAmountMinor(amount: number | null | undefined, currency?: string | null): string {
   return formatAmountMinorWithFixedCny(amount, currency);
 }
@@ -404,6 +416,8 @@ export default function ProjectDetailPage() {
   const [confirmDuplicateVideoCard, setConfirmDuplicateVideoCard] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState('');
   const [savingBudget, setSavingBudget] = useState(false);
+  const [pendingProjectAction, setPendingProjectAction] = useState<ProjectAction | null>(null);
+  const [projectActionBusy, setProjectActionBusy] = useState(false);
 
   const loadProject = async () => {
     setLoading(true);
@@ -505,41 +519,45 @@ export default function ProjectDetailPage() {
     await loadProject();
   };
 
-  const updateProjectStatus = async (action: 'archive' | 'restore') => {
+  const requestProjectAction = (action: ProjectAction) => {
     if (!project) return;
-    const label = action === 'archive' ? '归档为只读' : '恢复';
-    const description = action === 'archive'
-      ? '归档后项目仍可查看，但不能继续生成或新增素材。'
-      : '恢复后项目可继续生成和新增素材。';
     setError('');
     setMessage('');
-    if (!window.confirm(`确定${label}「${projectDisplayName(project)}」吗？\n${description}`)) return;
-    const res = await fetch(`/api/projects/${projectId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || `${label}项目失败`);
-      return;
-    }
-    setMessage(`项目已${label}`);
-    await loadProject();
+    setPendingProjectAction(action);
   };
 
-  const deleteProject = async () => {
-    if (!project) return;
-    setError('');
-    setMessage('');
-    if (!window.confirm(`确定删除空项目「${projectDisplayName(project)}」吗？删除后不会出现在项目列表。`)) return;
-    const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '删除项目失败');
-      return;
+  const confirmProjectAction = async () => {
+    if (!project || !pendingProjectAction) return;
+    const action = pendingProjectAction;
+    const label = action === 'archive' ? '归档为只读' : action === 'restore' ? '恢复' : '删除';
+
+    setProjectActionBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, action === 'delete'
+        ? { method: 'DELETE' }
+        : {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action }),
+          });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || data.message || `${label}项目失败`);
+        return;
+      }
+      setPendingProjectAction(null);
+      if (action === 'delete') {
+        window.location.href = '/projects';
+        return;
+      }
+      setMessage(`项目已${label}`);
+      await loadProject();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${label}项目失败`);
+      setPendingProjectAction(null);
+    } finally {
+      setProjectActionBusy(false);
     }
-    window.location.href = '/projects';
   };
 
   const removeMember = async (userId: string) => {
@@ -1234,14 +1252,14 @@ export default function ProjectDetailPage() {
           <h2 className="section-title">危险操作</h2>
           <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
             {project.status === 'archived' ? (
-              <button className="btn btn-secondary" type="button" onClick={() => updateProjectStatus('restore')}>
+              <button className="btn btn-secondary" type="button" onClick={() => requestProjectAction('restore')}>
                 恢复项目
               </button>
             ) : (
               <button
                 className="btn btn-secondary"
                 type="button"
-                onClick={() => updateProjectStatus('archive')}
+                onClick={() => requestProjectAction('archive')}
                 disabled={project.type !== 'team'}
               >
                 归档为只读
@@ -1250,7 +1268,7 @@ export default function ProjectDetailPage() {
             <button
               className="btn btn-danger"
               type="button"
-              onClick={deleteProject}
+              onClick={() => requestProjectAction('delete')}
               disabled={!canDeleteProject(project)}
               title={canDeleteProject(project) ? '删除空协作项目' : '仅没有任务和图集的协作项目可删除'}
             >
@@ -1261,6 +1279,17 @@ export default function ProjectDetailPage() {
             归档会保留历史任务和图集；删除只允许没有任务和图集的协作项目。
           </p>
         </div>
+      )}
+
+      {pendingProjectAction && project && (
+        <ProjectActionConfirmModal
+          action={pendingProjectAction}
+          projectName={projectDisplayName(project)}
+          meta={projectActionMeta(project)}
+          busy={projectActionBusy}
+          onCancel={() => setPendingProjectAction(null)}
+          onConfirm={() => void confirmProjectAction()}
+        />
       )}
     </div>
   );

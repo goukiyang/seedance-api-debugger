@@ -26,6 +26,7 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 import { AudioCard, GenerationCard, ImageCard, TextCard, VideoCard } from './nodes';
+import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { displayUserName } from '@/lib/users/display';
 import { buildSeedanceRequest, exportCanvas, syncGenerationInputs } from './seedanceApi';
 import { initialEdges, initialNodes } from './seedanceCanvas';
@@ -53,6 +54,8 @@ type EdgeMenuOpenPayload = {
   screenX: number;
   screenY: number;
 };
+
+type ProjectRemovalAction = 'archive' | 'delete';
 
 type CanvasEdgeData = Record<string, unknown> & {
   onOpenMenu?: (payload: EdgeMenuOpenPayload) => void;
@@ -528,6 +531,7 @@ function CanvasWorkspace() {
   const [projectName, setProjectName] = useState('');
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
+  const [pendingProjectRemoval, setPendingProjectRemoval] = useState<ProjectRemovalAction | null>(null);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
   const [canExportCanvasJson, setCanExportCanvasJson] = useState(false);
 
@@ -593,6 +597,12 @@ function CanvasWorkspace() {
         ? '成员'
         : selectedProject?.my_role || '可生成';
   const projectRemovalLabel = selectedProjectHasContent ? '归档' : '删除';
+  const selectedProjectActionMeta = [
+    selectedProjectTypeLabel,
+    selectedProjectRoleLabel,
+    `${selectedProjectTaskCount} 任务`,
+    `${selectedProjectAlbumCount} 图集`,
+  ].join(' · ');
   const projectRemovalTitle = !selectedProject
     ? '先选择项目'
     : selectedProject.type === 'personal' || selectedProject.type === 'system'
@@ -747,7 +757,7 @@ function CanvasWorkspace() {
     }
   }, [loadProjects, projectName]);
 
-  const handleProjectRemoval = useCallback(async () => {
+  const handleProjectRemoval = useCallback(() => {
     if (!selectedProject) return;
 
     if (selectedProject.type === 'personal' || selectedProject.type === 'system') {
@@ -760,14 +770,14 @@ function CanvasWorkspace() {
     }
 
     const action = selectedProjectHasContent ? 'archive' : 'delete';
-    const confirmed = window.confirm(
-      action === 'archive'
-        ? `确定归档项目「${projectDisplayName(selectedProject)}」吗？\n项目已有任务或图集，归档后历史记录仍保留。`
-        : `确定删除空项目「${projectDisplayName(selectedProject)}」吗？\n删除后不会出现在项目列表。`,
-    );
-    if (!confirmed) {
-      return;
-    }
+    setPendingProjectRemoval(action);
+    setProjectCreateOpen(false);
+    setProjectMessage(null);
+  }, [selectedProject, selectedProjectHasContent]);
+
+  const confirmProjectRemoval = useCallback(async () => {
+    if (!selectedProject || !pendingProjectRemoval) return;
+    const action = pendingProjectRemoval;
 
     setProjectBusy(true);
     setProjectMessage(null);
@@ -781,6 +791,7 @@ function CanvasWorkspace() {
       if (!response.ok) {
         if (action === 'delete' && isRecord(payload) && typeof payload.error === 'string' && payload.error.includes('归档')) {
           setProjectMessage({ type: 'info', text: '项目已有历史内容，不能删除；请改为归档。' });
+          setPendingProjectRemoval(null);
           return;
         }
         throw new Error(apiError(payload, '项目操作失败。'));
@@ -792,13 +803,15 @@ function CanvasWorkspace() {
           ? `已归档项目「${projectDisplayName(selectedProject)}」。`
           : `已删除项目「${projectDisplayName(selectedProject)}」。`,
       });
+      setPendingProjectRemoval(null);
       await loadProjects({ keepSelected: false });
     } catch (error) {
       setProjectMessage({ type: 'error', text: error instanceof Error ? error.message : '项目操作失败。' });
+      setPendingProjectRemoval(null);
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, selectedProject, selectedProjectHasContent]);
+  }, [loadProjects, pendingProjectRemoval, selectedProject]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1768,6 +1781,17 @@ function CanvasWorkspace() {
               <div className={`canvas-project-message ${projectMessage.type}`}>
                 {projectMessage.text}
               </div>
+            )}
+
+            {pendingProjectRemoval && selectedProject && (
+              <ProjectActionConfirmModal
+                action={pendingProjectRemoval}
+                projectName={projectDisplayName(selectedProject)}
+                meta={selectedProjectActionMeta}
+                busy={projectBusy}
+                onCancel={() => setPendingProjectRemoval(null)}
+                onConfirm={() => void confirmProjectRemoval()}
+              />
             )}
 
             <p className="muted tiny">
