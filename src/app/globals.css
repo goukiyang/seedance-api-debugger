@@ -4459,6 +4459,15 @@ a {
   line-height: 1.45;
 }
 
+.project-removal-summary[data-action="restore"] {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.project-removal-summary[data-action="restore"] strong {
+  color: #166534;
+}
+
 .bulk-download-summary {
   display: grid;
   gap: 10px;

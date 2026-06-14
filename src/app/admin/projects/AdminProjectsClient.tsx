@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { displayUserName } from '@/lib/users/display';
 
 interface ProjectItem {
@@ -19,6 +20,12 @@ interface ProjectItem {
 }
 
 type ProjectFilter = 'all' | 'active' | 'archived' | 'empty' | 'smoke';
+type ProjectAction = 'archive' | 'restore' | 'delete';
+
+type PendingProjectAction = {
+  project: ProjectItem;
+  action: ProjectAction;
+};
 
 type MergeCounts = {
   tasks: number;
@@ -67,6 +74,15 @@ function projectDisplayName(project: ProjectItem): string {
   return project.name;
 }
 
+function projectActionMeta(project: ProjectItem): string {
+  return [
+    `${project.type} / ${project.visibility}`,
+    `状态 ${project.status}`,
+    `任务 ${project._count?.tasks ?? 0}`,
+    `图集 ${project._count?.reference_albums ?? 0}`,
+  ].join(' · ');
+}
+
 function isSmokeProject(project: ProjectItem) {
   return /\bSmoke Project\b/i.test(project.name) || /closure smoke/i.test(project.description || '');
 }
@@ -104,6 +120,8 @@ export default function AdminProjectsClient() {
   const [mergePreview, setMergePreview] = useState<MergePreview | null>(null);
   const [mergeLoading, setMergeLoading] = useState(false);
   const [mergeError, setMergeError] = useState('');
+  const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction | null>(null);
+  const [projectActionBusy, setProjectActionBusy] = useState(false);
 
   const loadProjects = async () => {
     setLoading(true);
@@ -198,48 +216,45 @@ export default function AdminProjectsClient() {
     setMergeError('');
   };
 
-  const updateProjectStatus = async (project: ProjectItem, action: 'archive' | 'restore') => {
+  const requestProjectAction = (project: ProjectItem, action: ProjectAction) => {
     setMessage('');
     setError('');
-    const label = action === 'archive' ? '归档为只读' : '恢复';
-    const description = action === 'archive'
-      ? '归档后项目仍可查看，但不能继续生成或新增素材。'
-      : '恢复后项目可继续生成和新增素材。';
-    if (!window.confirm(`确定${label}「${projectDisplayName(project)}」吗？\n${description}`)) return;
+    setPendingProjectAction({ project, action });
+  };
 
+  const confirmProjectAction = async () => {
+    if (!pendingProjectAction) return;
+
+    const { project, action } = pendingProjectAction;
+    const label = action === 'archive' ? '归档为只读' : action === 'restore' ? '恢复' : '删除';
+
+    setProjectActionBusy(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
+      const res = await fetch(`/api/projects/${project.id}`, action === 'delete'
+        ? { method: 'DELETE' }
+        : {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action }),
+          });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || `${label}项目失败`);
-      setMessage(`项目已${label}`);
+
+      setMessage(action === 'delete' ? '项目已删除' : `项目已${label}`);
+      if (action === 'delete') {
+        setSelectedIds((current) => {
+          const next = new Set(current);
+          next.delete(project.id);
+          return next;
+        });
+      }
+      setPendingProjectAction(null);
       await loadProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : `${label}项目失败`);
-    }
-  };
-
-  const deleteProject = async (project: ProjectItem) => {
-    setMessage('');
-    setError('');
-    if (!window.confirm(`确定删除空项目「${projectDisplayName(project)}」吗？删除后不会出现在项目列表。`)) return;
-
-    try {
-      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || '删除项目失败');
-      setMessage('项目已删除');
-      setSelectedIds((current) => {
-        const next = new Set(current);
-        next.delete(project.id);
-        return next;
-      });
-      await loadProjects();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '删除项目失败');
+      setPendingProjectAction(null);
+    } finally {
+      setProjectActionBusy(false);
     }
   };
 
@@ -440,14 +455,14 @@ export default function AdminProjectsClient() {
                     <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap' }}>
                       <Link className="link" href={`/projects/${project.id}`}>管理</Link>
                       {project.status === 'archived' ? (
-                        <button className="btn btn-secondary" type="button" onClick={() => updateProjectStatus(project, 'restore')}>
+                        <button className="btn btn-secondary" type="button" onClick={() => requestProjectAction(project, 'restore')}>
                           恢复
                         </button>
                       ) : (
                         <button
                           className="btn btn-secondary"
                           type="button"
-                          onClick={() => updateProjectStatus(project, 'archive')}
+                          onClick={() => requestProjectAction(project, 'archive')}
                           disabled={!canArchive(project)}
                         >
                           归档为只读
@@ -456,7 +471,7 @@ export default function AdminProjectsClient() {
                       <button
                         className="btn btn-danger"
                         type="button"
-                        onClick={() => deleteProject(project)}
+                        onClick={() => requestProjectAction(project, 'delete')}
                         disabled={!canDelete(project)}
                         title={canDelete(project) ? '删除空协作项目' : '仅没有任务和图集的空协作项目可删除'}
                       >
@@ -589,6 +604,17 @@ export default function AdminProjectsClient() {
             )}
           </aside>
         </div>
+      )}
+
+      {pendingProjectAction && (
+        <ProjectActionConfirmModal
+          action={pendingProjectAction.action}
+          projectName={projectDisplayName(pendingProjectAction.project)}
+          meta={projectActionMeta(pendingProjectAction.project)}
+          busy={projectActionBusy}
+          onCancel={() => setPendingProjectAction(null)}
+          onConfirm={() => void confirmProjectAction()}
+        />
       )}
     </div>
   );
