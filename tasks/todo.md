@@ -4657,4 +4657,4 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 视频任务原有“移动视频”继续走目标项目 + 视频卡逻辑，未改变扣费、项目成本归属和视频卡规则。
 - [x] 批量目标模式和最后选择的目标图集会写入本地 `localStorage`，下次进入资产页自动恢复。
 - [x] 本地验证通过：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npm run build`。
-- [ ] 线上部署与公网验证待执行：需先临时隔离当前运行目录内非本轮未提交改动，避免无关改动随 `sd2` 构建一起上线。
+- [x] 线上部署与公网验证通过：已临时隔离非本轮源码改动后执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`；公网 `/assets` 加载最终 chunk `page-b7626efc122ca236.js`，命中“加入工作区 / 加入图集 / 移动视频”，最终 BUILD_ID 为 `OV3wqHcgmo8pbghL_T-LB`，健康守护周期后 `runs` 保持 54。
