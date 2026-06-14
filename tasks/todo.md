@@ -4644,6 +4644,7 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 模板生成工作台移除模板下拉菜单，改为可点击模板列表；模板生成页的视频卡选择移除下拉菜单，改为可点击卡片列表。
 - [x] 模板、视频卡、快捷调节、模板编辑页签和模块用途设置已保存最后一次选择，下次进入自动恢复。
 - [x] 前端模板相关英文显示已收敛为中文：`Logo` 改为“标志”，`Template Generate` 改为“模板生成”，规则类型改为“必须 / 禁止 / 建议”，素材类型改为“角色 / 标志 / 风格 / 其他”。
+- [x] 补充中文化收口：`Prompt 预览` 改为“提示词预览”，`Temporal 策略` 改为“分段策略”；旧模板数据中的 `Logo` 在模板 API 序列化层统一显示为“标志”。
 - [x] 验证通过：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
-- [x] 公网验证通过：`https://sd2.youdoodesign.com/template-generate` 页面 HTML 命中中文模板选择和视频卡选择结构；公网 CSS 命中 `template-selector-list`、`template-video-card-list`、`template-choice-row` 和 `width:66.666vw`；公网 JS 命中“强制插入”“仅参考”“模块用途”“参考图 ID”。
+- [x] 公网验证通过：`https://sd2.youdoodesign.com/template-generate` 页面 HTML 命中中文模板选择和视频卡选择结构；公网 CSS 命中 `template-selector-list`、`template-video-card-list`、`template-choice-row` 和 `width:66.666vw`；公网 JS 命中“强制插入”“仅参考”“模块用途”“分段策略”“提示词预览”，且未命中 `Prompt 预览`、`Temporal 策略`、`Logo 应`、`品牌 Logo`；最新 BUILD_ID 为 `nFjBGa98YRgWFd8iqdvPz`。
 - [ ] 未执行：未跑真实付费视频生成；未修改 Prisma schema。

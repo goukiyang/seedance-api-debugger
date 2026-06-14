@@ -1050,7 +1050,7 @@ export function GenerationComposer({
 
           <div className="template-prompt-preview">
             <div>
-              <span>Prompt 预览</span>
+              <span>提示词预览</span>
               <strong>
                 {selectedPlanKey ? `方案 ${selectedPlanKey}` : agentRunId ? '已生成方案' : '等待方案'}
                 {promptUserEdited ? ' · 已编辑' : ''}

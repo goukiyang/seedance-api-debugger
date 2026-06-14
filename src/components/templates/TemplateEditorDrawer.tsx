@@ -443,7 +443,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
           <label><span>全局提示词</span><textarea value={globalPrompt} onChange={(event) => setGlobalPrompt(event.currentTarget.value)} rows={3} /></label>
         </section>
         <section className="template-drawer-section">
-          <h3>Temporal 策略</h3>
+          <h3>分段策略</h3>
           <div className="template-drawer-check-row">
             <label><input type="checkbox" checked={segmentEnabled} onChange={(event) => setSegmentEnabled(event.currentTarget.checked)} /> 启用分段</label>
             <label><input type="checkbox" checked={handoff} onChange={(event) => setHandoff(event.currentTarget.checked)} /> 启用帧传递</label>

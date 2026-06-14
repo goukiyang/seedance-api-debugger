@@ -235,6 +235,13 @@ export function normalizeTemplateKey(value: unknown, fallbackName: string) {
     .slice(0, 80) || 'template';
 }
 
+function localizeTemplateDisplayText(value: string) {
+  return value
+    .replace(/品牌\s+Logo/g, '品牌标志')
+    .replace(/\bLogo\b\s*/g, '标志')
+    .replace(/标志\s+(?=[\u4e00-\u9fff])/g, '标志');
+}
+
 export function serializeGenerationTemplate(template: TemplateRecord): SerializedGenerationTemplate {
   return {
     id: template.id,
@@ -253,7 +260,7 @@ export function serializeGenerationTemplate(template: TemplateRecord): Serialize
     assets: (template.assets || []).map((asset) => ({
       id: asset.id,
       asset_type: normalizeAssetType(asset.asset_type),
-      label: asset.label,
+      label: localizeTemplateDisplayText(asset.label),
       url: asset.url,
       thumbnail_url: asset.thumbnail_url,
       reference_image_id: asset.reference_image_id,
@@ -264,7 +271,7 @@ export function serializeGenerationTemplate(template: TemplateRecord): Serialize
     rules: (template.rules || []).map((rule) => ({
       id: rule.id,
       rule_type: normalizeRuleType(rule.rule_type),
-      content: rule.content,
+      content: localizeTemplateDisplayText(rule.content),
       priority: rule.priority,
       sort_order: rule.sort_order,
       status: rule.status,
@@ -272,7 +279,7 @@ export function serializeGenerationTemplate(template: TemplateRecord): Serialize
     prompts: (template.prompts || []).map((prompt) => ({
       id: prompt.id,
       block_type: normalizePromptBlockType(prompt.block_type),
-      content: prompt.content,
+      content: localizeTemplateDisplayText(prompt.content),
       sort_order: prompt.sort_order,
       status: prompt.status,
     })),
