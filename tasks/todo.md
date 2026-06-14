@@ -6,6 +6,122 @@
 
 最新验收结论：整份 V1.2 仍未完整落地。当前代码已经有视频卡 P0 归档入口、公共项目预算底座、审批记录表、审批中心页面、1080p 基础校验、新建项目“默认记账 / 预算记账”选择入口，但这些还没有形成完整业务闭环。后续执行必须以本 todo 为准，不得把“有模型/有页面/有审批记录”误判为“业务已闭环”。
 
+## Smoke Project 自动合并与项目去重 Todo
+
+更新时间：2026-06-14
+
+问题定义：
+
+- 本地只读统计发现当前 `Project` 表存在 19 个 active/team 的 `Smoke Project ...`。
+- 这些项目不是 `scripts/project-ui-smoke.ts` 产生的；该脚本只读检查 `/api/projects`。
+- 真实来源是 `scripts/workbench-closure-smoke.ts`，它每次运行都会 `POST /api/projects` 创建随机命名的 `Smoke Project ${randomSuffix()}`，但脚本结束后没有清理，也没有复用固定测试项目。
+- 当前 19 个 Smoke Project 下已有 14 条 `VideoTask`、11 张 `VideoCard`、19 个 `CanvasDocument`、50 条 `CostLedger`、36 条 `CostAllocation`。因此不能直接批量删除，只能走“合并迁移 + 审计留痕 + 源项目归档/删除”的闭环。
+
+目标：
+
+- 管理员不再看到一堆测试项目散落在项目列表里。
+- 后续 smoke 测试默认复用一个固定项目，不再持续制造 `Smoke Project ...`。
+- 历史 Smoke Project 可安全合并到一个目标项目，任务、视频卡、画布、成本归属和成员关系都能闭环迁移。
+- 合并前必须提供 dry-run 预览；合并后保留操作日志和迁移审计，支持回查“哪些项目被合并到哪里”。
+
+### 方案选择
+
+- [x] 不推荐“直接删除所有 Smoke Project”：有任务、视频卡、画布和成本账本，删除会破坏历史结果、项目成本和视频卡入口。
+- [x] 不推荐“只把项目改名”：列表会少一点，但任务/成本仍散在多个项目，后续项目统计仍被污染。
+- [x] 推荐“固定测试项目 + 历史项目合并”：新 smoke 只进固定项目；旧 smoke 通过后台合并工具迁移到目标项目。
+
+### 第一阶段：阻止继续产生垃圾项目
+
+- [x] 修改 `scripts/workbench-closure-smoke.ts`。
+- [x] 新增环境变量 `SMOKE_PROJECT_ID`：传入时直接复用该项目，不再创建新项目。
+- [x] 新增环境变量 `SMOKE_PROJECT_NAME`：没有 `SMOKE_PROJECT_ID` 时，按固定名称查找或创建，例如 `Smoke Project Archive`。
+- [x] 默认行为从“每次随机新建项目”改成“复用固定 smoke 项目”；只有显式设置 `SMOKE_CREATE_UNIQUE_PROJECT=1` 时才允许创建随机项目。
+- [x] 脚本输出里标明 `projectMode=reused | created | unique`，方便日志审计。
+- [ ] 验证命令：`BASE_URL=http://localhost:3000 npx tsx scripts/workbench-closure-smoke.ts`，预期不会新增随机 `Smoke Project ...`。
+
+### 第二阶段：项目合并后端能力
+
+- [x] 新增项目合并服务：`src/lib/projects/merge.ts`。
+- [x] 服务导出 `previewProjectMerge(sourceProjectIds, targetProjectId)`。
+- [x] 服务导出 `mergeProjects({ sourceProjectIds, targetProjectId, actorUserId, reason, mode })`。
+- [x] preview 返回每个源项目的任务数、视频卡数、画布数、图集数、参考图数、成本账本数、成本分摊数、成员数、预算账户状态和阻断原因。
+- [x] merge 必须在单个事务内执行，避免迁移一半失败后账实不一致。
+- [x] `VideoTask.project_id` 迁移到目标项目。
+- [x] `VideoCard.project_id` 迁移到目标项目。
+- [x] `CanvasDocument.project_id` 迁移到目标项目。
+- [x] `ReferenceAlbum.project_id` 迁移到目标项目。
+- [x] `ReferenceImage.project_id` 迁移到目标项目。
+- [x] `ProviderApiRequest.project_id` 迁移到目标项目。
+- [x] `ApprovalRecord.project_id` 迁移到目标项目。
+- [x] `ContentAuditLog.project_id` 迁移到目标项目。
+- [x] `CostLedger.project_id` 和 `CostAllocation.project_id` 迁移时复用 `src/lib/costs/ledger.ts` 的 `recordTaskProjectTransfer` 或等价审计语义，不能静默改账本归属。
+- [x] `ProjectMember` 合并时按用户去重：目标已有成员则保留权限更高的角色，源项目成员只作为审计信息记录，不重复插入。
+- [x] 源项目合并后状态改为 `archived` 或 `deleted`，推荐第一版用 `archived`，备注写入 `description` 或 `OperationLog`，避免误删。
+- [x] 禁止把 `personal`、`system`、目标项目自身、已 deleted 项目作为源项目。
+- [x] 禁止合并到 `deleted` 或无权限管理的目标项目。
+- [x] 如果源项目存在 `ProjectBudgetAccount` 或 `ProjectBudgetLedger`，第一版先阻断合并，后续单独设计预算合并。
+
+### 第三阶段：管理员项目管理页交互
+
+- [x] 修改 `src/app/admin/projects/AdminProjectsClient.tsx`，增加批量选择列。
+- [x] 表格顶部增加搜索框，支持快速搜索 `Smoke Project`。
+- [x] 表格顶部增加筛选：全部、活跃、归档、空项目、疑似测试项目。
+- [x] 疑似测试项目规则第一版：项目名匹配 `/\\bSmoke Project\\b/i` 或 description 包含 `closure smoke`。
+- [x] 勾选多个项目后显示批量操作栏。
+- [x] 批量操作栏提供“合并到项目”按钮。
+- [x] 点击“合并到项目”后使用右侧抽屉，不使用浏览器 `window.confirm`。
+- [x] 抽屉第一步选择目标项目，默认推荐 `Smoke Project Archive`；如果不存在，引导先创建。
+- [x] 抽屉第二步展示 dry-run 预览：源项目数量、任务、视频卡、画布、成本账本、成员冲突、预算阻断。
+- [x] 抽屉第三步输入合并原因，并二次确认。
+- [x] 合并成功后刷新列表，源项目进入归档区，目标项目数据计数增加。
+- [x] 空 Smoke Project 可以走快速删除，但仍要二次确认并记录 `project_delete` 操作日志。
+
+### 第四阶段：项目合并 API
+
+- [x] 新增 `POST /api/admin/projects/merge/preview`。
+- [x] 入参：`source_project_ids: string[]`、`target_project_id: string`。
+- [x] 返回 dry-run 汇总、逐项目明细和阻断原因。
+- [x] 新增 `POST /api/admin/projects/merge`。
+- [x] 入参：`source_project_ids: string[]`、`target_project_id: string`、`reason: string`、`confirm: true`。
+- [x] 仅 admin 可调用；普通项目 owner 第一版不开放跨项目合并。
+- [x] API 必须拒绝空 reason、源项目为空、源项目包含目标项目、源项目包含 personal/system/deleted。
+- [x] API 成功后写 `OperationLog`：`project_merge_preview`、`project_merge_apply`。
+
+### 第五阶段：历史 Smoke Project 一次性清理脚本
+
+- [x] 新增 `scripts/merge-smoke-projects.ts`。
+- [x] 默认 dry-run，只输出候选源项目、目标项目、迁移影响和阻断项。
+- [ ] 参数：
+  - `--target <projectIdOrName>`
+  - `--pattern "Smoke Project"`
+  - `--apply`
+  - `--reason "合并历史 smoke 测试项目"`
+- [x] dry-run 输出必须包含：source project id/name、任务、视频卡、画布、成本账本、成本分摊、是否空项目、是否可快速删除。
+- [x] apply 前要求数据库备份路径存在，例如 `BACKUP_CONFIRMED=1`。
+- [x] apply 后输出迁移数量和源项目归档数量。
+
+### 数据口径与交互规则
+
+- [x] 合并后的任务仍保留原 `VideoTask.created_at`、`owner_user_id`、`user_id`、`source_request_id`，不能因为项目迁移改变生成者。
+- [x] 合并后的成本仍保留原发生时间和 Provider task id。
+- [x] 项目详情页按新目标项目展示迁移后的任务、视频卡、画布和成本。
+- [x] 源项目归档后只读可查，提示“已合并到 xxx”，不允许继续生成。
+- [x] 项目列表默认隐藏已合并归档项目，但管理员可在归档筛选中查看。
+- [x] 搜索 `Smoke Project` 时能定位历史源项目和目标归档项目。
+
+### 验收标准
+
+- [ ] 运行 smoke 脚本两次，不再新增两个随机 `Smoke Project ...`。
+- [x] 管理员项目页能筛出所有疑似 Smoke Project。
+- [x] 合并预览能正确显示当前本地样本：19 个项目、14 条任务、11 张视频卡、19 个画布、50 条成本账本、36 条成本分摊。
+- [x] 对带预算账户的项目，第一版明确阻断，不执行半合并。
+- [x] 对空 Smoke Project，支持二次确认后快速删除。
+- [x] 对有内容的 Smoke Project，合并后任务、视频卡、画布、成本都出现在目标项目。
+- [x] 源项目归档，不再出现在默认 active 项目列表。
+- [x] `OperationLog` 能查到合并发起人、原因、源项目、目标项目和迁移计数。
+- [x] `npm run lint`、`npx tsc --noEmit --pretty false`、`npm run build` 通过。
+- [x] 本地 dry-run 和 apply smoke 通过后，再部署 `sd2` 并用管理员页面刷新验证。
+
 ## 资产管理页 Todo：即梦式资产库 + 项目/用户维度 + 框选批量操作
 
 更新时间：2026-06-14
@@ -166,35 +282,94 @@ type SelectionState = {
 
 更新时间：2026-06-14
 
-目标：在现有 Seedance 生成能力上，落地“模板驱动 + Agent 辅助 + 规则约束”的智能生成工作台。用户日常只看到“模板 + 输入需求 + 选择方案 + 生成”，系统复杂度隐藏在后台，不把产品做成 Agent 控制台、Prompt 编辑器或后台系统。
+目标：在现有 Seedance 生成能力上，落地“模板驱动 + Agent 辅助 + 规则约束”的独立模板生成工作台。普通 `/generate` 继续承担常规自由生成/项目生成；模板生成必须独立成页，不再和普通生成页面共生。用户在模板生成页只看到“模板 + 本次需求 + Agent 方案 + Prompt 预览 + 生成”，系统复杂度隐藏在后台，不把产品做成 Agent 控制台、Prompt 编辑器或后台系统。
 
-### 当前代码定位
+### 2026-06-14 截图对照后的重规划（以本段为准）
 
-- `/generate` 当前由 `src/app/generate/page.tsx` 承载，负责项目/视频卡选择、最近任务、复用草稿和提交状态。
-- 生成输入区当前由 `src/components/GenerationComposer.tsx` 承载，已有参考图、图集、Prompt 输入、Seedance 参数、1080p 审批提示和提交入口。
+**截图依据：**
+
+- `/Users/gouki-youdoo/Pictures/test/02/20260425-211254.png`：模板生成独立工作台主页面。
+- `/Users/gouki-youdoo/Pictures/test/02/20260614-022935.png`：管理员模板编辑抽屉。
+- `/Users/gouki-youdoo/Pictures/test/02/20260614-023019.png`：Agent 执行链路查看页。
+
+**关键纠偏：**
+
+- [ ] 普通生成页和模板生成页必须拆开：普通 `/generate` 不再承载模板生成完整工作台。
+- [ ] 新增独立模板生成入口，推荐路由为 `/template-generate`；如后续因导航体系改为 `/templates/generate`，必须先同步本 todo。
+- [ ] `/templates` 不应继续简单重定向到普通 `/generate`；它应成为模板列表、模板管理入口或跳转到独立模板生成页的上游入口。
+- [ ] 已在 `/generate` 里做过的模板 UI 只算候选实现和可复用代码，不算最终完成；需要迁出、拆分状态和重新验收。
+- [ ] 模板生成页是“模板优先、方案优先”的页面；普通生成页是“Prompt/素材/项目优先”的页面，两者信息架构、默认态和成功路径不同。
+
+**主页面缺口清单（对照 20260425-211254）：**
+
+- [ ] 页面顶部需要明确的模板生成工作台外壳：`进入画布模式`、`查看我的项目`、保存到/当前项目选择，不把项目选择藏在普通生成表单里。
+- [ ] 当前模板区需要展示模板名、模板描述、模板切换、角色/Logo/固定素材/规则/分段摘要，并提供 `编辑模板`、`查看链路` 两个管理员入口。
+- [ ] 本次需求输入区只承接本次视频目标，保留字数统计和清晰 placeholder，避免混入后台、成本、调试等无关信息。
+- [ ] 快速调节区需要以按钮/标签承载“更科技、节奏更快、突出品牌、突出产品、情绪更强”等 modifier，并支持后续扩展。
+- [ ] 当前图集/参考素材需要以缩略图行展示，包含已有图集、固定素材和“添加参考图”入口。
+- [ ] Agent 方案区必须展示 A/B/C/D 四张可比较方案卡：缩略图、时长标签、标题、结构说明、推荐/选中态，以及 `查看 Prompt`、`继续修改`、`生成此方案` 操作。
+- [ ] Prompt 预览区需要可编辑、可放大、可恢复 Agent 版本，并继续支持 `@图片N` 引用。
+- [ ] Seedance 参数区只作为生成前的确认栏：模型、参考模式、比例、时长、清晰度、预估成本和最终生成按钮，视觉权重低于方案选择。
+- [ ] 最近任务只作为页面底部留存和复用入口，每条任务必须有截图/缩略图、标题/需求摘要、日期、成本和状态。
+- [ ] 页面不能出现“历史生成归档”等用户已明确删除的字样。
+
+**模板编辑抽屉缺口清单（对照 20260614-022935）：**
+
+- [ ] 抽屉必须从独立模板生成页打开，而不是绑定在普通 `/generate`。
+- [ ] 抽屉顶部需要模板名、版本、状态和 `模块 / 规则 / 资产` 分段或标签页。
+- [ ] 模块页展示模板专属提示词、角色提示词、Logo 提示词、风格提示词和 Global Prompt，并配套角色/Logo/素材预览卡。
+- [ ] 规则页展示 MUST/FORBID/SUGGEST 三类计数、规则列表、优先级、启停、编辑、删除和新增规则入口。
+- [ ] 资产页展示固定素材缩略图、添加素材、管理素材和素材来源说明。
+- [ ] 底部操作需要包含 `查看变更记录`、`保存为新版本`、`取消`，并处理未保存改动确认。
+- [ ] 管理员权限必须服务端校验，普通用户不可见入口，也不能调用编辑 API。
+
+**Agent 执行链路缺口清单（对照 20260614-023019）：**
+
+- [ ] 执行链路页需要能从模板生成页、最近任务或任务详情进入，并保留返回任务列表/返回模板生成的路径。
+- [ ] 顶部需要展示项目、模板、分段、Trace ID，并提供复制 Trace ID、导出报告、自动刷新等操作。
+- [ ] 横向链路卡需要覆盖 9 步：Intent、Template Load、Module Composer、Rule Engine、Prompt Compiler、Plan Generator、Validator、Seedance Execution、Memory Record。
+- [ ] 下方需要执行时间线，展示每一步状态、耗时、输入摘要、输出摘要和错误信息。
+- [ ] 需要规则命中面板：MUST/FORBID/SUGGEST 分类、命中规则、优先级、来源模块。
+- [ ] 需要输入/输出对比面板：用户需求、模板上下文、Agent Prompt、最终 Prompt、提交给 Seedance 的 payload 摘要。
+- [ ] 敏感字段必须脱敏，不展示 token、cookie、Provider 密钥或私有直链。
+
+**实现批次重新定义：**
+
+- [ ] Batch A：路由和导航拆分。新增 `/template-generate`，普通 `/generate` 回归普通生成；迁移或复用已有模板 UI 组件。
+- [ ] Batch B：独立模板生成主页面。按截图补齐模板区、项目区、需求区、图集区、方案区、Prompt 区、参数区和最近任务区。
+- [ ] Batch C：模板编辑抽屉重构。按 `模块 / 规则 / 资产` 三段重做抽屉信息架构和保存版本逻辑。
+- [ ] Batch D：Agent 执行链路页重构。按 9 步链路、时间线、规则命中、输入输出对比重新组织页面。
+- [ ] Batch E：数据和 API 适配。保留已有模板/Agent/Memory 模型，补齐独立页面需要的读取、保存、追踪和权限边界。
+- [ ] Batch F：普通生成页清理。移除模板生成工作台级 UI，只保留普通生成需要的项目、素材、Prompt、参数、最近任务能力。
+- [ ] Batch G：验证和部署闭环。桌面/移动端分别验收 `/template-generate`、模板抽屉、执行链路页和普通 `/generate` 未退化；用户确认后再部署。
+
+### 当前代码定位（历史实现与可复用部分）
+
+- `/generate` 当前由 `src/app/generate/page.tsx` 承载，负责项目/视频卡选择、最近任务、复用草稿和提交状态；后续应回归普通生成页，不再承载模板生成完整工作台。
+- 生成输入区当前由 `src/components/GenerationComposer.tsx` 承载，已有参考图、图集、Prompt 输入、Seedance 参数、1080p 审批提示和提交入口；模板生成可复用其中的素材、Prompt 和参数能力，但页面状态必须拆分。
 - Prompt 编辑当前由 `src/components/PromptEditor.tsx` 承载，已有 `@图片N` mention 和放大编辑。
 - 画布页已有轻量 Agent 卡入口，位置在 `src/components/canvas/full/nodes.tsx`，但它不是本 PRD 的主入口。
-- `/templates` 当前在 `src/app/templates/page.tsx` 直接重定向到 `/generate`；模板管理第一版已通过 `/generate` 内管理员右侧抽屉承载。
+- `/templates` 当前在 `src/app/templates/page.tsx` 直接重定向到 `/generate`；后续必须改为模板入口/列表/管理入口，不能继续把模板生成带回普通生成页。
 - Seedance 创建任务链路在 `src/app/api/tasks/create/route.ts`，当前负责 Prompt 引用校验、素材渲染、项目/视频卡校验、计费冻结和 Provider 提交。
 - `prisma/schema.prisma` 已新增模板、模块绑定、规则集合、Agent 执行链路和 Memory 的专用简化模型；本地 DB 已备份后手动应用本次新增迁移 SQL。
 
 ### 产品边界
 
-- [x] 生成主页面是唯一日常用户入口，不新增复杂工作台作为主路径。
-- [x] 模板编辑只做管理员右侧抽屉，不做独立大后台页面。
-- [x] 执行链路查看页只给管理员调试，不暴露给普通用户。
-- [x] 第一版不引入 AST、复杂规则引擎、复杂 Temporal 编排或多 Agent 控制台。
-- [x] 保留现有生成能力、项目/视频卡绑定、参考图、图集、最近任务、审批提示和 Seedance 参数，不因重构删除原功能。
+- [ ] 模板生成主页面是独立日常入口，不和普通 `/generate` 共生。
+- [ ] 普通 `/generate` 保留现有自由生成能力、项目/视频卡绑定、参考图、图集、最近任务、审批提示和 Seedance 参数，不因模板页迁出而退化。
+- [ ] 模板编辑只做管理员右侧抽屉，不做独立大后台页面。
+- [ ] 执行链路查看页只给管理员调试，不暴露给普通用户。
+- [ ] 第一版不引入 AST、复杂规则引擎、复杂 Temporal 编排或多 Agent 控制台。
 
 ### 成功标准
 
-- [x] 用户能选择模板，看到角色、Logo、规则摘要和固定素材。
-- [x] 用户输入本次需求并选择快捷微调后，系统生成 A/B/C/D 4 个方案。
-- [x] 用户选择一个方案后，得到可编辑 Prompt 预览。
-- [x] 最终生成仍走现有 Seedance 任务创建链路，并记录模板、方案、Prompt 和执行链路。
-- [x] 管理员能在生成页右侧抽屉编辑模板基础信息、模块绑定、素材、专属提示词、规则和 Temporal 策略。
-- [x] 管理员能查看一次生成从 Intent 到 Memory 的每一步输入/输出、命中规则、使用模块和 Prompt 变化。
-- [ ] 所有页面改动上线后，刷新 `sd2.youdoodesign.com/generate` 即可看到新效果。
+- [ ] 用户在独立模板生成页能选择模板，看到角色、Logo、规则摘要和固定素材。
+- [ ] 用户输入本次需求并选择快捷微调后，系统生成 A/B/C/D 4 个方案。
+- [ ] 用户选择一个方案后，得到可编辑 Prompt 预览。
+- [ ] 最终生成仍走现有 Seedance 任务创建链路，并记录模板、方案、Prompt 和执行链路。
+- [ ] 管理员能在独立模板生成页右侧抽屉编辑模板基础信息、模块绑定、素材、专属提示词、规则和 Temporal 策略。
+- [ ] 管理员能查看一次生成从 Intent 到 Memory 的每一步输入/输出、命中规则、使用模块和 Prompt 变化。
+- [ ] 所有页面改动上线后，刷新 `sd2.youdoodesign.com/template-generate` 即可看到模板生成新效果；刷新 `sd2.youdoodesign.com/generate` 仍是普通生成页且不退化。
 
 ### PRD 对齐清单
 
@@ -207,20 +382,22 @@ type SelectionState = {
 
 **页面层级：**
 
-- [x] 页面一：生成主页面，是用户唯一日常使用页面，优先级最高。
-- [x] 页面二：模板编辑抽屉，是管理员从生成页右侧滑出的编辑器，不做独立主页面。
-- [x] 页面三：执行链路查看页，是管理员调试页，普通用户不可见。
+- [ ] 页面一：独立模板生成主页面，是模板生成用户的日常使用页面，优先级最高。
+- [ ] 页面二：模板编辑抽屉，是管理员从独立模板生成页右侧滑出的编辑器，不做独立主页面。
+- [ ] 页面三：执行链路查看页，是管理员调试页，普通用户不可见。
 
-**生成主页面必须按以下信息顺序组织：**
+**独立模板生成主页面必须按以下信息顺序组织：**
 
-- [x] 当前模板区：模板名称、版本、状态、切换和管理员编辑入口。
-- [x] 模板自动加载信息：角色、Logo、规则摘要、固定素材。
-- [x] 本次需求输入区：用户只描述本次视频需求。
-- [x] 快速调节需求：更科技、更快、更品牌等可选 modifier。
-- [x] Agent 生成方案区：A/B/C/D 四个方案。
-- [x] Prompt 预览区：可编辑，可回退到 Agent 原始 Prompt。
-- [x] Seedance 生成参数和生成按钮。
-- [x] 最近任务列表。
+- [ ] 顶部工作台区：进入画布模式、查看我的项目、保存到/当前项目。
+- [ ] 当前模板区：模板名称、版本、状态、切换和管理员编辑入口。
+- [ ] 模板自动加载信息：角色、Logo、规则摘要、固定素材、15s 分段摘要。
+- [ ] 本次需求输入区：用户只描述本次视频需求。
+- [ ] 快速调节需求：更科技、更快、更品牌等可选 modifier。
+- [ ] 当前图集/参考素材区：视频截图/固定素材/添加参考图。
+- [ ] Agent 生成方案区：A/B/C/D 四个方案，含缩略图、时长、操作按钮和选中态。
+- [ ] Prompt 预览区：可编辑，可放大，可回退到 Agent 原始 Prompt。
+- [ ] Seedance 生成参数和生成按钮。
+- [ ] 最近任务列表，每条必须有截图/缩略图。
 
 **最小核心数据结构：**
 
@@ -269,7 +446,7 @@ type SelectionState = {
 
 **任务：**
 
-- [x] 确认第一版只做 3 层：生成主页面、模板编辑抽屉、执行链路查看页。
+- [x] 确认第一版只做 3 层：独立模板生成主页面、模板编辑抽屉、执行链路查看页。
 - [x] 确认模板字段和 Agent 输出字段只满足 PRD 7.1-7.3，不引入 AST/复杂 DSL。
 - [x] 开始实现前再次执行 `git status --short --branch`，保护现有未提交改动。
 - [x] 如需数据库变更，先备份 SQLite，再设计最小 Prisma schema。
@@ -312,43 +489,50 @@ type SelectionState = {
 - [x] Agent run API 能读到完整执行链路。
 - [x] 不读取、不打印 `.env`、token、cookie 或 Provider 密钥。
 
-### Batch 2：生成主页面信息架构重构
+### Batch 2：独立模板生成主页面信息架构重构
 
-目标：把 `/generate` 收敛为“模板驱动的视频生成工作台”。
+目标：新增独立模板生成页，把已混入 `/generate` 的模板工作台能力迁出；普通 `/generate` 保持常规生成链路。
 
 **预计主要文件：**
 
+- 新增 `src/app/template-generate/page.tsx`
 - `src/app/generate/page.tsx`
 - `src/components/GenerationComposer.tsx`
 - `src/components/PromptEditor.tsx`
 - 新增 `src/components/templates/TemplateHeader.tsx`
 - 新增 `src/components/templates/TemplateLoadedSummary.tsx`
+- 新增 `src/components/templates/TemplateGenerateWorkbench.tsx`
 - 新增 `src/components/agent/AgentPlanCards.tsx`
 - 新增 `src/components/agent/PromptPreviewPanel.tsx`
 - `src/app/globals.css`
 
 **任务：**
 
-- [x] 顶部增加当前模板区：模板名、版本、状态、切换入口、管理员编辑入口。
-- [x] 增加模板自动加载信息：角色、Logo、规则摘要、固定素材缩略图。
-- [x] 将“本次需求输入”作为主输入，不再让用户先面对复杂 Prompt。
-- [x] 增加快捷微调：更科技、更快节奏、更品牌、更产品、更情绪化等可配置选项。
-- [x] 增加 Agent 生成方案区：A/B/C/D 四个方案卡，展示方向、结构、适用场景、风险提示。
-- [x] 增加 Prompt 预览区：用户选中方案后生成，可编辑，可恢复到 Agent 版本。
-- [x] Seedance 参数区保留现有 ratio/duration/resolution/seed/audio/watermark 等能力，但视觉层级降低。
-- [x] 最近任务保留，并显示模板、方案、视频卡和缩略图。
-- [x] 移动端保持单列流程：模板 -> 需求 -> 方案 -> Prompt -> 参数 -> 生成。
+- [ ] 新增 `/template-generate` 路由和页面壳，视觉首屏以模板生成工作台为唯一主体。
+- [ ] 顶部增加工作台操作区：进入画布模式、查看我的项目、保存到/当前项目。
+- [ ] 增加当前模板区：模板名、版本、状态、切换入口、管理员编辑入口、查看链路入口。
+- [ ] 增加模板自动加载信息：角色、Logo、规则摘要、固定素材缩略图、15s 分段策略。
+- [ ] 将“本次需求输入”作为主输入，不再让用户先面对复杂 Prompt。
+- [ ] 增加快捷微调：更科技、更快节奏、更品牌、更产品、更情绪化等可配置选项。
+- [ ] 增加当前图集/固定素材区，使用视频内截图或已有素材缩略图作为第一视觉入口。
+- [ ] 增加 Agent 生成方案区：A/B/C/D 四个方案卡，展示缩略图、时长、方向、结构、适用场景和风险提示。
+- [ ] 为每个方案补齐 `查看 Prompt`、`继续修改`、`生成此方案` 操作，并有选中态和推荐态。
+- [ ] 增加 Prompt 预览区：用户选中方案后生成，可编辑、可放大、可恢复到 Agent 版本。
+- [ ] Seedance 参数区保留 ratio/duration/resolution/seed/audio/watermark 等能力，但视觉层级降低。
+- [ ] 最近任务保留，并显示模板、方案、视频卡、缩略图、日期、成本和状态。
+- [ ] 移动端保持单列流程：模板 -> 需求 -> 素材 -> 方案 -> Prompt -> 参数 -> 生成 -> 最近任务。
+- [ ] 清理普通 `/generate` 中的模板工作台级 UI，只保留普通生成所需入口。
 
 **验收：**
 
-- [x] 普通用户能不写专业 Prompt 完成一次从模板到生成提交前的完整操作。
-- [x] 未选择方案时不能误提交空 Prompt。
-- [x] 现有项目/视频卡、参考图、图集、最近任务和复用草稿不退化。
-- [x] `/generate` 移动端无横向溢出，关键按钮不被遮挡。
+- [ ] 普通用户在 `/template-generate` 能不写专业 Prompt 完成一次从模板到生成提交前的完整操作。
+- [ ] 未选择方案时不能误提交空 Prompt。
+- [ ] 普通 `/generate` 的项目/视频卡、参考图、图集、最近任务和复用草稿不退化。
+- [ ] `/template-generate` 和 `/generate` 移动端均无横向溢出，关键按钮不被遮挡。
 
 ### Batch 3：模板编辑抽屉（管理员）
 
-目标：管理员在生成页直接维护模板，不跳转到复杂后台。
+目标：管理员在独立模板生成页直接维护模板，不跳转到复杂后台，不绑定普通 `/generate`。
 
 **预计主要文件：**
 
@@ -356,25 +540,27 @@ type SelectionState = {
 - 新增 `src/components/templates/TemplateModuleBindingEditor.tsx`
 - 新增 `src/components/templates/TemplateRuleEditor.tsx`
 - 新增 `src/components/templates/TemplateAssetBinder.tsx`
-- `src/app/generate/page.tsx`
+- `src/app/template-generate/page.tsx`
 - `src/app/api/templates/[id]/route.ts`
 - `src/app/globals.css`
 
 **任务：**
 
-- [x] 抽屉支持基础信息：名称、描述、状态、版本。
-- [x] 抽屉支持模块绑定：Character、Logo、Style、Camera、Rules。
-- [x] 抽屉支持固定素材：角色参考图、Logo 资源、风格参考图。
-- [x] 抽屉支持专属提示词：Character Prompt、Logo Prompt、Style Prompt、Global Prompt。
-- [x] 抽屉支持规则编辑：MUST、FORBID、SUGGEST、优先级、排序、启停。
-- [x] 抽屉支持 Temporal 简化策略：分段 ON/OFF、默认 15s、是否启用帧传递。
-- [x] 抽屉保存前做字段校验，保存后刷新当前模板摘要。
+- [ ] 抽屉支持基础信息：名称、描述、状态、版本。
+- [ ] 抽屉顶部支持 `模块 / 规则 / 资产` 标签页。
+- [ ] 抽屉支持模块绑定：Character、Logo、Style、Camera、Rules。
+- [ ] 抽屉支持固定素材：角色参考图、Logo 资源、风格参考图，并展示缩略图。
+- [ ] 抽屉支持专属提示词：Character Prompt、Logo Prompt、Style Prompt、Global Prompt。
+- [ ] 抽屉支持规则编辑：MUST、FORBID、SUGGEST、优先级、排序、启停、编辑、删除。
+- [ ] 抽屉支持 Temporal 简化策略：分段 ON/OFF、默认 15s、是否启用帧传递。
+- [ ] 抽屉底部支持查看变更记录、保存为新版本、取消。
+- [ ] 抽屉保存前做字段校验，保存后刷新当前模板摘要。
 
 **验收：**
 
-- [x] 非管理员看不到编辑入口。
-- [x] 管理员修改模板后，生成主页面模板摘要立即反映最新配置。
-- [x] 关闭抽屉不丢未保存改动，离开前有确认。
+- [ ] 非管理员看不到编辑入口。
+- [ ] 管理员修改模板后，独立模板生成页模板摘要立即反映最新配置。
+- [ ] 关闭抽屉不丢未保存改动，离开前有确认。
 
 ### Batch 4：Agent 方案生成与 Prompt 合成
 
@@ -407,32 +593,38 @@ type SelectionState = {
 - [x] Prompt 预览可编辑，编辑后最终提交使用用户编辑版本。
 - [x] 不触发真实付费生成的 dry-run/smoke 可验证方案生成链路。
 
-### Batch 5：执行链路查看页（管理员调试）
+### Batch 5：执行链路查看页重构（管理员调试）
 
 目标：让管理员能看清 Agent 如何从模板和需求生成最终结果。
 
 **预计主要文件：**
 
-- 新增 `src/app/admin/agent-runs/page.tsx`
-- 新增 `src/app/admin/agent-runs/[id]/page.tsx`
+- 新增或重构 `src/app/admin/agent-runs/page.tsx`
+- 新增或重构 `src/app/admin/agent-runs/[id]/page.tsx`
 - 新增 `src/components/agent/AgentRunTimeline.tsx`
 - 新增 `src/components/agent/AgentRunStepInspector.tsx`
+- 新增 `src/components/agent/AgentRunChainCards.tsx`
+- 新增 `src/components/agent/AgentRunRuleHits.tsx`
+- 新增 `src/components/agent/AgentRunIOCompare.tsx`
 - `src/app/api/agent/runs/[id]/route.ts`
 - `src/app/globals.css`
 
 **任务：**
 
-- [x] 列表页展示最近 Agent runs：模板、用户、视频卡、状态、选中方案、任务 ID。
-- [x] 详情页按流程展示：Intent 解析 -> 模板加载 -> 模块组合 -> 规则计算 -> Prompt 生成 -> 方案生成 -> Prompt 最终输出 -> Seedance 执行 -> Memory 记录。
-- [x] 每一步展示输入/输出、命中规则、使用模块、Prompt diff。
-- [x] 敏感字段默认脱敏，不展示 token、cookie、Provider 密钥。
-- [x] 从最近任务或任务详情能跳到对应执行链路。
+- [ ] 列表页展示最近 Agent runs：模板、用户、视频卡、状态、选中方案、任务 ID。
+- [ ] 详情页顶部展示项目、模板、分段、Trace ID、复制、导出和自动刷新。
+- [ ] 详情页用横向链路卡展示 9 步：Intent -> Template Load -> Module Composer -> Rule Engine -> Prompt Compiler -> Plan Generator -> Validator -> Seedance Execution -> Memory Record。
+- [ ] 下方执行时间线展示每一步状态、耗时、输入摘要、输出摘要和错误信息。
+- [ ] 规则命中面板展示 MUST/FORBID/SUGGEST、优先级、来源模块和启停状态。
+- [ ] 输入/输出对比面板展示用户需求、模板上下文、Agent Prompt、最终 Prompt、Seedance payload 摘要。
+- [ ] 敏感字段默认脱敏，不展示 token、cookie、Provider 密钥。
+- [ ] 从模板生成页最近任务、任务详情或任务列表能跳到对应执行链路。
 
 **验收：**
 
-- [x] 管理员能追溯一次生成为什么得到这个 Prompt。
-- [x] 普通用户无法访问执行链路页和 API。
-- [x] 执行链路缺失时页面给出可理解空状态。
+- [ ] 管理员能追溯一次生成为什么得到这个 Prompt。
+- [ ] 普通用户无法访问执行链路页和 API。
+- [ ] 执行链路缺失时页面给出可理解空状态。
 
 ### Batch 6：Memory 轻量闭环
 
@@ -468,17 +660,19 @@ type SelectionState = {
 - `src/lib/auth/*`
 - `src/app/api/templates/*`
 - `src/app/api/agent/*`
+- `src/app/template-generate/page.tsx`
 - `src/app/generate/page.tsx`
 - `tasks/lessons.md`
 - `/Volumes/Data/Projects/project-version-registry.md`
 
 **任务：**
 
-- [x] 普通用户只能使用 active 模板、输入需求、选择方案、生成视频。
-- [x] 管理员才能编辑模板、调整规则、查看执行链路。
-- [x] 所有新增 API 做服务端权限校验，不能只靠前端隐藏按钮。
-- [x] 验证命令：`npx prisma validate`、`npm run db:generate`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
-- [ ] UI 验证：桌面和移动端 `/generate`，模板抽屉，方案卡，Prompt 预览，最近任务。
+- [ ] 普通用户只能使用 active 模板、输入需求、选择方案、生成视频。
+- [ ] 管理员才能编辑模板、调整规则、查看执行链路。
+- [ ] 所有新增 API 做服务端权限校验，不能只靠前端隐藏按钮。
+- [ ] 验证命令：`npx prisma validate`、`npm run db:generate`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [ ] UI 验证：桌面和移动端 `/template-generate`，模板抽屉，方案卡，Prompt 预览，最近任务。
+- [ ] 回归验证：桌面和移动端 `/generate` 仍是普通生成页，项目、视频卡、素材、Prompt、参数、最近任务不退化。
 - [ ] 线上闭环：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，再从公网验证页面、API 和静态资源。（用户要求先忽略部署。）
 - [ ] 形成聚焦提交、rollback tag、推送远端，并登记版本。
 
@@ -491,30 +685,33 @@ type SelectionState = {
 
 **Git Plan：**
 
-- 当前分支：`codex/seedance-template-agent-workbench`，已从 `codex/video-card-p0-closure` 切出作为本轮独立任务分支。
+- 当前分支：待执行前重新确认；当前工作区已有其他任务改动，落地时优先新建独立分支或 worktree，避免混入 `codex/smoke-project-merge` 的无关变更。
 - 提交分组建议：
   - 提交 1：schema、模板/Agent run/Memory 底座和只读 smoke。
-  - 提交 2：生成主页面模板信息架构和方案区。
+  - 提交 2：独立 `/template-generate` 主页面模板信息架构和方案区。
   - 提交 3：模板编辑抽屉和管理员权限。
   - 提交 4：Agent 方案生成、Prompt 合成和任务快照关联。
   - 提交 5：执行链路查看页和 Memory 轻量闭环。
-  - 提交 6：验证修复、线上闭环、经验记录和版本登记。
-- 回滚点建议：`rollback/2026-06-14-seedance-template-agent-workbench`。
+  - 提交 6：普通 `/generate` 清理和回归。
+  - 提交 7：验证修复、线上闭环、经验记录和版本登记。
+- 回滚点建议：`rollback/2026-06-14-template-generate-independent-workbench`。
 
 ### HARD-GATE
 
-- 当前只完成需求规划到 `tasks/todo.md`，不改业务代码。
-- 进入 Batch 1 前需要用户明确确认“开始落地 / 执行 / 开干”。
-- 如果用户只想先做前端原型，则改为先执行 Batch 2 的静态 UI，暂不改 Prisma schema 和真实 API。
+- 当前只完成截图对照后的重规划到 `tasks/todo.md`，不改业务代码。
+- 进入独立模板生成页落地前需要用户明确确认“开始落地 / 执行 / 开干”。
+- 如果用户只想先做前端原型，则先执行 Batch 2 的静态 UI 和路由拆分，暂不改 Prisma schema 和真实 API。
 
-### Review - 2026-06-14 本地实现与验证
+### Review - 2026-06-14 历史候选实现与验证（不代表独立页完成）
+
+- 重要纠偏：以下记录只说明曾在 `/generate` 内验证过模板工作台候选能力；按 2026-06-14 截图对照和用户确认，最终目标已改为独立模板生成页，不能把这些 `[x]` 当作新路线完成状态。
 
 - 已实现 Batch 1：新增 `GenerationTemplate`、`TemplateAsset`、`TemplateRule`、`TemplatePromptBlock`、`AgentRun`、`AgentRunStep`、`TemplateMemory`，并给 `VideoTask` 增加 `template_id`、`agent_run_id`、`selected_agent_plan_key`、Agent Prompt、最终 Prompt 和用户编辑标记。
 - 已实现 Batch 1：新增 `/api/templates`、`/api/templates/:id`、`/api/agent/template-plans`、`/api/agent/runs/:id`，并增加默认 active 模板迁移数据。
-- 已实现 Batch 2：`/generate` 中新增模板区、模板摘要、本次需求、快捷 modifier、A/B/C/D 方案卡、Prompt 预览和恢复 Agent 版本；原项目/视频卡、参考图、图集、Prompt、Seedance 参数和最近任务保留。
-- 已实现 Batch 3：管理员可从生成页打开右侧模板编辑抽屉，编辑基础信息、模块绑定、固定素材、提示词、规则和 Temporal；关闭抽屉前会确认未保存改动。
+- 历史候选实现 Batch 2：`/generate` 中曾新增模板区、模板摘要、本次需求、快捷 modifier、A/B/C/D 方案卡、Prompt 预览和恢复 Agent 版本；这些能力后续只能作为迁出到独立页的参考。
+- 历史候选实现 Batch 3：管理员曾可从生成页打开右侧模板编辑抽屉，编辑基础信息、模块绑定、固定素材、提示词、规则和 Temporal；后续需要迁到独立模板生成页并按截图重构为 `模块 / 规则 / 资产` 结构。
 - 已实现 Batch 4：Agent 方案生成使用确定性本地逻辑，固定输出 4 个差异化方案；选择方案后写入 Prompt，用户编辑会记录 `prompt_user_edited=true`。
-- 已实现 Batch 5：新增 `/admin/agent-runs` 和 `/admin/agent-runs/:id`，管理员可查看执行链路列表、步骤输入/输出、Prompt 快照和 Memory；任务详情高级信息可深链到对应 Agent 链路。
+- 历史候选实现 Batch 5：新增过 `/admin/agent-runs` 和 `/admin/agent-runs/:id`，管理员可查看执行链路列表、步骤输入/输出、Prompt 快照和 Memory；后续需要按截图补齐 9 步链路卡、规则命中和输入输出对比。
 - 已实现 Batch 6：方案选择、Seedance 提交、Provider 失败都会写入 `TemplateMemory`；后续同模板无 modifier 生成时，会优先参考当前用户历史正向方案选择。
 - 已验证：`npx prisma validate`、`npm run db:generate`、`npx tsc --noEmit --pretty false`、局部 `npm run lint`、`npm run build`、`git diff --check`、`npx impeccable detect` 通过。
 - 已验证：本地 DB 先备份为 `prisma/dev.db.backup-20260614112714-template-agent`；`prisma migrate deploy` 被历史迁移状态阻塞，未强行修复；`prisma db push` 提示会删除旧字段 `VideoCard.ratio_locked`，已拒绝；最终仅手动应用本次新增迁移 SQL，不触碰历史字段。
