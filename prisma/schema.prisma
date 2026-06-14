@@ -66,8 +66,14 @@ model VideoTask {
   project_id      String?
   video_card_id   String?
   video_branch_id String?
+  template_id     String?
+  agent_run_id    String?
   visibility      String  @default("project") // private | project | selected | public
   version_role    String  @default("normal") // normal | candidate | current_best | final | discarded
+  selected_agent_plan_key String?
+  agent_prompt_snapshot   String?
+  final_prompt_snapshot   String?
+  prompt_user_edited      Boolean @default(false)
 
   // 产出留存与用户删除（管理员仍可审计）
   retention_status String    @default("active") // active | user_deleted | admin_hidden | retained
@@ -115,6 +121,7 @@ model VideoTask {
   project                Project?             @relation(fields: [project_id], references: [id])
   video_card             VideoCard?           @relation("VideoCardTasks", fields: [video_card_id], references: [id], onDelete: SetNull)
   video_branch           VideoBranch?         @relation(fields: [video_branch_id], references: [id], onDelete: SetNull)
+  generation_template   GenerationTemplate?  @relation(fields: [template_id], references: [id], onDelete: SetNull)
   current_best_for_cards VideoCard[]          @relation("VideoCardCurrentBest")
   final_for_cards        VideoCard[]          @relation("VideoCardFinal")
   provider_api_requests  ProviderApiRequest[]
@@ -133,6 +140,8 @@ model VideoTask {
   @@index([project_id])
   @@index([video_card_id])
   @@index([video_branch_id])
+  @@index([template_id])
+  @@index([agent_run_id])
   @@index([version_role])
   @@index([source_type])
   @@index([source_request_id])
@@ -224,6 +233,160 @@ model PlatformSetting {
   updated_at DateTime @updatedAt
 
   @@index([key])
+}
+
+model GenerationTemplate {
+  id                   String   @id @default(cuid())
+  template_key         String   @unique
+  name                 String
+  description          String?
+  status               String   @default("draft") // draft | active | archived
+  version              String   @default("v1")
+  module_bindings_json String   @default("{}")
+  temporal_json        String   @default("{\"enabled\":true,\"segment\":15,\"handoff\":false}")
+  default_ratio        String?
+  default_duration     Int?
+  default_resolution   String?
+  created_by           String
+  updated_by           String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  assets    TemplateAsset[]
+  rules     TemplateRule[]
+  prompts   TemplatePromptBlock[]
+  agentRuns AgentRun[]
+  memories  TemplateMemory[]
+  tasks     VideoTask[]
+
+  @@index([status])
+  @@index([created_by])
+  @@index([updated_at])
+}
+
+model TemplateAsset {
+  id                 String   @id @default(cuid())
+  template_id        String
+  asset_type         String // character | logo | style | other
+  label              String
+  url                String?
+  thumbnail_url      String?
+  reference_image_id String?
+  sort_order         Int      @default(0)
+  status             String   @default("active") // active | archived
+  metadata_json      String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([asset_type])
+  @@index([status])
+}
+
+model TemplateRule {
+  id          String   @id @default(cuid())
+  template_id String
+  rule_type   String // must | forbid | suggest
+  content     String
+  priority    Int      @default(50)
+  sort_order  Int      @default(0)
+  status      String   @default("active") // active | disabled
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([rule_type])
+  @@index([status])
+}
+
+model TemplatePromptBlock {
+  id          String   @id @default(cuid())
+  template_id String
+  block_type  String // character | logo | style | global
+  content     String
+  sort_order  Int      @default(0)
+  status      String   @default("active") // active | disabled
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([block_type])
+  @@index([status])
+}
+
+model AgentRun {
+  id                    String    @id @default(cuid())
+  template_id           String
+  user_id               String
+  video_task_id         String?
+  video_card_id         String?
+  status                String    @default("draft") // draft | planned | submitted | completed | failed
+  user_input_json       String
+  modifiers_json        String    @default("[]")
+  plans_json            String    @default("[]")
+  selected_plan_key     String?
+  agent_prompt_snapshot String?
+  final_prompt_snapshot String?
+  user_edited           Boolean   @default(false)
+  error_message         String?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+  completed_at          DateTime?
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  steps    AgentRunStep[]
+
+  @@index([template_id])
+  @@index([user_id])
+  @@index([video_task_id])
+  @@index([video_card_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model AgentRunStep {
+  id           String   @id @default(cuid())
+  agent_run_id String
+  step_key     String
+  title        String
+  input_json   String?
+  output_json  String?
+  sort_order   Int      @default(0)
+  created_at   DateTime @default(now())
+
+  agentRun AgentRun @relation(fields: [agent_run_id], references: [id], onDelete: Cascade)
+
+  @@index([agent_run_id])
+  @@index([step_key])
+  @@index([sort_order])
+}
+
+model TemplateMemory {
+  id            String   @id @default(cuid())
+  template_id   String
+  user_id       String?
+  agent_run_id  String?
+  video_task_id String?
+  memory_type   String // plan_selected | prompt_edited | task_result | note
+  signal        String // positive | negative | neutral
+  summary       String
+  metadata_json String?
+  created_at    DateTime @default(now())
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([user_id])
+  @@index([agent_run_id])
+  @@index([video_task_id])
+  @@index([memory_type])
+  @@index([created_at])
 }
 
 model UserPreference {

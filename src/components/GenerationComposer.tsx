@@ -23,6 +23,9 @@ import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
+import type { SerializedGenerationTemplate } from '@/lib/templates/workbench';
+import type { AgentPlan } from '@/lib/agent-plans/template-plans';
+import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
@@ -30,6 +33,7 @@ const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
 const MAX_REFS = 9;
 const MAX_PROMPT_CHARS = 2000;
+const TEMPLATE_MODIFIERS = ['更科技', '更快节奏', '更品牌', '更产品', '更情绪化', '更克制'];
 
 interface PolledTask {
   id: string;
@@ -136,6 +140,12 @@ interface Props {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds: string[];
+    templateId: string | null;
+    agentRunId: string | null;
+    selectedAgentPlanKey: string | null;
+    agentPromptSnapshot: string | null;
+    finalPromptSnapshot: string | null;
+    promptUserEdited: boolean;
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
@@ -144,6 +154,8 @@ interface Props {
   polledResult: PolledTask | null;
   isPolling: boolean;
   onReset: () => void;
+  selectedVideoCardId?: string | null;
+  canManageTemplates?: boolean;
 }
 
 export function GenerationComposer({
@@ -163,10 +175,13 @@ export function GenerationComposer({
   onReset,
   reuseDraft,
   require1080pApproval,
+  selectedVideoCardId,
+  canManageTemplates = false,
 }: Props) {
   const workspace = useWorkspace();
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
+  const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [showUploadedImagePicker, setShowUploadedImagePicker] = useState(false);
@@ -174,6 +189,22 @@ export function GenerationComposer({
   const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
   const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
   const [mentionNotice, setMentionNotice] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<SerializedGenerationTemplate[]>([]);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [demandText, setDemandText] = useState('');
+  const [selectedModifiers, setSelectedModifiers] = useState<string[]>(['更科技']);
+  const [agentPlans, setAgentPlans] = useState<AgentPlan[]>([]);
+  const [selectedPlanKey, setSelectedPlanKey] = useState<string | null>(null);
+  const [agentRunId, setAgentRunId] = useState<string | null>(null);
+  const [agentPromptSnapshot, setAgentPromptSnapshot] = useState<string | null>(null);
+  const [promptUserEdited, setPromptUserEdited] = useState(false);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
+  const [templateSaveBusy, setTemplateSaveBusy] = useState(false);
+  const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
   const pendingMentionRequestRef = React.useRef<{
     source: 'history' | 'album';
     resolve: (insertText: string | null) => void;
@@ -193,6 +224,9 @@ export function GenerationComposer({
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
   const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
+  const selectedTemplate = useMemo(() => {
+    return templates.find((template) => template.id === selectedTemplateId) || templates[0] || null;
+  }, [selectedTemplateId, templates]);
 
   // ============================================================================
   // Validation
@@ -252,6 +286,14 @@ export function GenerationComposer({
   const estimatedPoints = useMemo(() => {
     return calculateEstimatedCostClient(resolution, duration);
   }, [resolution, duration]);
+
+  const activeRules = useMemo(() => {
+    return selectedTemplate?.rules.filter((rule) => rule.status === 'active') || [];
+  }, [selectedTemplate]);
+
+  const templateAssets = useMemo(() => {
+    return selectedTemplate?.assets.filter((asset) => asset.status === 'active') || [];
+  }, [selectedTemplate]);
 
   // 已按即梦 @图片N 规则引用的图片序号
   const usedRefs = useMemo(() => {
@@ -337,9 +379,41 @@ export function GenerationComposer({
     }
   }, []);
 
+  const loadTemplates = useCallback(async (preferredTemplateId?: string | null) => {
+    setTemplateLoading(true);
+    setTemplateError(null);
+    try {
+      const res = await fetch('/api/templates');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '模板读取失败');
+      const items = (data.templates || []) as SerializedGenerationTemplate[];
+      setTemplates(items);
+      setSelectedTemplateId((current) => preferredTemplateId || current || items[0]?.id || null);
+      return items;
+    } catch (error) {
+      setTemplateError(error instanceof Error ? error.message : '模板读取失败');
+      return [];
+    } finally {
+      setTemplateLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshReferenceAlbums();
   }, [refreshReferenceAlbums]);
+
+  useEffect(() => {
+    void loadTemplates();
+  }, [loadTemplates]);
+
+  useEffect(() => {
+    if (!selectedTemplate || reuseDraft) return;
+    if (appliedTemplateDefaultsRef.current === selectedTemplate.id) return;
+    appliedTemplateDefaultsRef.current = selectedTemplate.id;
+    if (selectedTemplate.defaults.ratio) setRatio(selectedTemplate.defaults.ratio as VideoRatio);
+    if (selectedTemplate.defaults.duration) setDuration(selectedTemplate.defaults.duration as VideoDuration);
+    if (selectedTemplate.defaults.resolution) setResolution(selectedTemplate.defaults.resolution as VideoResolution);
+  }, [reuseDraft, selectedTemplate]);
 
   useEffect(() => {
     if (!mentionNotice) return;
@@ -425,6 +499,12 @@ export function GenerationComposer({
       referenceImageIds: workspace.assets
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
+      templateId: selectedTemplate?.id || null,
+      agentRunId,
+      selectedAgentPlanKey: selectedPlanKey,
+      agentPromptSnapshot,
+      finalPromptSnapshot: prompt,
+      promptUserEdited,
     });
   }, [
     submitBlocker,
@@ -442,7 +522,97 @@ export function GenerationComposer({
     need1080pApproval,
     resolutionApprovalConfirmed,
     workspace.assets,
+    selectedTemplate?.id,
+    agentRunId,
+    selectedPlanKey,
+    agentPromptSnapshot,
+    promptUserEdited,
   ]);
+
+  const handlePromptChange = useCallback((nextPrompt: string) => {
+    setPrompt(nextPrompt);
+    if (agentPromptSnapshot !== null && nextPrompt !== agentPromptSnapshot) {
+      setPromptUserEdited(true);
+    }
+  }, [agentPromptSnapshot]);
+
+  const toggleModifier = useCallback((modifier: string) => {
+    setSelectedModifiers((current) => {
+      return current.includes(modifier)
+        ? current.filter((item) => item !== modifier)
+        : [...current, modifier];
+    });
+  }, []);
+
+  const handleGeneratePlans = useCallback(async () => {
+    if (!selectedTemplate) {
+      setAgentError('请先选择模板');
+      return;
+    }
+    if (!demandText.trim()) {
+      setAgentError('请填写本次视频需求');
+      return;
+    }
+    setAgentBusy(true);
+    setAgentError(null);
+    try {
+      const res = await fetch('/api/agent/template-plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_id: selectedTemplate.id,
+          video_card_id: selectedVideoCardId || null,
+          input: {
+            text: demandText.trim(),
+            modifiers: selectedModifiers,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '方案生成失败');
+      const plans = Array.isArray(data.plans) ? data.plans as AgentPlan[] : [];
+      setAgentPlans(plans);
+      setAgentRunId(data.agent_run_id || null);
+      const nextPlanKey = data.recommended_plan_key || plans[0]?.key || null;
+      setSelectedPlanKey(nextPlanKey);
+      const nextPrompt = plans.find((plan) => plan.key === nextPlanKey)?.prompt || data.prompt || '';
+      setAgentPromptSnapshot(nextPrompt);
+      setPromptUserEdited(false);
+      setPrompt(nextPrompt);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : '方案生成失败');
+    } finally {
+      setAgentBusy(false);
+    }
+  }, [demandText, selectedModifiers, selectedTemplate, selectedVideoCardId]);
+
+  const handleSelectPlan = useCallback((plan: AgentPlan) => {
+    setSelectedPlanKey(plan.key);
+    setAgentPromptSnapshot(plan.prompt);
+    setPromptUserEdited(false);
+    setPrompt(plan.prompt);
+  }, []);
+
+  const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
+    if (!selectedTemplate) return;
+    setTemplateSaveBusy(true);
+    setTemplateSaveError(null);
+    try {
+      const res = await fetch(`/api/templates/${selectedTemplate.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || '模板保存失败');
+      await loadTemplates(data.template?.id || selectedTemplate.id);
+      setTemplateDrawerOpen(false);
+    } catch (error) {
+      setTemplateSaveError(error instanceof Error ? error.message : '模板保存失败');
+    } finally {
+      setTemplateSaveBusy(false);
+    }
+  }, [loadTemplates, selectedTemplate]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
     if (workspace.assets.length > 0) {
@@ -639,6 +809,155 @@ export function GenerationComposer({
   return (
     <>
       <div className="generation-composer">
+        <section className="template-workbench" aria-label="模板驱动生成">
+          <div className="template-workbench-header">
+            <div>
+              <span className="template-workbench-kicker">Template</span>
+              <h2>{selectedTemplate?.name || '选择模板'}</h2>
+              <p>{selectedTemplate?.description || '模板决定角色、Logo、风格、规则和分段策略。'}</p>
+            </div>
+            <div className="template-workbench-controls">
+              <select
+                value={selectedTemplate?.id || ''}
+                onChange={(event) => {
+                  setSelectedTemplateId(event.currentTarget.value || null);
+                  setAgentPlans([]);
+                  setSelectedPlanKey(null);
+                  setAgentRunId(null);
+                  setAgentPromptSnapshot(null);
+                }}
+                disabled={templateLoading || templates.length === 0}
+                aria-label="选择生成模板"
+              >
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name} {template.version}
+                  </option>
+                ))}
+              </select>
+              {canManageTemplates && (
+                <div className="template-workbench-admin-actions">
+                  <button
+                    type="button"
+                    className="template-workbench-admin-chip"
+                    onClick={() => setTemplateDrawerOpen(true)}
+                    disabled={!selectedTemplate}
+                  >
+                    编辑模板
+                  </button>
+                  <a className="template-workbench-admin-link" href="/admin/agent-runs">
+                    执行链路
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {templateError && <div className="template-workbench-message is-error">{templateError}</div>}
+
+          {selectedTemplate && (
+            <div className="template-loaded-grid">
+              <div className="template-loaded-block">
+                <span>模块</span>
+                <strong>{[
+                  selectedTemplate.module_bindings.character,
+                  selectedTemplate.module_bindings.logo,
+                  selectedTemplate.module_bindings.style,
+                  selectedTemplate.module_bindings.camera,
+                ].filter(Boolean).join(' / ') || '未绑定'}</strong>
+              </div>
+              <div className="template-loaded-block">
+                <span>规则</span>
+                <strong>{activeRules.length} 条</strong>
+              </div>
+              <div className="template-loaded-block">
+                <span>分段</span>
+                <strong>{selectedTemplate.temporal.enabled ? `${selectedTemplate.temporal.segment}s` : 'OFF'}</strong>
+              </div>
+              <div className="template-loaded-block">
+                <span>素材</span>
+                <strong>{templateAssets.length} 个</strong>
+              </div>
+            </div>
+          )}
+
+          <div className="template-demand-row">
+            <label className="template-demand-field">
+              <span>本次需求</span>
+              <textarea
+                value={demandText}
+                onChange={(event) => setDemandText(event.currentTarget.value)}
+                placeholder="例如：做一个科技品牌宣传视频，突出新品发布、稳定 Logo 和快速产品动线。"
+                rows={3}
+              />
+            </label>
+            <div className="template-modifier-panel">
+              <span>快速调节</span>
+              <div className="template-modifier-list">
+                {TEMPLATE_MODIFIERS.map((modifier) => (
+                  <button
+                    key={modifier}
+                    type="button"
+                    className={selectedModifiers.includes(modifier) ? 'is-active' : ''}
+                    onClick={() => toggleModifier(modifier)}
+                  >
+                    {modifier}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="template-plan-generate"
+                onClick={handleGeneratePlans}
+                disabled={agentBusy || !selectedTemplate || !demandText.trim()}
+              >
+                {agentBusy ? '生成中...' : '生成 4 个方案'}
+              </button>
+            </div>
+          </div>
+
+          {agentError && <div className="template-workbench-message is-error">{agentError}</div>}
+
+          {agentPlans.length > 0 && (
+            <div className="template-plan-grid" aria-label="Agent 生成方案">
+              {agentPlans.map((plan) => (
+                <button
+                  key={plan.key}
+                  type="button"
+                  className={`template-plan-card ${selectedPlanKey === plan.key ? 'is-selected' : ''}`}
+                  onClick={() => handleSelectPlan(plan)}
+                >
+                  <span className="template-plan-key">{plan.key}</span>
+                  <strong>{plan.title}</strong>
+                  <small>{plan.angle}</small>
+                  <em>{plan.fit}</em>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="template-prompt-preview">
+            <div>
+              <span>Prompt 预览</span>
+              <strong>
+                {selectedPlanKey ? `方案 ${selectedPlanKey}` : agentRunId ? '已生成方案' : '等待方案'}
+                {promptUserEdited ? ' · 已编辑' : ''}
+              </strong>
+            </div>
+            {agentPromptSnapshot && prompt !== agentPromptSnapshot && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPrompt(agentPromptSnapshot);
+                  setPromptUserEdited(false);
+                }}
+              >
+                恢复 Agent 版本
+              </button>
+            )}
+          </div>
+        </section>
+
         {/* 图集工具条 */}
         <ImageSetToolbar
           collections={collections}
@@ -672,7 +991,7 @@ export function GenerationComposer({
         {/* 提示词输入 */}
         <PromptEditor
           value={prompt}
-          onChange={setPrompt}
+          onChange={handlePromptChange}
           referenceLabels={referenceLabels}
           mentionCandidates={mentionCandidates}
           onMentionSelect={handleMentionSelect}
@@ -796,6 +1115,15 @@ export function GenerationComposer({
         onClose={() => handleMentionPickerClose('history')}
         onUploadFile={workspace.uploadAssetToHistory}
         onConfirm={handleAddUploadedAssets}
+      />
+
+      <TemplateEditorDrawer
+        open={templateDrawerOpen}
+        template={selectedTemplate}
+        saving={templateSaveBusy}
+        error={templateSaveError}
+        onClose={() => setTemplateDrawerOpen(false)}
+        onSave={handleSaveTemplate}
       />
     </>
   );

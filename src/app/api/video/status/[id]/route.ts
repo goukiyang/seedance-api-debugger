@@ -32,6 +32,7 @@ export async function GET(
       include: {
         project: { select: { id: true, name: true, type: true } },
         video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
+        generation_template: { select: { id: true, name: true, template_key: true, version: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       },
@@ -69,6 +70,7 @@ export async function GET(
       include: {
         project: { select: { id: true, name: true, type: true } },
         video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
+        generation_template: { select: { id: true, name: true, template_key: true, version: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       },

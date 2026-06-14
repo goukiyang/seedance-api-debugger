@@ -49,6 +49,11 @@ interface TaskItem {
   project_id?: string | null;
   video_card_id?: string | null;
   video_card?: { id: string; title: string; objective: string | null; status: string; project_id?: string } | null;
+  template_id?: string | null;
+  agent_run_id?: string | null;
+  selected_agent_plan_key?: string | null;
+  prompt_user_edited?: boolean;
+  generation_template?: { id: string; name: string; template_key: string; version: string } | null;
   created_at: string;
 }
 
@@ -1027,6 +1032,12 @@ export default function GeneratePage() {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds?: string[];
+    templateId?: string | null;
+    agentRunId?: string | null;
+    selectedAgentPlanKey?: string | null;
+    agentPromptSnapshot?: string | null;
+    finalPromptSnapshot?: string | null;
+    promptUserEdited?: boolean;
   }) => {
     setSubmitting(true);
     setError(null);
@@ -1064,11 +1075,17 @@ export default function GeneratePage() {
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
           resolution_approval_confirmed: params.resolutionApprovalConfirmed,
-	          idempotency_key: idempotencyKey,
-	          project_id: selectedProjectId,
-	          video_card_id: selectedVideoCard.id,
-	          video_branch_id: selectedVideoBranchId || undefined,
-	          reference_image_ids: params.referenceImageIds || [],
+          idempotency_key: idempotencyKey,
+          project_id: selectedProjectId,
+          video_card_id: selectedVideoCard.id,
+          video_branch_id: selectedVideoBranchId || undefined,
+          reference_image_ids: params.referenceImageIds || [],
+          template_id: params.templateId || null,
+          agent_run_id: params.agentRunId || null,
+          selected_agent_plan_key: params.selectedAgentPlanKey || null,
+          agent_prompt_snapshot: params.agentPromptSnapshot || null,
+          final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
+          prompt_user_edited: params.promptUserEdited === true,
         }),
       });
 
@@ -1101,6 +1118,11 @@ export default function GeneratePage() {
           provider_final_amount_micros: null,
           project_id: data.project_id || selectedProjectId,
           video_card_id: data.video_card_id || selectedVideoCard.id,
+          template_id: data.template_id || null,
+          agent_run_id: data.agent_run_id || null,
+          selected_agent_plan_key: data.selected_agent_plan_key || null,
+          prompt_user_edited: params.promptUserEdited === true,
+          generation_template: null,
           video_card: {
             id: selectedVideoCard.id,
             title: selectedVideoCard.title,
@@ -1574,11 +1596,13 @@ export default function GeneratePage() {
           </div>
         )}
 
-	        <GenerationComposer
-	          collections={collections}
-	          initialSettings={generationDefaults}
-	          lockedSettings={selectedVideoCardLockedSettings}
-	          reuseDraft={reuseDraft}
+        <GenerationComposer
+          collections={collections}
+          initialSettings={generationDefaults}
+          lockedSettings={selectedVideoCardLockedSettings}
+          reuseDraft={reuseDraft}
+          selectedVideoCardId={selectedVideoCardId}
+          canManageTemplates={currentUser?.role === 'admin'}
           require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
@@ -1630,6 +1654,13 @@ export default function GeneratePage() {
                           <div className="composer-task-card-video-card">
                             {task.video_card ? task.video_card.title : '历史未归档视频卡'}
                           </div>
+                          {(task.generation_template || task.selected_agent_plan_key) && (
+                            <div className="composer-task-card-template">
+                              {task.generation_template ? `${task.generation_template.name} ${task.generation_template.version}` : '模板生成'}
+                              {task.selected_agent_plan_key ? ` · 方案 ${task.selected_agent_plan_key}` : ''}
+                              {task.prompt_user_edited ? ' · 已编辑' : ''}
+                            </div>
+                          )}
                           <div className="composer-task-card-meta">
                             {recentTaskChargeText && (
                               <span className="composer-task-card-charge" title={`实际扣除 ${recentTaskChargeText}`}>

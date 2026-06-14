@@ -62,6 +62,11 @@ interface VideoTask {
   project?: { id: string; name: string; type: string } | null;
   video_card_id: string | null;
   video_card?: { id: string; title: string; objective: string | null; status: string; project_id: string } | null;
+  template_id?: string | null;
+  generation_template?: { id: string; name: string; template_key: string; version: string; status: string } | null;
+  agent_run_id?: string | null;
+  selected_agent_plan_key?: string | null;
+  prompt_user_edited?: boolean | null;
   owner?: DisplayUser | null;
   user?: DisplayUser | null;
   submitted_user?: DisplayUser | null;
@@ -1282,6 +1287,12 @@ export default function TaskDetailPage() {
   ].filter(Boolean);
   const taskOwner = task.owner || task.submitted_user || task.user || null;
   const taskSourceText = taskSourceLabel(task);
+  const templateLabel = task.generation_template
+    ? `${task.generation_template.name} · ${task.generation_template.version}`
+    : task.template_id
+      ? shortId(task.template_id, 16)
+      : null;
+  const agentRunHref = task.agent_run_id ? `/admin/agent-runs/${task.agent_run_id}` : null;
 
   return (
     <div className="task-detail-page">
@@ -1364,6 +1375,8 @@ export default function TaskDetailPage() {
                       <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
                     ) : '历史未归档'}
                   </span>
+                  {templateLabel && <span>模板：{templateLabel}</span>}
+                  {task.selected_agent_plan_key && <span>方案：{task.selected_agent_plan_key}</span>}
                   <span>来源：{taskSourceText}</span>
                   {task.source_request_id && <span>请求：{shortId(task.source_request_id, 14)}</span>}
                 </div>
@@ -1532,6 +1545,11 @@ export default function TaskDetailPage() {
                     ) : '历史未归档'}
                   </strong>
                 </div>
+                {templateLabel && <div><span>模板</span><strong>{templateLabel}</strong></div>}
+                {task.selected_agent_plan_key && <div><span>Agent 方案</span><strong>{task.selected_agent_plan_key}</strong></div>}
+                {typeof task.prompt_user_edited === 'boolean' && (
+                  <div><span>Prompt 编辑</span><strong>{task.prompt_user_edited ? '用户改过' : '沿用方案'}</strong></div>
+                )}
                 <div><span>输入</span><strong>{inputChips.join(' · ') || '无参数记录'}</strong></div>
                 <div>
                   <span>{taskCompletedExactLabel}</span>
@@ -1742,6 +1760,14 @@ export default function TaskDetailPage() {
               <div><span>完成时间</span><strong>{formatTaskTime(task.completed_at).absolute}</strong></div>
               <div><span>视频来源</span><strong>{resultStorageText}</strong></div>
               <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
+              {templateLabel && <div><span>模板</span><strong>{templateLabel}</strong></div>}
+              {task.selected_agent_plan_key && <div><span>Agent 方案</span><strong>{task.selected_agent_plan_key}</strong></div>}
+              {agentRunHref && (
+                <div>
+                  <span>Agent 链路</span>
+                  <strong><Link className="link" href={agentRunHref}>查看链路</Link></strong>
+                </div>
+              )}
               <div>
                 <span>视频卡</span>
                 <strong>

@@ -77,11 +77,18 @@ export async function GET(request: NextRequest) {
         owner_user_id: true,
         project_id: true,
         video_card_id: true,
+        template_id: true,
+        agent_run_id: true,
+        selected_agent_plan_key: true,
+        prompt_user_edited: true,
         project: {
           select: { id: true, name: true, type: true },
         },
         video_card: {
           select: { id: true, title: true, objective: true, status: true, project_id: true },
+        },
+        generation_template: {
+          select: { id: true, name: true, template_key: true, version: true },
         },
       },
     });
