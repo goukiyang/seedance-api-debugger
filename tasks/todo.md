@@ -6,6 +6,162 @@
 
 最新验收结论：整份 V1.2 仍未完整落地。当前代码已经有视频卡 P0 归档入口、公共项目预算底座、审批记录表、审批中心页面、1080p 基础校验、新建项目“默认记账 / 预算记账”选择入口，但这些还没有形成完整业务闭环。后续执行必须以本 todo 为准，不得把“有模型/有页面/有审批记录”误判为“业务已闭环”。
 
+## 资产管理页 Todo：即梦式资产库 + 项目/用户维度 + 框选批量操作
+
+更新时间：2026-06-14
+
+闭环状态：
+
+- [x] 产品规划闭环：已明确页面定位、一级分类、权限边界、排序/分组、卡片展示、框选/多选和批量动作设计。
+- [x] 数据复用闭环：确认应复用 `VideoTask`、`Asset`、`ReferenceImage`、`Project`、`User`、`/api/video/thumbnail/[id]`、`/api/video/play/[id]`、`downloadBulkVideoZip`、`getTaskWhereForUser`、`getAdminUser`。
+- [ ] 代码实现未闭环：尚未新增 `/assets` 页面、统一资产库 API、框选选择状态、批量移动接口和批量下载入口。
+- [ ] 验证未闭环：尚未完成桌面框选、多选、管理员用户筛选、批量动作和移动端长按选择的端到端验证。
+
+目标：新增一个类似即梦资产页观感的统一资产管理页，但分类按本项目业务组织，不照搬“图片 / 视频 / 音频 / 文档”。页面既用于用户查看自己的生产资产，也用于管理员按用户审计和批量处理。
+
+### 页面入口与定位
+
+- [ ] 新增 `/assets` 页面，作为统一资产管理入口。
+- [ ] 将现有 `/videos` 从重定向 `/tasks` 改为重定向 `/assets?type=video`。
+- [ ] 页面标题使用“资产管理”或“资产库”，避免与任务列表混淆。
+- [ ] 普通用户默认进入 `生产历史 / 视频 / 按时间 / 最近生成`。
+- [ ] 管理员默认进入同样视图，但额外看到 `按用户查看` 一级分类。
+
+### 一级分类
+
+- [ ] `生产历史`：当前用户可见的生成资产，默认按日期分组。
+- [ ] `按项目`：按用户有权限访问的项目筛选资产，可选择“全部项目”或指定项目。
+- [ ] `按用户查看`：仅管理员可见，支持用户下拉菜单，默认“全部用户”。
+
+### 类型筛选
+
+- [ ] `全部`：视频产出、上传资产、参考素材的统一视图。
+- [ ] `视频`：来自 `VideoTask` 的生成结果。
+- [ ] `图片`：来自 `Asset` 的上传图片。
+- [ ] `参考素材`：来自 `ReferenceImage` / 图集的素材。
+- [ ] `已隐藏/已删除`：仅管理员可见，用于审计 `retention_status`。
+
+### 排序、分组与筛选
+
+- [ ] 排序支持：最近生成、最早生成、最近完成、项目名称、用户名称（管理员）、时长。
+- [ ] 分组支持：按时间、按项目、按用户（管理员）。
+- [ ] 筛选支持：项目、状态、比例、清晰度、关键词。
+- [ ] 关键词搜索至少覆盖：prompt、task id、provider task id、项目名、用户显示名。
+
+### 卡片展示
+
+- [ ] 网格卡片采用参考图的暗色横向卡片风格。
+- [ ] 视频卡片固定 16:9 容器，竖版视频居中显示，两侧保留深色留白。
+- [ ] 左下角显示时长，例如 `00:06`、`00:15`。
+- [ ] hover 显示播放按钮、项目名、创建时间、prompt 摘要。
+- [ ] 管理员模式 hover 额外显示用户名称。
+- [ ] 点击卡片默认打开右侧详情抽屉。
+- [ ] 详情抽屉展示播放器、prompt、模型、比例、时长、清晰度、项目、创建用户、创建/完成时间、下载、复用参数、加入图集、隐藏/恢复等操作。
+
+### 选择与框选交互
+
+- [ ] 每张卡片左上角提供复选框。
+- [ ] 点击复选框：选中 / 取消选中。
+- [ ] `Cmd/Ctrl + 点击卡片`：多选切换。
+- [ ] `Shift + 点击卡片`：从上次锚点到当前卡片做范围选择。
+- [ ] 在网格空白区域拖动鼠标：显示框选矩形，框内卡片进入选中预览。
+- [ ] 鼠标释放后提交框选结果。
+- [ ] 默认框选替换当前选择；按住 `Cmd/Ctrl` 时追加到当前选择。
+- [ ] 进入多选状态后，普通点击卡片改为切换选中，不再打开详情。
+- [ ] 双击卡片或点击卡片上的“查看”按钮仍可打开详情。
+- [ ] 移动端不做鼠标框选；长按卡片进入选择模式，点击切换选中。
+
+### 批量操作栏
+
+- [ ] 当 `selectedIds.size > 0` 时显示顶部批量操作栏。
+- [ ] 批量栏显示：已选数量、可下载数量、涉及项目数、涉及用户数（管理员）。
+- [ ] 操作按钮第一阶段支持：取消选择、下载视频、移动到项目。
+- [ ] 管理员额外支持：隐藏、恢复。
+- [ ] 第二阶段支持：加入图集、批量移除、批量改可见性。
+- [ ] 下载按钮文案显示真实可下载数量，例如 `下载视频（9/12）`。
+- [ ] 对跨项目、跨用户批量移动/隐藏增加二次确认。
+
+### 统一资产 API
+
+- [ ] 新增 `GET /api/assets/library`。
+- [ ] 查询参数：
+  - `scope=history | project | user`
+  - `type=all | video | image | reference`
+  - `project_id=`
+  - `owner_user_id=`，仅管理员
+  - `status=succeeded | running | failed | hidden`
+  - `group_by=date | project | user`
+  - `sort=created_desc | created_asc | completed_desc | project | user | duration`
+  - `cursor=`
+  - `limit=`
+- [ ] 返回统一 item id，格式为 `video_task:<taskId>`、`asset:<assetId>`、`reference_image:<referenceImageId>`。
+- [ ] 返回字段统一为：
+  - `id`
+  - `kind`
+  - `source`
+  - `taskId`
+  - `assetId`
+  - `title`
+  - `prompt`
+  - `thumbnailUrl`
+  - `previewUrl`
+  - `downloadUrl`
+  - `duration`
+  - `ratio`
+  - `status`
+  - `createdAt`
+  - `completedAt`
+  - `project`
+  - `owner`
+- [ ] 权限规则必须复用现有 `getTaskWhereForUser`、项目权限和管理员校验，不得直接暴露全量资产。
+
+### 批量动作 API
+
+- [ ] 新增 `POST /api/assets/library/bulk-download` 或复用现有批量下载客户端能力并补齐统一入参。
+- [ ] 新增 `POST /api/assets/library/bulk-move`。
+- [ ] 第二阶段新增 `POST /api/assets/library/bulk-add-to-album`。
+- [ ] 管理员第二阶段新增 `POST /api/assets/library/bulk-hide`。
+- [ ] 管理员第二阶段新增 `POST /api/assets/library/bulk-restore`。
+- [ ] 批量接口入参使用统一资产 id：`item_ids: string[]`。
+- [ ] 后端按 `video_task`、`asset`、`reference_image` 拆分并逐项做权限校验。
+
+### 前端状态设计
+
+- [ ] 定义统一选择 id 类型：
+
+```ts
+type AssetLibraryItemId =
+  | `video_task:${string}`
+  | `asset:${string}`
+  | `reference_image:${string}`;
+```
+
+- [ ] 维护选择状态：
+
+```ts
+type SelectionState = {
+  selectedIds: Set<AssetLibraryItemId>;
+  anchorId: AssetLibraryItemId | null;
+  mode: 'idle' | 'selecting';
+};
+```
+
+- [ ] 基于 `selectedIds` 计算 `selectedCount`、`downloadableCount`、`movableCount`、`projectCount`、`ownerCount`。
+- [ ] 选择状态和筛选/分页切换的关系要明确：切换一级分类、类型或用户时默认清空选择。
+
+### 第一阶段 MVP 验收
+
+- [ ] 普通用户访问 `/assets` 能看到类似参考图的暗色卡片网格。
+- [ ] 生产历史按日期分组展示已完成视频。
+- [ ] 按项目能筛选项目资产。
+- [ ] 管理员能看到 `按用户查看` 并用下拉菜单筛用户。
+- [ ] 单选、多选、`Shift` 范围选择、鼠标框选可用。
+- [ ] 批量栏能正确显示已选数量和可下载数量。
+- [ ] 批量下载视频可用，并遵守现有 `BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT`。
+- [ ] 批量移动到项目可用，并对无权限项目禁用。
+- [ ] 页面移动端可浏览，长按进入选择模式。
+- [ ] 不触碰 `.env`、密钥、Provider token 或数据库危险写入。
+
 ## Seedance 2.0 模板驱动 Agent 视频生成系统总控 Todo
 
 更新时间：2026-06-14
@@ -4298,3 +4454,18 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - 已完成公网验证：`https://sd2.youdoodesign.com/api/health` 返回 200，`/video-cards/test-nonexistent` 返回 200 页面，`/api/video-cards/test-nonexistent` 返回 401 鉴权响应而非 500，`/_next/static/MsQxqmA1MWOaeLuRk2VVy/_buildManifest.js` 返回 200。
 - 已登记版本：`/Volumes/Data/Projects/project-version-registry.md` 新增 `v0.4.0：视频卡归属闭环版`，记录分支、提交、rollback tag、部署目标、验证结果和数据库备份路径。
 - 未执行：未跑真实付费生成任务。
+
+## Review - 2026-06-14 资产管理页第一版落地
+
+- [x] 新增 `/assets` 资产管理页，支持“生产历史 / 按项目 / 按用户查看”三类视图；“按用户查看”仅管理员可见。
+- [x] 页面支持视频、图片、参考素材类型筛选，支持状态、项目、用户、时间/项目/用户分组和最近生成、最近完成、项目、用户、时长排序。
+- [x] 内容展示采用缩略图优先的深色资产网格，按时间默认分组，视频卡片显示时长、项目、创建时间和管理员用户信息。
+- [x] 新增多选能力：复选框单点、已进入选择态后的单点多选、Shift 范围选择、移动端长按选择、鼠标拖拽框选。
+- [x] 新增批量动作：已完成视频可复用既有 ZIP 批量下载能力；视频任务可批量移动到目标项目和目标视频卡。
+- [x] 新增 `GET /api/assets/library`，统一返回视频任务、上传素材和参考素材的资产列表，复用现有任务可见权限和管理员范围。
+- [x] 新增 `POST /api/assets/library/bulk-move`，复用现有项目移动权限语义，非管理员必须具备源/目标项目管理权限；移动视频任务必须指定目标视频卡。
+- [x] 导航已接入：侧边栏和顶部栏新增“资产管理”；旧 `/videos` 改为跳转 `/assets?type=video`。
+- [x] 线上目录已确认：当前 `sd2` 服务实际指向 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，本次最终代码已落在该目录并构建上线。
+- [x] 验证通过：`./node_modules/.bin/tsc --noEmit`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
+- [x] 公网验证通过：`https://sd2.youdoodesign.com/assets` 返回 200，资产页 bundle 返回 200，浏览器登录态加载出 61 张资产卡片，管理员“按用户查看”可见，单点选择和拖拽框选后批量栏可见，console 无前端错误。
+- [ ] 后续增强：把图片/参考素材批量移动到项目工作区或图集的能力单独设计；当前批量移动第一版只处理视频任务。

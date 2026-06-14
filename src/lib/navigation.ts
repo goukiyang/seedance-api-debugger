@@ -8,6 +8,7 @@ export interface NavItem {
 export const shellRoutes = [
   '/workbench',
   '/account',
+  '/assets',
   '/projects',
   '/collections',
   '/cutout',
@@ -38,6 +39,7 @@ export const userNavItems: NavItem[] = [
   { label: '生成视频', href: '/generate', prefixMatch: true },
   { label: '视频工作台', href: '/workbench', prefixMatch: true },
   { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
+  { label: '资产管理', href: '/assets', prefixMatch: true },
   { label: '我的项目', href: '/projects', prefixMatch: true },
   { label: '参考图集', href: '/collections', prefixMatch: true },
   { label: '我的任务', href: '/tasks', prefixMatch: true },
