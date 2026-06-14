@@ -135,6 +135,11 @@ interface VideoCardOption {
 type GeneratePageUser = AccountMenuUser & { id: string };
 type ProjectRemovalAction = 'delete' | 'archive';
 
+type PendingProjectRemoval = {
+  project: ProjectOption;
+  action: ProjectRemovalAction;
+};
+
 interface AuthMeResponse {
   user: GeneratePageUser | null;
 }
@@ -337,6 +342,7 @@ export default function GeneratePage() {
   const [projectName, setProjectName] = useState('');
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
+  const [pendingProjectRemoval, setPendingProjectRemoval] = useState<PendingProjectRemoval | null>(null);
   const [videoCards, setVideoCards] = useState<VideoCardOption[]>([]);
   const [selectedVideoCardId, setSelectedVideoCardId] = useState('');
   const [loadingVideoCards, setLoadingVideoCards] = useState(false);
@@ -630,7 +636,7 @@ export default function GeneratePage() {
     }
   }, [loadVideoCards, selectedProjectId, videoCardObjective, videoCardTitle]);
 
-  const handleProjectRemoval = useCallback(async (project: ProjectOption) => {
+  const handleProjectRemoval = useCallback((project: ProjectOption) => {
     const action = projectRemovalAction(project);
 
     if (project.type === 'personal' || project.type === 'system') {
@@ -641,14 +647,17 @@ export default function GeneratePage() {
       setProjectMessage({ type: 'error', text: '你没有权限管理这个项目' });
       return;
     }
-    const confirmed = window.confirm(
-      action === 'archive'
-        ? `确定归档项目「${projectDisplayName(project)}」吗？\n项目已有任务或图集，归档后历史记录仍保留。`
-        : `确定删除空项目「${projectDisplayName(project)}」吗？\n删除后不会出现在项目列表。`,
-    );
-    if (!confirmed) {
-      return;
-    }
+
+    setPendingProjectRemoval({ project, action });
+    setProjectPickerOpen(false);
+    setProjectCreateOpen(false);
+    setProjectMessage(null);
+  }, []);
+
+  const confirmProjectRemoval = useCallback(async () => {
+    if (!pendingProjectRemoval) return;
+
+    const { project, action } = pendingProjectRemoval;
 
     setProjectBusy(true);
     setProjectMessage(null);
@@ -665,6 +674,7 @@ export default function GeneratePage() {
             type: 'info',
             text: '项目已有历史内容，不能删除；请改为归档项目。',
           });
+          setPendingProjectRemoval(null);
           return;
         }
         throw new Error(data.message || data.error || '项目操作失败');
@@ -674,16 +684,18 @@ export default function GeneratePage() {
         type: 'success',
         text: action === 'archive' ? `已归档项目「${projectDisplayName(project)}」` : `已删除项目「${projectDisplayName(project)}」`,
       });
+      setPendingProjectRemoval(null);
       await loadProjects({
         preferredProjectId: project.id === selectedProjectId ? null : selectedProjectId,
         keepSelected: project.id !== selectedProjectId,
       });
     } catch (err) {
       setProjectMessage({ type: 'error', text: err instanceof Error ? err.message : '项目操作失败' });
+      setPendingProjectRemoval(null);
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, selectedProjectId]);
+  }, [loadProjects, pendingProjectRemoval, selectedProjectId]);
 
   useEffect(() => {
     if (!projectMessage) return;
@@ -1419,6 +1431,60 @@ export default function GeneratePage() {
         {projectMessage && (
           <div className={`composer-project-message ${projectMessage.type}`}>
             {projectMessage.text}
+          </div>
+        )}
+
+        {pendingProjectRemoval && (
+          <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={`${projectRemovalLabel(pendingProjectRemoval.project)}项目确认`}>
+            <div className="modal-panel project-removal-modal">
+              <div className="modal-header">
+                <div>
+                  <h2>
+                    {pendingProjectRemoval.action === 'archive' ? '归档项目' : '删除空项目'}
+                  </h2>
+                  <p>
+                    {pendingProjectRemoval.action === 'archive'
+                      ? '项目已有任务或图集，归档后历史记录仍会保留。'
+                      : '空项目删除后不会再出现在项目列表。'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setPendingProjectRemoval(null)}
+                  disabled={projectBusy}
+                  aria-label="关闭"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="project-removal-summary">
+                <strong>{projectDisplayName(pendingProjectRemoval.project)}</strong>
+                <span>{projectMetaLabel(pendingProjectRemoval.project)}</span>
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPendingProjectRemoval(null)}
+                  disabled={projectBusy}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => void confirmProjectRemoval()}
+                  disabled={projectBusy}
+                >
+                  {projectBusy
+                    ? '处理中...'
+                    : pendingProjectRemoval.action === 'archive'
+                      ? '确认归档'
+                      : '确认删除'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
