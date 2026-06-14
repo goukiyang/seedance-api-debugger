@@ -4634,3 +4634,16 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 验证通过：`./node_modules/.bin/tsc --noEmit`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
 - [x] 公网验证通过：`https://sd2.youdoodesign.com/assets` 返回 200，资产页 bundle 返回 200，浏览器登录态加载出 61 张资产卡片，管理员“按用户查看”可见，单点选择和拖拽框选后批量栏可见，console 无前端错误。
 - [ ] 后续增强：把图片/参考素材批量移动到项目工作区或图集的能力单独设计；当前批量移动第一版只处理视频任务。
+
+## Review - 2026-06-14 模板设置交互与模块用途重构
+
+- [x] 模板设置面板已从靠右窄抽屉调整为居中大面板，桌面宽度为全画幅约 2/3，移动端仍保持全屏可用。
+- [x] 模板模块结构新增 `module_usage`，支持把角色、标志、风格、镜头分别标记为“强制插入”或“仅参考”；旧模板默认按“强制插入”兼容。
+- [x] Agent Prompt 组装已区分“强制插入模块”和“参考模块”：强制项明确要求进入最终画面描述，参考项只作为风格、构图或一致性参考。
+- [x] 模板设置抽屉移除状态、素材类型、规则启停的下拉菜单，改为按钮式点击选择；模块绑定区也加入“强制插入 / 仅参考”按钮。
+- [x] 模板生成工作台移除模板下拉菜单，改为可点击模板列表；模板生成页的视频卡选择移除下拉菜单，改为可点击卡片列表。
+- [x] 模板、视频卡、快捷调节、模板编辑页签和模块用途设置已保存最后一次选择，下次进入自动恢复。
+- [x] 前端模板相关英文显示已收敛为中文：`Logo` 改为“标志”，`Template Generate` 改为“模板生成”，规则类型改为“必须 / 禁止 / 建议”，素材类型改为“角色 / 标志 / 风格 / 其他”。
+- [x] 验证通过：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
+- [x] 公网验证通过：`https://sd2.youdoodesign.com/template-generate` 页面 HTML 命中中文模板选择和视频卡选择结构；公网 CSS 命中 `template-selector-list`、`template-video-card-list`、`template-choice-row` 和 `width:66.666vw`；公网 JS 命中“强制插入”“仅参考”“模块用途”“参考图 ID”。
+- [ ] 未执行：未跑真实付费视频生成；未修改 Prisma schema。

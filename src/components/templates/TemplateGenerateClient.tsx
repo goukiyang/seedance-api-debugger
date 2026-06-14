@@ -85,6 +85,7 @@ type TaskPreviewModel = {
 };
 
 const PROJECT_STORAGE_KEY = 'template_generate_project_id';
+const VIDEO_CARD_STORAGE_KEY = 'template_generate_video_card_by_project_v1';
 const RECENT_TASK_PAGE_SIZE = 12;
 const MAX_ACTIVE_POLLING_TASKS = 12;
 
@@ -148,6 +149,24 @@ function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPr
   const hasThumbnailSource = Boolean(task.local_video_path || task.result_video_url || task.result_last_frame_url);
   if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) return { kind: 'image', src: thumbnailSrc };
   return { kind: 'empty' };
+}
+
+function readRememberedVideoCards(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(VIDEO_CARD_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberVideoCard(projectId: string, videoCardId: string) {
+  if (typeof window === 'undefined' || !projectId || !videoCardId) return;
+  window.localStorage.setItem(VIDEO_CARD_STORAGE_KEY, JSON.stringify({
+    ...readRememberedVideoCards(),
+    [projectId]: videoCardId,
+  }));
 }
 
 function TemplateTaskPreview({ task }: { task: TaskItem }) {
@@ -333,7 +352,8 @@ export function TemplateGenerateClient() {
       const list: VideoCardOption[] = data.video_cards || [];
       setVideoCards(list);
       const requestedVideoCardId = new URLSearchParams(window.location.search).get('video_card_id');
-      const preferredId = preferredVideoCardId || requestedVideoCardId || '';
+      const rememberedVideoCardId = readRememberedVideoCards()[projectId] || '';
+      const preferredId = preferredVideoCardId || requestedVideoCardId || rememberedVideoCardId || '';
       const nextCard = (preferredId ? list.find((card) => card.id === preferredId) : null)
         || list.find((card) => card.status !== 'sealed' && card.status !== 'archived')
         || list[0]
@@ -351,6 +371,11 @@ export function TemplateGenerateClient() {
   useEffect(() => {
     void loadVideoCards(selectedProjectId);
   }, [loadVideoCards, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !selectedVideoCardId) return;
+    rememberVideoCard(selectedProjectId, selectedVideoCardId);
+  }, [selectedProjectId, selectedVideoCardId]);
 
   useEffect(() => {
     if (!projectPickerOpen) return;
@@ -652,9 +677,9 @@ export function TemplateGenerateClient() {
       <main className="composer-main template-generate-main">
         <section className="template-generate-hero" aria-label="模板生成工作台">
           <div>
-            <span className="template-generate-kicker">Template Generate</span>
+            <span className="template-generate-kicker">模板生成</span>
             <h1>模板生成工作台</h1>
-            <p>模板固定角色、Logo、素材和规则，你只输入本次需求并选择方案。</p>
+            <p>模板固定角色、标志、素材和规则，你只输入本次需求并选择方案。</p>
           </div>
           <div className="template-generate-hero-actions">
             <Link href="/templates">返回模板库</Link>
@@ -751,21 +776,39 @@ export function TemplateGenerateClient() {
           </div>
 
           <div className="template-generate-video-card">
-            <label>
+            <div className="template-generate-video-card-picker">
               <span>视频卡</span>
-              <select
-                value={selectedVideoCardId}
-                onChange={(event) => setSelectedVideoCardId(event.currentTarget.value)}
-                disabled={!selectedProjectId || loadingVideoCards || videoCardBusy}
-              >
-                <option value="">{loadingVideoCards ? '正在加载视频卡...' : '选择视频卡'}</option>
-                {videoCards.map((card) => (
-                  <option key={card.id} value={card.id} disabled={card.status === 'sealed' || card.status === 'archived'}>
-                    {card.title}{card.summary ? ` · ${card.summary.task_count} 次` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <div className="template-video-card-list" role="listbox" aria-label="选择视频卡">
+                {loadingVideoCards ? (
+                  <span className="template-video-card-empty">正在加载视频卡...</span>
+                ) : videoCards.length === 0 ? (
+                  <span className="template-video-card-empty">当前项目暂无视频卡</span>
+                ) : videoCards.map((card) => {
+                  const disabled = card.status === 'sealed' || card.status === 'archived' || videoCardBusy;
+                  const selected = card.id === selectedVideoCardId;
+                  return (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className={selected ? 'is-active' : ''}
+                      onClick={() => {
+                        if (disabled) return;
+                        setSelectedVideoCardId(card.id);
+                      }}
+                      disabled={disabled}
+                      aria-selected={selected}
+                      role="option"
+                    >
+                      <strong>{card.title}</strong>
+                      <span>
+                        {card.summary ? `${card.summary.task_count} 次生成` : '暂无生成'}
+                        {disabled ? ' · 不可继续生成' : ''}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             {selectedVideoCard && (
               <Link href={`/projects/${selectedVideoCard.project_id || selectedProjectId}/video-cards/${selectedVideoCard.id}`}>查看视频卡</Link>
             )}

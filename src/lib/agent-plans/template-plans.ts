@@ -1,4 +1,9 @@
-import type { SerializedGenerationTemplate, SerializedTemplateRule } from '@/lib/templates/workbench';
+import type {
+  SerializedGenerationTemplate,
+  SerializedTemplateRule,
+  TemplateModuleKey,
+  TemplateModuleUsage,
+} from '@/lib/templates/workbench';
 
 export type TemplateUserInput = {
   text: string;
@@ -60,6 +65,13 @@ const PLAN_DIRECTIONS: Array<Pick<AgentPlan, 'key' | 'title' | 'angle' | 'fit' |
   },
 ];
 
+const MODULE_LABELS: Record<TemplateModuleKey, string> = {
+  character: '角色',
+  logo: '标志',
+  style: '风格',
+  camera: '镜头策略',
+};
+
 export function normalizeTemplateUserInput(input: unknown): TemplateUserInput {
   const object = input && typeof input === 'object' ? input as Record<string, unknown> : {};
   const text = typeof object.text === 'string' ? object.text.trim() : '';
@@ -104,27 +116,27 @@ function buildStructure(key: AgentPlan['key'], template: SerializedGenerationTem
     return [
       `场景建立：用一句视觉动作明确用户需求：${subject}`,
       '产品动作：展示核心功能或服务如何进入画面并解决问题',
-      '品牌收束：Logo 和主体稳定出现，留下明确记忆点',
+      '品牌收束：标志和主体稳定出现，留下明确记忆点',
     ];
   }
   if (key === 'C') {
     return [
       `氛围铺陈：用光影和环境建立 ${template.name} 的情绪基调`,
       `主体强化：围绕 ${subject} 做一次可感知的视觉转折`,
-      '记忆点：以品牌色、Logo 或角色动作完成收束',
+      '记忆点：以品牌色、标志或角色动作完成收束',
     ];
   }
   if (key === 'D') {
     return [
       `第一段 0-5s：建立需求和主体，主题是 ${subject}`,
-      '第二段 5-10s：展示变化过程，保持角色、Logo 和风格一致',
+      '第二段 5-10s：展示变化过程，保持角色、标志和风格一致',
       '第三段 10-15s：呈现结果，使用稳定品牌画面收尾',
     ];
   }
   return [
     `品牌信号：开场直接建立 ${template.name} 的识别`,
     `价值表达：围绕 ${subject} 展示一个清晰动作或场景`,
-    '结束画面：Logo、主体和品牌风格稳定停留',
+    '结束画面：标志、主体和品牌风格稳定停留',
   ];
 }
 
@@ -148,6 +160,9 @@ function composePrompt(
     .filter((block) => block.status === 'active')
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((block) => block.content);
+  const moduleLines = buildModuleLines(template);
+  const requiredModules = moduleLines.filter((module) => module.usage === 'required').map((module) => module.text);
+  const referenceModules = moduleLines.filter((module) => module.usage === 'reference').map((module) => module.text);
   const modifiers = input.modifiers.length ? input.modifiers.join('，') : '保持模板默认风格';
   const temporal = template.temporal.enabled
     ? `默认按 ${template.temporal.segment}s 结构组织${template.temporal.handoff ? '，启用帧传递' : '，不强制帧传递'}。`
@@ -162,11 +177,13 @@ function composePrompt(
     `节奏：${plan.rhythm}`,
     `分段策略：${temporal}`,
     `结构：${plan.structure.join('；')}`,
+    requiredModules.length ? `强制插入模块：${requiredModules.join('；')}。这些内容必须明确进入最终画面描述。` : '',
+    referenceModules.length ? `参考模块：${referenceModules.join('；')}。这些内容只作为风格、构图或一致性参考，不必逐字写入画面。` : '',
     promptBlocks.length ? `模板提示词：${promptBlocks.join('；')}` : '',
     must.length ? `必须：${must.join('；')}` : '',
     suggest.length ? `建议：${suggest.join('；')}` : '',
     forbid.length ? `禁止：${forbid.join('；')}` : '',
-    '输出为连续视频画面描述，保持主体、Logo、风格和镜头逻辑一致。',
+    '输出为连续视频画面描述，保持主体、标志、风格和镜头逻辑一致。',
   ].filter(Boolean).join('\n');
 }
 
@@ -175,4 +192,18 @@ function rulesByType(rules: SerializedTemplateRule[], type: SerializedTemplateRu
     .filter((rule) => rule.rule_type === type)
     .sort((a, b) => b.priority - a.priority || a.sort_order - b.sort_order)
     .map((rule) => rule.content);
+}
+
+function buildModuleLines(template: SerializedGenerationTemplate): Array<{ usage: TemplateModuleUsage; text: string }> {
+  const moduleUsage = template.module_bindings.module_usage || {};
+  return (Object.keys(MODULE_LABELS) as TemplateModuleKey[])
+    .map((key) => {
+      const value = template.module_bindings[key];
+      if (!value) return null;
+      return {
+        usage: moduleUsage[key] === 'reference' ? 'reference' as const : 'required' as const,
+        text: `${MODULE_LABELS[key]}：${value}`,
+      };
+    })
+    .filter((item): item is { usage: TemplateModuleUsage; text: string } => Boolean(item));
 }

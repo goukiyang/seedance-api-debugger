@@ -23,7 +23,7 @@ import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
-import type { SerializedGenerationTemplate } from '@/lib/templates/workbench';
+import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
 
@@ -34,6 +34,19 @@ const DEFAULT_RESOLUTION: VideoResolution = '480p';
 const MAX_REFS = 9;
 const MAX_PROMPT_CHARS = 2000;
 const TEMPLATE_MODIFIERS = ['更科技', '更快节奏', '更品牌', '更产品', '更情绪化', '更克制'];
+const TEMPLATE_WORKBENCH_PREFS_KEY = 'seedance_template_workbench_preferences_v1';
+
+const TEMPLATE_MODULE_LABELS: Record<TemplateModuleKey, string> = {
+  character: '角色',
+  logo: '标志',
+  style: '风格',
+  camera: '镜头',
+};
+
+type TemplateWorkbenchPreferences = {
+  selectedTemplateId?: string;
+  modifiers?: string[];
+};
 
 interface PolledTask {
   id: string;
@@ -99,6 +112,49 @@ function appendReferenceMarkers(value: string, labels: string[]): string {
 
 function formatReferenceTokens(labels: string[]): string {
   return labels.map((label) => `@${label}`).join(' ');
+}
+
+function readTemplateWorkbenchPreferences(): TemplateWorkbenchPreferences {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TEMPLATE_WORKBENCH_PREFS_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed as TemplateWorkbenchPreferences;
+  } catch {
+    return {};
+  }
+}
+
+function writeTemplateWorkbenchPreferences(patch: TemplateWorkbenchPreferences) {
+  if (typeof window === 'undefined') return;
+  const current = readTemplateWorkbenchPreferences();
+  window.localStorage.setItem(TEMPLATE_WORKBENCH_PREFS_KEY, JSON.stringify({ ...current, ...patch }));
+}
+
+function initialTemplateModifiers() {
+  const stored = readTemplateWorkbenchPreferences().modifiers;
+  return Array.isArray(stored) && stored.length > 0
+    ? stored.filter((modifier) => TEMPLATE_MODIFIERS.includes(modifier)).slice(0, TEMPLATE_MODIFIERS.length)
+    : ['更科技'];
+}
+
+function moduleUsage(template: SerializedGenerationTemplate, key: TemplateModuleKey): TemplateModuleUsage {
+  return template.module_bindings.module_usage?.[key] === 'reference' ? 'reference' : 'required';
+}
+
+function templateModuleItems(template: SerializedGenerationTemplate) {
+  return (Object.keys(TEMPLATE_MODULE_LABELS) as TemplateModuleKey[])
+    .map((key) => {
+      const value = template.module_bindings[key];
+      if (!value) return null;
+      return {
+        key,
+        label: TEMPLATE_MODULE_LABELS[key],
+        value,
+        usage: moduleUsage(template, key),
+      };
+    })
+    .filter((item): item is { key: TemplateModuleKey; label: string; value: string; usage: TemplateModuleUsage } => Boolean(item));
 }
 
 interface Props {
@@ -201,7 +257,7 @@ export function GenerationComposer({
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [demandText, setDemandText] = useState('');
-  const [selectedModifiers, setSelectedModifiers] = useState<string[]>(['更科技']);
+  const [selectedModifiers, setSelectedModifiers] = useState<string[]>(initialTemplateModifiers);
   const [agentPlans, setAgentPlans] = useState<AgentPlan[]>([]);
   const [selectedPlanKey, setSelectedPlanKey] = useState<string | null>(null);
   const [agentRunId, setAgentRunId] = useState<string | null>(null);
@@ -302,6 +358,11 @@ export function GenerationComposer({
   const templateAssets = useMemo(() => {
     return selectedTemplate?.assets.filter((asset) => asset.status === 'active') || [];
   }, [selectedTemplate]);
+  const selectedTemplateModules = useMemo(() => {
+    return selectedTemplate ? templateModuleItems(selectedTemplate) : [];
+  }, [selectedTemplate]);
+  const requiredModuleCount = selectedTemplateModules.filter((item) => item.usage === 'required').length;
+  const referenceModuleCount = selectedTemplateModules.filter((item) => item.usage === 'reference').length;
 
   // 已按即梦 @图片N 规则引用的图片序号
   const usedRefs = useMemo(() => {
@@ -397,7 +458,7 @@ export function GenerationComposer({
       const items = (data.templates || []) as SerializedGenerationTemplate[];
       setTemplates(items);
       setSelectedTemplateId((current) => {
-        const preferred = preferredTemplateId || current;
+        const preferred = preferredTemplateId || current || readTemplateWorkbenchPreferences().selectedTemplateId;
         return preferred && items.some((template) => template.id === preferred) ? preferred : items[0]?.id || null;
       });
       if (preferredTemplateId && !items.some((template) => template.id === preferredTemplateId)) {
@@ -420,6 +481,16 @@ export function GenerationComposer({
     if (!templateEnabled) return;
     void loadTemplates(initialTemplateId);
   }, [initialTemplateId, loadTemplates, templateEnabled]);
+
+  useEffect(() => {
+    if (!templateEnabled || !selectedTemplateId) return;
+    writeTemplateWorkbenchPreferences({ selectedTemplateId });
+  }, [selectedTemplateId, templateEnabled]);
+
+  useEffect(() => {
+    if (!templateEnabled) return;
+    writeTemplateWorkbenchPreferences({ modifiers: selectedModifiers });
+  }, [selectedModifiers, templateEnabled]);
 
   useEffect(() => {
     if (!templateEnabled || !selectedTemplate || reuseDraft) return;
@@ -557,6 +628,14 @@ export function GenerationComposer({
         ? current.filter((item) => item !== modifier)
         : [...current, modifier];
     });
+  }, []);
+
+  const handleSelectTemplate = useCallback((templateId: string | null) => {
+    setSelectedTemplateId(templateId);
+    setAgentPlans([]);
+    setSelectedPlanKey(null);
+    setAgentRunId(null);
+    setAgentPromptSnapshot(null);
   }, []);
 
   const handleGeneratePlans = useCallback(async () => {
@@ -828,29 +907,33 @@ export function GenerationComposer({
         <section className="template-workbench" aria-label="模板驱动生成">
           <div className="template-workbench-header">
             <div>
-              <span className="template-workbench-kicker">Template</span>
+              <span className="template-workbench-kicker">模板</span>
               <h2>{selectedTemplate?.name || '选择模板'}</h2>
-              <p>{selectedTemplate?.description || '模板决定角色、Logo、风格、规则和分段策略。'}</p>
+              <p>{selectedTemplate?.description || '模板决定角色、标志、风格、规则和分段策略。'}</p>
             </div>
             <div className="template-workbench-controls">
-              <select
-                value={selectedTemplate?.id || ''}
-                onChange={(event) => {
-                  setSelectedTemplateId(event.currentTarget.value || null);
-                  setAgentPlans([]);
-                  setSelectedPlanKey(null);
-                  setAgentRunId(null);
-                  setAgentPromptSnapshot(null);
-                }}
-                disabled={templateLoading || templates.length === 0}
-                aria-label="选择生成模板"
-              >
-                {templates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name} {template.version}
-                  </option>
-                ))}
-              </select>
+              <span className="template-selector-label">选择生成模板</span>
+              <div className="template-selector-list" role="listbox" aria-label="选择生成模板">
+                {templates.map((template) => {
+                  const active = selectedTemplate?.id === template.id;
+                  const modules = templateModuleItems(template);
+                  return (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className={active ? 'is-active' : ''}
+                      onClick={() => handleSelectTemplate(template.id)}
+                      disabled={templateLoading}
+                      aria-selected={active}
+                      role="option"
+                    >
+                      <strong>{template.name}</strong>
+                      <span>{template.version} · {modules.length || 0} 个模块</span>
+                    </button>
+                  );
+                })}
+                {!templateLoading && templates.length === 0 && <span className="template-selector-empty">暂无可用模板</span>}
+              </div>
               {canManageTemplates && (
                 <div className="template-workbench-admin-actions">
                   <button
@@ -875,12 +958,14 @@ export function GenerationComposer({
             <div className="template-loaded-grid">
               <div className="template-loaded-block">
                 <span>模块</span>
-                <strong>{[
-                  selectedTemplate.module_bindings.character,
-                  selectedTemplate.module_bindings.logo,
-                  selectedTemplate.module_bindings.style,
-                  selectedTemplate.module_bindings.camera,
-                ].filter(Boolean).join(' / ') || '未绑定'}</strong>
+                <strong>
+                  {selectedTemplateModules.length > 0
+                    ? selectedTemplateModules.map((item) => `${item.label}：${item.value}`).join(' / ')
+                    : '未绑定'}
+                </strong>
+                {selectedTemplateModules.length > 0 && (
+                  <small>{requiredModuleCount} 个强制插入，{referenceModuleCount} 个仅参考</small>
+                )}
               </div>
               <div className="template-loaded-block">
                 <span>规则</span>
@@ -888,7 +973,7 @@ export function GenerationComposer({
               </div>
               <div className="template-loaded-block">
                 <span>分段</span>
-                <strong>{selectedTemplate.temporal.enabled ? `${selectedTemplate.temporal.segment}s` : 'OFF'}</strong>
+                <strong>{selectedTemplate.temporal.enabled ? `${selectedTemplate.temporal.segment}s` : '关闭'}</strong>
               </div>
               <div className="template-loaded-block">
                 <span>素材</span>
@@ -903,7 +988,7 @@ export function GenerationComposer({
               <textarea
                 value={demandText}
                 onChange={(event) => setDemandText(event.currentTarget.value)}
-                placeholder="例如：做一个科技品牌宣传视频，突出新品发布、稳定 Logo 和快速产品动线。"
+                placeholder="例如：做一个科技品牌宣传视频，突出新品发布、稳定标志和快速产品动线。"
                 rows={3}
               />
             </label>

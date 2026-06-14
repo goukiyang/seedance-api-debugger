@@ -252,7 +252,7 @@ export function TemplateLibraryClient() {
     <div className="template-library-page">
       <section className="template-library-head" aria-label="动画模板选择">
         <div>
-          <span className="template-library-kicker">Animation Templates</span>
+          <span className="template-library-kicker">动画模板</span>
           <h1>选择动画模板</h1>
           <p>先选一个结构稳定的模板，再进入模板生成工作台填写本次需求。</p>
         </div>
@@ -434,7 +434,7 @@ export function TemplateLibraryClient() {
               <div className="template-library-preview-title">
                 <span className="template-library-kicker">{selectedView.scenario}</span>
                 <h2>{selectedView.template.name}</h2>
-                <p>{cleanText(selectedView.template.description) || '适合按固定角色、Logo、风格和规则生成一致的视频。'}</p>
+                <p>{cleanText(selectedView.template.description) || '适合按固定角色、标志、风格和规则生成一致的视频。'}</p>
               </div>
 
               <div className="template-library-preview-actions">

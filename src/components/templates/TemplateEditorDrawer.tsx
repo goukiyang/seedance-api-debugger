@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { SerializedGenerationTemplate, TemplateAssetType, TemplateRuleType } from '@/lib/templates/workbench';
+import type {
+  SerializedGenerationTemplate,
+  TemplateAssetType,
+  TemplateModuleKey,
+  TemplateModuleUsage,
+  TemplateModuleUsageMap,
+  TemplateRuleType,
+} from '@/lib/templates/workbench';
 
 type Props = {
   open: boolean;
@@ -13,17 +20,44 @@ type Props = {
 };
 
 const ruleTypes: Array<{ key: TemplateRuleType; label: string }> = [
-  { key: 'must', label: 'MUST' },
-  { key: 'forbid', label: 'FORBID' },
-  { key: 'suggest', label: 'SUGGEST' },
+  { key: 'must', label: '必须' },
+  { key: 'forbid', label: '禁止' },
+  { key: 'suggest', label: '建议' },
 ];
 
 const assetTypes: Array<{ key: TemplateAssetType; label: string }> = [
-  { key: 'character', label: 'Character' },
-  { key: 'logo', label: 'Logo' },
-  { key: 'style', label: 'Style' },
-  { key: 'other', label: 'Other' },
+  { key: 'character', label: '角色' },
+  { key: 'logo', label: '标志' },
+  { key: 'style', label: '风格' },
+  { key: 'other', label: '其他' },
 ];
+
+const moduleFields: Array<{ key: TemplateModuleKey; label: string; emptyLabel: string }> = [
+  { key: 'character', label: '角色模块', emptyLabel: '未绑定角色模块' },
+  { key: 'logo', label: '标志模块', emptyLabel: '未绑定标志模块' },
+  { key: 'style', label: '风格模块', emptyLabel: '未绑定风格模块' },
+  { key: 'camera', label: '镜头模块', emptyLabel: '未绑定镜头策略' },
+];
+
+const statusOptions = [
+  { key: 'draft', label: '草稿' },
+  { key: 'active', label: '启用' },
+  { key: 'archived', label: '归档' },
+] as const;
+
+const moduleUsageOptions: Array<{ key: TemplateModuleUsage; label: string; description: string }> = [
+  { key: 'required', label: '强制插入', description: '一定写入提示词' },
+  { key: 'reference', label: '仅参考', description: '只作为风格参考' },
+];
+
+const TEMPLATE_EDITOR_PREFS_KEY = 'seedance_template_editor_preferences_v1';
+
+type EditorTab = 'modules' | 'rules' | 'assets';
+
+type TemplateEditorPreferences = {
+  activeTab?: EditorTab;
+  moduleUsage?: TemplateModuleUsageMap;
+};
 
 type AssetDraft = {
   asset_type: TemplateAssetType;
@@ -47,6 +81,36 @@ function promptByType(template: SerializedGenerationTemplate | null, blockType: 
   return template?.prompts.find((prompt) => prompt.block_type === blockType && prompt.status === 'active')?.content || '';
 }
 
+function readEditorPreferences(): TemplateEditorPreferences {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TEMPLATE_EDITOR_PREFS_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed as TemplateEditorPreferences;
+  } catch {
+    return {};
+  }
+}
+
+function writeEditorPreferences(patch: TemplateEditorPreferences) {
+  if (typeof window === 'undefined') return;
+  const current = readEditorPreferences();
+  window.localStorage.setItem(TEMPLATE_EDITOR_PREFS_KEY, JSON.stringify({ ...current, ...patch }));
+}
+
+function normalizeEditorTab(value: unknown): EditorTab {
+  return value === 'rules' || value === 'assets' ? value : 'modules';
+}
+
+function defaultModuleUsage(template: SerializedGenerationTemplate | null): TemplateModuleUsageMap {
+  const saved = readEditorPreferences().moduleUsage || {};
+  return moduleFields.reduce<TemplateModuleUsageMap>((acc, field) => {
+    const current = template?.module_bindings.module_usage?.[field.key] || saved[field.key];
+    acc[field.key] = current === 'reference' ? 'reference' : 'required';
+    return acc;
+  }, {});
+}
+
 function assetDraftsFromTemplate(template: SerializedGenerationTemplate | null): AssetDraft[] {
   const existing = template?.assets
     .filter((asset) => asset.status === 'active')
@@ -63,7 +127,7 @@ function assetDraftsFromTemplate(template: SerializedGenerationTemplate | null):
   if (existing.length > 0) return existing;
   return [
     { asset_type: 'character', label: '角色参考图', url: '', thumbnail_url: '', reference_image_id: '', sort_order: 1, status: 'active' },
-    { asset_type: 'logo', label: 'Logo资源', url: '', thumbnail_url: '', reference_image_id: '', sort_order: 2, status: 'active' },
+    { asset_type: 'logo', label: '标志资源', url: '', thumbnail_url: '', reference_image_id: '', sort_order: 2, status: 'active' },
     { asset_type: 'style', label: '风格参考图', url: '', thumbnail_url: '', reference_image_id: '', sort_order: 3, status: 'active' },
   ];
 }
@@ -81,7 +145,7 @@ function ruleDraftsFromTemplate(template: SerializedGenerationTemplate | null): 
 }
 
 export function TemplateEditorDrawer({ open, template, saving = false, error, onClose, onSave }: Props) {
-  const [activeTab, setActiveTab] = useState<'modules' | 'rules' | 'assets'>('modules');
+  const [activeTab, setActiveTab] = useState<EditorTab>('modules');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('active');
@@ -90,6 +154,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
   const [logo, setLogo] = useState('');
   const [style, setStyle] = useState('');
   const [camera, setCamera] = useState('');
+  const [moduleUsage, setModuleUsage] = useState<TemplateModuleUsageMap>({});
   const [segmentEnabled, setSegmentEnabled] = useState(true);
   const [segment, setSegment] = useState(15);
   const [handoff, setHandoff] = useState(false);
@@ -110,6 +175,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
     setLogo(template.module_bindings.logo || '');
     setStyle(template.module_bindings.style || '');
     setCamera(template.module_bindings.camera || '');
+    setModuleUsage(defaultModuleUsage(template));
     setSegmentEnabled(template.temporal.enabled);
     setSegment(template.temporal.segment);
     setHandoff(template.temporal.handoff);
@@ -119,8 +185,13 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
     setStylePrompt(promptByType(template, 'style'));
     setGlobalPrompt(promptByType(template, 'global'));
     setAssets(assetDraftsFromTemplate(template));
-    setActiveTab('modules');
+    setActiveTab(normalizeEditorTab(readEditorPreferences().activeTab));
   }, [template]);
+
+  useEffect(() => {
+    if (!open) return;
+    writeEditorPreferences({ activeTab });
+  }, [activeTab, open]);
 
   const ruleCount = useMemo(() => {
     return ruleDrafts.filter((rule) => rule.status === 'active' && rule.content.trim()).length;
@@ -133,7 +204,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
       description,
       status,
       version,
-      module_bindings: { character, logo, style, camera },
+      module_bindings: { character, logo, style, camera, module_usage: moduleUsage },
       temporal: { enabled: segmentEnabled, segment, handoff },
       defaults: template.defaults,
       assets: assets
@@ -169,7 +240,14 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
     description: template.description || '',
     status: template.status,
     version: template.version,
-    module_bindings: template.module_bindings,
+    module_bindings: {
+      character: template.module_bindings.character,
+      logo: template.module_bindings.logo,
+      style: template.module_bindings.style,
+      camera: template.module_bindings.camera,
+      ...(template.module_bindings.rules ? { rules: template.module_bindings.rules } : {}),
+      module_usage: defaultModuleUsage(template),
+    },
     temporal: template.temporal,
     defaults: template.defaults,
     assets: assetDraftsFromTemplate(template).map((asset, index) => ({
@@ -209,12 +287,12 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
     await onSave(buildPayload());
   };
 
-  const modulePreviewCards = [
-    { type: 'character', label: 'Character', value: character || '未绑定角色模块' },
-    { type: 'logo', label: 'Logo', value: logo || '未绑定 Logo 模块' },
-    { type: 'style', label: 'Style', value: style || '未绑定风格模块' },
-    { type: 'other', label: 'Camera', value: camera || '未绑定镜头策略' },
-  ] as const;
+  const modulePreviewCards = moduleFields.map((field) => ({
+    type: field.key === 'camera' ? 'other' as const : field.key,
+    key: field.key,
+    label: field.label,
+    value: ({ character, logo, style, camera }[field.key]) || field.emptyLabel,
+  }));
 
   const addRuleDraft = (ruleType: TemplateRuleType) => {
     setRuleDrafts((current) => [
@@ -233,6 +311,14 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
     setRuleDrafts((current) => current.map((rule, ruleIndex) => (
       ruleIndex === index ? { ...rule, ...patch } : rule
     )));
+  };
+
+  const updateModuleUsage = (key: TemplateModuleKey, usage: TemplateModuleUsage) => {
+    setModuleUsage((current) => {
+      const next = { ...current, [key]: usage };
+      writeEditorPreferences({ moduleUsage: next });
+      return next;
+    });
   };
 
   return (
@@ -268,14 +354,21 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
             <textarea value={description} onChange={(event) => setDescription(event.currentTarget.value)} rows={3} />
           </label>
           <div className="template-drawer-grid">
-            <label>
+            <div className="template-drawer-choice-field">
               <span>状态</span>
-              <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
-                <option value="draft">草稿</option>
-                <option value="active">启用</option>
-                <option value="archived">归档</option>
-              </select>
-            </label>
+              <div className="template-choice-row" role="group" aria-label="模板状态">
+                {statusOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={status === option.key ? 'is-active' : ''}
+                    onClick={() => setStatus(option.key)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <label>
               <span>版本</span>
               <input value={version} onChange={(event) => setVersion(event.currentTarget.value)} />
@@ -285,11 +378,40 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
 
         <section className="template-drawer-section">
           <h3>模块绑定</h3>
-          <div className="template-drawer-grid">
-            <label><span>Character</span><input value={character} onChange={(event) => setCharacter(event.currentTarget.value)} /></label>
-            <label><span>Logo</span><input value={logo} onChange={(event) => setLogo(event.currentTarget.value)} /></label>
-            <label><span>Style</span><input value={style} onChange={(event) => setStyle(event.currentTarget.value)} /></label>
-            <label><span>Camera</span><input value={camera} onChange={(event) => setCamera(event.currentTarget.value)} /></label>
+          <div className="template-module-editor-grid">
+            {moduleFields.map((field) => {
+              const value = { character, logo, style, camera }[field.key];
+              const setValue = {
+                character: setCharacter,
+                logo: setLogo,
+                style: setStyle,
+                camera: setCamera,
+              }[field.key];
+              return (
+                <div className="template-module-editor-row" key={field.key}>
+                  <label>
+                    <span>{field.label}</span>
+                    <input value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+                  </label>
+                  <div className="template-drawer-choice-field">
+                    <span>模块用途</span>
+                    <div className="template-choice-row template-choice-row-compact" role="group" aria-label={`${field.label}用途`}>
+                      {moduleUsageOptions.map((option) => (
+                        <button
+                          key={option.key}
+                          type="button"
+                          className={(moduleUsage[field.key] || 'required') === option.key ? 'is-active' : ''}
+                          onClick={() => updateModuleUsage(field.key, option.key)}
+                          title={option.description}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
           <div className="template-drawer-preview-grid" aria-label="模块素材预览">
             {modulePreviewCards.map((card) => {
@@ -302,7 +424,10 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
                   <div>
                     <span>{card.label}</span>
                     <strong>{card.value}</strong>
-                    <small>{previewAsset?.label || '可在资产页绑定参考素材'}</small>
+                    <small>
+                      {(moduleUsage[card.key] || 'required') === 'required' ? '强制插入提示词' : '仅作为参考'}
+                      {previewAsset?.label ? ` · ${previewAsset.label}` : ' · 可在资产页绑定参考素材'}
+                    </small>
                   </div>
                 </article>
               );
@@ -312,10 +437,10 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
 
         <section className="template-drawer-section">
           <h3>专属提示词</h3>
-          <label><span>Character Prompt</span><textarea value={characterPrompt} onChange={(event) => setCharacterPrompt(event.currentTarget.value)} rows={3} /></label>
-          <label><span>Logo Prompt</span><textarea value={logoPrompt} onChange={(event) => setLogoPrompt(event.currentTarget.value)} rows={3} /></label>
-          <label><span>Style Prompt</span><textarea value={stylePrompt} onChange={(event) => setStylePrompt(event.currentTarget.value)} rows={3} /></label>
-          <label><span>Global Prompt</span><textarea value={globalPrompt} onChange={(event) => setGlobalPrompt(event.currentTarget.value)} rows={3} /></label>
+          <label><span>角色提示词</span><textarea value={characterPrompt} onChange={(event) => setCharacterPrompt(event.currentTarget.value)} rows={3} /></label>
+          <label><span>标志提示词</span><textarea value={logoPrompt} onChange={(event) => setLogoPrompt(event.currentTarget.value)} rows={3} /></label>
+          <label><span>风格提示词</span><textarea value={stylePrompt} onChange={(event) => setStylePrompt(event.currentTarget.value)} rows={3} /></label>
+          <label><span>全局提示词</span><textarea value={globalPrompt} onChange={(event) => setGlobalPrompt(event.currentTarget.value)} rows={3} /></label>
         </section>
         <section className="template-drawer-section">
           <h3>Temporal 策略</h3>
@@ -342,14 +467,20 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
                   <div className="template-asset-editor-thumb">
                     {previewUrl ? <img src={previewUrl} alt="" /> : <span>暂无</span>}
                   </div>
-                  <select
-                    value={asset.asset_type}
-                    onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
-                      itemIndex === index ? { ...item, asset_type: event.currentTarget.value as TemplateAssetType } : item
-                    )))}
-                  >
-                    {assetTypes.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}
-                  </select>
+                  <div className="template-choice-row template-choice-row-asset" role="group" aria-label="素材类型">
+                    {assetTypes.map((type) => (
+                      <button
+                        key={type.key}
+                        type="button"
+                        className={asset.asset_type === type.key ? 'is-active' : ''}
+                        onClick={() => setAssets((current) => current.map((item, itemIndex) => (
+                          itemIndex === index ? { ...item, asset_type: type.key } : item
+                        )))}
+                      >
+                        {type.label}
+                      </button>
+                    ))}
+                  </div>
                   <input
                     value={asset.label}
                     onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
@@ -376,7 +507,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
                     onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
                       itemIndex === index ? { ...item, reference_image_id: event.currentTarget.value } : item
                     )))}
-                    placeholder="ReferenceImage ID"
+                    placeholder="参考图 ID"
                   />
                   <small>{asset.reference_image_id ? '来源：参考图资产' : previewUrl ? '来源：外部素材 URL' : '来源：待补充'}</small>
                   <button
@@ -421,14 +552,22 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
                 <p className="template-rule-editor-empty">暂无规则，点击新增规则。</p>
               ) : indexedRules.map(({ draft, index }) => (
                 <div className="template-rule-editor-row" key={`${draft.rule_type}-${index}`}>
-                  <select
-                    value={draft.status}
-                    onChange={(event) => updateRuleDraft(index, { status: event.currentTarget.value })}
-                    aria-label={`${rule.label} 启停状态`}
-                  >
-                    <option value="active">启用</option>
-                    <option value="disabled">停用</option>
-                  </select>
+                  <div className="template-choice-row template-choice-row-compact" role="group" aria-label={`${rule.label}启停状态`}>
+                    <button
+                      type="button"
+                      className={draft.status === 'active' ? 'is-active' : ''}
+                      onClick={() => updateRuleDraft(index, { status: 'active' })}
+                    >
+                      启用
+                    </button>
+                    <button
+                      type="button"
+                      className={draft.status !== 'active' ? 'is-active' : ''}
+                      onClick={() => updateRuleDraft(index, { status: 'disabled' })}
+                    >
+                      停用
+                    </button>
+                  </div>
                   <label>
                     <span>优先级</span>
                     <input

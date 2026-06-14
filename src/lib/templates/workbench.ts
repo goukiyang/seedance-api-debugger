@@ -1,6 +1,9 @@
 export type TemplateRuleType = 'must' | 'forbid' | 'suggest';
 export type TemplateAssetType = 'character' | 'logo' | 'style' | 'other';
 export type TemplatePromptBlockType = 'character' | 'logo' | 'style' | 'global';
+export type TemplateModuleKey = 'character' | 'logo' | 'style' | 'camera';
+export type TemplateModuleUsage = 'required' | 'reference';
+export type TemplateModuleUsageMap = Partial<Record<TemplateModuleKey, TemplateModuleUsage>>;
 
 export type TemplateModuleBindings = {
   character?: string;
@@ -8,7 +11,10 @@ export type TemplateModuleBindings = {
   style?: string;
   camera?: string;
   rules?: string;
+  module_usage?: TemplateModuleUsageMap;
 };
+
+const TEMPLATE_MODULE_KEYS: TemplateModuleKey[] = ['character', 'logo', 'style', 'camera'];
 
 export type TemplateTemporalConfig = {
   enabled: boolean;
@@ -144,13 +150,29 @@ function normalizeModuleBindings(value: unknown): TemplateModuleBindings {
   const source = typeof value === 'string' ? parseJsonObject(value) : value;
   if (!source || typeof source !== 'object' || Array.isArray(source)) return {};
   const object = source as Record<string, unknown>;
-  return {
+  const bindings: TemplateModuleBindings = {
     character: stringOrUndefined(object.character),
     logo: stringOrUndefined(object.logo),
     style: stringOrUndefined(object.style),
     camera: stringOrUndefined(object.camera),
     rules: stringOrUndefined(object.rules),
   };
+  const moduleUsage = normalizeModuleUsage(object.module_usage, bindings);
+  return {
+    ...bindings,
+    ...(Object.keys(moduleUsage).length > 0 ? { module_usage: moduleUsage } : {}),
+  };
+}
+
+function normalizeModuleUsage(value: unknown, bindings: TemplateModuleBindings): TemplateModuleUsageMap {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return TEMPLATE_MODULE_KEYS.reduce<TemplateModuleUsageMap>((acc, key) => {
+    if (!bindings[key]) return acc;
+    acc[key] = source[key] === 'reference' ? 'reference' : 'required';
+    return acc;
+  }, {});
 }
 
 function normalizeTemporal(value: unknown): TemplateTemporalConfig {
