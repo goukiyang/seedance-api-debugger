@@ -132,7 +132,7 @@ async function getSerializableVideoCard(id: string) {
 async function assertTaskInVideoCard(taskId: string, videoCardId: string) {
   const task = await prisma.videoTask.findUnique({
     where: { id: taskId },
-    select: { id: true, video_card_id: true, project_id: true, version_role: true },
+    select: { id: true, video_card_id: true, project_id: true, version_role: true, ratio: true },
   });
   if (!task || task.video_card_id !== videoCardId) {
     throw new AuthError('任务不属于此视频卡', 400);
@@ -291,7 +291,20 @@ export async function PATCH(
         : undefined;
 
     if (currentBestTaskId) await assertTaskInVideoCard(currentBestTaskId, params.id);
-    if (finalTaskId) await assertTaskInVideoCard(finalTaskId, params.id);
+    if (finalTaskId) {
+      const task = await assertTaskInVideoCard(finalTaskId, params.id);
+      if (
+        access.videoCard.project.type === 'public'
+        && access.videoCard.ratio
+        && task.ratio
+        && task.ratio !== access.videoCard.ratio
+      ) {
+        return NextResponse.json(
+          { error: '公共项目最终版必须符合视频卡交付比例；偏离比例需要先走比例变更审批' },
+          { status: 403 },
+        );
+      }
+    }
     if (candidateTaskId) {
       const task = await assertTaskInVideoCard(candidateTaskId, params.id);
       if (

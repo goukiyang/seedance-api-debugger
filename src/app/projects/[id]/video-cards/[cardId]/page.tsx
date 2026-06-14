@@ -252,14 +252,19 @@ export default function VideoCardDetailPage() {
     }
   };
 
-  const patchBranch = async (branchId: string, action: string, successText: string) => {
+  const patchBranch = async (
+    branchId: string,
+    action: string,
+    successText: string,
+    extraPayload: Record<string, unknown> = {},
+  ) => {
     setBranchBusy(true);
     setBranchMessage('');
     try {
       const res = await fetch(`/api/video-cards/${videoCardId}/branches/${branchId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...extraPayload }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || '方向分支更新失败');
@@ -285,6 +290,7 @@ export default function VideoCardDetailPage() {
 
   const summary = videoCard.summary;
   const canGenerate = permissions.can_generate && videoCard.status !== 'sealed' && videoCard.status !== 'archived';
+  const primaryBranch = branches.find((branch) => branch.is_primary);
 
   return (
     <div>
@@ -424,6 +430,26 @@ export default function VideoCardDetailPage() {
                   {permissions.can_manage && !branch.is_primary && ['exploring', 'candidate'].includes(branch.status) && (
                     <button className="btn btn-secondary" type="button" disabled={branchBusy} onClick={() => patchBranch(branch.id, 'close', '方向已关闭')}>
                       关闭
+                    </button>
+                  )}
+                  {permissions.can_manage && primaryBranch && primaryBranch.id !== branch.id && ['exploring', 'candidate'].includes(branch.status) && (
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={branchBusy}
+                      onClick={() => patchBranch(branch.id, 'merge', '方向已合并到主方向', { target_branch_id: primaryBranch.id })}
+                    >
+                      合并到主方向
+                    </button>
+                  )}
+                  {permissions.can_manage && ['exploring', 'candidate', 'primary'].includes(branch.status) && (
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={branchBusy}
+                      onClick={() => patchBranch(branch.id, 'promote_to_card', '方向已升格为独立视频卡')}
+                    >
+                      升格为视频卡
                     </button>
                   )}
                 </div>

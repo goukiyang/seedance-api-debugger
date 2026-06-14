@@ -23,6 +23,12 @@ interface ProjectItem {
   _count?: { members: number; tasks: number; reference_albums?: number };
 }
 
+interface ReviewBudgetSuggestion {
+  suggested_credits: number;
+  sample_count: number;
+  risk_hint: string;
+}
+
 function canManageProject(project: ProjectItem): boolean {
   return project.my_role === 'admin' || project.my_role === 'project_owner';
 }
@@ -78,6 +84,7 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState('');
   const [billingMode, setBillingMode] = useState<'default' | 'budget'>('default');
   const [initialBudgetCredits, setInitialBudgetCredits] = useState('');
+  const [reviewBudgetSuggestion, setReviewBudgetSuggestion] = useState<ReviewBudgetSuggestion | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [downloadProject, setDownloadProject] = useState<ProjectItem | null>(null);
@@ -103,6 +110,36 @@ export default function ProjectsPage() {
   useEffect(() => {
     loadProjects();
   }, []);
+
+  useEffect(() => {
+    if (billingMode !== 'budget') return;
+    let cancelled = false;
+    fetch('/api/review-cards?project_type=public&limit=5', { cache: 'no-store' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (cancelled || !data?.review_cards?.length) return;
+        const cards = data.review_cards
+          .map((card: { budget_suggestion_credits?: number | null; failure_rate?: number | null }) => ({
+            budget: Number(card.budget_suggestion_credits || 0),
+            failureRate: Number(card.failure_rate || 0),
+          }))
+          .filter((item: { budget: number }) => item.budget > 0);
+        if (cards.length === 0) return;
+        const averageBudget = cards.reduce((sum: number, item: { budget: number }) => sum + item.budget, 0) / cards.length;
+        const averageFailureRate = cards.reduce((sum: number, item: { failureRate: number }) => sum + item.failureRate, 0) / cards.length;
+        setReviewBudgetSuggestion({
+          suggested_credits: Math.ceil(averageBudget),
+          sample_count: cards.length,
+          risk_hint: averageFailureRate >= 0.25 ? '历史失败率偏高，建议预留更多试错预算。' : '历史失败率正常，可按建议预算作为起点。',
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setReviewBudgetSuggestion(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [billingMode]);
 
   const createProject = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -259,13 +296,34 @@ export default function ProjectsPage() {
             </label>
           </div>
           {billingMode === 'budget' && (
-            <input
-              className="input"
-              value={initialBudgetCredits}
-              onChange={(event) => setInitialBudgetCredits(event.target.value)}
-              placeholder="初始项目预算点数，可选"
-              inputMode="decimal"
-            />
+            <>
+              <input
+                className="input"
+                value={initialBudgetCredits}
+                onChange={(event) => setInitialBudgetCredits(event.target.value)}
+                placeholder="初始项目预算点数，可选"
+                inputMode="decimal"
+              />
+              {reviewBudgetSuggestion && (
+                <div className="project-budget-suggestion">
+                  <div>
+                    <strong>历史复盘建议预算：{reviewBudgetSuggestion.suggested_credits} 点</strong>
+                    <span>
+                      {reviewBudgetSuggestion.sample_count} 个公共项目复盘样本
+                      {' · '}
+                      {reviewBudgetSuggestion.risk_hint}
+                    </span>
+                  </div>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => setInitialBudgetCredits(String(reviewBudgetSuggestion.suggested_credits))}
+                  >
+                    使用建议预算
+                  </button>
+                </div>
+              )}
+            </>
           )}
           <button className="btn btn-primary" type="submit" disabled={!name.trim()}>
             {billingMode === 'budget' ? '发起预算记账立项审批' : '创建项目'}

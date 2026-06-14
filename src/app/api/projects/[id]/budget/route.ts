@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProject, assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
-import { adjustProjectBudget, getProjectBudgetSummary } from '@/lib/projects/budget';
+import { adjustProjectBudget, ensureProjectBudgetAccount, getProjectBudgetSummary } from '@/lib/projects/budget';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +11,13 @@ function parseAmount(value: unknown) {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : null;
 }
+
+function optionalString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+const BUDGET_STATUSES = new Set(['active', 'frozen', 'exhausted', 'cancelled']);
+const RECONCILIATION_STATUSES = new Set(['normal', 'pending', 'abnormal', 'reconciled']);
 
 export async function GET(
   _request: NextRequest,
@@ -54,9 +61,25 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const targetBudget = parseAmount(body.budget_credits ?? body.budgetCredits);
-    if (targetBudget === null || targetBudget < 0) {
+    const hasBudget = body.budget_credits !== undefined || body.budgetCredits !== undefined;
+    const targetBudget = hasBudget ? parseAmount(body.budget_credits ?? body.budgetCredits) : null;
+    if (hasBudget && (targetBudget === null || targetBudget < 0)) {
       return NextResponse.json({ error: 'budget_credits 必须是非负数字' }, { status: 400 });
+    }
+    const nextStatus = optionalString(body.status);
+    const nextReconciliationStatus = optionalString(body.reconciliation_status ?? body.reconciliationStatus);
+    const freezeReason = optionalString(body.freeze_reason ?? body.freezeReason);
+    if (nextStatus && !BUDGET_STATUSES.has(nextStatus)) {
+      return NextResponse.json({ error: '预算账户状态无效' }, { status: 400 });
+    }
+    if (nextReconciliationStatus && !RECONCILIATION_STATUSES.has(nextReconciliationStatus)) {
+      return NextResponse.json({ error: '预算对账状态无效' }, { status: 400 });
+    }
+    if (nextStatus === 'frozen' && !freezeReason) {
+      return NextResponse.json({ error: '冻结预算账户必须填写原因' }, { status: 400 });
+    }
+    if (!hasBudget && !nextStatus && !nextReconciliationStatus) {
+      return NextResponse.json({ error: '缺少预算或状态变更内容' }, { status: 400 });
     }
 
     const reason = typeof body.reason === 'string' && body.reason.trim()
@@ -68,7 +91,7 @@ export async function PATCH(
 
     const budget = await prisma.$transaction(async (tx) => {
       const before = await getProjectBudgetSummary(tx, params.id);
-      const delta = targetBudget - before.budget_credits;
+      const delta = targetBudget === null ? 0 : targetBudget - before.budget_credits;
       if (delta !== 0) {
         await adjustProjectBudget(tx, {
           projectId: params.id,
@@ -78,11 +101,27 @@ export async function PATCH(
           idempotencyKey,
         });
       }
+      if (nextStatus || nextReconciliationStatus) {
+        const account = await ensureProjectBudgetAccount(tx, params.id, user.id);
+        await tx.projectBudgetAccount.update({
+          where: { id: account.id },
+          data: {
+            ...(nextStatus ? {
+              status: nextStatus,
+              freeze_reason: nextStatus === 'frozen' ? freezeReason : null,
+            } : {}),
+            ...(nextReconciliationStatus ? { reconciliation_status: nextReconciliationStatus } : {}),
+          },
+        });
+      }
       return getProjectBudgetSummary(tx, params.id);
     });
 
     await logProjectAction(user.id, 'project_budget_update', 'project', params.id, {
       budget_credits: targetBudget,
+      status: nextStatus,
+      freeze_reason: nextStatus === 'frozen' ? freezeReason : undefined,
+      reconciliation_status: nextReconciliationStatus,
       reason,
     });
 

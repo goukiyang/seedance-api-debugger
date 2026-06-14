@@ -112,6 +112,17 @@ interface VideoCardItem {
   summary: VideoCardSummary | null;
 }
 
+interface SimilarVideoCardItem {
+  id: string;
+  title: string;
+  objective: string | null;
+  status: string;
+  platform: string | null;
+  ratio: string | null;
+  score: number;
+  reasons: string[];
+}
+
 interface ProjectPermissions {
   can_manage_project: boolean;
   can_manage_members: boolean;
@@ -129,10 +140,34 @@ interface ProjectBudgetSummary {
   available_credits: number;
   currency: string;
   status: string;
+  freeze_reason: string | null;
+  reconciliation_status: string;
   usage_ratio: number;
   committed_ratio: number;
   risk_level: 'normal' | 'warning' | 'critical' | 'exhausted';
+  block_reason: string | null;
   updated_at: string | null;
+}
+
+interface ArchiveAnomalies {
+  total_count: number;
+  unfiled_tasks: Array<{
+    id: string;
+    prompt: string;
+    local_status: string;
+    created_at: string;
+    estimated_cost: number | null;
+    actual_cost: number | null;
+  }>;
+  project_card_mismatches: Array<{
+    id: string;
+    prompt: string;
+    local_status: string;
+    created_at: string;
+    project_id: string;
+    video_card_id: string;
+    card_project_id: string;
+  }>;
 }
 
 interface ReviewTaskItem {
@@ -346,6 +381,7 @@ export default function ProjectDetailPage() {
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumItem[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ProjectReviewSummary | null>(null);
   const [budget, setBudget] = useState<ProjectBudgetSummary | null>(null);
+  const [archiveAnomalies, setArchiveAnomalies] = useState<ArchiveAnomalies | null>(null);
   const [permissions, setPermissions] = useState<ProjectPermissions>({
     can_manage_project: false,
     can_manage_members: false,
@@ -364,6 +400,8 @@ export default function ProjectDetailPage() {
   const [videoCardTitle, setVideoCardTitle] = useState('');
   const [videoCardObjective, setVideoCardObjective] = useState('');
   const [creatingVideoCard, setCreatingVideoCard] = useState(false);
+  const [similarVideoCards, setSimilarVideoCards] = useState<SimilarVideoCardItem[]>([]);
+  const [confirmDuplicateVideoCard, setConfirmDuplicateVideoCard] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState('');
   const [savingBudget, setSavingBudget] = useState(false);
 
@@ -391,6 +429,7 @@ export default function ProjectDetailPage() {
       setReferenceAlbums(data.reference_albums || []);
       setReviewSummary(data.review_summary || null);
       setBudget(data.budget || null);
+      setArchiveAnomalies(data.archive_anomalies || null);
       setBudgetDraft(data.budget ? String(data.budget.budget_credits) : '');
       setPermissions(data.permissions || {
         can_manage_project: false,
@@ -536,15 +575,24 @@ export default function ProjectDetailPage() {
         body: JSON.stringify({
           title,
           objective: videoCardObjective.trim() || null,
+          confirm_duplicate: confirmDuplicateVideoCard,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 409 && data.code === 'SIMILAR_VIDEO_CARD_EXISTS') {
+          setSimilarVideoCards(data.similar_video_cards || []);
+          setConfirmDuplicateVideoCard(true);
+          setError('发现可能重复的视频卡。可以进入已有卡继续归档，或再次点击“仍然新建”。');
+          return;
+        }
         setError(data.error || data.message || '创建视频卡失败');
         return;
       }
       setVideoCardTitle('');
       setVideoCardObjective('');
+      setSimilarVideoCards([]);
+      setConfirmDuplicateVideoCard(false);
       setMessage('视频卡已创建');
       await loadProject();
     } finally {
@@ -650,11 +698,17 @@ export default function ProjectDetailPage() {
             <div>
               <h2 className="section-title mb-0">项目预算</h2>
               <p className="text-gray text-sm mt-2">
-                状态 {budgetRiskLabel(budget.risk_level)} · 已用 {Math.round(budget.usage_ratio * 100)}% · 含冻结 {Math.round(budget.committed_ratio * 100)}%
+                状态 {budget.status} · 对账 {budget.reconciliation_status} · 已用 {Math.round(budget.usage_ratio * 100)}% · 含冻结 {Math.round(budget.committed_ratio * 100)}%
               </p>
             </div>
             <span className={`project-budget-risk ${budget.risk_level}`}>{budgetRiskLabel(budget.risk_level)}</span>
           </div>
+          {budget.block_reason && (
+            <div className="project-budget-blocked">
+              <strong>预算暂不可生成</strong>
+              <span>{budget.block_reason}</span>
+            </div>
+          )}
           <div className="stats-grid">
             <div className="stat-card">
               <span className="stat-label">预算总额</span>
@@ -707,26 +761,59 @@ export default function ProjectDetailPage() {
           <span className="text-gray text-sm">{videoCards.length} 张</span>
         </div>
 
+        {archiveAnomalies && archiveAnomalies.total_count > 0 && (
+          <div className="video-card-anomaly-panel">
+            <strong>异常归档池</strong>
+            <span>
+              未归档任务 {archiveAnomalies.unfiled_tasks.length} 条 · 项目/视频卡错配 {archiveAnomalies.project_card_mismatches.length} 条
+            </span>
+            <small>这些任务不会自动重新计费；请通过移动归档或巡检脚本处理归属。</small>
+          </div>
+        )}
+
         {permissions.can_generate && project.status === 'active' && (
           <form className="video-card-create" onSubmit={createVideoCard}>
             <input
               className="input"
               value={videoCardTitle}
-              onChange={(event) => setVideoCardTitle(event.target.value)}
+              onChange={(event) => {
+                setVideoCardTitle(event.target.value);
+                setSimilarVideoCards([]);
+                setConfirmDuplicateVideoCard(false);
+              }}
               placeholder="视频卡标题，例如：产品首屏宣传短片"
               maxLength={80}
             />
             <input
               className="input"
               value={videoCardObjective}
-              onChange={(event) => setVideoCardObjective(event.target.value)}
+              onChange={(event) => {
+                setVideoCardObjective(event.target.value);
+                setSimilarVideoCards([]);
+                setConfirmDuplicateVideoCard(false);
+              }}
               placeholder="视频目标，可选"
               maxLength={160}
             />
             <button className="btn btn-primary" type="submit" disabled={creatingVideoCard || !videoCardTitle.trim()}>
-              {creatingVideoCard ? '创建中...' : '创建视频卡'}
+              {creatingVideoCard ? '创建中...' : confirmDuplicateVideoCard ? '仍然新建' : '创建视频卡'}
             </button>
           </form>
+        )}
+
+        {similarVideoCards.length > 0 && (
+          <div className="video-card-duplicate-panel">
+            <strong>可能已有同目标视频卡</strong>
+            <span>优先进入已有卡继续生成或整理；如果确实是不同交付目标，再选择仍然新建。</span>
+            <div>
+              {similarVideoCards.map((card) => (
+                <Link className="video-card-duplicate-item" href={`/projects/${project.id}/video-cards/${card.id}`} key={card.id}>
+                  <span>{card.title}</span>
+                  <small>{[videoCardStatusLabel(card.status), card.platform, card.ratio, ...card.reasons].filter(Boolean).join(' · ')}</small>
+                </Link>
+              ))}
+            </div>
+          </div>
         )}
 
         {videoCards.length === 0 ? (

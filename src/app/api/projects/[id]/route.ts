@@ -6,6 +6,7 @@ import { assertCanManageProject, assertCanManageProjectMembers, assertCanViewPro
 import { getProjectBudgetSummary } from '@/lib/projects/budget';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
+import { getVideoCardArchiveAnomalies } from '@/lib/video-cards/suggestions';
 
 export const dynamic = 'force-dynamic';
 
@@ -358,7 +359,10 @@ export async function GET(
       [...officialAllocationMicrosTotals, ...officialDirectMicrosTotals],
       [...officialAllocationMinorFallbackTotals, ...officialDirectMinorFallbackTotals],
     );
-    const budgetSummary = await prisma.$transaction((tx) => getProjectBudgetSummary(tx, params.id));
+    const { budgetSummary, archiveAnomalies } = await prisma.$transaction(async (tx) => ({
+      budgetSummary: await getProjectBudgetSummary(tx, params.id),
+      archiveAnomalies: await getVideoCardArchiveAnomalies(tx, params.id),
+    }));
     const primaryOfficialCost = officialCostTotals[0] || null;
     const reviewSummary = {
       task_count: taskCount,
@@ -415,6 +419,7 @@ export async function GET(
       tasks,
       cost_ledgers: costLedgers,
       budget: budgetSummary,
+      archive_anomalies: archiveAnomalies,
       review_summary: reviewSummary,
       permissions: {
         role: access.role,

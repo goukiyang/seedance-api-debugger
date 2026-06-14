@@ -4,6 +4,7 @@ import { notifyProjectOwner } from '@/lib/notifications';
 type BudgetClient = Prisma.TransactionClient;
 type ProjectBillingShape = Pick<Project, 'id' | 'type'>;
 const BUDGET_NOTIFICATION_THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 1] as const;
+const BLOCKING_RECONCILIATION_STATUSES = new Set(['pending', 'abnormal']);
 
 export type ProjectBudgetSnapshot = {
   source_type: 'project_budget';
@@ -59,6 +60,33 @@ function parseNotifiedThresholds(value: string | null | undefined) {
 function committedRatio(account: { budget_credits: number; used_credits: number; frozen_credits: number }) {
   if (account.budget_credits <= 0) return 0;
   return Math.min(1, (account.used_credits + account.frozen_credits) / account.budget_credits);
+}
+
+export function getProjectBudgetBlockReason(account: {
+  status: string;
+  freeze_reason?: string | null;
+  reconciliation_status?: string | null;
+}) {
+  if (account.status === 'frozen') {
+    return account.freeze_reason || '项目预算已冻结，需要管理员恢复后才能继续生成';
+  }
+  if (account.status === 'cancelled') return '项目预算账户已取消，不能继续生成';
+  if (account.status === 'exhausted') return '项目预算已耗尽，请先发起追加预算审批';
+  if (BLOCKING_RECONCILIATION_STATUSES.has(account.reconciliation_status || '')) {
+    return account.reconciliation_status === 'pending'
+      ? '项目预算正在对账，暂时不能继续生成'
+      : '项目预算对账异常，需要处理后才能继续生成';
+  }
+  return null;
+}
+
+export function assertProjectBudgetCanGenerate(account: {
+  status: string;
+  freeze_reason?: string | null;
+  reconciliation_status?: string | null;
+}) {
+  const reason = getProjectBudgetBlockReason(account);
+  if (reason) throw new Error(reason);
 }
 
 async function maybeNotifyBudgetThreshold(
@@ -143,9 +171,12 @@ export async function getProjectBudgetSummary(tx: BudgetClient, projectId: strin
       available_credits: 0,
       currency: 'credits',
       status: 'active',
+      freeze_reason: null,
+      reconciliation_status: 'normal',
       usage_ratio: 0,
       committed_ratio: 0,
       risk_level: 'normal',
+      block_reason: null,
       updated_at: null,
     };
   }
@@ -166,9 +197,12 @@ export async function getProjectBudgetSummary(tx: BudgetClient, projectId: strin
     available_credits: available,
     currency: account.currency,
     status: account.status,
+    freeze_reason: account.freeze_reason,
+    reconciliation_status: account.reconciliation_status,
     usage_ratio: usageRatio,
     committed_ratio: committedRatio,
     risk_level: committedRatio >= 1 ? 'exhausted' : committedRatio >= 0.9 ? 'critical' : committedRatio >= 0.7 ? 'warning' : 'normal',
+    block_reason: getProjectBudgetBlockReason(account),
     updated_at: account.updated_at,
   };
 }
@@ -205,7 +239,9 @@ export async function adjustProjectBudget(
     where: { id: account.id },
     data: {
       budget_credits: nextBudget,
-      status: nextBudget <= account.used_credits + account.frozen_credits ? 'exhausted' : 'active',
+      status: ['frozen', 'cancelled'].includes(account.status)
+        ? account.status
+        : nextBudget <= account.used_credits + account.frozen_credits ? 'exhausted' : 'active',
     },
   });
 
@@ -269,9 +305,7 @@ export async function allocateProjectTaskBudget(
   }
 
   const account = await ensureProjectBudgetAccount(tx, input.projectId, input.operatorId);
-  if (account.status !== 'active') {
-    throw new Error('项目预算不可用，请先追加预算或恢复预算状态');
-  }
+  assertProjectBudgetCanGenerate(account);
 
   const beforeRatio = committedRatio(account);
   const available = account.budget_credits - account.used_credits - account.frozen_credits;
@@ -382,7 +416,7 @@ export async function settleProjectTaskBudget(
     data: {
       used_credits: nextUsed,
       frozen_credits: nextFrozen,
-      status: account.status === 'cancelled' ? account.status : nextStatus,
+      status: ['cancelled', 'frozen'].includes(account.status) ? account.status : nextStatus,
     },
   });
 

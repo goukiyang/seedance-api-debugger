@@ -10,6 +10,11 @@ import {
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { normalizeVideoCardStatus } from '@/lib/video-cards/permissions';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
+import {
+  buildVideoCardTitleSuggestion,
+  findSimilarVideoCards,
+  getVideoCardArchiveAnomalies,
+} from '@/lib/video-cards/suggestions';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,6 +113,7 @@ export async function GET(
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
     const access = await assertCanViewProject(user, params.id);
+    const includeAnomalies = request.nextUrl.searchParams.get('include_anomalies') === 'true';
     const cards = await prisma.videoCard.findMany({
       where: { project_id: params.id },
       orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
@@ -126,9 +132,13 @@ export async function GET(
       ? {}
       : { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } };
     const summaryMap = await getVideoCardSummaryMap(cards.map((card) => card.id), { taskWhere });
+    const archiveAnomalies = includeAnomalies
+      ? await prisma.$transaction((tx) => getVideoCardArchiveAnomalies(tx, params.id))
+      : null;
 
     return NextResponse.json({
       video_cards: cards.map((card) => serializeVideoCard(card, summaryMap.get(card.id))),
+      archive_anomalies: archiveAnomalies,
       permissions: {
         role: access.role,
         can_generate: access.canGenerate,
@@ -167,6 +177,30 @@ export async function POST(
     const ratio = asOptionalString(body.ratio);
     const duration = asOptionalNumber(body.duration);
     const targetResolution = asOptionalString(body.target_resolution ?? body.targetResolution);
+    const titleSuggestion = buildVideoCardTitleSuggestion({
+      scene: asOptionalString(body.scene ?? body.usage_scene ?? body.usageScene),
+      objective: asOptionalString(body.objective),
+      platform,
+      ratio,
+    });
+    const similarCards = await prisma.$transaction((tx) => findSimilarVideoCards(tx, {
+      projectId: params.id,
+      title,
+      objective: asOptionalString(body.objective),
+      platform,
+      ratio,
+    }));
+    if (similarCards.length > 0 && body.confirm_duplicate !== true && body.confirmDuplicate !== true) {
+      return NextResponse.json(
+        {
+          error: '发现同项目下可能重复的视频卡，请确认归入已有卡或仍然新建',
+          code: 'SIMILAR_VIDEO_CARD_EXISTS',
+          similar_video_cards: similarCards,
+          title_suggestion: titleSuggestion,
+        },
+        { status: 409 },
+      );
+    }
     const card = await prisma.videoCard.create({
       data: {
         project_id: params.id,

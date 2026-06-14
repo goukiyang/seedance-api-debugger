@@ -44,22 +44,31 @@ export async function PATCH(
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
     const body = await request.json();
-    if (body.action !== 'mark_read') {
-      return NextResponse.json({ error: 'action 必须是 mark_read' }, { status: 400 });
+    if (!['mark_read', 'retry_failed'].includes(body.action)) {
+      return NextResponse.json({ error: 'action 必须是 mark_read 或 retry_failed' }, { status: 400 });
     }
 
     const existing = await prisma.notification.findFirst({
       where: { id: params.id, target_user_id: user.id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!existing) return NextResponse.json({ error: '通知不存在' }, { status: 404 });
+    if (body.action === 'retry_failed' && existing.status !== 'failed') {
+      return NextResponse.json({ error: '只有失败通知可以重试' }, { status: 400 });
+    }
 
     const notification = await prisma.notification.update({
       where: { id: params.id },
-      data: {
-        status: 'read',
-        read_at: new Date(),
-      },
+      data: body.action === 'mark_read'
+        ? {
+            status: 'read',
+            read_at: new Date(),
+          }
+        : {
+            status: 'sent',
+            sent_at: new Date(),
+            error_message: null,
+          },
       include: NOTIFICATION_INCLUDE,
     });
 
