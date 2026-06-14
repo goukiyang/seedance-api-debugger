@@ -33,6 +33,22 @@
 - `sd2` 线上状态：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`
 - 数据库相关脚本：`npm run db:generate`、`npm run db:push`、`npm run db:studio`，默认不得执行会修改数据库状态的命令
 
+## sd2 线上托管规则
+
+- 当前 `sd2.youdoodesign.com` 生产来源是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，公网入口经 Cloudflare Tunnel 转到本机 `127.0.0.1:3000`，LaunchAgent 是 `com.youdoo.site.sd2`。
+- 线上部署不得直接运行 `NEXT_DIST_DIR=.next-prod npm run build`、`rm -rf .next-prod`、手动覆盖 `.next-prod`，也不得让构建过程直接写 live `.next-prod`。这会在构建期间删除生产构建产物，导致 tunnel 打到 `127.0.0.1:3000` 时出现 `connect refused` / `502`。
+- 线上构建必须使用 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`。该命令应调用 `/Users/gouki-youdoo/.youdoo/runtime/sd2-3000-build.sh`，先构建 `.next-prod-candidate`，验证 `BUILD_ID`、`prerender-manifest.json`、`server/pages-manifest.json` 后，再替换 live `.next-prod`。
+- `sd2` 启动必须走 `/Users/gouki-youdoo/.youdoo/runtime/sd2-3000-start.sh`；不得把 LaunchAgent 改回裸 `next start`，除非同时保留生产构建关键文件检查和缺失时的安全构建逻辑。
+- 常规恢复优先使用 `youdoo-sites restart sd2` 或 `youdoo-sites heal sd2`；不要把 `launchctl bootout/bootstrap` 当作普通重启方式。确需重载 LaunchAgent 时，重载后必须立即验证 `launchctl print gui/$(id -u)/com.youdoo.site.sd2`、端口监听、本地 health 和公网 health。
+- 每次涉及 `sd2` 部署、构建脚本、LaunchAgent、`sites.json` 或公网可见页面改动后，必须验证：
+  - `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`
+  - `curl http://127.0.0.1:3000/api/config`
+  - `curl https://sd2.youdoodesign.com/api/config`
+  - `curl https://sd2.youdoodesign.com/login`
+  - `launchctl print ...` 中 `runs` 没有在健康守护周期内继续增长
+- 验证必须至少跨过一个健康守护周期：等待约 70 秒后再次检查 `youdoo-sites status sd2` 和 `runs`。只看到瞬时 200 不算完成。
+- 如果公网出现 `502`、Cloudflare 日志出现 `127.0.0.1:3000 connect refused`，先检查 `runs`、`.next-prod/BUILD_ID`、本地 `/api/config` 和 `/tmp/youdoo-sites-health.*.log`；不要先归因 DNS、Cloudflare 或“端口被挤掉”。
+
 ## UI 规则
 
 - 所有生成记录列表、任务记录列表、产出记录列表、项目内生成列表和视频卡生成列表，最左侧第一列必须是视频截图/缩略图。
