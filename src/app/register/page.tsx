@@ -21,6 +21,17 @@ function currentOriginLandingUrl(value: string | null | undefined, fallback: str
   return new URL(safeLandingPath(value, fallback), window.location.origin).toString();
 }
 
+function feishuAuthorizePath(next: string | null) {
+  const params = new URLSearchParams();
+  const safeNext = safeLandingPath(next, '');
+  if (safeNext) params.set('next', safeNext);
+  return `/api/auth/feishu/authorize${params.size ? `?${params.toString()}` : ''}`;
+}
+
+function shouldUseLocalFeishuFallback() {
+  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const [name, setName] = useState('');
@@ -145,8 +156,13 @@ export default function RegisterPage() {
     setDebugCode('');
     setFeishuLoading(true);
 
+    const next = new URLSearchParams(window.location.search).get('next');
+    if (!shouldUseLocalFeishuFallback()) {
+      window.location.assign(feishuAuthorizePath(next));
+      return;
+    }
+
     try {
-      const next = new URLSearchParams(window.location.search).get('next');
       const params = new URLSearchParams();
       const safeNext = safeLandingPath(next, '');
       if (safeNext) params.set('next', safeNext);
