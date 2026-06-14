@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-14 - 删除/归档类按钮不要依赖浏览器原生 confirm
+
+- 问题/背景：用户反馈生成页项目删除按钮点击后没有起效。
+- 诱因/根因：前端先调用 `window.confirm`，在当前浏览器/WebView 环境里确认层可能被拦截、不明显或没有继续触发请求；线上操作日志也没有新的 `project_delete/project_archive`，说明点击很可能没有走到后端。
+- 当时思路：后端继续保留“空项目可删除、已有任务或图集只能归档”的保护规则，只把前端确认交互改为站内弹窗，让用户看到明确动作和后端错误提示。
+- 改动位置：`src/app/generate/page.tsx`、`src/app/globals.css`、`src/app/api/projects/[id]/route.ts`。
+- 怎么改：删除按钮点击后设置 `pendingProjectRemoval` 并关闭项目菜单；弹窗里展示项目名、任务数、图集数和确认按钮；确认后再发 `DELETE` 或 `PATCH action=archive`。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网生成页 JS 包命中新的确认文案。
+- 可复用经验：用户可见的危险操作默认用站内确认弹窗，不依赖浏览器原生 confirm；后端保护规则不应为了“按钮能点”而放松，前端要把阻止原因清楚回显。
+
 ## 2026-06-14 - 飞书网页登录默认走同源 302 授权入口
 
 - 问题/背景：用户反馈飞书登录显示“初始化失败”，但公网 `/api/auth/feishu/authorize-url` 直接请求能正常返回授权 URL。
