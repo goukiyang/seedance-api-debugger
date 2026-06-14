@@ -35,27 +35,13 @@ type AssetDraft = {
   status: string;
 };
 
-function linesToRules(text: string, ruleType: TemplateRuleType) {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((content, index) => ({
-      rule_type: ruleType,
-      content,
-      priority: ruleType === 'suggest' ? 60 : 90,
-      sort_order: index + 1,
-      status: 'active',
-    }));
-}
-
-function rulesToText(template: SerializedGenerationTemplate | null, ruleType: TemplateRuleType) {
-  return template?.rules
-    .filter((rule) => rule.rule_type === ruleType && rule.status === 'active')
-    .sort((a, b) => a.sort_order - b.sort_order)
-    .map((rule) => rule.content)
-    .join('\n') || '';
-}
+type RuleDraft = {
+  rule_type: TemplateRuleType;
+  content: string;
+  priority: number;
+  sort_order: number;
+  status: string;
+};
 
 function promptByType(template: SerializedGenerationTemplate | null, blockType: string) {
   return template?.prompts.find((prompt) => prompt.block_type === blockType && prompt.status === 'active')?.content || '';
@@ -82,7 +68,20 @@ function assetDraftsFromTemplate(template: SerializedGenerationTemplate | null):
   ];
 }
 
+function ruleDraftsFromTemplate(template: SerializedGenerationTemplate | null): RuleDraft[] {
+  return template?.rules
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((rule, index) => ({
+      rule_type: rule.rule_type,
+      content: rule.content,
+      priority: rule.priority,
+      sort_order: rule.sort_order || index + 1,
+      status: rule.status,
+    })) || [];
+}
+
 export function TemplateEditorDrawer({ open, template, saving = false, error, onClose, onSave }: Props) {
+  const [activeTab, setActiveTab] = useState<'modules' | 'rules' | 'assets'>('modules');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('active');
@@ -94,9 +93,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
   const [segmentEnabled, setSegmentEnabled] = useState(true);
   const [segment, setSegment] = useState(15);
   const [handoff, setHandoff] = useState(false);
-  const [mustRules, setMustRules] = useState('');
-  const [forbidRules, setForbidRules] = useState('');
-  const [suggestRules, setSuggestRules] = useState('');
+  const [ruleDrafts, setRuleDrafts] = useState<RuleDraft[]>([]);
   const [characterPrompt, setCharacterPrompt] = useState('');
   const [logoPrompt, setLogoPrompt] = useState('');
   const [stylePrompt, setStylePrompt] = useState('');
@@ -116,21 +113,18 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
     setSegmentEnabled(template.temporal.enabled);
     setSegment(template.temporal.segment);
     setHandoff(template.temporal.handoff);
-    setMustRules(rulesToText(template, 'must'));
-    setForbidRules(rulesToText(template, 'forbid'));
-    setSuggestRules(rulesToText(template, 'suggest'));
+    setRuleDrafts(ruleDraftsFromTemplate(template));
     setCharacterPrompt(promptByType(template, 'character'));
     setLogoPrompt(promptByType(template, 'logo'));
     setStylePrompt(promptByType(template, 'style'));
     setGlobalPrompt(promptByType(template, 'global'));
     setAssets(assetDraftsFromTemplate(template));
+    setActiveTab('modules');
   }, [template]);
 
   const ruleCount = useMemo(() => {
-    return [mustRules, forbidRules, suggestRules]
-      .flatMap((text) => text.split('\n').filter((line) => line.trim()))
-      .length;
-  }, [forbidRules, mustRules, suggestRules]);
+    return ruleDrafts.filter((rule) => rule.status === 'active' && rule.content.trim()).length;
+  }, [ruleDrafts]);
 
   if (!open || !template) return null;
 
@@ -153,11 +147,15 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
           sort_order: index + 1,
           status: asset.status,
         })),
-      rules: [
-        ...linesToRules(mustRules, 'must'),
-        ...linesToRules(forbidRules, 'forbid'),
-        ...linesToRules(suggestRules, 'suggest'),
-      ],
+      rules: ruleDrafts
+        .filter((rule) => rule.content.trim())
+        .map((rule, index) => ({
+          rule_type: rule.rule_type,
+          content: rule.content.trim(),
+          priority: rule.priority,
+          sort_order: index + 1,
+          status: rule.status,
+        })),
       prompts: [
         { block_type: 'character', content: characterPrompt, sort_order: 1, status: 'active' },
         { block_type: 'logo', content: logoPrompt, sort_order: 2, status: 'active' },
@@ -183,11 +181,15 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
       sort_order: index + 1,
       status: asset.status,
     })),
-    rules: [
-      ...linesToRules(rulesToText(template, 'must'), 'must'),
-      ...linesToRules(rulesToText(template, 'forbid'), 'forbid'),
-      ...linesToRules(rulesToText(template, 'suggest'), 'suggest'),
-    ],
+    rules: ruleDraftsFromTemplate(template)
+      .filter((rule) => rule.content.trim())
+      .map((rule, index) => ({
+        rule_type: rule.rule_type,
+        content: rule.content.trim(),
+        priority: rule.priority,
+        sort_order: index + 1,
+        status: rule.status,
+      })),
     prompts: [
       { block_type: 'character', content: promptByType(template, 'character'), sort_order: 1, status: 'active' },
       { block_type: 'logo', content: promptByType(template, 'logo'), sort_order: 2, status: 'active' },
@@ -207,6 +209,32 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
     await onSave(buildPayload());
   };
 
+  const modulePreviewCards = [
+    { type: 'character', label: 'Character', value: character || '未绑定角色模块' },
+    { type: 'logo', label: 'Logo', value: logo || '未绑定 Logo 模块' },
+    { type: 'style', label: 'Style', value: style || '未绑定风格模块' },
+    { type: 'other', label: 'Camera', value: camera || '未绑定镜头策略' },
+  ] as const;
+
+  const addRuleDraft = (ruleType: TemplateRuleType) => {
+    setRuleDrafts((current) => [
+      ...current,
+      {
+        rule_type: ruleType,
+        content: '',
+        priority: ruleType === 'suggest' ? 60 : 90,
+        sort_order: current.length + 1,
+        status: 'active',
+      },
+    ]);
+  };
+
+  const updateRuleDraft = (index: number, patch: Partial<RuleDraft>) => {
+    setRuleDrafts((current) => current.map((rule, ruleIndex) => (
+      ruleIndex === index ? { ...rule, ...patch } : rule
+    )));
+  };
+
   return (
     <div className="template-drawer-shell" role="dialog" aria-modal="true" aria-label="模板编辑">
       <button type="button" className="template-drawer-backdrop" aria-label="关闭模板编辑" onClick={handleClose} />
@@ -219,8 +247,16 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
           <button type="button" onClick={handleClose}>关闭</button>
         </header>
 
+        <nav className="template-drawer-tabs" aria-label="模板编辑分组">
+          <button type="button" className={activeTab === 'modules' ? 'is-active' : ''} onClick={() => setActiveTab('modules')}>模块</button>
+          <button type="button" className={activeTab === 'rules' ? 'is-active' : ''} onClick={() => setActiveTab('rules')}>规则 <span>{ruleCount}</span></button>
+          <button type="button" className={activeTab === 'assets' ? 'is-active' : ''} onClick={() => setActiveTab('assets')}>资产 <span>{assets.length}</span></button>
+        </nav>
+
         {error && <div className="template-drawer-error">{error}</div>}
 
+        {activeTab === 'modules' && (
+        <>
         <section className="template-drawer-section">
           <h3>基础信息</h3>
           <label>
@@ -255,6 +291,23 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
             <label><span>Style</span><input value={style} onChange={(event) => setStyle(event.currentTarget.value)} /></label>
             <label><span>Camera</span><input value={camera} onChange={(event) => setCamera(event.currentTarget.value)} /></label>
           </div>
+          <div className="template-drawer-preview-grid" aria-label="模块素材预览">
+            {modulePreviewCards.map((card) => {
+              const previewAsset = assets.find((asset) => asset.asset_type === card.type && (asset.thumbnail_url || asset.url));
+              return (
+                <article className="template-drawer-preview-card" key={card.label}>
+                  <div className="template-drawer-preview-thumb">
+                    {previewAsset ? <img src={previewAsset.thumbnail_url || previewAsset.url} alt="" /> : <span>无预览</span>}
+                  </div>
+                  <div>
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <small>{previewAsset?.label || '可在资产页绑定参考素材'}</small>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </section>
 
         <section className="template-drawer-section">
@@ -264,56 +317,77 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
           <label><span>Style Prompt</span><textarea value={stylePrompt} onChange={(event) => setStylePrompt(event.currentTarget.value)} rows={3} /></label>
           <label><span>Global Prompt</span><textarea value={globalPrompt} onChange={(event) => setGlobalPrompt(event.currentTarget.value)} rows={3} /></label>
         </section>
+        <section className="template-drawer-section">
+          <h3>Temporal 策略</h3>
+          <div className="template-drawer-check-row">
+            <label><input type="checkbox" checked={segmentEnabled} onChange={(event) => setSegmentEnabled(event.currentTarget.checked)} /> 启用分段</label>
+            <label><input type="checkbox" checked={handoff} onChange={(event) => setHandoff(event.currentTarget.checked)} /> 启用帧传递</label>
+          </div>
+          <label>
+            <span>默认分段秒数</span>
+            <input type="number" min={5} max={60} value={segment} onChange={(event) => setSegment(Number(event.currentTarget.value) || 15)} />
+          </label>
+        </section>
+        </>
+        )}
 
+        {activeTab === 'assets' && (
         <section className="template-drawer-section">
           <h3>固定素材</h3>
           <div className="template-asset-editor-list">
-            {assets.map((asset, index) => (
-              <div className="template-asset-editor-row" key={`${asset.asset_type}-${index}`}>
-                <select
-                  value={asset.asset_type}
-                  onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
-                    itemIndex === index ? { ...item, asset_type: event.currentTarget.value as TemplateAssetType } : item
-                  )))}
-                >
-                  {assetTypes.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}
-                </select>
-                <input
-                  value={asset.label}
-                  onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
-                    itemIndex === index ? { ...item, label: event.currentTarget.value } : item
-                  )))}
-                  placeholder="素材名称"
-                />
-                <input
-                  value={asset.url}
-                  onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
-                    itemIndex === index ? { ...item, url: event.currentTarget.value } : item
-                  )))}
-                  placeholder="素材 URL"
-                />
-                <input
-                  value={asset.thumbnail_url}
-                  onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
-                    itemIndex === index ? { ...item, thumbnail_url: event.currentTarget.value } : item
-                  )))}
-                  placeholder="缩略图 URL"
-                />
-                <input
-                  value={asset.reference_image_id}
-                  onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
-                    itemIndex === index ? { ...item, reference_image_id: event.currentTarget.value } : item
-                  )))}
-                  placeholder="ReferenceImage ID"
-                />
-                <button
-                  type="button"
-                  onClick={() => setAssets((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                >
-                  删除
-                </button>
-              </div>
-            ))}
+            {assets.map((asset, index) => {
+              const previewUrl = asset.thumbnail_url || asset.url;
+              return (
+                <div className="template-asset-editor-row" key={`${asset.asset_type}-${index}`}>
+                  <div className="template-asset-editor-thumb">
+                    {previewUrl ? <img src={previewUrl} alt="" /> : <span>暂无</span>}
+                  </div>
+                  <select
+                    value={asset.asset_type}
+                    onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, asset_type: event.currentTarget.value as TemplateAssetType } : item
+                    )))}
+                  >
+                    {assetTypes.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}
+                  </select>
+                  <input
+                    value={asset.label}
+                    onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, label: event.currentTarget.value } : item
+                    )))}
+                    placeholder="素材名称"
+                  />
+                  <input
+                    value={asset.url}
+                    onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, url: event.currentTarget.value } : item
+                    )))}
+                    placeholder="素材 URL"
+                  />
+                  <input
+                    value={asset.thumbnail_url}
+                    onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, thumbnail_url: event.currentTarget.value } : item
+                    )))}
+                    placeholder="缩略图 URL"
+                  />
+                  <input
+                    value={asset.reference_image_id}
+                    onChange={(event) => setAssets((current) => current.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, reference_image_id: event.currentTarget.value } : item
+                    )))}
+                    placeholder="ReferenceImage ID"
+                  />
+                  <small>{asset.reference_image_id ? '来源：参考图资产' : previewUrl ? '来源：外部素材 URL' : '来源：待补充'}</small>
+                  <button
+                    type="button"
+                    onClick={() => setAssets((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    删除
+                  </button>
+                </div>
+              );
+            })}
           </div>
           <button
             type="button"
@@ -326,42 +400,71 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, on
             增加素材
           </button>
         </section>
+        )}
 
+        {activeTab === 'rules' && (
         <section className="template-drawer-section">
           <h3>规则集合 <small>{ruleCount} 条</small></h3>
-          {ruleTypes.map((rule) => (
-            <label key={rule.key}>
-              <span>{rule.label}</span>
-              <textarea
-                value={rule.key === 'must' ? mustRules : rule.key === 'forbid' ? forbidRules : suggestRules}
-                onChange={(event) => {
-                  if (rule.key === 'must') setMustRules(event.currentTarget.value);
-                  if (rule.key === 'forbid') setForbidRules(event.currentTarget.value);
-                  if (rule.key === 'suggest') setSuggestRules(event.currentTarget.value);
-                }}
-                rows={4}
-                placeholder="每行一条规则"
-              />
-            </label>
-          ))}
+          {ruleTypes.map((rule) => {
+            const indexedRules = ruleDrafts
+              .map((draft, index) => ({ draft, index }))
+              .filter((item) => item.draft.rule_type === rule.key);
+            const activeCount = indexedRules.filter((item) => item.draft.status === 'active' && item.draft.content.trim()).length;
+            return (
+            <div className="template-rule-editor-block" key={rule.key}>
+              <div className="template-rule-editor-head">
+                <span>{rule.label} · {activeCount}/{indexedRules.length} 启用</span>
+                <small>默认 P{rule.key === 'suggest' ? 60 : 90}</small>
+                <button type="button" onClick={() => addRuleDraft(rule.key)}>新增规则</button>
+              </div>
+              {indexedRules.length === 0 ? (
+                <p className="template-rule-editor-empty">暂无规则，点击新增规则。</p>
+              ) : indexedRules.map(({ draft, index }) => (
+                <div className="template-rule-editor-row" key={`${draft.rule_type}-${index}`}>
+                  <select
+                    value={draft.status}
+                    onChange={(event) => updateRuleDraft(index, { status: event.currentTarget.value })}
+                    aria-label={`${rule.label} 启停状态`}
+                  >
+                    <option value="active">启用</option>
+                    <option value="disabled">停用</option>
+                  </select>
+                  <label>
+                    <span>优先级</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={draft.priority}
+                      onChange={(event) => updateRuleDraft(index, { priority: Number(event.currentTarget.value) || 1 })}
+                    />
+                  </label>
+                  <textarea
+                    aria-label={`${rule.label} 规则内容`}
+                    value={draft.content}
+                    onChange={(event) => updateRuleDraft(index, { content: event.currentTarget.value })}
+                    rows={2}
+                    placeholder="输入单条规则"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRuleDrafts((current) => current.filter((_, ruleIndex) => ruleIndex !== index))}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          );
+          })}
         </section>
-
-        <section className="template-drawer-section">
-          <h3>Temporal 策略</h3>
-          <div className="template-drawer-check-row">
-            <label><input type="checkbox" checked={segmentEnabled} onChange={(event) => setSegmentEnabled(event.currentTarget.checked)} /> 启用分段</label>
-            <label><input type="checkbox" checked={handoff} onChange={(event) => setHandoff(event.currentTarget.checked)} /> 启用帧传递</label>
-          </div>
-          <label>
-            <span>默认分段秒数</span>
-            <input type="number" min={5} max={60} value={segment} onChange={(event) => setSegment(Number(event.currentTarget.value) || 15)} />
-          </label>
-        </section>
+        )}
 
         <footer className="template-drawer-actions">
+          <button type="button" disabled title="下一批接入模板变更记录">查看变更记录</button>
           <button type="button" onClick={handleClose}>取消</button>
           <button type="button" className="is-primary" onClick={handleSubmit} disabled={saving || !name.trim()}>
-            {saving ? '保存中...' : '保存模板'}
+            {saving ? '保存中...' : '保存为新版本'}
           </button>
         </footer>
       </aside>

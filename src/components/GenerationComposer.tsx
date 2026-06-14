@@ -156,6 +156,8 @@ interface Props {
   onReset: () => void;
   selectedVideoCardId?: string | null;
   canManageTemplates?: boolean;
+  templateMode?: 'disabled' | 'workbench';
+  resultReturnTo?: string;
 }
 
 export function GenerationComposer({
@@ -177,8 +179,11 @@ export function GenerationComposer({
   require1080pApproval,
   selectedVideoCardId,
   canManageTemplates = false,
+  templateMode = 'disabled',
+  resultReturnTo = '/generate',
 }: Props) {
   const workspace = useWorkspace();
+  const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
@@ -225,8 +230,9 @@ export function GenerationComposer({
   const need1080pApproval = require1080pApproval && resolution === '1080p';
   const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
   const selectedTemplate = useMemo(() => {
+    if (!templateEnabled) return null;
     return templates.find((template) => template.id === selectedTemplateId) || templates[0] || null;
-  }, [selectedTemplateId, templates]);
+  }, [selectedTemplateId, templateEnabled, templates]);
 
   // ============================================================================
   // Validation
@@ -403,17 +409,18 @@ export function GenerationComposer({
   }, [refreshReferenceAlbums]);
 
   useEffect(() => {
+    if (!templateEnabled) return;
     void loadTemplates();
-  }, [loadTemplates]);
+  }, [loadTemplates, templateEnabled]);
 
   useEffect(() => {
-    if (!selectedTemplate || reuseDraft) return;
+    if (!templateEnabled || !selectedTemplate || reuseDraft) return;
     if (appliedTemplateDefaultsRef.current === selectedTemplate.id) return;
     appliedTemplateDefaultsRef.current = selectedTemplate.id;
     if (selectedTemplate.defaults.ratio) setRatio(selectedTemplate.defaults.ratio as VideoRatio);
     if (selectedTemplate.defaults.duration) setDuration(selectedTemplate.defaults.duration as VideoDuration);
     if (selectedTemplate.defaults.resolution) setResolution(selectedTemplate.defaults.resolution as VideoResolution);
-  }, [reuseDraft, selectedTemplate]);
+  }, [reuseDraft, selectedTemplate, templateEnabled]);
 
   useEffect(() => {
     if (!mentionNotice) return;
@@ -809,6 +816,7 @@ export function GenerationComposer({
   return (
     <>
       <div className="generation-composer">
+        {templateEnabled && (
         <section className="template-workbench" aria-label="模板驱动生成">
           <div className="template-workbench-header">
             <div>
@@ -845,8 +853,8 @@ export function GenerationComposer({
                   >
                     编辑模板
                   </button>
-                  <a className="template-workbench-admin-link" href="/admin/agent-runs">
-                    执行链路
+                  <a className="template-workbench-admin-link" href={agentRunId ? `/admin/agent-runs/${agentRunId}` : '/admin/agent-runs'}>
+                    查看链路
                   </a>
                 </div>
               )}
@@ -921,17 +929,28 @@ export function GenerationComposer({
           {agentPlans.length > 0 && (
             <div className="template-plan-grid" aria-label="Agent 生成方案">
               {agentPlans.map((plan) => (
-                <button
+                <article
                   key={plan.key}
-                  type="button"
                   className={`template-plan-card ${selectedPlanKey === plan.key ? 'is-selected' : ''}`}
-                  onClick={() => handleSelectPlan(plan)}
                 >
-                  <span className="template-plan-key">{plan.key}</span>
-                  <strong>{plan.title}</strong>
-                  <small>{plan.angle}</small>
-                  <em>{plan.fit}</em>
-                </button>
+                  <button type="button" className="template-plan-card-main" onClick={() => handleSelectPlan(plan)}>
+                    <span className="template-plan-thumb" aria-hidden="true">
+                      <span>{plan.key}</span>
+                      <small>{selectedTemplate?.temporal.enabled ? `${selectedTemplate.temporal.segment}s` : `${duration}s`}</small>
+                    </span>
+                    <span className="template-plan-card-copy">
+                      <span className="template-plan-key">{plan.key}</span>
+                      <strong>{plan.title}</strong>
+                      <small>{plan.angle}</small>
+                      <em>{plan.fit}</em>
+                    </span>
+                  </button>
+                  <div className="template-plan-card-actions">
+                    <button type="button" onClick={() => handleSelectPlan(plan)}>查看 Prompt</button>
+                    <button type="button" onClick={() => handleSelectPlan(plan)}>继续修改</button>
+                    <button type="button" className="is-primary" onClick={() => handleSelectPlan(plan)}>生成此方案</button>
+                  </div>
+                </article>
               ))}
             </div>
           )}
@@ -957,6 +976,7 @@ export function GenerationComposer({
             )}
           </div>
         </section>
+        )}
 
         {/* 图集工具条 */}
         <ImageSetToolbar
@@ -1049,7 +1069,7 @@ export function GenerationComposer({
               </small>
             </div>
             <div className="composer-queue-actions">
-              <a href={taskDetailHref(result.id, '/generate')} className="composer-result-link">查看详情</a>
+              <a href={taskDetailHref(result.id, resultReturnTo)} className="composer-result-link">查看详情</a>
               <button type="button" className="composer-result-reset" onClick={onReset}>
                 收起
               </button>
@@ -1117,14 +1137,16 @@ export function GenerationComposer({
         onConfirm={handleAddUploadedAssets}
       />
 
-      <TemplateEditorDrawer
-        open={templateDrawerOpen}
-        template={selectedTemplate}
-        saving={templateSaveBusy}
-        error={templateSaveError}
-        onClose={() => setTemplateDrawerOpen(false)}
-        onSave={handleSaveTemplate}
-      />
+      {templateEnabled && (
+        <TemplateEditorDrawer
+          open={templateDrawerOpen}
+          template={selectedTemplate}
+          saving={templateSaveBusy}
+          error={templateSaveError}
+          onClose={() => setTemplateDrawerOpen(false)}
+          onSave={handleSaveTemplate}
+        />
+      )}
     </>
   );
 }

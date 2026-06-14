@@ -300,6 +300,16 @@
 - 验证结果：`npx prisma validate`、`npm run db:generate`、`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`NEXT_DIST_DIR=.next-prod-dry-run npm run build`、`/tmp` SQLite approval smoke、`youdoo-sites build/restart/status sd2` 和公网 `/approvals`/`api/approvals` 验证通过。
 - 可复用经验：任何高成本动作的“确认”都应拆成两层：前端确认只负责交互意图，后端必须验证可追溯审批实体；拒绝原因也要从审批记录回流到触发页面。
 
+## 2026-06-14 - 模板生成必须作为独立任务面落地
+
+- 问题/背景：用户指出截图里的模板生成页不是普通 `/generate` 的增强版，而是独立的模板生成页面；之前把模板工作台塞进普通生成页，导致信息架构共生、普通生成变复杂、todo 状态也容易误判。
+- 诱因/根因：表面上都是“生成视频”，但普通生成的第一性原理是自由 Prompt/素材驱动，模板生成的第一性原理是固定品牌、角色、Logo、规则后让用户只输入本次变量并选择方案；两条路径的主任务不同，不能共用同一个首屏。
+- 当时思路：不删除既有能力，而是给 `GenerationComposer` 增加模板模式开关；普通 `/generate` 默认关闭模板工作台，新增 `/template-generate` 独立外壳承载模板页，模板抽屉和 Agent 链路页按截图补齐信息层级。
+- 改动位置：`src/app/template-generate/page.tsx`、`src/components/templates/TemplateGenerateClient.tsx`、`src/components/GenerationComposer.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/app/admin/agent-runs/[id]/page.tsx`、`src/app/templates/page.tsx`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：新增独立模板生成路由；模板页顶部明确项目/视频卡归属和模板生成任务；`GenerationComposer` 通过 `templateMode="workbench"` 才显示模板区、需求区、方案卡和 Prompt 预览；普通生成页默认不加载模板工作台；模板抽屉改为 `模块 / 规则 / 资产`；Agent 链路详情增加 9 步链路卡、规则命中和输入输出对比。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect` 通过；本地 `http://localhost:3100/template-generate` 返回 200 且包含模板生成页首屏，`/generate` 仍按普通生成页登录保护跳转。
+- 可复用经验：当用户纠正“这不是同一个页面”时，优先按主任务和第一性原理拆页面，不要只靠显隐开关把两个工作流堆在一个页面里；保留功能不等于同屏暴露，低频配置进抽屉，调试证据进链路页，主页面只服务用户最短生成路径。
+
 ## 2026-06-13 - 反馈消单必须区分已验证闭环和高风险未闭环
 
 - 问题/背景：用户要求把反馈页未完成项一次性落地并自动消单，其中同时包含 UI 细节、生成者头像、通知中心和项目代付。
@@ -329,3 +339,13 @@
 - 怎么改：`project_create` 通过后创建 `type='public'` 项目、项目负责人关系和预算账户；`budget_increase` 通过后调用 `adjustProjectBudget` 写入 `ProjectBudgetLedger`；拒绝只记录决策原因，不改预算。
 - 验证结果：`npx tsx scripts/approval-effects-smoke.ts` 通过，脚本验证公共项目创建、初始预算流水、追加预算通过入账、追加预算拒绝不入账、操作日志写入，并主动回滚测试数据。
 - 可复用经验：审批类需求的完成标准必须是“记录 + 权限 + 业务副作用 + 失败/拒绝不半更新 + 可回证验证”，不能把审批状态字段当成业务闭环。
+
+## 2026-06-14 - Agent 链路页必须和实际落库步骤同源
+
+- 问题/背景：模板生成链路页已经按 9 步产品流程展示，但 `/api/agent/template-plans` 只写入 6 步，且存在 `memory_apply` 这种不在页面定义里的旧 key。
+- 诱因/根因：只从页面信息架构出发补 UI，没有同时检查 Agent Run 的真实写入路径，导致链路卡能显示，但真实时间线会缺步骤。
+- 当时思路：把 API 写入事件同步成 `Intent -> Template Load -> Module Composer -> Rule Engine -> Prompt Compiler -> Plan Generator -> Validator -> Seedance Execution -> Memory Record`，页面只负责读取同一组 key；导出报告和页面展示统一走脱敏函数。
+- 改动位置：`src/app/api/agent/template-plans/route.ts`、`src/app/admin/agent-runs/[id]/page.tsx`、`src/components/agent/AgentRunTraceActions.tsx`。
+- 怎么改：创建 Agent Run 时落库 9 个步骤；尚未提交 Seedance 的步骤明确标记为 `pending_submit`；执行链路详情页增加 Trace 复制、报告导出、自动刷新、错误摘要，并对 token、cookie、密钥和 URL 字段脱敏。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect` 和本地 `/template-generate` HTTP smoke 通过；线上部署验证待执行。
+- 可复用经验：调试链路页不是静态流程图。每一个 UI 步骤都必须能追溯到真实写入事件；如果产品流程调整，先改写入 key，再改页面展示和导出，否则排查时会看到“漂亮但不可信”的链路。

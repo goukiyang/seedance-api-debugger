@@ -288,6 +288,11 @@ type SelectionState = {
 
 - `/generate` 当前由 `src/app/generate/page.tsx` 承载，负责项目/视频卡选择、最近任务、复用草稿和提交状态。
 - 生成输入区当前由 `src/components/GenerationComposer.tsx` 承载，已有参考图、图集、Prompt 输入、Seedance 参数、1080p 审批提示和提交入口。
+- 本轮已落地：新增独立 `/template-generate` 模板生成页；`/templates` 改跳转到独立模板生成页；普通 `/generate` 默认不显示模板工作台。
+- 本轮已落地：模板编辑抽屉按 `模块 / 规则 / 资产` 重构，支持模块预览、素材缩略图、规则逐条新增/编辑/删除/启停/优先级。
+- 本轮已落地：Agent 执行链路详情改为 9 步 Trace，支持复制 Trace ID、导出脱敏报告、自动刷新、规则命中、输入输出对比和时间线耗时。
+- 本轮已落地：模板生成最近任务保持截图第一视觉入口，并在管理员态提供直达执行链路入口。
+- 本轮待闭环：`sd2.youdoodesign.com/template-generate` 线上部署和登录态视觉走查。
 - Prompt 编辑当前由 `src/components/PromptEditor.tsx` 承载，已有 `@图片N` mention 和放大编辑。
 - 画布页已有轻量 Agent 卡入口，位置在 `src/components/canvas/full/nodes.tsx`，但它不是本 PRD 的主入口。
 - `/templates` 当前在 `src/app/templates/page.tsx` 直接重定向到 `/generate`；模板管理第一版已通过 `/generate` 内管理员右侧抽屉承载。
@@ -637,6 +642,22 @@ type SelectionState = {
 - 已验证：本地 smoke 读取默认模板后生成 A/B/C/D 四方案，默认模板包含 4 条规则、4 个提示词块和 3 个素材占位。
 - 已验证：本地 dev server `http://localhost:3001/generate` 可访问；当前 in-app browser 无登录态，被重定向到 `/login?next=/generate`，因此认证后的桌面/移动端 UI 目测仍待登录后复核。
 - 未执行：按用户要求暂不部署，不执行 `youdoo-sites build/restart/status`，线上 `sd2.youdoodesign.com` 尚未加载本轮改动。
+
+### Review - 2026-06-14 独立模板生成页本地落地
+
+- 已实现：新增 `/template-generate` 独立页面和 `TemplateGenerateClient`，顶部明确为“模板生成工作台”，包含进入画布模式、查看我的项目、项目/视频卡归属、本次需求、模板方案、Prompt 预览、参数确认和最近任务。
+- 已实现：`GenerationComposer` 增加 `templateMode`，普通 `/generate` 默认关闭模板工作台；独立模板页显式启用模板工作台并复用素材、Prompt、参数和任务创建能力。
+- 已实现：`/templates` 不再重定向到普通 `/generate`，改为进入 `/template-generate`。
+- 已实现：模板编辑抽屉改为 `模块 / 规则 / 资产` 三段，保留未保存确认，底部补 `查看变更记录 / 取消 / 保存为新版本`。
+- 已实现：模板编辑抽屉补模块预览卡、资产缩略图、素材来源说明、增加/删除素材入口；规则页改为逐条规则编辑，支持分组计数、新增、编辑、删除、启停和优先级。
+- 已实现：Agent Run 详情页补 9 步链路卡、规则命中面板、输入/输出对比面板、复制 Trace ID、导出报告、自动刷新、规则来源模块和 Seedance payload 摘要。
+- 已实现：`/api/agent/template-plans` 实际落库 9 步 Trace，执行链路页展示和导出报告统一脱敏 token、cookie、密钥和直链字段。
+- 已实现：管理员可从模板生成页顶部、最近任务卡、任务详情页和 Agent Run 列表进入执行链路，并能返回模板生成或任务详情。
+- 已实现：模板页最近任务保留截图/缩略图第一视觉入口，无图时稳定显示“暂无截图”占位。
+- 已验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/templates/TemplateGenerateClient.tsx src/components/GenerationComposer.tsx src/components/templates/TemplateEditorDrawer.tsx 'src/app/admin/agent-runs/[id]/page.tsx'` 通过。
+- 已验证：本地 dev server `http://localhost:3100/template-generate` 返回 200，HTML 包含 `模板生成工作台` 和 `app/template-generate/page.js`；`http://localhost:3100/generate` 仍按普通生成页登录保护跳转 `/login?next=%2Fgenerate`。
+- 未验证：Playwright 未安装，未完成自动截图和登录态交互验收；当前验证以构建、HTML smoke 和无登录态路由为准。
+- 未执行：尚未部署 `sd2`，线上 `sd2.youdoodesign.com/template-generate` 未闭环；登录态视觉走查仍待部署后或可复用登录态下实测。
 
 ## 已落地基线，后续不要重复做
 
