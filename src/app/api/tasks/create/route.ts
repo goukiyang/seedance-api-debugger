@@ -101,6 +101,18 @@ export async function POST(request: NextRequest) {
   const duration: VideoDuration = body.duration || 5;
   const resolution: VideoResolution = body.resolution || '720p';
   const resolutionApprovalConfirmed = body.resolution_approval_confirmed === true || body.resolutionApprovalConfirmed === true;
+  const requestedTemplateId = typeof body.template_id === 'string' && body.template_id.trim() ? body.template_id.trim() : null;
+  const requestedAgentRunId = typeof body.agent_run_id === 'string' && body.agent_run_id.trim() ? body.agent_run_id.trim() : null;
+  const selectedAgentPlanKey = typeof body.selected_agent_plan_key === 'string' && body.selected_agent_plan_key.trim()
+    ? body.selected_agent_plan_key.trim().slice(0, 16)
+    : null;
+  const agentPromptSnapshot = typeof body.agent_prompt_snapshot === 'string' && body.agent_prompt_snapshot.trim()
+    ? body.agent_prompt_snapshot.trim().slice(0, 12000)
+    : null;
+  const finalPromptSnapshot = typeof body.final_prompt_snapshot === 'string' && body.final_prompt_snapshot.trim()
+    ? body.final_prompt_snapshot.trim().slice(0, 12000)
+    : body.prompt.trim();
+  const promptUserEdited = body.prompt_user_edited === true;
 
   if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
   if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
@@ -144,6 +156,33 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;
+  }
+
+  let generationTemplate: { id: string; status: string } | null = null;
+  if (requestedTemplateId) {
+    generationTemplate = await prisma.generationTemplate.findFirst({
+      where: {
+        id: requestedTemplateId,
+        OR: user.role === 'admin' ? [{ status: { in: ['draft', 'active'] } }] : [{ status: 'active' }],
+      },
+      select: { id: true, status: true },
+    });
+    if (!generationTemplate) return errorJson('模板不存在或不可用', 404);
+  }
+
+  let agentRun: { id: string; template_id: string; user_id: string; video_card_id: string | null } | null = null;
+  if (requestedAgentRunId) {
+    agentRun = await prisma.agentRun.findUnique({
+      where: { id: requestedAgentRunId },
+      select: { id: true, template_id: true, user_id: true, video_card_id: true },
+    });
+    if (!agentRun) return errorJson('Agent 执行链路不存在', 404);
+    if (agentRun.user_id !== user.id && user.role !== 'admin') return errorJson('Agent 执行链路不属于当前用户', 403);
+    if (generationTemplate && agentRun.template_id !== generationTemplate.id) return errorJson('Agent 执行链路与当前模板不一致', 400);
+    if (agentRun.video_card_id && agentRun.video_card_id !== videoCard.id) return errorJson('Agent 执行链路与当前视频卡不一致', 400);
+    if (!generationTemplate) {
+      generationTemplate = { id: agentRun.template_id, status: 'active' };
+    }
   }
 
   if (project.type !== 'personal' && resolution === '1080p') {
@@ -205,6 +244,9 @@ export async function POST(request: NextRequest) {
         source_request_id: existing.source_request_id,
         project_id: existing.project_id,
         video_card_id: existing.video_card_id,
+        template_id: existing.template_id,
+        agent_run_id: existing.agent_run_id,
+        selected_agent_plan_key: existing.selected_agent_plan_key,
         billing_scope: existing.billing_scope,
         billing_account_id: existing.billing_account_id,
       });
@@ -472,6 +514,12 @@ export async function POST(request: NextRequest) {
           owner_user_id: user.id,
           project_id: project.id,
           video_card_id: videoCard.id,
+          template_id: generationTemplate?.id || null,
+          agent_run_id: agentRun?.id || null,
+          selected_agent_plan_key: selectedAgentPlanKey,
+          agent_prompt_snapshot: agentPromptSnapshot,
+          final_prompt_snapshot: finalPromptSnapshot,
+          prompt_user_edited: promptUserEdited,
           visibility: project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
           frozen_cost: estimatedCost,
@@ -488,6 +536,10 @@ export async function POST(request: NextRequest) {
             referenceAlbumIds: generationReferenceAlbumIds,
             referenceImageIds: generationReferenceImageIds,
             videoCardId: videoCard.id,
+            templateId: generationTemplate?.id || null,
+            agentRunId: agentRun?.id || null,
+            selectedAgentPlanKey,
+            promptUserEdited,
             preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
             prepSummary,
             source: {
@@ -556,6 +608,9 @@ export async function POST(request: NextRequest) {
           detail: JSON.stringify({
             project_id: project.id,
             video_card_id: videoCard.id,
+            template_id: generationTemplate?.id || null,
+            agent_run_id: agentRun?.id || null,
+            selected_agent_plan_key: selectedAgentPlanKey,
             owner_user_id: user.id,
             estimated_cost: estimatedCost,
             billing_scope: billingScope,
@@ -571,6 +626,34 @@ export async function POST(request: NextRequest) {
       });
 
       await recordTaskCostEstimate(tx, task, pricing, user.id);
+
+      if (agentRun) {
+        await tx.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            video_task_id: task.id,
+            video_card_id: videoCard.id,
+            status: 'submitted',
+            selected_plan_key: selectedAgentPlanKey || undefined,
+            final_prompt_snapshot: finalPromptSnapshot,
+            user_edited: promptUserEdited,
+          },
+        });
+        if (selectedAgentPlanKey) {
+          await tx.templateMemory.create({
+            data: {
+              template_id: generationTemplate?.id || agentRun.template_id,
+              user_id: user.id,
+              agent_run_id: agentRun.id,
+              video_task_id: task.id,
+              memory_type: 'plan_selected',
+              signal: 'positive',
+              summary: `用户选择了方案 ${selectedAgentPlanKey}`,
+              metadata_json: JSON.stringify({ planKey: selectedAgentPlanKey, prompt_user_edited: promptUserEdited }),
+            },
+          });
+        }
+      }
 
       return task;
     });
@@ -634,6 +717,42 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    if (agentRun) {
+      await prisma.$transaction(async (tx) => {
+        await tx.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            status: 'submitted',
+            video_task_id: taskId,
+            final_prompt_snapshot: finalPromptSnapshot,
+            user_edited: promptUserEdited,
+          },
+        });
+        await tx.agentRunStep.create({
+          data: {
+            agent_run_id: agentRun.id,
+            step_key: 'seedance_submit',
+            title: 'Seedance 执行',
+            input_json: JSON.stringify({ task_id: taskId, template_id: generationTemplate?.id || null }),
+            output_json: JSON.stringify({ provider_task_id: providerResult.provider_task_id, status: 'submitted' }),
+            sort_order: 6,
+          },
+        });
+        await tx.templateMemory.create({
+          data: {
+            template_id: generationTemplate?.id || agentRun.template_id,
+            user_id: user.id,
+            agent_run_id: agentRun.id,
+            video_task_id: taskId,
+            memory_type: 'task_result',
+            signal: 'neutral',
+            summary: '任务已提交 Seedance，等待生成结果回写',
+            metadata_json: JSON.stringify({ provider_task_id: providerResult.provider_task_id }),
+          },
+        });
+      });
+    }
+
     startTaskLocalization(taskId);
 
     return NextResponse.json({
@@ -646,6 +765,9 @@ export async function POST(request: NextRequest) {
       workspace_id: workspaceId,
       project_id: project.id,
       video_card_id: videoCard.id,
+      template_id: generationTemplate?.id || null,
+      agent_run_id: agentRun?.id || null,
+      selected_agent_plan_key: selectedAgentPlanKey,
       billing_scope: billingScope,
       billing_account_id: billingAccountId,
       snapshot_id: snapshot.id,
@@ -672,6 +794,40 @@ export async function POST(request: NextRequest) {
       estimatedCost,
       err instanceof Error ? err.message : 'Seedance 调用异常',
     );
+    if (agentRun) {
+      await prisma.$transaction(async (tx) => {
+        await tx.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            status: 'failed',
+            error_message: err instanceof Error ? err.message : 'Seedance 调用异常',
+            completed_at: new Date(),
+          },
+        });
+        await tx.agentRunStep.create({
+          data: {
+            agent_run_id: agentRun.id,
+            step_key: 'seedance_failed',
+            title: 'Seedance 执行失败',
+            input_json: JSON.stringify({ task_id: taskId }),
+            output_json: JSON.stringify({ error: err instanceof Error ? err.message : 'Seedance 调用异常' }),
+            sort_order: 6,
+          },
+        });
+        await tx.templateMemory.create({
+          data: {
+            template_id: generationTemplate?.id || agentRun.template_id,
+            user_id: user.id,
+            agent_run_id: agentRun.id,
+            video_task_id: taskId,
+            memory_type: 'task_result',
+            signal: 'negative',
+            summary: 'Seedance 提交失败，已返还冻结点数',
+            metadata_json: JSON.stringify({ error: err instanceof Error ? err.message : 'Seedance 调用异常' }),
+          },
+        });
+      }).catch(() => {});
+    }
     return NextResponse.json(
       {
         error: 'PROVIDER_CREATE_FAILED',

@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-14 - 模板 Agent 落地要优先保护现有数据库字段
+
+- 问题/背景：Seedance 2.0 模板驱动 Agent 工作台新增模板、规则、AgentRun、Memory 和任务快照字段，需要同步本地 SQLite 验证默认模板与四方案生成。
+- 诱因/根因：本地数据库已有历史表和字段，但 `_prisma_migrations` 缺少部分旧迁移记录；`prisma migrate deploy` 会卡在早期已存在表，`prisma db push` 又提示会删除旧字段 `VideoCard.ratio_locked`。
+- 当时思路：先备份 `prisma/dev.db`，拒绝 `db push --accept-data-loss`，只手动应用本次新增迁移 SQL，避免为了新功能破坏既有视频卡比例数据。
+- 改动位置：`prisma/schema.prisma`、`prisma/migrations/20260614093000_add_template_agent_workbench/migration.sql`、`src/components/GenerationComposer.tsx`、`src/app/api/tasks/create/route.ts`、`src/app/api/templates/*`、`src/app/api/agent/*`。
+- 怎么改：模板/规则/Prompt/AgentRun/Memory 使用最小可用模型；生成页保留原有项目、视频卡、参考图和 Seedance 参数，只在上方增加模板、需求、方案和 Prompt 预览主路径；任务创建写入模板和 Agent 快照。
+- 验证结果：`npx prisma validate`、`npm run db:generate`、`npx tsc --noEmit --pretty false`、局部 `npm run lint`、`npm run build` 通过；本地 smoke 生成默认模板 A/B/C/D 四方案。
+- 可复用经验：Prisma 迁移状态和实际 SQLite schema 不一致时，不要用 `db push --accept-data-loss` 图快；先备份，再只应用本次新增的非破坏性 SQL，保留历史字段和用户数据。
+
 ## 2026-06-13 - 新建入口必须暴露账务口径
 
 - 问题/背景：公共项目预算池上线后，用户在新建项目时看不到当前项目会走默认个人积分记账还是公共项目预算记账。
@@ -9,6 +19,16 @@
 - 怎么改：新增记账方式单选区；默认记账提交创建 `team` 项目；预算记账带项目名和说明跳转 `/approvals?type=project_create`；审批中心读取 URL 预填审批类型和申请理由；项目卡显示“记账：默认记账/预算记账”。
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`NEXT_DIST_DIR=.next-prod-dry-run npm run build` 已通过；公网 `/projects` 返回 200 且包含默认记账和预算记账；浏览器验证预算单选按钮会切换提交按钮，审批页 query 能预填公共项目立项和申请理由。
 - 可复用经验：任何账务、权限、审批或可见状态规则发生变化，必须检查“创建入口、列表、详情页、执行动作、错误提示”五个位置是否都同步解释清楚。
+
+## 2026-06-13 - 趋势图不能用抽样隐藏关键每日桶
+
+- 问题/背景：每日生成量与成本图在本月有 13 个日桶时，前端只显著呈现了少量标签和节点，用户看到像“只有两个”，且柱状位置和实际数据感知不一致。
+- 诱因/根因：前端把所有日期压进固定 300px 坐标系，并用抽样逻辑隐藏日期/成本标签；数据桶本身是完整的，但呈现层压缩和省略让用户无法逐日核对。
+- 当时思路：先用服务端聚合函数验证真实日桶数量和非零日期，再把图表改成每个 bucket 固定宽度、可横向滚动、每柱显示次数、每个成本点保留节点和非零成本标签。
+- 改动位置：`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/globals.css`。
+- 怎么改：移除 `showTrendLabel` 抽样；按日桶数量计算 SVG 宽度；日期轴和图表放入同一滚动容器；零值日也保留稳定占位柱；tooltip 使用完整成本口径。
+- 验证结果：服务端本月日趋势为 2026-06-01 至 2026-06-13 共 13 桶，总任务 71，非零日为 06-03、06-06、06-09、06-10、06-11、06-13；`npm run lint -- --file src/app/admin/AdminGenerationDashboardClient.tsx`、`git diff --check`、`npx impeccable detect`、`NEXT_DIST_DIR=.next-prod npm run build` 通过；`sd2` 已重启，公网静态 CSS 可拉到新类名。
+- 可复用经验：数据可视化先核对后端 bucket 和真实非零日期，再定前端尺度；每日趋势图默认不能为了“看起来干净”抽样隐藏可核对的日柱、节点或日期。
 
 ## 2026-06-13 - 公共预算池上线必须先拆清读写边界
 

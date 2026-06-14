@@ -53,12 +53,12 @@ const trendGranularityOptions: Array<{ key: DashboardTrendGranularity; label: st
 ];
 
 const integerFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
-const TREND_CHART_WIDTH = 300;
-const TREND_CHART_HEIGHT = 100;
+const TREND_CHART_HEIGHT = 132;
 const TREND_CHART_LEFT = 18;
-const TREND_CHART_RIGHT = 284;
-const TREND_CHART_TOP = 14;
-const TREND_CHART_BOTTOM = 78;
+const TREND_CHART_RIGHT_PADDING = 28;
+const TREND_CHART_TOP = 22;
+const TREND_CHART_BOTTOM = 96;
+const TREND_BUCKET_WIDTH = 64;
 
 function formatCurrencyTotals(totals: DashboardCurrencyTotal[], fallback = '待官方确认') {
   if (!totals.length) return fallback;
@@ -254,9 +254,16 @@ function trendBucketClass(bucket: DashboardTrendBucket) {
   return 'is-empty';
 }
 
-function trendX(index: number, total: number) {
-  if (total <= 1) return (TREND_CHART_LEFT + TREND_CHART_RIGHT) / 2;
-  return TREND_CHART_LEFT + (index * (TREND_CHART_RIGHT - TREND_CHART_LEFT)) / (total - 1);
+function trendChartWidth(bucketCount: number) {
+  return TREND_CHART_LEFT + TREND_CHART_RIGHT_PADDING + Math.max(1, bucketCount) * TREND_BUCKET_WIDTH;
+}
+
+function trendChartRight(chartWidth: number) {
+  return chartWidth - TREND_CHART_RIGHT_PADDING;
+}
+
+function trendX(index: number) {
+  return TREND_CHART_LEFT + index * TREND_BUCKET_WIDTH + TREND_BUCKET_WIDTH / 2;
 }
 
 function trendY(value: number, max: number) {
@@ -265,81 +272,112 @@ function trendY(value: number, max: number) {
 }
 
 function trendPolyline(buckets: DashboardTrendBucket[], value: (bucket: DashboardTrendBucket) => number, max: number) {
-  return buckets.map((bucket, index) => `${trendX(index, buckets.length)},${trendY(value(bucket), max)}`).join(' ');
+  return buckets.map((bucket, index) => `${trendX(index)},${trendY(value(bucket), max)}`).join(' ');
 }
 
-function showTrendLabel(index: number, total: number) {
-  if (total <= 8) return true;
-  const step = Math.ceil(total / 6);
-  return index === 0 || index === total - 1 || index % step === 0;
+function trendCostLabelY(y: number) {
+  return y < TREND_CHART_TOP + 18 ? y + 15 : y - 7;
 }
 
 function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
   const countMax = Math.max(1, ...buckets.map((bucket) => bucket.task_count));
   const secondsMax = Math.max(1, ...buckets.map((bucket) => bucket.duration_seconds));
   const costMax = Math.max(1, ...buckets.map(trendOfficialMicros));
-  const barWidth = Math.min(14, Math.max(4, 150 / Math.max(buckets.length, 1)));
+  const chartWidth = trendChartWidth(buckets.length);
+  const chartRight = trendChartRight(chartWidth);
+  const barWidth = 26;
   const hasCost = buckets.some((bucket) => trendOfficialMicros(bucket) > 0);
   const hasSeconds = buckets.some((bucket) => bucket.duration_seconds > 0);
 
   return (
     <div className="admin-dashboard-trend-chart">
-      <svg viewBox={`0 0 ${TREND_CHART_WIDTH} ${TREND_CHART_HEIGHT}`} role="img" aria-label="生成次数、生成秒数和官方额度趋势图">
-        {[TREND_CHART_TOP, 30, 46, 62, TREND_CHART_BOTTOM].map((y) => (
-          <line className="admin-dashboard-trend-gridline" key={y} x1={TREND_CHART_LEFT} x2={TREND_CHART_RIGHT} y1={y} y2={y} />
-        ))}
-        {buckets.map((bucket, index) => {
-          const x = trendX(index, buckets.length);
-          const y = trendY(bucket.task_count, countMax);
-          return (
-            <rect
-              className="admin-dashboard-trend-bar"
-              key={bucket.key}
-              x={x - barWidth / 2}
-              y={y}
-              width={barWidth}
-              height={TREND_CHART_BOTTOM - y}
-              rx="2"
-            >
-              <title>{bucket.label}：{bucket.task_count} 次，{formatSeconds(bucket.duration_seconds)}，{formatCurrencyTotals(bucket.official_costs, '$0.00')}</title>
-            </rect>
-          );
-        })}
-        {hasSeconds && (
-          <polyline
-            className="admin-dashboard-trend-line is-seconds"
-            points={trendPolyline(buckets, (bucket) => bucket.duration_seconds, secondsMax)}
-          />
-        )}
-        {hasCost && (
-          <polyline
-            className="admin-dashboard-trend-line is-cost"
-            points={trendPolyline(buckets, trendOfficialMicros, costMax)}
-          />
-        )}
-        {buckets.map((bucket, index) => {
-          const x = trendX(index, buckets.length);
-          const costY = trendY(trendOfficialMicros(bucket), costMax);
-          const secondsY = trendY(bucket.duration_seconds, secondsMax);
-          return (
-            <g key={`${bucket.key}-points`}>
-              {hasSeconds && <circle className="admin-dashboard-trend-dot is-seconds" cx={x} cy={secondsY} r="3" />}
-              {hasCost && <circle className="admin-dashboard-trend-dot is-cost" cx={x} cy={costY} r="3" />}
-              {hasCost && showTrendLabel(index, buckets.length) && trendOfficialMicros(bucket) > 0 && (
-                <text className="admin-dashboard-trend-label" x={x} y={Math.max(9, costY - 7)} textAnchor="middle">
-                  {formatTrendCostShort(bucket)}
+      <div className="admin-dashboard-trend-viewport">
+        <svg
+          className="admin-dashboard-trend-plot"
+          width={chartWidth}
+          height={TREND_CHART_HEIGHT}
+          viewBox={`0 0 ${chartWidth} ${TREND_CHART_HEIGHT}`}
+          role="img"
+          aria-label={`生成次数、生成秒数和官方额度趋势图，共 ${buckets.length} 个时间桶`}
+        >
+          {[TREND_CHART_TOP, 40, 58, 76, TREND_CHART_BOTTOM].map((y) => (
+            <line className="admin-dashboard-trend-gridline" key={y} x1={TREND_CHART_LEFT} x2={chartRight} y1={y} y2={y} />
+          ))}
+          {buckets.map((bucket, index) => {
+            const x = trendX(index);
+            const valueY = trendY(bucket.task_count, countMax);
+            const barHeight = bucket.task_count > 0 ? TREND_CHART_BOTTOM - valueY : 2;
+            const barY = bucket.task_count > 0 ? valueY : TREND_CHART_BOTTOM - barHeight;
+            return (
+              <g key={bucket.key}>
+                <rect
+                  className={`admin-dashboard-trend-bar ${bucket.task_count > 0 ? '' : 'is-empty'}`}
+                  x={x - barWidth / 2}
+                  y={barY}
+                  width={barWidth}
+                  height={barHeight}
+                  rx="3"
+                >
+                  <title>{bucket.label}：{bucket.task_count} 次，{formatSeconds(bucket.duration_seconds)}，{formatTrendBucketCost(bucket)}</title>
+                </rect>
+                <text className="admin-dashboard-trend-count-label" x={x} y={Math.max(12, barY - 5)} textAnchor="middle">
+                  {formatInteger(bucket.task_count)}
                 </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="admin-dashboard-trend-axis" aria-hidden="true">
-        {buckets.map((bucket, index) => (
-          <span key={bucket.key} className={showTrendLabel(index, buckets.length) ? '' : 'is-muted'}>
-            {showTrendLabel(index, buckets.length) ? bucket.label : ''}
-          </span>
-        ))}
+              </g>
+            );
+          })}
+          {hasSeconds && (
+            <polyline
+              className="admin-dashboard-trend-line is-seconds"
+              points={trendPolyline(buckets, (bucket) => bucket.duration_seconds, secondsMax)}
+            />
+          )}
+          {hasCost && (
+            <polyline
+              className="admin-dashboard-trend-line is-cost"
+              points={trendPolyline(buckets, trendOfficialMicros, costMax)}
+            />
+          )}
+          {buckets.map((bucket, index) => {
+            const x = trendX(index);
+            const costMicros = trendOfficialMicros(bucket);
+            const costY = trendY(costMicros, costMax);
+            const secondsY = trendY(bucket.duration_seconds, secondsMax);
+            return (
+              <g key={`${bucket.key}-points`}>
+                {hasSeconds && (
+                  <circle className="admin-dashboard-trend-dot is-seconds" cx={x} cy={secondsY} r="3.2">
+                    <title>{bucket.label}：{formatSeconds(bucket.duration_seconds)}</title>
+                  </circle>
+                )}
+                {hasCost && (
+                  <circle className="admin-dashboard-trend-dot is-cost" cx={x} cy={costY} r="3.2">
+                    <title>{bucket.label}：{formatTrendBucketCost(bucket)}</title>
+                  </circle>
+                )}
+                {hasCost && costMicros > 0 && (
+                  <text className="admin-dashboard-trend-node-label is-cost" x={x} y={trendCostLabelY(costY)} textAnchor="middle">
+                    {formatTrendCostShort(bucket)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+        <div
+          className="admin-dashboard-trend-axis"
+          aria-hidden="true"
+          style={{
+            width: chartWidth,
+            gridTemplateColumns: `repeat(${Math.max(1, buckets.length)}, ${TREND_BUCKET_WIDTH}px)`,
+            paddingLeft: TREND_CHART_LEFT,
+            paddingRight: TREND_CHART_RIGHT_PADDING,
+          }}
+        >
+          {buckets.map((bucket) => (
+            <span key={bucket.key}>{bucket.label}</span>
+          ))}
+        </div>
       </div>
       <div className="admin-dashboard-trend-daily" aria-label="每日金额明细">
         {buckets.map((bucket) => (
