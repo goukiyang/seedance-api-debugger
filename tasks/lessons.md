@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-14 - 飞书网页登录默认走同源 302 授权入口
+
+- 问题/背景：用户反馈飞书登录显示“初始化失败”，但公网 `/api/auth/feishu/authorize-url` 直接请求能正常返回授权 URL。
+- 诱因/根因：前端登录按钮原先在同一个 `try` 中先 `fetch` JSON，再 `window.location.assign()` 跳转外部飞书域名；如果 WebView、浏览器策略或外部跳转阶段抛错，会被误归类为“初始化失败”。
+- 当时思路：把公网 OAuth 入口改成同源后端 302，前端只跳 `/api/auth/feishu/authorize`，由后端创建 state cookie 并重定向到飞书；localhost 仍保留原来的 CLI fallback。
+- 改动位置：`src/app/api/auth/feishu/authorize/route.ts`、`src/app/login/page.tsx`、`src/app/register/page.tsx`。
+- 怎么改：新增 `GET /api/auth/feishu/authorize`；登录页和注册页在非 localhost 环境直接跳同源授权入口；保留 `authorize-url` JSON 接口作为兼容和本地 fallback。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npm run build`、线上候选构建、`youdoo-sites restart/status sd2` 通过；公网 `/api/auth/feishu/authorize?next=/generate` 返回 303 到 `accounts.feishu.cn` 并写入 `feishu_oauth_state`；登录页/注册页新静态 JS 包包含同源授权入口。
+- 可复用经验：OAuth 公网页面默认不要依赖前端 fetch 后再跳第三方授权域名；登录入口应优先使用同源后端 redirect，错误状态再落到站内 callback 页面展示。
+
 ## 2026-06-14 - 新 App Router 客户端页上线前必须跑生产构建
 
 - 问题/背景：资产管理页 `/assets` 是客户端页面，使用 `useSearchParams()` 读取 `type=video` 初始筛选。
