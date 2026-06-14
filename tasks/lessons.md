@@ -369,3 +369,13 @@
 - 怎么改：创建 Agent Run 时落库 9 个步骤；尚未提交 Seedance 的步骤明确标记为 `pending_submit`；执行链路详情页增加 Trace 复制、报告导出、自动刷新、错误摘要，并对 token、cookie、密钥和 URL 字段脱敏。
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect` 和本地 `/template-generate` HTTP smoke 通过；线上部署验证待执行。
 - 可复用经验：调试链路页不是静态流程图。每一个 UI 步骤都必须能追溯到真实写入事件；如果产品流程调整，先改写入 key，再改页面展示和导出，否则排查时会看到“漂亮但不可信”的链路。
+
+## 2026-06-15 - 生产构建前隔离源码时要同时避开旧类型目录
+
+- 问题/背景：资产页图片批量动作上线前，需要临时隔离当前运行目录里的非本轮 tracked 改动和未跟踪源码目录，避免无关页面进入生产构建。
+- 诱因/根因：未跟踪源码被隔离后，旧 `.next/types` 或 `.next-prod/types` 仍可能保留这些页面的类型入口，导致 `youdoo-sites build sd2` 在 TypeScript 校验阶段找不到对应源码。
+- 当时思路：不直接删除 live `.next-prod`；构建时临时让 `tsconfig.json` 只扫描源码和 `.next-prod-candidate/types`，构建完成后立即恢复原 include。
+- 改动位置：`src/app/assets/page.tsx`、`src/app/globals.css`、`tasks/todo.md`、临时构建配置 `tsconfig.json`。
+- 怎么改：资产页补齐“加入工作区 / 加入图集 / 移动视频”批量动作；部署前 stash 非本轮源码；构建期间临时排除旧 `.next`、`.next-prod`、`.next-dev` 类型目录；部署后恢复 `tsconfig.json` 并复原工作区改动。
+- 验证结果：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网资产页 chunk 命中新批量动作；跨健康守护周期 `runs` 未增长。
+- 可复用经验：生产构建隔离源码时，不只要隔离 `src/**`，还要处理旧构建类型目录。优先用临时 `tsconfig` include 收敛来绕开旧类型引用，构建后必须恢复，避免污染仓库配置。
