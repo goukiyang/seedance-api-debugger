@@ -8,12 +8,14 @@ import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
 } from '@/lib/video/download-client';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetType = 'all' | 'video' | 'image' | 'reference';
 type AssetStatus = 'all' | 'succeeded' | 'running' | 'submitted' | 'failed' | 'cancelled' | 'hidden';
 type AssetSort = 'created_desc' | 'created_asc' | 'completed_desc' | 'project' | 'user' | 'duration';
 type AssetGroup = 'date' | 'project' | 'user';
+type AssetCardSize = 'standard' | 'compact';
 type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `reference_image:${string}`;
 
 type SessionUser = {
@@ -68,7 +70,16 @@ type AssetLibraryItem = {
   createdAt: string;
   completedAt: string | null;
   project: { id: string; name: string; type?: string | null; status?: string | null } | null;
-  owner: { id: string; displayName: string; subtitle: string } | null;
+  owner: {
+    id: string;
+    name?: string | null;
+    username?: string | null;
+    email?: string | null;
+    avatar_url?: string | null;
+    account_type?: string | null;
+    displayName: string;
+    subtitle: string;
+  } | null;
   downloadable: boolean;
   movable: boolean;
 };
@@ -127,6 +138,11 @@ const groupOptions: Array<{ id: AssetGroup; label: string; adminOnly?: boolean }
   { id: 'date', label: '按时间' },
   { id: 'project', label: '按项目' },
   { id: 'user', label: '按用户', adminOnly: true },
+];
+
+const cardSizeOptions: Array<{ id: AssetCardSize; label: string; title: string }> = [
+  { id: 'standard', label: '标准', title: '标准资产卡片尺寸' },
+  { id: 'compact', label: '2/3', title: '2/3 尺寸资产卡片' },
 ];
 
 function isAssetType(value: string | null): value is AssetType {
@@ -213,6 +229,7 @@ function AssetsPageContent() {
   const [status, setStatus] = useState<AssetStatus>('all');
   const [sort, setSort] = useState<AssetSort>('created_desc');
   const [groupBy, setGroupBy] = useState<AssetGroup>('date');
+  const [cardSize, setCardSize] = useState<AssetCardSize>('standard');
   const [projectId, setProjectId] = useState('');
   const [ownerUserId, setOwnerUserId] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -254,13 +271,13 @@ function AssetsPageContent() {
   const manageableProjects = projects.filter((project) => project.can_manage_project);
 
   const groupedItems = useMemo(() => {
-    const groups = new Map<string, { key: string; label: string; items: AssetLibraryItem[] }>();
+    const groups = new Map<string, { key: string; label: string; owner: AssetLibraryItem['owner']; items: AssetLibraryItem[] }>();
     items.forEach((item) => {
       const key = itemGroupKey(item, groupBy);
       const label = itemGroupLabel(item, groupBy);
       const current = groups.get(key);
       if (current) current.items.push(item);
-      else groups.set(key, { key, label, items: [item] });
+      else groups.set(key, { key, label, owner: groupBy === 'user' ? item.owner : null, items: [item] });
     });
     return Array.from(groups.values());
   }, [items, groupBy]);
@@ -651,6 +668,22 @@ function AssetsPageContent() {
           />
         </form>
 
+        <div className="asset-library-size-toggle" role="group" aria-label="资产卡片尺寸">
+          <span>尺寸</span>
+          {cardSizeOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={cardSize === option.id ? 'active' : ''}
+              title={option.title}
+              aria-pressed={cardSize === option.id}
+              onClick={() => setCardSize(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
         <select
           value={status}
           onChange={(event) => {
@@ -797,8 +830,19 @@ function AssetsPageContent() {
 
         {!loading && groupedItems.map((group) => (
           <section key={group.key} className="asset-library-group">
-            <h2>{group.label}</h2>
-            <div className="asset-library-grid">
+            <h2>
+              {groupBy === 'user' ? (
+                <UserIdentityBadge
+                  user={group.owner}
+                  size="sm"
+                  subtitle={group.owner?.subtitle || null}
+                  className="asset-library-group-owner"
+                />
+              ) : (
+                group.label
+              )}
+            </h2>
+            <div className={`asset-library-grid asset-library-grid-${cardSize}`}>
               {group.items.map((item) => {
                 const selected = selectedSet.has(item.id);
                 const previewed = previewSet.has(item.id);
@@ -809,7 +853,7 @@ function AssetsPageContent() {
                     ref={setCardRef(item.id)}
                     type="button"
                     data-asset-card="true"
-                    className={`asset-card ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''}`}
+                    className={`asset-card asset-card-${cardSize} ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''}`}
                     onClick={(event) => handleCardClick(event, item)}
                     onPointerDown={(event) => {
                       if (event.pointerType === 'touch') beginTouchSelect(item);
@@ -841,7 +885,13 @@ function AssetsPageContent() {
                     <span className="asset-card-meta">
                       <strong>{shortText(item.title, '未命名资产', 34)}</strong>
                       <span>{item.project?.name || '未归属项目'} · {formatDateTime(item.createdAt)}</span>
-                      {isAdmin && item.owner && <span>{item.owner.displayName}</span>}
+                      {isAdmin && item.owner && (
+                        <UserIdentityBadge
+                          user={item.owner}
+                          size="sm"
+                          className="asset-card-user"
+                        />
+                      )}
                     </span>
                   </button>
                 );
@@ -909,7 +959,14 @@ function AssetsPageContent() {
             {isAdmin && (
               <div>
                 <dt>用户</dt>
-                <dd>{activeItem.owner?.displayName || '未知用户'}</dd>
+                <dd>
+                  <UserIdentityBadge
+                    user={activeItem.owner}
+                    size="sm"
+                    subtitle={activeItem.owner?.subtitle || null}
+                    className="asset-detail-user"
+                  />
+                </dd>
               </div>
             )}
             <div>

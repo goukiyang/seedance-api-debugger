@@ -11159,13 +11159,14 @@ a {
 
 .asset-library-filter-bar {
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) repeat(4, minmax(126px, auto));
+  grid-template-columns: auto minmax(220px, 1fr) auto repeat(4, minmax(126px, auto));
   gap: 10px;
   align-items: center;
   margin-bottom: 16px;
 }
 
 .asset-library-search,
+.asset-library-size-toggle,
 .asset-library-filter-bar select,
 .asset-library-move-panel select {
   min-height: 38px;
@@ -11196,6 +11197,39 @@ a {
 
 .asset-library-search input::placeholder {
   color: oklch(0.57 0.014 245);
+}
+
+.asset-library-size-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+}
+
+.asset-library-size-toggle > span {
+  padding: 0 7px;
+  color: oklch(0.63 0.015 245);
+  font-size: 12px;
+}
+
+.asset-library-size-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  color: oklch(0.69 0.016 245);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.asset-library-size-toggle button.active {
+  color: oklch(0.96 0.01 245);
+  background: oklch(0.29 0.02 250);
 }
 
 .asset-library-filter-bar select,
@@ -11321,6 +11355,11 @@ a {
   gap: 12px;
 }
 
+.asset-library-grid-compact {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+}
+
 .asset-card {
   position: relative;
   display: grid;
@@ -11441,6 +11480,67 @@ a {
 .asset-card-meta span {
   color: oklch(0.63 0.015 245);
   font-size: 12px;
+}
+
+.asset-card-compact {
+  gap: 6px;
+}
+
+.asset-card-compact .asset-card-meta {
+  gap: 2px;
+}
+
+.asset-card-compact .asset-card-meta strong {
+  font-size: 12px;
+}
+
+.asset-card-compact .asset-card-meta > span {
+  font-size: 11px;
+}
+
+.asset-library-page .user-identity-badge {
+  max-width: 100%;
+  color: oklch(0.88 0.012 245);
+}
+
+.asset-library-page .user-identity-avatar {
+  border-color: oklch(0.45 0.025 245);
+}
+
+.asset-library-page .user-identity-name {
+  color: oklch(0.88 0.012 245);
+}
+
+.asset-library-page .user-identity-subtitle {
+  color: oklch(0.61 0.016 245);
+}
+
+.asset-card-user {
+  margin-top: 1px;
+}
+
+.asset-card-user .user-identity-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+}
+
+.asset-card-user .user-identity-name {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.asset-card-user .user-identity-subtitle {
+  display: none;
+}
+
+.asset-library-group-owner .user-identity-name {
+  color: oklch(0.92 0.01 245);
+  font-size: 15px;
+}
+
+.asset-detail-user .user-identity-name {
+  color: oklch(0.88 0.012 245);
 }
 
 .asset-library-pagination {
@@ -11579,7 +11679,8 @@ a {
   }
 
   .asset-library-type-tabs,
-  .asset-library-search {
+  .asset-library-search,
+  .asset-library-size-toggle {
     grid-column: 1 / -1;
   }
 }
@@ -11606,9 +11707,18 @@ a {
     width: 100%;
   }
 
+  .asset-library-size-toggle {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .asset-library-grid {
     grid-template-columns: repeat(auto-fill, minmax(166px, 1fr));
     gap: 10px;
+  }
+
+  .asset-library-grid-compact {
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   }
 
   .asset-card-meta strong {

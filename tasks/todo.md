@@ -4343,4 +4343,7 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 线上目录已确认：当前 `sd2` 服务实际指向 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，本次最终代码已落在该目录并构建上线。
 - [x] 验证通过：`./node_modules/.bin/tsc --noEmit`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
 - [x] 公网验证通过：`https://sd2.youdoodesign.com/assets` 返回 200，资产页 bundle 返回 200，浏览器登录态加载出 61 张资产卡片，管理员“按用户查看”可见，单点选择和拖拽框选后批量栏可见，console 无前端错误。
+- [x] 补充资产尺寸切换：资产页增加标准尺寸和 `2/3` 尺寸视图，点击切换后视频资产卡片以更小网格展示。
+- [x] 补充人物头像规则：资产页出现用户姓名的位置使用统一头像 badge；项目级 `AGENTS.md` 写入“人物姓名左侧必须带头像”规则。
+- [x] 补充验证：`tsc --noEmit`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网 JS/CSS 均能拉到尺寸切换和头像 badge 新代码。
 - [ ] 后续增强：把图片/参考素材批量移动到项目工作区或图集的能力单独设计；当前批量移动第一版只处理视频任务。
