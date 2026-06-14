@@ -803,7 +803,7 @@ function AssetsPageContent() {
         <div>
           <div className="asset-library-eyebrow">Asset Library</div>
           <h1>资产管理</h1>
-          <p>按生产历史、项目和用户查看视频资产，支持框选、多选、批量下载和批量移动。</p>
+          <p>按生产历史、项目和用户查看视频资产，支持框选、多选、批量下载、加入工作区、加入图集和移动视频。</p>
         </div>
         <div className="asset-library-header-actions">
           <button className="asset-library-icon-button" type="button" onClick={reloadItems} aria-label="刷新资产">
