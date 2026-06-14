@@ -157,6 +157,7 @@ interface Props {
   selectedVideoCardId?: string | null;
   canManageTemplates?: boolean;
   templateMode?: 'disabled' | 'workbench';
+  initialTemplateId?: string | null;
   resultReturnTo?: string;
 }
 
@@ -180,6 +181,7 @@ export function GenerationComposer({
   selectedVideoCardId,
   canManageTemplates = false,
   templateMode = 'disabled',
+  initialTemplateId = null,
   resultReturnTo = '/generate',
 }: Props) {
   const workspace = useWorkspace();
@@ -394,7 +396,13 @@ export function GenerationComposer({
       if (!res.ok) throw new Error(data.message || data.error || '模板读取失败');
       const items = (data.templates || []) as SerializedGenerationTemplate[];
       setTemplates(items);
-      setSelectedTemplateId((current) => preferredTemplateId || current || items[0]?.id || null);
+      setSelectedTemplateId((current) => {
+        const preferred = preferredTemplateId || current;
+        return preferred && items.some((template) => template.id === preferred) ? preferred : items[0]?.id || null;
+      });
+      if (preferredTemplateId && !items.some((template) => template.id === preferredTemplateId)) {
+        setTemplateError('选择的模板不可用，已切换到默认模板');
+      }
       return items;
     } catch (error) {
       setTemplateError(error instanceof Error ? error.message : '模板读取失败');
@@ -410,8 +418,8 @@ export function GenerationComposer({
 
   useEffect(() => {
     if (!templateEnabled) return;
-    void loadTemplates();
-  }, [loadTemplates, templateEnabled]);
+    void loadTemplates(initialTemplateId);
+  }, [initialTemplateId, loadTemplates, templateEnabled]);
 
   useEffect(() => {
     if (!templateEnabled || !selectedTemplate || reuseDraft) return;

@@ -9,6 +9,7 @@ export const shellRoutes = [
   '/workbench',
   '/account',
   '/assets',
+  '/templates',
   '/projects',
   '/collections',
   '/cutout',
@@ -37,6 +38,7 @@ const shellRoutePrefixes = [
 
 export const userNavItems: NavItem[] = [
   { label: '生成视频', href: '/generate', prefixMatch: true },
+  { label: '动画模板', href: '/templates', prefixMatch: true },
   { label: '视频工作台', href: '/workbench', prefixMatch: true },
   { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
   { label: '资产管理', href: '/assets', prefixMatch: true },
