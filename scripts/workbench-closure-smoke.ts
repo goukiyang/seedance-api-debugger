@@ -17,6 +17,12 @@ type HttpResponse = {
   json: AnyJson;
 };
 
+type SmokeProjectResolution = {
+  id: string;
+  mode: 'reused' | 'created' | 'unique';
+  name: string;
+};
+
 function log(message: string, ...rest: Array<string | number | boolean>) {
   console.log(`[closure-smoke] ${message}`, ...rest);
 }
@@ -111,6 +117,70 @@ function randomSuffix() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+async function resolveSmokeProject(
+  baseUrl: string,
+  cookie: string,
+  ownerUserId: string | undefined,
+  timeoutMs: number,
+): Promise<SmokeProjectResolution> {
+  const explicitProjectId = process.env.SMOKE_PROJECT_ID?.trim();
+  if (explicitProjectId) {
+    const projectRes = await request(baseUrl, `/api/projects/${explicitProjectId}`, cookie, { method: 'GET' }, timeoutMs);
+    assertStatus('GET /api/projects/:id SMOKE_PROJECT_ID', projectRes.status, 200);
+    const projectName = String(projectRes.json?.project?.name || explicitProjectId);
+    return { id: explicitProjectId, mode: 'reused', name: projectName };
+  }
+
+  const allowUniqueProject = process.env.SMOKE_CREATE_UNIQUE_PROJECT === '1';
+  const projectName = allowUniqueProject
+    ? `Smoke Project ${randomSuffix()}`
+    : (process.env.SMOKE_PROJECT_NAME?.trim() || 'Smoke Project Archive');
+
+  if (!allowUniqueProject && ownerUserId) {
+    const prisma = new PrismaClient();
+    try {
+      const existing = await prisma.project.findFirst({
+        where: {
+          name: projectName,
+          owner_user_id: ownerUserId,
+          status: { not: 'deleted' },
+        },
+        orderBy: { created_at: 'asc' },
+        select: { id: true, name: true },
+      });
+      if (existing) {
+        return { id: existing.id, mode: 'reused', name: existing.name };
+      }
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  const createProjectRes = await request(
+    baseUrl,
+    '/api/projects',
+    cookie,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: projectName,
+        type: 'team',
+        description: allowUniqueProject ? 'closure smoke unique project' : 'closure smoke reusable project',
+      }),
+    },
+    timeoutMs,
+  );
+  assertStatus('POST /api/projects', createProjectRes.status, [200, 201]);
+  const project = createProjectRes.json.project as { id: string; name?: string } | undefined;
+  if (!project?.id) fail('POST /api/projects missing project.id');
+  return {
+    id: project.id,
+    mode: allowUniqueProject ? 'unique' : 'created',
+    name: project.name || projectName,
+  };
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -147,7 +217,6 @@ async function main() {
   const allowPaidProviderSmoke = process.env.ALLOW_PAID_PROVIDER_SMOKE === '1';
   const paidGenerationReason = process.env.PAID_GENERATION_REASON
     || '用户显式允许 ALLOW_PAID_PROVIDER_SMOKE=1 执行真实付费闭环生成';
-  const taskCreateProject = `Smoke Project ${randomSuffix()}`;
 
   log(`baseUrl=${baseUrl}`);
   if (!allowPaidProviderSmoke) {
@@ -163,22 +232,9 @@ async function main() {
   const me = meRes.json.user as { id?: string };
   log(`me userId=${me.id || 'unknown'}`);
 
-  // 1) 新建项目
-  const createProjectRes = await request(
-    baseUrl,
-    '/api/projects',
-    cookie,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: taskCreateProject, type: 'team', description: 'closure smoke' }),
-    },
-    timeoutMs,
-  );
-  assertStatus('POST /api/projects', createProjectRes.status, [200, 201]);
-  const project = createProjectRes.json.project as { id: string } | undefined;
-  if (!project?.id) fail('POST /api/projects missing project.id');
-  log(`project created id=${project.id}`);
+  // 1) 解析 smoke 项目。默认复用固定项目，避免反复制造随机 Smoke Project。
+  const project = await resolveSmokeProject(baseUrl, cookie, me.id, timeoutMs);
+  log(`project ${project.mode} id=${project.id} name=${project.name}`);
 
   // 2) 新建画布
   const canvasRes = await request(
