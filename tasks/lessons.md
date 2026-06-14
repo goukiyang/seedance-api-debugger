@@ -4,11 +4,11 @@
 
 - 问题/背景：资产管理页 `/assets` 是客户端页面，使用 `useSearchParams()` 读取 `type=video` 初始筛选。
 - 诱因/根因：`tsc` 和 `lint` 都能通过，但 Next 生产构建会要求 `useSearchParams()` 位于 Suspense 边界内，否则预渲染 `/assets` 时失败。
-- 当时思路：不把未提交候选页面直接上线；先用独立 `NEXT_DIST_DIR=.next-prod-assets-dry-run npm run build` 验证真实生产构建，再修阻塞。
-- 改动位置：`src/app/assets/page.tsx`、命令 `NEXT_DIST_DIR=.next-prod-assets-dry-run npm run build`。
-- 怎么改：把真实页面内容拆为 `AssetsPageContent`，默认导出用 `Suspense` 包裹并提供稳定加载态；构建后清理 dry-run 目录，并撤掉 Next 自动写入 `tsconfig.json` 的临时 types 路径。
-- 验证结果：`DATABASE_URL=file:./prisma/dev.db npx tsc --noEmit --pretty false`、`npm run lint`、`NEXT_DIST_DIR=.next-prod-assets-dry-run npm run build` 通过。
-- 可复用经验：页面类候选功能只通过类型检查不够；涉及 App Router、`useSearchParams()`、动态路由或客户端数据拉取时，发布前必须跑一次生产构建，且用临时 `NEXT_DIST_DIR` 避免污染线上构建目录。
+- 当时思路：不把未提交候选页面直接上线；先用生产构建暴露 App Router 预渲染问题，再按 Next 生产规则修页面结构。
+- 改动位置：`src/app/assets/page.tsx`、`tsconfig.tsbuildinfo` 缓存、命令 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`。
+- 怎么改：把真实页面内容拆为 `AssetsPageContent`，默认导出用 `Suspense` 包裹并提供稳定加载态；清理引用旧临时 distDir 的 `tsconfig.tsbuildinfo` 增量缓存后重新构建。
+- 验证结果：`./node_modules/.bin/tsc --noEmit`、`npm run lint`、`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2` 通过；公网 `/assets` 和浏览器框选验证通过。
+- 可复用经验：页面类候选功能只通过类型检查不够；涉及 App Router、`useSearchParams()`、动态路由或客户端数据拉取时，发布前必须跑真实生产构建；若临时 `NEXT_DIST_DIR` 用于 dry-run，结束后要清理增量编译缓存，避免后续构建引用已不存在的 types。
 
 ## 2026-06-14 - 模板 Agent 落地要优先保护现有数据库字段
 

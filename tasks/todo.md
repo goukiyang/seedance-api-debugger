@@ -4329,3 +4329,18 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - 已完成公网验证：`https://sd2.youdoodesign.com/api/health` 返回 200，`/video-cards/test-nonexistent` 返回 200 页面，`/api/video-cards/test-nonexistent` 返回 401 鉴权响应而非 500，`/_next/static/MsQxqmA1MWOaeLuRk2VVy/_buildManifest.js` 返回 200。
 - 已登记版本：`/Volumes/Data/Projects/project-version-registry.md` 新增 `v0.4.0：视频卡归属闭环版`，记录分支、提交、rollback tag、部署目标、验证结果和数据库备份路径。
 - 未执行：未跑真实付费生成任务。
+
+## Review - 2026-06-14 资产管理页第一版落地
+
+- [x] 新增 `/assets` 资产管理页，支持“生产历史 / 按项目 / 按用户查看”三类视图；“按用户查看”仅管理员可见。
+- [x] 页面支持视频、图片、参考素材类型筛选，支持状态、项目、用户、时间/项目/用户分组和最近生成、最近完成、项目、用户、时长排序。
+- [x] 内容展示采用缩略图优先的深色资产网格，按时间默认分组，视频卡片显示时长、项目、创建时间和管理员用户信息。
+- [x] 新增多选能力：复选框单点、已进入选择态后的单点多选、Shift 范围选择、移动端长按选择、鼠标拖拽框选。
+- [x] 新增批量动作：已完成视频可复用既有 ZIP 批量下载能力；视频任务可批量移动到目标项目和目标视频卡。
+- [x] 新增 `GET /api/assets/library`，统一返回视频任务、上传素材和参考素材的资产列表，复用现有任务可见权限和管理员范围。
+- [x] 新增 `POST /api/assets/library/bulk-move`，复用现有项目移动权限语义，非管理员必须具备源/目标项目管理权限；移动视频任务必须指定目标视频卡。
+- [x] 导航已接入：侧边栏和顶部栏新增“资产管理”；旧 `/videos` 改为跳转 `/assets?type=video`。
+- [x] 线上目录已确认：当前 `sd2` 服务实际指向 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，本次最终代码已落在该目录并构建上线。
+- [x] 验证通过：`./node_modules/.bin/tsc --noEmit`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
+- [x] 公网验证通过：`https://sd2.youdoodesign.com/assets` 返回 200，资产页 bundle 返回 200，浏览器登录态加载出 61 张资产卡片，管理员“按用户查看”可见，单点选择和拖拽框选后批量栏可见，console 无前端错误。
+- [ ] 后续增强：把图片/参考素材批量移动到项目工作区或图集的能力单独设计；当前批量移动第一版只处理视频任务。
