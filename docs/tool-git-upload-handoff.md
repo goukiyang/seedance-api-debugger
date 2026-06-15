@@ -4,13 +4,83 @@
 
 核心原则：不要直接改主分支，不上传密钥，不上传大文件，不影响现有项目运行。
 
+## 0. 先确认能不能上传
+
+这份文档能指导你上传，但真正能不能 push 到我们的 Git，取决于你是否已经有 GitHub 仓库写权限。
+
+仓库地址：
+
+```text
+https://github.com/goukiyang/seedance-api-debugger.git
+```
+
+开始前请确认三件事：
+
+- 我们已经把你的 GitHub 账号加入仓库协作者，或你已经收到并接受 GitHub 邀请。
+- 你本机已经安装 Git。
+- 你已经登录 GitHub，HTTPS token 或 SSH key 能正常使用。
+
+基础检查：
+
+```bash
+git --version
+git config --global user.name
+git config --global user.email
+```
+
+如果没有配置用户名和邮箱，请配置：
+
+```bash
+git config --global user.name "<你的名字>"
+git config --global user.email "<你的邮箱>"
+```
+
+如果使用 GitHub CLI，可以这样登录：
+
+```bash
+gh auth login
+gh auth status
+```
+
+如果使用 SSH，可以这样检查：
+
+```bash
+ssh -T git@github.com
+```
+
+只检查读取权限：
+
+```bash
+git ls-remote https://github.com/goukiyang/seedance-api-debugger.git HEAD
+```
+
+注意：能读取不代表能上传。真正的写权限要以能 push 自己的分支为准。
+
+写权限自测方式：
+
+```bash
+git clone https://github.com/goukiyang/seedance-api-debugger.git
+cd seedance-api-debugger
+git checkout -b access-check/<你的名字>
+git commit --allow-empty -m "test: verify git upload access"
+git push -u origin access-check/<你的名字>
+```
+
+如果上面 push 成功，说明你可以上传分支。测试完成后，把分支名发给我们确认；确认后可以删除测试分支：
+
+```bash
+git push origin --delete access-check/<你的名字>
+```
+
+如果 push 失败，把完整报错发回来。常见原因是：还没接受 GitHub 邀请、账号没有写权限、HTTPS token 过期、SSH key 没绑定到 GitHub。
+
 ## 1. 仓库和分支
 
 请先拉取仓库：
 
 ```bash
-git clone <仓库地址>
-cd <仓库名>
+git clone https://github.com/goukiyang/seedance-api-debugger.git
+cd seedance-api-debugger
 ```
 
 不要直接在 `main` / `master` / 线上发布分支提交。
