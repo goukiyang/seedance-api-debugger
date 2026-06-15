@@ -1,5 +1,6 @@
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
+import { normalizeProviderErrorMessage } from '../provider/error-message';
 import { getVideoTaskStatus } from '../provider/jimeng';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
@@ -428,8 +429,9 @@ export async function finalizeVideoTaskStatus(
     if (statusResult.duration !== undefined) {
       updateData.duration = statusResult.duration;
     }
-    if (statusResult.error_message) {
-      updateData.error_message = statusResult.error_message;
+    const errorMessage = normalizeProviderErrorMessage(statusResult.error_message);
+    if (errorMessage) {
+      updateData.error_message = errorMessage;
     }
 
     const isTerminal = isTerminalLocalStatus(statusResult.local_status);
