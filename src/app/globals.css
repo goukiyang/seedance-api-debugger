@@ -4191,6 +4191,106 @@ a {
   padding: 16px 20px 20px;
 }
 
+.ultimate-canvas-page {
+  min-height: calc(100vh - 121px);
+  display: grid;
+  grid-template-rows: auto minmax(560px, 1fr);
+  gap: 14px;
+}
+
+.ultimate-canvas-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ultimate-canvas-kicker {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ultimate-canvas-header h1 {
+  color: #0f172a;
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 3px 0 0;
+}
+
+.ultimate-canvas-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ultimate-canvas-badge,
+.ultimate-canvas-link {
+  min-height: 34px;
+  align-items: center;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  justify-content: center;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.ultimate-canvas-badge {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.ultimate-canvas-badge.muted {
+  color: #64748b;
+}
+
+.ultimate-canvas-link {
+  background: #fff;
+  color: #1d4ed8;
+  text-decoration: none;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.ultimate-canvas-link:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.ultimate-canvas-link.primary {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #f8fafc;
+}
+
+.ultimate-canvas-link.primary:hover {
+  background: #1e40af;
+  border-color: #1e40af;
+}
+
+.ultimate-canvas-frame-shell {
+  min-height: 0;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.ultimate-canvas-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 560px;
+  border: 0;
+  display: block;
+  background: #0f172a;
+}
+
 @media (max-width: 900px) {
   .shell-body {
     grid-template-columns: 1fr;
@@ -4222,6 +4322,24 @@ a {
 
   .shell-content-topbar-only {
     padding: 12px;
+  }
+
+  .ultimate-canvas-page {
+    min-height: auto;
+    grid-template-rows: auto minmax(620px, 72vh);
+  }
+
+  .ultimate-canvas-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ultimate-canvas-actions {
+    justify-content: flex-start;
+  }
+
+  .ultimate-canvas-frame {
+    min-height: 620px;
   }
 }
 

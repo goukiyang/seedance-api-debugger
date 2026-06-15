@@ -9,6 +9,7 @@ export const shellRoutes = [
   '/workbench',
   '/account',
   '/assets',
+  '/tools/ultimate-canvas',
   '/projects',
   '/collections',
   '/cutout',
@@ -29,6 +30,7 @@ const shellRoutePrefixes = [
   '/tasks',
   '/projects',
   '/collections',
+  '/tools',
   '/admin/users',
   '/admin/outputs',
   '/admin/costs',
@@ -38,6 +40,7 @@ const shellRoutePrefixes = [
 export const userNavItems: NavItem[] = [
   { label: '生成视频', href: '/generate', prefixMatch: true },
   { label: '视频工作台', href: '/workbench', prefixMatch: true },
+  { label: '无线画布', href: '/tools/ultimate-canvas', prefixMatch: true },
   { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
   { label: '资产管理', href: '/assets', prefixMatch: true },
   { label: '我的项目', href: '/projects', prefixMatch: true },

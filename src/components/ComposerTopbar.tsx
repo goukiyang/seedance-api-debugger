@@ -18,6 +18,7 @@ interface ComposerTopbarProps {
 
 const navItems = [
   { label: '生成视频', href: '/generate', matches: ['/generate', '/generate/canvas'] },
+  { label: '无线画布', href: '/tools/ultimate-canvas', matches: ['/tools/ultimate-canvas'] },
   { label: '资产管理', href: '/assets', matches: ['/assets'] },
   { label: '我的项目', href: '/projects', matches: ['/projects'] },
   { label: '参考图集', href: '/collections', matches: ['/collections'] },
