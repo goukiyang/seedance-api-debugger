@@ -26,6 +26,29 @@ type CodexConfig = {
   } | null;
 };
 
+type MuskConfig = {
+  enabled: boolean;
+  ready: boolean;
+  base_url: string;
+  default_model: string;
+  api_key_configured: boolean;
+};
+
+type ImageGenerationConfig = {
+  enabled: boolean;
+  ready: boolean;
+  provider: 'banana2';
+  base_url: string;
+  default_model: string;
+  api_key_configured: boolean;
+  timeout_ms: number;
+  max_outputs_per_request: number;
+  default_ratio: string;
+  supports_text_to_image: boolean;
+  supports_image_to_image: boolean;
+  supports_async_task: boolean;
+};
+
 type SubmitState = {
   type: 'success' | 'error';
   message: string;
@@ -44,6 +67,29 @@ const EMPTY_CONFIG: CodexConfig = {
   linked_user: null,
 };
 
+const EMPTY_MUSK_CONFIG: MuskConfig = {
+  enabled: false,
+  ready: false,
+  base_url: 'https://api.muskapis.com/',
+  default_model: 'gpt-5.4',
+  api_key_configured: false,
+};
+
+const EMPTY_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
+  enabled: false,
+  ready: false,
+  provider: 'banana2',
+  base_url: '',
+  default_model: 'banana2',
+  api_key_configured: false,
+  timeout_ms: 90000,
+  max_outputs_per_request: 4,
+  default_ratio: '16:9',
+  supports_text_to_image: true,
+  supports_image_to_image: true,
+  supports_async_task: true,
+};
+
 function selectorLabel(type: UserSelectorType) {
   if (type === 'id') return '用户 ID';
   if (type === 'username') return '用户名';
@@ -58,10 +104,18 @@ function linkedUserText(config: CodexConfig) {
 
 export default function AdminIntegrationsClient() {
   const [config, setConfig] = useState<CodexConfig>(EMPTY_CONFIG);
+  const [muskConfig, setMuskConfig] = useState<MuskConfig>(EMPTY_MUSK_CONFIG);
+  const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [muskSaving, setMuskSaving] = useState(false);
+  const [imageSaving, setImageSaving] = useState(false);
   const [token, setToken] = useState('');
   const [clearToken, setClearToken] = useState(false);
+  const [muskApiKey, setMuskApiKey] = useState('');
+  const [clearMuskApiKey, setClearMuskApiKey] = useState(false);
+  const [imageApiKey, setImageApiKey] = useState('');
+  const [clearImageApiKey, setClearImageApiKey] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
 
   const statusText = useMemo(() => {
@@ -72,15 +126,48 @@ export default function AdminIntegrationsClient() {
     return '配置未就绪';
   }, [config]);
 
+  const muskStatusText = useMemo(() => {
+    if (muskConfig.ready) return '已启用';
+    if (!muskConfig.enabled) return '未启用';
+    if (!muskConfig.base_url) return '缺少 API 地址';
+    if (!muskConfig.default_model) return '缺少默认模型';
+    if (!muskConfig.api_key_configured) return '缺少 API Key';
+    return '配置未就绪';
+  }, [muskConfig]);
+
+  const imageStatusText = useMemo(() => {
+    if (imageConfig.ready) return '已启用';
+    if (!imageConfig.enabled) return '未启用';
+    if (!imageConfig.base_url) return '缺少 API 地址';
+    if (!imageConfig.default_model) return '缺少默认模型';
+    if (!imageConfig.api_key_configured) return '缺少 API Key';
+    return '配置未就绪';
+  }, [imageConfig]);
+
   const loadConfig = async () => {
     try {
-      const res = await fetch('/api/admin/integrations/codex', { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok) {
-        setSubmitState({ type: 'error', message: data.error || '读取配置失败' });
+      const [codexRes, muskRes, imageRes] = await Promise.all([
+        fetch('/api/admin/integrations/codex', { cache: 'no-store' }),
+        fetch('/api/admin/integrations/musk', { cache: 'no-store' }),
+        fetch('/api/admin/integrations/image-generation', { cache: 'no-store' }),
+      ]);
+      const [codexData, muskData, imageData] = await Promise.all([codexRes.json(), muskRes.json(), imageRes.json()]);
+
+      if (!codexRes.ok) {
+        setSubmitState({ type: 'error', message: codexData.error || '读取 Codex 配置失败' });
         return;
       }
-      setConfig(data.config || EMPTY_CONFIG);
+      if (!muskRes.ok) {
+        setSubmitState({ type: 'error', message: muskData.error || '读取 Musk API 配置失败' });
+        return;
+      }
+      if (!imageRes.ok) {
+        setSubmitState({ type: 'error', message: imageData.error || '读取图形生成 API 配置失败' });
+        return;
+      }
+      setConfig(codexData.config || EMPTY_CONFIG);
+      setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
+      setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
@@ -125,6 +212,79 @@ export default function AdminIntegrationsClient() {
     }
   };
 
+  const saveMuskConfig = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setMuskSaving(true);
+    setSubmitState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/musk', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: muskConfig.enabled,
+          base_url: muskConfig.base_url,
+          default_model: muskConfig.default_model,
+          api_key: muskApiKey,
+          clear_api_key: clearMuskApiKey,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+        return;
+      }
+      setMuskConfig(data.config || muskConfig);
+      setMuskApiKey('');
+      setClearMuskApiKey(false);
+      setSubmitState({ type: 'success', message: 'Musk API 配置已保存到后台配置。' });
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setMuskSaving(false);
+    }
+  };
+
+  const saveImageConfig = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setImageSaving(true);
+    setSubmitState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/image-generation', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: imageConfig.enabled,
+          provider: imageConfig.provider,
+          base_url: imageConfig.base_url,
+          default_model: imageConfig.default_model,
+          api_key: imageApiKey,
+          clear_api_key: clearImageApiKey,
+          timeout_ms: imageConfig.timeout_ms,
+          max_outputs_per_request: imageConfig.max_outputs_per_request,
+          default_ratio: imageConfig.default_ratio,
+          supports_text_to_image: imageConfig.supports_text_to_image,
+          supports_image_to_image: imageConfig.supports_image_to_image,
+          supports_async_task: imageConfig.supports_async_task,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+        return;
+      }
+      setImageConfig(data.config || imageConfig);
+      setImageApiKey('');
+      setClearImageApiKey(false);
+      setSubmitState({ type: 'success', message: '图形生成 API 配置已保存到后台配置。' });
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setImageSaving(false);
+    }
+  };
+
   const updateSelector = (patch: Partial<CodexConfig['user_selector']>) => {
     setConfig((prev) => ({
       ...prev,
@@ -140,8 +300,8 @@ export default function AdminIntegrationsClient() {
       <div>
         <PageBanner
           eyebrow="管理后台"
-          title="接口配置"
-          description="统一维护外部工具调用 sd2 的后端配置。"
+          title="API 设置"
+          description="统一维护 Musk API、图形生成 API、Codex API 和外部工具调用 sd2 的后端配置。"
         />
         <div className="card">
           <p className="text-gray">正在读取配置...</p>
@@ -154,8 +314,8 @@ export default function AdminIntegrationsClient() {
     <div className="admin-integrations-page">
       <PageBanner
         eyebrow="管理后台"
-        title="接口配置"
-        description="Codex 这类外部工具必须从这里启用、绑定用户和记录来源，生成任务才会进入同一套扣费与后台留痕。"
+        title="API 设置"
+        description="在这里维护 Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
       />
 
       <div className="stats-grid">
@@ -174,7 +334,283 @@ export default function AdminIntegrationsClient() {
           <strong className="stat-value">{config.linked_user?.username || '-'}</strong>
           <span className="stat-sub">{linkedUserText(config)}</span>
         </div>
+        <div className="stat-card">
+          <span className="stat-label">Musk API</span>
+          <strong className="stat-value">{muskStatusText}</strong>
+          <span className="stat-sub">{muskConfig.default_model || 'gpt-5.4'} · {muskConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">图形生成 API</span>
+          <strong className="stat-value">{imageStatusText}</strong>
+          <span className="stat-sub">{imageConfig.provider} / {imageConfig.default_model || 'banana2'} · {imageConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}</span>
+        </div>
       </div>
+
+      {submitState && (
+        <div className={`alert ${submitState.type === 'success' ? 'alert-success' : 'alert-error'} mt-4`}>
+          {submitState.message}
+        </div>
+      )}
+
+      <form className="card codex-config-form" onSubmit={saveMuskConfig}>
+        <div className="codex-config-head">
+          <div>
+            <h2 className="section-title mb-0">Musk API</h2>
+            <p className="text-gray text-sm mt-2">
+              保存外部 LLM 服务地址和默认模型，后续模板配置 Agent、模块生成 Agent 可从这里读取。
+            </p>
+          </div>
+          <label className="toggle-switch" aria-label="启用 Musk API">
+            <input
+              type="checkbox"
+              checked={muskConfig.enabled}
+              onChange={(event) => setMuskConfig((prev) => ({ ...prev, enabled: event.target.checked }))}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div className="codex-config-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="musk-base-url">API 地址</label>
+            <input
+              id="musk-base-url"
+              className="input"
+              value={muskConfig.base_url}
+              onChange={(event) => setMuskConfig((prev) => ({ ...prev, base_url: event.target.value }))}
+              placeholder="https://api.muskapis.com/"
+              autoComplete="off"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="musk-default-model">默认模型</label>
+            <input
+              id="musk-default-model"
+              className="input"
+              value={muskConfig.default_model}
+              onChange={(event) => setMuskConfig((prev) => ({ ...prev, default_model: event.target.value }))}
+              placeholder="gpt-5.4"
+              autoComplete="off"
+              maxLength={80}
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="musk-api-key">API Key</label>
+            <input
+              id="musk-api-key"
+              className="input"
+              type="password"
+              value={muskApiKey}
+              onChange={(event) => {
+                setMuskApiKey(event.target.value);
+                if (event.target.value.trim()) setClearMuskApiKey(false);
+              }}
+              placeholder={muskConfig.api_key_configured ? '当前已设置，留空不变' : '输入 Musk API Key'}
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+
+        <div className="codex-config-status">
+          <div>
+            <span className="info-label">当前状态</span>
+            <strong>{muskStatusText}</strong>
+          </div>
+          <div>
+            <span className="info-label">API 地址</span>
+            <strong>{muskConfig.base_url || '-'}</strong>
+          </div>
+          <div>
+            <span className="info-label">默认模型</span>
+            <strong>{muskConfig.default_model || '-'}</strong>
+          </div>
+          <div>
+            <span className="info-label">API Key</span>
+            <strong>{muskConfig.api_key_configured ? '已设置' : '未设置'}</strong>
+          </div>
+        </div>
+
+        <div className="codex-config-actions">
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearMuskApiKey}
+              disabled={!muskConfig.api_key_configured || Boolean(muskApiKey.trim())}
+              onChange={(event) => setClearMuskApiKey(event.target.checked)}
+            />
+            清除当前 API Key
+          </label>
+          <button className="btn btn-primary" type="submit" disabled={muskSaving}>
+            {muskSaving ? '正在保存' : '保存 Musk API'}
+          </button>
+        </div>
+      </form>
+
+      <form className="card codex-config-form" onSubmit={saveImageConfig}>
+        <div className="codex-config-head">
+          <div>
+            <h2 className="section-title mb-0">图形生成 API</h2>
+            <p className="text-gray text-sm mt-2">
+              单独维护 banana2 等图像模型配置。生成图片会先进入资产库，再作为参考图、首帧或尾帧参与视频生成。
+            </p>
+          </div>
+          <label className="toggle-switch" aria-label="启用图形生成 API">
+            <input
+              type="checkbox"
+              checked={imageConfig.enabled}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, enabled: event.target.checked }))}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div className="codex-config-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-provider">Provider</label>
+            <select
+              id="image-provider"
+              className="input"
+              value={imageConfig.provider}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, provider: event.target.value as ImageGenerationConfig['provider'] }))}
+            >
+              <option value="banana2">banana2</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-base-url">API 地址</label>
+            <input
+              id="image-base-url"
+              className="input"
+              value={imageConfig.base_url}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, base_url: event.target.value }))}
+              placeholder="按 banana2 官方 API 文档填写"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-default-model">默认模型</label>
+            <input
+              id="image-default-model"
+              className="input"
+              value={imageConfig.default_model}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, default_model: event.target.value }))}
+              placeholder="banana2"
+              autoComplete="off"
+              maxLength={80}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-api-key">API Key</label>
+            <input
+              id="image-api-key"
+              className="input"
+              type="password"
+              value={imageApiKey}
+              onChange={(event) => {
+                setImageApiKey(event.target.value);
+                if (event.target.value.trim()) setClearImageApiKey(false);
+              }}
+              placeholder={imageConfig.api_key_configured ? '当前已设置，留空不变' : '输入 banana2 API Key'}
+              autoComplete="new-password"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-timeout">超时时间</label>
+            <input
+              id="image-timeout"
+              className="input"
+              type="number"
+              min={5000}
+              max={300000}
+              step={1000}
+              value={imageConfig.timeout_ms}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, timeout_ms: Number(event.target.value) || 90000 }))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-max-outputs">单次最大张数</label>
+            <input
+              id="image-max-outputs"
+              className="input"
+              type="number"
+              min={1}
+              max={8}
+              value={imageConfig.max_outputs_per_request}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, max_outputs_per_request: Number(event.target.value) || 4 }))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-default-ratio">默认比例</label>
+            <select
+              id="image-default-ratio"
+              className="input"
+              value={imageConfig.default_ratio}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, default_ratio: event.target.value }))}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+              <option value="21:9">21:9</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="codex-config-status">
+          <div>
+            <span className="info-label">当前状态</span>
+            <strong>{imageStatusText}</strong>
+          </div>
+          <div>
+            <span className="info-label">Provider</span>
+            <strong>{imageConfig.provider}</strong>
+          </div>
+          <div>
+            <span className="info-label">默认模型</span>
+            <strong>{imageConfig.default_model || '-'}</strong>
+          </div>
+          <div>
+            <span className="info-label">能力</span>
+            <strong>
+              {[
+                imageConfig.supports_text_to_image ? '文生图' : null,
+                imageConfig.supports_image_to_image ? '图生图' : null,
+                imageConfig.supports_async_task ? '异步任务' : null,
+              ].filter(Boolean).join(' / ') || '-'}
+            </strong>
+          </div>
+          <div>
+            <span className="info-label">API Key</span>
+            <strong>{imageConfig.api_key_configured ? '已设置' : '未设置'}</strong>
+          </div>
+        </div>
+
+        <div className="codex-config-actions">
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearImageApiKey}
+              disabled={!imageConfig.api_key_configured || Boolean(imageApiKey.trim())}
+              onChange={(event) => setClearImageApiKey(event.target.checked)}
+            />
+            清除当前 API Key
+          </label>
+          <button className="btn btn-primary" type="submit" disabled={imageSaving}>
+            {imageSaving ? '正在保存' : '保存图形生成 API'}
+          </button>
+        </div>
+      </form>
 
       <form className="card codex-config-form" onSubmit={saveConfig}>
         <div className="codex-config-head">
@@ -283,11 +719,6 @@ export default function AdminIntegrationsClient() {
           </button>
         </div>
 
-        {submitState && (
-          <div className={`alert ${submitState.type === 'success' ? 'alert-success' : 'alert-error'} mt-4`}>
-            {submitState.message}
-          </div>
-        )}
       </form>
     </div>
   );
