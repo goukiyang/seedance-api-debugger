@@ -1,344 +1,128 @@
-# 工具上传 Git 交接说明
+# 工具上传 Git 极简交接说明
 
-这份说明用于把你做的工具上传到我们的 Git 仓库，方便我们 review、测试、合并和后续回退。
+这份说明用于让同事把本地工具文件夹上传到指定 Git 仓库。
 
-核心原则：不要直接改主分支，不上传密钥，不上传大文件，不影响现有项目运行。
+核心做法：我们提供仓库地址、账号、邮箱和上传密码/Token；密码/Token 单独发送，不写进文档，不写进 prompt，不提交到 Git。
 
-## 0. 先确认能不能上传
+## 1. 发给同事的信息
 
-这份文档能指导你上传，但真正能不能 push 到我们的 Git，取决于你是否已经有 GitHub 仓库写权限。
+可以直接把下面这段发给同事：
+
+```text
+请把你的工具文件夹上传到这个 Git 仓库：
+https://gitlab.youdoogo.com/ai/requirements_pool.git
+
+Git 账号：yangbo
+Git 邮箱：yangbo@youdoogo.com
+
+密码/Token 我会单独发给你，不要把密码/Token 写进任何文件、README、脚本、Git remote URL、commit message 或聊天总结。
+
+请不要直接推 main/master。请新建分支上传：
+upload/<工具名或文件夹名>
+
+上传完成后，把分支名、commit id、工具目录、运行方式发回来。
+```
+
+## 2. 如果让 AI 帮他上传，给 AI 的 prompt
+
+让同事把下面这段发给他的 AI：
+
+```text
+帮我把本地这个文件夹的内容上传到 Git 仓库：
+<这里填本地文件夹路径>
 
 仓库地址：
+https://gitlab.youdoogo.com/ai/requirements_pool.git
+
+Git 账号：yangbo
+Git 邮箱：yangbo@youdoogo.com
+
+要求：
+1. 不要直接推 main/master。
+2. 新建分支：upload/<工具名或文件夹名>
+3. 提交信息写清楚，例如：feat: 上传 XXX 工具。
+4. 提交前检查不要上传密码、Token、cookie、.env、node_modules、venv、dist、build、日志、大文件。
+5. 如果需要密码或 Token，请单独向我索要一次，只用于本次 git push。
+6. 不要把密码或 Token 写入文件、Git remote URL、commit message、README、脚本或最终总结。
+7. 上传完成后告诉我：分支名、commit id、上传的文件夹、运行方式和你做过的检查。
+
+如果 push 失败，请把报错原文发我，不要反复猜密码。
+```
+
+## 3. 密码/Token 怎么发
+
+密码/Token 不要写在上面的说明里。
+
+推荐单独发一条：
 
 ```text
-https://github.com/goukiyang/seedance-api-debugger.git
+本次 Git 上传密码/Token：<单独发送的密码或 Token>
+
+只允许用于这次上传，不要保存，不要写进任何文件，不要写进 Git remote URL，不要在总结里复述。
 ```
 
-开始前请确认三件事：
+如果条件允许，优先使用专用的临时 Token，而不是长期主账号密码。
 
-- 我们已经把你的 GitHub 账号加入仓库协作者，或你已经收到并接受 GitHub 邀请。
-- 你本机已经安装 Git。
-- 你已经登录 GitHub，HTTPS token 或 SSH key 能正常使用。
+## 4. 同事或 AI 可以执行的命令
 
-基础检查：
+下面是标准流程，路径和分支名按实际情况替换：
 
 ```bash
-git --version
-git config --global user.name
-git config --global user.email
+cd <工具文件夹的上级目录>
+git clone https://gitlab.youdoogo.com/ai/requirements_pool.git
+cd requirements_pool
+git checkout -b upload/<工具名或文件夹名>
 ```
 
-如果没有配置用户名和邮箱，请配置：
+把工具文件夹复制进仓库后：
 
 ```bash
-git config --global user.name "<你的名字>"
-git config --global user.email "<你的邮箱>"
+git status --short
+git add <工具文件夹>
+git commit -m "feat: 上传 XXX 工具"
+git push -u origin upload/<工具名或文件夹名>
 ```
 
-如果使用 GitHub CLI，可以这样登录：
-
-```bash
-gh auth login
-gh auth status
-```
-
-如果使用 SSH，可以这样检查：
-
-```bash
-ssh -T git@github.com
-```
-
-只检查读取权限：
-
-```bash
-git ls-remote https://github.com/goukiyang/seedance-api-debugger.git HEAD
-```
-
-注意：能读取不代表能上传。真正的写权限要以能 push 自己的分支为准。
-
-写权限自测方式：
-
-```bash
-git clone https://github.com/goukiyang/seedance-api-debugger.git
-cd seedance-api-debugger
-git checkout -b access-check/<你的名字>
-git commit --allow-empty -m "test: verify git upload access"
-git push -u origin access-check/<你的名字>
-```
-
-如果上面 push 成功，说明你可以上传分支。测试完成后，把分支名发给我们确认；确认后可以删除测试分支：
-
-```bash
-git push origin --delete access-check/<你的名字>
-```
-
-如果 push 失败，把完整报错发回来。常见原因是：还没接受 GitHub 邀请、账号没有写权限、HTTPS token 过期、SSH key 没绑定到 GitHub。
-
-## 1. 仓库和分支
-
-请先拉取仓库：
-
-```bash
-git clone https://github.com/goukiyang/seedance-api-debugger.git
-cd seedance-api-debugger
-```
-
-不要直接在 `main` / `master` / 线上发布分支提交。
-
-请新建一个功能分支：
-
-```bash
-git checkout -b feature/<你的工具名>
-```
-
-示例：
-
-```bash
-git checkout -b feature/video-batch-helper
-```
-
-## 2. 推荐目录
-
-如果这个工具是独立工具，建议放到：
+如果 Git 提示输入用户名和密码：
 
 ```text
-tools/<你的工具名>/
+Username: yangbo
+Password: 使用我们单独发送的密码或 Token
 ```
 
-示例：
+## 5. 提交前不要上传这些
 
-```text
-tools/video-batch-helper/
-```
+必须排除：
 
-如果这个工具已经是一个完整独立项目，也可以先单独建新仓库；但如果它要配合我们现有网站或后端使用，优先放到现有仓库的 `tools/` 目录下，方便一起 review。
-
-## 3. 需要提交的内容
-
-工具目录里建议至少包含：
-
-```text
-tools/<你的工具名>/
-├── README.md
-├── .env.example
-├── package.json / requirements.txt / pyproject.toml
-├── src/ 或 main.py / index.ts / app.py
-├── examples/
-└── scripts/ 或 tests/
-```
-
-其中：
-
-- `README.md`：说明工具用途、安装方式、运行命令、输入输出、注意事项。
-- `.env.example`：只写环境变量字段名，不写真实值。
-- 依赖文件：例如 `package.json`、`requirements.txt`、`pyproject.toml`。
-- 示例：放 1-2 个最小可运行示例，方便我们快速验证。
-- 测试或脚本：如果有 smoke test、demo 命令、检查脚本，请一起放进去。
-
-## 4. 禁止上传的内容
-
-不要上传任何敏感信息，包括：
-
-- token
-- cookie
-- API key
-- 密码
-- 账号凭据
 - `.env`
-- 私有证书
-- 私有下载链接
-- 带签名的临时 URL
-
-不要上传可重新生成或过大的内容，包括：
-
+- token、cookie、密码、API key
+- 私钥、证书、签名 URL
 - `node_modules/`
-- `venv/`
-- `.venv/`
-- `dist/`
-- `build/`
-- `.next/`
+- `venv/`、`.venv/`
+- `dist/`、`build/`
 - 日志文件
 - 缓存文件
 - 大视频、大图片、大压缩包、大模型、大数据集
 
-如果工具必须依赖大文件，请只提交下载说明或样例小文件，不要直接把大文件塞进 Git。
+如果工具依赖大文件，只写下载说明，不要直接塞进 Git。
 
-## 5. 提交前自查
+## 6. 上传完成后回传
 
-提交前请先看状态：
-
-```bash
-git status --short
-```
-
-确认只包含你的工具相关文件。
-
-再检查是否误带敏感信息：
-
-```bash
-git diff --cached
-```
-
-如果还没有暂存，可以先看：
-
-```bash
-git diff
-```
-
-建议至少跑一次你自己的最小验证命令，例如：
-
-```bash
-npm install
-npm run test
-npm run lint
-```
-
-或 Python 项目：
-
-```bash
-pip install -r requirements.txt
-python main.py --help
-python scripts/smoke_test.py
-```
-
-没有测试也可以，但请提供一个能证明工具能跑起来的命令。
-
-## 6. 提交和推送
-
-只暂存你的工具目录：
-
-```bash
-git add tools/<你的工具名>/
-```
-
-提交信息要写清楚：
-
-```bash
-git commit -m "feat: 上传 <你的工具名> 工具"
-```
-
-推送到远端分支：
-
-```bash
-git push -u origin feature/<你的工具名>
-```
-
-不要 force push，除非我们明确约定。
-
-## 7. 推送后发回这些信息
-
-推送完成后，请把下面信息发回来：
+上传完成后，让他发回：
 
 ```text
+仓库： https://gitlab.youdoogo.com/ai/requirements_pool.git
 分支名：
+commit id：
 工具目录：
-工具入口文件：
-安装依赖命令：
-本地运行命令：
-最小验证命令：
-需要哪些环境变量：
-是否依赖外部服务：
-是否会产生费用：
-是否会写数据库/写文件/调用线上接口：
-你本地测试通过的结果：
+入口文件：
+安装命令：
+运行命令：
+验证命令：
+是否需要环境变量：
+是否会产生费用或调用线上接口：
 ```
 
-示例：
+## 7. 最短版
 
-```text
-分支名：feature/video-batch-helper
-工具目录：tools/video-batch-helper/
-工具入口文件：tools/video-batch-helper/src/index.ts
-安装依赖命令：npm install
-本地运行命令：npm run dev
-最小验证命令：npm run smoke
-需要哪些环境变量：VIDEO_API_BASE_URL、VIDEO_API_KEY
-是否依赖外部服务：是，调用视频生成 API
-是否会产生费用：测试模式不会，真实生成会
-是否会写数据库/写文件/调用线上接口：会写本地 output/，会调用接口
-你本地测试通过的结果：已跑 npm run smoke，通过 3 个用例
-```
-
-## 8. Review 和合并规则
-
-你推上来后，我们会先做这些检查：
-
-- 目录结构是否清晰。
-- 是否能按 README 跑起来。
-- 是否有敏感信息。
-- 是否会误改现有项目。
-- 是否有最小验证命令。
-- 是否需要补充配置说明。
-- 是否需要拆成独立仓库。
-
-确认没有问题后，再合并到主分支。
-
-如果工具会调用付费接口、写线上数据库、批量请求外部服务，默认先用 dry-run 或测试模式验证，不直接跑真实任务。
-
-## 9. 推荐 README 模板
-
-你可以在工具目录里的 `README.md` 使用这个结构：
-
-````markdown
-# <工具名>
-
-## 用途
-
-说明这个工具解决什么问题。
-
-## 安装
-
-```bash
-<安装命令>
-```
-
-## 配置
-
-复制环境变量模板：
-
-```bash
-cp .env.example .env
-```
-
-需要配置：
-
-- `XXX`
-- `YYY`
-
-## 运行
-
-```bash
-<运行命令>
-```
-
-## 最小验证
-
-```bash
-<验证命令>
-```
-
-## 输入输出
-
-输入：
-
-```text
-示例输入
-```
-
-输出：
-
-```text
-示例输出
-```
-
-## 注意事项
-
-- 是否会产生费用。
-- 是否会写数据库。
-- 是否会上传文件。
-- 是否会调用线上接口。
-````
-
-## 10. 一句话版
-
-新建 `feature/<工具名>` 分支，把工具放进 `tools/<工具名>/`，补齐 README、依赖文件、`.env.example` 和最小验证命令，不上传密钥和大文件，推送后把分支名、入口文件、运行命令和测试结果发回来。
+给他仓库地址、账号和邮箱；密码/Token 单独发。让他或他的 AI 新建 `upload/<工具名>` 分支，把文件夹传上去。不要把密码写进任何地方，上传完回传分支名和 commit id。
