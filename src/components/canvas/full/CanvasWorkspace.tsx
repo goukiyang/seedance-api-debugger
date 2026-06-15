@@ -378,6 +378,12 @@ async function dataUrlToFile(url: string, fileName: string, mimeType: string) {
   return new File([blob], fileName, { type: mimeType || blob.type || 'application/octet-stream' });
 }
 
+type CanvasImageUploadInput = {
+  url: string;
+  fileName: string;
+  mimeType: string;
+};
+
 async function uploadCanvasAsset(fileData: { url: string; fileName: string; mimeType: string }) {
   const file = await dataUrlToFile(fileData.url, fileData.fileName, fileData.mimeType);
   const formData = new FormData();
@@ -397,6 +403,10 @@ async function uploadCanvasAsset(fileData: { url: string; fileName: string; mime
     throw new Error('素材上传成功，但缺少 assetId 或 originalUrl。');
   }
   return { assetId, publicUrl };
+}
+
+function titleFromFileName(fileName: string) {
+  return fileName.trim().replace(/\.[^.]+$/, '') || '图片';
 }
 
 async function resetWorkspaceAssets() {
@@ -940,16 +950,8 @@ function CanvasWorkspace() {
     [edges, refreshPreviewFor, setNodes],
   );
 
-  const handleImageChange = useCallback(
-    (nodeId: string, image: { url: string; fileName: string; mimeType: string }) => {
-      handleDataChange(nodeId, {
-        ...image,
-        publicUrl: undefined,
-        assetId: undefined,
-        uploadStatus: 'uploading',
-        uploadError: undefined,
-      });
-
+  const startImageUpload = useCallback(
+    (nodeId: string, image: CanvasImageUploadInput) => {
       void uploadCanvasAsset(image)
         .then(({ assetId, publicUrl }) => {
           handleDataChange(nodeId, {
@@ -970,6 +972,64 @@ function CanvasWorkspace() {
         });
     },
     [handleDataChange],
+  );
+
+  const handleImageChange = useCallback(
+    (nodeId: string, image: CanvasImageUploadInput) => {
+      handleDataChange(nodeId, {
+        ...image,
+        publicUrl: undefined,
+        assetId: undefined,
+        uploadStatus: 'uploading',
+        uploadError: undefined,
+      });
+      startImageUpload(nodeId, image);
+    },
+    [handleDataChange, startImageUpload],
+  );
+
+  const handleImageBatchAdd = useCallback(
+    (sourceNodeId: string, images: CanvasImageUploadInput[]) => {
+      if (images.length === 0) return;
+
+      const sourceNode = nodes.find((node) => node.id === sourceNodeId && node.type === 'imageCard') as ImageCardNode | undefined;
+      const sourcePosition = sourceNode?.position ?? { x: 120, y: 120 };
+      const baseImageCount = nodes.filter((node) => node.type === 'imageCard').length;
+      const batchStamp = Date.now();
+      const newNodes = images.map((image, index) => {
+        const imageIndex = baseImageCount + index + 1;
+        const refId = `@图片${imageIndex}`;
+        const isFrameCard = sourceNode?.data.variant === 'frame';
+        const usage = isFrameCard ? sourceNode.data.usage : 'character-reference';
+        return {
+          id: `image-${batchStamp}-${index + 1}`,
+          type: 'imageCard',
+          selected: false,
+          position: {
+            x: sourcePosition.x + 300 + (index % 2) * 300,
+            y: sourcePosition.y + Math.floor(index / 2) * 230,
+          },
+          data: {
+            title: isFrameCard ? (usage === 'end-frame' ? '尾帧' : '首帧') : `${titleFromFileName(image.fileName)}｜${refId}`,
+            refId,
+            variant: sourceNode?.data.variant ?? 'semantic',
+            url: image.url,
+            fileName: image.fileName,
+            mimeType: image.mimeType,
+            publicUrl: undefined,
+            assetId: undefined,
+            uploadStatus: 'uploading',
+            uploadError: undefined,
+            usage,
+            description: '',
+          },
+        } satisfies ImageCardNode;
+      });
+
+      setNodes(refreshPreviewFor([...nodes, ...newNodes], edges));
+      newNodes.forEach((node, index) => startImageUpload(node.id, images[index]));
+    },
+    [edges, nodes, refreshPreviewFor, setNodes, startImageUpload],
   );
 
   const handleMediaChange = useCallback(
@@ -1253,11 +1313,11 @@ function CanvasWorkspace() {
         onDelete: handleDeleteNode,
         onDuplicate: handleDuplicateNode,
         ...(isGenerationNode(node) ? { onGeneratePreview: handleGeneratePreview } : {}),
-        ...(node.type === 'imageCard' ? { onImageChange: handleImageChange } : {}),
+        ...(node.type === 'imageCard' ? { onImageChange: handleImageChange, onImageBatchAdd: handleImageBatchAdd } : {}),
         ...(node.type === 'videoCard' || node.type === 'audioCard' ? { onMediaChange: handleMediaChange } : {}),
       },
     })) as SeedanceCanvasNode[];
-  }, [edges, handleDataChange, handleDeleteNode, handleDuplicateNode, handleGeneratePreview, handleImageChange, handleMediaChange, nodes]);
+  }, [edges, handleDataChange, handleDeleteNode, handleDuplicateNode, handleGeneratePreview, handleImageBatchAdd, handleImageChange, handleMediaChange, nodes]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
