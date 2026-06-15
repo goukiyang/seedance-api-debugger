@@ -379,3 +379,13 @@
 - 怎么改：资产页补齐“加入工作区 / 加入图集 / 移动视频”批量动作；部署前 stash 非本轮源码；构建期间临时排除旧 `.next`、`.next-prod`、`.next-dev` 类型目录；部署后恢复 `tsconfig.json` 并复原工作区改动。
 - 验证结果：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网资产页 chunk 命中新批量动作；跨健康守护周期 `runs` 未增长。
 - 可复用经验：生产构建隔离源码时，不只要隔离 `src/**`，还要处理旧构建类型目录。优先用临时 `tsconfig` include 收敛来绕开旧类型引用，构建后必须恢复，避免污染仓库配置。
+
+## 2026-06-15 - 页面类改动不能停在本地验证
+
+- 问题/背景：无限画布版头和底部留白修复已本地验证，但第一次汇报时没有自动 Git 上传和线上部署。
+- 诱因/根因：当前开发目录和线上来源目录都有大量未提交改动，且线上 `sd2` 实际来源不是当前目录；遇到这种情况时错误地停在本地闭环，而不是先隔离出干净分支和线上来源补丁。
+- 当时思路：用独立 worktree 形成聚焦 Git 版本，再把同一补丁落到线上来源目录，按 `youdoo-sites build/restart/status sd2` 做公网验证。
+- 改动位置：`src/components/canvas/full/CanvasWorkspace.tsx`、`src/app/canvas-workspace.css`、`src/app/globals.css`、`tasks/lessons.md`。
+- 怎么改：移除画布内部版头，保留通用版头；导出入口移入画布管理区；画布和 topbar-only 内容区高度改为通用版头下方剩余视口。
+- 验证结果：`npm run lint`、`npm run build` 通过；后续必须继续完成 Git 远端可见和 `sd2.youdoodesign.com` 线上可见验证后才算结束。
+- 可复用经验：页面、样式或交互改动只要目标是线上页面，完成标准必须是“本地实现 + 远端版本 + 线上运行实例加载新构建”。脏工作区不是停止理由，应先用独立 worktree、聚焦提交或补丁隔离。

@@ -4193,7 +4193,8 @@ a {
 }
 
 .shell-content-topbar-only {
-  padding: 16px 20px 20px;
+  min-height: calc(100dvh - 48px);
+  padding: 0;
 }
 
 @media (max-width: 900px) {
@@ -4226,7 +4227,7 @@ a {
   }
 
   .shell-content-topbar-only {
-    padding: 12px;
+    padding: 0;
   }
 }
 

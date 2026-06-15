@@ -579,11 +579,6 @@ function CanvasWorkspace() {
     [projects, selectedProjectId],
   );
 
-  const currentCanvasSummary = useMemo(
-    () => canvasList.find((canvas) => canvas.id === currentCanvasId) ?? null,
-    [canvasList, currentCanvasId],
-  );
-
   const selectedProjectLabel = selectedProject ? projectDisplayLabel(selectedProject, duplicateProjectNames) : '未选择项目';
   const selectedProjectTaskCount = selectedProject?._count?.tasks || 0;
   const selectedProjectAlbumCount = selectedProject?._count?.reference_albums || 0;
@@ -622,9 +617,6 @@ function CanvasWorkspace() {
         : selectedProjectHasContent
           ? '项目已有历史内容，只能归档'
           : '删除空项目';
-  const currentCanvasLabel = currentCanvasSummary?.title || canvasTitle || '未命名画布';
-  const currentCanvasMeta = currentCanvasSummary?.updatedAt ? `最近保存 ${formatTime(currentCanvasSummary.updatedAt)}` : '尚未保存';
-
   const applyCanvasDocument = useCallback((document: StoredCanvasDocument) => {
     const nextEdges = Array.isArray(document.edges) ? document.edges : [];
     const syncedNodes = syncGenerationInputs(Array.isArray(document.nodes) ? document.nodes : [], nextEdges);
@@ -1648,45 +1640,6 @@ function CanvasWorkspace() {
 
   return (
     <div className="canvas-full-workspace">
-      <header className="canvas-page-header">
-        <div className="canvas-page-main">
-          <div className="canvas-page-title-row">
-            <span className="canvas-page-kicker">生成工作台</span>
-            <h1>画布</h1>
-            <span className="canvas-page-badge">Beta</span>
-          </div>
-          <div className="canvas-page-summary">
-            <span className="canvas-summary-chip">
-              <strong>项目</strong>
-              <span>{selectedProjectLabel}</span>
-            </span>
-            <span className="canvas-summary-chip">
-              <strong>画布</strong>
-              <span>{currentCanvasLabel}</span>
-            </span>
-            <span className="canvas-summary-chip">
-              <strong>状态</strong>
-              <span>{currentCanvasMeta}</span>
-            </span>
-          </div>
-        </div>
-        <div className="canvas-page-actions">
-          <Link href="/generate" className="canvas-page-link">
-            返回标准生成
-          </Link>
-          {canExportCanvasJson && (
-            <button
-              type="button"
-              onClick={() => void downloadJson().catch((error) => {
-                setCanvasStatus(error instanceof Error ? error.message : '导出 Canvas JSON 失败。');
-              })}
-            >
-              导出 Canvas JSON
-            </button>
-          )}
-        </div>
-      </header>
-
       <main className="app-shell">
         <aside className="sidebar">
           <section className="add-panel add-panel-primary">
@@ -1900,6 +1853,17 @@ function CanvasWorkspace() {
               ))}
             </select>
             <p className="muted tiny canvas-status">{canvasStatus}</p>
+            {canExportCanvasJson && (
+              <button
+                type="button"
+                className="canvas-export-action"
+                onClick={() => void downloadJson().catch((error) => {
+                  setCanvasStatus(error instanceof Error ? error.message : '导出 Canvas JSON 失败。');
+                })}
+              >
+                导出 Canvas JSON
+              </button>
+            )}
           </section>
 
           <details className="legend compact-disclosure">
