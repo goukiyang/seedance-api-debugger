@@ -48,6 +48,12 @@ export interface MediaCardData extends NodeCardActions {
   onMediaChange?: (nodeId: string, media: { url: string; fileName: string; mimeType: string }) => void;
 }
 
+export interface CanvasImageUploadInput {
+  url: string;
+  fileName: string;
+  mimeType: string;
+}
+
 export interface ImageCardData extends NodeCardActions {
   title: string;
   refId: string; // maps to @图片N in Seedance 2.0
@@ -61,7 +67,8 @@ export interface ImageCardData extends NodeCardActions {
   uploadError?: string;
   description: string;
   usage: 'first-frame' | 'character-reference' | 'style-reference' | 'storyboard' | 'end-frame';
-  onImageChange?: (nodeId: string, image: { url: string; fileName: string; mimeType: string }) => void;
+  onImageChange?: (nodeId: string, image: CanvasImageUploadInput) => void;
+  onImageBatchAdd?: (sourceNodeId: string, images: CanvasImageUploadInput[]) => void;
 }
 
 export type GenerationQuality = '480p' | '720p' | '1080p';

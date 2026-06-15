@@ -60,6 +60,29 @@ function NodeActions({ onDuplicate, onDelete }: { onDuplicate?: () => void; onDe
   );
 }
 
+function imageFilesFromList(files?: FileList | null) {
+  return Array.from(files ?? []).filter((file) => file.type.startsWith('image/'));
+}
+
+function readImageFile(file: File) {
+  return new Promise<{ url: string; fileName: string; mimeType: string }>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve({
+          url: reader.result,
+          fileName: file.name,
+          mimeType: file.type,
+        });
+        return;
+      }
+      reject(new Error('图片读取失败。'));
+    };
+    reader.onerror = () => reject(new Error('图片读取失败。'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function TextCard({ id, data }: NodeProps<TextCardNode>) {
   return (
     <>
@@ -90,19 +113,24 @@ export function ImageCard({ id, data }: NodeProps<ImageCardNode>) {
   const isFrameCard = data.variant === 'frame';
   const frameLabel = data.usage === 'end-frame' ? '尾帧' : '首帧';
 
-  const applyFile = (file?: File) => {
-    if (!file || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        data.onImageChange?.(id, {
-          url: reader.result,
-          fileName: file.name,
-          mimeType: file.type,
+  const applyFiles = (files?: FileList | null) => {
+    const imageFiles = imageFilesFromList(files);
+    if (imageFiles.length === 0) return;
+
+    void Promise.all(imageFiles.map(readImageFile))
+      .then(([firstImage, ...restImages]) => {
+        if (!firstImage) return;
+        data.onImageChange?.(id, firstImage);
+        if (restImages.length > 0) {
+          data.onImageBatchAdd?.(id, restImages);
+        }
+      })
+      .catch((error) => {
+        data.onDataChange?.(id, {
+          uploadStatus: 'failed',
+          uploadError: error instanceof Error ? error.message : String(error),
         });
-      }
-    };
-    reader.readAsDataURL(file);
+      });
   };
 
   return (
@@ -117,7 +145,7 @@ export function ImageCard({ id, data }: NodeProps<ImageCardNode>) {
         onDrop={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          applyFile(event.dataTransfer.files?.[0]);
+          applyFiles(event.dataTransfer.files);
         }}
       >
         <header className="card-header">
@@ -144,17 +172,27 @@ export function ImageCard({ id, data }: NodeProps<ImageCardNode>) {
         </header>
         {isFrameCard && <p className="frame-card-note">{frameLabel}卡只决定 API 的 {data.usage === 'end-frame' ? 'last_frame' : 'first_frame'}，不自动写入 prompt。</p>}
         <button className="upload-button" type="button" onClick={() => inputRef.current?.click()} disabled={data.uploadStatus === 'uploading'}>
-          <Upload size={14} /> {data.uploadStatus === 'uploading' ? '上传中…' : '选择/拖入图片'}
+          <Upload size={14} /> {data.uploadStatus === 'uploading' ? '上传中…' : '选择/拖入图片（可多选）'}
         </button>
         <input
           ref={inputRef}
           type="file"
           accept="image/*"
+          multiple
           hidden
-          onChange={(event) => applyFile(event.target.files?.[0])}
+          onChange={(event) => {
+            applyFiles(event.target.files);
+            event.currentTarget.value = '';
+          }}
         />
         <div className="image-placeholder">
-          {data.url || data.publicUrl ? <img src={data.url || data.publicUrl} alt={data.title || data.refId} /> : <span>{data.refId}</span>}
+          {data.url || data.publicUrl ? (
+            <img
+              src={data.url || data.publicUrl}
+              alt={data.title || data.refId}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            />
+          ) : <span>{data.refId}</span>}
         </div>
         <div className="image-meta-row">
           {data.fileName && <span className="pill file-pill">{data.fileName}</span>}
