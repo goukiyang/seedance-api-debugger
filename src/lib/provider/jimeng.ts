@@ -10,6 +10,7 @@
  */
 
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
+import { normalizeProviderErrorMessage } from './error-message';
 
 // ============================================================================
 // Environment Configuration
@@ -430,7 +431,7 @@ export async function getVideoTaskStatus(
     const resultLastFrameUrl = content?.last_frame_url as string | undefined;
 
     // 提取错误信息
-    const errorMessage = (data.error || data.message) as string | undefined;
+    const errorMessage = normalizeProviderErrorMessage(data.error ?? data.message);
 
     // 提取扩展字段
     const providerModel = data.model as string | undefined;
