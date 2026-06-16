@@ -8,6 +8,7 @@ export interface NavItem {
 export const shellRoutes = [
   '/workbench',
   '/account',
+  '/notifications',
   '/assets',
   '/templates',
   '/projects',

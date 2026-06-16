@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import AccountMenu, { type AccountMenuUser } from './AccountMenu';
+import NotificationBell from './NotificationBell';
 
 export interface ComposerCreditSummary {
   available?: number;
@@ -58,6 +59,7 @@ export default function ComposerTopbar({ user, loadingUser = false, credits }: C
             可用 {formatCredit(credits.available)} 点 ｜ 冻结 {formatCredit(credits.frozen_credits)} 点 ｜ 本月已用 {formatCredit(credits.monthly_used)} 点
           </div>
         )}
+        <NotificationBell enabled={Boolean(user && !loadingUser)} />
         <AccountMenu user={user} loading={loadingUser} variant="composer" />
       </div>
     </header>

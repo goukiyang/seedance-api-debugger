@@ -3214,6 +3214,290 @@ a {
 }
 
 /* ============================================================================
+   Notifications — in-app message center
+   ============================================================================ */
+
+.notifications-page {
+  display: grid;
+  gap: 18px;
+}
+
+.notifications-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.notifications-toolbar {
+  align-items: center;
+  background: oklch(0.99 0.004 248);
+  border: 1px solid oklch(0.9 0.014 248);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.notifications-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notifications-tabs button {
+  background: oklch(0.97 0.008 248);
+  border: 1px solid oklch(0.88 0.016 248);
+  border-radius: 8px;
+  color: oklch(0.36 0.024 248);
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  min-width: 92px;
+  padding: 9px 12px;
+  text-align: left;
+  transition: background-color 0.16s, border-color 0.16s, color 0.16s;
+}
+
+.notifications-tabs button:hover,
+.notifications-tabs button.active {
+  background: oklch(0.945 0.026 255);
+  border-color: oklch(0.82 0.07 255);
+  color: oklch(0.38 0.14 255);
+}
+
+.notifications-tabs button span {
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.notifications-tabs button small {
+  color: oklch(0.52 0.02 248);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.notifications-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.notifications-actions .btn,
+.notifications-row-actions .btn {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.notifications-message {
+  align-items: center;
+  border: 1px solid;
+  border-radius: 8px;
+  display: flex;
+  font-size: 13px;
+  font-weight: 750;
+  gap: 8px;
+  padding: 11px 12px;
+}
+
+.notifications-message.is-success {
+  background: oklch(0.96 0.032 145);
+  border-color: oklch(0.82 0.08 145);
+  color: oklch(0.38 0.11 145);
+}
+
+.notifications-message.is-error {
+  background: oklch(0.96 0.034 25);
+  border-color: oklch(0.84 0.08 25);
+  color: oklch(0.44 0.13 25);
+}
+
+.notifications-list {
+  background: oklch(0.995 0.003 248);
+  border: 1px solid oklch(0.9 0.014 248);
+  border-radius: 8px;
+  display: grid;
+  overflow: hidden;
+}
+
+.notifications-empty {
+  align-items: center;
+  color: oklch(0.5 0.02 248);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-height: 220px;
+  padding: 34px 18px;
+  text-align: center;
+}
+
+.notifications-empty strong {
+  color: oklch(0.28 0.026 248);
+  font-size: 15px;
+}
+
+.notifications-empty span {
+  font-size: 13px;
+}
+
+.notifications-row {
+  border-bottom: 1px solid oklch(0.92 0.012 248);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 14px;
+}
+
+.notifications-row:last-child {
+  border-bottom: 0;
+}
+
+.notifications-row.is-unread {
+  background: oklch(0.975 0.018 255);
+}
+
+.notifications-row-main {
+  align-items: start;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.notifications-row-main:disabled {
+  cursor: wait;
+}
+
+.notifications-row-dot {
+  background: oklch(0.68 0.13 255);
+  border-radius: 999px;
+  height: 8px;
+  margin-top: 7px;
+  width: 8px;
+}
+
+.notifications-row:not(.is-unread) .notifications-row-dot {
+  background: oklch(0.78 0.01 248);
+}
+
+.notifications-row.tone-success .notifications-row-dot {
+  background: oklch(0.64 0.14 145);
+}
+
+.notifications-row.tone-warning .notifications-row-dot {
+  background: oklch(0.72 0.14 75);
+}
+
+.notifications-row.tone-danger .notifications-row-dot {
+  background: oklch(0.62 0.2 25);
+}
+
+.notifications-row-content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.notifications-row-head {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.notifications-row-head strong {
+  color: oklch(0.22 0.028 248);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.notifications-row-head time {
+  color: oklch(0.54 0.018 248);
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.notifications-row-body {
+  color: oklch(0.36 0.024 248);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.notifications-row-meta {
+  align-items: center;
+  color: oklch(0.52 0.02 248);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 760;
+  gap: 6px;
+  line-height: 1.45;
+}
+
+.notifications-row-error {
+  background: oklch(0.96 0.034 25);
+  border: 1px solid oklch(0.84 0.08 25);
+  border-radius: 7px;
+  color: oklch(0.44 0.13 25);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+
+.notifications-row-actions {
+  align-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .notification-dropdown {
+    position: fixed;
+    right: 10px;
+    top: 56px;
+    width: calc(100vw - 20px);
+  }
+
+  .notifications-toolbar,
+  .notifications-row {
+    grid-template-columns: 1fr;
+  }
+
+  .notifications-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .notifications-actions,
+  .notifications-row-actions {
+    justify-content: flex-start;
+  }
+
+  .notifications-tabs button {
+    flex: 1 1 120px;
+  }
+
+  .notifications-row-head {
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+/* ============================================================================
    Tasks list — scannable history cards
    ============================================================================ */
 
@@ -5270,6 +5554,255 @@ a {
   background-color: rgba(255, 255, 255, 0.06);
   color: white;
   border-color: rgba(255, 255, 255, 0.2);
+}
+
+.notification-bell {
+  display: inline-flex;
+  position: relative;
+}
+
+.notification-bell-trigger {
+  position: relative;
+}
+
+.notification-bell-trigger.active {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(147, 197, 253, 0.26);
+  color: oklch(0.98 0.004 255);
+}
+
+.notification-bell-badge {
+  align-items: center;
+  background: oklch(0.64 0.22 25);
+  border: 1px solid oklch(0.86 0.12 25);
+  border-radius: 999px;
+  color: oklch(0.98 0.006 25);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 900;
+  height: 16px;
+  justify-content: center;
+  min-width: 16px;
+  padding: 0 4px;
+  position: absolute;
+  right: -5px;
+  top: -5px;
+}
+
+.notification-dropdown {
+  background: oklch(0.985 0.006 248);
+  border: 1px solid oklch(0.87 0.018 248);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
+  color: oklch(0.25 0.028 248);
+  max-height: min(620px, calc(100vh - 72px));
+  overflow: hidden;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: min(390px, calc(100vw - 24px));
+  z-index: 220;
+}
+
+.notification-dropdown-head {
+  align-items: center;
+  background: oklch(0.965 0.01 248);
+  border-bottom: 1px solid oklch(0.9 0.014 248);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.notification-dropdown-head strong {
+  display: block;
+  font-size: 15px;
+}
+
+.notification-dropdown-head span {
+  color: oklch(0.48 0.024 248);
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.notification-dropdown-actions {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.notification-dropdown-actions button {
+  align-items: center;
+  background: oklch(0.99 0.004 248);
+  border: 1px solid oklch(0.88 0.018 248);
+  border-radius: 7px;
+  color: oklch(0.34 0.03 248);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 8px;
+  transition: background-color 0.16s, border-color 0.16s, color 0.16s, opacity 0.16s;
+}
+
+.notification-dropdown-actions button:hover {
+  background: oklch(0.955 0.022 255);
+  border-color: oklch(0.82 0.07 255);
+  color: oklch(0.42 0.16 255);
+}
+
+.notification-dropdown-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.notification-dropdown-error {
+  align-items: center;
+  background: oklch(0.96 0.034 25);
+  border-bottom: 1px solid oklch(0.84 0.08 25);
+  color: oklch(0.44 0.13 25);
+  display: flex;
+  font-size: 12px;
+  font-weight: 750;
+  gap: 7px;
+  padding: 9px 12px;
+}
+
+.notification-dropdown-list {
+  display: grid;
+  max-height: 430px;
+  overflow-y: auto;
+}
+
+.notification-dropdown-empty {
+  align-items: center;
+  color: oklch(0.5 0.02 248);
+  display: flex;
+  font-size: 13px;
+  font-weight: 750;
+  gap: 8px;
+  justify-content: center;
+  min-height: 120px;
+  padding: 18px;
+}
+
+.notification-dropdown-item {
+  border-bottom: 1px solid oklch(0.92 0.012 248);
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+}
+
+.notification-dropdown-item:last-child {
+  border-bottom: 0;
+}
+
+.notification-dropdown-item.is-unread {
+  background: oklch(0.97 0.018 255);
+}
+
+.notification-dropdown-open {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.notification-dropdown-open:disabled {
+  cursor: wait;
+}
+
+.notification-dropdown-item-head {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.notification-dropdown-item-head span {
+  color: oklch(0.22 0.028 248);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.notification-dropdown-item-head small {
+  color: oklch(0.54 0.018 248);
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.notification-dropdown-body {
+  color: oklch(0.38 0.024 248);
+  display: -webkit-box;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.notification-dropdown-meta {
+  color: oklch(0.52 0.02 248);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.4;
+}
+
+.notification-dropdown-item-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.notification-dropdown-item-actions a,
+.notification-dropdown-item-actions button,
+.notification-dropdown-footer {
+  align-items: center;
+  background: oklch(0.99 0.004 248);
+  border: 1px solid oklch(0.88 0.018 248);
+  border-radius: 7px;
+  color: oklch(0.4 0.12 255);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  text-decoration: none;
+  transition: background-color 0.16s, border-color 0.16s, color 0.16s, opacity 0.16s;
+}
+
+.notification-dropdown-item-actions a:hover,
+.notification-dropdown-item-actions button:hover,
+.notification-dropdown-footer:hover {
+  background: oklch(0.955 0.022 255);
+  border-color: oklch(0.82 0.07 255);
+}
+
+.notification-dropdown-item-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.notification-dropdown-footer {
+  border-width: 1px 0 0;
+  border-color: oklch(0.9 0.014 248);
+  border-radius: 0;
+  justify-content: center;
+  min-height: 40px;
+  width: 100%;
 }
 
 /* 页面主体 */
