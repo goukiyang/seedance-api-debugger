@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
+import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 
 interface Props {
   asset: WorkspaceAssetItem;
@@ -22,6 +23,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
   const isFailed = uploadStatus === 'failed';
   const [imageSrc, setImageSrc] = useState(src);
   const [imageFailed, setImageFailed] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     setImageSrc(src);
@@ -34,7 +36,14 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       <button
         type="button"
         className="ref-thumb-img-btn"
-        onClick={() => imageSrc && !imageFailed && onPreview(imageSrc)}
+        onClick={() => {
+          if (!imageSrc || imageFailed) return;
+          if (asset.type === 'image') {
+            setPreviewOpen(true);
+            return;
+          }
+          onPreview(imageSrc);
+        }}
       >
         {imageSrc && !imageFailed ? (
           <img
@@ -109,6 +118,14 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       >
         ×
       </button>
+      {previewOpen && (
+        <ZoomableImagePreview
+          src={asset.originalUrl || imageSrc}
+          alt={`图${index + 1}`}
+          fileName={asset.fileName || `图${index + 1}`}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </div>
   );
 }
