@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { displayUserName } from '@/lib/users/display';
+import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 
 type AlbumScope = 'mine' | 'project' | 'shared' | 'public';
 
@@ -63,6 +64,7 @@ export function ReferenceAlbumPicker({
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<ReferenceImageItem | null>(null);
 
   const remaining = Math.max(0, 9 - currentCount);
   const currentReferenceImageIdSet = useMemo(
@@ -98,6 +100,7 @@ export function ReferenceAlbumPicker({
     if (!open || !selectedAlbumId) {
       setImages([]);
       setSelectedImageIds([]);
+      setPreviewImage(null);
       return;
     }
     setLoading(true);
@@ -108,6 +111,7 @@ export function ReferenceAlbumPicker({
         if (!ok) throw new Error(data.error || data.message || '图集详情读取失败');
         setImages(data.images || []);
         setSelectedImageIds([]);
+        setPreviewImage(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : '图集详情读取失败'))
       .finally(() => setLoading(false));
@@ -199,16 +203,32 @@ export function ReferenceAlbumPicker({
               const isAlreadyInWorkspace = currentReferenceImageIdSet.has(image.id);
               const disabledByLimit = !checked && !isAlreadyInWorkspace && selectedNewCount >= remaining;
               return (
-                <button
+                <article
                   key={image.id}
-                  type="button"
-                  className={checked ? 'selected' : ''}
-                  onClick={() => toggleImage(image.id)}
-                  disabled={disabledByLimit}
+                  className={[
+                    'album-picker-image-card',
+                    checked ? 'selected' : '',
+                    disabledByLimit ? 'disabled' : '',
+                  ].filter(Boolean).join(' ')}
                 >
-                  <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
-                  <span>{checked ? '已选择' : isAlreadyInWorkspace ? '已在工作台' : `图 ${image.sort_order + 1}`}</span>
-                </button>
+                  <button
+                    type="button"
+                    className="album-picker-image-preview"
+                    onClick={() => setPreviewImage(image)}
+                    title="放大查看"
+                    aria-label={`放大查看${image.asset?.file_name || `图 ${image.sort_order + 1}`}`}
+                  >
+                    <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
+                  </button>
+                  <button
+                    type="button"
+                    className="album-picker-image-select"
+                    onClick={() => toggleImage(image.id)}
+                    disabled={disabledByLimit}
+                  >
+                    {checked ? '已选择' : isAlreadyInWorkspace ? '已在工作台' : `图 ${image.sort_order + 1}`}
+                  </button>
+                </article>
               );
             })}
           </div>
@@ -228,6 +248,14 @@ export function ReferenceAlbumPicker({
             </button>
           </div>
         </div>
+        {previewImage && (
+          <ZoomableImagePreview
+            src={previewImage.image_url || previewImage.thumbnail_url}
+            alt={previewImage.asset?.file_name || '参考图'}
+            fileName={previewImage.asset?.file_name || `图 ${previewImage.sort_order + 1}`}
+            onClose={() => setPreviewImage(null)}
+          />
+        )}
       </div>
     </div>
   );

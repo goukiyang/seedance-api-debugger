@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 
 interface UploadedImageItem {
   id: string;
@@ -55,6 +56,7 @@ export function UploadedImagePicker({
   const [uploading, setUploading] = useState(false);
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<UploadedImageItem | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentAssetIdSet = useMemo(() => new Set(currentAssetIds), [currentAssetIds]);
@@ -89,17 +91,24 @@ export function UploadedImagePicker({
   useEffect(() => {
     if (!open) return;
     setSelectedAssetIds([]);
+    setPreviewAsset(null);
     void loadPage(1, 'replace');
   }, [loadPage, open]);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      if (previewAsset) {
+        event.stopImmediatePropagation();
+        setPreviewAsset(null);
+        return;
+      }
+      onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open]);
+  }, [onClose, open, previewAsset]);
 
   if (!open) return null;
 
@@ -230,17 +239,25 @@ export function UploadedImagePicker({
                       inWorkspace ? 'in-workspace' : '',
                     ].filter(Boolean).join(' ')}
                   >
-                    <button
-                      type="button"
-                      className="uploaded-picker-card-main"
-                      onClick={() => toggleAsset(item.id)}
-                      disabled={inWorkspace || disabledByLimit}
-                    >
-                      <img src={item.thumbnailUrl} alt={item.fileName} />
-                      <span className="uploaded-picker-card-state">
+                    <div className="uploaded-picker-card-main">
+                      <button
+                        type="button"
+                        className="uploaded-picker-preview-button"
+                        onClick={() => setPreviewAsset(item)}
+                        title="放大查看"
+                        aria-label={`放大查看${item.fileName}`}
+                      >
+                        <img src={item.thumbnailUrl} alt={item.fileName} />
+                      </button>
+                      <button
+                        type="button"
+                        className="uploaded-picker-card-state"
+                        onClick={() => toggleAsset(item.id)}
+                        disabled={inWorkspace || disabledByLimit}
+                      >
                         {inWorkspace ? '已在参考图' : selected ? '已选择' : '选择'}
-                      </span>
-                    </button>
+                      </button>
+                    </div>
                     <div className="uploaded-picker-card-meta">
                       <strong title={item.fileName}>{item.fileName}</strong>
                       <span>{dimensions} · {formatBytes(item.fileSize)} · {formatDate(item.createdAt)}</span>
@@ -287,6 +304,14 @@ export function UploadedImagePicker({
             </button>
           </div>
         </div>
+        {previewAsset && (
+          <ZoomableImagePreview
+            src={previewAsset.originalUrl || previewAsset.thumbnailUrl}
+            alt={previewAsset.fileName}
+            fileName={previewAsset.fileName}
+            onClose={() => setPreviewAsset(null)}
+          />
+        )}
       </div>
     </div>
   );

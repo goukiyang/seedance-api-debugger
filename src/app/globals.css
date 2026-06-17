@@ -11363,6 +11363,56 @@ a {
   padding: 7px;
 }
 
+.album-picker-image-card {
+  background: white;
+  border: 1px solid #e4e9f2;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.album-picker-image-card.selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.album-picker-image-card.disabled {
+  opacity: 0.72;
+}
+
+.album-picker-image-preview {
+  background: white;
+  border: none;
+  border-radius: 0;
+  cursor: zoom-in;
+  display: block;
+  padding: 0;
+  width: 100%;
+}
+
+.album-picker-image-select {
+  background: white;
+  border: none;
+  border-top: 1px solid #e4e9f2;
+  border-radius: 0;
+  color: #172033;
+  cursor: pointer;
+  display: block;
+  font-size: 12px;
+  padding: 7px;
+  text-align: left;
+  width: 100%;
+}
+
+.album-picker-image-card.selected .album-picker-image-select {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.album-picker-image-select:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
 .album-picker-error {
   background: #fef2f2;
   color: #b91c1c;
@@ -11477,16 +11527,19 @@ a {
 
 .uploaded-picker-card-main {
   background: #eef4ff;
-  border: none;
-  cursor: pointer;
   display: block;
   padding: 0;
   position: relative;
   width: 100%;
 }
 
-.uploaded-picker-card-main:disabled {
-  cursor: not-allowed;
+.uploaded-picker-preview-button {
+  background: transparent;
+  border: none;
+  cursor: zoom-in;
+  display: block;
+  padding: 0;
+  width: 100%;
 }
 
 .uploaded-picker-card-main img {
@@ -11498,14 +11551,20 @@ a {
 
 .uploaded-picker-card-state {
   background: rgba(15, 23, 42, 0.74);
+  border: none;
   border-radius: 999px;
   bottom: 8px;
   color: white;
+  cursor: pointer;
   font-size: 12px;
   font-weight: 700;
   left: 8px;
   padding: 4px 8px;
   position: absolute;
+}
+
+.uploaded-picker-card-state:disabled {
+  cursor: not-allowed;
 }
 
 .uploaded-picker-card.selected .uploaded-picker-card-state {

@@ -24,6 +24,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
   const [imageSrc, setImageSrc] = useState(src);
   const [imageFailed, setImageFailed] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const canZoomPreview = asset.type === 'image' && Boolean(asset.originalUrl || imageSrc);
 
   useEffect(() => {
     setImageSrc(src);
@@ -38,7 +39,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
         className="ref-thumb-img-btn"
         onClick={() => {
           if (!imageSrc || imageFailed) return;
-          if (asset.type === 'image') {
+          if (canZoomPreview) {
             setPreviewOpen(true);
             return;
           }
@@ -118,7 +119,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       >
         ×
       </button>
-      {previewOpen && (
+      {previewOpen && canZoomPreview && (
         <ZoomableImagePreview
           src={asset.originalUrl || imageSrc}
           alt={`图${index + 1}`}
