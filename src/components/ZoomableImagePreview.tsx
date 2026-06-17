@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent, PointerEvent, WheelEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import styles from './ZoomableImagePreview.module.css';
 
@@ -26,6 +27,7 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
 
   const resetView = useCallback(() => {
     setScale(1);
@@ -34,6 +36,10 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
 
   const zoomAtCenter = useCallback((factor: number) => {
     setScale((current) => clampScale(current * factor));
+  }, []);
+
+  useEffect(() => {
+    setPortalRoot(document.body);
   }, []);
 
   useEffect(() => {
@@ -109,7 +115,7 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
     if (event.target === event.currentTarget) onClose();
   }, [onClose]);
 
-  return (
+  const preview = (
     <div
       className={styles.backdrop}
       role="dialog"
@@ -167,4 +173,7 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
       </div>
     </div>
   );
+
+  if (!portalRoot) return null;
+  return createPortal(preview, portalRoot);
 }

@@ -142,8 +142,6 @@ export function ReferenceStrip({
       originalAssets: orderedAssetsRef.current,
     };
     suppressClickRef.current = false;
-    setDraggedKey(sourceKey);
-    e.currentTarget.setPointerCapture(e.pointerId);
   }, [loading, uploading]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
@@ -154,8 +152,14 @@ export function ReferenceStrip({
     const deltaY = Math.abs(e.clientY - drag.startY);
     if (deltaX < 4 && deltaY < 4) return;
 
-    drag.moved = true;
-    suppressClickRef.current = true;
+    if (!drag.moved) {
+      drag.moved = true;
+      suppressClickRef.current = true;
+      setDraggedKey(drag.sourceKey);
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+    }
     const insertIndex = getInsertIndexAtPoint(e.clientX);
     const nextOrder = moveAssetToInsertIndex(
       orderedAssetsRef.current,
