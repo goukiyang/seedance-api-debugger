@@ -5930,12 +5930,12 @@ a {
 
 .composer-project-trigger {
   width: 100%;
-  min-height: 44px;
+  min-height: 64px;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 18px;
+  grid-template-columns: 42px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: 12px;
+  padding: 10px 12px;
   border: 1px solid rgba(96, 165, 250, 0.28);
   border-radius: 8px;
   background: rgba(2, 6, 23, 0.48);
@@ -5957,20 +5957,35 @@ a {
 }
 
 .composer-project-trigger-icon {
-  width: 28px;
-  height: 28px;
+  width: 42px;
+  height: 42px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: 10px;
   background: rgba(37, 99, 235, 0.22);
   color: #bfdbfe;
+}
+
+.composer-project-trigger-icon.is-avatar {
+  background: transparent;
+}
+
+.composer-project-trigger-avatar .user-identity-copy {
+  display: none;
+}
+
+.composer-project-trigger-avatar .user-identity-avatar {
+  width: 42px;
+  height: 42px;
+  font-size: 14px;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.36);
 }
 
 .composer-project-trigger-copy {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 5px;
 }
 
 .composer-project-trigger-label,
@@ -5984,17 +5999,24 @@ a {
 .composer-project-trigger-name {
   overflow: hidden;
   color: rgba(248, 250, 252, 0.96);
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-project-trigger-meta-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .composer-project-trigger-meta {
   overflow: hidden;
   color: rgba(203, 213, 225, 0.58);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;

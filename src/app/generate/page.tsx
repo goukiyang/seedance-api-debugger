@@ -9,6 +9,7 @@ import { GenerationComposer } from '@/components/GenerationComposer';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import {
@@ -103,7 +104,7 @@ interface ProjectOption {
   my_role: string | null;
   can_generate?: boolean;
   can_manage_project?: boolean;
-  owner?: { name: string | null; username: string | null };
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { tasks: number; reference_albums?: number };
 }
 
@@ -229,6 +230,10 @@ function projectOwnerName(project: ProjectOption): string {
     name: project.owner?.name,
     username: project.owner?.username,
   });
+}
+
+function projectOwnerUser(project: ProjectOption) {
+  return project.owner || { id: project.owner_user_id, name: null, username: null };
 }
 
 function projectDisplayName(project: ProjectOption): string {
@@ -1246,7 +1251,7 @@ export default function GeneratePage() {
   }, {});
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
   const selectedProjectLabel = selectedProject
-    ? projectDisplayLabel(selectedProject, projectNameCounts[projectDisplayName(selectedProject)] > 1)
+    ? projectDisplayName(selectedProject)
     : loadingProjects
       ? '正在加载项目...'
       : '暂无可生成项目';
@@ -1331,13 +1336,25 @@ export default function GeneratePage() {
                   aria-haspopup="dialog"
                   title="本次生成的任务和结果会写入所选项目"
                 >
-                  <span className="composer-project-trigger-icon" aria-hidden="true">
-                    <Folder size={16} />
+                  <span
+                    className={`composer-project-trigger-icon${selectedProject ? ' is-avatar' : ''}`}
+                    aria-hidden="true"
+                  >
+                    {selectedProject ? (
+                      <UserIdentityBadge
+                        user={projectOwnerUser(selectedProject)}
+                        size="md"
+                        className="composer-project-trigger-avatar"
+                      />
+                    ) : (
+                      <Folder size={16} />
+                    )}
                   </span>
                   <span className="composer-project-trigger-copy">
-                    <span className="composer-project-trigger-label">当前项目</span>
                     <span className="composer-project-trigger-name">{selectedProjectLabel}</span>
-                    <span className="composer-project-trigger-meta">{selectedProjectMeta}</span>
+                    <span className="composer-project-trigger-meta-row">
+                      <span className="composer-project-trigger-meta">{selectedProjectMeta}</span>
+                    </span>
                   </span>
                   <ChevronDown className="composer-project-trigger-chevron" size={16} aria-hidden="true" />
                 </button>
