@@ -38,7 +38,14 @@
 
     window.showCanvasNotice = showCanvasNotice;
 
-    if (window.CanvasGenerationAPI?.configure) {
+    const canvasRuntime = {
+        bootstrap: null,
+        bootstrapLoaded: false,
+        bootstrapError: null
+    };
+
+    function configureGenerationEndpoints() {
+        if (!window.CanvasGenerationAPI?.configure) return;
         window.CanvasGenerationAPI.configure({
             endpoints: {
                 text: '/api/tools/ultimate-canvas/generate',
@@ -46,6 +53,64 @@
             }
         });
     }
+
+    function selectedProjectFromBootstrap(data) {
+        const projectId = data?.context?.selected_project_id;
+        return data?.context?.projects?.find(project => project.id === projectId) || null;
+    }
+
+    function selectedVideoCardFromBootstrap(data) {
+        const videoCardId = data?.context?.selected_video_card_id;
+        return data?.context?.video_cards?.find(card => card.id === videoCardId) || null;
+    }
+
+    function applyBootstrapState(data) {
+        const project = selectedProjectFromBootstrap(data);
+        const videoCard = selectedVideoCardFromBootstrap(data);
+        const projectNameEl = document.getElementById('project-name');
+        const avatarEl = document.getElementById('user-avatar');
+        if (projectNameEl && project?.name) {
+            projectNameEl.textContent = videoCard?.title
+                ? `${project.name} / ${videoCard.title}`
+                : project.name;
+        }
+        if (avatarEl && data?.user?.name) {
+            avatarEl.textContent = data.user.name.slice(0, 1);
+            avatarEl.title = data.user.name;
+        }
+        window.ultimateCanvasBootstrap = data;
+    }
+
+    async function loadCanvasBootstrap() {
+        try {
+            const res = await fetch('/api/tools/ultimate-canvas/bootstrap', {
+                credentials: 'same-origin',
+                cache: 'no-store'
+            });
+            const text = await res.text();
+            let data = {};
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch {
+                data = { raw: text };
+            }
+            if (!res.ok) {
+                throw new Error(data?.error || data?.message || `后台能力读取失败：${res.status}`);
+            }
+            canvasRuntime.bootstrap = data;
+            canvasRuntime.bootstrapLoaded = true;
+            canvasRuntime.bootstrapError = null;
+            applyBootstrapState(data);
+        } catch (error) {
+            canvasRuntime.bootstrap = null;
+            canvasRuntime.bootstrapLoaded = false;
+            canvasRuntime.bootstrapError = error;
+            showCanvasNotice(error?.message || '后台能力读取失败，请刷新后重试。', 'error');
+        }
+    }
+
+    configureGenerationEndpoints();
+    loadCanvasBootstrap();
 
     const generationModeMap = {
         '文生视频': 'text-to-video',
@@ -177,25 +242,73 @@
         }
 
         if (payload.kind === 'image' || payload.kind === 'video') {
-            const isMock = result?.provider === 'mock';
-            const title = isMock
-                ? (payload.kind === 'video' ? '视频生成占位' : '图片生成占位')
-                : (payload.kind === 'video' ? '视频生成接口' : '图片生成接口');
-            const desc = isMock
-                ? `${payload.modeLabel || payload.mode} · 尚未接入真实生成、点数扣减和任务轮询。`
-                : `${payload.modeLabel || payload.mode} · ${result?.message || '请求已提交'}`;
+            const title = payload.kind === 'video' ? '视频生成任务' : '图片生成结果';
+            const desc = `${payload.modeLabel || payload.mode} · ${result?.message || '请求已提交'}`;
             const preview = result?.previewImage || result?.imageUrl || result?.coverUrl || payload.referenceImage || '';
             decorateGeneratedNode(payload.nodeId, title, desc, preview);
-            if (isMock) {
-                showCanvasNotice('当前是无线画布占位结果，还没有创建真实 sd2 生成任务。', 'warn');
-            }
         }
+    }
+
+    function generationReadiness(payload) {
+        if (!canvasRuntime.bootstrapLoaded) {
+            const message = canvasRuntime.bootstrapError?.message
+                || '正在读取后台能力状态，请稍后再试。';
+            return { ready: false, message };
+        }
+
+        const capabilities = canvasRuntime.bootstrap?.capabilities || {};
+        if (payload.kind === 'text' || payload.kind === 'script') {
+            if (!capabilities.text?.enabled) {
+                return {
+                    ready: false,
+                    message: capabilities.text?.message || 'gpt5.4 文本能力未配置，请先到后台 API 设置完成配置。'
+                };
+            }
+            return { ready: true };
+        }
+
+        if (payload.kind === 'image') {
+            if (!capabilities.image?.enabled) {
+                return {
+                    ready: false,
+                    message: capabilities.image?.message || '图形生成能力未配置，请先到后台 API 设置完成配置。'
+                };
+            }
+            return {
+                ready: false,
+                message: '图片生成需要先接入项目和视频卡归属选择。本次先阻断，避免生成结果进错资产库。'
+            };
+        }
+
+        if (payload.kind === 'video') {
+            if (!capabilities.video?.enabled) {
+                return {
+                    ready: false,
+                    message: capabilities.video?.message || '默认视频 API 未配置，暂不能创建视频任务。'
+                };
+            }
+            return {
+                ready: false,
+                message: '视频生成需要先接入项目、视频卡和点数确认。本次先阻断，避免误扣点或建错任务。'
+            };
+        }
+
+        return {
+            ready: false,
+            message: '当前节点类型还没有正式生成接口。'
+        };
     }
 
     async function submitNodeGeneration(nodeEl, button) {
         const api = window.CanvasGenerationAPI;
         const payload = collectGenerationPayload(nodeEl);
         if (!api || !payload) return;
+
+        const readiness = generationReadiness(payload);
+        if (!readiness.ready) {
+            showCanvasNotice(readiness.message, 'warn');
+            return;
+        }
 
         setSubmitLoading(button, true);
         try {

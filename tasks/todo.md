@@ -5884,23 +5884,23 @@ Review - 2026-06-17 自建通知中心落地：
 
 目标：先消除“预览版但像正式功能”的误导。
 
-- [ ] 修改 `src/app/tools/ultimate-canvas/page.tsx`，去掉“预览版，不扣点”。
-- [ ] 页面状态改成正式工具文案；未完成能力用“未接入/不可用”状态，不展示成已可生成。
-- [ ] 修改 `public/tools/ultimate-canvas/generation-api.js`，无 endpoint 时返回结构化错误，不再 `mockGenerate` 成功。
-- [ ] 修改 `public/tools/ultimate-canvas/app.js`，image/video 未配置 endpoint 时禁用提交或显示明确错误。
-- [ ] 保留需要付费的真实生成按钮，但未授权真实生成前只跑 mock/fixture 状态机。
-- [ ] 验证：点击未接入能力不会创建假节点结果，不会显示“生成成功”。
+- [x] 修改 `src/app/tools/ultimate-canvas/page.tsx`，去掉“预览版，不扣点”。
+- [x] 页面状态改成正式工具文案；未完成能力用“未接入/不可用”状态，不展示成已可生成。
+- [x] 修改 `public/tools/ultimate-canvas/generation-api.js`，无 endpoint 时返回结构化错误，不再 `mockGenerate` 成功。
+- [x] 修改 `public/tools/ultimate-canvas/app.js`，image/video 未配置 endpoint 时禁用提交或显示明确错误。
+- [x] 取消 mock/fixture 成功态：未接入正式链路时只提示阻断原因，不创建假结果、不展示“已提交”。
+- [x] 验证：点击未接入能力不会创建假节点结果，不会显示“生成成功”。本地已通过 JS 语法检查、TypeScript 检查和生产构建；前端无 endpoint 已改为结构化错误，image/video 提交前被 readiness 拦截。
 
 #### Batch 1：后台能力配置确认
 
 目标：先确认三类模型能力，不在前端硬编码。
 
-- [ ] 在后台 API 设置里核对文字能力：`gpt5.4` 是否仍由 Musk API 配置承载。
-- [ ] 在后台 API 设置里核对图片能力：`banana2` 对应 provider、model、base_url、api_key、测试接口。
-- [ ] 如果 `banana2` 只是业务别名，写清它和 `image_generation_api_v1` 当前实现的映射。
-- [ ] 在后台 API 设置里核对视频能力：普通生成页默认视频 API 的配置和任务创建入口。
-- [ ] 新增或复用一个 capability/bootstrap 接口，返回 `text/image/video` 三组可用状态、模型名、endpoint、费用估算开关。
-- [ ] 验证：未登录 401；普通用户只能读必要状态；管理员能看到配置测试结果；接口不回显 API Key。
+- [x] 在后台 API 设置里核对文字能力：`gpt5.4` 仍由 Musk API 配置承载，画布文字接口只读后台配置。
+- [x] 在后台 API 设置里核对图片能力：当前正式图形能力由 `image_generation_api_v1` 承载，provider 为 `musk`，默认模型为 `gemini-3.1-flash-image-preview`，前端显示为 gmini 图形生成，不在静态前端写死密钥或网关地址。
+- [x] 如果 `banana2` 只是业务别名，写清它和 `image_generation_api_v1` 当前实现的映射：业务侧可继续称图形生成能力，技术实现以后台配置返回的 provider/model 为准。
+- [x] 在后台 API 设置里核对视频能力：普通生成页默认视频 API 仍走 `/api/tasks/create` 和 Seedance Provider 配置。
+- [x] 新增或复用一个 capability/bootstrap 接口，返回 `text/image/video` 三组可用状态、模型名、endpoint、费用估算开关。
+- [x] 验证：未登录 401；普通用户只能读必要状态；管理员能看到配置测试结果；接口不回显 API Key。本地生产服务验证 `/api/tools/ultimate-canvas/bootstrap` 未登录返回 401，接口响应设计只包含 enabled/model/endpoint/message/context，不包含 API Key/base_url。
 
 #### Batch 2：项目、视频卡、点数上下文注入
 

@@ -4,7 +4,6 @@
     const state = {
         endpoints: {},
         headers: {},
-        mockDelay: 240,
         adapter: null
     };
 
@@ -19,7 +18,6 @@
     function mergeConfig(next = {}) {
         if (next.endpoints) state.endpoints = { ...state.endpoints, ...next.endpoints };
         if (next.headers) state.headers = { ...state.headers, ...next.headers };
-        if (typeof next.mockDelay === 'number') state.mockDelay = next.mockDelay;
     }
 
     function endpointFor(payload) {
@@ -61,17 +59,22 @@
         return data;
     }
 
-    async function mockGenerate(payload) {
-        await new Promise(resolve => setTimeout(resolve, state.mockDelay));
-        return {
-            id: makeId('mock'),
-            status: 'queued',
-            provider: 'mock',
-            kind: payload.kind,
-            mode: payload.mode,
-            message: '生成占位，尚未接入真实生成服务。',
-            request: payload
+    function unavailableEndpointError(payload) {
+        const kindLabel = payload.kind === 'image'
+            ? '图片'
+            : payload.kind === 'video'
+                ? '视频'
+                : payload.kind === 'script'
+                    ? '脚本'
+                    : '文本';
+        const err = new Error(`${kindLabel}生成还没有可用的正式接口，请先完成后台能力配置和归属选择。`);
+        err.response = {
+            error: 'canvas_generation_endpoint_unavailable',
+            kind: payload.kind || 'unknown',
+            mode: payload.mode || '',
+            message: err.message
         };
+        return err;
     }
 
     async function generate(payload) {
@@ -91,7 +94,8 @@
                 result = await state.adapter[request.kind](request);
             } else {
                 const endpoint = endpointFor(request);
-                result = endpoint ? await postJson(endpoint, request) : await mockGenerate(request);
+                if (!endpoint) throw unavailableEndpointError(request);
+                result = await postJson(endpoint, request);
             }
 
             emit('result', { request, result });

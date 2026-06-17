@@ -16,8 +16,8 @@ export default async function UltimateCanvasPage() {
           <h1>无线画布</h1>
         </div>
         <div className="ultimate-canvas-actions">
-          <span className="ultimate-canvas-badge">独立工具</span>
-          <span className="ultimate-canvas-badge muted">预览版，不扣点</span>
+          <span className="ultimate-canvas-badge">正式工具</span>
+          <span className="ultimate-canvas-badge muted">统一后台配置</span>
           <Link href="/generate" className="ultimate-canvas-link">生成视频</Link>
           <a
             href="/tools/ultimate-canvas/index.html"
