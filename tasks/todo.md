@@ -6460,3 +6460,36 @@ HARD-GATE：
 - [x] 已完成飞书 OAuth 起跳灰度验证：`/api/auth/feishu/authorize` 返回 303，`redirect_uri` 为 `https://sd2-server.youdoodesign.com/api/auth/feishu/callback`。
 - [ ] 未完成飞书登录完整回调验收：需要真实账号点击登录，并确认飞书开放平台已允许灰度 callback。
 - [ ] 未执行正式 `sd2.youdoodesign.com` 切换；Mac 旧服务仍是正式入口。
+
+## 2026-06-18 sd2 Mac 正式服务自动部署
+
+### 目标
+
+- 当前正式 `sd2.youdoodesign.com` 仍运行在 Mac 的 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 以后 `origin/codex/v12-full-todo` 出现新 commit 后，Mac 自动拉取、构建、重启并验证，减少人工漏部署。
+- 不绕过现有 `youdoo-sites` 安全构建流程，不直接改 `.next-prod`。
+
+### 闭环策略
+
+- [x] 新增 `scripts/sd2-auto-deploy.sh`，每次运行先检查当前分支、工作区干净度、远端 commit 和 fast-forward 状态。
+- [x] 没有新 commit 时只记录 noop，不重建、不重启。
+- [x] 有新 commit 时执行 `git merge --ff-only origin/codex/v12-full-todo`，然后走 `tsc`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
+- [x] 部署后验证本地 `/api/config`、公网 `/api/config`、公网 `/login`、新 BUILD_ID 的 `_buildManifest.js`。
+- [x] 跨健康守护周期后再次执行 `youdoo-sites status sd2`。
+- [x] 新增 `scripts/com.youdoo.sd2-auto-deploy.plist`，用 launchd 每 300 秒检查一次，`RunAtLoad=true`。
+
+### 安全边界
+
+- [x] 工作区有未提交改动时自动跳过，避免部署半成品。
+- [x] 远端不是 fast-forward 时自动跳过，避免自动合并冲突。
+- [x] 不读取、不输出 `.env`、API Key、cookie、token。
+- [x] 当前只绑定 Mac 正式服务；如果未来正式域名切到 Ubuntu 灰度服务，要另做服务器端 systemd/Git 自动部署，不复用 Mac launchd。
+
+### 验收
+
+- [x] `zsh -n scripts/sd2-auto-deploy.sh` 通过。
+- [x] `plutil -lint scripts/com.youdoo.sd2-auto-deploy.plist` 通过。
+- [x] 手动运行脚本在工作区未提交时正确跳过，证明 dirty worktree 保护生效。
+- [ ] 提交并清理工作区后，手动运行脚本应显示 noop。
+- [ ] 安装 launchd 后，`launchctl print gui/$(id -u)/com.youdoo.sd2-auto-deploy` 应显示 job loaded。
+- [ ] 查看 `/tmp/sd2-auto-deploy.out.log`，确认定时运行时没有新 commit 会 noop。
