@@ -25,6 +25,8 @@ function safeConfigDto(settings: Awaited<ReturnType<typeof getCodexVideoApiSetti
       name: linkedUser.name,
       username: linkedUser.username,
       email: linkedUser.email,
+      avatar_url: linkedUser.avatar_url,
+      account_type: linkedUser.account_type,
       role: linkedUser.role,
       status: linkedUser.status,
     } : null,

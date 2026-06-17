@@ -2,8 +2,9 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { getFeatureProfileLabel, getUserProfileLabel } from '@/lib/users/profiles';
-import { displayUserName, isSyntheticFeishuEmail } from '@/lib/users/display';
+import { isSyntheticFeishuEmail } from '@/lib/users/display';
 import PageBanner from '@/components/PageBanner';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 
 function formatDate(value: Date | null) {
   if (!value) return '无';
@@ -39,7 +40,6 @@ export default async function AccountPage() {
     },
   });
 
-  const displayName = displayUserName(user);
   const emailText = isSyntheticFeishuEmail(user.email) ? '未绑定真实邮箱' : user.email;
 
   return (
@@ -51,7 +51,9 @@ export default async function AccountPage() {
         <div className="info-grid">
           <div className="info-item">
             <span className="info-label">用户名</span>
-            <span className="info-value">{displayName}</span>
+            <span className="info-value">
+              <UserIdentityBadge user={user} size="sm" showEmail />
+            </span>
           </div>
           <div className="info-item">
             <span className="info-label">邮箱</span>

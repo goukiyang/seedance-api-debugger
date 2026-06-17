@@ -40,7 +40,7 @@ type MuskConfig = {
 type ImageGenerationConfig = {
   enabled: boolean;
   ready: boolean;
-  provider: 'banana2';
+  provider: 'musk';
   base_url: string;
   default_model: string;
   api_key_configured: boolean;
@@ -55,6 +55,14 @@ type ImageGenerationConfig = {
 type SubmitState = {
   type: 'success' | 'error';
   message: string;
+} | null;
+
+type MuskTestState = {
+  type: 'success' | 'error';
+  message: string;
+  model?: string;
+  latency_ms?: number;
+  tested_at?: string;
 } | null;
 
 const EMPTY_CONFIG: CodexConfig = {
@@ -81,16 +89,16 @@ const EMPTY_MUSK_CONFIG: MuskConfig = {
 const EMPTY_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
   enabled: false,
   ready: false,
-  provider: 'banana2',
-  base_url: '',
-  default_model: 'banana2',
+  provider: 'musk',
+  base_url: 'https://api.muskapis.com/',
+  default_model: 'gemini-3.1-flash-image-preview',
   api_key_configured: false,
   timeout_ms: 90000,
-  max_outputs_per_request: 4,
+  max_outputs_per_request: 1,
   default_ratio: '16:9',
   supports_text_to_image: true,
   supports_image_to_image: true,
-  supports_async_task: true,
+  supports_async_task: false,
 };
 
 function selectorLabel(type: UserSelectorType) {
@@ -112,6 +120,7 @@ export default function AdminIntegrationsClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [muskSaving, setMuskSaving] = useState(false);
+  const [muskTesting, setMuskTesting] = useState(false);
   const [imageSaving, setImageSaving] = useState(false);
   const [token, setToken] = useState('');
   const [clearToken, setClearToken] = useState(false);
@@ -120,6 +129,7 @@ export default function AdminIntegrationsClient() {
   const [imageApiKey, setImageApiKey] = useState('');
   const [clearImageApiKey, setClearImageApiKey] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
+  const [muskTestState, setMuskTestState] = useState<MuskTestState>(null);
 
   const statusText = useMemo(() => {
     if (config.ready) return '已启用，可被 Codex 调用';
@@ -186,6 +196,7 @@ export default function AdminIntegrationsClient() {
     event.preventDefault();
     setMuskSaving(true);
     setSubmitState(null);
+    setMuskTestState(null);
 
     try {
       const res = await fetch('/api/admin/integrations/musk', {
@@ -212,6 +223,42 @@ export default function AdminIntegrationsClient() {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setMuskSaving(false);
+    }
+  };
+
+  const testMuskConfig = async () => {
+    setMuskTesting(true);
+    setSubmitState(null);
+    setMuskTestState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/musk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMuskTestState({
+          type: 'error',
+          message: data.error || data.message || 'Musk API 测试失败',
+        });
+        return;
+      }
+      setMuskConfig(data.config || muskConfig);
+      setMuskTestState({
+        type: 'success',
+        message: 'Musk API 连通性测试通过。',
+        model: data.test?.model || muskConfig.default_model,
+        latency_ms: data.test?.latency_ms,
+        tested_at: data.test?.tested_at,
+      });
+    } catch (error) {
+      setMuskTestState({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Musk API 测试失败',
+      });
+    } finally {
+      setMuskTesting(false);
     }
   };
 
@@ -353,7 +400,7 @@ export default function AdminIntegrationsClient() {
         <div className="stat-card">
           <span className="stat-label">图形生成 API</span>
           <strong className="stat-value">{imageStatusText}</strong>
-          <span className="stat-sub">{imageConfig.provider} · {imageConfig.default_model || 'banana2'}</span>
+          <span className="stat-sub">{imageConfig.provider} · {imageConfig.default_model || 'gemini-3.1-flash-image-preview'}</span>
         </div>
       </div>
 
@@ -455,10 +502,32 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 API Key
           </label>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={testMuskConfig}
+            disabled={muskTesting || muskSaving || !muskConfig.ready}
+          >
+            {muskTesting ? '正在测试' : '测试连接'}
+          </button>
           <button className="btn btn-primary" type="submit" disabled={muskSaving}>
             {muskSaving ? '正在保存' : '保存 Musk API'}
           </button>
         </div>
+
+        {muskTestState && (
+          <div className={`codex-config-test-result ${muskTestState.type === 'success' ? 'is-success' : 'is-error'}`}>
+            <strong>{muskTestState.message}</strong>
+            {muskTestState.type === 'success' && (
+              <span>
+                {muskTestState.model || muskConfig.default_model}
+                {typeof muskTestState.latency_ms === 'number' ? ` · ${muskTestState.latency_ms}ms` : ''}
+                {muskTestState.tested_at ? ` · ${new Date(muskTestState.tested_at).toLocaleString('zh-CN')}` : ''}
+              </span>
+            )}
+            {muskTestState.type === 'error' && <span>请先确认地址、模型和 API Key 已保存。</span>}
+          </div>
+        )}
       </form>
 
       <form className="card codex-config-form" onSubmit={saveImageConfig}>
@@ -486,9 +555,9 @@ export default function AdminIntegrationsClient() {
               id="image-provider"
               className="input"
               value={imageConfig.provider}
-              onChange={(event) => setImageConfig((prev) => ({ ...prev, provider: event.target.value as 'banana2' }))}
+              onChange={(event) => setImageConfig((prev) => ({ ...prev, provider: event.target.value as 'musk' }))}
             >
-              <option value="banana2">banana2</option>
+              <option value="musk">Musk APIs / Gemini Image</option>
             </select>
           </div>
 
@@ -499,7 +568,7 @@ export default function AdminIntegrationsClient() {
               className="input"
               value={imageConfig.base_url}
               onChange={(event) => setImageConfig((prev) => ({ ...prev, base_url: event.target.value }))}
-              placeholder="https://api.example.com/"
+              placeholder="https://api.muskapis.com/"
               autoComplete="off"
             />
           </div>
@@ -511,7 +580,7 @@ export default function AdminIntegrationsClient() {
               className="input"
               value={imageConfig.default_model}
               onChange={(event) => setImageConfig((prev) => ({ ...prev, default_model: event.target.value }))}
-              placeholder="banana2"
+              placeholder="gemini-3.1-flash-image-preview"
               autoComplete="off"
               maxLength={80}
               required

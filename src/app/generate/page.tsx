@@ -16,7 +16,6 @@ import {
   normalizeGenerationDefaults,
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
-import { displayUserName } from '@/lib/users/display';
 
 // ============================================================================
 // Types
@@ -224,26 +223,13 @@ function writeLocalGenerationDefaults(userId: string, settings: GenerationDefaul
   }
 }
 
-function projectOwnerName(project: ProjectOption): string {
-  return displayUserName({
-    id: project.owner_user_id,
-    name: project.owner?.name,
-    username: project.owner?.username,
-  });
-}
-
-function projectOwnerUser(project: ProjectOption) {
-  return project.owner || { id: project.owner_user_id, name: null, username: null };
-}
-
 function projectDisplayName(project: ProjectOption): string {
   if (project.type === 'personal') return '个人空间';
   return project.name;
 }
 
-function projectDisplayLabel(project: ProjectOption, hasDuplicateName: boolean): string {
-  const name = projectDisplayName(project);
-  return hasDuplicateName ? `${name} · ${projectOwnerName(project)}` : name;
+function projectOwnerUser(project: ProjectOption) {
+  return project.owner || { id: project.owner_user_id, name: null, username: null };
 }
 
 function projectMetaLabel(project: ProjectOption): string {
@@ -1309,9 +1295,6 @@ export default function GeneratePage() {
             上传参考图，描述你想生成的画面，Seedance 2.0 帮你实现
           </p>
           <div className="composer-hero-actions">
-            <Link href="/generate/canvas" className="composer-hero-action composer-hero-action-primary">
-              进入画布模式
-            </Link>
             <Link href="/projects" className="composer-hero-action composer-hero-action-secondary">
               查看我的项目
             </Link>
@@ -1448,11 +1431,16 @@ export default function GeneratePage() {
                               </span>
                               <span className="composer-project-option-copy">
                                 <span className="composer-project-option-name">
-                                  {projectDisplayLabel(project, duplicateName)}
+                                  {projectDisplayName(project)}
                                 </span>
                                 <span className="composer-project-option-meta">
                                   {projectMetaLabel(project)}
                                 </span>
+                                {duplicateName && (
+                                  <span className="composer-project-option-owner">
+                                    <UserIdentityBadge user={projectOwnerUser(project)} size="sm" />
+                                  </span>
+                                )}
                               </span>
                               {canRemoveProject && (
                                 <span

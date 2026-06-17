@@ -100,7 +100,7 @@ export function useWorkspace(): UseWorkspaceResult {
       const assetId = await uploadAssetToHistory(file);
 
       // 添加到 workspace
-      await fetch('/api/workspace/assets', {
+      const addRes = await fetch('/api/workspace/assets', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,6 +108,8 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ assetId }),
       });
+      const addData = await addRes.json();
+      if (!addRes.ok) throw new Error(addData.error || addData.message || 'Add asset failed');
 
       await fetchWorkspace();
       // 成功后移除临时状态

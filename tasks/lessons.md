@@ -1,5 +1,25 @@
 # Lessons
 
+## 2026-06-17 - 模板编辑页要按真实操作闭环摆放
+
+- 问题/背景：模板上下文卡片已经有卡片、编辑器和提示词预览，但用户反馈“页面结构崩了”“最终提示词影响放在最底部，不要放在侧边”“编辑栏可以放在侧边”。
+- 诱因/根因：之前把旧抽屉加宽，再把卡片、编辑器和提示词影响塞进同一个工作区，视觉上像临时后台；最终提示词影响离“保存/试生成前核对”太远，用户无法一眼判断强制/参考和绑定图片到底如何进入最终提示词。
+- 当时思路：按真实任务重排：左侧/中间是卡片画布，右侧只编辑当前卡片并作为 sticky 操作菜单，保存动作也归入右侧编辑栏；底部横向区域专门做最终提示词影响核对，必须是工作台最后一块但不做固定条；详情页直接进入工作台，不再先点编辑按钮打开弹层。
+- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/components/templates/AdminTemplatesClient.tsx`、`src/app/globals.css`、`src/lib/templates/workbench.ts`。
+- 怎么改：`TemplateEditorDrawer` 增加 inline 工作台模式；`/admin/templates/[id]` 直接渲染卡片工作台；最终提示词影响区移到底部并常显强制、参考、绑定图片三列，随页面自然滚动且完整换行展示；保存状态和保存按钮移进右侧编辑栏；卡片列表超高时在主舞台内收缩滚动，避免把整页撑爆；空内容草稿卡片不再被保存链路过滤。
+- 验证结果：`tsc`、`lint`、`git diff --check`、`impeccable detect`、`npm run build`、空卡片序列化 smoke、`youdoo-sites build/restart/status sd2` 通过；公网 CSS 命中新布局类名，`/api/config` 和 `/login` 返回 200。
+- 可复用经验：工作台页面不要用“抽屉加宽”替代信息架构；编辑器可以在侧边并保持可用，保存动作属于编辑器；最终影响、核对和提交前判断必须放在底部或主流程末端，贴近用户做决定的位置，且不要用固定高度截断关键内容。
+
+## 2026-06-15 - LLM 功能不能只落 UI 骨架
+
+- 问题/背景：模板模块页面已有 `Module Builder` 面板和 Musk API 基础地址/模型配置，但用户继续反馈“llm 的需求做了么，我没看见对应的 ui”等缺口。
+- 诱因/根因：前一批只完成可见入口和本地结构化草稿，尚未接入 API Key、真实 LLM 调用、AgentRun/Memory 审计和权限验证；“能看到面板”容易被误判为“LLM 已落地”。
+- 当时思路：先用 smoke 测试锁住 Module Builder Agent 的 JSON 解析和校验协议，再补 Musk API Key、OpenAI-compatible 调用、管理员生成接口和前端真实请求。
+- 改动位置：`src/lib/integrations/musk.ts`、`src/lib/templates/module-builder.ts`、`src/app/api/templates/module-builder/generate/route.ts`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`src/components/GenerationComposer.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`。
+- 怎么改：Musk 配置增加 API Key 但不回显；Module Builder 接口只生成草稿，不直接保存模块；生成过程写入 `AgentRun`、`AgentRunStep`、`TemplateMemory` 和 `OperationLog`；主工作台 UI 显示等待、错误、追问、规则和执行链路。
+- 验证结果：`npx tsx scripts/module-builder-agent-smoke.ts`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网静态 chunk 命中真实 Module Builder API 和 API Key 配置标识。
+- 可复用经验：凡是标成 LLM/Agent 的功能，验收必须至少覆盖“模型配置含密钥、服务端调用器、结构化输出校验、权限、审计链路、前端真实请求”；只有本地模拟或静态 UI 时必须明确标注为骨架。
+
 ## 2026-06-14 - 删除/归档类按钮不要依赖浏览器原生 confirm
 
 - 问题/背景：用户反馈生成页项目删除按钮点击后没有起效。
@@ -320,6 +340,16 @@
 - 验证结果：`npx prisma validate`、`npm run db:generate`、`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`NEXT_DIST_DIR=.next-prod-dry-run npm run build`、`/tmp` SQLite approval smoke、`youdoo-sites build/restart/status sd2` 和公网 `/approvals`/`api/approvals` 验证通过。
 - 可复用经验：任何高成本动作的“确认”都应拆成两层：前端确认只负责交互意图，后端必须验证可追溯审批实体；拒绝原因也要从审批记录回流到触发页面。
 
+## 2026-06-15 - LLM 入口必须放在管理员的自然操作点
+
+- 问题/背景：用户多次反馈“找不到用 LLM 生成模块的入口”，实际原因不是后端没有能力，而是入口放在抽屉顶部 Agent 面板里，和管理员预期的“新增模块 / 新增规则”操作点错位。
+- 诱因/根因：把 Agent 能力当成独立功能块展示，而不是嵌入用户原本要完成的动作；结果用户在新增模块和新增规则时看不到 LLM。
+- 当时思路：保留整套模板配置入口，但把单模块和单规则生成入口移到模块绑定区、规则分组区，并让每个具体行自动带入类型。
+- 改动位置：`src/components/templates/TemplateEditorDrawer.tsx`、`src/app/globals.css`、`src/app/api/templates/module-builder/*`、`src/lib/templates/module-library.ts`、`tasks/todo.md`。
+- 怎么改：模块页加入 `+ 新增模块（LLM）` 和每行 `LLM 生成`；规则页加入 `+ 新增规则（LLM）` 和每组 `LLM 生成本类规则`；内联展开 Module Builder / Rule Builder，支持生成、预览、应用、保存、拒绝、查看链路。
+- 验证结果：入口 smoke、LLM 合约 smoke、类型检查、lint、构建、设计扫描均通过；线上 `sd2` 构建发布后公网 chunk 已命中新入口文案，健康守护周期后服务稳定。
+- 可复用经验：Agent 主执行不是“多放一个聊天框”。后台 LLM 能力必须嵌入用户正在做的按钮和表单附近，生成结果必须有预览、人工确认、保存、追溯和失败回退，才算闭环。
+
 ## 2026-06-14 - 模板生成必须作为独立任务面落地
 
 - 问题/背景：用户指出截图里的模板生成页不是普通 `/generate` 的增强版，而是独立的模板生成页面；之前把模板工作台塞进普通生成页，导致信息架构共生、普通生成变复杂、todo 状态也容易误判。
@@ -379,3 +409,204 @@
 - 怎么改：资产页补齐“加入工作区 / 加入图集 / 移动视频”批量动作；部署前 stash 非本轮源码；构建期间临时排除旧 `.next`、`.next-prod`、`.next-dev` 类型目录；部署后恢复 `tsconfig.json` 并复原工作区改动。
 - 验证结果：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网资产页 chunk 命中新批量动作；跨健康守护周期 `runs` 未增长。
 - 可复用经验：生产构建隔离源码时，不只要隔离 `src/**`，还要处理旧构建类型目录。优先用临时 `tsconfig` include 收敛来绕开旧类型引用，构建后必须恢复，避免污染仓库配置。
+
+## 2026-06-15 - 页面功能完成必须包含导航可见性
+
+- 问题/背景：模板生成和 API 设置能力已有页面或路由，但用户在导航栏目里找不到对应入口，导致“做了页面”没有形成可用闭环。
+- 诱因/根因：验收只检查了路由或局部页面，没有同时检查左侧导航、后台快捷入口、兼容跳转和公网构建 chunk 是否包含入口文案。
+- 当时思路：把“页面存在”升级成“入口可见 + 目标路由可访问 + 生产构建已加载”；模板库和模板生成工作台分别命名，避免“动画模板”和“模板生成”混淆。
+- 改动位置：`src/lib/navigation.ts`、`src/app/admin/page.tsx`、`src/app/admin/settings/page.tsx`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`tasks/todo.md`。
+- 怎么改：左侧导航新增“模板生成”直达 `/template-generate`；后台入口改成“API 设置”并保留 `/admin/settings` 跳转；模板编辑抽屉新增 LLM 配置模板和 Module Builder 骨架；todo 标注真实 LLM 后端调用仍待继续。
+- 验证结果：`./node_modules/.bin/tsc --noEmit --pretty false`、`git diff --check`、`youdoo-sites build/restart sd2` 通过；公网 `/template-generate` 200；公网 layout chunk 命中 `模板生成`、`API 设置`；跨健康守护周期 `runs=58` 未增长。
+- 可复用经验：任何用户可见页面或后台设置页，完成标准必须包括导航/快捷入口可见性验证。只验证 URL 可访问不够，必须证明用户能从当前信息架构进入该页面。
+
+## 2026-06-15 - LLM Builder 不能只藏在编辑抽屉
+
+- 问题/背景：模板模块 LLM 生成器已经加到模板编辑抽屉，但用户进入模板生成页看不到对应 UI，以为 LLM 需求没有做。
+- 诱因/根因：把“管理员低频编辑入口”当成“功能已上线入口”。抽屉内能力需要先知道编辑按钮和页签路径，不能作为主任务面的可见证据。
+- 当时思路：把 LLM Builder 提升到 `/template-generate` 模板工作台内部，在当前模板上下文下直接展示模块类型、对话输入、生成规则、结构化预览和 API 设置入口；抽屉编辑能力保留。
+- 改动位置：`src/components/GenerationComposer.tsx`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：新增主工作台“LLM 模板配置 / 新增模块”面板；复用 sd2 视频生成 skill 的通用提示词格式作为 `prompt_format` 模块；生成草稿包含 `moduleType`、`promptBlock`、`rules`、`injectionMode`、`priority` 和当前模板上下文。
+- 验证结果：`./node_modules/.bin/tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npx impeccable detect`、`youdoo-sites build/restart sd2` 通过；公网 JS/CSS 命中 `template-llm-builder`、`Module Builder`、`draft_requires_admin_review`、`prompt_format`。
+- 可复用经验：Agent/LLM 类需求必须在主任务面有可见入口。抽屉、隐藏页签和详情页只能作为高级编辑路径，不能替代用户进入页面后能直接看到的工作区。
+
+## 2026-06-15 - 图形模型配置必须和文字 LLM 配置分离
+
+- 问题/背景：无线画布需要图形生成能力，但现有 Musk API 默认模型是 `gpt-5.4`，只适合 prompt、分镜和结构化草稿，不适合文生图、图生图或首尾帧草图。
+- 诱因/根因：如果复用文字 LLM 配置去接图像模型，会混淆 Provider Key、模型能力、计费、失败处理和后台排查口径。
+- 当时思路：先新增独立 `image_generation_api_v1` 配置；2026-06-17 已按用户纠偏，Provider 应走 Musk APIs 网关，默认模型走 Musk 可用的 Gemini 图片模型，不应把内部代号 `banana2` 当成后台 provider 或模型名。
+- 改动位置：`src/lib/integrations/image-generation.ts`、`src/app/api/admin/integrations/image-generation/route.ts`、`src/app/api/assets/generate/route.ts`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`tasks/todo.md`。
+- 怎么改：新增图形生成 API 配置读写、管理员设置卡、API Key 不回显、未配置时 `/api/assets/generate` 返回 503；纠偏后默认 provider 为 `musk`，默认地址为 `https://api.muskapis.com/`，默认模型为 `gemini-3.1-flash-image-preview`，旧 `banana2`、Google 直连地址和旧模型保存值只作为兼容迁移输入。
+- 验证结果：历史版本曾验证后台配置骨架；2026-06-17 纠偏后已验证当前后台 key 对 Musk API 有效，`/v1/models` 能返回 `gemini-3.1-flash-image-preview`。Musk 的 `/v1/images/generations` 不支持该 Gemini 图片模型，应走 `/v1beta/models/{model}:generateContent`，实测能返回 `inlineData` 图片；`/api/assets/generate` 登录态真实生成已成功入库，返回 `Asset`、`ReferenceImage`、`WorkspaceAsset` 和缩略图。
+- 可复用经验：跨模型能力要先拆配置域和安全边界；文字 LLM、图像模型、视频 Provider 不应共用一个 API 设置或一套计费语义。接 Musk APIs 这类聚合网关时，不能拿 Google 官方 base URL 或 Google key 规则判断；要按网关实际模型列表、端点类型和鉴权方式做真实探针。
+
+## 2026-06-15 - 页面类改动不能停在本地验证
+
+- 问题/背景：无限画布版头和底部留白修复已本地验证，但第一次汇报时没有自动 Git 上传和线上部署。
+- 诱因/根因：当前开发目录和线上来源目录都有大量未提交改动，且线上 `sd2` 实际来源不是当前目录；遇到这种情况时错误地停在本地闭环，而不是先隔离出干净分支和线上来源补丁。
+- 当时思路：用独立 worktree 形成聚焦 Git 版本，再把同一补丁落到线上来源目录，按 `youdoo-sites build/restart/status sd2` 做公网验证。
+- 改动位置：`src/components/canvas/full/CanvasWorkspace.tsx`、`src/app/canvas-workspace.css`、`src/app/globals.css`、`tasks/lessons.md`。
+- 怎么改：移除画布内部版头，保留通用版头；导出入口移入画布管理区；画布和 topbar-only 内容区高度改为通用版头下方剩余视口。
+- 验证结果：`npm run lint`、`npm run build` 通过；后续必须继续完成 Git 远端可见和 `sd2.youdoodesign.com` 线上可见验证后才算结束。
+- 可复用经验：页面、样式或交互改动只要目标是线上页面，完成标准必须是“本地实现 + 远端版本 + 线上运行实例加载新构建”。脏工作区不是停止理由，应先用独立 worktree、聚焦提交或补丁隔离。
+
+## 2026-06-15 - 候选构建缺关键文件时先保 live，再重跑闭环
+
+- 问题/背景：导航重组本地实现和普通 `npm run build` 已通过，但第一次执行 `youdoo-sites build sd2` 时，候选目录 `.next-prod-candidate` 未生成 `BUILD_ID` 和 `prerender-manifest.json`。
+- 诱因/根因：安全构建脚本会先构建候选包，再校验关键文件并替换 live `.next-prod`；Next 第一次会自动把 `.next-prod-candidate/types/**/*.ts` 写入 `tsconfig.json`，该次候选包不完整，不能发布。
+- 当时思路：第一次候选不完整时保留当前健康线上版本，不执行 restart，不替换 `.next-prod`；保留临时类型 include 重跑官方构建，成功后恢复 `tsconfig.json`，再重启和公网验证。
+- 改动位置：`src/lib/navigation.ts`、`src/components/ComposerTopbar.tsx`、`src/components/SideNav.tsx`、`src/app/admin/page.tsx`、`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/globals.css`、`tasks/todo.md`、`tasks/lessons.md`。
+- 怎么改：完成导航分层、顶部快捷收敛、侧边栏分组、管理中心入口归纳和视觉样式整理；部署阶段先让候选构建生成临时类型配置，再重跑 `youdoo-sites build sd2` 生成完整 `.next-prod`，最后恢复 `tsconfig.json`。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check`、`npx impeccable detect ...`、`youdoo-sites build/restart/status sd2` 通过；`.next-prod/BUILD_ID=d02kA_j7kG-kJXP3VUOcY`，公网 `/api/config` 和 `/login` 返回 200，公网 layout chunk 命中新导航文案。
+- 可复用经验：`youdoo-sites build` 未完成或候选包缺关键文件时，禁止重启线上服务，也不能汇报“已上线”。但如果 Next 只是先写入候选类型 include，保留该临时 include 重跑官方构建，成功后再恢复 `tsconfig.json`，可以把部署闭环做完。
+
+## 2026-06-16 - 管理对象合并后仍要保留直达入口
+
+- 问题/背景：管理中心把用户和项目合并为“用户与项目”归纳项后，项目管理入口不够明显，用户反馈“管理页的项目没有入口”。
+- 诱因/根因：信息架构合并只减少了一级入口数量，但没有保留关键管理对象的直达入口；“用户与项目”对项目管理来说过于隐含。
+- 当时思路：不撤回管理中心归纳结构，只把高频、独立对象“项目管理”在管理侧栏和管理中心顶部按钮中显式露出。
+- 改动位置：`src/lib/navigation.ts`、`src/app/admin/page.tsx`。
+- 怎么改：管理中心侧栏把“用户与项目”拆成“用户管理”和“项目管理”；管理中心页顶部主操作新增“项目管理”直达 `/admin/projects`。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npx impeccable detect ...`、`youdoo-sites build/restart/status sd2` 通过；公网 layout chunk 命中“项目管理”和“用户管理”。
+- 可复用经验：后台导航可以归纳，但不能把关键管理对象藏到抽象分组里。用户、项目、成本、产出这类高频对象至少要在管理中心首屏或侧栏有明确直达入口。
+
+## 2026-06-17 - 生成页项目卡要按对象卡片排版
+
+- 问题/背景：生成页项目选择卡把“当前项目”标签放在项目名上方，视觉上压住项目名和统计信息，用户要求按红框结构改成左头像、右信息。
+- 诱因/根因：原实现把项目卡当成表单字段，有标签、图标、项目名、统计、头像多层堆叠；但这个区域实际是当前保存对象的卡片摘要，不需要再写“当前项目”。
+- 当时思路：保留项目选择能力和下拉入口，只重排当前项摘要。左侧显示头像，没有项目时才用文件夹兜底；右侧只展示项目名和任务/图集信息。
+- 改动位置：`src/app/generate/page.tsx`、`src/app/globals.css`。
+- 怎么改：删除项目触发器里的“当前项目”标签；把左侧图标改为项目负责人头像；右侧改为项目名 + meta row；CSS 调整触发器高度、列宽、头像尺寸和文本层级。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npx impeccable detect ...`、`youdoo-sites build/restart/status sd2` 通过；生产包命中 `composer-project-trigger-avatar`、`composer-project-trigger-meta-row`、`is-avatar`，不再命中项目卡内 `当前项目</span>`。
+- 可复用经验：选择器当前值如果代表一个对象，就按对象卡片排版。避免“字段标签 + 对象摘要 + 头像”堆叠，尤其不要让标签和对象名抢同一视觉层级。
+
+## 2026-06-16 - 诊断默认先查后台反馈表
+
+- 问题/背景：用户说“诊断”时，期望查看后台反馈页收集到的真实反馈，而不是先从前端入口或其他链路推断。
+- 诱因/根因：排查时把最近改动链路当成诊断入口，忽略了项目已有 `Feedback` 后台表和 `/api/admin/feedback` 管理接口。
+- 当时思路：先从生产数据库读取 `Feedback` 汇总、最新 new 反馈、页面分布和已处理状态，再判断哪些已修复应消单、哪些是真新需求。
+- 改动位置：`prisma/schema.prisma` 的 `Feedback` 模型、`src/app/api/admin/feedback/route.ts`、生产库 `Feedback` 记录。
+- 怎么改：确认总反馈、new/archived 数量和最近反馈；核对版权失败任务已修复并退款后，将对应反馈 `cmqez2vic008312eobd00tncc` 归档并写 admin_note。
+- 验证结果：后台查询显示 `Feedback` 总数 28、原 `new=18`；任务 `cmqeygqo7006k12eovtfwjdck` 已为 failed，冻结点数为 0，存在 `task_failed_refund` 流水；对应反馈已更新为 archived。
+- 可复用经验：以后本项目用户只说“诊断”时，默认第一步查生产后台反馈数据，输出新反馈、已修复待消单和未做事项；只有反馈指向具体页面或任务后，再进入相应代码/任务链路。
+
+## 2026-06-16 - Seedance 资产上传不能把 AssetType 写死成 Image
+
+- 问题/背景：Seedance 资产面板里图片上传正常，但视频和音频上传失败。
+- 诱因/根因：官方完整功能示例已经包含 `reference_video`、`reference_audio`、`video_url`、`audio_url`，资产创建接口也依赖 `AssetType`；项目里的 `/api/assets/upload-and-create` 只允许 `jpg/png/webp`，并且调用官方 `/asset/create` 时固定传 `Image`。
+- 当时思路：先查官方文档资源确认视频/音频是受支持素材，再收敛修改资产创建入口，不改底层存储和官方 API client，因为它们已经支持 `Image/Video/Audio`。
+- 改动位置：`src/app/api/assets/upload-and-create/route.ts`、`src/app/api/assets/create-from-url/route.ts`、`src/components/SeedanceAssetPanel.tsx`。
+- 怎么改：本地上传按 MIME 和扩展名识别 `Image/Video/Audio`；图片保留 10MB 上限，视频/音频使用 50MB 上限；URL 创建按扩展名推断资产类型；前端文件选择框放开 `mp4/mov/webm/mp3/wav/ogg`。
+- 验证结果：`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网 `/api/config`、`/login` 200；生产编译产物命中 `video/mp4`、`audio/mpeg`、`Video`、`Audio`；健康守护周期后 `runs=72` 未增长。
+- 可复用经验：遇到“图片可用但视频/音频不可用”的素材问题，优先检查前端 accept、后端白名单和官方 `AssetType` 是否三处一致，不要只看存储层是否支持扩展名。
+
+## 2026-06-17 - 服务器迁移先改名并行灰度，不直接切正式域名
+
+- 问题/背景：需要把 Mac 上的 Seedance2 网站搬到 `server skills` 默认 Ubuntu 服务器，并把历史目录名 `video-api-debugger-v12-full-todo` 改成长期可维护的 `seedance2`。
+- 诱因/根因：当前 Mac 生产目录依赖跨目录软链接：`.env` 指向旧项目目录，`prisma/dev.db` 指向旧目录数据库；如果只复制当前文件夹，服务器上会断环境变量和 SQLite 数据库路径。
+- 当时思路：先建立服务器并行灰度环境，不切正式 `sd2.youdoodesign.com`；代码、环境、SQLite、uploads、videos、systemd、nginx Host 分层迁移，避免一次性把正式入口切坏。
+- 改动位置：服务器 `/home/gouki/services/seedance2`、`/home/gouki/data/seedance2`、`/etc/systemd/system/seedance2.service`、`/etc/nginx/sites-available/sd2-server.youdoodesign.com`、`tasks/todo.md`。
+- 怎么改：生成代码快照并排除 `node_modules` 和 `.next*`；用 SQLite `.backup` 生成灰度库；同步 `public/uploads` 和 `public/videos`；在 release 内把 `.env`、`prisma/dev.db`、`public/uploads`、`public/videos` 改成服务器绝对路径软链接；在 Ubuntu 上重新 `npm ci`、`npx prisma generate`、`npm run build`；systemd 监听 `127.0.0.1:3302`，nginx 预配置灰度 Host。
+- 验证结果：服务器 BUILD_ID `wUapis7t_x9-DwvlgU4uw`；`seedance2.service` active；`systemctl restart seedance2` 后 `/api/config` 和 `/login` 200；数据库计数与 Mac 一致；uploads/videos 样本 200；公网 IP + Host 头访问 nginx 灰度 Host `/api/config` 和 `/login` 200。
+- 可复用经验：搬 Next + SQLite 站点时，先改成清晰的服务器目录名并做并行灰度。正式切换前必须停写后再做最终 SQLite 和文件增量同步；真实公网域名、飞书回调和上传链路未验证前，不切正式域名。
+
+## 2026-06-17 - 模板生成页先保用户主路径，再放管理员能力
+
+- 问题/背景：模板生成页把普通生成、项目归档、Prompt 编辑、参考图、参数栏和 Module Builder 放在同一个工作面里，用户看不到“用模板生成视频”的简单闭环。
+- 诱因/根因：实现时沿工程配置视角继续堆能力，导致普通用户主路径被管理员低频配置打断；LLM 能力也缺少 API 状态前置检查和设置页测试闭环。
+- 当时思路：按角色拆面。普通用户只看到模板摘要、需求输入、方案选择和提交；管理员能力进入折叠工具区；所有真实 LLM 入口先看 Musk API 是否 ready。
+- 改动位置：`src/components/templates/TemplateGenerateClient.tsx`、`src/components/GenerationComposer.tsx`、`src/components/ComposerActionBar.tsx`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`src/app/api/admin/integrations/musk/route.ts`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：保存位置和视频卡折叠，提交前自动创建视频卡；Prompt、参考图、参数栏默认折叠；Module Builder 仅管理员可见且依赖 Musk 状态；API 设置页新增最小 JSON 连通性测试，并写 OperationLog。
+- 验证结果：`git diff --check -- <本轮目标文件>`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npx impeccable detect ...`、`npm run build` 通过；本地 `/template-generate` HTML 命中折叠保存位置、三步流和切换模板。
+- 可复用经验：模板类页面的完成标准不是“能力都在页面上”，而是不同角色各自闭环。普通用户主路径不能出现底层术语；管理员 LLM 操作必须先有 API 可用性前置检查和可追踪测试入口。
+
+## 2026-06-17 - 模板模块应是上下文卡片，不是工程字段
+
+- 问题/背景：用户再次指出重做后的模板模块仍然难用，原因是界面仍在暴露 `brand_logo`、模块类型、底层字段和工程结构。
+- 诱因/根因：把系统内部的模块/规则模型直接映射到 UI，导致用户像在填代码配置，而不是在编排给 LLM 的上下文。
+- 当时思路：把模块统一降维为“上下文卡片”。卡片只负责表达一段最终给 LLM 的上下文内容，可拖拽、可启用、可编辑、可选择强制插入或仅供参考，可选绑定 1 张图片。
+- 改动位置：`tasks/todo.md`。
+- 怎么改：新增“2026-06-17 最新产品修正：上下文卡片系统”；重写 `Phase 4：模板上下文卡片编排器` 和 `Phase 5：卡片绑定图片与图片选择器复用`；明确图片来源复用参考图集和历史上传图。
+- 验证结果：本轮为规划更新，未改业务代码；`tasks/todo.md` 已记录新页面、数据、交互、接口、验收标准和禁止项。
+- 可复用经验：模板模块 UI 必须从用户要表达的内容出发。内部可以继续有 `prompt_required/context_only` 等字段，但主界面只能呈现“上下文内容、强制插入/仅供参考、启用、编辑、绑定图片”这些用户能理解的概念。目标版本变更后，旧 todo 章节要明确标成历史记录或兼容层，不能让旧 `Module Builder` 主线和新上下文卡片主线并行冲突。
+
+## 2026-06-17 - 上下文卡片落地优先做兼容层，不急着迁移数据库
+
+- 问题/背景：用户要求“全量落地不要停”，目标是尽快在网页上看到并使用上下文卡片版模板管理，而不是继续停留在规划。
+- 诱因/根因：现有模板数据已经有 `module_bindings_json`、`TemplatePromptBlock`、`TemplateAsset`、`TemplateRule` 等旧结构；如果第一步就做数据库迁移，会拖慢入口和 UI 闭环。
+- 当时思路：先在序列化层新增 `context_cards`，旧模板读取时自动转换成卡片；保存卡片时再同步回旧 `prompts/assets/module_bindings_json`，让旧生成链路继续工作。
+- 改动位置：`src/lib/templates/workbench.ts`、`src/app/api/templates/[id]/context-cards/route.ts`、`src/components/templates/TemplateContextCardsPanel.tsx`、`src/components/templates/TemplateBoundImagePicker.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/components/templates/AdminTemplatesClient.tsx`、`src/lib/navigation.ts`、`src/app/admin/page.tsx`、`src/app/globals.css`。
+- 怎么改：新增 `/admin/templates` 工作台和 `/admin/templates/[id]` 详情页；编辑抽屉默认显示上下文卡片；卡片支持排序、启停、强制/参考、图片绑定、LLM 改写和自动保存；绑定图片从参考图集和历史上传图选择。
+- 验证结果：`tsc`、`lint`、`git diff --check`、`npx impeccable detect`、`npm run build` 通过；本地 `/admin/templates` 未登录 307 到登录页，`/api/templates` 未登录 401，构建路由表包含新增页面和接口。
+- 可复用经验：当用户要求产品交互快速闭环时，优先做“用户对象 + 兼容映射”。数据库迁移、完整版本化和深层重构可以后置，但主界面必须先摆脱旧字段模型。
+
+## 2026-06-17 - 线上包命中组件不等于真实入口可用
+
+- 问题/背景：参考图缩放预览组件已经在生产包里，但用户在生成页当前参考图和上传历史图片里点击图片没有弹窗。
+- 诱因/根因：只验证了线上 chunk 里存在 `ZoomableImagePreview`，没有逐个核对真实入口的点击绑定；上传历史和图集选择使用独立卡片组件，之前只把当前参考图缩略图接到了预览。
+- 当时思路：先按入口追代码，再把“图片预览”和“选择加入参考图”拆成两个明确点击区。
+- 改动位置：`src/components/ReferenceThumb.tsx`、`src/components/UploadedImagePicker.tsx`、`src/components/ReferenceAlbumPicker.tsx`、`src/app/globals.css`。
+- 怎么改：当前参考图继续点击图片放大；上传历史图片和图集图片的图片区点击放大，状态按钮负责选择；复用 `ZoomableImagePreview` 的滚轮缩放、拖动、放大、缩小和还原能力。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect ...`、`youdoo-sites build/restart/status sd2` 通过；公网 JS 命中 `uploaded-picker-preview-button`、`album-picker-image-preview`、`放大查看`，公网全局 CSS 命中对应样式；健康守护周期后 `runs` 未增长。
+- 可复用经验：页面交互类修复不能只证明组件存在或资源已发；必须按用户实际入口逐个验证事件绑定、弹窗层级和线上资源命中。
+
+## 2026-06-17 - 全屏预览不能挂在会裁剪的父弹窗里
+
+- 问题/背景：上传历史图片里点击放大后，预览层被限制在上传历史图片弹窗内部；生成页当前参考图单击也没有稳定响应。
+- 诱因/根因：预览组件虽然使用 `position: fixed`，但它被渲染在带 `transform` 和 `overflow: hidden` 的父弹窗里，浏览器会按父弹窗裁剪；参考图缩略图外层在 `pointerdown` 就捕获指针并进入拖拽链路，单击和拖动没有真正分开。
+- 当时思路：预览层改为 React Portal 挂到 `document.body`，让它真正覆盖整个视口；拖拽只有移动超过阈值后才捕获指针和触发排序，未移动时保留正常单击。
+- 改动位置：`src/components/ZoomableImagePreview.tsx`、`src/components/ZoomableImagePreview.module.css`、`src/components/ReferenceStrip.tsx`。
+- 怎么改：`ZoomableImagePreview` 使用 `createPortal` 输出到 `document.body`，预览层 `z-index` 提升到 4000；`ReferenceStrip` 去掉 `pointerdown` 立即捕获，改为超过 4px 移动后才设置拖拽态和 `setPointerCapture`。
+- 验证结果：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npm run build`、`npx impeccable detect ...`、`youdoo-sites build/restart/status sd2` 通过；公网 JS 命中 `createPortal`、`setPointerCapture`、`hasPointerCapture`，公网 CSS 命中 `z-index:4000`。
+- 可复用经验：任何全屏预览、全局菜单、tooltip、弹窗上弹窗，都不要挂在可能 `transform/overflow` 的局部容器里；排序拖拽必须先区分“点击”和“移动超过阈值”，不能在 `pointerdown` 就抢走点击。
+
+## 2026-06-17 - 删除旧模板入口要清到路由表和前端包
+
+- 问题/背景：用户指出新版上下文卡片方向已经确认，但网页结构里仍残留旧模块库、旧设置跳转和旧抽屉高级结构，页面看起来像多套系统并存。
+- 诱因/根因：之前只把新 `/admin/templates` 加进导航，没有把旧 `/admin/modules`、`/admin/settings` 和 `TemplateEditorDrawer` 里的旧 Module Builder 表单从页面结构里彻底移除。
+- 当时思路：以最新目标为唯一主线，删除旧页面，导航只保留模板工作台和必要诊断入口；抽屉只保留上下文卡片，不再渲染或打包旧工程字段 UI。
+- 改动位置：`src/app/admin/modules/page.tsx`、`src/app/admin/settings/page.tsx`、`src/lib/navigation.ts`、`src/app/admin/page.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：删除旧模块库页和旧设置跳转页；从 shell route、后台导航和管理中心快捷入口移除旧入口；重写模板编辑抽屉为纯卡片版；清理 `.next` 和 `.next-prod` 中旧路由类型缓存。
+- 验证结果：`tsc`、`git diff --check`、`npx impeccable detect`、`npm run lint`、`npm run build` 通过；构建路由表不再包含 `/admin/modules`、`/admin/settings`；前端可见生产包旧路由、`模块库` 和 `高级结构` 命中数为 0；线上 BUILD_ID `7Rwo7XAkwrIUNPHra8_bH` 已加载。
+- 可复用经验：界面重构不是“新入口能用”就结束。旧入口、旧文案、旧路由、旧构建类型和前端包里的旧 UI 字符串都要一起清，否则用户看到的是几套产品逻辑混在一起。
+
+## 2026-06-17 - 编辑面板不能藏在窄抽屉下方
+
+- 问题/背景：用户反馈上下文卡片点击编辑没有反应，并指出编辑模板页面结构崩坏、太窄。
+- 诱因/根因：模板编辑层仍沿用旧 `66.666vw` 抽屉；上下文卡片面板内部再分两栏，点击“编辑”后编辑面板被渲染在整个工作区下方，首屏几乎没有变化；同时整张卡片设置 `draggable`，按钮点击容易被拖拽行为干扰。
+- 当时思路：先修结构根因，不做局部补丁。把编辑模板改成全屏工作台，桌面三栏展示卡片、最终提示词影响和编辑面板；拖拽只允许从手柄开始。
+- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/app/globals.css`。
+- 怎么改：给工作区增加 `is-editing` 状态类；编辑时 CSS 使用 `minmax(520px, 1fr) 300px minmax(380px, 460px)` 三栏；中等屏幕回退单列；父级 `.template-drawer` 改为 `calc(100vw - 24px)` 宽和 `calc(100dvh - 24px)` 高；从 `article` 移除 `draggable`，改由 `.template-context-drag` 手柄触发。
+- 验证结果：`tsc`、`git diff --check`、`npx impeccable detect`、`npm run lint`、`npm run build` 通过；线上 BUILD_ID `1iTUAlgQKwqQ7Qs9d_WaP` 已加载，生产包命中 `is-editing`、全屏宽度和拖拽手柄文案。
+- 可复用经验：点击没反应不一定是事件没绑定，也可能是反馈出现在看不见或被挤压的位置。编辑类主任务不要塞进窄抽屉；涉及按钮和拖拽时，拖拽行为必须只挂在明确手柄上。
+
+## 2026-06-17 - 模板编辑不能用全屏弹层冒充独立工作台
+
+- 问题/背景：用户再次指出“现在这个页面怎么用”，要求先看清问题再重新规划。
+- 诱因/根因：上一轮把窄抽屉撑成全屏后，仍然没有改变页面本质：`/admin/templates/[id]` 只是复用列表页组件，真正编辑仍藏在 `TemplateEditorDrawer` 弹层里；卡片列表、编辑器、图片绑定、LLM 对话、提示词预览全挤在一个组件中。
+- 当时思路：先停止继续加宽旧抽屉，重新定义页面核心任务。模板编辑页应该是独立工作台，不是弹窗；桌面端第一屏就应看到可编辑上下文卡片、当前卡片编辑器和最终提示词影响预览。
+- 改动位置：`tasks/todo.md`。
+- 怎么改：新增“2026-06-17 纠偏：当前模板编辑页为什么仍然难用”，把 `/admin/templates/[id]` 独立详情页、空卡片保存闭环、卡片编辑器、图片绑定确认、最终提示词常显、真实登录验收重新列成 P0/P1/P2 任务；同时把误判完成的详情页和主工作区落点改回未完成。
+- 验证结果：`git diff --check -- tasks/todo.md` 通过；独立浏览器和现有 Chrome 都只能看到登录页，无法作为管理员真实点击验收，已把登录态截图/录屏列入后续验收闭环。
+- 可复用经验：页面重构不能只改尺寸。若用户说“怎么用”，先判断页面主任务、入口、信息层级、状态反馈和保存闭环；没有真实登录点击证据时，不能把线上包命中当成可用性完成。
+- 后续修正：模板编辑桌面端应保持左右工作结构，侧边栏可以放当前卡片编辑栏；最终提示词影响是全局核对信息，放页面底部横向区域。不要把桌面工作台改成上中下三段式表单。
+
+## 2026-06-17 - sd2 部署前必须确认真实线上源目录
+
+- 问题/背景：图集共享功能先在 `/Volumes/Data/Projects/video-api-debugger` 落地并验证，但 `youdoo-sites status sd2` 显示线上实际运行目录是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 诱因/根因：本机存在开发副本和线上源目录两个相似项目名；只在当前目录构建通过，不代表 `sd2.youdoodesign.com` 会加载这份代码。
+- 当时思路：先通过 `youdoo-sites status sd2`、`sites.json` 和 LaunchAgent 确认真实部署目录，再把本轮精确改动同步到线上源目录，避免覆盖线上已有头像展示、模板系统等未提交改动。
+- 改动位置：`src/components/ShareAlbumDialog.tsx`、`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/api/reference-images/[id]/share-album/route.ts`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：共享弹窗复用现有项目、公共文件夹和公共投稿接口；单图共享先创建私有单图图集；部署目录只做精确增量补丁，不整文件覆盖。
+- 验证结果：两个目录均通过 `npx tsc --noEmit --pretty false`；部署目录通过 `npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 `/api/config`、`/login`、新增 API 未登录 401、公共静态 chunk 新文案命中；70 秒后 `sd2` health 仍 OK 且 `runs` 未增加。
+- 可复用经验：任何要上线到 `sd2.youdoodesign.com` 的 UI/API 改动，先确认 `youdoo-sites` 真实项目路径。当前编辑目录和线上源目录不一致时，只同步本轮精确改动，并用公网 API、静态 chunk 和跨健康周期 status 证明线上实例已加载新构建。
+
+## 2026-06-18 - 无线画布输入框必须闭环到真实后端
+
+- 问题/背景：用户反馈无线画布文本节点能输入，但点击生成并没有真正接上 LLM。
+- 诱因/根因：静态画布已有输入框、按钮和 `CanvasGenerationAPI`，但没有配置真实 endpoint，默认退回 `mockGenerate` 占位；文本返回也没有写回节点内容。
+- 当时思路：先用第一性原理拆分“能输入、能提交、真实调用、结果可见、线上可用”五层，再只补文本/脚本 LLM 链路，避免把未接点数和轮询的图片/视频生成伪装成已完成。
+- 改动位置：`src/app/api/tools/ultimate-canvas/generate/route.ts`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/generation-api.js`、`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/styles.css`。
+- 怎么改：新增登录态保护的无线画布 LLM 接口，复用后台 Musk API 配置；前端把文本/脚本节点 endpoint 指到新接口；LLM 返回后写回节点正文；错误提示展示后端真实错误；模型标签从假模型名改为 `Musk LLM`。
+- 验证结果：`tsc`、`lint`、`youdoo-sites build/restart/status sd2` 通过；本地和公网 POST `/api/tools/ultimate-canvas/generate` 均返回 `provider=musk`、`model=gpt-5.4` 和文本内容；线上静态资源命中新 endpoint、结果写回逻辑和 `Musk LLM` 标签；健康周期后 `runs` 未增长。
+- 可复用经验：UI 上有输入框和按钮不代表功能闭环。生成类入口必须逐项验收：前端事件、真实后端 endpoint、鉴权、后台配置、上游返回、结果落点、错误提示、线上资源命中和跨健康周期稳定性。

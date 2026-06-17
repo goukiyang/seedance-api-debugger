@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
         ? prisma.referenceAlbum.findMany({
             where: { id: { in: sourceAlbumIds } },
             include: {
-              owner: { select: { id: true, name: true, username: true, email: true } },
+              owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
               images: {
                 where: { status: 'active' },
                 orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       submittedByIds.length > 0
         ? prisma.user.findMany({
             where: { id: { in: submittedByIds } },
-            select: { id: true, name: true, username: true, email: true },
+            select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true },
           })
         : Promise.resolve([]),
     ]);
@@ -65,7 +65,10 @@ export async function GET(request: NextRequest) {
           submitted_by: submitter ? {
             id: submitter.id,
             name: displayUserName(submitter),
+            username: submitter.username,
             email: submitter.email,
+            avatar_url: submitter.avatar_url,
+            account_type: submitter.account_type,
           } : null,
           public_folder: submission.publicFolder,
           source_album: album ? {

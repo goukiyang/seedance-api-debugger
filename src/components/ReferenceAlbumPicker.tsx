@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { displayUserName } from '@/lib/users/display';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 
 type AlbumScope = 'mine' | 'project' | 'shared' | 'public';
@@ -13,7 +13,7 @@ interface AlbumItem {
   album_type: string;
   visibility: string;
   image_count: number;
-  owner?: { name: string; username: string };
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   project?: { name: string } | null;
   permissions: {
     view: boolean;
@@ -184,7 +184,16 @@ export function ReferenceAlbumPicker({
                   onClick={() => setSelectedAlbumId(album.id)}
                 >
                   <strong>{album.name}</strong>
-                  <span>{album.image_count} 张 · {album.project?.name || (album.owner ? displayUserName(album.owner) : '个人')}</span>
+                  <span className="album-picker-album-meta">
+                    <span>{album.image_count} 张</span>
+                    {album.project?.name ? (
+                      <span>{album.project.name}</span>
+                    ) : album.owner ? (
+                      <UserIdentityBadge user={album.owner} size="sm" />
+                    ) : (
+                      <span>个人</span>
+                    )}
+                  </span>
                 </button>
               ))
             )}
@@ -201,7 +210,7 @@ export function ReferenceAlbumPicker({
             {!loading && selectedAlbum?.permissions.use && images.map((image) => {
               const checked = selectedImageIds.includes(image.id);
               const isAlreadyInWorkspace = currentReferenceImageIdSet.has(image.id);
-              const disabledByLimit = !checked && !isAlreadyInWorkspace && selectedNewCount >= remaining;
+      const disabledByLimit = !checked && !isAlreadyInWorkspace && selectedNewCount >= remaining;
               return (
                 <article
                   key={image.id}

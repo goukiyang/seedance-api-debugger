@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
       name: true,
       username: true,
       email: true,
+      avatar_url: true,
 	      role: true,
 	      account_type: true,
 	      user_profile: true,

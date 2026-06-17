@@ -20,9 +20,65 @@ import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// 允许的图片类型
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+type SeedanceUploadAssetType = 'Image' | 'Video' | 'Audio';
+
+type UploadTypeConfig = {
+  assetType: SeedanceUploadAssetType;
+  label: string;
+  mimeType: string;
+  maxSize: number;
+};
+
+const MB = 1024 * 1024;
+
+// 官方 /asset/create 通过 AssetType 区分 Image / Video / Audio；这里同时按 MIME 和扩展名兜底识别。
+const UPLOAD_TYPES_BY_MIME: Record<string, UploadTypeConfig> = {
+  'image/jpeg': { assetType: 'Image', label: 'jpg', mimeType: 'image/jpeg', maxSize: 10 * MB },
+  'image/png': { assetType: 'Image', label: 'png', mimeType: 'image/png', maxSize: 10 * MB },
+  'image/webp': { assetType: 'Image', label: 'webp', mimeType: 'image/webp', maxSize: 10 * MB },
+  'video/mp4': { assetType: 'Video', label: 'mp4', mimeType: 'video/mp4', maxSize: 50 * MB },
+  'video/quicktime': { assetType: 'Video', label: 'mov', mimeType: 'video/quicktime', maxSize: 50 * MB },
+  'video/webm': { assetType: 'Video', label: 'webm', mimeType: 'video/webm', maxSize: 50 * MB },
+  'audio/mpeg': { assetType: 'Audio', label: 'mp3', mimeType: 'audio/mpeg', maxSize: 50 * MB },
+  'audio/wav': { assetType: 'Audio', label: 'wav', mimeType: 'audio/wav', maxSize: 50 * MB },
+  'audio/ogg': { assetType: 'Audio', label: 'ogg', mimeType: 'audio/ogg', maxSize: 50 * MB },
+};
+
+const UPLOAD_TYPES_BY_EXTENSION: Record<string, UploadTypeConfig> = {
+  jpg: UPLOAD_TYPES_BY_MIME['image/jpeg'],
+  jpeg: UPLOAD_TYPES_BY_MIME['image/jpeg'],
+  png: UPLOAD_TYPES_BY_MIME['image/png'],
+  webp: UPLOAD_TYPES_BY_MIME['image/webp'],
+  mp4: UPLOAD_TYPES_BY_MIME['video/mp4'],
+  mov: UPLOAD_TYPES_BY_MIME['video/quicktime'],
+  webm: UPLOAD_TYPES_BY_MIME['video/webm'],
+  mp3: UPLOAD_TYPES_BY_MIME['audio/mpeg'],
+  wav: UPLOAD_TYPES_BY_MIME['audio/wav'],
+  ogg: UPLOAD_TYPES_BY_MIME['audio/ogg'],
+};
+
+const SUPPORTED_TYPE_LABELS = Array.from(
+  new Set(Object.values(UPLOAD_TYPES_BY_MIME).map((item) => item.label))
+).join(', ');
+
+function resolveUploadType(file: File): UploadTypeConfig | null {
+  if (file.type && UPLOAD_TYPES_BY_MIME[file.type]) {
+    return UPLOAD_TYPES_BY_MIME[file.type];
+  }
+
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (extension && UPLOAD_TYPES_BY_EXTENSION[extension]) {
+    return UPLOAD_TYPES_BY_EXTENSION[extension];
+  }
+
+  return null;
+}
+
+function getAssetTypeLabel(assetType: SeedanceUploadAssetType): string {
+  if (assetType === 'Image') return '图片';
+  if (assetType === 'Video') return '视频';
+  return '音频';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,16 +90,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    const uploadType = resolveUploadType(file);
+    if (!uploadType) {
       return NextResponse.json(
-        { error: `Unsupported file type: ${file.type}. Supported: jpg, png, webp` },
+        { error: `Unsupported file type: ${file.type || 'unknown'}. Supported: ${SUPPORTED_TYPE_LABELS}` },
         { status: 400 }
       );
     }
 
-    if (file.size > MAX_SIZE) {
+    if (file.size > uploadType.maxSize) {
       return NextResponse.json(
-        { error: `File too large: ${(file.size / 1024 / 1024).toFixed(1)}MB (max 10MB)` },
+        {
+          error: `File too large: ${(file.size / MB).toFixed(1)}MB (max ${uploadType.maxSize / MB}MB)`,
+        },
         { status: 400 }
       );
     }
@@ -62,15 +121,16 @@ export async function POST(request: NextRequest) {
         closedLoop: true,
         reused: true,
         reuseReason: 'FILE_HASH_MATCH',
-        message: '已检测到相同图片，已复用已有资产。',
+        message: `已检测到相同${getAssetTypeLabel(uploadType.assetType)}，已复用已有资产。`,
         storageProvider: existingByHash.provider,
+        assetType: uploadType.assetType,
         asset: existingByHash,
         providerAssetId: existingByHash.providerAssetId,
       });
     }
 
     // Step 3: 上传公网存储（R2 > TOS > local-public > local）
-    const uploadResult = await uploadPublicAsset(buffer, file.name, file.type);
+    const uploadResult = await uploadPublicAsset(buffer, file.name, uploadType.mimeType);
     const isPublic = uploadResult.isPubliclyReachable || isPubliclyReachableUrl(uploadResult.publicUrl);
 
     if (!isPublic) {
@@ -80,6 +140,7 @@ export async function POST(request: NextRequest) {
         reused: false,
         message: uploadResult.warning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。',
         storageProvider: uploadResult.storageProvider,
+        assetType: uploadType.assetType,
         publicUrl: uploadResult.publicUrl,
         storageKey: uploadResult.storageKey,
         size: uploadResult.size,
@@ -100,6 +161,7 @@ export async function POST(request: NextRequest) {
           reuseReason: 'STORAGE_KEY_MATCH',
           message: '已检测到相同存储资产，已复用已有资产。',
           storageProvider: uploadResult.storageProvider,
+          assetType: uploadType.assetType,
           asset: existingByKey,
           providerAssetId: existingByKey.providerAssetId,
         });
@@ -108,7 +170,7 @@ export async function POST(request: NextRequest) {
 
     // Step 5: 调官方 /asset/create
     const createResult = await createAsset({
-      assetType: 'Image',
+      assetType: uploadType.assetType,
       url: uploadResult.publicUrl,
       name: assetName,
     });
@@ -120,6 +182,7 @@ export async function POST(request: NextRequest) {
         reused: false,
         message: `官方 /asset/create 失败：${createResult.error}`,
         storageProvider: uploadResult.storageProvider,
+        assetType: uploadType.assetType,
         publicUrl: uploadResult.publicUrl,
         storageKey: uploadResult.storageKey,
         size: uploadResult.size,
@@ -130,7 +193,7 @@ export async function POST(request: NextRequest) {
     // Step 6: 写入数据库（带存储元数据）
     const record = await seedanceAssetRepository.createWithStorageMetadata({
       providerAssetId: createResult.data!.providerAssetId,
-      assetType: 'Image',
+      assetType: uploadType.assetType,
       name: assetName,
       originalUrl: uploadResult.publicUrl,
       rawProviderResponse: JSON.stringify(createResult.data!.rawResponse),
@@ -145,6 +208,7 @@ export async function POST(request: NextRequest) {
       reused: false,
       message: '上传成功，Seedance Asset 创建成功。',
       storageProvider: uploadResult.storageProvider,
+      assetType: uploadType.assetType,
       publicUrl: uploadResult.publicUrl,
       storageKey: uploadResult.storageKey,
       size: uploadResult.size,

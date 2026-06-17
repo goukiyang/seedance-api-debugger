@@ -4,13 +4,15 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 type PermissionKey = 'view' | 'use' | 'copy' | 'download' | 'viewSource' | 'edit';
 type PermissionPreset = 'view' | 'generate' | 'edit' | 'custom';
-type ShareTargetType = 'user' | 'project';
+type AlbumShareTargetType = 'user' | 'project';
+type ShareTargetType = AlbumShareTargetType | 'public_folder';
 
 type SharePermissions = Record<PermissionKey, boolean>;
 
 export interface ShareAlbumDialogAlbum {
   id: string;
   name: string;
+  description?: string | null;
   album_type: string;
   visibility: string;
   active_share_count?: number;
@@ -27,12 +29,28 @@ interface ShareGrantee {
 
 interface ShareItem {
   id: string;
-  grantee_type: ShareTargetType;
+  grantee_type: AlbumShareTargetType;
   grantee_id: string;
   permissions?: Partial<SharePermissions> | null;
   expires_at?: string | null;
   created_at: string;
   grantee?: ShareGrantee | null;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
+  type?: string | null;
+  status?: string | null;
+  my_role?: string | null;
+  can_manage_assets?: boolean;
+}
+
+interface PublicFolderOption {
+  id: string;
+  name: string;
+  description?: string | null;
+  album_count?: number;
 }
 
 interface ShareAlbumDialogProps {
@@ -59,17 +77,33 @@ const PRESETS: Array<{ value: PermissionPreset; label: string; description: stri
 
 export default function ShareAlbumDialog({ open, album, onClose, onChanged }: ShareAlbumDialogProps) {
   const [shares, setShares] = useState<ShareItem[]>([]);
-  const [targetType, setTargetType] = useState<ShareTargetType>('user');
+  const [targetType, setTargetType] = useState<ShareTargetType>('project');
   const [targetId, setTargetId] = useState('');
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [publicFolders, setPublicFolders] = useState<PublicFolderOption[]>([]);
+  const [publicFolderId, setPublicFolderId] = useState('');
+  const [publicName, setPublicName] = useState('');
+  const [publicDescription, setPublicDescription] = useState('');
+  const [submitNote, setSubmitNote] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [preset, setPreset] = useState<PermissionPreset>('generate');
   const [draftPermissions, setDraftPermissions] = useState<SharePermissions>(() => permissionsForPreset('generate'));
   const [loading, setLoading] = useState(false);
+  const [optionsLoading, setOptionsLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const shareCount = shares.length;
   const permissionSummary = useMemo(() => formatPermissions(draftPermissions), [draftPermissions]);
+  const shareableProjects = useMemo(
+    () => projects.filter((project) => project.status !== 'deleted' && project.type !== 'system'),
+    [projects],
+  );
+  const defaultProjectId = useMemo(() => {
+    const teamProject = shareableProjects.find((project) => project.type !== 'personal');
+    return teamProject?.id || shareableProjects[0]?.id || '';
+  }, [shareableProjects]);
 
   const loadShares = useCallback(async () => {
     if (!album) return;
@@ -87,17 +121,57 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
     }
   }, [album]);
 
+  const loadShareTargets = useCallback(async () => {
+    setOptionsLoading(true);
+    try {
+      const [projectsRes, foldersRes] = await Promise.all([
+        fetch('/api/projects', { cache: 'no-store' }),
+        fetch('/api/reference-album-folders', { cache: 'no-store' }),
+      ]);
+      const projectsData = await projectsRes.json().catch(() => ({}));
+      const foldersData = await foldersRes.json().catch(() => ({}));
+      if (!projectsRes.ok) throw new Error(projectsData.error || projectsData.message || '项目列表读取失败');
+      if (!foldersRes.ok) throw new Error(foldersData.error || foldersData.message || '共享文件夹读取失败');
+      setProjects(Array.isArray(projectsData.projects) ? projectsData.projects : []);
+      setPublicFolders(Array.isArray(foldersData.folders) ? foldersData.folders : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '共享目标读取失败');
+    } finally {
+      setOptionsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!open || !album) return;
-    setTargetType('user');
+    setTargetType('project');
     setTargetId('');
+    setPublicFolderId('');
+    setPublicName(album.name);
+    setPublicDescription(album.description || '');
+    setSubmitNote('');
     setExpiresAt('');
     setPreset('generate');
     setDraftPermissions(permissionsForPreset('generate'));
+    setNotice(null);
     loadShares();
-  }, [album, loadShares, open]);
+    loadShareTargets();
+  }, [album, loadShareTargets, loadShares, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (targetType === 'project' && !targetId && defaultProjectId) {
+      setTargetId(defaultProjectId);
+    }
+    if (targetType === 'public_folder' && !publicFolderId && publicFolders[0]?.id) {
+      setPublicFolderId(publicFolders[0].id);
+    }
+  }, [defaultProjectId, open, publicFolderId, publicFolders, targetId, targetType]);
 
   if (!open || !album) return null;
+
+  const canSubmit = targetType === 'public_folder'
+    ? Boolean(publicFolderId && publicName.trim())
+    : Boolean(targetId.trim());
 
   const applyPreset = (nextPreset: PermissionPreset) => {
     setPreset(nextPreset);
@@ -109,8 +183,63 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
     setDraftPermissions((current) => ({ ...current, [key]: checked }));
   };
 
+  const changeTargetType = (nextType: ShareTargetType) => {
+    setTargetType(nextType);
+    setError(null);
+    setNotice(null);
+    if (nextType === 'project') {
+      setTargetId(defaultProjectId);
+    } else if (nextType === 'user') {
+      setTargetId('');
+    } else {
+      setPublicFolderId(publicFolders[0]?.id || '');
+    }
+  };
+
   const createShare = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (targetType === 'public_folder') {
+      if (!publicFolderId) {
+        setError('请选择共享文件夹');
+        return;
+      }
+      if (!publicName.trim()) {
+        setError('请输入公共图集名称');
+        return;
+      }
+
+      setSavingKey('create');
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await fetch(`/api/reference-albums/${album.id}/public-submissions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            public_folder_id: publicFolderId,
+            name: publicName.trim(),
+            description: publicDescription.trim() || null,
+            submit_note: submitNote.trim() || null,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.message || '提交到共享文件夹失败');
+        if (data.public_album) {
+          setNotice('已复制到共享文件夹，公共库可以直接查看。');
+        } else if (data.deduplicated) {
+          setNotice('已有待审核的共享文件夹提交，管理员审核后会进入公共库。');
+        } else {
+          setNotice('已提交到共享文件夹，等待管理员审核。');
+        }
+        onChanged?.();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '提交到共享文件夹失败');
+      } finally {
+        setSavingKey(null);
+      }
+      return;
+    }
+
     const granteeId = targetId.trim();
     if (!granteeId) {
       setError(targetType === 'user' ? '请输入用户 ID' : '请输入项目 ID');
@@ -119,6 +248,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
     setSavingKey('create');
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/reference-albums/${album.id}/shares`, {
         method: 'POST',
@@ -134,6 +264,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
       if (!res.ok) throw new Error(data.error || data.message || '共享失败');
       setTargetId('');
       setExpiresAt('');
+      setNotice('共享对象已添加。');
       await loadShares();
       onChanged?.();
     } catch (err) {
@@ -147,6 +278,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
     const permissions = permissionsForPreset(nextPreset);
     setSavingKey(`share-${share.id}`);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/album-shares/${share.id}`, {
         method: 'PATCH',
@@ -170,6 +302,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
     setSavingKey(`share-${share.id}`);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/album-shares/${share.id}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
@@ -189,6 +322,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
     setSavingKey('revoke-all');
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/reference-albums/${album.id}/shares/revoke-all`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
@@ -226,70 +360,160 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
         </div>
 
         <form className="share-dialog-form" onSubmit={createShare}>
-          <div className="share-dialog-target">
+          <div className={`share-dialog-target ${targetType === 'public_folder' ? 'public-folder-mode' : ''}`}>
             <label>
-              共享给
-              <select value={targetType} onChange={(event) => setTargetType(event.target.value as ShareTargetType)}>
+              共享方式
+              <select value={targetType} onChange={(event) => changeTargetType(event.target.value as ShareTargetType)}>
+                <option value="project">共享给项目</option>
+                <option value="public_folder">提交到共享文件夹</option>
                 <option value="user">指定用户</option>
-                <option value="project">指定项目</option>
               </select>
             </label>
-            <label>
-              {targetType === 'user' ? '用户 ID' : '项目 ID'}
-              <input
-                value={targetId}
-                onChange={(event) => setTargetId(event.target.value)}
-                placeholder={targetType === 'user' ? '粘贴用户 ID' : '粘贴项目 ID'}
-              />
-            </label>
-            <label>
-              过期时间
-              <input
-                type="datetime-local"
-                value={expiresAt}
-                onChange={(event) => setExpiresAt(event.target.value)}
-              />
-            </label>
-          </div>
-
-          <div className="share-dialog-presets" role="group" aria-label="共享权限预设">
-            {PRESETS.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                className={preset === item.value ? 'active' : ''}
-                onClick={() => applyPreset(item.value)}
-              >
-                <strong>{item.label}</strong>
-                <span>{item.description}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="share-dialog-permissions">
-            {PERMISSION_LABELS.map((item) => (
-              <label key={item.key}>
-                <input
-                  type="checkbox"
-                  checked={draftPermissions[item.key]}
-                  onChange={(event) => updateDraftPermission(item.key, event.target.checked)}
-                />
-                <span>
-                  <strong>{item.label}</strong>
-                  <em>{item.description}</em>
-                </span>
+            {targetType === 'project' && (
+              <label>
+                选择项目
+                <select
+                  value={targetId}
+                  onChange={(event) => setTargetId(event.target.value)}
+                  disabled={optionsLoading || shareableProjects.length === 0}
+                >
+                  {shareableProjects.length === 0 ? (
+                    <option value="">暂无可选项目</option>
+                  ) : (
+                    shareableProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name} · {formatProjectType(project.type)} · {formatProjectRole(project.my_role)}
+                      </option>
+                    ))
+                  )}
+                </select>
               </label>
-            ))}
+            )}
+            {targetType === 'user' && (
+              <label>
+                用户 ID
+                <input
+                  value={targetId}
+                  onChange={(event) => setTargetId(event.target.value)}
+                  placeholder="粘贴用户 ID"
+                />
+              </label>
+            )}
+            {targetType === 'public_folder' && (
+              <label>
+                共享文件夹
+                <select
+                  value={publicFolderId}
+                  onChange={(event) => setPublicFolderId(event.target.value)}
+                  disabled={optionsLoading || publicFolders.length === 0}
+                >
+                  {publicFolders.length === 0 ? (
+                    <option value="">暂无共享文件夹</option>
+                  ) : (
+                    publicFolders.map((folder) => (
+                      <option key={folder.id} value={folder.id}>
+                        {folder.name}{typeof folder.album_count === 'number' ? ` · ${folder.album_count} 个图集` : ''}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+            )}
+            {targetType === 'public_folder' ? (
+              <label>
+                公共图集名称
+                <input
+                  value={publicName}
+                  onChange={(event) => setPublicName(event.target.value)}
+                  maxLength={80}
+                  placeholder={album.name}
+                />
+              </label>
+            ) : (
+              <label>
+                过期时间
+                <input
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(event) => setExpiresAt(event.target.value)}
+                />
+              </label>
+            )}
           </div>
+
+          {targetType === 'public_folder' ? (
+            <div className="share-dialog-public-fields">
+              <label>
+                公共说明
+                <textarea
+                  value={publicDescription}
+                  onChange={(event) => setPublicDescription(event.target.value)}
+                  placeholder="给公共库浏览者看的说明"
+                  rows={3}
+                />
+              </label>
+              <label>
+                提交备注
+                <textarea
+                  value={submitNote}
+                  onChange={(event) => setSubmitNote(event.target.value)}
+                  placeholder="给管理员审核看的备注，可不填"
+                  rows={2}
+                />
+              </label>
+              <p>
+                提交到共享文件夹会生成一份公共图集副本；普通用户需要管理员审核，管理员会直接复制到公共库。
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="share-dialog-presets" role="group" aria-label="共享权限预设">
+                {PRESETS.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={preset === item.value ? 'active' : ''}
+                    onClick={() => applyPreset(item.value)}
+                  >
+                    <strong>{item.label}</strong>
+                    <span>{item.description}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="share-dialog-permissions">
+                {PERMISSION_LABELS.map((item) => (
+                  <label key={item.key}>
+                    <input
+                      type="checkbox"
+                      checked={draftPermissions[item.key]}
+                      onChange={(event) => updateDraftPermission(item.key, event.target.checked)}
+                    />
+                    <span>
+                      <strong>{item.label}</strong>
+                      <em>{item.description}</em>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
 
           <div className="share-dialog-submit">
-            <span>{permissionSummary}</span>
-            <button type="submit" disabled={savingKey === 'create' || !targetId.trim()}>
-              {savingKey === 'create' ? '共享中...' : '添加共享'}
+            <span>
+              {targetType === 'public_folder'
+                ? '公共库共享需要选择共享文件夹'
+                : permissionSummary}
+            </span>
+            <button type="submit" disabled={savingKey === 'create' || !canSubmit}>
+              {savingKey === 'create'
+                ? (targetType === 'public_folder' ? '提交中...' : '共享中...')
+                : (targetType === 'public_folder' ? '提交到共享文件夹' : '添加共享')}
             </button>
           </div>
         </form>
 
+        {notice && <div className="share-dialog-notice">{notice}</div>}
         {error && <div className="share-dialog-error">{error}</div>}
 
         <div className="share-dialog-list-head">
@@ -394,4 +618,19 @@ function formatExpiresAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '过期时间未知';
   return `${date.toLocaleString('zh-CN')} 过期`;
+}
+
+function formatProjectType(type?: string | null) {
+  if (type === 'team') return '团队项目';
+  if (type === 'public') return '公共项目';
+  if (type === 'personal') return '个人项目';
+  return '项目';
+}
+
+function formatProjectRole(role?: string | null) {
+  if (role === 'admin') return '管理员';
+  if (role === 'project_owner') return '负责人';
+  if (role === 'editor') return '可编辑';
+  if (role === 'viewer') return '可查看';
+  return '成员';
 }

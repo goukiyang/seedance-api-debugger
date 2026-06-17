@@ -8,9 +8,9 @@ import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoR
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { displayUserName } from '@/lib/users/display';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
 
@@ -43,7 +43,7 @@ type ProjectOption = {
   my_role: string | null;
   can_generate?: boolean;
   can_manage_project?: boolean;
-  owner?: { name: string | null; username: string | null };
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { tasks: number; reference_albums?: number };
 };
 
@@ -89,21 +89,12 @@ const VIDEO_CARD_STORAGE_KEY = 'template_generate_video_card_by_project_v1';
 const RECENT_TASK_PAGE_SIZE = 12;
 const MAX_ACTIVE_POLLING_TASKS = 12;
 
-function projectOwnerName(project: ProjectOption): string {
-  return displayUserName({
-    id: project.owner_user_id,
-    name: project.owner?.name,
-    username: project.owner?.username,
-  });
-}
-
 function projectDisplayName(project: ProjectOption): string {
   return project.type === 'personal' ? '个人空间' : project.name;
 }
 
-function projectDisplayLabel(project: ProjectOption, hasDuplicateName: boolean): string {
-  const name = projectDisplayName(project);
-  return hasDuplicateName ? `${name} · ${projectOwnerName(project)}` : name;
+function projectOwnerUser(project: ProjectOption) {
+  return project.owner || { id: project.owner_user_id, name: null, username: null };
 }
 
 function projectMetaLabel(project: ProjectOption): string {
@@ -255,13 +246,18 @@ export function TemplateGenerateClient() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
   const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
   const selectedProjectLabel = selectedProject
-    ? projectDisplayLabel(selectedProject, projectNameCounts[projectDisplayName(selectedProject)] > 1)
+    ? projectDisplayName(selectedProject)
     : loadingProjects ? '正在加载项目...' : '暂无可生成项目';
   const selectedProjectMeta = selectedProject
     ? projectMetaLabel(selectedProject)
     : '新建项目后才能保存模板生成任务。';
   const initialTemplateId = searchParams.get('templateId') || searchParams.get('template_id') || null;
   const templateReturnTo = initialTemplateId ? `/template-generate?templateId=${encodeURIComponent(initialTemplateId)}` : '/template-generate';
+  const scopeSummaryText = selectedVideoCard
+    ? `保存到 ${selectedProjectLabel} / ${selectedVideoCard.title}`
+    : selectedProject
+      ? `保存到 ${selectedProjectLabel}，提交时自动创建视频卡`
+      : selectedProjectLabel;
 
   useEffect(() => {
     let cancelled = false;
@@ -533,6 +529,39 @@ export function TemplateGenerateClient() {
     }
   }, [loadVideoCards, selectedProjectId, videoCardObjective, videoCardTitle]);
 
+  const ensureVideoCardForSubmit = useCallback(async () => {
+    const selectedCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
+    if (selectedCard) return selectedCard;
+    if (!selectedProjectId) throw new Error('请先选择项目');
+
+    setVideoCardBusy(true);
+    setVideoCardMessage(null);
+    try {
+      const dateLabel = new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+      const response = await fetch(`/api/projects/${selectedProjectId}/video-cards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: videoCardTitle.trim() || `模板生成 ${dateLabel}`,
+          objective: videoCardObjective.trim() || '模板生成自动创建的视频卡',
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || data.error || '视频卡创建失败');
+      const createdCard = data.video_card as VideoCardOption | undefined;
+      if (!createdCard?.id) throw new Error('视频卡创建成功但没有返回 ID');
+      setVideoCards((current) => [createdCard, ...current.filter((card) => card.id !== createdCard.id)]);
+      setSelectedVideoCardId(createdCard.id);
+      rememberVideoCard(selectedProjectId, createdCard.id);
+      setVideoCardTitle('');
+      setVideoCardObjective('');
+      setVideoCardMessage({ type: 'success', text: '已自动创建视频卡并保存本次生成' });
+      return createdCard;
+    } finally {
+      setVideoCardBusy(false);
+    }
+  }, [selectedProjectId, selectedVideoCardId, videoCardObjective, videoCardTitle, videoCards]);
+
   const handleCollectionLoad = useCallback(async (collectionId: string) => {
     await fetch(`/api/collections/${collectionId}/load`, {
       method: 'POST',
@@ -576,8 +605,15 @@ export function TemplateGenerateClient() {
     setSubmitting(true);
     setError(null);
     setResult(null);
-    const selectedCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
-    if (!selectedProjectId || !selectedCard) {
+    let selectedCard: VideoCardOption | null = null;
+    try {
+      selectedCard = await ensureVideoCardForSubmit();
+    } catch (ensureError) {
+      setError(ensureError instanceof Error ? ensureError.message : '请先选择项目和视频卡');
+      setSubmitting(false);
+      return;
+    }
+    if (!selectedCard) {
       setError('请先选择项目和视频卡');
       setSubmitting(false);
       return;
@@ -667,7 +703,7 @@ export function TemplateGenerateClient() {
     } finally {
       setSubmitting(false);
     }
-  }, [selectedProjectId, selectedVideoCardId, videoCards]);
+  }, [ensureVideoCardForSubmit, selectedProjectId]);
 
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
 
@@ -683,13 +719,20 @@ export function TemplateGenerateClient() {
           </div>
           <div className="template-generate-hero-actions">
             <Link href="/templates">返回模板库</Link>
-            <Link href="/generate/canvas">进入画布模式</Link>
             <Link href="/projects">查看我的项目</Link>
             {currentUser?.role === 'admin' && <Link href="/admin/agent-runs">执行链路</Link>}
           </div>
         </section>
 
-        <section className="template-generate-scope" aria-label="保存范围">
+        <details className="template-generate-advanced-scope">
+          <summary>
+            <div>
+              <span>保存位置</span>
+              <strong>{scopeSummaryText}</strong>
+              <small>系统会默认选择项目和视频卡；需要调整时再展开。</small>
+            </div>
+          </summary>
+          <section className="template-generate-scope" aria-label="保存范围">
           <div className="composer-project-picker" ref={projectPickerRef}>
             <button
               type="button"
@@ -704,6 +747,11 @@ export function TemplateGenerateClient() {
                 <span className="composer-project-trigger-label">保存到 / 当前项目</span>
                 <span className="composer-project-trigger-name">{selectedProjectLabel}</span>
                 <span className="composer-project-trigger-meta">{selectedProjectMeta}</span>
+                {selectedProject && (
+                  <span className="composer-project-trigger-owner">
+                    <UserIdentityBadge user={projectOwnerUser(selectedProject)} size="sm" />
+                  </span>
+                )}
               </span>
               <ChevronDown className="composer-project-trigger-chevron" size={16} aria-hidden="true" />
             </button>
@@ -764,8 +812,13 @@ export function TemplateGenerateClient() {
                           {isSelected ? <Check size={16} /> : <Folder size={16} />}
                         </span>
                         <span className="composer-project-option-copy">
-                          <span className="composer-project-option-name">{projectDisplayLabel(project, duplicateName)}</span>
+                          <span className="composer-project-option-name">{projectDisplayName(project)}</span>
                           <span className="composer-project-option-meta">{projectMetaLabel(project)}</span>
+                          {duplicateName && (
+                            <span className="composer-project-option-owner">
+                              <UserIdentityBadge user={projectOwnerUser(project)} size="sm" />
+                            </span>
+                          )}
                         </span>
                       </button>
                     );
@@ -832,13 +885,14 @@ export function TemplateGenerateClient() {
               </button>
             </form>
           </div>
-        </section>
+          </section>
 
         {(projectMessage || videoCardMessage) && (
           <div className={`composer-project-message ${(projectMessage || videoCardMessage)?.type || 'info'}`}>
             {(projectMessage || videoCardMessage)?.text}
           </div>
         )}
+        </details>
 
         <GenerationComposer
           collections={collections}

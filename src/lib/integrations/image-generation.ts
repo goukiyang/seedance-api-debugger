@@ -3,7 +3,13 @@ import { prisma } from '@/lib/prisma';
 
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
 
-export const IMAGE_GENERATION_PROVIDERS = ['banana2'] as const;
+export const IMAGE_GENERATION_PROVIDERS = ['musk'] as const;
+export const DEFAULT_MUSK_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
+export const DEFAULT_MUSK_IMAGE_BASE_URL = 'https://api.muskapis.com/';
+
+const LEGACY_IMAGE_GENERATION_PROVIDERS = new Set(['banana2', 'gemini']);
+const LEGACY_IMAGE_GENERATION_MODELS = new Set(['banana2', 'gemini-3.1-flash-image']);
+const LEGACY_GOOGLE_GEMINI_HOST = 'generativelanguage.googleapis.com';
 
 export type ImageGenerationProvider = typeof IMAGE_GENERATION_PROVIDERS[number];
 
@@ -27,16 +33,16 @@ export type ImageGenerationApiSettingsInput = Partial<ImageGenerationApiSettings
 
 export const DEFAULT_IMAGE_GENERATION_API_SETTINGS: ImageGenerationApiSettings = {
   enabled: false,
-  provider: 'banana2',
-  base_url: '',
-  default_model: 'banana2',
+  provider: 'musk',
+  base_url: DEFAULT_MUSK_IMAGE_BASE_URL,
+  default_model: DEFAULT_MUSK_IMAGE_MODEL,
   api_key: null,
   timeout_ms: 90000,
-  max_outputs_per_request: 4,
+  max_outputs_per_request: 1,
   default_ratio: '16:9',
   supports_text_to_image: true,
   supports_image_to_image: true,
-  supports_async_task: true,
+  supports_async_task: false,
 };
 
 function cleanString(value: unknown, fallback = '') {
@@ -51,9 +57,31 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 
 function normalizeProvider(value: unknown): ImageGenerationProvider {
   const raw = cleanString(value, DEFAULT_IMAGE_GENERATION_API_SETTINGS.provider);
+  if (LEGACY_IMAGE_GENERATION_PROVIDERS.has(raw)) return DEFAULT_IMAGE_GENERATION_API_SETTINGS.provider;
   return IMAGE_GENERATION_PROVIDERS.includes(raw as ImageGenerationProvider)
     ? raw as ImageGenerationProvider
     : DEFAULT_IMAGE_GENERATION_API_SETTINGS.provider;
+}
+
+function normalizeDefaultModel(value: unknown) {
+  const raw = cleanString(value, DEFAULT_IMAGE_GENERATION_API_SETTINGS.default_model);
+  if (LEGACY_IMAGE_GENERATION_MODELS.has(raw)) return DEFAULT_IMAGE_GENERATION_API_SETTINGS.default_model;
+  return raw.slice(0, 80);
+}
+
+function isLegacyImageGenerationSettings(input: Partial<ImageGenerationApiSettings>) {
+  const rawProvider = cleanString(input.provider);
+  const rawModel = cleanString(input.default_model);
+  const rawBaseUrl = cleanString(input.base_url);
+  let isGoogleDirectBaseUrl = false;
+  try {
+    isGoogleDirectBaseUrl = rawBaseUrl ? new URL(rawBaseUrl).hostname === LEGACY_GOOGLE_GEMINI_HOST : false;
+  } catch {
+    isGoogleDirectBaseUrl = false;
+  }
+  return LEGACY_IMAGE_GENERATION_PROVIDERS.has(rawProvider)
+    || LEGACY_IMAGE_GENERATION_MODELS.has(rawModel)
+    || isGoogleDirectBaseUrl;
 }
 
 function normalizeBaseUrl(value: unknown, fallback = DEFAULT_IMAGE_GENERATION_API_SETTINGS.base_url) {
@@ -78,19 +106,25 @@ export function normalizeImageGenerationApiSettings(value: unknown): ImageGenera
   const input = value && typeof value === 'object'
     ? value as Partial<ImageGenerationApiSettings>
     : {};
+  const isLegacy = isLegacyImageGenerationSettings(input);
 
   return {
     enabled: input.enabled === true,
     provider: normalizeProvider(input.provider),
-    base_url: normalizeBaseUrl(input.base_url),
-    default_model: cleanString(input.default_model, DEFAULT_IMAGE_GENERATION_API_SETTINGS.default_model).slice(0, 80),
+    base_url: normalizeBaseUrl(isLegacy ? DEFAULT_IMAGE_GENERATION_API_SETTINGS.base_url : input.base_url),
+    default_model: normalizeDefaultModel(input.default_model),
     api_key: cleanString(input.api_key, '').slice(0, 500) || null,
     timeout_ms: clampInteger(input.timeout_ms, DEFAULT_IMAGE_GENERATION_API_SETTINGS.timeout_ms, 5000, 300000),
-    max_outputs_per_request: clampInteger(input.max_outputs_per_request, DEFAULT_IMAGE_GENERATION_API_SETTINGS.max_outputs_per_request, 1, 8),
+    max_outputs_per_request: clampInteger(
+      isLegacy ? DEFAULT_IMAGE_GENERATION_API_SETTINGS.max_outputs_per_request : input.max_outputs_per_request,
+      DEFAULT_IMAGE_GENERATION_API_SETTINGS.max_outputs_per_request,
+      1,
+      8,
+    ),
     default_ratio: cleanString(input.default_ratio, DEFAULT_IMAGE_GENERATION_API_SETTINGS.default_ratio).slice(0, 20),
     supports_text_to_image: input.supports_text_to_image !== false,
     supports_image_to_image: input.supports_image_to_image !== false,
-    supports_async_task: input.supports_async_task !== false,
+    supports_async_task: isLegacy ? DEFAULT_IMAGE_GENERATION_API_SETTINGS.supports_async_task : input.supports_async_task !== false,
   };
 }
 
@@ -189,19 +223,15 @@ export type ImageGenerationResult = {
   raw: unknown;
 };
 
-function buildImagesGenerationUrl(baseUrl: string) {
+function buildMuskGeminiGenerateContentUrl(baseUrl: string, model: string) {
   const url = new URL(baseUrl);
   const path = url.pathname.replace(/\/+$/, '');
-  if (path.endsWith('/images/generations')) return url.toString();
-  url.pathname = path.endsWith('/v1') ? `${path}/images/generations` : `${path}/v1/images/generations`;
+  if (path.endsWith(':generateContent')) return url.toString();
+  const versionPath = path.endsWith('/v1') || path.endsWith('/v1beta')
+    ? path
+    : `${path}/v1beta`;
+  url.pathname = `${versionPath}/models/${encodeURIComponent(model)}:generateContent`;
   return url.toString();
-}
-
-function sizeFromRatio(ratio: string) {
-  const normalized = cleanString(ratio, DEFAULT_IMAGE_GENERATION_API_SETTINGS.default_ratio);
-  if (normalized === '1:1') return '1024x1024';
-  if (normalized === '9:16' || normalized === '3:4') return '1024x1536';
-  return '1536x1024';
 }
 
 function pickOutputString(record: Record<string, unknown>, keys: string[]) {
@@ -212,49 +242,32 @@ function pickOutputString(record: Record<string, unknown>, keys: string[]) {
   return undefined;
 }
 
-function extractImageFromRecord(record: Record<string, unknown>): GeneratedImageOutput | null {
-  const nestedImage = record.image && typeof record.image === 'object'
-    ? record.image as Record<string, unknown>
-    : {};
-  const merged = { ...nestedImage, ...record };
-  const url = pickOutputString(merged, ['url', 'image_url', 'imageUrl', 'output_url', 'outputUrl']);
-  const b64Json = pickOutputString(merged, ['b64_json', 'b64Json', 'base64', 'image_base64', 'imageBase64']);
-  if (!url && !b64Json) return null;
-
-  return {
-    url,
-    b64Json,
-    mimeType: pickOutputString(merged, ['mime_type', 'mimeType', 'content_type', 'contentType']),
-    revisedPrompt: pickOutputString(merged, ['revised_prompt', 'revisedPrompt']),
-  };
-}
-
-function extractGeneratedImages(data: Record<string, unknown>): GeneratedImageOutput[] {
-  const candidates = Array.isArray(data.data)
-    ? data.data
-    : Array.isArray(data.images)
-      ? data.images
-      : Array.isArray(data.output)
-        ? data.output
-        : [];
-
+function extractGeminiGeneratedImages(data: Record<string, unknown>): GeneratedImageOutput[] {
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
   const images: GeneratedImageOutput[] = [];
-  for (const item of candidates) {
-    if (typeof item === 'string' && item.trim()) {
-      const value = item.trim();
-      images.push(value.startsWith('data:image/') ? { b64Json: value } : { url: value });
-      continue;
-    }
-    if (item && typeof item === 'object') {
-      const image = extractImageFromRecord(item as Record<string, unknown>);
-      if (image) images.push(image);
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const content = (candidate as Record<string, unknown>).content;
+    if (!content || typeof content !== 'object') continue;
+    const contentRecord = content as Record<string, unknown>;
+    const parts: unknown[] = Array.isArray(contentRecord.parts)
+      ? contentRecord.parts
+      : [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      const record = part as Record<string, unknown>;
+      const inlineData = record.inlineData || record.inline_data;
+      if (!inlineData || typeof inlineData !== 'object') continue;
+      const inlineRecord = inlineData as Record<string, unknown>;
+      const dataValue = pickOutputString(inlineRecord, ['data']);
+      if (!dataValue) continue;
+      images.push({
+        b64Json: dataValue,
+        mimeType: pickOutputString(inlineRecord, ['mimeType', 'mime_type']) || 'image/png',
+      });
     }
   }
-
-  if (images.length > 0) return images;
-
-  const single = extractImageFromRecord(data);
-  return single ? [single] : [];
+  return images;
 }
 
 export async function createImageGeneration(params: {
@@ -277,17 +290,16 @@ export async function createImageGeneration(params: {
   const timeout = setTimeout(() => controller.abort(), params.settings.timeout_ms);
 
   try {
-    const response = await fetch(buildImagesGenerationUrl(params.settings.base_url), {
+    const response = await fetch(buildMuskGeminiGenerateContentUrl(params.settings.base_url, params.settings.default_model), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${params.settings.api_key}`,
+        'x-goog-api-key': params.settings.api_key || '',
       },
       body: JSON.stringify({
-        model: params.settings.default_model,
-        prompt: params.prompt,
-        n: count,
-        size: sizeFromRatio(params.ratio || params.settings.default_ratio),
+        contents: [{
+          parts: [{ text: params.prompt }],
+        }],
       }),
       signal: controller.signal,
     });
@@ -309,7 +321,7 @@ export async function createImageGeneration(params: {
       throw new ImageGenerationApiError(message, response.status, 'image_generation_upstream_error');
     }
 
-    const images = extractGeneratedImages(data);
+    const images = extractGeminiGeneratedImages(data);
     if (images.length === 0) {
       throw new ImageGenerationApiError('图形生成 API 未返回图片', 502, 'image_generation_empty_output');
     }

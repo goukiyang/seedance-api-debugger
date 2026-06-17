@@ -1,0 +1,260 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
+import type { TemplateContextCardBoundImage } from '@/lib/templates/workbench';
+
+type AlbumScope = 'mine' | 'project' | 'shared' | 'public';
+
+type AlbumItem = {
+  id: string;
+  name: string;
+  image_count: number;
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
+  project?: { name: string } | null;
+  permissions: { view: boolean; use: boolean };
+};
+
+type ReferenceImageItem = {
+  id: string;
+  sort_order: number;
+  thumbnail_url: string;
+  image_url: string;
+  asset?: {
+    id?: string;
+    file_name: string;
+    width: number | null;
+    height: number | null;
+  } | null;
+};
+
+type UploadedImageItem = {
+  id: string;
+  originalUrl: string;
+  thumbnailUrl: string;
+  fileName: string;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+};
+
+type Props = {
+  open: boolean;
+  currentImage: TemplateContextCardBoundImage | null;
+  onClose: () => void;
+  onSelect: (image: TemplateContextCardBoundImage) => void;
+};
+
+const SCOPES: Array<{ value: AlbumScope; label: string }> = [
+  { value: 'mine', label: '我的图集' },
+  { value: 'project', label: '项目图集' },
+  { value: 'shared', label: '共享给我' },
+  { value: 'public', label: '公共图集' },
+];
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+}
+
+export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect }: Props) {
+  const [tab, setTab] = useState<'album' | 'history'>('album');
+  const [scope, setScope] = useState<AlbumScope>('mine');
+  const [albums, setAlbums] = useState<AlbumItem[]>([]);
+  const [selectedAlbumId, setSelectedAlbumId] = useState('');
+  const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
+  const [historyImages, setHistoryImages] = useState<UploadedImageItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const selectedAlbum = useMemo(
+    () => albums.find((album) => album.id === selectedAlbumId) || null,
+    [albums, selectedAlbumId],
+  );
+
+  useEffect(() => {
+    if (!open || tab !== 'album') return;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/reference-albums?scope=${scope}`, { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.error || data.message || '图集读取失败');
+        const list: AlbumItem[] = data.albums || [];
+        setAlbums(list);
+        setSelectedAlbumId((current) => (list.some((album) => album.id === current) ? current : list[0]?.id || ''));
+      })
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : '图集读取失败'))
+      .finally(() => setLoading(false));
+  }, [open, scope, tab]);
+
+  useEffect(() => {
+    if (!open || tab !== 'album' || !selectedAlbumId) {
+      setReferenceImages([]);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetch(`/api/reference-albums/${selectedAlbumId}`, { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.error || data.message || '图集详情读取失败');
+        setReferenceImages(data.images || []);
+      })
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : '图集详情读取失败'))
+      .finally(() => setLoading(false));
+  }, [open, selectedAlbumId, tab]);
+
+  useEffect(() => {
+    if (!open || tab !== 'history') return;
+    setLoading(true);
+    setError(null);
+    fetch('/api/assets/history?page=1&limit=60', { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.error || data.message || '历史上传图读取失败');
+        setHistoryImages(data.assets || []);
+      })
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : '历史上传图读取失败'))
+      .finally(() => setLoading(false));
+  }, [open, tab]);
+
+  if (!open) return null;
+
+  const chooseReferenceImage = (image: ReferenceImageItem) => {
+    onSelect({
+      source: 'reference_album',
+      id: image.id,
+      reference_image_id: image.id,
+      asset_id: image.asset?.id || null,
+      label: image.asset?.file_name || `参考图 ${image.sort_order + 1}`,
+      url: image.image_url,
+      thumbnail_url: image.thumbnail_url,
+    });
+    onClose();
+  };
+
+  const chooseHistoryImage = (image: UploadedImageItem) => {
+    onSelect({
+      source: 'upload_history',
+      id: image.id,
+      reference_image_id: null,
+      asset_id: image.id,
+      label: image.fileName,
+      url: image.originalUrl,
+      thumbnail_url: image.thumbnailUrl,
+    });
+    onClose();
+  };
+
+  return (
+    <div className="template-bound-image-backdrop" onClick={onClose}>
+      <div className="template-bound-image-picker" onClick={(event) => event.stopPropagation()}>
+        <header className="template-bound-image-head">
+          <div>
+            <h3>选择绑定图片</h3>
+            <p>一次只绑定 1 张图片，可随时更换。</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭图片选择">x</button>
+        </header>
+
+        <div className="template-bound-image-tabs" role="tablist" aria-label="图片来源">
+          <button type="button" className={tab === 'album' ? 'is-active' : ''} onClick={() => setTab('album')}>参考图集</button>
+          <button type="button" className={tab === 'history' ? 'is-active' : ''} onClick={() => setTab('history')}>历史上传图</button>
+        </div>
+
+        {error && <div className="template-drawer-error">{error}</div>}
+
+        {tab === 'album' ? (
+          <div className="template-bound-image-body">
+            <aside className="template-bound-image-sidebar">
+              <div className="template-bound-image-scope">
+                {SCOPES.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={scope === item.value ? 'is-active' : ''}
+                    onClick={() => setScope(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="template-bound-image-albums">
+                {albums.length === 0 && !loading ? (
+                  <div className="template-bound-image-empty">暂无图集</div>
+                ) : albums.map((album) => (
+                  <button
+                    key={album.id}
+                    type="button"
+                    className={album.id === selectedAlbumId ? 'is-active' : ''}
+                    onClick={() => setSelectedAlbumId(album.id)}
+                  >
+                    <strong>{album.name}</strong>
+                    <span>
+                      {album.image_count} 张
+                      {album.project?.name ? ` · ${album.project.name}` : ''}
+                    </span>
+                    {!album.project?.name && album.owner && <UserIdentityBadge user={album.owner} size="sm" />}
+                  </button>
+                ))}
+              </div>
+            </aside>
+            <main className="template-bound-image-grid">
+              {loading && <div className="template-bound-image-empty">读取中...</div>}
+              {!loading && selectedAlbum && !selectedAlbum.permissions.use && (
+                <div className="template-bound-image-empty">当前图集没有使用权限</div>
+              )}
+              {!loading && selectedAlbum?.permissions.use && referenceImages.length === 0 && (
+                <div className="template-bound-image-empty">这个图集还没有图片</div>
+              )}
+              {!loading && selectedAlbum?.permissions.use && referenceImages.map((image) => {
+                const selected = currentImage?.reference_image_id === image.id || currentImage?.id === image.id;
+                return (
+                  <button
+                    key={image.id}
+                    type="button"
+                    className={selected ? 'is-selected' : ''}
+                    onClick={() => chooseReferenceImage(image)}
+                  >
+                    <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
+                    <span>{image.asset?.file_name || `图 ${image.sort_order + 1}`}</span>
+                    {selected && <em>已绑定</em>}
+                  </button>
+                );
+              })}
+            </main>
+          </div>
+        ) : (
+          <div className="template-bound-image-history">
+            {loading && <div className="template-bound-image-empty">读取中...</div>}
+            {!loading && historyImages.length === 0 && <div className="template-bound-image-empty">还没有历史上传图</div>}
+            {!loading && historyImages.map((image) => {
+              const selected = currentImage?.asset_id === image.id || currentImage?.id === image.id;
+              const dimensions = image.width && image.height ? `${image.width}x${image.height}` : '未知尺寸';
+              return (
+                <button
+                  key={image.id}
+                  type="button"
+                  className={selected ? 'is-selected' : ''}
+                  onClick={() => chooseHistoryImage(image)}
+                >
+                  <img src={image.thumbnailUrl} alt={image.fileName} />
+                  <strong>{image.fileName}</strong>
+                  <span>{dimensions} · {formatDate(image.createdAt)}</span>
+                  {selected && <em>已绑定</em>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <footer className="template-bound-image-footer">
+          <span>{currentImage ? `当前绑定：${currentImage.label}` : '当前没有绑定图片'}</span>
+          <button type="button" onClick={onClose}>取消</button>
+        </footer>
+      </div>
+    </div>
+  );
+}

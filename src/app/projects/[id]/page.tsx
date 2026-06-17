@@ -9,7 +9,6 @@ import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
 
 interface ProjectDetail {
   id: string;
@@ -19,13 +18,13 @@ interface ProjectDetail {
   visibility: string;
   status: string;
   owner_user_id: string;
-  owner?: { name: string; username: string; email: string };
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   members: Array<{
     id: string;
     user_id: string;
     role: string;
     joined_at: string;
-    user: { id: string; name: string; username: string; email: string; role: string; status: string; account_type: string };
+    user: { id: string; name: string; username: string; email: string; avatar_url?: string | null; role: string; status: string; account_type: string };
   }>;
   invites: Array<{ id: string; token: string; default_role: string; expires_at: string | null; used_count: number; max_uses: number | null }>;
   _count?: { members: number; tasks: number; reference_albums?: number };
@@ -230,7 +229,7 @@ interface CostLedgerItem {
   reason: string | null;
   occurred_at: string;
   created_at: string;
-  user?: { id: string; name: string; username: string; email: string } | null;
+  user?: { id: string; name: string; username: string; email: string; avatar_url?: string | null; account_type?: string | null } | null;
   task?: (TaskItem & {
     provider_official_amount_micros?: number | null;
     provider_final_amount_micros?: number | null;
@@ -360,16 +359,12 @@ function formatBudgetPoint(value: number | null | undefined) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
 }
 
-function taskOwnerLabel(task: TaskItem | ReviewTaskItem): string {
-  return displayUserName(task.owner || task.user);
-}
-
 function taskOwnerUser(task: TaskItem | ReviewTaskItem) {
   return task.owner || task.user || null;
 }
 
-function ledgerOwnerLabel(ledger: CostLedgerItem): string {
-  return ledger.task ? taskOwnerLabel(ledger.task) : displayUserName(ledger.user);
+function ledgerOwnerUser(ledger: CostLedgerItem) {
+  return ledger.task ? taskOwnerUser(ledger.task) : ledger.user;
 }
 
 function safeVideoSrc(url?: string | null): string | null {
@@ -1039,7 +1034,7 @@ export default function ProjectDetailPage() {
                         </div>
                       </div>
                     </td>
-                    <td>{ledgerOwnerLabel(ledger)}</td>
+                    <td><UserIdentityBadge user={ledgerOwnerUser(ledger)} size="sm" /></td>
                     <td>
                       <span title={providerTaskId} style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
                         {providerTaskId === '-' ? '-' : `${providerTaskId.slice(0, 18)}${providerTaskId.length > 18 ? '...' : ''}`}
@@ -1181,7 +1176,13 @@ export default function ProjectDetailPage() {
           <tbody>
             {project.members.map((member) => (
               <tr key={member.id}>
-                <td>{displayUserName(member.user)} <span className="text-gray">({displayUserSubtitle(member.user) || `ID ${member.user.id.slice(0, 8)}`})</span></td>
+                <td>
+                  <UserIdentityBadge
+                    user={member.user}
+                    size="sm"
+                    subtitle={member.user.email || `ID ${member.user.id.slice(0, 8)}`}
+                  />
+                </td>
                 <td>{member.user.account_type}</td>
                 <td>{member.user.role}</td>
                 <td>{roleLabel(member.role)}</td>

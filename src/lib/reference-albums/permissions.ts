@@ -74,7 +74,7 @@ export async function getAlbumByIdForAccess(albumId: string) {
   return prisma.referenceAlbum.findFirst({
     where: { id: albumId, status: { not: 'deleted' } },
     include: {
-      owner: { select: { id: true, name: true, username: true, account_type: true } },
+      owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       project: { select: { id: true, name: true, owner_user_id: true, status: true } },
       shares: {
         where: {
@@ -94,7 +94,7 @@ export async function getReferenceImageByIdForAccess(imageId: string) {
       asset: true,
       album: {
         include: {
-          owner: { select: { id: true, name: true, username: true, account_type: true } },
+          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
           project: { select: { id: true, name: true, owner_user_id: true, status: true } },
           shares: {
             where: {

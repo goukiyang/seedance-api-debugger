@@ -153,10 +153,28 @@ export async function uploadAsset(
       thumbnail_url?: string | null;
       width?: number | null;
       height?: number | null;
+      owner_id?: string;
+      status?: string;
     } = {};
     let thumbnailUrl = existing.thumbnail_url;
     let width = existing.width;
     let height = existing.height;
+
+    const canClaimLegacyAsset = existing.owner_id === 'default-user' && ownerId !== 'default-user';
+    const isSameOwner = existing.owner_id === ownerId;
+    if (!isSameOwner && !canClaimLegacyAsset && ownerId !== 'default-user') {
+      throw new Error('相同文件已由其他用户上传，当前账号不能直接复用该素材。请从共享图集选择，或联系管理员开放共享。');
+    }
+
+    // 历史数据里存在 default-user 资产；真实用户重新上传同一文件时归属到当前用户。
+    if (canClaimLegacyAsset) {
+      updates.owner_id = ownerId;
+    }
+
+    // 用户重新上传自己隐藏/删除过的文件时，恢复为可见资产，避免“上传成功但列表不可见”。
+    if ((isSameOwner || canClaimLegacyAsset) && existing.status !== 'active') {
+      updates.status = 'active';
+    }
 
     if (isLocalUploadUrl(existing.original_url) && !localUploadExists(existing.original_url)) {
       const storedFileName = `${hash}.${ext}`;

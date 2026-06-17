@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
-import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { displayUserSubtitle } from '@/lib/users/display';
 
 interface PointsStats {
   user_count: number;
@@ -29,6 +30,7 @@ interface LedgerUser {
   name: string | null;
   username: string | null;
   email?: string | null;
+  avatar_url?: string | null;
   account_type?: string | null;
 }
 
@@ -91,14 +93,13 @@ function amountClass(amount: number) {
   return 'text-gray';
 }
 
-function userLabel(user: LedgerUser | null | undefined, fallback: string) {
-  if (!user) return fallback;
-  return displayUserName(user);
-}
-
 function userSubtitle(user: LedgerUser | null | undefined) {
   if (!user) return '';
   return displayUserSubtitle(user) || user.email || '';
+}
+
+function recordUser(record: Pick<LedgerRecord, 'user' | 'user_id'>) {
+  return record.user || { id: record.user_id, name: null, username: null };
 }
 
 function buildLedgerQuery(filters: PointsInitialFilters, page: number) {
@@ -346,8 +347,11 @@ export default function AdminPointsClient({
                     <td>{formatDate(record.created_at)}</td>
                     <td>
                       <div className="admin-points-subject-cell">
-                        <strong>{userLabel(record.user, record.user_id)}</strong>
-                        <span>{userSubtitle(record.user) || record.user_id}</span>
+                        <UserIdentityBadge
+                          user={recordUser(record)}
+                          size="sm"
+                          subtitle={userSubtitle(record.user) || record.user_id}
+                        />
                       </div>
                     </td>
                     <td>{ledgerTypeLabel(record.type)}</td>
@@ -389,7 +393,16 @@ export default function AdminPointsClient({
             <div className="admin-points-detail-list">
               <div><span>流水 ID</span><strong title={selectedRecord.id}>{selectedRecord.id}</strong></div>
               <div><span>主体类型</span><strong>用户点数</strong></div>
-              <div><span>用户</span><strong>{userLabel(selectedRecord.user, selectedRecord.user_id)}</strong></div>
+              <div>
+                <span>用户</span>
+                <strong>
+                  <UserIdentityBadge
+                    user={recordUser(selectedRecord)}
+                    size="sm"
+                    subtitle={userSubtitle(selectedRecord.user) || selectedRecord.user_id}
+                  />
+                </strong>
+              </div>
               <div><span>类型</span><strong>{ledgerTypeLabel(selectedRecord.type)}</strong></div>
               <div><span>变动</span><strong className={amountClass(selectedRecord.amount)}>{selectedRecord.amount > 0 ? '+' : ''}{formatNumber(selectedRecord.amount)}</strong></div>
               <div><span>任务</span><strong>{selectedRecord.related_task_id || '-'}</strong></div>

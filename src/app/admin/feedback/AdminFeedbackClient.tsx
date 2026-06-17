@@ -3,13 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
-import { displayUserName } from '@/lib/users/display';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 
 type FeedbackUser = {
   id: string;
   name: string;
   username: string;
   email: string;
+  avatar_url?: string | null;
+  account_type?: string | null;
 };
 
 type FeedbackItem = {
@@ -52,10 +54,6 @@ function statusLabel(status: string) {
   return '新反馈';
 }
 
-function submitter(item: FeedbackItem) {
-  return item.user ? displayUserName(item.user) : '未登录用户';
-}
-
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -70,7 +68,7 @@ function feedbackExportFilename(date = new Date()) {
   return `feedback_export_${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}.pdf`;
 }
 
-export default function AdminFeedbackClient({ currentUserName }: { currentUserName: string }) {
+export default function AdminFeedbackClient({ currentUser }: { currentUser: FeedbackUser }) {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [active, setActive] = useState<FeedbackItem | null>(null);
@@ -209,7 +207,7 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
         eyebrow="管理员后台"
         title="反馈管理"
         description="查看、归档、备注和导出用户提交的反馈材料。"
-        actions={<div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{currentUserName}</div>}
+        actions={<UserIdentityBadge user={currentUser} size="sm" showEmail />}
       />
 
       {(message || error) && (
@@ -304,7 +302,9 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
                     <td style={tdStyle}>{statusLabel(item.status)}</td>
                     <td style={{ ...tdStyle, maxWidth: 280 }}>{item.content.slice(0, 80)}{item.content.length > 80 ? '...' : ''}</td>
                     <td style={tdStyle}>{images.length}</td>
-                    <td style={tdStyle}>{submitter(item)}</td>
+                    <td style={tdStyle}>
+                      <UserIdentityBadge user={item.user} size="sm" showEmail />
+                    </td>
                     <td style={tdStyle}>{item.pathname || item.page_url || '-'}</td>
                     <td style={tdStyle}>{item.task_id || '-'}</td>
                     <td style={tdStyle}>{new Date(item.created_at).toLocaleString('zh-CN')}</td>
@@ -353,7 +353,7 @@ export default function AdminFeedbackClient({ currentUserName }: { currentUserNa
             </header>
             <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '10px 14px', margin: 0, fontSize: 13 }}>
               <dt style={dtStyle}>完整内容</dt><dd style={ddStyle}>{active.content}</dd>
-              <dt style={dtStyle}>提交人</dt><dd style={ddStyle}>{submitter(active)}</dd>
+              <dt style={dtStyle}>提交人</dt><dd style={ddStyle}><UserIdentityBadge user={active.user} size="sm" showEmail /></dd>
               <dt style={dtStyle}>页面 URL</dt><dd style={ddStyle}>{active.page_url || '-'}</dd>
               <dt style={dtStyle}>UserAgent</dt><dd style={ddStyle}>{active.user_agent || '-'}</dd>
               <dt style={dtStyle}>任务 ID</dt><dd style={ddStyle}>{active.task_id || '-'}</dd>

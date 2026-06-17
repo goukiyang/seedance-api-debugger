@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     prisma.feedback.findMany({
       where,
       include: {
-        user: { select: { id: true, name: true, username: true, email: true } },
+        user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       },
       orderBy: { created_at: 'desc' },
       skip: (page - 1) * pageSize,

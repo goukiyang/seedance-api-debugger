@@ -1,9 +1,40 @@
-export type TemplateRuleType = 'must' | 'forbid' | 'suggest';
-export type TemplateAssetType = 'character' | 'logo' | 'style' | 'other';
-export type TemplatePromptBlockType = 'character' | 'logo' | 'style' | 'global';
-export type TemplateModuleKey = 'character' | 'logo' | 'style' | 'camera';
-export type TemplateModuleUsage = 'required' | 'reference';
-export type TemplateModuleUsageMap = Partial<Record<TemplateModuleKey, TemplateModuleUsage>>;
+export type TemplateRuleType = 'must' | 'forbid' | 'suggest' | 'context';
+export type TemplateAssetType = 'character' | 'logo' | 'style' | 'product' | 'negative' | 'other';
+export type TemplatePromptBlockType =
+  | 'character'
+  | 'logo'
+  | 'style'
+  | 'camera'
+  | 'rules'
+  | 'asset_rule'
+  | 'temporal'
+  | 'prompt_format'
+  | 'global';
+
+export type TemplateContextCardMode = 'force' | 'reference';
+
+export type TemplateContextCardBoundImage = {
+  source: 'reference_album' | 'upload_history' | 'template_asset' | 'manual';
+  id: string | null;
+  reference_image_id: string | null;
+  asset_id: string | null;
+  label: string;
+  url: string | null;
+  thumbnail_url: string | null;
+};
+
+export type TemplateContextCard = {
+  id: string;
+  title: string;
+  content: string;
+  mode: TemplateContextCardMode;
+  enabled: boolean;
+  sort_order: number;
+  bound_image: TemplateContextCardBoundImage | null;
+  llm_reference: string;
+  legacy_block_type?: TemplatePromptBlockType;
+  auto_save_status?: 'idle' | 'saving' | 'saved' | 'error';
+};
 
 export type TemplateModuleBindings = {
   character?: string;
@@ -11,8 +42,16 @@ export type TemplateModuleBindings = {
   style?: string;
   camera?: string;
   rules?: string;
+  asset_rule?: string;
+  temporal?: string;
+  prompt_format?: string;
   module_usage?: TemplateModuleUsageMap;
+  context_cards?: TemplateContextCard[];
 };
+
+export type TemplateModuleKey = 'character' | 'logo' | 'style' | 'camera';
+export type TemplateModuleUsage = 'required' | 'reference';
+export type TemplateModuleUsageMap = Partial<Record<TemplateModuleKey, TemplateModuleUsage>>;
 
 const TEMPLATE_MODULE_KEYS: TemplateModuleKey[] = ['character', 'logo', 'style', 'camera'];
 
@@ -156,11 +195,16 @@ function normalizeModuleBindings(value: unknown): TemplateModuleBindings {
     style: stringOrUndefined(object.style),
     camera: stringOrUndefined(object.camera),
     rules: stringOrUndefined(object.rules),
+    asset_rule: stringOrUndefined(object.asset_rule),
+    temporal: stringOrUndefined(object.temporal),
+    prompt_format: stringOrUndefined(object.prompt_format),
   };
   const moduleUsage = normalizeModuleUsage(object.module_usage, bindings);
+  const contextCards = normalizeContextCards(object.context_cards);
   return {
     ...bindings,
     ...(Object.keys(moduleUsage).length > 0 ? { module_usage: moduleUsage } : {}),
+    ...(contextCards.length > 0 ? { context_cards: contextCards } : {}),
   };
 }
 
@@ -203,16 +247,81 @@ function normalizeItemStatus(value: unknown) {
   return value === 'disabled' || value === 'archived' ? value : 'active';
 }
 
+function normalizeContextCardMode(value: unknown): TemplateContextCardMode {
+  return value === 'reference' ? 'reference' : 'force';
+}
+
+function normalizeContextCardBoundImage(value: unknown): TemplateContextCardBoundImage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const object = value as Record<string, unknown>;
+  const label = stringOrNull(object.label) || '绑定图片';
+  const url = stringOrNull(object.url);
+  const thumbnailUrl = stringOrNull(object.thumbnail_url);
+  const referenceImageId = stringOrNull(object.reference_image_id);
+  const assetId = stringOrNull(object.asset_id);
+  const id = stringOrNull(object.id) || referenceImageId || assetId;
+  if (!id && !url && !thumbnailUrl) return null;
+  const rawSource = stringOrNull(object.source);
+  const source = rawSource === 'reference_album' || rawSource === 'upload_history' || rawSource === 'manual'
+    ? rawSource
+    : 'template_asset';
+  return {
+    source,
+    id,
+    reference_image_id: referenceImageId,
+    asset_id: assetId,
+    label,
+    url,
+    thumbnail_url: thumbnailUrl,
+  };
+}
+
+function normalizeContextCards(value: unknown): TemplateContextCard[] {
+  if (!Array.isArray(value)) return [];
+  return value.reduce<TemplateContextCard[]>((cards, item, index) => {
+      const object = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+      const content = stringOrNull(object.content) || '';
+      const rawTitle = stringOrNull(object.title);
+      const rawId = stringOrNull(object.id);
+      if (!content && !rawTitle && !rawId) return cards;
+      const title = rawTitle || `上下文卡片 ${index + 1}`;
+      cards.push({
+        id: rawId || `context-card-${index + 1}`,
+        title,
+        content,
+        mode: normalizeContextCardMode(object.mode),
+        enabled: typeof object.enabled === 'boolean' ? object.enabled : true,
+        sort_order: normalizeSortOrder(object.sort_order, index + 1),
+        bound_image: normalizeContextCardBoundImage(object.bound_image),
+        llm_reference: stringOrNull(object.llm_reference) || '',
+        legacy_block_type: object.legacy_block_type ? normalizePromptBlockType(object.legacy_block_type) : undefined,
+      });
+      return cards;
+    }, [])
+    .sort((a, b) => a.sort_order - b.sort_order);
+}
+
 function normalizeRuleType(value: unknown): TemplateRuleType {
-  return value === 'forbid' || value === 'suggest' ? value : 'must';
+  return value === 'forbid' || value === 'suggest' || value === 'context' ? value : 'must';
 }
 
 function normalizeAssetType(value: unknown): TemplateAssetType {
-  return value === 'logo' || value === 'style' || value === 'other' ? value : 'character';
+  return value === 'logo' || value === 'style' || value === 'product' || value === 'negative' || value === 'other'
+    ? value
+    : 'character';
 }
 
 function normalizePromptBlockType(value: unknown): TemplatePromptBlockType {
-  return value === 'logo' || value === 'style' || value === 'global' ? value : 'character';
+  return value === 'logo'
+    || value === 'style'
+    || value === 'camera'
+    || value === 'rules'
+    || value === 'asset_rule'
+    || value === 'temporal'
+    || value === 'prompt_format'
+    || value === 'global'
+    ? value
+    : 'character';
 }
 
 function normalizeSortOrder(value: unknown, fallback: number) {
@@ -225,6 +334,92 @@ function normalizePriority(value: unknown) {
   return Number.isFinite(parsed) ? Math.min(100, Math.max(1, Math.round(parsed))) : 50;
 }
 
+const CONTEXT_CARD_LABELS: Record<TemplatePromptBlockType, string> = {
+  character: '角色设定',
+  logo: 'Logo 要求',
+  style: '风格参考',
+  camera: '镜头要求',
+  rules: '生成规则',
+  asset_rule: '素材使用',
+  temporal: '分段节奏',
+  prompt_format: '提示词格式',
+  global: '全局补充',
+};
+
+function contextCardId(blockType: string, index: number) {
+  return `card-${blockType}-${index + 1}`;
+}
+
+function contextCardModeForBlock(blockType: TemplatePromptBlockType, bindings: TemplateModuleBindings): TemplateContextCardMode {
+  if (blockType === 'style' || blockType === 'asset_rule') return 'reference';
+  if (blockType === 'character' || blockType === 'logo' || blockType === 'camera') {
+    const usage = bindings.module_usage?.[blockType as TemplateModuleKey];
+    return usage === 'reference' ? 'reference' : 'force';
+  }
+  return 'force';
+}
+
+function findBoundImageForBlock(blockType: TemplatePromptBlockType, assets: SerializedTemplateAsset[]): TemplateContextCardBoundImage | null {
+  const assetType = blockType === 'asset_rule' ? 'product' : blockType;
+  const asset = assets.find((item) => item.status === 'active' && item.asset_type === assetType)
+    || (blockType === 'global' ? null : assets.find((item) => item.status === 'active' && (item.thumbnail_url || item.url || item.reference_image_id)));
+  if (!asset) return null;
+  return {
+    source: 'template_asset',
+    id: asset.id || asset.reference_image_id || asset.url || null,
+    reference_image_id: asset.reference_image_id,
+    asset_id: null,
+    label: asset.label,
+    url: asset.url,
+    thumbnail_url: asset.thumbnail_url,
+  };
+}
+
+function buildContextCardsFromLegacy(
+  bindings: TemplateModuleBindings,
+  prompts: SerializedTemplatePromptBlock[],
+  assets: SerializedTemplateAsset[],
+  rules: SerializedTemplateRule[],
+): TemplateContextCard[] {
+  const activePrompts = prompts.filter((prompt) => prompt.status === 'active' && prompt.content.trim());
+  const cards = activePrompts.map((prompt, index) => {
+    const bindingValue = bindings[prompt.block_type as keyof TemplateModuleBindings];
+    const title = typeof bindingValue === 'string' && bindingValue.trim()
+      ? bindingValue.trim()
+      : CONTEXT_CARD_LABELS[prompt.block_type];
+    return {
+      id: contextCardId(prompt.block_type, index),
+      title,
+      content: prompt.content,
+      mode: contextCardModeForBlock(prompt.block_type, bindings),
+      enabled: true,
+      sort_order: prompt.sort_order || index + 1,
+      bound_image: findBoundImageForBlock(prompt.block_type, assets),
+      llm_reference: '由旧模板结构自动转换，可展开后按当前模板目标调整。',
+      legacy_block_type: prompt.block_type,
+    };
+  });
+
+  if (!cards.some((card) => card.title === CONTEXT_CARD_LABELS.rules) && rules.length > 0) {
+    cards.push({
+      id: contextCardId('rules', cards.length),
+      title: CONTEXT_CARD_LABELS.rules,
+      content: rules
+        .filter((rule) => rule.status === 'active')
+        .map((rule) => `${rule.rule_type.toUpperCase()}：${rule.content}`)
+        .join('\n'),
+      mode: 'force',
+      enabled: true,
+      sort_order: cards.length + 1,
+      bound_image: null,
+      llm_reference: '由旧规则列表自动合并。',
+      legacy_block_type: 'rules',
+    });
+  }
+
+  return cards.sort((a, b) => a.sort_order - b.sort_order);
+}
+
 export function normalizeTemplateKey(value: unknown, fallbackName: string) {
   const raw = typeof value === 'string' && value.trim() ? value : fallbackName;
   return raw
@@ -235,14 +430,38 @@ export function normalizeTemplateKey(value: unknown, fallbackName: string) {
     .slice(0, 80) || 'template';
 }
 
-function localizeTemplateDisplayText(value: string) {
-  return value
-    .replace(/品牌\s+Logo/g, '品牌标志')
-    .replace(/\bLogo\b\s*/g, '标志')
-    .replace(/标志\s+(?=[\u4e00-\u9fff])/g, '标志');
-}
-
 export function serializeGenerationTemplate(template: TemplateRecord): SerializedGenerationTemplate {
+  const moduleBindings = normalizeModuleBindings(template.module_bindings_json);
+  const assets = (template.assets || []).map((asset) => ({
+    id: asset.id,
+    asset_type: normalizeAssetType(asset.asset_type),
+    label: asset.label,
+    url: asset.url,
+    thumbnail_url: asset.thumbnail_url,
+    reference_image_id: asset.reference_image_id,
+    sort_order: asset.sort_order,
+    status: asset.status,
+    metadata: parseJsonObject(asset.metadata_json),
+  }));
+  const rules = (template.rules || []).map((rule) => ({
+    id: rule.id,
+    rule_type: normalizeRuleType(rule.rule_type),
+    content: rule.content,
+    priority: rule.priority,
+    sort_order: rule.sort_order,
+    status: rule.status,
+  }));
+  const prompts = (template.prompts || []).map((prompt) => ({
+    id: prompt.id,
+    block_type: normalizePromptBlockType(prompt.block_type),
+    content: prompt.content,
+    sort_order: prompt.sort_order,
+    status: prompt.status,
+  }));
+  const contextCards = moduleBindings.context_cards?.length
+    ? moduleBindings.context_cards
+    : buildContextCardsFromLegacy(moduleBindings, prompts, assets, rules);
+
   return {
     id: template.id,
     template_key: template.template_key,
@@ -250,39 +469,19 @@ export function serializeGenerationTemplate(template: TemplateRecord): Serialize
     description: template.description,
     status: template.status,
     version: template.version,
-    module_bindings: normalizeModuleBindings(template.module_bindings_json),
+    module_bindings: {
+      ...moduleBindings,
+      context_cards: contextCards,
+    },
     temporal: normalizeTemporal(template.temporal_json),
     defaults: {
       ratio: template.default_ratio,
       duration: template.default_duration,
       resolution: template.default_resolution,
     },
-    assets: (template.assets || []).map((asset) => ({
-      id: asset.id,
-      asset_type: normalizeAssetType(asset.asset_type),
-      label: localizeTemplateDisplayText(asset.label),
-      url: asset.url,
-      thumbnail_url: asset.thumbnail_url,
-      reference_image_id: asset.reference_image_id,
-      sort_order: asset.sort_order,
-      status: asset.status,
-      metadata: parseJsonObject(asset.metadata_json),
-    })),
-    rules: (template.rules || []).map((rule) => ({
-      id: rule.id,
-      rule_type: normalizeRuleType(rule.rule_type),
-      content: localizeTemplateDisplayText(rule.content),
-      priority: rule.priority,
-      sort_order: rule.sort_order,
-      status: rule.status,
-    })),
-    prompts: (template.prompts || []).map((prompt) => ({
-      id: prompt.id,
-      block_type: normalizePromptBlockType(prompt.block_type),
-      content: localizeTemplateDisplayText(prompt.content),
-      sort_order: prompt.sort_order,
-      status: prompt.status,
-    })),
+    assets,
+    rules,
+    prompts,
     created_by: template.created_by,
     updated_by: template.updated_by,
     created_at: template.created_at,

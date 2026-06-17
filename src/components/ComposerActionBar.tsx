@@ -22,6 +22,7 @@ interface Props {
   lockedDuration?: boolean;
   lockedResolution?: boolean;
   lockReason?: string;
+  compactControls?: boolean;
 }
 
 export function ComposerActionBar({
@@ -41,16 +42,15 @@ export function ComposerActionBar({
   lockedDuration = false,
   lockedResolution = false,
   lockReason = '此参数来自视频卡交付规格',
+  compactControls = false,
 }: Props) {
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
   const [showResolutionMenu, setShowResolutionMenu] = useState(false);
 
-  return (
-    <div className="composer-action-bar">
-      {/* 参数 Chips */}
-      <div className="composer-chips">
+  const chips = (
+    <div className="composer-chips">
         {/* 视频生成标签 */}
         <ParamChip label="视频生成" active />
 
@@ -166,7 +166,20 @@ export function ComposerActionBar({
             </>
           )}
         </div>
-      </div>
+    </div>
+  );
+
+  return (
+    <div className={`composer-action-bar ${compactControls ? 'is-compact' : ''}`}>
+      {compactControls ? (
+        <details className="composer-advanced-params">
+          <summary>
+            <span>生成参数</span>
+            <strong>Seedance 2.0 · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}</strong>
+          </summary>
+          {chips}
+        </details>
+      ) : chips}
 
       {/* 右侧：点数 + 提交按钮 */}
       <div className="composer-action-right">

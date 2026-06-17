@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import AccountMenu, { type AccountMenuUser } from './AccountMenu';
 import NotificationBell from './NotificationBell';
+import { topbarQuickItems } from '@/lib/navigation';
 
 export interface ComposerCreditSummary {
   available?: number;
@@ -17,21 +18,13 @@ interface ComposerTopbarProps {
   credits?: ComposerCreditSummary | null;
 }
 
-const navItems = [
-  { label: '生成视频', href: '/generate', matches: ['/generate', '/generate/canvas'] },
-  { label: '动画模板', href: '/templates', matches: ['/templates', '/template-generate'] },
-  { label: '资产管理', href: '/assets', matches: ['/assets'] },
-  { label: '我的项目', href: '/projects', matches: ['/projects'] },
-  { label: '参考图集', href: '/collections', matches: ['/collections'] },
-  { label: '我的任务', href: '/tasks', matches: ['/tasks'] },
-] as const;
-
 function formatCredit(value: number | undefined) {
   return Math.max(0, Math.floor(value || 0)).toString();
 }
 
-function isActivePath(pathname: string, matches: readonly string[]) {
-  return matches.some((match) => pathname === match || pathname.startsWith(`${match}/`));
+function isActivePath(pathname: string, item: typeof topbarQuickItems[number]) {
+  const candidates = item.match?.length ? item.match : [item.href];
+  return candidates.some((match) => pathname === match || pathname.startsWith(`${match}/`));
 }
 
 export default function ComposerTopbar({ user, loadingUser = false, credits }: ComposerTopbarProps) {
@@ -41,12 +34,14 @@ export default function ComposerTopbar({ user, loadingUser = false, credits }: C
     <header className="composer-topbar">
       <div className="composer-topbar-left">
         <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
-        <nav className="composer-topbar-nav">
-          {navItems.map((item) => (
+        <nav className="composer-topbar-nav" aria-label="快捷入口">
+          {topbarQuickItems
+            .filter((item) => !item.adminOnly || user?.role === 'admin')
+            .map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className={`composer-topbar-nav-btn${isActivePath(pathname, item.matches) ? ' active' : ''}`}
+              className={`composer-topbar-nav-btn${isActivePath(pathname, item) ? ' active' : ''}`}
             >
               {item.label}
             </Link>
@@ -55,8 +50,11 @@ export default function ComposerTopbar({ user, loadingUser = false, credits }: C
       </div>
       <div className="composer-topbar-right">
         {credits && (
-          <div className="composer-topbar-nav-btn" title="当前点数">
-            可用 {formatCredit(credits.available)} 点 ｜ 冻结 {formatCredit(credits.frozen_credits)} 点 ｜ 本月已用 {formatCredit(credits.monthly_used)} 点
+          <div
+            className="composer-topbar-credit"
+            title={`冻结 ${formatCredit(credits.frozen_credits)} 点，本月已用 ${formatCredit(credits.monthly_used)} 点`}
+          >
+            可用 {formatCredit(credits.available)}
           </div>
         )}
         <NotificationBell enabled={Boolean(user && !loadingUser)} />

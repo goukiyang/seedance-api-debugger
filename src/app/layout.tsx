@@ -1,7 +1,5 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import './canvas-workspace.css';
-import '@xyflow/react/dist/style.css';
 import ClientLayout from './ClientLayout';
 
 export const metadata: Metadata = {

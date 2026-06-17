@@ -3,7 +3,15 @@ export interface NavItem {
   href: string;
   match?: string[];
   prefixMatch?: boolean;
+  adminOnly?: boolean;
 }
+
+export interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+export const showLegacyVideoWorkbenchEntry = false;
 
 export const shellRoutes = [
   '/workbench',
@@ -11,52 +19,94 @@ export const shellRoutes = [
   '/notifications',
   '/assets',
   '/templates',
+  '/template-generate',
   '/projects',
   '/collections',
   '/cutout',
-  '/generate/canvas',
+  '/tools/ultimate-canvas',
   '/admin',
   '/admin/projects',
   '/admin/outputs',
   '/admin/costs',
   '/admin/integrations',
+  '/admin/templates',
+  '/admin/agent-runs',
   '/admin/feedback',
 ] as const;
 
-const topbarOnlyShellRoutes = [
-  '/generate/canvas',
-] as const;
+const topbarOnlyShellRoutes = [] as const;
 
 const shellRoutePrefixes = [
   '/tasks',
   '/projects',
   '/collections',
+  '/assets',
+  '/templates',
+  '/template-generate',
+  '/tools',
   '/admin/users',
   '/admin/outputs',
   '/admin/costs',
   '/admin/integrations',
+  '/admin/templates',
+  '/admin/agent-runs',
 ] as const;
 
-export const userNavItems: NavItem[] = [
-  { label: '生成视频', href: '/generate', prefixMatch: true },
-  { label: '动画模板', href: '/templates', prefixMatch: true },
-  { label: '视频工作台', href: '/workbench', prefixMatch: true },
-  { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
-  { label: '资产管理', href: '/assets', prefixMatch: true },
-  { label: '我的项目', href: '/projects', prefixMatch: true },
-  { label: '参考图集', href: '/collections', prefixMatch: true },
-  { label: '我的任务', href: '/tasks', prefixMatch: true },
+export const topbarQuickItems: NavItem[] = [
+  { label: '生成', href: '/generate', match: ['/generate'] },
+  { label: '模板', href: '/templates', match: ['/templates', '/template-generate'] },
+  { label: '项目', href: '/projects', match: ['/projects', '/tasks', '/assets', '/collections'] },
+  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'] },
+  { label: '工具', href: '/cutout', match: ['/cutout'] },
+  { label: '管理中心', href: '/admin', match: ['/admin'], prefixMatch: true, adminOnly: true },
 ];
 
-export const adminNavItems: NavItem[] = [
-  { label: '后台总览', href: '/admin' },
-  { label: '用户管理', href: '/admin/users' },
-  { label: '项目管理', href: '/admin/projects' },
-  { label: '产出留存', href: '/admin/outputs' },
-  { label: '计费与成本', href: '/admin/costs' },
-  { label: '接口配置', href: '/admin/integrations' },
-  { label: '反馈管理', href: '/admin/feedback' },
+export const userNavGroups: NavGroup[] = [
+  {
+    title: '创作',
+    items: [
+      { label: '生成视频', href: '/generate', prefixMatch: true },
+      { label: '模板生成', href: '/template-generate', prefixMatch: true },
+      { label: '动画模板', href: '/templates', prefixMatch: true },
+      { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'] },
+      ...(showLegacyVideoWorkbenchEntry
+        ? [{ label: '视频工作台', href: '/workbench', prefixMatch: true }]
+        : []),
+    ],
+  },
+  {
+    title: '项目',
+    items: [
+      { label: '我的项目', href: '/projects', prefixMatch: true },
+      { label: '我的任务', href: '/tasks', prefixMatch: true },
+      { label: '资产管理', href: '/assets', prefixMatch: true },
+      { label: '参考图集', href: '/collections', prefixMatch: true },
+    ],
+  },
+  {
+    title: '工具',
+    items: [
+      { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
+    ],
+  },
 ];
+
+export const adminNavGroups: NavGroup[] = [
+  {
+    title: '管理中心',
+    items: [
+      { label: '管理中心', href: '/admin' },
+      { label: '用户管理', href: '/admin/users', match: ['/admin/users', '/admin/points'] },
+      { label: '项目管理', href: '/admin/projects', prefixMatch: true },
+      { label: '产出与反馈', href: '/admin/outputs', match: ['/admin/outputs', '/admin/feedback'] },
+      { label: '成本与接口', href: '/admin/costs', match: ['/admin/costs', '/admin/integrations'] },
+      { label: '模板工作台', href: '/admin/templates', match: ['/admin/templates', '/admin/agent-runs'], prefixMatch: true },
+    ],
+  },
+];
+
+export const userNavItems: NavItem[] = userNavGroups.flatMap((group) => group.items);
+export const adminNavItems: NavItem[] = adminNavGroups.flatMap((group) => group.items);
 
 export function isNavItemActive(pathname: string, item: NavItem) {
   const candidates = item.match?.length ? item.match : [item.href];

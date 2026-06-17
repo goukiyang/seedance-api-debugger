@@ -8,6 +8,7 @@ import {
   formatAmountMinorWithFixedCny,
 } from '@/lib/costs/currency';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import type {
   DashboardBreakdownItem,
   DashboardCurrencyTotal,
@@ -17,7 +18,6 @@ import type {
   DashboardWarning,
   GenerationDashboardData,
 } from '@/lib/admin/generation-dashboard';
-import { displayUserName } from '@/lib/users/display';
 
 type ProviderBalanceView = {
   amount: string;
@@ -34,10 +34,16 @@ type QuickLink = {
   href: string;
 };
 
+type QuickLinkGroup = {
+  title: string;
+  desc: string;
+  links: QuickLink[];
+};
+
 type Props = {
   initialDashboard: GenerationDashboardData;
   providerBalance: ProviderBalanceView;
-  quickLinks: QuickLink[];
+  quickLinks: QuickLinkGroup[];
 };
 
 const rangeOptions: Array<{ key: DashboardRangeKey; label: string }> = [
@@ -204,7 +210,9 @@ function DonutLegend({ items }: { items: DashboardBreakdownItem[] }) {
             aria-hidden="true"
           />
           <span>
-            <strong>{item.label}</strong>
+            <strong>
+                      <UserIdentityBadge user={item.user || { id: item.key, name: item.label, username: null }} size="sm" />
+                    </strong>
             <small>{item.count} 条 · {formatCurrencyTotals(item.official_costs)}</small>
           </span>
           <b>{breakdownShare(item, items)}</b>
@@ -702,7 +710,9 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 </span>
                 <span>
                   <strong>{task.project?.name || '未归属项目'}</strong>
-                  <small>{task.owner ? displayUserName(task.owner) : '未知成员'}</small>
+                  <small>
+                    <UserIdentityBadge user={task.owner} size="sm" />
+                  </small>
                 </span>
                 <span>{task.resolution === 'unknown' ? '未记录' : task.resolution} · {task.duration ? `${task.duration}s` : '-'} · {task.ratio || '-'}</span>
                 <span>{taskOfficialCost(task)}</span>
@@ -723,11 +733,21 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
             </div>
           </div>
           <div className="admin-dashboard-quick-links">
-            {quickLinks.map((link) => (
-              <Link href={link.href} key={link.href}>
-                <strong>{link.title}</strong>
-                <span>{link.desc}</span>
-              </Link>
+            {quickLinks.map((group) => (
+              <section className="admin-dashboard-quick-group" key={group.title}>
+                <div>
+                  <strong>{group.title}</strong>
+                  <span>{group.desc}</span>
+                </div>
+                <div className="admin-dashboard-quick-group-links">
+                  {group.links.map((link) => (
+                    <Link href={link.href} key={link.href}>
+                      <strong>{link.title}</strong>
+                      <span>{link.desc}</span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         </div>

@@ -8,7 +8,6 @@ import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { formatAmountMicrosWithFixedCny } from '@/lib/costs/currency';
-import { displayUserName } from '@/lib/users/display';
 
 interface VideoCardSummary {
   task_count: number;
@@ -30,7 +29,7 @@ interface VideoCardDetail {
   objective: string | null;
   status: string;
   owner_user_id: string | null;
-  owner?: { id: string; name: string; username: string; email?: string } | null;
+  owner?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   platform: string | null;
   ratio: string | null;
   duration: number | null;
@@ -313,8 +312,10 @@ export default function VideoCardDetailPage() {
           <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
             <div>
               <h2 className="section-title mb-0">卡片信息</h2>
-              <p className="text-gray text-sm mt-2">
-                {statusLabel(videoCard.status)} · {displayUserName(videoCard.owner)} · {videoCard.is_fallback ? '历史兜底卡' : '正式视频卡'}
+              <p className="text-gray text-sm mt-2 video-card-owner-line">
+                <span>{statusLabel(videoCard.status)}</span>
+                <UserIdentityBadge user={videoCard.owner} size="sm" />
+                <span>{videoCard.is_fallback ? '历史兜底卡' : '正式视频卡'}</span>
               </p>
             </div>
             <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap' }}>

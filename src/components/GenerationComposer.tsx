@@ -26,6 +26,7 @@ import type { GenerationDefaults } from '@/lib/preferences/generation';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
+import { Bot, FileJson, Settings2 } from 'lucide-react';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
@@ -41,6 +42,61 @@ const TEMPLATE_MODULE_LABELS: Record<TemplateModuleKey, string> = {
   logo: '标志',
   style: '风格',
   camera: '镜头',
+};
+
+type ModuleBuilderType = 'auto' | 'character' | 'logo' | 'style' | 'camera' | 'rule' | 'asset_rule' | 'temporal' | 'prompt_format';
+type ResolvedModuleBuilderType = Exclude<ModuleBuilderType, 'auto'>;
+
+const MODULE_BUILDER_OPTIONS: Array<{ value: ModuleBuilderType; label: string; hint: string }> = [
+  { value: 'auto', label: '自动判断', hint: '让 Agent 按描述分类' },
+  { value: 'character', label: '角色', hint: 'IP、人物、吉祥物' },
+  { value: 'logo', label: 'Logo', hint: '标志、字标、品牌露出' },
+  { value: 'style', label: '风格', hint: '视觉风格、材质、调色' },
+  { value: 'camera', label: '镜头', hint: '景别、运镜、节奏' },
+  { value: 'rule', label: '规则', hint: 'MUST / FORBID / SUGGEST' },
+  { value: 'asset_rule', label: '素材带规则', hint: '图片素材用途与约束' },
+  { value: 'temporal', label: 'Temporal 分段', hint: '时间段、镜头段落' },
+  { value: 'prompt_format', label: '提示词格式', hint: '复用视频生成 skills' },
+];
+
+const MODULE_BUILDER_TYPE_LABELS: Record<ResolvedModuleBuilderType, string> = {
+  character: '角色模块',
+  logo: 'Logo模块',
+  style: '风格模块',
+  camera: '镜头模块',
+  rule: '规则模块',
+  asset_rule: '素材带规则模块',
+  temporal: 'Temporal分段模块',
+  prompt_format: '提示词格式模块',
+};
+
+const DEFAULT_MODULE_BUILDER_RULES = [
+  '不要只生成自然语言描述，必须输出结构化模块。',
+  '必须区分 prompt_required / context_only / validation_only。',
+  '必须区分 MUST / FORBID / SUGGEST / CONTEXT。',
+  '如果是图片素材，必须判断它是角色、Logo、风格、镜头、产品还是反例。',
+  '如果缺少关键信息，必须先追问，不要直接生成。',
+  '输出结果必须可保存为系统模块。',
+].join('\n');
+
+const VIDEO_PROMPT_FORMAT_BLOCK = {
+  source: 'sd2-video-generate skill + 通用视频提示词格式',
+  format: [
+    '(创意名编号)',
+    '【开场方式】，【空间/背景】，【主体】为视觉核心。主任务：【最终观众看到什么/记住什么】。限制：【禁止项】。',
+    '时间 / 景别 / 运镜 / 内容',
+    '(end)',
+  ],
+  shotFields: ['时间', '景别', '运镜', '内容'],
+  rules: [
+    '首行创意名最多两个中文字符加三位数字，例如 (弹力001)。',
+    '先写总述，再拆镜头。',
+    '每一镜只写一个核心动作。',
+    '时间必须连续、不重叠，结尾落到目标总时长。',
+    '每个分镜必须包含景别和运镜。',
+    '内容写可拍画面，不写抽象评价。',
+    '禁止项只放在总述限制里，正文默认使用正向画面描述。',
+  ],
 };
 
 type TemplateWorkbenchPreferences = {
@@ -69,6 +125,14 @@ interface ReferenceAlbumOption {
   project?: { name: string } | null;
   permissions?: { use?: boolean; edit?: boolean };
 }
+
+type MuskIntegrationConfig = {
+  enabled: boolean;
+  ready: boolean;
+  base_url: string;
+  default_model: string;
+  api_key_configured: boolean;
+};
 
 function inferSingleReferenceAlbum(assets: WorkspaceAssetItem[]): { id: string; name: string } | null {
   if (assets.length === 0) return null;
@@ -155,6 +219,112 @@ function templateModuleItems(template: SerializedGenerationTemplate) {
       };
     })
     .filter((item): item is { key: TemplateModuleKey; label: string; value: string; usage: TemplateModuleUsage } => Boolean(item));
+}
+
+function resolveModuleBuilderType(intent: string, selectedType: ModuleBuilderType): ResolvedModuleBuilderType {
+  if (selectedType !== 'auto') return selectedType;
+  const text = intent.toLowerCase();
+  if (/提示词|prompt|格式|分镜|景别|运镜/.test(text)) return 'prompt_format';
+  if (/logo|标志|字标|品牌露出/.test(text)) return 'logo';
+  if (/角色|人物|ip|吉祥物|兔|猫|形象/.test(text)) return 'character';
+  if (/风格|质感|色彩|调色|材质|氛围/.test(text)) return 'style';
+  if (/镜头|景别|运镜|推入|拉远|横移|跟随/.test(text)) return 'camera';
+  if (/素材|图片|参考图|反例|绑定/.test(text)) return 'asset_rule';
+  if (/时间|分段|temporal|段落|节奏/.test(text)) return 'temporal';
+  return 'rule';
+}
+
+function moduleTargetForType(moduleType: ResolvedModuleBuilderType): string {
+  if (moduleType === 'asset_rule') return 'asset';
+  if (moduleType === 'prompt_format') return 'prompt';
+  if (moduleType === 'temporal') return 'timeline';
+  return moduleType;
+}
+
+function createModuleBuilderDraft(params: {
+  intent: string;
+  selectedType: ModuleBuilderType;
+  rules: string;
+  template: SerializedGenerationTemplate | null;
+  duration: VideoDuration;
+}) {
+  const moduleType = resolveModuleBuilderType(params.intent, params.selectedType);
+  const target = moduleTargetForType(moduleType);
+  const cleanIntent = params.intent.trim().replace(/\s+/g, ' ');
+  const fallbackName = MODULE_BUILDER_TYPE_LABELS[moduleType];
+  const moduleName = cleanIntent ? cleanIntent.slice(0, 26) : fallbackName;
+  const templateModules = params.template ? templateModuleItems(params.template) : [];
+  const priority = moduleType === 'prompt_format' || moduleType === 'rule' ? 90 : 80;
+
+  const promptBlock = moduleType === 'prompt_format'
+    ? VIDEO_PROMPT_FORMAT_BLOCK
+    : {
+        description: cleanIntent || `为当前模板新增${fallbackName}。`,
+        usage: moduleType === 'asset_rule'
+          ? '识别素材用途并生成绑定规则。'
+          : moduleType === 'temporal'
+            ? `按 ${params.duration}s 生成连续分段和镜头节奏。`
+            : '作为模板生成时的可注入提示词块。',
+        adminReview: '管理员必须审核、修改并保存后才会进入正式模块库。',
+      };
+
+  return {
+    moduleType,
+    moduleName,
+    source: 'module_builder_agent_draft',
+    status: 'draft_requires_admin_review',
+    templateContext: params.template ? {
+      templateId: params.template.id,
+      templateName: params.template.name,
+      version: params.template.version,
+      modules: templateModules.map((item) => ({
+        key: item.key,
+        name: item.value,
+        usage: item.usage === 'required' ? 'prompt_required' : 'context_only',
+      })),
+      activeRuleCount: params.template.rules.filter((rule) => rule.status === 'active').length,
+      assetCount: params.template.assets.filter((asset) => asset.status === 'active').length,
+    } : null,
+    builderRules: {
+      defaultRules: DEFAULT_MODULE_BUILDER_RULES.split('\n'),
+      sessionRules: params.rules.split('\n').map((rule) => rule.trim()).filter(Boolean),
+    },
+    assetBinding: moduleType === 'asset_rule'
+      ? {
+          assetId: null,
+          usage: 'auto_classify_asset_role',
+          requiresAssetReview: true,
+        }
+      : null,
+    promptBlock,
+    rules: [
+      {
+        ruleType: 'MUST',
+        injectionMode: 'prompt_required',
+        target,
+        content: moduleType === 'prompt_format'
+          ? '必须按通用视频提示词格式输出：创意名编号、总述、连续分镜行和 (end)。'
+          : `必须把“${cleanIntent || fallbackName}”转成可注入的结构化模块。`,
+        priority,
+      },
+      {
+        ruleType: 'FORBID',
+        injectionMode: 'validation_only',
+        target,
+        content: '禁止只输出自然语言说明，禁止跳过管理员确认直接入库。',
+        priority: 100,
+      },
+      {
+        ruleType: 'SUGGEST',
+        injectionMode: moduleType === 'rule' ? 'validation_only' : 'context_only',
+        target,
+        content: '缺少关键素材、角色、Logo、目标时先追问，再生成最终模块。',
+        priority: 70,
+      },
+    ],
+    injectionMode: moduleType === 'rule' ? 'validation_only' : 'prompt_required',
+    priority,
+  };
 }
 
 interface Props {
@@ -268,6 +438,16 @@ export function GenerationComposer({
   const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
   const [templateSaveBusy, setTemplateSaveBusy] = useState(false);
   const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
+  const [moduleBuilderType, setModuleBuilderType] = useState<ModuleBuilderType>('auto');
+  const [moduleBuilderIntent, setModuleBuilderIntent] = useState('');
+  const [moduleBuilderRules, setModuleBuilderRules] = useState(DEFAULT_MODULE_BUILDER_RULES);
+  const [moduleBuilderDraft, setModuleBuilderDraft] = useState('');
+  const [moduleBuilderNotice, setModuleBuilderNotice] = useState<string | null>(null);
+  const [moduleBuilderBusy, setModuleBuilderBusy] = useState(false);
+  const [moduleBuilderAgentRunId, setModuleBuilderAgentRunId] = useState<string | null>(null);
+  const [muskConfig, setMuskConfig] = useState<MuskIntegrationConfig | null>(null);
+  const [muskConfigLoading, setMuskConfigLoading] = useState(false);
+  const [muskConfigError, setMuskConfigError] = useState<string | null>(null);
   const pendingMentionRequestRef = React.useRef<{
     source: 'history' | 'album';
     resolve: (insertText: string | null) => void;
@@ -384,6 +564,14 @@ export function GenerationComposer({
     });
   }, [workspace.assets]);
 
+  const muskReady = muskConfig?.ready === true;
+  const moduleBuilderDisabled = moduleBuilderBusy || muskConfigLoading || !muskReady;
+  const muskStatusText = muskConfigLoading
+    ? '正在检查 LLM 配置...'
+    : muskReady
+      ? `LLM 已就绪：${muskConfig?.default_model || 'gpt-5.4'}`
+      : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
+
   const mentionCandidates = useMemo<PromptMentionCandidate[]>(() => {
     const sourceDisabled = workspace.assets.length >= MAX_REFS;
     return [
@@ -481,6 +669,31 @@ export function GenerationComposer({
     if (!templateEnabled) return;
     void loadTemplates(initialTemplateId);
   }, [initialTemplateId, loadTemplates, templateEnabled]);
+
+  useEffect(() => {
+    if (!templateEnabled || !canManageTemplates) return;
+    let cancelled = false;
+    setMuskConfigLoading(true);
+    setMuskConfigError(null);
+    fetch('/api/admin/integrations/musk', { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || data.message || '读取 Musk API 配置失败');
+        if (!cancelled) setMuskConfig(data.config || null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setMuskConfig(null);
+          setMuskConfigError(error instanceof Error ? error.message : '读取 Musk API 配置失败');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMuskConfigLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageTemplates, templateEnabled]);
 
   useEffect(() => {
     if (!templateEnabled || !selectedTemplateId) return;
@@ -679,6 +892,93 @@ export function GenerationComposer({
       setAgentBusy(false);
     }
   }, [demandText, selectedModifiers, selectedTemplate, selectedVideoCardId]);
+
+  const handleGenerateModuleBuilderDraft = useCallback(async () => {
+    if (!canManageTemplates) {
+      setModuleBuilderNotice('只有管理员可以生成或编辑模块草稿。');
+      return;
+    }
+    if (!selectedTemplate) {
+      setModuleBuilderNotice('请先选择模板。');
+      return;
+    }
+    if (!moduleBuilderIntent.trim()) {
+      setModuleBuilderNotice('请先描述要创建的模块。');
+      return;
+    }
+    if (muskConfigLoading || !muskReady) {
+      setModuleBuilderNotice(muskStatusText);
+      return;
+    }
+
+    setModuleBuilderBusy(true);
+    setModuleBuilderNotice(null);
+    setModuleBuilderAgentRunId(null);
+    try {
+      const res = await fetch('/api/templates/module-builder/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_id: selectedTemplate.id,
+          module_type: moduleBuilderType,
+          intent: moduleBuilderIntent,
+          session_rules: moduleBuilderRules,
+          context_asset_ids: currentReferenceImageIds,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Module Builder 生成失败');
+
+      setModuleBuilderAgentRunId(data.agent_run_id || null);
+      if (data.needs_clarification) {
+        setModuleBuilderDraft(JSON.stringify({
+          needsClarification: true,
+          questions: data.questions || [],
+          agentRunId: data.agent_run_id || null,
+        }, null, 2));
+        setModuleBuilderNotice(`LLM 需要追问：${(data.questions || [])[0] || '请补充关键信息'}`);
+        return;
+      }
+
+      setModuleBuilderDraft(JSON.stringify(data.draft || {
+        error: 'LLM 没有返回可保存草稿',
+        validationErrors: data.validation_errors || [],
+        agentRunId: data.agent_run_id || null,
+      }, null, 2));
+      setModuleBuilderNotice(
+        Array.isArray(data.validation_errors) && data.validation_errors.length > 0
+          ? `结构化校验未通过：${data.validation_errors.join('；')}`
+          : '已由真实 LLM 生成结构化模块草稿，保存前仍需管理员审核。',
+      );
+    } catch (error) {
+      setModuleBuilderNotice(error instanceof Error ? error.message : 'Module Builder 生成失败');
+    } finally {
+      setModuleBuilderBusy(false);
+    }
+  }, [
+    canManageTemplates,
+    currentReferenceImageIds,
+    moduleBuilderIntent,
+    moduleBuilderRules,
+    moduleBuilderType,
+    muskConfigLoading,
+    muskReady,
+    muskStatusText,
+    selectedTemplate,
+  ]);
+
+  const handleCopyModuleBuilderDraft = useCallback(async () => {
+    if (!moduleBuilderDraft) {
+      setModuleBuilderNotice('请先生成模块草稿。');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(moduleBuilderDraft);
+      setModuleBuilderNotice('模块草稿 JSON 已复制。');
+    } catch {
+      setModuleBuilderNotice('复制失败，请直接选中预览内容复制。');
+    }
+  }, [moduleBuilderDraft]);
 
   const handleSelectPlan = useCallback((plan: AgentPlan) => {
     setSelectedPlanKey(plan.key);
@@ -909,10 +1209,13 @@ export function GenerationComposer({
             <div>
               <span className="template-workbench-kicker">模板</span>
               <h2>{selectedTemplate?.name || '选择模板'}</h2>
-              <p>{selectedTemplate?.description || '模板决定角色、标志、风格、规则和分段策略。'}</p>
+              <p>{selectedTemplate?.description || '模板会自动带入角色、标志、风格、规则和提示词格式。'}</p>
             </div>
-            <div className="template-workbench-controls">
-              <span className="template-selector-label">选择生成模板</span>
+            <details className="template-switcher">
+              <summary>
+                <span>切换模板</span>
+                <strong>{selectedTemplate?.name || (templateLoading ? '正在加载模板' : '暂无可用模板')}</strong>
+              </summary>
               <div className="template-selector-list" role="listbox" aria-label="选择生成模板">
                 {templates.map((template) => {
                   const active = selectedTemplate?.id === template.id;
@@ -934,22 +1237,7 @@ export function GenerationComposer({
                 })}
                 {!templateLoading && templates.length === 0 && <span className="template-selector-empty">暂无可用模板</span>}
               </div>
-              {canManageTemplates && (
-                <div className="template-workbench-admin-actions">
-                  <button
-                    type="button"
-                    className="template-workbench-admin-chip"
-                    onClick={() => setTemplateDrawerOpen(true)}
-                    disabled={!selectedTemplate}
-                  >
-                    编辑模板
-                  </button>
-                  <a className="template-workbench-admin-link" href={agentRunId ? `/admin/agent-runs/${agentRunId}` : '/admin/agent-runs'}>
-                    查看链路
-                  </a>
-                </div>
-              )}
-            </div>
+            </details>
           </div>
 
           {templateError && <div className="template-workbench-message is-error">{templateError}</div>}
@@ -982,18 +1270,24 @@ export function GenerationComposer({
             </div>
           )}
 
+          <div className="template-flow-steps" aria-label="模板生成步骤">
+            <span className={demandText.trim() ? 'is-done' : 'is-active'}>1. 输入需求</span>
+            <span className={agentPlans.length > 0 ? 'is-done' : demandText.trim() ? 'is-active' : ''}>2. 选择方案</span>
+            <span className={prompt.trim() ? 'is-active' : ''}>3. 提交生成</span>
+          </div>
+
           <div className="template-demand-row">
             <label className="template-demand-field">
-              <span>本次需求</span>
+              <span>你想生成什么视频？</span>
               <textarea
                 value={demandText}
                 onChange={(event) => setDemandText(event.currentTarget.value)}
                 placeholder="例如：做一个科技品牌宣传视频，突出新品发布、稳定标志和快速产品动线。"
-                rows={3}
+                rows={4}
               />
             </label>
             <div className="template-modifier-panel">
-              <span>快速调节</span>
+              <span>风格调节</span>
               <div className="template-modifier-list">
                 {TEMPLATE_MODIFIERS.map((modifier) => (
                   <button
@@ -1039,10 +1333,15 @@ export function GenerationComposer({
                     </span>
                   </button>
                   <div className="template-plan-card-actions">
-                    <button type="button" onClick={() => handleSelectPlan(plan)}>查看 Prompt</button>
-                    <button type="button" onClick={() => handleSelectPlan(plan)}>继续修改</button>
-                    <button type="button" className="is-primary" onClick={() => handleSelectPlan(plan)}>生成此方案</button>
+                    <button type="button" onClick={() => handleSelectPlan(plan)}>查看方案</button>
+                    <button type="button" className="is-primary" onClick={() => handleSelectPlan(plan)}>使用此方案</button>
                   </div>
+                  <ul className="template-plan-structure">
+                    {plan.structure.slice(0, 3).map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                  <p className="template-plan-risk">注意：{plan.risk}</p>
                 </article>
               ))}
             </div>
@@ -1068,47 +1367,235 @@ export function GenerationComposer({
               </button>
             )}
           </div>
+
+          {canManageTemplates && (
+            <details className="template-admin-tools">
+              <summary>
+                <span>管理员工具</span>
+                <strong>{muskStatusText}</strong>
+              </summary>
+              <div className="template-workbench-admin-actions">
+                <button
+                  type="button"
+                  className="template-workbench-admin-chip"
+                  onClick={() => setTemplateDrawerOpen(true)}
+                  disabled={!selectedTemplate}
+                >
+                  编辑模板
+                </button>
+                <a className="template-workbench-admin-link" href={agentRunId ? `/admin/agent-runs/${agentRunId}` : '/admin/agent-runs'}>
+                  查看链路
+                </a>
+              </div>
+              <section className={`template-llm-builder ${muskReady ? '' : 'is-locked'}`} aria-label="LLM 模板配置与模块生成器">
+                <div className="template-llm-builder-head">
+                  <div>
+                    <span className="template-llm-builder-kicker">
+                      <Bot size={14} aria-hidden="true" />
+                      Module Builder Agent
+                    </span>
+                    <h3>新增模块 / 规则</h3>
+                    <p>管理员描述模块用途，Agent 生成结构化草稿；保存前必须人工确认。</p>
+                  </div>
+                  <div className="template-llm-builder-actions">
+                    <a href="/admin/integrations">
+                      <Settings2 size={14} aria-hidden="true" />
+                      API 设置
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setTemplateDrawerOpen(true)}
+                      disabled={!selectedTemplate}
+                    >
+                      <FileJson size={14} aria-hidden="true" />
+                      高级编辑
+                    </button>
+                  </div>
+                </div>
+                {!muskReady && (
+                  <p className="template-llm-builder-note is-warning">
+                    {muskStatusText} 请先到 API 设置完成配置。
+                  </p>
+                )}
+
+                <div className="template-llm-builder-grid">
+                  <div className="template-llm-builder-inputs">
+                    <label className="template-llm-builder-field">
+                      <span>模块类型</span>
+                      <select
+                        value={moduleBuilderType}
+                        onChange={(event) => setModuleBuilderType(event.currentTarget.value as ModuleBuilderType)}
+                        disabled={moduleBuilderDisabled}
+                      >
+                        {MODULE_BUILDER_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label} · {option.hint}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="template-llm-builder-field">
+                      <span>描述要创建的模块或规则</span>
+                      <textarea
+                        value={moduleBuilderIntent}
+                        onChange={(event) => setModuleBuilderIntent(event.currentTarget.value)}
+                        placeholder="例如：我要新增一个兔子 IP 角色模块，它是白色兔子，性格活泼，要用于品牌宣传视频。"
+                        rows={4}
+                        disabled={moduleBuilderDisabled}
+                      />
+                    </label>
+                    <details className="template-llm-builder-rules">
+                      <summary>
+                        LLM生成规则设定
+                        <small>高级项，默认不用改。</small>
+                      </summary>
+                      <textarea
+                        value={moduleBuilderRules}
+                        onChange={(event) => setModuleBuilderRules(event.currentTarget.value)}
+                        rows={7}
+                        disabled={moduleBuilderDisabled}
+                      />
+                      <div className="template-llm-builder-rule-actions">
+                        <button type="button" onClick={() => setModuleBuilderRules(DEFAULT_MODULE_BUILDER_RULES)} disabled={moduleBuilderDisabled}>
+                          恢复默认规则
+                        </button>
+                        <button type="button" onClick={() => setModuleBuilderNotice('本次生成规则已保留在当前页面草稿中。')} disabled={moduleBuilderDisabled}>
+                          保存当前生成规则
+                        </button>
+                      </div>
+                    </details>
+                    <div className="template-llm-builder-buttons">
+                      <button
+                        type="button"
+                        className="is-primary"
+                        onClick={handleGenerateModuleBuilderDraft}
+                        disabled={moduleBuilderDisabled}
+                      >
+                        {moduleBuilderBusy ? 'LLM 生成中...' : moduleBuilderDraft ? '重新生成' : '生成模块草稿'}
+                      </button>
+                      <button type="button" onClick={handleCopyModuleBuilderDraft} disabled={!moduleBuilderDraft || moduleBuilderBusy}>
+                        复制 JSON
+                      </button>
+                      {demandText.trim() && (
+                        <button type="button" onClick={() => setModuleBuilderIntent(demandText.trim())} disabled={moduleBuilderDisabled}>
+                          使用本次需求
+                        </button>
+                      )}
+                      {moduleBuilderAgentRunId && (
+                        <a href={`/admin/agent-runs/${moduleBuilderAgentRunId}`}>查看生成链路</a>
+                      )}
+                    </div>
+                    {moduleBuilderNotice && <p className="template-llm-builder-note">{moduleBuilderNotice}</p>}
+                  </div>
+
+                  <div className="template-llm-builder-preview">
+                    <div>
+                      <span>生成结果预览</span>
+                      <strong>{moduleBuilderDraft ? '结构化草稿' : '等待 LLM 生成'}</strong>
+                    </div>
+                    <pre>{moduleBuilderDraft || JSON.stringify({
+                      moduleType: 'character',
+                      moduleName: '兔子IP',
+                      promptBlock: { description: '白色兔子IP角色，保持核心识别点。' },
+                      rules: [
+                        { ruleType: 'MUST', injectionMode: 'prompt_required', target: 'character', priority: 95 },
+                        { ruleType: 'FORBID', injectionMode: 'validation_only', target: 'character', priority: 100 },
+                      ],
+                      status: 'draft_requires_admin_review',
+                    }, null, 2)}</pre>
+                  </div>
+                </div>
+              </section>
+            </details>
+          )}
         </section>
         )}
 
-        {/* 图集工具条 */}
-        <ImageSetToolbar
-          collections={collections}
-          onLoad={handleLoadCollection}
-          onSave={handleSaveCollection}
-          onNew={handleNewCollection}
-          onOpenReferenceAlbums={() => setShowAlbumPicker(true)}
-          referenceAlbums={referenceAlbums}
-          currentReferenceAlbumId={currentReferenceAlbumId}
-          currentReferenceAlbumName={currentReferenceAlbumName}
-          onReferenceAlbumLoad={handleLoadReferenceAlbum}
-          onReferenceAlbumSaveCurrent={handleSaveCurrentAsReferenceAlbum}
-          onReferenceAlbumCreate={handleCreateReferenceAlbum}
-          loading={workspace.loading}
-        />
+        {templateEnabled ? (
+          <details className="template-advanced-panel">
+            <summary>
+              <span>参考素材和图集</span>
+              <strong>{workspace.assets.length > 0 ? `${workspace.assets.length} 张参考图` : '默认不使用参考图'}</strong>
+            </summary>
+            <ImageSetToolbar
+              collections={collections}
+              onLoad={handleLoadCollection}
+              onSave={handleSaveCollection}
+              onNew={handleNewCollection}
+              onOpenReferenceAlbums={() => setShowAlbumPicker(true)}
+              referenceAlbums={referenceAlbums}
+              currentReferenceAlbumId={currentReferenceAlbumId}
+              currentReferenceAlbumName={currentReferenceAlbumName}
+              onReferenceAlbumLoad={handleLoadReferenceAlbum}
+              onReferenceAlbumSaveCurrent={handleSaveCurrentAsReferenceAlbum}
+              onReferenceAlbumCreate={handleCreateReferenceAlbum}
+              loading={workspace.loading}
+            />
+            <ReferenceStrip
+              assets={workspace.assets}
+              uploadStatuses={workspace.uploadStatuses}
+              onUpload={workspace.uploadAsset}
+              onRemove={handleRemove}
+              onReorder={handleReorder}
+              onReplace={handleReplace}
+              onPreview={handlePreview}
+              onOpenHistory={() => setShowUploadedImagePicker(true)}
+              generationMode={generationMode}
+              loading={workspace.loading}
+            />
+          </details>
+        ) : (
+          <>
+            <ImageSetToolbar
+              collections={collections}
+              onLoad={handleLoadCollection}
+              onSave={handleSaveCollection}
+              onNew={handleNewCollection}
+              onOpenReferenceAlbums={() => setShowAlbumPicker(true)}
+              referenceAlbums={referenceAlbums}
+              currentReferenceAlbumId={currentReferenceAlbumId}
+              currentReferenceAlbumName={currentReferenceAlbumName}
+              onReferenceAlbumLoad={handleLoadReferenceAlbum}
+              onReferenceAlbumSaveCurrent={handleSaveCurrentAsReferenceAlbum}
+              onReferenceAlbumCreate={handleCreateReferenceAlbum}
+              loading={workspace.loading}
+            />
+            <ReferenceStrip
+              assets={workspace.assets}
+              uploadStatuses={workspace.uploadStatuses}
+              onUpload={workspace.uploadAsset}
+              onRemove={handleRemove}
+              onReorder={handleReorder}
+              onReplace={handleReplace}
+              onPreview={handlePreview}
+              onOpenHistory={() => setShowUploadedImagePicker(true)}
+              generationMode={generationMode}
+              loading={workspace.loading}
+            />
+          </>
+        )}
 
-        {/* 缩略图行 */}
-        <ReferenceStrip
-          assets={workspace.assets}
-          uploadStatuses={workspace.uploadStatuses}
-          onUpload={workspace.uploadAsset}
-          onRemove={handleRemove}
-          onReorder={handleReorder}
-          onReplace={handleReplace}
-          onPreview={handlePreview}
-          onOpenHistory={() => setShowUploadedImagePicker(true)}
-          generationMode={generationMode}
-          loading={workspace.loading}
-        />
-
-        {/* 提示词输入 */}
-        <PromptEditor
-          value={prompt}
-          onChange={handlePromptChange}
-          referenceLabels={referenceLabels}
-          mentionCandidates={mentionCandidates}
-          onMentionSelect={handleMentionSelect}
-        />
+        {templateEnabled ? (
+          <details className="template-advanced-panel template-prompt-editor-panel">
+            <summary>
+              <span>查看 / 编辑最终提示词</span>
+              <strong>{prompt.trim() ? (promptUserEdited ? '已手动编辑' : '已由方案生成') : '选择方案后自动生成'}</strong>
+            </summary>
+            <PromptEditor
+              value={prompt}
+              onChange={handlePromptChange}
+              referenceLabels={referenceLabels}
+              mentionCandidates={mentionCandidates}
+              onMentionSelect={handleMentionSelect}
+            />
+          </details>
+        ) : (
+          <PromptEditor
+            value={prompt}
+            onChange={handlePromptChange}
+            referenceLabels={referenceLabels}
+            mentionCandidates={mentionCandidates}
+            onMentionSelect={handleMentionSelect}
+          />
+        )}
 
         {/* 状态行 */}
         <ComposerStatusLine
@@ -1188,6 +1675,7 @@ export function GenerationComposer({
           lockedDuration={Boolean(lockedSettings?.duration)}
           lockedResolution={Boolean(lockedSettings?.resolution)}
           lockReason={lockReason}
+          compactControls={templateEnabled}
         />
       </div>
 

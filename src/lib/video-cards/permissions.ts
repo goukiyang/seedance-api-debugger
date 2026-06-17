@@ -21,7 +21,7 @@ export async function getVideoCardAccess(user: SessionUser, videoCardId: string)
     where: { id: videoCardId },
     include: {
       project: true,
-      owner: { select: { id: true, name: true, username: true, email: true } },
+      owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
     },
   });
 

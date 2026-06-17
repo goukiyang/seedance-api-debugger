@@ -11,6 +11,7 @@ const PROTECTED_PREFIXES = [
   '/points',
   '/help',
   '/config',
+  '/tools',
 ];
 
 function forwardedOrigin(request: NextRequest) {
@@ -48,5 +49,6 @@ export const config = {
     '/points/:path*',
     '/help/:path*',
     '/config/:path*',
+    '/tools/:path*',
   ],
 };

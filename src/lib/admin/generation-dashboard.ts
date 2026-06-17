@@ -55,6 +55,14 @@ export type DashboardKpis = {
 export type DashboardBreakdownItem = {
   key: string;
   label: string;
+  user?: {
+    id: string;
+    name: string | null;
+    username: string;
+    email: string;
+    avatar_url: string | null;
+    account_type: string;
+  } | null;
   count: number;
   succeeded: number;
   failed: number;
@@ -382,10 +390,16 @@ function buildTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granul
   return Array.from(buckets.values()).map(finalizeTrendBucket);
 }
 
-function createAccumulator(key: string, label: string, href: string): DashboardBreakdownItem & { currencyMap: Map<string, number> } {
+function createAccumulator(
+  key: string,
+  label: string,
+  href: string,
+  user?: DashboardBreakdownItem['user'],
+): DashboardBreakdownItem & { currencyMap: Map<string, number> } {
   return {
     key,
     label,
+    user,
     count: 0,
     succeeded: 0,
     failed: 0,
@@ -401,6 +415,7 @@ function finalizeAccumulator(item: DashboardBreakdownItem & { currencyMap: Map<s
   return {
     key: item.key,
     label: item.label,
+    user: item.user,
     count: item.count,
     succeeded: item.succeeded,
     failed: item.failed,
@@ -714,6 +729,14 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
         actorId,
         actorLabel,
         outputParams(range, { owner_user_id: actorId === 'unknown' ? null : actorId }),
+        actor ? {
+          id: actor.id,
+          name: actor.name,
+          username: actor.username,
+          email: actor.email,
+          avatar_url: actor.avatar_url,
+          account_type: actor.account_type,
+        } : null,
       ));
     }
     addTaskToAccumulator(memberMap.get(actorId)!, task);

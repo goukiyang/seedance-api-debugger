@@ -1,10 +1,867 @@
 # V1.2 剩余模块落地 Todo
 
-更新时间：2026-06-14
+更新时间：2026-06-17
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
 
 最新验收结论：整份 V1.2 仍未完整落地。当前代码已经有视频卡 P0 归档入口、公共项目预算底座、审批记录表、审批中心页面、1080p 基础校验、新建项目“默认记账 / 预算记账”选择入口，但这些还没有形成完整业务闭环。后续执行必须以本 todo 为准，不得把“有模型/有页面/有审批记录”误判为“业务已闭环”。
+
+## 图集和单图共享闭环 Todo
+
+更新时间：2026-06-17
+
+目标：
+
+- 所有可共享图集都保留明显“共享”入口。
+- 共享给项目时必须通过项目下拉选择，避免手填 ID 出错。
+- 共享到公共库时必须选择共享文件夹，再提交公共共享流程。
+- 单张图片也能共享：先自动创建一个只包含该图片的单图图集，再复用同一个共享面板。
+
+### 实现任务
+
+- [x] 复查现有图集、公共文件夹、公共投稿和图集分享接口，不另造一套共享模型。
+- [x] 将共享弹窗默认目标改为项目，并加载可用项目下拉。
+- [x] 在共享弹窗中增加“共享文件夹”目标，选择公共文件夹后走公共投稿接口。
+- [x] 保留指定用户共享能力，作为高级补充入口。
+- [x] 新增单张参考图创建单图共享图集的接口。
+- [x] 在图集详情页每张图片卡增加“共享”按钮，点击后打开同一共享弹窗。
+- [x] 验证 TypeScript、lint、构建和公网页面闭环。
+
+### 验收标准
+
+- [x] 图集卡和图集详情页都能打开共享面板。
+- [x] 共享面板可以直接选择项目，不需要用户手填项目 ID。
+- [x] 共享面板可以选择共享文件夹，并提交公共共享。
+- [x] 单张图片点击“共享”后，会生成一个单图图集并进入共享流程。
+- [x] 普通用户提交公共共享为待审核；管理员提交后直接生成公共图集。
+- [x] 线上 `sd2.youdoodesign.com` 刷新后能看到新入口。
+
+### Review - 2026-06-17 图集和单图共享闭环
+
+- 共享弹窗复用现有 `AlbumShare`、`ReferenceAlbumFolder`、`PublicAlbumSubmission`，没有新增数据库模型。
+- 图集共享默认进入“共享给项目”，项目来源为 `/api/projects` 下拉；指定用户共享保留。
+- 新增“提交到共享文件夹”方式，选择共享文件夹后调用 `/api/reference-albums/[id]/public-submissions`，普通用户待审核、管理员直接复制公共图集沿用既有后端规则。
+- 新增 `POST /api/reference-images/[id]/share-album`，单张图片会先创建只包含该图片的私有单图图集，再打开同一共享弹窗。
+- 已通过 `youdoo-sites build/restart sd2` 上线到 `sd2.youdoodesign.com`。
+- 验证通过：`npx tsc --noEmit --pretty false`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 `/api/config`、`/login`、新增 API 未登录 401、公共静态 chunk 包含新文案。
+- 真实提交会写入数据库，本轮没有用生产账号制造测试共享记录；功能路径通过构建、路由、静态资源和现有后端规则闭环验证。
+
+## 模板系统 UX 重设计总控 Todo
+
+更新时间：2026-06-17
+
+依据：
+
+- `/Volumes/Data/Projects/video-api-debugger-v12-full-todo/tasks/template-ux-redesign-plan.md`
+- `/Volumes/Data/Projects/video-api-debugger-v12-full-todo/tasks/template-full-function-chain.md`
+- `/Volumes/Data/Downloads/Current/AI 视频创作经验工作台需求文档 V1.pdf`
+- 2026-06-17 多角色 Agent 推演结论
+
+### 总判断
+
+当前模板功能底层方向是对的，但页面仍然像工程后台：
+
+```text
+模板 / 模块 / PromptBlock / AgentRun / JSON / 优先级 / 注入方式
+```
+
+真实用户要完成的是：
+
+```text
+普通用户：选模板 -> 输入需求 -> 生成方案 -> 提交生成
+模板管理员：创建模板 -> 编排上下文卡片 -> 绑定图片 -> 预览最终提示词 -> 试生成 -> 发布
+质量运营：发现跑偏 -> 复盘归因 -> 写入 Memory -> 推动模板优化
+系统管理员：配置 API -> 测试可用 -> 查看失败诊断
+```
+
+因此，本轮模板相关后续开发必须从“补字段 / 补抽屉”改为“按用户角色重建工作台”。
+
+### 2026-06-17 最新产品修正：上下文卡片系统
+
+用户已确认新的目标形态：模板里的“模块”不再按工程模块、字段表单或代码 key 展示，而是统一变成**上下文卡片**。
+
+核心定义：
+
+```text
+上下文卡片 = 一段最终给 LLM 的上下文内容 + 可选 1 张绑定图片 + 卡片级启用状态 + 卡片级强制/参考模式
+```
+
+页面必须围绕这 4 个对象设计：
+
+1. `模板上下文卡片编排页`
+   - 卡片可拖拽排序。
+   - 卡片可启用 / 停用。
+   - 卡片上直接显示二选一按钮：`强制插入` / `仅供参考`。
+   - 卡片可绑定 0 或 1 张图片。
+   - 卡片只有 `编辑` 一个进入详情的按钮，不暴露底层字段。
+
+2. `编辑上下文卡片抽屉`
+   - 顶部第一个框：`最终输入给 LLM 的上下文内容`，这是最终生效内容。
+   - 中间第二块：`LLM 参考与设置`，默认折叠，可展开修改，修改后自动保存。
+   - 底部第三个框：`让 LLM 帮你改这张卡片`，输入后按 Enter 调用 LLM，并更新顶部内容。
+   - 编辑抽屉里不再放 `强制插入 / 仅供参考`，因为它已经在卡片上直接选择。
+
+3. `绑定图片模式`
+   - 图片只是卡片的附加绑定，不单独变成一套“图片模块”。
+   - 一张卡片默认只绑定 1 张图片，可更换、移除。
+   - 图片来源复用生成页已有能力：`参考图集` 和 `历史上传图`。
+   - 没绑定图片时，卡片显示 `添加图片` 占位。
+
+4. `最终提示词影响预览`
+   - 放在模板编辑工作台底部，做成随页面自然滚动的横向全宽核对区，不做固定条、不做内部限高滚动。
+   - 不放在右侧边栏，右侧只用于当前选中卡片编辑。
+   - 影响区内容要完整显示，长文本自然换行，不用省略号截断。
+   - 显示强制插入卡片数量、仅供参考卡片数量、绑定图片数量。
+   - 显示启用卡片按拖拽顺序如何影响最终提示词。
+   - 明确说明：强制插入会写进最终提示词；仅供参考只影响 LLM 理解，不保证原文出现。
+
+禁止项：
+
+- 不再把 `brand_logo`、`moduleType`、`PromptBlock`、`injectionMode`、`priority`、`target`、`JSON` 放在主路径。
+- 不再把“模块类型选择器”作为管理员编辑模块的主入口。
+- 不再要求用户理解“角色模块 / Logo 模块 / 风格模块”这些底层分类，必要分类只由系统内部推断或作为高级筛选。
+- 不再把图片做成单独模块；图片跟随某张上下文卡片。
+
+### 目标版本对齐结论（2026-06-17）
+
+- [x] 当前目标版本以“上下文卡片系统”为准，不再以工程模块表单、模块类型选择器或 JSON 结构预览为主路径。
+- [x] 旧 `Module Builder / 新增模块 / 新增规则 / 模块库 / 素材规则库` 只作为历史实现、兼容旧数据或高级维护能力保留，不能继续抢占管理员主流程。
+- [x] 目标闭环统一为：模板工作台 -> 上下文卡片编排 -> 卡片编辑 / LLM 修改 -> 可选绑定图片 -> 最终提示词影响预览 -> 试生成 -> 发布检查 -> 普通用户使用 -> 质量复盘。
+- [x] 图片绑定必须是卡片能力，不是独立图片模块；图片来源复用参考图集和历史上传图。
+- [ ] 代码实现仍需按 Phase 2 到 Phase 8 落地，本节只对齐目标版本和执行优先级。
+
+### 2026-06-17 纠偏：当前模板编辑页为什么仍然难用
+
+结论：上一轮只是把旧抽屉“撑宽”，没有真正把模板编辑变成可用工作台。现在的问题不是某个按钮坏，而是页面任务层级错了。
+
+已确认问题：
+
+- [x] 独立浏览器访问 `https://sd2.youdoodesign.com/admin/templates` 会跳到登录页；当前缺少管理员登录态截图验收，后续必须补真实登录后的点击闭环。
+- [x] `/admin/templates/[id]` 不是真正的模板详情工作台，只是复用 `AdminTemplatesClient initialTemplateId`，所以列表页、详情页、新建模板、发布检查和编辑入口仍挤在同一个页面。
+- [x] 主编辑仍通过 `TemplateEditorDrawer` 弹层完成；这和“模板详情页主工作区就是上下文卡片编排器”的目标冲突。
+- [x] `TemplateContextCardsPanel` 同时承担卡片列表、编辑面板、提示词预览、图片选择入口、LLM 对话、拖拽和保存状态，组件职责过重，后续很难继续稳定扩展。
+- [x] 新增空卡片存在丢失风险：`createEmptyCard()` 默认 `content: ''`，但 `src/lib/templates/workbench.ts` 的 `normalizeContextCards()` 会过滤空内容卡片；保存链路走 `buildTemplateWritePayload()` 后，空草稿卡片刷新后可能消失。
+- [x] 图片绑定弹窗目前点击图片即选中并关闭，但 todo 里写的是“确认绑定”；实际交互和规划不一致，容易误点。
+- [x] 最终提示词正文藏在 `<details>` 里，不是工作台主信息；管理员无法一眼判断强制/参考到底如何影响最终提示词。
+- [x] 暗色全屏弹层叠在浅色后台页面上，视觉系统割裂；看起来像临时调试面板，不像稳定工作台。
+
+新的页面核心判断：
+
+```text
+模板编辑页不是弹窗。
+模板编辑页应该是一个独立工作台。
+
+进入 /admin/templates/[id]
+↓
+主工作区保持左右结构，不做上中下三段式表单
+左侧/中间：上下文卡片画布，可排序、启用、强制/参考、绑定图片
+右侧：当前选中卡片编辑栏
+底部：最终提示词影响预览，只作为试生成前的横向核对区，随页面自然滚动
+↓
+保存自动完成，发布前必须试生成并通过检查
+```
+
+#### P0：停止继续加宽旧抽屉，改成真正模板工作台
+
+- [x] 将 `/admin/templates` 收敛为模板列表页：只负责查看模板、搜索/筛选、进入详情、LLM 新建模板。
+- [ ] 将 `/admin/templates/[id]` 改为真正详情页：不再复用完整 `AdminTemplatesClient` 列表页壳子。
+- [x] 在 `/admin/templates/[id]` 直接渲染上下文卡片工作台，默认选中第一张卡片；不再要求用户点“编辑上下文卡片”才进入主编辑。
+- [x] `TemplateEditorDrawer` 降级为小屏或兼容旧入口的临时编辑层；桌面端主路径不再使用全屏弹层。
+- [x] 删除或隐藏当前详情页里重复的卡片预览区，避免“预览卡片”和“可编辑卡片”两套列表同时存在。
+
+#### P0：修复卡片数据闭环
+
+- [x] 服务端保存链路允许保存空内容草稿卡片，至少保留 `id / title / mode / enabled / sort_order / bound_image / llm_reference`，不要因为 `content` 为空就丢卡片。
+- [x] 新增卡片后立即进入选中编辑态，并显示“草稿未写内容”状态；刷新后卡片仍存在。
+- [ ] 自动保存状态拆成卡片级状态：`未保存`、`保存中`、`已保存`、`保存失败，可重试`。
+- [ ] LLM 改写前保存当前内容快照，LLM 回复后提供 `撤回本次修改`。
+- [ ] 添加真实回归脚本或浏览器验收：新增空卡片 -> 刷新 -> 卡片仍在 -> 写内容 -> 刷新 -> 内容仍在。
+
+#### P1：重做模板详情页页面结构
+
+- [ ] 页面顶部只保留模板名称、状态、版本、保存状态、一个主按钮 `试生成`，发布相关动作进入发布检查区。
+- [x] 详情页主体不要做成上中下三段式表单；桌面端保持左右工作结构。
+- [x] 左侧/中间主舞台显示上下文卡片画布：卡片可拖拽、可启用、可二选一 `强制插入 / 仅供参考`、可直接看到图片缩略图。
+- [x] 右侧保留当前选中卡片编辑栏：最终上下文内容、绑定图片、LLM 参考与设置、LLM 对话。
+- [x] 最底部只放最终提示词影响预览，横向全宽显示强制内容、参考内容、绑定图片、最终拼接顺序，不放侧边，不默认折叠，不做固定条。
+- [x] 中等屏幕下保持两栏优先：左侧卡片画布，右侧编辑栏；最终提示词影响仍在页面底部。
+- [x] 小屏幕下才允许自然纵向堆叠：卡片列表 -> 选中卡片编辑 -> 底部提示词影响预览；桌面端不做上中下三段。
+- [x] 桌面端编辑栏作为主要操作菜单保持 sticky；保存模板版本也放入右侧编辑栏，不再压在最终提示词影响区下面。
+- [x] 最终提示词影响区必须是模板工作台最后一块，随页面流动，不做固定条，不再被保存操作或其他常驻工具压在下面。
+- [x] 上下文卡片列表超高时只让卡片列表自身收缩滚动，单张卡片压缩成稳定摘要，不把整页撑爆。
+
+#### P1：重做卡片编辑器
+
+- [ ] 卡片编辑器不是普通表单，而是“当前卡片”的专属编辑面板；选中卡片变化时右侧内容同步变化。
+- [ ] 第一块固定为 `最终输入给 LLM 的上下文内容`，高度足够，支持长文本，不被其他控件挤压。
+- [ ] 第二块 `LLM 参考与设置` 默认折叠，但折叠态要显示摘要，例如 `已设置 3 行参考`；展开修改后自动保存。
+- [ ] 第三块 `让 LLM 帮你改这张卡片` 固定在编辑面板底部，Enter 发送，Shift+Enter 换行。
+- [ ] LLM 按钮必须先检查 Musk API 配置；未配置时显示 `去 API 设置`，不能让用户点了才报错。
+- [ ] `强制插入 / 仅供参考` 只保留在卡片本体上，不进入右侧编辑器。
+
+#### P1：重做图片绑定体验
+
+- [ ] 卡片上未绑定图片时显示明确入口 `添加图片`；已绑定时显示缩略图、来源、文件名。
+- [ ] 图片选择器改为“先选中，再确认绑定”，避免点击图片就误绑定。
+- [ ] 图片选择器支持搜索图片名称、图集名称和历史上传文件名。
+- [ ] 图片选择器保留两个来源：`参考图集`、`历史上传图`，并显示权限不可用、空图集、加载失败三种状态。
+- [ ] 绑定图片后右侧卡片编辑器和中间卡片画布同步更新，刷新后仍保留。
+
+#### P1：最终提示词影响预览必须变成主信息
+
+- [x] 最终提示词影响预览位于模板详情工作台底部横向区域，不进入右侧编辑器，不做侧边栏，也不做固定条。
+- [x] 强制插入区常显：列出会进入最终提示词的卡片标题和内容摘要。
+- [x] 仅供参考区常显：列出只影响 LLM 理解的卡片，不保证原文出现。
+- [x] 图片区常显：列出进入上下文的绑定图片、来源和所属卡片。
+- [x] 提供 `复制最终提示词`，但不暴露底层 JSON。
+- [ ] 试生成前必须显示“本次最终会带入哪些卡片和图片”。
+
+#### P2：拆组件，降低后续维护成本
+
+- [ ] 拆出 `AdminTemplateListPage`：只管 `/admin/templates` 列表和 LLM 新建入口。
+- [ ] 拆出 `AdminTemplateWorkspacePage`：只管 `/admin/templates/[id]` 的独立详情工作台。
+- [ ] 拆出 `TemplateCardCanvas`：卡片排序、启用、强制/参考、图片缩略图。
+- [ ] 拆出 `TemplateCardInspector`：右侧当前卡片编辑器、LLM 参考、LLM 对话。
+- [ ] 拆出 `TemplatePromptImpactPanel`：底部横向最终提示词影响预览。
+- [ ] 拆出 `TemplateImageBinder`：图片来源、搜索、选中、确认绑定。
+- [ ] 保留 `TemplateContextCardsPanel` 作为临时兼容层或删除，不能继续无限堆功能。
+
+#### 验收闭环
+
+- [ ] 管理员真实登录后验证：导航进入 `/admin/templates`，能看懂下一步是选择模板或新建模板。
+- [ ] 管理员真实登录后验证：进入 `/admin/templates/[id]` 后不用打开弹窗，第一屏就能编辑上下文卡片。
+- [ ] 管理员真实登录后验证：新增空卡片、刷新、卡片仍存在。
+- [ ] 管理员真实登录后验证：编辑卡片内容、切换强制/参考、停用/启用、拖拽排序、刷新后全部保留。
+- [ ] 管理员真实登录后验证：绑定参考图集图片、绑定历史上传图、刷新后图片仍保留。
+- [ ] 管理员真实登录后验证：LLM 对话能改写当前卡片内容，并能撤回本次修改。
+- [ ] 管理员真实登录后验证：最终提示词影响预览在页面最底部，不在右侧；试生成入口能清楚展示本次会带入的卡片与图片。
+- [ ] 响应式验收：1440、1280、1024、390 宽度下不横向溢出、不遮挡、不出现右侧编辑区被挤没。
+- [ ] 线上闭环：`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网加载新 BUILD_ID、登录态真实点击截图或录屏证据。
+
+### 总原则
+
+- [x] 普通用户主路径不得出现 `Module Builder`、`PromptBlock`、`AgentRun`、`Memory`、`injectionMode`、`priority`、原始 JSON。
+- [x] 模板管理员主路径不得要求手填 JSON、`reference_image_id`、`thumbnail_url`、`target`、`sort_order`。
+- [x] 模板管理员主路径必须以“上下文卡片”展示模板模块，不显示 `brand_logo` 这类代码 key。
+- [x] `强制插入 / 仅供参考` 必须在卡片上直接二选一，不放进编辑抽屉。
+- [x] 卡片允许绑定 0 或 1 张图片，图片来源必须复用参考图集和历史上传图。
+- [x] 编辑抽屉必须是三块：最终上下文内容、默认折叠的 LLM 参考与设置、底部 LLM 对话框。
+- [x] 卡片内容、LLM 参考设置、图片绑定、启用状态、强制/参考模式都要自动保存，并显示保存状态。
+- [ ] 所有 LLM 生成结果必须先是草稿，必须人工确认后才能保存。
+- [ ] 所有 LLM 入口必须先检查 Musk API 状态；未配置时禁用按钮并显示“去 API 设置”。
+- [x] 一页只保留一个主任务和一个最强主按钮；低频功能折叠或移到二级页面。
+- [ ] 发布模板前必须完成试生成和发布检查。
+- [ ] 复盘页面必须能回答“为什么这样生成、哪里跑偏、下一步改什么”，不能只展示日志 JSON。
+- [x] `TemplateEditorDrawer` 后续不能再作为管理员创建模板的主路径，只能作为上下文卡片快速编辑入口。
+
+### 新信息架构
+
+- [x] 普通用户入口收敛为：`/templates` 模板库 -> `/template-generate` 模板生成 -> `/tasks/[id]` 结果详情。
+- [x] 管理员入口新增：`/admin/templates` 模板工作台。
+- [ ] 管理员新增模板入口：`/admin/templates/new` LLM 新建模板向导。
+- [ ] 管理员模板详情入口：`/admin/templates/[id]` 必须重做为真正独立详情工作台；当前只是复用列表页组件加初始 ID，不能算完成。
+- [ ] 质量运营入口新增：`/admin/quality-runs`，从产出、任务详情、反馈、AgentRun 进入。
+- [x] 图片来源入口复用现有参考图集和历史上传图，不先新增一套独立图片模块后台。
+- [x] `/admin/modules` 旧模块库页面已删除，不再作为管理员新增模块或高级维护入口；兼容数据只保留在服务端 API / 设置层。
+- [ ] 素材规则入口后置为增强能力，不能抢在上下文卡片系统前面。
+- [ ] 系统诊断入口新增或整理为：`/admin/diagnostics`、`/admin/operation-logs`、`/admin/agent-runs`、`/admin/integrations`。
+- [ ] 导航分组改为“创作管理”和“系统诊断”，不要把模板、模块、API、AgentRun 平铺给所有管理员。
+
+### Phase 0：现状隔离与执行边界
+
+目标：先停止沿旧抽屉方向继续堆功能，明确哪些旧实现保留、迁移或降级为高级入口。
+
+- [x] 梳理当前模板相关页面和组件依赖：`/templates`、`/template-generate`、`TemplateGenerateClient`、`GenerationComposer`、`TemplateEditorDrawer`、`/admin/modules`、`/admin/agent-runs`、`/admin/integrations`。
+- [x] 标记旧路径职责：`TemplateEditorDrawer` 只作为高级编辑 / 快速编辑，不再作为创建模板主路径。
+- [x] 标记旧路径风险：`/template-generate` 内的 Module Builder 面板不再对普通用户显示，不再作为管理员新增模块主入口。
+- [x] 标记旧任务调整：现有“模板编辑抽屉继续补 LLM 配置”的任务全部迁移到“模板工作台 / 新建向导 / 上下文卡片编排器 / 卡片编辑抽屉”。
+- [x] 确认当前工作区脏改来源，本轮只触碰模板 UX 重设计、导航清理和任务/版本记录相关文件。
+
+涉及文件：
+
+- `tasks/template-ux-redesign-plan.md`
+- `tasks/template-full-function-chain.md`
+- `tasks/todo.md`
+- `src/lib/navigation.ts`
+- `src/components/SideNav.tsx`
+- `src/components/ComposerTopbar.tsx`
+- `src/components/templates/*`
+
+验收标准：
+
+- [ ] 后续任务能明确区分“用户生成主路径”“管理员模板工作台”“质量复盘”“系统诊断”。
+- [ ] 不再出现“把所有模板能力继续塞进一个抽屉”的执行计划。
+
+### Phase 1：普通用户模板生成三步流
+
+目标：普通用户从模板库进入后，3 步内能提交生成。
+
+主路径：
+
+```text
+模板摘要
+↓
+输入一句视频需求
+↓
+生成 A/B/C/D 方案
+↓
+选择方案
+↓
+提交生成
+```
+
+任务：
+
+- [x] `/template-generate` 首屏重排为“当前模板摘要 + 视频需求输入 + 生成 4 个方案”。
+- [x] 项目选择默认使用个人默认项目或最近项目，折叠为“保存位置”高级项。
+- [x] 视频卡默认自动创建或选择最近可生成视频卡，折叠为“视频卡归档”高级项。
+- [x] Prompt 编辑默认折叠，只显示“查看 / 编辑最终提示词”。
+- [x] 参考图、图集、参数栏、模板规则详情默认折叠，避免打断主路径。
+- [x] 普通用户不可见 Module Builder、LLM 生成规则设定、AgentRun 链接、JSON 预览。
+- [ ] A/B/C/D 方案卡必须显示：方案名称、核心思路、适合场景、简短分镜、预期效果。
+- [x] 方案按钮文案区分：`查看方案`、`使用此方案`，避免“查看 Prompt / 继续修改 / 生成此方案”三个按钮视觉同级。
+- [x] 提交后显示任务状态和结果入口，不把最近任务抢到主路径上方。
+
+涉及文件：
+
+- `src/app/template-generate/page.tsx`
+- `src/components/templates/TemplateGenerateClient.tsx`
+- `src/components/GenerationComposer.tsx`
+- `src/components/PromptEditor.tsx`
+- `src/components/ComposerActionBar.tsx`
+
+验收标准：
+
+- [x] 普通用户从 `/templates` 点击“使用模板”后，首屏只需要输入需求即可开始。
+- [x] 普通用户 3 步内可提交生成：输入需求、选择方案、提交。
+- [x] 普通用户全流程不需要理解模板模块、规则、AgentRun、Memory。
+- [x] 移动端主路径仍是单列：模板摘要 -> 需求 -> 方案 -> 提交。
+
+### Phase 2：模板工作台
+
+目标：管理员不再靠模板库抽屉维护模板，而是在独立模板工作台里创建、维护、试生成、发布。
+
+新增页面：
+
+- [x] `/admin/templates`：模板工作台首页。
+- [x] `/admin/templates/[id]`：模板详情与发布工作台。
+
+`/admin/templates` 任务：
+
+- [x] 左侧或主列表显示模板：名称、状态、上下文卡片完整度、绑定图片状态、最近试生成、最近质量问题。
+- [x] 顶部主按钮：`+ 用 LLM 新建模板`。
+- [x] 次级入口：复制模板、查看高级模块库（兼容旧数据）、查看质量复盘、查看执行链路。
+- [x] 模板状态使用人话：草稿、待补卡片、待绑图片、待试生成、可发布、已发布、已停用。
+- [x] 空状态引导管理员用 LLM 创建第一个模板。
+
+`/admin/templates/[id]` 任务：
+
+- [x] 主舞台显示模板用途、上下文卡片列表、绑定图片预览、最终提示词影响预览、试生成结果、A/B/C/D 方案预览。
+- [x] 右侧显示下一步建议和缺失项，不显示无关日志。
+- [x] 高级结构仅系统管理员或高级维护入口可见，默认不显示 `PromptBlock`、JSON、`injectionMode`、`priority`。
+- [x] 保留快速编辑入口，但不把所有字段直接堆成表单。
+- [ ] 增加模板质量历史：最近负向 Memory、常见跑偏类型、待处理优化。
+
+涉及文件：
+
+- `src/app/admin/templates/page.tsx`
+- `src/app/admin/templates/[id]/page.tsx`
+- `src/components/templates/*`
+- `src/app/api/templates/*`
+- `src/lib/templates/workbench.ts`
+- `src/lib/navigation.ts`
+
+验收标准：
+
+- [x] 管理员进入 `/admin/templates` 后 3 秒内知道下一步该点什么。
+- [x] 管理员能从模板详情看出该模板是否能发布、缺什么、最近效果如何。
+- [x] 原始 JSON 不在主视图默认展示。
+
+### Phase 3：LLM 新建模板向导
+
+目标：管理员用自然语言从 0 创建模板，不要求先选一个已有模板。
+
+页面：`/admin/templates/new`
+
+步骤：
+
+- [x] Step 1：描述模板目标，显示大输入框和少量业务辅助选项。
+- [x] Step 2：LLM 追问缺失信息，缺素材、缺用途、缺时长时不硬生成。
+- [x] Step 3：生成模板草稿，展示人话预览，不默认展示 JSON。
+- [ ] Step 4：生成初始上下文卡片，管理员可调整卡片内容、启用状态和强制 / 参考模式。
+- [ ] Step 5：为需要图片的卡片绑定图片，图片来源复用参考图集和历史上传图。
+- [ ] Step 6：试生成，使用当前草稿生成 A/B/C/D 方案。
+- [ ] Step 7：发布检查，通过后发布。
+
+草稿预览必须显示：
+
+- [ ] 模板名称。
+- [ ] 一句话用途。
+- [ ] 适用场景。
+- [ ] 默认比例 / 时长。
+- [ ] 初始上下文卡片列表。
+- [ ] 每张卡片的最终上下文内容。
+- [ ] 每张卡片的启用状态。
+- [ ] 每张卡片的 `强制插入 / 仅供参考` 模式。
+- [ ] 每张卡片是否建议绑定图片。
+- [ ] 最终提示词影响摘要。
+- [ ] 缺失信息。
+
+涉及文件：
+
+- `src/app/admin/templates/new/page.tsx`
+- `src/components/templates/TemplateCreateWizard.tsx`
+- `src/lib/templates/template-config-builder.ts`
+- `src/app/api/templates/config-builder/generate/route.ts`
+- `src/app/api/templates/config-builder/save/route.ts`
+
+验收标准：
+
+- [x] 管理员可以不选择旧模板，直接通过自然语言创建模板草稿。
+- [x] happy path 不出现 JSON。
+- [x] LLM 追问和草稿生成均有明确状态。
+- [x] 保存后进入模板详情页继续试生成和发布。
+
+### Phase 4：模板上下文卡片编排器
+
+目标：把旧的模块表单、Module Builder 面板和代码 key，重做成管理员能直接理解的“上下文卡片编排器”。
+
+页面位置：
+
+- [x] 首选落点：`/admin/templates/[id]` 的主工作区；详情页已直接显示上下文卡片工作台。
+- [x] 过渡落点：`TemplateEditorDrawer` 已增加 `inline` 工作台模式，同时保留旧抽屉兼容入口。
+- [ ] `/template-generate` 只保留普通用户生成主路径，不再承载管理员卡片编辑主任务。
+
+数据模型任务：
+
+- [x] 在模板序列化结构中新增 `context_cards` 数组，旧 `module_bindings / rules / assets` 先兼容读取，不作为新 UI 的主模型。
+- [x] 单张卡片字段使用人话概念：
+  - `id`
+  - `title`
+  - `content`：最终输入给 LLM 的上下文内容。
+  - `mode`：`force` 或 `reference`，UI 显示为 `强制插入` / `仅供参考`。
+  - `enabled`
+  - `sort_order`
+  - `bound_image`：可为空，最多 1 张。
+  - `llm_reference`：LLM 参考与设置，默认折叠。
+  - `auto_save_status`
+- [x] 底层如果仍需映射到 `prompt_required / context_only`，只在保存或渲染层映射，不暴露给 UI。
+- [x] 为旧模板生成默认上下文卡片：角色、Logo、风格、镜头等旧模块文本转成卡片标题和内容，不在卡片标题里显示 `brand_logo` 等 key。
+
+卡片编排页任务：
+
+- [x] 将 `TemplateContextCardsPanel` 的最终提示词影响预览从右侧迁移到页面底部；右侧只保留当前卡片编辑栏，桌面端编辑栏保持 sticky。
+- [x] 每张卡片显示拖拽手柄、可选图片缩略图、标题、内容摘要、`强制插入 / 仅供参考` 二选一按钮、启用开关、编辑按钮。
+- [x] 支持拖拽排序，排序后自动保存，并立即更新最终提示词影响预览。
+- [x] 支持启用 / 停用，切换后自动保存；停用卡片不进入最终提示词，也不带入绑定图片。
+- [x] 支持在卡片上直接切换 `强制插入 / 仅供参考`，切换后自动保存。
+- [x] 没绑定图片的卡片显示 `添加图片` 占位；已绑定图片显示缩略图和 `已绑定图片` 角标。
+- [x] 卡片列表底部提供 `新增上下文卡片` 按钮，新卡片默认 `仅供参考`、启用、无图片。
+- [x] 空状态文案：`还没有上下文卡片，先添加一张卡片告诉 LLM 什么必须保持。`
+
+编辑抽屉任务：
+
+- [ ] 拆出真正的 `TemplateContextCardDrawer` 或 `TemplateCardInspector`；当前编辑器内嵌在 `TemplateContextCardsPanel`，组件职责过重，不能算完成。
+- [x] 顶部第一个框：`最终输入给 LLM 的上下文内容`，大文本框，编辑后自动保存。
+- [x] 顶部内容框旁显示保存状态：`正在保存`、`已自动保存`、`保存失败，点击重试`。
+- [x] 图片绑定区域显示当前图片缩略图、图片来源、`更换图片`、`移除图片`。
+- [x] 中间第二块：`LLM 参考与设置`，默认折叠。
+- [x] `LLM 参考与设置` 展开后包含：
+  - `给 LLM 的参考背景` 文本框。
+  - `修改偏好` 输入框。
+  - `自动保存` 状态。
+- [x] 底部第三个框：`让 LLM 帮你改这张卡片`。
+- [x] LLM 对话框 Enter 发送，调用 Musk API，用对话要求更新顶部 `content`，不直接改变 `mode` 和图片绑定。
+- [ ] LLM 回复后显示“已更新上方内容”，并提供 `撤回本次修改`。
+- [x] 编辑抽屉里不得出现 `强制插入 / 仅供参考`，该二选一只在卡片上。
+
+最终提示词影响预览任务：
+
+- [ ] 底部横向预览显示统计：强制插入数量、仅供参考数量、绑定图片数量、停用数量。（已完成前三项，停用数量仍待补）
+- [x] 预览按拖拽顺序列出启用卡片。
+- [x] 强制插入卡片用明确标识：`会写进最终提示词`。
+- [x] 仅供参考卡片用明确标识：`只给 LLM 参考，不保证原文出现`。
+- [x] 绑定图片在预览里显示缩略图和来源。
+- [x] 增加 `查看最终提示词` 按钮，打开最终提示词预览，不显示底层 JSON。
+- [x] 最终提示词影响区内容完整换行展示，不再被固定高度或省略号截断。
+
+涉及文件：
+
+- `src/lib/templates/workbench.ts`
+- `src/components/templates/TemplateContextCardsPanel.tsx`
+- `src/components/templates/TemplateContextCard.tsx`
+- `src/components/templates/TemplateContextCardDrawer.tsx`
+- `src/components/templates/TemplatePromptImpactPreview.tsx`
+- `src/components/templates/TemplateEditorDrawer.tsx`
+- `src/app/admin/templates/[id]/page.tsx`
+- `src/app/api/templates/[id]/context-cards/route.ts`
+- `src/app/api/templates/[id]/context-cards/[cardId]/route.ts`
+- `src/app/api/templates/[id]/context-cards/reorder/route.ts`
+- `src/app/api/templates/[id]/context-cards/[cardId]/revise/route.ts`
+
+验收标准：
+
+- [x] 管理员全流程只看到上下文卡片，不看到 `brand_logo`、`moduleType`、`injectionMode`、`priority`、JSON。
+- [x] 卡片能新增、编辑、拖拽排序、启用/停用、切换强制/参考，并自动保存。
+- [x] 编辑抽屉的 LLM 对话能更新顶部最终上下文内容。
+- [x] 最终提示词影响预览能实时反映卡片顺序、强制/参考状态和图片绑定。
+- [x] 旧模板仍能被兼容打开，并能显示为上下文卡片。
+
+### Phase 5：卡片绑定图片与图片选择器复用
+
+目标：在上下文卡片上增加“绑定 1 张图片”的能力，图片来源复用生成页已有 `参考图集` 和 `历史上传图`，不要另做图片模块。
+
+图片绑定规则：
+
+- [x] 每张上下文卡片最多绑定 1 张图片。
+- [x] 图片跟随卡片启用状态：卡片停用时，图片也不进入本次模板上下文。
+- [x] 图片跟随卡片模式：强制插入卡片的图片作为强参考；仅供参考卡片的图片只给 LLM 做上下文。
+- [x] 图片可更换、移除，动作都自动保存。
+- [x] 图片必须显示来源：参考图集名称 / 历史上传图 / 手动上传。
+- [x] 手填图片 URL 不进入主路径，只作为高级入口或暂不做。
+
+选择图片弹窗任务：
+
+- [x] 新增 `TemplateBoundImagePicker`，复用生成页参考图集和历史上传图能力。
+- [x] 弹窗标题：`选择绑定图片`。
+- [x] 顶部 Tab：`参考图集` / `历史上传图`。
+- [x] 参考图集 Tab 左侧显示图集列表：品牌素材、角色 IP、产品图、公共参考图等。
+- [ ] 右侧显示图片网格，支持搜索图片名称。
+- [x] 历史上传图 Tab 复用 `UploadedImagePicker` 的数据源和网格交互。
+- [x] 图片选中后显示蓝色边框和勾选标记。
+- [x] 底部按钮：`取消` / `确认绑定`。
+- [x] 底部提示：`一次只绑定 1 张图片，可随时更换。`
+
+组件复用任务：
+
+- [ ] 抽取生成页现有图片选择公共能力，避免复制两套列表和搜索逻辑。
+- [ ] 复用或拆分 `ReferenceAlbumPicker`：保留原生成页多选能力，同时支持“单选绑定模式”。
+- [ ] 复用或拆分 `UploadedImagePicker`：保留原生成页多选能力，同时支持“单选绑定模式”。
+- [ ] 统一图片缩略图组件，支持加载失败占位、图片名称、来源、选中态。
+- [x] 绑定图片弹窗不触发生成页素材列表变更；它只把图片绑定到当前卡片。
+
+后端 / 数据任务：
+
+- [x] 新增或复用接口读取参考图集图片，返回图片 ID、名称、缩略图、原图、来源图集。
+- [x] 新增或复用接口读取历史上传图，返回图片 ID、名称、缩略图、原图、上传时间。
+- [x] `PATCH context-card` 支持写入 / 清空 `bound_image`。
+- [x] 保存时只存图片引用 ID 和来源信息，不把图片 base64 写进模板 JSON。
+- [ ] 删除或归档图片后，卡片显示“图片不可用”，并提示重新绑定。
+
+最终提示词和生成链路任务：
+
+- [x] 渲染最终 Prompt 时，把启用卡片按拖拽顺序传给 LLM。
+- [x] 强制插入卡片的 `content` 必须进入最终提示词。
+- [x] 仅供参考卡片的 `content` 进入 LLM 上下文，但不强制原文进入最终提示词。
+- [x] 绑定图片进入本次生成的参考图列表，并和卡片保持关联。
+- [ ] 如果绑定图片超过生成接口参考图数量限制，按卡片顺序和强制优先级选择，并给管理员显示提示。
+- [x] 最终提示词预览显示“文字卡片”和“绑定图片”如何被使用。
+
+涉及文件：
+
+- `src/components/templates/TemplateBoundImagePicker.tsx`
+- `src/components/templates/TemplateContextCardDrawer.tsx`
+- `src/components/ReferenceAlbumPicker.tsx`
+- `src/components/UploadedImagePicker.tsx`
+- `src/components/ReferenceThumb.tsx`
+- `src/lib/hooks/useWorkspace.ts`
+- `src/app/api/reference-albums/*`
+- `src/app/api/assets/history/route.ts`
+- `src/app/api/templates/[id]/context-cards/[cardId]/route.ts`
+- `src/lib/templates/workbench.ts`
+- `src/app/api/agent/template-plans/route.ts`
+- `src/app/api/tasks/create/route.ts`
+
+验收标准：
+
+- [x] 管理员能从参考图集选 1 张图绑定到卡片。
+- [x] 管理员能从历史上传图选 1 张图绑定到卡片。
+- [x] 更换 / 移除图片后自动保存，刷新页面仍能看到正确状态。
+- [x] 绑定图片不会污染生成页当前参考图列表。
+- [x] 生成方案和最终提示词预览能识别卡片绑定图片。
+- [x] 普通用户不需要知道图片绑定配置，只在模板生成时自然生效。
+
+### Phase 6：试生成与发布检查
+
+目标：发布不是状态下拉，而是带门禁的发布流程。
+
+任务：
+
+- [x] 模板详情增加 `试生成` 主入口，使用当前模板草稿生成 A/B/C/D 方案。
+- [ ] 试生成结果记录到模板版本和 AgentRun。
+- [ ] 发布前检查 LLM API 状态、模板基本信息、启用上下文卡片、强制插入卡片、绑定图片可用性、最终提示词预览、试生成结果、敏感信息。
+- [ ] 未通过检查时禁用“发布模板”，并列出缺失项。
+- [ ] 通过检查后允许发布，并提示“模板已发布，普通用户现在可以使用”。
+- [ ] 支持停用模板、复制模板、发布新版本、查看发布历史。
+- [ ] 版本回滚可先进入 P3，但发布历史必须先可见。
+
+涉及文件：
+
+- `src/app/admin/templates/[id]/page.tsx`
+- `src/components/templates/TemplatePublishChecklist.tsx`
+- `src/app/api/templates/[id]/route.ts`
+- `src/app/api/agent/template-plans/route.ts`
+- `src/lib/templates/workbench.ts`
+
+验收标准：
+
+- [ ] 没有试生成结果的模板不能发布。
+- [ ] 缺少启用卡片、强制插入卡片、必要绑定图片或试生成结果时不能发布。
+- [ ] 发布后普通用户在 `/templates` 可见。
+- [ ] 停用后普通用户不可见，但管理员仍可查看和复用。
+
+### Phase 7：质量复盘工作台
+
+目标：从结果出发，快速判断跑偏原因，并推动模板优化。
+
+新增页面：
+
+- [ ] `/admin/quality-runs`
+- [ ] `/admin/quality-runs/[id]`
+
+入口：
+
+- [ ] `/admin/outputs` 增加模板、方案、是否用户改 Prompt、AgentRun 链接、质量标注按钮。
+- [ ] 任务详情顶部增加“质量复盘”按钮，不藏在账务或排障区域。
+- [ ] 用户反馈可一键转质量复盘，带入反馈图片、任务 ID、用户说明。
+- [ ] AgentRun 详情可以进入质量复盘模式。
+
+页面布局：
+
+- [ ] 左侧显示视频结果 / 首帧 / 参考素材对比。
+- [ ] 中间显示用户需求、Agent Prompt、最终 Prompt、Prompt 差异、命中规则、素材来源。
+- [ ] 右侧显示归因面板：问题类型、归因对象、证据、建议动作、处理状态。
+
+结构化字段：
+
+- [ ] 问题类型：角色变形、标志丢失、风格跑偏、镜头不对、分段断裂、Prompt 格式错误、Provider 随机失败。
+- [ ] 归因对象：模板、上下文卡片、绑定图片、最终 Prompt、Provider、用户输入。
+- [ ] 处理状态：待处理、已转优化、已修复、已回归验证。
+- [ ] 复盘可写入 `TemplateMemory`，并能生成模板管理员优化待办。
+
+涉及文件：
+
+- `src/app/admin/quality-runs/page.tsx`
+- `src/app/admin/quality-runs/[id]/page.tsx`
+- `src/app/admin/outputs/AdminOutputsClient.tsx`
+- `src/app/tasks/[id]/page.tsx`
+- `src/app/admin/feedback/AdminFeedbackClient.tsx`
+- `src/app/admin/agent-runs/[id]/page.tsx`
+- `src/lib/templates/workbench.ts`
+- `prisma/schema.prisma`，如需新增结构化复盘表需单独迁移规划
+
+验收标准：
+
+- [ ] 运营 30 秒内找到任务模板、方案和 AgentRun。
+- [ ] 2 分钟内看清用户需求、最终 Prompt、素材、规则和模板版本。
+- [ ] 5 分钟内完成结构化归因。
+- [ ] 归因能写入 Memory。
+- [ ] 模板管理员能看到待优化项。
+- [ ] 改完模板后能用同类需求回归验证。
+
+### Phase 8：系统管理员 API 状态与诊断
+
+目标：API 设置不是“保存配置”，而是“确认 LLM 可用并能诊断失败”。
+
+任务：
+
+- [x] `/admin/integrations` Musk API 区增加“测试连接”按钮。
+- [x] 测试连接验证 HTTP 成功、模型可用、JSON 返回、耗时、错误码。
+- [ ] 保存后显示：已保存但未测试 / 已测试通过 / 测试失败。
+- [ ] 显示最后测试时间、测试模型、测试耗时、最近错误。
+- [ ] LLM 未配置时，模板工作台、模板创建向导、上下文卡片 LLM 对话全部禁用生成按钮并显示“去 API 设置”。
+- [ ] 新增 `/admin/diagnostics`：显示 LLM API 状态、最近 LLM 失败、最近权限拒绝、最近 OperationLog、最近 AgentRun failed。
+- [ ] 新增或补齐 `/admin/operation-logs`，系统管理员可查看谁改了 API、谁清除了 Key、谁改了用户角色。
+- [ ] 失败的 LLM 调用也要形成可追踪诊断记录，不能只在前端 toast 失败。
+
+涉及文件：
+
+- `src/app/admin/integrations/AdminIntegrationsClient.tsx`
+- `src/app/api/admin/integrations/musk/route.ts`
+- `src/lib/integrations/musk.ts`
+- `src/app/admin/diagnostics/page.tsx`
+- `src/app/admin/operation-logs/page.tsx`
+- `src/app/api/templates/module-builder/generate/route.ts`
+- `src/app/api/templates/config-builder/generate/route.ts`
+
+验收标准：
+
+- [x] 系统管理员能在 API 设置页确认 Musk API 真实可用。
+- [ ] LLM 未配置时用户不会点击后才失败。
+- [ ] 失败原因能被后台追踪。
+- [x] API Key、token、cookie 不出现在页面、日志、导出报告中。
+
+### Phase 9：权限与角色拆分
+
+目标：不要继续只有 `admin/user` 两档权限。
+
+任务：
+
+- [ ] 明确角色：普通用户、模板管理员、系统管理员、质量运营。
+- [ ] 普通用户只能看已发布模板和自己的生成任务。
+- [ ] 模板管理员只能维护自己负责的模板和模板级模块。
+- [ ] 系统管理员可以配置 API、全局模块、全局规则、用户权限、所有诊断。
+- [ ] 质量运营可查看产出、反馈、质量复盘和相关 AgentRun，但不一定能配置 API。
+- [ ] 后台导航按角色显示，不把系统设置暴露给模板管理员。
+- [ ] 后台 API 统一补权限 helper，避免新增页面漏写角色判断。
+
+涉及文件：
+
+- `src/lib/auth/*`
+- `src/middleware.ts`
+- `src/lib/navigation.ts`
+- `src/components/SideNav.tsx`
+- `src/app/api/templates/*`
+- `src/app/api/admin/*`
+- `prisma/schema.prisma`，如需角色扩展需单独迁移规划
+
+验收标准：
+
+- [ ] 普通用户访问后台 API 返回 403，未登录返回 401。
+- [ ] 模板管理员不能编辑不属于自己的模板。
+- [ ] 系统管理员能查看所有诊断和配置。
+- [ ] 权限失败有明确提示，不泄露资源是否存在。
+
+### Phase 10：验证、上线与回归
+
+本轮是中大型 UI / API / 权限重构，不能只靠构建通过。
+
+验证任务：
+
+- [ ] `git diff --check`
+- [ ] `npx tsc --noEmit --pretty false`
+- [ ] `npm run lint`
+- [ ] `npm run build`
+- [ ] `npx impeccable detect` 覆盖模板库、模板生成、模板工作台、新建向导、质量复盘。
+- [ ] 普通用户浏览器验收：`/templates` -> `/template-generate` -> 输入需求 -> 方案 -> 提交前检查。
+- [ ] 管理员浏览器验收：`/admin/templates` -> 新建模板 -> 草稿 -> 素材 -> 规则 -> 试生成 -> 发布。
+- [ ] 系统管理员验收：`/admin/integrations` 保存 Musk API -> 测试连接 -> LLM 入口状态同步。
+- [ ] 质量运营验收：从跑偏任务进入质量复盘 -> 归因 -> 写入 Memory -> 生成优化待办。
+- [ ] 权限验收：普通用户看不到模块库、AgentRun、Memory、API 设置。
+- [ ] 线上闭环：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`、公网验证 `/templates`、`/template-generate`、`/admin/templates`、`/admin/integrations`。
+- [ ] 跨健康守护周期复查 `sd2` 服务稳定。
+
+Git / 发布规划：
+
+- 当前生产目录：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 当前分支：`codex/v12-full-todo`。
+- 当前工作区已有大量跨任务未提交改动；正式编码前必须先确认目标文件 diff，避免混入无线画布、通知中心、资产接口等无关改动。
+- 建议按 Phase 分批提交：普通用户三步流、模板工作台、新建向导、上下文卡片编排器、卡片绑定图片、质量复盘、API 诊断、权限拆分。
+- 每个 Phase 验证通过后单独登记 `/Volumes/Data/Projects/project-version-registry.md`。
+- 稳定回退点建议：`rollback/2026-06-17-template-ux-redesign`。
+
+停止条件：
+
+- [ ] 如果需要数据库迁移，先停止编码，单独写 schema、迁移、回滚和数据兼容方案。
+- [ ] 如果 LLM 测试会消耗付费额度，先做 dry-run 或最小请求，并明确授权边界。
+- [ ] 如果真实生成会消耗费用，未获明确授权不得发起付费生成。
+- [ ] 如果权限模型无法兼容现有用户，先做角色映射方案，不直接改生产权限。
+- [ ] 如果线上部署会覆盖无关脏改，先做分支 / worktree / 聚焦提交隔离。
+
+HARD-GATE：
+
+- [x] 这是跨页面、权限、API、模板数据、LLM 状态和线上部署的中大型重设计。开始编码前，需要用户确认首个执行范围。建议先执行 Phase 1 + Phase 8 的 P0：普通用户三步流 + LLM 未配置前置提示。
+
+## 历史记录：模板模块 LLM 生成器与 API 设置 Todo（已被上下文卡片版替代）
+
+更新时间：2026-06-15
+
+状态说明：
+
+- 本节保留 2026-06-15 的历史实现与验收记录，用于回溯已做过的 Musk API、旧 Module Builder 和审计能力。
+- 从 2026-06-17 起，新目标以“上下文卡片系统”为准；本节未完成项不得原样继续执行，必须迁移为上下文卡片、卡片 LLM 对话、卡片绑定图片、最终提示词影响预览等能力。
+- 旧 `Module Builder / moduleType / promptBlock / rules / injectionMode / priority` 可以作为服务端兼容层或高级诊断信息，但不能回到管理员主界面。
+
+问题定义：
+
+- 模板生成能力不能藏在无导航入口的页面里；用户必须能从左侧导航直接进入模板生成工作台。
+- 模板配置不应继续依赖纯手填字段，而要先落地“LLM 对话 + 结构化预览 + 人工确认”的 Module Builder 交互骨架。
+- API 设置页必须有可见入口，并为 Musk API 预置 `https://api.muskapis.com/` 和默认模型 `gpt-5.4`。
+
+已落地：
+
+- [x] 左侧导航新增“模板生成”，直接进入 `/template-generate`。
+- [x] 保留“动画模板”入口，用于模板库选择页 `/templates`，避免和模板生成工作台混淆。
+- [x] 后台导航和总览快捷入口新增“API 设置”，`/admin/settings` 兼容跳转到 `/admin/integrations`。
+- [x] API 设置页新增 Musk API 配置区，默认 Base URL 为 `https://api.muskapis.com/`，默认模型为 `gpt-5.4`。
+- [x] 模板编辑抽屉的模块页签新增“LLM 配置模板”区域，可根据管理员描述生成模板配置结构化草稿，并一键应用到模板描述、模块和规则。
+- [x] 模板编辑抽屉的模块页签新增“新增模块 / Module Builder”区域，包含模块类型选择、LLM 对话输入、默认折叠的“LLM生成规则设定”、结构化预览、重新生成和应用草稿。
+- [x] `/template-generate` 主工作台新增显性“LLM 模板配置 / 新增模块”面板，不再只藏在模板编辑抽屉里。
+- [x] 主工作台 Module Builder 面板包含模块类型、管理员和 LLM 对话、LLM生成规则设定、生成结果预览、生成/重新生成、复制 JSON、API 设置和打开模板编辑入口。
+- [x] Module Builder 支持角色、Logo、风格、镜头、规则、素材带规则、Temporal 分段和提示词格式模块。
+- [x] “提示词格式模块”复用现有视频生成 skills 的分镜提示词结构：总体要求、具体分镜、景别、动作、镜头运动、画面约束和输出格式。
+- [x] 生成草稿不会直接入库，必须由管理员点击应用后进入待保存的模板编辑状态。
+
+待继续：
+
+- [x] 真实 LLM 草稿生成 P0 已完成：主工作台 Module Builder 已调用服务端 API，不再只是前端结构化草稿 UI。
+- [ ] 正式模块保存、模块库版本化、管理员修改 diff、模板级 LLM Config Agent 仍未完成。
+
+### 待落地：真实 Module Builder Agent
+
+- [x] 新增服务端 LLM 配置读取层：从 `PlatformSetting` 读取 Musk API Base URL、API Key、默认模型 `gpt-5.4`、启用状态和调用超时。
+- [x] 新增 Musk/OpenAI 兼容调用客户端：统一处理 `base_url`、`model`、`messages`、JSON schema 输出、超时、错误脱敏和重试边界。
+- [x] 新增 Module Builder Agent 服务：输入管理员对话、模块类型、当前模板上下文、当前素材上下文、默认生成规则和本次生成规则。
+- [x] Agent 必须强制输出结构化 JSON，至少包含 `moduleType`、`moduleName`、`promptBlock`、`rules`、`injectionMode`、`priority`、`target`、`assetBinding`。
+- [x] Agent 必须支持模块类型：角色、Logo、风格、镜头、规则、素材带规则、Temporal 分段、提示词格式模块。
+- [x] 提示词格式模块必须复用 sd2 视频生成 skill / 通用视频提示词格式：创意名编号、总述、连续分镜、景别、运镜、内容、`(end)`。
+- [x] 缺少关键信息时，Agent 返回 `needsClarification=true` 和追问问题，不允许硬生成不可保存草稿。
+
+### 待落地：API 与权限
+
+- [x] 新增 `POST /api/templates/module-builder/generate`，只允许模板管理员和系统管理员调用。
+- [ ] API 入参包含：`template_id`、`module_type`、`intent`、`session_rules`、`context_asset_ids`、`conversation_id`。
+- [x] API 出参包含：结构化模块草稿、追问状态、模型调用摘要、脱敏错误、可保存性校验结果。
+- [x] 普通用户不能调用生成模块 API，也不能编辑 LLM 生成规则设定。
+- [ ] 模板管理员只能为自己负责的模板生成 / 编辑模块；系统管理员可以生成全局模块和编辑默认生成规则。
+- [x] Musk API 未配置、未启用、缺少 API Key、模型为空或返回非 JSON 时，必须给出明确错误，不写入模块库。
+
+### 待落地：前端接入真实调用
+
+- [x] `/template-generate` 主工作台的 LLM Builder 面板从本地 mock 生成改为调用真实 `POST /api/templates/module-builder/generate`。
+- [ ] 模板编辑抽屉里的 LLM 配置模板 / 新增模块也改为调用同一个服务端 API，不保留两套生成逻辑。
+- [x] UI 增加真实状态：等待 LLM、追问信息、生成失败、JSON 校验失败、可保存、管理员已修改。
+- [ ] 生成结果预览支持结构化编辑，而不是只展示纯 JSON 文本。
+- [ ] “保存模块”必须保存的是管理员确认后的结构，不允许 LLM 结果直接入库。
+- [ ] 保存前必须展示差异：LLM 原始草稿 vs 管理员修改后草稿。
+
+### 待落地：模块库 / 素材规则库 / 版本化
+
+- [ ] 设计并落地正式模块保存接口：保存角色模块、Logo 模块、风格模块、镜头模块、规则模块、素材带规则模块、Temporal 模块、提示词格式模块。
+- [ ] 模块保存后可被模板引用，模板模块绑定使用正式模块 ID，而不是只写文本字段。
+- [ ] 素材带规则模块保存到素材规则库，能绑定素材 ID、用途、规则、注入方式和优先级。
+- [ ] 模块版本化：每次保存生成新版本，保留 `draft`、`active`、`archived` 状态。
+- [ ] 支持从模板详情查看模块版本记录、回滚和对比。
+
+### 待落地：Memory / 审计 / 复盘
+
+- [ ] 保存模块时写入 Memory / 审计记录：创建人、创建时间、模板 ID、模块类型、生成规则、管理员输入、LLM 原始输出、管理员最终保存结构。
+- [ ] 审计记录必须标记是否被管理员修改过，并保存修改 diff 或等价结构化对比。
+- [ ] OperationLog 记录 `module_builder_generate`、`module_builder_save`、`module_builder_update_rules`、`module_builder_reject`。
+- [x] Agent Run / Trace 页面能查看 Module Builder 的输入、输出、规则命中、错误和保存结果。
+- [ ] 审计内容必须脱敏，不记录 API key、token、cookie 或敏感凭据。
+
+### 待落地：验证与上线验收
+
+- [ ] 单元 / 集成测试覆盖：Musk 配置读取、LLM JSON 解析、非 JSON 错误、权限拒绝、追问分支、保存前人工确认。
+- [ ] API smoke：未登录 401、普通用户 403、模板管理员 200、Musk 未配置明确失败、模拟 LLM 返回结构化草稿。
+- [ ] 前端 smoke：管理员在 `/template-generate` 输入兔子 IP 需求，能看到真实 API 返回的结构化草稿。
+- [ ] 保存 smoke：管理员确认后保存模块，模板能引用该模块，重新进入页面仍能看到模块。
+- [ ] 审计 smoke：保存后能查到创建人、输入、规则、LLM 输出、最终结构和修改标记。
+- [x] 部署验收：`tsc`、`lint`、`build`、`youdoo-sites build/restart/status sd2` 通过，公网验证 `/template-generate` 主工作台真实调用接口。
+
+验收记录：
+
+- [x] `./node_modules/.bin/tsc --noEmit --pretty false` 通过。
+- [x] `git diff --check` 通过。
+- [x] `youdoo-sites build sd2` 通过，生产构建 `BUILD_ID=7XsQ7H1f8gvdA3ApNPsWo`。
+- [x] `youdoo-sites restart sd2` 后公网 `/template-generate` 返回 200。
+- [x] 公网 layout chunk 命中 `模板生成`、`/template-generate`、`API 设置`、`/admin/settings`。
+- [x] 生产 server bundle 命中 `LLM 配置模板`、`Module Builder`、`LLM生成规则设定`。
+- [x] 公网 `/api/admin/integrations/musk` 未登录返回 401，公网 `/admin/settings` 未登录 307 跳转登录。
+- [x] 跨健康守护周期后 `status sd2` 仍 OK，LaunchAgent `runs=58` 未增长。
+- [x] 2026-06-15 追加验证：公网 `/template-generate` 加载 `page-4516379bf9413f43.js`；公网 JS/CSS 命中 `template-llm-builder`、`Module Builder`、`draft_requires_admin_review`、`prompt_format`。
+- [x] 2026-06-15 真实 LLM P0 验证：当前开发目录 `npx tsx scripts/module-builder-agent-smoke.ts`、`./node_modules/.bin/tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npx impeccable detect ...`、`npm run build` 通过；线上运行目录 `youdoo-sites build sd2` 通过，`.next-prod/BUILD_ID=BIS0m47He12PEqUzMiqLZ`，`youdoo-sites restart/status sd2` OK；公网 `POST /api/templates/module-builder/generate` 未登录 401，公网 `/api/admin/integrations/musk` 未登录 401，公网静态 chunk 命中 `/api/templates/module-builder/generate`、`LLM 生成中`、`查看生成链路`、`Module Builder Agent`、`api_key_configured`、`clear_api_key`、`缺少 API Key`、`gpt-5.4`。
 
 ## 动画模板选择页 Todo
 
@@ -4658,3 +5515,730 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 批量目标模式和最后选择的目标图集会写入本地 `localStorage`，下次进入资产页自动恢复。
 - [x] 本地验证通过：`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npm run build`。
 - [x] 线上部署与公网验证通过：已临时隔离非本轮源码改动后执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`；公网 `/assets` 加载最终 chunk `page-b7626efc122ca236.js`，命中“加入工作区 / 加入图集 / 移动视频”，最终 BUILD_ID 为 `OV3wqHcgmo8pbghL_T-LB`，健康守护周期后 `runs` 保持 54。
+
+## 2026-06-15 纠偏：LLM 入口归位到“新增模块 / 新增规则”
+
+背景：已有 Module Builder / Template Config Agent 能力，但管理员自然操作点里找不到 LLM 生成入口。入口必须放回“新增模块”和“新增规则”，并且生成、预览、应用、保存、追溯都要闭环。
+
+- [x] 模块页“模块绑定”区新增 `+ 新增模块（LLM）`，位置靠近 Character / Logo / Style / Camera / Rules / Asset Rule / Temporal / Prompt Format。
+- [x] 每个模块行新增 `LLM 生成`，点击后自动带入对应模块类型。
+- [x] `+ 新增模块（LLM）` 在当前区块展开 Module Builder 内联面板，不再依赖抽屉顶部入口。
+- [x] 模块生成面板保留模块类型、模块用途输入、LLM生成规则设定、结构化预览、重新生成、应用到模板、保存模块、拒绝草稿、API 设置和生成链路。
+- [x] 规则页顶部新增 `+ 新增规则（LLM）`。
+- [x] 每个规则分组头部新增 `LLM 生成本类规则`，点击后自动带入对应规则类型。
+- [x] 规则生成复用 Module Builder API 的 `module_type=rule`，UI 展示为 Rule Builder。
+- [x] 应用规则草稿时只追加到当前规则列表，不自动保存模板。
+- [x] 规则草稿保存为正式规则模块时，写入模块库、Memory 和 AgentRun。
+- [x] 抽屉顶部 `LLM 配置模板` 保留为整套模板配置入口，不再承担“新增模块 / 新增规则”的主入口。
+- [x] 入口文案统一为 `新增模块（LLM）`、`新增规则（LLM）`、`Module Builder`、`Rule Builder`。
+
+闭环要求：
+
+- [x] 模块闭环：输入需求 -> LLM 生成结构化草稿 -> 管理员预览 -> 应用到模板 -> 保存模块 -> 模块库 / Memory / AgentRun 可追溯。
+- [x] 规则闭环：输入规则目标 -> LLM 生成规则草稿 -> 管理员预览 -> 应用到规则列表 -> 保存模板版本后生效。
+- [x] 失败闭环：API 未配置、LLM 追问、校验失败、保存失败、权限不足，都在当前入口附近展示状态，并提供 API 设置或重试入口。
+- [x] 回退闭环：拒绝草稿不污染模板；未保存关闭有提示；保存失败不清空草稿。
+- [ ] 浏览器确认：点击保存模板版本后，模板列表 / 当前模板摘要能看到新增模块或新增规则变化。
+- [ ] 权限确认：普通用户看不到这些管理员入口。
+
+## Review - 2026-06-15 LLM 新增模块 / 新增规则入口归位上线
+
+- [x] 模板编辑抽屉“模块”页已在模块绑定区加入 `+ 新增模块（LLM）`，每行模块旁加入 `LLM 生成`。
+- [x] 模板编辑抽屉“规则”页已加入 `+ 新增规则（LLM）`，每个规则分组加入 `LLM 生成本类规则`。
+- [x] Module Builder / Rule Builder 已接真实 `/api/templates/module-builder/*` 接口，支持生成、规则设定、保存模块、拒绝草稿、查看链路。
+- [x] Template Config Agent 已接 `/api/templates/config-builder/*`，顶部保留为整套模板配置生成入口。
+- [x] 管理导航已加入“模块库”，后台总览已加入模块库和执行链路入口；API 设置页保留 Musk API 地址 `https://api.muskapis.com/` 和默认模型 `gpt-5.4`。
+- [x] 本地验证通过：`npx tsx scripts/template-builder-entrypoints-smoke.ts`、`npx tsx scripts/template-llm-contract-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npx impeccable detect src/components/templates/TemplateEditorDrawer.tsx`、`npm run build`。
+- [x] 线上部署通过：`youdoo-sites build sd2` 生成 `BUILD_ID=ia_RbEzZ6Nkpl_LbV6hkh`，`youdoo-sites restart sd2` 后服务运行正常。
+- [x] 公网验证通过：`/api/config`、`/api/health`、`/login`、`/templates` 返回 200；公网静态 chunk `6349-f96c1a130ed4d936.js` 命中 `新增模块（LLM）`、`新增规则（LLM）`、`LLM 生成本类规则`。
+- [x] 健康守护周期后复查通过：`youdoo-sites status sd2` 为 OK，LaunchAgent `runs=64` 未增加。
+- [ ] 未执行真实登录态浏览器操作：未实际点击保存模板版本验证列表摘要刷新；未切普通用户验证入口隐藏。
+
+## 2026-06-15 图形生成 API 独立设置与 Gemini 图像模型接入
+
+目标：
+
+- 图形生成是给视频生成准备图片素材，不是视频任务本身。
+- 文字 LLM 继续走 Musk API / `gpt-5.4`；文生图、图生图、首尾帧草图必须走独立图形生成配置。
+- 图形生成 Provider 使用 Musk APIs 网关，不使用 `banana2` 作为 provider 或默认模型；默认模型使用 `gemini-3.1-flash-image-preview`。
+
+已落地：
+
+- [x] 新增 `src/lib/integrations/image-generation.ts`，使用独立配置键 `image_generation_api_v1`。
+- [x] Provider 固定为 `musk`，默认地址为 `https://api.muskapis.com/`，默认模型为 `gemini-3.1-flash-image-preview`；旧 `banana2`、Google 直连地址和旧模型保存值读取时自动归一到 Musk APIs 默认配置。
+- [x] 新增 `GET/PUT/POST /api/admin/integrations/image-generation`，仅管理员可读写。
+- [x] 后台 API 设置页新增“图形生成 API”配置区，和 Musk API、Codex 视频接口并列。
+- [x] API Key 只支持写入、留空不变和清除，不在页面或接口里回显明文。
+- [x] 启用图形生成 API 前必须有 `base_url`、`default_model`、`api_key`。
+- [x] 新增 `POST /api/assets/generate`，作为普通生成页和无线画布后续共用入口。
+- [x] 图形生成入口校验登录态、项目、视频卡、画布和参考图权限。
+- [x] 图形生成入口只读取后台配置，忽略前端伪造的 `api_key`、`base_url` 或 Provider endpoint。
+- [x] 图形生成 API 未配置时返回 503；配置就绪后通过 Musk APIs 的 Gemini 兼容 `generateContent` 调用并解析 `inlineData` 图片。
+- [x] Gemini 文生图 REST 请求体按官方最小 `contents[].parts[].text` 发送，不再传当前接口拒绝的 `generationConfig.responseModalities`。
+- [x] 配置保存和生成尝试写入 `OperationLog`，不记录密钥。
+
+待继续：
+
+- [x] 对齐 Musk APIs 网关：`/v1/images/generations` 只支持 imagen 模型；当前 key 可用的 Gemini 图片模型应走 `/v1beta/models/{model}:generateContent`。
+- [ ] 新增图形生成服务层，例如 `src/lib/assets/generation.ts`，集中处理 Provider 适配、下载、缩略图和资产落库。
+- [ ] 多参考图 / 图生图需要把站内参考图转成 Gemini `inlineData` parts；当前文本到图像已先接通。
+- [ ] 生成成功后写入 `Asset`，生成缩略图，并在需要时补齐 `ReferenceImage`。
+- [ ] 无线画布调用时，把 `asset_id`、`reference_image_id`、`public_url`、`thumbnail_url`、`target_usage` 回写到节点。
+- [ ] 前端提供“应用到当前节点 / 加入参考图 / 设为首帧 / 设为尾帧”确认动作，不自动覆盖用户已有素材。
+- [ ] 如果图形生成收费，先设计价格策略、点数冻结/扣费/失败退款和后台流水；没有这套规则前不启用真实付费生成。
+- [ ] 资产管理页能看到图形生成图片，并可追溯项目、视频卡、画布和节点。
+
+验证结果：
+
+- [x] `GET /api/admin/integrations/image-generation` 的返回 DTO 不包含 `api_key` 明文字段；公网未登录访问返回 401，不是 404/500。
+- [x] 启用 Gemini 图形生成时缺少 `base_url`、`default_model` 或 `api_key` 的拒绝逻辑已在管理员接口中实现并通过类型/构建校验。
+- [x] `POST /api/assets/generate` 公网未登录访问返回 401；路由只开放 POST，GET 返回 405，不是 404/500。
+- [x] `POST /api/assets/generate` 源码路径只读取 `image_generation_api_v1`，不读取前端传入的 `api_key`、`base_url` 或 Provider endpoint。
+- [x] 本地验证通过：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/app/admin/integrations/AdminIntegrationsClient.tsx`。
+- [x] 线上部署通过：`youdoo-sites build sd2` 生成 `BUILD_ID=WDj7WsiqYleSuuYT2iKx3`，`youdoo-sites restart/status sd2` 正常。
+- [x] 公网验证通过：`/api/config` 200、`/login` 200、`/api/admin/integrations/image-generation` 未登录 401、`/api/assets/generate` POST 未登录 401。2026-06-17 已纠偏为 Musk APIs，重新部署后应命中 `Musk APIs / Gemini Image / gemini-3.1-flash-image-preview`。
+- [x] 健康守护周期后复查通过：`youdoo-sites status sd2` 仍 OK，LaunchAgent `runs=65` 未增长。
+- [x] 2026-06-17 实测 Musk API 模型列表：当前后台 key 可用，`/v1/models` 返回 `gemini-3.1-flash-image-preview` 和 `gpt-image-2` 等模型。
+- [x] 2026-06-17 实测 Musk API 图像接口：`/v1/images/generations` 使用 `gemini-3.1-flash-image-preview` 会返回 `not supported model for image generation, only imagen models are supported`；因此该模型必须走 Gemini 兼容 `generateContent`。
+- [x] 2026-06-17 实测 Musk API Gemini 兼容链路：`/v1beta/models/gemini-3.1-flash-image-preview:generateContent` 可返回 `inlineData` 图片，`Authorization: Bearer`、`x-goog-api-key` 和 `?key=` 三种方式均可通。
+- [x] 2026-06-17 重跑 `/api/assets/generate` 登录态真实生成成功：返回 `provider=musk`、`model=gemini-3.1-flash-image-preview`，生成 1 张 JPEG，已写入 `Asset`、`ReferenceImage`、`WorkspaceAsset`，并返回缩略图，图片尺寸 1408x768。
+- [ ] 登录态下触发“Provider 未配置返回 503”和“伪造 api_key/base_url 被忽略”的接口测试待补；需要准备可用用户、项目和视频卡 fixture。
+
+停止条件：
+
+- 如果 Gemini 图生图、多参考图或计费策略没有确认，不扩展到真实付费多图生成。
+- 如果要新增计费、任务表或资产生成记录表，先单独规划数据库变更和回滚。
+- 如果生成图片不能进入 `Asset` / `ReferenceImage`，不能只把临时 URL 返回给前端。
+- 如果真实生成会消耗费用，没有明确授权时只做非付费验证。
+
+## 2026-06-15 导航重组与管理中心归纳设计规划
+
+第一性目标：
+
+- 降低找入口成本。用户进来应该能按任务自然找到入口，而不是在顶部和左侧两套重复菜单里判断。
+- 保留高频快捷。顶部仍保留少量快捷入口，但只做快速跳转和状态承载，不再承担完整目录。
+- 明确从属关系。左侧是一级目录，管理中心页是管理员二级目录，页面内部才是具体操作。
+- 同时服务普通用户和管理员。管理员也是创作者，不能把管理员导航做成只剩后台；普通用户不能看到管理入口。
+- 入口合并，不删除功能。能合并的管理页面先做导航归纳和管理中心卡片入口，旧页面功能、路由和可达链路必须保留。
+
+导航命名原则：
+
+- [x] 不使用“生产”作为前台分组名，改为更自然的“创作”。
+- [x] 不使用“素材”作为一级分组名，参考图集和资产管理归入“项目”。
+- [x] 管理入口不平铺十几个页面，统一收口到“管理中心”和少量归纳项。
+- [x] 顶部快捷入口最多保留 5 个，避免再次变成第二套完整导航。
+
+顶部快捷栏规划：
+
+- [x] 保留顶部快捷入口：`生成`、`模板`、`项目`、`工具`。
+- [x] 管理员额外显示 `管理中心`。
+- [x] 顶部不再展示完整“资产管理 / 参考图集 / 我的任务”等细项。
+- [x] 顶部点数从长文本压缩为短状态，例如 `可用 123`，详细信息进入账号或账户页。
+- [x] 顶部右侧保留账号菜单；当前页主操作可按页面显示，例如 `新建生成`。
+
+左侧普通用户导航规划：
+
+- [x] 分组一：`创作`
+  - [x] `生成视频` -> `/generate`
+  - [x] `模板生成` -> `/template-generate`
+  - [x] `动画模板` -> `/templates`
+  - [x] `画布模式` -> `/generate/canvas`
+- [x] 分组二：`项目`
+  - [x] `我的项目` -> `/projects`
+  - [x] `我的任务` -> `/tasks`
+  - [x] `资产管理` -> `/assets`
+  - [x] `参考图集` -> `/collections`
+- [x] 分组三：`工具`
+  - [x] `AI 抠图` -> `/cutout`
+- [x] 普通用户不得看到任何管理中心入口。
+
+管理员导航规划：
+
+- [x] 管理员保留完整普通用户导航。
+- [x] 管理员额外显示 `管理中心` 分组。
+- [x] 管理中心分组只保留归纳后的入口：
+  - [x] `管理中心` -> `/admin`
+  - [x] `用户与项目` -> 管理用户、项目、权限、成员。
+  - [x] `产出与反馈` -> 管理产出留存、反馈。
+  - [x] `成本与接口` -> 管理计费成本、API 设置、Provider 状态。
+  - [x] `模板与链路` -> 管理模板、模块库、执行链路。
+- [ ] 管理员进入 `/admin/*` 时管理中心分组展开并高亮；进入普通创作页面时管理分组可以保持收起或低优先级。
+
+管理页面合并规划：
+
+- [x] `/admin` 改为“管理中心”首页，不只是普通后台总览。
+- [x] 管理中心首页提供归纳卡片或分区：
+  - [x] `用户与项目`：用户管理、项目管理、权限、成员。
+  - [x] `产出与反馈`：产出留存、隐藏/恢复、任务追踪、反馈管理。
+  - [x] `成本与接口`：计费成本、API 设置、Provider 配置。
+  - [x] `模板与链路`：模板管理、模块库、Agent 执行链路。
+- [x] 旧管理页面路由继续保留，不能删除现有功能。
+- [x] 如果先不做真实页面合并，也要先从导航层面合并入口，并在管理中心页提供二级入口。
+
+实现拆分：
+
+- [x] `src/lib/navigation.ts`：把导航从扁平数组改为分组模型，支持顶部快捷、左侧普通导航、左侧管理员导航。
+- [x] `src/components/ComposerTopbar.tsx`：顶部改为少量快捷入口 + 点数短状态 + 账号菜单。
+- [x] `src/components/SideNav.tsx`：支持分组渲染、管理员分组和当前路径高亮；折叠策略暂不启用。
+- [x] `src/components/AppShell.tsx`：当前无需改动，顶部快捷和左侧目录已从 `navigation.ts` 分层，避免重复维护两套目录。
+- [x] `src/app/admin/page.tsx` 或现有 Admin Dashboard：改为管理中心首页结构，归纳管理入口。
+- [x] `src/app/globals.css`：重做顶部和侧边栏的信息层级、间距、active/hover/focus 状态和移动端表现。
+
+验收标准：
+
+- [ ] 普通用户登录后只看到 `创作 / 项目 / 工具`，没有管理入口。
+- [ ] 管理员登录后能看到普通工作台和管理中心，但管理入口不铺满左侧。
+- [x] 顶部快捷入口不超过 5 个，并且不再和左侧完整重复。
+- [x] 资产管理和参考图集在左侧归入 `项目`。
+- [x] AI 抠图在左侧归入 `工具`。
+- [x] 管理页入口减少，旧功能仍然可从管理中心二级入口到达。
+- [x] `/admin/users`、`/admin/projects`、`/admin/outputs`、`/admin/feedback`、`/admin/costs`、`/admin/integrations`、`/admin/modules`、`/admin/agent-runs` 的原路由仍可访问。
+- [ ] 桌面端左侧导航和顶部快捷栏不抢层级；移动端不横向溢出。
+- [x] 线上 `sd2.youdoodesign.com` 已加载新导航构建；公网 layout chunk 命中 `管理中心 / 用户与项目 / 产出与反馈 / 成本与接口 / 模板与链路 / 资产管理 / 参考图集 / AI 抠图`。
+
+本轮落地记录：
+
+- 已完成：导航配置分层、顶部快捷栏收敛、左侧分组、管理中心入口归纳、管理中心首页分区卡片、相关样式整理。
+- 已验证：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check`、`npx impeccable detect ...` 均通过；lint 仍有项目既有 `<img>` 与 Hook 依赖警告。
+- 部署状态：第一次候选构建让 Next 自动追加 `.next-prod-candidate/types/**/*.ts` 后缺少 `BUILD_ID`，保留该临时配置重跑后完成生产构建；已恢复 `tsconfig.json`。
+- 线上健康：`youdoo-sites build sd2`、`youdoo-sites restart sd2` 已完成；`.next-prod/BUILD_ID=d02kA_j7kG-kJXP3VUOcY`；`http://127.0.0.1:3000/api/config`、`https://sd2.youdoodesign.com/api/config`、`https://sd2.youdoodesign.com/login` 均返回 200。
+- 未闭环：登录态真实视觉验收、移动端视觉验收。
+
+停止条件：
+
+- [ ] 如果需要真正合并后台页面数据流，先单独规划每个合并页的 API、权限和回滚。
+- [ ] 如果某个旧页面有未完成任务或线上依赖，不能直接删除入口，只能降级为二级入口。
+- [ ] 如果普通用户和管理员权限判断不确定，先保守隐藏管理入口并验证 `/api/auth/me` 角色返回。
+- [ ] 如果导航改动导致当前页面无法从任一路径到达，停止发布并恢复旧入口。
+
+## 2026-06-17 自建通知与消息中心规划
+
+第一性目标：
+
+- 用户在任意工作台页面都能看到“有没有新通知”，不需要进后台或猜入口。
+- “消息”第一版定义为系统通知中心，不做聊天、私信或客服会话，避免新建一套和 `Notification` 表重复的数据模型。
+- 通知必须能读、能标记已读、能全部已读、能按关联对象跳转，失败通知能保留重试入口。
+- 不接 Novu、Knock、SuprSend、Engagespot 这类外部通知平台；本项目已经有通知表和 API，优先把现有能力做可见。
+
+现状证据：
+
+- `prisma/schema.prisma` 的 `model Notification` 已有 `target_user_id`、`actor_user_id`、`project_id`、`video_card_id`、`approval_id`、`status`、`read_at`、`metadata_json` 等字段，能支撑站内通知。
+- `src/app/api/notifications/route.ts` 的 `GET` 已能返回当前用户通知列表和 `unread_count`，`PATCH` 已支持 `mark_all_read`。
+- `src/app/api/notifications/[id]/route.ts` 的 `GET` 已支持通知详情，`PATCH` 已支持 `mark_read` 和 `retry_failed`。
+- `src/lib/notifications/index.ts` 的 `createInAppNotification` 和 `notifyProjectOwner` 已能写入站内通知。
+- `src/components/AppShell.tsx` 当前只获取用户和点数，没有获取通知未读数。
+- `src/components/ComposerTopbar.tsx` 当前右侧只有点数和账号，没有通知铃铛或消息入口。
+- `src/lib/navigation.ts` 当前未把 `/notifications` 放进 shell 路由，新增页面后需要纳入应用壳层。
+- `src/app/globals.css` 已有 `.composer-topbar-icon-btn` 和顶部导航样式，可复用，不需要引入 UI 大包。
+- CodeGraph 在当前生产目录未初始化，本轮规划证据来自 `rg` 和定点文件读取；正式开发前不依赖未初始化索引。
+
+实现任务：
+
+- [x] 新增 `src/components/NotificationBell.tsx`：顶部通知铃铛，登录后调用 `GET /api/notifications?limit=8`，展示未读角标、加载态、空状态、错误态和最近通知下拉。
+- [x] `NotificationBell` 支持点击外部关闭、`Escape` 关闭、键盘可达、移动端不溢出，交互状态跟现有顶部按钮保持一致。
+- [x] `NotificationBell` 支持单条 `mark_read`，支持“全部已读”，操作成功后同步刷新未读数和列表状态。
+- [x] 新增 `src/lib/notifications/display.ts`：集中把通知类型、关联项目、视频卡、审批记录和 `metadata_json` 转成前端展示文案、状态标签和跳转链接。
+- [x] 新增 `src/app/notifications/page.tsx` 和 `src/app/notifications/NotificationsPageClient.tsx`：完整通知中心页面，包含全部、未读、失败三个视图。
+- [x] 通知中心页面支持单条已读、全部已读、失败通知重试、打开关联项目或视频卡；未知类型只展示详情，不做错误跳转。
+- [x] 更新 `src/components/ComposerTopbar.tsx`：在点数和账号之间接入 `NotificationBell`，未登录或用户加载中不请求通知。
+- [x] 更新 `src/lib/navigation.ts`：把 `/notifications` 加入 `shellRoutes` 或前缀规则，保证通知中心页面使用现有顶部和左侧布局。
+- [x] 更新 `src/app/globals.css`：补齐通知铃铛、角标、下拉列表、通知中心页面、移动端布局、focus/hover/disabled/loading 状态。
+- [x] 必要时微调 `src/app/api/notifications/route.ts`：本轮无需改动，现有接口字段已满足前端使用，未改数据库 schema。
+- [x] 不安装外部通知中心包；如果后续只需要轻提示，再单独评估 `sonner`，本轮先不改 `package.json`。
+
+验收标准：
+
+- [ ] 登录用户刷新任意 shell 页面，顶部能看到通知入口；未登录页面不发通知请求。
+- [ ] 有未读通知时显示稳定角标；没有通知时显示明确空状态。
+- [ ] 点击一条未读通知后，该条变为已读，未读数减少，并能跳转到关联项目、视频卡或通知详情。
+- [ ] 点击“全部已读”后，未读角标清零，刷新页面后状态仍保持。
+- [ ] `/notifications` 页面在桌面和移动端都不横向溢出，列表文字、按钮和角标不互相遮挡。
+- [ ] 失败通知只在状态为 `failed` 时显示重试入口，避免误导普通通知。
+- [x] 不新建 Message 表，不引入外部通知 SaaS，不泄露 `metadata_json` 中可能存在的敏感调试内容。
+
+验证计划：
+
+- [x] `git diff --check`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] `npx impeccable detect src/components/NotificationBell.tsx`
+- [x] 本地未登录接口验证：`curl http://127.0.0.1:3000/api/notifications` 应返回 401。
+- [ ] 登录态浏览器验证：通知铃铛、下拉、全部已读、通知中心页、移动端宽度。
+- [x] 线上闭环：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，再从公网验证 `/notifications`、`/api/config`、`/login` 和相关静态资源已加载新构建。
+
+Git Plan：
+
+- 当前分支：`codex/v12-full-todo`，跟踪 `origin/codex/v12-full-todo`。
+- 当前工作区已有大量非本轮改动；正式开发前先复查 `git status` 和目标文件 diff。
+- 本轮只 stage 通知中心相关新增文件和必要 shared 文件的相关 hunk，不能把无关导航、模板、画布、后台改动混入提交。
+- 若 `ComposerTopbar.tsx`、`navigation.ts`、`globals.css` 已有未提交改动和本轮改动难以拆分，优先手动分 hunk 暂存；无法安全拆分时停止汇报，不强行提交。
+- 验证通过后创建聚焦提交并推送到远端；稳定发布点创建并推送 `rollback/2026-06-17-notifications-center`。
+- 完成发布后按全局规则登记 `/Volumes/Data/Projects/project-version-registry.md`。
+
+HARD-GATE：
+
+- [x] 这是中等以上 UI 功能，按当前项目规则需要用户确认本计划后再开始编码。
+
+Review - 2026-06-17 自建通知中心落地：
+
+- [x] 已新增通知展示层、顶部通知铃铛、通知中心页面、通知中心样式，并接入 `/notifications` 应用壳层。
+- [x] 已保留现有后端通知表和接口，不新增 Message 表，不引入外部通知 SaaS，不改 Prisma schema。
+- [x] 本地验证通过：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/NotificationBell.tsx`。
+- [x] 线上部署通过：`youdoo-sites build sd2` 生成 `.next-prod/BUILD_ID=8fEB-vvAjFr2i-lek4OOk`，`youdoo-sites restart sd2` 后 `youdoo-sites status sd2` 正常。
+- [x] 公网验证通过：`/api/config` 200、`/login` 200、`/api/notifications` 未登录 401、`/notifications` 未登录 307 到 `/login`；公网通知页面 chunk 命中 `/api/notifications / 全部已读 / notifications-row`，公网 CSS 命中 `notification-bell / notification-dropdown / notifications-page`。
+- [ ] 未执行真实登录态点击验收：当前未拿到可复用登录会话，ClickOps CLI session 不能跨进程复用，项目也未安装 Playwright；不能把未登录态验证冒充为登录态验收。
+
+## 2026-06-17 无线画布功能缺口应对方式与落地任务规划
+
+来源文档：`tasks/ultimate-canvas-feature-gap-audit.md`
+
+问题定义：
+
+- 新无线画布当前是“可交互前端工具 Demo”，不是已经完整接入 sd2 后台体系的正式生成工具。
+- 用户的真实目标不是多一个静态工具页面，而是让无线画布成为现有后台体系里的一个新生成工具入口。
+- 所以应对方式不能只补 UI，也不能只接一个生成接口；必须把项目、保存、生成、点数、素材、历史、下载、反馈这些链路串起来。
+- 正确顺序是先保证“不会误导用户”，再保证“能真实生成”，最后补“长期创作体验”。
+
+### 应对方式
+
+#### 方案 A：先做正式工具 MVP，推荐
+
+- 核心思路：保留现有无线画布前端，把它接进 sd2 现有后台体系，先跑通最小正式闭环。
+- 覆盖范围：项目上下文、画布保存、真实视频生成、状态轮询、结果预览、点数扣减、资产入库。
+- 优点：最快让无线画布从 Demo 变成正式工具；不会另起一套后台。
+- 缺点：第一版先收敛功能，协作、分享、复杂导演台自动化暂不做深。
+- 适合当前目标：符合“无线画布只是现有后台体系里的新工具入口”。
+
+#### 方案 B：先做占位治理和体验补丁
+
+- 核心思路：不接真实生成，先把所有无响应按钮隐藏、置灰、加说明，减少用户误点。
+- 覆盖范围：协作、分享、通知、帮助、反馈、从历史选择、AI 识图、几何模型、全屏入口。
+- 优点：风险低，短期能减少“点了没反应”的反馈。
+- 缺点：工具仍然不能真实生成，不能解决本质目标。
+- 适合场景：如果真实 API、点数、资产链路暂时排期不足，可以作为过渡。
+
+#### 方案 C：先重写成 React 原生工具
+
+- 核心思路：把 `public/tools/ultimate-canvas/*.js` 的静态工具迁移成 React/Next 组件。
+- 覆盖范围：组件化、状态管理、权限、API hooks、测试和样式统一。
+- 优点：长期维护性最好，能自然接入现有 app shell。
+- 缺点：工作量最大，短期会拖慢真实生成闭环。
+- 适合场景：等 MVP 证明确实要长期重投后再做，不建议第一阶段就重写。
+
+#### 方案 D：把静态工具继续作为 iframe，但加桥接层
+
+- 核心思路：保留 iframe 和静态 JS，通过 `postMessage` / bootstrap JSON 注入用户、项目、API endpoint、点数和资产能力。
+- 优点：最小改动利用现有工具，能较快上线。
+- 缺点：iframe 和主站状态同步复杂，类型安全、测试和错误处理更难。
+- 推荐用法：作为 MVP 的第一步；后续稳定后再考虑 React 化。
+
+推荐决策：
+
+- 第一阶段采用“方案 A + 方案 D”：保留现有静态画布，用桥接层接入 sd2 后台，先完成正式工具 MVP。
+- 第二阶段采用“方案 B”：把未实现的按钮治理干净，避免用户误解。
+- 第三阶段再评估“方案 C”：如果无线画布使用频率高，再迁移成 React 原生工具。
+
+### 分阶段任务
+
+#### Phase 0：风险收口和入口治理
+
+目标：先让用户不会被未实现功能误导。
+
+- [x] 审查 `public/tools/ultimate-canvas/index.html` 的所有按钮，列出无事件或只改状态的入口。
+- [x] 对协作、分享、通知、头像、帮助、反馈、从历史选择先做明确策略：隐藏、置灰、接真实功能三选一。
+- [x] 对导演台里的 `AI 识图导入`、`几何模型`、`接入首尾帧视频` 加状态区分：真实可用、仅创建节点、暂未接入。
+- [x] 检查 `/tools/ultimate-canvas/index.html` 全屏直达路径是否始终受登录保护；如果不能保证，改成受保护 route。
+- [x] 验收：页面上没有“点击后完全无反馈”的按钮；未实现功能不会伪装成已完成。
+
+Phase 0 落地记录：
+
+- 入口策略：协作、分享、通知、头像、反馈、从生成历史选择、小地图先保留入口但标记为待接入，点击统一提示，不创建假数据。
+- 帮助策略：帮助按钮先提供当前可用边界说明，不跳到未完成页面。
+- 导演台策略：`AI 识图导入`、`几何模型` 明确显示待接入；`接入首尾帧视频` 只创建视频节点，并说明真实 `first_last_frame` 生成还没有提交到 sd2 后台。
+- 生成策略：当前没有真实 endpoint 时，mock 结果显示为“生成占位”，不再伪装成接口已成功。
+- 登录保护：`src/middleware.ts` 已覆盖 `/tools/:path*`，所以 `/tools/ultimate-canvas/index.html` 直达也会先过登录检查；本阶段不新增 route。
+- 后续边界：Phase 0 没有接入保存、扣点、任务轮询、资产库和真实生成，这些继续进入 Phase 1 到 Phase 6。
+
+涉及文件：
+
+- `src/app/tools/ultimate-canvas/page.tsx`
+- `public/tools/ultimate-canvas/index.html`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/styles.css`
+
+#### Phase 1：启动上下文和项目归属
+
+目标：无线画布进入现有项目体系，不再是孤立页面。
+
+- [ ] 外层 `src/app/tools/ultimate-canvas/page.tsx` 读取当前用户、项目列表、默认项目、账户点数和可用生成配置。
+- [ ] 设计 iframe bootstrap 数据结构：`user`、`project`、`videoCard`、`credits`、`settings`、`endpoints`。
+- [ ] iframe 加载后用 `postMessage` 或同源 JSON 注入 bootstrap 数据。
+- [ ] 静态画布接收 bootstrap 后显示真实项目名，不再只显示本地 `未命名`。
+- [ ] 未选择项目时禁用真实生成按钮，并提示先选择项目。
+- [ ] 验收：生成 payload 必须包含 `project_id`，可选包含 `video_card_id`。
+
+涉及文件：
+
+- `src/app/tools/ultimate-canvas/page.tsx`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/generation-api.js`
+- 可能新增：`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`
+
+#### Phase 2：画布保存与恢复
+
+目标：刷新不丢节点、连线、提示词和参数。
+
+- [ ] 明确复用 `CanvasDocument` 还是新增无线画布专用文档模型；优先复用现有 `CanvasDocument`，避免新建重复表。
+- [ ] 新增或恢复受保护的画布文档 API：创建、读取、更新、归档。
+- [ ] 保存内容包含：`nodes`、`connections`、`viewport`、`project_id`、`video_card_id`、节点资产引用、节点任务引用。
+- [ ] 前端实现自动保存：节点新增、删除、移动、连线、提示词、参数变化后节流保存。
+- [ ] 页面显示保存状态：正在保存、已保存、保存失败、重试。
+- [ ] 验收：刷新、退出再进入，画布内容完整恢复。
+
+涉及文件：
+
+- `prisma/schema.prisma`
+- `src/app/api/canvases/*` 或新 `src/app/api/tools/ultimate-canvas/documents/*`
+- `src/lib/canvas/*` 或新 `src/lib/ultimate-canvas/*`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/canvas-engine.js`
+
+停止条件：
+
+- 如果需要数据库迁移，先单独规划迁移和回滚。
+- 如果旧画布 zip 中的代码要恢复，必须只恢复需要的 API/权限逻辑，不能把旧 `/generate/canvas` 页面重新暴露。
+
+#### Phase 3：真实视频生成链路
+
+目标：画布里点视频生成，必须创建真实 sd2 任务。
+
+- [ ] 把 `generation-api.js` 的 mock 默认路径改成“无 endpoint 时明确提示未配置”，不能静默返回 mock 成功。
+- [ ] 文生视频映射到 `/api/video/create`。
+- [ ] 图生视频映射到 `/api/video/create` 并带参考图资产。
+- [ ] 首尾帧映射到 `/api/video/create` 的 `first_last_frame` 模式。
+- [ ] 节点进入任务状态：queued、running、succeeded、failed、cancelled。
+- [ ] 轮询 `/api/video/status/:taskId?refresh=true`，直到终态。
+- [ ] 成功后展示视频预览、缩略图、下载入口、任务详情入口。
+- [ ] 失败后展示错误原因、重试入口、复制错误信息入口。
+- [ ] 验收：非付费环境可用 mock endpoint 验证状态机；付费真实生成必须得到明确授权后再跑。
+
+涉及文件：
+
+- `public/tools/ultimate-canvas/generation-api.js`
+- `public/tools/ultimate-canvas/app.js`
+- `src/app/api/video/create/route.ts`
+- `src/app/api/video/status/[id]/route.ts`
+- `src/components/GenerationComposer.tsx` 可作为现有 payload 参考
+
+#### Phase 4：图形生成和 Gemini Image 接入
+
+目标：图片节点能真实生成图片，并进入资产库。
+
+- [ ] 文生图、图生图、高清修复先接现有 `/api/assets/generate`。
+- [x] 图形生成使用独立 Gemini Image 配置，不复用视频 Provider，也不复用 Musk 文字 LLM 配置。
+- [ ] 图片生成结果写入 `Asset`、`ReferenceImage`、工作区资产。
+- [ ] 图片节点展示真实图片预览、下载、设为首帧、设为尾帧、作为参考图。
+- [ ] 验收：图片节点生成结果能在资产管理和参考图集中查到。
+
+涉及文件：
+
+- `src/app/api/assets/generate/route.ts`
+- `src/lib/integrations/image-generation/*`
+- `src/app/admin/integrations/*`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/generation-api.js`
+
+#### Phase 5：点数、估价和流水
+
+目标：无线画布生成和普通生成共用点数体系。
+
+- [ ] 节点参数变化时按模式、时长、清晰度、参考资源数量估价。
+- [ ] 生成按钮旁展示预计点数和账户余额。
+- [ ] 生成前校验余额，不足时禁用或引导充值/联系管理员。
+- [ ] 创建任务时走现有冻结、扣减、失败退款逻辑。
+- [ ] 点数流水里标明来源：`ultimate_canvas`、画布文档、节点 ID、项目、任务 ID。
+- [ ] 后台点数流水支持筛选或至少能看出无线画布来源。
+- [ ] 验收：一次无线画布真实生成后，管理页点数流水能查到对应记录。
+
+涉及文件：
+
+- `src/lib/credits/*`
+- `src/lib/costs/*`
+- `src/app/api/tasks/estimate/route.ts`
+- `src/app/api/video/create/route.ts`
+- `src/app/admin/points/AdminPointsClient.tsx`
+- `public/tools/ultimate-canvas/app.js`
+
+#### Phase 6：素材库、上传和历史
+
+目标：画布能复用站内资产，生成结果也能回到站内资产。
+
+- [ ] 本地上传走 `/api/assets/upload`，不只创建本地空节点。
+- [ ] 上传成功后节点保存 `asset_id`、`public_url`、`thumbnail_url`、`mime_type`。
+- [ ] 素材面板接 `/api/assets/list`，支持搜索、分类、拖入画布。
+- [ ] 历史面板接任务和资产列表，支持从历史选择并创建节点。
+- [ ] 成功视频支持播放、下载、复制链接、打开任务详情。
+- [ ] 成功图片支持预览、下载、设为参考图、拖给视频节点。
+- [ ] 验收：从素材库拖一张图到画布，再生成图生视频，结果进入项目资产。
+
+涉及文件：
+
+- `src/app/api/assets/upload/route.ts`
+- `src/app/api/assets/list/route.ts`
+- `src/app/api/video/list/route.ts`
+- `src/app/api/video/download/[id]/route.ts`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/styles.css`
+
+#### Phase 7：导演台业务闭环
+
+目标：导演台不只是本地 3D 摆拍，而能输出可生成资产。
+
+- [ ] 3D GLB 资源改成进入导演台后懒加载，首屏不加载 16MB 素体资源。
+- [ ] 摄像机截图输出进入资产库，而不只是前端图片节点。
+- [ ] “生成分镜参考图”调用图形生成 API。
+- [ ] “接入首尾帧视频”创建真实 `first_last_frame` 视频任务。
+- [ ] `AI 识图导入` 接图形理解或先置灰，不能只显示“入口已就绪”。
+- [ ] `几何模型` 做真实插入或先置灰。
+- [ ] 验收：导演台输出的分镜图和视频任务能在项目资产/任务记录里查到。
+
+涉及文件：
+
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/director-3d.js`
+- `public/tools/ultimate-canvas/assets/director/liblib/*`
+- `src/app/api/assets/generate/route.ts`
+- `src/app/api/video/create/route.ts`
+
+#### Phase 8：长期创作体验
+
+目标：从“能生成”提升到“能长期创作”。
+
+- [ ] 增加撤销/重做栈，覆盖节点增删、移动、连线、提示词和参数。
+- [ ] 修复多选：用数组记录多选节点，支持批量移动、删除、复制。
+- [ ] 完善右键菜单：复制节点、删除节点、断开连线、整理选中节点。
+- [ ] 增加快捷键帮助面板。
+- [ ] 替换浏览器原生 `confirm` 为站内确认弹窗。
+- [ ] 明确移动端策略：支持横屏使用，或小屏提示请用桌面端。
+- [ ] icon-only 按钮补 `aria-label`、focus 样式、键盘顺序。
+- [ ] 验收：误操作可撤销，键盘可用，小屏不横向错乱。
+
+涉及文件：
+
+- `public/tools/ultimate-canvas/canvas-engine.js`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/styles.css`
+- 可能新增：`public/tools/ultimate-canvas/state-history.js`
+
+### 总体验收标准
+
+- [ ] 用户从 `/tools/ultimate-canvas` 进入后能选择项目并恢复上次画布。
+- [ ] 任一视频节点点击生成后会创建真实 sd2 任务。
+- [ ] 任务状态能从 queued/running 到 succeeded/failed/cancelled。
+- [ ] 成功任务能预览、下载、进入项目资产。
+- [ ] 点数扣减和后台流水一致。
+- [ ] 上传素材能保存到服务器，并能作为生成参考。
+- [ ] 历史面板显示真实生成记录。
+- [ ] 没有无响应或误导性的按钮。
+- [ ] 刷新页面不丢节点、连线、提示词、参数。
+- [ ] 新无线画布仍然只是现有后台体系里的新工具入口，不另起一套后台。
+
+### 验证计划
+
+- [ ] `git diff --check`
+- [ ] `npx tsc --noEmit --pretty false`
+- [ ] `npm run lint`
+- [ ] `npm run build`
+- [ ] 本地打开 `/tools/ultimate-canvas`，验证入口、项目注入、保存恢复、无响应按钮治理。
+- [ ] 非付费 API mock 验证：生成状态机、失败态、重试、资产入库模拟。
+- [ ] 登录态真实验证：项目选择、素材上传、历史复用、点数余额展示。
+- [ ] 付费真实生成只在用户明确授权后执行。
+- [ ] 线上闭环：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，公网验证 `/tools/ultimate-canvas`、`/api/config`、`/login` 和构建资源。
+- [ ] 跨健康守护周期复查 LaunchAgent `runs` 不增长。
+
+### Git Plan
+
+- 当前生产目录：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 当前分支：`codex/v12-full-todo`。
+- 当前工作区已有大量跨任务未提交改动；正式开发前必须先复查 `git status` 和目标文件 diff。
+- 每个 Phase 尽量单独提交，避免把无线画布、通知中心、模板模块等无关任务混入一个提交。
+- 如果要改 `src/app/api/video/create/route.ts`、点数、资产、Prisma schema，优先单独分支或 worktree，验证通过后再同步部署。
+- 稳定回退点建议：`rollback/2026-06-17-ultimate-canvas-mvp`。
+- 发布后登记 `/Volumes/Data/Projects/project-version-registry.md`。
+
+### 停止条件
+
+- 如果真实生成会消耗费用，未获明确授权时不得发起付费生成。
+- 如果数据库 schema 需要迁移，先停止编码，单独写迁移和回滚方案。
+- 如果恢复旧画布 API，会重新暴露旧 `/generate/canvas` 或旧 `/api/canvases` 风险，必须先调整路由边界。
+- 如果点数扣减无法和现有流水闭环，不允许只在前端显示“已扣点”。
+- 如果素材上传不能进入服务器和资产库，不允许只用本地 blob URL 当正式结果。
+- 如果 iframe 直达路径不能保证登录保护，先停止发布并修正入口保护。
+
+HARD-GATE：
+
+- [ ] 这是跨前端、API、点数、资产、任务状态和线上部署的中大型功能；开始编码前需要用户确认执行 Phase 0/1/2/3 的顺序和首个 MVP 范围。
+
+## Review：2026-06-17 模板 UX P0 与 Musk API 测试入口
+
+- 本轮完成：`/template-generate` 普通用户主路径收敛为模板摘要、需求输入、方案选择和提交；保存位置、视频卡、参考图、Prompt 编辑、参数栏改为默认折叠；普通用户不再看到 Module Builder、LLM 规则、JSON 预览和 AgentRun 入口。
+- 本轮完成：视频卡未选择时，提交前自动创建“模板生成”视频卡并继续归档，避免用户先理解视频卡才能生成。
+- 本轮完成：管理员工具折叠到“管理员工具”，Module Builder 先读取 Musk API 状态，未配置时禁用生成并引导去 API 设置。
+- 本轮完成：`/admin/integrations` Musk API 增加“测试连接”按钮，后端 `POST /api/admin/integrations/musk` 用最小 JSON 请求验证 HTTP、模型、JSON 返回和耗时，成功/失败都写 OperationLog，且不回显 API Key。
+- 验证通过：`git diff --check -- <本轮目标文件>`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npx impeccable detect src/components/GenerationComposer.tsx src/components/templates/TemplateGenerateClient.tsx src/app/globals.css`、`npm run build`。
+- 页面验证：本地 `http://127.0.0.1:3107/template-generate` 返回页面 HTML，命中“保存位置”折叠、“输入需求 / 选择方案 / 提交生成”三步、“切换模板”折叠；`/admin/integrations` 未登录跳转登录页，符合后台权限保护。
+- 未完成（截至该 P0 当时）：独立 `/admin/templates` 模板工作台、`/admin/templates/new` LLM 新建模板向导、上下文卡片编排器、卡片编辑抽屉、持久化最后测试结果、`/admin/diagnostics`、完整权限拆分和线上部署闭环；其中模板工作台和上下文卡片能力已在后续 Review 落地。
+
+## Review：2026-06-17 上下文卡片系统重新规划
+
+- 本轮规划修正：旧的 `Module Builder / 模块类型 / brand_logo / injectionMode / priority` 方向不再作为主路径，后续要改为“上下文卡片系统”。
+- 新核心对象：上下文卡片 = 最终给 LLM 的上下文内容 + 可选 1 张绑定图片 + 启用状态 + `强制插入 / 仅供参考` 二选一。
+- 新页面规划：模板上下文卡片编排页、编辑上下文卡片抽屉、绑定图片选择弹窗、最终提示词影响预览。
+- 新交互规划：卡片可拖拽排序；卡片上直接切换 `强制插入 / 仅供参考`；编辑抽屉三块为最终上下文内容、默认折叠的 LLM 参考与设置、底部 LLM 对话框；所有修改自动保存。
+- 新图片规划：图片不是独立模块，而是绑定在某张上下文卡片上；图片来源复用生成页的参考图集和历史上传图；一张卡片默认只绑定 1 张图，可更换/移除。
+- 已重写：`Phase 4：模板上下文卡片编排器`、`Phase 5：卡片绑定图片与图片选择器复用`。
+- 规划阶段遗留已推进到代码落地，最新状态见下一节。
+
+## Review：2026-06-17 上下文卡片系统代码落地
+
+- 本轮完成：`SerializedGenerationTemplate.module_bindings.context_cards` 序列化层已落地；旧模板会由 `module_bindings / prompts / rules / assets` 自动转换为上下文卡片，不需要数据库迁移。
+- 本轮完成：新增 `/admin/templates` 和 `/admin/templates/[id]` 模板工作台；后台导航和管理中心入口指向模板工作台，不再把 `/templates` 当管理员主入口。
+- 历史实现：新增 `TemplateContextCardsPanel`，支持卡片新增、拖拽排序、启用 / 停用、`强制插入 / 仅供参考` 直接切换、绑定图片；当时把最终提示词影响放在右侧，已被 2026-06-17 最新纠偏覆盖，后续必须迁移到页面底部横向核对区。
+- 本轮完成：新增卡片编辑抽屉，包含顶部最终上下文内容、中间默认折叠的 LLM 参考与设置、底部 LLM 对话框；Enter 可调用现有 Musk Module Builder API 改写顶部内容。
+- 本轮完成：新增 `TemplateBoundImagePicker`，图片来源走参考图集和历史上传图；绑定图片保存到卡片，并同步成旧模板资产引用，避免污染生成页当前参考图列表。
+- 本轮完成：新增 `PATCH /api/templates/[id]/context-cards`，自动保存卡片，同时同步旧 `prompts/assets/module_bindings_json`，保证旧生成链路能读取新卡片结果。
+- 本轮完成：`/admin/templates` 支持从 0 描述模板目标，调用现有 `config-builder/generate` 生成草稿，再用 `config-builder/save` 保存并进入卡片编辑。
+- 未完成：独立 `/admin/templates/new` 页面未拆出，当前 LLM 新建模板在 `/admin/templates` 内联完成。
+- 未完成：LLM 改写后“撤回本次修改”未做；当前已能改写并自动保存。
+- 未完成：绑定图片弹窗的图片名称搜索未做；当前可按图集 / 历史上传图选择。
+- 未完成：真正发布门禁、发布历史、质量复盘工作台、权限角色拆分仍未全量落地。
+- 验证通过：`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`git diff --check -- <本轮相关文件>`、`npx impeccable detect ...`、`npm run build`。
+- 本地页面验证：`curl -I http://127.0.0.1:3117/admin/templates` 未登录返回 307 到登录页；`curl -I http://127.0.0.1:3117/api/templates` 未登录返回 401；生产构建路由表已包含 `/admin/templates`、`/admin/templates/[id]`、`/api/templates/[id]/context-cards`。
+- 线上验证通过：`youdoo-sites build sd2` 生成 BUILD_ID `G9FZEZPu9K4LxaVCovvrS`；`youdoo-sites restart sd2` 成功；公网 `/admin/templates` 未登录返回 307 到登录页，公网 `/api/templates` 未登录返回 401，公网 `/login` HTML 已加载同一个 BUILD_ID；生产包命中 `选择绑定图片`、`上下文卡片`、`context_cards`、`template_context_cards_update`、`用 LLM 新建模板`；跨约 70 秒健康守护周期后 `youdoo-sites status sd2` 仍为 running/OK/public 200。
+
+## Review：2026-06-17 模板旧入口删除与结构收敛
+
+- 本轮完成：删除旧 `/admin/modules` 页面，后台导航、管理中心快捷入口和 shell route 不再引用模块库。
+- 本轮完成：删除旧 `/admin/settings` 兼容跳转页，API 设置统一进入 `/admin/integrations`。
+- 本轮完成：`TemplateEditorDrawer` 重写为纯上下文卡片抽屉，只保留卡片列表、强制/参考、绑定图片、卡片 LLM 改写、自动保存和保存模板版本；旧 `高级结构 / 规则 / 资产 / Module Builder / PromptBlock / JSON` 表单 UI 已从组件中移除。
+- 本轮完成：清理旧路由生成类型缓存，避免 `.next` / `.next-prod` 继续引用已删除页面。
+- 验证通过：`./node_modules/.bin/tsc --noEmit --pretty false`、`git diff --check -- <本轮相关文件>`、`npx impeccable detect ...`、`npm run lint`、`npm run build`。
+- 本地构建验证：路由表已不包含 `/admin/modules` 和 `/admin/settings`，仍包含 `/admin/templates`、`/admin/templates/[id]`、`/admin/integrations`、`/admin/agent-runs`。
+- 线上验证通过：`youdoo-sites build sd2` 生成 BUILD_ID `7Rwo7XAkwrIUNPHra8_bH`；`youdoo-sites restart sd2` 成功；公网 `/admin/templates` 未登录返回 307 到登录页，公网 `/login` HTML 命中同一 BUILD_ID；前端可见生产包旧 `/admin/modules`、旧 `/admin/settings`、`模块库`、`高级结构` 命中数均为 0，新 `卡片正在自动保存` 命中 1；`youdoo-sites status sd2` 为 running/OK/public 200。
+
+## Review：2026-06-17 模板编辑工作台过窄修复
+
+- 本轮修复：模板编辑层从 66.666vw 窄抽屉改为接近全屏工作台，宽度 `calc(100vw - 24px)`，高度 `calc(100dvh - 24px)`。
+- 历史修复：上下文卡片工作区曾从“卡片 + 预览 + 编辑面板在下方”改为桌面三栏；最新纠偏要求不再把最终提示词影响夹在侧边，桌面端应保持卡片画布 + 右侧编辑栏，最终提示词影响放页面底部。
+- 本轮修复：中等宽度自动回退单列，不再硬挤三栏；窄屏下卡片本身也改成单列。
+- 本轮修复：拖拽能力只挂在拖拽手柄上，不再把整张卡片设为 draggable，避免按钮点击被拖拽行为干扰。
+- 验证通过：`./node_modules/.bin/tsc --noEmit --pretty false`、`git diff --check -- src/components/templates/TemplateContextCardsPanel.tsx src/app/globals.css`、`npx impeccable detect ...`、`npm run lint`、`npm run build`。
+- 线上验证通过：`youdoo-sites build sd2` 生成 BUILD_ID `1iTUAlgQKwqQ7Qs9d_WaP`；`youdoo-sites restart sd2` 成功；公网 `/login` HTML 命中同一 BUILD_ID；生产包命中三栏 `is-editing`、全屏宽度、拖拽手柄文案和新 CSS。
+
+## Review：2026-06-17 模板详情工作台与底部提示词影响区
+
+- 本轮完成：`/admin/templates/[id]` 不再要求先点“编辑上下文卡片”，进入详情后直接渲染上下文卡片工作台，默认选中第一张卡片。
+- 本轮完成：桌面端结构改为左侧/中间卡片画布 + 右侧当前卡片编辑栏 + 底部横向最终提示词影响区；最终提示词影响不再放在侧边栏，也不再做固定条。
+- 本轮完成：右侧编辑栏作为主要操作菜单保持 sticky；保存状态和保存模板版本按钮移入右侧编辑栏，底部最终提示词影响区成为工作台最后一块。
+- 本轮完成：上下文卡片列表超高时自动收缩成卡片区滚动，单张卡片压缩为稳定摘要；右侧编辑栏不再用内部 `max-height + overflow` 截断内容。
+- 本轮完成：底部最终提示词影响区常显强制写入、仅供参考、绑定图片三列，支持复制最终提示词，并保留完整最终提示词展开查看；长内容完整换行显示，不再被限高或省略号截断。
+- 本轮完成：`TemplateEditorDrawer` 增加 `inline` 工作台模式，旧抽屉只作为兼容入口；模板列表页的“编辑上下文卡片”改为进入详情页。
+- 本轮完成：空内容草稿卡片不再被 `normalizeContextCards()` 过滤；新增空卡片后选中编辑，保存链路保留 `id / title / mode / enabled / sort_order / bound_image / llm_reference`。
+- 验证通过：`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`git diff --check -- <本轮相关文件>`、`npx impeccable detect ...`、`npm run build`、空卡片序列化 smoke。
+- 线上验证通过：`youdoo-sites build sd2` 生成 BUILD_ID `uqNLQ4i29fYiN_B6aBc6d`；`youdoo-sites restart sd2` 成功；公网 `/api/config` 200、公网 `/login` 200；公网 CSS 命中 `template-context-editor-actions`、`grid-template-columns:minmax(520px,1fr) minmax(420px,480px)`、卡片主区和卡片列表的 `clamp(...)` 收缩高度、`position:sticky`、`max-height:none`、`overflow:visible`、`white-space:pre-wrap` 和 `text-overflow:clip`；重启窗口里 public health 曾短暂出现 `URLError`，随后立即复查恢复为 `sd2 running / port ok / build ok / local 200 / public 200`，直接公网 `/api/config` 和 `/login` 持续返回 200。
+- 未完成：真实管理员登录态点击验收和截图/录屏证据未补；停用卡片数量统计、LLM 改写撤回、卡片级保存状态、发布门禁、质量复盘、权限角色拆分仍待后续落地。
+
+## 2026-06-17 - Seedance2 服务器迁移计划
+
+目标：把当前 Mac 上的 `sd2.youdoodesign.com` 网站迁移到 `server skills` 默认 Ubuntu 服务器 `42.193.221.253`，同时把目录命名从 `video-api-debugger-v12-full-todo` 改成可长期维护的 `seedance2`。
+
+### 迁移原则
+
+- [x] 先搭服务器并行灰度版，不直接切正式 `sd2.youdoodesign.com`。
+- [ ] Mac 旧服务保留为回滚源，正式切换后至少保留 24 小时。
+- [x] 服务器目录统一命名为 `seedance2`，不继续沿用 `video-api-debugger-v12-full-todo`。
+- [x] 代码、环境变量、SQLite、上传文件、视频产物、域名入口、进程管理分开处理。
+- [x] 不打印、不提交、不登记任何 API Key、飞书密钥、Session Secret、R2 密钥。
+- [x] 不复制 Mac 的 `node_modules`、`.next-prod`；服务器必须重新安装依赖、重新 Prisma generate、重新构建。
+
+### 目标目录
+
+- [x] 代码发布目录：`/home/gouki/services/seedance2/releases/<timestamp>`
+- [x] 当前版本软链接：`/home/gouki/services/seedance2/current`
+- [x] 数据目录：`/home/gouki/data/seedance2`
+- [x] SQLite 数据库：`/home/gouki/data/seedance2/dev.db`
+- [x] 上传素材目录：`/home/gouki/data/seedance2/uploads`
+- [x] 视频产物目录：`/home/gouki/data/seedance2/videos`
+- [x] 备份目录：`/home/gouki/backups/seedance2`
+- [x] 灰度端口：`127.0.0.1:3302`，避免占用服务器现有 `3000`。
+
+### 当前 Mac 数据源
+
+- [x] 生产代码目录：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`
+- [x] 共享环境文件：`/Volumes/Data/Projects/video-api-debugger/.env`
+- [x] 真实 SQLite：`/Volumes/Data/Projects/video-api-debugger/prisma/dev.db`
+- [x] 当前生产目录里的 `prisma/dev.db` 是软链接，迁移后必须改成服务器路径。
+- [x] 当前生产目录里的 `.env` 是软链接，迁移后必须改成服务器本地 `.env`。
+- [x] `public/uploads` 需要同步到服务器数据目录。
+- [x] `public/videos` 需要同步到服务器数据目录。
+- [x] `public/tools` 如仍作为页面入口，需要同步或保留在 release 中。
+
+### 执行步骤
+
+- [x] 服务器预检：确认 Ubuntu、Node、npm、nginx、磁盘、端口、systemd 状态。
+- [x] 创建服务器目录结构和权限。
+- [x] 制作本地代码快照，排除 `node_modules`、`.next*`、构建缓存和无关临时文件。
+- [x] 生成 SQLite 一致性备份，先作为灰度测试数据上传。
+- [x] 同步 `public/uploads`、`public/videos`、必要的 `public/tools`。
+- [x] 在服务器创建 `.env`，只迁移变量，不输出密钥值。
+- [x] 在服务器 release 中创建软链接：`prisma/dev.db`、`public/uploads`、`public/videos` 指向 `/home/gouki/data/seedance2`。
+- [x] 执行 `npm ci`、`npx prisma generate`、`npm run build`。
+- [x] 创建 `systemd` 服务 `seedance2.service`，监听 `127.0.0.1:3302`。
+- [x] 验证服务器本地 `http://127.0.0.1:3302/api/config` 和 `/login`。
+- [x] 配置临时灰度公网入口，优先使用 Cloudflare Tunnel，不直接改正式域名。（已完成服务器专用 Cloudflare Tunnel：`https://sd2-server.youdoodesign.com` -> `127.0.0.1:3302`）
+- [ ] 灰度验证登录、飞书回调、资产页、视频播放、图片/视频/音频上传。（已验证飞书 OAuth 起跳 `redirect_uri` 指向灰度 callback；完整登录回调仍待真实账号/飞书后台白名单验收）
+- [ ] 最终切换前停 Mac 写入，再做 SQLite 和文件增量同步。
+- [ ] 切换正式 `sd2.youdoodesign.com` 后验证公网 `/api/config`、`/login`、核心页面和上传链路。
+
+### 验收标准
+
+- [x] 服务器本地 `/api/config` 返回 Seedance 配置 JSON。
+- [x] 服务器本地 `/login` 返回 200。
+- [x] 灰度公网 `/api/config` 返回 200。
+- [x] 灰度公网 `/login` 返回 200。
+- [x] 现有用户、项目、任务、资产数量和 Mac 源数据一致。
+- [x] 已有 `public/videos` 中的视频可以通过服务器 3302 和 nginx Host 访问。
+- [x] 已有 `public/uploads` 中的图片/缩略图可以通过服务器 3302 和 nginx Host 访问。
+- [ ] 飞书登录回调可用；如使用临时域名，需要先配置飞书回调白名单。
+- [ ] 图片、视频、音频上传链路可用。
+- [x] `systemctl restart seedance2` 后服务自动恢复。
+- [x] 服务日志没有密钥输出。
+- [ ] 正式域名切换前有明确回滚路径。
+
+### 停止条件
+
+- [ ] 如果服务器 3302 端口被占用，停止并重新选端口，不抢现有 3000。
+- [ ] 如果 `.env` 无法安全迁移，停止，不用明文打印密钥。
+- [ ] 如果 SQLite 最终同步无法在停写窗口完成，停止正式切换。
+- [ ] 如果灰度公网无法稳定访问，不切正式 `sd2.youdoodesign.com`。
+- [ ] 如果飞书回调未验证，不切正式域名。
+- [ ] 如果上传或视频播放失败，不切正式域名。
+
+### Git / 版本计划
+
+- 当前生产目录已有大量未提交改动，本次迁移先形成服务器灰度环境，不混合提交无关源码。
+- 迁移脚本、服务配置和经验记录如需要落库，后续单独整理成聚焦提交。
+- 正式切换成功后，登记 `/Volumes/Data/Projects/project-version-registry.md` 和 `/Volumes/Data/Projects/public-link-registry.md`。
+- 稳定回退点建议命名：`rollback/2026-06-17-seedance2-server-migration`。
+
+### Review
+
+- [x] 已完成服务器并行灰度基础环境：`/home/gouki/services/seedance2/current` -> release `20260617153020`，`seedance2.service` active，监听 `127.0.0.1:3302`。
+- [x] 已完成数据灰度同步：SQLite 备份、`public/uploads`、`public/videos` 和 release 内软链接。
+- [x] 已完成服务器本地验证：`/api/config` 200、`/login` 200、`/assets` 200、上传图片样本 200、视频样本 200。
+- [x] 已完成 nginx Host 预配置：`sd2-server.youdoodesign.com` -> `127.0.0.1:3302`，用公网 IP + Host 头访问 `/api/config` 和 `/login` 返回 200。
+- [x] 已完成真实公网灰度域名：`https://sd2-server.youdoodesign.com` 通过服务器专用 Cloudflare Tunnel `seedance2-server` 进入 Ubuntu `127.0.0.1:3302`，公网 `/login`、`/assets`、`/api/config`、新构建静态资源、uploads 缩略图和 videos 样本均返回 200。
+- [x] 已完成飞书 OAuth 起跳灰度验证：`/api/auth/feishu/authorize` 返回 303，`redirect_uri` 为 `https://sd2-server.youdoodesign.com/api/auth/feishu/callback`。
+- [ ] 未完成飞书登录完整回调验收：需要真实账号点击登录，并确认飞书开放平台已允许灰度 callback。
+- [ ] 未执行正式 `sd2.youdoodesign.com` 切换；Mac 旧服务仍是正式入口。

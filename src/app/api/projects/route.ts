@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
       where,
       orderBy: [{ type: 'asc' }, { updated_at: 'desc' }],
       include: {
-        owner: { select: { id: true, name: true, username: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         members: includeAll
           ? { where: { status: 'active' }, select: { user_id: true, role: true, status: true } }
           : { where: { user_id: user.id }, select: { user_id: true, role: true, status: true } },

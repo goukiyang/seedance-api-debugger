@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import type { SessionUser } from '@/lib/auth/session';
 import {
   FEATURE_PROFILE_OPTIONS,
@@ -35,6 +36,7 @@ interface AdminUser {
   name: string;
   username: string;
   email: string;
+  avatar_url?: string | null;
   role: string;
   account_type: string;
   user_profile: string;
@@ -255,8 +257,7 @@ function matchesQuickView(user: AdminUser, view: QuickView) {
 }
 
 function selectedUserNames(users: AdminUser[]) {
-  const names = users.slice(0, 3).map((user) => displayUserName(user)).join('、');
-  return users.length > 3 ? `${names} 等 ${users.length} 人` : names || '未选择用户';
+  return users.length ? `已选 ${users.length} 个用户` : '未选择用户';
 }
 
 function adminUserOptionLabel(user: AdminUser) {
@@ -722,9 +723,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
 
-    const previewNames = selectedUsers.slice(0, 3).map((user) => displayUserName(user)).join('、');
-    const moreText = selectedUsers.length > 3 ? ` 等 ${selectedUsers.length} 人` : '';
-    const ok = window.confirm(`确认给 ${previewNames}${moreText} 每人发放 ${amount} 点？总计 ${amount * selectedUserIds.length} 点。`);
+    const ok = window.confirm(`确认给 ${selectedUsers.length} 个用户每人发放 ${amount} 点？总计 ${amount * selectedUserIds.length} 点。`);
     if (!ok) return;
 
     const res = await fetch('/api/admin/credits/bulk-grant', {
@@ -811,7 +810,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
     if (mergeAdminSources.length > 0) {
-      setError(`管理员账号不能作为被合并账号：${mergeAdminSources.map((user) => displayUserName(user)).join('、')}`);
+      setError(`管理员账号不能作为被合并账号，请在下方列表中取消选择 ${mergeAdminSources.length} 个管理员账号。`);
       return;
     }
     if (!reason) {
@@ -819,10 +818,8 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
 
-    const sourceNames = mergeSourceUsers.slice(0, 4).map((user) => displayUserName(user)).join('、');
-    const moreText = mergeSourceUsers.length > 4 ? ` 等 ${mergeSourceUsers.length} 个账号` : '';
     const confirmText = [
-      `确认把 ${sourceNames}${moreText} 合并到 ${displayUserName(mergeTargetUser)}？`,
+      `确认把 ${mergeSourceUsers.length} 个账号合并到保留账号？`,
       '源账号会软删除并无法登录，业务数据会迁移到保留账号。',
       '点数会以合并汇总流水转入保留账号，源账号原始流水保留用于审计。',
       `原因：${reason}`,
@@ -1211,8 +1208,11 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                         />
                       </td>
                       <td className="admin-users-cell-user">
-                        <strong>{displayUserName(user)}</strong>
-                        <span>{displayUserSubtitle(user) || `ID ${user.id.slice(0, 8)}`}</span>
+                        <UserIdentityBadge
+                          user={user}
+                          size="sm"
+                          subtitle={displayUserSubtitle(user) || `ID ${user.id.slice(0, 8)}`}
+                        />
                         <small>{hasFeishuBinding(user) ? '已绑定飞书' : '未绑定飞书'}</small>
                       </td>
                       <td>
@@ -1639,7 +1639,16 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                   <strong>2. 检查源账号和影响范围</strong>
                   <p>源账号会软删除；任务、项目、图集、成本、反馈、资产、飞书身份会迁移到保留账号。</p>
                   <p>点数转入：余额 {formatNumber(mergeCreditPreview.balance)} 点，冻结 {formatNumber(mergeCreditPreview.frozen)} 点。</p>
-                  {mergeAdminSources.length > 0 && <p className="is-danger">当前已选包含管理员：{mergeAdminSources.map((user) => displayUserName(user)).join('、')}</p>}
+                  {mergeAdminSources.length > 0 && (
+                    <p className="is-danger admin-users-inline-warning">
+                      <span>当前已选包含管理员：</span>
+                      <span className="admin-users-inline-badges">
+                        {mergeAdminSources.map((user) => (
+                          <UserIdentityBadge key={user.id} user={user} size="sm" />
+                        ))}
+                      </span>
+                    </p>
+                  )}
                 </div>
                 <input style={inputStyle} placeholder="合并原因，必填" value={mergeForm.reason} onChange={(event) => setMergeForm({ ...mergeForm, reason: event.target.value })} />
                 <button

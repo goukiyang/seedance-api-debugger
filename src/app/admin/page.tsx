@@ -89,28 +89,57 @@ export default async function AdminPage() {
   const balanceState = balanceHealth(latestProviderBalance);
   const providerBalanceSyncEnabled = Boolean(process.env.SEEDANCE_BALANCE_ENDPOINT?.trim());
   const quickLinks = [
-    { title: '计费与成本', desc: '余额快照、官方扣费、成本待办和账本自检', href: '/admin/costs' },
-    { title: '产出留存', desc: '检查预览、隐藏/恢复和任务归属追溯', href: '/admin/outputs' },
-    { title: '用户与点数', desc: '账号、长期点数、每日配额和批量发放', href: '/admin/users' },
-    { title: '点数流水', desc: '按用户、任务、类型和时间范围追溯点数账本', href: '/admin/points' },
-    { title: '项目管理', desc: '项目归属、成员、邀请和成本归集边界', href: '/admin/projects' },
-    { title: '接口配置', desc: 'Codex API 与外部集成状态', href: '/admin/integrations' },
-    { title: '反馈管理', desc: '查看、归档和导出用户反馈', href: '/admin/feedback' },
+    {
+      title: '用户与项目',
+      desc: '成员、权限、项目归属和点数流水集中处理。',
+      links: [
+        { title: '用户管理', desc: '账号、长期点数和每日配额', href: '/admin/users' },
+        { title: '项目管理', desc: '项目归属、成员和邀请边界', href: '/admin/projects' },
+        { title: '点数流水', desc: '按用户、任务和类型追溯账本', href: '/admin/points' },
+      ],
+    },
+    {
+      title: '产出与反馈',
+      desc: '生成结果、留存、隐藏恢复和用户反馈放在一处。',
+      links: [
+        { title: '产出留存', desc: '检查预览、隐藏恢复和任务追溯', href: '/admin/outputs' },
+        { title: '反馈管理', desc: '查看、归档和导出用户反馈', href: '/admin/feedback' },
+      ],
+    },
+    {
+      title: '成本与接口',
+      desc: '费用、余额、接口配置和外部 Provider 状态集中管理。',
+      links: [
+        { title: '计费与成本', desc: '余额快照、官方扣费和账本自检', href: '/admin/costs' },
+        { title: 'API 设置', desc: 'Musk API、图形生成和外部集成', href: '/admin/integrations' },
+      ],
+    },
+    {
+      title: '模板工作台',
+      desc: '模板上下文卡片、LLM 新建模板和执行链路集中查看。',
+      links: [
+        { title: '模板工作台', desc: '卡片编排、绑定图片、试生成和发布检查', href: '/admin/templates' },
+        { title: '执行链路', desc: '查看模板 LLM 调用和生成 Agent 日志', href: '/admin/agent-runs' },
+      ],
+    },
   ];
 
   return (
     <div className="admin-overview-page">
       <PageBanner
-        eyebrow="管理员后台"
-        title="视频生成成本与产能驾驶舱"
-        description="先看生成量、官方成本、清晰度消耗和异常待办，再进入产出、成本、项目和用户明细处理。"
+        eyebrow="管理中心"
+        title="管理中心"
+        description="先看生成量、成本和异常，再按用户项目、产出反馈、成本接口、模板链路进入二级管理。"
         actions={(
           <>
-            <Link className="btn btn-secondary" href="/admin/outputs">
-              查看产出明细
+            <Link className="btn btn-secondary" href="/admin/users">
+              用户管理
+            </Link>
+            <Link className="btn btn-secondary" href="/admin/projects">
+              项目管理
             </Link>
             <Link className="btn btn-primary" href="/admin/costs">
-              处理成本异常
+              成本与接口
             </Link>
           </>
         )}

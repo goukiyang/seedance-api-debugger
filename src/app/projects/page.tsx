@@ -6,7 +6,7 @@ import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
-import { displayUserName } from '@/lib/users/display';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 
 interface ProjectItem {
@@ -20,7 +20,7 @@ interface ProjectItem {
   updated_at: string;
   my_role: string | null;
   downloadable_task_count?: number;
-  owner?: { name: string | null; username: string | null };
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { members: number; tasks: number; reference_albums?: number };
 }
 
@@ -45,17 +45,13 @@ function canDeleteProject(project: ProjectItem): boolean {
   return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
 
-function projectOwnerName(project: ProjectItem): string {
-  return displayUserName({
-    id: project.owner_user_id,
-    name: project.owner?.name,
-    username: project.owner?.username,
-  });
-}
-
 function projectDisplayName(project: ProjectItem): string {
   if (project.type === 'personal') return '个人空间';
   return project.name;
+}
+
+function projectOwnerUser(project: ProjectItem) {
+  return project.owner || { id: project.owner_user_id, name: null, username: null };
 }
 
 function projectRoleLabel(role: string | null): string {
@@ -88,7 +84,6 @@ function projectBillingDescription(project: Pick<ProjectItem, 'type'>): string {
 function projectActionMeta(project: ProjectItem): string {
   return [
     projectStatusLabel(project.status),
-    `负责人 ${projectOwnerName(project)}`,
     `任务 ${project._count?.tasks ?? 0}`,
     `图集 ${project._count?.reference_albums ?? 0}`,
   ].join(' · ');
@@ -408,14 +403,13 @@ export default function ProjectsPage() {
               return (
               <div key={project.id} className="shell-link-card">
                 <Link href={`/projects/${project.id}`} className="link">
-                  <strong>
-                    {nameCounts[displayName] > 1 ? `${displayName} · ${projectOwnerName(project)}` : displayName}
-                  </strong>
+                  <strong>{displayName}</strong>
                 </Link>
                 <span>{project.description || `${project.type} · ${project.visibility}`}</span>
-                <span>
+                <span className="project-owner-meta">
                   状态：{projectStatusLabel(project.status)}
-                  {' · '}负责人：{projectOwnerName(project)}
+                  {' · '}负责人：
+                  <UserIdentityBadge user={projectOwnerUser(project)} size="sm" />
                 </span>
                 <span>
                   我的权限：{projectRoleLabel(project.my_role)}

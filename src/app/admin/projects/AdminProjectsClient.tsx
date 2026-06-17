@@ -5,6 +5,7 @@ import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserName } from '@/lib/users/display';
 
 interface ProjectItem {
@@ -14,7 +15,7 @@ interface ProjectItem {
   type: string;
   visibility: string;
   status: string;
-  owner?: { name: string | null; username: string | null };
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { members: number; tasks: number; reference_albums?: number };
   updated_at: string;
 }
@@ -70,7 +71,7 @@ function canDelete(project: ProjectItem): boolean {
 }
 
 function projectDisplayName(project: ProjectItem): string {
-  if (project.type === 'personal') return `个人空间 · ${ownerLabel(project)}`;
+  if (project.type === 'personal') return '个人空间';
   return project.name;
 }
 
@@ -446,7 +447,7 @@ export default function AdminProjectsClient() {
                     </div>
                   </td>
                   <td>{project.type} / {project.visibility}</td>
-                  <td>{ownerLabel(project)}</td>
+                  <td><UserIdentityBadge user={project.owner} size="sm" /></td>
                   <td>{project._count?.members ?? 0}</td>
                   <td>任务 {project._count?.tasks ?? 0} / 图集 {project._count?.reference_albums ?? 0}</td>
                   <td>{project.status}</td>

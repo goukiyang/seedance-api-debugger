@@ -5,6 +5,7 @@ import { getSession } from '@/lib/auth/session';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
 import PageBanner from '@/components/PageBanner';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 import {
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
@@ -12,7 +13,6 @@ import {
   usdToCnyRateText,
 } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { displayUserName } from '@/lib/users/display';
 import OfficialChargeForm from './OfficialChargeForm';
 import OfficialChargeImportForm from './OfficialChargeImportForm';
 import ProviderBalancePanel from './ProviderBalancePanel';
@@ -49,11 +49,11 @@ function costStatusLabel(status: string) {
   return '未记录';
 }
 
-function taskOwnerLabel(task: {
-  owner?: { name: string; username: string } | null;
-  user?: { name: string; username: string } | null;
+function taskOwnerUser(task: {
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null } | null;
+  user?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null } | null;
 }) {
-  return displayUserName(task.owner || task.user);
+  return task.owner || task.user || null;
 }
 
 function formatCurrencyTotals(totals: Array<{ currency: string; amount_minor: number; amount_micros?: number }>) {
@@ -211,8 +211,8 @@ export default async function AdminCostsPage() {
         provider_cost_currency: true,
         created_at: true,
         project: { select: { id: true, name: true } },
-        owner: { select: { name: true, username: true } },
-        user: { select: { name: true, username: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       },
     }),
     prisma.providerApiRequest.findMany({
@@ -243,7 +243,7 @@ export default async function AdminCostsPage() {
         id: true,
         name: true,
         status: true,
-        owner: { select: { name: true, username: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         budget_account: true,
         _count: { select: { tasks: true, video_cards: true } },
       },
@@ -377,7 +377,7 @@ export default async function AdminCostsPage() {
                 return (
                   <tr key={project.id}>
                     <td><Link className="link" href={`/projects/${project.id}`}>{project.name}</Link></td>
-                    <td>{displayUserName(project.owner)}</td>
+                    <td><UserIdentityBadge user={project.owner} size="sm" /></td>
                     <td>{formatPoint(budgetCredits)}</td>
                     <td>{formatPoint(usedCredits)}</td>
                     <td>{formatPoint(frozenCredits)}</td>
@@ -509,7 +509,7 @@ export default async function AdminCostsPage() {
                       <span className="text-red">未归属</span>
                     )}
                   </td>
-                  <td>{taskOwnerLabel(task)}</td>
+                  <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>
                   <td>{task.local_status}</td>
                   <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
                   <td>{costStatusLabel(task.provider_cost_status)}</td>

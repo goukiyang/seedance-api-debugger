@@ -10,7 +10,6 @@ import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { displayUserName } from '@/lib/users/display';
 
 type OutputOwner = {
   id: string;
@@ -545,9 +544,24 @@ export default function AdminOutputsClient() {
                         <span>成本状态：{output.provider_cost_status}</span>
                         <span>留存：{deletionSummary(output)}</span>
                         {output.delete_reason && <span>原因：{output.delete_reason}</span>}
-                        {output.user_deleted_by_user && <span>操作人：{displayUserName(output.user_deleted_by_user)}</span>}
-                        {output.admin_hidden_by_user && <span>操作人：{displayUserName(output.admin_hidden_by_user)}</span>}
-                        {output.restored_by_user && <span>恢复人：{displayUserName(output.restored_by_user)}</span>}
+                        {output.user_deleted_by_user && (
+                          <span className="outputs-audit-user">
+                            <span>操作人：</span>
+                            <UserIdentityBadge user={output.user_deleted_by_user} size="sm" />
+                          </span>
+                        )}
+                        {output.admin_hidden_by_user && (
+                          <span className="outputs-audit-user">
+                            <span>操作人：</span>
+                            <UserIdentityBadge user={output.admin_hidden_by_user} size="sm" />
+                          </span>
+                        )}
+                        {output.restored_by_user && (
+                          <span className="outputs-audit-user">
+                            <span>恢复人：</span>
+                            <UserIdentityBadge user={output.restored_by_user} size="sm" />
+                          </span>
+                        )}
                       </div>
                     </details>
                   </div>

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthError, getSession } from '@/lib/auth/session';
-import { assertCanEditCanvas } from '@/lib/canvas/permissions';
+import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import {
   createImageGeneration,
   getImageGenerationApiSettings,
@@ -11,7 +10,7 @@ import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/ass
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { uploadAsset } from '@/lib/assets/storage';
 import { prisma } from '@/lib/prisma';
-import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { getProjectAccess, getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 
@@ -222,6 +221,37 @@ async function writeGenerationAttemptLog(params: {
   });
 }
 
+async function assertCanAttachCanvasContext(user: SessionUser, canvasDocumentId: string) {
+  const canvas = await prisma.canvasDocument.findUnique({
+    where: { id: canvasDocumentId },
+    select: {
+      id: true,
+      owner_user_id: true,
+      project_id: true,
+      status: true,
+    },
+  });
+
+  if (!canvas || canvas.status === 'deleted') {
+    throw new AuthError('画布不存在', 404);
+  }
+
+  if (user.role === 'admin' || canvas.owner_user_id === user.id) {
+    return canvas;
+  }
+
+  if (!canvas.project_id) {
+    throw new AuthError('无权编辑此画布', 403);
+  }
+
+  const projectAccess = await getProjectAccess(user, canvas.project_id);
+  if (projectAccess.role !== 'project_owner' && projectAccess.role !== 'editor') {
+    throw new AuthError('无权编辑此画布', 403);
+  }
+
+  return canvas;
+}
+
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -247,7 +277,7 @@ export async function POST(request: NextRequest) {
     const canvasDocumentId = cleanString(body.canvas_document_id || body.canvasDocumentId) || null;
     const canvasNodeId = cleanString(body.canvas_node_id || body.canvasNodeId) || null;
     if (canvasDocumentId) {
-      const canvas = await assertCanEditCanvas(user, canvasDocumentId);
+      const canvas = await assertCanAttachCanvasContext(user, canvasDocumentId);
       if (canvas.project_id && canvas.project_id !== project.id) {
         return NextResponse.json({ error: '画布不属于当前项目' }, { status: 400 });
       }

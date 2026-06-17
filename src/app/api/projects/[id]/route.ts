@@ -82,7 +82,7 @@ export async function GET(
           where: { status: 'active' },
           orderBy: { joined_at: 'asc' },
           include: {
-            user: { select: { id: true, name: true, username: true, email: true, role: true, status: true, account_type: true } },
+            user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, role: true, status: true, account_type: true } },
           },
         },
         invites: {

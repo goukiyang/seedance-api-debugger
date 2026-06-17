@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ShareAlbumDialog from '@/components/ShareAlbumDialog';
-import { displayUserName } from '@/lib/users/display';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 
 type Scope = 'mine' | 'project' | 'shared' | 'public' | 'all';
 
@@ -38,7 +38,7 @@ interface AlbumItem {
   image_count: number;
   active_share_count: number;
   updated_at: string;
-  owner?: { name: string; username: string };
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   project?: { name: string } | null;
   permissions: {
     view: boolean;
@@ -63,7 +63,7 @@ interface PublicSubmission {
   submit_note: string | null;
   status: string;
   created_at: string;
-  submitted_by?: { id: string; name: string; email?: string | null } | null;
+  submitted_by?: { id: string; name: string | null; username?: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null } | null;
   public_folder?: { id: string; name: string } | null;
   source_album?: {
     id: string;
@@ -532,8 +532,9 @@ export default function ReferenceAlbumsClient() {
                 </div>
                 <div className="album-review-copy">
                   <strong>{submission.name}</strong>
-                  <span>
-                    {submission.submitted_by?.name || '未知用户'} 提交到 {submission.public_folder?.name || '未指定文件夹'}
+                  <span className="album-review-submitter">
+                    <UserIdentityBadge user={submission.submitted_by} size="sm" />
+                    <span>提交到 {submission.public_folder?.name || '未指定文件夹'}</span>
                   </span>
                   {submission.submit_note && <p>{submission.submit_note}</p>}
                 </div>
@@ -676,7 +677,7 @@ export default function ReferenceAlbumsClient() {
                           || album.project?.name
                           || (album.album_type === 'public' ? '公共图集' : album.album_type === 'project' ? '项目图集' : '个人图集')}
                       </span>
-                      <span>{displayUserName(album.owner)}</span>
+                      <UserIdentityBadge user={album.owner} size="sm" />
                     </div>
                     <div className="album-card-perms">
                       {album.permissions.view && <span>可查看</span>}

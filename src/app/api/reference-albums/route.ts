@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
       where: baseWhere,
       orderBy: { updated_at: 'desc' },
       include: {
-        owner: { select: { id: true, name: true, username: true, account_type: true } },
+        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         project: { select: { id: true, name: true, owner_user_id: true, status: true } },
         publicFolder: { select: { id: true, name: true, description: true, sort_order: true, status: true } },
         shares: {
@@ -255,7 +255,7 @@ function serializeAlbum(
     status: string;
     created_at: Date;
     updated_at: Date;
-    owner: { id: string; name: string; username: string; account_type: string };
+    owner: { id: string; name: string; username: string; email: string; avatar_url: string | null; account_type: string };
     project: { id: string; name: string; owner_user_id: string; status: string } | null;
     publicFolder: { id: string; name: string; description: string | null; sort_order: number; status: string } | null;
     images: Array<{ id: string }>;
