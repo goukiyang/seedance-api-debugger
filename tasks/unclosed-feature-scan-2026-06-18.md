@@ -33,6 +33,8 @@
 
 补充说明：CodeGraph 在该目录没有初始化，所以本轮用 `rg` 和定向读文件完成扫描。
 
+状态修正：本报告原始扫描发生在 `f65e151` 检查点上传前。涉及“未提交 / dirty / 未上传”的源码状态，已在 `f65e151` 和 rollback tag `rollback/2026-06-18-sd2-deployed-checkpoint` 中整理上传；未闭环判断仍以功能验收标准为准。
+
 ## 3. 已经闭环的部分
 
 ### 3.1 无线画布文本 / 脚本 LLM
@@ -255,11 +257,12 @@
 - 该图片可直接用于图生视频或 first_last_frame。
 - 历史任务能从画布内选择并复用。
 
-### P0-7：老画布隐藏 / 删除还没有形成远端版本
+### P0-7：老画布隐藏 / 删除已形成远端版本，恢复策略仍需明确
 
 现象：
 
-- 本地已经删除旧画布代码和 API，但这批删除还没有形成提交上传。
+- 旧画布代码和 API 的删除已经进入 `f65e151` 检查点。
+- 后续如果需要复用旧 `CanvasDocument` 思路，必须明确从历史版本恢复哪部分能力。
 
 证据：
 
@@ -278,31 +281,30 @@
 
 本质问题：
 
-- 线上和远端 Git 的“回退点”不等于当前本地工作区。
-- 如果现在回退到最近提交，只能回到“文本 LLM 接通”的版本，不能保证旧画布清理也在。
+- Git 现在已有回退点，但产品上仍要决定“旧画布完全归档”还是“抽取旧保存能力复用到新无线画布”。
 
 推荐动作：
 
-- 单独做一个“旧画布归档 / 隐藏”提交。
+- 如需恢复旧保存能力，先从历史版本定向恢复服务层，不要恢复旧入口。
 - 确认是否已把旧画布源码打包 zip 保存。
 - 验证 `/workbench`、导航、middleware 都不会再把用户带回旧画布。
 
 验收标准：
 
 - 旧画布源码已归档。
-- Git 远端有单独提交和 rollback tag。
+- Git 远端有提交和 rollback tag：`f65e151` / `rollback/2026-06-18-sd2-deployed-checkpoint`。
 - 公网页面不会出现旧画布入口。
 
 ## 5. P1 未闭环问题
 
-### P1-1：模板系统大量新增文件未提交，且 TODO 仍有关键未完成
+### P1-1：模板系统阶段代码已上传，但 TODO 仍有关键未完成
 
 现象：
 
-- 模板系统新增了很多文件，但 Git 状态显示仍是未跟踪。
+- 模板系统新增文件已进入 `f65e151` 检查点。
 - `tasks/todo.md` 里模板工作台、卡片编辑、图片绑定、发布检查、质量复盘仍有大量未完成项。
 
-未提交文件示例：
+已纳入检查点的文件示例：
 
 - `src/app/admin/templates/`
 - `src/app/api/templates/[id]/context-cards/`
@@ -375,7 +377,7 @@
 
 - `src/app/assets/page.tsx`：有资产页筛选、选择、批量下载、批量移动、加入工作区 / 图集等能力。
 - `src/app/api/assets/library/route.ts`：把视频任务、资产、参考图统一成资产库条目。
-- Git 状态中 `src/app/assets/page.tsx` 未列为 dirty，但相关资产 API / 组件仍有修改，如 `src/app/api/assets/create-from-url/route.ts`、`src/app/api/assets/upload-and-create/route.ts`、`src/lib/assets/storage.ts`、`src/components/SeedanceAssetPanel.tsx`。
+- 相关资产 API / 组件已进入 `f65e151` 检查点，如 `src/app/api/assets/create-from-url/route.ts`、`src/app/api/assets/upload-and-create/route.ts`、`src/lib/assets/storage.ts`、`src/components/SeedanceAssetPanel.tsx`。
 
 本质问题：
 
@@ -477,9 +479,9 @@
 - 等 P0 生成闭环完成后再补。
 - 不要先花大量时间打磨这些体验，否则会把“不能真实生成”的根问题掩盖掉。
 
-## 7. 当前没有上传 / 不应直接混合上传的内容
+## 7. 已完成上传 / 后续不应直接混合开发的内容
 
-当前工作区有大量 dirty 文件，不适合一把梭提交。建议按业务意图拆开。
+当时生产工作区里的已上线源码已整理为检查点提交 `f65e151`，并推送 rollback tag `rollback/2026-06-18-sd2-deployed-checkpoint`。下面这些分组仍然有参考价值：后续继续开发时，应按业务意图拆分，而不是把未闭环新功能继续混进同一个提交。
 
 ### 建议提交 A：旧画布归档 / 隐藏
 
