@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无线画布 - 专业视频创作工具</title>
+    <meta name="description" content="无线画布 - AI驱动的专业视频创作画布工具，支持节点式工作流编辑">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <!-- Top Header Bar -->
+    <header id="header-bar" class="header-bar">
+        <div class="header-left">
+            <div class="logo" id="logo">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <span class="logo-text">无线画布</span>
+            </div>
+            <div class="project-name" id="project-name" contenteditable="true">未命名</div>
+        </div>
+        <div class="header-right">
+            <button class="header-btn icon-btn is-coming-soon" id="btn-collab" title="协作待接入" data-coming-soon="多人协作还没有接入后台权限和实时同步，当前不会创建协作空间。">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>
+                    <line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>
+                </svg>
+            </button>
+            <button class="header-btn icon-btn is-coming-soon" id="btn-share" title="分享待接入" data-coming-soon="分享链接还没有接入后台权限校验，当前不会生成公开分享地址。">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                </svg>
+            </button>
+            <button class="header-btn icon-btn is-coming-soon" id="btn-notification" title="通知待接入" data-coming-soon="通知中心还没有接入主站消息系统，当前不会读取真实通知。">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+            </button>
+            <div class="avatar is-coming-soon" id="user-avatar" role="button" tabindex="0" title="用户菜单待接入" data-coming-soon="用户菜单还没有接入主站账号面板，登录状态由外层 sd2 页面保护。"></div>
+        </div>
+    </header>
+
+    <!-- Main Canvas Area -->
+    <main id="canvas-workspace" class="canvas-workspace">
+        <!-- Left Toolbar (vertically centered) -->
+        <aside id="left-toolbar" class="left-toolbar">
+            <button class="toolbar-btn" id="tool-add" data-tooltip="添加节点">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+            </button>
+            <button class="toolbar-btn" id="tool-toolbox" data-tooltip="打开工具箱" data-panel="toolbox-panel">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.73 12.73l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
+            </button>
+            <button class="toolbar-btn" id="tool-assets" data-tooltip="我的素材" data-panel="assets-panel">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                </svg>
+            </button>
+            <button class="toolbar-btn" id="tool-history" data-tooltip="历史记录" data-panel="history-panel">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+            </button>
+            <button class="toolbar-btn" id="tool-help" data-tooltip="帮助" data-help-tip="当前版本支持双击画布或点左侧加号创建节点，真实保存、点数和后台生成还在接入中。">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </button>
+            <button class="toolbar-btn is-coming-soon" id="tool-feedback" data-tooltip="反馈待接入" data-coming-soon="反馈入口还没有接入后台反馈中心，当前不会提交反馈内容。">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            </button>
+        </aside>
+
+        <!-- Side Panels (slide from left) -->
+        <div id="toolbox-panel" class="side-panel">
+            <div class="panel-header">
+                <span>我的工具箱</span>
+                <button class="panel-close" data-close-panel>✕</button>
+            </div>
+            <div class="toolbox-grid" id="toolbox-grid"></div>
+        </div>
+
+        <div id="assets-panel" class="side-panel">
+            <div class="panel-header">
+                <div class="panel-tabs">
+                    <span class="panel-tab active">我的素材</span>
+                    <span class="panel-tab">我的主体库</span>
+                </div>
+                <button class="panel-close" data-close-panel>✕</button>
+            </div>
+            <div class="asset-categories">
+                <span class="asset-cat active">全部</span>
+                <span class="asset-cat">其它</span>
+                <span class="asset-cat">人物</span>
+                <span class="asset-cat">场景</span>
+                <span class="asset-cat">物品</span>
+                <span class="asset-cat">风格</span>
+            </div>
+            <div class="empty-state">
+                <strong>素材库待接入</strong>
+                <span>后续会读取后台资产、上传图片和已生成视频；当前只支持把本地文件拖成画布节点。</span>
+            </div>
+        </div>
+
+        <div id="history-panel" class="side-panel">
+            <div class="panel-header">
+                <span>生成历史</span>
+                <button class="panel-close" data-close-panel>✕</button>
+            </div>
+            <div class="empty-state">
+                <strong>生成历史待接入</strong>
+                <span>这里还没有读取 sd2 任务记录；真实任务状态、预览和下载会在接入后显示。</span>
+            </div>
+        </div>
+
+        <!-- Canvas Container -->
+        <div id="canvas-container" class="canvas-container">
+            <div id="selection-marquee" class="selection-marquee hidden"></div>
+            <svg id="connections-svg" class="connections-svg" overflow="visible" style="overflow: visible;"></svg>
+            <div id="canvas" class="canvas">
+                <!-- Welcome Overlay -->
+                <div id="canvas-welcome" class="canvas-welcome">
+                    <div class="welcome-hint">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                        </svg>
+                        双击画布 自由生成节点
+                    </div>
+                    <div class="quick-start-cards">
+                        <div class="quick-card" data-type="script-gen">
+                            <div class="quick-card-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                </svg>
+                            </div>
+                            <span class="quick-card-text">故事脚本生成</span>
+                        </div>
+                        <div class="quick-card" data-type="character">
+                            <div class="quick-card-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                                </svg>
+                            </div>
+                            <span class="quick-card-text">角色三视图</span>
+                        </div>
+                        <div class="quick-card" data-type="auto-video">
+                            <div class="quick-card-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+                                    <line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/>
+                                </svg>
+                            </div>
+                            <span class="quick-card-text">自动图生视频</span>
+                        </div>
+                        <div class="quick-card" data-type="music">
+                            <div class="quick-card-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M9 18V5l12-2v13"/>
+                                    <circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+                                </svg>
+                            </div>
+                            <span class="quick-card-text">音乐生成</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Floating Add Node Menu (appears on double-click) -->
+        <div id="add-node-menu" class="add-node-menu hidden">
+            <div class="menu-section-title">添加节点</div>
+            <div class="menu-item" data-node-type="text">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/>
+                </svg>
+                <span>文本</span>
+            </div>
+            <div class="menu-item" data-node-type="image">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                </svg>
+                <span>图片</span>
+            </div>
+            <div class="menu-item" data-node-type="video">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+                    <line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/>
+                </svg>
+                <span>视频</span>
+            </div>
+            <div class="menu-item" data-node-type="video-compose">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/>
+                    <polyline points="2 12 12 17 22 12"/>
+                </svg>
+                <span>视频合成</span>
+                <span class="badge beta">Beta</span>
+            </div>
+            <div class="menu-item" data-node-type="director">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
+                </svg>
+                <span>导演台</span>
+                <span class="badge new">NEW</span>
+            </div>
+            <div class="menu-item" data-node-type="audio">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                </svg>
+                <span>音频</span>
+            </div>
+            <div class="menu-item" data-node-type="script">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <span>脚本</span>
+                <span class="badge beta">Beta</span>
+            </div>
+            <div class="menu-divider"></div>
+            <div class="menu-section-title">添加资源</div>
+            <div class="menu-item" data-action="upload">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span>上传</span>
+            </div>
+            <div class="menu-item is-coming-soon" data-action="from-history" data-coming-soon="生成历史还没有接入后台任务记录，当前不能从历史选择素材。">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                </svg>
+                <span>从生成历史选择</span>
+            </div>
+        </div>
+
+        <!-- Floating Canvas Bottom Toolbar -->
+        <div id="canvas-floating-toolbar" class="canvas-floating-toolbar">
+            <button class="toolbar-pill-btn" id="btn-fit" title="整理画布">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>
+                </svg>
+            </button>
+            <button class="toolbar-pill-btn" id="btn-minimap" title="画布小地图">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/><path d="M3 20h18"/>
+                </svg>
+            </button>
+            <button class="toolbar-pill-btn active" id="btn-snap" title="智能吸附">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 10a7 7 0 0 0 14 0V4h-4v6a3 3 0 0 1-6 0V4H5v6z"/><line x1="5" y1="7" x2="9" y2="7"/><line x1="15" y1="7" x2="19" y2="7"/>
+                </svg>
+            </button>
+            <span class="toolbar-pill-divider"></span>
+            <button class="toolbar-pill-btn zoom-ctrl" id="zoom-out" title="缩小">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <span class="zoom-level" id="zoom-level">100%</span>
+            <button class="toolbar-pill-btn zoom-ctrl" id="zoom-in" title="放大">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+        </div>
+    </main>
+
+    <script src="assets/director/liblib/director-liblib-data.js"></script>
+    <script src="canvas-engine.js"></script>
+    <script src="generation-api.js"></script>
+    <script src="app.js"></script>
+    <script type="module" src="director-3d.js"></script>
+</body>
+</html>
