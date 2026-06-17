@@ -80,6 +80,38 @@
   cursor: grabbing;
 }
 
+.loadingState {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: oklch(0.96 0 0);
+  pointer-events: none;
+  text-align: center;
+}
+
+.loadingState strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.loadingState small {
+  color: oklch(0.78 0 0);
+  font-size: 12px;
+}
+
+.loadingSpinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid oklch(0.88 0 0 / 0.24);
+  border-top-color: oklch(0.76 0.14 170);
+  border-radius: 999px;
+  animation: preview-loading-spin 0.8s linear infinite;
+}
+
 .image {
   position: absolute;
   top: 50%;
@@ -92,8 +124,22 @@
   will-change: transform;
 }
 
+.imageLoading {
+  opacity: 0;
+}
+
+.imageReady {
+  opacity: 1;
+}
+
 .stageDragging .image {
   transition: none;
+}
+
+@keyframes preview-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 640px) {

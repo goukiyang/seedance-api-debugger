@@ -28,6 +28,8 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   const resetView = useCallback(() => {
     setScale(1);
@@ -62,6 +64,8 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
 
   useEffect(() => {
     resetView();
+    setImageLoaded(false);
+    setImageError(false);
   }, [resetView, src]);
 
   const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
@@ -127,7 +131,7 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
       <div className={styles.toolbar}>
         <div className={styles.title}>
           <strong>{fileName || alt}</strong>
-          <span>{Math.round(scale * 100)}%</span>
+          <span>{imageError ? '加载失败' : imageLoaded ? `${Math.round(scale * 100)}%` : '加载中...'}</span>
         </div>
         <div className={styles.actions}>
           <button type="button" onClick={() => zoomAtCenter(1 / SCALE_STEP)} title="缩小" aria-label="缩小图片">
@@ -148,6 +152,7 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
         ref={stageRef}
         className={`${styles.stage} ${dragging ? styles.stageDragging : ''}`}
         title="滚轮缩放，拖动查看"
+        aria-busy={!imageLoaded && !imageError}
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -160,12 +165,27 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
         }}
       >
         {/* 参考图来源可能是本地、远程或临时地址，这里保留原生 img 以支持原图缩放查看。 */}
+        {(!imageLoaded || imageError) && (
+          <div className={styles.loadingState} role="status" aria-live="polite">
+            {!imageError && <span className={styles.loadingSpinner} />}
+            <strong>{imageError ? '图片加载失败' : '图片加载中...'}</strong>
+            <small>{imageError ? '请关闭后重试，或检查图片地址。' : '原图较大时可能需要几秒。'}</small>
+          </div>
+        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
           alt={alt}
-          className={styles.image}
+          className={`${styles.image} ${imageLoaded ? styles.imageReady : styles.imageLoading}`}
           draggable={false}
+          onLoad={() => {
+            setImageLoaded(true);
+            setImageError(false);
+          }}
+          onError={() => {
+            setImageLoaded(false);
+            setImageError(true);
+          }}
           style={{
             transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
           }}
