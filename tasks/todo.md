@@ -5562,6 +5562,12 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - 文字 LLM 继续走 Musk API / `gpt-5.4`；文生图、图生图、首尾帧草图必须走独立图形生成配置。
 - 图形生成 Provider 使用 Musk APIs 网关，不使用 `banana2` 作为 provider 或默认模型；默认模型使用 `gemini-3.1-flash-image-preview`。
 
+2026-06-18 口径修正：
+
+- 上面是 2026-06-15 当时的实现记录；无线画布正式版的产品/业务口径已改为“图片用后端 `banana2`”。
+- 开始无线画布图片正式接入前，必须先确认 `banana2` 到当前 `image_generation_api_v1` 的映射关系：它是新的 provider、后台配置名称、模型别名，还是业务侧对图形生成能力的统称。
+- 未确认映射前，不允许在无线画布静态前端直接写死 `banana2`、Gemini 模型或 Musk 网关地址；必须由后台配置统一下发。
+
 已落地：
 
 - [x] 新增 `src/lib/integrations/image-generation.ts`，使用独立配置键 `image_generation_api_v1`。
@@ -5800,6 +5806,58 @@ Review - 2026-06-17 自建通知中心落地：
 - 所以应对方式不能只补 UI，也不能只接一个生成接口；必须把项目、保存、生成、点数、素材、历史、下载、反馈这些链路串起来。
 - 正确顺序是先保证“不会误导用户”，再保证“能真实生成”，最后补“长期创作体验”。
 
+### 2026-06-18 正式版口径补充：不做预览版
+
+用户最新确认：
+
+- 无线画布要做正式版，不是预览版。
+- 图片生成走后端 `banana2` 图形生成能力。
+- 文字 / 脚本 / 文案改写走 `gpt5.4`。
+- 视频生成走普通生成页面同一套默认视频 API，不另起视频后端。
+- 点数、项目、视频卡、任务、资产、历史、下载、截图都必须复用现有后台体系。
+
+闭环判断：
+
+- 当前规划方向基本齐全，但还没有闭环到“正式版可上线”。
+- 最大缺口不是 UI，而是三条生成链路和现有后台体系还没有全部打通。
+- 只要 image/video 仍可能返回 mock，或任务没有项目/视频卡/点数/资产归属，就不能叫正式版。
+- 只要视频成功后不能自动保存本地并生成截图，就不能叫结果闭环。
+- 只要画布刷新会丢节点、连线、任务和资产引用，就不能叫创作闭环。
+
+正式版能力边界：
+
+- 文本正式链路：画布文本节点、脚本节点、提示词改写统一调用后台 `gpt5.4` 配置；前端不得写死 key、base_url 或模型，只从后台配置读取。
+- 图片正式链路：画布图片节点、图生图、高清修复、首尾帧草图统一调用后端 `banana2` 图形生成能力；如果底层实现实际通过 Musk/Gemini 网关转发，也必须在后台配置层统一抽象为图形生成能力，画布侧只认后台给出的 endpoint 和能力开关。
+- 视频正式链路：文生视频、图生视频、首尾帧视频统一复用 `/api/tasks/create`，和普通生成页面一致，不能新建一套只给画布用的扣点/任务/Provider 流程。
+- 状态正式链路：视频任务统一轮询 `/api/video/status/:taskId?refresh=true`，直到 `succeeded`、`failed` 或 `cancelled`，不能只看创建返回。
+- 资产正式链路：生成图片、上传图片、生成视频、视频截图都必须进入资产/参考图/任务体系，不能只留浏览器 blob 或临时节点。
+- 点数正式链路：生成前估价和余额校验；生成中冻结或预扣；成功实扣；失败释放；后台点数流水能看出来源 `ultimate_canvas`。
+
+正式版 MVP 必做清单：
+
+- [ ] 去掉 `/tools/ultimate-canvas` 的“预览版，不扣点”表达，改成正式工具状态；未接通能力先禁用，不得伪装可用。
+- [ ] `CanvasGenerationAPI` 无 endpoint 时不得返回 mock 成功；必须返回结构化错误或让按钮禁用。
+- [ ] 外层页面给 iframe 注入项目、视频卡、用户、点数、后台模型配置和 endpoint。
+- [ ] 文本/脚本节点接 `gpt5.4`，生成结果写回节点并记录 OperationLog。
+- [ ] 图片节点接后端 `banana2`，成功后写回 `asset_id`、`reference_image_id`、`thumbnail_url`。
+- [ ] 视频节点接普通生成页面默认视频 API，即 `/api/tasks/create`。
+- [ ] 视频状态轮询接 `/api/video/status/:taskId?refresh=true`，成功后显示本地视频、截图、下载和任务详情。
+- [ ] 本地上传先上传服务器并入库，不能把本地文件路径直接当生成参考。
+- [ ] 画布文档保存/恢复节点、连线、提示词、参数、任务 ID、资产 ID、参考图 ID。
+- [ ] 生成历史和素材面板读取真实任务/资产，不再显示假历史或只提示待接入。
+- [ ] 后台点数流水、项目页、视频卡详情、资产库都能查到无线画布产生的内容。
+
+特别注意：
+
+- [ ] `banana2` 是正式版图片能力口径；实现时必须确认后台真实配置名称、provider、模型和 API 地址，不允许在静态前端硬编码。
+- [ ] `gpt5.4` 是文字能力口径；如果后台 Musk API 未配置，所有 LLM 按钮要前置禁用并提示去 API 设置。
+- [ ] 视频必须走普通生成页同一套 `/api/tasks/create`，不要再写 `/api/video/create` 这种不存在或不完整的旁路接口。
+- [ ] 首尾帧生成必须先确保首帧/尾帧是 provider 可访问的公开 URL 或站内资产，不接受本地路径。
+- [ ] 生成成功不等于闭环；必须等状态终态、本地视频保存成功、截图生成成功、资产/任务/流水可查。
+- [ ] 付费真实生成必须得到明确授权；开发阶段先用非付费 mock/fixture 验证状态机。
+- [ ] iframe 静态页面要注意登录保护、CSRF/同源请求、跨窗口消息校验，不能让全屏静态页绕过权限。
+- [ ] 数据库迁移、点数扣减、Provider 调用属于高风险改动，必须单独提交、单独验证、可回滚。
+
 ### 应对方式
 
 #### 方案 A：先做正式工具 MVP，推荐
@@ -5914,9 +5972,9 @@ Phase 0 落地记录：
 目标：画布里点视频生成，必须创建真实 sd2 任务。
 
 - [ ] 把 `generation-api.js` 的 mock 默认路径改成“无 endpoint 时明确提示未配置”，不能静默返回 mock 成功。
-- [ ] 文生视频映射到 `/api/video/create`。
-- [ ] 图生视频映射到 `/api/video/create` 并带参考图资产。
-- [ ] 首尾帧映射到 `/api/video/create` 的 `first_last_frame` 模式。
+- [ ] 文生视频映射到普通生成页同一套 `/api/tasks/create`。
+- [ ] 图生视频映射到 `/api/tasks/create` 并带参考图资产。
+- [ ] 首尾帧映射到 `/api/tasks/create` 的 `first_last_frame` 模式。
 - [ ] 节点进入任务状态：queued、running、succeeded、failed、cancelled。
 - [ ] 轮询 `/api/video/status/:taskId?refresh=true`，直到终态。
 - [ ] 成功后展示视频预览、缩略图、下载入口、任务详情入口。
@@ -5927,16 +5985,17 @@ Phase 0 落地记录：
 
 - `public/tools/ultimate-canvas/generation-api.js`
 - `public/tools/ultimate-canvas/app.js`
-- `src/app/api/video/create/route.ts`
+- `src/app/api/tasks/create/route.ts`
 - `src/app/api/video/status/[id]/route.ts`
 - `src/components/GenerationComposer.tsx` 可作为现有 payload 参考
 
-#### Phase 4：图形生成和 Gemini Image 接入
+#### Phase 4：图形生成和 banana2 后端接入
 
 目标：图片节点能真实生成图片，并进入资产库。
 
-- [ ] 文生图、图生图、高清修复先接现有 `/api/assets/generate`。
-- [x] 图形生成使用独立 Gemini Image 配置，不复用视频 Provider，也不复用 Musk 文字 LLM 配置。
+- [ ] 文生图、图生图、高清修复先接现有 `/api/assets/generate`，由后端图形生成配置指向正式 `banana2` 能力。
+- [ ] 后台确认 `banana2` 的 provider/model/base_url/api_key 配置项和测试入口；画布只读后台配置，不写死参数。
+- [ ] 如果当前底层仍通过 Musk/Gemini 网关承载图片能力，必须在后台配置层做清晰命名和能力抽象，避免前端把 `banana2`、Gemini 模型和 Musk 文字 LLM 混在一起。
 - [ ] 图片生成结果写入 `Asset`、`ReferenceImage`、工作区资产。
 - [ ] 图片节点展示真实图片预览、下载、设为首帧、设为尾帧、作为参考图。
 - [ ] 验收：图片节点生成结果能在资产管理和参考图集中查到。
@@ -5966,7 +6025,7 @@ Phase 0 落地记录：
 - `src/lib/credits/*`
 - `src/lib/costs/*`
 - `src/app/api/tasks/estimate/route.ts`
-- `src/app/api/video/create/route.ts`
+- `src/app/api/tasks/create/route.ts`
 - `src/app/admin/points/AdminPointsClient.tsx`
 - `public/tools/ultimate-canvas/app.js`
 
@@ -6009,7 +6068,7 @@ Phase 0 落地记录：
 - `public/tools/ultimate-canvas/director-3d.js`
 - `public/tools/ultimate-canvas/assets/director/liblib/*`
 - `src/app/api/assets/generate/route.ts`
-- `src/app/api/video/create/route.ts`
+- `src/app/api/tasks/create/route.ts`
 
 #### Phase 8：长期创作体验
 
@@ -6034,6 +6093,9 @@ Phase 0 落地记录：
 ### 总体验收标准
 
 - [ ] 用户从 `/tools/ultimate-canvas` 进入后能选择项目并恢复上次画布。
+- [ ] 页面不再出现“预览版，不扣点”；未接入能力必须禁用或明确显示不可用。
+- [ ] 文本/脚本节点真实调用 `gpt5.4`，并在后台日志能查到。
+- [ ] 图片节点真实调用后端 `banana2`，并在资产库能查到图片和参考图。
 - [ ] 任一视频节点点击生成后会创建真实 sd2 任务。
 - [ ] 任务状态能从 queued/running 到 succeeded/failed/cancelled。
 - [ ] 成功任务能预览、下载、进入项目资产。
@@ -6053,6 +6115,7 @@ Phase 0 落地记录：
 - [ ] 本地打开 `/tools/ultimate-canvas`，验证入口、项目注入、保存恢复、无响应按钮治理。
 - [ ] 非付费 API mock 验证：生成状态机、失败态、重试、资产入库模拟。
 - [ ] 登录态真实验证：项目选择、素材上传、历史复用、点数余额展示。
+- [ ] 后台配置验证：`gpt5.4`、`banana2`、默认视频 API 三组配置都能独立测试成功，且前端不会泄露 key。
 - [ ] 付费真实生成只在用户明确授权后执行。
 - [ ] 线上闭环：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，公网验证 `/tools/ultimate-canvas`、`/api/config`、`/login` 和构建资源。
 - [ ] 跨健康守护周期复查 LaunchAgent `runs` 不增长。
@@ -6063,7 +6126,7 @@ Phase 0 落地记录：
 - 当前分支：`codex/v12-full-todo`。
 - 当前工作区已有大量跨任务未提交改动；正式开发前必须先复查 `git status` 和目标文件 diff。
 - 每个 Phase 尽量单独提交，避免把无线画布、通知中心、模板模块等无关任务混入一个提交。
-- 如果要改 `src/app/api/video/create/route.ts`、点数、资产、Prisma schema，优先单独分支或 worktree，验证通过后再同步部署。
+- 如果要改 `src/app/api/tasks/create/route.ts`、点数、资产、Prisma schema，优先单独分支或 worktree，验证通过后再同步部署。
 - 稳定回退点建议：`rollback/2026-06-17-ultimate-canvas-mvp`。
 - 发布后登记 `/Volumes/Data/Projects/project-version-registry.md`。
 
