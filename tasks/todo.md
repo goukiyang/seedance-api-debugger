@@ -5907,7 +5907,7 @@ Review - 2026-06-17 自建通知中心落地：
 执行基准：
 
 - 当前生产源码目录必须使用 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，不要误用旧目录 `/Volumes/Data/Projects/video-api-debugger`。
-- 当前远端检查点为 `codex/v12-full-todo` 的 `e20a562`，对应已上传扫描报告和回退标签 `rollback/2026-06-18-unclosed-feature-scan-updated`。
+- 当前远端最新检查点为 `codex/v12-full-todo` 的 `ff5e429`，对应回退标签 `rollback/2026-06-18-sd2-codex-auto-deploy`；`e20a562` 只是未闭环扫描报告基准，对应回退标签 `rollback/2026-06-18-unclosed-feature-scan-updated`。
 - 无线画布文本 / 脚本 LLM 已形成远端版本；下一步只处理图片、视频、归属、保存、点数和真实验收这些未闭环项。
 - 每个批次完成后都要形成聚焦提交、推送远端、创建清晰 rollback tag，并登记 `/Volumes/Data/Projects/project-version-registry.md`。
 
