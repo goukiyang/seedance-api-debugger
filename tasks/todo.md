@@ -1,6 +1,6 @@
 # V1.2 剩余模块落地 Todo
 
-更新时间：2026-06-17
+更新时间：2026-06-18
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
 
@@ -5901,6 +5901,77 @@ Review - 2026-06-17 自建通知中心落地：
 - [x] 在后台 API 设置里核对视频能力：普通生成页默认视频 API 仍走 `/api/tasks/create` 和 Seedance Provider 配置。
 - [x] 新增或复用一个 capability/bootstrap 接口，返回 `text/image/video` 三组可用状态、模型名、endpoint、费用估算开关。
 - [x] 验证：未登录 401；普通用户只能读必要状态；管理员能看到配置测试结果；接口不回显 API Key。本地生产服务验证 `/api/tools/ultimate-canvas/bootstrap` 未登录返回 401，接口响应设计只包含 enabled/model/endpoint/message/context，不包含 API Key/base_url。
+
+### 2026-06-18 当前推进任务：从已上传检查点继续落地
+
+执行基准：
+
+- 当前生产源码目录必须使用 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，不要误用旧目录 `/Volumes/Data/Projects/video-api-debugger`。
+- 当前远端检查点为 `codex/v12-full-todo` 的 `e20a562`，对应已上传扫描报告和回退标签 `rollback/2026-06-18-unclosed-feature-scan-updated`。
+- 无线画布文本 / 脚本 LLM 已形成远端版本；下一步只处理图片、视频、归属、保存、点数和真实验收这些未闭环项。
+- 每个批次完成后都要形成聚焦提交、推送远端、创建清晰 rollback tag，并登记 `/Volumes/Data/Projects/project-version-registry.md`。
+
+上传原则落地：
+
+- [ ] 开始编码前执行 `git status --short --branch`，确认没有混入无关改动。
+- [ ] 只提交当前批次文件；如果出现跨任务脏文件，先拆分暂存或停止说明风险。
+- [ ] 任何用户可见页面改动都必须走 `youdoo-sites build sd2`、`youdoo-sites restart sd2` 和公网验证，不能只停在本地构建或 Git。
+- [ ] 真实付费生成、扣点、数据库迁移和 Provider 调用必须单独标记风险；没有明确授权时只做非付费状态机和接口权限验证。
+
+第一推进批次：Batch 2 项目 / 视频卡 / 点数上下文注入
+
+- [ ] 外层页面读取当前用户、可用项目、默认项目、可用视频卡、账户点数和能力配置。
+- [ ] `bootstrap` 接口只输出 iframe 必要上下文，不回显 key、base_url、token 或其他敏感配置。
+- [ ] iframe 初始化后显示真实项目名、视频卡名、余额和可用能力状态。
+- [ ] 没有项目或视频卡时，图片 / 视频生成按钮禁用，并提示先选择归属。
+- [ ] 验证所有正式生成 payload 都带 `project_id` 和 `video_card_id`。
+
+第二推进批次：Batch 4 图片真实生成链路
+
+- [ ] 确认 `banana2` 与当前后端图形生成能力的真实映射，只能由后台配置下发，静态前端不得写死 provider、模型或网关地址。
+- [ ] 画布图片节点统一调用 `/api/assets/generate`，不直接调用外部 provider。
+- [ ] 支持文生图、图生图、高清修复、首帧草图、尾帧草图的最小正式链路。
+- [ ] 成功后把 `asset_id`、`reference_image_id`、`workspace_asset_id`、`thumbnailUrl` 写回节点。
+- [ ] 验证图片结果能在资产库、参考图和项目详情中追溯。
+
+第三推进批次：Batch 5 视频真实生成链路
+
+- [ ] 画布视频节点统一调用 `/api/tasks/create`，复用普通生成页同一套视频任务、价格和状态逻辑。
+- [ ] 文生视频、图生视频、首尾帧视频都必须生成真实 `task_id`。
+- [ ] 前端轮询 `/api/video/status/:taskId?refresh=true` 直到终态。
+- [ ] 成功后节点展示视频预览、缩略图、下载入口、本地链接和任务详情入口。
+- [ ] 失败后展示错误原因、重试入口、复制错误信息和扣点/退款状态。
+
+第四推进批次：Batch 6 保存恢复
+
+- [ ] 明确复用旧 `CanvasDocument` 思路还是新建 Ultimate Canvas 文档 API；优先复用现有模型，避免重复造表。
+- [ ] 保存 `nodes`、`connections`、`viewport`、`project_id`、`video_card_id`、资产引用和任务引用。
+- [ ] 节点新增、删除、移动、连线、提示词、参数变化后节流自动保存。
+- [ ] 页面显示保存状态：保存中、已保存、保存失败、可重试。
+- [ ] 验证刷新后文本节点、图片节点、视频任务节点及其关联结果完整恢复。
+
+第五推进批次：Batch 8 点数 / 成本 / 后台流水
+
+- [ ] 视频生成复用 `/api/tasks/create` 的冻结、实扣和失败释放，不另写画布扣点逻辑。
+- [ ] 图片和文字如需扣点，先明确价格表、失败退款规则和后台展示位置；未明确前只记录 OperationLog。
+- [ ] CreditLedger / CostLedger / OperationLog 记录来源 `ultimate_canvas`、`canvas_document_id` 和 `canvas_node_id`。
+- [ ] 后台点数流水可以按用户、项目、任务、来源查到无线画布生成。
+
+第六推进批次：本地化补偿和正式验收
+
+- [ ] 将 `scripts/finalize-pending-videos.ts` 纳入 launchd / cron 或等价补偿机制，避免服务重启后任务本地保存丢失。
+- [ ] 增加只读健康信息：待本地化任务数、最近补偿时间、失败原因。
+- [ ] 本地验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [ ] 页面验证：`/tools/ultimate-canvas` 能看到项目注入、能力状态、文字、图片、视频状态机和保存恢复。
+- [ ] 公网验证：`/api/config`、`/login`、`/tools/ultimate-canvas`、关键静态资源、接口权限和至少一个不扣费状态机闭环。
+- [ ] 若用户明确授权付费测试，再执行真实图片 / 视频生成，确认任务、资产、点数、项目、视频卡、后台流水全部可追溯。
+
+停止条件：
+
+- 如果当前源码目录和 `youdoo-sites` 注册的 sd2 来源不一致，停止编码并先校准来源。
+- 如果项目 / 视频卡上下文拿不到，停止在真实生成前，不允许用假 ID 或隐藏默认值绕过。
+- 如果 `banana2`、`gpt5.4` 或视频 provider 的后台配置不明确，不允许在静态前端硬编码。
+- 如果验证失败，不提交、不推送、不部署，先修复或明确阻塞原因。
 
 #### Batch 2：项目、视频卡、点数上下文注入
 
