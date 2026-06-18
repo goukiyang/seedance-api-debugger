@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { ensureDefaultProjectForUser } from '@/lib/projects/permissions';
@@ -24,7 +24,7 @@ function safeDate(value: Date | string | null | undefined) {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
@@ -80,7 +80,12 @@ export async function GET() {
     };
   });
 
-  const selectedProject = projectSummaries.find((project) => project.can_generate) || null;
+  const requestedProjectId = request.nextUrl.searchParams.get('project_id')?.trim() || '';
+  const requestedVideoCardId = request.nextUrl.searchParams.get('video_card_id')?.trim() || '';
+  const requestedProject = requestedProjectId
+    ? projectSummaries.find((project) => project.id === requestedProjectId && project.can_generate) || null
+    : null;
+  const selectedProject = requestedProject || projectSummaries.find((project) => project.can_generate) || null;
   const videoCards = selectedProject
     ? await prisma.videoCard.findMany({
         where: {
@@ -115,7 +120,22 @@ export async function GET() {
     target_resolution: card.target_resolution,
     updated_at: safeDate(card.updated_at),
   }));
-  const selectedVideoCard = videoCardSummaries.find((card) => card.can_generate) || null;
+  const requestedVideoCard = requestedVideoCardId
+    ? videoCardSummaries.find((card) => card.id === requestedVideoCardId && card.can_generate) || null
+    : null;
+  const selectedVideoCard = requestedVideoCard || videoCardSummaries.find((card) => card.can_generate) || null;
+
+  const latestCanvasDocument = selectedProject
+    ? await prisma.canvasDocument.findFirst({
+        where: {
+          owner_user_id: user.id,
+          project_id: selectedProject.id,
+          status: 'active',
+        },
+        orderBy: { updated_at: 'desc' },
+        select: { id: true, title: true, project_id: true, updated_at: true },
+      })
+    : null;
 
   const textReady = isMuskApiReady(muskSettings);
   const imageReady = isImageGenerationApiReady(imageSettings);
@@ -141,6 +161,12 @@ export async function GET() {
       selected_project_id: selectedProject?.id || null,
       video_cards: videoCardSummaries,
       selected_video_card_id: selectedVideoCard?.id || null,
+      canvas_document: latestCanvasDocument ? {
+        id: latestCanvasDocument.id,
+        title: latestCanvasDocument.title,
+        project_id: latestCanvasDocument.project_id,
+        updated_at: safeDate(latestCanvasDocument.updated_at),
+      } : null,
       needs_project_selection: !selectedProject,
       needs_video_card_selection: !selectedVideoCard,
     },

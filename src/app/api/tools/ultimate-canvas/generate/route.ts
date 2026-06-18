@@ -8,6 +8,9 @@ import {
   isMuskApiReady,
   MuskApiError,
 } from '@/lib/integrations/musk';
+import { AuthError } from '@/lib/auth/session';
+import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -114,6 +117,31 @@ export async function POST(request: NextRequest) {
   const prompt = cleanString(body.prompt).slice(0, MAX_PROMPT_LENGTH);
   const title = cleanString(body.title).slice(0, 120);
   const sourceNodes = compactSourceNodes(body.sourceNodes);
+  const requestedProjectId = cleanString(body.project_id || body.projectId) || null;
+  const requestedVideoCardId = cleanString(body.video_card_id || body.videoCardId) || null;
+  const canvasDocumentId = cleanString(body.canvas_document_id || body.canvasDocumentId) || null;
+
+  let projectId: string | null = null;
+  let videoCardId: string | null = null;
+  if (requestedVideoCardId) {
+    const videoCard = await prisma.videoCard.findUnique({
+      where: { id: requestedVideoCardId },
+      select: { id: true, project_id: true },
+    });
+    if (!videoCard) return NextResponse.json({ error: '视频卡不存在' }, { status: 404 });
+    if (requestedProjectId && requestedProjectId !== videoCard.project_id) {
+      return NextResponse.json({ error: '视频卡不属于当前项目' }, { status: 400 });
+    }
+    try {
+      const project = await getProjectForGeneration(user, videoCard.project_id);
+      await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
+      projectId = project.id;
+      videoCardId = videoCard.id;
+    } catch (error) {
+      if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+      throw error;
+    }
+  }
 
   if (!kind) {
     return NextResponse.json(
@@ -131,7 +159,7 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       action: 'ultimate_canvas_llm_generate',
       nodeId,
-      detail: { status: 'failed', reason: 'musk_api_not_configured', kind, mode },
+      detail: { status: 'failed', reason: 'musk_api_not_configured', kind, mode, project_id: projectId, video_card_id: videoCardId, canvas_document_id: canvasDocumentId },
     });
     return NextResponse.json(
       { error: 'Musk API 未启用或缺少 API Key，请先到后台 API 设置完成配置' },
@@ -175,6 +203,9 @@ export async function POST(request: NextRequest) {
         status: 'succeeded',
         kind,
         mode,
+        project_id: projectId,
+        video_card_id: videoCardId,
+        canvas_document_id: canvasDocumentId,
         model: completion.model || settings.default_model,
         prompt_length: prompt.length,
         source_node_count: sourceNodes.length,
@@ -207,6 +238,9 @@ export async function POST(request: NextRequest) {
         status: 'failed',
         kind,
         mode,
+        project_id: projectId,
+        video_card_id: videoCardId,
+        canvas_document_id: canvasDocumentId,
         reason: error instanceof MuskApiError ? error.code : 'llm_response_error',
       },
     });

@@ -305,14 +305,78 @@ class CanvasEngine {
 
     // --- Nodes ---
     addNode(type, x, y, data = {}) {
-        const id = 'node-' + this.nextNodeId++;
-        const nodeData = { id, type, x, y, data };
+        const requestedId = typeof data?.id === 'string' && data.id.trim() ? data.id.trim() : '';
+        const id = requestedId || 'node-' + this.nextNodeId++;
+        const match = id.match(/^node-(\d+)$/);
+        if (match) this.nextNodeId = Math.max(this.nextNodeId, Number(match[1]) + 1);
+        const cleanData = { ...(data || {}) };
+        delete cleanData.id;
+        const nodeData = { id, type, x, y, data: cleanData };
         this.nodes.set(id, nodeData);
         const el = this._buildNode(nodeData);
         this.canvas.appendChild(el);
         document.getElementById('canvas-welcome')?.classList.add('hidden');
         this._selectNode(id);
         return id;
+    }
+
+    serialize() {
+        return {
+            version: 1,
+            viewport: {
+                scale: this.scale,
+                offsetX: this.offsetX,
+                offsetY: this.offsetY,
+                nextNodeId: this.nextNodeId
+            },
+            selectedNodeId: this.selectedNodeId,
+            nodes: Array.from(this.nodes.values()).map(node => ({
+                id: node.id,
+                type: node.type,
+                x: node.x,
+                y: node.y,
+                data: node.data || {}
+            })),
+            connections: this.connections.map(connection => ({
+                from: connection.from,
+                to: connection.to
+            }))
+        };
+    }
+
+    restore(snapshot = {}) {
+        this.canvas.querySelectorAll('.canvas-node').forEach(node => node.remove());
+        this.svg.querySelectorAll('.connection-line').forEach(line => line.remove());
+        this.nodes.clear();
+        this.connections = [];
+        this.selectedNodeId = null;
+        this.nextNodeId = 1;
+
+        const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
+        nodes.forEach(node => {
+            if (!node?.type || !node?.id) return;
+            this.addNode(node.type, Number(node.x) || 0, Number(node.y) || 0, {
+                ...(node.data || {}),
+                id: node.id
+            });
+        });
+
+        const connections = Array.isArray(snapshot.connections) ? snapshot.connections : [];
+        connections.forEach(connection => {
+            if (connection?.from && connection?.to) this._createConnection(connection.from, connection.to);
+        });
+
+        const viewport = snapshot.viewport || {};
+        this.scale = Number.isFinite(Number(viewport.scale)) ? Number(viewport.scale) : 1;
+        this.offsetX = Number.isFinite(Number(viewport.offsetX)) ? Number(viewport.offsetX) : 0;
+        this.offsetY = Number.isFinite(Number(viewport.offsetY)) ? Number(viewport.offsetY) : 0;
+        if (Number.isFinite(Number(viewport.nextNodeId))) {
+            this.nextNodeId = Math.max(this.nextNodeId, Number(viewport.nextNodeId));
+        }
+        this._applyTransform();
+        this._updateZoom();
+        this._updateConnections();
+        document.getElementById('canvas-welcome')?.classList.toggle('hidden', this.nodes.size > 0);
     }
 
     deleteNode(nodeId) {

@@ -107,9 +107,11 @@
                 <span class="asset-cat">物品</span>
                 <span class="asset-cat">风格</span>
             </div>
-            <div class="empty-state">
-                <strong>素材库待接入</strong>
-                <span>后续会读取后台资产、上传图片和已生成视频；当前只支持把本地文件拖成画布节点。</span>
+            <div id="assets-panel-body" class="panel-body-list">
+                <div class="empty-state">
+                    <strong>正在读取素材库</strong>
+                    <span>素材会从当前项目和站内资产库加载。</span>
+                </div>
             </div>
         </div>
 
@@ -118,9 +120,11 @@
                 <span>生成历史</span>
                 <button class="panel-close" data-close-panel>✕</button>
             </div>
-            <div class="empty-state">
-                <strong>生成历史待接入</strong>
-                <span>这里还没有读取 sd2 任务记录；真实任务状态、预览和下载会在接入后显示。</span>
+            <div id="history-panel-body" class="panel-body-list">
+                <div class="empty-state">
+                    <strong>正在读取生成历史</strong>
+                    <span>历史会从当前项目的视频任务中加载。</span>
+                </div>
             </div>
         </div>
 

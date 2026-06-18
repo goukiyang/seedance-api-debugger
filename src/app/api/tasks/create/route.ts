@@ -55,6 +55,17 @@ const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 
+function cleanSourceMetadata(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of ['source', 'canvas_document_id', 'canvas_node_id', 'mode']) {
+    const raw = source[key];
+    if (typeof raw === 'string' && raw.trim()) result[key] = raw.trim().slice(0, 240);
+  }
+  return result;
+}
+
 export async function POST(request: NextRequest) {
   let user;
   let requestSource: GenerationRequestSource = webRequestSource(request);
@@ -333,6 +344,7 @@ export async function POST(request: NextRequest) {
   const sourceRequestId = requestSource.source_request_id || bodySourceRequestId || idempotencyKey || null;
   const sourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
+    ...cleanSourceMetadata(body.source_metadata),
     tab_id: tabId,
     idempotency_key: idempotencyKey || null,
     body_source_request_id: bodySourceRequestId,
@@ -710,7 +722,7 @@ export async function POST(request: NextRequest) {
               frozen_after: freeze.frozen_after,
               related_task_id: task.id,
               reason: `任务创建冻结 ${estimatedCost} 点`,
-              metadata_json: JSON.stringify({ allocations: freeze.allocations }),
+              metadata_json: JSON.stringify({ allocations: freeze.allocations, source_metadata: sourceMetadata }),
             },
           });
         }
@@ -747,6 +759,7 @@ export async function POST(request: NextRequest) {
             source_type: requestSource.source_type,
             source_label: requestSource.source_label,
             source_request_id: sourceRequestId,
+            source_metadata: sourceMetadata,
             paid_generation_guard: paidGenerationGuard.metadata,
           }),
         },

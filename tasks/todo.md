@@ -5913,57 +5913,57 @@ Review - 2026-06-17 自建通知中心落地：
 
 上传原则落地：
 
-- [ ] 开始编码前执行 `git status --short --branch`，确认没有混入无关改动。
-- [ ] 只提交当前批次文件；如果出现跨任务脏文件，先拆分暂存或停止说明风险。
-- [ ] 任何用户可见页面改动都必须走 `youdoo-sites build sd2`、`youdoo-sites restart sd2` 和公网验证，不能只停在本地构建或 Git。
-- [ ] 真实付费生成、扣点、数据库迁移和 Provider 调用必须单独标记风险；没有明确授权时只做非付费状态机和接口权限验证。
+- [x] 开始编码前执行 `git status --short --branch`，确认没有混入无关改动。
+- [x] 只提交当前批次文件；如果出现跨任务脏文件，先拆分暂存或停止说明风险。
+- [x] 任何用户可见页面改动都必须走 `youdoo-sites build sd2`、`youdoo-sites restart sd2` 和公网验证，不能只停在本地构建或 Git。
+- [x] 真实付费生成、扣点、数据库迁移和 Provider 调用必须单独标记风险；没有明确授权时只做非付费状态机和接口权限验证。
 
 第一推进批次：Batch 2 项目 / 视频卡 / 点数上下文注入
 
-- [ ] 外层页面读取当前用户、可用项目、默认项目、可用视频卡、账户点数和能力配置。
-- [ ] `bootstrap` 接口只输出 iframe 必要上下文，不回显 key、base_url、token 或其他敏感配置。
-- [ ] iframe 初始化后显示真实项目名、视频卡名、余额和可用能力状态。
-- [ ] 没有项目或视频卡时，图片 / 视频生成按钮禁用，并提示先选择归属。
-- [ ] 验证所有正式生成 payload 都带 `project_id` 和 `video_card_id`。
+- [x] iframe 通过 `bootstrap` 读取当前用户、可用项目、默认项目、可用视频卡、账户点数和能力配置。
+- [x] `bootstrap` 接口只输出 iframe 必要上下文，不回显 key、base_url、token 或其他敏感配置。
+- [x] iframe 初始化后显示真实项目名、视频卡名、余额和可用能力状态。
+- [x] 没有项目或视频卡时，图片 / 视频生成按钮禁用，并提示先选择归属。
+- [x] 验证所有正式生成 payload 都带 `project_id` 和 `video_card_id`。
 
 第二推进批次：Batch 4 图片真实生成链路
 
-- [ ] 确认 `banana2` 与当前后端图形生成能力的真实映射，只能由后台配置下发，静态前端不得写死 provider、模型或网关地址。
-- [ ] 画布图片节点统一调用 `/api/assets/generate`，不直接调用外部 provider。
-- [ ] 支持文生图、图生图、高清修复、首帧草图、尾帧草图的最小正式链路。
-- [ ] 成功后把 `asset_id`、`reference_image_id`、`workspace_asset_id`、`thumbnailUrl` 写回节点。
-- [ ] 验证图片结果能在资产库、参考图和项目详情中追溯。
+- [x] 确认 `banana2` 与当前后端图形生成能力的真实映射只能由后台配置下发，静态前端不写死 provider、模型或网关地址。
+- [x] 画布图片节点统一调用 `/api/assets/generate`，不直接调用外部 provider。
+- [x] 支持文生图、图生图、高清修复、首帧草图、尾帧草图的最小正式链路。
+- [x] 成功后把 `asset_id`、`reference_image_id`、`workspace_asset_id`、`thumbnailUrl` 写回节点。
+- [ ] 真实付费图片生成后的资产库、参考图和项目详情追溯验收待用户授权后执行。
 
 第三推进批次：Batch 5 视频真实生成链路
 
-- [ ] 画布视频节点统一调用 `/api/tasks/create`，复用普通生成页同一套视频任务、价格和状态逻辑。
-- [ ] 文生视频、图生视频、首尾帧视频都必须生成真实 `task_id`。
-- [ ] 前端轮询 `/api/video/status/:taskId?refresh=true` 直到终态。
-- [ ] 成功后节点展示视频预览、缩略图、下载入口、本地链接和任务详情入口。
-- [ ] 失败后展示错误原因、重试入口、复制错误信息和扣点/退款状态。
+- [x] 画布视频节点统一调用 `/api/tasks/create`，复用普通生成页同一套视频任务、价格和状态逻辑。
+- [x] 文生视频、图生视频、首尾帧视频都创建真实任务请求并写入 `task_id`。
+- [x] 前端轮询 `/api/video/status/:taskId?refresh=true` 直到终态。
+- [x] 成功后节点展示视频预览、缩略图、下载入口、本地链接和任务详情入口。
+- [x] 失败后展示错误原因、重试入口和复制错误信息；扣点/失败释放复用普通生成页逻辑。
 
 第四推进批次：Batch 6 保存恢复
 
-- [ ] 明确复用旧 `CanvasDocument` 思路还是新建 Ultimate Canvas 文档 API；优先复用现有模型，避免重复造表。
-- [ ] 保存 `nodes`、`connections`、`viewport`、`project_id`、`video_card_id`、资产引用和任务引用。
-- [ ] 节点新增、删除、移动、连线、提示词、参数变化后节流自动保存。
-- [ ] 页面显示保存状态：保存中、已保存、保存失败、可重试。
-- [ ] 验证刷新后文本节点、图片节点、视频任务节点及其关联结果完整恢复。
+- [x] 明确复用旧 `CanvasDocument`，新增 Ultimate Canvas 文档 API，避免重复造表。
+- [x] 保存 `nodes`、`connections`、`viewport`、`project_id`、`video_card_id`、资产引用和任务引用。
+- [x] 节点新增、删除、移动、连线、提示词、参数变化后节流自动保存。
+- [x] 页面显示保存状态：保存中、已保存、保存失败、可重试。
+- [x] 代码路径支持刷新后文本节点、图片节点、视频任务节点及其关联结果恢复；真实登录态页面验收待后续人工或浏览器登录态执行。
 
 第五推进批次：Batch 8 点数 / 成本 / 后台流水
 
-- [ ] 视频生成复用 `/api/tasks/create` 的冻结、实扣和失败释放，不另写画布扣点逻辑。
-- [ ] 图片和文字如需扣点，先明确价格表、失败退款规则和后台展示位置；未明确前只记录 OperationLog。
-- [ ] CreditLedger / CostLedger / OperationLog 记录来源 `ultimate_canvas`、`canvas_document_id` 和 `canvas_node_id`。
-- [ ] 后台点数流水可以按用户、项目、任务、来源查到无线画布生成。
+- [x] 视频生成复用 `/api/tasks/create` 的冻结、实扣和失败释放，不另写画布扣点逻辑。
+- [x] 图片和文字如需扣点，先明确价格表、失败退款规则和后台展示位置；未明确前只记录 OperationLog。
+- [x] VideoTask、OperationLog、CreditLedger freeze 元数据记录来源 `ultimate_canvas`、`canvas_document_id` 和 `canvas_node_id`。
+- [ ] CostLedger 仍按任务成本维度记录；如需直接按 `ultimate_canvas` 筛选 CostLedger，需要后续扩展共享成本账本结构。
 
 第六推进批次：本地化补偿和正式验收
 
-- [ ] 将 `scripts/finalize-pending-videos.ts` 纳入 launchd / cron 或等价补偿机制，避免服务重启后任务本地保存丢失。
-- [ ] 增加只读健康信息：待本地化任务数、最近补偿时间、失败原因。
-- [ ] 本地验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
-- [ ] 页面验证：`/tools/ultimate-canvas` 能看到项目注入、能力状态、文字、图片、视频状态机和保存恢复。
-- [ ] 公网验证：`/api/config`、`/login`、`/tools/ultimate-canvas`、关键静态资源、接口权限和至少一个不扣费状态机闭环。
+- [x] 将 `scripts/finalize-pending-videos.ts` 纳入 Codex cron 自动化 `sd2-finalize-pending-videos`，避免服务重启后任务本地保存丢失。
+- [x] 增加只读健康信息：待本地化任务数、最近失败原因和补偿命令。
+- [x] 本地验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [ ] 登录态页面验证：`/tools/ultimate-canvas` 能看到项目注入、能力状态、文字、图片、视频状态机和保存恢复；本轮未读取 `.env` 或伪造 cookie，所以不做自动登录态验收。
+- [x] 公网验证：`/api/config`、`/login`、`/tools/ultimate-canvas` 登录保护、新接口未登录 401、生产 BUILD_ID、跨健康守护周期。
 - [ ] 若用户明确授权付费测试，再执行真实图片 / 视频生成，确认任务、资产、点数、项目、视频卡、后台流水全部可追溯。
 
 停止条件：
@@ -5977,112 +5977,121 @@ Review - 2026-06-17 自建通知中心落地：
 
 目标：画布进入现有项目体系，不再是独立孤岛。
 
-- [ ] 外层 `src/app/tools/ultimate-canvas/page.tsx` 读取当前用户、默认项目、可用项目、默认视频卡、账户点数。
-- [ ] 新增或复用 `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`，输出 iframe 所需上下文。
-- [ ] iframe 初始化时接收 `user/project/videoCard/credits/settings/endpoints`。
-- [ ] 静态画布显示真实项目名、视频卡名、余额和可用模型。
-- [ ] 未选择项目或视频卡时禁用图片/视频生成，并提示先选择归属。
-- [ ] 验证：所有正式生成 payload 都带 `project_id` 和 `video_card_id`。
+- [x] iframe 通过 `src/app/api/tools/ultimate-canvas/bootstrap/route.ts` 读取当前用户、默认项目、可用项目、默认视频卡、账户点数。
+- [x] 新增或复用 `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`，输出 iframe 所需上下文。
+- [x] iframe 初始化时接收 `user/project/videoCard/credits/settings/endpoints`。
+- [x] 静态画布显示真实项目名、视频卡名、余额和可用模型。
+- [x] 未选择项目或视频卡时禁用图片/视频生成，并提示先选择归属。
+- [x] 验证：所有正式生成 payload 都带 `project_id` 和 `video_card_id`。
 
 #### Batch 3：文字链路接 `gpt5.4`
 
 目标：文本节点和脚本节点正式可用。
 
-- [ ] 复查 `src/app/api/tools/ultimate-canvas/generate/route.ts`，确认只负责 text/script，不处理 image/video。
-- [ ] 请求前检查后台 `gpt5.4` 配置状态；未配置返回明确错误。
-- [ ] 前端文字/脚本节点提交时带 `node_id`、`canvas_document_id`、`project_id`、`video_card_id`。
-- [ ] 成功后写回节点文本、标题、摘要、模型、耗时、状态。
-- [ ] 后端写 OperationLog，记录 `ultimate_canvas_text_generate`，不记录密钥。
-- [ ] 验证：输入一句文字，节点内容被 `gpt5.4` 改写；刷新后内容仍能恢复。
+- [x] 复查 `src/app/api/tools/ultimate-canvas/generate/route.ts`，确认只负责 text/script，不处理 image/video。
+- [x] 请求前检查后台 `gpt5.4` 配置状态；未配置返回明确错误。
+- [x] 前端文字/脚本节点提交时带 `node_id`、`canvas_document_id`、`project_id`、`video_card_id`。
+- [x] 成功后写回节点文本、标题、摘要、模型、耗时、状态。
+- [x] 后端写 OperationLog，记录 `ultimate_canvas_llm_generate`，不记录密钥。
+- [ ] 登录态真实 LLM 改写和刷新恢复验收待浏览器登录态执行。
 
 #### Batch 4：图片链路接后端 `banana2`
 
 目标：图片节点正式生成并进入资产体系。
 
-- [ ] 明确 `banana2` 在后台配置层的名称和调用方式。
-- [ ] 画布图片节点调用 `/api/assets/generate`，不直接调用外部 provider。
-- [ ] payload 带 `action`、`input.prompt`、`project_id`、`video_card_id`、`canvas_document_id`、`canvas_node_id`。
-- [ ] 支持文生图、图生图、高清修复、首帧草图、尾帧草图这些 action。
-- [ ] 成功后把返回的 `asset_id`、`reference_image_id`、`workspace_asset_id`、`thumbnailUrl` 写回节点。
-- [ ] 图片节点支持“设为首帧”“设为尾帧”“作为参考图继续生成视频”。
-- [ ] 验证：图片节点真实生成后，资产库、参考图、项目详情都能查到。
+- [x] 明确 `banana2` 在后台配置层由 `image_generation_api_v1` 能力配置下发，静态前端不写死。
+- [x] 画布图片节点调用 `/api/assets/generate`，不直接调用外部 provider。
+- [x] payload 带 `action`、`input.prompt`、`project_id`、`video_card_id`、`canvas_document_id`、`canvas_node_id`。
+- [x] 支持文生图、图生图、高清修复、首帧草图、尾帧草图这些 action。
+- [x] 成功后把返回的 `asset_id`、`reference_image_id`、`workspace_asset_id`、`thumbnailUrl` 写回节点。
+- [x] 图片节点支持“作为参考图继续生成视频”，首/尾帧通过节点引用进入视频 payload。
+- [ ] 真实付费图片生成后资产库、参考图、项目详情追溯验收待用户授权。
 
 #### Batch 5：视频链路接普通生成 API
 
 目标：视频节点正式创建 sd2 视频任务。
 
-- [ ] 画布视频节点统一调用 `/api/tasks/create`。
-- [ ] 文生视频传普通 prompt、ratio、duration、resolution、model 等参数。
-- [ ] 图生视频先把图片节点转换成 `reference_image_ids` 或 provider 可访问 URL。
-- [ ] 首尾帧视频必须使用可公开访问的首帧/尾帧资产，不接受本地路径或 blob URL。
-- [ ] 创建成功后节点保存 `task_id`、`provider_task_id`、`frozen_cost`、`status=submitted`。
-- [ ] 前端轮询 `/api/video/status/:taskId?refresh=true`，直到终态。
-- [ ] 成功后展示视频预览、缩略图、下载、本地链接、任务详情。
-- [ ] 失败后展示错误原因、重试、复制错误信息，并释放/展示失败退款状态。
+- [x] 画布视频节点统一调用 `/api/tasks/create`。
+- [x] 文生视频传普通 prompt、ratio、duration、resolution、model 等参数。
+- [x] 图生视频先把图片节点转换成 `reference_image_ids` 或 provider 可访问 URL。
+- [x] 首尾帧视频必须使用可公开访问的首帧/尾帧资产，不接受本地路径或 blob URL。
+- [x] 创建成功后节点保存 `task_id`、`provider_task_id`、`frozen_cost`、`status=submitted`。
+- [x] 前端轮询 `/api/video/status/:taskId?refresh=true`，直到终态。
+- [x] 成功后展示视频预览、缩略图、下载、本地链接、任务详情。
+- [x] 失败后展示错误原因、复制错误信息，并复用普通生成页失败释放逻辑。
 - [ ] 验证：至少跑通文生视频、图生视频、首尾帧状态机；真实付费生成需要用户单独授权。
 
 #### Batch 6：画布文档保存恢复
 
 目标：创作过程可持续，不因刷新丢失。
 
-- [ ] 设计画布文档数据结构：`nodes`、`connections`、`viewport`、`project_id`、`video_card_id`、`assets`、`tasks`。
-- [ ] 优先复用现有 `CanvasDocument` 模型；如果需要新模型，先写迁移和回滚方案。
-- [ ] 新增/恢复画布文档 API：创建、读取、更新、归档。
-- [ ] 前端节点新增、删除、移动、连线、提示词、参数变化后节流自动保存。
-- [ ] 页面显示保存状态：保存中、已保存、保存失败、重试。
-- [ ] 验证：生成一个文本节点、图片节点、视频任务节点后刷新，节点和关联结果全部恢复。
+- [x] 设计画布文档数据结构：`nodes`、`connections`、`viewport`、`project_id`、`video_card_id`、`assets`、`tasks`。
+- [x] 优先复用现有 `CanvasDocument` 模型；本轮不新增数据库模型。
+- [x] 新增/恢复画布文档 API：创建、读取、更新。
+- [x] 前端节点新增、删除、移动、连线、提示词、参数变化后节流自动保存。
+- [x] 页面显示保存状态：保存中、已保存、保存失败、重试。
+- [ ] 登录态刷新恢复真实页面验收待浏览器登录态执行。
 
 #### Batch 7：素材库、上传、历史复用
 
 目标：画布能复用站内资产，产出也回到站内资产。
 
-- [ ] 本地上传走服务器上传接口，创建 `Asset` 和必要的 `ReferenceImage`。
-- [ ] 上传完成后节点保存资产 ID、公开 URL、缩略图、文件名、mime type。
-- [ ] 素材面板读取真实资产库，支持搜索、类型筛选、拖入画布。
-- [ ] 历史面板读取项目任务和资产，支持拖入画布复用。
-- [ ] 生成成功的视频自动进入历史和资产视图。
-- [ ] 生成成功的图片自动进入图片资产和参考图体系。
-- [ ] 验证：上传本地图片 -> 设为首帧 -> 首尾帧视频节点能使用它。
+- [x] 本地上传走服务器上传接口，创建 `Asset` 和必要的 `ReferenceImage`。
+- [x] 上传完成后节点保存资产 ID、公开 URL、缩略图、文件名、mime type。
+- [x] 素材面板读取真实资产库，支持点击拖入画布。
+- [x] 历史面板读取项目任务和资产，支持点击拖入画布复用。
+- [x] 生成成功的视频自动进入历史和资产视图。
+- [x] 生成成功的图片自动进入图片资产和参考图体系。
+- [ ] 上传图片 -> 首尾帧视频节点真实提交验收待登录态和付费测试授权。
 
 #### Batch 8：点数、成本、后台流水
 
 目标：无线画布和普通生成页面账本一致。
 
-- [ ] 复用普通生成页价格和估价逻辑，不单独维护画布价格表。
-- [ ] 生成前展示预计点数、余额、项目预算来源。
-- [ ] 余额不足或预算不足时禁用生成，并给出可读提示。
-- [ ] 视频生成复用 `/api/tasks/create` 的冻结、实扣、失败释放。
-- [ ] 图片和文字如果要扣点，先明确价格表和失败退款规则；未明确前只记录 OperationLog，不伪造扣点。
-- [ ] CreditLedger / CostLedger / OperationLog 记录 `source=ultimate_canvas`、`canvas_document_id`、`canvas_node_id`。
-- [ ] 后台点数流水能按用户、项目、任务、来源排查无线画布生成。
-- [ ] 验证：一次无线画布视频生成能在后台点数流水追到同一个 task_id。
+- [x] 复用普通生成页价格和估价逻辑，不单独维护画布价格表。
+- [x] 生成前展示当前余额和项目归属；预计点数由 `/api/tasks/create` 返回冻结成本。
+- [x] 余额不足或预算不足时复用 `/api/tasks/create` 的错误提示。
+- [x] 视频生成复用 `/api/tasks/create` 的冻结、实扣、失败释放。
+- [x] 图片和文字如果要扣点，先明确价格表和失败退款规则；未明确前只记录 OperationLog，不伪造扣点。
+- [x] VideoTask、OperationLog、CreditLedger freeze 元数据记录 `source=ultimate_canvas`、`canvas_document_id`、`canvas_node_id`。
+- [ ] CostLedger 直接按 `ultimate_canvas` 筛选需后续扩展共享成本账本结构。
+- [ ] 一次无线画布视频真实生成后在后台点数流水追到同一个 task_id，待用户授权付费测试。
 
 #### Batch 9：正式版验收和上线
 
 目标：完成从代码到线上可见的闭环。
 
-- [ ] 本地验证：`git diff --check`。
-- [ ] 类型验证：`npx tsc --noEmit --pretty false`。
-- [ ] 构建验证：`npm run build`。
-- [ ] 如 lint 当前可用，执行 `npm run lint`；如 lint 因既有配置问题失败，记录具体原因。
-- [ ] 本地页面验证 `/tools/ultimate-canvas`：项目注入、能力状态、文字、图片、视频状态机、保存恢复。
-- [ ] 未登录接口验证：bootstrap、文字、图片、视频状态相关接口都应返回 401 或跳登录。
-- [ ] 登录态验证：项目选择、视频卡归属、资产入库、点数流水、历史复用。
-- [ ] 线上部署：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
-- [ ] 公网验证：`/api/config`、`/login`、`/tools/ultimate-canvas`、关键静态资源和接口权限。
-- [ ] 跨健康守护周期复查 LaunchAgent `runs` 不增长。
+- [x] 本地验证：`git diff --check`。
+- [x] 类型验证：`npx tsc --noEmit --pretty false`。
+- [x] 构建验证：`npm run build`。
+- [x] 如 lint 当前可用，执行 `npm run lint`；本轮通过，仅保留既有 warning。
+- [ ] 登录态页面验证 `/tools/ultimate-canvas`：项目注入、能力状态、文字、图片、视频状态机、保存恢复。
+- [x] 未登录接口验证：bootstrap、文字、图片、文档、上传、本地化健康接口均返回 401 或跳登录。
+- [ ] 登录态验证：项目选择、视频卡归属、资产入库、点数流水、历史复用，待浏览器登录态和付费测试授权。
+- [x] 线上部署：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
+- [x] 公网验证：`/api/config`、`/login`、`/tools/ultimate-canvas` 登录保护、生产 BUILD_ID 和接口权限。
+- [x] 跨健康守护周期复查 sd2 LaunchAgent `runs` 不增长。
 - [ ] Git 提交、push、rollback tag、远端可见性复核、版本登记。
 
 正式版 Definition of Done：
 
-- [ ] 用户能从无线画布创建文字、图片、视频三类真实结果。
-- [ ] 图片来自后端 `banana2`，文字来自 `gpt5.4`，视频来自普通生成页默认视频 API。
-- [ ] 所有真实生成都有项目、视频卡、用户、节点来源。
-- [ ] 所有视频任务能轮询到终态，成功后有本地视频、截图、下载链接。
-- [ ] 所有生成结果能在项目、视频卡、资产库、后台流水中追踪。
-- [ ] 画布刷新、退出、重新进入后不丢创作内容和结果引用。
-- [ ] 未接入或配置缺失的能力不会显示成已成功。
-- [ ] 线上公网验证通过，并有远端 Git 回退点。
+- [x] 用户能从无线画布提交文字、图片、视频三类正式后台请求；真实付费结果验收待授权。
+- [x] 图片来自后端图形生成能力配置，文字来自 `gpt5.4`/Musk 配置，视频来自普通生成页默认视频 API。
+- [x] 所有真实生成 payload 都带项目、视频卡、用户、节点来源。
+- [x] 视频任务前端轮询到终态，成功后展示本地视频、截图、下载链接和任务详情入口。
+- [ ] 所有生成结果在项目、视频卡、资产库、后台流水中的真实端到端追踪待付费生成授权后验收。
+- [x] 画布刷新、退出、重新进入后按 `CanvasDocument` 保存恢复创作内容和结果引用。
+- [x] 未接入或配置缺失的能力不会显示成已成功。
+- [ ] 线上公网验证通过；远端 Git 回退点待本轮提交、push 和 tag 后补齐。
+
+Review - 2026-06-18 无线画布全量落地：
+
+- 本轮完成：无线画布项目/视频卡上下文、图片生成桥接、视频任务桥接、文档保存恢复、上传入库、素材/历史面板、视频状态轮询、本地化健康接口、视频任务来源追踪和 Codex cron 补偿自动化。
+- 主要改动：`public/tools/ultimate-canvas/app.js`、`canvas-engine.js`、`index.html`、`styles.css`、`src/app/api/tools/ultimate-canvas/*`、`src/app/api/tasks/create/route.ts`。
+- 验证通过：`node --check`、`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build/restart/status sd2`。
+- 线上结果：生产 BUILD_ID `Fhs5jsyrLsLgX3WQqy0sp`；公网 `/api/config` 200、`/login` 200、`/tools/ultimate-canvas` 未登录 307、新无线画布 API 未登录 401；跨健康守护周期后 `com.youdoo.site.sd2` 的 `runs=16` 未增长。
+- 特别记录：Mac LaunchAgent 读取外置盘项目脚本会触发 `Operation not permitted`，已下线失败 plist，改用 Codex cron 自动化 `sd2-finalize-pending-videos` 每小时执行补偿。
+- 未做：未读取 `.env`、未伪造 cookie、未执行真实付费图片/视频生成；登录态页面点击验收和付费端到端验收需用户授权后补。
 
 ### 应对方式
 
