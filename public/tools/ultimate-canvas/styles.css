@@ -156,6 +156,14 @@ html, body {
     color: var(--accent-teal);
 }
 
+.context-status.credits {
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-color: rgba(96,165,250,0.32);
+    color: #93c5fd;
+}
+
 .header-right { display: flex; align-items: center; gap: 6px; }
 .header-btn {
     display: flex; align-items: center; gap: 5px;

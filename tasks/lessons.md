@@ -610,3 +610,13 @@
 - 怎么改：新增登录态保护的无线画布 LLM 接口，复用后台 Musk API 配置；前端把文本/脚本节点 endpoint 指到新接口；LLM 返回后写回节点正文；错误提示展示后端真实错误；模型标签从假模型名改为 `Musk LLM`。
 - 验证结果：`tsc`、`lint`、`youdoo-sites build/restart/status sd2` 通过；本地和公网 POST `/api/tools/ultimate-canvas/generate` 均返回 `provider=musk`、`model=gpt-5.4` 和文本内容；线上静态资源命中新 endpoint、结果写回逻辑和 `Musk LLM` 标签；健康周期后 `runs` 未增长。
 - 可复用经验：UI 上有输入框和按钮不代表功能闭环。生成类入口必须逐项验收：前端事件、真实后端 endpoint、鉴权、后台配置、上游返回、结果落点、错误提示、线上资源命中和跨健康周期稳定性。
+
+## 2026-06-18 - 全量落地不能只按第一批闭环收口
+
+- 问题/背景：用户要求无线画布正式版全量落地，但前一轮按批次完成后，只把第一批阶段闭环当成了可汇报节点，导致用户追问“为什么只落地了一部分”。
+- 诱因/根因：把工程执行批次当成用户目标边界；同时 todo 中部分“已完成”项没有逐项反查代码，例如 bootstrap 文档写了账户点数但接口未返回点数、历史入口已接真实面板但菜单仍标待接入、首尾帧视频只自动取首帧没有取第二张尾帧。
+- 当时思路：重新按第一性原理核对正式版成功标准：同一套后台、同一套项目/视频卡、同一套点数、同一套任务状态、同一套资产历史。只要其中一条链路有字段或入口断点，就不能用“批次完成”代替“全量完成”。
+- 改动位置：`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`、`src/app/api/tasks/create/route.ts`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/index.html`、`public/tools/ultimate-canvas/styles.css`、`tasks/todo.md`。
+- 怎么改：bootstrap 增加真实点数摘要；画布前端统一传无线画布 workspace key；首尾帧后端用第二张准备好的参考图作为尾帧；历史入口打开真实历史面板；默认模型文案改成 `gpt5.4`、`gmini 图形生成`、`默认视频 API`。
+- 验证结果：本条为纠偏记录；最终验证以本轮 `tsc`、构建、部署、公网资源命中和健康周期复查为准。
+- 可复用经验：用户说“全量落地”时，批次只是内部执行顺序，不是完成标准。最终汇报前要逐项反查 todo 的每个已完成项是否真的有代码字段、真实入口、线上验证和不能付费测试的明确边界。

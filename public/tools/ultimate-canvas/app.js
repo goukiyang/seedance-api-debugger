@@ -76,12 +76,23 @@
         return selectedVideoCardFromBootstrap(canvasRuntime.bootstrap);
     }
 
+    function canvasWorkspaceKey() {
+        if (!canvasRuntime.selectedProjectId || !canvasRuntime.selectedVideoCardId) return '';
+        return `ultimate-canvas:${canvasRuntime.selectedProjectId}:${canvasRuntime.selectedVideoCardId}`;
+    }
+
+    function workspaceHeaders() {
+        const key = canvasWorkspaceKey();
+        return key ? { 'x-tab-id': key } : {};
+    }
+
     async function postJson(url, payload, options = {}) {
         const res = await fetch(url, {
             method: 'POST',
             credentials: 'same-origin',
             headers: {
                 'Content-Type': 'application/json',
+                ...workspaceHeaders(),
                 ...(options.headers || {})
             },
             body: JSON.stringify(payload)
@@ -203,6 +214,7 @@
             video_card_id: canvasRuntime.selectedVideoCardId,
             canvas_document_id: canvasRuntime.documentId,
             canvas_node_id: payload.nodeId,
+            tab_id: canvasWorkspaceKey(),
             client_name: 'ultimate_canvas',
             source_request_id: `ultimate_canvas:${payload.nodeId}:${payload.requestId || Date.now()}`
         };
@@ -267,7 +279,8 @@
                             source: 'ultimate_canvas',
                             canvas_document_id: canvasRuntime.documentId,
                             canvas_node_id: payload.nodeId,
-                            mode: payload.mode
+                            mode: payload.mode,
+                            workspace_key: canvasWorkspaceKey()
                         }
                     });
                     return {
@@ -292,6 +305,13 @@
     function selectedVideoCardFromBootstrap(data) {
         const videoCardId = data?.context?.selected_video_card_id;
         return data?.context?.video_cards?.find(card => card.id === videoCardId) || null;
+    }
+
+    function formatCredits(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return '0';
+        if (Math.abs(number) >= 1000) return Math.round(number).toLocaleString('zh-CN');
+        return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/\.?0+$/, '');
     }
 
     function applyBootstrapState(data) {
@@ -330,6 +350,7 @@
         }
         const projects = data?.context?.projects || [];
         const cards = data?.context?.video_cards || [];
+        const credits = data?.context?.credits || {};
         const projectOptions = projects.map(project => `
             <option value="${escapeHtml(project.id)}" ${project.id === data.context.selected_project_id ? 'selected' : ''}>
                 ${escapeHtml(project.name)}
@@ -355,6 +376,9 @@
             </label>
             <span class="context-status ${data.context.needs_video_card_selection ? 'warn' : 'ok'}">
                 ${data.context.needs_video_card_selection ? '缺少归属' : '已接入后台'}
+            </span>
+            <span class="context-status credits" title="可用点数 / 冻结点数">
+                可用 ${escapeHtml(formatCredits(credits.available))} 点 · 冻结 ${escapeHtml(formatCredits(credits.frozen_credits))} 点
             </span>
             <span id="canvas-save-state" class="context-status save ${canvasRuntime.saveState}">
                 ${canvasRuntime.saveState === 'saved' ? '已保存' : canvasRuntime.saveState === 'saving' ? '保存中' : canvasRuntime.saveState === 'error' ? '保存失败' : '未保存'}
@@ -1122,7 +1146,7 @@
             if (payload.mode === 'first-last-frame-video' && collectReferenceImageIds(payload).length === 0 && collectReferenceImageUrls(payload).length === 0) {
                 return {
                     ready: false,
-                    message: '首尾帧视频至少需要一个可访问的图片节点作为首帧参考。'
+                    message: '首尾帧视频至少需要连接一张图片作为首帧；连接第二张图片会作为尾帧。'
                 };
             }
             return { ready: true };
@@ -1502,7 +1526,8 @@
         } else if (action === 'upload') {
             triggerUpload(cx, cy, pendingConnection);
         } else if (action === 'from-history') {
-            showCanvasNotice(item.dataset.comingSoon || '生成历史还没有接入后台任务记录。', 'warn');
+            showPanel('history-panel');
+            loadLibraryPanels(true);
         }
 
         engine._hideAddMenu();

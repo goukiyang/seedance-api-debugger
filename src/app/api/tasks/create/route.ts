@@ -491,6 +491,7 @@ export async function POST(request: NextRequest) {
       break;
     case 'first_last_frame':
       if (!firstFrameUrl) firstFrameUrl = preparedImages[0]?.originalUrl;
+      if (!lastFrameUrl) lastFrameUrl = preparedImages[1]?.originalUrl;
       if (!firstFrameUrl) return errorJson('首尾帧模式必须提供首帧图片', 400);
       break;
     case 'smart_multi_frame':

@@ -660,7 +660,7 @@ class CanvasEngine {
                 <div class="node-input-footer">
                     <div class="model-selector">
                         <span class="model-icon">🧠</span>
-                        <span>Musk LLM</span>
+                        <span>gpt5.4</span>
                         <span class="chevron">▾</span>
                     </div>
                     <div class="input-footer-right">
@@ -697,7 +697,7 @@ class CanvasEngine {
                 <div class="video-props-footer">
                     <div class="video-model-info">
                         <span class="model-icon">📊</span>
-                        <span>Seedance 2.0 VIP</span>
+                        <span>默认视频 API</span>
                         <span style="color:var(--accent-orange)">💎</span>
                     </div>
                     <div class="video-res-info">
@@ -729,7 +729,7 @@ class CanvasEngine {
                 <div class="image-props-footer">
                     <div class="video-model-info">
                         <span class="model-icon">✨</span>
-                        <span>无线 Navo Pro</span>
+                        <span>gmini 图形生成</span>
                         <span class="chevron" style="color:var(--text-dim)">▾</span>
                     </div>
                     <div class="video-footer-right">

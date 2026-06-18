@@ -12,6 +12,7 @@ import {
   isImageGenerationApiReady,
 } from '@/lib/integrations/image-generation';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
+import { getCreditSummary } from '@/lib/credits/policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -33,6 +34,7 @@ export async function GET(request: NextRequest) {
     getImageGenerationApiSettings(),
   ]);
   const videoConfig = getProviderConfig();
+  const creditSummary = await prisma.$transaction((tx) => getCreditSummary(tx, user));
 
   await ensureDefaultProjectForUser(user.id);
 
@@ -161,6 +163,22 @@ export async function GET(request: NextRequest) {
       selected_project_id: selectedProject?.id || null,
       video_cards: videoCardSummaries,
       selected_video_card_id: selectedVideoCard?.id || null,
+      credits: {
+        balance: creditSummary.account.balance,
+        available: creditSummary.available,
+        frozen_credits: creditSummary.frozen_credits,
+        daily_quota: {
+          total: creditSummary.daily_total,
+          remaining: creditSummary.daily_remaining,
+          frozen: creditSummary.daily_frozen,
+          expires_at: safeDate(creditSummary.daily_expires_at),
+        },
+        long_term: {
+          available: creditSummary.long_available,
+          balance: creditSummary.account.balance,
+          frozen: creditSummary.account.frozen_credits,
+        },
+      },
       canvas_document: latestCanvasDocument ? {
         id: latestCanvasDocument.id,
         title: latestCanvasDocument.title,
