@@ -82,6 +82,18 @@ function normalizeCurrency(value: unknown) {
   return currency;
 }
 
+function parseJsonRecord(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeActualCost(value: unknown) {
   const amount = typeof value === 'number'
     ? value
@@ -261,7 +273,10 @@ async function settleTask(
           frozen_after: settlement.frozenAfter,
           related_task_id: taskId,
           reason: `任务成功，扣除 ${settlement.actualCost} 点`,
-          metadata_json: JSON.stringify({ allocations: settlement.allocations }),
+          metadata_json: JSON.stringify({
+            allocations: settlement.allocations,
+            source_metadata: parseJsonRecord(freshTask.source_metadata_json),
+          }),
         },
       });
 
@@ -286,6 +301,7 @@ async function settleTask(
           metadata_json: JSON.stringify({
             allocations: settlement.allocations,
             expired_closed: settlement.expiredClosedAmount,
+            source_metadata: parseJsonRecord(freshTask.source_metadata_json),
           }),
         },
       });

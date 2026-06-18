@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
   const userId = url.searchParams.get('user_id');
   const type = url.searchParams.get('type');
   const taskId = url.searchParams.get('task_id');
+  const source = url.searchParams.get('source')?.trim();
   const keyword = url.searchParams.get('q')?.trim();
   const dateFrom = url.searchParams.get('date_from');
   const dateTo = url.searchParams.get('date_to');
@@ -34,9 +35,17 @@ export async function GET(request: NextRequest) {
   const skip = (page - 1) * pageSize;
 
   const where: Prisma.CreditLedgerWhereInput = {};
+  const andFilters: Prisma.CreditLedgerWhereInput[] = [];
   if (userId) where.user_id = userId;
   if (type) where.type = type;
   if (taskId) where.related_task_id = { contains: taskId };
+  if (source === 'ultimate_canvas') {
+    andFilters.push({ metadata_json: { contains: '"source":"ultimate_canvas"' } });
+  } else if (source === 'codex_api') {
+    andFilters.push({ metadata_json: { contains: '"interface":"codex"' } });
+  } else if (source === 'web') {
+    andFilters.push({ metadata_json: { contains: '"interface":"web"' } });
+  }
   if (fromDate || toDate) {
     where.created_at = {
       ...(fromDate ? { gte: fromDate } : {}),
@@ -48,11 +57,13 @@ export async function GET(request: NextRequest) {
       { id: { contains: keyword } },
       { type: { contains: keyword } },
       { reason: { contains: keyword } },
+      { metadata_json: { contains: keyword } },
       { related_task_id: { contains: keyword } },
       { user: { name: { contains: keyword } } },
       { user: { username: { contains: keyword } } },
     ];
   }
+  if (andFilters.length > 0) where.AND = andFilters;
 
   const [records, total] = await Promise.all([
     prisma.creditLedger.findMany({

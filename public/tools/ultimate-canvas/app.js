@@ -261,7 +261,7 @@
                 }
 
                 if (payload.kind === 'video') {
-                    const referenceImageIds = collectWorkspaceReferenceImageIds(payload);
+                    const referenceImageIds = collectReferenceImageIds(payload);
                     const referenceImageUrls = collectReferenceImageUrls(payload);
                     const generationMode = videoModeForCanvasMode(payload.mode);
                     const data = await postJson(capabilities.video?.endpoint || '/api/tasks/create', {
@@ -542,6 +542,9 @@
         engine.nodes.forEach((node) => {
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
             if (!nodeEl) return;
+            if (node.type === 'image') {
+                syncImageModeButtons(nodeEl, node.data?.mode || 'text-to-image');
+            }
             if ((node.type === 'text' || node.type === 'script') && node.data?.generatedText) {
                 applyTextGenerationResult(nodeEl, {
                     nodeId: node.id,
@@ -733,6 +736,7 @@
             description: item.prompt || item.title,
             assetId: item.assetId || null,
             referenceImageId: item.referenceImageId || null,
+            workspaceAssetId: item.workspaceAssetId || item.workspace_asset_id || null,
             taskId: item.taskId || null,
             previewImage: itemPreview(item),
             thumbnailUrl: item.thumbnailUrl || itemPreview(item),
@@ -1192,8 +1196,33 @@
     const imageModeMap = {
         '文生图': 'text-to-image',
         '图生图': 'image-to-image',
-        '高清修复': 'upscale-image'
+        '高清修复': 'upscale-image',
+        '首帧草图': 'first-frame-draft',
+        '尾帧草图': 'last-frame-draft'
     };
+
+    function syncImageModeButtons(nodeEl, mode = 'text-to-image') {
+        if (!nodeEl) return;
+        nodeEl.querySelectorAll('.image-mode-btn').forEach(button => {
+            button.classList.toggle('active', button.dataset.imageMode === mode);
+        });
+    }
+
+    document.addEventListener('click', (event) => {
+        const button = event.target.closest('.image-mode-btn');
+        const nodeEl = button?.closest('.canvas-node');
+        if (!button || !nodeEl) return;
+        const node = engine.nodes.get(nodeEl.dataset.nodeId);
+        if (!node) return;
+        event.preventDefault();
+        event.stopPropagation();
+        node.data = {
+            ...node.data,
+            mode: button.dataset.imageMode || 'text-to-image'
+        };
+        syncImageModeButtons(nodeEl, node.data.mode);
+        scheduleCanvasSave('image_mode_change');
+    });
 
     function promptInputFor(nodeEl, type) {
         if (type === 'video') return nodeEl.querySelector('.video-props-textarea');
@@ -1217,7 +1246,7 @@
         }
         if (node.type === 'image') {
             const mode = node.data?.mode || 'text-to-image';
-            return ['文生图', '图生图', '高清修复'].map(label => ({
+            return ['文生图', '图生图', '高清修复', '首帧草图', '尾帧草图'].map(label => ({
                 label,
                 active: imageModeMap[label] === mode || (!mode && label === '文生图')
             }));
@@ -1355,6 +1384,7 @@
         }
         if (node.type === 'image' && label) {
             node.data.mode = imageModeMap[label] || node.data.mode || 'text-to-image';
+            syncImageModeButtons(nodeEl, node.data.mode);
         }
     }
 

@@ -53,6 +53,7 @@ export default async function AdminPointsPage({
         user_id: firstParam(searchParams?.user_id),
         task_id: firstParam(searchParams?.task_id),
         type: firstParam(searchParams?.type),
+        source: firstParam(searchParams?.source),
         q: firstParam(searchParams?.q),
         date_from: firstParam(searchParams?.date_from),
         date_to: firstParam(searchParams?.date_to),

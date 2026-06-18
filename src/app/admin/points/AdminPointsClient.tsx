@@ -20,6 +20,7 @@ interface PointsInitialFilters {
   user_id?: string;
   task_id?: string;
   type?: string;
+  source?: string;
   q?: string;
   date_from?: string;
   date_to?: string;
@@ -129,6 +130,33 @@ function metadataSummary(value: string | null) {
     return '原始 metadata';
   }
   return '原始 metadata';
+}
+
+function parseMetadata(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordSourceInfo(record: Pick<LedgerRecord, 'metadata_json'>) {
+  const metadata = parseMetadata(record.metadata_json);
+  const sourceMetadata = metadata?.source_metadata && typeof metadata.source_metadata === 'object'
+    ? metadata.source_metadata as Record<string, unknown>
+    : metadata;
+  const source = typeof sourceMetadata?.source === 'string' ? sourceMetadata.source : '';
+  const sourceLabel = typeof sourceMetadata?.source_label === 'string' ? sourceMetadata.source_label : '';
+  const iface = typeof sourceMetadata?.interface === 'string' ? sourceMetadata.interface : '';
+
+  if (source === 'ultimate_canvas') {
+    return { key: 'ultimate_canvas', label: sourceLabel || '无线画布' };
+  }
+  if (iface === 'codex') return { key: 'codex_api', label: sourceLabel || '外部 API' };
+  if (iface === 'web') return { key: 'web', label: sourceLabel || '普通网页' };
+  return { key: 'unknown', label: '-' };
 }
 
 export default function AdminPointsClient({
@@ -289,6 +317,18 @@ export default function AdminPointsClient({
             </select>
           </label>
           <label>
+            来源
+            <select
+              value={filters.source || ''}
+              onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
+            >
+              <option value="">全部来源</option>
+              <option value="ultimate_canvas">无线画布</option>
+              <option value="web">普通网页</option>
+              <option value="codex_api">外部 API</option>
+            </select>
+          </label>
+          <label>
             开始日期
             <input
               type="date"
@@ -330,6 +370,7 @@ export default function AdminPointsClient({
                   <th>时间</th>
                   <th>主体</th>
                   <th>类型</th>
+                  <th>来源</th>
                   <th>变动</th>
                   <th>余额变化</th>
                   <th>冻结变化</th>
@@ -355,6 +396,11 @@ export default function AdminPointsClient({
                       </div>
                     </td>
                     <td>{ledgerTypeLabel(record.type)}</td>
+                    <td>
+                      <span className={`admin-points-source-badge source-${recordSourceInfo(record).key}`}>
+                        {recordSourceInfo(record).label}
+                      </span>
+                    </td>
                     <td className={amountClass(record.amount)}>{record.amount > 0 ? '+' : ''}{formatNumber(record.amount)}</td>
                     <td>{formatNumber(record.balance_before)}{' -> '}{formatNumber(record.balance_after)}</td>
                     <td>{formatNumber(record.frozen_before)}{' -> '}{formatNumber(record.frozen_after)}</td>
@@ -369,7 +415,7 @@ export default function AdminPointsClient({
                   </tr>
                 ))}
                 {!loading && records.length === 0 && (
-                  <tr><td colSpan={8} className="text-gray">没有匹配的点数流水。</td></tr>
+                  <tr><td colSpan={9} className="text-gray">没有匹配的点数流水。</td></tr>
                 )}
               </tbody>
             </table>
@@ -404,6 +450,7 @@ export default function AdminPointsClient({
                 </strong>
               </div>
               <div><span>类型</span><strong>{ledgerTypeLabel(selectedRecord.type)}</strong></div>
+              <div><span>来源</span><strong>{recordSourceInfo(selectedRecord).label}</strong></div>
               <div><span>变动</span><strong className={amountClass(selectedRecord.amount)}>{selectedRecord.amount > 0 ? '+' : ''}{formatNumber(selectedRecord.amount)}</strong></div>
               <div><span>任务</span><strong>{selectedRecord.related_task_id || '-'}</strong></div>
               <div><span>操作人</span><strong>{selectedRecord.operator_id || '-'}</strong></div>

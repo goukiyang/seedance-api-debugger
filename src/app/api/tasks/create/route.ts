@@ -4,7 +4,7 @@ import fs from 'fs';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { calculateEstimatedCost } from '@/lib/pricing';
-import { getOrCreateWorkspace } from '@/lib/assets/workspace';
+import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
@@ -26,6 +26,7 @@ import {
   recordTaskCostSettlement,
 } from '@/lib/costs/ledger';
 import {
+  assertCanUseReferenceImage,
   getAuthorizedReferenceImagesForUse,
   uniquePreserveOrder,
 } from '@/lib/reference-albums/permissions';
@@ -64,6 +65,22 @@ function cleanSourceMetadata(value: unknown) {
     if (typeof raw === 'string' && raw.trim()) result[key] = raw.trim().slice(0, 240);
   }
   return result;
+}
+
+function cleanClientName(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 80) : null;
+}
+
+function parseJsonRecord(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -342,13 +359,20 @@ export async function POST(request: NextRequest) {
       ? body.codex_request_id.trim()
       : null;
   const sourceRequestId = requestSource.source_request_id || bodySourceRequestId || idempotencyKey || null;
+  const cleanedSourceMetadata = cleanSourceMetadata(body.source_metadata);
+  const clientName = cleanClientName(body.client_name);
+  const isUltimateCanvasRequest = clientName === 'ultimate_canvas'
+    || cleanedSourceMetadata.source === 'ultimate_canvas';
+  const effectiveSourceLabel = isUltimateCanvasRequest ? '无线画布' : requestSource.source_label;
   const sourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
-    ...cleanSourceMetadata(body.source_metadata),
+    ...cleanedSourceMetadata,
+    ...(isUltimateCanvasRequest ? { source: 'ultimate_canvas' } : {}),
     tab_id: tabId,
     idempotency_key: idempotencyKey || null,
     body_source_request_id: bodySourceRequestId,
-    client_name: typeof body.client_name === 'string' && body.client_name.trim() ? body.client_name.trim() : null,
+    client_name: clientName,
+    source_label: effectiveSourceLabel,
     paid_generation_guard: paidGenerationGuard.metadata,
   };
   const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
@@ -380,7 +404,7 @@ export async function POST(request: NextRequest) {
         workspaceId,
         projectId: project.id,
         sourceRequestId,
-        sourceLabel: requestSource.source_label,
+        sourceLabel: effectiveSourceLabel,
         urls: requestedReferenceImageUrls,
       });
       requestedReferenceImageIds = uniquePreserveOrder([
@@ -409,7 +433,7 @@ export async function POST(request: NextRequest) {
     workspaceId,
     projectId: project.id,
     sourceRequestId,
-    sourceLabel: requestSource.source_label,
+    sourceLabel: effectiveSourceLabel,
     metadataSource: requestSource.source_type === 'codex_api' ? 'codex_api_workspace' : 'web_workspace',
   });
   if (workspaceReferenceBackfill.length > 0) {
@@ -419,7 +443,7 @@ export async function POST(request: NextRequest) {
     }));
   }
 
-  const workspaceReferenceImageIds = uniquePreserveOrder(
+  let workspaceReferenceImageIds = uniquePreserveOrder(
     (await prisma.workspaceAsset.findMany({
       where: {
         workspace_id: workspaceId,
@@ -432,7 +456,42 @@ export async function POST(request: NextRequest) {
 
   if (requestedReferenceImageIds.length > 0) {
     const workspaceIdSet = new Set(workspaceReferenceImageIds);
-    const missingFromWorkspace = requestedReferenceImageIds.filter((id) => !workspaceIdSet.has(id));
+    let missingFromWorkspace = requestedReferenceImageIds.filter((id) => !workspaceIdSet.has(id));
+    if (missingFromWorkspace.length > 0 && isUltimateCanvasRequest) {
+      const importedToWorkspace: Array<{
+        asset_id: string;
+        reference_image_id: string;
+        workspace_asset_id: string;
+      }> = [];
+
+      for (const referenceImageId of missingFromWorkspace) {
+        const image = await assertCanUseReferenceImage(user, referenceImageId);
+        if (!image.asset_id) continue;
+        const workspaceAssetId = await addAssetToWorkspace(
+          workspaceId,
+          image.asset_id,
+          'reference_image',
+          user.id,
+          { referenceImageId: image.id, allowSharedAsset: true },
+        );
+        importedToWorkspace.push({
+          asset_id: image.asset_id,
+          reference_image_id: image.id,
+          workspace_asset_id: workspaceAssetId,
+        });
+        workspaceIdSet.add(image.id);
+      }
+
+      if (importedToWorkspace.length > 0) {
+        sourceMetadata.canvas_reference_workspace_import = importedToWorkspace;
+        workspaceReferenceImageIds = uniquePreserveOrder([
+          ...workspaceReferenceImageIds,
+          ...importedToWorkspace.map((item) => item.reference_image_id),
+        ]);
+        missingFromWorkspace = requestedReferenceImageIds.filter((id) => !workspaceIdSet.has(id));
+      }
+    }
+
     if (missingFromWorkspace.length > 0) {
       return NextResponse.json(
         { error: 'REFERENCE_IMAGE_NOT_IN_WORKSPACE', message: '参考图必须先加入当前生成工作台' },
@@ -560,7 +619,7 @@ export async function POST(request: NextRequest) {
     prepSummary,
     source: {
       type: requestSource.source_type,
-      label: requestSource.source_label,
+      label: effectiveSourceLabel,
       requestId: sourceRequestId,
       paidGenerationGuard: paidGenerationGuard.metadata,
     },
@@ -594,7 +653,7 @@ export async function POST(request: NextRequest) {
           generation_mode: generationMode,
           prompt: body.prompt.trim(),
           source_type: requestSource.source_type,
-          source_label: requestSource.source_label,
+          source_label: effectiveSourceLabel,
           source_request_id: sourceRequestId,
           source_metadata_json: JSON.stringify(sourceMetadata),
           ratio,
@@ -758,7 +817,7 @@ export async function POST(request: NextRequest) {
             reference_album_ids: generationReferenceAlbumIds,
             reference_image_ids: generationReferenceImageIds,
             source_type: requestSource.source_type,
-            source_label: requestSource.source_label,
+            source_label: effectiveSourceLabel,
             source_request_id: sourceRequestId,
             source_metadata: sourceMetadata,
             paid_generation_guard: paidGenerationGuard.metadata,
@@ -842,7 +901,7 @@ export async function POST(request: NextRequest) {
         ...providerInput,
         source: {
           type: requestSource.source_type,
-          label: requestSource.source_label,
+          label: effectiveSourceLabel,
           requestId: sourceRequestId,
           paidGenerationGuard: paidGenerationGuard.metadata,
         },
@@ -932,7 +991,7 @@ export async function POST(request: NextRequest) {
       reference_album_ids: generationReferenceAlbumIds,
       reference_image_ids: generationReferenceImageIds,
       source_type: requestSource.source_type,
-      source_label: requestSource.source_label,
+      source_label: effectiveSourceLabel,
       source_request_id: sourceRequestId,
       created_at: new Date().toISOString(),
     });
@@ -1092,6 +1151,7 @@ async function handleProviderFailure(
         metadata_json: JSON.stringify({
           allocations: settlement.allocations,
           expired_closed: settlement.expiredClosedAmount,
+          source_metadata: parseJsonRecord(taskBeforeSettlement.source_metadata_json),
         }),
       },
     });

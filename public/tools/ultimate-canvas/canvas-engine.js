@@ -725,6 +725,13 @@ class CanvasEngine {
                     <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>标记</span></button>
                     <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg><span>裁切</span></button>
                 </div>
+                <div class="image-mode-segment" data-image-mode-segment>
+                    <button class="image-mode-btn active" data-image-mode="text-to-image">文生图</button>
+                    <button class="image-mode-btn" data-image-mode="image-to-image">图生图</button>
+                    <button class="image-mode-btn" data-image-mode="upscale-image">高清修复</button>
+                    <button class="image-mode-btn" data-image-mode="first-frame-draft">首帧草图</button>
+                    <button class="image-mode-btn" data-image-mode="last-frame-draft">尾帧草图</button>
+                </div>
                 <textarea class="image-props-textarea" placeholder="描述你想要生成的画面内容。描述越详细,效果越好。"></textarea>
                 <div class="image-props-footer">
                     <div class="video-model-info">

@@ -620,3 +620,13 @@
 - 怎么改：bootstrap 增加真实点数摘要；画布前端统一传无线画布 workspace key；首尾帧后端用第二张准备好的参考图作为尾帧；历史入口打开真实历史面板；默认模型文案改成 `gpt5.4`、`gmini 图形生成`、`默认视频 API`。
 - 验证结果：本条为纠偏记录；最终验证以本轮 `tsc`、构建、部署、公网资源命中和健康周期复查为准。
 - 可复用经验：用户说“全量落地”时，批次只是内部执行顺序，不是完成标准。最终汇报前要逐项反查 todo 的每个已完成项是否真的有代码字段、真实入口、线上验证和不能付费测试的明确边界。
+
+## 2026-06-19 - 生成接入闭环要查到终态流水和真实引用图
+
+- 问题/背景：用户再次要求把无线画布未做完的生成接入一次性全量落地，但不做真实视频生成调试。
+- 诱因/根因：上一轮主要补了创建任务和前端入口，但生成接入的完整闭环还包括素材库引用图是否真正传进生成工作区、成功/失败终态流水是否继承来源、后台能否按来源筛选，而不只是任务创建时有 metadata。
+- 当时思路：把“可提交”拆成“来源可识别、引用图可用、结果可追踪、流水可筛、UI 模式可选、线上可见”六个检查点，不跑付费生成也要把非付费接入层补完整。
+- 改动位置：`src/app/api/tasks/create/route.ts`、`src/lib/video/task-finalizer.ts`、`src/app/api/admin/credits/ledger/route.ts`、`src/app/admin/points/AdminPointsClient.tsx`、`src/app/admin/points/page.tsx`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/styles.css`、`tasks/todo.md`。
+- 怎么改：无线画布来源统一写成 `source=ultimate_canvas` / `source_label=无线画布`；素材库参考图由后端校验权限后自动补挂 workspace；成功扣除、失败返还、创建失败返还流水继承任务来源；点数流水页支持来源筛选；图片节点补文生图/图生图/高清修复/首帧草图/尾帧草图模式按钮。
+- 验证结果：本轮不执行真实付费视频生成；验收以 JS 语法、TypeScript、lint、build、API 未登录保护、公网页面资源命中和 sd2 健康周期复查为准。
+- 可复用经验：生成接入不能只验“点了会创建任务”。正式闭环必须覆盖输入引用能不能真正进入后端、状态终态能不能追踪、点数冻结/实扣/返还能不能按来源查、后台列表能不能定位到来源；若用户禁止付费测试，要把未跑的真实生成验收单独标出来。

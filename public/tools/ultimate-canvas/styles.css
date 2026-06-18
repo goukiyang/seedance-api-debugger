@@ -937,6 +937,31 @@ html, body {
 .image-props-tools {
     display: flex; gap: 6px; padding: 10px 16px;
 }
+.image-mode-segment {
+    display: flex;
+    gap: 4px;
+    margin: 0 16px 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+.image-mode-btn {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-node);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex: 0 0 auto;
+    font-family: var(--font-family);
+    font-size: 12px;
+    height: 28px;
+    padding: 0 9px;
+}
+.image-mode-btn:hover,
+.image-mode-btn.active {
+    background: rgba(88,166,255,0.16);
+    border-color: rgba(88,166,255,0.42);
+    color: var(--text-primary);
+}
 .image-props-textarea {
     width: calc(100% - 32px); margin: 0 16px 10px;
     min-height: 80px; background: transparent; border: none;
