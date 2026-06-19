@@ -2,7 +2,8 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ImageIcon, Plus, GripVertical } from 'lucide-react';
+import { ImageIcon, Plus, GripVertical, Trash2 } from 'lucide-react';
+import { normalizeContextCardTitle } from '@/lib/templates/workbench';
 import type {
   TemplateContextCard,
   TemplateContextCardBoundImage,
@@ -42,6 +43,10 @@ function reorderCards(cards: TemplateContextCard[]) {
   return cards.map((card, index) => ({ ...card, sort_order: index + 1 }));
 }
 
+function normalizeCardTitle(card: TemplateContextCard, fallbackIndex: number) {
+  return normalizeContextCardTitle(card.title, card.legacy_block_type, fallbackIndex);
+}
+
 function modeLabel(mode: TemplateContextCardMode) {
   return mode === 'force' ? '强制插入' : '仅供参考';
 }
@@ -65,7 +70,12 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
   const autoSelectedCardIdRef = useRef<string | null>(null);
 
   const sortedCards = useMemo(
-    () => [...cards].sort((a, b) => a.sort_order - b.sort_order),
+    () => [...cards]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((card, index) => ({
+        ...card,
+        title: normalizeCardTitle(card, index + 1),
+      })),
     [cards],
   );
   const editingCard = sortedCards.find((card) => card.id === editingCardId) || null;
@@ -93,7 +103,14 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
   }, [editingCardId, sortedCards]);
 
   const updateCard = (cardId: string, patch: Partial<TemplateContextCard>) => {
-    onChange(sortedCards.map((card) => (card.id === cardId ? { ...card, ...patch } : card)));
+    onChange(sortedCards.map((card, index) => {
+      if (card.id !== cardId) return card;
+      const next = { ...card, ...patch };
+      return {
+        ...next,
+        title: normalizeCardTitle(next, index + 1),
+      };
+    }));
   };
 
   const addCard = () => {
@@ -105,6 +122,21 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
 
   const removeBoundImage = (cardId: string) => {
     updateCard(cardId, { bound_image: null });
+  };
+
+  const deleteCard = (cardId: string) => {
+    const card = sortedCards.find((item) => item.id === cardId);
+    if (!card) return;
+    const confirmed = window.confirm(`删除「${card.title}」这张上下文卡片？删除后会自动保存。`);
+    if (!confirmed) return;
+
+    const nextCards = reorderCards(sortedCards.filter((item) => item.id !== cardId));
+    onChange(nextCards);
+    if (editingCardId === cardId) {
+      setEditingCardId(nextCards[0]?.id || null);
+      setReferenceExpanded(false);
+      setReferenceOpen(false);
+    }
   };
 
   const bindImage = (image: TemplateContextCardBoundImage) => {
@@ -250,6 +282,14 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
                       }}
                     >
                       编辑
+                    </button>
+                    <button
+                      type="button"
+                      className="is-danger"
+                      onClick={() => deleteCard(card.id)}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      删除
                     </button>
                   </div>
                 </article>

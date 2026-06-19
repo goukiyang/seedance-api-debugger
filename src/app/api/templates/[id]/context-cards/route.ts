@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
 import {
   buildTemplateWritePayload,
+  normalizeContextCardTitle,
   serializeGenerationTemplate,
   TEMPLATE_INCLUDE,
   type SerializedGenerationTemplate,
@@ -32,12 +33,16 @@ function normalizeCards(value: unknown): TemplateContextCard[] {
   return value.reduce<TemplateContextCard[]>((cards, item, index) => {
       const object = item && typeof item === 'object' ? item as Record<string, unknown> : {};
       const content = typeof object.content === 'string' ? object.content.trim() : '';
-      const title = typeof object.title === 'string' && object.title.trim() ? object.title.trim() : `上下文卡片 ${index + 1}`;
-      if (!content && !title) return cards;
       const rawBlockType = typeof object.legacy_block_type === 'string' ? object.legacy_block_type : 'global';
       const legacyBlockType = CARD_PROMPT_BLOCKS.has(rawBlockType as TemplatePromptBlockType)
         ? rawBlockType as TemplatePromptBlockType
         : 'global';
+      const title = normalizeContextCardTitle(
+        typeof object.title === 'string' ? object.title : null,
+        legacyBlockType,
+        index + 1,
+      );
+      if (!content && !title) return cards;
       cards.push({
         id: typeof object.id === 'string' && object.id.trim() ? object.id.trim() : `context-card-${index + 1}`,
         title,

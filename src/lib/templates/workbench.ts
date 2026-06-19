@@ -251,6 +251,87 @@ function normalizeContextCardMode(value: unknown): TemplateContextCardMode {
   return value === 'reference' ? 'reference' : 'force';
 }
 
+export const CONTEXT_CARD_LABELS: Record<TemplatePromptBlockType, string> = {
+  character: '角色设定',
+  logo: '品牌标识',
+  style: '视觉风格',
+  camera: '镜头语言',
+  rules: '生成规则',
+  asset_rule: '素材规则',
+  temporal: '分段节奏',
+  prompt_format: '提示词格式',
+  global: '全局补充',
+};
+
+const CODE_TITLE_LABELS: Record<string, string> = {
+  asset_rule: '素材规则',
+  brand_ip: '品牌角色',
+  brand_logo: '品牌标识',
+  camera: '镜头语言',
+  character: '角色设定',
+  fast_motion: '快节奏镜头',
+  global: '全局补充',
+  logo: '品牌标识',
+  prompt_format: '提示词格式',
+  rules: '生成规则',
+  style: '视觉风格',
+  tech_brand: '科技风格',
+  temporal: '分段节奏',
+};
+
+function titleKey(value: string) {
+  return value.trim().toLowerCase().replace(/[\s/-]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function translateTitleWords(value: string) {
+  return value
+    .replace(/brand/gi, '品牌')
+    .replace(/logo/gi, '标识')
+    .replace(/style/gi, '风格')
+    .replace(/camera/gi, '镜头')
+    .replace(/prompt/gi, '提示词')
+    .replace(/rules?/gi, '规则')
+    .replace(/global/gi, '全局')
+    .replace(/\bip\b/gi, '角色')
+    .replace(/[_/-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/([\u3400-\u9fff])\s+([\u3400-\u9fff])/g, '$1$2')
+    .replace(/角色角色/g, '角色')
+    .trim();
+}
+
+function isCodeLikeTitle(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const hasChinese = /[\u3400-\u9fff]/.test(trimmed);
+  const hasCodeSeparator = /[_./:-]/.test(trimmed);
+  const asciiOnly = /^[a-z0-9\s_.:/-]+$/i.test(trimmed);
+  return (asciiOnly && !hasChinese) || (hasCodeSeparator && asciiOnly);
+}
+
+export function normalizeContextCardTitle(
+  value: string | null | undefined,
+  blockType?: TemplatePromptBlockType,
+  fallbackIndex = 1,
+) {
+  const raw = (value || '').trim();
+  const fallback = blockType ? CONTEXT_CARD_LABELS[blockType] : `上下文卡片 ${fallbackIndex}`;
+  if (!raw) return fallback;
+
+  const directLabel = CODE_TITLE_LABELS[titleKey(raw)];
+  if (directLabel) return directLabel;
+
+  const translated = translateTitleWords(raw);
+  if (translated && translated !== raw) {
+    const translatedLabel = CODE_TITLE_LABELS[titleKey(translated)];
+    if (translatedLabel) return translatedLabel;
+    if (!/[a-z]/i.test(translated)) return translated;
+  }
+
+  if (isCodeLikeTitle(raw) || /[a-z]/i.test(raw)) return fallback;
+  return raw;
+}
+
 function normalizeContextCardBoundImage(value: unknown): TemplateContextCardBoundImage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const object = value as Record<string, unknown>;
@@ -284,7 +365,8 @@ function normalizeContextCards(value: unknown): TemplateContextCard[] {
       const rawTitle = stringOrNull(object.title);
       const rawId = stringOrNull(object.id);
       if (!content && !rawTitle && !rawId) return cards;
-      const title = rawTitle || `上下文卡片 ${index + 1}`;
+      const legacyBlockType = object.legacy_block_type ? normalizePromptBlockType(object.legacy_block_type) : undefined;
+      const title = normalizeContextCardTitle(rawTitle, legacyBlockType, index + 1);
       cards.push({
         id: rawId || `context-card-${index + 1}`,
         title,
@@ -294,7 +376,7 @@ function normalizeContextCards(value: unknown): TemplateContextCard[] {
         sort_order: normalizeSortOrder(object.sort_order, index + 1),
         bound_image: normalizeContextCardBoundImage(object.bound_image),
         llm_reference: stringOrNull(object.llm_reference) || '',
-        legacy_block_type: object.legacy_block_type ? normalizePromptBlockType(object.legacy_block_type) : undefined,
+        legacy_block_type: legacyBlockType,
       });
       return cards;
     }, [])
@@ -334,18 +416,6 @@ function normalizePriority(value: unknown) {
   return Number.isFinite(parsed) ? Math.min(100, Math.max(1, Math.round(parsed))) : 50;
 }
 
-const CONTEXT_CARD_LABELS: Record<TemplatePromptBlockType, string> = {
-  character: '角色设定',
-  logo: 'Logo 要求',
-  style: '风格参考',
-  camera: '镜头要求',
-  rules: '生成规则',
-  asset_rule: '素材使用',
-  temporal: '分段节奏',
-  prompt_format: '提示词格式',
-  global: '全局补充',
-};
-
 function contextCardId(blockType: string, index: number) {
   return `card-${blockType}-${index + 1}`;
 }
@@ -384,9 +454,11 @@ function buildContextCardsFromLegacy(
   const activePrompts = prompts.filter((prompt) => prompt.status === 'active' && prompt.content.trim());
   const cards = activePrompts.map((prompt, index) => {
     const bindingValue = bindings[prompt.block_type as keyof TemplateModuleBindings];
-    const title = typeof bindingValue === 'string' && bindingValue.trim()
-      ? bindingValue.trim()
-      : CONTEXT_CARD_LABELS[prompt.block_type];
+    const title = normalizeContextCardTitle(
+      typeof bindingValue === 'string' ? bindingValue : null,
+      prompt.block_type,
+      index + 1,
+    );
     return {
       id: contextCardId(prompt.block_type, index),
       title,

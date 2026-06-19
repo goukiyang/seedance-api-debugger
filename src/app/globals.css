@@ -8717,6 +8717,18 @@ a {
   color: #dbeafe;
 }
 
+.template-context-card-actions button.is-danger {
+  background: rgba(127, 29, 29, 0.18);
+  border-color: rgba(248, 113, 113, 0.36);
+  color: #fecaca;
+}
+
+.template-context-card-actions button.is-danger:hover {
+  background: rgba(153, 27, 27, 0.28);
+  border-color: rgba(248, 113, 113, 0.58);
+  color: #fee2e2;
+}
+
 .template-context-card-actions {
   align-content: start;
   display: grid;
