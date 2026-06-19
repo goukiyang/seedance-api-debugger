@@ -295,8 +295,7 @@ export function TemplateContextCardsPanel({
   if (showCardEditorPage) {
     return (
       <section className="template-context-card-edit-page" aria-label="上下文卡片二级编辑页">
-        <div className="template-card-edit-topbar">
-          {backHref && <Link href={backHref}>返回卡片列表</Link>}
+        <div className="template-card-edit-statusbar">
           <span>{saveStatusText(saveStatus, saveError)}</span>
         </div>
         {renderCardEditor('template-context-card-editor-page', false)}

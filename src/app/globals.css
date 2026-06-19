@@ -8524,8 +8524,7 @@ a {
 .template-context-main,
 .template-context-impact,
 .template-context-drawer,
-.template-context-card-editor-page,
-.template-card-route-workspace {
+.template-context-card-editor-page {
   background: rgba(15, 23, 42, 0.42);
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 13px;
@@ -8585,6 +8584,7 @@ a {
 .template-context-editor-actions button,
 .template-context-drawer header button,
 .template-card-edit-topbar a,
+.template-card-page-back,
 .template-card-edit-empty a,
 .template-context-impact-head button,
 .template-bound-image-head button,
@@ -8930,7 +8930,7 @@ a {
   display: grid;
   gap: 14px;
   min-height: 0;
-  padding: 14px;
+  padding: 0;
 }
 
 .template-context-card-edit-page {
@@ -8946,7 +8946,14 @@ a {
   justify-content: space-between;
 }
 
-.template-card-edit-topbar span {
+.template-card-edit-statusbar {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.template-card-edit-topbar span,
+.template-card-edit-statusbar span {
   color: rgba(203, 213, 225, 0.82);
   font-size: 12px;
   font-weight: 850;
@@ -9277,6 +9284,59 @@ a {
   max-width: 1440px;
 }
 
+.admin-template-page.is-card-editor {
+  gap: 14px;
+}
+
+.template-card-page-head {
+  align-items: center;
+  background: rgba(248, 250, 252, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+  display: flex;
+  gap: 14px;
+  justify-content: flex-start;
+  padding: 14px 16px;
+}
+
+.template-card-page-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.template-card-page-head span {
+  color: rgba(37, 99, 235, 0.92);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.template-card-page-head h1 {
+  color: #0f172a;
+  font-size: 24px;
+  line-height: 1.18;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.template-card-page-head p {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.template-card-page-back {
+  flex: 0 0 auto;
+}
+
+.template-card-page-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+}
+
 .admin-template-head,
 .admin-template-detail-head {
   align-items: end;
@@ -9511,6 +9571,17 @@ a {
   display: flex;
   gap: 7px;
   font-weight: 750;
+}
+
+@media (max-width: 760px) {
+  .template-card-page-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .template-card-page-back {
+    width: 100%;
+  }
 }
 
 .template-library-page {

@@ -239,18 +239,20 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
 
   const workspaceContent = (
     <>
-      <header className="template-drawer-head">
-        <div>
-          <span>模板工作台</span>
-          <h2>{template.name}</h2>
-        </div>
-        {variant === 'drawer' && <button type="button" onClick={onClose}>关闭</button>}
-        {variant === 'inline' && (
-          <div className="template-drawer-head-actions">
-            {editorActions}
+      {variant !== 'card' && (
+        <header className="template-drawer-head">
+          <div>
+            <span>模板工作台</span>
+            <h2>{template.name}</h2>
           </div>
-        )}
-      </header>
+          {variant === 'drawer' && <button type="button" onClick={onClose}>关闭</button>}
+          {variant === 'inline' && (
+            <div className="template-drawer-head-actions">
+              {editorActions}
+            </div>
+          )}
+        </header>
+      )}
 
       {error && <div className="template-drawer-error">{error}</div>}
 
