@@ -282,8 +282,20 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
 
   if (variant === 'card') {
     return (
-      <section className="template-card-route-workspace" aria-label="上下文卡片二级编辑">
-        {workspaceContent}
+      <section className="template-card-modal-shell" role="dialog" aria-modal="true" aria-label="上下文卡片三级编辑弹窗">
+        <button type="button" className="template-card-modal-backdrop" aria-label="关闭卡片编辑" onClick={onClose} />
+        <aside className="template-card-modal">
+          <header className="template-card-modal-head">
+            <div>
+              <span>上下文卡片三级弹窗</span>
+              <h2>{template.name}</h2>
+            </div>
+            <button type="button" onClick={onClose}>关闭</button>
+          </header>
+          <section className="template-card-route-workspace" aria-label="上下文卡片编辑">
+            {workspaceContent}
+          </section>
+        </aside>
       </section>
     );
   }

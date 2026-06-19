@@ -200,45 +200,6 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
     }
   };
 
-  if (cardEditorMode) {
-    const pageTitle = selectedTemplate?.name || '模板上下文卡片';
-
-    return (
-      <div className="admin-template-page is-card-editor">
-        <header className="template-card-page-head">
-          <Link className="template-card-page-back" href={`/admin/templates/${initialTemplateId}`}>
-            返回卡片列表
-          </Link>
-          <div>
-            <span>上下文卡片二级编辑</span>
-            <h1>{pageTitle}</h1>
-            <p>编辑这张卡片最终写入 LLM 的内容、参考设置和绑定图片。</p>
-          </div>
-        </header>
-
-        <main className="template-card-page-body">
-          {loading && <div className="admin-template-state">读取模板中...</div>}
-          {!loading && error && <div className="admin-template-state is-error">{error}</div>}
-          {!loading && !selectedTemplate && !error && (
-            <div className="admin-template-state">没有找到这个模板</div>
-          )}
-          {!loading && selectedTemplate && (
-            <TemplateEditorDrawer
-              open
-              variant="card"
-              template={selectedTemplate}
-              cardId={initialCardId}
-              saving={saving}
-              error={saveError}
-              onClose={() => undefined}
-              onSave={handleSaveTemplate}
-            />
-          )}
-        </main>
-      </div>
-    );
-  }
-
   return (
     <div className="admin-template-page">
       <header className="admin-template-head">
@@ -326,9 +287,8 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
             detailWorkspaceMode ? (
               <TemplateEditorDrawer
                 open
-                variant={cardEditorMode ? 'card' : 'inline'}
+                variant="inline"
                 template={selectedTemplate}
-                cardId={initialCardId}
                 saving={saving}
                 error={saveError}
                 onClose={() => undefined}
@@ -407,6 +367,19 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
         onClose={() => setDrawerOpen(false)}
         onSave={handleSaveTemplate}
       />
+
+      {cardEditorMode && selectedTemplate && (
+        <TemplateEditorDrawer
+          open
+          variant="card"
+          template={selectedTemplate}
+          cardId={initialCardId}
+          saving={saving}
+          error={saveError}
+          onClose={() => router.push(`/admin/templates/${selectedTemplate.id}`)}
+          onSave={handleSaveTemplate}
+        />
+      )}
     </div>
   );
 }

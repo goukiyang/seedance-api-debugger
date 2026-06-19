@@ -640,3 +640,13 @@
 - 怎么改：卡片面板接收模板规则并在规则栏逐条展示；LLM 改写只生成“LLM 生成草稿（未应用）”，提供“应用到上方内容”和“清空草稿”；切换卡片时清空未应用草稿，避免组件状态里残留当前页面不可见的生成内容。
 - 验证结果：`git diff --check`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npx impeccable detect ...`、`npm run lint`、`npm run build` 通过。
 - 可复用经验：所有会进入最终提示词或影响 LLM 改写的内容都必须有明确可见位置。LLM 生成不能直接覆盖正式字段，必须先作为草稿展示，再由管理员确认应用。
+
+## 2026-06-19 - 卡片编辑应作为模板页上的三级弹窗
+
+- 问题/背景：用户明确指出卡片编辑页应该是独立的三级弹窗，而不是把模板详情页替换成另一个整页编辑界面。
+- 诱因/根因：上一轮为了修复二级页位置，把 `/admin/templates/[id]/cards/[cardId]` 渲染成独立页面；这会让管理员离开模板卡片列表上下文，不符合“在模板页上弹出编辑当前卡片”的工作流。
+- 当时思路：保留卡片编辑路由可达，但页面主体仍显示模板卡片工作台；当前卡片编辑器作为固定遮罩弹窗浮在上层，关闭后返回模板卡片列表。
+- 改动位置：`src/components/templates/AdminTemplatesClient.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/components/templates/TemplateContextCardsPanel.tsx`、`src/app/globals.css`。
+- 怎么改：移除卡片路由的整页早返回；模板详情页始终渲染卡片列表；当 URL 带 `cardId` 时额外渲染 `template-card-modal-shell` 三级弹窗；关闭按钮和遮罩返回 `/admin/templates/[id]`；删除旧二级整页头部样式。
+- 验证结果：`git diff --check`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npx impeccable detect ...`、`npm run lint`、`npm run build` 通过。
+- 可复用经验：工作流里的“编辑当前项”不一定应该独立成新页面。若用户需要保留父页面上下文，深层编辑应该用独立弹窗或抽屉覆盖，关闭后回到原列表位置。

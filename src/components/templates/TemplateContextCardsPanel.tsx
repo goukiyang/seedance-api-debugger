@@ -354,7 +354,7 @@ export function TemplateContextCardsPanel({
 
   if (showCardEditorPage) {
     return (
-      <section className="template-context-card-edit-page" aria-label="上下文卡片二级编辑页">
+      <section className="template-context-card-edit-page" aria-label="上下文卡片弹窗编辑内容">
         <div className="template-card-edit-statusbar">
           <span>{saveStatusText(saveStatus, saveError)}</span>
         </div>
