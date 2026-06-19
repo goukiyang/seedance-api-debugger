@@ -61,9 +61,40 @@ const moduleItem: TemplateModuleLibraryItem = buildTemplateModuleLibraryItem({
 });
 
 assert.equal(moduleItem.module_type, 'character');
+assert.equal(moduleItem.category, '角色设定');
 assert.equal(moduleItem.current_version, 1);
 assert.equal(moduleItem.versions[0]?.content.moduleName, '兔子IP');
 assert.equal(moduleItem.source.template_id, 'tpl_001');
+
+const promptFormatModule = buildTemplateModuleLibraryItem({
+  draft: {
+    moduleType: 'prompt_format',
+    moduleName: '视频提示词格式',
+    promptBlock: {
+      content: '创意名编号、总述、连续分镜、(end)。',
+    },
+    rules: [
+      {
+        ruleType: 'MUST',
+        injectionMode: 'prompt_required',
+        target: 'prompt_format',
+        content: '必须输出连续分镜格式。',
+        priority: 100,
+      },
+    ],
+    injectionMode: 'prompt_required',
+    priority: 100,
+    target: 'prompt_format',
+  },
+  template,
+  actorUserId: 'admin_001',
+  scope: 'global',
+  category: '提示词格式',
+});
+
+assert.equal(promptFormatModule.scope, 'global');
+assert.equal(promptFormatModule.category, '提示词格式');
+assert.equal(promptFormatModule.versions[0]?.prompt_format_source, 'video_generation_skills');
 
 const modulePatch = buildTemplateModulePatch(template, moduleItem);
 assert.equal(modulePatch.module_bindings.character, moduleItem.id);

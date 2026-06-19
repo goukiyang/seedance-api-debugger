@@ -37,6 +37,7 @@ export type TemplateModuleLibraryItem = {
   id: string;
   module_type: ResolvedModuleBuilderType;
   name: string;
+  category: string;
   scope: TemplateModuleScope;
   status: TemplateModuleStatus;
   current_version: number;
@@ -67,6 +68,7 @@ export type BuildTemplateModuleLibraryItemInput = {
   agentRunId?: string | null;
   scope?: TemplateModuleScope;
   status?: TemplateModuleStatus;
+  category?: string;
   existingModule?: TemplateModuleLibraryItem | null;
   adminModified?: boolean;
   diffSummary?: string[];
@@ -116,6 +118,17 @@ const PROMPT_BLOCK_MAP: Record<ResolvedModuleBuilderType, TemplatePromptBlockTyp
   prompt_format: 'prompt_format',
 };
 
+const MODULE_CATEGORY_MAP: Record<ResolvedModuleBuilderType, string> = {
+  character: '角色设定',
+  logo: 'Logo / 品牌规范',
+  style: '风格参考',
+  camera: '镜头语言',
+  rule: '规则限制',
+  asset_rule: '素材规则',
+  temporal: 'Temporal 分段',
+  prompt_format: '提示词格式',
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -140,7 +153,9 @@ function normalizeLibrary(value: unknown): TemplateModuleLibrary {
   const source = value as Partial<TemplateModuleLibrary>;
   return {
     version: 1,
-    modules: Array.isArray(source.modules) ? source.modules.filter(isTemplateModuleLibraryItem) : [],
+    modules: Array.isArray(source.modules)
+      ? source.modules.map(normalizeLibraryItem).filter((item): item is TemplateModuleLibraryItem => Boolean(item))
+      : [],
     updated_at: safeString(source.updated_at) || nowIso(),
   };
 }
@@ -149,6 +164,14 @@ function isTemplateModuleLibraryItem(value: unknown): value is TemplateModuleLib
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const source = value as Partial<TemplateModuleLibraryItem>;
   return Boolean(source.id && source.module_type && source.name && Array.isArray(source.versions));
+}
+
+function normalizeLibraryItem(value: unknown): TemplateModuleLibraryItem | null {
+  if (!isTemplateModuleLibraryItem(value)) return null;
+  return {
+    ...value,
+    category: safeString(value.category) || MODULE_CATEGORY_MAP[value.module_type] || '未分类',
+  };
 }
 
 function promptBlockToText(value: Record<string, unknown>) {
@@ -203,6 +226,7 @@ export function buildTemplateModuleLibraryItem(input: BuildTemplateModuleLibrary
     id,
     module_type: input.draft.moduleType,
     name: input.draft.moduleName,
+    category: input.category?.trim() || existing?.category || MODULE_CATEGORY_MAP[input.draft.moduleType],
     scope: input.scope || existing?.scope || 'template',
     status: input.status || existing?.status || 'active',
     current_version: version,
