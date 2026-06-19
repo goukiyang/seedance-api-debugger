@@ -7808,6 +7808,14 @@ a {
   justify-content: space-between;
 }
 
+.template-drawer-head-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .template-drawer-head span {
   color: rgba(148, 163, 184, 0.78);
   font-size: 12px;
@@ -7859,7 +7867,8 @@ a {
 }
 
 .template-drawer-head button,
-.template-drawer-actions button {
+.template-drawer-actions button,
+.template-drawer-head-actions button {
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 9px;
@@ -7869,6 +7878,18 @@ a {
   font-weight: 800;
   min-height: 34px;
   padding: 7px 11px;
+}
+
+.template-drawer-head-actions .is-primary {
+  background: #2563eb;
+  border-color: rgba(147, 197, 253, 0.5);
+  color: #eff6ff;
+}
+
+.template-drawer-save-state {
+  color: rgba(203, 213, 225, 0.84);
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .template-drawer-actions .is-primary {
@@ -8502,7 +8523,9 @@ a {
 
 .template-context-main,
 .template-context-impact,
-.template-context-drawer {
+.template-context-drawer,
+.template-context-card-editor-page,
+.template-card-route-workspace {
   background: rgba(15, 23, 42, 0.42);
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 13px;
@@ -8528,6 +8551,7 @@ a {
 
 .template-context-toolbar h3,
 .template-context-drawer h3,
+.template-context-card-editor-page h3,
 .template-context-impact strong,
 .template-context-impact h4,
 .admin-template-detail h2,
@@ -8542,6 +8566,7 @@ a {
 .template-context-impact span,
 .template-context-impact li span,
 .template-context-drawer header span,
+.template-context-card-editor-page header span,
 .template-context-bound-row span,
 .template-context-reference button,
 .template-context-chat span {
@@ -8553,11 +8578,14 @@ a {
 .template-context-add,
 .template-context-empty button,
 .template-context-card-actions button,
+.template-context-card-actions a,
 .template-context-card-controls button,
 .template-context-bound-row button,
 .template-context-chat button,
 .template-context-editor-actions button,
 .template-context-drawer header button,
+.template-card-edit-topbar a,
+.template-card-edit-empty a,
 .template-context-impact-head button,
 .template-bound-image-head button,
 .template-bound-image-tabs button,
@@ -8872,7 +8900,8 @@ a {
 
 .template-context-empty,
 .template-bound-image-empty,
-.admin-template-state {
+.admin-template-state,
+.template-card-edit-empty {
   align-items: center;
   border: 1px dashed rgba(148, 163, 184, 0.26);
   border-radius: 12px;
@@ -8897,13 +8926,50 @@ a {
   top: 92px;
 }
 
-.template-context-drawer header {
+.template-card-route-workspace {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 14px;
+}
+
+.template-context-card-edit-page {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+}
+
+.template-card-edit-topbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.template-card-edit-topbar span {
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.template-context-card-editor-page {
+  display: grid;
+  gap: 12px;
+  max-width: 980px;
+  min-height: 0;
+  padding: 14px;
+  width: 100%;
+}
+
+.template-context-drawer header,
+.template-context-card-editor-page header {
   align-items: center;
   display: flex;
   justify-content: space-between;
 }
 
 .template-context-drawer label,
+.template-context-card-editor-page label,
 .template-context-chat {
   display: grid;
   gap: 7px;
@@ -8911,6 +8977,8 @@ a {
 
 .template-context-drawer input,
 .template-context-drawer textarea,
+.template-context-card-editor-page input,
+.template-context-card-editor-page textarea,
 .admin-template-builder textarea {
   background: rgba(2, 6, 23, 0.38);
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -8924,7 +8992,8 @@ a {
   width: 100%;
 }
 
-.template-context-drawer label:nth-of-type(2) textarea {
+.template-context-drawer label:nth-of-type(2) textarea,
+.template-context-card-editor-page label:nth-of-type(2) textarea {
   min-height: 150px;
 }
 

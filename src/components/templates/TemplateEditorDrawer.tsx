@@ -15,7 +15,8 @@ type Props = {
   template: SerializedGenerationTemplate | null;
   saving?: boolean;
   error?: string | null;
-  variant?: 'drawer' | 'inline';
+  variant?: 'drawer' | 'inline' | 'card';
+  cardId?: string | null;
   onClose: () => void;
   onSave: (payload: Record<string, unknown>) => Promise<void>;
 };
@@ -102,7 +103,7 @@ function promptBlockToString(value: unknown) {
     .join('\n');
 }
 
-export function TemplateEditorDrawer({ open, template, saving = false, error, variant = 'drawer', onClose, onSave }: Props) {
+export function TemplateEditorDrawer({ open, template, saving = false, error, variant = 'drawer', cardId = null, onClose, onSave }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('draft');
@@ -244,6 +245,11 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
           <h2>{template.name}</h2>
         </div>
         {variant === 'drawer' && <button type="button" onClick={onClose}>关闭</button>}
+        {variant === 'inline' && (
+          <div className="template-drawer-head-actions">
+            {editorActions}
+          </div>
+        )}
       </header>
 
       {error && <div className="template-drawer-error">{error}</div>}
@@ -252,7 +258,11 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
         cards={contextCards}
         saveStatus={contextCardsSaveStatus}
         saveError={contextCardsSaveError}
-        editorActions={editorActions}
+        editorActions={variant === 'card' ? editorActions : undefined}
+        templateId={template.id}
+        editorMode={variant === 'card' ? 'card-page' : 'overview'}
+        editingCardId={cardId}
+        backHref={`/admin/templates/${template.id}`}
         onChange={setContextCards}
         onRewriteCard={rewriteContextCard}
       />
@@ -262,6 +272,14 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
   if (variant === 'inline') {
     return (
       <section className="template-inline-workspace" aria-label="模板上下文卡片编辑">
+        {workspaceContent}
+      </section>
+    );
+  }
+
+  if (variant === 'card') {
+    return (
+      <section className="template-card-route-workspace" aria-label="上下文卡片二级编辑">
         {workspaceContent}
       </section>
     );

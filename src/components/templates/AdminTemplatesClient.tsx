@@ -9,6 +9,7 @@ import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawe
 
 type Props = {
   initialTemplateId?: string | null;
+  initialCardId?: string | null;
 };
 
 type TemplateConfigDraft = {
@@ -64,8 +65,9 @@ function publishIssues(template: SerializedGenerationTemplate | null) {
   return issues;
 }
 
-export function AdminTemplatesClient({ initialTemplateId = null }: Props) {
+export function AdminTemplatesClient({ initialTemplateId = null, initialCardId = null }: Props) {
   const detailWorkspaceMode = Boolean(initialTemplateId);
+  const cardEditorMode = Boolean(initialTemplateId && initialCardId);
   const router = useRouter();
   const [templates, setTemplates] = useState<SerializedGenerationTemplate[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialTemplateId);
@@ -285,8 +287,9 @@ export function AdminTemplatesClient({ initialTemplateId = null }: Props) {
             detailWorkspaceMode ? (
               <TemplateEditorDrawer
                 open
-                variant="inline"
+                variant={cardEditorMode ? 'card' : 'inline'}
                 template={selectedTemplate}
+                cardId={initialCardId}
                 saving={saving}
                 error={saveError}
                 onClose={() => undefined}

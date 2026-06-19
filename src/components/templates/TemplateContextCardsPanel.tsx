@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { ImageIcon, Plus, GripVertical, Trash2 } from 'lucide-react';
 import { normalizeContextCardTitle } from '@/lib/templates/workbench';
 import type {
@@ -18,6 +19,10 @@ type Props = {
   saveStatus: SaveStatus;
   saveError?: string | null;
   editorActions?: ReactNode;
+  templateId?: string;
+  editorMode?: 'overview' | 'inline' | 'card-page';
+  editingCardId?: string | null;
+  backHref?: string;
   onChange: (cards: TemplateContextCard[]) => void;
   onRewriteCard: (card: TemplateContextCard, instruction: string) => Promise<string>;
 };
@@ -58,8 +63,19 @@ function saveStatusText(status: SaveStatus, error?: string | null) {
   return '等待修改';
 }
 
-export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editorActions, onChange, onRewriteCard }: Props) {
-  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+export function TemplateContextCardsPanel({
+  cards,
+  saveStatus,
+  saveError,
+  editorActions,
+  templateId,
+  editorMode = 'overview',
+  editingCardId = null,
+  backHref,
+  onChange,
+  onRewriteCard,
+}: Props) {
+  const [internalEditingCardId, setInternalEditingCardId] = useState<string | null>(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
@@ -78,7 +94,10 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
       })),
     [cards],
   );
-  const editingCard = sortedCards.find((card) => card.id === editingCardId) || null;
+  const effectiveEditingCardId = editorMode === 'card-page' ? editingCardId : internalEditingCardId;
+  const editingCard = sortedCards.find((card) => card.id === effectiveEditingCardId) || null;
+  const showInlineEditor = editorMode === 'inline';
+  const showCardEditorPage = editorMode === 'card-page';
   const enabledCards = sortedCards.filter((card) => card.enabled);
   const forceCards = enabledCards.filter((card) => card.mode === 'force');
   const referenceCards = enabledCards.filter((card) => card.mode === 'reference');
@@ -95,12 +114,13 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
   );
 
   useEffect(() => {
-    if (editingCardId && sortedCards.some((card) => card.id === editingCardId)) return;
+    if (!showInlineEditor) return;
+    if (internalEditingCardId && sortedCards.some((card) => card.id === internalEditingCardId)) return;
     const firstCard = sortedCards[0];
     if (!firstCard || autoSelectedCardIdRef.current === firstCard.id) return;
     autoSelectedCardIdRef.current = firstCard.id;
-    setEditingCardId(firstCard.id);
-  }, [editingCardId, sortedCards]);
+    setInternalEditingCardId(firstCard.id);
+  }, [internalEditingCardId, showInlineEditor, sortedCards]);
 
   const updateCard = (cardId: string, patch: Partial<TemplateContextCard>) => {
     onChange(sortedCards.map((card, index) => {
@@ -116,7 +136,7 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
   const addCard = () => {
     const next = [...sortedCards, createEmptyCard(sortedCards.length + 1)];
     onChange(next);
-    setEditingCardId(next[next.length - 1].id);
+    setInternalEditingCardId(next[next.length - 1].id);
     setReferenceExpanded(false);
   };
 
@@ -132,8 +152,8 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
 
     const nextCards = reorderCards(sortedCards.filter((item) => item.id !== cardId));
     onChange(nextCards);
-    if (editingCardId === cardId) {
-      setEditingCardId(nextCards[0]?.id || null);
+    if (effectiveEditingCardId === cardId) {
+      setInternalEditingCardId(nextCards[0]?.id || null);
       setReferenceExpanded(false);
       setReferenceOpen(false);
     }
@@ -171,6 +191,10 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
     }
   };
 
+  const editHrefForCard = (card: TemplateContextCard) => (
+    templateId ? `/admin/templates/${templateId}/cards/${card.id}` : null
+  );
+
   const copyFinalPrompt = async () => {
     if (!finalPromptText) {
       setCopyNotice('暂无启用卡片');
@@ -184,9 +208,111 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
     }
   };
 
+  const renderCardEditor = (className: string, showCloseButton: boolean) => {
+    if (!editingCard) return (
+      <section className={className} aria-label="编辑上下文卡片">
+        <div className="template-card-edit-empty">
+          <strong>没有找到这张卡片</strong>
+          <span>它可能已经被删除，返回模板卡片列表重新选择。</span>
+          {backHref && <Link href={backHref}>返回卡片列表</Link>}
+        </div>
+      </section>
+    );
+
+    return (
+      <aside className={className} aria-label="编辑上下文卡片">
+        <header>
+          <div>
+            <span>{modeLabel(editingCard.mode)}</span>
+            <h3>{editingCard.title || '编辑上下文卡片'}</h3>
+          </div>
+          {showCloseButton && <button type="button" onClick={() => setInternalEditingCardId(null)}>关闭</button>}
+        </header>
+        <label>
+          <span>卡片名称</span>
+          <input value={editingCard.title} onChange={(event) => updateCard(editingCard.id, { title: event.currentTarget.value })} />
+        </label>
+        <label>
+          <span>最终输入给 LLM 的上下文内容</span>
+          <textarea
+            value={editingCard.content}
+            onChange={(event) => updateCard(editingCard.id, { content: event.currentTarget.value })}
+            rows={8}
+          />
+        </label>
+        <div className={`template-context-save ${saveStatus}`}>
+          {saveStatusText(saveStatus, saveError)}
+        </div>
+        <div className="template-context-bound-row">
+          <div>
+            <span>绑定图片</span>
+            <strong>{editingCard.bound_image?.label || '未绑定'}</strong>
+          </div>
+          <button type="button" onClick={() => setReferenceOpen(true)}>{editingCard.bound_image ? '更换图片' : '添加图片'}</button>
+          {editingCard.bound_image && <button type="button" onClick={() => removeBoundImage(editingCard.id)}>移除图片</button>}
+        </div>
+        <section className="template-context-reference">
+          <button type="button" onClick={() => setReferenceExpanded((current) => !current)}>
+            {referenceExpanded ? '收起' : '展开'} LLM 参考与设置
+          </button>
+          {referenceExpanded && (
+            <textarea
+              value={editingCard.llm_reference}
+              onChange={(event) => updateCard(editingCard.id, { llm_reference: event.currentTarget.value })}
+              rows={5}
+              placeholder="给 LLM 的背景、偏好或临时规则。"
+            />
+          )}
+        </section>
+        <section className="template-context-chat">
+          <span>让 LLM 帮你改这张卡片</span>
+          <textarea
+            value={chatInput}
+            onChange={(event) => setChatInput(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void handleRewrite();
+              }
+            }}
+            rows={3}
+            placeholder="例如：把这张卡片改得更强调角色性格，不要写成普通风格。"
+          />
+          <button type="button" onClick={() => { void handleRewrite(); }} disabled={chatBusy || !chatInput.trim()}>
+            {chatBusy ? 'LLM 修改中...' : '发送并更新上方内容'}
+          </button>
+          {chatError && <div className="template-drawer-error">{chatError}</div>}
+        </section>
+        {editorActions && (
+          <section className="template-context-editor-actions">
+            {editorActions}
+          </section>
+        )}
+      </aside>
+    );
+  };
+
+  if (showCardEditorPage) {
+    return (
+      <section className="template-context-card-edit-page" aria-label="上下文卡片二级编辑页">
+        <div className="template-card-edit-topbar">
+          {backHref && <Link href={backHref}>返回卡片列表</Link>}
+          <span>{saveStatusText(saveStatus, saveError)}</span>
+        </div>
+        {renderCardEditor('template-context-card-editor-page', false)}
+        <TemplateBoundImagePicker
+          open={referenceOpen}
+          currentImage={editingCard?.bound_image || null}
+          onClose={() => setReferenceOpen(false)}
+          onSelect={bindImage}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="template-context-workspace" aria-label="模板上下文卡片">
-      <div className={`template-context-edit-row ${editingCard ? 'is-editing' : ''}`}>
+      <div className={`template-context-edit-row ${showInlineEditor && editingCard ? 'is-editing' : ''}`}>
         <div className="template-context-main">
           <div className="template-context-toolbar">
             <div>
@@ -228,21 +354,35 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
                   >
                     <GripVertical size={18} />
                   </span>
-                  <button
-                    type="button"
-                    className="template-context-thumb"
-                    onClick={() => {
-                      setEditingCardId(card.id);
-                      setReferenceOpen(true);
-                    }}
-                    title={card.bound_image ? '更换绑定图片' : '添加图片'}
-                  >
+                  {editHrefForCard(card) ? (
+                    <Link
+                      className="template-context-thumb"
+                      href={editHrefForCard(card) || '#'}
+                      title={card.bound_image ? '编辑绑定图片' : '添加图片'}
+                    >
+                      {card.bound_image?.thumbnail_url || card.bound_image?.url ? (
+                        <img src={card.bound_image.thumbnail_url || card.bound_image.url || ''} alt={card.bound_image.label} />
+                      ) : (
+                        <span><ImageIcon size={18} /> 添加图片</span>
+                      )}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className="template-context-thumb"
+                      onClick={() => {
+                        setInternalEditingCardId(card.id);
+                        setReferenceOpen(true);
+                      }}
+                      title={card.bound_image ? '更换绑定图片' : '添加图片'}
+                    >
                     {card.bound_image?.thumbnail_url || card.bound_image?.url ? (
                       <img src={card.bound_image.thumbnail_url || card.bound_image.url || ''} alt={card.bound_image.label} />
                     ) : (
                       <span><ImageIcon size={18} /> 添加图片</span>
                     )}
-                  </button>
+                    </button>
+                  )}
                   <div className="template-context-card-body">
                     <div className="template-context-card-title">
                       <strong>{card.title || '未命名卡片'}</strong>
@@ -274,15 +414,19 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
                     >
                       {card.enabled ? '启用' : '停用'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingCardId(card.id);
-                        setReferenceExpanded(false);
-                      }}
-                    >
-                      编辑
-                    </button>
+                    {editHrefForCard(card) ? (
+                      <Link href={editHrefForCard(card) || '#'}>编辑</Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInternalEditingCardId(card.id);
+                          setReferenceExpanded(false);
+                        }}
+                      >
+                        编辑
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="is-danger"
@@ -298,77 +442,7 @@ export function TemplateContextCardsPanel({ cards, saveStatus, saveError, editor
           )}
         </div>
 
-        {editingCard && (
-          <aside className="template-context-drawer" aria-label="编辑上下文卡片">
-            <header>
-              <div>
-                <span>{modeLabel(editingCard.mode)}</span>
-                <h3>{editingCard.title || '编辑上下文卡片'}</h3>
-              </div>
-              <button type="button" onClick={() => setEditingCardId(null)}>关闭</button>
-            </header>
-            <label>
-              <span>卡片名称</span>
-              <input value={editingCard.title} onChange={(event) => updateCard(editingCard.id, { title: event.currentTarget.value })} />
-            </label>
-            <label>
-              <span>最终输入给 LLM 的上下文内容</span>
-              <textarea
-                value={editingCard.content}
-                onChange={(event) => updateCard(editingCard.id, { content: event.currentTarget.value })}
-                rows={8}
-              />
-            </label>
-            <div className={`template-context-save ${saveStatus}`}>
-              {saveStatusText(saveStatus, saveError)}
-            </div>
-            <div className="template-context-bound-row">
-              <div>
-                <span>绑定图片</span>
-                <strong>{editingCard.bound_image?.label || '未绑定'}</strong>
-              </div>
-              <button type="button" onClick={() => setReferenceOpen(true)}>{editingCard.bound_image ? '更换图片' : '添加图片'}</button>
-              {editingCard.bound_image && <button type="button" onClick={() => removeBoundImage(editingCard.id)}>移除图片</button>}
-            </div>
-            <section className="template-context-reference">
-              <button type="button" onClick={() => setReferenceExpanded((current) => !current)}>
-                {referenceExpanded ? '收起' : '展开'} LLM 参考与设置
-              </button>
-              {referenceExpanded && (
-                <textarea
-                  value={editingCard.llm_reference}
-                  onChange={(event) => updateCard(editingCard.id, { llm_reference: event.currentTarget.value })}
-                  rows={5}
-                  placeholder="给 LLM 的背景、偏好或临时规则。"
-                />
-              )}
-            </section>
-            <section className="template-context-chat">
-              <span>让 LLM 帮你改这张卡片</span>
-              <textarea
-                value={chatInput}
-                onChange={(event) => setChatInput(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void handleRewrite();
-                  }
-                }}
-                rows={3}
-                placeholder="例如：把这张卡片改得更强调角色性格，不要写成普通风格。"
-              />
-              <button type="button" onClick={() => { void handleRewrite(); }} disabled={chatBusy || !chatInput.trim()}>
-                {chatBusy ? 'LLM 修改中...' : '发送并更新上方内容'}
-              </button>
-              {chatError && <div className="template-drawer-error">{chatError}</div>}
-            </section>
-            {editorActions && (
-              <section className="template-context-editor-actions">
-                {editorActions}
-              </section>
-            )}
-          </aside>
-        )}
+        {showInlineEditor && editingCard && renderCardEditor('template-context-drawer', true)}
       </div>
 
       <aside className="template-context-impact" aria-label="最终提示词影响预览">
