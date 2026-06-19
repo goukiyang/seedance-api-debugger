@@ -188,7 +188,8 @@
 - [x] 小屏幕下才允许自然纵向堆叠：卡片列表 -> 选中卡片编辑 -> 底部提示词影响预览；桌面端不做上中下三段。
 - [x] 桌面端编辑栏作为主要操作菜单保持 sticky；保存模板版本也放入右侧编辑栏，不再压在最终提示词影响区下面。
 - [x] 最终提示词影响区必须是模板工作台最后一块，随页面流动，不做固定条，不再被保存操作或其他常驻工具压在下面。
-- [x] 上下文卡片列表超高时只让卡片列表自身收缩滚动，单张卡片压缩成稳定摘要，不把整页撑爆。
+- [x] 上下文卡片列表超高时只让卡片列表自身收缩滚动；单张卡片标题和正文完整换行显示，不再用摘要截断内容。
+- [x] 模板旧抽屉入口和模板列表预览也必须同步取消内容裁剪：抽屉容器允许滚动，预览卡片正文完整换行显示。
 
 #### P1：重做卡片编辑器
 
@@ -6459,14 +6460,14 @@ HARD-GATE：
 ## Review：2026-06-17 模板详情工作台与底部提示词影响区
 
 - 本轮完成：`/admin/templates/[id]` 不再要求先点“编辑上下文卡片”，进入详情后直接渲染上下文卡片工作台，默认选中第一张卡片。
-- 本轮完成：桌面端结构改为左侧/中间卡片画布 + 右侧当前卡片编辑栏 + 底部横向最终提示词影响区；最终提示词影响不再放在侧边栏，也不再做固定条。
+- 本轮完成：桌面端结构改为“上方编辑行 + 底部影响区”：上方编辑行只放左侧/中间卡片画布和右侧当前卡片编辑栏；最终提示词影响区独立成为工作台最后一块，不再依赖 `grid-area`。
 - 本轮完成：右侧编辑栏作为主要操作菜单保持 sticky；保存状态和保存模板版本按钮移入右侧编辑栏，底部最终提示词影响区成为工作台最后一块。
-- 本轮完成：上下文卡片列表超高时自动收缩成卡片区滚动，单张卡片压缩为稳定摘要；右侧编辑栏不再用内部 `max-height + overflow` 截断内容。
+- 本轮完成：上下文卡片列表超高时自动收缩成卡片区滚动，单张卡片标题和正文完整换行显示，不再用摘要或省略号截断；旧抽屉容器不再 `overflow:hidden` 裁剪内容，模板列表预览卡片也取消 2 行截断。
 - 本轮完成：底部最终提示词影响区常显强制写入、仅供参考、绑定图片三列，支持复制最终提示词，并保留完整最终提示词展开查看；长内容完整换行显示，不再被限高或省略号截断。
 - 本轮完成：`TemplateEditorDrawer` 增加 `inline` 工作台模式，旧抽屉只作为兼容入口；模板列表页的“编辑上下文卡片”改为进入详情页。
 - 本轮完成：空内容草稿卡片不再被 `normalizeContextCards()` 过滤；新增空卡片后选中编辑，保存链路保留 `id / title / mode / enabled / sort_order / bound_image / llm_reference`。
 - 验证通过：`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`git diff --check -- <本轮相关文件>`、`npx impeccable detect ...`、`npm run build`、空卡片序列化 smoke。
-- 线上验证通过：`youdoo-sites build sd2` 生成 BUILD_ID `uqNLQ4i29fYiN_B6aBc6d`；`youdoo-sites restart sd2` 成功；公网 `/api/config` 200、公网 `/login` 200；公网 CSS 命中 `template-context-editor-actions`、`grid-template-columns:minmax(520px,1fr) minmax(420px,480px)`、卡片主区和卡片列表的 `clamp(...)` 收缩高度、`position:sticky`、`max-height:none`、`overflow:visible`、`white-space:pre-wrap` 和 `text-overflow:clip`；重启窗口里 public health 曾短暂出现 `URLError`，随后立即复查恢复为 `sd2 running / port ok / build ok / local 200 / public 200`，直接公网 `/api/config` 和 `/login` 持续返回 200。
+- 线上验证通过：`youdoo-sites build sd2` 生成 BUILD_ID `i_2uMbxw7CP8Qq3jjEprq`；`youdoo-sites restart sd2` 成功；公网 `/api/config` 200、公网 `/login` 200；公网 CSS 命中 `template-context-edit-row`、`template-context-workspace{display:flex;flex-direction:column}`、`grid-template-columns:minmax(520px,1fr) minmax(420px,480px)`、卡片主区和卡片列表的 `clamp(...)` 收缩高度、`template-context-card-body p{display:block...overflow:visible...white-space:pre-wrap}`、`template-context-card-title strong{overflow-wrap:anywhere}`、`template-context-card-actions{align-content:start}`；公网 CSS 中旧 `grid-area:impact`、`grid-area:drawer` 和 `grid-template-areas` 命中数均为 0；跨健康守护周期复查最终为 `sd2 running / port ok / build ok / local 200 / public 200`。
 - 未完成：真实管理员登录态点击验收和截图/录屏证据未补；停用卡片数量统计、LLM 改写撤回、卡片级保存状态、发布门禁、质量复盘、权限角色拆分仍待后续落地。
 
 ## 2026-06-17 - Seedance2 服务器迁移计划
