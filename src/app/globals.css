@@ -8977,7 +8977,9 @@ a {
 
 .template-context-drawer label,
 .template-context-card-editor-page label,
-.template-context-chat {
+.template-context-chat,
+.template-context-rule-panel,
+.template-context-rewrite-preview {
   display: grid;
   gap: 7px;
 }
@@ -8986,6 +8988,7 @@ a {
 .template-context-drawer textarea,
 .template-context-card-editor-page input,
 .template-context-card-editor-page textarea,
+.template-context-rewrite-preview textarea,
 .admin-template-builder textarea {
   background: rgba(2, 6, 23, 0.38);
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -9010,6 +9013,10 @@ a {
 
 .template-context-chat textarea {
   min-height: 78px;
+}
+
+.template-context-rewrite-preview textarea {
+  min-height: 132px;
 }
 
 .template-context-save {
@@ -9066,11 +9073,73 @@ a {
 }
 
 .template-context-reference > button {
+  align-items: center;
   background: transparent;
   border: 0;
   cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
   padding: 0;
   text-align: left;
+}
+
+.template-context-reference > button span {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.template-context-rule-list {
+  background: rgba(2, 6, 23, 0.22);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 9px;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+}
+
+.template-context-rule-list > span,
+.template-context-rewrite-preview label span {
+  color: rgba(148, 163, 184, 0.88);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.template-context-rule-list > p,
+.template-context-rule-item p {
+  color: rgba(203, 213, 225, 0.84);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.template-context-rule-item {
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.template-context-rule-item strong {
+  color: rgba(226, 232, 240, 0.94);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.template-context-rewrite-preview {
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.template-context-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .template-context-editor-actions {

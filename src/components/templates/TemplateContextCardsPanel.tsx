@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ImageIcon, Plus, GripVertical, Trash2 } from 'lucide-react';
 import { normalizeContextCardTitle } from '@/lib/templates/workbench';
 import type {
+  SerializedTemplateRule,
   TemplateContextCard,
   TemplateContextCardBoundImage,
   TemplateContextCardMode,
@@ -19,6 +20,7 @@ type Props = {
   saveStatus: SaveStatus;
   saveError?: string | null;
   editorActions?: ReactNode;
+  templateRules?: SerializedTemplateRule[];
   templateId?: string;
   editorMode?: 'overview' | 'inline' | 'card-page';
   editingCardId?: string | null;
@@ -68,6 +70,7 @@ export function TemplateContextCardsPanel({
   saveStatus,
   saveError,
   editorActions,
+  templateRules = [],
   templateId,
   editorMode = 'overview',
   editingCardId = null,
@@ -80,6 +83,8 @@ export function TemplateContextCardsPanel({
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [rewritePreview, setRewritePreview] = useState('');
+  const [rewritePreviewCardId, setRewritePreviewCardId] = useState<string | null>(null);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState('');
@@ -96,6 +101,8 @@ export function TemplateContextCardsPanel({
   );
   const effectiveEditingCardId = editorMode === 'card-page' ? editingCardId : internalEditingCardId;
   const editingCard = sortedCards.find((card) => card.id === effectiveEditingCardId) || null;
+  const activeRewritePreview = editingCard && rewritePreviewCardId === editingCard.id ? rewritePreview : '';
+  const visibleTemplateRules = templateRules;
   const showInlineEditor = editorMode === 'inline';
   const showCardEditorPage = editorMode === 'card-page';
   const enabledCards = sortedCards.filter((card) => card.enabled);
@@ -121,6 +128,12 @@ export function TemplateContextCardsPanel({
     autoSelectedCardIdRef.current = firstCard.id;
     setInternalEditingCardId(firstCard.id);
   }, [internalEditingCardId, showInlineEditor, sortedCards]);
+
+  useEffect(() => {
+    setChatError(null);
+    setRewritePreview('');
+    setRewritePreviewCardId(null);
+  }, [effectiveEditingCardId]);
 
   const updateCard = (cardId: string, patch: Partial<TemplateContextCard>) => {
     onChange(sortedCards.map((card, index) => {
@@ -182,13 +195,27 @@ export function TemplateContextCardsPanel({
     setChatError(null);
     try {
       const nextContent = await onRewriteCard(editingCard, chatInput.trim());
-      updateCard(editingCard.id, { content: nextContent });
+      if (!nextContent.trim()) throw new Error('LLM 没有返回可用草稿');
+      setRewritePreview(nextContent);
+      setRewritePreviewCardId(editingCard.id);
       setChatInput('');
     } catch (rewriteError) {
       setChatError(rewriteError instanceof Error ? rewriteError.message : 'LLM 修改失败');
     } finally {
       setChatBusy(false);
     }
+  };
+
+  const applyRewritePreview = () => {
+    if (!editingCard || !activeRewritePreview.trim()) return;
+    updateCard(editingCard.id, { content: activeRewritePreview });
+    setRewritePreview('');
+    setRewritePreviewCardId(null);
+  };
+
+  const clearRewritePreview = () => {
+    setRewritePreview('');
+    setRewritePreviewCardId(null);
   };
 
   const editHrefForCard = (card: TemplateContextCard) => (
@@ -253,15 +280,32 @@ export function TemplateContextCardsPanel({
         </div>
         <section className="template-context-reference">
           <button type="button" onClick={() => setReferenceExpanded((current) => !current)}>
-            {referenceExpanded ? '收起' : '展开'} LLM 参考与设置
+            {referenceExpanded ? '收起' : '展开'} 规则栏
+            <span>{visibleTemplateRules.length} 条模板规则 · {editingCard.llm_reference.trim().length ? '有卡片规则' : '无卡片规则'}</span>
           </button>
           {referenceExpanded && (
-            <textarea
-              value={editingCard.llm_reference}
-              onChange={(event) => updateCard(editingCard.id, { llm_reference: event.currentTarget.value })}
-              rows={5}
-              placeholder="给 LLM 的背景、偏好或临时规则。"
-            />
+            <div className="template-context-rule-panel">
+              <div className="template-context-rule-list">
+                <span>模板规则</span>
+                {visibleTemplateRules.length ? visibleTemplateRules.map((rule) => (
+                  <article key={rule.id || `${rule.rule_type}-${rule.sort_order}`} className="template-context-rule-item">
+                    <strong>{rule.rule_type.toUpperCase()} · 优先级 {rule.priority} · {rule.status}</strong>
+                    <p>{rule.content}</p>
+                  </article>
+                )) : (
+                  <p>无模板规则</p>
+                )}
+              </div>
+              <label>
+                <span>本卡片规则与 LLM 参考</span>
+                <textarea
+                  value={editingCard.llm_reference}
+                  onChange={(event) => updateCard(editingCard.id, { llm_reference: event.currentTarget.value })}
+                  rows={5}
+                  placeholder="只写这张卡片改写时要遵守的规则或参考。"
+                />
+              </label>
+            </div>
           )}
         </section>
         <section className="template-context-chat">
@@ -279,9 +323,25 @@ export function TemplateContextCardsPanel({
             placeholder="例如：把这张卡片改得更强调角色性格，不要写成普通风格。"
           />
           <button type="button" onClick={() => { void handleRewrite(); }} disabled={chatBusy || !chatInput.trim()}>
-            {chatBusy ? 'LLM 修改中...' : '发送并更新上方内容'}
+            {chatBusy ? 'LLM 生成中...' : '生成可见草稿'}
           </button>
           {chatError && <div className="template-drawer-error">{chatError}</div>}
+          {activeRewritePreview && (
+            <section className="template-context-rewrite-preview">
+              <label>
+                <span>LLM 生成草稿（未应用）</span>
+                <textarea
+                  value={activeRewritePreview}
+                  onChange={(event) => setRewritePreview(event.currentTarget.value)}
+                  rows={6}
+                />
+              </label>
+              <div className="template-context-preview-actions">
+                <button type="button" onClick={applyRewritePreview}>应用到上方内容</button>
+                <button type="button" onClick={clearRewritePreview}>清空草稿</button>
+              </div>
+            </section>
+          )}
         </section>
         {editorActions && (
           <section className="template-context-editor-actions">

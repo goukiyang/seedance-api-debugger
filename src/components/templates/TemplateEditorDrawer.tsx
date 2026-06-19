@@ -261,6 +261,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
         saveStatus={contextCardsSaveStatus}
         saveError={contextCardsSaveError}
         editorActions={variant === 'card' ? editorActions : undefined}
+        templateRules={template.rules}
         templateId={template.id}
         editorMode={variant === 'card' ? 'card-page' : 'overview'}
         editingCardId={cardId}
