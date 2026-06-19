@@ -2,12 +2,14 @@
 
 import React, { useState } from 'react';
 import type { AssetCollection } from '@/types';
+import UserIdentityBadge from '@/components/UserIdentityBadge';
 
 interface ReferenceAlbumOption {
   id: string;
   name: string;
   image_count: number;
   album_type: string;
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   project?: { name: string } | null;
   permissions?: { use?: boolean; edit?: boolean };
 }
@@ -120,7 +122,10 @@ export function ImageSetToolbar({
                           }
                         }}
                       >
-                        <span>{album.name}</span>
+                        <span className="composer-toolbar-dropdown-item-main">
+                          <UserIdentityBadge user={album.owner} size="sm" />
+                          <span className="composer-toolbar-dropdown-item-name">{album.name}</span>
+                        </span>
                         <span className="composer-toolbar-dropdown-item-count">{album.image_count || 0} 张</span>
                       </button>
                     ))

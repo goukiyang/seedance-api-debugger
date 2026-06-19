@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
 
     const filtered = [];
     for (const album of albums) {
-      if (!matchesScope(album, scope, user.id, accessibleProjectIds, requestedProjectId, requestedPublicFolderId)) continue;
+      if (!matchesScope(album, scope, user.id, user.role, accessibleProjectIds, requestedProjectId, requestedPublicFolderId)) continue;
       const access = await getAlbumAccess(user, album);
       if (!access.permissions.view) continue;
       filtered.push(serializeAlbum(album, access, activeCoverIds, activeShareCountByAlbumId.get(album.id) || 0));
@@ -216,6 +216,7 @@ function matchesScope(
   },
   scope: string,
   userId: string,
+  userRole: string,
   accessibleProjectIds: string[],
   requestedProjectId: string | null,
   requestedPublicFolderId: string | null,
@@ -225,6 +226,11 @@ function matchesScope(
   if (scope === 'project') {
     if (requestedProjectId) return album.project_id === requestedProjectId && album.album_type === 'project';
     return Boolean(album.project_id && accessibleProjectIds.includes(album.project_id) && album.album_type === 'project');
+  }
+  if (scope === 'other_project') {
+    if (userRole !== 'admin') return false;
+    if (requestedProjectId && album.project_id !== requestedProjectId) return false;
+    return Boolean(album.project_id && album.album_type === 'project' && album.owner_user_id !== userId);
   }
   if (scope === 'shared') {
     return album.shares.some((share) => (

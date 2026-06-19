@@ -7,7 +7,7 @@ import PaginationControls from '@/components/PaginationControls';
 import ShareAlbumDialog from '@/components/ShareAlbumDialog';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 
-type Scope = 'mine' | 'project' | 'shared' | 'public' | 'all';
+type Scope = 'mine' | 'project' | 'other_project' | 'shared' | 'public' | 'all';
 
 interface ProjectOption {
   id: string;
@@ -77,6 +77,7 @@ interface PublicSubmission {
 const TABS: Array<{ value: Scope; label: string }> = [
   { value: 'mine', label: '我的图集' },
   { value: 'project', label: '项目图集' },
+  { value: 'other_project', label: '其他人的项目图集' },
   { value: 'shared', label: '共享给我的' },
   { value: 'public', label: '公共图集' },
   { value: 'all', label: '全部图集' },
@@ -99,6 +100,7 @@ export default function ReferenceAlbumsClient() {
   const [description, setDescription] = useState('');
   const [albumType, setAlbumType] = useState<'personal' | 'project'>('personal');
   const [projectId, setProjectId] = useState('');
+  const [projectFilterId, setProjectFilterId] = useState('all');
   const [selectedFolderId, setSelectedFolderId] = useState('all');
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderDescription, setNewFolderDescription] = useState('');
@@ -120,6 +122,14 @@ export default function ReferenceAlbumsClient() {
     [projects],
   );
   const isAdmin = currentUser?.role === 'admin';
+  const visibleTabs = useMemo(
+    () => (isAdmin ? TABS : TABS.filter((tab) => tab.value !== 'other_project')),
+    [isAdmin],
+  );
+  const projectFilterChoices = useMemo(
+    () => projects.filter((project) => project.type !== 'system'),
+    [projects],
+  );
   const totalPages = Math.max(1, Math.ceil(albums.length / ALBUMS_PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedAlbums = albums.slice(
@@ -161,7 +171,9 @@ export default function ReferenceAlbumsClient() {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ scope });
-    if (scope === 'project' && projectId) params.set('project_id', projectId);
+    if ((scope === 'project' || scope === 'other_project') && projectFilterId !== 'all') {
+      params.set('project_id', projectFilterId);
+    }
     if (scope === 'public' && selectedFolderId !== 'all') params.set('public_folder_id', selectedFolderId);
     fetch(`/api/reference-albums?${params.toString()}`, { cache: 'no-store' })
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
@@ -172,7 +184,7 @@ export default function ReferenceAlbumsClient() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : '图集读取失败'))
       .finally(() => setLoading(false));
-  }, [projectId, scope, selectedFolderId]);
+  }, [projectFilterId, scope, selectedFolderId]);
 
   const loadPendingSubmissions = useCallback(() => {
     if (!isAdmin) return;
@@ -203,7 +215,10 @@ export default function ReferenceAlbumsClient() {
     const initialScope = params.get('scope') as Scope | null;
     const initialProjectId = params.get('project_id') || '';
     if (initialScope && TABS.some((tab) => tab.value === initialScope)) setScope(initialScope);
-    if (initialProjectId) setProjectId(initialProjectId);
+    if (initialProjectId) {
+      setProjectId(initialProjectId);
+      setProjectFilterId(initialProjectId);
+    }
 
     fetch('/api/projects')
       .then((res) => res.ok ? res.json() : null)
@@ -211,9 +226,18 @@ export default function ReferenceAlbumsClient() {
         const list: ProjectOption[] = data?.projects || [];
         setProjects(list);
         setProjectId((current) => current || list.find((project) => project.can_manage_assets)?.id || '');
+        setProjectFilterId((current) => (
+          current !== 'all' && list.some((project) => project.id === current) ? current : 'all'
+        ));
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (currentUser && !isAdmin && scope === 'other_project') {
+      setScope('project');
+    }
+  }, [currentUser, isAdmin, scope]);
 
   const handleCreate = async () => {
     if (!name.trim()) return;
@@ -456,7 +480,7 @@ export default function ReferenceAlbumsClient() {
       />
 
       <div className="album-tabs">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.value}
             type="button"
@@ -470,6 +494,25 @@ export default function ReferenceAlbumsClient() {
           </button>
         ))}
       </div>
+
+      {(scope === 'project' || scope === 'other_project') && (
+        <section className="album-project-filter">
+          <div>
+            <strong>{scope === 'other_project' ? '其他人的项目图集' : '项目图集'}</strong>
+            <span>
+              {scope === 'other_project'
+                ? '管理员可按项目筛选其他人创建的项目图集。'
+                : '默认显示所有可访问项目图集，也可收窄到单个项目。'}
+            </span>
+          </div>
+          <select value={projectFilterId} onChange={(event) => setProjectFilterId(event.target.value)}>
+            <option value="all">{scope === 'other_project' ? '全部他人项目' : '全部项目'}</option>
+            {projectFilterChoices.map((project) => (
+              <option key={project.id} value={project.id}>{projectDisplayName(project)}</option>
+            ))}
+          </select>
+        </section>
+      )}
 
       {scope === 'public' && (
         <section className="album-public-folders">
@@ -670,14 +713,16 @@ export default function ReferenceAlbumsClient() {
                     )}
                   </div>
                   <div className="album-card-body">
-                    <div className="album-card-title">{album.name}</div>
+                    <div className="album-card-title-row">
+                      <UserIdentityBadge user={album.owner} size="sm" />
+                      <div className="album-card-title">{album.name}</div>
+                    </div>
                     <div className="album-card-meta">
                       <span>
                         {album.public_folder?.name
                           || album.project?.name
                           || (album.album_type === 'public' ? '公共图集' : album.album_type === 'project' ? '项目图集' : '个人图集')}
                       </span>
-                      <UserIdentityBadge user={album.owner} size="sm" />
                     </div>
                     <div className="album-card-perms">
                       {album.permissions.view && <span>可查看</span>}

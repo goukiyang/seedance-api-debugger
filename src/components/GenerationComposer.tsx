@@ -122,6 +122,7 @@ interface ReferenceAlbumOption {
   name: string;
   image_count: number;
   album_type: string;
+  owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   project?: { name: string } | null;
   permissions?: { use?: boolean; edit?: boolean };
 }
@@ -151,7 +152,7 @@ function inferSingleReferenceAlbum(assets: WorkspaceAssetItem[]): { id: string; 
 function dedupeReferenceAlbums(albums: ReferenceAlbumOption[]): ReferenceAlbumOption[] {
   const seen = new Set<string>();
   return albums.filter((album) => {
-    const key = album.name.trim();
+    const key = album.id;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;

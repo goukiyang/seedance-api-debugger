@@ -6594,3 +6594,30 @@ HARD-GATE：
 - [x] Codex 自动化创建成功：automation id `sd2`，状态 `ACTIVE`。
 - [x] launchd 失败路线已清理：`launchctl print gui/$(id -u)/com.youdoo.sd2-auto-deploy` 返回未找到服务。
 - [ ] 等下一次整点自动化运行后，复核自动化执行记录是否按预期 noop。
+
+## 2026-06-20 参考图集管理员视图和头像归属
+
+### 目标
+
+- 参考图集页的“项目图集”默认显示所有可访问项目图集，不再被新建表单里的项目选择误过滤。
+- 管理员单独看到“其他人的项目图集”分栏，可以按项目筛选其他人创建的项目图集。
+- 图集名展示前统一增加创建者头像，方便判断谁创建、谁共享。
+
+### 落地
+
+- [x] `/api/reference-albums` 增加 `scope=other_project`，仅管理员可用。
+- [x] `/collections` 分离列表项目筛选和新建图集项目选择，项目图集默认查全部项目。
+- [x] `/collections` 图集卡片标题改为“头像 + 图集名”。
+- [x] 生成页顶部图集下拉展示“创建者头像 + 图集名 + 数量”。
+- [x] 生成页“从图集选择参考图”弹窗展示“创建者头像 + 图集名”。
+
+### 验收
+
+- [x] `git diff --check` 通过。
+- [x] `npx tsc --noEmit --pretty false` 通过。
+- [x] `npm run lint` 通过，只有既有 warning。
+- [x] `npm run build` 通过。
+- [x] `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2` 通过。
+- [x] 公网 `/api/config` 200、`/login` 200、`/collections` 未登录 307、`/generate` 未登录 307、`/api/reference-albums?scope=other_project` 未登录 401。
+- [x] 生产 BUILD_ID `tzaGyxOD8guvSsGdamHwJ`，生产静态资源命中新文案和样式标记：`其他人的项目图集`、`album-project-filter`、`composer-toolbar-dropdown-item-main`、`album-card-title-row`。
+- [x] 跨健康守护周期复查后 `youdoo-sites status sd2` OK，`com.youdoo.site.sd2` 的 `runs=28` 未增长。

@@ -183,7 +183,10 @@ export function ReferenceAlbumPicker({
                   className={album.id === selectedAlbumId ? 'active' : ''}
                   onClick={() => setSelectedAlbumId(album.id)}
                 >
-                  <strong>{album.name}</strong>
+                  <span className="album-picker-album-title">
+                    <UserIdentityBadge user={album.owner} size="sm" />
+                    <strong>{album.name}</strong>
+                  </span>
                   <span className="album-picker-album-meta">
                     <span>{album.image_count} 张</span>
                     {album.project?.name ? (

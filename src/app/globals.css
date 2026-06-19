@@ -10917,6 +10917,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   width: 100%;
   padding: 8px 10px;
   border-radius: 8px;
@@ -10927,6 +10928,23 @@ a {
   cursor: pointer;
   text-align: left;
   transition: background-color 0.1s;
+}
+
+.composer-toolbar-dropdown-item-main {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer-toolbar-dropdown-item-main .user-identity-badge {
+  flex: 0 0 auto;
+}
+
+.composer-toolbar-dropdown-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer-toolbar-dropdown-item:hover {
@@ -10941,6 +10959,7 @@ a {
 
 .composer-toolbar-dropdown-item-count {
   font-size: 11px;
+  flex: 0 0 auto;
   color: rgba(255, 255, 255, 0.35);
 }
 
@@ -12643,6 +12662,43 @@ a {
   margin-bottom: 16px;
 }
 
+.album-project-filter {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #243044;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+}
+
+.album-project-filter div {
+  display: grid;
+  gap: 4px;
+}
+
+.album-project-filter strong {
+  font-size: 14px;
+}
+
+.album-project-filter span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.album-project-filter select {
+  background: white;
+  border: 1px solid #d7dde8;
+  border-radius: 8px;
+  color: #243044;
+  min-height: 34px;
+  min-width: 220px;
+  padding: 7px 10px;
+}
+
 .album-tabs button,
 .album-create-controls button,
 .album-detail-actions button,
@@ -12961,10 +13017,25 @@ a {
   padding: 12px;
 }
 
+.album-card-title-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.album-card-title-row .user-identity-badge {
+  flex: 0 0 auto;
+}
+
 .album-card-title {
   font-size: 15px;
   font-weight: 700;
-  margin-bottom: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .album-card-meta,
@@ -13541,11 +13612,33 @@ a {
   border-color: #2563eb;
 }
 
-.album-picker-albums span {
+.album-picker-album-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.album-picker-album-title .user-identity-badge {
+  flex: 0 0 auto;
+}
+
+.album-picker-album-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.album-picker-album-meta {
   color: #64748b;
   display: block;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.album-picker-album-meta > span {
+  display: block;
 }
 
 .album-picker-images {
