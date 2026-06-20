@@ -1,6 +1,7 @@
 import type {
   SerializedGenerationTemplate,
   SerializedTemplateRule,
+  TemplateContextCard,
   TemplateModuleKey,
   TemplateModuleUsage,
 } from '@/lib/templates/workbench';
@@ -156,11 +157,15 @@ function composePrompt(
   const must = rulesByType(activeRules, 'must');
   const forbid = rulesByType(activeRules, 'forbid');
   const suggest = rulesByType(activeRules, 'suggest');
-  const promptBlocks = template.prompts
+  const hasContextCards = Boolean(template.module_bindings.context_cards?.length);
+  const contextCardLines = buildContextCardLines(template);
+  const promptBlocks = hasContextCards ? [] : template.prompts
     .filter((block) => block.status === 'active')
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((block) => block.content);
-  const moduleLines = buildModuleLines(template);
+  const moduleLines = hasContextCards ? [] : buildModuleLines(template);
+  const requiredContextCards = contextCardLines.filter((card) => card.usage === 'required').map((card) => card.text);
+  const referenceContextCards = contextCardLines.filter((card) => card.usage === 'reference').map((card) => card.text);
   const requiredModules = moduleLines.filter((module) => module.usage === 'required').map((module) => module.text);
   const referenceModules = moduleLines.filter((module) => module.usage === 'reference').map((module) => module.text);
   const modifiers = input.modifiers.length ? input.modifiers.join('，') : '保持模板默认风格';
@@ -177,6 +182,8 @@ function composePrompt(
     `节奏：${plan.rhythm}`,
     `分段策略：${temporal}`,
     `结构：${plan.structure.join('；')}`,
+    requiredContextCards.length ? `强制插入卡片：${requiredContextCards.join('；')}。这些内容必须明确进入最终画面描述。` : '',
+    referenceContextCards.length ? `参考卡片：${referenceContextCards.join('；')}。这些内容只作为风格、构图或一致性参考，不必逐字写入画面。` : '',
     requiredModules.length ? `强制插入模块：${requiredModules.join('；')}。这些内容必须明确进入最终画面描述。` : '',
     referenceModules.length ? `参考模块：${referenceModules.join('；')}。这些内容只作为风格、构图或一致性参考，不必逐字写入画面。` : '',
     promptBlocks.length ? `模板提示词：${promptBlocks.join('；')}` : '',
@@ -185,6 +192,29 @@ function composePrompt(
     forbid.length ? `禁止：${forbid.join('；')}` : '',
     '输出为连续视频画面描述，保持主体、标志、风格和镜头逻辑一致。',
   ].filter(Boolean).join('\n');
+}
+
+function boundImageSourceLabel(source: NonNullable<TemplateContextCard['bound_image']>['source']) {
+  if (source === 'reference_album') return '参考图集';
+  if (source === 'upload_history') return '历史上传图';
+  if (source === 'template_asset') return '模板素材';
+  return '手动绑定';
+}
+
+function buildContextCardLines(template: SerializedGenerationTemplate): Array<{ usage: TemplateModuleUsage; text: string }> {
+  const cards = template.module_bindings.context_cards || [];
+  return cards
+    .filter((card) => card.enabled && card.content.trim())
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((card) => {
+      const imageText = card.bound_image
+        ? `；绑定图片：${card.bound_image.label}（${boundImageSourceLabel(card.bound_image.source)}）`
+        : '';
+      return {
+        usage: card.mode === 'reference' ? 'reference' as const : 'required' as const,
+        text: `${card.title}：${card.content.trim()}${imageText}`,
+      };
+    });
 }
 
 function rulesByType(rules: SerializedTemplateRule[], type: SerializedTemplateRule['rule_type']) {

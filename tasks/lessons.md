@@ -650,3 +650,13 @@
 - 怎么改：移除卡片路由的整页早返回；模板详情页始终渲染卡片列表；当 URL 带 `cardId` 时额外渲染 `template-card-modal-shell` 三级弹窗；关闭按钮和遮罩返回 `/admin/templates/[id]`；删除旧二级整页头部样式。
 - 验证结果：`git diff --check`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npx impeccable detect ...`、`npm run lint`、`npm run build` 通过。
 - 可复用经验：工作流里的“编辑当前项”不一定应该独立成新页面。若用户需要保留父页面上下文，深层编辑应该用独立弹窗或抽屉覆盖，关闭后回到原列表位置。
+
+## 2026-06-20 - 模板卡片编辑必须公开所有最终输入来源
+
+- 问题/背景：用户澄清“规则全部显示”不是只把 rules 数组列出来，而是所有会影响最终输入给 LLM 的上下文内容都必须在卡片编辑里可见，包括标题、插入方式、启用状态、排序、绑定图片，以及旧模块名这类历史字段。
+- 诱因/根因：上一轮只解决了 LLM 草稿和模板规则可见，但真实生成方案仍会读取旧 `module_bindings`；卡片标题也会进入管理页最终提示词影响预览，却没有明确标注“会写入最终输入”。
+- 当时思路：先追真实生成链路，区分“直接进入最终提示词”“影响 Agent 方案”“只影响 LLM 改写”“仅用于保存归档”的字段，再把这些来源放回卡片编辑弹窗。
+- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/lib/agent-plans/template-plans.ts`、`src/app/globals.css`、`scripts/template-card-final-context-smoke.ts`。
+- 怎么改：卡片编辑页新增“实际进入最终输入”预览；标题、启用、强制/参考、读取顺序、绑定图片都在编辑弹窗中可见；规则折叠栏新增影响来源说明；生成方案有上下文卡片时改用卡片内容，不再追加旧模块名。
+- 验证结果：以本轮 `template-card-final-context-smoke`、TypeScript、lint、build、部署和公网资源命中为准。
+- 可复用经验：凡是会影响 LLM 的内容，不能只在代码、旧字段、保存逻辑或生成逻辑里存在。编辑界面必须让管理员看到它、理解它会怎么生效，并能明确判断它是否直接进入最终提示词。

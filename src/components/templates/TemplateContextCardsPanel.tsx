@@ -58,6 +58,42 @@ function modeLabel(mode: TemplateContextCardMode) {
   return mode === 'force' ? '强制插入' : '仅供参考';
 }
 
+function modePromptLabel(mode: TemplateContextCardMode) {
+  return mode === 'force' ? '必须写入' : '参考理解';
+}
+
+function boundImageSourceLabel(source: TemplateContextCardBoundImage['source']) {
+  if (source === 'reference_album') return '参考图集';
+  if (source === 'upload_history') return '历史上传图';
+  if (source === 'template_asset') return '模板素材';
+  return '手动绑定';
+}
+
+function legacyBlockTypeLabel(blockType: TemplateContextCard['legacy_block_type']) {
+  if (!blockType) return '通用上下文';
+  return {
+    character: '角色设定',
+    logo: '品牌标识',
+    style: '视觉风格',
+    camera: '镜头语言',
+    rules: '生成规则',
+    asset_rule: '素材规则',
+    temporal: '分段节奏',
+    prompt_format: '提示词格式',
+    global: '全局补充',
+  }[blockType];
+}
+
+function buildCardFinalInputText(card: TemplateContextCard, index: number) {
+  return [
+    `${index}. ${modePromptLabel(card.mode)}：${card.title || '未命名卡片'}`,
+    card.content || '草稿未写内容',
+    card.bound_image
+      ? `绑定图片：${card.bound_image.label}（${boundImageSourceLabel(card.bound_image.source)}）`
+      : '',
+  ].filter(Boolean).join('\n');
+}
+
 function saveStatusText(status: SaveStatus, error?: string | null) {
   if (status === 'saving') return '正在自动保存';
   if (status === 'saved') return '已自动保存';
@@ -101,6 +137,7 @@ export function TemplateContextCardsPanel({
   );
   const effectiveEditingCardId = editorMode === 'card-page' ? editingCardId : internalEditingCardId;
   const editingCard = sortedCards.find((card) => card.id === effectiveEditingCardId) || null;
+  const editingCardPosition = editingCard ? sortedCards.findIndex((card) => card.id === editingCard.id) + 1 : 0;
   const activeRewritePreview = editingCard && rewritePreviewCardId === editingCard.id ? rewritePreview : '';
   const visibleTemplateRules = templateRules;
   const showInlineEditor = editorMode === 'inline';
@@ -113,10 +150,7 @@ export function TemplateContextCardsPanel({
   const referenceCount = enabledCards.filter((card) => card.mode === 'reference').length;
   const imageCount = enabledCards.filter((card) => card.bound_image).length;
   const finalPromptText = useMemo(
-    () => enabledCards.map((card, index) => {
-      const prefix = card.mode === 'force' ? '必须写入' : '参考理解';
-      return `${index + 1}. ${prefix}：${card.title}\n${card.content || '草稿未写内容'}`;
-    }).join('\n\n'),
+    () => enabledCards.map((card, index) => buildCardFinalInputText(card, index + 1)).join('\n\n'),
     [enabledCards],
   );
 
@@ -255,8 +289,59 @@ export function TemplateContextCardsPanel({
           </div>
           {showCloseButton && <button type="button" onClick={() => setInternalEditingCardId(null)}>关闭</button>}
         </header>
+        <section className="template-context-effective-preview" aria-label="这张卡片实际进入最终输入的内容">
+          <div>
+            <span>实际进入最终输入</span>
+            <strong>{editingCard.enabled ? `第 ${editingCardPosition} 位 · ${modePromptLabel(editingCard.mode)}` : '已停用，不进入最终输入'}</strong>
+          </div>
+          <pre>{editingCard.enabled ? buildCardFinalInputText(editingCard, editingCardPosition) : '这张卡片已停用，标题、正文和绑定图片都不会进入最终提示词。'}</pre>
+        </section>
+        <div className="template-context-editor-switches" aria-label="卡片最终输入开关">
+          <section>
+            <span>启用状态</span>
+            <div className="template-context-segmented">
+              <button
+                type="button"
+                className={editingCard.enabled ? 'is-active' : ''}
+                onClick={() => updateCard(editingCard.id, { enabled: true })}
+              >
+                启用
+              </button>
+              <button
+                type="button"
+                className={!editingCard.enabled ? 'is-active' : ''}
+                onClick={() => updateCard(editingCard.id, { enabled: false })}
+              >
+                停用
+              </button>
+            </div>
+          </section>
+          <section>
+            <span>插入方式</span>
+            <div className="template-context-segmented">
+              <button
+                type="button"
+                className={editingCard.mode === 'force' ? 'is-active' : ''}
+                onClick={() => updateCard(editingCard.id, { mode: 'force' })}
+              >
+                强制插入
+              </button>
+              <button
+                type="button"
+                className={editingCard.mode === 'reference' ? 'is-active' : ''}
+                onClick={() => updateCard(editingCard.id, { mode: 'reference' })}
+              >
+                仅供参考
+              </button>
+            </div>
+          </section>
+          <section>
+            <span>读取顺序</span>
+            <strong>第 {editingCardPosition} 位，由卡片拖动排序决定</strong>
+          </section>
+        </div>
         <label>
-          <span>卡片名称</span>
+          <span>卡片标题（会写入最终输入）</span>
           <input value={editingCard.title} onChange={(event) => updateCard(editingCard.id, { title: event.currentTarget.value })} />
         </label>
         <label>
@@ -280,11 +365,20 @@ export function TemplateContextCardsPanel({
         </div>
         <section className="template-context-reference">
           <button type="button" onClick={() => setReferenceExpanded((current) => !current)}>
-            {referenceExpanded ? '收起' : '展开'} 规则栏
-            <span>{visibleTemplateRules.length} 条模板规则 · {editingCard.llm_reference.trim().length ? '有卡片规则' : '无卡片规则'}</span>
+            {referenceExpanded ? '收起' : '展开'} 规则与非最终输入来源
+            <span>{visibleTemplateRules.length} 条模板规则 · {editingCard.llm_reference.trim().length ? '有 LLM 改写参考' : '无 LLM 改写参考'}</span>
           </button>
           {referenceExpanded && (
             <div className="template-context-rule-panel">
+              <div className="template-context-source-audit">
+                <span>影响说明</span>
+                <ul>
+                  <li><strong>标题、正文、插入方式、启用状态、排序、绑定图片</strong><span>会显示在上方“实际进入最终输入”里。</span></li>
+                  <li><strong>模板规则</strong><span>会影响 Agent 生成方案，完整列在下方。</span></li>
+                  <li><strong>本卡片 LLM 参考</strong><span>只影响下方“让 LLM 帮你改卡片”，不会直接写入最终提示词。</span></li>
+                  <li><strong>来源类型</strong><span>{legacyBlockTypeLabel(editingCard.legacy_block_type)}，只用于保存归档到对应模块，不直接写入提示词。</span></li>
+                </ul>
+              </div>
               <div className="template-context-rule-list">
                 <span>模板规则</span>
                 {visibleTemplateRules.length ? visibleTemplateRules.map((rule) => (
