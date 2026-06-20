@@ -8630,23 +8630,25 @@ a {
 
 .template-context-card-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   max-height: clamp(360px, calc(100dvh - 330px), 620px);
   min-height: 0;
   overflow: auto;
-  padding-right: 4px;
+  padding-right: 12px;
+  scrollbar-gutter: stable;
 }
 
 .template-context-card {
-  align-items: start;
+  align-items: stretch;
   background: rgba(2, 6, 23, 0.28);
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 12px;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 20px 72px minmax(0, 1fr) minmax(76px, auto);
-  min-height: 88px;
-  padding: 8px;
+  gap: 10px;
+  grid-template-columns: 20px 76px minmax(260px, 1fr) 92px;
+  min-height: 118px;
+  overflow: hidden;
+  padding: 10px;
 }
 
 .template-context-card.is-disabled {
@@ -8663,6 +8665,7 @@ a {
   cursor: grab;
   display: flex;
   justify-content: center;
+  min-height: 76px;
   touch-action: none;
   user-select: none;
 }
@@ -8685,8 +8688,9 @@ a {
   overflow: hidden;
   padding: 0;
   aspect-ratio: 1;
-  min-height: 72px;
-  width: 72px;
+  height: 76px;
+  min-height: 76px;
+  width: 76px;
 }
 
 .template-context-thumb img {
@@ -8704,40 +8708,59 @@ a {
 
 .template-context-card-body {
   display: grid;
-  gap: 7px;
+  gap: 8px;
+  grid-template-rows: auto minmax(40px, 1fr) auto;
   min-width: 0;
+  overflow: hidden;
 }
 
 .template-context-card-title {
-  align-items: flex-start;
-  display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  display: grid;
   gap: 8px;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
 }
 
 .template-context-card-title strong {
   color: rgba(248, 250, 252, 0.96);
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-context-card-title span {
+  background: rgba(15, 23, 42, 0.62);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 4px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .template-context-card-body p {
   color: rgba(203, 213, 225, 0.82);
-  display: block;
+  display: -webkit-box;
   font-size: 12.5px;
   line-height: 1.5;
   margin: 0;
   max-width: none;
-  overflow: visible;
+  overflow: hidden;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
 }
 
 .template-context-card-controls {
-  display: flex;
-  flex-wrap: wrap;
+  align-self: end;
+  display: grid;
   gap: 7px;
+  grid-template-columns: repeat(2, minmax(86px, max-content));
+  justify-content: start;
 }
 
 .template-context-card-controls button.is-active,
@@ -8765,7 +8788,16 @@ a {
   align-content: start;
   display: grid;
   gap: 6px;
-  min-width: 76px;
+  justify-self: end;
+  min-width: 92px;
+  width: 92px;
+}
+
+.template-context-card-actions button,
+.template-context-card-actions a {
+  min-height: 30px;
+  padding: 5px 8px;
+  width: 100%;
 }
 
 .template-context-impact {
@@ -12204,6 +12236,7 @@ a {
 
   .template-context-card {
     grid-template-columns: 28px minmax(0, 1fr);
+    min-height: 0;
   }
 
   .template-context-thumb,
@@ -12212,7 +12245,28 @@ a {
   }
 
   .template-context-thumb {
+    height: auto;
     min-height: 140px;
+    width: 100%;
+  }
+
+  .template-context-card-title {
+    align-items: start;
+    grid-template-columns: 1fr;
+  }
+
+  .template-context-card-title span {
+    max-width: 100%;
+    width: fit-content;
+  }
+
+  .template-context-card-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .template-context-card-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
   }
 
   .template-drawer-grid {

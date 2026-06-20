@@ -6621,3 +6621,37 @@ HARD-GATE：
 - [x] 公网 `/api/config` 200、`/login` 200、`/collections` 未登录 307、`/generate` 未登录 307、`/api/reference-albums?scope=other_project` 未登录 401。
 - [x] 生产 BUILD_ID `tzaGyxOD8guvSsGdamHwJ`，生产静态资源命中新文案和样式标记：`其他人的项目图集`、`album-project-filter`、`composer-toolbar-dropdown-item-main`、`album-card-title-row`。
 - [x] 跨健康守护周期复查后 `youdoo-sites status sd2` OK，`com.youdoo.site.sd2` 的 `runs=28` 未增长。
+
+## 2026-06-20 模板卡片列表布局根治
+
+### 问题判断
+
+- 截图显示上下文卡片列表在模板三级弹窗里重叠：正文、标题、强制/参考按钮、删除/启用/编辑按钮挤在同一水平行。
+- 根因不是单个间距错误，而是列表卡片承担了太多内容：完整标题、完整正文、绑定图片状态、模式切换、启用、编辑、删除都在一行里争宽度。
+- 右侧操作列宽度过窄且贴近内部滚动条，内容列没有固定“摘要区”和“控制区”边界，长文本会把按钮挤乱。
+- 根治原则：列表是“编排视图”，只显示短摘要和关键状态；完整内容、规则、LLM 改写都在三级弹窗编辑页展示。
+
+### 根治方案
+
+- [x] 将 `.template-context-card` 改为稳定四区布局：拖拽区、图片区、内容摘要区、操作区。
+- [x] 内容摘要区限制标题和正文行数，长文本截断为摘要，完整内容只在三级弹窗看。
+- [x] 模式切换按钮固定在摘要区底部，不与正文同一行重叠。
+- [x] 操作区固定宽度并远离滚动条，启用/编辑/删除三个按钮垂直排列，按钮宽度一致。
+- [x] 绑定图片状态改为短徽标，不把长图名铺满整行。
+- [x] 移动或窄宽度下卡片自动变为上下结构，操作按钮改为三列，不再横向挤压。
+- [x] 补 smoke 或静态检查，确认关键 CSS 类和截断策略存在。
+
+### 验收标准
+
+- [x] 截图中的三类重叠消失：正文不压按钮，按钮不压标题，操作区不贴滚动条。
+- [x] 卡片行高度稳定，长标题/长正文不会撑爆列表。
+- [x] 启用、编辑、删除仍完整可达。
+- [x] 强制插入/仅供参考仍可在卡片上直接二选一。
+- [ ] `tsc`、`lint`、`build`、线上部署、公网静态资源命中和健康周期验证通过。
+
+### Review
+
+- [x] 已把卡片列表改成编排摘要视图，完整内容回到三级弹窗。
+- [x] 已新增 `scripts/template-card-layout-smoke.ts`，防止四区布局、两行摘要和移动端操作区规则被后续改丢。
+- [x] 本地验证已通过：`npx tsx scripts/template-card-layout-smoke.ts`、`git diff --check`、`npx impeccable detect ...`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [ ] 待完成线上部署、公网资源命中和健康周期复查。
