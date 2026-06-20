@@ -429,6 +429,60 @@ function contextCardModeForBlock(blockType: TemplatePromptBlockType, bindings: T
   return 'force';
 }
 
+function ruleTypeEditableLabel(type: TemplateRuleType) {
+  if (type === 'forbid') return '禁止 FORBID';
+  if (type === 'suggest') return '建议 SUGGEST';
+  if (type === 'context') return '上下文 CONTEXT';
+  return '必须 MUST';
+}
+
+function activeRulesAsEditableText(rules: SerializedTemplateRule[]) {
+  return rules
+    .filter((rule) => rule.status === 'active' && rule.content.trim())
+    .sort((a, b) => b.priority - a.priority || a.sort_order - b.sort_order)
+    .map((rule) => `${ruleTypeEditableLabel(rule.rule_type)}（优先级 ${rule.priority}）：${rule.content.trim()}`)
+    .join('\n');
+}
+
+function isRulesContextCard(card: TemplateContextCard) {
+  return card.legacy_block_type === 'rules' || titleKey(card.title) === titleKey(CONTEXT_CARD_LABELS.rules);
+}
+
+function ensureRulesContextCard(cards: TemplateContextCard[], rules: SerializedTemplateRule[]): TemplateContextCard[] {
+  const rulesText = activeRulesAsEditableText(rules);
+  if (!rulesText) return cards;
+
+  const existingIndex = cards.findIndex(isRulesContextCard);
+  if (existingIndex >= 0) {
+    return cards.map((card, index) => {
+      if (index !== existingIndex || card.content.trim()) return card;
+      return {
+        ...card,
+        title: CONTEXT_CARD_LABELS.rules,
+        content: rulesText,
+        mode: 'force',
+        enabled: true,
+        legacy_block_type: 'rules',
+      };
+    });
+  }
+
+  return [
+    ...cards,
+    {
+      id: contextCardId('rules', cards.length),
+      title: CONTEXT_CARD_LABELS.rules,
+      content: rulesText,
+      mode: 'force',
+      enabled: true,
+      sort_order: cards.length + 1,
+      bound_image: null,
+      llm_reference: '',
+      legacy_block_type: 'rules',
+    },
+  ];
+}
+
 function findBoundImageForBlock(blockType: TemplatePromptBlockType, assets: SerializedTemplateAsset[]): TemplateContextCardBoundImage | null {
   const assetType = blockType === 'asset_rule' ? 'product' : blockType;
   const asset = assets.find((item) => item.status === 'active' && item.asset_type === assetType)
@@ -472,19 +526,17 @@ function buildContextCardsFromLegacy(
     };
   });
 
-  if (!cards.some((card) => card.title === CONTEXT_CARD_LABELS.rules) && rules.length > 0) {
+  const rulesText = activeRulesAsEditableText(rules);
+  if (!cards.some((card) => card.title === CONTEXT_CARD_LABELS.rules) && rulesText) {
     cards.push({
       id: contextCardId('rules', cards.length),
       title: CONTEXT_CARD_LABELS.rules,
-      content: rules
-        .filter((rule) => rule.status === 'active')
-        .map((rule) => `${rule.rule_type.toUpperCase()}：${rule.content}`)
-        .join('\n'),
+      content: rulesText,
       mode: 'force',
       enabled: true,
       sort_order: cards.length + 1,
       bound_image: null,
-      llm_reference: '由旧规则列表自动合并。',
+      llm_reference: '',
       legacy_block_type: 'rules',
     });
   }
@@ -530,9 +582,10 @@ export function serializeGenerationTemplate(template: TemplateRecord): Serialize
     sort_order: prompt.sort_order,
     status: prompt.status,
   }));
-  const contextCards = moduleBindings.context_cards?.length
+  const rawContextCards = moduleBindings.context_cards?.length
     ? moduleBindings.context_cards
     : buildContextCardsFromLegacy(moduleBindings, prompts, assets, rules);
+  const contextCards = ensureRulesContextCard(rawContextCards, rules);
 
   return {
     id: template.id,

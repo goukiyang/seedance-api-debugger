@@ -153,11 +153,11 @@ function composePrompt(
     structure: string[];
   },
 ) {
-  const activeRules = template.rules.filter((rule) => rule.status === 'active');
+  const hasContextCards = Boolean(template.module_bindings.context_cards?.length);
+  const activeRules = hasContextCards ? [] : template.rules.filter((rule) => rule.status === 'active');
   const must = rulesByType(activeRules, 'must');
   const forbid = rulesByType(activeRules, 'forbid');
   const suggest = rulesByType(activeRules, 'suggest');
-  const hasContextCards = Boolean(template.module_bindings.context_cards?.length);
   const contextCardLines = buildContextCardLines(template);
   const promptBlocks = hasContextCards ? [] : template.prompts
     .filter((block) => block.status === 'active')

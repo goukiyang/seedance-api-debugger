@@ -6744,3 +6744,20 @@ HARD-GATE：
 - [ ] 创建 rollback tag，建议：`rollback/2026-06-20-company-project-type`。
 - [ ] 推送 `origin/codex/v12-full-todo` 和 rollback tag，并用 `git ls-remote` 复核。
 - [ ] 部署成功后登记 `/Volumes/Data/Projects/project-version-registry.md`。
+
+## 2026-06-20 模板规则文本化闭环
+
+### 目标
+
+- [x] 删除卡片编辑页里的“规则与非最终输入来源”折叠区，不再保留看不见但会影响 LLM 的规则通道。
+- [x] 旧 `template.rules` 自动合并成一张“生成规则”上下文卡片，规则正文直接写在“最终输入给 LLM 的上下文内容”输入框里。
+- [x] 有上下文卡片时，最终生成提示词只读取卡片正文、启用状态、插入方式、排序和绑定图片，不再额外读取旧 `template.rules`。
+- [x] LLM 改写卡片时不再读取隐藏 `llm_reference`，只读取卡片标题、当前正文和管理员本次输入。
+- [x] 补 `template-rules-editable-text-smoke`，锁定规则文本化和废弃 UI 不回归。
+
+### 验收标准
+
+- [ ] 线上卡片编辑弹窗不再出现“规则与非最终输入来源”区域。
+- [ ] “生成规则”以普通卡片出现，可启用/停用、强制插入/仅供参考、编辑正文和排序。
+- [ ] 生成提示词里出现的规则内容，必须来自可见卡片正文。
+- [ ] 旧 `rules` 数组不能在卡片之外偷偷追加到最终提示词。

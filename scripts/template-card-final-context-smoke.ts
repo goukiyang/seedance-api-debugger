@@ -79,6 +79,7 @@ assert.match(prompt, /参考卡片/);
 assert.match(prompt, /视觉风格：科技感干净，画面清楚，品牌色稳定。/);
 assert.doesNotMatch(prompt, /brand_ip|brand_logo|tech_brand/);
 assert.doesNotMatch(prompt, /旧隐藏提示词/);
+assert.doesNotMatch(prompt, /保持品牌一致性/);
 assert.doesNotMatch(prompt, /强制插入模块/);
 assert.doesNotMatch(prompt, /只影响卡片改写/);
 

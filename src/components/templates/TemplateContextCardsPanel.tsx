@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { ImageIcon, Plus, GripVertical, Trash2 } from 'lucide-react';
 import { normalizeContextCardTitle } from '@/lib/templates/workbench';
 import type {
-  SerializedTemplateRule,
   TemplateContextCard,
   TemplateContextCardBoundImage,
   TemplateContextCardMode,
@@ -20,7 +19,6 @@ type Props = {
   saveStatus: SaveStatus;
   saveError?: string | null;
   editorActions?: ReactNode;
-  templateRules?: SerializedTemplateRule[];
   templateId?: string;
   editorMode?: 'overview' | 'inline' | 'card-page';
   editingCardId?: string | null;
@@ -69,21 +67,6 @@ function boundImageSourceLabel(source: TemplateContextCardBoundImage['source']) 
   return '手动绑定';
 }
 
-function legacyBlockTypeLabel(blockType: TemplateContextCard['legacy_block_type']) {
-  if (!blockType) return '通用上下文';
-  return {
-    character: '角色设定',
-    logo: '品牌标识',
-    style: '视觉风格',
-    camera: '镜头语言',
-    rules: '生成规则',
-    asset_rule: '素材规则',
-    temporal: '分段节奏',
-    prompt_format: '提示词格式',
-    global: '全局补充',
-  }[blockType];
-}
-
 function buildCardFinalInputText(card: TemplateContextCard, index: number) {
   return [
     `${index}. ${modePromptLabel(card.mode)}：${card.title || '未命名卡片'}`,
@@ -106,7 +89,6 @@ export function TemplateContextCardsPanel({
   saveStatus,
   saveError,
   editorActions,
-  templateRules = [],
   templateId,
   editorMode = 'overview',
   editingCardId = null,
@@ -121,7 +103,6 @@ export function TemplateContextCardsPanel({
   const [chatError, setChatError] = useState<string | null>(null);
   const [rewritePreview, setRewritePreview] = useState('');
   const [rewritePreviewCardId, setRewritePreviewCardId] = useState<string | null>(null);
-  const [referenceExpanded, setReferenceExpanded] = useState(false);
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState('');
   const autoSelectedCardIdRef = useRef<string | null>(null);
@@ -139,7 +120,6 @@ export function TemplateContextCardsPanel({
   const editingCard = sortedCards.find((card) => card.id === effectiveEditingCardId) || null;
   const editingCardPosition = editingCard ? sortedCards.findIndex((card) => card.id === editingCard.id) + 1 : 0;
   const activeRewritePreview = editingCard && rewritePreviewCardId === editingCard.id ? rewritePreview : '';
-  const visibleTemplateRules = templateRules;
   const showInlineEditor = editorMode === 'inline';
   const showCardEditorPage = editorMode === 'card-page';
   const enabledCards = sortedCards.filter((card) => card.enabled);
@@ -184,7 +164,6 @@ export function TemplateContextCardsPanel({
     const next = [...sortedCards, createEmptyCard(sortedCards.length + 1)];
     onChange(next);
     setInternalEditingCardId(next[next.length - 1].id);
-    setReferenceExpanded(false);
   };
 
   const removeBoundImage = (cardId: string) => {
@@ -201,7 +180,6 @@ export function TemplateContextCardsPanel({
     onChange(nextCards);
     if (effectiveEditingCardId === cardId) {
       setInternalEditingCardId(nextCards[0]?.id || null);
-      setReferenceExpanded(false);
       setReferenceOpen(false);
     }
   };
@@ -363,45 +341,6 @@ export function TemplateContextCardsPanel({
           <button type="button" onClick={() => setReferenceOpen(true)}>{editingCard.bound_image ? '更换图片' : '添加图片'}</button>
           {editingCard.bound_image && <button type="button" onClick={() => removeBoundImage(editingCard.id)}>移除图片</button>}
         </div>
-        <section className="template-context-reference">
-          <button type="button" onClick={() => setReferenceExpanded((current) => !current)}>
-            {referenceExpanded ? '收起' : '展开'} 规则与非最终输入来源
-            <span>{visibleTemplateRules.length} 条模板规则 · {editingCard.llm_reference.trim().length ? '有 LLM 改写参考' : '无 LLM 改写参考'}</span>
-          </button>
-          {referenceExpanded && (
-            <div className="template-context-rule-panel">
-              <div className="template-context-source-audit">
-                <span>影响说明</span>
-                <ul>
-                  <li><strong>标题、正文、插入方式、启用状态、排序、绑定图片</strong><span>会显示在上方“实际进入最终输入”里。</span></li>
-                  <li><strong>模板规则</strong><span>会影响 Agent 生成方案，完整列在下方。</span></li>
-                  <li><strong>本卡片 LLM 参考</strong><span>只影响下方“让 LLM 帮你改卡片”，不会直接写入最终提示词。</span></li>
-                  <li><strong>来源类型</strong><span>{legacyBlockTypeLabel(editingCard.legacy_block_type)}，只用于保存归档到对应模块，不直接写入提示词。</span></li>
-                </ul>
-              </div>
-              <div className="template-context-rule-list">
-                <span>模板规则</span>
-                {visibleTemplateRules.length ? visibleTemplateRules.map((rule) => (
-                  <article key={rule.id || `${rule.rule_type}-${rule.sort_order}`} className="template-context-rule-item">
-                    <strong>{rule.rule_type.toUpperCase()} · 优先级 {rule.priority} · {rule.status}</strong>
-                    <p>{rule.content}</p>
-                  </article>
-                )) : (
-                  <p>无模板规则</p>
-                )}
-              </div>
-              <label>
-                <span>本卡片规则与 LLM 参考</span>
-                <textarea
-                  value={editingCard.llm_reference}
-                  onChange={(event) => updateCard(editingCard.id, { llm_reference: event.currentTarget.value })}
-                  rows={5}
-                  placeholder="只写这张卡片改写时要遵守的规则或参考。"
-                />
-              </label>
-            </div>
-          )}
-        </section>
         <section className="template-context-chat">
           <span>让 LLM 帮你改这张卡片</span>
           <textarea
@@ -574,7 +513,6 @@ export function TemplateContextCardsPanel({
                         type="button"
                         onClick={() => {
                           setInternalEditingCardId(card.id);
-                          setReferenceExpanded(false);
                         }}
                       >
                         编辑

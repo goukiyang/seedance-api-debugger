@@ -192,7 +192,6 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
     const intent = [
       `卡片标题：${card.title}`,
       `当前内容：${card.content || '空'}`,
-      card.llm_reference ? `LLM 参考与设置：${card.llm_reference}` : '',
       `管理员要求：${userInput}`,
     ].filter(Boolean).join('\n');
 
@@ -261,7 +260,6 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
         saveStatus={contextCardsSaveStatus}
         saveError={contextCardsSaveError}
         editorActions={variant === 'card' ? editorActions : undefined}
-        templateRules={template.rules}
         templateId={template.id}
         editorMode={variant === 'card' ? 'card-page' : 'overview'}
         editingCardId={cardId}
