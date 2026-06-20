@@ -323,14 +323,14 @@
         document.body.classList.toggle('is-canvas-admin', isCanvasAdmin());
         root.querySelectorAll?.('.canvas-node').forEach(nodeEl => {
             const node = engine.nodes.get(nodeEl.dataset.nodeId);
-            const button = nodeEl.querySelector('[data-context-rules-open]');
-            if (!button) return;
             const hasRules = Boolean(contextRulesForNode(node));
-            button.classList.toggle('has-rules', hasRules);
-            button.title = hasRules
-                ? '已设置上下文规则，点击编辑'
-                : '编辑影响本节点 LLM 上下文的规则';
-            button.setAttribute('aria-label', button.title);
+            nodeEl.querySelectorAll('[data-context-rules-open]').forEach(button => {
+                button.classList.toggle('has-rules', hasRules);
+                button.title = hasRules
+                    ? '已设置上下文规则，点击编辑'
+                    : '编辑影响本节点 LLM 上下文的规则';
+                button.setAttribute('aria-label', button.title);
+            });
         });
     }
 

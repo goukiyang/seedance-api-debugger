@@ -647,6 +647,18 @@ html, body {
 .node-action-row.accent { color: var(--accent-teal); }
 .node-action-row.accent:hover { color: #6ee7de; background: var(--accent-teal-dim); }
 
+.node-context-rules-row {
+    display: none;
+    justify-content: flex-end;
+    margin-top: auto;
+    padding-top: 12px;
+    width: 100%;
+}
+
+.is-canvas-admin .node-type-text .node-context-rules-row {
+    display: flex;
+}
+
 /* Text content (after user writes) */
 .node-text-content {
     width: 100%; min-height: 80px; padding: 10px; font-size: 14px;
@@ -747,6 +759,20 @@ html, body {
 .context-rules-button.has-rules::before {
     background: #60a5fa;
     box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.16);
+}
+
+.context-rules-card-button {
+    background: rgba(15, 23, 42, 0.72);
+    border-color: rgba(96, 165, 250, 0.36);
+    color: #bfdbfe;
+    height: 30px;
+    padding: 0 12px;
+}
+
+.context-rules-card-button:hover {
+    background: rgba(37, 99, 235, 0.2);
+    border-color: rgba(96, 165, 250, 0.58);
+    color: #eff6ff;
 }
 
 .input-footer-right { display: flex; align-items: center; gap: 8px; }

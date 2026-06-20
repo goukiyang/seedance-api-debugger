@@ -700,3 +700,13 @@
 - 怎么改：图集页直接 multipart 提交到当前图集图片接口；后端先算文件 hash，命中已有图片资产则创建新的 `ReferenceImage` 并复用旧 `asset_id/original_url/thumbnail_url`，未命中才走 `uploadSiteAsset`。
 - 验证结果：`reference-album-duplicate-upload-smoke`、`reference-album-duplicate-upload-integration`、`git diff --check`、`tsc`、`lint`、`build` 通过；已部署 BUILD_ID `QxmU9C1GexK7-UVnz4RvH`，公网 `/api/config`、`/login` 和生产包关键字符串命中，健康周期后 `runs=36` 未增长。
 - 可复用经验：同一个文件去重规则不能替代业务动作。图集、工作台、个人历史素材是不同使用场景；跨用户 hash 命中时，应在具体入口决定是阻止、复制引用，还是复用内容链接。
+
+## 2026-06-20 - 无线画布管理员规则入口不能藏在选中态面板里
+
+- 问题/背景：用户刷新登录后的无线画布页后，在文本节点底部看不到预期的“规则”按钮。
+- 诱因/根因：规则按钮已经写进文本节点，但被放在 `.node-input-bar` 里；这个输入栏默认只有节点被选中时才显示，所以刷新后管理员很容易看不到入口。另外入口 HTML 没有给静态脚本加版本号，线上刷新时也容易受旧资源缓存影响。
+- 当时思路：把“管理员需要一眼看到的规则入口”和“选中后展开的 LLM 输入栏”分开。规则入口应该在文本卡片本体底部可见，输入栏里可以保留同一能力作为补充入口。
+- 改动位置：`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/styles.css`、`public/tools/ultimate-canvas/index.html`、`scripts/ultimate-canvas-context-rules-smoke.ts`。
+- 怎么改：文本节点卡片底部新增管理员可见的 `规则` 按钮；刷新按钮状态时同步更新同一节点里的所有规则按钮；入口 HTML 给 `styles.css`、`canvas-engine.js`、`app.js` 加版本号；smoke 检查覆盖卡片底部入口和版本号。
+- 验证结果：JS 语法、规则 smoke、TypeScript、lint、Next build、`youdoo-sites build/restart`、本地/公网 `/api/config` 与 `/login` 均通过；lint 仅保留项目既有 img/hook 警告。
+- 可复用经验：用户说“刷新后应该看到某按钮”，不要只检查 DOM 是否存在，还要检查父级是否在默认态隐藏。管理员常用入口不能依赖 hover、selected、折叠面板或旧静态资源缓存才能出现。

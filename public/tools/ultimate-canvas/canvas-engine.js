@@ -567,6 +567,11 @@ class CanvasEngine {
                     <div class="node-action-row" data-action="txt2music" data-nid="${id}">
                         <span class="action-icon">🔊</span>文字生音乐
                     </div>
+                </div>
+                <div class="node-context-rules-row">
+                    <button class="context-rules-button context-rules-card-button" data-context-rules-open title="编辑影响本节点 LLM 上下文的规则">
+                        <span>规则</span>
+                    </button>
                 </div>`;
             case 'video': return `
                 <div class="card-preview-placeholder">
