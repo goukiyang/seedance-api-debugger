@@ -6655,3 +6655,92 @@ HARD-GATE：
 - [x] 已新增 `scripts/template-card-layout-smoke.ts`，防止四区布局、两行摘要和移动端操作区规则被后续改丢。
 - [x] 本地验证已通过：`npx tsx scripts/template-card-layout-smoke.ts`、`git diff --check`、`npx impeccable detect ...`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
 - [x] 已完成线上部署，生产 BUILD_ID `sBmW_xsIQ1G8W1uDWCCXk`；公网 CSS 命中 `scrollbar-gutter:stable`、`20px 76px minmax(260px,1fr) 92px`、`-webkit-line-clamp:2` 和移动端三列操作按钮规则。
+
+## 2026-06-20 公司级项目类型规划
+
+### 目标
+
+- 创建项目时，除了个人默认项目和普通协作项目，还要支持“公司级项目”。
+- 公司级项目用于公司内部共享工作，不等同现有 `public` 公共预算项目。
+- 公司级项目默认仍走个人积分记账：谁发起生成，扣谁的个人积分；不进入公共项目预算池。
+
+### 设计口径
+
+- [ ] 新增项目类型 `company`，语义为“公司级项目”。
+- [ ] 保留 `personal` 作为个人默认空间，不允许手动新建多个个人空间。
+- [ ] 保留 `team` 作为成员制协作项目。
+- [ ] 保留 `public` 作为公共预算项目，只通过现有审批/预算流程创建或启用。
+- [ ] 保留 `system` 作为系统项目，不进入普通创建入口。
+- [ ] 公司级项目默认 `visibility='internal_public'`，表示公司内部可见。
+- [ ] 公司级项目的创建者自动成为 `project_owner`。
+- [ ] 公司级项目对登录用户默认可查看、可生成；只有管理员、项目负责人和被授权编辑者能管理资产。
+- [ ] 公司级项目仍支持邀请和成员管理，成员角色用于提升管理/编辑权限。
+- [ ] 公司级项目不触发 `ProjectBudgetAccount` 初始化，不走公共预算冻结、实扣或追加预算审批。
+
+### 需要修改的文件
+
+- [ ] `src/app/api/projects/route.ts`：`POST` 支持 `type='company'`；`GET` 把公司级项目纳入普通用户可见项目；返回 `can_manage_members` 时把 `company` 作为可管理成员项目。
+- [ ] `src/lib/projects/permissions.ts`：把可共享/可邀请项目类型从 `team | public` 扩展为 `team | company | public`；补公司级默认可见、可生成、但非负责人不可管理的权限规则。
+- [ ] `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`：无线画布启动项目列表包含公司级项目。
+- [ ] `src/app/api/project-invites/[token]/join/route.ts`：邀请加入允许 `company` 类型。
+- [ ] `src/app/projects/page.tsx`：创建项目表单增加“协作项目 / 公司级项目 / 预算记账项目”选择；普通创建根据选择传 `team` 或 `company`。
+- [ ] `src/app/generate/page.tsx`：生成页项目下拉里的新建项目表单增加“协作 / 公司级”切换；项目 meta 显示“公司级项目”。
+- [ ] `src/components/templates/TemplateGenerateClient.tsx`：模板生成页项目下拉同步支持公司级项目创建和显示。
+- [ ] `src/components/ShareAlbumDialog.tsx`：共享图集项目下拉类型文案增加“公司级项目”。
+- [ ] `src/app/admin/projects/AdminProjectsClient.tsx`：后台项目列表显示“公司级项目”；公司级空项目允许删除，有内容项目允许归档。
+- [ ] `src/app/projects/[id]/page.tsx`：项目详情页删除/归档判断和类型文案支持公司级项目。
+- [ ] `prisma/schema.prisma`：只更新 `Project.type` 注释为 `personal | team | company | public | system`；不需要数据库迁移，因为当前字段是字符串。
+
+### 实施步骤
+
+- [ ] 增加项目类型 helper，统一输出项目类型标签，避免各页面散落 `team/public/personal` 判断。
+- [ ] 后端先改权限和创建接口，确保 `company` 不会被 API 强制落成 `team`。
+- [ ] 前端再改三个创建入口：项目页、生成页、模板生成页。
+- [ ] 改所有项目类型显示文案，避免公司级项目仍显示为“团队项目”。
+- [ ] 检查共享图集、项目邀请、任务移动、资产移动、无线画布 bootstrap 是否能识别公司级项目。
+- [ ] 补 smoke 脚本或轻量测试，覆盖 `company` 创建、列表可见、权限判断和 `public` 预算逻辑未被误触发。
+- [ ] 本地验证通过后，按 sd2 流程部署到线上。
+
+### 验收标准
+
+- [ ] `/projects` 创建项目时能选择“公司级项目”。
+- [ ] 创建后的公司级项目在项目列表显示为“公司级项目”，不是“团队项目”。
+- [ ] `/generate` 新建项目时能选择公司级，创建后自动选中。
+- [ ] `/template-generate` 新建项目时能选择公司级，创建后自动选中。
+- [ ] 普通登录用户能看到 active 的公司级项目，并能在其中生成。
+- [ ] 非负责人不能归档、删除或管理公司级项目成员。
+- [ ] 项目负责人和管理员能管理公司级项目成员、图集和资产。
+- [ ] 公司级项目生成仍扣发起人的个人积分，不创建或使用项目预算池。
+- [ ] 公共预算项目 `public` 的原有审批、预算冻结、实扣、预算不足逻辑不回归。
+- [ ] 分享图集到项目时，公司级项目可被选择，并显示“公司级项目”。
+
+### 验证命令
+
+- [ ] `git diff --check`
+- [ ] `npx tsc --noEmit --pretty false`
+- [ ] `npm run lint`
+- [ ] `npx impeccable detect src/app/projects/page.tsx src/app/generate/page.tsx src/components/templates/TemplateGenerateClient.tsx src/app/globals.css`
+- [ ] `npm run build`
+- [ ] `youdoo-sites build sd2`
+- [ ] `youdoo-sites restart sd2`
+- [ ] `youdoo-sites status sd2`
+- [ ] `curl http://127.0.0.1:3000/api/config`
+- [ ] `curl https://sd2.youdoodesign.com/api/config`
+- [ ] `curl https://sd2.youdoodesign.com/login`
+- [ ] 跨健康守护周期后复查 `youdoo-sites status sd2` 和 `launchctl print gui/$(id -u)/com.youdoo.site.sd2` 的 `runs` 不增长。
+
+### 停止条件
+
+- [ ] 如果发现现有 `public` 公共预算项目已经被业务用作“公司级”，先停下重新确认命名，不直接改。
+- [ ] 如果公司级项目会绕过权限导致外部账号可见，先停下补账号类型边界。
+- [ ] 如果 `company` 影响公共项目预算扣费路径，先停下拆分记账判断。
+- [ ] 如果测试或构建失败，不提交、不推送、不部署。
+- [ ] 如果工作区出现非本轮改动，先隔离或报告，不混入提交。
+
+### Git / 部署计划
+
+- [ ] 本轮落地时使用当前生产工作区 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- [ ] 完成后创建聚焦 commit，建议信息：`新增公司级项目类型`。
+- [ ] 创建 rollback tag，建议：`rollback/2026-06-20-company-project-type`。
+- [ ] 推送 `origin/codex/v12-full-todo` 和 rollback tag，并用 `git ls-remote` 复核。
+- [ ] 部署成功后登记 `/Volumes/Data/Projects/project-version-registry.md`。
