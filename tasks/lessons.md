@@ -690,3 +690,13 @@
 - 怎么改：文本节点底部新增管理员可见“规则”按钮；弹窗编辑规则文本并触发画布自动保存；生成 payload 带 `contextRules`；后端将管理员规则作为高优先级上下文写入 LLM 请求，非管理员伪造字段会被忽略并记录。
 - 验证结果：以本轮 smoke、JS 语法检查、TypeScript、lint、build、部署和公网资源验收为准。
 - 可复用经验：任何“只给管理员开放”的上下文、规则、提示词能力都不能只靠前端隐藏。前端负责入口和体验，后端负责是否真正应用，日志要能区分已应用和被忽略。
+
+## 2026-06-20 - 图集上传不能被个人素材归属拦截
+
+- 问题/背景：参考图集详情页上传别人已经传过的同一张图片时，页面提示“联系管理员开放共享”，但用户真实目标是先把图片贴进当前图集。
+- 诱因/根因：图集页上传走的是“先上传到个人历史素材，再绑定到图集”的两步流；个人素材层按 `Asset.hash` 去重并阻止跨用户复用，导致图集绑定步骤根本没有执行。
+- 当时思路：拆开两种业务语义。个人历史素材仍保持归属限制；图集上传是用户本地选择同一二进制文件后创建图集图片，允许只复用已有后台内容链接。
+- 改动位置：`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/api/reference-albums/[id]/images/route.ts`、`scripts/reference-album-duplicate-upload-smoke.ts`。
+- 怎么改：图集页直接 multipart 提交到当前图集图片接口；后端先算文件 hash，命中已有图片资产则创建新的 `ReferenceImage` 并复用旧 `asset_id/original_url/thumbnail_url`，未命中才走 `uploadSiteAsset`。
+- 验证结果：`reference-album-duplicate-upload-smoke`、`reference-album-duplicate-upload-integration`、`git diff --check`、`tsc`、`lint`、`build` 通过；已部署 BUILD_ID `QxmU9C1GexK7-UVnz4RvH`，公网 `/api/config`、`/login` 和生产包关键字符串命中，健康周期后 `runs=36` 未增长。
+- 可复用经验：同一个文件去重规则不能替代业务动作。图集、工作台、个人历史素材是不同使用场景；跨用户 hash 命中时，应在具体入口决定是阻止、复制引用，还是复用内容链接。

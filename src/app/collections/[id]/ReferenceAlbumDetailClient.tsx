@@ -72,20 +72,14 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
     setLoading(true);
     setError(null);
     try {
-      const assetIds = [];
+      const formData = new FormData();
       for (const file of files) {
-        const formData = new FormData();
         formData.append('file', file);
-        const uploadRes = await fetch('/api/assets/upload', { method: 'POST', body: formData });
-        const uploadData = await uploadRes.json();
-        if (!uploadRes.ok) throw new Error(uploadData.error || '图片上传失败');
-        assetIds.push(uploadData.asset.id);
       }
 
       const addRes = await fetch(`/api/reference-albums/${albumId}/images`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset_ids: assetIds }),
+        body: formData,
       });
       const addData = await addRes.json();
       if (!addRes.ok) throw new Error(addData.error || addData.message || '保存到图集失败');
