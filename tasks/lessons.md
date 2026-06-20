@@ -710,3 +710,13 @@
 - 怎么改：文本节点卡片底部新增管理员可见的 `规则` 按钮；刷新按钮状态时同步更新同一节点里的所有规则按钮；入口 HTML 给 `styles.css`、`canvas-engine.js`、`app.js` 加版本号；smoke 检查覆盖卡片底部入口和版本号。
 - 验证结果：JS 语法、规则 smoke、TypeScript、lint、Next build、`youdoo-sites build/restart`、本地/公网 `/api/config` 与 `/login` 均通过；lint 仅保留项目既有 img/hook 警告。
 - 可复用经验：用户说“刷新后应该看到某按钮”，不要只检查 DOM 是否存在，还要检查父级是否在默认态隐藏。管理员常用入口不能依赖 hover、selected、折叠面板或旧静态资源缓存才能出现。
+
+## 2026-06-21 - 绑定图片选择窗口必须能直接上传并完成绑定
+
+- 问题/背景：用户在模板卡片编辑页指出，选择绑定图片的窗口需要有上传图片功能按键。
+- 诱因/根因：绑定图片弹窗只提供“参考图集”和“历史上传图”两种已有素材来源；如果当前图片还没上传，管理员必须离开当前编辑流去别处上传，再返回绑定，链路不闭环。
+- 当时思路：这个窗口的目标不是素材管理，而是给当前卡片绑定 1 张图片，所以上传动作应直接完成绑定，按钮文案明确为“上传并绑定图片”。
+- 改动位置：`src/components/templates/TemplateBoundImagePicker.tsx`、`src/app/globals.css`、`scripts/template-bound-image-upload-smoke.ts`。
+- 怎么改：弹窗内加入隐藏 file input 和 footer 上传按钮；调用既有 `/api/assets/upload`，上传成功后用返回的 `asset.id/originalUrl/thumbnailUrl/fileName` 写入卡片 `bound_image`，来源标记为 `upload_history`，并切到历史上传图语义。
+- 验证结果：以本轮上传入口 smoke、TypeScript、lint、build、部署和公网资源验收为准。
+- 可复用经验：选择窗口如果承担“绑定/引用”决策，就不能只展示已有项。遇到素材缺失时，应在同一窗口提供最短上传路径，并让上传结果直接进入当前业务对象。

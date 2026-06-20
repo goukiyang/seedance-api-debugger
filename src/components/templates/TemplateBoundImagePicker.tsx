@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import type { TemplateContextCardBoundImage } from '@/lib/templates/workbench';
 
@@ -66,7 +67,9 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
   const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
   const [historyImages, setHistoryImages] = useState<UploadedImageItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const selectedAlbum = useMemo(
     () => albums.find((album) => album.id === selectedAlbumId) || null,
@@ -106,19 +109,25 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
       .finally(() => setLoading(false));
   }, [open, selectedAlbumId, tab]);
 
-  useEffect(() => {
-    if (!open || tab !== 'history') return;
+  const loadHistoryImages = useCallback(async () => {
     setLoading(true);
     setError(null);
-    fetch('/api/assets/history?page=1&limit=60', { cache: 'no-store' })
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.error || data.message || '历史上传图读取失败');
-        setHistoryImages(data.assets || []);
-      })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : '历史上传图读取失败'))
-      .finally(() => setLoading(false));
-  }, [open, tab]);
+    try {
+      const res = await fetch('/api/assets/history?page=1&limit=60', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '历史上传图读取失败');
+      setHistoryImages(data.assets || []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '历史上传图读取失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || tab !== 'history') return;
+    void loadHistoryImages();
+  }, [loadHistoryImages, open, tab]);
 
   if (!open) return null;
 
@@ -148,9 +157,75 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
     onClose();
   };
 
+  const handleUploadClick = () => {
+    if (uploading) return;
+    uploadInputRef.current?.click();
+  };
+
+  const handleUploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = Array.from(event.target.files || []).find((item) => item.type.startsWith('image/'));
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/assets/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || '图片上传失败');
+      const asset = data.asset as {
+        id?: string;
+        originalUrl?: string | null;
+        thumbnailUrl?: string | null;
+        fileName?: string;
+        width?: number | null;
+        height?: number | null;
+      } | undefined;
+      if (!asset?.id) throw new Error('图片上传成功，但没有返回素材 ID');
+      const assetId = asset.id;
+      const nextImage: TemplateContextCardBoundImage = {
+        source: 'upload_history',
+        id: assetId,
+        reference_image_id: null,
+        asset_id: assetId,
+        label: asset.fileName || file.name,
+        url: asset.originalUrl || asset.thumbnailUrl || null,
+        thumbnail_url: asset.thumbnailUrl || asset.originalUrl || null,
+      };
+      setHistoryImages((current) => [
+        {
+          id: assetId,
+          originalUrl: asset.originalUrl || asset.thumbnailUrl || '',
+          thumbnailUrl: asset.thumbnailUrl || asset.originalUrl || '',
+          fileName: asset.fileName || file.name,
+          width: asset.width ?? null,
+          height: asset.height ?? null,
+          createdAt: new Date().toISOString(),
+        },
+        ...current.filter((item) => item.id !== asset.id),
+      ]);
+      setTab('history');
+      onSelect(nextImage);
+      onClose();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '图片上传失败');
+    } finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="template-bound-image-backdrop" onClick={onClose}>
       <div className="template-bound-image-picker" onClick={(event) => event.stopPropagation()}>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="image/*"
+          className="template-bound-image-file-input"
+          onChange={(event) => { void handleUploadFile(event); }}
+        />
         <header className="template-bound-image-head">
           <div>
             <h3>选择绑定图片</h3>
@@ -254,7 +329,17 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
 
         <footer className="template-bound-image-footer">
           <span>{currentImage ? `当前绑定：${currentImage.label}` : '当前没有绑定图片'}</span>
-          <button type="button" onClick={onClose}>取消</button>
+          <div className="template-bound-image-footer-actions">
+            <button
+              type="button"
+              className="template-bound-image-upload"
+              onClick={handleUploadClick}
+              disabled={uploading || loading}
+            >
+              {uploading ? '上传中...' : '上传并绑定图片'}
+            </button>
+            <button type="button" onClick={onClose}>取消</button>
+          </div>
         </footer>
       </div>
     </div>

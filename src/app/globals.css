@@ -9295,6 +9295,34 @@ a {
   justify-content: space-between;
 }
 
+.template-bound-image-file-input {
+  display: none;
+}
+
+.template-bound-image-footer-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.template-bound-image-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.template-bound-image-footer .template-bound-image-upload {
+  background: #2563eb;
+  border-color: rgba(147, 197, 253, 0.58);
+  color: #f8fbff;
+}
+
+.template-bound-image-footer .template-bound-image-upload:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: rgba(191, 219, 254, 0.72);
+}
+
 .template-bound-image-head h3 {
   color: rgba(248, 250, 252, 0.96);
   margin: 0 0 4px;
