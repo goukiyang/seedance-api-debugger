@@ -6647,11 +6647,11 @@ HARD-GATE：
 - [x] 卡片行高度稳定，长标题/长正文不会撑爆列表。
 - [x] 启用、编辑、删除仍完整可达。
 - [x] 强制插入/仅供参考仍可在卡片上直接二选一。
-- [ ] `tsc`、`lint`、`build`、线上部署、公网静态资源命中和健康周期验证通过。
+- [x] `tsc`、`lint`、`build`、线上部署、公网静态资源命中和健康周期验证通过。
 
 ### Review
 
 - [x] 已把卡片列表改成编排摘要视图，完整内容回到三级弹窗。
 - [x] 已新增 `scripts/template-card-layout-smoke.ts`，防止四区布局、两行摘要和移动端操作区规则被后续改丢。
 - [x] 本地验证已通过：`npx tsx scripts/template-card-layout-smoke.ts`、`git diff --check`、`npx impeccable detect ...`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
-- [ ] 待完成线上部署、公网资源命中和健康周期复查。
+- [x] 已完成线上部署，生产 BUILD_ID `sBmW_xsIQ1G8W1uDWCCXk`；公网 CSS 命中 `scrollbar-gutter:stable`、`20px 76px minmax(260px,1fr) 92px`、`-webkit-line-clamp:2` 和移动端三列操作按钮规则。
