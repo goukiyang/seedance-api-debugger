@@ -81,7 +81,7 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
         if (!ok) throw new Error(data.error || data.message || '图集读取失败');
-        const list: AlbumItem[] = data.albums || [];
+        const list: AlbumItem[] = (data.albums || []).filter((album: AlbumItem) => album.image_count > 0);
         setAlbums(list);
         setSelectedAlbumId((current) => (list.some((album) => album.id === current) ? current : list[0]?.id || ''));
       })
@@ -191,12 +191,14 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
                     className={album.id === selectedAlbumId ? 'is-active' : ''}
                     onClick={() => setSelectedAlbumId(album.id)}
                   >
-                    <strong>{album.name}</strong>
+                    <span className="template-bound-image-album-title">
+                      <UserIdentityBadge user={album.owner} size="sm" avatarOnly />
+                      <strong>{album.name}</strong>
+                    </span>
                     <span>
                       {album.image_count} 张
                       {album.project?.name ? ` · ${album.project.name}` : ''}
                     </span>
-                    {!album.project?.name && album.owner && <UserIdentityBadge user={album.owner} size="sm" />}
                   </button>
                 ))}
               </div>

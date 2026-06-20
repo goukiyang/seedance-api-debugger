@@ -215,7 +215,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             <span>{album.image_count} 张图片</span>
             <span className="album-detail-owner">
               <span>创建者：</span>
-              <UserIdentityBadge user={album.owner} size="sm" />
+              <UserIdentityBadge user={album.owner} size="sm" avatarOnly />
             </span>
             <span>项目：{album.project?.name || '-'}</span>
             <span>范围：{album.visibility}</span>

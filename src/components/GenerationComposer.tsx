@@ -152,6 +152,7 @@ function inferSingleReferenceAlbum(assets: WorkspaceAssetItem[]): { id: string; 
 function dedupeReferenceAlbums(albums: ReferenceAlbumOption[]): ReferenceAlbumOption[] {
   const seen = new Set<string>();
   return albums.filter((album) => {
+    if (album.image_count <= 0) return false;
     const key = album.id;
     if (!key || seen.has(key)) return false;
     seen.add(key);

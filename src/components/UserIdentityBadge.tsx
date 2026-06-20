@@ -14,6 +14,7 @@ interface UserIdentityBadgeProps {
   size?: 'sm' | 'md';
   subtitle?: string | null;
   showEmail?: boolean;
+  avatarOnly?: boolean;
   className?: string;
 }
 
@@ -22,6 +23,7 @@ export default function UserIdentityBadge({
   size = 'md',
   subtitle,
   showEmail = false,
+  avatarOnly = false,
   className = '',
 }: UserIdentityBadgeProps) {
   const [avatarFailed, setAvatarFailed] = useState(false);
@@ -34,7 +36,10 @@ export default function UserIdentityBadge({
   }, [avatarUrl]);
 
   return (
-    <span className={`user-identity-badge user-identity-badge-${size} ${className}`.trim()}>
+    <span
+      className={`user-identity-badge user-identity-badge-${size} ${avatarOnly ? 'user-identity-badge-avatar-only' : ''} ${className}`.trim()}
+      aria-label={avatarOnly ? name : undefined}
+    >
       <span className="user-identity-avatar" style={{ backgroundColor: userAvatarColor(user) }} aria-hidden="true">
         {avatarUrl && !avatarFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -43,10 +48,12 @@ export default function UserIdentityBadge({
           <span>{displayUserInitials(user)}</span>
         )}
       </span>
-      <span className="user-identity-copy">
-        <span className="user-identity-name">{name}</span>
-        {secondary && <span className="user-identity-subtitle">{secondary}</span>}
-      </span>
+      {!avatarOnly && (
+        <span className="user-identity-copy">
+          <span className="user-identity-name">{name}</span>
+          {secondary && <span className="user-identity-subtitle">{secondary}</span>}
+        </span>
+      )}
     </span>
   );
 }

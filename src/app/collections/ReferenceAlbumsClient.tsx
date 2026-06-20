@@ -714,7 +714,7 @@ export default function ReferenceAlbumsClient() {
                   </div>
                   <div className="album-card-body">
                     <div className="album-card-title-row">
-                      <UserIdentityBadge user={album.owner} size="sm" />
+                      <UserIdentityBadge user={album.owner} size="sm" avatarOnly />
                       <div className="album-card-title">{album.name}</div>
                     </div>
                     <div className="album-card-meta">

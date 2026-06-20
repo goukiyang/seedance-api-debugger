@@ -612,6 +612,10 @@ a {
   vertical-align: middle;
 }
 
+.user-identity-badge-avatar-only {
+  gap: 0;
+}
+
 .user-identity-avatar {
   align-items: center;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -9287,6 +9291,24 @@ a {
   text-align: left;
 }
 
+.template-bound-image-album-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.template-bound-image-album-title .user-identity-badge {
+  flex: 0 0 auto;
+}
+
+.template-bound-image-album-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .template-bound-image-albums button.is-active,
 .template-bound-image-grid button.is-selected,
 .template-bound-image-history button.is-selected {
@@ -9296,6 +9318,21 @@ a {
 
 .template-bound-image-albums span {
   color: rgba(148, 163, 184, 0.84);
+  font-size: 12px;
+}
+
+.template-bound-image-album-title {
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 13px;
+}
+
+.template-bound-image-album-title strong {
+  color: inherit;
+  font-size: inherit;
+}
+
+.template-bound-image-album-title .user-identity-avatar span {
+  color: #f8fafc;
   font-size: 12px;
 }
 

@@ -52,6 +52,7 @@ export function ImageSetToolbar({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const currentCollection = collections.find((c) => c.id === currentCollectionId);
+  const visibleReferenceAlbums = referenceAlbums.filter((album) => album.image_count > 0);
 
   const handleSave = async () => {
     if (!dialogName.trim()) return;
@@ -104,10 +105,10 @@ export function ImageSetToolbar({
               <div className="composer-toolbar-dropdown">
                 <div className="composer-toolbar-dropdown-title">选择图集</div>
                 {onReferenceAlbumLoad ? (
-                  referenceAlbums.length === 0 ? (
+                  visibleReferenceAlbums.length === 0 ? (
                     <div className="composer-toolbar-dropdown-empty">暂无可用参考图集</div>
                   ) : (
-                    referenceAlbums.map((album) => (
+                    visibleReferenceAlbums.map((album) => (
                       <button
                         key={album.id}
                         type="button"
@@ -123,7 +124,7 @@ export function ImageSetToolbar({
                         }}
                       >
                         <span className="composer-toolbar-dropdown-item-main">
-                          <UserIdentityBadge user={album.owner} size="sm" />
+                          <UserIdentityBadge user={album.owner} size="sm" avatarOnly />
                           <span className="composer-toolbar-dropdown-item-name">{album.name}</span>
                         </span>
                         <span className="composer-toolbar-dropdown-item-count">{album.image_count || 0} 张</span>
