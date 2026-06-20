@@ -453,17 +453,15 @@ export function buildTemplateConfigUserPrompt(input: TemplateConfigGenerateInput
     name: input.template.name,
     description: input.template.description,
     version: input.template.version,
-    module_bindings: input.template.module_bindings,
     temporal: input.template.temporal,
     defaults: input.template.defaults,
-    active_rules: input.template.rules.filter((rule) => rule.status === 'active'),
-    active_assets: input.template.assets.filter((asset) => asset.status === 'active').map((asset) => ({
-      id: asset.id,
-      type: asset.asset_type,
-      label: asset.label,
-      reference_image_id: asset.reference_image_id,
-    })),
-    prompts: input.template.prompts.filter((prompt) => prompt.status === 'active'),
+    visible_context_cards: (input.template.module_bindings.context_cards || [])
+      .filter((card) => card.enabled && card.content.trim())
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((card) => ({
+        mode: card.mode,
+        content: card.content.trim(),
+      })),
   } : null;
 
   return JSON.stringify({

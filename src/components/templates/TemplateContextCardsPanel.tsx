@@ -60,20 +60,10 @@ function modePromptLabel(mode: TemplateContextCardMode) {
   return mode === 'force' ? '必须写入' : '参考理解';
 }
 
-function boundImageSourceLabel(source: TemplateContextCardBoundImage['source']) {
-  if (source === 'reference_album') return '参考图集';
-  if (source === 'upload_history') return '历史上传图';
-  if (source === 'template_asset') return '模板素材';
-  return '手动绑定';
-}
-
 function buildCardFinalInputText(card: TemplateContextCard, index: number) {
   return [
-    `${index}. ${modePromptLabel(card.mode)}：${card.title || '未命名卡片'}`,
-    card.content || '草稿未写内容',
-    card.bound_image
-      ? `绑定图片：${card.bound_image.label}（${boundImageSourceLabel(card.bound_image.source)}）`
-      : '',
+    `${index}. ${modePromptLabel(card.mode)}`,
+    card.content.trim() || '草稿未写内容',
   ].filter(Boolean).join('\n');
 }
 
@@ -272,7 +262,7 @@ export function TemplateContextCardsPanel({
             <span>实际进入最终输入</span>
             <strong>{editingCard.enabled ? `第 ${editingCardPosition} 位 · ${modePromptLabel(editingCard.mode)}` : '已停用，不进入最终输入'}</strong>
           </div>
-          <pre>{editingCard.enabled ? buildCardFinalInputText(editingCard, editingCardPosition) : '这张卡片已停用，标题、正文和绑定图片都不会进入最终提示词。'}</pre>
+          <pre>{editingCard.enabled ? buildCardFinalInputText(editingCard, editingCardPosition) : '这张卡片已停用，上下文正文不会进入最终提示词。卡片名和绑定图片只用于管理和素材绑定。'}</pre>
         </section>
         <div className="template-context-editor-switches" aria-label="卡片最终输入开关">
           <section>
@@ -319,7 +309,7 @@ export function TemplateContextCardsPanel({
           </section>
         </div>
         <label>
-          <span>卡片标题（会写入最终输入）</span>
+          <span>卡片名称（只用于管理，不进入最终提示词）</span>
           <input value={editingCard.title} onChange={(event) => updateCard(editingCard.id, { title: event.currentTarget.value })} />
         </label>
         <label>

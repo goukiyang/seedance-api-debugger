@@ -81,16 +81,21 @@ const prompt = createTemplatePlanResult(template, {
   modifiers: [],
 }).prompt;
 
-assert.match(prompt, /生成规则：禁止 FORBID（优先级 100）：禁止把角色写实化或替换成其他主体。/);
+assert.match(prompt, /强制插入卡片：保持品牌角色外观稳定。；禁止 FORBID（优先级 100）：禁止把角色写实化或替换成其他主体。/);
 assert.match(prompt, /必须 MUST（优先级 95）：必须保持品牌角色、标识和画面风格一致。/);
+assert.doesNotMatch(prompt, /生成规则：/);
 assert.doesNotMatch(prompt, /\n必须：必须保持品牌角色/);
 assert.doesNotMatch(prompt, /\n禁止：禁止把角色写实化/);
 assert.doesNotMatch(prompt, /隐藏参考不应影响最终提示词/);
 
 const panelSource = readFileSync('src/components/templates/TemplateContextCardsPanel.tsx', 'utf8');
 const drawerSource = readFileSync('src/components/templates/TemplateEditorDrawer.tsx', 'utf8');
+const contextCardsRouteSource = readFileSync('src/app/api/templates/[id]/context-cards/route.ts', 'utf8');
 
 assert.doesNotMatch(panelSource, /规则与非最终输入来源|本卡片规则与 LLM 参考|template-context-reference/);
 assert.doesNotMatch(drawerSource, /LLM 参考与设置|templateRules/);
+assert.doesNotMatch(drawerSource, /rules:\s*template\.rules\.map/);
+assert.doesNotMatch(contextCardsRouteSource, /rules:\s*existing\.rules/);
+assert.doesNotMatch(contextCardsRouteSource, /disabledPrompts|existing\.prompts/);
 
 console.log('template-rules-editable-text-smoke passed');

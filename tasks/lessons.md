@@ -720,3 +720,13 @@
 - 怎么改：弹窗内加入隐藏 file input 和 footer 上传按钮；调用既有 `/api/assets/upload`，上传成功后用返回的 `asset.id/originalUrl/thumbnailUrl/fileName` 写入卡片 `bound_image`，来源标记为 `upload_history`，并切到历史上传图语义。
 - 验证结果：以本轮上传入口 smoke、TypeScript、lint、build、部署和公网资源验收为准。
 - 可复用经验：选择窗口如果承担“绑定/引用”决策，就不能只展示已有项。遇到素材缺失时，应在同一窗口提供最短上传路径，并让上传结果直接进入当前业务对象。
+
+## 2026-06-21 - 模板卡片最终提示词只读可编辑正文
+
+- 问题/背景：用户重新澄清模板模块卡片关系：模块需求写进需求框，管理员调整“最终输入给 LLM 的上下文内容”，最后由这两个明示输入推导 LLM 生成草稿。
+- 诱因/根因：上一轮为了“公开所有来源”，把卡片标题、绑定图片标签、模板旧 rules、旧 prompt blocks、模板素材统计等都放进了生成链路或预览；虽然界面能看到一部分，但它们不是用户期望的上下文正文，仍会造成“没写进上下文框却影响结果”的感觉。
+- 当时思路：把文本来源收敛成一个硬规则：最终影响 LLM 的正文只来自卡片 `content` 和管理员需求 `intent`。标题、绑定图片、模板名、旧 rules/prompts/assets 只能做管理、排序、素材绑定或首次迁移，不得直接拼入最终提示词或模块草稿输入。
+- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/lib/templates/module-builder.ts`、`src/app/api/templates/module-builder/generate/route.ts`、`src/lib/agent-plans/template-plans.ts`、`src/app/api/templates/[id]/context-cards/route.ts`。
+- 怎么改：卡片最终输入预览只显示模式和正文；卡片名称改成管理字段；卡片 LLM 改写只传管理员需求和当前正文；Module Builder 用户消息移除隐藏模板 rules/assets/prompts；真实生成方案只拼卡片正文；保存卡片时清空旧 rules 且不保留无对应卡片的旧 prompt blocks。
+- 验证结果：以本轮可见输入 smoke、卡片最终上下文 smoke、规则文本 smoke、TypeScript、lint、build、部署和公网验收为准。
+- 可复用经验：当用户要求“所有影响最终提示词的内容都在输入框里”，不要把“界面某处可见”理解成合格。最终文本来源必须能从同一个可编辑正文框逐字追溯；管理标题、素材标签、历史结构化字段都不能偷跑进 LLM prompt。

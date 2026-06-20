@@ -29,17 +29,6 @@ const BLOCK_TO_ASSET_TYPE: Partial<Record<TemplatePromptBlockType, TemplateAsset
   style: 'style',
 };
 
-const BLOCK_TO_BUILDER_TYPE: Partial<Record<TemplatePromptBlockType, string>> = {
-  character: 'character',
-  logo: 'logo',
-  style: 'style',
-  camera: 'camera',
-  rules: 'rule',
-  asset_rule: 'asset_rule',
-  temporal: 'temporal',
-  prompt_format: 'prompt_format',
-};
-
 function cleanText(value: string | null | undefined) {
   return (value || '').replace(/\s+/g, ' ').trim();
 }
@@ -76,7 +65,6 @@ function assetsFromContextCards(cards: TemplateContextCard[], existingAssets: Se
       status: 'active',
       metadata: {
         context_card_id: card.id,
-        context_card_title: card.title,
         source: card.bound_image?.source || 'manual',
       },
     }));
@@ -176,39 +164,28 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
         status: asset.status,
         metadata: asset.metadata || {},
       })),
-      rules: template.rules.map((rule, index) => ({
-        rule_type: rule.rule_type,
-        content: rule.content,
-        priority: rule.priority,
-        sort_order: index + 1,
-        status: rule.status,
-      })),
+      rules: [],
       prompts: promptBlocksFromContextCards(contextCards),
     };
   }, [contextCards, description, name, status, template, version]);
 
   const rewriteContextCard = async (card: TemplateContextCard, userInput: string) => {
     if (!template) throw new Error('模板不存在');
-    const intent = [
-      `卡片标题：${card.title}`,
-      `当前内容：${card.content || '空'}`,
-      `管理员要求：${userInput}`,
-    ].filter(Boolean).join('\n');
+    const intent = userInput.trim();
 
     const response = await fetch('/api/templates/module-builder/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         intent,
-        module_type: BLOCK_TO_BUILDER_TYPE[card.legacy_block_type || 'global'] || 'auto',
+        module_type: 'auto',
         template_id: template.id,
-        current_template_context: {
-          name: template.name,
-          description: template.description,
-          context_card_title: card.title,
-          mode: card.mode,
-        },
-        one_time_rules: '只改写这张上下文卡片的最终内容，只返回可直接替换上方内容的文本，不要改变卡片模式。',
+        context_text: card.content,
+        session_rules: [
+          '只根据“模块需求”和“LLM 上下文内容”生成草稿。',
+          '不要加入模板名、卡片名、图片标签、旧规则、旧 Prompt 或其他未明示内容。',
+          '输出的 promptBlock 必须是可直接替换上下文内容框的文本。',
+        ].join('\n'),
       }),
     });
     const data = await response.json().catch(() => ({}));

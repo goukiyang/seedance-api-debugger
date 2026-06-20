@@ -74,9 +74,11 @@ const result = createTemplatePlanResult(template, {
 const prompt = result.prompt;
 
 assert.match(prompt, /强制插入卡片/);
-assert.match(prompt, /品牌角色：保持白色兔子 IP 的外观、材质、比例和活泼性格。；绑定图片：兔子参考图（参考图集）/);
+assert.match(prompt, /强制插入卡片：保持白色兔子 IP 的外观、材质、比例和活泼性格。/);
 assert.match(prompt, /参考卡片/);
-assert.match(prompt, /视觉风格：科技感干净，画面清楚，品牌色稳定。/);
+assert.match(prompt, /参考卡片：科技感干净，画面清楚，品牌色稳定。/);
+assert.doesNotMatch(prompt, /品牌角色：|视觉风格：/);
+assert.doesNotMatch(prompt, /绑定图片：|兔子参考图|参考图集/);
 assert.doesNotMatch(prompt, /brand_ip|brand_logo|tech_brand/);
 assert.doesNotMatch(prompt, /旧隐藏提示词/);
 assert.doesNotMatch(prompt, /保持品牌一致性/);

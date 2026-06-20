@@ -95,8 +95,8 @@ function blockTypeToAssetType(blockType: TemplatePromptBlockType | undefined): T
   return 'character';
 }
 
-function promptsFromCards(cards: TemplateContextCard[], existing: SerializedGenerationTemplate) {
-  const cardPrompts = cards
+function promptsFromCards(cards: TemplateContextCard[]) {
+  return cards
     .filter((card) => card.enabled && card.content.trim())
     .map((card, index) => ({
       block_type: card.legacy_block_type || 'global',
@@ -104,10 +104,6 @@ function promptsFromCards(cards: TemplateContextCard[], existing: SerializedGene
       sort_order: index + 1,
       status: 'active',
     }));
-  const disabledPrompts = existing.prompts
-    .filter((prompt) => !cards.some((card) => card.legacy_block_type === prompt.block_type))
-    .map((prompt, index) => ({ ...prompt, sort_order: cardPrompts.length + index + 1 }));
-  return [...cardPrompts, ...disabledPrompts];
 }
 
 function assetsFromCards(cards: TemplateContextCard[], existing: SerializedGenerationTemplate) {
@@ -124,7 +120,6 @@ function assetsFromCards(cards: TemplateContextCard[], existing: SerializedGener
       metadata: {
         source: card.bound_image?.source,
         context_card_id: card.id,
-        context_card_title: card.title,
         asset_id: card.bound_image?.asset_id,
       },
     }));
@@ -167,8 +162,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         temporal: existing.temporal,
         defaults: existing.defaults,
         assets: assetsFromCards(contextCards, existing),
-        rules: existing.rules,
-        prompts: promptsFromCards(contextCards, existing),
+        rules: [],
+        prompts: promptsFromCards(contextCards),
       }, user.id);
 
       await tx.templateAsset.deleteMany({ where: { template_id: params.id } });

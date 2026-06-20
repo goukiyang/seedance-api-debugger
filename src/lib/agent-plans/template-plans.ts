@@ -1,7 +1,6 @@
 import type {
   SerializedGenerationTemplate,
   SerializedTemplateRule,
-  TemplateContextCard,
   TemplateModuleKey,
   TemplateModuleUsage,
 } from '@/lib/templates/workbench';
@@ -194,25 +193,15 @@ function composePrompt(
   ].filter(Boolean).join('\n');
 }
 
-function boundImageSourceLabel(source: NonNullable<TemplateContextCard['bound_image']>['source']) {
-  if (source === 'reference_album') return '参考图集';
-  if (source === 'upload_history') return '历史上传图';
-  if (source === 'template_asset') return '模板素材';
-  return '手动绑定';
-}
-
 function buildContextCardLines(template: SerializedGenerationTemplate): Array<{ usage: TemplateModuleUsage; text: string }> {
   const cards = template.module_bindings.context_cards || [];
   return cards
     .filter((card) => card.enabled && card.content.trim())
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((card) => {
-      const imageText = card.bound_image
-        ? `；绑定图片：${card.bound_image.label}（${boundImageSourceLabel(card.bound_image.source)}）`
-        : '';
       return {
         usage: card.mode === 'reference' ? 'reference' as const : 'required' as const,
-        text: `${card.title}：${card.content.trim()}${imageText}`,
+        text: card.content.trim(),
       };
     });
 }

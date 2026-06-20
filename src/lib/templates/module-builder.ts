@@ -49,6 +49,7 @@ export type ModuleBuilderGenerateInput = {
   template: SerializedGenerationTemplate;
   moduleType: ModuleBuilderType;
   intent: string;
+  contextText?: string;
   sessionRules: string;
   contextAssetIds?: string[];
 };
@@ -136,30 +137,16 @@ export function buildModuleBuilderSystemPrompt(options?: {
 }
 
 export function buildModuleBuilderUserPrompt(input: ModuleBuilderGenerateInput) {
-  const templateContext = {
-    id: input.template.id,
-    name: input.template.name,
-    version: input.template.version,
-    module_bindings: input.template.module_bindings,
-    temporal: input.template.temporal,
-    active_rules: input.template.rules.filter((rule) => rule.status === 'active'),
-    active_assets: input.template.assets.filter((asset) => asset.status === 'active').map((asset) => ({
-      id: asset.id,
-      type: asset.asset_type,
-      label: asset.label,
-      reference_image_id: asset.reference_image_id,
-    })),
-    prompts: input.template.prompts.filter((prompt) => prompt.status === 'active'),
-  };
+  const contextText = input.contextText?.trim() || '';
 
   return JSON.stringify({
     task: 'generate_module_draft',
     selectedModuleType: input.moduleType,
     resolvedModuleType: resolveModuleBuilderType(input.intent, input.moduleType),
-    adminIntent: input.intent,
-    sessionRules: input.sessionRules,
+    moduleRequirement: input.intent,
+    llmContextContent: contextText,
+    generationRules: input.sessionRules,
     contextAssetIds: input.contextAssetIds || [],
-    templateContext,
     videoPromptFormatRequirements: VIDEO_PROMPT_FORMAT_REQUIREMENTS,
   }, null, 2);
 }

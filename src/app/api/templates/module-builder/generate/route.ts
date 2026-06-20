@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as Record<string, unknown>;
     const templateId = cleanString(body.template_id);
     const intent = cleanString(body.intent);
+    const contextText = cleanString(body.context_text);
     const moduleType = normalizeModuleType(body.module_type);
     const defaultRules = await getModuleBuilderRules();
     const sessionRules = cleanString(body.session_rules, defaultRules);
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Musk API 未启用或缺少 API Key，请先到 API 设置完成配置' }, { status: 503 });
     }
 
-    const input = { template, moduleType, intent, sessionRules, contextAssetIds };
+    const input = { template, moduleType, intent, contextText, sessionRules, contextAssetIds };
     const result = await generateModuleBuilderDraftWithLlm({ settings, input });
     const status = result.needsClarification
       ? 'draft'
@@ -103,6 +104,7 @@ export async function POST(request: NextRequest) {
           user_input_json: JSON.stringify({
             kind: 'module_builder',
             intent,
+            contextText,
             moduleType,
             sessionRules,
             contextAssetIds,
@@ -116,20 +118,21 @@ export async function POST(request: NextRequest) {
             validationErrors: result.validationErrors,
           }),
           selected_plan_key: result.draft?.moduleType || moduleType,
-          agent_prompt_snapshot: JSON.stringify({ moduleType, intent, sessionRules }).slice(0, 12000),
+          agent_prompt_snapshot: JSON.stringify({ moduleType, intent, contextText, sessionRules }).slice(0, 12000),
           final_prompt_snapshot: result.draft ? JSON.stringify(result.draft) : null,
           error_message: result.validationErrors.length > 0 ? result.validationErrors.join('；') : null,
           steps: {
             create: [
               {
                 step_key: 'module_builder_context',
-                title: '模板上下文',
+                title: '明示上下文输入',
                 input_json: JSON.stringify({ template_id: template.id }),
                 output_json: JSON.stringify({
-                  template_key: template.template_key,
-                  modules: template.module_bindings,
-                  activeRuleCount: template.rules.filter((rule) => rule.status === 'active').length,
-                  activeAssetCount: template.assets.filter((asset) => asset.status === 'active').length,
+                  template_id: template.id,
+                  visible_context_length: contextText.length,
+                  hidden_template_rules_used: false,
+                  hidden_template_prompts_used: false,
+                  hidden_template_assets_used: false,
                 }),
                 sort_order: 1,
               },
