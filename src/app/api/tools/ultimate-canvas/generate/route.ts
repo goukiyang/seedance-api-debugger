@@ -117,6 +117,8 @@ export async function POST(request: NextRequest) {
   const prompt = cleanString(body.prompt).slice(0, MAX_PROMPT_LENGTH);
   const title = cleanString(body.title).slice(0, 120);
   const sourceNodes = compactSourceNodes(body.sourceNodes);
+  const rawContextRules = cleanString(body.contextRules || body.context_rules).slice(0, 4000);
+  const contextRules = user.role === 'admin' ? rawContextRules : '';
   const requestedProjectId = cleanString(body.project_id || body.projectId) || null;
   const requestedVideoCardId = cleanString(body.video_card_id || body.videoCardId) || null;
   const canvasDocumentId = cleanString(body.canvas_document_id || body.canvasDocumentId) || null;
@@ -170,6 +172,12 @@ export async function POST(request: NextRequest) {
   const requestContext = {
     node: { nodeId, kind, mode, title },
     prompt,
+    contextRules: contextRules
+      ? {
+          source: 'admin_node_context_rules',
+          content: contextRules,
+        }
+      : null,
     sourceNodes,
   };
 
@@ -185,6 +193,7 @@ export async function POST(request: NextRequest) {
             '你是无线画布里的中文创作助手，负责把用户输入扩写成可继续生产图片、视频或脚本的清晰文本。',
             '必须只返回 JSON 对象，不要返回 Markdown。JSON 字段固定为：title、content、summary、nextActions。',
             'content 用中文输出，保留可执行的画面、角色、动作、情绪和结构；不要编造后台状态、点数或任务结果。',
+            '如果用户消息里的 contextRules 有内容，它是管理员设置的高优先级上下文规则，必须遵守；如与普通输入冲突，优先遵守 contextRules。',
           ].join('\n'),
         },
         {
@@ -209,6 +218,8 @@ export async function POST(request: NextRequest) {
         model: completion.model || settings.default_model,
         prompt_length: prompt.length,
         source_node_count: sourceNodes.length,
+        context_rules_applied: Boolean(contextRules),
+        context_rules_ignored: Boolean(rawContextRules && !contextRules),
       },
     });
 

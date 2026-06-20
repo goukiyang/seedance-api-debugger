@@ -658,10 +658,15 @@ class CanvasEngine {
                 </button>
                 <textarea class="node-input-textarea" placeholder="写下你想讲的故事、场景或角色设定。例如：一个来自未来的机器人，在城市屋顶看星星。"></textarea>
                 <div class="node-input-footer">
-                    <div class="model-selector">
-                        <span class="model-icon">🧠</span>
-                        <span>gpt5.4</span>
-                        <span class="chevron">▾</span>
+                    <div class="node-input-left">
+                        <div class="model-selector">
+                            <span class="model-icon">🧠</span>
+                            <span>gpt5.4</span>
+                            <span class="chevron">▾</span>
+                        </div>
+                        <button class="context-rules-button" data-context-rules-open title="编辑影响本节点 LLM 上下文的规则">
+                            <span>规则</span>
+                        </button>
                     </div>
                     <div class="input-footer-right">
                         <button class="footer-icon-btn" title="翻译">

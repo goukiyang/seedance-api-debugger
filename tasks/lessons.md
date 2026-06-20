@@ -680,3 +680,13 @@
 - 怎么改：删除规则折叠区和隐藏 LLM 参考入口；旧 active rules 序列化为“生成规则”卡片正文；有上下文卡片时生成方案不再读取 `template.rules`；LLM 改写只接收卡片标题、当前正文和管理员输入。
 - 验证结果：以本轮 smoke、TypeScript、lint、build、部署和公网验收为准。
 - 可复用经验：模板卡片编辑页只能有一个最终输入来源：可编辑正文。标题、图片、强制/参考和启停可以作为明确 UI 开关存在；规则内容不能再放在独立折叠区、旧数组、隐藏参考字段或任何管理员改不到的地方。
+
+## 2026-06-20 - 画布节点的 LLM 上下文规则要同时有 UI 和后端权限
+
+- 问题/背景：用户指出无线画布文本节点只有 LLM 生成入口，缺少能影响最终上下文的规则编辑能力，并要求暂时只给管理员开放。
+- 诱因/根因：无线画布节点只有 `prompt` 和来源节点会进入生成 payload，缺少节点级规则字段；如果只在前端隐藏按钮，普通用户仍可能伪造请求字段。
+- 当时思路：把规则作为文本节点数据的一部分保存到 `node.data.contextRules`，入口放在 LLM 模型旁边，保持画布流轻量；后端只在 `user.role === 'admin'` 时把规则写入 LLM 上下文。
+- 改动位置：`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/styles.css`、`src/app/api/tools/ultimate-canvas/generate/route.ts`、`scripts/ultimate-canvas-context-rules-smoke.ts`。
+- 怎么改：文本节点底部新增管理员可见“规则”按钮；弹窗编辑规则文本并触发画布自动保存；生成 payload 带 `contextRules`；后端将管理员规则作为高优先级上下文写入 LLM 请求，非管理员伪造字段会被忽略并记录。
+- 验证结果：以本轮 smoke、JS 语法检查、TypeScript、lint、build、部署和公网资源验收为准。
+- 可复用经验：任何“只给管理员开放”的上下文、规则、提示词能力都不能只靠前端隐藏。前端负责入口和体验，后端负责是否真正应用，日志要能区分已应用和被忽略。

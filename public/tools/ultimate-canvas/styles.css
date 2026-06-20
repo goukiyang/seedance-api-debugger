@@ -683,6 +683,14 @@ html, body {
 .node-input-footer {
     display: flex; align-items: center; justify-content: space-between;
 }
+
+.node-input-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
 .model-selector {
     display: flex; align-items: center; gap: 5px;
     font-size: 14px; color: var(--text-secondary); cursor: pointer;
@@ -693,6 +701,53 @@ html, body {
 .model-selector:hover { background: var(--bg-hover); }
 .model-selector .model-icon { color: var(--accent-blue); font-size: 16px; }
 .model-selector .chevron { color: var(--text-dim); font-size: 10px; }
+
+.context-rules-button {
+    align-items: center;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.24);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: none;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    gap: 6px;
+    height: 28px;
+    padding: 0 9px;
+    position: relative;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.is-canvas-admin .node-type-text .context-rules-button {
+    display: inline-flex;
+}
+
+.context-rules-button::before {
+    background: rgba(148, 163, 184, 0.72);
+    border-radius: 999px;
+    content: "";
+    height: 6px;
+    width: 6px;
+}
+
+.context-rules-button:hover {
+    background: rgba(59, 130, 246, 0.14);
+    border-color: rgba(96, 165, 250, 0.42);
+    color: var(--text-primary);
+}
+
+.context-rules-button.has-rules {
+    background: rgba(37, 99, 235, 0.18);
+    border-color: rgba(96, 165, 250, 0.58);
+    color: #dbeafe;
+}
+
+.context-rules-button.has-rules::before {
+    background: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.16);
+}
 
 .input-footer-right { display: flex; align-items: center; gap: 8px; }
 .footer-icon-btn {
@@ -1205,6 +1260,234 @@ body.prompt-modal-open {
     }
     .prompt-modal-side {
         display: none;
+    }
+}
+
+/* ===== LLM Context Rules Modal ===== */
+body.context-rules-modal-open {
+    overflow: hidden;
+}
+
+.context-rules-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-overlay) + 6);
+    background: rgba(8, 8, 8, 0.58);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+}
+
+.context-rules-modal {
+    width: min(820px, calc(100vw - 56px));
+    max-height: min(640px, calc(100vh - 56px));
+    border: 1px solid var(--border-node);
+    border-radius: var(--radius-lg);
+    background: var(--bg-node);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.context-rules-modal-header {
+    min-height: 58px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border-node);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.context-rules-modal-header span {
+    display: block;
+    color: var(--accent-teal);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.context-rules-modal-header strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 16px;
+    margin-top: 2px;
+}
+
+.context-rules-close {
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.context-rules-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.context-rules-modal-body {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 14px;
+    padding: 14px 18px;
+    overflow: auto;
+}
+
+.context-rules-editor {
+    min-width: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.context-rules-editor label {
+    border: 1px solid var(--border-node);
+    border-radius: var(--radius-md);
+    background: rgba(0, 0, 0, 0.18);
+    display: grid;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.context-rules-editor label span,
+.context-rules-preview span,
+.context-rules-side span {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.context-rules-editor label span {
+    padding: 12px 14px 0;
+}
+
+.context-rules-editor textarea {
+    width: 100%;
+    min-height: 220px;
+    border: none;
+    resize: vertical;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-family);
+    font-size: 14px;
+    line-height: 1.75;
+    padding: 0 14px 14px;
+}
+
+.context-rules-editor textarea::placeholder {
+    color: var(--text-tertiary);
+}
+
+.context-rules-preview {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.03);
+    display: grid;
+    gap: 6px;
+    padding: 11px 12px;
+}
+
+.context-rules-preview p {
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    line-height: 1.6;
+    margin: 0;
+    max-height: 88px;
+    overflow: auto;
+    white-space: pre-wrap;
+}
+
+.context-rules-side {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 10px;
+}
+
+.context-rules-side div {
+    border: 1px solid var(--border-node);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.03);
+    display: grid;
+    gap: 5px;
+    padding: 11px 12px;
+}
+
+.context-rules-side strong {
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.context-rules-modal-footer {
+    min-height: 58px;
+    border-top: 1px solid var(--border-node);
+    padding: 0 18px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.context-rules-secondary,
+.context-rules-primary {
+    height: 34px;
+    border-radius: var(--radius-md);
+    padding: 0 16px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.context-rules-secondary {
+    border: 1px solid var(--border-node);
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.context-rules-secondary:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.context-rules-primary {
+    border: 1px solid var(--text-primary);
+    background: var(--text-primary);
+    color: #111;
+    font-weight: 700;
+}
+
+@media (max-width: 760px) {
+    .context-rules-modal-overlay {
+        padding: 12px;
+    }
+    .context-rules-modal {
+        width: calc(100vw - 24px);
+        max-height: calc(100vh - 24px);
+    }
+    .context-rules-modal-body {
+        grid-template-columns: 1fr;
+    }
+    .context-rules-side {
+        display: none;
+    }
+    .context-rules-modal-footer {
+        flex-wrap: wrap;
+        justify-content: stretch;
+        padding: 10px 14px;
+    }
+    .context-rules-secondary,
+    .context-rules-primary {
+        flex: 1 1 120px;
     }
 }
 

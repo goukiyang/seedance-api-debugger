@@ -307,6 +307,33 @@
         return data?.context?.video_cards?.find(card => card.id === videoCardId) || null;
     }
 
+    function isCanvasAdmin() {
+        return canvasRuntime.bootstrap?.user?.role === 'admin';
+    }
+
+    function normalizeContextRules(value) {
+        return typeof value === 'string' ? value.trim().slice(0, 4000) : '';
+    }
+
+    function contextRulesForNode(node) {
+        return normalizeContextRules(node?.data?.contextRules || node?.data?.context_rules);
+    }
+
+    function refreshContextRulesButtons(root = document) {
+        document.body.classList.toggle('is-canvas-admin', isCanvasAdmin());
+        root.querySelectorAll?.('.canvas-node').forEach(nodeEl => {
+            const node = engine.nodes.get(nodeEl.dataset.nodeId);
+            const button = nodeEl.querySelector('[data-context-rules-open]');
+            if (!button) return;
+            const hasRules = Boolean(contextRulesForNode(node));
+            button.classList.toggle('has-rules', hasRules);
+            button.title = hasRules
+                ? '已设置上下文规则，点击编辑'
+                : '编辑影响本节点 LLM 上下文的规则';
+            button.setAttribute('aria-label', button.title);
+        });
+    }
+
     function formatCredits(value) {
         const number = Number(value);
         if (!Number.isFinite(number)) return '0';
@@ -336,6 +363,7 @@
         configureGenerationEndpoints();
         installGenerationAdapter();
         updateGenerationLabels(data);
+        refreshContextRulesButtons();
     }
 
     function renderContextControls(data) {
@@ -428,6 +456,7 @@
             canvasRuntime.bootstrap = null;
             canvasRuntime.bootstrapLoaded = false;
             canvasRuntime.bootstrapError = error;
+            refreshContextRulesButtons();
             showCanvasNotice(error?.message || '后台能力读取失败，请刷新后重试。', 'error');
         }
     }
@@ -474,10 +503,12 @@
         const prompt = collectNodePrompt(nodeEl, node.type);
         const label = nodeEl.querySelector('.node-label')?.textContent?.trim() || '';
         const tabText = activeTabText(nodeEl);
+        const contextRules = contextRulesForNode(node);
         node.data = {
             ...node.data,
             title: node.data?.title || label,
             prompt: prompt || node.data?.prompt || '',
+            contextRules,
             mode: node.type === 'video'
                 ? (generationModeMap[tabText] || node.data?.mode || 'text-to-video')
                 : node.type === 'image'
@@ -605,6 +636,7 @@
             canvasRuntime.documentRestoring = true;
             engine.restore(parsed.canvas || parsed);
             hydrateNodeViews();
+            refreshContextRulesButtons();
             canvasRuntime.saveState = 'saved';
             canvasRuntime.saveError = null;
         } catch (error) {
@@ -621,6 +653,7 @@
         const originalAddNode = engine.addNode.bind(engine);
         engine.addNode = (...args) => {
             const nodeId = originalAddNode(...args);
+            refreshContextRulesButtons();
             scheduleCanvasSave('node_add');
             return nodeId;
         };
@@ -867,6 +900,7 @@
         const mode = node.data?.generationIntent?.mode || node.data?.mode || (isVideo
             ? (generationModeMap[tabText] || 'text-to-video')
             : isImage ? 'text-to-image' : 'text');
+        const contextRules = contextRulesForNode(node);
 
         return {
             nodeId,
@@ -874,6 +908,8 @@
             mode,
             modeLabel: tabText || mode,
             prompt: prompt || node.data?.prompt || node.data?.description || '',
+            contextRules,
+            context_rules: contextRules,
             model: nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '',
             spec: nodeEl.querySelector('.video-res-info')?.textContent.trim() || '',
             sourceNodes: nodeSourcePayloads(nodeId),
@@ -1358,6 +1394,106 @@
         `;
     }
 
+    function contextRulesContextFor(nodeEl) {
+        const nodeId = nodeEl?.dataset.nodeId;
+        const node = engine.nodes.get(nodeId);
+        if (!node || node.type !== 'text') return null;
+        const label = nodeEl.querySelector('.node-label')?.textContent.trim()
+            || node.data?.title
+            || nodeId;
+        return {
+            node,
+            nodeId,
+            nodeEl,
+            label,
+            prompt: promptValueFor(nodeEl, node),
+            rules: contextRulesForNode(node)
+        };
+    }
+
+    function buildContextRulesModal(ctx) {
+        return `
+            <div class="context-rules-modal-overlay" data-context-rules-modal data-node-id="${escapeHtml(ctx.nodeId)}">
+                <section class="context-rules-modal" role="dialog" aria-modal="true" aria-label="LLM 上下文规则">
+                    <header class="context-rules-modal-header">
+                        <div>
+                            <span>LLM 上下文规则</span>
+                            <strong>${escapeHtml(ctx.label)}</strong>
+                        </div>
+                        <button class="context-rules-close" data-context-rules-close title="关闭">×</button>
+                    </header>
+                    <div class="context-rules-modal-body">
+                        <main class="context-rules-editor">
+                            <label>
+                                <span>影响本节点 LLM 的规则文本</span>
+                                <textarea data-context-rules-textarea placeholder="写清这条文本节点生成时必须遵守的上下文规则，例如品牌语气、禁用表达、输出格式、角色设定或必须保留的信息。">${escapeHtml(ctx.rules)}</textarea>
+                            </label>
+                            <div class="context-rules-preview">
+                                <span>当前用户输入</span>
+                                <p>${escapeHtml(ctx.prompt || '还没有输入内容')}</p>
+                            </div>
+                        </main>
+                        <aside class="context-rules-side">
+                            <div>
+                                <span>权限</span>
+                                <strong>仅管理员可编辑</strong>
+                            </div>
+                            <div>
+                                <span>保存</span>
+                                <strong>随画布自动保存</strong>
+                            </div>
+                            <div>
+                                <span>生效</span>
+                                <strong>生成时写入 LLM 上下文</strong>
+                            </div>
+                        </aside>
+                    </div>
+                    <footer class="context-rules-modal-footer">
+                        <button class="context-rules-secondary" data-context-rules-clear>清空规则</button>
+                        <button class="context-rules-secondary" data-context-rules-cancel>取消</button>
+                        <button class="context-rules-primary" data-context-rules-save>保存规则</button>
+                    </footer>
+                </section>
+            </div>
+        `;
+    }
+
+    function closeContextRulesModal() {
+        document.querySelector('[data-context-rules-modal]')?.remove();
+        document.body.classList.remove('context-rules-modal-open');
+    }
+
+    function openContextRulesModal(nodeEl) {
+        if (!isCanvasAdmin()) {
+            showCanvasNotice('只有管理员可以编辑 LLM 上下文规则。', 'warn');
+            return;
+        }
+        const ctx = contextRulesContextFor(nodeEl);
+        if (!ctx) return;
+        closeContextRulesModal();
+        document.body.insertAdjacentHTML('beforeend', buildContextRulesModal(ctx));
+        document.body.classList.add('context-rules-modal-open');
+        const textarea = document.querySelector('[data-context-rules-textarea]');
+        textarea?.focus();
+        textarea?.setSelectionRange?.(textarea.value.length, textarea.value.length);
+    }
+
+    function saveContextRulesModal(modal) {
+        const nodeId = modal.dataset.nodeId;
+        const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        const node = engine.nodes.get(nodeId);
+        if (!nodeEl || !node) return;
+        const rules = normalizeContextRules(modal.querySelector('[data-context-rules-textarea]')?.value || '');
+        node.data = {
+            ...node.data,
+            contextRules: rules,
+            contextRulesUpdatedAt: rules ? new Date().toISOString() : null
+        };
+        refreshContextRulesButtons();
+        scheduleCanvasSave('context_rules_change');
+        showCanvasNotice(rules ? '上下文规则已保存' : '上下文规则已清空', 'info');
+    }
+
     function closePromptModal() {
         document.querySelector('[data-prompt-modal]')?.remove();
         document.body.classList.remove('prompt-modal-open');
@@ -1414,6 +1550,35 @@
     }
 
     document.addEventListener('click', async (e) => {
+        const contextRulesButton = e.target.closest('[data-context-rules-open]');
+        if (contextRulesButton) {
+            const nodeEl = contextRulesButton.closest('.canvas-node');
+            if (nodeEl) {
+                e.preventDefault();
+                e.stopPropagation();
+                openContextRulesModal(nodeEl);
+                return;
+            }
+        }
+
+        const contextRulesModal = e.target.closest('[data-context-rules-modal]');
+        if (contextRulesModal) {
+            if (e.target.closest('[data-context-rules-close], [data-context-rules-cancel]')) {
+                closeContextRulesModal();
+                return;
+            }
+            if (e.target.closest('[data-context-rules-clear]')) {
+                const textarea = contextRulesModal.querySelector('[data-context-rules-textarea]');
+                if (textarea) textarea.value = '';
+                return;
+            }
+            if (e.target.closest('[data-context-rules-save]')) {
+                saveContextRulesModal(contextRulesModal);
+                closeContextRulesModal();
+                return;
+            }
+        }
+
         const promptExpand = e.target.closest('[data-prompt-expand], .prompt-card-expand');
         if (promptExpand) {
             const nodeEl = promptExpand.closest('.canvas-node');
