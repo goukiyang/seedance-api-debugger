@@ -16176,6 +16176,13 @@ a {
   font-size: 12px;
 }
 
+.asset-card-meta .asset-card-spec {
+  color: oklch(0.78 0.055 188);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
 .asset-card-compact {
   gap: 6px;
 }
@@ -16189,6 +16196,10 @@ a {
 }
 
 .asset-card-compact .asset-card-meta > span {
+  font-size: 11px;
+}
+
+.asset-card-compact .asset-card-meta .asset-card-spec {
   font-size: 11px;
 }
 

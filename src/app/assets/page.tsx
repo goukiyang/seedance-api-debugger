@@ -232,6 +232,20 @@ function formatDuration(seconds: number | null) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+function formatResolution(value: string | null) {
+  const normalized = value?.trim();
+  if (!normalized) return '';
+  return normalized.toUpperCase();
+}
+
+function formatAssetSpec(item: Pick<AssetLibraryItem, 'resolution' | 'duration' | 'ratio'>) {
+  return [
+    formatResolution(item.resolution),
+    item.duration ? `${item.duration}s` : null,
+    item.ratio,
+  ].filter(Boolean).join(' · ');
+}
+
 function formatDateTime(value: string | null) {
   if (!value) return '-';
   return new Date(value).toLocaleString('zh-CN', {
@@ -1099,6 +1113,7 @@ function AssetsPageContent() {
                 const selected = selectedSet.has(item.id);
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
+                const specText = formatAssetSpec(item);
                 return (
                   <button
                     key={item.id}
@@ -1136,6 +1151,7 @@ function AssetsPageContent() {
                     </span>
                     <span className="asset-card-meta">
                       <strong>{shortText(item.title, '未命名资产', 34)}</strong>
+                      {specText && <span className="asset-card-spec">{specText}</span>}
                       <span>{item.project?.name || '未归属项目'} · {formatDateTime(item.createdAt)}</span>
                       {isAdmin && item.owner && (
                         <UserIdentityBadge
@@ -1223,7 +1239,7 @@ function AssetsPageContent() {
             )}
             <div>
               <dt>规格</dt>
-              <dd>{[activeItem.resolution, activeItem.duration ? `${activeItem.duration}s` : null, activeItem.ratio].filter(Boolean).join(' · ') || '-'}</dd>
+              <dd>{formatAssetSpec(activeItem) || '-'}</dd>
             </div>
             <div>
               <dt>创建时间</dt>
