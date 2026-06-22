@@ -45,6 +45,10 @@ function canDeleteProject(project: ProjectItem): boolean {
   return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
 
+function canShowDeleteProjectAction(project: ProjectItem): boolean {
+  return project.type === 'team';
+}
+
 function projectDisplayName(project: ProjectItem): string {
   if (project.type === 'personal') return '个人空间';
   return project.name;
@@ -453,15 +457,17 @@ export default function ProjectsPage() {
                         归档为只读
                       </button>
                     )}
-                    <button
-                      className="btn btn-danger"
-                      type="button"
-                      onClick={() => requestProjectAction(project, 'delete')}
-                      disabled={!canDeleteProject(project)}
-                      title={canDeleteProject(project) ? '删除空协作项目' : '仅没有任务和图集的协作项目可删除'}
-                    >
-                      删除空项目
-                    </button>
+                    {canShowDeleteProjectAction(project) && (
+                      <button
+                        className="btn btn-danger"
+                        type="button"
+                        onClick={() => requestProjectAction(project, 'delete')}
+                        disabled={!canDeleteProject(project)}
+                        title={canDeleteProject(project) ? '删除空协作项目' : '仅没有任务和图集的协作项目可删除'}
+                      >
+                        删除空项目
+                      </button>
+                    )}
                     </>
                   )}
                 </div>
