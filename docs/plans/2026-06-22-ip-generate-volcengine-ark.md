@@ -700,3 +700,146 @@ Validation:
 - 参考图片、参考视频、参考音频、`asset://` 授权素材按官方限制校验。
 - `npm run lint` 和 `npm run build` 通过。
 - 至少完成一次 dry-run；有 API Key 和资源包/余额许可时完成一次真实小任务闭环。
+
+---
+
+## 13. 正式版执行清单
+
+这一节作为后续落地的任务入口。当前结论是：除了真实火山 API Key、模型 ID、资源包和素材权限未到位导致不能直接生成外，入口、独立页面、配置状态、素材授权、复用边界、后续 provider 接入路径都已经明确。
+
+### 13.1 当前阶段先做
+
+- [ ] Batch IP-0：锁定范围和停止条件。
+  - 只做入口、独立 `/generate/ip` 页面、火山配置状态、素材授权准备。
+  - 不调用火山创建任务接口。
+  - 不调用本地 `/api/tasks/create`。
+  - 不冻结点数，不写入真实 `VideoTask`。
+  - 不修改普通生成页的生成链路、扣点链路和旧 provider 行为。
+
+- [ ] Batch IP-1：入口归位。
+  - 在普通生成页顶部“我的项目”按钮旁增加 `IP生成` 入口。
+  - 把已有 `(IP) 生成页` 命名统一为 `IP生成`。
+  - 保持路由为 `/generate/ip`。
+  - 检查桌面和移动端入口不挤压、不异常换行。
+
+- [ ] Batch IP-2：独立页面拆分。
+  - `src/app/generate/ip/page.tsx` 不再直接导入普通 `../page`。
+  - 新建独立页面容器，例如 `src/components/ip-generate/IpGeneratePage.tsx`。
+  - 普通 `/generate` 停止继续扩展 `isIpSurface`。
+  - 可复用普通生成页的项目选择、提示词、参考素材和基础参数组件，但提交逻辑独立。
+
+- [ ] Batch IP-3：火山配置状态面板。
+  - 展示视频生成数据面 Base URL：`https://ark.cn-beijing.volces.com/api/v3`。
+  - 展示素材/管控面 Base URL：`https://ark.cn-beijing.volcengineapi.com/?Action=...&Version=2024-01-01`。
+  - 展示 API Key 是否已配置，只显示状态，不显示明文。
+  - 展示 Model ID / Endpoint ID 待配置状态。
+  - 展示资源包/余额人工检查项。
+  - 展示素材资产组、素材资产、真人素材授权的待配置状态。
+
+- [ ] Batch IP-4：素材授权和合规准备。
+  - 增加 IP 授权确认控件。
+  - 设计并记录 metadata 结构：`authorization_confirmed`、`source_type`、`source_note`、`asset_ids`、`confirmed_at`、`confirmed_by`。
+  - 设计 `asset://<asset ID>` 白名单或受控配置入口，当前阶段不开放用户随意输入。
+  - 页面提示素材资产上传限制：公共 URL、视频 2 到 15 秒、不超过 50 MB。
+  - 页面提示真人素材必须完成真人认证和授权。
+  - 页面提示提示词里用“图片1 / 视频1 / 音频1”引用素材，不直接写 Asset ID。
+
+- [ ] Batch IP-5：生成禁用和安全边界。
+  - API Key / Model ID 未配置时，生成按钮不可用。
+  - 不出现“会扣点”或类似误导状态。
+  - 不发火山请求。
+  - 不创建本地任务。
+  - 普通 `/generate` 仍能按原链路生成。
+
+- [ ] Batch IP-6：当前阶段验证。
+  - `npm run lint`。
+  - `npm run build`。
+  - 浏览器验证 `/generate`：`IP生成` 在“我的项目”旁，普通生成不受影响。
+  - 浏览器验证 `/generate/ip`：独立页面、配置状态、授权准备、生成禁用状态可见。
+  - 网络验证：`/generate/ip` 当前阶段不会请求 `/api/tasks/create`。
+
+### 13.2 API 到位后再开
+
+- [ ] Batch API-1：环境和配置。
+  - 配置 `VOLCENGINE_ARK_API_KEY`。
+  - 配置 `VOLCENGINE_ARK_BASE_URL`。
+  - 配置 `VOLCENGINE_ARK_VIDEO_MODEL` 或 Endpoint ID。
+  - 确认火山账号已开通 Seedance 2.0，且资源包/余额允许真实烟测。
+  - 继续保证前端不接触 API Key。
+
+- [ ] Batch API-2：Provider 基础层。
+  - 新增 `src/lib/provider/volcengine-ark.ts`。
+  - 新增或改造 provider router，例如 `src/lib/provider/video-provider.ts`。
+  - create/status/list/delete 都走官方接口。
+  - 错误格式统一转成本地 provider failure。
+  - 保存 request payload、raw create response、raw status response。
+
+- [ ] Batch API-3：创建任务链路。
+  - `/generate/ip` 提交时传 `provider=volcengine_ark`。
+  - 继续复用 `/api/tasks/create` 的登录、权限、点数冻结、项目预算和失败回滚。
+  - 缺火山配置时直接返回配置错误，不冻结点数。
+  - 成功创建后保存官方 task id 到 `provider_task_id`。
+
+- [ ] Batch API-4：官方 payload 映射。
+  - 文本生视频：`text`。
+  - 首帧：`text + image_url(first_frame)`。
+  - 首尾帧：`text + image_url(first_frame) + image_url(last_frame)`。
+  - 多图参考：1 到 9 张 `reference_image`。
+  - 视频参考：最多 3 个 `reference_video`。
+  - 音频参考：`reference_audio`，且必须搭配图片或视频。
+  - 授权素材：只允许受控 `asset://<asset ID>`。
+  - `resolution`、`ratio`、`duration`、`seed`、`watermark` 走官方顶层字段。
+  - `frames` 和 `duration` 互斥。
+
+- [ ] Batch API-5：状态、结算和本地化。
+  - finalizer 按 `task.provider` 查询火山官方状态。
+  - `queued/running/succeeded/failed/cancelled/expired` 映射到本地状态。
+  - 成功后写入 `result_video_url` 和 `result_last_frame_url`。
+  - 成功后立即触发现有本地化缓存，避免官方 URL 24 小时过期。
+  - 失败、取消、过期都按现有点数释放/结算规则处理。
+
+- [ ] Batch API-6：后台对账、取消和回调。
+  - 新增后台官方任务列表查询，用于最近 7 天对账。
+  - 新增或复用本地取消/删除入口，调用官方 DELETE。
+  - 排队任务取消释放冻结。
+  - 终态删除只删除外部任务或停止外部保留，不删除本地审计记录。
+  - 新增火山 callback route，真实回调不可测时保留轮询兜底。
+
+- [ ] Batch API-7：真实烟测。
+  - 先 dry-run：缺配置不冻结点数、不创建任务。
+  - 再真实小任务：必须确认 API Key、模型、资源包/余额和授权素材都已到位。
+  - 记录官方 task id、本地 task id、点数流水、任务状态、生成记录、视频 URL、本地化结果。
+  - 验证后台列表能对账到同一个官方 task id。
+
+### 13.3 不做事项
+
+- [ ] 不把火山 API Key 放到前端。
+- [ ] 不自动判断用户是否真的拥有 IP 法律授权。
+- [ ] 不绕过现有点数、项目预算、失败退款和任务记录链路。
+- [ ] 不把普通生成页默认切到火山 provider。
+- [ ] 不在 API 缺失时做假生成、假进度或假扣点。
+- [ ] 不直接上传含真人人脸参考图/视频，除非走官方认可的授权素材资产。
+- [ ] 不默认做数据库迁移，除非现有 JSON 字段无法承载授权审计。
+
+### 13.4 未解决问题
+
+- [ ] 火山控制台实际可用的 Model ID / Endpoint ID。
+- [ ] 火山 API Key 和生产环境变量配置位置。
+- [ ] 火山资源包/余额是否足够，以及是否允许真实烟测消耗。
+- [ ] 素材 `asset://<asset ID>` 由后台白名单管理，还是先用配置文件管理。
+- [ ] 官方 callback 真实 payload 需要 API 到位后 live 验证。
+- [ ] 参考视频/音频的服务端媒体探测能力是否已有可复用实现。
+- [ ] 官方 DELETE 对 `running` 状态的真实行为和本地点数策略需要再确认。
+
+### 13.5 Git 和上线计划
+
+- 当前规划阶段只修改本规划文档。
+- 实现阶段建议新建独立任务分支或在当前分支做聚焦提交，避免混入当前工作区已有大量未提交改动。
+- 提交分组建议：
+  - 提交 1：入口归位和命名统一。
+  - 提交 2：独立 `/generate/ip` 页面和配置面板。
+  - 提交 3：授权确认和素材 metadata。
+  - 提交 4：API 到位后的 `volcengine_ark` provider。
+  - 提交 5：provider router、finalizer、结果本地化。
+  - 提交 6：后台对账、取消/删除、回调和真实烟测修复。
+- 如果要上线到 `sd2.youdoodesign.com`，必须先确认实际生产工作树，再按 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网验证和健康守护周期复查闭环。
