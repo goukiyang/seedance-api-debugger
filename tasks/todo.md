@@ -5956,7 +5956,7 @@ Review - 2026-06-17 自建通知中心落地：
 - [x] 视频生成复用 `/api/tasks/create` 的冻结、实扣和失败释放，不另写画布扣点逻辑。
 - [x] 图片和文字如需扣点，先明确价格表、失败退款规则和后台展示位置；未明确前只记录 OperationLog。
 - [x] VideoTask、OperationLog、CreditLedger freeze 元数据记录来源 `ultimate_canvas`、`canvas_document_id` 和 `canvas_node_id`。
-- [ ] CostLedger 仍按任务成本维度记录；如需直接按 `ultimate_canvas` 筛选 CostLedger，需要后续扩展共享成本账本结构。
+- [x] CostLedger 仍按任务成本维度记录，但后台成本页已能通过关联 `VideoTask.source_metadata_json/source_label` 直接筛选 `ultimate_canvas` 成本总账；不新增重复账本结构。
 
 第六推进批次：本地化补偿和正式验收
 
@@ -6055,7 +6055,7 @@ Review - 2026-06-17 自建通知中心落地：
 - [x] 视频生成复用 `/api/tasks/create` 的冻结、实扣、失败释放。
 - [x] 图片和文字如果要扣点，先明确价格表和失败退款规则；未明确前只记录 OperationLog，不伪造扣点。
 - [x] VideoTask、OperationLog、CreditLedger freeze 元数据记录 `source=ultimate_canvas`、`canvas_document_id`、`canvas_node_id`。
-- [ ] CostLedger 直接按 `ultimate_canvas` 筛选需后续扩展共享成本账本结构。
+- [x] CostLedger 直接按 `ultimate_canvas` 筛选：`/admin/costs?source=ultimate_canvas` 通过关联任务来源过滤待处理队列和最近总账，并显示来源列。
 - [ ] 一次无线画布视频真实生成后在后台点数流水追到同一个 task_id，待用户授权付费测试；2026-06-19 本轮按要求不做真实视频生成调试，只完成非付费接入层验证。
 
 #### Batch 9：正式版验收和上线
@@ -6277,6 +6277,7 @@ Phase 0 落地记录：
 - [x] 成功扣除、失败返还、创建失败返还流水继承任务 `source_metadata_json`，避免只冻结流水可筛、终态流水不可筛。
 - [x] 非付费验证范围：JS 语法检查、TypeScript/lint/build、API 未登录保护、页面资源加载、生产构建和公网健康验证。
 - [ ] 未执行项：真实视频生成、Provider 任务轮询到终态、真实扣点/返还截图；原因是本轮用户明确要求“过程不会要做生成视频调试”。
+- 2026-06-22 补充推进：后台成本页新增来源筛选，支持 `/admin/costs?source=ultimate_canvas|web|codex_api`，待处理队列和最近总账能直接看无线画布成本来源；真实付费图片/视频生成验收仍需用户单独授权。
 
 涉及文件：
 
