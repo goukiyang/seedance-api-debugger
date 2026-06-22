@@ -23,6 +23,7 @@ interface Props {
   lockedResolution?: boolean;
   lockReason?: string;
   compactControls?: boolean;
+  modelLabel?: string;
 }
 
 export function ComposerActionBar({
@@ -43,6 +44,7 @@ export function ComposerActionBar({
   lockedResolution = false,
   lockReason = '此参数来自视频卡交付规格',
   compactControls = false,
+  modelLabel = 'Seedance 2.0',
 }: Props) {
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
@@ -55,7 +57,7 @@ export function ComposerActionBar({
         <ParamChip label="视频生成" active />
 
         {/* 模型标签 */}
-        <ParamChip label="Seedance 2.0" />
+        <ParamChip label={modelLabel} />
 
         {/* 模式选择 */}
         <div className="composer-chip-wrap">
@@ -175,7 +177,7 @@ export function ComposerActionBar({
         <details className="composer-advanced-params">
           <summary>
             <span>生成参数</span>
-            <strong>Seedance 2.0 · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}</strong>
+            <strong>{modelLabel} · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}</strong>
           </summary>
           {chips}
         </details>

@@ -387,6 +387,8 @@ interface Props {
   templateMode?: 'disabled' | 'workbench';
   initialTemplateId?: string | null;
   resultReturnTo?: string;
+  submitDisabledReason?: string | null;
+  modelLabel?: string;
 }
 
 export function GenerationComposer({
@@ -411,6 +413,8 @@ export function GenerationComposer({
   templateMode = 'disabled',
   initialTemplateId = null,
   resultReturnTo = '/generate',
+  submitDisabledReason = null,
+  modelLabel = 'Seedance 2.0',
 }: Props) {
   const workspace = useWorkspace();
   const templateEnabled = templateMode === 'workbench';
@@ -524,10 +528,13 @@ export function GenerationComposer({
       const isUploading = submitBlocker.includes('上传中');
       return { message: submitBlocker, tone: isUploading ? 'progress' as const : 'error' as const };
     }
+    if (submitDisabledReason) {
+      return { message: submitDisabledReason, tone: 'hint' as const };
+    }
     return { message: null, tone: 'ok' as const };
-  }, [isSubmitting, mentionNotice, prompt, submitBlocker]);
+  }, [isSubmitting, mentionNotice, prompt, submitBlocker, submitDisabledReason]);
 
-  const canPressSubmit = !isSubmitting && !(need1080pApproval && !resolutionApprovalConfirmed);
+  const canPressSubmit = !isSubmitting && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
 
   const estimatedPoints = useMemo(() => {
     return calculateEstimatedCostClient(resolution, duration);
@@ -785,7 +792,7 @@ export function GenerationComposer({
   // ============================================================================
 
   const handleSubmit = useCallback(async () => {
-    if (submitBlocker || isSubmitting) return;
+    if (submitBlocker || submitDisabledReason || isSubmitting) return;
     await onSubmit({
       prompt,
       generationMode,
@@ -809,6 +816,7 @@ export function GenerationComposer({
     });
   }, [
     submitBlocker,
+    submitDisabledReason,
     isSubmitting,
     onSubmit,
     prompt,
@@ -1669,6 +1677,7 @@ export function GenerationComposer({
           canSubmit={canPressSubmit}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
+          modelLabel={modelLabel}
           onModeChange={setGenerationMode}
           onRatioChange={setRatio}
           onDurationChange={setDuration}

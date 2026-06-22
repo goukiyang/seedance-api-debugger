@@ -1,5 +1,5 @@
-import IpGeneratePage from '@/components/ip-generate/IpGeneratePage';
+import { GeneratePageClient } from '@/components/generate/GeneratePageClient';
 
 export default function IpGenerateRoute() {
-  return <IpGeneratePage />;
+  return <GeneratePageClient surface="ip" />;
 }
