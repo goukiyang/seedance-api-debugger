@@ -42,12 +42,15 @@ export type DashboardKpis = {
   failed_tasks: number;
   running_tasks: number;
   pending_tasks: number;
+  total_duration_seconds: number;
   total_points: number;
   frozen_points: number;
   refund_points: number;
   official_costs: DashboardCurrencyTotal[];
   average_official_costs: DashboardCurrencyTotal[];
+  official_cost_per_second: DashboardCurrencyTotal[];
   official_cost_task_count: number;
+  official_cost_duration_seconds: number;
   pending_official_count: number;
   warning_count: number;
 };
@@ -66,8 +69,11 @@ export type DashboardBreakdownItem = {
   count: number;
   succeeded: number;
   failed: number;
+  duration_seconds: number;
   points: number;
   official_costs: DashboardCurrencyTotal[];
+  official_cost_per_second: DashboardCurrencyTotal[];
+  official_cost_duration_seconds: number;
   pending_official_count: number;
   href: string;
 };
@@ -278,6 +284,16 @@ function addCurrency(total: Map<string, number>, currency: string | null | undef
   total.set(key, (total.get(key) || 0) + amountMicros);
 }
 
+function addCurrencySeconds(total: Map<string, number>, currency: string | null | undefined, seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return;
+  const key = normalizedCurrency(currency);
+  total.set(key, (total.get(key) || 0) + seconds);
+}
+
+function sumMapValues(total: Map<string, number>) {
+  return Array.from(total.values()).reduce((sum, value) => sum + value, 0);
+}
+
 function currencyTotals(total: Map<string, number>, divisor = 1): DashboardCurrencyTotal[] {
   return Array.from(total.entries())
     .map(([currency, amountMicros]) => {
@@ -289,6 +305,22 @@ function currencyTotals(total: Map<string, number>, divisor = 1): DashboardCurre
       };
     })
     .filter((item) => item.amount_micros !== 0)
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+function currencyPerSecondTotals(costTotal: Map<string, number>, secondsTotal: Map<string, number>): DashboardCurrencyTotal[] {
+  return Array.from(costTotal.entries())
+    .map(([currency, amountMicros]) => {
+      const seconds = secondsTotal.get(currency) || 0;
+      if (seconds <= 0) return null;
+      const value = Math.round(amountMicros / seconds);
+      return {
+        currency,
+        amount_micros: value,
+        amount_minor: Math.round(value / 10_000),
+      };
+    })
+    .filter((item): item is DashboardCurrencyTotal => Boolean(item && item.amount_micros !== 0))
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
@@ -308,6 +340,10 @@ function costsHref(anchor?: string) {
 }
 
 type DashboardTrendAccumulator = DashboardTrendBucket & { currencyMap: Map<string, number> };
+type DashboardBreakdownAccumulator = DashboardBreakdownItem & {
+  currencyMap: Map<string, number>;
+  officialCostDurationMap: Map<string, number>;
+};
 
 function trendStart(date: Date, granularity: DashboardTrendGranularity) {
   if (granularity === 'week') return startOfWeek(date);
@@ -395,7 +431,7 @@ function createAccumulator(
   label: string,
   href: string,
   user?: DashboardBreakdownItem['user'],
-): DashboardBreakdownItem & { currencyMap: Map<string, number> } {
+): DashboardBreakdownAccumulator {
   return {
     key,
     label,
@@ -403,15 +439,19 @@ function createAccumulator(
     count: 0,
     succeeded: 0,
     failed: 0,
+    duration_seconds: 0,
     points: 0,
     official_costs: [],
+    official_cost_per_second: [],
+    official_cost_duration_seconds: 0,
     pending_official_count: 0,
     href,
     currencyMap: new Map<string, number>(),
+    officialCostDurationMap: new Map<string, number>(),
   };
 }
 
-function finalizeAccumulator(item: DashboardBreakdownItem & { currencyMap: Map<string, number> }): DashboardBreakdownItem {
+function finalizeAccumulator(item: DashboardBreakdownAccumulator): DashboardBreakdownItem {
   return {
     key: item.key,
     label: item.label,
@@ -419,8 +459,11 @@ function finalizeAccumulator(item: DashboardBreakdownItem & { currencyMap: Map<s
     count: item.count,
     succeeded: item.succeeded,
     failed: item.failed,
+    duration_seconds: item.duration_seconds,
     points: item.points,
     official_costs: currencyTotals(item.currencyMap),
+    official_cost_per_second: currencyPerSecondTotals(item.currencyMap, item.officialCostDurationMap),
+    official_cost_duration_seconds: sumMapValues(item.officialCostDurationMap),
     pending_official_count: item.pending_official_count,
     href: item.href,
   };
@@ -512,14 +555,17 @@ function pendingOfficialCost(task: DashboardTask) {
   return isTerminal(task) && !FINAL_PROVIDER_COST_STATUSES.has(task.provider_cost_status || '');
 }
 
-function addTaskToAccumulator(item: DashboardBreakdownItem & { currencyMap: Map<string, number> }, task: DashboardTask) {
+function addTaskToAccumulator(item: DashboardBreakdownAccumulator, task: DashboardTask) {
   const officialAmount = officialCostMicros(task);
+  const durationSeconds = Math.max(0, task.duration ?? 0);
   item.count += 1;
   item.succeeded += task.local_status === 'succeeded' ? 1 : 0;
   item.failed += task.local_status === 'failed' ? 1 : 0;
+  item.duration_seconds += durationSeconds;
   item.points += task.actual_cost ?? 0;
   item.pending_official_count += pendingOfficialCost(task) ? 1 : 0;
   addCurrency(item.currencyMap, task.provider_cost_currency, officialAmount);
+  if (officialAmount !== null) addCurrencySeconds(item.officialCostDurationMap, task.provider_cost_currency, durationSeconds);
 }
 
 function buildWarning(params: {
@@ -669,9 +715,10 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
 
   const tasks = allTasks.filter((task) => taskMatchesResolution(task, requestedResolution));
   const officialTotal = new Map<string, number>();
-  const resolutionMap = new Map<DashboardResolutionKey, DashboardBreakdownItem & { currencyMap: Map<string, number> }>();
-  const projectMap = new Map<string, DashboardBreakdownItem & { currencyMap: Map<string, number> }>();
-  const memberMap = new Map<string, DashboardBreakdownItem & { currencyMap: Map<string, number> }>();
+  const officialCostDurationTotal = new Map<string, number>();
+  const resolutionMap = new Map<DashboardResolutionKey, DashboardBreakdownAccumulator>();
+  const projectMap = new Map<string, DashboardBreakdownAccumulator>();
+  const memberMap = new Map<string, DashboardBreakdownAccumulator>();
 
   DASHBOARD_RESOLUTIONS.forEach((resolution) => {
     resolutionMap.set(resolution, createAccumulator(
@@ -682,6 +729,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
   });
 
   let totalPoints = 0;
+  let totalDurationSeconds = 0;
   let frozenPoints = 0;
   let refundPoints = 0;
   let officialTaskCount = 0;
@@ -693,6 +741,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
 
   tasks.forEach((task) => {
     const officialAmount = officialCostMicros(task);
+    const durationSeconds = Math.max(0, task.duration ?? 0);
     const resolution = normalizeDashboardResolution(task.resolution);
     const projectKey = task.project_id || 'unassigned';
     const projectLabel = task.project?.name || '未归属项目';
@@ -701,6 +750,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
     const actorLabel = actor?.name || actor?.username || '未知成员';
 
     totalPoints += task.actual_cost ?? 0;
+    totalDurationSeconds += durationSeconds;
     frozenPoints += task.frozen_cost ?? 0;
     refundPoints += task.refund_amount ?? 0;
     succeededTasks += task.local_status === 'succeeded' ? 1 : 0;
@@ -711,6 +761,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
     if (officialAmount !== null) {
       officialTaskCount += 1;
       addCurrency(officialTotal, task.provider_cost_currency, officialAmount);
+      addCurrencySeconds(officialCostDurationTotal, task.provider_cost_currency, durationSeconds);
     }
 
     addTaskToAccumulator(resolutionMap.get(resolution)!, task);
@@ -757,12 +808,15 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       failed_tasks: failedTasks,
       running_tasks: runningTasks,
       pending_tasks: pendingTasks,
+      total_duration_seconds: totalDurationSeconds,
       total_points: totalPoints,
       frozen_points: frozenPoints,
       refund_points: refundPoints,
       official_costs: currencyTotals(officialTotal),
       average_official_costs: currencyTotals(officialTotal, Math.max(officialTaskCount, 1)),
+      official_cost_per_second: currencyPerSecondTotals(officialTotal, officialCostDurationTotal),
       official_cost_task_count: officialTaskCount,
+      official_cost_duration_seconds: sumMapValues(officialCostDurationTotal),
       pending_official_count: pendingOfficialCount,
       warning_count: warnings.reduce((sum, warning) => sum + warning.count, 0),
     },
@@ -810,6 +864,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
     data_notes: [
       '统计周期按 VideoTask.created_at 计算。',
       '官方成本优先读取 provider_official_amount_micros，回退 provider_official_amount_minor；没有官方金额时显示“待官方确认”。',
+      '每秒均价按“同币种官方成本 / 同币种且有视频时长的秒数”计算；未确认官方金额或没有时长的任务不进入秒价分母。',
       'actual_cost 是平台点数扣除，不是美元；estimated_cost 是预估点数，不能代表真实扣费。',
       '清晰度只归一为 480p / 720p / 1080p / 未记录，模型只作为明细字段。',
       '无 project_id 的任务归入“未归属项目”，并计入异常预警。',

@@ -14248,7 +14248,7 @@ a {
 .admin-dashboard-kpi-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: 1.15fr repeat(3, 1fr);
+  grid-template-columns: minmax(180px, 1.15fr) repeat(4, minmax(160px, 1fr));
 }
 
 .admin-dashboard-kpi {
@@ -14274,6 +14274,7 @@ a {
   font-weight: 800;
   letter-spacing: 0;
   line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .admin-dashboard-kpi small {
@@ -14787,6 +14788,54 @@ a {
   white-space: nowrap;
 }
 
+.admin-dashboard-resolution-rate-list {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.admin-dashboard-resolution-rate-row {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(84px, 0.72fr) minmax(0, 1fr);
+  min-height: 58px;
+  padding: 10px 11px;
+  text-decoration: none;
+}
+
+.admin-dashboard-resolution-rate-row:hover {
+  background: #f8fbff;
+  border-color: #bfdbfe;
+}
+
+.admin-dashboard-resolution-rate-row span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-dashboard-resolution-rate-row strong {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.admin-dashboard-resolution-rate-row small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .admin-dashboard-balance {
   align-content: start;
   display: grid;
@@ -15039,6 +15088,7 @@ a {
   }
 
   .admin-dashboard-resolution-row,
+  .admin-dashboard-resolution-rate-row,
   .admin-dashboard-breakdown-row,
   .admin-dashboard-warning {
     grid-template-columns: 1fr;

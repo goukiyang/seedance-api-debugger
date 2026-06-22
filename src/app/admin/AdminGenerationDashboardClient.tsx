@@ -72,6 +72,11 @@ function formatCurrencyTotals(totals: DashboardCurrencyTotal[], fallback = '待�
   return totals.map((item) => formatAmountMicrosWithFixedCny(item.amount_micros, item.currency)).join(' · ');
 }
 
+function formatCurrencyRates(totals: DashboardCurrencyTotal[], fallback = '暂无可算均价') {
+  if (!totals.length) return fallback;
+  return totals.map((item) => `${formatAmountMicrosWithFixedCny(item.amount_micros, item.currency)}/秒`).join(' · ');
+}
+
 function formatInteger(value: number) {
   return integerFormatter.format(Math.round(value));
 }
@@ -519,6 +524,11 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           <strong>{formatCurrencyTotals(dashboard.kpis.average_official_costs)}</strong>
           <small>仅统计已有官方金额的任务</small>
         </div>
+        <div className="admin-dashboard-kpi">
+          <span>全量每秒均价</span>
+          <strong>{formatCurrencyRates(dashboard.kpis.official_cost_per_second)}</strong>
+          <small>按已确认官方成本的 {formatSeconds(dashboard.kpis.official_cost_duration_seconds)} 视频时长计算</small>
+        </div>
         <Link className="admin-dashboard-kpi is-warning" href="/admin/costs">
           <span>异常待办</span>
           <strong>{dashboard.kpis.warning_count}</strong>
@@ -586,7 +596,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           <div className="admin-dashboard-section-head">
             <div>
               <span className="admin-dashboard-kicker">主成本维度</span>
-              <h2>清晰度消耗占比</h2>
+              <h2>清晰度成本与秒价</h2>
             </div>
             <span>{dashboard.range.date_from} - {dashboard.range.date_to}</span>
           </div>
@@ -598,6 +608,20 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
               ariaLabel="清晰度消耗占比圆环图"
             />
             <DonutLegend items={dashboard.resolution_breakdown} />
+          </div>
+          <div className="admin-dashboard-resolution-rate-list">
+            {dashboard.resolution_breakdown.map((item) => (
+              <Link className="admin-dashboard-resolution-rate-row" href={item.href} key={`${item.key}-rate`}>
+                <span>
+                  <strong>{item.label}</strong>
+                  <small>{item.count} 条 · {formatSeconds(item.duration_seconds)}</small>
+                </span>
+                <span>
+                  <strong>{formatCurrencyRates(item.official_cost_per_second)}</strong>
+                  <small>每秒均价 · 样本 {formatSeconds(item.official_cost_duration_seconds)}</small>
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
 
