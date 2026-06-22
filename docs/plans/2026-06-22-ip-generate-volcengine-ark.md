@@ -2,9 +2,9 @@
 
 > **For Codex:** Use `${CODEX_HOME:-$HOME/.codex}/skills/executing-plans/SKILL.md` to implement this plan task-by-task.
 
-**Goal:** 把现有“普通生成页”的第二入口正式改造成 `(IP) 生成页`，让它调用火山引擎火山方舟官方视频生成 API，支持授权 IP / 授权肖像 / 授权品牌素材的视频生成；现有扣点、冻结、失败退款、任务记录、生成列表、缓存下载、项目预算、后台流水等链路保持不变。
+**Goal:** 新增一个独立的 `(IP) 生成页`，入口放在普通生成页顶部“我的项目”按钮旁边，按钮名为 `IP生成`；该页面面向授权 IP / 授权肖像 / 授权品牌素材的视频生成准备工作。当前火山 API Key 尚未拿到，真实 API 生成调用先不实现；现有普通生成页、扣点、冻结、失败退款、任务记录、生成列表、缓存下载、项目预算、后台流水等链路保持不变。
 
-**Architecture:** 继续复用当前 `VideoTask`、点数、生成记录和前端工作台，正式新增火山方舟 Provider、Provider 路由、授权素材记录、官方任务对账和取消/删除能力。`(IP) 生成页` 在提交时标记 `provider=volcengine_ark`，服务端按 provider 路由到火山方舟官方接口；普通生成页仍走原 provider。任务状态查询、结果落库、本地化缓存、扣点结算、后台流水和线上部署验收都进入同一正式闭环。
+**Architecture:** 当前阶段只做入口、独立页面骨架、火山配置清单、素材/授权/合规准备，不做真实生成 API 调用。`/generate/ip` 是新页面，不是在普通 `/generate` 页面里切一个模式；可以复用普通页的组件和项目选择能力，但代码边界上要拆出独立页面容器。API Key、模型 ID、资源包和授权素材配置齐备后，再接入火山方舟 Provider、任务状态、官方对账、取消/删除和回调闭环。
 
 **Tech Stack:** Next.js 14 App Router, React 18, TypeScript, Prisma, SQLite, existing credits and cost ledger, Volcengine Ark Video Generation API.
 
@@ -19,10 +19,26 @@
 - [查询视频生成任务列表](https://www.volcengine.com/docs/82379/1521675?lang=zh)
 - [取消或删除视频生成任务](https://www.volcengine.com/docs/82379/1521720?lang=zh)
 - [Seedance 2.0 系列模型资源包使用规则](https://www.volcengine.com/docs/82379/2191775?lang=zh)
+- [Base URL 及鉴权](https://www.volcengine.com/docs/82379/1298459?lang=zh)
+- [获取 API Key 并配置](https://www.volcengine.com/docs/82379/1541594?lang=zh)
+- [环境变量配置指南](https://www.volcengine.com/docs/82379/1820161?lang=zh)
+- [Doubao Seedance 2.0 系列教程](https://www.volcengine.com/docs/82379/2291680?lang=zh)
+- [Doubao Seedance 2.0 系列提示词指南](https://www.volcengine.com/docs/82379/2222480?lang=zh)
+- [视频生成教程](https://www.volcengine.com/docs/82379/2298881?lang=zh)
+- [管理私域素材库](https://www.volcengine.com/docs/82379/2333600?lang=zh)
+- [创建素材资产组合](https://www.volcengine.com/docs/82379/2318270?lang=zh)
+- [创建素材资产](https://www.volcengine.com/docs/82379/2318271?lang=zh)
+- [查询素材资产列表](https://www.volcengine.com/docs/82379/2318273?lang=zh)
+- [查询素材资产信息](https://www.volcengine.com/docs/82379/2318274?lang=zh)
+- [录入真人形象素材](https://www.volcengine.com/docs/82379/2315856?lang=zh)
+- [资产功能使用规则](https://www.volcengine.com/docs/82379/2275639?lang=zh)
 
 关键官方事实：
 
-- 鉴权：只支持 API Key，服务端请求头使用 `Authorization: Bearer $ARK_API_KEY`。
+- 当前项目还没有火山 API Key 和模型 ID，所以真实创建视频任务、查询任务、列表对账、删除任务先只规划，不在当前阶段实现真实调用。
+- 视频生成数据面 Base URL：`https://ark.cn-beijing.volces.com/api/v3`；视频生成任务接口支持 API Key 鉴权，服务端请求头使用 `Authorization: Bearer $ARK_API_KEY`。
+- 管控面和素材资产管理接口使用 `https://ark.cn-beijing.volcengineapi.com/?Action=...&Version=2024-01-01` 形态；官方素材接口示例使用 Access Key 签名鉴权，和视频生成数据面 API Key 不是同一个接入形态。
+- API Key 应配置在服务端环境变量中，不能硬编码；API Key 属于火山项目空间，可限制可鉴权的 Model ID / Endpoint ID 或可调用 IP，且不支持跨项目访问。
 - 创建任务：`POST https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`。
 - 查询单个任务：`GET https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{id}`。
 - 查询任务列表：`GET https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks?page_num=...&page_size=...&filter.status=...&filter.task_ids=...&filter.model=...`。
@@ -31,6 +47,12 @@
 - 只支持查询最近 7 天任务；生成视频 URL 和尾帧 URL 有效期为 24 小时，必须及时转存到现有本地化缓存链路。
 - Seedance 2.0 系列开通和调用要求依赖账号余额或资源包；资源包不足后会转为按量后付费。
 - Seedance 2.0 不支持直接上传含真人人脸的参考图/视频；可用平台认可的模型生成样片、预置虚拟人像、或授权真人素材资产。
+- 私域素材库支持素材资产组和素材资产：创建素材资产组前需要在控制台签署授权函；素材资产可为图片、视频、音频，上传素材资产 API 是异步接口。
+- 素材资产上传只支持公共可访问 URL，不支持 Base64；视频素材要求单个视频 2 到 15 秒、大小不超过 50 MB。
+- 素材资产状态需要通过查询接口确认；`GetAsset` 即使返回 HTTP 200，也可能在响应中给出 `Status=Failed` 和错误原因。
+- 素材资产接口返回的素材访问 URL 有效期为 12 小时；用于生成时应优先使用 `asset://<asset ID>`。
+- 真人形象素材需要授权人完成真人认证和授权；授权完成后，素材进入私域素材库并获得 asset ID。
+- 提示词中引用参考素材时应使用“图片1 / 视频1 / 音频1”等顺序标识；即使用 `asset://` 作为输入，也不要在提示词里直接用 Asset ID 代替素材描述。
 
 ---
 
@@ -38,8 +60,8 @@
 
 当前普通生成链路已经有一套可复用闭环：
 
-- 页面入口：`src/app/generate/page.tsx` 已承载普通生成工作台；`src/app/generate/ip/page.tsx` 已作为 `(IP) 生成页` 入口复用普通页面。
-- 导航入口：`src/lib/navigation.ts`、`src/components/ComposerTopbar.tsx` 已有生成页入口模式。
+- 页面入口：`src/app/generate/page.tsx` 已承载普通生成工作台；`src/app/generate/ip/page.tsx` 当前只是复用普通页面。用户已明确要求它必须是新的生成页面，不是在普通生成页里切一个模式。
+- 导航入口：`src/components/ComposerTopbar.tsx` 当前已有 `(IP) 生成页` 顶部导航项，但位置在“生成视频”后面；正式方案应改为普通生成页顶部“我的项目”按钮旁新增 `IP生成` 按钮。`src/lib/navigation.ts` 中也已有 `(IP) 生成页` 导航项，需要统一命名和入口策略。
 - 任务创建：`src/app/api/tasks/create/route.ts` 负责登录校验、参数校验、点数冻结、项目预算、创建 `VideoTask`、记录 `ProviderApiRequest`、调用 provider。
 - 点数估算：`src/app/api/tasks/estimate/route.ts` 和 `src/lib/pricing.ts` 已有估算逻辑。
 - Provider 适配：`src/lib/provider/jimeng.ts` 当前封装原有外部 create/status 调用，并且已经能构造 `text`、`image_url`、`video_url`、`audio_url`、`first_frame`、`last_frame`、`reference_image` 等内容结构。
@@ -47,7 +69,7 @@
 - 状态接口：`src/app/api/video/status/[id]/route.ts` 已通过 finalizer 统一返回任务状态。
 - 数据模型：`prisma/schema.prisma` 的 `VideoTask` 已有 `provider`、`model`、`provider_task_id`、`provider_status`、`provider_payload_json`、`provider_raw_create_response_json`、`provider_raw_status_response_json`、`result_video_url`、`result_last_frame_url`、`params_json`、`source_metadata_json`、`reference_video_urls`、`reference_audio_urls` 等字段，正式版优先复用这些字段，不先做数据库迁移。
 
-结论：这次不要复制整套后端任务系统，也不要只做一个最短可用版。正式版做法是“复用现有任务/扣点/缓存闭环，新增火山官方 Provider、授权素材闭环、官方列表对账、取消/删除和部署验收”。
+结论：这次先做独立页面入口和火山配置准备，不改普通生成页内部行为，不做真实 API 生成调用。API Key、模型 ID、资源包、素材资产权限到位后，再进入火山官方 Provider 和任务闭环实现。
 
 ---
 
@@ -55,30 +77,39 @@
 
 | 模块 | 处理方式 | 原因 |
 | --- | --- | --- |
-| `(IP) 生成页`入口、布局、提示词、比例、时长、分辨率、参考图交互 | 复用普通生成页，按 `isIpSurface` 做少量差异 | 用户要求“直接复制现有普通生成页基础上改”；这样最快，也能保持体验一致 |
+| `IP生成`入口 | 新增普通生成页顶部按钮，放在“我的项目”旁边 | 用户明确指定入口位置；这是最符合当前工作流的位置 |
+| `(IP) 生成页`页面容器 | 新建独立页面，不在普通生成页内部切模式 | 用户明确要求这是新的生成页面，不是改普通生成页 |
+| 页面基础控件 | 复用普通页可拆组件，但不要复用成同一个页面分支 | 可以复用项目选择、参考素材、提示词等能力，但页面边界要独立 |
 | 登录态、用户信息、项目/视频卡归属 | 复用 | 和 provider 无关 |
-| 点数估算、冻结、项目预算、失败退款、成功扣点 | 复用，不改规则 | 用户明确要求“扣点等等保持原有链路不变” |
+| 点数估算、冻结、项目预算、失败退款、成功扣点 | 当前阶段不触发；API 到位后复用 | 当前 API Key 未拿到，不应进入真实生成和扣点；以后接入时不改原规则 |
 | `VideoTask`、生成记录、后台最近生成、任务列表 | 复用 | 现有字段足够保存新 provider 的任务 ID、状态、结果 URL 和原始响应 |
 | 本地化缓存、缩略图、尾帧、结果转存 | 复用，但必须接入新 provider 的结果字段 | 官方视频 URL 只有 24 小时有效，现有本地化链路正好需要继续用 |
 | 原 `src/lib/provider/jimeng.ts` | 保留给普通生成页 | 避免影响旧页面 |
-| 火山方舟官方 API 调用 | 新增 `volcengine_ark` provider | 原 provider endpoint 和官方 API 完全不同 |
-| provider 路由 | 新增或抽象 | create/status/list/delete 要按任务 provider 切换 |
+| 火山方舟官方 API 调用 | 后置 | API Key、模型 ID、资源包/权限未到位前不实现真实调用 |
+| provider 路由 | 后置 | 生成 API 接入时再做 create/status/list/delete 路由 |
 | IP 授权确认与素材来源记录 | 新增 | `(IP) 生成页`的核心差异是授权素材使用责任和可追溯 |
-| 火山官方任务列表、取消/删除接口 | 正式版纳入后台诊断和任务操作闭环 | 用户要求“所有接口”，不能只停在 create/status |
+| 火山官方任务列表、取消/删除接口 | 后置 | 当前阶段记录方案；凭据到位后接入 |
 | Seedance 2.0 资源包/余额检查 | 正式版纳入配置检查和上线验收 | 这是火山账号侧前置条件，不能用现有点数系统替代 |
 
 ---
 
 ## 4. 官方接口清单与项目映射
 
-| 官方接口 | 项目内入口 | 正式版定位 | 说明 |
+| 官方接口/配置 | 项目内入口 | 当前定位 | 说明 |
 | --- | --- | --- | --- |
-| `POST /api/v3/contents/generations/tasks` 创建视频任务 | 复用 `POST /api/tasks/create`，内部按 `provider=volcengine_ark` 路由 | 必做 | 创建成功后保存官方 `id` 到 `VideoTask.provider_task_id` |
-| `GET /api/v3/contents/generations/tasks/{id}` 查询单个任务 | 复用 `GET /api/video/status/[id]`，内部 finalizer 按 provider 路由 | 必做 | 把 `queued/running/succeeded/failed/cancelled/expired` 映射到本地任务状态 |
-| `GET /api/v3/contents/generations/tasks` 查询任务列表 | 新增后台诊断 API 和 provider 函数 | 必做 | 用于火山侧任务对账、异常补偿、批量排查，覆盖最近 7 天任务 |
-| `DELETE /api/v3/contents/generations/tasks/{id}` 取消或删除任务 | 新增本地取消/删除 API，内部按 provider 调用官方 DELETE | 必做 | 排队中任务取消，本地释放冻结点数；终态任务只删除/隐藏外部记录，不破坏本地审计 |
-| 资源包使用规则 | 不做 app API；做配置检查、后台提示和上线验收项 | 必做 | 火山账号资源包和本系统点数是两层账，不能混为一个系统 |
-| `callback_url` 回调 | 新增本项目回调接收入口，同时保留轮询兜底 | 必做 | 官方创建接口支持回调；正式版要能接收回调，但不能依赖回调作为唯一状态来源 |
+| `IP生成`入口按钮 | 普通生成页顶部“我的项目”旁 | 当前必做 | 按用户指定位置新增入口，跳转 `/generate/ip` |
+| 独立 `/generate/ip` 页面 | 新页面容器 | 当前必做 | 不再把普通 `/generate` 当作同一个页面分支来改 |
+| Base URL / 鉴权配置 | 后台配置检查或只读提示 | 当前必做 | 记录数据面和管控面的不同 Base URL、鉴权方式、环境变量要求 |
+| API Key 配置 | 服务端环境变量和后台只读状态 | 当前只规划/检查 | API Key 未拿到，不实现真实生成调用 |
+| Model ID / Endpoint ID | 后台只读状态 | 当前只规划/检查 | 需要火山控制台确认 |
+| 资源包/余额 | 上线检查项 | 当前只规划/人工确认 | 官方文档没有给本应用可直接查余额的生成 API |
+| 私域素材库/Asset Group | 授权素材配置清单 | 当前规划 | 涉及管控面接口和签名鉴权，凭据到位后再接 |
+| `asset://<asset ID>` | 授权素材白名单 | 当前规划 | 当前先定义管理方式，不做真实素材 API 调用 |
+| `POST /api/v3/contents/generations/tasks` 创建视频任务 | 未来复用 `POST /api/tasks/create` 并按 `provider=volcengine_ark` 路由 | API 到位后做 | 当前阶段忽略真实生成调用 |
+| `GET /api/v3/contents/generations/tasks/{id}` 查询单个任务 | 未来复用 `GET /api/video/status/[id]` | API 到位后做 | 当前阶段不实现 |
+| `GET /api/v3/contents/generations/tasks` 查询任务列表 | 未来后台诊断 API | API 到位后做 | 当前阶段只记录接口 |
+| `DELETE /api/v3/contents/generations/tasks/{id}` 取消或删除任务 | 未来本地取消/删除 API | API 到位后做 | 当前阶段只记录状态和点数策略 |
+| `callback_url` 回调 | 未来 provider callback route | API 到位后做 | 当前不搭公网回调 |
 
 ---
 
@@ -130,12 +161,22 @@
 
 ---
 
-## 6. `(IP) 生成页`正式版功能清单
+## 6. `(IP) 生成页`功能清单
 
-### 6.1 正式版必须有
+### 6.1 当前阶段必须有
 
-- 页面标题和导航统一为 `(IP) 生成页`。
-- 继续复用普通生成页的主要布局、提示词输入、参考图选择、比例、时长、分辨率、声音、尾帧、seed、水印等控件。
+- 普通生成页顶部“我的项目”按钮旁新增 `IP生成` 按钮，点击进入 `/generate/ip`。
+- `IP生成`入口在顶部导航和普通生成页头部操作区保持一致，不再使用 `(IP) 生成页` 作为按钮名。
+- `/generate/ip` 是独立新页面，不在普通 `/generate` 页面里用 `isIpSurface` 改文案。
+- 独立页面可以复用普通生成页的项目选择、参考素材、提示词、基础参数组件，但页面容器和提交逻辑独立。
+- 当前 API Key 未到位，提交生成按钮不能触发火山真实生成，也不能冻结点数。
+- 当前页面应展示“火山配置未完成 / 生成暂未开启”的明确状态。
+- 当前可以先整理配置面板：Base URL、API Key 状态、Model ID / Endpoint ID、资源包/余额人工检查、素材库/授权状态。
+- IP 授权确认和素材来源记录可以先做本地 metadata 设计，不发火山请求。
+- 普通生成页继续走旧 provider，不被新页面影响。
+
+### 6.2 API Key / 模型 / 资源包到位后再做
+
 - 页面提交时传 `provider=volcengine_ark`。
 - 服务端创建任务时保留原有点数冻结、项目预算、`VideoTask` 创建、`ProviderApiRequest` 记录和失败回滚。
 - 新 provider 用火山官方 `POST /contents/generations/tasks` 创建任务。
@@ -144,8 +185,7 @@
 - 成功后立即进入现有本地化缓存，避免 24 小时 URL 过期。
 - IP 授权确认：提交前必须让用户确认参考素材已授权，确认结果写入 `params_json` 或现有 metadata 字段。
 - 素材来源记录：至少记录素材类型、来源说明、授权确认时间、提交用户。
-- 缺少火山 API Key 或模型配置时，前端/服务端给出明确错误，不冻结或及时释放点数。
-- 普通生成页继续走旧 provider，不被新逻辑影响。
+- 缺少火山 API Key 或模型配置时，前端/服务端给出明确错误，不冻结点数。
 - 参考视频输入：支持公网 URL、已上传资产 URL、或火山 `asset://`。
 - 参考音频输入：支持公网 URL、base64、或火山 `asset://`，并校验必须搭配图或视频。
 - 火山任务列表查询：做后台诊断/对账入口，支持按状态、task id、model 查最近 7 天。
@@ -159,7 +199,7 @@
 - 取消闭环：排队任务取消后本地状态、冻结点数、操作日志、ProviderApiRequest 状态全部一致。
 - 删除闭环：终态任务删除外部记录时，本地保留审计和已本地化结果，不能让历史生成记录消失。
 
-### 6.2 正式版仍不做
+### 6.3 仍不做
 
 - 不改现有点数价格公式。
 - 不新增数据库迁移，除非实现时发现现有 `params_json`、`source_metadata_json`、资产 metadata 无法承载授权素材审计。
@@ -173,26 +213,27 @@
 
 | 功能/模块 | 正式版是否做 | 处理方式 | 解决方案状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| `(IP) 生成页`入口和导航 | 做 | 用当前 | 已有方案 | `src/app/generate/ip/page.tsx` 复用普通生成页，导航继续用现有入口 |
+| `IP生成`入口按钮 | 当前做 | 改造当前入口 | 已有方案 | 放在普通生成页顶部“我的项目”按钮旁边，按钮名固定为 `IP生成` |
 | 普通生成页原链路 | 做保护 | 用当前 | 已有方案 | 不切 provider，不改扣点，不改 UI 主行为 |
-| 页面基础布局、提示词、参考图、比例、时长、分辨率、seed、水印、声音、尾帧 | 做 | 用当前，按 IP 模式补少量差异 | 已有方案 | 复用 `src/app/generate/page.tsx` 和 `GenerationComposer` |
-| IP 授权确认 | 做 | 新增 | 已有方案 | 提交前强制确认，写入 `params_json` 或 `source_metadata_json` |
-| 授权素材来源记录 | 做 | 新增 | 已有方案 | 记录素材类型、来源说明、授权确认时间、提交用户、关联资产 |
-| 火山 `asset://<ASSET_ID>` 授权素材 | 做 | 新增 | 需要配置/白名单方案 | 不允许普通用户任意输入；先做后台白名单或受控配置 |
-| 创建视频任务 | 做 | 当前 `/api/tasks/create` + 新 provider | 已有方案 | 保留登录、校验、点数冻结、任务创建和 ProviderApiRequest |
-| 火山官方 create API | 做 | 新增 | 已有方案 | `POST /api/v3/contents/generations/tasks` |
-| 查询单个任务 | 做 | 当前 status API + 修改 finalizer | 已有方案 | `GET /api/v3/contents/generations/tasks/{id}` |
-| 火山官方任务列表 | 做 | 新增后台诊断 API | 已有方案 | `GET /api/v3/contents/generations/tasks`，用于最近 7 天对账 |
-| 火山官方取消/删除 | 做 | 新增本地取消/删除 API | 需要细化状态规则 | `DELETE /api/v3/contents/generations/tasks/{id}`；排队任务释放冻结，终态删除保留本地审计 |
-| 官方回调接收 | 做 | 新增 | 需要 live 验证回调格式 | 创建任务传 `callback_url`，回调只加速状态更新，轮询兜底 |
-| Provider 适配 | 做 | 新增 | 已有方案 | 新建 `src/lib/provider/volcengine-ark.ts`，旧 `jimeng.ts` 保留 |
-| Provider 路由 | 做 | 新增/重写调用点 | 已有方案 | `tasks/create` 和 `task-finalizer` 不能再直接绑定旧 provider |
+| 独立 `/generate/ip` 页面 | 当前做 | 新增页面容器，可复用组件 | 已有方案 | 不再把普通 `/generate` 页面当同一个页面分支改 |
+| 页面基础布局、提示词、参考图、比例、时长、分辨率、seed、水印、声音、尾帧 | 当前做页面准备 | 复用组件，不触发生成 | 已有方案 | 从普通页抽可复用组件，避免两页互相污染 |
+| IP 授权确认 | 当前做 | 新增 | 已有方案 | 提交前强制确认，写入 `params_json` 或 `source_metadata_json`；当前不发火山请求 |
+| 授权素材来源记录 | 当前做 | 新增 | 已有方案 | 记录素材类型、来源说明、授权确认时间、提交用户、关联资产 |
+| 火山 `asset://<ASSET_ID>` 授权素材 | 当前做配置设计，API 后置 | 新增 | 需要配置/白名单方案 | 不允许普通用户任意输入；先做后台白名单或受控配置 |
+| 创建视频任务 | API 到位后做 | 当前 `/api/tasks/create` + 新 provider | 已有方案 | 当前 API Key 未到位，先不冻结点数、不发外部请求 |
+| 火山官方 create API | API 到位后做 | 新增 | 已有方案 | `POST /api/v3/contents/generations/tasks` |
+| 查询单个任务 | API 到位后做 | 当前 status API + 修改 finalizer | 已有方案 | `GET /api/v3/contents/generations/tasks/{id}` |
+| 火山官方任务列表 | API 到位后做 | 新增后台诊断 API | 已有方案 | `GET /api/v3/contents/generations/tasks`，用于最近 7 天对账 |
+| 火山官方取消/删除 | API 到位后做 | 新增本地取消/删除 API | 需要细化状态规则 | `DELETE /api/v3/contents/generations/tasks/{id}`；排队任务释放冻结，终态删除保留本地审计 |
+| 官方回调接收 | API 到位后做 | 新增 | 需要 live 验证回调格式 | 创建任务传 `callback_url`，回调只加速状态更新，轮询兜底 |
+| Provider 适配 | API 到位后做 | 新增 | 已有方案 | 新建 `src/lib/provider/volcengine-ark.ts`，旧 `jimeng.ts` 保留 |
+| Provider 路由 | API 到位后做 | 新增/重写调用点 | 已有方案 | `tasks/create` 和 `task-finalizer` 不能再直接绑定旧 provider |
 | 扣点估算 | 做保护 | 用当前 | 已有方案 | `src/lib/pricing.ts` 不改公式 |
-| 点数冻结、失败释放、成功扣点 | 做保护 | 用当前 | 已有方案 | `allocateTaskCredits`、`settleTaskCredits` 保持原事务链路 |
+| 点数冻结、失败释放、成功扣点 | 当前不触发，API 到位后复用 | 用当前 | 已有方案 | 当前无 API Key 时不能冻结点数；以后 `allocateTaskCredits`、`settleTaskCredits` 保持原事务链路 |
 | 项目预算 | 做保护 | 用当前 | 已有方案 | 不绕过项目预算账户和 ledger |
-| ProviderApiRequest 记录 | 做 | 用当前，补 endpoint 名称 | 已有方案 | endpoint 从旧 `seedance.createVideoTask` 扩展出 `volcengine_ark.createVideoTask` 等 |
-| 结果落库 | 做 | 用当前字段 | 已有方案 | 写 `result_video_url`、`result_last_frame_url`、raw response、usage |
-| 本地化缓存 | 做保护 | 用当前 | 已有方案 | 官方 URL 24 小时有效，必须沿用 `startTaskLocalization` |
+| ProviderApiRequest 记录 | API 到位后做 | 用当前，补 endpoint 名称 | 已有方案 | endpoint 从旧 `seedance.createVideoTask` 扩展出 `volcengine_ark.createVideoTask` 等 |
+| 结果落库 | API 到位后做 | 用当前字段 | 已有方案 | 写 `result_video_url`、`result_last_frame_url`、raw response、usage |
+| 本地化缓存 | API 到位后做保护 | 用当前 | 已有方案 | 官方 URL 24 小时有效，必须沿用 `startTaskLocalization` |
 | 缩略图/生成记录列表 | 做保护 | 用当前 | 已有方案 | 成功结果进入现有任务列表和后台最近生成 |
 | 参考图片 | 做 | 用当前 + 官方 role 映射 | 已有方案 | 首帧、首尾帧、多图参考分别映射 `first_frame`、`last_frame`、`reference_image` |
 | 参考视频 | 做 | 扩展当前字段和 UI | 已有方案但需补校验 | 当前 route 已有 `reference_video_urls`，前端入口和格式/时长/大小校验要补 |
@@ -212,8 +253,10 @@
 
 ### 7.1 当前可直接复用
 
-- `src/app/generate/page.tsx`：普通生成页主体和 IP 模式判断。
-- `src/app/generate/ip/page.tsx`：IP 页面入口。
+- `src/app/generate/page.tsx`：普通生成页主体和“我的项目”附近入口位置参考；不继续用它承载 IP 页面逻辑。
+- `src/app/generate/ip/page.tsx`：IP 页面路由入口，需要改成独立页面容器。
+- `src/components/ComposerTopbar.tsx`：顶部导航入口位置，需要把现有 `(IP) 生成页` 统一为 `IP生成` 并放到“我的项目”旁边。
+- `src/lib/navigation.ts`：全局导航入口配置，需要统一按钮名和位置策略。
 - `src/app/api/tasks/create/route.ts`：登录、校验、点数冻结、任务创建、ProviderApiRequest、失败回滚主链路。
 - `src/app/api/video/status/[id]/route.ts`：任务状态入口。
 - `src/lib/video/task-finalizer.ts`：状态终结、结果写回、扣点结算、本地化触发框架。
@@ -225,22 +268,28 @@
 
 ### 7.2 必须新增
 
-- `src/lib/provider/volcengine-ark.ts`：官方 create/status/list/delete 调用。
-- `src/lib/provider/video-provider.ts`：按 provider 选择 create/status/list/delete。
-- `src/app/api/admin/provider/volcengine-ark/tasks/route.ts`：官方任务列表对账。
-- `src/app/api/provider-callbacks/volcengine-ark/video/route.ts`：官方任务回调接收。
-- `src/app/api/video/cancel/[id]/route.ts` 或复用现有任务操作入口：取消/删除任务。
+- 当前阶段新增 `/generate/ip` 独立页面容器，必要时拆出 `src/components/ip-generate/*` 或同等组件目录。
+- 当前阶段新增 `IP生成` 入口按钮，放在普通生成页“我的项目”旁边。
+- 当前阶段新增火山配置状态 UI：API Key、Model ID / Endpoint ID、资源包/余额、素材库/授权状态。
+- API 到位后新增 `src/lib/provider/volcengine-ark.ts`：官方 create/status/list/delete 调用。
+- API 到位后新增 `src/lib/provider/video-provider.ts`：按 provider 选择 create/status/list/delete。
+- API 到位后新增 `src/app/api/admin/provider/volcengine-ark/tasks/route.ts`：官方任务列表对账。
+- API 到位后新增 `src/app/api/provider-callbacks/volcengine-ark/video/route.ts`：官方任务回调接收。
+- API 到位后新增 `src/app/api/video/cancel/[id]/route.ts` 或复用现有任务操作入口：取消/删除任务。
 - IP 授权确认 UI 和授权 metadata 写入。
 - 参考视频/音频输入 UI、校验和官方 payload 映射。
 - 火山配置检查：API Key、Base URL、Model ID、资源包/余额上线提示。
 
 ### 7.3 必须重写或改造
 
-- `src/app/api/tasks/create/route.ts`：不能固定调用旧 `createVideoTask`；要按 provider 路由，同时保持原扣点事务。
-- `src/lib/video/task-finalizer.ts`：不能固定调用旧 `getVideoTaskStatus`；要按 `VideoTask.provider` 查询。
+- `src/app/generate/page.tsx`：移除或停止扩展 `isIpSurface` 这类同页分支，普通页只负责普通生成和入口按钮。
+- `src/components/ComposerTopbar.tsx`：入口名改为 `IP生成`，位置调整到“我的项目”旁边。
+- `src/lib/navigation.ts`：入口名改为 `IP生成`，保持路由 `/generate/ip`。
+- API 到位后改造 `src/app/api/tasks/create/route.ts`：不能固定调用旧 `createVideoTask`；要按 provider 路由，同时保持原扣点事务。
+- API 到位后改造 `src/lib/video/task-finalizer.ts`：不能固定调用旧 `getVideoTaskStatus`；要按 `VideoTask.provider` 查询。
 - `src/lib/provider/jimeng.ts` 的内容构造不能直接覆盖为火山官方实现；旧 provider 要保留，新 provider 单独实现。
-- 任务取消逻辑要新增本地规则：排队取消释放冻结，运行中/终态删除不破坏本地审计。
-- 生成页提交 payload 要区分 `/generate` 和 `/generate/ip`，避免普通生成页误走火山。
+- API 到位后任务取消逻辑要新增本地规则：排队取消释放冻结，运行中/终态删除不破坏本地审计。
+- API 到位后生成页提交 payload 要区分 `/generate` 和 `/generate/ip`，避免普通生成页误走火山。
 
 ### 7.4 当前未有完整解决方案，进入实现前要确认
 
@@ -252,11 +301,94 @@
 - 参考视频/音频的服务端时长和大小检测方式：是否已有可复用媒体探测能力，还是先用上传阶段 metadata。
 - `DELETE` 对 `running` 状态的真实表现和本地点数策略，需要用官方接口或文档进一步确认。
 
+### 7.5 当前阶段要先整理的火山配置项
+
+| 配置项 | 来源文档 | 当前处理 | 说明 |
+| --- | --- | --- | --- |
+| 视频生成 Base URL | Base URL 及鉴权 | 写入只读配置说明 | `https://ark.cn-beijing.volces.com/api/v3` |
+| 素材/管控面 Base URL | 管理私域素材库、素材 API | 写入只读配置说明 | `https://ark.cn-beijing.volcengineapi.com/?Action=...&Version=2024-01-01` |
+| 视频生成 API Key | 获取 API Key 并配置 | 暂无，先显示未配置 | 只能服务端环境变量；可限制 Model ID / Endpoint ID / 调用 IP |
+| Access Key / 签名鉴权 | Base URL 及鉴权、素材 API | 暂无，先列为未解决 | 素材资产管理接口示例使用 HMAC-SHA256 签名 |
+| Model ID / Endpoint ID | Base URL 及鉴权、Seedance 教程 | 暂无，先显示待配置 | 需要火山控制台确认可用模型 |
+| 资源包/余额 | 资源包使用规则、Seedance 教程 | 人工检查项 | Seedance 2.0 开通需要余额或资源包余量 |
+| 素材资产组 | CreateAssetGroup/ListAssetGroups | 先设计白名单和展示字段 | 首次创建素材组前需在控制台签署授权函 |
+| 素材资产 | CreateAsset/ListAssets/GetAsset | 先设计状态字段 | 素材上传异步处理；状态可能 Processing / Available / Failed |
+| 素材 URL | CreateAsset/GetAsset | 先设计限制提示 | 上传素材资产只支持公共 URL；视频素材 2 到 15 秒、不超过 50 MB |
+| 真人形象素材 | 录入真人形象素材 | 先设计授权状态 | 需要授权人完成真人认证和授权；成功后使用 `asset://<asset ID>` |
+| 资产合规 | 资产功能使用规则、合规承诺函 | 先设计确认文案 | 用户需确认素材权属、肖像权、声音权、商标/IP 授权 |
+| 提示词素材引用 | Seedance 2.0 提示词指南 | 写入页面提示 | 提示词里使用“图片1 / 视频1 / 音频1”，不要直接用 Asset ID 代替素材描述 |
+| 输出规格 | 视频生成教程 | 当前可配置但不请求 | 分辨率、比例、时长、水印等先做配置准备；真实请求后置 |
+
 ---
 
 ## 8. 推荐文件改造清单
 
-### Task 1: Provider 类型和常量
+### 当前阶段 Task 1: `IP生成`入口位置
+
+Files:
+
+- `src/app/generate/page.tsx`
+- `src/components/ComposerTopbar.tsx`
+- `src/lib/navigation.ts`
+
+Steps:
+
+1. 在普通生成页顶部“我的项目”按钮旁增加 `IP生成` 按钮，链接到 `/generate/ip`。
+2. 把当前顶部导航里的 `(IP) 生成页` 命名统一为 `IP生成`。
+3. 保持普通生成页原有“我的项目”按钮、项目选择和生成流程不变。
+4. 检查移动端宽度下 `IP生成` 和“我的项目”不会挤压或换行异常。
+
+Validation:
+
+- 打开 `/generate`，能在“我的项目”旁看到 `IP生成`。
+- 点击 `IP生成` 进入 `/generate/ip`。
+- 普通生成页原提交流程不变。
+
+### 当前阶段 Task 2: 独立 `/generate/ip` 页面
+
+Files:
+
+- `src/app/generate/ip/page.tsx`
+- 可选新增 `src/components/ip-generate/IpGeneratePage.tsx`
+- 可选新增 `src/components/ip-generate/IpGenerateConfigPanel.tsx`
+
+Steps:
+
+1. `/generate/ip` 不再直接导入普通 `../page` 作为同一个页面。
+2. 新页面使用独立容器和标题，入口名保持 `IP生成`。
+3. 可复用项目选择、参考素材、提示词和基础参数组件，但提交逻辑先禁用真实生成。
+4. 页面显示火山配置状态：API Key 未配置、模型未配置、资源包/余额待人工确认、素材库待配置。
+5. 生成按钮在配置未完成时展示不可用状态，不能触发 `/api/tasks/create`，不能冻结点数。
+
+Validation:
+
+- `/generate/ip` 是独立页面，不依赖 `isIpSurface` 修改普通页文案。
+- 配置未完成时提交按钮不可用。
+- `/generate` 页面不出现 IP 专属配置面板。
+
+### 当前阶段 Task 3: 火山配置与素材准备面板
+
+Files:
+
+- `src/components/ip-generate/IpGenerateConfigPanel.tsx`
+- 可选 `src/lib/provider/volcengine-ark-config.ts`
+
+Steps:
+
+1. 展示数据面 Base URL：`https://ark.cn-beijing.volces.com/api/v3`。
+2. 展示管控面 Base URL：`https://ark.cn-beijing.volcengineapi.com/?Action=...&Version=2024-01-01`。
+3. 展示 API Key、Model ID / Endpoint ID、资源包/余额、素材资产组、真人素材授权的状态。
+4. 明确 API Key 只能服务端环境变量配置，不能前端输入或展示明文。
+5. 明确素材资产上传只支持公共 URL，视频素材 2 到 15 秒、不超过 50 MB。
+6. 明确真人素材必须走真人认证和授权，成功后使用 `asset://<asset ID>`。
+7. 明确提示词中用“图片1 / 视频1 / 音频1”引用素材，不直接写 Asset ID。
+
+Validation:
+
+- 配置面板只展示状态和说明，不泄露任何 secret。
+- 没有 API Key 时不发任何火山请求。
+
+### API 到位后 Task 1: Provider 类型和常量
 
 Files:
 
@@ -274,7 +406,7 @@ Validation:
 - `npm run lint`
 - TypeScript 编译随 `npm run build` 覆盖
 
-### Task 2: 新增火山方舟官方 Provider
+### API 到位后 Task 2: 新增火山方舟官方 Provider
 
 Files:
 
@@ -296,7 +428,7 @@ Validation:
 - mock fetch 或本地脚本验证 payload 结构。
 - 有 API Key 后再做最小真实烟测，真实烟测会消耗火山资源，必须单独标记。
 
-### Task 3: Provider 路由层
+### API 到位后 Task 3: Provider 路由层
 
 Files:
 
@@ -317,7 +449,7 @@ Validation:
 - 新任务 provider 为 `volcengine_ark`。
 - 旧任务状态查询仍可兼容。
 
-### Task 4: `(IP) 生成页`提交参数
+### API 到位后 Task 4: `(IP) 生成页`提交参数
 
 Files:
 
@@ -339,7 +471,7 @@ Validation:
 - `/generate/ip` 创建请求带 `provider=volcengine_ark`。
 - 未勾选授权确认不能提交。
 
-### Task 5: 参数构造和校验
+### API 到位后 Task 5: 参数构造和校验
 
 Files:
 
@@ -367,7 +499,7 @@ Validation:
 - 图 + 音频 payload。
 - 视频 + 音频 payload。
 
-### Task 6: 结果落库和本地化
+### API 到位后 Task 6: 结果落库和本地化
 
 Files:
 
@@ -389,7 +521,7 @@ Validation:
 - 外部 URL 过期前已转存。
 - 本地化失败不导致点数重复结算。
 
-### Task 7: 官方列表和取消/删除能力
+### API 到位后 Task 7: 官方列表和取消/删除能力
 
 Files:
 
@@ -412,7 +544,7 @@ Validation:
 - DELETE 只对新 provider 任务生效，不误删旧 provider。
 - 取消排队任务后冻结点数释放且不会重复结算。
 
-### Task 8: 官方回调接收
+### API 到位后 Task 8: 官方回调接收
 
 Files:
 
@@ -434,7 +566,7 @@ Validation:
 - 用不存在 task id 的回调，返回安全失败，不创建陌生任务。
 - 重复回调不会重复结算点数。
 
-### Task 9: 配置和上线检查
+### 当前阶段 Task 4 / API 到位后复查: 配置和上线检查
 
 Files:
 
@@ -466,16 +598,18 @@ Validation:
 
 - `npm run lint`
 - `npm run build`
-- payload 构造测试或脚本：覆盖文本、首帧、首尾帧、多图参考、图+音频、视频+音频。
-- 普通生成页回归：确认 provider 仍为旧链路。
-- `(IP) 生成页`回归：确认 provider 为 `volcengine_ark`，授权确认未勾选不能提交。
-- 后台列表对账：确认能按 task id/status/model 调火山列表接口。
-- 取消/删除：确认只影响 `volcengine_ark` 任务，旧 provider 任务不会误调用火山。
-- 回调 fixture：确认重复回调不会重复扣点或重复释放。
+- 普通生成页回归：确认普通页原提交流程不变。
+- 入口回归：确认 `/generate` 的“我的项目”旁出现 `IP生成`。
+- 路由回归：点击 `IP生成` 进入独立 `/generate/ip` 页面。
+- 禁用回归：API Key 未配置时，`/generate/ip` 不能触发真实生成、不能调用 `/api/tasks/create`、不能冻结点数。
+- 配置面板回归：确认 Base URL、API Key 状态、Model ID / Endpoint ID、资源包/余额、素材库/授权状态展示正确且不泄露 secret。
+- API 到位后再补 payload 构造测试：覆盖文本、首帧、首尾帧、多图参考、图+音频、视频+音频。
+- API 到位后再补后台列表对账、取消/删除、回调 fixture 验证。
 
 ### 外部 API 验证
 
-- 无 API Key dry-run：确认不会冻结点数后卡死；若已冻结必须释放。
+- 当前无 API Key，不做真实外部 API 验证。
+- API 到位后做无 API Key dry-run：确认不会冻结点数后卡死；若已冻结必须释放。
 - 有 API Key 真实烟测：用最小参数创建 1 个任务，记录官方 task id。
 - 轮询到终态：确认 `queued/running/succeeded/failed/expired` 映射正确。
 - 成功任务：确认视频 URL、尾帧 URL、缩略图、本地化缓存、生成记录都写入。
@@ -526,23 +660,34 @@ Validation:
 
 ## 11. 推荐实施顺序
 
-1. 新增 `volcengine_ark` provider 和 provider 路由层。
-2. 让 `/api/tasks/create` 接收 provider，但默认仍保持旧 provider。
-3. 让 `/generate/ip` 提交新 provider，并增加授权确认。
-4. 修改 finalizer，让新旧任务都能按各自 provider 查询状态。
-5. 接通结果落库和本地化缓存。
-6. 接入参考视频、参考音频、`asset://` 白名单、`frames`、`priority` 等正式能力。
-7. 接入官方列表对账、取消/删除和回调接收。
-8. 做 mock/dry-run 验证，确保旧普通生成页不受影响。
-9. 配置火山 API Key 和模型 ID 后做最小真实烟测。
-10. 真实烟测通过后，验证官方列表能查到任务，验证可取消任务的 DELETE 闭环。
+1. 在普通生成页“我的项目”旁增加 `IP生成` 入口。
+2. 把现有 `(IP) 生成页` 导航命名统一为 `IP生成`。
+3. 把 `/generate/ip` 改成独立页面容器，不再直接复用普通页面分支。
+4. 做火山配置状态面板和授权素材准备面板。
+5. 保证 API Key 未配置时不会触发真实生成和扣点。
+6. 验证普通生成页不受影响。
+7. API Key、模型 ID、资源包/余额、素材权限到位后，再新增 `volcengine_ark` provider 和 provider 路由层。
+8. API 到位后让 `/generate/ip` 提交新 provider，并增加授权确认。
+9. API 到位后接通 finalizer、结果落库、本地化缓存、官方列表、取消/删除、回调接收。
+10. API 到位后做 dry-run、真实烟测和公网回调/部署闭环。
 11. 需要上线时，切到实际 sd2 生产工作树按 `youdoo-sites` 闭环部署。
 
 ---
 
-## 12. 正式版完成标准
+## 12. 完成标准
 
-- `(IP) 生成页`入口存在且文案正确。
+### 12.1 当前阶段完成标准
+
+- 普通生成页“我的项目”旁出现 `IP生成`。
+- 点击 `IP生成` 进入独立 `/generate/ip` 页面。
+- `/generate/ip` 不再依赖普通 `/generate` 的 `isIpSurface` 文案分支。
+- API Key 未配置时不触发真实火山生成、不调用 `/api/tasks/create`、不冻结点数。
+- 页面能展示火山配置状态和素材/授权准备状态。
+- 普通生成页原流程不变。
+- `npm run lint` 和 `npm run build` 通过。
+
+### 12.2 API 到位后完成标准
+
 - `(IP) 生成页`提交任务走火山方舟官方 create API。
 - 普通生成页仍走旧 provider。
 - 点数冻结、失败释放、成功扣点保持旧链路。
