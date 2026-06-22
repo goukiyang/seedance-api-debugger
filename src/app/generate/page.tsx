@@ -1298,6 +1298,9 @@ export default function GeneratePage() {
             <Link href="/projects" className="composer-hero-action composer-hero-action-secondary">
               查看我的项目
             </Link>
+            <Link href="/generate/ip" className="composer-hero-action composer-hero-action-secondary">
+              IP生成
+            </Link>
           </div>
         </div>
 

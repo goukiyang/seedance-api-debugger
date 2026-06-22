@@ -53,11 +53,12 @@ const shellRoutePrefixes = [
 ] as const;
 
 export const topbarQuickItems: NavItem[] = [
-  { label: '生成', href: '/generate', match: ['/generate'] },
-  { label: '模板', href: '/templates', match: ['/templates', '/template-generate'] },
-  { label: '项目', href: '/projects', match: ['/projects', '/tasks', '/assets', '/collections'] },
-  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'] },
-  { label: '工具', href: '/cutout', match: ['/cutout'] },
+  { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'] },
+  { label: '模板', href: '/templates', match: ['/templates', '/template-generate'], prefixMatch: true },
+  { label: '项目', href: '/projects', match: ['/projects', '/tasks', '/assets', '/collections'], prefixMatch: true },
+  { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
+  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true },
+  { label: '工具', href: '/cutout', match: ['/cutout'], prefixMatch: true },
   { label: '管理中心', href: '/admin', match: ['/admin'], prefixMatch: true, adminOnly: true },
 ];
 
@@ -78,6 +79,7 @@ export const userNavGroups: NavGroup[] = [
     title: '项目',
     items: [
       { label: '我的项目', href: '/projects', prefixMatch: true },
+      { label: 'IP生成', href: '/generate/ip' },
       { label: '我的任务', href: '/tasks', prefixMatch: true },
       { label: '资产管理', href: '/assets', prefixMatch: true },
       { label: '参考图集', href: '/collections', prefixMatch: true },

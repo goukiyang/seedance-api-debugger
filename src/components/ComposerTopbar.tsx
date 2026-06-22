@@ -24,7 +24,7 @@ function formatCredit(value: number | undefined) {
 
 function isActivePath(pathname: string, item: typeof topbarQuickItems[number]) {
   const candidates = item.match?.length ? item.match : [item.href];
-  return candidates.some((match) => pathname === match || pathname.startsWith(`${match}/`));
+  return candidates.some((match) => pathname === match || (item.prefixMatch ? pathname.startsWith(`${match}/`) : false));
 }
 
 export default function ComposerTopbar({ user, loadingUser = false, credits }: ComposerTopbarProps) {
