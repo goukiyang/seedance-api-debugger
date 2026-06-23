@@ -272,6 +272,11 @@ function getAssetPreviewAspectRatio(item: Pick<AssetLibraryItem, 'ratio' | 'reso
   return parseStoredAspectRatio(item.ratio) || parseResolutionAspectRatio(item.resolution);
 }
 
+function isPortraitAspectRatio(value: string | null) {
+  const pair = value?.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  return pair ? Number(pair[1]) < Number(pair[2]) : false;
+}
+
 function formatDateTime(value: string | null) {
   if (!value) return '-';
   return new Date(value).toLocaleString('zh-CN', {
@@ -392,6 +397,7 @@ function AssetsPageContent() {
   const activePreviewAspectRatio = activeItem
     ? detailMediaAspectRatio || getAssetPreviewAspectRatio(activeItem) || '16 / 10'
     : '16 / 10';
+  const activePreviewIsPortrait = isPortraitAspectRatio(activePreviewAspectRatio);
 
   const groupedItems = useMemo(() => {
     const groups = new Map<string, { key: string; label: string; owner: AssetLibraryItem['owner']; items: AssetLibraryItem[] }>();
@@ -1241,8 +1247,7 @@ function AssetsPageContent() {
             </button>
           </div>
           <div
-            className={`asset-detail-preview asset-detail-preview-${activeItem.kind}`}
-            style={{ aspectRatio: activePreviewAspectRatio }}
+            className={`asset-detail-preview asset-detail-preview-${activeItem.kind} ${activePreviewIsPortrait ? 'is-portrait' : ''}`}
           >
             {activeItem.kind === 'video' && activeItem.previewUrl ? (
               <video
