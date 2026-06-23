@@ -14,7 +14,7 @@
 
 - [x] 入口已覆盖：当前工作区已有 `/generate/ip` 页面；普通生成页首屏“查看我的项目”旁边已有 `IP生成` 入口；`ComposerTopbar` 和用户导航里也已有 `IP生成`。
 - [x] 当前页面只是静态准备页：可保存 IP 授权草稿、展示配置清单、明确 API 未配置时不生成、不扣点、不创建任务。
-- [ ] 火山真实接口未闭环：还没有服务端 `Volcengine IP Provider`，没有按官方创建、查询、列表、取消/删除接口提交真实请求。
+- [ ] 火山真实接口未闭环：服务端 `Volcengine IP Provider` 适配层已完成；还没有接入本地任务创建、点数冻结、转存和真实火山请求。
 - [ ] 任务状态未闭环：还没有把火山任务状态、失败原因、`usage`、结果视频 URL、24 小时转存要求映射回本地 `VideoTask`。
 - [ ] 点数和成本未闭环：可沿用现有冻结、扣点、返还和 CostLedger 链路，但必须等火山返回的真实 `usage`/费用口径确认后才能打开真实扣点。
 - [ ] 线上未闭环：当前工作区未完成本轮构建、部署和公网验收；不能把本地代码雏形当成线上效果。
@@ -35,16 +35,16 @@
 
 必须新写或重写：
 
-- [ ] 新增火山 IP Provider：创建任务 `POST /api/v3/contents/generations/tasks`，鉴权使用服务端 `Authorization: Bearer <ARK_API_KEY>`，Base URL 为 `https://ark.cn-beijing.volces.com/api/v3`。
-- [ ] 新增查询单任务适配：按火山任务 ID 拉取状态，处理成功、运行中、失败、取消、删除等状态，并把失败错误码写回本地任务。
-- [ ] 新增查询任务列表适配：用于后台对账、补偿扫描和异常恢复，不替代本地任务列表的主展示。
-- [ ] 新增取消/删除适配：区分“取消 Provider 任务”和“本地隐藏/删除记录”；运行中任务优先取消，已完成记录默认只做本地留存操作。
-- [ ] 新增火山 payload mapper：从 IP 页面草稿、授权 metadata、参考素材、ratio、duration、resolution、seed、watermark、audio、return_last_frame 等生成官方 `content` 请求体。
-- [ ] 新增错误码 mapper：把 401/403 鉴权权限、429 限流、余额/配额、模型无权限、敏感内容、版权/真人/素材审核失败、Provider 内部错误，翻译成用户能看懂的状态。
+- [x] 新增火山 IP Provider：创建任务 `POST /api/v3/contents/generations/tasks`，鉴权使用服务端 `Authorization: Bearer <ARK_API_KEY>`，Base URL 为 `https://ark.cn-beijing.volces.com/api/v3`。
+- [x] 新增查询单任务适配：按火山任务 ID 拉取状态，处理成功、运行中、失败、取消、删除等状态，并把失败错误码写回本地任务。
+- [x] 新增查询任务列表适配：用于后台对账、补偿扫描和异常恢复，不替代本地任务列表的主展示。
+- [x] 新增取消/删除适配：区分“取消 Provider 任务”和“本地隐藏/删除记录”；运行中任务优先取消，已完成记录默认只做本地留存操作。
+- [x] 新增火山 payload mapper：从 IP 页面草稿、授权 metadata、参考素材、ratio、duration、resolution、seed、watermark、audio、return_last_frame 等生成官方 `content` 请求体。
+- [x] 新增错误码 mapper：把 401/403 鉴权权限、429 限流、余额/配额、模型无权限、敏感内容、版权/真人/素材审核失败、Provider 内部错误，翻译成用户能看懂的状态。
 - [ ] 新增重试策略：只对网络超时、429、5xx 等短暂错误做退避重试；鉴权、权限、余额、内容安全、素材审核失败不自动重试。
 - [ ] 新增回调接收策略：如果启用 `callback_url`，回调只能作为状态提示；必须校验任务 ID 属于本地任务，幂等写入，必要时再主动查询火山状态确认。
 - [ ] 新增结果转存：火山查询结果的视频 URL 有有效期，任务成功后必须尽快下载到本地/对象存储，长期展示优先用本地稳定 URL。
-- [ ] 新增敏感信息脱敏：日志、AgentRun、raw response、错误详情里不得展示 API Key、AK/SK、签名参数、完整临时视频 URL 或真人认证 token。
+- [x] 新增敏感信息脱敏：日志、AgentRun、raw response、错误详情里不得展示 API Key、AK/SK、签名参数、完整临时视频 URL 或真人认证 token。
 
 暂不做：
 
@@ -68,6 +68,7 @@
 
 - [x] Batch IP-0：只做接口设计和类型定义，新增 `src/lib/provider/volcengine-ip.ts`、状态/错误码类型、payload mapper 单元测试，不调用真实火山。
 - [x] Batch IP-1：接环境变量和管理员配置状态页，前端只展示“已配置/未配置”，不回显密钥。
+- [x] Batch IP-2A：实现火山创建、查询、列表、取消/删除 Provider 网络适配层和 smoke fixture；不接入本地扣点、不发真实请求。
 - [ ] Batch IP-2：实现创建任务服务端链路，复用现有鉴权、项目/视频卡、点数冻结、任务落库；失败必须返还冻结点数。
 - [ ] Batch IP-3：实现查询单任务、结果转存、状态回写、任务详情展示和最近任务缩略图。
 - [ ] Batch IP-4：实现补偿扫描和查询任务列表，用于任务遗漏、回调失败、URL 过期前转存。
@@ -89,11 +90,18 @@
 - 已新增 `scripts/volcengine-ip-config-status-smoke.ts`，验证缺配置/已配置两种状态、API 不含密钥片段、route 存在且为动态路由。
 - 本批没有保存配置、没有回显密钥、没有接入真实创建任务、没有请求火山、没有冻结点数，也没有部署线上。
 
+### Review - 2026-06-24 Batch IP-2A
+
+- 已在 `src/lib/provider/volcengine-ip.ts` 新增火山任务网络适配层：创建任务、查询单任务、查询任务列表、取消/删除任务。
+- 已按官方视频生成 API 形态固定方法和路径：`POST /contents/generations/tasks`、`GET /contents/generations/tasks/{id}`、`GET /contents/generations/tasks`、`DELETE /contents/generations/tasks/{id}`。
+- 已新增 `scripts/volcengine-ip-task-api-smoke.ts`，用假 `fetch` 验证 URL、方法、`Authorization: Bearer`、请求体不带密钥、状态/usage/结果 URL 解析和列表筛选参数。
+- 本批仍未接入 `/api/tasks/create`、项目/视频卡、点数冻结、CostLedger、结果转存或真实火山请求；Batch IP-2 主业务链路继续保持未完成。
+
 验收标准：
 
 - [ ] 普通 `/generate` 原功能不退化，只多一个到 `/generate/ip` 的入口。
 - [ ] `/generate/ip` 是独立页面，所有普通生成功能可达；真实生成只在火山配置满足后开启。
-- [ ] 创建、查询、列表、取消/删除四个火山视频任务接口都有服务端适配和测试 fixture。
+- [x] 创建、查询、列表、取消/删除四个火山视频任务接口都有服务端适配和测试 fixture。
 - [ ] 任务成功后结果视频已转存，页面不依赖火山 24 小时临时 URL。
 - [ ] 失败任务能显示清楚原因，并区分用户可修复、管理员配置问题、火山侧临时问题。
 - [ ] 点数冻结、扣点、返还和成本账本与现有链路一致，不能重复扣点或漏返还。

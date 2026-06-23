@@ -65,6 +65,87 @@ export interface VolcengineIpPublicConfigStatus {
   missing: Array<'api_key' | 'model'>;
 }
 
+export interface VolcengineIpRequestOptions {
+  fetchImpl?: typeof fetch;
+  apiKey?: string;
+  model?: string;
+  baseUrl?: string;
+  signal?: AbortSignal;
+}
+
+export interface VolcengineIpCreateTaskInput extends CreateVideoInput {
+  generation_mode: GenerationMode;
+  model?: string;
+}
+
+export interface VolcengineIpCreateTaskResult {
+  provider_task_id: string;
+  raw: unknown;
+}
+
+export interface VolcengineIpTaskStatusResult {
+  provider_task_id: string;
+  provider_status?: string;
+  local_status: LocalStatus;
+  result_video_url?: string;
+  result_last_frame_url?: string;
+  usage?: unknown;
+  raw: unknown;
+  error?: NormalizedVolcengineIpError;
+}
+
+export interface VolcengineIpTaskListParams {
+  page_num?: number;
+  page_size?: number;
+  filter_status?: string;
+  filter_task_ids?: string[];
+  filter_model?: string;
+  filter_created_after?: string;
+  filter_created_before?: string;
+}
+
+export interface VolcengineIpTaskListResult {
+  items: unknown[];
+  total?: number;
+  raw: unknown;
+}
+
+export interface VolcengineIpDeleteTaskResult {
+  provider_task_id: string;
+  deleted: boolean;
+  raw: unknown;
+}
+
+export class VolcengineIpConfigurationError extends Error {
+  code = 'volcengine_ip_not_configured';
+  missing: Array<'api_key' | 'model'>;
+
+  constructor(missing: Array<'api_key' | 'model'>) {
+    super(`volcengine_ip_not_configured: missing ${missing.join(', ')}`);
+    this.name = 'VolcengineIpConfigurationError';
+    this.missing = missing;
+  }
+}
+
+export class VolcengineIpRequestError extends Error {
+  code = 'volcengine_ip_request_failed';
+  statusCode?: number;
+  normalized: NormalizedVolcengineIpError;
+  raw?: unknown;
+
+  constructor(input: {
+    statusCode?: number;
+    normalized: NormalizedVolcengineIpError;
+    raw?: unknown;
+  }) {
+    super(input.normalized.userMessage);
+    this.name = 'VolcengineIpRequestError';
+    this.statusCode = input.statusCode;
+    this.normalized = input.normalized;
+    this.raw = input.raw;
+  }
+}
+
 function cleanBaseUrl(value?: string) {
   const trimmed = value?.trim();
   if (!trimmed) return VOLCENGINE_IP_DEFAULT_BASE_URL;
@@ -203,7 +284,7 @@ export function buildVolcengineIpCreatePayload(
 export function mapVolcengineTaskStatus(status?: string | null): LocalStatus {
   const normalized = (status || '').trim().toLowerCase();
   if (['succeeded', 'success', 'completed', 'complete'].includes(normalized)) return 'succeeded';
-  if (['failed', 'fail', 'error'].includes(normalized)) return 'failed';
+  if (['failed', 'fail', 'error', 'expired'].includes(normalized)) return 'failed';
   if (['cancelled', 'canceled', 'deleted', 'delete'].includes(normalized)) return 'cancelled';
   if (['queued', 'created', 'pending', 'submitted'].includes(normalized)) return 'submitted';
   return 'running';
@@ -221,6 +302,28 @@ function pickNestedString(value: unknown, paths: string[][]) {
     }
     if (typeof current === 'string' && current.trim()) return current.trim();
   }
+  return undefined;
+}
+
+function pickNestedValue(value: unknown, paths: string[][]) {
+  for (const path of paths) {
+    let current = value;
+    for (const key of path) {
+      if (!current || typeof current !== 'object') {
+        current = undefined;
+        break;
+      }
+      current = (current as Record<string, unknown>)[key];
+    }
+    if (current !== undefined && current !== null) return current;
+  }
+  return undefined;
+}
+
+function pickNestedNumber(value: unknown, paths: string[][]) {
+  const current = pickNestedValue(value, paths);
+  if (typeof current === 'number' && Number.isFinite(current)) return current;
+  if (typeof current === 'string' && current.trim() && Number.isFinite(Number(current))) return Number(current);
   return undefined;
 }
 
@@ -345,4 +448,282 @@ export function redactVolcengineIpLog<T>(value: T): T {
     }
     return acc;
   }, {}) as T;
+}
+
+function resolvePrivateConfig(
+  options: VolcengineIpRequestOptions | undefined,
+  requireModel: boolean,
+) {
+  const apiKey = (options?.apiKey || readApiKey()).trim();
+  const model = (options?.model || readModel()).trim();
+  const baseUrl = cleanBaseUrl(options?.baseUrl || process.env.VOLCENGINE_IP_BASE_URL || process.env.ARK_BASE_URL);
+  const missing: Array<'api_key' | 'model'> = [];
+
+  if (!apiKey) missing.push('api_key');
+  if (requireModel && !model) missing.push('model');
+  if (missing.length) throw new VolcengineIpConfigurationError(missing);
+
+  return { apiKey, model, baseUrl };
+}
+
+function buildTaskUrl(baseUrl: string, providerTaskId?: string) {
+  if (!providerTaskId) return `${baseUrl}${VOLCENGINE_IP_CREATE_TASK_PATH}`;
+  return `${baseUrl}${VOLCENGINE_IP_CREATE_TASK_PATH}/${encodeURIComponent(providerTaskId)}`;
+}
+
+async function readResponseBody(response: Response) {
+  const text = await response.text();
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw_text: text };
+  }
+}
+
+async function requestVolcengineIpJson(
+  url: string,
+  init: RequestInit,
+  config: { apiKey: string },
+  options?: VolcengineIpRequestOptions,
+) {
+  const fetchImpl = options?.fetchImpl || globalThis.fetch;
+  if (!fetchImpl) {
+    throw new VolcengineIpRequestError({
+      normalized: normalizeVolcengineIpError({
+        raw: { error: { code: 'NetworkError', message: 'fetch is not available' } },
+        fallbackMessage: 'fetch is not available',
+      }),
+    });
+  }
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      ...init,
+      signal: options?.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'network error';
+    throw new VolcengineIpRequestError({
+      normalized: normalizeVolcengineIpError({
+        raw: { error: { code: 'NetworkError', message } },
+        fallbackMessage: message,
+      }),
+    });
+  }
+
+  const body = await readResponseBody(response);
+  if (!response.ok) {
+    throw new VolcengineIpRequestError({
+      statusCode: response.status,
+      normalized: normalizeVolcengineIpError({ statusCode: response.status, raw: body }),
+      raw: redactVolcengineIpLog(body),
+    });
+  }
+
+  return body;
+}
+
+export function parseVolcengineIpCreateResponse(raw: unknown): VolcengineIpCreateTaskResult {
+  const providerTaskId = pickNestedString(raw, [
+    ['id'],
+    ['task_id'],
+    ['data', 'id'],
+    ['data', 'task_id'],
+    ['result', 'id'],
+    ['result', 'task_id'],
+  ]);
+
+  if (!providerTaskId) {
+    throw new VolcengineIpRequestError({
+      normalized: normalizeVolcengineIpError({
+        raw: { error: { code: 'InvalidCreateTaskResponse', message: 'missing task id' } },
+        fallbackMessage: 'missing task id',
+      }),
+      raw: redactVolcengineIpLog(raw),
+    });
+  }
+
+  return { provider_task_id: providerTaskId, raw };
+}
+
+export function parseVolcengineIpStatusResponse(
+  raw: unknown,
+  fallbackTaskId?: string,
+): VolcengineIpTaskStatusResult {
+  const providerTaskId = pickNestedString(raw, [
+    ['id'],
+    ['task_id'],
+    ['data', 'id'],
+    ['data', 'task_id'],
+    ['result', 'id'],
+    ['result', 'task_id'],
+  ]) || fallbackTaskId || '';
+  const providerStatus = pickNestedString(raw, [
+    ['status'],
+    ['data', 'status'],
+    ['result', 'status'],
+    ['task', 'status'],
+  ]);
+  const resultVideoUrl = pickNestedString(raw, [
+    ['content', 'video_url'],
+    ['content', 'video_url', 'url'],
+    ['data', 'content', 'video_url'],
+    ['data', 'content', 'video_url', 'url'],
+    ['result', 'content', 'video_url'],
+    ['result', 'content', 'video_url', 'url'],
+    ['output', 'video_url'],
+    ['video_url'],
+  ]);
+  const resultLastFrameUrl = pickNestedString(raw, [
+    ['content', 'last_frame_url'],
+    ['content', 'last_frame_url', 'url'],
+    ['data', 'content', 'last_frame_url'],
+    ['data', 'content', 'last_frame_url', 'url'],
+    ['result', 'content', 'last_frame_url'],
+    ['result', 'content', 'last_frame_url', 'url'],
+    ['output', 'last_frame_url'],
+    ['last_frame_url'],
+  ]);
+  const usage = pickNestedValue(raw, [
+    ['usage'],
+    ['data', 'usage'],
+    ['result', 'usage'],
+  ]);
+  const rawError = pickNestedValue(raw, [
+    ['error'],
+    ['data', 'error'],
+    ['result', 'error'],
+    ['ResponseMetadata', 'Error'],
+  ]);
+
+  return {
+    provider_task_id: providerTaskId,
+    provider_status: providerStatus,
+    local_status: mapVolcengineTaskStatus(providerStatus),
+    result_video_url: resultVideoUrl,
+    result_last_frame_url: resultLastFrameUrl,
+    usage,
+    raw,
+    error: rawError ? normalizeVolcengineIpError({ raw }) : undefined,
+  };
+}
+
+export function parseVolcengineIpTaskListResponse(raw: unknown): VolcengineIpTaskListResult {
+  const items = pickNestedValue(raw, [
+    ['items'],
+    ['data', 'items'],
+    ['tasks'],
+    ['data', 'tasks'],
+    ['result', 'items'],
+  ]);
+
+  return {
+    items: Array.isArray(items) ? items : [],
+    total: pickNestedNumber(raw, [
+      ['total'],
+      ['data', 'total'],
+      ['total_count'],
+      ['data', 'total_count'],
+    ]),
+    raw,
+  };
+}
+
+export async function createVolcengineIpVideoTask(
+  input: VolcengineIpCreateTaskInput,
+  options?: VolcengineIpRequestOptions,
+): Promise<VolcengineIpCreateTaskResult> {
+  const config = resolvePrivateConfig(options, true);
+  const payload = buildVolcengineIpCreatePayload({
+    ...input,
+    model: input.model?.trim() || config.model,
+  });
+  const raw = await requestVolcengineIpJson(
+    buildTaskUrl(config.baseUrl),
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    config,
+    options,
+  );
+
+  return parseVolcengineIpCreateResponse(raw);
+}
+
+export async function getVolcengineIpTaskStatus(
+  providerTaskId: string,
+  options?: VolcengineIpRequestOptions,
+): Promise<VolcengineIpTaskStatusResult> {
+  const taskId = providerTaskId.trim();
+  if (!taskId) {
+    throw new Error('火山 IP 查询缺少任务 ID');
+  }
+
+  const config = resolvePrivateConfig(options, false);
+  const raw = await requestVolcengineIpJson(
+    buildTaskUrl(config.baseUrl, taskId),
+    { method: 'GET' },
+    config,
+    options,
+  );
+
+  return parseVolcengineIpStatusResponse(raw, taskId);
+}
+
+export async function listVolcengineIpTasks(
+  params: VolcengineIpTaskListParams = {},
+  options?: VolcengineIpRequestOptions,
+): Promise<VolcengineIpTaskListResult> {
+  const config = resolvePrivateConfig(options, false);
+  const url = new URL(buildTaskUrl(config.baseUrl));
+
+  if (params.page_num !== undefined) url.searchParams.set('page_num', String(params.page_num));
+  if (params.page_size !== undefined) url.searchParams.set('page_size', String(params.page_size));
+  if (params.filter_status) url.searchParams.set('filter.status', params.filter_status);
+  if (params.filter_model) url.searchParams.set('filter.model', params.filter_model);
+  if (params.filter_created_after) url.searchParams.set('filter.created_after', params.filter_created_after);
+  if (params.filter_created_before) url.searchParams.set('filter.created_before', params.filter_created_before);
+  for (const taskId of params.filter_task_ids || []) {
+    const trimmed = taskId.trim();
+    if (trimmed) url.searchParams.append('filter.task_ids', trimmed);
+  }
+
+  const raw = await requestVolcengineIpJson(url.toString(), { method: 'GET' }, config, options);
+  return parseVolcengineIpTaskListResponse(raw);
+}
+
+export async function deleteVolcengineIpVideoTask(
+  providerTaskId: string,
+  options?: VolcengineIpRequestOptions,
+): Promise<VolcengineIpDeleteTaskResult> {
+  const taskId = providerTaskId.trim();
+  if (!taskId) {
+    throw new Error('火山 IP 删除缺少任务 ID');
+  }
+
+  const config = resolvePrivateConfig(options, false);
+  const raw = await requestVolcengineIpJson(
+    buildTaskUrl(config.baseUrl, taskId),
+    { method: 'DELETE' },
+    config,
+    options,
+  );
+
+  return { provider_task_id: taskId, deleted: true, raw };
+}
+
+export async function cancelOrDeleteVolcengineIpVideoTask(
+  providerTaskId: string,
+  options?: VolcengineIpRequestOptions,
+) {
+  return deleteVolcengineIpVideoTask(providerTaskId, options);
 }
