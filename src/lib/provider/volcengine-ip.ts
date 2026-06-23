@@ -54,6 +54,17 @@ export interface NormalizedVolcengineIpError {
   statusCode?: number;
 }
 
+export interface VolcengineIpPublicConfigStatus {
+  provider: 'volcengine_ip';
+  base_url: string;
+  create_task_path: string;
+  model: string;
+  ready: boolean;
+  api_key_configured: boolean;
+  model_configured: boolean;
+  missing: Array<'api_key' | 'model'>;
+}
+
 function cleanBaseUrl(value?: string) {
   const trimmed = value?.trim();
   if (!trimmed) return VOLCENGINE_IP_DEFAULT_BASE_URL;
@@ -90,6 +101,21 @@ export function getVolcengineIpProviderConfig(): VolcengineIpProviderConfig {
     apiKeyMasked: maskSecret(apiKey),
     ready: missing.length === 0,
     missing,
+  };
+}
+
+export function getVolcengineIpPublicConfigStatus(): VolcengineIpPublicConfigStatus {
+  const config = getVolcengineIpProviderConfig();
+
+  return {
+    provider: 'volcengine_ip',
+    base_url: config.baseUrl,
+    create_task_path: VOLCENGINE_IP_CREATE_TASK_PATH,
+    model: config.model,
+    ready: config.ready,
+    api_key_configured: !config.missing.includes('api_key'),
+    model_configured: !config.missing.includes('model'),
+    missing: config.missing,
   };
 }
 

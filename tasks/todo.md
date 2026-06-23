@@ -67,7 +67,7 @@
 后续落地批次：
 
 - [x] Batch IP-0：只做接口设计和类型定义，新增 `src/lib/provider/volcengine-ip.ts`、状态/错误码类型、payload mapper 单元测试，不调用真实火山。
-- [ ] Batch IP-1：接环境变量和管理员配置状态页，前端只展示“已配置/未配置”，不回显密钥。
+- [x] Batch IP-1：接环境变量和管理员配置状态页，前端只展示“已配置/未配置”，不回显密钥。
 - [ ] Batch IP-2：实现创建任务服务端链路，复用现有鉴权、项目/视频卡、点数冻结、任务落库；失败必须返还冻结点数。
 - [ ] Batch IP-3：实现查询单任务、结果转存、状态回写、任务详情展示和最近任务缩略图。
 - [ ] Batch IP-4：实现补偿扫描和查询任务列表，用于任务遗漏、回调失败、URL 过期前转存。
@@ -80,6 +80,14 @@
 - 已新增 `scripts/volcengine-ip-provider-smoke.ts`，覆盖默认 Base URL、Model/API Key 配置闸门、`content` 数组构造、状态映射、429/内容安全错误归类和签名 URL/token 脱敏。
 - 已按 TDD 先跑红灯：模块不存在时报 `Cannot find module '@/lib/provider/volcengine-ip'`；实现后 smoke 通过。
 - 本批没有接入 `/api/tasks/create`，没有读取真实 API Key，没有向火山发请求，没有冻结点数，也没有部署线上。
+
+### Review - 2026-06-24 Batch IP-1
+
+- 已新增 `getVolcengineIpPublicConfigStatus()`，只返回 `ready`、`api_key_configured`、`model_configured`、Base URL、创建任务路径和缺失项，不返回明文或 masked API Key。
+- 已新增管理员 API：`GET /api/admin/integrations/volcengine-ip`，沿用 `getAdminUser` 鉴权，只读返回火山 IP 生成配置状态。
+- 已新增只读管理员页面：`/admin/integrations/volcengine-ip`，页面只显示“已配置 / 未配置”、Model ID、Base URL、缺失项和“真实请求未启用”。
+- 已新增 `scripts/volcengine-ip-config-status-smoke.ts`，验证缺配置/已配置两种状态、API 不含密钥片段、route 存在且为动态路由。
+- 本批没有保存配置、没有回显密钥、没有接入真实创建任务、没有请求火山、没有冻结点数，也没有部署线上。
 
 验收标准：
 
