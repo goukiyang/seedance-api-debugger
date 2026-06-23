@@ -6807,3 +6807,159 @@ HARD-GATE：
 - [x] 新增图集图片的后台内容链接与旧资产保持一致，不重复上传二进制文件。
 - [x] 普通个人历史素材上传仍保持原来的跨用户限制，不扩大素材库权限。
 - [x] `tsc`、`lint`、`build`、部署、公网资源命中和健康周期验证通过。
+
+## 2026-06-24 火山 IP 生成页正式版接口闭环规划更新
+
+### 官方文档依据
+
+- [创建视频生成任务 API](https://www.volcengine.com/docs/82379/1520757?lang=zh)
+- [查询视频生成任务 API](https://www.volcengine.com/docs/82379/1521309?lang=zh)
+- [查询视频生成任务列表](https://www.volcengine.com/docs/82379/1521675?lang=zh)
+- [取消或删除视频生成任务](https://www.volcengine.com/docs/82379/1521720?lang=zh)
+- [Doubao Seedance 2.0 系列教程](https://www.volcengine.com/docs/82379/2291680?lang=zh)
+- [Doubao Seedance 2.0 系列提示词指南](https://www.volcengine.com/docs/82379/2222480?lang=zh)
+- [模型列表](https://www.volcengine.com/docs/82379/1330310?lang=zh)
+- [模型价格](https://www.volcengine.com/docs/82379/1544106?lang=zh)
+- [Seedance 2.0 系列模型资源包使用规则](https://www.volcengine.com/docs/82379/2191775?lang=zh)
+- [获取 API Key 并配置](https://www.volcengine.com/docs/82379/1541594?lang=zh)
+- [管理 API Key](https://www.volcengine.com/docs/82379/1361424?lang=zh)
+- [虚拟人像库](https://www.volcengine.com/docs/82379/2223965?lang=zh)
+- [录入真人形象素材](https://www.volcengine.com/docs/82379/2315856?lang=zh)
+- [版权和人像素材使用规则](https://www.volcengine.com/docs/82379/2525200?lang=zh)
+
+### 当前判断
+
+- [x] `/generate/ip` 已经是独立入口，复用普通生成页完整 UI。
+- [x] `/generate/ip` 目前已锁定提交，不会误走旧 `/api/tasks/create`，不会误扣点。
+- [ ] 火山官方创建、查询、列表、取消/删除四个接口尚未接入。
+- [ ] 火山官方文档里的鉴权、模型开通、素材输入限制、真人/虚拟人像、结果链接 24 小时有效、7 天查询窗口、token 计费和回调要求尚未落地。
+- [ ] 普通生成页 `/generate` 不属于本计划修改范围；后续实现不得改变普通生成页已有提交、查询、列表、删除行为。
+
+### 需要新增关注并调整的官方约束
+
+- [ ] 鉴权：火山视频生成接口只用 API Key 鉴权，服务端环境变量建议新增 `VOLCENGINE_ARK_API_KEY`，不得暴露到前端。
+- [ ] API Key 权限：火山 API Key 可限制 Model ID、自定义接入点和调用 IP，配置页需要支持“已配置但权限不足”的错误文案。
+- [ ] 模型开通：Seedance 2.0 系列需要账户余额大于 200 元，或购买对应资源包且有余量；配置检查不能只判断 API Key 存在。
+- [ ] 模型 ID：正式模型必须从配置读取，例如 `VOLCENGINE_ARK_VIDEO_MODEL`，不要写死；Seedance 2.0 mini 文档写明预计北京时间 6 月 25 日支持 API 调用，落地时需再次确认。
+- [ ] Endpoint ID：官方允许用 Endpoint ID 调用模型以获得限流、计费类型、监控和安全能力；第一版先支持 Model ID，Endpoint ID 作为同一字段配置，不另起复杂抽象。
+- [ ] 输入组合：支持文本、图片、视频、音频、样片任务 ID；但图生视频首帧、首尾帧、多模态参考是互斥场景，不能在 payload 中混用。
+- [ ] 素材数量：Seedance 2.0 多模态参考支持图片 0-9 张、视频 0-3 个、音频 0-3 段；音频不能单独输入，必须至少有 1 个图片或视频。
+- [ ] 素材大小：单张图片小于 30 MB；单个视频不超过 200 MB；单个音频不超过 15 MB；请求体总大小不超过 64 MB，大文件不要走 Base64。
+- [ ] 素材时长：单个视频 2-15 秒，多个视频总时长不超过 15 秒；单个音频 2-15 秒，多个音频总时长不超过 15 秒。
+- [ ] 公网可访问：普通 URL 素材必须公网可访问，建议走 TOS/R2；不能把本地路径、内网地址、localhost 传给火山。
+- [ ] 火山素材 URI：虚拟人像和已授权真人素材使用 `asset://<ASSET_ID>`，不能当普通图片 URL 处理。
+- [ ] 真人脸限制：Seedance 2.0 不支持直接上传含真人人脸的普通参考图/视频；真人必须走授权人像素材或受信模型原始产物。
+- [ ] 受信素材：本账号下近 30 天内由指定 Seedance 2.0 系列模型生成的含人脸原始产物，可作为再次生成输入；压缩、转发可能导致信任失效。
+- [ ] 虚拟人像：可在体验中心复制资产 ID/URI 后用于 API；第一版只支持用户手工粘贴 `asset://...`，不接火山人像库浏览。
+- [ ] 已授权真人：录入/认证/接收授权在火山控制台完成；本系统第一版只消费已有 `asset://...`，不做真人认证 H5、邀约二维码和素材入库流程。
+- [ ] 参数传法：`resolution`、`ratio`、`duration`、`frames`、`seed`、`camera_fixed`、`watermark` 用 request body 强校验方式，不再塞进 prompt 后缀。
+- [ ] 分辨率：Seedance 2.0 默认 720p；Seedance 2.0 支持 4k，Fast/Mini 不支持 1080p；4k 是 H.265/10bit，浏览器播放和本地转存要额外兼容。
+- [ ] 比例：Seedance 2.0 默认 `adaptive`，并支持 `16:9`、`4:3`、`1:1`、`3:4`、`9:16`、`21:9`；实际比例要以查询返回值为准。
+- [ ] 时长：`duration` 和 `frames` 二选一，`frames` 优先；第一版只保留整数秒 `duration`，不做小数秒 `frames`。
+- [ ] 智能时长：`duration=-1` 会影响计费且不可预估；第一版不开放。
+- [ ] 音频：`generate_audio` 默认 true，有声视频为单声道；提示词里的台词建议使用中文引号包裹。
+- [ ] 尾帧：`return_last_frame=true` 才返回 `last_frame_url`；尾帧 URL 也是 24 小时有效，需要转存。
+- [ ] 回调：`callback_url` 状态变化时 POST，内容与查询任务返回一致；发送失败 5 秒内未成功会重试 3 次。
+- [ ] 过期：`execution_expires_after` 默认 172800 秒，范围 3600-259200 秒；超过后状态为 `expired`。
+- [ ] 服务层级：`service_tier=default` 是在线推理；`flex` 是离线推理，价格约为在线 50%，但时延更高且不支持优先级；第一版默认 `default`，后台可配置。
+- [ ] 样片模式：`draft` 仅 Seedance 1.5 Pro 支持，且 480p、不支持尾帧、不支持离线推理；IP 生成第一版不做样片模式。
+- [ ] 联网搜索：`tools.type=web_search` 会增加时延，查询结果里用 `usage.tool_usage.web_search` 对账；第一版默认关闭，后续按开关接入。
+- [ ] 查询窗口：官方只支持查最近 7 天任务；我们必须把 provider 返回结果及时落库。
+- [ ] 结果链接：`video_url` 和 `last_frame_url` 有效期 24 小时；任务成功后必须尽快转存到本地/R2/TOS，并生成缩略图。
+- [ ] 状态映射：火山状态为 `queued`、`running`、`cancelled`、`succeeded`、`failed`、`expired`；本地需要把 `expired` 明确当终态失败/超时处理，不能按 running 继续轮询。
+- [ ] 删除语义：只有 `queued` 任务可取消为 `cancelled`；`cancelled` 24 小时自动删除；`running/succeeded/failed/expired` 调 DELETE 的效果需按官方状态表和实测确认。
+- [ ] 计费：官方只对成功生成计费，失败不计费；准确 token 用量以查询返回 `usage.completion_tokens` 为准。
+- [ ] 最低用量：Seedance 2.0 系列存在最低 token 用量，预估扣点必须保守，最终以官方 `usage` 对账。
+- [ ] 资源包：资源包按模型和场景抵扣，超出后自动转按量后付费；本系统不直接管理火山资源包，只记录官方用量和配置提示。
+- [ ] 版权 IP：模型价格页写明“版权视频生成”当前仅支持在体验中心基于特定版权 IP 使用 Seedance 2.0；如我们做“授权 IP 动画”，需等拿到官方 API 可用模型/资产 URI/授权范围后再开放付费提交。
+
+### 复用现有能力
+
+- [ ] 复用 `/generate/ip` 现有页面壳、项目、视频卡、模板、提示词、图集、最近任务布局。
+- [ ] 复用登录态、用户权限、项目权限、视频卡权限。
+- [ ] 复用现有 `VideoTask` 表里的 `provider`、`provider_task_id`、`raw_create_response`、`raw_status_response`、`provider_payload_json`、成本字段。
+- [ ] 复用点数冻结、成功扣除、失败退回、项目预算、成本 ledger，但要新增火山 `usage` 对账写入。
+- [ ] 复用现有素材公网化能力 `uploadSiteAsset` / R2 / TOS 检查。
+- [ ] 复用成功后本地缓存视频、生成缩略图、任务详情展示。
+
+### 必须新做或重写
+
+- [ ] 新建 `src/lib/provider/volcengine-ark-video.ts`，只封装火山 Ark 官方接口，不改 `src/lib/provider/jimeng.ts`。
+- [ ] 新增火山类型文件或同文件内类型：创建请求、任务详情、列表响应、错误结构、usage、content。
+- [ ] 新增 IP 专用创建接口 `src/app/api/ip/tasks/create/route.ts`，不要让 `/generate/ip` 走 `/api/tasks/create`。
+- [ ] 新增 IP 专用状态接口 `src/app/api/ip/video/status/[id]/route.ts`，内部只处理 `provider='volcengine_ark'` 的任务。
+- [ ] 新增 IP 专用列表接口 `src/app/api/ip/video/list/route.ts`，默认读取本地任务，并按 `provider='volcengine_ark'` 过滤。
+- [ ] 新增可选的远端任务同步接口 `src/app/api/ip/provider/tasks/route.ts`，仅管理员/诊断使用，用火山 List API 补最近 7 天状态。
+- [ ] 新增 IP 专用取消接口 `src/app/api/ip/tasks/[id]/cancel/route.ts`，调用火山 DELETE，只对可取消状态开放。
+- [ ] 保留现有 `src/app/api/tasks/[id]/route.ts` 作为本地移除，不让它假装取消火山任务。
+- [ ] 新增火山状态 finalizer，例如 `src/lib/video/volcengine-task-finalizer.ts`，不直接改普通 `task-finalizer.ts` 的旧 provider 行为。
+- [ ] 新增火山 content builder：区分首帧、首尾帧、多模态参考、`asset://` 素材、普通公网 URL、Base64。
+- [ ] 新增 IP 输入校验：素材数量、大小、时长、音频不能单独输入、普通真人脸素材提示禁用、`asset://` 格式校验。
+- [ ] 新增配置检查接口或扩展现有配置展示：API Key、模型 ID、base URL、service tier、callback 开关、转存开关。
+- [ ] 新增结果转存闭环：成功查询后立即下载 `video_url` 和 `last_frame_url`，写入本地/R2/TOS 地址，再生成缩略图。
+- [ ] 新增官方 `usage.completion_tokens` / `total_tokens` / `tool_usage.web_search` 入库和后台成本展示字段映射。
+- [ ] 前端 `/generate/ip` 提交、轮询、列表、取消全部改到 `/api/ip/...`，但普通 `/generate` 保持旧接口。
+- [ ] 前端显示火山专属状态：排队、运行、成功、失败、已取消、已超时。
+- [ ] 前端素材区增加 `asset://` 输入/粘贴入口，用于虚拟人像和已授权真人素材。
+- [ ] 前端对 4k、Fast/Mini 不支持 1080p、`adaptive` 比例等模型差异做动态限制。
+
+### 暂不做
+
+- [ ] 不在第一版做火山控制台 API Key 管理、模型开通、资源包购买或余额查询。
+- [ ] 不在第一版做人脸认证 H5、真人素材邀约二维码、真人素材入库和接收授权流程。
+- [ ] 不在第一版做火山虚拟人像库浏览器；只支持粘贴官方 `asset://<ASSET_ID>`。
+- [ ] 不在第一版开放 `duration=-1`、`frames` 小数秒、`draft` 样片模式、`web_search` 联网搜索、`service_tier=flex` 用户开关。
+- [ ] 不在第一版改普通生成页 `/generate` 的接口、轮询、列表和删除逻辑。
+- [ ] 不在未拿到 API Key 和明确付费授权前发起真实火山生成。
+
+### 实施步骤
+
+- [ ] Task 1：补火山 provider 类型和接口客户端，mock fetch 覆盖创建、查询、列表、删除和错误解析。
+- [ ] Task 2：补火山状态映射和 finalizer，覆盖 `queued/running/cancelled/succeeded/failed/expired`。
+- [ ] Task 3：补火山 content builder，覆盖文本、首帧、首尾帧、多模态参考、`asset://`、公网 URL、Base64 的 payload。
+- [ ] Task 4：补 IP 创建 route，复用权限、视频卡、点数冻结、预算、快照、ledger，但 provider 改为火山。
+- [ ] Task 5：补 IP 查询 route，成功时转存视频/尾帧、写官方 usage、结算点数、生成缩略图。
+- [ ] Task 6：补 IP 本地列表 route，并让 `/generate/ip` 最近任务只看火山任务。
+- [ ] Task 7：补 IP 取消 route，区分“取消火山任务”和“本地移除记录”。
+- [ ] Task 8：改 `/generate/ip` 前端提交、轮询、列表、取消按钮到 `/api/ip/...`；普通 `/generate` 不改。
+- [ ] Task 9：给 IP 页素材输入补 `asset://` 能力和火山限制提示，禁止普通真人脸参考图作为付费提交入口。
+- [ ] Task 10：补配置页/后台提示，显示火山 API Key、模型、service tier、回调、转存是否就绪。
+- [ ] Task 11：补测试和 smoke，验证 IP 链路不会访问旧 `/api/tasks/create`，普通生成页仍访问旧链路。
+- [ ] Task 12：拿到 API Key 后，先只跑配置检查和 mock；真实生成必须再次获得用户明确付费授权。
+
+### 验收标准
+
+- [ ] `/generate` 普通生成页提交、轮询、列表、删除行为不变。
+- [ ] `/generate/ip` 提交时只请求 `/api/ip/tasks/create`。
+- [ ] IP 任务创建成功后，本地 `VideoTask.provider='volcengine_ark'`，并保存火山 `provider_task_id`。
+- [ ] IP 任务查询只调用火山 `GET /api/v3/contents/generations/tasks/{id}`。
+- [ ] IP 最近任务列表只显示火山任务，不混入普通生成任务。
+- [ ] `succeeded` 后 24 小时内完成 `video_url` 和 `last_frame_url` 转存，任务卡使用转存后的稳定地址。
+- [ ] `expired` 会结算为失败/超时并退回冻结点数，不会无限轮询。
+- [ ] `cancelled` 会正确退回冻结点数，并在 UI 上显示已取消。
+- [ ] 火山 `usage.completion_tokens`、`total_tokens`、`tool_usage.web_search` 写入成本/用量快照。
+- [ ] 未配置 API Key、模型未开通、素材不公网可达、普通真人脸素材、素材数量/大小/时长超限，都有明确中文错误。
+- [ ] 无用户明确授权时，不跑真实付费火山生成。
+
+### 验证命令
+
+- [ ] `git diff --check`
+- [ ] `npx tsc --noEmit --pretty false`
+- [ ] `npm run lint`
+- [ ] `npm run build`
+- [ ] 新增 smoke：`node scripts/smoke/volcengine-ip-provider-smoke.mjs`
+- [ ] 新增 smoke：`node scripts/smoke/ip-generate-routing-smoke.mjs`
+- [ ] 部署时：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`
+- [ ] 部署时：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2`
+- [ ] 部署时：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`
+- [ ] 公网验证：`curl https://sd2.youdoodesign.com/api/config`
+- [ ] 浏览器验证：`/generate` 和 `/generate/ip` 分别抓请求，确认两页走各自接口。
+
+### 停止条件
+
+- [ ] 如果火山 API Key 未拿到或模型未开通，只能做到 mock 和配置检查，不跑真实生成。
+- [ ] 如果真实生成会消耗火山费用或站内点数，必须等用户明确授权。
+- [ ] 如果发现必须改普通生成页接口才能接 IP 页，先停下重新拆路由，不直接改。
+- [ ] 如果火山版权 IP 只能体验中心使用、API 暂未开放，IP 生成付费提交继续锁定，只保留配置和素材准备。
+- [ ] 如果结果转存失败，不标记任务为最终完成；保留官方临时 URL 并提示 24 小时有效。
+- [ ] 如果测试、构建或部署失败，不提交、不推送、不上线。
