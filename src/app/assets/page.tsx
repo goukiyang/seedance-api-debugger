@@ -246,6 +246,32 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'resolution' | 'duration' 
   ].filter(Boolean).join(' · ');
 }
 
+function aspectRatioFromDimensions(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return `${Math.round(width)} / ${Math.round(height)}`;
+}
+
+function parseStoredAspectRatio(value: string | null) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  const pair = normalized.match(/^(\d+(?:\.\d+)?)\s*(?::|\/|x|X|×)\s*(\d+(?:\.\d+)?)$/);
+  if (pair) return aspectRatioFromDimensions(Number(pair[1]), Number(pair[2]));
+  const decimal = Number(normalized);
+  if (Number.isFinite(decimal) && decimal > 0) return `${decimal} / 1`;
+  return null;
+}
+
+function parseResolutionAspectRatio(value: string | null) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  const pair = normalized.match(/(\d{2,5})\s*(?:x|X|×)\s*(\d{2,5})/);
+  return pair ? aspectRatioFromDimensions(Number(pair[1]), Number(pair[2])) : null;
+}
+
+function getAssetPreviewAspectRatio(item: Pick<AssetLibraryItem, 'ratio' | 'resolution'>) {
+  return parseStoredAspectRatio(item.ratio) || parseResolutionAspectRatio(item.resolution);
+}
+
 function formatDateTime(value: string | null) {
   if (!value) return '-';
   return new Date(value).toLocaleString('zh-CN', {
@@ -329,6 +355,7 @@ function AssetsPageContent() {
   const [selectedIds, setSelectedIds] = useState<AssetLibraryItemId[]>([]);
   const [anchorId, setAnchorId] = useState<AssetLibraryItemId | null>(null);
   const [activeItem, setActiveItem] = useState<AssetLibraryItem | null>(null);
+  const [detailMediaAspectRatio, setDetailMediaAspectRatio] = useState<string | null>(null);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [movePanelOpen, setMovePanelOpen] = useState(false);
   const [bulkTarget, setBulkTarget] = useState<AssetBulkTarget>(() => readSavedAssetBulkTarget());
@@ -362,6 +389,9 @@ function AssetsPageContent() {
     .filter((item) => item.source === 'reference_image' && item.referenceImageId)
     .map((item) => item.referenceImageId as string);
   const manageableProjects = projects.filter((project) => project.can_manage_project);
+  const activePreviewAspectRatio = activeItem
+    ? detailMediaAspectRatio || getAssetPreviewAspectRatio(activeItem) || '16 / 10'
+    : '16 / 10';
 
   const groupedItems = useMemo(() => {
     const groups = new Map<string, { key: string; label: string; owner: AssetLibraryItem['owner']; items: AssetLibraryItem[] }>();
@@ -512,6 +542,10 @@ function AssetsPageContent() {
       cancelled = true;
     };
   }, [user, scope, type, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
+
+  useEffect(() => {
+    setDetailMediaAspectRatio(null);
+  }, [activeItem?.id]);
 
   useEffect(() => {
     if (!moveProjectId) {
@@ -1206,11 +1240,35 @@ function AssetsPageContent() {
               <X size={18} />
             </button>
           </div>
-          <div className="asset-detail-preview">
+          <div
+            className={`asset-detail-preview asset-detail-preview-${activeItem.kind}`}
+            style={{ aspectRatio: activePreviewAspectRatio }}
+          >
             {activeItem.kind === 'video' && activeItem.previewUrl ? (
-              <video src={activeItem.previewUrl} controls poster={activeItem.thumbnailUrl || undefined} />
+              <video
+                src={activeItem.previewUrl}
+                controls
+                poster={activeItem.thumbnailUrl || undefined}
+                onLoadedMetadata={(event) => {
+                  const ratio = aspectRatioFromDimensions(
+                    event.currentTarget.videoWidth,
+                    event.currentTarget.videoHeight,
+                  );
+                  if (ratio) setDetailMediaAspectRatio(ratio);
+                }}
+              />
             ) : activeItem.thumbnailUrl ? (
-              <img src={activeItem.thumbnailUrl} alt={activeItem.title} />
+              <img
+                src={activeItem.thumbnailUrl}
+                alt={activeItem.title}
+                onLoad={(event) => {
+                  const ratio = aspectRatioFromDimensions(
+                    event.currentTarget.naturalWidth,
+                    event.currentTarget.naturalHeight,
+                  );
+                  if (ratio) setDetailMediaAspectRatio(ratio);
+                }}
+              />
             ) : (
               <div>{statusLabel(activeItem.status)}</div>
             )}
