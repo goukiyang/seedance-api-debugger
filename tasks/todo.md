@@ -66,13 +66,20 @@
 
 后续落地批次：
 
-- [ ] Batch IP-0：只做接口设计和类型定义，新增 `src/lib/provider/volcengine-ip.ts`、状态/错误码类型、payload mapper 单元测试，不调用真实火山。
+- [x] Batch IP-0：只做接口设计和类型定义，新增 `src/lib/provider/volcengine-ip.ts`、状态/错误码类型、payload mapper 单元测试，不调用真实火山。
 - [ ] Batch IP-1：接环境变量和管理员配置状态页，前端只展示“已配置/未配置”，不回显密钥。
 - [ ] Batch IP-2：实现创建任务服务端链路，复用现有鉴权、项目/视频卡、点数冻结、任务落库；失败必须返还冻结点数。
 - [ ] Batch IP-3：实现查询单任务、结果转存、状态回写、任务详情展示和最近任务缩略图。
 - [ ] Batch IP-4：实现补偿扫描和查询任务列表，用于任务遗漏、回调失败、URL 过期前转存。
 - [ ] Batch IP-5：实现取消/删除 Provider 任务，并和本地任务隐藏/删除做清晰分层。
 - [ ] Batch IP-6：补错误码、回调、脱敏、用量对账和管理员手动 Badcase 上报。
+
+### Review - 2026-06-24 Batch IP-0
+
+- 已新增 `src/lib/provider/volcengine-ip.ts`，只包含纯函数：配置读取、创建任务 payload 构造、任务状态映射、错误分类/重试建议、日志脱敏。
+- 已新增 `scripts/volcengine-ip-provider-smoke.ts`，覆盖默认 Base URL、Model/API Key 配置闸门、`content` 数组构造、状态映射、429/内容安全错误归类和签名 URL/token 脱敏。
+- 已按 TDD 先跑红灯：模块不存在时报 `Cannot find module '@/lib/provider/volcengine-ip'`；实现后 smoke 通过。
+- 本批没有接入 `/api/tasks/create`，没有读取真实 API Key，没有向火山发请求，没有冻结点数，也没有部署线上。
 
 验收标准：
 
