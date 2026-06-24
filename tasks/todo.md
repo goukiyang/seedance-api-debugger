@@ -6963,3 +6963,102 @@ HARD-GATE：
 - [ ] 如果火山版权 IP 只能体验中心使用、API 暂未开放，IP 生成付费提交继续锁定，只保留配置和素材准备。
 - [ ] 如果结果转存失败，不标记任务为最终完成；保留官方临时 URL 并提示 24 小时有效。
 - [ ] 如果测试、构建或部署失败，不提交、不推送、不上线。
+
+## 2026-06-24 无线画布项目 / 视频卡选择器治理规划
+
+### 现象和根因
+
+- 现象：无线画布顶部项目下拉里出现很多同名“我的默认项目”，用户无法判断这些项目分别是谁的、属于什么类型，也无法在当前位置新增或删减项目 / 视频卡。
+- 根因 1：`src/app/api/tools/ultimate-canvas/bootstrap/route.ts` 当前对管理员返回所有 `active` 且非 `system` 的项目，`PROJECT_TAKE=20`，且按 `type + updated_at` 排序；管理员看到的是全站可生成项目，不只是自己的项目。
+- 根因 2：多个用户或历史迁移可能都有同名默认项目；当前 `public/tools/ultimate-canvas/app.js` 用原生 `<select>` 只显示 `project.name`，没有 owner、头像、项目类型、任务数、图集数和权限动作，所以看起来像重复数据。
+- 根因 3：普通生成页 `src/components/generate/GeneratePageClient.tsx` 已有更完整的项目选择器：项目名前有头像、重复名显示 owner、新建项目、归档 / 删除空项目、项目管理入口；无线画布没有复用这个交互口径。
+- 根因 4：视频卡在普通生成页已支持选择和新建，但无线画布只是原生 `<select>`；同时后端目前只有 `POST /api/projects/:id/video-cards` 创建和 `PATCH /api/video-cards/:id` 更新状态，没有直接删除视频卡接口，所以“删减视频卡”必须优先设计为归档 / 废弃，而不是硬删历史记录。
+
+### 目标
+
+- 无线画布不是独立后台，项目和视频卡选择必须和普通生成页保持同一套规则、同一套权限、同一套视觉识别。
+- 所有项目项目前面都挂头像：真实头像优先，没有头像时用稳定首字母 / 颜色头像占位。
+- 同名项目必须能区分 owner、项目类型和历史内容；不要只显示一串相同名称。
+- 下拉菜单内支持新增项目、删除空项目、归档有内容项目。
+- 视频卡下拉内支持新增视频卡、查看视频卡、归档 / 废弃不再使用的视频卡；有生成记录的视频卡不得硬删。
+- 切换项目 / 视频卡后，画布保存、生成 payload、素材 workspace、历史面板和点数归属都必须同步到新上下文。
+
+### 推荐方案
+
+- 不继续扩展原生 `<select>`；改成无线画布自己的轻量下拉面板，视觉和交互对齐普通生成页 `composer-project-picker`。
+- 第一阶段保留无线画布静态 JS 架构，不迁移 React；先在 `public/tools/ultimate-canvas/app.js` 和 `styles.css` 内实现项目 / 视频卡菜单组件。
+- 数据仍通过 `bootstrap` 拉取，但 `bootstrap` 要补齐普通生成页已经依赖的字段：项目 owner、`_count.tasks`、`_count.reference_albums`、`can_manage_project`、视频卡 owner、summary、状态。
+- 项目新增 / 删除 / 归档直接复用现有接口：`POST /api/projects`、`DELETE /api/projects/:id`、`PATCH /api/projects/:id`。
+- 视频卡新增复用 `POST /api/projects/:id/video-cards`；视频卡删减先复用 `PATCH /api/video-cards/:id` 把状态改为 `archived` 或 `discarded`，必要时再补专门的“空视频卡删除”接口。
+
+### Phase 1：补齐 bootstrap 数据口径
+
+- [ ] 修改 `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`：项目列表 include `owner` 和 `_count.tasks/reference_albums`，返回字段对齐 `GeneratePageClient` 的 `ProjectOption`。
+- [ ] 修改 `bootstrap` 项目权限字段：返回 `can_generate`、`can_manage_project`、`can_manage_assets`，管理员也必须明确 owner，而不是只返回 `my_role=admin`。
+- [ ] 修改 `bootstrap` 项目显示逻辑：个人默认项目前端统一显示为“个人空间”，原始 `project.name` 保留为调试字段，避免一堆“我的默认项目”直接暴露。
+- [ ] 修改 `bootstrap` 项目排序：优先当前用户自己的 personal/team/company，再显示参与项目；管理员需要查看全站项目时放入“其他项目”分组，不混在自己的默认项目前面。
+- [ ] 修改 `bootstrap` 视频卡列表：include `owner`、summary task count、状态、规格字段，返回是否可生成、是否可归档 / 废弃。
+- [ ] 验证：未登录 `/api/tools/ultimate-canvas/bootstrap` 仍为 401；登录态管理员返回项目必须能区分 owner；普通用户只能看到自己有权限生成的项目。
+
+### Phase 2：项目下拉改为头像 + 动作面板
+
+- [ ] 修改 `public/tools/ultimate-canvas/app.js`：把 `renderContextControls()` 内的项目原生 `<select>` 替换成自定义 `canvas-context-menu`。
+- [ ] 项目触发器显示：头像 + 项目显示名 + 项目类型 / 任务数 / 图集数；没有项目时显示“选择项目”。
+- [ ] 项目列表每一项显示：头像、项目显示名、owner 名、项目类型、任务数、图集数、当前选中勾选。
+- [ ] 同名项目必须显示 owner；即使不同名，也保留头像，满足“项目前面都挂头像”的统一规则。
+- [ ] 项目菜单顶部加入“新建项目”按钮；展开内联表单，调用 `POST /api/projects`，成功后重新 `loadCanvasBootstrap(newProject.id, null)` 并自动选中新项目。
+- [ ] 项目菜单项右侧加入“删除 / 归档”动作：空项目调用 `DELETE /api/projects/:id`；有任务或图集的项目调用 `PATCH /api/projects/:id` 归档；默认项目和无权限项目不显示危险动作。
+- [ ] 删除 / 归档必须二次确认；确认弹窗说明“有历史内容只能归档，不能硬删”。
+- [ ] 项目切换后清空当前 `selectedVideoCardId`，重新拉取视频卡；如果当前画布文档属于旧项目，提示用户“切换项目会加载该项目最近画布 / 或创建新画布”，不能静默把旧画布保存到新项目。
+- [ ] 修改 `public/tools/ultimate-canvas/styles.css`：新增项目菜单、头像、动作按钮、确认态样式；移动端不横向溢出。
+
+### Phase 3：视频卡下拉支持新增和删减
+
+- [ ] 修改 `public/tools/ultimate-canvas/app.js`：把视频卡原生 `<select>` 替换成和项目菜单一致的面板。
+- [ ] 视频卡触发器显示：视频卡标题、规格摘要、状态；没有视频卡时显示“选择 / 新建视频卡”。
+- [ ] 视频卡列表每一项显示：标题、目标、状态、比例、时长、分辨率、生成次数、owner 头像。
+- [ ] 视频卡菜单顶部加入“新建视频卡”按钮；内联表单字段至少包含标题、视频目标，可选规格后续再补；调用 `POST /api/projects/:projectId/video-cards`。
+- [ ] 新建视频卡成功后自动选中，更新 `canvasRuntime.selectedVideoCardId`，重新 `loadCanvasBootstrap(projectId, newCard.id)`，并触发 `scheduleCanvasSave('video_card_create')`。
+- [ ] 视频卡菜单项加入“查看视频卡”入口，跳到 `/projects/:projectId/video-cards/:cardId`。
+- [ ] 视频卡菜单项加入“归档 / 废弃”动作：有任务记录的卡走 `PATCH /api/video-cards/:id` 改 `archived`；无任务卡可先走 `discarded`，是否补 DELETE 接口需单独评估数据库关系。
+- [ ] 如果后端当前不允许把 active/draft 改成 `archived/discarded`，先补最小 `PATCH` 支持和权限校验，不新增破坏性 DELETE。
+- [ ] 已封存 `sealed`、已归档 `archived`、已合并 `merged` 的视频卡默认不允许生成，只能查看。
+- [ ] 删除 / 归档当前选中的视频卡后，自动选择同项目下一张可生成卡；没有可用卡时禁用图片 / 视频生成并提示创建视频卡。
+
+### Phase 4：普通生成页口径抽象复用
+
+- [ ] 抽出项目显示纯函数，避免普通生成页和无线画布各写一套：`projectDisplayName`、`projectMetaLabel`、`projectOwnerUser`、`projectRemovalAction`。
+- [ ] 建议新增 `src/lib/projects/display.ts` 或同等 helper；普通生成页和无线画布 bootstrap / 前端展示都复用。
+- [ ] 抽出视频卡显示纯函数：状态文案、规格摘要、是否可生成、是否可归档。
+- [ ] 如果无线画布继续保持静态 JS，后端可以在 bootstrap 里直接返回 `display_name`、`meta_label`、`removal_action`、`owner`，避免静态 JS 重写过多业务判断。
+- [ ] 保持普通生成页现有行为不回归；无线画布只是对齐，不改变 `/generate` 的主流程。
+
+### Phase 5：验证和闭环
+
+- [ ] 本地验证：`git diff --check`。
+- [ ] 类型验证：`npx tsc --noEmit --pretty false`。
+- [ ] Lint：`npm run lint`。
+- [ ] 构建：`npm run build`。
+- [ ] 静态 JS 语法：`node --check public/tools/ultimate-canvas/app.js`。
+- [ ] 登录态页面验证：管理员进入 `/tools/ultimate-canvas`，项目菜单中每个项目都有头像、owner、类型和动作；同名“个人空间”能区分 owner。
+- [ ] 普通用户验证：只能看到自己可生成项目；无权限项目不出现危险动作。
+- [ ] 新建项目验证：无线画布菜单内新建项目后自动选中，并能继续新建视频卡。
+- [ ] 项目删除 / 归档验证：空项目可删除；有任务或图集项目只能归档；默认项目不可删除。
+- [ ] 新建视频卡验证：菜单内创建后自动选中；生成按钮解除“缺少归属”。
+- [ ] 视频卡归档 / 废弃验证：归档当前卡后不能继续生成，自动切换到下一张可用卡或提示新建。
+- [ ] 线上闭环：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 `/api/config`、`/login`、`/tools/ultimate-canvas` 登录保护、跨健康守护周期。
+- [ ] Git 闭环：聚焦提交、推送 `codex/v12-full-todo`、创建并推送 rollback tag、登记 `/Volumes/Data/Projects/project-version-registry.md`。
+
+### 风险和停止条件
+
+- 如果发现“我的默认项目”实际是历史重复 personal 项目数据，而不是多用户默认项目，只规划 UI 区分还不够，必须另开数据清理任务；清理前要备份数据库并确认任务 / 图集归属。
+- 如果删除项目会影响任务、图集、成本账本或资产归属，不允许硬删，只能归档。
+- 如果视频卡存在任务、成本、最终版或分支，不允许硬删，只能归档 / 废弃。
+- 如果无线画布切换项目会把旧画布文档保存到新项目，必须先修保存隔离，不能继续做生成接入。
+- 如果普通生成页和无线画布在项目权限、点数归属、视频卡可生成状态上出现差异，以普通生成页现有后端权限为准，不在无线画布里绕过。
+
+### 当前结论
+
+- 截图里的“很多我的默认项目”不是用户应该直接承受的 UI；短期要先用头像、owner、分组和项目类型消除歧义。
+- 中期要把无线画布项目 / 视频卡选择器提升到普通生成页同等级能力：新增、删除 / 归档、查看、自动选中、权限提示。
+- 不建议为了“看起来少一点”简单限制数量或隐藏项目；这会掩盖管理员全站视角和历史同名项目问题，后续生成归属仍会混乱。
