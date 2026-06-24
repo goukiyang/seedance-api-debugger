@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { uploadAsset } from '@/lib/assets/storage';
-import { uploadPublicAsset } from '@/lib/assets/public-storage';
+import { isPubliclyReachableUrl, uploadPublicAsset } from '@/lib/assets/public-storage';
 
 export const SITE_UPLOAD_ALLOWED_TYPES = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp',
@@ -20,6 +20,7 @@ export type SiteUploadResult = {
   fileSize: number;
   mimeType: string;
   hash: string;
+  reused: boolean;
   isPubliclyReachable: boolean;
   storageProvider?: string;
   publicUploadWarning?: string;
@@ -42,9 +43,24 @@ export async function uploadSiteAsset(
   fileSize: number,
   ownerId: string,
 ): Promise<SiteUploadResult> {
+  const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId);
+
+  if (localResult.reused) {
+    const isPubliclyReachable = isPubliclyReachableUrl(localResult.originalUrl);
+    return {
+      ...localResult,
+      fileName,
+      fileSize,
+      mimeType,
+      isPubliclyReachable,
+      publicUploadWarning: isPubliclyReachable
+        ? undefined
+        : '已复用已有本地素材链接，当前链接不是公网地址。',
+    };
+  }
+
   try {
     const pubResult = await uploadPublicAsset(buffer, fileName, mimeType);
-    const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId);
 
     await prisma.asset.update({
       where: { id: localResult.assetId },
@@ -62,7 +78,6 @@ export async function uploadSiteAsset(
       publicUploadWarning: pubResult.warning,
     };
   } catch (pubError) {
-    const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId);
     return {
       ...localResult,
       fileName,

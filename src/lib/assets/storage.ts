@@ -129,6 +129,7 @@ export interface UploadResult {
   originalUrl: string;
   thumbnailUrl: string | null;
   hash: string;
+  reused: boolean;
   width?: number;
   height?: number;
 }
@@ -161,18 +162,14 @@ export async function uploadAsset(
     let height = existing.height;
 
     const canClaimLegacyAsset = existing.owner_id === 'default-user' && ownerId !== 'default-user';
-    const isSameOwner = existing.owner_id === ownerId;
-    if (!isSameOwner && !canClaimLegacyAsset && ownerId !== 'default-user') {
-      throw new Error('相同文件已由其他用户上传，当前账号不能直接复用该素材。请从共享图集选择，或联系管理员开放共享。');
-    }
 
     // 历史数据里存在 default-user 资产；真实用户重新上传同一文件时归属到当前用户。
     if (canClaimLegacyAsset) {
       updates.owner_id = ownerId;
     }
 
-    // 用户重新上传自己隐藏/删除过的文件时，恢复为可见资产，避免“上传成功但列表不可见”。
-    if ((isSameOwner || canClaimLegacyAsset) && existing.status !== 'active') {
+    // Asset 按文件 hash 全站去重；任意用户重新上传同一文件，都复用同一后台链接并恢复可见。
+    if (existing.status !== 'active') {
       updates.status = 'active';
     }
 
@@ -206,6 +203,7 @@ export async function uploadAsset(
       originalUrl: (updates.original_url as string | undefined) ?? existing.original_url,
       thumbnailUrl,
       hash: existing.hash ?? '',
+      reused: true,
       width: width ?? undefined,
       height: height ?? undefined,
     };
@@ -252,6 +250,7 @@ export async function uploadAsset(
     originalUrl: asset.original_url,
     thumbnailUrl: asset.thumbnail_url,
     hash: asset.hash ?? '',
+    reused: false,
     width: asset.width ?? undefined,
     height: asset.height ?? undefined,
   };
