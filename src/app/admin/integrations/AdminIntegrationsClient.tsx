@@ -52,6 +52,19 @@ type ImageGenerationConfig = {
   supports_async_task: boolean;
 };
 
+type VolcengineIpConfig = {
+  enabled: boolean;
+  ready: boolean;
+  provider: 'volcengine_ip';
+  base_url: string;
+  create_task_path: string;
+  default_model: string;
+  model: string;
+  api_key_configured: boolean;
+  model_configured: boolean;
+  missing: Array<'api_key' | 'model'>;
+};
+
 type SubmitState = {
   type: 'success' | 'error';
   message: string;
@@ -101,6 +114,19 @@ const EMPTY_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
   supports_async_task: false,
 };
 
+const EMPTY_VOLCENGINE_IP_CONFIG: VolcengineIpConfig = {
+  enabled: false,
+  ready: false,
+  provider: 'volcengine_ip',
+  base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+  create_task_path: '/contents/generations/tasks',
+  default_model: '',
+  model: '',
+  api_key_configured: false,
+  model_configured: false,
+  missing: ['api_key', 'model'],
+};
+
 function selectorLabel(type: UserSelectorType) {
   if (type === 'id') return '用户 ID';
   if (type === 'username') return '用户名';
@@ -117,17 +143,21 @@ export default function AdminIntegrationsClient() {
   const [config, setConfig] = useState<CodexConfig>(EMPTY_CONFIG);
   const [muskConfig, setMuskConfig] = useState<MuskConfig>(EMPTY_MUSK_CONFIG);
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
+  const [volcengineConfig, setVolcengineConfig] = useState<VolcengineIpConfig>(EMPTY_VOLCENGINE_IP_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [muskSaving, setMuskSaving] = useState(false);
   const [muskTesting, setMuskTesting] = useState(false);
   const [imageSaving, setImageSaving] = useState(false);
+  const [volcengineSaving, setVolcengineSaving] = useState(false);
   const [token, setToken] = useState('');
   const [clearToken, setClearToken] = useState(false);
   const [muskApiKey, setMuskApiKey] = useState('');
   const [clearMuskApiKey, setClearMuskApiKey] = useState(false);
   const [imageApiKey, setImageApiKey] = useState('');
   const [clearImageApiKey, setClearImageApiKey] = useState(false);
+  const [volcengineApiKey, setVolcengineApiKey] = useState('');
+  const [clearVolcengineApiKey, setClearVolcengineApiKey] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
   const [muskTestState, setMuskTestState] = useState<MuskTestState>(null);
 
@@ -157,17 +187,28 @@ export default function AdminIntegrationsClient() {
     return '配置未就绪';
   }, [imageConfig]);
 
+  const volcengineStatusText = useMemo(() => {
+    if (volcengineConfig.ready) return '已启用';
+    if (!volcengineConfig.enabled) return '未启用';
+    if (!volcengineConfig.base_url) return '缺少 API 地址';
+    if (!volcengineConfig.default_model) return '缺少 Model ID';
+    if (!volcengineConfig.api_key_configured) return '缺少 API Key';
+    return '配置未就绪';
+  }, [volcengineConfig]);
+
   const loadConfig = async () => {
     try {
-      const [codexRes, muskRes, imageRes] = await Promise.all([
+      const [codexRes, muskRes, imageRes, volcengineRes] = await Promise.all([
         fetch('/api/admin/integrations/codex', { cache: 'no-store' }),
         fetch('/api/admin/integrations/musk', { cache: 'no-store' }),
         fetch('/api/admin/integrations/image-generation', { cache: 'no-store' }),
+        fetch('/api/admin/integrations/volcengine-ip', { cache: 'no-store' }),
       ]);
-      const [codexData, muskData, imageData] = await Promise.all([
+      const [codexData, muskData, imageData, volcengineData] = await Promise.all([
         codexRes.json(),
         muskRes.json(),
         imageRes.json(),
+        volcengineRes.json(),
       ]);
 
       if (!codexRes.ok) {
@@ -182,9 +223,14 @@ export default function AdminIntegrationsClient() {
         setSubmitState({ type: 'error', message: imageData.error || '读取图形生成 API 配置失败' });
         return;
       }
+      if (!volcengineRes.ok) {
+        setSubmitState({ type: 'error', message: volcengineData.error || '读取火山 IP 生成配置失败' });
+        return;
+      }
       setConfig(codexData.config || EMPTY_CONFIG);
       setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
       setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
+      setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
@@ -302,6 +348,39 @@ export default function AdminIntegrationsClient() {
     }
   };
 
+  const saveVolcengineConfig = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setVolcengineSaving(true);
+    setSubmitState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/volcengine-ip', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: volcengineConfig.enabled,
+          base_url: volcengineConfig.base_url,
+          default_model: volcengineConfig.default_model,
+          api_key: volcengineApiKey,
+          clear_api_key: clearVolcengineApiKey,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+        return;
+      }
+      setVolcengineConfig(data.config || volcengineConfig);
+      setVolcengineApiKey('');
+      setClearVolcengineApiKey(false);
+      setSubmitState({ type: 'success', message: '火山 IP 生成 API 配置已保存到后台配置。' });
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setVolcengineSaving(false);
+    }
+  };
+
   useEffect(() => {
     loadConfig();
   }, []);
@@ -355,7 +434,7 @@ export default function AdminIntegrationsClient() {
         <PageBanner
           eyebrow="管理后台"
           title="API 设置"
-          description="统一维护 Musk API、图形生成 API、Codex API 和外部工具调用 sd2 的后端配置。"
+          description="统一维护火山 IP 生成、Musk API、图形生成 API、Codex API 和外部工具调用 sd2 的后端配置。"
         />
         <div className="card">
           <p className="text-gray">正在读取配置...</p>
@@ -369,7 +448,7 @@ export default function AdminIntegrationsClient() {
       <PageBanner
         eyebrow="管理后台"
         title="API 设置"
-        description="在这里维护 Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
+        description="在这里维护火山 IP 生成、Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
       />
 
       <div className="stats-grid">
@@ -402,6 +481,13 @@ export default function AdminIntegrationsClient() {
           <strong className="stat-value">{imageStatusText}</strong>
           <span className="stat-sub">{imageConfig.provider} · {imageConfig.default_model || 'gemini-3.1-flash-image-preview'}</span>
         </div>
+        <div className="stat-card">
+          <span className="stat-label">火山 IP 生成</span>
+          <strong className="stat-value">{volcengineStatusText}</strong>
+          <span className="stat-sub">
+            {volcengineConfig.default_model || '未设置 Model ID'} · {volcengineConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}
+          </span>
+        </div>
       </div>
 
       {submitState && (
@@ -409,6 +495,108 @@ export default function AdminIntegrationsClient() {
           {submitState.message}
         </div>
       )}
+
+      <form id="volcengine-ip" className="card codex-config-form" onSubmit={saveVolcengineConfig}>
+        <div className="codex-config-head">
+          <div>
+            <h2 className="section-title mb-0">火山 IP 生成 API</h2>
+            <p className="text-gray text-sm mt-2">
+              保存火山 Ark 视频生成密钥和 Model ID。API Key 只会提交到服务端保存，页面和接口不会回显明文。
+            </p>
+          </div>
+          <label className="toggle-switch" aria-label="启用火山 IP 生成 API">
+            <input
+              type="checkbox"
+              checked={volcengineConfig.enabled}
+              onChange={(event) => setVolcengineConfig((prev) => ({ ...prev, enabled: event.target.checked }))}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div className="codex-config-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="volcengine-base-url">API 地址</label>
+            <input
+              id="volcengine-base-url"
+              className="input"
+              value={volcengineConfig.base_url}
+              onChange={(event) => setVolcengineConfig((prev) => ({ ...prev, base_url: event.target.value }))}
+              placeholder="https://ark.cn-beijing.volces.com/api/v3"
+              autoComplete="off"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="volcengine-model">Model ID</label>
+            <input
+              id="volcengine-model"
+              className="input"
+              value={volcengineConfig.default_model}
+              onChange={(event) => setVolcengineConfig((prev) => ({ ...prev, default_model: event.target.value }))}
+              placeholder="按火山控制台已开通模型填写"
+              autoComplete="off"
+              maxLength={120}
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="volcengine-api-key">API Key</label>
+            <input
+              id="volcengine-api-key"
+              className="input"
+              type="password"
+              value={volcengineApiKey}
+              onChange={(event) => {
+                setVolcengineApiKey(event.target.value);
+                if (event.target.value.trim()) setClearVolcengineApiKey(false);
+              }}
+              placeholder={volcengineConfig.api_key_configured ? '当前已设置，留空不变' : '输入火山 API Key'}
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+
+        <div className="codex-config-status">
+          <div>
+            <span className="info-label">当前状态</span>
+            <strong>{volcengineStatusText}</strong>
+          </div>
+          <div>
+            <span className="info-label">Base URL</span>
+            <strong>{volcengineConfig.base_url || '-'}</strong>
+          </div>
+          <div>
+            <span className="info-label">创建任务路径</span>
+            <strong>{volcengineConfig.create_task_path}</strong>
+          </div>
+          <div>
+            <span className="info-label">Model ID</span>
+            <strong>{volcengineConfig.default_model || '-'}</strong>
+          </div>
+          <div>
+            <span className="info-label">API Key</span>
+            <strong>{volcengineConfig.api_key_configured ? '已设置' : '未设置'}</strong>
+          </div>
+        </div>
+
+        <div className="codex-config-actions">
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearVolcengineApiKey}
+              disabled={!volcengineConfig.api_key_configured || Boolean(volcengineApiKey.trim())}
+              onChange={(event) => setClearVolcengineApiKey(event.target.checked)}
+            />
+            清除当前 API Key
+          </label>
+          <button className="btn btn-primary" type="submit" disabled={volcengineSaving}>
+            {volcengineSaving ? '正在保存' : '保存火山 IP 生成 API'}
+          </button>
+        </div>
+      </form>
 
       <form className="card codex-config-form" onSubmit={saveMuskConfig}>
         <div className="codex-config-head">
