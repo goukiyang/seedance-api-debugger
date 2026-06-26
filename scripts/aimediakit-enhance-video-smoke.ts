@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   AI_MEDIAKIT_DEFAULT_BASE_URL,
+  buildEnhanceVideoCreatePayload,
   createEnhanceVideoTask,
   getAiMediaKitTaskStatus,
   requestMediaUploadUrl,
@@ -186,6 +187,20 @@ async function main() {
     () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', client_token: 'bad\nvalue' }, { fetchImpl }),
     /client_token 只能包含 ASCII 可打印字符/,
   );
+
+  for (const allowedVideoUrl of [
+    'http://example.com/source.mp4',
+    'https://example.com/source.mp4',
+    'mediakit://media-file-001',
+    'vod://space/video-id',
+    'tos://bucket/path/source.mp4',
+  ]) {
+    assert.equal(
+      buildEnhanceVideoCreatePayload({ video_url: allowedVideoUrl }).video_url,
+      allowedVideoUrl,
+      `${allowedVideoUrl} should be accepted`,
+    );
+  }
   await assertRejectsMessage(
     () => createEnhanceVideoTask({ video_url: 'ftp://media-file-001' }, { fetchImpl }),
     /video_url 协议只允许/,
