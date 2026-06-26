@@ -265,9 +265,11 @@ export function buildEnhanceVideoCreatePayload(input: EnhanceVideoCreateInput): 
 
 export function mapAiMediaKitTaskStatus(status?: string | null): LocalStatus {
   const normalized = (status || '').trim().toLowerCase();
-  if (normalized === 'completed') return 'succeeded';
-  if (normalized === 'failed') return 'failed';
-  if (normalized === 'running') return 'running';
+  if (['completed', 'succeeded', 'success', 'complete', 'done', 'finished'].includes(normalized)) return 'succeeded';
+  if (['failed', 'failure', 'error'].includes(normalized)) return 'failed';
+  if (['cancelled', 'canceled'].includes(normalized)) return 'cancelled';
+  if (['queued', 'created', 'pending'].includes(normalized)) return 'submitted';
+  if (['running', 'processing', 'in_progress'].includes(normalized)) return 'running';
   return 'running';
 }
 
@@ -302,6 +304,12 @@ function pickNestedNumber(value: unknown, paths: string[][]) {
   if (typeof picked === 'number' && Number.isFinite(picked)) return picked;
   if (typeof picked === 'string' && picked.trim() && Number.isFinite(Number(picked))) return Number(picked);
   return undefined;
+}
+
+function stringFromScalar(value: unknown) {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  return '';
 }
 
 function headersToRecord(headers?: HeadersInit) {
@@ -425,7 +433,8 @@ export function parseAiMediaKitError(raw: unknown): AiMediaKitErrorDetail | unde
     code: pickNestedString(errorValue, [['code'], ['Code'], ['error_code'], ['errorCode']])
       || pickNestedString(raw, [['code'], ['Code']]),
     message: redactOptionalText(
-      pickNestedString(errorValue, [['message'], ['Message'], ['error_message'], ['errorMessage'], ['msg'], ['detail']])
+      stringFromScalar(errorValue)
+      || pickNestedString(errorValue, [['message'], ['Message'], ['error_message'], ['errorMessage'], ['msg'], ['detail']])
       || pickNestedString(raw, [['message'], ['Message']]),
     ),
     type: pickNestedString(errorValue, [['type'], ['Type']])
@@ -670,6 +679,11 @@ export async function requestMediaUploadUrl(
   const fileName = input.file_name.trim();
   if (!fileName) {
     throw new Error('AI MediaKit 上传地址申请缺少 file_name');
+  }
+  if (input.content_length !== undefined) {
+    if (!Number.isFinite(input.content_length) || !Number.isInteger(input.content_length) || input.content_length <= 0) {
+      throw new Error('content_length 必须是正整数');
+    }
   }
   validateClientToken(input.client_token);
 
