@@ -67,6 +67,237 @@
 - [ ] 没有可用 AI MediaKit API Key、资源包/余额或账号权限时，只能做到本地适配和 mock/smoke，不做真实付费验证。
 - [ ] 需要迁移数据库、修改计费规则、上线公开入口、启用真实回调或消耗付费额度前，必须单独确认边界。
 
+### 详细实施计划
+
+目标：
+
+- 让已生成视频可以发起一次“超分/画质增强”处理，生成一个新的本地 `VideoTask`，并沿用现有任务列表、任务详情、视频卡、点数、成本和转存链路。
+- 首版只打通单视频、标准版/专业版、轮询取结果、成功转存、失败返还；不做批量、回调、大模型版、极速版和官方账单对账。
+
+推荐 Git Plan：
+
+- [ ] 开发前从当前远端最新状态新建任务分支：`codex/mediakit-video-enhance`。
+- [ ] 如果当前工作区存在无关改动，先停止并只读报告；不要把超分接入和其他任务混在一个提交。
+- [ ] 提交分组建议：Provider 适配一组、状态分发/转存一组、创建接口/计费一组、前端入口一组、部署登记一组。
+- [ ] 真实上线前创建 rollback tag：`rollback/YYYY-MM-DD-mediakit-video-enhance`，并推送远端。
+- [ ] 线上目标如果是 `sd2.youdoodesign.com`，必须按项目规则用 `youdoo-sites build sd2` 和 `youdoo-sites restart sd2`，不能手动覆盖 `.next-prod`。
+
+Batch 0：开工确认与官方口径冻结
+
+- [ ] 读规则和状态：`AGENTS.md`、`git status --short --branch`、`tasks/todo.md` 本段。
+- [ ] 确认真实工作树：如果目标是线上 `sd2`，先确认是否应在 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo` 落地，而不是旧 checkout。
+- [ ] 重新拉取当天官方文档，至少覆盖：
+  - `POST /api/v1/tools/enhance-video`
+  - `GET /api/v1/tasks/{task_id}`
+  - `AI MediaKit API Key`
+  - 计费/资源包说明
+- [ ] 明确本轮是否允许真实付费调用；未明确授权时只做 mock/smoke 和非付费验证。
+- [ ] 验证命令：`git status --short --branch`、官方文档 URL 可打开或官方接口内容可取回。
+
+Batch 1：新增 AI MediaKit Provider 适配层
+
+- [ ] 新建 `src/lib/provider/aimediakit-enhance-video.ts`。
+- [ ] 在该文件内定义类型：
+  - `EnhanceVideoToolVersion = 'standard' | 'professional'`
+  - `EnhanceVideoScene = 'common' | 'ugc' | 'short_series' | 'aigc' | 'old_film'`
+  - `EnhanceVideoCreateInput`
+  - `EnhanceVideoCreateResponse`
+  - `EnhanceVideoStatusResponse`
+- [ ] 实现配置函数：
+  - `getAiMediaKitConfig()`：读取 `AI_MEDIAKIT_API_KEY`、可选 `AI_MEDIAKIT_BASE_URL`，默认 `https://mediakit.cn-beijing.volces.com`。
+  - `isAiMediaKitConfigured()`：只返回布尔值，不返回明文或 masked key 给前端。
+- [ ] 实现参数校验：
+  - `resolution` 只允许 `240p/360p/480p/540p/720p/1080p/2k/4k`。
+  - `resolution` 与 `resolution_limit` 互斥。
+  - `resolution_limit` 范围 `[128, 2160]`。
+  - `fps` 范围 `[15, 120]`。
+  - `tool_version='professional'` 时不要把 `scene` 当作强依赖。
+- [ ] 实现请求函数：
+  - `createEnhanceVideoTask(input)` 调 `POST /api/v1/tools/enhance-video`。
+  - `getAiMediaKitTaskStatus(providerTaskId)` 调 `GET /api/v1/tasks/{task_id}`。
+  - Authorization 固定为 `Bearer ${AI_MEDIAKIT_API_KEY}`，不得写入 payload、日志或数据库。
+- [ ] 实现状态映射：
+  - `running` -> 本地 `running`
+  - `completed` -> 本地 `succeeded`
+  - `failed` -> 本地 `failed`
+  - 未知状态按 `running` 处理，并保存 raw 供排查。
+- [ ] 实现脱敏：
+  - 日志/ProviderApiRequest/request summary 中隐藏 `Authorization`、API Key、`auth_key` query、签名 URL。
+  - raw response 可以存任务结构，但不要额外复制完整临时 URL 到 `params_json`。
+- [ ] 新建 `scripts/aimediakit-enhance-video-smoke.ts`，用假 `fetch` 验证：
+  - URL、method、header 正确。
+  - payload 不包含 API Key。
+  - 成功创建能解析 `task_id`。
+  - 查询 `completed` 能解析 `result.video_url`、`duration`、`fps`、`resolution`。
+  - 查询 `failed` 能解析 `error.code/message/type`。
+- [ ] 验证命令：`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npm run lint`。
+
+Batch 2：把状态最终化改成按 Provider 分发
+
+- [ ] 新建 `src/lib/provider/video-task-status.ts`，统一暴露：
+  - `getProviderTaskStatus(task: { provider: string; provider_task_id: string | null })`
+  - `refreshProviderTaskResultUrl(task: { id: string; provider: string; provider_task_id: string | null })`
+- [ ] Seedance 分支继续调用 `src/lib/provider/jimeng.ts` 的 `getVideoTaskStatus`。
+- [ ] AI MediaKit 分支调用 `getAiMediaKitTaskStatus`，并把返回结果整理成现有 `ProviderStatusResponse` 形状。
+- [ ] 修改 `src/lib/video/task-finalizer.ts`：
+  - 删除直接 import `../provider/jimeng` 的 `getVideoTaskStatus`。
+  - 用 `getProviderTaskStatus(task)` 替代硬编码 Seedance 查询。
+  - 成功时继续写 `result_video_url`、`duration`、`resolution`、`raw_status_response`。
+  - 失败时继续走现有点数/预算返还。
+- [ ] 修改 `src/lib/video/local-cache.ts`：
+  - `CacheableVideoTask` 增加 `provider: string`。
+  - 403 刷新链接时用 `refreshProviderTaskResultUrl(task)`，不能再固定走 Seedance。
+- [ ] 检查并补齐所有 `cacheTaskVideoToLocal` 调用方的 `provider` 字段：
+  - `src/lib/video/task-finalizer.ts`
+  - `src/app/api/video/download/[id]/route.ts`
+  - `src/app/api/video/thumbnail/[id]/route.ts`
+  - `src/lib/video/bulk-download.ts`
+- [ ] 新建 `scripts/provider-status-router-smoke.ts`，用 mock 函数或假 task 验证：
+  - `provider='seedance'` 走 Seedance 分支。
+  - `provider='volcengine_mediakit'` 走 AI MediaKit 分支。
+  - 未知 provider 返回可读错误，不误调用 Seedance。
+- [ ] 验证命令：`npx tsx scripts/provider-status-router-smoke.ts`、`npm run lint`、`npm run build`。
+
+Batch 3：新增超分创建入口，先不改普通生成入口
+
+- [ ] 新建 `src/app/api/tasks/enhance-video/create/route.ts`，不要恢复 `/api/video/create`。
+- [ ] 入参首版只支持：
+  - `source_task_id`：优先，从已有成功任务发起超分。
+  - `video_url`：管理员/内部测试可选，必须是公网 HTTP/HTTPS、`mediakit://`、`vod://` 或 `tos://`。
+  - `tool_version`：默认 `standard`，可选 `professional`。
+  - `scene`：默认 `aigc`，仅标准版使用。
+  - `resolution`：默认 `1080p`。
+  - `fps`：可选；未传则不插帧。
+  - `bitrate_level`：默认 `medium`，可选 `low/medium/high`。
+  - `video_card_id`：默认沿用 source task 的视频卡；跨卡必须重新做权限校验。
+- [ ] 源视频解析规则：
+  - 如果给 `source_task_id`，先用权限函数确认当前用户能看该任务。
+  - 优先使用已转存的稳定地址 `local_video_path` 转成公网绝对 URL。
+  - 如果只能拿到 Provider 临时 URL，必须确认是 HTTP/HTTPS，并提示可能过期；任务成功后仍要转存。
+  - 如果只有本地相对路径但没有可用公网 Base URL，直接返回 400，不调用火山、不冻结点数。
+- [ ] 点数和预算：
+  - 在 `src/lib/pricing.ts` 增加 `calculateEnhanceVideoEstimatedCost(input)`。
+  - 首版按保守规则冻结点数：以源视频 `duration` 为基础，`standard` 低于 Seedance 生成、`professional` 明显高于 standard；具体数值写入 `pricing_snapshot`，后续按官方账单调整。
+  - 同步在 `src/lib/pricing-client.ts` 增加前端估算函数。
+  - Provider 真实扣费未接入前，`provider_cost_status` 标记为 `estimated_by_rule` 或 `not_recorded`，不得显示成官方已确认成本。
+- [ ] 任务落库：
+  - `provider='volcengine_mediakit'`
+  - `model='enhance-video'`
+  - `generation_mode='enhance_video'`
+  - `prompt='视频超分/画质增强：<源任务短标题或源任务ID>'`
+  - `project_id`、`video_card_id`、`user_id`、`owner_user_id` 沿用权限确认后的目标。
+  - `params_json` 写入非敏感参数、source task id、source provider、目标分辨率、fps、tool_version。
+  - `provider_payload_json` 只存脱敏摘要，不存 API Key 或完整签名 URL。
+- [ ] Provider 提交：
+  - 先创建本地任务、冻结点数、记录成本估算。
+  - 用本地 `task.id` 作为 AI MediaKit `client_token`，避免重复扣费。
+  - 调 `createEnhanceVideoTask` 成功后写入 `provider_task_id`、`raw_create_response`、`local_status='submitted'`。
+  - 成功后调用 `startTaskLocalization(taskId)`。
+  - Provider 创建失败必须释放冻结点数、写 `local_status='failed'`、记录失败原因。
+- [ ] 可复用抽取：
+  - 如果实现中需要复用现有 `handleProviderFailure`，先把它从 `src/app/api/tasks/create/route.ts` 抽到 `src/lib/tasks/provider-failure.ts`。
+  - 抽取必须保持原 `/api/tasks/create` 行为不变，先用 smoke 验证失败返还路径。
+- [ ] 新建 `scripts/enhance-video-create-route-smoke.ts`：
+  - 未登录返回 401。
+  - 未配置 API Key 时不冻结点数。
+  - `resolution` 与 `resolution_limit` 同时传返回 400。
+  - 无公网源视频返回 400。
+  - mock Provider 成功时创建 `VideoTask`，provider/model/generation_mode/status 正确。
+  - mock Provider 失败时冻结点数被释放。
+- [ ] 验证命令：`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npm run lint`、`npm run build`。
+
+Batch 4：类型和列表/详情兼容
+
+- [ ] 修改 `src/types/index.ts`：
+  - `GenerationMode` 增加 `'enhance_video'`，或新增更准确的 `TaskGenerationMode`，避免列表页类型报错。
+  - `GENERATION_MODE_LABELS` 增加 `enhance_video: '视频超分'`。
+  - 如果会影响普通生成表单，表单自己的可选模式必须继续只用原三个 Seedance 模式。
+- [ ] 修改 `src/app/api/video/list/route.ts` 和相关 select：
+  - 确认返回 `provider`，便于前端区分生成任务和超分任务。
+- [ ] 修改 `src/app/tasks/page.tsx`：
+  - `modeLabel` 对 `enhance_video` 显示“视频超分”。
+  - 参数显示改成 `resolution + fps/tool_version`，不要显示无意义的 ratio。
+  - 缩略图仍然在最左侧，不能退化成纯文字列表。
+- [ ] 修改 `src/app/tasks/[id]/page.tsx`：
+  - 对 `provider='volcengine_mediakit'` 展示源任务、工具版本、目标分辨率、fps、转存状态。
+  - 不展示完整签名 URL。
+- [ ] 验证命令：`npm run lint`、`npm run build`。
+
+Batch 5：前端最小入口
+
+- [ ] UI 设计前先使用 `impeccable`，但首版只做内嵌动作，不做新 landing 页。
+- [ ] 优先在 `src/app/tasks/[id]/page.tsx` 给成功任务增加“超分/增强”按钮。
+- [ ] 建议新建 `src/components/EnhanceVideoAction.tsx`，组件负责：
+  - 只在任务 `local_status='succeeded'` 且有可用视频时显示。
+  - 打开一个紧凑弹窗：版本、目标分辨率、可选 fps、预估点数、确认按钮。
+  - 未配置 API Key 或源视频不可公网访问时显示明确原因，不显示可点击确认按钮。
+  - 提交时调用 `/api/tasks/enhance-video/create`。
+  - 成功后跳转新任务详情页或显示“已创建超分任务”链接。
+- [ ] 可选追加入口：
+  - `src/app/tasks/page.tsx` 列表卡片上只对成功任务显示小按钮。
+  - 视频卡详情页同样只对 current/final 任务显示入口。
+- [ ] 交互规则：
+  - 不显示百分比进度；轮询中只显示“已提交 / 处理中 / 已完成 / 失败”。
+  - 估算点数必须来自 `calculateEnhanceVideoEstimatedCostClient`，不能写死在按钮文案里。
+  - 确认按钮要防重复点击，重复提交用 `client_token` / 本地幂等键兜底。
+- [ ] 验证命令：`npm run lint`、`npm run build`；如果有本地页面验证，刷新任务详情页确认按钮显隐和弹窗不溢出。
+
+Batch 6：真实链路验证，默认先不付费
+
+- [ ] 非付费验证：
+  - 无 API Key：接口返回配置缺失，不冻结点数。
+  - mock Provider 成功：任务创建、轮询、转存、缩略图生成链路通过。
+  - mock Provider 失败：失败原因可见，点数/预算返还。
+- [ ] 付费验证前确认：
+  - AI MediaKit API Key 已配置。
+  - 账号有资源包或余额。
+  - 用户明确授权消耗一次真实额度。
+  - 测试视频体积小、时长短、可公开访问。
+- [ ] 真实付费验证：
+  - 用短视频提交 `standard + 720p` 或 `standard + 1080p`。
+  - 记录本地 `task_id`、火山 `task_id`、本地状态变化、最终 `local_video_path`。
+  - 验证任务详情页能播放本地转存结果。
+  - 不在聊天或日志里输出完整签名 URL、API Key、Authorization。
+- [ ] 验证命令：
+  - `curl http://127.0.0.1:3000/api/config`
+  - 浏览器任务详情页真实刷新
+  - `sqlite3 prisma/dev.db "select id,provider,model,generation_mode,local_status,provider_task_id,local_video_path from VideoTask order by created_at desc limit 5;"`
+
+Batch 7：线上发布和回滚
+
+- [ ] 发布前检查：
+  - `git status --short --branch`
+  - `npm run lint`
+  - `npm run build`
+  - 无 `.env`、密钥、临时视频、大文件被 stage。
+- [ ] 形成版本：
+  - 聚焦 commit。
+  - push 到任务分支或 mainline 策略明确的分支。
+  - 创建并推送 rollback tag。
+  - 登记 `/Volumes/Data/Projects/project-version-registry.md`。
+- [ ] 如果发布 `sd2.youdoodesign.com`：
+  - `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`
+  - `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2`
+  - `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`
+  - `curl http://127.0.0.1:3000/api/config`
+  - `curl https://sd2.youdoodesign.com/api/config`
+  - `curl https://sd2.youdoodesign.com/login`
+  - 等约 70 秒后复查 status 和 LaunchAgent runs。
+- [ ] 公网验收：
+  - 登录后打开一个成功任务详情页。
+  - 能看到“超分/增强”入口。
+  - 未配置密钥时入口 disabled 且原因明确；已配置并授权时能创建超分任务。
+  - 新任务完成后视频可播放，缩略图正常，列表最左侧仍是视频预览。
+
+明确暂不做：
+
+- [ ] 不接 `enhance-video-fast` 和 `enhance-video-generative`。
+- [ ] 不做批量超分。
+- [ ] 不做回调公网接收。
+- [ ] 不接官方账单对账。
+- [ ] 不迁移数据库，除非执行中证明现有 `VideoTask` 字段无法承载。
+- [ ] 不把超分入口放到普通生成提交按钮里，避免和 Seedance 生成语义混在一起。
+
 ## 火山 IP 生成页正式版闭环复核 Todo
 
 更新时间：2026-06-24
