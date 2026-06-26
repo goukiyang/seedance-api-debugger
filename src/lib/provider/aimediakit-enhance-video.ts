@@ -9,6 +9,7 @@ export const AI_MEDIAKIT_REQUEST_UPLOAD_PATH = '/api/v1/tools-sync/request-media
 const ENHANCE_VIDEO_RESOLUTIONS = ['240p', '360p', '480p', '540p', '720p', '1080p', '2k', '4k'] as const;
 const ENHANCE_VIDEO_SCENES = ['common', 'ugc', 'short_series', 'aigc', 'old_film'] as const;
 const ENHANCE_VIDEO_TOOL_VERSIONS = ['standard', 'professional'] as const;
+const ENHANCE_VIDEO_ALLOWED_URL_PROTOCOLS = ['http:', 'https:', 'mediakit:', 'vod:', 'tos:'] as const;
 
 export type EnhanceVideoToolVersion = typeof ENHANCE_VIDEO_TOOL_VERSIONS[number];
 export type EnhanceVideoScene = typeof ENHANCE_VIDEO_SCENES[number];
@@ -29,7 +30,7 @@ export interface AiMediaKitRequestOptions {
 }
 
 export interface EnhanceVideoCreateInput {
-  file_id: string;
+  video_url: string;
   tool_version?: EnhanceVideoToolVersion;
   scene?: EnhanceVideoScene;
   resolution?: EnhanceVideoResolution;
@@ -40,7 +41,7 @@ export interface EnhanceVideoCreateInput {
 }
 
 export interface EnhanceVideoCreatePayload {
-  file_id: string;
+  video_url: string;
   tool_version?: EnhanceVideoToolVersion;
   scene?: EnhanceVideoScene;
   resolution?: EnhanceVideoResolution;
@@ -130,7 +131,7 @@ export class AiMediaKitRequestError extends Error {
     super(formatAiMediaKitError(input.error) || 'AI MediaKit 请求失败');
     this.name = 'AiMediaKitRequestError';
     this.statusCode = input.statusCode;
-    this.error = input.error;
+    this.error = redactAiMediaKitErrorDetail(input.error);
     this.raw = input.raw;
   }
 }
@@ -190,10 +191,28 @@ function validateClientToken(clientToken?: string) {
   }
 }
 
-export function validateEnhanceVideoCreateInput(input: EnhanceVideoCreateInput) {
-  if (!input.file_id?.trim()) {
-    throw new Error('AI MediaKit 画质增强缺少 file_id');
+function normalizeVideoUrl(videoUrl?: string) {
+  const trimmed = videoUrl?.trim();
+  if (!trimmed) {
+    throw new Error('AI MediaKit 画质增强缺少 video_url');
   }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error('video_url 协议只允许 http://、https://、mediakit://、vod://、tos://');
+  }
+
+  if (!ENHANCE_VIDEO_ALLOWED_URL_PROTOCOLS.includes(parsed.protocol as typeof ENHANCE_VIDEO_ALLOWED_URL_PROTOCOLS[number])) {
+    throw new Error('video_url 协议只允许 http://、https://、mediakit://、vod://、tos://');
+  }
+
+  return trimmed;
+}
+
+export function validateEnhanceVideoCreateInput(input: EnhanceVideoCreateInput) {
+  normalizeVideoUrl(input.video_url);
 
   if (input.tool_version && !isAllowedValue(input.tool_version, ENHANCE_VIDEO_TOOL_VERSIONS)) {
     throw new Error('tool_version 只允许 standard 或 professional');
@@ -230,7 +249,7 @@ export function buildEnhanceVideoCreatePayload(input: EnhanceVideoCreateInput): 
   validateEnhanceVideoCreateInput(input);
 
   const payload: EnhanceVideoCreatePayload = {
-    file_id: input.file_id.trim(),
+    video_url: normalizeVideoUrl(input.video_url),
   };
 
   if (input.tool_version) payload.tool_version = input.tool_version;
@@ -334,10 +353,40 @@ function redactUrl(raw: string) {
   }
 }
 
+export function redactAiMediaKitText(value: string): string {
+  return value
+    .replace(/\b(?:https?|mediakit|vod|tos):\/\/[^\s"'<>]+/gi, (url) => redactUrl(url))
+    .replace(
+      /\b(?:upload_url|authorization|api[_\s-]?key|apikey|auth_key|token|secret|signature|x-tos-signature)\b\s*[:=]\s*[^&\s,;)]+/gi,
+      (match) => {
+        const separator = match.includes(':') ? ':' : '=';
+        const key = match.split(separator)[0]?.trim() || 'secret';
+        return `${key}${separator} [redacted]`;
+      },
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    .replace(/\bupload_url\b/gi, '[redacted_upload_url]');
+}
+
+function redactOptionalText(value?: string) {
+  return value ? redactAiMediaKitText(value) : undefined;
+}
+
+function redactAiMediaKitErrorDetail(error: AiMediaKitErrorDetail): AiMediaKitErrorDetail {
+  return {
+    code: redactOptionalText(error.code),
+    message: redactOptionalText(error.message),
+    type: redactOptionalText(error.type),
+    param: redactOptionalText(error.param),
+    request_id: redactOptionalText(error.request_id),
+  };
+}
+
 export function redactAiMediaKitLog<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((item) => redactAiMediaKitLog(item)) as T;
   }
+  if (typeof value === 'string') return redactAiMediaKitText(value) as T;
   if (!isRecord(value)) return value;
 
   return Object.entries(value).reduce<Record<string, unknown>>((acc, [key, current]) => {
@@ -355,6 +404,8 @@ export function redactAiMediaKitLog<T>(value: T): T {
       acc[key] = '[redacted]';
     } else if (normalizedKey.includes('url') && typeof current === 'string') {
       acc[key] = redactUrl(current);
+    } else if (typeof current === 'string') {
+      acc[key] = redactAiMediaKitText(current);
     } else {
       acc[key] = redactAiMediaKitLog(current);
     }
@@ -373,8 +424,10 @@ export function parseAiMediaKitError(raw: unknown): AiMediaKitErrorDetail | unde
   const detail: AiMediaKitErrorDetail = {
     code: pickNestedString(errorValue, [['code'], ['Code'], ['error_code'], ['errorCode']])
       || pickNestedString(raw, [['code'], ['Code']]),
-    message: pickNestedString(errorValue, [['message'], ['Message'], ['error_message'], ['errorMessage'], ['msg'], ['detail']])
+    message: redactOptionalText(
+      pickNestedString(errorValue, [['message'], ['Message'], ['error_message'], ['errorMessage'], ['msg'], ['detail']])
       || pickNestedString(raw, [['message'], ['Message']]),
+    ),
     type: pickNestedString(errorValue, [['type'], ['Type']])
       || pickNestedString(raw, [['type'], ['Type']]),
     param: pickNestedString(errorValue, [['param'], ['Param']])
@@ -391,7 +444,7 @@ export function parseAiMediaKitError(raw: unknown): AiMediaKitErrorDetail | unde
 
 export function formatAiMediaKitError(error?: AiMediaKitErrorDetail) {
   if (!error) return undefined;
-  const message = error.message || normalizeProviderErrorMessage(error) || 'AI MediaKit 任务失败';
+  const message = redactAiMediaKitText(error.message || normalizeProviderErrorMessage(error) || 'AI MediaKit 任务失败');
   const prefix = error.code ? `[${error.code}] ` : '';
   const suffix = [
     error.type ? `type=${error.type}` : '',
@@ -399,7 +452,7 @@ export function formatAiMediaKitError(error?: AiMediaKitErrorDetail) {
     error.request_id ? `request_id=${error.request_id}` : '',
   ].filter(Boolean);
 
-  return suffix.length ? `${prefix}${message} (${suffix.join(', ')})` : `${prefix}${message}`;
+  return redactAiMediaKitText(suffix.length ? `${prefix}${message} (${suffix.join(', ')})` : `${prefix}${message}`);
 }
 
 async function requestAiMediaKitJson(
@@ -430,7 +483,7 @@ async function requestAiMediaKitJson(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'network error';
     throw new AiMediaKitRequestError({
-      error: { code: 'NetworkError', message, type: 'network' },
+      error: { code: 'NetworkError', message: redactAiMediaKitText(message), type: 'network' },
     });
   }
 
@@ -524,7 +577,7 @@ export function parseEnhanceVideoStatusResponse(
       ['output', 'tool_version'],
       ['tool_version'],
     ]),
-    error_message: formatAiMediaKitError(error) || normalizeProviderErrorMessage(pickNestedValue(raw, [['error']])),
+    error_message: formatAiMediaKitError(error) || redactOptionalText(normalizeProviderErrorMessage(pickNestedValue(raw, [['error']]))),
     error,
     raw,
   };
@@ -673,7 +726,7 @@ export async function uploadMediaToAiMediaKit(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'media upload failed';
     throw new AiMediaKitRequestError({
-      error: { code: 'UploadNetworkError', message, type: 'network' },
+      error: { code: 'UploadNetworkError', message: redactAiMediaKitText(message), type: 'network' },
     });
   }
 

@@ -61,6 +61,7 @@ async function main() {
   delete process.env.AI_MEDIAKIT_BASE_URL;
 
   const uploadUrl = 'https://upload.example.com/bucket/source.mp4?auth_key=secret&X-Tos-Signature=secret';
+  const failingUploadUrl = 'https://upload.example.com/bucket/fail.mp4?auth_key=secret&X-Tos-Signature=secret';
   const captured: CapturedRequest[] = [];
   const outputLines: string[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -91,7 +92,7 @@ async function main() {
         status: 'failed',
         error: {
           code: 'InvalidParameter',
-          message: 'fps must be between 15 and 120',
+          message: 'fps must be between 15 and 120: https://example.com/bad.mp4?auth_key=secret&X-Tos-Signature=secret',
           type: 'invalid_request_error',
           param: 'fps',
           request_id: 'req-smoke-001',
@@ -101,7 +102,7 @@ async function main() {
 
     if (url.endsWith('/api/v1/tools-sync/request-media-upload-url') && init?.method === 'POST') {
       return jsonResponse({
-        file_id: 'media-file-001',
+        file_id: 'mediakit://media-file-001',
         method: 'PUT',
         upload_headers: {
           'Content-Type': 'video/mp4',
@@ -115,12 +116,16 @@ async function main() {
       return new Response('', { status: 200 });
     }
 
+    if (url === failingUploadUrl && init?.method === 'PUT') {
+      throw new Error(`upload_url failed: ${failingUploadUrl}`);
+    }
+
     return jsonResponse({ error: { code: 'UnexpectedRequest', message: `${init?.method || 'GET'} ${url}` } }, 500);
   };
 
   const created = await createEnhanceVideoTask(
     {
-      file_id: 'media-file-001',
+      video_url: 'mediakit://media-file-001',
       tool_version: 'professional',
       resolution: '1080p',
       fps: 60,
@@ -137,7 +142,8 @@ async function main() {
   assert.equal(headerValue(createRequest.init, 'Authorization'), 'Bearer smoke-mediakit-key-1234567890');
   assert.equal(headerValue(createRequest.init, 'Content-Type'), 'application/json');
   const createBody = JSON.parse(String(createRequest.init.body));
-  assert.equal(createBody.file_id, 'media-file-001');
+  assert.equal(createBody.video_url, 'mediakit://media-file-001');
+  assert.equal('file_id' in createBody, false);
   assert.equal(createBody.tool_version, 'professional');
   assert.equal(createBody.resolution, '1080p');
   assert.equal(createBody.fps, 60);
@@ -156,26 +162,33 @@ async function main() {
   const failed = await getAiMediaKitTaskStatus('failed-task-001', { fetchImpl });
   assert.equal(failed.local_status, 'failed');
   assert.equal(failed.error?.code, 'InvalidParameter');
-  assert.equal(failed.error?.message, 'fps must be between 15 and 120');
+  assert.ok(failed.error?.message?.includes('fps must be between 15 and 120'));
   assert.equal(failed.error?.type, 'invalid_request_error');
   assert.equal(failed.error?.param, 'fps');
   assert.ok(failed.error_message?.includes('[InvalidParameter] fps must be between 15 and 120'));
+  assert.equal(failed.error_message?.includes('auth_key=secret'), false);
+  assert.equal(failed.error_message?.includes('X-Tos-Signature=secret'), false);
+  assert.equal(failed.error_message?.includes('https://example.com/bad.mp4?auth_key=secret&X-Tos-Signature=secret'), false);
 
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ file_id: 'media-file-001', resolution: '720p', resolution_limit: 720 }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', resolution: '720p', resolution_limit: 720 }, { fetchImpl }),
     /resolution 与 resolution_limit 不能同时传/,
   );
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ file_id: 'media-file-001', fps: 121 }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', fps: 121 }, { fetchImpl }),
     /fps 必须在 15 到 120 之间/,
   );
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ file_id: 'media-file-001', client_token: 'x'.repeat(65) }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', client_token: 'x'.repeat(65) }, { fetchImpl }),
     /client_token 最多 64 个字符/,
   );
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ file_id: 'media-file-001', client_token: 'bad\nvalue' }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', client_token: 'bad\nvalue' }, { fetchImpl }),
     /client_token 只能包含 ASCII 可打印字符/,
+  );
+  await assertRejectsMessage(
+    () => createEnhanceVideoTask({ video_url: 'ftp://media-file-001' }, { fetchImpl }),
+    /video_url 协议只允许/,
   );
 
   const uploadTicket = await requestMediaUploadUrl(
@@ -186,7 +199,7 @@ async function main() {
     },
     { fetchImpl },
   );
-  assert.equal(uploadTicket.file_id, 'media-file-001');
+  assert.equal(uploadTicket.file_id, 'mediakit://media-file-001');
   assert.equal(uploadTicket.method, 'PUT');
   assert.equal(uploadTicket.upload_headers['Content-Type'], 'video/mp4');
   assert.equal(uploadTicket.upload_url, uploadUrl);
@@ -219,6 +232,25 @@ async function main() {
   assert.equal(String(headerValue(putRequest.init, 'Content-Type')).includes('multipart/form-data'), false);
   assert.ok(putRequest.init.body instanceof Uint8Array);
   assert.equal(outputLines.join('\n').includes(uploadUrl), false);
+
+  await assert.rejects(
+    () => uploadMediaToAiMediaKit(
+      {
+        upload_url: failingUploadUrl,
+        method: 'PUT',
+        upload_headers: uploadTicket.upload_headers,
+        body: new Uint8Array([1, 2, 3, 4]),
+      },
+      { fetchImpl },
+    ),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message.includes(failingUploadUrl), false);
+      assert.equal(error.message.includes('auth_key=secret'), false);
+      assert.equal(error.message.includes('X-Tos-Signature=secret'), false);
+      return true;
+    },
+  );
 
   restoreEnv();
   console.log('aimediakit-enhance-video smoke passed');
