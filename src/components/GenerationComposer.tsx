@@ -23,6 +23,7 @@ import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
+import type { VolcengineIpModelOption } from '@/lib/integrations/volcengine-ip-models';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
@@ -374,6 +375,7 @@ interface Props {
     agentPromptSnapshot: string | null;
     finalPromptSnapshot: string | null;
     promptUserEdited: boolean;
+    model: string | null;
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
@@ -389,6 +391,7 @@ interface Props {
   resultReturnTo?: string;
   submitDisabledReason?: string | null;
   modelLabel?: string;
+  modelOptions?: VolcengineIpModelOption[];
 }
 
 export function GenerationComposer({
@@ -415,6 +418,7 @@ export function GenerationComposer({
   resultReturnTo = '/generate',
   submitDisabledReason = null,
   modelLabel = 'Seedance 2.0',
+  modelOptions = [],
 }: Props) {
   const workspace = useWorkspace();
   const templateEnabled = templateMode === 'workbench';
@@ -469,6 +473,7 @@ export function GenerationComposer({
   const [generateAudio, setGenerateAudio] = useState(true);
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(modelOptions[0]?.id || '');
   const [resolutionApprovalConfirmed, setResolutionApprovalConfirmed] = useState(false);
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
@@ -787,6 +792,17 @@ export function GenerationComposer({
     }
   }, [need1080pApproval]);
 
+  useEffect(() => {
+    const fallbackModel = modelOptions[0]?.id || '';
+    if (!fallbackModel) {
+      if (selectedModel) setSelectedModel('');
+      return;
+    }
+    if (!modelOptions.some((option) => option.id === selectedModel)) {
+      setSelectedModel(fallbackModel);
+    }
+  }, [modelOptions, selectedModel]);
+
   // ============================================================================
   // Handlers
   // ============================================================================
@@ -813,6 +829,7 @@ export function GenerationComposer({
       agentPromptSnapshot,
       finalPromptSnapshot: prompt,
       promptUserEdited,
+      model: selectedModel || null,
     });
   }, [
     submitBlocker,
@@ -836,6 +853,7 @@ export function GenerationComposer({
     selectedPlanKey,
     agentPromptSnapshot,
     promptUserEdited,
+    selectedModel,
   ]);
 
   const handlePromptChange = useCallback((nextPrompt: string) => {
@@ -1678,6 +1696,9 @@ export function GenerationComposer({
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
           modelLabel={modelLabel}
+          modelOptions={modelOptions}
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
           onModeChange={setGenerationMode}
           onRatioChange={setRatio}
           onDurationChange={setDuration}

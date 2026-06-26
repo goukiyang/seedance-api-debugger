@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { ParamChip } from '@/components/ParamChip';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution } from '@/types';
 import { GENERATION_MODE_LABELS, RATIO_LABELS, RATIO_OPTIONS, DURATION_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import type { VolcengineIpModelOption } from '@/lib/integrations/volcengine-ip-models';
 
 interface Props {
   generationMode: GenerationMode;
@@ -24,6 +25,9 @@ interface Props {
   lockReason?: string;
   compactControls?: boolean;
   modelLabel?: string;
+  modelOptions?: VolcengineIpModelOption[];
+  selectedModel?: string | null;
+  onModelChange?: (model: string) => void;
 }
 
 export function ComposerActionBar({
@@ -45,8 +49,15 @@ export function ComposerActionBar({
   lockReason = '此参数来自视频卡交付规格',
   compactControls = false,
   modelLabel = 'Seedance 2.0',
+  modelOptions = [],
+  selectedModel = null,
+  onModelChange,
 }: Props) {
+  const hasModelOptions = modelOptions.length > 0;
+  const selectedModelOption = modelOptions.find((option) => option.id === selectedModel) || modelOptions[0] || null;
+  const effectiveModelLabel = selectedModelOption?.label || modelLabel;
   const [showModeMenu, setShowModeMenu] = useState(false);
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
   const [showResolutionMenu, setShowResolutionMenu] = useState(false);
@@ -57,7 +68,35 @@ export function ComposerActionBar({
         <ParamChip label="视频生成" active />
 
         {/* 模型标签 */}
-        <ParamChip label={modelLabel} />
+        <div className="composer-chip-wrap">
+          <ParamChip
+            label={effectiveModelLabel}
+            dropdown={hasModelOptions}
+            onClick={hasModelOptions ? () => setShowModelMenu(!showModelMenu) : undefined}
+          />
+          {showModelMenu && hasModelOptions && (
+            <>
+              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowModelMenu(false)} />
+              <div className="composer-chip-dropdown composer-model-options">
+                {modelOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`composer-chip-dropdown-item ${option.id === selectedModelOption?.id ? 'active' : ''}`}
+                    onClick={() => {
+                      onModelChange?.(option.id);
+                      setShowModelMenu(false);
+                    }}
+                    title={option.id}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.detail}</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
 
         {/* 模式选择 */}
         <div className="composer-chip-wrap">
@@ -177,7 +216,7 @@ export function ComposerActionBar({
         <details className="composer-advanced-params">
           <summary>
             <span>生成参数</span>
-            <strong>{modelLabel} · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}</strong>
+            <strong>{effectiveModelLabel} · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}</strong>
           </summary>
           {chips}
         </details>

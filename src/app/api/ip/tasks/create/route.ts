@@ -221,6 +221,10 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
+  const requestedModel = typeof body.model === 'string' && body.model.trim()
+    ? body.model.trim().slice(0, 160)
+    : null;
+  const selectedModel = requestedModel || volcengineSettings.default_model;
 
   // --- Validation ---
   if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
@@ -465,6 +469,9 @@ export async function POST(request: NextRequest) {
     body_source_request_id: bodySourceRequestId,
     client_name: clientName,
     source_label: effectiveSourceLabel,
+    requested_model: requestedModel,
+    selected_model: selectedModel,
+    admin_default_model: volcengineSettings.default_model,
     paid_generation_guard: paidGenerationGuard.metadata,
   };
   const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
@@ -690,7 +697,7 @@ export async function POST(request: NextRequest) {
   // --- Create snapshot ---
   const content = buildVolcengineIpCreatePayload({
     ...providerInput,
-    model: volcengineSettings.default_model,
+    model: selectedModel,
   }).content;
   const snapshot = await createTaskSnapshot({
     workspaceId,
@@ -744,7 +751,7 @@ export async function POST(request: NextRequest) {
       const task = await tx.videoTask.create({
         data: {
           provider: VOLCENGINE_IP_VIDEO_PROVIDER,
-          model: volcengineSettings.default_model,
+          model: selectedModel,
           generation_mode: generationMode,
           prompt: body.prompt.trim(),
           source_type: requestSource.source_type,
@@ -1008,6 +1015,7 @@ export async function POST(request: NextRequest) {
       idempotencyKey: idempotencyKey || null,
       requestPayload: {
         ...providerInput,
+        model: selectedModel,
         source: {
           type: requestSource.source_type,
           label: effectiveSourceLabel,
@@ -1020,7 +1028,7 @@ export async function POST(request: NextRequest) {
 
     const providerResult = await createVolcengineIpVideoTask({
       ...providerInput,
-      model: volcengineSettings.default_model,
+      model: selectedModel,
     });
 
     await prisma.videoTask.update({

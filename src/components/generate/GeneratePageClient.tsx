@@ -16,6 +16,7 @@ import {
   normalizeGenerationDefaults,
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
+import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
 
 // ============================================================================
 // Types
@@ -1088,6 +1089,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     agentPromptSnapshot?: string | null;
     finalPromptSnapshot?: string | null;
     promptUserEdited?: boolean;
+    model?: string | null;
   }) => {
     setSubmitting(true);
     setError(null);
@@ -1137,6 +1139,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           agent_prompt_snapshot: params.agentPromptSnapshot || null,
           final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
           prompt_user_edited: params.promptUserEdited === true,
+          model: params.model || undefined,
         }),
       });
 
@@ -1750,6 +1753,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           resultReturnTo={surfaceConfig.routePath}
           submitDisabledReason={surfaceConfig.submitDisabledReason}
           modelLabel={surfaceConfig.modelLabel}
+          modelOptions={isIpSurface ? VOLCENGINE_IP_MODEL_OPTIONS : []}
         />
 
         {/* 最近任务 */}
