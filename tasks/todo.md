@@ -6,6 +6,67 @@
 
 最新验收结论：整份 V1.2 仍未完整落地。当前代码已经有视频卡 P0 归档入口、公共项目预算底座、审批记录表、审批中心页面、1080p 基础校验、新建项目“默认记账 / 预算记账”选择入口，但这些还没有形成完整业务闭环。后续执行必须以本 todo 为准，不得把“有模型/有页面/有审批记录”误判为“业务已闭环”。
 
+## 视频超分 / AI MediaKit 画质增强接入 Todo
+
+更新时间：2026-06-26
+
+规划结论：
+
+- 用户给出的 `https://www.volcengine.com/docs/6448/2407225?lang=zh` 实际对应“图像画质增强”；视频超分应对齐同一 AI MediaKit 文档库中的视频画质增强能力。
+- 首版不要新建一套“超分任务系统”；按现有 `VideoTask`、任务状态轮询、结果转存、缩略图、点数冻结和成本账本闭环接入，把超分视为一种视频处理任务。
+- 首版优先接 `POST /api/v1/tools/enhance-video` 标准版 / 专业版；极速版 `enhance-video-fast` 和大模型版 `enhance-video-generative` 先保留成二期或后台开关，避免第一版参数分叉过多。
+- 官方返回的视频结果链接默认只有 24 小时有效；本项目完成标准必须包含成功后转存到本地/对象存储，页面展示不得依赖火山临时链接。
+
+官方文档对照范围：
+
+- `画质增强（标准版和专业版）`：开发流程、场景、分辨率、帧率、输入限制。
+- `提交画质增强（标准版和专业版）任务 API`：`POST https://mediakit.cn-beijing.volces.com/api/v1/tools/enhance-video`。
+- `查询任务信息 API`：`GET https://mediakit.cn-beijing.volces.com/api/v1/tasks/{task_id}`。
+- `基础概念及准备工作`：AI MediaKit API Key、异步任务、幂等 `client_token`、轮询和回调。
+- `提交画质增强（极速版）任务 API`、`提交画质增强（大模型）任务 API`：作为后续扩展参考。
+
+首版范围：
+
+- [ ] 新增 AI MediaKit Provider 适配层：读取 `AI_MEDIAKIT_API_KEY` / Base URL，只在服务端使用密钥，不输出、不入库、不回显。
+- [ ] 新增创建超分任务函数：提交 `video_url`、`tool_version`、`scene`、`resolution` 或 `resolution_limit`、`fps`、`bitrate_level`、`client_token`、可选 `callback_url`。
+- [ ] 新增查询超分任务函数：轮询 `GET /api/v1/tasks/{task_id}`，把 `running`、`completed`、`failed` 映射到本地 `submitted/running/succeeded/failed`。
+- [ ] 复用 `VideoTask`：`provider` 建议标记为 `volcengine_mediakit`，`model` 或 `generation_mode` 标记 `enhance-video`，原视频 URL 和超分参数写入 `params_json` / `provider_payload_json`。
+- [ ] 复用现有 `/api/tasks/create` 或新增同风格专用入口 `/api/tasks/enhance-video/create`；不要恢复已废弃的 `/api/video/create`。
+- [ ] 接入点数冻结与失败返还：首版先使用保守预估点数，真实官方扣费未确认前 `provider_cost_status` 保持 `estimated_by_rule` 或 `not_recorded`。
+- [ ] 成功后立即调用现有结果缓存/转存和缩略图逻辑，确保任务列表、详情页、下载入口能长期打开结果。
+- [ ] 前端入口先做最小闭环：在任务结果或视频卡上增加“超分/增强”动作，带入当前结果视频 URL；首版不做复杂批量超分。
+
+参数边界：
+
+- [ ] `resolution` 与 `resolution_limit` 互斥；首版 UI 只开放一种，建议先开放 `resolution` 档位：`720p`、`1080p`、`2k`、`4k`。
+- [ ] `fps` 取值按官方限制 `[15, 120]`，并提示建议不超过原片 4 倍；没有真实原片 fps 时不要显示假百分比或假处理进度。
+- [ ] 标准版 `scene` 可选 `common`、`ugc`、`short_series`、`aigc`、`old_film`；专业版不依赖 `scene`。
+- [ ] 输入视频必须是公网 HTTP/HTTPS URL、`mediakit://`、`vod://` 或 `tos://`；本地临时路径必须先转成公网可访问地址。
+- [ ] 输入文件建议不超过 10 GB，标准/专业/极速输入视频最高支持 2K；大模型版输入限制更窄，首版不默认开放。
+
+二期范围：
+
+- [ ] 增加极速版 `enhance-video-fast`，用于低延迟、成本敏感场景。
+- [ ] 增加大模型版 `enhance-video-generative`，只在明确高画质修复需求和预算确认后开放。
+- [ ] 接入事件回调；回调只能作为提示，最终仍要用任务 ID 主动查询确认状态后再落库。
+- [ ] 接入官方资源包/账单对账，把真实费用写入 Provider 成本字段和后台成本报表。
+- [ ] 支持批量超分和项目级队列，但必须先完成单任务闭环。
+
+验收标准：
+
+- [ ] 未配置 AI MediaKit API Key 时，前端不得发起真实请求，也不得冻结点数。
+- [ ] 提交成功后本地任务能看到火山 `task_id`、原始状态和本地状态。
+- [ ] 轮询到 `completed` 后，页面能展示增强后视频，且视频已转存，不依赖 24 小时临时 URL。
+- [ ] 轮询到 `failed` 后，用户能看到可理解失败原因，冻结点数已返还。
+- [ ] 任务列表、详情页、视频卡详情的最左侧仍按项目 UI 规则展示缩略图。
+- [ ] 日志、raw response、后台详情不得泄露 API Key、Authorization、签名 URL 或完整临时下载链接。
+- [ ] `npm run lint`、`npm run build` 通过；如果改到线上页面，还必须按 sd2 规则 build/restart 并公网验证。
+
+停止条件：
+
+- [ ] 没有可用 AI MediaKit API Key、资源包/余额或账号权限时，只能做到本地适配和 mock/smoke，不做真实付费验证。
+- [ ] 需要迁移数据库、修改计费规则、上线公开入口、启用真实回调或消耗付费额度前，必须单独确认边界。
+
 ## 火山 IP 生成页正式版闭环复核 Todo
 
 更新时间：2026-06-24
