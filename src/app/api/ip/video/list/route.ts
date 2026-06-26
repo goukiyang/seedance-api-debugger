@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
+import {
+  VOLCENGINE_IP_VIDEO_PROVIDER,
+  safeVolcengineIpUserMessage,
+} from '@/lib/provider/volcengine-ip';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 
@@ -55,8 +58,6 @@ export async function GET(request: NextRequest) {
         duration: true,
         resolution: true,
         local_status: true,
-        result_video_url: true,
-        result_last_frame_url: true,
         local_video_path: true,
         error_message: true,
         estimated_cost: true,
@@ -101,7 +102,12 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      tasks,
+      tasks: tasks.map((task) => ({
+        ...task,
+        result_video_url: null,
+        result_last_frame_url: null,
+        error_message: safeVolcengineIpUserMessage(task.error_message),
+      })),
       pagination: {
         page,
         limit,

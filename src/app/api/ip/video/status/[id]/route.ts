@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
-import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
+import {
+  VOLCENGINE_IP_VIDEO_PROVIDER,
+  safeVolcengineIpUserMessage,
+} from '@/lib/provider/volcengine-ip';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 
 export const dynamic = 'force-dynamic';
@@ -20,12 +23,27 @@ function serializeTaskForIpStatus<T extends {
   user?: unknown;
   id: string;
   provider: string;
+  model?: string | null;
   provider_task_id: string | null;
   prompt: string;
+  source_type?: string | null;
+  source_label?: string | null;
+  source_request_id?: string | null;
   generation_mode: string;
   ratio: string | null;
   duration: number | null;
   resolution: string | null;
+  seed?: number | null;
+  generate_audio?: boolean | null;
+  return_last_frame?: boolean | null;
+  watermark?: boolean | null;
+  reference_image_ids?: string | null;
+  reference_image_urls?: string | null;
+  reference_video_urls?: string | null;
+  reference_audio_urls?: string | null;
+  first_frame_url?: string | null;
+  last_frame_url?: string | null;
+  frame_image_urls?: string | null;
   local_status: string;
   provider_status: string | null;
   result_video_url: string | null;
@@ -50,18 +68,33 @@ function serializeTaskForIpStatus<T extends {
   return {
     id: task.id,
     provider: task.provider,
+    model: task.model ?? null,
     provider_task_id: task.provider_task_id,
     prompt: task.prompt,
+    source_type: task.source_type ?? null,
+    source_label: task.source_label ?? null,
+    source_request_id: task.source_request_id ?? null,
     generation_mode: task.generation_mode,
     ratio: task.ratio,
     duration: task.duration,
     resolution: task.resolution,
+    seed: task.seed ?? null,
+    generate_audio: task.generate_audio ?? null,
+    return_last_frame: task.return_last_frame ?? null,
+    watermark: task.watermark ?? null,
+    reference_image_ids: task.reference_image_ids ?? null,
+    reference_image_urls: task.reference_image_urls ?? null,
+    reference_video_urls: task.reference_video_urls ?? null,
+    reference_audio_urls: task.reference_audio_urls ?? null,
+    first_frame_url: task.first_frame_url ?? null,
+    last_frame_url: task.last_frame_url ?? null,
+    frame_image_urls: task.frame_image_urls ?? null,
     local_status: task.local_status,
     provider_status: task.provider_status,
-    result_video_url: task.result_video_url,
-    result_last_frame_url: task.result_last_frame_url,
+    result_video_url: null,
+    result_last_frame_url: null,
     local_video_path: task.local_video_path,
-    error_message: task.error_message,
+    error_message: safeVolcengineIpUserMessage(task.error_message),
     project_id: task.project_id,
     video_card_id: task.video_card_id,
     template_id: task.template_id ?? null,
@@ -150,7 +183,8 @@ export async function GET(
     if (finalizeResult.providerError) {
       return NextResponse.json({
         ...serializeTaskForIpStatus(responseTask),
-        error_message: responseTask.error_message || finalizeResult.providerError,
+        error_message: safeVolcengineIpUserMessage(responseTask.error_message)
+          || '火山任务状态同步失败，请稍后重试。',
       });
     }
 

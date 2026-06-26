@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '@/lib/prisma';
@@ -13,6 +14,7 @@ import {
   VolcengineIpRequestError,
   buildVolcengineIpCreatePayload,
   createVolcengineIpVideoTask,
+  safeVolcengineIpUserMessage,
 } from '@/lib/provider/volcengine-ip';
 import {
   getVolcengineIpApiSettings,
@@ -93,17 +95,60 @@ function parseJsonRecord(value: string | null | undefined) {
   }
 }
 
+type IpIdempotentTask = {
+  id: string;
+  local_status: string;
+  estimated_cost: number | null;
+  frozen_cost: number | null;
+  created_at: Date;
+  source_type: string | null;
+  source_label: string | null;
+  source_request_id: string | null;
+  project_id: string | null;
+  video_card_id: string | null;
+  template_id: string | null;
+  agent_run_id: string | null;
+  selected_agent_plan_key: string | null;
+  billing_scope: string | null;
+  billing_account_id: string | null;
+};
+
+function ipDeduplicatedTaskResponse(existing: IpIdempotentTask) {
+  return NextResponse.json({
+    id: existing.id,
+    status: existing.local_status,
+    estimated_cost: existing.estimated_cost,
+    frozen_cost: existing.frozen_cost,
+    created_at: existing.created_at,
+    deduplicated: true,
+    source_type: existing.source_type,
+    source_label: existing.source_label,
+    source_request_id: existing.source_request_id,
+    project_id: existing.project_id,
+    video_card_id: existing.video_card_id,
+    template_id: existing.template_id,
+    agent_run_id: existing.agent_run_id,
+    selected_agent_plan_key: existing.selected_agent_plan_key,
+    billing_scope: existing.billing_scope,
+    billing_account_id: existing.billing_account_id,
+  });
+}
+
+function isPrismaUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
 function volcengineProviderErrorMessage(error: unknown) {
   if (error instanceof VolcengineIpConfigurationError) {
     return '请先在 API 整合页配置并启用火山 IP 生成 API';
   }
   if (error instanceof VolcengineIpRequestError) {
-    if (error.normalized.providerMessage && error.normalized.providerMessage !== error.normalized.userMessage) {
-      return `${error.normalized.userMessage}（火山返回：${error.normalized.providerMessage}）`;
-    }
     return error.normalized.userMessage;
   }
-  return error instanceof Error ? error.message : '火山 IP 调用异常';
+  return safeVolcengineIpUserMessage(
+    error instanceof Error ? error.message : null,
+    '火山 IP 调用异常',
+  ) || '火山 IP 调用异常';
 }
 
 function volcengineProviderErrorCode(error: unknown) {
@@ -394,24 +439,7 @@ export async function POST(request: NextRequest) {
       if (existing.video_card_id && existing.video_card_id !== videoCard.id) {
         return errorJson('同一个幂等键已绑定到其他视频卡', 409);
       }
-      return NextResponse.json({
-        id: existing.id,
-        status: existing.local_status,
-        estimated_cost: existing.estimated_cost,
-        frozen_cost: existing.frozen_cost,
-        created_at: existing.created_at,
-        deduplicated: true,
-        source_type: existing.source_type,
-        source_label: existing.source_label,
-        source_request_id: existing.source_request_id,
-        project_id: existing.project_id,
-        video_card_id: existing.video_card_id,
-        template_id: existing.template_id,
-        agent_run_id: existing.agent_run_id,
-        selected_agent_plan_key: existing.selected_agent_plan_key,
-        billing_scope: existing.billing_scope,
-        billing_account_id: existing.billing_account_id,
-      });
+      return ipDeduplicatedTaskResponse(existing);
     }
   }
 
@@ -928,6 +956,20 @@ export async function POST(request: NextRequest) {
     taskId = result.id;
     createdTask = result;
   } catch (err) {
+    if (idempotencyKey && isPrismaUniqueConstraintError(err)) {
+      const existing = await prisma.videoTask.findUnique({
+        where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
+      });
+      if (existing) {
+        if (existing.provider !== VOLCENGINE_IP_VIDEO_PROVIDER) {
+          return errorJson('同一个幂等键已绑定到普通生成任务，不能用于 IP 生成', 409);
+        }
+        if (existing.video_card_id && existing.video_card_id !== videoCard.id) {
+          return errorJson('同一个幂等键已绑定到其他视频卡', 409);
+        }
+        return ipDeduplicatedTaskResponse(existing);
+      }
+    }
     if (err instanceof CreditError) {
       if (err.code === 'INSUFFICIENT_PROJECT_BUDGET') {
         await prisma.$transaction((tx) => notifyProjectOwner(tx, {

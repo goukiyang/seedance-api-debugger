@@ -382,6 +382,18 @@ export function redactVolcengineIpLog<T>(value: T): T {
   }, {}) as T;
 }
 
+const SENSITIVE_USER_MESSAGE_PATTERN = /https?:\/\/|x-tos-|x-amz-|signature|credential|authorization|api[_ -]?key|apikey|token|secret|bearer|responsemetadata|火山返回|modelnotopen|accessdenied|invalidparameter/i;
+
+export function safeVolcengineIpUserMessage(
+  message: string | null | undefined,
+  fallback = '火山任务处理失败，请管理员查看后台错误详情。',
+) {
+  const trimmed = typeof message === 'string' ? message.trim() : '';
+  if (!trimmed) return null;
+  if (SENSITIVE_USER_MESSAGE_PATTERN.test(trimmed)) return fallback;
+  return trimmed.slice(0, 300);
+}
+
 async function resolvePrivateConfig(
   options: VolcengineIpRequestOptions | undefined,
   requireModel: boolean,

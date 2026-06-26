@@ -774,14 +774,23 @@ export default function TaskDetailPage() {
 
   const fetchTask = useCallback(async (forceProviderRefresh = false): Promise<VideoTask | null> => {
     try {
-      const statusUrl = forceProviderRefresh
-        ? `/api/video/status/${taskId}?refresh=true`
-        : `/api/video/status/${taskId}`;
-      const res = await fetch(statusUrl, {
+      const refreshQuery = forceProviderRefresh ? '?refresh=true' : '';
+      let res = await fetch(`/api/video/status/${taskId}${refreshQuery}`, {
         cache: 'no-store',
         credentials: 'same-origin',
       });
-      const data = await res.json().catch(() => ({}));
+      let data = await res.json().catch(() => ({}));
+
+      const ordinaryStatusRejectedIpTask = res.status === 400
+        && `${data?.error || ''} ${data?.message || ''}`.includes('IP');
+      if (!res.ok && ordinaryStatusRejectedIpTask) {
+        res = await fetch(`/api/ip/video/status/${taskId}${refreshQuery}`, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+        data = await res.json().catch(() => ({}));
+      }
+
       if (res.ok) {
         const nextTask = data as VideoTask;
         setTask(nextTask);

@@ -2,12 +2,28 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
-import { VOLCENGINE_IP_VIDEO_PROVIDER, deleteVolcengineIpVideoTask } from '@/lib/provider/volcengine-ip';
+import {
+  VOLCENGINE_IP_VIDEO_PROVIDER,
+  deleteVolcengineIpVideoTask,
+  safeVolcengineIpUserMessage,
+} from '@/lib/provider/volcengine-ip';
 import { settleTask } from '@/lib/video/task-finalizer';
 
 export const dynamic = 'force-dynamic';
 
 const CANCELLABLE_LOCAL_STATUSES = new Set(['submitted', 'running']);
+const IP_CANCEL_TASK_SELECT = {
+  id: true,
+  provider: true,
+  provider_task_id: true,
+  provider_status: true,
+  local_status: true,
+  frozen_cost: true,
+  actual_cost: true,
+  refund_amount: true,
+  completed_at: true,
+  updated_at: true,
+} as const;
 
 export async function POST(
   _request: NextRequest,
@@ -48,7 +64,7 @@ export async function POST(
     }
 
     const providerResult = await deleteVolcengineIpVideoTask(task.provider_task_id);
-    const updated = await prisma.videoTask.update({
+    await prisma.videoTask.update({
       where: { id: task.id },
       data: {
         local_status: 'cancelled',
@@ -62,9 +78,14 @@ export async function POST(
       await settleTask(task.id, ownerId, task.frozen_cost, 'cancelled');
     }
 
+    const responseTask = await prisma.videoTask.findUnique({
+      where: { id: task.id },
+      select: IP_CANCEL_TASK_SELECT,
+    });
+
     return NextResponse.json({
       ok: true,
-      task: updated,
+      task: responseTask,
       provider_task_id: task.provider_task_id,
       provider_deleted: providerResult.deleted,
     });
@@ -74,7 +95,13 @@ export async function POST(
       return NextResponse.json({ error: '任务不存在' }, { status: 404 });
     }
     return NextResponse.json(
-      { error: '取消火山 IP 生成任务失败', message: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        error: '取消火山 IP 生成任务失败',
+        message: safeVolcengineIpUserMessage(
+          error instanceof Error ? error.message : null,
+          '取消火山 IP 生成任务失败，请稍后重试。',
+        ) || '取消火山 IP 生成任务失败，请稍后重试。',
+      },
       { status: 500 },
     );
   }
