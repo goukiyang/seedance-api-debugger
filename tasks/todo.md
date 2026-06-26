@@ -13,7 +13,9 @@
 - [x] 新增火山 IP 生成后台配置读写接口，API Key 不回显明文。
 - [x] 在 `/admin/integrations` 增加“火山 IP 生成 API”配置卡片，支持启用、Base URL、Model ID、API Key、清空 Key。
 - [x] 补 smoke 验证：配置归一化、Key 不泄露、接口路由存在、页面包含输入入口。
-- [ ] 通过 TypeScript、lint、build，并部署到 `sd2.youdoodesign.com` 验证页面可见。
+- [x] 通过 TypeScript、lint、build，并部署到 `sd2.youdoodesign.com` 验证页面可见。
+
+Review：已上线到生产 BUILD_ID `J8JDIEkiAV5n3U6MLNE8_`。公网 `/login` 200，新 `/api/admin/integrations/volcengine-ip` 未登录返回 401，生产包包含“火山 IP 生成 API”、`volcengine-api-key` 和 `/api/admin/integrations/volcengine-ip`。本轮只做 API 整合页配置入口，不请求火山、不接生成任务、不改普通生成和扣点链路。
 
 ## 图集和单图共享闭环 Todo
 
