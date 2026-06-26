@@ -4,6 +4,7 @@ import {
   buildEnhanceVideoCreatePayload,
   createEnhanceVideoTask,
   getAiMediaKitTaskStatus,
+  mapAiMediaKitTaskStatus,
   requestMediaUploadUrl,
   uploadMediaToAiMediaKit,
 } from '@/lib/provider/aimediakit-enhance-video';
@@ -101,6 +102,12 @@ async function main() {
       });
     }
 
+    if (url.endsWith('/api/v1/tasks/scalar-error-task') && init?.method === 'GET') {
+      return jsonResponse({
+        error: 'download failed https://x.test/a.mp4?auth_key=secret',
+      }, 401);
+    }
+
     if (url.endsWith('/api/v1/tools-sync/request-media-upload-url') && init?.method === 'POST') {
       return jsonResponse({
         file_id: 'mediakit://media-file-001',
@@ -160,6 +167,23 @@ async function main() {
   assert.equal(completed.resolution, '1080p');
   assert.equal(completed.tool_version, 'professional');
 
+  for (const status of ['completed', 'succeeded', 'success', 'complete', 'done', 'finished']) {
+    assert.equal(mapAiMediaKitTaskStatus(status), 'succeeded', `${status} should map to succeeded`);
+  }
+  for (const status of ['failed', 'failure', 'error']) {
+    assert.equal(mapAiMediaKitTaskStatus(status), 'failed', `${status} should map to failed`);
+  }
+  for (const status of ['running', 'processing', 'in_progress']) {
+    assert.equal(mapAiMediaKitTaskStatus(status), 'running', `${status} should map to running`);
+  }
+  for (const status of ['queued', 'created', 'pending']) {
+    assert.equal(mapAiMediaKitTaskStatus(status), 'submitted', `${status} should map to submitted`);
+  }
+  for (const status of ['cancelled', 'canceled']) {
+    assert.equal(mapAiMediaKitTaskStatus(status), 'cancelled', `${status} should map to cancelled`);
+  }
+  assert.equal(mapAiMediaKitTaskStatus('provider-new-state'), 'running');
+
   const failed = await getAiMediaKitTaskStatus('failed-task-001', { fetchImpl });
   assert.equal(failed.local_status, 'failed');
   assert.equal(failed.error?.code, 'InvalidParameter');
@@ -170,6 +194,17 @@ async function main() {
   assert.equal(failed.error_message?.includes('auth_key=secret'), false);
   assert.equal(failed.error_message?.includes('X-Tos-Signature=secret'), false);
   assert.equal(failed.error_message?.includes('https://example.com/bad.mp4?auth_key=secret&X-Tos-Signature=secret'), false);
+
+  await assert.rejects(
+    () => getAiMediaKitTaskStatus('scalar-error-task', { fetchImpl }),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.ok(error.message.includes('download failed'));
+      assert.equal(error.message.includes('auth_key=secret'), false);
+      assert.equal(error.message.includes('https://x.test/a.mp4?auth_key=secret'), false);
+      return true;
+    },
+  );
 
   await assertRejectsMessage(
     () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', resolution: '720p', resolution_limit: 720 }, { fetchImpl }),
@@ -205,6 +240,19 @@ async function main() {
     () => createEnhanceVideoTask({ video_url: 'ftp://media-file-001' }, { fetchImpl }),
     /video_url 协议只允许/,
   );
+  for (const invalidContentLength of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5]) {
+    await assertRejectsMessage(
+      () => requestMediaUploadUrl(
+        {
+          file_name: 'source.mp4',
+          content_type: 'video/mp4',
+          content_length: invalidContentLength,
+        },
+        { fetchImpl },
+      ),
+      /content_length 必须是正整数/,
+    );
+  }
 
   const uploadTicket = await requestMediaUploadUrl(
     {
@@ -218,6 +266,14 @@ async function main() {
   assert.equal(uploadTicket.method, 'PUT');
   assert.equal(uploadTicket.upload_headers['Content-Type'], 'video/mp4');
   assert.equal(uploadTicket.upload_url, uploadUrl);
+  const uploadRequest = captured.find((request) => request.url.endsWith('/api/v1/tools-sync/request-media-upload-url'));
+  assert.ok(uploadRequest);
+  assert.equal(uploadRequest.init.method, 'POST');
+  const uploadRequestBody = JSON.parse(String(uploadRequest.init.body));
+  assert.equal(uploadRequestBody.file_name, 'source.mp4');
+  assert.equal(uploadRequestBody.content_type, 'video/mp4');
+  assert.equal(uploadRequestBody.content_length, 4);
+  assertNoApiKeyInPayload(uploadRequestBody);
 
   const originalLog = console.log;
   console.log = (...args: unknown[]) => {
