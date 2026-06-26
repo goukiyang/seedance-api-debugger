@@ -21,6 +21,9 @@ interface Task {
   duration: number | null;
   resolution: string | null;
   local_status: string;
+  public_video_url: string | null;
+  public_video_storage_provider?: string | null;
+  public_video_cached_at?: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -126,12 +129,12 @@ function taskOfficialChargeText(task: Task): string {
 }
 
 function isTaskDownloadable(task: Task) {
-  return task.local_status === 'succeeded' && Boolean(task.local_video_path || task.result_video_url);
+  return task.local_status === 'succeeded' && Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
 }
 
 function taskDownloadDisabledReason(task: Task) {
   if (task.local_status !== 'succeeded') return '任务未完成，暂不能下载';
-  if (!task.local_video_path && !task.result_video_url) return '任务没有可用视频链接';
+  if (!task.public_video_url && !task.local_video_path && !task.result_video_url) return '任务没有可用视频链接';
   return '';
 }
 

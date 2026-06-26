@@ -7122,3 +7122,36 @@ HARD-GATE：
 - [x] 火山 List API 200，说明 API Key、Base URL 和 Bearer 鉴权可用。
 - [x] 最多 3 个真实火山任务验收：提交 2 次，均未获得火山 `provider_task_id`；第二次火山返回 `ModelNotOpen`，账号未开通当前模型，冻结点数已自动退回。
 - [ ] 模型在火山 Ark Console 开通后，再跑第 3 个也是最后一个真实任务，继续保持 480p、4 秒、带参考图、幂等键。
+
+## 2026-06-26 视频播放卡顿与下载慢修复落地
+
+### 根因
+
+- [x] 已确认卡顿主因是视频分发仍走本机 `public/videos` + `sd2.youdoodesign.com` 隧道；本机 1MB Range 很快，公网同片段明显变慢。
+- [x] 已确认缩略图路由会在浏览时触发完整 mp4 缓存，是任务页/资源页加载慢的放大因素。
+- [x] 已确认批量 ZIP 对 mp4 使用高压缩等级，收益极低但会增加等待。
+
+### 已落地
+
+- [x] `VideoTask` 增加 `public_video_url/public_video_storage_*` 等字段，并同步 SQLite schema。
+- [x] 新增 `src/lib/video/public-delivery.ts`，生成成功后优先转存 R2/TOS；未配置对象存储时标记慢速备用，不把本地公网目录误判为快速播放源。
+- [x] `src/lib/video/task-finalizer.ts` 成功任务本地缓存后自动触发 public video delivery。
+- [x] `/api/video/play/:id` 优先 302 到 `public_video_url`，旧本地 Range 和 Provider URL 保留兜底。
+- [x] `/api/assets/library`、任务列表、任务详情、IP 状态接口补齐 public video 字段。
+- [x] 任务详情页优先播放/下载对象存储 URL；转存中显示“视频准备中”；对象存储未配置时显示“慢速备用播放”。
+- [x] 资源管理页视频预览增加 `preload="metadata"`。
+- [x] 缩略图路由不再在浏览请求里调用 `cacheTaskVideoToLocal()` 下载完整 mp4；无本地视频时只允许尾帧图片兜底。
+- [x] 批量下载 mp4 ZIP 改为 `compressionLevel: 0`。
+- [x] 新增 `scripts/backfill-public-video-delivery.ts`，默认 dry-run，`--apply` 才处理历史任务。
+- [x] 新增 `scripts/check-video-public-delivery-rules.ts`，防止 `local-public` 默认被误当成快速视频分发。
+
+### 验证/部署
+
+- [x] `npx tsx scripts/check-video-public-delivery-rules.ts`
+- [x] `npx tsx scripts/backfill-public-video-delivery.ts --limit 5`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] R2 已配置，已跑 `npx tsx scripts/backfill-public-video-delivery.ts --limit 5 --apply`，5/5 成功写入 `public_video_url`。
+- [x] `youdoo-sites build sd2 && youdoo-sites restart sd2` 已完成，公网 `/api/video/play/:id` 已 302 到 R2 URL。
+- [ ] R2 dev 域名 Range 测速仍波动偏慢，需评估 R2 自定义域/CDN 或 TOS 国内可访问域名。

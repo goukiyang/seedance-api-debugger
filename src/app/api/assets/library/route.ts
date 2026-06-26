@@ -108,16 +108,18 @@ function taskOrderBy(sort: string): Prisma.VideoTaskOrderByWithRelationInput[] {
 
 function isDownloadableTask(task: {
   local_status: string;
+  public_video_url?: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
 }) {
-  return task.local_status === 'succeeded' && Boolean(task.local_video_path || task.result_video_url);
+  return task.local_status === 'succeeded' && Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
 }
 
 function serializeTask(task: {
   id: string;
   prompt: string;
   local_status: string;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -131,7 +133,8 @@ function serializeTask(task: {
   owner: LibraryUser | null;
   user: LibraryUser | null;
 }): LibraryItem {
-  const hasVideo = Boolean(task.local_video_path || task.result_video_url || task.result_last_frame_url);
+  const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
+  const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
   const owner = userSummary(task.owner || task.user);
   return {
     id: `video_task:${task.id}`,
@@ -143,8 +146,8 @@ function serializeTask(task: {
     title: taskTitle(task),
     prompt: task.prompt,
     thumbnailUrl: hasVideo ? `/api/video/thumbnail/${task.id}` : null,
-    previewUrl: hasVideo ? `/api/video/play/${task.id}` : null,
-    downloadUrl: hasVideo ? `/api/video/play/${task.id}` : null,
+    previewUrl: videoUrl,
+    downloadUrl: videoUrl,
     duration: task.duration,
     ratio: task.ratio,
     resolution: task.resolution,
@@ -324,6 +327,7 @@ async function loadVideoItems(options: {
         id: true,
         prompt: true,
         local_status: true,
+        public_video_url: true,
         result_video_url: true,
         result_last_frame_url: true,
         local_video_path: true,

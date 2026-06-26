@@ -49,6 +49,11 @@ function serializeTaskForIpStatus<T extends {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  public_video_url?: string | null;
+  public_video_storage_provider?: string | null;
+  public_video_storage_key?: string | null;
+  public_video_file_size?: number | null;
+  public_video_cached_at?: Date | null;
   error_message: string | null;
   project_id: string | null;
   video_card_id: string | null;
@@ -94,6 +99,11 @@ function serializeTaskForIpStatus<T extends {
     result_video_url: null,
     result_last_frame_url: null,
     local_video_path: task.local_video_path,
+    public_video_url: task.public_video_url ?? null,
+    public_video_storage_provider: task.public_video_storage_provider ?? null,
+    public_video_storage_key: task.public_video_storage_key ?? null,
+    public_video_file_size: task.public_video_file_size ?? null,
+    public_video_cached_at: task.public_video_cached_at ?? null,
     error_message: safeVolcengineIpUserMessage(task.error_message),
     project_id: task.project_id,
     video_card_id: task.video_card_id,

@@ -55,6 +55,11 @@ interface VideoTask {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  public_video_url: string | null;
+  public_video_storage_provider: string | null;
+  public_video_storage_key?: string | null;
+  public_video_file_size?: number | null;
+  public_video_cached_at?: string | null;
   raw_create_response: string | null;
   raw_status_response: string | null;
   error_message: string | null;
@@ -755,9 +760,8 @@ export default function TaskDetailPage() {
   // 下载状态
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState('');
-  const [downloadPercent, setDownloadPercent] = useState(0);
-  const [downloadSpeed, setDownloadSpeed] = useState('');
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [publicDeliveryPollStartedAt, setPublicDeliveryPollStartedAt] = useState<number | null>(null);
   
   // 视频预览错误状态
   const [videoError, setVideoError] = useState(false);
@@ -912,10 +916,43 @@ export default function TaskDetailPage() {
 
   // Stop polling when task is terminal
   useEffect(() => {
-    if (task && ['succeeded', 'failed', 'cancelled'].includes(task.local_status)) {
+    if (task && ['failed', 'cancelled'].includes(task.local_status)) {
+      setAutoPoll(false);
+    }
+    if (task?.local_status === 'succeeded' && task.public_video_url) {
       setAutoPoll(false);
     }
   }, [task]);
+
+  useEffect(() => {
+    if (!task) return;
+    const needsPublicDelivery = task.local_status === 'succeeded'
+      && !task.public_video_url
+      && Boolean(task.local_video_path || task.result_video_url)
+      && !task.public_video_storage_provider;
+
+    if (needsPublicDelivery && publicDeliveryPollStartedAt === null) {
+      setPublicDeliveryPollStartedAt(Date.now());
+      return;
+    }
+    if (!needsPublicDelivery && publicDeliveryPollStartedAt !== null) {
+      setPublicDeliveryPollStartedAt(null);
+    }
+  }, [task, publicDeliveryPollStartedAt]);
+
+  useEffect(() => {
+    if (publicDeliveryPollStartedAt === null) return;
+
+    const interval = setInterval(() => {
+      if (Date.now() - publicDeliveryPollStartedAt > 60_000) {
+        setPublicDeliveryPollStartedAt(null);
+        return;
+      }
+      fetchTask();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [fetchTask, publicDeliveryPollStartedAt]);
 
   const queryStatus = async () => {
     setQuerying(true);
@@ -985,9 +1022,7 @@ export default function TaskDetailPage() {
     }
 
     setDownloading(true);
-    setDownloadProgress('正在下载视频...');
-    setDownloadPercent(0);
-    setDownloadSpeed('');
+    setDownloadProgress('正在准备本地备用视频...');
     setDownloadError(null);
     setOpenError(null);
     
@@ -1004,8 +1039,6 @@ export default function TaskDetailPage() {
         const fileSizeMB = (data.file_size / 1024 / 1024).toFixed(2);
         
         setDownloadProgress(`下载完成，文件大小: ${fileSizeMB} MB，耗时: ${elapsed}s`);
-        setDownloadPercent(100);
-        setDownloadSpeed('');
         
         if (data.already_exists) {
           setDownloadProgress(`视频已存在于本地: ${fileSizeMB} MB`);
@@ -1038,21 +1071,33 @@ export default function TaskDetailPage() {
     await downloadVideoToLocal(task);
   };
 
-  // 复制可长期使用的本地视频 URL，不再复制会过期的 Provider 外链
+  const taskPlaybackUrl = (sourceTask: VideoTask) => (
+    sourceTask.public_video_url || new URL(`/api/video/play/${sourceTask.id}`, window.location.origin).toString()
+  );
+
+  // 复制当前最稳的视频入口：对象存储优先，其次同源播放 API。
   const handleCopyUrl = async () => {
     if (!task) return;
     setCopyingLink(true);
     setOpenError(null);
 
     try {
-      const localVideoPath = task.local_video_path || await downloadVideoToLocal(task);
-      if (!localVideoPath) {
-        setOpenError('无法生成可复制的本地链接，Provider 外链可能已过期。');
+      let hasUsableLink = Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
+      if (!hasUsableLink) {
+        const localVideoPath = await downloadVideoToLocal(task);
+        if (!localVideoPath) {
+          setOpenError('无法生成可复制的视频链接，Provider 外链可能已过期。');
+          return;
+        }
+        hasUsableLink = true;
+      }
+
+      if (!hasUsableLink) {
+        setOpenError('视频链接暂不可用，请刷新结果后重试。');
         return;
       }
 
-      const videoUrl = new URL(`/api/video/play/${task.id}`, window.location.origin).toString();
-      await navigator.clipboard.writeText(videoUrl);
+      await navigator.clipboard.writeText(taskPlaybackUrl(task));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } finally {
@@ -1067,23 +1112,23 @@ export default function TaskDetailPage() {
     setOpenError(null);
 
     try {
-      let localVideoPath = task.local_video_path || await downloadVideoToLocal(task);
-
-      if (!localVideoPath && task.result_video_url) {
-        setOpenError('外链可能已过期，正在刷新任务状态...');
-        const refreshedTask = await fetchTask(true);
-        if (refreshedTask) {
-          localVideoPath = refreshedTask.local_video_path || await downloadVideoToLocal(refreshedTask);
-        }
-      }
-
-      if (!localVideoPath) {
-        setOpenError('视频链接暂不可用。请刷新任务状态后重试，或重新生成。');
+      if (task.public_video_url || task.local_video_path || task.result_video_url) {
+        window.location.assign(taskPlaybackUrl(task));
         return;
       }
 
-      const localUrl = new URL(`/api/video/play/${task.id}`, window.location.origin).toString();
-      window.location.assign(localUrl);
+      if (task.local_status === 'succeeded') {
+        setOpenError('外链可能已过期，正在刷新任务状态...');
+        const refreshedTask = await fetchTask(true);
+        if (refreshedTask) {
+          if (refreshedTask.public_video_url || refreshedTask.local_video_path || refreshedTask.result_video_url) {
+            window.location.assign(taskPlaybackUrl(refreshedTask));
+            return;
+          }
+        }
+      }
+
+      setOpenError('视频链接暂不可用。请刷新任务状态后重试，或重新生成。');
     } finally {
       setOpeningVideo(false);
     }
@@ -1095,15 +1140,23 @@ export default function TaskDetailPage() {
     setOpenError(null);
 
     try {
-      const localVideoPath = task.local_video_path || await downloadVideoToLocal(task);
-      if (!localVideoPath) {
-        setOpenError('视频还没有可下载的本地文件。请刷新结果后重试，或重新生成。');
+      let hasUsableLink = Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
+      if (!hasUsableLink) {
+        const localVideoPath = await downloadVideoToLocal(task);
+        if (!localVideoPath) {
+          setOpenError('视频还没有可下载的文件。请刷新结果后重试，或重新生成。');
+          return;
+        }
+        hasUsableLink = true;
+      }
+
+      if (!hasUsableLink) {
+        setOpenError('视频还没有可下载的文件。请刷新结果后重试，或重新生成。');
         return;
       }
 
-      const videoUrl = new URL(`/api/video/play/${task.id}`, window.location.origin).toString();
       const anchor = document.createElement('a');
-      anchor.href = videoUrl;
+      anchor.href = taskPlaybackUrl(task);
       anchor.download = `seedance-${task.id}.mp4`;
       anchor.rel = 'noopener';
       document.body.appendChild(anchor);
@@ -1124,6 +1177,9 @@ export default function TaskDetailPage() {
   // 获取视频播放源
   const getVideoSrc = () => {
     if (!task) return '';
+    if (task.public_video_url) {
+      return task.public_video_url;
+    }
     if (task.local_video_path) {
       return `/api/video/play/${task.id}`;
     }
@@ -1154,8 +1210,18 @@ export default function TaskDetailPage() {
   const referenceAudios = parseJsonArray(task.reference_audio_urls);
   const frameImages = parseJsonArray(task.frame_image_urls);
   const videoSrc = getVideoSrc();
+  const hasPublicVideo = !!task.public_video_url;
   const hasLocalVideo = !!task.local_video_path;
-  const hasPlayableVideo = !!(task.local_video_path || task.result_video_url);
+  const hasFallbackVideo = !!(task.local_video_path || task.result_video_url);
+  const hasPlayableVideo = !!videoSrc;
+  const isPublicVideoPreparing = task.local_status === 'succeeded'
+    && !hasPublicVideo
+    && hasFallbackVideo
+    && !task.public_video_storage_provider;
+  const isSlowFallbackVideo = task.local_status === 'succeeded'
+    && !hasPublicVideo
+    && hasFallbackVideo
+    && Boolean(task.public_video_storage_provider);
   
   // 从 provider_payload_json 解析 resolved_mode
   const resolvedMode = (() => {
@@ -1199,7 +1265,8 @@ export default function TaskDetailPage() {
   })();
 
   const providerBilling = extractProviderBilling(task);
-  const hasResultVideo = task.local_status === 'succeeded' && !!videoSrc;
+  const hasResultVideo = task.local_status === 'succeeded' && !!videoSrc && !isPublicVideoPreparing;
+  const canUseVideoActions = hasPlayableVideo && !isPublicVideoPreparing;
   const isProcessing = ['submitted', 'running'].includes(task.local_status);
   const modeLabel = GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
   const resolvedModeLabel = resolvedMode && resolvedMode !== task.generation_mode ? resolvedMode : null;
@@ -1207,24 +1274,34 @@ export default function TaskDetailPage() {
     ? '生成失败'
     : isProcessing
       ? '生成中'
-      : hasResultVideo
-        ? '生成结果'
-        : '暂无结果';
+      : isPublicVideoPreparing
+        ? '视频准备中'
+        : hasResultVideo
+          ? '生成结果'
+          : '暂无结果';
   const resultDecisionBody = task.local_status === 'failed'
     ? '这次没有产出可用视频，可以复用输入重新生成。'
     : isProcessing
       ? '任务还在生成中，可以刷新状态或开启自动轮询。'
-      : hasResultVideo
-        ? '先看结果，再决定保存、复制链接或复用输入继续调整。'
-        : '暂时没有可播放链接，可以重新查询结果。';
-  const resultStorageText = hasLocalVideo
-    ? '本地已保存'
-    : task.result_video_url
-      ? '远程链接待保存'
-      : '没有视频链接';
+      : isPublicVideoPreparing
+        ? '生成已完成，正在准备可流畅播放的视频链接。'
+        : hasResultVideo
+          ? '先看结果，再决定下载、复制链接或复用输入继续调整。'
+          : '暂时没有可播放链接，可以重新查询结果。';
+  const resultStorageText = hasPublicVideo
+    ? '对象存储已就绪'
+    : isPublicVideoPreparing
+      ? '视频准备中'
+      : isSlowFallbackVideo
+        ? '慢速备用播放'
+        : hasLocalVideo
+          ? '本地备用链接'
+          : task.result_video_url
+            ? '远程备用链接'
+            : '没有视频链接';
   const shouldShowRefresh = isProcessing
     || !task.result_video_url
-    || (task.local_status === 'succeeded' && !task.local_video_path)
+    || isPublicVideoPreparing
     || task.local_status === 'failed';
 
   const parameterItems = [
@@ -1270,15 +1347,13 @@ export default function TaskDetailPage() {
       : '待结算';
   const resultPrimaryAction = task.local_status === 'failed'
     ? 'reuse'
-    : isProcessing
+    : isProcessing || isPublicVideoPreparing
       ? 'refresh'
-      : hasPlayableVideo && !hasLocalVideo && task.result_video_url
-        ? 'save'
-        : hasPlayableVideo
-          ? 'open'
-          : shouldShowRefresh
-            ? 'refresh'
-            : 'reuse';
+      : hasPlayableVideo
+        ? 'open'
+        : shouldShowRefresh
+          ? 'refresh'
+          : 'reuse';
   const inputChips = [
     modeLabel,
     task.ratio,
@@ -1360,12 +1435,6 @@ export default function TaskDetailPage() {
                       {querying ? '查询中...' : '刷新结果'}
                     </button>
                   )}
-                  {resultPrimaryAction === 'save' && (
-                    <button className="btn btn-primary" onClick={handleDownloadToLocal} disabled={downloading}>
-                      <Download size={16} aria-hidden="true" />
-                      {downloading ? '保存中...' : '保存视频'}
-                    </button>
-                  )}
                   {resultPrimaryAction === 'open' && (
                     <button className="btn btn-primary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
                       <ExternalLink size={16} aria-hidden="true" />
@@ -1398,6 +1467,7 @@ export default function TaskDetailPage() {
                       key={videoSrc}
                       controls
                       playsInline
+                      preload="metadata"
                       src={videoSrc}
                       onError={() => setVideoError(true)}
                       onCanPlay={() => setVideoError(false)}
@@ -1421,14 +1491,16 @@ export default function TaskDetailPage() {
 
               <div className="task-result-storage-row">
                 <span>{resultStorageText}</span>
-                {!hasLocalVideo && task.result_video_url && <strong>建议保存为本地长期链接</strong>}
-                {hasLocalVideo && <strong>可复制同源链接</strong>}
+                {hasPublicVideo && <strong>可流畅播放</strong>}
+                {isPublicVideoPreparing && <strong>正在转存</strong>}
+                {isSlowFallbackVideo && <strong>对象存储未配置，使用备用链路</strong>}
+                {!hasPublicVideo && !isPublicVideoPreparing && !isSlowFallbackVideo && hasFallbackVideo && <strong>备用链接可用</strong>}
               </div>
 
               {videoError && (
                 <div className="alert alert-warning task-action-guidance">
                   <strong>视频预览失败。</strong>
-                  <span>优先保存到本地，再打开视频或复制本地链接；仍失败时刷新结果或复用输入。</span>
+                  <span>请先刷新结果；如果对象存储未配置，系统会继续提供慢速备用链接。</span>
                 </div>
               )}
               {openError && (
@@ -1457,16 +1529,16 @@ export default function TaskDetailPage() {
                     {querying ? '查询中...' : '刷新结果'}
                   </button>
                 )}
-                {hasPlayableVideo && resultPrimaryAction !== 'open' && (
+                {canUseVideoActions && resultPrimaryAction !== 'open' && (
                   <button className="btn btn-secondary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
                     <ExternalLink size={16} aria-hidden="true" />
                     {openingVideo ? '打开中...' : '打开视频'}
                   </button>
                 )}
-                {hasPlayableVideo && (
+                {canUseVideoActions && (
                   <button className="btn btn-secondary" onClick={() => void handleCopyUrl()} disabled={copyingLink || downloading}>
                     <Copy size={16} aria-hidden="true" />
-                    {copyingLink ? '复制中...' : copied ? '已复制' : hasLocalVideo ? '复制本地链接' : '保存并复制'}
+                    {copyingLink ? '复制中...' : copied ? '已复制' : hasPublicVideo ? '复制播放链接' : '复制备用链接'}
                   </button>
                 )}
                 {resultPrimaryAction !== 'reuse' && (
@@ -1475,12 +1547,12 @@ export default function TaskDetailPage() {
                     复用输入
                   </Link>
                 )}
-                {hasPlayableVideo && (
+                {canUseVideoActions && (
                   <button
                     className="btn btn-secondary"
                     onClick={handleBrowserDownloadVideo}
                     disabled={browserDownloading || downloading}
-                    title="下载本地视频文件"
+                    title={hasPublicVideo ? '从对象存储下载视频' : '下载备用视频文件'}
                   >
                     <Download size={16} aria-hidden="true" />
                     {browserDownloading || downloading ? '准备中...' : '下载视频'}
@@ -1517,13 +1589,7 @@ export default function TaskDetailPage() {
                 <div className="task-download-state">
                   <div className="task-download-meta">
                     <span>{downloading ? '下载中' : '下载状态'}</span>
-                    <span>{downloadPercent}%{downloadSpeed && ` · ${downloadSpeed}`}</span>
-                  </div>
-                  <div className="task-progress-track">
-                    <div
-                      className={`task-progress-fill ${downloadError ? 'is-error' : downloading ? 'is-running' : 'is-done'}`}
-                      style={{ width: `${downloadPercent}%` }}
-                    />
+                    <span>{downloadError ? '失败' : downloading ? '处理中' : '完成'}</span>
                   </div>
                   <p className={downloadError ? 'task-download-error' : ''}>{downloadProgress}</p>
                 </div>
@@ -1569,11 +1635,15 @@ export default function TaskDetailPage() {
               <div className="task-decision-note">
                 {task.local_status === 'failed'
                   ? '这次任务未产出可用视频，优先复用输入调整。'
-                  : hasLocalVideo
-                    ? '本地视频已可长期访问，可直接打开或复制链接。'
-                    : task.result_video_url
-                      ? '当前仍依赖远程链接，建议先保存到本地。'
-                      : '还没有可保存的视频链接，先刷新结果。'}
+                  : hasPublicVideo
+                    ? '对象存储链接已就绪，可以直接播放和下载。'
+                    : isPublicVideoPreparing
+                      ? '生成已完成，系统正在准备可流畅播放的视频链接。'
+                      : isSlowFallbackVideo
+                        ? '对象存储未配置或不可用，当前使用慢速备用播放。'
+                        : hasFallbackVideo
+                          ? '当前只有备用视频链接，建议刷新结果等待转存。'
+                          : '还没有可保存的视频链接，先刷新结果。'}
               </div>
             </aside>
           </div>

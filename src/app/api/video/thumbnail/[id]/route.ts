@@ -3,33 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
-import { cacheTaskVideoToLocal, type CacheableVideoTask } from '@/lib/video/local-cache';
 import {
   ensureTaskThumbnail,
   isSafeTaskId,
-  localPublicVideoPath,
-  fileExists,
   thumbnailFilePath,
 } from '@/lib/video/thumbnail';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-async function ensureLocalVideoForThumbnail(task: CacheableVideoTask) {
-  const localVideo = localPublicVideoPath(task.local_video_path);
-  if (localVideo && await fileExists(localVideo)) return task;
-  if (task.local_status !== 'succeeded' || !task.result_video_url) return task;
-
-  const cacheResult = await cacheTaskVideoToLocal(task);
-  if (!cacheResult.success || !cacheResult.local_video_path) return task;
-
-  return {
-    ...task,
-    local_video_path: cacheResult.local_video_path,
-    result_video_url: cacheResult.result_video_url || task.result_video_url,
-    result_last_frame_url: cacheResult.result_last_frame_url || task.result_last_frame_url,
-  };
-}
 
 async function imageResponse(filePath: string) {
   const file = await readFile(filePath);
@@ -78,8 +59,11 @@ export async function GET(
 
     await assertCanViewTask(user, task);
 
-    const taskWithLocalVideo = await ensureLocalVideoForThumbnail(task);
-    const thumbnailResult = await ensureTaskThumbnail(taskWithLocalVideo, { allowRemoteFallback: true });
+    const thumbnailResult = await ensureTaskThumbnail({
+      ...task,
+      // 浏览缩略图不能触发远程 mp4 拉取；无本地视频时只允许尾帧图片作为远程兜底。
+      result_video_url: null,
+    }, { allowRemoteFallback: true });
     if (!thumbnailResult.success) {
       return NextResponse.json({ error: thumbnailResult.message || '视频截图不可用' }, { status: 404 });
     }

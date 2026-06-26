@@ -8,6 +8,7 @@ import { settleTaskCredits } from '../credits/policy';
 import { settleProjectTaskBudget } from '../projects/budget';
 import { cacheTaskVideoToLocal, type LocalVideoCacheResult } from './local-cache';
 import { ensureTaskThumbnail, type EnsureTaskThumbnailResult } from './thumbnail';
+import { ensurePublicVideoDelivery, type PublicVideoDeliveryResult } from './public-delivery';
 
 const TERMINAL_LOCAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 const FINAL_PROVIDER_COST_STATUSES = new Set(['official_confirmed', 'reconciled', 'failed_no_charge']);
@@ -50,6 +51,7 @@ export type FinalizeVideoTaskResult = {
   terminal: boolean;
   cacheResult?: LocalVideoCacheResult;
   thumbnailResult?: EnsureTaskThumbnailResult;
+  publicDeliveryResult?: PublicVideoDeliveryResult;
   providerError?: string;
   skippedReason?: string;
 };
@@ -343,6 +345,7 @@ async function cacheAndMaybeThumbnail(
 ) {
   let cacheResult: LocalVideoCacheResult | undefined;
   let thumbnailResult: EnsureTaskThumbnailResult | undefined;
+  let publicDeliveryResult: PublicVideoDeliveryResult | undefined;
   let taskForThumbnail = task;
 
   if (options.cacheOnSuccess && task.local_status === 'succeeded' && (task.result_video_url || task.local_video_path)) {
@@ -363,6 +366,25 @@ async function cacheAndMaybeThumbnail(
         result_video_url: cacheResult.result_video_url || task.result_video_url,
         result_last_frame_url: cacheResult.result_last_frame_url || task.result_last_frame_url,
       };
+
+      publicDeliveryResult = await ensurePublicVideoDelivery({
+        ...taskForThumbnail,
+        public_video_url: task.public_video_url,
+        public_video_storage_provider: task.public_video_storage_provider,
+        public_video_storage_key: task.public_video_storage_key,
+        public_video_file_size: task.public_video_file_size,
+        public_video_cached_at: task.public_video_cached_at,
+      });
+      if (!publicDeliveryResult.success) {
+        console.warn('[VideoFinalizer] Public video delivery not ready:', {
+          taskId: task.id,
+          storageProvider: publicDeliveryResult.storage_provider,
+          fallback: publicDeliveryResult.fallback ?? false,
+          skipped: publicDeliveryResult.skipped ?? false,
+          error: publicDeliveryResult.error,
+          message: publicDeliveryResult.message,
+        });
+      }
     } else {
       console.warn('[VideoFinalizer] Local cache skipped:', {
         taskId: task.id,
@@ -382,7 +404,7 @@ async function cacheAndMaybeThumbnail(
     }
   }
 
-  return { cacheResult, thumbnailResult };
+  return { cacheResult, thumbnailResult, publicDeliveryResult };
 }
 
 export async function finalizeVideoTaskStatus(
@@ -421,6 +443,7 @@ export async function finalizeVideoTaskStatus(
       terminal: isTerminalLocalStatus((refreshedTask || task).local_status),
       cacheResult: localResult.cacheResult,
       thumbnailResult: localResult.thumbnailResult,
+      publicDeliveryResult: localResult.publicDeliveryResult,
     };
   }
 
@@ -484,6 +507,16 @@ export async function finalizeVideoTaskStatus(
       const localResult = await cacheAndMaybeThumbnail(updatedTask, { cacheOnSuccess, generateThumbnail });
       cacheResult = localResult.cacheResult;
       thumbnailResult = localResult.thumbnailResult;
+      const publicDeliveryResult = localResult.publicDeliveryResult;
+      const finalTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
+      return {
+        task: finalTask || updatedTask || task,
+        statusRefreshed: true,
+        terminal: isTerminalLocalStatus((finalTask || updatedTask || task).local_status),
+        cacheResult,
+        thumbnailResult,
+        publicDeliveryResult,
+      };
     }
 
     const finalTask = await prisma.videoTask.findUnique({ where: { id: taskId } });

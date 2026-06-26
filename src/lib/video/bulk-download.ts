@@ -358,7 +358,7 @@ function createZipStream(items: BulkDownloadItem[]) {
   items
     .filter((item) => item.status === 'success' && item.absolutePath)
     .forEach((item) => {
-      archive.addFile(item.absolutePath as string, item.fileName, { compressionLevel: 9 });
+      archive.addFile(item.absolutePath as string, item.fileName, { compressionLevel: 0 });
     });
   archive.addBuffer(Buffer.from(buildManifestCsv(items), 'utf8'), 'manifest.csv');
   archive.end();

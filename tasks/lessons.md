@@ -730,3 +730,13 @@
 - 怎么改：卡片最终输入预览只显示模式和正文；卡片名称改成管理字段；卡片 LLM 改写只传管理员需求和当前正文；Module Builder 用户消息移除隐藏模板 rules/assets/prompts；真实生成方案只拼卡片正文；保存卡片时清空旧 rules 且不保留无对应卡片的旧 prompt blocks。
 - 验证结果：以本轮可见输入 smoke、卡片最终上下文 smoke、规则文本 smoke、TypeScript、lint、build、部署和公网验收为准。
 - 可复用经验：当用户要求“所有影响最终提示词的内容都在输入框里”，不要把“界面某处可见”理解成合格。最终文本来源必须能从同一个可编辑正文框逐字追溯；管理标题、素材标签、历史结构化字段都不能偷跑进 LLM prompt。
+
+## 2026-06-26 - 视频播放卡顿先查分发链路
+
+- 问题/背景：用户反馈生成完成后任务页、视频预览、单个下载和二次批量下载都很卡。
+- 诱因/根因：视频虽然已经缓存到本机 `public/videos`，但公网仍经 `sd2.youdoodesign.com`/Cloudflare Tunnel 从本机发给用户；缩略图浏览还可能触发完整 mp4 缓存；批量 ZIP 对 mp4 使用高压缩等级。
+- 当时思路：不要先做 HLS、播放器替换或转码。第一性原理是“视频字节从哪里发给用户”，先把 mp4 从本机隧道分发改为对象存储/R2 优先分发。
+- 改动位置：`prisma/schema.prisma`、`src/lib/video/public-delivery.ts`、`src/lib/video/task-finalizer.ts`、`src/app/api/video/play/[id]/route.ts`、`src/app/api/video/thumbnail/[id]/route.ts`、`src/app/tasks/[id]/page.tsx`、`src/lib/video/bulk-download.ts`。
+- 怎么改：`VideoTask` 增加 public video 字段；成功任务本地缓存后转存 R2/TOS；播放 API 优先 302 到 `public_video_url`；任务详情/资源页优先使用 public URL；缩略图浏览不再下载完整 mp4；批量 ZIP 对 mp4 改为不压缩。
+- 验证结果：规则脚本、backfill dry-run、TypeScript、lint、build 通过；R2 已小批量补偿 5 个任务且公网 `/api/video/play/:id` 已 302 到 R2。R2 dev 域名 Range 速度仍波动偏慢，需要后续评估 R2 自定义域/CDN 或 TOS 国内可访问域名。
+- 可复用经验：视频“卡”大多不是 UI 播放器问题，而是分发路径问题。先测本机、站点 API、静态路径、对象存储 URL 的同一 Range 片段，再决定是改代码、换存储域名，还是做转码/HLS。

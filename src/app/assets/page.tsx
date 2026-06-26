@@ -1253,6 +1253,7 @@ function AssetsPageContent() {
               <video
                 src={activeItem.previewUrl}
                 controls
+                preload="metadata"
                 poster={activeItem.thumbnailUrl || undefined}
                 onLoadedMetadata={(event) => {
                   const ratio = aspectRatioFromDimensions(

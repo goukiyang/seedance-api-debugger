@@ -64,11 +64,15 @@ export async function GET(
 
   const task = await prisma.videoTask.findUnique({
     where: { id: taskId },
-    select: { local_video_path: true, result_video_url: true },
+    select: { public_video_url: true, local_video_path: true, result_video_url: true },
   });
 
   if (!task) {
     return NextResponse.json({ error: '任务不存在' }, { status: 404 });
+  }
+
+  if (task.public_video_url) {
+    return NextResponse.redirect(task.public_video_url, 302);
   }
 
   const absolutePath = localPublicVideoPath(task.local_video_path);

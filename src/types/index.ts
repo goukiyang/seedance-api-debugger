@@ -151,6 +151,11 @@ export interface VideoTask {
   result_video_url?: string;
   result_last_frame_url?: string;
   local_video_path?: string;
+  public_video_url?: string;
+  public_video_storage_provider?: string;
+  public_video_storage_key?: string;
+  public_video_file_size?: number;
+  public_video_cached_at?: Date;
   raw_create_response?: string;
   raw_status_response?: string;
   error_message?: string;
