@@ -128,44 +128,54 @@ Batch 0：开工确认与官方口径冻结
 
 Batch 1：新增 AI MediaKit Provider 适配层
 
-- [ ] 新建 `src/lib/provider/aimediakit-enhance-video.ts`。
-- [ ] 在该文件内定义类型：
+- [x] 新建 `src/lib/provider/aimediakit-enhance-video.ts`。
+- [x] 在该文件内定义类型：
   - `EnhanceVideoToolVersion = 'standard' | 'professional'`
   - `EnhanceVideoScene = 'common' | 'ugc' | 'short_series' | 'aigc' | 'old_film'`
   - `EnhanceVideoCreateInput`
   - `EnhanceVideoCreateResponse`
   - `EnhanceVideoStatusResponse`
-- [ ] 实现配置函数：
+- [x] 实现配置函数：
   - `getAiMediaKitConfig()`：读取 `AI_MEDIAKIT_API_KEY`、可选 `AI_MEDIAKIT_BASE_URL`，默认 `https://mediakit.cn-beijing.volces.com`。
   - `isAiMediaKitConfigured()`：只返回布尔值，不返回明文或 masked key 给前端。
-- [ ] 实现参数校验：
+- [x] 实现参数校验：
   - `resolution` 只允许 `240p/360p/480p/540p/720p/1080p/2k/4k`。
   - `resolution` 与 `resolution_limit` 互斥。
   - `resolution_limit` 范围 `[128, 2160]`。
   - `fps` 范围 `[15, 120]`。
   - `tool_version='professional'` 时不要把 `scene` 当作强依赖。
-- [ ] 实现请求函数：
+- [x] 实现请求函数：
   - `createEnhanceVideoTask(input)` 调 `POST /api/v1/tools/enhance-video`。
   - `getAiMediaKitTaskStatus(providerTaskId)` 调 `GET /api/v1/tasks/{task_id}`。
   - `requestMediaUploadUrl()` 调 `POST /api/v1/tools-sync/request-media-upload-url`，返回 `file_id`、`method`、`upload_headers`、`upload_url`。
   - `uploadMediaToAiMediaKit(input)` 按官方返回的 `method/upload_headers/upload_url` 用原始二进制 `PUT` 上传，禁止用 multipart/form-data。
   - Authorization 固定为 `Bearer ${AI_MEDIAKIT_API_KEY}`，不得写入 payload、日志或数据库。
-- [ ] 实现状态映射：
+- [x] 实现状态映射：
   - `running` -> 本地 `running`
   - `completed` -> 本地 `succeeded`
   - `failed` -> 本地 `failed`
   - 未知状态按 `running` 处理，并保存 raw 供排查。
-- [ ] 实现脱敏：
+- [x] 实现脱敏：
   - 日志/ProviderApiRequest/request summary 中隐藏 `Authorization`、API Key、`auth_key` query、`upload_url`、签名 URL。
   - raw response 可以存任务结构，但不要额外复制完整临时 URL 到 `params_json`。
-- [ ] 新建 `scripts/aimediakit-enhance-video-smoke.ts`，用假 `fetch` 验证：
+- [x] 新建 `scripts/aimediakit-enhance-video-smoke.ts`，用假 `fetch` 验证：
   - URL、method、header 正确。
   - payload 不包含 API Key。
   - 成功创建能解析 `task_id`。
   - 查询 `completed` 能解析 `result.video_url`、`duration`、`fps`、`resolution`。
   - 查询 `failed` 能解析 `error.code/message/type`。
   - 本地上传申请地址后，`PUT` 使用返回 headers，且日志不包含完整 `upload_url`。
-- [ ] 验证命令：`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npm run lint`。
+- [x] 验证命令：`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npm run lint`。
+
+### Review - 2026-06-26 Batch 1
+
+- 已新增 `src/lib/provider/aimediakit-enhance-video.ts`，只包含 AI MediaKit 画质增强 Provider 适配层、上传地址申请、原始二进制上传、任务提交、任务查询、状态映射、错误解析和脱敏逻辑。
+- 已按官方视频接口修正创建字段为 `video_url`，支持 `http://`、`https://`、`mediakit://`、`vod://`、`tos://`，不再误用 `file_id` 作为增强任务提交字段。
+- 已新增 `scripts/aimediakit-enhance-video-smoke.ts`，全程使用假 `fetch`，不依赖真实 API Key，不访问火山，不产生真实计费。
+- Smoke 覆盖创建请求 URL/method/header/body、API Key 不入 payload、`completed/failed` 解析、状态别名、错误标量解析、签名 URL 脱敏、本地上传 URL 申请、原始二进制 PUT 上传、非法参数拒绝和 `content_length` 正整数校验。
+- 已通过 spec reviewer 复审和 code quality reviewer 复审；关键回修点包括：错误摘要脱敏、上传异常脱敏、`video_url` 字段修正、协议白名单覆盖、状态别名映射和标量错误解析。
+- 已验证：`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npm run lint`、`npx tsc --noEmit --pretty false`、`git diff --check` 均通过；`npm run lint` 仍只有项目既有 `<img>` / React hook dependency warnings。
+- 本批未接入 route、数据库、点数冻结、任务 finalizer、前端入口、真实火山请求、部署或线上验证；Batch 2 继续处理 Provider 状态分发和转存链路。
 
 Batch 2：把状态最终化改成按 Provider 分发
 
