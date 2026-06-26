@@ -203,7 +203,6 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
       { href: '/generate', label: '普通生成' },
       { href: '/projects', label: '查看我的项目' },
     ],
-    notice: 'IP生成页会复用项目、视频卡、参考素材、图集、模板和点数链路；生成提交、状态查询、列表和取消走火山官方 IP 接口。',
     modelLabel: '火山 IP 动画',
   },
 };
