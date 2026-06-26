@@ -197,13 +197,12 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     routePath: '/generate/ip',
     titleLead: '(IP) 生成',
     titleAccent: '页',
-    subtitle: '保留普通生成页完整工作流，后续真实提交会切到火山官方授权 IP 动画接口',
+    subtitle: '保留普通生成页完整工作流，提交时走火山官方授权 IP 动画接口',
     heroLinks: [
       { href: '/generate', label: '普通生成' },
       { href: '/projects', label: '查看我的项目' },
     ],
-    notice: 'IP生成页当前保留普通生成页的项目、视频卡、参考素材、图集、模板和最近任务能力；真实火山 IP 接口未配置前，提交按钮锁定，不会创建任务或扣点。',
-    submitDisabledReason: 'IP生成接口还未配置，暂不能提交生成。项目、素材、视频卡和提示词可以先完整整理。',
+    notice: 'IP生成页会复用项目、视频卡、参考素材、图集、模板和点数链路；生成提交、状态查询、列表和取消走火山官方 IP 接口。',
     modelLabel: '火山 IP 动画',
   },
 };
@@ -872,7 +871,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     }
 
     try {
-      const res = await fetch(`/api/video/list?page=${page}&limit=${RECENT_TASK_PAGE_SIZE}`, {
+      const listEndpoint = isIpSurface ? '/api/ip/video/list' : '/api/video/list';
+      const res = await fetch(`${listEndpoint}?page=${page}&limit=${RECENT_TASK_PAGE_SIZE}`, {
         cache: 'no-store',
       });
       const data = await res.json() as TaskListResponse;
@@ -906,7 +906,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setRecentTasksLoadingInitial(false);
       setRecentTasksLoadingMore(false);
     }
-  }, []);
+  }, [isIpSurface]);
 
   const loadMoreRecentTasks = useCallback(() => {
     if (recentTasksLoadingRef.current || !recentTasksHasMoreRef.current) return;
@@ -973,7 +973,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
       await Promise.all(activePollingTaskIds.map(async (taskId) => {
         try {
-          const res = await fetch(`/api/video/status/${taskId}`);
+          const statusEndpoint = isIpSurface ? `/api/ip/video/status/${taskId}` : `/api/video/status/${taskId}`;
+          const res = await fetch(statusEndpoint);
           if (!res.ok) return;
           const data: PolledTask = await res.json();
           if (cancelled) return;
@@ -1020,7 +1021,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [activePollingTaskIds, loadRecentTasksPage]);
+  }, [activePollingTaskIds, isIpSurface, loadRecentTasksPage]);
 
   useEffect(() => {
     if (!result?.id) return;
@@ -1104,21 +1105,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setSubmitting(false);
       return;
     }
-    if (isIpSurface) {
-      setError(surfaceConfig.submitDisabledReason || 'IP生成接口还未配置，暂不能提交生成。');
-      setErrorDebug({
-        surface: 'ip',
-        planned_endpoint: 'volcengine_ip_authorized_animation',
-        status: 'api_not_configured',
-      });
-      setSubmitting(false);
-      return;
-    }
-
     const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     try {
-      const res = await fetch('/api/tasks/create', {
+      const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
+      const res = await fetch(createEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1206,7 +1197,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     } finally {
       setSubmitting(false);
     }
-	  }, [isIpSurface, saveGenerationDefaults, selectedProjectId, selectedVideoBranchId, selectedVideoCardId, surfaceConfig.submitDisabledReason, videoCards]);
+	  }, [isIpSurface, saveGenerationDefaults, selectedProjectId, selectedVideoBranchId, selectedVideoCardId, videoCards]);
 
   // ============================================================================
   // Collection handlers
@@ -1359,7 +1350,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             ))}
             {isIpSurface && (
               <span className="composer-hero-action composer-hero-action-muted">
-                接口待配置
+                火山官方 API
               </span>
             )}
           </div>

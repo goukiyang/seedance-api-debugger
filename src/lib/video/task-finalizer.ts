@@ -2,6 +2,7 @@ import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage } from '../provider/error-message';
 import { getVideoTaskStatus } from '../provider/jimeng';
+import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from '../provider/volcengine-ip';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
 import { settleProjectTaskBudget } from '../projects/budget';
@@ -204,7 +205,15 @@ async function recordOfficialProviderCharge(
   });
 }
 
-async function settleTask(
+async function getProviderStatusForTask(task: Pick<VideoTask, 'provider' | 'provider_task_id'>) {
+  if (!task.provider_task_id) throw new Error('missing provider_task_id');
+  if (task.provider === VOLCENGINE_IP_VIDEO_PROVIDER) {
+    return getVolcengineIpTaskStatus(task.provider_task_id);
+  }
+  return getVideoTaskStatus(task.provider_task_id);
+}
+
+export async function settleTask(
   taskId: string,
   userId: string,
   frozenAmount: number,
@@ -339,6 +348,7 @@ async function cacheAndMaybeThumbnail(
   if (options.cacheOnSuccess && task.local_status === 'succeeded' && (task.result_video_url || task.local_video_path)) {
     cacheResult = await withLocalCacheSlot(() => cacheTaskVideoToLocal({
       id: task.id,
+      provider: task.provider,
       local_status: task.local_status,
       provider_task_id: task.provider_task_id,
       result_video_url: task.result_video_url,
@@ -415,7 +425,7 @@ export async function finalizeVideoTaskStatus(
   }
 
   try {
-    const statusResult = await getVideoTaskStatus(task.provider_task_id);
+    const statusResult = await getProviderStatusForTask(task);
 
     const updateData: Prisma.VideoTaskUncheckedUpdateInput = {
       provider_status: statusResult.provider_status,

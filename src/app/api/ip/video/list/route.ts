@@ -19,8 +19,8 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
     const skip = (page - 1) * limit;
     const projectId = searchParams.get('project_id');
     const videoCardId = searchParams.get('video_card_id');
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     const where = {
       AND: [
         baseWhere,
-        { provider: { not: VOLCENGINE_IP_VIDEO_PROVIDER } },
+        { provider: VOLCENGINE_IP_VIDEO_PROVIDER },
         ...(videoCardId ? [{ video_card_id: videoCardId }] : []),
       ],
     };
@@ -106,7 +106,7 @@ export async function GET(request: NextRequest) {
         page,
         limit,
         total,
-        total_pages: Math.ceil(total / limit),
+        total_pages: Math.max(1, Math.ceil(total / limit)),
       },
     });
   } catch (error) {
@@ -116,10 +116,10 @@ export async function GET(request: NextRequest) {
         { status: error.status },
       );
     }
-    console.error('List tasks error:', error);
+    console.error('[IpVideoList] List tasks error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

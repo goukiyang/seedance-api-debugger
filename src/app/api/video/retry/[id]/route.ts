@@ -5,6 +5,7 @@ import {
   assertCanViewTask,
   getProjectForGeneration,
 } from '@/lib/projects/permissions';
+import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import {
   PAID_GENERATION_INTENT_HEADER,
@@ -60,6 +61,7 @@ export async function POST(
       where: { id: params.id },
       select: {
         id: true,
+        provider: true,
         prompt: true,
         generation_mode: true,
         ratio: true,
@@ -84,6 +86,12 @@ export async function POST(
 
     if (!originalTask) {
       return NextResponse.json({ error: '任务不存在', message: `任务 ${params.id} 不存在` }, { status: 404 });
+    }
+    if (originalTask.provider === VOLCENGINE_IP_VIDEO_PROVIDER) {
+      return NextResponse.json(
+        { error: 'IP_RETRY_NOT_SUPPORTED', message: 'IP 生成任务不能走普通重试，请回到 IP 生成页重新提交' },
+        { status: 400 },
+      );
     }
 
     try {

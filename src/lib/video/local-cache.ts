@@ -4,6 +4,7 @@ import path from 'path';
 import { once } from 'events';
 import { prisma } from '@/lib/prisma';
 import { getVideoTaskStatus } from '@/lib/provider/jimeng';
+import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from '@/lib/provider/volcengine-ip';
 
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
 const PUBLIC_VIDEO_DIR = path.join(process.cwd(), 'public', 'videos');
@@ -11,6 +12,7 @@ const activeCacheTasks = new Map<string, Promise<LocalVideoCacheResult>>();
 
 export type CacheableVideoTask = {
   id: string;
+  provider?: string | null;
   local_status: string | null;
   provider_task_id: string | null;
   result_video_url: string | null;
@@ -124,7 +126,9 @@ async function updateTaskLocalPath(taskId: string, publicPath: string) {
 
 async function refreshResultUrl(task: CacheableVideoTask) {
   if (!task.provider_task_id) return null;
-  const refreshed = await getVideoTaskStatus(task.provider_task_id);
+  const refreshed = task.provider === VOLCENGINE_IP_VIDEO_PROVIDER
+    ? await getVolcengineIpTaskStatus(task.provider_task_id)
+    : await getVideoTaskStatus(task.provider_task_id);
   if (!refreshed.result_video_url) return null;
 
   await prisma.videoTask.update({

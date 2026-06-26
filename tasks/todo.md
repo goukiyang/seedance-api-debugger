@@ -7073,3 +7073,52 @@ HARD-GATE：
 - 截图里的“很多我的默认项目”不是用户应该直接承受的 UI；短期要先用头像、owner、分组和项目类型消除歧义。
 - 中期要把无线画布项目 / 视频卡选择器提升到普通生成页同等级能力：新增、删除 / 归档、查看、自动选中、权限提示。
 - 不建议为了“看起来少一点”简单限制数量或隐藏项目；这会掩盖管理员全站视角和历史同名项目问题，后续生成归属仍会混乱。
+
+## 2026-06-26 IP 生成页火山官方 API 正式接入执行
+
+### 范围
+
+- [x] 保持普通生成页 `/generate` 原提交、查询、列表、软删除链路不变。
+- [x] `/generate/ip` 作为独立新页面，复用普通生成页项目、视频卡、模板、提示词、参考图、点数冻结和失败返还能力。
+- [x] 火山 API Key、Model ID、Base URL 从 `/admin/integrations` 的 API 整合页读取，前端不接触密钥。
+
+### 已落地
+
+- [x] 新增 `src/lib/provider/volcengine-ip.ts`：按官方 Ark `POST/GET/DELETE /contents/generations/tasks` 封装创建、查询、列表、删除。
+- [x] 新增 IP 专用创建接口 `src/app/api/ip/tasks/create/route.ts`，复制普通生成创建链路后只替换 provider 调用。
+- [x] 新增 IP 专用状态接口 `src/app/api/ip/video/status/[id]/route.ts`，只允许查询 `provider='volcengine_ark'` 的任务。
+- [x] 新增 IP 专用列表接口 `src/app/api/ip/video/list/route.ts`，最近任务只显示火山 IP 任务。
+- [x] 新增 IP 专用取消接口 `src/app/api/ip/tasks/[id]/cancel/route.ts`，调用火山 DELETE 后走本地点数返还。
+- [x] `src/lib/video/task-finalizer.ts` 和 `src/lib/video/local-cache.ts` 增加 provider 分派：普通任务走旧 Seedance，IP 任务走火山查询和 URL 转存。
+- [x] `/generate/ip` 前端提交、轮询、最近任务切到 `/api/ip/...`，普通页面仍走 `/api/tasks/create`、`/api/video/...`。
+- [x] 新增 `scripts/volcengine-ip-provider-smoke.ts`，mock 验证 480p、4 秒、参考图、创建/查询/列表/删除四个官方接口路径。
+- [x] 普通 `/api/video/list` 排除 IP 任务，避免普通生成页最近任务混入火山 IP 记录。
+- [x] 普通 `/api/video/status/[id]` 和 `/api/video/retry/[id]` 拒绝 IP 任务，避免详情页误走普通生成重试。
+- [x] IP 状态接口改为白名单响应，不直接返回 raw provider response、params 或 source metadata。
+- [x] IP 创建接口幂等命中时校验 provider，避免同一幂等键跨普通生成和 IP 生成复用。
+- [x] IP provider 按火山官方示例调整 `content` 顺序：文本项在前，参考图片/视频/音频在后。
+- [x] 火山 200 响应里的错误体会按失败处理；创建失败记录火山错误码，模型/权限/素材类失败返回 JSON 4xx，避免公网 502 纯文本导致前端拿不到错误。
+
+### 真实测试护栏
+
+- [x] 真实测试最多创建 3 个火山视频任务；本轮只做 2 次提交尝试，未继续发第 3 个。
+- [x] 每个真实任务必须是 `resolution=480p`、`duration=4`、至少 1 张参考图；两次提交均符合。
+- [x] 第 1/2 个真实任务因模型权限失败后停止，不继续消耗第 3 个名额。
+- [x] 同一个用例重试必须复用原幂等键或只查状态，不能新增第 4 个任务；`ip-real-acceptance-20260626-02` 幂等复查返回已有任务。
+- [ ] 真实任务完成后必须确认本地任务状态、火山 `provider_task_id`、结果 URL/本地转存、缩略图和点数结算；当前阻断在火山 `ModelNotOpen`，没有生成 `provider_task_id`。
+
+### 验证
+
+- [x] `npx tsx scripts/volcengine-ip-provider-smoke.ts`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `git diff --check`
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] `youdoo-sites build sd2`
+- [x] `youdoo-sites restart sd2`
+- [x] 公网 `/generate/ip` 未登录跳转登录，生产包包含 IP 页面和 `/api/ip/...` 路由。
+- [x] 公网 `/api/ip/video/list` 未登录保护正常；登录态只返回 `provider='volcengine_ark'` 任务。
+- [x] 火山配置接口登录态显示 ready，Model ID 已校正为 `doubao-seedance-2-0-260128`，API Key 已配置且不回显。
+- [x] 火山 List API 200，说明 API Key、Base URL 和 Bearer 鉴权可用。
+- [x] 最多 3 个真实火山任务验收：提交 2 次，均未获得火山 `provider_task_id`；第二次火山返回 `ModelNotOpen`，账号未开通当前模型，冻结点数已自动退回。
+- [ ] 模型在火山 Ark Console 开通后，再跑第 3 个也是最后一个真实任务，继续保持 480p、4 秒、带参考图、幂等键。

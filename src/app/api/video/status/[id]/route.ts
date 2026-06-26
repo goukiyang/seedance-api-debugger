@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
+import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,12 @@ export async function GET(
       return NextResponse.json(
         { error: 'Task not found', message: `Task ${taskId} not found` },
         { status: 404 },
+      );
+    }
+    if (task.provider === VOLCENGINE_IP_VIDEO_PROVIDER) {
+      return NextResponse.json(
+        { error: '任务是 IP 生成任务', message: '请使用 IP 任务状态接口查询此任务' },
+        { status: 400 },
       );
     }
 
