@@ -2445,6 +2445,56 @@ a {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.volcengine-model-presets {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-top: 10px;
+}
+
+.volcengine-model-preset {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  color: #374151;
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.volcengine-model-preset:hover {
+  background: #f3f4f6;
+  border-color: #cbd5e1;
+}
+
+.volcengine-model-preset:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.volcengine-model-preset.is-active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.14);
+}
+
+.volcengine-model-preset span {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.volcengine-model-preset small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .codex-config-status {
   background: #f9fafb;
   border: 1px solid #e5e7eb;

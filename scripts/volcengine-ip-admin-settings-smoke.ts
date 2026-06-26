@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import {
-  VOLCENGINE_IP_API_SETTING_KEY,
+  VOLCENGINE_IP_MODEL_OPTIONS,
+  VOLCENGINE_IP_SEEDANCE_2_0_MINI_MODEL_ID,
+} from '@/lib/integrations/volcengine-ip-models';
+import {
   buildVolcengineIpApiSettingsPatch,
   isVolcengineIpApiReady,
   safeVolcengineIpConfigDto,
+  VOLCENGINE_IP_API_SETTING_KEY,
 } from '@/lib/integrations/volcengine-ip';
 
 const current = {
@@ -23,6 +27,11 @@ const saved = buildVolcengineIpApiSettingsPatch(current, {
 });
 
 assert.equal(VOLCENGINE_IP_API_SETTING_KEY, 'volcengine_ip_api_v1');
+assert.equal(VOLCENGINE_IP_SEEDANCE_2_0_MINI_MODEL_ID, 'doubao-seedance-2-0-mini-260615');
+assert.ok(
+  VOLCENGINE_IP_MODEL_OPTIONS.some((option) => option.id === VOLCENGINE_IP_SEEDANCE_2_0_MINI_MODEL_ID),
+  'Seedance 2.0 Mini should be available as a Volcengine IP model preset',
+);
 assert.equal(saved.enabled, true);
 assert.equal(saved.base_url, 'https://ark.example.com/api/v3');
 assert.equal(saved.default_model, 'doubao-seedance-2-0-fast-test');
@@ -56,6 +65,8 @@ async function main() {
   assert.ok(clientSource.includes('/api/admin/integrations/volcengine-ip'));
   assert.ok(clientSource.includes('volcengine-api-key'));
   assert.ok(clientSource.includes('火山 IP 生成 API'));
+  assert.ok(clientSource.includes('VOLCENGINE_IP_MODEL_OPTIONS'));
+  assert.ok(clientSource.includes('volcengine-model-presets'));
   assert.ok(clientSource.includes('autoComplete="new-password"'));
 
   console.log('volcengine-ip-admin-settings smoke passed');

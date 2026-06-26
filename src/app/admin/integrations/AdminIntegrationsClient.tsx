@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
+import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
 
 type UserSelectorType = 'id' | 'email' | 'username';
 
@@ -533,6 +534,7 @@ export default function AdminIntegrationsClient() {
             <input
               id="volcengine-model"
               className="input"
+              list="volcengine-model-options"
               value={volcengineConfig.default_model}
               onChange={(event) => setVolcengineConfig((prev) => ({ ...prev, default_model: event.target.value }))}
               placeholder="按火山控制台已开通模型填写"
@@ -540,6 +542,30 @@ export default function AdminIntegrationsClient() {
               maxLength={120}
               required
             />
+            <datalist id="volcengine-model-options">
+              {VOLCENGINE_IP_MODEL_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </datalist>
+            <div className="volcengine-model-presets" aria-label="火山 IP 模型预设">
+              {VOLCENGINE_IP_MODEL_OPTIONS.map((option) => {
+                const active = volcengineConfig.default_model === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    className={`volcengine-model-preset${active ? ' is-active' : ''}`}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setVolcengineConfig((prev) => ({ ...prev, default_model: option.id }))}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.detail}</small>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="form-group">
