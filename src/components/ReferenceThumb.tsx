@@ -22,6 +22,8 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
   const isFailed = uploadStatus === 'failed';
   const [imageSrc, setImageSrc] = useState(src);
   const [imageFailed, setImageFailed] = useState(false);
+  const labelPrefix = asset.type === 'video' ? '视频' : asset.type === 'audio' ? '音频' : '图';
+  const label = `${labelPrefix}${index + 1}`;
 
   useEffect(() => {
     setImageSrc(src);
@@ -39,7 +41,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
         {imageSrc && !imageFailed ? (
           <img
             src={imageSrc}
-            alt={`图${index + 1}`}
+            alt={label}
             className="ref-thumb-img"
             loading="lazy"
             draggable={false}
@@ -72,7 +74,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       )}
 
       {/* 图号标签 */}
-      <div className="ref-thumb-label">图{index + 1}</div>
+      <div className="ref-thumb-label">{label}</div>
 
       {/* Frame 角色标签 */}
       {frameRole === 'first_frame' && (
@@ -92,7 +94,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
           onReplace(asset.assetId);
         }}
         title="替换"
-        aria-label={`替换图${index + 1}`}
+        aria-label={`替换${label}`}
       >
         ↺
       </button>
@@ -105,7 +107,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
           onRemove(asset.assetId);
         }}
         title="移除"
-        aria-label={`移除图${index + 1}`}
+        aria-label={`移除${label}`}
       >
         ×
       </button>

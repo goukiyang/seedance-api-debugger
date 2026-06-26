@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Check, ChevronDown, Folder, Plus } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
@@ -169,6 +170,7 @@ function TemplateTaskPreview({ task }: { task: TaskItem }) {
 }
 
 export function TemplateGenerateClient() {
+  const searchParams = useSearchParams();
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
   const recentTasksSentinelRef = useRef<HTMLDivElement | null>(null);
   const recentTasksLoadingRef = useRef(false);
@@ -239,6 +241,8 @@ export function TemplateGenerateClient() {
   const selectedProjectMeta = selectedProject
     ? projectMetaLabel(selectedProject)
     : '新建项目后才能保存模板生成任务。';
+  const initialTemplateId = searchParams.get('templateId') || searchParams.get('template_id') || null;
+  const templateReturnTo = initialTemplateId ? `/template-generate?templateId=${encodeURIComponent(initialTemplateId)}` : '/template-generate';
 
   useEffect(() => {
     let cancelled = false;
@@ -537,6 +541,8 @@ export function TemplateGenerateClient() {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds?: string[];
+    referenceVideoUrls?: string[];
+    referenceAudioUrls?: string[];
     templateId?: string | null;
     agentRunId?: string | null;
     selectedAgentPlanKey?: string | null;
@@ -581,6 +587,8 @@ export function TemplateGenerateClient() {
           project_id: selectedProjectId,
           video_card_id: selectedCard.id,
           reference_image_ids: params.referenceImageIds || [],
+          reference_video_urls: params.referenceVideoUrls || [],
+          reference_audio_urls: params.referenceAudioUrls || [],
           template_id: params.templateId || null,
           agent_run_id: params.agentRunId || null,
           selected_agent_plan_key: params.selectedAgentPlanKey || null,
@@ -653,6 +661,7 @@ export function TemplateGenerateClient() {
             <p>模板固定角色、Logo、素材和规则，你只输入本次需求并选择方案。</p>
           </div>
           <div className="template-generate-hero-actions">
+            <Link href="/templates">返回模板库</Link>
             <Link href="/generate/canvas">进入画布模式</Link>
             <Link href="/projects">查看我的项目</Link>
             {currentUser?.role === 'admin' && <Link href="/admin/agent-runs">执行链路</Link>}
@@ -797,7 +806,8 @@ export function TemplateGenerateClient() {
           selectedVideoCardId={selectedVideoCardId}
           canManageTemplates={currentUser?.role === 'admin'}
           templateMode="workbench"
-          resultReturnTo="/template-generate"
+          initialTemplateId={initialTemplateId}
+          resultReturnTo={templateReturnTo}
           require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}

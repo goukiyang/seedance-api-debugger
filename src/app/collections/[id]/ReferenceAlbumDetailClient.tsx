@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
-import ShareAlbumDialog from '@/components/ShareAlbumDialog';
+import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/ShareAlbumDialog';
 import { displayUserName } from '@/lib/users/display';
 
 interface AlbumDetail {
@@ -44,7 +44,8 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareDialogAlbum, setShareDialogAlbum] = useState<ShareAlbumDialogAlbum | null>(null);
+  const [sharingImageId, setSharingImageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadAlbum = () => {
@@ -132,6 +133,27 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
     loadAlbum();
   };
 
+  const handleShareSingleImage = async (image: ReferenceImageItem) => {
+    setSharingImageId(image.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reference-images/${image.id}/share-album`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: image.asset?.file_name ? `单图共享 - ${image.asset.file_name}` : `单图共享 - 图 ${image.sort_order + 1}`,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || '单图共享创建失败');
+      setShareDialogAlbum(data.album);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '单图共享创建失败');
+    } finally {
+      setSharingImageId(null);
+    }
+  };
+
   const handleRenameAlbum = async () => {
     if (!album) return;
     const nextName = window.prompt('输入新的图集名称', album.name)?.trim();
@@ -213,7 +235,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
               </button>
             )}
             {album.can_share && !['public', 'system'].includes(album.album_type) && (
-              <button type="button" onClick={() => setShowShareDialog(true)} disabled={loading}>
+              <button type="button" onClick={() => setShareDialogAlbum(album)} disabled={loading}>
                 {album.active_share_count > 0 ? '共享设置' : '转为共享图集'}
               </button>
             )}
@@ -238,6 +260,15 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
                     </button>
                     <div className="album-image-meta">
                       <span>图 {image.sort_order + 1}</span>
+                      {album.permissions.copy && (
+                        <button
+                          type="button"
+                          onClick={() => handleShareSingleImage(image)}
+                          disabled={sharingImageId === image.id}
+                        >
+                          {sharingImageId === image.id ? '创建中...' : '共享'}
+                        </button>
+                      )}
                       {album.permissions.edit && (
                         <button type="button" onClick={() => handleDeleteImage(image.id)}>删除</button>
                       )}
@@ -248,10 +279,12 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             )}
           </div>
           <ShareAlbumDialog
-            open={showShareDialog}
-            album={album}
-            onClose={() => setShowShareDialog(false)}
-            onChanged={loadAlbum}
+            open={Boolean(shareDialogAlbum)}
+            album={shareDialogAlbum}
+            onClose={() => setShareDialogAlbum(null)}
+            onChanged={() => {
+              if (shareDialogAlbum?.id === album.id) loadAlbum();
+            }}
           />
         </>
       )}

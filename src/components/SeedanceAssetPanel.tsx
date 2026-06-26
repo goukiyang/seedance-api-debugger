@@ -256,7 +256,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://xxx.jpg"
+              placeholder="https://xxx.jpg / xxx.mp4 / xxx.mp3"
               style={{ width: '100%', padding: '7px 10px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: 'white', fontSize: 12, outline: 'none', marginBottom: 8 }}
             />
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -281,12 +281,12 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
 
           {/* 本地上传测试区 */}
           <div style={{ marginBottom: 16, padding: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.7)', marginBottom: 10 }}>本地上传 → 自动创建资产</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.7)', marginBottom: 10 }}>本地上传图片/视频/音频 → 自动创建资产</div>
             <div style={{ marginBottom: 8 }}>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/wav,audio/ogg"
                 onChange={(e) => {
                   const f = e.target.files?.[0] || null;
                   setUploadFile(f);

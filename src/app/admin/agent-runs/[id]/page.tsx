@@ -68,6 +68,28 @@ const TRACE_STEPS = [
   { key: 'memory_record', label: 'Memory Record', fallbackTitle: 'Memory 记录' },
 ];
 
+const MODULE_BUILDER_TRACE_STEPS = [
+  { key: 'module_builder_context', label: 'Template Context', fallbackTitle: '模板上下文' },
+  { key: 'module_builder_rules', label: 'Builder Rules', fallbackTitle: 'LLM生成规则设定' },
+  { key: 'llm_generate', label: 'LLM Generate', fallbackTitle: 'LLM 生成模块草稿' },
+  { key: 'validator', label: 'Validator', fallbackTitle: '结构化校验' },
+  { key: 'memory_record', label: 'Memory Record', fallbackTitle: 'Memory 记录' },
+];
+
+const TEMPLATE_CONFIG_TRACE_STEPS = [
+  { key: 'template_config_context', label: 'Template Context', fallbackTitle: '模板上下文' },
+  { key: 'template_config_rules', label: 'Config Rules', fallbackTitle: '模板配置生成规则' },
+  { key: 'llm_generate', label: 'LLM Generate', fallbackTitle: 'LLM 生成模板配置草稿' },
+  { key: 'validator', label: 'Validator', fallbackTitle: '结构化校验' },
+  { key: 'memory_record', label: 'Memory Record', fallbackTitle: 'Memory 记录' },
+];
+
+function traceStepsForKind(kind: unknown) {
+  if (kind === 'module_builder') return MODULE_BUILDER_TRACE_STEPS;
+  if (kind === 'template_config') return TEMPLATE_CONFIG_TRACE_STEPS;
+  return TRACE_STEPS;
+}
+
 function stepStatusClass(exists: boolean, runStatus: string) {
   if (exists) return 'is-done';
   if (runStatus === 'failed') return 'is-missing';
@@ -77,6 +99,7 @@ function stepStatusClass(exists: boolean, runStatus: string) {
 function ruleTypeLabel(type: string) {
   if (type === 'must') return 'MUST';
   if (type === 'forbid') return 'FORBID';
+  if (type === 'context') return 'CONTEXT';
   return 'SUGGEST';
 }
 
@@ -119,6 +142,10 @@ export default async function AdminAgentRunDetailPage({ params }: PageProps) {
   const orderedSteps = [...run.steps].sort((a, b) => a.sort_order - b.sort_order);
   const stepsByKey = new Map(run.steps.map((step) => [step.step_key, step]));
   const userInput = safeJson(run.user_input_json, {});
+  const userInputRecord = userInput && typeof userInput === 'object' && !Array.isArray(userInput)
+    ? userInput as Record<string, unknown>
+    : {};
+  const traceSteps = traceStepsForKind(userInputRecord.kind);
   const plans = safeJson(run.plans_json, []);
   const modules = safeJson(run.template.module_bindings_json, {});
   const temporal = safeJson(run.template.temporal_json, {});
@@ -172,7 +199,7 @@ export default async function AdminAgentRunDetailPage({ params }: PageProps) {
       </section>
 
       <section className="admin-agent-run-chain" aria-label="Agent 执行链路">
-        {TRACE_STEPS.map((traceStep, index) => {
+        {traceSteps.map((traceStep, index) => {
           const step = stepsByKey.get(traceStep.key);
           return (
             <article className={`admin-agent-run-chain-card ${stepStatusClass(Boolean(step), run.status)}`} key={traceStep.key}>

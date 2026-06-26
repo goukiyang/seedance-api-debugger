@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
+import { createNotification, creditNotificationCopy } from '@/lib/notifications';
 
 const MAX_BULK_RECIPIENTS = 200;
 
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
           data: { balance: balanceAfter },
         });
 
-        await tx.creditLedger.create({
+        const ledger = await tx.creditLedger.create({
           data: {
             user_id: userId,
             type: 'admin_grant',
@@ -93,6 +94,24 @@ export async function POST(request: NextRequest) {
             frozen_after: account.frozen_credits,
             operator_id: admin.id,
             reason,
+          },
+        });
+
+        const copy = creditNotificationCopy('admin_grant', amount, reason);
+        await createNotification(tx, {
+          userId,
+          type: 'credit',
+          title: copy.title,
+          body: copy.body,
+          href: '/account',
+          sourceType: 'credit_ledger',
+          sourceId: ledger.id,
+          actorUserId: admin.id,
+          metadata: {
+            ledger_type: 'admin_grant',
+            amount,
+            operator_id: admin.id,
+            batch_size: userIds.length,
           },
         });
 

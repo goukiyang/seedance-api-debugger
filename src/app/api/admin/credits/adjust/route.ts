@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
+import { createNotification, creditNotificationCopy } from '@/lib/notifications';
 
 export async function POST(request: NextRequest) {
   let admin: SessionUser;
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
         data: { balance: newBalance },
       });
 
-      await tx.creditLedger.create({
+      const ledger = await tx.creditLedger.create({
         data: {
           user_id,
           type: ledgerType,
@@ -81,6 +82,23 @@ export async function POST(request: NextRequest) {
             delta: ledgerAmount,
             scope: 'long_term_balance',
           }),
+        },
+      });
+
+      const copy = creditNotificationCopy(ledgerType, ledgerAmount, reason);
+      await createNotification(tx, {
+        userId: user_id,
+        type: 'credit',
+        title: copy.title,
+        body: copy.body,
+        href: '/account',
+        sourceType: 'credit_ledger',
+        sourceId: ledger.id,
+        actorUserId: admin.id,
+        metadata: {
+          ledger_type: ledgerType,
+          amount: ledgerAmount,
+          operator_id: admin.id,
         },
       });
 

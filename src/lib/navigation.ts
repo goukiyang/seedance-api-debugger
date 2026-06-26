@@ -8,7 +8,9 @@ export interface NavItem {
 export const shellRoutes = [
   '/workbench',
   '/account',
+  '/notifications',
   '/assets',
+  '/templates',
   '/projects',
   '/collections',
   '/cutout',
@@ -18,6 +20,10 @@ export const shellRoutes = [
   '/admin/outputs',
   '/admin/costs',
   '/admin/integrations',
+  '/admin/settings',
+  '/admin/notifications',
+  '/admin/agent-runs',
+  '/admin/modules',
   '/admin/feedback',
 ] as const;
 
@@ -33,25 +39,36 @@ const shellRoutePrefixes = [
   '/admin/outputs',
   '/admin/costs',
   '/admin/integrations',
+  '/admin/settings',
+  '/admin/notifications',
+  '/admin/agent-runs',
+  '/admin/modules',
 ] as const;
 
 export const userNavItems: NavItem[] = [
-  { label: '生成视频', href: '/generate', prefixMatch: true },
+  { label: '生成视频', href: '/generate', match: ['/generate', '/generate/canvas'] },
+  { label: '动画模板', href: '/templates', prefixMatch: true },
   { label: '视频工作台', href: '/workbench', prefixMatch: true },
   { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
   { label: '资产管理', href: '/assets', prefixMatch: true },
   { label: '我的项目', href: '/projects', prefixMatch: true },
+  { label: 'IP生成', href: '/generate/ip' },
   { label: '参考图集', href: '/collections', prefixMatch: true },
   { label: '我的任务', href: '/tasks', prefixMatch: true },
+  { label: '通知', href: '/notifications' },
 ];
 
 export const adminNavItems: NavItem[] = [
   { label: '后台总览', href: '/admin' },
   { label: '用户管理', href: '/admin/users' },
   { label: '项目管理', href: '/admin/projects' },
+  { label: '模板管理', href: '/templates', prefixMatch: true },
+  { label: '模块库', href: '/admin/modules', prefixMatch: true },
+  { label: '执行链路', href: '/admin/agent-runs', prefixMatch: true },
   { label: '产出留存', href: '/admin/outputs' },
   { label: '计费与成本', href: '/admin/costs' },
-  { label: '接口配置', href: '/admin/integrations' },
+  { label: 'API 设置', href: '/admin/integrations', match: ['/admin/integrations', '/admin/settings'] },
+  { label: '通知公告', href: '/admin/notifications' },
   { label: '反馈管理', href: '/admin/feedback' },
 ];
 

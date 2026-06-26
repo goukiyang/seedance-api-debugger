@@ -94,7 +94,11 @@ export default async function AdminPage() {
     { title: '用户与点数', desc: '账号、长期点数、每日配额和批量发放', href: '/admin/users' },
     { title: '点数流水', desc: '按用户、任务、类型和时间范围追溯点数账本', href: '/admin/points' },
     { title: '项目管理', desc: '项目归属、成员、邀请和成本归集边界', href: '/admin/projects' },
-    { title: '接口配置', desc: 'Codex API 与外部集成状态', href: '/admin/integrations' },
+    { title: '模板管理', desc: 'LLM 新建模板、Module Builder 和模板版本调整', href: '/templates' },
+    { title: '模块库', desc: '查看 LLM 生成模块、版本记录和来源链路', href: '/admin/modules' },
+    { title: '执行链路', desc: '查看 Template Config、Module Builder 和生成 Agent 的全链路', href: '/admin/agent-runs' },
+    { title: '通知公告', desc: '发布版本更新，触达用户通知中心', href: '/admin/notifications' },
+    { title: 'API 设置', desc: 'Musk API、Codex API 与外部集成状态', href: '/admin/integrations' },
     { title: '反馈管理', desc: '查看、归档和导出用户反馈', href: '/admin/feedback' },
   ];
 

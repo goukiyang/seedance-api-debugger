@@ -1,6 +1,15 @@
-export type TemplateRuleType = 'must' | 'forbid' | 'suggest';
-export type TemplateAssetType = 'character' | 'logo' | 'style' | 'other';
-export type TemplatePromptBlockType = 'character' | 'logo' | 'style' | 'global';
+export type TemplateRuleType = 'must' | 'forbid' | 'suggest' | 'context';
+export type TemplateAssetType = 'character' | 'logo' | 'style' | 'product' | 'negative' | 'other';
+export type TemplatePromptBlockType =
+  | 'character'
+  | 'logo'
+  | 'style'
+  | 'camera'
+  | 'rules'
+  | 'asset_rule'
+  | 'temporal'
+  | 'prompt_format'
+  | 'global';
 
 export type TemplateModuleBindings = {
   character?: string;
@@ -8,6 +17,9 @@ export type TemplateModuleBindings = {
   style?: string;
   camera?: string;
   rules?: string;
+  asset_rule?: string;
+  temporal?: string;
+  prompt_format?: string;
 };
 
 export type TemplateTemporalConfig = {
@@ -150,6 +162,9 @@ function normalizeModuleBindings(value: unknown): TemplateModuleBindings {
     style: stringOrUndefined(object.style),
     camera: stringOrUndefined(object.camera),
     rules: stringOrUndefined(object.rules),
+    asset_rule: stringOrUndefined(object.asset_rule),
+    temporal: stringOrUndefined(object.temporal),
+    prompt_format: stringOrUndefined(object.prompt_format),
   };
 }
 
@@ -182,15 +197,26 @@ function normalizeItemStatus(value: unknown) {
 }
 
 function normalizeRuleType(value: unknown): TemplateRuleType {
-  return value === 'forbid' || value === 'suggest' ? value : 'must';
+  return value === 'forbid' || value === 'suggest' || value === 'context' ? value : 'must';
 }
 
 function normalizeAssetType(value: unknown): TemplateAssetType {
-  return value === 'logo' || value === 'style' || value === 'other' ? value : 'character';
+  return value === 'logo' || value === 'style' || value === 'product' || value === 'negative' || value === 'other'
+    ? value
+    : 'character';
 }
 
 function normalizePromptBlockType(value: unknown): TemplatePromptBlockType {
-  return value === 'logo' || value === 'style' || value === 'global' ? value : 'character';
+  return value === 'logo'
+    || value === 'style'
+    || value === 'camera'
+    || value === 'rules'
+    || value === 'asset_rule'
+    || value === 'temporal'
+    || value === 'prompt_format'
+    || value === 'global'
+    ? value
+    : 'character';
 }
 
 function normalizeSortOrder(value: unknown, fallback: number) {

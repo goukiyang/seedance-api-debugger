@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-15 - LLM 功能不能只落 UI 骨架
+
+- 问题/背景：模板模块页面已有 `Module Builder` 面板和 Musk API 基础地址/模型配置，但用户继续反馈“llm 的需求做了么，我没看见对应的 ui”等缺口。
+- 诱因/根因：前一批只完成可见入口和本地结构化草稿，尚未接入 API Key、真实 LLM 调用、AgentRun/Memory 审计和权限验证；“能看到面板”容易被误判为“LLM 已落地”。
+- 当时思路：先用 smoke 测试锁住 Module Builder Agent 的 JSON 解析和校验协议，再补 Musk API Key、OpenAI-compatible 调用、管理员生成接口和前端真实请求。
+- 改动位置：`src/lib/integrations/musk.ts`、`src/lib/templates/module-builder.ts`、`src/app/api/templates/module-builder/generate/route.ts`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`。
+- 怎么改：Musk 配置增加 API Key 但不回显；Module Builder 接口只生成草稿，不直接保存模块；生成过程写入 `AgentRun`、`AgentRunStep`、`TemplateMemory` 和 `OperationLog`；抽屉 UI 显示等待、错误、追问、规则和执行链路。
+- 验证结果：`npx tsx scripts/module-builder-agent-smoke.ts` 和 `./node_modules/.bin/tsc --noEmit --pretty false` 通过。
+- 可复用经验：凡是标成 LLM/Agent 的功能，验收必须至少覆盖“模型配置含密钥、服务端调用器、结构化输出校验、权限、审计链路、前端真实请求”；只有本地模拟或静态 UI 时必须明确标注为骨架。
+
 ## 2026-06-14 - 删除/归档类按钮不要依赖浏览器原生 confirm
 
 - 问题/背景：用户反馈生成页项目删除按钮点击后没有起效。
@@ -300,6 +310,16 @@
 - 验证结果：备份 `prisma/dev.db` 后应用迁移；backfill 创建 22 张兜底视频卡，迁移 124 个历史任务；SQL 验证 `missing_card=0`、`cross_project=0`，`CreditLedger` 和 `CostLedger` 计数/汇总不变；`prisma validate`、`tsc`、`lint`、`build` 通过。
 - 可复用经验：给历史数据补强归属关系时，先用 nullable 字段保护上线，再用可重复 dry-run/apply 脚本迁移旧数据；所有创建入口、复用入口、重试入口和画布入口必须同时补齐，否则“新任务必填”只是局部约束。
 
+## 2026-06-15 - 图形模型配置必须和文字 LLM 配置分离
+
+- 问题/背景：无线画布需要图形生成能力，但现有 Musk API 默认模型是 `gpt-5.4`，只适合 prompt、分镜和结构化草稿，不适合文生图/图生图。
+- 诱因/根因：如果复用文字 LLM 配置去接图像模型，会混淆 Provider Key、模型能力、计费、失败处理和后台排查口径。
+- 当时思路：先新增独立 `image_generation_api_v1` 配置和 `banana2` Provider 骨架，前端只通过后台读取配置状态，不直连图像模型。
+- 改动位置：`src/lib/integrations/image-generation.ts`、`src/app/api/admin/integrations/image-generation/route.ts`、`src/app/api/assets/generate/route.ts`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`tasks/todo.md`。
+- 怎么改：新增图形生成 API 配置读写、管理员设置卡、API Key 不回显、未配置时 `/api/assets/generate` 返回 503、配置后因 banana2 协议未确认返回 501，避免硬编码假接口。
+- 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect src/app/admin/integrations/AdminIntegrationsClient.tsx` 通过。
+- 可复用经验：跨模型能力要先拆配置域和安全边界；文字 LLM、图像模型、视频 Provider 不应共用一个 API 设置或一套计费语义，真实 Provider 协议未确认前只能落骨架和阻断，不写假调用。
+
 ## 2026-06-13 - 视频卡必须按项目子资源验证信息架构
 
 - 问题/背景：用户指出视频卡不应该和项目同级；V1.2 第一阶段实际只完成了视频卡归属闭环，不等于整份需求已完成。
@@ -329,6 +349,16 @@
 - 怎么改：新增独立模板生成路由；模板页顶部明确项目/视频卡归属和模板生成任务；`GenerationComposer` 通过 `templateMode="workbench"` 才显示模板区、需求区、方案卡和 Prompt 预览；普通生成页默认不加载模板工作台；模板抽屉改为 `模块 / 规则 / 资产`；Agent 链路详情增加 9 步链路卡、规则命中和输入输出对比。
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect` 通过；本地 `http://localhost:3100/template-generate` 返回 200 且包含模板生成页首屏，`/generate` 仍按普通生成页登录保护跳转。
 - 可复用经验：当用户纠正“这不是同一个页面”时，优先按主任务和第一性原理拆页面，不要只靠显隐开关把两个工作流堆在一个页面里；保留功能不等于同屏暴露，低频配置进抽屉，调试证据进链路页，主页面只服务用户最短生成路径。
+
+## 2026-06-15 - LLM 生成模块必须先有结构化保存层
+
+- 问题/背景：用户要求新增模块不要走传统表单，而是由 Module Builder Agent 通过对话生成；同时模板配置也要接 LLM，不只是本地假草稿。
+- 诱因/根因：如果只在前端展示 LLM 文案，没有正式模块库、版本记录、模板写入 normalizer 和 Memory 记录，管理员保存后仍无法追溯或复用模块。
+- 当时思路：先用现有 `PlatformSetting` 做兼容模块库，避免为了模块库立即改 Prisma schema；LLM 输出必须先通过结构化校验，再由管理员保存为模块或模板草稿。
+- 改动位置：`src/lib/templates/module-library.ts`、`src/lib/templates/template-config-builder.ts`、`src/app/api/templates/module-builder/*`、`src/app/api/templates/config-builder/*`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/components/templates/TemplateLibraryClient.tsx`、`src/app/admin/modules/page.tsx`。
+- 怎么改：新增 Module Builder 生成/保存/拒绝/规则接口；新增 Template Config Agent 生成/保存接口；模板写入层支持 `prompt_format`、`asset_rule`、`temporal`、`context`；前端抽屉和模板库页接真实 API；AgentRun 详情按 run kind 展示对应链路。
+- 验证结果：`npx tsx scripts/template-llm-contract-smoke.ts`、`npx tsc --noEmit`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/templates/TemplateLibraryClient.tsx src/components/templates/TemplateEditorDrawer.tsx` 通过；线上源目录未同步，因 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo` 已有大量未提交改动。
+- 可复用经验：LLM 驱动的后台能力不能只做“聊天框”；必须同时落地结构化 schema/兼容存储、人工确认、版本记录、可应用写入、Memory/OperationLog 和可见管理入口，否则用户会“看见生成了”但系统没有真正获得新能力。
 
 ## 2026-06-13 - 反馈消单必须区分已验证闭环和高风险未闭环
 
@@ -369,3 +399,13 @@
 - 怎么改：创建 Agent Run 时落库 9 个步骤；尚未提交 Seedance 的步骤明确标记为 `pending_submit`；执行链路详情页增加 Trace 复制、报告导出、自动刷新、错误摘要，并对 token、cookie、密钥和 URL 字段脱敏。
 - 验证结果：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx impeccable detect` 和本地 `/template-generate` HTTP smoke 通过；线上部署验证待执行。
 - 可复用经验：调试链路页不是静态流程图。每一个 UI 步骤都必须能追溯到真实写入事件；如果产品流程调整，先改写入 key，再改页面展示和导出，否则排查时会看到“漂亮但不可信”的链路。
+
+## 2026-06-17 - sd2 部署前必须确认真实线上源目录
+
+- 问题/背景：图集共享功能先在 `/Volumes/Data/Projects/video-api-debugger` 落地并验证，但 `youdoo-sites status sd2` 显示线上实际运行目录是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 诱因/根因：本机存在开发副本和线上源目录两个相似项目名；只在当前目录构建通过，不代表 `sd2.youdoodesign.com` 会加载这份代码。
+- 当时思路：先通过 `youdoo-sites status sd2`、`sites.json` 和 LaunchAgent 确认真实部署目录，再把本轮精确改动同步到线上源目录，避免覆盖线上已有头像展示、模板系统等未提交改动。
+- 改动位置：`src/components/ShareAlbumDialog.tsx`、`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/api/reference-images/[id]/share-album/route.ts`、`src/app/globals.css`、`tasks/todo.md`。
+- 怎么改：共享弹窗复用现有项目、公共文件夹和公共投稿接口；单图共享先创建私有单图图集；部署目录只做精确增量补丁，不整文件覆盖。
+- 验证结果：两个目录均通过 `npx tsc --noEmit --pretty false`；部署目录通过 `npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 `/api/config`、`/login`、新增 API 未登录 401、公共静态 chunk 新文案命中；70 秒后 `sd2` health 仍 OK 且 `runs` 未增加。
+- 可复用经验：任何要上线到 `sd2.youdoodesign.com` 的 UI/API 改动，先确认 `youdoo-sites` 真实项目路径。当前编辑目录和线上源目录不一致时，只同步本轮精确改动，并用公网 API、静态 chunk 和跨健康周期 status 证明线上实例已加载新构建。

@@ -54,6 +54,16 @@ const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 
+function normalizeUrlList(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniquePreserveOrder(
+    value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ).slice(0, limit);
+}
+
 export async function POST(request: NextRequest) {
   let user;
   let requestSource: GenerationRequestSource = webRequestSource(request);
@@ -400,8 +410,8 @@ export async function POST(request: NextRequest) {
   let firstFrameUrl: string | undefined = body.first_frame_url;
   let lastFrameUrl: string | undefined = body.last_frame_url;
   let frameImageUrls: string[] = body.frame_image_urls ? [...body.frame_image_urls] : [];
-  const referenceVideoUrls: string[] = body.reference_video_urls ? [...body.reference_video_urls].slice(0, 3) : [];
-  const referenceAudioUrls: string[] = body.reference_audio_urls ? [...body.reference_audio_urls].slice(0, 3) : [];
+  const referenceVideoUrls = normalizeUrlList(body.reference_video_urls ?? body.referenceVideoUrls, 3);
+  const referenceAudioUrls = normalizeUrlList(body.reference_audio_urls ?? body.referenceAudioUrls, 3);
 
   switch (generationMode) {
     case 'all_in_one_reference':

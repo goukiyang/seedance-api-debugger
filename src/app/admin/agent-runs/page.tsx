@@ -18,9 +18,15 @@ function formatDate(value: Date) {
 function parsePlans(value: string) {
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.length : 0;
+    if (Array.isArray(parsed)) return `${parsed.length} 个方案`;
+    if (parsed && typeof parsed === 'object') {
+      const source = parsed as Record<string, unknown>;
+      if (source.kind === 'module_builder') return '模块草稿';
+      if (source.kind === 'template_config') return '模板配置';
+    }
+    return '无方案';
   } catch {
-    return 0;
+    return '无方案';
   }
 }
 
@@ -69,7 +75,7 @@ export default async function AdminAgentRunsPage() {
             <span><em>{run.status}</em></span>
             <span>
               <strong>{run.selected_plan_key || '-'}</strong>
-              <small>{parsePlans(run.plans_json)} 个方案</small>
+              <small>{parsePlans(run.plans_json)}</small>
             </span>
             <span>
               {run.video_task_id ? (

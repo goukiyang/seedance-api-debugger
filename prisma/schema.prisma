@@ -206,6 +206,8 @@ model User {
   approval_decisions      ApprovalRecord[]      @relation("ApprovalApprover")
   feedbacks               Feedback[]
   preferences             UserPreference[]
+  received_notifications  Notification[]      @relation("NotificationTarget")
+  acted_notifications     Notification[]      @relation("NotificationActor")
 
   @@index([username])
   @@index([email])
@@ -225,6 +227,41 @@ model PlatformSetting {
   updated_at DateTime @updatedAt
 
   @@index([key])
+}
+
+model Notification {
+  id             String    @id @default(cuid())
+  type           String
+  channel        String    @default("in_app")
+  status         String    @default("pending") // pending | sent | read | failed | archived
+  target_user_id String
+  actor_user_id  String?
+  project_id     String?
+  video_card_id  String?
+  approval_id    String?
+  title          String
+  body           String?
+  metadata_json  String?
+  sent_at        DateTime?
+  read_at        DateTime?
+  error_message  String?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  targetUser User            @relation("NotificationTarget", fields: [target_user_id], references: [id], onDelete: Cascade)
+  actorUser  User?           @relation("NotificationActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
+  project    Project?        @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  videoCard  VideoCard?      @relation(fields: [video_card_id], references: [id], onDelete: SetNull)
+  approval   ApprovalRecord? @relation(fields: [approval_id], references: [id], onDelete: SetNull)
+
+  @@index([target_user_id])
+  @@index([actor_user_id])
+  @@index([project_id])
+  @@index([video_card_id])
+  @@index([approval_id])
+  @@index([type])
+  @@index([status])
+  @@index([created_at])
 }
 
 model GenerationTemplate {
@@ -426,6 +463,7 @@ model Project {
   budget_ledgers        ProjectBudgetLedger[]
   approval_records      ApprovalRecord[]
   content_audit_logs    ContentAuditLog[]
+  notifications         Notification[]
 
   @@index([workspace_id])
   @@index([owner_user_id])
@@ -465,6 +503,7 @@ model VideoCard {
   current_best_task VideoTask?  @relation("VideoCardCurrentBest", fields: [current_best_task_id], references: [id], onDelete: SetNull)
   final_task        VideoTask?  @relation("VideoCardFinal", fields: [final_task_id], references: [id], onDelete: SetNull)
   approval_records  ApprovalRecord[]
+  notifications     Notification[]
 
   @@index([project_id])
   @@index([status])
@@ -707,6 +746,7 @@ model ApprovalRecord {
   task      VideoTask? @relation(fields: [task_id], references: [id], onDelete: SetNull)
   requester User       @relation("ApprovalRequester", fields: [requester_user_id], references: [id], onDelete: Cascade)
   approver  User?      @relation("ApprovalApprover", fields: [approver_user_id], references: [id], onDelete: SetNull)
+  notifications Notification[]
 
   @@index([type])
   @@index([status])

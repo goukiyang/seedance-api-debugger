@@ -108,6 +108,114 @@
 - [ ] 日志和后台详情脱敏，不能泄露密钥、签名 URL、真人认证 token 或完整敏感 payload。
 - [ ] 真实 API Key 未配置时，任何生成按钮都不能调用火山，也不能冻结点数。
 
+## 图集和单图共享闭环 Todo
+
+更新时间：2026-06-17
+
+目标：
+
+- 所有可共享图集都保留明显“共享”入口。
+- 共享给项目时必须通过项目下拉选择，避免手填 ID 出错。
+- 共享到公共库时必须选择共享文件夹，再提交公共共享流程。
+- 单张图片也能共享：先自动创建一个只包含该图片的单图图集，再复用同一个共享面板。
+
+### 实现任务
+
+- [x] 复查现有图集、公共文件夹、公共投稿和图集分享接口，不另造一套共享模型。
+- [x] 将共享弹窗默认目标改为项目，并加载可用项目下拉。
+- [x] 在共享弹窗中增加“共享文件夹”目标，选择公共文件夹后走公共投稿接口。
+- [x] 保留指定用户共享能力，作为高级补充入口。
+- [x] 新增单张参考图创建单图共享图集的接口。
+- [x] 在图集详情页每张图片卡增加“共享”按钮，点击后打开同一共享弹窗。
+- [x] 验证 TypeScript、lint、构建和公网页面闭环。
+
+### 验收标准
+
+- [x] 图集卡和图集详情页都能打开共享面板。
+- [x] 共享面板可以直接选择项目，不需要用户手填项目 ID。
+- [x] 共享面板可以选择共享文件夹，并提交公共共享。
+- [x] 单张图片点击“共享”后，会生成一个单图图集并进入共享流程。
+- [x] 普通用户提交公共共享为待审核；管理员提交后直接生成公共图集。
+- [x] 线上 `sd2.youdoodesign.com` 刷新后能看到新入口。
+
+### Review - 2026-06-17 图集和单图共享闭环
+
+- 共享弹窗复用现有 `AlbumShare`、`ReferenceAlbumFolder`、`PublicAlbumSubmission`，没有新增数据库模型。
+- 图集共享默认进入“共享给项目”，项目来源为 `/api/projects` 下拉；指定用户共享保留。
+- 新增“提交到共享文件夹”方式，选择共享文件夹后调用 `/api/reference-albums/[id]/public-submissions`，普通用户待审核、管理员直接复制公共图集沿用既有后端规则。
+- 新增 `POST /api/reference-images/[id]/share-album`，单张图片会先创建只包含该图片的私有单图图集，再打开同一共享弹窗。
+- 已在部署目录 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo` 同步同样代码，并通过 `youdoo-sites build/restart sd2` 上线。
+- 验证通过：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 `/api/config`、`/login`、新增 API 未登录 401、公共静态 chunk 包含新文案。
+- 真实提交会写入数据库，本轮没有用生产账号制造测试共享记录；功能路径通过构建、路由、静态资源和现有后端规则闭环验证。
+
+## 动画模板选择页 Todo
+
+更新时间：2026-06-14
+
+第一性原理：
+
+- 这不是生成页、模板编辑页或 Agent 调试页，而是模板生成流程的前置决策页。
+- 用户进入这个页面时，核心问题是“我该选哪个动画模板开始生成”。
+- 页面必须让用户先看到模板画面、适用场景和使用入口，再按需查看结构、规则、素材和管理员配置。
+- 普通生成 `/generate` 与模板生成 `/template-generate` 必须保持分离；模板选择页只负责选择模板并把用户送入模板生成工作台。
+
+页面关系：
+
+- `/generate`：普通自由生成，不承载模板选择主流程。
+- `/templates`：动画模板选择页，展示模板库、筛选、预览和“使用此模板”入口。
+- `/template-generate?templateId=<id>`：独立模板生成工作台，进入后自动选中对应模板。
+- 管理员编辑模板仍使用既有模板编辑抽屉，不把复杂配置暴露给普通用户。
+
+### 页面信息架构
+
+- [x] 首屏必须展示模板库主任务：选择动画模板。
+- [x] 模板卡片必须截图优先；没有真实截图时使用稳定的 16:9 占位图，不允许文字信息顶到视觉入口。
+- [x] 卡片一级信息只保留：模板名称、适用场景、比例、时长、素材完整度、使用入口。
+- [x] 二级信息放入右侧预览面板：分镜结构、固定素材、模块绑定、规则数量、默认参数、适用/不适用场景。
+- [x] 管理员信息默认隐藏：版本、规则、Prompt、Temporal、执行链路、编辑模板。
+- [x] 搜索覆盖模板名、描述、模块名、素材标签和规则内容。
+- [x] 筛选至少包含：场景、比例、时长、状态、素材完整度。
+
+### 交互闭环
+
+- [x] 点击模板卡片只选中并更新预览，不直接跳转，便于用户比较。
+- [x] 点击“使用此模板”跳转 `/template-generate?templateId=<id>`。
+- [x] `/template-generate` 读取 URL 中的 `templateId`，自动预选对应模板。
+- [x] 如果 URL 中模板不存在或不可用，回退到第一个可用模板，并提示模板不可用。
+- [x] 管理员在选择页可从预览区进入“编辑模板”，普通用户不可见。
+- [x] 空模板、无搜索结果、无截图、缺素材、草稿/归档状态都必须有明确状态。
+
+### 实现任务
+
+- [x] 将 `src/app/templates/page.tsx` 从重定向改为模板选择页。
+- [x] 新增模板库客户端组件，复用 `/api/templates` 返回的 `SerializedGenerationTemplate`。
+- [x] 为模板选择页新增筛选、搜索、选中预览、状态计算和跳转逻辑。
+- [x] 扩展 `GenerationComposer` 支持 `initialTemplateId`，用于从 URL 预选模板。
+- [x] 扩展 `TemplateGenerateClient` 读取 `templateId` query，并传入 `GenerationComposer`。
+- [x] 更新导航配置，让 `/templates` 进入侧边栏并保持选中态。
+- [x] 新增或补充模板库样式，确保桌面、平板、移动端无横向溢出。
+
+### 验收标准
+
+- [x] `/templates` 可以独立打开，不再直接跳转 `/template-generate`。
+- [x] 每张模板卡片都有截图或稳定占位。
+- [x] 用户能在 3 秒内理解页面是“选择动画模板”。
+- [x] 点击“使用此模板”后进入 `/template-generate?templateId=<id>`。
+- [x] 模板生成工作台自动选中从选择页传入的模板。
+- [x] 普通 `/generate` 不受影响。
+- [x] 管理员编辑入口保留但不干扰普通用户主路径。
+- [x] `npm run lint`、`npx tsc --noEmit --pretty false` 和本地页面检查通过。
+
+### Review - 2026-06-14 动画模板选择页落地
+
+- 新增 `/templates` 动画模板选择页，不再直接跳转模板生成工作台。
+- 选择页复用 `/api/templates`，按模板名称、描述、模块、素材、规则和 Prompt 推断搜索信息、场景、素材完整度和预览状态。
+- 新增截图优先模板卡、左侧筛选、右侧预览、“使用此模板”和管理员编辑入口。
+- `/template-generate?templateId=<id>` 已接入 `GenerationComposer.initialTemplateId`，可自动预选模板；无效模板会回退默认模板并提示。
+- 导航已新增“动画模板”，模板生成工作台顶部新增“返回模板库”。
+- 验证通过：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- 本地页面验证：dev server `http://localhost:3001` 启动成功；无 cookie 访问 `/templates` 按鉴权重定向登录；临时本地 session cookie 只读请求 `/templates` 返回 200，`/api/templates` 返回 1 个 active 模板，HTML 包含“选择动画模板 / Animation Templates / 模板库”。
+
 ## Smoke Project 自动合并与项目去重 Todo
 
 更新时间：2026-06-14
@@ -695,7 +803,7 @@ flowchart LR
 
 ### Batch 3：模板编辑抽屉（管理员）
 
-目标：管理员在独立模板生成页直接维护模板，不跳转到复杂后台，不绑定普通 `/generate`。
+目标：管理员在独立模板生成页直接维护模板，不跳转到复杂后台，不绑定普通 `/generate`。第一入口必须是 LLM 模板配置生成器，字段表单只作为审核和微调层，不能让管理员从空白表单开始手填整套模板。
 
 **预计主要文件：**
 
@@ -709,21 +817,70 @@ flowchart LR
 
 **任务：**
 
-- [ ] 抽屉支持基础信息：名称、描述、状态、版本。
-- [ ] 抽屉顶部支持 `模块 / 规则 / 资产` 标签页。
-- [ ] 抽屉支持模块绑定：Character、Logo、Style、Camera、Rules。
-- [ ] 抽屉支持固定素材：角色参考图、Logo 资源、风格参考图，并展示缩略图。
-- [ ] 抽屉支持专属提示词：Character Prompt、Logo Prompt、Style Prompt、Global Prompt。
-- [ ] 抽屉支持规则编辑：MUST、FORBID、SUGGEST、优先级、排序、启停、编辑、删除。
-- [ ] 抽屉支持 Temporal 简化策略：分段 ON/OFF、默认 15s、是否启用帧传递。
+- [x] 抽屉支持基础信息：名称、描述、状态、版本。
+- [x] 抽屉顶部提供 `LLM 配置模板` 入口，管理员可通过对话生成或重写模板配置草稿。
+- [x] 新建模板默认进入 Template Config Agent 流程，而不是空白基础信息表单。
+- [x] LLM 生成模板配置后，抽屉按结构化结果回填基础信息、模块、规则、资产、提示词格式和 Temporal，不直接保存。
+- [x] 保留手动微调能力，但手动字段区必须明确表现为“审核 / 微调”，不是主创建路径。
+- [x] 抽屉顶部支持 `模块 / 规则 / 资产` 标签页。
+- [x] 抽屉支持模块绑定：Character、Logo、Style、Camera、Rules。
+- [x] 抽屉支持固定素材：角色参考图、Logo 资源、风格参考图，并展示缩略图。
+- [x] 抽屉支持专属提示词：Character Prompt、Logo Prompt、Style Prompt、Global Prompt。
+- [x] 抽屉支持规则编辑：MUST、FORBID、SUGGEST、优先级、排序、启停、编辑、删除。
+- [x] 抽屉支持 Temporal 简化策略：分段 ON/OFF、默认 15s、是否启用帧传递。
 - [ ] 抽屉底部支持查看变更记录、保存为新版本、取消。
 - [ ] 抽屉保存前做字段校验，保存后刷新当前模板摘要。
 
 **验收：**
 
-- [ ] 非管理员看不到编辑入口。
+- [x] 非管理员看不到编辑入口。
 - [ ] 管理员修改模板后，独立模板生成页模板摘要立即反映最新配置。
-- [ ] 关闭抽屉不丢未保存改动，离开前有确认。
+- [x] 关闭抽屉不丢未保存改动，离开前有确认。
+
+#### 2026-06-15 纠偏：LLM 入口归位到“新增模块 / 新增规则”
+
+背景：当前虽然已有 Module Builder / Template Config Agent 能力，但入口放在抽屉顶部的 Agent 面板里，管理员在自然操作点“新增模块”“新增规则”处找不到 LLM 生成入口。用户明确要求：用 LLM 生成模块的入口应出现在新增模块处；用 LLM 生成规则的入口应出现在新增规则处。
+
+重新规划：
+
+- [x] 模块页的“模块绑定”区必须有明确按钮：`+ 新增模块（LLM）`，位置靠近 Character / Logo / Style / Camera / Rules / Asset Rule / Temporal / Prompt Format 这些模块字段，而不是只放在抽屉顶部。
+- [x] 每个模块类型旁边提供轻量入口：`LLM 生成` 或 `重写模块`，点击后自动带入对应模块类型，例如 Character 行默认 `module_type=character`，Logo 行默认 `module_type=logo`。
+- [x] `+ 新增模块（LLM）` 点击后在当前位置展开 Module Builder 内联面板，或滚动定位到同一区块内的 Module Builder；不能让用户感觉跳到另一个无关区域。
+- [x] 模块生成面板必须保留：模块类型、模块用途输入、LLM生成规则设定（默认折叠）、生成结果预览、重新生成、手动微调、保存模块、应用到模板、拒绝草稿、查看生成链路。
+- [x] 规则页顶部必须有明确按钮：`+ 新增规则（LLM）`，位置靠近现有 `新增规则` 按钮，而不是藏在模块页。
+- [x] MUST / FORBID / SUGGEST / CONTEXT 每个规则分组头部都要能触发 `LLM 生成本类规则`，点击后自动带入对应 `ruleType`。
+- [x] LLM 新增规则应复用 Module Builder API 的 `module_type=rule`，但 UI 展示为“规则草稿”，生成后先展示结构化预览，再由管理员点击 `应用到规则列表`。
+- [x] 应用规则草稿时只追加到当前规则列表，不自动保存模板；仍然需要管理员最后点击保存版本。
+- [x] 规则草稿保存为正式模块时，应支持保存为 `rules` 模块，并写入模块库、Memory 和 AgentRun。
+- [x] 原抽屉顶部的 `LLM 配置模板` 仍保留，用于整套模板配置生成；但它不能承担“新增模块 / 新增规则”的主入口。
+- [x] 文案统一：入口叫 `新增模块（LLM）`、`新增规则（LLM）`；面板名叫 `Module Builder` / `Rule Builder`；不要只写 “AI” 或 “Agent” 让管理员猜用途。
+
+闭环要求：
+
+- [x] 模块闭环必须完整：点击 `新增模块（LLM）` -> 输入需求 -> LLM 生成结构化草稿 -> 管理员预览 / 微调 -> `应用到模板` 后表单出现未保存状态 -> `保存模块` 写入模块库、Memory、AgentRun -> `保存模板版本` 后模板摘要刷新 -> 能从模块库或执行链路追溯来源。
+- [x] 规则闭环必须完整：点击 `新增规则（LLM）` -> 输入规则目标或从规则类型分组触发 -> LLM 生成规则草稿 -> 管理员预览 / 微调 -> `应用到规则列表` 后规则区出现新规则且未保存 -> `保存模板版本` 后模板规则摘要刷新 -> 执行链路能看到该规则来源。
+- [x] 失败闭环必须完整：API 未配置、LLM 追问、结构化校验失败、保存失败、权限不足，都要在当前入口附近给出可理解状态，并保留重新生成、修改输入、去 API 设置、查看链路或取消的下一步。
+- [x] 追溯闭环必须完整：每次 LLM 生成、保存、拒绝、应用草稿都要能在 AgentRun、TemplateMemory 或 OperationLog 中找到记录；不允许只改前端状态而没有后端痕迹。
+- [x] 回退闭环必须完整：管理员拒绝草稿后不污染当前模板；关闭抽屉时未保存改动要提示；保存失败不能清空已生成草稿。
+
+预计改动文件：
+
+- `src/components/templates/TemplateEditorDrawer.tsx`
+- `src/app/globals.css`
+- 必要时补充 `scripts/template-llm-contract-smoke.ts`，验证规则草稿和模块草稿都能映射到模板表单。
+
+验收标准：
+
+- [x] 管理员打开模板编辑抽屉后，在“模块”页不滚动到顶部也能看到 `+ 新增模块（LLM）`。
+- [x] 管理员打开“规则”页后，能直接看到 `+ 新增规则（LLM）`。
+- [x] 从 Character / Logo / Style / Camera / Rules 等具体行触发时，模块类型自动正确带入。
+- [x] 从 MUST / FORBID / SUGGEST / CONTEXT 分组触发时，规则类型自动正确带入。
+- [x] 生成结果必须先预览，不能自动写入模板或模块库。
+- [x] 应用草稿后，模板仍处于未保存状态，关闭抽屉要提示未保存修改。
+- [ ] 点击保存后，模板列表 / 当前模板摘要能看到新增模块或新增规则的变化。
+- [x] 进入 `/admin/modules` 能看到已保存模块；进入 `/admin/agent-runs/:id` 能看到生成链路。
+- [x] LLM API 未配置时，当前入口附近提示去 `/admin/integrations` 配置，而不是静默失败。
+- [ ] 普通用户看不到这些入口。
 
 ### Batch 4：Agent 方案生成与 Prompt 合成
 
@@ -776,11 +933,11 @@ flowchart LR
 
 - [ ] 列表页展示最近 Agent runs：模板、用户、视频卡、状态、选中方案、任务 ID。
 - [ ] 详情页顶部展示项目、模板、分段、Trace ID、复制、导出和自动刷新。
-- [ ] 详情页用横向链路卡展示 9 步：Intent -> Template Load -> Module Composer -> Rule Engine -> Prompt Compiler -> Plan Generator -> Validator -> Seedance Execution -> Memory Record。
-- [ ] 下方执行时间线展示每一步状态、耗时、输入摘要、输出摘要和错误信息。
-- [ ] 规则命中面板展示 MUST/FORBID/SUGGEST、优先级、来源模块和启停状态。
-- [ ] 输入/输出对比面板展示用户需求、模板上下文、Agent Prompt、最终 Prompt、Seedance payload 摘要。
-- [ ] 敏感字段默认脱敏，不展示 token、cookie、Provider 密钥。
+- [x] 详情页用横向链路卡展示 9 步：Intent -> Template Load -> Module Composer -> Rule Engine -> Prompt Compiler -> Plan Generator -> Validator -> Seedance Execution -> Memory Record。
+- [x] 下方执行时间线展示每一步状态、耗时、输入摘要、输出摘要和错误信息。
+- [x] 规则命中面板展示 MUST/FORBID/SUGGEST、优先级、来源模块和启停状态。
+- [x] 输入/输出对比面板展示用户需求、模板上下文、Agent Prompt、最终 Prompt、Seedance payload 摘要。
+- [x] 敏感字段默认脱敏，不展示 token、cookie、Provider 密钥。
 - [ ] 从模板生成页最近任务、任务详情或任务列表能跳到对应执行链路。
 
 **验收：**
@@ -831,8 +988,8 @@ flowchart LR
 **任务：**
 
 - [ ] 普通用户只能使用 active 模板、输入需求、选择方案、生成视频。
-- [ ] 管理员才能编辑模板、调整规则、查看执行链路。
-- [ ] 所有新增 API 做服务端权限校验，不能只靠前端隐藏按钮。
+- [x] 管理员才能编辑模板、调整规则、查看执行链路。
+- [x] 所有新增 API 做服务端权限校验，不能只靠前端隐藏按钮。
 - [ ] 验证命令：`npx prisma validate`、`npm run db:generate`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
 - [ ] UI 验证：桌面和移动端 `/template-generate`，模板抽屉，方案卡，Prompt 预览，最近任务。
 - [ ] 回归验证：桌面和移动端 `/generate` 仍是普通生成页，项目、视频卡、素材、Prompt、参数、最近任务不退化。
@@ -897,6 +1054,303 @@ flowchart LR
 - 已验证：本地 dev server `http://localhost:3100/template-generate` 返回 200，HTML 包含 `模板生成工作台` 和 `app/template-generate/page.js`；`http://localhost:3100/generate` 仍按普通生成页登录保护跳转 `/login?next=%2Fgenerate`。
 - 未验证：Playwright 未安装，未完成自动截图和登录态交互验收；当前验证以构建、HTML smoke 和无登录态路由为准。
 - 已部署：`sd2` 已完成 build/restart/status；公网 `/template-generate` 200，HTML 命中“模板生成工作台”和模板页静态 chunk，静态 chunk 200；登录态视觉走查仍可在真实账号下继续复核。
+
+### Review - 2026-06-14 LLM 模板配置入口第一批落地
+
+- 已实现：后台接口配置页新增 Musk API 配置区，默认 API 地址为 `https://api.muskapis.com/`，默认模型为 `gpt-5.4`，配置保存到 `PlatformSetting:musk_api_v1`。
+- 已实现：新增 `/api/admin/integrations/musk`，仅管理员可读写，保存时写入 `OperationLog`，无登录访问返回 401。
+- 已实现：模板编辑抽屉的“模块”页签顶部新增 `LLM 配置模板` 面板，管理员输入模板目标后可生成结构化模板配置草稿。
+- 已实现：模板配置草稿可一键回填基础信息、模块绑定、PromptBlock、MUST/FORBID/SUGGEST 规则和 Temporal 策略；回填后仍需管理员点击“保存为新版本”。
+- 已实现：模板编辑抽屉新增 `新增模块 / Module Builder` 面板，支持角色、Logo、风格、镜头、规则、素材规则、Temporal、提示词格式等模块草稿生成，并可应用到当前模板。
+- 边界说明：本批先落产品交互和结构化草稿回填，未接真实 Musk API 远程 LLM 调用；真实调用需要补密钥/鉴权策略后再接入。
+
+## Template Config Agent 模板配置生成器 Todo
+
+更新时间：2026-06-14
+
+目标：把“模板配置”也从后台字段维护升级为 LLM 驱动的模板生成流程。管理员新增或重构模板时，不应该先看到一堆空字段，而是通过 Template Config Agent 描述模板用途、适用场景、固定素材和输出目标，由 Agent 生成完整模板配置草稿，再由管理员审核、微调、保存为模板版本。
+
+### 核心纠偏
+
+- 之前的 `Module Builder Agent` 只覆盖“新增一个模块”，还没有覆盖“生成一整套模板配置”。
+- 模板是生产线，模块是生产线里的零件；Template Config Agent 负责搭生产线，Module Builder Agent 负责造零件。
+- 模板配置不能继续以手填表单为主路径，否则管理员仍要自己拆模块、写规则、配 Prompt、配素材和 Temporal。
+- 手动配置仍保留，但定位必须变成 LLM 草稿后的审核、微调和版本确认。
+
+### 正确流程
+
+```text
+点击新建模板 / LLM 配置模板
+↓
+打开 Template Config Agent
+↓
+管理员描述模板用途、视频类型、品牌要求、固定素材、时长和适用场景
+↓
+Agent 必要时追问
+↓
+Agent 生成模板配置草稿
+↓
+结构化预览：基础信息 / 模块建议 / 规则 / 素材绑定 / 提示词格式 / Temporal / 默认参数
+↓
+管理员审核、微调、补素材
+↓
+保存为模板草稿或新版本
+↓
+用一次 dry-run 生成方案验证模板可用
+```
+
+### Template Config Agent 输出范围
+
+- [ ] 模板基础信息：名称、描述、适用场景、不适用场景、状态、版本建议。
+- [ ] 默认生成参数：比例、时长、清晰度、参考模式、是否生成音频、是否水印。
+- [ ] 模块规划：需要哪些 `character`、`logo`、`style`、`camera`、`rule`、`asset_rule`、`temporal`、`prompt_format` 模块。
+- [ ] 模块来源：复用已有模块、调用 Module Builder 生成新模块、或标记为待管理员补齐。
+- [ ] PromptBlock 草稿：Character Prompt、Logo Prompt、Style Prompt、Global Prompt、Prompt Format。
+- [ ] 规则集合：MUST、FORBID、SUGGEST、CONTEXT，含优先级、目标、注入方式。
+- [ ] 素材绑定：角色图、Logo、风格图、产品图、反例图、首尾帧或分段参考。
+- [ ] Temporal 策略：是否分段、默认 15s、段间连贯、帧传递、每段 Prompt 结构。
+- [ ] Agent 方案生成策略：默认生成 A/B/C/D 的差异维度，例如节奏、品牌露出、产品动作、情绪强度。
+- [ ] 验证清单：保存前必须通过的结构化校验和一次不消耗真实生成的 dry-run。
+
+### 页面交互
+
+- [ ] `/templates` 或模板管理入口提供 `LLM 新建模板` 主按钮，旁边保留 `手动创建` 作为低权重备用入口。
+- [ ] 模板编辑抽屉顶部提供 `LLM 配置模板` / `重新生成配置` 入口，用于对已有模板做结构化重配。
+- [ ] Template Config Agent 使用大抽屉或独立页，不塞进小弹窗。
+- [ ] 左侧为对话区：管理员描述模板目标，Agent 追问缺失信息。
+- [ ] 中间为结构化模板配置预览：基础信息、模块、规则、资产、提示词格式、Temporal、默认参数。
+- [ ] 右侧为上下文和规则：当前素材、已有模块库、生成规则设定、模板风险提示。
+- [ ] `模板配置生成规则设定` 默认折叠，和普通需求输入分开。
+- [ ] 操作按钮至少包含：`重新生成配置`、`调用模块生成器补模块`、`手动微调`、`保存为草稿`、`保存为新版本`。
+
+### Template Config Agent 输入
+
+- [ ] 管理员自然语言描述，例如“我要做一个品牌宣传用的兔子 IP 动画模板”。
+- [ ] 当前模板上下文，新增模板时为空，重构模板时读取现有模板全部配置。
+- [ ] 当前项目 / 品牌 / 视频卡 / 素材上下文。
+- [ ] 已有模块库和素材规则库。
+- [ ] 内置 `prompt_format` 模块快照。
+- [ ] 系统默认模板配置规则。
+- [ ] 本次模板配置补充规则。
+- [ ] 管理员权限和可创建模块范围。
+
+### Template Config Agent 输出 Schema
+
+- [ ] 输出必须是结构化模板草稿，至少包含：
+  - `templateDraft`
+  - `defaultParams`
+  - `modulePlan`
+  - `promptBlocks`
+  - `rules`
+  - `assetBindings`
+  - `temporal`
+  - `promptFormat`
+  - `planStrategy`
+  - `validationChecklist`
+  - `missingInputs`
+- [ ] `modulePlan` 必须标明每个模块是复用已有、需要新建、还是待管理员补充。
+- [ ] 如果需要新建模块，必须生成可交给 Module Builder Agent 的模块创建请求，不直接塞进模板字段。
+- [ ] 如果缺少关键素材，例如角色图或 Logo 图，必须进入 `missingInputs`，不能假装配置完成。
+- [ ] 输出草稿不能直接发布为 active 模板，必须先保存为 draft 或新版本待确认。
+
+### 与 Module Builder 的关系
+
+- [ ] Template Config Agent 生成“模板配置草稿”和“模块规划”。
+- [ ] Module Builder Agent 生成“单个模块草稿”。
+- [ ] Template Config Agent 可以调用 Module Builder，但调用结果仍需管理员确认后才能进入模板。
+- [ ] 模板保存时记录每个模块来源：已有模块、LLM 新建模块、手动填写、素材自动推断。
+- [ ] 执行链路页要能区分 `template_config_agent_run` 和 `module_builder_agent_run`，避免把模板生成和模块生成混为一条日志。
+
+### 数据与 API 规划
+
+- [ ] 评估是否新增 `TemplateConfigRun`，或在现有 `AgentRun` 中增加 `run_type=template_config`。
+- [ ] 新增模板配置草稿保存能力，支持未入库草稿、模板 draft、新版本草稿三种状态。
+- [ ] 保存草稿时不要覆盖 active 模板，只有管理员确认后才写入正式版本。
+- [ ] 记录 `template_config_memory`：输入、规则、Agent 输出、管理员修改、最终模板配置、关联模块生成记录。
+- [ ] 模板版本记录必须能回看“这一版是 LLM 生成、手动修改、还是混合生成”。
+
+### 实现批次
+
+- [ ] Batch TC-0：补现状调研，确认现有模板编辑抽屉哪些字段仍是手填主路径。
+- [ ] Batch TC-1：定义 Template Config Agent 的输入/输出 schema 和 `run_type=template_config` 记录方式。
+- [ ] Batch TC-2：在 `/templates` 和模板编辑抽屉加入 `LLM 新建模板` / `LLM 配置模板` 入口。
+- [ ] Batch TC-3：实现 Template Config Agent UI，完成对话、结构化预览、规则设定和上下文面板。
+- [ ] Batch TC-4：实现模板配置草稿 API，支持生成、追问、重新生成、校验和保存草稿。
+- [ ] Batch TC-5：接入 Module Builder，模板缺模块时可生成模块请求并回填引用。
+- [ ] Batch TC-6：保存为模板 draft / 新版本，写入 Memory、版本记录和执行链路。
+- [ ] Batch TC-7：验证新建模板、重配模板、缺素材追问、提示词格式模块、权限和线上闭环。
+
+### 验收标准
+
+- [ ] 管理员新建模板时默认看到 LLM 配置流程，而不是空白字段表单。
+- [ ] 管理员输入模板用途后，系统能生成完整模板配置草稿。
+- [ ] 草稿覆盖基础信息、模块规划、规则、素材、提示词格式、Temporal 和默认参数。
+- [ ] 缺少关键素材或业务信息时，Agent 会追问或标记缺失，不直接保存。
+- [ ] 管理员能从模板配置草稿进入 Module Builder 补齐单个模块。
+- [ ] 保存后模板生成页能读取该模板，并用对应配置生成 A/B/C/D 方案。
+- [ ] 保存过程写入模板配置 Memory 和版本记录。
+- [ ] 普通用户无法访问 LLM 配置模板入口和模板配置审计。
+
+### HARD-GATE
+
+- 当前只把模板级 LLM 配置缺口写入 `tasks/todo.md`。
+- 未获得用户明确确认前，不修改模板 API、Prisma schema 或实际 UI 代码。
+- 如果实现阶段发现需要新增模板版本表或 AgentRun 类型字段，必须先单独确认 schema 方案。
+
+## Module Builder Agent 模块生成器 Todo
+
+更新时间：2026-06-14
+
+目标：把“新增模块”从后台手填表单升级为 LLM 驱动的模块生成流程。管理员不再逐项填写名称、类型、规则和 Prompt，而是通过 Module Builder Agent 对话生成结构化模块草稿，再人工审核、微调、保存为正式模块。
+
+### 第一性原理
+
+- 模块的价值是稳定复用角色、Logo、风格、镜头、规则、素材和提示词格式，而不是让管理员维护更多表单字段。
+- LLM 负责把自然语言需求转成结构化模块草稿；管理员负责设定生成规则、审核结果、保存版本。
+- Module Builder 只能生成草稿，不能绕过人工确认直接入库。
+- 生成结果必须可被系统消费，不能只是一段自然语言说明。
+- 提示词格式模块不另起一套格式规范，直接复用现有视频生成 skill 的提示词格式标准。
+
+### 内置模块类型
+
+- [x] `character`：角色模块，控制角色身份、外形、性格、表演和身份保持规则。
+- [x] `logo`：Logo 模块，控制品牌标识、字标、识别点、禁止拆字和禁止变形规则。
+- [x] `style`：风格模块，控制画面风格、色彩、材质、光线和参考图风格使用方式。
+- [x] `camera`：镜头模块，控制景别、运镜、节奏、镜头稳定性和镜头语言偏好。
+- [x] `rule`：规则模块，沉淀 MUST / FORBID / SUGGEST / CONTEXT 规则。
+- [x] `asset_rule`：素材带规则模块，把素材用途和注入/校验规则绑定，例如角色参考、Logo 参考、风格参考、产品参考、反例。
+- [x] `temporal`：Temporal 分段模块，控制 15s 分段、镜头连续性、帧传递和段落交接。
+- [x] `prompt_format`：提示词格式模块，使用现有 `sd2-video-generate` skill 的 Prompt Format Standard 作为默认格式标准。
+
+### 提示词格式模块约定
+
+来源：
+
+- Codex skill：`/Users/gouki-youdoo/.codex/skills/sd2-video-generate/SKILL.md`
+- 默认格式文件：`/Volumes/Data/Downloads/Current/通用视频提示词格式.md`
+
+设计原则：
+
+- [x] 产品运行时不要直接依赖本机 `~/.codex/skills` 或下载目录路径；当前 P0 先将格式标准写入 `Module Builder Agent` 内置常量，正式模块快照和导入版本仍待 MB-2。
+- [x] `prompt_format` 模块默认约束最终 Prompt 输出为：
+  - 第一行创意名编号，格式为“最多两个中文字符 + 三位数字”，例如 `(弹力001)`。
+  - 总述行包含开场方式、空间/背景、主体、主任务和限制。
+  - 镜头行统一为 `时间 / 景别 / 运镜 / 内容`。
+  - 时间连续、不重叠、不跳秒，结尾落到目标总时长。
+  - 每一镜只写一个核心可见动作。
+  - 结尾必须包含 `(end)`。
+- [ ] Agent 生成模板方案和最终 Prompt 时，必须把 `prompt_format` 模块作为 Prompt Compiler 的强约束，而不是普通建议。
+- [ ] 如果管理员临时补充格式规则，只影响本次 Module Builder 生成；保存模块时需要记录本次规则和最终格式快照。
+- [ ] 如果未来更新 `sd2-video-generate` skill 的提示词格式，需提供“同步内置提示词格式模块”的显式操作，不自动静默覆盖既有模板版本。
+
+### Module Builder 交互
+
+- [ ] 在模板编辑抽屉和模块管理页提供 `[+ 新增模块]` 入口，只有管理员可见。
+- [ ] 点击后打开 `Module Builder` 大抽屉或独立页，不使用传统新增表单作为主路径。
+- [ ] 页面采用“对话 + 结构化预览 + 规则与上下文”的三栏结构；窄屏降级为上下分区。
+- [x] 模块类型支持自动判断，也允许管理员手动选择角色、Logo、风格、镜头、规则、素材带规则、Temporal、提示词格式。
+- [x] LLM 对话区用于输入“我要创建什么模块”；不能把规则设定输入框和需求输入框混在一起。
+- [x] `LLM 生成规则设定` 默认折叠，展开后可编辑系统默认规则和本次补充规则。
+- [x] 折叠态显示摘要，例如：`严格模式 / 输出 JSON / 自动分类 / 缺信息先追问 / 使用提示词格式模块`。
+- [ ] 生成结果预览必须展示模块名称、模块类型、素材绑定、PromptBlock、Rules、InjectionMode、Priority、适用目标和校验结果。
+- [ ] 操作按钮至少包含：`重新生成`、`手动微调`、`保存模块`。
+
+### Module Builder Agent 输入
+
+- [x] 管理员自然语言需求。
+- [x] 当前模板上下文，包括模板名称、用途、已有模块绑定、已有规则和 Temporal 设置。
+- [x] 当前素材上下文，包括角色图、Logo、风格图、产品图、反例图和素材来源。
+- [x] 系统默认 LLM 生成规则。
+- [x] 本次生成补充规则。
+- [x] 内置 `prompt_format` 模块快照。
+- [ ] 当前管理员权限范围。
+- [ ] 现有模块库，用于避免重复创建近似模块。
+
+### Module Builder Agent 输出 Schema
+
+- [ ] 输出必须是结构化草稿，至少包含：
+  - `moduleType`
+  - `moduleName`
+  - `assetBinding`
+  - `promptBlock`
+  - `rules`
+  - `injectionMode`
+  - `priority`
+  - `target`
+  - `validation`
+  - `sourceContext`
+- [x] `rules` 必须区分 `MUST`、`FORBID`、`SUGGEST`、`CONTEXT`。
+- [x] `injectionMode` 必须区分 `prompt_required`、`context_only`、`validation_only`。
+- [ ] 图片素材必须判断用途：角色、Logo、风格、镜头、产品、反例或其他。
+- [x] 缺少关键信息时必须先追问，不允许直接生成低可信模块。
+- [x] 输出草稿不允许直接入库，必须经过管理员确认。
+
+### 数据与 API 规划
+
+- [ ] 评估是否新增独立 `TemplateModule` / `ModuleLibraryItem` 模型；如果第一版不改 schema，可先落在 `GenerationTemplate.module_bindings_json`、`TemplatePromptBlock`、`TemplateRule` 和 `TemplateAsset.metadata_json` 的兼容结构里。
+- [ ] 如果新增正式模块库，至少包含模块类型、名称、状态、作用域、版本、创建人、更新时间、结构化内容、来源模板、来源素材和生成 Memory。
+- [ ] 扩展现有 `TemplateModuleBindings`，预留 `prompt_format`、`asset_rule`、`temporal` 等模块引用能力。
+- [ ] 扩展或兼容 `TemplatePromptBlockType`，支持提示词格式模块对应的 `prompt_format` / `format` 块。
+- [ ] 新增 Module Builder 草稿 API：生成草稿、重新生成、校验草稿、保存模块。
+- [ ] 所有保存 API 必须服务端校验管理员权限，不能只靠前端隐藏入口。
+- [ ] 保存模块时必须生成新版本或版本记录，不覆盖历史结构。
+
+### Memory 与审计
+
+- [ ] 保存模块时记录生成 Memory：创建人、创建时间、原始输入、系统默认规则、本次补充规则、Agent 原始输出、管理员最终保存结构。
+- [ ] 记录管理员是否修改过草稿，并保存结构化差异摘要。
+- [ ] 记录 `prompt_format` 模块使用的来源标准、导入快照和格式版本。
+- [ ] Memory 不记录 token、cookie、私有直链、Provider 密钥或不必要的敏感素材原文。
+- [x] 生成草稿时写入 `AgentRun`、`AgentRunStep`、`TemplateMemory` 和 `OperationLog`，记录输入、规则、LLM 输出、校验结果和执行状态。
+- [x] 执行链路页可展示 Module Builder 的生成过程和规则命中，但普通用户不可见。
+
+### 权限规则
+
+- [x] 普通用户不能新增模块、编辑模块或编辑 LLM 生成规则设定。
+- [ ] 模板管理员可以为自己负责的模板新增/编辑模块，可以编辑本次生成规则。
+- [ ] 系统管理员可以新增全局模块、编辑系统默认 LLM 生成规则、同步内置提示词格式模块。
+- [ ] 全局模块和模板私有模块必须在 UI 和 API 层明确区分。
+
+### 实现批次
+
+- [ ] Batch MB-0：只做规划和现状调研，不改业务代码；确认现有模板结构、PromptBlock、Rule、Asset、AgentRun 能复用到什么程度。
+- [x] Batch MB-1：补数据协议和类型，加入 `prompt_format`、`asset_rule`、`temporal` 模块类型和结构化草稿 schema。
+- [ ] Batch MB-2：实现内置提示词格式模块种子，来源为 `sd2-video-generate` skill 的 Prompt Format Standard，并记录快照来源。
+- [ ] Batch MB-3：新增 Module Builder UI，完成对话区、结构化预览、LLM 生成规则设定、当前上下文面板。
+- [x] Batch MB-4：新增 Module Builder Agent API，支持草稿生成、追问、重新生成、schema 校验和错误态。
+- [ ] Batch MB-5：保存模块到模板模块库或兼容结构，写入 Memory 和版本记录。
+- [ ] Batch MB-6：把模块库接回模板编辑抽屉，管理员可以引用新模块，普通用户生成页只看到模板摘要。
+- [ ] Batch MB-7：验证权限、结构化输出、提示词格式约束、Memory 审计和线上页面闭环。
+
+### 验收标准
+
+- [x] 管理员点击新增模块后，看到的是 Module Builder 对话生成器，不是传统表单。
+- [ ] 管理员输入“我要新增一个兔子 IP 角色模块”后，系统能生成结构化角色模块草稿。
+- [ ] 管理员选择或自动生成 `prompt_format` 模块后，最终 Prompt 必须符合现有视频生成 skill 的通用提示词格式。
+- [x] Agent 缺少关键信息时会追问，不直接输出低可信模块。
+- [x] 草稿必须经过管理员确认才能保存。
+- [ ] 保存后模板可以引用该模块，后续 Agent 方案和 Prompt Compiler 能读取模块。
+- [ ] 保存模块会写入 Memory，能追溯输入、规则、Agent 输出、管理员修改和最终结构。
+- [x] 普通用户无法访问新增模块、编辑模块、编辑 LLM 生成规则或查看 Module Builder 审计。
+
+### 2026-06-15 P0 真实调用落地进度
+
+- [x] `src/lib/integrations/musk.ts` 支持 API Key、ready 判断和 OpenAI-compatible `/v1/chat/completions` 调用。
+- [x] `src/app/admin/integrations/AdminIntegrationsClient.tsx` 增加 Musk API Key 输入、清除开关和已设置/未设置状态，不回显密钥。
+- [x] `src/lib/templates/module-builder.ts` 新增 Module Builder Agent Prompt、用户上下文拼装、JSON fence 解析、追问分支、schema 校验和提示词格式模块内置约束。
+- [x] `POST /api/templates/module-builder/generate` 已新增，仅管理员可调用；会读取 Musk 配置、调用 LLM、返回草稿/追问/校验错误。
+- [x] 生成草稿会写入 `AgentRun`、`AgentRunStep`、`TemplateMemory` 和 `OperationLog`，用于复盘本次输入、规则、LLM 输出和校验结果。
+- [x] 模板编辑抽屉里的 Module Builder 已改为真实 API 调用，支持等待态、错误态、追问提示、规则折叠区、结构化 JSON 预览和执行链路入口。
+- [x] `scripts/module-builder-agent-smoke.ts` 覆盖 fenced JSON 草稿解析、追问解析和系统提示词关键约束。
+- [ ] 尚未实现正式 `TemplateModule` / 模块库模型、保存模块 API、模块版本记录和保存前后差异摘要。
+- [ ] 尚未实现模块管理页的完整三栏 Module Builder 独立页面。
+- [ ] 尚未执行带真实 Musk API Key 的上游成功调用；当前只完成本地 smoke、类型检查和未登录权限验证。
+
+### HARD-GATE
+
+- 用户已在 2026-06-15 明确“开工”，P0 真实 LLM 草稿生成链路已开始落地。
+- 当前已实现 Module Builder Agent 草稿生成，不直接保存正式模块；后续保存模块库、版本化和 schema 方案仍需继续执行。
+- 如果实现阶段需要新增 Prisma 模型或迁移，必须先单独确认 schema 方案和数据回滚策略。
 
 ## 已落地基线，后续不要重复做
 
@@ -4845,3 +5299,756 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] 验证通过：`./node_modules/.bin/tsc --noEmit`、`git diff --check`、`npm run lint`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
 - [x] 公网验证通过：`https://sd2.youdoodesign.com/assets` 返回 200，资产页 bundle 返回 200，浏览器登录态加载出 61 张资产卡片，管理员“按用户查看”可见，单点选择和拖拽框选后批量栏可见，console 无前端错误。
 - [ ] 后续增强：把图片/参考素材批量移动到项目工作区或图集的能力单独设计；当前批量移动第一版只处理视频任务。
+
+## Review - 2026-06-15 LLM 模板与模块能力落地
+
+- [x] 新增 Module Builder 真实后端链路：`/api/templates/module-builder/generate` 读取 Musk API 配置并调用 LLM，输出结构化模块草稿，写入 AgentRun、AgentRunStep、TemplateMemory 和 OperationLog。
+- [x] 新增正式模块库：使用 `PlatformSetting(template_module_library_v1)` 兼容存储模块、版本、来源模板、生成规则、管理员修改标记和 AgentRun 关联；新增 `/admin/modules` 模块库查看页。
+- [x] 新增模块保存/拒绝/规则接口：`/api/templates/module-builder/save`、`/reject`、`/rules`、`/library`，保存后可自动应用到模板绑定、PromptBlock、Rules 和素材绑定。
+- [x] 新增 Template Config Agent：`/api/templates/config-builder/generate` 支持已有模板配置改写和新模板草稿生成；`/save` 支持保存为草稿或新版本，并记录 Memory 和操作日志。
+- [x] 模板编辑抽屉从本地假生成切换到真实 LLM API：支持生成配置草稿、应用草稿、保存草稿、保存新版本、查看链路、保存模块、拒绝模块草稿、编辑 LLM 生成规则。
+- [x] 模板管理页新增管理员入口“LLM 新建模板”，管理员可输入模板目标，生成结构化草稿并保存为草稿模板。
+- [x] 提示词格式模块已直接纳入 Module Builder / Template Config Agent 规则，默认使用现有视频生成 skills 的格式要求：创意名编号、总体要求、连续分镜、景别/运镜/内容、`(end)`。
+- [x] 模板写入层扩展支持 `prompt_format`、`asset_rule`、`temporal`、`context` 等类型，避免 LLM 结构化结果保存时被旧 normalizer 丢弃。
+- [x] 后台导航新增“模板管理 / 模块库 / 执行链路”，后台首页新增对应快捷入口；AgentRun 详情页能按 `module_builder`、`template_config` 展示对应链路步骤。
+- [x] 已验证：`npx tsx scripts/template-llm-contract-smoke.ts`、`npx tsc --noEmit`、`npm run lint`、`npm run build`、`npx impeccable detect src/components/templates/TemplateLibraryClient.tsx src/components/templates/TemplateEditorDrawer.tsx` 通过。
+- [ ] 未做“验证落地”范围：没有勾选 UI 桌面/移动端完整验收、线上 `sd2` 部署闭环、Git 远端版本闭环和真实付费生成。
+- [ ] 线上未同步说明：当前实现落在 `/Volumes/Data/Projects/video-api-debugger`；项目规则记录线上 `sd2` 来源是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，该目录已有大量未提交改动，本轮未直接覆盖线上源目录，避免混入或覆盖无关改动。
+
+---
+
+# 无线画布作为普通生成工具新入口接入 Todo
+
+更新时间：2026-06-15
+
+## 目标对齐
+
+无线画布不是一套新后台，它只是现有普通生成工具的另一种操作界面。
+
+最终用户感知应该是：仍然在本站生成视频，仍然选择项目和视频卡，仍然按现有规则扣点、排队、成功、失败和退款；只是原来的普通生成页是表单式输入，无线画布是节点式输入。
+
+核心原则：
+
+- 工具可以多个，后台只能一套。
+- 无线画布只负责“怎么组织输入”，不负责“怎么结算和记账”。
+- 普通生成页有什么生成闭环，无线画布就必须有什么生成闭环。
+- 无线画布额外只保存画布关系、节点关系和节点绑定的任务，不新增独立账本、独立任务表或独立产出中心。
+
+## 当前代码依据
+
+- `src/app/api/video/create/route.ts` 的 `POST` 已返回 410，并明确要求改用 `/api/tasks/create`；说明旧生成入口不能再接。
+- `src/app/api/tasks/create/route.ts` 的 `POST` 已要求 `video_card_id`，并在统一入口里处理项目权限、视频卡归属、点数冻结、Provider 请求、失败回退和任务记录。
+- `src/components/canvas/full/CanvasWorkspace.tsx` 已经具备画布生成的基础链路：构造任务 payload、检查项目和视频卡、调用 `/api/tasks/create`、轮询 `/api/video/status/:taskId`、把成功结果回写到节点。
+- `src/components/canvas/full/CanvasWorkspace.tsx` 当前 `idempotency_key` 使用 `canvas:${nodeId}:${Date.now()}`，能区分每次点击，但还不能稳定防止同一次节点提交被重复点击后重复创建任务。
+- `src/lib/integrations/codex.ts` 当前 `GenerationRequestSource.source_type` 只有 `web` 和 `codex_api`，还没有统一“工具来源”表达。
+- `src/lib/canvas/document.ts` 已有 `CanvasDocumentData`，可以保存 `nodes`、`edges`、`viewport` 和 `activeGenerationId`，适合承载无线画布工程，不需要另建画布后台。
+- `src/app/api/assets/upload/route.ts`、`src/app/api/workspace/assets/route.ts` 和 `src/lib/assets/reference-import.ts` 已经能把图片资产、参考图和工作区资产串起来；无线画布应该复用这套资产链路。
+- `src/lib/integrations/musk.ts` 已有统一 Musk API 配置、API Key 保存、模型名、超时、JSON 返回校验和 `createMuskChatCompletion()`，适合作为后台 LLM 网关底座；前端不应该直接接触 API Key。
+- `src/app/api/templates/config-builder/generate/route.ts` 和 `src/app/api/templates/module-builder/generate/route.ts` 已经通过后台调用 LLM，并写入 `AgentRun`、`AgentRunStep`、`TemplateMemory` 和 `OperationLog`，但这两条当前是模板管理/管理员用途，不应直接塞给无线画布普通用户使用。
+- `src/app/api/agent/template-plans/route.ts` 已有“用户输入 -> 方案 / prompt -> AgentRun”的链路，但当前主要围绕模板工作台；`AgentRun.template_id` 是必填字段，因此通用无线画布 LLM 链路如果不绑定模板，需要先设计记录方式，不能硬塞空模板。
+- 当前代码只发现图片上传、抠图、缩略图、参考图、首尾帧和结果尾帧链路，未发现可复用的统一“文生图 / 图生图 / 图形生成”后台接口；因此图形生成必须先补后台 Provider 和资产落库闭环，不能只在前端加按钮。
+- 当前 Musk API 配置默认模型是 `gpt-5.4`，定位是文字 LLM，用于 prompt、分镜、规则和结构化草稿；图形生成不能复用这套配置，需要独立的图像模型 API 设置，例如 `banana2`。
+
+## 接入地图
+
+```mermaid
+flowchart LR
+  normal["普通生成页<br/>表单式输入"]:::tool
+  canvas["无线画布<br/>节点式输入"]:::canvas
+  api["外部 API / Codex<br/>自动化输入"]:::tool
+
+  source["统一来源标记<br/>interface/tool_id/node_id"]:::source
+  create["统一生成入口<br/>/api/tasks/create"]:::core
+
+  project["项目 / 视频卡"]:::project
+  credit["点数冻结 / 扣费 / 退款"]:::money
+  asset["资产 / 参考图 / 首尾帧"]:::asset
+  status["任务状态 / 轮询"]:::status
+  local["服务器本地下载 / 截图 / 缩略图"]:::result
+  admin["后台任务 / 点数流水 / 产出记录"]:::admin
+  canvasDoc["画布工程<br/>节点 / 连线 / task_id"]:::canvas
+
+  normal --> source
+  canvas --> source
+  api --> source
+  source --> create
+  create --> project
+  create --> credit
+  create --> asset
+  create --> status
+  status --> local
+  local --> admin
+  credit --> admin
+  project --> admin
+  canvas --> canvasDoc
+  status --> canvasDoc
+
+  classDef tool fill:#DBEAFE,stroke:#2563EB,color:#111827;
+  classDef canvas fill:#FFE4E6,stroke:#E11D48,color:#111827;
+  classDef source fill:#FEF3C7,stroke:#D97706,color:#111827;
+  classDef core fill:#DCFCE7,stroke:#16A34A,color:#111827;
+  classDef project fill:#FDE68A,stroke:#B45309,color:#111827;
+  classDef money fill:#FCE7F3,stroke:#DB2777,color:#111827;
+  classDef asset fill:#E0F2FE,stroke:#0284C7,color:#111827;
+  classDef status fill:#EDE9FE,stroke:#7C3AED,color:#111827;
+  classDef result fill:#CCFBF1,stroke:#0F766E,color:#111827;
+  classDef admin fill:#F3F4F6,stroke:#4B5563,color:#111827;
+```
+
+## 闭环定义
+
+只有同时满足以下条件，才算无线画布接入闭环：
+
+- [ ] 用户进入无线画布后，能像普通生成页一样选择项目和视频卡。
+- [ ] 每个正式生成节点都必须绑定 `video_card_id`，没有视频卡不能发起付费生成。
+- [ ] 创建任务只走 `/api/tasks/create`，不新增无线画布专属生成接口，不使用已废弃的 `/api/video/create`。
+- [ ] 点数冻结、成功扣费、失败退款、项目成本、视频卡成本全部复用现有后台逻辑。
+- [ ] 本地上传图片、首帧、尾帧和参考图全部先进入现有资产系统，再参与生成。
+- [ ] 创建成功后只轮询同一个 `task_id`，不能用重复创建任务代替刷新状态。
+- [ ] 任务成功后，视频能预览、能下载、能生成截图/缩略图，并出现在现有任务、视频卡、资产库和后台产出里。
+- [ ] 任务失败后，画布节点显示失败原因，后台保留失败记录，点数退款链路照常执行。
+- [ ] 画布工程保存节点、连线、视口、`task_id`、结果 URL 或资产 ID，刷新页面后能恢复。
+- [ ] 后台能区分来源是普通生成页、外部 API、Codex 还是无线画布，但所有记录仍在同一套后台里看。
+
+## 重要补充点
+
+- [ ] 工具身份：不要新建“无线画布后台”，只给现有任务增加来源标记，例如 `interface=canvas`、`tool_id=wireless_canvas`、`canvas_document_id`、`canvas_node_id`。
+- [ ] 来源字段策略：优先保持 `source_type=web` 表示网页登录态生成，在 `source_metadata` 里记录具体工具；只有后台筛选和统计确实需要时，再评估是否扩展 `source_type` 枚举。
+- [ ] 权限：不能只靠页面入口保护；后端仍要检查登录态、项目权限、视频卡权限、点数/预算、工具是否启用。
+- [ ] 稳定防重复：同一个节点的一次生成尝试要有稳定 `idempotency_key`；用户重复点击时复用同一个 key，用户明确“再生成一次”时才创建新的 attempt key。
+- [ ] 自动保存：付费生成前应先保存或自动创建画布工程，确保生成后一定能把 `task_id` 回写到可恢复的画布文档。
+- [ ] 资产公网化：本地图片不能直接作为 `first_frame_url`、`last_frame_url` 或参考图 URL；必须先走上传，确认变成 Provider 可访问的 URL。
+- [ ] 首尾帧模式：`first_last_frame` 可以只依赖 `first_frame_url` 和 `last_frame_url`，不要强迫用户再传普通参考图。
+- [ ] 状态轮询：创建任务后轮询 `/api/video/status/:taskId?refresh=true`，直到 `succeeded`、`failed` 或 `cancelled`；短暂 running 不要重复创建任务。
+- [ ] 结果验收：视频成功后要确认服务器本地下载、截图/缩略图、前端预览、后台产出都可用；不能只看 Provider 返回成功。
+- [ ] 失败回写：失败、取消、超时都要回写节点状态，并提供“查看任务 / 重试 / 复制参数”入口。
+- [ ] 功能降级：如果图片生成、音频、3D 导演、批量自动流转暂时没有完整后台能力，第一版不要假装可用；可以作为辅助输入、参考帧或未接入功能展示。
+- [ ] 工具开关：需要配置开关控制无线画布是否启用、哪些用户可用、是否允许批量、单次最大节点数、是否允许 1080p。
+- [ ] LLM 归口：无线画布里所有“帮我写、帮我拆、帮我优化”的能力都必须走后台统一 API，前端不得直接调用 LLM，也不得保存或暴露模型 Key。
+- [ ] LLM 和视频生成分账：LLM 只产出草稿、节点建议或 prompt，不能直接触发付费视频生成；视频点数冻结仍然只发生在用户确认后调用 `/api/tasks/create` 时。
+- [ ] LLM 调用记录：每次 LLM 调用至少记录用户、项目、视频卡、工具来源、动作类型、输入摘要、输出摘要、模型、usage、状态和错误原因，方便后台排查。
+- [ ] 图形生成归口：无线画布里所有“生成参考图、生成首尾帧、生成封面、生成背景、生成分镜图”的能力都必须走后台统一 API，前端不得直接调用图像模型 Provider。
+- [ ] 图形生成资产化：任何生成出来的图片都必须进入 `Asset` / `ReferenceImage` / 工作区资产链路，拿到 `asset_id`、`reference_image_id`、公开 URL 和缩略图后，才能被视频生成引用。
+- [ ] 图形生成和视频生成分账：图形生成如果消耗外部模型费用，需要单独定价、单独记录、单独退款/失败策略，不能混进视频任务的 `task_freeze` 语义。
+- [ ] 图形生成 API 独立设置：后台要新增独立配置，不复用 Musk / `gpt-5.4`；第一候选 Provider 可按 `banana2` 设计，配置项单独存储、单独启用、单独校验。
+- [ ] 线上目录：执行前必须确认本轮目标目录是当前开发目录还是线上 `sd2` 实际来源目录，避免只改了本地分支但线上看不到。
+
+## LLM 内容统一接入规划
+
+第一性原理：
+
+- 无线画布里的 LLM 不是“生成视频”，而是“帮用户组织生成内容”。
+- LLM 能做的是写提示词、拆分镜、整理节点、检查质量、给重试建议；真正扣点和生成视频仍然必须由 `/api/tasks/create` 完成。
+- 普通生成页和无线画布都可能需要同一类 LLM 内容能力，所以不要给无线画布单独做一组散乱接口。
+- 前端只传“用户意图 + 当前上下文”，后台负责选模型、拼系统规则、调用 LLM、结构化校验、记录日志和返回草稿。
+
+### 需要 LLM 的内容清单
+
+- [ ] 一句话扩写成完整视频提示词：用户写一句目标，LLM 输出可直接放入生成节点的完整 prompt。
+- [ ] Prompt 润色 / 改写：保留用户原意，补足镜头、主体、动作、节奏、风格、时长和比例要求。
+- [ ] 分镜拆解：把一个复杂需求拆成多个镜头段落，输出每段景别、动作、运镜、节奏和画面目标。
+- [ ] 画布节点生成：把用户需求转成无线画布节点草稿，例如文本节点、参考图节点、生成节点、首尾帧节点和它们之间的连线建议。
+- [ ] 首尾帧转场提示词：根据首帧、尾帧和用户目标，生成 `first_last_frame` 模式的转场 prompt，明确慢到快再到慢、无文字、无 logo、无 UI、水印限制。
+- [ ] 多参考图关系说明：帮助用户描述 `@图片1`、`@图片2` 分别是什么、谁是主体、谁是风格、谁是背景，避免参考图语义混乱。
+- [ ] 参数建议：根据内容建议比例、时长、清晰度、生成模式，但只作为建议，不直接越过用户选择。
+- [ ] 质量检查：提交前检查 prompt 是否缺主体、缺动作、缺镜头、存在互相冲突的要求、是否误写“文字/logo/UI”等容易影响出片的内容。
+- [ ] 失败重试建议：读取任务失败原因、原 prompt 和参数，给出可重试的修改建议，但不自动重新扣点生成。
+- [ ] 节点标题和摘要：自动给画布节点、生成结果和方案命名，方便用户管理复杂画布。
+- [ ] 模板/模块推荐：如果当前用户在模板生成流程或选中了模板，LLM 可以推荐适合的模板模块；没有模板时不能强绑模板体系。
+
+### 不应该交给 LLM 的内容
+
+- [ ] 不让 LLM 自己决定扣点、退款、项目成本或用户余额。
+- [ ] 不让 LLM 直接创建付费生成任务。
+- [ ] 不让 LLM 绕过项目权限、视频卡权限或工具开关。
+- [ ] 不让 LLM 直接生成本地文件路径、签名下载地址、token、cookie 或任何密钥。
+- [ ] 不把 LLM 返回的文本当成可信结构；后台必须做 JSON schema 校验、长度限制和字段白名单。
+
+### 统一后台 API 形态
+
+推荐新增一个普通生成页和无线画布共用的后台入口：
+
+```text
+POST /api/agent/generation-assistant
+```
+
+第一版动作类型：
+
+```text
+prompt_expand
+prompt_rewrite
+storyboard_split
+canvas_nodes_draft
+first_last_transition_prompt
+reference_role_describe
+parameter_suggest
+quality_check
+retry_fix
+node_title_summary
+template_fit
+```
+
+请求体建议：
+
+```json
+{
+  "action": "canvas_nodes_draft",
+  "interface": "canvas",
+  "tool_id": "wireless_canvas",
+  "project_id": "project_xxx",
+  "video_card_id": "card_xxx",
+  "canvas_document_id": "canvas_xxx",
+  "canvas_node_id": "node_xxx",
+  "template_id": null,
+  "input": {
+    "user_text": "用户输入的需求",
+    "prompt": "当前已有提示词",
+    "generation_mode": "first_last_frame",
+    "ratio": "16:9",
+    "duration": 5,
+    "resolution": "720p",
+    "reference_labels": ["@图片1", "@图片2"],
+    "nodes": [],
+    "edges": []
+  }
+}
+```
+
+响应体建议：
+
+```json
+{
+  "ok": true,
+  "action": "canvas_nodes_draft",
+  "assistant_run_id": "run_xxx",
+  "needs_clarification": false,
+  "questions": [],
+  "draft": {
+    "prompt": "可编辑的草稿提示词",
+    "nodes": [],
+    "edges": [],
+    "suggested_parameters": {}
+  },
+  "validation_errors": [],
+  "model": "gpt-5.4",
+  "usage": {}
+}
+```
+
+后台职责：
+
+- [ ] 校验登录态。
+- [ ] 校验项目访问权限。
+- [ ] 校验视频卡生成权限。
+- [ ] 校验画布访问权限。
+- [ ] 校验工具开关和用户可用范围。
+- [ ] 从 `PlatformSetting` 读取 Musk API 配置，前端不传 Key。
+- [ ] 根据 `action` 拼接不同系统规则。
+- [ ] 调用 `createMuskChatCompletion()`。
+- [ ] 校验 LLM 返回 JSON 结构，失败时返回可读错误。
+- [ ] 写 `OperationLog`。
+- [ ] 如果 `template_id` 存在，尽量复用 `AgentRun` / `AgentRunStep` 记录链路。
+- [ ] 如果 `template_id` 不存在，第一版至少写 `OperationLog`；若要完整执行链路，另行规划通用 `AssistantRun` 或扩展 `AgentRun`，不能在本批次偷改 schema。
+
+### LLM 内容和点数关系
+
+- [ ] 第一版 LLM 助手不冻结视频生成点数，不和 `/api/tasks/create` 的 `task_freeze` 混在一起。
+- [ ] 第一版记录模型 `usage` 和动作来源，作为后台成本观察依据。
+- [ ] 如果后续要对 LLM 助手单独收费，需要新增独立价格策略和流水类型，例如 `assistant_usage`，不能复用视频生成的冻结/结算语义。
+- [ ] LLM 生成草稿后，用户必须点“应用到节点”或“确认生成”，才进入视频生成扣点链路。
+
+### LLM 接入地图
+
+```mermaid
+flowchart LR
+  normal["普通生成页"]:::tool
+  canvas["无线画布"]:::canvas
+  api["POST /api/agent/generation-assistant"]:::core
+  guard["权限 / 工具开关 / 上下文校验"]:::guard
+  rules["动作规则<br/>prompt / 分镜 / 节点 / 检查"]:::rules
+  musk["Musk API 后台调用"]:::llm
+  validate["JSON 校验 / 字段白名单"]:::guard
+  log["OperationLog / AgentRun"]:::log
+  draft["返回可编辑草稿"]:::result
+  task["用户确认后<br/>/api/tasks/create"]:::task
+
+  normal --> api
+  canvas --> api
+  api --> guard --> rules --> musk --> validate --> log --> draft
+  draft --> task
+
+  classDef tool fill:#DBEAFE,stroke:#2563EB,color:#111827;
+  classDef canvas fill:#FFE4E6,stroke:#E11D48,color:#111827;
+  classDef core fill:#DCFCE7,stroke:#16A34A,color:#111827;
+  classDef guard fill:#FEF3C7,stroke:#D97706,color:#111827;
+  classDef rules fill:#EDE9FE,stroke:#7C3AED,color:#111827;
+  classDef llm fill:#FCE7F3,stroke:#DB2777,color:#111827;
+  classDef log fill:#F3F4F6,stroke:#4B5563,color:#111827;
+  classDef result fill:#CCFBF1,stroke:#0F766E,color:#111827;
+  classDef task fill:#DCFCE7,stroke:#15803D,color:#111827;
+```
+
+## 图形生成统一接入规划
+
+第一性原理：
+
+- 图形生成不是视频生成本身，而是给视频生成准备素材。
+- 用户真正需要的是：把文字想法、已有参考图、当前画布节点，变成可用的图片资产，例如参考图、首帧、尾帧、背景图、封面图、分镜图。
+- 只要产出是图片，就必须先进入本站资产系统，再进入工作区和视频生成链路。
+- 图形生成可以服务普通生成页和无线画布，所以也不能只给无线画布单独接一套前端逻辑。
+- 文字 LLM 和图像模型不是同一种能力：`Musk API / gpt-5.4` 负责写内容，`banana2` 这类图像模型负责产出图片，配置、权限、计费、失败处理都要拆开。
+
+### 图形生成 API 设置
+
+推荐新增独立后台配置，不复用 Musk API：
+
+```text
+PlatformSetting:image_generation_api_v1
+```
+
+后台管理入口：
+
+```text
+/admin/integrations
+```
+
+新增配置区块：
+
+```text
+图形生成 API
+```
+
+第一版 Provider：
+
+```text
+banana2
+```
+
+配置字段建议：
+
+```json
+{
+  "enabled": false,
+  "provider": "banana2",
+  "base_url": "由实际 banana2 API 文档确认",
+  "default_model": "banana2",
+  "api_key": null,
+  "timeout_ms": 90000,
+  "max_outputs_per_request": 4,
+  "default_ratio": "16:9",
+  "supports_text_to_image": true,
+  "supports_image_to_image": true,
+  "supports_async_task": true
+}
+```
+
+配置原则：
+
+- [x] 新增 `src/lib/integrations/image-generation.ts` 或等价模块，负责读取、保存、校验图形生成 API 配置。
+- [x] 新增 `IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1'`，不要复用 `MUSK_API_SETTING_KEY`。
+- [x] 新增 `/api/admin/integrations/image-generation`，仅管理员可读写。
+- [x] `/admin/integrations` 增加“图形生成 API”配置卡，和 Musk API 并列展示。
+- [x] API Key 只允许写入和清除，不允许明文回显；前端只显示“已设置 / 未设置”。
+- [x] `provider=banana2` 第一版可以写死为唯一选项，但数据结构要允许后续扩展其他图片 Provider。
+- [ ] `base_url`、`default_model`、请求路径、响应字段必须以实际 banana2 API 文档为准；未确认前不能硬编码假接口。
+- [x] 图形生成接口只从后台配置读取 Provider 信息，普通前端请求不得传入 API Key、base_url 或任意 Provider 地址。
+- [x] 保存配置和启停状态必须写 `OperationLog`。
+- [x] Provider 未启用或缺 Key 时，`POST /api/assets/generate` 返回 503，前端显示“图形生成 API 未配置”。
+
+### 需要图形生成的内容清单
+
+- [ ] 文生参考图：用户描述角色、产品、背景、场景后，生成可加入参考图条的图片。
+- [ ] 图生变体：基于已有图片做风格变化、构图变化、颜色变化、姿态变化。
+- [ ] 首帧生成：根据视频 prompt、比例和参考图，生成 `first_last_frame` 可用的首帧。
+- [ ] 尾帧生成：根据目标画面或下一页/下一镜头，生成 `first_last_frame` 可用的尾帧。
+- [ ] PPT/演示转场首尾帧：根据无文字背景页生成干净首尾帧，要求无文字、无 logo、无 UI、水印。
+- [ ] 分镜图 / 关键帧：把 LLM 拆出的分镜变成一组关键帧草图，供用户选择后再生成视频。
+- [ ] 背景图：为产品、人物、场景生成干净背景，作为参考图或首尾帧素材。
+- [ ] 主体图 / 角色图：生成或统一角色、产品、Logo 的参考图，后续可加入主体库或图集。
+- [ ] 风格参考图：生成某种视觉风格、材质、灯光、色调的参考图。
+- [ ] 封面 / 缩略图：为生成结果或视频卡生成封面图，但不能替代真实视频截图。
+- [ ] 画布辅助图形：生成节点图标、简单构图草图、流程示意图；这类可以作为画布视觉辅助，但如果要参与视频生成，也必须资产化。
+
+### 不应该交给图形生成的内容
+
+- [ ] 不让图形生成直接创建视频任务。
+- [ ] 不让图形生成直接扣视频生成点数。
+- [ ] 不让图形生成绕过图片上传、资产落库和公开 URL 校验。
+- [ ] 不让图形生成返回本地文件路径给前端直接使用。
+- [ ] 不让图形生成结果自动覆盖用户已有首帧、尾帧或参考图；必须由用户确认应用。
+- [ ] 不把封面图误当作视频真实截图；真实视频截图仍以视频下载后的抽帧结果为准。
+
+### 统一后台 API 形态
+
+推荐新增一个普通生成页和无线画布共用的后台入口：
+
+```text
+POST /api/assets/generate
+```
+
+如果图像 Provider 是异步任务，第一版可以返回 `asset_generation_task_id`，再增加：
+
+```text
+GET /api/assets/generate/:id
+```
+
+第一版动作类型：
+
+```text
+text_to_image_reference
+image_variant
+first_frame_draft
+last_frame_draft
+storyboard_keyframes
+background_image
+subject_reference
+style_reference
+cover_image
+```
+
+请求体建议：
+
+```json
+{
+  "action": "first_frame_draft",
+  "interface": "canvas",
+  "tool_id": "wireless_canvas",
+  "project_id": "project_xxx",
+  "video_card_id": "card_xxx",
+  "canvas_document_id": "canvas_xxx",
+  "canvas_node_id": "node_xxx",
+  "input": {
+    "prompt": "画面目标",
+    "negative_prompt": "无文字、无 logo、无 UI、水印",
+    "ratio": "16:9",
+    "reference_asset_ids": ["asset_xxx"],
+    "reference_image_ids": ["ref_xxx"],
+    "target_usage": "first_frame"
+  }
+}
+```
+
+响应体建议：
+
+```json
+{
+  "ok": true,
+  "asset_generation_task_id": "imgtask_xxx",
+  "status": "succeeded",
+  "assets": [
+    {
+      "asset_id": "asset_xxx",
+      "reference_image_id": "ref_xxx",
+      "public_url": "https://...",
+      "thumbnail_url": "/uploads/thumbs/...",
+      "width": 1280,
+      "height": 720,
+      "target_usage": "first_frame"
+    }
+  ],
+  "model": "provider-model",
+  "usage": {}
+}
+```
+
+后台职责：
+
+- [ ] 校验登录态。
+- [ ] 校验项目访问权限。
+- [ ] 校验视频卡权限。
+- [ ] 校验画布访问权限。
+- [ ] 校验工具开关、用户可用范围和单次生成数量。
+- [ ] 从 `PlatformSetting:image_generation_api_v1` 读取图像 Provider 配置，第一版按 `banana2` 接入；不把 Provider Key 下发到前端。
+- [ ] 校验 action、比例、尺寸、数量、参考图权限和输入长度。
+- [ ] 生成完成后下载或接收图片文件，统一写入 `Asset`。
+- [ ] 为图片生成缩略图。
+- [ ] 如图片要作为视频参考素材，自动补齐 `ReferenceImage`。
+- [ ] 如图片来自无线画布，写入画布节点数据并保存 `asset_id` / `reference_image_id`。
+- [ ] 写 `OperationLog`，记录用户、项目、视频卡、工具、画布、节点、action、provider、model、usage、状态和错误。
+- [ ] 如果图形生成需要收费，先设计价格策略和流水类型；第一版没有定价前不能启用真实付费图形生成。
+
+### 图形生成和视频生成关系
+
+- [ ] 图形生成输出的是资产，不是视频任务。
+- [ ] 用户确认把生成图加入参考图、首帧或尾帧后，才进入 `/api/tasks/create`。
+- [ ] 图形生成失败不能影响已有视频任务。
+- [ ] 视频生成失败也不能删除已生成图片资产。
+- [ ] 如果首尾帧来自图形生成，视频任务的 `source_metadata` 应记录对应 `asset_id` 和 `reference_image_id`，方便追踪。
+
+### 图形生成接入地图
+
+```mermaid
+flowchart LR
+  normal["普通生成页"]:::tool
+  canvas["无线画布"]:::canvas
+  api["POST /api/assets/generate"]:::core
+  guard["权限 / 开关 / 配额"]:::guard
+  provider["图像 Provider<br/>文生图 / 图生图"]:::provider
+  asset["Asset 落库<br/>公开 URL / 缩略图"]:::asset
+  reference["ReferenceImage<br/>工作区参考图"]:::reference
+  canvasNode["回写画布节点"]:::canvas
+  confirm["用户确认应用"]:::guard
+  task["/api/tasks/create<br/>视频生成"]:::task
+  admin["后台记录 / 成本 / 日志"]:::admin
+
+  normal --> api
+  canvas --> api
+  api --> guard --> provider --> asset --> reference
+  asset --> admin
+  reference --> canvasNode --> confirm --> task
+  reference --> confirm
+  task --> admin
+
+  classDef tool fill:#DBEAFE,stroke:#2563EB,color:#111827;
+  classDef canvas fill:#FFE4E6,stroke:#E11D48,color:#111827;
+  classDef core fill:#DCFCE7,stroke:#16A34A,color:#111827;
+  classDef guard fill:#FEF3C7,stroke:#D97706,color:#111827;
+  classDef provider fill:#FCE7F3,stroke:#DB2777,color:#111827;
+  classDef asset fill:#E0F2FE,stroke:#0284C7,color:#111827;
+  classDef reference fill:#EDE9FE,stroke:#7C3AED,color:#111827;
+  classDef task fill:#DCFCE7,stroke:#15803D,color:#111827;
+  classDef admin fill:#F3F4F6,stroke:#4B5563,color:#111827;
+```
+
+## 分阶段任务
+
+### Batch WC-0：目标和范围锁定
+
+- [ ] 确认无线画布定位：普通生成工具的新界面，不是新后台。
+- [ ] 确认第一版只闭环视频生成，不把图片生成、音频、复杂 3D 自动流转混入第一批。
+- [ ] 确认第一版不新增独立账本、独立任务表、独立产出中心。
+- [ ] 确认真实付费生成测试必须单独得到授权。
+- [ ] 执行前重新检查 `git status`，保护当前大量未提交改动。
+
+### Batch WC-1：普通生成工具一致性
+
+- [ ] 对齐 `/generate` 普通生成页和 `/generate/canvas` 无线画布的基础配置项。
+- [ ] 无线画布顶部明确显示当前项目、当前视频卡、比例、时长、清晰度和生成模式。
+- [ ] 无项目或无视频卡时，不允许正式生成，提示用户先选择或创建视频卡。
+- [ ] 普通生成页已有的点数预估、清晰度限制、视频卡封板限制，无线画布也要一致。
+- [ ] 无线画布不要把“工具说明”放成主内容，第一屏应直接是可操作的生成工作台。
+
+### Batch WC-2：统一工具来源标记
+
+- [ ] 在画布调用 `/api/tasks/create` 时传入来源元数据：`tool_id=wireless_canvas`、`tool_name=无线画布`、`canvas_document_id`、`canvas_node_id`、`client_attempt_id`。
+- [ ] 在 `/api/tasks/create` 中把这些字段写入现有 `source_metadata` 或任务元信息。
+- [ ] 保持 `source_type` 不分裂账本；优先沿用 `web`，后台展示时从 metadata 解析具体工具名。
+- [ ] `OperationLog` 中记录“无线画布创建生成”，但仍归入现有 `generation_create` 系列语义。
+- [ ] 后台列表、任务详情和点数流水能展示“来源：无线画布”。
+
+### Batch WC-3：稳定防重复和节点尝试模型
+
+- [ ] 为每个生成节点维护 `client_attempt_id`。
+- [ ] 点击“生成”时，如果上一轮创建请求还在进行中，按钮进入 loading 并禁止重复提交。
+- [ ] 同一次请求重试网络错误时复用同一个 `idempotency_key`。
+- [ ] 用户点击“再生成一次”时生成新的 `client_attempt_id`，避免把真正的新任务误判成重复。
+- [ ] 把 `task_id`、`client_attempt_id`、状态、错误原因写回节点数据并保存。
+
+### Batch WC-LLM：统一生成助手后台 API
+
+- [ ] 新增统一接口 `POST /api/agent/generation-assistant`，普通生成页和无线画布都走它。
+- [ ] 新增后端服务层，例如 `src/lib/agent/generation-assistant.ts`，集中定义 action、输入结构、输出结构、系统规则和校验。
+- [ ] 复用 `src/lib/integrations/musk.ts` 的 `getMuskApiSettings()`、`isMuskApiReady()` 和 `createMuskChatCompletion()`。
+- [ ] 第一版支持动作：`prompt_expand`、`prompt_rewrite`、`storyboard_split`、`canvas_nodes_draft`、`first_last_transition_prompt`、`quality_check`、`retry_fix`、`node_title_summary`。
+- [ ] 第二版再支持：`reference_role_describe`、`parameter_suggest`、`template_fit`，避免第一版一次做太散。
+- [ ] 接口必须校验登录态、项目权限、视频卡权限、画布权限和工具开关。
+- [ ] 接口必须限制输入长度：用户文本、当前 prompt、节点 JSON、边 JSON、参考图描述都要有上限。
+- [ ] 接口不得读取或返回图片本地路径；参考图上下文只传资产 ID、可公开 URL、用户给的标签和安全摘要。
+- [ ] LLM 返回必须是结构化 JSON，后台做 schema 校验；校验失败返回 `validation_errors`，不把半截 JSON 交给前端直接用。
+- [ ] 每次调用写 `OperationLog`，记录 action、interface、tool_id、project_id、video_card_id、canvas_document_id、canvas_node_id、model、usage、status。
+- [ ] 如果请求带 `template_id`，复用或关联 `AgentRun`；如果不带模板，第一版只写 `OperationLog`，通用执行链路模型另行规划。
+- [ ] 前端只展示草稿和“应用到节点”按钮；LLM 返回后不能自动调用 `/api/tasks/create`。
+- [ ] 在画布节点里保存 `assistant_run_id` 或 `operation_log_id`，方便后台排查“这个 prompt 是怎么生成的”。
+- [ ] 普通生成页也能复用 `prompt_expand` / `prompt_rewrite` / `quality_check`，避免无线画布和普通页维护两套 AI 写作能力。
+- [ ] 如果 Musk API 未配置，接口返回清晰的 503 和配置提示；普通用户界面显示“AI 助手暂不可用”，不影响手动生成。
+
+### Batch WC-GFX：统一图形生成后台 API
+
+- [x] 新增独立图形生成 API 配置模块：`src/lib/integrations/image-generation.ts`。
+- [x] 新增 `IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1'`。
+- [x] 新增 `GET/POST /api/admin/integrations/image-generation`，只允许管理员读取和保存图形生成 API 配置。
+- [x] 扩展 `/admin/integrations` 页面，新增“图形生成 API”设置卡；第一版 Provider 选项为 `banana2`。
+- [x] 配置字段至少包含：`enabled`、`provider`、`base_url`、`default_model`、`api_key`、`timeout_ms`、`max_outputs_per_request`。
+- [x] 保存 API Key 时不回显明文；支持留空不变和清除 Key。
+- [x] 启用 `banana2` 前必须校验 `base_url`、`default_model`、`api_key` 都已配置。
+- [x] 新增统一接口 `POST /api/assets/generate`，普通生成页和无线画布都走它。
+- [ ] 如果 Provider 是异步任务，新增 `GET /api/assets/generate/:id` 查询图形生成状态。
+- [ ] 新增后端服务层，例如 `src/lib/assets/generation.ts`，集中定义 action、输入结构、输出结构、Provider 适配和资产落库。
+- [ ] 第一版先支持：`text_to_image_reference`、`first_frame_draft`、`last_frame_draft`、`storyboard_keyframes`。
+- [ ] 第二版再支持：`image_variant`、`background_image`、`subject_reference`、`style_reference`、`cover_image`。
+- [x] 接口必须校验登录态、项目权限、视频卡权限、画布权限、参考图权限和工具开关。
+- [ ] 接口必须限制生成数量、尺寸、比例、输入长度、参考图数量。
+- [ ] 接口必须把生成结果写入 `Asset`，并生成 `thumbnail_url`。
+- [ ] 如果生成图要参与视频生成，接口必须补齐 `ReferenceImage`，并能加入当前 workspace。
+- [ ] 无线画布调用时，结果必须回写到节点，保存 `asset_id`、`reference_image_id`、`public_url`、`thumbnail_url`、`target_usage`。
+- [ ] 图形生成结果不能自动覆盖用户已有参考图、首帧或尾帧；前端必须提供“应用到当前节点 / 加入参考图 / 设为首帧 / 设为尾帧”的确认动作。
+- [x] 如果图形 Provider 未配置，接口返回清晰 503，前端隐藏或禁用真实图形生成入口。
+- [x] `POST /api/assets/generate` 不接受前端传入的 `api_key`、`base_url`、任意 Provider endpoint；只能使用后台保存的 `image_generation_api_v1`。
+- [ ] 如果图形生成收费，先新增价格策略、点数冻结/扣费/失败退款规则和后台流水展示；没有这套规则前只允许非付费 mock 或管理员测试。
+- [ ] 后台必须能按来源筛选图形生成记录：普通生成页、无线画布、外部 API。
+- [ ] 资产管理页必须能看到图形生成出来的图片，并能追溯到项目、视频卡、画布和节点。
+
+### Batch WC-4：资产和参考图统一链路
+
+- [ ] 图片卡上传统一走 `/api/assets/upload`。
+- [ ] 图片进入生成前统一加入 `/api/workspace/assets`，补齐 `ReferenceImage`。
+- [ ] 普通参考图模式传 `referenceImageIds`，不要只传临时 URL。
+- [ ] 首尾帧模式传 `first_frame_url` 和 `last_frame_url`，并确保 URL 可被 Provider 访问。
+- [ ] 多帧模式至少检查 2 张帧图，并按画布连线顺序确定提交顺序。
+- [ ] 上传失败、URL 不可访问、超 9 张参考图、素材未完成上传都要在节点上给出明确提示。
+
+### Batch WC-5：任务创建和轮询结果闭环
+
+- [ ] 创建任务只调用 `/api/tasks/create`。
+- [ ] 创建成功后保存内部 `task_id`，不把 Provider task id 当作本站任务 id。
+- [ ] 轮询接口改为 `/api/video/status/:taskId?refresh=true`。
+- [ ] 轮询到 `succeeded` 后，确认返回视频 URL、任务状态和本地缓存/缩略图状态。
+- [ ] 轮询到 `failed` 或 `cancelled` 后，节点显示失败原因并保留 `task_id`。
+- [ ] 轮询超时后不重复创建任务，提示用户去任务列表继续查看。
+
+### Batch WC-6：结果回写、预览和下载
+
+- [ ] 成功节点显示视频预览，视觉上和普通生成记录一致。
+- [ ] 成功节点提供下载、查看任务、打开视频卡、复制参数、再生成一次。
+- [ ] 成功任务进入最近任务、视频卡详情、资产管理页和后台产出。
+- [ ] 缩略图缺失时显示稳定占位，并触发或提示截图生成。
+- [ ] 下载文件必须等完整下载后再校验，避免把未完整 MP4 误判为坏视频。
+
+### Batch WC-7：画布工程保存和恢复
+
+- [ ] 付费生成前自动保存画布；如果画布尚未保存，先创建 `CanvasDocument`。
+- [ ] 保存 `nodes`、`edges`、`viewport`、`activeGenerationId`。
+- [ ] 节点数据保存 `task_id`、`video_card_id`、`asset_id`、`video_url`、`thumbnail_url`、`status`、`error_message`。
+- [ ] 刷新页面后能恢复生成中、成功、失败节点。
+- [ ] 恢复到生成中节点时，可以继续轮询已有 `task_id`，不能重新创建任务。
+
+### Batch WC-8：后台筛选和统一管理
+
+- [ ] 后台任务列表增加或复用来源展示：普通生成页、无线画布、外部 API、Codex。
+- [ ] 点数流水详情能看到工具来源、项目、视频卡、任务和用户。
+- [ ] 视频卡详情能看到来自无线画布的任务，不单独分出去。
+- [ ] 资产管理页能看到无线画布生成的视频和截图。
+- [ ] 管理员可按工具来源过滤，但过滤结果仍来自同一套任务和账本。
+
+### Batch WC-9：安全开关和容量限制
+
+- [ ] 增加无线画布启用开关。
+- [ ] 增加用户或角色可用范围。
+- [ ] 增加单画布最大节点数、单次批量生成数量、同时生成数量限制。
+- [ ] 生成中节点离开页面时保留状态，不自动取消付费任务。
+- [ ] 不在前端保存或输出 token、cookie、签名下载 URL。
+
+### Batch WC-10：验证、上线和回滚
+
+- [ ] 非付费验证：`/api/video/create` 返回 410，`/api/tasks/create` 缺少 `video_card_id` 返回 400。
+- [ ] 非付费验证：无线画布无项目、无视频卡、图片未上传、参考图超限时都有明确阻断。
+- [ ] LLM 验证：Musk API 未配置时，`POST /api/agent/generation-assistant` 返回 503，不泄露 Key 或内部配置。
+- [ ] LLM 验证：无项目权限、无视频卡权限、无画布权限时，接口分别返回 403 或 404。
+- [ ] LLM 验证：`prompt_expand` 只返回草稿，不创建 `VideoTask`，不冻结点数。
+- [ ] LLM 验证：`canvas_nodes_draft` 返回节点/连线草稿后，前端必须由用户确认应用，不能自动覆盖画布。
+- [ ] LLM 验证：`first_last_transition_prompt` 输出包含首尾帧转场、无文字/无 logo/无 UI/无水印、ease-in-out 等关键要求。
+- [ ] 图形生成验证：Provider 未配置时，`POST /api/assets/generate` 返回 503，不泄露 Key 或内部配置。
+- [ ] 图形生成验证：`GET /api/admin/integrations/image-generation` 不回显 `api_key` 明文，只返回 `api_key_configured` 或等价状态。
+- [ ] 图形生成验证：启用 `banana2` 时缺少 `base_url`、`default_model` 或 `api_key` 会被后台拒绝保存。
+- [ ] 图形生成验证：`POST /api/assets/generate` 即使请求体伪造 `api_key` / `base_url`，后台也忽略并只使用 `image_generation_api_v1`。
+- [ ] 图形生成验证：无项目权限、无视频卡权限、无画布权限、无参考图权限时，接口拒绝。
+- [ ] 图形生成验证：`first_frame_draft` 成功后返回 `asset_id`、`reference_image_id`、公开 URL 和缩略图。
+- [ ] 图形生成验证：生成图能加入工作区，并作为 `first_frame_url` / `last_frame_url` 或普通参考图参与后续视频生成。
+- [ ] 图形生成验证：生成图不会自动创建 `VideoTask`，不会自动冻结视频生成点数。
+- [ ] 图形生成验证：资产管理页能看到生成图，并能追溯项目、视频卡、画布节点和来源工具。
+- [ ] 本地验证：`npx tsc --noEmit --pretty false`。
+- [ ] 本地验证：`npm run lint`。
+- [ ] 本地验证：`npm run build`。
+- [ ] 浏览器验证：打开 `/generate/canvas`，确认项目/视频卡选择、节点保存、失败提示、轮询恢复不退化。
+- [ ] 真实付费验证：只有用户明确授权后，才跑 1 条低成本真实生成任务，检查点数、任务、视频卡、后台、预览、下载、截图全部闭环。
+- [ ] 线上闭环：如目标是 `sd2.youdoodesign.com`，必须使用 `youdoo-sites build sd2` 和 `youdoo-sites restart sd2`，再从公网验证页面/API/静态资源已加载新版本。
+- [ ] Git 闭环：完成验证后形成聚焦提交、推送远端、创建 rollback tag，并登记版本。
+
+## 验收标准
+
+- [ ] 无线画布看起来像普通生成工具的画布版，不像一个独立后台或外部系统。
+- [ ] 用户能在无线画布里完成“选择项目和视频卡 -> 配置节点 -> 生成 -> 查看状态 -> 预览/下载结果”的完整链路。
+- [ ] 后台任务、点数流水、视频卡成本、资产管理页都能查到同一条生成记录。
+- [ ] 后台能看出来源是无线画布，但任务仍在统一任务体系内。
+- [ ] 重复点击不会重复扣点。
+- [ ] 失败会退款并回写节点失败原因。
+- [ ] 页面刷新后不会丢失已创建的 `task_id`。
+- [ ] 未接入的图片、音频、3D 自动流转能力不会误导用户以为已经可用。
+- [ ] LLM 能力都走统一后台 API，前端没有任何模型 Key、直连模型地址或散落的 LLM fetch。
+- [ ] LLM 只生成可编辑草稿，不会自动扣点或自动提交付费生成。
+- [ ] 普通生成页和无线画布可以复用同一套 prompt 扩写、润色和质量检查能力。
+- [ ] 图形生成能力都走统一后台 API，前端没有任何图像模型 Key、直连 Provider 地址或散落的图形生成 fetch。
+- [ ] 图形生成结果全部进入资产库和参考图链路，可以被普通生成页和无线画布复用。
+- [ ] 图形生成不会自动创建视频任务，必须由用户确认后才进入 `/api/tasks/create`。
+
+## 停止条件
+
+- 如果执行中发现必须绕过 `/api/tasks/create` 才能生成，立即停止，重新设计。
+- 如果执行中发现点数冻结、失败退款或视频卡成本不能复用现有逻辑，立即停止，先修后台统一入口。
+- 如果执行中需要改 Prisma schema，先单独规划数据库变更和备份，不混入 UI 批次。
+- 如果为了记录通用 LLM 执行链路必须改 `AgentRun` schema，立即停止，先单独规划通用 `AssistantRun` 或 `AgentRun` 泛化方案。
+- 如果发现前端需要直接接触 Musk API Key 或模型地址，立即停止，改回后台代理。
+- 如果图形生成需要新增 Provider、价格策略、任务表或资产生成记录表，立即停止，先单独规划 schema、计费和回滚。
+- 如果图形生成结果无法写入 `Asset` / `ReferenceImage`，立即停止，不能只把临时 URL 返回给前端。
+- 如果发现前端需要直接接触图像 Provider Key 或模型地址，立即停止，改回后台代理。
+- 如果 banana2 的真实 API 文档没有确认请求/响应字段，不得硬编码假协议；先停下补官方接口确认。
+- 如果真实生成会消耗点数或费用，没有明确授权时只做非付费验证。
+- 如果当前目录和线上 `sd2` 来源目录不一致，先确认目标目录和同步策略，不直接覆盖线上大量未提交改动。
+
+## Git Plan
+
+- 当前工作区已有大量未提交改动，执行前必须重新检查 `git status`。
+- 本计划当前只修改 `tasks/todo.md`，不做代码落地。
+- 真正落地时优先新建任务分支或独立 worktree，避免混入当前其他任务改动。
+- 第一批建议提交：
+  - 提交 1：工具来源标记、稳定 `idempotency_key`、节点 attempt 保存。
+  - 提交 2：统一生成助手后台 API 和 LLM action 校验。
+  - 提交 3：图形生成 API 设置页和 `banana2` 配置存储。
+  - 提交 4：统一图形生成后台 API 和资产落库闭环。
+  - 提交 5：无线画布项目/视频卡/参数体验对齐普通生成页。
+  - 提交 6：资产、首尾帧、参考图链路收口。
+  - 提交 7：轮询、结果回写、预览下载和失败回写。
+  - 提交 8：后台来源展示、验证修复和版本登记。
+- 稳定回退点建议：`rollback/2026-06-15-wireless-canvas-tool-entry`。
+
+## HARD-GATE
+
+- 当前只完成目标重整和计划写入，不编码。
+- 进入实现前需要用户明确说“落地 / 开干 / 执行”。
+- 第一批执行范围限定为“让无线画布像普通生成工具一样走同一套后台闭环”。
+- 不做新后台，不做新账本，不做独立产出中心。
+## 2026-06-23 - 反馈 F7/F8 复核与落地计划
+
+### 状态复核
+
+- 反馈 `cmqg9c406006fl0p1gvsdh63i`：未完成。底层 `VideoTask`、Provider 入参和画布链路已有 `reference_video_urls` / `reference_audio_urls`，但 `/generate` 普通生成页没有把工作区视频/音频素材传入创建任务接口。
+- 反馈 `cmqau8wyb0014js78wotf6ckz`：未完成。当前只有点数展示和后台点数流水，没有独立站内通知模型、用户通知入口、管理员版本公告发布入口和点数发放通知闭环。
+
+### 第一性原理判断
+
+- 多媒体参考的真实目标：用户要在同一条生成链路里把图片、视频、音频都作为参考素材提交给 Seedance，而不是只在界面里上传后看见文件。
+- 通知中心的真实目标：用户要有一个可回看的信息入口，能知道系统更新了什么、点数为什么变化，以及后续审批/预算类提醒在哪里看。
+- 不可变约束：不能只改前端假展示；生成任务必须落到 `VideoTask` 和 Provider payload；通知不得包含 token、cookie、签名 URL 等敏感内容；点数通知必须来自真实点数操作。
+- 成功标准：新任务可保存视频/音频参考 URL；用户顶部能看到未读通知；用户可进入通知页并标记已读；管理员可发布版本更新通知；管理员发放/调整点数时生成对应通知。
+
+### 推荐调整范围
+
+- [x] `/generate` 提交链路按素材类型分出图片、视频、音频：图片仍走 `reference_image_ids`，视频/音频走 `reference_video_urls` / `reference_audio_urls`。
+- [x] 提示词和素材标签避免把视频/音频误标为图片；图片校验仍只校验图片编号。
+- [x] 新增最小通知模型 `Notification`，支持用户通知列表、未读数、标已读。
+- [x] 新增管理员版本公告发布入口，发布后给所有 active 用户写入通知。
+- [x] 管理员点数调整成功后给目标用户写入点数通知。
+- [x] 验证 TypeScript、lint/build；按反馈 ID 判断是否可以归档。
+
+### 执行记录
+
+- 已打通 `/generate` 和模板生成页的视频/音频参考提交链路。
+- 已复用现有数据库 `Notification` 表，补齐 Prisma schema、用户通知 API、管理员公告 API、通知页和顶部未读入口。
+- 已让管理员单人点数调整、批量发放点数时写入站内点数通知。
+- 已归档反馈 `cmqg9c406006fl0p1gvsdh63i`、`cmqau8wyb0014js78wotf6ckz`；当前 `Feedback` 表无 `new` 状态反馈。
+
+### 风险与停止条件
+
+- 如果 Prisma 迁移或生成失败，停止，不改数据库归档状态。
+- 如果通知写入会影响点数事务一致性，停止，不归档通知反馈。
+- 如果视频/音频素材 URL 不是公网可访问，生成可能仍失败；第一版只打通链路，公网存储问题按上传链路另行处理。

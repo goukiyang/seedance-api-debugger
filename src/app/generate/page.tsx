@@ -1011,6 +1011,8 @@ export default function GeneratePage() {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds?: string[];
+    referenceVideoUrls?: string[];
+    referenceAudioUrls?: string[];
     templateId?: string | null;
     agentRunId?: string | null;
     selectedAgentPlanKey?: string | null;
@@ -1058,6 +1060,8 @@ export default function GeneratePage() {
           project_id: selectedProjectId,
           video_card_id: selectedVideoCard.id,
           reference_image_ids: params.referenceImageIds || [],
+          reference_video_urls: params.referenceVideoUrls || [],
+          reference_audio_urls: params.referenceAudioUrls || [],
           template_id: params.templateId || null,
           agent_run_id: params.agentRunId || null,
           selected_agent_plan_key: params.selectedAgentPlanKey || null,
@@ -1260,6 +1264,9 @@ export default function GeneratePage() {
             </Link>
             <Link href="/projects" className="composer-hero-action composer-hero-action-secondary">
               查看我的项目
+            </Link>
+            <Link href="/generate/ip" className="composer-hero-action composer-hero-action-secondary">
+              IP生成
             </Link>
           </div>
         </div>
@@ -1611,6 +1618,7 @@ export default function GeneratePage() {
           polledResult={polledResult}
           isPolling={isPolling}
           onReset={handleReset}
+          resultReturnTo="/generate"
         />
 
         {/* 最近任务 */}

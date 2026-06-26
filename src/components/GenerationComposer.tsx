@@ -90,6 +90,13 @@ function uniqueStrings(values: string[]): string[] {
   });
 }
 
+function assetReferenceLabel(asset: WorkspaceAssetItem, index: number, assets: WorkspaceAssetItem[]): string {
+  const sameTypeIndex = assets.slice(0, index + 1).filter((item) => item.type === asset.type).length;
+  if (asset.type === 'video') return `视频${sameTypeIndex}`;
+  if (asset.type === 'audio') return `音频${sameTypeIndex}`;
+  return `图片${sameTypeIndex}`;
+}
+
 function appendReferenceMarkers(value: string, labels: string[]): string {
   if (labels.length === 0) return value;
   const markers = labels.map((label) => `@${label}`).join(' ');
@@ -134,6 +141,8 @@ interface Props {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds: string[];
+    referenceVideoUrls?: string[];
+    referenceAudioUrls?: string[];
     templateId: string | null;
     agentRunId: string | null;
     selectedAgentPlanKey: string | null;
@@ -151,6 +160,7 @@ interface Props {
   selectedVideoCardId?: string | null;
   canManageTemplates?: boolean;
   templateMode?: 'disabled' | 'workbench';
+  initialTemplateId?: string | null;
   resultReturnTo?: string;
 }
 
@@ -173,6 +183,7 @@ export function GenerationComposer({
   selectedVideoCardId,
   canManageTemplates = false,
   templateMode = 'disabled',
+  initialTemplateId = null,
   resultReturnTo = '/generate',
 }: Props) {
   const workspace = useWorkspace();
@@ -231,8 +242,9 @@ export function GenerationComposer({
   // ============================================================================
 
   const validation = useMemo(() => {
-    return checkPrompt(prompt, workspace.assets.length, duration);
-  }, [prompt, workspace.assets.length, duration]);
+    const imageCount = workspace.assets.filter((asset) => asset.type === 'image').length;
+    return checkPrompt(prompt, imageCount, duration);
+  }, [prompt, workspace.assets, duration]);
 
   const submitBlocker = useMemo(() => {
     if (!prompt.trim()) return '请填写提示词';
@@ -244,20 +256,21 @@ export function GenerationComposer({
     const hasFailed = Object.values(workspace.uploadStatuses).some((s) => s === 'failed');
     if (hasFailed) return '存在上传失败的素材，请移除后重试';
 
-    if (generationMode === 'first_last_frame' && workspace.assets.length < 2) {
-      return `首尾帧模式至少需要 2 张素材，当前 ${workspace.assets.length} 张`;
+    const imageCount = workspace.assets.filter((asset) => asset.type === 'image').length;
+    if (generationMode === 'first_last_frame' && imageCount < 2) {
+      return `首尾帧模式至少需要 2 张图片素材，当前 ${imageCount} 张`;
     }
-    if (generationMode === 'smart_multi_frame' && workspace.assets.length < 3) {
-      return `智能多帧模式至少需要 3 张素材，当前 ${workspace.assets.length} 张`;
+    if (generationMode === 'smart_multi_frame' && imageCount < 3) {
+      return `智能多帧模式至少需要 3 张图片素材，当前 ${imageCount} 张`;
     }
     if (!validation.valid) {
-      return `提示词引用了图${validation.maxMissing}，但当前只有 ${workspace.assets.length} 张素材`;
+      return `提示词引用了图片${validation.maxMissing}，但当前只有 ${imageCount} 张图片素材`;
     }
     if (need1080pApproval && !resolutionApprovalConfirmed) {
       return '1080p 生成需要先确认审批通过。';
     }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.assets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation]);
+  }, [prompt, workspace.uploadStatuses, workspace.assets, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -300,7 +313,7 @@ export function GenerationComposer({
 
   const referenceLabels = useMemo(() => {
     return workspace.assets.map((asset, index) => {
-      const label = `图片${index + 1}`;
+      const label = assetReferenceLabel(asset, index, workspace.assets);
       const titleParts = [
         label,
         asset.fileName,
@@ -324,7 +337,7 @@ export function GenerationComposer({
         description: '主体库下一批开放，当前先用图集复用',
       },
       ...workspace.assets.map((asset, index): PromptMentionCandidate => {
-        const label = `图片${index + 1}`;
+        const label = assetReferenceLabel(asset, index, workspace.assets);
         const titleParts = [
           asset.fileName,
           asset.referenceAlbumName ? `来自 ${asset.referenceAlbumName}` : null,
@@ -386,7 +399,13 @@ export function GenerationComposer({
       if (!res.ok) throw new Error(data.message || data.error || '模板读取失败');
       const items = (data.templates || []) as SerializedGenerationTemplate[];
       setTemplates(items);
-      setSelectedTemplateId((current) => preferredTemplateId || current || items[0]?.id || null);
+      setSelectedTemplateId((current) => {
+        const preferred = preferredTemplateId || current;
+        return preferred && items.some((template) => template.id === preferred) ? preferred : items[0]?.id || null;
+      });
+      if (preferredTemplateId && !items.some((template) => template.id === preferredTemplateId)) {
+        setTemplateError('选择的模板不可用，已切换到默认模板');
+      }
       return items;
     } catch (error) {
       setTemplateError(error instanceof Error ? error.message : '模板读取失败');
@@ -402,8 +421,8 @@ export function GenerationComposer({
 
   useEffect(() => {
     if (!templateEnabled) return;
-    void loadTemplates();
-  }, [loadTemplates, templateEnabled]);
+    void loadTemplates(initialTemplateId);
+  }, [initialTemplateId, loadTemplates, templateEnabled]);
 
   useEffect(() => {
     if (!templateEnabled || !selectedTemplate || reuseDraft) return;
@@ -484,8 +503,19 @@ export function GenerationComposer({
       watermark,
       resolutionApprovalConfirmed: need1080pApproval ? resolutionApprovalConfirmed : false,
       referenceImageIds: workspace.assets
+        .filter((asset) => asset.type === 'image')
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
+      referenceVideoUrls: uniqueStrings(workspace.assets
+        .filter((asset) => asset.type === 'video')
+        .map((asset) => asset.originalUrl)
+        .filter(Boolean))
+        .slice(0, 3),
+      referenceAudioUrls: uniqueStrings(workspace.assets
+        .filter((asset) => asset.type === 'audio')
+        .map((asset) => asset.originalUrl)
+        .filter(Boolean))
+        .slice(0, 3),
       templateId: selectedTemplate?.id || null,
       agentRunId,
       selectedAgentPlanKey: selectedPlanKey,
@@ -667,7 +697,7 @@ export function GenerationComposer({
 
     const labelByReferenceId = new Map(existingLabelByReferenceId);
     idsToAdd.forEach((id, index) => {
-      labelByReferenceId.set(id, `图片${workspace.assets.length + index + 1}`);
+      labelByReferenceId.set(id, `图片${workspace.assets.filter((asset) => asset.type === 'image').length + index + 1}`);
     });
 
     const labelsToInsert = uniqueReferenceImageIds
@@ -715,7 +745,7 @@ export function GenerationComposer({
 
     const labelByAssetId = new Map(existingLabelByAssetId);
     idsToAdd.forEach((id, index) => {
-      labelByAssetId.set(id, `图片${workspace.assets.length + index + 1}`);
+      labelByAssetId.set(id, `图片${workspace.assets.filter((asset) => asset.type === 'image').length + index + 1}`);
     });
     const labelsToInsert = uniqueAssetIds
       .map((id) => labelByAssetId.get(id))
