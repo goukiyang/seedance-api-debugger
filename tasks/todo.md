@@ -23,15 +23,45 @@
 - `提交画质增强（标准版和专业版）任务 API`：`POST https://mediakit.cn-beijing.volces.com/api/v1/tools/enhance-video`。
 - `查询任务信息 API`：`GET https://mediakit.cn-beijing.volces.com/api/v1/tasks/{task_id}`。
 - `基础概念及准备工作`：AI MediaKit API Key、异步任务、幂等 `client_token`、轮询和回调。
+- `多源媒体输入与本地上传`：公网 URL、`mediakit://`、`vod://`、`tos://` 四类输入，以及本地文件上传流程。
+- `获取媒体上传地址 API`：`POST https://mediakit.cn-beijing.volces.com/api/v1/tools-sync/request-media-upload-url`。
+- `事件回调`：异步任务完成事件、重试规则、当前无回调签名鉴权。
+- `视频工具计费`：画质增强按输出时长、输出分辨率、输出帧率和版本系数计费。
+- `资源包`：资源包按分钟抵扣，失败任务不扣费，超额自动转按量计费。
+- `错误码`：同步参数/鉴权错误与异步任务失败错误的结构。
 - `提交画质增强（极速版）任务 API`、`提交画质增强（大模型）任务 API`：作为后续扩展参考。
+
+闭环审查结论（2026-06-26 官方文档复核）：
+
+- [x] 规划方向闭环：普通用户入口不做独立页面，放在已有任务详情、视频卡结果区和任务列表快捷动作里；后端不复用 Seedance 的 `/api/tasks/create`，新增同风格专用入口 `/api/tasks/enhance-video/create`，并复用现有 `VideoTask`、轮询、转存、缩略图、点数和成本账本。
+- [x] 文档口径闭环：用户给出的 `2407225` 是图像画质增强，属于同步图像接口 `tools-sync/enhance-image`；视频超分必须使用视频画质增强的异步接口，不能拿图像接口直接改。
+- [ ] 功能实现未闭环：当前只是规划和 todo 更新，还没有写 Provider、接口、前端入口、状态分发、转存、测试、真实任务和线上验证。
+- [ ] 真实业务闭环未闭环：没有 AI MediaKit API Key、余额/资源包、短视频样本和明确付费授权前，只能做到本地适配、mock/smoke 和非付费验证。
+- [ ] 线上目标未闭环：如果最终目标是 `sd2.youdoodesign.com`，实现时必须确认真实 live 工作树是否是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，不能只在旧 checkout 里改完就算上线。
+
+本轮补充注意事项：
+
+- [ ] 本地视频源不能直接把本机路径传给火山。源解析顺序应为：已可公网访问的 HTTP/HTTPS URL -> 已有 `mediakit://` / `vod://` / `tos://` -> 本地缓存文件走 `request-media-upload-url` 申请上传地址、用 `PUT` 原始二进制上传、再用返回的 `mediakit://` 提交任务 -> 仍不可用则返回 400 且不冻结点数。
+- [ ] 本地上传有单文件 5 GB 限制、上传地址 24 小时有效、上传后的文件默认 30 天清理；而超分接口对输入视频建议不超过 10 GB、最高 2K。实现校验时要区分“上传限制”和“处理限制”。
+- [ ] 查询任务接口的 `success=true` 只代表查询请求成功，不代表任务成功；真正任务状态只看 `status=running/completed/failed`。
+- [ ] 成功任务的结果链接默认保留 24 小时；当剩余有效期不足 2 小时时，查询接口会自动续期，但本项目仍必须在 `completed` 后立即转存，不得依赖临时链接。
+- [ ] 回调当前无签名鉴权；回调失败会最多重试 3 次，间隔 5 秒、10 秒、30 秒。即使二期启用回调，也只能把回调当通知，必须按 `task_id` 主动查询确认后再落库，并做本地幂等校验。
+- [ ] `client_token` 用于幂等控制，最多 64 个 ASCII 可打印字符；建议用本地 `VideoTask.id` 或稳定派生值，避免重复提交导致重复扣费。
+- [ ] `queue_id` 可用于不同业务/优先级队列和项目分账；首版可以不开放 UI，但 Provider 入参、后台记录和配置位要预留。
+- [ ] 计费不能按 Seedance 生成规则套用。标准版/专业版按“输出时长 × 计费换算系数 × 0.75 元/分钟”；极速版基准 0.2 元/分钟；大模型基准 2.5 元/分钟；换算系数受版本、输出分辨率和输出帧率影响，具体表要以官方计费文档为准落到 `pricing_snapshot`。
+- [ ] 资源包抵扣也按输出时长和换算系数折算；失败任务不触发计费/抵扣，超出资源包余量会自动转按量计费。后台展示必须区分“本项目预估点数”和“火山官方实际账单/资源包扣减”。
+- [ ] 错误对象至少包含 `code/message/type`，部分场景还有 `param`，所有失败日志要保留 `request_id` 便于找火山支持；前端只展示可理解摘要，不展示签名 URL、API Key 或完整临时下载链接。
+- [ ] 大模型版文档口径和标准/专业不同：输入最高 1080p、短边/长边范围更窄、仅 SDR，首版继续不开放，避免把约束混到标准版 UI。
+- [ ] 图像画质增强如果后续也要做，应作为单独“图片增强”能力规划；它是同步接口、参数和计费单位都不同，不并入本次视频超分首版。
 
 首版范围：
 
 - [ ] 新增 AI MediaKit Provider 适配层：读取 `AI_MEDIAKIT_API_KEY` / Base URL，只在服务端使用密钥，不输出、不入库、不回显。
 - [ ] 新增创建超分任务函数：提交 `video_url`、`tool_version`、`scene`、`resolution` 或 `resolution_limit`、`fps`、`bitrate_level`、`client_token`、可选 `callback_url`。
 - [ ] 新增查询超分任务函数：轮询 `GET /api/v1/tasks/{task_id}`，把 `running`、`completed`、`failed` 映射到本地 `submitted/running/succeeded/failed`。
+- [ ] 新增源视频解析/上传函数：公网 URL 直接提交，本地缓存文件先走 AI MediaKit 上传换成 `mediakit://`，不可上传时不得调用火山。
 - [ ] 复用 `VideoTask`：`provider` 建议标记为 `volcengine_mediakit`，`model` 或 `generation_mode` 标记 `enhance-video`，原视频 URL 和超分参数写入 `params_json` / `provider_payload_json`。
-- [ ] 复用现有 `/api/tasks/create` 或新增同风格专用入口 `/api/tasks/enhance-video/create`；不要恢复已废弃的 `/api/video/create`。
+- [ ] 新增同风格专用入口 `/api/tasks/enhance-video/create`；不要直接复用 Seedance 生成专用的 `/api/tasks/create`，也不要恢复已废弃的 `/api/video/create`。
 - [ ] 接入点数冻结与失败返还：首版先使用保守预估点数，真实官方扣费未确认前 `provider_cost_status` 保持 `estimated_by_rule` 或 `not_recorded`。
 - [ ] 成功后立即调用现有结果缓存/转存和缩略图逻辑，确保任务列表、详情页、下载入口能长期打开结果。
 - [ ] 前端入口先做最小闭环：在任务结果或视频卡上增加“超分/增强”动作，带入当前结果视频 URL；首版不做复杂批量超分。
@@ -41,7 +71,7 @@
 - [ ] `resolution` 与 `resolution_limit` 互斥；首版 UI 只开放一种，建议先开放 `resolution` 档位：`720p`、`1080p`、`2k`、`4k`。
 - [ ] `fps` 取值按官方限制 `[15, 120]`，并提示建议不超过原片 4 倍；没有真实原片 fps 时不要显示假百分比或假处理进度。
 - [ ] 标准版 `scene` 可选 `common`、`ugc`、`short_series`、`aigc`、`old_film`；专业版不依赖 `scene`。
-- [ ] 输入视频必须是公网 HTTP/HTTPS URL、`mediakit://`、`vod://` 或 `tos://`；本地临时路径必须先转成公网可访问地址。
+- [ ] 输入视频必须是公网 HTTP/HTTPS URL、`mediakit://`、`vod://` 或 `tos://`；本地临时路径必须先转成 AI MediaKit 可接受的 URL，优先走官方本地上传得到 `mediakit://`。
 - [ ] 输入文件建议不超过 10 GB，标准/专业/极速输入视频最高支持 2K；大模型版输入限制更窄，首版不默认开放。
 
 二期范围：
@@ -91,6 +121,8 @@ Batch 0：开工确认与官方口径冻结
   - `GET /api/v1/tasks/{task_id}`
   - `AI MediaKit API Key`
   - 计费/资源包说明
+  - `request-media-upload-url` 本地上传流程
+  - 事件回调、错误码、队列/分账说明
 - [ ] 明确本轮是否允许真实付费调用；未明确授权时只做 mock/smoke 和非付费验证。
 - [ ] 验证命令：`git status --short --branch`、官方文档 URL 可打开或官方接口内容可取回。
 
@@ -115,6 +147,8 @@ Batch 1：新增 AI MediaKit Provider 适配层
 - [ ] 实现请求函数：
   - `createEnhanceVideoTask(input)` 调 `POST /api/v1/tools/enhance-video`。
   - `getAiMediaKitTaskStatus(providerTaskId)` 调 `GET /api/v1/tasks/{task_id}`。
+  - `requestMediaUploadUrl()` 调 `POST /api/v1/tools-sync/request-media-upload-url`，返回 `file_id`、`method`、`upload_headers`、`upload_url`。
+  - `uploadMediaToAiMediaKit(input)` 按官方返回的 `method/upload_headers/upload_url` 用原始二进制 `PUT` 上传，禁止用 multipart/form-data。
   - Authorization 固定为 `Bearer ${AI_MEDIAKIT_API_KEY}`，不得写入 payload、日志或数据库。
 - [ ] 实现状态映射：
   - `running` -> 本地 `running`
@@ -122,7 +156,7 @@ Batch 1：新增 AI MediaKit Provider 适配层
   - `failed` -> 本地 `failed`
   - 未知状态按 `running` 处理，并保存 raw 供排查。
 - [ ] 实现脱敏：
-  - 日志/ProviderApiRequest/request summary 中隐藏 `Authorization`、API Key、`auth_key` query、签名 URL。
+  - 日志/ProviderApiRequest/request summary 中隐藏 `Authorization`、API Key、`auth_key` query、`upload_url`、签名 URL。
   - raw response 可以存任务结构，但不要额外复制完整临时 URL 到 `params_json`。
 - [ ] 新建 `scripts/aimediakit-enhance-video-smoke.ts`，用假 `fetch` 验证：
   - URL、method、header 正确。
@@ -130,6 +164,7 @@ Batch 1：新增 AI MediaKit Provider 适配层
   - 成功创建能解析 `task_id`。
   - 查询 `completed` 能解析 `result.video_url`、`duration`、`fps`、`resolution`。
   - 查询 `failed` 能解析 `error.code/message/type`。
+  - 本地上传申请地址后，`PUT` 使用返回 headers，且日志不包含完整 `upload_url`。
 - [ ] 验证命令：`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npm run lint`。
 
 Batch 2：把状态最终化改成按 Provider 分发
@@ -172,12 +207,14 @@ Batch 3：新增超分创建入口，先不改普通生成入口
   - `video_card_id`：默认沿用 source task 的视频卡；跨卡必须重新做权限校验。
 - [ ] 源视频解析规则：
   - 如果给 `source_task_id`，先用权限函数确认当前用户能看该任务。
-  - 优先使用已转存的稳定地址 `local_video_path` 转成公网绝对 URL。
+  - 优先使用已可公网访问且不需要登录的稳定 HTTP/HTTPS URL。
+  - 如果源任务已有 `mediakit://`、`vod://`、`tos://`，可直接作为 `video_url`。
+  - 如果只有已转存的本地缓存文件，且服务端能读到文件、文件大小不超过本地上传限制，则先走 AI MediaKit 本地上传拿 `mediakit://`，再提交超分任务。
   - 如果只能拿到 Provider 临时 URL，必须确认是 HTTP/HTTPS，并提示可能过期；任务成功后仍要转存。
-  - 如果只有本地相对路径但没有可用公网 Base URL，直接返回 400，不调用火山、不冻结点数。
+  - 如果只有本地相对路径且文件不存在、超出本地上传限制或上传失败，直接返回 400，不调用火山、不冻结点数。
 - [ ] 点数和预算：
   - 在 `src/lib/pricing.ts` 增加 `calculateEnhanceVideoEstimatedCost(input)`。
-  - 首版按保守规则冻结点数：以源视频 `duration` 为基础，`standard` 低于 Seedance 生成、`professional` 明显高于 standard；具体数值写入 `pricing_snapshot`，后续按官方账单调整。
+  - 首版按保守规则冻结点数：以源视频 `duration` 为基础，结合官方“输出时长 × 计费换算系数 × 基准单价”口径估算；具体版本、分辨率、帧率和系数写入 `pricing_snapshot`，后续按官方账单调整。
   - 同步在 `src/lib/pricing-client.ts` 增加前端估算函数。
   - Provider 真实扣费未接入前，`provider_cost_status` 标记为 `estimated_by_rule` 或 `not_recorded`，不得显示成官方已确认成本。
 - [ ] 任务落库：
@@ -191,6 +228,7 @@ Batch 3：新增超分创建入口，先不改普通生成入口
 - [ ] Provider 提交：
   - 先创建本地任务、冻结点数、记录成本估算。
   - 用本地 `task.id` 作为 AI MediaKit `client_token`，避免重复扣费。
+  - 如需本地上传，先上传成功并取得 `mediakit://`，再进入火山超分提交；上传失败必须释放冻结点数或在冻结前失败。
   - 调 `createEnhanceVideoTask` 成功后写入 `provider_task_id`、`raw_create_response`、`local_status='submitted'`。
   - 成功后调用 `startTaskLocalization(taskId)`。
   - Provider 创建失败必须释放冻结点数、写 `local_status='failed'`、记录失败原因。
@@ -201,7 +239,7 @@ Batch 3：新增超分创建入口，先不改普通生成入口
   - 未登录返回 401。
   - 未配置 API Key 时不冻结点数。
   - `resolution` 与 `resolution_limit` 同时传返回 400。
-  - 无公网源视频返回 400。
+  - 本地缓存文件可上传时会转成 `mediakit://`；不可上传或不存在时返回 400。
   - mock Provider 成功时创建 `VideoTask`，provider/model/generation_mode/status 正确。
   - mock Provider 失败时冻结点数被释放。
 - [ ] 验证命令：`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npm run lint`、`npm run build`。
@@ -253,10 +291,11 @@ Batch 6：真实链路验证，默认先不付费
   - AI MediaKit API Key 已配置。
   - 账号有资源包或余额。
   - 用户明确授权消耗一次真实额度。
-  - 测试视频体积小、时长短、可公开访问。
+  - 测试视频体积小、时长短；优先用公网 URL，若用本地文件则先验证 `request-media-upload-url` 和 `PUT` 上传链路。
 - [ ] 真实付费验证：
   - 用短视频提交 `standard + 720p` 或 `standard + 1080p`。
   - 记录本地 `task_id`、火山 `task_id`、本地状态变化、最终 `local_video_path`。
+  - 记录官方返回 `duration/fps/resolution/tool_version` 和本项目 `pricing_snapshot`，用于后续和资源包/账单对齐。
   - 验证任务详情页能播放本地转存结果。
   - 不在聊天或日志里输出完整签名 URL、API Key、Authorization。
 - [ ] 验证命令：
