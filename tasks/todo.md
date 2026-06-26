@@ -226,16 +226,17 @@ Batch 4：类型和列表/详情兼容
 Batch 5：前端最小入口
 
 - [ ] UI 设计前先使用 `impeccable`，但首版只做内嵌动作，不做新 landing 页。
-- [ ] 优先在 `src/app/tasks/[id]/page.tsx` 给成功任务增加“超分/增强”按钮。
+- [ ] 产品入口决策：首版不做独立用户页面；超分是“已有视频的后处理动作”，主入口应放在用户正在查看结果的模块里。
+- [ ] 第一入口放在 `src/app/tasks/[id]/page.tsx`：给成功任务增加“超分/增强”按钮，用户看完原视频后可直接增强。
+- [ ] 第二入口放在视频卡详情/视频卡结果区：对 current/final 视频提供同一个“超分/增强”动作，增强后的任务仍归属同一项目和视频卡。
+- [ ] 列表页 `src/app/tasks/page.tsx` 只作为快捷入口：成功任务卡片上可显示小按钮，但不能替代详情页确认流程。
+- [ ] 可选独立页只允许作为管理员/内部调试台，例如 `/admin/integrations/aimediakit-enhance-video`，用于检查配置、mock/smoke 和真实额度授权状态；不作为普通用户主入口。
 - [ ] 建议新建 `src/components/EnhanceVideoAction.tsx`，组件负责：
   - 只在任务 `local_status='succeeded'` 且有可用视频时显示。
   - 打开一个紧凑弹窗：版本、目标分辨率、可选 fps、预估点数、确认按钮。
   - 未配置 API Key 或源视频不可公网访问时显示明确原因，不显示可点击确认按钮。
   - 提交时调用 `/api/tasks/enhance-video/create`。
   - 成功后跳转新任务详情页或显示“已创建超分任务”链接。
-- [ ] 可选追加入口：
-  - `src/app/tasks/page.tsx` 列表卡片上只对成功任务显示小按钮。
-  - 视频卡详情页同样只对 current/final 任务显示入口。
 - [ ] 交互规则：
   - 不显示百分比进度；轮询中只显示“已提交 / 处理中 / 已完成 / 失败”。
   - 估算点数必须来自 `calculateEnhanceVideoEstimatedCostClient`，不能写死在按钮文案里。
