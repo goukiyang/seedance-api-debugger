@@ -1,7 +1,7 @@
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage } from '../provider/error-message';
-import { getVideoTaskStatus } from '../provider/jimeng';
+import { getProviderTaskStatus } from '../provider/video-task-status';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
 import { settleProjectTaskBudget } from '../projects/budget';
@@ -323,6 +323,7 @@ async function cacheAndMaybeThumbnail(
   if (options.cacheOnSuccess && task.local_status === 'succeeded' && (task.result_video_url || task.local_video_path)) {
     cacheResult = await withLocalCacheSlot(() => cacheTaskVideoToLocal({
       id: task.id,
+      provider: task.provider,
       local_status: task.local_status,
       provider_task_id: task.provider_task_id,
       result_video_url: task.result_video_url,
@@ -399,7 +400,7 @@ export async function finalizeVideoTaskStatus(
   }
 
   try {
-    const statusResult = await getVideoTaskStatus(task.provider_task_id);
+    const statusResult = await getProviderTaskStatus(task);
 
     const updateData: Prisma.VideoTaskUncheckedUpdateInput = {
       provider_status: statusResult.provider_status,

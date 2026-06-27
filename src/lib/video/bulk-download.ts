@@ -72,6 +72,7 @@ export type BulkVideoDownloadResult = BulkVideoDownloadJsonResult | BulkVideoDow
 
 const taskSelect = {
   id: true,
+  provider: true,
   prompt: true,
   local_status: true,
   provider_task_id: true,

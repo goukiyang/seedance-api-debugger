@@ -104,6 +104,15 @@
 - 让已生成视频可以发起一次“超分/画质增强”处理，生成一个新的本地 `VideoTask`，并沿用现有任务列表、任务详情、视频卡、点数、成本和转存链路。
 - 首版只打通单视频、标准版/专业版、轮询取结果、成功转存、失败返还；不做批量、回调、大模型版、极速版和官方账单对账。
 
+### 当前落地范围 - 2026-06-27
+
+- [x] 现状确认：Batch 1 只完成 AI MediaKit Provider 适配层，还没有把超分任务接进现有任务轮询、转存、创建接口和前端入口，所以不能宣称“全部做好”。
+- [x] 本轮先完成可真实接入的后端基础闭环 Batch 2：把任务状态查询和结果链接刷新从固定 Seedance 改为按 `provider` 分发，确保未来 `volcengine_mediakit` 任务能沿用现有最终化、下载转存和缩略图链路。
+- [x] Batch 2 验证标准：新增红绿 smoke；Seedance 任务仍走 `getVideoTaskStatus`；AI MediaKit 任务走 `getAiMediaKitTaskStatus`；未知 provider 不误走 Seedance；`cacheTaskVideoToLocal` 所有调用方都带 provider；`npx tsc --noEmit --pretty false` 和 `npm run lint` 通过。
+- [x] Batch 2 完成后形成聚焦 commit 并 push 到 `codex/mediakit-video-enhance`，保持远端可回退。
+- [ ] 后续可真实使用版继续按 Batch 3 到 Batch 5 落地：新增 `/api/tasks/enhance-video/create`、补任务类型/列表/详情兼容、在任务详情和视频卡结果区放“超分/增强”入口。
+- [ ] 真实火山付费验收停止条件不变：没有 AI MediaKit API Key、资源包/余额、短视频样本和明确付费授权前，只做本地适配、mock/smoke 和非付费验证，不调用真实付费接口。
+
 推荐 Git Plan：
 
 - [ ] 开发前从当前远端最新状态新建任务分支：`codex/mediakit-video-enhance`。
@@ -179,29 +188,39 @@ Batch 1：新增 AI MediaKit Provider 适配层
 
 Batch 2：把状态最终化改成按 Provider 分发
 
-- [ ] 新建 `src/lib/provider/video-task-status.ts`，统一暴露：
+- [x] 新建 `src/lib/provider/video-task-status.ts`，统一暴露：
   - `getProviderTaskStatus(task: { provider: string; provider_task_id: string | null })`
   - `refreshProviderTaskResultUrl(task: { id: string; provider: string; provider_task_id: string | null })`
-- [ ] Seedance 分支继续调用 `src/lib/provider/jimeng.ts` 的 `getVideoTaskStatus`。
-- [ ] AI MediaKit 分支调用 `getAiMediaKitTaskStatus`，并把返回结果整理成现有 `ProviderStatusResponse` 形状。
-- [ ] 修改 `src/lib/video/task-finalizer.ts`：
+- [x] Seedance 分支继续调用 `src/lib/provider/jimeng.ts` 的 `getVideoTaskStatus`。
+- [x] AI MediaKit 分支调用 `getAiMediaKitTaskStatus`，并把返回结果整理成现有 `ProviderStatusResponse` 形状。
+- [x] 修改 `src/lib/video/task-finalizer.ts`：
   - 删除直接 import `../provider/jimeng` 的 `getVideoTaskStatus`。
   - 用 `getProviderTaskStatus(task)` 替代硬编码 Seedance 查询。
   - 成功时继续写 `result_video_url`、`duration`、`resolution`、`raw_status_response`。
   - 失败时继续走现有点数/预算返还。
-- [ ] 修改 `src/lib/video/local-cache.ts`：
+- [x] 修改 `src/lib/video/local-cache.ts`：
   - `CacheableVideoTask` 增加 `provider: string`。
   - 403 刷新链接时用 `refreshProviderTaskResultUrl(task)`，不能再固定走 Seedance。
-- [ ] 检查并补齐所有 `cacheTaskVideoToLocal` 调用方的 `provider` 字段：
+- [x] 检查并补齐所有 `cacheTaskVideoToLocal` 调用方的 `provider` 字段：
   - `src/lib/video/task-finalizer.ts`
   - `src/app/api/video/download/[id]/route.ts`
   - `src/app/api/video/thumbnail/[id]/route.ts`
   - `src/lib/video/bulk-download.ts`
-- [ ] 新建 `scripts/provider-status-router-smoke.ts`，用 mock 函数或假 task 验证：
+- [x] 新建 `scripts/provider-status-router-smoke.ts`，用 mock 函数或假 task 验证：
   - `provider='seedance'` 走 Seedance 分支。
   - `provider='volcengine_mediakit'` 走 AI MediaKit 分支。
   - 未知 provider 返回可读错误，不误调用 Seedance。
-- [ ] 验证命令：`npx tsx scripts/provider-status-router-smoke.ts`、`npm run lint`、`npm run build`。
+- [x] 验证命令：`npx tsx scripts/provider-status-router-smoke.ts`、`npm run lint`、`npm run build`。
+
+### Review - 2026-06-27 Batch 2
+
+- 已新增 `src/lib/provider/video-task-status.ts`，作为任务状态查询的统一分发层；`provider='seedance'` 继续调用原 Seedance `getVideoTaskStatus`，`provider='volcengine_mediakit'` 调用 AI MediaKit `getAiMediaKitTaskStatus`，未知 provider 直接返回可读错误，避免误走 Seedance。
+- 已把 `src/lib/video/task-finalizer.ts` 的状态查询改为 `getProviderTaskStatus(task)`，保留原来的成功落库、失败返还、官方费用记录、成功后本地转存和缩略图生成流程。
+- 已把 `src/lib/video/local-cache.ts` 的 403 链接刷新改为 `refreshProviderTaskResultUrl(task)`，并要求 `CacheableVideoTask` 必须带 `provider`。
+- 已补齐 `cacheTaskVideoToLocal` 相关入口的 provider 字段：finalizer 显式传入、缩略图接口 select 增加 provider、批量下载 select 增加 provider；下载接口使用完整 `VideoTask`，天然包含 provider。
+- 已新增 `scripts/provider-status-router-smoke.ts`，先红测确认模块缺失，再补实现跑绿；测试全程使用注入的假 fetcher，不访问真实 Provider、不产生计费。
+- 已验证：`npx tsx scripts/provider-status-router-smoke.ts`、`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 均通过；`npm run lint` 仍只有项目既有 `<img>` / React hook dependency warnings。
+- 本批仍未新增 `/api/tasks/enhance-video/create`、点数冻结、前端入口、真实 AI MediaKit 付费调用或线上部署；这些继续进入 Batch 3 到 Batch 5。
 
 Batch 3：新增超分创建入口，先不改普通生成入口
 
