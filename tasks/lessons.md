@@ -701,6 +701,16 @@
 - 验证结果：以本轮 smoke、JS 语法检查、TypeScript、lint、build、部署和公网资源验收为准。
 - 可复用经验：任何“只给管理员开放”的上下文、规则、提示词能力都不能只靠前端隐藏。前端负责入口和体验，后端负责是否真正应用，日志要能区分已应用和被忽略。
 
+## 2026-06-28 - 新能力不能只藏在结果详情页里
+
+- 问题/背景：AI MediaKit 视频超分链路、API Key 设置和任务详情内按钮已经上线，但用户反馈“没有找到入口”，不知道在哪里做超分。
+- 诱因/根因：首版只在成功任务详情/视频卡结果区放了折叠的“超分/增强”组件，没有在主创作入口、导航、控制台或独立页面给用户一个明确的任务起点；从工程视角看功能存在，从用户视角看入口不可达。
+- 当时思路：按真实用户任务流补齐“先找到能力，再选择源视频，再提交任务”的直达路径，不改 Provider、扣点或任务创建核心链路。
+- 改动位置：`src/app/generate/enhance/page.tsx`、`src/components/generate/EnhanceVideoPageClient.tsx`、`src/lib/navigation.ts`、`src/components/generate/GeneratePageClient.tsx`、`src/app/dashboard/page.tsx`、`src/app/globals.css`、`scripts/enhance-video-entry-smoke.ts`。
+- 怎么改：新增 `/generate/enhance` 视频超分直达页，列出可超分的成功视频并复用原有 `EnhanceVideoAction`；生成页顶部、侧边栏、控制台都加入口；导航高亮只落到“视频超分”。
+- 验证结果：入口 smoke、AI MediaKit 设置 smoke、超分创建 API smoke、TypeScript、lint、Next build、`youdoo-sites build/restart` 和公网构建产物验证通过。
+- 可复用经验：新增用户能力必须至少有一个稳定主入口和一个就近上下文入口。只把动作塞进详情页、折叠区、hover 区或成功态下方，不算入口闭环；用户找不到时要按产品缺陷处理，而不是解释“其实已经做了”。
+
 ## 2026-06-20 - 图集上传不能被个人素材归属拦截
 
 - 问题/背景：参考图集详情页上传别人已经传过的同一张图片时，页面提示“联系管理员开放共享”，但用户真实目标是先把图片贴进当前图集。
