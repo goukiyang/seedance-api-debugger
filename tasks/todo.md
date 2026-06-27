@@ -8,7 +8,7 @@
 
 ## 视频超分 / AI MediaKit 画质增强接入 Todo
 
-更新时间：2026-06-26
+更新时间：2026-06-27
 
 规划结论：
 
@@ -355,6 +355,72 @@ Batch 5：前端最小入口
 - 已在 `/admin/integrations` 增加“AI MediaKit 视频超分 API”配置卡，包含状态卡、启用开关、API 地址、API Key 密码输入、清除当前 API Key 和保存按钮。
 - 已让 `/api/tasks/enhance-video/create`、AI MediaKit Provider 状态查询和 `/api/config` 统一读取后台保存配置；前端“超分/增强”按钮只在配置 ready 时可提交。
 - 已新增 `scripts/aimediakit-admin-settings-smoke.ts`，覆盖配置 patch、脱敏 DTO、route 存在和前端输入入口存在。
+
+### 落地执行计划 - 2026-06-27
+
+落地目标：把当前功能分支 `codex/mediakit-video-enhance` 上的 AI MediaKit 视频超分首版，安全同步到真实 `sd2` 线上工作树，完成后台配置入口、非付费链路、线上页面可见和授权后的真实付费验收。
+
+Ponytail 取舍：
+
+- [x] 不再新增普通用户独立页面；当前任务详情页和视频卡结果区入口已经覆盖真实使用路径。
+- [x] 不在首发里接回调、批量超分、极速版、大模型版和官方账单对账；这些不是首版上线必要条件。
+- [x] 不新增依赖、不迁移数据库；现有 `VideoTask`、`PlatformSetting`、点数冻结和转存链路已经能承载首版。
+
+执行前硬门槛：
+
+- [ ] 锁定真实上线工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，不要只在旧 checkout `/Volumes/Data/Projects/video-api-debugger` 里完成。
+- [ ] 在 live 工作树执行 `git status --short --branch`，如果有无关脏改或不能 fast-forward，停止并报告，不合并、不部署。
+- [ ] 在 live 工作树确认远端、当前分支、线上 `sd2` 来源和本机 `youdoo-sites status sd2` 一致。
+- [ ] 确认本轮是否允许真实付费调用；未明确授权时只做到配置、页面、mock/smoke 和非付费验证。
+
+阶段 1：把功能分支带到 live 工作树
+
+- [ ] 在 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo` 拉取远端：`git fetch origin codex/mediakit-video-enhance`。
+- [ ] 对比 live 与功能分支差异：`git diff --stat HEAD..origin/codex/mediakit-video-enhance -- src scripts tasks package.json prisma`。
+- [ ] 只在确认无覆盖风险后合入：优先 fast-forward 或新建发布分支，禁止 force push、禁止覆盖用户未提交改动。
+- [ ] 合入后执行 `git status --short --branch`，确认工作区只包含本轮计划范围。
+
+阶段 2：live 工作树本地验证
+
+- [ ] 执行 `npx tsx scripts/aimediakit-admin-settings-smoke.ts`，确认后台配置入口、脱敏 DTO、路由和页面源码存在。
+- [ ] 执行 `npx tsx scripts/aimediakit-enhance-video-smoke.ts`，确认 Provider 创建、查询、本地上传和脱敏仍通过。
+- [ ] 执行 `npx tsx scripts/enhance-video-create-route-smoke.ts`，确认创建 route 的权限、URL、成本估算和防递归超分规则通过。
+- [ ] 执行 `npx tsx scripts/provider-status-router-smoke.ts`，确认 Seedance 和 AI MediaKit 状态分发不串线。
+- [ ] 执行 `npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [ ] 如果上述任一失败，停止部署；先修复并重新验证，不带失败版本上线。
+
+阶段 3：线上构建与部署
+
+- [ ] 创建回滚点：`rollback/YYYY-MM-DD-mediakit-video-enhance-settings` tag 或等价保护分支，并推送远端。
+- [ ] 执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`，禁止手动覆盖 `.next-prod`。
+- [ ] 执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2`。
+- [ ] 执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`。
+- [ ] 验证本地和公网：`curl http://127.0.0.1:3000/api/config`、`curl https://sd2.youdoodesign.com/api/config`、`curl https://sd2.youdoodesign.com/login`。
+- [ ] 等约 70 秒后复查 `youdoo-sites status sd2` 和 LaunchAgent `runs`，确认不是瞬时健康。
+
+阶段 4：真实页面非付费验收
+
+- [ ] 管理员登录公网后台，打开 `/admin/integrations`，确认能看到“AI MediaKit 视频超分 API”配置卡。
+- [ ] 打开 `/admin/integrations/aimediakit`，确认独立页面同样能进入后台配置面板。
+- [ ] 未填 API Key 时，打开一个成功任务详情页，确认“超分/增强”入口存在但不可提交，原因显示为未启用或缺少 API Key。
+- [ ] 用浏览器或 API 确认 `/api/config` 只返回 `enabled/ready/base_url/api_key_configured`，不返回 API Key 明文或 masked key。
+- [ ] 保存一条测试配置时，只在管理员后台输入 API Key；不在聊天、日志、截图或命令输出中暴露密钥。
+
+阶段 5：授权后真实付费验收
+
+- [ ] 先由用户明确授权消耗一次 AI MediaKit 额度，并确认账号有余额或资源包。
+- [ ] 选择一个短视频样本，优先用公网 HTTP/HTTPS 源，规格用 `standard + 720p` 或 `standard + 1080p`。
+- [ ] 从任务详情页点击“超分/增强”，创建新任务；记录本地 `VideoTask.id` 和火山 `provider_task_id`。
+- [ ] 等待轮询到终态；成功时确认结果已转存成本地视频，任务详情页能播放，列表和视频卡最左侧缩略图正常。
+- [ ] 失败时确认错误摘要可读、点数/预算返还、日志不含 API Key、Authorization、完整签名 URL。
+- [ ] 记录官方返回的 `duration/fps/resolution/tool_version` 和本项目 `pricing_snapshot`，只标记为规则预估，不写成官方账单确认。
+
+阶段 6：Git 和版本收尾
+
+- [ ] 聚焦提交 live 工作树变更，commit 信息写清版本含义。
+- [ ] 推送目标分支和 rollback tag，用 `git ls-remote --heads` / `git ls-remote --tags` 验证远端可见。
+- [ ] 更新 `/Volumes/Data/Projects/project-version-registry.md`，记录 commit、分支、tag、构建/部署/公网验收结果。
+- [ ] 最终汇报必须区分：功能分支已完成、live 工作树是否已合入、Git 是否已推送、`sd2.youdoodesign.com` 是否已加载、真实付费任务是否已授权并完成。
 
 Batch 6：真实链路验证，默认先不付费
 
