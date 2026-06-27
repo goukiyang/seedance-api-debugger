@@ -29,7 +29,7 @@ Review：已上线到生产 BUILD_ID `J8JDIEkiAV5n3U6MLNE8_`。公网 `/login` 2
 - [x] 任务详情页和视频卡结果区增加“超分/增强”入口；普通任务仍走原 Seedance 生成链路，超分任务不允许递归超分。
 - [x] 已通过 smoke、TypeScript、lint 和 `npm run build`；真实付费调用仍等待 API Key、资源包/余额和用户明确授权。
 
-Review 待上线验证后补齐：`youdoo-sites build/restart/status sd2`、公网 `/api/config`、`/login`、后台配置页、健康守护周期和最终 BUILD_ID。
+Review：已上线到生产 BUILD_ID `9dEA89njqrKrwgpurV0vr`。`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2` 均通过；本地和公网 `/api/config` 返回 `aimediakit_enhance_video.enabled=false`、`ready=false`、`api_key_configured=false`，说明入口已上线但尚未配置 API Key；公网 `/login` 200，`/api/admin/integrations/aimediakit` 未登录返回 401，`/admin/integrations/aimediakit` 未登录跳转登录页；生产 `_next/static/9dEA89njqrKrwgpurV0vr/_buildManifest.js` 200，生产包包含后台整合页、AI MediaKit 配置页、管理员配置 API 和超分创建 API；跨健康守护周期复查后 launchd `runs=3` 未继续增长。真实付费超分任务未执行，原因是还未录入 AI MediaKit API Key、未确认资源包/余额，也未获得本轮付费调用授权。
 
 ## 图集和单图共享闭环 Todo
 
