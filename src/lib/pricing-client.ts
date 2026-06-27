@@ -1,9 +1,11 @@
+const SEEDANCE_VIDEO_COST_PER_SECOND = 3;
+
 export function calculateEstimatedCostClient(
   resolution: string,
   duration: number,
 ): number {
-  const baseCostPerSecond = resolution === '1080p' ? 18 : resolution === '720p' ? 12 : 8;
-  return Math.ceil(baseCostPerSecond * duration);
+  void resolution;
+  return Math.ceil(SEEDANCE_VIDEO_COST_PER_SECOND * duration);
 }
 
 export function calculateEnhanceVideoEstimatedCostClient(input: {

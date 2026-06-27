@@ -1,7 +1,8 @@
 import type { VideoResolution, VideoDuration } from '@/types';
 
-const DEFAULT_PRICING_RULE_ID = 'default-seedance-v1';
-const DEFAULT_PRICING_RULE_VERSION = 1;
+const DEFAULT_PRICING_RULE_ID = 'default-seedance-v2';
+const DEFAULT_PRICING_RULE_VERSION = 2;
+const SEEDANCE_VIDEO_COST_PER_SECOND = 3;
 const ENHANCE_VIDEO_PRICING_RULE_ID = 'default-aimediakit-enhance-video-v1';
 const ENHANCE_VIDEO_PRICING_RULE_VERSION = 1;
 
@@ -29,7 +30,7 @@ export function calculateEstimatedCost(
   resolution: VideoResolution | string,
   duration: VideoDuration | number,
 ): PricingSnapshot {
-  const baseCostPerSecond = resolution === '1080p' ? 18 : resolution === '720p' ? 12 : 8;
+  const baseCostPerSecond = SEEDANCE_VIDEO_COST_PER_SECOND;
   const internalMultiplier = 1.0;
   const finalCostPerSecond = baseCostPerSecond * internalMultiplier;
   const estimatedCost = Math.ceil(finalCostPerSecond * (duration as number));
