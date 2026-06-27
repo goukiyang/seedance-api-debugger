@@ -110,7 +110,8 @@
 - [x] 本轮先完成可真实接入的后端基础闭环 Batch 2：把任务状态查询和结果链接刷新从固定 Seedance 改为按 `provider` 分发，确保未来 `volcengine_mediakit` 任务能沿用现有最终化、下载转存和缩略图链路。
 - [x] Batch 2 验证标准：新增红绿 smoke；Seedance 任务仍走 `getVideoTaskStatus`；AI MediaKit 任务走 `getAiMediaKitTaskStatus`；未知 provider 不误走 Seedance；`cacheTaskVideoToLocal` 所有调用方都带 provider；`npx tsc --noEmit --pretty false` 和 `npm run lint` 通过。
 - [x] Batch 2 完成后形成聚焦 commit 并 push 到 `codex/mediakit-video-enhance`，保持远端可回退。
-- [ ] 后续可真实使用版继续按 Batch 3 到 Batch 5 落地：新增 `/api/tasks/enhance-video/create`、补任务类型/列表/详情兼容、在任务详情和视频卡结果区放“超分/增强”入口。
+- [x] Batch 3 完成：新增 `/api/tasks/enhance-video/create`，支持源任务/直接 URL、点数或项目预算冻结、Provider 提交、失败返还和本地轮询转存启动。
+- [ ] 后续可真实使用版继续按 Batch 4 到 Batch 5 落地：补任务类型/列表/详情兼容，并在任务详情和视频卡结果区放“超分/增强”入口。
 - [ ] 真实火山付费验收停止条件不变：没有 AI MediaKit API Key、资源包/余额、短视频样本和明确付费授权前，只做本地适配、mock/smoke 和非付费验证，不调用真实付费接口。
 
 推荐 Git Plan：
@@ -224,29 +225,29 @@ Batch 2：把状态最终化改成按 Provider 分发
 
 Batch 3：新增超分创建入口，先不改普通生成入口
 
-- [ ] 新建 `src/app/api/tasks/enhance-video/create/route.ts`，不要恢复 `/api/video/create`。
-- [ ] 入参首版只支持：
+- [x] 新建 `src/app/api/tasks/enhance-video/create/route.ts`，不要恢复 `/api/video/create`。
+- [x] 入参首版只支持：
   - `source_task_id`：优先，从已有成功任务发起超分。
-  - `video_url`：管理员/内部测试可选，必须是公网 HTTP/HTTPS、`mediakit://`、`vod://` 或 `tos://`。
+  - `video_url`：直接 URL 可选，必须是公网 HTTP/HTTPS、`mediakit://`、`vod://` 或 `tos://`；HTTP/HTTPS 禁止本机和内网地址。
   - `tool_version`：默认 `standard`，可选 `professional`。
   - `scene`：默认 `aigc`，仅标准版使用。
   - `resolution`：默认 `1080p`。
   - `fps`：可选；未传则不插帧。
-  - `bitrate_level`：默认 `medium`，可选 `low/medium/high`。
+  - `bitrate_level`：Batch 1 Provider 未接该字段，首版不传给 AI MediaKit，后续确认官方字段后再加。
   - `video_card_id`：默认沿用 source task 的视频卡；跨卡必须重新做权限校验。
-- [ ] 源视频解析规则：
+- [x] 源视频解析规则：
   - 如果给 `source_task_id`，先用权限函数确认当前用户能看该任务。
   - 优先使用已可公网访问且不需要登录的稳定 HTTP/HTTPS URL。
   - 如果源任务已有 `mediakit://`、`vod://`、`tos://`，可直接作为 `video_url`。
-  - 如果只有已转存的本地缓存文件，且服务端能读到文件、文件大小不超过本地上传限制，则先走 AI MediaKit 本地上传拿 `mediakit://`，再提交超分任务。
+  - 如果只有已转存的本地缓存文件，且服务端能读到文件、文件大小不超过当前服务端安全上传上限 512 MB，则先走 AI MediaKit 本地上传拿 `mediakit://`，再提交超分任务。
   - 如果只能拿到 Provider 临时 URL，必须确认是 HTTP/HTTPS，并提示可能过期；任务成功后仍要转存。
   - 如果只有本地相对路径且文件不存在、超出本地上传限制或上传失败，直接返回 400，不调用火山、不冻结点数。
-- [ ] 点数和预算：
+- [x] 点数和预算：
   - 在 `src/lib/pricing.ts` 增加 `calculateEnhanceVideoEstimatedCost(input)`。
   - 首版按保守规则冻结点数：以源视频 `duration` 为基础，结合官方“输出时长 × 计费换算系数 × 基准单价”口径估算；具体版本、分辨率、帧率和系数写入 `pricing_snapshot`，后续按官方账单调整。
-  - 同步在 `src/lib/pricing-client.ts` 增加前端估算函数。
+  - 前端估算函数留到 Batch 5 随 UI 一起接，避免现在出现无人调用的前端 API。
   - Provider 真实扣费未接入前，`provider_cost_status` 标记为 `estimated_by_rule` 或 `not_recorded`，不得显示成官方已确认成本。
-- [ ] 任务落库：
+- [x] 任务落库：
   - `provider='volcengine_mediakit'`
   - `model='enhance-video'`
   - `generation_mode='enhance_video'`
@@ -254,24 +255,33 @@ Batch 3：新增超分创建入口，先不改普通生成入口
   - `project_id`、`video_card_id`、`user_id`、`owner_user_id` 沿用权限确认后的目标。
   - `params_json` 写入非敏感参数、source task id、source provider、目标分辨率、fps、tool_version。
   - `provider_payload_json` 只存脱敏摘要，不存 API Key 或完整签名 URL。
-- [ ] Provider 提交：
+- [x] Provider 提交：
   - 先创建本地任务、冻结点数、记录成本估算。
   - 用本地 `task.id` 作为 AI MediaKit `client_token`，避免重复扣费。
   - 如需本地上传，先上传成功并取得 `mediakit://`，再进入火山超分提交；上传失败必须释放冻结点数或在冻结前失败。
   - 调 `createEnhanceVideoTask` 成功后写入 `provider_task_id`、`raw_create_response`、`local_status='submitted'`。
   - 成功后调用 `startTaskLocalization(taskId)`。
   - Provider 创建失败必须释放冻结点数、写 `local_status='failed'`、记录失败原因。
-- [ ] 可复用抽取：
-  - 如果实现中需要复用现有 `handleProviderFailure`，先把它从 `src/app/api/tasks/create/route.ts` 抽到 `src/lib/tasks/provider-failure.ts`。
-  - 抽取必须保持原 `/api/tasks/create` 行为不变，先用 smoke 验证失败返还路径。
-- [ ] 新建 `scripts/enhance-video-create-route-smoke.ts`：
-  - 未登录返回 401。
-  - 未配置 API Key 时不冻结点数。
-  - `resolution` 与 `resolution_limit` 同时传返回 400。
-  - 本地缓存文件可上传时会转成 `mediakit://`；不可上传或不存在时返回 400。
-  - mock Provider 成功时创建 `VideoTask`，provider/model/generation_mode/status 正确。
-  - mock Provider 失败时冻结点数被释放。
-- [ ] 验证命令：`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npm run lint`、`npm run build`。
+- [x] 可复用抽取：
+  - 本轮没有改动原 `/api/tasks/create`，避免把普通生成接口带入风险；失败返还逻辑按现有实现复制到专用 route。
+  - 后续如果还有第三个 Provider，再统一抽到 `src/lib/tasks/provider-failure.ts`。
+- [x] 新建 `scripts/enhance-video-create-route-smoke.ts`：
+  - 未传源、同时传 `source_task_id` 和 `video_url` 都会失败。
+  - `file://`、localhost、127.0.0.1、内网 HTTP URL 会失败。
+  - 成本估算返回 `AI MediaKit enhance-video`、`costSource='rule'`、`confidence='estimated'`。
+  - 标准版会带 `scene`，专业版不会把 `scene` 传给 Provider。
+- [x] 验证命令：`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npm run lint`、`npm run build`。
+
+### Review - 2026-06-27 Batch 3
+
+- 已新增 `/api/tasks/enhance-video/create`，普通生成入口 `/api/tasks/create` 和废弃 `/api/video/create` 均未改动。
+- 已新增 `src/lib/tasks/enhance-video-create.ts`，集中处理超分创建入参、URL 协议白名单、内网 URL 拒绝和 Provider payload 构造。
+- 已在 `src/lib/pricing.ts` 增加 `calculateEnhanceVideoEstimatedCost()`，按源视频时长、目标分辨率、标准/专业版、fps 规则冻结点数，并通过 `recordTaskCostEstimate()` 标记为规则预估。
+- 新 route 支持从成功源任务发起；优先使用源任务 `result_video_url`，不可用时可把 `/public/videos` 下 512 MB 内本地缓存上传成 `mediakit://` 后提交；上传失败发生在冻结前。
+- 新 route 会创建 `provider='volcengine_mediakit'`、`model='enhance-video'`、`generation_mode='enhance_video'` 的 `VideoTask`，写入项目、视频卡、用户、成本估算和脱敏 Provider payload。
+- Provider 创建成功后写入 `provider_task_id` 并启动 `startTaskLocalization()`；Provider 创建失败会释放用户点数或项目预算、写失败状态，并记录 ProviderApiRequest 失败。
+- 已验证：`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npx tsx scripts/provider-status-router-smoke.ts`、`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check` 均通过；`npm run build` 已列出 `/api/tasks/enhance-video/create`。
+- 未做真实 AI MediaKit 付费提交；没有 API Key、样本和明确付费授权前不做真实计费验证。
 
 Batch 4：类型和列表/详情兼容
 
