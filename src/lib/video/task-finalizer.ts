@@ -1,8 +1,7 @@
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage } from '../provider/error-message';
-import { getVideoTaskStatus } from '../provider/jimeng';
-import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from '../provider/volcengine-ip';
+import { getProviderTaskStatus } from '../provider/video-task-status';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
 import { settleProjectTaskBudget } from '../projects/budget';
@@ -205,14 +204,6 @@ async function recordOfficialProviderCharge(
 
     await recordProviderReportedCharge(tx, freshTask, charge, createdBy || null);
   });
-}
-
-async function getProviderStatusForTask(task: Pick<VideoTask, 'provider' | 'provider_task_id'>) {
-  if (!task.provider_task_id) throw new Error('missing provider_task_id');
-  if (task.provider === VOLCENGINE_IP_VIDEO_PROVIDER) {
-    return getVolcengineIpTaskStatus(task.provider_task_id);
-  }
-  return getVideoTaskStatus(task.provider_task_id);
 }
 
 export async function settleTask(
@@ -448,7 +439,7 @@ export async function finalizeVideoTaskStatus(
   }
 
   try {
-    const statusResult = await getProviderStatusForTask(task);
+    const statusResult = await getProviderTaskStatus(task);
 
     const updateData: Prisma.VideoTaskUncheckedUpdateInput = {
       provider_status: statusResult.provider_status,

@@ -41,6 +41,7 @@ export async function GET(
       where: { id: taskId },
       select: {
         id: true,
+        provider: true,
         local_video_path: true,
         result_video_url: true,
         result_last_frame_url: true,

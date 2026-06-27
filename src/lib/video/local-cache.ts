@@ -3,8 +3,7 @@ import { mkdir, rename, stat, unlink } from 'fs/promises';
 import path from 'path';
 import { once } from 'events';
 import { prisma } from '@/lib/prisma';
-import { getVideoTaskStatus } from '@/lib/provider/jimeng';
-import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from '@/lib/provider/volcengine-ip';
+import { refreshProviderTaskResultUrl } from '@/lib/provider/video-task-status';
 
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
 const PUBLIC_VIDEO_DIR = path.join(process.cwd(), 'public', 'videos');
@@ -125,24 +124,26 @@ async function updateTaskLocalPath(taskId: string, publicPath: string) {
 }
 
 async function refreshResultUrl(task: CacheableVideoTask) {
-  if (!task.provider_task_id) return null;
-  const refreshed = task.provider === VOLCENGINE_IP_VIDEO_PROVIDER
-    ? await getVolcengineIpTaskStatus(task.provider_task_id)
-    : await getVideoTaskStatus(task.provider_task_id);
-  if (!refreshed.result_video_url) return null;
+  const refreshed = await refreshProviderTaskResultUrl(task);
+  if (!refreshed) return null;
 
-  await prisma.videoTask.update({
-    where: { id: task.id },
-    data: {
-      result_video_url: refreshed.result_video_url,
-      result_last_frame_url: refreshed.result_last_frame_url || task.result_last_frame_url,
-      raw_status_response: JSON.stringify(refreshed.raw),
-    },
-  });
+  const updateData: {
+    result_video_url: string;
+    result_last_frame_url: string | null;
+    raw_status_response?: string;
+  } = {
+    result_video_url: refreshed.result_video_url,
+    result_last_frame_url: refreshed.result_last_frame_url,
+  };
+  if (refreshed.raw !== undefined) {
+    updateData.raw_status_response = JSON.stringify(refreshed.raw);
+  }
+
+  await prisma.videoTask.update({ where: { id: task.id }, data: updateData });
 
   return {
     result_video_url: refreshed.result_video_url,
-    result_last_frame_url: refreshed.result_last_frame_url || task.result_last_frame_url,
+    result_last_frame_url: refreshed.result_last_frame_url,
   };
 }
 
