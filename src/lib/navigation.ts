@@ -69,7 +69,7 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '创作',
     items: [
-      { label: '生成视频', href: '/generate', prefixMatch: true },
+      { label: '生成视频', href: '/generate', match: ['/generate'] },
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true },
       { label: '动画模板', href: '/templates', prefixMatch: true },
