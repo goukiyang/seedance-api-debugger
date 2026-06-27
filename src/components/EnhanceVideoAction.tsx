@@ -23,6 +23,8 @@ type EnhanceVideoActionProps = {
 
 type ConfigResponse = {
   aimediakit_enhance_video?: {
+    ready?: boolean;
+    enabled?: boolean;
     api_key_configured?: boolean;
   };
 };
@@ -51,7 +53,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     fetch('/api/config', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data: ConfigResponse) => {
-        if (!cancelled) setConfigured(data.aimediakit_enhance_video?.api_key_configured === true);
+        if (!cancelled) setConfigured(data.aimediakit_enhance_video?.ready === true);
       })
       .catch(() => {
         if (!cancelled) setConfigured(false);
@@ -75,7 +77,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
 
   const disabledReason = (() => {
     if (configured === null) return '正在检查 AI MediaKit 配置';
-    if (!configured) return '未配置 AI_MEDIAKIT_API_KEY';
+    if (!configured) return 'AI MediaKit 未启用或缺少 API Key';
     if (!task.video_card_id) return '当前任务没有视频卡，不能写入成本闭环';
     if (!task.duration) return '当前任务缺少视频时长，不能估算冻结点数';
     return '';

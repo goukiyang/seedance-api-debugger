@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
-import { isAiMediaKitConfigured } from '@/lib/provider/aimediakit-enhance-video';
+import { getAiMediaKitApiSettings, safeAiMediaKitConfigDto } from '@/lib/integrations/aimediakit';
 
 export async function GET() {
   const config = getProviderConfig();
+  const aiMediaKitConfig = safeAiMediaKitConfigDto(await getAiMediaKitApiSettings());
 
   return NextResponse.json({
     provider: 'seedance',
@@ -11,7 +12,10 @@ export async function GET() {
     model: config.model,
     api_key_configured: isApiKeyConfigured(),
     aimediakit_enhance_video: {
-      api_key_configured: isAiMediaKitConfigured(),
+      enabled: aiMediaKitConfig.enabled,
+      ready: aiMediaKitConfig.ready,
+      base_url: aiMediaKitConfig.base_url,
+      api_key_configured: aiMediaKitConfig.api_key_configured,
     },
   });
 }

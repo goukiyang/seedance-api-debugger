@@ -140,7 +140,7 @@ function readApiKey() {
   return (process.env.AI_MEDIAKIT_API_KEY || '').trim();
 }
 
-function cleanBaseUrl(value?: string) {
+function cleanBaseUrl(value?: string | null) {
   const trimmed = value?.trim();
   if (!trimmed) return AI_MEDIAKIT_DEFAULT_BASE_URL;
   return trimmed.replace(/\/+$/, '');
@@ -163,9 +163,19 @@ export function isAiMediaKitConfigured(): boolean {
   return Boolean(readApiKey());
 }
 
-function resolvePrivateConfig(options?: AiMediaKitRequestOptions) {
-  const apiKey = (options?.apiKey || readApiKey()).trim();
-  const baseUrl = cleanBaseUrl(options?.baseUrl || process.env.AI_MEDIAKIT_BASE_URL);
+async function resolvePrivateConfig(options?: AiMediaKitRequestOptions) {
+  let configuredApiKey = readApiKey();
+  let configuredBaseUrl = process.env.AI_MEDIAKIT_BASE_URL || '';
+
+  if (!options?.apiKey) {
+    const { getAiMediaKitApiSettings } = await import('@/lib/integrations/aimediakit');
+    const settings = await getAiMediaKitApiSettings();
+    configuredApiKey = settings.api_key || configuredApiKey;
+    configuredBaseUrl = settings.base_url || configuredBaseUrl;
+  }
+
+  const apiKey = (options?.apiKey || configuredApiKey).trim();
+  const baseUrl = cleanBaseUrl(options?.baseUrl || configuredBaseUrl);
 
   if (!apiKey) {
     throw new AiMediaKitConfigurationError(['api_key']);
@@ -637,7 +647,7 @@ export async function createEnhanceVideoTask(
   input: EnhanceVideoCreateInput,
   options?: AiMediaKitRequestOptions,
 ): Promise<EnhanceVideoCreateResponse> {
-  const config = resolvePrivateConfig(options);
+  const config = await resolvePrivateConfig(options);
   const payload = buildEnhanceVideoCreatePayload(input);
   const raw = await requestAiMediaKitJson(
     AI_MEDIAKIT_ENHANCE_VIDEO_PATH,
@@ -661,7 +671,7 @@ export async function getAiMediaKitTaskStatus(
     throw new Error('AI MediaKit 查询缺少任务 ID');
   }
 
-  const config = resolvePrivateConfig(options);
+  const config = await resolvePrivateConfig(options);
   const raw = await requestAiMediaKitJson(
     `${AI_MEDIAKIT_TASK_STATUS_PATH}/${encodeURIComponent(taskId)}`,
     { method: 'GET' },
@@ -695,7 +705,7 @@ export async function requestMediaUploadUrl(
   if (input.media_type) payload.media_type = input.media_type;
   if (input.client_token) payload.client_token = input.client_token;
 
-  const config = resolvePrivateConfig(options);
+  const config = await resolvePrivateConfig(options);
   const raw = await requestAiMediaKitJson(
     AI_MEDIAKIT_REQUEST_UPLOAD_PATH,
     {
