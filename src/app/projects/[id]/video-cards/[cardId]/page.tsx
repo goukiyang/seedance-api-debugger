@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import EnhanceVideoAction from '@/components/EnhanceVideoAction';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { formatAmountMicrosWithFixedCny } from '@/lib/costs/currency';
 import { displayUserName } from '@/lib/users/display';
@@ -47,7 +48,11 @@ interface VideoCardDetail {
 
 interface TaskItem {
   id: string;
+  provider: string;
+  generation_mode: string;
   prompt: string;
+  duration: number | null;
+  video_card_id: string | null;
   local_status: string;
   result_video_url: string | null;
   local_video_path: string | null;
@@ -339,6 +344,9 @@ export default function VideoCardDetailPage() {
                           标记最终版
                         </button>
                       </div>
+                    )}
+                    {canGenerate && (
+                      <EnhanceVideoAction task={task} />
                     )}
                   </div>
                 </article>

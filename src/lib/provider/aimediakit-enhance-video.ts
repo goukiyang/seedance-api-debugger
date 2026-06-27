@@ -588,7 +588,7 @@ export function parseEnhanceVideoStatusResponse(
     ]),
     error_message: formatAiMediaKitError(error) || redactOptionalText(normalizeProviderErrorMessage(pickNestedValue(raw, [['error']]))),
     error,
-    raw,
+    raw: redactAiMediaKitLog(raw),
   };
 }
 

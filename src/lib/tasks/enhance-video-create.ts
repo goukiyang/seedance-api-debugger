@@ -31,6 +31,11 @@ export type BuildEnhanceVideoProviderInputArgs = {
   clientToken: string;
 };
 
+export type EnhanceVideoSourceTaskGuardInput = {
+  provider?: string | null;
+  generation_mode?: string | null;
+};
+
 function cleanString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -116,6 +121,12 @@ export function normalizeEnhanceVideoCreateBody(input: unknown): NormalizedEnhan
     videoCardId: cleanString(body.video_card_id ?? body.videoCardId),
     idempotencyKey: cleanString(body.idempotency_key ?? body.idempotencyKey),
   };
+}
+
+export function assertEnhanceVideoSourceTaskAllowed(task: EnhanceVideoSourceTaskGuardInput) {
+  if (task.provider === 'volcengine_mediakit' || task.generation_mode === 'enhance_video') {
+    throw new Error('首版不支持对超分结果再次发起超分');
+  }
 }
 
 export function buildEnhanceVideoProviderInput(args: BuildEnhanceVideoProviderInputArgs): EnhanceVideoCreateInput {

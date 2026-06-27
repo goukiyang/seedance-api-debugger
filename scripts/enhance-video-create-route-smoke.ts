@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  assertEnhanceVideoSourceTaskAllowed,
   buildEnhanceVideoProviderInput,
   normalizeEnhanceVideoCreateBody,
 } from '@/lib/tasks/enhance-video-create';
@@ -69,6 +70,19 @@ async function main() {
   assert.equal(pricing.resolution, '1080p');
   assert.equal(pricing.toolVersion, 'professional');
   assert.ok(pricing.estimatedCost > 0);
+
+  assert.doesNotThrow(() => assertEnhanceVideoSourceTaskAllowed({
+    provider: 'seedance',
+    generation_mode: 'all_in_one_reference',
+  }));
+  assert.throws(
+    () => assertEnhanceVideoSourceTaskAllowed({ provider: 'volcengine_mediakit', generation_mode: 'enhance_video' }),
+    /不支持对超分结果再次发起超分/,
+  );
+  assert.throws(
+    () => assertEnhanceVideoSourceTaskAllowed({ provider: 'seedance', generation_mode: 'enhance_video' }),
+    /不支持对超分结果再次发起超分/,
+  );
 
   const providerInput = buildEnhanceVideoProviderInput({
     videoUrl: 'https://cdn.example.com/input.mp4',

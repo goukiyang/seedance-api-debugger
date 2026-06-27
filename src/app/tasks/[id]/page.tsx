@@ -12,10 +12,11 @@ import {
   RefreshCcw,
   RotateCcw,
 } from 'lucide-react';
-import type { GenerationMode } from '@/types';
-import { GENERATION_MODE_LABELS } from '@/types';
+import type { TaskGenerationMode } from '@/types';
+import { TASK_GENERATION_MODE_LABELS } from '@/types';
 import { ThumbnailCard } from '@/components/ThumbnailCard';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import EnhanceVideoAction from '@/components/EnhanceVideoAction';
 import {
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
@@ -29,7 +30,7 @@ interface VideoTask {
   id: string;
   provider: string;
   model: string;
-  generation_mode: GenerationMode;
+  generation_mode: TaskGenerationMode;
   prompt: string;
   source_type: string;
   source_label: string | null;
@@ -1189,22 +1190,29 @@ export default function TaskDetailPage() {
     }
   })();
 
+  const taskParams = parseJsonObject(task.params_json);
+  const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+  const enhanceSourceTaskId = pickStringValue(taskParams, ['source_task_id']);
+  const enhanceToolVersion = pickStringValue(taskParams, ['tool_version']);
+  const enhanceScene = pickStringValue(taskParams, ['scene']);
+  const enhanceSourceKind = pickStringValue(taskParams, ['source_video_kind']);
+  const enhanceFps = pickNumberValue(taskParams, ['fps']);
   const providerBilling = extractProviderBilling(task);
   const hasResultVideo = task.local_status === 'succeeded' && !!videoSrc;
   const isProcessing = ['submitted', 'running'].includes(task.local_status);
-  const modeLabel = GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
+  const modeLabel = TASK_GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
   const resolvedModeLabel = resolvedMode && resolvedMode !== task.generation_mode ? resolvedMode : null;
   const resultStateTitle = task.local_status === 'failed'
-    ? '生成失败'
+    ? (isEnhanceTask ? '超分失败' : '生成失败')
     : isProcessing
-      ? '生成中'
+      ? (isEnhanceTask ? '超分处理中' : '生成中')
       : hasResultVideo
-        ? '生成结果'
+        ? (isEnhanceTask ? '超分结果' : '生成结果')
         : '暂无结果';
   const resultDecisionBody = task.local_status === 'failed'
-    ? '这次没有产出可用视频，可以复用输入重新生成。'
+    ? (isEnhanceTask ? '这次没有产出可用增强视频，可以回到源任务重新发起。' : '这次没有产出可用视频，可以复用输入重新生成。')
     : isProcessing
-      ? '任务还在生成中，可以刷新状态或开启自动轮询。'
+      ? (isEnhanceTask ? '超分任务还在处理中，可以刷新状态或开启自动轮询。' : '任务还在生成中，可以刷新状态或开启自动轮询。')
       : hasResultVideo
         ? '先看结果，再决定保存、复制链接或复用输入继续调整。'
         : '暂时没有可播放链接，可以重新查询结果。';
@@ -1218,20 +1226,37 @@ export default function TaskDetailPage() {
     || (task.local_status === 'succeeded' && !task.local_video_path)
     || task.local_status === 'failed';
 
-  const parameterItems = [
-    { label: '模型', value: task.model || 'Seedance 2.0' },
-    { label: '模式', value: modeLabel },
-    { label: '比例', value: task.ratio || '-' },
-    { label: '时长', value: task.duration ? `${task.duration} 秒` : '-' },
-    { label: '分辨率', value: task.resolution || '-' },
-  ];
-  const advancedParameterItems = [
-    { label: '随机种子', value: task.seed === -1 ? '随机' : (task.seed ?? '-') },
-    { label: '音频', value: task.generate_audio ? '开启' : '关闭' },
-    { label: '尾帧', value: task.return_last_frame ? '返回' : '不返回' },
-    { label: '水印', value: task.watermark ? '开启' : '关闭' },
-    ...(resolvedModeLabel ? [{ label: 'Resolved 模式', value: resolvedModeLabel }] : []),
-  ];
+  const parameterItems = isEnhanceTask
+    ? [
+        { label: '模型', value: 'AI MediaKit enhance-video' },
+        { label: '模式', value: modeLabel },
+        { label: '工具版本', value: enhanceToolVersion === 'professional' ? '专业版' : '标准版' },
+        { label: '场景', value: enhanceScene || '-' },
+        { label: '时长', value: task.duration ? `${task.duration} 秒` : '-' },
+        { label: '目标分辨率', value: task.resolution || '-' },
+        { label: '帧率', value: enhanceFps ? `${enhanceFps} fps` : '不插帧' },
+        { label: '源任务', value: enhanceSourceTaskId ? shortId(enhanceSourceTaskId, 16) : '外部视频 URL' },
+      ]
+    : [
+        { label: '模型', value: task.model || 'Seedance 2.0' },
+        { label: '模式', value: modeLabel },
+        { label: '比例', value: task.ratio || '-' },
+        { label: '时长', value: task.duration ? `${task.duration} 秒` : '-' },
+        { label: '分辨率', value: task.resolution || '-' },
+      ];
+  const advancedParameterItems = isEnhanceTask
+    ? [
+        { label: 'Provider', value: task.provider },
+        { label: '源视频类型', value: enhanceSourceKind || '-' },
+        { label: 'Client Token', value: task.provider_client_request_id ? shortId(task.provider_client_request_id, 16) : '-' },
+      ]
+    : [
+        { label: '随机种子', value: task.seed === -1 ? '随机' : (task.seed ?? '-') },
+        { label: '音频', value: task.generate_audio ? '开启' : '关闭' },
+        { label: '尾帧', value: task.return_last_frame ? '返回' : '不返回' },
+        { label: '水印', value: task.watermark ? '开启' : '关闭' },
+        ...(resolvedModeLabel ? [{ label: 'Resolved 模式', value: resolvedModeLabel }] : []),
+      ];
 
   const officialCostMicros = task.provider_final_amount_micros ?? task.provider_official_amount_micros;
   const officialCostMinor = task.provider_final_amount_minor ?? task.provider_official_amount_minor;
@@ -1270,21 +1295,34 @@ export default function TaskDetailPage() {
           : shouldShowRefresh
             ? 'refresh'
             : 'reuse';
-  const inputChips = [
-    modeLabel,
-    task.ratio,
-    task.duration ? `${task.duration}s` : null,
-    task.resolution,
-    referenceImages.length > 0 ? `${referenceImages.length} 张参考图` : null,
-  ].filter(Boolean);
-  const referenceSummaryItems = [
-    referenceImages.length > 0 ? `参考图 ${referenceImages.length}` : null,
-    frameImages.length > 0 ? `多帧 ${frameImages.length}` : null,
-    task.first_frame_url ? '首帧' : null,
-    task.last_frame_url ? '尾帧' : null,
-    referenceVideos.length > 0 ? `参考视频 ${referenceVideos.length}` : null,
-    referenceAudios.length > 0 ? `参考音频 ${referenceAudios.length}` : null,
-  ].filter(Boolean);
+  const inputChips = isEnhanceTask
+    ? [
+        modeLabel,
+        enhanceToolVersion === 'professional' ? '专业版' : '标准版',
+        task.resolution,
+        enhanceFps ? `${enhanceFps}fps` : null,
+        task.duration ? `${task.duration}s` : null,
+      ].filter(Boolean)
+    : [
+        modeLabel,
+        task.ratio,
+        task.duration ? `${task.duration}s` : null,
+        task.resolution,
+        referenceImages.length > 0 ? `${referenceImages.length} 张参考图` : null,
+      ].filter(Boolean);
+  const referenceSummaryItems = isEnhanceTask
+    ? [
+        enhanceSourceTaskId ? `源任务 ${shortId(enhanceSourceTaskId, 16)}` : '外部视频 URL',
+        enhanceSourceKind ? `源类型 ${enhanceSourceKind}` : null,
+      ].filter(Boolean)
+    : [
+        referenceImages.length > 0 ? `参考图 ${referenceImages.length}` : null,
+        frameImages.length > 0 ? `多帧 ${frameImages.length}` : null,
+        task.first_frame_url ? '首帧' : null,
+        task.last_frame_url ? '尾帧' : null,
+        referenceVideos.length > 0 ? `参考视频 ${referenceVideos.length}` : null,
+        referenceAudios.length > 0 ? `参考音频 ${referenceAudios.length}` : null,
+      ].filter(Boolean);
   const taskOwner = task.owner || task.submitted_user || task.user || null;
   const taskSourceText = taskSourceLabel(task);
   const templateLabel = task.generation_template
@@ -1519,6 +1557,8 @@ export default function TaskDetailPage() {
                   <p className={downloadError ? 'task-download-error' : ''}>{downloadProgress}</p>
                 </div>
               )}
+
+              <EnhanceVideoAction task={task} />
             </section>
 
             <aside className="task-detail-card task-decision-panel">
@@ -1551,6 +1591,12 @@ export default function TaskDetailPage() {
                   <div><span>Prompt 编辑</span><strong>{task.prompt_user_edited ? '用户改过' : '沿用方案'}</strong></div>
                 )}
                 <div><span>输入</span><strong>{inputChips.join(' · ') || '无参数记录'}</strong></div>
+                {isEnhanceTask && (
+                  <div>
+                    <span>源任务</span>
+                    <strong>{enhanceSourceTaskId ? shortId(enhanceSourceTaskId, 16) : '外部视频 URL'}</strong>
+                  </div>
+                )}
                 <div>
                   <span>{taskCompletedExactLabel}</span>
                   <strong title={taskCompletedTime.absolute}>{taskCompletedTime.absolute}</strong>

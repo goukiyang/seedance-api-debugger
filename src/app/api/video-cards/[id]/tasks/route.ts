@@ -36,6 +36,7 @@ export async function GET(
         take: limit,
         select: {
           id: true,
+          provider: true,
           provider_task_id: true,
           prompt: true,
           generation_mode: true,

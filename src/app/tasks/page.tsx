@@ -8,14 +8,15 @@ import PaginationControls from '@/components/PaginationControls';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
-import type { GenerationMode } from '@/types';
-import { GENERATION_MODE_LABELS } from '@/types';
+import type { TaskGenerationMode } from '@/types';
+import { TASK_GENERATION_MODE_LABELS } from '@/types';
 
 interface Task {
   id: string;
+  provider: string;
   provider_task_id: string | null;
   prompt: string;
-  generation_mode: GenerationMode;
+  generation_mode: TaskGenerationMode;
   ratio: string | null;
   duration: number | null;
   resolution: string | null;
@@ -98,9 +99,21 @@ function truncatePrompt(prompt: string, maxLen = 140): string {
 }
 
 function taskReferenceCount(task: Task): number {
+  if (task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit') return 0;
   const ids = parseJsonArray(task.reference_image_ids);
   if (ids.length > 0) return ids.length;
   return parseJsonArray(task.reference_image_urls).length;
+}
+
+function taskParameterText(task: Task) {
+  if (task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit') {
+    return [
+      task.resolution || '-',
+      task.duration ? `${task.duration}s` : '-',
+      'AI MediaKit',
+    ].join(' · ');
+  }
+  return `${task.resolution || '-'} · ${task.duration ? `${task.duration}s` : '-'} · ${task.ratio || '-'}`;
 }
 
 function taskCostText(task: Task): string {
@@ -375,7 +388,7 @@ export default function TasksPage() {
             <div className="tasks-card-list">
               {tasks.map((task) => {
                 const referenceCount = taskReferenceCount(task);
-                const modeLabel = GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
+                const modeLabel = TASK_GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
                 const downloadable = isTaskDownloadable(task);
                 return (
                   <article key={task.id} className="tasks-card">
@@ -417,7 +430,7 @@ export default function TasksPage() {
                         </div>
                         <div>
                           <span>参数</span>
-                          <strong>{task.resolution || '-'} · {task.duration ? `${task.duration}s` : '-'} · {task.ratio || '-'}</strong>
+                          <strong>{taskParameterText(task)}</strong>
                         </div>
                         <div>
                           <span>参考图</span>

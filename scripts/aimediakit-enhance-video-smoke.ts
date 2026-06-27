@@ -166,6 +166,7 @@ async function main() {
   assert.equal(completed.frames_per_second, 60);
   assert.equal(completed.resolution, '1080p');
   assert.equal(completed.tool_version, 'professional');
+  assert.equal(JSON.stringify(completed.raw).includes('auth_key=result-secret'), false);
 
   for (const status of ['completed', 'succeeded', 'success', 'complete', 'done', 'finished']) {
     assert.equal(mapAiMediaKitTaskStatus(status), 'succeeded', `${status} should map to succeeded`);
