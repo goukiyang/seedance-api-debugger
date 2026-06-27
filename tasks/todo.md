@@ -346,6 +346,16 @@ Batch 5：前端最小入口
 - 已补 smoke 断言：超分源任务拒绝、状态 raw 脱敏都进入 `scripts/enhance-video-create-route-smoke.ts` 和 `scripts/aimediakit-enhance-video-smoke.ts`。
 - 已复跑：`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npx tsx scripts/provider-status-router-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
 
+### Review - 2026-06-27 API 设置入口返修
+
+- 漏点确认：上一版只让 AI MediaKit Provider 读取 `.env`，并在 `/api/config` 暴露“是否配置”的只读状态，没有在 `/admin/integrations` 提供 API Key 输入、保存和清除入口。
+- 根因：实现时把“后端能读到 API Key”误判成“管理员能在前端配置 API Key”，没有把 Provider 接入的验收面拆成“配置入口、保存 API、真实调用读取、前端按钮状态”四层。
+- 已新增 `src/lib/integrations/aimediakit.ts`，用 `PlatformSetting` 保存 AI MediaKit API 配置，支持 `.env` fallback、启用开关、Base URL、API Key 保存/清除和安全 DTO。
+- 已新增 `GET/PUT /api/admin/integrations/aimediakit`，仅管理员可读写；API Key 不回显，操作写入 `OperationLog`。
+- 已在 `/admin/integrations` 增加“AI MediaKit 视频超分 API”配置卡，包含状态卡、启用开关、API 地址、API Key 密码输入、清除当前 API Key 和保存按钮。
+- 已让 `/api/tasks/enhance-video/create`、AI MediaKit Provider 状态查询和 `/api/config` 统一读取后台保存配置；前端“超分/增强”按钮只在配置 ready 时可提交。
+- 已新增 `scripts/aimediakit-admin-settings-smoke.ts`，覆盖配置 patch、脱敏 DTO、route 存在和前端输入入口存在。
+
 Batch 6：真实链路验证，默认先不付费
 
 - [ ] 非付费验证：

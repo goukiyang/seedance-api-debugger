@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-27 - Provider 接入必须同时落配置入口和真实读取路径
+
+- 问题/背景：AI MediaKit 视频超分首版已接 Provider、创建接口、任务展示和“超分/增强”入口，但用户在 API 设置页看不到 AI MediaKit API Key 输入入口。
+- 诱因/根因：实现时只检查了服务端 `.env` 读取和 `/api/config` 的只读配置状态，把“后端有配置能力”误判为“管理员能在前端完成配置”；验收清单没有单独列出“管理员配置页输入入口、保存 API、真实调用读取后台配置”。
+- 当时思路：复用已有 `/admin/integrations` 和 `PlatformSetting` 模式，不新造配置体系；API Key 只允许服务端保存和清除，不回显明文。
+- 改动位置：`src/lib/integrations/aimediakit.ts`、`src/app/api/admin/integrations/aimediakit/route.ts`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`src/lib/provider/aimediakit-enhance-video.ts`、`src/app/api/tasks/enhance-video/create/route.ts`、`src/app/api/config/route.ts`。
+- 怎么改：新增 AI MediaKit 管理员配置卡和 GET/PUT API；Provider 调用优先读后台保存设置，没有设置时 fallback 到 `.env`；普通前端只拿 ready/configured 状态，不接触 API Key。
+- 验证结果：`npx tsx scripts/aimediakit-admin-settings-smoke.ts`、`npx tsx scripts/aimediakit-enhance-video-smoke.ts`、`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npx tsc --noEmit --pretty false` 通过。
+- 可复用经验：任何新增付费 Provider 的“可真实使用首版”必须同时验收四件事：管理员配置入口、配置保存 API、真实 Provider 调用读取后台配置、普通前端按钮状态同步；只支持 `.env` 或只展示配置状态都不算闭环。
+
 ## 2026-06-15 - LLM 功能不能只落 UI 骨架
 
 - 问题/背景：模板模块页面已有 `Module Builder` 面板和 Musk API 基础地址/模型配置，但用户继续反馈“llm 的需求做了么，我没看见对应的 ui”等缺口。

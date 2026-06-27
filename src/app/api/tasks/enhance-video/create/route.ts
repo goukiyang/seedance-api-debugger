@@ -23,11 +23,15 @@ import {
 } from '@/lib/costs/ledger';
 import {
   createEnhanceVideoTask,
-  isAiMediaKitConfigured,
   redactAiMediaKitLog,
   requestMediaUploadUrl,
   uploadMediaToAiMediaKit,
 } from '@/lib/provider/aimediakit-enhance-video';
+import {
+  aiMediaKitSettingsToRequestOptions,
+  getAiMediaKitApiSettings,
+  isAiMediaKitApiReady,
+} from '@/lib/integrations/aimediakit';
 import {
   assertEnhanceVideoSourceTaskAllowed,
   buildEnhanceVideoProviderInput,
@@ -82,7 +86,10 @@ function publicVideoFilePath(localVideoPath: string) {
   return absolutePath;
 }
 
-async function uploadLocalVideoForEnhance(task: SourceTask) {
+async function uploadLocalVideoForEnhance(
+  task: SourceTask,
+  providerOptions: { apiKey?: string; baseUrl?: string },
+) {
   if (!task.local_video_path) return null;
 
   const filePath = publicVideoFilePath(task.local_video_path);
@@ -101,7 +108,7 @@ async function uploadLocalVideoForEnhance(task: SourceTask) {
     content_length: info.size,
     media_type: 'video',
     client_token: `enhance-upload:${task.id}`,
-  });
+  }, providerOptions);
   const file = await readFile(filePath);
   await uploadMediaToAiMediaKit({
     upload_url: uploadTicket.upload_url,
@@ -113,7 +120,10 @@ async function uploadLocalVideoForEnhance(task: SourceTask) {
   return uploadTicket.file_id;
 }
 
-async function resolveSourceVideoUrl(task: SourceTask) {
+async function resolveSourceVideoUrl(
+  task: SourceTask,
+  providerOptions: { apiKey?: string; baseUrl?: string },
+) {
   if (task.result_video_url) {
     try {
       return validateEnhanceVideoUrl(task.result_video_url);
@@ -122,7 +132,7 @@ async function resolveSourceVideoUrl(task: SourceTask) {
     }
   }
 
-  const uploaded = await uploadLocalVideoForEnhance(task);
+  const uploaded = await uploadLocalVideoForEnhance(task, providerOptions);
   if (uploaded) return uploaded;
 
   throw new Error('源任务没有可用于超分的视频 URL 或本地缓存文件');
@@ -217,9 +227,11 @@ export async function POST(request: NextRequest) {
   if (user.status !== 'active') {
     return errorJson('账号已被禁用，无法创建超分任务', 403);
   }
-  if (!isAiMediaKitConfigured()) {
-    return errorJson('请先配置 AI_MEDIAKIT_API_KEY', 500);
+  const aiMediaKitSettings = await getAiMediaKitApiSettings();
+  if (!isAiMediaKitApiReady(aiMediaKitSettings)) {
+    return errorJson('请先到 API 设置启用 AI MediaKit 并保存 API Key', 500);
   }
+  const aiMediaKitRequestOptions = aiMediaKitSettingsToRequestOptions(aiMediaKitSettings);
 
   let body;
   try {
@@ -340,7 +352,7 @@ export async function POST(request: NextRequest) {
 
   if (sourceTask) {
     try {
-      sourceVideoUrl = await resolveSourceVideoUrl(sourceTask);
+      sourceVideoUrl = await resolveSourceVideoUrl(sourceTask, aiMediaKitRequestOptions);
     } catch (error) {
       return jsonError(error instanceof Error ? error.message : '源视频不可用', 400, 'SOURCE_VIDEO_UNAVAILABLE');
     }
@@ -498,7 +510,7 @@ export async function POST(request: NextRequest) {
     });
     providerRequestId = providerRequest.id;
 
-    const providerResult = await createEnhanceVideoTask(providerInput);
+    const providerResult = await createEnhanceVideoTask(providerInput, aiMediaKitRequestOptions);
     await prisma.videoTask.update({
       where: { id: createdTask.id },
       data: {

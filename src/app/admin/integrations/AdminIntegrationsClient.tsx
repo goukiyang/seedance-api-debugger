@@ -62,6 +62,18 @@ type VolcengineIpConfig = {
   missing: Array<'api_key' | 'model'>;
 };
 
+type AiMediaKitConfig = {
+  enabled: boolean;
+  ready: boolean;
+  provider: 'aimediakit_enhance_video';
+  base_url: string;
+  enhance_video_path: string;
+  task_status_path: string;
+  request_upload_path: string;
+  api_key_configured: boolean;
+  missing: Array<'api_key'>;
+};
+
 type SubmitState = {
   type: 'success' | 'error';
   message: string;
@@ -116,6 +128,18 @@ const EMPTY_VOLCENGINE_IP_CONFIG: VolcengineIpConfig = {
   missing: ['api_key', 'model'],
 };
 
+const EMPTY_AIMEDIAKIT_CONFIG: AiMediaKitConfig = {
+  enabled: false,
+  ready: false,
+  provider: 'aimediakit_enhance_video',
+  base_url: 'https://mediakit.cn-beijing.volces.com',
+  enhance_video_path: '/api/v1/tools/enhance-video',
+  task_status_path: '/api/v1/tasks/{task_id}',
+  request_upload_path: '/api/v1/tools-sync/request-media-upload-url',
+  api_key_configured: false,
+  missing: ['api_key'],
+};
+
 function selectorLabel(type: UserSelectorType) {
   if (type === 'id') return '用户 ID';
   if (type === 'username') return '用户名';
@@ -133,11 +157,13 @@ export default function AdminIntegrationsClient() {
   const [muskConfig, setMuskConfig] = useState<MuskConfig>(EMPTY_MUSK_CONFIG);
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
   const [volcengineConfig, setVolcengineConfig] = useState<VolcengineIpConfig>(EMPTY_VOLCENGINE_IP_CONFIG);
+  const [aiMediaKitConfig, setAiMediaKitConfig] = useState<AiMediaKitConfig>(EMPTY_AIMEDIAKIT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [muskSaving, setMuskSaving] = useState(false);
   const [imageSaving, setImageSaving] = useState(false);
   const [volcengineSaving, setVolcengineSaving] = useState(false);
+  const [aiMediaKitSaving, setAiMediaKitSaving] = useState(false);
   const [token, setToken] = useState('');
   const [clearToken, setClearToken] = useState(false);
   const [muskApiKey, setMuskApiKey] = useState('');
@@ -146,6 +172,8 @@ export default function AdminIntegrationsClient() {
   const [clearImageApiKey, setClearImageApiKey] = useState(false);
   const [volcengineApiKey, setVolcengineApiKey] = useState('');
   const [clearVolcengineApiKey, setClearVolcengineApiKey] = useState(false);
+  const [aiMediaKitApiKey, setAiMediaKitApiKey] = useState('');
+  const [clearAiMediaKitApiKey, setClearAiMediaKitApiKey] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
 
   const statusText = useMemo(() => {
@@ -183,19 +211,29 @@ export default function AdminIntegrationsClient() {
     return '配置未就绪';
   }, [volcengineConfig]);
 
+  const aiMediaKitStatusText = useMemo(() => {
+    if (aiMediaKitConfig.ready) return '已启用';
+    if (!aiMediaKitConfig.enabled) return '未启用';
+    if (!aiMediaKitConfig.base_url) return '缺少 API 地址';
+    if (!aiMediaKitConfig.api_key_configured) return '缺少 API Key';
+    return '配置未就绪';
+  }, [aiMediaKitConfig]);
+
   const loadConfig = async () => {
     try {
-      const [codexRes, muskRes, imageRes, volcengineRes] = await Promise.all([
+      const [codexRes, muskRes, imageRes, volcengineRes, aiMediaKitRes] = await Promise.all([
         fetch('/api/admin/integrations/codex', { cache: 'no-store' }),
         fetch('/api/admin/integrations/musk', { cache: 'no-store' }),
         fetch('/api/admin/integrations/image-generation', { cache: 'no-store' }),
         fetch('/api/admin/integrations/volcengine-ip', { cache: 'no-store' }),
+        fetch('/api/admin/integrations/aimediakit', { cache: 'no-store' }),
       ]);
-      const [codexData, muskData, imageData, volcengineData] = await Promise.all([
+      const [codexData, muskData, imageData, volcengineData, aiMediaKitData] = await Promise.all([
         codexRes.json(),
         muskRes.json(),
         imageRes.json(),
         volcengineRes.json(),
+        aiMediaKitRes.json(),
       ]);
 
       if (!codexRes.ok) {
@@ -214,10 +252,15 @@ export default function AdminIntegrationsClient() {
         setSubmitState({ type: 'error', message: volcengineData.error || '读取火山 IP 生成配置失败' });
         return;
       }
+      if (!aiMediaKitRes.ok) {
+        setSubmitState({ type: 'error', message: aiMediaKitData.error || '读取 AI MediaKit 配置失败' });
+        return;
+      }
       setConfig(codexData.config || EMPTY_CONFIG);
       setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
       setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
+      setAiMediaKitConfig(aiMediaKitData.config || EMPTY_AIMEDIAKIT_CONFIG);
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
@@ -368,6 +411,38 @@ export default function AdminIntegrationsClient() {
     }
   };
 
+  const saveAiMediaKitConfig = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAiMediaKitSaving(true);
+    setSubmitState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/aimediakit', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: aiMediaKitConfig.enabled,
+          base_url: aiMediaKitConfig.base_url,
+          api_key: aiMediaKitApiKey,
+          clear_api_key: clearAiMediaKitApiKey,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+        return;
+      }
+      setAiMediaKitConfig(data.config || aiMediaKitConfig);
+      setAiMediaKitApiKey('');
+      setClearAiMediaKitApiKey(false);
+      setSubmitState({ type: 'success', message: 'AI MediaKit 视频超分 API 配置已保存到后台配置。' });
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setAiMediaKitSaving(false);
+    }
+  };
+
   const updateSelector = (patch: Partial<CodexConfig['user_selector']>) => {
     setConfig((prev) => ({
       ...prev,
@@ -384,7 +459,7 @@ export default function AdminIntegrationsClient() {
         <PageBanner
           eyebrow="管理后台"
           title="API 设置"
-          description="统一维护火山 IP 生成、Musk API、图形生成 API、Codex API 和外部工具调用 sd2 的后端配置。"
+          description="统一维护火山 IP 生成、AI MediaKit 超分、Musk API、图形生成 API、Codex API 和外部工具调用 sd2 的后端配置。"
         />
         <div className="card">
           <p className="text-gray">正在读取配置...</p>
@@ -398,7 +473,7 @@ export default function AdminIntegrationsClient() {
       <PageBanner
         eyebrow="管理后台"
         title="API 设置"
-        description="在这里维护火山 IP 生成、Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
+        description="在这里维护火山 IP 生成、AI MediaKit 超分、Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
       />
 
       <div className="stats-grid">
@@ -432,6 +507,11 @@ export default function AdminIntegrationsClient() {
           <strong className="stat-value">{volcengineStatusText}</strong>
           <span className="stat-sub">{volcengineConfig.default_model || '未设置 Model ID'} · {volcengineConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}</span>
         </div>
+        <div className="stat-card">
+          <span className="stat-label">AI MediaKit 超分</span>
+          <strong className="stat-value">{aiMediaKitStatusText}</strong>
+          <span className="stat-sub">{aiMediaKitConfig.base_url || '未设置 API 地址'} · {aiMediaKitConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}</span>
+        </div>
       </div>
 
       {submitState && (
@@ -439,6 +519,94 @@ export default function AdminIntegrationsClient() {
           {submitState.message}
         </div>
       )}
+
+      <form id="aimediakit-enhance-video" className="card codex-config-form" onSubmit={saveAiMediaKitConfig}>
+        <div className="codex-config-head">
+          <div>
+            <h2 className="section-title mb-0">AI MediaKit 视频超分 API</h2>
+            <p className="text-gray text-sm mt-2">
+              保存视频超分/画质增强所需的 AI MediaKit API Key。API Key 只提交到服务端保存，页面和接口不会回显明文。
+            </p>
+          </div>
+          <label className="toggle-switch" aria-label="启用 AI MediaKit 视频超分 API">
+            <input
+              type="checkbox"
+              checked={aiMediaKitConfig.enabled}
+              onChange={(event) => setAiMediaKitConfig((prev) => ({ ...prev, enabled: event.target.checked }))}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div className="codex-config-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="aimediakit-base-url">API 地址</label>
+            <input
+              id="aimediakit-base-url"
+              className="input"
+              value={aiMediaKitConfig.base_url}
+              onChange={(event) => setAiMediaKitConfig((prev) => ({ ...prev, base_url: event.target.value }))}
+              placeholder="https://mediakit.cn-beijing.volces.com"
+              autoComplete="off"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="aimediakit-api-key">API Key</label>
+            <input
+              id="aimediakit-api-key"
+              className="input"
+              type="password"
+              value={aiMediaKitApiKey}
+              onChange={(event) => {
+                setAiMediaKitApiKey(event.target.value);
+                if (event.target.value.trim()) setClearAiMediaKitApiKey(false);
+              }}
+              placeholder={aiMediaKitConfig.api_key_configured ? '当前已设置，留空不变' : '输入 AI MediaKit API Key'}
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+
+        <div className="codex-config-status">
+          <div>
+            <span className="info-label">当前状态</span>
+            <strong>{aiMediaKitStatusText}</strong>
+          </div>
+          <div>
+            <span className="info-label">提交任务</span>
+            <strong>{aiMediaKitConfig.enhance_video_path}</strong>
+          </div>
+          <div>
+            <span className="info-label">查询任务</span>
+            <strong>{aiMediaKitConfig.task_status_path}</strong>
+          </div>
+          <div>
+            <span className="info-label">本地上传</span>
+            <strong>{aiMediaKitConfig.request_upload_path}</strong>
+          </div>
+          <div>
+            <span className="info-label">API Key</span>
+            <strong>{aiMediaKitConfig.api_key_configured ? '已设置' : '未设置'}</strong>
+          </div>
+        </div>
+
+        <div className="codex-config-actions">
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearAiMediaKitApiKey}
+              disabled={!aiMediaKitConfig.api_key_configured || Boolean(aiMediaKitApiKey.trim())}
+              onChange={(event) => setClearAiMediaKitApiKey(event.target.checked)}
+            />
+            清除当前 API Key
+          </label>
+          <button className="btn btn-primary" type="submit" disabled={aiMediaKitSaving}>
+            {aiMediaKitSaving ? '正在保存' : '保存 AI MediaKit 视频超分 API'}
+          </button>
+        </div>
+      </form>
 
       <form id="volcengine-ip" className="card codex-config-form" onSubmit={saveVolcengineConfig}>
         <div className="codex-config-head">
