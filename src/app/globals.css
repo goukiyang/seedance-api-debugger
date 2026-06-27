@@ -3136,6 +3136,252 @@ a {
   margin-top: 12px;
 }
 
+.enhance-video-page {
+  display: grid;
+  gap: 16px;
+}
+
+.enhance-video-hero {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 24px;
+}
+
+.enhance-video-eyebrow {
+  color: #2563eb;
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.enhance-video-hero h1 {
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.enhance-video-hero p {
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+.enhance-video-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.enhance-video-hero-actions .btn {
+  gap: 8px;
+}
+
+.enhance-video-config,
+.enhance-video-error,
+.enhance-video-list {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.enhance-video-config {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.enhance-video-config.is-ready {
+  border-color: #bbf7d0;
+  color: #047857;
+}
+
+.enhance-video-config.is-blocked {
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.enhance-video-config strong,
+.enhance-video-config span {
+  display: block;
+}
+
+.enhance-video-config strong {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.enhance-video-config span {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.enhance-video-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.enhance-video-section-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.enhance-video-section-head h2 {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.25;
+  margin: 0 0 4px;
+}
+
+.enhance-video-section-head span,
+.enhance-video-section-head a {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.enhance-video-section-head a {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.enhance-video-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.enhance-video-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 148px minmax(0, 1fr);
+  padding: 12px;
+}
+
+.enhance-video-card .task-video-thumbnail {
+  width: 100%;
+}
+
+.enhance-video-card-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.enhance-video-card-title {
+  color: #0f172a;
+  display: -webkit-box;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.enhance-video-card-body span,
+.enhance-video-card-body small {
+  color: #64748b;
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.enhance-video-card .enhance-video-action {
+  margin-top: 0;
+}
+
+.enhance-video-empty {
+  align-items: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  color: #64748b;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding: 20px;
+}
+
+.enhance-video-empty strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.enhance-video-empty div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.enhance-video-blocked-list {
+  display: grid;
+  gap: 8px;
+}
+
+.enhance-video-blocked-item {
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.enhance-video-blocked-item span {
+  color: #334155;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enhance-video-blocked-item strong {
+  color: #64748b;
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .enhance-video-hero,
+  .enhance-video-section-head,
+  .enhance-video-card {
+    align-items: stretch;
+    flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .enhance-video-hero-actions,
+  .enhance-video-section-head {
+    justify-content: flex-start;
+  }
+
+  .enhance-video-hero-actions .btn {
+    width: 100%;
+  }
+}
+
 .task-prompt-preview {
   background: #f8fafc;
   border: 1px solid #e5e7eb;

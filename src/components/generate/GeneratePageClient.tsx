@@ -189,6 +189,7 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     titleAccent: '视频',
     subtitle: '上传参考图，描述你想生成的画面，Seedance 2.0 帮你实现',
     heroLinks: [
+      { href: '/generate/enhance', label: '视频超分' },
       { href: '/projects', label: '查看我的项目' },
       { href: '/generate/ip', label: 'IP生成' },
     ],
@@ -201,6 +202,7 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     subtitle: '保留普通生成页完整工作流，提交时走火山官方授权 IP 动画接口',
     heroLinks: [
       { href: '/generate', label: '普通生成' },
+      { href: '/generate/enhance', label: '视频超分' },
       { href: '/projects', label: '查看我的项目' },
     ],
     modelLabel: '火山 IP 动画',

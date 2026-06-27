@@ -23,6 +23,10 @@ export default async function DashboardPage() {
             <strong>生成视频</strong>
             <span>进入现有完整生成页面，保留当前可用的任务创建与最近任务能力。</span>
           </Link>
+          <Link href="/generate/enhance" className="shell-link-card">
+            <strong>视频超分</strong>
+            <span>选择已成功的视频，创建 AI MediaKit 超分任务。</span>
+          </Link>
           <Link href="/projects" className="shell-link-card">
             <strong>我的项目</strong>
             <span>创建项目、查看参与项目，并从项目空间进入生成内容。</span>

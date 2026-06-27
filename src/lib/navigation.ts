@@ -24,6 +24,7 @@ export const shellRoutes = [
   '/collections',
   '/cutout',
   '/tools/ultimate-canvas',
+  '/generate/enhance',
   '/admin',
   '/admin/projects',
   '/admin/outputs',
@@ -44,6 +45,7 @@ const shellRoutePrefixes = [
   '/templates',
   '/template-generate',
   '/tools',
+  '/generate/enhance',
   '/admin/users',
   '/admin/outputs',
   '/admin/costs',
@@ -54,6 +56,7 @@ const shellRoutePrefixes = [
 
 export const topbarQuickItems: NavItem[] = [
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'] },
+  { label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true },
   { label: '模板', href: '/templates', match: ['/templates', '/template-generate'], prefixMatch: true },
   { label: '项目', href: '/projects', match: ['/projects', '/tasks', '/assets', '/collections'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
@@ -67,6 +70,7 @@ export const userNavGroups: NavGroup[] = [
     title: '创作',
     items: [
       { label: '生成视频', href: '/generate', prefixMatch: true },
+      { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true },
       { label: '动画模板', href: '/templates', prefixMatch: true },
       { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'] },

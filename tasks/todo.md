@@ -37,6 +37,7 @@ Review：已上线到生产 BUILD_ID `9dEA89njqrKrwgpurV0vr`。`youdoo-sites bui
 
 - [x] 确认 live 工作树是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，当前分支 `codex/v12-full-todo` 与 `origin/codex/v12-full-todo` 完全一致。
 - [x] 确认线上已包含后台配置入口、AI MediaKit 管理 API、超分创建 API、Provider 状态分发、任务详情/视频卡超分入口。
+- [x] 2026-06-28 返修入口：新增 `/generate/enhance` 视频超分直达页，生成页顶部、侧边栏和控制台都能进入；页面直接列出可超分的成功视频，并复用现有超分创建组件。
 - [ ] 在 `/admin/integrations` 或 `/admin/integrations/aimediakit` 录入真实 AI MediaKit API Key；密钥只走后台输入框，不写入聊天、todo、日志或截图。
 - [ ] 录入后确认公网 `/api/config` 返回 `aimediakit_enhance_video.ready=true`、`api_key_configured=true`，且响应中不出现 API Key 明文。
 - [ ] 准备一条已成功生成、可公网访问、时长较短的视频作为源任务；优先用已有成功任务，避免为了测试先额外生成视频。
