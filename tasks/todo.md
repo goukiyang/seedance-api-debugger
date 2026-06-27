@@ -31,6 +31,21 @@ Review：已上线到生产 BUILD_ID `J8JDIEkiAV5n3U6MLNE8_`。公网 `/login` 2
 
 Review：已上线到生产 BUILD_ID `9dEA89njqrKrwgpurV0vr`。`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2` 均通过；本地和公网 `/api/config` 返回 `aimediakit_enhance_video.enabled=false`、`ready=false`、`api_key_configured=false`，说明入口已上线但尚未配置 API Key；公网 `/login` 200，`/api/admin/integrations/aimediakit` 未登录返回 401，`/admin/integrations/aimediakit` 未登录跳转登录页；生产 `_next/static/9dEA89njqrKrwgpurV0vr/_buildManifest.js` 200，生产包包含后台整合页、AI MediaKit 配置页、管理员配置 API 和超分创建 API；跨健康守护周期复查后 launchd `runs=3` 未继续增长。真实付费超分任务未执行，原因是还未录入 AI MediaKit API Key、未确认资源包/余额，也未获得本轮付费调用授权。
 
+## 2026-06-27 AI MediaKit 视频超分闭环测试准备
+
+目标：把线上超分链路从“代码和入口已上线”推进到“真实 Key、真实任务、真实结果、点数结算、页面回看”闭环。
+
+- [x] 确认 live 工作树是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，当前分支 `codex/v12-full-todo` 与 `origin/codex/v12-full-todo` 完全一致。
+- [x] 确认线上已包含后台配置入口、AI MediaKit 管理 API、超分创建 API、Provider 状态分发、任务详情/视频卡超分入口。
+- [ ] 在 `/admin/integrations` 或 `/admin/integrations/aimediakit` 录入真实 AI MediaKit API Key；密钥只走后台输入框，不写入聊天、todo、日志或截图。
+- [ ] 录入后确认公网 `/api/config` 返回 `aimediakit_enhance_video.ready=true`、`api_key_configured=true`，且响应中不出现 API Key 明文。
+- [ ] 准备一条已成功生成、可公网访问、时长较短的视频作为源任务；优先用已有成功任务，避免为了测试先额外生成视频。
+- [ ] 从任务详情页或视频卡结果区点击“超分/增强”，创建一条真实超分任务；记录本地任务 ID、Provider 任务 ID、冻结点数和预算记录。
+- [ ] 轮询到终态：成功时验证结果视频可播放、已转存到本地/对象存储、缩略图和下载可用；失败时验证错误信息脱敏、冻结点数/预算自动返还。
+- [ ] 对比源视频和超分视频：确认页面能区分“原视频”和“超分结果”，普通生成链路、火山 IP 链路和 Seedance 链路没有被误改。
+
+停止条件：没有 API Key、资源包/余额不足、Provider 返回模型/能力未开通、任务卡在排队超过供应商正常窗口、或出现签名 URL/密钥泄露风险时，立即停止真实付费测试并先复盘。
+
 ## 图集和单图共享闭环 Todo
 
 更新时间：2026-06-17
