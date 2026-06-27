@@ -1,5 +1,6 @@
 // Generation mode options (按即梦网页版)
 export type GenerationMode = 'all_in_one_reference' | 'first_last_frame' | 'smart_multi_frame';
+export type TaskGenerationMode = GenerationMode | 'enhance_video';
 
 // Video aspect ratios (网页版 6 个比例)
 export type VideoRatio = '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
@@ -126,7 +127,7 @@ export interface VideoTask {
   id: string;
   provider: string;
   model: string;
-  generation_mode: GenerationMode;
+  generation_mode: TaskGenerationMode;
   prompt: string;
   ratio?: string;
   duration?: number;
@@ -203,6 +204,11 @@ export const GENERATION_MODE_LABELS: Record<GenerationMode, string> = {
   'all_in_one_reference': '全能参考',
   'first_last_frame': '首尾帧',
   'smart_multi_frame': '智能多帧',
+};
+
+export const TASK_GENERATION_MODE_LABELS: Record<TaskGenerationMode, string> = {
+  ...GENERATION_MODE_LABELS,
+  'enhance_video': '视频超分',
 };
 
 export const RATIO_LABELS: Record<VideoRatio, string> = {

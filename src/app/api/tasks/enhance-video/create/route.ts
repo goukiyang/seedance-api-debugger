@@ -29,6 +29,7 @@ import {
   uploadMediaToAiMediaKit,
 } from '@/lib/provider/aimediakit-enhance-video';
 import {
+  assertEnhanceVideoSourceTaskAllowed,
   buildEnhanceVideoProviderInput,
   normalizeEnhanceVideoCreateBody,
   validateEnhanceVideoUrl,
@@ -41,6 +42,7 @@ type SourceTask = Pick<VideoTask,
   | 'id'
   | 'provider'
   | 'provider_task_id'
+  | 'generation_mode'
   | 'prompt'
   | 'local_status'
   | 'result_video_url'
@@ -227,7 +229,7 @@ export async function POST(request: NextRequest) {
   }
 
   let sourceTask: SourceTask | null = null;
-  let sourceVideoUrl: string;
+  let sourceVideoUrl = body.videoUrl;
   if (body.sourceTaskId) {
     sourceTask = await prisma.videoTask.findUnique({
       where: { id: body.sourceTaskId },
@@ -235,6 +237,7 @@ export async function POST(request: NextRequest) {
         id: true,
         provider: true,
         provider_task_id: true,
+        generation_mode: true,
         prompt: true,
         local_status: true,
         result_video_url: true,
@@ -260,9 +263,9 @@ export async function POST(request: NextRequest) {
       return jsonError('源任务还没有成功产出视频，不能发起超分', 400, 'SOURCE_TASK_NOT_READY');
     }
     try {
-      sourceVideoUrl = await resolveSourceVideoUrl(sourceTask);
+      assertEnhanceVideoSourceTaskAllowed(sourceTask);
     } catch (error) {
-      return jsonError(error instanceof Error ? error.message : '源视频不可用', 400, 'SOURCE_VIDEO_UNAVAILABLE');
+      return jsonError(error instanceof Error ? error.message : '源任务不支持超分', 400, 'SOURCE_TASK_UNSUPPORTED');
     }
   } else if (body.videoUrl) {
     sourceVideoUrl = body.videoUrl;
@@ -333,6 +336,17 @@ export async function POST(request: NextRequest) {
         created_at: existing.created_at,
       });
     }
+  }
+
+  if (sourceTask) {
+    try {
+      sourceVideoUrl = await resolveSourceVideoUrl(sourceTask);
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : '源视频不可用', 400, 'SOURCE_VIDEO_UNAVAILABLE');
+    }
+  }
+  if (!sourceVideoUrl) {
+    return jsonError('源视频不可用', 400, 'SOURCE_VIDEO_UNAVAILABLE');
   }
 
   let createdTask: VideoTask;

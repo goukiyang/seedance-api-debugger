@@ -3026,6 +3026,116 @@ a {
   margin-bottom: 8px;
 }
 
+.enhance-video-action {
+  background: #f8fafc;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  margin-top: 16px;
+  padding: 12px;
+}
+
+.enhance-video-action summary {
+  align-items: center;
+  color: #0f172a;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 10px;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.enhance-video-action summary::-webkit-details-marker {
+  display: none;
+}
+
+.enhance-video-action summary span,
+.enhance-video-action-footer,
+.enhance-video-action-body {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.enhance-video-action summary strong {
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.enhance-video-action-body {
+  align-items: flex-end;
+  border-top: 1px solid #dbe4ee;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.enhance-video-action label,
+.enhance-video-action-meta {
+  display: grid;
+  gap: 6px;
+  min-width: 142px;
+}
+
+.enhance-video-action label span,
+.enhance-video-action-meta span,
+.enhance-video-action-footer span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.enhance-video-action select {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #0f172a;
+  font: inherit;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.enhance-video-action-meta strong {
+  color: #0f172a;
+  font-size: 14px;
+  min-height: 38px;
+  padding-top: 9px;
+}
+
+.enhance-video-action-warning,
+.enhance-video-action-error,
+.enhance-video-action-success {
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  margin-top: 10px;
+  padding: 9px 10px;
+}
+
+.enhance-video-action-warning {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.enhance-video-action-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.enhance-video-action-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.enhance-video-action-footer {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
 .task-prompt-preview {
   background: #f8fafc;
   border: 1px solid #e5e7eb;
