@@ -17,6 +17,20 @@
 
 Review：已上线到生产 BUILD_ID `J8JDIEkiAV5n3U6MLNE8_`。公网 `/login` 200，新 `/api/admin/integrations/volcengine-ip` 未登录返回 401，生产包包含“火山 IP 生成 API”、`volcengine-api-key` 和 `/api/admin/integrations/volcengine-ip`。本轮只做 API 整合页配置入口，不请求火山、不接生成任务、不改普通生成和扣点链路。
 
+## 2026-06-27 AI MediaKit 视频超分线上落地
+
+目标：把 AI MediaKit 视频超分首版落到 `sd2.youdoodesign.com` 的真实 live 工作树，提供后台 API Key 配置、成功视频的超分入口、专用创建接口、Provider 状态分发、结果转存和点数/预算失败返还。
+
+- [x] 从功能分支按提交 cherry-pick 到 live 分支，没有整段 merge 旧 checkout，避免覆盖 live 中已有火山 IP、通知、模板、画布等能力。
+- [x] 创建并推送发布前回滚点：`rollback/2026-06-27-before-mediakit-video-enhance`，指向合入前 live commit `9c9dd677cc02206882cb63f5e3bad475f852dabd`。
+- [x] 保留火山 IP Provider 的状态查询和结果链接刷新逻辑，新增 AI MediaKit 后形成 Seedance / 火山 IP / AI MediaKit 三路 Provider 分发。
+- [x] `/admin/integrations` 和 `/admin/integrations/aimediakit` 增加 AI MediaKit 视频超分 API Key 保存/清除入口，API Key 不回显。
+- [x] `/api/tasks/enhance-video/create` 接入源任务校验、URL 防内网、点数/预算冻结、Provider 提交、失败返还和本地最终化链路。
+- [x] 任务详情页和视频卡结果区增加“超分/增强”入口；普通任务仍走原 Seedance 生成链路，超分任务不允许递归超分。
+- [x] 已通过 smoke、TypeScript、lint 和 `npm run build`；真实付费调用仍等待 API Key、资源包/余额和用户明确授权。
+
+Review 待上线验证后补齐：`youdoo-sites build/restart/status sd2`、公网 `/api/config`、`/login`、后台配置页、健康守护周期和最终 BUILD_ID。
+
 ## 图集和单图共享闭环 Todo
 
 更新时间：2026-06-17

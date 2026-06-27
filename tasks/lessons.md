@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-06-27 - 多 checkout 功能上线不能整分支 merge
+
+- 问题/背景：AI MediaKit 视频超分功能先在旧 checkout 的 `codex/mediakit-video-enhance` 分支完成，再要推进到真实线上工作树 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 诱因/根因：功能分支和 live 分支相差大量历史提交；直接 merge 会带入旧 checkout 的删除、旧页面和旧任务文档，风险远大于功能本身。
+- 当时思路：先跑 live gate，确认 `codex/v12-full-todo` 干净且等于远端；给当前线上 commit 打 rollback tag；只 cherry-pick AI MediaKit 相关提交，冲突时保留 live 已有火山 IP Provider 和长期 todo，再手动补 AI MediaKit 能力。
+- 改动位置：`src/lib/provider/video-task-status.ts`、`src/lib/video/local-cache.ts`、`src/lib/video/task-finalizer.ts`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`src/app/tasks/[id]/page.tsx`、`tasks/todo.md`。
+- 怎么改：Provider 状态分发合并成 Seedance / 火山 IP / AI MediaKit 三路；任务详情页保留 live 的对象存储/慢速备用链路判断，只给 AI MediaKit 任务增加超分文案和入口；后台整合页保留原有配置能力并新增 AI MediaKit API Key 卡片。
+- 验证结果：AI MediaKit 四个 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 通过；构建 manifest 包含 `/admin/integrations/aimediakit` 和 `/api/tasks/enhance-video/create`。
+- 可复用经验：多 checkout 场景上线功能时，先判断分支历史差异；如果不是 fast-forward 或小范围 merge，不要整分支合入，改用带回滚点的提交级 cherry-pick，并在冲突中优先保护 live 已验证能力。
+
 ## 2026-06-17 - 模板编辑页要按真实操作闭环摆放
 
 - 问题/背景：模板上下文卡片已经有卡片、编辑器和提示词预览，但用户反馈“页面结构崩了”“最终提示词影响放在最底部，不要放在侧边”“编辑栏可以放在侧边”。
