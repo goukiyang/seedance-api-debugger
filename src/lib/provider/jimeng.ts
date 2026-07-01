@@ -23,9 +23,8 @@ const SEEDANCE_BASE_URL = process.env.SEEDANCE_BASE_URL || 'https://etc.seedance
 // Utilities
 // ============================================================================
 
-function maskKey(key: string): string {
-  if (!key || key.length < 12) return '***';
-  return `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
+function maskKey(_key: string): string {
+  return '***';
 }
 
 function pickString(record: Record<string, unknown>, keys: string[]): string | undefined {
@@ -75,6 +74,32 @@ function redactProviderResponseForLog(value: unknown): unknown {
     }
     return acc;
   }, {});
+}
+
+export function buildProviderHttpErrorStatus(
+  providerTaskId: string,
+  httpStatus: number,
+  data: Record<string, unknown>,
+): ProviderStatusResponse | null {
+  const isTransientProviderError = httpStatus === 401
+    || httpStatus === 403
+    || httpStatus === 408
+    || httpStatus === 409
+    || httpStatus === 425
+    || httpStatus === 429
+    || httpStatus >= 500;
+  if (isTransientProviderError) return null;
+
+  const errorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+  if (!errorMessage) return null;
+
+  return {
+    provider_task_id: providerTaskId,
+    provider_status: 'failed',
+    local_status: 'failed',
+    error_message: errorMessage,
+    raw: data,
+  };
 }
 
 // ============================================================================
@@ -416,6 +441,12 @@ export async function getVideoTaskStatus(
     console.log(`[Status] Response:`, JSON.stringify(redactProviderResponseForLog(data), null, 2));
 
     if (!response.ok) {
+      const failedStatus = buildProviderHttpErrorStatus(providerTaskId, response.status, data);
+      if (failedStatus) {
+        console.log(`\n❌ Step2 Complete: status = failed`);
+        console.log(`   Error: ${failedStatus.error_message || 'Unknown error'}\n`);
+        return failedStatus;
+      }
       throw new Error(`Get video task failed: ${response.status} ${JSON.stringify(data)}`);
     }
 

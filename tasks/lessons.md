@@ -770,3 +770,13 @@
 - 怎么改：`Asset.hash` 改为 `owner_id + hash` 唯一；跨用户重复上传时创建当前用户 Asset，复用已有 `original_url/thumbnail_url`；图集上传统一走 `uploadSiteAsset`；新增 smoke 覆盖跨用户重复上传后历史可见并可加入工作区。
 - 验证结果：`site-upload-dedupe-smoke`、`workspace-duplicate-upload-smoke`、`reference-album-duplicate-upload-smoke`、`reference-album-duplicate-upload-integration`、TypeScript、lint、build 通过；数据库已备份后同步索引；已部署 BUILD_ID `b55InuVW1hopeSQRgTb-s`，公网真实复现确认历史可见和工作区加入成功。
 - 可复用经验：同一文件的“存储去重”不能等同于“业务对象去重”。凡是后续链路按 owner、权限、历史列表或归档对象判断的地方，跨用户复用必须给当前用户创建自己的业务记录，只复用底层文件链接。
+
+## 2026-07-01 - 视频任务收尾不能依赖前端轮询
+
+- 问题/背景：用户反馈 15s/720p 视频 50 分钟后仍显示生成中，实际 Provider 已成功，点数也可能长期冻结。
+- 诱因/根因：本地任务状态依赖生成页轮询或单次后台 runner；runner 到达最大运行时间后停止，真实定时收尾任务又没有稳定运行，导致 Provider 成功后本地仍停在 `running`。
+- 当时思路：把“查 Provider 状态、写回结果、缓存视频、生成缩略图、结算冻结点数”做成后台可重复执行的收尾任务；状态和点数先闭环，缓存和缩略图失败不能反过来卡住成功状态。
+- 改动位置：`scripts/finalize-pending-videos.ts`、`src/lib/video/task-finalizer.ts`、`src/lib/video/finalize-pending-candidates.ts`、`src/lib/video/local-cache.ts`、`src/lib/provider/jimeng.ts`、`src/lib/provider/volcengine-ip.ts`、`scripts/sd2-finalize-pending-videos.sh`。
+- 怎么改：收尾脚本优先处理 `submitted/running`，再处理最近成功但缺缓存的视频；旧 orphan submitted 且无 Provider 任务号会自动失败退款；Provider 非重试错误落为失败；下载流超时返回可控失败；LaunchAgent 每 300 秒跑一次并带陈旧锁清理。
+- 验证结果：5 个 smoke、TypeScript、lint、build 通过；`cmr1o6u8s0038f05laf0wpqic` 已成功结算并有本地/R2 视频；旧孤儿任务 `cmpkxpuqx003xd14k1ct7m4vg` 已失败退款 84 点；线上 BUILD_ID `4miq1OhmOna1d6CxNG-Hn` 已加载，LaunchAgent 退出码为 0。
+- 可复用经验：长耗时任务必须有独立后台收尾和幂等账务结算，不能把“用户打开页面继续查”当成可靠机制。任何缓存、缩略图、对象存储转存失败都只能影响后续补偿，不能阻止任务状态和点数先闭环。

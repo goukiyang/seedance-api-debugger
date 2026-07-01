@@ -121,6 +121,27 @@ export class VolcengineIpRequestError extends Error {
   }
 }
 
+export function volcengineRequestErrorToStatus(
+  providerTaskId: string,
+  error: unknown,
+): ProviderStatusResponse | null {
+  if (!(error instanceof VolcengineIpRequestError)) return null;
+  if (error.normalized.retryable) return null;
+
+  return {
+    provider_task_id: providerTaskId,
+    provider_status: 'failed',
+    local_status: 'failed',
+    error_message: error.normalized.providerMessage || error.normalized.userMessage,
+    raw: error.raw || {
+      error: {
+        code: error.normalized.code,
+        message: error.normalized.providerMessage || error.normalized.userMessage,
+      },
+    },
+  };
+}
+
 function cleanBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, '');
 }
@@ -637,12 +658,19 @@ export async function getVolcengineIpTaskStatus(
   if (!taskId) throw new Error('火山 IP 查询缺少任务 ID');
 
   const config = await resolvePrivateConfig(options, false);
-  const raw = await requestVolcengineIpJson(
-    buildTaskUrl(config.baseUrl, taskId),
-    { method: 'GET' },
-    config,
-    options,
-  );
+  let raw: unknown;
+  try {
+    raw = await requestVolcengineIpJson(
+      buildTaskUrl(config.baseUrl, taskId),
+      { method: 'GET' },
+      config,
+      options,
+    );
+  } catch (error) {
+    const failedStatus = volcengineRequestErrorToStatus(taskId, error);
+    if (failedStatus) return failedStatus;
+    throw error;
+  }
 
   return parseVolcengineIpStatusResponse(raw, taskId);
 }

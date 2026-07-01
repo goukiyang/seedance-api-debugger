@@ -71,7 +71,48 @@ async function fetchVideoWithTimeout(url: string, timeoutMs: number) {
   }
 }
 
-async function writeResponseToFile(response: Response, targetPath: string, expectedBytes: number) {
+function createDownloadTimeoutError(timeoutMs: number) {
+  return new Error(`下载超时（超过${timeoutMs / 1000}秒），请重试或检查网络`);
+}
+
+function isDownloadTimeoutError(error: unknown) {
+  return error instanceof Error && error.message.startsWith('下载超时');
+}
+
+function downloadTimeoutResult(timeoutMs: number): LocalVideoCacheResult {
+  return {
+    success: false,
+    error: 'Download timeout',
+    message: createDownloadTimeoutError(timeoutMs).message,
+    status: 408,
+  };
+}
+
+async function readWithTimeout<T>(readPromise: Promise<T>, timeoutMs: number, startedAt: number) {
+  const remainingMs = timeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw createDownloadTimeoutError(timeoutMs);
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      readPromise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(createDownloadTimeoutError(timeoutMs)), remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+export async function writeResponseToFile(
+  response: Response,
+  targetPath: string,
+  expectedBytes: number,
+  timeoutMs = DOWNLOAD_TIMEOUT_MS,
+) {
   const body = response.body;
   if (!body) {
     throw new Error('无法读取视频响应流');
@@ -81,20 +122,34 @@ async function writeResponseToFile(response: Response, targetPath: string, expec
   const stream = createWriteStream(tempPath);
   const reader = body.getReader();
   let receivedBytes = 0;
+  const startedAt = Date.now();
+  let cleanupDestroy = false;
+  let streamError: Error | null = null;
+
+  stream.on('error', (error) => {
+    if (!cleanupDestroy) streamError = error;
+  });
+
+  const throwIfStreamErrored = () => {
+    if (streamError) throw streamError;
+  };
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithTimeout(reader.read(), timeoutMs, startedAt);
       if (done) break;
       if (!value) continue;
       receivedBytes += value.length;
       if (!stream.write(Buffer.from(value))) {
-        await once(stream, 'drain');
+        await readWithTimeout(once(stream, 'drain'), timeoutMs, startedAt);
+        throwIfStreamErrored();
       }
+      throwIfStreamErrored();
     }
 
     stream.end();
-    await once(stream, 'finish');
+    await readWithTimeout(once(stream, 'finish'), timeoutMs, startedAt);
+    throwIfStreamErrored();
 
     const info = await stat(tempPath);
     if (!info.isFile() || info.size <= 0) {
@@ -110,6 +165,8 @@ async function writeResponseToFile(response: Response, targetPath: string, expec
     await rename(tempPath, targetPath);
     return info.size;
   } catch (error) {
+    cleanupDestroy = true;
+    await reader.cancel().catch(() => undefined);
     stream.destroy();
     await unlink(tempPath).catch(() => undefined);
     throw error;
@@ -215,12 +272,7 @@ async function cacheTaskVideoToLocalInner(
     response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      return {
-        success: false,
-        error: 'Download timeout',
-        message: `下载超时（超过${timeoutMs / 1000}秒），请重试或检查网络`,
-        status: 408,
-      };
+      return downloadTimeoutResult(timeoutMs);
     }
     throw error;
   }
@@ -231,7 +283,17 @@ async function cacheTaskVideoToLocalInner(
       sourceUrl = refreshed.result_video_url;
       lastFrameUrl = refreshed.result_last_frame_url;
       refreshedUrl = true;
-      response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
+      try {
+        response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return {
+            ...downloadTimeoutResult(timeoutMs),
+            refreshed_url: refreshedUrl,
+          };
+        }
+        throw error;
+      }
     }
   }
 
@@ -257,11 +319,23 @@ async function cacheTaskVideoToLocalInner(
 
   const contentLength = response.headers.get('content-length');
   const expectedBytes = contentLength ? Number.parseInt(contentLength, 10) : 0;
-  const fileSize = await writeResponseToFile(
-    response,
-    targetPath,
-    Number.isFinite(expectedBytes) ? expectedBytes : 0,
-  );
+  let fileSize: number;
+  try {
+    fileSize = await writeResponseToFile(
+      response,
+      targetPath,
+      Number.isFinite(expectedBytes) ? expectedBytes : 0,
+      timeoutMs,
+    );
+  } catch (error) {
+    if (isDownloadTimeoutError(error)) {
+      return {
+        ...downloadTimeoutResult(timeoutMs),
+        refreshed_url: refreshedUrl,
+      };
+    }
+    throw error;
+  }
 
   await updateTaskLocalPath(task.id, publicPath);
 

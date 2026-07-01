@@ -41,6 +41,7 @@ export type FinalizeVideoTaskOptions = {
   forceProviderRefresh?: boolean;
   cacheOnSuccess?: boolean;
   generateThumbnail?: boolean;
+  cacheTimeoutMs?: number;
   createdBy?: string | null;
 };
 
@@ -332,7 +333,8 @@ async function withLocalCacheSlot<T>(callback: () => Promise<T>) {
 
 async function cacheAndMaybeThumbnail(
   task: VideoTask,
-  options: Required<Pick<FinalizeVideoTaskOptions, 'cacheOnSuccess' | 'generateThumbnail'>>,
+  options: Required<Pick<FinalizeVideoTaskOptions, 'cacheOnSuccess' | 'generateThumbnail'>>
+    & Pick<FinalizeVideoTaskOptions, 'cacheTimeoutMs'>,
 ) {
   let cacheResult: LocalVideoCacheResult | undefined;
   let thumbnailResult: EnsureTaskThumbnailResult | undefined;
@@ -348,7 +350,7 @@ async function cacheAndMaybeThumbnail(
       result_video_url: task.result_video_url,
       result_last_frame_url: task.result_last_frame_url,
       local_video_path: task.local_video_path,
-    }));
+    }, { timeoutMs: options.cacheTimeoutMs }));
 
     if (cacheResult.success && cacheResult.local_video_path) {
       taskForThumbnail = {
@@ -405,6 +407,7 @@ export async function finalizeVideoTaskStatus(
   const forceProviderRefresh = options.forceProviderRefresh === true;
   const cacheOnSuccess = options.cacheOnSuccess !== false;
   const generateThumbnail = options.generateThumbnail !== false;
+  const cacheTimeoutMs = options.cacheTimeoutMs;
   const task = await prisma.videoTask.findUnique({ where: { id: taskId } });
 
   if (!task) {
@@ -426,7 +429,7 @@ export async function finalizeVideoTaskStatus(
   }
 
   if (shouldReadLocalFinalCost(task, forceProviderRefresh)) {
-    const localResult = await cacheAndMaybeThumbnail(task, { cacheOnSuccess, generateThumbnail });
+    const localResult = await cacheAndMaybeThumbnail(task, { cacheOnSuccess, generateThumbnail, cacheTimeoutMs });
     const refreshedTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
     return {
       task: refreshedTask || task,
@@ -495,7 +498,7 @@ export async function finalizeVideoTaskStatus(
     let cacheResult: LocalVideoCacheResult | undefined;
     let thumbnailResult: EnsureTaskThumbnailResult | undefined;
     if (updatedTask && updatedTask.local_status === 'succeeded') {
-      const localResult = await cacheAndMaybeThumbnail(updatedTask, { cacheOnSuccess, generateThumbnail });
+      const localResult = await cacheAndMaybeThumbnail(updatedTask, { cacheOnSuccess, generateThumbnail, cacheTimeoutMs });
       cacheResult = localResult.cacheResult;
       thumbnailResult = localResult.thumbnailResult;
       const publicDeliveryResult = localResult.publicDeliveryResult;

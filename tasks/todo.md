@@ -7214,3 +7214,72 @@ HARD-GATE：
 - [x] `npm run build`
 - [x] `youdoo-sites build sd2 && youdoo-sites restart sd2` 已完成，BUILD_ID `b55InuVW1hopeSQRgTb-s`。
 - [x] 公网真实复现通过：跨用户重复上传返回当前用户 Asset，上传历史可见，加入工作区成功。
+
+## 2026-07-01 15s/720p 生成中卡单后台收尾修复规划
+
+### 已确认现象
+
+- [x] 用户反馈的 15s / 720p 任务最吻合 `cmr1o6u8s0038f05laf0wpqic`，Provider 任务为 `cgt-20260701140354-2lvln`。
+- [x] Provider 只读查询已返回 `succeeded` 和视频地址，但本地 `VideoTask.local_status` 仍是 `running`，`provider_status` 仍是 `unknown`。
+- [x] 后台日志显示 `VideoLocalizationRunner` 在 20 分钟后停止：`Max runtime reached`，本地最后更新时间停在 `2026-07-01 14:23:51`。
+- [x] 当前真实自动化目录没有看到 `sd2-finalize-pending-videos`，和旧 todo 里“已纳入 Codex cron 自动化”的记录不一致，需要重新核对和恢复真实定时执行。
+
+### 目标
+
+- 新生成任务不依赖用户打开生成页或任务详情页，也能最终从 `submitted/running` 自动变成 `succeeded/failed/cancelled`。
+- Provider 已成功时，本地必须自动写回视频地址、完成本地/公开分发、生成缩略图并结算冻结点数。
+- Provider 明确失败时，本地必须自动失败收尾、释放冻结点数并写退款流水。
+- 同一个任务被详情页、补偿脚本或定时任务重复触发时，点数结算只能执行一次。
+- 超过合理时间仍没有明确结果的任务，不再无限安静显示“生成中”，后台要能看到异常数量和待处理任务。
+
+### P0：先补当前卡单
+
+- [x] 只读列出所有 `local_status in ('submitted','running')` 且有 `provider_task_id` 的任务，按创建时间、更新时间、冻结点数和 Provider 当前状态分组。
+- [x] 对 `cmr1o6u8s0038f05laf0wpqic` 执行一次受控收尾：复用 `src/lib/video/task-finalizer.ts`，不要手写状态和点数。
+- [x] 验证该任务变为 `succeeded`，`result_video_url` 已写入，`completed_at` 有值，冻结点数已结算，`CreditLedger` 没有重复扣费或重复退款。
+- [x] 对仍返回 `{}` 的新任务保留 `running`，但记录为“Provider 仍未给明确结果”，不提前退款。
+
+### P0：恢复不会下班的后台查单
+
+- [x] 核对现有 `scripts/finalize-pending-videos.ts` 是否覆盖 `running/submitted`、`succeeded 但缺本地视频` 两类任务；不足处只补最小逻辑。
+- [x] 给项目增加一个明确可运行命令：`npm run video:finalize-pending`，内部调用现有脚本，不新增依赖。
+- [x] 恢复真实定时执行：LaunchAgent `com.youdoo.sd2.finalize-pending-videos` 每 300 秒执行一次，调用 `/Users/gouki-youdoo/.youdoo/runtime/sd2-finalize-pending-videos.sh`。
+- [x] 频率定为每 5 分钟一轮，每轮限制处理数量、总运行时间和单个缓存下载超时，避免多个大视频同时下载拖垮站点。
+- [x] 每轮日志只记录任务 ID、状态、计数和错误类型；Seedance API Key 和签名 URL 已脱敏。
+
+### P0：保证点数和状态不会算乱
+
+- [x] 为 `finalizeVideoTaskStatus()` 增加或补齐幂等验证：同一个成功任务重复 finalize，成功扣点流水只能出现一次。
+- [x] 为失败/取消路径补齐幂等验证：同一个失败任务重复 finalize，冻结点数只能释放一次。
+- [x] 覆盖 Provider 返回 `{}` 的路径：不改成失败、不结算点数，只更新可观察状态或保留下轮继续查。
+- [x] 覆盖 Provider 返回 `succeeded` 但本地缓存/缩略图失败的路径：任务状态成功和点数结算不能被缓存失败卡住，缓存失败进入后续补偿。
+
+### P1：异常可见和用户提示
+
+- [ ] 在现有健康接口或后台增加“长时间生成中”统计：超过 30/60/90 分钟的 running 任务数量、冻结点数总额、最老任务时间。
+- [ ] 任务详情页对超过阈值的任务显示明确文案：`生成时间较长，后台仍在自动检查`；不要只让用户看到普通“生成中”。
+- [ ] 后台列表能筛选“长时间生成中 / Provider 空返回 / 本地待收尾”三类任务，方便管理员处理。
+
+### 验证方式
+
+- [x] 运行只读 dry-run：列出将被收尾的任务，不修改数据库。
+- [x] 对当前已成功但本地 running 的任务执行真实补偿，并验证数据库、视频地址、点数流水和页面状态。
+- [x] 跑最小回归：`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [x] 部署后验证：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 `/api/config` 和 `/login` 正常。
+- [x] 用真实或受控任务验证：LaunchAgent 重新加载后 `runs=1`，`last exit code=0`，可继续自动查单。
+
+### 2026-07-01 落地结果
+
+- `cmr1o6u8s0038f05laf0wpqic` 已从 `running` 收尾为 `succeeded`，`frozen_cost=0`，`actual_cost=45`，本地视频和 R2 公开视频均已写入。
+- 发现并补偿旧孤儿任务 `cmpkxpuqx003xd14k1ct7m4vg`：提交后没有 Provider 任务号，已标记 `failed`，返还冻结 84 点，并写入 `task_failed_refund` 流水。
+- 火山 IP provider 的非重试错误会落为失败并释放冻结点数，避免 provider 错误一直把任务留在 `running`。
+- 后台收尾脚本现在优先处理 `submitted/running`，再处理最近 7 天成功但缺本地缓存的视频；旧过期签名 URL 不再每轮反复拖慢批处理。
+- 定时执行载体已恢复为 LaunchAgent：`com.youdoo.sd2.finalize-pending-videos`，每 300 秒执行一次；已重新加载并验证退出码为 0。
+- 仍保留的 P1：后台健康统计、任务详情长时间等待提示、后台筛选能力尚未做，本轮不扩大到 UI 可视化。
+
+### 停止条件
+
+- Provider 返回内容包含不应打印的签名 URL、密钥或 token 时，先脱敏再继续。
+- 发现点数流水已重复扣费或重复退款时，停止自动补偿，先做账务核对。
+- 发现真实定时任务没有稳定运行位置时，不伪装成已修复；先确认自动化载体再部署。
+- 构建、回归或线上健康检查失败时，不提交、不部署、不标记完成。
