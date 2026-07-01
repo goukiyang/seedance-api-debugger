@@ -760,3 +760,13 @@
 - 怎么改：`VideoTask` 增加 public video 字段；成功任务本地缓存后转存 R2/TOS；播放 API 优先 302 到 `public_video_url`；任务详情/资源页优先使用 public URL；缩略图浏览不再下载完整 mp4；批量 ZIP 对 mp4 改为不压缩。
 - 验证结果：规则脚本、backfill dry-run、TypeScript、lint、build 通过；R2 已小批量补偿 5 个任务且公网 `/api/video/play/:id` 已 302 到 R2。R2 dev 域名 Range 速度仍波动偏慢，需要后续评估 R2 自定义域/CDN 或 TOS 国内可访问域名。
 - 可复用经验：视频“卡”大多不是 UI 播放器问题，而是分发路径问题。先测本机、站点 API、静态路径、对象存储 URL 的同一 Range 片段，再决定是改代码、换存储域名，还是做转码/HLS。
+
+## 2026-07-01 - 重复上传不能只复用别人的 Asset id
+
+- 问题/背景：用户反馈当前版本选择图片上传流程正常，但点完上传后页面没有出现图片。
+- 诱因/根因：`/api/assets/upload` 按文件 hash 复用其他用户已有 Asset，随后 `/api/workspace/assets` 把这个 Asset 当成别人的私有素材，在参考图归档时返回 `reference_asset_forbidden`；上传历史也只查当前用户自己的 `owner_id`，所以同一张图不会出现在历史里。
+- 当时思路：文件内容去重和用户可见记录要拆开。存储文件和公网链接可以复用，但当前用户必须拥有自己的 Asset 记录，后续历史、工作区、参考图归档才会自然通过权限检查。
+- 改动位置：`prisma/schema.prisma`、`src/lib/assets/storage.ts`、`src/app/api/assets/upload/route.ts`、`src/app/api/reference-albums/[id]/images/route.ts`、`scripts/workspace-duplicate-upload-smoke.ts`。
+- 怎么改：`Asset.hash` 改为 `owner_id + hash` 唯一；跨用户重复上传时创建当前用户 Asset，复用已有 `original_url/thumbnail_url`；图集上传统一走 `uploadSiteAsset`；新增 smoke 覆盖跨用户重复上传后历史可见并可加入工作区。
+- 验证结果：`site-upload-dedupe-smoke`、`workspace-duplicate-upload-smoke`、`reference-album-duplicate-upload-smoke`、TypeScript、lint、build 通过；数据库已备份后同步索引。
+- 可复用经验：同一文件的“存储去重”不能等同于“业务对象去重”。凡是后续链路按 owner、权限、历史列表或归档对象判断的地方，跨用户复用必须给当前用户创建自己的业务记录，只复用底层文件链接。

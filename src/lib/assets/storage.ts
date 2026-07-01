@@ -146,29 +146,23 @@ export async function uploadAsset(
   const ext = mimeTypeToExt(mimeType);
   const assetType = getAssetType(mimeType);
 
-  // 检查是否已存在（通过 hash 去重）
-  const existing = await prisma.asset.findUnique({ where: { hash } });
+  // 同一用户重复上传同一文件时复用自己的记录，并恢复历史隐藏/删除状态。
+  const existing = await prisma.asset.findFirst({
+    where: { owner_id: ownerId, hash },
+    orderBy: { created_at: 'desc' },
+  });
   if (existing) {
     const updates: {
       original_url?: string;
       thumbnail_url?: string | null;
       width?: number | null;
       height?: number | null;
-      owner_id?: string;
       status?: string;
     } = {};
     let thumbnailUrl = existing.thumbnail_url;
     let width = existing.width;
     let height = existing.height;
 
-    const canClaimLegacyAsset = existing.owner_id === 'default-user' && ownerId !== 'default-user';
-
-    // 历史数据里存在 default-user 资产；真实用户重新上传同一文件时归属到当前用户。
-    if (canClaimLegacyAsset) {
-      updates.owner_id = ownerId;
-    }
-
-    // Asset 按文件 hash 全站去重；任意用户重新上传同一文件，都复用同一后台链接并恢复可见。
     if (existing.status !== 'active') {
       updates.status = 'active';
     }
@@ -206,6 +200,102 @@ export async function uploadAsset(
       reused: true,
       width: width ?? undefined,
       height: height ?? undefined,
+    };
+  }
+
+  // 别的用户已经上传过同一文件时，不重复上传文件，只给当前用户创建自己的可见记录。
+  const sharedExisting = await prisma.asset.findFirst({
+    where: {
+      hash,
+      type: assetType,
+      status: { not: 'deleted' },
+    },
+    orderBy: { created_at: 'desc' },
+  });
+  if (sharedExisting) {
+    const updates: {
+      original_url?: string;
+      thumbnail_url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      owner_id?: string;
+      status?: string;
+    } = {};
+    let originalUrl = sharedExisting.original_url;
+    let thumbnailUrl = sharedExisting.thumbnail_url;
+    let width = sharedExisting.width;
+    let height = sharedExisting.height;
+
+    if (sharedExisting.owner_id === 'default-user' && ownerId !== 'default-user') {
+      updates.owner_id = ownerId;
+    }
+    if (sharedExisting.status !== 'active') {
+      updates.status = 'active';
+    }
+
+    if (isLocalUploadUrl(sharedExisting.original_url) && !localUploadExists(sharedExisting.original_url)) {
+      const storedFileName = `${hash}.${ext}`;
+      const filePath = path.join(ASSETS_DIR, storedFileName);
+      fs.writeFileSync(filePath, buffer);
+      originalUrl = `/uploads/assets/${storedFileName}`;
+      updates.original_url = originalUrl;
+    }
+
+    if (assetType === 'image' && (!sharedExisting.thumbnail_url || !localUploadExists(sharedExisting.thumbnail_url))) {
+      const metadata = await sharp(buffer).metadata();
+      width = metadata.width ?? null;
+      height = metadata.height ?? null;
+      const thumbResult = await generateThumbnail(buffer, mimeType);
+      thumbnailUrl = thumbResult.thumbPath;
+      updates.thumbnail_url = thumbResult.thumbPath;
+      updates.width = width;
+      updates.height = height;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await prisma.asset.update({
+        where: { id: sharedExisting.id },
+        data: updates,
+      });
+    }
+
+    if (updates.owner_id === ownerId) {
+      return {
+        assetId: sharedExisting.id,
+        originalUrl,
+        thumbnailUrl,
+        hash: sharedExisting.hash ?? '',
+        reused: true,
+        width: width ?? undefined,
+        height: height ?? undefined,
+      };
+    }
+
+    const asset = await prisma.asset.create({
+      data: {
+        id: uuidv4(),
+        owner_id: ownerId,
+        type: assetType,
+        original_url: originalUrl,
+        thumbnail_url: thumbnailUrl,
+        file_name: fileName,
+        mime_type: mimeType,
+        width,
+        height,
+        file_size: buffer.length,
+        hash,
+        status: 'active',
+      },
+    });
+
+    return {
+      assetId: asset.id,
+      originalUrl: asset.original_url,
+      thumbnailUrl: asset.thumbnail_url,
+      hash: asset.hash ?? '',
+      reused: true,
+      width: asset.width ?? undefined,
+      height: asset.height ?? undefined,
     };
   }
 

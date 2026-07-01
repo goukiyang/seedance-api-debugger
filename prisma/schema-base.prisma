@@ -61,11 +61,13 @@ model Asset {
   width          Int?
   height         Int?
   file_size      Int
-  hash           String?   @unique
+  hash           String?
   created_at     DateTime  @default(now())
   workspace_assets     WorkspaceAsset[]
   collection_items    AssetCollectionItem[]
   collections_cover    AssetCollection[]     @relation("CollectionCover")
+  @@unique([owner_id, hash])
+  @@index([hash])
 }
 
 model Workspace {

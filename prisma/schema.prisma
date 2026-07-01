@@ -1149,7 +1149,7 @@ model Asset {
   file_size Int // bytes
 
   // 去重
-  hash String? @unique
+  hash String?
 
   status String @default("active") // active | hidden | deleted
 
@@ -1161,6 +1161,8 @@ model Asset {
   collections_cover AssetCollection[]     @relation("CollectionCover")
   reference_images  ReferenceImage[]
 
+  @@unique([owner_id, hash])
+  @@index([hash])
   @@index([owner_id, type, status, created_at])
   @@index([status])
 }

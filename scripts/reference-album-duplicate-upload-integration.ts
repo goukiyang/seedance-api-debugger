@@ -98,13 +98,21 @@ async function main() {
     });
     if (images.length !== 1) fail(`expected 1 reference image, got ${images.length}`);
     const image = images[0];
-    if (image.asset_id !== assetId) fail(`reference image asset_id=${image.asset_id}, expected ${assetId}`);
+    if (image.asset_id === assetId) fail('reference image used original owner asset instead of uploader-owned asset');
     if (image.url !== originalUrl) fail(`reference image url=${image.url}, expected ${originalUrl}`);
     if (image.thumbnail_url !== thumbnailUrl) {
       fail(`reference image thumbnail_url=${image.thumbnail_url}, expected ${thumbnailUrl}`);
     }
-    const sameHashAssets = await prisma.asset.count({ where: { hash } });
-    if (sameHashAssets !== 1) fail(`expected hash to keep one Asset row, got ${sameHashAssets}`);
+    const sameHashAssets = await prisma.asset.findMany({
+      where: { hash },
+      select: { id: true, owner_id: true },
+    });
+    if (sameHashAssets.length !== 2) fail(`expected hash to keep one Asset row per user, got ${sameHashAssets.length}`);
+    const uploaderAsset = sameHashAssets.find((asset) => asset.owner_id === uploaderId);
+    if (!uploaderAsset) fail('expected uploader-owned Asset row');
+    if (image.asset_id !== uploaderAsset.id) {
+      fail(`reference image asset_id=${image.asset_id}, expected uploader asset ${uploaderAsset.id}`);
+    }
     const metadata = image.metadata_json ? JSON.parse(image.metadata_json) : {};
     if (metadata.reused_existing_asset !== true) {
       fail(`metadata.reused_existing_asset was not true: ${image.metadata_json || '(empty)'}`);
@@ -115,7 +123,7 @@ async function main() {
     await prisma.operationLog.deleteMany({ where: { target_id: albumId } });
     await prisma.referenceImage.deleteMany({ where: { album_id: albumId } });
     await prisma.referenceAlbum.deleteMany({ where: { id: albumId } });
-    await prisma.asset.deleteMany({ where: { id: assetId } });
+    await prisma.asset.deleteMany({ where: { hash } });
     await prisma.user.deleteMany({ where: { id: { in: [existingOwnerId, uploaderId] } } });
     await prisma.$disconnect();
   }

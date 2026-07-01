@@ -283,8 +283,9 @@ async function uploadFilesToAlbum(
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const hash = computeUploadHash(buffer);
-    let asset = await prisma.asset.findUnique({
-      where: { hash },
+    const uploadResult = await uploadSiteAsset(buffer, file.name, file.type, file.size, user.id);
+    const asset = await prisma.asset.findUnique({
+      where: { id: uploadResult.assetId },
       select: {
         id: true,
         type: true,
@@ -293,29 +294,8 @@ async function uploadFilesToAlbum(
         file_name: true,
       },
     });
-
-    let reusedExistingAsset = Boolean(asset);
-    if (asset && asset.type !== 'image') {
-      return NextResponse.json({ error: `同文件内容已存在，但不是图片素材: ${file.name}` }, { status: 400 });
-    }
-
-    if (!asset) {
-      const uploadResult = await uploadSiteAsset(buffer, file.name, file.type, file.size, user.id);
-      const uploadedAsset = await prisma.asset.findUnique({
-        where: { id: uploadResult.assetId },
-        select: {
-          id: true,
-          type: true,
-          original_url: true,
-          thumbnail_url: true,
-          file_name: true,
-        },
-      });
-      if (!uploadedAsset || uploadedAsset.type !== 'image') {
-        return NextResponse.json({ error: `图片上传后未生成有效素材: ${file.name}` }, { status: 500 });
-      }
-      asset = uploadedAsset;
-      reusedExistingAsset = false;
+    if (!asset || asset.type !== 'image') {
+      return NextResponse.json({ error: `图片上传后未生成有效素材: ${file.name}` }, { status: 500 });
     }
 
     sortOrder += 1;
@@ -328,10 +308,11 @@ async function uploadFilesToAlbum(
       metadata: {
         source: 'album_file_upload',
         original_file_name: file.name,
-        reused_existing_asset: reusedExistingAsset,
+        upload_hash: hash,
+        reused_existing_asset: uploadResult.reused,
       },
     });
-    if (reusedExistingAsset) reusedAssetIds.push(asset.id);
+    if (uploadResult.reused) reusedAssetIds.push(asset.id);
     created.push(image);
   }
 

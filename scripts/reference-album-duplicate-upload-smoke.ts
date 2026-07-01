@@ -27,8 +27,8 @@ assert(
   '图集上传必须先计算文件 hash。',
 );
 assert(
-  routeSource.includes('where: { hash }'),
-  '图集上传必须用 hash 查询已有资产。',
+  routeSource.includes('computeUploadHash(buffer)'),
+  '图集上传必须保留 hash 计算，避免重复上传逻辑回归。',
 );
 assert(
   routeSource.includes('reused_existing_asset'),
@@ -36,7 +36,7 @@ assert(
 );
 assert(
   routeSource.includes('uploadSiteAsset(buffer, file.name, file.type, file.size, user.id)'),
-  'hash 未命中时仍必须走原有站点上传能力。',
+  '图集上传必须统一走站点上传能力，由存储层处理跨用户复用。',
 );
 assert(
   routeSource.includes('action: \'reference_album_upload_images\''),

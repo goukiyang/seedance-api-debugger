@@ -42,6 +42,7 @@ export async function POST(request: NextRequest) {
         fileSize: uploadResult.fileSize,
         mimeType: uploadResult.mimeType,
         hash: uploadResult.hash,
+        reused: uploadResult.reused,
         isPubliclyReachable: uploadResult.isPubliclyReachable,
         storageProvider: uploadResult.storageProvider,
         warning: uploadResult.publicUploadWarning,

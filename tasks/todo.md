@@ -7185,3 +7185,29 @@ HARD-GATE：
 - [x] R2 已配置，已跑 `npx tsx scripts/backfill-public-video-delivery.ts --limit 5 --apply`，5/5 成功写入 `public_video_url`。
 - [x] `youdoo-sites build sd2 && youdoo-sites restart sd2` 已完成，公网 `/api/video/play/:id` 已 302 到 R2 URL。
 - [ ] R2 dev 域名 Range 测速仍波动偏慢，需评估 R2 自定义域/CDN 或 TOS 国内可访问域名。
+
+## 2026-07-01 跨用户重复图片上传不显示修复
+
+### 根因
+
+- [x] 已确认 `/api/assets/upload` 会按文件 hash 复用其他用户已有 Asset，但后续 `/api/workspace/assets` 在归档参考图时仍按 `Asset.owner_id` 拦截，返回 `reference_asset_forbidden`。
+- [x] 已确认上传历史 `/api/assets/history` 只查当前用户自己的 Asset；如果继续返回其他用户的 Asset id，历史列表也不会显示刚上传的图。
+
+### 已落地
+
+- [x] `Asset.hash` 从全站唯一改为 `owner_id + hash` 唯一，并保留 hash 普通索引。
+- [x] 跨用户重复上传时不重复上传文件，只给当前用户创建自己的 Asset 记录，复用同一个 `original_url/thumbnail_url`。
+- [x] `/api/assets/upload` 返回 `reused`，便于前端和调试判断是否复用。
+- [x] 参考图集上传统一走 `uploadSiteAsset`，避免图集和工作台重复实现不同的 hash 复用规则。
+- [x] 新增工作区重复上传 smoke，覆盖“别人已有同图 -> 当前用户上传 -> 历史可见 -> 加入工作区/参考图成功”。
+
+### 验证/部署
+
+- [x] `npx prisma generate`
+- [x] `npx prisma db push --accept-data-loss`
+- [x] `npx tsx scripts/site-upload-dedupe-smoke.ts`
+- [x] `npx tsx scripts/workspace-duplicate-upload-smoke.ts`
+- [x] `npx tsx scripts/reference-album-duplicate-upload-smoke.ts`
+- [x] `npx tsc --noEmit --pretty false`
+- [x] `npm run lint`
+- [x] `npm run build`
