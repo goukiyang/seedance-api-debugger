@@ -7208,6 +7208,9 @@ HARD-GATE：
 - [x] `npx tsx scripts/site-upload-dedupe-smoke.ts`
 - [x] `npx tsx scripts/workspace-duplicate-upload-smoke.ts`
 - [x] `npx tsx scripts/reference-album-duplicate-upload-smoke.ts`
+- [x] `npx tsx scripts/reference-album-duplicate-upload-integration.ts`
 - [x] `npx tsc --noEmit --pretty false`
 - [x] `npm run lint`
 - [x] `npm run build`
+- [x] `youdoo-sites build sd2 && youdoo-sites restart sd2` 已完成，BUILD_ID `b55InuVW1hopeSQRgTb-s`。
+- [x] 公网真实复现通过：跨用户重复上传返回当前用户 Asset，上传历史可见，加入工作区成功。

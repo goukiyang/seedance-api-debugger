@@ -768,5 +768,5 @@
 - 当时思路：文件内容去重和用户可见记录要拆开。存储文件和公网链接可以复用，但当前用户必须拥有自己的 Asset 记录，后续历史、工作区、参考图归档才会自然通过权限检查。
 - 改动位置：`prisma/schema.prisma`、`src/lib/assets/storage.ts`、`src/app/api/assets/upload/route.ts`、`src/app/api/reference-albums/[id]/images/route.ts`、`scripts/workspace-duplicate-upload-smoke.ts`。
 - 怎么改：`Asset.hash` 改为 `owner_id + hash` 唯一；跨用户重复上传时创建当前用户 Asset，复用已有 `original_url/thumbnail_url`；图集上传统一走 `uploadSiteAsset`；新增 smoke 覆盖跨用户重复上传后历史可见并可加入工作区。
-- 验证结果：`site-upload-dedupe-smoke`、`workspace-duplicate-upload-smoke`、`reference-album-duplicate-upload-smoke`、TypeScript、lint、build 通过；数据库已备份后同步索引。
+- 验证结果：`site-upload-dedupe-smoke`、`workspace-duplicate-upload-smoke`、`reference-album-duplicate-upload-smoke`、`reference-album-duplicate-upload-integration`、TypeScript、lint、build 通过；数据库已备份后同步索引；已部署 BUILD_ID `b55InuVW1hopeSQRgTb-s`，公网真实复现确认历史可见和工作区加入成功。
 - 可复用经验：同一文件的“存储去重”不能等同于“业务对象去重”。凡是后续链路按 owner、权限、历史列表或归档对象判断的地方，跨用户复用必须给当前用户创建自己的业务记录，只复用底层文件链接。
