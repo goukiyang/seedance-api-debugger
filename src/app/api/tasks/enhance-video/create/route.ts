@@ -124,16 +124,23 @@ async function resolveSourceVideoUrl(
   task: SourceTask,
   providerOptions: { apiKey?: string; baseUrl?: string },
 ) {
+  let localUploadError: unknown = null;
+  try {
+    const uploaded = await uploadLocalVideoForEnhance(task, providerOptions);
+    if (uploaded) return uploaded;
+  } catch (error) {
+    localUploadError = error;
+  }
+
   if (task.result_video_url) {
     try {
       return validateEnhanceVideoUrl(task.result_video_url);
     } catch {
-      // Provider 临时 URL 不可用时，继续尝试本地缓存上传。
+      // Provider 临时 URL 不可用时，继续返回本地缓存上传时的真实错误。
     }
   }
 
-  const uploaded = await uploadLocalVideoForEnhance(task, providerOptions);
-  if (uploaded) return uploaded;
+  if (localUploadError instanceof Error) throw localUploadError;
 
   throw new Error('源任务没有可用于超分的视频 URL 或本地缓存文件');
 }

@@ -346,6 +346,33 @@ function headersToRecord(headers?: HeadersInit) {
   return record;
 }
 
+function normalizeUploadHeaders(value: unknown) {
+  if (value === undefined || value === null) return {};
+
+  if (isRecord(value)) {
+    return Object.entries(value).reduce<Record<string, string>>((acc, [key, headerValue]) => {
+      acc[key] = String(headerValue);
+      return acc;
+    }, {});
+  }
+
+  if (Array.isArray(value)) {
+    return value.reduce<Record<string, string>>((acc, item) => {
+      if (Array.isArray(item) && item.length >= 2) {
+        acc[String(item[0])] = String(item[1]);
+        return acc;
+      }
+      if (isRecord(item)) {
+        const key = stringFromScalar(item.key ?? item.name ?? item.header);
+        if (key) acc[key] = stringFromScalar(item.value ?? item.val ?? item.header_value);
+      }
+      return acc;
+    }, {});
+  }
+
+  return null;
+}
+
 function getHeaderValue(headers: Record<string, string>, key: string) {
   const normalized = key.toLowerCase();
   return Object.entries(headers).find(([currentKey]) => currentKey.toLowerCase() === normalized)?.[1];
@@ -455,7 +482,7 @@ export function parseAiMediaKitError(raw: unknown): AiMediaKitErrorDetail | unde
       || pickNestedString(raw, [['request_id'], ['requestId'], ['RequestId'], ['ResponseMetadata', 'RequestId']]),
   };
 
-  if (detail.code || detail.message || detail.type || detail.param || detail.request_id) {
+  if (detail.code || detail.message || detail.type || detail.param) {
     return detail;
   }
   return undefined;
@@ -623,8 +650,9 @@ export function parseRequestMediaUploadUrlResponse(raw: unknown): RequestMediaUp
     ['data', 'upload_headers'],
     ['result', 'upload_headers'],
   ]);
+  const normalizedUploadHeaders = normalizeUploadHeaders(uploadHeaders);
 
-  if (!fileId || !method || !uploadUrl || !isRecord(uploadHeaders)) {
+  if (!fileId || !method || !uploadUrl || normalizedUploadHeaders === null) {
     throw new AiMediaKitRequestError({
       error: { code: 'InvalidUploadUrlResponse', message: 'AI MediaKit 上传地址响应缺少必要字段' },
       raw: redactAiMediaKitLog(raw),
@@ -635,10 +663,7 @@ export function parseRequestMediaUploadUrlResponse(raw: unknown): RequestMediaUp
     file_id: fileId,
     method,
     upload_url: uploadUrl,
-    upload_headers: Object.entries(uploadHeaders).reduce<Record<string, string>>((acc, [key, value]) => {
-      acc[key] = String(value);
-      return acc;
-    }, {}),
+    upload_headers: normalizedUploadHeaders,
     raw,
   };
 }

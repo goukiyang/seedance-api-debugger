@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   assertEnhanceVideoSourceTaskAllowed,
   buildEnhanceVideoProviderInput,
@@ -109,6 +110,15 @@ async function main() {
     clientToken: 'local-task-002',
   });
   assert.equal('scene' in professionalInput, false);
+
+  const routeSource = fs.readFileSync(
+    `${process.cwd()}/src/app/api/tasks/enhance-video/create/route.ts`,
+    'utf8',
+  );
+  const localUploadIndex = routeSource.indexOf('const uploaded = await uploadLocalVideoForEnhance(task, providerOptions);');
+  const providerUrlIndex = routeSource.indexOf('if (task.result_video_url)');
+  assert.ok(localUploadIndex >= 0);
+  assert.ok(providerUrlIndex > localUploadIndex);
 
   console.log('enhance-video-create-route smoke passed');
 }

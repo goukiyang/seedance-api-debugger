@@ -56,6 +56,14 @@ async function main() {
   assert.equal(typeof routeModule.PUT, 'function');
   assert.equal(routeModule.dynamic, 'force-dynamic');
 
+  const publicConfigRouteSource = fs.readFileSync(
+    `${process.cwd()}/src/app/api/config/route.ts`,
+    'utf8',
+  );
+  assert.ok(publicConfigRouteSource.includes("export const dynamic = 'force-dynamic'"));
+  assert.ok(publicConfigRouteSource.includes("'Cache-Control': 'no-store, max-age=0'"));
+  assert.ok(publicConfigRouteSource.includes('getAiMediaKitApiSettings'));
+
   const clientSource = fs.readFileSync(
     `${process.cwd()}/src/app/admin/integrations/AdminIntegrationsClient.tsx`,
     'utf8',

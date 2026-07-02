@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getAiMediaKitApiSettings, safeAiMediaKitConfigDto } from '@/lib/integrations/aimediakit';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   const config = getProviderConfig();
   const aiMediaKitConfig = safeAiMediaKitConfigDto(await getAiMediaKitApiSettings());
@@ -16,6 +18,10 @@ export async function GET() {
       ready: aiMediaKitConfig.ready,
       base_url: aiMediaKitConfig.base_url,
       api_key_configured: aiMediaKitConfig.api_key_configured,
+    },
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, max-age=0',
     },
   });
 }

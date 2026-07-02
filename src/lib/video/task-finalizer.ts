@@ -475,6 +475,9 @@ export async function finalizeVideoTaskStatus(
     const errorMessage = normalizeProviderErrorMessage(statusResult.error_message);
     if (errorMessage) {
       updateData.error_message = errorMessage;
+    } else if (statusResult.local_status === 'succeeded') {
+      updateData.error_message = null;
+      updateData.error_code = null;
     }
 
     const isTerminal = isTerminalLocalStatus(statusResult.local_status);
