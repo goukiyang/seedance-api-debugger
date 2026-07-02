@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -11,6 +11,7 @@ import {
   PlayCircle,
   RefreshCcw,
   RotateCcw,
+  Sparkles,
 } from 'lucide-react';
 import type { TaskGenerationMode } from '@/types';
 import { TASK_GENERATION_MODE_LABELS } from '@/types';
@@ -155,6 +156,8 @@ interface ProviderBillingMeta {
   providerTaskId: string | null;
   clientRequestId: string | null;
 }
+
+type CompareSide = 'source' | 'enhanced';
 
 // Seedance 参考图资产元数据（与 generate/page.tsx 的 SelectedReferenceAsset 对应）
 interface ReferenceAssetMeta {
@@ -772,10 +775,22 @@ export default function TaskDetailPage() {
   const [copyingLink, setCopyingLink] = useState(false);
   const [browserDownloading, setBrowserDownloading] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [enhanceSourceTask, setEnhanceSourceTask] = useState<VideoTask | null>(null);
+  const [enhanceSourceLoading, setEnhanceSourceLoading] = useState(false);
+  const [enhanceSourceLoadError, setEnhanceSourceLoadError] = useState<string | null>(null);
+  const sourceCompareVideoRef = useRef<HTMLVideoElement | null>(null);
+  const enhancedCompareVideoRef = useRef<HTMLVideoElement | null>(null);
+  const compareSyncingRef = useRef(false);
 
   // 显示原始响应
   const [showCreateResponse, setShowCreateResponse] = useState(false);
   const [showStatusResponse, setShowStatusResponse] = useState(false);
+
+  const currentTaskParams = parseJsonObject(task?.params_json);
+  const currentIsEnhanceTask = Boolean(task && (task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit'));
+  const currentEnhanceSourceTaskId = currentIsEnhanceTask
+    ? pickStringValue(currentTaskParams, ['source_task_id'])
+    : null;
 
   const fetchTask = useCallback(async (forceProviderRefresh = false): Promise<VideoTask | null> => {
     try {
@@ -955,6 +970,44 @@ export default function TaskDetailPage() {
     return () => clearInterval(interval);
   }, [fetchTask, publicDeliveryPollStartedAt]);
 
+  useEffect(() => {
+    if (!currentEnhanceSourceTaskId || currentEnhanceSourceTaskId === taskId) {
+      setEnhanceSourceTask(null);
+      setEnhanceSourceLoading(false);
+      setEnhanceSourceLoadError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setEnhanceSourceLoading(true);
+    setEnhanceSourceLoadError(null);
+
+    fetch(`/api/video/status/${currentEnhanceSourceTaskId}`, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.message || data.error || `源任务加载失败：HTTP ${res.status}`);
+        }
+        if (!cancelled) setEnhanceSourceTask(data as VideoTask);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setEnhanceSourceTask(null);
+          setEnhanceSourceLoadError(error instanceof Error ? error.message : '源任务加载失败');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setEnhanceSourceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEnhanceSourceTaskId, taskId]);
+
   const queryStatus = async () => {
     setQuerying(true);
     await fetchTask(true);
@@ -1076,6 +1129,13 @@ export default function TaskDetailPage() {
     sourceTask.public_video_url || new URL(`/api/video/play/${sourceTask.id}`, window.location.origin).toString()
   );
 
+  const taskVideoSource = (sourceTask: VideoTask | null) => {
+    if (!sourceTask) return '';
+    if (sourceTask.public_video_url) return sourceTask.public_video_url;
+    if (sourceTask.local_video_path) return `/api/video/play/${sourceTask.id}`;
+    return sourceTask.result_video_url || '';
+  };
+
   // 复制当前最稳的视频入口：对象存储优先，其次同源播放 API。
   const handleCopyUrl = async () => {
     if (!task) return;
@@ -1177,14 +1237,52 @@ export default function TaskDetailPage() {
 
   // 获取视频播放源
   const getVideoSrc = () => {
-    if (!task) return '';
-    if (task.public_video_url) {
-      return task.public_video_url;
+    return taskVideoSource(task);
+  };
+
+  const compareVideos = (side: CompareSide) => {
+    if (side === 'source') {
+      return {
+        from: sourceCompareVideoRef.current,
+        to: enhancedCompareVideoRef.current,
+      };
     }
-    if (task.local_video_path) {
-      return `/api/video/play/${task.id}`;
+    return {
+      from: enhancedCompareVideoRef.current,
+      to: sourceCompareVideoRef.current,
+    };
+  };
+
+  const syncCompareTime = (side: CompareSide) => {
+    const { from, to } = compareVideos(side);
+    if (!from || !to || compareSyncingRef.current) return;
+    compareSyncingRef.current = true;
+    try {
+      if (Number.isFinite(from.currentTime) && Math.abs(to.currentTime - from.currentTime) > 0.25) {
+        to.currentTime = from.currentTime;
+      }
+    } finally {
+      setTimeout(() => {
+        compareSyncingRef.current = false;
+      }, 0);
     }
-    return task.result_video_url || '';
+  };
+
+  const handleComparePlay = (side: CompareSide) => {
+    syncCompareTime(side);
+    const { to } = compareVideos(side);
+    if (to?.paused) {
+      void to.play().catch(() => undefined);
+    }
+  };
+
+  const handleComparePause = (side: CompareSide) => {
+    const { to } = compareVideos(side);
+    if (to && !to.paused) to.pause();
+  };
+
+  const handleCompareSeeked = (side: CompareSide) => {
+    syncCompareTime(side);
   };
 
   if (loading) {
@@ -1265,7 +1363,7 @@ export default function TaskDetailPage() {
     }
   })();
 
-  const taskParams = parseJsonObject(task.params_json);
+  const taskParams = currentTaskParams;
   const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
   const enhanceSourceTaskId = pickStringValue(taskParams, ['source_task_id']);
   const enhanceToolVersion = pickStringValue(taskParams, ['tool_version']);
@@ -1274,6 +1372,13 @@ export default function TaskDetailPage() {
   const enhanceFps = pickNumberValue(taskParams, ['fps']);
   const providerBilling = extractProviderBilling(task);
   const hasResultVideo = task.local_status === 'succeeded' && !!videoSrc && !isPublicVideoPreparing;
+  const enhanceSourceVideoSrc = taskVideoSource(enhanceSourceTask);
+  const showEnhanceCompare = isEnhanceTask && hasResultVideo && Boolean(enhanceSourceVideoSrc);
+  const enhanceSourceNotice = isEnhanceTask && hasResultVideo && !enhanceSourceVideoSrc
+    ? enhanceSourceLoading
+      ? '正在加载源视频，加载完成后会显示左右对比。'
+      : (enhanceSourceLoadError || '源视频不可用，暂时只显示超分结果。')
+    : '';
   const canUseVideoActions = hasPlayableVideo && !isPublicVideoPreparing;
   const isProcessing = ['submitted', 'running'].includes(task.local_status);
   const modeLabel = TASK_GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
@@ -1498,9 +1603,50 @@ export default function TaskDetailPage() {
                 </div>
               </div>
 
-              <div className="task-result-stage">
+              <div className={`task-result-stage ${showEnhanceCompare ? 'task-result-compare-stage' : ''}`}>
                 {hasResultVideo ? (
-                  <>
+                  showEnhanceCompare ? (
+                    <>
+                      <div className="task-compare-video-panel">
+                        <span className="task-compare-badge">原视频</span>
+                        <video
+                          key={enhanceSourceVideoSrc}
+                          ref={sourceCompareVideoRef}
+                          controls
+                          playsInline
+                          muted
+                          preload="metadata"
+                          src={enhanceSourceVideoSrc}
+                          onPlay={() => handleComparePlay('source')}
+                          onPause={() => handleComparePause('source')}
+                          onSeeked={() => handleCompareSeeked('source')}
+                        >
+                          您的浏览器不支持视频播放
+                        </video>
+                      </div>
+                      <div className="task-compare-video-panel">
+                        <span className="task-compare-badge task-compare-badge-enhance">
+                          <Sparkles size={13} aria-hidden="true" />
+                          超分视频
+                        </span>
+                        <video
+                          key={videoSrc}
+                          ref={enhancedCompareVideoRef}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          src={videoSrc}
+                          onError={() => setVideoError(true)}
+                          onCanPlay={() => setVideoError(false)}
+                          onPlay={() => handleComparePlay('enhanced')}
+                          onPause={() => handleComparePause('enhanced')}
+                          onSeeked={() => handleCompareSeeked('enhanced')}
+                        >
+                          您的浏览器不支持视频播放
+                        </video>
+                      </div>
+                    </>
+                  ) : (
                     <video
                       key={videoSrc}
                       controls
@@ -1512,7 +1658,7 @@ export default function TaskDetailPage() {
                     >
                       您的浏览器不支持视频播放
                     </video>
-                  </>
+                  )
                 ) : (
                   <div className={`task-result-empty task-result-empty-${task.local_status}`}>
                     <strong>{resultStateTitle}</strong>
@@ -1526,6 +1672,12 @@ export default function TaskDetailPage() {
                   </div>
                 )}
               </div>
+
+              {enhanceSourceNotice && (
+                <div className="task-result-storage-row task-result-compare-notice">
+                  <span>{enhanceSourceNotice}</span>
+                </div>
+              )}
 
               <div className="task-result-storage-row">
                 <span>{resultStorageText}</span>

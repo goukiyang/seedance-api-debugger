@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-07-02 - 用户找不到入口时要把入口跟到对象上
+
+- 问题/背景：AI MediaKit 视频超分先做了后台配置、独立 `/generate/enhance` 页面和任务详情入口，但用户仍反馈“没有找到入口”“在哪里做超分”，并要求改成资产卡片 hover 直接发起。
+- 诱因/根因：前一版把“功能存在”和“用户能在真实工作流里自然发现”混在一起；独立页面能证明能力上线，但用户真实路径是先看到某个视频资产，再决定是否超分，不会先去理解一个新功能页。
+- 当时思路：把主入口放到视频资产封面上，独立页只作为补充筛选页；超分结果必须在列表、详情和对比结果里持续可识别，不能和普通生成混在一起。
+- 改动位置：`src/app/api/assets/library/route.ts`、`src/app/assets/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/globals.css`、`scripts/enhance-video-entry-smoke.ts`、`tasks/todo.md`。
+- 怎么改：资产接口返回 `isEnhanceTask/canEnhanceVideo/enhanceSourceTaskId`；普通成功视频 hover 出“超分”按钮和分辨率/帧率菜单；超分结果封面左上角常驻“超分”；超分任务详情页改成原视频和超分视频左右同步播放。
+- 验证结果：专项 smoke、`tsc`、`lint`、本地生产 build、`youdoo-sites build/restart/status sd2` 均通过；公网静态 chunk 命中新入口和对比展示；公网配置 ready。真实登录态 hover 截图未完成，因为当前 Chrome 停在登录页，没有可复用登录态。
+- 可复用经验：用户可见能力不能只用“有路由 / 有按钮 / 有页面”验收；必须按入口 -> 操作 -> 等待 -> 结果 -> 失败恢复的真实路径检查。对象型能力优先跟随对象出现，例如视频超分应该跟着视频卡片走，而不是只放在一个独立功能页里。
+
 ## 2026-06-27 - 多 checkout 功能上线不能整分支 merge
 
 - 问题/背景：AI MediaKit 视频超分功能先在旧 checkout 的 `codex/mediakit-video-enhance` 分支完成，再要推进到真实线上工作树 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。

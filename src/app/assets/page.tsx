@@ -3,12 +3,14 @@
 
 import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, X } from 'lucide-react';
+import { Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
 } from '@/lib/video/download-client';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
+import { taskDetailHref } from '@/lib/navigation/return-to';
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetType = 'all' | 'video' | 'image' | 'reference';
@@ -18,6 +20,8 @@ type AssetGroup = 'date' | 'project' | 'user';
 type AssetCardSize = 'standard' | 'compact';
 type AssetBulkTarget = 'video_project' | 'album';
 type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `reference_image:${string}`;
+type EnhanceResolution = '720p' | '1080p' | '2k' | '4k';
+type EnhanceFps = 'none' | '30' | '60';
 
 type SessionUser = {
   id: string;
@@ -77,6 +81,12 @@ type AssetLibraryItem = {
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  provider: string | null;
+  generationMode: string | null;
+  videoCardId: string | null;
+  isEnhanceTask: boolean;
+  canEnhanceVideo: boolean;
+  enhanceSourceTaskId: string | null;
   status: string;
   retentionStatus: string | null;
   createdAt: string;
@@ -371,8 +381,13 @@ function AssetsPageContent() {
   const [targetAlbumId, setTargetAlbumId] = useState(() => readSavedTargetAlbumId());
   const [moving, setMoving] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [aiMediaKitReady, setAiMediaKitReady] = useState<boolean | null>(null);
+  const [enhanceMenuItemId, setEnhanceMenuItemId] = useState<AssetLibraryItemId | null>(null);
+  const [enhanceResolution, setEnhanceResolution] = useState<EnhanceResolution>('1080p');
+  const [enhanceFps, setEnhanceFps] = useState<EnhanceFps>('none');
+  const [enhanceSubmittingId, setEnhanceSubmittingId] = useState<AssetLibraryItemId | null>(null);
 
-  const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLButtonElement>());
+  const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isAdmin = user?.role === 'admin';
@@ -446,6 +461,22 @@ function AssetsPageContent() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    fetch('/api/config', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!cancelled) setAiMediaKitReady(data.aimediakit_enhance_video?.ready === true);
+      })
+      .catch(() => {
+        if (!cancelled) setAiMediaKitReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -580,7 +611,7 @@ function AssetsPageContent() {
     };
   }, [moveProjectId]);
 
-  const setCardRef = (id: AssetLibraryItemId) => (node: HTMLButtonElement | null) => {
+  const setCardRef = (id: AssetLibraryItemId) => (node: HTMLDivElement | null) => {
     if (node) cardRefs.current.set(id, node);
     else cardRefs.current.delete(id);
   };
@@ -620,6 +651,82 @@ function AssetsPageContent() {
       return;
     }
     setActiveItem(item);
+  };
+
+  const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, item: AssetLibraryItem) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    setActiveItem(item);
+  };
+
+  const currentAssetReturnTo = () => {
+    if (typeof window === 'undefined') return '/assets?type=video';
+    return `${window.location.pathname}${window.location.search || ''}`;
+  };
+
+  const enhanceEstimatedCost = (item: AssetLibraryItem) => {
+    if (!item.duration) return null;
+    return calculateEnhanceVideoEstimatedCostClient({
+      duration: item.duration,
+      resolution: enhanceResolution,
+      toolVersion: 'standard',
+      fps: enhanceFps === 'none' ? null : Number(enhanceFps),
+    });
+  };
+
+  const enhanceDisabledReason = (item: AssetLibraryItem) => {
+    if (aiMediaKitReady === null) return '正在检查配置';
+    if (!aiMediaKitReady) return 'AI MediaKit 未就绪';
+    if (!item.canEnhanceVideo) return '当前视频不可超分';
+    if (!item.taskId) return '缺少源任务';
+    if (!item.videoCardId) return '缺少视频卡';
+    if (!item.duration) return '缺少时长';
+    return '';
+  };
+
+  const createEnhanceTask = async (item: AssetLibraryItem) => {
+    const disabledReason = enhanceDisabledReason(item);
+    if (disabledReason || !item.taskId || enhanceSubmittingId) {
+      if (disabledReason) setError(disabledReason);
+      return;
+    }
+    setEnhanceSubmittingId(item.id);
+    setError('');
+    setMessage('');
+    try {
+      const selectedFps = enhanceFps === 'none' ? null : Number(enhanceFps);
+      const response = await fetch('/api/tasks/enhance-video/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_task_id: item.taskId,
+          video_card_id: item.videoCardId,
+          tool_version: 'standard',
+          scene: 'aigc',
+          resolution: enhanceResolution,
+          fps: selectedFps || undefined,
+          duration: item.duration,
+          idempotency_key: [
+            'asset-enhance',
+            item.taskId,
+            enhanceResolution,
+            selectedFps || 'source_fps',
+          ].join(':'),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || data.error || '创建超分任务失败');
+      }
+      setMessage('已创建超分任务，正在打开对比页');
+      setEnhanceMenuItemId(null);
+      window.location.href = taskDetailHref(data.id, currentAssetReturnTo());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建超分任务失败');
+    } finally {
+      setEnhanceSubmittingId(null);
+    }
   };
 
   const beginTouchSelect = (item: AssetLibraryItem) => {
@@ -1154,40 +1261,113 @@ function AssetsPageContent() {
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
                 const specText = formatAssetSpec(item);
+                const enhanceMenuOpen = enhanceMenuItemId === item.id;
+                const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
+                const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
                 return (
-                  <button
+                  <div
                     key={item.id}
                     ref={setCardRef(item.id)}
-                    type="button"
                     data-asset-card="true"
-                    className={`asset-card asset-card-${cardSize} ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    className={`asset-card asset-card-${cardSize} ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''} ${enhanceMenuOpen ? 'enhance-menu-open' : ''}`}
                     onClick={(event) => handleCardClick(event, item)}
+                    onKeyDown={(event) => handleCardKeyDown(event, item)}
                     onPointerDown={(event) => {
                       if (event.pointerType === 'touch') beginTouchSelect(item);
                     }}
                     onPointerUp={clearTouchTimer}
                     onPointerCancel={clearTouchTimer}
                   >
-                    <span
+                    <button
+                      type="button"
                       className="asset-card-check"
+                      aria-label={selected ? '取消选择资产' : '选择资产'}
                       onClick={(event) => {
                         event.stopPropagation();
                         toggleItem(item.id);
                       }}
                     >
                       {selected ? '✓' : ''}
-                    </span>
+                    </button>
                     <span className="asset-card-media">
                       {item.thumbnailUrl ? (
                         <img src={item.thumbnailUrl} alt={item.title} loading="lazy" />
                       ) : (
                         <span className="asset-card-empty">{statusLabel(item.status)}</span>
                       )}
+                      {item.isEnhanceTask && (
+                        <span className="asset-card-badge asset-card-badge-enhance">
+                          <Sparkles size={12} aria-hidden="true" />
+                          超分
+                        </span>
+                      )}
                       {duration && <span className="asset-card-duration">{duration}</span>}
-                      <span className="asset-card-hover">
-                        <Eye size={16} />
-                        查看
+                      <span className={`asset-card-hover ${item.canEnhanceVideo ? 'asset-card-hover-actions' : ''}`}>
+                        <button
+                          type="button"
+                          className="asset-card-hover-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setActiveItem(item);
+                          }}
+                        >
+                          <Eye size={16} aria-hidden="true" />
+                          查看
+                        </button>
+                        {item.canEnhanceVideo && (
+                          <button
+                            type="button"
+                            className="asset-card-hover-button asset-card-hover-enhance"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEnhanceMenuItemId((current) => current === item.id ? null : item.id);
+                            }}
+                          >
+                            <Sparkles size={16} aria-hidden="true" />
+                            超分
+                          </button>
+                        )}
                       </span>
+                      {enhanceMenuOpen && (
+                        <span className="asset-card-enhance-menu" onClick={(event) => event.stopPropagation()}>
+                          <label>
+                            <span>分辨率</span>
+                            <select
+                              value={enhanceResolution}
+                              onChange={(event) => setEnhanceResolution(event.target.value as EnhanceResolution)}
+                            >
+                              <option value="720p">720p</option>
+                              <option value="1080p">1080p</option>
+                              <option value="2k">2K</option>
+                              <option value="4k">4K</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span>帧率</span>
+                            <select
+                              value={enhanceFps}
+                              onChange={(event) => setEnhanceFps(event.target.value as EnhanceFps)}
+                            >
+                              <option value="none">不插帧</option>
+                              <option value="30">30 fps</option>
+                              <option value="60">60 fps</option>
+                            </select>
+                          </label>
+                          <span className="asset-card-enhance-cost">
+                            预估冻结 {estimatedEnhanceCost === null ? '-' : `${estimatedEnhanceCost} 点`}
+                          </span>
+                          {enhanceReason && <span className="asset-card-enhance-warning">{enhanceReason}</span>}
+                          <button
+                            type="button"
+                            onClick={() => void createEnhanceTask(item)}
+                            disabled={Boolean(enhanceReason) || enhanceSubmittingId === item.id}
+                          >
+                            {enhanceSubmittingId === item.id ? '创建中...' : '开始超分'}
+                          </button>
+                        </span>
+                      )}
                     </span>
                     <span className="asset-card-meta">
                       <strong>{shortText(item.title, '未命名资产', 34)}</strong>
@@ -1201,7 +1381,7 @@ function AssetsPageContent() {
                         />
                       )}
                     </span>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -1239,7 +1419,7 @@ function AssetsPageContent() {
         <aside className="asset-detail-drawer" aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
-              <span>{activeItem.kind === 'video' ? '视频资产' : '图片资产'}</span>
+              <span>{activeItem.isEnhanceTask ? '超分视频资产' : activeItem.kind === 'video' ? '视频资产' : '图片资产'}</span>
               <h2>{shortText(activeItem.title, '资产详情', 42)}</h2>
             </div>
             <button type="button" onClick={() => setActiveItem(null)} aria-label="关闭详情">
@@ -1249,6 +1429,12 @@ function AssetsPageContent() {
           <div
             className={`asset-detail-preview asset-detail-preview-${activeItem.kind} ${activePreviewIsPortrait ? 'is-portrait' : ''}`}
           >
+            {activeItem.isEnhanceTask && (
+              <span className="asset-detail-preview-badge">
+                <Sparkles size={12} aria-hidden="true" />
+                超分
+              </span>
+            )}
             {activeItem.kind === 'video' && activeItem.previewUrl ? (
               <video
                 src={activeItem.previewUrl}

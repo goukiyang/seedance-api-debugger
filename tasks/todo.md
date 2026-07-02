@@ -38,14 +38,36 @@ Review：已上线到生产 BUILD_ID `9dEA89njqrKrwgpurV0vr`。`youdoo-sites bui
 - [x] 确认 live 工作树是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，当前分支 `codex/v12-full-todo` 与 `origin/codex/v12-full-todo` 完全一致。
 - [x] 确认线上已包含后台配置入口、AI MediaKit 管理 API、超分创建 API、Provider 状态分发、任务详情/视频卡超分入口。
 - [x] 2026-06-28 返修入口：新增 `/generate/enhance` 视频超分直达页，生成页顶部、侧边栏和控制台都能进入；页面直接列出可超分的成功视频，并复用现有超分创建组件。
-- [ ] 在 `/admin/integrations` 或 `/admin/integrations/aimediakit` 录入真实 AI MediaKit API Key；密钥只走后台输入框，不写入聊天、todo、日志或截图。
-- [ ] 录入后确认公网 `/api/config` 返回 `aimediakit_enhance_video.ready=true`、`api_key_configured=true`，且响应中不出现 API Key 明文。
-- [ ] 准备一条已成功生成、可公网访问、时长较短的视频作为源任务；优先用已有成功任务，避免为了测试先额外生成视频。
-- [ ] 从任务详情页或视频卡结果区点击“超分/增强”，创建一条真实超分任务；记录本地任务 ID、Provider 任务 ID、冻结点数和预算记录。
-- [ ] 轮询到终态：成功时验证结果视频可播放、已转存到本地/对象存储、缩略图和下载可用；失败时验证错误信息脱敏、冻结点数/预算自动返还。
-- [ ] 对比源视频和超分视频：确认页面能区分“原视频”和“超分结果”，普通生成链路、火山 IP 链路和 Seedance 链路没有被误改。
+- [x] 在 `/admin/integrations` 或 `/admin/integrations/aimediakit` 录入真实 AI MediaKit API Key；密钥只走后台输入框，不写入聊天、todo、日志或截图。
+- [x] 录入后确认公网 `/api/config` 返回 `aimediakit_enhance_video.ready=true`、`api_key_configured=true`，且响应中不出现 API Key 明文。
+- [x] 准备一条已成功生成、可公网访问、时长较短的视频作为源任务；优先用已有成功任务，避免为了测试先额外生成视频。
+- [x] 从任务详情页或视频卡结果区点击“超分/增强”，创建一条真实超分任务；记录本地任务 ID、Provider 任务 ID、冻结点数和预算记录。
+- [x] 轮询到终态：成功时验证结果视频可播放、已转存到本地/对象存储、缩略图和下载可用；失败时验证错误信息脱敏、冻结点数/预算自动返还。
+- [x] 对比源视频和超分视频：确认页面能区分“原视频”和“超分结果”，普通生成链路、火山 IP 链路和 Seedance 链路没有被误改。
+
+Review：2026-07-02 已用真实 Key 在公网创建 4 秒超分任务 `cmr2z696l0002ou0zzp0m0054`，Provider 任务 `amk-tool-enhance-video-466388192002` 成功，结果已本地化并写入对象存储；冻结 40 点已结算为实际扣除 40 点，错误字段残留已修复。仍需补产品展示闭环：用户在资产页如何发现超分、如何区分超分内容、如何对比原视频和超分视频。
 
 停止条件：没有 API Key、资源包/余额不足、Provider 返回模型/能力未开通、任务卡在排队超过供应商正常窗口、或出现签名 URL/密钥泄露风险时，立即停止真实付费测试并先复盘。
+
+## 2026-07-02 AI MediaKit 视频超分资产页轻入口与对比展示
+
+目标：把超分从“独立入口”调整为资产管理里的自然操作。用户在 `/assets?type=video` 看视频资产时，鼠标移到视频封面即可发起超分；超分结果在列表和详情里都能一眼区分，并能和源视频左右同步对比播放。
+
+- [x] `/api/assets/library` 的视频任务资产返回 `provider`、`generation_mode`、`video_card_id`、`isEnhanceTask`、`canEnhanceVideo`、`enhanceSourceTaskId`，用于前端判断普通生成、超分结果和可超分源视频。
+- [x] `/assets` 视频卡片封面左上角给超分结果加“超分”标注；普通生成不加标，避免列表噪音。
+- [x] `/assets` 普通成功视频 hover 时显示“超分”按钮；点击后展开轻量二级菜单，选择目标分辨率和帧率后直接创建超分任务。
+- [x] 超分菜单默认值保持省脑：分辨率默认 `1080p`，帧率默认“不插帧”；菜单里显示预计冻结点数，提交中禁止重复点击。
+- [x] 超分创建成功后跳转到新超分任务详情页；失败时在当前卡片附近展示可恢复错误，不吞掉错误也不暴露密钥、签名 URL 或内部路径。
+- [x] `/tasks/[id]` 遇到超分任务时，主结果区改为原视频 / 超分视频左右对比；两个视频播放、暂停、拖动进度尽量同步。
+- [x] 对比页左侧明确标“原视频”，右侧明确标“超分视频”；超分视频封面和结果区左上角都保留“超分”标注。
+- [x] 保留现有 `/generate/enhance` 作为补充筛选页，但主路径以资产卡片 hover 操作为准。
+- [x] 补回归检查：资产页源码包含 hover 超分入口、超分标注、分辨率/帧率菜单；任务详情源码包含左右对比和同步播放逻辑。
+- [x] 通过 smoke、lint、build；部署后公网验证 `/assets?type=video` 生产包包含“超分”和对比展示逻辑，公网 `/api/config` 返回 AI MediaKit ready。
+- [ ] 真实登录态 hover 截图验收：当前前台 Chrome 的 `sd2.youdoodesign.com` 标签停在 `/login?next=/admin/integrations`，没有可复用登录态；登录后需补一次资产页实际 hover 菜单和超分详情对比页截图验收。
+
+体验原则：入口跟着视频走，不让用户先理解“超分功能在哪里”；超分结果必须持续可识别，不能混在普通生成里；对比页只服务一个判断：超分后有没有变好。
+
+Review：2026-07-02 已上线到生产 BUILD_ID `eW9697UV1jcc4VUslEVPw`。本轮把主入口改到资产管理页：普通成功视频封面 hover 后出现“查看 / 超分”，超分二级菜单可选 `720p/1080p/2K/4K` 和“不插帧/30fps/60fps”，并显示预计冻结点数；超分结果卡片和详情预览左上角持续显示“超分”。任务详情页对 AI MediaKit 超分任务改为左右对比播放，左侧“原视频”、右侧“超分视频”，播放、暂停、拖动进度会同步。验证通过：`npx tsx scripts/enhance-video-entry-smoke.ts`、`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build/restart/status sd2`；公网 `/api/config` 200 且 `aimediakit_enhance_video.ready=true`，公网 assets/task 静态 chunk 命中 `asset-card-hover-enhance`、`asset-card-badge`、`task-result-compare-stage`、`原视频`、`超分视频`。受控无登录浏览器访问 `/assets?type=video&status=succeeded` 被正确跳转到 `/login`；真实登录态 hover 截图未完成，原因是当前 Chrome 没有可复用登录态。
 
 ## 图集和单图共享闭环 Todo
 

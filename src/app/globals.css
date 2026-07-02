@@ -2791,6 +2791,52 @@ a {
   width: 100%;
 }
 
+.task-result-compare-stage {
+  aspect-ratio: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  min-height: 360px;
+}
+
+.task-compare-video-panel {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 320px;
+  background: #0f172a;
+}
+
+.task-compare-video-panel video {
+  max-height: 64vh;
+}
+
+.task-compare-badge {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: #e5e7eb;
+  background: rgba(15, 23, 42, 0.82);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.task-compare-badge-enhance {
+  color: #ecfeff;
+  background: rgba(13, 148, 136, 0.88);
+}
+
+.task-result-compare-notice {
+  margin-top: 10px;
+}
+
 .task-result-empty {
   align-items: center;
   color: #cbd5e1;
@@ -4352,6 +4398,14 @@ a {
 
   .task-result-stage,
   .task-result-empty {
+    min-height: 220px;
+  }
+
+  .task-result-compare-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .task-compare-video-panel {
     min-height: 220px;
   }
 
@@ -16523,7 +16577,7 @@ a {
   position: absolute;
   z-index: 3;
   top: 8px;
-  left: 8px;
+  right: 8px;
   display: grid;
   place-items: center;
   width: 22px;
@@ -16539,6 +16593,24 @@ a {
 .asset-card.selected .asset-card-check {
   border-color: oklch(0.74 0.12 188);
   background: oklch(0.74 0.12 188);
+}
+
+.asset-card-badge,
+.asset-detail-preview-badge {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  color: oklch(0.98 0.012 188);
+  background: oklch(0.49 0.12 188 / 0.92);
+  box-shadow: 0 6px 20px oklch(0.08 0.01 250 / 0.28);
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .asset-card-media {
@@ -16588,8 +16660,100 @@ a {
   transition: opacity 180ms ease;
 }
 
-.asset-card:hover .asset-card-hover {
+.asset-card-hover-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 74px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid oklch(0.88 0.02 245 / 0.3);
+  border-radius: 8px;
+  color: oklch(0.97 0.01 245);
+  background: oklch(0.17 0.012 250 / 0.82);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.asset-card-hover-enhance {
+  border-color: oklch(0.72 0.12 188 / 0.48);
+  background: oklch(0.42 0.11 188 / 0.88);
+}
+
+.asset-card:hover .asset-card-hover,
+.asset-card:focus-within .asset-card-hover,
+.asset-card.enhance-menu-open .asset-card-hover {
   opacity: 1;
+}
+
+.asset-card-enhance-menu {
+  position: absolute;
+  z-index: 6;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid oklch(0.68 0.095 188 / 0.58);
+  border-radius: 8px;
+  color: oklch(0.92 0.012 245);
+  background: oklch(0.14 0.012 250 / 0.95);
+  box-shadow: 0 12px 26px oklch(0.05 0.01 250 / 0.42);
+}
+
+.asset-card-enhance-menu label,
+.asset-card-enhance-cost,
+.asset-card-enhance-warning {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.asset-card-enhance-menu label span,
+.asset-card-enhance-cost,
+.asset-card-enhance-warning {
+  color: oklch(0.74 0.018 245);
+}
+
+.asset-card-enhance-menu select {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid oklch(0.36 0.02 245);
+  border-radius: 7px;
+  color: oklch(0.94 0.012 245);
+  background: oklch(0.19 0.012 250);
+  font-size: 12px;
+}
+
+.asset-card-enhance-cost {
+  align-content: center;
+}
+
+.asset-card-enhance-warning {
+  grid-column: 1 / -1;
+  color: oklch(0.81 0.12 63);
+}
+
+.asset-card-enhance-menu > button {
+  grid-column: 1 / -1;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  color: oklch(0.98 0.012 188);
+  background: oklch(0.52 0.12 188);
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.asset-card-enhance-menu > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .asset-card-meta {
@@ -16758,6 +16922,7 @@ a {
 }
 
 .asset-detail-preview {
+  position: relative;
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -16765,6 +16930,11 @@ a {
   border: 1px solid oklch(0.29 0.018 245);
   border-radius: 8px;
   background: oklch(0.11 0.008 250);
+}
+
+.asset-detail-preview-badge {
+  top: 10px;
+  left: 10px;
 }
 
 .asset-detail-preview video,

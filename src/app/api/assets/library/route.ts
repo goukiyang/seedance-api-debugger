@@ -48,6 +48,12 @@ type LibraryItem = {
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  provider: string | null;
+  generationMode: string | null;
+  videoCardId: string | null;
+  isEnhanceTask: boolean;
+  canEnhanceVideo: boolean;
+  enhanceSourceTaskId: string | null;
   status: string;
   retentionStatus: string | null;
   createdAt: string;
@@ -117,6 +123,8 @@ function isDownloadableTask(task: {
 
 function serializeTask(task: {
   id: string;
+  provider: string;
+  generation_mode: string;
   prompt: string;
   local_status: string;
   public_video_url: string | null;
@@ -126,6 +134,8 @@ function serializeTask(task: {
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  video_card_id: string | null;
+  params_json: string | null;
   retention_status: string;
   created_at: Date;
   completed_at: Date | null;
@@ -136,6 +146,18 @@ function serializeTask(task: {
   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
   const owner = userSummary(task.owner || task.user);
+  const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+  let enhanceSourceTaskId: string | null = null;
+  if (isEnhanceTask && task.params_json) {
+    try {
+      const params = JSON.parse(task.params_json) as { source_task_id?: unknown };
+      enhanceSourceTaskId = typeof params.source_task_id === 'string' && params.source_task_id.trim()
+        ? params.source_task_id.trim()
+        : null;
+    } catch {
+      enhanceSourceTaskId = null;
+    }
+  }
   return {
     id: `video_task:${task.id}`,
     kind: 'video',
@@ -151,6 +173,12 @@ function serializeTask(task: {
     duration: task.duration,
     ratio: task.ratio,
     resolution: task.resolution,
+    provider: task.provider,
+    generationMode: task.generation_mode,
+    videoCardId: task.video_card_id,
+    isEnhanceTask,
+    canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
+    enhanceSourceTaskId,
     status: task.local_status,
     retentionStatus: task.retention_status,
     createdAt: task.created_at.toISOString(),
@@ -189,6 +217,12 @@ function serializeAsset(asset: {
     duration: null,
     ratio: asset.width && asset.height ? `${asset.width}:${asset.height}` : null,
     resolution: null,
+    provider: null,
+    generationMode: null,
+    videoCardId: null,
+    isEnhanceTask: false,
+    canEnhanceVideo: false,
+    enhanceSourceTaskId: null,
     status: asset.status,
     retentionStatus: null,
     createdAt: asset.created_at.toISOString(),
@@ -227,6 +261,12 @@ function serializeReferenceImage(image: {
     duration: null,
     ratio: null,
     resolution: null,
+    provider: null,
+    generationMode: null,
+    videoCardId: null,
+    isEnhanceTask: false,
+    canEnhanceVideo: false,
+    enhanceSourceTaskId: null,
     status: image.status,
     retentionStatus: null,
     createdAt: image.created_at.toISOString(),
@@ -325,6 +365,8 @@ async function loadVideoItems(options: {
       take,
       select: {
         id: true,
+        provider: true,
+        generation_mode: true,
         prompt: true,
         local_status: true,
         public_video_url: true,
@@ -334,6 +376,8 @@ async function loadVideoItems(options: {
         duration: true,
         ratio: true,
         resolution: true,
+        video_card_id: true,
+        params_json: true,
         retention_status: true,
         created_at: true,
         completed_at: true,
