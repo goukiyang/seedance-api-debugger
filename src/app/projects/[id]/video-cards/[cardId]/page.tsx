@@ -294,6 +294,7 @@ export default function VideoCardDetailPage() {
 
   const summary = videoCard.summary;
   const canGenerate = permissions.can_generate && videoCard.status !== 'sealed' && videoCard.status !== 'archived';
+  const isAdmin = permissions.project_role === 'admin';
   const primaryBranch = branches.find((branch) => branch.is_primary);
 
   return (
@@ -537,7 +538,7 @@ export default function VideoCardDetailPage() {
                         </button>
                       </div>
                     )}
-                    {canGenerate && (
+                    {canGenerate && isAdmin && (
                       <EnhanceVideoAction task={task} />
                     )}
                   </div>

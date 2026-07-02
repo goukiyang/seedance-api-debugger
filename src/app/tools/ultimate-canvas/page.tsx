@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 export default async function UltimateCanvasPage() {
   const user = await getSession();
   if (!user) redirect('/login?next=/tools/ultimate-canvas');
+  if (user.role !== 'admin') redirect('/generate');
 
   return (
     <div className="ultimate-canvas-page">

@@ -117,6 +117,8 @@ function parseJsonBody(raw: string): unknown {
 }
 
 export default function CutoutPage() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loadingCap, setLoadingCap] = useState(false);
   const [capabilityMessage, setCapabilityMessage] = useState<string | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -140,6 +142,34 @@ export default function CutoutPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    let isActive = true;
+
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isActive) return;
+        const user = (data as { user?: { role?: string } | null }).user;
+        const admin = user?.role === 'admin';
+        setIsAdmin(admin);
+        setAuthChecked(true);
+        if (!admin) {
+          window.location.assign(user ? '/generate' : '/login?next=/cutout');
+        }
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setAuthChecked(true);
+        window.location.assign('/login?next=/cutout');
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authChecked || !isAdmin) return;
+
     let isActive = true;
     setLoadingCap(true);
     setCapabilityMessage(null);
@@ -181,11 +211,13 @@ export default function CutoutPage() {
         if (Number.isFinite(cap?.limits?.max_upload_mb || NaN)) {
           setMaxUploadMb(cap.limits!.max_upload_mb!);
         }
-        if (unique.length > 0 && (!settings.model_preference || !unique.some((item) => item.id === settings.model_preference))) {
+        if (unique.length > 0) {
           const first = unique.find((item) => item.available !== false) || unique[0];
-          if (first) {
-            setSettings((prev) => ({ ...prev, model_preference: first.id }));
-          }
+          setSettings((prev) => (
+            first && (!prev.model_preference || !unique.some((item) => item.id === prev.model_preference))
+              ? { ...prev, model_preference: first.id }
+              : prev
+          ));
         }
       } catch (error) {
         if (!isActive) return;
@@ -198,7 +230,7 @@ export default function CutoutPage() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [authChecked, isAdmin]);
 
   useEffect(() => {
     if (!file) {
@@ -212,12 +244,19 @@ export default function CutoutPage() {
   }, [file]);
 
   const maxUploadBytes = useMemo(() => maxUploadMb * 1024 * 1024, [maxUploadMb]);
-
   const selectedModel = settings.model_preference;
 
   const supportedModelIds = useMemo(() => {
     return new Set(models.map((model) => model.id));
   }, [models]);
+
+  if (!authChecked || !isAdmin) {
+    return (
+      <div className="card">
+        <p className="text-gray">正在确认权限...</p>
+      </div>
+    );
+  }
 
   const setFileFromClipboardOrDrop = (candidate: File | null) => {
     if (!candidate) return;

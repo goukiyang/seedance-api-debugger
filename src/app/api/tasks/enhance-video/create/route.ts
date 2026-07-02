@@ -234,6 +234,9 @@ export async function POST(request: NextRequest) {
   if (user.status !== 'active') {
     return errorJson('账号已被禁用，无法创建超分任务', 403);
   }
+  if (user.role !== 'admin') {
+    return errorJson('视频超分功能暂时只对管理员开放', 403);
+  }
   const aiMediaKitSettings = await getAiMediaKitApiSettings();
   if (!isAiMediaKitApiReady(aiMediaKitSettings)) {
     return errorJson('请先到 API 设置启用 AI MediaKit 并保存 API Key', 500);

@@ -103,6 +103,9 @@ async function writeCanvasLog(params: {
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录，请先登录后再使用无线画布 LLM' }, { status: 401 });
+  if (user.role !== 'admin') {
+    return NextResponse.json({ error: '权限不足', message: '无线画布暂时只对管理员开放' }, { status: 403 });
+  }
 
   let body: Record<string, unknown>;
   try {

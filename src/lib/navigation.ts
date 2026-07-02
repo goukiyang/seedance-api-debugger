@@ -56,12 +56,12 @@ const shellRoutePrefixes = [
 
 export const topbarQuickItems: NavItem[] = [
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'] },
-  { label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true },
+  { label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
   { label: '模板', href: '/templates', match: ['/templates', '/template-generate'], prefixMatch: true },
-  { label: '项目', href: '/projects', match: ['/projects', '/tasks', '/assets', '/collections'], prefixMatch: true },
+  { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
-  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true },
-  { label: '工具', href: '/cutout', match: ['/cutout'], prefixMatch: true },
+  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, adminOnly: true },
+  { label: '工具', href: '/cutout', match: ['/cutout'], prefixMatch: true, adminOnly: true },
   { label: '管理中心', href: '/admin', match: ['/admin'], prefixMatch: true, adminOnly: true },
 ];
 
@@ -70,10 +70,10 @@ export const userNavGroups: NavGroup[] = [
     title: '创作',
     items: [
       { label: '生成视频', href: '/generate', match: ['/generate'] },
-      { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true },
+      { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true },
       { label: '动画模板', href: '/templates', prefixMatch: true },
-      { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'] },
+      { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], adminOnly: true },
       ...(showLegacyVideoWorkbenchEntry
         ? [{ label: '视频工作台', href: '/workbench', prefixMatch: true }]
         : []),
@@ -92,7 +92,7 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '工具',
     items: [
-      { label: 'AI 抠图', href: '/cutout', prefixMatch: true },
+      { label: 'AI 抠图', href: '/cutout', prefixMatch: true, adminOnly: true },
     ],
   },
 ];
@@ -120,6 +120,10 @@ export function isNavItemActive(pathname: string, item: NavItem) {
   return candidates.some((candidate) => (
     pathname === candidate || (item.prefixMatch ? pathname.startsWith(`${candidate}/`) : false)
   ));
+}
+
+export function isNavItemVisible(item: NavItem, isAdmin: boolean) {
+  return !item.adminOnly || isAdmin;
 }
 
 export function shouldUseNavigationShell(pathname: string) {

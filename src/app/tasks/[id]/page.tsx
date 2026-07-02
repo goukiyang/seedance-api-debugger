@@ -120,6 +120,10 @@ interface ProjectOption {
   can_manage_project?: boolean;
 }
 
+interface AuthMeResponse {
+  user?: { role?: string } | null;
+}
+
 interface VideoCardOption {
   id: string;
   project_id: string;
@@ -745,6 +749,7 @@ export default function TaskDetailPage() {
   const returnLabel = taskReturnLabel(returnTo);
 
   const [task, setTask] = useState<VideoTask | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [querying, setQuerying] = useState(false);
@@ -873,6 +878,23 @@ export default function TaskDetailPage() {
   useEffect(() => {
     fetchTask();
   }, [fetchTask]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data: AuthMeResponse) => {
+        if (!cancelled) setIsAdmin(data.user?.role === 'admin');
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     fetchProjects();
@@ -1785,7 +1807,7 @@ export default function TaskDetailPage() {
                 </div>
               )}
 
-              <EnhanceVideoAction task={task} />
+              {isAdmin && <EnhanceVideoAction task={task} />}
             </section>
 
             <aside className="task-detail-card task-decision-panel">

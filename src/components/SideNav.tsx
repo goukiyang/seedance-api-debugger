@@ -2,20 +2,23 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { adminNavGroups, isNavItemActive, userNavGroups, type NavGroup } from '@/lib/navigation';
+import { adminNavGroups, isNavItemActive, isNavItemVisible, userNavGroups, type NavGroup } from '@/lib/navigation';
 
 interface SideNavProps {
   isAdmin: boolean;
 }
 
-function SideNavGroup({ group }: { group: NavGroup }) {
+function SideNavGroup({ group, isAdmin }: { group: NavGroup; isAdmin: boolean }) {
   const pathname = usePathname();
+  const visibleItems = group.items.filter((item) => isNavItemVisible(item, isAdmin));
+
+  if (visibleItems.length === 0) return null;
 
   return (
     <nav className="shell-nav-group" aria-label={group.title}>
       <div className="shell-nav-title">{group.title}</div>
       <div className="shell-nav-list">
-        {group.items.map((item) => {
+        {visibleItems.map((item) => {
           const active = isNavItemActive(pathname, item);
           return (
             <Link
@@ -37,11 +40,11 @@ export default function SideNav({ isAdmin }: SideNavProps) {
   return (
     <aside className="shell-sidebar">
       {userNavGroups.map((group) => (
-        <SideNavGroup group={group} key={group.title} />
+        <SideNavGroup group={group} isAdmin={isAdmin} key={group.title} />
       ))}
 
       {isAdmin && adminNavGroups.map((group) => (
-        <SideNavGroup group={group} key={group.title} />
+        <SideNavGroup group={group} isAdmin={isAdmin} key={group.title} />
       ))}
     </aside>
   );

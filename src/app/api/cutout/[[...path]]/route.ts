@@ -131,6 +131,9 @@ async function proxy(request: NextRequest, context: { params: PathParams }): Pro
   if (!user) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
+  if (user.role !== 'admin') {
+    return NextResponse.json({ error: '权限不足', message: 'AI 抠图工具暂时只对管理员开放' }, { status: 403 });
+  }
 
   const path = context.params.path?.join('/') || '';
   const serviceBase = getCutoutServiceBase();

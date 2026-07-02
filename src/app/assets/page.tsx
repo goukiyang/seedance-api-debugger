@@ -1321,7 +1321,7 @@ function AssetsPageContent() {
                     <div className="asset-card-meta">
                       <div className="asset-card-title-row">
                         <strong>{shortText(item.title, '未命名资产', 34)}</strong>
-                        {item.canEnhanceVideo && (
+                        {isAdmin && item.canEnhanceVideo && (
                           <div
                             className="asset-card-enhance-shell"
                             onClick={(event) => event.stopPropagation()}

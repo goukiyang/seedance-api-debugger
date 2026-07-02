@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import AccountMenu, { type AccountMenuUser } from './AccountMenu';
 import NotificationBell from './NotificationBell';
-import { topbarQuickItems } from '@/lib/navigation';
+import { isNavItemVisible, topbarQuickItems } from '@/lib/navigation';
 
 export interface ComposerCreditSummary {
   available?: number;
@@ -36,7 +36,7 @@ export default function ComposerTopbar({ user, loadingUser = false, credits }: C
         <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
         <nav className="composer-topbar-nav" aria-label="快捷入口">
           {topbarQuickItems
-            .filter((item) => !item.adminOnly || user?.role === 'admin')
+            .filter((item) => isNavItemVisible(item, user?.role === 'admin'))
             .map((item) => (
             <Link
               key={item.href}
