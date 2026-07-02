@@ -143,6 +143,7 @@ export async function GET(request: NextRequest) {
         select: {
           id: true,
           prompt: true,
+          provider: true,
           source_type: true,
           source_label: true,
           source_request_id: true,
@@ -150,6 +151,7 @@ export async function GET(request: NextRequest) {
           provider_task_id: true,
           provider_status: true,
           model: true,
+          generation_mode: true,
           resolution: true,
           duration: true,
           ratio: true,
@@ -210,6 +212,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       outputs: tasks.map((task) => ({
         ...task,
+        is_enhance_task: task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit',
         owner: userSummary(task.owner || task.user),
         submitted_user: userSummary(task.user),
         user_deleted_by_user: userSummary(task.user_deleted_by ? actorById.get(task.user_deleted_by) : null),

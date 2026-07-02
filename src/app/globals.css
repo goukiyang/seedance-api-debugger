@@ -188,6 +188,12 @@ a {
   font-weight: 500;
 }
 
+.status-badge-enhance {
+  background-color: #ccfbf1;
+  color: #0f766e;
+  font-weight: 700;
+}
+
 /* 状态颜色语义：蓝色=提示/排队，绿色=进行/成功，黄色=注意，红色=失败/危险。 */
 .status-draft {
   background-color: #f3f4f6;

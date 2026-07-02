@@ -48,6 +48,7 @@ interface OutputItem {
   project_id: string | null;
   owner_user_id: string | null;
   retention_status: string;
+  is_enhance_task: boolean;
   user_deleted_at: string | null;
   admin_hidden_at: string | null;
   restored_at: string | null;
@@ -510,6 +511,11 @@ export default function AdminOutputsClient() {
 
                   <div className="outputs-item-main">
                     <div className="outputs-item-kicker">
+                      {output.is_enhance_task && (
+                        <span className="status-badge status-badge-enhance">
+                          超分
+                        </span>
+                      )}
                       <span className={`status-badge ${localStatusClass(output.local_status)}`}>
                         {localStatusLabel(output.local_status)}
                       </span>
