@@ -234,14 +234,6 @@ export async function POST(request: NextRequest) {
   if (user.status !== 'active') {
     return errorJson('账号已被禁用，无法创建超分任务', 403);
   }
-  if (user.role !== 'admin') {
-    return errorJson('视频超分功能暂时只对管理员开放', 403);
-  }
-  const aiMediaKitSettings = await getAiMediaKitApiSettings();
-  if (!isAiMediaKitApiReady(aiMediaKitSettings)) {
-    return errorJson('请先到 API 设置启用 AI MediaKit 并保存 API Key', 500);
-  }
-  const aiMediaKitRequestOptions = aiMediaKitSettingsToRequestOptions(aiMediaKitSettings);
 
   let body;
   try {
@@ -249,6 +241,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : '请求参数无效', 400, 'INVALID_REQUEST');
   }
+  if (!body.sourceTaskId && body.videoUrl && user.role !== 'admin') {
+    return jsonError('普通用户请从资产页选择已有视频发起超分', 403, 'RAW_VIDEO_URL_FORBIDDEN');
+  }
+
+  const aiMediaKitSettings = await getAiMediaKitApiSettings();
+  if (!isAiMediaKitApiReady(aiMediaKitSettings)) {
+    return errorJson('请先到 API 设置启用 AI MediaKit 并保存 API Key', 500);
+  }
+  const aiMediaKitRequestOptions = aiMediaKitSettingsToRequestOptions(aiMediaKitSettings);
 
   let sourceTask: SourceTask | null = null;
   let sourceVideoUrl = body.videoUrl;

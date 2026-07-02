@@ -13,6 +13,12 @@ function assertContains(content: string, needle: string, label: string) {
   }
 }
 
+function assertNotContains(content: string, needle: string, label: string) {
+  if (content.includes(needle)) {
+    throw new Error(`${label} should not contain: ${needle}`);
+  }
+}
+
 const route = read('src/app/generate/enhance/page.tsx');
 assertContains(route, 'EnhanceVideoPageClient', 'enhance route');
 assertContains(route, "user.role !== 'admin'", 'enhance route admin gate');
@@ -43,7 +49,8 @@ assertContains(dashboard, 'href="/generate/enhance"', 'dashboard link');
 const assetsPage = read('src/app/assets/page.tsx');
 assertContains(assetsPage, 'canEnhanceVideo', 'asset library enhance eligibility');
 assertContains(assetsPage, 'asset-card-enhance-trigger', 'asset card right-aligned enhance action');
-assertContains(assetsPage, 'isAdmin && item.canEnhanceVideo', 'asset card admin-only enhance action');
+assertContains(assetsPage, 'item.canEnhanceVideo &&', 'asset card enhance action visible to all eligible users');
+assertNotContains(assetsPage, 'isAdmin && item.canEnhanceVideo', 'asset card enhance action admin-only gate');
 assertContains(assetsPage, '/api/tasks/enhance-video/create', 'asset card enhance create action');
 assertContains(assetsPage, 'asset-card-badge asset-card-badge-enhance', 'asset card enhance badge');
 
@@ -68,7 +75,8 @@ assertContains(globalsCss, 'is-compare-fullscreen', 'task detail compare fullscr
 assertContains(globalsCss, ':fullscreen', 'task detail compare native fullscreen style');
 
 const enhanceCreateRoute = read('src/app/api/tasks/enhance-video/create/route.ts');
-assertContains(enhanceCreateRoute, '视频超分功能暂时只对管理员开放', 'enhance create admin-only gate');
+assertContains(enhanceCreateRoute, 'RAW_VIDEO_URL_FORBIDDEN', 'enhance create raw URL non-admin gate');
+assertNotContains(enhanceCreateRoute, '视频超分功能暂时只对管理员开放', 'enhance create blanket admin-only gate');
 
 const ultimateCanvasPage = read('src/app/tools/ultimate-canvas/page.tsx');
 assertContains(ultimateCanvasPage, "user.role !== 'admin'", 'ultimate canvas page admin gate');
