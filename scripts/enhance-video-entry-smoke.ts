@@ -65,6 +65,10 @@ assertContains(enhanceCreateRoute, '视频超分功能暂时只对管理员开�
 const ultimateCanvasPage = read('src/app/tools/ultimate-canvas/page.tsx');
 assertContains(ultimateCanvasPage, "user.role !== 'admin'", 'ultimate canvas page admin gate');
 
+const ultimateCanvasStaticPage = read('public/tools/ultimate-canvas/index.html');
+assertContains(ultimateCanvasStaticPage, "data-admin-check=\"pending\"", 'ultimate canvas static page hidden while checking role');
+assertContains(ultimateCanvasStaticPage, "user.role !== 'admin'", 'ultimate canvas static page admin gate');
+
 [
   'src/app/api/tools/ultimate-canvas/bootstrap/route.ts',
   'src/app/api/tools/ultimate-canvas/document/route.ts',

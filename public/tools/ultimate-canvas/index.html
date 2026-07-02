@@ -10,6 +10,31 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css?v=20260620-rules-visible">
     <link rel="icon" href="data:,">
+    <style>
+        html[data-admin-check="pending"] body { visibility: hidden; }
+    </style>
+    <script>
+        (function () {
+            document.documentElement.dataset.adminCheck = 'pending';
+            fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    var user = data && data.user;
+                    if (!user) {
+                        window.location.replace('/login?next=/tools/ultimate-canvas');
+                        return;
+                    }
+                    if (user.role !== 'admin') {
+                        window.location.replace('/generate');
+                        return;
+                    }
+                    delete document.documentElement.dataset.adminCheck;
+                })
+                .catch(function () {
+                    window.location.replace('/login?next=/tools/ultimate-canvas');
+                });
+        }());
+    </script>
 </head>
 <body>
     <!-- Top Header Bar -->
