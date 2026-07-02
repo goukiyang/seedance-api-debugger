@@ -33,7 +33,7 @@ assertContains(dashboard, 'href="/generate/enhance"', 'dashboard link');
 
 const assetsPage = read('src/app/assets/page.tsx');
 assertContains(assetsPage, 'canEnhanceVideo', 'asset library enhance eligibility');
-assertContains(assetsPage, 'asset-card-hover-enhance', 'asset card hover enhance action');
+assertContains(assetsPage, 'asset-card-enhance-trigger', 'asset card right-aligned enhance action');
 assertContains(assetsPage, '/api/tasks/enhance-video/create', 'asset card enhance create action');
 assertContains(assetsPage, 'asset-card-badge asset-card-badge-enhance', 'asset card enhance badge');
 

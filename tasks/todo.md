@@ -69,6 +69,8 @@ Review：2026-07-02 已用真实 Key 在公网创建 4 秒超分任务 `cmr2z696
 
 Review：2026-07-02 已上线到生产 BUILD_ID `eW9697UV1jcc4VUslEVPw`。本轮把主入口改到资产管理页：普通成功视频封面 hover 后出现“查看 / 超分”，超分二级菜单可选 `720p/1080p/2K/4K` 和“不插帧/30fps/60fps”，并显示预计冻结点数；超分结果卡片和详情预览左上角持续显示“超分”。任务详情页对 AI MediaKit 超分任务改为左右对比播放，左侧“原视频”、右侧“超分视频”，播放、暂停、拖动进度会同步。验证通过：`npx tsx scripts/enhance-video-entry-smoke.ts`、`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build/restart/status sd2`；公网 `/api/config` 200 且 `aimediakit_enhance_video.ready=true`，公网 assets/task 静态 chunk 命中 `asset-card-hover-enhance`、`asset-card-badge`、`task-result-compare-stage`、`原视频`、`超分视频`。受控无登录浏览器访问 `/assets?type=video&status=succeeded` 被正确跳转到 `/login`；真实登录态 hover 截图未完成，原因是当前 Chrome 没有可复用登录态。
 
+Follow-up：2026-07-02 根据用户反馈，超分操作按钮从视频封面 hover 层移出，封面 hover 只保留“查看”；普通成功视频的“超分”改到卡片标题行右侧，默认隐藏，卡片 hover/focus 后显示，点击后在按钮旁展开分辨率和帧率菜单。上线 BUILD_ID `h1a-TilZA-dFsC6THZVt5`，公网 assets JS/CSS 命中 `asset-card-enhance-trigger`、`asset-card-enhance-shell`、`asset-card-title-row`，不再命中 `asset-card-hover-enhance`。
+
 ## 图集和单图共享闭环 Todo
 
 更新时间：2026-06-17

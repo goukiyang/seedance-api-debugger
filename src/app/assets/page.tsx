@@ -1304,7 +1304,7 @@ function AssetsPageContent() {
                         </span>
                       )}
                       {duration && <span className="asset-card-duration">{duration}</span>}
-                      <span className={`asset-card-hover ${item.canEnhanceVideo ? 'asset-card-hover-actions' : ''}`}>
+                      <span className="asset-card-hover">
                         <button
                           type="button"
                           className="asset-card-hover-button"
@@ -1316,61 +1316,68 @@ function AssetsPageContent() {
                           <Eye size={16} aria-hidden="true" />
                           查看
                         </button>
-                        {item.canEnhanceVideo && (
-                          <button
-                            type="button"
-                            className="asset-card-hover-button asset-card-hover-enhance"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setEnhanceMenuItemId((current) => current === item.id ? null : item.id);
-                            }}
-                          >
-                            <Sparkles size={16} aria-hidden="true" />
-                            超分
-                          </button>
-                        )}
                       </span>
-                      {enhanceMenuOpen && (
-                        <span className="asset-card-enhance-menu" onClick={(event) => event.stopPropagation()}>
-                          <label>
-                            <span>分辨率</span>
-                            <select
-                              value={enhanceResolution}
-                              onChange={(event) => setEnhanceResolution(event.target.value as EnhanceResolution)}
-                            >
-                              <option value="720p">720p</option>
-                              <option value="1080p">1080p</option>
-                              <option value="2k">2K</option>
-                              <option value="4k">4K</option>
-                            </select>
-                          </label>
-                          <label>
-                            <span>帧率</span>
-                            <select
-                              value={enhanceFps}
-                              onChange={(event) => setEnhanceFps(event.target.value as EnhanceFps)}
-                            >
-                              <option value="none">不插帧</option>
-                              <option value="30">30 fps</option>
-                              <option value="60">60 fps</option>
-                            </select>
-                          </label>
-                          <span className="asset-card-enhance-cost">
-                            预估冻结 {estimatedEnhanceCost === null ? '-' : `${estimatedEnhanceCost} 点`}
-                          </span>
-                          {enhanceReason && <span className="asset-card-enhance-warning">{enhanceReason}</span>}
-                          <button
-                            type="button"
-                            onClick={() => void createEnhanceTask(item)}
-                            disabled={Boolean(enhanceReason) || enhanceSubmittingId === item.id}
-                          >
-                            {enhanceSubmittingId === item.id ? '创建中...' : '开始超分'}
-                          </button>
-                        </span>
-                      )}
                     </span>
-                    <span className="asset-card-meta">
-                      <strong>{shortText(item.title, '未命名资产', 34)}</strong>
+                    <div className="asset-card-meta">
+                      <div className="asset-card-title-row">
+                        <strong>{shortText(item.title, '未命名资产', 34)}</strong>
+                        {item.canEnhanceVideo && (
+                          <div
+                            className="asset-card-enhance-shell"
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className="asset-card-enhance-trigger"
+                              onClick={() => {
+                                setEnhanceMenuItemId((current) => current === item.id ? null : item.id);
+                              }}
+                            >
+                              <Sparkles size={14} aria-hidden="true" />
+                              <span>超分</span>
+                            </button>
+                            {enhanceMenuOpen && (
+                              <div className="asset-card-enhance-menu">
+                                <label>
+                                  <span>分辨率</span>
+                                  <select
+                                    value={enhanceResolution}
+                                    onChange={(event) => setEnhanceResolution(event.target.value as EnhanceResolution)}
+                                  >
+                                    <option value="720p">720p</option>
+                                    <option value="1080p">1080p</option>
+                                    <option value="2k">2K</option>
+                                    <option value="4k">4K</option>
+                                  </select>
+                                </label>
+                                <label>
+                                  <span>帧率</span>
+                                  <select
+                                    value={enhanceFps}
+                                    onChange={(event) => setEnhanceFps(event.target.value as EnhanceFps)}
+                                  >
+                                    <option value="none">不插帧</option>
+                                    <option value="30">30 fps</option>
+                                    <option value="60">60 fps</option>
+                                  </select>
+                                </label>
+                                <span className="asset-card-enhance-cost">
+                                  预估冻结 {estimatedEnhanceCost === null ? '-' : `${estimatedEnhanceCost} 点`}
+                                </span>
+                                {enhanceReason && <span className="asset-card-enhance-warning">{enhanceReason}</span>}
+                                <button
+                                  type="button"
+                                  onClick={() => void createEnhanceTask(item)}
+                                  disabled={Boolean(enhanceReason) || enhanceSubmittingId === item.id}
+                                >
+                                  {enhanceSubmittingId === item.id ? '创建中...' : '开始超分'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       {specText && <span className="asset-card-spec">{specText}</span>}
                       <span>{item.project?.name || '未归属项目'} · {formatDateTime(item.createdAt)}</span>
                       {isAdmin && item.owner && (
@@ -1380,7 +1387,7 @@ function AssetsPageContent() {
                           className="asset-card-user"
                         />
                       )}
-                    </span>
+                    </div>
                   </div>
                 );
               })}

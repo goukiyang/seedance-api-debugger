@@ -16677,26 +16677,76 @@ a {
   cursor: pointer;
 }
 
-.asset-card-hover-enhance {
-  border-color: oklch(0.72 0.12 188 / 0.48);
-  background: oklch(0.42 0.11 188 / 0.88);
+.asset-card:hover .asset-card-hover,
+.asset-card:focus-within .asset-card-hover {
+  opacity: 1;
 }
 
-.asset-card:hover .asset-card-hover,
-.asset-card:focus-within .asset-card-hover,
-.asset-card.enhance-menu-open .asset-card-hover {
+.asset-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.asset-card-title-row > strong {
+  flex: 1;
+  min-width: 0;
+}
+
+.asset-card-enhance-shell {
+  position: relative;
+  z-index: 8;
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.asset-card-enhance-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 62px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid oklch(0.48 0.06 188 / 0.58);
+  border-radius: 8px;
+  color: oklch(0.89 0.05 188);
+  background: oklch(0.2 0.018 250 / 0.92);
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition: opacity 150ms ease, transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.asset-card:hover .asset-card-enhance-trigger,
+.asset-card:focus-within .asset-card-enhance-trigger,
+.asset-card.enhance-menu-open .asset-card-enhance-trigger {
   opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.asset-card-enhance-trigger:hover,
+.asset-card.enhance-menu-open .asset-card-enhance-trigger {
+  border-color: oklch(0.72 0.12 188 / 0.68);
+  color: oklch(0.98 0.012 188);
+  background: oklch(0.38 0.1 188 / 0.95);
 }
 
 .asset-card-enhance-menu {
   position: absolute;
   z-index: 6;
-  right: 8px;
-  bottom: 8px;
-  left: 8px;
+  top: calc(100% + 7px);
+  right: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+  width: min(268px, calc(100vw - 32px));
   padding: 9px;
   border: 1px solid oklch(0.68 0.095 188 / 0.58);
   border-radius: 8px;
@@ -16763,8 +16813,9 @@ a {
   padding: 0 2px;
 }
 
-.asset-card-meta strong,
-.asset-card-meta span {
+.asset-card-meta > strong,
+.asset-card-meta > span,
+.asset-card-title-row > strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -16775,7 +16826,7 @@ a {
   font-size: 13px;
 }
 
-.asset-card-meta span {
+.asset-card-meta > span {
   color: oklch(0.63 0.015 245);
   font-size: 12px;
 }
