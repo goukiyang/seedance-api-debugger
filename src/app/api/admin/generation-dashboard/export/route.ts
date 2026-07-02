@@ -18,7 +18,7 @@ function csvCell(value: unknown) {
 }
 
 function rangeKey(value: string | null): DashboardRangeKey | undefined {
-  if (value === '7d' || value === '30d' || value === 'month' || value === 'custom') return value;
+  if (value === 'all' || value === '7d' || value === '30d' || value === 'month' || value === 'custom') return value;
   return undefined;
 }
 

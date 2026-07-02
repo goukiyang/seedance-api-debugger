@@ -47,6 +47,7 @@ type Props = {
 };
 
 const rangeOptions: Array<{ key: DashboardRangeKey; label: string }> = [
+  { key: 'all', label: '全部' },
   { key: 'month', label: '本月' },
   { key: '7d', label: '7天' },
   { key: '30d', label: '30天' },
@@ -411,7 +412,9 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
   const [range, setRange] = useState<DashboardRangeKey>(initialDashboard.range.key);
   const [dateFrom, setDateFrom] = useState(initialDashboard.range.date_from);
   const [dateTo, setDateTo] = useState(initialDashboard.range.date_to);
-  const [trendGranularity, setTrendGranularity] = useState<DashboardTrendGranularity>('day');
+  const [trendGranularity, setTrendGranularity] = useState<DashboardTrendGranularity>(
+    initialDashboard.range.key === 'all' ? 'month' : 'day',
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -476,6 +479,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
               className={range === option.key ? 'is-active' : ''}
               onClick={() => {
                 setRange(option.key);
+                if (option.key === 'all') setTrendGranularity('month');
                 if (option.key !== 'custom') void loadDashboard(option.key);
               }}
               disabled={loading}
@@ -725,6 +729,8 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                     resultVideoUrl={task.result_video_url}
                     resultLastFrameUrl={task.result_last_frame_url}
                     status={task.local_status}
+                    provider={task.provider}
+                    generationMode={task.generation_mode}
                     size="compact"
                   />
                 </span>

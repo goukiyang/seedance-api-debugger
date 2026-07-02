@@ -79,7 +79,7 @@ export default async function AdminPage() {
   if (user.role !== 'admin') redirect('/generate');
 
   const [dashboard, latestProviderBalance] = await Promise.all([
-    getGenerationDashboardData({ range: 'month' }),
+    getGenerationDashboardData({ range: 'all' }),
     prisma.providerAccountSnapshot.findFirst({
       where: { provider_name: 'seedance' },
       orderBy: { fetched_at: 'desc' },

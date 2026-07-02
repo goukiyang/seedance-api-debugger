@@ -1,6 +1,26 @@
-import { getGenerationDashboardData } from '../src/lib/admin/generation-dashboard';
+import { getGenerationDashboardData, parseDashboardRange } from '../src/lib/admin/generation-dashboard';
 
 async function main() {
+  const allRange = parseDashboardRange(
+    { range: 'all' },
+    new Date('2026-07-02T12:00:00+08:00'),
+    { earliestDate: new Date('2026-05-15T09:30:00+08:00') },
+  );
+  if (allRange.key !== 'all' || allRange.label !== '全部' || allRange.date_from !== '2026-05-15' || allRange.date_to !== '2026-07-02') {
+    throw new Error(`全部范围异常：${JSON.stringify(allRange)}`);
+  }
+
+  const allDashboard = await getGenerationDashboardData({ range: 'all' });
+  if (allDashboard.range.key !== 'all' || allDashboard.range.label !== '全部') {
+    throw new Error(`全部驾驶舱范围异常：${JSON.stringify(allDashboard.range)}`);
+  }
+  if (!allDashboard.trends.month.length) {
+    throw new Error('全部范围缺少按月趋势数据');
+  }
+  if (allDashboard.range.date_from.slice(0, 7) !== allDashboard.range.date_to.slice(0, 7) && allDashboard.trends.month.length < 2) {
+    throw new Error(`全部范围跨月但月趋势不足：${JSON.stringify(allDashboard.range)}`);
+  }
+
   const dashboard = await getGenerationDashboardData({ range: 'month' });
   const resolutionKeys = dashboard.resolution_breakdown.map((item) => item.key).sort();
   const expectedKeys = ['1080p', '480p', '720p', 'unknown'];
@@ -30,6 +50,8 @@ async function main() {
 
   console.log(JSON.stringify({
     ok: true,
+    all_range: allDashboard.range,
+    all_month_buckets: allDashboard.trends.month.length,
     range: dashboard.range,
     total_tasks: dashboard.kpis.total_tasks,
     resolution_keys: resolutionKeys,

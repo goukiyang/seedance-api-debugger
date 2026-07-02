@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
 
-export type DashboardRangeKey = '7d' | '30d' | 'month' | 'custom';
+export type DashboardRangeKey = 'all' | '7d' | '30d' | 'month' | 'custom';
 export type DashboardResolutionKey = '480p' | '720p' | '1080p' | 'unknown';
 export type DashboardWarningTone = 'danger' | 'warning' | 'info';
 export type DashboardTrendGranularity = 'day' | 'week' | 'month';
@@ -92,6 +92,8 @@ export type DashboardRecentTask = {
   id: string;
   prompt: string;
   local_status: string;
+  provider: string;
+  generation_mode: string;
   provider_cost_status: string;
   model: string;
   resolution: DashboardResolutionKey;
@@ -216,14 +218,23 @@ function clampCustomStart(start: Date, end: Date) {
   return start < minStart ? minStart : start;
 }
 
-export function parseDashboardRange(query: GenerationDashboardQuery, now = new Date()): DashboardRange {
-  const key = query.range || 'month';
+export function parseDashboardRange(
+  query: GenerationDashboardQuery,
+  now = new Date(),
+  bounds: { earliestDate?: Date | string | null } = {},
+): DashboardRange {
+  const key = query.range || 'all';
   const todayEnd = endOfDay(now);
   let start: Date;
   let end: Date = todayEnd;
   let label: string;
 
-  if (key === '7d') {
+  if (key === 'all') {
+    const earliest = parseDateInput(bounds.earliestDate);
+    start = earliest ? startOfDay(earliest) : startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
+    if (start > end) start = startOfDay(end);
+    label = '全部';
+  } else if (key === '7d') {
     start = startOfDay(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000));
     label = '近 7 天';
   } else if (key === '30d') {
@@ -479,6 +490,8 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       source_type: true,
       source_label: true,
       local_status: true,
+      provider: true,
+      generation_mode: true,
       provider_task_id: true,
       model: true,
       resolution: true,
@@ -514,13 +527,8 @@ function taskMatchesResolution(task: DashboardTask, resolution?: DashboardResolu
   return normalizeDashboardResolution(task.resolution) === resolution;
 }
 
-function buildTaskWhere(range: DashboardRange, query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
-  const where: Prisma.VideoTaskWhereInput = {
-    created_at: {
-      gte: startOfDay(localDateFromIso(range.date_from)),
-      lte: endOfDay(localDateFromIso(range.date_to)),
-    },
-  };
+function buildDashboardScopeWhere(query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
+  const where: Prisma.VideoTaskWhereInput = {};
 
   if (query.projectId) {
     where.project_id = query.projectId === 'unassigned' ? null : query.projectId;
@@ -531,6 +539,17 @@ function buildTaskWhere(range: DashboardRange, query: GenerationDashboardQuery):
       { user_id: query.ownerUserId },
     ];
   }
+  return where;
+}
+
+function buildTaskWhere(range: DashboardRange, query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
+  const where: Prisma.VideoTaskWhereInput = {
+    ...buildDashboardScopeWhere(query),
+    created_at: {
+      gte: startOfDay(localDateFromIso(range.date_from)),
+      lte: endOfDay(localDateFromIso(range.date_to)),
+    },
+  };
   return where;
 }
 
@@ -688,7 +707,13 @@ function buildWarnings(tasks: DashboardTask[], range: DashboardRange, auditSumma
 }
 
 export async function getGenerationDashboardData(query: GenerationDashboardQuery = {}): Promise<GenerationDashboardData> {
-  const range = parseDashboardRange(query);
+  const allRangeBounds = query.range === 'all' || !query.range
+    ? await prisma.videoTask.aggregate({
+        where: buildDashboardScopeWhere(query),
+        _min: { created_at: true },
+      })
+    : null;
+  const range = parseDashboardRange(query, new Date(), { earliestDate: allRangeBounds?._min.created_at });
   const requestedResolution = query.resolution ? normalizeDashboardResolution(query.resolution) : null;
   const where = buildTaskWhere(range, query);
   const requestWhere: Prisma.ProviderApiRequestWhereInput = {
@@ -839,6 +864,8 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       id: task.id,
       prompt: task.prompt,
       local_status: task.local_status,
+      provider: task.provider,
+      generation_mode: task.generation_mode,
       provider_cost_status: task.provider_cost_status,
       model: task.model,
       resolution: normalizeDashboardResolution(task.resolution),
