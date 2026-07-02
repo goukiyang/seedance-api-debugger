@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { canRequestTaskThumbnail } from '@/lib/video/thumbnail-availability';
 
 type ThumbnailSize = 'compact' | 'medium' | 'card';
 
@@ -32,7 +33,6 @@ function statusText(status?: string | null) {
 export function TaskVideoThumbnail({
   taskId,
   localVideoPath,
-  resultVideoUrl,
   resultLastFrameUrl,
   status,
   provider,
@@ -44,7 +44,7 @@ export function TaskVideoThumbnail({
   overlay,
 }: Props) {
   const [failed, setFailed] = useState(false);
-  const hasSource = Boolean(localVideoPath || resultVideoUrl || resultLastFrameUrl);
+  const hasSource = canRequestTaskThumbnail({ localVideoPath, resultLastFrameUrl });
   const thumbnailSrc = useMemo(() => `/api/video/thumbnail/${taskId}`, [taskId]);
   const content = hasSource && !failed ? (
     <img

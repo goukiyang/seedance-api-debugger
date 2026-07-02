@@ -5,6 +5,8 @@ import { getSession, type SessionUser } from '@/lib/auth/session';
 import { getAccessibleProjectIds, getTaskWhereForUser } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
+import { fileExists, thumbnailFilePath } from '@/lib/video/thumbnail';
+import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
 
 export const dynamic = 'force-dynamic';
 
@@ -121,7 +123,7 @@ function isDownloadableTask(task: {
   return task.local_status === 'succeeded' && Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
 }
 
-function serializeTask(task: {
+async function serializeTask(task: {
   id: string;
   provider: string;
   generation_mode: string;
@@ -142,11 +144,21 @@ function serializeTask(task: {
   project: LibraryProject | null;
   owner: LibraryUser | null;
   user: LibraryUser | null;
-}): LibraryItem {
+}): Promise<LibraryItem> {
   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
   const owner = userSummary(task.owner || task.user);
   const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+  const hasThumbnailSource = canRequestTaskThumbnail({
+    localVideoPath: task.local_video_path,
+    resultLastFrameUrl: task.result_last_frame_url,
+  });
+  const hasExistingThumbnail = hasThumbnailSource ? false : await fileExists(thumbnailFilePath(task.id));
+  const thumbnailUrl = shouldExposeTaskThumbnailUrl({
+    hasExistingThumbnail,
+    localVideoPath: task.local_video_path,
+    resultLastFrameUrl: task.result_last_frame_url,
+  }) ? `/api/video/thumbnail/${task.id}` : null;
   let enhanceSourceTaskId: string | null = null;
   if (isEnhanceTask && task.params_json) {
     try {
@@ -167,7 +179,7 @@ function serializeTask(task: {
     referenceImageId: null,
     title: taskTitle(task),
     prompt: task.prompt,
-    thumbnailUrl: hasVideo ? `/api/video/thumbnail/${task.id}` : null,
+    thumbnailUrl,
     previewUrl: videoUrl,
     downloadUrl: videoUrl,
     duration: task.duration,
@@ -390,7 +402,7 @@ async function loadVideoItems(options: {
   ]);
 
   return {
-    items: tasks.map(serializeTask),
+    items: await Promise.all(tasks.map(serializeTask)),
     total,
   };
 }

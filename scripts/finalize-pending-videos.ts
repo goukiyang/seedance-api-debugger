@@ -105,10 +105,10 @@ async function failStaleSubmittedWithoutProvider(
 
 async function main() {
   const limit = numberArg('--limit', 20);
-  const maxSeconds = numberArg('--max-seconds', 90);
+  const maxSeconds = numberArg('--max-seconds', 1800);
   const orphanMinAgeMinutes = numberArg('--orphan-min-age-minutes', 30);
-  const cacheTimeoutSeconds = numberArg('--cache-timeout-seconds', 60);
-  const missingLocalMaxAgeDays = numberArg('--missing-local-max-age-days', 7);
+  const cacheTimeoutSeconds = numberArg('--cache-timeout-seconds', 900);
+  const missingLocalMaxAgeDays = numberArg('--missing-local-max-age-days', 2);
   const taskId = stringArg('--task-id');
   const dryRun = hasArg('--dry-run');
   const startedAt = Date.now();

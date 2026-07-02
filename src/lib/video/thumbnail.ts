@@ -6,7 +6,8 @@ import { mkdir, rename, stat, unlink } from 'fs/promises';
 const execFileAsync = promisify(execFile);
 const PUBLIC_VIDEO_ROOT = path.join(process.cwd(), 'public');
 const THUMBNAIL_DIR = path.join(PUBLIC_VIDEO_ROOT, 'videos', 'thumbnails');
-const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
+const DEFAULT_FFMPEG_BIN = 'ffmpeg';
+const THUMBNAIL_SEEK_SECONDS = ['2.5', '0.5'];
 
 export type ThumbnailSourceTask = {
   id: string;
@@ -77,16 +78,16 @@ export async function resolveThumbnailSources(
   return sources;
 }
 
-async function generateThumbnail(source: string, outputPath: string) {
+async function generateThumbnailAtSeek(source: string, outputPath: string, seekSeconds: string) {
   const tempPath = `${outputPath}.${process.pid}.${Date.now()}.tmp.jpg`;
   try {
-    await execFileAsync(FFMPEG_BIN, [
+    await execFileAsync(process.env.FFMPEG_PATH || DEFAULT_FFMPEG_BIN, [
       '-hide_banner',
       '-loglevel',
       'error',
       '-y',
       '-ss',
-      '0.5',
+      seekSeconds,
       '-i',
       source,
       '-frames:v',
@@ -102,6 +103,19 @@ async function generateThumbnail(source: string, outputPath: string) {
     await unlink(tempPath).catch(() => undefined);
     throw error;
   }
+}
+
+async function generateThumbnail(source: string, outputPath: string) {
+  let lastError: unknown;
+  for (const seekSeconds of THUMBNAIL_SEEK_SECONDS) {
+    try {
+      await generateThumbnailAtSeek(source, outputPath, seekSeconds);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 export async function ensureTaskThumbnail(

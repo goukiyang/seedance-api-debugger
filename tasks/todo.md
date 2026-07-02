@@ -1,10 +1,83 @@
 # V1.2 剩余模块落地 Todo
 
-更新时间：2026-07-02
+更新时间：2026-07-03
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
 
 最新验收结论：整份 V1.2 仍未完整落地。当前代码已经有视频卡 P0 归档入口、公共项目预算底座、审批记录表、审批中心页面、1080p 基础校验、新建项目“默认记账 / 预算记账”选择入口，但这些还没有形成完整业务闭环。后续执行必须以本 todo 为准，不得把“有模型/有页面/有审批记录”误判为“业务已闭环”。
+
+## 2026-07-03 最新生成内容截图缺失 / 截图错误修复
+
+目标：最新生成成功的视频在任务页、资产页、项目页和后台产出页都能稳定看到正确截图；生成成功但视频本地化暂时失败时，不给前端暴露会 404 的假截图地址；已有缺截图的最新任务要能被后台补偿回来。
+
+当前根因：
+
+- 2026-07-02 最新成功任务里，大量 Seedance 任务只有 `result_video_url`，没有 `local_video_path`，也没有 `public/videos/thumbnails/*.jpg`。
+- 线上日志显示本地化失败链路是 `Local cache skipped: Download timeout`，随后 `Thumbnail skipped: No thumbnail source`。
+- `task-localization-runner` 在任务状态到 `succeeded` 后就停止，即使本地缓存和截图失败也不继续重试。
+- `finalize-pending-videos` 补偿脚本默认 `--cache-timeout-seconds 60`、`--max-seconds 120`，慢链接下补不回来。
+- `src/app/api/assets/library/route.ts` 只要看到远端视频链接就返回 `/api/video/thumbnail/:id`，但缩略图接口实际不能从远端 mp4 抽帧，导致前端请求 404。
+- `src/lib/video/thumbnail.ts` 固定抽 `0.5s`，遇到开场纯色、黑屏或遮罩时，会生成看起来像坏图的截图。
+
+### Phase 1：止血和补偿已有缺截图任务
+
+- [x] 先用只读 SQL 列出近 2 天 `local_status='succeeded'`、有 `result_video_url`、但 `local_video_path` 为空的任务，保存任务 ID 清单用于补偿验收。
+- [x] 临时运行补偿命令，使用更长下载窗口：`npm run video:finalize-pending -- --limit 20 --max-seconds 1800 --cache-timeout-seconds 900 --missing-local-max-age-days 2`。
+- [x] 对最新缺截图任务抽样核对：`local_video_path` 已写入、`public/videos/<taskId>.mp4` 存在、`public/videos/thumbnails/<taskId>.jpg` 存在。
+- [x] 对仍然超时的任务保留清单，不手动伪造截图、不写假 `local_video_path`。
+
+### Phase 2：修后台本地化停止条件
+
+- [x] 修改 `src/lib/video/task-localization-runner.ts`：任务 `succeeded` 但 `cacheResult.success !== true` 且还有 `result_video_url` 时，不立即停止；继续按间隔重试，直到本地视频和截图成功，或达到最大运行时间。
+- [x] 给 runner 增加更长的成功后本地化下载超时，例如 `cacheTimeoutMs: 10 * 60 * 1000`，避免 3MB-8MB 慢链接 60 秒必失败。
+- [x] 保持失败、取消、无视频 URL、无 provider task id 等不可恢复状态仍然停止，避免无限轮询。
+- [x] 补一个小 smoke，覆盖“provider 已成功但缓存超时不能被当成完整完成”的逻辑。
+
+### Phase 3：修补偿脚本和生产定时参数
+
+- [x] 修改 `/Users/gouki-youdoo/.youdoo/runtime/sd2-finalize-pending-videos.sh` 和仓库内对应脚本参数，把 `--cache-timeout-seconds 60` 调整为更长窗口，并把 `--max-seconds` 调到足够完成至少 1-2 条慢视频。
+- [x] 保持单批 `limit` 较小，避免多个大视频同时下载拖垮服务。
+- [x] 验证定时补偿仍有锁 `/tmp/youdoo-sd2-finalize-pending-videos.lock`，不会并发重复跑。
+
+### Phase 4：修前端接口口径，避免假截图地址
+
+- [x] 修改 `src/app/api/assets/library/route.ts`：只有本地缩略图文件存在、已有 `local_video_path`、或有可用 `result_last_frame_url` 时，才返回 `thumbnailUrl`。
+- [x] 修改 `src/components/TaskVideoThumbnail.tsx`：不要把远端 `result_video_url` 当成可截图来源；没有本地视频、尾帧或明确可用截图时，直接显示稳定占位，不请求必然 404 的缩略图接口。
+- [x] 复查 `/tasks`、`/admin/outputs`、项目详情、视频卡详情、生成页历史列表的 `TaskVideoThumbnail` 调用，确保不会因为只传 `resultVideoUrl` 就触发坏截图请求。
+- [x] 补 smoke：最新远端-only 成功任务在列表接口里 `thumbnailUrl` 为 `null` 或稳定占位，不返回 `/api/video/thumbnail/:id`。
+
+### Phase 5：修截图取帧策略
+
+- [x] 修改 `src/lib/video/thumbnail.ts` 的抽帧策略：优先抽更靠后的时间点，例如 `2.5s`；失败时再回退 `0.5s`。
+- [x] 对已有本地视频任务抽样重生成截图，验证不再抽到纯色开场帧。
+- [x] 不引入新图片识别依赖；先用 ffmpeg 多时间点回退解决 80% 问题。
+
+### Phase 6：验证、部署和回归
+
+- [x] 跑专项 smoke：缺本地视频任务不会暴露假 `thumbnailUrl`；runner 不会在缓存超时后提前结束；抽帧时间点能生成有效 JPEG。
+- [x] 跑 `npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [x] 部署：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
+- [x] 公网验证 `/api/config`、`/login`、`/_next/static/<BUILD_ID>/_buildManifest.js`。
+- [x] 真实数据验收：近 2 天缺截图成功任务的本地视频和缩略图数量明显增加；资产页/任务页最新视频不再出现大量截图 404。
+
+Review：2026-07-03 已上线到生产 BUILD_ID `5kmfTLMNBKVjBURhnOkAm`。`thumbnail-pipeline-smoke`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build/restart/status sd2` 均通过；公网 `/api/config`、`/login`、`/_next/static/5kmfTLMNBKVjBURhnOkAm/_buildManifest.js` 均 200。等待健康守护周期后 `launchd runs=23` 未继续增长。只读 SQL 确认近 2 天成功但缺 `local_video_path` 的任务为 63 条；手动补偿跑通 6 条，补偿后剩余 57 条。抽样 6 条均已写入 `local_video_path`，并生成 `public/videos/<taskId>.mp4` 与 `public/videos/thumbnails/<taskId>.jpg`；`file`、`sips` 和公网静态 URL 验证缩略图是有效 JPEG。手动补偿期间发现生产定时脚本同时启动，已停止并发进程；后续补偿应走带锁脚本，不直接绕过锁运行裸 `npm run video:finalize-pending`。
+
+### 停止条件
+
+- [ ] 下载补偿会消耗大量带宽或单条任务超过 15 分钟仍未完成时，停止批量补偿，保留任务清单。
+- [ ] 发现远端视频链接已过期且刷新也拿不到新链接时，停止该任务补偿，不伪造结果。
+- [ ] 发现缩略图静态路径可能造成越权可见风险时，继续走鉴权 API，不直接暴露 `/videos/thumbnails/*.jpg`。
+- [ ] 发现需要改数据库结构时，先停止并备份 SQLite。
+
+### Git Plan
+
+- 当前工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 当前分支：`codex/v12-full-todo`。
+- 提交建议：
+  - 提交 1：runner / finalize 脚本本地化重试和超时修复。
+  - 提交 2：thumbnailUrl 口径和 `TaskVideoThumbnail` 防 404 修复。
+  - 提交 3：抽帧时间点和最新任务补偿记录。
+- 发布前创建 rollback tag：`rollback/2026-07-03-before-thumbnail-pipeline-fix`。
 
 ## 2026-07-02 管理中心趋势图跨月份可见修复
 
