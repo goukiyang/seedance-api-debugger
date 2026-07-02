@@ -340,6 +340,8 @@ export default async function AdminCostsPage({
         source_type: true,
         source_label: true,
         source_metadata_json: true,
+        provider: true,
+        generation_mode: true,
 	        local_status: true,
 	        result_video_url: true,
 	        result_last_frame_url: true,
@@ -692,6 +694,8 @@ export default async function AdminCostsPage({
 	                      resultVideoUrl={task.result_video_url}
 	                      resultLastFrameUrl={task.result_last_frame_url}
 	                      status={task.local_status}
+	                      provider={task.provider}
+	                      generationMode={task.generation_mode}
 	                      href={taskDetailHref(task.id, '/admin/costs')}
 	                      size="compact"
 	                    />

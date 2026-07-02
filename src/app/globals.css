@@ -16252,12 +16252,36 @@ body.compare-fullscreen-open {
   white-space: nowrap;
 }
 
+.task-video-thumbnail-enhance-badge {
+  position: absolute;
+  inset: 6px auto auto 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 3px 7px;
+  border: 1px solid rgba(204, 251, 241, 0.38);
+  border-radius: 6px;
+  background: rgba(15, 118, 110, 0.94);
+  color: #ecfeff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
+}
+
 .task-video-thumbnail-overlay {
   position: absolute;
   inset: 6px auto auto 6px;
+  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.task-video-thumbnail-enhance-badge + .task-video-thumbnail-overlay {
+  inset-block-start: 32px;
 }
 
 .task-video-thumbnail:hover {

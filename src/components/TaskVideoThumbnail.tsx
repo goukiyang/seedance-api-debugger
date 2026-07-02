@@ -11,6 +11,9 @@ type Props = {
   resultVideoUrl?: string | null;
   resultLastFrameUrl?: string | null;
   status?: string | null;
+  provider?: string | null;
+  generationMode?: string | null;
+  isEnhanceTask?: boolean;
   href?: string | null;
   size?: ThumbnailSize;
   className?: string;
@@ -32,6 +35,9 @@ export function TaskVideoThumbnail({
   resultVideoUrl,
   resultLastFrameUrl,
   status,
+  provider,
+  generationMode,
+  isEnhanceTask,
   href,
   size = 'compact',
   className = '',
@@ -56,10 +62,13 @@ export function TaskVideoThumbnail({
     failed ? 'is-fallback' : '',
     className,
   ].filter(Boolean).join(' ');
+  const shouldShowEnhanceBadge = isEnhanceTask
+    ?? (generationMode === 'enhance_video' || provider === 'volcengine_mediakit');
 
   const inner = (
     <>
       {content}
+      {shouldShowEnhanceBadge ? <span className="task-video-thumbnail-enhance-badge">超分</span> : null}
       {overlay ? <span className="task-video-thumbnail-overlay">{overlay}</span> : null}
     </>
   );

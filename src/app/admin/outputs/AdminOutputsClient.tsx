@@ -235,6 +235,7 @@ function OutputFramePreview({ output }: { output: OutputItem }) {
       resultVideoUrl={output.result_video_url}
       resultLastFrameUrl={output.result_last_frame_url}
       status={output.local_status}
+      isEnhanceTask={output.is_enhance_task}
       href={taskDetailHref(output.id, '/admin/outputs')}
       size="medium"
       className="outputs-preview"

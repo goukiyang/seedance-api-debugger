@@ -38,6 +38,8 @@ interface CreateResponse {
 interface TaskItem {
   id: string;
   prompt: string;
+  provider: string;
+  generation_mode: string;
   local_status: string;
   result_video_url: string | null;
   result_last_frame_url: string | null;
@@ -1162,6 +1164,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         {
           id: data.id,
           prompt: params.prompt,
+          provider: isIpSurface ? 'volcengine_ark' : 'seedance',
+          generation_mode: params.generationMode,
           local_status: data.status || 'submitted',
           result_video_url: null,
           result_last_frame_url: null,
@@ -1781,6 +1785,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	                          resultVideoUrl={task.result_video_url}
 	                          resultLastFrameUrl={task.result_last_frame_url}
 	                          status={task.local_status}
+	                          provider={task.provider}
+	                          generationMode={task.generation_mode}
 	                          size="card"
 	                          className="composer-task-card-preview"
 	                        />

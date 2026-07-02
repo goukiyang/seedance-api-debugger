@@ -42,6 +42,8 @@ interface ReferenceAlbumItem {
 interface TaskItem {
   id: string;
   prompt: string;
+  provider: string;
+  generation_mode: string;
   local_status: string;
   provider_task_id: string | null;
   result_video_url?: string | null;
@@ -81,6 +83,8 @@ interface VideoCardSummary {
 interface VideoCardPreviewTask {
   id: string;
   prompt: string;
+  provider: string;
+  generation_mode: string;
   local_status: string;
   local_video_path: string | null;
   result_video_url: string | null;
@@ -175,6 +179,8 @@ interface ArchiveAnomalies {
 interface ReviewTaskItem {
   id: string;
   prompt: string;
+  provider?: string | null;
+  generation_mode?: string | null;
   local_status: string;
   estimated_cost: number | null;
   actual_cost?: number | null;
@@ -321,6 +327,10 @@ function formatCostTotals(totals?: Array<{ currency: string; amount_minor: numbe
 
 function videoCardPreviewTask(card: VideoCardItem) {
   return card.final_task || card.current_best_task || null;
+}
+
+function isEnhanceTask(task?: { provider?: string | null; generation_mode?: string | null } | null) {
+  return task?.generation_mode === 'enhance_video' || task?.provider === 'volcengine_mediakit';
 }
 
 function costStatusLabel(status: string): string {
@@ -852,6 +862,9 @@ export default function ProjectDetailPage() {
                     ) : (
                       <span>{card.is_fallback ? '历史' : '待生成'}</span>
                     )}
+                    {isEnhanceTask(previewTask) ? (
+                      <span className="task-video-thumbnail-enhance-badge">超分</span>
+                    ) : null}
                   </div>
                   <div className="video-card-main">
                     <div className="video-card-head">
@@ -955,6 +968,7 @@ export default function ProjectDetailPage() {
 	                        resultVideoUrl={task.result_video_url}
 	                        resultLastFrameUrl={task.result_last_frame_url}
 	                        status={task.local_status}
+	                        isEnhanceTask={isEnhanceTask(task)}
 	                        href={taskDetailHref(task.id, projectReturnTo)}
 	                        size="compact"
 	                      />
@@ -1014,6 +1028,7 @@ export default function ProjectDetailPage() {
 	                            resultVideoUrl={task.result_video_url}
 	                            resultLastFrameUrl={task.result_last_frame_url}
 	                            status={task.local_status}
+	                            isEnhanceTask={isEnhanceTask(task)}
 	                            href={taskDetailHref(task.id, projectReturnTo)}
 	                            size="compact"
 	                          />
@@ -1105,6 +1120,7 @@ export default function ProjectDetailPage() {
 	                      resultVideoUrl={task.result_video_url}
 	                      resultLastFrameUrl={task.result_last_frame_url}
 	                      status={task.local_status}
+	                      isEnhanceTask={isEnhanceTask(task)}
 	                      href={taskDetailHref(task.id, projectReturnTo)}
 	                      size="compact"
 	                    />

@@ -344,6 +344,8 @@ export default function TasksPage() {
 	                        resultVideoUrl={task.result_video_url}
 	                        resultLastFrameUrl={task.result_last_frame_url}
 	                        status={task.local_status}
+	                        provider={task.provider}
+	                        generationMode={task.generation_mode}
 	                        href={taskDetailHref(task.id, '/tasks')}
 	                        size="medium"
 	                        className="tasks-preview"
