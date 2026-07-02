@@ -57,7 +57,15 @@ assertContains(taskDetail, 'task-result-compare-stage', 'task detail enhance com
 assertContains(taskDetail, '原视频', 'task detail source video label');
 assertContains(taskDetail, '超分视频', 'task detail enhanced video label');
 assertContains(taskDetail, 'handleComparePlay', 'task detail synchronized compare playback');
+assertContains(taskDetail, 'handleToggleCompareFullscreen', 'task detail compare fullscreen action');
+assertContains(taskDetail, 'requestFullscreen', 'task detail compare fullscreen API');
+assertContains(taskDetail, '全屏对比', 'task detail compare fullscreen button label');
 assertContains(taskDetail, 'isAdmin && <EnhanceVideoAction task={task} />', 'task detail admin-only enhance action');
+
+const globalsCss = read('src/app/globals.css');
+assertContains(globalsCss, 'task-compare-fullscreen-button', 'task detail compare fullscreen button style');
+assertContains(globalsCss, 'is-compare-fullscreen', 'task detail compare fullscreen state style');
+assertContains(globalsCss, ':fullscreen', 'task detail compare native fullscreen style');
 
 const enhanceCreateRoute = read('src/app/api/tasks/enhance-video/create/route.ts');
 assertContains(enhanceCreateRoute, '视频超分功能暂时只对管理员开放', 'enhance create admin-only gate');

@@ -2803,6 +2803,38 @@ a {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   min-height: 360px;
+  position: relative;
+}
+
+.task-compare-fullscreen-button {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(226, 232, 240, 0.28);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #f8fafc;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 9px 11px;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.task-compare-fullscreen-button:hover,
+.task-compare-fullscreen-button:focus-visible {
+  background: rgba(30, 41, 59, 0.92);
+  border-color: rgba(226, 232, 240, 0.58);
+  outline: none;
+}
+
+.task-compare-fullscreen-button:active {
+  transform: translateY(1px);
 }
 
 .task-compare-video-panel {
@@ -2837,6 +2869,58 @@ a {
 .task-compare-badge-enhance {
   color: #ecfeff;
   background: rgba(13, 148, 136, 0.88);
+}
+
+body.compare-fullscreen-open {
+  overflow: hidden;
+}
+
+.task-result-compare-stage::backdrop {
+  background: #020617;
+}
+
+.task-result-compare-stage.is-compare-fullscreen,
+.task-result-compare-stage:fullscreen,
+.task-result-compare-stage:-webkit-full-screen {
+  background: #020617;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  height: 100vh;
+  min-height: 100vh;
+  padding: 52px 16px 16px;
+  width: 100vw;
+  z-index: 9999;
+}
+
+.task-result-compare-stage.is-compare-fullscreen {
+  position: fixed;
+  inset: 0;
+}
+
+.task-result-compare-stage:fullscreen,
+.task-result-compare-stage:-webkit-full-screen {
+  position: relative;
+  inset: auto;
+}
+
+.task-result-compare-stage.is-compare-fullscreen .task-compare-video-panel,
+.task-result-compare-stage:fullscreen .task-compare-video-panel,
+.task-result-compare-stage:-webkit-full-screen .task-compare-video-panel {
+  min-height: calc(100vh - 68px);
+}
+
+.task-result-compare-stage.is-compare-fullscreen .task-compare-video-panel video,
+.task-result-compare-stage:fullscreen .task-compare-video-panel video,
+.task-result-compare-stage:-webkit-full-screen .task-compare-video-panel video {
+  height: 100%;
+  max-height: none;
+}
+
+.task-result-compare-stage.is-compare-fullscreen .task-compare-fullscreen-button,
+.task-result-compare-stage:fullscreen .task-compare-fullscreen-button,
+.task-result-compare-stage:-webkit-full-screen .task-compare-fullscreen-button {
+  top: 14px;
+  right: 16px;
 }
 
 .task-result-compare-notice {
@@ -4411,8 +4495,21 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .task-result-compare-stage.is-compare-fullscreen,
+  .task-result-compare-stage:fullscreen,
+  .task-result-compare-stage:-webkit-full-screen {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 48px 8px 10px;
+  }
+
   .task-compare-video-panel {
     min-height: 220px;
+  }
+
+  .task-result-compare-stage.is-compare-fullscreen .task-compare-video-panel,
+  .task-result-compare-stage:fullscreen .task-compare-video-panel,
+  .task-result-compare-stage:-webkit-full-screen .task-compare-video-panel {
+    min-height: calc(100vh - 58px);
   }
 
   .task-result-cost-pill {

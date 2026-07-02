@@ -8,6 +8,8 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Maximize2,
+  Minimize2,
   PlayCircle,
   RefreshCcw,
   RotateCcw,
@@ -785,7 +787,10 @@ export default function TaskDetailPage() {
   const [enhanceSourceLoadError, setEnhanceSourceLoadError] = useState<string | null>(null);
   const sourceCompareVideoRef = useRef<HTMLVideoElement | null>(null);
   const enhancedCompareVideoRef = useRef<HTMLVideoElement | null>(null);
+  const compareStageRef = useRef<HTMLDivElement | null>(null);
   const compareSyncingRef = useRef(false);
+  const [isCompareFullscreen, setIsCompareFullscreen] = useState(false);
+  const [compareFullscreenFallback, setCompareFullscreenFallback] = useState(false);
 
   // 显示原始响应
   const [showCreateResponse, setShowCreateResponse] = useState(false);
@@ -940,6 +945,35 @@ export default function TaskDetailPage() {
   useEffect(() => {
     fetchOfficialCharges();
   }, [fetchOfficialCharges]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const activeElement = document.fullscreenElement;
+      const isStageFullscreen = activeElement === compareStageRef.current;
+      setIsCompareFullscreen(isStageFullscreen);
+      if (!activeElement) setCompareFullscreenFallback(false);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && compareFullscreenFallback) {
+        setCompareFullscreenFallback(false);
+        setIsCompareFullscreen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [compareFullscreenFallback]);
+
+  useEffect(() => {
+    document.body.classList.toggle('compare-fullscreen-open', isCompareFullscreen);
+    return () => document.body.classList.remove('compare-fullscreen-open');
+  }, [isCompareFullscreen]);
 
   // Auto polling
   useEffect(() => {
@@ -1307,6 +1341,39 @@ export default function TaskDetailPage() {
     syncCompareTime(side);
   };
 
+  const handleToggleCompareFullscreen = async () => {
+    const compareStage = compareStageRef.current;
+    if (!compareStage) return;
+    setOpenError(null);
+
+    if (compareFullscreenFallback) {
+      setCompareFullscreenFallback(false);
+      setIsCompareFullscreen(false);
+      return;
+    }
+
+    if (document.fullscreenElement === compareStage) {
+      await document.exitFullscreen().catch(() => undefined);
+      setIsCompareFullscreen(false);
+      return;
+    }
+
+    syncCompareTime('enhanced');
+
+    try {
+      if (compareStage.requestFullscreen) {
+        await compareStage.requestFullscreen();
+        setIsCompareFullscreen(true);
+        return;
+      }
+    } catch (error) {
+      console.warn('[TaskDetail] Compare fullscreen fallback:', error);
+    }
+
+    setCompareFullscreenFallback(true);
+    setIsCompareFullscreen(true);
+  };
+
   if (loading) {
     return (
       <div className="card">
@@ -1625,10 +1692,27 @@ export default function TaskDetailPage() {
                 </div>
               </div>
 
-              <div className={`task-result-stage ${showEnhanceCompare ? 'task-result-compare-stage' : ''}`}>
+              <div
+                ref={compareStageRef}
+                className={`task-result-stage ${showEnhanceCompare ? 'task-result-compare-stage' : ''} ${isCompareFullscreen ? 'is-compare-fullscreen' : ''}`}
+              >
                 {hasResultVideo ? (
                   showEnhanceCompare ? (
                     <>
+                      <button
+                        type="button"
+                        className="task-compare-fullscreen-button"
+                        onClick={handleToggleCompareFullscreen}
+                        aria-label={isCompareFullscreen ? '退出全屏对比' : '全屏对比播放'}
+                        aria-pressed={isCompareFullscreen}
+                      >
+                        {isCompareFullscreen ? (
+                          <Minimize2 size={15} aria-hidden="true" />
+                        ) : (
+                          <Maximize2 size={15} aria-hidden="true" />
+                        )}
+                        {isCompareFullscreen ? '退出全屏' : '全屏对比'}
+                      </button>
                       <div className="task-compare-video-panel">
                         <span className="task-compare-badge">原视频</span>
                         <video
