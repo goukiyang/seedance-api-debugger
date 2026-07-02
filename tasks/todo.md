@@ -1,10 +1,103 @@
 # V1.2 剩余模块落地 Todo
 
-更新时间：2026-06-18
+更新时间：2026-07-02
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
 
 最新验收结论：整份 V1.2 仍未完整落地。当前代码已经有视频卡 P0 归档入口、公共项目预算底座、审批记录表、审批中心页面、1080p 基础校验、新建项目“默认记账 / 预算记账”选择入口，但这些还没有形成完整业务闭环。后续执行必须以本 todo 为准，不得把“有模型/有页面/有审批记录”误判为“业务已闭环”。
+
+## 2026-07-02 资产管理页性能闭环：本地秒开缓存 + 增量同步 + 数据库/缩略图慢源修复
+
+目标：解决 `/assets` 资产管理页打开慢的问题。最终体验是：用户再次打开资产页时先看到上次已加载内容，不空白等待；后台只同步新增、修改、删除、权限变化的资产；同时修掉 SQLite 写锁、首屏多接口和缩略图重复请求这些真实慢源。
+
+当前证据：
+
+- `/api/assets/library?type=video&limit=60` 本机约几十到几百毫秒，但公网 `sd2.youdoodesign.com` 对同一大 JSON 响应有明显波动，重复测到数秒到 30 秒级。
+- 资产页首屏会拉 `/api/auth/me`、`/api/config`、`/api/projects`、`/api/admin/users`、`/api/reference-albums`、`/api/assets/library`，随后还会触发大量缩略图请求。
+- `sd2` 日志出现 Prisma `P1008` SQLite 等待超时，涉及 `/api/projects` 的 `projectMember.upsert()`、`/api/me/credits` 事务和视频 finalizer 写状态。
+- 当前 SQLite `journal_mode=delete`、`busy_timeout=0`；v12 工作树的 `prisma/dev.db` symlink 到旧目录实际数据库。
+- 首屏视频任务存在缺失缩略图，部分远端视频无本地视频和尾帧，缩略图接口会返回 404，浏览器仍会重复请求。
+
+执行原则：
+
+- Ponytail 最短路径：不引入新状态管理大框架；先用浏览器原生 IndexedDB + 小封装实现列表缓存，能解决再考虑 TanStack Query 持久化。
+- 缓存只改善体验，不掩盖后端问题；数据库锁和缩略图请求必须同一轮纳入。
+- 读接口不能顺手写数据库；列表页必须优先保持纯读取。
+- 不缓存敏感字段、密钥、内部路径、签名 URL；缓存按用户和筛选条件隔离。
+
+### Phase 1：前端本地缓存与旧内容先显示
+
+- [ ] 新增资产页本地缓存 helper，优先放在 `src/lib/assets/library-cache.ts` 或同类前端可用位置，使用 IndexedDB，不用 `localStorage` 存大列表。
+- [ ] 缓存 key 包含 `userId`、`role`、`scope`、`type`、`status`、`sort`、`groupBy`、`projectId`、`ownerUserId`、`keyword`、`page`、`schemaVersion`，避免管理员/普通用户或不同筛选串数据。
+- [ ] `/assets` 初始化时先读缓存；命中后立即 `setItems` 和 `setPagination`，页面显示“正在同步最新资产”轻状态，不显示空白 loading。
+- [ ] 网络请求成功后更新页面和 IndexedDB；失败时保留旧列表，只提示“当前显示上次加载内容，刷新失败可重试”。
+- [ ] 登出、用户变化、`schemaVersion` 变化时清理或隔离旧缓存。
+
+### Phase 2：服务端增量同步接口
+
+- [ ] 在 `GET /api/assets/library` 增加 `snapshot_version` 或 `updated_after` 支持；最小可行版本先返回完整第一页 + `serverSnapshot`，后续再变成真正 delta。
+- [ ] 新增或扩展返回结构，包含 `items`、`updatedItems`、`deletedIds`、`hiddenIds`、`serverSnapshot`，确保删除、隐藏、移动项目、取消共享、权限变化能同步到本地缓存。
+- [ ] 给 `VideoTask`、`Asset`、`ReferenceImage` 统一使用可比较的更新时间字段；如果缺字段，先复用 `updated_at/created_at`，不要为了缓存盲目大改 schema。
+- [ ] 前端合并 delta 时按 `id` 去重、按当前排序重排，并从缓存移除已删除/无权限项。
+
+### Phase 3：去掉资产页首屏的非必要请求
+
+- [ ] `src/app/assets/page.tsx` 首屏只拉用户和资产列表；`/api/projects` 延迟到项目筛选、批量移动面板或需要项目名映射时再拉。
+- [ ] `/api/admin/users` 只在管理员切到“按用户查看”或打开用户筛选时请求。
+- [ ] `/api/reference-albums?scope=all` 只在批量加入图集/共享相关面板打开时请求。
+- [ ] 保持常用筛选状态可恢复，但不要因为恢复筛选导致一次性并发拉全部辅助数据。
+
+### Phase 4：数据库锁修复
+
+- [ ] 修改 `src/app/api/projects/route.ts`，`GET` 不再无条件调用 `ensureDefaultProjectForUser()`；默认项目补齐改到登录/注册/创建项目/生成提交等真正需要写入的路径。
+- [ ] 复查 `ensureDefaultProjectForUser()` 调用点，避免多个只读页面进入时触发 `projectMember.upsert()`。
+- [ ] 评估并执行 SQLite WAL 方案：部署前备份实际数据库 `/Volumes/Data/Projects/video-api-debugger/prisma/dev.db`，再执行 `PRAGMA journal_mode=WAL;` 和合理 busy timeout 验证。
+- [ ] 如果 Prisma 无法稳定设置 busy timeout，则至少通过减少只读页写操作和缩短事务降低锁竞争；不要把超时时间无限拉长来掩盖问题。
+
+### Phase 5：缩略图性能和失败缓存
+
+- [ ] 任务完成 finalizer 成功本地化视频时主动生成缩略图；没有本地视频但有尾帧时使用尾帧；只有远端 mp4 且不允许拉远端时，不给前端返回 `/api/video/thumbnail/:id`。
+- [ ] `/api/assets/library` 序列化视频任务时，只有确认存在本地缩略图或可用尾帧时才返回 `thumbnailUrl`；否则返回 `null` 或稳定占位状态，避免浏览器反复请求 404。
+- [ ] 缩略图响应加稳定缓存头；已有静态缩略图优先走 `/videos/thumbnails/*.jpg` 静态路径，减少动态 API 鉴权、查库、读文件。
+- [ ] 前端对缩略图加载失败做短期 negative cache，同一会话不反复请求已失败地址。
+
+### Phase 6：列表 JSON 瘦身
+
+- [ ] `/api/assets/library` 列表项只返回卡片需要字段：id、kind、title、thumbnailUrl、duration、ratio/resolution、status、project 摘要、owner 摘要、createdAt、可下载/可移动/可超分标记。
+- [ ] 长 prompt、完整参数、详情 URL、成本明细等改为点击详情抽屉时再请求，避免第一页 JSON 继续膨胀。
+- [ ] 保留现有超分入口所需字段，不破坏 `canEnhanceVideo`、`isEnhanceTask`、`enhanceSourceTaskId` 判断。
+
+### 验收标准
+
+- [ ] 本地首次打开 `/assets?type=video` 后刷新页面，能先看到 IndexedDB 缓存内容，再后台同步新数据。
+- [ ] 断网或接口失败时，页面保留上次资产列表，不清空成空白页。
+- [ ] 普通用户和管理员缓存不串；切换用户后不能看到上一个用户的资产。
+- [ ] `/api/projects` GET 不再触发 `ProjectMember.upsert()`。
+- [ ] SQLite 不再持续出现资产页相关 Prisma `P1008` 超时。
+- [ ] 首屏公网资产列表 JSON 明显变小；缩略图 404 请求明显减少。
+- [ ] `npm run lint`、`npx tsc --noEmit --pretty false`、`npm run build` 通过。
+- [ ] 部署后执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并验证公网 `/assets`、`/api/assets/library`、`/login`。
+- [ ] 真实登录态浏览器验收：首次加载、刷新秒开、后台同步、失败保留旧内容、缩略图占位都符合预期。
+
+### 停止条件
+
+- [ ] 需要 schema 变更但未备份 SQLite 时停止。
+- [ ] 发现缓存可能泄露其他用户资产或管理员视角数据时停止。
+- [ ] 发现签名 URL、密钥、内部路径会进入 IndexedDB 时停止。
+- [ ] WAL 或数据库设置影响生产启动时停止并回滚数据库备份。
+- [ ] 缩略图策略需要拉取远端大 mp4 或产生额外付费/带宽风险时停止。
+
+### Git Plan
+
+- 当前分支：`codex/v12-full-todo`。
+- 建议新建任务分支：`codex/assets-cache-performance`，避免直接把性能改造混入当前 live 分支。
+- 提交分组：
+  - 提交 1：前端 IndexedDB 缓存和旧内容先显示。
+  - 提交 2：辅助数据懒加载和列表 JSON 瘦身。
+  - 提交 3：`/api/projects` 只读化和数据库锁缓解。
+  - 提交 4：缩略图静态化/失败缓存。
+  - 提交 5：增量同步接口和真实验收补强。
+- 发布前创建 rollback tag：`rollback/2026-07-02-before-assets-cache-performance`。
 
 ## 2026-06-26 火山 IP API 整合页配置入口
 
