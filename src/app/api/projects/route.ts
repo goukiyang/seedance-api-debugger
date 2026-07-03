@@ -13,8 +13,6 @@ export async function GET(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    await ensureDefaultProjectForUser(user.id);
-
     const includeArchived = request.nextUrl.searchParams.get('include_archived') === 'true';
     const includeAll = user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
     const statusWhere = includeArchived ? { not: 'deleted' } : 'active';

@@ -113,11 +113,11 @@ Review：已上线到生产 BUILD_ID `8-plVoagPP7tPNn_QFF47`。专项 smoke 证�
 
 ### Phase 1：前端本地缓存与旧内容先显示
 
-- [ ] 新增资产页本地缓存 helper，优先放在 `src/lib/assets/library-cache.ts` 或同类前端可用位置，使用 IndexedDB，不用 `localStorage` 存大列表。
-- [ ] 缓存 key 包含 `userId`、`role`、`scope`、`type`、`status`、`sort`、`groupBy`、`projectId`、`ownerUserId`、`keyword`、`page`、`schemaVersion`，避免管理员/普通用户或不同筛选串数据。
-- [ ] `/assets` 初始化时先读缓存；命中后立即 `setItems` 和 `setPagination`，页面显示“正在同步最新资产”轻状态，不显示空白 loading。
-- [ ] 网络请求成功后更新页面和 IndexedDB；失败时保留旧列表，只提示“当前显示上次加载内容，刷新失败可重试”。
-- [ ] 登出、用户变化、`schemaVersion` 变化时清理或隔离旧缓存。
+- [x] 新增资产页本地缓存 helper，优先放在 `src/lib/assets/library-cache.ts` 或同类前端可用位置，使用 IndexedDB，不用 `localStorage` 存大列表。
+- [x] 缓存 key 包含 `userId`、`role`、`scope`、`type`、`status`、`sort`、`groupBy`、`projectId`、`ownerUserId`、`keyword`、`page`、`schemaVersion`，避免管理员/普通用户或不同筛选串数据。
+- [x] `/assets` 初始化时先读缓存；命中后立即 `setItems` 和 `setPagination`，页面显示“正在同步最新资产”轻状态，不显示空白 loading。
+- [x] 网络请求成功后更新页面和 IndexedDB；失败时保留旧列表，只提示“当前显示上次加载内容，刷新失败可重试”。
+- [x] 登出、用户变化、`schemaVersion` 变化时清理或隔离旧缓存。
 
 ### Phase 2：服务端增量同步接口
 
@@ -128,15 +128,15 @@ Review：已上线到生产 BUILD_ID `8-plVoagPP7tPNn_QFF47`。专项 smoke 证�
 
 ### Phase 3：去掉资产页首屏的非必要请求
 
-- [ ] `src/app/assets/page.tsx` 首屏只拉用户和资产列表；`/api/projects` 延迟到项目筛选、批量移动面板或需要项目名映射时再拉。
-- [ ] `/api/admin/users` 只在管理员切到“按用户查看”或打开用户筛选时请求。
-- [ ] `/api/reference-albums?scope=all` 只在批量加入图集/共享相关面板打开时请求。
-- [ ] 保持常用筛选状态可恢复，但不要因为恢复筛选导致一次性并发拉全部辅助数据。
+- [x] `src/app/assets/page.tsx` 首屏只拉用户和资产列表；`/api/projects` 延迟到项目筛选、批量移动面板或需要项目名映射时再拉。
+- [x] `/api/admin/users` 只在管理员切到“按用户查看”或打开用户筛选时请求。
+- [x] `/api/reference-albums?scope=all` 只在批量加入图集/共享相关面板打开时请求。
+- [x] 保持常用筛选状态可恢复，但不要因为恢复筛选导致一次性并发拉全部辅助数据。
 
 ### Phase 4：数据库锁修复
 
-- [ ] 修改 `src/app/api/projects/route.ts`，`GET` 不再无条件调用 `ensureDefaultProjectForUser()`；默认项目补齐改到登录/注册/创建项目/生成提交等真正需要写入的路径。
-- [ ] 复查 `ensureDefaultProjectForUser()` 调用点，避免多个只读页面进入时触发 `projectMember.upsert()`。
+- [x] 修改 `src/app/api/projects/route.ts`，`GET` 不再无条件调用 `ensureDefaultProjectForUser()`；默认项目补齐改到登录/注册/创建项目/生成提交等真正需要写入的路径。
+- [x] 复查 `ensureDefaultProjectForUser()` 调用点，避免多个只读页面进入时触发 `projectMember.upsert()`。
 - [ ] 评估并执行 SQLite WAL 方案：部署前备份实际数据库 `/Volumes/Data/Projects/video-api-debugger/prisma/dev.db`，再执行 `PRAGMA journal_mode=WAL;` 和合理 busy timeout 验证。
 - [ ] 如果 Prisma 无法稳定设置 busy timeout，则至少通过减少只读页写操作和缩短事务降低锁竞争；不要把超时时间无限拉长来掩盖问题。
 
@@ -155,13 +155,13 @@ Review：已上线到生产 BUILD_ID `8-plVoagPP7tPNn_QFF47`。专项 smoke 证�
 
 ### 验收标准
 
-- [ ] 本地首次打开 `/assets?type=video` 后刷新页面，能先看到 IndexedDB 缓存内容，再后台同步新数据。
-- [ ] 断网或接口失败时，页面保留上次资产列表，不清空成空白页。
-- [ ] 普通用户和管理员缓存不串；切换用户后不能看到上一个用户的资产。
-- [ ] `/api/projects` GET 不再触发 `ProjectMember.upsert()`。
+- [x] 本地首次打开 `/assets?type=video` 后刷新页面，能先看到 IndexedDB 缓存内容，再后台同步新数据。
+- [x] 断网或接口失败时，页面保留上次资产列表，不清空成空白页。
+- [x] 普通用户和管理员缓存不串；切换用户后不能看到上一个用户的资产。
+- [x] `/api/projects` GET 不再触发 `ProjectMember.upsert()`。
 - [ ] SQLite 不再持续出现资产页相关 Prisma `P1008` 超时。
 - [ ] 首屏公网资产列表 JSON 明显变小；缩略图 404 请求明显减少。
-- [ ] `npm run lint`、`npx tsc --noEmit --pretty false`、`npm run build` 通过。
+- [x] `npm run lint`、`npx tsc --noEmit --pretty false`、`npm run build` 通过。
 - [ ] 部署后执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并验证公网 `/assets`、`/api/assets/library`、`/login`。
 - [ ] 真实登录态浏览器验收：首次加载、刷新秒开、后台同步、失败保留旧内容、缩略图占位都符合预期。
 

@@ -11,6 +11,11 @@ import {
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import {
+  createAssetLibraryCacheKey,
+  readAssetLibraryCache,
+  writeAssetLibraryCache,
+} from '@/lib/assets/library-cache';
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetType = 'all' | 'video' | 'image' | 'reference';
@@ -346,6 +351,36 @@ function isReusableImageItem(item: AssetLibraryItem) {
     || (item.source === 'reference_image' && Boolean(item.referenceImageId));
 }
 
+function cacheSafeAssetUrl(value: string | null) {
+  if (!value) return null;
+  return value.startsWith('/') ? value : null;
+}
+
+function toCacheSafeOwner(owner: AssetLibraryItem['owner']): AssetLibraryItem['owner'] {
+  if (!owner) return null;
+  return {
+    id: owner.id,
+    name: owner.displayName,
+    username: null,
+    email: null,
+    avatar_url: cacheSafeAssetUrl(owner.avatar_url || null),
+    account_type: null,
+    displayName: owner.displayName,
+    subtitle: '',
+  };
+}
+
+function toCacheSafeAssetItem(item: AssetLibraryItem): AssetLibraryItem {
+  return {
+    ...item,
+    prompt: null,
+    owner: toCacheSafeOwner(item.owner),
+    thumbnailUrl: cacheSafeAssetUrl(item.thumbnailUrl),
+    previewUrl: cacheSafeAssetUrl(item.previewUrl),
+    downloadUrl: cacheSafeAssetUrl(item.downloadUrl),
+  };
+}
+
 function AssetsPageContent() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [scope, setScope] = useState<AssetScope>('history');
@@ -365,6 +400,8 @@ function AssetsPageContent() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncingAssets, setSyncingAssets] = useState(false);
+  const [showingCachedAssets, setShowingCachedAssets] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState<AssetLibraryItemId[]>([]);
@@ -480,6 +517,7 @@ function AssetsPageContent() {
 
   useEffect(() => {
     if (!user) return;
+    if (scope !== 'project' && !(movePanelOpen && bulkTarget === 'video_project')) return;
     let cancelled = false;
     const projectUrl = user.role === 'admin'
       ? '/api/projects?include_archived=true&include_all=true'
@@ -492,25 +530,29 @@ function AssetsPageContent() {
       .catch(() => {
         if (!cancelled) setProjects([]);
       });
-
-    if (user.role === 'admin') {
-      fetch('/api/admin/users', { cache: 'no-store' })
-        .then((response) => response.ok ? response.json() : null)
-        .then((data) => {
-          if (!cancelled && data) setUsers(data.users || []);
-        })
-        .catch(() => {
-          if (!cancelled) setUsers([]);
-        });
-    }
-
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, scope, movePanelOpen, bulkTarget]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.role !== 'admin' || scope !== 'user') return;
+    let cancelled = false;
+    fetch('/api/admin/users', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (!cancelled && data) setUsers(data.users || []);
+      })
+      .catch(() => {
+        if (!cancelled) setUsers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, scope]);
+
+  useEffect(() => {
+    if (!user || !movePanelOpen || bulkTarget !== 'album') return;
     let cancelled = false;
     fetch('/api/reference-albums?scope=all', { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
@@ -531,13 +573,29 @@ function AssetsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, movePanelOpen, bulkTarget]);
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    setLoading(true);
+    const normalizedKeyword = keyword.trim();
+    const cacheKey = createAssetLibraryCacheKey({
+      userId: user.id,
+      role: user.role,
+      scope,
+      type,
+      status,
+      sort,
+      groupBy,
+      projectId,
+      ownerUserId,
+      keyword: normalizedKeyword,
+      page,
+    });
     setError('');
+    setShowingCachedAssets(false);
+    setSyncingAssets(true);
+    setLoading(true);
     const params = new URLSearchParams({
       scope,
       type,
@@ -549,31 +607,64 @@ function AssetsPageContent() {
     });
     if (scope === 'project' && projectId) params.set('project_id', projectId);
     if (scope === 'user' && ownerUserId) params.set('owner_user_id', ownerUserId);
-    if (keyword.trim()) params.set('keyword', keyword.trim());
+    if (normalizedKeyword) params.set('keyword', normalizedKeyword);
 
-    fetch(`/api/assets/library?${params.toString()}`, { cache: 'no-store' })
-      .then(async (response) => {
+    void (async () => {
+      let showedCache = false;
+      let cached: { items: AssetLibraryItem[]; pagination: Pagination | null } | null = null;
+      try {
+        cached = await readAssetLibraryCache<AssetLibraryItem, Pagination>(cacheKey);
+      } catch {
+        cached = null;
+      }
+      if (cancelled) return;
+      if (cached) {
+        showedCache = true;
+        const cachedItems = cached.items || [];
+        setItems(cachedItems);
+        setPagination(cached.pagination || null);
+        setSelectedIds((current) => current.filter((id) => cachedItems.some((item) => item.id === id)));
+        setShowingCachedAssets(true);
+        setLoading(false);
+      }
+
+      try {
+        const response = await fetch(`/api/assets/library?${params.toString()}`, { cache: 'no-store' });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || data.message || '资产加载失败');
-        return data;
-      })
-      .then((data) => {
         if (!cancelled) {
-          setItems(data.items || []);
-          setPagination(data.pagination || null);
-          setSelectedIds((current) => current.filter((id) => (data.items || []).some((item: AssetLibraryItem) => item.id === id)));
+          const nextItems = (data.items || []) as AssetLibraryItem[];
+          const nextPagination = (data.pagination || null) as Pagination | null;
+          setItems(nextItems);
+          setPagination(nextPagination);
+          setSelectedIds((current) => current.filter((id) => nextItems.some((item) => item.id === id)));
+          setShowingCachedAssets(false);
+          void writeAssetLibraryCache<AssetLibraryItem, Pagination>({
+            key: cacheKey,
+            userId: user.id,
+            payload: {
+              items: nextItems.map(toCacheSafeAssetItem),
+              pagination: nextPagination,
+            },
+          });
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) {
-          setItems([]);
-          setPagination(null);
-          setError(err instanceof Error ? err.message : '资产加载失败');
+          if (showedCache) {
+            setError('最新资产同步失败，当前显示上次加载内容，可稍后重试。');
+          } else {
+            setItems([]);
+            setPagination(null);
+            setError(err instanceof Error ? err.message : '资产加载失败');
+          }
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setSyncingAssets(false);
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -1114,6 +1205,12 @@ function AssetsPageContent() {
           <button type="button" onClick={() => { setError(''); setMessage(''); }} aria-label="关闭提示">
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {syncingAssets && showingCachedAssets && !error && (
+        <div className="asset-library-sync-note" aria-live="polite">
+          正在同步最新资产，当前先显示上次加载内容。
         </div>
       )}
 

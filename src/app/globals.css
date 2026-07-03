@@ -16544,6 +16544,12 @@ body.compare-fullscreen-open {
   cursor: pointer;
 }
 
+.asset-library-sync-note {
+  margin-bottom: 14px;
+  color: oklch(0.72 0.018 245);
+  font-size: 12px;
+}
+
 .asset-library-bulkbar {
   position: sticky;
   top: 14px;
