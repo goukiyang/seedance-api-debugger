@@ -162,7 +162,7 @@ Review：已上线到生产 BUILD_ID `8-plVoagPP7tPNn_QFF47`。专项 smoke 证�
 - [ ] SQLite 不再持续出现资产页相关 Prisma `P1008` 超时。
 - [ ] 首屏公网资产列表 JSON 明显变小；缩略图 404 请求明显减少。
 - [x] `npm run lint`、`npx tsc --noEmit --pretty false`、`npm run build` 通过。
-- [ ] 部署后执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并验证公网 `/assets`、`/api/assets/library`、`/login`。
+- [x] 部署后执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并验证公网 `/assets`、`/api/assets/library`、`/login`。
 - [ ] 真实登录态浏览器验收：首次加载、刷新秒开、后台同步、失败保留旧内容、缩略图占位都符合预期。
 
 ### 停止条件
@@ -172,6 +172,8 @@ Review：已上线到生产 BUILD_ID `8-plVoagPP7tPNn_QFF47`。专项 smoke 证�
 - [ ] 发现签名 URL、密钥、内部路径会进入 IndexedDB 时停止。
 - [ ] WAL 或数据库设置影响生产启动时停止并回滚数据库备份。
 - [ ] 缩略图策略需要拉取远端大 mp4 或产生额外付费/带宽风险时停止。
+
+Review：2026-07-03 已上线到生产 BUILD_ID `8l1n_n4ANzXdi-fj52iff`，Git commit `b620635`，回滚 tag `rollback/2026-07-03-before-assets-cache-performance` 指向上线前 `b4fcc86`。本轮完成 Phase 1、Phase 3、Phase 4 前两项：资产页 IndexedDB 秒开缓存、缓存 key 按用户/角色/筛选隔离、缓存写入过滤 prompt/外部 URL/用户邮箱等字段、接口失败保留旧列表；首屏不再无条件拉项目、管理员用户和图集；`/api/projects` GET 不再触发默认项目写入。验证通过：`npx tsx scripts/assets-library-performance-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、限定 lint、完整 `npm run lint`、`npm run build`、子 agent 只读审查并修复 2 个 P2、`youdoo-sites build/restart/status sd2`。公网验证：`/api/config` 200、`/login` 200、`/assets?type=video` 200、`/api/assets/library?type=video&limit=1` 未登录 401 符合权限预期、资产页公网 chunk 200 且包含 `sd2_asset_library_cache` / `asset_library_pages` / “正在同步最新资产”。等待健康守护周期后 launchd `runs=24` 未增长。
 
 ### Git Plan
 
