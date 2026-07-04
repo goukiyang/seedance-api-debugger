@@ -249,6 +249,10 @@ function formatRecentTaskChargeText(chargeText: string): string {
   return chargeText.replace(/\s*USD(?=（|$)/g, '');
 }
 
+function isRecentEnhanceTask(task: Pick<TaskItem, 'provider' | 'generation_mode'>) {
+  return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+}
+
 function generationPreferenceStorageKey(userId: string) {
   return `${GENERATION_PREFERENCE_STORAGE_PREFIX}${userId}`;
 }
@@ -1772,6 +1776,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                 {recentTasks.map((task) => {
                   const chargeText = formatProviderUsdCharge(task);
                   const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;
+                  const enhanceTask = isRecentEnhanceTask(task);
 
                   return (
                     <article
@@ -1810,6 +1815,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                             </div>
                           )}
                           <div className="composer-task-card-meta">
+                            {enhanceTask && (
+                              <span className="composer-task-card-enhance-chip">
+                                视频超分
+                              </span>
+                            )}
                             {recentTaskChargeText && (
                               <span className="composer-task-card-charge" title={`实际扣除 ${recentTaskChargeText}`}>
                                 {recentTaskChargeText}
@@ -1824,14 +1834,23 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           </div>
                         </div>
                       </Link>
-                      <button
-                        type="button"
-                        className="composer-task-card-reuse"
-                        disabled={reuseLoading}
-                        onClick={() => loadReusableTask(task.id)}
-                      >
-                        {reusingTaskId === task.id ? '回填中...' : '重新生成'}
-                      </button>
+                      {enhanceTask ? (
+                        <Link
+                          href={taskDetailHref(task.id, surfaceConfig.routePath)}
+                          className="composer-task-card-reuse composer-task-card-reuse-link"
+                        >
+                          查看超分结果
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          className="composer-task-card-reuse"
+                          disabled={reuseLoading}
+                          onClick={() => loadReusableTask(task.id)}
+                        >
+                          {reusingTaskId === task.id ? '回填中...' : '重新生成'}
+                        </button>
+                      )}
                     </article>
                   );
                 })}

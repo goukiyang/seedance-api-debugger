@@ -4325,6 +4325,20 @@ body.compare-fullscreen-open {
   font-size: 12px;
 }
 
+.task-enhance-chip {
+  align-items: center;
+  background: #ccfbf1;
+  border: 1px solid #99f6e4;
+  border-radius: 9999px;
+  color: #0f766e;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
 .tasks-project-link {
   color: #2563eb;
   font-size: 13px;
@@ -7285,7 +7299,7 @@ body.compare-fullscreen-open {
   pointer-events: none;
 }
 
-.composer-task-card-preview > span {
+.composer-task-card-preview > .task-video-thumbnail-placeholder {
   align-items: center;
   color: rgba(226, 232, 240, 0.62);
   display: grid;
@@ -7371,6 +7385,17 @@ body.compare-fullscreen-open {
   padding: 3px 7px;
 }
 
+.composer-task-card-enhance-chip {
+  background: rgba(20, 184, 166, 0.16);
+  border: 1px solid rgba(94, 234, 212, 0.28);
+  border-radius: 9999px;
+  color: rgba(204, 251, 241, 0.96);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+  padding: 3px 7px;
+}
+
 .composer-task-card-status {
   margin-left: auto;
   font-size: 11px;
@@ -7411,6 +7436,10 @@ body.compare-fullscreen-open {
 .composer-task-card-reuse:hover:not(:disabled) {
   background: rgba(37, 99, 235, 0.46);
   border-color: rgba(147, 197, 253, 0.78);
+}
+
+.composer-task-card-reuse-link {
+  text-decoration: none;
 }
 
 .composer-task-card-reuse:disabled {
@@ -16254,21 +16283,23 @@ body.compare-fullscreen-open {
 
 .task-video-thumbnail-enhance-badge {
   position: absolute;
-  inset: 6px auto auto 6px;
+  inset: 6px 6px auto auto;
   z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 34px;
-  padding: 3px 7px;
-  border: 1px solid rgba(204, 251, 241, 0.38);
-  border-radius: 6px;
-  background: rgba(15, 118, 110, 0.94);
+  min-width: 28px;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid rgba(204, 251, 241, 0.44);
+  border-radius: 9999px;
+  background: rgba(15, 118, 110, 0.78);
   color: #ecfeff;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   line-height: 1.1;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(6px);
 }
 
 .task-video-thumbnail-overlay {
@@ -16278,10 +16309,6 @@ body.compare-fullscreen-open {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-
-.task-video-thumbnail-enhance-badge + .task-video-thumbnail-overlay {
-  inset-block-start: 32px;
 }
 
 .task-video-thumbnail:hover {

@@ -13,6 +13,12 @@ function assertContains(content: string, needle: string, label: string) {
   }
 }
 
+function assertNotContains(content: string, needle: string, label: string) {
+  if (content.includes(needle)) {
+    throw new Error(`${label} should not contain: ${needle}`);
+  }
+}
+
 function assertEveryThumbnailHasEnhanceSignal(relativePath: string) {
   const content = read(relativePath);
   const blocks = content.match(/<TaskVideoThumbnail[\s\S]*?\/>/g) || [];
@@ -34,12 +40,17 @@ assertContains(thumbnail, 'provider?: string | null;', 'thumbnail provider prop'
 assertContains(thumbnail, 'generationMode?: string | null;', 'thumbnail generation mode prop');
 assertContains(thumbnail, 'isEnhanceTask?: boolean;', 'thumbnail explicit enhance prop');
 assertContains(thumbnail, "generationMode === 'enhance_video' || provider === 'volcengine_mediakit'", 'thumbnail enhance rule');
+assertContains(thumbnail, 'is-enhance-task', 'thumbnail enhance state class');
 assertContains(thumbnail, 'task-video-thumbnail-enhance-badge', 'thumbnail enhance badge render');
 assertContains(thumbnail, '超分', 'thumbnail enhance badge label');
 
 const globals = read('src/app/globals.css');
 assertContains(globals, '.task-video-thumbnail-enhance-badge', 'thumbnail enhance badge style');
-assertContains(globals, '.task-video-thumbnail-enhance-badge + .task-video-thumbnail-overlay', 'thumbnail overlay collision guard');
+assertContains(globals, 'inset: 6px 6px auto auto;', 'thumbnail enhance badge must sit at top right');
+assertContains(globals, '.task-enhance-chip', 'task info enhance chip style');
+assertContains(globals, '.composer-task-card-enhance-chip', 'generate recent task enhance chip style');
+assertContains(globals, '.composer-task-card-preview > .task-video-thumbnail-placeholder', 'generate recent task placeholder style must be scoped');
+assertNotContains(globals, '.composer-task-card-preview > span', 'generate recent task preview must not style every span');
 
 [
   'src/app/tasks/page.tsx',
@@ -66,6 +77,19 @@ assertContains(dashboardLib, 'generation_mode: task.generation_mode', 'dashboard
 
 const projectPage = read('src/app/projects/[id]/page.tsx');
 assertContains(projectPage, 'isEnhanceTask(previewTask)', 'project video card preview enhance badge');
+assertContains(projectPage, 'task-enhance-chip', 'project recent tasks must show enhance chip outside thumbnail');
+
+const tasksPage = read('src/app/tasks/page.tsx');
+assertContains(tasksPage, 'isEnhanceTask(task)', 'tasks page must classify enhance tasks');
+assertContains(tasksPage, 'task-enhance-chip', 'tasks page must show enhance chip outside thumbnail');
+
+const generatePage = read('src/components/generate/GeneratePageClient.tsx');
+assertContains(generatePage, 'isRecentEnhanceTask(task)', 'generate recent tasks must classify enhance tasks');
+assertContains(generatePage, 'composer-task-card-enhance-chip', 'generate recent tasks must show enhance chip outside thumbnail');
+
+const adminDashboard = read('src/app/admin/AdminGenerationDashboardClient.tsx');
+assertContains(adminDashboard, 'isDashboardEnhanceTask(task)', 'admin recent tasks must classify enhance tasks');
+assertContains(adminDashboard, 'task-enhance-chip', 'admin recent tasks must show enhance chip outside thumbnail');
 
 const ipListRoute = read('src/app/api/ip/video/list/route.ts');
 assertContains(ipListRoute, 'provider: true', 'IP task list provider select');

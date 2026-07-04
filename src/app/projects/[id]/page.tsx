@@ -1129,6 +1129,7 @@ export default function ProjectDetailPage() {
 	                    <Link className="link truncate" style={{ display: 'block', maxWidth: 280 }} href={taskDetailHref(task.id, projectReturnTo)} title={task.prompt}>
 	                      {task.prompt || task.id}
 	                    </Link>
+	                    {isEnhanceTask(task) && <span className="task-enhance-chip">视频超分</span>}
 	                    <span className="text-gray text-sm">{task.id.slice(0, 10)}...</span>
 	                  </td>
                   <td>{task.local_status}</td>

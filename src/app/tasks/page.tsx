@@ -103,14 +103,18 @@ function truncatePrompt(prompt: string, maxLen = 140): string {
 }
 
 function taskReferenceCount(task: Task): number {
-  if (task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit') return 0;
+  if (isEnhanceTask(task)) return 0;
   const ids = parseJsonArray(task.reference_image_ids);
   if (ids.length > 0) return ids.length;
   return parseJsonArray(task.reference_image_urls).length;
 }
 
+function isEnhanceTask(task: Pick<Task, 'generation_mode' | 'provider'>): boolean {
+  return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+}
+
 function taskParameterText(task: Task) {
-  if (task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit') {
+  if (isEnhanceTask(task)) {
     return [
       task.resolution || '-',
       task.duration ? `${task.duration}s` : '-',
@@ -335,39 +339,41 @@ export default function TasksPage() {
                 const referenceCount = taskReferenceCount(task);
                 const modeLabel = TASK_GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
                 const downloadable = isTaskDownloadable(task);
+                const enhanceTask = isEnhanceTask(task);
                 return (
-	                  <article key={task.id} className="tasks-card">
-	                    <div className="tasks-preview-cell">
-	                      <TaskVideoThumbnail
-	                        taskId={task.id}
-	                        localVideoPath={task.local_video_path}
-	                        resultVideoUrl={task.result_video_url}
-	                        resultLastFrameUrl={task.result_last_frame_url}
-	                        status={task.local_status}
-	                        provider={task.provider}
-	                        generationMode={task.generation_mode}
-	                        href={taskDetailHref(task.id, '/tasks')}
-	                        size="medium"
-	                        className="tasks-preview"
-	                      />
-	                      <label
-	                        className="tasks-card-select"
-	                        title={downloadable ? '选择此视频加入批量下载' : taskDownloadDisabledReason(task)}
-	                      >
-	                        <input
-	                          type="checkbox"
-	                          checked={selectedSet.has(task.id)}
-	                          disabled={!downloadable}
-	                          onChange={(event) => toggleTaskSelection(task, event.target.checked)}
-	                        />
-	                      </label>
-	                    </div>
+                  <article key={task.id} className="tasks-card">
+                    <div className="tasks-preview-cell">
+                      <TaskVideoThumbnail
+                        taskId={task.id}
+                        localVideoPath={task.local_video_path}
+                        resultVideoUrl={task.result_video_url}
+                        resultLastFrameUrl={task.result_last_frame_url}
+                        status={task.local_status}
+                        provider={task.provider}
+                        generationMode={task.generation_mode}
+                        href={taskDetailHref(task.id, '/tasks')}
+                        size="medium"
+                        className="tasks-preview"
+                      />
+                      <label
+                        className="tasks-card-select"
+                        title={downloadable ? '选择此视频加入批量下载' : taskDownloadDisabledReason(task)}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedSet.has(task.id)}
+                          disabled={!downloadable}
+                          onChange={(event) => toggleTaskSelection(task, event.target.checked)}
+                        />
+                      </label>
+                    </div>
 
 	                    <div className="tasks-card-main">
                       <div className="tasks-card-topline">
                         <span className={`status-badge ${getStatusClass(task.local_status)}`}>
                           {getStatusText(task.local_status)}
                         </span>
+                        {enhanceTask && <span className="task-enhance-chip">视频超分</span>}
                         <span className="tasks-card-id" title={task.id}>{task.id.slice(0, 12)}...</span>
                         {task.project && (
                           <Link href={`/projects/${task.project.id}`} className="tasks-project-link">
@@ -417,8 +423,8 @@ export default function TasksPage() {
                       <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
                         查看详情
                       </Link>
-                      <Link href={`/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
-                        重新生成
+                      <Link href={enhanceTask ? '/generate/enhance' : `/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
+                        {enhanceTask ? '继续超分' : '重新生成'}
                       </Link>
                       <button
                         type="button"

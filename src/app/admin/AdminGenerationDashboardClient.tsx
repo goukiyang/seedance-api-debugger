@@ -109,6 +109,10 @@ function taskOfficialCost(task: GenerationDashboardData['recent_tasks'][number])
   return '待官方确认';
 }
 
+function isDashboardEnhanceTask(task: Pick<GenerationDashboardData['recent_tasks'][number], 'provider' | 'generation_mode'>) {
+  return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+}
+
 function dateTimeText(value: string) {
   return new Date(value).toLocaleString('zh-CN', {
     month: '2-digit',
@@ -736,6 +740,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 </span>
                 <span>
                   <strong>{shortPrompt(task.prompt || task.id)}</strong>
+                  {isDashboardEnhanceTask(task) && <span className="task-enhance-chip">视频超分</span>}
                   <small>{dateTimeText(task.created_at)}</small>
                 </span>
                 <span>

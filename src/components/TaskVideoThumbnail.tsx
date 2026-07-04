@@ -56,19 +56,24 @@ export function TaskVideoThumbnail({
   ) : (
     <span className="task-video-thumbnail-placeholder">{statusText(status)}</span>
   );
+  const shouldShowEnhanceBadge = isEnhanceTask
+    ?? (generationMode === 'enhance_video' || provider === 'volcengine_mediakit');
   const classNames = [
     'task-video-thumbnail',
     `task-video-thumbnail-${size}`,
     failed ? 'is-fallback' : '',
+    shouldShowEnhanceBadge ? 'is-enhance-task' : '',
     className,
   ].filter(Boolean).join(' ');
-  const shouldShowEnhanceBadge = isEnhanceTask
-    ?? (generationMode === 'enhance_video' || provider === 'volcengine_mediakit');
 
   const inner = (
     <>
       {content}
-      {shouldShowEnhanceBadge ? <span className="task-video-thumbnail-enhance-badge">超分</span> : null}
+      {shouldShowEnhanceBadge ? (
+        <span className="task-video-thumbnail-enhance-badge" title="视频超分任务" aria-label="视频超分任务">
+          超分
+        </span>
+      ) : null}
       {overlay ? <span className="task-video-thumbnail-overlay">{overlay}</span> : null}
     </>
   );
