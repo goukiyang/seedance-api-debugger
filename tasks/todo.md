@@ -17,7 +17,9 @@
 - [x] 超分结果卡片增加更明显的边框、徽标和“AI MediaKit 超分结果”信息；可超分源视频显示“可超分”和常显超分按钮。
 - [x] 缓存 key 增加 `view/enhance` 维度，避免“生产历史”和“视频超分”缓存串页。
 - [x] 验证：`assets-library-performance-smoke`、`enhance-video-entry-smoke`、`npx tsc --noEmit --pretty false`、限定 lint、完整 lint、`npm run build`、`npx impeccable detect` 均通过。
-- [ ] 部署：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并验证公网 `/assets` 静态资源包含新标签、选择模式和超分显性样式。
+- [x] 部署：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并验证公网 `/assets` 静态资源包含新标签、选择模式和超分显性样式。
+
+Review：2026-07-04 已上线到生产 BUILD_ID `GgBPUtfOeGnYVtT_wUqrR`，Git commit `9686904`，回滚 tag `rollback/2026-07-04-before-assets-selection-enhance-tabs` 指向上线前 `8f27488`。公网 `/api/config` 200、`/login` 200、`/assets` 200、未登录 `/api/assets/library?type=video&enhance=all&limit=1` 返回 401 符合权限预期；公网 assets chunk `page-4407d9e1b0a095ff.js` 200，并命中“视频超分”、`asset-library-select-toggle`、`asset-card-badge-enhance-ready`、`可直接发起视频超分`；生产 CSS/JS 命中 `asset-library-tab-enhance`、`asset-library-view-chip`、`asset-card-enhance-ready`。等待健康守护周期后 launchd `runs=25` 未增长。ClickOps 当前没有可用 in-app browser session，未做真实登录态点击截图，已用公网静态资源和接口验证新版本加载。
 
 ## 2026-07-03 最新生成内容截图缺失 / 截图错误修复
 
