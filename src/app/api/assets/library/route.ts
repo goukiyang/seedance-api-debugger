@@ -15,6 +15,7 @@ const SCOPES = new Set(['history', 'project', 'user']);
 const STATUSES = new Set(['all', 'succeeded', 'running', 'submitted', 'failed', 'cancelled', 'hidden']);
 const SORTS = new Set(['created_desc', 'created_asc', 'completed_desc', 'project', 'user', 'duration']);
 const GROUPS = new Set(['date', 'project', 'user']);
+const ENHANCE_FILTERS = new Set(['none', 'all']);
 
 type LibraryItemKind = 'video' | 'image';
 type LibraryItemSource = 'video_task' | 'asset' | 'reference_image';
@@ -320,6 +321,7 @@ function addKeywordFilter(keyword: string | null): Prisma.VideoTaskWhereInput | 
 async function loadVideoItems(options: {
   type: string;
   scope: string;
+  enhance: string;
   status: string;
   sort: string;
   projectId: string | null;
@@ -361,6 +363,30 @@ async function loadVideoItems(options: {
     filters.push({ retention_status: { in: ['user_deleted', 'admin_hidden'] } });
   } else if (options.status !== 'all') {
     filters.push({ local_status: options.status });
+  }
+
+  if (options.enhance === 'all') {
+    filters.push({
+      OR: [
+        { generation_mode: 'enhance_video' },
+        { provider: 'volcengine_mediakit' },
+        {
+          local_status: 'succeeded',
+          duration: { not: null },
+          video_card_id: { not: null },
+          NOT: [
+            { generation_mode: 'enhance_video' },
+            { provider: 'volcengine_mediakit' },
+          ],
+          OR: [
+            { public_video_url: { not: null } },
+            { local_video_path: { not: null } },
+            { result_video_url: { not: null } },
+            { result_last_frame_url: { not: null } },
+          ],
+        },
+      ],
+    });
   }
 
   const keywordFilter = addKeywordFilter(options.keyword);
@@ -411,12 +437,16 @@ async function loadAssetItems(options: {
   userId: string;
   role: 'admin' | 'user';
   type: string;
+  enhance: string;
   scope: string;
   status: string;
   ownerUserId: string | null;
   keyword: string | null;
   take: number;
 }) {
+  if (options.enhance !== 'none') {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
   if (options.type !== 'all' && options.type !== 'image' && options.type !== 'video') {
     return { items: [] as LibraryItem[], total: 0 };
   }
@@ -463,12 +493,16 @@ async function loadAssetItems(options: {
 async function loadReferenceItems(options: {
   user: SessionUser;
   type: string;
+  enhance: string;
   scope: string;
   projectId: string | null;
   ownerUserId: string | null;
   keyword: string | null;
   take: number;
 }) {
+  if (options.enhance !== 'none') {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
   if (options.type !== 'all' && options.type !== 'reference') {
     return { items: [] as LibraryItem[], total: 0 };
   }
@@ -527,6 +561,7 @@ export async function GET(request: NextRequest) {
     const status = enumParam(searchParams.get('status'), STATUSES, 'all');
     const sort = enumParam(searchParams.get('sort'), SORTS, 'created_desc');
     const groupBy = enumParam(searchParams.get('group_by'), GROUPS, 'date');
+    const enhance = enumParam(searchParams.get('enhance'), ENHANCE_FILTERS, 'none');
     const projectId = optionalText(searchParams.get('project_id'));
     const ownerUserId = optionalText(searchParams.get('owner_user_id'));
     const keyword = optionalText(searchParams.get('keyword'));
@@ -543,6 +578,7 @@ export async function GET(request: NextRequest) {
       loadVideoItems({
         type,
         scope,
+        enhance,
         status,
         sort,
         projectId,
@@ -556,6 +592,7 @@ export async function GET(request: NextRequest) {
         userId: user.id,
         role: user.role,
         type,
+        enhance,
         scope,
         status,
         ownerUserId,
@@ -565,6 +602,7 @@ export async function GET(request: NextRequest) {
       loadReferenceItems({
         user,
         type,
+        enhance,
         scope,
         projectId,
         ownerUserId,
@@ -595,6 +633,7 @@ export async function GET(request: NextRequest) {
         scope,
         status,
         sort,
+        enhance,
         group_by: groupBy,
         project_id: projectId,
         owner_user_id: ownerUserId,

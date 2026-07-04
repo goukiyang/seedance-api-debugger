@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, X } from 'lucide-react';
+import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
@@ -18,6 +18,7 @@ import {
 } from '@/lib/assets/library-cache';
 
 type AssetScope = 'history' | 'project' | 'user';
+type AssetView = AssetScope | 'enhance';
 type AssetType = 'all' | 'video' | 'image' | 'reference';
 type AssetStatus = 'all' | 'succeeded' | 'running' | 'submitted' | 'failed' | 'cancelled' | 'hidden';
 type AssetSort = 'created_desc' | 'created_asc' | 'completed_desc' | 'project' | 'user' | 'duration';
@@ -129,10 +130,11 @@ type MarqueeState = {
   previewIds: AssetLibraryItemId[];
 };
 
-const scopeTabs: Array<{ id: AssetScope; label: string; adminOnly?: boolean }> = [
+const assetViewTabs: Array<{ id: AssetView; label: string; adminOnly?: boolean; tone?: 'enhance' }> = [
   { id: 'history', label: '生产历史' },
   { id: 'project', label: '按项目' },
   { id: 'user', label: '按用户查看', adminOnly: true },
+  { id: 'enhance', label: '视频超分', tone: 'enhance' },
 ];
 
 const typeTabs: Array<{ id: AssetType; label: string }> = [
@@ -383,7 +385,7 @@ function toCacheSafeAssetItem(item: AssetLibraryItem): AssetLibraryItem {
 
 function AssetsPageContent() {
   const [user, setUser] = useState<SessionUser | null>(null);
-  const [scope, setScope] = useState<AssetScope>('history');
+  const [assetView, setAssetView] = useState<AssetView>('history');
   const [type, setType] = useState<AssetType>('video');
   const [status, setStatus] = useState<AssetStatus>('all');
   const [sort, setSort] = useState<AssetSort>('created_desc');
@@ -405,6 +407,7 @@ function AssetsPageContent() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState<AssetLibraryItemId[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
   const [anchorId, setAnchorId] = useState<AssetLibraryItemId | null>(null);
   const [activeItem, setActiveItem] = useState<AssetLibraryItem | null>(null);
   const [detailMediaAspectRatio, setDetailMediaAspectRatio] = useState<string | null>(null);
@@ -428,6 +431,10 @@ function AssetsPageContent() {
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isAdmin = user?.role === 'admin';
+  const isEnhanceView = assetView === 'enhance';
+  const scope: AssetScope = isEnhanceView ? 'history' : assetView;
+  const requestType: AssetType = isEnhanceView ? 'video' : type;
+  const enhanceFilter = isEnhanceView ? 'all' : 'none';
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const previewSet = useMemo(() => new Set(marquee?.previewIds || []), [marquee?.previewIds]);
   const selectedItems = useMemo(
@@ -467,6 +474,16 @@ function AssetsPageContent() {
     setSelectedIds([]);
     setAnchorId(null);
     setMovePanelOpen(false);
+  };
+
+  const toggleSelectionMode = () => {
+    if (selectionMode) {
+      clearSelection();
+      setMarquee(null);
+      setSelectionMode(false);
+      return;
+    }
+    setSelectionMode(true);
   };
 
   const resetForFilterChange = () => {
@@ -580,10 +597,12 @@ function AssetsPageContent() {
     let cancelled = false;
     const normalizedKeyword = keyword.trim();
     const cacheKey = createAssetLibraryCacheKey({
+      view: assetView,
       userId: user.id,
       role: user.role,
       scope,
-      type,
+      type: requestType,
+      enhance: enhanceFilter,
       status,
       sort,
       groupBy,
@@ -598,13 +617,14 @@ function AssetsPageContent() {
     setLoading(true);
     const params = new URLSearchParams({
       scope,
-      type,
+      type: requestType,
       status,
       sort,
       group_by: groupBy,
       page: String(page),
       limit: '60',
     });
+    if (enhanceFilter !== 'none') params.set('enhance', enhanceFilter);
     if (scope === 'project' && projectId) params.set('project_id', projectId);
     if (scope === 'user' && ownerUserId) params.set('owner_user_id', ownerUserId);
     if (normalizedKeyword) params.set('keyword', normalizedKeyword);
@@ -669,7 +689,7 @@ function AssetsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [user, scope, type, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
+  }, [user, assetView, scope, requestType, enhanceFilter, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
 
   useEffect(() => {
     setDetailMediaAspectRatio(null);
@@ -733,12 +753,13 @@ function AssetsPageContent() {
   };
 
   const handleCardClick = (event: React.MouseEvent, item: AssetLibraryItem) => {
-    if (event.shiftKey) {
-      selectRange(item.id);
-      return;
-    }
-    if (event.metaKey || event.ctrlKey || selectedIds.length > 0) {
-      toggleItem(item.id);
+    if (selectionMode || event.shiftKey || event.metaKey || event.ctrlKey) {
+      if (!selectionMode) setSelectionMode(true);
+      if (event.shiftKey) {
+        selectRange(item.id);
+      } else {
+        toggleItem(item.id);
+      }
       return;
     }
     setActiveItem(item);
@@ -746,9 +767,27 @@ function AssetsPageContent() {
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, item: AssetLibraryItem) => {
     if (event.target !== event.currentTarget) return;
+    if (selectionMode && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      toggleItem(item.id);
+      return;
+    }
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     setActiveItem(item);
+  };
+
+  const handleSelectView = (nextView: AssetView) => {
+    setAssetView(nextView);
+    if (nextView !== 'project') setProjectId('');
+    if (nextView !== 'user') setOwnerUserId('');
+    if (nextView === 'enhance') {
+      setType('video');
+      setStatus('all');
+      setGroupBy('date');
+    }
+    setEnhanceMenuItemId(null);
+    resetForFilterChange();
   };
 
   const currentAssetReturnTo = () => {
@@ -821,6 +860,7 @@ function AssetsPageContent() {
   };
 
   const beginTouchSelect = (item: AssetLibraryItem) => {
+    if (!selectionMode) return;
     if (selectedIds.length > 0) return;
     if (touchTimer.current) clearTimeout(touchTimer.current);
     touchTimer.current = setTimeout(() => {
@@ -852,6 +892,7 @@ function AssetsPageContent() {
   };
 
   const handleGridPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectionMode) return;
     if (event.button !== 0 || event.pointerType === 'touch') return;
     const target = event.target as HTMLElement;
     if (target.closest('[data-asset-card],button,a,input,select,textarea')) return;
@@ -1061,44 +1102,56 @@ function AssetsPageContent() {
           <button className="asset-library-icon-button" type="button" onClick={reloadItems} aria-label="刷新资产">
             <RefreshCcw size={16} />
           </button>
+          <button
+            className={`asset-library-secondary-link asset-library-select-toggle ${selectionMode ? 'active' : ''}`}
+            type="button"
+            aria-pressed={selectionMode}
+            onClick={toggleSelectionMode}
+          >
+            <CheckSquare size={15} />
+            {selectionMode ? '退出选择' : '选择'}
+          </button>
           <Link className="asset-library-secondary-link" href="/tasks">任务列表</Link>
         </div>
       </header>
 
       <section className="asset-library-tabs" aria-label="资产分类">
-        {scopeTabs.filter((tab) => !tab.adminOnly || isAdmin).map((tab) => (
+        {assetViewTabs.filter((tab) => !tab.adminOnly || isAdmin).map((tab) => (
           <button
             key={tab.id}
             type="button"
-            className={scope === tab.id ? 'active' : ''}
-            onClick={() => {
-              setScope(tab.id);
-              if (tab.id !== 'project') setProjectId('');
-              if (tab.id !== 'user') setOwnerUserId('');
-              resetForFilterChange();
-            }}
+            className={`${assetView === tab.id ? 'active' : ''} ${tab.tone === 'enhance' ? 'asset-library-tab-enhance' : ''}`.trim()}
+            onClick={() => handleSelectView(tab.id)}
           >
+            {tab.tone === 'enhance' && <Sparkles size={13} aria-hidden="true" />}
             {tab.label}
           </button>
         ))}
       </section>
 
       <section className="asset-library-filter-bar">
-        <div className="asset-library-type-tabs">
-          {typeTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className={type === tab.id ? 'active' : ''}
-              onClick={() => {
-                setType(tab.id);
-                resetForFilterChange();
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {isEnhanceView ? (
+          <div className="asset-library-view-chip">
+            <Sparkles size={14} aria-hidden="true" />
+            视频超分
+          </div>
+        ) : (
+          <div className="asset-library-type-tabs">
+            {typeTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={type === tab.id ? 'active' : ''}
+                onClick={() => {
+                  setType(tab.id);
+                  resetForFilterChange();
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <form
           className="asset-library-search"
@@ -1318,7 +1371,7 @@ function AssetsPageContent() {
       )}
 
       <main
-        className="asset-library-content"
+        className={`asset-library-content ${selectionMode ? 'is-selecting' : ''}`}
         onPointerDown={handleGridPointerDown}
         onPointerMove={handleGridPointerMove}
         onPointerUp={handleGridPointerUp}
@@ -1333,7 +1386,7 @@ function AssetsPageContent() {
         {!loading && items.length === 0 && (
           <div className="asset-library-empty">
             <h2>暂无资产</h2>
-            <p>调整筛选条件，或先到生成页创建视频。</p>
+            <p>{isEnhanceView ? '当前没有可超分视频或超分结果，完成视频生成后会自动出现在这里。' : '调整筛选条件，或先到生成页创建视频。'}</p>
             <Link href="/generate">去生成视频</Link>
           </div>
         )}
@@ -1361,6 +1414,10 @@ function AssetsPageContent() {
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
+                const enhanceStateLabel = item.isEnhanceTask ? '超分结果' : item.canEnhanceVideo ? '可超分' : '';
+                const enhanceBadgeClassName = item.isEnhanceTask
+                  ? 'asset-card-badge asset-card-badge-enhance'
+                  : 'asset-card-badge asset-card-badge-enhance-ready';
                 return (
                   <div
                     key={item.id}
@@ -1368,7 +1425,7 @@ function AssetsPageContent() {
                     data-asset-card="true"
                     role="button"
                     tabIndex={0}
-                    className={`asset-card asset-card-${cardSize} ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''} ${enhanceMenuOpen ? 'enhance-menu-open' : ''}`}
+                    className={`asset-card asset-card-${cardSize} ${selectionMode ? 'selection-mode' : ''} ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''} ${item.isEnhanceTask ? 'asset-card-enhance-result' : ''} ${item.canEnhanceVideo ? 'asset-card-enhance-ready' : ''} ${enhanceMenuOpen ? 'enhance-menu-open' : ''}`}
                     onClick={(event) => handleCardClick(event, item)}
                     onKeyDown={(event) => handleCardKeyDown(event, item)}
                     onPointerDown={(event) => {
@@ -1377,27 +1434,29 @@ function AssetsPageContent() {
                     onPointerUp={clearTouchTimer}
                     onPointerCancel={clearTouchTimer}
                   >
-                    <button
-                      type="button"
-                      className="asset-card-check"
-                      aria-label={selected ? '取消选择资产' : '选择资产'}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleItem(item.id);
-                      }}
-                    >
-                      {selected ? '✓' : ''}
-                    </button>
+                    {(selectionMode || selected) && (
+                      <button
+                        type="button"
+                        className="asset-card-check"
+                        aria-label={selected ? '取消选择资产' : '选择资产'}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleItem(item.id);
+                        }}
+                      >
+                        {selected ? '✓' : ''}
+                      </button>
+                    )}
                     <span className="asset-card-media">
                       {item.thumbnailUrl ? (
                         <img src={item.thumbnailUrl} alt={item.title} loading="lazy" />
                       ) : (
                         <span className="asset-card-empty">{statusLabel(item.status)}</span>
                       )}
-                      {item.isEnhanceTask && (
-                        <span className="asset-card-badge asset-card-badge-enhance">
+                      {enhanceStateLabel && (
+                        <span className={enhanceBadgeClassName}>
                           <Sparkles size={12} aria-hidden="true" />
-                          超分
+                          {enhanceStateLabel}
                         </span>
                       )}
                       {duration && <span className="asset-card-duration">{duration}</span>}
@@ -1475,6 +1534,11 @@ function AssetsPageContent() {
                           </div>
                         )}
                       </div>
+                      {enhanceStateLabel && (
+                        <span className={`asset-card-enhance-note ${item.isEnhanceTask ? 'is-result' : 'is-ready'}`}>
+                          {item.isEnhanceTask ? 'AI MediaKit 超分结果' : '可直接发起视频超分'}
+                        </span>
+                      )}
                       {specText && <span className="asset-card-spec">{specText}</span>}
                       <span>{item.project?.name || '未归属项目'} · {formatDateTime(item.createdAt)}</span>
                       {isAdmin && item.owner && (

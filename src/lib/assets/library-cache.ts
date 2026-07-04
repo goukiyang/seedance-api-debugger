@@ -5,10 +5,12 @@ const DB_VERSION = 1;
 export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 1;
 
 type AssetLibraryCacheKeyInput = {
+  view?: string;
   userId: string;
   role: string;
   scope: string;
   type: string;
+  enhance?: string;
   status: string;
   sort: string;
   groupBy: string;
@@ -101,10 +103,12 @@ export function createAssetLibraryCacheKey(input: AssetLibraryCacheKeyInput) {
   const schemaVersion = input.schemaVersion ?? ASSET_LIBRARY_CACHE_SCHEMA_VERSION;
   return [
     `v${schemaVersion}`,
+    input.view || '-',
     input.userId,
     input.role,
     input.scope,
     input.type,
+    input.enhance || '-',
     input.status,
     input.sort,
     input.groupBy,
