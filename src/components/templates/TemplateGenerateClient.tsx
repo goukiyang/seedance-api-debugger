@@ -10,6 +10,7 @@ import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
+import { readJsonResponse } from '@/lib/http/json-response';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
@@ -25,6 +26,12 @@ type CreateResponse = {
   agent_run_id?: string | null;
   selected_agent_plan_key?: string | null;
   prompt_rendered?: string;
+};
+
+type CreateTaskResponse = CreateResponse & {
+  error?: string;
+  message?: string;
+  _debug?: object | null;
 };
 
 type CreditSummary = {
@@ -306,7 +313,7 @@ export function TemplateGenerateClient() {
         window.location.href = '/login?next=/template-generate';
         return;
       }
-      const data = await response.json();
+      const data = await readJsonResponse<{ projects?: ProjectOption[] }>(response);
       const list: ProjectOption[] = (data.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
       setProjects(list);
       const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
@@ -343,7 +350,7 @@ export function TemplateGenerateClient() {
     setVideoCardMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/video-cards`, { cache: 'no-store' });
-      const data = await response.json();
+      const data = await readJsonResponse<{ video_cards?: VideoCardOption[]; error?: string; message?: string }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '视频卡列表加载失败');
       const list: VideoCardOption[] = data.video_cards || [];
       setVideoCards(list);
@@ -407,7 +414,12 @@ export function TemplateGenerateClient() {
         window.location.href = '/login?next=/template-generate';
         return;
       }
-      const data = await response.json();
+      const data = await readJsonResponse<{
+        tasks?: TaskItem[];
+        pagination?: { page?: number; total_pages?: number };
+        error?: string;
+        message?: string;
+      }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '最近任务加载失败');
       const tasks = Array.isArray(data.tasks) ? data.tasks as TaskItem[] : [];
       const pagination = data.pagination || {};
@@ -491,7 +503,7 @@ export function TemplateGenerateClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: projectName.trim() }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse<{ project?: ProjectOption; error?: string; message?: string }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '项目创建失败');
       setProjectName('');
       setProjectCreateOpen(false);
@@ -516,7 +528,7 @@ export function TemplateGenerateClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: videoCardTitle.trim(), objective: videoCardObjective.trim() || null }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse<{ video_card?: VideoCardOption; error?: string; message?: string }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '视频卡创建失败');
       setVideoCardTitle('');
       setVideoCardObjective('');
@@ -546,7 +558,7 @@ export function TemplateGenerateClient() {
           objective: videoCardObjective.trim() || '模板生成自动创建的视频卡',
         }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse<{ video_card?: VideoCardOption; error?: string; message?: string }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '视频卡创建失败');
       const createdCard = data.video_card as VideoCardOption | undefined;
       if (!createdCard?.id) throw new Error('视频卡创建成功但没有返回 ID');
@@ -654,7 +666,7 @@ export function TemplateGenerateClient() {
           prompt_user_edited: params.promptUserEdited === true,
         }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse<CreateTaskResponse>(response);
       if (!response.ok) {
         setErrorDebug(data._debug || null);
         throw new Error(data.message || data.error || `创建失败 (HTTP ${response.status})`);

@@ -11,6 +11,7 @@ import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
+import { readJsonResponse } from '@/lib/http/json-response';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import {
   normalizeGenerationDefaults,
@@ -29,11 +30,20 @@ interface CreateResponse {
   created_at: string;
   project_id?: string;
   video_card_id?: string;
+  template_id?: string | null;
+  agent_run_id?: string | null;
+  selected_agent_plan_key?: string | null;
   prompt_rendered?: string;
   estimated_cost?: number;
   frozen_cost?: number;
   deduplicated?: boolean;
 }
+
+type CreateTaskResponse = CreateResponse & {
+  error?: string;
+  message?: string;
+  _debug?: object | null;
+};
 
 interface TaskItem {
   id: string;
@@ -489,7 +499,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         window.location.href = '/login';
         return;
       }
-      const data = await res.json();
+      const data = await readJsonResponse<{ projects?: ProjectOption[] }>(res);
       const list: ProjectOption[] = (data.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
       setProjects(list);
 
@@ -538,7 +548,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setVideoCardMessage(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/video-cards`, { cache: 'no-store' });
-      const data = await res.json();
+      const data = await readJsonResponse<{ video_cards?: VideoCardOption[]; error?: string; message?: string }>(res);
       if (!res.ok) throw new Error(data.message || data.error || '视频卡列表加载失败');
       const list: VideoCardOption[] = data.video_cards || [];
       setVideoCards(list);
@@ -658,7 +668,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, type: 'team' }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse<{ project: ProjectOption; error?: string; message?: string }>(res);
       if (!res.ok) throw new Error(data.message || data.error || '新建项目失败');
 
       setProjectName('');
@@ -696,7 +706,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           objective: videoCardObjective.trim() || null,
         }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse<{ video_card: VideoCardOption; error?: string; message?: string }>(res);
       if (!res.ok) throw new Error(data.message || data.error || '创建视频卡失败');
       setVideoCardTitle('');
       setVideoCardObjective('');
@@ -744,7 +754,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         headers: action === 'archive' ? { 'Content-Type': 'application/json' } : undefined,
         body: action === 'archive' ? JSON.stringify({ action: 'archive' }) : undefined,
       });
-      const data = await res.json();
+      const data = await readJsonResponse<{ error?: string; message?: string }>(res);
       if (!res.ok) {
         if (action === 'delete' && typeof data.error === 'string' && data.error.includes('归档')) {
           setProjectMessage({
@@ -809,7 +819,27 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
         },
       });
-      const data = await res.json();
+      const data = await readJsonResponse<{
+        draft: {
+          task_id: string;
+          prompt?: string;
+          generation_mode?: GenerationMode;
+          ratio?: VideoRatio;
+          duration?: VideoDuration;
+          resolution?: VideoResolution;
+          seed?: number;
+          generate_audio?: boolean;
+          return_last_frame?: boolean;
+          watermark?: boolean;
+          resolution_approval_confirmed?: boolean;
+          project_id?: string | null;
+          video_card_id?: string | null;
+        };
+        skipped_references?: number;
+        restored_references?: number;
+        error?: string;
+        message?: string;
+      }>(res);
       if (!res.ok) {
         throw new Error(data.message || data.error || '复用任务失败');
       }
@@ -1150,7 +1180,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         }),
       });
 
-      const data = await res.json();
+      const data = await readJsonResponse<CreateTaskResponse>(res);
 
       if (!res.ok) {
         setErrorDebug(data._debug || null);

@@ -16,6 +16,7 @@ import {
   createVolcengineIpVideoTask,
   safeVolcengineIpUserMessage,
 } from '@/lib/provider/volcengine-ip';
+import { ensureProviderSafeReferenceImageUrl } from '@/lib/provider/reference-image-safety';
 import {
   getVolcengineIpApiSettings,
   isVolcengineIpApiReady,
@@ -622,11 +623,25 @@ export async function POST(request: NextRequest) {
   }
   const generationReferenceAlbumIds = uniquePreserveOrder(generationReferenceImages.map((image) => image.album_id));
 
-  const { preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(
-    workspaceId,
-    generationReferenceImageIds,
-    requestedReferenceImageUrls,
-  );
+  let preparedImages: PreparedRefImage[];
+  let prepareErrors: string[];
+  let prepSummary: { total: number; publicUrl: number; r2Uploaded: number; skipped: number; hasLocalPath: boolean };
+  try {
+    ({ preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(
+      workspaceId,
+      generationReferenceImageIds,
+      requestedReferenceImageUrls,
+    ));
+  } catch (error) {
+    console.error('[IpTasksCreate] Reference image preparation failed:', error);
+    return NextResponse.json(
+      {
+        error: 'REFERENCE_IMAGE_PREP_FAILED',
+        message: `参考图处理失败：${error instanceof Error ? error.message : '服务临时异常'}`,
+      },
+      { status: 400 },
+    );
+  }
 
   if (prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
     return NextResponse.json(
@@ -1305,7 +1320,18 @@ async function prepareReferenceImages(
   const prepareErrors: string[] = [];
   let skipped = 0;
 
-  let imageItems: Array<{ asset: { id: string; file_name: string | null; original_url: string; type: string } | null; originalUrl: string }> = [];
+  let imageItems: Array<{
+    asset: {
+      id: string;
+      file_name: string | null;
+      original_url: string;
+      type: string;
+      width: number | null;
+      height: number | null;
+      mime_type: string | null;
+    } | null;
+    originalUrl: string;
+  }> = [];
 
   const workspaceReferenceAssets = await prisma.workspaceAsset.findMany({
     where: { workspace_id: workspaceId },
@@ -1355,6 +1381,9 @@ async function prepareReferenceImages(
         file_name: asset.file_name,
         original_url: asset.original_url,
         type: asset.type,
+        width: asset.width,
+        height: asset.height,
+        mime_type: asset.mime_type,
       } : null, originalUrl: rawUrl });
     }
   } else {
@@ -1365,6 +1394,9 @@ async function prepareReferenceImages(
         file_name: item.asset.file_name,
         original_url: item.asset.original_url,
         type: item.asset.type,
+        width: item.asset.width,
+        height: item.asset.height,
+        mime_type: item.asset.mime_type,
       }, originalUrl: item.asset.original_url }));
   }
 
@@ -1383,11 +1415,27 @@ async function prepareReferenceImages(
     const isLocalPath = originalUrl.startsWith('/');
 
     if (isPublicUrl) {
+      let providerUrl = originalUrl;
+      let sourceType: PreparedRefImage['sourceType'] = isR2 ? 'upload' : 'external';
+      if (item.asset) {
+        try {
+          const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset });
+          providerUrl = safeReference.providerUrl;
+          if (safeReference.resized) {
+            r2Uploaded += 1;
+            sourceType = 'upload';
+          }
+        } catch (error) {
+          skipped += 1;
+          prepareErrors.push(`[${i + 1}] 参考图压缩失败: ${error instanceof Error ? error.message : String(error)}`);
+          continue;
+        }
+      }
       publicUrl += 1;
       preparedImages.push({
         name: item.asset?.file_name || `图${i + 1}`,
-        originalUrl,
-        sourceType: isR2 ? 'upload' : 'external',
+        originalUrl: providerUrl,
+        sourceType,
         order: i,
       });
       continue;
