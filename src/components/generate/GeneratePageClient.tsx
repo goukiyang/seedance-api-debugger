@@ -37,6 +37,7 @@ interface CreateResponse {
   estimated_cost?: number;
   frozen_cost?: number;
   deduplicated?: boolean;
+  reference_image_notice?: string | null;
 }
 
 type CreateTaskResponse = CreateResponse & {

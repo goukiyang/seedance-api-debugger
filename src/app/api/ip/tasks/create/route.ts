@@ -16,7 +16,13 @@ import {
   createVolcengineIpVideoTask,
   safeVolcengineIpUserMessage,
 } from '@/lib/provider/volcengine-ip';
-import { ensureProviderSafeReferenceImageUrl } from '@/lib/provider/reference-image-safety';
+import {
+  PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+  ensureProviderSafeReferenceImageUrl,
+  getProviderSafeImageResizeDimensions,
+  isProviderReferenceImageSizeError,
+  providerReferenceImageSizeMessage,
+} from '@/lib/provider/reference-image-safety';
 import {
   getVolcengineIpApiSettings,
   isVolcengineIpApiReady,
@@ -644,8 +650,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
+    const referenceImageFailure = buildReferenceImagePreparationFailure(prepareErrors);
     return NextResponse.json(
-      { error: 'REFERENCE_IMAGE_NOT_PUBLIC', message: '参考图无法生成公网 URL', details: { errors: prepareErrors } },
+      { error: referenceImageFailure.error, message: referenceImageFailure.message, details: { errors: prepareErrors } },
       { status: 400 },
     );
   }
@@ -732,7 +739,12 @@ export async function POST(request: NextRequest) {
     agentRunId: agentRun?.id || null,
     selectedAgentPlanKey,
     promptUserEdited,
-    preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
+    preparedImages: preparedImages.map((img) => ({
+      name: img.name,
+      originalUrl: img.originalUrl,
+      sourceType: img.sourceType,
+      providerSafeResize: img.providerSafeResize,
+    })),
     prepSummary,
     source: {
       type: requestSource.source_type,
@@ -1104,6 +1116,7 @@ export async function POST(request: NextRequest) {
     }
 
     startTaskLocalization(taskId);
+    const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
 
     return NextResponse.json({
       id: taskId,
@@ -1125,6 +1138,10 @@ export async function POST(request: NextRequest) {
       asset_mapping: assetMapping,
       reference_album_ids: generationReferenceAlbumIds,
       reference_image_ids: generationReferenceImageIds,
+      reference_image_notice: referenceImageResizeSummary
+        ? `已自动把 ${referenceImageResizeSummary.resized_count} 张过大的参考图压缩到平台允许尺寸，原图不会被修改。`
+        : null,
+      reference_image_resize_summary: referenceImageResizeSummary,
       source_type: requestSource.source_type,
       source_label: effectiveSourceLabel,
       source_request_id: sourceRequestId,
@@ -1134,6 +1151,9 @@ export async function POST(request: NextRequest) {
     const providerErrorMessage = volcengineProviderErrorMessage(err);
     const providerErrorCode = volcengineProviderErrorCode(err);
     const providerHttpStatus = volcengineProviderHttpStatus(err);
+    const userFacingProviderMessage = isProviderReferenceImageSizeError(providerErrorMessage)
+      ? `${providerReferenceImageSizeMessage(providerErrorMessage)} 已返还冻结点数。`
+      : `${providerErrorMessage}，已返还冻结点数`;
     if (providerRequestId) {
       await markProviderApiRequestFailed({
         requestId: providerRequestId,
@@ -1184,7 +1204,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: 'PROVIDER_CREATE_FAILED',
-        message: `${providerErrorMessage}，已返还冻结点数`,
+        message: userFacingProviderMessage,
         task_id: taskId,
       },
       { status: providerHttpStatus },
@@ -1304,6 +1324,46 @@ interface PreparedRefImage {
   originalUrl: string;
   sourceType: 'upload' | 'gallery' | 'external';
   order: number;
+  providerSafeResize?: {
+    originalWidth?: number;
+    originalHeight?: number;
+    outputWidth?: number;
+    outputHeight?: number;
+    originalPixels?: number;
+    maxPixels?: number;
+  };
+}
+
+function buildReferenceImageResizeSummary(preparedImages: PreparedRefImage[]) {
+  const resizedItems = preparedImages.filter((image) => image.providerSafeResize);
+  if (resizedItems.length === 0) return null;
+  return {
+    resized_count: resizedItems.length,
+    max_pixels: PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+    items: resizedItems.map((image) => ({
+      name: image.name,
+      original_width: image.providerSafeResize?.originalWidth ?? null,
+      original_height: image.providerSafeResize?.originalHeight ?? null,
+      output_width: image.providerSafeResize?.outputWidth ?? null,
+      output_height: image.providerSafeResize?.outputHeight ?? null,
+      original_pixels: image.providerSafeResize?.originalPixels ?? null,
+      max_pixels: image.providerSafeResize?.maxPixels ?? PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+    })),
+  };
+}
+
+function buildReferenceImagePreparationFailure(prepareErrors: string[]) {
+  const joinedErrors = prepareErrors.join('；');
+  if (isProviderReferenceImageSizeError(joinedErrors)) {
+    return {
+      error: 'REFERENCE_IMAGE_TOO_LARGE',
+      message: '参考图尺寸过大，系统已尝试自动压缩到合规尺寸，但这张图处理失败。请换一张更小的图，或先压缩后再提交。',
+    };
+  }
+  return {
+    error: 'REFERENCE_IMAGE_NOT_PUBLIC',
+    message: '参考图无法生成公网 URL，请换一张可访问的图片后重试。',
+  };
 }
 
 async function prepareReferenceImages(
@@ -1417,17 +1477,31 @@ async function prepareReferenceImages(
     if (isPublicUrl) {
       let providerUrl = originalUrl;
       let sourceType: PreparedRefImage['sourceType'] = isR2 ? 'upload' : 'external';
+      let providerSafeResize: PreparedRefImage['providerSafeResize'];
       if (item.asset) {
+        const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset.width, item.asset.height));
         try {
           const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset });
           providerUrl = safeReference.providerUrl;
           if (safeReference.resized) {
             r2Uploaded += 1;
             sourceType = 'upload';
+            providerSafeResize = {
+              originalWidth: safeReference.width,
+              originalHeight: safeReference.height,
+              outputWidth: safeReference.outputWidth,
+              outputHeight: safeReference.outputHeight,
+              originalPixels: safeReference.originalPixels,
+              maxPixels: safeReference.maxPixels,
+            };
           }
         } catch (error) {
           skipped += 1;
-          prepareErrors.push(`[${i + 1}] 参考图压缩失败: ${error instanceof Error ? error.message : String(error)}`);
+          const rawMessage = error instanceof Error ? error.message : String(error);
+          const message = shouldResize || isProviderReferenceImageSizeError(rawMessage)
+            ? providerReferenceImageSizeMessage(rawMessage)
+            : `参考图处理失败: ${rawMessage}`;
+          prepareErrors.push(`[${i + 1}] ${message}`);
           continue;
         }
       }
@@ -1437,6 +1511,7 @@ async function prepareReferenceImages(
         originalUrl: providerUrl,
         sourceType,
         order: i,
+        providerSafeResize,
       });
       continue;
     }

@@ -77,6 +77,29 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   const hasLocalUrls = debugInfo?.hasLocalUrls;
   const hasNonPublic = debugInfo?.hasNonPublicUrls;
 
+  if (
+    lower.includes('reference_image_too_large')
+    || lower.includes('参考图尺寸过大')
+    || lower.includes('图片尺寸过大')
+    || lower.includes('maximum allowed total pixels')
+    || lower.includes('image exceeds the maximum allowed')
+  ) {
+    return {
+      code: 'REFERENCE_IMAGE_TOO_LARGE',
+      title: '参考图尺寸过大',
+      reasons: [
+        '这不是系统整体故障，是当前选择的参考图超过了视频生成服务允许的图片大小',
+        '系统会优先自动压缩到合规尺寸；如果自动处理仍失败，需要换一张更小的图或先压缩后再提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
   // 524 超时 — 重点处理
   if (error.includes('524') || lower.includes('524') || ctx?.httpStatus === 524) {
     const reasons: string[] = [];

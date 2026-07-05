@@ -2,10 +2,10 @@ import path from 'path';
 import sharp from 'sharp';
 import { uploadPublicAsset } from '@/lib/assets/public-storage';
 
-const PROVIDER_REFERENCE_IMAGE_MAX_PIXELS = 36_000_000;
+export const PROVIDER_REFERENCE_IMAGE_MAX_PIXELS = 36_000_000;
 const PROVIDER_REFERENCE_IMAGE_TARGET_PIXELS = 32_000_000;
 const PROVIDER_REFERENCE_IMAGE_MAX_EDGE = 8192;
-const REFERENCE_IMAGE_FETCH_TIMEOUT_MS = 30_000;
+const REFERENCE_IMAGE_FETCH_TIMEOUT_MS = 90_000;
 
 export interface ProviderReferenceImageAsset {
   file_name?: string | null;
@@ -22,6 +22,8 @@ export interface ProviderSafeReferenceImageResult {
   height?: number;
   outputWidth?: number;
   outputHeight?: number;
+  originalPixels?: number;
+  maxPixels?: number;
 }
 
 export function getProviderSafeImageResizeDimensions(
@@ -58,6 +60,23 @@ function outputName(fileName: string | null | undefined, mimeType: string) {
   return `${parsed.name || 'reference-image'}-provider-safe${ext}`;
 }
 
+export function isProviderReferenceImageSizeError(message: string | null | undefined) {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return lower.includes('image exceeds the maximum allowed total pixels')
+    || lower.includes('maximum allowed total pixels')
+    || lower.includes('exceeds the maximum allowed')
+    || lower.includes('参考图尺寸过大')
+    || lower.includes('图片尺寸过大');
+}
+
+export function providerReferenceImageSizeMessage(rawMessage?: string | null) {
+  const suffix = rawMessage && rawMessage.trim()
+    ? ` 原始提示：${rawMessage.trim()}`
+    : '';
+  return `参考图尺寸过大，已超过视频生成服务允许的图片大小。系统会优先自动压缩到合规尺寸；如果仍失败，请换一张更小的图或先压缩后再提交。${suffix}`;
+}
+
 async function fetchImageBuffer(url: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REFERENCE_IMAGE_FETCH_TIMEOUT_MS);
@@ -79,7 +98,7 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
 }): Promise<ProviderSafeReferenceImageResult> {
   const { originalUrl, asset } = params;
   const knownResize = getProviderSafeImageResizeDimensions(asset?.width, asset?.height);
-  if (!knownResize) {
+  if (asset?.width && asset?.height && !knownResize) {
     return { originalUrl, providerUrl: originalUrl, resized: false, width: asset?.width ?? undefined, height: asset?.height ?? undefined };
   }
 
@@ -94,6 +113,8 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
       resized: false,
       width: metadata.width,
       height: metadata.height,
+      originalPixels: metadata.width && metadata.height ? metadata.width * metadata.height : undefined,
+      maxPixels: PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
     };
   }
 
@@ -124,5 +145,7 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
     height: metadata.height,
     outputWidth: resize.width,
     outputHeight: resize.height,
+    originalPixels: resize.originalPixels,
+    maxPixels: resize.maxPixels,
   };
 }

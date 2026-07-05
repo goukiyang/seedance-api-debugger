@@ -26,6 +26,7 @@ type CreateResponse = {
   agent_run_id?: string | null;
   selected_agent_plan_key?: string | null;
   prompt_rendered?: string;
+  reference_image_notice?: string | null;
 };
 
 type CreateTaskResponse = CreateResponse & {

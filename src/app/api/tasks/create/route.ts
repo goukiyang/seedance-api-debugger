@@ -8,7 +8,13 @@ import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspac
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
-import { ensureProviderSafeReferenceImageUrl } from '@/lib/provider/reference-image-safety';
+import {
+  PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+  ensureProviderSafeReferenceImageUrl,
+  getProviderSafeImageResizeDimensions,
+  isProviderReferenceImageSizeError,
+  providerReferenceImageSizeMessage,
+} from '@/lib/provider/reference-image-safety';
 import { AuthError } from '@/lib/auth/session';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
@@ -545,8 +551,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
+    const referenceImageFailure = buildReferenceImagePreparationFailure(prepareErrors);
     return NextResponse.json(
-      { error: 'REFERENCE_IMAGE_NOT_PUBLIC', message: '参考图无法生成公网 URL', details: { errors: prepareErrors } },
+      { error: referenceImageFailure.error, message: referenceImageFailure.message, details: { errors: prepareErrors } },
       { status: 400 },
     );
   }
@@ -630,7 +637,12 @@ export async function POST(request: NextRequest) {
     agentRunId: agentRun?.id || null,
     selectedAgentPlanKey,
     promptUserEdited,
-    preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
+    preparedImages: preparedImages.map((img) => ({
+      name: img.name,
+      originalUrl: img.originalUrl,
+      sourceType: img.sourceType,
+      providerSafeResize: img.providerSafeResize,
+    })),
     prepSummary,
     source: {
       type: requestSource.source_type,
@@ -984,6 +996,7 @@ export async function POST(request: NextRequest) {
     }
 
     startTaskLocalization(taskId);
+    const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
 
     return NextResponse.json({
       id: taskId,
@@ -1005,24 +1018,32 @@ export async function POST(request: NextRequest) {
       asset_mapping: assetMapping,
       reference_album_ids: generationReferenceAlbumIds,
       reference_image_ids: generationReferenceImageIds,
+      reference_image_notice: referenceImageResizeSummary
+        ? `已自动把 ${referenceImageResizeSummary.resized_count} 张过大的参考图压缩到平台允许尺寸，原图不会被修改。`
+        : null,
+      reference_image_resize_summary: referenceImageResizeSummary,
       source_type: requestSource.source_type,
       source_label: effectiveSourceLabel,
       source_request_id: sourceRequestId,
       created_at: new Date().toISOString(),
     });
   } catch (err) {
+    const providerFailureMessage = err instanceof Error ? err.message : 'Seedance 调用异常';
+    const userFacingProviderMessage = isProviderReferenceImageSizeError(providerFailureMessage)
+      ? `${providerReferenceImageSizeMessage(providerFailureMessage)} 已返还冻结点数。`
+      : '视频生成服务异常，已返还冻结点数';
     if (providerRequestId) {
       await markProviderApiRequestFailed({
         requestId: providerRequestId,
         errorCode: 'PROVIDER_CREATE_FAILED',
-        errorMessage: err instanceof Error ? err.message : 'Seedance 调用异常',
+        errorMessage: providerFailureMessage,
       }).catch(() => {});
     }
     await handleProviderFailure(
       taskId,
       user.id,
       estimatedCost,
-      err instanceof Error ? err.message : 'Seedance 调用异常',
+      providerFailureMessage,
     );
     if (agentRun) {
       await prisma.$transaction(async (tx) => {
@@ -1030,7 +1051,7 @@ export async function POST(request: NextRequest) {
           where: { id: agentRun.id },
           data: {
             status: 'failed',
-            error_message: err instanceof Error ? err.message : 'Seedance 调用异常',
+            error_message: providerFailureMessage,
             completed_at: new Date(),
           },
         });
@@ -1040,7 +1061,7 @@ export async function POST(request: NextRequest) {
             step_key: 'seedance_failed',
             title: 'Seedance 执行失败',
             input_json: JSON.stringify({ task_id: taskId }),
-            output_json: JSON.stringify({ error: err instanceof Error ? err.message : 'Seedance 调用异常' }),
+            output_json: JSON.stringify({ error: providerFailureMessage }),
             sort_order: 6,
           },
         });
@@ -1053,7 +1074,7 @@ export async function POST(request: NextRequest) {
             memory_type: 'task_result',
             signal: 'negative',
             summary: 'Seedance 提交失败，已返还冻结点数',
-            metadata_json: JSON.stringify({ error: err instanceof Error ? err.message : 'Seedance 调用异常' }),
+            metadata_json: JSON.stringify({ error: providerFailureMessage }),
           },
         });
       }).catch(() => {});
@@ -1061,7 +1082,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: 'PROVIDER_CREATE_FAILED',
-        message: '视频生成服务异常，已返还冻结点数',
+        message: userFacingProviderMessage,
         task_id: taskId,
       },
       { status: 502 },
@@ -1181,6 +1202,46 @@ interface PreparedRefImage {
   originalUrl: string;
   sourceType: 'upload' | 'gallery' | 'external';
   order: number;
+  providerSafeResize?: {
+    originalWidth?: number;
+    originalHeight?: number;
+    outputWidth?: number;
+    outputHeight?: number;
+    originalPixels?: number;
+    maxPixels?: number;
+  };
+}
+
+function buildReferenceImageResizeSummary(preparedImages: PreparedRefImage[]) {
+  const resizedItems = preparedImages.filter((image) => image.providerSafeResize);
+  if (resizedItems.length === 0) return null;
+  return {
+    resized_count: resizedItems.length,
+    max_pixels: PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+    items: resizedItems.map((image) => ({
+      name: image.name,
+      original_width: image.providerSafeResize?.originalWidth ?? null,
+      original_height: image.providerSafeResize?.originalHeight ?? null,
+      output_width: image.providerSafeResize?.outputWidth ?? null,
+      output_height: image.providerSafeResize?.outputHeight ?? null,
+      original_pixels: image.providerSafeResize?.originalPixels ?? null,
+      max_pixels: image.providerSafeResize?.maxPixels ?? PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+    })),
+  };
+}
+
+function buildReferenceImagePreparationFailure(prepareErrors: string[]) {
+  const joinedErrors = prepareErrors.join('；');
+  if (isProviderReferenceImageSizeError(joinedErrors)) {
+    return {
+      error: 'REFERENCE_IMAGE_TOO_LARGE',
+      message: '参考图尺寸过大，系统已尝试自动压缩到合规尺寸，但这张图处理失败。请换一张更小的图，或先压缩后再提交。',
+    };
+  }
+  return {
+    error: 'REFERENCE_IMAGE_NOT_PUBLIC',
+    message: '参考图无法生成公网 URL，请换一张可访问的图片后重试。',
+  };
 }
 
 async function prepareReferenceImages(
@@ -1294,17 +1355,31 @@ async function prepareReferenceImages(
     if (isPublicUrl) {
       let providerUrl = originalUrl;
       let sourceType: PreparedRefImage['sourceType'] = isR2 ? 'upload' : 'external';
+      let providerSafeResize: PreparedRefImage['providerSafeResize'];
       if (item.asset) {
+        const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset.width, item.asset.height));
         try {
           const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset });
           providerUrl = safeReference.providerUrl;
           if (safeReference.resized) {
             r2Uploaded += 1;
             sourceType = 'upload';
+            providerSafeResize = {
+              originalWidth: safeReference.width,
+              originalHeight: safeReference.height,
+              outputWidth: safeReference.outputWidth,
+              outputHeight: safeReference.outputHeight,
+              originalPixels: safeReference.originalPixels,
+              maxPixels: safeReference.maxPixels,
+            };
           }
         } catch (error) {
           skipped += 1;
-          prepareErrors.push(`[${i + 1}] 参考图压缩失败: ${error instanceof Error ? error.message : String(error)}`);
+          const rawMessage = error instanceof Error ? error.message : String(error);
+          const message = shouldResize || isProviderReferenceImageSizeError(rawMessage)
+            ? providerReferenceImageSizeMessage(rawMessage)
+            : `参考图处理失败: ${rawMessage}`;
+          prepareErrors.push(`[${i + 1}] ${message}`);
           continue;
         }
       }
@@ -1314,6 +1389,7 @@ async function prepareReferenceImages(
         originalUrl: providerUrl,
         sourceType,
         order: i,
+        providerSafeResize,
       });
       continue;
     }

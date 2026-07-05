@@ -380,7 +380,12 @@ interface Props {
   submitError: string | null;
   submitErrorDebug?: object | null;
   isSubmitting: boolean;
-  result: { id: string; provider_task_id: string; prompt_rendered?: string } | null;
+  result: {
+    id: string;
+    provider_task_id: string;
+    prompt_rendered?: string;
+    reference_image_notice?: string | null;
+  } | null;
   polledResult: PolledTask | null;
   isPolling: boolean;
   onReset: () => void;
@@ -1675,6 +1680,9 @@ export function GenerationComposer({
                     ? '系统正在后台查询生成进度，最近任务会自动更新。'
                     : '任务已提交，最近任务会继续显示进度。'}
               </small>
+              {result.reference_image_notice && (
+                <small>{result.reference_image_notice}</small>
+              )}
             </div>
             <div className="composer-queue-actions">
               <a href={taskDetailHref(result.id, resultReturnTo)} className="composer-result-link">查看详情</a>
