@@ -1414,10 +1414,7 @@ function AssetsPageContent() {
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
-                const enhanceStateLabel = item.isEnhanceTask ? '超分结果' : item.canEnhanceVideo ? '可超分' : '';
-                const enhanceBadgeClassName = item.isEnhanceTask
-                  ? 'asset-card-badge asset-card-badge-enhance'
-                  : 'asset-card-badge asset-card-badge-enhance-ready';
+                const enhanceStateLabel = item.isEnhanceTask ? '超分结果' : '';
                 return (
                   <div
                     key={item.id}
@@ -1425,7 +1422,7 @@ function AssetsPageContent() {
                     data-asset-card="true"
                     role="button"
                     tabIndex={0}
-                    className={`asset-card asset-card-${cardSize} ${selectionMode ? 'selection-mode' : ''} ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''} ${item.isEnhanceTask ? 'asset-card-enhance-result' : ''} ${item.canEnhanceVideo ? 'asset-card-enhance-ready' : ''} ${enhanceMenuOpen ? 'enhance-menu-open' : ''}`}
+                    className={`asset-card asset-card-${cardSize} ${selectionMode ? 'selection-mode' : ''} ${selected ? 'selected' : ''} ${previewed ? 'preview-selected' : ''} ${item.isEnhanceTask ? 'asset-card-enhance-result' : ''} ${enhanceMenuOpen ? 'enhance-menu-open' : ''}`}
                     onClick={(event) => handleCardClick(event, item)}
                     onKeyDown={(event) => handleCardKeyDown(event, item)}
                     onPointerDown={(event) => {
@@ -1454,7 +1451,7 @@ function AssetsPageContent() {
                         <span className="asset-card-empty">{statusLabel(item.status)}</span>
                       )}
                       {enhanceStateLabel && (
-                        <span className={enhanceBadgeClassName}>
+                        <span className="asset-card-badge asset-card-badge-enhance">
                           <Sparkles size={12} aria-hidden="true" />
                           {enhanceStateLabel}
                         </span>
@@ -1535,8 +1532,8 @@ function AssetsPageContent() {
                         )}
                       </div>
                       {enhanceStateLabel && (
-                        <span className={`asset-card-enhance-note ${item.isEnhanceTask ? 'is-result' : 'is-ready'}`}>
-                          {item.isEnhanceTask ? 'AI MediaKit 超分结果' : '可直接发起视频超分'}
+                        <span className="asset-card-enhance-note is-result">
+                          AI MediaKit 超分结果
                         </span>
                       )}
                       {specText && <span className="asset-card-spec">{specText}</span>}

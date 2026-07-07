@@ -16779,10 +16779,6 @@ body.compare-fullscreen-open {
   box-shadow: inset 0 0 0 1px oklch(0.72 0.12 188 / 0.34), 0 10px 24px oklch(0.08 0.012 250 / 0.2);
 }
 
-.asset-card-enhance-ready .asset-card-media {
-  border-color: oklch(0.76 0.16 92 / 0.62);
-}
-
 .asset-card-check {
   position: absolute;
   z-index: 3;
@@ -16826,11 +16822,6 @@ body.compare-fullscreen-open {
 .asset-card-badge-enhance {
   color: oklch(0.98 0.014 188);
   background: linear-gradient(135deg, oklch(0.52 0.14 188 / 0.96), oklch(0.48 0.12 232 / 0.94));
-}
-
-.asset-card-badge-enhance-ready {
-  color: oklch(0.16 0.025 92);
-  background: oklch(0.82 0.16 92 / 0.94);
 }
 
 .asset-card-media {
@@ -17019,10 +17010,6 @@ body.compare-fullscreen-open {
   color: oklch(0.8 0.07 188);
   font-size: 12px;
   font-weight: 820;
-}
-
-.asset-card-enhance-note.is-ready {
-  color: oklch(0.78 0.12 92);
 }
 
 .asset-card-meta {
