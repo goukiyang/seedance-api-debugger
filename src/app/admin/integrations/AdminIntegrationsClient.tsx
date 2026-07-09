@@ -38,16 +38,22 @@ type MuskConfig = {
   api_key_configured: boolean;
 };
 
+type ImageGenerationProvider = 'musk' | 'seedream';
+
 type ImageGenerationConfig = {
   enabled: boolean;
   ready: boolean;
-  provider: 'musk';
+  provider: 'musk' | 'seedream';
   base_url: string;
   default_model: string;
   api_key_configured: boolean;
   timeout_ms: number;
   max_outputs_per_request: number;
   default_ratio: string;
+  default_size: '1K' | '2K';
+  output_format: 'png' | 'jpeg';
+  response_format: 'url' | 'b64_json';
+  watermark: boolean;
   supports_text_to_image: boolean;
   supports_image_to_image: boolean;
   supports_async_task: boolean;
@@ -122,10 +128,49 @@ const EMPTY_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
   timeout_ms: 90000,
   max_outputs_per_request: 1,
   default_ratio: '16:9',
+  default_size: '2K',
+  output_format: 'png',
+  response_format: 'url',
+  watermark: false,
   supports_text_to_image: true,
   supports_image_to_image: true,
   supports_async_task: false,
 };
+
+const IMAGE_MODEL_OPTIONS: Array<{
+  provider: ImageGenerationProvider;
+  label: string;
+  model: string;
+  baseUrl: string;
+  summary: string;
+  tags: string[];
+  maxOutputs: number;
+  supportsAsyncTask: boolean;
+  defaultSize: '1K' | '2K';
+}> = [
+  {
+    provider: 'musk',
+    label: 'Gemini Image (Musk)',
+    model: 'gemini-3.1-flash-image-preview',
+    baseUrl: 'https://api.muskapis.com/',
+    summary: '通用草图、普通参考图和兼容旧配置。',
+    tags: ['文生图', '图生图', '通用草图'],
+    maxOutputs: 8,
+    supportsAsyncTask: false,
+    defaultSize: '2K',
+  },
+  {
+    provider: 'seedream',
+    label: 'Seedream 5.0 Pro',
+    model: 'doubao-seedream-5-0-pro-260628',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    summary: '适合高质量参考图、首帧、尾帧和多参考图生图。',
+    tags: ['高质量参考图', '最多 10 张参考图', '1K/2K', '单张输出'],
+    maxOutputs: 1,
+    supportsAsyncTask: false,
+    defaultSize: '2K',
+  },
+];
 
 const EMPTY_VOLCENGINE_IP_CONFIG: VolcengineIpConfig = {
   enabled: false,
@@ -215,6 +260,12 @@ export default function AdminIntegrationsClient() {
     if (!imageConfig.api_key_configured) return '缺少 API Key';
     return '配置未就绪';
   }, [imageConfig]);
+
+  const selectedImageModel = useMemo(
+    () => IMAGE_MODEL_OPTIONS.find((option) => option.provider === imageConfig.provider) || IMAGE_MODEL_OPTIONS[0],
+    [imageConfig.provider],
+  );
+  const isSeedreamImageModel = imageConfig.provider === 'seedream';
 
   const volcengineStatusText = useMemo(() => {
     if (volcengineConfig.ready) return '已启用';
@@ -371,6 +422,10 @@ export default function AdminIntegrationsClient() {
           timeout_ms: imageConfig.timeout_ms,
           max_outputs_per_request: imageConfig.max_outputs_per_request,
           default_ratio: imageConfig.default_ratio,
+          default_size: imageConfig.default_size,
+          output_format: imageConfig.output_format,
+          response_format: imageConfig.response_format,
+          watermark: imageConfig.watermark,
           supports_text_to_image: imageConfig.supports_text_to_image,
           supports_image_to_image: imageConfig.supports_image_to_image,
           supports_async_task: imageConfig.supports_async_task,
@@ -390,6 +445,24 @@ export default function AdminIntegrationsClient() {
     } finally {
       setImageSaving(false);
     }
+  };
+
+  const applyImageModel = (provider: ImageGenerationProvider) => {
+    const option = IMAGE_MODEL_OPTIONS.find((item) => item.provider === provider) || IMAGE_MODEL_OPTIONS[0];
+    setImageConfig((prev) => ({
+      ...prev,
+      provider: option.provider,
+      base_url: option.baseUrl,
+      default_model: option.model,
+      max_outputs_per_request: option.maxOutputs,
+      default_size: option.defaultSize,
+      output_format: prev.output_format || 'png',
+      response_format: prev.response_format || 'url',
+      watermark: option.provider === 'seedream' ? false : prev.watermark,
+      supports_text_to_image: true,
+      supports_image_to_image: true,
+      supports_async_task: option.supportsAsyncTask,
+    }));
   };
 
   const saveVolcengineConfig = async (event: FormEvent<HTMLFormElement>) => {
@@ -555,7 +628,7 @@ export default function AdminIntegrationsClient() {
         <div className="stat-card">
           <span className="stat-label">图形生成 API</span>
           <strong className="stat-value">{imageStatusText}</strong>
-          <span className="stat-sub">{imageConfig.provider} · {imageConfig.default_model || 'gemini-3.1-flash-image-preview'}</span>
+          <span className="stat-sub">{selectedImageModel.label} · {imageConfig.default_model || selectedImageModel.model}</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">火山 IP 生成</span>
@@ -915,9 +988,9 @@ export default function AdminIntegrationsClient() {
       <form className="card codex-config-form" onSubmit={saveImageConfig}>
         <div className="codex-config-head">
           <div>
-            <h2 className="section-title mb-0">图形生成 API</h2>
+            <h2 className="section-title mb-0">图片模型配置</h2>
             <p className="text-gray text-sm mt-2">
-              保存文生图、图生图和首尾帧草图服务配置；普通生成页和无线画布后续都从这里读取。
+              保存文生图、图生图和首尾帧草图模型；普通生成页和无线画布后续都从这里读取。
             </p>
           </div>
           <label className="toggle-switch" aria-label="启用图形生成 API">
@@ -931,16 +1004,38 @@ export default function AdminIntegrationsClient() {
         </div>
 
         <div className="codex-config-grid">
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-provider">Provider</label>
+          <div className="form-group image-model-field">
+            <label className="form-label" htmlFor="image-provider">图片模型</label>
             <select
               id="image-provider"
               className="input"
               value={imageConfig.provider}
-              onChange={(event) => setImageConfig((prev) => ({ ...prev, provider: event.target.value as 'musk' }))}
+              onChange={(event) => applyImageModel(event.target.value as ImageGenerationProvider)}
             >
-              <option value="musk">Musk APIs / Gemini Image</option>
+              {IMAGE_MODEL_OPTIONS.map((option) => (
+                <option key={option.provider} value={option.provider}>
+                  {option.label}
+                </option>
+              ))}
             </select>
+            <div className="image-model-options" aria-label="图片模型能力">
+              {IMAGE_MODEL_OPTIONS.map((option) => {
+                const active = imageConfig.provider === option.provider;
+                return (
+                  <button
+                    key={option.provider}
+                    className={`image-model-option${active ? ' is-active' : ''}`}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => applyImageModel(option.provider)}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.summary}</small>
+                    <em>{option.tags.join(' / ')}</em>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="form-group">
@@ -950,7 +1045,7 @@ export default function AdminIntegrationsClient() {
               className="input"
               value={imageConfig.base_url}
               onChange={(event) => setImageConfig((prev) => ({ ...prev, base_url: event.target.value }))}
-              placeholder="https://api.muskapis.com/"
+              placeholder={selectedImageModel.baseUrl}
               autoComplete="off"
             />
           </div>
@@ -962,7 +1057,7 @@ export default function AdminIntegrationsClient() {
               className="input"
               value={imageConfig.default_model}
               onChange={(event) => setImageConfig((prev) => ({ ...prev, default_model: event.target.value }))}
-              placeholder="gemini-3.1-flash-image-preview"
+              placeholder={selectedImageModel.model}
               autoComplete="off"
               maxLength={80}
               required
@@ -1009,13 +1104,19 @@ export default function AdminIntegrationsClient() {
               className="input"
               type="number"
               min={1}
-              max={8}
+              max={isSeedreamImageModel ? 1 : 8}
               value={imageConfig.max_outputs_per_request}
+              disabled={isSeedreamImageModel}
               onChange={(event) => setImageConfig((prev) => ({
                 ...prev,
                 max_outputs_per_request: Number(event.target.value) || EMPTY_IMAGE_GENERATION_CONFIG.max_outputs_per_request,
               }))}
             />
+            {isSeedreamImageModel && (
+              <small id="seedream-reference-limit" className="text-gray">
+                Seedream 5.0 Pro 最多 10 张参考图，单张输出。
+              </small>
+            )}
           </div>
 
           <div className="form-group">
@@ -1029,6 +1130,67 @@ export default function AdminIntegrationsClient() {
               maxLength={20}
             />
           </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-default-size">分辨率档位</label>
+            <select
+              id="image-default-size"
+              className="input"
+              value={imageConfig.default_size}
+              onChange={(event) => setImageConfig((prev) => ({
+                ...prev,
+                default_size: event.target.value as ImageGenerationConfig['default_size'],
+              }))}
+            >
+              <option value="1K">速度优先 1K</option>
+              <option value="2K">质量优先 2K</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-output-format">输出格式</label>
+            <select
+              id="image-output-format"
+              className="input"
+              value={imageConfig.output_format}
+              onChange={(event) => setImageConfig((prev) => ({
+                ...prev,
+                output_format: event.target.value as ImageGenerationConfig['output_format'],
+              }))}
+            >
+              <option value="png">PNG，参考图和首尾帧优先</option>
+              <option value="jpeg">JPEG，文件更小</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-response-format">返回格式</label>
+            <select
+              id="image-response-format"
+              className="input"
+              value={imageConfig.response_format}
+              onChange={(event) => setImageConfig((prev) => ({
+                ...prev,
+                response_format: event.target.value as ImageGenerationConfig['response_format'],
+              }))}
+            >
+              <option value="url">URL，生成后立即下载入库</option>
+              <option value="b64_json">Base64，直接入库</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-watermark">水印</label>
+            <label className="codex-clear-token image-watermark-toggle">
+              <input
+                id="image-watermark"
+                type="checkbox"
+                checked={imageConfig.watermark}
+                onChange={(event) => setImageConfig((prev) => ({ ...prev, watermark: event.target.checked }))}
+              />
+              输出图片带水印
+            </label>
+          </div>
         </div>
 
         <div className="codex-config-status">
@@ -1037,8 +1199,8 @@ export default function AdminIntegrationsClient() {
             <strong>{imageStatusText}</strong>
           </div>
           <div>
-            <span className="info-label">Provider</span>
-            <strong>{imageConfig.provider}</strong>
+            <span className="info-label">图片模型</span>
+            <strong>{selectedImageModel.label}</strong>
           </div>
           <div>
             <span className="info-label">默认模型</span>
@@ -1050,9 +1212,16 @@ export default function AdminIntegrationsClient() {
               {[
                 imageConfig.supports_text_to_image ? '文生图' : null,
                 imageConfig.supports_image_to_image ? '图生图' : null,
+                isSeedreamImageModel ? '多参考图' : null,
+                isSeedreamImageModel ? '1K/2K' : null,
+                isSeedreamImageModel ? '单张输出' : null,
                 imageConfig.supports_async_task ? '异步任务' : null,
               ].filter(Boolean).join(' / ') || '-'}
             </strong>
+          </div>
+          <div>
+            <span className="info-label">输出</span>
+            <strong>{imageConfig.default_size} · {imageConfig.output_format.toUpperCase()} · {imageConfig.response_format}</strong>
           </div>
           <div>
             <span className="info-label">API Key</span>

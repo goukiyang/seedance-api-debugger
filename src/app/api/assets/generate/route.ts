@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import {
   createImageGeneration,
@@ -31,6 +33,11 @@ const IMAGE_GENERATION_ACTIONS = [
 ] as const;
 
 type ImageGenerationAction = typeof IMAGE_GENERATION_ACTIONS[number];
+type AuthorizedReferenceImage = Awaited<ReturnType<typeof assertCanUseReferenceImage>>;
+
+const DEFAULT_REFERENCE_IMAGE_LIMIT = 9;
+const SEEDREAM_REFERENCE_IMAGE_LIMIT = 10;
+const REFERENCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
 function cleanString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -61,6 +68,63 @@ function normalizeCount(value: unknown, fallback: number, min: number, max: numb
   const next = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(next)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(next)));
+}
+
+function imageGenerationModelLabel(provider: string, model: string) {
+  if (provider === 'seedream') return 'Seedream 5.0 Pro';
+  if (provider === 'musk') return 'Gemini Image (Musk)';
+  return model || provider;
+}
+
+function inferMimeFromPath(value: string) {
+  const ext = path.extname(value).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'image/png';
+}
+
+function localUploadPath(url: string) {
+  if (!url.startsWith('/uploads/')) return null;
+  const publicRoot = path.join(process.cwd(), 'public');
+  const uploadsRoot = path.join(publicRoot, 'uploads');
+  const filePath = path.normalize(path.join(publicRoot, url.replace(/^\/+/, '')));
+  const relativePath = path.relative(uploadsRoot, filePath);
+  return relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath) ? filePath : null;
+}
+
+function localUploadDataUrl(url: string, mimeType?: string | null) {
+  const filePath = localUploadPath(url);
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new ImageGenerationApiError('参考图本地文件不存在，无法用于图生图', 400, 'image_generation_reference_image_unavailable');
+  }
+  const buffer = fs.readFileSync(filePath);
+  if (buffer.length === 0) {
+    throw new ImageGenerationApiError('参考图文件为空，无法用于图生图', 400, 'image_generation_reference_image_empty');
+  }
+  if (buffer.length > REFERENCE_IMAGE_MAX_BYTES) {
+    throw new ImageGenerationApiError('参考图尺寸过大，请先压缩或换一张图片', 413, 'image_generation_reference_image_too_large');
+  }
+  const resolvedMimeType = mimeType && mimeType.startsWith('image/') ? mimeType : inferMimeFromPath(filePath);
+  return `data:${resolvedMimeType};base64,${buffer.toString('base64')}`;
+}
+
+function resolveImageGenerationReferenceInputs(images: AuthorizedReferenceImage[]) {
+  const inputs: string[] = [];
+  for (const image of images.slice(0, SEEDREAM_REFERENCE_IMAGE_LIMIT)) {
+    const source = cleanString(image.asset?.original_url || image.url);
+    if (!source) continue;
+    if (source.startsWith('data:image/') || source.startsWith('http://') || source.startsWith('https://')) {
+      inputs.push(source);
+      continue;
+    }
+    if (source.startsWith('/uploads/')) {
+      inputs.push(localUploadDataUrl(source, image.asset?.mime_type));
+      continue;
+    }
+    throw new ImageGenerationApiError('参考图地址不可访问，请换成已入库图片或公网图片', 400, 'image_generation_reference_image_unavailable');
+  }
+  return inputs;
 }
 
 function roleForAction(action: ImageGenerationAction) {
@@ -192,6 +256,11 @@ async function writeGenerationAttemptLog(params: {
   canvasNodeId: string | null;
   provider: string;
   model: string;
+  modelLabel?: string;
+  size?: string;
+  outputFormat?: string;
+  responseFormat?: string;
+  referenceImageCount?: number;
   error?: string;
   workspaceId?: string;
   assetIds?: string[];
@@ -212,6 +281,11 @@ async function writeGenerationAttemptLog(params: {
         canvas_node_id: params.canvasNodeId,
         provider: params.provider,
         model: params.model,
+        model_label: params.modelLabel || imageGenerationModelLabel(params.provider, params.model),
+        size: params.size || null,
+        output_format: params.outputFormat || null,
+        response_format: params.responseFormat || null,
+        reference_image_count: params.referenceImageCount ?? params.referenceImageIds?.length ?? 0,
         error: params.error || null,
         workspace_id: params.workspaceId || null,
         asset_ids: params.assetIds || [],
@@ -288,12 +362,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
     }
 
-    const referenceImageIds = normalizeStringList(input.reference_image_ids || input.referenceImageIds, 9);
-    for (const referenceImageId of referenceImageIds) {
-      await assertCanUseReferenceImage(user, referenceImageId);
-    }
-
     const settings = await getImageGenerationApiSettings();
+    const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
+    const referenceLimit = settings.provider === 'seedream'
+      ? SEEDREAM_REFERENCE_IMAGE_LIMIT
+      : DEFAULT_REFERENCE_IMAGE_LIMIT;
+    const referenceImageIds = normalizeStringList(input.reference_image_ids || input.referenceImageIds, referenceLimit);
+    const referenceImages: AuthorizedReferenceImage[] = [];
+    for (const referenceImageId of referenceImageIds) {
+      referenceImages.push(await assertCanUseReferenceImage(user, referenceImageId));
+    }
+    const referenceInputs = settings.provider === 'seedream'
+      ? resolveImageGenerationReferenceInputs(referenceImages)
+      : [];
+
     if (!isImageGenerationApiReady(settings)) {
       await writeGenerationAttemptLog({
         userId: user.id,
@@ -305,6 +387,8 @@ export async function POST(request: NextRequest) {
         canvasNodeId,
         provider: settings.provider,
         model: settings.default_model,
+        modelLabel,
+        referenceImageCount: referenceImageIds.length,
         error: 'image_generation_api_not_configured',
       });
       return NextResponse.json({
@@ -323,6 +407,7 @@ export async function POST(request: NextRequest) {
       settings.max_outputs_per_request,
     );
     const ratio = cleanString(input.ratio || body.ratio, settings.default_ratio);
+    const imageSize = cleanString(input.size || input.default_size || input.resolution || body.size, settings.default_size);
     const explicitWorkspaceId = cleanString(body.workspace_id || body.workspaceId);
     let workspaceId = explicitWorkspaceId;
     if (workspaceId) {
@@ -336,7 +421,14 @@ export async function POST(request: NextRequest) {
       workspaceId = (await getOrCreateWorkspace(tabId, user.id)).id;
     }
 
-    const providerResult = await createImageGeneration({ settings, prompt, ratio, count });
+    const providerResult = await createImageGeneration({
+      settings,
+      prompt,
+      ratio,
+      size: imageSize,
+      count,
+      referenceImages: referenceInputs,
+    });
     const generatedAssets: Array<{
       assetId: string;
       referenceImageId: string;
@@ -366,7 +458,7 @@ export async function POST(request: NextRequest) {
           workspaceId,
           projectId: project.id,
           sourceRequestId: `${action}:${videoCard.id}:${Date.now()}:${index + 1}`,
-          sourceLabel: `图形生成 API / ${settings.provider}`,
+          sourceLabel: `图形生成 API / ${modelLabel}`,
           role,
           albumName: '图形生成结果',
           albumDescription: '图形生成 API 生成并自动归档的图片',
@@ -398,6 +490,11 @@ export async function POST(request: NextRequest) {
       canvasNodeId,
       provider: settings.provider,
       model: settings.default_model,
+      modelLabel,
+      size: imageSize,
+      outputFormat: settings.output_format,
+      responseFormat: settings.response_format,
+      referenceImageCount: referenceImageIds.length,
       workspaceId,
       assetIds: generatedAssets.map((asset) => asset.assetId),
       referenceImageIds: generatedAssets.map((asset) => asset.referenceImageId),
@@ -408,6 +505,11 @@ export async function POST(request: NextRequest) {
       action,
       provider: settings.provider,
       model: settings.default_model,
+      source_model_label: modelLabel,
+      size: imageSize,
+      output_format: settings.output_format,
+      response_format: settings.response_format,
+      reference_image_count: referenceImageIds.length,
       workspaceId,
       assets: generatedAssets,
       asset_id: generatedAssets[0]?.assetId || null,

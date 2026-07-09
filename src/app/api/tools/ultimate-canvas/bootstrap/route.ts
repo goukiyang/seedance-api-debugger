@@ -20,6 +20,35 @@ export const runtime = 'nodejs';
 const PROJECT_TAKE = 20;
 const VIDEO_CARD_TAKE = 30;
 
+function imageModelLabel(provider: string, model: string) {
+  if (provider === 'seedream') return 'Seedream 5.0 Pro';
+  if (provider === 'musk') return 'Gemini Image (Musk)';
+  return model || provider || '图片模型';
+}
+
+function imageModelCapabilities(provider: string) {
+  if (provider === 'seedream') {
+    return {
+      reference_image_limit: 10,
+      max_outputs_per_request: 1,
+      size_options: ['1K', '2K'],
+      output_formats: ['png', 'jpeg'],
+      supports_stream: false,
+      supports_sequential_generation: false,
+      notes: ['最多 10 张参考图', '单张输出', '生成 URL 会立即入库'],
+    };
+  }
+  return {
+    reference_image_limit: 9,
+    max_outputs_per_request: 8,
+    size_options: [],
+    output_formats: ['png'],
+    supports_stream: false,
+    supports_sequential_generation: false,
+    notes: ['通用草图', '兼容现有图片生成流程'],
+  };
+}
+
 function safeDate(value: Date | string | null | undefined) {
   if (!value) return null;
   return value instanceof Date ? value.toISOString() : value;
@@ -144,6 +173,7 @@ export async function GET(request: NextRequest) {
 
   const textReady = isMuskApiReady(muskSettings);
   const imageReady = isImageGenerationApiReady(imageSettings);
+  const imageLabel = imageModelLabel(imageSettings.provider, imageSettings.default_model);
   const videoReady = isApiKeyConfigured();
 
   return NextResponse.json({
@@ -202,9 +232,14 @@ export async function GET(request: NextRequest) {
       },
       image: {
         enabled: imageReady,
-        label: 'gmini 图形生成',
+        label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,
+        size: imageSettings.default_size,
+        output_format: imageSettings.output_format,
+        response_format: imageSettings.response_format,
+        watermark: imageSettings.watermark,
+        capabilities: imageModelCapabilities(imageSettings.provider),
         endpoint: '/api/assets/generate',
         billing: 'site_asset_generation',
         requires: ['project_id', 'video_card_id'],
