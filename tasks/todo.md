@@ -7537,3 +7537,186 @@ HARD-GATE：
 - [x] 普通用户页面内的超分发起入口已收起：生成页快捷入口、资产卡片二级菜单、任务详情、视频卡详情。
 - [x] 超分创建接口、无线画布 API、AI 抠图代理接口已补后端管理员限制，避免绕过页面入口直接调用。
 - [x] 已验证：`npx tsx scripts/enhance-video-entry-smoke.ts`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
+
+## 2026-07-05 用户 Bug 反馈自动通知与 Codex 修复链路规划
+
+### 1. 目标复述
+
+- [ ] 用户要解决的是：用户在网站里遇到 bug 后，只要提交一次反馈，管理员就能马上知道；反馈里要自动带上足够排查的信息，后续可以安全地交给 Codex 修复。
+- [ ] 完成标准：反馈提交后能形成“站内记录 + 管理员通知 + 可追踪修复单 + Codex 修复 PR + 预览验收”的闭环；Codex 不能直接改生产，必须先经过 PR、测试和人工确认。
+- [ ] 第一阶段不改变用户习惯：继续复用现有反馈入口，不要求用户去 GitHub、飞书表单或其他新平台重复填写。
+
+### 2. 具体任务
+
+#### P0：先闭住反馈通知和证据包
+
+- [ ] 复核现有反馈链路：`FeedbackWidget`、`/api/feedback`、`Feedback` 数据表、`/admin/feedback` 和现有 `Notification` 能力，确认哪些字段已够用、哪些字段必须补。
+- [ ] 扩展反馈证据包：提交反馈时自动带上页面 URL、pathname、浏览器信息、当前登录用户、构建版本、任务 ID、项目 ID、最近一次前端错误 ID、可选截图/上传图片。
+- [ ] 给反馈增加分级和类型：`打不开`、`生成失败`、`显示错误`、`权限/点数问题`、`体验建议`，后台可以按严重程度排序。
+- [ ] 提交反馈成功后创建站内管理员通知；通知内容包含反馈摘要、用户、页面、任务/项目入口和后台反馈详情链接。
+- [ ] 接入飞书通知，但只发脱敏摘要和后台链接，不发送 token、签名 URL、隐私内容或大段日志；凭据缺失时降级为站内通知并在后台显示“飞书未发送”。
+- [ ] 增加简单去重和限流：同一用户、同一页面、相似内容在短时间内重复提交时合并或标记重复，避免通知刷屏。
+- [ ] 管理员后台显示通知状态：未读、已读、已转 Issue、已开始修复、已关闭。
+
+#### P1：把有效 bug 转成可追踪 GitHub Issue
+
+- [ ] 给反馈记录增加 GitHub Issue 关联信息：issue number、issue URL、同步状态、最后同步时间、转单人。
+- [ ] 后台增加“创建 GitHub Issue”动作，默认只对 bug 类型或管理员确认的反馈开放，不自动把所有建议都转成 Issue。
+- [ ] Issue 正文只包含脱敏证据包：复现页面、用户描述、相关任务/项目 ID、截图链接、构建版本、后台反馈链接和管理员补充说明。
+- [ ] 重复反馈不要创建重复 Issue：相同根因的反馈追加评论或关联到已有 Issue。
+- [ ] Issue 标签固定：`feedback`、`bug`、`sd2`、`needs-triage`；管理员确认可交给 Codex 后再加 `codex-ready`。
+
+#### P2：Codex 只做安全自动修复，不直接发生产
+
+- [ ] 选择 Codex 触发方式：优先用 GitHub Issue 标签 `codex-ready` 或管理员评论触发，不让普通用户反馈直接触发代码修改。
+- [ ] Codex 接到 Issue 后创建独立分支和 PR，PR 必须包含反馈 ID、Issue 链接、修改摘要、验证命令和风险说明。
+- [ ] PR 自动跑基础验证：TypeScript、lint、build，以及对应功能的 smoke 测试；验证失败时只回报失败，不合并、不部署。
+- [ ] 修复结果回写：PR 链接同步到反馈后台，并给管理员发飞书通知。
+- [ ] 合并和生产发布保持人工确认：Codex 可以准备修复和预览，不能绕过人工确认直接发布到 `sd2.youdoodesign.com`。
+
+#### P3：预览验收和长期观测
+
+- [ ] PR 通过验证后提供预览地址或灰度地址，飞书通知管理员点击验收。
+- [ ] 管理员在反馈后台标记“已验证 / 未解决 / 需要补充信息”，状态同步回 Issue。
+- [ ] 等 P0-P2 稳定后，再评估是否接入 GlitchTip、OpenReplay、Formbricks 或类似工具；前提是隐私脱敏、用户授权和保留周期清楚。
+- [ ] 沉淀反馈数据看板：按页面、功能、用户、严重程度、修复耗时和重复次数统计，帮助判断哪个页面最容易出问题。
+
+### 3. 验收/审查
+
+- [ ] 本地提交一次测试反馈，验证数据库 `Feedback` 有记录，后台反馈页能看到，管理员站内通知生成。
+- [ ] 飞书通知用管理员自己的测试会话验证一次；消息只包含脱敏摘要和后台链接。
+- [ ] 重复提交同类反馈时，不应生成多条重复飞书轰炸通知。
+- [ ] 创建 GitHub Issue 后，反馈后台能看到 Issue 链接；重复反馈能关联到同一个 Issue。
+- [ ] 给 Issue 加 `codex-ready` 后，只能产生修复分支和 PR，不能直接改主分支或生产服务。
+- [ ] PR 验证失败时必须停住，并把失败原因写回反馈后台和飞书通知。
+- [ ] 审查默认只读；执行阶段如用户明确要求子 agent，再派独立只读审查。未派子 agent 时，用只读 diff、测试日志、后台记录、飞书消息和 Issue/PR 链接替代审查证据。
+
+### 4. 审查是否对齐目标
+
+- [ ] 用户是否仍然只需要在网站里提交一次反馈，而不是学习新工具？
+- [ ] 管理员是否能及时收到通知，不再依赖定期手动去后台查看？
+- [ ] 反馈是否带了足够定位问题的证据，而不是只有一句“坏了”？
+- [ ] Codex 是否被限制在 Issue、分支和 PR 里，避免自动改生产？
+- [ ] 整条链路失败时是否可见、可重试、可追踪？
+
+### Git Plan
+
+- [ ] 当前生产工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，目标分支默认沿用 `codex/v12-full-todo`。
+- [ ] 执行 P0 前先处理或确认当前工作区已有非本任务改动，避免反馈链路改动混入上传/任务创建相关改动。
+- [ ] 每个阶段单独提交：P0 通知和证据包、P1 GitHub Issue、P2 Codex PR 自动化、P3 预览和观测。
+- [ ] 涉及通知、外部发送、GitHub 写入、生产部署时必须先用测试对象验证；失败不提交、不部署、不标记完成。
+
+### 停止条件
+
+- [ ] 飞书或 GitHub 凭据缺失、scope 不够、无法确认发送对象时，先停在站内通知和后台记录，不硬接外部发送。
+- [ ] 反馈证据包可能泄露 token、cookie、签名 URL、隐私内容或本机路径时，先做脱敏规则，不外发。
+- [ ] Codex 自动化试图直接 push 主分支、直接合并或直接部署生产时，立即停止。
+- [ ] 测试、构建或真实通知验证失败时，不能标记闭环。
+
+## 2026-07-08 Seedream 5.0 Pro 图片生成 API 接入规划
+
+### 1. 目标复述
+
+- [ ] 用户要解决的是：火山方舟新上线的 Seedream 5.0 Pro 已经可以调用，后续希望把它接进 sd2，让平台能直接生成高质量参考图、首帧、尾帧、封面和风格/主体参考图。
+- [ ] 完成标准：管理员能在现有 `/admin/integrations` 配置 Seedream；用户在现有图形生成入口生成图片；结果必须自动入资产库、挂到项目/视频卡/工作区；生成记录有审计日志；失败提示能说清楚真实原因。
+- [ ] 本轮只做资料读取和规划，不调用付费 API、不写密钥、不改业务代码、不部署。
+
+### 2. 已确认资料和现状
+
+- [ ] 官方 API 入口是 `POST https://ark.cn-beijing.volces.com/api/v3/images/generations`，鉴权使用 `Authorization: Bearer $ARK_API_KEY`。
+- [ ] Seedream 5.0 Pro Model ID：`doubao-seedream-5-0-pro-260628`；教程说明调用方式与 5.0 Lite 相同，替换 `model` 字段即可。
+- [ ] Seedream 5.0 Pro 支持文生图、单图生图、多参考图生图；最多 10 张参考图。
+- [ ] Seedream 5.0 Pro 不支持 `sequential_image_generation`、`sequential_image_generation_options`、`stream`、`tools`，传这些参数会报错；因此第一版不要做组图、流式、联网搜索。
+- [ ] `size` 可用分辨率档位为 `1K`、`2K`；也可按官方限制使用 `宽x高` 形式，但第一版优先用 `1K/2K`，避免比例映射错误。
+- [ ] `output_format` 支持 `png` / `jpeg`；`response_format` 支持 `url` / `b64_json`；`url` 下载链接 24 小时内有效，必须生成后立即下载入库，不能只保存远端 URL。
+- [ ] 现有 live 工作树 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo` 已有 `src/lib/integrations/image-generation.ts` 和 `/api/assets/generate` 链路；当前 Provider 只有 `musk`，结果已经会下载进资产库并附加到项目/视频卡/工作区。
+- [ ] 对客 Lark 文档当前公开访问返回 404，后续需要有权限后补读，不能把其中内容当成已确认规则。
+
+### 3. 具体任务
+
+#### P0：最短可用接入，不新建一套资产系统
+
+- [ ] 在 `src/lib/integrations/image-generation.ts` 增加 `seedream` Provider，默认 base URL 为 `https://ark.cn-beijing.volces.com/api/v3`，默认模型为 `doubao-seedream-5-0-pro-260628`。
+- [ ] 保留现有 `musk` Provider；用 provider 分发函数分别构造 Musk 和 Seedream 请求，避免把两种 API 格式揉在一起。
+- [ ] Seedream 请求只发送官方确认支持的字段：`model`、`prompt`、可选 `image`、`size`、`output_format`、`response_format`、`watermark`。
+- [ ] Seedream 第一版把 `max_outputs_per_request` 固定或归一化为 1；不要继续发送当前通用的 `n` 字段，除非后续官方确认 Pro 支持。
+- [ ] 将现有 `ratio` 映射改成 Provider 可感知：Seedream 优先映射到 `2K`，如用户选择轻量或需要更快再用 `1K`；不要把 `1536x1024` 这类旧尺寸直接套给 Pro。
+- [ ] `response_format` 第一版默认 `url`，服务端收到 URL 后立即下载并走现有 `uploadAsset` / `attachAssetToSiteReferenceImage`；同时兼容 `b64_json`，防止后台配置切换后断链。
+- [ ] 参考图输入后续从现有 `input.reference_image_ids` 找到可访问图片 URL 或本地文件转 Base64，再传给 `image`；第一版先支持单图和多图，最多 10 张，超过时给明确提示。
+- [ ] 错误处理映射火山返回的 `error.code` / `error.message`；如果是参数不支持、参考图不可访问、图片过大、鉴权失败，要给用户可修正提示，不泛化成“系统异常”。
+
+#### P1：后台配置入口和能力开关
+
+- [ ] 修改 `/admin/integrations` 图形生成 API 卡片：Provider 下拉增加 `Seedream 5.0 Pro`，默认模型和 base URL 自动带入但允许管理员修改。
+- [ ] 保存配置时不回显 API Key；operation log 只记录 provider、base URL、model、是否设置 key、是否清空 key，不记录密钥明文。
+- [ ] 展示能力说明：`文生图 / 单图生图 / 多参考图生图 / 非流式 / 单张输出 / URL 24 小时有效并自动入库`。
+- [ ] 对 Seedream 隐藏或禁用“异步任务/多张输出/组图/流式/联网搜索”等不支持能力，避免管理员误配后用户生成失败。
+- [ ] 补后台配置 smoke，验证 provider 归一化、旧配置兼容、Key 不泄露、Seedream 默认值正确。
+
+#### P1.5：网页端模型呈现和选择体验
+
+- [ ] 后台 `/admin/integrations` 不再只显示工程化的 `Provider` 字段；改成“图片模型配置”区域，模型以可读名称展示：`Seedream 5.0 Pro`、`Gemini Image (Musk)`，内部 provider id 只放在调试信息或日志里。
+- [ ] 后台模型选择用紧凑模型卡或增强下拉：每个模型展示用途标签、默认模型 ID、是否已设置 Key、可用能力和限制；Seedream 卡片固定展示 `高质量参考图`、`最多 10 张参考图`、`1K/2K`、`单张输出`、`生成 URL 自动入库`。
+- [ ] 后台配置字段按模型动态显示：Seedream 显示 base URL、Model ID、API Key、超时、分辨率档位、输出格式、水印开关；隐藏或锁定多张输出、异步任务、流式、联网搜索，旁边用短文案说明“该模型不支持”。
+- [ ] 普通用户入口不让用户理解 `musk`、`seedream` 这类 provider 名；生成页只展示“图片模型”或“生成质量”，默认按任务推荐模型，例如首帧/尾帧/多参考图优先推荐 Seedream，普通草图可以继续用当前默认图像模型。
+- [ ] 如果后台只启用了一个图片模型，用户生成页不出现模型选择器，只在按钮附近显示一枚来源标签，例如 `Seedream 5.0 Pro · 2K · PNG`；如果启用了多个模型，再显示紧凑下拉或分段控件。
+- [ ] 模型选择不要做成大面积营销卡；主流程优先展示用途、参考图、提示词和生成按钮，模型能力用小标签辅助说明：`文生图`、`图生图`、`多参考图`、`1K/2K`、`单张输出`。
+- [ ] Seedream 下的参考图选择器显示真实上限：`已选 3/10`；超过 10 张时提交前拦截，保留已选图片，并提示“Seedream 5.0 Pro 最多支持 10 张参考图，请移除多余图片”。
+- [ ] 分辨率不先暴露复杂宽高输入；主控件用 `速度优先 1K` 和 `质量优先 2K` 两档，宽高自定义先放到高级设置，避免用户误把视频比例和图片像素混在一起。
+- [ ] 输出格式默认 `PNG`，适合参考图和首尾帧；`JPEG` 放在高级设置里，用于更小文件。`watermark` 也放高级设置，默认值必须跟后端配置一致。
+- [ ] 生成结果卡必须显示来源模型和入库状态，例如 `Seedream 5.0 Pro · 2K · PNG · 已入资产库`；操作按钮保持原有使用习惯：设为参考图、设为首帧、设为尾帧、设为封面、加入工作区。
+- [ ] 失败提示按用户能处理的原因来写：Key 无效、模型未开通、参考图过多、参考图不可访问、图片太大、参数不支持、远端 URL 下载失败；失败后不得清空提示词和已选参考图。
+- [ ] 记住安全偏好：按动作记住上次选择的图片模型、1K/2K、PNG/JPEG；不要保存 API Key、清空 Key 勾选态、付费确认态或一次性下载 URL。
+- [ ] 移动端 390px 宽度下模型选择收成单个下拉，能力标签自动换行，高级设置默认折叠，不出现横向滚动或大卡片堆叠。
+- [ ] 审计日志记录 `provider`、`model`、`size`、`output_format`、`reference_image_count`、动作来源和结果是否入库；前端只展示用户能理解的模型名称，不展示密钥、签名 URL、Base64 或本机路径。
+
+#### P2：用户入口复用现有图形生成流程
+
+- [ ] 不新建独立 Seedream 页面；先复用 `/api/assets/generate` 和现有图形生成按钮，让结果继续进入资产库、参考图、首帧、尾帧或封面。
+- [ ] 在 `createImageGeneration` 参数中补 `referenceImageIds/referenceImages` 或等价输入，让 `image_variant`、`first_frame_draft`、`last_frame_draft` 等动作能带参考图。
+- [ ] 前端选择多参考图时按官方限制最多 10 张；超过时前端先拦截，后端再二次校验。
+- [ ] 生成成功后记录 provider/model/size/output_format/response_format/reference_image_count 到 operation log，方便后续查问题。
+- [ ] 生成失败时保留当前输入和已选参考图，不清空用户页面状态。
+
+#### P3：真实 API 探针和付费边界
+
+- [ ] 在不写入生产数据的前提下新增最小探针脚本或 smoke：只读配置、构造请求、dry-run 打印脱敏 payload；真实调用必须等用户明确授权。
+- [ ] 用户授权后先用 1 张低风险文生图测试：`size=1K`、`output_format=png`、`response_format=url`、`watermark=false`。
+- [ ] 验证返回 URL 能在 24 小时窗口内下载入库，图片 MIME/大小/宽高有效，资产页可见，刷新后仍存在。
+- [ ] 再测单图生图和多参考图生图；不测组图、流式、联网搜索，因为 Pro 官方标注不支持。
+- [ ] 如果官方价格、限流或余额接口未明确，先不把 Seedream 接入普通用户大流量入口；只允许管理员或测试项目试用。
+
+#### P4：上线闭环
+
+- [ ] 代码完成后跑 `npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`，再跑新增 Seedream smoke。
+- [ ] 创建独立只读审查 agent：只读检查 diff、官方参数兼容、密钥不泄露、资产入库链路、错误提示、审计日志和测试证据；审查 agent 不改文件、不提交、不补实现。
+- [ ] 通过审查后按 sd2 规则执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`。
+- [ ] 公网验证 `/admin/integrations` 能看到 Seedream 配置项；未登录访问相关接口仍返回 401；登录后测试项目能生成并看到入库图片。
+- [ ] 等待一个健康守护周期后复查 `youdoo-sites status sd2` 和 launchd `runs`，确认没有重启增长。
+
+### 4. 审查是否对齐目标
+
+- [ ] 是否真的接进了 live 工作树 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，而不是旧 checkout？
+- [ ] 用户是否仍走现有图形生成和资产流程，没有被迫学习新入口？
+- [ ] 网页端是否用普通人能看懂的模型名称、用途标签和推荐理由区分 `Seedream 5.0 Pro` 与现有 `Gemini Image (Musk)`，而不是直接暴露 provider id？
+- [ ] 用户在点击生成前是否能看清将使用哪个模型、参考图上限、分辨率档位和输出格式？
+- [ ] Seedream Pro 不支持的能力是否都没有暴露给用户或管理员？
+- [ ] 生成 URL 是否立即转存为本地/对象存储资产，避免 24 小时后失效？
+- [ ] API Key、签名 URL、Base64 图片和内部路径是否都没有进入前端、日志或 Git？
+- [ ] 失败时用户是否知道该怎么修，比如参考图太大、URL 不可访问、参数不支持或 Key 无效？
+
+### Git Plan
+
+- [ ] 当前生产工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- [ ] 当前分支：`codex/v12-full-todo`；执行前先处理现有 `tasks/todo.md` 未提交规划改动，避免和实现提交混在一起。
+- [ ] 建议新建任务分支：`codex/seedream-5-pro-image-provider`。
+- [ ] 提交分组：提交 1 Provider 和参数归一化；提交 2 后台配置入口；提交 3 用户生成链路参考图支持；提交 4 smoke、审查修复和版本登记。
+- [ ] 上线前创建 rollback tag：`rollback/2026-07-08-before-seedream-5-pro-provider`。
+
+### 停止条件
+
+- [ ] 没有火山 `ARK_API_KEY` 或模型未开通时，只能完成代码和 dry-run，不能声称真实生成通过。
+- [ ] 对客 Lark 文档无法读取时，不使用其中未确认的产品话术或商务规则。
+- [ ] 发现 Pro 实际字段和公开 API 文档冲突时，先停下更新计划，再改代码。
+- [ ] 真实 API 调用涉及付费、余额不足、限流、外部素材版权或隐私图片时，先停止并等明确授权。
+- [ ] 测试、构建、只读审查、部署或公网验收任一失败时，不提交为完成版本、不部署、不标记闭环。
