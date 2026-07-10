@@ -7254,6 +7254,8 @@ HARD-GATE：
 
 ### Phase 1：补齐 bootstrap 数据口径
 
+- [ ] 交接安全补充：当前 `/tools/ultimate-canvas` 和 `/api/tools/ultimate-canvas/bootstrap|document|generate|upload` 仍硬性要求 `admin` 登录态；给可信同事可先用专属临时 admin 调试账号，但正式长期交接要新增 `canvas_debugger` 或等价专用权限，避免为了无线画布暴露完整后台权限。
+- [ ] 专用权限落地时，统一改页面入口、导航可见性和上述无线画布 API 权限判断；验证普通非授权用户 403、`canvas_debugger` 可用无线画布但不能访问 `/admin/integrations`、`/admin/users`、`/admin/costs`。
 - [ ] 修改 `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`：项目列表 include `owner` 和 `_count.tasks/reference_albums`，返回字段对齐 `GeneratePageClient` 的 `ProjectOption`。
 - [ ] 修改 `bootstrap` 项目权限字段：返回 `can_generate`、`can_manage_project`、`can_manage_assets`，管理员也必须明确 owner，而不是只返回 `my_role=admin`。
 - [ ] 修改 `bootstrap` 项目显示逻辑：个人默认项目前端统一显示为“个人空间”，原始 `project.name` 保留为调试字段，避免一堆“我的默认项目”直接暴露。

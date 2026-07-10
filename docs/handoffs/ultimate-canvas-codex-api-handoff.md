@@ -10,7 +10,14 @@
 - 当前网站代码分支：`codex/seedream-5-pro-image-provider`
 - 当前网站备份分支：`backup/2026-07-10-current-sd2-site`
 - 当前网站备份 tag：`rollback/2026-07-10-current-sd2-site-backup`
-- 建议同事开发分支：`teammate/ultimate-canvas-complete`
+- 交接开发分支：`teammate/ultimate-canvas-complete`
+- 本文档路径：`docs/handoffs/ultimate-canvas-codex-api-handoff.md`
+
+给同事的交接包只需要三样：
+
+1. 仓库地址。
+2. `teammate/ultimate-canvas-complete` 分支。
+3. 专属调试账号，密码单独发，不写进文档、聊天记录或代码。
 
 同事开工命令：
 
@@ -18,12 +25,19 @@
 git clone https://github.com/goukiyang/seedance-api-debugger.git
 cd seedance-api-debugger
 git fetch origin
-git checkout -b teammate/ultimate-canvas-complete origin/codex/seedream-5-pro-image-provider
+git switch --track origin/teammate/ultimate-canvas-complete
 ```
 
 ## 我们给同事的权限
 
-给专属调试账号，不给本人主账号，不给完整 admin。
+给专属调试账号，不给本人主账号，不给第三方 API Key。
+
+当前代码现状必须特别注意：
+
+- `/tools/ultimate-canvas` 页面入口和 `/api/tools/ultimate-canvas/bootstrap`、`document`、`generate`、`upload` 这几个无线画布接口当前都硬性要求 `user.role === 'admin'`。
+- 如果只给普通用户账号，同事打开无线画布或调用这些接口会直接得到 403，不能完成调试。
+- 所以“现在立刻交接可用”的账号必须是临时 / 专属 admin 调试账号，但只用于无线画布开发，不给本人主账号，不给 `.env`，不开放 API 设置说明，不给供应商后台或密钥。
+- 如果后续要做到更安全的最小权限，应先新增 `canvas_debugger` 或等价专用权限，并把无线画布页面和上述接口从硬编码 admin 判断改成专用权限判断；这属于后续权限改造，不是本交接包的前置条件。
 
 推荐权限：
 
@@ -47,6 +61,26 @@ git checkout -b teammate/ultimate-canvas-complete origin/codex/seedream-5-pro-im
 - 数据库原件
 - cookie、token、第三方 API Key
 - 点数批量发放 / 扣减能力
+
+限制说明：
+
+- 因为当前无线画布实现仍然硬性依赖 `admin` 登录态，所以“临时 admin 调试账号”在系统层面可能仍能打开部分 admin URL。
+- 这份交接方案成立的前提是同事可信，并且只按本文档范围做无线画布开发。
+- 如果要给不完全可信的外部人员，必须先做专用 `canvas_debugger` 权限，把无线画布能力从完整 admin 权限里拆出来，再发账号。
+
+实操边界：
+
+- 密码通过单独渠道发给同事，不能提交到 Git。
+- 同事不需要、也不能索要 OpenAI / Musk / Gemini / Seedance / Jimeng 等第三方密钥。
+- 如果 `capabilities.*.enabled` 返回 `false`，同事只需要把返回的 `message` 发回给我们，不要去改 API 设置页。
+- 账号给有限测试点数，避免真实视频 / 图片生成误消耗过大。
+
+开工自检：
+
+1. 登录 `https://sd2.youdoodesign.com`。
+2. 打开 `https://sd2.youdoodesign.com/tools/ultimate-canvas`。
+3. 页面能加载出顶部项目 / 视频卡上下文，不出现 401 / 403。
+4. 如果出现 403，说明账号不是当前实现需要的 admin 调试账号，先停止，不要改代码绕权限。
 
 ## 后端调用原则
 
