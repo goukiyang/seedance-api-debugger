@@ -3948,7 +3948,8 @@
                         watermark: false
                     }
                 }),
-                connectNodes: (fromId, toId) => engine.connectNodes(fromId, toId)
+                connectNodes: (fromId, toId) => engine.connectNodes(fromId, toId),
+                rollbackVideoNode: nodeId => engine.deleteNode(nodeId)
             }, { sourceNodeId: node.id });
             if (!videoNodeId) return;
             renderGenerationNodeControls(videoNodeId);

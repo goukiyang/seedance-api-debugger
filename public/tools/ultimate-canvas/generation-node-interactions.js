@@ -138,11 +138,24 @@
     }
 
     function applyDownstreamVideoAction(dependencies, action) {
-        if (typeof dependencies?.createVideoNode !== 'function' || typeof dependencies?.connectNodes !== 'function') return null;
+        if (typeof dependencies?.createVideoNode !== 'function'
+            || typeof dependencies?.connectNodes !== 'function'
+            || typeof dependencies?.rollbackVideoNode !== 'function') return null;
         const videoNodeId = dependencies.createVideoNode();
         if (!videoNodeId) return null;
-        dependencies.connectNodes(action.sourceNodeId, videoNodeId);
-        return videoNodeId;
+        let connected = false;
+        try {
+            connected = dependencies.connectNodes(action.sourceNodeId, videoNodeId) === true;
+        } catch {
+            connected = false;
+        }
+        if (connected) return videoNodeId;
+        try {
+            dependencies.rollbackVideoNode(videoNodeId);
+        } catch {
+            // Connection failure remains the primary outcome even if rollback cleanup fails.
+        }
+        return null;
     }
 
     function pollDelay(attempt, errorCount, hidden) {

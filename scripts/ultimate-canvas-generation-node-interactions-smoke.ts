@@ -207,17 +207,47 @@ assert.equal(nodeStub.querySelector('.node-generation-expanded'), editorObject, 
 const downstreamCalls: string[] = [];
 const downstreamId = interactions.applyDownstreamVideoAction({
   createVideoNode: () => { downstreamCalls.push('create'); return 'video-1'; },
-  connectNodes: (from: string, to: string) => downstreamCalls.push(`connect:${from}:${to}`),
+  connectNodes: (from: string, to: string) => { downstreamCalls.push(`connect:${from}:${to}`); return true; },
+  rollbackVideoNode: (nodeId: string) => downstreamCalls.push(`rollback:${nodeId}`),
 }, { sourceNodeId: 'image-1' });
 assert.equal(downstreamId, 'video-1');
 assert.deepEqual(downstreamCalls, ['create', 'connect:image-1:video-1']);
-assert.equal(interactions.applyDownstreamVideoAction({}, { sourceNodeId: 'image-1' }), null,
-  'missing creation dependency cannot produce a partial downstream action');
-let partialCreates = 0;
+
+const falseConnectionCalls: string[] = [];
 assert.equal(interactions.applyDownstreamVideoAction({
-  createVideoNode: () => { partialCreates += 1; return 'video-orphan'; },
-}, { sourceNodeId: 'image-1' }), null, 'missing connection dependency cannot create an orphan target');
-assert.equal(partialCreates, 0);
+  createVideoNode: () => { falseConnectionCalls.push('create'); return 'video-false'; },
+  connectNodes: () => { falseConnectionCalls.push('connect'); return false; },
+  rollbackVideoNode: (nodeId: string) => falseConnectionCalls.push(`rollback:${nodeId}`),
+}, { sourceNodeId: 'image-1' }), null);
+assert.deepEqual(falseConnectionCalls, ['create', 'connect', 'rollback:video-false']);
+
+const thrownConnectionCalls: string[] = [];
+assert.equal(interactions.applyDownstreamVideoAction({
+  createVideoNode: () => { thrownConnectionCalls.push('create'); return 'video-throw'; },
+  connectNodes: () => { thrownConnectionCalls.push('connect'); throw new Error('connection failed'); },
+  rollbackVideoNode: (nodeId: string) => thrownConnectionCalls.push(`rollback:${nodeId}`),
+}, { sourceNodeId: 'image-1' }), null);
+assert.deepEqual(thrownConnectionCalls, ['create', 'connect', 'rollback:video-throw']);
+
+const noIdCalls: string[] = [];
+assert.equal(interactions.applyDownstreamVideoAction({
+  createVideoNode: () => { noIdCalls.push('create'); return null; },
+  connectNodes: () => { noIdCalls.push('connect'); return true; },
+  rollbackVideoNode: () => noIdCalls.push('rollback'),
+}, { sourceNodeId: 'image-1' }), null);
+assert.deepEqual(noIdCalls, ['create']);
+
+for (const missingDependency of ['createVideoNode', 'connectNodes', 'rollbackVideoNode']) {
+  const missingCalls: string[] = [];
+  const dependencies: any = {
+    createVideoNode: () => { missingCalls.push('create'); return 'video-missing'; },
+    connectNodes: () => { missingCalls.push('connect'); return true; },
+    rollbackVideoNode: () => missingCalls.push('rollback'),
+  };
+  delete dependencies[missingDependency];
+  assert.equal(interactions.applyDownstreamVideoAction(dependencies, { sourceNodeId: 'image-1' }), null);
+  assert.deepEqual(missingCalls, [], `missing ${missingDependency} prevents all downstream side effects`);
+}
 
 assert.equal(interactions.pollDelay(1, 0, false), 3000);
 assert.equal(interactions.pollDelay(20, 0, false), 8000);
