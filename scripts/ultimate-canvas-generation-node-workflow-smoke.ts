@@ -256,5 +256,19 @@ contains(appSource, "data-generated-image-action=\"download\"", 'image result ca
 contains(appSource, "data-generated-image-action=\"regenerate\"", 'image result can regenerate');
 contains(appSource, "data-generated-image-action=\"create-video\"", 'image result creates downstream video');
 contains(appSource, "scheduleCanvasSave('image_settings_change')", 'image settings persist');
+contains(appSource, 'function optimizeVideoPrompt', 'video prompt optimizer calls the text backend');
+contains(appSource, 'function renderCameraPresetMenu', 'camera preset menu renders');
+contains(appSource, 'function applyCameraPreset', 'camera preset updates the prompt');
+contains(appSource, 'button.dataset.videoMode', 'video mode is persisted from stable values');
+contains(appSource, "scheduleCanvasSave('video_mode_change')", 'video mode persists');
+contains(appSource, "scheduleCanvasSave('video_settings_change')", 'video settings persist');
+contains(appSource, "videoRequest({", 'video submission uses the contract module');
+contains(appSource, 'validateVideo({', 'video request is validated by the contract module');
+contains(appSource, 'normalizeVideoCreate', 'video create response is normalized');
+contains(appSource, 'normalizeVideoStatus', 'video poll response is normalized');
+contains(appSource, 'frozenCost', 'frozen point result is displayed from the backend');
+contains(appSource, 'data-generated-task-retry', 'terminal video task can retry');
+contains(appSource, "scheduleCanvasSave('video_prompt_optimize')", 'optimized video prompt persists');
+contains(appSource, "scheduleCanvasSave('video_camera_preset')", 'camera preset persists');
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

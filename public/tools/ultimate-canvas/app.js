@@ -799,35 +799,34 @@
                 }
 
                 if (payload.kind === 'video') {
-                    const referenceImageIds = collectReferenceImageIds(payload);
-                    const referenceImageUrls = collectReferenceImageUrls(payload);
-                    const generationMode = videoModeForCanvasMode(payload.mode);
-                    const data = await postJson(capabilities.video?.endpoint || '/api/tasks/create', {
-                        ...baseContextPayload(payload),
+                    const descriptor = window.UltimateCanvasGenerationNodes.videoRequest({
+                        projectId: canvasRuntime.selectedProjectId,
+                        cardId: canvasRuntime.selectedVideoCardId,
+                        branchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
+                        documentId: canvasRuntime.documentId,
+                        nodeId: payload.nodeId,
+                        workspaceKey: canvasWorkspaceKey(),
+                        requestId: payload.requestId,
+                        mode: payload.mode,
                         prompt: payload.prompt,
-                        generation_mode: generationMode,
-                        ratio: ratioFromContext(),
-                        duration: durationFromContext(),
-                        resolution: resolutionFromContext(),
-                        reference_image_ids: referenceImageIds,
-                        reference_image_urls: referenceImageIds.length ? [] : referenceImageUrls,
-                        idempotency_key: `${payload.nodeId}:${payload.requestId}`,
-                        final_prompt_snapshot: payload.prompt,
-                        source_metadata: {
-                            source: 'ultimate_canvas',
-                            canvas_document_id: canvasRuntime.documentId,
-                            canvas_node_id: payload.nodeId,
-                            video_branch_id: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
-                            mode: payload.mode,
-                            workspace_key: canvasWorkspaceKey()
-                        }
+                        promptUserEdited: true,
+                        referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
+                        settings: payload.settings || {}
                     });
+                    descriptor.url = capabilities.video?.endpoint || descriptor.url;
+                    const data = await requestJson(descriptor.url, {
+                        method: descriptor.method,
+                        payload: descriptor.payload
+                    });
+                    const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoCreate(data);
                     return {
                         ...data,
-                        status: data.status || 'submitted',
-                        task_id: data.id,
+                        ...normalized,
+                        task_id: normalized.taskId,
+                        provider_task_id: normalized.providerTaskId,
+                        frozen_cost: normalized.frozenCost,
                         message: '视频任务已提交，正在轮询状态',
-                        statusEndpoint: `/api/video/status/${data.id}?refresh=true`
+                        statusEndpoint: `/api/video/status/${normalized.taskId}?refresh=true`
                     };
                 }
 
@@ -2767,12 +2766,13 @@
         if (!node || !nodeEl || !['image', 'video'].includes(node.type)) return;
 
         const settings = generationSettingsForNode(node);
+        const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
+            || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
 
         if (node.type === 'image') {
-            const mode = node.data?.mode || node.data?.generationIntent?.mode || 'text-to-image';
-            syncImageModeButtons(nodeEl, mode);
+            syncImageModeButtons(nodeEl, nodeMode);
             setSelectOptions(nodeEl.querySelector('[data-generation-setting="size"]'), settings.sizeOptions, settings.size);
             const countInput = nodeEl.querySelector('[data-generation-setting="count"]');
             if (countInput) {
@@ -2783,6 +2783,32 @@
             if (ratioSelect) ratioSelect.value = settings.ratio;
             const spec = nodeEl.querySelector('[data-generation-spec]');
             if (spec) spec.textContent = `${settings.ratio} · ${settings.size} · ${settings.count}张`;
+        } else {
+            nodeEl.querySelectorAll('[data-video-mode]').forEach(button => {
+                button.classList.toggle('active', button.dataset.videoMode === nodeMode);
+            });
+            const panel = nodeEl.querySelector('[data-generation-settings="video"]');
+            if (panel) {
+                const ratio = panel.querySelector('[data-generation-setting="ratio"]');
+                const duration = panel.querySelector('[data-generation-setting="duration"]');
+                const resolution = panel.querySelector('[data-generation-setting="resolution"]');
+                const audio = panel.querySelector('[data-generation-setting="generateAudio"]');
+                const lastFrame = panel.querySelector('[data-generation-setting="returnLastFrame"]');
+                const watermark = panel.querySelector('[data-generation-setting="watermark"]');
+                if (ratio) ratio.value = settings.ratio;
+                if (duration) duration.value = String(settings.duration);
+                if (resolution) resolution.value = settings.resolution;
+                if (audio) audio.checked = settings.generateAudio;
+                if (lastFrame) lastFrame.checked = settings.returnLastFrame;
+                if (watermark) watermark.checked = settings.watermark;
+            }
+            const spec = nodeEl.querySelector('[data-generation-spec]');
+            if (spec) {
+                spec.textContent = `${settings.ratio} · ${settings.resolution} · ${settings.duration}s${settings.generateAudio ? ' · 声音' : ''}`;
+            }
+            const cost = nodeEl.querySelector('[data-generation-cost]');
+            if (cost) cost.textContent = node.data?.frozenCost ? `已冻结 ${node.data.frozenCost}` : '后台计费';
+            renderCameraPresetMenu(nodeEl, node);
         }
 
         const references = generationReferenceItems(nodeId);
@@ -2793,7 +2819,11 @@
                     <span class="generation-reference-item ${item.available ? '' : 'is-unavailable'}" title="${escapeHtml(item.available ? item.title : `${item.title} 尚未入库`)}">
                         ${item.preview ? `<img src="${escapeHtml(item.preview)}" alt="">` : '<span class="generation-reference-thumb"></span>'}
                         <strong>${escapeHtml(item.title)}</strong>
-                        <span>${item.available ? (index === 0 ? '参考 1' : `参考 ${index + 1}`) : '未入库'}</span>
+                        <span>${item.available
+                            ? (node.type === 'video' && nodeMode === 'first-last-frame-video'
+                                ? (index === 0 ? '首帧' : index === 1 ? '尾帧' : `忽略 ${index + 1}`)
+                                : (index === 0 ? '参考 1' : `参考 ${index + 1}`))
+                            : '未入库'}</span>
                     </span>`).join('')
                 : '<span class="generation-reference-empty">未连接参考图</span>';
         }
@@ -3070,17 +3100,20 @@
 
     function applyVideoTaskStatus(nodeId, task) {
         const node = engine.nodes.get(nodeId);
-        if (!node || !task?.id) return;
+        const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(task);
+        if (!node || !normalized.taskId) return;
         const previousStatus = node.data?.generationStatus;
-        const nextStatus = task.local_status || task.status || previousStatus;
-        const preview = videoPreviewForTask(task);
+        const nextStatus = normalized.status || previousStatus;
+        const preview = normalized.thumbnailUrl || videoPreviewForTask(task);
         node.data = {
             ...node.data,
-            taskId: task.id,
+            taskId: normalized.taskId,
             providerTaskId: task.provider_task_id || node.data.providerTaskId || null,
             generationStatus: nextStatus,
-            videoPreviewUrl: task.result_video_url ? `/api/video/play/${task.id}` : node.data.videoPreviewUrl,
-            videoDownloadUrl: `/api/video/download/${task.id}`,
+            videoPreviewUrl: normalized.playUrl || node.data.videoPreviewUrl,
+            videoDownloadUrl: normalized.downloadUrl,
+            resultVideoUrl: normalized.resultVideoUrl || node.data.resultVideoUrl,
+            resultLastFrameUrl: normalized.resultLastFrameUrl || node.data.resultLastFrameUrl,
             thumbnailUrl: preview || node.data.thumbnailUrl,
             generationResult: {
                 ...(node.data.generationResult || {}),
@@ -3089,18 +3122,19 @@
         };
         decorateGeneratedNode(
             nodeId,
-            task.local_status === 'succeeded' ? '视频生成完成' : '视频生成任务',
+            nextStatus === 'succeeded' ? '视频生成完成' : '视频生成任务',
             taskDescription(task),
             preview,
             {
-                taskId: task.id,
-                videoUrl: task.local_status === 'succeeded' || task.result_video_url ? `/api/video/play/${task.id}` : '',
-                downloadUrl: `/api/video/download/${task.id}`
+                taskId: normalized.taskId,
+                videoUrl: normalized.playUrl,
+                downloadUrl: normalized.downloadUrl
             }
         );
+        renderGenerationNodeControls(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         if (nextStatus === 'succeeded') setNodeGenerationStatus(nodeEl, 'success', '视频生成完成');
-        else if (nextStatus === 'failed') setNodeGenerationStatus(nodeEl, 'error', task.error_message || '视频生成失败');
+        else if (nextStatus === 'failed') setNodeGenerationStatus(nodeEl, 'error', normalized.errorMessage || '视频生成失败');
         else if (nextStatus === 'cancelled') setNodeGenerationStatus(nodeEl, 'warn', '视频任务已取消');
         else setNodeGenerationStatus(nodeEl, 'loading', `视频任务${nextStatus || '处理中'}`);
         if (nextStatus !== previousStatus || ['succeeded', 'failed', 'cancelled'].includes(nextStatus)) {
@@ -3110,33 +3144,36 @@
 
     function applyVideoGenerationResult(nodeEl, payload, result) {
         const node = engine.nodes.get(payload.nodeId);
+        const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoCreate(result);
         if (node) {
             node.data = {
                 ...node.data,
                 prompt: payload.prompt,
                 videoCardId: canvasRuntime.selectedVideoCardId,
                 videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
-                taskId: result?.task_id || result?.id || null,
-                providerTaskId: result?.provider_task_id || null,
-                frozenCost: result?.frozen_cost || null,
+                videoSettings: payload.settings || generationSettingsForNode(node),
+                taskId: normalized.taskId || null,
+                providerTaskId: normalized.providerTaskId || null,
+                frozenCost: normalized.frozenCost || null,
                 generationPayload: payload,
                 generationResult: result,
-                generationStatus: result?.status || 'submitted'
+                generationStatus: normalized.status
             };
         }
         decorateGeneratedNode(
             payload.nodeId,
             '视频生成任务',
-            result?.message || `任务已提交：${result?.task_id || result?.id || '等待返回任务 ID'}`,
+            result?.message || `任务已提交：${normalized.taskId || '等待返回任务 ID'}`,
             '',
             {
-                taskId: result?.task_id || result?.id || null
+                taskId: normalized.taskId || null
             }
         );
+        renderGenerationNodeControls(payload.nodeId);
         setNodeGenerationStatus(nodeEl, 'loading', '视频任务已提交，正在查询状态');
         showCanvasNotice(result?.message || '视频任务已提交。', 'info');
         scheduleCanvasSave('video_generation');
-        if (result?.task_id || result?.id) pollVideoTask(result.task_id || result.id, payload.nodeId);
+        if (normalized.taskId) pollVideoTask(normalized.taskId, payload.nodeId);
     }
 
     function applyGenerationResult(nodeEl, payload, result) {
@@ -3226,12 +3263,15 @@
                     message: capabilities.video?.message || '默认视频 API 未配置，暂不能创建视频任务。'
                 };
             }
-            if (payload.mode === 'first-last-frame-video' && collectReferenceImageIds(payload).length === 0 && collectReferenceImageUrls(payload).length === 0) {
-                return {
-                    ready: false,
-                    message: '首尾帧视频至少需要连接一张图片作为首帧；连接第二张图片会作为尾帧。'
-                };
-            }
+            const validation = window.UltimateCanvasGenerationNodes.validateVideo({
+                mode: payload.mode,
+                prompt: payload.prompt,
+                projectId: project.id,
+                cardId: card.id,
+                referenceImageIds: payload.referenceImageIds || [],
+                settings: payload.settings || {}
+            });
+            if (!validation.valid) return { ready: false, message: validation.message };
             return { ready: true };
         }
 
@@ -3326,6 +3366,108 @@
         scheduleCanvasSave('image_mode_change');
     });
 
+    const VIDEO_CAMERA_PRESETS = [
+        { id: 'push-in', label: '推进', prompt: '镜头平稳向主体推进，逐步强化主体细节' },
+        { id: 'pull-out', label: '拉远', prompt: '镜头从主体缓慢拉远，逐步揭示完整环境' },
+        { id: 'pan-left', label: '左摇', prompt: '镜头从右向左平稳摇摄，保持主体运动连续' },
+        { id: 'orbit', label: '环绕', prompt: '镜头围绕主体进行平滑半环绕运动，保持主体居中' },
+        { id: 'tracking', label: '跟拍', prompt: '镜头与主体同步移动，保持稳定跟拍距离' },
+        { id: 'handheld', label: '手持', prompt: '轻微手持呼吸感，运动自然但画面主体保持清晰' },
+        { id: 'static', label: '固定', prompt: '固定机位，不移动镜头，仅表现画面内动作' }
+    ];
+
+    function renderCameraPresetMenu(nodeEl, node) {
+        const menu = nodeEl?.querySelector('[data-generation-camera-menu]');
+        if (!menu || !node) return;
+        const selectedId = node.data?.cameraPresets?.[0]?.id || '';
+        menu.innerHTML = VIDEO_CAMERA_PRESETS.map(preset => `
+            <button type="button" class="generation-camera-preset ${selectedId === preset.id ? 'is-active' : ''}"
+                    data-generation-camera-preset="${escapeHtml(preset.id)}">${escapeHtml(preset.label)}</button>
+        `).join('');
+    }
+
+    function applyCameraPreset(nodeEl, node, presetId) {
+        const preset = VIDEO_CAMERA_PRESETS.find(item => item.id === presetId);
+        if (!nodeEl || !node || node.type !== 'video' || !preset) return;
+        const input = nodeEl.querySelector('.video-props-textarea');
+        if (!input) return;
+
+        const previousLine = node.data?.cameraPromptLine || '';
+        const baseLines = String(input.value || node.data?.prompt || '')
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line && line !== previousLine);
+        const wasSelected = node.data?.cameraPresets?.[0]?.id === preset.id;
+        const cameraPromptLine = wasSelected ? '' : `运镜：${preset.prompt}`;
+        if (cameraPromptLine) baseLines.push(cameraPromptLine);
+        const prompt = baseLines.join('\n');
+        input.value = prompt;
+        node.data = {
+            ...node.data,
+            prompt,
+            cameraPromptLine,
+            cameraPresets: wasSelected ? [] : [{
+                id: preset.id,
+                name: preset.label,
+                tagLabel: preset.label,
+                prompt: preset.prompt
+            }]
+        };
+        renderCameraPresetMenu(nodeEl, node);
+        scheduleCanvasSave('video_camera_preset');
+    }
+
+    async function optimizeVideoPrompt(nodeEl, node, command) {
+        const input = nodeEl?.querySelector('.video-props-textarea');
+        const prompt = input?.value?.trim() || node?.data?.prompt || '';
+        if (!input || !node || node.type !== 'video') return;
+        if (!prompt) {
+            showCanvasNotice('请先填写视频提示词，再进行优化。', 'warn');
+            return;
+        }
+        const originalLabel = command?.textContent || '优化提示词';
+        if (command) {
+            command.disabled = true;
+            command.textContent = '优化中';
+        }
+        setNodeGenerationStatus(nodeEl, 'loading', '正在通过文本模型优化视频提示词');
+        try {
+            const result = await postJson(
+                canvasRuntime.bootstrap?.capabilities?.text?.endpoint || '/api/tools/ultimate-canvas/generate',
+                {
+                    kind: 'text',
+                    mode: 'video-prompt-enhance',
+                    prompt: `请把下面内容优化成可直接用于视频生成的完整中文提示词，补充画面、动作、镜头、光线和节奏，不要解释：\n${prompt}`,
+                    title: node.data?.title || '视频提示词',
+                    nodeId: node.id,
+                    sourceNodes: nodeSourcePayloads(node.id),
+                    project_id: canvasRuntime.selectedProjectId,
+                    video_card_id: canvasRuntime.selectedVideoCardId,
+                    canvas_document_id: canvasRuntime.documentId
+                }
+            );
+            const optimized = generatedTextFromResult(result);
+            if (!optimized) throw new Error('文本模型没有返回可用提示词。');
+            input.value = optimized;
+            node.data = {
+                ...node.data,
+                prompt: optimized,
+                promptOptimizedAt: new Date().toISOString(),
+                promptOptimizationResult: result
+            };
+            setNodeGenerationStatus(nodeEl, 'success', '视频提示词已优化，可继续编辑后生成');
+            scheduleCanvasSave('video_prompt_optimize');
+        } catch (error) {
+            setNodeGenerationStatus(nodeEl, 'error', error?.message || '提示词优化失败，原内容已保留');
+            showCanvasNotice(error?.message || '提示词优化失败，原内容已保留。', 'error');
+        } finally {
+            if (command) {
+                command.disabled = false;
+                command.textContent = originalLabel;
+            }
+        }
+    }
+
     function disconnectGenerationReferences(nodeId) {
         const removed = [];
         engine.connections = engine.connections.filter(connection => {
@@ -3361,6 +3503,19 @@
             command.setAttribute('aria-expanded', String(!panel.hidden));
             return;
         }
+        if (action === 'optimize-prompt' && node.type === 'video') {
+            optimizeVideoPrompt(nodeEl, node, command);
+            return;
+        }
+        if (action === 'camera-presets' && node.type === 'video') {
+            const menu = nodeEl.querySelector('[data-generation-camera-menu]');
+            if (!menu) return;
+            renderCameraPresetMenu(nodeEl, node);
+            menu.hidden = !menu.hidden;
+            command.classList.toggle('is-active', !menu.hidden);
+            command.setAttribute('aria-expanded', String(!menu.hidden));
+            return;
+        }
         if (action === 'select-reference') {
             canvasRuntime.pendingGenerationReferenceTargetId = nodeId;
             showPanel('assets-panel');
@@ -3375,23 +3530,49 @@
         }
     });
 
+    document.addEventListener('click', event => {
+        const preset = event.target.closest('[data-generation-camera-preset]');
+        const nodeEl = preset?.closest('.canvas-node');
+        if (!preset || !nodeEl) return;
+        const node = engine.nodes.get(nodeEl.dataset.nodeId);
+        if (!node || node.type !== 'video') return;
+        event.preventDefault();
+        event.stopPropagation();
+        applyCameraPreset(nodeEl, node, preset.dataset.generationCameraPreset);
+    });
+
     document.addEventListener('change', event => {
         const control = event.target.closest('[data-generation-setting]');
         const nodeEl = control?.closest('.canvas-node');
         const panel = control?.closest('[data-generation-settings]');
-        if (!control || !nodeEl || !panel || panel.dataset.generationSettings !== 'image') return;
+        if (!control || !nodeEl || !panel) return;
         const node = engine.nodes.get(nodeEl.dataset.nodeId);
-        if (!node || node.type !== 'image') return;
+        if (!node || panel.dataset.generationSettings !== node.type) return;
 
         const ratio = panel.querySelector('[data-generation-setting="ratio"]')?.value || '16:9';
-        const size = panel.querySelector('[data-generation-setting="size"]')?.value || '1K';
-        const count = Number(panel.querySelector('[data-generation-setting="count"]')?.value || 1);
-        node.data = {
-            ...node.data,
-            imageSettings: { ratio, size, count }
-        };
+        if (node.type === 'image') {
+            const size = panel.querySelector('[data-generation-setting="size"]')?.value || '1K';
+            const count = Number(panel.querySelector('[data-generation-setting="count"]')?.value || 1);
+            node.data = {
+                ...node.data,
+                imageSettings: { ratio, size, count }
+            };
+            scheduleCanvasSave('image_settings_change');
+        } else if (node.type === 'video') {
+            node.data = {
+                ...node.data,
+                videoSettings: {
+                    ratio,
+                    duration: Number(panel.querySelector('[data-generation-setting="duration"]')?.value || 5),
+                    resolution: panel.querySelector('[data-generation-setting="resolution"]')?.value || '720p',
+                    generateAudio: panel.querySelector('[data-generation-setting="generateAudio"]')?.checked === true,
+                    returnLastFrame: panel.querySelector('[data-generation-setting="returnLastFrame"]')?.checked === true,
+                    watermark: panel.querySelector('[data-generation-setting="watermark"]')?.checked === true
+                }
+            };
+            scheduleCanvasSave('video_settings_change');
+        }
         renderGenerationNodeControls(node.id);
-        scheduleCanvasSave('image_settings_change');
     });
 
     document.addEventListener('click', event => {
@@ -5604,11 +5785,21 @@
     // Video props tab clicks
     // =====================
     document.addEventListener('click', (e) => {
-        const tab = e.target.closest('.video-props-tab');
-        if (!tab) return;
-        const parent = tab.closest('.video-props-tabs');
+        const button = e.target.closest('.video-props-tab');
+        if (!button) return;
+        const parent = button.closest('.video-props-tabs');
         parent?.querySelectorAll('.video-props-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
+        button.classList.add('active');
+        const nodeEl = button.closest('.canvas-node');
+        const node = engine.nodes.get(nodeEl?.dataset.nodeId);
+        if (node?.type === 'video' && button.dataset.videoMode) {
+            node.data = {
+                ...node.data,
+                mode: button.dataset.videoMode
+            };
+            renderGenerationNodeControls(node.id);
+            scheduleCanvasSave('video_mode_change');
+        }
     });
 
     // =====================
