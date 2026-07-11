@@ -44,6 +44,7 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
+contains(indexSource, 'app.js?v=20260711-polling-coordinator', 'canvas app cache key changes with coordinator integration');
 contains(appSource, 'pollingCoordinator.register(taskId, nodeId)', 'video polling delegates registration to the canvas coordinator');
 contains(appSource, 'pollingCoordinator.unregister(taskId)', 'task cleanup delegates to the coordinator');
 contains(appSource, 'pollingCoordinator.clear()', 'context cleanup delegates to the coordinator');

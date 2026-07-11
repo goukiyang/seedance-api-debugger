@@ -4,6 +4,94 @@ const { createGenerationTaskCoordinator } = require('../public/tools/ultimate-ca
 
 type TimerCallback = () => void;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function staleResultSmoke() {
+  const pending: Array<ReturnType<typeof deferred<any>>> = [];
+  const statuses: string[] = [];
+  const errors: string[] = [];
+  let timer: TimerCallback | null = null;
+  let timerCreates = 0;
+  let timerClears = 0;
+  let liveTimers = 0;
+  let maxLiveTimers = 0;
+  const coordinator = createGenerationTaskCoordinator({
+    fetchStatus: () => {
+      const next = deferred<any>();
+      pending.push(next);
+      return next.promise;
+    },
+    onStatus: (nodeId: string) => statuses.push(nodeId),
+    onError: (_taskId: string, nodeId: string) => errors.push(nodeId),
+    isNodeAlive: () => true,
+    isHidden: () => false,
+    setTimer: (callback: TimerCallback) => {
+      timerCreates += 1;
+      liveTimers += 1;
+      maxLiveTimers = Math.max(maxLiveTimers, liveTimers);
+      timer = callback;
+      return timerCreates;
+    },
+    clearTimer: () => {
+      timerClears += 1;
+      liveTimers -= 1;
+      timer = null;
+    },
+    delayFor: () => 3000,
+  });
+
+  coordinator.register('same-task', 'old-node');
+  const staleSuccessCycle = coordinator.runNow();
+  coordinator.unregister('same-task');
+  coordinator.register('same-task', 'new-node');
+  pending[0].resolve({ id: 'same-task', local_status: 'succeeded' });
+  await staleSuccessCycle;
+  assert.deepEqual(statuses, [], 'stale terminal success is not delivered');
+  assert.equal(coordinator.has('same-task'), true, 'stale terminal success cannot remove the replacement');
+
+  const staleDirectUpdateCycle = coordinator.runNow();
+  coordinator.register('same-task', 'direct-update-node');
+  pending[1].resolve({ id: 'same-task', local_status: 'succeeded' });
+  await staleDirectUpdateCycle;
+  assert.deepEqual(statuses, [], 'same-task registration for a different node invalidates the captured entry');
+  assert.equal(coordinator.has('same-task'), true, 'stale direct-update terminal cannot remove the replacement');
+
+  const freshSuccessCycle = coordinator.runNow();
+  pending[2].resolve({ id: 'same-task', local_status: 'running' });
+  await freshSuccessCycle;
+  assert.deepEqual(statuses, ['direct-update-node'], 'the replacement entry receives a fresh result normally');
+
+  coordinator.clear();
+  coordinator.register('same-task', 'latest-node');
+  const staleErrorCycle = coordinator.runNow();
+  coordinator.clear();
+  coordinator.register('same-task', 'newest-node');
+  pending[3].reject(new Error('stale failure'));
+  await staleErrorCycle;
+  assert.deepEqual(errors, [], 'stale rejection is not delivered');
+  assert.equal(coordinator.has('same-task'), true, 'stale rejection cannot affect the replacement');
+
+  const freshAfterClearCycle = coordinator.runNow();
+  pending[4].resolve({ id: 'same-task', local_status: 'succeeded' });
+  await freshAfterClearCycle;
+  assert.deepEqual(statuses, ['direct-update-node', 'newest-node'], 'a fresh terminal result after clear is delivered normally');
+  assert.equal(coordinator.has('same-task'), false);
+  assert.ok(timerCreates >= 1, 'the coordinator schedules through the shared timer slot');
+  assert.equal(maxLiveTimers, 1, 'the coordinator never owns more than one live timer');
+  coordinator.clear();
+  assert.equal(timer, null, 'clear cancels the shared timer');
+  assert.equal(liveTimers, 0, 'clear leaves no live timer');
+  assert.ok(timerClears >= 1, 'the shared timer is cleared rather than duplicated');
+}
+
 async function main() {
 const statuses: Array<{ nodeId: string; status: string }> = [];
 const errors: Array<{ taskId: string; count: number }> = [];
@@ -85,6 +173,8 @@ assert.equal(coordinator.has('hidden'), false);
 coordinator.clear();
 assert.equal(coordinator.size(), 0);
 assert.equal(timer, null);
+
+await staleResultSmoke();
 
 console.log('ultimate canvas generation task coordinator smoke passed');
 }

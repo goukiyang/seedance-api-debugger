@@ -303,6 +303,6 @@ contains(appSource, "scheduleCanvasSave('video_camera_preset')", 'camera preset 
 assert.match(indexSource, /styles\.css\?v=20260711-generation-nodes/);
 assert.match(indexSource, /canvas-engine\.js\?v=20260711-generation-popovers/);
 assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-generation-nodes/);
-assert.match(indexSource, /app\.js\?v=20260711-generation-popovers/);
+assert.match(indexSource, /app\.js\?v=20260711-polling-coordinator/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

@@ -36,7 +36,9 @@
             if (!taskId || !nodeId) return;
             const existing = active.get(taskId);
             if (existing) {
-                existing.nodeId = nodeId;
+                if (existing.nodeId !== nodeId) {
+                    active.set(taskId, { taskId, nodeId, attempt: 0, errorCount: 0 });
+                }
                 return;
             }
             active.set(taskId, { taskId, nodeId, attempt: 0, errorCount: 0 });
@@ -74,7 +76,7 @@
 
             results.forEach((result, index) => {
                 const entry = fetchEntries[index];
-                if (!active.has(entry.taskId)) return;
+                if (active.get(entry.taskId) !== entry) return;
                 if (result.status === 'rejected') {
                     entry.errorCount += 1;
                     options.onError(entry.taskId, entry.nodeId, entry.errorCount, result.reason, entry);
@@ -83,7 +85,9 @@
                 entry.errorCount = 0;
                 options.onStatus(entry.nodeId, result.value, entry);
                 const status = result.value?.local_status || result.value?.status;
-                if (TERMINAL_STATUSES.has(status)) unregister(entry.taskId);
+                if (TERMINAL_STATUSES.has(status) && active.get(entry.taskId) === entry) {
+                    unregister(entry.taskId);
+                }
             });
 
             scheduleNext();
