@@ -216,6 +216,22 @@ contains(
   'UltimateCanvasVideoCards.generationContext',
   'generation uses shared context builder',
 );
+contains(app, 'data-video-card-search', 'video card list has search');
+contains(app, 'data-video-card-refresh', 'video card list has refresh');
+contains(app, 'data-video-card-manage', 'video card rows open in-place management');
+contains(app, 'data-video-card-view-back', 'video card detail returns to list');
+contains(app, 'data-video-card-section', 'video card detail has in-place sections');
+contains(app, 'async function refreshProjectVideoCards', 'menu refreshes complete project cards');
+
+const styles = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
+contains(styles, '.video-card-context-detail', 'video card detail styles exist');
+contains(styles, '.video-card-section-tabs', 'video card section tabs are stable');
+contains(styles, '.video-card-task-list', 'video card task list has stable layout');
+contains(
+  styles,
+  'max-width: min(560px, calc(100vw - 24px))',
+  'video card menu is constrained to viewport',
+);
 
 const index = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
 assert.ok(index.includes('video-card-workflow.js'), 'index loads video card workflow');

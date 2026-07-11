@@ -216,6 +216,79 @@
         return nextBranchId;
     }
 
+    async function refreshProjectVideoCards(projectId = canvasRuntime.selectedProjectId) {
+        if (!projectId || !canvasRuntime.bootstrap?.context) return [];
+        const data = await requestJson(`/api/projects/${encodeURIComponent(projectId)}/video-cards`, {
+            cache: 'no-store'
+        });
+        if (projectId !== canvasRuntime.selectedProjectId) return [];
+
+        const previousCards = new Map(
+            (canvasRuntime.bootstrap.context.video_cards || []).map(card => [card.id, card])
+        );
+        const permissions = data?.permissions || {};
+        const cards = (data?.video_cards || [])
+            .filter(card => card.status !== 'discarded')
+            .map(card => {
+                const previous = previousCards.get(card.id) || {};
+                const canGenerate = window.UltimateCanvasVideoCards.operationAllowed({
+                    video_card: card,
+                    permissions: { can_generate: permissions.can_generate }
+                }, 'generate');
+                return {
+                    ...previous,
+                    ...card,
+                    can_generate: canGenerate,
+                    can_manage: Boolean(permissions.can_manage_project),
+                    status_label: previous.status_label || card.status,
+                    spec_label: videoCardSpecFor(card),
+                    branch_count: previous.branch_count || 0,
+                    removal_action: previous.removal_action || null,
+                    removal_reason: previous.removal_reason || ''
+                };
+            });
+        canvasRuntime.bootstrap.context.video_cards = cards;
+        renderRuntimeContextControls();
+        return cards;
+    }
+
+    function openVideoCardManagement(cardId) {
+        if (!cardId) return;
+        canvasRuntime.videoCardView = {
+            ...canvasRuntime.videoCardView,
+            mode: 'detail',
+            section: 'info',
+            cardId
+        };
+        canvasRuntime.openContextMenu = 'video-card';
+        renderRuntimeContextControls();
+        loadVideoCardWorkspace(cardId).then(() => {
+            if (canvasRuntime.videoCardView.mode === 'detail'
+                && canvasRuntime.videoCardView.cardId === cardId) {
+                renderRuntimeContextControls();
+            }
+        }).catch(() => {
+            if (canvasRuntime.videoCardView.mode === 'detail'
+                && canvasRuntime.videoCardView.cardId === cardId) {
+                renderRuntimeContextControls();
+            }
+        });
+    }
+
+    async function refreshVideoCardManagement(cardId) {
+        if (!cardId) return;
+        invalidateVideoCardWorkspace(cardId);
+        renderRuntimeContextControls();
+        try {
+            await loadVideoCardWorkspace(cardId, { force: true });
+        } finally {
+            if (canvasRuntime.videoCardView.mode === 'detail'
+                && canvasRuntime.videoCardView.cardId === cardId) {
+                renderRuntimeContextControls();
+            }
+        }
+    }
+
     function uniqueList(items) {
         return Array.from(new Set((items || []).filter(Boolean)));
     }
@@ -558,7 +631,111 @@
         return card?.status_label || card?.status || '未选择';
     }
 
+    const videoCardUiText = {
+        title: '\u89c6\u9891\u5361',
+        back: '\u8fd4\u56de\u5217\u8868',
+        refresh: '\u5237\u65b0',
+        search: '\u641c\u7d22\u89c6\u9891\u5361',
+        manage: '\u539f\u4f4d\u7ba1\u7406',
+        info: '\u4fe1\u606f',
+        branches: '\u65b9\u5411',
+        tasks: '\u8bb0\u5f55',
+        operations: '\u64cd\u4f5c',
+        loading: '\u6b63\u5728\u8bfb\u53d6\u89c6\u9891\u5361\u8be6\u60c5...',
+        emptyBranches: '\u6682\u65e0\u65b9\u5411\u5206\u652f',
+        emptyTasks: '\u6682\u65e0\u751f\u6210\u8bb0\u5f55',
+        retry: '\u91cd\u8bd5',
+        taskCount: '\u751f\u6210\u6b21\u6570',
+        owner: '\u8d1f\u8d23\u4eba',
+        status: '\u72b6\u6001',
+        spec: '\u4ea4\u4ed8\u89c4\u683c',
+        operationHint: '\u5361\u7247\u7ba1\u7406\u64cd\u4f5c\u4f1a\u6839\u636e\u5f53\u524d\u6743\u9650\u548c\u72b6\u6001\u663e\u793a\u3002'
+    };
+
+    function videoCardDetailMenuHtml(selectedProject) {
+        const cardId = canvasRuntime.videoCardView.cardId;
+        const cachedDetail = canvasRuntime.videoCardDetails.get(cardId);
+        const detailError = canvasRuntime.videoCardLoadErrors.get(cardId);
+        const card = cachedDetail?.video_card
+            || canvasRuntime.bootstrap?.context?.video_cards?.find(item => item.id === cardId)
+            || null;
+        const branches = canvasRuntime.videoCardBranches.get(cardId) || [];
+        const tasks = canvasRuntime.videoCardTasks.get(cardId) || [];
+        const section = canvasRuntime.videoCardView.section || 'info';
+        const sections = [
+            ['info', videoCardUiText.info],
+            ['branches', videoCardUiText.branches],
+            ['tasks', videoCardUiText.tasks],
+            ['operations', videoCardUiText.operations]
+        ];
+
+        let body = `<div class="context-menu-empty">${escapeHtml(videoCardUiText.loading)}</div>`;
+        if (detailError) {
+            body = `
+                <div class="video-card-detail-error">
+                    <span>${escapeHtml(detailError.message || String(detailError))}</span>
+                    <button type="button" class="context-command" data-video-card-refresh="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.retry)}</button>
+                </div>`;
+        } else if (cachedDetail) {
+            if (section === 'info') {
+                const owner = ownerIdentity(card?.owner, card?.owner_user_id);
+                body = `
+                    <div class="video-card-summary-grid">
+                        <span><small>${escapeHtml(videoCardUiText.status)}</small><strong>${escapeHtml(videoCardStatusFor(card))}</strong></span>
+                        <span><small>${escapeHtml(videoCardUiText.spec)}</small><strong>${escapeHtml(videoCardSpecFor(card))}</strong></span>
+                        <span><small>${escapeHtml(videoCardUiText.owner)}</small><strong>${escapeHtml(owner.name)}</strong></span>
+                        <span><small>${escapeHtml(videoCardUiText.taskCount)}</small><strong>${escapeHtml(card?.summary?.task_count || tasks.length)}</strong></span>
+                    </div>
+                    ${card?.objective ? `<p class="video-card-objective">${escapeHtml(card.objective)}</p>` : ''}`;
+            } else if (section === 'branches') {
+                body = branches.length
+                    ? `<div class="video-card-branch-list">${branches.map(branch => `
+                        <div class="video-card-branch-row ${branch.id === canvasRuntime.selectedVideoBranchId ? 'is-selected' : ''}">
+                            <span><strong>${escapeHtml(branch.title || branch.id)}</strong><small>${escapeHtml(branch.status || '')}</small></span>
+                            <small>${escapeHtml(branch.summary?.task_count || 0)}</small>
+                        </div>`).join('')}</div>`
+                    : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyBranches)}</div>`;
+            } else if (section === 'tasks') {
+                body = tasks.length
+                    ? `<div class="video-card-task-list">${tasks.map(task => `
+                        <div class="video-card-task-row">
+                            <span><strong>${escapeHtml(task.prompt || task.id)}</strong><small>${escapeHtml(task.local_status || task.status || '')}</small></span>
+                            <small>${escapeHtml(task.version_role || '')}</small>
+                        </div>`).join('')}</div>`
+                    : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyTasks)}</div>`;
+            } else {
+                body = `<div class="video-card-operation-placeholder">${escapeHtml(videoCardUiText.operationHint)}</div>`;
+            }
+        }
+
+        return `
+            <div class="canvas-context-menu video-card-menu video-card-context-detail ${canvasRuntime.openContextMenu === 'video-card' ? 'is-open' : ''}" data-context-menu="video-card">
+                <div class="context-menu-head video-card-detail-head">
+                    <button type="button" class="context-command" data-video-card-view-back>${escapeHtml(videoCardUiText.back)}</button>
+                    <span><strong>${escapeHtml(card?.title || videoCardUiText.title)}</strong><small>${escapeHtml(selectedProject ? projectDisplayNameFor(selectedProject) : '')}</small></span>
+                    <button type="button" class="context-command" data-video-card-refresh="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.refresh)}</button>
+                </div>
+                <div class="video-card-section-tabs" role="tablist">
+                    ${sections.map(([key, label]) => `<button type="button" class="${section === key ? 'is-active' : ''}" data-video-card-section="${key}" role="tab" aria-selected="${section === key}">${escapeHtml(label)}</button>`).join('')}
+                </div>
+                <div class="video-card-detail-body">${body}</div>
+            </div>`;
+    }
+
     function videoCardMenuHtml(cards, selectedProject, selectedVideoCardId) {
+        if (canvasRuntime.videoCardView.mode === 'detail' && canvasRuntime.videoCardView.cardId) {
+            return videoCardDetailMenuHtml(selectedProject);
+        }
+        const search = (canvasRuntime.videoCardView.search || '').trim().toLocaleLowerCase();
+        if (search) {
+            cards = cards.filter(card => [
+                card.title,
+                card.objective,
+                ownerIdentity(card.owner, card.owner_user_id).name,
+                videoCardStatusFor(card),
+                videoCardSpecFor(card)
+            ].some(value => String(value || '').toLocaleLowerCase().includes(search)));
+        }
         const canCreate = Boolean(selectedProject?.can_generate);
         const items = cards.map(card => {
             const selected = card.id === selectedVideoCardId;
@@ -576,6 +753,10 @@
                         <span class="context-menu-check" aria-hidden="true">${selected ? '✓' : ''}</span>
                     </button>
                     <a class="context-row-icon-action" href="/projects/${encodeURIComponent(card.project_id)}/video-cards/${encodeURIComponent(card.id)}" target="_top" title="查看视频卡" aria-label="查看视频卡">↗</a>
+                    <button type="button" class="context-row-icon-action video-card-manage-action"
+                        data-video-card-manage="${escapeHtml(card.id)}"
+                        title="${escapeHtml(videoCardUiText.manage)}"
+                        aria-label="${escapeHtml(videoCardUiText.manage)}">&#9881;</button>
                     ${card.removal_action ? `
                         <button type="button" class="context-row-action ${card.removal_action === 'discard' ? 'danger' : ''}"
                             data-video-card-remove="${escapeHtml(card.id)}"
@@ -592,6 +773,11 @@
                 <div class="context-menu-head">
                     <span><strong>视频卡</strong><small>${cards.length} 张 · 归属当前项目</small></span>
                     <button type="button" class="context-command" data-video-card-create-toggle ${canCreate ? '' : 'disabled'}>${canvasRuntime.videoCardCreateOpen ? '取消' : '新建视频卡'}</button>
+                </div>
+                <div class="video-card-list-tools">
+                    <input type="search" value="${escapeHtml(canvasRuntime.videoCardView.search || '')}"
+                        data-video-card-search placeholder="${escapeHtml(videoCardUiText.search)}" autocomplete="off">
+                    <button type="button" class="context-command" data-video-card-refresh="">${escapeHtml(videoCardUiText.refresh)}</button>
                 </div>
                 ${canvasRuntime.videoCardCreateOpen ? `
                     <form class="context-create-form" data-video-card-create-form>
@@ -1043,14 +1229,79 @@
     installAutosaveHooks();
     loadCanvasBootstrap();
 
+    document.addEventListener('input', event => {
+        const search = event.target.closest('[data-video-card-search]');
+        if (!search) return;
+        const value = search.value || '';
+        canvasRuntime.videoCardView.search = value;
+        renderRuntimeContextControls();
+        window.requestAnimationFrame(() => {
+            const next = document.querySelector('[data-video-card-search]');
+            if (!next) return;
+            next.focus();
+            next.setSelectionRange(value.length, value.length);
+        });
+    });
+
     document.addEventListener('click', event => {
         const toggle = event.target.closest('[data-context-toggle]');
         if (toggle) {
             const kind = toggle.dataset.contextToggle;
-            canvasRuntime.openContextMenu = canvasRuntime.openContextMenu === kind ? null : kind;
+            const opening = canvasRuntime.openContextMenu !== kind;
+            canvasRuntime.openContextMenu = opening ? kind : null;
             if (kind !== 'project') canvasRuntime.projectCreateOpen = false;
             if (kind !== 'video-card') canvasRuntime.videoCardCreateOpen = false;
+            if (kind === 'video-card' && opening) {
+                canvasRuntime.videoCardView = {
+                    ...canvasRuntime.videoCardView,
+                    mode: 'list',
+                    section: 'info',
+                    cardId: null
+                };
+            }
             renderRuntimeContextControls();
+            if (kind === 'video-card' && opening) {
+                refreshProjectVideoCards().catch(error => {
+                    showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u5217\u8868\u5237\u65b0\u5931\u8d25\u3002', 'warn');
+                });
+            }
+            return;
+        }
+
+        const videoCardRefresh = event.target.closest('[data-video-card-refresh]');
+        if (videoCardRefresh) {
+            const cardId = videoCardRefresh.dataset.videoCardRefresh;
+            const action = cardId
+                ? refreshVideoCardManagement(cardId)
+                : refreshProjectVideoCards();
+            action.catch(error => {
+                showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u5237\u65b0\u5931\u8d25\u3002', 'warn');
+            });
+            return;
+        }
+
+        const videoCardViewBack = event.target.closest('[data-video-card-view-back]');
+        if (videoCardViewBack) {
+            canvasRuntime.videoCardView = {
+                ...canvasRuntime.videoCardView,
+                mode: 'list',
+                section: 'info',
+                cardId: null
+            };
+            renderRuntimeContextControls();
+            return;
+        }
+
+        const videoCardSection = event.target.closest('[data-video-card-section]');
+        if (videoCardSection) {
+            canvasRuntime.videoCardView.section = videoCardSection.dataset.videoCardSection || 'info';
+            renderRuntimeContextControls();
+            return;
+        }
+
+        const videoCardManage = event.target.closest('[data-video-card-manage]');
+        if (videoCardManage) {
+            openVideoCardManagement(videoCardManage.dataset.videoCardManage);
             return;
         }
 
