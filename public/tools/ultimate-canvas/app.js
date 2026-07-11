@@ -74,7 +74,8 @@
         pendingGenerationReferenceTargetId: null,
         pollingCoordinator: null,
         generationPopover: null,
-        referenceSelection: null
+        referenceSelection: null,
+        videoEstimates: new Map()
     };
 
     function configureGenerationEndpoints() {
@@ -2478,6 +2479,10 @@
         engine.deleteNode = (...args) => {
             const deletedNode = engine.nodes.get(args[0]);
             if (deletedNode?.data?.taskId) stopVideoPolling(deletedNode.data.taskId, deletedNode.id);
+            const estimate = canvasRuntime.videoEstimates.get(args[0]);
+            if (estimate?.timer) window.clearTimeout(estimate.timer);
+            estimate?.controller?.abort();
+            canvasRuntime.videoEstimates.delete(args[0]);
             const nextSelection = CanvasReferenceSelection.deleteNode(canvasRuntime.referenceSelection, args[0]);
             if (canvasRuntime.referenceSelection && !nextSelection.active) {
                 finishReferenceSelection({ returnToTarget: false });
@@ -2755,6 +2760,57 @@
         return {};
     }
 
+    function videoEstimateSignature(settings) {
+        return `${settings.resolution}:${settings.duration}`;
+    }
+
+    function scheduleVideoEstimate(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        if (!node || node.type !== 'video') return;
+        const settings = generationSettingsForNode(node);
+        const estimateSignature = videoEstimateSignature(settings);
+        const previous = canvasRuntime.videoEstimates.get(nodeId);
+        if (previous?.signature === estimateSignature && ['pending', 'success', 'failure'].includes(previous.status)) return;
+        if (previous?.timer) window.clearTimeout(previous.timer);
+        previous?.controller?.abort();
+
+        const controller = new AbortController();
+        const entry = { signature: estimateSignature, status: 'pending', controller, timer: null };
+        entry.timer = window.setTimeout(async () => {
+            const endpoint = '/api/tasks/estimate';
+            const url = new URL(endpoint, window.location.origin);
+            url.searchParams.set('resolution', settings.resolution);
+            url.searchParams.set('duration', String(settings.duration));
+            try {
+                const response = await fetch(url.toString(), {
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    signal: controller.signal
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !Number.isFinite(Number(data?.estimatedCost))) throw new Error('estimate unavailable');
+                const current = canvasRuntime.videoEstimates.get(nodeId);
+                const currentNode = engine.nodes.get(nodeId);
+                if (current?.controller !== controller
+                    || current?.signature !== estimateSignature
+                    || videoEstimateSignature(generationSettingsForNode(currentNode)) !== estimateSignature) return;
+                canvasRuntime.videoEstimates.set(nodeId, {
+                    signature: estimateSignature,
+                    status: 'success',
+                    estimatedCost: Number(data.estimatedCost)
+                });
+                renderGenerationNodeControls(nodeId);
+            } catch (error) {
+                if (error?.name === 'AbortError') return;
+                const current = canvasRuntime.videoEstimates.get(nodeId);
+                if (current?.controller !== controller || current?.signature !== estimateSignature) return;
+                canvasRuntime.videoEstimates.set(nodeId, { signature: estimateSignature, status: 'failure' });
+                renderGenerationNodeControls(nodeId);
+            }
+        }, 350);
+        canvasRuntime.videoEstimates.set(nodeId, entry);
+    }
+
     function generationReferenceItems(nodeId) {
         const seen = new Set();
         return engine.connections
@@ -2973,6 +3029,8 @@
 
         if (node.type === 'image') {
             const spec = nodeEl.querySelector('[data-generation-spec]');
+            const cost = nodeEl.querySelector('[data-generation-cost]');
+            if (cost) cost.textContent = '后台计费';
             if (spec) spec.textContent = `${settings.ratio} · ${settings.size} · ${settings.count}张`;
         } else {
             const spec = nodeEl.querySelector('[data-generation-spec]');
@@ -2980,7 +3038,16 @@
                 spec.textContent = `${settings.ratio} · ${settings.resolution} · ${settings.duration}s${settings.generateAudio ? ' · 声音' : ''}`;
             }
             const cost = nodeEl.querySelector('[data-generation-cost]');
-            if (cost) cost.textContent = node.data?.frozenCost ? `已冻结 ${node.data.frozenCost}` : '后台计费';
+            const estimate = canvasRuntime.videoEstimates.get(nodeId);
+            const estimateSignature = videoEstimateSignature(settings);
+            if (cost) {
+                cost.textContent = node.data?.frozenCost
+                    ? `已冻结 ${node.data.frozenCost}`
+                    : estimate?.signature === estimateSignature && estimate.status === 'success'
+                        ? `预计 ${estimate.estimatedCost} 点`
+                        : '提交后由后台计算';
+            }
+            scheduleVideoEstimate(nodeId);
         }
 
         const references = generationReferenceItems(nodeId);

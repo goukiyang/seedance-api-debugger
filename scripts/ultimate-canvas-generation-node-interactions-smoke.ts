@@ -44,7 +44,14 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260711-polling-coordinator', 'canvas app cache key changes with coordinator integration');
+contains(indexSource, 'app.js?v=20260711-liblib-interactions', 'canvas app cache key matches the final interaction release');
+contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
+contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
+contains(appSource, '350', 'video estimates debounce for 350ms');
+contains(appSource, '.abort()', 'a superseded video estimate request is aborted');
+contains(appSource, 'estimateSignature', 'stale estimate responses are checked against their settings signature');
+contains(appSource, '预计 ${', 'successful estimates are labeled clearly');
+contains(appSource, '提交后由后台计算', 'estimate failure remains nonblocking');
 const pollingSource = appSource.slice(
   appSource.indexOf('function pollVideoTask'),
   appSource.indexOf('canvasRuntime.pollingCoordinator ='),

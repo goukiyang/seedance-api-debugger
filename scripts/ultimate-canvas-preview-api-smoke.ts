@@ -65,6 +65,9 @@ async function main() {
   assert.ok(bootstrap.capabilities.video.interaction.modes.includes('first-last-frame-video'));
   assert.deepEqual(bootstrap.capabilities.image.interaction.size_options, ['1K', '2K']);
 
+  const estimate = await get('/api/tasks/estimate?resolution=1080p&duration=6');
+  assert.equal(estimate.estimatedCost, 18);
+
   const detail = await get(`/api/video-cards/${cardId}`);
   assert.equal(detail.video_card.id, cardId);
   assert.equal(detail.permissions.can_manage, true);

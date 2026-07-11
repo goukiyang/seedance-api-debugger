@@ -300,9 +300,9 @@ contains(appSource, 'data-generated-task-retry', 'terminal video task can retry'
 contains(appSource, "scheduleCanvasSave('video_prompt_optimize')", 'optimized video prompt persists');
 contains(appSource, "scheduleCanvasSave('video_camera_preset')", 'camera preset persists');
 
-assert.match(indexSource, /styles\.css\?v=20260711-generation-nodes/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260711-generation-popovers/);
-assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-generation-nodes/);
-assert.match(indexSource, /app\.js\?v=20260711-polling-coordinator/);
+assert.match(indexSource, /styles\.css\?v=20260711-liblib-interactions/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260711-liblib-interactions/);
+assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-liblib-interactions/);
+assert.match(indexSource, /app\.js\?v=20260711-liblib-interactions/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

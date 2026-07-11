@@ -843,6 +843,11 @@ const server = http.createServer(async (request, response) => {
     });
   }
 
+  if (url.pathname === '/api/tasks/estimate' && request.method === 'GET') {
+    const duration = Number(url.searchParams.get('duration') || 0);
+    return sendJson(response, { estimatedCost: Math.ceil(duration * 3) });
+  }
+
   if (url.pathname === '/api/tasks/create' && request.method === 'POST') {
     const body = await readJsonBody(request);
     const taskId = `task-mock-${sequence++}`;
