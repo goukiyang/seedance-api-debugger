@@ -68,7 +68,7 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 
 - 本地浏览器验收已经完成；视频预估跨项目/视频卡切换的旧响应隔离由共享清理函数、可执行烟测和两轮独立审查覆盖，未使用线上账号制造真实慢请求。
 - 尚未部署到线上环境，也未用真实普通账号核对线上 estimate/provider 字段、失败/超时状态、资产播放下载和真实点数流水。
-- 远端推送结果与无权限时的完整补丁路径由本次收尾在最终验证后追加。
+- 已尝试 `git push origin teammate/ultimate-canvas-complete`，远端以 403 拒绝当前身份 `K4y2025` 对 `goukiyang/seedance-api-debugger` 的写入。完整二进制安全补丁输出到 `E:\Ultimate-canvas\ultimate-canvas-complete-final.patch`，覆盖 `origin/teammate/ultimate-canvas-complete..HEAD` 的全部提交，供有权限的维护者直接应用。
 
 ## 10. 风险和建议下一步
 
