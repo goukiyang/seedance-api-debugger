@@ -1167,6 +1167,38 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     border-color: var(--accent-teal);
     box-shadow: 0 0 0 2px rgba(78,205,196,0.2), var(--shadow-node);
 }
+.canvas-node.is-reference-incompatible {
+    opacity: 0.42;
+    filter: grayscale(0.7);
+}
+
+.canvas-reference-selection-status {
+    position: fixed;
+    z-index: 1200;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 8px 14px;
+    border: 1px solid var(--border-node);
+    border-radius: var(--radius-sm);
+    background: var(--bg-panel);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.canvas-reference-selection-status button {
+    min-height: 28px;
+    padding: 0 9px;
+    border: 1px solid var(--border-node);
+    border-radius: 4px;
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
 
 /* Hide properties/input panels below cards by default. Show them only when selected */
 .canvas-node .node-input-bar,
@@ -1897,7 +1929,22 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     background: var(--bg-input);
     color: var(--text-secondary);
     font-size: 11px;
-    overflow: hidden;
+    overflow: visible;
+}
+
+.generation-reference-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border-node);
+    border-radius: 50%;
+    background: var(--bg-panel);
+    color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 16px;
 }
 
 .generation-reference-item img,

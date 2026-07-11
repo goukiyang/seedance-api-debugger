@@ -73,7 +73,8 @@
         videoCardView: { mode: 'list', section: 'info', cardId: null, search: '' },
         pendingGenerationReferenceTargetId: null,
         pollingTasks: new Map(),
-        generationPopover: null
+        generationPopover: null,
+        referenceSelection: null
     };
 
     function configureGenerationEndpoints() {
@@ -1649,6 +1650,7 @@
             if (!confirmed) return;
         }
         canvasRuntime.openContextMenu = null;
+        finishReferenceSelection({ returnToTarget: false });
         canvasRuntime.projectCreateOpen = false;
         setContextSwitching(true);
         try {
@@ -1673,6 +1675,7 @@
             return;
         }
         canvasRuntime.openContextMenu = null;
+        finishReferenceSelection({ returnToTarget: false });
         canvasRuntime.videoCardCreateOpen = false;
         setContextSwitching(true);
         try {
@@ -2471,6 +2474,9 @@
         };
         const originalDeleteNode = engine.deleteNode.bind(engine);
         engine.deleteNode = (...args) => {
+            if (canvasRuntime.referenceSelection) {
+                finishReferenceSelection({ returnToTarget: false });
+            }
             const result = originalDeleteNode(...args);
             renderAllGenerationNodeControls();
             scheduleCanvasSave('node_delete');
@@ -2489,6 +2495,10 @@
             const result = originalMouseUp(...args);
             if (wasDragging) scheduleCanvasSave('node_move');
             return result;
+        };
+        engine.onConnectionDeleted = (_fromId, toId) => {
+            renderGenerationNodeControls(toId);
+            scheduleCanvasSave('connection_change');
         };
     }
 
@@ -2613,7 +2623,11 @@
             }
         );
         if (referenceTargetId && !isVideo && engine.nodes.has(referenceTargetId)) {
-            engine._createConnection(nodeId, referenceTargetId);
+            if (canvasRuntime.referenceSelection?.targetNodeId === referenceTargetId) {
+                selectCanvasReference(nodeId);
+            } else {
+                engine.connectNodes(nodeId, referenceTargetId);
+            }
             canvasRuntime.pendingGenerationReferenceTargetId = null;
             renderGenerationNodeControls(referenceTargetId);
             showCanvasNotice('参考图已加入并连接到生成节点。', 'info');
@@ -2762,6 +2776,130 @@
             .map(item => item.referenceImageId);
     }
 
+    function generationModeState(node, referenceCount = generationReferenceItems(node.id).length) {
+        const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
+            node.type,
+            canvasRuntime.bootstrap?.capabilities?.[node.type]
+        );
+        const selectedMode = node.data?.mode || node.data?.generationIntent?.mode
+            || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
+        const options = window.UltimateCanvasGenerationInteractions.modeOptions(node.type, capability, referenceCount);
+        return { capability, selectedMode, options, selected: options.find(option => option.id === selectedMode) };
+    }
+
+    function referenceSelectionMaximum(node) {
+        const state = generationModeState(node);
+        return Math.max(0, Math.min(
+            Number(state.capability.maxReferenceImages) || 0,
+            Number(state.selected?.maximumReferences ?? state.capability.maxReferenceImages) || 0
+        ));
+    }
+
+    function updateReferenceSelectionMarkers() {
+        const state = canvasRuntime.referenceSelection;
+        document.querySelectorAll('.canvas-node').forEach(nodeEl => {
+            const node = engine.nodes.get(nodeEl.dataset.nodeId);
+            const compatible = Boolean(state && node?.type === 'image' && node.data?.referenceImageId);
+            nodeEl.classList.toggle('is-reference-compatible', compatible);
+            nodeEl.classList.toggle('is-reference-incompatible', Boolean(state && !compatible));
+        });
+    }
+
+    function renderReferenceSelectionStatus() {
+        document.querySelector('[data-reference-selection-status]')?.remove();
+        const state = canvasRuntime.referenceSelection;
+        if (!state) return;
+        const target = engine.nodes.get(state.targetNodeId);
+        if (!target) return;
+        const count = generationReferenceItems(target.id).length;
+        const status = document.createElement('div');
+        status.className = 'canvas-reference-selection-status';
+        status.dataset.referenceSelectionStatus = '';
+        status.innerHTML = `
+            <span>从画布选择参考 <strong>${count}/${state.maximumReferences}</strong></span>
+            <button type="button" data-reference-selection-action="library" title="从素材库选择">素材库</button>
+            <button type="button" data-reference-selection-action="return" title="返回节点">返回节点</button>
+            <button type="button" data-reference-selection-action="exit" title="退出">退出</button>`;
+        document.body.appendChild(status);
+    }
+
+    function finishReferenceSelection(options = {}) {
+        const state = canvasRuntime.referenceSelection;
+        if (!state) return false;
+        canvasRuntime.referenceSelection = null;
+        if (canvasRuntime.pendingGenerationReferenceTargetId === state.targetNodeId) {
+            canvasRuntime.pendingGenerationReferenceTargetId = null;
+        }
+        document.querySelector('[data-reference-selection-status]')?.remove();
+        updateReferenceSelectionMarkers();
+        if (options.returnToTarget !== false && engine.nodes.has(state.targetNodeId)) {
+            engine.selectNode(state.targetNodeId);
+        } else if (options.restorePrevious && state.previousSelectedNodeId && engine.nodes.has(state.previousSelectedNodeId)) {
+            engine.selectNode(state.previousSelectedNodeId);
+        }
+        if (options.reason) showCanvasNotice(options.reason, options.tone || 'info');
+        return true;
+    }
+
+    function startReferenceSelection(targetNodeId) {
+        const target = engine.nodes.get(targetNodeId);
+        if (!target || !['image', 'video'].includes(target.type)) return false;
+        finishReferenceSelection({ returnToTarget: false });
+        const maximumReferences = referenceSelectionMaximum(target);
+        if (generationReferenceItems(targetNodeId).length >= maximumReferences) {
+            showCanvasNotice(`当前模式最多支持 ${maximumReferences} 个参考图`, 'warn');
+            return false;
+        }
+        closeGenerationPopover();
+        canvasRuntime.referenceSelection = {
+            targetNodeId,
+            previousSelectedNodeId: engine.selectedNodeId,
+            maximumReferences,
+            startedAt: Date.now()
+        };
+        canvasRuntime.pendingGenerationReferenceTargetId = targetNodeId;
+        updateReferenceSelectionMarkers();
+        renderReferenceSelectionStatus();
+        return true;
+    }
+
+    function selectCanvasReference(sourceNodeId) {
+        const state = canvasRuntime.referenceSelection;
+        const source = engine.nodes.get(sourceNodeId);
+        const target = state ? engine.nodes.get(state.targetNodeId) : null;
+        if (!state || !target || source?.type !== 'image' || !source.data?.referenceImageId) return false;
+        if (generationReferenceImageIds(target.id).includes(source.data.referenceImageId)) {
+            engine.selectNode(target.id);
+            return false;
+        }
+        if (engine.connections.some(connection => connection.from === sourceNodeId && connection.to === target.id)) {
+            engine.selectNode(target.id);
+            return false;
+        }
+        if (generationReferenceItems(target.id).length >= state.maximumReferences) {
+            finishReferenceSelection({ reason: `当前模式最多支持 ${state.maximumReferences} 个参考图`, tone: 'warn' });
+            return false;
+        }
+        if (!engine.connectNodes(sourceNodeId, target.id)) return false;
+        engine.selectNode(target.id);
+        renderGenerationNodeControls(target.id);
+        scheduleCanvasSave('generation_reference_add');
+        if (generationReferenceItems(target.id).length >= state.maximumReferences) {
+            finishReferenceSelection({ reason: `已达当前模式的 ${state.maximumReferences} 张参考图上限` });
+        } else {
+            renderReferenceSelectionStatus();
+        }
+        return true;
+    }
+
+    function removeGenerationReference(targetNodeId, sourceNodeId) {
+        if (!engine.disconnectNodes(sourceNodeId, targetNodeId)) return false;
+        renderGenerationNodeControls(targetNodeId);
+        renderReferenceSelectionStatus();
+        scheduleCanvasSave('generation_reference_remove');
+        return true;
+    }
+
     function setSelectOptions(select, values, selectedValue) {
         if (!select) return;
         const uniqueValues = Array.from(new Set((values || []).filter(Boolean)));
@@ -2784,19 +2922,20 @@
         const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
-        const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
-            node.type,
-            canvasRuntime.bootstrap?.capabilities?.[node.type]
-        );
-        const mode = window.UltimateCanvasGenerationInteractions.modeOptions(
-            node.type,
-            capability,
-            generationReferenceItems(nodeId).length
-        ).find(option => option.id === nodeMode);
+        const mode = generationModeState(node).selected;
         updateGenerationNodeModelLabel(nodeEl, node);
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
         const modeLabel = nodeEl.querySelector('[data-generation-mode-label]');
         if (modeLabel) modeLabel.textContent = mode?.label || nodeMode;
+        const submit = nodeEl.querySelector('[data-generation-submit]');
+        if (submit && !submit.classList.contains('is-loading')) submit.disabled = !mode?.enabled;
+        const existingStatus = nodeEl.querySelector('.node-generation-status');
+        if (mode && !mode.enabled) {
+            setNodeGenerationStatus(nodeEl, 'warn', mode.reason);
+            nodeEl.querySelector('.node-generation-status')?.setAttribute('data-mode-invalid', 'true');
+        } else if (existingStatus?.dataset.modeInvalid === 'true') {
+            existingStatus.remove();
+        }
 
         if (node.type === 'image') {
             const spec = nodeEl.querySelector('[data-generation-spec]');
@@ -2819,10 +2958,10 @@
                         ${item.preview ? `<img src="${escapeHtml(item.preview)}" alt="">` : '<span class="generation-reference-thumb"></span>'}
                         <strong>${escapeHtml(item.title)}</strong>
                         <span>${item.available
-                            ? (node.type === 'video' && nodeMode === 'first-last-frame-video'
-                                ? (index === 0 ? '首帧' : index === 1 ? '尾帧' : `忽略 ${index + 1}`)
-                                : (index === 0 ? '参考 1' : `参考 ${index + 1}`))
+                            ? escapeHtml(window.UltimateCanvasGenerationInteractions.referenceRole(nodeMode, index))
                             : '未入库'}</span>
+                        <button type="button" class="generation-reference-remove" data-generation-reference-remove="${escapeHtml(item.nodeId)}"
+                            title="移除参考图" aria-label="移除参考图">&times;</button>
                     </span>`).join('')
                 : '<span class="generation-reference-empty">未连接参考图</span>';
         }
@@ -3304,6 +3443,11 @@
         }
 
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
+        const generationNode = payload.nodeId ? engine.nodes.get(payload.nodeId) : null;
+        if (generationNode && ['image', 'video'].includes(generationNode.type)) {
+            const selectedMode = generationModeState(generationNode).selected;
+            if (selectedMode && !selectedMode.enabled) return { ready: false, message: selectedMode.reason };
+        }
         const project = selectedProject();
         const card = selectedVideoCard();
         if (canvasRuntime.contextSwitching) {
@@ -3416,6 +3560,7 @@
             showCanvasNotice(error?.message || '生成请求失败，输入和已选素材已保留，可稍后重试。', 'error');
         } finally {
             setSubmitLoading(button, false);
+            renderGenerationNodeControls(payload.nodeId);
         }
     }
 
@@ -3564,18 +3709,9 @@
     }
 
     function disconnectGenerationReferences(nodeId) {
-        const removed = [];
-        engine.connections = engine.connections.filter(connection => {
-            const source = engine.nodes.get(connection.from);
-            if (connection.to === nodeId && source?.type === 'image') {
-                removed.push(connection);
-                document.getElementById(connection.lineId)?.remove();
-                return false;
-            }
-            return true;
-        });
-        if (!removed.length) return false;
-        engine._updateConnections();
+        const references = generationReferenceItems(nodeId);
+        if (!references.length) return false;
+        references.forEach(item => engine.disconnectNodes(item.nodeId, nodeId));
         renderGenerationNodeControls(nodeId);
         scheduleCanvasSave('generation_references_clear');
         return true;
@@ -3603,10 +3739,7 @@
             return;
         }
         if (action === 'select-reference') {
-            canvasRuntime.pendingGenerationReferenceTargetId = nodeId;
-            showPanel('assets-panel');
-            loadLibraryPanels(true);
-            showCanvasNotice('从素材面板选择图片后会自动连接到当前节点。', 'info');
+            startReferenceSelection(nodeId);
             return;
         }
         if (action === 'disconnect-references') {
@@ -3614,6 +3747,27 @@
                 showCanvasNotice('当前节点没有已连接的图片参考。', 'info');
             }
         }
+    });
+
+    document.addEventListener('click', event => {
+        const remove = event.target.closest('[data-generation-reference-remove]');
+        const nodeEl = remove?.closest('.canvas-node');
+        if (!remove || !nodeEl) return;
+        event.preventDefault();
+        event.stopPropagation();
+        removeGenerationReference(nodeEl.dataset.nodeId, remove.dataset.generationReferenceRemove);
+    });
+
+    document.addEventListener('click', event => {
+        const action = event.target.closest('[data-reference-selection-action]')?.dataset.referenceSelectionAction;
+        const state = canvasRuntime.referenceSelection;
+        if (!action || !state) return;
+        if (action === 'library') {
+            showPanel('assets-panel');
+            loadLibraryPanels(true);
+        }
+        if (action === 'return') engine.selectNode(state.targetNodeId);
+        if (action === 'exit') finishReferenceSelection();
     });
 
     document.addEventListener('click', event => {
@@ -3682,7 +3836,12 @@
 
     engine.container.addEventListener('wheel', closeGenerationPopover, { passive: true });
     window.addEventListener('resize', closeGenerationPopover);
-    engine.onNodeSelected = closeGenerationPopover;
+    engine.onNodeSelected = nodeId => {
+        closeGenerationPopover();
+        if (canvasRuntime.referenceSelection && nodeId !== canvasRuntime.referenceSelection.targetNodeId) {
+            selectCanvasReference(nodeId);
+        }
+    };
     engine.onNodeDeselected = closeGenerationPopover;
     engine.onViewportChanged = closeGenerationPopover;
 
@@ -5994,6 +6153,11 @@
     document.addEventListener('keydown', (e) => {
         switch (e.key) {
             case 'Escape':
+                if (canvasRuntime.referenceSelection) {
+                    e.preventDefault();
+                    finishReferenceSelection({ restorePrevious: true, returnToTarget: false });
+                    return;
+                }
                 if (canvasRuntime.generationPopover) {
                     e.preventDefault();
                     closeGenerationPopover();

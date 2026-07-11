@@ -211,6 +211,15 @@ async function main() {
           },
         },
         {
+          id: 'node-image-last',
+          type: 'image',
+          data: {
+            mode: 'image-to-image',
+            imageSettings: { ratio: '9:16', size: '2K', count: 1 },
+            referenceImageId: 'reference-last',
+          },
+        },
+        {
           id: 'node-video',
           type: 'video',
           data: {
@@ -221,7 +230,10 @@ async function main() {
           },
         },
       ],
-      connections: [{ from: 'node-image', to: 'node-video' }],
+      connections: [
+        { from: 'node-image', to: 'node-video' },
+        { from: 'node-image-last', to: 'node-video' },
+      ],
       viewport: {},
     },
   });
@@ -231,6 +243,11 @@ async function main() {
   });
   const restored = await get(`/api/tools/ultimate-canvas/document?project_id=${projectId}`);
   assert.equal(restored.document.document_json, documentJson);
+  const restoredDocument = JSON.parse(restored.document.document_json);
+  assert.deepEqual(restoredDocument.canvas.connections, [
+    { from: 'node-image', to: 'node-video' },
+    { from: 'node-image-last', to: 'node-video' },
+  ]);
 
     console.log('ultimate-canvas-preview-api-smoke passed');
   } finally {

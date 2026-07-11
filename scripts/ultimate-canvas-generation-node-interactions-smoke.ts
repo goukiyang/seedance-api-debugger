@@ -25,6 +25,14 @@ contains(engineSource, 'data-generation-popover="mode"', 'node exposes one mode 
 contains(engineSource, 'data-generation-popover="spec"', 'node exposes one specification trigger');
 contains(appSource, 'function openGenerationPopover', 'app owns one anchored popover');
 contains(appSource, 'function closeGenerationPopover', 'popover has one cleanup path');
+contains(appSource, 'function startReferenceSelection', 'reference command enters canvas selection mode');
+contains(appSource, 'function finishReferenceSelection', 'reference mode has one cleanup path');
+contains(appSource, 'function selectCanvasReference', 'compatible canvas nodes can be selected');
+contains(appSource, 'function removeGenerationReference', 'individual references can be removed');
+contains(appSource, '从画布选择参考', 'reference mode has visible status text');
+contains(stylesSource, '.is-reference-compatible', 'compatible nodes are highlighted');
+contains(stylesSource, '.is-reference-incompatible', 'incompatible nodes are visibly disabled');
+contains(appSource, 'referenceRole(', 'first and last frames derive from ordered references');
 contains(appSource, "case 'Escape'", 'Escape closes generation popovers');
 contains(stylesSource, '.generation-popover', 'popover has viewport-safe styling');
 assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes are not permanently spread across the node');
