@@ -18,6 +18,9 @@ assert.match(appSource, /data-context-rules-modal/);
 assert.match(appSource, /contextRules,/);
 assert.match(appSource, /context_rules: contextRules/);
 assert.match(appSource, /scheduleCanvasSave\('context_rules_change'\)/);
+assert.match(appSource, /video_branch_id/);
+assert.match(appSource, /data-video-branch-prompt-select/);
+assert.match(appSource, /videoBranchId/);
 
 assert.match(cssSource, /\.context-rules-button\s*\{/);
 assert.match(cssSource, /\.node-context-rules-row\s*\{/);

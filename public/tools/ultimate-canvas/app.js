@@ -324,6 +324,82 @@
         return result;
     }
 
+    async function executeVideoBranchAction(operation, input = {}) {
+        const cardId = input.cardId || canvasRuntime.videoCardView.cardId;
+        const descriptor = window.UltimateCanvasVideoCards.requestFor(operation, {
+            ...input,
+            cardId
+        });
+        let result;
+        try {
+            result = await requestJson(descriptor.url, {
+                method: descriptor.method,
+                payload: descriptor.payload
+            });
+        } catch (error) {
+            const activeCount = window.UltimateCanvasVideoCards.activeBranches(
+                canvasRuntime.videoCardBranches.get(cardId) || []
+            ).length;
+            if (operation === 'branch-create'
+                && !input.confirmOverLimit
+                && error?.status === 400
+                && activeCount >= 5) {
+                const confirmed = await requestCanvasConfirmation({
+                    title: '\u65b9\u5411\u6570\u91cf\u786e\u8ba4',
+                    message: `\u5f53\u524d\u5df2\u6709 ${activeCount} \u4e2a\u6d3b\u8dc3\u65b9\u5411\uff0c\u7ee7\u7eed\u65b0\u5efa\u53ef\u80fd\u589e\u52a0\u6574\u7406\u6210\u672c\u3002`,
+                    detail: input.title || '',
+                    confirmLabel: '\u4ecd\u7136\u65b0\u5efa'
+                });
+                if (confirmed) {
+                    return executeVideoBranchAction(operation, {
+                        ...input,
+                        confirmOverLimit: true
+                    });
+                }
+            }
+            throw error;
+        }
+
+        invalidateVideoCardWorkspace(cardId);
+        if (input.action === 'promote_to_card') await refreshProjectVideoCards();
+        await loadVideoCardWorkspace(cardId, { force: true });
+        renderRuntimeContextControls();
+        scheduleCanvasSave('video_branch_operation');
+        return result;
+    }
+
+    async function handleVideoBranchAction(button) {
+        const action = button.dataset.action;
+        const cardId = button.dataset.cardId;
+        const branchId = button.dataset.branchId;
+        const targetBranchId = button.dataset.targetBranchId || null;
+        const branch = (canvasRuntime.videoCardBranches.get(cardId) || [])
+            .find(item => item.id === branchId);
+        if (!action || !cardId || !branchId) return;
+        if (action !== 'set_primary') {
+            const labels = {
+                close: videoCardUiText.closeBranch,
+                merge: videoCardUiText.mergeBranch,
+                promote_to_card: videoCardUiText.promoteBranch
+            };
+            const confirmed = await requestCanvasConfirmation({
+                title: labels[action] || videoCardUiText.branches,
+                message: `\u786e\u8ba4\u5904\u7406\u65b9\u5411\u300c${branch?.title || branchId}\u300d\uff1f`,
+                detail: branch?.description || branch?.status || '',
+                confirmLabel: labels[action] || videoCardUiText.operations,
+                danger: action === 'close'
+            });
+            if (!confirmed) return;
+        }
+        await executeVideoBranchAction('branch-action', {
+            cardId,
+            branchId,
+            action,
+            targetBranchId
+        });
+        showCanvasNotice('\u65b9\u5411\u72b6\u6001\u5df2\u66f4\u65b0\u3002', 'info');
+    }
+
     function changedVideoCardValues(form) {
         const values = {};
         const nullable = new Set(['objective', 'platform', 'ratio', 'target_resolution']);
@@ -478,7 +554,7 @@
             ...window.UltimateCanvasVideoCards.generationContext({
                 projectId: canvasRuntime.selectedProjectId,
                 cardId: canvasRuntime.selectedVideoCardId,
-                branchId: canvasRuntime.selectedVideoBranchId,
+                branchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
                 documentId: canvasRuntime.documentId,
                 nodeId: payload.nodeId,
                 tabId: canvasWorkspaceKey()
@@ -547,6 +623,7 @@
                             source: 'ultimate_canvas',
                             canvas_document_id: canvasRuntime.documentId,
                             canvas_node_id: payload.nodeId,
+                            video_branch_id: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
                             mode: payload.mode,
                             workspace_key: canvasWorkspaceKey()
                         }
@@ -756,6 +833,16 @@
         targetRatio: '\u76ee\u6807\u6bd4\u4f8b',
         reason: '\u539f\u56e0',
         submitApproval: '\u63d0\u4ea4\u7533\u8bf7',
+        createBranch: '\u65b0\u5efa\u65b9\u5411',
+        branchTitle: '\u65b9\u5411\u540d\u79f0',
+        branchDescription: '\u65b9\u5411\u8bf4\u660e',
+        selectBranch: '\u9009\u62e9',
+        selectedBranch: '\u5df2\u9009',
+        setPrimary: '\u8bbe\u4e3a\u4e3b\u65b9\u5411',
+        closeBranch: '\u5173\u95ed',
+        mergeBranch: '\u5408\u5e76\u5230\u4e3b\u65b9\u5411',
+        promoteBranch: '\u5347\u683c\u4e3a\u89c6\u9891\u5361',
+        branchCount: '\u65b9\u5411\u6570',
         operationHint: '\u5361\u7247\u7ba1\u7406\u64cd\u4f5c\u4f1a\u6839\u636e\u5f53\u524d\u6743\u9650\u548c\u72b6\u6001\u663e\u793a\u3002'
     };
 
@@ -794,6 +881,40 @@
                     <label class="is-wide"><span>${escapeHtml(videoCardUiText.reason)}</span><input name="reason" minlength="2" maxlength="300" required></label>
                     <button type="submit" class="context-command">${escapeHtml(videoCardUiText.submitApproval)}</button>
                 </form>` : ''}`;
+    }
+
+    function videoCardBranchesHtml(detail, branches) {
+        const card = detail?.video_card;
+        if (!card) return '';
+        const canManage = Boolean(detail?.permissions?.can_manage);
+        const activeBranches = window.UltimateCanvasVideoCards.activeBranches(branches);
+        const primary = activeBranches.find(branch => branch.is_primary || branch.status === 'primary');
+        const rows = branches.map(branch => {
+            const isActive = activeBranches.some(item => item.id === branch.id);
+            const isSelected = branch.id === canvasRuntime.selectedVideoBranchId;
+            const actionButtons = canManage && isActive ? `
+                ${!branch.is_primary ? `<button type="button" data-video-branch-action data-action="set_primary" data-card-id="${escapeHtml(card.id)}" data-branch-id="${escapeHtml(branch.id)}">${escapeHtml(videoCardUiText.setPrimary)}</button>` : ''}
+                ${!branch.is_primary ? `<button type="button" data-video-branch-action data-action="close" data-card-id="${escapeHtml(card.id)}" data-branch-id="${escapeHtml(branch.id)}">${escapeHtml(videoCardUiText.closeBranch)}</button>` : ''}
+                ${primary && primary.id !== branch.id ? `<button type="button" data-video-branch-action data-action="merge" data-card-id="${escapeHtml(card.id)}" data-branch-id="${escapeHtml(branch.id)}" data-target-branch-id="${escapeHtml(primary.id)}">${escapeHtml(videoCardUiText.mergeBranch)}</button>` : ''}
+                <button type="button" data-video-branch-action data-action="promote_to_card" data-card-id="${escapeHtml(card.id)}" data-branch-id="${escapeHtml(branch.id)}">${escapeHtml(videoCardUiText.promoteBranch)}</button>
+            ` : '';
+            return `
+                <div class="video-card-branch-row ${isSelected ? 'is-selected' : ''}">
+                    <button type="button" class="video-card-branch-main" data-video-branch-select="${escapeHtml(branch.id)}" ${isActive ? '' : 'disabled'}>
+                        <span><strong>${escapeHtml(branch.title || branch.id)}</strong><small>${escapeHtml(branch.description || branch.status || '')}</small></span>
+                        <small>${escapeHtml(branch.summary?.task_count || 0)} · ${escapeHtml(isSelected ? videoCardUiText.selectedBranch : branch.status || '')}</small>
+                    </button>
+                    ${actionButtons ? `<div class="video-card-branch-actions">${actionButtons}</div>` : ''}
+                </div>`;
+        }).join('');
+        return `
+            ${canManage ? `
+                <form class="video-card-branch-create-form" data-video-branch-create-form data-card-id="${escapeHtml(card.id)}">
+                    <label><span>${escapeHtml(videoCardUiText.branchTitle)}</span><input name="title" maxlength="80" required></label>
+                    <label><span>${escapeHtml(videoCardUiText.branchDescription)}</span><input name="description" maxlength="300"></label>
+                    <button type="submit" class="context-primary-command">${escapeHtml(videoCardUiText.createBranch)}</button>
+                </form>` : ''}
+            ${rows ? `<div class="video-card-branch-list">${rows}</div>` : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyBranches)}</div>`}`;
     }
 
     function videoCardOperationsHtml(detail, branches, tasks) {
@@ -861,13 +982,7 @@
                     </div>
                     ${videoCardInfoFormHtml(cachedDetail)}`;
             } else if (section === 'branches') {
-                body = branches.length
-                    ? `<div class="video-card-branch-list">${branches.map(branch => `
-                        <div class="video-card-branch-row ${branch.id === canvasRuntime.selectedVideoBranchId ? 'is-selected' : ''}">
-                            <span><strong>${escapeHtml(branch.title || branch.id)}</strong><small>${escapeHtml(branch.status || '')}</small></span>
-                            <small>${escapeHtml(branch.summary?.task_count || 0)}</small>
-                        </div>`).join('')}</div>`
-                    : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyBranches)}</div>`;
+                body = videoCardBranchesHtml(cachedDetail, branches);
             } else if (section === 'tasks') {
                 body = tasks.length
                     ? `<div class="video-card-task-list">${tasks.map(task => `
@@ -1478,6 +1593,21 @@
             return;
         }
 
+        const videoBranchSelect = event.target.closest('[data-video-branch-select]');
+        if (videoBranchSelect) {
+            selectVideoBranch(videoBranchSelect.dataset.videoBranchSelect);
+            renderRuntimeContextControls();
+            return;
+        }
+
+        const videoBranchAction = event.target.closest('[data-video-branch-action]');
+        if (videoBranchAction) {
+            handleVideoBranchAction(videoBranchAction).catch(error => {
+                showCanvasNotice(error?.message || '\u65b9\u5411\u64cd\u4f5c\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
         const videoCardSeal = event.target.closest('[data-video-card-seal]');
         if (videoCardSeal) {
             confirmVideoCardLifecycle('card-seal', videoCardSeal.dataset.videoCardSeal).catch(error => {
@@ -1552,6 +1682,24 @@
     });
 
     document.addEventListener('submit', event => {
+        const videoBranchCreateForm = event.target.closest('[data-video-branch-create-form]');
+        if (videoBranchCreateForm) {
+            event.preventDefault();
+            const submit = videoBranchCreateForm.querySelector('[type="submit"]');
+            if (submit) submit.disabled = true;
+            executeVideoBranchAction('branch-create', {
+                cardId: videoBranchCreateForm.dataset.cardId,
+                title: videoBranchCreateForm.elements.title?.value?.trim(),
+                description: videoBranchCreateForm.elements.description?.value?.trim()
+            }).then(() => {
+                showCanvasNotice('\u65b9\u5411\u5df2\u521b\u5efa\u3002', 'info');
+            }).catch(error => {
+                if (submit) submit.disabled = false;
+                showCanvasNotice(error?.message || '\u65b9\u5411\u521b\u5efa\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
         const videoCardInfoForm = event.target.closest('[data-video-card-info-form]');
         if (videoCardInfoForm) {
             event.preventDefault();
@@ -2135,6 +2283,7 @@
             nodeId,
             kind,
             mode,
+            videoBranchId: node.data?.videoBranchId || canvasRuntime.selectedVideoBranchId,
             modeLabel: tabText || mode,
             prompt: prompt || node.data?.prompt || node.data?.description || '',
             contextRules,
@@ -2389,6 +2538,8 @@
             node.data = {
                 ...node.data,
                 prompt: payload.prompt,
+                videoCardId: canvasRuntime.selectedVideoCardId,
+                videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
                 taskId: result?.task_id || result?.id || null,
                 providerTaskId: result?.provider_task_id || null,
                 frozenCost: result?.frozen_cost || null,
@@ -2522,6 +2673,15 @@
             return;
         }
 
+        const submittingNode = engine.nodes.get(payload.nodeId);
+        if (submittingNode && payload.kind === 'video') {
+            submittingNode.data = {
+                ...submittingNode.data,
+                videoCardId: canvasRuntime.selectedVideoCardId,
+                videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId
+            };
+        }
+
         setSubmitLoading(button, true);
         setNodeGenerationStatus(nodeEl, 'loading', '正在提交生成请求');
         try {
@@ -2630,6 +2790,13 @@
         const sourceNodes = nodeSourcePayloads(nodeId);
         const prompt = promptValueFor(nodeEl, node);
         const tabs = promptTabsFor(nodeEl, node);
+        const branches = node.type === 'video' ? selectedVideoBranches() : [];
+        const videoBranchId = node.type === 'video'
+            ? window.UltimateCanvasVideoCards.chooseBranch(
+                branches,
+                node.data?.videoBranchId || canvasRuntime.selectedVideoBranchId
+            )
+            : '';
         const kindLabel = node.type === 'video' ? 'VIDEO PROMPT'
             : node.type === 'image' ? 'IMAGE PROMPT'
                 : 'TEXT PROMPT';
@@ -2642,6 +2809,8 @@
             kindLabel,
             prompt,
             tabs,
+            branches,
+            videoBranchId,
             model,
             spec,
             sourceNodes,
@@ -2667,6 +2836,22 @@
         return presets.map((preset, index) => `
             <span class="prompt-token">{{CameraPreset ${index + 1}} ${escapeHtml(preset.tagLabel || preset.name || '')}</span>
         `).join('');
+    }
+
+    function buildPromptBranchSelector(ctx) {
+        if (ctx.node.type !== 'video') return '';
+        const branches = window.UltimateCanvasVideoCards.activeBranches(ctx.branches || []);
+        const options = branches.map(branch => `
+            <option value="${escapeHtml(branch.id)}" ${branch.id === ctx.videoBranchId ? 'selected' : ''}>
+                ${escapeHtml(branch.is_primary ? `\u4e3b\u65b9\u5411 \u00b7 ${branch.title}` : branch.title)}
+            </option>`).join('');
+        return `
+            <div class="prompt-side-card prompt-branch-card">
+                <span>${escapeHtml(videoCardUiText.branches)}</span>
+                <select data-video-branch-prompt-select ${branches.length ? '' : 'disabled'}>
+                    ${options || `<option value="">${escapeHtml(videoCardUiText.emptyBranches)}</option>`}
+                </select>
+            </div>`;
     }
 
     function buildPromptModal(ctx) {
@@ -2702,6 +2887,7 @@
                                 <span>引用</span>
                                 <strong>${escapeHtml(sourceLabel)}</strong>
                             </div>
+                            ${buildPromptBranchSelector(ctx)}
                             ${ctx.referenceImage ? `
                                 <div class="prompt-side-card prompt-reference-preview">
                                     <span>参考图</span>
@@ -2825,7 +3011,17 @@
         document.body.classList.remove('prompt-modal-open');
     }
 
-    function openPromptModal(nodeEl) {
+    async function openPromptModal(nodeEl) {
+        const node = engine.nodes.get(nodeEl?.dataset.nodeId);
+        if (node?.type === 'video'
+            && canvasRuntime.selectedVideoCardId
+            && !canvasRuntime.videoCardBranches.has(canvasRuntime.selectedVideoCardId)) {
+            try {
+                await loadVideoCardWorkspace(canvasRuntime.selectedVideoCardId);
+            } catch (error) {
+                showCanvasNotice(error?.message || '\u65b9\u5411\u5217\u8868\u8bfb\u53d6\u5931\u8d25\uff0c\u4ecd\u53ef\u7f16\u8f91\u63d0\u793a\u8bcd\u3002', 'warn');
+            }
+        }
         const ctx = promptContextFor(nodeEl);
         if (!ctx) return;
         closePromptModal();
@@ -2868,10 +3064,20 @@
             prompt,
             description: node.data?.source === 'director' ? prompt : node.data?.description
         };
+        if (node.type === 'video') {
+            const branchSelect = modal.querySelector('[data-video-branch-prompt-select]');
+            if (branchSelect && !branchSelect.disabled) selectVideoBranch(branchSelect.value);
+            node.data = {
+                ...node.data,
+                videoCardId: canvasRuntime.selectedVideoCardId,
+                videoBranchId: canvasRuntime.selectedVideoBranchId
+            };
+        }
         syncPromptTabToNode(modal, nodeEl, node);
 
         const generatedText = nodeEl.querySelector('.generated-reference-card p');
         if (generatedText && prompt) generatedText.textContent = prompt;
+        scheduleCanvasSave('prompt_modal_save');
         return nodeEl;
     }
 
@@ -2911,7 +3117,7 @@
             if (nodeEl && promptContextFor(nodeEl)) {
                 e.preventDefault();
                 e.stopPropagation();
-                openPromptModal(nodeEl);
+                await openPromptModal(nodeEl);
                 return;
             }
         }

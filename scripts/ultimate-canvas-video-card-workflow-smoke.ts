@@ -73,6 +73,15 @@ assert.deepEqual(request('branch-create', {
   method: 'POST',
   payload: { title: '动作方向', description: '快速移动' },
 });
+assert.deepEqual(request('branch-create', {
+  cardId: 'card-1',
+  title: '第六方向',
+  confirmOverLimit: true,
+}), {
+  url: '/api/video-cards/card-1/branches',
+  method: 'POST',
+  payload: { title: '第六方向', description: null, confirm_over_limit: true },
+});
 assert.deepEqual(request('branch-action', {
   cardId: 'card-1',
   branchId: 'branch-1',
@@ -82,6 +91,17 @@ assert.deepEqual(request('branch-action', {
   url: '/api/video-cards/card-1/branches/branch-1',
   method: 'PATCH',
   payload: { action: 'merge', target_branch_id: 'branch-main' },
+});
+assert.deepEqual(request('branch-action', {
+  cardId: 'card-1',
+  branchId: 'branch-1',
+  action: 'promote_to_card',
+  title: '动作独立卡',
+  reason: '方向成熟',
+}), {
+  url: '/api/video-cards/card-1/branches/branch-1',
+  method: 'PATCH',
+  payload: { action: 'promote_to_card', title: '动作独立卡', reason: '方向成熟' },
 });
 assert.deepEqual(request('version-candidate', { cardId: 'card-1', taskId: 'task-1' }), {
   url: '/api/video-cards/card-1',
@@ -233,6 +253,22 @@ contains(
   'const canRequestApproval = Boolean(detail?.video_card)',
   'viewable cards can request approval without admin or generate permission',
 );
+contains(app, 'data-video-branch-create-form', 'branches can be created in place');
+contains(app, 'data-video-branch-select', 'active branch can be selected');
+contains(app, 'data-video-branch-action', 'branch lifecycle actions are available');
+contains(app, 'async function executeVideoBranchAction', 'branch actions use one executor');
+contains(app, 'data-video-branch-prompt-select', 'video prompt contains branch selector');
+contains(
+  app,
+  'videoBranchId: canvasRuntime.selectedVideoBranchId',
+  'video node persists selected branch',
+);
+contains(
+  app,
+  'branchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId',
+  'real generation uses node or canvas branch',
+);
+contains(app, "scheduleCanvasSave('prompt_modal_save')", 'prompt modal saves branch and prompt');
 
 const styles = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
 contains(styles, '.video-card-context-detail', 'video card detail styles exist');

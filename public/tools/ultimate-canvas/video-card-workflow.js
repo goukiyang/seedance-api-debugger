@@ -87,17 +87,23 @@
             method: 'PATCH',
             payload: { action: 'discard' }
         }),
-        'branch-create': ({ cardId, title, description }) => ({
+        'branch-create': ({ cardId, title, description, confirmOverLimit }) => ({
             url: `/api/video-cards/${encoded(cardId)}/branches`,
             method: 'POST',
-            payload: { title, description: description || null }
+            payload: {
+                title,
+                description: description || null,
+                ...(confirmOverLimit ? { confirm_over_limit: true } : {})
+            }
         }),
-        'branch-action': ({ cardId, branchId, action, targetBranchId }) => ({
+        'branch-action': ({ cardId, branchId, action, targetBranchId, title, reason }) => ({
             url: `/api/video-cards/${encoded(cardId)}/branches/${encoded(branchId)}`,
             method: 'PATCH',
             payload: {
                 action,
-                ...(targetBranchId ? { target_branch_id: targetBranchId } : {})
+                ...(targetBranchId ? { target_branch_id: targetBranchId } : {}),
+                ...(title ? { title } : {}),
+                ...(reason ? { reason } : {})
             }
         }),
         'version-candidate': ({ cardId, taskId }) => ({

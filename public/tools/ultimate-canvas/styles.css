@@ -495,6 +495,68 @@ html, body {
 .video-card-task-row > span { min-width: 0; display: grid; gap: 2px; }
 .video-card-branch-row.is-selected { border-color: rgba(78,205,196,0.5); background: rgba(78,205,196,0.08); }
 
+.video-card-branch-row { display: block; padding: 0; }
+.video-card-branch-main {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    padding: 8px 10px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.video-card-branch-main:disabled { cursor: not-allowed; opacity: 0.55; }
+.video-card-branch-main > span { min-width: 0; display: grid; gap: 2px; }
+.video-card-branch-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 6px 8px 8px;
+    border-top: 1px solid var(--border-default);
+}
+
+.video-card-branch-actions button {
+    min-height: 26px;
+    border: 1px solid var(--border-default);
+    border-radius: 5px;
+    background: #2d2d2d;
+    color: var(--text-secondary);
+    padding: 0 7px;
+    font: inherit;
+    font-size: 9px;
+    cursor: pointer;
+}
+
+.video-card-branch-actions button:hover { color: var(--text-primary); background: var(--bg-hover); }
+.video-card-branch-create-form {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.8fr) minmax(0, 1.2fr) auto;
+    align-items: end;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.video-card-branch-create-form label { min-width: 0; display: grid; gap: 4px; color: var(--text-tertiary); font-size: 10px; }
+.video-card-branch-create-form input {
+    width: 100%;
+    min-height: 32px;
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 0 8px;
+    font: inherit;
+    font-size: 11px;
+    outline: none;
+}
+.video-card-branch-create-form input:focus { border-color: var(--accent-teal); }
+
 .video-card-info-form { display: grid; gap: 10px; }
 .video-card-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .video-card-form-grid label,
@@ -1712,6 +1774,20 @@ body.prompt-modal-open {
     line-height: 1.5;
     word-break: break-word;
 }
+.prompt-branch-card select {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 0 8px;
+    font: inherit;
+    font-size: 11px;
+    outline: none;
+}
+.prompt-branch-card select:focus { border-color: var(--accent-teal); }
+.prompt-branch-card select:disabled { opacity: 0.55; }
 .prompt-reference-preview img {
     width: 100%;
     aspect-ratio: 16 / 9;
@@ -3645,6 +3721,7 @@ body.director-studio-open {
     .video-card-inline-approval { grid-template-columns: 1fr; }
     .video-card-inline-approval label.is-wide,
     .video-card-inline-approval > strong { grid-column: auto; }
+    .video-card-branch-create-form { grid-template-columns: 1fr; }
 }
 
 .hidden { display: none !important; }
