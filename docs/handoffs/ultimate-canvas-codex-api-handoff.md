@@ -11,7 +11,7 @@
 - 当前网站备份分支：`backup/2026-07-10-current-sd2-site`
 - 当前网站备份 tag：`rollback/2026-07-10-current-sd2-site-backup`
 - 交接开发分支：`teammate/ultimate-canvas-complete`
-- 交接开发分支当前提交：`160dc419b48dbbe4a04a0c128ff45b8adbd0cc1b`
+- 交接开发分支最新提交以远端分支为准；同事不要手动固定旧 commit。
 - 本文档路径：`docs/handoffs/ultimate-canvas-codex-api-handoff.md`
 
 给同事的交接包只需要三样：
@@ -27,12 +27,15 @@ git clone https://github.com/goukiyang/seedance-api-debugger.git
 cd seedance-api-debugger
 git fetch origin
 git switch --track origin/teammate/ultimate-canvas-complete
+git pull --ff-only
+git ls-remote --heads origin teammate/ultimate-canvas-complete
 ```
 
 下载权限说明：
 
 - 这个 GitHub 仓库当前可公开读取；只要下载 / clone / fetch / checkout，不需要 GitHub 密码。
 - 已用无登录、无本机凭据的 `git ls-remote` 验证：仓库和 `teammate/ultimate-canvas-complete` 分支都能读取。
+- `git ls-remote --heads origin teammate/ultimate-canvas-complete` 能看到远端分支提交就说明代码能拉；不用把文档里出现过的旧提交号当成固定目标。
 - 如果同事要把代码直接推回这个仓库，才需要 GitHub 写入权限；没有写入权限时，让他把改动推到自己有权限的 fork / 分支，或发 patch / diff 给我们合并。
 - 不要把任何 GitHub token、密码、cookie 写进文档、代码、commit message 或聊天记录。
 
@@ -198,12 +201,18 @@ POST 必带：
 ```json
 {
   "project_id": "project_xxx",
-  "video_card_id": "card_xxx",
-  "nodes": [],
-  "connections": [],
-  "viewport": {}
+  "title": "无线画布 / 测试视频卡",
+  "active_generation_node_id": "node_xxx",
+  "document_json": "{\"schema\":\"ultimate_canvas.v1\",\"context\":{\"project_id\":\"project_xxx\",\"video_card_id\":\"card_xxx\"},\"canvas\":{\"nodes\":[],\"connections\":[],\"viewport\":{}}}"
 }
 ```
+
+说明：
+
+- 后端实际读取的是 `document_json`、`documentJson` 或 `document`。
+- 如果只传顶层 `nodes/connections/viewport`，后端会把内容当成空对象，可能返回“画布内容不能为空”。
+- `video_card_id` 放在 `document_json.context.video_card_id` 里；当前画布保存接口本身不读取顶层 `video_card_id`。
+- 静态页面现有实现参考 `public/tools/ultimate-canvas/app.js` 的 `canvasDocumentPayload()` 和 `saveCanvasDocument()`。
 
 ### 3. GPT 文本 / 脚本生成
 
@@ -290,6 +299,19 @@ POST /api/tasks/create
 ```
 
 首尾帧视频必须使用 provider 可访问的 URL 或已经入库的公开资产，不能传本地文件路径或 blob URL。
+
+如果用 Codex / 脚本 / curl 直接调真实视频生成接口：
+
+- 后端有付费生成保护，脚本、Codex、自测来源创建真实视频任务前可能返回 `PAID_GENERATION_AUTH_REQUIRED`。
+- 页面里由用户手动点击生成，通常不需要额外 header。
+- 如果确实是用户明确授权的真实扣费生成，脚本请求需要带：
+
+```http
+x-paid-generation-intent: user_authorized_real_provider
+x-paid-generation-reason: 用户明确要求本次真实生成用于无线画布调试
+```
+
+- 没有明确授权时，不要让 Codex 或脚本批量创建真实视频任务；先用文字、图片、保存、轮询非扣费部分完成调试。
 
 ### 7. 视频状态轮询
 
@@ -386,6 +408,29 @@ src/lib/provider/*
 ## 本地开发注意点
 
 无线画布当前使用相对路径调用 `/api/...`。如果同事在本地跑页面，本地页面会默认调用本地后端；本地没有生产 `.env` 时，不要尝试索要第三方密钥，也不要让他本地重建完整后端。
+
+本地最小准备：
+
+```bash
+npm install
+```
+
+优先做这些不需要生产 `.env` 的检查：
+
+```bash
+git diff --check
+node --check public/tools/ultimate-canvas/app.js
+node --check public/tools/ultimate-canvas/canvas-engine.js
+npx tsc --noEmit --pretty false
+npm run lint
+```
+
+注意：
+
+- `npm run dev` 会启动本地 Next.js 服务，但本地没有线上数据库、登录态和 provider 配置时，很多接口不能完整工作。
+- 不要因为本地接口缺 `.env` 就索要生产 `.env`、数据库原件或第三方 API Key。
+- 真实 API 行为优先用普通账号登录线上 `https://sd2.youdoodesign.com` 验证，或把分支交给我们部署预览后验收。
+- 如果必须让本地页面直连线上后端，需要先做受限 debug proxy；不要打开完整后台 CORS，不要把 cookie/token 写进代码。
 
 推荐调试方式：
 
