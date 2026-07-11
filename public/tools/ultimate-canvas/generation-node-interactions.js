@@ -129,6 +129,7 @@
     function nodeHasNonterminalVideoTask(node) {
         if (!node || (node.type && node.type !== 'video')) return false;
         const data = node.data || node;
+        if (!data.taskId) return false;
         return [
             data.generationStatus,
             data.local_status,
@@ -138,11 +139,11 @@
         ].some(isNonterminalGenerationStatus);
     }
 
-    function generationInteractionReadiness(kind, capability, nodeData, referenceCount, selectedMode) {
+    function generationInteractionReadiness(kind, capability, nodeData, referenceCount, selectedMode, options = {}) {
         if (!capability?.enabled) {
             return { ready: false, message: capability?.message || capability?.reason || '当前生成能力不可用。' };
         }
-        if (kind === 'video' && nodeHasNonterminalVideoTask(nodeData)) {
+        if (kind === 'video' && (options.transientPending || nodeHasNonterminalVideoTask(nodeData))) {
             return { ready: false, message: '当前视频任务仍在处理中，请等待完成后再生成。' };
         }
         const selected = modeOptions(kind, capability, referenceCount)
@@ -154,6 +155,50 @@
             : capability.ratios?.length > 0 && capability.durations?.length > 0 && capability.resolutions?.length > 0;
         if (!hasSpec) return { ready: false, message: capability.reason || '当前没有可用的生成规格。' };
         return { ready: true };
+    }
+
+    function createGenerationSubmissionTracker() {
+        const pending = new Map();
+        return {
+            start(nodeId, entry) {
+                if (!nodeId || !entry || pending.has(nodeId)) return false;
+                pending.set(nodeId, entry);
+                return true;
+            },
+            finish(nodeId, entry) {
+                if (pending.get(nodeId) !== entry) return false;
+                return pending.delete(nodeId);
+            },
+            get: nodeId => pending.get(nodeId),
+            has: nodeId => pending.has(nodeId),
+            clear: () => pending.clear(),
+            size: () => pending.size
+        };
+    }
+
+    function recoverTasklessNonterminalVideoNode(node) {
+        if (!node || node.type !== 'video') return false;
+        const data = node.data || {};
+        if (data.taskId || ![
+            data.generationStatus,
+            data.local_status,
+            data.status,
+            data.generationResult?.local_status,
+            data.generationResult?.status
+        ].some(isNonterminalGenerationStatus)) return false;
+        const recovered = { ...data, generationStatus: 'idle' };
+        delete recovered.generationError;
+        delete recovered.providerTaskId;
+        if (isNonterminalGenerationStatus(recovered.local_status)) delete recovered.local_status;
+        if (isNonterminalGenerationStatus(recovered.status)) delete recovered.status;
+        if (recovered.generationResult && [
+            recovered.generationResult.local_status,
+            recovered.generationResult.status
+        ].some(isNonterminalGenerationStatus)) {
+            delete recovered.generationResult;
+        }
+        node.data = recovered;
+        return true;
     }
 
     function referenceIdsFromNodeData(data = {}) {
@@ -358,6 +403,8 @@
         isNonterminalGenerationStatus,
         nodeHasNonterminalVideoTask,
         generationInteractionReadiness,
+        createGenerationSubmissionTracker,
+        recoverTasklessNonterminalVideoNode,
         referenceIdsFromNodeData,
         availableReferenceCount,
         captureGenerationContext,

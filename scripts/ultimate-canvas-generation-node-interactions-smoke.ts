@@ -476,6 +476,10 @@ assert.equal(interactions.nodeHasNonterminalVideoTask({
   type: 'video',
   data: { taskId: 'task-1', generationStatus: 'processing' },
 }), true);
+assert.equal(interactions.nodeHasNonterminalVideoTask({
+  type: 'video',
+  data: { generationStatus: 'submitted' },
+}), false, 'taskless legacy submitted state cannot own or lock a video task');
 assert.deepEqual(
   interactions.generationInteractionReadiness(
     'video',

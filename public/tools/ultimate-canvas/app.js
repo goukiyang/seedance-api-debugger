@@ -76,7 +76,8 @@
         pollingCoordinator: null,
         generationPopover: null,
         referenceSelection: null,
-        videoEstimates: new Map()
+        videoEstimates: new Map(),
+        pendingGenerationSubmissions: window.UltimateCanvasGenerationInteractions.createGenerationSubmissionTracker()
     };
 
     function configureGenerationEndpoints() {
@@ -2371,9 +2372,17 @@
     }
 
     function hydrateNodeViews() {
+        let recoveredTasklessVideoStatus = false;
         engine.nodes.forEach((node) => {
+            const recoveredNode = window.UltimateCanvasGenerationInteractions
+                .recoverTasklessNonterminalVideoNode(node);
+            if (recoveredNode) recoveredTasklessVideoStatus = true;
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
             if (!nodeEl) return;
+            if (recoveredNode) {
+                nodeEl.querySelector('.node-generation-status')?.remove();
+                nodeEl.querySelector('[data-generation-submit]')?.classList.remove('is-loading');
+            }
             renderGenerationNodeControls(node.id);
             if (node.data?.generationStatus === 'failed') {
                 setNodeGenerationStatus(nodeEl, 'error', node.data.generationError || '上次生成失败，输入和素材已保留');
@@ -2428,12 +2437,14 @@
                 }
             }
         });
+        return recoveredTasklessVideoStatus;
     }
 
     async function loadCanvasDocument(options = {}) {
         if (!canvasRuntime.selectedProjectId || canvasRuntime.documentLoaded) return;
         const projectId = canvasRuntime.selectedProjectId;
         const requestId = ++canvasRuntime.documentRequestId;
+        let recoveredTasklessVideoStatus = false;
         try {
             const url = new URL('/api/tools/ultimate-canvas/document', window.location.origin);
             url.searchParams.set('project_id', projectId);
@@ -2481,7 +2492,7 @@
             stopAllVideoPolling();
             clearAllVideoEstimates();
             engine.restore(parsed.canvas || parsed);
-            hydrateNodeViews();
+            recoveredTasklessVideoStatus = hydrateNodeViews();
             refreshContextRulesButtons();
             canvasRuntime.saveState = 'saved';
             canvasRuntime.saveError = null;
@@ -2494,6 +2505,9 @@
             if (requestId === canvasRuntime.documentRequestId) {
                 canvasRuntime.documentRestoring = false;
                 updateSaveIndicator();
+                if (recoveredTasklessVideoStatus && projectId === canvasRuntime.selectedProjectId) {
+                    scheduleCanvasSave('recover_taskless_video_status');
+                }
             }
         }
     }
@@ -3055,7 +3069,8 @@
             modeState.capability,
             node.data || {},
             availableGenerationReferenceItems(nodeId).length,
-            nodeMode
+            nodeMode,
+            { transientPending: hasCurrentGenerationSubmission(nodeId) }
         );
         updateGenerationNodeModelLabel(nodeEl, node);
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
@@ -3543,40 +3558,39 @@
     function applyVideoGenerationResult(nodeEl, payload, result) {
         const node = engine.nodes.get(payload.nodeId);
         const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoCreate(result);
-        if (node) {
-            node.data = {
-                ...node.data,
-                prompt: payload.prompt,
-                videoCardId: canvasRuntime.selectedVideoCardId,
-                videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
-                videoSettings: payload.settings || generationSettingsForNode(node),
-                taskId: normalized.taskId || null,
-                providerTaskId: normalized.providerTaskId || null,
-                frozenCost: normalized.frozenCost || null,
-                generationPayload: payload,
-                generationResult: result,
-                generationStatus: normalized.status
-            };
-        }
+        if (!node || !normalized.taskId) throw new Error('视频任务创建响应缺少任务 ID。');
+        node.data = {
+            ...node.data,
+            prompt: payload.prompt,
+            videoCardId: canvasRuntime.selectedVideoCardId,
+            videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
+            videoSettings: payload.settings || generationSettingsForNode(node),
+            taskId: normalized.taskId,
+            providerTaskId: normalized.providerTaskId || null,
+            frozenCost: normalized.frozenCost || null,
+            generationPayload: payload,
+            generationResult: result,
+            generationStatus: normalized.status || 'submitted'
+        };
         decorateGeneratedNode(
             payload.nodeId,
             '视频生成任务',
             result?.message || `任务已提交：${normalized.taskId || '等待返回任务 ID'}`,
             '',
             {
-                taskId: normalized.taskId || null
+                taskId: normalized.taskId
             }
         );
         renderGenerationNodeControls(payload.nodeId);
         setNodeGenerationStatus(nodeEl, 'loading', '视频任务已提交，正在查询状态');
         showCanvasNotice(result?.message || '视频任务已提交。', 'info');
+        pollVideoTask(normalized.taskId, payload.nodeId);
         scheduleCanvasSave('video_generation');
-        if (normalized.taskId) pollVideoTask(normalized.taskId, payload.nodeId);
     }
 
     function applyGenerationResult(nodeEl, payload, result) {
         const node = engine.nodes.get(payload.nodeId);
-        if (node) {
+        if (node && payload.kind !== 'video') {
             node.data = {
                 ...node.data,
                 generationPayload: payload,
@@ -3619,7 +3633,8 @@
                 capability,
                 generationNode.data || {},
                 (payload.referenceImageIds || []).length,
-                payload.mode
+                payload.mode,
+                { transientPending: hasCurrentGenerationSubmission(payload.nodeId) }
             );
             if (!interactionReadiness.ready) return interactionReadiness;
         }
@@ -3705,6 +3720,14 @@
         };
     }
 
+    function hasCurrentGenerationSubmission(nodeId) {
+        const entry = canvasRuntime.pendingGenerationSubmissions.get(nodeId);
+        return Boolean(entry && window.UltimateCanvasGenerationInteractions.generationContextMatches(
+            entry.captured,
+            currentGenerationContext(nodeId)
+        ));
+    }
+
     async function submitNodeGeneration(nodeEl, button) {
         const api = window.CanvasGenerationAPI;
         const payload = collectGenerationPayload(nodeEl);
@@ -3717,18 +3740,13 @@
         }
 
         const submittingNode = engine.nodes.get(payload.nodeId);
-        const previousGenerationStatus = submittingNode?.data?.generationStatus;
-        const previousTaskId = submittingNode?.data?.taskId || null;
         const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(
             currentGenerationContext(payload.nodeId)
         );
-        if (submittingNode && payload.kind === 'video') {
-            submittingNode.data = {
-                ...submittingNode.data,
-                videoCardId: canvasRuntime.selectedVideoCardId,
-                videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
-                generationStatus: 'submitted'
-            };
+        const transientEntry = payload.kind === 'video' ? { captured: capturedContext } : null;
+        if (transientEntry && !canvasRuntime.pendingGenerationSubmissions.start(payload.nodeId, transientEntry)) {
+            showCanvasNotice('当前视频请求正在提交，请等待返回后再试。', 'warn');
+            return;
         }
 
         setSubmitLoading(button, true);
@@ -3754,12 +3772,13 @@
                 showCanvasNotice(error?.message || '生成请求失败，输入和已选素材已保留，可稍后重试。', 'error');
             },
             onFinally: ({ stale }) => {
+                if (transientEntry) {
+                    canvasRuntime.pendingGenerationSubmissions.finish(payload.nodeId, transientEntry);
+                }
                 window.UltimateCanvasGenerationInteractions.cleanupGenerationSubmission({
                     stale,
                     node: submittingNode,
                     nodeElement: nodeEl,
-                    previousStatus: previousGenerationStatus,
-                    previousTaskId,
                     clearLoading: () => setSubmitLoading(button, false)
                 });
                 if (!stale || engine.nodes.get(payload.nodeId) === submittingNode) {

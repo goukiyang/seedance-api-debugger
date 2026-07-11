@@ -20,18 +20,96 @@ function context(runtime: any) {
   };
 }
 
-async function documentMetadataChangeSmoke() {
-  const node: any = { id: 'video-node', type: 'video', data: { generationStatus: 'submitted' } };
+function videoCapability() {
+  return interactions.normalizeCapabilities('video', {
+    enabled: true,
+    interaction: {
+      modes: ['text-to-video'],
+      ratios: ['16:9'],
+      durations: [5],
+      resolutions: ['720p'],
+      max_reference_images: 9,
+    },
+  });
+}
+
+function readiness(node: any, transientPending = false) {
+  return interactions.generationInteractionReadiness(
+    'video', videoCapability(), node.data, 0, 'text-to-video', { transientPending },
+  );
+}
+
+async function staleFlushRestoreSmoke() {
+  const node: any = { id: 'video-node', type: 'video', data: { prompt: 'shot', generationStatus: 'idle' } };
   const runtime: any = {
-    contextEpoch: 3,
+    contextEpoch: 4,
+    selectedProjectId: 'project-a',
+    selectedVideoCardId: 'card-a',
+    documentId: 'document-a',
+    node,
+  };
+  const tracker = interactions.createGenerationSubmissionTracker();
+  const captured = interactions.captureGenerationContext(context(runtime));
+  const entry = { captured };
+  assert.equal(tracker.start(node.id, entry), true);
+  assert.equal(readiness(node, tracker.has(node.id)).ready, false, 'transient ownership blocks a duplicate submit');
+
+  let loading = true;
+  const response = deferred<any>();
+  const applied: string[] = [];
+  const submission = interactions.runGuardedGenerationResponse({
+    response: response.promise,
+    captured,
+    current: () => context(runtime),
+    onSuccess: (result: any) => {
+      node.data = { ...node.data, taskId: result.taskId, generationStatus: 'submitted' };
+      applied.push(result.taskId);
+    },
+    onFinally: ({ stale }: any) => {
+      interactions.cleanupGenerationSubmission({
+        stale,
+        node,
+        clearLoading: () => { loading = false; },
+      });
+      tracker.finish(node.id, entry);
+    },
+  });
+
+  const flushedSnapshot = JSON.stringify(node);
+  const flushedData = JSON.parse(flushedSnapshot).data;
+  assert.equal(flushedData.generationStatus, 'idle', 'pre-response snapshot has no durable submitted state');
+  assert.equal(flushedData.taskId, undefined);
+
+  runtime.contextEpoch += 1;
+  runtime.selectedVideoCardId = 'card-b';
+  response.resolve({ taskId: 'stale-task' });
+  const outcome = await submission;
+  assert.equal(outcome.stale, true);
+  assert.deepEqual(applied, [], 'stale response never attaches a task/result');
+  assert.equal(loading, false, 'stale response clears captured transient loading');
+  assert.equal(tracker.has(node.id), false);
+
+  const restoredNode = JSON.parse(flushedSnapshot);
+  const recovered = interactions.recoverTasklessNonterminalVideoNode(restoredNode);
+  assert.equal(recovered, false, 'clean transient snapshot needs no durable recovery');
+  assert.equal(restoredNode.data.generationStatus, 'idle');
+  assert.equal(readiness(restoredNode).ready, true, 'restored flushed snapshot can submit again');
+}
+
+async function currentResponseOwnershipSmoke() {
+  const node: any = { id: 'current-video', type: 'video', data: { generationStatus: 'idle' } };
+  const runtime: any = {
+    contextEpoch: 8,
     selectedProjectId: 'project-a',
     selectedVideoCardId: 'card-a',
     documentId: null,
     node,
   };
+  const tracker = interactions.createGenerationSubmissionTracker();
   const captured = interactions.captureGenerationContext(context(runtime));
+  const entry = { captured };
+  tracker.start(node.id, entry);
   const response = deferred<any>();
-  const applied: string[] = [];
   const polling: string[] = [];
   const saves: string[] = [];
   let finallyCalls = 0;
@@ -41,142 +119,87 @@ async function documentMetadataChangeSmoke() {
     captured,
     current: () => context(runtime),
     onSuccess: (result: any) => {
-      node.data.taskId = result.taskId;
-      node.data.generationStatus = 'running';
-      applied.push(result.taskId);
+      node.data = {
+        ...node.data,
+        taskId: result.taskId,
+        generationStatus: result.status,
+        generationResult: result,
+      };
       polling.push(result.taskId);
       saves.push('video_generation');
     },
-    onFinally: () => { finallyCalls += 1; },
-  });
-
-  runtime.documentId = 'created-document';
-  response.resolve({ taskId: 'valid-task' });
-  const outcome = await submission;
-
-  assert.equal(outcome.stale, false, 'document ID creation is metadata, not a context replacement');
-  assert.deepEqual(applied, ['valid-task'], 'valid response applies exactly once');
-  assert.deepEqual(polling, ['valid-task'], 'valid response registers polling once');
-  assert.deepEqual(saves, ['video_generation'], 'valid response schedules one save');
-  assert.equal(finallyCalls, 1, 'valid response cleanup runs exactly once');
-}
-
-async function cardSwitchCleanupSmoke() {
-  const node: any = { id: 'same-node', type: 'video', data: { generationStatus: 'submitted' } };
-  const runtime: any = {
-    contextEpoch: 9,
-    selectedProjectId: 'project-a',
-    selectedVideoCardId: 'card-a',
-    documentId: 'document-a',
-    node,
-  };
-  const captured = interactions.captureGenerationContext(context(runtime));
-  const response = deferred<any>();
-  const applied: string[] = [];
-  let loading = true;
-  let finallyCalls = 0;
-  const transientStatus = {
-    textContent: '正在提交生成请求',
-    removed: false,
-    remove() { this.removed = true; },
-  };
-  const capturedElement = {
-    isConnected: true,
-    querySelector: () => transientStatus,
-  };
-
-  const submission = interactions.runGuardedGenerationResponse({
-    response: response.promise,
-    captured,
-    current: () => context(runtime),
-    onSuccess: (result: any) => {
-      node.data.taskId = result.taskId;
-      applied.push(result.taskId);
-    },
-    onFinally: ({ stale }: any) => {
+    onFinally: () => {
       finallyCalls += 1;
-      interactions.cleanupGenerationSubmission({
-        stale,
-        node,
-        nodeElement: capturedElement,
-        clearLoading: () => { loading = false; },
-      });
+      tracker.finish(node.id, entry);
     },
   });
 
-  runtime.contextEpoch += 1;
-  runtime.selectedVideoCardId = 'card-b';
-  response.resolve({ taskId: 'stale-task' });
+  assert.equal(JSON.parse(JSON.stringify(node)).data.generationStatus, 'idle');
+  runtime.documentId = 'created-document';
+  response.resolve({ taskId: 'current-task', status: 'submitted' });
   const outcome = await submission;
 
-  assert.equal(outcome.stale, true);
-  assert.deepEqual(applied, [], 'card-switch response cannot attach a stale task/result');
-  assert.equal(finallyCalls, 1, 'stale response cleanup still runs exactly once');
-  assert.equal(loading, false, 'captured loading state is cleared');
-  assert.equal(transientStatus.removed, true, 'captured transient status is cleared while detached');
-  assert.equal(node.data.generationStatus, 'idle', 'pre-response submitting state is cleared');
-  assert.equal(node.data.taskId, undefined, 'cleanup never attaches the stale task');
+  assert.equal(outcome.stale, false);
+  assert.equal(node.data.taskId, 'current-task');
+  assert.equal(node.data.generationStatus, 'submitted');
+  assert.deepEqual(polling, ['current-task']);
+  assert.deepEqual(saves, ['video_generation']);
+  assert.equal(finallyCalls, 1);
+  assert.equal(tracker.has(node.id), false);
+  assert.equal(readiness(node).ready, false, 'task-owned nonterminal response blocks duplicate paid submission');
 }
 
-async function replacementNodeSmoke() {
-  const originalNode: any = { id: 'same-node', type: 'video', data: { generationStatus: 'submitted' } };
-  const replacementNode = { id: 'same-node', type: 'video', data: {} };
-  const runtime: any = {
-    contextEpoch: 12,
-    selectedProjectId: 'project-a',
-    selectedVideoCardId: 'card-a',
-    documentId: 'document-a',
-    node: originalNode,
-  };
-  const captured = interactions.captureGenerationContext(context(runtime));
-  const response = deferred<any>();
-  const mutations: string[] = [];
-  let detachedCleanup = 0;
-  let detachedLoading = true;
-  const detachedStatus = {
-    textContent: '正在提交生成请求',
-    removed: false,
-    remove() { this.removed = true; },
-  };
-  const detachedElement = { isConnected: false, querySelector: () => detachedStatus };
-  const submission = interactions.runGuardedGenerationResponse({
-    response: response.promise,
-    captured,
-    current: () => context(runtime),
-    onSuccess: (result: any) => mutations.push(result.taskId),
-    onFinally: ({ stale }: any) => {
-      detachedCleanup += 1;
-      interactions.cleanupGenerationSubmission({
-        stale,
-        node: originalNode,
-        nodeElement: detachedElement,
-        clearLoading: () => { detachedLoading = false; },
-      });
+function restoreRecoverySmoke() {
+  const legacy: any = {
+    id: 'legacy-video',
+    type: 'video',
+    data: {
+      generationStatus: 'submitted',
+      generationError: 'stale loading marker',
+      generationResult: { status: 'submitted' },
     },
-  });
-  runtime.contextEpoch += 1;
-  runtime.node = replacementNode;
-  response.resolve({ taskId: 'detached-task' });
-  const outcome = await submission;
-  assert.equal(outcome.stale, true);
-  assert.deepEqual(replacementNode.data, {});
-  assert.deepEqual(mutations, []);
-  assert.equal(detachedCleanup, 1, 'cleanup is safe even after the original node is detached');
-  assert.equal(detachedLoading, false);
-  assert.equal(detachedStatus.removed, true);
+  };
+  assert.equal(interactions.nodeHasNonterminalVideoTask(legacy), false, 'taskless legacy status has no ownership');
+  assert.equal(interactions.recoverTasklessNonterminalVideoNode(legacy), true);
+  assert.equal(legacy.data.generationStatus, 'idle');
+  assert.equal(legacy.data.generationError, undefined);
+  assert.equal(legacy.data.generationResult, undefined);
+  assert.equal(readiness(legacy).ready, true);
+  assert.equal(interactions.recoverTasklessNonterminalVideoNode(legacy), false, 'recovery is one-shot and cannot save-loop');
+
+  const legitimate: any = {
+    id: 'running-video',
+    type: 'video',
+    data: { taskId: 'running-task', generationStatus: 'running' },
+  };
+  const polled: string[] = [];
+  assert.equal(interactions.recoverTasklessNonterminalVideoNode(legitimate), false);
+  assert.equal(interactions.nodeHasNonterminalVideoTask(legitimate), true);
+  if (interactions.nodeHasNonterminalVideoTask(legitimate)) polled.push(legitimate.data.taskId);
+  assert.deepEqual(polled, ['running-task'], 'legitimate restored task remains pollable');
+  assert.equal(readiness(legitimate).ready, false, 'legitimate restored running task remains blocked');
 }
 
 async function main() {
-  await documentMetadataChangeSmoke();
-  await cardSwitchCleanupSmoke();
-  await replacementNodeSmoke();
+  await staleFlushRestoreSmoke();
+  await currentResponseOwnershipSmoke();
+  restoreRecoverySmoke();
 
   const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
-  assert.ok(appSource.includes('contextEpoch'), 'runtime owns a generation context epoch');
-  assert.ok(appSource.includes('captureGenerationContext'), 'submission captures generation identity');
-  assert.ok(appSource.includes('runGuardedGenerationResponse'), 'submission consumes the executable guard');
-  assert.ok(appSource.includes('cleanupGenerationSubmission'), 'app consumes the executable cleanup contract');
-  assert.ok(appSource.includes('invalidateGenerationContext'), 'context replacement invalidates in-flight generation');
+  const submitSource = appSource.slice(
+    appSource.indexOf('async function submitNodeGeneration'),
+    appSource.indexOf("document.addEventListener('click', (e) =>", appSource.indexOf('async function submitNodeGeneration')),
+  );
+  const hydrateSource = appSource.slice(
+    appSource.indexOf('function hydrateNodeViews'),
+    appSource.indexOf('async function loadCanvasDocument'),
+  );
+  assert.ok(appSource.includes('createGenerationSubmissionTracker'), 'app uses transient submission ownership');
+  assert.ok(appSource.includes('recoverTasklessNonterminalVideoNode'), 'hydrate uses executable legacy recovery');
+  assert.ok(appSource.includes("scheduleCanvasSave('recover_taskless_video_status')"), 'recovery persists through the save queue');
+  assert.ok(hydrateSource.includes('return recoveredTasklessVideoStatus;'), 'hydrate reports whether durable recovery occurred');
+  assert.ok(!submitSource.includes('return recoveredTasklessVideoStatus;'), 'submission does not leak hydration state');
+  assert.ok(!submitSource.includes("generationStatus: 'submitted'"), 'pre-response submit never writes durable submitted state');
 
   console.log('ultimate canvas generation lifecycle smoke passed');
 }
