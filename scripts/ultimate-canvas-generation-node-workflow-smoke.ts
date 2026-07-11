@@ -94,6 +94,19 @@ assert.deepEqual(workflow.videoMode('first-last-frame-video'), {
   minimumReferences: 1,
   maximumReferences: 2,
 });
+assert.deepEqual(workflow.videoMode('smart-multi-frame-video'), {
+  generationMode: 'smart_multi_frame',
+  minimumReferences: 2,
+  maximumReferences: 9,
+});
+assert.equal(workflow.validateVideo({
+  mode: 'smart-multi-frame-video',
+  prompt: 'camera move',
+  projectId: 'project-1',
+  cardId: 'card-1',
+  referenceImageIds: ['reference-1'],
+  settings: { ratio: '16:9', duration: 5, resolution: '720p' },
+}).valid, false);
 assert.equal(workflow.validateVideo({
   mode: 'first-last-frame-video',
   prompt: 'camera move',
@@ -148,6 +161,14 @@ assert.deepEqual(workflow.videoRequest({
     },
   },
 });
+
+assert.deepEqual(workflow.videoRequest({
+  ...context,
+  mode: 'smart-multi-frame-video',
+  prompt: 'Tell a visual story',
+  referenceImageIds: ['reference-1', 'reference-2', 'reference-1', 'reference-3', 'reference-4', 'reference-5', 'reference-6', 'reference-7', 'reference-8', 'reference-9', 'reference-10'],
+  settings: { ratio: '16:9', duration: 5, resolution: '720p' },
+}).payload.reference_image_ids, ['reference-1', 'reference-2', 'reference-3', 'reference-4', 'reference-5', 'reference-6', 'reference-7', 'reference-8', 'reference-9']);
 
 assert.deepEqual(workflow.normalizeImageResult({
   success: true,

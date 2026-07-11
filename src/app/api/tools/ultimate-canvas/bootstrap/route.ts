@@ -26,6 +26,7 @@ import {
   videoCardSpecLabel,
   videoCardStatusLabel,
 } from '@/lib/video-cards/display';
+import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -358,6 +359,13 @@ export async function GET(request: NextRequest) {
         response_format: imageSettings.response_format,
         watermark: imageSettings.watermark,
         capabilities: imageModelCapabilities(imageSettings.provider),
+        interaction: {
+          modes: ['text-to-image', 'image-to-image', 'upscale-image', 'first-frame-draft', 'last-frame-draft'],
+          ratios: RATIO_OPTIONS,
+          size_options: imageModelCapabilities(imageSettings.provider).size_options,
+          max_outputs_per_request: imageModelCapabilities(imageSettings.provider).max_outputs_per_request,
+          max_reference_images: imageModelCapabilities(imageSettings.provider).reference_image_limit,
+        },
         endpoint: '/api/assets/generate',
         billing: 'site_asset_generation',
         requires: ['project_id', 'video_card_id'],
@@ -367,6 +375,24 @@ export async function GET(request: NextRequest) {
         enabled: videoReady,
         label: '默认视频 API',
         model: videoConfig.model,
+        interaction: {
+          modes: [
+            'text-to-video',
+            'all-reference-video',
+            'image-to-video',
+            'first-frame-video',
+            'first-last-frame-video',
+            'image-reference-video',
+            'smart-multi-frame-video',
+          ],
+          ratios: RATIO_OPTIONS,
+          durations: DURATION_OPTIONS,
+          resolutions: RESOLUTION_OPTIONS,
+          supports_audio: true,
+          supports_last_frame: true,
+          supports_watermark: true,
+          max_reference_images: 9,
+        },
         endpoint: '/api/tasks/create',
         status_endpoint_template: '/api/video/status/:taskId?refresh=true',
         billing: 'credits_and_project_budget',

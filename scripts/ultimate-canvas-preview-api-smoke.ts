@@ -55,6 +55,13 @@ async function main() {
   assert.ok(projectId);
   assert.ok(cardId);
   assert.deepEqual(bootstrap.capabilities.image.capabilities.size_options, ['1K', '2K']);
+  assert.deepEqual(bootstrap.capabilities.video.interaction.ratios, ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
+  assert.deepEqual(bootstrap.capabilities.video.interaction.durations, [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.deepEqual(bootstrap.capabilities.video.interaction.resolutions, ['480p', '720p', '1080p']);
+  assert.equal(bootstrap.capabilities.video.interaction.max_reference_images, 9);
+  assert.equal(bootstrap.capabilities.video.interaction.supports_audio, true);
+  assert.ok(bootstrap.capabilities.video.interaction.modes.includes('first-last-frame-video'));
+  assert.deepEqual(bootstrap.capabilities.image.interaction.size_options, ['1K', '2K']);
 
   const detail = await get(`/api/video-cards/${cardId}`);
   assert.equal(detail.video_card.id, cardId);

@@ -19,7 +19,8 @@
         'image-to-video': { generationMode: 'all_in_one_reference', minimumReferences: 1, maximumReferences: 9 },
         'first-frame-video': { generationMode: 'all_in_one_reference', minimumReferences: 1, maximumReferences: 1 },
         'first-last-frame-video': { generationMode: 'first_last_frame', minimumReferences: 1, maximumReferences: 2 },
-        'image-reference-video': { generationMode: 'all_in_one_reference', minimumReferences: 1, maximumReferences: 9 }
+        'image-reference-video': { generationMode: 'all_in_one_reference', minimumReferences: 1, maximumReferences: 9 },
+        'smart-multi-frame-video': { generationMode: 'smart_multi_frame', minimumReferences: 2, maximumReferences: 9 }
     };
 
     const RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);

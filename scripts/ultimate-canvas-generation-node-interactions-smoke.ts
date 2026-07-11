@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const interactions = require('../public/tools/ultimate-canvas/generation-node-interactions.js');
+
+const bootstrapSource = readFileSync('src/app/api/tools/ultimate-canvas/bootstrap/route.ts', 'utf8');
+assert.ok(bootstrapSource.includes('interaction'));
+assert.ok(bootstrapSource.includes('DURATION_OPTIONS'));
+assert.ok(bootstrapSource.includes('RESOLUTION_OPTIONS'));
+assert.ok(bootstrapSource.includes('RATIO_OPTIONS'));
 
 const videoCapability = interactions.normalizeCapabilities('video', {
   interaction: {
