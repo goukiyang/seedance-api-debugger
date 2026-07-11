@@ -7252,10 +7252,13 @@ HARD-GATE：
 - 项目新增 / 删除 / 归档直接复用现有接口：`POST /api/projects`、`DELETE /api/projects/:id`、`PATCH /api/projects/:id`。
 - 视频卡新增复用 `POST /api/projects/:id/video-cards`；视频卡删减先复用 `PATCH /api/video-cards/:id` 把状态改为 `archived` 或 `discarded`，必要时再补专门的“空视频卡删除”接口。
 
-### Phase 1：补齐 bootstrap 数据口径
+### Phase 1：补齐 bootstrap 数据口径和普通用户开放
 
-- [ ] 交接安全补充：当前 `/tools/ultimate-canvas` 和 `/api/tools/ultimate-canvas/bootstrap|document|generate|upload` 仍硬性要求 `admin` 登录态；给可信同事可先用专属临时 admin 调试账号，但正式长期交接要新增 `canvas_debugger` 或等价专用权限，避免为了无线画布暴露完整后台权限。
-- [ ] 专用权限落地时，统一改页面入口、导航可见性和上述无线画布 API 权限判断；验证普通非授权用户 403、`canvas_debugger` 可用无线画布但不能访问 `/admin/integrations`、`/admin/users`、`/admin/costs`。
+- [ ] 交接目标修正：同事不拿 admin，也不本地重装完整后端；使用普通登录调试账号 + 测试点数，通过 `https://sd2.youdoodesign.com` 现有后端调用文本、图片、视频模型能力。
+- [ ] 移除无线画布硬编码 admin 限制：`/tools/ultimate-canvas` 和 `/api/tools/ultimate-canvas/bootstrap|document|generate|upload` 改成“已登录 + 当前项目 / 视频卡可生成权限”，普通账号不再 403。
+- [ ] 保持后台隔离：普通调试账号不能访问 `/admin/integrations`、`/admin/users`、`/admin/costs`，不能读取 API Key、Provider 配置、成本总账或数据库原件。
+- [ ] 后端模型能力白名单：`bootstrap` 只返回普通用户可调用的 `capabilities.text/image/video` 和允许的模型标识；前端只能传白名单里的 `model_id` 或能力类型，不能传 `api_key`、`base_url` 或自定义 provider。
+- [ ] 调试连接方式：本地页面如需连线上后端，只允许通过受限 debug base URL / proxy 调无线画布、生成、项目和视频卡业务接口；禁止打开完整后台 CORS 或把 cookie/token 写入代码。
 - [ ] 修改 `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`：项目列表 include `owner` 和 `_count.tasks/reference_albums`，返回字段对齐 `GeneratePageClient` 的 `ProjectOption`。
 - [ ] 修改 `bootstrap` 项目权限字段：返回 `can_generate`、`can_manage_project`、`can_manage_assets`，管理员也必须明确 owner，而不是只返回 `my_role=admin`。
 - [ ] 修改 `bootstrap` 项目显示逻辑：个人默认项目前端统一显示为“个人空间”，原始 `project.name` 保留为调试字段，避免一堆“我的默认项目”直接暴露。
