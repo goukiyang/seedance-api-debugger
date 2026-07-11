@@ -1491,6 +1491,17 @@
         renderAllGenerationNodeControls();
     }
 
+    function updateGenerationNodeModelLabel(nodeEl, node) {
+        const label = nodeEl?.querySelector('.video-model-info span:nth-child(2)');
+        if (!label || !node) return;
+        const capabilities = canvasRuntime.bootstrap?.capabilities || {};
+        if (node.type === 'image') {
+            label.textContent = capabilities.image?.model || capabilities.image?.label || '图形生成';
+        } else if (node.type === 'video') {
+            label.textContent = capabilities.video?.model || capabilities.video?.label || '默认视频 API';
+        }
+    }
+
     async function loadCanvasBootstrap(
         projectId = canvasRuntime.selectedProjectId,
         videoCardId = canvasRuntime.selectedVideoCardId,
@@ -2568,7 +2579,10 @@
         const center = canvasCenter();
         const isVideo = item.kind === 'video';
         const referenceTargetId = canvasRuntime.pendingGenerationReferenceTargetId;
-        const nodeId = engine.addNode(isVideo ? 'video' : 'image', center.x, center.y, {
+        const referenceTarget = referenceTargetId ? engine.nodes.get(referenceTargetId) : null;
+        const nodeX = referenceTarget ? referenceTarget.x - 720 : center.x;
+        const nodeY = referenceTarget ? referenceTarget.y : center.y;
+        const nodeId = engine.addNode(isVideo ? 'video' : 'image', nodeX, nodeY, {
             title: item.title,
             prompt: item.prompt || item.title,
             description: item.prompt || item.title,
@@ -2769,6 +2783,7 @@
         const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
+        updateGenerationNodeModelLabel(nodeEl, node);
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
 
         if (node.type === 'image') {

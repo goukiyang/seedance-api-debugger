@@ -217,6 +217,7 @@ function excludes(source: string, needle: string, label: string) {
 const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
 const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
 const stylesSource = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
+const indexSource = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
 
 contains(engineSource, 'data-generation-command="optimize-prompt"', 'video prompt optimizer is actionable');
 contains(engineSource, 'data-generation-command="camera-presets"', 'camera presets are actionable');
@@ -248,7 +249,9 @@ contains(stylesSource, '@media (max-width: 720px)', 'generation controls have a 
 contains(appSource, 'function generationSettingsForNode', 'node settings have one persisted source');
 contains(appSource, 'function generationReferenceItems', 'incoming image references are ordered');
 contains(appSource, 'function renderGenerationNodeControls', 'node controls rehydrate from node data');
+contains(appSource, 'function updateGenerationNodeModelLabel', 'new nodes receive the backend model label');
 contains(appSource, 'pendingGenerationReferenceTargetId', 'asset selection targets a generation node');
+contains(appSource, 'referenceTarget.x - 720', 'selected reference nodes do not cover their target');
 contains(appSource, "imageRequest({", 'image submission uses the contract module');
 contains(appSource, 'normalizeImageResult', 'image response uses contract normalization');
 contains(appSource, "data-generated-image-action=\"open\"", 'image result can open');
@@ -270,5 +273,10 @@ contains(appSource, 'frozenCost', 'frozen point result is displayed from the bac
 contains(appSource, 'data-generated-task-retry', 'terminal video task can retry');
 contains(appSource, "scheduleCanvasSave('video_prompt_optimize')", 'optimized video prompt persists');
 contains(appSource, "scheduleCanvasSave('video_camera_preset')", 'camera preset persists');
+
+assert.match(indexSource, /styles\.css\?v=20260711-generation-nodes/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260711-generation-nodes/);
+assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-generation-nodes/);
+assert.match(indexSource, /app\.js\?v=20260711-generation-nodes/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');
