@@ -25,7 +25,8 @@
     });
 
     const VALID_RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
-    const VALID_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
+    const VALID_VIDEO_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
+    const VALID_IMAGE_RESOLUTIONS = new Set(['1K', '2K']);
     const DEFAULTS = Object.freeze({
         image: Object.freeze({ modes: MODE_DEFINITIONS.image.map(mode => mode.id), ratios: ['1:1', '4:3', '16:9', '9:16'], durations: [], resolutions: ['1K', '2K'], supportsAudio: false, supportsLastFrame: false, supportsWatermark: false, maxReferenceImages: 10 }),
         video: Object.freeze({ modes: MODE_DEFINITIONS.video.map(mode => mode.id), ratios: ['16:9', '9:16'], durations: [5, 10], resolutions: ['720p', '1080p'], supportsAudio: false, supportsLastFrame: false, supportsWatermark: true, maxReferenceImages: 9 })
@@ -54,7 +55,8 @@
         const modes = strings(interaction.modes, value => validModes.has(value));
         const ratios = strings(interaction.ratios, value => VALID_RATIOS.has(value));
         const durations = (Array.isArray(interaction.durations) ? interaction.durations : []).filter(value => Number.isInteger(value) && value > 0);
-        const resolutions = strings(interaction.resolutions, value => VALID_RESOLUTIONS.has(value));
+        const validResolutions = kind === 'image' ? VALID_IMAGE_RESOLUTIONS : VALID_VIDEO_RESOLUTIONS;
+        const resolutions = strings(interaction.resolutions, value => validResolutions.has(value));
         const maxReferenceImages = Number.isInteger(interaction.max_reference_images) && interaction.max_reference_images >= 0
             ? interaction.max_reference_images : defaults.maxReferenceImages;
         return {

@@ -23,6 +23,15 @@ const invalidResolutionCapability = interactions.normalizeCapabilities('video', 
 });
 assert.deepEqual(invalidResolutionCapability.resolutions, ['720p', '1080p']);
 
+const imageResolutionCapability = interactions.normalizeCapabilities('image', {
+  interaction: { resolutions: ['1K', '2K', '2160p'] },
+});
+assert.deepEqual(imageResolutionCapability.resolutions, ['1K', '2K']);
+const imageMixedResolutionCapability = interactions.normalizeCapabilities('image', {
+  interaction: { resolutions: ['1K', '2160p'] },
+});
+assert.deepEqual(imageMixedResolutionCapability.resolutions, ['1K']);
+
 const nullInteractionCapability = interactions.normalizeCapabilities('video', { interaction: null });
 assert.deepEqual(nullInteractionCapability.modes, [
   'text-to-video',
