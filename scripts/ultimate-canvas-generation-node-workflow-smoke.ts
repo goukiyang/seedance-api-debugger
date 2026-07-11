@@ -162,13 +162,15 @@ assert.deepEqual(workflow.videoRequest({
   },
 });
 
-assert.deepEqual(workflow.videoRequest({
+const smartMultiFrameRequest = workflow.videoRequest({
   ...context,
   mode: 'smart-multi-frame-video',
   prompt: 'Tell a visual story',
   referenceImageIds: ['reference-1', 'reference-2', 'reference-1', 'reference-3', 'reference-4', 'reference-5', 'reference-6', 'reference-7', 'reference-8', 'reference-9', 'reference-10'],
   settings: { ratio: '16:9', duration: 5, resolution: '720p' },
-}).payload.reference_image_ids, ['reference-1', 'reference-2', 'reference-3', 'reference-4', 'reference-5', 'reference-6', 'reference-7', 'reference-8', 'reference-9']);
+});
+assert.deepEqual(smartMultiFrameRequest.payload.reference_image_ids, ['reference-1', 'reference-2', 'reference-3', 'reference-4', 'reference-5', 'reference-6', 'reference-7', 'reference-8', 'reference-9']);
+assert.equal(smartMultiFrameRequest.payload.generation_mode, 'smart_multi_frame');
 
 assert.deepEqual(workflow.normalizeImageResult({
   success: true,
@@ -245,17 +247,10 @@ contains(engineSource, 'data-generation-command="camera-presets"', 'camera prese
 contains(engineSource, 'data-generation-command="select-reference"', 'reference picker is actionable');
 contains(engineSource, 'data-generation-command="toggle-settings"', 'settings are actionable');
 contains(engineSource, 'data-generation-reference-list', 'nodes render ordered references');
-contains(engineSource, 'data-generation-settings="image"', 'image settings panel exists');
-contains(engineSource, 'data-generation-settings="video"', 'video settings panel exists');
-contains(engineSource, 'data-generation-setting="ratio"', 'ratio setting exists');
-contains(engineSource, 'data-generation-setting="size"', 'image size setting exists');
-contains(engineSource, 'data-generation-setting="count"', 'image count setting exists');
-contains(engineSource, 'data-generation-setting="duration"', 'video duration setting exists');
-contains(engineSource, 'data-generation-setting="resolution"', 'video resolution setting exists');
-contains(engineSource, 'data-generation-setting="generateAudio"', 'video audio setting exists');
-contains(engineSource, 'data-generation-setting="returnLastFrame"', 'last frame setting exists');
-contains(engineSource, 'data-generation-setting="watermark"', 'watermark setting exists');
-contains(engineSource, 'data-video-mode="first-last-frame-video"', 'video modes use stable values');
+contains(engineSource, 'data-generation-popover="spec"', 'nodes expose the specification popover trigger');
+contains(engineSource, 'data-generation-settings="image"', 'image specification trigger identifies its panel');
+contains(engineSource, 'data-generation-settings="video"', 'video specification trigger identifies its panel');
+excludes(engineSource, 'data-video-mode=', 'video modes are not permanently rendered in nodes');
 contains(engineSource, '后台计费', 'fake fixed point labels are removed');
 excludes(engineSource, '<span>智记</span>', 'old inert smart-note button removed');
 excludes(engineSource, '<span>角色库</span>', 'old inert character-library button removed');
@@ -270,6 +265,15 @@ contains(stylesSource, '@media (max-width: 720px)', 'generation controls have a 
 contains(appSource, 'function generationSettingsForNode', 'node settings have one persisted source');
 contains(appSource, 'function generationReferenceItems', 'incoming image references are ordered');
 contains(appSource, 'function renderGenerationNodeControls', 'node controls rehydrate from node data');
+contains(appSource, 'function renderSpecPopover', 'specification controls render in the shared popover');
+contains(appSource, 'data-generation-setting="ratio"', 'ratio setting exists');
+contains(appSource, 'data-generation-setting="size"', 'image size setting exists');
+contains(appSource, 'data-generation-setting="count"', 'image count setting exists');
+contains(appSource, 'data-generation-setting="duration"', 'video duration setting exists');
+contains(appSource, 'data-generation-setting="resolution"', 'video resolution setting exists');
+contains(appSource, 'data-generation-setting="generateAudio"', 'video audio setting exists');
+contains(appSource, 'data-generation-setting="returnLastFrame"', 'last frame setting exists');
+contains(appSource, 'data-generation-setting="watermark"', 'watermark setting exists');
 contains(appSource, 'function updateGenerationNodeModelLabel', 'new nodes receive the backend model label');
 contains(appSource, 'pendingGenerationReferenceTargetId', 'asset selection targets a generation node');
 contains(appSource, 'referenceTarget.x - 720', 'selected reference nodes do not cover their target');
@@ -283,8 +287,9 @@ contains(appSource, "scheduleCanvasSave('image_settings_change')", 'image settin
 contains(appSource, 'function optimizeVideoPrompt', 'video prompt optimizer calls the text backend');
 contains(appSource, 'function renderCameraPresetMenu', 'camera preset menu renders');
 contains(appSource, 'function applyCameraPreset', 'camera preset updates the prompt');
-contains(appSource, 'button.dataset.videoMode', 'video mode is persisted from stable values');
-contains(appSource, "scheduleCanvasSave('video_mode_change')", 'video mode persists');
+contains(appSource, 'UltimateCanvasGenerationInteractions.modeOptions', 'mode values are sourced from the interaction contract');
+contains(appSource, 'modeButton.dataset.generationMode', 'popover mode values persist from stable contract ids');
+contains(appSource, 'scheduleCanvasSave(`${node.type}_mode_change`)', 'generation mode persists');
 contains(appSource, "scheduleCanvasSave('video_settings_change')", 'video settings persist');
 contains(appSource, "videoRequest({", 'video submission uses the contract module');
 contains(appSource, 'validateVideo({', 'video request is validated by the contract module');
@@ -296,8 +301,8 @@ contains(appSource, "scheduleCanvasSave('video_prompt_optimize')", 'optimized vi
 contains(appSource, "scheduleCanvasSave('video_camera_preset')", 'camera preset persists');
 
 assert.match(indexSource, /styles\.css\?v=20260711-generation-nodes/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260711-generation-nodes/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260711-generation-popovers/);
 assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-generation-nodes/);
-assert.match(indexSource, /app\.js\?v=20260711-generation-nodes/);
+assert.match(indexSource, /app\.js\?v=20260711-generation-popovers/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');
