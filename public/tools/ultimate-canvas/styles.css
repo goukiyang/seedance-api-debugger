@@ -619,6 +619,86 @@ html, body {
 .context-command.danger { border-color: rgba(239,68,68,0.45); color: #fca5a5; }
 .context-command.danger:hover { background: rgba(239,68,68,0.12); }
 
+.video-card-task-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 8px;
+}
+
+.video-card-task-row.is-selected { border-color: rgba(78,205,196,0.5); background: rgba(78,205,196,0.08); }
+.video-card-task-check { width: 24px; display: grid; place-items: center; }
+.video-card-task-check input { width: 15px; height: 15px; accent-color: var(--accent-teal); }
+.video-card-task-main { min-width: 0; display: grid; gap: 2px; }
+.video-card-task-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.video-card-task-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 9px; }
+.video-card-task-role { max-width: 90px; color: var(--accent-teal); font-size: 9px; text-align: right; }
+.video-card-task-actions {
+    grid-column: 2 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 6px;
+}
+
+.video-card-task-actions a,
+.video-card-task-actions button,
+.generated-action-row button {
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border-default);
+    border-radius: 5px;
+    background: rgba(255,255,255,0.035);
+    color: var(--text-secondary);
+    padding: 0 7px;
+    font: inherit;
+    font-size: 9px;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.video-card-task-actions a:hover,
+.video-card-task-actions button:hover,
+.generated-action-row button:hover { border-color: var(--accent-teal); color: var(--text-primary); }
+.video-card-task-organize { display: grid; gap: 9px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-default); }
+.video-card-task-organize > strong { color: var(--text-primary); font-size: 11px; }
+.video-card-task-organize form,
+.video-card-merge-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    align-items: end;
+    gap: 8px;
+}
+
+.video-card-task-organize label,
+.video-card-merge-form label { min-width: 0; display: grid; gap: 4px; color: var(--text-tertiary); font-size: 10px; }
+.video-card-task-organize label.is-wide,
+.video-card-merge-form label.is-wide { grid-column: 1 / -2; }
+.video-card-task-organize input,
+.video-card-task-organize select,
+.video-card-merge-form input,
+.video-card-merge-form select {
+    width: 100%;
+    min-height: 32px;
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 0 8px;
+    font: inherit;
+    font-size: 10px;
+    outline: none;
+}
+
+.video-card-merge-form {
+    width: 100%;
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-default);
+}
+.video-card-merge-form > strong { grid-column: 1 / -1; color: var(--text-primary); font-size: 11px; }
+
 .canvas-confirm-overlay {
     position: fixed;
     inset: 0;
@@ -3722,6 +3802,14 @@ body.director-studio-open {
     .video-card-inline-approval label.is-wide,
     .video-card-inline-approval > strong { grid-column: auto; }
     .video-card-branch-create-form { grid-template-columns: 1fr; }
+    .video-card-task-row { grid-template-columns: auto minmax(0, 1fr); }
+    .video-card-task-role { grid-column: 2; max-width: none; text-align: left; }
+    .video-card-task-actions { grid-column: 1 / -1; }
+    .video-card-task-organize form,
+    .video-card-merge-form { grid-template-columns: 1fr; }
+    .video-card-task-organize label.is-wide,
+    .video-card-merge-form label.is-wide,
+    .video-card-merge-form > strong { grid-column: auto; }
 }
 
 .hidden { display: none !important; }

@@ -80,6 +80,7 @@ export async function POST(
         frame_image_urls: true,
         project_id: true,
         video_card_id: true,
+        video_branch_id: true,
         params_json: true,
       },
     });
@@ -171,6 +172,7 @@ export async function POST(
       resolution_approval_confirmed: asBoolean(paramsJson.resolutionApprovalConfirmed, false),
       project_id: retryProject.id,
       video_card_id: originalTask.video_card_id,
+      video_branch_id: originalTask.video_branch_id,
       reference_image_urls: uniquePreserveOrder(preferredReferenceImageUrls),
       reference_video_urls: parseJsonArray(originalTask.reference_video_urls),
       reference_audio_urls: parseJsonArray(originalTask.reference_audio_urls),

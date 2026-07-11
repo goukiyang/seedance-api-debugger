@@ -69,6 +69,7 @@
         videoCardTasks: new Map(),
         videoCardLoads: new Map(),
         videoCardLoadErrors: new Map(),
+        videoCardSelectedTaskIds: new Map(),
         videoCardView: { mode: 'list', section: 'info', cardId: null, search: '' },
         pollingTasks: new Map()
     };
@@ -398,6 +399,195 @@
             targetBranchId
         });
         showCanvasNotice('\u65b9\u5411\u72b6\u6001\u5df2\u66f4\u65b0\u3002', 'info');
+    }
+
+    function cachedVideoTask(taskId) {
+        for (const tasks of canvasRuntime.videoCardTasks.values()) {
+            const task = tasks.find(item => item.id === taskId);
+            if (task) return task;
+        }
+        return null;
+    }
+
+    function refreshVideoTaskNode(task, nodeId = '') {
+        if (!task?.id) return;
+        const nodeIds = nodeId
+            ? [nodeId]
+            : Array.from(engine.nodes.values())
+                .filter(node => node.type === 'video' && node.data?.taskId === task.id)
+                .map(node => node.id);
+        nodeIds.forEach(id => {
+            const node = engine.nodes.get(id);
+            if (!node) return;
+            const status = task.local_status || task.status || node.data?.generationStatus || 'submitted';
+            node.data = {
+                ...node.data,
+                taskId: task.id,
+                providerTaskId: task.provider_task_id || node.data?.providerTaskId || null,
+                videoCardId: task.video_card_id || node.data?.videoCardId || canvasRuntime.selectedVideoCardId,
+                videoBranchId: task.video_branch_id || node.data?.videoBranchId || null,
+                generationStatus: status,
+                versionRole: task.version_role || node.data?.versionRole || 'normal',
+                generationResult: {
+                    ...(node.data?.generationResult || {}),
+                    ...task
+                }
+            };
+            const succeeded = status === 'succeeded';
+            decorateGeneratedNode(
+                id,
+                succeeded ? '\u89c6\u9891\u751f\u6210\u5b8c\u6210' : '\u89c6\u9891\u751f\u6210\u4efb\u52a1',
+                taskDescription(task),
+                videoPreviewForTask(task),
+                {
+                    taskId: task.id,
+                    videoUrl: succeeded || task.result_video_url ? `/api/video/play/${task.id}` : '',
+                    downloadUrl: `/api/video/download/${task.id}`,
+                    versionRole: task.version_role || node.data.versionRole
+                }
+            );
+        });
+        if (nodeIds.length) scheduleCanvasSave('video_task_refresh');
+    }
+
+    async function executeVideoTaskVersion(cardId, taskId, role) {
+        const operation = role === 'candidate'
+            ? 'version-candidate'
+            : role === 'best' ? 'version-best' : 'version-final';
+        const descriptor = window.UltimateCanvasVideoCards.requestFor(operation, { cardId, taskId });
+        await requestJson(descriptor.url, { method: descriptor.method, payload: descriptor.payload });
+        invalidateVideoCardWorkspace(cardId);
+        await refreshProjectVideoCards();
+        const workspace = await loadVideoCardWorkspace(cardId, { force: true });
+        const updatedTask = workspace?.tasks?.find(task => task.id === taskId);
+        if (updatedTask) refreshVideoTaskNode(updatedTask);
+        renderRuntimeContextControls();
+        return updatedTask || null;
+    }
+
+    async function retryVideoTask(taskId, nodeId = '', cardId = '') {
+        const sourceTask = cachedVideoTask(taskId);
+        const descriptor = window.UltimateCanvasVideoCards.requestFor('task-retry', { taskId });
+        const result = await requestJson(descriptor.url, {
+            method: descriptor.method,
+            payload: descriptor.payload
+        });
+        const nextTaskId = result?.id || result?.task_id;
+        if (!nextTaskId) throw new Error('\u91cd\u8bd5\u6210\u529f\u4f46\u672a\u8fd4\u56de\u65b0\u4efb\u52a1 ID\u3002');
+
+        let targetNodeId = nodeId || Array.from(engine.nodes.values())
+            .find(node => node.type === 'video' && node.data?.taskId === taskId)?.id;
+        const resolvedCardId = result.video_card_id || cardId || sourceTask?.video_card_id || canvasRuntime.selectedVideoCardId;
+        const resolvedBranchId = result.video_branch_id || sourceTask?.video_branch_id || canvasRuntime.selectedVideoBranchId;
+        if (!targetNodeId) {
+            const center = canvasCenter();
+            targetNodeId = engine.addNode('video', center.x, center.y, {
+                title: sourceTask?.prompt || '\u89c6\u9891\u91cd\u8bd5\u4efb\u52a1',
+                prompt: sourceTask?.prompt || '',
+                videoCardId: resolvedCardId,
+                videoBranchId: resolvedBranchId
+            });
+        }
+
+        stopVideoPolling(taskId);
+        const node = engine.nodes.get(targetNodeId);
+        if (node) {
+            node.data = {
+                ...node.data,
+                taskId: nextTaskId,
+                providerTaskId: result.provider_task_id || null,
+                videoCardId: resolvedCardId,
+                videoBranchId: resolvedBranchId,
+                generationStatus: result.local_status || result.status || 'submitted',
+                generationResult: result,
+                versionRole: 'normal'
+            };
+        }
+        refreshVideoTaskNode({
+            ...result,
+            id: nextTaskId,
+            video_card_id: resolvedCardId,
+            video_branch_id: resolvedBranchId,
+            version_role: 'normal'
+        }, targetNodeId);
+        pollVideoTask(nextTaskId, targetNodeId);
+        if (resolvedCardId) {
+            invalidateVideoCardWorkspace(resolvedCardId);
+            await loadVideoCardWorkspace(resolvedCardId, { force: true }).catch(() => null);
+        }
+        renderRuntimeContextControls();
+        return result;
+    }
+
+    async function moveVideoTasks(form) {
+        const cardId = form.dataset.cardId;
+        const taskIds = Array.from(selectedVideoTaskIds(cardId));
+        const targetCardId = form.elements.target_card_id?.value;
+        if (!taskIds.length) throw new Error('\u8bf7\u5148\u9009\u62e9\u8981\u8fc1\u79fb\u7684\u4efb\u52a1\u3002');
+        const descriptor = window.UltimateCanvasVideoCards.requestFor('tasks-move', {
+            cardId,
+            targetCardId,
+            taskIds,
+            targetBranchId: form.elements.target_branch_id?.value || null,
+            reason: form.elements.reason?.value?.trim() || null
+        });
+        const result = await requestJson(descriptor.url, { method: descriptor.method, payload: descriptor.payload });
+        selectedVideoTaskIds(cardId).clear();
+        invalidateVideoCardWorkspace(cardId);
+        invalidateVideoCardWorkspace(targetCardId);
+        await refreshProjectVideoCards();
+        await loadVideoCardWorkspace(cardId, { force: true });
+        renderRuntimeContextControls();
+        return result;
+    }
+
+    async function splitVideoCard(form) {
+        const cardId = form.dataset.cardId;
+        const taskIds = Array.from(selectedVideoTaskIds(cardId));
+        if (!taskIds.length) throw new Error('\u8bf7\u5148\u9009\u62e9\u8981\u62c6\u5206\u7684\u4efb\u52a1\u3002');
+        const descriptor = window.UltimateCanvasVideoCards.requestFor('card-split', {
+            cardId,
+            title: form.elements.title?.value?.trim(),
+            taskIds,
+            reason: form.elements.reason?.value?.trim() || null
+        });
+        const result = await requestJson(descriptor.url, { method: descriptor.method, payload: descriptor.payload });
+        selectedVideoTaskIds(cardId).clear();
+        invalidateVideoCardWorkspace(cardId);
+        await refreshProjectVideoCards();
+        await loadVideoCardWorkspace(cardId, { force: true });
+        renderRuntimeContextControls();
+        return result;
+    }
+
+    async function mergeVideoCard(form) {
+        const cardId = form.dataset.cardId;
+        const targetCardId = form.elements.target_card_id?.value;
+        if (cardId === canvasRuntime.selectedVideoCardId) {
+            const saved = await flushCanvasSave('before_video_card_merge');
+            if (!saved) throw new Error('\u753b\u5e03\u4fdd\u5b58\u5931\u8d25\uff0c\u5df2\u53d6\u6d88\u5408\u5e76\u3002');
+        }
+        const descriptor = window.UltimateCanvasVideoCards.requestFor('card-merge', {
+            cardId,
+            targetCardId,
+            reason: form.elements.reason?.value?.trim() || null
+        });
+        const result = await requestJson(descriptor.url, { method: descriptor.method, payload: descriptor.payload });
+        stopAllVideoPolling();
+        invalidateVideoCardWorkspace(cardId);
+        invalidateVideoCardWorkspace(targetCardId);
+        await refreshProjectVideoCards();
+        await loadCanvasBootstrap(canvasRuntime.selectedProjectId, targetCardId, { restoreDocument: false });
+        canvasRuntime.videoCardView = {
+            ...canvasRuntime.videoCardView,
+            mode: 'detail',
+            section: 'tasks',
+            cardId: targetCardId
+        };
+        await loadVideoCardWorkspace(targetCardId, { force: true });
+        renderRuntimeContextControls();
+        scheduleCanvasSave('video_card_merge');
+        return result;
     }
 
     function changedVideoCardValues(form) {
@@ -843,6 +1033,20 @@
         mergeBranch: '\u5408\u5e76\u5230\u4e3b\u65b9\u5411',
         promoteBranch: '\u5347\u683c\u4e3a\u89c6\u9891\u5361',
         branchCount: '\u65b9\u5411\u6570',
+        candidate: '\u6807\u8bb0\u5019\u9009',
+        best: '\u5f53\u524d\u6700\u4f73',
+        final: '\u6700\u7ec8\u7248',
+        retryTask: '\u91cd\u8bd5',
+        play: '\u64ad\u653e',
+        download: '\u4e0b\u8f7d',
+        moveTasks: '\u8fc1\u79fb\u6240\u9009\u4efb\u52a1',
+        splitCard: '\u62c6\u5206\u4e3a\u65b0\u89c6\u9891\u5361',
+        mergeCard: '\u5408\u5e76\u5230\u76ee\u6807\u5361',
+        targetCard: '\u76ee\u6807\u89c6\u9891\u5361',
+        targetBranch: '\u76ee\u6807\u65b9\u5411',
+        newCardTitle: '\u65b0\u89c6\u9891\u5361\u6807\u9898',
+        noBranch: '\u4e0d\u6307\u5b9a\u65b9\u5411',
+        selectedTasks: '\u5df2\u9009\u4efb\u52a1',
         operationHint: '\u5361\u7247\u7ba1\u7406\u64cd\u4f5c\u4f1a\u6839\u636e\u5f53\u524d\u6743\u9650\u548c\u72b6\u6001\u663e\u793a\u3002'
     };
 
@@ -917,6 +1121,93 @@
             ${rows ? `<div class="video-card-branch-list">${rows}</div>` : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyBranches)}</div>`}`;
     }
 
+    function selectedVideoTaskIds(cardId) {
+        if (!canvasRuntime.videoCardSelectedTaskIds.has(cardId)) {
+            canvasRuntime.videoCardSelectedTaskIds.set(cardId, new Set());
+        }
+        return canvasRuntime.videoCardSelectedTaskIds.get(cardId);
+    }
+
+    function videoTaskVersionLabel(role) {
+        if (role === 'candidate') return videoCardUiText.candidate;
+        if (role === 'current_best') return videoCardUiText.best;
+        if (role === 'final') return videoCardUiText.final;
+        return role || '';
+    }
+
+    function videoCardTargetOptions(cardId) {
+        return (canvasRuntime.bootstrap?.context?.video_cards || [])
+            .filter(card => card.id !== cardId
+                && card.can_manage
+                && !['sealed', 'merged', 'archived', 'discarded'].includes(card.status));
+    }
+
+    function videoCardTasksHtml(detail, tasks, branches) {
+        const card = detail?.video_card;
+        if (!card) return '';
+        const canManage = Boolean(detail?.permissions?.can_manage);
+        const canGenerate = Boolean(detail?.permissions?.can_generate);
+        const selectedIds = selectedVideoTaskIds(card.id);
+        const branchById = new Map(branches.map(branch => [branch.id, branch]));
+        const rows = tasks.map(task => {
+            const owner = ownerIdentity(task.owner || task.user, task.owner_user_id || task.user_id);
+            const status = task.local_status || task.status || '';
+            const successful = status === 'succeeded';
+            const retryable = canGenerate && ['succeeded', 'failed', 'cancelled'].includes(status);
+            const branch = branchById.get(task.video_branch_id);
+            return `
+                <div class="video-card-task-row ${selectedIds.has(task.id) ? 'is-selected' : ''}">
+                    ${canManage ? `<label class="video-card-task-check"><input type="checkbox" data-video-task-select="${escapeHtml(task.id)}" data-card-id="${escapeHtml(card.id)}" ${selectedIds.has(task.id) ? 'checked' : ''}><span></span></label>` : ''}
+                    <div class="video-card-task-main">
+                        <strong title="${escapeHtml(task.prompt || task.id)}">${escapeHtml(task.prompt || task.id)}</strong>
+                        <small>${escapeHtml(status)} · ${escapeHtml(owner.name)} · ${escapeHtml(branch?.title || videoCardUiText.noBranch)}</small>
+                        <small>${escapeHtml(task.actual_cost ?? task.estimated_cost ?? 0)} · ${escapeHtml(task.created_at ? new Date(task.created_at).toLocaleString('zh-CN') : '')}</small>
+                    </div>
+                    <span class="video-card-task-role">${escapeHtml(videoTaskVersionLabel(task.version_role))}</span>
+                    <div class="video-card-task-actions">
+                        ${successful ? `<a href="/api/video/play/${encodeURIComponent(task.id)}" target="_blank" rel="noreferrer">${escapeHtml(videoCardUiText.play)}</a><a href="/api/video/download/${encodeURIComponent(task.id)}" target="_blank" rel="noreferrer">${escapeHtml(videoCardUiText.download)}</a>` : ''}
+                        ${retryable ? `<button type="button" data-video-task-retry="${escapeHtml(task.id)}" data-card-id="${escapeHtml(card.id)}">${escapeHtml(videoCardUiText.retryTask)}</button>` : ''}
+                        ${canManage && successful ? `
+                            <button type="button" data-video-task-version="candidate" data-task-id="${escapeHtml(task.id)}" data-card-id="${escapeHtml(card.id)}">${escapeHtml(videoCardUiText.candidate)}</button>
+                            <button type="button" data-video-task-version="best" data-task-id="${escapeHtml(task.id)}" data-card-id="${escapeHtml(card.id)}">${escapeHtml(videoCardUiText.best)}</button>
+                            <button type="button" data-video-task-version="final" data-task-id="${escapeHtml(task.id)}" data-card-id="${escapeHtml(card.id)}">${escapeHtml(videoCardUiText.final)}</button>` : ''}
+                    </div>
+                </div>`;
+        }).join('');
+
+        const targetCards = videoCardTargetOptions(card.id);
+        const targetCardId = targetCards.some(item => item.id === canvasRuntime.videoCardView.targetCardId)
+            ? canvasRuntime.videoCardView.targetCardId
+            : targetCards[0]?.id || '';
+        canvasRuntime.videoCardView.targetCardId = targetCardId;
+        if (targetCardId
+            && !canvasRuntime.videoCardBranches.has(targetCardId)
+            && !canvasRuntime.videoCardLoads.has(targetCardId)) {
+            loadVideoCardWorkspace(targetCardId).then(() => {
+                if (canvasRuntime.videoCardView.section === 'tasks') renderRuntimeContextControls();
+            }).catch(() => null);
+        }
+        const targetBranches = canvasRuntime.videoCardBranches.get(targetCardId) || [];
+        const activeTargetBranches = window.UltimateCanvasVideoCards.activeBranches(targetBranches);
+        const selectedCount = selectedIds.size;
+        const organizeForms = canManage && tasks.length ? `
+            <div class="video-card-task-organize">
+                <strong>${escapeHtml(videoCardUiText.selectedTasks)} · ${selectedCount}</strong>
+                <form data-video-task-move-form data-card-id="${escapeHtml(card.id)}">
+                    <label><span>${escapeHtml(videoCardUiText.targetCard)}</span><select name="target_card_id" data-video-task-target-card required>${targetCards.map(target => `<option value="${escapeHtml(target.id)}" ${target.id === targetCardId ? 'selected' : ''}>${escapeHtml(target.title)}</option>`).join('')}</select></label>
+                    <label><span>${escapeHtml(videoCardUiText.targetBranch)}</span><select name="target_branch_id"><option value="">${escapeHtml(videoCardUiText.noBranch)}</option>${activeTargetBranches.map(branch => `<option value="${escapeHtml(branch.id)}">${escapeHtml(branch.title)}</option>`).join('')}</select></label>
+                    <label class="is-wide"><span>${escapeHtml(videoCardUiText.reason)}</span><input name="reason" maxlength="300"></label>
+                    <button type="submit" class="context-command" ${selectedCount && targetCardId ? '' : 'disabled'}>${escapeHtml(videoCardUiText.moveTasks)}</button>
+                </form>
+                <form data-video-card-split-form data-card-id="${escapeHtml(card.id)}">
+                    <label><span>${escapeHtml(videoCardUiText.newCardTitle)}</span><input name="title" maxlength="120" required></label>
+                    <label class="is-wide"><span>${escapeHtml(videoCardUiText.reason)}</span><input name="reason" maxlength="300"></label>
+                    <button type="submit" class="context-command" ${selectedCount ? '' : 'disabled'}>${escapeHtml(videoCardUiText.splitCard)}</button>
+                </form>
+            </div>` : '';
+        return `${rows ? `<div class="video-card-task-list">${rows}</div>` : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyTasks)}</div>`}${organizeForms}`;
+    }
+
     function videoCardOperationsHtml(detail, branches, tasks) {
         const card = detail?.video_card;
         if (!card) return '';
@@ -932,6 +1223,10 @@
             : hasHistory ? 'archive' : 'discard';
         const canSeal = canManage
             && window.UltimateCanvasVideoCards.operationAllowed(detail, 'card-seal');
+        const targetCards = videoCardTargetOptions(card.id);
+        const mergeAllowed = canManage
+            && targetCards.length > 0
+            && window.UltimateCanvasVideoCards.operationAllowed(detail, 'card-merge');
         return `
             <div class="video-card-operation-list">
                 <p>${escapeHtml(videoCardUiText.operationHint)}</p>
@@ -942,6 +1237,13 @@
                         <strong>${escapeHtml(videoCardUiText.reopenApproval)}</strong>
                         <label class="is-wide"><span>${escapeHtml(videoCardUiText.reason)}</span><input name="reason" minlength="2" maxlength="300" required></label>
                         <button type="submit" class="context-command">${escapeHtml(videoCardUiText.submitApproval)}</button>
+                    </form>` : ''}
+                ${mergeAllowed ? `
+                    <form class="video-card-merge-form" data-video-card-merge-form data-card-id="${escapeHtml(card.id)}">
+                        <strong>${escapeHtml(videoCardUiText.mergeCard)}</strong>
+                        <label><span>${escapeHtml(videoCardUiText.targetCard)}</span><select name="target_card_id" required>${targetCards.map(target => `<option value="${escapeHtml(target.id)}">${escapeHtml(target.title)}</option>`).join('')}</select></label>
+                        <label class="is-wide"><span>${escapeHtml(videoCardUiText.reason)}</span><input name="reason" maxlength="300" required></label>
+                        <button type="submit" class="context-command">${escapeHtml(videoCardUiText.mergeCard)}</button>
                     </form>` : ''}
             </div>`;
     }
@@ -984,13 +1286,7 @@
             } else if (section === 'branches') {
                 body = videoCardBranchesHtml(cachedDetail, branches);
             } else if (section === 'tasks') {
-                body = tasks.length
-                    ? `<div class="video-card-task-list">${tasks.map(task => `
-                        <div class="video-card-task-row">
-                            <span><strong>${escapeHtml(task.prompt || task.id)}</strong><small>${escapeHtml(task.local_status || task.status || '')}</small></span>
-                            <small>${escapeHtml(task.version_role || '')}</small>
-                        </div>`).join('')}</div>`
-                    : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyTasks)}</div>`;
+                body = videoCardTasksHtml(cachedDetail, tasks, branches);
             } else {
                 body = videoCardOperationsHtml(cachedDetail, branches, tasks);
             }
@@ -1317,6 +1613,7 @@
         canvasRuntime.videoCardTasks.clear();
         canvasRuntime.videoCardLoads.clear();
         canvasRuntime.videoCardLoadErrors.clear();
+        canvasRuntime.videoCardSelectedTaskIds.clear();
         canvasRuntime.videoCardView = { mode: 'list', section: 'info', cardId: null, search: '' };
     }
 
@@ -1531,6 +1828,30 @@
         });
     });
 
+    document.addEventListener('change', event => {
+        const taskSelect = event.target.closest('[data-video-task-select]');
+        if (taskSelect) {
+            const selectedIds = selectedVideoTaskIds(taskSelect.dataset.cardId);
+            if (taskSelect.checked) selectedIds.add(taskSelect.dataset.videoTaskSelect);
+            else selectedIds.delete(taskSelect.dataset.videoTaskSelect);
+            renderRuntimeContextControls();
+            return;
+        }
+
+        const targetCard = event.target.closest('[data-video-task-target-card]');
+        if (targetCard) {
+            const targetCardId = targetCard.value;
+            canvasRuntime.videoCardView.targetCardId = targetCardId;
+            if (!targetCardId) {
+                renderRuntimeContextControls();
+                return;
+            }
+            loadVideoCardWorkspace(targetCardId).then(renderRuntimeContextControls).catch(error => {
+                showCanvasNotice(error?.message || '\u76ee\u6807\u89c6\u9891\u5361\u65b9\u5411\u8bfb\u53d6\u5931\u8d25\u3002', 'warn');
+            });
+        }
+    });
+
     document.addEventListener('click', event => {
         const toggle = event.target.closest('[data-context-toggle]');
         if (toggle) {
@@ -1604,6 +1925,46 @@
         if (videoBranchAction) {
             handleVideoBranchAction(videoBranchAction).catch(error => {
                 showCanvasNotice(error?.message || '\u65b9\u5411\u64cd\u4f5c\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
+        const videoTaskVersion = event.target.closest('[data-video-task-version], [data-generated-task-version]');
+        if (videoTaskVersion) {
+            const role = videoTaskVersion.dataset.videoTaskVersion
+                || videoTaskVersion.dataset.generatedTaskVersion;
+            executeVideoTaskVersion(
+                videoTaskVersion.dataset.cardId || canvasRuntime.selectedVideoCardId,
+                videoTaskVersion.dataset.taskId,
+                role
+            ).then(() => {
+                showCanvasNotice('\u89c6\u9891\u7248\u672c\u6807\u8bb0\u5df2\u66f4\u65b0\u3002', 'info');
+            }).catch(error => {
+                showCanvasNotice(error?.message || '\u89c6\u9891\u7248\u672c\u6807\u8bb0\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
+        const videoTaskRetry = event.target.closest('[data-video-task-retry], [data-generated-task-retry]');
+        if (videoTaskRetry) {
+            const taskId = videoTaskRetry.dataset.videoTaskRetry
+                || videoTaskRetry.dataset.generatedTaskRetry;
+            requestCanvasConfirmation({
+                title: videoCardUiText.retryTask,
+                message: '\u91cd\u8bd5\u4f1a\u521b\u5efa\u65b0\u7684\u771f\u5b9e\u751f\u6210\u4efb\u52a1\uff0c\u5e76\u6309\u540e\u7aef\u89c4\u5219\u51bb\u7ed3\u6216\u6d88\u8017\u70b9\u6570\u3002',
+                detail: taskId,
+                confirmLabel: videoCardUiText.retryTask
+            }).then(confirmed => {
+                if (!confirmed) return null;
+                return retryVideoTask(
+                    taskId,
+                    videoTaskRetry.dataset.nodeId || '',
+                    videoTaskRetry.dataset.cardId || ''
+                );
+            }).then(result => {
+                if (result) showCanvasNotice('\u91cd\u8bd5\u4efb\u52a1\u5df2\u63d0\u4ea4\u3002', 'info');
+            }).catch(error => {
+                showCanvasNotice(error?.message || '\u4efb\u52a1\u91cd\u8bd5\u5931\u8d25\u3002', 'error');
             });
             return;
         }
@@ -1682,6 +2043,61 @@
     });
 
     document.addEventListener('submit', event => {
+        const videoTaskMoveForm = event.target.closest('[data-video-task-move-form]');
+        if (videoTaskMoveForm) {
+            event.preventDefault();
+            const taskCount = selectedVideoTaskIds(videoTaskMoveForm.dataset.cardId).size;
+            const target = videoTaskMoveForm.elements.target_card_id?.selectedOptions?.[0]?.textContent || '';
+            requestCanvasConfirmation({
+                title: videoCardUiText.moveTasks,
+                message: `\u786e\u8ba4\u8fc1\u79fb ${taskCount} \u4e2a\u4efb\u52a1\u5230\u300c${target}\u300d\uff1f`,
+                detail: videoTaskMoveForm.elements.reason?.value?.trim() || '',
+                confirmLabel: videoCardUiText.moveTasks
+            }).then(confirmed => confirmed ? moveVideoTasks(videoTaskMoveForm) : null).then(result => {
+                if (result) showCanvasNotice('\u6240\u9009\u4efb\u52a1\u5df2\u8fc1\u79fb\u3002', 'info');
+            }).catch(error => {
+                showCanvasNotice(error?.message || '\u4efb\u52a1\u8fc1\u79fb\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
+        const videoCardSplitForm = event.target.closest('[data-video-card-split-form]');
+        if (videoCardSplitForm) {
+            event.preventDefault();
+            const taskCount = selectedVideoTaskIds(videoCardSplitForm.dataset.cardId).size;
+            const title = videoCardSplitForm.elements.title?.value?.trim() || '';
+            requestCanvasConfirmation({
+                title: videoCardUiText.splitCard,
+                message: `\u786e\u8ba4\u5c06 ${taskCount} \u4e2a\u4efb\u52a1\u62c6\u5206\u5230\u65b0\u89c6\u9891\u5361\u300c${title}\u300d\uff1f`,
+                detail: videoCardSplitForm.elements.reason?.value?.trim() || '',
+                confirmLabel: videoCardUiText.splitCard
+            }).then(confirmed => confirmed ? splitVideoCard(videoCardSplitForm) : null).then(result => {
+                if (result) showCanvasNotice('\u65b0\u89c6\u9891\u5361\u5df2\u4ece\u6240\u9009\u4efb\u52a1\u62c6\u5206\u521b\u5efa\u3002', 'info');
+            }).catch(error => {
+                showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u62c6\u5206\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
+        const videoCardMergeForm = event.target.closest('[data-video-card-merge-form]');
+        if (videoCardMergeForm) {
+            event.preventDefault();
+            const sourceCard = canvasRuntime.videoCardDetails.get(videoCardMergeForm.dataset.cardId)?.video_card;
+            const target = videoCardMergeForm.elements.target_card_id?.selectedOptions?.[0]?.textContent || '';
+            requestCanvasConfirmation({
+                title: videoCardUiText.mergeCard,
+                message: `\u786e\u8ba4\u5c06\u300c${sourceCard?.title || videoCardMergeForm.dataset.cardId}\u300d\u5408\u5e76\u5230\u300c${target}\u300d\uff1f`,
+                detail: videoCardMergeForm.elements.reason?.value?.trim() || '',
+                confirmLabel: videoCardUiText.mergeCard,
+                danger: true
+            }).then(confirmed => confirmed ? mergeVideoCard(videoCardMergeForm) : null).then(result => {
+                if (result) showCanvasNotice('\u89c6\u9891\u5361\u5df2\u5408\u5e76\u3002', 'info');
+            }).catch(error => {
+                showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u5408\u5e76\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
         const videoBranchCreateForm = event.target.closest('[data-video-branch-create-form]');
         if (videoBranchCreateForm) {
             event.preventDefault();
@@ -4358,6 +4774,14 @@
         const nodeEl = document.querySelector(`[data-node-id="${nodeId}"]`);
         const body = nodeEl?.querySelector('.node-body');
         if (!body) return;
+        const node = engine.nodes.get(nodeId);
+        const cardId = node?.data?.videoCardId || canvasRuntime.selectedVideoCardId;
+        const detail = canvasRuntime.videoCardDetails.get(cardId);
+        const cardSummary = canvasRuntime.bootstrap?.context?.video_cards?.find(card => card.id === cardId);
+        const canManage = Boolean(detail?.permissions?.can_manage || cardSummary?.can_manage);
+        const canRetry = Boolean(detail?.permissions?.can_generate || cardSummary?.can_generate);
+        const terminal = ['succeeded', 'failed', 'cancelled'].includes(node?.data?.generationStatus);
+        const succeeded = node?.data?.generationStatus === 'succeeded';
         const taskActions = options.taskId ? `
             <div class="generated-action-row">
                 <a href="/tasks?task=${encodeURIComponent(options.taskId)}" target="_blank" rel="noreferrer">任务详情</a>
@@ -4365,6 +4789,14 @@
                 ${options.downloadUrl ? `<a href="${escapeHtml(options.downloadUrl)}" target="_blank" rel="noreferrer">下载</a>` : ''}
             </div>
         ` : '';
+        const generatedButtons = options.taskId && (canRetry || canManage) ? `
+            <div class="generated-action-row generated-task-actions">
+                ${canRetry && terminal ? `<button type="button" data-generated-task-retry="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.retryTask)}</button>` : ''}
+                ${canManage && succeeded ? `
+                    <button type="button" data-generated-task-version="candidate" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.candidate)}</button>
+                    <button type="button" data-generated-task-version="best" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.best)}</button>
+                    <button type="button" data-generated-task-version="final" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.final)}</button>` : ''}
+            </div>` : '';
         body.innerHTML = `
             <div class="generated-reference-card">
                 <button class="prompt-card-expand" data-prompt-expand title="展开提示词">
@@ -4378,6 +4810,7 @@
                     ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}">`
                     : '<div class="generated-frame-lines"></div>'}
                 ${taskActions}
+                ${generatedButtons}
             </div>`;
     }
 

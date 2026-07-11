@@ -269,6 +269,20 @@ contains(
   'real generation uses node or canvas branch',
 );
 contains(app, "scheduleCanvasSave('prompt_modal_save')", 'prompt modal saves branch and prompt');
+contains(app, 'data-video-task-select', 'task history supports selection');
+contains(app, 'data-video-task-version', 'task history supports version roles');
+contains(app, 'data-video-task-retry', 'task history supports retry');
+contains(app, 'data-video-task-move-form', 'selected tasks can move cards');
+contains(app, 'data-video-card-split-form', 'selected tasks can split to a new card');
+contains(app, 'data-video-card-merge-form', 'cards can merge in place');
+contains(app, 'data-generated-task-retry', 'video result node supports retry');
+contains(app, 'data-generated-task-version', 'video result node supports version roles');
+contains(app, 'function refreshVideoTaskNode', 'task response updates node in place');
+contains(app, 'async function executeVideoTaskVersion', 'task version uses real card API');
+contains(app, 'async function retryVideoTask', 'task retry uses real retry API');
+contains(app, 'async function moveVideoTasks', 'task migration uses real card API');
+contains(app, 'async function splitVideoCard', 'card split uses real split API');
+contains(app, 'async function mergeVideoCard', 'card merge uses real merge API');
 
 const styles = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
 contains(styles, '.video-card-context-detail', 'video card detail styles exist');
@@ -278,6 +292,16 @@ contains(
   styles,
   'max-width: min(560px, calc(100vw - 24px))',
   'video card menu is constrained to viewport',
+);
+
+const tasksRoute = readFileSync('src/app/api/video-cards/[id]/tasks/route.ts', 'utf8');
+contains(tasksRoute, 'video_branch_id: true', 'task history returns its branch id');
+const retryRoute = readFileSync('src/app/api/video/retry/[id]/route.ts', 'utf8');
+contains(retryRoute, 'video_branch_id: true', 'retry reads the original branch id');
+contains(
+  retryRoute,
+  'video_branch_id: originalTask.video_branch_id',
+  'retry remains assigned to the original branch',
 );
 
 const index = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
