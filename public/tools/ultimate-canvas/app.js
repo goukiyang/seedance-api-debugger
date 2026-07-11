@@ -53,9 +53,10 @@
         selectedVideoBranchId: null,
         documentProjectId: null,
         documentVideoCardId: null,
+        contextEpoch: 0,
         bootstrapRequestId: 0,
         documentRequestId: 0,
-        activeSavePromise: null,
+        saveCoordinator: null,
         contextSwitching: false,
         openContextMenu: null,
         projectCreateOpen: false,
@@ -654,19 +655,7 @@
     }
 
     function referenceIdsFromNodeData(data = {}) {
-        const ids = [];
-        if (data.referenceImageId) ids.push(data.referenceImageId);
-        if (data.reference_image_id) ids.push(data.reference_image_id);
-        if (data.generationResult?.reference_image_id) ids.push(data.generationResult.reference_image_id);
-        if (Array.isArray(data.generationResult?.assets)) {
-            data.generationResult.assets.forEach(asset => {
-                if (asset?.referenceImageId) ids.push(asset.referenceImageId);
-                if (asset?.reference_image_id) ids.push(asset.reference_image_id);
-            });
-        }
-        if (Array.isArray(data.referenceImageIds)) ids.push(...data.referenceImageIds);
-        if (Array.isArray(data.reference_image_ids)) ids.push(...data.reference_image_ids);
-        return ids;
+        return window.UltimateCanvasGenerationInteractions.referenceIdsFromNodeData(data);
     }
 
     function referenceUrlsFromNodeData(data = {}) {
@@ -1386,7 +1375,11 @@
     function applyBootstrapState(data) {
         const project = selectedProjectFromBootstrap(data);
         const videoCard = selectedVideoCardFromBootstrap(data);
+        const previousProjectId = canvasRuntime.selectedProjectId;
         const previousVideoCardId = canvasRuntime.selectedVideoCardId;
+        if (previousProjectId !== (project?.id || null) || previousVideoCardId !== (videoCard?.id || null)) {
+            invalidateGenerationContext();
+        }
         canvasRuntime.selectedProjectId = project?.id || null;
         canvasRuntime.selectedVideoCardId = videoCard?.id || null;
         if (previousVideoCardId !== canvasRuntime.selectedVideoCardId) {
@@ -1569,6 +1562,10 @@
         renderRuntimeContextControls();
     }
 
+    function invalidateGenerationContext() {
+        canvasRuntime.contextEpoch += 1;
+    }
+
     function requestCanvasConfirmation(options = {}) {
         return new Promise(resolve => {
             document.querySelector('[data-canvas-confirm]')?.remove();
@@ -1608,6 +1605,7 @@
     }
 
     function clearCanvasForContext() {
+        invalidateGenerationContext();
         canvasRuntime.documentRestoring = true;
         try {
             clearAllVideoEstimates();
@@ -1618,6 +1616,7 @@
     }
 
     function resetProjectScopedRuntime(projectId) {
+        invalidateGenerationContext();
         stopAllVideoPolling();
         canvasRuntime.selectedProjectId = projectId || null;
         canvasRuntime.selectedVideoCardId = null;
@@ -1686,6 +1685,7 @@
         try {
             const saved = await flushCanvasSave('before_video_card_change');
             if (!saved) throw new Error('当前画布保存失败，已取消切换视频卡。');
+            invalidateGenerationContext();
             stopAllVideoPolling();
             canvasRuntime.selectedVideoBranchId = null;
             const data = await loadCanvasBootstrap(canvasRuntime.selectedProjectId, videoCardId, { restoreDocument: false });
@@ -2273,65 +2273,91 @@
         };
     }
 
-    async function saveCanvasDocument(reason = 'autosave') {
+    function canvasSaveSnapshot(reason) {
         if (canvasRuntime.documentRestoring) return true;
         if (!canvasRuntime.bootstrapLoaded || !canvasRuntime.selectedProjectId) return true;
         const projectId = canvasRuntime.selectedProjectId;
         const videoCardId = canvasRuntime.selectedVideoCardId;
         const videoBranchId = canvasRuntime.selectedVideoBranchId;
-        const contextKey = `${projectId}:${videoCardId || ''}:${videoBranchId || ''}`;
         const documentId = canvasRuntime.documentProjectId === projectId ? canvasRuntime.documentId : null;
-        if (!engine.nodes.size && !documentId) return true;
-        canvasRuntime.saveState = 'saving';
-        canvasRuntime.saveError = null;
-        updateSaveIndicator();
+        if (!engine.nodes.size && !documentId) return null;
         const payload = window.UltimateCanvasGenerationInteractions.durableCanvasDocument(
             canvasDocumentPayload({ projectId, videoCardId })
         );
-        const savePromise = postJson('/api/tools/ultimate-canvas/document', {
-            document_id: documentId,
-            project_id: projectId,
-            title: selectedVideoCard()?.title ? `无线画布 / ${selectedVideoCard().title}` : '无线画布',
-            active_generation_node_id: engine.selectedNodeId,
-            document_json: JSON.stringify(payload),
-            save_reason: reason
-        });
-        canvasRuntime.activeSavePromise = savePromise;
-        try {
-            const result = await savePromise;
-            const currentContextKey = `${canvasRuntime.selectedProjectId || ''}:${canvasRuntime.selectedVideoCardId || ''}:${canvasRuntime.selectedVideoBranchId || ''}`;
-            if (currentContextKey === contextKey) {
-                canvasRuntime.documentId = result.document?.id || documentId || canvasRuntime.documentId;
-                canvasRuntime.documentProjectId = projectId;
-                canvasRuntime.documentVideoCardId = videoCardId;
-                canvasRuntime.saveState = 'saved';
-                canvasRuntime.saveError = null;
+        return {
+            contextEpoch: canvasRuntime.contextEpoch,
+            projectId,
+            videoCardId,
+            videoBranchId,
+            documentId,
+            request: {
+                document_id: documentId,
+                project_id: projectId,
+                title: selectedVideoCard()?.title ? `无线画布 / ${selectedVideoCard().title}` : '无线画布',
+                active_generation_node_id: engine.selectedNodeId,
+                document_json: JSON.stringify(payload),
+                save_reason: reason
             }
-            return true;
-        } catch (error) {
-            if (canvasRuntime.selectedProjectId === projectId) {
-                canvasRuntime.saveState = 'error';
-                canvasRuntime.saveError = error?.message || '保存失败';
-                showCanvasNotice(canvasRuntime.saveError, 'warn');
+        };
+    }
+
+    function canvasSaveContextMatches(snapshot) {
+        return snapshot.contextEpoch === canvasRuntime.contextEpoch
+            && snapshot.projectId === canvasRuntime.selectedProjectId
+            && snapshot.videoCardId === canvasRuntime.selectedVideoCardId
+            && snapshot.videoBranchId === canvasRuntime.selectedVideoBranchId;
+    }
+
+    canvasRuntime.saveCoordinator = window.UltimateCanvasSaveCoordinator.createCanvasSaveCoordinator({
+        isCurrent: job => canvasSaveContextMatches(job.snapshot),
+        executor: job => {
+            const request = { ...job.snapshot.request };
+            if (!request.document_id
+                && canvasSaveContextMatches(job.snapshot)
+                && canvasRuntime.documentProjectId === job.snapshot.projectId) {
+                request.document_id = canvasRuntime.documentId;
             }
-            return false;
-        } finally {
-            if (canvasRuntime.activeSavePromise === savePromise) canvasRuntime.activeSavePromise = null;
+            return postJson('/api/tools/ultimate-canvas/document', request);
+        },
+        onStart: job => {
+            if (!canvasSaveContextMatches(job.snapshot)) return;
+            canvasRuntime.saveState = 'saving';
+            canvasRuntime.saveError = null;
+            updateSaveIndicator();
+        },
+        onSuccess: (result, job) => {
+            const snapshot = job.snapshot;
+            if (!canvasSaveContextMatches(snapshot)) return;
+            canvasRuntime.documentId = result.document?.id || snapshot.documentId || canvasRuntime.documentId;
+            canvasRuntime.documentProjectId = snapshot.projectId;
+            canvasRuntime.documentVideoCardId = snapshot.videoCardId;
+            canvasRuntime.saveState = 'saved';
+            canvasRuntime.saveError = null;
+            updateSaveIndicator();
+        },
+        onError: (error, job, state) => {
+            if (!canvasSaveContextMatches(job.snapshot) || state.hasPending) return;
+            canvasRuntime.saveState = 'error';
+            canvasRuntime.saveError = error?.message || '保存失败';
+            showCanvasNotice(canvasRuntime.saveError, 'warn');
             updateSaveIndicator();
         }
+    });
+
+    async function saveCanvasDocument(reason = 'autosave') {
+        const snapshot = canvasSaveSnapshot(reason);
+        if (!snapshot || snapshot === true) return true;
+        const outcome = await canvasRuntime.saveCoordinator.request(snapshot);
+        return outcome.ok;
     }
 
     async function flushCanvasSave(reason = 'flush') {
         window.clearTimeout(canvasRuntime.saveTimer);
         canvasRuntime.saveTimer = null;
-        if (canvasRuntime.activeSavePromise) {
-            try {
-                await canvasRuntime.activeSavePromise;
-            } catch {
-                // saveCanvasDocument 会统一呈现错误；继续补一次最终保存。
-            }
-        }
-        return saveCanvasDocument(reason);
+        const snapshot = canvasSaveSnapshot(reason);
+        if (!snapshot || snapshot === true) return true;
+        const outcome = await canvasRuntime.saveCoordinator.flush(snapshot);
+        return outcome.ok;
     }
 
     function scheduleCanvasSave(reason = 'change') {
@@ -2450,6 +2476,7 @@
                     showCanvasNotice(error?.message || '\u89c6\u9891\u65b9\u5411\u6062\u590d\u5931\u8d25\uff0c\u5df2\u56de\u9000\u5230\u9ed8\u8ba4\u65b9\u5411\u3002', 'warn');
                 }
             }
+            invalidateGenerationContext();
             canvasRuntime.documentRestoring = true;
             stopAllVideoPolling();
             clearAllVideoEstimates();
@@ -2851,7 +2878,11 @@
             .map(item => item.referenceImageId);
     }
 
-    function generationModeState(node, referenceCount = generationReferenceItems(node.id).length) {
+    function availableGenerationReferenceItems(nodeId) {
+        return generationReferenceItems(nodeId).filter(item => item.available);
+    }
+
+    function generationModeState(node, referenceCount = availableGenerationReferenceItems(node.id).length) {
         const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
             node.type,
             canvasRuntime.bootstrap?.capabilities?.[node.type]
@@ -2893,7 +2924,7 @@
         const state = canvasRuntime.referenceSelection;
         document.querySelectorAll('.canvas-node').forEach(nodeEl => {
             const node = engine.nodes.get(nodeEl.dataset.nodeId);
-            const compatible = Boolean(state && node?.type === 'image' && node.data?.referenceImageId);
+            const compatible = Boolean(state && node?.type === 'image' && referenceIdsFromNodeData(node.data || {}).length);
             nodeEl.classList.toggle('is-reference-compatible', compatible);
             nodeEl.classList.toggle('is-reference-incompatible', Boolean(state && !compatible));
         });
@@ -2905,7 +2936,7 @@
         if (!state) return;
         const target = engine.nodes.get(state.targetNodeId);
         if (!target) return;
-        const count = generationReferenceItems(target.id).length;
+        const count = availableGenerationReferenceItems(target.id).length;
         const status = document.createElement('div');
         status.className = 'canvas-reference-selection-status';
         status.dataset.referenceSelectionStatus = '';
@@ -2940,7 +2971,7 @@
         if (!target || !['image', 'video'].includes(target.type)) return false;
         finishReferenceSelection({ returnToTarget: false });
         const maximumReferences = referenceSelectionMaximum(target);
-        if (generationReferenceItems(targetNodeId).length >= maximumReferences) {
+        if (availableGenerationReferenceItems(targetNodeId).length >= maximumReferences) {
             showCanvasNotice(`当前模式最多支持 ${maximumReferences} 个参考图`, 'warn');
             return false;
         }
@@ -2966,7 +2997,7 @@
         if (!state || !target || source?.type !== 'image') return false;
         const decision = CanvasReferenceSelection.add(state, {
             nodeId: sourceNodeId,
-            referenceImageId: source.data?.referenceImageId
+            referenceImageId: referenceIdsFromNodeData(source.data || {})[0] || ''
         });
         if (!decision.accepted) {
             engine.selectNode(target.id);
@@ -3017,18 +3048,26 @@
         const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
-        const mode = generationModeState(node).selected;
+        const modeState = generationModeState(node);
+        const mode = modeState.selected;
+        const interactionReadiness = window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
+            node.type,
+            modeState.capability,
+            node.data || {},
+            availableGenerationReferenceItems(nodeId).length,
+            nodeMode
+        );
         updateGenerationNodeModelLabel(nodeEl, node);
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
         const modeLabel = nodeEl.querySelector('[data-generation-mode-label]');
         if (modeLabel) modeLabel.textContent = mode?.label || nodeMode;
         const submit = nodeEl.querySelector('[data-generation-submit]');
-        if (submit && !submit.classList.contains('is-loading')) submit.disabled = !mode?.enabled;
+        if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready;
         const existingStatus = nodeEl.querySelector('.node-generation-status');
-        if (mode && !mode.enabled) {
-            setNodeGenerationStatus(nodeEl, 'warn', mode.reason);
-            nodeEl.querySelector('.node-generation-status')?.setAttribute('data-mode-invalid', 'true');
-        } else if (existingStatus?.dataset.modeInvalid === 'true') {
+        if (!interactionReadiness.ready) {
+            setNodeGenerationStatus(nodeEl, 'warn', interactionReadiness.message);
+            nodeEl.querySelector('.node-generation-status')?.setAttribute('data-interaction-invalid', 'true');
+        } else if (existingStatus?.dataset.interactionInvalid === 'true') {
             existingStatus.remove();
         }
 
@@ -3095,7 +3134,7 @@
             nodeType: node.type,
             mode,
             minimumReferences: selectedMode?.minimumReferences || 0,
-            referenceCount: generationReferenceItems(nodeId).length
+            referenceCount: availableGenerationReferenceItems(nodeId).length
         });
         return true;
     }
@@ -3114,7 +3153,7 @@
         const selected = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         return `<div class="generation-popover-list">${window.UltimateCanvasGenerationInteractions
-            .modeOptions(node.type, capability, generationReferenceItems(node.id).length)
+            .modeOptions(node.type, capability, availableGenerationReferenceItems(node.id).length)
             .map(option => `<button type="button" class="generation-popover-option ${option.id === selected ? 'is-active' : ''}"
                 data-generation-mode="${escapeHtml(option.id)}" ${option.enabled ? '' : 'disabled aria-disabled="true"'}>
                 <span>${escapeHtml(option.label)}</span>${option.reason ? `<small>${escapeHtml(option.reason)}</small>` : ''}
@@ -3130,7 +3169,7 @@
         if (node.type === 'image') {
             return `<div class="generation-popover-spec" data-generation-settings="image">
                 ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
-                ${generationSelect('size', '尺寸', capability.resolutions, settings.size)}
+                ${generationSelect('size', '尺寸', capability.sizeOptions, settings.size)}
                 <label><span>数量</span><input type="number" min="1" max="${settings.maximumCount}" value="${settings.count}" data-generation-setting="count"></label>
             </div>`;
         }
@@ -3566,8 +3605,18 @@
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         const generationNode = payload.nodeId ? engine.nodes.get(payload.nodeId) : null;
         if (generationNode && ['image', 'video'].includes(generationNode.type)) {
-            const selectedMode = generationModeState(generationNode).selected;
-            if (selectedMode && !selectedMode.enabled) return { ready: false, message: selectedMode.reason };
+            const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
+                generationNode.type,
+                capabilities[generationNode.type]
+            );
+            const interactionReadiness = window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
+                generationNode.type,
+                capability,
+                generationNode.data || {},
+                (payload.referenceImageIds || []).length,
+                payload.mode
+            );
+            if (!interactionReadiness.ready) return interactionReadiness;
         }
         const project = selectedProject();
         const card = selectedVideoCard();
@@ -3640,6 +3689,17 @@
         };
     }
 
+    function currentGenerationContext(nodeId) {
+        return {
+            epoch: canvasRuntime.contextEpoch,
+            projectId: canvasRuntime.selectedProjectId,
+            videoCardId: canvasRuntime.selectedVideoCardId,
+            documentId: canvasRuntime.documentId,
+            nodeId,
+            node: engine.nodes.get(nodeId)
+        };
+    }
+
     async function submitNodeGeneration(nodeEl, button) {
         const api = window.CanvasGenerationAPI;
         const payload = collectGenerationPayload(nodeEl);
@@ -3652,37 +3712,45 @@
         }
 
         const submittingNode = engine.nodes.get(payload.nodeId);
+        const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(
+            currentGenerationContext(payload.nodeId)
+        );
         if (submittingNode && payload.kind === 'video') {
             submittingNode.data = {
                 ...submittingNode.data,
                 videoCardId: canvasRuntime.selectedVideoCardId,
-                videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId
+                videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
+                generationStatus: 'submitted'
             };
         }
 
         setSubmitLoading(button, true);
         setNodeGenerationStatus(nodeEl, 'loading', '正在提交生成请求');
-        try {
-            const result = await api.generate(payload);
-            applyGenerationResult(nodeEl, payload, result);
-        } catch (error) {
-            const node = engine.nodes.get(payload.nodeId);
-            if (node) {
-                node.data = {
-                    ...node.data,
-                    prompt: payload.prompt,
-                    generationPayload: payload,
-                    generationStatus: 'failed',
-                    generationError: error?.message || '生成请求失败'
-                };
+        await window.UltimateCanvasGenerationInteractions.runGuardedGenerationResponse({
+            response: Promise.resolve().then(() => api.generate(payload)),
+            captured: capturedContext,
+            current: () => currentGenerationContext(payload.nodeId),
+            onSuccess: result => applyGenerationResult(nodeEl, payload, result),
+            onError: error => {
+                const node = engine.nodes.get(payload.nodeId);
+                if (node) {
+                    node.data = {
+                        ...node.data,
+                        prompt: payload.prompt,
+                        generationPayload: payload,
+                        generationStatus: 'failed',
+                        generationError: error?.message || '生成请求失败'
+                    };
+                }
+                setNodeGenerationStatus(nodeEl, 'error', error?.message || '生成请求失败，输入和素材已保留');
+                scheduleCanvasSave('generation_error');
+                showCanvasNotice(error?.message || '生成请求失败，输入和已选素材已保留，可稍后重试。', 'error');
+            },
+            onFinally: () => {
+                setSubmitLoading(button, false);
+                renderGenerationNodeControls(payload.nodeId);
             }
-            setNodeGenerationStatus(nodeEl, 'error', error?.message || '生成请求失败，输入和素材已保留');
-            scheduleCanvasSave('generation_error');
-            showCanvasNotice(error?.message || '生成请求失败，输入和已选素材已保留，可稍后重试。', 'error');
-        } finally {
-            setSubmitLoading(button, false);
-            renderGenerationNodeControls(payload.nodeId);
-        }
+        });
     }
 
     document.addEventListener('click', (e) => {

@@ -9,6 +9,7 @@
 
     function createGenerationTaskCoordinator(options) {
         const active = new Map();
+        const ownedByNode = new Map();
         let timer = null;
         let runningCycle = null;
 
@@ -34,14 +35,26 @@
 
         function register(taskId, nodeId) {
             if (!taskId || !nodeId) return;
+            const ownedTaskId = ownedByNode.get(nodeId);
+            if (ownedTaskId && ownedTaskId !== taskId) {
+                const ownedEntry = active.get(ownedTaskId);
+                active.delete(ownedTaskId);
+                if (ownedEntry && ownedByNode.get(ownedEntry.nodeId) === ownedTaskId) {
+                    ownedByNode.delete(ownedEntry.nodeId);
+                }
+            }
             const existing = active.get(taskId);
             if (existing) {
                 if (existing.nodeId !== nodeId) {
-                    active.set(taskId, { taskId, nodeId, attempt: 0, errorCount: 0 });
+                    if (ownedByNode.get(existing.nodeId) === taskId) ownedByNode.delete(existing.nodeId);
+                    const replacement = { taskId, nodeId, attempt: 0, errorCount: 0 };
+                    active.set(taskId, replacement);
+                    ownedByNode.set(nodeId, taskId);
                 }
                 return;
             }
             active.set(taskId, { taskId, nodeId, attempt: 0, errorCount: 0 });
+            ownedByNode.set(nodeId, taskId);
             if (timer === null && !runningCycle) scheduleNext();
         }
 
@@ -49,11 +62,13 @@
             const existing = active.get(taskId);
             if (nodeId && existing?.nodeId !== nodeId) return;
             if (!active.delete(taskId)) return;
+            if (ownedByNode.get(existing.nodeId) === taskId) ownedByNode.delete(existing.nodeId);
             if (!active.size) cancelTimer();
         }
 
         function clear() {
             active.clear();
+            ownedByNode.clear();
             cancelTimer();
         }
 

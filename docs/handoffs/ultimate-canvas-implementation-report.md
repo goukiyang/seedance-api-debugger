@@ -92,3 +92,35 @@ Modified files for this follow-up are `public/tools/ultimate-canvas/styles.css`,
 TDD RED was recorded with `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`: strict PostCSS first exposed an unrelated legacy parse-recovery brace, so the smoke was switched to Next's bundled PostCSS safe parser; it then failed on the production `height: 100%` result-card declaration. After the CSS fix, the same smoke passed. Focused verification runs the new semantic layout smoke plus interaction, complete, preview API, and generation workflow smokes, six canvas JavaScript syntax checks, `npx tsc --noEmit --pretty false`, and `git diff --check`.
 
 The semantic smoke parses the stylesheet AST and checks exact declarations; it does not itself provide computed browser rectangles, stacking/hit-test evidence, clicks, or executed `ResizeObserver` behavior. Parent browser QA supplied the missing rendering evidence: desktop result geometry and hit testing passed, 390px document overflow stayed at zero, the mobile popover stayed within 12px viewport margins, and the browser console reported zero warning/error entries.
+
+## Final production hardening (2026-07-12)
+
+This pass closes every Critical and Important finding from the whole-branch review without adding a second canvas workflow or changing backend generation, pricing, provider, credit, authentication, admin, or database behavior.
+
+### Production changes
+
+- Generation submissions now capture a context epoch, project ID, video-card ID, canvas document ID, node ID, and original node object. Project/card switches, canvas clears, and document restores invalidate the epoch before context replacement. Deferred stale image/video successes and failures cannot mutate or decorate a replacement node, register polling, change status, show completion/error notices, or schedule a save.
+- One shared normalized nonterminal predicate covers submitted, queued, pending, processing, running, and normalized `in_progress` variants. Video submit readiness and rendering use it; image regeneration remains available. The polling coordinator now enforces one task owner per node and ignores responses from replaced ownership.
+- `canvas-save-coordinator.js` provides a single-flight, latest-wins queue with an injected executor. No canvas document POST runs concurrently. Intermediate dirty revisions coalesce, failure does not wedge later saves, flush persists the newest snapshot, and stale-context responses cannot update the current document ID or save state.
+- Capability normalization preserves outer `enabled`, `message`, and `reason`, preserves explicit empty interaction arrays, disables missing/unavailable capabilities, and caps every mode maximum by `max_reference_images`. Image specifications consume normalized `interaction.size_options`; `resolutions` remains only a compatibility alias.
+- Mode counts, reference selection limits/status, compatibility markers, and submit gating use durable available reference IDs, including restored nested result/asset forms. Connected images without a durable ID remain visible as unavailable but cannot enable a mode.
+
+### TDD evidence and tests
+
+The first focused RED run failed for the intended missing behavior:
+
+- `ultimate-canvas-generation-node-interactions-smoke.ts`: normalized capability `enabled` was missing.
+- `ultimate-canvas-generation-task-coordinator-smoke.ts`: one node retained two active tasks (`2 !== 1`).
+- `ultimate-canvas-generation-lifecycle-smoke.ts`: `captureGenerationContext` did not exist.
+- `ultimate-canvas-save-coordinator-smoke.ts`: `canvas-save-coordinator.js` did not exist.
+- A second save RED proved stale context delivery by changing the current document from `replacement-document` to `stale-document`.
+
+New executable coverage is in `scripts/ultimate-canvas-generation-lifecycle-smoke.ts` and `scripts/ultimate-canvas-save-coordinator-smoke.ts`. Existing interaction and task-coordinator smokes now cover disabled/missing/enabled capability recovery, image `size_options`, explicit empty arrays, capped maxima, normalized nonterminal statuses, video duplicate readiness, nested durable references, unavailable-reference mode gating, one-node ownership, and stale replaced-task responses.
+
+All 11 `ultimate-canvas*-smoke.ts` scripts pass, including the local mock preview API smoke. Eight JavaScript syntax checks pass (the seven existing canvas scripts plus the new save coordinator), as do `npx tsc --noEmit --pretty false`, `git diff --check`, `npm run lint`, and `npm run build`. Lint retains only pre-existing warnings in unrelated React files.
+
+### Safety and acceptance
+
+No online text, image, or video generation was run. No retry or paid task was created, and points consumed were exactly zero. `.env`, API/admin settings, provider secrets, credit rules, database schema, backend pricing/provider/generation routes, package metadata, and lockfiles were not read or modified. Production calls remain same-origin sd2 calls for an ordinary user.
+
+Browser acceptance was not claimed by this hardening pass. The parent must rerun desktop/mobile browser acceptance after the final commit, including capability-disabled rendering, nonterminal video submit disablement, context-switch stale response behavior, reference availability, and save-state behavior.

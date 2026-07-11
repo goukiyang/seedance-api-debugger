@@ -47,23 +47,42 @@
         return prototype === Object.prototype || prototype === null;
     }
 
+    function hasOwn(object, key) {
+        return Object.prototype.hasOwnProperty.call(object, key);
+    }
+
+    function normalizedStrings(interaction, key, defaults, validator) {
+        return hasOwn(interaction, key)
+            ? strings(interaction[key], validator)
+            : [...defaults];
+    }
+
     function normalizeCapabilities(kind, capability) {
         const defaults = DEFAULTS[kind] || DEFAULTS.video;
         const interaction = isPlainObject(capability?.interaction) ? capability.interaction : {};
         const definitions = MODE_DEFINITIONS[kind] || MODE_DEFINITIONS.video;
         const validModes = new Set(definitions.map(mode => mode.id));
-        const modes = strings(interaction.modes, value => validModes.has(value));
-        const ratios = strings(interaction.ratios, value => VALID_RATIOS.has(value));
-        const durations = (Array.isArray(interaction.durations) ? interaction.durations : []).filter(value => Number.isInteger(value) && value > 0);
+        const modes = normalizedStrings(interaction, 'modes', defaults.modes, value => validModes.has(value));
+        const ratios = normalizedStrings(interaction, 'ratios', defaults.ratios, value => VALID_RATIOS.has(value));
+        const durations = hasOwn(interaction, 'durations')
+            ? (Array.isArray(interaction.durations) ? interaction.durations : []).filter(value => Number.isInteger(value) && value > 0)
+            : [...defaults.durations];
         const validResolutions = kind === 'image' ? VALID_IMAGE_RESOLUTIONS : VALID_VIDEO_RESOLUTIONS;
-        const resolutions = strings(interaction.resolutions, value => validResolutions.has(value));
+        const resolutionKey = kind === 'image' && hasOwn(interaction, 'size_options') ? 'size_options' : 'resolutions';
+        const resolutions = hasOwn(interaction, resolutionKey)
+            ? strings(interaction[resolutionKey], value => validResolutions.has(value))
+            : [...defaults.resolutions];
         const maxReferenceImages = Number.isInteger(interaction.max_reference_images) && interaction.max_reference_images >= 0
             ? interaction.max_reference_images : defaults.maxReferenceImages;
         return {
-            modes: modes.length ? modes : [...defaults.modes],
-            ratios: ratios.length ? ratios : [...defaults.ratios],
-            durations: durations.length ? [...new Set(durations)] : [...defaults.durations],
-            resolutions: resolutions.length ? resolutions : [...defaults.resolutions],
+            enabled: capability?.enabled === true,
+            message: typeof capability?.message === 'string' ? capability.message : '',
+            reason: typeof capability?.reason === 'string' ? capability.reason : '',
+            modes,
+            ratios,
+            durations: [...new Set(durations)],
+            resolutions,
+            sizeOptions: kind === 'image' ? resolutions : [],
             supportsAudio: typeof interaction.supports_audio === 'boolean' ? interaction.supports_audio : defaults.supportsAudio,
             supportsLastFrame: typeof interaction.supports_last_frame === 'boolean' ? interaction.supports_last_frame : defaults.supportsLastFrame,
             supportsWatermark: typeof interaction.supports_watermark === 'boolean' ? interaction.supports_watermark : defaults.supportsWatermark,
@@ -76,11 +95,127 @@
         const allowed = new Set(Array.isArray(capability?.modes) ? capability.modes : []);
         const count = Number.isFinite(referenceCount) ? Math.max(0, referenceCount) : 0;
         return definitions.filter(mode => allowed.has(mode.id)).map(mode => {
+            mode = {
+                ...mode,
+                maximumReferences: Number.isInteger(capability?.maxReferenceImages)
+                    ? Math.min(mode.maximumReferences, capability.maxReferenceImages)
+                    : mode.maximumReferences
+            };
             let reason = '';
             if (count < mode.minimumReferences) reason = `至少需要 ${mode.minimumReferences} 个参考图`;
             else if (count > mode.maximumReferences) reason = `最多支持 ${mode.maximumReferences} 个参考图`;
             return { ...mode, enabled: !reason, reason };
         });
+    }
+
+    const NONTERMINAL_GENERATION_STATUSES = new Set([
+        'submitted', 'queued', 'pending', 'processing', 'running', 'in_progress', 'inprogress'
+    ]);
+
+    function normalizedGenerationStatus(status) {
+        return typeof status === 'string'
+            ? status.trim().toLowerCase().replace(/[\s-]+/g, '_')
+            : '';
+    }
+
+    function isNonterminalGenerationStatus(status) {
+        return NONTERMINAL_GENERATION_STATUSES.has(normalizedGenerationStatus(status));
+    }
+
+    function nodeHasNonterminalVideoTask(node) {
+        if (!node || (node.type && node.type !== 'video')) return false;
+        const data = node.data || node;
+        return [
+            data.generationStatus,
+            data.local_status,
+            data.status,
+            data.generationResult?.local_status,
+            data.generationResult?.status
+        ].some(isNonterminalGenerationStatus);
+    }
+
+    function generationInteractionReadiness(kind, capability, nodeData, referenceCount, selectedMode) {
+        if (!capability?.enabled) {
+            return { ready: false, message: capability?.message || capability?.reason || '当前生成能力不可用。' };
+        }
+        if (kind === 'video' && nodeHasNonterminalVideoTask(nodeData)) {
+            return { ready: false, message: '当前视频任务仍在处理中，请等待完成后再生成。' };
+        }
+        const selected = modeOptions(kind, capability, referenceCount)
+            .find(mode => mode.id === selectedMode);
+        if (!selected) return { ready: false, message: capability.message || '当前没有可用的生成模式。' };
+        if (!selected.enabled) return { ready: false, message: selected.reason };
+        const hasSpec = kind === 'image'
+            ? capability.ratios?.length > 0 && capability.sizeOptions?.length > 0
+            : capability.ratios?.length > 0 && capability.durations?.length > 0 && capability.resolutions?.length > 0;
+        if (!hasSpec) return { ready: false, message: capability.message || '当前没有可用的生成规格。' };
+        return { ready: true };
+    }
+
+    function referenceIdsFromNodeData(data = {}) {
+        const ids = [];
+        const visited = new Set();
+        function visit(value) {
+            if (!value || typeof value !== 'object' || visited.has(value)) return;
+            visited.add(value);
+            ['referenceImageId', 'reference_image_id'].forEach(key => {
+                if (typeof value[key] === 'string' && value[key]) ids.push(value[key]);
+            });
+            ['referenceImageIds', 'reference_image_ids'].forEach(key => {
+                if (Array.isArray(value[key])) ids.push(...value[key].filter(item => typeof item === 'string' && item));
+            });
+            ['generationResult', 'result', 'output'].forEach(key => visit(value[key]));
+            if (Array.isArray(value.assets)) value.assets.forEach(visit);
+        }
+        visit(data);
+        return [...new Set(ids)];
+    }
+
+    function availableReferenceCount(items) {
+        return (Array.isArray(items) ? items : [])
+            .filter(item => referenceIdsFromNodeData(item?.data || item).length > 0)
+            .length;
+    }
+
+    function captureGenerationContext(context) {
+        return Object.freeze({
+            epoch: context.epoch,
+            projectId: context.projectId || null,
+            videoCardId: context.videoCardId || null,
+            documentId: context.documentId || null,
+            nodeId: context.nodeId,
+            node: context.node
+        });
+    }
+
+    function generationContextMatches(captured, current) {
+        return Boolean(captured && current
+            && captured.epoch === current.epoch
+            && captured.projectId === (current.projectId || null)
+            && captured.videoCardId === (current.videoCardId || null)
+            && captured.documentId === (current.documentId || null)
+            && captured.nodeId === current.nodeId
+            && captured.node === current.node);
+    }
+
+    async function runGuardedGenerationResponse(options) {
+        try {
+            const result = await options.response;
+            if (!generationContextMatches(options.captured, options.current())) {
+                return { stale: true, result };
+            }
+            const value = await options.onSuccess?.(result);
+            await options.onFinally?.();
+            return { stale: false, result, value };
+        } catch (error) {
+            if (!generationContextMatches(options.captured, options.current())) {
+                return { stale: true, error };
+            }
+            const value = await options.onError?.(error);
+            await options.onFinally?.();
+            if (!options.onError) throw error;
+            return { stale: false, error, value };
+        }
     }
 
     function referenceRole(mode, index) {
@@ -193,6 +328,14 @@
     return {
         normalizeCapabilities,
         modeOptions,
+        isNonterminalGenerationStatus,
+        nodeHasNonterminalVideoTask,
+        generationInteractionReadiness,
+        referenceIdsFromNodeData,
+        availableReferenceCount,
+        captureGenerationContext,
+        generationContextMatches,
+        runGuardedGenerationResponse,
         referenceRole,
         replaceCameraLine,
         sanitizeSerializable,

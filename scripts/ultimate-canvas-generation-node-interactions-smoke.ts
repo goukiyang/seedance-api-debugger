@@ -69,7 +69,7 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260711-liblib-interactions', 'canvas app cache key matches the final interaction release');
+contains(indexSource, 'app.js?v=20260712-final-hardening', 'canvas app cache key matches final hardening');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
 contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
 contains(appSource, '350', 'video estimates debounce for 350ms');
@@ -141,6 +141,8 @@ assert.ok(bootstrapSource.includes('RESOLUTION_OPTIONS'));
 assert.ok(bootstrapSource.includes('RATIO_OPTIONS'));
 
 const videoCapability = interactions.normalizeCapabilities('video', {
+  enabled: true,
+  message: 'video ready',
   interaction: {
     modes: ['text-to-video', 'image-to-video', 'first-last-frame-video'],
     ratios: ['16:9', '9:16'],
@@ -155,20 +157,59 @@ const videoCapability = interactions.normalizeCapabilities('video', {
 
 assert.deepEqual(videoCapability.durations, [5, 10]);
 assert.equal(videoCapability.supportsWatermark, false);
+assert.equal(videoCapability.enabled, true);
+assert.equal(videoCapability.message, 'video ready');
 
 const invalidResolutionCapability = interactions.normalizeCapabilities('video', {
+  enabled: true,
   interaction: { resolutions: ['2160p', 'not-a-resolution'] },
 });
-assert.deepEqual(invalidResolutionCapability.resolutions, ['720p', '1080p']);
+assert.deepEqual(invalidResolutionCapability.resolutions, [], 'explicit invalid video resolutions do not invent defaults');
 
 const imageResolutionCapability = interactions.normalizeCapabilities('image', {
-  interaction: { resolutions: ['1K', '2K', '2160p'] },
+  enabled: true,
+  interaction: { size_options: ['1K', '2K', '2160p'] },
 });
-assert.deepEqual(imageResolutionCapability.resolutions, ['1K', '2K']);
+assert.deepEqual(imageResolutionCapability.sizeOptions, ['1K', '2K']);
+assert.deepEqual(imageResolutionCapability.resolutions, ['1K', '2K'], 'image resolution alias remains compatible');
 const imageMixedResolutionCapability = interactions.normalizeCapabilities('image', {
-  interaction: { resolutions: ['1K', '2160p'] },
+  enabled: true,
+  interaction: { size_options: ['1K', '2160p'] },
 });
-assert.deepEqual(imageMixedResolutionCapability.resolutions, ['1K']);
+assert.deepEqual(imageMixedResolutionCapability.sizeOptions, ['1K']);
+const imageEmptySizeCapability = interactions.normalizeCapabilities('image', {
+  enabled: true,
+  interaction: { size_options: [] },
+});
+assert.deepEqual(imageEmptySizeCapability.sizeOptions, [], 'explicit empty image sizes stay unavailable');
+const imageDefaultSizeCapability = interactions.normalizeCapabilities('image', {
+  enabled: true,
+  interaction: {},
+});
+assert.deepEqual(imageDefaultSizeCapability.sizeOptions, ['1K', '2K'], 'missing image sizes use compatibility defaults');
+
+const disabledCapability = interactions.normalizeCapabilities('image', {
+  enabled: false,
+  message: 'provider unavailable',
+  interaction: { modes: ['text-to-image'], size_options: ['1K'] },
+});
+assert.equal(disabledCapability.enabled, false);
+assert.equal(disabledCapability.message, 'provider unavailable');
+assert.deepEqual(
+  interactions.generationInteractionReadiness('image', disabledCapability, {}, 0, 'text-to-image'),
+  { ready: false, message: 'provider unavailable' },
+);
+const missingCapability = interactions.normalizeCapabilities('image');
+assert.equal(missingCapability.enabled, false, 'missing backend capability is unavailable');
+const recoveredCapability = interactions.normalizeCapabilities('image', {
+  enabled: true,
+  interaction: { modes: ['text-to-image'], size_options: ['1K'] },
+});
+assert.equal(
+  interactions.generationInteractionReadiness('image', recoveredCapability, {}, 0, 'text-to-image').ready,
+  true,
+  'enabled capability with a valid mode and size recovers',
+);
 
 const nullInteractionCapability = interactions.normalizeCapabilities('video', { interaction: null });
 assert.deepEqual(nullInteractionCapability.modes, [
@@ -188,6 +229,8 @@ assert.match(withoutReferences.find((item: any) => item.id === 'image-to-video')
 
 const withTwoReferences = interactions.modeOptions('video', videoCapability, 2);
 assert.equal(withTwoReferences.find((item: any) => item.id === 'first-last-frame-video').enabled, true);
+assert.equal(withTwoReferences.find((item: any) => item.id === 'image-to-video').maximumReferences, 2,
+  'mode maxima are capped by backend max_reference_images');
 assert.equal(interactions.referenceRole('first-last-frame-video', 0), '首帧');
 assert.equal(interactions.referenceRole('first-last-frame-video', 1), '尾帧');
 
@@ -402,6 +445,56 @@ const smartMultiFrameAfterRemoval = interactions.modeOptions('video', {
 assert.equal(smartMultiFrameWithTwo.enabled, true);
 assert.equal(smartMultiFrameAfterRemoval.enabled, false, 'mode and submit gating become invalid after reference removal');
 assert.ok(smartMultiFrameAfterRemoval.reason);
+
+for (const status of ['submitted', 'queued', 'pending', 'processing', 'running', 'IN-PROGRESS', 'in progress']) {
+  assert.equal(interactions.isNonterminalGenerationStatus(status), true, `${status} is nonterminal`);
+}
+for (const status of ['succeeded', 'failed', 'cancelled', '', null]) {
+  assert.equal(interactions.isNonterminalGenerationStatus(status), false, `${status} is terminal or empty`);
+}
+assert.equal(interactions.nodeHasNonterminalVideoTask({
+  type: 'video',
+  data: { taskId: 'task-1', generationStatus: 'processing' },
+}), true);
+assert.deepEqual(
+  interactions.generationInteractionReadiness(
+    'video',
+    videoCapability,
+    { taskId: 'task-1', generationStatus: 'running' },
+    0,
+    'text-to-video',
+  ),
+  { ready: false, message: '当前视频任务仍在处理中，请等待完成后再生成。' },
+  'paid video submission is rejected while this node owns a nonterminal task',
+);
+assert.equal(
+  interactions.generationInteractionReadiness('image', recoveredCapability, { generationStatus: 'running' }, 0, 'text-to-image').ready,
+  true,
+  'image regeneration remains available',
+);
+
+assert.deepEqual(interactions.referenceIdsFromNodeData({
+  generationResult: {
+    assets: [{ reference_image_id: 'asset-reference' }],
+    result: { referenceImageIds: ['nested-reference'] },
+  },
+}).sort(), ['asset-reference', 'nested-reference'], 'restored nested reference IDs remain durable and available');
+assert.equal(interactions.availableReferenceCount([
+  { data: { previewImage: 'https://example.test/unavailable.png' } },
+  { data: { generationResult: { reference_image_id: 'durable-reference' } } },
+]), 1, 'only durable reference IDs count toward mode gating');
+const durableCount = interactions.availableReferenceCount([
+  { data: { previewImage: 'https://example.test/unavailable.png' } },
+  { data: { generationResult: { reference_image_id: 'durable-reference' } } },
+]);
+assert.equal(interactions.modeOptions('video', {
+  modes: ['smart-multi-frame-video'],
+  maxReferenceImages: 9,
+}, durableCount)[0].enabled, false, 'an unavailable connected image cannot enable a multi-reference mode');
+
+assert.ok(appSource.includes('generationInteractionReadiness'), 'app consumes the shared readiness contract');
+assert.ok(appSource.includes('availableGenerationReferenceItems'), 'app gates modes with available references');
+assert.ok(appSource.includes('capability.sizeOptions'), 'image spec UI consumes normalized size options');
 
 function engineHarness() {
   const engine = Object.create(CanvasEngine.prototype);

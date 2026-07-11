@@ -31,7 +31,7 @@ assert.match(cssSource, /\.context-rules-modal/);
 
 assert.match(indexSource, /styles\.css\?v=20260711-liblib-interactions/);
 assert.match(indexSource, /canvas-engine\.js\?v=20260711-liblib-interactions/);
-assert.match(indexSource, /app\.js\?v=20260711-liblib-interactions/);
+assert.match(indexSource, /app\.js\?v=20260712-final-hardening/);
 
 assert.match(routeSource, /const rawContextRules =/);
 assert.match(routeSource, /const contextRules = user\.role === 'admin' \? rawContextRules : ''/);

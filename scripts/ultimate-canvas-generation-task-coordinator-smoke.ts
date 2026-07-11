@@ -94,7 +94,51 @@ async function staleResultSmoke() {
   assert.ok(timerClears >= 1, 'the shared timer is cleared rather than duplicated');
 }
 
+async function oneNodeReplacementResponseSmoke() {
+  const pending: Array<ReturnType<typeof deferred<any>>> = [];
+  const statuses: string[] = [];
+  const coordinator = createGenerationTaskCoordinator({
+    fetchStatus: () => {
+      const next = deferred<any>();
+      pending.push(next);
+      return next.promise;
+    },
+    onStatus: (_nodeId: string, task: any) => statuses.push(task.id),
+    onError: () => {},
+    isNodeAlive: () => true,
+    isHidden: () => false,
+    setTimer: () => 1,
+    clearTimer: () => {},
+    delayFor: () => 3000,
+  });
+  coordinator.register('old-task', 'same-node');
+  const oldCycle = coordinator.runNow();
+  coordinator.register('new-task', 'same-node');
+  pending[0].resolve({ id: 'old-task', local_status: 'succeeded' });
+  await oldCycle;
+  assert.deepEqual(statuses, [], 'old response is inert after same-node ownership replacement');
+  assert.equal(coordinator.has('new-task'), true);
+  coordinator.clear();
+}
+
 async function main() {
+const exclusiveCoordinator = createGenerationTaskCoordinator({
+  fetchStatus: async (taskId: string) => ({ id: taskId, local_status: 'running' }),
+  onStatus: () => {},
+  onError: () => {},
+  isNodeAlive: () => true,
+  isHidden: () => false,
+  setTimer: () => 1,
+  clearTimer: () => {},
+  delayFor: () => 3000,
+});
+exclusiveCoordinator.register('old-task', 'one-node');
+exclusiveCoordinator.register('new-task', 'one-node');
+assert.equal(exclusiveCoordinator.size(), 1, 'one node owns at most one active polling task');
+assert.equal(exclusiveCoordinator.has('old-task'), false, 'registering a replacement task removes old ownership');
+assert.equal(exclusiveCoordinator.has('new-task'), true);
+exclusiveCoordinator.clear();
+
 const statuses: Array<{ nodeId: string; status: string }> = [];
 const errors: Array<{ taskId: string; count: number }> = [];
 const calls: string[] = [];
@@ -177,6 +221,7 @@ assert.equal(coordinator.size(), 0);
 assert.equal(timer, null);
 
 await staleResultSmoke();
+await oneNodeReplacementResponseSmoke();
 
 console.log('ultimate canvas generation task coordinator smoke passed');
 }
