@@ -15,7 +15,7 @@ Task 8 基线：`f72fc26716ef43d4905e5ea03bb511139c32f20e`
 从交付起点到 Task 8 的修改/新增文件如下：
 
 - 前端：`public/tools/ultimate-canvas/app.js`、`canvas-engine.js`、`generation-node-interactions.js`、`generation-node-workflow.js`、`generation-task-coordinator.js`、`video-card-workflow.js`、`index.html`、`styles.css`。
-- 本地预览与自动验证：`scripts/ultimate-canvas-preview-server.mjs`、`ultimate-canvas-preview-api-smoke.ts`、`ultimate-canvas-generation-node-interactions-smoke.ts`、`ultimate-canvas-generation-node-workflow-smoke.ts`、`ultimate-canvas-generation-task-coordinator-smoke.ts`、`ultimate-canvas-video-card-workflow-smoke.ts`、`ultimate-canvas-complete-smoke.ts`、`ultimate-canvas-context-rules-smoke.ts`、`ultimate-canvas-normal-user-access-smoke.ts`。
+- 本地预览与自动验证：`scripts/ultimate-canvas-preview-server.mjs`、`ultimate-canvas-preview-api-smoke.ts`、`ultimate-canvas-generation-node-interactions-smoke.ts`、`ultimate-canvas-result-layout-smoke.ts`、`ultimate-canvas-generation-node-workflow-smoke.ts`、`ultimate-canvas-generation-task-coordinator-smoke.ts`、`ultimate-canvas-video-card-workflow-smoke.ts`、`ultimate-canvas-complete-smoke.ts`、`ultimate-canvas-context-rules-smoke.ts`、`ultimate-canvas-normal-user-access-smoke.ts`。
 - 既有接口与显示规则：`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`、`src/app/api/video-cards/[id]/route.ts`、`src/app/api/video-cards/[id]/tasks/route.ts`、`src/app/api/video/retry/[id]/route.ts`、`src/lib/projects/display.ts`、`src/lib/video-cards/display.ts`。
 - 设计、计划与回执：`docs/superpowers/specs/2026-07-11-ultimate-canvas-generation-nodes-design.md`、`2026-07-11-ultimate-canvas-video-card-in-place-design.md`、`2026-07-11-ultimate-canvas-liblib-interactions-design.md`，对应三个计划文件，以及本回执。
 - Task 8 另同步了三个旧烟测中的最终 cache key 断言：`ultimate-canvas-generation-node-workflow-smoke.ts`、`ultimate-canvas-context-rules-smoke.ts`、`ultimate-canvas-video-card-workflow-smoke.ts`。
@@ -83,4 +83,12 @@ Parent browser QA confirmed that the image result and editor remain on the same 
 
 The defect is fixed in CSS. Selected image/video nodes with a nonempty generation result now use content-driven height with a `350px` minimum; generated result cards use border-box sizing; previews are bounded; and action rows remain in normal flow above the same-node editor. Unselected generated nodes retain the compact `350x240` card and hide result actions until selected. Ports remain at the actual card's vertical center, and the existing `ResizeObserver` continues to refresh connection paths after card size changes. Video task/version action rows remain in the same result card and were not removed or nested.
 
-The source smoke now rejects the old fixed-height selected-result behavior and verifies the compact-state, bounded-media, connector-centering, and resize-observer contracts. Final browser rectangle and click re-verification is pending parent confirmation.
+The source smoke now rejects the old fixed-height selected-result behavior and verifies the compact-state, bounded-media, and connector-centering declarations. It confirms that `ResizeObserver` setup remains in source but does not execute observer behavior. Final browser rectangle and click re-verification is pending parent confirmation.
+
+### Review hardening follow-up
+
+Modified files for this follow-up are `public/tools/ultimate-canvas/styles.css`, the new `scripts/ultimate-canvas-result-layout-smoke.ts`, this handoff, and the ignored `.superpowers/sdd/browser-result-layout-report.md`. The stylesheet now makes the generated result card explicitly content-driven, exposes selected action rows, and caps selected image/video cards at `calc(100vw - 24px)` below 720px without viewport-based font scaling.
+
+TDD RED was recorded with `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`: strict PostCSS first exposed an unrelated legacy parse-recovery brace, so the smoke was switched to Next's bundled PostCSS safe parser; it then failed on the production `height: 100%` result-card declaration. After the CSS fix, the same smoke passed. Focused verification runs the new semantic layout smoke plus interaction, complete, preview API, and generation workflow smokes, six canvas JavaScript syntax checks, `npx tsc --noEmit --pretty false`, and `git diff --check`.
+
+The semantic smoke parses the stylesheet AST and checks exact declarations; it does not provide computed browser rectangles, stacking/hit-test evidence, clicks, or executed `ResizeObserver` behavior. Parent browser re-verification remains pending.
