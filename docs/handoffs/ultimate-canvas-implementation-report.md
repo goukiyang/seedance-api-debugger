@@ -6,6 +6,8 @@
 
 基线提交：`2ce4a17010a8e5867a3f405b024f555b417da565`
 
+交付状态：最终代码已提交到本地目标分支。执行 `git push origin teammate/ultimate-canvas-complete` 时，GitHub 对当前身份 `K4y2025` 返回 403，无仓库写权限。将生成 `E:\Ultimate-canvas\ultimate-canvas-complete-final.patch` 供有权限的维护者应用。
+
 ## 1. 本次目标理解
 
 本次目标是在 sd2 现有无线画布页面原位补齐项目、视频卡和生成闭环，不新增独立页面、独立流程或第二套后台。
@@ -216,7 +218,7 @@ node scripts/ultimate-canvas-preview-server.mjs 4399
 - 尚未使用真实普通测试账号完成线上 401/403、项目可见范围和危险动作权限验收。
 - 尚未真实提交保存、上传、文本、图片、视频和重试任务，也未在线轮询到终态。
 - 尚未核对真实任务的点数冻结、扣减、失败返还、资产入库和视频播放/下载。
-- 最终推送和补丁交付状态将在提交完成后执行并记录。
+- 当前身份无法推送目标仓库；需要有权限的维护者应用完整 patch 后推送目标分支。
 
 ## 10. 风险和建议下一步
 
@@ -227,3 +229,4 @@ node scripts/ultimate-canvas-preview-server.mjs 4399
 5. 重点回归项目/视频卡切换时旧画布不会串存，重试不会丢失原方向。
 6. 移动端建议在真实设备再补一张截图；本机覆盖视口的 DOM 和尺寸检查已通过，但截图传输在浏览器工具侧超时。
 7. 依赖安装报告的既有漏洞不属于本次范围，建议单独开依赖升级任务，避免与无线画布交付混合。
+8. 当前 GitHub 身份没有目标仓库写权限；请应用 `E:\Ultimate-canvas\ultimate-canvas-complete-final.patch` 后推送 `teammate/ultimate-canvas-complete`。
