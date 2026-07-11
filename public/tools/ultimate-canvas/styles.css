@@ -1163,6 +1163,26 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 }
 .canvas-node.dragging { z-index: 100; opacity: 0.92; }
 .canvas-node:not(.selected) .node-generation-expanded { display: none !important; }
+.canvas-node.selected .generation-quick-modes,
+.node-body:has(.generation-result-region:not(:empty)) .generation-quick-modes { display: none; }
+.generation-quick-modes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 10px;
+}
+.generation-quick-modes button {
+    min-width: 0;
+    padding: 7px 8px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+}
+.generation-quick-modes button:hover { border-color: var(--accent-teal); color: var(--text-primary); }
+.generation-result-region:empty { display: none; }
 .canvas-node.is-reference-compatible .node-card {
     border-color: var(--accent-teal);
     box-shadow: 0 0 0 2px rgba(78,205,196,0.2), var(--shadow-node);

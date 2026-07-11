@@ -498,11 +498,20 @@ class CanvasEngine {
         const labelIcon = this._icon(type);
         const label = this._label(type, id);
         const body = this._body(type, id);
+        const generationBody = type === 'image' || type === 'video' ? `
+            <div class="generation-quick-modes" data-generation-quick-modes>
+                ${type === 'image' ? `
+                    <button type="button" data-generation-quick-mode="text-to-image">文字生成图片</button>
+                    <button type="button" data-generation-quick-mode="image-to-image">使用参考图</button>` : `
+                    <button type="button" data-generation-quick-mode="first-frame-video">首帧生成视频</button>
+                    <button type="button" data-generation-quick-mode="first-last-frame-video">首尾帧生成视频</button>`}
+            </div>
+            <div class="generation-result-region" data-generation-result-region></div>` : body;
 
         wrap.innerHTML = `
             <div class="node-label">${labelIcon} ${label}</div>
             <div class="node-card">
-                <div class="node-body">${body}</div>
+                <div class="node-body">${generationBody}</div>
                 <div class="node-connector input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
                 <div class="node-connector output"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
             </div>

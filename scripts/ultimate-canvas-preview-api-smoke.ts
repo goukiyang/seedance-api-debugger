@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 
+const interactions = require('../public/tools/ultimate-canvas/generation-node-interactions.js');
+
 const port = 45000 + Math.floor(Math.random() * 1000);
 const baseUrl = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, ['scripts/ultimate-canvas-preview-server.mjs', String(port)], {
@@ -197,7 +199,7 @@ async function main() {
   });
   assert.equal(approval.approval.status, 'pending');
 
-  const documentJson = JSON.stringify({
+  const liveDocument = {
     context: { project_id: projectId, video_card_id: cardId, video_branch_id: branchId },
     canvas: {
       nodes: [
@@ -227,6 +229,9 @@ async function main() {
             videoSettings: { ratio: '9:16', duration: 6, resolution: '1080p' },
             taskId,
             generationStatus: 'succeeded',
+            previewImage: 'blob:video-preview',
+            videoPreviewUrl: 'data:video/mp4;base64,temporary',
+            videoDownloadUrl: `/api/video/download/${taskId}`,
           },
         },
       ],
@@ -236,7 +241,10 @@ async function main() {
       ],
       viewport: {},
     },
-  });
+  };
+  const documentJson = JSON.stringify(interactions.sanitizeSerializable(structuredClone(liveDocument)));
+  assert.equal(liveDocument.canvas.nodes[2].data.previewImage, 'blob:video-preview');
+  assert.equal(liveDocument.canvas.nodes[2].data.videoPreviewUrl, 'data:video/mp4;base64,temporary');
   await post('/api/tools/ultimate-canvas/document', {
     project_id: projectId,
     document_json: documentJson,
@@ -248,6 +256,9 @@ async function main() {
     { from: 'node-image', to: 'node-video' },
     { from: 'node-image-last', to: 'node-video' },
   ]);
+  assert.equal(restoredDocument.canvas.nodes[2].data.previewImage, '');
+  assert.equal(restoredDocument.canvas.nodes[2].data.videoPreviewUrl, '');
+  assert.equal(restoredDocument.canvas.nodes[2].data.videoDownloadUrl, `/api/video/download/${taskId}`);
 
     console.log('ultimate-canvas-preview-api-smoke passed');
   } finally {

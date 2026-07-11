@@ -36,7 +36,38 @@ contains(stylesSource, '.is-reference-incompatible', 'incompatible nodes are vis
 contains(appSource, 'referenceRole(', 'first and last frames derive from ordered references');
 contains(appSource, "case 'Escape'", 'Escape closes generation popovers');
 contains(stylesSource, '.generation-popover', 'popover has viewport-safe styling');
+contains(engineSource, 'data-generation-quick-mode', 'compact nodes expose quick mode choices');
+contains(engineSource, 'data-generation-result-region', 'generation nodes reserve an in-place result region');
+contains(appSource, 'function applyGenerationQuickMode', 'quick choices only configure the node');
+contains(appSource, 'sanitizeSerializable(structuredClone(canvasDocumentPayload', 'canvas documents remove transient local URLs');
+contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
+contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes are not permanently spread across the node');
+
+const quickModeSource = appSource.slice(
+  appSource.indexOf('function applyGenerationQuickMode'),
+  appSource.indexOf('function generationSelect'),
+);
+assert.ok(quickModeSource.includes('engine.selectNode(nodeId)'), 'quick mode selects the existing node');
+assert.ok(quickModeSource.includes('startReferenceSelection(nodeId)'), 'reference modes enter selection');
+assert.ok(!quickModeSource.includes('submitNodeGeneration'), 'quick mode never submits generation');
+
+const generatedActionSource = appSource.slice(
+  appSource.indexOf("if (action === 'regenerate')"),
+  appSource.indexOf('function promptInputFor'),
+);
+assert.ok(generatedActionSource.includes('submitNodeGeneration(nodeEl, submit)'), 'regenerate reuses the current node');
+assert.equal((generatedActionSource.match(/engine\.addNode\('video'/g) || []).length, 1,
+  'create-video creates exactly one downstream video node');
+assert.equal((generatedActionSource.match(/engine\.connectNodes\(node\.id, videoNodeId\)/g) || []).length, 1,
+  'create-video connects the downstream node exactly once');
+
+const decorationSource = appSource.slice(
+  appSource.indexOf('function decorateGeneratedNode'),
+  appSource.indexOf('function createDirectorOutput'),
+);
+assert.ok(decorationSource.includes('resultRegion.innerHTML'), 'generated results update their dedicated region');
+assert.ok(!decorationSource.includes('body.innerHTML'), 'generated results do not replace editor controls');
 
 assert.ok(bootstrapSource.includes('interaction'));
 assert.ok(bootstrapSource.includes('DURATION_OPTIONS'));
@@ -107,6 +138,24 @@ assert.deepEqual(
   interactions.sanitizeSerializable({ keep: 'https://example.com/a.png', remove: 'blob:temp', nested: ['data:image/png;base64,x', 3] }),
   { keep: 'https://example.com/a.png', remove: '', nested: ['', 3] },
 );
+const liveDocument = {
+  id: 'canvas-1',
+  count: 2,
+  enabled: true,
+  empty: null,
+  remote: 'https://example.com/a.png',
+  api: '/api/assets/a.png',
+  transient: 'blob:preview',
+  nested: { transient: 'data:image/png;base64,x' },
+};
+const durableDocument = interactions.sanitizeSerializable(structuredClone(liveDocument));
+assert.deepEqual(durableDocument, {
+  ...liveDocument,
+  transient: '',
+  nested: { transient: '' },
+});
+assert.equal(liveDocument.transient, 'blob:preview', 'sanitizing a clone does not mutate live node data');
+assert.equal(liveDocument.nested.transient, 'data:image/png;base64,x');
 
 assert.equal(interactions.pollDelay(1, 0, false), 3000);
 assert.equal(interactions.pollDelay(20, 0, false), 8000);
