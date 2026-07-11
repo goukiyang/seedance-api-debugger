@@ -40,7 +40,7 @@ npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
 npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 ```
 
-随后严格按 Task 8 顺序运行：`git diff --check`；6 个 `node --check`；8 个 `npx tsx` 烟测；`npx tsc --noEmit --pretty false`；`npm run lint`；`npm run build`。未启动、重启或终止现有 4399 预览服务器。
+随后严格按 Task 8 顺序运行：`git diff --check`；6 个 `node --check`；8 个 `npx tsx` 烟测；`npx tsc --noEmit --pretty false`；`npm run lint`；`npm run build`。自动验证代理未改动 4399 预览进程；父代理在代码审查通过后重启本地预览服务器，并在应用内浏览器完成最终交互验收。
 
 ## 5. 验证结果是否通过
 
@@ -48,7 +48,9 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 - 评审修复 RED 符合预期：第一次因缺少 `clearAllVideoEstimates` 失败；第二次因项目/视频卡 bootstrap 切换未清理失败。实现共享 helper 与生命周期接线后，两组断言均转为 GREEN。
 - GREEN 与完整套件全部退出 0：6 个语法检查、8 个烟测、TypeScript、lint、build 均通过；预览 API 烟测在随机本机端口启动并自行清理子进程。
 - `npm run lint` 有 38 条既有 warning：6 条 `react-hooks/exhaustive-deps`、32 条 `@next/next/no-img-element`；修改的无线画布文件无新增 lint warning。构建成功生成 76 个静态页面，并包含 `/api/tasks/estimate` 与无线画布路由。
-- 本代理未执行应用内浏览器 QA，也不声称九项浏览器验收通过。最终浏览器验收由父代理在现有预览服务器上补充。
+- 应用内浏览器九项验收全部通过：紧凑/展开、画布引用选择、禁用模式及原因、单弹层与 Escape、同节点图片结果、图片结果创建并连接视频节点、刷新后视频轮询恢复、390px 视口、控制台零新增 warning/error。
+- 结果布局修复后，在 71% 画布缩放下，图片结果操作行底部为 `767.93px`，卡片底部为 `787.38px`，属性面板顶部为 `798.76px`；操作行完整位于卡片内且属性面板从卡片下方开始。点击“生成视频”后实际出现 `node-4` 和 `conn-node-2-node-4`。
+- 390px 视口下，`documentElement.clientWidth === scrollWidth === 390`，选中节点卡片和属性面板计算宽度均为 `366px`；弹层范围为 `x=12.66px` 到 `right=377.99px`，未越出视口。
 
 ## 6. 是否真实调用了文字/图片/视频生成
 
@@ -64,18 +66,16 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 
 ## 9. 还没做完的内容
 
-- 父代理仍需完成九项浏览器验收：紧凑/展开节点、画布引用选择、禁用模式及原因、单弹层与 Escape、同节点图片结果、已连接视频创建、刷新后轮询恢复、390px 视口、控制台零新增 error/warning。
-- 浏览器验收时应额外观察：在视频预估请求待定期间切换项目/视频卡或恢复文档，不得让旧上下文的点数结果写入新上下文节点。
+- 本地九项浏览器验收已经完成；视频预估跨项目/视频卡切换的旧响应隔离由共享清理函数、可执行烟测和两轮独立审查覆盖，未使用线上账号制造真实慢请求。
 - 尚未部署到线上环境，也未用真实普通账号核对线上 estimate/provider 字段、失败/超时状态、资产播放下载和真实点数流水。
 - 本任务不负责推送；当前提交后的远端权限和推送结果需由父代理确认并追加。
 
 ## 10. 风险和建议下一步
 
-1. 先由父代理使用现有本地预览服务器完成九项浏览器验收，并将实际结果追加到本报告，不要触发线上生成。
-2. 部署到受控预览环境后，先验证不扣点路径、普通用户权限和估算失败降级，再由有授权的用户决定是否进行最小真实生成测试。
-3. 线上重点核对 `/api/tasks/estimate` 的 `estimatedCost` 字段、分辨率/时长组合、请求取消行为及旧响应不会覆盖新设置。
-4. 保持点数预估为信息层；后端仍是最终计费来源，前端不得复制或持久化计价规则。
-5. 现有 38 条仓库级 lint warning 与本范围无关，可在独立维护任务中处理，避免混入本次交付。
+1. 部署到受控预览环境后，先验证不扣点路径、普通用户权限和估算失败降级，再由有授权的用户决定是否进行最小真实生成测试。
+2. 线上重点核对 `/api/tasks/estimate` 的 `estimatedCost` 字段、分辨率/时长组合、请求取消行为及旧响应不会覆盖新设置。
+3. 保持点数预估为信息层；后端仍是最终计费来源，前端不得复制或持久化计价规则。
+4. 现有 38 条仓库级 lint warning 与本范围无关，可在独立维护任务中处理，避免混入本次交付。
 
 ## Browser QA follow-up: generated result layout
 
@@ -83,7 +83,7 @@ Parent browser QA confirmed that the image result and editor remain on the same 
 
 The defect is fixed in CSS. Selected image/video nodes with a nonempty generation result now use content-driven height with a `350px` minimum; generated result cards use border-box sizing; previews are bounded; and action rows remain in normal flow above the same-node editor. Unselected generated nodes retain the compact `350x240` card and hide result actions until selected. Ports remain at the actual card's vertical center, and the existing `ResizeObserver` continues to refresh connection paths after card size changes. Video task/version action rows remain in the same result card and were not removed or nested.
 
-The source smoke now rejects the old fixed-height selected-result behavior and verifies the compact-state, bounded-media, and connector-centering declarations. It confirms that `ResizeObserver` setup remains in source but does not execute observer behavior. Final browser rectangle and click re-verification is pending parent confirmation.
+The semantic smoke rejects the old fixed-height selected-result behavior and verifies exact compact-state, bounded-media, mobile-width, action-row and connector declarations. It confirms that `ResizeObserver` setup remains in source but does not execute observer behavior. Parent browser re-verification passed: the result actions are inside the card, the editor starts below it, and clicking create-video produced one downstream video node and connection.
 
 ### Review hardening follow-up
 
@@ -91,4 +91,4 @@ Modified files for this follow-up are `public/tools/ultimate-canvas/styles.css`,
 
 TDD RED was recorded with `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`: strict PostCSS first exposed an unrelated legacy parse-recovery brace, so the smoke was switched to Next's bundled PostCSS safe parser; it then failed on the production `height: 100%` result-card declaration. After the CSS fix, the same smoke passed. Focused verification runs the new semantic layout smoke plus interaction, complete, preview API, and generation workflow smokes, six canvas JavaScript syntax checks, `npx tsc --noEmit --pretty false`, and `git diff --check`.
 
-The semantic smoke parses the stylesheet AST and checks exact declarations; it does not provide computed browser rectangles, stacking/hit-test evidence, clicks, or executed `ResizeObserver` behavior. Parent browser re-verification remains pending.
+The semantic smoke parses the stylesheet AST and checks exact declarations; it does not itself provide computed browser rectangles, stacking/hit-test evidence, clicks, or executed `ResizeObserver` behavior. Parent browser QA supplied the missing rendering evidence: desktop result geometry and hit testing passed, 390px document overflow stayed at zero, the mobile popover stayed within 12px viewport margins, and the browser console reported zero warning/error entries.
