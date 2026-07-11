@@ -289,6 +289,96 @@
         }
     }
 
+    async function executeVideoCardOperation(operation, input = {}) {
+        const cardId = input.cardId || canvasRuntime.videoCardView.cardId;
+        const changesGenerationContext = ['card-seal', 'card-archive', 'card-discard'].includes(operation);
+        if (changesGenerationContext && cardId === canvasRuntime.selectedVideoCardId) {
+            const saved = await flushCanvasSave(`before_${operation}`);
+            if (!saved) throw new Error('\u753b\u5e03\u4fdd\u5b58\u5931\u8d25\uff0c\u5df2\u53d6\u6d88\u89c6\u9891\u5361\u64cd\u4f5c\u3002');
+        }
+
+        const descriptor = window.UltimateCanvasVideoCards.requestFor(operation, {
+            ...input,
+            cardId
+        });
+        const result = await requestJson(descriptor.url, {
+            method: descriptor.method,
+            payload: descriptor.payload
+        });
+        if (operation.startsWith('approval-')) return result;
+
+        invalidateVideoCardWorkspace(cardId);
+        await refreshProjectVideoCards();
+        if (changesGenerationContext && cardId === canvasRuntime.selectedVideoCardId) {
+            canvasRuntime.videoCardView = {
+                ...canvasRuntime.videoCardView,
+                mode: 'list',
+                section: 'info',
+                cardId: null
+            };
+            await loadCanvasBootstrap(canvasRuntime.selectedProjectId, null, { restoreDocument: false });
+        } else {
+            await loadVideoCardWorkspace(cardId, { force: true });
+            renderRuntimeContextControls();
+        }
+        return result;
+    }
+
+    function changedVideoCardValues(form) {
+        const values = {};
+        const nullable = new Set(['objective', 'platform', 'ratio', 'target_resolution']);
+        const numeric = new Set(['duration', 'budget_credits']);
+        [
+            'title',
+            'objective',
+            'platform',
+            'ratio',
+            'duration',
+            'target_resolution',
+            'budget_credits',
+            'budget_currency'
+        ].forEach(name => {
+            const field = form.elements[name];
+            if (!field || field.disabled) return;
+            const current = String(field.value ?? '').trim();
+            const original = String(field.dataset.original ?? '').trim();
+            if (current === original) return;
+            if (numeric.has(name)) {
+                values[name] = current === '' ? null : Number(current);
+            } else if (nullable.has(name)) {
+                values[name] = current || null;
+            } else {
+                values[name] = current;
+            }
+        });
+        return values;
+    }
+
+    async function confirmVideoCardLifecycle(operation, cardId) {
+        const detail = canvasRuntime.videoCardDetails.get(cardId);
+        const card = detail?.video_card
+            || canvasRuntime.bootstrap?.context?.video_cards?.find(item => item.id === cardId);
+        if (!card) return;
+        const labels = {
+            'card-seal': videoCardUiText.seal,
+            'card-archive': videoCardUiText.archive,
+            'card-discard': videoCardUiText.discard
+        };
+        const label = labels[operation] || videoCardUiText.operations;
+        const taskCount = card.summary?.task_count || canvasRuntime.videoCardTasks.get(cardId)?.length || 0;
+        const branchCount = canvasRuntime.videoCardBranches.get(cardId)?.length || 0;
+        const confirmed = await requestCanvasConfirmation({
+            title: label,
+            message: `\u786e\u8ba4\u5bf9\u89c6\u9891\u5361\u300c${card.title || card.id}\u300d\u6267\u884c${label}\uff1f`,
+            detail: `\u72b6\u6001 ${card.status || '-'} \u00b7 \u4efb\u52a1 ${taskCount} \u00b7 \u65b9\u5411 ${branchCount}`,
+            confirmLabel: label,
+            danger: operation === 'card-discard'
+        });
+        if (!confirmed) return;
+        await executeVideoCardOperation(operation, { cardId });
+        showCanvasNotice(`\u89c6\u9891\u5361\u5df2${label}\u3002`, 'info');
+    }
+
     function uniqueList(items) {
         return Array.from(new Set((items || []).filter(Boolean)));
     }
@@ -649,8 +739,91 @@
         owner: '\u8d1f\u8d23\u4eba',
         status: '\u72b6\u6001',
         spec: '\u4ea4\u4ed8\u89c4\u683c',
+        save: '\u4fdd\u5b58\u4fee\u6539',
+        cardTitle: '\u6807\u9898',
+        objective: '\u89c6\u9891\u76ee\u6807',
+        platform: '\u5e73\u53f0',
+        ratio: '\u6bd4\u4f8b',
+        duration: '\u65f6\u957f\uff08\u79d2\uff09',
+        resolution: '\u76ee\u6807\u5206\u8fa8\u7387',
+        budget: '\u9884\u7b97\u70b9\u6570',
+        currency: '\u9884\u7b97\u5e01\u79cd',
+        seal: '\u5c01\u677f',
+        archive: '\u5f52\u6863',
+        discard: '\u5e9f\u5f03',
+        ratioApproval: '\u7533\u8bf7\u6bd4\u4f8b\u53d8\u66f4',
+        reopenApproval: '\u7533\u8bf7\u91cd\u5f00',
+        targetRatio: '\u76ee\u6807\u6bd4\u4f8b',
+        reason: '\u539f\u56e0',
+        submitApproval: '\u63d0\u4ea4\u7533\u8bf7',
         operationHint: '\u5361\u7247\u7ba1\u7406\u64cd\u4f5c\u4f1a\u6839\u636e\u5f53\u524d\u6743\u9650\u548c\u72b6\u6001\u663e\u793a\u3002'
     };
+
+    function videoCardSelectOptions(values, selected) {
+        return values.map(value => `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('');
+    }
+
+    function videoCardInfoFormHtml(detail) {
+        const card = detail?.video_card;
+        if (!card) return '';
+        const canEdit = window.UltimateCanvasVideoCards.operationAllowed(detail, 'card-update');
+        const disabled = canEdit ? '' : 'disabled';
+        const ratioLocked = Boolean(card.ratio_locked || card.project?.type === 'public' || card.final_task_id);
+        const canRequestApproval = Boolean(detail?.video_card);
+        const ratioDisabled = canEdit && !ratioLocked ? '' : 'disabled';
+        const duration = card.duration ?? 5;
+        const budget = card.budget_credits ?? '';
+        return `
+            <form class="video-card-info-form" data-video-card-info-form data-card-id="${escapeHtml(card.id)}">
+                <div class="video-card-form-grid">
+                    <label><span>${escapeHtml(videoCardUiText.cardTitle)}</span><input name="title" value="${escapeHtml(card.title || '')}" data-original="${escapeHtml(card.title || '')}" maxlength="120" required ${disabled}></label>
+                    <label><span>${escapeHtml(videoCardUiText.platform)}</span><input name="platform" value="${escapeHtml(card.platform || '')}" data-original="${escapeHtml(card.platform || '')}" maxlength="80" ${disabled}></label>
+                    <label class="is-wide"><span>${escapeHtml(videoCardUiText.objective)}</span><textarea name="objective" data-original="${escapeHtml(card.objective || '')}" maxlength="1000" rows="3" ${disabled}>${escapeHtml(card.objective || '')}</textarea></label>
+                    <label><span>${escapeHtml(videoCardUiText.ratio)}</span><select name="ratio" data-original="${escapeHtml(card.ratio || '')}" ${ratioDisabled}>${videoCardSelectOptions(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], card.ratio || '16:9')}</select></label>
+                    <label><span>${escapeHtml(videoCardUiText.duration)}</span><input name="duration" type="number" min="4" max="15" step="1" value="${escapeHtml(duration)}" data-original="${escapeHtml(duration)}" ${disabled}></label>
+                    <label><span>${escapeHtml(videoCardUiText.resolution)}</span><select name="target_resolution" data-original="${escapeHtml(card.target_resolution || '')}" ${disabled}>${videoCardSelectOptions(['480p', '720p', '1080p'], card.target_resolution || '720p')}</select></label>
+                    <label><span>${escapeHtml(videoCardUiText.budget)}</span><input name="budget_credits" type="number" min="0" step="0.01" value="${escapeHtml(budget)}" data-original="${escapeHtml(budget)}" ${disabled}></label>
+                    <label><span>${escapeHtml(videoCardUiText.currency)}</span><input name="budget_currency" value="${escapeHtml(card.budget_currency || 'credits')}" data-original="${escapeHtml(card.budget_currency || 'credits')}" maxlength="16" ${disabled}></label>
+                </div>
+                ${canEdit ? `<div class="video-card-form-actions"><button type="submit" class="context-primary-command">${escapeHtml(videoCardUiText.save)}</button></div>` : ''}
+            </form>
+            ${ratioLocked && canRequestApproval ? `
+                <form class="video-card-inline-approval" data-video-card-approval-ratio data-card-id="${escapeHtml(card.id)}">
+                    <strong>${escapeHtml(videoCardUiText.ratioApproval)}</strong>
+                    <label><span>${escapeHtml(videoCardUiText.targetRatio)}</span><select name="target_ratio" required>${videoCardSelectOptions(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], card.ratio || '16:9')}</select></label>
+                    <label class="is-wide"><span>${escapeHtml(videoCardUiText.reason)}</span><input name="reason" minlength="2" maxlength="300" required></label>
+                    <button type="submit" class="context-command">${escapeHtml(videoCardUiText.submitApproval)}</button>
+                </form>` : ''}`;
+    }
+
+    function videoCardOperationsHtml(detail, branches, tasks) {
+        const card = detail?.video_card;
+        if (!card) return '';
+        const canManage = Boolean(detail?.permissions?.can_manage);
+        const canRequestApproval = Boolean(detail?.video_card);
+        const hasHistory = tasks.length > 0
+            || branches.length > 0
+            || Boolean(card.current_best_task_id)
+            || Boolean(card.final_task_id);
+        const lifecycleAction = card.is_fallback
+            || ['sealed', 'merged', 'archived', 'discarded'].includes(card.status)
+            ? null
+            : hasHistory ? 'archive' : 'discard';
+        const canSeal = canManage
+            && window.UltimateCanvasVideoCards.operationAllowed(detail, 'card-seal');
+        return `
+            <div class="video-card-operation-list">
+                <p>${escapeHtml(videoCardUiText.operationHint)}</p>
+                ${canSeal ? `<button type="button" class="context-command" data-video-card-seal="${escapeHtml(card.id)}">${escapeHtml(videoCardUiText.seal)}</button>` : ''}
+                ${canManage && lifecycleAction ? `<button type="button" class="context-command ${lifecycleAction === 'discard' ? 'danger' : ''}" data-video-card-lifecycle="${escapeHtml(lifecycleAction)}" data-card-id="${escapeHtml(card.id)}">${escapeHtml(lifecycleAction === 'discard' ? videoCardUiText.discard : videoCardUiText.archive)}</button>` : ''}
+                ${canRequestApproval && ['sealed', 'archived'].includes(card.status) ? `
+                    <form class="video-card-inline-approval" data-video-card-approval-reopen data-card-id="${escapeHtml(card.id)}">
+                        <strong>${escapeHtml(videoCardUiText.reopenApproval)}</strong>
+                        <label class="is-wide"><span>${escapeHtml(videoCardUiText.reason)}</span><input name="reason" minlength="2" maxlength="300" required></label>
+                        <button type="submit" class="context-command">${escapeHtml(videoCardUiText.submitApproval)}</button>
+                    </form>` : ''}
+            </div>`;
+    }
 
     function videoCardDetailMenuHtml(selectedProject) {
         const cardId = canvasRuntime.videoCardView.cardId;
@@ -686,7 +859,7 @@
                         <span><small>${escapeHtml(videoCardUiText.owner)}</small><strong>${escapeHtml(owner.name)}</strong></span>
                         <span><small>${escapeHtml(videoCardUiText.taskCount)}</small><strong>${escapeHtml(card?.summary?.task_count || tasks.length)}</strong></span>
                     </div>
-                    ${card?.objective ? `<p class="video-card-objective">${escapeHtml(card.objective)}</p>` : ''}`;
+                    ${videoCardInfoFormHtml(cachedDetail)}`;
             } else if (section === 'branches') {
                 body = branches.length
                     ? `<div class="video-card-branch-list">${branches.map(branch => `
@@ -704,7 +877,7 @@
                         </div>`).join('')}</div>`
                     : `<div class="context-menu-empty">${escapeHtml(videoCardUiText.emptyTasks)}</div>`;
             } else {
-                body = `<div class="video-card-operation-placeholder">${escapeHtml(videoCardUiText.operationHint)}</div>`;
+                body = videoCardOperationsHtml(cachedDetail, branches, tasks);
             }
         }
 
@@ -1305,6 +1478,25 @@
             return;
         }
 
+        const videoCardSeal = event.target.closest('[data-video-card-seal]');
+        if (videoCardSeal) {
+            confirmVideoCardLifecycle('card-seal', videoCardSeal.dataset.videoCardSeal).catch(error => {
+                showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u5c01\u677f\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
+        const videoCardLifecycle = event.target.closest('[data-video-card-lifecycle]');
+        if (videoCardLifecycle) {
+            const operation = videoCardLifecycle.dataset.videoCardLifecycle === 'discard'
+                ? 'card-discard'
+                : 'card-archive';
+            confirmVideoCardLifecycle(operation, videoCardLifecycle.dataset.cardId).catch(error => {
+                showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u72b6\u6001\u64cd\u4f5c\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
         const projectCreateToggle = event.target.closest('[data-project-create-toggle]');
         if (projectCreateToggle) {
             canvasRuntime.projectCreateOpen = !canvasRuntime.projectCreateOpen;
@@ -1360,6 +1552,69 @@
     });
 
     document.addEventListener('submit', event => {
+        const videoCardInfoForm = event.target.closest('[data-video-card-info-form]');
+        if (videoCardInfoForm) {
+            event.preventDefault();
+            const values = changedVideoCardValues(videoCardInfoForm);
+            if (!Object.keys(values).length) {
+                showCanvasNotice('\u6ca1\u6709\u9700\u8981\u4fdd\u5b58\u7684\u4fee\u6539\u3002', 'info');
+                return;
+            }
+            const submit = videoCardInfoForm.querySelector('[type="submit"]');
+            if (submit) submit.disabled = true;
+            executeVideoCardOperation('card-update', {
+                cardId: videoCardInfoForm.dataset.cardId,
+                values
+            }).then(() => {
+                showCanvasNotice('\u89c6\u9891\u5361\u4fe1\u606f\u5df2\u4fdd\u5b58\u3002', 'info');
+            }).catch(error => {
+                if (submit) submit.disabled = false;
+                showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u4fdd\u5b58\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
+        const ratioApprovalForm = event.target.closest('[data-video-card-approval-ratio]');
+        if (ratioApprovalForm) {
+            event.preventDefault();
+            const submit = ratioApprovalForm.querySelector('[type="submit"]');
+            if (submit) submit.disabled = true;
+            executeVideoCardOperation('approval-ratio', {
+                projectId: canvasRuntime.selectedProjectId,
+                cardId: ratioApprovalForm.dataset.cardId,
+                targetRatio: ratioApprovalForm.elements.target_ratio?.value,
+                reason: ratioApprovalForm.elements.reason?.value?.trim()
+            }).then(() => {
+                showCanvasNotice('\u6bd4\u4f8b\u53d8\u66f4\u7533\u8bf7\u5df2\u63d0\u4ea4\u3002', 'info');
+                ratioApprovalForm.reset();
+                if (submit) submit.disabled = false;
+            }).catch(error => {
+                if (submit) submit.disabled = false;
+                showCanvasNotice(error?.message || '\u6bd4\u4f8b\u53d8\u66f4\u7533\u8bf7\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
+        const reopenApprovalForm = event.target.closest('[data-video-card-approval-reopen]');
+        if (reopenApprovalForm) {
+            event.preventDefault();
+            const submit = reopenApprovalForm.querySelector('[type="submit"]');
+            if (submit) submit.disabled = true;
+            executeVideoCardOperation('approval-reopen', {
+                projectId: canvasRuntime.selectedProjectId,
+                cardId: reopenApprovalForm.dataset.cardId,
+                reason: reopenApprovalForm.elements.reason?.value?.trim()
+            }).then(() => {
+                showCanvasNotice('\u89c6\u9891\u5361\u91cd\u5f00\u7533\u8bf7\u5df2\u63d0\u4ea4\u3002', 'info');
+                reopenApprovalForm.reset();
+                if (submit) submit.disabled = false;
+            }).catch(error => {
+                if (submit) submit.disabled = false;
+                showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u91cd\u5f00\u7533\u8bf7\u5931\u8d25\u3002', 'error');
+            });
+            return;
+        }
+
         const projectForm = event.target.closest('[data-project-create-form]');
         if (projectForm) {
             event.preventDefault();

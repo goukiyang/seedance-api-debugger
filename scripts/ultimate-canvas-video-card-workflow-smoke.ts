@@ -222,6 +222,17 @@ contains(app, 'data-video-card-manage', 'video card rows open in-place managemen
 contains(app, 'data-video-card-view-back', 'video card detail returns to list');
 contains(app, 'data-video-card-section', 'video card detail has in-place sections');
 contains(app, 'async function refreshProjectVideoCards', 'menu refreshes complete project cards');
+contains(app, 'data-video-card-info-form', 'video card info is editable in place');
+contains(app, 'data-video-card-seal', 'video card can be sealed in place');
+contains(app, 'data-video-card-approval-ratio', 'ratio approval is requested in place');
+contains(app, 'data-video-card-approval-reopen', 'reopen approval is requested in place');
+contains(app, 'async function executeVideoCardOperation', 'card mutations share one executor');
+contains(app, 'UltimateCanvasVideoCards.requestFor', 'card mutations use shared request contracts');
+contains(
+  app,
+  'const canRequestApproval = Boolean(detail?.video_card)',
+  'viewable cards can request approval without admin or generate permission',
+);
 
 const styles = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
 contains(styles, '.video-card-context-detail', 'video card detail styles exist');
