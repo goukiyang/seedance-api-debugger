@@ -40,13 +40,13 @@ npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
 npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 ```
 
-随后严格按 Task 8 顺序运行：`git diff --check`；6 个 `node --check`；8 个 `npx tsx` 烟测；`npx tsc --noEmit --pretty false`；`npm run lint`；`npm run build`。自动验证代理未改动 4399 预览进程；父代理在代码审查通过后重启本地预览服务器，并在应用内浏览器完成最终交互验收。
+随后运行：`git diff --check`；8 个画布 JavaScript 文件的 `node --check`；全部 11 个 `ultimate-canvas-*-smoke.ts`；`npx tsc --noEmit --pretty false`；`npm run lint`；`npm run build`。自动验证代理未改动 4399 预览进程；父代理在代码审查通过后重启本地预览服务器，并在应用内浏览器完成最终交互验收。
 
 ## 5. 验证结果是否通过
 
 - RED 符合预期：交互烟测因最终 cache key/预估实现缺失退出 1；预览 API 对 `/api/tasks/estimate` 返回 501，退出 1。
 - 评审修复 RED 符合预期：第一次因缺少 `clearAllVideoEstimates` 失败；第二次因项目/视频卡 bootstrap 切换未清理失败。实现共享 helper 与生命周期接线后，两组断言均转为 GREEN。
-- GREEN 与完整套件全部退出 0：6 个语法检查、8 个烟测、TypeScript、lint、build 均通过；预览 API 烟测在随机本机端口启动并自行清理子进程。
+- GREEN 与完整套件全部退出 0：8 个语法检查、11 个烟测、TypeScript、lint、build 均通过；预览 API 烟测在随机本机端口启动并自行清理子进程。
 - `npm run lint` 有 38 条既有 warning：6 条 `react-hooks/exhaustive-deps`、32 条 `@next/next/no-img-element`；修改的无线画布文件无新增 lint warning。构建成功生成 76 个静态页面，并包含 `/api/tasks/estimate` 与无线画布路由。
 - 应用内浏览器九项验收全部通过：紧凑/展开、画布引用选择、禁用模式及原因、单弹层与 Escape、同节点图片结果、图片结果创建并连接视频节点、刷新后视频轮询恢复、390px 视口、控制台零新增 warning/error。
 - 结果布局修复后，在 71% 画布缩放下，图片结果操作行底部为 `767.93px`，卡片底部为 `787.38px`，属性面板顶部为 `798.76px`；操作行完整位于卡片内且属性面板从卡片下方开始。点击“生成视频”后实际出现 `node-4` 和 `conn-node-2-node-4`。
@@ -66,9 +66,9 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 
 ## 9. 还没做完的内容
 
-- 本地九项浏览器验收已经完成；视频预估跨项目/视频卡切换的旧响应隔离由共享清理函数、可执行烟测和两轮独立审查覆盖，未使用线上账号制造真实慢请求。
+- 本地浏览器验收已经完成；视频预估跨项目/视频卡切换的旧响应隔离由共享清理函数、可执行烟测和两轮独立审查覆盖，未使用线上账号制造真实慢请求。
 - 尚未部署到线上环境，也未用真实普通账号核对线上 estimate/provider 字段、失败/超时状态、资产播放下载和真实点数流水。
-- 本任务不负责推送；当前提交后的远端权限和推送结果需由父代理确认并追加。
+- 远端推送结果与无权限时的完整补丁路径由本次收尾在最终验证后追加。
 
 ## 10. 风险和建议下一步
 
@@ -123,7 +123,7 @@ All 11 `ultimate-canvas*-smoke.ts` scripts pass, including the local mock previe
 
 No online text, image, or video generation was run. No retry or paid task was created, and points consumed were exactly zero. `.env`, API/admin settings, provider secrets, credit rules, database schema, backend pricing/provider/generation routes, package metadata, and lockfiles were not read or modified. Production calls remain same-origin sd2 calls for an ordinary user.
 
-Browser acceptance was not claimed by this hardening pass. The parent must rerun desktop/mobile browser acceptance after the final commit, including capability-disabled rendering, nonterminal video submit disablement, context-switch stale response behavior, reference availability, and save-state behavior.
+父代理已在最终提交后重跑桌面与移动端浏览器验收：非终态视频任务提交按钮保持禁用，保存后刷新可恢复并继续轮询；图片可在原节点再次生成；可用素材能加入参考列表并建立连接，计数从 `0/10` 变为 `1/10`；保存状态回到“已保存”。
 
 ## Re-review correction (2026-07-12)
 
@@ -133,7 +133,7 @@ Image capability normalization now preserves explicit empty `interaction.size_op
 
 The current hardening inventory includes `public/tools/ultimate-canvas/canvas-save-coordinator.js`, `scripts/ultimate-canvas-generation-lifecycle-smoke.ts`, and `scripts/ultimate-canvas-save-coordinator-smoke.ts`. The production cache key for `app.js`, generation interactions, task coordination, and save coordination is `20260712-final-hardening`. Lifecycle coverage now separates document-only metadata creation, same-object card switching, and detached replacement cleanup; capability coverage separates empty-plus-fixed, empty-without-fixed, absent-field defaults, and explicit selectable lists.
 
-No online generation or paid retry was run, and points consumed remain zero. Protected backend/provider/credit/schema/package/secret areas remain untouched. Parent desktop/mobile browser acceptance remains pending after this separate correction commit.
+No online generation or paid retry was run, and points consumed remain zero. Protected backend/provider/credit/schema/package/secret areas remain untouched. Parent desktop/mobile browser acceptance passed after this correction commit.
 
 ## Transient pending video correction (2026-07-12)
 
@@ -141,10 +141,18 @@ Video submission ownership before the backend returns a real task ID is now runt
 
 For a current response, `taskId`, normalized nonterminal status, and generation result are written together before decoration, polling registration, and the queued canvas save. Hydration repairs legacy video nodes that have a nonterminal durable status without `taskId`: status becomes `idle`, stale error/result/loading markers are removed, and one current-context save is scheduled after restore through `canvas-save-coordinator.js`. The recovery helper is idempotent, so the persisted idle document does not create a restore/save loop. Legitimate restored `running + taskId` nodes remain blocked and are registered for polling.
 
-Deferred lifecycle coverage now verifies pre-response serialization, switch/flush/stale resolution and restore, current task-owned response persistence, taskless legacy recovery, and legitimate running-task restore. No online generation or paid retry was run; points remain zero. Parent browser acceptance remains pending after this commit.
+Deferred lifecycle coverage now verifies pre-response serialization, switch/flush/stale resolution and restore, current task-owned response persistence, taskless legacy recovery, and legitimate running-task restore. No online generation or paid retry was run; points remain zero. Parent browser acceptance passed after this commit.
 
 ## Context invalidation submission release (2026-07-12)
 
 Context invalidation now bulk-releases every captured image/video submission entry before incrementing the epoch. Each entry owns a transient UI cleanup closure only; invalidation removes loading/status presentation without changing durable node task/result data. The tracker clears its map before invoking cleanup callbacks, so a same-ID image or video submission can start immediately in the new context even when the old backend promise remains unresolved.
 
-Tracker completion remains identity-based. If the old promise later settles, its `finish(nodeId, oldEntry)` cannot remove or clean a newer `nodeId` entry, and it does not rerender over the newer request. Deferred coverage verifies old unresolved submission, invalidation cleanup, immediate same-ID replacement, stale old completion, identity-safe new ownership, and image/video bulk release. Parent browser acceptance remains pending; no online generation or paid retry was run and points remain zero.
+Tracker completion remains identity-based. If the old promise later settles, its `finish(nodeId, oldEntry)` cannot remove or clean a newer `nodeId` entry, and it does not rerender over the newer request. Deferred coverage verifies old unresolved submission, invalidation cleanup, immediate same-ID replacement, stale old completion, identity-safe new ownership, and image/video bulk release。父代理最终浏览器验收已通过；没有运行线上生成或付费重试，点数消耗仍为 0。
+
+## 最终父代理验收（2026-07-11）
+
+- 视频节点提交后立即进入单请求占用状态，“生成视频”按钮禁用，不能在后端返回前重复创建付费任务；任务保存后刷新页面可恢复，并最终显示“视频生成完成”。
+- 图片节点保留完整规格与提交控件，规格显示 `9:16 · 1K · 1张`；本机 mock 图片在同一节点原位展示，并可继续再次生成或创建下游视频节点。
+- 参考选择流程可从素材库选中持久化素材，参考计数由 `0/10` 更新为 `1/10`，节点显示“参考图 1”，同时新增可追踪的参考图片节点与连接；退出后保存状态回到“已保存”。
+- 390px 视口下 `documentElement.clientWidth === scrollWidth === 390`；选中节点与属性区计算宽度均为 `366px`；规格弹层范围为 `x=12.66px` 到 `right=377.99px`，完整位于视口内。
+- 浏览器最终 warning/error 日志为 0。上述流程全部使用 `ultimate-canvas-preview-server.mjs` 的本机内存 mock，没有访问线上 sd2、没有调用真实模型、没有消耗点数。
