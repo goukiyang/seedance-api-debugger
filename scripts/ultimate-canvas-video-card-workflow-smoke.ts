@@ -5,6 +5,10 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const workflow = require('../public/tools/ultimate-canvas/video-card-workflow.js');
 
+function contains(source: string, needle: string, label: string) {
+  assert.ok(source.includes(needle), `${label}: missing ${needle}`);
+}
+
 function request(operation: string, input: Record<string, unknown>) {
   return workflow.requestFor(operation, input);
 }
@@ -192,6 +196,26 @@ assert.deepEqual(workflow.generationContext({
 });
 
 assert.throws(() => request('unknown-operation', {}), /不支持的视频卡操作/);
+
+const app = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
+contains(app, 'selectedVideoBranchId: null', 'runtime tracks selected branch');
+contains(app, 'videoCardDetails: new Map()', 'runtime caches card detail');
+contains(app, 'videoCardBranches: new Map()', 'runtime caches card branches');
+contains(app, 'videoCardTasks: new Map()', 'runtime caches card tasks');
+contains(app, 'videoCardLoads: new Map()', 'runtime deduplicates card loads');
+contains(app, 'async function loadVideoCardWorkspace', 'card workspace is lazy loaded');
+contains(app, 'function invalidateVideoCardWorkspace', 'card cache can be invalidated');
+contains(
+  app,
+  'video_branch_id: canvasRuntime.selectedVideoBranchId || null',
+  'save stores selected branch',
+);
+contains(app, 'parsed?.context?.video_branch_id', 'restore reads selected branch');
+contains(
+  app,
+  'UltimateCanvasVideoCards.generationContext',
+  'generation uses shared context builder',
+);
 
 const index = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
 assert.ok(index.includes('video-card-workflow.js'), 'index loads video card workflow');

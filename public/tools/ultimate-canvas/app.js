@@ -50,6 +50,7 @@
         saveError: null,
         selectedProjectId: null,
         selectedVideoCardId: null,
+        selectedVideoBranchId: null,
         documentProjectId: null,
         documentVideoCardId: null,
         bootstrapRequestId: 0,
@@ -63,6 +64,12 @@
         historyLoaded: false,
         libraryItems: [],
         historyItems: [],
+        videoCardDetails: new Map(),
+        videoCardBranches: new Map(),
+        videoCardTasks: new Map(),
+        videoCardLoads: new Map(),
+        videoCardLoadErrors: new Map(),
+        videoCardView: { mode: 'list', section: 'info', cardId: null, search: '' },
         pollingTasks: new Map()
     };
 
@@ -85,6 +92,10 @@
 
     function selectedVideoCard() {
         return selectedVideoCardFromBootstrap(canvasRuntime.bootstrap);
+    }
+
+    function selectedVideoBranches() {
+        return canvasRuntime.videoCardBranches.get(canvasRuntime.selectedVideoCardId) || [];
     }
 
     function canvasWorkspaceKey() {
@@ -137,6 +148,72 @@
 
     function deleteJson(url, options = {}) {
         return requestJson(url, { ...options, method: 'DELETE' });
+    }
+
+    function invalidateVideoCardWorkspace(cardId) {
+        if (!cardId) return;
+        canvasRuntime.videoCardDetails.delete(cardId);
+        canvasRuntime.videoCardBranches.delete(cardId);
+        canvasRuntime.videoCardTasks.delete(cardId);
+        canvasRuntime.videoCardLoads.delete(cardId);
+        canvasRuntime.videoCardLoadErrors.delete(cardId);
+    }
+
+    async function loadVideoCardWorkspace(cardId, options = {}) {
+        if (!cardId) return null;
+        const cached = !options.force
+            && canvasRuntime.videoCardDetails.has(cardId)
+            && canvasRuntime.videoCardBranches.has(cardId)
+            && canvasRuntime.videoCardTasks.has(cardId);
+        if (cached) {
+            return {
+                detail: canvasRuntime.videoCardDetails.get(cardId),
+                branches: canvasRuntime.videoCardBranches.get(cardId),
+                tasks: canvasRuntime.videoCardTasks.get(cardId)
+            };
+        }
+        if (!options.force && canvasRuntime.videoCardLoads.has(cardId)) {
+            return canvasRuntime.videoCardLoads.get(cardId);
+        }
+
+        canvasRuntime.videoCardLoadErrors.delete(cardId);
+        const request = Promise.all([
+            requestJson(`/api/video-cards/${encodeURIComponent(cardId)}`, { cache: 'no-store' }),
+            requestJson(`/api/video-cards/${encodeURIComponent(cardId)}/branches`, { cache: 'no-store' }),
+            requestJson(`/api/video-cards/${encodeURIComponent(cardId)}/tasks`, { cache: 'no-store' })
+        ]).then(([detail, branchesPayload, tasksPayload]) => {
+            const branches = branchesPayload?.branches || [];
+            const tasks = tasksPayload?.tasks || [];
+            canvasRuntime.videoCardDetails.set(cardId, detail);
+            canvasRuntime.videoCardBranches.set(cardId, branches);
+            canvasRuntime.videoCardTasks.set(cardId, tasks);
+            if (cardId === canvasRuntime.selectedVideoCardId) {
+                canvasRuntime.selectedVideoBranchId = window.UltimateCanvasVideoCards.chooseBranch(
+                    branches,
+                    canvasRuntime.selectedVideoBranchId
+                ) || null;
+            }
+            return { detail, branches, tasks };
+        }).catch(error => {
+            canvasRuntime.videoCardLoadErrors.set(cardId, error);
+            throw error;
+        }).finally(() => {
+            canvasRuntime.videoCardLoads.delete(cardId);
+        });
+
+        canvasRuntime.videoCardLoads.set(cardId, request);
+        return request;
+    }
+
+    function selectVideoBranch(branchId) {
+        const nextBranchId = window.UltimateCanvasVideoCards.chooseBranch(
+            selectedVideoBranches(),
+            branchId
+        ) || null;
+        if (canvasRuntime.selectedVideoBranchId === nextBranchId) return nextBranchId;
+        canvasRuntime.selectedVideoBranchId = nextBranchId;
+        scheduleCanvasSave('video_branch_change');
+        return nextBranchId;
     }
 
     function uniqueList(items) {
@@ -235,11 +312,14 @@
 
     function baseContextPayload(payload) {
         return {
-            project_id: canvasRuntime.selectedProjectId,
-            video_card_id: canvasRuntime.selectedVideoCardId,
-            canvas_document_id: canvasRuntime.documentId,
-            canvas_node_id: payload.nodeId,
-            tab_id: canvasWorkspaceKey(),
+            ...window.UltimateCanvasVideoCards.generationContext({
+                projectId: canvasRuntime.selectedProjectId,
+                cardId: canvasRuntime.selectedVideoCardId,
+                branchId: canvasRuntime.selectedVideoBranchId,
+                documentId: canvasRuntime.documentId,
+                nodeId: payload.nodeId,
+                tabId: canvasWorkspaceKey()
+            }),
             client_name: 'ultimate_canvas',
             source_request_id: `ultimate_canvas:${payload.nodeId}:${payload.requestId || Date.now()}`
         };
@@ -530,8 +610,12 @@
     function applyBootstrapState(data) {
         const project = selectedProjectFromBootstrap(data);
         const videoCard = selectedVideoCardFromBootstrap(data);
+        const previousVideoCardId = canvasRuntime.selectedVideoCardId;
         canvasRuntime.selectedProjectId = project?.id || null;
         canvasRuntime.selectedVideoCardId = videoCard?.id || null;
+        if (previousVideoCardId !== canvasRuntime.selectedVideoCardId) {
+            canvasRuntime.selectedVideoBranchId = null;
+        }
         const documentMeta = data?.context?.canvas_document || null;
         if (canvasRuntime.documentProjectId !== project?.id) {
             canvasRuntime.documentId = documentMeta?.id || null;
@@ -745,6 +829,7 @@
         stopAllVideoPolling();
         canvasRuntime.selectedProjectId = projectId || null;
         canvasRuntime.selectedVideoCardId = null;
+        canvasRuntime.selectedVideoBranchId = null;
         canvasRuntime.documentId = null;
         canvasRuntime.documentProjectId = null;
         canvasRuntime.documentVideoCardId = null;
@@ -753,6 +838,12 @@
         canvasRuntime.historyLoaded = false;
         canvasRuntime.libraryItems = [];
         canvasRuntime.historyItems = [];
+        canvasRuntime.videoCardDetails.clear();
+        canvasRuntime.videoCardBranches.clear();
+        canvasRuntime.videoCardTasks.clear();
+        canvasRuntime.videoCardLoads.clear();
+        canvasRuntime.videoCardLoadErrors.clear();
+        canvasRuntime.videoCardView = { mode: 'list', section: 'info', cardId: null, search: '' };
     }
 
     async function switchProjectContext(projectId) {
@@ -799,6 +890,8 @@
         try {
             const saved = await flushCanvasSave('before_video_card_change');
             if (!saved) throw new Error('当前画布保存失败，已取消切换视频卡。');
+            stopAllVideoPolling();
+            canvasRuntime.selectedVideoBranchId = null;
             const data = await loadCanvasBootstrap(canvasRuntime.selectedProjectId, videoCardId, { restoreDocument: false });
             if (!data) throw new Error('视频卡切换失败，请稍后重试。');
             canvasRuntime.documentVideoCardId = canvasRuntime.selectedVideoCardId;
@@ -1078,7 +1171,8 @@
             savedAt: new Date().toISOString(),
             context: {
                 project_id: context.projectId ?? canvasRuntime.selectedProjectId,
-                video_card_id: context.videoCardId ?? canvasRuntime.selectedVideoCardId
+                video_card_id: context.videoCardId ?? canvasRuntime.selectedVideoCardId,
+                video_branch_id: canvasRuntime.selectedVideoBranchId || null
             },
             canvas: engine.serialize()
         };
@@ -1089,7 +1183,8 @@
         if (!canvasRuntime.bootstrapLoaded || !canvasRuntime.selectedProjectId) return true;
         const projectId = canvasRuntime.selectedProjectId;
         const videoCardId = canvasRuntime.selectedVideoCardId;
-        const contextKey = `${projectId}:${videoCardId || ''}`;
+        const videoBranchId = canvasRuntime.selectedVideoBranchId;
+        const contextKey = `${projectId}:${videoCardId || ''}:${videoBranchId || ''}`;
         const documentId = canvasRuntime.documentProjectId === projectId ? canvasRuntime.documentId : null;
         if (!engine.nodes.size && !documentId) return true;
         canvasRuntime.saveState = 'saving';
@@ -1107,7 +1202,7 @@
         canvasRuntime.activeSavePromise = savePromise;
         try {
             const result = await savePromise;
-            const currentContextKey = `${canvasRuntime.selectedProjectId || ''}:${canvasRuntime.selectedVideoCardId || ''}`;
+            const currentContextKey = `${canvasRuntime.selectedProjectId || ''}:${canvasRuntime.selectedVideoCardId || ''}:${canvasRuntime.selectedVideoBranchId || ''}`;
             if (currentContextKey === contextKey) {
                 canvasRuntime.documentId = result.document?.id || documentId || canvasRuntime.documentId;
                 canvasRuntime.documentProjectId = projectId;
@@ -1239,6 +1334,20 @@
             canvasRuntime.documentId = data.document.id;
             canvasRuntime.documentProjectId = projectId;
             canvasRuntime.documentVideoCardId = parsed?.context?.video_card_id || canvasRuntime.selectedVideoCardId;
+            const savedVideoBranchId = parsed?.context?.video_branch_id || null;
+            canvasRuntime.selectedVideoBranchId = savedVideoBranchId;
+            if (savedVideoBranchId && canvasRuntime.selectedVideoCardId) {
+                try {
+                    const workspace = await loadVideoCardWorkspace(canvasRuntime.selectedVideoCardId);
+                    canvasRuntime.selectedVideoBranchId = window.UltimateCanvasVideoCards.chooseBranch(
+                        workspace?.branches || [],
+                        savedVideoBranchId
+                    ) || null;
+                } catch (error) {
+                    canvasRuntime.selectedVideoBranchId = null;
+                    showCanvasNotice(error?.message || '\u89c6\u9891\u65b9\u5411\u6062\u590d\u5931\u8d25\uff0c\u5df2\u56de\u9000\u5230\u9ed8\u8ba4\u65b9\u5411\u3002', 'warn');
+                }
+            }
             canvasRuntime.documentRestoring = true;
             stopAllVideoPolling();
             engine.restore(parsed.canvas || parsed);
