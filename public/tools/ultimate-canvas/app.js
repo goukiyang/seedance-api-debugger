@@ -1564,6 +1564,7 @@
     }
 
     function invalidateGenerationContext() {
+        canvasRuntime.pendingGenerationSubmissions.releaseAll(entry => entry.release?.(true));
         canvasRuntime.contextEpoch += 1;
     }
 
@@ -3743,7 +3744,16 @@
         const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(
             currentGenerationContext(payload.nodeId)
         );
-        const transientEntry = payload.kind === 'video' ? { captured: capturedContext } : null;
+        const transientEntry = ['image', 'video'].includes(payload.kind) ? {
+            captured: capturedContext,
+            release: (stale = true) => window.UltimateCanvasGenerationInteractions.cleanupGenerationSubmission({
+                stale,
+                preserveDurable: true,
+                node: submittingNode,
+                nodeElement: nodeEl,
+                clearLoading: () => setSubmitLoading(button, false)
+            })
+        } : null;
         if (transientEntry && !canvasRuntime.pendingGenerationSubmissions.start(payload.nodeId, transientEntry)) {
             showCanvasNotice('当前视频请求正在提交，请等待返回后再试。', 'warn');
             return;
@@ -3772,16 +3782,21 @@
                 showCanvasNotice(error?.message || '生成请求失败，输入和已选素材已保留，可稍后重试。', 'error');
             },
             onFinally: ({ stale }) => {
+                let ownsTransientEntry = !transientEntry;
                 if (transientEntry) {
-                    canvasRuntime.pendingGenerationSubmissions.finish(payload.nodeId, transientEntry);
+                    ownsTransientEntry = canvasRuntime.pendingGenerationSubmissions
+                        .finish(payload.nodeId, transientEntry);
+                    if (ownsTransientEntry) transientEntry.release(stale);
                 }
-                window.UltimateCanvasGenerationInteractions.cleanupGenerationSubmission({
-                    stale,
-                    node: submittingNode,
-                    nodeElement: nodeEl,
-                    clearLoading: () => setSubmitLoading(button, false)
-                });
-                if (!stale || engine.nodes.get(payload.nodeId) === submittingNode) {
+                if (!transientEntry) {
+                    window.UltimateCanvasGenerationInteractions.cleanupGenerationSubmission({
+                        stale,
+                        node: submittingNode,
+                        nodeElement: nodeEl,
+                        clearLoading: () => setSubmitLoading(button, false)
+                    });
+                }
+                if (ownsTransientEntry && (!stale || engine.nodes.get(payload.nodeId) === submittingNode)) {
                     renderGenerationNodeControls(payload.nodeId);
                 }
             }

@@ -171,7 +171,23 @@
             },
             get: nodeId => pending.get(nodeId),
             has: nodeId => pending.has(nodeId),
-            clear: () => pending.clear(),
+            releaseAll(release) {
+                const entries = Array.from(pending.entries());
+                pending.clear();
+                entries.forEach(([nodeId, entry]) => {
+                    try {
+                        release?.(entry, nodeId);
+                    } catch {
+                        // Continue releasing the remaining captured UI entries.
+                    }
+                });
+                return entries.length;
+            },
+            clear() {
+                const count = pending.size;
+                pending.clear();
+                return count;
+            },
             size: () => pending.size
         };
     }
@@ -251,7 +267,7 @@
         if (!options.stale) return { resetStatus: false, removedStatus: false };
         const data = options.node?.data;
         let resetStatus = false;
-        if (data?.generationStatus === 'submitted'
+        if (!options.preserveDurable && data?.generationStatus === 'submitted'
             && (data.taskId || null) === (options.previousTaskId || null)) {
             options.node.data = {
                 ...data,
