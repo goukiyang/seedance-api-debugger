@@ -190,6 +190,28 @@ const mockImageDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   </svg>
 `)}`;
 
+const generatedLibraryItems = [];
+
+function previewLibraryItems() {
+  return [
+    {
+      id: 'library-reference-seed',
+      kind: 'image',
+      status: 'active',
+      title: '本地参考图',
+      prompt: '本机预览参考图',
+      assetId: 'asset-reference-seed',
+      referenceImageId: 'reference-seed',
+      workspaceAssetId: 'workspace-reference-seed',
+      originalUrl: mockImageDataUrl,
+      thumbnailUrl: mockImageDataUrl,
+      downloadUrl: mockImageDataUrl,
+      source: 'local-mock',
+    },
+    ...generatedLibraryItems,
+  ];
+}
+
 async function readJsonBody(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -362,7 +384,19 @@ function bootstrapPayload(url) {
     },
     capabilities: {
       text: { enabled: true, model: 'gpt-5.4', endpoint: '/api/tools/ultimate-canvas/generate', message: '可用' },
-      image: { enabled: true, model: 'Seedream 5.0 Pro', endpoint: '/api/assets/generate', message: '可用' },
+      image: {
+        enabled: true,
+        model: 'Seedream 5.0 Pro',
+        size: '1K',
+        endpoint: '/api/assets/generate',
+        message: '可用',
+        capabilities: {
+          reference_image_limit: 10,
+          max_outputs_per_request: 1,
+          size_options: ['1K', '2K'],
+          output_formats: ['png', 'jpeg'],
+        },
+      },
       video: { enabled: true, model: 'Seedance 2.0', endpoint: '/api/tasks/create', status_endpoint_template: '/api/video/status/:taskId?refresh=true', message: '可用' },
     },
   };
@@ -388,7 +422,11 @@ const server = http.createServer(async (request, response) => {
     }
     return sendJson(response, { document: canvasDocuments.get(url.searchParams.get('project_id')) || null });
   }
-  if (url.pathname === '/api/assets/library') return sendJson(response, { items: [] });
+  if (url.pathname === '/api/assets/library') {
+    const type = url.searchParams.get('type') || 'all';
+    const items = previewLibraryItems().filter((item) => type === 'all' || item.kind === type);
+    return sendJson(response, { items });
+  }
   if (url.pathname === '/api/projects' && request.method === 'POST') {
     const body = await readJsonBody(request);
     const project = {
@@ -738,6 +776,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (url.pathname === '/api/assets/generate' && request.method === 'POST') {
+    const body = await readJsonBody(request);
     const assetId = `asset-generated-${sequence++}`;
     const asset = {
       assetId,
@@ -748,6 +787,20 @@ const server = http.createServer(async (request, response) => {
       fileName: '本地-mock-生成图.svg',
       mimeType: 'image/svg+xml',
     };
+    generatedLibraryItems.unshift({
+      id: `library-${assetId}`,
+      kind: 'image',
+      status: 'succeeded',
+      title: asset.fileName,
+      prompt: body.input?.prompt || '本地 Mock 生图',
+      assetId: asset.assetId,
+      referenceImageId: asset.referenceImageId,
+      workspaceAssetId: asset.workspaceAssetId,
+      originalUrl: asset.originalUrl,
+      thumbnailUrl: asset.thumbnailUrl,
+      downloadUrl: asset.originalUrl,
+      source: 'image-generation-mock',
+    });
     return sendJson(response, {
       success: true,
       status: 'succeeded',
@@ -755,6 +808,7 @@ const server = http.createServer(async (request, response) => {
       asset_id: asset.assetId,
       reference_image_id: asset.referenceImageId,
       workspace_asset_id: asset.workspaceAssetId,
+      mock_request: body,
     });
   }
 
@@ -769,6 +823,15 @@ const server = http.createServer(async (request, response) => {
       video_card_id: body.video_card_id || null,
       video_branch_id: body.video_branch_id || null,
       prompt: body.prompt || 'Local mock video task',
+      generation_mode: body.generation_mode || 'all_in_one_reference',
+      ratio: body.ratio || '16:9',
+      duration: Number(body.duration || 5),
+      resolution: body.resolution || '720p',
+      generate_audio: body.generate_audio === true,
+      return_last_frame: body.return_last_frame === true,
+      watermark: body.watermark === true,
+      reference_image_ids: Array.isArray(body.reference_image_ids) ? body.reference_image_ids : [],
+      source_metadata: body.source_metadata || {},
       local_status: 'submitted',
       version_role: 'normal',
       estimated_cost: 0,
@@ -794,6 +857,7 @@ const server = http.createServer(async (request, response) => {
     if (task) {
       task.local_status = succeeded ? 'succeeded' : 'running';
       task.result_video_url = succeeded ? `/mock/${taskId}.mp4` : null;
+      task.result_last_frame_url = succeeded && task.return_last_frame ? mockImageDataUrl : null;
       task.actual_cost = 0;
     }
     return sendJson(response, {
@@ -801,6 +865,7 @@ const server = http.createServer(async (request, response) => {
       provider_task_id: `provider-${taskId}`,
       local_status: succeeded ? 'succeeded' : 'running',
       result_video_url: succeeded ? `/mock/${taskId}.mp4` : null,
+      result_last_frame_url: succeeded && task?.return_last_frame ? mockImageDataUrl : null,
     });
   }
 

@@ -78,14 +78,22 @@ contains(app, "flushCanvasSave('before_project_change')", 'project switching sav
 contains(app, 'clearCanvasForContext()', 'project switching clears stale canvas');
 contains(app, 'documentProjectId === projectId', 'save uses project-bound document id');
 contains(app, "formData.set('canvas_node_id', canvasNodeId)", 'upload carries canvas node id');
-contains(app, "client_name: 'ultimate_canvas'", 'video generation identifies canvas client');
-contains(app, "source: 'ultimate_canvas'", 'video generation carries canvas source metadata');
 contains(app, 'status_endpoint_template', 'polling uses backend status endpoint template');
 contains(app, 'window.setTimeout(poll, delay)', 'polling is serialized with timeout');
+contains(app, 'UltimateCanvasGenerationNodes.imageRequest', 'image nodes use the sd2 request contract');
+contains(app, 'UltimateCanvasGenerationNodes.videoRequest', 'video nodes use the sd2 request contract');
+contains(app, 'data-generation-command', 'generation node commands are handled');
+contains(app, 'generationReferenceImageIds', 'connected image references feed generation');
 excludes(app, 'window.setInterval(poll', 'polling does not overlap with interval');
 excludes(app, 'api.openai.com', 'frontend does not call OpenAI directly');
 excludes(app, 'api_key', 'frontend does not accept provider keys');
 excludes(app, 'base_url', 'frontend does not accept provider base URLs');
+
+const generationWorkflow = read('public/tools/ultimate-canvas/generation-node-workflow.js');
+contains(generationWorkflow, "client_name: 'ultimate_canvas'", 'video generation identifies canvas client');
+contains(generationWorkflow, "source: 'ultimate_canvas'", 'video generation carries canvas source metadata');
+excludes(generationWorkflow, 'api_key', 'generation contract does not accept provider keys');
+excludes(generationWorkflow, 'base_url', 'generation contract does not accept provider base URLs');
 
 const videoCardRoute = read('src/app/api/video-cards/[id]/route.ts');
 contains(videoCardRoute, "lifecycleAction === 'archive' || lifecycleAction === 'discard'", 'video card route exposes scoped lifecycle actions');
@@ -97,5 +105,13 @@ const styles = read('public/tools/ultimate-canvas/styles.css');
 contains(styles, '.canvas-context-menu', 'context menu styles exist');
 contains(styles, '.canvas-confirm-overlay', 'confirmation modal styles exist');
 contains(styles, '.node-generation-status', 'generation status styles exist');
+contains(styles, '.generation-settings-panel', 'generation settings styles exist');
+
+const index = read('public/tools/ultimate-canvas/index.html');
+contains(index, 'generation-node-workflow.js', 'generation node contract is loaded');
+assert.ok(
+  index.indexOf('generation-node-workflow.js') < index.indexOf('app.js'),
+  'generation node contract loads before app',
+);
 
 console.log('ultimate-canvas-complete-smoke passed');

@@ -54,6 +54,7 @@ async function main() {
   const cardId = bootstrap.context.selected_video_card_id as string;
   assert.ok(projectId);
   assert.ok(cardId);
+  assert.deepEqual(bootstrap.capabilities.image.capabilities.size_options, ['1K', '2K']);
 
   const detail = await get(`/api/video-cards/${cardId}`);
   assert.equal(detail.video_card.id, cardId);
@@ -76,20 +77,63 @@ async function main() {
   assert.ok(branchId);
   await patch(`/api/video-cards/${cardId}/branches/${branchId}`, { action: 'set_primary' });
 
+  const image = await post('/api/assets/generate', {
+    project_id: projectId,
+    video_card_id: cardId,
+    canvas_document_id: 'canvas-preview-project-personal',
+    canvas_node_id: 'node-image',
+    action: 'image_variant',
+    input: {
+      prompt: '本机生图节点闭环测试',
+      ratio: '9:16',
+      size: '2K',
+      count: 1,
+      reference_image_ids: ['reference-seed'],
+      mode: 'image-to-image',
+    },
+  });
+  assert.equal(image.mock_request.action, 'image_variant');
+  assert.equal(image.mock_request.input.ratio, '9:16');
+  assert.equal(image.mock_request.input.size, '2K');
+  assert.deepEqual(image.mock_request.input.reference_image_ids, ['reference-seed']);
+  const generatedReferenceId = image.reference_image_id as string;
+  assert.ok(generatedReferenceId);
+
+  const library = await get(`/api/assets/library?type=all&scope=project&project_id=${projectId}`);
+  assert.equal(library.items.some((item: { referenceImageId?: string }) => item.referenceImageId === generatedReferenceId), true);
+
   const task = await post('/api/tasks/create', {
     project_id: projectId,
     video_card_id: cardId,
     video_branch_id: branchId,
     prompt: '本机视频闭环测试',
+    generation_mode: 'first_last_frame',
+    ratio: '9:16',
+    duration: 6,
+    resolution: '1080p',
+    generate_audio: true,
+    return_last_frame: true,
+    watermark: false,
+    reference_image_ids: [generatedReferenceId],
+    source_metadata: {
+      source: 'ultimate_canvas',
+      canvas_node_id: 'node-video',
+    },
   });
   const taskId = (task.id || task.task_id) as string;
   assert.ok(taskId);
   assert.equal(task.frozen_cost, 0);
+  assert.equal(task.generation_mode, 'first_last_frame');
+  assert.equal(task.ratio, '9:16');
+  assert.equal(task.duration, 6);
+  assert.equal(task.resolution, '1080p');
+  assert.deepEqual(task.reference_image_ids, [generatedReferenceId]);
 
   const firstPoll = await get(`/api/video/status/${taskId}?refresh=true`);
   const secondPoll = await get(`/api/video/status/${taskId}?refresh=true`);
   assert.equal(firstPoll.local_status, 'running');
   assert.equal(secondPoll.local_status, 'succeeded');
+  assert.equal(typeof secondPoll.result_last_frame_url, 'string');
 
   const taskList = await get(`/api/video-cards/${cardId}/tasks`);
   assert.equal(taskList.tasks.find((item: { id: string }) => item.id === taskId)?.video_branch_id, branchId);
@@ -148,7 +192,31 @@ async function main() {
 
   const documentJson = JSON.stringify({
     context: { project_id: projectId, video_card_id: cardId, video_branch_id: branchId },
-    canvas: { nodes: [{ id: 'node-local' }], connections: [], viewport: {} },
+    canvas: {
+      nodes: [
+        {
+          id: 'node-image',
+          type: 'image',
+          data: {
+            mode: 'image-to-image',
+            imageSettings: { ratio: '9:16', size: '2K', count: 1 },
+            referenceImageId: generatedReferenceId,
+          },
+        },
+        {
+          id: 'node-video',
+          type: 'video',
+          data: {
+            mode: 'first-last-frame-video',
+            videoSettings: { ratio: '9:16', duration: 6, resolution: '1080p' },
+            taskId,
+            generationStatus: 'succeeded',
+          },
+        },
+      ],
+      connections: [{ from: 'node-image', to: 'node-video' }],
+      viewport: {},
+    },
   });
   await post('/api/tools/ultimate-canvas/document', {
     project_id: projectId,
