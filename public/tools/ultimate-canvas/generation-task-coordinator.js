@@ -45,7 +45,9 @@
             if (timer === null && !runningCycle) scheduleNext();
         }
 
-        function unregister(taskId) {
+        function unregister(taskId, nodeId) {
+            const existing = active.get(taskId);
+            if (nodeId && existing?.nodeId !== nodeId) return;
             if (!active.delete(taskId)) return;
             if (!active.size) cancelTimer();
         }

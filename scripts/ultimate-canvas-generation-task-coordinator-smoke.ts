@@ -63,6 +63,8 @@ async function staleResultSmoke() {
   await staleDirectUpdateCycle;
   assert.deepEqual(statuses, [], 'same-task registration for a different node invalidates the captured entry');
   assert.equal(coordinator.has('same-task'), true, 'stale direct-update terminal cannot remove the replacement');
+  coordinator.unregister('same-task', 'old-node');
+  assert.equal(coordinator.has('same-task'), true, 'deleting an old node cannot unregister the replacement mapping');
 
   const freshSuccessCycle = coordinator.runNow();
   pending[2].resolve({ id: 'same-task', local_status: 'running' });

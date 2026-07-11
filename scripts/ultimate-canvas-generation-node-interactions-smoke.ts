@@ -45,10 +45,15 @@ contains(appSource, 'data-generated-image-action="regenerate"', 'image results r
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
 contains(indexSource, 'app.js?v=20260711-polling-coordinator', 'canvas app cache key changes with coordinator integration');
-contains(appSource, 'pollingCoordinator.register(taskId, nodeId)', 'video polling delegates registration to the canvas coordinator');
-contains(appSource, 'pollingCoordinator.unregister(taskId)', 'task cleanup delegates to the coordinator');
+const pollingSource = appSource.slice(
+  appSource.indexOf('function pollVideoTask'),
+  appSource.indexOf('canvasRuntime.pollingCoordinator ='),
+);
+contains(pollingSource, 'pollingCoordinator.register(taskId, nodeId)', 'video polling always delegates registration to the canvas coordinator');
+assert.ok(!pollingSource.includes('pollingCoordinator.has(taskId)'), 'app does not bypass coordinator replacement semantics');
+contains(appSource, 'stopVideoPolling(deletedNode.data.taskId, deletedNode.id)', 'node deletion unregisters only its own task mapping');
+contains(appSource, 'pollingCoordinator.unregister(taskId, nodeId)', 'task cleanup delegates optional node ownership to the coordinator');
 contains(appSource, 'pollingCoordinator.clear()', 'context cleanup delegates to the coordinator');
-contains(appSource, 'canvasRuntime.pollingCoordinator.has(taskId)', 'registration remains idempotent after hydration');
 assert.ok(!appSource.includes('pollingTasks: new Map()'), 'app no longer owns per-task polling timers');
 assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes are not permanently spread across the node');
 

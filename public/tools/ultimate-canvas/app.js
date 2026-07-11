@@ -2477,7 +2477,7 @@
         const originalDeleteNode = engine.deleteNode.bind(engine);
         engine.deleteNode = (...args) => {
             const deletedNode = engine.nodes.get(args[0]);
-            if (deletedNode?.data?.taskId) stopVideoPolling(deletedNode.data.taskId);
+            if (deletedNode?.data?.taskId) stopVideoPolling(deletedNode.data.taskId, deletedNode.id);
             const nextSelection = CanvasReferenceSelection.deleteNode(canvasRuntime.referenceSelection, args[0]);
             if (canvasRuntime.referenceSelection && !nextSelection.active) {
                 finishReferenceSelection({ returnToTarget: false });
@@ -3310,8 +3310,8 @@
         return template.replace(':taskId', encodeURIComponent(taskId));
     }
 
-    function stopVideoPolling(taskId) {
-        canvasRuntime.pollingCoordinator.unregister(taskId);
+    function stopVideoPolling(taskId, nodeId) {
+        canvasRuntime.pollingCoordinator.unregister(taskId, nodeId);
     }
 
     function stopAllVideoPolling() {
@@ -3319,7 +3319,7 @@
     }
 
     function pollVideoTask(taskId, nodeId) {
-        if (!taskId || !nodeId || canvasRuntime.pollingCoordinator.has(taskId)) return;
+        if (!taskId || !nodeId) return;
         canvasRuntime.pollingCoordinator.register(taskId, nodeId);
         void canvasRuntime.pollingCoordinator.runNow();
     }
