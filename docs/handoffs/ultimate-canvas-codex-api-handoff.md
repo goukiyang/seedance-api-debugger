@@ -11,6 +11,7 @@
 - 当前网站备份分支：`backup/2026-07-10-current-sd2-site`
 - 当前网站备份 tag：`rollback/2026-07-10-current-sd2-site-backup`
 - 交接开发分支：`teammate/ultimate-canvas-complete`
+- 交接开发分支当前提交：`160dc419b48dbbe4a04a0c128ff45b8adbd0cc1b`
 - 本文档路径：`docs/handoffs/ultimate-canvas-codex-api-handoff.md`
 
 给同事的交接包只需要三样：
@@ -28,6 +29,13 @@ git fetch origin
 git switch --track origin/teammate/ultimate-canvas-complete
 ```
 
+下载权限说明：
+
+- 这个 GitHub 仓库当前可公开读取；只要下载 / clone / fetch / checkout，不需要 GitHub 密码。
+- 已用无登录、无本机凭据的 `git ls-remote` 验证：仓库和 `teammate/ultimate-canvas-complete` 分支都能读取。
+- 如果同事要把代码直接推回这个仓库，才需要 GitHub 写入权限；没有写入权限时，让他把改动推到自己有权限的 fork / 分支，或发 patch / diff 给我们合并。
+- 不要把任何 GitHub token、密码、cookie 写进文档、代码、commit message 或聊天记录。
+
 ## 我们给同事的权限
 
 给普通登录调试账号，不给本人主账号，不给第三方 API Key，不给后台 API 设置页。
@@ -41,10 +49,11 @@ git switch --track origin/teammate/ultimate-canvas-complete
 
 当前代码现状必须特别注意：
 
-- `/tools/ultimate-canvas` 页面入口和 `/api/tools/ultimate-canvas/bootstrap`、`document`、`generate`、`upload` 这几个无线画布接口当前都硬性要求 `user.role === 'admin'`。
-- 如果只给普通用户账号，同事打开无线画布或调用这些接口会直接得到 403，不能完成调试。
-- 这不是最终方案；最终目标是把无线画布改成普通登录用户可用，权限完全复用普通生成页的项目 / 视频卡 / 点数规则。
-- 因此交接前或同事第一项任务，必须先移除无线画布的硬编码 admin 限制，改成“已登录 + 有项目 / 视频卡生成权限”。
+- 截至提交 `160dc419b48dbbe4a04a0c128ff45b8adbd0cc1b`，无线画布普通账号前置权限已经落地。
+- `/tools/ultimate-canvas` 页面入口、静态全屏页，以及 `/api/tools/ultimate-canvas/bootstrap`、`document`、`generate`、`upload` 不再用整页 / 整接口 admin-only 拦普通用户。
+- 普通账号仍必须登录；生成、上传、保存等动作继续复用项目、视频卡和点数权限。
+- `/api/tools/ultimate-canvas/localization-health` 仍然只给管理员，因为它暴露本地化补偿和后台任务健康信息。
+- 后台 API 设置、用户管理、成本总账仍然是管理员权限；同事不需要也不应该进入这些页面。
 
 推荐权限：
 
@@ -71,9 +80,10 @@ git switch --track origin/teammate/ultimate-canvas-complete
 
 当前缺口：
 
-- 当前代码还没完成普通用户开放；硬编码 admin 判断仍在无线画布页面和 API 里。
-- 在这个缺口修掉以前，普通账号不能直接完成无线画布调试。
-- 不建议为了省事给完整 admin；正确修法是开放给普通登录用户，并继续依赖项目、视频卡和点数权限。
+- 代码层普通账号入口已经打开；还没做的是“真实同事普通账号”的登录态验收。
+- 同事账号需要你在后台给足测试点数；点数不够时，图片 / 视频生成会按正常业务规则失败或被拦。
+- 如果同事本地页面要直接连线上后端，还需要单独实现受限 debug proxy；当前推荐先通过线上 sd2 页面或预览部署验证。
+- 不建议为了省事给完整 admin；正确做法仍然是普通账号 + 测试点数 + 现有后端接口。
 
 实操边界：
 
@@ -87,7 +97,7 @@ git switch --track origin/teammate/ultimate-canvas-complete
 1. 登录 `https://sd2.youdoodesign.com`。
 2. 打开 `https://sd2.youdoodesign.com/tools/ultimate-canvas`。
 3. 普通账号应能加载出顶部项目 / 视频卡上下文，不出现 401 / 403。
-4. 如果出现 403，说明无线画布普通用户开放还没落地；先修权限入口，不要绕过到 admin。
+4. 如果出现 403，先看是不是账号没权限访问当前项目 / 视频卡，或者登录态过期；不要改成 admin 绕过。
 5. 创建或选择一个测试项目和视频卡，确认账户可用点数足够。
 
 ## 后端调用原则
