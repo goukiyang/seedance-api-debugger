@@ -13,12 +13,25 @@ import {
 } from '@/lib/integrations/image-generation';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getCreditSummary } from '@/lib/credits/policy';
+import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
+import {
+  projectDisplayName,
+  projectMetaLabel,
+  projectRemovalAction,
+  projectRemovalReason,
+} from '@/lib/projects/display';
+import {
+  videoCardRemovalAction,
+  videoCardRemovalReason,
+  videoCardSpecLabel,
+  videoCardStatusLabel,
+} from '@/lib/video-cards/display';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const PROJECT_TAKE = 20;
-const VIDEO_CARD_TAKE = 30;
+const PROJECT_TAKE = 100;
+const VIDEO_CARD_TAKE = 60;
 
 function imageModelLabel(provider: string, model: string) {
   if (provider === 'seedream') return 'Seedream 5.0 Pro';
@@ -54,6 +67,16 @@ function safeDate(value: Date | string | null | undefined) {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+function savedVideoCardId(documentJson: string | null | undefined) {
+  if (!documentJson) return '';
+  try {
+    const parsed = JSON.parse(documentJson);
+    return typeof parsed?.context?.video_card_id === 'string' ? parsed.context.video_card_id.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -79,7 +102,7 @@ export async function GET(request: NextRequest) {
           { owner_user_id: user.id },
           {
             type: { in: ['team', 'public'] },
-            members: { some: { user_id: user.id, status: 'active' } },
+            members: { some: { user_id: user.id, status: 'active', role: { not: 'viewer' } } },
           },
         ],
       };
@@ -89,26 +112,63 @@ export async function GET(request: NextRequest) {
     orderBy: [{ type: 'asc' }, { updated_at: 'desc' }],
     take: PROJECT_TAKE,
     include: {
-      members: user.role === 'admin'
-        ? { where: { status: 'active' }, select: { user_id: true, role: true, status: true } }
-        : { where: { user_id: user.id }, select: { user_id: true, role: true, status: true } },
+      owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+      members: {
+        where: { user_id: user.id, status: 'active' },
+        take: 1,
+        select: { user_id: true, role: true, status: true },
+      },
+      _count: {
+        select: {
+          tasks: user.role === 'admin'
+            ? true
+            : { where: { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } } },
+          reference_albums: { where: { status: { not: 'deleted' } } },
+        },
+      },
     },
   });
 
   const projectSummaries = projects.map((project) => {
-    const myRole = user.role === 'admin'
-      ? 'admin'
-      : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
-    const canGenerate = project.status === 'active' && myRole !== null && myRole !== 'viewer';
-    return {
+    const explicitRole = project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null;
+    const myRole = explicitRole || (user.role === 'admin' ? 'admin' : null);
+    const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
+    const canGenerate = isActiveNonSystem && (user.role === 'admin' || (explicitRole !== null && explicitRole !== 'viewer'));
+    const canManageProject = user.role === 'admin' || explicitRole === 'project_owner';
+    const canManageAssets = isActiveNonSystem
+      && (user.role === 'admin' || explicitRole === 'project_owner' || explicitRole === 'editor');
+    const base = {
       id: project.id,
       name: project.name,
+      original_name: project.name,
       type: project.type,
       status: project.status,
+      owner_user_id: project.owner_user_id,
+      owner: project.owner,
+      _count: project._count,
       my_role: myRole,
       can_generate: canGenerate,
+      can_manage_project: canManageProject,
+      can_manage_assets: canManageAssets,
+      group: project.owner_user_id === user.id ? 'owned' : explicitRole ? 'joined' : 'other',
       updated_at: safeDate(project.updated_at),
     };
+    return {
+      ...base,
+      display_name: projectDisplayName(base),
+      meta_label: projectMetaLabel(base),
+      removal_action: projectRemovalAction(base),
+      removal_reason: projectRemovalReason(base),
+    };
+  });
+
+  projectSummaries.sort((a, b) => {
+    const groupOrder: Record<string, number> = { owned: 0, joined: 1, other: 2 };
+    const groupDelta = groupOrder[a.group] - groupOrder[b.group];
+    if (groupDelta !== 0) return groupDelta;
+    if (a.type === 'personal' && b.type !== 'personal') return -1;
+    if (b.type === 'personal' && a.type !== 'personal') return 1;
+    return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
   });
 
   const requestedProjectId = request.nextUrl.searchParams.get('project_id')?.trim() || '';
@@ -117,45 +177,6 @@ export async function GET(request: NextRequest) {
     ? projectSummaries.find((project) => project.id === requestedProjectId && project.can_generate) || null
     : null;
   const selectedProject = requestedProject || projectSummaries.find((project) => project.can_generate) || null;
-  const videoCards = selectedProject
-    ? await prisma.videoCard.findMany({
-        where: {
-          project_id: selectedProject.id,
-          status: { in: ['draft', 'active', 'reviewing'] },
-        },
-        orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
-        take: VIDEO_CARD_TAKE,
-        select: {
-          id: true,
-          project_id: true,
-          title: true,
-          status: true,
-          platform: true,
-          ratio: true,
-          duration: true,
-          target_resolution: true,
-          updated_at: true,
-        },
-      })
-    : [];
-
-  const videoCardSummaries = videoCards.map((card) => ({
-    id: card.id,
-    project_id: card.project_id,
-    title: card.title,
-    status: card.status,
-    can_generate: canGenerateInVideoCardStatus(card.status),
-    platform: card.platform,
-    ratio: card.ratio,
-    duration: card.duration,
-    target_resolution: card.target_resolution,
-    updated_at: safeDate(card.updated_at),
-  }));
-  const requestedVideoCard = requestedVideoCardId
-    ? videoCardSummaries.find((card) => card.id === requestedVideoCardId && card.can_generate) || null
-    : null;
-  const selectedVideoCard = requestedVideoCard || videoCardSummaries.find((card) => card.can_generate) || null;
-
   const latestCanvasDocument = selectedProject
     ? await prisma.canvasDocument.findFirst({
         where: {
@@ -164,9 +185,105 @@ export async function GET(request: NextRequest) {
           status: 'active',
         },
         orderBy: { updated_at: 'desc' },
-        select: { id: true, title: true, project_id: true, updated_at: true },
+        select: { id: true, title: true, project_id: true, document_json: true, updated_at: true },
       })
     : null;
+
+  const videoCards = selectedProject
+    ? await prisma.videoCard.findMany({
+        where: {
+          project_id: selectedProject.id,
+          status: { not: 'discarded' },
+        },
+        orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
+        take: VIDEO_CARD_TAKE,
+        select: {
+          id: true,
+          project_id: true,
+          title: true,
+          objective: true,
+          status: true,
+          owner_user_id: true,
+          owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+          platform: true,
+          ratio: true,
+          duration: true,
+          target_resolution: true,
+          is_fallback: true,
+          current_best_task_id: true,
+          final_task_id: true,
+          updated_at: true,
+        },
+      })
+    : [];
+
+  const videoCardIds = videoCards.map((card) => card.id);
+  const [taskCountRows, branchCountRows] = videoCardIds.length
+    ? await Promise.all([
+        prisma.videoTask.groupBy({
+          by: ['video_card_id'],
+          where: {
+            video_card_id: { in: videoCardIds },
+            ...(user.role === 'admin'
+              ? {}
+              : { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } }),
+          },
+          _count: { _all: true },
+        }),
+        prisma.videoBranch.groupBy({
+          by: ['video_card_id'],
+          where: { video_card_id: { in: videoCardIds } },
+          _count: { _all: true },
+        }),
+      ])
+    : [[], []];
+  const taskCountByCard = new Map(taskCountRows.map((row) => [row.video_card_id, row._count._all]));
+  const branchCountByCard = new Map(branchCountRows.map((row) => [row.video_card_id, row._count._all]));
+  const videoCardSummaries = videoCards.map((card) => {
+    const summary = { task_count: taskCountByCard.get(card.id) || 0 };
+    const canManage = Boolean(selectedProject?.can_manage_project);
+    const canGenerate = Boolean(selectedProject?.can_generate) && canGenerateInVideoCardStatus(card.status);
+    const base = {
+      id: card.id,
+      project_id: card.project_id,
+      title: card.title,
+      objective: card.objective,
+      status: card.status,
+      owner_user_id: card.owner_user_id,
+      owner: card.owner,
+      can_generate: canGenerate,
+      can_manage: canManage,
+      platform: card.platform,
+      ratio: card.ratio,
+      duration: card.duration,
+      target_resolution: card.target_resolution,
+      is_fallback: card.is_fallback,
+      current_best_task_id: card.current_best_task_id,
+      final_task_id: card.final_task_id,
+      branch_count: branchCountByCard.get(card.id) || 0,
+      summary,
+      updated_at: safeDate(card.updated_at),
+    };
+    return {
+      ...base,
+      status_label: videoCardStatusLabel(card.status),
+      spec_label: videoCardSpecLabel(base),
+      removal_action: videoCardRemovalAction(base, canManage),
+      removal_reason: videoCardRemovalReason(base, canManage),
+    };
+  });
+  const requestedVideoCard = requestedVideoCardId
+    ? videoCardSummaries.find((card) => card.id === requestedVideoCardId) || null
+    : null;
+  const restoredVideoCardId = requestedVideoCardId ? '' : savedVideoCardId(latestCanvasDocument?.document_json);
+  const restoredVideoCard = restoredVideoCardId
+    ? videoCardSummaries.find((card) => card.id === restoredVideoCardId && card.can_generate) || null
+    : null;
+  const selectedVideoCard = requestedVideoCard
+    || restoredVideoCard
+    || videoCardSummaries.find((card) => card.can_generate)
+    || videoCardSummaries[0]
+    || null;
 
   const textReady = isMuskApiReady(muskSettings);
   const imageReady = isImageGenerationApiReady(imageSettings);
@@ -217,6 +334,10 @@ export async function GET(request: NextRequest) {
       } : null,
       needs_project_selection: !selectedProject,
       needs_video_card_selection: !selectedVideoCard,
+      selected_video_card_can_generate: Boolean(selectedVideoCard?.can_generate),
+      generation_blocked_reason: selectedVideoCard && !selectedVideoCard.can_generate
+        ? `视频卡${selectedVideoCard.status_label}，不能继续生成`
+        : null,
     },
     capabilities: {
       text: {
@@ -225,7 +346,7 @@ export async function GET(request: NextRequest) {
         model: muskSettings.default_model || 'gpt-5.4',
         endpoint: '/api/tools/ultimate-canvas/generate',
         billing: 'operation_log',
-        message: textReady ? '可用' : '后台 Musk API 未启用或缺少 API Key',
+        message: textReady ? '可用' : '文本生成能力暂不可用，请稍后联系管理员',
       },
       image: {
         enabled: imageReady,
@@ -240,7 +361,7 @@ export async function GET(request: NextRequest) {
         endpoint: '/api/assets/generate',
         billing: 'site_asset_generation',
         requires: ['project_id', 'video_card_id'],
-        message: imageReady ? '可用' : '后台图形生成 API 未启用或缺少配置',
+        message: imageReady ? '可用' : '图片生成能力暂不可用，请稍后联系管理员',
       },
       video: {
         enabled: videoReady,
@@ -250,7 +371,7 @@ export async function GET(request: NextRequest) {
         status_endpoint_template: '/api/video/status/:taskId?refresh=true',
         billing: 'credits_and_project_budget',
         requires: ['project_id', 'video_card_id'],
-        message: videoReady ? '可用' : 'SEEDANCE_API_KEY 未配置',
+        message: videoReady ? '可用' : '视频生成能力暂不可用，请稍后联系管理员',
       },
     },
   });

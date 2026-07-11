@@ -185,6 +185,47 @@ export async function PATCH(
     const data: Record<string, unknown> = {};
     const lockedForDirectChanges = access.videoCard.status === 'sealed' || access.videoCard.status === 'archived';
 
+    const lifecycleAction = asOptionalString(body.action);
+    if (lifecycleAction === 'archive' || lifecycleAction === 'discard') {
+      if (access.videoCard.is_fallback) {
+        return NextResponse.json({ error: '系统兜底视频卡不能归档或废弃' }, { status: 400 });
+      }
+      if (['sealed', 'merged', 'archived', 'discarded'].includes(access.videoCard.status)) {
+        return NextResponse.json(
+          { error: '视频卡当前状态不允许归档或废弃，请在详情页按现有工作流处理' },
+          { status: 400 },
+        );
+      }
+
+      if (lifecycleAction === 'discard') {
+        const [taskCount, branchCount] = await Promise.all([
+          prisma.videoTask.count({ where: { video_card_id: params.id } }),
+          prisma.videoBranch.count({ where: { video_card_id: params.id } }),
+        ]);
+        const hasHistory = taskCount > 0
+          || branchCount > 0
+          || Boolean(access.videoCard.current_best_task_id)
+          || Boolean(access.videoCard.final_task_id);
+        if (hasHistory) {
+          return NextResponse.json(
+            { error: '视频卡已有任务、最终版或分支，不能废弃；请改为归档' },
+            { status: 409 },
+          );
+        }
+      }
+
+      await prisma.videoCard.update({
+        where: { id: params.id },
+        data: { status: lifecycleAction === 'archive' ? 'archived' : 'discarded' },
+      });
+      await logProjectAction(user.id, `video_card_${lifecycleAction}`, 'video_card', params.id, {
+        project_id: access.videoCard.project_id,
+        previous_status: access.videoCard.status,
+      });
+      const videoCard = await getSerializableVideoCard(params.id);
+      return NextResponse.json({ video_card: videoCard, action: lifecycleAction });
+    }
+
     if (hasOwn(body, 'status')) {
       return NextResponse.json(
         { error: '视频卡状态不能直接修改；封板请使用封板操作，重开或归档需要走审批/专用流程' },

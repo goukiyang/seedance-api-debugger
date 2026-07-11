@@ -50,8 +50,19 @@
         saveError: null,
         selectedProjectId: null,
         selectedVideoCardId: null,
+        documentProjectId: null,
+        documentVideoCardId: null,
+        bootstrapRequestId: 0,
+        documentRequestId: 0,
+        activeSavePromise: null,
+        contextSwitching: false,
+        openContextMenu: null,
+        projectCreateOpen: false,
+        videoCardCreateOpen: false,
         libraryLoaded: false,
         historyLoaded: false,
+        libraryItems: [],
+        historyItems: [],
         pollingTasks: new Map()
     };
 
@@ -86,16 +97,18 @@
         return key ? { 'x-tab-id': key } : {};
     }
 
-    async function postJson(url, payload, options = {}) {
+    async function requestJson(url, options = {}) {
+        const method = options.method || 'GET';
         const res = await fetch(url, {
-            method: 'POST',
+            method,
             credentials: 'same-origin',
             headers: {
-                'Content-Type': 'application/json',
+                ...(options.payload === undefined ? {} : { 'Content-Type': 'application/json' }),
                 ...workspaceHeaders(),
                 ...(options.headers || {})
             },
-            body: JSON.stringify(payload)
+            body: options.payload === undefined ? undefined : JSON.stringify(options.payload),
+            cache: options.cache
         });
         const text = await res.text();
         let data = {};
@@ -112,6 +125,18 @@
             throw error;
         }
         return data;
+    }
+
+    function postJson(url, payload, options = {}) {
+        return requestJson(url, { ...options, method: 'POST', payload });
+    }
+
+    function patchJson(url, payload, options = {}) {
+        return requestJson(url, { ...options, method: 'PATCH', payload });
+    }
+
+    function deleteJson(url, options = {}) {
+        return requestJson(url, { ...options, method: 'DELETE' });
     }
 
     function uniqueList(items) {
@@ -341,18 +366,187 @@
         return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/\.?0+$/, '');
     }
 
+    function projectDisplayNameFor(project) {
+        if (!project) return '选择项目';
+        return project.display_name || (project.type === 'personal' ? '个人空间' : project.name) || '未命名项目';
+    }
+
+    function projectMetaFor(project) {
+        if (!project) return '选择生成内容的归属项目';
+        if (project.meta_label) return project.meta_label;
+        const kind = project.type === 'personal' ? '个人默认' : project.type === 'public' ? '预算记账项目' : '协作项目';
+        return `${kind} · ${project._count?.tasks || 0} 任务 · ${project._count?.reference_albums || 0} 图集`;
+    }
+
+    function ownerIdentity(owner, fallbackId = '') {
+        const value = owner || {};
+        return {
+            id: value.id || fallbackId || '',
+            name: value.name || value.username || value.email || '未知用户',
+            avatarUrl: value.avatar_url || ''
+        };
+    }
+
+    function avatarHue(seed) {
+        let hash = 0;
+        String(seed || 'canvas').split('').forEach(char => {
+            hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+        });
+        return Math.abs(hash) % 360;
+    }
+
+    function identityAvatarHtml(owner, fallbackId = '', className = '') {
+        const identity = ownerIdentity(owner, fallbackId);
+        const classes = `context-avatar ${className}`.trim();
+        if (identity.avatarUrl) {
+            return `<span class="${classes}"><img src="${escapeHtml(identity.avatarUrl)}" alt=""></span>`;
+        }
+        const initial = identity.name.trim().slice(0, 1).toUpperCase() || 'U';
+        return `<span class="${classes}" style="--avatar-hue:${avatarHue(identity.id || identity.name)}">${escapeHtml(initial)}</span>`;
+    }
+
+    function contextChevronHtml() {
+        return '<svg class="context-trigger-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+    }
+
+    function projectMenuHtml(projects, selectedProjectId) {
+        const groups = [
+            { key: 'owned', label: '我的项目' },
+            { key: 'joined', label: '参与项目' },
+            { key: 'other', label: '其他项目' }
+        ];
+        const sections = groups.map(group => {
+            const items = projects.filter(project => (project.group || 'owned') === group.key);
+            if (!items.length) return '';
+            return `
+                <div class="context-menu-group">
+                    <div class="context-menu-group-label">${group.label}</div>
+                    ${items.map(project => {
+                        const owner = ownerIdentity(project.owner, project.owner_user_id);
+                        const selected = project.id === selectedProjectId;
+                        const removalAction = project.removal_action || '';
+                        return `
+                            <div class="context-menu-row ${selected ? 'is-selected' : ''}">
+                                <button type="button" class="context-menu-row-main" data-project-select="${escapeHtml(project.id)}" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>
+                                    ${identityAvatarHtml(project.owner, project.owner_user_id)}
+                                    <span class="context-menu-row-copy">
+                                        <span class="context-menu-row-title">${escapeHtml(projectDisplayNameFor(project))}</span>
+                                        <span class="context-menu-row-owner">${escapeHtml(owner.name)}</span>
+                                        <span class="context-menu-row-meta">${escapeHtml(projectMetaFor(project))}</span>
+                                    </span>
+                                    <span class="context-menu-check" aria-hidden="true">${selected ? '✓' : ''}</span>
+                                </button>
+                                ${removalAction ? `
+                                    <button type="button" class="context-row-action ${removalAction === 'delete' ? 'danger' : ''}"
+                                        data-project-remove="${escapeHtml(project.id)}"
+                                        data-removal-action="${escapeHtml(removalAction)}"
+                                        title="${escapeHtml(project.removal_reason || (removalAction === 'delete' ? '删除空项目' : '归档项目'))}">
+                                        ${removalAction === 'delete' ? '删除' : '归档'}
+                                    </button>
+                                ` : ''}
+                            </div>`;
+                    }).join('')}
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="canvas-context-menu ${canvasRuntime.openContextMenu === 'project' ? 'is-open' : ''}" data-context-menu="project">
+                <div class="context-menu-head">
+                    <span><strong>项目列表</strong><small>${projects.length} 个可生成项目</small></span>
+                    <button type="button" class="context-command" data-project-create-toggle>${canvasRuntime.projectCreateOpen ? '取消' : '新建项目'}</button>
+                </div>
+                ${canvasRuntime.projectCreateOpen ? `
+                    <form class="context-create-form" data-project-create-form>
+                        <label>项目名称<input name="project_name" maxlength="80" autocomplete="off" placeholder="例如：品牌短片" required></label>
+                        <button type="submit" class="context-primary-command" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>创建并选中</button>
+                    </form>
+                ` : ''}
+                <div class="context-menu-list">
+                    ${sections || '<div class="context-menu-empty">还没有可用项目，可以先新建一个。</div>'}
+                </div>
+                <a class="context-menu-footer-link" href="/projects" target="_top">打开项目管理</a>
+            </div>`;
+    }
+
+    function videoCardSpecFor(card) {
+        if (!card) return '选择或新建视频卡';
+        return card.spec_label || [card.platform, card.ratio, card.duration ? `${card.duration}s` : '', card.target_resolution]
+            .filter(Boolean).join(' · ') || '未设置生成规格';
+    }
+
+    function videoCardStatusFor(card) {
+        return card?.status_label || card?.status || '未选择';
+    }
+
+    function videoCardMenuHtml(cards, selectedProject, selectedVideoCardId) {
+        const canCreate = Boolean(selectedProject?.can_generate);
+        const items = cards.map(card => {
+            const selected = card.id === selectedVideoCardId;
+            const owner = ownerIdentity(card.owner, card.owner_user_id);
+            const taskCount = card.summary?.task_count || 0;
+            return `
+                <div class="context-menu-row video-card-row ${selected ? 'is-selected' : ''} ${card.can_generate ? '' : 'is-locked'}">
+                    <button type="button" class="context-menu-row-main" data-video-card-select="${escapeHtml(card.id)}" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>
+                        ${identityAvatarHtml(card.owner, card.owner_user_id, 'is-small')}
+                        <span class="context-menu-row-copy">
+                            <span class="context-menu-row-title">${escapeHtml(card.title || '未命名视频卡')}</span>
+                            <span class="context-menu-row-owner">${escapeHtml(owner.name)} · ${escapeHtml(videoCardStatusFor(card))}</span>
+                            <span class="context-menu-row-meta">${escapeHtml(videoCardSpecFor(card))} · ${taskCount} 次生成</span>
+                        </span>
+                        <span class="context-menu-check" aria-hidden="true">${selected ? '✓' : ''}</span>
+                    </button>
+                    <a class="context-row-icon-action" href="/projects/${encodeURIComponent(card.project_id)}/video-cards/${encodeURIComponent(card.id)}" target="_top" title="查看视频卡" aria-label="查看视频卡">↗</a>
+                    ${card.removal_action ? `
+                        <button type="button" class="context-row-action ${card.removal_action === 'discard' ? 'danger' : ''}"
+                            data-video-card-remove="${escapeHtml(card.id)}"
+                            data-removal-action="${escapeHtml(card.removal_action)}"
+                            title="${escapeHtml(card.removal_reason || '')}">
+                            ${card.removal_action === 'discard' ? '废弃' : '归档'}
+                        </button>
+                    ` : ''}
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="canvas-context-menu video-card-menu ${canvasRuntime.openContextMenu === 'video-card' ? 'is-open' : ''}" data-context-menu="video-card">
+                <div class="context-menu-head">
+                    <span><strong>视频卡</strong><small>${cards.length} 张 · 归属当前项目</small></span>
+                    <button type="button" class="context-command" data-video-card-create-toggle ${canCreate ? '' : 'disabled'}>${canvasRuntime.videoCardCreateOpen ? '取消' : '新建视频卡'}</button>
+                </div>
+                ${canvasRuntime.videoCardCreateOpen ? `
+                    <form class="context-create-form" data-video-card-create-form>
+                        <label>标题<input name="video_card_title" maxlength="120" autocomplete="off" placeholder="例如：开场镜头" required></label>
+                        <label>视频目标<textarea name="video_card_objective" maxlength="1000" rows="2" placeholder="说明这张卡要产出什么"></textarea></label>
+                        <button type="submit" class="context-primary-command" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>创建并选中</button>
+                    </form>
+                ` : ''}
+                <div class="context-menu-list">
+                    ${items || '<div class="context-menu-empty">当前项目还没有视频卡，创建后才能提交生成。</div>'}
+                </div>
+                ${selectedProject ? `<a class="context-menu-footer-link" href="/projects/${encodeURIComponent(selectedProject.id)}" target="_top">查看项目详情</a>` : ''}
+            </div>`;
+    }
+
     function applyBootstrapState(data) {
         const project = selectedProjectFromBootstrap(data);
         const videoCard = selectedVideoCardFromBootstrap(data);
         canvasRuntime.selectedProjectId = project?.id || null;
         canvasRuntime.selectedVideoCardId = videoCard?.id || null;
-        canvasRuntime.documentId = data?.context?.canvas_document?.id || canvasRuntime.documentId || null;
+        const documentMeta = data?.context?.canvas_document || null;
+        if (canvasRuntime.documentProjectId !== project?.id) {
+            canvasRuntime.documentId = documentMeta?.id || null;
+            canvasRuntime.documentProjectId = project?.id || null;
+            canvasRuntime.documentVideoCardId = null;
+            canvasRuntime.documentLoaded = false;
+        } else if (!canvasRuntime.documentId && documentMeta?.id) {
+            canvasRuntime.documentId = documentMeta.id;
+        }
         const projectNameEl = document.getElementById('project-name');
         const avatarEl = document.getElementById('user-avatar');
-        if (projectNameEl && project?.name) {
+        if (projectNameEl) {
             projectNameEl.textContent = videoCard?.title
-                ? `${project.name} / ${videoCard.title}`
-                : project.name;
+                ? `${projectDisplayNameFor(project)} / ${videoCard.title}`
+                : projectDisplayNameFor(project);
         }
         if (avatarEl && data?.user?.name) {
             avatarEl.textContent = data.user.name.slice(0, 1);
@@ -379,38 +573,50 @@
         const projects = data?.context?.projects || [];
         const cards = data?.context?.video_cards || [];
         const credits = data?.context?.credits || {};
-        const projectOptions = projects.map(project => `
-            <option value="${escapeHtml(project.id)}" ${project.id === data.context.selected_project_id ? 'selected' : ''}>
-                ${escapeHtml(project.name)}
-            </option>
-        `).join('');
-        const cardOptions = cards.map(card => `
-            <option value="${escapeHtml(card.id)}" ${card.id === data.context.selected_video_card_id ? 'selected' : ''}>
-                ${escapeHtml(card.title || card.id)}
-            </option>
-        `).join('');
+        const project = selectedProjectFromBootstrap(data);
+        const card = selectedVideoCardFromBootstrap(data);
+        const contextReady = Boolean(project?.can_generate && card?.can_generate);
+        const contextStatus = !project
+            ? '缺少项目'
+            : !card
+                ? '缺少视频卡'
+                : card.can_generate
+                    ? '已接入后台'
+                    : data?.context?.generation_blocked_reason || `视频卡${videoCardStatusFor(card)}`;
         wrap.innerHTML = `
-            <label>
-                <span>项目</span>
-                <select data-context-project ${projects.length ? '' : 'disabled'}>
-                    ${projectOptions || '<option value="">无可用项目</option>'}
-                </select>
-            </label>
-            <label>
-                <span>视频卡</span>
-                <select data-context-video-card ${cards.length ? '' : 'disabled'}>
-                    ${cardOptions || '<option value="">无可用视频卡</option>'}
-                </select>
-            </label>
-            <span class="context-status ${data.context.needs_video_card_selection ? 'warn' : 'ok'}">
-                ${data.context.needs_video_card_selection ? '缺少归属' : '已接入后台'}
+            <div class="canvas-context-picker" data-context-picker="project">
+                <span class="context-picker-label">项目</span>
+                <button type="button" class="canvas-context-trigger" data-context-toggle="project" aria-expanded="${canvasRuntime.openContextMenu === 'project'}">
+                    ${project ? identityAvatarHtml(project.owner, project.owner_user_id, 'is-trigger') : '<span class="context-trigger-placeholder"></span>'}
+                    <span class="context-trigger-copy">
+                        <strong>${escapeHtml(projectDisplayNameFor(project))}</strong>
+                        <small>${escapeHtml(projectMetaFor(project))}</small>
+                    </span>
+                    ${contextChevronHtml()}
+                </button>
+                ${projectMenuHtml(projects, data.context.selected_project_id)}
+            </div>
+            <div class="canvas-context-picker" data-context-picker="video-card">
+                <span class="context-picker-label">视频卡</span>
+                <button type="button" class="canvas-context-trigger" data-context-toggle="video-card" aria-expanded="${canvasRuntime.openContextMenu === 'video-card'}" ${project ? '' : 'disabled'}>
+                    <span class="context-video-card-mark"></span>
+                    <span class="context-trigger-copy">
+                        <strong>${escapeHtml(card?.title || '选择 / 新建视频卡')}</strong>
+                        <small>${escapeHtml(card ? `${videoCardStatusFor(card)} · ${videoCardSpecFor(card)}` : '生成任务必须归属视频卡')}</small>
+                    </span>
+                    ${contextChevronHtml()}
+                </button>
+                ${videoCardMenuHtml(cards, project, data.context.selected_video_card_id)}
+            </div>
+            <span class="context-status ${contextReady ? 'ok' : 'warn'}" title="${escapeHtml(contextStatus)}">
+                ${escapeHtml(contextStatus)}
             </span>
             <span class="context-status credits" title="可用点数 / 冻结点数">
                 可用 ${escapeHtml(formatCredits(credits.available))} 点 · 冻结 ${escapeHtml(formatCredits(credits.frozen_credits))} 点
             </span>
-            <span id="canvas-save-state" class="context-status save ${canvasRuntime.saveState}">
+            <button type="button" id="canvas-save-state" data-save-now class="context-status save ${canvasRuntime.saveState}" title="点击立即保存" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>
                 ${canvasRuntime.saveState === 'saved' ? '已保存' : canvasRuntime.saveState === 'saving' ? '保存中' : canvasRuntime.saveState === 'error' ? '保存失败' : '未保存'}
-            </span>
+            </button>
         `;
     }
 
@@ -427,7 +633,12 @@
         });
     }
 
-    async function loadCanvasBootstrap(projectId = canvasRuntime.selectedProjectId, videoCardId = canvasRuntime.selectedVideoCardId) {
+    async function loadCanvasBootstrap(
+        projectId = canvasRuntime.selectedProjectId,
+        videoCardId = canvasRuntime.selectedVideoCardId,
+        options = {}
+    ) {
+        const requestId = ++canvasRuntime.bootstrapRequestId;
         try {
             const url = new URL('/api/tools/ultimate-canvas/bootstrap', window.location.origin);
             if (projectId) url.searchParams.set('project_id', projectId);
@@ -446,41 +657,380 @@
             if (!res.ok) {
                 throw new Error(data?.error || data?.message || `后台能力读取失败：${res.status}`);
             }
+            if (requestId !== canvasRuntime.bootstrapRequestId) return null;
             canvasRuntime.bootstrap = data;
             canvasRuntime.bootstrapLoaded = true;
             canvasRuntime.bootstrapError = null;
             applyBootstrapState(data);
-            await loadCanvasDocument();
+            if (options.restoreDocument !== false) {
+                await loadCanvasDocument({ clearWhenMissing: options.clearWhenMissing !== false });
+            }
             await loadLibraryPanels();
+            return data;
         } catch (error) {
+            if (requestId !== canvasRuntime.bootstrapRequestId) return null;
             canvasRuntime.bootstrap = null;
             canvasRuntime.bootstrapLoaded = false;
             canvasRuntime.bootstrapError = error;
             refreshContextRulesButtons();
             showCanvasNotice(error?.message || '后台能力读取失败，请刷新后重试。', 'error');
+            return null;
+        }
+    }
+
+    function renderRuntimeContextControls() {
+        if (canvasRuntime.bootstrap) renderContextControls(canvasRuntime.bootstrap);
+    }
+
+    function closeContextMenus() {
+        canvasRuntime.openContextMenu = null;
+        canvasRuntime.projectCreateOpen = false;
+        canvasRuntime.videoCardCreateOpen = false;
+        renderRuntimeContextControls();
+    }
+
+    function setContextSwitching(busy) {
+        canvasRuntime.contextSwitching = busy;
+        renderRuntimeContextControls();
+    }
+
+    function requestCanvasConfirmation(options = {}) {
+        return new Promise(resolve => {
+            document.querySelector('[data-canvas-confirm]')?.remove();
+            const overlay = document.createElement('div');
+            overlay.className = 'canvas-confirm-overlay';
+            overlay.dataset.canvasConfirm = 'true';
+            overlay.innerHTML = `
+                <div class="canvas-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="canvas-confirm-title">
+                    <div class="canvas-confirm-head">
+                        <strong id="canvas-confirm-title">${escapeHtml(options.title || '确认操作')}</strong>
+                        <button type="button" class="canvas-confirm-close" data-confirm-value="false" aria-label="关闭">×</button>
+                    </div>
+                    <p>${escapeHtml(options.message || '请确认是否继续。')}</p>
+                    ${options.detail ? `<div class="canvas-confirm-detail">${escapeHtml(options.detail)}</div>` : ''}
+                    <div class="canvas-confirm-actions">
+                        <button type="button" class="context-command" data-confirm-value="false">取消</button>
+                        <button type="button" class="context-primary-command ${options.danger ? 'danger' : ''}" data-confirm-value="true">${escapeHtml(options.confirmLabel || '确认')}</button>
+                    </div>
+                </div>`;
+            const finish = value => {
+                overlay.remove();
+                document.removeEventListener('keydown', onKeyDown);
+                resolve(value);
+            };
+            const onKeyDown = event => {
+                if (event.key === 'Escape') finish(false);
+            };
+            overlay.addEventListener('click', event => {
+                const value = event.target.closest('[data-confirm-value]')?.dataset.confirmValue;
+                if (value) finish(value === 'true');
+                else if (event.target === overlay) finish(false);
+            });
+            document.addEventListener('keydown', onKeyDown);
+            document.body.appendChild(overlay);
+            overlay.querySelector('[data-confirm-value="true"]')?.focus();
+        });
+    }
+
+    function clearCanvasForContext() {
+        canvasRuntime.documentRestoring = true;
+        try {
+            engine.restore({ nodes: [], connections: [], viewport: {} });
+        } finally {
+            canvasRuntime.documentRestoring = false;
+        }
+    }
+
+    function resetProjectScopedRuntime(projectId) {
+        stopAllVideoPolling();
+        canvasRuntime.selectedProjectId = projectId || null;
+        canvasRuntime.selectedVideoCardId = null;
+        canvasRuntime.documentId = null;
+        canvasRuntime.documentProjectId = null;
+        canvasRuntime.documentVideoCardId = null;
+        canvasRuntime.documentLoaded = false;
+        canvasRuntime.libraryLoaded = false;
+        canvasRuntime.historyLoaded = false;
+        canvasRuntime.libraryItems = [];
+        canvasRuntime.historyItems = [];
+    }
+
+    async function switchProjectContext(projectId) {
+        if (!projectId || projectId === canvasRuntime.selectedProjectId || canvasRuntime.contextSwitching) {
+            closeContextMenus();
+            return;
+        }
+        if (engine.nodes.size > 0 || canvasRuntime.documentId) {
+            const confirmed = await requestCanvasConfirmation({
+                title: '切换项目',
+                message: '当前画布会先保存到原项目，再加载目标项目最近的画布。两个项目的节点和素材不会混用。',
+                detail: `当前：${projectDisplayNameFor(selectedProject())}`,
+                confirmLabel: '保存并切换'
+            });
+            if (!confirmed) return;
+        }
+        canvasRuntime.openContextMenu = null;
+        canvasRuntime.projectCreateOpen = false;
+        setContextSwitching(true);
+        try {
+            const saved = await flushCanvasSave('before_project_change');
+            if (!saved) throw new Error('当前画布保存失败，已取消切换项目，避免内容错存。');
+            resetProjectScopedRuntime(projectId);
+            clearCanvasForContext();
+            canvasRuntime.bootstrapLoaded = false;
+            const data = await loadCanvasBootstrap(projectId, null, { restoreDocument: true, clearWhenMissing: true });
+            if (!data) throw new Error('项目切换失败，请稍后重试。');
+            showCanvasNotice(`已切换到「${projectDisplayNameFor(selectedProject())}」`, 'info');
+        } catch (error) {
+            showCanvasNotice(error?.message || '项目切换失败。', 'error');
+        } finally {
+            setContextSwitching(false);
+        }
+    }
+
+    async function switchVideoCardContext(videoCardId) {
+        if (!videoCardId || videoCardId === canvasRuntime.selectedVideoCardId || canvasRuntime.contextSwitching) {
+            closeContextMenus();
+            return;
+        }
+        canvasRuntime.openContextMenu = null;
+        canvasRuntime.videoCardCreateOpen = false;
+        setContextSwitching(true);
+        try {
+            const saved = await flushCanvasSave('before_video_card_change');
+            if (!saved) throw new Error('当前画布保存失败，已取消切换视频卡。');
+            const data = await loadCanvasBootstrap(canvasRuntime.selectedProjectId, videoCardId, { restoreDocument: false });
+            if (!data) throw new Error('视频卡切换失败，请稍后重试。');
+            canvasRuntime.documentVideoCardId = canvasRuntime.selectedVideoCardId;
+            scheduleCanvasSave('video_card_change');
+            showCanvasNotice(`已切换到视频卡「${selectedVideoCard()?.title || '未命名'}」`, 'info');
+        } catch (error) {
+            showCanvasNotice(error?.message || '视频卡切换失败。', 'error');
+        } finally {
+            setContextSwitching(false);
+        }
+    }
+
+    async function createProjectFromMenu(form) {
+        const name = form.elements.project_name?.value?.trim() || '';
+        if (!name || canvasRuntime.contextSwitching) return;
+        setContextSwitching(true);
+        try {
+            const data = await postJson('/api/projects', { name, type: 'team' });
+            if (!data?.project?.id) throw new Error('后端没有返回新项目 ID');
+            const saved = await flushCanvasSave('before_project_create_switch');
+            if (!saved) throw new Error('当前画布保存失败，新项目已创建但未切换。');
+            resetProjectScopedRuntime(data.project.id);
+            clearCanvasForContext();
+            canvasRuntime.bootstrapLoaded = false;
+            await loadCanvasBootstrap(data.project.id, null, { restoreDocument: true, clearWhenMissing: true });
+            showCanvasNotice(`已新建并切换到「${data.project.name}」`, 'info');
+        } catch (error) {
+            showCanvasNotice(error?.message || '新建项目失败。', 'error');
+        } finally {
+            canvasRuntime.openContextMenu = null;
+            canvasRuntime.projectCreateOpen = false;
+            setContextSwitching(false);
+        }
+    }
+
+    async function removeProjectFromMenu(projectId, action) {
+        const project = canvasRuntime.bootstrap?.context?.projects?.find(item => item.id === projectId);
+        if (!project || !action || canvasRuntime.contextSwitching) return;
+        const confirmed = await requestCanvasConfirmation({
+            title: action === 'archive' ? '归档项目' : '删除空项目',
+            message: action === 'archive'
+                ? '这个项目已有任务或图集，将转为只读归档，不会删除历史内容。'
+                : '这个项目当前没有任务或图集，删除后不会再出现在项目列表中。',
+            detail: `${projectDisplayNameFor(project)} · ${projectMetaFor(project)}`,
+            confirmLabel: action === 'archive' ? '确认归档' : '确认删除',
+            danger: action === 'delete'
+        });
+        if (!confirmed) return;
+
+        setContextSwitching(true);
+        try {
+            if (projectId === canvasRuntime.selectedProjectId) {
+                const saved = await flushCanvasSave('before_project_remove');
+                if (!saved) throw new Error('当前画布保存失败，已取消项目操作。');
+            }
+            if (action === 'archive') await patchJson(`/api/projects/${encodeURIComponent(projectId)}`, { action: 'archive' });
+            else await deleteJson(`/api/projects/${encodeURIComponent(projectId)}`);
+
+            if (projectId === canvasRuntime.selectedProjectId) {
+                resetProjectScopedRuntime(null);
+                clearCanvasForContext();
+                canvasRuntime.bootstrapLoaded = false;
+                await loadCanvasBootstrap(null, null, { restoreDocument: true, clearWhenMissing: true });
+            } else {
+                await loadCanvasBootstrap(canvasRuntime.selectedProjectId, canvasRuntime.selectedVideoCardId, { restoreDocument: false });
+            }
+            showCanvasNotice(action === 'archive' ? '项目已归档。' : '空项目已删除。', 'info');
+        } catch (error) {
+            showCanvasNotice(error?.message || '项目操作失败。', 'error');
+        } finally {
+            canvasRuntime.openContextMenu = null;
+            setContextSwitching(false);
+        }
+    }
+
+    async function createVideoCardFromValues(title, objective, confirmDuplicate = false) {
+        if (!title || !canvasRuntime.selectedProjectId || canvasRuntime.contextSwitching) return;
+        setContextSwitching(true);
+        try {
+            const data = await postJson(`/api/projects/${encodeURIComponent(canvasRuntime.selectedProjectId)}/video-cards`, {
+                title,
+                objective: objective || null,
+                confirm_duplicate: confirmDuplicate
+            });
+            if (!data?.video_card?.id) throw new Error('后端没有返回新视频卡 ID');
+            await loadCanvasBootstrap(canvasRuntime.selectedProjectId, data.video_card.id, { restoreDocument: false });
+            canvasRuntime.documentVideoCardId = data.video_card.id;
+            scheduleCanvasSave('video_card_create');
+            showCanvasNotice(`已创建视频卡「${data.video_card.title}」`, 'info');
+            canvasRuntime.openContextMenu = null;
+            canvasRuntime.videoCardCreateOpen = false;
+        } catch (error) {
+            if (error?.status === 409 && error?.response?.code === 'SIMILAR_VIDEO_CARD_EXISTS' && !confirmDuplicate) {
+                const confirmed = await requestCanvasConfirmation({
+                    title: '可能存在重复视频卡',
+                    message: '同一项目下发现标题或目标相近的视频卡。你可以取消后选择已有卡，也可以确认继续新建。',
+                    detail: error.response?.similar_video_cards?.[0]?.title || title,
+                    confirmLabel: '仍然新建'
+                });
+                canvasRuntime.contextSwitching = false;
+                if (confirmed) return await createVideoCardFromValues(title, objective, true);
+            } else {
+                showCanvasNotice(error?.message || '新建视频卡失败。', 'error');
+            }
+        } finally {
+            setContextSwitching(false);
+        }
+    }
+
+    function createVideoCardFromMenu(form) {
+        const title = form.elements.video_card_title?.value?.trim() || '';
+        const objective = form.elements.video_card_objective?.value?.trim() || '';
+        return createVideoCardFromValues(title, objective, false);
+    }
+
+    async function removeVideoCardFromMenu(videoCardId, action) {
+        const card = canvasRuntime.bootstrap?.context?.video_cards?.find(item => item.id === videoCardId);
+        if (!card || !action || canvasRuntime.contextSwitching) return;
+        const confirmed = await requestCanvasConfirmation({
+            title: action === 'archive' ? '归档视频卡' : '废弃空视频卡',
+            message: action === 'archive'
+                ? '视频卡已有生成记录，归档后保留历史，但不能继续生成。'
+                : '这张视频卡还没有生成记录，废弃后将从当前列表移除。',
+            detail: `${card.title} · ${videoCardSpecFor(card)}`,
+            confirmLabel: action === 'archive' ? '确认归档' : '确认废弃',
+            danger: action === 'discard'
+        });
+        if (!confirmed) return;
+
+        setContextSwitching(true);
+        try {
+            await patchJson(`/api/video-cards/${encodeURIComponent(videoCardId)}`, { action });
+            const wasSelected = videoCardId === canvasRuntime.selectedVideoCardId;
+            await loadCanvasBootstrap(
+                canvasRuntime.selectedProjectId,
+                wasSelected ? null : canvasRuntime.selectedVideoCardId,
+                { restoreDocument: false }
+            );
+            if (wasSelected) scheduleCanvasSave('video_card_remove');
+            showCanvasNotice(action === 'archive' ? '视频卡已归档。' : '空视频卡已废弃。', 'info');
+        } catch (error) {
+            showCanvasNotice(error?.message || '视频卡操作失败。', 'error');
+        } finally {
+            canvasRuntime.openContextMenu = null;
+            setContextSwitching(false);
         }
     }
 
     installAutosaveHooks();
     loadCanvasBootstrap();
 
-    document.addEventListener('change', async (event) => {
-        const projectSelect = event.target.closest('[data-context-project]');
-        if (projectSelect) {
-            canvasRuntime.selectedProjectId = projectSelect.value || null;
-            canvasRuntime.selectedVideoCardId = null;
-            canvasRuntime.documentId = null;
-            canvasRuntime.documentLoaded = false;
-            await loadCanvasBootstrap(canvasRuntime.selectedProjectId, null);
-            scheduleCanvasSave('project_change');
+    document.addEventListener('click', event => {
+        const toggle = event.target.closest('[data-context-toggle]');
+        if (toggle) {
+            const kind = toggle.dataset.contextToggle;
+            canvasRuntime.openContextMenu = canvasRuntime.openContextMenu === kind ? null : kind;
+            if (kind !== 'project') canvasRuntime.projectCreateOpen = false;
+            if (kind !== 'video-card') canvasRuntime.videoCardCreateOpen = false;
+            renderRuntimeContextControls();
             return;
         }
-        const cardSelect = event.target.closest('[data-context-video-card]');
-        if (cardSelect) {
-            canvasRuntime.selectedVideoCardId = cardSelect.value || null;
-            await loadCanvasBootstrap(canvasRuntime.selectedProjectId, canvasRuntime.selectedVideoCardId);
-            scheduleCanvasSave('video_card_change');
+
+        const projectCreateToggle = event.target.closest('[data-project-create-toggle]');
+        if (projectCreateToggle) {
+            canvasRuntime.projectCreateOpen = !canvasRuntime.projectCreateOpen;
+            renderRuntimeContextControls();
+            document.querySelector('[data-project-create-form] input')?.focus();
+            return;
         }
+
+        const videoCardCreateToggle = event.target.closest('[data-video-card-create-toggle]');
+        if (videoCardCreateToggle) {
+            canvasRuntime.videoCardCreateOpen = !canvasRuntime.videoCardCreateOpen;
+            renderRuntimeContextControls();
+            document.querySelector('[data-video-card-create-form] input')?.focus();
+            return;
+        }
+
+        const projectSelect = event.target.closest('[data-project-select]');
+        if (projectSelect) {
+            switchProjectContext(projectSelect.dataset.projectSelect);
+            return;
+        }
+
+        const projectRemove = event.target.closest('[data-project-remove]');
+        if (projectRemove) {
+            removeProjectFromMenu(projectRemove.dataset.projectRemove, projectRemove.dataset.removalAction);
+            return;
+        }
+
+        const videoCardSelect = event.target.closest('[data-video-card-select]');
+        if (videoCardSelect) {
+            switchVideoCardContext(videoCardSelect.dataset.videoCardSelect);
+            return;
+        }
+
+        const videoCardRemove = event.target.closest('[data-video-card-remove]');
+        if (videoCardRemove) {
+            removeVideoCardFromMenu(videoCardRemove.dataset.videoCardRemove, videoCardRemove.dataset.removalAction);
+            return;
+        }
+
+        const saveNow = event.target.closest('[data-save-now]');
+        if (saveNow) {
+            if (canvasRuntime.contextSwitching) return;
+            flushCanvasSave('manual').then(saved => {
+                showCanvasNotice(saved ? '画布已保存。' : '画布保存失败，请稍后重试。', saved ? 'info' : 'error');
+            });
+            return;
+        }
+
+        if (canvasRuntime.openContextMenu && !event.target.closest('.canvas-context-picker')) {
+            closeContextMenus();
+        }
+    });
+
+    document.addEventListener('submit', event => {
+        const projectForm = event.target.closest('[data-project-create-form]');
+        if (projectForm) {
+            event.preventDefault();
+            createProjectFromMenu(projectForm);
+            return;
+        }
+        const videoCardForm = event.target.closest('[data-video-card-create-form]');
+        if (videoCardForm) {
+            event.preventDefault();
+            createVideoCardFromMenu(videoCardForm);
+        }
+    });
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && canvasRuntime.openContextMenu) closeContextMenus();
     });
 
     function updateSaveIndicator() {
@@ -521,51 +1071,84 @@
         engine.nodes.forEach((node, nodeId) => syncNodeDataFromDom(nodeId, node));
     }
 
-    function canvasDocumentPayload() {
+    function canvasDocumentPayload(context = {}) {
         syncAllNodesFromDom();
         return {
             schema: 'ultimate_canvas.v1',
             savedAt: new Date().toISOString(),
             context: {
-                project_id: canvasRuntime.selectedProjectId,
-                video_card_id: canvasRuntime.selectedVideoCardId
+                project_id: context.projectId ?? canvasRuntime.selectedProjectId,
+                video_card_id: context.videoCardId ?? canvasRuntime.selectedVideoCardId
             },
             canvas: engine.serialize()
         };
     }
 
     async function saveCanvasDocument(reason = 'autosave') {
-        if (canvasRuntime.documentRestoring) return;
-        if (!canvasRuntime.bootstrapLoaded || !canvasRuntime.selectedProjectId) return;
-        if (!engine.nodes.size && !canvasRuntime.documentId) return;
+        if (canvasRuntime.documentRestoring) return true;
+        if (!canvasRuntime.bootstrapLoaded || !canvasRuntime.selectedProjectId) return true;
+        const projectId = canvasRuntime.selectedProjectId;
+        const videoCardId = canvasRuntime.selectedVideoCardId;
+        const contextKey = `${projectId}:${videoCardId || ''}`;
+        const documentId = canvasRuntime.documentProjectId === projectId ? canvasRuntime.documentId : null;
+        if (!engine.nodes.size && !documentId) return true;
         canvasRuntime.saveState = 'saving';
         canvasRuntime.saveError = null;
         updateSaveIndicator();
+        const payload = canvasDocumentPayload({ projectId, videoCardId });
+        const savePromise = postJson('/api/tools/ultimate-canvas/document', {
+            document_id: documentId,
+            project_id: projectId,
+            title: selectedVideoCard()?.title ? `无线画布 / ${selectedVideoCard().title}` : '无线画布',
+            active_generation_node_id: engine.selectedNodeId,
+            document_json: JSON.stringify(payload),
+            save_reason: reason
+        });
+        canvasRuntime.activeSavePromise = savePromise;
         try {
-            const payload = canvasDocumentPayload();
-            const result = await postJson('/api/tools/ultimate-canvas/document', {
-                document_id: canvasRuntime.documentId,
-                project_id: canvasRuntime.selectedProjectId,
-                title: selectedVideoCard()?.title ? `无线画布 / ${selectedVideoCard().title}` : '无线画布',
-                active_generation_node_id: engine.selectedNodeId,
-                document_json: JSON.stringify(payload),
-                save_reason: reason
-            });
-            canvasRuntime.documentId = result.document?.id || canvasRuntime.documentId;
-            canvasRuntime.saveState = 'saved';
-            canvasRuntime.saveError = null;
+            const result = await savePromise;
+            const currentContextKey = `${canvasRuntime.selectedProjectId || ''}:${canvasRuntime.selectedVideoCardId || ''}`;
+            if (currentContextKey === contextKey) {
+                canvasRuntime.documentId = result.document?.id || documentId || canvasRuntime.documentId;
+                canvasRuntime.documentProjectId = projectId;
+                canvasRuntime.documentVideoCardId = videoCardId;
+                canvasRuntime.saveState = 'saved';
+                canvasRuntime.saveError = null;
+            }
+            return true;
         } catch (error) {
-            canvasRuntime.saveState = 'error';
-            canvasRuntime.saveError = error?.message || '保存失败';
-            showCanvasNotice(canvasRuntime.saveError, 'warn');
+            if (canvasRuntime.selectedProjectId === projectId) {
+                canvasRuntime.saveState = 'error';
+                canvasRuntime.saveError = error?.message || '保存失败';
+                showCanvasNotice(canvasRuntime.saveError, 'warn');
+            }
+            return false;
         } finally {
+            if (canvasRuntime.activeSavePromise === savePromise) canvasRuntime.activeSavePromise = null;
             updateSaveIndicator();
         }
+    }
+
+    async function flushCanvasSave(reason = 'flush') {
+        window.clearTimeout(canvasRuntime.saveTimer);
+        canvasRuntime.saveTimer = null;
+        if (canvasRuntime.activeSavePromise) {
+            try {
+                await canvasRuntime.activeSavePromise;
+            } catch {
+                // saveCanvasDocument 会统一呈现错误；继续补一次最终保存。
+            }
+        }
+        return saveCanvasDocument(reason);
     }
 
     function scheduleCanvasSave(reason = 'change') {
         if (canvasRuntime.documentRestoring) return;
         window.clearTimeout(canvasRuntime.saveTimer);
+        if (canvasRuntime.saveState === 'saved') {
+            canvasRuntime.saveState = 'idle';
+            updateSaveIndicator();
+        }
         canvasRuntime.saveTimer = window.setTimeout(() => saveCanvasDocument(reason), 900);
     }
 
@@ -573,6 +1156,13 @@
         engine.nodes.forEach((node) => {
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
             if (!nodeEl) return;
+            if (node.data?.generationStatus === 'failed') {
+                setNodeGenerationStatus(nodeEl, 'error', node.data.generationError || '上次生成失败，输入和素材已保留');
+            } else if (node.data?.generationStatus === 'succeeded') {
+                setNodeGenerationStatus(nodeEl, 'success', '生成已完成');
+            } else if (node.data?.generationStatus && node.data.generationStatus !== 'idle') {
+                setNodeGenerationStatus(nodeEl, 'loading', `任务${node.data.generationStatus}`);
+            }
             if (node.type === 'image') {
                 syncImageModeButtons(nodeEl, node.data?.mode || 'text-to-image');
             }
@@ -617,35 +1207,55 @@
         });
     }
 
-    async function loadCanvasDocument() {
+    async function loadCanvasDocument(options = {}) {
         if (!canvasRuntime.selectedProjectId || canvasRuntime.documentLoaded) return;
+        const projectId = canvasRuntime.selectedProjectId;
+        const requestId = ++canvasRuntime.documentRequestId;
         try {
             const url = new URL('/api/tools/ultimate-canvas/document', window.location.origin);
-            url.searchParams.set('project_id', canvasRuntime.selectedProjectId);
+            url.searchParams.set('project_id', projectId);
             const res = await fetch(url.toString(), { credentials: 'same-origin', cache: 'no-store' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data?.error || data?.message || `画布读取失败：${res.status}`);
+            if (requestId !== canvasRuntime.documentRequestId || projectId !== canvasRuntime.selectedProjectId) return;
             canvasRuntime.documentLoaded = true;
             if (!data.document?.document_json) {
+                if (options.clearWhenMissing !== false) {
+                    stopAllVideoPolling();
+                    clearCanvasForContext();
+                }
+                canvasRuntime.documentId = null;
+                canvasRuntime.documentProjectId = projectId;
+                canvasRuntime.documentVideoCardId = canvasRuntime.selectedVideoCardId;
                 canvasRuntime.saveState = 'idle';
                 updateSaveIndicator();
                 return;
             }
             const parsed = JSON.parse(data.document.document_json);
+            const savedProjectId = parsed?.context?.project_id || data.document.project_id;
+            if (savedProjectId && savedProjectId !== projectId) {
+                throw new Error('画布文档归属与当前项目不一致，已停止恢复。');
+            }
             canvasRuntime.documentId = data.document.id;
+            canvasRuntime.documentProjectId = projectId;
+            canvasRuntime.documentVideoCardId = parsed?.context?.video_card_id || canvasRuntime.selectedVideoCardId;
             canvasRuntime.documentRestoring = true;
+            stopAllVideoPolling();
             engine.restore(parsed.canvas || parsed);
             hydrateNodeViews();
             refreshContextRulesButtons();
             canvasRuntime.saveState = 'saved';
             canvasRuntime.saveError = null;
         } catch (error) {
+            if (requestId !== canvasRuntime.documentRequestId || projectId !== canvasRuntime.selectedProjectId) return;
             canvasRuntime.saveState = 'error';
             canvasRuntime.saveError = error?.message || '画布恢复失败';
             showCanvasNotice(canvasRuntime.saveError, 'warn');
         } finally {
-            canvasRuntime.documentRestoring = false;
-            updateSaveIndicator();
+            if (requestId === canvasRuntime.documentRequestId) {
+                canvasRuntime.documentRestoring = false;
+                updateSaveIndicator();
+            }
         }
     }
 
@@ -729,6 +1339,7 @@
     async function loadLibraryPanels(force = false) {
         if (!canvasRuntime.bootstrapLoaded || !canvasRuntime.selectedProjectId) return;
         if (!force && canvasRuntime.libraryLoaded && canvasRuntime.historyLoaded) return;
+        const projectId = canvasRuntime.selectedProjectId;
         try {
             const [assetItems, historyItems] = await Promise.all([
                 fetchLibraryItems({
@@ -736,7 +1347,7 @@
                     scope: 'project',
                     status: 'all',
                     sort: 'created_desc',
-                    project_id: canvasRuntime.selectedProjectId,
+                    project_id: projectId,
                     limit: 24
                 }),
                 fetchLibraryItems({
@@ -744,10 +1355,11 @@
                     scope: 'project',
                     status: 'all',
                     sort: 'created_desc',
-                    project_id: canvasRuntime.selectedProjectId,
+                    project_id: projectId,
                     limit: 24
                 })
             ]);
+            if (projectId !== canvasRuntime.selectedProjectId) return;
             canvasRuntime.libraryItems = assetItems;
             canvasRuntime.historyItems = historyItems;
             renderLibraryItems(document.getElementById('assets-panel-body'), assetItems, '暂无素材');
@@ -802,7 +1414,7 @@
         createNodeFromLibraryItem(item);
     });
 
-    async function uploadCanvasFile(file, role = '') {
+    async function uploadCanvasFile(file, role = '', canvasNodeId = '') {
         if (!canvasRuntime.selectedProjectId || !canvasRuntime.selectedVideoCardId) {
             throw new Error('请先选择项目和视频卡，再上传素材。');
         }
@@ -811,6 +1423,7 @@
         formData.set('project_id', canvasRuntime.selectedProjectId);
         formData.set('video_card_id', canvasRuntime.selectedVideoCardId);
         if (canvasRuntime.documentId) formData.set('canvas_document_id', canvasRuntime.documentId);
+        if (canvasNodeId) formData.set('canvas_node_id', canvasNodeId);
         if (role) formData.set('role', role);
         const res = await fetch('/api/tools/ultimate-canvas/upload', {
             method: 'POST',
@@ -822,13 +1435,14 @@
         return data;
     }
 
-    function createUploadedNode(uploadResult, cx, cy, pendingConnection = null) {
+    function createUploadedNode(uploadResult, cx, cy, pendingConnection = null, requestedNodeId = '') {
         const asset = uploadResult.asset || {};
         const type = asset.mimeType?.startsWith('video/') ? 'video'
             : asset.mimeType?.startsWith('audio/') ? 'audio'
                 : 'image';
         const imagePreview = type === 'image' ? (asset.thumbnailUrl || asset.originalUrl || '') : '';
         const nodeId = engine.addNode(type, cx, cy, {
+            id: requestedNodeId || undefined,
             title: asset.fileName || '上传素材',
             description: uploadResult.reference_image_id ? '已上传并加入参考图体系' : '已上传到站内资产库',
             assetId: asset.id,
@@ -927,6 +1541,24 @@
         button.title = loading ? '接口调用中' : button.dataset.originalTitle;
     }
 
+    function setNodeGenerationStatus(nodeEl, state, message) {
+        if (!nodeEl) return;
+        const panel = nodeEl.querySelector('.node-input-bar, .node-video-props, .node-image-props');
+        if (!panel) return;
+        let status = panel.querySelector('.node-generation-status');
+        if (!message) {
+            status?.remove();
+            return;
+        }
+        if (!status) {
+            status = document.createElement('div');
+            panel.prepend(status);
+        }
+        status.className = `node-generation-status ${state || 'info'}`;
+        status.textContent = message;
+        status.title = message;
+    }
+
     function generatedTextFromResult(result) {
         return (result?.text || result?.content || result?.message || '').trim();
     }
@@ -964,6 +1596,7 @@
             };
         }
 
+        setNodeGenerationStatus(nodeEl, 'success', result?.message || '文本生成完成');
         showCanvasNotice(result?.message || 'LLM 生成完成', 'info');
         scheduleCanvasSave('text_generation');
     }
@@ -1005,61 +1638,107 @@
             };
         }
         decorateGeneratedNode(payload.nodeId, title, desc, imageUrl);
+        setNodeGenerationStatus(nodeEl, 'success', '图片生成完成并已入库');
         showCanvasNotice('图片生成完成，已进入资产库。', 'info');
         scheduleCanvasSave('image_generation');
         loadLibraryPanels(true);
     }
 
+    function videoStatusUrl(taskId) {
+        const template = canvasRuntime.bootstrap?.capabilities?.video?.status_endpoint_template
+            || '/api/video/status/:taskId?refresh=true';
+        return template.replace(':taskId', encodeURIComponent(taskId));
+    }
+
+    function stopVideoPolling(taskId) {
+        const state = canvasRuntime.pollingTasks.get(taskId);
+        if (!state) return;
+        state.stopped = true;
+        window.clearTimeout(state.timer);
+        canvasRuntime.pollingTasks.delete(taskId);
+    }
+
+    function stopAllVideoPolling() {
+        Array.from(canvasRuntime.pollingTasks.keys()).forEach(stopVideoPolling);
+    }
+
     async function pollVideoTask(taskId, nodeId) {
         if (!taskId || canvasRuntime.pollingTasks.has(taskId)) return;
-        let attempt = 0;
-        const maxAttempts = 80;
-        let stopped = false;
-        const stopPolling = () => {
-            stopped = true;
-            window.clearInterval(canvasRuntime.pollingTasks.get(taskId));
-            canvasRuntime.pollingTasks.delete(taskId);
+        const state = {
+            attempt: 0,
+            errorCount: 0,
+            timer: null,
+            stopped: false
         };
+        canvasRuntime.pollingTasks.set(taskId, state);
+        const maxAttempts = 120;
+
+        const schedule = delay => {
+            if (state.stopped) return;
+            state.timer = window.setTimeout(poll, delay);
+        };
+
         const poll = async () => {
-            attempt += 1;
+            if (state.stopped) return;
+            if (!engine.nodes.has(nodeId)) {
+                stopVideoPolling(taskId);
+                return;
+            }
+            state.attempt += 1;
+            const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+            setNodeGenerationStatus(nodeEl, 'loading', `视频生成中 · 第 ${state.attempt} 次状态检查`);
             try {
-                const res = await fetch(`/api/video/status/${encodeURIComponent(taskId)}?refresh=true`, {
+                const res = await fetch(videoStatusUrl(taskId), {
                     credentials: 'same-origin',
                     cache: 'no-store'
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data?.message || data?.error || `状态读取失败：${res.status}`);
-                applyVideoTaskStatus(nodeId, data);
-                const status = data.local_status || data.status;
-                if (['succeeded', 'failed', 'cancelled'].includes(status) || attempt >= maxAttempts) {
-                    stopPolling();
+                state.errorCount = 0;
+                const task = data?.task || data;
+                applyVideoTaskStatus(nodeId, task);
+                const status = task.local_status || task.status;
+                if (['succeeded', 'failed', 'cancelled'].includes(status)) {
+                    stopVideoPolling(taskId);
                     loadLibraryPanels(true);
+                    return;
                 }
+                if (state.attempt >= maxAttempts) {
+                    stopVideoPolling(taskId);
+                    setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
+                    return;
+                }
+                const delay = document.hidden ? 15000 : state.attempt < 4 ? 3000 : state.attempt < 20 ? 5000 : 8000;
+                schedule(delay);
             } catch (error) {
-                if (attempt >= 3) {
-                    showCanvasNotice(error?.message || '视频状态轮询失败。', 'warn');
+                state.errorCount += 1;
+                setNodeGenerationStatus(nodeEl, 'warn', `状态读取失败，正在自动重试（${state.errorCount}）`);
+                if (state.errorCount === 3) {
+                    showCanvasNotice(error?.message || '视频状态轮询暂时失败，正在自动重试。', 'warn');
                 }
-                if (attempt >= maxAttempts) {
-                    stopPolling();
+                if (state.attempt >= maxAttempts) {
+                    stopVideoPolling(taskId);
+                    setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
+                    return;
                 }
+                schedule(Math.min(20000, 5000 * state.errorCount));
             }
         };
+
         await poll();
-        if (!stopped && !canvasRuntime.pollingTasks.has(taskId)) {
-            const timer = window.setInterval(poll, 5000);
-            canvasRuntime.pollingTasks.set(taskId, timer);
-        }
     }
 
     function applyVideoTaskStatus(nodeId, task) {
         const node = engine.nodes.get(nodeId);
         if (!node || !task?.id) return;
+        const previousStatus = node.data?.generationStatus;
+        const nextStatus = task.local_status || task.status || previousStatus;
         const preview = videoPreviewForTask(task);
         node.data = {
             ...node.data,
             taskId: task.id,
             providerTaskId: task.provider_task_id || node.data.providerTaskId || null,
-            generationStatus: task.local_status || task.status || node.data.generationStatus,
+            generationStatus: nextStatus,
             videoPreviewUrl: task.result_video_url ? `/api/video/play/${task.id}` : node.data.videoPreviewUrl,
             videoDownloadUrl: `/api/video/download/${task.id}`,
             thumbnailUrl: preview || node.data.thumbnailUrl,
@@ -1079,7 +1758,14 @@
                 downloadUrl: `/api/video/download/${task.id}`
             }
         );
-        scheduleCanvasSave('video_status');
+        const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (nextStatus === 'succeeded') setNodeGenerationStatus(nodeEl, 'success', '视频生成完成');
+        else if (nextStatus === 'failed') setNodeGenerationStatus(nodeEl, 'error', task.error_message || '视频生成失败');
+        else if (nextStatus === 'cancelled') setNodeGenerationStatus(nodeEl, 'warn', '视频任务已取消');
+        else setNodeGenerationStatus(nodeEl, 'loading', `视频任务${nextStatus || '处理中'}`);
+        if (nextStatus !== previousStatus || ['succeeded', 'failed', 'cancelled'].includes(nextStatus)) {
+            scheduleCanvasSave('video_status');
+        }
     }
 
     function applyVideoGenerationResult(nodeEl, payload, result) {
@@ -1105,6 +1791,7 @@
                 taskId: result?.task_id || result?.id || null
             }
         );
+        setNodeGenerationStatus(nodeEl, 'loading', '视频任务已提交，正在查询状态');
         showCanvasNotice(result?.message || '视频任务已提交。', 'info');
         scheduleCanvasSave('video_generation');
         if (result?.task_id || result?.id) pollVideoTask(result.task_id || result.id, payload.nodeId);
@@ -1144,11 +1831,29 @@
         }
 
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
+        const project = selectedProject();
+        const card = selectedVideoCard();
+        if (canvasRuntime.contextSwitching) {
+            return { ready: false, message: '项目或视频卡正在切换，请稍后再生成。' };
+        }
+        const promptOptional = payload.kind === 'image' && payload.mode === 'upscale-image';
+        if (!promptOptional && !payload.prompt?.trim()) {
+            return { ready: false, message: '请先填写提示词，再提交生成。' };
+        }
+        if (!project?.id || !project.can_generate) {
+            return { ready: false, message: '请先选择一个你有生成权限的项目。' };
+        }
+        if (!card?.id) {
+            return { ready: false, message: '请先选择或新建视频卡，生成结果才能正确归档。' };
+        }
+        if (!card.can_generate) {
+            return { ready: false, message: canvasRuntime.bootstrap?.context?.generation_blocked_reason || '当前视频卡不能继续生成，请切换或新建视频卡。' };
+        }
         if (payload.kind === 'text' || payload.kind === 'script') {
             if (!capabilities.text?.enabled) {
                 return {
                     ready: false,
-                    message: capabilities.text?.message || 'gpt5.4 文本能力未配置，请先到后台 API 设置完成配置。'
+                    message: capabilities.text?.message || '文本生成能力当前不可用。'
                 };
             }
             return { ready: true };
@@ -1161,11 +1866,10 @@
                     message: capabilities.image?.message || '图形生成能力未配置，请先到后台 API 设置完成配置。'
                 };
             }
-            if (!canvasRuntime.selectedProjectId || !canvasRuntime.selectedVideoCardId) {
-                return {
-                    ready: false,
-                    message: '请先选择项目和视频卡，图片结果才能进入正确资产库。'
-                };
+            if (payload.mode === 'upscale-image'
+                && collectReferenceImageIds(payload).length === 0
+                && collectReferenceImageUrls(payload).length === 0) {
+                return { ready: false, message: '高清修复需要先连接一张已上传或已生成的图片。' };
             }
             return { ready: true };
         }
@@ -1175,12 +1879,6 @@
                 return {
                     ready: false,
                     message: capabilities.video?.message || '默认视频 API 未配置，暂不能创建视频任务。'
-                };
-            }
-            if (!canvasRuntime.selectedProjectId || !canvasRuntime.selectedVideoCardId) {
-                return {
-                    ready: false,
-                    message: '请先选择项目和视频卡，视频任务才能进入正确成本和点数链路。'
                 };
             }
             if (payload.mode === 'first-last-frame-video' && collectReferenceImageIds(payload).length === 0 && collectReferenceImageUrls(payload).length === 0) {
@@ -1210,11 +1908,24 @@
         }
 
         setSubmitLoading(button, true);
+        setNodeGenerationStatus(nodeEl, 'loading', '正在提交生成请求');
         try {
             const result = await api.generate(payload);
             applyGenerationResult(nodeEl, payload, result);
         } catch (error) {
-            showCanvasNotice(error?.message || '生成请求失败，请检查接口配置。', 'error');
+            const node = engine.nodes.get(payload.nodeId);
+            if (node) {
+                node.data = {
+                    ...node.data,
+                    prompt: payload.prompt,
+                    generationPayload: payload,
+                    generationStatus: 'failed',
+                    generationError: error?.message || '生成请求失败'
+                };
+            }
+            setNodeGenerationStatus(nodeEl, 'error', error?.message || '生成请求失败，输入和素材已保留');
+            scheduleCanvasSave('generation_error');
+            showCanvasNotice(error?.message || '生成请求失败，输入和已选素材已保留，可稍后重试。', 'error');
         } finally {
             setSubmitLoading(button, false);
         }
@@ -1735,10 +2446,11 @@
         input.onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
+            const requestedNodeId = `node-upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
             try {
                 showCanvasNotice('正在上传素材...', 'info');
-                const result = await uploadCanvasFile(file);
-                createUploadedNode(result, cx, cy, pendingConnection);
+                const result = await uploadCanvasFile(file, '', requestedNodeId);
+                createUploadedNode(result, cx, cy, pendingConnection, requestedNodeId);
                 showCanvasNotice(result.asset?.warning || '素材上传完成，已加入画布。', result.asset?.warning ? 'warn' : 'info');
             } catch (error) {
                 showCanvasNotice(error?.message || '上传失败。', 'error');

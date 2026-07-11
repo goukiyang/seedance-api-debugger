@@ -48,7 +48,7 @@ assertContains(
 
 const bootstrapRoute = read('src/app/api/tools/ultimate-canvas/bootstrap/route.ts');
 assertContains(bootstrapRoute, "owner_user_id: user.id", 'bootstrap filters normal user owned projects');
-assertContains(bootstrapRoute, "members: { some: { user_id: user.id, status: 'active' } }", 'bootstrap filters normal user member projects');
+assertContains(bootstrapRoute, "members: { some: { user_id: user.id, status: 'active', role: { not: 'viewer' } } }", 'bootstrap filters normal user generatable member projects');
 assertNotContains(bootstrapRoute, 'api_key', 'bootstrap does not expose API key fields');
 assertNotContains(bootstrapRoute, 'base_url', 'bootstrap does not expose provider base URL fields');
 
