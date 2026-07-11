@@ -4,6 +4,23 @@ import { readFileSync } from 'node:fs';
 const interactions = require('../public/tools/ultimate-canvas/generation-node-interactions.js');
 
 const bootstrapSource = readFileSync('src/app/api/tools/ultimate-canvas/bootstrap/route.ts', 'utf8');
+const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
+const stylesSource = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
+
+function contains(source: string, expected: string, message: string) {
+  assert.ok(source.includes(expected), message);
+}
+
+contains(engineSource, 'connectNodes(fromId, toId)', 'engine exposes public connection creation');
+contains(engineSource, 'disconnectNodes(fromId, toId)', 'engine exposes public connection removal');
+contains(engineSource, 'disconnectIncoming(nodeId)', 'engine can clear target references');
+contains(engineSource, 'selectNode(nodeId)', 'app can return selection to the target node');
+contains(engineSource, 'new ResizeObserver', 'node size changes update edge paths');
+contains(engineSource, 'this.onConnectionDeleted', 'connection removals notify persistence');
+contains(stylesSource, '.canvas-node.selected', 'selected canvas node state is styled');
+contains(stylesSource, '.canvas-node:not(.selected) .node-generation-expanded', 'unselected generation controls collapse');
+contains(stylesSource, '.canvas-node.is-reference-compatible', 'reference-compatible node state is styled');
+
 assert.ok(bootstrapSource.includes('interaction'));
 assert.ok(bootstrapSource.includes('DURATION_OPTIONS'));
 assert.ok(bootstrapSource.includes('RESOLUTION_OPTIONS'));

@@ -1162,6 +1162,11 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     animation: nodeAppear 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .canvas-node.dragging { z-index: 100; opacity: 0.92; }
+.canvas-node:not(.selected) .node-generation-expanded { display: none !important; }
+.canvas-node.is-reference-compatible .node-card {
+    border-color: var(--accent-teal);
+    box-shadow: 0 0 0 2px rgba(78,205,196,0.2), var(--shadow-node);
+}
 
 /* Hide properties/input panels below cards by default. Show them only when selected */
 .canvas-node .node-input-bar,
@@ -1460,8 +1465,22 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 /* ===== Video & Image Node Unified Layout ===== */
 .node-type-video .node-card,
 .node-type-image .node-card {
-    width: 622px;
+    width: 350px;
+    height: 240px;
+}
+.canvas-node.selected.node-type-video .node-card,
+.canvas-node.selected.node-type-image .node-card {
+    width: 620px;
+    max-width: 620px;
     height: 350px;
+}
+.canvas-node:not(.selected).node-type-video .node-body,
+.canvas-node:not(.selected).node-type-image .node-body {
+    min-height: 208px;
+}
+.canvas-node:not(.selected).node-type-video .card-preview-placeholder,
+.canvas-node:not(.selected).node-type-image .card-preview-placeholder {
+    height: 130px;
 }
 .node-type-video .node-body,
 .node-type-image .node-body {
@@ -1528,7 +1547,7 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 .node-video-props {
     width: 640px;
     margin-top: 16px;
-    margin-left: calc((622px - 640px) / 2);
+    margin-left: calc((620px - 640px) / 2);
     background: var(--bg-node);
     border: 1px solid var(--border-node);
     border-radius: var(--radius-lg);

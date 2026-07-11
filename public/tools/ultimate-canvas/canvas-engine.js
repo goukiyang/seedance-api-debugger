@@ -37,6 +37,19 @@ class CanvasEngine {
         this.onNodeSelected = null;
         this.onNodeDeselected = null;
         this.onConnectionCreated = null;
+        this.onConnectionDeleted = null;
+        this.onNodeDeleted = null;
+
+        this.connectionResizeFrame = null;
+        this.nodeResizeObserver = typeof ResizeObserver === 'function'
+            ? new ResizeObserver(() => {
+                if (this.connectionResizeFrame !== null) return;
+                this.connectionResizeFrame = requestAnimationFrame(() => {
+                    this.connectionResizeFrame = null;
+                    this._updateConnections();
+                });
+            })
+            : null;
 
         this.isSnapEnabled = true; // Snap to grid by default
         this.isSpacePressed = false;
@@ -315,6 +328,7 @@ class CanvasEngine {
         this.nodes.set(id, nodeData);
         const el = this._buildNode(nodeData);
         this.canvas.appendChild(el);
+        this.nodeResizeObserver?.observe(el);
         document.getElementById('canvas-welcome')?.classList.add('hidden');
         this._selectNode(id);
         return id;
@@ -345,7 +359,10 @@ class CanvasEngine {
     }
 
     restore(snapshot = {}) {
-        this.canvas.querySelectorAll('.canvas-node').forEach(node => node.remove());
+        this.canvas.querySelectorAll('.canvas-node').forEach(node => {
+            this.nodeResizeObserver?.unobserve(node);
+            node.remove();
+        });
         this.svg.querySelectorAll('.connection-line').forEach(line => line.remove());
         this.nodes.clear();
         this.connections = [];
@@ -380,21 +397,27 @@ class CanvasEngine {
     }
 
     deleteNode(nodeId) {
-        document.querySelector(`[data-node-id="${nodeId}"]`)?.remove();
+        const nodeEl = document.querySelector(`[data-node-id="${nodeId}"]`);
+        if (nodeEl) {
+            this.nodeResizeObserver?.unobserve(nodeEl);
+            nodeEl.remove();
+        }
         this.connections = this.connections.filter(c => {
             if (c.from === nodeId || c.to === nodeId) {
                 document.getElementById(c.lineId)?.remove();
+                this.onConnectionDeleted?.(c.from, c.to);
                 return false;
             }
             return true;
         });
-        this.nodes.delete(nodeId);
+        const deleted = this.nodes.delete(nodeId);
         if (this.selectedNodeId === nodeId) {
             this.selectedNodeId = null;
             this.onNodeDeselected?.();
         }
         if (this.nodes.size === 0)
             document.getElementById('canvas-welcome')?.classList.remove('hidden');
+        if (deleted) this.onNodeDeleted?.(nodeId);
     }
 
     _buildNode(nd) {
@@ -686,7 +709,7 @@ class CanvasEngine {
             </div>`;
 
         if (type === 'video') return `
-            <div class="node-video-props">
+            <div class="node-video-props node-generation-expanded">
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
@@ -749,7 +772,7 @@ class CanvasEngine {
             </div>`;
 
         if (type === 'image') return `
-            <div class="node-image-props">
+            <div class="node-image-props node-generation-expanded">
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
@@ -874,6 +897,12 @@ class CanvasEngine {
     }
 
     // --- Selection ---
+    selectNode(nodeId) {
+        if (!this.nodes.has(nodeId)) return false;
+        this._selectNode(nodeId);
+        return true;
+    }
+
     _selectNode(id) {
         this._deselectAll();
         this.selectedNodeId = id;
@@ -887,6 +916,29 @@ class CanvasEngine {
     }
 
     // --- Connections ---
+    connectNodes(fromId, toId) {
+        if (!this.nodes.has(fromId) || !this.nodes.has(toId) || fromId === toId) return false;
+        const before = this.connections.length;
+        this._createConnection(fromId, toId);
+        return this.connections.length > before;
+    }
+
+    disconnectNodes(fromId, toId) {
+        const removed = this.connections.filter(item => item.from === fromId && item.to === toId);
+        if (!removed.length) return false;
+        removed.forEach(item => document.getElementById(item.lineId)?.remove());
+        this.connections = this.connections.filter(item => !(item.from === fromId && item.to === toId));
+        removed.forEach(item => this.onConnectionDeleted?.(item.from, item.to));
+        this._updateConnections();
+        return true;
+    }
+
+    disconnectIncoming(nodeId) {
+        const incoming = this.connections.filter(item => item.to === nodeId);
+        incoming.forEach(item => this.disconnectNodes(item.from, item.to));
+        return incoming.length;
+    }
+
     _getConnectorPos(el) {
         let x = 0;
         let y = 0;
