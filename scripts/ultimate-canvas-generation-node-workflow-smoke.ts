@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -204,5 +205,43 @@ assert.deepEqual(workflow.normalizeVideoStatus({
   playUrl: '/api/video/play/task-1',
   downloadUrl: '/api/video/download/task-1',
 });
+
+function contains(source: string, needle: string, label: string) {
+  assert.ok(source.includes(needle), `${label}: missing ${needle}`);
+}
+
+function excludes(source: string, needle: string, label: string) {
+  assert.ok(!source.includes(needle), `${label}: still contains ${needle}`);
+}
+
+const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
+const stylesSource = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
+
+contains(engineSource, 'data-generation-command="optimize-prompt"', 'video prompt optimizer is actionable');
+contains(engineSource, 'data-generation-command="camera-presets"', 'camera presets are actionable');
+contains(engineSource, 'data-generation-command="select-reference"', 'reference picker is actionable');
+contains(engineSource, 'data-generation-command="toggle-settings"', 'settings are actionable');
+contains(engineSource, 'data-generation-reference-list', 'nodes render ordered references');
+contains(engineSource, 'data-generation-settings="image"', 'image settings panel exists');
+contains(engineSource, 'data-generation-settings="video"', 'video settings panel exists');
+contains(engineSource, 'data-generation-setting="ratio"', 'ratio setting exists');
+contains(engineSource, 'data-generation-setting="size"', 'image size setting exists');
+contains(engineSource, 'data-generation-setting="count"', 'image count setting exists');
+contains(engineSource, 'data-generation-setting="duration"', 'video duration setting exists');
+contains(engineSource, 'data-generation-setting="resolution"', 'video resolution setting exists');
+contains(engineSource, 'data-generation-setting="generateAudio"', 'video audio setting exists');
+contains(engineSource, 'data-generation-setting="returnLastFrame"', 'last frame setting exists');
+contains(engineSource, 'data-generation-setting="watermark"', 'watermark setting exists');
+contains(engineSource, 'data-video-mode="first-last-frame-video"', 'video modes use stable values');
+contains(engineSource, '后台计费', 'fake fixed point labels are removed');
+excludes(engineSource, '<span>智记</span>', 'old inert smart-note button removed');
+excludes(engineSource, '<span>角色库</span>', 'old inert character-library button removed');
+excludes(engineSource, '<span>高端</span>', 'old inert premium button removed');
+excludes(engineSource, '<span>标记</span>', 'old inert mark button removed');
+excludes(engineSource, '<span>裁切</span>', 'old inert crop button removed');
+
+contains(stylesSource, '.generation-reference-list', 'reference list layout exists');
+contains(stylesSource, '.generation-settings-panel', 'settings panel layout exists');
+contains(stylesSource, '@media (max-width: 720px)', 'generation controls have a mobile breakpoint');
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

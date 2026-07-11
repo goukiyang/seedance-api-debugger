@@ -691,34 +691,57 @@ class CanvasEngine {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
                 <div class="video-props-tabs">
-                    <div class="video-props-tab active">文生视频</div>
-                    <div class="video-props-tab">全部参考</div>
-                    <div class="video-props-tab">图生视频</div>
-                    <div class="video-props-tab">首尾帧</div>
-                    <div class="video-props-tab">图片参考</div>
+                    <button type="button" class="video-props-tab active" data-video-mode="text-to-video">文生视频</button>
+                    <button type="button" class="video-props-tab" data-video-mode="all-reference-video">全部参考</button>
+                    <button type="button" class="video-props-tab" data-video-mode="image-to-video">图生视频</button>
+                    <button type="button" class="video-props-tab" data-video-mode="first-last-frame-video">首尾帧</button>
+                    <button type="button" class="video-props-tab" data-video-mode="image-reference-video">图片参考</button>
                 </div>
-                <div class="video-props-tools">
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>智记</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg><span>运镜</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>角色库</span></button>
-                    <button class="video-tool-btn active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg><span>更多</span><span class="tool-badge-new">新功能</span></button>
+                <div class="generation-node-toolbar">
+                    <button type="button" class="generation-command" data-generation-command="optimize-prompt">优化提示词</button>
+                    <button type="button" class="generation-command" data-generation-command="camera-presets">运镜</button>
+                    <button type="button" class="generation-command" data-generation-command="select-reference">选择参考</button>
+                    <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
+                    <button type="button" class="generation-command" data-generation-command="toggle-settings" aria-expanded="false">设置</button>
+                </div>
+                <div class="generation-camera-menu" data-generation-camera-menu hidden></div>
+                <div class="generation-reference-list" data-generation-reference-list>
+                    <span class="generation-reference-empty">未连接参考图</span>
+                </div>
+                <div class="generation-settings-panel" data-generation-settings="video" hidden>
+                    <label>比例
+                        <select data-generation-setting="ratio">
+                            <option value="21:9">21:9</option><option value="16:9" selected>16:9</option>
+                            <option value="4:3">4:3</option><option value="1:1">1:1</option>
+                            <option value="3:4">3:4</option><option value="9:16">9:16</option>
+                        </select>
+                    </label>
+                    <label>时长
+                        <select data-generation-setting="duration">
+                            ${Array.from({ length: 12 }, (_, index) => index + 4).map(value => `<option value="${value}" ${value === 5 ? 'selected' : ''}>${value}s</option>`).join('')}
+                        </select>
+                    </label>
+                    <label>分辨率
+                        <select data-generation-setting="resolution">
+                            <option value="480p">480p</option><option value="720p" selected>720p</option><option value="1080p">1080p</option>
+                        </select>
+                    </label>
+                    <label class="generation-toggle"><input type="checkbox" data-generation-setting="generateAudio">生成声音</label>
+                    <label class="generation-toggle"><input type="checkbox" data-generation-setting="returnLastFrame">返回尾帧</label>
+                    <label class="generation-toggle"><input type="checkbox" data-generation-setting="watermark">添加水印</label>
                 </div>
                 <textarea class="video-props-textarea" placeholder="根据文字描述生成视频。"></textarea>
                 <div class="video-props-footer">
                     <div class="video-model-info">
                         <span class="model-icon">📊</span>
                         <span>默认视频 API</span>
-                        <span style="color:var(--accent-orange)">💎</span>
                     </div>
                     <div class="video-res-info">
-                        <span>📐 16:9 · 720P · 5s · 🔊</span>
+                        <span data-generation-spec>16:9 · 720p · 5s</span>
                     </div>
                     <div class="video-footer-right">
-                        <button class="footer-icon-btn" title="翻译"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/></svg></button>
-                        <button class="footer-icon-btn" title="反转"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg></button>
-                        <button class="footer-icon-btn" title="设置"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg></button>
-                        <span class="cost-label">⚡ 135</span>
-                        <button class="submit-btn" title="生成">
+                        <span class="cost-label" data-generation-cost>后台计费</span>
+                        <button class="submit-btn" data-generation-submit title="生成视频">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>
                     </div>
@@ -730,10 +753,10 @@ class CanvasEngine {
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
-                <div class="image-props-tools">
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.73 12.73l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><span>高端</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>标记</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg><span>裁切</span></button>
+                <div class="generation-node-toolbar image-generation-toolbar">
+                    <button type="button" class="generation-command" data-generation-command="select-reference">选择参考</button>
+                    <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
+                    <button type="button" class="generation-command" data-generation-command="toggle-settings" aria-expanded="false">设置</button>
                 </div>
                 <div class="image-mode-segment" data-image-mode-segment>
                     <button class="image-mode-btn active" data-image-mode="text-to-image">文生图</button>
@@ -741,6 +764,24 @@ class CanvasEngine {
                     <button class="image-mode-btn" data-image-mode="upscale-image">高清修复</button>
                     <button class="image-mode-btn" data-image-mode="first-frame-draft">首帧草图</button>
                     <button class="image-mode-btn" data-image-mode="last-frame-draft">尾帧草图</button>
+                </div>
+                <div class="generation-reference-list" data-generation-reference-list>
+                    <span class="generation-reference-empty">未连接参考图</span>
+                </div>
+                <div class="generation-settings-panel" data-generation-settings="image" hidden>
+                    <label>比例
+                        <select data-generation-setting="ratio">
+                            <option value="21:9">21:9</option><option value="16:9" selected>16:9</option>
+                            <option value="4:3">4:3</option><option value="1:1">1:1</option>
+                            <option value="3:4">3:4</option><option value="9:16">9:16</option>
+                        </select>
+                    </label>
+                    <label>尺寸
+                        <select data-generation-setting="size"><option value="1K">1K</option><option value="2K">2K</option></select>
+                    </label>
+                    <label>数量
+                        <input type="number" min="1" max="8" value="1" data-generation-setting="count">
+                    </label>
                 </div>
                 <textarea class="image-props-textarea" placeholder="描述你想要生成的画面内容。描述越详细,效果越好。"></textarea>
                 <div class="image-props-footer">
@@ -750,9 +791,9 @@ class CanvasEngine {
                         <span class="chevron" style="color:var(--text-dim)">▾</span>
                     </div>
                     <div class="video-footer-right">
-                        <span class="video-res-info">📐 16:9 · </span>
-                        <span class="cost-label">⚡ 40</span>
-                        <button class="submit-btn" title="生成">
+                        <span class="video-res-info" data-generation-spec>16:9 · 1K · 1张</span>
+                        <span class="cost-label" data-generation-cost>后台计费</span>
+                        <button class="submit-btn" data-generation-submit title="生成图片">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>
                     </div>
