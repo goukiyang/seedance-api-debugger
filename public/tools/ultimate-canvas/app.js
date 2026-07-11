@@ -3167,9 +3167,14 @@
             canvasRuntime.bootstrap?.capabilities?.[node.type]
         );
         if (node.type === 'image') {
+            const sizeControl = capability.sizeOptions.length
+                ? generationSelect('size', '尺寸', capability.sizeOptions, settings.size)
+                : capability.fixedSize
+                    ? `<label><span>尺寸</span><input type="text" value="${escapeHtml(capability.fixedSize)}" readonly data-generation-fixed-size></label>`
+                    : '<label><span>尺寸</span><input type="text" value="不可用" readonly data-generation-size-unavailable></label>';
             return `<div class="generation-popover-spec" data-generation-settings="image">
                 ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
-                ${generationSelect('size', '尺寸', capability.sizeOptions, settings.size)}
+                ${sizeControl}
                 <label><span>数量</span><input type="number" min="1" max="${settings.maximumCount}" value="${settings.count}" data-generation-setting="count"></label>
             </div>`;
         }
@@ -3712,6 +3717,8 @@
         }
 
         const submittingNode = engine.nodes.get(payload.nodeId);
+        const previousGenerationStatus = submittingNode?.data?.generationStatus;
+        const previousTaskId = submittingNode?.data?.taskId || null;
         const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(
             currentGenerationContext(payload.nodeId)
         );
@@ -3746,9 +3753,18 @@
                 scheduleCanvasSave('generation_error');
                 showCanvasNotice(error?.message || '生成请求失败，输入和已选素材已保留，可稍后重试。', 'error');
             },
-            onFinally: () => {
-                setSubmitLoading(button, false);
-                renderGenerationNodeControls(payload.nodeId);
+            onFinally: ({ stale }) => {
+                window.UltimateCanvasGenerationInteractions.cleanupGenerationSubmission({
+                    stale,
+                    node: submittingNode,
+                    nodeElement: nodeEl,
+                    previousStatus: previousGenerationStatus,
+                    previousTaskId,
+                    clearLoading: () => setSubmitLoading(button, false)
+                });
+                if (!stale || engine.nodes.get(payload.nodeId) === submittingNode) {
+                    renderGenerationNodeControls(payload.nodeId);
+                }
             }
         });
     }

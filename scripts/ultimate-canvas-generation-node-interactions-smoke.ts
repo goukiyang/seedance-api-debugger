@@ -179,14 +179,34 @@ const imageMixedResolutionCapability = interactions.normalizeCapabilities('image
 assert.deepEqual(imageMixedResolutionCapability.sizeOptions, ['1K']);
 const imageEmptySizeCapability = interactions.normalizeCapabilities('image', {
   enabled: true,
+  size: '2K',
   interaction: { size_options: [] },
 });
-assert.deepEqual(imageEmptySizeCapability.sizeOptions, [], 'explicit empty image sizes stay unavailable');
+assert.deepEqual(imageEmptySizeCapability.sizeOptions, [], 'explicit empty selectable image sizes stay empty');
+assert.equal(imageEmptySizeCapability.fixedSize, '2K', 'outer configured image size is normalized as fixed');
+assert.equal(
+  interactions.generationInteractionReadiness('image', imageEmptySizeCapability, {}, 0, 'text-to-image').ready,
+  true,
+  'enabled fixed-size image capability remains valid',
+);
+const imageMissingSizeCapability = interactions.normalizeCapabilities('image', {
+  enabled: true,
+  message: '可用',
+  interaction: { size_options: [] },
+});
+const imageMissingSizeReadiness = interactions.generationInteractionReadiness(
+  'image', imageMissingSizeCapability, {}, 0, 'text-to-image',
+);
+assert.equal(imageMissingSizeReadiness.ready, false, 'image capability without selectable or fixed size is invalid');
+assert.equal(imageMissingSizeReadiness.message, '当前没有可用的生成规格。');
+assert.notEqual(imageMissingSizeReadiness.message, '可用', 'missing spec never reports a positive capability message');
 const imageDefaultSizeCapability = interactions.normalizeCapabilities('image', {
   enabled: true,
   interaction: {},
 });
 assert.deepEqual(imageDefaultSizeCapability.sizeOptions, ['1K', '2K'], 'missing image sizes use compatibility defaults');
+assert.equal(imageDefaultSizeCapability.fixedSize, '');
+assert.equal(imageResolutionCapability.fixedSize, '');
 
 const disabledCapability = interactions.normalizeCapabilities('image', {
   enabled: false,
@@ -495,6 +515,7 @@ assert.equal(interactions.modeOptions('video', {
 assert.ok(appSource.includes('generationInteractionReadiness'), 'app consumes the shared readiness contract');
 assert.ok(appSource.includes('availableGenerationReferenceItems'), 'app gates modes with available references');
 assert.ok(appSource.includes('capability.sizeOptions'), 'image spec UI consumes normalized size options');
+assert.ok(appSource.includes('capability.fixedSize'), 'image spec UI renders a read-only fixed size fallback');
 
 function engineHarness() {
   const engine = Object.create(CanvasEngine.prototype);

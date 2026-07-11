@@ -124,3 +124,13 @@ All 11 `ultimate-canvas*-smoke.ts` scripts pass, including the local mock previe
 No online text, image, or video generation was run. No retry or paid task was created, and points consumed were exactly zero. `.env`, API/admin settings, provider secrets, credit rules, database schema, backend pricing/provider/generation routes, package metadata, and lockfiles were not read or modified. Production calls remain same-origin sd2 calls for an ordinary user.
 
 Browser acceptance was not claimed by this hardening pass. The parent must rerun desktop/mobile browser acceptance after the final commit, including capability-disabled rendering, nonterminal video submit disablement, context-switch stale response behavior, reference availability, and save-state behavior.
+
+## Re-review correction (2026-07-12)
+
+The follow-up review identified that a newly created canvas document ID is mutable save metadata rather than generation context identity. Generation validity now depends on context epoch, project ID, video-card ID, node ID, and original node object identity; a first autosave changing `documentId` from null to a created ID no longer discards a valid generation response. Guarded cleanup runs exactly once for success, failure, and stale outcomes. A stale card-switch response cannot attach a task/result, while the captured submit button/status and pre-response `submitted` state are safely cleared even if the original element or node has been detached.
+
+Image capability normalization now preserves explicit empty `interaction.size_options` while also exposing the configured outer `capability.size` as `fixedSize`. Enabled fixed-size providers remain submit-ready and render the fixed size read-only. Providers with neither selectable sizes nor a fixed size are disabled with the specific unavailable-spec reason rather than a positive backend message such as `可用`.
+
+The current hardening inventory includes `public/tools/ultimate-canvas/canvas-save-coordinator.js`, `scripts/ultimate-canvas-generation-lifecycle-smoke.ts`, and `scripts/ultimate-canvas-save-coordinator-smoke.ts`. The production cache key for `app.js`, generation interactions, task coordination, and save coordination is `20260712-final-hardening`. Lifecycle coverage now separates document-only metadata creation, same-object card switching, and detached replacement cleanup; capability coverage separates empty-plus-fixed, empty-without-fixed, absent-field defaults, and explicit selectable lists.
+
+No online generation or paid retry was run, and points consumed remain zero. Protected backend/provider/credit/schema/package/secret areas remain untouched. Parent desktop/mobile browser acceptance remains pending after this separate correction commit.

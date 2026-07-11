@@ -74,6 +74,9 @@
             : [...defaults.resolutions];
         const maxReferenceImages = Number.isInteger(interaction.max_reference_images) && interaction.max_reference_images >= 0
             ? interaction.max_reference_images : defaults.maxReferenceImages;
+        const fixedSize = kind === 'image' && typeof capability?.size === 'string'
+            ? capability.size.trim()
+            : '';
         return {
             enabled: capability?.enabled === true,
             message: typeof capability?.message === 'string' ? capability.message : '',
@@ -83,6 +86,7 @@
             durations: [...new Set(durations)],
             resolutions,
             sizeOptions: kind === 'image' ? resolutions : [],
+            fixedSize,
             supportsAudio: typeof interaction.supports_audio === 'boolean' ? interaction.supports_audio : defaults.supportsAudio,
             supportsLastFrame: typeof interaction.supports_last_frame === 'boolean' ? interaction.supports_last_frame : defaults.supportsLastFrame,
             supportsWatermark: typeof interaction.supports_watermark === 'boolean' ? interaction.supports_watermark : defaults.supportsWatermark,
@@ -146,9 +150,9 @@
         if (!selected) return { ready: false, message: capability.message || '当前没有可用的生成模式。' };
         if (!selected.enabled) return { ready: false, message: selected.reason };
         const hasSpec = kind === 'image'
-            ? capability.ratios?.length > 0 && capability.sizeOptions?.length > 0
+            ? capability.ratios?.length > 0 && (capability.sizeOptions?.length > 0 || Boolean(capability.fixedSize))
             : capability.ratios?.length > 0 && capability.durations?.length > 0 && capability.resolutions?.length > 0;
-        if (!hasSpec) return { ready: false, message: capability.message || '当前没有可用的生成规格。' };
+        if (!hasSpec) return { ready: false, message: capability.reason || '当前没有可用的生成规格。' };
         return { ready: true };
     }
 
@@ -193,28 +197,51 @@
             && captured.epoch === current.epoch
             && captured.projectId === (current.projectId || null)
             && captured.videoCardId === (current.videoCardId || null)
-            && captured.documentId === (current.documentId || null)
             && captured.nodeId === current.nodeId
             && captured.node === current.node);
     }
 
+    function cleanupGenerationSubmission(options) {
+        options.clearLoading?.();
+        if (!options.stale) return { resetStatus: false, removedStatus: false };
+        const data = options.node?.data;
+        let resetStatus = false;
+        if (data?.generationStatus === 'submitted'
+            && (data.taskId || null) === (options.previousTaskId || null)) {
+            options.node.data = {
+                ...data,
+                generationStatus: options.previousStatus || 'idle'
+            };
+            resetStatus = true;
+        }
+        const status = options.nodeElement?.querySelector?.('.node-generation-status');
+        const removedStatus = status?.textContent === '正在提交生成请求';
+        if (removedStatus) status.remove?.();
+        return { resetStatus, removedStatus };
+    }
+
     async function runGuardedGenerationResponse(options) {
+        let cleanup = { stale: false };
         try {
             const result = await options.response;
-            if (!generationContextMatches(options.captured, options.current())) {
+            const stale = !generationContextMatches(options.captured, options.current());
+            cleanup = { stale, result };
+            if (stale) {
                 return { stale: true, result };
             }
             const value = await options.onSuccess?.(result);
-            await options.onFinally?.();
             return { stale: false, result, value };
         } catch (error) {
-            if (!generationContextMatches(options.captured, options.current())) {
+            const stale = !generationContextMatches(options.captured, options.current());
+            cleanup = { stale, error };
+            if (stale) {
                 return { stale: true, error };
             }
             const value = await options.onError?.(error);
-            await options.onFinally?.();
             if (!options.onError) throw error;
             return { stale: false, error, value };
+        } finally {
+            await options.onFinally?.(cleanup);
         }
     }
 
@@ -335,6 +362,7 @@
         availableReferenceCount,
         captureGenerationContext,
         generationContextMatches,
+        cleanupGenerationSubmission,
         runGuardedGenerationResponse,
         referenceRole,
         replaceCameraLine,
