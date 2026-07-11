@@ -40,15 +40,21 @@
         });
     }
 
+    function isPlainObject(value) {
+        if (!value || typeof value !== 'object') return false;
+        const prototype = Object.getPrototypeOf(value);
+        return prototype === Object.prototype || prototype === null;
+    }
+
     function normalizeCapabilities(kind, capability) {
         const defaults = DEFAULTS[kind] || DEFAULTS.video;
-        const interaction = capability && typeof capability.interaction === 'object' ? capability.interaction : {};
+        const interaction = isPlainObject(capability?.interaction) ? capability.interaction : {};
         const definitions = MODE_DEFINITIONS[kind] || MODE_DEFINITIONS.video;
         const validModes = new Set(definitions.map(mode => mode.id));
         const modes = strings(interaction.modes, value => validModes.has(value));
         const ratios = strings(interaction.ratios, value => VALID_RATIOS.has(value));
         const durations = (Array.isArray(interaction.durations) ? interaction.durations : []).filter(value => Number.isInteger(value) && value > 0);
-        const resolutions = strings(interaction.resolutions, value => typeof value === 'string' && value.trim().length > 0);
+        const resolutions = strings(interaction.resolutions, value => VALID_RESOLUTIONS.has(value));
         const maxReferenceImages = Number.isInteger(interaction.max_reference_images) && interaction.max_reference_images >= 0
             ? interaction.max_reference_images : defaults.maxReferenceImages;
         return {

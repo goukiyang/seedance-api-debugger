@@ -18,6 +18,22 @@ const videoCapability = interactions.normalizeCapabilities('video', {
 assert.deepEqual(videoCapability.durations, [5, 10]);
 assert.equal(videoCapability.supportsWatermark, false);
 
+const invalidResolutionCapability = interactions.normalizeCapabilities('video', {
+  interaction: { resolutions: ['2160p', 'not-a-resolution'] },
+});
+assert.deepEqual(invalidResolutionCapability.resolutions, ['720p', '1080p']);
+
+const nullInteractionCapability = interactions.normalizeCapabilities('video', { interaction: null });
+assert.deepEqual(nullInteractionCapability.modes, [
+  'text-to-video',
+  'all-reference-video',
+  'image-to-video',
+  'first-frame-video',
+  'first-last-frame-video',
+  'image-reference-video',
+  'smart-multi-frame-video',
+]);
+
 const withoutReferences = interactions.modeOptions('video', videoCapability, 0);
 assert.equal(withoutReferences.find((item: any) => item.id === 'text-to-video').enabled, true);
 assert.equal(withoutReferences.find((item: any) => item.id === 'image-to-video').enabled, false);
