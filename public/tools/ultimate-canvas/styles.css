@@ -1701,6 +1701,136 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 }
 
 /* ===== Functional generation node controls ===== */
+.generation-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-node);
+}
+
+.generation-summary-button {
+    min-width: 0;
+    max-width: 100%;
+    height: 30px;
+    padding: 0 9px;
+    border: 1px solid var(--border-node);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.generation-summary-button span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.generation-summary-button:hover,
+.generation-summary-button[aria-expanded="true"] {
+    border-color: var(--accent-teal);
+    color: var(--text-primary);
+    background: var(--bg-active);
+}
+
+.generation-popover {
+    position: fixed;
+    z-index: calc(var(--z-overlay) + 12);
+    width: max-content;
+    min-width: 220px;
+    max-width: min(420px, calc(100vw - 24px));
+    max-height: min(560px, calc(100vh - 24px));
+    overflow: auto;
+    padding: 8px;
+    border: 1px solid rgba(255,255,255,0.13);
+    border-radius: 8px;
+    background: #17191d;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.42);
+    color: var(--text-primary);
+}
+
+.generation-popover-list {
+    display: grid;
+    gap: 4px;
+}
+
+.generation-popover-option {
+    width: 100%;
+    min-width: 200px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.generation-popover-option span,
+.generation-popover-option small {
+    display: block;
+}
+
+.generation-popover-option small {
+    margin-top: 3px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.generation-popover-option:hover:not(:disabled),
+.generation-popover-option.is-active {
+    border-color: var(--accent-teal);
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+.generation-popover-option:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+
+.generation-popover-spec {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(96px, 1fr));
+    gap: 10px;
+    width: min(390px, calc(100vw - 42px));
+}
+
+.generation-popover-spec label {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 5px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+}
+
+.generation-popover-spec select,
+.generation-popover-spec input[type="number"] {
+    width: 100%;
+    height: 32px;
+    border: 1px solid var(--border-node);
+    border-radius: 5px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 0 8px;
+    font: inherit;
+    font-size: 12px;
+}
+
+.generation-popover-spec .generation-toggle {
+    min-height: 32px;
+    flex-direction: row;
+    align-items: center;
+    color: var(--text-secondary);
+}
+
 .generation-node-toolbar {
     display: flex;
     align-items: center;
@@ -1870,7 +2000,8 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
         margin-left: 0;
     }
 
-    .generation-settings-panel {
+    .generation-settings-panel,
+    .generation-popover-spec {
         grid-template-columns: 1fr;
     }
 

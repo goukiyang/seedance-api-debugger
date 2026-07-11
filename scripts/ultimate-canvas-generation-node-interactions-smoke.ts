@@ -5,6 +5,7 @@ const interactions = require('../public/tools/ultimate-canvas/generation-node-in
 
 const bootstrapSource = readFileSync('src/app/api/tools/ultimate-canvas/bootstrap/route.ts', 'utf8');
 const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
+const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
 const stylesSource = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
 
 function contains(source: string, expected: string, message: string) {
@@ -20,6 +21,13 @@ contains(engineSource, 'this.onConnectionDeleted', 'connection removals notify p
 contains(stylesSource, '.canvas-node.selected', 'selected canvas node state is styled');
 contains(stylesSource, '.canvas-node:not(.selected) .node-generation-expanded', 'unselected generation controls collapse');
 contains(stylesSource, '.canvas-node.is-reference-compatible', 'reference-compatible node state is styled');
+contains(engineSource, 'data-generation-popover="mode"', 'node exposes one mode trigger');
+contains(engineSource, 'data-generation-popover="spec"', 'node exposes one specification trigger');
+contains(appSource, 'function openGenerationPopover', 'app owns one anchored popover');
+contains(appSource, 'function closeGenerationPopover', 'popover has one cleanup path');
+contains(appSource, "case 'Escape'", 'Escape closes generation popovers');
+contains(stylesSource, '.generation-popover', 'popover has viewport-safe styling');
+assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes are not permanently spread across the node');
 
 assert.ok(bootstrapSource.includes('interaction'));
 assert.ok(bootstrapSource.includes('DURATION_OPTIONS'));

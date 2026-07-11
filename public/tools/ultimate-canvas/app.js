@@ -72,7 +72,8 @@
         videoCardSelectedTaskIds: new Map(),
         videoCardView: { mode: 'list', section: 'info', cardId: null, search: '' },
         pendingGenerationReferenceTargetId: null,
-        pollingTasks: new Map()
+        pollingTasks: new Map(),
+        generationPopover: null
     };
 
     function configureGenerationEndpoints() {
@@ -2231,7 +2232,7 @@
         if (!nodeEl || !node) return;
         const prompt = collectNodePrompt(nodeEl, node.type);
         const label = nodeEl.querySelector('.node-label')?.textContent?.trim() || '';
-        const tabText = activeTabText(nodeEl);
+        const tabText = nodeEl.querySelector('[data-generation-mode-label]')?.textContent.trim() || activeTabText(nodeEl);
         const contextRules = contextRulesForNode(node);
         node.data = {
             ...node.data,
@@ -2783,47 +2784,30 @@
         const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
+        const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
+            node.type,
+            canvasRuntime.bootstrap?.capabilities?.[node.type]
+        );
+        const mode = window.UltimateCanvasGenerationInteractions.modeOptions(
+            node.type,
+            capability,
+            generationReferenceItems(nodeId).length
+        ).find(option => option.id === nodeMode);
         updateGenerationNodeModelLabel(nodeEl, node);
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
+        const modeLabel = nodeEl.querySelector('[data-generation-mode-label]');
+        if (modeLabel) modeLabel.textContent = mode?.label || nodeMode;
 
         if (node.type === 'image') {
-            syncImageModeButtons(nodeEl, nodeMode);
-            setSelectOptions(nodeEl.querySelector('[data-generation-setting="size"]'), settings.sizeOptions, settings.size);
-            const countInput = nodeEl.querySelector('[data-generation-setting="count"]');
-            if (countInput) {
-                countInput.max = String(settings.maximumCount);
-                countInput.value = String(settings.count);
-            }
-            const ratioSelect = nodeEl.querySelector('[data-generation-settings="image"] [data-generation-setting="ratio"]');
-            if (ratioSelect) ratioSelect.value = settings.ratio;
             const spec = nodeEl.querySelector('[data-generation-spec]');
             if (spec) spec.textContent = `${settings.ratio} · ${settings.size} · ${settings.count}张`;
         } else {
-            nodeEl.querySelectorAll('[data-video-mode]').forEach(button => {
-                button.classList.toggle('active', button.dataset.videoMode === nodeMode);
-            });
-            const panel = nodeEl.querySelector('[data-generation-settings="video"]');
-            if (panel) {
-                const ratio = panel.querySelector('[data-generation-setting="ratio"]');
-                const duration = panel.querySelector('[data-generation-setting="duration"]');
-                const resolution = panel.querySelector('[data-generation-setting="resolution"]');
-                const audio = panel.querySelector('[data-generation-setting="generateAudio"]');
-                const lastFrame = panel.querySelector('[data-generation-setting="returnLastFrame"]');
-                const watermark = panel.querySelector('[data-generation-setting="watermark"]');
-                if (ratio) ratio.value = settings.ratio;
-                if (duration) duration.value = String(settings.duration);
-                if (resolution) resolution.value = settings.resolution;
-                if (audio) audio.checked = settings.generateAudio;
-                if (lastFrame) lastFrame.checked = settings.returnLastFrame;
-                if (watermark) watermark.checked = settings.watermark;
-            }
             const spec = nodeEl.querySelector('[data-generation-spec]');
             if (spec) {
                 spec.textContent = `${settings.ratio} · ${settings.resolution} · ${settings.duration}s${settings.generateAudio ? ' · 声音' : ''}`;
             }
             const cost = nodeEl.querySelector('[data-generation-cost]');
             if (cost) cost.textContent = node.data?.frozenCost ? `已冻结 ${node.data.frozenCost}` : '后台计费';
-            renderCameraPresetMenu(nodeEl, node);
         }
 
         const references = generationReferenceItems(nodeId);
@@ -2846,6 +2830,101 @@
 
     function renderAllGenerationNodeControls() {
         engine.nodes.forEach(node => renderGenerationNodeControls(node.id));
+    }
+
+    function generationSelect(name, label, values, selected) {
+        return `<label><span>${label}</span><select data-generation-setting="${name}">${values.map(value =>
+            `<option value="${escapeHtml(String(value))}" ${String(value) === String(selected) ? 'selected' : ''}>${escapeHtml(String(value))}</option>`
+        ).join('')}</select></label>`;
+    }
+
+    function renderModePopover(node) {
+        const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
+            node.type,
+            canvasRuntime.bootstrap?.capabilities?.[node.type]
+        );
+        const selected = node.data?.mode || node.data?.generationIntent?.mode
+            || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
+        return `<div class="generation-popover-list">${window.UltimateCanvasGenerationInteractions
+            .modeOptions(node.type, capability, generationReferenceItems(node.id).length)
+            .map(option => `<button type="button" class="generation-popover-option ${option.id === selected ? 'is-active' : ''}"
+                data-generation-mode="${escapeHtml(option.id)}" ${option.enabled ? '' : 'disabled aria-disabled="true"'}>
+                <span>${escapeHtml(option.label)}</span>${option.reason ? `<small>${escapeHtml(option.reason)}</small>` : ''}
+            </button>`).join('')}</div>`;
+    }
+
+    function renderSpecPopover(node) {
+        const settings = generationSettingsForNode(node);
+        const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
+            node.type,
+            canvasRuntime.bootstrap?.capabilities?.[node.type]
+        );
+        if (node.type === 'image') {
+            return `<div class="generation-popover-spec" data-generation-settings="image">
+                ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
+                ${generationSelect('size', '尺寸', capability.resolutions, settings.size)}
+                <label><span>数量</span><input type="number" min="1" max="${settings.maximumCount}" value="${settings.count}" data-generation-setting="count"></label>
+            </div>`;
+        }
+        return `<div class="generation-popover-spec" data-generation-settings="video">
+            ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
+            ${generationSelect('duration', '时长', capability.durations.map(value => `${value}`), settings.duration)}
+            ${generationSelect('resolution', '分辨率', capability.resolutions, settings.resolution)}
+            ${capability.supportsAudio ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="generateAudio" ${settings.generateAudio ? 'checked' : ''}><span>生成声音</span></label>` : ''}
+            ${capability.supportsLastFrame ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="returnLastFrame" ${settings.returnLastFrame ? 'checked' : ''}><span>返回尾帧</span></label>` : ''}
+            ${capability.supportsWatermark ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="watermark" ${settings.watermark ? 'checked' : ''}><span>添加水印</span></label>` : ''}
+        </div>`;
+    }
+
+    function renderCameraPopover(node) {
+        const selectedId = node.data?.cameraPresets?.[0]?.id || '';
+        return `<div class="generation-popover-list">${VIDEO_CAMERA_PRESETS.map(preset => `
+            <button type="button" class="generation-popover-option ${selectedId === preset.id ? 'is-active' : ''}"
+                data-generation-camera-preset="${escapeHtml(preset.id)}"><span>${escapeHtml(preset.label)}</span><small>${escapeHtml(preset.prompt)}</small></button>
+        `).join('')}</div>`;
+    }
+
+    function closeGenerationPopover() {
+        const state = canvasRuntime.generationPopover;
+        if (!state) return;
+        state.anchor?.setAttribute('aria-expanded', 'false');
+        state.element?.remove();
+        canvasRuntime.generationPopover = null;
+    }
+
+    function positionGenerationPopover(state) {
+        if (!state?.anchor?.isConnected || !state.element?.isConnected) return closeGenerationPopover();
+        const gap = 6;
+        const margin = 12;
+        const anchorRect = state.anchor.getBoundingClientRect();
+        const popoverRect = state.element.getBoundingClientRect();
+        const left = Math.min(Math.max(margin, anchorRect.left), window.innerWidth - popoverRect.width - margin);
+        const below = anchorRect.bottom + gap;
+        const top = below + popoverRect.height <= window.innerHeight - margin
+            ? below
+            : Math.max(margin, anchorRect.top - popoverRect.height - gap);
+        state.element.style.left = `${left}px`;
+        state.element.style.top = `${top}px`;
+    }
+
+    function openGenerationPopover(nodeId, kind, anchor) {
+        const node = engine.nodes.get(nodeId);
+        if (!node || !anchor || !['image', 'video'].includes(node.type)) return;
+        if (canvasRuntime.generationPopover?.anchor === anchor && canvasRuntime.generationPopover.kind === kind) {
+            closeGenerationPopover();
+            return;
+        }
+        closeGenerationPopover();
+        const element = document.createElement('div');
+        element.className = 'generation-popover';
+        element.dataset.generationPopoverKind = kind;
+        element.innerHTML = kind === 'mode' ? renderModePopover(node)
+            : kind === 'spec' ? renderSpecPopover(node)
+                : renderCameraPopover(node);
+        document.body.appendChild(element);
+        anchor.setAttribute('aria-expanded', 'true');
+        canvasRuntime.generationPopover = { nodeId, kind, anchor, element };
+        positionGenerationPopover(canvasRuntime.generationPopover);
     }
 
     function activeTabText(nodeEl) {
@@ -2900,7 +2979,7 @@
             contextRules,
             context_rules: contextRules,
             model: nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '',
-            spec: nodeEl.querySelector('.video-res-info')?.textContent.trim() || '',
+            spec: nodeEl.querySelector('[data-generation-spec]')?.textContent.trim() || '',
             sourceNodes: nodeSourcePayloads(nodeId),
             referenceImageIds: generationReferenceImageIds(nodeId),
             settings: generationSettingsForNode(node),
@@ -3407,15 +3486,13 @@
         const input = nodeEl.querySelector('.video-props-textarea');
         if (!input) return;
 
-        const previousLine = node.data?.cameraPromptLine || '';
-        const baseLines = String(input.value || node.data?.prompt || '')
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line && line !== previousLine);
         const wasSelected = node.data?.cameraPresets?.[0]?.id === preset.id;
         const cameraPromptLine = wasSelected ? '' : `运镜：${preset.prompt}`;
-        if (cameraPromptLine) baseLines.push(cameraPromptLine);
-        const prompt = baseLines.join('\n');
+        const basePrompt = String(input.value || node.data?.prompt || '')
+            .split('\n')
+            .filter(line => !/^\s*运镜：/.test(line))
+            .join('\n');
+        const prompt = wasSelected ? basePrompt : window.UltimateCanvasGenerationInteractions.replaceCameraLine(basePrompt, preset.prompt);
         input.value = prompt;
         node.data = {
             ...node.data,
@@ -3428,7 +3505,10 @@
                 prompt: preset.prompt
             }]
         };
-        renderCameraPresetMenu(nodeEl, node);
+        if (canvasRuntime.generationPopover?.kind === 'camera') {
+            canvasRuntime.generationPopover.element.innerHTML = renderCameraPopover(node);
+        }
+        renderGenerationNodeControls(node.id);
         scheduleCanvasSave('video_camera_preset');
     }
 
@@ -3502,6 +3582,14 @@
     }
 
     document.addEventListener('click', event => {
+        const trigger = event.target.closest('[data-generation-popover]');
+        const triggerNode = trigger?.closest('.canvas-node');
+        if (trigger && triggerNode) {
+            event.preventDefault();
+            event.stopPropagation();
+            openGenerationPopover(triggerNode.dataset.nodeId, trigger.dataset.generationPopover, trigger);
+            return;
+        }
         const command = event.target.closest('[data-generation-command]');
         const nodeEl = command?.closest('.canvas-node');
         if (!command || !nodeEl) return;
@@ -3510,25 +3598,8 @@
         if (!node || !['image', 'video'].includes(node.type)) return;
 
         const action = command.dataset.generationCommand;
-        if (action === 'toggle-settings') {
-            const panel = nodeEl.querySelector(`[data-generation-settings="${node.type}"]`);
-            if (!panel) return;
-            panel.hidden = !panel.hidden;
-            command.classList.toggle('is-active', !panel.hidden);
-            command.setAttribute('aria-expanded', String(!panel.hidden));
-            return;
-        }
         if (action === 'optimize-prompt' && node.type === 'video') {
             optimizeVideoPrompt(nodeEl, node, command);
-            return;
-        }
-        if (action === 'camera-presets' && node.type === 'video') {
-            const menu = nodeEl.querySelector('[data-generation-camera-menu]');
-            if (!menu) return;
-            renderCameraPresetMenu(nodeEl, node);
-            menu.hidden = !menu.hidden;
-            command.classList.toggle('is-active', !menu.hidden);
-            command.setAttribute('aria-expanded', String(!menu.hidden));
             return;
         }
         if (action === 'select-reference') {
@@ -3547,9 +3618,10 @@
 
     document.addEventListener('click', event => {
         const preset = event.target.closest('[data-generation-camera-preset]');
-        const nodeEl = preset?.closest('.canvas-node');
-        if (!preset || !nodeEl) return;
-        const node = engine.nodes.get(nodeEl.dataset.nodeId);
+        const state = canvasRuntime.generationPopover;
+        const nodeEl = state ? document.querySelector(`[data-node-id="${CSS.escape(state.nodeId)}"]`) : null;
+        if (!preset || !nodeEl || !state?.element.contains(preset)) return;
+        const node = engine.nodes.get(state.nodeId);
         if (!node || node.type !== 'video') return;
         event.preventDefault();
         event.stopPropagation();
@@ -3558,10 +3630,10 @@
 
     document.addEventListener('change', event => {
         const control = event.target.closest('[data-generation-setting]');
-        const nodeEl = control?.closest('.canvas-node');
         const panel = control?.closest('[data-generation-settings]');
-        if (!control || !nodeEl || !panel) return;
-        const node = engine.nodes.get(nodeEl.dataset.nodeId);
+        const state = canvasRuntime.generationPopover;
+        if (!control || !panel || !state?.element.contains(control)) return;
+        const node = engine.nodes.get(state.nodeId);
         if (!node || panel.dataset.generationSettings !== node.type) return;
 
         const ratio = panel.querySelector('[data-generation-setting="ratio"]')?.value || '16:9';
@@ -3589,6 +3661,30 @@
         }
         renderGenerationNodeControls(node.id);
     });
+
+    document.addEventListener('click', event => {
+        const modeButton = event.target.closest('[data-generation-mode]');
+        const state = canvasRuntime.generationPopover;
+        if (!modeButton || modeButton.disabled || !state?.element.contains(modeButton)) return;
+        const node = engine.nodes.get(state.nodeId);
+        if (!node) return;
+        node.data = { ...node.data, mode: modeButton.dataset.generationMode };
+        renderGenerationNodeControls(node.id);
+        scheduleCanvasSave(`${node.type}_mode_change`);
+        closeGenerationPopover();
+    });
+
+    document.addEventListener('pointerdown', event => {
+        const state = canvasRuntime.generationPopover;
+        if (!state || state.element.contains(event.target) || state.anchor.contains(event.target)) return;
+        closeGenerationPopover();
+    }, true);
+
+    engine.container.addEventListener('wheel', closeGenerationPopover, { passive: true });
+    window.addEventListener('resize', closeGenerationPopover);
+    engine.onNodeSelected = closeGenerationPopover;
+    engine.onNodeDeselected = closeGenerationPopover;
+    engine.onViewportChanged = closeGenerationPopover;
 
     document.addEventListener('click', event => {
         const actionElement = event.target.closest('[data-generated-image-action]');
@@ -5896,6 +5992,15 @@
     // Keyboard Shortcuts
     // =====================
     document.addEventListener('keydown', (e) => {
+        switch (e.key) {
+            case 'Escape':
+                if (canvasRuntime.generationPopover) {
+                    e.preventDefault();
+                    closeGenerationPopover();
+                    return;
+                }
+                break;
+        }
         if (e.key === 'Escape' && document.querySelector('[data-prompt-modal]')) {
             e.preventDefault();
             closePromptModal();

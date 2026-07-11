@@ -39,6 +39,7 @@ class CanvasEngine {
         this.onConnectionCreated = null;
         this.onConnectionDeleted = null;
         this.onNodeDeleted = null;
+        this.onViewportChanged = null;
 
         this.connectionResizeFrame = null;
         this.nodeResizeObserver = typeof ResizeObserver === 'function'
@@ -274,6 +275,7 @@ class CanvasEngine {
         const t = `translate(${this.offsetX}px, ${this.offsetY}px) scale(${this.scale})`;
         this.canvas.style.transform = t;
         this.svg.style.transform = t;
+        this.onViewportChanged?.({ scale: this.scale, offsetX: this.offsetX, offsetY: this.offsetY });
     }
     _updateZoom() {
         const el = document.getElementById('zoom-level');
@@ -713,54 +715,28 @@ class CanvasEngine {
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
-                <div class="video-props-tabs">
-                    <button type="button" class="video-props-tab active" data-video-mode="text-to-video">文生视频</button>
-                    <button type="button" class="video-props-tab" data-video-mode="all-reference-video">全部参考</button>
-                    <button type="button" class="video-props-tab" data-video-mode="image-to-video">图生视频</button>
-                    <button type="button" class="video-props-tab" data-video-mode="first-last-frame-video">首尾帧</button>
-                    <button type="button" class="video-props-tab" data-video-mode="image-reference-video">图片参考</button>
+                <div class="generation-summary-row">
+                    <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
+                        <span data-generation-mode-label>文生视频</span>
+                    </button>
+                    <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="video" data-generation-popover="spec" aria-expanded="false">
+                        <span data-generation-spec>16:9 · 720p · 5s</span>
+                    </button>
                 </div>
                 <div class="generation-node-toolbar">
                     <button type="button" class="generation-command" data-generation-command="optimize-prompt">优化提示词</button>
-                    <button type="button" class="generation-command" data-generation-command="camera-presets">运镜</button>
+                    <button type="button" class="generation-command" data-generation-command="camera-presets" data-generation-popover="camera" aria-expanded="false">运镜</button>
                     <button type="button" class="generation-command" data-generation-command="select-reference">选择参考</button>
                     <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
-                    <button type="button" class="generation-command" data-generation-command="toggle-settings" aria-expanded="false">设置</button>
                 </div>
-                <div class="generation-camera-menu" data-generation-camera-menu hidden></div>
                 <div class="generation-reference-list" data-generation-reference-list>
                     <span class="generation-reference-empty">未连接参考图</span>
-                </div>
-                <div class="generation-settings-panel" data-generation-settings="video" hidden>
-                    <label>比例
-                        <select data-generation-setting="ratio">
-                            <option value="21:9">21:9</option><option value="16:9" selected>16:9</option>
-                            <option value="4:3">4:3</option><option value="1:1">1:1</option>
-                            <option value="3:4">3:4</option><option value="9:16">9:16</option>
-                        </select>
-                    </label>
-                    <label>时长
-                        <select data-generation-setting="duration">
-                            ${Array.from({ length: 12 }, (_, index) => index + 4).map(value => `<option value="${value}" ${value === 5 ? 'selected' : ''}>${value}s</option>`).join('')}
-                        </select>
-                    </label>
-                    <label>分辨率
-                        <select data-generation-setting="resolution">
-                            <option value="480p">480p</option><option value="720p" selected>720p</option><option value="1080p">1080p</option>
-                        </select>
-                    </label>
-                    <label class="generation-toggle"><input type="checkbox" data-generation-setting="generateAudio">生成声音</label>
-                    <label class="generation-toggle"><input type="checkbox" data-generation-setting="returnLastFrame">返回尾帧</label>
-                    <label class="generation-toggle"><input type="checkbox" data-generation-setting="watermark">添加水印</label>
                 </div>
                 <textarea class="video-props-textarea" placeholder="根据文字描述生成视频。"></textarea>
                 <div class="video-props-footer">
                     <div class="video-model-info">
                         <span class="model-icon">📊</span>
                         <span>默认视频 API</span>
-                    </div>
-                    <div class="video-res-info">
-                        <span data-generation-spec>16:9 · 720p · 5s</span>
                     </div>
                     <div class="video-footer-right">
                         <span class="cost-label" data-generation-cost>后台计费</span>
@@ -776,35 +752,20 @@ class CanvasEngine {
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
+                <div class="generation-summary-row">
+                    <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
+                        <span data-generation-mode-label>文生图</span>
+                    </button>
+                    <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="image" data-generation-popover="spec" aria-expanded="false">
+                        <span data-generation-spec>16:9 · 1K · 1张</span>
+                    </button>
+                </div>
                 <div class="generation-node-toolbar image-generation-toolbar">
                     <button type="button" class="generation-command" data-generation-command="select-reference">选择参考</button>
                     <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
-                    <button type="button" class="generation-command" data-generation-command="toggle-settings" aria-expanded="false">设置</button>
-                </div>
-                <div class="image-mode-segment" data-image-mode-segment>
-                    <button class="image-mode-btn active" data-image-mode="text-to-image">文生图</button>
-                    <button class="image-mode-btn" data-image-mode="image-to-image">图生图</button>
-                    <button class="image-mode-btn" data-image-mode="upscale-image">高清修复</button>
-                    <button class="image-mode-btn" data-image-mode="first-frame-draft">首帧草图</button>
-                    <button class="image-mode-btn" data-image-mode="last-frame-draft">尾帧草图</button>
                 </div>
                 <div class="generation-reference-list" data-generation-reference-list>
                     <span class="generation-reference-empty">未连接参考图</span>
-                </div>
-                <div class="generation-settings-panel" data-generation-settings="image" hidden>
-                    <label>比例
-                        <select data-generation-setting="ratio">
-                            <option value="21:9">21:9</option><option value="16:9" selected>16:9</option>
-                            <option value="4:3">4:3</option><option value="1:1">1:1</option>
-                            <option value="3:4">3:4</option><option value="9:16">9:16</option>
-                        </select>
-                    </label>
-                    <label>尺寸
-                        <select data-generation-setting="size"><option value="1K">1K</option><option value="2K">2K</option></select>
-                    </label>
-                    <label>数量
-                        <input type="number" min="1" max="8" value="1" data-generation-setting="count">
-                    </label>
                 </div>
                 <textarea class="image-props-textarea" placeholder="描述你想要生成的画面内容。描述越详细,效果越好。"></textarea>
                 <div class="image-props-footer">
@@ -814,7 +775,6 @@ class CanvasEngine {
                         <span class="chevron" style="color:var(--text-dim)">▾</span>
                     </div>
                     <div class="video-footer-right">
-                        <span class="video-res-info" data-generation-spec>16:9 · 1K · 1张</span>
                         <span class="cost-label" data-generation-cost>后台计费</span>
                         <button class="submit-btn" data-generation-submit title="生成图片">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
