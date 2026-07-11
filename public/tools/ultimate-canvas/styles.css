@@ -1526,6 +1526,15 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     max-width: 620px;
     height: 350px;
 }
+.canvas-node.selected.node-type-video .node-card:has([data-generation-result-region]:not(:empty)),
+.canvas-node.selected.node-type-image .node-card:has([data-generation-result-region]:not(:empty)) {
+    height: auto;
+    min-height: 350px;
+}
+.canvas-node.selected.node-type-video .node-card:has([data-generation-result-region]:not(:empty)) .node-body,
+.canvas-node.selected.node-type-image .node-card:has([data-generation-result-region]:not(:empty)) .node-body {
+    height: auto;
+}
 .canvas-node:not(.selected).node-type-video .node-body,
 .canvas-node:not(.selected).node-type-image .node-body {
     min-height: 208px;
@@ -1533,6 +1542,26 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 .canvas-node:not(.selected).node-type-video .card-preview-placeholder,
 .canvas-node:not(.selected).node-type-image .card-preview-placeholder {
     height: 130px;
+}
+.canvas-node:not(.selected).node-type-video .generation-result-region,
+.canvas-node:not(.selected).node-type-image .generation-result-region {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+.canvas-node:not(.selected).node-type-video .generated-action-row,
+.canvas-node:not(.selected).node-type-image .generated-action-row {
+    display: none;
+}
+.canvas-node:not(.selected).node-type-video .generated-reference-card,
+.canvas-node:not(.selected).node-type-image .generated-reference-card {
+    min-height: 0;
+    padding: 10px;
+}
+.canvas-node:not(.selected).node-type-video .generated-frame-preview,
+.canvas-node:not(.selected).node-type-image .generated-frame-preview {
+    max-height: 130px;
+    min-height: 0;
 }
 .node-type-video .node-body,
 .node-type-image .node-body {
@@ -3905,6 +3934,7 @@ body.director-studio-open {
     width: 100%;
     height: 100%;
     min-height: 220px;
+    box-sizing: border-box;
     border-radius: var(--radius-md);
     background:
         linear-gradient(135deg, rgba(78,205,196,0.16), transparent 34%),
@@ -3974,11 +4004,12 @@ body.director-studio-open {
     filter: blur(0.2px);
 }
 .generated-frame-preview {
-    flex: 1;
+    flex: 0 1 auto;
     width: 100%;
     min-height: 150px;
+    max-height: 260px;
     margin-top: 14px;
-    object-fit: cover;
+    object-fit: contain;
     border-radius: var(--radius-sm);
     border: 1px solid rgba(255,255,255,0.14);
     background: #111;

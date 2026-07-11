@@ -14,11 +14,36 @@ function contains(source: string, expected: string, message: string) {
   assert.ok(source.includes(expected), message);
 }
 
+function matches(source: string, expected: RegExp, message: string) {
+  assert.match(source, expected, message);
+}
+
 contains(engineSource, 'connectNodes(fromId, toId)', 'engine exposes public connection creation');
 contains(engineSource, 'disconnectNodes(fromId, toId)', 'engine exposes public connection removal');
 contains(engineSource, 'disconnectIncoming(nodeId)', 'engine can clear target references');
 contains(engineSource, 'selectNode(nodeId)', 'app can return selection to the target node');
 contains(engineSource, 'new ResizeObserver', 'node size changes update edge paths');
+matches(
+  stylesSource,
+  /\.canvas-node\.selected\.node-type-(?:video|image) \.node-card:has\(\[data-generation-result-region\]:not\(:empty\)\)[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*350px;/,
+  'selected generated results use content-driven card height with the selected-node minimum',
+);
+matches(
+  stylesSource,
+  /\.generated-reference-card\s*\{[\s\S]*?box-sizing:\s*border-box;/,
+  'generated result cards include padding and borders in their measured size',
+);
+matches(
+  stylesSource,
+  /\.generated-frame-preview\s*\{[\s\S]*?max-height:\s*\d+px;/,
+  'generated media is bounded so action rows remain visible',
+);
+matches(
+  stylesSource,
+  /\.canvas-node:not\(\.selected\)[\s\S]*?\.generated-action-row\s*\{[\s\S]*?display:\s*none;/,
+  'unselected generated nodes hide result actions to preserve compact dimensions',
+);
+matches(stylesSource, /\.node-connector\s*\{[\s\S]*?top:\s*50%;[\s\S]*?translateY\(-50%\)/, 'ports stay vertically centered on the card');
 contains(engineSource, 'this.onConnectionDeleted', 'connection removals notify persistence');
 contains(stylesSource, '.canvas-node.selected', 'selected canvas node state is styled');
 contains(stylesSource, '.canvas-node:not(.selected) .node-generation-expanded', 'unselected generation controls collapse');

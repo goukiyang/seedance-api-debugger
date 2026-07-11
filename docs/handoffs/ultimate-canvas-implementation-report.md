@@ -76,3 +76,11 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 3. 线上重点核对 `/api/tasks/estimate` 的 `estimatedCost` 字段、分辨率/时长组合、请求取消行为及旧响应不会覆盖新设置。
 4. 保持点数预估为信息层；后端仍是最终计费来源，前端不得复制或持久化计价规则。
 5. 现有 38 条仓库级 lint warning 与本范围无关，可在独立维护任务中处理，避免混入本次交付。
+
+## Browser QA follow-up: generated result layout
+
+Parent browser QA confirmed that the image result and editor remain on the same node. It also found a layout defect at 71% zoom: the selected card ended at `y=746.21`, while the visible create-video action began at `y=792.54`, underneath the following image properties panel. The action locator was visible to Playwright, but the overlapping panel intercepted the click.
+
+The defect is fixed in CSS. Selected image/video nodes with a nonempty generation result now use content-driven height with a `350px` minimum; generated result cards use border-box sizing; previews are bounded; and action rows remain in normal flow above the same-node editor. Unselected generated nodes retain the compact `350x240` card and hide result actions until selected. Ports remain at the actual card's vertical center, and the existing `ResizeObserver` continues to refresh connection paths after card size changes. Video task/version action rows remain in the same result card and were not removed or nested.
+
+The source smoke now rejects the old fixed-height selected-result behavior and verifies the compact-state, bounded-media, connector-centering, and resize-observer contracts. Final browser rectangle and click re-verification is pending parent confirmation.
