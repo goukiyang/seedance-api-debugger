@@ -72,7 +72,7 @@
         videoCardSelectedTaskIds: new Map(),
         videoCardView: { mode: 'list', section: 'info', cardId: null, search: '' },
         pendingGenerationReferenceTargetId: null,
-        pollingTasks: new Map(),
+        pollingCoordinator: null,
         generationPopover: null,
         referenceSelection: null
     };
@@ -2476,6 +2476,8 @@
         };
         const originalDeleteNode = engine.deleteNode.bind(engine);
         engine.deleteNode = (...args) => {
+            const deletedNode = engine.nodes.get(args[0]);
+            if (deletedNode?.data?.taskId) stopVideoPolling(deletedNode.data.taskId);
             const nextSelection = CanvasReferenceSelection.deleteNode(canvasRuntime.referenceSelection, args[0]);
             if (canvasRuntime.referenceSelection && !nextSelection.active) {
                 finishReferenceSelection({ returnToTarget: false });
@@ -3309,82 +3311,65 @@
     }
 
     function stopVideoPolling(taskId) {
-        const state = canvasRuntime.pollingTasks.get(taskId);
-        if (!state) return;
-        state.stopped = true;
-        window.clearTimeout(state.timer);
-        canvasRuntime.pollingTasks.delete(taskId);
+        canvasRuntime.pollingCoordinator.unregister(taskId);
     }
 
     function stopAllVideoPolling() {
-        Array.from(canvasRuntime.pollingTasks.keys()).forEach(stopVideoPolling);
+        canvasRuntime.pollingCoordinator.clear();
     }
 
-    async function pollVideoTask(taskId, nodeId) {
-        if (!taskId || canvasRuntime.pollingTasks.has(taskId)) return;
-        const state = {
-            attempt: 0,
-            errorCount: 0,
-            timer: null,
-            stopped: false
-        };
-        canvasRuntime.pollingTasks.set(taskId, state);
-        const maxAttempts = 120;
+    function pollVideoTask(taskId, nodeId) {
+        if (!taskId || !nodeId || canvasRuntime.pollingCoordinator.has(taskId)) return;
+        canvasRuntime.pollingCoordinator.register(taskId, nodeId);
+        void canvasRuntime.pollingCoordinator.runNow();
+    }
 
-        const schedule = delay => {
-            if (state.stopped) return;
-            state.timer = window.setTimeout(poll, delay);
-        };
-
-        const poll = async () => {
-            if (state.stopped) return;
-            if (!engine.nodes.has(nodeId)) {
-                stopVideoPolling(taskId);
-                return;
+    canvasRuntime.pollingCoordinator = window.UltimateCanvasGenerationTaskCoordinator.createGenerationTaskCoordinator({
+        fetchStatus: async (taskId, entry) => {
+            const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(entry.nodeId)}"]`);
+            setNodeGenerationStatus(nodeEl, 'loading', `视频生成中 · 第 ${entry.attempt} 次状态检查`);
+            const res = await fetch(videoStatusUrl(taskId), {
+                credentials: 'same-origin',
+                cache: 'no-store'
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.message || data?.error || `状态读取失败：${res.status}`);
+            return data?.task || data;
+        },
+        onStatus: (nodeId, task, entry) => {
+            applyVideoTaskStatus(nodeId, task);
+            const status = task.local_status || task.status;
+            if (['succeeded', 'failed', 'cancelled'].includes(status)) {
+                loadLibraryPanels(true);
+            } else if (entry.attempt >= 120) {
+                stopVideoPolling(entry.taskId);
+                const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+                setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
             }
-            state.attempt += 1;
+        },
+        onError: (taskId, nodeId, errorCount, error, entry) => {
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
-            setNodeGenerationStatus(nodeEl, 'loading', `视频生成中 · 第 ${state.attempt} 次状态检查`);
-            try {
-                const res = await fetch(videoStatusUrl(taskId), {
-                    credentials: 'same-origin',
-                    cache: 'no-store'
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data?.message || data?.error || `状态读取失败：${res.status}`);
-                state.errorCount = 0;
-                const task = data?.task || data;
-                applyVideoTaskStatus(nodeId, task);
-                const status = task.local_status || task.status;
-                if (['succeeded', 'failed', 'cancelled'].includes(status)) {
-                    stopVideoPolling(taskId);
-                    loadLibraryPanels(true);
-                    return;
-                }
-                if (state.attempt >= maxAttempts) {
-                    stopVideoPolling(taskId);
-                    setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
-                    return;
-                }
-                const delay = document.hidden ? 15000 : state.attempt < 4 ? 3000 : state.attempt < 20 ? 5000 : 8000;
-                schedule(delay);
-            } catch (error) {
-                state.errorCount += 1;
-                setNodeGenerationStatus(nodeEl, 'warn', `状态读取失败，正在自动重试（${state.errorCount}）`);
-                if (state.errorCount === 3) {
-                    showCanvasNotice(error?.message || '视频状态轮询暂时失败，正在自动重试。', 'warn');
-                }
-                if (state.attempt >= maxAttempts) {
-                    stopVideoPolling(taskId);
-                    setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
-                    return;
-                }
-                schedule(Math.min(20000, 5000 * state.errorCount));
+            setNodeGenerationStatus(nodeEl, 'warn', `状态读取失败，正在自动重试（${errorCount}）`);
+            if (errorCount === 3) {
+                showCanvasNotice(error?.message || '视频状态轮询暂时失败，正在自动重试。', 'warn');
             }
-        };
-
-        await poll();
-    }
+            if (entry.attempt >= 120) {
+                stopVideoPolling(taskId);
+                setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
+            }
+        },
+        isNodeAlive: nodeId => engine.nodes.has(nodeId),
+        isHidden: () => document.hidden,
+        setTimer: (poll, delay) => window.setTimeout(poll, delay),
+        clearTimer: timer => window.clearTimeout(timer),
+        delayFor: (entry, hidden) => {
+            if (hidden) return 15000;
+            if (entry.errorCount) return Math.min(20000, 5000 * entry.errorCount);
+            if (entry.attempt < 4) return 3000;
+            if (entry.attempt < 20) return 5000;
+            return 8000;
+        }
+    });
 
     function applyVideoTaskStatus(nodeId, task) {
         const node = engine.nodes.get(nodeId);

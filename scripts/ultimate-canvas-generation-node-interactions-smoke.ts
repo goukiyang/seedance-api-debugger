@@ -8,6 +8,7 @@ const bootstrapSource = readFileSync('src/app/api/tools/ultimate-canvas/bootstra
 const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
 const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
 const stylesSource = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
+const indexSource = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
 
 function contains(source: string, expected: string, message: string) {
   assert.ok(source.includes(expected), message);
@@ -42,6 +43,12 @@ contains(appSource, 'function applyGenerationQuickMode', 'quick choices only con
 contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable durable document contract');
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
+contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
+contains(appSource, 'pollingCoordinator.register(taskId, nodeId)', 'video polling delegates registration to the canvas coordinator');
+contains(appSource, 'pollingCoordinator.unregister(taskId)', 'task cleanup delegates to the coordinator');
+contains(appSource, 'pollingCoordinator.clear()', 'context cleanup delegates to the coordinator');
+contains(appSource, 'canvasRuntime.pollingCoordinator.has(taskId)', 'registration remains idempotent after hydration');
+assert.ok(!appSource.includes('pollingTasks: new Map()'), 'app no longer owns per-task polling timers');
 assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes are not permanently spread across the node');
 
 const quickModeSource = appSource.slice(
