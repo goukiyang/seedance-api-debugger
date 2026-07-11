@@ -242,7 +242,8 @@ async function main() {
       viewport: {},
     },
   };
-  const documentJson = JSON.stringify(interactions.sanitizeSerializable(structuredClone(liveDocument)));
+  const durableDocument = interactions.durableCanvasDocument(liveDocument);
+  const documentJson = JSON.stringify(durableDocument);
   assert.equal(liveDocument.canvas.nodes[2].data.previewImage, 'blob:video-preview');
   assert.equal(liveDocument.canvas.nodes[2].data.videoPreviewUrl, 'data:video/mp4;base64,temporary');
   await post('/api/tools/ultimate-canvas/document', {

@@ -2268,10 +2268,6 @@
         };
     }
 
-    function sanitizeSerializable(value) {
-        return window.UltimateCanvasGenerationInteractions.sanitizeSerializable(value);
-    }
-
     async function saveCanvasDocument(reason = 'autosave') {
         if (canvasRuntime.documentRestoring) return true;
         if (!canvasRuntime.bootstrapLoaded || !canvasRuntime.selectedProjectId) return true;
@@ -2284,7 +2280,9 @@
         canvasRuntime.saveState = 'saving';
         canvasRuntime.saveError = null;
         updateSaveIndicator();
-        const payload = sanitizeSerializable(structuredClone(canvasDocumentPayload({ projectId, videoCardId })));
+        const payload = window.UltimateCanvasGenerationInteractions.durableCanvasDocument(
+            canvasDocumentPayload({ projectId, videoCardId })
+        );
         const savePromise = postJson('/api/tools/ultimate-canvas/document', {
             document_id: documentId,
             project_id: projectId,
@@ -3008,14 +3006,23 @@
     function applyGenerationQuickMode(nodeId, mode) {
         const node = engine.nodes.get(nodeId);
         if (!node || !['image', 'video'].includes(node.type)) return false;
-        engine.selectNode(nodeId);
-        node.data = { ...node.data, mode };
-        renderGenerationNodeControls(nodeId);
-        const selectedMode = generationModeState(node).selected;
-        if ((selectedMode?.minimumReferences || 0) > generationReferenceItems(nodeId).length) {
-            startReferenceSelection(nodeId);
-        }
-        scheduleCanvasSave(`${node.type}_quick_mode`);
+        const selectedMode = generationModeState(node).options.find(option => option.id === mode);
+        window.UltimateCanvasGenerationInteractions.applyGenerationQuickAction({
+            selectNode: id => engine.selectNode(id),
+            configureMode: (id, selected) => {
+                const target = engine.nodes.get(id);
+                if (target) target.data = { ...target.data, mode: selected };
+            },
+            renderControls: renderGenerationNodeControls,
+            startReferenceSelection,
+            scheduleSave: scheduleCanvasSave
+        }, {
+            nodeId,
+            nodeType: node.type,
+            mode,
+            minimumReferences: selectedMode?.minimumReferences || 0,
+            referenceCount: generationReferenceItems(nodeId).length
+        });
         return true;
     }
 
@@ -3927,20 +3934,23 @@
         }
 
         if (action === 'create-video') {
-            const videoNodeId = engine.addNode('video', node.x + 760, node.y, {
-                mode: 'image-to-video',
-                sourceNodeId: node.id,
-                prompt: node.data?.prompt || node.data?.description || '',
-                videoSettings: {
-                    ratio: node.data?.imageSettings?.ratio || ratioFromContext(),
-                    duration: durationFromContext(),
-                    resolution: resolutionFromContext(),
-                    generateAudio: false,
-                    returnLastFrame: false,
-                    watermark: false
-                }
-            });
-            engine.connectNodes(node.id, videoNodeId);
+            const videoNodeId = window.UltimateCanvasGenerationInteractions.applyDownstreamVideoAction({
+                createVideoNode: () => engine.addNode('video', node.x + 760, node.y, {
+                    mode: 'image-to-video',
+                    sourceNodeId: node.id,
+                    prompt: node.data?.prompt || node.data?.description || '',
+                    videoSettings: {
+                        ratio: node.data?.imageSettings?.ratio || ratioFromContext(),
+                        duration: durationFromContext(),
+                        resolution: resolutionFromContext(),
+                        generateAudio: false,
+                        returnLastFrame: false,
+                        watermark: false
+                    }
+                }),
+                connectNodes: (fromId, toId) => engine.connectNodes(fromId, toId)
+            }, { sourceNodeId: node.id });
+            if (!videoNodeId) return;
             renderGenerationNodeControls(videoNodeId);
             scheduleCanvasSave('image_create_video');
             showCanvasNotice('已创建并连接图生视频节点。', 'info');
@@ -5589,7 +5599,7 @@
                 <button type="button" data-generated-image-action="regenerate" data-node-id="${escapeHtml(nodeId)}">再次生成</button>
                 <button type="button" data-generated-image-action="create-video" data-node-id="${escapeHtml(nodeId)}">生成视频</button>
             </div>` : '';
-        resultRegion.innerHTML = `
+        window.UltimateCanvasGenerationInteractions.updateGenerationResultRegion(nodeEl, `
             <div class="generated-reference-card">
                 <button class="prompt-card-expand" data-prompt-expand title="展开提示词">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
@@ -5604,7 +5614,7 @@
                 ${taskActions}
                 ${generatedButtons}
                 ${imageActions}
-            </div>`;
+            </div>`);
     }
 
     function createDirectorOutput(sourceId, kind, title, description, index = 0) {

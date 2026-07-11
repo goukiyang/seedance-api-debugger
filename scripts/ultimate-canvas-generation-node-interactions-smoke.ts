@@ -39,7 +39,7 @@ contains(stylesSource, '.generation-popover', 'popover has viewport-safe styling
 contains(engineSource, 'data-generation-quick-mode', 'compact nodes expose quick mode choices');
 contains(engineSource, 'data-generation-result-region', 'generation nodes reserve an in-place result region');
 contains(appSource, 'function applyGenerationQuickMode', 'quick choices only configure the node');
-contains(appSource, 'sanitizeSerializable(structuredClone(canvasDocumentPayload', 'canvas documents remove transient local URLs');
+contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable durable document contract');
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes are not permanently spread across the node');
@@ -48,8 +48,7 @@ const quickModeSource = appSource.slice(
   appSource.indexOf('function applyGenerationQuickMode'),
   appSource.indexOf('function generationSelect'),
 );
-assert.ok(quickModeSource.includes('engine.selectNode(nodeId)'), 'quick mode selects the existing node');
-assert.ok(quickModeSource.includes('startReferenceSelection(nodeId)'), 'reference modes enter selection');
+assert.ok(quickModeSource.includes('applyGenerationQuickAction'), 'quick mode delegates to the executable contract');
 assert.ok(!quickModeSource.includes('submitNodeGeneration'), 'quick mode never submits generation');
 
 const generatedActionSource = appSource.slice(
@@ -57,16 +56,13 @@ const generatedActionSource = appSource.slice(
   appSource.indexOf('function promptInputFor'),
 );
 assert.ok(generatedActionSource.includes('submitNodeGeneration(nodeEl, submit)'), 'regenerate reuses the current node');
-assert.equal((generatedActionSource.match(/engine\.addNode\('video'/g) || []).length, 1,
-  'create-video creates exactly one downstream video node');
-assert.equal((generatedActionSource.match(/engine\.connectNodes\(node\.id, videoNodeId\)/g) || []).length, 1,
-  'create-video connects the downstream node exactly once');
+assert.ok(generatedActionSource.includes('applyDownstreamVideoAction'), 'create-video delegates to the executable contract');
 
 const decorationSource = appSource.slice(
   appSource.indexOf('function decorateGeneratedNode'),
   appSource.indexOf('function createDirectorOutput'),
 );
-assert.ok(decorationSource.includes('resultRegion.innerHTML'), 'generated results update their dedicated region');
+assert.ok(decorationSource.includes('updateGenerationResultRegion'), 'generated results use the executable region contract');
 assert.ok(!decorationSource.includes('body.innerHTML'), 'generated results do not replace editor controls');
 
 assert.ok(bootstrapSource.includes('interaction'));
@@ -148,7 +144,7 @@ const liveDocument = {
   transient: 'blob:preview',
   nested: { transient: 'data:image/png;base64,x' },
 };
-const durableDocument = interactions.sanitizeSerializable(structuredClone(liveDocument));
+const durableDocument = interactions.durableCanvasDocument(liveDocument);
 assert.deepEqual(durableDocument, {
   ...liveDocument,
   transient: '',
@@ -156,6 +152,72 @@ assert.deepEqual(durableDocument, {
 });
 assert.equal(liveDocument.transient, 'blob:preview', 'sanitizing a clone does not mutate live node data');
 assert.equal(liveDocument.nested.transient, 'data:image/png;base64,x');
+
+const quickCalls: string[] = [];
+let quickSubmitCalls = 0;
+let quickNetworkCalls = 0;
+const quickPlan = interactions.applyGenerationQuickAction({
+  selectNode: (nodeId: string) => quickCalls.push(`select:${nodeId}`),
+  configureMode: (nodeId: string, mode: string) => quickCalls.push(`configure:${nodeId}:${mode}`),
+  renderControls: (nodeId: string) => quickCalls.push(`render:${nodeId}`),
+  startReferenceSelection: (nodeId: string) => quickCalls.push(`reference:${nodeId}`),
+  scheduleSave: (reason: string) => quickCalls.push(`save:${reason}`),
+  submitGeneration: () => { quickSubmitCalls += 1; },
+  request: () => { quickNetworkCalls += 1; },
+}, { nodeId: 'image-1', nodeType: 'image', mode: 'image-to-image', minimumReferences: 1, referenceCount: 0 });
+assert.deepEqual(quickPlan, { startsReferenceSelection: true });
+assert.deepEqual(quickCalls, [
+  'select:image-1',
+  'configure:image-1:image-to-image',
+  'render:image-1',
+  'reference:image-1',
+  'save:image_quick_mode',
+]);
+assert.equal(quickSubmitCalls, 0, 'quick action does not invoke an available submit dependency');
+assert.equal(quickNetworkCalls, 0, 'quick action does not invoke an available network dependency');
+const noReferenceCalls: string[] = [];
+const noReferencePlan = interactions.applyGenerationQuickAction({
+  selectNode() {}, configureMode() {}, renderControls() {},
+  startReferenceSelection: () => noReferenceCalls.push('reference'), scheduleSave() {},
+}, { nodeId: 'image-1', nodeType: 'image', mode: 'image-to-image', minimumReferences: 1, referenceCount: 1 });
+assert.deepEqual(noReferencePlan, { startsReferenceSelection: false });
+assert.deepEqual(noReferenceCalls, []);
+
+const promptObject = { value: 'editable prompt' };
+const submitObject = { disabled: false };
+const editorObject = { promptObject, submitObject };
+const resultRegion = { innerHTML: '' };
+const nodeStub = {
+  querySelector(selector: string) {
+    if (selector === '[data-generation-result-region]') return resultRegion;
+    if (selector === '.node-generation-expanded') return editorObject;
+    if (selector === '[data-generation-submit]') return submitObject;
+    return null;
+  },
+};
+assert.equal(interactions.updateGenerationResultRegion(nodeStub, '<article>first</article>'), true);
+assert.equal(resultRegion.innerHTML, '<article>first</article>');
+assert.equal(nodeStub.querySelector('.node-generation-expanded'), editorObject);
+assert.equal(nodeStub.querySelector('[data-generation-submit]'), submitObject);
+assert.equal(promptObject.value, 'editable prompt');
+assert.equal(interactions.updateGenerationResultRegion(nodeStub, '<article>restored</article>'), true);
+assert.equal(resultRegion.innerHTML, '<article>restored</article>', 'rerender restores only result content');
+assert.equal(nodeStub.querySelector('.node-generation-expanded'), editorObject, 'rerender preserves editor identity');
+
+const downstreamCalls: string[] = [];
+const downstreamId = interactions.applyDownstreamVideoAction({
+  createVideoNode: () => { downstreamCalls.push('create'); return 'video-1'; },
+  connectNodes: (from: string, to: string) => downstreamCalls.push(`connect:${from}:${to}`),
+}, { sourceNodeId: 'image-1' });
+assert.equal(downstreamId, 'video-1');
+assert.deepEqual(downstreamCalls, ['create', 'connect:image-1:video-1']);
+assert.equal(interactions.applyDownstreamVideoAction({}, { sourceNodeId: 'image-1' }), null,
+  'missing creation dependency cannot produce a partial downstream action');
+let partialCreates = 0;
+assert.equal(interactions.applyDownstreamVideoAction({
+  createVideoNode: () => { partialCreates += 1; return 'video-orphan'; },
+}, { sourceNodeId: 'image-1' }), null, 'missing connection dependency cannot create an orphan target');
+assert.equal(partialCreates, 0);
 
 assert.equal(interactions.pollDelay(1, 0, false), 3000);
 assert.equal(interactions.pollDelay(20, 0, false), 8000);

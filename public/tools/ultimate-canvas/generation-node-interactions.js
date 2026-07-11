@@ -113,6 +113,38 @@
         return value;
     }
 
+    function durableCanvasDocument(payload) {
+        const clone = typeof structuredClone === 'function'
+            ? structuredClone(payload)
+            : JSON.parse(JSON.stringify(payload));
+        return sanitizeSerializable(clone);
+    }
+
+    function applyGenerationQuickAction(dependencies, action) {
+        const startsReferenceSelection = Number(action?.referenceCount || 0) < Number(action?.minimumReferences || 0);
+        dependencies.selectNode(action.nodeId);
+        dependencies.configureMode(action.nodeId, action.mode);
+        dependencies.renderControls(action.nodeId);
+        if (startsReferenceSelection) dependencies.startReferenceSelection(action.nodeId);
+        dependencies.scheduleSave(`${action.nodeType}_quick_mode`);
+        return { startsReferenceSelection };
+    }
+
+    function updateGenerationResultRegion(nodeElement, html) {
+        const resultRegion = nodeElement?.querySelector?.('[data-generation-result-region]');
+        if (!resultRegion) return false;
+        resultRegion.innerHTML = html;
+        return true;
+    }
+
+    function applyDownstreamVideoAction(dependencies, action) {
+        if (typeof dependencies?.createVideoNode !== 'function' || typeof dependencies?.connectNodes !== 'function') return null;
+        const videoNodeId = dependencies.createVideoNode();
+        if (!videoNodeId) return null;
+        dependencies.connectNodes(action.sourceNodeId, videoNodeId);
+        return videoNodeId;
+    }
+
     function pollDelay(attempt, errorCount, hidden) {
         if (hidden) return 15000;
         if (errorCount > 0) return Math.min(20000, errorCount * 5000);
@@ -121,5 +153,16 @@
         return 8000;
     }
 
-    return { normalizeCapabilities, modeOptions, referenceRole, replaceCameraLine, sanitizeSerializable, pollDelay };
+    return {
+        normalizeCapabilities,
+        modeOptions,
+        referenceRole,
+        replaceCameraLine,
+        sanitizeSerializable,
+        durableCanvasDocument,
+        applyGenerationQuickAction,
+        updateGenerationResultRegion,
+        applyDownstreamVideoAction,
+        pollDelay
+    };
 });
