@@ -2,6 +2,71 @@
  * Canvas Engine – Panning, zooming, node drag, connections
  * Nodes rendered with label OUTSIDE card, connectors always visible
  */
+const CanvasReferenceSelection = Object.freeze({
+    start({ targetNodeId, previousSelectedNodeId = null, maximumReferences, references = [] }) {
+        const maximum = Math.max(0, Number(maximumReferences) || 0);
+        const durableReferences = references
+            .filter(item => item?.nodeId && item?.referenceImageId)
+            .slice(0, maximum);
+        return {
+            active: durableReferences.length < maximum,
+            targetNodeId,
+            previousSelectedNodeId,
+            maximumReferences: maximum,
+            references: durableReferences,
+            startedAt: Date.now()
+        };
+    },
+
+    add(session, candidate) {
+        if (!session?.active || !candidate?.nodeId || !candidate?.referenceImageId) {
+            return { session, accepted: false, finished: !session?.active };
+        }
+        if (session.references.some(item => item.referenceImageId === candidate.referenceImageId)) {
+            return { session, accepted: false, finished: false };
+        }
+        if (session.references.length >= session.maximumReferences) {
+            return { session: { ...session, active: false }, accepted: false, finished: true };
+        }
+        const references = [...session.references, {
+            nodeId: candidate.nodeId,
+            referenceImageId: candidate.referenceImageId
+        }];
+        const finished = references.length >= session.maximumReferences;
+        return {
+            session: { ...session, active: !finished, references },
+            accepted: true,
+            finished
+        };
+    },
+
+    sync(session, references = []) {
+        if (!session) return null;
+        const durableReferences = references.filter(item => item?.nodeId && item?.referenceImageId);
+        return { ...session, references: durableReferences };
+    },
+
+    transition(session, action) {
+        if (!session) return { session: null, selectedNodeId: null };
+        if (action === 'return') return { session, selectedNodeId: session.targetNodeId };
+        if (action === 'exit') return { session: { ...session, active: false }, selectedNodeId: session.targetNodeId };
+        return { session, selectedNodeId: null };
+    },
+
+    deleteNode(session, nodeId) {
+        if (!session) return null;
+        if (nodeId === session.targetNodeId) return { ...session, active: false };
+        return {
+            ...session,
+            references: session.references.filter(item => item.nodeId !== nodeId)
+        };
+    },
+
+    pendingTargetId(session) {
+        return session?.active ? session.targetNodeId : null;
+    }
+});
+
 class CanvasEngine {
     constructor(containerId, canvasId, svgId) {
         this.container = document.getElementById(containerId);
@@ -1022,4 +1087,8 @@ class CanvasEngine {
         this.offsetY = (r.height - h*this.scale)/2 - minY*this.scale + p*this.scale;
         this._applyTransform(); this._updateZoom(); this._updateConnections();
     }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { CanvasEngine, CanvasReferenceSelection };
 }

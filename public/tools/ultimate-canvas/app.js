@@ -2474,10 +2474,15 @@
         };
         const originalDeleteNode = engine.deleteNode.bind(engine);
         engine.deleteNode = (...args) => {
-            if (canvasRuntime.referenceSelection) {
+            const nextSelection = CanvasReferenceSelection.deleteNode(canvasRuntime.referenceSelection, args[0]);
+            if (canvasRuntime.referenceSelection && !nextSelection.active) {
                 finishReferenceSelection({ returnToTarget: false });
+            } else if (nextSelection) {
+                canvasRuntime.referenceSelection = nextSelection;
             }
             const result = originalDeleteNode(...args);
+            syncReferenceSelection();
+            renderReferenceSelectionStatus();
             renderAllGenerationNodeControls();
             scheduleCanvasSave('node_delete');
             return result;
@@ -2485,6 +2490,7 @@
         const originalCreateConnection = engine._createConnection.bind(engine);
         engine._createConnection = (...args) => {
             const result = originalCreateConnection(...args);
+            syncReferenceSelection();
             renderGenerationNodeControls(args[1]);
             scheduleCanvasSave('connection_change');
             return result;
@@ -2497,6 +2503,8 @@
             return result;
         };
         engine.onConnectionDeleted = (_fromId, toId) => {
+            syncReferenceSelection();
+            renderReferenceSelectionStatus();
             renderGenerationNodeControls(toId);
             scheduleCanvasSave('connection_change');
         };
@@ -2628,7 +2636,9 @@
             } else {
                 engine.connectNodes(nodeId, referenceTargetId);
             }
-            canvasRuntime.pendingGenerationReferenceTargetId = null;
+            canvasRuntime.pendingGenerationReferenceTargetId = CanvasReferenceSelection.pendingTargetId(
+                canvasRuntime.referenceSelection
+            );
             renderGenerationNodeControls(referenceTargetId);
             showCanvasNotice('参考图已加入并连接到生成节点。', 'info');
         }
@@ -2795,6 +2805,25 @@
         ));
     }
 
+    function referenceSelectionItems(nodeId) {
+        return generationReferenceItems(nodeId)
+            .filter(item => item.available)
+            .map(item => ({ nodeId: item.nodeId, referenceImageId: item.referenceImageId }));
+    }
+
+    function syncReferenceSelection() {
+        const state = canvasRuntime.referenceSelection;
+        if (!state) return null;
+        canvasRuntime.referenceSelection = CanvasReferenceSelection.sync(
+            state,
+            referenceSelectionItems(state.targetNodeId)
+        );
+        canvasRuntime.pendingGenerationReferenceTargetId = CanvasReferenceSelection.pendingTargetId(
+            canvasRuntime.referenceSelection
+        );
+        return canvasRuntime.referenceSelection;
+    }
+
     function updateReferenceSelectionMarkers() {
         const state = canvasRuntime.referenceSelection;
         document.querySelectorAll('.canvas-node').forEach(nodeEl => {
@@ -2851,13 +2880,15 @@
             return false;
         }
         closeGenerationPopover();
-        canvasRuntime.referenceSelection = {
+        canvasRuntime.referenceSelection = CanvasReferenceSelection.start({
             targetNodeId,
             previousSelectedNodeId: engine.selectedNodeId,
             maximumReferences,
-            startedAt: Date.now()
-        };
-        canvasRuntime.pendingGenerationReferenceTargetId = targetNodeId;
+            references: referenceSelectionItems(targetNodeId)
+        });
+        canvasRuntime.pendingGenerationReferenceTargetId = CanvasReferenceSelection.pendingTargetId(
+            canvasRuntime.referenceSelection
+        );
         updateReferenceSelectionMarkers();
         renderReferenceSelectionStatus();
         return true;
@@ -2867,24 +2898,22 @@
         const state = canvasRuntime.referenceSelection;
         const source = engine.nodes.get(sourceNodeId);
         const target = state ? engine.nodes.get(state.targetNodeId) : null;
-        if (!state || !target || source?.type !== 'image' || !source.data?.referenceImageId) return false;
-        if (generationReferenceImageIds(target.id).includes(source.data.referenceImageId)) {
+        if (!state || !target || source?.type !== 'image') return false;
+        const decision = CanvasReferenceSelection.add(state, {
+            nodeId: sourceNodeId,
+            referenceImageId: source.data?.referenceImageId
+        });
+        if (!decision.accepted) {
             engine.selectNode(target.id);
-            return false;
-        }
-        if (engine.connections.some(connection => connection.from === sourceNodeId && connection.to === target.id)) {
-            engine.selectNode(target.id);
-            return false;
-        }
-        if (generationReferenceItems(target.id).length >= state.maximumReferences) {
-            finishReferenceSelection({ reason: `当前模式最多支持 ${state.maximumReferences} 个参考图`, tone: 'warn' });
             return false;
         }
         if (!engine.connectNodes(sourceNodeId, target.id)) return false;
+        canvasRuntime.referenceSelection = decision.session;
+        canvasRuntime.pendingGenerationReferenceTargetId = CanvasReferenceSelection.pendingTargetId(decision.session);
         engine.selectNode(target.id);
         renderGenerationNodeControls(target.id);
         scheduleCanvasSave('generation_reference_add');
-        if (generationReferenceItems(target.id).length >= state.maximumReferences) {
+        if (decision.finished) {
             finishReferenceSelection({ reason: `已达当前模式的 ${state.maximumReferences} 张参考图上限` });
         } else {
             renderReferenceSelectionStatus();
@@ -2894,6 +2923,7 @@
 
     function removeGenerationReference(targetNodeId, sourceNodeId) {
         if (!engine.disconnectNodes(sourceNodeId, targetNodeId)) return false;
+        syncReferenceSelection();
         renderGenerationNodeControls(targetNodeId);
         renderReferenceSelectionStatus();
         scheduleCanvasSave('generation_reference_remove');
@@ -3766,7 +3796,11 @@
             showPanel('assets-panel');
             loadLibraryPanels(true);
         }
-        if (action === 'return') engine.selectNode(state.targetNodeId);
+        if (action === 'return') {
+            const transition = CanvasReferenceSelection.transition(state, 'return');
+            canvasRuntime.referenceSelection = transition.session;
+            engine.selectNode(transition.selectedNodeId);
+        }
         if (action === 'exit') finishReferenceSelection();
     });
 
