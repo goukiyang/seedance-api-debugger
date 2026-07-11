@@ -7254,17 +7254,26 @@ HARD-GATE：
 
 ### Phase 1：补齐 bootstrap 数据口径和普通用户开放
 
-- [ ] 交接目标修正：同事不拿 admin，也不本地重装完整后端；使用普通登录调试账号 + 测试点数，通过 `https://sd2.youdoodesign.com` 现有后端调用文本、图片、视频模型能力。
-- [ ] 移除无线画布硬编码 admin 限制：`/tools/ultimate-canvas` 和 `/api/tools/ultimate-canvas/bootstrap|document|generate|upload` 改成“已登录 + 当前项目 / 视频卡可生成权限”，普通账号不再 403。
-- [ ] 保持后台隔离：普通调试账号不能访问 `/admin/integrations`、`/admin/users`、`/admin/costs`，不能读取 API Key、Provider 配置、成本总账或数据库原件。
-- [ ] 后端模型能力白名单：`bootstrap` 只返回普通用户可调用的 `capabilities.text/image/video` 和允许的模型标识；前端只能传白名单里的 `model_id` 或能力类型，不能传 `api_key`、`base_url` 或自定义 provider。
-- [ ] 调试连接方式：本地页面如需连线上后端，只允许通过受限 debug base URL / proxy 调无线画布、生成、项目和视频卡业务接口；禁止打开完整后台 CORS 或把 cookie/token 写入代码。
+- [x] 交接目标修正：同事不拿 admin，也不本地重装完整后端；使用普通登录调试账号 + 测试点数，通过 `https://sd2.youdoodesign.com` 现有后端调用文本、图片、视频模型能力。
+- [x] 移除无线画布硬编码 admin 限制：`/tools/ultimate-canvas` 和 `/api/tools/ultimate-canvas/bootstrap|document|generate|upload` 改成“已登录 + 当前项目 / 视频卡可生成权限”，普通账号不再 403。
+- [x] 保持后台隔离：普通调试账号不能访问 `/admin/integrations`、`/admin/users`、`/admin/costs`，不能读取 API Key、Provider 配置、成本总账或数据库原件。
+- [x] 后端模型能力白名单：`bootstrap` 只返回普通用户可调用的 `capabilities.text/image/video` 和允许的模型标识；前端只能传白名单里的 `model_id` 或能力类型，不能传 `api_key`、`base_url` 或自定义 provider。
+- [x] 调试连接方式：当前先走线上同源接口，不新增完整后台 CORS，不把 cookie/token 写入代码；后续如需本地直连线上后端，再单独补受限 debug proxy。
 - [ ] 修改 `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`：项目列表 include `owner` 和 `_count.tasks/reference_albums`，返回字段对齐 `GeneratePageClient` 的 `ProjectOption`。
 - [ ] 修改 `bootstrap` 项目权限字段：返回 `can_generate`、`can_manage_project`、`can_manage_assets`，管理员也必须明确 owner，而不是只返回 `my_role=admin`。
 - [ ] 修改 `bootstrap` 项目显示逻辑：个人默认项目前端统一显示为“个人空间”，原始 `project.name` 保留为调试字段，避免一堆“我的默认项目”直接暴露。
 - [ ] 修改 `bootstrap` 项目排序：优先当前用户自己的 personal/team/company，再显示参与项目；管理员需要查看全站项目时放入“其他项目”分组，不混在自己的默认项目前面。
 - [ ] 修改 `bootstrap` 视频卡列表：include `owner`、summary task count、状态、规格字段，返回是否可生成、是否可归档 / 废弃。
 - [ ] 验证：未登录 `/api/tools/ultimate-canvas/bootstrap` 仍为 401；登录态管理员返回项目必须能区分 owner；普通用户只能看到自己有权限生成的项目。
+
+#### 2026-07-11 前置权限处理进度
+
+- [x] 已移除 `/tools/ultimate-canvas`、静态全屏页、`bootstrap`、`document`、`generate`、`upload` 的整页 / 整接口 admin-only 闸门。
+- [x] 已保留登录保护：未登录用户仍跳转登录或返回 401。
+- [x] 已保留后台隔离：`/admin/integrations`、`/admin/users`、`/admin/costs` 未改；无线画布 `bootstrap` 不返回 `api_key` / `base_url`。
+- [x] 已加普通用户生成边界：普通用户调用无线画布 LLM 必须带视频卡；后端继续校验项目和视频卡可生成权限。
+- [x] 已保留管理员专属健康接口：`/api/tools/ultimate-canvas/localization-health` 仍只允许 admin，因为它会暴露本地化补偿和后台任务健康信息。
+- [ ] 待准备真实普通测试账号后做登录态实测：进入 `/tools/ultimate-canvas`、读取 bootstrap、保存画布、上传素材、调用文字接口，并确认无权限项目不可见。
 
 ### Phase 2：项目下拉改为头像 + 动作面板
 

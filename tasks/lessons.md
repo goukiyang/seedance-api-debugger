@@ -722,6 +722,16 @@
 - 验证结果：以本轮 smoke、JS 语法检查、TypeScript、lint、build、部署和公网资源验收为准。
 - 可复用经验：任何“只给管理员开放”的上下文、规则、提示词能力都不能只靠前端隐藏。前端负责入口和体验，后端负责是否真正应用，日志要能区分已应用和被忽略。
 
+## 2026-07-11 - 交接普通账号前必须先拆掉工具自身的 admin-only 闸门
+
+- 问题/背景：无线画布要交给同事用普通测试账号继续开发，但代码里页面、静态全屏页和多条无线画布 API 仍把非管理员直接挡回 `/generate` 或 403。
+- 诱因/根因：之前交接文档已经改成“普通账号 + 测试点数 + 连接现有后端”，但没有同步把实际运行入口从 admin-only 改成“已登录 + 项目 / 视频卡权限”。
+- 当时思路：不能为了方便给同事 admin，也不能给第三方模型密钥；正确做法是让普通账号进入无线画布，但所有生成、上传、画布上下文仍复用主站项目、视频卡和后台模型能力白名单。
+- 改动位置：`src/app/tools/ultimate-canvas/page.tsx`、`public/tools/ultimate-canvas/index.html`、`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`、`document/route.ts`、`generate/route.ts`、`upload/route.ts`、`src/lib/navigation.ts`。
+- 怎么改：移除无线画布整页 / 整接口 admin-only 判断；普通用户 LLM 调用必须带视频卡并通过 `assertCanGenerateInVideoCard`；上传继续要求视频卡；本地化健康检查保留 admin-only，因为它暴露后台补偿信息。
+- 验证结果：普通用户入口 smoke、旧入口 smoke、规则 smoke、JS 语法、`git diff --check`、TypeScript、lint、Next build 均通过。
+- 可复用经验：外部协作交接不能只看文档措辞。凡是说“普通账号可用”，必须同时检查页面入口、静态资源自检、API 路由、导航显隐和测试脚本；旧测试如果还断言 admin-only，要同步改成新的权限边界。
+
 ## 2026-06-28 - 新能力不能只藏在结果详情页里
 
 - 问题/背景：AI MediaKit 视频超分链路、API Key 设置和任务详情内按钮已经上线，但用户反馈“没有找到入口”，不知道在哪里做超分。

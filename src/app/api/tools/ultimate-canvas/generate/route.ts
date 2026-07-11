@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth/session';
+import { getSession, type SessionUser } from '@/lib/auth/session';
 import {
   createMuskChatCompletion,
   getMuskApiSettings,
@@ -100,12 +100,35 @@ async function writeCanvasLog(params: {
   }
 }
 
+async function assertCanUseCanvasDocument(
+  user: SessionUser,
+  canvasDocumentId: string | null,
+  projectId: string | null,
+) {
+  if (!canvasDocumentId) return;
+
+  const canvas = await prisma.canvasDocument.findUnique({
+    where: { id: canvasDocumentId },
+    select: { id: true, owner_user_id: true, project_id: true, status: true },
+  });
+
+  if (!canvas || canvas.status === 'deleted') {
+    throw new AuthError('画布不存在', 404);
+  }
+
+  if (projectId && canvas.project_id && canvas.project_id !== projectId) {
+    throw new AuthError('画布不属于当前项目', 400);
+  }
+
+  if (user.role === 'admin' || canvas.owner_user_id === user.id) return;
+  if (!canvas.project_id || canvas.project_id !== projectId) {
+    throw new AuthError('无权编辑此画布', 403);
+  }
+}
+
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录，请先登录后再使用无线画布 LLM' }, { status: 401 });
-  if (user.role !== 'admin') {
-    return NextResponse.json({ error: '权限不足', message: '无线画布暂时只对管理员开放' }, { status: 403 });
-  }
 
   let body: Record<string, unknown>;
   try {
@@ -125,6 +148,10 @@ export async function POST(request: NextRequest) {
   const requestedProjectId = cleanString(body.project_id || body.projectId) || null;
   const requestedVideoCardId = cleanString(body.video_card_id || body.videoCardId) || null;
   const canvasDocumentId = cleanString(body.canvas_document_id || body.canvasDocumentId) || null;
+
+  if (user.role !== 'admin' && !requestedVideoCardId) {
+    return NextResponse.json({ error: '请先选择项目和视频卡，再使用无线画布 LLM' }, { status: 400 });
+  }
 
   let projectId: string | null = null;
   let videoCardId: string | null = null;
@@ -146,6 +173,13 @@ export async function POST(request: NextRequest) {
       if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
       throw error;
     }
+  }
+
+  try {
+    await assertCanUseCanvasDocument(user, canvasDocumentId, projectId);
+  } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
   }
 
   if (!kind) {

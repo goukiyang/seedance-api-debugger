@@ -25,9 +25,6 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-    if (user.role !== 'admin') {
-      return NextResponse.json({ error: '权限不足', message: '无线画布暂时只对管理员开放' }, { status: 403 });
-    }
 
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
@@ -63,11 +60,11 @@ export async function POST(request: NextRequest) {
         select: { id: true, owner_user_id: true, project_id: true, status: true },
       });
       if (!canvas || canvas.status === 'deleted') return NextResponse.json({ error: '画布不存在' }, { status: 404 });
-      if (user.role !== 'admin' && canvas.owner_user_id !== user.id) {
-        return NextResponse.json({ error: '无权编辑此画布' }, { status: 403 });
-      }
       if (canvas.project_id && canvas.project_id !== project.id) {
         return NextResponse.json({ error: '画布不属于当前项目' }, { status: 400 });
+      }
+      if (user.role !== 'admin' && canvas.owner_user_id !== user.id && !canvas.project_id) {
+        return NextResponse.json({ error: '无权编辑此画布' }, { status: 403 });
       }
     }
 

@@ -67,9 +67,6 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-    if (user.role !== 'admin') {
-      return NextResponse.json({ error: '权限不足', message: '无线画布暂时只对管理员开放' }, { status: 403 });
-    }
 
     const documentId = request.nextUrl.searchParams.get('document_id')?.trim() || '';
     const projectId = request.nextUrl.searchParams.get('project_id')?.trim() || null;
@@ -103,9 +100,6 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-    if (user.role !== 'admin') {
-      return NextResponse.json({ error: '权限不足', message: '无线画布暂时只对管理员开放' }, { status: 403 });
-    }
 
     const body = await request.json() as Record<string, unknown>;
     const documentId = cleanString(body.document_id || body.documentId);

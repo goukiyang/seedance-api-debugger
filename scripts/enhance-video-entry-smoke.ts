@@ -32,7 +32,9 @@ const navigation = read('src/lib/navigation.ts');
 assertContains(navigation, "label: '资产', href: '/assets'", 'topbar asset entry');
 assertContains(navigation, "label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true", 'topbar enhance admin-only entry');
 assertContains(navigation, "label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true", 'side nav enhance admin-only label');
-assertContains(navigation, "label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, adminOnly: true", 'topbar ultimate canvas admin-only entry');
+assertContains(navigation, "label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true", 'topbar ultimate canvas normal-user entry');
+assertContains(navigation, "label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'] }", 'side nav ultimate canvas normal-user entry');
+assertNotContains(navigation, "label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, adminOnly: true", 'topbar ultimate canvas admin-only entry');
 assertContains(navigation, "label: '工具', href: '/cutout', match: ['/cutout'], prefixMatch: true, adminOnly: true", 'topbar tools admin-only entry');
 assertContains(navigation, 'isNavItemVisible', 'shared navigation visibility helper');
 
@@ -79,21 +81,26 @@ assertContains(enhanceCreateRoute, 'RAW_VIDEO_URL_FORBIDDEN', 'enhance create ra
 assertNotContains(enhanceCreateRoute, '视频超分功能暂时只对管理员开放', 'enhance create blanket admin-only gate');
 
 const ultimateCanvasPage = read('src/app/tools/ultimate-canvas/page.tsx');
-assertContains(ultimateCanvasPage, "user.role !== 'admin'", 'ultimate canvas page admin gate');
+assertNotContains(ultimateCanvasPage, "user.role !== 'admin'", 'ultimate canvas page no blanket admin gate');
 
 const ultimateCanvasStaticPage = read('public/tools/ultimate-canvas/index.html');
-assertContains(ultimateCanvasStaticPage, "data-admin-check=\"pending\"", 'ultimate canvas static page hidden while checking role');
-assertContains(ultimateCanvasStaticPage, "user.role !== 'admin'", 'ultimate canvas static page admin gate');
+assertContains(ultimateCanvasStaticPage, "data-auth-check=\"pending\"", 'ultimate canvas static page hidden while checking login');
+assertNotContains(ultimateCanvasStaticPage, "user.role !== 'admin'", 'ultimate canvas static page no blanket admin gate');
 
 [
   'src/app/api/tools/ultimate-canvas/bootstrap/route.ts',
   'src/app/api/tools/ultimate-canvas/document/route.ts',
   'src/app/api/tools/ultimate-canvas/generate/route.ts',
-  'src/app/api/tools/ultimate-canvas/localization-health/route.ts',
   'src/app/api/tools/ultimate-canvas/upload/route.ts',
 ].forEach((relativePath) => {
-  assertContains(read(relativePath), '无线画布暂时只对管理员开放', `${relativePath} admin-only gate`);
+  assertNotContains(read(relativePath), '无线画布暂时只对管理员开放', `${relativePath} no blanket admin-only gate`);
 });
+
+assertContains(
+  read('src/app/api/tools/ultimate-canvas/localization-health/route.ts'),
+  '无线画布本地化健康检查只对管理员开放',
+  'ultimate canvas localization health remains admin-only',
+);
 
 const cutoutPage = read('src/app/cutout/page.tsx');
 assertContains(cutoutPage, "user?.role === 'admin'", 'cutout page admin gate');

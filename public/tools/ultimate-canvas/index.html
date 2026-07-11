@@ -11,11 +11,11 @@
     <link rel="stylesheet" href="styles.css?v=20260620-rules-visible">
     <link rel="icon" href="data:,">
     <style>
-        html[data-admin-check="pending"] body { visibility: hidden; }
+        html[data-auth-check="pending"] body { visibility: hidden; }
     </style>
     <script>
         (function () {
-            document.documentElement.dataset.adminCheck = 'pending';
+            document.documentElement.dataset.authCheck = 'pending';
             fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' })
                 .then(function (response) { return response.json(); })
                 .then(function (data) {
@@ -24,11 +24,7 @@
                         window.location.replace('/login?next=/tools/ultimate-canvas');
                         return;
                     }
-                    if (user.role !== 'admin') {
-                        window.location.replace('/generate');
-                        return;
-                    }
-                    delete document.documentElement.dataset.adminCheck;
+                    delete document.documentElement.dataset.authCheck;
                 })
                 .catch(function () {
                     window.location.replace('/login?next=/tools/ultimate-canvas');
