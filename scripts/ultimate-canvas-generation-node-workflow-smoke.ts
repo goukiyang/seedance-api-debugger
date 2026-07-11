@@ -215,6 +215,7 @@ function excludes(source: string, needle: string, label: string) {
 }
 
 const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
+const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
 const stylesSource = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
 
 contains(engineSource, 'data-generation-command="optimize-prompt"', 'video prompt optimizer is actionable');
@@ -243,5 +244,17 @@ excludes(engineSource, '<span>裁切</span>', 'old inert crop button removed');
 contains(stylesSource, '.generation-reference-list', 'reference list layout exists');
 contains(stylesSource, '.generation-settings-panel', 'settings panel layout exists');
 contains(stylesSource, '@media (max-width: 720px)', 'generation controls have a mobile breakpoint');
+
+contains(appSource, 'function generationSettingsForNode', 'node settings have one persisted source');
+contains(appSource, 'function generationReferenceItems', 'incoming image references are ordered');
+contains(appSource, 'function renderGenerationNodeControls', 'node controls rehydrate from node data');
+contains(appSource, 'pendingGenerationReferenceTargetId', 'asset selection targets a generation node');
+contains(appSource, "imageRequest({", 'image submission uses the contract module');
+contains(appSource, 'normalizeImageResult', 'image response uses contract normalization');
+contains(appSource, "data-generated-image-action=\"open\"", 'image result can open');
+contains(appSource, "data-generated-image-action=\"download\"", 'image result can download');
+contains(appSource, "data-generated-image-action=\"regenerate\"", 'image result can regenerate');
+contains(appSource, "data-generated-image-action=\"create-video\"", 'image result creates downstream video');
+contains(appSource, "scheduleCanvasSave('image_settings_change')", 'image settings persist');
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

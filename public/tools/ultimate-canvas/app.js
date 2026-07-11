@@ -71,6 +71,7 @@
         videoCardLoadErrors: new Map(),
         videoCardSelectedTaskIds: new Map(),
         videoCardView: { mode: 'list', section: 'info', cardId: null, search: '' },
+        pendingGenerationReferenceTargetId: null,
         pollingTasks: new Map()
     };
 
@@ -767,30 +768,33 @@
                 }
 
                 if (payload.kind === 'image') {
-                    const action = imageActionForMode(payload.mode);
-                    const data = await postJson(capabilities.image?.endpoint || '/api/assets/generate', {
-                        ...baseContextPayload(payload),
-                        action,
-                        input: {
-                            prompt: payload.prompt,
-                            ratio: ratioFromContext(),
-                            reference_image_ids: collectReferenceImageIds(payload),
-                            reference_image_urls: collectReferenceImageUrls(payload),
-                            source_nodes: payload.sourceNodes || [],
-                            mode: payload.mode,
-                            title: payload.title || ''
-                        }
+                    const descriptor = window.UltimateCanvasGenerationNodes.imageRequest({
+                        projectId: canvasRuntime.selectedProjectId,
+                        cardId: canvasRuntime.selectedVideoCardId,
+                        branchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
+                        documentId: canvasRuntime.documentId,
+                        nodeId: payload.nodeId,
+                        workspaceKey: canvasWorkspaceKey(),
+                        requestId: payload.requestId,
+                        mode: payload.mode,
+                        prompt: payload.prompt,
+                        referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
+                        settings: payload.settings || {}
                     });
-                    const first = data.assets?.[0] || {};
+                    descriptor.url = capabilities.image?.endpoint || descriptor.url;
+                    const data = await requestJson(descriptor.url, {
+                        method: descriptor.method,
+                        payload: descriptor.payload
+                    });
+                    const normalized = window.UltimateCanvasGenerationNodes.normalizeImageResult(data);
                     return {
                         ...data,
-                        status: 'succeeded',
+                        ...normalized,
                         message: '图片生成完成，已进入资产库',
-                        imageUrl: first.thumbnailUrl || first.originalUrl || data.thumbnail_url || '',
-                        previewImage: first.thumbnailUrl || first.originalUrl || '',
-                        asset_id: data.asset_id || first.assetId || null,
-                        reference_image_id: data.reference_image_id || first.referenceImageId || null,
-                        workspace_asset_id: data.workspace_asset_id || first.workspaceAssetId || null
+                        previewImage: normalized.imageUrl,
+                        asset_id: normalized.assetId,
+                        reference_image_id: normalized.referenceImageId,
+                        workspace_asset_id: normalized.workspaceAssetId
                     };
                 }
 
@@ -1485,6 +1489,7 @@
         document.querySelectorAll('.node-type-video .video-model-info span:nth-child(2)').forEach(el => {
             el.textContent = caps.video?.model || caps.video?.label || '默认视频 API';
         });
+        renderAllGenerationNodeControls();
     }
 
     async function loadCanvasBootstrap(
@@ -1615,6 +1620,7 @@
         canvasRuntime.videoCardLoadErrors.clear();
         canvasRuntime.videoCardSelectedTaskIds.clear();
         canvasRuntime.videoCardView = { mode: 'list', section: 'info', cardId: null, search: '' };
+        canvasRuntime.pendingGenerationReferenceTargetId = null;
     }
 
     async function switchProjectContext(projectId) {
@@ -2321,6 +2327,7 @@
         engine.nodes.forEach((node) => {
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
             if (!nodeEl) return;
+            renderGenerationNodeControls(node.id);
             if (node.data?.generationStatus === 'failed') {
                 setNodeGenerationStatus(nodeEl, 'error', node.data.generationError || '上次生成失败，输入和素材已保留');
             } else if (node.data?.generationStatus === 'succeeded') {
@@ -2349,7 +2356,11 @@
                     node.id,
                     node.data.title || '图片生成结果',
                     node.data.description || node.data.prompt || '已恢复图片节点',
-                    node.data.previewImage || node.data.thumbnailUrl || ''
+                    node.data.previewImage || node.data.thumbnailUrl || '',
+                    {
+                        imageUrl: node.data.originalUrl || node.data.previewImage || node.data.thumbnailUrl || '',
+                        downloadUrl: node.data.originalUrl || node.data.previewImage || node.data.thumbnailUrl || ''
+                    }
                 );
                 return;
             }
@@ -2443,18 +2454,21 @@
         engine.addNode = (...args) => {
             const nodeId = originalAddNode(...args);
             refreshContextRulesButtons();
+            renderGenerationNodeControls(nodeId);
             scheduleCanvasSave('node_add');
             return nodeId;
         };
         const originalDeleteNode = engine.deleteNode.bind(engine);
         engine.deleteNode = (...args) => {
             const result = originalDeleteNode(...args);
+            renderAllGenerationNodeControls();
             scheduleCanvasSave('node_delete');
             return result;
         };
         const originalCreateConnection = engine._createConnection.bind(engine);
         engine._createConnection = (...args) => {
             const result = originalCreateConnection(...args);
+            renderGenerationNodeControls(args[1]);
             scheduleCanvasSave('connection_change');
             return result;
         };
@@ -2554,6 +2568,7 @@
         if (!item) return;
         const center = canvasCenter();
         const isVideo = item.kind === 'video';
+        const referenceTargetId = canvasRuntime.pendingGenerationReferenceTargetId;
         const nodeId = engine.addNode(isVideo ? 'video' : 'image', center.x, center.y, {
             title: item.title,
             prompt: item.prompt || item.title,
@@ -2578,10 +2593,20 @@
                 taskId: item.taskId,
                 videoUrl: item.previewUrl,
                 downloadUrl: item.downloadUrl
-            } : {}
+            } : {
+                imageUrl: item.originalUrl || item.downloadUrl || itemPreview(item),
+                downloadUrl: item.downloadUrl || item.originalUrl || itemPreview(item)
+            }
         );
+        if (referenceTargetId && !isVideo && engine.nodes.has(referenceTargetId)) {
+            engine._createConnection(nodeId, referenceTargetId);
+            canvasRuntime.pendingGenerationReferenceTargetId = null;
+            renderGenerationNodeControls(referenceTargetId);
+            showCanvasNotice('参考图已加入并连接到生成节点。', 'info');
+        }
         showPanel(null);
         scheduleCanvasSave('library_item_add');
+        return nodeId;
     }
 
     document.addEventListener('click', (event) => {
@@ -2590,6 +2615,10 @@
         const itemId = libraryItem.dataset.libraryId;
         const item = [...(canvasRuntime.libraryItems || []), ...(canvasRuntime.historyItems || [])]
             .find(entry => entry.id === itemId);
+        if (canvasRuntime.pendingGenerationReferenceTargetId && item?.kind === 'video') {
+            showCanvasNotice('视频不能作为图片参考，请选择一张已入库图片。', 'warn');
+            return;
+        }
         createNodeFromLibraryItem(item);
     });
 
@@ -2653,6 +2682,127 @@
         '图片参考': 'image-reference-video'
     };
 
+    function generationSettingsForNode(node) {
+        if (!node) return {};
+        if (node.type === 'image') {
+            const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
+            const limits = capability.capabilities || {};
+            const current = node.data?.imageSettings || {};
+            const maximum = Math.max(1, Number(limits.max_outputs_per_request) || 1);
+            return {
+                ratio: current.ratio || selectedVideoCard()?.ratio || '16:9',
+                size: current.size || capability.size || limits.size_options?.[0] || '1K',
+                count: Math.max(1, Math.min(maximum, Number(current.count) || 1)),
+                maximumCount: maximum,
+                sizeOptions: Array.isArray(limits.size_options) && limits.size_options.length
+                    ? limits.size_options
+                    : [current.size || capability.size || '1K']
+            };
+        }
+        if (node.type === 'video') {
+            const current = node.data?.videoSettings || {};
+            return {
+                ratio: current.ratio || ratioFromContext(),
+                duration: Number(current.duration || durationFromContext()),
+                resolution: current.resolution || resolutionFromContext(),
+                generateAudio: current.generateAudio === true,
+                returnLastFrame: current.returnLastFrame === true,
+                watermark: current.watermark === true
+            };
+        }
+        return {};
+    }
+
+    function generationReferenceItems(nodeId) {
+        const seen = new Set();
+        return engine.connections
+            .filter(connection => connection.to === nodeId)
+            .map((connection, index) => ({ node: engine.nodes.get(connection.from), index }))
+            .filter(item => item.node?.type === 'image')
+            .map(({ node, index }) => {
+                const data = node.data || {};
+                const referenceImageId = referenceIdsFromNodeData(data)[0] || '';
+                const preview = referenceUrlsFromNodeData(data)[0]
+                    || data.previewImage
+                    || data.thumbnailUrl
+                    || '';
+                return {
+                    nodeId: node.id,
+                    referenceImageId,
+                    preview,
+                    title: data.title || `参考图 ${index + 1}`,
+                    available: Boolean(referenceImageId)
+                };
+            })
+            .filter(item => {
+                const key = item.referenceImageId || `node:${item.nodeId}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+    }
+
+    function generationReferenceImageIds(nodeId) {
+        return generationReferenceItems(nodeId)
+            .filter(item => item.available)
+            .map(item => item.referenceImageId);
+    }
+
+    function setSelectOptions(select, values, selectedValue) {
+        if (!select) return;
+        const uniqueValues = Array.from(new Set((values || []).filter(Boolean)));
+        if (selectedValue && !uniqueValues.includes(selectedValue)) uniqueValues.unshift(selectedValue);
+        select.replaceChildren(...uniqueValues.map(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            option.selected = value === selectedValue;
+            return option;
+        }));
+    }
+
+    function renderGenerationNodeControls(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (!node || !nodeEl || !['image', 'video'].includes(node.type)) return;
+
+        const settings = generationSettingsForNode(node);
+        const promptInput = promptInputFor(nodeEl, node.type);
+        if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
+
+        if (node.type === 'image') {
+            const mode = node.data?.mode || node.data?.generationIntent?.mode || 'text-to-image';
+            syncImageModeButtons(nodeEl, mode);
+            setSelectOptions(nodeEl.querySelector('[data-generation-setting="size"]'), settings.sizeOptions, settings.size);
+            const countInput = nodeEl.querySelector('[data-generation-setting="count"]');
+            if (countInput) {
+                countInput.max = String(settings.maximumCount);
+                countInput.value = String(settings.count);
+            }
+            const ratioSelect = nodeEl.querySelector('[data-generation-settings="image"] [data-generation-setting="ratio"]');
+            if (ratioSelect) ratioSelect.value = settings.ratio;
+            const spec = nodeEl.querySelector('[data-generation-spec]');
+            if (spec) spec.textContent = `${settings.ratio} · ${settings.size} · ${settings.count}张`;
+        }
+
+        const references = generationReferenceItems(nodeId);
+        const referenceList = nodeEl.querySelector('[data-generation-reference-list]');
+        if (referenceList) {
+            referenceList.innerHTML = references.length
+                ? references.map((item, index) => `
+                    <span class="generation-reference-item ${item.available ? '' : 'is-unavailable'}" title="${escapeHtml(item.available ? item.title : `${item.title} 尚未入库`)}">
+                        ${item.preview ? `<img src="${escapeHtml(item.preview)}" alt="">` : '<span class="generation-reference-thumb"></span>'}
+                        <strong>${escapeHtml(item.title)}</strong>
+                        <span>${item.available ? (index === 0 ? '参考 1' : `参考 ${index + 1}`) : '未入库'}</span>
+                    </span>`).join('')
+                : '<span class="generation-reference-empty">未连接参考图</span>';
+        }
+    }
+
+    function renderAllGenerationNodeControls() {
+        engine.nodes.forEach(node => renderGenerationNodeControls(node.id));
+    }
+
     function activeTabText(nodeEl) {
         return nodeEl.querySelector('.video-props-tab.active')?.textContent.trim() || '';
     }
@@ -2690,7 +2840,7 @@
         const isVideo = node.type === 'video';
         const isImage = node.type === 'image';
         const kind = node.data?.generationIntent?.kind || (isVideo ? 'video' : isImage ? 'image' : node.type);
-        const mode = node.data?.generationIntent?.mode || node.data?.mode || (isVideo
+        const mode = node.data?.mode || node.data?.generationIntent?.mode || (isVideo
             ? (generationModeMap[tabText] || 'text-to-video')
             : isImage ? 'text-to-image' : 'text');
         const contextRules = contextRulesForNode(node);
@@ -2707,6 +2857,8 @@
             model: nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '',
             spec: nodeEl.querySelector('.video-res-info')?.textContent.trim() || '',
             sourceNodes: nodeSourcePayloads(nodeId),
+            referenceImageIds: generationReferenceImageIds(nodeId),
+            settings: generationSettingsForNode(node),
             cameraPresets: node.data?.cameraPresets || [],
             referenceImage: node.data?.previewImage || node.data?.referenceImage || '',
             source: node.data?.source || '',
@@ -2799,8 +2951,9 @@
 
     function applyImageGenerationResult(nodeEl, payload, result) {
         const node = engine.nodes.get(payload.nodeId);
-        const imageUrl = result?.previewImage || result?.imageUrl || result?.assets?.[0]?.thumbnailUrl || result?.assets?.[0]?.originalUrl || '';
-        const title = result?.assets?.[0]?.fileName || '图片生成结果';
+        const normalized = window.UltimateCanvasGenerationNodes.normalizeImageResult(result);
+        const imageUrl = normalized.imageUrl;
+        const title = normalized.fileName || '图片生成结果';
         const desc = result?.message || `${payload.modeLabel || payload.mode} 已完成并写入资产库`;
         if (node) {
             node.data = {
@@ -2809,15 +2962,22 @@
                 prompt: payload.prompt,
                 previewImage: imageUrl,
                 referenceImage: imageUrl,
-                assetId: result?.asset_id || result?.assets?.[0]?.assetId || null,
-                referenceImageId: result?.reference_image_id || result?.assets?.[0]?.referenceImageId || null,
-                workspaceAssetId: result?.workspace_asset_id || result?.assets?.[0]?.workspaceAssetId || null,
+                imageUrl,
+                thumbnailUrl: normalized.thumbnailUrl || imageUrl,
+                originalUrl: normalized.originalUrl || imageUrl,
+                assetId: normalized.assetId,
+                referenceImageId: normalized.referenceImageId,
+                workspaceAssetId: normalized.workspaceAssetId,
                 generationPayload: payload,
                 generationResult: result,
                 generationStatus: 'succeeded'
             };
         }
-        decorateGeneratedNode(payload.nodeId, title, desc, imageUrl);
+        decorateGeneratedNode(payload.nodeId, title, desc, imageUrl, {
+            imageUrl: normalized.originalUrl || imageUrl,
+            downloadUrl: normalized.originalUrl || imageUrl
+        });
+        renderGenerationNodeControls(payload.nodeId);
         setNodeGenerationStatus(nodeEl, 'success', '图片生成完成并已入库');
         showCanvasNotice('图片生成完成，已进入资产库。', 'info');
         scheduleCanvasSave('image_generation');
@@ -3048,11 +3208,14 @@
                     message: capabilities.image?.message || '图形生成能力未配置，请先到后台 API 设置完成配置。'
                 };
             }
-            if (payload.mode === 'upscale-image'
-                && collectReferenceImageIds(payload).length === 0
-                && collectReferenceImageUrls(payload).length === 0) {
-                return { ready: false, message: '高清修复需要先连接一张已上传或已生成的图片。' };
-            }
+            const validation = window.UltimateCanvasGenerationNodes.validateImage({
+                mode: payload.mode,
+                prompt: payload.prompt,
+                projectId: project.id,
+                cardId: card.id,
+                referenceImageIds: payload.referenceImageIds || []
+            });
+            if (!validation.valid) return { ready: false, message: validation.message };
             return { ready: true };
         }
 
@@ -3159,7 +3322,118 @@
             mode: button.dataset.imageMode || 'text-to-image'
         };
         syncImageModeButtons(nodeEl, node.data.mode);
+        renderGenerationNodeControls(node.id);
         scheduleCanvasSave('image_mode_change');
+    });
+
+    function disconnectGenerationReferences(nodeId) {
+        const removed = [];
+        engine.connections = engine.connections.filter(connection => {
+            const source = engine.nodes.get(connection.from);
+            if (connection.to === nodeId && source?.type === 'image') {
+                removed.push(connection);
+                document.getElementById(connection.lineId)?.remove();
+                return false;
+            }
+            return true;
+        });
+        if (!removed.length) return false;
+        engine._updateConnections();
+        renderGenerationNodeControls(nodeId);
+        scheduleCanvasSave('generation_references_clear');
+        return true;
+    }
+
+    document.addEventListener('click', event => {
+        const command = event.target.closest('[data-generation-command]');
+        const nodeEl = command?.closest('.canvas-node');
+        if (!command || !nodeEl) return;
+        const nodeId = nodeEl.dataset.nodeId;
+        const node = engine.nodes.get(nodeId);
+        if (!node || !['image', 'video'].includes(node.type)) return;
+
+        const action = command.dataset.generationCommand;
+        if (action === 'toggle-settings') {
+            const panel = nodeEl.querySelector(`[data-generation-settings="${node.type}"]`);
+            if (!panel) return;
+            panel.hidden = !panel.hidden;
+            command.classList.toggle('is-active', !panel.hidden);
+            command.setAttribute('aria-expanded', String(!panel.hidden));
+            return;
+        }
+        if (action === 'select-reference') {
+            canvasRuntime.pendingGenerationReferenceTargetId = nodeId;
+            showPanel('assets-panel');
+            loadLibraryPanels(true);
+            showCanvasNotice('从素材面板选择图片后会自动连接到当前节点。', 'info');
+            return;
+        }
+        if (action === 'disconnect-references') {
+            if (!disconnectGenerationReferences(nodeId)) {
+                showCanvasNotice('当前节点没有已连接的图片参考。', 'info');
+            }
+        }
+    });
+
+    document.addEventListener('change', event => {
+        const control = event.target.closest('[data-generation-setting]');
+        const nodeEl = control?.closest('.canvas-node');
+        const panel = control?.closest('[data-generation-settings]');
+        if (!control || !nodeEl || !panel || panel.dataset.generationSettings !== 'image') return;
+        const node = engine.nodes.get(nodeEl.dataset.nodeId);
+        if (!node || node.type !== 'image') return;
+
+        const ratio = panel.querySelector('[data-generation-setting="ratio"]')?.value || '16:9';
+        const size = panel.querySelector('[data-generation-setting="size"]')?.value || '1K';
+        const count = Number(panel.querySelector('[data-generation-setting="count"]')?.value || 1);
+        node.data = {
+            ...node.data,
+            imageSettings: { ratio, size, count }
+        };
+        renderGenerationNodeControls(node.id);
+        scheduleCanvasSave('image_settings_change');
+    });
+
+    document.addEventListener('click', event => {
+        const actionElement = event.target.closest('[data-generated-image-action]');
+        if (!actionElement) return;
+        const action = actionElement.dataset.generatedImageAction;
+        if (action === 'open' || action === 'download') return;
+
+        const nodeId = actionElement.dataset.nodeId;
+        const node = engine.nodes.get(nodeId);
+        const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (!node || node.type !== 'image' || !nodeEl) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (action === 'regenerate') {
+            const submit = nodeEl.querySelector('[data-generation-submit]');
+            if (!submit) return;
+            node.data = { ...node.data, generationStatus: 'idle', generationError: null };
+            submitNodeGeneration(nodeEl, submit);
+            return;
+        }
+
+        if (action === 'create-video') {
+            const videoNodeId = engine.addNode('video', node.x + 760, node.y, {
+                mode: 'image-to-video',
+                sourceNodeId: node.id,
+                prompt: node.data?.prompt || node.data?.description || '',
+                videoSettings: {
+                    ratio: node.data?.imageSettings?.ratio || ratioFromContext(),
+                    duration: durationFromContext(),
+                    resolution: resolutionFromContext(),
+                    generateAudio: false,
+                    returnLastFrame: false,
+                    watermark: false
+                }
+            });
+            engine._createConnection(node.id, videoNodeId);
+            renderGenerationNodeControls(videoNodeId);
+            scheduleCanvasSave('image_create_video');
+            showCanvasNotice('已创建并连接图生视频节点。', 'info');
+        }
     });
 
     function promptInputFor(nodeEl, type) {
@@ -4797,6 +5071,13 @@
                     <button type="button" data-generated-task-version="best" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.best)}</button>
                     <button type="button" data-generated-task-version="final" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.final)}</button>` : ''}
             </div>` : '';
+        const imageActions = options.imageUrl ? `
+            <div class="generated-action-row generated-image-actions">
+                <a data-generated-image-action="open" href="${escapeHtml(options.imageUrl)}" target="_blank" rel="noreferrer">打开原图</a>
+                <a data-generated-image-action="download" href="${escapeHtml(options.downloadUrl || options.imageUrl)}" download>下载</a>
+                <button type="button" data-generated-image-action="regenerate" data-node-id="${escapeHtml(nodeId)}">再次生成</button>
+                <button type="button" data-generated-image-action="create-video" data-node-id="${escapeHtml(nodeId)}">生成视频</button>
+            </div>` : '';
         body.innerHTML = `
             <div class="generated-reference-card">
                 <button class="prompt-card-expand" data-prompt-expand title="展开提示词">
@@ -4811,6 +5092,7 @@
                     : '<div class="generated-frame-lines"></div>'}
                 ${taskActions}
                 ${generatedButtons}
+                ${imageActions}
             </div>`;
     }
 
