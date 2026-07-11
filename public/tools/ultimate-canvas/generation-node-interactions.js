@@ -166,6 +166,30 @@
         return 8000;
     }
 
+    function clearVideoEstimateEntries(entries, clearTimer) {
+        if (!entries || typeof entries.values !== 'function') return;
+        try {
+            for (const entry of entries.values()) {
+                if (entry?.timer != null && typeof clearTimer === 'function') {
+                    try {
+                        clearTimer(entry.timer);
+                    } catch {
+                        // Continue releasing the remaining transient entries.
+                    }
+                }
+                if (typeof entry?.controller?.abort === 'function') {
+                    try {
+                        entry.controller.abort();
+                    } catch {
+                        // A failed abort must not retain the old context map.
+                    }
+                }
+            }
+        } finally {
+            entries.clear?.();
+        }
+    }
+
     return {
         normalizeCapabilities,
         modeOptions,
@@ -176,6 +200,7 @@
         applyGenerationQuickAction,
         updateGenerationResultRegion,
         applyDownstreamVideoAction,
-        pollDelay
+        pollDelay,
+        clearVideoEstimateEntries
     };
 });

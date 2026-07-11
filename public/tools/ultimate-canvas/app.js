@@ -1510,6 +1510,9 @@
         videoCardId = canvasRuntime.selectedVideoCardId,
         options = {}
     ) {
+        if (projectId !== canvasRuntime.selectedProjectId || videoCardId !== canvasRuntime.selectedVideoCardId) {
+            clearAllVideoEstimates();
+        }
         const requestId = ++canvasRuntime.bootstrapRequestId;
         try {
             const url = new URL('/api/tools/ultimate-canvas/bootstrap', window.location.origin);
@@ -1607,6 +1610,7 @@
     function clearCanvasForContext() {
         canvasRuntime.documentRestoring = true;
         try {
+            clearAllVideoEstimates();
             engine.restore({ nodes: [], connections: [], viewport: {} });
         } finally {
             canvasRuntime.documentRestoring = false;
@@ -2448,6 +2452,7 @@
             }
             canvasRuntime.documentRestoring = true;
             stopAllVideoPolling();
+            clearAllVideoEstimates();
             engine.restore(parsed.canvas || parsed);
             hydrateNodeViews();
             refreshContextRulesButtons();
@@ -3384,6 +3389,15 @@
     function stopAllVideoPolling() {
         canvasRuntime.pollingCoordinator.clear();
     }
+
+    function clearAllVideoEstimates() {
+        window.UltimateCanvasGenerationInteractions.clearVideoEstimateEntries(
+            canvasRuntime.videoEstimates,
+            timer => window.clearTimeout(timer)
+        );
+    }
+
+    window.addEventListener('pagehide', clearAllVideoEstimates);
 
     function pollVideoTask(taskId, nodeId) {
         if (!taskId || !nodeId) return;

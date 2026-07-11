@@ -22,9 +22,9 @@ Task 8 基线：`f72fc26716ef43d4905e5ea03bb511139c32f20e`
 
 ## 3. 每个文件改了什么
 
-- `app.js`：完成项目/视频卡上下文、引用选择、节点折叠与弹层、图片原位结果、下游视频创建、视频任务轮询恢复，以及 Task 8 的瞬时视频预估。预估以分辨率和时长签名防止旧响应覆盖新设置，节点删除时清理定时器和请求。
+- `app.js`：完成项目/视频卡上下文、引用选择、节点折叠与弹层、图片原位结果、下游视频创建、视频任务轮询恢复，以及 Task 8 的瞬时视频预估。预估以分辨率和时长签名防止旧响应覆盖新设置；单节点删除执行定向清理，整画布清空、文档恢复、项目/视频卡上下文切换及 `pagehide` 均在替换上下文前执行全量清理。
 - `canvas-engine.js`、`styles.css`：提供紧凑/展开节点、单一弹层入口、引用兼容/禁用状态、稳定结果区域和窄屏布局；图片与视频均保留可编辑提交控件。
-- 三个 generation 模块：分别集中交互纯函数、生成请求/响应契约和任务轮询协调，覆盖引用去重、持久化清洗、连接回滚、轮询替换及过期响应保护。
+- 三个 generation 模块：分别集中交互纯函数、生成请求/响应契约和任务轮询协调，覆盖引用去重、持久化清洗、连接回滚、轮询替换及过期响应保护。`generation-node-interactions.js` 还提供生产与烟测共用的 `clearVideoEstimateEntries`：每个非空 timer 清理一次、每个 controller 中止一次，即使中止抛错也继续并最终清空 Map。
 - `video-card-workflow.js`：集中视频卡、方向、任务版本、重试、迁移、拆分、合并和审批请求契约。
 - `index.html`：按依赖顺序加载模块；`styles.css`、`canvas-engine.js`、`generation-node-interactions.js`、`generation-node-workflow.js`、`generation-task-coordinator.js`、`app.js` 最终 cache key 统一为 `20260711-liblib-interactions`。
 - `ultimate-canvas-preview-server.mjs`：仅监听本机并以内存 mock 覆盖画布 API；Task 8 的 `/api/tasks/estimate` mock 使用 `Math.ceil(duration * 3)`，该公式只存在于预览服务器，不进入生产文件。
@@ -45,6 +45,7 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 ## 5. 验证结果是否通过
 
 - RED 符合预期：交互烟测因最终 cache key/预估实现缺失退出 1；预览 API 对 `/api/tasks/estimate` 返回 501，退出 1。
+- 评审修复 RED 符合预期：第一次因缺少 `clearAllVideoEstimates` 失败；第二次因项目/视频卡 bootstrap 切换未清理失败。实现共享 helper 与生命周期接线后，两组断言均转为 GREEN。
 - GREEN 与完整套件全部退出 0：6 个语法检查、8 个烟测、TypeScript、lint、build 均通过；预览 API 烟测在随机本机端口启动并自行清理子进程。
 - `npm run lint` 有 38 条既有 warning：6 条 `react-hooks/exhaustive-deps`、32 条 `@next/next/no-img-element`；修改的无线画布文件无新增 lint warning。构建成功生成 76 个静态页面，并包含 `/api/tasks/estimate` 与无线画布路由。
 - 本代理未执行应用内浏览器 QA，也不声称九项浏览器验收通过。最终浏览器验收由父代理在现有预览服务器上补充。
@@ -64,6 +65,7 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 ## 9. 还没做完的内容
 
 - 父代理仍需完成九项浏览器验收：紧凑/展开节点、画布引用选择、禁用模式及原因、单弹层与 Escape、同节点图片结果、已连接视频创建、刷新后轮询恢复、390px 视口、控制台零新增 error/warning。
+- 浏览器验收时应额外观察：在视频预估请求待定期间切换项目/视频卡或恢复文档，不得让旧上下文的点数结果写入新上下文节点。
 - 尚未部署到线上环境，也未用真实普通账号核对线上 estimate/provider 字段、失败/超时状态、资产播放下载和真实点数流水。
 - 本任务不负责推送；当前提交后的远端权限和推送结果需由父代理确认并追加。
 

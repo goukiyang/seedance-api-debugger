@@ -52,6 +52,31 @@ contains(appSource, '.abort()', 'a superseded video estimate request is aborted'
 contains(appSource, 'estimateSignature', 'stale estimate responses are checked against their settings signature');
 contains(appSource, '预计 ${', 'successful estimates are labeled clearly');
 contains(appSource, '提交后由后台计算', 'estimate failure remains nonblocking');
+contains(appSource, 'function clearAllVideoEstimates', 'app exposes one whole-canvas estimate cleanup path');
+const bootstrapSourceBlock = appSource.slice(
+  appSource.indexOf('async function loadCanvasBootstrap'),
+  appSource.indexOf('function renderRuntimeContextControls'),
+);
+contains(bootstrapSourceBlock, 'clearAllVideoEstimates()', 'project and video-card bootstrap switches clear old estimates');
+contains(appSource, "window.addEventListener('pagehide', clearAllVideoEstimates)", 'page teardown clears pending estimates');
+const clearCanvasSource = appSource.slice(
+  appSource.indexOf('function clearCanvasForContext'),
+  appSource.indexOf('function resetProjectScopedRuntime'),
+);
+contains(clearCanvasSource, 'clearAllVideoEstimates()', 'whole-canvas clearing cancels stale estimates before restore');
+assert.ok(
+  clearCanvasSource.indexOf('clearAllVideoEstimates()') < clearCanvasSource.indexOf('engine.restore('),
+  'whole-canvas cleanup runs before engine restore',
+);
+const restoreDocumentSource = appSource.slice(
+  appSource.indexOf('async function loadCanvasDocument'),
+  appSource.indexOf('function installAutosaveHooks'),
+);
+contains(restoreDocumentSource, 'clearAllVideoEstimates()', 'document restore cancels stale estimates');
+assert.ok(
+  restoreDocumentSource.lastIndexOf('clearAllVideoEstimates()') < restoreDocumentSource.indexOf('engine.restore('),
+  'document cleanup runs before engine restore',
+);
 const pollingSource = appSource.slice(
   appSource.indexOf('function pollVideoTask'),
   appSource.indexOf('canvasRuntime.pollingCoordinator ='),
@@ -273,6 +298,27 @@ assert.equal(interactions.pollDelay(1, 0, false), 3000);
 assert.equal(interactions.pollDelay(20, 0, false), 8000);
 assert.equal(interactions.pollDelay(2, 3, false), 15000);
 assert.equal(interactions.pollDelay(2, 0, true), 15000);
+
+assert.doesNotThrow(() => interactions.clearVideoEstimateEntries());
+assert.doesNotThrow(() => interactions.clearVideoEstimateEntries(new Map()));
+const clearedTimers: unknown[] = [];
+let firstAbortCount = 0;
+let throwingAbortCount = 0;
+let lastAbortCount = 0;
+const estimateEntries = new Map<string, any>([
+  ['first', { timer: 11, controller: { abort: () => { firstAbortCount += 1; } } }],
+  ['throwing', { timer: 22, controller: { abort: () => { throwingAbortCount += 1; throw new Error('abort failed'); } } }],
+  ['last', { timer: null, controller: { abort: () => { lastAbortCount += 1; } } }],
+]);
+assert.doesNotThrow(() => interactions.clearVideoEstimateEntries(
+  estimateEntries,
+  (timer: unknown) => clearedTimers.push(timer),
+));
+assert.deepEqual(clearedTimers, [11, 22]);
+assert.equal(firstAbortCount, 1);
+assert.equal(throwingAbortCount, 1);
+assert.equal(lastAbortCount, 1, 'cleanup continues after an abort throws');
+assert.equal(estimateEntries.size, 0, 'cleanup always clears the transient estimate map');
 
 const selection = CanvasReferenceSelection.start({
   targetNodeId: 'target',
