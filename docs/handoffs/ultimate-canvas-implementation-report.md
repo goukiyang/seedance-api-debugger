@@ -6,6 +6,8 @@
 
 远端基线：`2ce4a17010a8e5867a3f405b024f555b417da565`
 
+交付状态：本地目标分支已完成提交。最终执行 `git push origin teammate/ultimate-canvas-complete` 时，GitHub 拒绝当前身份 `K4y2025`，返回 403；完整 patch 输出到 `E:\Ultimate-canvas\ultimate-canvas-complete-final.patch`。
+
 ## 1. 本次目标理解
 
 本次工作的主目标是增强 sd2 现有无线画布，而不是新建页面、第二套工作流或独立后端。重点是把当前画布里的生图节点和视频节点原位接到 sd2 的真实同源接口，并延续已经完成的项目、视频卡和方向规则。
@@ -158,7 +160,7 @@ node scripts/ultimate-canvas-preview-server.mjs 4399
 - 尚未把最终提交部署到 `https://sd2.youdoodesign.com` 的预览或生产环境。
 - 尚未用真实普通测试账号在线提交一次文字、图片、视频和重试任务。
 - 尚未在线核对真实 provider 返回字段、失败态、超时态、点数流水、图片入库、视频播放/下载和尾帧资产。
-- 最新本地提交尚需推送到远端目标分支；若当前 GitHub 身份仍无写权限，将以完整 patch 交付。
+- 最新本地提交因当前 GitHub 身份无仓库写权限而无法推送，改以完整 patch 交付。
 - 多人协作、分享、通知、反馈等全局入口仍标记为待接入；它们不属于本次生图/视频节点范围。
 
 ## 10. 风险和建议下一步
@@ -169,4 +171,4 @@ node scripts/ultimate-canvas-preview-server.mjs 4399
 4. 视频必须等待到终态，再核对失败提示、播放、下载、尾帧、版本标记以及刷新恢复。
 5. 特别核对线上 bootstrap 的图片尺寸、视频分辨率/时长/音频能力与当前 UI 选项一致；若后端能力收窄，应由 bootstrap 驱动隐藏或禁用选项。
 6. 在真实移动设备补一张 390px 左右视口截图；本机尺寸与交互检查已通过，但截图传输工具曾超时。
-7. 当前 GitHub 身份此前对目标仓库推送返回 403；最终提交会再次尝试，失败时使用仓库外的完整二进制 patch 交付。
+7. 当前 GitHub 身份对目标仓库的最终推送返回 403；请由有权限的维护者应用 `E:\Ultimate-canvas\ultimate-canvas-complete-final.patch`，再推送目标分支。
