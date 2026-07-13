@@ -3061,13 +3061,14 @@
         }));
     }
 
-    function generationNodeLongEdge() {
-        return Math.max(1, Math.min(350, window.innerWidth - 24));
+    function generationNodeLongEdge(nodeEl) {
+        const nodeType = nodeEl?.classList?.contains('node-type-image') ? 'image' : 'video';
+        return window.UltimateCanvasGenerationInteractions.generationNodeLongEdge(nodeType, window.innerWidth);
     }
 
     function applyGenerationNodeDimensions(nodeEl, settings) {
         const dimensions = window.UltimateCanvasGenerationInteractions
-            .generationNodeDimensions(settings.ratio, generationNodeLongEdge());
+            .generationNodeDimensions(settings.ratio, generationNodeLongEdge(nodeEl));
         nodeEl.style.setProperty('--generation-node-width', `${dimensions.width}px`);
         nodeEl.style.setProperty('--generation-node-height', `${dimensions.height}px`);
         nodeEl.dataset.generationRatio = dimensions.ratio;
@@ -3147,6 +3148,7 @@
                     </span>`).join('')
                 : '<span class="generation-reference-empty">未连接参考图</span>';
         }
+        refreshOpenGenerationSpecPopover(node);
         syncVideoTaskActionsTrigger(nodeEl, node);
     }
 
@@ -3224,6 +3226,14 @@
             ${capability.supportsLastFrame ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="returnLastFrame" ${settings.returnLastFrame ? 'checked' : ''}><span>返回尾帧</span></label>` : ''}
             ${capability.supportsWatermark ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="watermark" ${settings.watermark ? 'checked' : ''}><span>添加水印</span></label>` : ''}
         </div>`;
+    }
+
+    function refreshOpenGenerationSpecPopover(node) {
+        const state = canvasRuntime.generationPopover;
+        if (!state || state.kind !== 'spec' || state.nodeId !== node?.id || !state.element?.isConnected) return false;
+        state.element.innerHTML = renderSpecPopover(node);
+        positionGenerationPopover(state);
+        return true;
     }
 
     function renderCameraPopover(node) {

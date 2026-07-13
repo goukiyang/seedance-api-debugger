@@ -49,6 +49,12 @@ assert.equal(-landscapeOverflow + desktopPanelWidth / 2, landscapeCardWidth / 2)
 const mobilePanelWidth = Math.min(640, 390 - 24);
 assert.equal(mobilePanelWidth, 366);
 
+const desktopImageLongEdge = interactions.generationNodeLongEdge('image', 1200);
+const desktopImageLandscape = interactions.generationNodeDimensions('21:9', desktopImageLongEdge);
+assert.equal(desktopImageLongEdge, desktopPanelWidth);
+assert.equal(desktopImageLandscape.width, desktopPanelWidth, 'landscape image card aligns with the prompt panel width');
+assert.equal(desktopImageLandscape.height, 274.286);
+
 const generationNodes = ruleWith(['.canvas-node.node-type-video', '.canvas-node.node-type-image']);
 assertDeclarations(generationNodes, { width: 'var(--generation-node-width, 350px)' });
 

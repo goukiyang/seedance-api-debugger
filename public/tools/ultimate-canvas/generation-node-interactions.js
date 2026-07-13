@@ -55,6 +55,13 @@
         };
     }
 
+    function generationNodeLongEdge(nodeType, viewportWidth) {
+        const maximum = clean(nodeType) === 'image' ? 640 : 350;
+        const width = Number(viewportWidth);
+        const available = Number.isFinite(width) && width > 24 ? width - 24 : maximum;
+        return Math.max(1, Math.min(maximum, available));
+    }
+
     function strings(values, validator) {
         const seen = new Set();
         return (Array.isArray(values) ? values : []).filter(value => {
@@ -453,6 +460,7 @@
 
     return {
         generationNodeDimensions,
+        generationNodeLongEdge,
         normalizeCapabilities,
         videoTaskActionAvailability,
         modeOptions,

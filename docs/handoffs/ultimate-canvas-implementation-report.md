@@ -163,3 +163,16 @@ Tracker completion remains identity-based. If the old promise later settles, its
 - 图片和视频卡片现在选中前后都保持 `350×240px`；下方参数编辑器仍正常展开并以卡片中心对齐。生成结果预览限制为 92px，操作行固定为 24px 并可横向滚动，按钮没有被裁切或移出卡片。
 - 桌面浏览器实测选中视频卡为 `350×240px`，操作行 `clientHeight === scrollHeight === 24` 且底部位于卡片底部之上；390px 下文档无横向溢出，卡片和属性面板中心点一致，控制台 warning/error 为 0。
 - TDD、11 个画布烟测、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 与 `git diff --check` 均通过。没有调用线上生成、没有消耗点数、没有触碰受保护设置或后端核心逻辑。
+
+## 比例节点与图片规格同步修复（2026-07-13）
+
+本节覆盖上方旧的固定图片卡尺寸结论。视频节点继续使用最大 `350px` 长边；图片节点改为独立的最大 `640px` 长边，以便横向图片框与原有 `640px` 提示词面板对齐。两类节点都继续按当前生成比例计算另一条边，窄屏时统一限制为 `viewportWidth - 24px`，提示词面板本身仍保持原有 `640px` 桌面宽度和自然高度。
+
+- `public/tools/ultimate-canvas/generation-node-interactions.js`：新增可测试的图片/视频长边策略，图片为 640、视频为 350，并保留移动端 12px 双侧边距。
+- `public/tools/ultimate-canvas/app.js`：按节点类型应用长边策略；打开中的规格弹层会在节点状态刷新后从当前数据重新渲染，因此比例、尺寸、数量、摘要按钮和节点尺寸使用同一份状态。
+- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`：覆盖图片/视频桌面与移动端长边，并实际执行规格弹层刷新函数，验证比例、尺寸、数量和重新定位。
+- `scripts/ultimate-canvas-result-layout-smoke.ts`：覆盖 21:9 图片节点 `640 x 274.286`，验证其横向宽度与提示词面板一致。
+
+TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦烟测转为 GREEN。应用内浏览器实测图片规格从 1:1 切回 21:9 后，下拉和摘要均显示 `21:9`，节点变量为 `640 x 274.286`，提示词面板为 `640px`，中心点一致；视频 9:16 仍为 `196.875 x 350`。测试结束后已恢复图片节点原有 21:9 设置和 100% 画布缩放。
+
+本轮没有调用真实文字、图片或视频生成，没有创建付费重试，消耗点数为 0。没有读取或修改 `.env`、后台 API 设置、provider 密钥、点数核心规则、数据库 schema、后端生成路由或普通账号权限逻辑。

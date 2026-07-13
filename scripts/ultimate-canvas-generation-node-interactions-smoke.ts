@@ -32,6 +32,10 @@ assert.deepEqual(interactions.generationNodeDimensions('9:16', 296), {
 });
 assert.equal(interactions.generationNodeDimensions('bad').ratio, '16:9');
 assert.equal(interactions.generationNodeDimensions('16:9', 0).width, 350);
+assert.equal(interactions.generationNodeLongEdge('image', 1200), 640, 'desktop image nodes align their long edge with the prompt panel');
+assert.equal(interactions.generationNodeLongEdge('video', 1200), 350, 'video nodes retain the compact long edge');
+assert.equal(interactions.generationNodeLongEdge('image', 390), 366, 'image nodes respect the mobile viewport gutter');
+assert.equal(interactions.generationNodeLongEdge('video', 320), 296, 'video nodes respect the mobile viewport gutter');
 assert.deepEqual(interactions.videoTaskActionAvailability({
   taskId: 'task-1', status: 'succeeded', previewUrl: '/play', downloadUrl: '/download', canRetry: true, canManage: true,
 }), {
@@ -102,9 +106,51 @@ for (const [taskId, previewUrl, downloadUrl] of [
   assert.ok(body.lastChild.innerHTML.includes(previewUrl), `${taskId} popover retains override-only preview URL`);
   assert.ok(body.lastChild.innerHTML.includes(downloadUrl), `${taskId} popover retains override-only download URL`);
 }
-contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge())', 'render derives card dimensions from current settings');
+
+const specPopoverSource = appSource.slice(
+  appSource.indexOf('function generationSelect'),
+  appSource.indexOf('function renderCameraPopover'),
+);
+const specPopoverElement = { isConnected: true, innerHTML: 'stale controls' };
+let specPopoverPositionCalls = 0;
+const specPopoverRuntime = {
+  generationPopover: { nodeId: 'image-spec-node', kind: 'spec', element: specPopoverElement },
+  bootstrap: { capabilities: { image: {} } },
+};
+const specPopoverFactory = new Function(
+  'canvasRuntime', 'window', 'escapeHtml', 'generationSettingsForNode', 'positionGenerationPopover',
+  `${specPopoverSource}\nreturn { refreshOpenGenerationSpecPopover };`,
+);
+const specPopoverApi = specPopoverFactory(
+  specPopoverRuntime,
+  {
+    UltimateCanvasGenerationInteractions: {
+      normalizeCapabilities: () => ({ ratios: ['16:9', '21:9'], sizeOptions: ['1K', '2K'], fixedSize: '' }),
+    },
+  },
+  (value: unknown) => String(value ?? ''),
+  (node: any) => ({ ...node.data.imageSettings, maximumCount: 4 }),
+  () => { specPopoverPositionCalls += 1; },
+);
+const imageSpecNode = {
+  id: 'image-spec-node', type: 'image', data: { imageSettings: { ratio: '21:9', size: '2K', count: 3 } },
+};
+assert.equal(specPopoverApi.refreshOpenGenerationSpecPopover(imageSpecNode), true);
+assert.ok(specPopoverElement.innerHTML.includes('value="21:9" selected'), 'open ratio control follows current image settings');
+assert.ok(specPopoverElement.innerHTML.includes('value="2K" selected'), 'open size control follows current image settings');
+assert.ok(specPopoverElement.innerHTML.includes('value="3"'), 'open count control follows current image settings');
+assert.equal(specPopoverPositionCalls, 1, 'refreshed specification controls are repositioned');
+
+contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge(nodeEl))', 'render derives card dimensions from the node type and current settings');
 contains(appSource, "setProperty('--generation-node-width'", 'render writes node width');
 contains(appSource, "setProperty('--generation-node-height'", 'render writes node height');
+contains(appSource, 'function refreshOpenGenerationSpecPopover', 'open specification controls have one state refresh path');
+contains(appSource, 'state.element.innerHTML = renderSpecPopover(node)', 'open specification controls rerender from current node settings');
+const renderGenerationControlsSource = appSource.slice(
+  appSource.indexOf('function renderGenerationNodeControls'),
+  appSource.indexOf('function renderAllGenerationNodeControls'),
+);
+contains(renderGenerationControlsSource, 'refreshOpenGenerationSpecPopover(node)', 'node control refresh updates an open specification popover');
 
 contains(engineSource, 'connectNodes(fromId, toId)', 'engine exposes public connection creation');
 contains(engineSource, 'disconnectNodes(fromId, toId)', 'engine exposes public connection removal');
