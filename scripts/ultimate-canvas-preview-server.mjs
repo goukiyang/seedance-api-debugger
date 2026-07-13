@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(repoRoot, 'public');
 const port = Number(process.argv[2] || 4399);
+const mockGenerationEnabled = process.argv.includes('--mock-generation');
+const realBackendRequiredMessage = '本地预览未连接 SD2，真实生成请使用已部署的同源应用。';
 
 const mockUser = {
   id: 'preview-user',
@@ -227,8 +229,12 @@ function activeProjects() {
   return projects.filter((project) => project.status === 'active');
 }
 
+function visibleVideoTasks() {
+  return mockGenerationEnabled ? videoTasks : [];
+}
+
 function cardTasks(cardId) {
-  return videoTasks.filter((task) => task.video_card_id === cardId);
+  return visibleVideoTasks().filter((task) => task.video_card_id === cardId);
 }
 
 function cardBranches(cardId) {
@@ -250,7 +256,7 @@ function taskSummary(cardId) {
 }
 
 function normalizeBranch(branch) {
-  const tasks = videoTasks.filter((task) => task.video_branch_id === branch.id);
+  const tasks = visibleVideoTasks().filter((task) => task.video_branch_id === branch.id);
   return {
     ...branch,
     summary: {
@@ -342,6 +348,13 @@ function sendJson(response, value, status = 200) {
   response.end(JSON.stringify(value));
 }
 
+function sendRealBackendRequired(response) {
+  return sendJson(response, {
+    error: 'REAL_BACKEND_REQUIRED',
+    message: realBackendRequiredMessage,
+  }, 503);
+}
+
 function contentType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return {
@@ -359,6 +372,12 @@ function contentType(filePath) {
 }
 
 function bootstrapPayload(url) {
+  const backend = mockGenerationEnabled
+    ? { mode: 'mock', transport: 'same-origin', mock: true }
+    : { mode: 'preview', transport: 'same-origin', mock: false };
+  const generationMessage = mockGenerationEnabled
+    ? '测试 Mock 可用'
+    : realBackendRequiredMessage;
   const projectId = url.searchParams.get('project_id') || 'project-personal';
   const availableProjects = activeProjects();
   const selectedProject = availableProjects.find((project) => project.id === projectId) || availableProjects[0] || null;
@@ -368,7 +387,7 @@ function bootstrapPayload(url) {
   const requestedCardId = url.searchParams.get('video_card_id');
   const selectedCard = cards.find((card) => card.id === requestedCardId) || cards.find((card) => card.can_generate) || null;
   return {
-    backend: { mode: 'mock', transport: 'same-origin', mock: true },
+    backend,
     tool: { id: 'ultimate-canvas', name: '无线画布', mode: 'preview', billing: 'unified_sd2' },
     user: mockUser,
     context: {
@@ -384,13 +403,13 @@ function bootstrapPayload(url) {
       generation_blocked_reason: null,
     },
     capabilities: {
-      text: { enabled: true, model: 'gpt-5.4', endpoint: '/api/tools/ultimate-canvas/generate', message: '可用' },
+      text: { enabled: mockGenerationEnabled, model: 'gpt-5.4', endpoint: '/api/tools/ultimate-canvas/generate', message: generationMessage },
       image: {
-        enabled: true,
+        enabled: mockGenerationEnabled,
         model: 'Seedream 5.0 Pro',
         size: '1K',
         endpoint: '/api/assets/generate',
-        message: '可用',
+        message: generationMessage,
         capabilities: {
           reference_image_limit: 10,
           max_outputs_per_request: 1,
@@ -406,7 +425,7 @@ function bootstrapPayload(url) {
         },
       },
       video: {
-        enabled: true,
+        enabled: mockGenerationEnabled,
         model: 'Seedance 2.0',
         interaction: {
           modes: [
@@ -428,7 +447,7 @@ function bootstrapPayload(url) {
         },
         endpoint: '/api/tasks/create',
         status_endpoint_template: '/api/video/status/:taskId?refresh=true',
-        message: '可用',
+        message: generationMessage,
       },
     },
   };
@@ -438,6 +457,15 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || '/', `http://127.0.0.1:${port}`);
   if (url.pathname === '/api/auth/me') return sendJson(response, { user: mockUser });
   if (url.pathname === '/api/tools/ultimate-canvas/bootstrap') return sendJson(response, bootstrapPayload(url));
+  if (!mockGenerationEnabled && (
+    (url.pathname === '/api/tools/ultimate-canvas/generate' && request.method === 'POST')
+    || (url.pathname === '/api/assets/generate' && request.method === 'POST')
+    || (url.pathname === '/api/tasks/estimate' && request.method === 'GET')
+    || (url.pathname === '/api/tasks/create' && request.method === 'POST')
+    || (/^\/api\/video\/retry\/[^/]+$/.test(url.pathname) && request.method === 'POST')
+    || /^\/api\/video\/status\/[^/]+$/.test(url.pathname)
+    || /^\/api\/video\/thumbnail\/[^/]+$/.test(url.pathname)
+  )) return sendRealBackendRequired(response);
   if (url.pathname === '/api/tools/ultimate-canvas/document') {
     if (request.method === 'POST') {
       const body = await readJsonBody(request);

@@ -5,7 +5,11 @@ const interactions = require('../public/tools/ultimate-canvas/generation-node-in
 
 const port = 45000 + Math.floor(Math.random() * 1000);
 const baseUrl = `http://127.0.0.1:${port}`;
-const child = spawn(process.execPath, ['scripts/ultimate-canvas-preview-server.mjs', String(port)], {
+const child = spawn(process.execPath, [
+  'scripts/ultimate-canvas-preview-server.mjs',
+  String(port),
+  '--mock-generation',
+], {
   cwd: process.cwd(),
   env: process.env,
   stdio: ['ignore', 'pipe', 'pipe'],

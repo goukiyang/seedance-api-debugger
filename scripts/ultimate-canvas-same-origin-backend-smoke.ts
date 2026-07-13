@@ -239,7 +239,11 @@ assert.ok(!appSource.includes('默认视频 API 未配置，暂不能创建视�
 assert.ok(!generationApiSource.includes('请先完成后台能力配置和归属选择'));
 assert.match(generationApiSource, /resolveApiEndpoint\(value, '', window\.location\.origin, capabilityPolicy\(key\)\)/);
 assert.match(bootstrapRouteSource, /backend:\s*\{\s*mode: 'sd2',\s*transport: 'same-origin',\s*mock: false\s*\}/);
-assert.match(previewServerSource, /backend:\s*\{\s*mode: 'mock',\s*transport: 'same-origin',\s*mock: true\s*\}/);
+assert.match(previewServerSource, /process\.argv\.includes\('--mock-generation'\)/);
+assert.match(previewServerSource, /mode: 'preview',\s*transport: 'same-origin',\s*mock: false/);
+assert.match(previewServerSource, /mode: 'mock',\s*transport: 'same-origin',\s*mock: true/);
+assert.match(previewServerSource, /REAL_BACKEND_REQUIRED/);
+assert.doesNotMatch(previewServerSource, /process\.env\.[A-Z0-9_]*MOCK/);
 assert.ok(!generateRouteSource.includes('Musk API 未启用或缺少 API Key，请先到后台 API 设置完成配置'));
 assert.match(gitignoreSource, /^\.superpowers\/sdd\/$/m);
 assert.doesNotMatch(gitignoreSource, /^\.superpowers\/$/m);
