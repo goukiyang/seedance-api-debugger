@@ -186,3 +186,50 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 - 两个现有 smoke 增加视频 21:9 `640 x 274.286`、窄屏尺寸和任务菜单声明断言。TDD RED 分别捕获旧的 350 上限和缺失的菜单样式，修复后转为 GREEN。
 
 应用内浏览器实测：21:9 视频节点为 `640 x 274.286`，与 `640px` 提示词面板中心对齐；390px 视口下为 `366 x 156.857`，`clientWidth === scrollWidth === 390`；“更多”中的任务详情、预览、下载、重试和版本按钮均为暗色无下划线菜单项。未调用真实生成，点数消耗仍为 0，受保护的后台设置、密钥、点数核心规则和数据库 schema 均未触碰。
+
+## SD2 同源真实后端接入（2026-07-13）
+
+### 本次目标理解
+
+本轮仅对已完成并获批准的 Tasks 1-3 进行完整自动化验证和交付记录，不修改生产代码或测试代码。目标分支为 `teammate/ultimate-canvas-complete`，目标同源环境为 `https://sd2.youdoodesign.com`；本地预览验证保持 Mock-only 且零点数消耗。
+
+### 实际修改文件及逐文件说明
+
+- `docs/handoffs/ultimate-canvas-implementation-report.md`：追加本次验证记录、阻塞证据、安全边界和待部署验收说明。
+- `.superpowers/sdd/task-4-report.md`：写入本 Task 的详细执行报告；该任务报告不属于本次提交内容。
+- 未修改任何生产文件、测试文件、环境配置、依赖或锁文件。
+
+### 验证命令与结果
+
+以下命令均单独执行并以退出码 `0` 完成：12 个按名称排序的 `scripts/ultimate-canvas-*-smoke.ts` smoke 脚本，以及以下四个语法检查：
+
+- `node --check public/tools/ultimate-canvas/backend-contract.js`
+- `node --check public/tools/ultimate-canvas/generation-api.js`
+- `node --check public/tools/ultimate-canvas/app.js`
+- `node --check public/tools/ultimate-canvas/canvas-engine.js`
+
+`npx tsc --noEmit --pretty false` 在 21.9 秒后以退出码 `1` 失败，因此本 Task 按约束停止。失败为 `scripts/ultimate-canvas-same-origin-backend-smoke.ts` 第 45、54、56、61、62 行的 `TS1501`：正则表达式 `s` flag 仅在目标为 ES2018 或更高版本时可用。
+
+由于该失败，未执行 `npm run lint`、`npm run build` 和 `git diff --check`；本轮不能声明完整验证通过。
+
+### 真实文字、图片、视频调用情况
+
+自动化验证仅使用本地 Mock，没有创建付费生成。除非存在直接证据，否则本轮没有触发真实文字、图片或视频生成；本轮没有此类证据。
+
+### 点数消耗情况
+
+本轮实现和验证期间消耗点数为 `0`。
+
+### 受保护区域确认
+
+`.env`、admin API settings、provider secret configuration、credits core logic 和 database schema 均未读取或修改。未运行付费生成，也未修改生产或测试代码。
+
+### 未完成内容
+
+- 完整验证被 TypeScript 错误阻塞；需要由相应任务处理 ES target 与 smoke 脚本的兼容性后重新运行本 Task 的完整命令清单。
+- SD2 普通账户的线上验收仍待该分支部署到 SD2 同源环境后进行。
+- 本 Task 不声明目标分支 push 或 live deployment 成功；控制方将在本 Task 后尝试 push 并生成 patch fallback。
+
+### 风险与下一步
+
+当前风险是 TypeScript 配置目标与同源后端 smoke 中使用的正则表达式 `s` flag 不兼容。修复该阻塞后，应从 `npx tsc --noEmit --pretty false` 起重新执行剩余验证，并在获得全部新鲜证据前避免发布或声明部署成功。
