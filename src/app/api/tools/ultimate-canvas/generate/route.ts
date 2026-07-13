@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
       detail: { status: 'failed', reason: 'musk_api_not_configured', kind, mode, project_id: projectId, video_card_id: videoCardId, canvas_document_id: canvasDocumentId },
     });
     return NextResponse.json(
-      { error: 'Musk API 未启用或缺少 API Key，请先到后台 API 设置完成配置' },
+      { error: '文本生成能力暂不可用，请稍后联系管理员。' },
       { status: 503 },
     );
   }

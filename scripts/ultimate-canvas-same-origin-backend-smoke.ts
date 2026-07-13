@@ -37,6 +37,9 @@ assert.equal(contract.requestErrorMessage(403, { error: '无权访问当前项�
 const indexSource = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
 const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
 const generationApiSource = readFileSync('public/tools/ultimate-canvas/generation-api.js', 'utf8');
+const bootstrapRouteSource = readFileSync('src/app/api/tools/ultimate-canvas/bootstrap/route.ts', 'utf8');
+const generateRouteSource = readFileSync('src/app/api/tools/ultimate-canvas/generate/route.ts', 'utf8');
+const previewServerSource = readFileSync('scripts/ultimate-canvas-preview-server.mjs', 'utf8');
 assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('generation-api.js'));
 assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('app.js'));
 assert.match(appSource, /function backendEndpoint\(candidate, fallback\)\s*\{\s*return window\.UltimateCanvasBackendContract\.resolveApiEndpoint\(candidate, fallback, window\.location\.origin\);/s);
@@ -55,5 +58,8 @@ assert.match(appSource, /backendEndpoint\(canvasRuntime\.bootstrap\?\.capabiliti
 assert.match(appSource, /const backend = window\.UltimateCanvasBackendContract\.backendStatus\(data\);/);
 assert.match(appSource, /\? backend\.label\s*:/);
 assert.match(generationApiSource, /resolveApiEndpoint\(value, '', window\.location\.origin\)/);
+assert.match(bootstrapRouteSource, /backend:\s*\{\s*mode: 'sd2',\s*transport: 'same-origin',\s*mock: false\s*\}/s);
+assert.match(previewServerSource, /backend:\s*\{\s*mode: 'mock',\s*transport: 'same-origin',\s*mock: true\s*\}/s);
+assert.ok(!generateRouteSource.includes('Musk API 未启用或缺少 API Key，请先到后台 API 设置完成配置'));
 
 console.log('ultimate-canvas-same-origin-backend-smoke passed');

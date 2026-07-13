@@ -56,6 +56,7 @@ async function main() {
   const cardId = bootstrap.context.selected_video_card_id as string;
   assert.ok(projectId);
   assert.ok(cardId);
+  assert.deepEqual(bootstrap.backend, { mode: 'mock', transport: 'same-origin', mock: true });
   assert.deepEqual(bootstrap.capabilities.image.capabilities.size_options, ['1K', '2K']);
   assert.deepEqual(bootstrap.capabilities.video.interaction.ratios, ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
   assert.deepEqual(bootstrap.capabilities.video.interaction.durations, [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);

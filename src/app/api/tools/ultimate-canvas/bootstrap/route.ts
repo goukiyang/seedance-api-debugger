@@ -292,6 +292,7 @@ export async function GET(request: NextRequest) {
   const videoReady = isApiKeyConfigured();
 
   return NextResponse.json({
+    backend: { mode: 'sd2', transport: 'same-origin', mock: false },
     tool: {
       id: 'ultimate-canvas',
       name: '无线画布',

@@ -51,12 +51,15 @@ assertContains(bootstrapRoute, "owner_user_id: user.id", 'bootstrap filters norm
 assertContains(bootstrapRoute, "members: { some: { user_id: user.id, status: 'active', role: { not: 'viewer' } } }", 'bootstrap filters normal user generatable member projects');
 assertNotContains(bootstrapRoute, 'api_key', 'bootstrap does not expose API key fields');
 assertNotContains(bootstrapRoute, 'base_url', 'bootstrap does not expose provider base URL fields');
+assertContains(bootstrapRoute, "backend: { mode: 'sd2', transport: 'same-origin', mock: false }", 'bootstrap identifies the SD2 same-origin backend');
 
 const generateRoute = read('src/app/api/tools/ultimate-canvas/generate/route.ts');
 assertContains(generateRoute, "user.role !== 'admin' && !requestedVideoCardId", 'normal LLM generation requires video card context');
 assertContains(generateRoute, 'assertCanGenerateInVideoCard(user, project.id, videoCard.id)', 'LLM generation uses video card permission');
 assertContains(generateRoute, 'assertCanUseCanvasDocument(user, canvasDocumentId, projectId)', 'LLM generation checks canvas document ownership');
 assertContains(generateRoute, "const contextRules = user.role === 'admin' ? rawContextRules : ''", 'normal users cannot apply admin context rules');
+assertContains(generateRoute, '文本生成能力暂不可用，请稍后联系管理员。', 'LLM unavailable copy is safe for ordinary users');
+assertNotContains(generateRoute, 'Musk API 未启用或缺少 API Key，请先到后台 API 设置完成配置', 'LLM unavailable copy does not direct ordinary users to admin settings');
 
 const uploadRoute = read('src/app/api/tools/ultimate-canvas/upload/route.ts');
 assertContains(uploadRoute, 'assertCanGenerateInVideoCard(user, project.id, videoCard.id)', 'upload uses video card permission');

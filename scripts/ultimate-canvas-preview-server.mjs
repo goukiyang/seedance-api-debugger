@@ -368,6 +368,7 @@ function bootstrapPayload(url) {
   const requestedCardId = url.searchParams.get('video_card_id');
   const selectedCard = cards.find((card) => card.id === requestedCardId) || cards.find((card) => card.can_generate) || null;
   return {
+    backend: { mode: 'mock', transport: 'same-origin', mock: true },
     tool: { id: 'ultimate-canvas', name: '无线画布', mode: 'preview', billing: 'unified_sd2' },
     user: mockUser,
     context: {
