@@ -3268,11 +3268,12 @@
         trigger.dataset.generationPopover = 'task-actions';
         trigger.setAttribute('aria-expanded', 'false');
         trigger.textContent = '\u66f4\u591a';
+        trigger._generationTaskActions = actions;
         toolbar.appendChild(trigger);
     }
 
-    function renderVideoTaskActionsPopover(node) {
-        const actions = videoTaskActionsForNode(node);
+    function renderVideoTaskActionsPopover(node, actionModel = null) {
+        const actions = actionModel || videoTaskActionsForNode(node);
         if (!actions) return '';
         const attributes = `data-task-id="${escapeHtml(actions.taskId)}" data-node-id="${escapeHtml(node.id)}" data-card-id="${escapeHtml(actions.cardId)}"`;
         return `<div class="generation-popover-list generation-task-action-menu">
@@ -3324,7 +3325,7 @@
         element.innerHTML = kind === 'mode' ? renderModePopover(node)
             : kind === 'spec' ? renderSpecPopover(node)
                 : kind === 'camera' ? renderCameraPopover(node)
-                    : kind === 'task-actions' ? renderVideoTaskActionsPopover(node)
+                    : kind === 'task-actions' ? renderVideoTaskActionsPopover(node, anchor._generationTaskActions)
                         : '';
         document.body.appendChild(element);
         anchor.setAttribute('aria-expanded', 'true');

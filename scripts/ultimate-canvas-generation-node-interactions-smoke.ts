@@ -40,6 +40,68 @@ assert.deepEqual(interactions.videoTaskActionAvailability({
 assert.equal(interactions.videoTaskActionAvailability({ taskId: '', status: 'succeeded' }), null);
 assert.equal(interactions.videoTaskActionAvailability({ taskId: 'task-2', status: 'running', canRetry: true }).canRetry, false);
 assert.equal(interactions.videoTaskActionAvailability({ taskId: 'task-3', status: 'failed', canRetry: true }).canRetry, true);
+
+const taskActionPopoverSource = appSource.slice(
+  appSource.indexOf('function videoTaskActionsForNode'),
+  appSource.indexOf('function activeTabText'),
+);
+function taskActionPopoverHarness(node: { id: string; type: string; data: Record<string, unknown> }) {
+  const body: { lastChild: any; appendChild: (element: any) => void } = {
+    lastChild: null,
+    appendChild(element) { element.isConnected = true; this.lastChild = element; },
+  };
+  const documentStub = {
+    body,
+    createElement() {
+      return {
+        className: '', dataset: {}, style: {}, isConnected: false,
+        remove() { this.isConnected = false; },
+        setAttribute() {},
+        getBoundingClientRect: () => ({ width: 190, height: 100 }),
+      };
+    },
+  };
+  const canvasRuntime = {
+    generationPopover: null,
+    selectedVideoCardId: 'card-1',
+    videoCardDetails: new Map(),
+    bootstrap: { context: { video_cards: [{ id: 'card-1', can_generate: true, can_manage: true }] } },
+  };
+  const factory = new Function('canvasRuntime', 'window', 'document', 'engine', 'escapeHtml', 'videoCardUiText', `${taskActionPopoverSource}\nreturn { syncVideoTaskActionsTrigger, openGenerationPopover };`);
+  const api = factory(
+    canvasRuntime,
+    { UltimateCanvasGenerationInteractions: interactions, innerWidth: 1200, innerHeight: 800 },
+    documentStub,
+    { nodes: new Map([[node.id, node]]) },
+    (value: unknown) => String(value ?? ''),
+    { retryTask: 'Retry', candidate: 'Candidate', best: 'Best', final: 'Final' },
+  );
+  const toolbar: { trigger: any; querySelector: () => any; appendChild: (trigger: any) => void } = {
+    trigger: null,
+    querySelector: () => null,
+    appendChild(trigger) { this.trigger = trigger; },
+  };
+  const nodeEl = { querySelector: (selector: string) => selector === '.generation-node-toolbar' ? toolbar : null };
+  return { api, body, nodeEl, toolbar };
+}
+
+for (const [taskId, previewUrl, downloadUrl] of [
+  ['refreshed-task', '/api/video/play/refreshed-task', '/api/video/download/refreshed-task'],
+  ['restored-task', '/restored-preview', '/api/video/download/restored-task'],
+]) {
+  const node = { id: `${taskId}-node`, type: 'video', data: { taskId, generationStatus: 'succeeded', videoCardId: 'card-1' } };
+  const { api, body, nodeEl, toolbar } = taskActionPopoverHarness(node);
+  api.syncVideoTaskActionsTrigger(nodeEl, node, { videoUrl: previewUrl, downloadUrl });
+  const trigger = {
+    ...toolbar.trigger,
+    isConnected: true,
+    setAttribute() {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 30 }),
+  };
+  api.openGenerationPopover(node.id, 'task-actions', trigger);
+  assert.ok(body.lastChild.innerHTML.includes(previewUrl), `${taskId} popover retains override-only preview URL`);
+  assert.ok(body.lastChild.innerHTML.includes(downloadUrl), `${taskId} popover retains override-only download URL`);
+}
 contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge())', 'render derives card dimensions from current settings');
 contains(appSource, "setProperty('--generation-node-width'", 'render writes node width');
 contains(appSource, "setProperty('--generation-node-height'", 'render writes node height');
@@ -170,7 +232,7 @@ const taskActionsTriggerSource = appSource.slice(
 contains(engineSource, 'data-generation-command="disconnect-references"', 'video prompt toolbar exposes clear references before dynamic task actions');
 contains(taskActionsTriggerSource, "trigger.textContent = '\\u66f4\\u591a'", 'task trigger renders the more label');
 contains(taskActionsTriggerSource, 'toolbar.appendChild(trigger)', 'video task-actions trigger follows the existing toolbar commands');
-contains(appSource, "kind === 'task-actions' ? renderVideoTaskActionsPopover(node)", 'popover renders the explicit task-actions branch');
+contains(appSource, "kind === 'task-actions' ? renderVideoTaskActionsPopover(node, anchor._generationTaskActions)", 'popover renders the explicit task-actions branch with trigger action state');
 
 assert.ok(bootstrapSource.includes('interaction'));
 assert.ok(bootstrapSource.includes('DURATION_OPTIONS'));
