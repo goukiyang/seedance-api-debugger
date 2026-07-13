@@ -593,22 +593,22 @@ const server = http.createServer(async (request, response) => {
     }
     if (body.seal === true) card.status = 'sealed';
     if (body.candidate_task_id) {
-      const task = videoTasks.find((item) => item.id === body.candidate_task_id && item.video_card_id === card.id);
+      const task = visibleVideoTasks().find((item) => item.id === body.candidate_task_id && item.video_card_id === card.id);
       if (!task) return sendJson(response, { error: 'Task not found in video card' }, 400);
       task.version_role = 'candidate';
     }
     if (body.current_best_task_id) {
-      videoTasks.filter((task) => task.video_card_id === card.id && task.version_role === 'current_best')
+      visibleVideoTasks().filter((task) => task.video_card_id === card.id && task.version_role === 'current_best')
         .forEach((task) => { task.version_role = 'normal'; });
-      const task = videoTasks.find((item) => item.id === body.current_best_task_id && item.video_card_id === card.id);
+      const task = visibleVideoTasks().find((item) => item.id === body.current_best_task_id && item.video_card_id === card.id);
       if (!task) return sendJson(response, { error: 'Task not found in video card' }, 400);
       task.version_role = 'current_best';
       card.current_best_task_id = task.id;
     }
     if (body.final_task_id) {
-      videoTasks.filter((task) => task.video_card_id === card.id && task.version_role === 'final')
+      visibleVideoTasks().filter((task) => task.video_card_id === card.id && task.version_role === 'final')
         .forEach((task) => { task.version_role = 'normal'; });
-      const task = videoTasks.find((item) => item.id === body.final_task_id && item.video_card_id === card.id);
+      const task = visibleVideoTasks().find((item) => item.id === body.final_task_id && item.video_card_id === card.id);
       if (!task) return sendJson(response, { error: 'Task not found in video card' }, 400);
       task.version_role = 'final';
       card.final_task_id = task.id;
@@ -677,7 +677,7 @@ const server = http.createServer(async (request, response) => {
       if (!videoBranches.some((item) => item.id === targetBranchId && item.video_card_id === cardId)) {
         return sendJson(response, { error: 'Target branch not found' }, 400);
       }
-      videoTasks.filter((task) => task.video_branch_id === branchId)
+      visibleVideoTasks().filter((task) => task.video_branch_id === branchId)
         .forEach((task) => { task.video_branch_id = targetBranchId; });
       branch.status = 'merged';
       branch.is_primary = false;
@@ -692,7 +692,7 @@ const server = http.createServer(async (request, response) => {
         duration: source?.duration,
         target_resolution: source?.target_resolution,
       });
-      videoTasks.filter((task) => task.video_branch_id === branchId)
+      visibleVideoTasks().filter((task) => task.video_branch_id === branchId)
         .forEach((task) => {
           task.video_card_id = promoted.id;
           task.video_branch_id = null;
@@ -720,14 +720,15 @@ const server = http.createServer(async (request, response) => {
     const targetCard = videoCards.find((card) => card.id === body.target_video_card_id);
     if (!targetCard) return sendJson(response, { error: 'Target card not found' }, 404);
     const taskIds = Array.isArray(body.task_ids) ? body.task_ids : [];
-    videoTasks.filter((task) => task.video_card_id === sourceCardId && taskIds.includes(task.id))
+    const tasksToMove = visibleVideoTasks().filter((task) => task.video_card_id === sourceCardId && taskIds.includes(task.id));
+    tasksToMove
       .forEach((task) => {
         task.video_card_id = targetCard.id;
         task.project_id = targetCard.project_id;
         task.video_branch_id = body.target_branch_id || null;
         task.version_role = 'normal';
       });
-    return sendJson(response, { moved_task_ids: taskIds, target_video_card_id: targetCard.id });
+    return sendJson(response, { moved_task_ids: tasksToMove.map((task) => task.id), target_video_card_id: targetCard.id });
   }
 
   const splitMatch = url.pathname.match(/^\/api\/video-cards\/([^/]+)\/split$/);
@@ -744,7 +745,7 @@ const server = http.createServer(async (request, response) => {
       target_resolution: source.target_resolution,
     });
     const taskIds = Array.isArray(body.task_ids) ? body.task_ids : [];
-    videoTasks.filter((task) => task.video_card_id === sourceCardId && taskIds.includes(task.id))
+    visibleVideoTasks().filter((task) => task.video_card_id === sourceCardId && taskIds.includes(task.id))
       .forEach((task) => {
         task.video_card_id = newCard.id;
         task.video_branch_id = null;
@@ -760,7 +761,7 @@ const server = http.createServer(async (request, response) => {
     const body = await readJsonBody(request);
     const target = videoCards.find((card) => card.id === body.target_video_card_id);
     if (!source || !target) return sendJson(response, { error: 'Merge card not found' }, 404);
-    videoTasks.filter((task) => task.video_card_id === sourceCardId)
+    visibleVideoTasks().filter((task) => task.video_card_id === sourceCardId)
       .forEach((task) => {
         task.video_card_id = target.id;
         task.project_id = target.project_id;
