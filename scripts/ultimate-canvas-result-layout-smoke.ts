@@ -34,6 +34,15 @@ function assertDeclarations(rule: any, expected: Record<string, string>) {
   });
 }
 
+function mediaRuleWith(params: string): any {
+  let match: any = null;
+  css.walkAtRules('media', (atRule: any) => {
+    if (atRule.params.trim() === params) match = atRule;
+  });
+  assert.ok(match, `missing CSS media rule for ${params}`);
+  return match;
+}
+
 const portraitCardWidth = interactions.generationNodeDimensions('9:16').width;
 const desktopPanelWidth = 640;
 const portraitOverflow = (desktopPanelWidth - portraitCardWidth) / 2;
@@ -139,12 +148,26 @@ assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
 const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
 const videoTemplateStart = engineSource.indexOf("if (type === 'video') return `");
 const imageTemplateStart = engineSource.indexOf("if (type === 'image') return `", videoTemplateStart);
+assert.ok(videoTemplateStart >= 0, 'video template must exist');
+assert.ok(imageTemplateStart >= 0, 'image template must delimit the video template');
+assert.ok(videoTemplateStart < imageTemplateStart, 'video template must precede the image template');
 const videoTemplate = engineSource.slice(videoTemplateStart, imageTemplateStart);
 const toolbarStart = videoTemplate.indexOf('class="generation-node-toolbar"');
 const footerStart = videoTemplate.indexOf('class="video-props-footer"');
-const modelStart = videoTemplate.indexOf('class="video-model-info"', footerStart);
+const modelStart = videoTemplate.indexOf('class="video-model-info"');
 const summaryStart = videoTemplate.indexOf('class="generation-summary-row"');
-const footerRightStart = videoTemplate.indexOf('class="video-footer-right"', footerStart);
+const footerRightStart = videoTemplate.indexOf('class="video-footer-right"');
+
+assert.ok(toolbarStart >= 0, 'video toolbar must exist in the video template');
+assert.ok(footerStart >= 0, 'video footer must exist in the video template');
+assert.ok(modelStart >= 0, 'video model label must exist in the video template');
+assert.ok(summaryStart >= 0, 'video summary row must exist in the video template');
+assert.ok(footerRightStart >= 0, 'video footer actions must exist in the video template');
+assert.equal(
+  videoTemplate.match(/class="generation-summary-row"/g)?.length ?? 0,
+  1,
+  'video template must contain exactly one generation summary row',
+);
 
 assert.ok(toolbarStart < footerStart, 'video toolbar remains above the footer');
 assert.ok(footerStart < modelStart, 'video model remains inside the footer');
@@ -162,6 +185,24 @@ assertDeclarations(ruleWith(['.video-props-footer .generation-summary-row']), {
 });
 assertDeclarations(ruleWith(['.video-props-footer .video-footer-right']), {
   'justify-self': 'end',
+});
+
+const mobileLayout = mediaRuleWith('(max-width: 720px)');
+assertDeclarations(ruleWith(['.video-props-footer'], mobileLayout), {
+  'grid-template-columns': 'minmax(0, 1fr) auto',
+});
+assertDeclarations(ruleWith(['.video-props-footer .generation-summary-row'], mobileLayout), {
+  'grid-column': '1 / -1',
+  'grid-row': '1',
+  'max-width': '100%',
+});
+assertDeclarations(ruleWith(['.video-props-footer .video-model-info'], mobileLayout), {
+  'grid-column': '1',
+  'grid-row': '2',
+});
+assertDeclarations(ruleWith(['.video-props-footer .video-footer-right'], mobileLayout), {
+  'grid-column': '2',
+  'grid-row': '2',
 });
 
 for (const selectorsToCheck of [
