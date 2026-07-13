@@ -189,47 +189,44 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 
 ## SD2 同源真实后端接入（2026-07-13）
 
-### 本次目标理解
+### 1. 本次目标理解
 
-本轮仅对已完成并获批准的 Tasks 1-3 进行完整自动化验证和交付记录，不修改生产代码或测试代码。目标分支为 `teammate/ultimate-canvas-complete`，目标同源环境为 `https://sd2.youdoodesign.com`；本地预览验证保持 Mock-only 且零点数消耗。
+本轮完成已批准 Tasks 1-3 的最终验证与交付记录。目标分支为 `teammate/ultimate-canvas-complete`，目标同源环境为 `https://sd2.youdoodesign.com`；本地预览保持 Mock-only 和零点数消耗。
 
-### 实际修改文件及逐文件说明
+### 2. 验证范围与环境
 
-- `docs/handoffs/ultimate-canvas-implementation-report.md`：追加本次验证记录、阻塞证据、安全边界和待部署验收说明。
-- `.superpowers/sdd/task-4-report.md`：写入本 Task 的详细执行报告；该任务报告不属于本次提交内容。
-- 未修改任何生产文件、测试文件、环境配置、依赖或锁文件。
+所有 smoke、Node 语法检查和 TypeScript 检查均在本 feature worktree 的同一功能 HEAD `99796380221346f0f4deb74aae388413cf2dd08a` 上完成。嵌套 worktree 的 `npm run lint` 会同时加载本 worktree 与父 checkout 的 ESLint 配置并发生 `@next/next` 插件冲突；该问题已确认为环境性问题。针对相同 HEAD 的 lint 与 build 在干净 detached worktree `E:\sd2-same-origin-verification` 中完成，且主 checkout lint 亦通过。
 
-### 验证命令与结果
+### 3. 实际修改文件
 
-以下命令均单独执行并以退出码 `0` 完成：12 个按名称排序的 `scripts/ultimate-canvas-*-smoke.ts` smoke 脚本，以及以下四个语法检查：
+- `docs/handoffs/ultimate-canvas-implementation-report.md`：本次仅更新最终验证、环境差异、安全边界和部署限制记录。
+- `.superpowers/sdd/task-4-report.md`：追加恢复验证证据；该忽略文件不纳入本次提交。
+- 未修改生产代码、测试代码、依赖、锁文件或环境配置。
 
-- `node --check public/tools/ultimate-canvas/backend-contract.js`
-- `node --check public/tools/ultimate-canvas/generation-api.js`
-- `node --check public/tools/ultimate-canvas/app.js`
-- `node --check public/tools/ultimate-canvas/canvas-engine.js`
+### 4. 逐文件说明
 
-`npx tsc --noEmit --pretty false` 在 21.9 秒后以退出码 `1` 失败，因此本 Task 按约束停止。失败为 `scripts/ultimate-canvas-same-origin-backend-smoke.ts` 第 45、54、56、61、62 行的 `TS1501`：正则表达式 `s` flag 仅在目标为 ES2018 或更高版本时可用。
+本 handoff 文件以最终成功验证替换了先前的 TypeScript 阻塞状态。Task 4 报告保留先前阻塞记录，并追加其根因、干净 worktree 的验证来源及最终状态，确保审计历史连续。
 
-由于该失败，未执行 `npm run lint`、`npm run build` 和 `git diff --check`；本轮不能声明完整验证通过。
+### 5. Smoke 验证结果
 
-### 真实文字、图片、视频调用情况
+12 个按名称排序的 `scripts/ultimate-canvas-*-smoke.ts` 脚本均退出 `0`：complete、context-rules、generation-lifecycle、generation-node-interactions、generation-node-workflow、generation-task-coordinator、normal-user-access、preview-api、result-layout、same-origin-backend、save-coordinator 和 video-card-workflow。
 
-自动化验证仅使用本地 Mock，没有创建付费生成。除非存在直接证据，否则本轮没有触发真实文字、图片或视频生成；本轮没有此类证据。
+### 6. Node 与 TypeScript 验证结果
 
-### 点数消耗情况
+以下四个命令均退出 `0` 且无输出：`node --check public/tools/ultimate-canvas/backend-contract.js`、`generation-api.js`、`app.js`、`canvas-engine.js`。修复后的 `npx tsc --noEmit --pretty false` 亦退出 `0`。
 
-本轮实现和验证期间消耗点数为 `0`。
+### 7. Lint、构建与空白检查结果
 
-### 受保护区域确认
+在干净 detached worktree `E:\sd2-same-origin-verification` 的相同 HEAD `9979638` 上，`npm run lint` 通过，仅保留既有 warnings；`npm run build` 通过，仅保留既有 warnings。嵌套 feature worktree 的 lint 不作为功能失败：它因父目录 ESLint 配置重复加载而报 `@next/next` 插件冲突。feature worktree 中本轮重新执行的 `git diff --check` 退出 `0`。
 
-`.env`、admin API settings、provider secret configuration、credits core logic 和 database schema 均未读取或修改。未运行付费生成，也未修改生产或测试代码。
+### 8. 真实文字、图片、视频调用情况
 
-### 未完成内容
+自动化验证仅使用本地 Mock，未创建付费生成。没有直接证据表明本轮触发了真实文字、图片或视频模型调用；本轮没有此类调用。
 
-- 完整验证被 TypeScript 错误阻塞；需要由相应任务处理 ES target 与 smoke 脚本的兼容性后重新运行本 Task 的完整命令清单。
-- SD2 普通账户的线上验收仍待该分支部署到 SD2 同源环境后进行。
-- 本 Task 不声明目标分支 push 或 live deployment 成功；控制方将在本 Task 后尝试 push 并生成 patch fallback。
+### 9. 点数与受保护区域确认
 
-### 风险与下一步
+本轮消耗点数为 `0`。未读取或修改 `.env`、admin API settings、provider secret configuration、credits core logic 或 database schema；未运行付费生成。
 
-当前风险是 TypeScript 配置目标与同源后端 smoke 中使用的正则表达式 `s` flag 不兼容。修复该阻塞后，应从 `npx tsc --noEmit --pretty false` 起重新执行剩余验证，并在获得全部新鲜证据前避免发布或声明部署成功。
+### 10. 未完成内容、风险与下一步
+
+Live SD2 普通账户验收仍待该分支部署至 SD2 同源环境后进行。本 Task 不声明 target-branch push 或 live deployment 成功；控制方将在本 Task 后尝试 push 并生成 patch fallback。剩余风险限于部署后需以普通账户观察真实同源响应和账务行为，而非本地 Mock 验证范围。
