@@ -34,28 +34,20 @@ function assertDeclarations(rule: any, expected: Record<string, string>) {
   });
 }
 
-function panelGeometry(cardWidth: number, panelWidth = 350) {
-  const inset = (cardWidth - panelWidth) / 2;
-  return {
-    leftOverflow: Math.max(0, -inset),
-    rightOverflow: Math.max(0, -inset),
-    cardCenter: cardWidth / 2,
-    panelCenter: inset + panelWidth / 2,
-  };
-}
+const portraitCardWidth = 350 * 9 / 16;
+const desktopPanelWidth = 640;
+const portraitOverflow = (desktopPanelWidth - portraitCardWidth) / 2;
+assert.equal(portraitCardWidth, 196.875);
+assert.equal(portraitOverflow, 221.5625);
+assert.equal(-portraitOverflow + desktopPanelWidth / 2, portraitCardWidth / 2);
 
-assert.deepEqual(panelGeometry(interactions.generationNodeDimensions('9:16').width), {
-  leftOverflow: 76.5625,
-  rightOverflow: 76.5625,
-  cardCenter: 98.4375,
-  panelCenter: 98.4375,
-}, '9:16 panels overflow symmetrically while preserving the media-card center');
-assert.deepEqual(panelGeometry(interactions.generationNodeDimensions('16:9').width), {
-  leftOverflow: 0,
-  rightOverflow: 0,
-  cardCenter: 175,
-  panelCenter: 175,
-}, '16:9 panels remain centered without horizontal overflow');
+const landscapeCardWidth = 350;
+const landscapeOverflow = (desktopPanelWidth - landscapeCardWidth) / 2;
+assert.equal(landscapeOverflow, 145);
+assert.equal(-landscapeOverflow + desktopPanelWidth / 2, landscapeCardWidth / 2);
+
+const mobilePanelWidth = Math.min(640, 390 - 24);
+assert.equal(mobilePanelWidth, 366);
 
 const generationNodes = ruleWith(['.canvas-node.node-type-video', '.canvas-node.node-type-image']);
 assertDeclarations(generationNodes, { width: 'var(--generation-node-width, 350px)' });
@@ -125,11 +117,24 @@ assertDeclarations(ruleWith(['.generated-frame-preview']), {
 });
 
 assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
-  width: '350px',
+  width: '640px',
+  'max-width': 'min(640px, calc(100vw - 24px))',
   'margin-left': '0',
   left: '50%',
   transform: 'translateX(-50%)',
 });
+
+for (const selectorsToCheck of [
+  ['.image-props-footer'],
+  ['.generation-summary-row'],
+  ['.generation-node-toolbar'],
+]) {
+  assert.equal(
+    declarations(ruleWith(selectorsToCheck)).has('flex-wrap'),
+    false,
+    `${selectorsToCheck.join(', ')} must retain the desktop single-row layout`,
+  );
+}
 
 assertDeclarations(ruleWith(['.node-connector']), {
     width: '20px',
