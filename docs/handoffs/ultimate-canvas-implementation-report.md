@@ -293,3 +293,96 @@ Verification commands and results:
 - `git diff --check`: PASS after this receipt was written (only the expected line-ending warning was emitted).
 
 No real text, image, or video generation occurred. No paid retry, credit mutation, point consumption, or provider call occurred; points consumed: 0. `.env`, admin settings, provider configuration/secrets, credits logic, and database schema were not read or changed. Self-review: the only intended production modification is this appended receipt update; browser acceptance is complete. No remaining Task 2 concern.
+
+## 本地预览默认禁用假生成（2026-07-13）
+
+本节覆盖本回执中此前将无参数本地预览描述为“本地 Mock”的历史结论。当前行为以本节和提交 `91d1505`、`418a2ad`、`e6cddc5` 为准：默认预览不生成假结果，测试 Mock 只能通过显式 `--mock-generation` 启用。
+
+### 1. 本次目标理解
+
+目标是在不改变生产 SD2 同源接口、普通账号授权和真实计费规则的前提下，让 `node scripts/ultimate-canvas-preview-server.mjs 4400` 仅提供画布布局、节点编辑、连接和保存恢复所需的本地 fixture，不再返回假的文字、图片、视频、任务、缩略图、重试结果或点数预估。既有确定性生成生命周期覆盖保留，但仅允许自动化测试通过字面量命令行开关 `--mock-generation` 显式启用；不允许环境变量暗中开启 Mock。
+
+### 2. 实际修改了哪些文件
+
+本次设计、实现、测试和回执范围包含以下 14 个文件：
+
+- `docs/superpowers/specs/2026-07-13-ultimate-canvas-local-preview-no-fake-generation-design.md`
+- `docs/superpowers/plans/2026-07-13-ultimate-canvas-local-preview-no-fake-generation.md`
+- `docs/handoffs/ultimate-canvas-implementation-report.md`
+- `public/tools/ultimate-canvas/backend-contract.js`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/index.html`
+- `scripts/ultimate-canvas-preview-server.mjs`
+- `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
+- `scripts/ultimate-canvas-preview-api-smoke.ts`
+- `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
+- `scripts/ultimate-canvas-context-rules-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+
+### 3. 每个文件改了什么
+
+- 两份设计/计划文档定义默认 preview、显式 test Mock、503 契约、安全边界和验收步骤；本回执记录最终证据。
+- `backend-contract.js` 增加可信的 `preview + same-origin + mock:false` 状态，映射为“未连接 SD2”；显式 Mock 映射为“测试 Mock”，矛盾元数据仍按未验证处理。
+- `app.js` 在图片或视频能力禁用时优先显示后端下发的能力不可用原因，不伪造成功状态；`index.html` 更新相关脚本缓存键。
+- `ultimate-canvas-preview-server.mjs` 默认关闭假生成，对文字、图片、视频、预估、重试、状态和缩略图等生成路径返回 HTTP 503 与 `REAL_BACKEND_REQUIRED`；默认列表、卡片、分支及移动/合并/拆分操作不会泄露或修改预置假任务。只有字面量 `--mock-generation` 开关启用测试 Mock。
+- `ultimate-canvas-preview-no-generation-smoke.ts` 覆盖默认 bootstrap、能力禁用、稳定 503、无假资源/任务及隐藏任务隔离。
+- `ultimate-canvas-preview-api-smoke.ts` 显式传入 `--mock-generation`，继续覆盖测试用提交、轮询、恢复和结果生命周期。
+- `ultimate-canvas-same-origin-backend-smoke.ts` 覆盖 SD2、preview、test Mock 三种状态及默认拒绝契约。
+- 其余四个前端 smoke 更新缓存键与能力消息断言，继续覆盖上下文规则、节点交互、生成节点工作流和视频卡工作流。
+
+### 4. RED/GREEN 与验证命令
+
+Task 1 的 RED：
+
+- `npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts`：实现前 preview 元数据被映射为未验证状态。
+- `npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts`：实现前图片/视频禁用分支未使用能力专属消息。
+
+Task 2 的 RED：
+
+- `npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts`：实现前无参数服务返回 Mock bootstrap。
+- 扩展隐藏任务隔离断言后，默认模式对预置候选任务的卡片 PATCH 曾错误返回 200；改为仅基于 `visibleVideoTasks()` 后转为 GREEN。
+
+Task 3 完整验证：
+
+```powershell
+Get-ChildItem scripts -Filter 'ultimate-canvas-*-smoke.ts' | Sort-Object Name | ForEach-Object { npx tsx $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+node --check public/tools/ultimate-canvas/backend-contract.js
+node --check public/tools/ultimate-canvas/app.js
+node --check scripts/ultimate-canvas-preview-server.mjs
+npx tsc --noEmit --pretty false
+npm run lint
+npm run build
+git diff --check 9937708..HEAD
+```
+
+### 5. 验证结果是否通过
+
+通过。13/13 个 `ultimate-canvas-*-smoke.ts` 全部退出 0；3 个 `node --check`、TypeScript 和 `git diff --check 9937708..HEAD` 均退出 0。嵌套 worktree 中首次执行 `npm run lint` 因 `.eslintrc.json` 与两级父目录的同名 Next ESLint 配置重复加载而退出 1；未修改 lint 配置。在精确功能 HEAD `e6cddc58bf78e61f936ad3a5378f8fb795f008cb` 的干净外部 detached worktree `E:\Ultimate-canvas\seedance-api-debugger-task3-verify-e6cddc5` 中，`npm ci` 后重新执行 `npm run lint` 退出 0，仅保留仓库既有 warning；`npm run build` 退出 0，保留既有 lint/autoprefixer warning，并成功生成 76 个页面。
+
+父代理的默认浏览器 QA 也通过：启动命令没有 `--mock-generation`；页面徽标为“未连接 SD2”；新建图片和视频节点都显示“本地预览未连接 SD2，真实生成请使用已部署的同源应用。”，对应生成按钮均为禁用状态。刷新后两个节点恢复，节点数为 2，生成结果元素总数为 0，没有图片、视频、待轮询标记或假任务，保存状态为“已保存”，浏览器 warning/error 日志为 0。能力禁用使 UI 不会发起生成请求，默认服务端 503 行为由自动化 smoke 覆盖。
+
+### 6. 是否真实调用了文字/图片/视频生成
+
+没有。未调用真实文字、图片或视频生成；未连接线上 SD2，也未调用第三方 provider。显式 `--mock-generation` 仅由自动化生命周期 smoke 使用，其结果是本机确定性测试数据，不是真实模型结果。
+
+### 7. 是否消耗了点数
+
+没有，点数消耗为 0。没有创建真实付费生成、重试、扣点、冻结、返还或点数调整操作。
+
+### 8. 是否碰过后台设置、密钥、点数核心逻辑
+
+没有。未读取或修改 `.env`、后台 API 设置、provider 密钥配置、点数核心逻辑、数据库 schema；也没有绕过普通账号成为 admin。生产模型调用仍由 SD2 同源后端负责，浏览器和预览服务没有接入第三方 API Key。
+
+### 9. 还没做完的内容
+
+- 尚未将本次提交部署或推送到 `https://sd2.youdoodesign.com`。
+- 尚未在已部署环境使用获授权的普通账号验证真实同源 bootstrap、上传、提交、轮询和结果恢复。
+- 按本次安全约束，尚未执行任何会消耗点数的最小真实文字、图片或视频生成验收。
+
+### 10. 风险和建议下一步
+
+- 测试 Mock 仍存在，但只能通过显式 `--mock-generation` 开启；手工使用该开关时页面会明确显示“测试 Mock”，不能将其结果作为真实后端验收证据。
+- 生产 SD2 仍是模型、权限、任务状态和计费的最终权威。部署后应先用普通账号验证同源能力元数据、不可用降级、保存恢复和无扣点路径，再由获授权人员决定是否做最小真实生成。
+- 若后端能力字段、任务状态或业务路由变更，应同步更新契约与 smoke，避免默认预览安全边界和生产接口发生漂移。
