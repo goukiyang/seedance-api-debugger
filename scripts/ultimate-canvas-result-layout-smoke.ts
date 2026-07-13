@@ -34,6 +34,32 @@ function assertDeclarations(rule: any, expected: Record<string, string>) {
   });
 }
 
+function panelGeometry(cardWidth: number, panelWidth = 350) {
+  const inset = (cardWidth - panelWidth) / 2;
+  return {
+    leftOverflow: Math.max(0, -inset),
+    rightOverflow: Math.max(0, -inset),
+    cardCenter: cardWidth / 2,
+    panelCenter: inset + panelWidth / 2,
+  };
+}
+
+assert.deepEqual(panelGeometry(interactions.generationNodeDimensions('9:16').width), {
+  leftOverflow: 76.5625,
+  rightOverflow: 76.5625,
+  cardCenter: 98.4375,
+  panelCenter: 98.4375,
+}, '9:16 panels overflow symmetrically while preserving the media-card center');
+assert.deepEqual(panelGeometry(interactions.generationNodeDimensions('16:9').width), {
+  leftOverflow: 0,
+  rightOverflow: 0,
+  cardCenter: 175,
+  panelCenter: 175,
+}, '16:9 panels remain centered without horizontal overflow');
+
+const generationNodes = ruleWith(['.canvas-node.node-type-video', '.canvas-node.node-type-image']);
+assertDeclarations(generationNodes, { width: 'var(--generation-node-width, 350px)' });
+
 const baseCards = ruleWith(['.node-type-video .node-card', '.node-type-image .node-card']);
 assertDeclarations(baseCards, {
   width: 'var(--generation-node-width, 350px)',

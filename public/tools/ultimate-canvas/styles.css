@@ -1515,6 +1515,10 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 }
 
 /* ===== Video & Image Node Unified Layout ===== */
+.canvas-node.node-type-video,
+.canvas-node.node-type-image {
+    width: var(--generation-node-width, 350px);
+}
 .node-type-video .node-card,
 .node-type-image .node-card {
     width: var(--generation-node-width, 350px);
