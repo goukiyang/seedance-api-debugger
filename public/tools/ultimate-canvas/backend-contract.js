@@ -18,6 +18,8 @@
         /^\/api\/assets\/library$/,
         /^\/api\/projects(?:\/[^/]+(?:\/video-cards)?)?$/,
         /^\/api\/video-cards\/[^/]+(?:\/branches(?:\/[^/]+)?|\/tasks|\/split|\/merge)?$/,
+        /^\/api\/approvals$/,
+        /^\/api\/video\/retry\/[^/]+$/,
         /^\/api\/tasks\/estimate$/
     ];
 

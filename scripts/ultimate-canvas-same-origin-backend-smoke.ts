@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 const contract = require('../public/tools/ultimate-canvas/backend-contract.js');
+const videoCards = require('../public/tools/ultimate-canvas/video-card-workflow.js');
 const origin = 'https://sd2.youdoodesign.com';
 const safeUnavailableMessage = '该功能暂时不可用，请稍后重试。';
 
@@ -79,6 +80,31 @@ for (const endpoint of [
   '/api/tasks/estimate?resolution=720p&duration=5',
 ]) {
   assert.equal(contract.resolveApiEndpoint(endpoint, '', origin, 'canvas'), endpoint);
+}
+
+for (const [operation, input] of [
+  ['approval-ratio', {
+    projectId: 'project1', cardId: 'card1', targetRatio: '16:9', reason: 'review',
+  }],
+  ['approval-reopen', {
+    projectId: 'project1', cardId: 'card1', reason: 'revision',
+  }],
+  ['task-retry', { taskId: 'task/1' }],
+] as const) {
+  const descriptor = videoCards.requestFor(operation, input);
+  assert.equal(
+    contract.resolveApiEndpoint(descriptor.url, '', origin, 'canvas'),
+    descriptor.url,
+  );
+}
+
+for (const endpoint of [
+  '/api/approvals/admin',
+  '/api/video/retry',
+  '/api/video/retry/task/extra',
+  '/api/video/retries/task',
+]) {
+  assert.equal(contract.resolveApiEndpoint(endpoint, '', origin, 'canvas'), '');
 }
 
 assert.equal(
