@@ -23,9 +23,19 @@ assert.deepEqual(contract.backendStatus({
   mode: 'unverified', label: '后端状态未验证', isReal: false,
 });
 assert.deepEqual(contract.backendStatus({
+  backend: { mode: 'preview', transport: 'same-origin', mock: false },
+}), {
+  mode: 'preview', label: '未连接 SD2', isReal: false,
+});
+assert.deepEqual(contract.backendStatus({
+  backend: { mode: 'preview', transport: 'same-origin', mock: true },
+}), {
+  mode: 'unverified', label: '后端状态未验证', isReal: false,
+});
+assert.deepEqual(contract.backendStatus({
   backend: { mode: 'mock', transport: 'same-origin', mock: true },
 }), {
-  mode: 'mock', label: '本地 Mock', isReal: false,
+  mode: 'mock', label: '测试 Mock', isReal: false,
 });
 assert.deepEqual(contract.backendStatus({
   backend: { mode: 'sd2', transport: 'same-origin', mock: false },
@@ -211,8 +221,9 @@ assert.ok(generationEvents.some(event => event.name === 'canvas-generation:error
 
 assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('generation-api.js'));
 assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('app.js'));
+assert.match(indexSource, /backend-contract\.js\?v=20260713-no-fake-preview/);
 assert.match(indexSource, /generation-api\.js\?v=20260713-sd2-same-origin/);
-assert.match(indexSource, /app\.js\?v=20260713-sd2-same-origin/);
+assert.match(indexSource, /app\.js\?v=20260713-no-fake-preview/);
 assert.match(appSource, /function backendEndpoint\(candidate, fallback, policy = 'canvas'\)/);
 assert.match(appSource, /createApiError\(400,/);
 assert.match(appSource, /options\.body/);

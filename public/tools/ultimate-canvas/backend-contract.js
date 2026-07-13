@@ -92,10 +92,15 @@
 
     function backendStatus(bootstrap) {
         const backend = bootstrap?.backend;
+        if (backend?.mode === 'preview'
+            && backend.transport === 'same-origin'
+            && backend.mock === false) {
+            return { mode: 'preview', label: '未连接 SD2', isReal: false };
+        }
         if (backend?.mode === 'mock'
             && backend.transport === 'same-origin'
             && backend.mock === true) {
-            return { mode: 'mock', label: '本地 Mock', isReal: false };
+            return { mode: 'mock', label: '测试 Mock', isReal: false };
         }
         if (backend?.mode === 'sd2'
             && backend.transport === 'same-origin'

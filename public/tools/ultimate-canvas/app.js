@@ -3768,7 +3768,8 @@
             if (!capabilities.image?.enabled) {
                 return {
                     ready: false,
-                    message: window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE
+                    message: capabilities.image?.message
+                        || window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE
                 };
             }
             const validation = window.UltimateCanvasGenerationNodes.validateImage({
@@ -3786,7 +3787,8 @@
             if (!capabilities.video?.enabled) {
                 return {
                     ready: false,
-                    message: window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE
+                    message: capabilities.video?.message
+                        || window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE
                 };
             }
             const validation = window.UltimateCanvasGenerationNodes.validateVideo({

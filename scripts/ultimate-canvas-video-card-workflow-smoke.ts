@@ -312,6 +312,6 @@ assert.ok(
 );
 assert.match(index, /styles\.css\?v=20260713-video-footer-controls/);
 assert.match(index, /video-card-workflow\.js\?v=20260711-video-card-complete/);
-assert.match(index, /app\.js\?v=20260713-sd2-same-origin/);
+assert.match(index, /app\.js\?v=20260713-no-fake-preview/);
 
 console.log('ultimate-canvas-video-card-workflow-smoke passed');

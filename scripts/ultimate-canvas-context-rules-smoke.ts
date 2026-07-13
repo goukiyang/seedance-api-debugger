@@ -31,7 +31,7 @@ assert.match(cssSource, /\.context-rules-modal/);
 
 assert.match(indexSource, /styles\.css\?v=20260713-video-footer-controls/);
 assert.match(indexSource, /canvas-engine\.js\?v=20260713-video-footer-controls/);
-assert.match(indexSource, /app\.js\?v=20260713-sd2-same-origin/);
+assert.match(indexSource, /app\.js\?v=20260713-no-fake-preview/);
 
 assert.match(routeSource, /const rawContextRules =/);
 assert.match(routeSource, /const contextRules = user\.role === 'admin' \? rawContextRules : ''/);
