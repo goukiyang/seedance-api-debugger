@@ -80,15 +80,19 @@
         pendingGenerationSubmissions: window.UltimateCanvasGenerationInteractions.createGenerationSubmissionTracker()
     };
 
+    function backendEndpoint(candidate, fallback) {
+        return window.UltimateCanvasBackendContract.resolveApiEndpoint(candidate, fallback, window.location.origin);
+    }
+
     function configureGenerationEndpoints() {
         if (!window.CanvasGenerationAPI?.configure) return;
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         window.CanvasGenerationAPI.configure({
             endpoints: {
-                text: capabilities.text?.endpoint || '/api/tools/ultimate-canvas/generate',
-                script: capabilities.text?.endpoint || '/api/tools/ultimate-canvas/generate',
-                image: capabilities.image?.endpoint || '/api/assets/generate',
-                video: capabilities.video?.endpoint || '/api/tasks/create'
+                text: backendEndpoint(capabilities.text?.endpoint, '/api/tools/ultimate-canvas/generate'),
+                script: backendEndpoint(capabilities.script?.endpoint, '/api/tools/ultimate-canvas/generate'),
+                image: backendEndpoint(capabilities.image?.endpoint, '/api/assets/generate'),
+                video: backendEndpoint(capabilities.video?.endpoint, '/api/tasks/create')
             }
         });
     }
@@ -117,7 +121,9 @@
 
     async function requestJson(url, options = {}) {
         const method = options.method || 'GET';
-        const res = await fetch(url, {
+        const endpoint = backendEndpoint(url, '');
+        if (!endpoint) throw new Error('Canvas requests must target a same-origin /api/ endpoint.');
+        const res = await fetch(endpoint, {
             method,
             credentials: 'same-origin',
             headers: {
@@ -136,7 +142,7 @@
             data = { raw: text };
         }
         if (!res.ok) {
-            const message = data?.message || data?.error || `请求失败：${res.status}`;
+            const message = window.UltimateCanvasBackendContract.requestErrorMessage(res.status, data);
             const error = new Error(message);
             error.response = data;
             error.status = res.status;
@@ -754,7 +760,10 @@
             async generate(payload) {
                 const capabilities = canvasRuntime.bootstrap?.capabilities || {};
                 if (payload.kind === 'text' || payload.kind === 'script') {
-                    return postJson(capabilities.text?.endpoint || '/api/tools/ultimate-canvas/generate', {
+                    const endpoint = payload.kind === 'script'
+                        ? backendEndpoint(capabilities.script?.endpoint, '/api/tools/ultimate-canvas/generate')
+                        : backendEndpoint(capabilities.text?.endpoint, '/api/tools/ultimate-canvas/generate');
+                    return postJson(endpoint, {
                         ...payload,
                         ...baseContextPayload(payload)
                     });
@@ -774,7 +783,7 @@
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
-                    descriptor.url = capabilities.image?.endpoint || descriptor.url;
+                    descriptor.url = backendEndpoint(capabilities.image?.endpoint, descriptor.url);
                     const data = await requestJson(descriptor.url, {
                         method: descriptor.method,
                         payload: descriptor.payload
@@ -806,7 +815,7 @@
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
-                    descriptor.url = capabilities.video?.endpoint || descriptor.url;
+                    descriptor.url = backendEndpoint(capabilities.video?.endpoint, descriptor.url);
                     const data = await requestJson(descriptor.url, {
                         method: descriptor.method,
                         payload: descriptor.payload
@@ -1407,14 +1416,14 @@
             avatarEl.title = data.user.name;
         }
         window.ultimateCanvasBootstrap = data;
-        renderContextControls(data);
+        renderRuntimeContextControls(data);
         configureGenerationEndpoints();
         installGenerationAdapter();
         updateGenerationLabels(data);
         refreshContextRulesButtons();
     }
 
-    function renderContextControls(data) {
+    function renderContextControls(data, backend) {
         const left = document.querySelector('.header-left');
         if (!left) return;
         let wrap = document.getElementById('canvas-context-controls');
@@ -1437,6 +1446,7 @@
                 : card.can_generate
                     ? '已接入后台'
                     : data?.context?.generation_blocked_reason || `视频卡${videoCardStatusFor(card)}`;
+        const resolvedContextStatus = contextReady ? backend.label : contextStatus;
         wrap.innerHTML = `
             <div class="canvas-context-picker" data-context-picker="project">
                 <span class="context-picker-label">项目</span>
@@ -1462,8 +1472,8 @@
                 </button>
                 ${videoCardMenuHtml(cards, project, data.context.selected_video_card_id)}
             </div>
-            <span class="context-status ${contextReady ? 'ok' : 'warn'}" title="${escapeHtml(contextStatus)}">
-                ${escapeHtml(contextStatus)}
+            <span class="context-status ${contextReady ? 'ok' : 'warn'}" title="${escapeHtml(resolvedContextStatus)}">
+                ${escapeHtml(resolvedContextStatus)}
             </span>
             <span class="context-status credits" title="可用点数 / 冻结点数">
                 可用 ${escapeHtml(formatCredits(credits.available))} 点 · 冻结 ${escapeHtml(formatCredits(credits.frozen_credits))} 点
@@ -1547,8 +1557,10 @@
         }
     }
 
-    function renderRuntimeContextControls() {
-        if (canvasRuntime.bootstrap) renderContextControls(canvasRuntime.bootstrap);
+    function renderRuntimeContextControls(data = canvasRuntime.bootstrap) {
+        if (!data) return;
+        const backend = window.UltimateCanvasBackendContract.backendStatus(data);
+        renderContextControls(data, backend);
     }
 
     function closeContextMenus() {
@@ -3525,9 +3537,11 @@
     }
 
     function videoStatusUrl(taskId) {
-        const template = canvasRuntime.bootstrap?.capabilities?.video?.status_endpoint_template
-            || '/api/video/status/:taskId?refresh=true';
-        return template.replace(':taskId', encodeURIComponent(taskId));
+        return window.UltimateCanvasBackendContract.resolveTaskStatusEndpoint(
+            canvasRuntime.bootstrap?.capabilities?.video?.status_endpoint_template,
+            taskId,
+            window.location.origin
+        );
     }
 
     function stopVideoPolling(taskId, nodeId) {
@@ -4000,7 +4014,7 @@
         setNodeGenerationStatus(nodeEl, 'loading', '正在通过文本模型优化视频提示词');
         try {
             const result = await postJson(
-                canvasRuntime.bootstrap?.capabilities?.text?.endpoint || '/api/tools/ultimate-canvas/generate',
+                backendEndpoint(canvasRuntime.bootstrap?.capabilities?.text?.endpoint, '/api/tools/ultimate-canvas/generate'),
                 {
                     kind: 'text',
                     mode: 'video-prompt-enhance',

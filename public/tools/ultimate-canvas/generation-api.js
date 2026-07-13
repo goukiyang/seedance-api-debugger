@@ -16,7 +16,14 @@
     }
 
     function mergeConfig(next = {}) {
-        if (next.endpoints) state.endpoints = { ...state.endpoints, ...next.endpoints };
+        if (next.endpoints) {
+            const { resolveApiEndpoint } = window.UltimateCanvasBackendContract;
+            const endpoints = Object.fromEntries(Object.entries(next.endpoints).map(([key, value]) => [
+                key,
+                resolveApiEndpoint(value, '', window.location.origin)
+            ]));
+            state.endpoints = { ...state.endpoints, ...endpoints };
+        }
         if (next.headers) state.headers = { ...state.headers, ...next.headers };
     }
 
