@@ -33,8 +33,9 @@ assert.deepEqual(interactions.generationNodeDimensions('9:16', 296), {
 assert.equal(interactions.generationNodeDimensions('bad').ratio, '16:9');
 assert.equal(interactions.generationNodeDimensions('16:9', 0).width, 350);
 assert.equal(interactions.generationNodeLongEdge('image', 1200), 640, 'desktop image nodes align their long edge with the prompt panel');
-assert.equal(interactions.generationNodeLongEdge('video', 1200), 350, 'video nodes retain the compact long edge');
+assert.equal(interactions.generationNodeLongEdge('video', 1200), 640, 'desktop video nodes align their long edge with the prompt panel');
 assert.equal(interactions.generationNodeLongEdge('image', 390), 366, 'image nodes respect the mobile viewport gutter');
+assert.equal(interactions.generationNodeLongEdge('video', 390), 366, 'video nodes align with the prompt panel at the 390px mobile viewport');
 assert.equal(interactions.generationNodeLongEdge('video', 320), 296, 'video nodes respect the mobile viewport gutter');
 assert.deepEqual(interactions.videoTaskActionAvailability({
   taskId: 'task-1', status: 'succeeded', previewUrl: '/play', downloadUrl: '/download', canRetry: true, canManage: true,

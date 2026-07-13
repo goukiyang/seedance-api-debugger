@@ -55,6 +55,12 @@ assert.equal(desktopImageLongEdge, desktopPanelWidth);
 assert.equal(desktopImageLandscape.width, desktopPanelWidth, 'landscape image card aligns with the prompt panel width');
 assert.equal(desktopImageLandscape.height, 274.286);
 
+const desktopVideoLongEdge = interactions.generationNodeLongEdge('video', 1200);
+const desktopVideoLandscape = interactions.generationNodeDimensions('21:9', desktopVideoLongEdge);
+assert.equal(desktopVideoLongEdge, desktopPanelWidth);
+assert.equal(desktopVideoLandscape.width, desktopPanelWidth, 'landscape video card aligns with the prompt panel width');
+assert.equal(desktopVideoLandscape.height, 274.286);
+
 const generationNodes = ruleWith(['.canvas-node.node-type-video', '.canvas-node.node-type-image']);
 assertDeclarations(generationNodes, { width: 'var(--generation-node-width, 350px)' });
 
@@ -153,7 +159,28 @@ assertDeclarations(ruleWith(['.generation-task-action-menu']), { 'min-width': '1
 assertDeclarations(ruleWith([
   '.generation-task-action-menu a',
   '.generation-task-action-menu button',
-]), { width: '100%', 'justify-content': 'flex-start' });
+]), {
+  display: 'flex',
+  width: '100%',
+  'justify-content': 'flex-start',
+  'min-height': '32px',
+  padding: '6px 10px',
+  border: '1px solid transparent',
+  'border-radius': '6px',
+  background: 'transparent',
+  color: 'var(--text-secondary)',
+  'text-decoration': 'none',
+  cursor: 'pointer',
+});
+
+assertDeclarations(ruleWith([
+  '.generation-task-action-menu a:hover',
+  '.generation-task-action-menu button:hover',
+]), {
+  border: '1px solid var(--border-node)',
+  background: 'var(--bg-active)',
+  color: 'var(--text-primary)',
+});
 
 const generatedResultAction = { id: 'generated-result-action', enabled: true };
 const resultRegion = {

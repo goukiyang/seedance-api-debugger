@@ -1977,8 +1977,27 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 
 .generation-task-action-menu a,
 .generation-task-action-menu button {
+    display: flex;
+    align-items: center;
     width: 100%;
     justify-content: flex-start;
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.generation-task-action-menu a:hover,
+.generation-task-action-menu button:hover {
+    border: 1px solid var(--border-node);
+    background: var(--bg-active);
+    color: var(--text-primary);
 }
 
 .generation-reference-list {
