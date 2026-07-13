@@ -268,3 +268,24 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 - 后端业务路由、任务状态模板或响应字段变更时，应同步更新 backend-contract.js 和 ultimate-canvas-same-origin-backend-smoke.ts，避免前端白名单与真实接口漂移。
 - 保持本地预览的 Mock 标识与生产 SD2 标识可区分，继续禁止在浏览器暴露第三方密钥。
 - 在具备写权限后执行目标分支推送；若仍受限，交付当前 commit 的 patch，不宣称已推送或已上线。
+## Task 2 browser QA and delivery receipt (2026-07-13)
+
+Task 2 validated the approved Task 1 commit `3060e46` (`fix: move video settings into footer`) without changing application code. Task 1 production changes are `public/tools/ultimate-canvas/canvas-engine.js`, `public/tools/ultimate-canvas/index.html`, and `public/tools/ultimate-canvas/styles.css`. Its updated smoke files are `scripts/ultimate-canvas-context-rules-smoke.ts`, `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`, `scripts/ultimate-canvas-result-layout-smoke.ts`, and `scripts/ultimate-canvas-video-card-workflow-smoke.ts`.
+
+RED/GREEN evidence: the Task 1 diff shows the prior video `generation-summary-row` above `generation-node-toolbar` and the prior footer as wrapping flex. The approved revision moves the same mode/spec controls after `video-model-info` inside `video-props-footer`, places `video-footer-right` after them, and changes the desktop footer to a three-column grid. `ultimate-canvas-result-layout-smoke.ts` now asserts toolbar-before-footer, model-before-settings-before-cost/submit, and the grid placements. The full 12-script smoke run was GREEN.
+
+Local Mock preview evidence: `node scripts/ultimate-canvas-preview-server.mjs 4400` was started hidden from this worktree. `http://127.0.0.1:4400/tools/ultimate-canvas/index.html` returned HTTP 200 with `Cache-Control: no-store`; bootstrap returned `backend.mode: "mock"`, `transport: "same-origin"`, and `mock: true`. The returned HTML loaded this branch's cache keys: `styles.css?v=20260713-video-footer-controls` and `canvas-engine.js?v=20260713-video-footer-controls`.
+
+Browser QA status: BLOCKED by the required in-app browser surface. After loading the required `browser:control-in-app-browser` workflow and its recovery guidance, two attempts to create/navigate an in-app tab timed out with "Timed out waiting for the Browser webview to attach for this browser-use page"; `browser.tabs.list()` then returned `[]`. Therefore no desktop or 390px interactive geometry/order/overflow measurements, mode/spec popover checks, changed Mock-option label/state check, or browser console warning/error sample was fabricated or recorded. No alternative browser automation surface was used.
+
+Verification commands and results:
+
+- `Get-ChildItem scripts -Filter 'ultimate-canvas-*-smoke.ts' | Sort-Object Name | ForEach-Object { npx tsx $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }`: PASS, 12/12 scripts.
+- `node --check public/tools/ultimate-canvas/canvas-engine.js`: PASS.
+- `node --check public/tools/ultimate-canvas/app.js`: PASS.
+- `npx tsc --noEmit --pretty false`: PASS.
+- `npm run lint` in this nested worktree: expected environmental FAIL (exit 1), duplicate `@next/next` plugin paths from `.eslintrc.json` and `..\\..\\.eslintrc.json`.
+- Clean detached external worktree `E:\Ultimate-canvas\seedance-api-debugger-task2-verify-3060e46` at the same source HEAD `3060e46bf76e243fb1a1f8c3e9daac735d464264`: after `npm ci`, `npm run lint` PASS with pre-existing warnings; `npm run build` PASS with the same pre-existing lint/autoprefixer warnings.
+- `git diff --check`: PASS after this receipt was written (only the expected line-ending warning was emitted).
+
+No real text, image, or video generation occurred. No paid retry, credit mutation, point consumption, or provider call occurred; points consumed: 0. `.env`, admin settings, provider configuration/secrets, credits logic, and database schema were not read or changed. Self-review: the only intended production modification is this appended receipt; the required browser acceptance remains incomplete solely because the in-app browser could not attach. Concern: rerun the specified desktop and 390px in-app-browser checks once a browser tab can be attached, then append its concrete geometry, overflow, popover, option-state, and console evidence.
