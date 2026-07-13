@@ -35,41 +35,42 @@ function assertDeclarations(rule: any, expected: Record<string, string>) {
 }
 
 const baseCards = ruleWith(['.node-type-video .node-card', '.node-type-image .node-card']);
-assertDeclarations(baseCards, { width: '350px', height: '240px' });
+assertDeclarations(baseCards, {
+  width: 'var(--generation-node-width, 350px)',
+  height: 'var(--generation-node-height, 196.875px)',
+});
 
-const emptySelectedCards = ruleWith([
-  '.canvas-node.selected.node-type-video .node-card',
-  '.canvas-node.selected.node-type-image .node-card',
+const cardBodies = ruleWith([
+  '.node-type-video .node-body',
+  '.node-type-image .node-body',
 ]);
-assertDeclarations(emptySelectedCards, { width: '350px', 'max-width': '350px', height: '240px' });
+assertDeclarations(cardBodies, { height: '100%', 'min-height': '0', overflow: 'hidden' });
 
-const selectedBodies = ruleWith([
-  '.canvas-node.selected.node-type-video .node-body',
-  '.canvas-node.selected.node-type-image .node-body',
+const resultRegions = ruleWith([
+  '.node-type-video .generation-result-region:not(:empty)',
+  '.node-type-image .generation-result-region:not(:empty)',
 ]);
-assertDeclarations(selectedBodies, { 'min-height': '208px' });
+assertDeclarations(resultRegions, { height: '100%', 'min-height': '0', overflow: 'hidden' });
 
-const selectedPlaceholders = ruleWith([
-  '.canvas-node.selected.node-type-video .card-preview-placeholder',
-  '.canvas-node.selected.node-type-image .card-preview-placeholder',
-]);
-assertDeclarations(selectedPlaceholders, { height: '130px' });
-
-const selectedResultSelectors = [
-  '.canvas-node.selected.node-type-video .node-card:has([data-generation-result-region]:not(:empty))',
-  '.canvas-node.selected.node-type-image .node-card:has([data-generation-result-region]:not(:empty))',
-];
-assertDeclarations(ruleWith(selectedResultSelectors), { height: '240px', 'min-height': '240px' });
-
-const selectedResultBodies = selectedResultSelectors.map(selector => `${selector} .node-body`);
-assertDeclarations(ruleWith(selectedResultBodies), { height: '100%', 'min-height': '208px' });
+css.walkRules((rule: any) => {
+  const selectedCardRule = selectors(rule).some(selector =>
+    selector.includes('.canvas-node.selected') && selector.endsWith('.node-card')
+  );
+  if (!selectedCardRule) return;
+  const selectedDeclarations = declarations(rule);
+  for (const property of ['width', 'height', 'min-height', 'max-width']) {
+    assert.equal(selectedDeclarations.has(property), false, `${rule.selector} must not change selected card ${property}`);
+  }
+});
 
 assertDeclarations(ruleWith(['.generated-reference-card']), {
   'box-sizing': 'border-box',
 });
 
-const selectedResultCards = selectedResultSelectors.map(selector => `${selector} .generated-reference-card`);
-assertDeclarations(ruleWith(selectedResultCards), { height: '100%', 'min-height': '0', padding: '10px' });
+assertDeclarations(ruleWith([
+  '.node-type-video .generation-result-region:not(:empty) .generated-reference-card',
+  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card',
+]), { height: '100%', 'min-height': '0', padding: '10px' });
 
 const selectedActions = ruleWith([
   '.canvas-node.selected.node-type-video .generated-action-row',
@@ -97,18 +98,11 @@ assertDeclarations(ruleWith(['.generated-frame-preview']), {
   'object-fit': 'contain',
 });
 
-const selectedResultPreviews = selectedResultSelectors.map(selector => `${selector} .generated-frame-preview`);
-assertDeclarations(ruleWith(selectedResultPreviews), {
-  'min-height': '0',
-  'max-height': '92px',
-  'margin-top': '8px',
-});
-
-assertDeclarations(ruleWith(['.node-video-props']), {
-  'margin-left': 'calc((350px - 640px) / 2)',
-});
-assertDeclarations(ruleWith(['.node-image-props']), {
-  'margin-left': 'calc((350px - 640px) / 2)',
+assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
+  width: '350px',
+  'margin-left': '0',
+  left: '50%',
+  transform: 'translateX(-50%)',
 });
 
 assertDeclarations(ruleWith(['.node-connector']), {
@@ -116,21 +110,6 @@ assertDeclarations(ruleWith(['.node-connector']), {
   height: '20px',
   top: '50%',
 });
-
-let mobileMedia: any = null;
-css.walkAtRules('media', (atRule: any) => {
-  if (atRule.params === '(max-width: 720px)') mobileMedia = atRule;
-});
-assert.ok(mobileMedia, 'missing 720px mobile layout rule');
-const mobileSelectedCards = ruleWith([
-  '.node-type-video .node-card',
-  '.node-type-image .node-card',
-], mobileMedia);
-assertDeclarations(mobileSelectedCards, {
-  width: 'min(350px, calc(100vw - 24px))',
-  'max-width': 'min(350px, calc(100vw - 24px))',
-});
-assert.equal(Math.min(350, 390 - 24), 350, '390px viewport keeps the selected card at its compact width');
 
 const generatedResultAction = { id: 'generated-result-action', enabled: true };
 const resultRegion = {

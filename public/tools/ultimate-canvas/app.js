@@ -3054,12 +3054,26 @@
         }));
     }
 
+    function generationNodeLongEdge() {
+        return Math.max(1, Math.min(350, window.innerWidth - 24));
+    }
+
+    function applyGenerationNodeDimensions(nodeEl, settings) {
+        const dimensions = window.UltimateCanvasGenerationInteractions
+            .generationNodeDimensions(settings.ratio, generationNodeLongEdge());
+        nodeEl.style.setProperty('--generation-node-width', `${dimensions.width}px`);
+        nodeEl.style.setProperty('--generation-node-height', `${dimensions.height}px`);
+        nodeEl.dataset.generationRatio = dimensions.ratio;
+        return dimensions;
+    }
+
     function renderGenerationNodeControls(nodeId) {
         const node = engine.nodes.get(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         if (!node || !nodeEl || !['image', 'video'].includes(node.type)) return;
 
         const settings = generationSettingsForNode(node);
+        applyGenerationNodeDimensions(nodeEl, settings);
         const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
@@ -4086,7 +4100,12 @@
     }, true);
 
     engine.container.addEventListener('wheel', closeGenerationPopover, { passive: true });
-    window.addEventListener('resize', closeGenerationPopover);
+    let generationResizeFrame = 0;
+    window.addEventListener('resize', () => {
+        closeGenerationPopover();
+        window.cancelAnimationFrame(generationResizeFrame);
+        generationResizeFrame = window.requestAnimationFrame(renderAllGenerationNodeControls);
+    });
     engine.onNodeSelected = nodeId => {
         closeGenerationPopover();
         if (canvasRuntime.referenceSelection && nodeId !== canvasRuntime.referenceSelection.targetNodeId) {

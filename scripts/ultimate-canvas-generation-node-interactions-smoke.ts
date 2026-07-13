@@ -32,16 +32,19 @@ assert.deepEqual(interactions.generationNodeDimensions('9:16', 296), {
 });
 assert.equal(interactions.generationNodeDimensions('bad').ratio, '16:9');
 assert.equal(interactions.generationNodeDimensions('16:9', 0).width, 350);
+contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge())', 'render derives card dimensions from current settings');
+contains(appSource, "setProperty('--generation-node-width'", 'render writes node width');
+contains(appSource, "setProperty('--generation-node-height'", 'render writes node height');
 
 contains(engineSource, 'connectNodes(fromId, toId)', 'engine exposes public connection creation');
 contains(engineSource, 'disconnectNodes(fromId, toId)', 'engine exposes public connection removal');
 contains(engineSource, 'disconnectIncoming(nodeId)', 'engine can clear target references');
 contains(engineSource, 'selectNode(nodeId)', 'app can return selection to the target node');
 contains(engineSource, 'new ResizeObserver', 'node size changes update edge paths');
-matches(
+assert.doesNotMatch(
   stylesSource,
-  /\.canvas-node\.selected\.node-type-(?:video|image) \.node-card:has\(\[data-generation-result-region\]:not\(:empty\)\)[\s\S]*?height:\s*240px;[\s\S]*?min-height:\s*240px;/,
-  'selected generated results keep the same compact card height',
+  /\.canvas-node\.selected\.node-type-(?:video|image) \.node-card[\s\S]*?(?:width|height):\s*\d+px;/,
+  'selected generated results do not override ratio-aware card dimensions',
 );
 matches(
   stylesSource,
