@@ -80,8 +80,13 @@
         pendingGenerationSubmissions: window.UltimateCanvasGenerationInteractions.createGenerationSubmissionTracker()
     };
 
-    function backendEndpoint(candidate, fallback) {
-        return window.UltimateCanvasBackendContract.resolveApiEndpoint(candidate, fallback, window.location.origin);
+    function backendEndpoint(candidate, fallback, policy = 'canvas') {
+        return window.UltimateCanvasBackendContract.resolveApiEndpoint(
+            candidate,
+            fallback,
+            window.location.origin,
+            policy
+        );
     }
 
     function configureGenerationEndpoints() {
@@ -89,10 +94,10 @@
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         window.CanvasGenerationAPI.configure({
             endpoints: {
-                text: backendEndpoint(capabilities.text?.endpoint, '/api/tools/ultimate-canvas/generate'),
-                script: backendEndpoint(capabilities.script?.endpoint, '/api/tools/ultimate-canvas/generate'),
-                image: backendEndpoint(capabilities.image?.endpoint, '/api/assets/generate'),
-                video: backendEndpoint(capabilities.video?.endpoint, '/api/tasks/create')
+                text: backendEndpoint(capabilities.text?.endpoint, '/api/tools/ultimate-canvas/generate', 'text'),
+                script: backendEndpoint(capabilities.script?.endpoint, '/api/tools/ultimate-canvas/generate', 'script'),
+                image: backendEndpoint(capabilities.image?.endpoint, '/api/assets/generate', 'image'),
+                video: backendEndpoint(capabilities.video?.endpoint, '/api/tasks/create', 'video')
             }
         });
     }
@@ -121,18 +126,33 @@
 
     async function requestJson(url, options = {}) {
         const method = options.method || 'GET';
-        const endpoint = backendEndpoint(url, '');
-        if (!endpoint) throw new Error('Canvas requests must target a same-origin /api/ endpoint.');
+        const policy = options.policy || 'canvas';
+        const endpoint = backendEndpoint(url, '', policy);
+        if (!endpoint) {
+            throw window.UltimateCanvasBackendContract.createApiError(400, {
+                error: 'invalid_canvas_endpoint',
+                endpoint: String(url || ''),
+                policy
+            }, 'Canvas request endpoint is not allowed.');
+        }
+        const hasPayload = options.payload !== undefined;
+        const body = options.body !== undefined
+            ? options.body
+            : hasPayload
+                ? JSON.stringify(options.payload)
+                : undefined;
+        const requestHeaders = {
+            ...(hasPayload ? { 'Content-Type': 'application/json' } : {}),
+            ...workspaceHeaders(),
+            ...(options.headers || {})
+        };
         const res = await fetch(endpoint, {
             method,
             credentials: 'same-origin',
-            headers: {
-                ...(options.payload === undefined ? {} : { 'Content-Type': 'application/json' }),
-                ...workspaceHeaders(),
-                ...(options.headers || {})
-            },
-            body: options.payload === undefined ? undefined : JSON.stringify(options.payload),
-            cache: options.cache
+            headers: requestHeaders,
+            body,
+            cache: options.cache,
+            signal: options.signal
         });
         const text = await res.text();
         let data = {};
@@ -142,11 +162,7 @@
             data = { raw: text };
         }
         if (!res.ok) {
-            const message = window.UltimateCanvasBackendContract.requestErrorMessage(res.status, data);
-            const error = new Error(message);
-            error.response = data;
-            error.status = res.status;
-            throw error;
+            throw window.UltimateCanvasBackendContract.createApiError(res.status, data);
         }
         return data;
     }
@@ -761,12 +777,12 @@
                 const capabilities = canvasRuntime.bootstrap?.capabilities || {};
                 if (payload.kind === 'text' || payload.kind === 'script') {
                     const endpoint = payload.kind === 'script'
-                        ? backendEndpoint(capabilities.script?.endpoint, '/api/tools/ultimate-canvas/generate')
-                        : backendEndpoint(capabilities.text?.endpoint, '/api/tools/ultimate-canvas/generate');
+                        ? backendEndpoint(capabilities.script?.endpoint, '/api/tools/ultimate-canvas/generate', 'script')
+                        : backendEndpoint(capabilities.text?.endpoint, '/api/tools/ultimate-canvas/generate', 'text');
                     return postJson(endpoint, {
                         ...payload,
                         ...baseContextPayload(payload)
-                    });
+                    }, { policy: payload.kind });
                 }
 
                 if (payload.kind === 'image') {
@@ -783,10 +799,11 @@
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
-                    descriptor.url = backendEndpoint(capabilities.image?.endpoint, descriptor.url);
+                    descriptor.url = backendEndpoint(capabilities.image?.endpoint, descriptor.url, 'image');
                     const data = await requestJson(descriptor.url, {
                         method: descriptor.method,
-                        payload: descriptor.payload
+                        payload: descriptor.payload,
+                        policy: 'image'
                     });
                     const normalized = window.UltimateCanvasGenerationNodes.normalizeImageResult(data);
                     return {
@@ -815,10 +832,11 @@
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
-                    descriptor.url = backendEndpoint(capabilities.video?.endpoint, descriptor.url);
+                    descriptor.url = backendEndpoint(capabilities.video?.endpoint, descriptor.url, 'video');
                     const data = await requestJson(descriptor.url, {
                         method: descriptor.method,
-                        payload: descriptor.payload
+                        payload: descriptor.payload,
+                        policy: 'video'
                     });
                     const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoCreate(data);
                     return {
@@ -1522,20 +1540,9 @@
             const url = new URL('/api/tools/ultimate-canvas/bootstrap', window.location.origin);
             if (projectId) url.searchParams.set('project_id', projectId);
             if (videoCardId) url.searchParams.set('video_card_id', videoCardId);
-            const res = await fetch(url.toString(), {
-                credentials: 'same-origin',
+            const data = await requestJson(url.toString(), {
                 cache: 'no-store'
             });
-            const text = await res.text();
-            let data = {};
-            try {
-                data = text ? JSON.parse(text) : {};
-            } catch {
-                data = { raw: text };
-            }
-            if (!res.ok) {
-                throw new Error(data?.error || data?.message || `后台能力读取失败：${res.status}`);
-            }
             if (requestId !== canvasRuntime.bootstrapRequestId) return null;
             canvasRuntime.bootstrap = data;
             canvasRuntime.bootstrapLoaded = true;
@@ -2468,9 +2475,7 @@
         try {
             const url = new URL('/api/tools/ultimate-canvas/document', window.location.origin);
             url.searchParams.set('project_id', projectId);
-            const res = await fetch(url.toString(), { credentials: 'same-origin', cache: 'no-store' });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data?.error || data?.message || `画布读取失败：${res.status}`);
+            const data = await requestJson(url.toString(), { cache: 'no-store' });
             if (requestId !== canvasRuntime.documentRequestId || projectId !== canvasRuntime.selectedProjectId) return;
             canvasRuntime.documentLoaded = true;
             if (!data.document?.document_json) {
@@ -2627,9 +2632,7 @@
         Object.entries(params).forEach(([key, value]) => {
             if (value !== null && value !== undefined && value !== '') url.searchParams.set(key, String(value));
         });
-        const res = await fetch(url.toString(), { credentials: 'same-origin', cache: 'no-store' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.message || data?.error || `资产加载失败：${res.status}`);
+        const data = await requestJson(url.toString(), { cache: 'no-store' });
         return data.items || [];
     }
 
@@ -2746,14 +2749,10 @@
         if (canvasRuntime.documentId) formData.set('canvas_document_id', canvasRuntime.documentId);
         if (canvasNodeId) formData.set('canvas_node_id', canvasNodeId);
         if (role) formData.set('role', role);
-        const res = await fetch('/api/tools/ultimate-canvas/upload', {
+        return requestJson('/api/tools/ultimate-canvas/upload', {
             method: 'POST',
-            credentials: 'same-origin',
             body: formData
         });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.message || data?.error || `上传失败：${res.status}`);
-        return data;
     }
 
     function createUploadedNode(uploadResult, cx, cy, pendingConnection = null, requestedNodeId = '') {
@@ -2848,13 +2847,11 @@
             url.searchParams.set('resolution', settings.resolution);
             url.searchParams.set('duration', String(settings.duration));
             try {
-                const response = await fetch(url.toString(), {
-                    credentials: 'same-origin',
+                const data = await requestJson(url.toString(), {
                     cache: 'no-store',
                     signal: controller.signal
                 });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok || !Number.isFinite(Number(data?.estimatedCost))) throw new Error('estimate unavailable');
+                if (!Number.isFinite(Number(data?.estimatedCost))) throw new Error('estimate unavailable');
                 const current = canvasRuntime.videoEstimates.get(nodeId);
                 const currentNode = engine.nodes.get(nodeId);
                 if (current?.controller !== controller
@@ -3571,12 +3568,10 @@
         fetchStatus: async (taskId, entry) => {
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(entry.nodeId)}"]`);
             setNodeGenerationStatus(nodeEl, 'loading', `视频生成中 · 第 ${entry.attempt} 次状态检查`);
-            const res = await fetch(videoStatusUrl(taskId), {
-                credentials: 'same-origin',
-                cache: 'no-store'
+            const data = await requestJson(videoStatusUrl(taskId), {
+                cache: 'no-store',
+                policy: 'video-status'
             });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data?.message || data?.error || `状态读取失败：${res.status}`);
             return data?.task || data;
         },
         onStatus: (nodeId, task, entry) => {
@@ -3773,7 +3768,7 @@
             if (!capabilities.image?.enabled) {
                 return {
                     ready: false,
-                    message: capabilities.image?.message || '图形生成能力未配置，请先到后台 API 设置完成配置。'
+                    message: window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE
                 };
             }
             const validation = window.UltimateCanvasGenerationNodes.validateImage({
@@ -3791,7 +3786,7 @@
             if (!capabilities.video?.enabled) {
                 return {
                     ready: false,
-                    message: capabilities.video?.message || '默认视频 API 未配置，暂不能创建视频任务。'
+                    message: window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE
                 };
             }
             const validation = window.UltimateCanvasGenerationNodes.validateVideo({
@@ -4014,7 +4009,11 @@
         setNodeGenerationStatus(nodeEl, 'loading', '正在通过文本模型优化视频提示词');
         try {
             const result = await postJson(
-                backendEndpoint(canvasRuntime.bootstrap?.capabilities?.text?.endpoint, '/api/tools/ultimate-canvas/generate'),
+                backendEndpoint(
+                    canvasRuntime.bootstrap?.capabilities?.text?.endpoint,
+                    '/api/tools/ultimate-canvas/generate',
+                    'text'
+                ),
                 {
                     kind: 'text',
                     mode: 'video-prompt-enhance',
@@ -4025,7 +4024,8 @@
                     project_id: canvasRuntime.selectedProjectId,
                     video_card_id: canvasRuntime.selectedVideoCardId,
                     canvas_document_id: canvasRuntime.documentId
-                }
+                },
+                { policy: 'text' }
             );
             const optimized = generatedTextFromResult(result);
             if (!optimized) throw new Error('文本模型没有返回可用提示词。');

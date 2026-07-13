@@ -15,12 +15,17 @@
         window.dispatchEvent(new CustomEvent(`canvas-generation:${name}`, { detail }));
     }
 
+    function capabilityPolicy(key) {
+        const kind = String(key || '').split(':', 1)[0];
+        return ['text', 'script', 'image', 'video'].includes(kind) ? kind : 'none';
+    }
+
     function mergeConfig(next = {}) {
         if (next.endpoints) {
             const { resolveApiEndpoint } = window.UltimateCanvasBackendContract;
             const endpoints = Object.fromEntries(Object.entries(next.endpoints).map(([key, value]) => [
                 key,
-                resolveApiEndpoint(value, '', window.location.origin)
+                resolveApiEndpoint(value, '', window.location.origin, capabilityPolicy(key))
             ]));
             state.endpoints = { ...state.endpoints, ...endpoints };
         }
@@ -54,14 +59,11 @@
             data = { raw: text };
         }
         if (!res.ok) {
-            const message = typeof data?.error === 'string'
-                ? data.error
-                : typeof data?.message === 'string'
-                    ? data.message
-                    : `Generation request failed: ${res.status}`;
-            const err = new Error(message);
-            err.response = data;
-            throw err;
+            throw window.UltimateCanvasBackendContract.createApiError(
+                res.status,
+                data,
+                `Generation request failed: ${res.status}`
+            );
         }
         return data;
     }
@@ -74,14 +76,14 @@
                 : payload.kind === 'script'
                     ? '脚本'
                     : '文本';
-        const err = new Error(`${kindLabel}生成还没有可用的正式接口，请先完成后台能力配置和归属选择。`);
-        err.response = {
+        const response = {
             error: 'canvas_generation_endpoint_unavailable',
             kind: payload.kind || 'unknown',
             mode: payload.mode || '',
-            message: err.message
+            message: window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE,
+            label: kindLabel
         };
-        return err;
+        return window.UltimateCanvasBackendContract.createApiError(503, response);
     }
 
     async function generate(payload) {
