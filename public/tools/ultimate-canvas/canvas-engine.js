@@ -789,14 +789,6 @@ class CanvasEngine {
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
-                <div class="generation-summary-row">
-                    <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
-                        <span data-generation-mode-label>文生视频</span>
-                    </button>
-                    <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="video" data-generation-popover="spec" aria-expanded="false">
-                        <span data-generation-spec>16:9 · 720p · 5s</span>
-                    </button>
-                </div>
                 <div class="generation-node-toolbar">
                     <button type="button" class="generation-command" data-generation-command="optimize-prompt">优化提示词</button>
                     <button type="button" class="generation-command" data-generation-command="camera-presets" data-generation-popover="camera" aria-expanded="false">运镜</button>
@@ -811,6 +803,14 @@ class CanvasEngine {
                     <div class="video-model-info">
                         <span class="model-icon">📊</span>
                         <span>默认视频 API</span>
+                    </div>
+                    <div class="generation-summary-row">
+                        <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
+                            <span data-generation-mode-label>文生视频</span>
+                        </button>
+                        <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="video" data-generation-popover="spec" aria-expanded="false">
+                            <span data-generation-spec>16:9 · 720p · 5s</span>
+                        </button>
                     </div>
                     <div class="video-footer-right">
                         <span class="cost-label" data-generation-cost>后台计费</span>

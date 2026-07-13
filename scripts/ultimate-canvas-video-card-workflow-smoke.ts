@@ -310,7 +310,7 @@ assert.ok(
   index.indexOf('video-card-workflow.js') < index.indexOf('app.js'),
   'workflow loads before app',
 );
-assert.match(index, /styles\.css\?v=20260711-liblib-interactions/);
+assert.match(index, /styles\.css\?v=20260713-video-footer-controls/);
 assert.match(index, /video-card-workflow\.js\?v=20260711-video-card-complete/);
 assert.match(index, /app\.js\?v=20260713-sd2-same-origin/);
 

@@ -136,6 +136,34 @@ assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
   transform: 'translateX(-50%)',
 });
 
+const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
+const videoTemplateStart = engineSource.indexOf("if (type === 'video') return `");
+const imageTemplateStart = engineSource.indexOf("if (type === 'image') return `", videoTemplateStart);
+const videoTemplate = engineSource.slice(videoTemplateStart, imageTemplateStart);
+const toolbarStart = videoTemplate.indexOf('class="generation-node-toolbar"');
+const footerStart = videoTemplate.indexOf('class="video-props-footer"');
+const modelStart = videoTemplate.indexOf('class="video-model-info"', footerStart);
+const summaryStart = videoTemplate.indexOf('class="generation-summary-row"');
+const footerRightStart = videoTemplate.indexOf('class="video-footer-right"', footerStart);
+
+assert.ok(toolbarStart < footerStart, 'video toolbar remains above the footer');
+assert.ok(footerStart < modelStart, 'video model remains inside the footer');
+assert.ok(modelStart < summaryStart, 'video settings follow the model label');
+assert.ok(summaryStart < footerRightStart, 'video settings precede cost and submit controls');
+
+assertDeclarations(ruleWith(['.video-props-footer']), {
+  display: 'grid',
+  'grid-template-columns': 'minmax(0, 1fr) auto minmax(0, 1fr)',
+});
+assertDeclarations(ruleWith(['.video-props-footer .generation-summary-row']), {
+  padding: '0',
+  'border-bottom': '0',
+  'justify-self': 'center',
+});
+assertDeclarations(ruleWith(['.video-props-footer .video-footer-right']), {
+  'justify-self': 'end',
+});
+
 for (const selectorsToCheck of [
   ['.image-props-footer'],
   ['.generation-summary-row'],

@@ -300,8 +300,8 @@ contains(appSource, 'data-generated-task-retry', 'terminal video task can retry'
 contains(appSource, "scheduleCanvasSave('video_prompt_optimize')", 'optimized video prompt persists');
 contains(appSource, "scheduleCanvasSave('video_camera_preset')", 'camera preset persists');
 
-assert.match(indexSource, /styles\.css\?v=20260711-liblib-interactions/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260711-liblib-interactions/);
+assert.match(indexSource, /styles\.css\?v=20260713-video-footer-controls/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260713-video-footer-controls/);
 assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-liblib-interactions/);
 assert.match(indexSource, /app\.js\?v=20260713-sd2-same-origin/);
 
