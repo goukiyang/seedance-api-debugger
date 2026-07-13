@@ -23,12 +23,12 @@ Task 8 基线：`f72fc26716ef43d4905e5ea03bb511139c32f20e`
 ## 3. 每个文件改了什么
 
 - `app.js`：完成项目/视频卡上下文、引用选择、节点折叠与弹层、图片原位结果、下游视频创建、视频任务轮询恢复，以及 Task 8 的瞬时视频预估。预估以分辨率和时长签名防止旧响应覆盖新设置；单节点删除执行定向清理，整画布清空、文档恢复、项目/视频卡上下文切换及 `pagehide` 均在替换上下文前执行全量清理。
-- `canvas-engine.js`、`styles.css`：提供紧凑/展开节点、单一弹层入口、引用兼容/禁用状态、稳定结果区域和窄屏布局；图片与视频均保留可编辑提交控件。
+- `canvas-engine.js`、`styles.css`：提供固定尺寸节点、节点下方编辑面板、单一弹层入口、引用兼容/禁用状态、稳定结果区域和窄屏布局；图片与视频均保留可编辑提交控件，选中状态不再改变卡片尺寸。
 - 三个 generation 模块：分别集中交互纯函数、生成请求/响应契约和任务轮询协调，覆盖引用去重、持久化清洗、连接回滚、轮询替换及过期响应保护。`generation-node-interactions.js` 还提供生产与烟测共用的 `clearVideoEstimateEntries`：每个非空 timer 清理一次、每个 controller 中止一次，即使中止抛错也继续并最终清空 Map。
 - `video-card-workflow.js`：集中视频卡、方向、任务版本、重试、迁移、拆分、合并和审批请求契约。
 - `index.html`：按依赖顺序加载模块；最终 hardening 生产模块 `generation-node-interactions.js`、`generation-task-coordinator.js`、`canvas-save-coordinator.js`、`app.js` 使用 cache key `20260712-final-hardening`。未在 hardening 中修改的 `styles.css`、`canvas-engine.js`、`generation-node-workflow.js` 保留其既有 `20260711-liblib-interactions` key。
 - `ultimate-canvas-preview-server.mjs`：仅监听本机并以内存 mock 覆盖画布 API；Task 8 的 `/api/tasks/estimate` mock 使用 `Math.ceil(duration * 3)`，该公式只存在于预览服务器，不进入生产文件。
-- 烟测脚本：覆盖普通用户权限、上下文隔离、节点模式和参数、引用选择、原位结果、连接回滚、轮询协调、保存恢复、预览 API，以及 Task 8 的预估端点、350ms 防抖、请求中止、签名保护和文案。
+- 烟测脚本：覆盖普通用户权限、上下文隔离、节点模式和参数、引用选择、原位结果、连接回滚、轮询协调、保存恢复、预览 API、选中节点尺寸稳定，以及 Task 8 的预估端点、350ms 防抖、请求中止、签名保护和文案。
 - 既有后端文件：补齐画布 bootstrap、视频卡管理/任务归属/重试沿用方向及纯显示规则；未新增或修改后端生成路由。
 
 ## 4. 跑了哪些验证命令
@@ -49,8 +49,8 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 - GREEN 与完整套件全部退出 0：8 个语法检查、11 个烟测、TypeScript、lint、build 均通过；预览 API 烟测在随机本机端口启动并自行清理子进程。
 - `npm run lint` 有 38 条既有 warning：6 条 `react-hooks/exhaustive-deps`、32 条 `@next/next/no-img-element`；修改的无线画布文件无新增 lint warning。构建成功生成 76 个静态页面，并包含 `/api/tasks/estimate` 与无线画布路由。
 - 应用内浏览器九项验收全部通过：紧凑/展开、画布引用选择、禁用模式及原因、单弹层与 Escape、同节点图片结果、图片结果创建并连接视频节点、刷新后视频轮询恢复、390px 视口、控制台零新增 warning/error。
-- 结果布局修复后，在 71% 画布缩放下，图片结果操作行底部为 `767.93px`，卡片底部为 `787.38px`，属性面板顶部为 `798.76px`；操作行完整位于卡片内且属性面板从卡片下方开始。点击“生成视频”后实际出现 `node-4` 和 `conn-node-2-node-4`。
-- 390px 视口下，`documentElement.clientWidth === scrollWidth === 390`，选中节点卡片和属性面板计算宽度均为 `366px`；弹层范围为 `x=12.66px` 到 `right=377.99px`，未越出视口。
+- 最终选中状态实测：图片和视频卡片选中前后计算尺寸始终为 `350×240px`；视频结果操作行固定为 `24px` 高并完整位于卡片内，属性面板从卡片下方开始。点击“生成视频”后仍能创建下游节点和连接。
+- 390px 视口下，`documentElement.clientWidth === scrollWidth === 390`；选中卡片宽度为 `350px`，属性面板宽度为 `366px`，二者中心点一致；既有规格弹层仍完整位于视口内。
 
 ## 6. 是否真实调用了文字/图片/视频生成
 
@@ -81,15 +81,15 @@ npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
 
 Parent browser QA confirmed that the image result and editor remain on the same node. It also found a layout defect at 71% zoom: the selected card ended at `y=746.21`, while the visible create-video action began at `y=792.54`, underneath the following image properties panel. The action locator was visible to Playwright, but the overlapping panel intercepted the click.
 
-The defect is fixed in CSS. Selected image/video nodes with a nonempty generation result now use content-driven height with a `350px` minimum; generated result cards use border-box sizing; previews are bounded; and action rows remain in normal flow above the same-node editor. Unselected generated nodes retain the compact `350x240` card and hide result actions until selected. Ports remain at the actual card's vertical center, and the existing `ResizeObserver` continues to refresh connection paths after card size changes. Video task/version action rows remain in the same result card and were not removed or nested.
+The defect is fixed in CSS. The final selection-stability pass supersedes the earlier content-driven selected-card rule: selected and unselected image/video cards both remain `350x240`; selected result previews are compacted inside that fixed card; and the 24px action row stays available through horizontal scrolling without a visible scrollbar. The same-node editor remains a separate centered panel below the card. Ports remain at the card's vertical center, and the existing `ResizeObserver` continues to refresh connection paths.
 
-The semantic smoke rejects the old fixed-height selected-result behavior and verifies exact compact-state, bounded-media, mobile-width, action-row and connector declarations. It confirms that `ResizeObserver` setup remains in source but does not execute observer behavior. Parent browser re-verification passed: the result actions are inside the card, the editor starts below it, and clicking create-video produced one downstream video node and connection.
+The semantic smoke now rejects selection-based card enlargement and verifies exact fixed dimensions, bounded media, mobile width, action-row and connector declarations. It confirms that `ResizeObserver` setup remains in source but does not execute observer behavior. Parent browser re-verification passed: result actions remain inside the card, the editor starts below it, and clicking create-video still produces a downstream video node and connection.
 
 ### Review hardening follow-up
 
-Modified files for this follow-up are `public/tools/ultimate-canvas/styles.css`, the new `scripts/ultimate-canvas-result-layout-smoke.ts`, this handoff, and the ignored `.superpowers/sdd/browser-result-layout-report.md`. The stylesheet now makes the generated result card explicitly content-driven, exposes selected action rows, and caps selected image/video cards at `calc(100vw - 24px)` below 720px without viewport-based font scaling.
+Modified files for the final layout follow-up are `public/tools/ultimate-canvas/styles.css`, `scripts/ultimate-canvas-result-layout-smoke.ts`, `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`, and this handoff. The stylesheet keeps selected image/video cards at the compact base size, centers the existing editor panel below them, and only shrinks cards below 350px when the viewport itself is narrower.
 
-TDD RED was recorded with `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`: strict PostCSS first exposed an unrelated legacy parse-recovery brace, so the smoke was switched to Next's bundled PostCSS safe parser; it then failed on the production `height: 100%` result-card declaration. After the CSS fix, the same smoke passed. Focused verification runs the new semantic layout smoke plus interaction, complete, preview API, and generation workflow smokes, six canvas JavaScript syntax checks, `npx tsc --noEmit --pretty false`, and `git diff --check`.
+TDD RED for selection stability was recorded with `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`: the existing production rule returned `620px` instead of the required `350px`. A second RED captured the compressed video action row before its fixed 24px height was added. After the CSS fix, the semantic layout smoke and all 11 canvas smokes passed, followed by TypeScript, lint, build, and `git diff --check`.
 
 The semantic smoke parses the stylesheet AST and checks exact declarations; it does not itself provide computed browser rectangles, stacking/hit-test evidence, clicks, or executed `ResizeObserver` behavior. Parent browser QA supplied the missing rendering evidence: desktop result geometry and hit testing passed, 390px document overflow stayed at zero, the mobile popover stayed within 12px viewport margins, and the browser console reported zero warning/error entries.
 
@@ -154,5 +154,12 @@ Tracker completion remains identity-based. If the old promise later settles, its
 - 视频节点提交后立即进入单请求占用状态，“生成视频”按钮禁用，不能在后端返回前重复创建付费任务；任务保存后刷新页面可恢复，并最终显示“视频生成完成”。
 - 图片节点保留完整规格与提交控件，规格显示 `9:16 · 1K · 1张`；本机 mock 图片在同一节点原位展示，并可继续再次生成或创建下游视频节点。
 - 参考选择流程可从素材库选中持久化素材，参考计数由 `0/10` 更新为 `1/10`，节点显示“参考图 1”，同时新增可追踪的参考图片节点与连接；退出后保存状态回到“已保存”。
-- 390px 视口下 `documentElement.clientWidth === scrollWidth === 390`；选中节点与属性区计算宽度均为 `366px`；规格弹层范围为 `x=12.66px` 到 `right=377.99px`，完整位于视口内。
+- 390px 视口下 `documentElement.clientWidth === scrollWidth === 390`；选中节点计算宽度为 `350px`，属性区为 `366px`，二者中心点一致；规格弹层完整位于视口内。
 - 浏览器最终 warning/error 日志为 0。上述流程全部使用 `ultimate-canvas-preview-server.mjs` 的本机内存 mock，没有访问线上 sd2、没有调用真实模型、没有消耗点数。
+
+## 选中节点尺寸稳定修复（2026-07-13）
+
+- 根因是 `styles.css` 对选中图片/视频卡片显式设置了 `width: 620px; height: 350px`，有结果时又改为内容驱动高度，因此不是画布缩放，而是选中态样式主动放大。
+- 图片和视频卡片现在选中前后都保持 `350×240px`；下方参数编辑器仍正常展开并以卡片中心对齐。生成结果预览限制为 92px，操作行固定为 24px 并可横向滚动，按钮没有被裁切或移出卡片。
+- 桌面浏览器实测选中视频卡为 `350×240px`，操作行 `clientHeight === scrollHeight === 24` 且底部位于卡片底部之上；390px 下文档无横向溢出，卡片和属性面板中心点一致，控制台 warning/error 为 0。
+- TDD、11 个画布烟测、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 与 `git diff --check` 均通过。没有调用线上生成、没有消耗点数、没有触碰受保护设置或后端核心逻辑。

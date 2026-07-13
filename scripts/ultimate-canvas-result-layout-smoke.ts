@@ -41,27 +41,49 @@ const emptySelectedCards = ruleWith([
   '.canvas-node.selected.node-type-video .node-card',
   '.canvas-node.selected.node-type-image .node-card',
 ]);
-assertDeclarations(emptySelectedCards, { width: '620px', 'max-width': '620px', height: '350px' });
+assertDeclarations(emptySelectedCards, { width: '350px', 'max-width': '350px', height: '240px' });
+
+const selectedBodies = ruleWith([
+  '.canvas-node.selected.node-type-video .node-body',
+  '.canvas-node.selected.node-type-image .node-body',
+]);
+assertDeclarations(selectedBodies, { 'min-height': '208px' });
+
+const selectedPlaceholders = ruleWith([
+  '.canvas-node.selected.node-type-video .card-preview-placeholder',
+  '.canvas-node.selected.node-type-image .card-preview-placeholder',
+]);
+assertDeclarations(selectedPlaceholders, { height: '130px' });
 
 const selectedResultSelectors = [
   '.canvas-node.selected.node-type-video .node-card:has([data-generation-result-region]:not(:empty))',
   '.canvas-node.selected.node-type-image .node-card:has([data-generation-result-region]:not(:empty))',
 ];
-assertDeclarations(ruleWith(selectedResultSelectors), { height: 'auto', 'min-height': '350px' });
+assertDeclarations(ruleWith(selectedResultSelectors), { height: '240px', 'min-height': '240px' });
 
 const selectedResultBodies = selectedResultSelectors.map(selector => `${selector} .node-body`);
-assertDeclarations(ruleWith(selectedResultBodies), { height: 'auto' });
+assertDeclarations(ruleWith(selectedResultBodies), { height: '100%', 'min-height': '208px' });
 
 assertDeclarations(ruleWith(['.generated-reference-card']), {
   'box-sizing': 'border-box',
-  height: 'auto',
 });
+
+const selectedResultCards = selectedResultSelectors.map(selector => `${selector} .generated-reference-card`);
+assertDeclarations(ruleWith(selectedResultCards), { height: '100%', 'min-height': '0', padding: '10px' });
 
 const selectedActions = ruleWith([
   '.canvas-node.selected.node-type-video .generated-action-row',
   '.canvas-node.selected.node-type-image .generated-action-row',
 ]);
 assertDeclarations(selectedActions, { display: 'flex' });
+assertDeclarations(selectedActions, {
+  'flex-wrap': 'nowrap',
+  'overflow-x': 'auto',
+  'overflow-y': 'hidden',
+  height: '24px',
+  'min-height': '24px',
+  flex: '0 0 24px',
+});
 
 const unselectedActions = ruleWith([
   '.canvas-node:not(.selected).node-type-video .generated-action-row',
@@ -73,6 +95,20 @@ assertDeclarations(ruleWith(['.generated-frame-preview']), {
   flex: '0 1 auto',
   'max-height': '260px',
   'object-fit': 'contain',
+});
+
+const selectedResultPreviews = selectedResultSelectors.map(selector => `${selector} .generated-frame-preview`);
+assertDeclarations(ruleWith(selectedResultPreviews), {
+  'min-height': '0',
+  'max-height': '92px',
+  'margin-top': '8px',
+});
+
+assertDeclarations(ruleWith(['.node-video-props']), {
+  'margin-left': 'calc((350px - 640px) / 2)',
+});
+assertDeclarations(ruleWith(['.node-image-props']), {
+  'margin-left': 'calc((350px - 640px) / 2)',
 });
 
 assertDeclarations(ruleWith(['.node-connector']), {
@@ -87,17 +123,14 @@ css.walkAtRules('media', (atRule: any) => {
 });
 assert.ok(mobileMedia, 'missing 720px mobile layout rule');
 const mobileSelectedCards = ruleWith([
-  '.canvas-node.selected.node-type-video .node-card',
-  '.canvas-node.selected.node-type-image .node-card',
+  '.node-type-video .node-card',
+  '.node-type-image .node-card',
 ], mobileMedia);
 assertDeclarations(mobileSelectedCards, {
-  width: 'calc(100vw - 24px)',
-  'max-width': 'calc(100vw - 24px)',
+  width: 'min(350px, calc(100vw - 24px))',
+  'max-width': 'min(350px, calc(100vw - 24px))',
 });
-assert.equal(390 - 24, 366, '390px viewport leaves 12px on each side of the selected card');
-selectedResultSelectors.forEach(selector => {
-  assert.ok(selectors(mobileSelectedCards).some(candidate => selector.startsWith(candidate)), 'mobile selected-card cap also applies to nonempty result cards');
-});
+assert.equal(Math.min(350, 390 - 24), 350, '390px viewport keeps the selected card at its compact width');
 
 const generatedResultAction = { id: 'generated-result-action', enabled: true };
 const resultRegion = {

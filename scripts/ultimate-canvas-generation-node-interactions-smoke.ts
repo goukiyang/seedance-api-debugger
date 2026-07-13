@@ -25,8 +25,8 @@ contains(engineSource, 'selectNode(nodeId)', 'app can return selection to the ta
 contains(engineSource, 'new ResizeObserver', 'node size changes update edge paths');
 matches(
   stylesSource,
-  /\.canvas-node\.selected\.node-type-(?:video|image) \.node-card:has\(\[data-generation-result-region\]:not\(:empty\)\)[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*350px;/,
-  'selected generated results use content-driven card height with the selected-node minimum',
+  /\.canvas-node\.selected\.node-type-(?:video|image) \.node-card:has\(\[data-generation-result-region\]:not\(:empty\)\)[\s\S]*?height:\s*240px;[\s\S]*?min-height:\s*240px;/,
+  'selected generated results keep the same compact card height',
 );
 matches(
   stylesSource,
