@@ -191,7 +191,7 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 
 ### 1. 本次目标理解
 
-本次为完整集成回执，覆盖 Git 范围 5bb620cb366af65f5f0857645300f26d19b1a63a..8f8aef8，而非仅记录某一个 Task。目标是在保留既有认证和普通用户访问限制的前提下，让 Ultimate Canvas 的生产请求通过 SD2 同源业务路由完成 bootstrap、文档、素材库、上传、预估、生成提交与任务轮询；本地预览继续使用 Mock，且浏览器不持有任何第三方 API 密钥。
+本次为完整集成回执，覆盖 Git 范围 5bb620cb366af65f5f0857645300f26d19b1a63a..d15e318，而非仅记录某一个 Task。目标是在保留既有认证和普通用户访问限制的前提下，让 Ultimate Canvas 的生产请求通过 SD2 同源业务路由完成 bootstrap、文档、素材库、上传、预估、生成提交与任务轮询；本地预览继续使用 Mock，且浏览器不持有任何第三方 API 密钥。
 
 ### 2. 实际修改了哪些文件
 
@@ -218,7 +218,7 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 
 - .gitignore：忽略 .superpowers/sdd/ 的本地任务记录。
 - docs/handoffs/ultimate-canvas-implementation-report.md：记录本次同源接入及其验证、安全边界和未完成事项；本节为该范围的最终集成回执。
-- public/tools/ultimate-canvas/backend-contract.js：新增前端后端契约层；按文字、图片、视频能力分别维护同源业务路由白名单；校验任务状态模板；集中处理状态和响应错误，并提供普通用户可理解的安全文案。
+- public/tools/ultimate-canvas/backend-contract.js：新增前端后端契约层；按文字、图片、视频能力分别维护同源业务路由白名单，并精确放行画布已有的审批与单任务重试路由；校验任务状态模板；集中处理状态和响应错误，并提供普通用户可理解的安全文案。
 - public/tools/ultimate-canvas/generation-api.js：通过契约层校验配置下发的能力端点，拒绝跨能力或未允许的业务路由，并统一保留错误状态与响应；浏览器端不直接接触第三方 API Key。
 - public/tools/ultimate-canvas/app.js：将应用 bootstrap、画布文档、素材库、上传、预估与任务轮询全部改为通过 requestJson 访问同源后端；读取并显示生产 SD2/本地 Mock 后端标识，保留既有认证和普通用户检查。
 - public/tools/ultimate-canvas/index.html：按依赖顺序加载后端契约模块，并更新 backend-contract.js、generation-api.js 和 app.js 的脚本缓存版本。
@@ -237,12 +237,12 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 - 对 public/tools/ultimate-canvas/backend-contract.js、generation-api.js、app.js、canvas-engine.js 执行 node --check。
 - 执行 npx tsc --noEmit --pretty false。
 - 执行 git diff --check。
-- 在精确 8f8aef8 的干净 detached 外部 worktree 中执行 npm run lint 和 npm run build。
+- 在精确功能代码 HEAD d15e318 的干净 detached 外部 worktree 中执行 npm run lint 和 npm run build。
 - 针对契约与缓存版本的 5 个 smoke 单独复跑：ultimate-canvas-same-origin-backend-smoke.ts、ultimate-canvas-context-rules-smoke.ts、ultimate-canvas-generation-node-interactions-smoke.ts、ultimate-canvas-generation-node-workflow-smoke.ts、ultimate-canvas-video-card-workflow-smoke.ts。
 
 ### 5. 验证结果是否通过
 
-通过。当前代码 HEAD 8f8aef8 上，12 个 ultimate-canvas-*-smoke.ts 脚本全部通过；4 个 node --check、TypeScript 检查和 git diff --check 均通过。干净 detached 外部 worktree 的 npm run lint 和 npm run build 也通过；两者只保留既有 warning，构建产出 76 个页面。上述 5 个契约与缓存版本 smoke 均通过。最终 hardening 后的本地浏览器复测也已通过：页面显示“本地 Mock”，bootstrap 返回 `mode: mock`、`transport: same-origin`、`mock: true`，用户角色为普通 `user`，三个浏览器脚本均加载 `20260713-sd2-same-origin` 缓存版本，控制台 warning/error 为 0。
+通过。功能代码 HEAD d15e318 上，12 个 ultimate-canvas-*-smoke.ts 脚本全部通过；4 个 node --check、TypeScript 检查和 git diff --check 均通过。干净 detached 外部 worktree 的 npm run lint 和 npm run build 也通过；两者只保留既有 warning，构建产出 76 个页面。上述 5 个契约与缓存版本 smoke 均通过，并覆盖审批、重新打开视频卡与单任务重试的允许路由及相邻非法路由。最终 hardening 后的本地浏览器复测也已通过：页面显示“本地 Mock”，bootstrap 返回 `mode: mock`、`transport: same-origin`、`mock: true`，用户角色为普通 `user`，三个浏览器脚本均加载 `20260713-sd2-same-origin` 缓存版本，控制台 warning/error 为 0。
 
 ### 6. 是否真实调用了文字/图片/视频生成
 
