@@ -35,6 +35,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Local git worktrees
+.worktrees/
+
 # Storage (local uploads)
 storage/
 storage
