@@ -42,7 +42,7 @@ const generateRouteSource = readFileSync('src/app/api/tools/ultimate-canvas/gene
 const previewServerSource = readFileSync('scripts/ultimate-canvas-preview-server.mjs', 'utf8');
 assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('generation-api.js'));
 assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('app.js'));
-assert.match(appSource, /function backendEndpoint\(candidate, fallback\)\s*\{\s*return window\.UltimateCanvasBackendContract\.resolveApiEndpoint\(candidate, fallback, window\.location\.origin\);/s);
+assert.match(appSource, /function backendEndpoint\(candidate, fallback\)\s*\{\s*return window\.UltimateCanvasBackendContract\.resolveApiEndpoint\(candidate, fallback, window\.location\.origin\);/);
 assert.match(appSource, /text: backendEndpoint\(capabilities\.text\?\.endpoint, '\/api\/tools\/ultimate-canvas\/generate'\)/);
 assert.match(appSource, /script: backendEndpoint\(capabilities\.script\?\.endpoint, '\/api\/tools\/ultimate-canvas\/generate'\)/);
 assert.match(appSource, /image: backendEndpoint\(capabilities\.image\?\.endpoint, '\/api\/assets\/generate'\)/);
@@ -51,15 +51,15 @@ assert.match(appSource, /descriptor\.url = backendEndpoint\(capabilities\.image\
 assert.match(appSource, /descriptor\.url = backendEndpoint\(capabilities\.video\?\.endpoint, descriptor\.url\);/);
 assert.ok(!appSource.includes('descriptor.url = capabilities.image?.endpoint || descriptor.url;'));
 assert.ok(!appSource.includes('descriptor.url = capabilities.video?.endpoint || descriptor.url;'));
-assert.match(appSource, /const endpoint = backendEndpoint\(url, ''\);\s*if \(!endpoint\) throw new Error\('Canvas requests must target a same-origin \/api\/ endpoint\.'\);\s*const res = await fetch\(endpoint,/s);
+assert.match(appSource, /const endpoint = backendEndpoint\(url, ''\);\s*if \(!endpoint\) throw new Error\('Canvas requests must target a same-origin \/api\/ endpoint\.'\);\s*const res = await fetch\(endpoint,/);
 assert.match(appSource, /window\.UltimateCanvasBackendContract\.requestErrorMessage\(res\.status, data\)/);
-assert.match(appSource, /return window\.UltimateCanvasBackendContract\.resolveTaskStatusEndpoint\(\s*canvasRuntime\.bootstrap\?\.capabilities\?\.video\?\.status_endpoint_template,\s*taskId,\s*window\.location\.origin\s*\);/s);
+assert.match(appSource, /return window\.UltimateCanvasBackendContract\.resolveTaskStatusEndpoint\(\s*canvasRuntime\.bootstrap\?\.capabilities\?\.video\?\.status_endpoint_template,\s*taskId,\s*window\.location\.origin\s*\);/);
 assert.match(appSource, /backendEndpoint\(canvasRuntime\.bootstrap\?\.capabilities\?\.text\?\.endpoint, '\/api\/tools\/ultimate-canvas\/generate'\)/);
 assert.match(appSource, /const backend = window\.UltimateCanvasBackendContract\.backendStatus\(data\);/);
 assert.match(appSource, /\? backend\.label\s*:/);
 assert.match(generationApiSource, /resolveApiEndpoint\(value, '', window\.location\.origin\)/);
-assert.match(bootstrapRouteSource, /backend:\s*\{\s*mode: 'sd2',\s*transport: 'same-origin',\s*mock: false\s*\}/s);
-assert.match(previewServerSource, /backend:\s*\{\s*mode: 'mock',\s*transport: 'same-origin',\s*mock: true\s*\}/s);
+assert.match(bootstrapRouteSource, /backend:\s*\{\s*mode: 'sd2',\s*transport: 'same-origin',\s*mock: false\s*\}/);
+assert.match(previewServerSource, /backend:\s*\{\s*mode: 'mock',\s*transport: 'same-origin',\s*mock: true\s*\}/);
 assert.ok(!generateRouteSource.includes('Musk API 未启用或缺少 API Key，请先到后台 API 设置完成配置'));
 
 console.log('ultimate-canvas-same-origin-backend-smoke passed');
