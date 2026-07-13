@@ -32,6 +32,14 @@ assert.deepEqual(interactions.generationNodeDimensions('9:16', 296), {
 });
 assert.equal(interactions.generationNodeDimensions('bad').ratio, '16:9');
 assert.equal(interactions.generationNodeDimensions('16:9', 0).width, 350);
+assert.deepEqual(interactions.videoTaskActionAvailability({
+  taskId: 'task-1', status: 'succeeded', previewUrl: '/play', downloadUrl: '/download', canRetry: true, canManage: true,
+}), {
+  taskId: 'task-1', detailUrl: '/tasks?task=task-1', previewUrl: '/play', downloadUrl: '/download', canRetry: true, canMarkVersion: true,
+});
+assert.equal(interactions.videoTaskActionAvailability({ taskId: '', status: 'succeeded' }), null);
+assert.equal(interactions.videoTaskActionAvailability({ taskId: 'task-2', status: 'running', canRetry: true }).canRetry, false);
+assert.equal(interactions.videoTaskActionAvailability({ taskId: 'task-3', status: 'failed', canRetry: true }).canRetry, true);
 contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge())', 'render derives card dimensions from current settings');
 contains(appSource, "setProperty('--generation-node-width'", 'render writes node width');
 contains(appSource, "setProperty('--generation-node-height'", 'render writes node height');
@@ -152,6 +160,17 @@ const decorationSource = appSource.slice(
 );
 assert.ok(decorationSource.includes('updateGenerationResultRegion'), 'generated results use the executable region contract');
 assert.ok(!decorationSource.includes('body.innerHTML'), 'generated results do not replace editor controls');
+assert.ok(!decorationSource.includes('const taskActions ='), 'generated result cards no longer render task links');
+assert.ok(!decorationSource.includes('const generatedButtons ='), 'generated result cards no longer render task commands');
+contains(appSource, 'data-generation-popover="task-actions"', 'video toolbar exposes a task-actions popover trigger');
+const taskActionsTriggerSource = appSource.slice(
+  appSource.indexOf('function syncVideoTaskActionsTrigger'),
+  appSource.indexOf('function renderVideoTaskActionsPopover'),
+);
+contains(engineSource, 'data-generation-command="disconnect-references"', 'video prompt toolbar exposes clear references before dynamic task actions');
+contains(taskActionsTriggerSource, "trigger.textContent = '\\u66f4\\u591a'", 'task trigger renders the more label');
+contains(taskActionsTriggerSource, 'toolbar.appendChild(trigger)', 'video task-actions trigger follows the existing toolbar commands');
+contains(appSource, "kind === 'task-actions' ? renderVideoTaskActionsPopover(node)", 'popover renders the explicit task-actions branch');
 
 assert.ok(bootstrapSource.includes('interaction'));
 assert.ok(bootstrapSource.includes('DURATION_OPTIONS'));

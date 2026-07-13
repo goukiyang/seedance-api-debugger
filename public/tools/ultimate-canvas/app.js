@@ -1958,6 +1958,7 @@
 
         const videoTaskVersion = event.target.closest('[data-video-task-version], [data-generated-task-version]');
         if (videoTaskVersion) {
+            closeGenerationPopover();
             const role = videoTaskVersion.dataset.videoTaskVersion
                 || videoTaskVersion.dataset.generatedTaskVersion;
             executeVideoTaskVersion(
@@ -1974,6 +1975,7 @@
 
         const videoTaskRetry = event.target.closest('[data-video-task-retry], [data-generated-task-retry]');
         if (videoTaskRetry) {
+            closeGenerationPopover();
             const taskId = videoTaskRetry.dataset.videoTaskRetry
                 || videoTaskRetry.dataset.generatedTaskRetry;
             requestCanvasConfirmation({
@@ -1993,6 +1995,11 @@
             }).catch(error => {
                 showCanvasNotice(error?.message || '\u4efb\u52a1\u91cd\u8bd5\u5931\u8d25\u3002', 'error');
             });
+            return;
+        }
+
+        if (event.target.closest('.generation-task-action-menu a')) {
+            closeGenerationPopover();
             return;
         }
 
@@ -3140,6 +3147,7 @@
                     </span>`).join('')
                 : '<span class="generation-reference-empty">未连接参考图</span>';
         }
+        syncVideoTaskActionsTrigger(nodeEl, node);
     }
 
     function renderAllGenerationNodeControls() {
@@ -3226,6 +3234,59 @@
         `).join('')}</div>`;
     }
 
+    function videoTaskActionsForNode(node, overrides = {}) {
+        const data = node?.data || {};
+        const result = data.generationResult || {};
+        const cardId = data.videoCardId || canvasRuntime.selectedVideoCardId || '';
+        const detail = canvasRuntime.videoCardDetails.get(cardId);
+        const cardSummary = canvasRuntime.bootstrap?.context?.video_cards?.find(card => card.id === cardId);
+        const previewUrl = overrides.videoUrl ?? overrides.previewUrl ?? data.videoPreviewUrl
+            ?? result.play_url ?? result.playUrl ?? result.result_video_url ?? result.resultVideoUrl;
+        const downloadUrl = overrides.downloadUrl ?? data.videoDownloadUrl
+            ?? result.download_url ?? result.downloadUrl;
+        const actions = window.UltimateCanvasGenerationInteractions.videoTaskActionAvailability({
+            taskId: data.taskId,
+            status: data.generationStatus,
+            previewUrl,
+            downloadUrl,
+            canRetry: Boolean(detail?.permissions?.can_generate || cardSummary?.can_generate),
+            canManage: Boolean(detail?.permissions?.can_manage || cardSummary?.can_manage)
+        });
+        return actions ? { ...actions, cardId } : null;
+    }
+
+    function syncVideoTaskActionsTrigger(nodeEl, node, overrides = {}) {
+        const toolbar = nodeEl?.querySelector('.generation-node-toolbar');
+        const existing = toolbar?.querySelector('[data-generation-popover="task-actions"]');
+        if (existing && canvasRuntime.generationPopover?.anchor === existing) closeGenerationPopover();
+        existing?.remove();
+        const actions = node?.type === 'video' ? videoTaskActionsForNode(node, overrides) : null;
+        if (!toolbar || !actions) return;
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'generation-command generation-task-more';
+        trigger.dataset.generationPopover = 'task-actions';
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.textContent = '\u66f4\u591a';
+        toolbar.appendChild(trigger);
+    }
+
+    function renderVideoTaskActionsPopover(node) {
+        const actions = videoTaskActionsForNode(node);
+        if (!actions) return '';
+        const attributes = `data-task-id="${escapeHtml(actions.taskId)}" data-node-id="${escapeHtml(node.id)}" data-card-id="${escapeHtml(actions.cardId)}"`;
+        return `<div class="generation-popover-list generation-task-action-menu">
+            <a href="${escapeHtml(actions.detailUrl)}" target="_blank" rel="noreferrer">\u4efb\u52a1\u8be6\u60c5</a>
+            ${actions.previewUrl ? `<a href="${escapeHtml(actions.previewUrl)}" target="_blank" rel="noreferrer">\u9884\u89c8</a>` : ''}
+            ${actions.downloadUrl ? `<a href="${escapeHtml(actions.downloadUrl)}" target="_blank" rel="noreferrer">\u4e0b\u8f7d</a>` : ''}
+            ${actions.canRetry ? `<button type="button" data-generated-task-retry="${escapeHtml(actions.taskId)}" data-node-id="${escapeHtml(node.id)}" data-card-id="${escapeHtml(actions.cardId)}">${escapeHtml(videoCardUiText.retryTask)}</button>` : ''}
+            ${actions.canMarkVersion ? `
+                <button type="button" data-generated-task-version="candidate" ${attributes}>${escapeHtml(videoCardUiText.candidate)}</button>
+                <button type="button" data-generated-task-version="best" ${attributes}>${escapeHtml(videoCardUiText.best)}</button>
+                <button type="button" data-generated-task-version="final" ${attributes}>${escapeHtml(videoCardUiText.final)}</button>` : ''}
+        </div>`;
+    }
+
     function closeGenerationPopover() {
         const state = canvasRuntime.generationPopover;
         if (!state) return;
@@ -3262,7 +3323,9 @@
         element.dataset.generationPopoverKind = kind;
         element.innerHTML = kind === 'mode' ? renderModePopover(node)
             : kind === 'spec' ? renderSpecPopover(node)
-                : renderCameraPopover(node);
+                : kind === 'camera' ? renderCameraPopover(node)
+                    : kind === 'task-actions' ? renderVideoTaskActionsPopover(node)
+                        : '';
         document.body.appendChild(element);
         anchor.setAttribute('aria-expanded', 'true');
         canvasRuntime.generationPopover = { nodeId, kind, anchor, element };
@@ -5774,28 +5837,6 @@
         const resultRegion = nodeEl?.querySelector('[data-generation-result-region]');
         if (!resultRegion) return;
         const node = engine.nodes.get(nodeId);
-        const cardId = node?.data?.videoCardId || canvasRuntime.selectedVideoCardId;
-        const detail = canvasRuntime.videoCardDetails.get(cardId);
-        const cardSummary = canvasRuntime.bootstrap?.context?.video_cards?.find(card => card.id === cardId);
-        const canManage = Boolean(detail?.permissions?.can_manage || cardSummary?.can_manage);
-        const canRetry = Boolean(detail?.permissions?.can_generate || cardSummary?.can_generate);
-        const terminal = ['succeeded', 'failed', 'cancelled'].includes(node?.data?.generationStatus);
-        const succeeded = node?.data?.generationStatus === 'succeeded';
-        const taskActions = options.taskId ? `
-            <div class="generated-action-row">
-                <a href="/tasks?task=${encodeURIComponent(options.taskId)}" target="_blank" rel="noreferrer">任务详情</a>
-                ${options.videoUrl ? `<a href="${escapeHtml(options.videoUrl)}" target="_blank" rel="noreferrer">预览</a>` : ''}
-                ${options.downloadUrl ? `<a href="${escapeHtml(options.downloadUrl)}" target="_blank" rel="noreferrer">下载</a>` : ''}
-            </div>
-        ` : '';
-        const generatedButtons = options.taskId && (canRetry || canManage) ? `
-            <div class="generated-action-row generated-task-actions">
-                ${canRetry && terminal ? `<button type="button" data-generated-task-retry="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.retryTask)}</button>` : ''}
-                ${canManage && succeeded ? `
-                    <button type="button" data-generated-task-version="candidate" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.candidate)}</button>
-                    <button type="button" data-generated-task-version="best" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.best)}</button>
-                    <button type="button" data-generated-task-version="final" data-task-id="${escapeHtml(options.taskId)}" data-node-id="${escapeHtml(nodeId)}" data-card-id="${escapeHtml(cardId)}">${escapeHtml(videoCardUiText.final)}</button>` : ''}
-            </div>` : '';
         const imageActions = options.imageUrl ? `
             <div class="generated-action-row generated-image-actions">
                 <a data-generated-image-action="open" href="${escapeHtml(options.imageUrl)}" target="_blank" rel="noreferrer">打开原图</a>
@@ -5815,10 +5856,9 @@
                 ${previewImage
                     ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}">`
                     : '<div class="generated-frame-lines"></div>'}
-                ${taskActions}
-                ${generatedButtons}
                 ${imageActions}
             </div>`);
+        if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
     }
 
     function createDirectorOutput(sourceId, kind, title, description, index = 0) {

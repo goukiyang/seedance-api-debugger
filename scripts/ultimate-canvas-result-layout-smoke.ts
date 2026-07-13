@@ -132,10 +132,17 @@ assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
 });
 
 assertDeclarations(ruleWith(['.node-connector']), {
-  width: '20px',
-  height: '20px',
-  top: '50%',
+    width: '20px',
+    height: '20px',
+    top: '50%',
 });
+
+assertDeclarations(ruleWith(['.generation-task-more']), { 'margin-left': 'auto' });
+assertDeclarations(ruleWith(['.generation-task-action-menu']), { 'min-width': '190px' });
+assertDeclarations(ruleWith([
+  '.generation-task-action-menu a',
+  '.generation-task-action-menu button',
+]), { width: '100%', 'justify-content': 'flex-start' });
 
 const generatedResultAction = { id: 'generated-result-action', enabled: true };
 const resultRegion = {

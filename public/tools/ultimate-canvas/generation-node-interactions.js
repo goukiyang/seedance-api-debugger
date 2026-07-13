@@ -145,6 +145,21 @@
             : '';
     }
 
+    function videoTaskActionAvailability(context = {}) {
+        const taskId = clean(context.taskId);
+        if (!taskId) return null;
+        const status = normalizedGenerationStatus(context.status);
+        const terminal = ['succeeded', 'failed', 'cancelled'].includes(status);
+        return {
+            taskId,
+            detailUrl: `/tasks?task=${encodeURIComponent(taskId)}`,
+            previewUrl: clean(context.previewUrl),
+            downloadUrl: clean(context.downloadUrl),
+            canRetry: context.canRetry === true && terminal,
+            canMarkVersion: context.canManage === true && status === 'succeeded'
+        };
+    }
+
     function isNonterminalGenerationStatus(status) {
         return NONTERMINAL_GENERATION_STATUSES.has(normalizedGenerationStatus(status));
     }
@@ -439,6 +454,7 @@
     return {
         generationNodeDimensions,
         normalizeCapabilities,
+        videoTaskActionAvailability,
         modeOptions,
         isNonterminalGenerationStatus,
         nodeHasNonterminalVideoTask,

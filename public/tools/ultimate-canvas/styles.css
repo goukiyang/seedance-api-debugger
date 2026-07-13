@@ -1970,6 +1970,20 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     cursor: not-allowed;
 }
 
+.generation-task-more {
+    margin-left: auto;
+}
+
+.generation-task-action-menu {
+    min-width: 190px;
+}
+
+.generation-task-action-menu a,
+.generation-task-action-menu button {
+    width: 100%;
+    justify-content: flex-start;
+}
+
 .generation-reference-list {
     min-height: 50px;
     padding: 8px 16px;
