@@ -37,6 +37,7 @@ Thumbs.db
 
 # Local git worktrees
 .worktrees/
+.superpowers/
 
 # Storage (local uploads)
 storage/
