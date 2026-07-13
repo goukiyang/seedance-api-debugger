@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Resize image/video cards from their selected generation ratio, keep the prompt panel fixed at 350px, and move video task actions into a `更多` menu in the prompt toolbar.
+**Goal:** Resize image/video cards from their selected generation ratio, keep the prompt panel's original 640px desktop layout unchanged, and move video task actions into a `更多` menu in the prompt toolbar.
 
 **Architecture:** Add pure ratio and task-action helpers to the existing generation interaction module. `app.js` derives presentation from already-persisted node settings, writes dimensions to the existing node DOM, and extends the existing single-generation-popover flow for task actions. CSS consumes derived dimensions and keeps prompt panels independent from media ratio.
 
@@ -12,7 +12,7 @@
 
 - Work only in the existing Ultimate Canvas workflow; do not add a second generation flow.
 - Desktop node-card long edge is exactly `350px`; narrow viewports cap it at `window.innerWidth - 24`.
-- Prompt/settings panels stay `350px` wide with natural height and never receive a media aspect ratio.
+- Prompt/settings panels retain the original `640px` desktop width and natural height, keep the existing `min(640px, calc(100vw - 24px))` narrow-viewport cap, and never receive a media aspect ratio.
 - Invalid or missing ratios fall back to `16:9`.
 - Video task actions leave the media card and appear only through the prompt-toolbar `更多` menu.
 - Preserve normal-user permissions and existing task-state gating.
@@ -107,7 +107,7 @@ git commit -m "feat: add canvas ratio dimension contract"
 
 ---
 
-### Task 2: Ratio-Aware Cards and Fixed Prompt Panels
+### Task 2: Ratio-Aware Cards and Unchanged Prompt Panels
 
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js:3057-3129, 4088-4089`
@@ -137,7 +137,7 @@ assertDeclarations(baseCards, {
   height: 'var(--generation-node-height, 196.875px)',
 });
 assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
-  width: '350px',
+  width: '640px',
   'margin-left': '0',
   left: '50%',
   transform: 'translateX(-50%)',
@@ -203,8 +203,8 @@ Unify prompt panels:
 ```css
 .node-video-props,
 .node-image-props {
-    width: 350px;
-    max-width: calc(100vw - 24px);
+    width: 640px;
+    max-width: min(640px, calc(100vw - 24px));
     margin-top: 16px;
     margin-left: 0;
     left: 50%;
@@ -212,7 +212,7 @@ Unify prompt panels:
 }
 ```
 
-Allow `.generation-summary-row`, `.generation-node-toolbar`, and footer rows to wrap at 350px. Do not apply `aspect-ratio` to prompt panels.
+Preserve the existing desktop row and toolbar layout; retain existing narrow-viewport wrapping only. Do not apply `aspect-ratio` to prompt panels.
 
 - [ ] **Step 5: Verify focused and interaction smokes**
 
@@ -394,7 +394,7 @@ Using the local preview only:
 
 1. Set a video node to `16:9`, `1:1`, and `9:16`; confirm dimensions are `350x196.875`, `350x350`, and `196.875x350` before canvas zoom.
 2. Select and deselect each node; dimensions must not change.
-3. Confirm the prompt panel is always 350px wide and centered under the card.
+3. Confirm the prompt panel remains 640px wide on desktop and centered under the card.
 4. Confirm the video result card contains no task links/buttons.
 5. Click prompt-toolbar `更多`; verify detail/preview/download and permitted retry/version actions.
 6. Close with outside click and Escape; verify a second generation popover replaces the first.
@@ -408,7 +408,7 @@ Set viewport to `390x844`, fit the canvas, and verify:
 
 - document client width equals scroll width (`390`);
 - long edge remains `350`;
-- prompt panel is `350px` wide and centered;
+- prompt panel uses the existing `366px` viewport cap and remains centered;
 - task menu stays inside 12px viewport margins.
 
 Reset the viewport afterward.

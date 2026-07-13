@@ -6,7 +6,7 @@ Branch: `teammate/ultimate-canvas-complete`
 
 ## Goal
 
-Make image and video node cards reflect the selected generation ratio while keeping the selected prompt/settings panel visually stable. The node card uses a fixed maximum long edge and derives its short edge from the current ratio. The prompt/settings panel remains a normal fixed-width form and does not inherit the media ratio. Video task actions move out of the media card so task links and version controls cannot compress the video frame.
+Make image and video node cards reflect the selected generation ratio while leaving the existing prompt/settings panel dimensions and layout unchanged. The node card uses a fixed maximum long edge and derives its short edge from the current ratio. The prompt/settings panel retains its original `640px` desktop width and natural height and does not inherit the media ratio. Video task actions move out of the media card so task links and version controls cannot compress the video frame.
 
 ## Confirmed Visual Rules
 
@@ -15,8 +15,8 @@ Make image and video node cards reflect the selected generation ratio while keep
 - Landscape dimensions use `width = 350` and `height = 350 / ratio`.
 - Portrait dimensions use `height = 350` and `width = 350 * ratio`.
 - Square nodes are `350x350`.
-- The prompt/settings panel is always `350px` wide with natural content height. It is centered below the node card and never receives `aspect-ratio`.
-- On narrow viewports, the long edge becomes `min(350px, calc(100vw - 24px))`; the same ratio calculation applies. The prompt/settings panel independently uses that same capped width.
+- The prompt/settings panel retains its original `640px` desktop width and natural content height. It is centered below the node card and never receives `aspect-ratio`.
+- On narrow viewports, the node long edge becomes `min(350px, calc(100vw - 24px))`; the same ratio calculation applies. The prompt/settings panel independently keeps its existing `min(640px, calc(100vw - 24px))` width rule.
 - The existing prompt toolbar gains a right-aligned `更多` button after `清空参考` when the video node owns a task. No video task link or version button remains inside the media card.
 - Clicking `更多` opens a compact task menu containing the actions currently available to that user and task state.
 
@@ -24,9 +24,9 @@ Examples at desktop size:
 
 | Ratio | Node card | Prompt/settings panel |
 | --- | --- | --- |
-| `16:9` | `350x197` | `350px` wide, natural height |
-| `1:1` | `350x350` | `350px` wide, natural height |
-| `9:16` | `197x350` | `350px` wide, natural height |
+| `16:9` | `350x197` | `640px` wide, natural height |
+| `1:1` | `350x350` | `640px` wide, natural height |
+| `9:16` | `197x350` | `640px` wide, natural height |
 
 ## Architecture
 
@@ -63,9 +63,9 @@ No result action is removed. Video task detail, preview, download, retry, candid
 
 ### Prompt/settings panel
 
-`.node-video-props` and `.node-image-props` will use a fixed `350px` desktop width and natural height. They are centered with `left: 50%` and `transform: translateX(-50%)` relative to the node, so the centering remains correct for every ratio without duplicating ratio arithmetic in CSS.
+`.node-video-props` and `.node-image-props` retain their existing `640px` desktop width, natural height, and desktop control layout. They are centered with `left: 50%` and `transform: translateX(-50%)` relative to the ratio-derived node width, so the centering remains correct for every ratio without duplicating ratio arithmetic in CSS.
 
-Rows and toolbars may wrap at 350px, but controls keep their current meaning and submission behavior. Popovers continue to use the existing viewport-aware positioning and are not constrained to the node ratio.
+Rows and toolbars keep their existing desktop layout and only wrap under the existing narrow-viewport rules. Popovers continue to use the existing viewport-aware positioning and are not constrained to the node ratio.
 
 ### Video task action menu
 
@@ -121,10 +121,10 @@ Out of scope:
 6. Browser acceptance:
    - `16:9`, `1:1`, and `9:16` cards match calculated dimensions.
    - Selection does not alter card dimensions.
-   - The prompt/settings panel remains 350px wide and centered for all ratios.
+   - The prompt/settings panel remains 640px wide and centered for all desktop ratios.
    - Image result actions remain inside image cards and usable.
    - Video task actions do not reduce the media rectangle; `更多` opens the expected links and permitted commands from the prompt toolbar.
-   - At 390px, document width equals scroll width and the panel remains centered.
+   - At 390px, document width equals scroll width, the panel uses its existing 366px viewport cap, and remains centered.
    - Browser warning/error log remains empty.
 
 ## Acceptance Criteria
@@ -132,7 +132,7 @@ Out of scope:
 - Ratio changes immediately resize only the image/video card.
 - Card dimensions use a 350px maximum long edge and the selected exact ratio.
 - Selecting a node does not resize its card.
-- The prompt/settings panel remains a normal 350px-wide form with natural height and is centered below the card.
+- The prompt/settings panel remains the original 640px-wide desktop form with natural height and is centered below the card; narrow viewports retain the existing viewport cap.
 - Generated media is not cropped and result actions remain available.
 - Video task actions never participate in media-card layout and remain available from the prompt-toolbar `更多` menu.
 - Saved/restored nodes recover the same dimensions from existing ratio settings.
