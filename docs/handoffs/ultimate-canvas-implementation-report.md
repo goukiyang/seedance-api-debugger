@@ -191,42 +191,80 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 
 ### 1. 本次目标理解
 
-本轮完成已批准 Tasks 1-3 的最终验证与交付记录。目标分支为 `teammate/ultimate-canvas-complete`，目标同源环境为 `https://sd2.youdoodesign.com`；本地预览保持 Mock-only 和零点数消耗。
+本次为完整集成回执，覆盖 Git 范围 5bb620cb366af65f5f0857645300f26d19b1a63a..8f8aef8，而非仅记录某一个 Task。目标是在保留既有认证和普通用户访问限制的前提下，让 Ultimate Canvas 的生产请求通过 SD2 同源业务路由完成 bootstrap、文档、素材库、上传、预估、生成提交与任务轮询；本地预览继续使用 Mock，且浏览器不持有任何第三方 API 密钥。
 
-### 2. 验证范围与环境
+### 2. 实际修改了哪些文件
 
-所有 smoke、Node 语法检查和 TypeScript 检查均在本 feature worktree 的同一功能 HEAD `99796380221346f0f4deb74aae388413cf2dd08a` 上完成。嵌套 worktree 的 `npm run lint` 会同时加载本 worktree 与父 checkout 的 ESLint 配置并发生 `@next/next` 插件冲突；该问题已确认为环境性问题。针对相同 HEAD 的 lint 与 build 在干净 detached worktree `E:\sd2-same-origin-verification` 中完成，且主 checkout lint 亦通过。
+本范围共修改 16 个文件：
 
-### 3. 实际修改文件
+- .gitignore
+- docs/handoffs/ultimate-canvas-implementation-report.md
+- public/tools/ultimate-canvas/app.js
+- public/tools/ultimate-canvas/backend-contract.js
+- public/tools/ultimate-canvas/generation-api.js
+- public/tools/ultimate-canvas/index.html
+- scripts/ultimate-canvas-context-rules-smoke.ts
+- scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+- scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+- scripts/ultimate-canvas-normal-user-access-smoke.ts
+- scripts/ultimate-canvas-preview-api-smoke.ts
+- scripts/ultimate-canvas-preview-server.mjs
+- scripts/ultimate-canvas-same-origin-backend-smoke.ts
+- scripts/ultimate-canvas-video-card-workflow-smoke.ts
+- src/app/api/tools/ultimate-canvas/bootstrap/route.ts
+- src/app/api/tools/ultimate-canvas/generate/route.ts
 
-- `docs/handoffs/ultimate-canvas-implementation-report.md`：本次仅更新最终验证、环境差异、安全边界和部署限制记录。
-- `.superpowers/sdd/task-4-report.md`：追加恢复验证证据；该忽略文件不纳入本次提交。
-- 未修改生产代码、测试代码、依赖、锁文件或环境配置。
+### 3. 每个文件改了什么
 
-### 4. 逐文件说明
+- .gitignore：忽略 .superpowers/sdd/ 的本地任务记录。
+- docs/handoffs/ultimate-canvas-implementation-report.md：记录本次同源接入及其验证、安全边界和未完成事项；本节为该范围的最终集成回执。
+- public/tools/ultimate-canvas/backend-contract.js：新增前端后端契约层；按文字、图片、视频能力分别维护同源业务路由白名单；校验任务状态模板；集中处理状态和响应错误，并提供普通用户可理解的安全文案。
+- public/tools/ultimate-canvas/generation-api.js：通过契约层校验配置下发的能力端点，拒绝跨能力或未允许的业务路由，并统一保留错误状态与响应；浏览器端不直接接触第三方 API Key。
+- public/tools/ultimate-canvas/app.js：将应用 bootstrap、画布文档、素材库、上传、预估与任务轮询全部改为通过 requestJson 访问同源后端；读取并显示生产 SD2/本地 Mock 后端标识，保留既有认证和普通用户检查。
+- public/tools/ultimate-canvas/index.html：按依赖顺序加载后端契约模块，并更新 backend-contract.js、generation-api.js 和 app.js 的脚本缓存版本。
+- src/app/api/tools/ultimate-canvas/bootstrap/route.ts：在既有访问控制不变的情况下，返回生产后端标识 backend: { mode: 'sd2', transport: 'same-origin', mock: false }。
+- src/app/api/tools/ultimate-canvas/generate/route.ts：保留原有认证和普通用户授权检查，将文字生成不可用时的响应改为面向普通用户的“文本生成能力暂不可用，请稍后联系管理员。”文案。
+- scripts/ultimate-canvas-preview-server.mjs：本地预览 bootstrap 响应标识为 Mock，确保预览不会伪装为 SD2 生产后端。
+- scripts/ultimate-canvas-same-origin-backend-smoke.ts：新增同源后端集成烟测，覆盖能力路由白名单、请求契约、任务状态、错误文案、生产/Mock 标识和浏览器无第三方密钥。
+- scripts/ultimate-canvas-normal-user-access-smoke.ts：补充普通用户安全访问和文案断言。
+- scripts/ultimate-canvas-context-rules-smoke.ts、scripts/ultimate-canvas-generation-node-interactions-smoke.ts、scripts/ultimate-canvas-generation-node-workflow-smoke.ts、scripts/ultimate-canvas-video-card-workflow-smoke.ts：更新 app.js 缓存版本断言，防止旧缓存掩盖本次接入。
+- scripts/ultimate-canvas-preview-api-smoke.ts：验证本地预览 bootstrap 明确返回 Mock 同源运行时标识。
+- 其余上述 smoke 变更共同确保本地 Mock API 预览与既有节点、视频卡和上下文流程仍可执行。
 
-本 handoff 文件以最终成功验证替换了先前的 TypeScript 阻塞状态。Task 4 报告保留先前阻塞记录，并追加其根因、干净 worktree 的验证来源及最终状态，确保审计历史连续。
+### 4. 跑了哪些验证命令
 
-### 5. Smoke 验证结果
+- 执行全部 12 个 scripts/ultimate-canvas-*-smoke.ts 烟测脚本。
+- 对 public/tools/ultimate-canvas/backend-contract.js、generation-api.js、app.js、canvas-engine.js 执行 node --check。
+- 执行 npx tsc --noEmit --pretty false。
+- 执行 git diff --check。
+- 在精确 8f8aef8 的干净 detached 外部 worktree 中执行 npm run lint 和 npm run build。
+- 针对契约与缓存版本的 5 个 smoke 单独复跑：ultimate-canvas-same-origin-backend-smoke.ts、ultimate-canvas-context-rules-smoke.ts、ultimate-canvas-generation-node-interactions-smoke.ts、ultimate-canvas-generation-node-workflow-smoke.ts、ultimate-canvas-video-card-workflow-smoke.ts。
 
-12 个按名称排序的 `scripts/ultimate-canvas-*-smoke.ts` 脚本均退出 `0`：complete、context-rules、generation-lifecycle、generation-node-interactions、generation-node-workflow、generation-task-coordinator、normal-user-access、preview-api、result-layout、same-origin-backend、save-coordinator 和 video-card-workflow。
+### 5. 验证结果是否通过
 
-### 6. Node 与 TypeScript 验证结果
+通过。当前代码 HEAD 8f8aef8 上，12 个 ultimate-canvas-*-smoke.ts 脚本全部通过；4 个 node --check、TypeScript 检查和 git diff --check 均通过。干净 detached 外部 worktree 的 npm run lint 和 npm run build 也通过；两者只保留既有 warning，构建产出 76 个页面。上述 5 个契约与缓存版本 smoke 均通过。最终 hardening 后的本地浏览器复测也已通过：页面显示“本地 Mock”，bootstrap 返回 `mode: mock`、`transport: same-origin`、`mock: true`，用户角色为普通 `user`，三个浏览器脚本均加载 `20260713-sd2-same-origin` 缓存版本，控制台 warning/error 为 0。
 
-以下四个命令均退出 `0` 且无输出：`node --check public/tools/ultimate-canvas/backend-contract.js`、`generation-api.js`、`app.js`、`canvas-engine.js`。修复后的 `npx tsc --noEmit --pretty false` 亦退出 `0`。
+### 6. 是否真实调用了文字/图片/视频生成
 
-### 7. Lint、构建与空白检查结果
+没有。只运行了静态检查、Node/TypeScript 烟测、构建和本地 Mock 预览验证；未调用真实文字、图片或视频生成服务，也未创建付费重试。
 
-在干净 detached worktree `E:\sd2-same-origin-verification` 的相同 HEAD `9979638` 上，`npm run lint` 通过，仅保留既有 warnings；`npm run build` 通过，仅保留既有 warnings。嵌套 feature worktree 的 lint 不作为功能失败：它因父目录 ESLint 配置重复加载而报 `@next/next` 插件冲突。feature worktree 中本轮重新执行的 `git diff --check` 退出 `0`。
+### 7. 是否消耗了点数
 
-### 8. 真实文字、图片、视频调用情况
+没有。点数消耗为 0；没有创建真实付费生成、付费重试、扣点、冻结、返还或调整操作。
 
-自动化验证仅使用本地 Mock，未创建付费生成。没有直接证据表明本轮触发了真实文字、图片或视频模型调用；本轮没有此类调用。
+### 8. 是否碰过后台设置、密钥、点数核心逻辑
 
-### 9. 点数与受保护区域确认
+没有。未读取或修改 .env、后台 API 设置、provider 密钥、第三方服务地址、点数核心逻辑、credits 规则或数据库 schema；也未改动这些受保护区域的行为。生产前端仅调用同源业务路由，浏览器中没有直接第三方 API Key。
 
-本轮消耗点数为 `0`。未读取或修改 `.env`、admin API settings、provider secret configuration、credits core logic 或 database schema；未运行付费生成。
+### 9. 还没做完的内容
 
-### 10. 未完成内容、风险与下一步
+- 尚未部署到 https://sd2.youdoodesign.com。
+- 尚未在获授权的普通账号上进行非付费/真实线上验收。
+- 尚未确认目标分支 push 或线上部署成功；后续可按权限执行 push，或提供 patch 作为回退交付。
 
-Live SD2 普通账户验收仍待该分支部署至 SD2 同源环境后进行。本 Task 不声明 target-branch push 或 live deployment 成功；控制方将在本 Task 后尝试 push 并生成 patch fallback。剩余风险限于部署后需以普通账户观察真实同源响应和账务行为，而非本地 Mock 验证范围。
+### 10. 风险和建议下一步
+
+- 部署至 SD2 后，先用获授权的普通账号验证同源 bootstrap、能力不可用降级、任务状态与普通用户提示，再决定是否进行任何最小真实生成验收。
+- 后端业务路由、任务状态模板或响应字段变更时，应同步更新 backend-contract.js 和 ultimate-canvas-same-origin-backend-smoke.ts，避免前端白名单与真实接口漂移。
+- 保持本地预览的 Mock 标识与生产 SD2 标识可区分，继续禁止在浏览器暴露第三方密钥。
+- 在具备写权限后执行目标分支推送；若仍受限，交付当前 commit 的 patch，不宣称已推送或已上线。
