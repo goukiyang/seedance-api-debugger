@@ -62,3 +62,40 @@ git diff --check
 - Confirmed the restored panel remains centered independently of ratio-derived card width.
 - Confirmed ratio-derived `.canvas-node` and card declarations remain unchanged.
 - Confirmed the Task 3 `.generation-task-more` rule remains present and unchanged.
+
+## Follow-up: Helper-Coupled Geometry Coverage
+
+Review found that the original correction smoke test computed portrait and landscape card widths from hard-coded ratio arithmetic. That could remain green if `generationNodeDimensions()` regressed.
+
+The geometry assertions now read their inputs directly from:
+
+- `interactions.generationNodeDimensions('9:16').width`
+- `interactions.generationNodeDimensions('16:9').width`
+
+They retain the required `640px` panel width, `221.5625` portrait overflow, `145` landscape overflow, symmetric center checks, and `390px - 24px = 366px` mobile assertion.
+
+### Helper Coverage Check
+
+With the production helper unchanged, `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts` passed.
+
+To verify the new test detects a helper regression, the helper's default long edge was temporarily changed from `350` to `351` and the result-layout smoke was run. It failed as expected:
+
+```text
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
++ 197.438
+- 196.875
+```
+
+The helper was immediately restored to `350`; the temporary mutation is not part of this change.
+
+### Follow-up Verification
+
+Commands to run after restoration:
+
+```powershell
+npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/ultimate-canvas-complete-smoke.ts
+git diff --check
+```

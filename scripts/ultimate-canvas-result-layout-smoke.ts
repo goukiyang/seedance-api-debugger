@@ -34,14 +34,14 @@ function assertDeclarations(rule: any, expected: Record<string, string>) {
   });
 }
 
-const portraitCardWidth = 350 * 9 / 16;
+const portraitCardWidth = interactions.generationNodeDimensions('9:16').width;
 const desktopPanelWidth = 640;
 const portraitOverflow = (desktopPanelWidth - portraitCardWidth) / 2;
 assert.equal(portraitCardWidth, 196.875);
 assert.equal(portraitOverflow, 221.5625);
 assert.equal(-portraitOverflow + desktopPanelWidth / 2, portraitCardWidth / 2);
 
-const landscapeCardWidth = 350;
+const landscapeCardWidth = interactions.generationNodeDimensions('16:9').width;
 const landscapeOverflow = (desktopPanelWidth - landscapeCardWidth) / 2;
 assert.equal(landscapeOverflow, 145);
 assert.equal(-landscapeOverflow + desktopPanelWidth / 2, landscapeCardWidth / 2);
