@@ -27,10 +27,33 @@
     const VALID_RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
     const VALID_VIDEO_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
     const VALID_IMAGE_RESOLUTIONS = new Set(['1K', '2K']);
+    const GENERATION_RATIOS = Object.freeze({
+        '21:9': [21, 9], '16:9': [16, 9], '4:3': [4, 3],
+        '1:1': [1, 1], '3:4': [3, 4], '9:16': [9, 16]
+    });
     const DEFAULTS = Object.freeze({
         image: Object.freeze({ modes: MODE_DEFINITIONS.image.map(mode => mode.id), ratios: ['1:1', '4:3', '16:9', '9:16'], durations: [], resolutions: ['1K', '2K'], supportsAudio: false, supportsLastFrame: false, supportsWatermark: false, maxReferenceImages: 10 }),
         video: Object.freeze({ modes: MODE_DEFINITIONS.video.map(mode => mode.id), ratios: ['16:9', '9:16'], durations: [5, 10], resolutions: ['720p', '1080p'], supportsAudio: false, supportsLastFrame: false, supportsWatermark: true, maxReferenceImages: 9 })
     });
+
+    function clean(value) {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    function generationNodeDimensions(ratio, longEdge = 350) {
+        const normalizedRatio = Object.hasOwn(GENERATION_RATIOS, clean(ratio)) ? clean(ratio) : '16:9';
+        const [numerator, denominator] = GENERATION_RATIOS[normalizedRatio];
+        const edge = Number.isFinite(Number(longEdge)) && Number(longEdge) > 0 ? Number(longEdge) : 350;
+        const scale = edge / Math.max(numerator, denominator);
+        const round = value => Math.round(value * 1000) / 1000;
+        return {
+            ratio: normalizedRatio,
+            numerator,
+            denominator,
+            width: round(numerator * scale),
+            height: round(denominator * scale)
+        };
+    }
 
     function strings(values, validator) {
         const seen = new Set();
@@ -414,6 +437,7 @@
     }
 
     return {
+        generationNodeDimensions,
         normalizeCapabilities,
         modeOptions,
         isNonterminalGenerationStatus,

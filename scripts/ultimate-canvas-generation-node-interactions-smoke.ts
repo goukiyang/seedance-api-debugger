@@ -18,6 +18,21 @@ function matches(source: string, expected: RegExp, message: string) {
   assert.match(source, expected, message);
 }
 
+assert.deepEqual(interactions.generationNodeDimensions('16:9'), {
+  ratio: '16:9', numerator: 16, denominator: 9, width: 350, height: 196.875,
+});
+assert.deepEqual(interactions.generationNodeDimensions('9:16'), {
+  ratio: '9:16', numerator: 9, denominator: 16, width: 196.875, height: 350,
+});
+assert.deepEqual(interactions.generationNodeDimensions('1:1'), {
+  ratio: '1:1', numerator: 1, denominator: 1, width: 350, height: 350,
+});
+assert.deepEqual(interactions.generationNodeDimensions('9:16', 296), {
+  ratio: '9:16', numerator: 9, denominator: 16, width: 166.5, height: 296,
+});
+assert.equal(interactions.generationNodeDimensions('bad').ratio, '16:9');
+assert.equal(interactions.generationNodeDimensions('16:9', 0).width, 350);
+
 contains(engineSource, 'connectNodes(fromId, toId)', 'engine exposes public connection creation');
 contains(engineSource, 'disconnectNodes(fromId, toId)', 'engine exposes public connection removal');
 contains(engineSource, 'disconnectIncoming(nodeId)', 'engine can clear target references');
