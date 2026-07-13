@@ -225,8 +225,17 @@ async function readJsonBody(request) {
   }
 }
 
+function normalizeProject(project) {
+  if (!project || mockGenerationEnabled) return project;
+  return {
+    ...project,
+    _count: { ...project._count, tasks: 0 },
+    meta_label: project.meta_label?.replace(/\d+\s*任务/, '0 任务'),
+  };
+}
+
 function activeProjects() {
-  return projects.filter((project) => project.status === 'active');
+  return projects.filter((project) => project.status === 'active').map(normalizeProject);
 }
 
 function visibleVideoTasks() {
@@ -295,7 +304,7 @@ function normalizeCard(card) {
     ...card,
     can_generate: canGenerate,
     can_manage: true,
-    project: projects.find((project) => project.id === card.project_id) || null,
+    project: normalizeProject(projects.find((project) => project.id === card.project_id) || null),
     branch_count: branchCount,
     summary,
     current_best_task_id: card.current_best_task_id || currentBest?.id || null,
@@ -509,7 +518,7 @@ const server = http.createServer(async (request, response) => {
       removal_reason: '空项目可以删除',
     };
     projects.push(project);
-    return sendJson(response, { project }, 201);
+    return sendJson(response, { project: normalizeProject(project) }, 201);
   }
 
   const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
@@ -522,7 +531,7 @@ const server = http.createServer(async (request, response) => {
     } else {
       project.status = 'deleted';
     }
-    return sendJson(response, { project });
+    return sendJson(response, { project: normalizeProject(project) });
   }
 
   const createCardMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/video-cards$/);
@@ -577,6 +586,13 @@ const server = http.createServer(async (request, response) => {
   }
   if (cardMatch && request.method === 'PATCH') {
     const body = await readJsonBody(request);
+    if (!mockGenerationEnabled && [
+      'candidate_task_id',
+      'current_best_task_id',
+      'final_task_id',
+    ].some((key) => Object.prototype.hasOwnProperty.call(body, key))) {
+      return sendRealBackendRequired(response);
+    }
     const card = videoCards.find((item) => item.id === decodeURIComponent(cardMatch[1]));
     if (!card) return sendJson(response, { error: '视频卡不存在' }, 404);
     for (const key of [
@@ -775,6 +791,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (url.pathname === '/api/approvals' && request.method === 'POST') {
+    if (!mockGenerationEnabled) return sendRealBackendRequired(response);
     const body = await readJsonBody(request);
     const approval = {
       id: `approval-mock-${sequence++}`,

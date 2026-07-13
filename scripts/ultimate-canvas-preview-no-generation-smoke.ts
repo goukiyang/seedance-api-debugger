@@ -5,7 +5,12 @@ const port = 46000 + Math.floor(Math.random() * 1000);
 const baseUrl = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, ['scripts/ultimate-canvas-preview-server.mjs', String(port)], {
   cwd: process.cwd(),
-  env: process.env,
+  env: {
+    ...process.env,
+    ULTIMATE_CANVAS_MOCK: '1',
+    MOCK_GENERATION: 'true',
+    ENABLE_MOCK: 'true',
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
@@ -55,6 +60,15 @@ function assertEmptyTaskSummary(summary: Record<string, unknown>) {
   }
 }
 
+function assertNoMockProjectTaskCount(project: {
+  _count?: { tasks?: unknown };
+  meta_label?: unknown;
+} | null | undefined) {
+  assert.ok(project);
+  assert.equal(project._count?.tasks, 0);
+  assert.match(String(project.meta_label || ''), /0\s*任务/);
+}
+
 async function main() {
   try {
     await waitForServer();
@@ -67,9 +81,29 @@ async function main() {
     assert.equal(bootstrap.data.capabilities.text.enabled, false);
     assert.equal(bootstrap.data.capabilities.image.enabled, false);
     assert.equal(bootstrap.data.capabilities.video.enabled, false);
+    const realBackendRequiredMessage = bootstrap.data.capabilities.video.message;
+    assert.match(realBackendRequiredMessage, /未连接 SD2/);
+    for (const project of bootstrap.data.context.projects) {
+      assertNoMockProjectTaskCount(project);
+    }
     for (const card of bootstrap.data.context.video_cards) {
       assertEmptyTaskSummary(card.summary);
+      assertNoMockProjectTaskCount(card.project);
     }
+
+    const cardDetail = await request('GET', '/api/video-cards/card-opening');
+    assert.equal(cardDetail.status, 200);
+    assertNoMockProjectTaskCount(cardDetail.data.video_card.project);
+
+    const cardList = await request('GET', '/api/projects/project-personal/video-cards');
+    assert.equal(cardList.status, 200);
+    for (const card of cardList.data.video_cards) {
+      assertNoMockProjectTaskCount(card.project);
+    }
+
+    const projectUpdate = await request('PATCH', '/api/projects/project-personal', {});
+    assert.equal(projectUpdate.status, 200);
+    assertNoMockProjectTaskCount(projectUpdate.data.project);
 
     const branches = await request('GET', '/api/video-cards/card-opening/branches');
     assert.equal(branches.status, 200);
@@ -85,21 +119,32 @@ async function main() {
       ['POST', '/api/video/retry/task-opening-1', {}],
       ['GET', '/api/video/status/task-opening-1?refresh=true'],
       ['GET', '/api/video/thumbnail/task-opening-1'],
+      ['POST', '/api/approvals', {
+        type: 'ratio_change',
+        project_id: 'project-personal',
+        video_card_id: 'card-opening',
+      }],
     ] as const) {
       const result = await request(attempt[0], attempt[1], attempt[2]);
       assert.equal(result.status, 503);
       assert.equal(result.data.error, 'REAL_BACKEND_REQUIRED');
-      assert.match(result.data.message, /未连接 SD2/);
-      assert.doesNotMatch(JSON.stringify(result.data), /task-mock-|asset-generated-|result_video_url/);
+      assert.equal(result.data.message, realBackendRequiredMessage);
+      assert.doesNotMatch(JSON.stringify(result.data), /task-mock-|asset-generated-|approval-mock-|result_video_url/);
     }
 
     const tasks = await request('GET', '/api/video-cards/card-opening/tasks');
     assert.equal(tasks.status, 200);
     assert.deepEqual(tasks.data.tasks, []);
 
-    for (const field of ['candidate_task_id', 'current_best_task_id', 'final_task_id'] as const) {
-      const selection = await request('PATCH', '/api/video-cards/card-opening', { [field]: 'task-opening-1' });
-      assert.equal(selection.status, 400);
+    for (const payload of [
+      { candidate_task_id: 'task-opening-1' },
+      { current_best_task_id: null },
+      { final_task_id: '' },
+    ]) {
+      const selection = await request('PATCH', '/api/video-cards/card-opening', payload);
+      assert.equal(selection.status, 503);
+      assert.equal(selection.data.error, 'REAL_BACKEND_REQUIRED');
+      assert.equal(selection.data.message, realBackendRequiredMessage);
       assertNoHiddenTaskIds(selection.data);
     }
 
