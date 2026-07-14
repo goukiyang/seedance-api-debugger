@@ -811,3 +811,13 @@
 - 怎么改：收尾脚本优先处理 `submitted/running`，再处理最近成功但缺缓存的视频；旧 orphan submitted 且无 Provider 任务号会自动失败退款；Provider 非重试错误落为失败；下载流超时返回可控失败；LaunchAgent 每 300 秒跑一次并带陈旧锁清理。
 - 验证结果：5 个 smoke、TypeScript、lint、build 通过；`cmr1o6u8s0038f05laf0wpqic` 已成功结算并有本地/R2 视频；旧孤儿任务 `cmpkxpuqx003xd14k1ct7m4vg` 已失败退款 84 点；线上 BUILD_ID `4miq1OhmOna1d6CxNG-Hn` 已加载，LaunchAgent 退出码为 0。
 - 可复用经验：长耗时任务必须有独立后台收尾和幂等账务结算，不能把“用户打开页面继续查”当成可靠机制。任何缓存、缩略图、对象存储转存失败都只能影响后续补偿，不能阻止任务状态和点数先闭环。
+
+## 2026-07-14 - 运行中新生成的 uploads 文件不能依赖 Next 静态文件清单
+
+- 问题/背景：无线画布图片节点显示“图片生成完成，已进入资产库”，但预览区破图，只显示文件名；同一条 Asset 记录里的原图和缩略图文件实际已经写入 `public/uploads`。
+- 诱因/根因：生产 Next 服务对 `public/uploads` 下运行中新写入的文件不会稳定当成静态文件立刻服务；旧文件能 200，新生成文件在服务运行期间访问 `/uploads/...` 返回 404。
+- 当时思路：不改已有 Asset URL、不迁移数据库、不让前端绕路；保留 `/uploads/...` 语义，给它补一个动态路由读取本地上传文件。
+- 改动位置：`src/app/uploads/[...path]/route.ts`、`scripts/uploads-dynamic-route-smoke.ts`。
+- 怎么改：新增 `/uploads/[...path]` 动态路由，安全限制在 `public/uploads` 内，支持 GET、HEAD、Range、常见图片/视频/音频 MIME；新增 smoke 覆盖运行中新写入图片、HEAD 和路径越界拒绝。
+- 验证结果：复现时目标缩略图公网 404；部署后同一缩略图和原图本地/公网均 200；服务启动后再写入的 smoke 图片也可直接 200；`uploads-dynamic-route-smoke`、lint、`youdoo-sites build/restart` 通过。
+- 可复用经验：上传、生成、截图、缩略图这类运行时产物不能只靠 `public` 静态目录假设。凡是文件是在服务启动后写入的，都要用动态文件出口或对象存储 URL 做验收；验收必须包含“启动后新写入文件能立即访问”。
