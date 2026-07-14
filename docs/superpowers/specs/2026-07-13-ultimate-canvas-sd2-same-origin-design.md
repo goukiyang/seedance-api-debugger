@@ -1,7 +1,7 @@
 # Ultimate Canvas SD2 同源后端接入设计
 
-日期：2026-07-13  
-目标分支：`teammate/ultimate-canvas-complete`  
+日期：2026-07-13
+目标分支：`teammate/ultimate-canvas-complete`
 目标站点：`https://sd2.youdoodesign.com`
 
 ## 1. 背景与目标
