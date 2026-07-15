@@ -106,6 +106,33 @@ assertDeclarations(ruleWith(['.generated-reference-card']), {
   'box-sizing': 'border-box',
 });
 
+const imageResultCard = ruleWith([
+  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card',
+]);
+assertDeclarations(imageResultCard, {
+  display: 'grid',
+  'grid-template-rows': 'auto minmax(0, 1fr) auto',
+  gap: '8px',
+  'justify-content': 'stretch',
+});
+
+const imageResultDescription = ruleWith([
+  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card p',
+]);
+assertDeclarations(imageResultDescription, { display: 'none' });
+
+const imageResultPreview = ruleWith([
+  '.canvas-node.node-type-image .generation-result-region:not(:empty) .generated-frame-preview',
+]);
+assertDeclarations(imageResultPreview, {
+  width: '100%',
+  height: '100%',
+  'min-height': '0',
+  'max-height': 'none',
+  'margin-top': '0',
+  'object-fit': 'contain',
+});
+
 assertDeclarations(ruleWith([
   '.node-type-video .generation-result-region:not(:empty) .generated-reference-card',
   '.node-type-image .generation-result-region:not(:empty) .generated-reference-card',
