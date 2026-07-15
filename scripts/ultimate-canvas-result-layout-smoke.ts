@@ -135,6 +135,9 @@ assertDeclarations(ruleWith(['.generated-frame-preview']), {
   flex: '0 1 auto',
   'max-height': '260px',
   'object-fit': 'contain',
+  'user-select': 'none',
+  '-webkit-user-select': 'none',
+  '-webkit-user-drag': 'none',
 });
 
 assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
@@ -284,5 +287,27 @@ assert.equal(nodeStub.querySelector('.node-generation-expanded'), editor, 'same-
 assert.equal(nodeStub.querySelector('[data-generation-submit]'), submit, 'same-node submit identity is retained');
 assert.equal(editor.value, 'keep prompt');
 assert.equal(submit.disabled, false);
+
+const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
+assert.ok(
+  appSource
+    .slice(appSource.indexOf('function decorateGeneratedNode'), appSource.indexOf('function createDirectorOutput'))
+    .includes('draggable="false"'),
+  'generated result images disable browser-native image dragging',
+);
+
+const nodeCardDragStart = engineSource.indexOf("wrap.querySelector('.node-card').addEventListener('mousedown'");
+const nodeCardDragEnd = engineSource.indexOf('// Select', nodeCardDragStart);
+assert.ok(nodeCardDragStart >= 0 && nodeCardDragEnd > nodeCardDragStart, 'node-card drag handler must exist');
+const nodeCardDragSource = engineSource.slice(nodeCardDragStart, nodeCardDragEnd);
+const leftButtonGuardIndex = nodeCardDragSource.indexOf('if (e.button !== 0) return;');
+const preventDefaultIndex = nodeCardDragSource.indexOf('e.preventDefault();');
+const dragInitializationIndex = nodeCardDragSource.indexOf('this.isDraggingNode = true');
+assert.ok(leftButtonGuardIndex >= 0 && leftButtonGuardIndex < preventDefaultIndex,
+  'node-card dragging ignores non-left mouse buttons before cancelling native behavior');
+assert.ok(preventDefaultIndex >= 0 && preventDefaultIndex < dragInitializationIndex,
+  'node-card dragging cancels native image selection before moving the node');
+assert.ok(nodeCardDragSource.includes('textarea, input, select, button, a, [contenteditable]'),
+  'interactive controls inside node cards remain excluded from node dragging');
 
 console.log('ultimate-canvas-result-layout-smoke passed');

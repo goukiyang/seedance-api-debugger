@@ -223,7 +223,7 @@ assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('gene
 assert.ok(indexSource.indexOf('backend-contract.js') < indexSource.indexOf('app.js'));
 assert.match(indexSource, /backend-contract\.js\?v=20260713-no-fake-preview/);
 assert.match(indexSource, /generation-api\.js\?v=20260713-sd2-same-origin/);
-assert.match(indexSource, /app\.js\?v=20260713-no-fake-preview/);
+assert.match(indexSource, /app\.js\?v=20260715-generated-image-drag/);
 assert.match(appSource, /function backendEndpoint\(candidate, fallback, policy = 'canvas'\)/);
 assert.match(appSource, /createApiError\(400,/);
 assert.match(appSource, /options\.body/);

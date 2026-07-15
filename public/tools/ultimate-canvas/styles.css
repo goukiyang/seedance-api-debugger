@@ -1549,6 +1549,9 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     min-height: 0;
     max-height: 92px;
     margin-top: 8px;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
 }
 .canvas-node:not(.selected).node-type-video .card-preview-placeholder,
 .canvas-node:not(.selected).node-type-image .card-preview-placeholder {
@@ -4071,6 +4074,9 @@ body.director-studio-open {
     max-height: 260px;
     margin-top: 14px;
     object-fit: contain;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
     border-radius: var(--radius-sm);
     border: 1px solid rgba(255,255,255,0.14);
     background: #111;

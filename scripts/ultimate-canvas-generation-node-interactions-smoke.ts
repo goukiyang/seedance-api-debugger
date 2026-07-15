@@ -170,8 +170,8 @@ matches(
 );
 matches(
   stylesSource,
-  /\.generated-frame-preview\s*\{[\s\S]*?max-height:\s*\d+px;/,
-  'generated media is bounded so action rows remain visible',
+  /\.generated-frame-preview\s*\{[\s\S]*?max-height:\s*\d+px;[\s\S]*?-webkit-user-drag:\s*none;/,
+  'generated media is bounded and does not trigger browser-native image dragging',
 );
 matches(
   stylesSource,
@@ -204,7 +204,7 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260713-no-fake-preview', 'canvas app cache key matches the non-generating preview state');
+contains(indexSource, 'app.js?v=20260715-generated-image-drag', 'canvas app cache key matches the generated image drag state');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
 contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
 contains(appSource, '350', 'video estimates debounce for 350ms');

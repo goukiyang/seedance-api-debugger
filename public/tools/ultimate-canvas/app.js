@@ -5881,7 +5881,7 @@
                     <p>${escapeHtml(description)}</p>
                 </div>
                 ${previewImage
-                    ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}">`
+                    ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}" draggable="false">`
                     : '<div class="generated-frame-lines"></div>'}
                 ${imageActions}
             </div>`);

@@ -309,9 +309,9 @@ assert.match(
   /capabilities\.video\?\.message\s*\|\|\s*window\.UltimateCanvasBackendContract\.SAFE_UNAVAILABLE_MESSAGE/,
 );
 
-assert.match(indexSource, /styles\.css\?v=20260713-video-footer-controls/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260713-video-footer-controls/);
+assert.match(indexSource, /styles\.css\?v=20260715-generated-image-drag/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260715-generated-image-drag/);
 assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-liblib-interactions/);
-assert.match(indexSource, /app\.js\?v=20260713-no-fake-preview/);
+assert.match(indexSource, /app\.js\?v=20260715-generated-image-drag/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');
