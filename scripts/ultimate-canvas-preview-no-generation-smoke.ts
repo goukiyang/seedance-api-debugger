@@ -323,7 +323,11 @@ async function main() {
 
       const loginRecovery = await fetch(`${liveBaseUrl}/login`);
       assert.equal(loginRecovery.status, 200);
-      assert.match(await loginRecovery.text(), /id="feishu-login"/i);
+      const loginRecoveryHtml = await loginRecovery.text();
+      assert.match(loginRecoveryHtml, /id="feishu-login"/i);
+      assert.doesNotMatch(loginRecoveryHtml, /<form\b/i);
+      assert.doesNotMatch(loginRecoveryHtml, /\/api\/auth\/login/i);
+      assert.doesNotMatch(loginRecoveryHtml, /name="(?:identifier|password)"/i);
 
       const unrelatedCookieCanvas = await fetch(`${liveBaseUrl}/tools/ultimate-canvas/index.html`, {
         headers: { cookie: 'theme=dark' },
