@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -375,7 +376,13 @@ function sendRealBackendRequired(response) {
 }
 
 function safeNextPath(value) {
-  if (!value || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
+  if (
+    !value
+    || !value.startsWith('/')
+    || value.startsWith('//')
+    || value.includes('\\')
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
     return '/tools/ultimate-canvas/index.html';
   }
   return value;
@@ -391,14 +398,34 @@ function hasSd2SessionCookie(cookieHeader) {
     .some((cookie) => /^\s*session=.+/.test(cookie));
 }
 
+function htmlSecurityHeaders(nonce) {
+  return {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+  };
+}
+
+function feishuAuthorizeUrl(nextPath) {
+  const callback = `http://127.0.0.1:${port}/__sd2-feishu-callback`;
+  const relayMarker = `/__sd2-feishu-local-relay?${new URLSearchParams({ callback, next: nextPath })}`;
+  const authorizeUrl = new URL('/api/auth/feishu/authorize', sd2LiveOrigin);
+  authorizeUrl.searchParams.set('next', relayMarker);
+  return authorizeUrl.toString();
+}
+
 function sendSd2LoginPage(response, url) {
   const nextPath = safeNextPath(url.searchParams.get('next'));
   const nextPathScriptValue = JSON.stringify(nextPath).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  const nonce = randomBytes(18).toString('base64');
+  const authorizeUrl = feishuAuthorizeUrl(nextPath);
   const content = `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SD2 Login</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>SD2 Login</title></head>
 <body>
   <main>
+    <a id="feishu-login" href="${escapeHtmlAttribute(authorizeUrl)}">Sign in with Feishu</a>
     <form method="post" action="/api/auth/login">
       <input type="hidden" name="next" value="${escapeHtmlAttribute(nextPath)}">
       <label>Account <input name="identifier" autocomplete="username" required></label>
@@ -407,7 +434,7 @@ function sendSd2LoginPage(response, url) {
       <p id="login-error" role="alert" hidden></p>
     </form>
   </main>
-  <script>
+  <script nonce="${nonce}">
     document.querySelector('form').addEventListener('submit', async function (event) {
       event.preventDefault();
       const identifier = this.elements.identifier.value;
@@ -435,7 +462,44 @@ function sendSd2LoginPage(response, url) {
   </script>
 </body>
 </html>`;
-  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  response.writeHead(200, htmlSecurityHeaders(nonce));
+  response.end(content);
+}
+
+function sendSd2FeishuCallbackPage(response, url) {
+  const nextPath = safeNextPath(url.searchParams.get('next'));
+  const nextPathScriptValue = JSON.stringify(nextPath).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  const nonce = randomBytes(18).toString('base64');
+  const content = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>SD2 Feishu Login</title></head>
+<body>
+  <main><p id="login-status" role="status">Completing sign-in...</p></main>
+  <script nonce="${nonce}">
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const error = params.get('error');
+    window.history.replaceState({}, document.title, window.location.pathname);
+    const loginStatus = document.getElementById('login-status');
+    if (error || !code) {
+      loginStatus.textContent = 'Feishu sign-in was not completed.';
+    } else {
+      fetch('/api/auth/feishu/login-by-code', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code }),
+        credentials: 'same-origin',
+      }).then((exchangeResponse) => {
+        if (!exchangeResponse.ok) throw new Error('login failed');
+        window.location.replace(${nextPathScriptValue});
+      }).catch(() => {
+        loginStatus.textContent = 'Feishu sign-in failed.';
+      });
+    }
+  </script>
+</body>
+</html>`;
+  response.writeHead(200, htmlSecurityHeaders(nonce));
   response.end(content);
 }
 
@@ -542,6 +606,9 @@ const server = http.createServer(async (request, response) => {
   const canvasPath = url.pathname === '/' || url.pathname === '/tools/ultimate-canvas/index.html';
   if (sd2LiveEnabled && (url.pathname === '/__sd2-login' || url.pathname === '/login') && request.method === 'GET') {
     return sendSd2LoginPage(response, url);
+  }
+  if (sd2LiveEnabled && url.pathname === '/__sd2-feishu-callback' && request.method === 'GET') {
+    return sendSd2FeishuCallbackPage(response, url);
   }
   if (sd2LiveEnabled && canvasPath && !hasSd2SessionCookie(request.headers.cookie)) {
     const nextPath = safeNextPath(`${url.pathname}${url.search}`);

@@ -252,10 +252,40 @@ async function main() {
 
       const login = await fetch(`${liveBaseUrl}/__sd2-login`);
       assert.equal(login.status, 200);
+      assert.equal(login.headers.get('cache-control'), 'no-store');
+      assert.equal(login.headers.get('referrer-policy'), 'no-referrer');
+      assert.match(login.headers.get('content-security-policy') || '', /default-src 'none'/);
       const loginHtml = await login.text();
+      const feishuLink = loginHtml.match(/id="feishu-login" href="([^"]+)"/i);
+      assert(feishuLink);
+      const authorizeUrl = new URL(feishuLink[1].replaceAll('&amp;', '&'));
+      assert.equal(authorizeUrl.origin, 'https://sd2.youdoodesign.com');
+      assert.equal(authorizeUrl.pathname, '/api/auth/feishu/authorize');
+      const relayMarker = new URL(authorizeUrl.searchParams.get('next') || '', authorizeUrl.origin);
+      assert.equal(relayMarker.pathname, '/__sd2-feishu-local-relay');
+      assert.equal(
+        relayMarker.searchParams.get('callback'),
+        `${liveBaseUrl}/__sd2-feishu-callback`,
+      );
+      assert.equal(relayMarker.searchParams.get('next'), '/tools/ultimate-canvas/index.html');
       assert.match(loginHtml, /<form[^>]+method="post"[^>]+action="\/api\/auth\/login"/i);
       assert.match(loginHtml, /name="identifier"/i);
       assert.match(loginHtml, /name="password"/i);
+
+      const callback = await fetch(
+        `${liveBaseUrl}/__sd2-feishu-callback?code=single-use-code&next=${encodeURIComponent('/tools/ultimate-canvas/index.html?open=video-card')}`,
+      );
+      assert.equal(callback.status, 200);
+      assert.equal(callback.headers.get('cache-control'), 'no-store');
+      assert.equal(callback.headers.get('referrer-policy'), 'no-referrer');
+      assert.match(callback.headers.get('content-security-policy') || '', /default-src 'none'/);
+      const callbackHtml = await callback.text();
+      const clearHistoryIndex = callbackHtml.indexOf('window.history.replaceState');
+      const exchangeIndex = callbackHtml.indexOf("fetch('/api/auth/feishu/login-by-code'");
+      assert.ok(clearHistoryIndex >= 0);
+      assert.ok(exchangeIndex > clearHistoryIndex, 'the callback query must be removed before code exchange');
+      assert.match(callbackHtml, /body: JSON\.stringify\(\{ code \}\)/);
+      assert.doesNotMatch(callbackHtml, /session(?:_token)?=/i);
 
       const loginRecovery = await fetch(`${liveBaseUrl}/login`);
       assert.equal(loginRecovery.status, 200);

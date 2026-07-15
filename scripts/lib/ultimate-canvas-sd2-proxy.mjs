@@ -4,6 +4,7 @@ import https from 'node:https';
 export const SD2_CANVAS_PROXY_PATHS = Object.freeze([
   '/api/auth/login',
   '/api/auth/me',
+  '/api/auth/feishu/login-by-code',
   '/api/tools/ultimate-canvas',
   '/api/projects',
   '/api/video-cards',
@@ -50,7 +51,8 @@ function rewriteReferer(referer, target) {
 export function isAllowedSd2CanvasPath(pathname) {
   return pathname === '/api/auth/login'
     || pathname === '/api/auth/me'
-    || SD2_CANVAS_PROXY_PATHS.slice(2).some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    || pathname === '/api/auth/feishu/login-by-code'
+    || SD2_CANVAS_PROXY_PATHS.slice(3).some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 function sendJson(response, statusCode, body) {

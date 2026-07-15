@@ -5,6 +5,10 @@ import {
   loginWithFeishuCode,
   verifyFeishuOAuthState,
 } from '@/lib/auth/feishu';
+import {
+  buildFeishuLocalCallbackUrl,
+  parseFeishuLocalRelay,
+} from '@/lib/auth/feishu-local-relay';
 import { setSessionCookie } from '@/lib/auth/session-cookie';
 
 export const dynamic = 'force-dynamic';
@@ -50,16 +54,28 @@ function clearStateCookie(response: NextResponse) {
 
 export async function GET(request: NextRequest) {
   const returnedError = request.nextUrl.searchParams.get('error');
-  if (returnedError) {
-    return clearStateCookie(redirectToCallbackPage(request, { error: 'access_denied' }));
-  }
-
   const code = request.nextUrl.searchParams.get('code');
   const state = request.nextUrl.searchParams.get('state');
   const storedState = verifyFeishuOAuthState(request.cookies.get(FEISHU_STATE_COOKIE)?.value, state);
+  const relay = storedState ? parseFeishuLocalRelay(storedState.next) : null;
+
+  if (returnedError) {
+    const response = relay
+      ? NextResponse.redirect(buildFeishuLocalCallbackUrl(relay, { error: 'access_denied' }), { status: 303 })
+      : redirectToCallbackPage(request, { error: 'access_denied' });
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('Referrer-Policy', 'no-referrer');
+    return clearStateCookie(response);
+  }
 
   if (!code) return clearStateCookie(redirectToCallbackPage(request, { error: 'missing_code' }));
   if (!storedState) return clearStateCookie(redirectToCallbackPage(request, { error: 'invalid_state' }));
+  if (relay) {
+    const response = NextResponse.redirect(buildFeishuLocalCallbackUrl(relay, { code }), { status: 303 });
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('Referrer-Policy', 'no-referrer');
+    return clearStateCookie(response);
+  }
 
   try {
     const result = await loginWithFeishuCode(code, publicAuthOrigin(request));
