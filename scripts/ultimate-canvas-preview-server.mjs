@@ -472,7 +472,6 @@ function feishuAuthorizeUrl(nextPath, relayNonce) {
 
 function sendSd2LoginPage(response, url) {
   const nextPath = safeNextPath(url.searchParams.get('next'));
-  const nextPathScriptValue = JSON.stringify(nextPath).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
   const cspNonce = randomBytes(18).toString('base64');
   const relayNonce = createFeishuRelayBinding();
   const authorizeUrl = feishuAuthorizeUrl(nextPath, relayNonce);
@@ -482,40 +481,7 @@ function sendSd2LoginPage(response, url) {
 <body>
   <main>
     <a id="feishu-login" href="${escapeHtmlAttribute(authorizeUrl)}">Sign in with Feishu</a>
-    <form method="post" action="/api/auth/login">
-      <input type="hidden" name="next" value="${escapeHtmlAttribute(nextPath)}">
-      <label>Account <input name="identifier" autocomplete="username" required></label>
-      <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-      <button type="submit">Sign in</button>
-      <p id="login-error" role="alert" hidden></p>
-    </form>
   </main>
-  <script nonce="${cspNonce}">
-    document.querySelector('form').addEventListener('submit', async function (event) {
-      event.preventDefault();
-      const identifier = this.elements.identifier.value;
-      const password = this.elements.password.value;
-      const loginError = document.getElementById('login-error');
-      loginError.hidden = true;
-      try {
-        const response = await fetch(this.action, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ identifier, password }),
-          credentials: 'same-origin',
-        });
-        if (response.ok) {
-          window.location.assign(${nextPathScriptValue});
-          return;
-        }
-        const data = await response.json().catch(() => ({}));
-        loginError.textContent = typeof data.error === 'string' ? data.error : 'Sign-in failed.';
-      } catch {
-        loginError.textContent = 'Sign-in failed.';
-      }
-      loginError.hidden = false;
-    });
-  </script>
 </body>
 </html>`;
   response.writeHead(200, {

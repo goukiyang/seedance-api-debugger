@@ -71,7 +71,7 @@ Expected: FAIL on missing live-mode assertions.
 
 - [ ] **Step 3: Add mode selection, login page, and proxy dispatch**
 
-Parse `--sd2-live`, reject conflicting flags, redirect unauthenticated canvas HTML requests to `/__sd2-login`, render an account/password form posting to proxied `/api/auth/login`, proxy only allowed paths before local fixture routing, and label startup output `SD2 LIVE`.
+Parse `--sd2-live`, reject conflicting flags, redirect unauthenticated canvas HTML requests to `/__sd2-login`, render the Feishu login bridge, proxy only allowed paths before local fixture routing, and label startup output `SD2 LIVE`. Do not expose `/api/auth/login`; Feishu is the only local login method.
 
 - [ ] **Step 4: Run preview and proxy tests and verify GREEN**
 

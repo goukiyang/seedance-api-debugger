@@ -45,7 +45,7 @@ The localhost callback immediately removes the code from browser history and pos
 
 The local login page also creates a five-minute, host-only `HttpOnly` relay-binding cookie and a matching in-memory nonce. The callback must consume that binding exactly once before it can receive an exchange-capable page. A successful callback then receives a separate 60-second one-time exchange permit. The proxy accepts `login-by-code` only from the exact local host and origin, with `POST`, `application/json`, and that permit; it consumes the permit before opening the upstream request and strips the local-only header before forwarding.
 
-The proxy does not log or persist authorization codes, credentials, or session values. A missing local session redirects the canvas document to `/__sd2-login`; an expired session returns to the same local bridge through `/login`. Account/password login remains a secondary compatibility option.
+The proxy does not log or persist authorization codes, credentials, or session values. A missing local session redirects the canvas document to `/__sd2-login`; an expired session returns to the same local bridge through `/login`. Feishu is the only local login method; the password endpoint is not exposed by the proxy, preventing cross-site session planting.
 
 ### Proxy boundary
 
@@ -53,7 +53,7 @@ A focused proxy module streams requests and responses without decoding uploads o
 
 Only these path families are eligible:
 
-- `/api/auth/login`, `/api/auth/me`, `/api/auth/feishu/login-by-code`
+- `/api/auth/me`, `/api/auth/feishu/login-by-code`
 - `/api/tools/ultimate-canvas/*`
 - `/api/projects/*`, `/api/video-cards/*`
 - `/api/assets/*`, `/api/tasks/*`, `/api/video/*`

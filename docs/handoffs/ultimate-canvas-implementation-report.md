@@ -4,7 +4,7 @@
 
 目标分支：`teammate/ultimate-canvas-complete`
 
-已推送提交：`70e57ad`（远端范围 `a42160c..70e57ad`）
+已推送实现基线：`70e57ad`；本回执与审查修复继续提交到同一目标分支，最终远端头以 `origin/teammate/ultimate-canvas-complete` 为准。
 
 ## 1. 本次目标理解
 
@@ -28,11 +28,11 @@
 
 - `ultimate-canvas-implementation-report.md`：记录本轮目标、文件、命令、真实浏览器证据、点数、保护边界和剩余部署工作。
 - 两份设计/实施计划：记录固定 SD2 来源、白名单代理、飞书回环、浏览器绑定、一次性换码许可和验收顺序。
-- `ultimate-canvas-sd2-proxy.mjs`：新增流式反向代理；只允许画布、项目、视频卡、素材、任务、视频、图集、审批、上传和必要认证路径；过滤逐跳头；保留媒体 Range 和响应 Cookie；对飞书换码额外要求精确本地主机/来源、JSON POST 和 60 秒一次性许可。
+- `ultimate-canvas-sd2-proxy.mjs`：新增流式反向代理；只允许画布、项目、视频卡、素材、任务、视频、图集、审批、上传和必要的飞书认证路径；不暴露密码登录端点；过滤逐跳头；保留媒体 Range 和响应 Cookie；对飞书换码额外要求精确本地主机/来源、JSON POST 和 60 秒一次性许可。
 - `ultimate-canvas-feishu-local-relay-smoke.ts`：覆盖合法 loopback、外部跳转拒绝、重复/缺失参数、生产回调分支和取消场景。
 - `ultimate-canvas-preview-api-smoke.ts`：覆盖 `--sd2-live` 参数和与 Mock 互斥的启动规则。
 - `ultimate-canvas-preview-no-generation-smoke.ts`：覆盖默认预览不生成、飞书入口、五分钟浏览器绑定 Cookie、错误 Cookie、缺失 Cookie和回调重放拒绝。
-- `ultimate-canvas-preview-server.mjs`：新增 `--sd2-live`、本地登录页、飞书回调页、会话门禁、固定 SD2 代理接线和安全响应头；默认与 Mock 行为不变。
+- `ultimate-canvas-preview-server.mjs`：新增 `--sd2-live`、飞书唯一入口的本地登录页、飞书回调页、会话门禁、固定 SD2 代理接线和安全响应头；默认与 Mock 行为不变。
 - `ultimate-canvas-sd2-live-proxy-smoke.ts`：用本地上游验证请求/响应流、Cookie、媒体、错误和路径白名单；并证明缺失、错误、过期、跨站、错误 Host、非 JSON、错误方法和重放许可均不会接触上游。
 - `feishu/callback/route.ts`：在既有 state 校验之后识别严格 loopback 标记，把一次性飞书 code 送回本地；普通生产登录仍走原来的换码和会话逻辑。
 - `feishu-local-relay.ts`：提供纯函数解析/构造器，只接受 `127.0.0.1`、`localhost`、`::1` 的高位端口和固定回调路径，拒绝 HTTPS、外部主机、用户信息、片段、错误端口与重复参数。
@@ -59,7 +59,8 @@
 - Lint：PASS；仅保留仓库已有的 Hook 依赖与 `<img>` warning。
 - Production build：PASS，Next.js 14.2.5 编译成功并生成 76 个页面。
 - `git diff --check`：PASS。
-- 安全复审：最终 Approved，Critical/Important/Minor 均为 0。
+- 飞书换码专项安全复审：最终 Approved，Critical/Important/Minor 均为 0。
+- 最终总审查发现密码备用入口存在跨站会话植入风险；已先补 RED 回归，再移除本地密码表单和 `/api/auth/login` 代理权限。修复后聚焦测试转为 GREEN，最终全量结果见本节后续记录。
 - 生产普通账号：`role = user`；页面显示 `SD2 真实后端`，可用 604 点、冻结 0 点；真实图片/视频素材可见；已有 2 个节点刷新前后 ID 与标签一致且状态为“已保存”；控制台 warning/error 为 0。
 - 本地飞书真实回环：尚未通过。生产站仍运行旧回调，授权成功后落到生产 404，而没有回到 `http://127.0.0.1:4402/__sd2-feishu-callback`。代码已推送，但提交 `70e57ad` 仍需发布到 SD2。
 
@@ -77,14 +78,14 @@
 
 ## 9. 还没做完的内容
 
-- 将提交 `70e57ad` 发布到 `https://sd2.youdoodesign.com`，然后重新执行本地飞书回环登录。
+- 将目标分支最新远端头发布到 `https://sd2.youdoodesign.com`，然后重新执行本地飞书回环登录。
 - 回环登录成功后，用本地 4402 页面复核真实 bootstrap、项目/视频卡、点数、素材库和保存恢复。
 - 尚未向生产上传新的测试素材，避免在部署未完成时留下无意义资产。
 - 尚未执行真实文字、图片或视频生成；这会消耗点数，需由用户明确决定是否做最小付费验收。
 
 ## 10. 风险和建议下一步
 
-- 分支推送不会自动证明生产已发布；必须先部署 callback 提交，再测试回环，否则飞书 code 会被旧生产回调消费。
+- 分支推送不会自动证明生产已发布；必须先部署目标分支最新 callback，再测试回环，否则飞书 code 会被旧生产回调消费。
 - 部署后重新打开 `http://127.0.0.1:4402/__sd2-login` 获取新的五分钟浏览器绑定，不要复用旧授权页。
 - 飞书 code、回环 nonce、换码许可和 session 均不记录日志；许可只能使用一次，代理也会在转发前移除本地专用头。
 - 代理白名单需要随 SD2 画布接口变化显式维护并补 smoke，不能改成任意路径转发。

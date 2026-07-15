@@ -98,9 +98,8 @@ async function main() {
         < previewSource.indexOf("if (url.pathname === '/api/auth/me')"),
       'live API requests must proxy before local fixture routing',
     );
-    assert.match(previewSource, /headers: \{ 'content-type': 'application\/json' \}/);
-    assert.match(previewSource, /JSON\.stringify\(\{ identifier, password \}\)/);
-    assert.match(previewSource, /id="login-error"/);
+    assert.doesNotMatch(previewSource, /JSON\.stringify\(\{ identifier, password \}\)/);
+    assert.doesNotMatch(previewSource, /id="login-error"/);
 
     const bootstrap = await request('GET', '/api/tools/ultimate-canvas/bootstrap');
     assert.equal(bootstrap.status, 200);
@@ -281,9 +280,9 @@ async function main() {
       );
       assert.equal(relayMarker.searchParams.get('next'), '/tools/ultimate-canvas/index.html');
       assert.equal(relayMarker.searchParams.get('nonce'), bindingNonce);
-      assert.match(loginHtml, /<form[^>]+method="post"[^>]+action="\/api\/auth\/login"/i);
-      assert.match(loginHtml, /name="identifier"/i);
-      assert.match(loginHtml, /name="password"/i);
+      assert.doesNotMatch(loginHtml, /<form\b/i);
+      assert.doesNotMatch(loginHtml, /\/api\/auth\/login/i);
+      assert.doesNotMatch(loginHtml, /name="(?:identifier|password)"/i);
 
       const callbackUrl = `${liveBaseUrl}/__sd2-feishu-callback?code=single-use-code&next=${encodeURIComponent('/tools/ultimate-canvas/index.html?open=video-card')}&nonce=${bindingNonce}`;
       for (const cookie of [undefined, `sd2_feishu_relay_nonce=${'b'.repeat(43)}`]) {
@@ -324,7 +323,7 @@ async function main() {
 
       const loginRecovery = await fetch(`${liveBaseUrl}/login`);
       assert.equal(loginRecovery.status, 200);
-      assert.match(await loginRecovery.text(), /id="login-error"/i);
+      assert.match(await loginRecovery.text(), /id="feishu-login"/i);
 
       const unrelatedCookieCanvas = await fetch(`${liveBaseUrl}/tools/ultimate-canvas/index.html`, {
         headers: { cookie: 'theme=dark' },

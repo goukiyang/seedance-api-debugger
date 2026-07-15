@@ -203,13 +203,20 @@ async function main() {
     assert.equal(replayed.status, 403);
     assert.equal(feishuExchangeRequestCount(), exchangeCount);
 
+    const passwordLoginRequestCount = upstreamRequests.filter(
+      (request) => request.url === '/api/auth/login',
+    ).length;
     const login = await fetch(`${proxyOrigin}/api/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ account: 'ordinary-user', password: 'not-a-secret' }),
     });
-    assert.equal(login.status, 200);
-    assert.equal(login.headers.get('set-cookie'), 'session=live-token; HttpOnly; SameSite=Lax');
+    assert.equal(login.status, 404);
+    assert.deepEqual(await login.json(), { error: 'Not found' });
+    assert.equal(
+      upstreamRequests.filter((request) => request.url === '/api/auth/login').length,
+      passwordLoginRequestCount,
+    );
 
     const save = await fetch(`${proxyOrigin}/api/tools/ultimate-canvas/documents?project_id=project-1`, {
       method: 'POST',

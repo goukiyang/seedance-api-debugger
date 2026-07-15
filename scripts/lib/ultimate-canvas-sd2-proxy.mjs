@@ -6,7 +6,6 @@ const FEISHU_EXCHANGE_PATH = '/api/auth/feishu/login-by-code';
 const FEISHU_EXCHANGE_PERMIT_HEADER = 'x-sd2-feishu-exchange-permit';
 
 export const SD2_CANVAS_PROXY_PATHS = Object.freeze([
-  '/api/auth/login',
   '/api/auth/me',
   '/api/auth/feishu/login-by-code',
   '/api/tools/ultimate-canvas',
@@ -53,10 +52,9 @@ function rewriteReferer(referer, target) {
 }
 
 export function isAllowedSd2CanvasPath(pathname) {
-  return pathname === '/api/auth/login'
-    || pathname === '/api/auth/me'
-    || pathname === '/api/auth/feishu/login-by-code'
-    || SD2_CANVAS_PROXY_PATHS.slice(3).some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return pathname === '/api/auth/me'
+    || pathname === FEISHU_EXCHANGE_PATH
+    || SD2_CANVAS_PROXY_PATHS.slice(2).some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 function sendJson(response, statusCode, body) {
