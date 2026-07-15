@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 
 const interactions = require('../public/tools/ultimate-canvas/generation-node-interactions.js');
 
@@ -54,6 +55,10 @@ const patch = (path: string, payload: unknown) => request('PATCH', path, payload
 async function main() {
   try {
     await waitForServer();
+
+  const previewSource = await readFile('scripts/ultimate-canvas-preview-server.mjs', 'utf8');
+  assert.match(previewSource, /const sd2LiveEnabled = process\.argv\.includes\('--sd2-live'\);/);
+  assert.match(previewSource, /console\.log\(`SD2 LIVE: http:\/\/127\.0\.0\.1:\$\{port\}\/tools\/ultimate-canvas\/index\.html`\);/);
 
   const bootstrap = await get('/api/tools/ultimate-canvas/bootstrap');
   const projectId = bootstrap.context.selected_project_id as string;

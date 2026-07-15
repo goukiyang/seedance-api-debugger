@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 
 const port = 46000 + Math.floor(Math.random() * 1000);
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -30,6 +31,20 @@ async function waitForServer() {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`preview server did not start\n${output}`);
+}
+
+async function waitForServerAt(url: string, getOutput: () => string) {
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${url}/__sd2-login`);
+      if (response.ok) return;
+    } catch {
+      // Server is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`preview server did not start\n${getOutput()}`);
 }
 
 async function request(method: string, path: string, payload?: unknown) {
@@ -72,6 +87,15 @@ function assertNoMockProjectTaskCount(project: {
 async function main() {
   try {
     await waitForServer();
+
+    const previewSource = await readFile('scripts/ultimate-canvas-preview-server.mjs', 'utf8');
+    assert.match(previewSource, /const sd2LiveOrigin = 'https:\/\/sd2\.youdoodesign\.com';/);
+    assert.match(previewSource, /proxySd2CanvasRequest\(request, response, \{ origin: sd2LiveOrigin \}\)/);
+    assert.ok(
+      previewSource.indexOf('proxySd2CanvasRequest(request, response, { origin: sd2LiveOrigin })')
+        < previewSource.indexOf("if (url.pathname === '/api/auth/me')"),
+      'live API requests must proxy before local fixture routing',
+    );
 
     const bootstrap = await request('GET', '/api/tools/ultimate-canvas/bootstrap');
     assert.equal(bootstrap.status, 200);
@@ -196,6 +220,61 @@ async function main() {
     for (const branch of branchesAfter.data.branches) {
       assertEmptyTaskSummary(branch.summary);
     }
+
+    const livePort = port + 1;
+    const liveBaseUrl = `http://127.0.0.1:${livePort}`;
+    const liveChild = spawn(process.execPath, [
+      'scripts/ultimate-canvas-preview-server.mjs',
+      String(livePort),
+      '--sd2-live',
+    ], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let liveOutput = '';
+    liveChild.stdout.on('data', (chunk) => { liveOutput += chunk.toString(); });
+    liveChild.stderr.on('data', (chunk) => { liveOutput += chunk.toString(); });
+    try {
+      await waitForServerAt(liveBaseUrl, () => liveOutput);
+
+      const canvas = await fetch(`${liveBaseUrl}/tools/ultimate-canvas/index.html?open=video-card`, {
+        redirect: 'manual',
+      });
+      assert.equal(canvas.status, 302);
+      assert.equal(
+        canvas.headers.get('location'),
+        '/__sd2-login?next=%2Ftools%2Fultimate-canvas%2Findex.html%3Fopen%3Dvideo-card',
+      );
+
+      const login = await fetch(`${liveBaseUrl}/__sd2-login`);
+      assert.equal(login.status, 200);
+      const loginHtml = await login.text();
+      assert.match(loginHtml, /<form[^>]+method="post"[^>]+action="\/api\/auth\/login"/i);
+      assert.match(loginHtml, /name="identifier"/i);
+      assert.match(loginHtml, /name="password"/i);
+
+      const unsafeLogin = await fetch(`${liveBaseUrl}/__sd2-login?next=%2F%3C%2Fscript%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E`);
+      assert.equal(unsafeLogin.status, 200);
+      assert.doesNotMatch(await unsafeLogin.text(), /<script>alert\(1\)<\/script>/i);
+    } finally {
+      liveChild.kill();
+    }
+
+    const conflictChild = spawn(process.execPath, [
+      'scripts/ultimate-canvas-preview-server.mjs',
+      String(port + 2),
+      '--mock-generation',
+      '--sd2-live',
+    ], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const conflictExitCode = await new Promise<number | null>((resolve) => {
+      conflictChild.once('exit', (code) => resolve(code));
+    });
+    assert.notEqual(conflictExitCode, 0);
 
     console.log('ultimate-canvas-preview-no-generation-smoke passed');
   } finally {

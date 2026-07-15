@@ -2,12 +2,22 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  isAllowedSd2CanvasPath,
+  proxySd2CanvasRequest,
+} from './lib/ultimate-canvas-sd2-proxy.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(repoRoot, 'public');
 const port = Number(process.argv[2] || 4399);
 const mockGenerationEnabled = process.argv.includes('--mock-generation');
+const sd2LiveEnabled = process.argv.includes('--sd2-live');
+const sd2LiveOrigin = 'https://sd2.youdoodesign.com';
 const realBackendRequiredMessage = '本地预览未连接 SD2，真实生成请使用已部署的同源应用。';
+
+if (mockGenerationEnabled && sd2LiveEnabled) {
+  throw new Error('--mock-generation and --sd2-live cannot be used together');
+}
 
 const mockUser = {
   id: 'preview-user',
@@ -364,6 +374,45 @@ function sendRealBackendRequired(response) {
   }, 503);
 }
 
+function safeNextPath(value) {
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
+    return '/tools/ultimate-canvas/index.html';
+  }
+  return value;
+}
+
+function escapeHtmlAttribute(value) {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function sendSd2LoginPage(response, url) {
+  const nextPath = safeNextPath(url.searchParams.get('next'));
+  const nextPathScriptValue = JSON.stringify(nextPath).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  const content = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SD2 Login</title></head>
+<body>
+  <main>
+    <form method="post" action="/api/auth/login">
+      <input type="hidden" name="next" value="${escapeHtmlAttribute(nextPath)}">
+      <label>Account <input name="identifier" autocomplete="username" required></label>
+      <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in</button>
+    </form>
+  </main>
+  <script>
+    document.querySelector('form').addEventListener('submit', async function (event) {
+      event.preventDefault();
+      const response = await fetch(this.action, { method: 'POST', body: new FormData(this), credentials: 'same-origin' });
+      if (response.ok) window.location.assign(${nextPathScriptValue});
+    });
+  </script>
+</body>
+</html>`;
+  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  response.end(content);
+}
+
 function contentType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return {
@@ -464,6 +513,19 @@ function bootstrapPayload(url) {
 
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || '/', `http://127.0.0.1:${port}`);
+  const canvasPath = url.pathname === '/' || url.pathname === '/tools/ultimate-canvas/index.html';
+  if (sd2LiveEnabled && url.pathname === '/__sd2-login' && request.method === 'GET') {
+    return sendSd2LoginPage(response, url);
+  }
+  if (sd2LiveEnabled && canvasPath && !request.headers.cookie) {
+    const nextPath = safeNextPath(`${url.pathname}${url.search}`);
+    response.writeHead(302, { location: `/__sd2-login?next=${encodeURIComponent(nextPath)}` });
+    response.end();
+    return;
+  }
+  if (sd2LiveEnabled && isAllowedSd2CanvasPath(url.pathname)) {
+    return proxySd2CanvasRequest(request, response, { origin: sd2LiveOrigin });
+  }
   if (url.pathname === '/api/auth/me') return sendJson(response, { user: mockUser });
   if (url.pathname === '/api/tools/ultimate-canvas/bootstrap') return sendJson(response, bootstrapPayload(url));
   if (!mockGenerationEnabled && (
@@ -981,5 +1043,9 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, '127.0.0.1', () => {
+  if (sd2LiveEnabled) {
+    console.log(`SD2 LIVE: http://127.0.0.1:${port}/tools/ultimate-canvas/index.html`);
+    return;
+  }
   console.log(`ultimate canvas preview: http://127.0.0.1:${port}/tools/ultimate-canvas/index.html`);
 });
