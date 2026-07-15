@@ -70,25 +70,19 @@ assert.equal(desktopVideoLongEdge, desktopPanelWidth);
 assert.equal(desktopVideoLandscape.width, desktopPanelWidth, 'landscape video card aligns with the prompt panel width');
 assert.equal(desktopVideoLandscape.height, 274.286);
 
-const generationNodes = ruleWith(['.canvas-node.node-type-video', '.canvas-node.node-type-image']);
+const generationNodes = ruleWith(['.generation-node']);
 assertDeclarations(generationNodes, { width: 'var(--generation-node-width, 350px)' });
 
-const baseCards = ruleWith(['.node-type-video .node-card', '.node-type-image .node-card']);
+const baseCards = ruleWith(['.generation-node .node-card']);
 assertDeclarations(baseCards, {
   width: 'var(--generation-node-width, 350px)',
   height: 'var(--generation-node-height, 196.875px)',
 });
 
-const cardBodies = ruleWith([
-  '.node-type-video .node-body',
-  '.node-type-image .node-body',
-]);
+const cardBodies = ruleWith(['.generation-node .node-body']);
 assertDeclarations(cardBodies, { height: '100%', 'min-height': '0', overflow: 'hidden' });
 
-const resultRegions = ruleWith([
-  '.node-type-video .generation-result-region:not(:empty)',
-  '.node-type-image .generation-result-region:not(:empty)',
-]);
+const resultRegions = ruleWith(['.generation-node .generation-result-region:not(:empty)']);
 assertDeclarations(resultRegions, { height: '100%', 'min-height': '0', overflow: 'hidden' });
 
 css.walkRules((rule: any) => {
@@ -134,14 +128,10 @@ assertDeclarations(imageResultPreview, {
 });
 
 assertDeclarations(ruleWith([
-  '.node-type-video .generation-result-region:not(:empty) .generated-reference-card',
-  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card',
+  '.generation-node .generation-result-region:not(:empty) .generated-reference-card',
 ]), { height: '100%', 'min-height': '0', padding: '10px' });
 
-const selectedActions = ruleWith([
-  '.canvas-node.selected.node-type-video .generated-action-row',
-  '.canvas-node.selected.node-type-image .generated-action-row',
-]);
+const selectedActions = ruleWith(['.generation-node.selected .generated-action-row']);
 assertDeclarations(selectedActions, { display: 'flex' });
 assertDeclarations(selectedActions, {
   'flex-wrap': 'nowrap',
@@ -152,10 +142,7 @@ assertDeclarations(selectedActions, {
   flex: '0 0 24px',
 });
 
-const unselectedActions = ruleWith([
-  '.canvas-node:not(.selected).node-type-video .generated-action-row',
-  '.canvas-node:not(.selected).node-type-image .generated-action-row',
-]);
+const unselectedActions = ruleWith(['.generation-node:not(.selected) .generated-action-row']);
 assertDeclarations(unselectedActions, { display: 'none' });
 
 assertDeclarations(ruleWith(['.generated-frame-preview']), {
@@ -164,7 +151,7 @@ assertDeclarations(ruleWith(['.generated-frame-preview']), {
   'object-fit': 'contain',
 });
 
-assertDeclarations(ruleWith(['.node-video-props', '.node-image-props']), {
+assertDeclarations(ruleWith(['.generation-editor']), {
   width: '640px',
   'max-width': 'min(640px, calc(100vw - 24px))',
   'margin-left': '0',
@@ -179,8 +166,8 @@ assert.ok(videoTemplateStart >= 0, 'video template must exist');
 assert.ok(imageTemplateStart >= 0, 'image template must delimit the video template');
 assert.ok(videoTemplateStart < imageTemplateStart, 'video template must precede the image template');
 const videoTemplate = engineSource.slice(videoTemplateStart, imageTemplateStart);
-const toolbarStart = videoTemplate.indexOf('class="generation-node-toolbar"');
-const footerStart = videoTemplate.indexOf('class="video-props-footer"');
+const toolbarStart = videoTemplate.indexOf('generation-editor-toolbar');
+const footerStart = videoTemplate.indexOf('generation-editor-footer');
 const modelStart = videoTemplate.indexOf('class="video-model-info"');
 const summaryStart = videoTemplate.indexOf('class="generation-summary-row"');
 const footerRightStart = videoTemplate.indexOf('class="video-footer-right"');
@@ -201,41 +188,40 @@ assert.ok(footerStart < modelStart, 'video model remains inside the footer');
 assert.ok(modelStart < summaryStart, 'video settings follow the model label');
 assert.ok(summaryStart < footerRightStart, 'video settings precede cost and submit controls');
 
-assertDeclarations(ruleWith(['.video-props-footer']), {
+assertDeclarations(ruleWith(['.generation-editor-footer']), {
   display: 'grid',
-  'grid-template-columns': 'minmax(0, 1fr) auto minmax(0, 1fr)',
+  'grid-template-columns': 'minmax(0, auto) minmax(0, 1fr) auto',
 });
-assertDeclarations(ruleWith(['.video-props-footer .generation-summary-row']), {
+assertDeclarations(ruleWith(['.generation-editor-footer .generation-summary-row']), {
   padding: '0',
-  'border-bottom': '0',
-  'justify-self': 'center',
+  border: '0',
 });
-assertDeclarations(ruleWith(['.video-props-footer .video-footer-right']), {
+assertDeclarations(ruleWith(['.generation-editor-footer .video-footer-right']), {
   'justify-self': 'end',
 });
 
 const mobileLayout = mediaRuleWith('(max-width: 720px)');
-assertDeclarations(ruleWith(['.video-props-footer'], mobileLayout), {
+assertDeclarations(ruleWith(['.generation-editor-footer'], mobileLayout), {
   'grid-template-columns': 'minmax(0, 1fr) auto',
 });
-assertDeclarations(ruleWith(['.video-props-footer .generation-summary-row'], mobileLayout), {
+assertDeclarations(ruleWith(['.generation-editor-footer .generation-summary-row'], mobileLayout), {
   'grid-column': '1 / -1',
   'grid-row': '1',
   'max-width': '100%',
 });
-assertDeclarations(ruleWith(['.video-props-footer .video-model-info'], mobileLayout), {
+assertDeclarations(ruleWith(['.generation-editor-footer .video-model-info'], mobileLayout), {
   'grid-column': '1',
   'grid-row': '2',
 });
-assertDeclarations(ruleWith(['.video-props-footer .video-footer-right'], mobileLayout), {
+assertDeclarations(ruleWith(['.generation-editor-footer .video-footer-right'], mobileLayout), {
   'grid-column': '2',
   'grid-row': '2',
 });
 
 for (const selectorsToCheck of [
-  ['.image-props-footer'],
+  ['.generation-editor-footer'],
   ['.generation-summary-row'],
-  ['.generation-node-toolbar'],
+  ['.generation-editor-toolbar'],
 ]) {
   assert.equal(
     declarations(ruleWith(selectorsToCheck)).has('flex-wrap'),

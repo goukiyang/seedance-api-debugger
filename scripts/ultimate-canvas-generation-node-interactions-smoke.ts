@@ -276,7 +276,9 @@ const taskActionsTriggerSource = appSource.slice(
   appSource.indexOf('function syncVideoTaskActionsTrigger'),
   appSource.indexOf('function renderVideoTaskActionsPopover'),
 );
-contains(engineSource, 'data-generation-command="disconnect-references"', 'video prompt toolbar exposes clear references before dynamic task actions');
+assert.ok(!engineSource.includes('data-generation-command="disconnect-references"'),
+  'generation editors do not expose a permanent clear-reference command');
+contains(appSource, 'data-generation-reference-remove', 'connected references remain individually removable');
 contains(taskActionsTriggerSource, "trigger.textContent = '\\u66f4\\u591a'", 'task trigger renders the more label');
 contains(taskActionsTriggerSource, 'toolbar.appendChild(trigger)', 'video task-actions trigger follows the existing toolbar commands');
 contains(appSource, "kind === 'task-actions' ? renderVideoTaskActionsPopover(node, anchor._generationTaskActions)", 'popover renders the explicit task-actions branch with trigger action state');
