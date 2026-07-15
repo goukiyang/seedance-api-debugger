@@ -490,7 +490,7 @@ class CanvasEngine {
     _buildNode(nd) {
         const { id, type, x, y } = nd;
         const wrap = document.createElement('div');
-        wrap.className = `canvas-node node-type-${type}`;
+        wrap.className = `canvas-node node-type-${type}${type === 'image' || type === 'video' ? ' generation-node' : ''}`;
         wrap.dataset.nodeId = id;
         wrap.style.left = x + 'px';
         wrap.style.top = y + 'px';
@@ -499,12 +499,20 @@ class CanvasEngine {
         const label = this._label(type, id);
         const body = this._body(type, id);
         const generationBody = type === 'image' || type === 'video' ? `
-            <div class="generation-quick-modes" data-generation-quick-modes>
-                ${type === 'image' ? `
-                    <button type="button" data-generation-quick-mode="text-to-image">文字生成图片</button>
-                    <button type="button" data-generation-quick-mode="image-to-image">使用参考图</button>` : `
-                    <button type="button" data-generation-quick-mode="first-frame-video">首帧生成视频</button>
-                    <button type="button" data-generation-quick-mode="first-last-frame-video">首尾帧生成视频</button>`}
+            <div class="generation-quick-modes generation-empty-state" data-generation-quick-modes>
+                <div class="generation-empty-icon" aria-hidden="true">
+                    ${type === 'image'
+                        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>'
+                        : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>'}
+                </div>
+                <div class="generation-empty-actions">
+                    <span class="generation-empty-label">尝试</span>
+                    ${type === 'image' ? `
+                        <button type="button" data-generation-quick-mode="image-to-image">图生图</button>
+                        <button type="button" data-generation-quick-mode="upscale-image">图片高清</button>` : `
+                        <button type="button" data-generation-quick-mode="first-last-frame-video">首尾帧生成</button>
+                        <button type="button" data-generation-quick-mode="first-frame-video">首帧生成</button>`}
+                </div>
             </div>
             <div class="generation-result-region" data-generation-result-region></div>` : body;
 
@@ -785,24 +793,21 @@ class CanvasEngine {
             </div>`;
 
         if (type === 'video') return `
-            <div class="node-video-props node-generation-expanded">
-                <button class="video-props-expand" data-prompt-expand title="展开提示词">
+            <div class="node-video-props node-generation-expanded generation-editor" data-generation-editor="video">
+                <button class="video-props-expand" data-prompt-expand title="展开提示词" aria-label="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
-                <div class="generation-node-toolbar">
+                <div class="generation-node-toolbar generation-editor-toolbar">
+                    <button type="button" class="generation-command" data-generation-command="select-reference">+ 参考</button>
                     <button type="button" class="generation-command" data-generation-command="optimize-prompt">优化提示词</button>
                     <button type="button" class="generation-command" data-generation-command="camera-presets" data-generation-popover="camera" aria-expanded="false">运镜</button>
-                    <button type="button" class="generation-command" data-generation-command="select-reference">选择参考</button>
-                    <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
                 </div>
-                <div class="generation-reference-list" data-generation-reference-list>
-                    <span class="generation-reference-empty">未连接参考图</span>
-                </div>
-                <textarea class="video-props-textarea" placeholder="根据文字描述生成视频。"></textarea>
-                <div class="video-props-footer">
+                <div class="generation-reference-list" data-generation-reference-list hidden></div>
+                <textarea class="video-props-textarea" placeholder="描述想要生成的画面，@ 引用素材"></textarea>
+                <div class="generation-editor-footer video-props-footer">
                     <div class="video-model-info">
-                        <span class="model-icon">📊</span>
-                        <span>默认视频 API</span>
+                        <svg class="model-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+                        <span data-generation-model-label>默认视频 API</span>
                     </div>
                     <div class="generation-summary-row">
                         <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
@@ -813,8 +818,8 @@ class CanvasEngine {
                         </button>
                     </div>
                     <div class="video-footer-right">
-                        <span class="cost-label" data-generation-cost>后台计费</span>
-                        <button class="submit-btn" data-generation-submit title="生成视频">
+                        <span class="cost-label" data-generation-cost title="费用由后台计算">后台计费</span>
+                        <button class="submit-btn" data-generation-submit title="生成视频" aria-label="生成视频">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>
                     </div>
@@ -822,35 +827,31 @@ class CanvasEngine {
             </div>`;
 
         if (type === 'image') return `
-            <div class="node-image-props node-generation-expanded">
-                <button class="video-props-expand" data-prompt-expand title="展开提示词">
+            <div class="node-image-props node-generation-expanded generation-editor" data-generation-editor="image">
+                <button class="video-props-expand" data-prompt-expand title="展开提示词" aria-label="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
-                <div class="generation-summary-row">
-                    <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
-                        <span data-generation-mode-label>文生图</span>
-                    </button>
-                    <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="image" data-generation-popover="spec" aria-expanded="false">
-                        <span data-generation-spec>16:9 · 1K · 1张</span>
-                    </button>
+                <div class="generation-node-toolbar generation-editor-toolbar image-generation-toolbar">
+                    <button type="button" class="generation-command" data-generation-command="select-reference">+ 参考</button>
                 </div>
-                <div class="generation-node-toolbar image-generation-toolbar">
-                    <button type="button" class="generation-command" data-generation-command="select-reference">选择参考</button>
-                    <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
-                </div>
-                <div class="generation-reference-list" data-generation-reference-list>
-                    <span class="generation-reference-empty">未连接参考图</span>
-                </div>
-                <textarea class="image-props-textarea" placeholder="描述你想要生成的画面内容。描述越详细,效果越好。"></textarea>
-                <div class="image-props-footer">
+                <div class="generation-reference-list" data-generation-reference-list hidden></div>
+                <textarea class="image-props-textarea" placeholder="描述想要生成的图像，@ 引用素材"></textarea>
+                <div class="generation-editor-footer image-props-footer">
                     <div class="video-model-info">
-                        <span class="model-icon">✨</span>
-                        <span>gmini 图形生成</span>
-                        <span class="chevron" style="color:var(--text-dim)">▾</span>
+                        <svg class="model-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+                        <span data-generation-model-label>图像生成</span>
+                    </div>
+                    <div class="generation-summary-row">
+                        <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
+                            <span data-generation-mode-label>文生图</span>
+                        </button>
+                        <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="image" data-generation-popover="spec" aria-expanded="false">
+                            <span data-generation-spec>16:9 · 1K · 1张</span>
+                        </button>
                     </div>
                     <div class="video-footer-right">
-                        <span class="cost-label" data-generation-cost>后台计费</span>
-                        <button class="submit-btn" data-generation-submit title="生成图片">
+                        <span class="cost-label" data-generation-cost title="费用由后台计算">后台计费</span>
+                        <button class="submit-btn" data-generation-submit title="生成图片" aria-label="生成图片">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>
                     </div>

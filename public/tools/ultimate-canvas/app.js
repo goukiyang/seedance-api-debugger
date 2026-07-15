@@ -3144,6 +3144,7 @@
         const references = generationReferenceItems(nodeId);
         const referenceList = nodeEl.querySelector('[data-generation-reference-list]');
         if (referenceList) {
+            referenceList.hidden = references.length === 0;
             referenceList.innerHTML = references.length
                 ? references.map((item, index) => `
                     <span class="generation-reference-item ${item.available ? '' : 'is-unavailable'}" title="${escapeHtml(item.available ? item.title : `${item.title} 尚未入库`)}">
@@ -3155,7 +3156,7 @@
                         <button type="button" class="generation-reference-remove" data-generation-reference-remove="${escapeHtml(item.nodeId)}"
                             title="移除参考图" aria-label="移除参考图">&times;</button>
                     </span>`).join('')
-                : '<span class="generation-reference-empty">未连接参考图</span>';
+                : '';
         }
         refreshOpenGenerationSpecPopover(node);
         syncVideoTaskActionsTrigger(nodeEl, node);
