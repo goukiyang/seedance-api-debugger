@@ -4,7 +4,7 @@
 
 **Goal:** Add an opt-in localhost runtime that logs an ordinary user into SD2 and exercises the real Ultimate Canvas upload, generation, persistence, and polling APIs through a fixed same-origin proxy.
 
-**Architecture:** Keep local canvas assets and existing relative endpoint contracts. Extract a small streaming reverse-proxy module with a strict canvas API allowlist, then let the preview server select default, Mock, or fixed-origin SD2 live mode and provide a localhost login bridge.
+**Architecture:** Keep local canvas assets and existing relative endpoint contracts. Use a strict streaming proxy for canvas APIs, and relay a state-validated, single-use Feishu authorization code from the deployed callback to an exact loopback callback where the existing SD2 `login-by-code` endpoint creates the localhost session.
 
 **Tech Stack:** Node.js `http`/`https`, existing static Ultimate Canvas JavaScript, Next.js 14 SD2 APIs, TypeScript smoke scripts.
 
@@ -102,3 +102,60 @@ Start live mode on an unused port, log in through `/__sd2-login`, open the canva
 - [ ] **Step 4: Final diff and safety audit**
 
 Confirm no `.env`, admin settings, provider secrets, credits core files, or schema files changed; confirm the default preview still returns `REAL_BACKEND_REQUIRED` for generation.
+
+### Task 4: Feishu Loopback Login Relay
+
+**Files:**
+- Create: `src/lib/auth/feishu-local-relay.ts`
+- Create: `scripts/ultimate-canvas-feishu-local-relay-smoke.ts`
+- Modify: `src/app/api/auth/feishu/callback/route.ts`
+- Modify: `scripts/lib/ultimate-canvas-sd2-proxy.mjs`
+- Modify: `scripts/ultimate-canvas-preview-server.mjs`
+- Modify: `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
+
+**Interfaces:**
+- Produces: `parseFeishuLocalRelay(next)` and `buildFeishuLocalCallbackUrl(relay, result)` for the deployed callback.
+- Consumes: the existing OAuth state and `/api/auth/feishu/login-by-code` endpoint.
+- Produces: local routes `/__sd2-login` and `/__sd2-feishu-callback`, a browser-bound relay nonce, and a one-time exchange permit for strict proxy access to `/api/auth/feishu/login-by-code`.
+
+- [x] **Step 1: Write failing loopback and preview tests**
+
+Assert that only `http://127.0.0.1:<1024-65535>/__sd2-feishu-callback`, `localhost`, and `::1` are accepted; external hosts, HTTPS, user info, fragments, wrong paths, and invalid ports are rejected. Assert that the deployed callback relays only after state verification, the local login page points to deployed Feishu authorize, the callback removes the code from history before exchange, and the proxy permits only `login-by-code` from the Feishu auth family.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+Run: `npx tsx scripts/ultimate-canvas-feishu-local-relay-smoke.ts; npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts; npx tsx scripts/ultimate-canvas-sd2-live-proxy-smoke.ts`
+Expected: FAIL because the relay helper, callback branch, Feishu login UI, and allowlist entry do not exist.
+
+- [x] **Step 3: Implement the minimal state-validated relay**
+
+Add a pure strict loopback parser/builder, branch in the deployed callback before `loginWithFeishuCode`, relay cancellation errors locally when state is valid, and add the primary Feishu login link and no-referrer local callback page. Bind the callback to the initiating local browser with a five-minute host-only `HttpOnly` cookie and in-memory nonce. After that binding is consumed, issue a separate 60-second one-time permit and require exact local Host/Origin, `POST`, `application/json`, and the permit before proxying JSON `{ code }` to SD2. Remove the query from browser history immediately, strip the local permit before forwarding, and never log code/session values.
+
+- [x] **Step 4: Run focused tests and verify GREEN**
+
+Run the three focused smoke scripts, `npx tsc --noEmit --pretty false`, both changed-file syntax checks, and `git diff --check`.
+Expected: every command exits 0.
+
+### Task 5: Authenticated Browser Acceptance and Final Report
+
+**Files:**
+- Modify: `docs/handoffs/ultimate-canvas-implementation-report.md`
+
+**Interfaces:**
+- Verifies: deployed Feishu callback support, localhost session establishment, real SD2 bootstrap/data/upload/save/restore, and zero paid generation.
+
+- [ ] **Step 1: Deploy or confirm the callback commit is live**
+
+Verify the deployed SD2 authorize/callback path contains the loopback relay support before attempting localhost login.
+
+- [ ] **Step 2: Complete Feishu login through localhost**
+
+Start `node scripts/ultimate-canvas-preview-server.mjs 4402 --sd2-live`, use the Feishu button, return through `/__sd2-feishu-callback`, and confirm the browser reaches the canvas with `SD2 真实后端`.
+
+- [ ] **Step 3: Verify real non-generation workflows**
+
+Confirm real project/video-card context, point balance, asset library, one permitted upload, document save, reload, and restore. Do not click text, image, or video generation submit.
+
+- [ ] **Step 4: Finalize the implementation report and verification**
+
+Record live actions, whether any generation ran, exact point consumption, all automated commands, lint environment caveat if still present, protected files untouched, deployment dependency, remaining risks, and final commit range.

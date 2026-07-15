@@ -1,7 +1,7 @@
 # Ultimate Canvas Local SD2 Live Link
 
 Date: 2026-07-15  
-Status: Approved (local SD2 login and same-origin proxy)
+Status: Approved (Feishu loopback login and same-origin proxy)
 
 ## Context
 
@@ -35,11 +35,17 @@ The Ultimate Canvas browser client already submits upload, text, image, video, s
 
 The process refuses to start when `--mock-generation` and `--sd2-live` are both present. The SD2 origin is a source constant rather than a browser-provided URL.
 
-### Local login bridge
+### Local Feishu login bridge
 
-In live mode, `/__sd2-login` serves a minimal localhost-only account/password form. Its POST goes through the same proxy to `/api/auth/login`. SD2 validates the normal account and returns the existing `session` cookie. Because the upstream cookie has no `Domain` attribute, the browser stores it for localhost; it remains `HttpOnly`, `SameSite=Lax`, and is never exposed to canvas JavaScript.
+In live mode, `/__sd2-login` offers Feishu as the primary login method. It opens the deployed SD2 `/api/auth/feishu/authorize` route so the existing production Feishu application, state cookie, callback URI, provider secrets, tenant policy, and ordinary-account provisioning remain authoritative.
 
-The proxy does not log or persist credentials or session values. A missing local session redirects the canvas document to `/__sd2-login`; an expired session is handled by the existing 401 UI and can be renewed locally.
+The OAuth state stores a special relative relay marker. After the deployed callback validates that state, it does not consume the code itself; it may forward the single-use Feishu authorization code only to an exact loopback callback (`http://127.0.0.1:<port>/__sd2-feishu-callback`, with equivalent `localhost`/`::1` hosts). External hosts, HTTPS targets, user-info URLs, fragments, unexpected paths, and invalid ports are rejected.
+
+The localhost callback immediately removes the code from browser history and posts it through the fixed SD2 proxy to the existing `/api/auth/feishu/login-by-code` endpoint. SD2 exchanges the code, applies the normal account rules, and returns the existing `session` cookie. The browser stores that cookie for localhost; it remains `HttpOnly`, `SameSite=Lax`, and is never exposed to canvas JavaScript. No SD2 session token is placed in a URL.
+
+The local login page also creates a five-minute, host-only `HttpOnly` relay-binding cookie and a matching in-memory nonce. The callback must consume that binding exactly once before it can receive an exchange-capable page. A successful callback then receives a separate 60-second one-time exchange permit. The proxy accepts `login-by-code` only from the exact local host and origin, with `POST`, `application/json`, and that permit; it consumes the permit before opening the upstream request and strips the local-only header before forwarding.
+
+The proxy does not log or persist authorization codes, credentials, or session values. A missing local session redirects the canvas document to `/__sd2-login`; an expired session returns to the same local bridge through `/login`. Account/password login remains a secondary compatibility option.
 
 ### Proxy boundary
 
@@ -47,11 +53,12 @@ A focused proxy module streams requests and responses without decoding uploads o
 
 Only these path families are eligible:
 
-- `/api/auth/login`, `/api/auth/me`
+- `/api/auth/login`, `/api/auth/me`, `/api/auth/feishu/login-by-code`
 - `/api/tools/ultimate-canvas/*`
 - `/api/projects/*`, `/api/video-cards/*`
 - `/api/assets/*`, `/api/tasks/*`, `/api/video/*`
 - `/api/reference-albums/*`
+- `/api/approvals`
 - `/uploads/*`
 
 Other proxy attempts return 404 locally. Static canvas files continue to come from the checked-out branch.
@@ -66,10 +73,12 @@ The proxied SD2 bootstrap already reports `backend.mode = "sd2"`; the existing h
 - Upstream 401: forward the real authentication response; never replace it with Mock data.
 - Unsupported local route: return 404 and do not contact SD2.
 - Conflicting runtime flags: fail startup before opening a port.
+- Invalid OAuth state or non-loopback relay target: preserve the normal SD2 callback error path and never expose the authorization code.
 
 ## Verification
 
 - A focused smoke test starts a fake upstream and verifies allowlisting, login `Set-Cookie`, authenticated cookie forwarding, POST body/query forwarding, range/media streaming, and blocked routes.
+- A pure relay smoke verifies valid loopback destinations, rejects open redirects, and locks the callback branch before code exchange. Proxy behavior tests also prove that missing, wrong, expired, cross-origin, wrong-host, non-JSON, wrong-method, and replayed permits cannot contact upstream.
 - Existing preview smoke tests continue proving that default and Mock modes never become real silently.
-- Browser verification logs in through localhost and confirms the real bootstrap, projects, points, save/restore, and asset library without submitting a paid generation.
+- Browser verification completes Feishu login through localhost and confirms the real bootstrap, projects, points, save/restore, and asset library without submitting a paid generation.
 - Full canvas smoke tests, TypeScript, syntax, lint, build, and `git diff --check` remain required.
