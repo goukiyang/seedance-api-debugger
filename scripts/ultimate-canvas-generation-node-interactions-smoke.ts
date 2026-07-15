@@ -296,7 +296,7 @@ contains(appSource, 'imageDownloadUrl: isVideo ? null', 'library image nodes per
 contains(appSource, "trigger.dataset.generationPopover = 'result-actions'", 'image results expose a More popover trigger');
 contains(appSource, "kind === 'result-actions' ? renderImageResultActionsPopover", 'popover renders image result actions from trigger state');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260715-compact-video-settings', 'canvas app cache key matches the compact video settings state');
+contains(indexSource, 'app.js?v=20260715-generated-image-drag', 'canvas app cache key matches the generated image drag state');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
 contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
 contains(appSource, '350', 'video estimates debounce for 350ms');

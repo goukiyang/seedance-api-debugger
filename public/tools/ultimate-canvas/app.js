@@ -6027,7 +6027,7 @@
             <div class="generated-reference-card">
                 <strong class="generated-result-title">${escapeHtml(title)}</strong>
                 ${previewImage
-                    ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}">`
+                    ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}" draggable="false">`
                     : '<div class="generated-result-placeholder" aria-hidden="true"></div>'}
             </div>`);
         syncImageResultActionsTrigger(nodeEl, node, options);

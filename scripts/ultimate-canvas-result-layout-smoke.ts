@@ -143,6 +143,8 @@ assertDeclarations(ruleWith([
   'border-radius': 'inherit',
   background: 'transparent',
   'object-fit': 'contain',
+  'user-select': 'none',
+  '-webkit-user-drag': 'none',
 });
 assertDeclarations(ruleWith([
   '.generation-node .generation-result-region:not(:empty) .generated-result-placeholder',
@@ -211,9 +213,24 @@ assert.ok(!appSource.slice(appSource.indexOf('function decorateGeneratedNode'), 
   .includes('generated-action-row'));
 assert.ok(!appSource.slice(appSource.indexOf('function decorateGeneratedNode'), appSource.indexOf('function createDirectorOutput'))
   .includes('generated-frame-lines'));
+assert.ok(appSource.slice(appSource.indexOf('function decorateGeneratedNode'), appSource.indexOf('function createDirectorOutput'))
+  .includes('draggable="false"'), 'generated result images disable the browser native drag operation');
 assert.ok(appSource.includes('generated-result-placeholder'));
 assert.ok(appSource.includes("const card = nodeEl.querySelector('.node-card')"));
 assert.ok(appSource.includes('card.append(status)'));
+const nodeCardDragStart = engineSource.indexOf("wrap.querySelector('.node-card').addEventListener('mousedown'");
+const nodeCardDragEnd = engineSource.indexOf('// Select', nodeCardDragStart);
+assert.ok(nodeCardDragStart >= 0 && nodeCardDragEnd > nodeCardDragStart, 'node-card drag handler must exist');
+const nodeCardDragSource = engineSource.slice(nodeCardDragStart, nodeCardDragEnd);
+const nonLeftGuardIndex = nodeCardDragSource.indexOf('if (e.button !== 0) return;');
+const preventDefaultIndex = nodeCardDragSource.indexOf('e.preventDefault()');
+const dragInitializationIndex = nodeCardDragSource.indexOf('this.isDraggingNode = true');
+assert.ok(nonLeftGuardIndex >= 0 && nonLeftGuardIndex < preventDefaultIndex,
+  'node-card dragging ignores non-left mouse buttons before cancelling native behavior');
+assert.ok(preventDefaultIndex >= 0 && preventDefaultIndex < dragInitializationIndex,
+  'node-card dragging cancels native image selection before moving the node');
+assert.ok(nodeCardDragSource.includes("e.target.closest('textarea, input, select, button, a, [contenteditable]')"),
+  'interactive controls inside node cards remain excluded from node dragging');
 assertDeclarations(ruleWith(['.generation-editor-footer .generation-summary-row']), {
   padding: '0',
   border: '0',

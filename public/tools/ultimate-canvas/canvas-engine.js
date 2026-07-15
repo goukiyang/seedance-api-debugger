@@ -542,12 +542,14 @@ class CanvasEngine {
 
         // Also drag via card header area (but not inputs/buttons inside)
         wrap.querySelector('.node-card').addEventListener('mousedown', (e) => {
-            if (e.target.closest('.node-connector') || e.target.closest('textarea')
-                || e.target.closest('button') || e.target.closest('.node-action-row')
-                || e.target.closest('[contenteditable]') || e.target.closest('.video-props-tab')
+            if (e.button !== 0) return;
+            if (e.target.closest('.node-connector')
+                || e.target.closest('textarea, input, select, button, a, [contenteditable]')
+                || e.target.closest('.node-action-row') || e.target.closest('.video-props-tab')
                 || e.target.closest('.video-tool-btn') || e.target.closest('.image-props-tools')
                 || e.target.closest('.model-selector') || e.target.closest('.director-actor')
                 || e.target.closest('.director-shot-chip')) return;
+            e.preventDefault();
             e.stopPropagation();
             this.isDraggingNode = true;
             this.dragNode = wrap;

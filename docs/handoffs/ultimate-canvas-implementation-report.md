@@ -1,3 +1,83 @@
+# Ultimate Canvas 生成图片拖动修复回执
+
+日期：2026-07-15
+
+目标分支：`teammate/ultimate-canvas-complete`
+
+## 1. 本次目标理解
+
+修复图片生成完成后，从结果图片区域按住鼠标左键会触发浏览器原生图片拖拽或选中，导致无法直接拖动画布节点的问题。保持现有节点、生成、保存和后端链路不变。
+
+## 2. 实际修改了哪些文件
+
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/canvas-engine.js`
+- `public/tools/ultimate-canvas/styles.css`
+- `public/tools/ultimate-canvas/index.html`
+- `scripts/ultimate-canvas-result-layout-smoke.ts`
+- `scripts/ultimate-canvas-context-rules-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
+- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- `docs/handoffs/ultimate-canvas-implementation-report.md`
+
+## 3. 每个文件改了什么
+
+- `app.js`：生成结果图片增加 `draggable="false"`，关闭浏览器原生图片拖放。
+- `canvas-engine.js`：非左键在节点拖动初始化前直接返回；左键拖动开始时调用 `preventDefault()`，让画布引擎稳定接管事件；并统一排除 `textarea`、`input`、`select`、按钮、链接和可编辑区域。
+- `styles.css`：结果图片增加 `user-select: none`、`-webkit-user-select: none` 和 `-webkit-user-drag: none`，避免拖动时选中或产生原生图片拖影。
+- `index.html`：将 `styles.css`、`canvas-engine.js` 和 `app.js` 的缓存版本统一更新为 `20260715-generated-image-drag`。
+- `ultimate-canvas-result-layout-smoke.ts`：新增原生拖拽关闭、不可选中、非左键提前返回、交互控件排除和节点拖动事件接管顺序断言。
+- 其余五个 smoke：同步校验新的静态资源缓存版本，避免部署后继续加载旧实现。
+- 本回执：记录目标、文件、验证、真实调用、点数、保护边界、剩余事项和风险。
+
+## 4. 跑了哪些验证命令
+
+- TDD RED：`npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`
+- 缓存键 RED：`npx tsx scripts/ultimate-canvas-context-rules-smoke.ts`
+- 全部 16 个 `scripts/ultimate-canvas-*-smoke.ts`
+- `npx tsc --noEmit --pretty false`
+- `node --check public/tools/ultimate-canvas/app.js`
+- `node --check public/tools/ultimate-canvas/canvas-engine.js`
+- `npm run lint`
+- `npm run build`
+- `git diff --check`
+- 应用内浏览器：本地 `--mock-generation` 生成图片后，直接从图片中心拖动节点，并检查节点坐标、页面选区和控制台错误。
+
+## 5. 验证结果是否通过
+
+- 两次 RED 均按预期失败，分别证明旧实现缺少拖动保护、旧缓存键尚未更新。
+- 画布 smoke：`16/16` PASS。
+- TypeScript、两个 JavaScript 语法检查、production build 和 `git diff --check`：PASS。
+- Lint：PASS；仅保留仓库已有 Hook 依赖和 `<img>` warning，没有新增 lint error。
+- 浏览器交互：PASS。节点从 `left: 460px; top: 240px` 拖到 `left: 600px; top: 360px`；拖后页面选区为空；控制台 error 为 0。
+- 独立只读审查发现非左键仍可能进入旧拖动初始化；已先补 RED 断言，再改为非左键提前返回，并补齐卡片内通用交互控件排除。修复后的 16 个 smoke、类型检查、lint 和 build 再次全部通过。
+
+## 6. 是否真实调用了文字/图片/视频生成
+
+没有。本轮仅使用显式本地 Mock 生成图片来验证拖动交互，没有提交真实文字、图片或视频模型任务。
+
+## 7. 是否消耗了点数
+
+没有，点数消耗为 0。
+
+## 8. 是否碰过后台设置、密钥、点数核心逻辑
+
+没有读取或修改 `.env`、后台 API 设置、provider 密钥配置、点数冻结/扣减/退款核心逻辑或数据库 schema；没有修改普通账号权限，也没有绕成 admin。
+
+## 9. 还没做完的内容
+
+- 代码合并并部署到 `https://sd2.youdoodesign.com` 后，生产浏览器才会加载本次新缓存版本。
+- 本轮未为纯交互修复触发真实付费生成。
+
+## 10. 风险和建议下一步
+
+- 部署后强制刷新一次，确认请求加载 `20260715-generated-image-drag` 版本，再用一张真实历史生成图复核从图片任意位置拖动节点。
+- 如果后续在结果图上增加裁剪、缩放或热点按钮，应把对应控件加入节点拖动排除条件，避免工具操作被节点拖动接管。
+
+---
+
 # Ultimate Canvas 紧凑视频规格弹层实施回执
 
 日期：2026-07-15

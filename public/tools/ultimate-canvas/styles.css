@@ -1556,6 +1556,9 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     border-radius: inherit;
     background: transparent;
     object-fit: contain;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
 }
 .generation-node .generation-result-region:not(:empty) .generated-result-placeholder {
     display: block;
