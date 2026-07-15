@@ -525,11 +525,11 @@ git commit -m "feat: add compact generation specification tiles"
 
 **Interfaces:**
 - Consumes: Existing generated image action event delegation, video task action model, result URLs stored in node data, `.generation-node-toolbar`, and `.node-card`.
-- Produces: Image `result-actions` popover, shared compact `more` trigger, result cards with media-only body, and a one-line card status overlay.
+- Produces: Image `result-actions` popover, shared compact `more` trigger, one-surface result states with overlay filenames, and a one-line card status overlay.
 
 - [ ] **Step 1: Write failing result-layout and action assertions**
 
-Change result-layout expectations to require both node types to use a two-row result grid and no inline action row:
+Change result-layout expectations to require both node types to reuse the single outer card surface with no inset visual card and no inline action row:
 
 ```ts
 const compactResults = ruleWith([
@@ -537,12 +537,20 @@ const compactResults = ruleWith([
   '.node-type-image .generation-result-region:not(:empty) .generated-reference-card',
 ]);
 assertDeclarations(compactResults, {
-  display: 'grid',
-  'grid-template-rows': 'auto minmax(0, 1fr)',
-  gap: '8px',
+  position: 'relative',
+  width: '100%',
   height: '100%',
   'min-height': '0',
+  padding: '0',
+  border: '0',
+  'border-radius': 'inherit',
+  background: 'transparent',
+  'box-shadow': 'none',
 });
+assertDeclarations(ruleWith([
+  '.node-type-video .node-body:has(.generation-result-region:not(:empty))',
+  '.node-type-image .node-body:has(.generation-result-region:not(:empty))',
+]), { padding: '0' });
 assertDeclarations(ruleWith([
   '.node-type-video .generation-result-region:not(:empty) .generated-reference-card p',
   '.node-type-image .generation-result-region:not(:empty) .generated-reference-card p',
@@ -551,6 +559,12 @@ assertDeclarations(ruleWith([
   '.node-type-video .generation-result-region:not(:empty) .generated-frame-preview',
   '.node-type-image .generation-result-region:not(:empty) .generated-frame-preview',
 ]), { width: '100%', height: '100%', 'object-fit': 'contain' });
+assertDeclarations(ruleWith(['.generated-result-title']), {
+  position: 'absolute',
+  top: '10px',
+  left: '10px',
+  'z-index': '2',
+});
 ```
 
 Add source assertions:
@@ -652,7 +666,7 @@ if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
 
 The existing `syncVideoTaskActionsTrigger` remains the video task-detail path.
 
-- [ ] **Step 4: Make generated result markup media-first**
+- [ ] **Step 4: Make generated result markup reuse the empty node surface**
 
 Replace the body passed to `updateGenerationResultRegion` with:
 
@@ -696,22 +710,31 @@ function setNodeGenerationStatus(nodeEl, state, message) {
 
 Style `.node-generation-status` as an absolutely positioned, single-line pill at the bottom-right of `.node-card`, with `max-width: calc(100% - 20px)`, ellipsis, no border-bottom, and a z-index above media but below connectors.
 
-- [ ] **Step 6: Apply the shared result grid and full media sizing**
+- [ ] **Step 6: Remove the inset result-card appearance and fill the outer surface**
 
 Use shared image/video rules:
 
 ```css
 .node-type-video .generation-result-region:not(:empty) .generated-reference-card,
 .node-type-image .generation-result-region:not(:empty) .generated-reference-card {
-    display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px;
-    height: 100%; min-height: 0; padding: 10px; overflow: hidden;
+    position: relative; width: 100%; height: 100%; min-height: 0;
+    padding: 0; border: 0; border-radius: inherit;
+    background: transparent; box-shadow: none; overflow: hidden;
 }
-.generated-result-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-type-video .node-body:has(.generation-result-region:not(:empty)),
+.node-type-image .node-body:has(.generation-result-region:not(:empty)) { padding: 0; }
+.generated-result-title {
+    position: absolute; top: 10px; left: 10px; z-index: 2;
+    max-width: calc(100% - 20px); padding: 4px 7px; border-radius: 5px;
+    background: rgba(0,0,0,0.58); color: var(--text-primary); font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
+}
 .node-type-video .generation-result-region:not(:empty) .generated-reference-card p,
 .node-type-image .generation-result-region:not(:empty) .generated-reference-card p { display: none; }
 .node-type-video .generation-result-region:not(:empty) .generated-frame-preview,
 .node-type-image .generation-result-region:not(:empty) .generated-frame-preview {
-    width: 100%; height: 100%; min-height: 0; max-height: none; margin: 0; object-fit: contain;
+    display: block; width: 100%; height: 100%; min-height: 0; max-height: none;
+    margin: 0; border: 0; border-radius: inherit; object-fit: contain;
 }
 ```
 
@@ -781,6 +804,7 @@ At a desktop viewport, verify:
 
 ```text
 - empty image and video cards show centered media icons and two compact quick actions;
+- empty and completed nodes have the same outer background, border, radius, and inset, with no nested result frame;
 - selecting either card does not resize it and keeps empty-state actions visible;
 - both editors use toolbar -> references (only when present) -> textarea -> footer order;
 - only real controls are visible;

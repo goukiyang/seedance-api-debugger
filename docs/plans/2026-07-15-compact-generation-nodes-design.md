@@ -29,11 +29,12 @@ The current image and video generation nodes expose mode, reference, status, pro
 
 - Keep the node label outside and above the card.
 - Selection changes only the border treatment; it must not scale the node.
+- Empty, uploading, generating, and result states use the same single outer card surface. A state change must not introduce another visible card, border, background, radius, or inset frame.
 - Size the preview frame from the node's selected aspect ratio, within stable minimum and maximum dimensions.
 - Empty image nodes show an image icon plus compact `Try` actions for text-to-image and reference-image generation.
 - Empty video nodes show a play icon plus compact `Try` actions for first-frame and first/last-frame generation.
-- Uploaded and generated media use `object-fit: contain` so the entire image or video remains visible.
-- Retain only the file name when a useful name exists. Upload and generation status text moves to a compact overlay or status line.
+- Uploaded and generated media fill that same outer surface and use `object-fit: contain` so the entire image or video remains visible.
+- Retain only the file name when a useful name exists, rendered as a compact top-left overlay that does not consume media height. Upload and generation status text moves to a compact overlay or status line.
 
 ### Prompt editor
 
@@ -57,7 +58,7 @@ The current image and video generation nodes expose mode, reference, status, pro
 
 - Idle: icon, compact quick actions, and no explanatory paragraph.
 - Uploading/submitting/polling: preserve the preview footprint and show one concise status overlay.
-- Success: show complete media; do not place task details or action buttons inside the media frame.
+- Success: replace the empty-state content inside the same outer card with complete media; do not add a nested result-card surface or place task details and action buttons inside the media frame.
 - Failure: show a concise error with a retry action. Detailed task actions stay in the contextual `more` menu.
 - References: show thumbnails only when present; removal updates mode eligibility and saved node data as it does today.
 
@@ -74,4 +75,3 @@ The current image and video generation nodes expose mode, reference, status, pro
 - Add smoke coverage for compact DOM order, hidden empty-reference rows, media aspect-ratio sizing hooks, and real control wiring.
 - Preserve and run the existing canvas smoke suites, TypeScript check, lint, and production build.
 - Verify image and video nodes in the local browser at desktop and narrow viewports, including empty, selected, referenced, generating, success, and error states without paid generation.
-
