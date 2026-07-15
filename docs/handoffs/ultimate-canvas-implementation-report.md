@@ -476,3 +476,83 @@ git diff --check c2fd70a..HEAD
 
 - `contain` 会完整保留图片；当图片比例与节点比例不一致时会出现正常留边，不应改为会裁切主体的 `cover`。
 - 后续可单独修复内部节点 ID、模型技术名和参数摘要同步问题，本次没有扩大修改范围。
+
+## Compact image and video generation nodes (2026-07-15)
+
+### 1. 本次目标理解
+
+本轮目标是在现有无线画布原位统一所有节点卡片的视觉外壳，并让图片、视频生成节点共用紧凑的预览与编辑交互。`.node-card` 作为所有节点唯一的外层卡片样式，`.generation-node` 只承载图片/视频共有的生成布局；空态、处理中、成功和失败均作为同一张卡片内的内容状态，不再为结果额外嵌套另一层视觉卡片。图片与视频继续使用 SD2 同源提交、能力元数据、状态轮询、保存恢复和普通账号权限路径，不新建生成流程。
+
+### 2. 实际修改了哪些文件
+
+以本轮功能基线 `217cda0`、已提交实现 `ed6b7fa` 以及 Task 4 验收修复的当前工作区统计，实现、测试与回执涉及以下文件：
+
+- `docs/plans/2026-07-15-compact-generation-nodes-design.md`
+- `docs/superpowers/plans/2026-07-15-ultimate-canvas-compact-generation-nodes.md`
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/canvas-engine.js`
+- `public/tools/ultimate-canvas/generation-node-interactions.js`
+- `public/tools/ultimate-canvas/styles.css`
+- `scripts/ultimate-canvas-compact-generation-ui-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/ultimate-canvas-result-layout-smoke.ts`
+- `docs/handoffs/ultimate-canvas-implementation-report.md`
+
+Task 4 新增的窄屏弹层定位修复位于 `app.js`，对应运行时回归加入现有 `ultimate-canvas-generation-node-interactions-smoke.ts`；旧规格控件契约的修订位于 `ultimate-canvas-generation-node-workflow-smoke.ts`。本轮没有另建画布、生成流程或测试专用应用页面。
+
+### 3. 每个文件改了什么
+
+- 两份设计/实施计划记录统一节点外壳、能力驱动控件、共享编辑器结构、结果态和验收边界。
+- `canvas-engine.js` 为图片和视频节点统一使用 `.node-card` 与 `.generation-node`，统一空态快捷入口和“工具栏 -> 参考图 -> 提示词 -> 底栏”结构。
+- `app.js` 将规格设置改为由后端能力元数据生成的按钮组选项，保留原有设置对象与自动保存；同时整理图片/视频结果动作、状态渲染，并持久化图片原图与下载地址。Task 4 的 `positionGenerationPopover()` 进一步读取 `#header-bar` 的实际底边作为安全区，限制弹层 `maxHeight`，并保证向上展开时不会进入移动端 header 下方。
+- `generation-node-interactions.js` 按能力、参考图数量和可用状态控制图片/视频快捷模式，避免展示或执行后端不支持的入口。
+- `styles.css` 统一生成节点的外壳、空态、编辑器、规格弹层和结果区；结果媒体直接占用卡片内容面，状态改为紧凑覆盖层，图片继续使用 `object-fit: contain`。
+- `ultimate-canvas-compact-generation-ui-smoke.ts` 覆盖共享结构、编辑器顺序、能力规格按钮、统一结果面和关键 CSS 级联契约。
+- `ultimate-canvas-generation-node-interactions-smoke.ts` 覆盖快捷模式能力门控、设置点击与持久化交互；Task 4 新增运行时定位回归，在 `320px` 宽视口和 `header bottom = 88px` 条件下断言弹层 `maxHeight = 368px`、`top = 100px`，确保弹层位于 header 安全区内。
+- `ultimate-canvas-generation-node-workflow-smoke.ts` 将旧 `data-generation-setting` 断言更新为 `data-generation-setting-choice` 与 `generationChoiceGroup()` 契约，并断言图片/视频通过共享的 ``scheduleCanvasSave(`${node.type}_settings_change`)`` 路径持久化设置。
+- `ultimate-canvas-result-layout-smoke.ts` 覆盖统一结果外壳、无预览占位、状态覆盖层以及原图/下载地址在重复同步和恢复后的保留。
+- 本回执记录实际命令结果、安全边界以及桌面和两个窄视口的最终浏览器验收。
+
+### 4. 跑了哪些验证命令
+
+- 修复后完整 smoke 命令：`Get-ChildItem scripts -Filter 'ultimate-canvas-*-smoke.ts' | Sort-Object Name | ForEach-Object { npx tsx $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }`：14/14 PASS，退出 0。
+- `ultimate-canvas-generation-node-workflow-smoke.ts`：PASS，已覆盖 `data-generation-setting-choice`、全部能力规格组和图片/视频共享持久化契约。
+- `ultimate-canvas-generation-node-interactions-smoke.ts`：PASS，包含移动端 header 安全区、弹层最大高度与顶部定位的运行时回归。
+- `npx tsc --noEmit --pretty false`：PASS，退出 0。
+- `node --check public/tools/ultimate-canvas/app.js`：PASS，退出 0。
+- `node --check public/tools/ultimate-canvas/canvas-engine.js`：PASS，退出 0。
+- `npm run lint`：PASS，退出 0；仅保留仓库既有 React Hook 依赖与 `<img>` warning。
+- `npm run build`：PASS，退出 0；Next.js 14.2.5 编译成功并生成 76 个页面，仅保留与 lint 相同的既有 warning。
+- `git diff --check`：PASS，退出 0。
+
+### 5. 验证结果是否通过
+
+通过。修复旧 workflow smoke 契约和移动端弹层安全区后，完整 14 个 `ultimate-canvas-*-smoke.ts` 全部 PASS；TypeScript、两个 JavaScript 语法检查、lint、build 和 `git diff --check` 均退出 0。lint/build 仅保留仓库既有 React Hook 依赖与 `<img>` warning，没有新增错误。
+
+浏览器桌面验收中，图片比例从 `9:16` 切换到 `21:9` 后摘要立即更新，节点 CSS 尺寸为 `640 x 274.286`，提示词面板宽度保持 `640`；取消选中后卡片仍为 `640 x 274`，没有因选中而放大或改变布局。素材结果、空图片和空视频均使用同一 `.node-card` 结构、`rgb(38, 38, 38)` 背景与 `12px` 圆角；结果媒体为 `object-fit: contain`，任务状态显示为覆盖层，不占用或挤压媒体区域。
+
+`320 x 720` 验收中，header `bottom = 88`，规格弹层 `top = 100`、`bottom = 660`、`width = 296`，页面 `document.scrollWidth = 320`，弹层没有被 header 遮挡或造成横向溢出。`390 x 844` 整理多节点后 `body.scrollWidth = 390`，无页面级横向溢出，卡片与编辑器没有互相挤压。两个本地验收页面的 console error 均为 0。
+
+### 6. 是否真实调用了文字、图片、视频生成
+
+没有。未向 SD2 或任何第三方 provider 提交真实文字、图片或视频生成。自动化 smoke 中的显式 `--mock-generation` 只运行本机确定性测试数据，不是真实模型调用。
+
+### 7. 是否消耗了点数
+
+没有，点数消耗为 0；没有执行真实生成、付费重试、扣点、冻结、返还或点数调整。
+
+### 8. 是否碰过后台设置、密钥、点数核心逻辑
+
+没有。未读取或修改 `.env`、后台 API 设置、provider 密钥配置、点数核心逻辑或数据库 schema；没有绕过普通账号成为 admin，也没有直接接入第三方 API Key。
+
+### 9. 还没做完的内容
+
+- 生产 SD2 页面不会因 Git 分支更新自动发布，仍需走现有部署流程后才会展示本轮统一样式。
+- 按安全约束，未执行会消耗点数的真实文字、图片或视频生成验收。
+
+### 10. 风险和建议下一步
+
+- 当前 Task 4 的命令行与浏览器验收已通过；后续若 header 高度、规格项数量或移动端底部安全区变化，应保留并扩展现有运行时弹层定位回归，防止弹层再次进入 header 或超出视口。
+- 统一样式依赖 `.node-card` 作为唯一视觉外壳；后续新增节点状态时应复用该结构和 `.generation-node` 语义布局，避免重新引入类型专属嵌套卡片。
+- 部署后仍应使用普通账号验证同源能力元数据、上传、保存恢复和无扣点路径；真实付费生成应由获授权人员另行决定。

@@ -167,6 +167,40 @@ assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="3"'), 'c
 assert.ok(!specPopoverElement.innerHTML.includes('<select'), 'specification popover has no native selects');
 assert.equal(specPopoverPositionCalls, 1, 'refreshed specification controls are repositioned');
 
+const positionPopoverSource = appSource.slice(
+  appSource.indexOf('function positionGenerationPopover'),
+  appSource.indexOf('function openGenerationPopover'),
+);
+const positionPopoverFactory = new Function(
+  'canvasRuntime', 'window', 'document',
+  `${positionPopoverSource}\nreturn { positionGenerationPopover };`,
+);
+const positionedPopover = {
+  isConnected: true,
+  style: {} as Record<string, string>,
+  getBoundingClientRect() {
+    return {
+      width: 296,
+      height: Math.min(804, Number.parseFloat(this.style.maxHeight || '') || 560),
+    };
+  },
+};
+const positionedAnchor = {
+  isConnected: true,
+  getBoundingClientRect: () => ({ left: 20, top: 260, bottom: 280 }),
+};
+const positionRuntime = {
+  generationPopover: { anchor: positionedAnchor, element: positionedPopover },
+};
+const positionPopoverApi = positionPopoverFactory(
+  positionRuntime,
+  { innerWidth: 320, innerHeight: 480 },
+  { getElementById: () => ({ getBoundingClientRect: () => ({ bottom: 88 }) }) },
+);
+positionPopoverApi.positionGenerationPopover(positionRuntime.generationPopover);
+assert.equal(positionedPopover.style.maxHeight, '368px', 'popover height stays inside the viewport below the mobile header');
+assert.equal(positionedPopover.style.top, '100px', 'popover never opens underneath the mobile header');
+
 contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge(nodeEl))', 'render derives card dimensions from the node type and current settings');
 contains(appSource, "setProperty('--generation-node-width'", 'render writes node width');
 contains(appSource, "setProperty('--generation-node-height'", 'render writes node height');

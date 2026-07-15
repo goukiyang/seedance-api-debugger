@@ -3436,13 +3436,17 @@
         if (!state?.anchor?.isConnected || !state.element?.isConnected) return closeGenerationPopover();
         const gap = 6;
         const margin = 12;
+        const headerBottom = document.getElementById?.('header-bar')?.getBoundingClientRect().bottom || 0;
+        const safeTop = Math.max(margin, Math.ceil(headerBottom) + margin);
+        const maxHeight = Math.max(80, Math.min(560, window.innerHeight - safeTop - margin));
+        state.element.style.maxHeight = `${maxHeight}px`;
         const anchorRect = state.anchor.getBoundingClientRect();
         const popoverRect = state.element.getBoundingClientRect();
         const left = Math.min(Math.max(margin, anchorRect.left), window.innerWidth - popoverRect.width - margin);
         const below = anchorRect.bottom + gap;
         const top = below + popoverRect.height <= window.innerHeight - margin
             ? below
-            : Math.max(margin, anchorRect.top - popoverRect.height - gap);
+            : Math.max(safeTop, anchorRect.top - popoverRect.height - gap);
         state.element.style.left = `${left}px`;
         state.element.style.top = `${top}px`;
     }
