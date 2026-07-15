@@ -142,6 +142,22 @@
         });
     }
 
+    function quickModeActionability(options, modeId, referenceCount, capabilityEnabled = true) {
+        const option = (Array.isArray(options) ? options : []).find(item => item?.id === modeId);
+        if (!option) return { visible: false, enabled: false, startsReferenceSelection: false };
+        const count = Number.isFinite(referenceCount) ? Math.max(0, referenceCount) : 0;
+        const minimumReferences = Math.max(0, Number(option.minimumReferences) || 0);
+        const maximumReferences = Math.max(0, Number(option.maximumReferences) || 0);
+        const belowMinimum = count < minimumReferences;
+        const exceedsMaximum = count > maximumReferences;
+        const canSelectReferences = belowMinimum && maximumReferences >= minimumReferences;
+        return {
+            visible: true,
+            enabled: capabilityEnabled === true && (option.enabled === true || (canSelectReferences && !exceedsMaximum)),
+            startsReferenceSelection: capabilityEnabled === true && canSelectReferences && !exceedsMaximum
+        };
+    }
+
     const NONTERMINAL_GENERATION_STATUSES = new Set([
         'submitted', 'queued', 'pending', 'processing', 'running', 'in_progress', 'inprogress'
     ]);
@@ -464,6 +480,7 @@
         normalizeCapabilities,
         videoTaskActionAvailability,
         modeOptions,
+        quickModeActionability,
         isNonterminalGenerationStatus,
         nodeHasNonterminalVideoTask,
         generationInteractionReadiness,

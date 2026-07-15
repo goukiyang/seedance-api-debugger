@@ -395,6 +395,42 @@ assert.equal(withoutReferences.find((item: any) => item.id === 'text-to-video').
 assert.equal(withoutReferences.find((item: any) => item.id === 'image-to-video').enabled, false);
 assert.match(withoutReferences.find((item: any) => item.id === 'image-to-video').reason, /1/);
 
+const quickImageOptions = interactions.modeOptions('image', {
+  modes: ['image-to-image', 'upscale-image'],
+  maxReferenceImages: 1,
+}, 0);
+assert.deepEqual(
+  interactions.quickModeActionability(quickImageOptions, 'text-to-image', 0, true),
+  { visible: false, enabled: false, startsReferenceSelection: false },
+  'unsupported quick modes are hidden and rejected',
+);
+assert.deepEqual(
+  interactions.quickModeActionability(quickImageOptions, 'image-to-image', 0, true),
+  { visible: true, enabled: true, startsReferenceSelection: true },
+  'a supported mode below its reference minimum remains actionable for reference selection',
+);
+const overMaximumQuickOptions = interactions.modeOptions('image', {
+  modes: ['upscale-image'],
+  maxReferenceImages: 1,
+}, 2);
+assert.deepEqual(
+  interactions.quickModeActionability(overMaximumQuickOptions, 'upscale-image', 2, true),
+  { visible: true, enabled: false, startsReferenceSelection: false },
+  'a mode above its reference maximum is rejected',
+);
+contains(appSource, 'quickModeActionability', 'quick buttons consume the shared quick-mode actionability contract');
+contains(appSource, 'quickMode.hidden = !quickModeState.visible;', 'unsupported quick buttons are hidden');
+contains(appSource, 'quickMode.disabled = !quickModeState.enabled;', 'invalid quick buttons are disabled');
+contains(appSource, 'quickActions.hidden = supportedQuickChoices === 0;',
+  'the empty-action group hides only when no supported quick choices remain');
+contains(appSource, 'if (!quickModeState.visible || !quickModeState.enabled) return false;',
+  'quick mode changes are rejected before mutating an unavailable node mode');
+assert.ok(
+  quickModeSource.indexOf('if (!quickModeState.visible || !quickModeState.enabled) return false;')
+    < quickModeSource.indexOf('applyGenerationQuickAction'),
+  'quick-mode rejection happens before the action that configures node state',
+);
+
 const withTwoReferences = interactions.modeOptions('video', videoCapability, 2);
 assert.equal(withTwoReferences.find((item: any) => item.id === 'first-last-frame-video').enabled, true);
 assert.equal(withTwoReferences.find((item: any) => item.id === 'image-to-video').maximumReferences, 2,

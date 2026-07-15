@@ -3094,13 +3094,14 @@
         const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
-        const modeState = generationModeState(node);
+        const referenceCount = availableGenerationReferenceItems(nodeId).length;
+        const modeState = generationModeState(node, referenceCount);
         const mode = modeState.selected;
         const interactionReadiness = window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
             node.type,
             modeState.capability,
             node.data || {},
-            availableGenerationReferenceItems(nodeId).length,
+            referenceCount,
             nodeMode,
             { transientPending: hasCurrentGenerationSubmission(nodeId) }
         );
@@ -3108,6 +3109,20 @@
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
         const modeLabel = nodeEl.querySelector('[data-generation-mode-label]');
         if (modeLabel) modeLabel.textContent = mode?.label || nodeMode;
+        let supportedQuickChoices = 0;
+        nodeEl.querySelectorAll('[data-generation-quick-mode]').forEach(quickMode => {
+            const quickModeState = window.UltimateCanvasGenerationInteractions.quickModeActionability(
+                modeState.options,
+                quickMode.dataset.generationQuickMode,
+                referenceCount,
+                modeState.capability.enabled
+            );
+            quickMode.hidden = !quickModeState.visible;
+            quickMode.disabled = !quickModeState.enabled;
+            if (quickModeState.visible) supportedQuickChoices += 1;
+        });
+        const quickActions = nodeEl.querySelector('.generation-empty-actions');
+        if (quickActions) quickActions.hidden = supportedQuickChoices === 0;
         const submit = nodeEl.querySelector('[data-generation-submit]');
         if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready;
         const existingStatus = nodeEl.querySelector('.node-generation-status');
@@ -3169,7 +3184,16 @@
     function applyGenerationQuickMode(nodeId, mode) {
         const node = engine.nodes.get(nodeId);
         if (!node || !['image', 'video'].includes(node.type)) return false;
-        const selectedMode = generationModeState(node).options.find(option => option.id === mode);
+        const referenceCount = availableGenerationReferenceItems(nodeId).length;
+        const modeState = generationModeState(node, referenceCount);
+        const selectedMode = modeState.options.find(option => option.id === mode);
+        const quickModeState = window.UltimateCanvasGenerationInteractions.quickModeActionability(
+            modeState.options,
+            mode,
+            referenceCount,
+            modeState.capability.enabled
+        );
+        if (!quickModeState.visible || !quickModeState.enabled) return false;
         window.UltimateCanvasGenerationInteractions.applyGenerationQuickAction({
             selectNode: id => engine.selectNode(id),
             configureMode: (id, selected) => {
@@ -3184,7 +3208,7 @@
             nodeType: node.type,
             mode,
             minimumReferences: selectedMode?.minimumReferences || 0,
-            referenceCount: availableGenerationReferenceItems(nodeId).length
+            referenceCount
         });
         return true;
     }
