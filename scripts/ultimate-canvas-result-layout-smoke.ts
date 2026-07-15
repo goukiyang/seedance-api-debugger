@@ -79,12 +79,25 @@ assertDeclarations(baseCards, {
   width: 'var(--generation-node-width, 350px)',
   height: 'var(--generation-node-height, 196.875px)',
 });
+assertDeclarations(ruleWith(['.node-card']), { overflow: 'visible' });
 
 const cardBodies = ruleWith(['.generation-node .node-body']);
-assertDeclarations(cardBodies, { height: '100%', 'min-height': '0', overflow: 'hidden' });
+assertDeclarations(cardBodies, {
+  height: '100%',
+  'min-height': '0',
+  overflow: 'hidden',
+  'border-radius': 'inherit',
+  background: 'transparent',
+});
 
 const resultRegions = ruleWith(['.generation-node .generation-result-region:not(:empty)']);
-assertDeclarations(resultRegions, { height: '100%', 'min-height': '0', overflow: 'hidden' });
+assertDeclarations(resultRegions, {
+  height: '100%',
+  'min-height': '0',
+  overflow: 'hidden',
+  'border-radius': 'inherit',
+  background: 'transparent',
+});
 
 css.walkRules((rule: any) => {
   const selectedCardRule = selectors(rule).some(selector =>
@@ -123,18 +136,30 @@ assertDeclarations(ruleWith([
 ]), { display: 'none' });
 assertDeclarations(ruleWith([
   '.generation-node .generation-result-region:not(:empty) .generated-frame-preview',
-]), { width: '100%', height: '100%', 'object-fit': 'contain' });
+]), {
+  width: '100%',
+  height: '100%',
+  border: '0',
+  'border-radius': 'inherit',
+  background: 'transparent',
+  'object-fit': 'contain',
+});
+assertDeclarations(ruleWith([
+  '.generation-node .generation-result-region:not(:empty) .generated-result-placeholder',
+]), {
+  display: 'block',
+  width: '100%',
+  height: '100%',
+  margin: '0',
+  border: '0',
+  'border-radius': 'inherit',
+  background: 'transparent',
+});
 assertDeclarations(ruleWith(['.generated-result-title']), {
   position: 'absolute',
   top: '10px',
   left: '10px',
   'z-index': '2',
-});
-
-assertDeclarations(ruleWith(['.generated-frame-preview']), {
-  flex: '0 1 auto',
-  'max-height': '260px',
-  'object-fit': 'contain',
 });
 
 assertDeclarations(ruleWith(['.generation-editor']), {
@@ -184,6 +209,9 @@ assert.ok(appSource.includes("trigger.dataset.generationPopover = 'result-action
 assert.ok(appSource.includes("kind === 'result-actions' ? renderImageResultActionsPopover"));
 assert.ok(!appSource.slice(appSource.indexOf('function decorateGeneratedNode'), appSource.indexOf('function createDirectorOutput'))
   .includes('generated-action-row'));
+assert.ok(!appSource.slice(appSource.indexOf('function decorateGeneratedNode'), appSource.indexOf('function createDirectorOutput'))
+  .includes('generated-frame-lines'));
+assert.ok(appSource.includes('generated-result-placeholder'));
 assert.ok(appSource.includes("const card = nodeEl.querySelector('.node-card')"));
 assert.ok(appSource.includes('card.append(status)'));
 assertDeclarations(ruleWith(['.generation-editor-footer .generation-summary-row']), {

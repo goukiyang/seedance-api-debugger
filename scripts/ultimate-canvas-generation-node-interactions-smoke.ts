@@ -72,7 +72,7 @@ function taskActionPopoverHarness(node: { id: string; type: string; data: Record
     videoCardDetails: new Map(),
     bootstrap: { context: { video_cards: [{ id: 'card-1', can_generate: true, can_manage: true }] } },
   };
-  const factory = new Function('canvasRuntime', 'window', 'document', 'engine', 'escapeHtml', 'videoCardUiText', `${taskActionPopoverSource}\nreturn { syncVideoTaskActionsTrigger, openGenerationPopover };`);
+  const factory = new Function('canvasRuntime', 'window', 'document', 'engine', 'escapeHtml', 'videoCardUiText', `${taskActionPopoverSource}\nreturn { syncImageResultActionsTrigger, syncVideoTaskActionsTrigger, openGenerationPopover };`);
   const api = factory(
     canvasRuntime,
     { UltimateCanvasGenerationInteractions: interactions, innerWidth: 1200, innerHeight: 800 },
@@ -81,13 +81,32 @@ function taskActionPopoverHarness(node: { id: string; type: string; data: Record
     (value: unknown) => String(value ?? ''),
     { retryTask: 'Retry', candidate: 'Candidate', best: 'Best', final: 'Final' },
   );
-  const toolbar: { trigger: any; querySelector: () => any; appendChild: (trigger: any) => void } = {
+  const toolbar: { trigger: any; querySelector: (selector: string) => any; appendChild: (trigger: any) => void } = {
     trigger: null,
-    querySelector: () => null,
+    querySelector(selector) { return selector.includes('result-actions') || selector.includes('task-actions') ? this.trigger : null; },
     appendChild(trigger) { this.trigger = trigger; },
   };
   const nodeEl = { querySelector: (selector: string) => selector === '.generation-node-toolbar' ? toolbar : null };
   return { api, body, nodeEl, toolbar };
+}
+
+for (const restoredData of [
+  { originalUrl: '/library/original.png', imageDownloadUrl: '/library/download.png' },
+  JSON.parse(JSON.stringify({ originalUrl: '/restored/original.png', imageDownloadUrl: '/restored/download.png' })),
+]) {
+  const node = { id: `image-${restoredData.originalUrl}`, type: 'image', data: restoredData };
+  const { api, body, nodeEl, toolbar } = taskActionPopoverHarness(node);
+  api.syncImageResultActionsTrigger(nodeEl, node);
+  api.syncImageResultActionsTrigger(nodeEl, node);
+  const trigger = {
+    ...toolbar.trigger,
+    isConnected: true,
+    setAttribute() {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 30 }),
+  };
+  api.openGenerationPopover(node.id, 'result-actions', trigger);
+  assert.ok(body.lastChild.innerHTML.includes(restoredData.originalUrl), 'image More action retains durable original URL');
+  assert.ok(body.lastChild.innerHTML.includes(restoredData.imageDownloadUrl), 'image More action retains durable download URL');
 }
 
 for (const [taskId, previewUrl, downloadUrl] of [
@@ -174,11 +193,8 @@ matches(
   /\.generated-reference-card\s*\{[\s\S]*?box-sizing:\s*border-box;/,
   'generated result cards include padding and borders in their measured size',
 );
-matches(
-  stylesSource,
-  /\.generated-frame-preview\s*\{[\s\S]*?max-height:\s*\d+px;/,
-  'generated media is bounded so action rows remain visible',
-);
+assert.ok(stylesSource.includes('.generation-node .generation-result-region:not(:empty) .generated-frame-preview'),
+  'generation media owns its effective result surface rule');
 assert.ok(!stylesSource.includes('.generated-action-row'), 'generated result actions are not styled as inline rows');
 matches(stylesSource, /\.node-connector\s*\{[\s\S]*?top:\s*50%;[\s\S]*?translateY\(-50%\)/, 'ports stay vertically centered on the card');
 contains(engineSource, 'this.onConnectionDeleted', 'connection removals notify persistence');
@@ -206,6 +222,9 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(appSource, 'function imageResultActionsForNode', 'image results expose contextual action state');
+contains(appSource, 'data.imageDownloadUrl', 'image actions prefer durable download URLs');
+contains(appSource, 'originalUrl: isVideo ? null', 'library image nodes persist the original URL');
+contains(appSource, 'imageDownloadUrl: isVideo ? null', 'library image nodes persist the download URL');
 contains(appSource, "trigger.dataset.generationPopover = 'result-actions'", 'image results expose a More popover trigger');
 contains(appSource, "kind === 'result-actions' ? renderImageResultActionsPopover", 'popover renders image result actions from trigger state');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');

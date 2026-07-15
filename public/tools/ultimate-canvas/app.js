@@ -2441,8 +2441,9 @@
                     node.data.description || node.data.prompt || '已恢复图片节点',
                     node.data.previewImage || node.data.thumbnailUrl || '',
                     {
-                        imageUrl: node.data.originalUrl || node.data.previewImage || node.data.thumbnailUrl || '',
-                        downloadUrl: node.data.originalUrl || node.data.previewImage || node.data.thumbnailUrl || ''
+                        imageUrl: node.data.originalUrl || node.data.imageUrl || node.data.previewImage || node.data.thumbnailUrl || '',
+                        downloadUrl: node.data.imageDownloadUrl || node.data.originalUrl
+                            || node.data.imageUrl || node.data.previewImage || node.data.thumbnailUrl || ''
                     }
                 );
                 return;
@@ -2689,6 +2690,8 @@
             taskId: item.taskId || null,
             previewImage: itemPreview(item),
             thumbnailUrl: item.thumbnailUrl || itemPreview(item),
+            originalUrl: isVideo ? null : item.originalUrl || itemPreview(item),
+            imageDownloadUrl: isVideo ? null : item.downloadUrl || item.originalUrl || itemPreview(item),
             videoPreviewUrl: item.previewUrl || null,
             videoDownloadUrl: item.downloadUrl || null,
             source: item.source,
@@ -3348,12 +3351,13 @@
         if (node?.type !== 'image') return null;
         const data = node.data || {};
         const result = data.generationResult || {};
-        const imageUrl = overrides.imageUrl ?? data.originalUrl ?? data.imageUrl ?? data.previewImage
+        const imageUrl = data.originalUrl ?? overrides.imageUrl ?? data.imageUrl ?? data.previewImage
             ?? result.original_url ?? result.originalUrl ?? result.image_url ?? result.imageUrl;
         if (!imageUrl) return null;
         return {
             imageUrl,
-            downloadUrl: overrides.downloadUrl ?? data.originalUrl ?? imageUrl
+            downloadUrl: data.imageDownloadUrl ?? overrides.downloadUrl ?? data.originalUrl
+                ?? result.download_url ?? result.downloadUrl ?? imageUrl
         };
     }
 
@@ -5965,7 +5969,7 @@
                 <strong class="generated-result-title">${escapeHtml(title)}</strong>
                 ${previewImage
                     ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}">`
-                    : '<div class="generated-frame-lines"></div>'}
+                    : '<div class="generated-result-placeholder" aria-hidden="true"></div>'}
             </div>`);
         syncImageResultActionsTrigger(nodeEl, node, options);
         if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
