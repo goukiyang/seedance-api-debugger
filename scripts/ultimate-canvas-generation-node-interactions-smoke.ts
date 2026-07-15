@@ -409,6 +409,11 @@ assert.deepEqual(
   { visible: true, enabled: true, startsReferenceSelection: true },
   'a supported mode below its reference minimum remains actionable for reference selection',
 );
+assert.deepEqual(
+  interactions.quickModeActionability(quickImageOptions, 'image-to-image', 0, false),
+  { visible: false, enabled: false, startsReferenceSelection: false },
+  'provider-disabled capabilities hide otherwise supported quick modes',
+);
 const overMaximumQuickOptions = interactions.modeOptions('image', {
   modes: ['upscale-image'],
   maxReferenceImages: 1,

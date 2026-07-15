@@ -143,6 +143,9 @@
     }
 
     function quickModeActionability(options, modeId, referenceCount, capabilityEnabled = true) {
+        if (capabilityEnabled !== true) {
+            return { visible: false, enabled: false, startsReferenceSelection: false };
+        }
         const option = (Array.isArray(options) ? options : []).find(item => item?.id === modeId);
         if (!option) return { visible: false, enabled: false, startsReferenceSelection: false };
         const count = Number.isFinite(referenceCount) ? Math.max(0, referenceCount) : 0;
@@ -153,8 +156,8 @@
         const canSelectReferences = belowMinimum && maximumReferences >= minimumReferences;
         return {
             visible: true,
-            enabled: capabilityEnabled === true && (option.enabled === true || (canSelectReferences && !exceedsMaximum)),
-            startsReferenceSelection: capabilityEnabled === true && canSelectReferences && !exceedsMaximum
+            enabled: option.enabled === true || (canSelectReferences && !exceedsMaximum),
+            startsReferenceSelection: canSelectReferences && !exceedsMaximum
         };
     }
 
