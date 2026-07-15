@@ -1,3 +1,60 @@
+## Task 3: SD2 local live-link automated verification (2026-07-15)
+
+### Feature goal
+
+Provide a local Ultimate Canvas preview mode that can proxy an authenticated, ordinary-user browser session to the deployed SD2 same-origin API surface. The mode is local-only, opt-in (`--sd2-live`), allowlisted, and mutually exclusive with `--mock-generation`; it must never turn the ordinary preview into a generation substitute or bypass SD2 authentication, authorization, provider, or credit controls.
+
+### Changed files through current HEAD
+
+Branch base: `aa23f57` (`docs: plan local SD2 live link`). Implementation commits inspected: `1f0ffc3`, `0d9bb28`, and `3126823`.
+
+- `scripts/lib/ultimate-canvas-sd2-proxy.mjs` (new): allowlisted streaming HTTP/HTTPS proxy for the canvas auth, project, card, asset, task, video, reference-album, approval, and upload paths; strips hop-by-hop headers and rewrites upstream `Host`, `Origin`, and `Referer` headers.
+- `scripts/ultimate-canvas-preview-server.mjs`: adds `--sd2-live`, local login shell, session-cookie gate, mutually exclusive mode guard, and delegation to the SD2 proxy. The default preview behavior is retained.
+- `scripts/ultimate-canvas-sd2-live-proxy-smoke.ts` (new): verifies the path allowlist, header filtering/rewrites, body and response streaming, upstream failures, and the default server safety boundary.
+- `scripts/ultimate-canvas-preview-api-smoke.ts`: adds live-mode argument coverage.
+- `scripts/ultimate-canvas-preview-no-generation-smoke.ts`: verifies the no-generation boundary in default preview mode.
+- `docs/handoffs/ultimate-canvas-implementation-report.md`: this Task 3 verification handoff section.
+
+No production application file changed on this branch: `public/tools/ultimate-canvas/app.js` and `public/tools/ultimate-canvas/canvas-engine.js` were checked for syntax only.
+
+### Automated verification
+
+All commands below were run in `E:\Ultimate-canvas\seedance-api-debugger\.worktrees\ultimate-canvas-sd2-live-link` on 2026-07-15.
+
+- `Get-ChildItem scripts -Filter 'ultimate-canvas-*-smoke.ts' | Sort-Object Name | ForEach-Object { ... npx tsx $_.FullName ... }`: PASS, 15/15 scripts, exit 0.
+  - Passed: compact-generation-ui, complete, context-rules, generation-lifecycle, generation-node-interactions, generation-node-workflow, generation-task-coordinator, normal-user-access, preview-api, preview-no-generation, result-layout, same-origin-backend, save-coordinator, sd2-live-proxy, and video-card-workflow.
+- `npx tsc --noEmit --pretty false`: PASS, exit 0.
+- `node --check public/tools/ultimate-canvas/app.js`: PASS, exit 0.
+- `node --check public/tools/ultimate-canvas/canvas-engine.js`: PASS, exit 0.
+- `node --check scripts/ultimate-canvas-preview-server.mjs`: PASS, exit 0.
+- `node --check scripts/lib/ultimate-canvas-sd2-proxy.mjs`: PASS, exit 0.
+- `npm run lint`: BLOCKED, exit 1 before source linting. Next reports a duplicate `@next/next` plugin from this worktree's `.eslintrc.json` and the enclosing `E:\Ultimate-canvas\seedance-api-debugger\.eslintrc.json`; both extend `next/core-web-vitals`. The branch did not change either ESLint config, `package.json`, or the lockfile, so no task-local fix was made.
+- `npm run build`: PASS, exit 0. Next.js 14.2.5 built successfully and generated 76 static pages. It emitted the same duplicate ESLint plugin message, plus existing Autoprefixer mixed-support warnings in `src/app/globals.css` at lines 301, 4078, 4127, 6566, 8238, 8743, 10210, 10473, and 11157.
+- `git diff --check`: PASS, exit 0 before this documentation update.
+
+### Preliminary status and safety boundary
+
+This is a preliminary automated-verification handoff only. No real SD2 live login, real bootstrap, project/card inspection, upload, canvas save/restore, or text/image/video generation has been performed in this task. No generation submission was made. Points consumed: **0**.
+
+Protected areas remain untouched by the branch diff and this Task 3 update: `.env` files, admin settings, provider secrets, credit/points core logic, authentication implementation, database schema, production backend generation routes, package metadata, and lockfiles. Default preview protection remains covered by smoke tests: generation-related requests respond with `REAL_BACKEND_REQUIRED` unless the explicitly separate mock mode is selected; live mode remains opt-in and cannot be combined with `--mock-generation`.
+
+### Remaining controller browser acceptance
+
+The controller, using an authenticated in-app browser and an authorized ordinary user, must still perform the live-mode acceptance without submitting generation:
+
+1. Start `node scripts/ultimate-canvas-preview-server.mjs 4402 --sd2-live`.
+2. Open `http://127.0.0.1:4402/__sd2-login`, authenticate, and return to the canvas.
+3. Verify the `SD2` live backend indicator, real project and video-card data, visible point balance, and asset library.
+4. Upload a permitted test asset, save the canvas, reload, and verify restore.
+5. Do not click or submit any text, image, or video generation action.
+
+### Risks and handoff notes
+
+- Live verification depends on the controller's authenticated browser session and deployed SD2 availability; automated proxy tests use a local upstream fixture and cannot prove real credentials, session-cookie behavior, CORS-adjacent browser behavior, or backend response contracts end-to-end.
+- The duplicate inherited ESLint configuration blocks standalone `npm run lint` in this nested worktree. `npm run build` completed despite surfacing the same message, but lint remains an explicit non-passing verification item until the workspace-level configuration ownership is resolved outside this task.
+- The proxy intentionally forwards only a narrow allowlist. A future canvas endpoint may require a deliberate allowlist and smoke-test update; broadening it casually would weaken the local bridge boundary.
+- The local live start command is exactly: `node scripts/ultimate-canvas-preview-server.mjs 4402 --sd2-live`.
+
 # 无线画布完整实施回执
 
 日期：2026-07-11
