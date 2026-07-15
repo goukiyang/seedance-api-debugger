@@ -51,5 +51,10 @@ assert.doesNotMatch(styles, /\.node-type-(?:image|video)\s+\.generation-(?:quick
   'image and video do not duplicate generation visual-state styles');
 assert.ok(app.includes('referenceList.hidden = references.length === 0'));
 assert.ok(app.includes('referenceList.innerHTML = references.length'));
+assert.ok(app.includes('function generationChoiceGroup'));
+assert.ok(app.includes('function applyGenerationSettingChoice'));
+assert.ok(app.includes("scheduleCanvasSave(`${node.type}_settings_change`)"));
+assert.match(styles, /\.generation-choice-grid\s*\{[\s\S]*?display:\s*grid;/);
+assert.match(styles, /\.generation-choice-button\[aria-pressed="true"\]/);
 
 console.log('ultimate-canvas-compact-generation-ui-smoke passed');

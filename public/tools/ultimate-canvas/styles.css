@@ -1910,38 +1910,66 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 
 .generation-popover-spec {
     display: grid;
-    grid-template-columns: repeat(3, minmax(96px, 1fr));
-    gap: 10px;
-    width: min(390px, calc(100vw - 42px));
+    gap: 16px;
+    width: min(420px, calc(100vw - 42px));
 }
 
-.generation-popover-spec label {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 5px;
+.generation-choice-section {
+    display: grid;
+    gap: 8px;
+}
+
+.generation-choice-section h3 {
+    margin: 0;
     color: var(--text-tertiary);
-    font-size: 11px;
-}
-
-.generation-popover-spec select,
-.generation-popover-spec input[type="number"] {
-    width: 100%;
-    height: 32px;
-    border: 1px solid var(--border-node);
-    border-radius: 5px;
-    background: var(--bg-input);
-    color: var(--text-primary);
-    padding: 0 8px;
-    font: inherit;
     font-size: 12px;
+    font-weight: 500;
 }
 
-.generation-popover-spec .generation-toggle {
-    min-height: 32px;
-    flex-direction: row;
-    align-items: center;
+.generation-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+    gap: 8px;
+}
+
+.generation-choice-button {
+    min-width: 0;
+    min-height: 54px;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border-node);
+    border-radius: 7px;
+    background: var(--bg-input);
     color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.generation-choice-button:hover,
+.generation-choice-button[aria-pressed="true"] {
+    border-color: var(--text-primary);
+    color: var(--text-primary);
+    background: var(--bg-active);
+}
+
+.generation-ratio-glyph {
+    width: 22px;
+    max-height: 16px;
+    aspect-ratio: var(--generation-choice-ratio);
+    border: 1.5px solid currentColor;
+    border-radius: 2px;
+}
+
+.generation-spec-static {
+    min-height: 38px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border-node);
+    border-radius: 7px;
+    background: var(--bg-input);
 }
 
 .generation-editor-toolbar {

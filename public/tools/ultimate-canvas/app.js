@@ -3213,10 +3213,21 @@
         return true;
     }
 
-    function generationSelect(name, label, values, selected) {
-        return `<label><span>${label}</span><select data-generation-setting="${name}">${values.map(value =>
-            `<option value="${escapeHtml(String(value))}" ${String(value) === String(selected) ? 'selected' : ''}>${escapeHtml(String(value))}</option>`
-        ).join('')}</select></label>`;
+    function generationChoiceGroup(name, label, values, selected, format = value => String(value)) {
+        return `<section class="generation-choice-section" data-generation-choice-section="${escapeHtml(name)}">
+            <h3>${escapeHtml(label)}</h3>
+            <div class="generation-choice-grid">
+                ${values.map(value => {
+                    const raw = String(value);
+                    const active = raw === String(selected);
+                    const ratio = name === 'ratio' && /^\d+:\d+$/.test(raw)
+                        ? `<span class="generation-ratio-glyph" style="--generation-choice-ratio:${raw.replace(':', ' / ')}" aria-hidden="true"></span>`
+                        : '';
+                    return `<button type="button" class="generation-choice-button" data-generation-setting-choice="${escapeHtml(name)}"
+                        data-generation-value="${escapeHtml(raw)}" aria-pressed="${active}">${ratio}<span>${escapeHtml(format(value))}</span></button>`;
+                }).join('')}
+            </div>
+        </section>`;
     }
 
     function renderModePopover(node) {
@@ -3242,24 +3253,57 @@
         );
         if (node.type === 'image') {
             const sizeControl = capability.sizeOptions.length
-                ? generationSelect('size', '尺寸', capability.sizeOptions, settings.size)
-                : capability.fixedSize
-                    ? `<label><span>尺寸</span><input type="text" value="${escapeHtml(capability.fixedSize)}" readonly data-generation-fixed-size></label>`
-                    : '<label><span>尺寸</span><input type="text" value="不可用" readonly data-generation-size-unavailable></label>';
+                ? generationChoiceGroup('size', '尺寸', capability.sizeOptions, settings.size)
+                : `<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">${escapeHtml(capability.fixedSize || '不可用')}</div></section>`;
+            const counts = Array.from({ length: settings.maximumCount }, (_, index) => index + 1);
             return `<div class="generation-popover-spec" data-generation-settings="image">
-                ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
+                ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
                 ${sizeControl}
-                <label><span>数量</span><input type="number" min="1" max="${settings.maximumCount}" value="${settings.count}" data-generation-setting="count"></label>
+                ${generationChoiceGroup('count', '生成数量', counts, settings.count, value => `${value}张`)}
             </div>`;
         }
         return `<div class="generation-popover-spec" data-generation-settings="video">
-            ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
-            ${generationSelect('duration', '时长', capability.durations.map(value => `${value}`), settings.duration)}
-            ${generationSelect('resolution', '分辨率', capability.resolutions, settings.resolution)}
-            ${capability.supportsAudio ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="generateAudio" ${settings.generateAudio ? 'checked' : ''}><span>生成声音</span></label>` : ''}
-            ${capability.supportsLastFrame ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="returnLastFrame" ${settings.returnLastFrame ? 'checked' : ''}><span>返回尾帧</span></label>` : ''}
-            ${capability.supportsWatermark ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="watermark" ${settings.watermark ? 'checked' : ''}><span>添加水印</span></label>` : ''}
+            ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
+            ${generationChoiceGroup('duration', '时长', capability.durations, settings.duration, value => `${value}s`)}
+            ${generationChoiceGroup('resolution', '分辨率', capability.resolutions, settings.resolution)}
+            ${capability.supportsAudio ? generationChoiceGroup('generateAudio', '生成声音', [true, false], settings.generateAudio, value => value ? '开启' : '关闭') : ''}
+            ${capability.supportsLastFrame ? generationChoiceGroup('returnLastFrame', '返回尾帧', [true, false], settings.returnLastFrame, value => value ? '开启' : '关闭') : ''}
+            ${capability.supportsWatermark ? generationChoiceGroup('watermark', '水印', [true, false], settings.watermark, value => value ? '开启' : '关闭') : ''}
         </div>`;
+    }
+
+    function applyGenerationSettingChoice(node, name, rawValue) {
+        const current = generationSettingsForNode(node);
+        if (node.type === 'image') {
+            const allowed = new Set(['ratio', 'size', 'count']);
+            if (!allowed.has(name)) return false;
+            node.data = {
+                ...node.data,
+                imageSettings: {
+                    ratio: name === 'ratio' ? rawValue : current.ratio,
+                    size: name === 'size' ? rawValue : current.size,
+                    count: name === 'count' ? Number(rawValue) : current.count
+                }
+            };
+        } else if (node.type === 'video') {
+            const allowed = new Set(['ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark']);
+            if (!allowed.has(name)) return false;
+            const booleanValue = rawValue === 'true';
+            node.data = {
+                ...node.data,
+                videoSettings: {
+                    ratio: name === 'ratio' ? rawValue : current.ratio,
+                    duration: name === 'duration' ? Number(rawValue) : current.duration,
+                    resolution: name === 'resolution' ? rawValue : current.resolution,
+                    generateAudio: name === 'generateAudio' ? booleanValue : current.generateAudio,
+                    returnLastFrame: name === 'returnLastFrame' ? booleanValue : current.returnLastFrame,
+                    watermark: name === 'watermark' ? booleanValue : current.watermark
+                }
+            };
+        } else return false;
+        renderGenerationNodeControls(node.id);
+        scheduleCanvasSave(`${node.type}_settings_change`);
+        return true;
     }
 
     function refreshOpenGenerationSpecPopover(node) {
@@ -4162,38 +4206,20 @@
         applyCameraPreset(nodeEl, node, preset.dataset.generationCameraPreset);
     });
 
-    document.addEventListener('change', event => {
-        const control = event.target.closest('[data-generation-setting]');
-        const panel = control?.closest('[data-generation-settings]');
+    document.addEventListener('click', event => {
+        const choice = event.target.closest('[data-generation-setting-choice]');
         const state = canvasRuntime.generationPopover;
-        if (!control || !panel || !state?.element.contains(control)) return;
+        if (!choice || state?.kind !== 'spec' || !state.element?.contains(choice)) return;
         const node = engine.nodes.get(state.nodeId);
-        if (!node || panel.dataset.generationSettings !== node.type) return;
-
-        const ratio = panel.querySelector('[data-generation-setting="ratio"]')?.value || '16:9';
-        if (node.type === 'image') {
-            const size = panel.querySelector('[data-generation-setting="size"]')?.value || '1K';
-            const count = Number(panel.querySelector('[data-generation-setting="count"]')?.value || 1);
-            node.data = {
-                ...node.data,
-                imageSettings: { ratio, size, count }
-            };
-            scheduleCanvasSave('image_settings_change');
-        } else if (node.type === 'video') {
-            node.data = {
-                ...node.data,
-                videoSettings: {
-                    ratio,
-                    duration: Number(panel.querySelector('[data-generation-setting="duration"]')?.value || 5),
-                    resolution: panel.querySelector('[data-generation-setting="resolution"]')?.value || '720p',
-                    generateAudio: panel.querySelector('[data-generation-setting="generateAudio"]')?.checked === true,
-                    returnLastFrame: panel.querySelector('[data-generation-setting="returnLastFrame"]')?.checked === true,
-                    watermark: panel.querySelector('[data-generation-setting="watermark"]')?.checked === true
-                }
-            };
-            scheduleCanvasSave('video_settings_change');
-        }
-        renderGenerationNodeControls(node.id);
+        const panel = choice.closest('[data-generation-settings]');
+        if (!node || panel?.dataset.generationSettings !== node.type) return;
+        event.preventDefault();
+        event.stopPropagation();
+        applyGenerationSettingChoice(
+            node,
+            choice.dataset.generationSettingChoice,
+            choice.dataset.generationValue
+        );
     });
 
     document.addEventListener('click', event => {

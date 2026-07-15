@@ -108,8 +108,9 @@ for (const [taskId, previewUrl, downloadUrl] of [
   assert.ok(body.lastChild.innerHTML.includes(downloadUrl), `${taskId} popover retains override-only download URL`);
 }
 
+const generationChoiceGroupStart = appSource.indexOf('function generationChoiceGroup');
 const specPopoverSource = appSource.slice(
-  appSource.indexOf('function generationSelect'),
+  generationChoiceGroupStart >= 0 ? generationChoiceGroupStart : appSource.indexOf('function generationSelect'),
   appSource.indexOf('function renderCameraPopover'),
 );
 const specPopoverElement = { isConnected: true, innerHTML: 'stale controls' };
@@ -137,9 +138,14 @@ const imageSpecNode = {
   id: 'image-spec-node', type: 'image', data: { imageSettings: { ratio: '21:9', size: '2K', count: 3 } },
 };
 assert.equal(specPopoverApi.refreshOpenGenerationSpecPopover(imageSpecNode), true);
-assert.ok(specPopoverElement.innerHTML.includes('value="21:9" selected'), 'open ratio control follows current image settings');
-assert.ok(specPopoverElement.innerHTML.includes('value="2K" selected'), 'open size control follows current image settings');
-assert.ok(specPopoverElement.innerHTML.includes('value="3"'), 'open count control follows current image settings');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-setting-choice="ratio"'), 'specification popover renders ratio tiles');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="21:9"'), 'ratio tiles retain capability values');
+assert.ok(specPopoverElement.innerHTML.includes('aria-pressed="true"'), 'selected tiles expose pressed state');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-setting-choice="size"'), 'specification popover renders size tiles');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="2K"'), 'size tiles retain capability values');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-setting-choice="count"'), 'specification popover renders count tiles');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="3"'), 'count tiles retain selected count');
+assert.ok(!specPopoverElement.innerHTML.includes('<select'), 'specification popover has no native selects');
 assert.equal(specPopoverPositionCalls, 1, 'refreshed specification controls are repositioned');
 
 contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge(nodeEl))', 'render derives card dimensions from the node type and current settings');
@@ -251,7 +257,7 @@ assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes ar
 
 const quickModeSource = appSource.slice(
   appSource.indexOf('function applyGenerationQuickMode'),
-  appSource.indexOf('function generationSelect'),
+  generationChoiceGroupStart >= 0 ? generationChoiceGroupStart : appSource.indexOf('function generationSelect'),
 );
 assert.ok(quickModeSource.includes('applyGenerationQuickAction'), 'quick mode delegates to the executable contract');
 assert.ok(!quickModeSource.includes('submitNodeGeneration'), 'quick mode never submits generation');
