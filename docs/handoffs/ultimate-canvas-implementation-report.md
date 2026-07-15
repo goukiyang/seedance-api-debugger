@@ -1,3 +1,94 @@
+# Ultimate Canvas SD2 Live Link 实施回执
+
+日期：2026-07-15
+
+目标分支：`teammate/ultimate-canvas-complete`
+
+已推送提交：`70e57ad`（远端范围 `a42160c..70e57ad`）
+
+## 1. 本次目标理解
+
+在现有无线画布原位增加可选的本地 SD2 真实链路，不另建生成流程。默认预览继续禁止真实生成，显式 `--sd2-live` 才把现有相对 `/api/...` 请求通过固定来源、严格白名单的流式代理发送到 `https://sd2.youdoodesign.com`。普通账号使用现有飞书授权和 SD2 会话，不绕成 admin；所有模型调用仍由 SD2 后端负责，不在浏览器或本地桥接层接第三方 Key。
+
+## 2. 实际修改了哪些文件
+
+- `docs/handoffs/ultimate-canvas-implementation-report.md`
+- `docs/plans/2026-07-15-ultimate-canvas-local-sd2-live-link-design.md`
+- `docs/superpowers/plans/2026-07-15-ultimate-canvas-local-sd2-live-link.md`
+- `scripts/lib/ultimate-canvas-sd2-proxy.mjs`
+- `scripts/ultimate-canvas-feishu-local-relay-smoke.ts`
+- `scripts/ultimate-canvas-preview-api-smoke.ts`
+- `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
+- `scripts/ultimate-canvas-preview-server.mjs`
+- `scripts/ultimate-canvas-sd2-live-proxy-smoke.ts`
+- `src/app/api/auth/feishu/callback/route.ts`
+- `src/lib/auth/feishu-local-relay.ts`
+
+## 3. 每个文件改了什么
+
+- `ultimate-canvas-implementation-report.md`：记录本轮目标、文件、命令、真实浏览器证据、点数、保护边界和剩余部署工作。
+- 两份设计/实施计划：记录固定 SD2 来源、白名单代理、飞书回环、浏览器绑定、一次性换码许可和验收顺序。
+- `ultimate-canvas-sd2-proxy.mjs`：新增流式反向代理；只允许画布、项目、视频卡、素材、任务、视频、图集、审批、上传和必要认证路径；过滤逐跳头；保留媒体 Range 和响应 Cookie；对飞书换码额外要求精确本地主机/来源、JSON POST 和 60 秒一次性许可。
+- `ultimate-canvas-feishu-local-relay-smoke.ts`：覆盖合法 loopback、外部跳转拒绝、重复/缺失参数、生产回调分支和取消场景。
+- `ultimate-canvas-preview-api-smoke.ts`：覆盖 `--sd2-live` 参数和与 Mock 互斥的启动规则。
+- `ultimate-canvas-preview-no-generation-smoke.ts`：覆盖默认预览不生成、飞书入口、五分钟浏览器绑定 Cookie、错误 Cookie、缺失 Cookie和回调重放拒绝。
+- `ultimate-canvas-preview-server.mjs`：新增 `--sd2-live`、本地登录页、飞书回调页、会话门禁、固定 SD2 代理接线和安全响应头；默认与 Mock 行为不变。
+- `ultimate-canvas-sd2-live-proxy-smoke.ts`：用本地上游验证请求/响应流、Cookie、媒体、错误和路径白名单；并证明缺失、错误、过期、跨站、错误 Host、非 JSON、错误方法和重放许可均不会接触上游。
+- `feishu/callback/route.ts`：在既有 state 校验之后识别严格 loopback 标记，把一次性飞书 code 送回本地；普通生产登录仍走原来的换码和会话逻辑。
+- `feishu-local-relay.ts`：提供纯函数解析/构造器，只接受 `127.0.0.1`、`localhost`、`::1` 的高位端口和固定回调路径，拒绝 HTTPS、外部主机、用户信息、片段、错误端口与重复参数。
+
+## 4. 跑了哪些验证命令
+
+- 全部 `scripts/ultimate-canvas-*-smoke.ts`，按文件名排序逐个执行。
+- `npx tsc --noEmit --pretty false`
+- `node --check public/tools/ultimate-canvas/app.js`
+- `node --check public/tools/ultimate-canvas/canvas-engine.js`
+- `node --check scripts/ultimate-canvas-preview-server.mjs`
+- `node --check scripts/lib/ultimate-canvas-sd2-proxy.mjs`
+- `npm run lint`
+- `npm run build`
+- `git diff --check`
+- 独立安全复审两轮，并对首轮发现的直接换码登录 CSRF 绕过补测试、修复和复审。
+- 应用内浏览器完成生产飞书授权、普通账号身份确认、生产画布只读检查、素材库检查、节点刷新恢复和控制台检查。
+
+## 5. 验证结果是否通过
+
+- 画布烟测：`16/16` PASS。
+- TypeScript：PASS。
+- 四个 JavaScript 语法检查：PASS。
+- Lint：PASS；仅保留仓库已有的 Hook 依赖与 `<img>` warning。
+- Production build：PASS，Next.js 14.2.5 编译成功并生成 76 个页面。
+- `git diff --check`：PASS。
+- 安全复审：最终 Approved，Critical/Important/Minor 均为 0。
+- 生产普通账号：`role = user`；页面显示 `SD2 真实后端`，可用 604 点、冻结 0 点；真实图片/视频素材可见；已有 2 个节点刷新前后 ID 与标签一致且状态为“已保存”；控制台 warning/error 为 0。
+- 本地飞书真实回环：尚未通过。生产站仍运行旧回调，授权成功后落到生产 404，而没有回到 `http://127.0.0.1:4402/__sd2-feishu-callback`。代码已推送，但提交 `70e57ad` 仍需发布到 SD2。
+
+## 6. 是否真实调用了文字/图片/视频生成
+
+没有。真实生产站只执行了登录和只读/恢复验收；没有点击文字、图片或视频生成，没有创建重试任务。自动化中的 Mock 仅是本地确定性测试数据，不是模型结果。
+
+## 7. 是否消耗了点数
+
+没有，点数消耗为 0。未提交任何生成或付费重试。验收时只观察到可用 604 点、冻结 0 点，没有执行计费动作。
+
+## 8. 是否碰过后台设置、密钥、点数核心逻辑
+
+没有读取或修改 `.env`、后台 API 设置、provider 密钥配置、点数冻结/扣减/退款核心逻辑或数据库 schema；没有修改第三方 Key，也没有绕过普通账号成为 admin。唯一生产认证改动是既有飞书 callback 内、state 校验之后的严格 loopback 分支。
+
+## 9. 还没做完的内容
+
+- 将提交 `70e57ad` 发布到 `https://sd2.youdoodesign.com`，然后重新执行本地飞书回环登录。
+- 回环登录成功后，用本地 4402 页面复核真实 bootstrap、项目/视频卡、点数、素材库和保存恢复。
+- 尚未向生产上传新的测试素材，避免在部署未完成时留下无意义资产。
+- 尚未执行真实文字、图片或视频生成；这会消耗点数，需由用户明确决定是否做最小付费验收。
+
+## 10. 风险和建议下一步
+
+- 分支推送不会自动证明生产已发布；必须先部署 callback 提交，再测试回环，否则飞书 code 会被旧生产回调消费。
+- 部署后重新打开 `http://127.0.0.1:4402/__sd2-login` 获取新的五分钟浏览器绑定，不要复用旧授权页。
+- 飞书 code、回环 nonce、换码许可和 session 均不记录日志；许可只能使用一次，代理也会在转发前移除本地专用头。
+- 代理白名单需要随 SD2 画布接口变化显式维护并补 smoke，不能改成任意路径转发。
+
 ## Task 3: SD2 local live-link automated verification (2026-07-15)
 
 ### Feature goal
