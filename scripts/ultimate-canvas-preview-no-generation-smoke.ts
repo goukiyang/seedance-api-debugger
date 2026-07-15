@@ -90,9 +90,11 @@ async function main() {
 
     const previewSource = await readFile('scripts/ultimate-canvas-preview-server.mjs', 'utf8');
     assert.match(previewSource, /const sd2LiveOrigin = 'https:\/\/sd2\.youdoodesign\.com';/);
-    assert.match(previewSource, /proxySd2CanvasRequest\(request, response, \{ origin: sd2LiveOrigin \}\)/);
+    assert.match(previewSource, /proxySd2CanvasRequest\(request, response, \{/);
+    assert.match(previewSource, /localOrigin: sd2LocalOrigin/);
+    assert.match(previewSource, /consumeFeishuExchangePermit/);
     assert.ok(
-      previewSource.indexOf('proxySd2CanvasRequest(request, response, { origin: sd2LiveOrigin })')
+      previewSource.indexOf('proxySd2CanvasRequest(request, response, {')
         < previewSource.indexOf("if (url.pathname === '/api/auth/me')"),
       'live API requests must proxy before local fixture routing',
     );
@@ -293,6 +295,7 @@ async function main() {
         const rejectedHtml = await rejectedCallback.text();
         assert.match(rejectedHtml, /window\.history\.replaceState/);
         assert.doesNotMatch(rejectedHtml, /\/api\/auth\/feishu\/login-by-code/);
+        assert.doesNotMatch(rejectedHtml, /x-sd2-feishu-exchange-permit/);
         assert.doesNotMatch(rejectedHtml, /JSON\.stringify\(\{ code \}\)/);
       }
 
@@ -308,13 +311,16 @@ async function main() {
       assert.ok(clearHistoryIndex >= 0);
       assert.ok(exchangeIndex > clearHistoryIndex, 'the callback query must be removed before code exchange');
       assert.match(callbackHtml, /body: JSON\.stringify\(\{ code \}\)/);
+      assert.match(callbackHtml, /'x-sd2-feishu-exchange-permit': "[A-Za-z0-9_-]{43}"/);
       assert.doesNotMatch(callbackHtml, /session(?:_token)?=/i);
+      assert.doesNotMatch(callbackUrl, /exchange-permit/i);
 
       const replayedCallback = await fetch(callbackUrl, { headers: { cookie: bindingCookie } });
       assert.equal(replayedCallback.status, 200);
       const replayedHtml = await replayedCallback.text();
       assert.match(replayedHtml, /window\.history\.replaceState/);
       assert.doesNotMatch(replayedHtml, /\/api\/auth\/feishu\/login-by-code/);
+      assert.doesNotMatch(replayedHtml, /x-sd2-feishu-exchange-permit/);
 
       const loginRecovery = await fetch(`${liveBaseUrl}/login`);
       assert.equal(loginRecovery.status, 200);

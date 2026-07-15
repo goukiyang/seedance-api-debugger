@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { proxySd2CanvasRequest } from './lib/ultimate-canvas-sd2-proxy.mjs';
+import {
+  createFeishuExchangePermitStore,
+  proxySd2CanvasRequest,
+} from './lib/ultimate-canvas-sd2-proxy.mjs';
 
 async function listen(server: http.Server): Promise<number> {
   server.listen(0, '127.0.0.1');
@@ -42,6 +45,15 @@ async function main() {
       return;
     }
 
+    if (request.url === '/api/auth/feishu/login-by-code' && request.method === 'POST') {
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'set-cookie': 'session=feishu-session; HttpOnly; SameSite=Lax',
+      });
+      response.end('{"ok":true}');
+      return;
+    }
+
     if (request.url === '/api/tools/ultimate-canvas/documents?project_id=project-1' && request.method === 'POST') {
       response.writeHead(201, { 'content-type': 'application/json' });
       response.end('{"saved":true}');
@@ -75,15 +87,122 @@ async function main() {
   });
   const upstreamPort = await listen(upstream);
 
+  let currentTime = 0;
+  const permitStore = createFeishuExchangePermitStore({
+    maxAgeMs: 1_000,
+    now: () => currentTime,
+  });
+  let proxyOrigin = '';
   const proxy = http.createServer((request, response) => {
     void proxySd2CanvasRequest(request, response, {
       origin: `http://127.0.0.1:${upstreamPort}`,
+      localOrigin: proxyOrigin,
+      consumeFeishuExchangePermit: permitStore.consume,
     });
   });
   const proxyPort = await listen(proxy);
-  const proxyOrigin = `http://127.0.0.1:${proxyPort}`;
+  proxyOrigin = `http://127.0.0.1:${proxyPort}`;
+
+  async function exchange(options: {
+    contentType?: string;
+    host?: string;
+    method?: string;
+    origin?: string;
+    permit?: string;
+  } = {}) {
+    const headers: Record<string, string> = {
+      'content-type': options.contentType ?? 'application/json',
+      origin: options.origin ?? proxyOrigin,
+    };
+    if (options.host) headers.host = options.host;
+    if (options.permit) headers['x-sd2-feishu-exchange-permit'] = options.permit;
+    const method = options.method ?? 'POST';
+    return new Promise<{
+      headers: http.IncomingHttpHeaders;
+      json: () => unknown;
+      status: number;
+    }>((resolve, reject) => {
+      const request = http.request(`${proxyOrigin}/api/auth/feishu/login-by-code`, {
+        method,
+        headers,
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8');
+          resolve({
+            headers: response.headers,
+            json: () => JSON.parse(body),
+            status: response.statusCode || 0,
+          });
+        });
+      });
+      request.once('error', reject);
+      if (method === 'POST') request.write('{"code":"synthetic-code"}');
+      request.end();
+    });
+  }
+
+  function feishuExchangeRequestCount() {
+    return upstreamRequests.filter((request) => request.url === '/api/auth/feishu/login-by-code').length;
+  }
 
   try {
+    let exchangeCount = feishuExchangeRequestCount();
+    const missingPermit = await exchange();
+    assert.equal(missingPermit.status, 403);
+    assert.deepEqual(missingPermit.json(), { error: 'Forbidden' });
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const wrongPermit = await exchange({ permit: 'w'.repeat(43) });
+    assert.equal(wrongPermit.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const expiredPermit = permitStore.issue();
+    currentTime += 1_001;
+    const expired = await exchange({ permit: expiredPermit });
+    assert.equal(expired.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const validPermit = permitStore.issue();
+    const wrongHost = await exchange({
+      host: `localhost:${proxyPort}`,
+      permit: validPermit,
+    });
+    assert.equal(wrongHost.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const wrongOrigin = await exchange({ origin: 'https://attacker.example', permit: validPermit });
+    assert.equal(wrongOrigin.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const missingOrigin = await exchange({ origin: '', permit: validPermit });
+    assert.equal(missingOrigin.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const textPlain = await exchange({ contentType: 'text/plain', permit: validPermit });
+    assert.equal(textPlain.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const wrongMethod = await exchange({ method: 'GET', permit: validPermit });
+    assert.equal(wrongMethod.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
+    const accepted = await exchange({ permit: validPermit });
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(accepted.headers['set-cookie'], ['session=feishu-session; HttpOnly; SameSite=Lax']);
+    exchangeCount += 1;
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+    const acceptedRequest = upstreamRequests.findLast(
+      (request) => request.url === '/api/auth/feishu/login-by-code',
+    );
+    assert(acceptedRequest);
+    assert.equal(acceptedRequest.headers['x-sd2-feishu-exchange-permit'], undefined);
+
+    const replayed = await exchange({ permit: validPermit });
+    assert.equal(replayed.status, 403);
+    assert.equal(feishuExchangeRequestCount(), exchangeCount);
+
     const login = await fetch(`${proxyOrigin}/api/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

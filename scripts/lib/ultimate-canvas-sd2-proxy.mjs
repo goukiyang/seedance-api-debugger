@@ -1,5 +1,9 @@
 import http from 'node:http';
 import https from 'node:https';
+import { randomBytes } from 'node:crypto';
+
+const FEISHU_EXCHANGE_PATH = '/api/auth/feishu/login-by-code';
+const FEISHU_EXCHANGE_PERMIT_HEADER = 'x-sd2-feishu-exchange-permit';
 
 export const SD2_CANVAS_PROXY_PATHS = Object.freeze([
   '/api/auth/login',
@@ -64,6 +68,65 @@ function sendJson(response, statusCode, body) {
   response.end(payload);
 }
 
+export function createFeishuExchangePermitStore(options = {}) {
+  const maxAgeMs = options.maxAgeMs ?? 60_000;
+  const now = options.now ?? Date.now;
+  const pending = new Map();
+
+  function removeExpired(currentTime) {
+    for (const [permit, record] of pending) {
+      if (record.expiresAt <= currentTime) pending.delete(permit);
+    }
+  }
+
+  return Object.freeze({
+    consume(permit) {
+      const currentTime = now();
+      removeExpired(currentTime);
+      if (!/^[A-Za-z0-9_-]{43}$/.test(permit || '')) return false;
+      const record = pending.get(permit);
+      if (!record || record.expiresAt <= currentTime) return false;
+      pending.delete(permit);
+      return true;
+    },
+    issue() {
+      const currentTime = now();
+      removeExpired(currentTime);
+      const permit = randomBytes(32).toString('base64url');
+      pending.set(permit, { expiresAt: currentTime + maxAgeMs });
+      return permit;
+    },
+  });
+}
+
+function permitsFeishuExchange(request, options) {
+  let localOrigin;
+  try {
+    localOrigin = new URL(options.localOrigin);
+  } catch {
+    return false;
+  }
+
+  const contentType = String(request.headers['content-type'] || '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
+  const permit = request.headers[FEISHU_EXCHANGE_PERMIT_HEADER];
+  if (
+    request.method !== 'POST'
+    || request.headers.host !== localOrigin.host
+    || request.headers.origin !== localOrigin.origin
+    || contentType !== 'application/json'
+    || typeof permit !== 'string'
+    || !/^[A-Za-z0-9_-]{43}$/.test(permit)
+    || typeof options.consumeFeishuExchangePermit !== 'function'
+  ) {
+    return false;
+  }
+
+  return options.consumeFeishuExchangePermit(permit) === true;
+}
+
 export function proxySd2CanvasRequest(request, response, options) {
   const origin = new URL(options.origin);
   const incomingUrl = new URL(request.url || '/', 'http://localhost');
@@ -73,8 +136,15 @@ export function proxySd2CanvasRequest(request, response, options) {
     return;
   }
 
+  if (incomingUrl.pathname === FEISHU_EXCHANGE_PATH && !permitsFeishuExchange(request, options)) {
+    request.resume();
+    sendJson(response, 403, { error: 'Forbidden' });
+    return;
+  }
+
   const target = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, origin);
   const headers = headersWithoutHopByHop(request.headers);
+  delete headers[FEISHU_EXCHANGE_PERMIT_HEADER];
   headers.host = target.host;
   if (headers.origin) headers.origin = target.origin;
   if (headers.referer) headers.referer = rewriteReferer(headers.referer, target);

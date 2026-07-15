@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  createFeishuExchangePermitStore,
   isAllowedSd2CanvasPath,
   proxySd2CanvasRequest,
 } from './lib/ultimate-canvas-sd2-proxy.mjs';
@@ -11,12 +12,14 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(repoRoot, 'public');
 const port = Number(process.argv[2] || 4399);
+const sd2LocalOrigin = `http://127.0.0.1:${port}`;
 const mockGenerationEnabled = process.argv.includes('--mock-generation');
 const sd2LiveEnabled = process.argv.includes('--sd2-live');
 const sd2LiveOrigin = 'https://sd2.youdoodesign.com';
 const feishuRelayCookieName = 'sd2_feishu_relay_nonce';
 const feishuRelayMaxAgeSeconds = 300;
 const pendingFeishuRelays = new Map();
+const feishuExchangePermits = createFeishuExchangePermitStore();
 const realBackendRequiredMessage = '本地预览未连接 SD2，真实生成请使用已部署的同源应用。';
 
 if (mockGenerationEnabled && sd2LiveEnabled) {
@@ -456,7 +459,7 @@ function feishuRelayCookie(value, maxAge) {
 }
 
 function feishuAuthorizeUrl(nextPath, relayNonce) {
-  const callback = `http://127.0.0.1:${port}/__sd2-feishu-callback`;
+  const callback = `${sd2LocalOrigin}/__sd2-feishu-callback`;
   const relayMarker = `/__sd2-feishu-local-relay?${new URLSearchParams({
     callback,
     next: nextPath,
@@ -529,7 +532,14 @@ function sendSd2FeishuCallbackPage(request, response, url) {
   const queryNonces = url.searchParams.getAll('nonce');
   const bindingValid = queryNonces.length === 1
     && consumeFeishuRelayBinding(queryNonces[0], request.headers.cookie);
-  const callbackScript = bindingValid ? `
+  const returnedCodes = url.searchParams.getAll('code');
+  const exchangePermit = bindingValid
+    && returnedCodes.length === 1
+    && returnedCodes[0]
+    && !url.searchParams.get('error')
+    ? feishuExchangePermits.issue()
+    : null;
+  const callbackScript = exchangePermit ? `
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const error = params.get('error');
@@ -540,7 +550,10 @@ function sendSd2FeishuCallbackPage(request, response, url) {
     } else {
       fetch('/api/auth/feishu/login-by-code', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'x-sd2-feishu-exchange-permit': ${JSON.stringify(exchangePermit)},
+        },
         body: JSON.stringify({ code }),
         credentials: 'same-origin',
       }).then((exchangeResponse) => {
@@ -682,7 +695,11 @@ const server = http.createServer(async (request, response) => {
     return;
   }
   if (sd2LiveEnabled && isAllowedSd2CanvasPath(url.pathname)) {
-    return proxySd2CanvasRequest(request, response, { origin: sd2LiveOrigin });
+    return proxySd2CanvasRequest(request, response, {
+      origin: sd2LiveOrigin,
+      localOrigin: sd2LocalOrigin,
+      consumeFeishuExchangePermit: feishuExchangePermits.consume,
+    });
   }
   if (url.pathname === '/api/auth/me') return sendJson(response, { user: mockUser });
   if (url.pathname === '/api/tools/ultimate-canvas/bootstrap') return sendJson(response, bootstrapPayload(url));
