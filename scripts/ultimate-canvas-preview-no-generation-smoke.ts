@@ -255,6 +255,16 @@ async function main() {
       assert.equal(login.headers.get('cache-control'), 'no-store');
       assert.equal(login.headers.get('referrer-policy'), 'no-referrer');
       assert.match(login.headers.get('content-security-policy') || '', /default-src 'none'/);
+      const bindingSetCookie = login.headers.get('set-cookie');
+      assert(bindingSetCookie);
+      assert.match(bindingSetCookie, /^sd2_feishu_relay_nonce=[A-Za-z0-9_-]{43};/);
+      assert.match(bindingSetCookie, /HttpOnly/i);
+      assert.match(bindingSetCookie, /SameSite=Lax/i);
+      assert.match(bindingSetCookie, /Path=\/__sd2-feishu-callback/i);
+      assert.match(bindingSetCookie, /Max-Age=300/i);
+      assert.doesNotMatch(bindingSetCookie, /Domain=/i);
+      const bindingCookie = bindingSetCookie.split(';', 1)[0];
+      const bindingNonce = bindingCookie.slice(bindingCookie.indexOf('=') + 1);
       const loginHtml = await login.text();
       const feishuLink = loginHtml.match(/id="feishu-login" href="([^"]+)"/i);
       assert(feishuLink);
@@ -268,17 +278,30 @@ async function main() {
         `${liveBaseUrl}/__sd2-feishu-callback`,
       );
       assert.equal(relayMarker.searchParams.get('next'), '/tools/ultimate-canvas/index.html');
+      assert.equal(relayMarker.searchParams.get('nonce'), bindingNonce);
       assert.match(loginHtml, /<form[^>]+method="post"[^>]+action="\/api\/auth\/login"/i);
       assert.match(loginHtml, /name="identifier"/i);
       assert.match(loginHtml, /name="password"/i);
 
-      const callback = await fetch(
-        `${liveBaseUrl}/__sd2-feishu-callback?code=single-use-code&next=${encodeURIComponent('/tools/ultimate-canvas/index.html?open=video-card')}`,
-      );
+      const callbackUrl = `${liveBaseUrl}/__sd2-feishu-callback?code=single-use-code&next=${encodeURIComponent('/tools/ultimate-canvas/index.html?open=video-card')}&nonce=${bindingNonce}`;
+      for (const cookie of [undefined, `sd2_feishu_relay_nonce=${'b'.repeat(43)}`]) {
+        const rejectedCallback = await fetch(callbackUrl, {
+          headers: cookie ? { cookie } : undefined,
+        });
+        assert.equal(rejectedCallback.status, 200);
+        assert.match(rejectedCallback.headers.get('set-cookie') || '', /sd2_feishu_relay_nonce=;.*Max-Age=0/i);
+        const rejectedHtml = await rejectedCallback.text();
+        assert.match(rejectedHtml, /window\.history\.replaceState/);
+        assert.doesNotMatch(rejectedHtml, /\/api\/auth\/feishu\/login-by-code/);
+        assert.doesNotMatch(rejectedHtml, /JSON\.stringify\(\{ code \}\)/);
+      }
+
+      const callback = await fetch(callbackUrl, { headers: { cookie: bindingCookie } });
       assert.equal(callback.status, 200);
       assert.equal(callback.headers.get('cache-control'), 'no-store');
       assert.equal(callback.headers.get('referrer-policy'), 'no-referrer');
       assert.match(callback.headers.get('content-security-policy') || '', /default-src 'none'/);
+      assert.match(callback.headers.get('set-cookie') || '', /sd2_feishu_relay_nonce=;.*Max-Age=0/i);
       const callbackHtml = await callback.text();
       const clearHistoryIndex = callbackHtml.indexOf('window.history.replaceState');
       const exchangeIndex = callbackHtml.indexOf("fetch('/api/auth/feishu/login-by-code'");
@@ -286,6 +309,12 @@ async function main() {
       assert.ok(exchangeIndex > clearHistoryIndex, 'the callback query must be removed before code exchange');
       assert.match(callbackHtml, /body: JSON\.stringify\(\{ code \}\)/);
       assert.doesNotMatch(callbackHtml, /session(?:_token)?=/i);
+
+      const replayedCallback = await fetch(callbackUrl, { headers: { cookie: bindingCookie } });
+      assert.equal(replayedCallback.status, 200);
+      const replayedHtml = await replayedCallback.text();
+      assert.match(replayedHtml, /window\.history\.replaceState/);
+      assert.doesNotMatch(replayedHtml, /\/api\/auth\/feishu\/login-by-code/);
 
       const loginRecovery = await fetch(`${liveBaseUrl}/login`);
       assert.equal(loginRecovery.status, 200);

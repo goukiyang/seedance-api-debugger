@@ -8,9 +8,10 @@ import { isAllowedSd2CanvasPath } from './lib/ultimate-canvas-sd2-proxy.mjs';
 
 const RELAY_PATH = '/__sd2-feishu-local-relay';
 const LOCAL_NEXT = '/tools/ultimate-canvas/index.html?open=video-card';
+const VALID_NONCE = 'a'.repeat(43);
 
-function relayMarker(callback: string, next = LOCAL_NEXT) {
-  return `${RELAY_PATH}?${new URLSearchParams({ callback, next })}`;
+function relayMarker(callback: string, next = LOCAL_NEXT, nonce = VALID_NONCE) {
+  return `${RELAY_PATH}?${new URLSearchParams({ callback, next, nonce })}`;
 }
 
 async function main() {
@@ -22,6 +23,7 @@ async function main() {
     assert.deepEqual(parseFeishuLocalRelay(relayMarker(callbackUrl)), {
       callbackUrl,
       next: LOCAL_NEXT,
+      nonce: VALID_NONCE,
     });
   }
 
@@ -53,6 +55,14 @@ async function main() {
     relayMarker('http://127.0.0.1:4402/__sd2-feishu-callback', '/\\example.com/steal'),
     relayMarker('http://127.0.0.1:4402/__sd2-feishu-callback', 'https://example.com/steal'),
     `${relayMarker('http://127.0.0.1:4402/__sd2-feishu-callback')}&callback=http%3A%2F%2Flocalhost%3A4403%2F__sd2-feishu-callback`,
+    `${RELAY_PATH}?${new URLSearchParams({
+      callback: 'http://127.0.0.1:4402/__sd2-feishu-callback',
+      next: LOCAL_NEXT,
+    })}`,
+    relayMarker('http://127.0.0.1:4402/__sd2-feishu-callback', LOCAL_NEXT, 'too-short'),
+    relayMarker('http://127.0.0.1:4402/__sd2-feishu-callback', LOCAL_NEXT, 'a'.repeat(42) + '!'),
+    relayMarker('http://127.0.0.1:4402/__sd2-feishu-callback', LOCAL_NEXT, 'a'.repeat(44)),
+    `${relayMarker('http://127.0.0.1:4402/__sd2-feishu-callback')}&nonce=${'b'.repeat(43)}`,
   ]) {
     assert.equal(parseFeishuLocalRelay(marker), null, marker);
   }
@@ -63,11 +73,11 @@ async function main() {
   assert(relay);
   assert.equal(
     buildFeishuLocalCallbackUrl(relay, { code: 'single-use-code' }),
-    `http://127.0.0.1:4402/__sd2-feishu-callback?code=single-use-code&next=${encodeURIComponent(LOCAL_NEXT)}`,
+    `http://127.0.0.1:4402/__sd2-feishu-callback?code=single-use-code&next=${encodeURIComponent(LOCAL_NEXT)}&nonce=${VALID_NONCE}`,
   );
   assert.equal(
     buildFeishuLocalCallbackUrl(relay, { error: 'access_denied' }),
-    `http://127.0.0.1:4402/__sd2-feishu-callback?error=access_denied&next=${encodeURIComponent(LOCAL_NEXT)}`,
+    `http://127.0.0.1:4402/__sd2-feishu-callback?error=access_denied&next=${encodeURIComponent(LOCAL_NEXT)}&nonce=${VALID_NONCE}`,
   );
 
   assert.equal(isAllowedSd2CanvasPath('/api/auth/feishu/login-by-code'), true);

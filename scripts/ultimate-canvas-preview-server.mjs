@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,9 @@ const port = Number(process.argv[2] || 4399);
 const mockGenerationEnabled = process.argv.includes('--mock-generation');
 const sd2LiveEnabled = process.argv.includes('--sd2-live');
 const sd2LiveOrigin = 'https://sd2.youdoodesign.com';
+const feishuRelayCookieName = 'sd2_feishu_relay_nonce';
+const feishuRelayMaxAgeSeconds = 300;
+const pendingFeishuRelays = new Map();
 const realBackendRequiredMessage = '本地预览未连接 SD2，真实生成请使用已部署的同源应用。';
 
 if (mockGenerationEnabled && sd2LiveEnabled) {
@@ -407,9 +410,58 @@ function htmlSecurityHeaders(nonce) {
   };
 }
 
-function feishuAuthorizeUrl(nextPath) {
+function removeExpiredFeishuRelays(now) {
+  for (const [nonce, record] of pendingFeishuRelays) {
+    if (record.expiresAt <= now) pendingFeishuRelays.delete(nonce);
+  }
+}
+
+function createFeishuRelayBinding() {
+  const now = Date.now();
+  removeExpiredFeishuRelays(now);
+  const nonce = randomBytes(32).toString('base64url');
+  pendingFeishuRelays.set(nonce, { expiresAt: now + feishuRelayMaxAgeSeconds * 1000 });
+  return nonce;
+}
+
+function cookieValues(cookieHeader, name) {
+  return String(cookieHeader || '')
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .filter((cookie) => cookie.startsWith(`${name}=`))
+    .map((cookie) => cookie.slice(name.length + 1));
+}
+
+function equalRelayNonces(left, right) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(left || '') || !/^[A-Za-z0-9_-]{43}$/.test(right || '')) return false;
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function consumeFeishuRelayBinding(queryNonce, cookieHeader) {
+  const now = Date.now();
+  removeExpiredFeishuRelays(now);
+  const cookies = cookieValues(cookieHeader, feishuRelayCookieName);
+  if (cookies.length !== 1 || !equalRelayNonces(queryNonce, cookies[0])) return false;
+
+  const pending = pendingFeishuRelays.get(queryNonce);
+  if (!pending || pending.expiresAt <= now) return false;
+  pendingFeishuRelays.delete(queryNonce);
+  return true;
+}
+
+function feishuRelayCookie(value, maxAge) {
+  return `${feishuRelayCookieName}=${value}; Path=/__sd2-feishu-callback; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
+}
+
+function feishuAuthorizeUrl(nextPath, relayNonce) {
   const callback = `http://127.0.0.1:${port}/__sd2-feishu-callback`;
-  const relayMarker = `/__sd2-feishu-local-relay?${new URLSearchParams({ callback, next: nextPath })}`;
+  const relayMarker = `/__sd2-feishu-local-relay?${new URLSearchParams({
+    callback,
+    next: nextPath,
+    nonce: relayNonce,
+  })}`;
   const authorizeUrl = new URL('/api/auth/feishu/authorize', sd2LiveOrigin);
   authorizeUrl.searchParams.set('next', relayMarker);
   return authorizeUrl.toString();
@@ -418,8 +470,9 @@ function feishuAuthorizeUrl(nextPath) {
 function sendSd2LoginPage(response, url) {
   const nextPath = safeNextPath(url.searchParams.get('next'));
   const nextPathScriptValue = JSON.stringify(nextPath).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
-  const nonce = randomBytes(18).toString('base64');
-  const authorizeUrl = feishuAuthorizeUrl(nextPath);
+  const cspNonce = randomBytes(18).toString('base64');
+  const relayNonce = createFeishuRelayBinding();
+  const authorizeUrl = feishuAuthorizeUrl(nextPath, relayNonce);
   const content = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>SD2 Login</title></head>
@@ -434,7 +487,7 @@ function sendSd2LoginPage(response, url) {
       <p id="login-error" role="alert" hidden></p>
     </form>
   </main>
-  <script nonce="${nonce}">
+  <script nonce="${cspNonce}">
     document.querySelector('form').addEventListener('submit', async function (event) {
       event.preventDefault();
       const identifier = this.elements.identifier.value;
@@ -462,20 +515,21 @@ function sendSd2LoginPage(response, url) {
   </script>
 </body>
 </html>`;
-  response.writeHead(200, htmlSecurityHeaders(nonce));
+  response.writeHead(200, {
+    ...htmlSecurityHeaders(cspNonce),
+    'set-cookie': feishuRelayCookie(relayNonce, feishuRelayMaxAgeSeconds),
+  });
   response.end(content);
 }
 
-function sendSd2FeishuCallbackPage(response, url) {
+function sendSd2FeishuCallbackPage(request, response, url) {
   const nextPath = safeNextPath(url.searchParams.get('next'));
   const nextPathScriptValue = JSON.stringify(nextPath).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
-  const nonce = randomBytes(18).toString('base64');
-  const content = `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>SD2 Feishu Login</title></head>
-<body>
-  <main><p id="login-status" role="status">Completing sign-in...</p></main>
-  <script nonce="${nonce}">
+  const cspNonce = randomBytes(18).toString('base64');
+  const queryNonces = url.searchParams.getAll('nonce');
+  const bindingValid = queryNonces.length === 1
+    && consumeFeishuRelayBinding(queryNonces[0], request.headers.cookie);
+  const callbackScript = bindingValid ? `
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const error = params.get('error');
@@ -495,11 +549,22 @@ function sendSd2FeishuCallbackPage(response, url) {
       }).catch(() => {
         loginStatus.textContent = 'Feishu sign-in failed.';
       });
-    }
+    }` : `
+    window.history.replaceState({}, document.title, window.location.pathname);
+    document.getElementById('login-status').textContent = 'Feishu sign-in was not completed.';`;
+  const content = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>SD2 Feishu Login</title></head>
+<body>
+  <main><p id="login-status" role="status">Completing sign-in...</p></main>
+  <script nonce="${cspNonce}">${callbackScript}
   </script>
 </body>
 </html>`;
-  response.writeHead(200, htmlSecurityHeaders(nonce));
+  response.writeHead(200, {
+    ...htmlSecurityHeaders(cspNonce),
+    'set-cookie': feishuRelayCookie('', 0),
+  });
   response.end(content);
 }
 
@@ -608,7 +673,7 @@ const server = http.createServer(async (request, response) => {
     return sendSd2LoginPage(response, url);
   }
   if (sd2LiveEnabled && url.pathname === '/__sd2-feishu-callback' && request.method === 'GET') {
-    return sendSd2FeishuCallbackPage(response, url);
+    return sendSd2FeishuCallbackPage(request, response, url);
   }
   if (sd2LiveEnabled && canvasPath && !hasSd2SessionCookie(request.headers.cookie)) {
     const nextPath = safeNextPath(`${url.pathname}${url.search}`);
