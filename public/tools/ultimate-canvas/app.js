@@ -3174,6 +3174,7 @@
                 : '';
         }
         refreshOpenGenerationSpecPopover(node);
+        syncImageResultActionsTrigger(nodeEl, node);
         syncVideoTaskActionsTrigger(nodeEl, node);
     }
 
@@ -3343,6 +3344,49 @@
         return actions ? { ...actions, cardId } : null;
     }
 
+    function imageResultActionsForNode(node, overrides = {}) {
+        if (node?.type !== 'image') return null;
+        const data = node.data || {};
+        const result = data.generationResult || {};
+        const imageUrl = overrides.imageUrl ?? data.originalUrl ?? data.imageUrl ?? data.previewImage
+            ?? result.original_url ?? result.originalUrl ?? result.image_url ?? result.imageUrl;
+        if (!imageUrl) return null;
+        return {
+            imageUrl,
+            downloadUrl: overrides.downloadUrl ?? data.originalUrl ?? imageUrl
+        };
+    }
+
+    function syncImageResultActionsTrigger(nodeEl, node, overrides = {}) {
+        const toolbar = nodeEl?.querySelector('.generation-node-toolbar');
+        const existing = toolbar?.querySelector('[data-generation-popover="result-actions"]');
+        if (existing && canvasRuntime.generationPopover?.anchor === existing) closeGenerationPopover();
+        existing?.remove();
+        const actions = imageResultActionsForNode(node, overrides);
+        if (!toolbar || !actions) return;
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'generation-command generation-task-more generation-icon-command';
+        trigger.dataset.generationPopover = 'result-actions';
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-label', '\u66f4\u591a\u64cd\u4f5c');
+        trigger.title = '\u66f4\u591a\u64cd\u4f5c';
+        trigger.textContent = '\u66f4\u591a';
+        trigger._generationResultActions = actions;
+        toolbar.appendChild(trigger);
+    }
+
+    function renderImageResultActionsPopover(node, actionModel = null) {
+        const actions = actionModel || imageResultActionsForNode(node);
+        if (!actions) return '';
+        return `<div class="generation-popover-list generation-task-action-menu">
+            <a data-generated-image-action="open" href="${escapeHtml(actions.imageUrl)}" target="_blank" rel="noreferrer">\u6253\u5f00\u539f\u56fe</a>
+            <a data-generated-image-action="download" href="${escapeHtml(actions.downloadUrl)}" download>\u4e0b\u8f7d</a>
+            <button type="button" data-generated-image-action="regenerate" data-node-id="${escapeHtml(node.id)}">\u518d\u6b21\u751f\u6210</button>
+            <button type="button" data-generated-image-action="create-video" data-node-id="${escapeHtml(node.id)}">\u751f\u6210\u89c6\u9891</button>
+        </div>`;
+    }
+
     function syncVideoTaskActionsTrigger(nodeEl, node, overrides = {}) {
         const toolbar = nodeEl?.querySelector('.generation-node-toolbar');
         const existing = toolbar?.querySelector('[data-generation-popover="task-actions"]');
@@ -3413,8 +3457,9 @@
         element.innerHTML = kind === 'mode' ? renderModePopover(node)
             : kind === 'spec' ? renderSpecPopover(node)
                 : kind === 'camera' ? renderCameraPopover(node)
-                    : kind === 'task-actions' ? renderVideoTaskActionsPopover(node, anchor._generationTaskActions)
-                        : '';
+                    : kind === 'result-actions' ? renderImageResultActionsPopover(node, anchor._generationResultActions)
+                        : kind === 'task-actions' ? renderVideoTaskActionsPopover(node, anchor._generationTaskActions)
+                            : '';
         document.body.appendChild(element);
         anchor.setAttribute('aria-expanded', 'true');
         canvasRuntime.generationPopover = { nodeId, kind, anchor, element };
@@ -3493,16 +3538,16 @@
 
     function setNodeGenerationStatus(nodeEl, state, message) {
         if (!nodeEl) return;
-        const panel = nodeEl.querySelector('.node-input-bar, .node-video-props, .node-image-props');
-        if (!panel) return;
-        let status = panel.querySelector('.node-generation-status');
+        const card = nodeEl.querySelector('.node-card');
+        if (!card) return;
+        let status = card.querySelector(':scope > .node-generation-status');
         if (!message) {
             status?.remove();
             return;
         }
         if (!status) {
             status = document.createElement('div');
-            panel.prepend(status);
+            card.append(status);
         }
         status.className = `node-generation-status ${state || 'info'}`;
         status.textContent = message;
@@ -5915,27 +5960,14 @@
         const resultRegion = nodeEl?.querySelector('[data-generation-result-region]');
         if (!resultRegion) return;
         const node = engine.nodes.get(nodeId);
-        const imageActions = options.imageUrl ? `
-            <div class="generated-action-row generated-image-actions">
-                <a data-generated-image-action="open" href="${escapeHtml(options.imageUrl)}" target="_blank" rel="noreferrer">打开原图</a>
-                <a data-generated-image-action="download" href="${escapeHtml(options.downloadUrl || options.imageUrl)}" download>下载</a>
-                <button type="button" data-generated-image-action="regenerate" data-node-id="${escapeHtml(nodeId)}">再次生成</button>
-                <button type="button" data-generated-image-action="create-video" data-node-id="${escapeHtml(nodeId)}">生成视频</button>
-            </div>` : '';
         window.UltimateCanvasGenerationInteractions.updateGenerationResultRegion(nodeEl, `
             <div class="generated-reference-card">
-                <button class="prompt-card-expand" data-prompt-expand title="展开提示词">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
-                </button>
-                <div>
-                    <strong>${escapeHtml(title)}</strong>
-                    <p>${escapeHtml(description)}</p>
-                </div>
+                <strong class="generated-result-title">${escapeHtml(title)}</strong>
                 ${previewImage
                     ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}">`
                     : '<div class="generated-frame-lines"></div>'}
-                ${imageActions}
             </div>`);
+        syncImageResultActionsTrigger(nodeEl, node, options);
         if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
     }
 

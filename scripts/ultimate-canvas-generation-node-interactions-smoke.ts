@@ -179,11 +179,7 @@ matches(
   /\.generated-frame-preview\s*\{[\s\S]*?max-height:\s*\d+px;/,
   'generated media is bounded so action rows remain visible',
 );
-matches(
-  stylesSource,
-  /\.canvas-node:not\(\.selected\)[\s\S]*?\.generated-action-row\s*\{[\s\S]*?display:\s*none;/,
-  'unselected generated nodes hide result actions to preserve compact dimensions',
-);
+assert.ok(!stylesSource.includes('.generated-action-row'), 'generated result actions are not styled as inline rows');
 matches(stylesSource, /\.node-connector\s*\{[\s\S]*?top:\s*50%;[\s\S]*?translateY\(-50%\)/, 'ports stay vertically centered on the card');
 contains(engineSource, 'this.onConnectionDeleted', 'connection removals notify persistence');
 contains(stylesSource, '.canvas-node.selected', 'selected canvas node state is styled');
@@ -209,6 +205,9 @@ contains(appSource, 'function applyGenerationQuickMode', 'quick choices only con
 contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable durable document contract');
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
+contains(appSource, 'function imageResultActionsForNode', 'image results expose contextual action state');
+contains(appSource, "trigger.dataset.generationPopover = 'result-actions'", 'image results expose a More popover trigger');
+contains(appSource, "kind === 'result-actions' ? renderImageResultActionsPopover", 'popover renders image result actions from trigger state');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
 contains(indexSource, 'app.js?v=20260713-no-fake-preview', 'canvas app cache key matches the non-generating preview state');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
@@ -277,6 +276,8 @@ assert.ok(decorationSource.includes('updateGenerationResultRegion'), 'generated 
 assert.ok(!decorationSource.includes('body.innerHTML'), 'generated results do not replace editor controls');
 assert.ok(!decorationSource.includes('const taskActions ='), 'generated result cards no longer render task links');
 assert.ok(!decorationSource.includes('const generatedButtons ='), 'generated result cards no longer render task commands');
+assert.ok(!decorationSource.includes('generated-action-row'), 'generated result cards keep actions in the toolbar popover');
+assert.ok(!decorationSource.includes('data-prompt-expand'), 'generated result cards do not add a second prompt expander');
 contains(appSource, 'data-generation-popover="task-actions"', 'video toolbar exposes a task-actions popover trigger');
 const taskActionsTriggerSource = appSource.slice(
   appSource.indexOf('function syncVideoTaskActionsTrigger'),

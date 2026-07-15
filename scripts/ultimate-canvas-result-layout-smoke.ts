@@ -5,6 +5,7 @@ const safeParser = require('next/dist/compiled/postcss-safe-parser');
 const interactions = require('../public/tools/ultimate-canvas/generation-node-interactions.js');
 
 const css = safeParser(readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8'));
+const appSource = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
 
 function selectors(rule: any): string[] {
   return rule.selectors.map((selector: string) => selector.trim());
@@ -100,50 +101,35 @@ assertDeclarations(ruleWith(['.generated-reference-card']), {
   'box-sizing': 'border-box',
 });
 
-const imageResultCard = ruleWith([
-  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card',
+const compactResults = ruleWith([
+  '.generation-node .generation-result-region:not(:empty) .generated-reference-card',
 ]);
-assertDeclarations(imageResultCard, {
-  display: 'grid',
-  'grid-template-rows': 'auto minmax(0, 1fr) auto',
-  gap: '8px',
-  'justify-content': 'stretch',
-});
-
-const imageResultDescription = ruleWith([
-  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card p',
-]);
-assertDeclarations(imageResultDescription, { display: 'none' });
-
-const imageResultPreview = ruleWith([
-  '.canvas-node.node-type-image .generation-result-region:not(:empty) .generated-frame-preview',
-]);
-assertDeclarations(imageResultPreview, {
+assertDeclarations(compactResults, {
+  position: 'relative',
   width: '100%',
   height: '100%',
   'min-height': '0',
-  'max-height': 'none',
-  'margin-top': '0',
-  'object-fit': 'contain',
+  padding: '0',
+  border: '0',
+  'border-radius': 'inherit',
+  background: 'transparent',
+  'box-shadow': 'none',
 });
-
 assertDeclarations(ruleWith([
-  '.generation-node .generation-result-region:not(:empty) .generated-reference-card',
-]), { height: '100%', 'min-height': '0', padding: '10px' });
-
-const selectedActions = ruleWith(['.generation-node.selected .generated-action-row']);
-assertDeclarations(selectedActions, { display: 'flex' });
-assertDeclarations(selectedActions, {
-  'flex-wrap': 'nowrap',
-  'overflow-x': 'auto',
-  'overflow-y': 'hidden',
-  height: '24px',
-  'min-height': '24px',
-  flex: '0 0 24px',
+  '.generation-node .node-body:has(.generation-result-region:not(:empty))',
+]), { padding: '0' });
+assertDeclarations(ruleWith([
+  '.generation-node .generation-result-region:not(:empty) .generated-reference-card p',
+]), { display: 'none' });
+assertDeclarations(ruleWith([
+  '.generation-node .generation-result-region:not(:empty) .generated-frame-preview',
+]), { width: '100%', height: '100%', 'object-fit': 'contain' });
+assertDeclarations(ruleWith(['.generated-result-title']), {
+  position: 'absolute',
+  top: '10px',
+  left: '10px',
+  'z-index': '2',
 });
-
-const unselectedActions = ruleWith(['.generation-node:not(.selected) .generated-action-row']);
-assertDeclarations(unselectedActions, { display: 'none' });
 
 assertDeclarations(ruleWith(['.generated-frame-preview']), {
   flex: '0 1 auto',
@@ -192,6 +178,14 @@ assertDeclarations(ruleWith(['.generation-editor-footer']), {
   display: 'grid',
   'grid-template-columns': 'minmax(0, auto) minmax(0, 1fr) auto',
 });
+
+assert.ok(appSource.includes('function imageResultActionsForNode'));
+assert.ok(appSource.includes("trigger.dataset.generationPopover = 'result-actions'"));
+assert.ok(appSource.includes("kind === 'result-actions' ? renderImageResultActionsPopover"));
+assert.ok(!appSource.slice(appSource.indexOf('function decorateGeneratedNode'), appSource.indexOf('function createDirectorOutput'))
+  .includes('generated-action-row'));
+assert.ok(appSource.includes("const card = nodeEl.querySelector('.node-card')"));
+assert.ok(appSource.includes('card.append(status)'));
 assertDeclarations(ruleWith(['.generation-editor-footer .generation-summary-row']), {
   padding: '0',
   border: '0',
