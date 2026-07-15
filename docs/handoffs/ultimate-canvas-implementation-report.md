@@ -416,3 +416,63 @@ git diff --check c2fd70a..HEAD
 - GitHub 账号 `K4y2025` 已接受 `goukiyang/seedance-api-debugger` 的 Write 权限邀请；官方 API 确认待接受邀请为 0，仓库 `push` 权限为 true。
 - `git fetch origin`、`git switch teammate/ultimate-canvas-complete`、`git pull --rebase origin teammate/ultimate-canvas-complete` 和 `git push origin teammate/ultimate-canvas-complete` 均执行成功。
 - 实现提交 `a415539793319a10d98e4241b261f387e4a6d19e` 已推送，推送区间为 `2ce4a17..a415539`；推送后本地 HEAD、远端跟踪分支与 GitHub 远端分支哈希一致。
+
+## 图片预览卡优化（2026-07-15）
+
+### 1. 本次目标理解
+
+图片节点结果卡只保留一行文件名，隐藏上传或生成状态说明；图片使用节点卡片的剩余高度并按原比例完整显示，不裁切主体。节点比例、连接锚点和下方提示词面板尺寸保持不变。
+
+### 2. 实际修改了哪些文件
+
+- `public/tools/ultimate-canvas/styles.css`
+- `scripts/ultimate-canvas-result-layout-smoke.ts`
+- `docs/superpowers/specs/2026-07-15-ultimate-canvas-image-preview-card-design.md`
+- `docs/superpowers/plans/2026-07-15-ultimate-canvas-image-preview-card.md`
+- `docs/handoffs/ultimate-canvas-implementation-report.md`
+
+### 3. 每个文件改了什么
+
+- `styles.css`：图片结果卡改为“文件名 / 自适应预览 / 可选操作行”三行网格；隐藏描述状态；取消图片预览的固定最大高度并保持 `object-fit: contain`。
+- `ultimate-canvas-result-layout-smoke.ts`：新增图片卡网格、隐藏状态、完整预览尺寸和 `contain` 行为的回归断言。
+- 设计与实施计划：记录获确认的布局、约束、RED/GREEN 步骤和验收范围。
+- 本回执：记录真实修改、验证证据和安全边界。
+
+### 4. 跑了哪些验证命令
+
+- 修改前 `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`：PASS。
+- 加入回归断言后同一命令：按预期 FAIL，缺少 `display: grid`。
+- 实现后聚焦布局与交互 smoke：PASS。
+- 全部 `ultimate-canvas-*-smoke.ts`：13/13 PASS。
+- `npx tsc --noEmit --pretty false`：PASS。
+- `node --check public/tools/ultimate-canvas/app.js`：PASS。
+- `node --check public/tools/ultimate-canvas/canvas-engine.js`：PASS。
+- `npm run lint`：PASS，保留仓库既有 Hook 依赖和 `<img>` warning。
+- `npm run build`：PASS，成功生成 76 个页面，保留相同既有 warning。
+- `git diff --check`：PASS，仅有 Git 的 LF/CRLF 提示。
+
+### 5. 验证结果是否通过
+
+通过。本地无生成预览中，16:9 图片卡约为 `602 x 338`，图片预览约为 `558 x 229`，状态说明为 `display: none`，预览为 `object-fit: contain` 且 `max-height: none`。桌面页面 `clientWidth/scrollWidth` 为 `1105/1105`；`390 x 844` 窄屏为 `390/390`，没有页面级横向溢出。提示词面板保持居中固定编辑面尺寸，浏览器 warning/error 为 0。
+
+### 6. 是否真实调用了文字、图片、视频生成
+
+没有。本轮只使用不启用生成的本地预览素材验证布局，没有提交文字、图片或视频生成。
+
+### 7. 是否消耗了点数
+
+没有，点数消耗为 0。
+
+### 8. 是否碰过后台设置、密钥、点数核心逻辑
+
+没有。未读取或修改 `.env`、后台 API 设置、provider 密钥配置、点数核心逻辑或数据库 schema，也没有绕过普通账号权限。
+
+### 9. 还没做完的内容
+
+- 需要将本分支推送并由 SD2 部署流程发布后，才能在生产地址看到新布局。
+- 生产发布后还需刷新静态资源缓存并复核真实上传图片节点；不需要为该视觉复核执行付费生成。
+
+### 10. 风险和建议下一步
+
+- `contain` 会完整保留图片；当图片比例与节点比例不一致时会出现正常留边，不应改为会裁切主体的 `cover`。
+- 后续可单独修复内部节点 ID、模型技术名和参数摘要同步问题，本次没有扩大修改范围。
