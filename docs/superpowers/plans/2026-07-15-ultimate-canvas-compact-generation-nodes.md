@@ -12,6 +12,8 @@
 
 - Modify the existing Ultimate Canvas in place; do not create another canvas or generation flow.
 - Show only controls backed by current real behavior.
+- Use `.node-card` as the single visual outer shell for every canvas node; image and video share `.generation-node` for generation-specific layout.
+- Do not duplicate image/video visual rules when one shared `.generation-node` rule expresses the same behavior.
 - Preserve ratio-derived image and video node dimensions.
 - Keep the prompt editor at a fixed responsive width independent of media ratio.
 - Preserve same-origin sd2 upload, image generation, video generation, task polling, save, and restore contracts.
@@ -33,7 +35,7 @@
 
 **Interfaces:**
 - Consumes: Existing quick-mode IDs, `data-generation-command`, `data-generation-popover`, `data-generation-reference-list`, `data-generation-submit`, and prompt textarea selectors.
-- Produces: Shared `.generation-empty-state`, `.generation-editor-toolbar`, `.generation-editor-footer`, and hidden-empty reference-list structure for image and video nodes.
+- Produces: Universal `.node-card` usage plus shared `.generation-node`, `.generation-empty-state`, `.generation-editor-toolbar`, `.generation-editor-footer`, and hidden-empty reference-list structure for image and video nodes.
 
 - [ ] **Step 1: Write the failing compact-structure smoke test**
 
@@ -70,6 +72,8 @@ for (const [kind, template] of [['video', videoTemplate], ['image', imageTemplat
 
 assert.ok(!imageTemplate.includes('data-generation-command="disconnect-references"'));
 assert.ok(!videoTemplate.includes('data-generation-command="disconnect-references"'));
+assert.ok(engine.includes("isGenerationNode ? ' generation-node' : ''"));
+assert.ok(engine.includes('<div class="node-card">'), 'all node types retain the universal outer shell');
 assert.ok(engine.includes('class="generation-empty-state"'));
 assert.ok(engine.includes('data-generation-quick-mode="image-to-image"'));
 assert.ok(engine.includes('data-generation-quick-mode="upscale-image"'));
@@ -79,6 +83,9 @@ assert.ok(!styles.includes('.canvas-node.selected .generation-quick-modes,'),
   'selection keeps the empty-state actions visible');
 assert.match(styles, /\.generation-editor-footer\s*\{[\s\S]*?display:\s*grid;/);
 assert.match(styles, /\.generation-reference-list\[hidden\]\s*\{[\s\S]*?display:\s*none;/);
+assert.match(styles, /\.generation-node \.node-card\s*\{/);
+assert.doesNotMatch(styles, /\.node-type-video \.node-card,\s*\n\.node-type-image \.node-card\s*\{/,
+  'shared generation visuals use the semantic generation-node class');
 assert.ok(app.includes('referenceList.hidden = references.length === 0'));
 assert.ok(app.includes("referenceList.innerHTML = references.length"));
 
@@ -97,7 +104,14 @@ Expected: FAIL because compact classes, the new quick-mode choices, and hidden e
 
 - [ ] **Step 3: Replace the empty preview markup with the compact structure**
 
-In `_buildNode`, replace `generationBody` with this complete branch:
+In `_buildNode`, define the shared generation wrapper state before assigning `wrap.className`:
+
+```js
+const isGenerationNode = type === 'image' || type === 'video';
+wrap.className = `canvas-node node-type-${type}${isGenerationNode ? ' generation-node' : ''}`;
+```
+
+Keep `<div class="node-card">` unchanged as the only visual outer shell for every node type. Then replace `generationBody` with this complete branch:
 
 ```js
 const generationBody = type === 'image' || type === 'video' ? `
@@ -248,6 +262,13 @@ Replace the old quick-mode grid and image/video footer layout with these shared 
 }
 .generation-quick-modes button:hover { background: var(--bg-hover); }
 
+.generation-node .node-card {
+    width: var(--generation-node-width, 350px);
+    height: var(--generation-node-height, 196.875px);
+}
+.generation-node .node-body {
+    height: 100%; min-height: 0; overflow: hidden; position: relative;
+}
 .generation-editor { overflow: hidden; }
 .generation-editor-toolbar { padding: 12px 16px 4px; border: 0; overflow-x: auto; }
 .generation-editor-toolbar .generation-command { border: 0; background: var(--bg-hover); }
@@ -533,8 +554,7 @@ Change result-layout expectations to require both node types to reuse the single
 
 ```ts
 const compactResults = ruleWith([
-  '.node-type-video .generation-result-region:not(:empty) .generated-reference-card',
-  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card',
+  '.generation-node .generation-result-region:not(:empty) .generated-reference-card',
 ]);
 assertDeclarations(compactResults, {
   position: 'relative',
@@ -548,16 +568,13 @@ assertDeclarations(compactResults, {
   'box-shadow': 'none',
 });
 assertDeclarations(ruleWith([
-  '.node-type-video .node-body:has(.generation-result-region:not(:empty))',
-  '.node-type-image .node-body:has(.generation-result-region:not(:empty))',
+  '.generation-node .node-body:has(.generation-result-region:not(:empty))',
 ]), { padding: '0' });
 assertDeclarations(ruleWith([
-  '.node-type-video .generation-result-region:not(:empty) .generated-reference-card p',
-  '.node-type-image .generation-result-region:not(:empty) .generated-reference-card p',
+  '.generation-node .generation-result-region:not(:empty) .generated-reference-card p',
 ]), { display: 'none' });
 assertDeclarations(ruleWith([
-  '.node-type-video .generation-result-region:not(:empty) .generated-frame-preview',
-  '.node-type-image .generation-result-region:not(:empty) .generated-frame-preview',
+  '.generation-node .generation-result-region:not(:empty) .generated-frame-preview',
 ]), { width: '100%', height: '100%', 'object-fit': 'contain' });
 assertDeclarations(ruleWith(['.generated-result-title']), {
   position: 'absolute',
@@ -715,24 +732,20 @@ Style `.node-generation-status` as an absolutely positioned, single-line pill at
 Use shared image/video rules:
 
 ```css
-.node-type-video .generation-result-region:not(:empty) .generated-reference-card,
-.node-type-image .generation-result-region:not(:empty) .generated-reference-card {
+.generation-node .generation-result-region:not(:empty) .generated-reference-card {
     position: relative; width: 100%; height: 100%; min-height: 0;
     padding: 0; border: 0; border-radius: inherit;
     background: transparent; box-shadow: none; overflow: hidden;
 }
-.node-type-video .node-body:has(.generation-result-region:not(:empty)),
-.node-type-image .node-body:has(.generation-result-region:not(:empty)) { padding: 0; }
+.generation-node .node-body:has(.generation-result-region:not(:empty)) { padding: 0; }
 .generated-result-title {
     position: absolute; top: 10px; left: 10px; z-index: 2;
     max-width: calc(100% - 20px); padding: 4px 7px; border-radius: 5px;
     background: rgba(0,0,0,0.58); color: var(--text-primary); font-size: 11px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
 }
-.node-type-video .generation-result-region:not(:empty) .generated-reference-card p,
-.node-type-image .generation-result-region:not(:empty) .generated-reference-card p { display: none; }
-.node-type-video .generation-result-region:not(:empty) .generated-frame-preview,
-.node-type-image .generation-result-region:not(:empty) .generated-frame-preview {
+.generation-node .generation-result-region:not(:empty) .generated-reference-card p { display: none; }
+.generation-node .generation-result-region:not(:empty) .generated-frame-preview {
     display: block; width: 100%; height: 100%; min-height: 0; max-height: none;
     margin: 0; border: 0; border-radius: inherit; object-fit: contain;
 }

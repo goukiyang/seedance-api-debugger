@@ -25,6 +25,13 @@ The current image and video generation nodes expose mode, reference, status, pro
 
 ## Shared Layout
 
+### Shared card contract
+
+- `.node-card` is the only visual outer shell for every canvas node type. Border, background, radius, shadow, hover, and selection styling live there once.
+- Image and video wrappers share one semantic `.generation-node` class for ratio-aware sizing and generation-state layout.
+- Empty, loading, success, and failure are content states inside that shared shell, not separate card components.
+- Type-specific selectors are reserved for real behavioral or media differences; duplicated image/video visual rules are not allowed.
+
 ### Preview card
 
 - Keep the node label outside and above the card.
@@ -65,6 +72,7 @@ The current image and video generation nodes expose mode, reference, status, pro
 ## Interaction and Data Boundaries
 
 - Existing delegated `data-generation-*` events remain the interaction contract.
+- Existing `.node-card` remains the universal visual contract; generation nodes add `.generation-node` without replacing or nesting another card shell.
 - Existing image and video settings objects remain the persisted data contract.
 - Existing same-origin sd2 submission, upload, polling, and normal-user authentication paths remain unchanged.
 - Popovers are anchored to their footer controls, close on outside click or Escape, and remain inside the viewport.
