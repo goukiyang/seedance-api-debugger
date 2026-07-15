@@ -96,6 +96,9 @@ async function main() {
         < previewSource.indexOf("if (url.pathname === '/api/auth/me')"),
       'live API requests must proxy before local fixture routing',
     );
+    assert.match(previewSource, /headers: \{ 'content-type': 'application\/json' \}/);
+    assert.match(previewSource, /JSON\.stringify\(\{ identifier, password \}\)/);
+    assert.match(previewSource, /id="login-error"/);
 
     const bootstrap = await request('GET', '/api/tools/ultimate-canvas/bootstrap');
     assert.equal(bootstrap.status, 200);
@@ -253,6 +256,22 @@ async function main() {
       assert.match(loginHtml, /<form[^>]+method="post"[^>]+action="\/api\/auth\/login"/i);
       assert.match(loginHtml, /name="identifier"/i);
       assert.match(loginHtml, /name="password"/i);
+
+      const loginRecovery = await fetch(`${liveBaseUrl}/login`);
+      assert.equal(loginRecovery.status, 200);
+      assert.match(await loginRecovery.text(), /id="login-error"/i);
+
+      const unrelatedCookieCanvas = await fetch(`${liveBaseUrl}/tools/ultimate-canvas/index.html`, {
+        headers: { cookie: 'theme=dark' },
+        redirect: 'manual',
+      });
+      assert.equal(unrelatedCookieCanvas.status, 302);
+
+      const sessionCanvas = await fetch(`${liveBaseUrl}/tools/ultimate-canvas/index.html`, {
+        headers: { cookie: 'session=stale' },
+        redirect: 'manual',
+      });
+      assert.equal(sessionCanvas.status, 200);
 
       const unsafeLogin = await fetch(`${liveBaseUrl}/__sd2-login?next=%2F%3C%2Fscript%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E`);
       assert.equal(unsafeLogin.status, 200);

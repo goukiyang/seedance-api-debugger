@@ -4,14 +4,15 @@ import https from 'node:https';
 export const SD2_CANVAS_PROXY_PATHS = Object.freeze([
   '/api/auth/login',
   '/api/auth/me',
-  '/api/tools/ultimate-canvas/',
-  '/api/projects/',
-  '/api/video-cards/',
-  '/api/assets/',
-  '/api/tasks/',
-  '/api/video/',
-  '/api/reference-albums/',
-  '/uploads/',
+  '/api/tools/ultimate-canvas',
+  '/api/projects',
+  '/api/video-cards',
+  '/api/assets',
+  '/api/tasks',
+  '/api/video',
+  '/api/reference-albums',
+  '/api/approvals',
+  '/uploads',
 ]);
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -49,7 +50,7 @@ function rewriteReferer(referer, target) {
 export function isAllowedSd2CanvasPath(pathname) {
   return pathname === '/api/auth/login'
     || pathname === '/api/auth/me'
-    || SD2_CANVAS_PROXY_PATHS.slice(2).some((prefix) => pathname.startsWith(prefix));
+    || SD2_CANVAS_PROXY_PATHS.slice(2).some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 function sendJson(response, statusCode, body) {

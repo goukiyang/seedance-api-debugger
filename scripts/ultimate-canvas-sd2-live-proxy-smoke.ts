@@ -48,6 +48,18 @@ async function main() {
       return;
     }
 
+    if (request.url === '/api/projects' && request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end('{"projects":[]}');
+      return;
+    }
+
+    if (request.url === '/api/approvals' && request.method === 'POST') {
+      response.writeHead(201, { 'content-type': 'application/json' });
+      response.end('{"approval":{"id":"approval-1"}}');
+      return;
+    }
+
     if (request.url === '/uploads/live.mp4') {
       response.writeHead(206, {
         'accept-ranges': 'bytes',
@@ -109,6 +121,20 @@ async function main() {
     assert.equal(media.status, 206);
     assert.equal(media.headers.get('content-range'), 'bytes 0-3/4');
     assert.deepEqual(Buffer.from(await media.arrayBuffer()), Buffer.from([1, 2, 3, 4]));
+
+    const projects = await fetch(`${proxyOrigin}/api/projects`);
+    assert.equal(projects.status, 200);
+    assert.deepEqual(await projects.json(), { projects: [] });
+    assert.equal(upstreamRequests.at(-1)?.url, '/api/projects');
+
+    const approvals = await fetch(`${proxyOrigin}/api/approvals`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'ratio_change' }),
+    });
+    assert.equal(approvals.status, 201);
+    assert.deepEqual(await approvals.json(), { approval: { id: 'approval-1' } });
+    assert.equal(upstreamRequests.at(-1)?.url, '/api/approvals');
 
     const requestsBeforeBlockedPath = upstreamRequests.length;
     const blocked = await fetch(`${proxyOrigin}/api/admin/settings`);

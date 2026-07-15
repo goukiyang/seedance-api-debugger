@@ -385,6 +385,12 @@ function escapeHtmlAttribute(value) {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function hasSd2SessionCookie(cookieHeader) {
+  return String(cookieHeader || '')
+    .split(';')
+    .some((cookie) => /^\s*session=.+/.test(cookie));
+}
+
 function sendSd2LoginPage(response, url) {
   const nextPath = safeNextPath(url.searchParams.get('next'));
   const nextPathScriptValue = JSON.stringify(nextPath).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
@@ -398,13 +404,33 @@ function sendSd2LoginPage(response, url) {
       <label>Account <input name="identifier" autocomplete="username" required></label>
       <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
       <button type="submit">Sign in</button>
+      <p id="login-error" role="alert" hidden></p>
     </form>
   </main>
   <script>
     document.querySelector('form').addEventListener('submit', async function (event) {
       event.preventDefault();
-      const response = await fetch(this.action, { method: 'POST', body: new FormData(this), credentials: 'same-origin' });
-      if (response.ok) window.location.assign(${nextPathScriptValue});
+      const identifier = this.elements.identifier.value;
+      const password = this.elements.password.value;
+      const loginError = document.getElementById('login-error');
+      loginError.hidden = true;
+      try {
+        const response = await fetch(this.action, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ identifier, password }),
+          credentials: 'same-origin',
+        });
+        if (response.ok) {
+          window.location.assign(${nextPathScriptValue});
+          return;
+        }
+        const data = await response.json().catch(() => ({}));
+        loginError.textContent = typeof data.error === 'string' ? data.error : 'Sign-in failed.';
+      } catch {
+        loginError.textContent = 'Sign-in failed.';
+      }
+      loginError.hidden = false;
     });
   </script>
 </body>
@@ -514,10 +540,10 @@ function bootstrapPayload(url) {
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || '/', `http://127.0.0.1:${port}`);
   const canvasPath = url.pathname === '/' || url.pathname === '/tools/ultimate-canvas/index.html';
-  if (sd2LiveEnabled && url.pathname === '/__sd2-login' && request.method === 'GET') {
+  if (sd2LiveEnabled && (url.pathname === '/__sd2-login' || url.pathname === '/login') && request.method === 'GET') {
     return sendSd2LoginPage(response, url);
   }
-  if (sd2LiveEnabled && canvasPath && !request.headers.cookie) {
+  if (sd2LiveEnabled && canvasPath && !hasSd2SessionCookie(request.headers.cookie)) {
     const nextPath = safeNextPath(`${url.pathname}${url.search}`);
     response.writeHead(302, { location: `/__sd2-login?next=${encodeURIComponent(nextPath)}` });
     response.end();
