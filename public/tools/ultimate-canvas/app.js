@@ -3234,6 +3234,42 @@
         </section>`;
     }
 
+    function generationDurationSlider(values, selected) {
+        const durations = values.map(Number).filter(Number.isFinite);
+        if (!durations.length) {
+            return '<section class="generation-choice-section"><h3>时长</h3><div class="generation-spec-static">不可用</div></section>';
+        }
+        const selectedIndex = durations.findIndex(value => value === Number(selected));
+        const activeIndex = selectedIndex >= 0 ? selectedIndex : 0;
+        const activeDuration = durations[activeIndex];
+        return `<section class="generation-choice-section generation-duration-section" data-generation-choice-section="duration">
+            <div class="generation-duration-heading">
+                <h3>时长</h3>
+                <output data-generation-duration-output>${escapeHtml(`${activeDuration}s`)}</output>
+            </div>
+            <input type="range" class="generation-duration-slider" min="0" max="${durations.length - 1}" step="1" value="${activeIndex}"
+                data-generation-duration-slider data-generation-duration-values="${escapeHtml(durations.join(','))}"
+                aria-label="时长" aria-valuetext="${escapeHtml(`${activeDuration}秒`)}">
+            <div class="generation-duration-scale" aria-hidden="true"><span>${escapeHtml(`${durations[0]}s`)}</span><span>${escapeHtml(`${durations.at(-1)}s`)}</span></div>
+        </section>`;
+    }
+
+    function syncGenerationDurationSlider(slider) {
+        const durations = String(slider?.dataset?.generationDurationValues || '')
+            .split(',')
+            .map(Number)
+            .filter(Number.isFinite);
+        if (!durations.length) return null;
+        const index = Math.max(0, Math.min(durations.length - 1, Number(slider.value) || 0));
+        const duration = durations[index];
+        slider.value = String(index);
+        slider.setAttribute('aria-valuetext', `${duration}秒`);
+        const output = slider.closest('[data-generation-choice-section="duration"]')
+            ?.querySelector('[data-generation-duration-output]');
+        if (output) output.textContent = `${duration}s`;
+        return duration;
+    }
+
     function renderModePopover(node) {
         const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
             node.type,
@@ -3268,7 +3304,7 @@
         }
         return `<div class="generation-popover-spec" data-generation-settings="video">
             ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
-            ${generationChoiceGroup('duration', '时长', capability.durations, settings.duration, value => `${value}s`)}
+            ${generationDurationSlider(capability.durations, settings.duration)}
             ${generationChoiceGroup('resolution', '分辨率', capability.resolutions, settings.resolution)}
             ${capability.supportsAudio ? generationChoiceGroup('generateAudio', '生成声音', [true, false], settings.generateAudio, value => value ? '开启' : '关闭') : ''}
             ${capability.supportsLastFrame ? generationChoiceGroup('returnLastFrame', '返回尾帧', [true, false], settings.returnLastFrame, value => value ? '开启' : '关闭') : ''}
@@ -4273,6 +4309,25 @@
             choice.dataset.generationSettingChoice,
             choice.dataset.generationValue
         );
+    });
+
+    document.addEventListener('input', event => {
+        const slider = event.target.closest?.('[data-generation-duration-slider]');
+        const state = canvasRuntime.generationPopover;
+        if (!slider || state?.kind !== 'spec' || !state.element?.contains(slider)) return;
+        syncGenerationDurationSlider(slider);
+    });
+
+    document.addEventListener('change', event => {
+        const slider = event.target.closest?.('[data-generation-duration-slider]');
+        const state = canvasRuntime.generationPopover;
+        if (!slider || state?.kind !== 'spec' || !state.element?.contains(slider)) return;
+        const node = engine.nodes.get(state.nodeId);
+        const panel = slider.closest('[data-generation-settings]');
+        if (!node || node.type !== 'video' || panel?.dataset.generationSettings !== 'video') return;
+        const duration = syncGenerationDurationSlider(slider);
+        if (duration === null) return;
+        applyGenerationSettingChoice(node, 'duration', String(duration));
     });
 
     document.addEventListener('click', event => {

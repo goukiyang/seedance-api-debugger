@@ -52,9 +52,20 @@ assert.doesNotMatch(styles, /\.node-type-(?:image|video)\s+\.generation-(?:quick
 assert.ok(app.includes('referenceList.hidden = references.length === 0'));
 assert.ok(app.includes('referenceList.innerHTML = references.length'));
 assert.ok(app.includes('function generationChoiceGroup'));
+assert.ok(app.includes('function generationDurationSlider'));
 assert.ok(app.includes('function applyGenerationSettingChoice'));
 assert.ok(app.includes("scheduleCanvasSave(`${node.type}_settings_change`)"));
 assert.match(styles, /\.generation-choice-grid\s*\{[\s\S]*?display:\s*grid;/);
 assert.match(styles, /\.generation-choice-button\[aria-pressed="true"\]/);
+assert.match(styles, /\.generation-popover-spec\s*\{[\s\S]*?gap:\s*12px;/,
+  'specification sections use compact spacing');
+assert.match(styles, /\.generation-choice-grid\s*\{[\s\S]*?minmax\(60px,\s*1fr\)[\s\S]*?gap:\s*6px;/,
+  'capability choices fit more options without overflowing');
+assert.match(styles, /\.generation-choice-button\s*\{[\s\S]*?min-height:\s*44px;/,
+  'choice tiles stay compact while retaining a stable target size');
+assert.match(styles, /\.generation-duration-slider\s*\{[\s\S]*?width:\s*100%;/,
+  'video duration uses one full-width slider');
+assert.match(styles, /\.generation-popover\[data-generation-popover-kind="spec"\]\s*\{[\s\S]*?max-width:\s*min\(438px,[\s\S]*?overflow-x:\s*hidden;/,
+  'the specification shell includes its content padding without horizontal overflow');
 
 console.log('ultimate-canvas-compact-generation-ui-smoke passed');

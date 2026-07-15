@@ -140,17 +140,28 @@ const specPopoverRuntime = {
 };
 const specPopoverFactory = new Function(
   'canvasRuntime', 'window', 'escapeHtml', 'generationSettingsForNode', 'positionGenerationPopover',
-  `${specPopoverSource}\nreturn { refreshOpenGenerationSpecPopover };`,
+  `${specPopoverSource}\nreturn { renderSpecPopover, refreshOpenGenerationSpecPopover };`,
 );
 const specPopoverApi = specPopoverFactory(
   specPopoverRuntime,
   {
     UltimateCanvasGenerationInteractions: {
-      normalizeCapabilities: () => ({ ratios: ['16:9', '21:9'], sizeOptions: ['1K', '2K'], fixedSize: '' }),
+      normalizeCapabilities: (type: string) => type === 'video'
+        ? {
+            ratios: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+            durations: [4, 5, 8, 15],
+            resolutions: ['480p', '720p', '1080p'],
+            supportsAudio: true,
+            supportsLastFrame: false,
+            supportsWatermark: false,
+          }
+        : { ratios: ['16:9', '21:9'], sizeOptions: ['1K', '2K'], fixedSize: '' },
     },
   },
   (value: unknown) => String(value ?? ''),
-  (node: any) => ({ ...node.data.imageSettings, maximumCount: 4 }),
+  (node: any) => node.type === 'video'
+    ? node.data.videoSettings
+    : { ...node.data.imageSettings, maximumCount: 4 },
   () => { specPopoverPositionCalls += 1; },
 );
 const imageSpecNode = {
@@ -166,6 +177,29 @@ assert.ok(specPopoverElement.innerHTML.includes('data-generation-setting-choice=
 assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="3"'), 'count tiles retain selected count');
 assert.ok(!specPopoverElement.innerHTML.includes('<select'), 'specification popover has no native selects');
 assert.equal(specPopoverPositionCalls, 1, 'refreshed specification controls are repositioned');
+
+const videoSpecHtml = specPopoverApi.renderSpecPopover({
+  id: 'video-spec-node',
+  type: 'video',
+  data: {
+    videoSettings: {
+      ratio: '16:9', duration: 8, resolution: '1080p', generateAudio: false,
+      returnLastFrame: false, watermark: false,
+    },
+  },
+});
+assert.ok(videoSpecHtml.includes('data-generation-duration-slider'), 'video duration renders as a range slider');
+assert.ok(videoSpecHtml.includes('type="range"'), 'duration control uses the native range interaction');
+assert.ok(videoSpecHtml.includes('min="0" max="3" step="1" value="2"'),
+  'slider indexes the exact capability-backed duration options');
+assert.ok(videoSpecHtml.includes('data-generation-duration-values="4,5,8,15"'),
+  'slider retains non-contiguous backend duration options');
+assert.ok(videoSpecHtml.includes('data-generation-duration-output>8s</output>'),
+  'slider exposes the current duration beside its label');
+assert.ok(!videoSpecHtml.includes('data-generation-setting-choice="duration"'),
+  'duration no longer expands into a grid of buttons');
+assert.ok(videoSpecHtml.includes('data-generation-setting-choice="ratio"'), 'video ratios remain capability-backed tiles');
+assert.ok(videoSpecHtml.includes('data-generation-setting-choice="resolution"'), 'video resolutions remain capability-backed tiles');
 
 const positionPopoverSource = appSource.slice(
   appSource.indexOf('function positionGenerationPopover'),
@@ -262,7 +296,7 @@ contains(appSource, 'imageDownloadUrl: isVideo ? null', 'library image nodes per
 contains(appSource, "trigger.dataset.generationPopover = 'result-actions'", 'image results expose a More popover trigger');
 contains(appSource, "kind === 'result-actions' ? renderImageResultActionsPopover", 'popover renders image result actions from trigger state');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260713-no-fake-preview', 'canvas app cache key matches the non-generating preview state');
+contains(indexSource, 'app.js?v=20260715-compact-video-settings', 'canvas app cache key matches the compact video settings state');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
 contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
 contains(appSource, '350', 'video estimates debounce for 350ms');

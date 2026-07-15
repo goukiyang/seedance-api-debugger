@@ -310,8 +310,8 @@ assert.ok(
   index.indexOf('video-card-workflow.js') < index.indexOf('app.js'),
   'workflow loads before app',
 );
-assert.match(index, /styles\.css\?v=20260713-video-footer-controls/);
+assert.match(index, /styles\.css\?v=20260715-compact-video-settings/);
 assert.match(index, /video-card-workflow\.js\?v=20260711-video-card-complete/);
-assert.match(index, /app\.js\?v=20260713-no-fake-preview/);
+assert.match(index, /app\.js\?v=20260715-compact-video-settings/);
 
 console.log('ultimate-canvas-video-card-workflow-smoke passed');

@@ -1,3 +1,84 @@
+# Ultimate Canvas 紧凑视频规格弹层实施回执
+
+日期：2026-07-15
+
+目标分支：`teammate/ultimate-canvas-complete`
+
+## 1. 本次目标理解
+
+在现有无线画布的视频节点规格弹层内原位优化交互，不修改节点尺寸、提示词面板或生成流程。比例、分辨率和开关继续读取 SD2 后端能力；时长从 4s 至 15s 的按钮矩阵改为能力驱动的离散滑块，并同步更新节点摘要、保存状态和既有费用预估。
+
+## 2. 实际修改了哪些文件
+
+- `public/tools/ultimate-canvas/app.js`
+- `public/tools/ultimate-canvas/styles.css`
+- `public/tools/ultimate-canvas/index.html`
+- `scripts/ultimate-canvas-compact-generation-ui-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/ultimate-canvas-context-rules-smoke.ts`
+- `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
+- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- `docs/handoffs/ultimate-canvas-implementation-report.md`
+
+## 3. 每个文件改了什么
+
+- `app.js`：新增时长滑块渲染与索引到后端时长选项的映射；`input` 实时更新秒数，`change` 复用现有设置保存、摘要刷新和费用预估链路。非连续能力值（如 4、5、8、15 秒）也按原值提交。
+- `styles.css`：压缩弹层分组、选项间距和卡片高度；六种比例可在常见桌面宽度一行显示；补充滑块、当前值和首尾刻度样式；修正规格弹层内容宽度加内边距后产生的横向溢出。
+- `index.html`：将 `styles.css` 和 `app.js` 静态资源版本更新为 `20260715-compact-video-settings`，避免生产浏览器继续使用旧弹层缓存。
+- `ultimate-canvas-compact-generation-ui-smoke.ts`：覆盖紧凑间距、稳定点击高度、滑块样式和规格弹层无横向溢出。
+- `ultimate-canvas-generation-node-interactions-smoke.ts`：覆盖视频滑块渲染、当前值、非连续时长映射，以及比例/分辨率仍由能力选项驱动。
+- `ultimate-canvas-generation-node-workflow-smoke.ts`：把视频时长契约更新为能力驱动滑块，并同步静态资源版本断言。
+- 其余四个 smoke：同步本轮静态资源 cache key，继续约束上下文、同源后端和视频卡工作流加载顺序。
+- 本回执：记录目标、文件、验证、真实调用、点数、保护边界、剩余事项与风险。
+
+## 4. 跑了哪些验证命令
+
+- 全部 `scripts/ultimate-canvas-*-smoke.ts`，按文件名排序逐个执行。
+- `npx tsc --noEmit --pretty false`
+- `node --check public/tools/ultimate-canvas/app.js`
+- `npm run lint`
+- `npm run build`
+- `git diff --check`
+- 应用内浏览器在本地 `--mock-generation` 预览中创建视频节点，打开规格弹层，将时长从 5s 调到 10s并刷新恢复；检查 `1280x720` 短屏边界、弹层 `scrollWidth/clientWidth`、`scrollHeight/clientHeight` 和控制台错误。
+- 独立只读代码审查，聚焦能力值映射、事件持久化、费用预估接线、节点尺寸和弹层溢出。
+
+## 5. 验证结果是否通过
+
+- 画布 smoke：`16/16` PASS。
+- TypeScript：PASS。
+- `app.js` 语法：PASS。
+- Lint：PASS；只有仓库既有 Hook 依赖和 `<img>` warning。
+- Production build：PASS，Next.js 14.2.5 编译成功。
+- 浏览器交互：PASS。滑块从 5s 调到 10s 后摘要变为 `9:16 · 1080p · 10s`，刷新后仍保留；`1280x720` 下弹层底部位于视口内，`scrollWidth = clientWidth = 436`、`scrollHeight = clientHeight = 466`，没有横纵溢出；控制台 error 为 0。
+- 独立代码审查：Approved；Critical / Important / Minor 均为 0。
+
+## 6. 是否真实调用了文字/图片/视频生成
+
+没有。本轮只在显式本地 Mock 预览中验证设置交互、保存恢复和费用预估显示，没有提交文字、图片或视频生成。
+
+## 7. 是否消耗了点数
+
+没有，点数消耗为 0。
+
+## 8. 是否碰过后台设置、密钥、点数核心逻辑
+
+没有读取或修改 `.env`、后台 API 设置、provider 密钥配置、点数冻结/扣减/退款核心逻辑或数据库 schema；没有绕过普通账号权限。费用仍由既有 SD2 同源接口计算。
+
+## 9. 还没做完的内容
+
+- 尚未将本轮前端提交部署到 `https://sd2.youdoodesign.com`；生产页要看到新弹层需合并/部署目标分支。
+- 尚未在生产普通账号上提交付费生成，本轮不需要为 UI 调整消耗点数。
+
+## 10. 风险和建议下一步
+
+- 后端若返回非连续时长选项，滑块会按选项索引移动并提交对应真实秒数；后续新增模型时应继续通过 capabilities 提供合法列表，不在前端硬编码模型规则。
+- 部署后使用强制刷新确认 `app.js` 与 `styles.css` 的 `20260715-compact-video-settings` 版本已加载，再复核一个横屏和一个竖屏节点。
+- 极窄移动视口本轮由响应式 CSS 和宽度计算约束覆盖，仍建议部署后用真机竖屏确认原生 range 控件没有被系统样式放大或裁切。
+- 若未来开关项继续增加，应优先分组或折叠低频设置，不要重新把时长恢复成高占用按钮矩阵。
+
+---
+
 # Ultimate Canvas SD2 Live Link 实施回执
 
 日期：2026-07-15

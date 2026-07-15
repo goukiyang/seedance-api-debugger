@@ -270,7 +270,7 @@ contains(appSource, 'data-generation-setting-choice=', 'specification settings u
 contains(appSource, "generationChoiceGroup('ratio'", 'ratio setting exists');
 contains(appSource, "generationChoiceGroup('size'", 'image size setting exists');
 contains(appSource, "generationChoiceGroup('count'", 'image count setting exists');
-contains(appSource, "generationChoiceGroup('duration'", 'video duration setting exists');
+contains(appSource, 'generationDurationSlider(capability.durations, settings.duration)', 'video duration slider exists');
 contains(appSource, "generationChoiceGroup('resolution'", 'video resolution setting exists');
 contains(appSource, "generationChoiceGroup('generateAudio'", 'video audio setting exists');
 contains(appSource, "generationChoiceGroup('returnLastFrame'", 'last frame setting exists');
@@ -309,9 +309,9 @@ assert.match(
   /capabilities\.video\?\.message\s*\|\|\s*window\.UltimateCanvasBackendContract\.SAFE_UNAVAILABLE_MESSAGE/,
 );
 
-assert.match(indexSource, /styles\.css\?v=20260713-video-footer-controls/);
+assert.match(indexSource, /styles\.css\?v=20260715-compact-video-settings/);
 assert.match(indexSource, /canvas-engine\.js\?v=20260713-video-footer-controls/);
 assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-liblib-interactions/);
-assert.match(indexSource, /app\.js\?v=20260713-no-fake-preview/);
+assert.match(indexSource, /app\.js\?v=20260715-compact-video-settings/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');
