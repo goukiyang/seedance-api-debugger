@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import { readJsonResponse } from '@/lib/http/json-response';
 
 interface UploadedImageItem {
   id: string;
@@ -25,8 +26,24 @@ interface Props {
   onConfirm: (assetIds: string[]) => Promise<void>;
 }
 
+type HistoryListResponse = {
+  assets?: UploadedImageItem[];
+  pagination?: {
+    page?: number;
+    has_more?: boolean;
+  };
+  error?: string;
+  message?: string;
+};
+
+type ApiMessageResponse = {
+  error?: string;
+  message?: string;
+};
+
 const PAGE_SIZE = 40;
 const MAX_REFS = 9;
+const HISTORY_INVALID_JSON_MESSAGE = '历史图片服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '';
@@ -71,7 +88,9 @@ export function UploadedImagePicker({
         limit: String(PAGE_SIZE),
       });
       const res = await fetch(`/api/assets/history?${params.toString()}`, { cache: 'no-store' });
-      const data = await res.json();
+      const data = await readJsonResponse<HistoryListResponse>(res, {
+        invalidJsonMessage: HISTORY_INVALID_JSON_MESSAGE,
+      });
       if (!res.ok) throw new Error(data.error || data.message || '历史图片读取失败');
       const nextItems: UploadedImageItem[] = data.assets || [];
       setItems((current) => {
@@ -167,7 +186,9 @@ export function UploadedImagePicker({
     setError(null);
     try {
       const res = await fetch(`/api/assets/history/${asset.id}`, { method: 'DELETE' });
-      const data = await res.json().catch(() => ({}));
+      const data = await readJsonResponse<ApiMessageResponse>(res, {
+        invalidJsonMessage: '删除历史图片时服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
+      });
       if (!res.ok) throw new Error(data.error || data.message || '删除历史图片失败');
       setItems((current) => current.filter((item) => item.id !== asset.id));
       setSelectedAssetIds((current) => current.filter((id) => id !== asset.id));

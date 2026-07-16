@@ -7,9 +7,43 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { readJsonResponse } from '@/lib/http/json-response';
 import type { Workspace, WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 
 const TAB_ID_KEY = 'workspace_tab_id';
+const UPLOAD_INVALID_JSON_MESSAGE = '图片上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
+const WORKSPACE_INVALID_JSON_MESSAGE = '工作台服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
+const REFERENCE_ALBUM_INVALID_JSON_MESSAGE = '图集服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
+
+type ApiMessageResponse = {
+  error?: string;
+  message?: string;
+};
+
+type WorkspaceResponse = ApiMessageResponse & {
+  workspace?: Workspace;
+};
+
+type UploadAssetResponse = ApiMessageResponse & {
+  asset?: {
+    id?: string;
+  };
+};
+
+type ReferenceAlbumDetailResponse = ApiMessageResponse & {
+  images?: Array<{ id?: string }>;
+};
+
+type ReferenceAlbumCreateResponse = ApiMessageResponse & {
+  album?: {
+    id?: string;
+  };
+};
+
+type PromptValidationResponse = {
+  valid?: boolean;
+  missing?: string[];
+};
 
 function getOrCreateTabId(): string {
   if (typeof window === 'undefined') return 'default';
@@ -60,12 +94,14 @@ export function useWorkspace(): UseWorkspaceResult {
       const res = await fetch('/api/workspace', {
         headers: { 'x-tab-id': tabIdRef.current },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load workspace');
-      setWorkspace(data.workspace);
+      const data = await readJsonResponse<WorkspaceResponse>(res, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!res.ok) throw new Error(data.error || data.message || '工作台读取失败');
+      setWorkspace(data.workspace || null);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : '工作台读取失败');
     } finally {
       setLoading(false);
     }
@@ -83,10 +119,12 @@ export function useWorkspace(): UseWorkspaceResult {
       method: 'POST',
       body: formData,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    const data = await readJsonResponse<UploadAssetResponse>(res, {
+      invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
+    });
+    if (!res.ok) throw new Error(data.error || data.message || '图片上传失败，请重新选择后重试');
     const assetId = data.asset?.id as string | undefined;
-    if (!assetId) throw new Error('Upload response missing asset id');
+    if (!assetId) throw new Error('图片上传成功，但没有返回素材 ID');
     return assetId;
   }, []);
 
@@ -108,8 +146,10 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ assetId }),
       });
-      const addData = await addRes.json();
-      if (!addRes.ok) throw new Error(addData.error || addData.message || 'Add asset failed');
+      const addData = await readJsonResponse<ApiMessageResponse>(addRes, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!addRes.ok) throw new Error(addData.error || addData.message || '图片加入工作台失败');
 
       await fetchWorkspace();
       // 成功后移除临时状态
@@ -119,7 +159,7 @@ export function useWorkspace(): UseWorkspaceResult {
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setError(err instanceof Error ? err.message : '图片上传失败');
       // 标记为失败
       setUploadStatuses((prev) => ({ ...prev, [tempId]: 'failed' }));
       setLoading(false);
@@ -143,15 +183,19 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ assetId: nextAssetId, role: targetAsset?.role || 'reference_image' }),
       });
-      const addData = await addRes.json();
-      if (!addRes.ok) throw new Error(addData.error || addData.message || 'Replace failed');
+      const addData = await readJsonResponse<ApiMessageResponse>(addRes, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!addRes.ok) throw new Error(addData.error || addData.message || '替换图片失败');
 
       const removeRes = await fetch(`/api/workspace/assets/${assetId}`, {
         method: 'DELETE',
         headers: { 'x-tab-id': tabIdRef.current },
       });
-      const removeData = await removeRes.json();
-      if (!removeRes.ok) throw new Error(removeData.error || removeData.message || 'Replace failed');
+      const removeData = await readJsonResponse<ApiMessageResponse>(removeRes, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!removeRes.ok) throw new Error(removeData.error || removeData.message || '替换图片失败');
 
       if (targetAsset) {
         const nextOrder = currentAssets
@@ -167,8 +211,10 @@ export function useWorkspace(): UseWorkspaceResult {
           },
           body: JSON.stringify({ order: nextOrder }),
         });
-        const reorderData = await reorderRes.json();
-        if (!reorderRes.ok) throw new Error(reorderData.error || reorderData.message || 'Replace failed');
+        const reorderData = await readJsonResponse<ApiMessageResponse>(reorderRes, {
+          invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+        });
+        if (!reorderRes.ok) throw new Error(reorderData.error || reorderData.message || '替换图片失败');
       }
 
       await fetchWorkspace();
@@ -178,7 +224,7 @@ export function useWorkspace(): UseWorkspaceResult {
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Replace failed');
+      setError(err instanceof Error ? err.message : '替换图片失败');
       setUploadStatuses((prev) => ({ ...prev, [assetId]: 'failed' }));
     }
   }, [fetchWorkspace, uploadAssetToHistory, workspace?.assets]);
@@ -196,11 +242,13 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ assetIds: cleanAssetIds }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || 'Add assets failed');
+      const data = await readJsonResponse<ApiMessageResponse>(res, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!res.ok) throw new Error(data.error || data.message || '加入参考图失败');
       await fetchWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Add assets failed');
+      setError(err instanceof Error ? err.message : '加入参考图失败');
       setLoading(false);
       throw err;
     }
@@ -218,11 +266,13 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ referenceImageIds }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || 'Add reference images failed');
+      const data = await readJsonResponse<ApiMessageResponse>(res, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!res.ok) throw new Error(data.error || data.message || '加入参考图失败');
       await fetchWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Add reference images failed');
+      setError(err instanceof Error ? err.message : '加入参考图失败');
       setLoading(false);
       throw err;
     }
@@ -232,9 +282,14 @@ export function useWorkspace(): UseWorkspaceResult {
     setLoading(true);
     try {
       const detailRes = await fetch(`/api/reference-albums/${albumId}`);
-      const detail = await detailRes.json();
-      if (!detailRes.ok) throw new Error(detail.error || detail.message || 'Load reference album failed');
-      const referenceImageIds = (detail.images || []).map((image: { id: string }) => image.id).slice(0, 9);
+      const detail = await readJsonResponse<ReferenceAlbumDetailResponse>(detailRes, {
+        invalidJsonMessage: REFERENCE_ALBUM_INVALID_JSON_MESSAGE,
+      });
+      if (!detailRes.ok) throw new Error(detail.error || detail.message || '读取图集失败');
+      const referenceImageIds = (detail.images || [])
+        .map((image) => image.id)
+        .filter((id): id is string => Boolean(id))
+        .slice(0, 9);
       const res = await fetch('/api/workspace/assets', {
         method: 'POST',
         headers: {
@@ -243,11 +298,13 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ referenceImageIds, replace: true }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || 'Load reference album failed');
+      const data = await readJsonResponse<ApiMessageResponse>(res, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!res.ok) throw new Error(data.error || data.message || '读取图集失败');
       await fetchWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Load reference album failed');
+      setError(err instanceof Error ? err.message : '读取图集失败');
       setLoading(false);
       throw err;
     }
@@ -259,9 +316,13 @@ export function useWorkspace(): UseWorkspaceResult {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, album_type: 'personal' }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || data.message || 'Create reference album failed');
-    return data.album.id as string;
+    const data = await readJsonResponse<ReferenceAlbumCreateResponse>(res, {
+      invalidJsonMessage: REFERENCE_ALBUM_INVALID_JSON_MESSAGE,
+    });
+    if (!res.ok) throw new Error(data.error || data.message || '创建图集失败');
+    const albumId = data.album?.id;
+    if (!albumId) throw new Error('图集创建成功，但没有返回图集 ID');
+    return albumId;
   }, []);
 
   const clearAssets = useCallback(async () => {
@@ -275,11 +336,13 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ replace: true, referenceImageIds: [] }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || 'Clear workspace failed');
+      const data = await readJsonResponse<ApiMessageResponse>(res, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      if (!res.ok) throw new Error(data.error || data.message || '清空参考图失败');
       await fetchWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Clear workspace failed');
+      setError(err instanceof Error ? err.message : '清空参考图失败');
       setLoading(false);
       throw err;
     }
@@ -299,8 +362,10 @@ export function useWorkspace(): UseWorkspaceResult {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ asset_ids: assetIds, reference_image_ids: referenceImageIds }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || 'Save current references failed');
+      const data = await readJsonResponse<ReferenceAlbumDetailResponse>(res, {
+        invalidJsonMessage: REFERENCE_ALBUM_INVALID_JSON_MESSAGE,
+      });
+      if (!res.ok) throw new Error(data.error || data.message || '保存图集失败');
 
       const savedReferenceImageIds = Array.isArray(data.images)
         ? data.images.map((image: { id?: string }) => image.id).filter((id: string | undefined): id is string => Boolean(id))
@@ -315,9 +380,11 @@ export function useWorkspace(): UseWorkspaceResult {
           },
           body: JSON.stringify({ referenceImageIds: savedReferenceImageIds, replace: true }),
         });
-        const workspaceData = await workspaceRes.json();
+        const workspaceData = await readJsonResponse<ApiMessageResponse>(workspaceRes, {
+          invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+        });
         if (!workspaceRes.ok) {
-          throw new Error(workspaceData.error || workspaceData.message || 'Load saved reference album failed');
+          throw new Error(workspaceData.error || workspaceData.message || '载入已保存图集失败');
         }
         await fetchWorkspace();
       }
@@ -386,8 +453,10 @@ export function useWorkspace(): UseWorkspaceResult {
         },
         body: JSON.stringify({ prompt }),
       });
-      const data = await res.json();
-      return { valid: data.valid, missing: data.missing || [] };
+      const data = await readJsonResponse<PromptValidationResponse>(res, {
+        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+      });
+      return { valid: Boolean(data.valid), missing: data.missing || [] };
     } catch {
       return { valid: false, missing: [] };
     }

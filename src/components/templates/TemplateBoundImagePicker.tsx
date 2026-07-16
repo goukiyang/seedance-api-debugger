@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { readJsonResponse } from '@/lib/http/json-response';
 import type { TemplateContextCardBoundImage } from '@/lib/templates/workbench';
 
 type AlbumScope = 'mine' | 'project' | 'shared' | 'public';
@@ -46,12 +47,43 @@ type Props = {
   onSelect: (image: TemplateContextCardBoundImage) => void;
 };
 
+type ApiMessageResponse = {
+  error?: string;
+  message?: string;
+};
+
+type AlbumListResponse = ApiMessageResponse & {
+  albums?: AlbumItem[];
+};
+
+type AlbumDetailResponse = ApiMessageResponse & {
+  images?: ReferenceImageItem[];
+};
+
+type HistoryListResponse = ApiMessageResponse & {
+  assets?: UploadedImageItem[];
+};
+
+type UploadAssetResponse = ApiMessageResponse & {
+  asset?: {
+    id?: string;
+    originalUrl?: string | null;
+    thumbnailUrl?: string | null;
+    fileName?: string;
+    width?: number | null;
+    height?: number | null;
+  };
+};
+
 const SCOPES: Array<{ value: AlbumScope; label: string }> = [
   { value: 'mine', label: '我的图集' },
   { value: 'project', label: '项目图集' },
   { value: 'shared', label: '共享给我' },
   { value: 'public', label: '公共图集' },
 ];
+
+const PICKER_INVALID_JSON_MESSAGE = '图片选择服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
+const UPLOAD_INVALID_JSON_MESSAGE = '图片上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -78,18 +110,30 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
 
   useEffect(() => {
     if (!open || tab !== 'album') return;
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/reference-albums?scope=${scope}`, { cache: 'no-store' })
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.error || data.message || '图集读取失败');
+    const loadAlbums = async () => {
+      try {
+        const res = await fetch(`/api/reference-albums?scope=${scope}`, { cache: 'no-store' });
+        const data = await readJsonResponse<AlbumListResponse>(res, {
+          invalidJsonMessage: PICKER_INVALID_JSON_MESSAGE,
+        });
+        if (!res.ok) throw new Error(data.error || data.message || '图集读取失败');
         const list: AlbumItem[] = (data.albums || []).filter((album: AlbumItem) => album.image_count > 0);
+        if (cancelled) return;
         setAlbums(list);
         setSelectedAlbumId((current) => (list.some((album) => album.id === current) ? current : list[0]?.id || ''));
-      })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : '图集读取失败'))
-      .finally(() => setLoading(false));
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : '图集读取失败');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void loadAlbums();
+    return () => {
+      cancelled = true;
+    };
   }, [open, scope, tab]);
 
   useEffect(() => {
@@ -97,16 +141,28 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
       setReferenceImages([]);
       return;
     }
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/reference-albums/${selectedAlbumId}`, { cache: 'no-store' })
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.error || data.message || '图集详情读取失败');
+    const loadAlbumImages = async () => {
+      try {
+        const res = await fetch(`/api/reference-albums/${selectedAlbumId}`, { cache: 'no-store' });
+        const data = await readJsonResponse<AlbumDetailResponse>(res, {
+          invalidJsonMessage: PICKER_INVALID_JSON_MESSAGE,
+        });
+        if (!res.ok) throw new Error(data.error || data.message || '图集详情读取失败');
+        if (cancelled) return;
         setReferenceImages(data.images || []);
-      })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : '图集详情读取失败'))
-      .finally(() => setLoading(false));
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : '图集详情读取失败');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void loadAlbumImages();
+    return () => {
+      cancelled = true;
+    };
   }, [open, selectedAlbumId, tab]);
 
   const loadHistoryImages = useCallback(async () => {
@@ -114,7 +170,9 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
     setError(null);
     try {
       const res = await fetch('/api/assets/history?page=1&limit=60', { cache: 'no-store' });
-      const data = await res.json();
+      const data = await readJsonResponse<HistoryListResponse>(res, {
+        invalidJsonMessage: PICKER_INVALID_JSON_MESSAGE,
+      });
       if (!res.ok) throw new Error(data.error || data.message || '历史上传图读取失败');
       setHistoryImages(data.assets || []);
     } catch (loadError) {
@@ -172,16 +230,11 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
       const formData = new FormData();
       formData.append('file', file);
       const res = await fetch('/api/assets/upload', { method: 'POST', body: formData });
-      const data = await res.json();
+      const data = await readJsonResponse<UploadAssetResponse>(res, {
+        invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
+      });
       if (!res.ok) throw new Error(data.error || data.message || '图片上传失败');
-      const asset = data.asset as {
-        id?: string;
-        originalUrl?: string | null;
-        thumbnailUrl?: string | null;
-        fileName?: string;
-        width?: number | null;
-        height?: number | null;
-      } | undefined;
+      const asset = data.asset;
       if (!asset?.id) throw new Error('图片上传成功，但没有返回素材 ID');
       const assetId = asset.id;
       const nextImage: TemplateContextCardBoundImage = {
