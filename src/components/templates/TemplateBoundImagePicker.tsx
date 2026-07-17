@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { buildRawFileUploadRequest } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { TemplateContextCardBoundImage } from '@/lib/templates/workbench';
 
@@ -227,9 +228,9 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
     setUploading(true);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await fetch('/api/assets/upload', { method: 'POST', body: formData });
+      const res = await fetch('/api/assets/upload', {
+        ...buildRawFileUploadRequest(file),
+      });
       const data = await readJsonResponse<UploadAssetResponse>(res, {
         invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
       });

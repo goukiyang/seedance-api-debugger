@@ -165,18 +165,22 @@ export async function ensureSiteAssetPublicUrl(assetId: string): Promise<SiteAss
   };
 }
 
-export function validateSiteUploadInput(file: File) {
-  if (!SITE_UPLOAD_ALLOWED_TYPES.includes(file.type as (typeof SITE_UPLOAD_ALLOWED_TYPES)[number])) {
-    return `不支持的文件类型：${file.type || '未知'}。目前支持图片、MP4/MOV/WebM 视频、MP3/WAV/OGG 音频。`;
+export function validateSiteUploadMetadata(input: { mimeType: string; fileSize: number }) {
+  if (!SITE_UPLOAD_ALLOWED_TYPES.includes(input.mimeType as (typeof SITE_UPLOAD_ALLOWED_TYPES)[number])) {
+    return `不支持的文件类型：${input.mimeType || '未知'}。目前支持图片、MP4/MOV/WebM 视频、MP3/WAV/OGG 音频。`;
   }
-  const kind = getUploadKind(file.type);
-  if (!kind) return `不支持的文件类型：${file.type || '未知'}`;
+  const kind = getUploadKind(input.mimeType);
+  if (!kind) return `不支持的文件类型：${input.mimeType || '未知'}`;
 
   const maxSize = SITE_UPLOAD_MAX_SIZE_BY_KIND[kind];
-  if (file.size > maxSize) {
-    return `${uploadKindLabel(kind)}过大：${(file.size / 1024 / 1024).toFixed(1)}MB，最大 ${formatMb(maxSize)}。`;
+  if (input.fileSize > maxSize) {
+    return `${uploadKindLabel(kind)}过大：${(input.fileSize / 1024 / 1024).toFixed(1)}MB，最大 ${formatMb(maxSize)}。`;
   }
   return null;
+}
+
+export function validateSiteUploadInput(file: File) {
+  return validateSiteUploadMetadata({ mimeType: file.type, fileSize: file.size });
 }
 
 export async function validateSiteUploadBuffer(buffer: Buffer, fileName: string, mimeType: string) {

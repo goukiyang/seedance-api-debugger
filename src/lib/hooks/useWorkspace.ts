@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { buildRawFileUploadRequest } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { Workspace, WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 
@@ -112,12 +113,8 @@ export function useWorkspace(): UseWorkspaceResult {
   }, [fetchWorkspace]);
 
   const uploadAssetToHistory = useCallback(async (file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
     const res = await fetch('/api/assets/upload', {
-      method: 'POST',
-      body: formData,
+      ...buildRawFileUploadRequest(file),
     });
     const data = await readJsonResponse<UploadAssetResponse>(res, {
       invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
