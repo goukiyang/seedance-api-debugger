@@ -3,8 +3,8 @@ import {
   authenticateCodexVideoApi,
   CodexApiAuthError,
 } from '@/lib/integrations/codex';
-import { getOrCreateWorkspace } from '@/lib/assets/workspace';
-import { uploadSiteAsset, validateSiteUploadInput } from '@/lib/assets/site-upload';
+import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
+import { uploadSiteAsset, validateSiteUploadBuffer, validateSiteUploadInput } from '@/lib/assets/site-upload';
 import {
   attachAssetToCodexReferenceImage,
   ReferenceImportError,
@@ -13,6 +13,12 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+function roleForMimeType(mimeType: string) {
+  if (mimeType.startsWith('video/')) return 'reference_video';
+  if (mimeType.startsWith('audio/')) return 'reference_audio';
+  return 'reference_image';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,16 +35,24 @@ export async function POST(request: NextRequest) {
     const tabId = request.headers.get('x-tab-id') || 'codex';
     const { id: workspaceId } = await getOrCreateWorkspace(tabId, context.user.id);
     const buffer = Buffer.from(await file.arrayBuffer());
+    const mediaValidationError = await validateSiteUploadBuffer(buffer, file.name, file.type);
+    if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
+
     const uploadResult = await uploadSiteAsset(buffer, file.name, file.type, file.size, context.user.id);
-    const reference = await attachAssetToCodexReferenceImage(
-      {
-        user: context.user,
-        workspaceId,
-        sourceRequestId: context.source.source_request_id,
-        sourceLabel: context.source.source_label,
-      },
-      uploadResult.assetId,
-    );
+    const role = roleForMimeType(uploadResult.mimeType);
+    const reference = uploadResult.mimeType.startsWith('image/')
+      ? await attachAssetToCodexReferenceImage(
+          {
+            user: context.user,
+            workspaceId,
+            sourceRequestId: context.source.source_request_id,
+            sourceLabel: context.source.source_label,
+          },
+          uploadResult.assetId,
+        )
+      : null;
+    const workspaceAssetId = reference?.workspaceAssetId
+      || await addAssetToWorkspace(workspaceId, uploadResult.assetId, role, context.user.id);
 
     return NextResponse.json({
       success: true,
@@ -57,9 +71,10 @@ export async function POST(request: NextRequest) {
         storageProvider: uploadResult.storageProvider,
         warning: uploadResult.publicUploadWarning,
       },
-      referenceImageId: reference.referenceImageId,
-      reference_image_id: reference.referenceImageId,
-      workspaceAssetId: reference.workspaceAssetId,
+      referenceImageId: reference?.referenceImageId || null,
+      reference_image_id: reference?.referenceImageId || null,
+      workspaceAssetId,
+      role,
       source_type: context.source.source_type,
       source_label: context.source.source_label,
       source_request_id: context.source.source_request_id,

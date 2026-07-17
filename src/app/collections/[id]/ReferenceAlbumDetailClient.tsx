@@ -35,7 +35,24 @@ interface ReferenceImageItem {
   sort_order: number;
   thumbnail_url: string;
   image_url: string;
-  asset?: { file_name: string; width: number | null; height: number | null } | null;
+  asset?: {
+    file_name: string;
+    type?: string | null;
+    mime_type?: string | null;
+    file_size?: number | null;
+    width: number | null;
+    height: number | null;
+  } | null;
+}
+
+function mediaTypeLabel(type: string | null | undefined) {
+  if (type === 'video') return '视频';
+  if (type === 'audio') return '音频';
+  return '图片';
+}
+
+function isImageItem(image: ReferenceImageItem) {
+  return !image.asset?.type || image.asset.type === 'image';
 }
 
 export default function ReferenceAlbumDetailClient({ albumId }: { albumId: string }) {
@@ -135,14 +152,14 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: image.asset?.file_name ? `单图共享 - ${image.asset.file_name}` : `单图共享 - 图 ${image.sort_order + 1}`,
+          name: image.asset?.file_name ? `单素材共享 - ${image.asset.file_name}` : `单素材共享 - ${mediaTypeLabel(image.asset?.type)} ${image.sort_order + 1}`,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || '单图共享创建失败');
+      if (!res.ok) throw new Error(data.error || data.message || '单素材共享创建失败');
       setShareDialogAlbum(data.album);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '单图共享创建失败');
+      setError(err instanceof Error ? err.message : '单素材共享创建失败');
     } finally {
       setSharingImageId(null);
     }
@@ -198,7 +215,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         backLabel="返回参考图集"
         eyebrow="图集详情"
         title={album?.name || '参考图集'}
-        description={album?.description || '图集图片会继承图集权限；取消共享后，被授权用户不能继续访问或使用。'}
+        description={album?.description || '图集素材会继承图集权限；取消共享后，被授权用户不能继续访问或使用。'}
       />
 
       {error && <div className="album-error">{error}</div>}
@@ -206,7 +223,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
       {album && (
         <>
           <div className="album-detail-summary">
-            <span>{album.image_count} 张图片</span>
+            <span>{album.image_count} 个素材</span>
             <span className="album-detail-owner">
               <span>创建者：</span>
               <UserIdentityBadge user={album.owner} size="sm" avatarOnly />
@@ -220,15 +237,15 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
           <div className="album-detail-actions">
             {album.permissions.edit && (
               <>
-                <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUpload} />
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading}>上传图片到图集</button>
+                <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" multiple style={{ display: 'none' }} onChange={handleUpload} />
+                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading}>上传素材到图集</button>
                 <button type="button" onClick={handleRenameAlbum} disabled={loading}>重命名图集</button>
                 <button type="button" className="danger" onClick={handleDeleteAlbum} disabled={loading}>删除图集</button>
               </>
             )}
             {album.permissions.use && (
               <button type="button" onClick={handleUseForGeneration} disabled={selectedImageIds.length === 0 || loading}>
-                作为参考图生成
+                作为参考素材生成
               </button>
             )}
             {album.can_share && !['public', 'system'].includes(album.album_type) && (
@@ -240,10 +257,12 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
 
           <div className="album-image-grid">
             {images.length === 0 ? (
-              <div className="album-empty">暂无图片</div>
+              <div className="album-empty">暂无素材</div>
             ) : (
               images.map((image) => {
                 const selected = selectedImageIds.includes(image.id);
+                const typeLabel = mediaTypeLabel(image.asset?.type);
+                const canPreviewOriginalMedia = album.permissions.use || album.permissions.download;
                 return (
                   <div key={image.id} className={`album-image-card ${selected ? 'selected' : ''}`}>
                     <button
@@ -253,10 +272,16 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
                         prev.includes(image.id) ? prev.filter((id) => id !== image.id) : [...prev, image.id].slice(0, 9)
                       ))}
                     >
-                      <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
+                      {isImageItem(image) ? (
+                        <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
+                      ) : image.asset?.type === 'video' && canPreviewOriginalMedia ? (
+                        <video src={image.thumbnail_url || image.image_url} muted playsInline preload="metadata" />
+                      ) : (
+                        <div className="album-image-media-placeholder">{typeLabel}</div>
+                      )}
                     </button>
                     <div className="album-image-meta">
-                      <span>图 {image.sort_order + 1}</span>
+                      <span>{typeLabel} {image.sort_order + 1}</span>
                       {album.permissions.copy && (
                         <button
                           type="button"

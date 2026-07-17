@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
-import { uploadSiteAsset, validateSiteUploadInput } from '@/lib/assets/site-upload';
+import { uploadSiteAsset, validateSiteUploadBuffer, validateSiteUploadInput } from '@/lib/assets/site-upload';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
 import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/assets/reference-import';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
@@ -69,6 +69,9 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const mediaValidationError = await validateSiteUploadBuffer(buffer, file.name, file.type);
+    if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
+
     const uploadResult = await uploadSiteAsset(buffer, file.name, file.type, file.size, user.id);
     const workspaceId = (await getOrCreateWorkspace(`ultimate-canvas:${project.id}:${videoCard.id}`, user.id)).id;
     const role = roleForMimeType(uploadResult.mimeType, requestedRole);

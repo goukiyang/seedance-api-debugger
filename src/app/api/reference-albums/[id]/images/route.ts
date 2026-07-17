@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
-import { uploadSiteAsset, validateSiteUploadInput } from '@/lib/assets/site-upload';
+import { ensureSiteAssetPublicUrl, uploadSiteAsset, validateSiteUploadBuffer, validateSiteUploadInput } from '@/lib/assets/site-upload';
 import {
   assertCanEditAlbum,
   canCopyAlbumImage,
@@ -68,7 +68,7 @@ export async function POST(
     const album = await assertCanEditAlbum(user, params.id);
     const contentType = request.headers.get('content-type') || '';
     if (contentType.includes('multipart/form-data')) {
-      return uploadFilesToAlbum(request, album, user);
+      return await uploadFilesToAlbum(request, album, user);
     }
 
     const body = await request.json();
@@ -93,6 +93,12 @@ export async function POST(
       if (!sourceImage.asset_id) {
         return NextResponse.json({ error: `参考图缺少资产记录: ${sourceReferenceImageId}` }, { status: 400 });
       }
+      const sourceAsset = sourceImage.asset
+        ? await ensureReferenceAssetReady(sourceImage.asset)
+        : null;
+      if (!sourceAsset) {
+        return NextResponse.json({ error: `参考素材缺少资产记录: ${sourceReferenceImageId}` }, { status: 400 });
+      }
 
       sortOrder += 1;
       const image = await prisma.referenceImage.create({
@@ -101,9 +107,9 @@ export async function POST(
           workspace_id: album.workspace_id,
           project_id: album.project_id,
           owner_user_id: user.id,
-          asset_id: sourceImage.asset_id,
-          url: sourceImage.url,
-          thumbnail_url: sourceImage.thumbnail_url,
+          asset_id: sourceAsset.id,
+          url: sourceAsset.original_url,
+          thumbnail_url: sourceAsset.thumbnail_url,
           source_type: 'copied',
           source_content_id: sourceImage.source_content_id,
           source_image_id: sourceImage.id,
@@ -120,9 +126,12 @@ export async function POST(
         return NextResponse.json({ error: '无权保存此素材到图集' }, { status: 403 });
       }
 
-      const asset = await prisma.asset.findUnique({ where: { id: assetId } });
-      if (!asset || asset.type !== 'image') {
-        return NextResponse.json({ error: `素材不存在或不是图片: ${assetId}` }, { status: 400 });
+      const assetRecord = await prisma.asset.findUnique({ where: { id: assetId } });
+      const asset = assetRecord && isSupportedReferenceAssetType(assetRecord.type)
+        ? await ensureReferenceAssetReady(assetRecord)
+        : null;
+      if (!asset || !isSupportedReferenceAssetType(asset.type)) {
+        return NextResponse.json({ error: `素材不存在或类型不支持: ${assetId}` }, { status: 400 });
       }
 
       sortOrder += 1;
@@ -158,7 +167,7 @@ export async function POST(
     await prisma.operationLog.create({
       data: {
         operator_id: user.id,
-        action: 'reference_album_add_images',
+        action: 'reference_album_add_assets',
         target_type: 'ReferenceAlbum',
         target_id: album.id,
         detail: JSON.stringify({ image_ids: created.map((image) => image.id), asset_ids: assetIds }),
@@ -174,6 +183,9 @@ export async function POST(
       })),
     }, { status: 201 });
   } catch (error) {
+    if (error instanceof ReferenceAssetPublicUrlError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
@@ -202,6 +214,34 @@ type AlbumImageAsset = {
   thumbnail_url: string | null;
   file_name: string;
 };
+
+class ReferenceAssetPublicUrlError extends Error {
+  readonly status = 400;
+}
+
+function isSupportedReferenceAssetType(type: string | null | undefined) {
+  return type === 'image' || type === 'video' || type === 'audio';
+}
+
+async function ensureReferenceAssetReady(asset: AlbumImageAsset): Promise<AlbumImageAsset> {
+  if (asset.type !== 'video' && asset.type !== 'audio') return asset;
+  let result: Awaited<ReturnType<typeof ensureSiteAssetPublicUrl>>;
+  try {
+    result = await ensureSiteAssetPublicUrl(asset.id);
+  } catch (error) {
+    throw new ReferenceAssetPublicUrlError(error instanceof Error ? error.message : '参考视频/音频公网 URL 准备失败');
+  }
+  if (!result.isPubliclyReachable) {
+    throw new ReferenceAssetPublicUrlError('参考视频/音频必须是公网可访问 URL，请重新上传素材或配置 R2/TOS 存储。');
+  }
+  return {
+    id: result.asset.id,
+    type: result.asset.type,
+    original_url: result.asset.original_url,
+    thumbnail_url: result.asset.thumbnail_url,
+    file_name: result.asset.file_name,
+  };
+}
 
 function computeUploadHash(buffer: Buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
@@ -263,7 +303,7 @@ async function uploadFilesToAlbum(
     ));
 
   if (files.length === 0) {
-    return NextResponse.json({ error: '请选择要上传的图片' }, { status: 400 });
+    return NextResponse.json({ error: '请选择要上传的参考素材' }, { status: 400 });
   }
 
   const currentMax = await prisma.referenceImage.aggregate({
@@ -275,13 +315,13 @@ async function uploadFilesToAlbum(
   const reusedAssetIds: string[] = [];
 
   for (const file of files) {
-    if (!file.type.startsWith('image/')) {
-      return NextResponse.json({ error: `图集只能上传图片文件: ${file.name}` }, { status: 400 });
-    }
     const validationError = validateSiteUploadInput(file);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const mediaValidationError = await validateSiteUploadBuffer(buffer, file.name, file.type);
+    if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
+
     const hash = computeUploadHash(buffer);
     const uploadResult = await uploadSiteAsset(buffer, file.name, file.type, file.size, user.id);
     const asset = await prisma.asset.findUnique({
@@ -294,8 +334,8 @@ async function uploadFilesToAlbum(
         file_name: true,
       },
     });
-    if (!asset || asset.type !== 'image') {
-      return NextResponse.json({ error: `图片上传后未生成有效素材: ${file.name}` }, { status: 500 });
+    if (!asset || !isSupportedReferenceAssetType(asset.type)) {
+      return NextResponse.json({ error: `上传后未生成有效参考素材: ${file.name}` }, { status: 500 });
     }
 
     sortOrder += 1;
@@ -328,7 +368,7 @@ async function uploadFilesToAlbum(
   await prisma.operationLog.create({
     data: {
       operator_id: user.id,
-      action: 'reference_album_upload_images',
+      action: 'reference_album_upload_assets',
       target_type: 'ReferenceAlbum',
       target_id: album.id,
       detail: JSON.stringify({

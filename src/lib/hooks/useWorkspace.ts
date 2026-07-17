@@ -11,7 +11,7 @@ import { readJsonResponse } from '@/lib/http/json-response';
 import type { Workspace, WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 
 const TAB_ID_KEY = 'workspace_tab_id';
-const UPLOAD_INVALID_JSON_MESSAGE = '图片上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
+const UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const WORKSPACE_INVALID_JSON_MESSAGE = '工作台服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const REFERENCE_ALBUM_INVALID_JSON_MESSAGE = '图集服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 
@@ -122,9 +122,9 @@ export function useWorkspace(): UseWorkspaceResult {
     const data = await readJsonResponse<UploadAssetResponse>(res, {
       invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
     });
-    if (!res.ok) throw new Error(data.error || data.message || '图片上传失败，请重新选择后重试');
+    if (!res.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
     const assetId = data.asset?.id as string | undefined;
-    if (!assetId) throw new Error('图片上传成功，但没有返回素材 ID');
+    if (!assetId) throw new Error('素材上传成功，但没有返回素材 ID');
     return assetId;
   }, []);
 
@@ -149,7 +149,7 @@ export function useWorkspace(): UseWorkspaceResult {
       const addData = await readJsonResponse<ApiMessageResponse>(addRes, {
         invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
       });
-      if (!addRes.ok) throw new Error(addData.error || addData.message || '图片加入工作台失败');
+      if (!addRes.ok) throw new Error(addData.error || addData.message || '素材加入工作台失败');
 
       await fetchWorkspace();
       // 成功后移除临时状态
@@ -159,7 +159,7 @@ export function useWorkspace(): UseWorkspaceResult {
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '图片上传失败');
+      setError(err instanceof Error ? err.message : '素材上传失败');
       // 标记为失败
       setUploadStatuses((prev) => ({ ...prev, [tempId]: 'failed' }));
       setLoading(false);
@@ -186,7 +186,7 @@ export function useWorkspace(): UseWorkspaceResult {
       const addData = await readJsonResponse<ApiMessageResponse>(addRes, {
         invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
       });
-      if (!addRes.ok) throw new Error(addData.error || addData.message || '替换图片失败');
+      if (!addRes.ok) throw new Error(addData.error || addData.message || '替换素材失败');
 
       const removeRes = await fetch(`/api/workspace/assets/${assetId}`, {
         method: 'DELETE',
@@ -195,7 +195,7 @@ export function useWorkspace(): UseWorkspaceResult {
       const removeData = await readJsonResponse<ApiMessageResponse>(removeRes, {
         invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
       });
-      if (!removeRes.ok) throw new Error(removeData.error || removeData.message || '替换图片失败');
+      if (!removeRes.ok) throw new Error(removeData.error || removeData.message || '替换素材失败');
 
       if (targetAsset) {
         const nextOrder = currentAssets
@@ -214,7 +214,7 @@ export function useWorkspace(): UseWorkspaceResult {
         const reorderData = await readJsonResponse<ApiMessageResponse>(reorderRes, {
           invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
         });
-        if (!reorderRes.ok) throw new Error(reorderData.error || reorderData.message || '替换图片失败');
+        if (!reorderRes.ok) throw new Error(reorderData.error || reorderData.message || '替换素材失败');
       }
 
       await fetchWorkspace();
@@ -224,7 +224,7 @@ export function useWorkspace(): UseWorkspaceResult {
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '替换图片失败');
+      setError(err instanceof Error ? err.message : '替换素材失败');
       setUploadStatuses((prev) => ({ ...prev, [assetId]: 'failed' }));
     }
   }, [fetchWorkspace, uploadAssetToHistory, workspace?.assets]);
@@ -245,10 +245,10 @@ export function useWorkspace(): UseWorkspaceResult {
       const data = await readJsonResponse<ApiMessageResponse>(res, {
         invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
       });
-      if (!res.ok) throw new Error(data.error || data.message || '加入参考图失败');
+      if (!res.ok) throw new Error(data.error || data.message || '加入参考素材失败');
       await fetchWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加入参考图失败');
+      setError(err instanceof Error ? err.message : '加入参考素材失败');
       setLoading(false);
       throw err;
     }
@@ -269,10 +269,10 @@ export function useWorkspace(): UseWorkspaceResult {
       const data = await readJsonResponse<ApiMessageResponse>(res, {
         invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
       });
-      if (!res.ok) throw new Error(data.error || data.message || '加入参考图失败');
+      if (!res.ok) throw new Error(data.error || data.message || '加入参考素材失败');
       await fetchWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加入参考图失败');
+      setError(err instanceof Error ? err.message : '加入参考素材失败');
       setLoading(false);
       throw err;
     }
@@ -339,10 +339,10 @@ export function useWorkspace(): UseWorkspaceResult {
       const data = await readJsonResponse<ApiMessageResponse>(res, {
         invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
       });
-      if (!res.ok) throw new Error(data.error || data.message || '清空参考图失败');
+      if (!res.ok) throw new Error(data.error || data.message || '清空参考素材失败');
       await fetchWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '清空参考图失败');
+      setError(err instanceof Error ? err.message : '清空参考素材失败');
       setLoading(false);
       throw err;
     }

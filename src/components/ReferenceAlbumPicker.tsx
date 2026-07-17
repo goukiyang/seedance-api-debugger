@@ -30,6 +30,9 @@ interface ReferenceImageItem {
   image_url: string;
   asset?: {
     file_name: string;
+    type?: string | null;
+    mime_type?: string | null;
+    file_size?: number | null;
     width: number | null;
     height: number | null;
   } | null;
@@ -49,6 +52,16 @@ const SCOPES: Array<{ value: AlbumScope; label: string }> = [
   { value: 'shared', label: '共享给我的' },
   { value: 'public', label: '公共图集' },
 ];
+
+function mediaTypeLabel(type: string | null | undefined) {
+  if (type === 'video') return '视频';
+  if (type === 'audio') return '音频';
+  return '图片';
+}
+
+function isImageItem(image: ReferenceImageItem | null) {
+  return !image?.asset?.type || image.asset.type === 'image';
+}
 
 export function ReferenceAlbumPicker({
   open,
@@ -150,8 +163,8 @@ export function ReferenceAlbumPicker({
       <div className="album-picker" onClick={(event) => event.stopPropagation()}>
         <div className="album-picker-header">
           <div>
-            <h3>选择参考图</h3>
-            <p>最多 9 张，顺序会进入生成工作台并对应 @图片1、@图片2、@图片3。</p>
+            <h3>选择参考素材</h3>
+            <p>最多 9 个，顺序会进入生成工作台；图片、视频和音频会按类型传给生成接口。</p>
           </div>
           <button type="button" className="album-picker-close" onClick={onClose}>×</button>
         </div>
@@ -188,7 +201,7 @@ export function ReferenceAlbumPicker({
                     <strong>{album.name}</strong>
                   </span>
                   <span className="album-picker-album-meta">
-                    <span>{album.image_count} 张</span>
+                    <span>{album.image_count} 个</span>
                     {album.project?.name ? (
                       <span>{album.project.name}</span>
                     ) : (
@@ -203,15 +216,18 @@ export function ReferenceAlbumPicker({
           <div className="album-picker-images">
             {loading && <div className="album-picker-empty">读取中...</div>}
             {!loading && selectedAlbum && !selectedAlbum.permissions.use && (
-              <div className="album-picker-empty">当前图集没有“用作参考图生成”权限</div>
+              <div className="album-picker-empty">当前图集没有“用作参考素材生成”权限</div>
             )}
             {!loading && selectedAlbum?.permissions.use && images.length === 0 && (
-              <div className="album-picker-empty">这个图集还没有图片</div>
+              <div className="album-picker-empty">这个图集还没有素材</div>
             )}
             {!loading && selectedAlbum?.permissions.use && images.map((image) => {
               const checked = selectedImageIds.includes(image.id);
               const isAlreadyInWorkspace = currentReferenceImageIdSet.has(image.id);
-      const disabledByLimit = !checked && !isAlreadyInWorkspace && selectedNewCount >= remaining;
+              const disabledByLimit = !checked && !isAlreadyInWorkspace && selectedNewCount >= remaining;
+              const typeLabel = mediaTypeLabel(image.asset?.type);
+              const isImage = isImageItem(image);
+              const isVideo = image.asset?.type === 'video';
               return (
                 <article
                   key={image.id}
@@ -225,10 +241,16 @@ export function ReferenceAlbumPicker({
                     type="button"
                     className="album-picker-image-preview"
                     onClick={() => setPreviewImage(image)}
-                    title="放大查看"
-                    aria-label={`放大查看${image.asset?.file_name || `图 ${image.sort_order + 1}`}`}
+                    title={isImage ? '放大查看' : `预览${typeLabel}`}
+                    aria-label={`${isImage ? '放大查看' : `预览${typeLabel}`}${image.asset?.file_name || `${typeLabel} ${image.sort_order + 1}`}`}
                   >
-                    <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
+                    {isImage ? (
+                      <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
+                    ) : isVideo ? (
+                      <video src={image.thumbnail_url || image.image_url} muted playsInline preload="metadata" />
+                    ) : (
+                      <div className="album-picker-media-placeholder">音频</div>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -236,7 +258,7 @@ export function ReferenceAlbumPicker({
                     onClick={() => toggleImage(image.id)}
                     disabled={disabledByLimit}
                   >
-                    {checked ? '已选择' : isAlreadyInWorkspace ? '已在工作台' : `图 ${image.sort_order + 1}`}
+                    {checked ? '已选择' : isAlreadyInWorkspace ? '已在工作台' : `${typeLabel} ${image.sort_order + 1}`}
                   </button>
                 </article>
               );
@@ -245,7 +267,7 @@ export function ReferenceAlbumPicker({
         </div>
 
         <div className="album-picker-footer">
-          <span>已选 {selectedImageIds.length} 张，其中新增 {selectedNewCount} 张，当前工作台还可新增 {remaining} 张</span>
+          <span>已选 {selectedImageIds.length} 个，其中新增 {selectedNewCount} 个，当前工作台还可新增 {remaining} 个</span>
           <div>
             <button type="button" className="album-picker-cancel" onClick={onClose}>取消</button>
             <button
@@ -254,17 +276,30 @@ export function ReferenceAlbumPicker({
               onClick={handleConfirm}
               disabled={selectedImageIds.length === 0 || loading}
             >
-              加入并插入 @图片
+              加入并插入引用
             </button>
           </div>
         </div>
-        {previewImage && (
+        {previewImage && isImageItem(previewImage) && (
           <ZoomableImagePreview
             src={previewImage.image_url || previewImage.thumbnail_url}
             alt={previewImage.asset?.file_name || '参考图'}
             fileName={previewImage.asset?.file_name || `图 ${previewImage.sort_order + 1}`}
             onClose={() => setPreviewImage(null)}
           />
+        )}
+        {previewImage && !isImageItem(previewImage) && (
+          <div className="album-media-preview-backdrop" onClick={() => setPreviewImage(null)}>
+            <div className="album-media-preview-modal" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="album-media-preview-close" onClick={() => setPreviewImage(null)}>×</button>
+              <strong>{previewImage.asset?.file_name || `${mediaTypeLabel(previewImage.asset?.type)} ${previewImage.sort_order + 1}`}</strong>
+              {previewImage.asset?.type === 'video' ? (
+                <video src={previewImage.thumbnail_url || previewImage.image_url} controls playsInline />
+              ) : (
+                <audio src={previewImage.thumbnail_url || previewImage.image_url} controls />
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

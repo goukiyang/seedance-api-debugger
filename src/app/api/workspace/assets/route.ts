@@ -14,6 +14,28 @@ import {
   attachAssetToSiteReferenceImage,
   ReferenceImportError,
 } from '@/lib/assets/reference-import';
+import { ensureSiteAssetPublicUrl } from '@/lib/assets/site-upload';
+
+function referenceRoleForAssetType(type: string | null | undefined, requestedRole?: string | null) {
+  if (type === 'video') return 'reference_video';
+  if (type === 'audio') return 'reference_audio';
+  if (requestedRole === 'first_frame' || requestedRole === 'last_frame' || requestedRole === 'reference_image') {
+    return requestedRole;
+  }
+  return 'reference_image';
+}
+
+async function ensureNonImageAssetReadyForGeneration(assetId: string, type: string | null | undefined) {
+  if (type !== 'video' && type !== 'audio') return;
+  const result = await ensureSiteAssetPublicUrl(assetId);
+  if (!result.isPubliclyReachable) {
+    throw new ReferenceImportError(
+      '参考视频/音频必须是公网可访问 URL，请重新上传素材或配置 R2/TOS 存储。',
+      400,
+      'reference_media_url_not_public',
+    );
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -56,7 +78,7 @@ export async function POST(request: NextRequest) {
       }
       const existingCount = await prisma.workspaceAsset.count({ where: { workspace_id: workspaceId } });
       if (existingCount + referenceImageIds.length > 9) {
-        return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+        return NextResponse.json({ error: '单次生成最多选择 9 个参考素材' }, { status: 400 });
       }
 
       const workspaceAssetIds: string[] = [];
@@ -65,10 +87,11 @@ export async function POST(request: NextRequest) {
         if (!image.asset_id) {
           return NextResponse.json({ error: `参考图缺少资产记录: ${referenceImageId}` }, { status: 400 });
         }
+        await ensureNonImageAssetReadyForGeneration(image.asset_id, image.asset?.type);
         const waId = await addAssetToWorkspace(
           workspaceId,
           image.asset_id,
-          role || 'reference_image',
+          referenceRoleForAssetType(image.asset?.type, role),
           user.id,
           { referenceImageId: image.id, allowSharedAsset: true },
         );
@@ -90,7 +113,7 @@ export async function POST(request: NextRequest) {
     const existingCount = await prisma.workspaceAsset.count({ where: { workspace_id: workspaceId } });
     const newAssetCount = assetIds.filter((id) => !existingAssetIdSet.has(id)).length;
     if (existingCount + newAssetCount > 9) {
-      return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+      return NextResponse.json({ error: '单次生成最多选择 9 个参考素材' }, { status: 400 });
     }
 
     const workspaceAssetIds: string[] = [];
@@ -111,7 +134,7 @@ export async function POST(request: NextRequest) {
             user,
             workspaceId,
             sourceLabel: 'Web UI',
-            role: role || 'reference_image',
+            role: referenceRoleForAssetType(asset.type, role),
             albumName: '生成工作台参考图',
             albumDescription: '生成工作台自动归档的参考图',
             metadataSource: 'workspace_upload',
@@ -121,7 +144,8 @@ export async function POST(request: NextRequest) {
         workspaceAssetIds.push(reference.workspaceAssetId);
         referenceImageIdsFromAssets.push(reference.referenceImageId);
       } else {
-        const waId = await addAssetToWorkspace(workspaceId, asset.id, role, user.id);
+        await ensureNonImageAssetReadyForGeneration(asset.id, asset.type);
+        const waId = await addAssetToWorkspace(workspaceId, asset.id, referenceRoleForAssetType(asset.type, role), user.id);
         workspaceAssetIds.push(waId);
       }
     }

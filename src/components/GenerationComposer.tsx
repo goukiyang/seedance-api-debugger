@@ -369,6 +369,8 @@ interface Props {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds: string[];
+    referenceVideoUrls: string[];
+    referenceAudioUrls: string[];
     templateId: string | null;
     agentRunId: string | null;
     selectedAgentPlanKey: string | null;
@@ -632,7 +634,7 @@ export function GenerationComposer({
         type: 'source',
         source: 'album',
         label: '从图集选择',
-        description: sourceDisabled ? `已达 ${MAX_REFS} 张上限` : '我的图集、项目图集、公共图集',
+        description: sourceDisabled ? `已达 ${MAX_REFS} 个上限` : '我的图集、项目图集、公共图集',
         disabled: sourceDisabled,
       },
     ];
@@ -826,8 +828,15 @@ export function GenerationComposer({
       watermark,
       resolutionApprovalConfirmed: need1080pApproval ? resolutionApprovalConfirmed : false,
       referenceImageIds: workspace.assets
+        .filter((asset) => asset.type === 'image')
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
+      referenceVideoUrls: workspace.assets
+        .filter((asset) => asset.type === 'video' && Boolean(asset.originalUrl))
+        .map((asset) => asset.originalUrl),
+      referenceAudioUrls: workspace.assets
+        .filter((asset) => asset.type === 'audio' && Boolean(asset.originalUrl))
+        .map((asset) => asset.originalUrl),
       templateId: selectedTemplate?.id || null,
       agentRunId,
       selectedAgentPlanKey: selectedPlanKey,
@@ -1102,7 +1111,7 @@ export function GenerationComposer({
     const idsToAdd = uniqueReferenceImageIds.filter((id) => !existingLabelByReferenceId.has(id));
     const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
     if (idsToAdd.length > availableSlots) {
-      throw new Error(`单次生成最多选择 ${MAX_REFS} 张参考图，当前还可新增 ${availableSlots} 张`);
+      throw new Error(`单次生成最多选择 ${MAX_REFS} 个参考素材，当前还可新增 ${availableSlots} 个`);
     }
 
     const labelByReferenceId = new Map(existingLabelByReferenceId);
@@ -1150,7 +1159,7 @@ export function GenerationComposer({
     const idsToAdd = uniqueAssetIds.filter((id) => !existingLabelByAssetId.has(id));
     const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
     if (idsToAdd.length > availableSlots) {
-      throw new Error(`单次生成最多选择 ${MAX_REFS} 张参考图，当前还可新增 ${availableSlots} 张`);
+      throw new Error(`单次生成最多选择 ${MAX_REFS} 个参考素材，当前还可新增 ${availableSlots} 个`);
     }
 
     const labelByAssetId = new Map(existingLabelByAssetId);
@@ -1188,7 +1197,7 @@ export function GenerationComposer({
   const handleMentionSelect = useCallback((candidate: PromptMentionCandidate) => {
     if (candidate.type === 'image') return candidate.token;
     if (candidate.type === 'action') {
-      setMentionNotice('主体能力将在第二批开放；当前可以先用图集保存和复用参考图。');
+      setMentionNotice('主体能力将在第二批开放；当前可以先用图集保存和复用参考素材。');
       return null;
     }
     if (candidate.disabled) return null;
@@ -1205,7 +1214,7 @@ export function GenerationComposer({
 
   const handleLoadReferenceAlbum = useCallback(async (albumId: string, albumName: string) => {
     if (workspace.assets.length > 0) {
-      const ok = window.confirm('切换图集会替换当前参考图列表，确定继续？');
+      const ok = window.confirm('切换图集会替换当前参考素材列表，确定继续？');
       if (!ok) return;
     }
     await workspace.loadReferenceAlbum(albumId);
@@ -1214,7 +1223,7 @@ export function GenerationComposer({
   }, [workspace]);
 
   const handleSaveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
-    if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考图');
+    if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考素材');
     const albumId = await workspace.saveCurrentAsReferenceAlbum(name);
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(name);
@@ -1546,7 +1555,7 @@ export function GenerationComposer({
           <details className="template-advanced-panel">
             <summary>
               <span>参考素材和图集</span>
-              <strong>{workspace.assets.length > 0 ? `${workspace.assets.length} 张参考图` : '默认不使用参考图'}</strong>
+              <strong>{workspace.assets.length > 0 ? `${workspace.assets.length} 个参考素材` : '默认不使用参考素材'}</strong>
             </summary>
             <ImageSetToolbar
               collections={collections}

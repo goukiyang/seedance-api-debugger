@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { uploadSiteAsset, validateSiteUploadInput } from '@/lib/assets/site-upload';
+import { uploadSiteAsset, validateSiteUploadBuffer, validateSiteUploadInput } from '@/lib/assets/site-upload';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const mediaValidationError = await validateSiteUploadBuffer(buffer, file.name, file.type);
+    if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
+
     const uploadResult = await uploadSiteAsset(buffer, file.name, file.type, file.size, user.id);
 
     return NextResponse.json({

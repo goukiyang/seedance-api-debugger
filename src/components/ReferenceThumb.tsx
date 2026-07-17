@@ -24,7 +24,11 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
   const [imageSrc, setImageSrc] = useState(src);
   const [imageFailed, setImageFailed] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const isImage = asset.type === 'image';
+  const isVideo = asset.type === 'video';
+  const isAudio = asset.type === 'audio';
   const canZoomPreview = asset.type === 'image' && Boolean(asset.originalUrl || imageSrc);
+  const mediaLabel = isVideo ? '视频' : isAudio ? '音频' : '素材';
 
   useEffect(() => {
     setImageSrc(src);
@@ -46,7 +50,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
           onPreview(imageSrc);
         }}
       >
-        {imageSrc && !imageFailed ? (
+        {isImage && imageSrc && !imageFailed ? (
           <img
             src={imageSrc}
             alt={`图${index + 1}`}
@@ -62,6 +66,18 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
               setImageFailed(true);
             }}
           />
+        ) : isVideo && asset.originalUrl ? (
+          <video
+            src={asset.originalUrl}
+            className="ref-thumb-video"
+            muted
+            playsInline
+            preload="metadata"
+          />
+        ) : isAudio ? (
+          <div className="ref-thumb-media-placeholder">
+            <span>音频</span>
+          </div>
         ) : (
           <div className="ref-thumb-placeholder" />
         )}
@@ -82,7 +98,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       )}
 
       {/* 图号标签 */}
-      <div className="ref-thumb-label">图{index + 1}</div>
+      <div className="ref-thumb-label">{isImage ? '图' : mediaLabel}{index + 1}</div>
 
       {/* Frame 角色标签 */}
       {frameRole === 'first_frame' && (

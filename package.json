@@ -12,6 +12,7 @@
     "db:studio": "prisma studio",
     "seed:admin": "tsx scripts/seed-admin.ts",
     "test:api": "tsx scripts/test-seedance-api.ts",
+    "test:reference-media": "tsx scripts/reference-media-chain-smoke.ts",
     "video:finalize-pending": "tsx scripts/finalize-pending-videos.ts"
   },
   "dependencies": {

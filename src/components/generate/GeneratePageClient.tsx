@@ -1121,6 +1121,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds?: string[];
+    referenceVideoUrls?: string[];
+    referenceAudioUrls?: string[];
     templateId?: string | null;
     agentRunId?: string | null;
     selectedAgentPlanKey?: string | null;
@@ -1171,6 +1173,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           video_card_id: selectedVideoCard.id,
           video_branch_id: selectedVideoBranchId || undefined,
           reference_image_ids: params.referenceImageIds || [],
+          reference_video_urls: params.referenceVideoUrls || [],
+          reference_audio_urls: params.referenceAudioUrls || [],
           template_id: params.templateId || null,
           agent_run_id: params.agentRunId || null,
           selected_agent_plan_key: params.selectedAgentPlanKey || null,

@@ -6,6 +6,7 @@ import { AuthError } from '@/lib/auth/session';
 import {
   assertCanViewReferenceImage,
   canDownloadOriginal,
+  canUseAlbumImage,
 } from '@/lib/reference-albums/permissions';
 
 export const dynamic = 'force-dynamic';
@@ -21,9 +22,19 @@ export async function GET(
 
     const image = await assertCanViewReferenceImage(user, params.id);
     const variant = request.nextUrl.searchParams.get('variant') === 'thumbnail' ? 'thumbnail' : 'original';
+    const assetType = image.asset?.type || 'image';
+    const isOriginalMediaPreview = variant === 'thumbnail' && assetType !== 'image' && !image.thumbnail_url;
 
     if (variant === 'original' && !(await canDownloadOriginal(user, image))) {
-      return NextResponse.json({ error: '无权访问原图' }, { status: 403 });
+      return NextResponse.json({ error: '无权访问原素材' }, { status: 403 });
+    }
+
+    if (
+      isOriginalMediaPreview
+      && !(await canUseAlbumImage(user, image))
+      && !(await canDownloadOriginal(user, image))
+    ) {
+      return NextResponse.json({ error: '无权预览原始视频/音频素材' }, { status: 403 });
     }
 
     const sourceUrl = variant === 'thumbnail'
@@ -45,7 +56,7 @@ export async function GET(
 
     const upstream = await fetch(sourceUrl, { cache: 'no-store' });
     if (!upstream.ok) {
-      return NextResponse.json({ error: '图片读取失败' }, { status: upstream.status });
+      return NextResponse.json({ error: '素材读取失败' }, { status: upstream.status });
     }
     const buffer = Buffer.from(await upstream.arrayBuffer());
     return new NextResponse(buffer, {

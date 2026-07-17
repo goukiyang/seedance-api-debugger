@@ -21,6 +21,7 @@ interface Props {
 }
 
 function getFrameRole(asset: WorkspaceAssetItem, idx: number, assets: WorkspaceAssetItem[], mode?: string): FrameRole {
+  if (asset.type !== 'image') return null;
   if (asset.role === 'first_frame') return 'first_frame';
   if (asset.role === 'last_frame') return 'last_frame';
   if (mode === 'first_last_frame') {

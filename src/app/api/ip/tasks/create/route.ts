@@ -54,6 +54,7 @@ import {
   importReferenceImageUrlsToSite,
   ReferenceImportError,
 } from '@/lib/assets/reference-import';
+import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import {
   allocateProjectTaskBudget,
@@ -100,6 +101,18 @@ function parseJsonRecord(value: string | null | undefined) {
   } catch {
     return null;
   }
+}
+
+function normalizeReferenceMediaUrls(value: unknown, max: number) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function firstNonPublicReferenceMediaUrl(urls: string[]) {
+  return urls.find((url) => !isPubliclyReachableUrl(url)) || null;
 }
 
 type IpIdempotentTask = {
@@ -662,8 +675,8 @@ export async function POST(request: NextRequest) {
   let firstFrameUrl: string | undefined = body.first_frame_url;
   let lastFrameUrl: string | undefined = body.last_frame_url;
   let frameImageUrls: string[] = body.frame_image_urls ? [...body.frame_image_urls] : [];
-  const referenceVideoUrls: string[] = body.reference_video_urls ? [...body.reference_video_urls].slice(0, 3) : [];
-  const referenceAudioUrls: string[] = body.reference_audio_urls ? [...body.reference_audio_urls].slice(0, 3) : [];
+  const referenceVideoUrls = normalizeReferenceMediaUrls(body.reference_video_urls, 3);
+  const referenceAudioUrls = normalizeReferenceMediaUrls(body.reference_audio_urls, 3);
 
   switch (generationMode) {
     case 'all_in_one_reference':
@@ -678,6 +691,22 @@ export async function POST(request: NextRequest) {
       if (frameImageUrls.length === 0) frameImageUrls = preparedImages.map((img) => img.originalUrl);
       if (frameImageUrls.length < 2) return errorJson('智能多帧模式至少需要 2 张图片', 400);
       break;
+  }
+
+  const nonPublicReferenceMediaUrl = firstNonPublicReferenceMediaUrl([
+    ...referenceVideoUrls,
+    ...referenceAudioUrls,
+  ]);
+  if (nonPublicReferenceMediaUrl) {
+    return errorJson('参考视频/音频必须是公网可访问 URL，请重新上传素材或配置 R2/TOS 存储。', 400);
+  }
+  const hasVisualReference = referenceImageUrls.length > 0
+    || Boolean(firstFrameUrl)
+    || Boolean(lastFrameUrl)
+    || frameImageUrls.length > 0
+    || referenceVideoUrls.length > 0;
+  if (referenceAudioUrls.length > 0 && !hasVisualReference) {
+    return errorJson('音频参考不能单独使用，至少还需要 1 个图片或视频参考素材。', 400);
   }
 
   // --- Prompt validation + rendering ---
