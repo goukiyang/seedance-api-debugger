@@ -115,6 +115,7 @@ async function main() {
     '参考图集保存不能继续拒绝非图片素材',
   );
   assertIncludes(albumImagesRoute, 'validateSiteUploadBuffer', '参考图集上传必须校验视频/音频时长');
+  assertIncludes(albumImagesRoute, "export const maxDuration = 120", '参考图集上传接口必须允许较长视频/音频上传处理时间');
   assertIncludes(albumImagesRoute, 'ensureSiteAssetPublicUrl', '参考图集复用历史视频/音频素材前必须补公网 URL');
   assertIncludes(albumImagesRoute, 'ensureReferenceAssetReady(sourceImage.asset)', '复制图集里的历史视频/音频素材前必须补公网 URL');
 
@@ -165,6 +166,12 @@ async function main() {
 
   const albumDetail = read('src/app/collections/[id]/ReferenceAlbumDetailClient.tsx');
   assertIncludes(albumDetail, 'canPreviewOriginalMedia', '图集详情页不应给无使用/下载权限者直接加载原始视频');
+  assertIncludes(albumDetail, 'uploadFeedback', '图集详情页上传必须显示处理中和成功提示');
+  assertIncludes(albumDetail, '正在上传', '图集详情页上传开始后必须告诉用户正在处理');
+  assertIncludes(albumDetail, '上传成功，正在刷新图集列表', '图集详情页上传成功后必须显示刷新状态');
+  assertIncludes(albumDetail, '已上传 ${uploadedCount} 个素材到图集', '图集详情页刷新后必须显示上传成功提示');
+  assertIncludes(albumDetail, 'await loadAlbum()', '图集详情页上传成功后必须等待列表刷新完成');
+  assertIncludes(albumDetail, '上传处理中...', '图集详情页上传期间按钮文案必须反馈状态');
 
   const referenceThumb = read('src/components/ReferenceThumb.tsx');
   assertIncludes(referenceThumb, '<video', '工作区参考素材缩略图必须能展示视频预览');

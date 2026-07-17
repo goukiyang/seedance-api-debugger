@@ -13817,6 +13817,12 @@ body.compare-fullscreen-open {
   color: #047857;
 }
 
+.album-error.info {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
 .album-grid,
 .album-image-grid {
   display: grid;

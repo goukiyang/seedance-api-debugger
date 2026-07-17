@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/ShareAlbumDialog';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
@@ -45,6 +45,11 @@ interface ReferenceImageItem {
   } | null;
 }
 
+type AlbumUploadFeedback = {
+  type: 'info' | 'success';
+  message: string;
+};
+
 function mediaTypeLabel(type: string | null | undefined) {
   if (type === 'video') return '视频';
   if (type === 'audio') return '音频';
@@ -60,34 +65,43 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [uploadFeedback, setUploadFeedback] = useState<AlbumUploadFeedback | null>(null);
   const [loading, setLoading] = useState(false);
   const [shareDialogAlbum, setShareDialogAlbum] = useState<ShareAlbumDialogAlbum | null>(null);
   const [sharingImageId, setSharingImageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadAlbum = () => {
+  const loadAlbum = useCallback(async () => {
     setLoading(true);
     setError(null);
-    fetch(`/api/reference-albums/${albumId}`)
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.error || data.message || '图集读取失败');
-        setAlbum(data.album);
-        setImages(data.images || []);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : '图集读取失败'))
-      .finally(() => setLoading(false));
-  };
+    try {
+      const res = await fetch(`/api/reference-albums/${albumId}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || '图集读取失败');
+      setAlbum(data.album);
+      setImages(data.images || []);
+      return data;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '图集读取失败');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [albumId]);
 
   useEffect(() => {
-    loadAlbum();
-  }, [albumId]);
+    void loadAlbum().catch(() => {});
+  }, [loadAlbum]);
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
     setLoading(true);
     setError(null);
+    setUploadFeedback({
+      type: 'info',
+      message: `正在上传 ${files.length} 个素材。视频或音频会先校验时长并上传到公网存储，文件较大时可能需要几十秒。`,
+    });
     try {
       const formData = new FormData();
       for (const file of files) {
@@ -98,11 +112,15 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         method: 'POST',
         body: formData,
       });
-      const addData = await addRes.json();
+      const addData = await addRes.json().catch(() => ({}));
       if (!addRes.ok) throw new Error(addData.error || addData.message || '保存到图集失败');
-      loadAlbum();
+      const uploadedCount = Array.isArray(addData.images) ? addData.images.length : files.length;
+      setUploadFeedback({ type: 'info', message: '上传成功，正在刷新图集列表...' });
+      await loadAlbum();
+      setUploadFeedback({ type: 'success', message: `已上传 ${uploadedCount} 个素材到图集。` });
     } catch (err) {
       setError(err instanceof Error ? err.message : '上传失败');
+      setUploadFeedback(null);
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -141,7 +159,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
       return;
     }
     setSelectedImageIds((prev) => prev.filter((id) => id !== imageId));
-    loadAlbum();
+    void loadAlbum().catch(() => {});
   };
 
   const handleShareSingleImage = async (image: ReferenceImageItem) => {
@@ -219,6 +237,9 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
       />
 
       {error && <div className="album-error">{error}</div>}
+      {uploadFeedback && !error && (
+        <div className={`album-error ${uploadFeedback.type}`}>{uploadFeedback.message}</div>
+      )}
 
       {album && (
         <>
@@ -238,7 +259,9 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             {album.permissions.edit && (
               <>
                 <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" multiple style={{ display: 'none' }} onChange={handleUpload} />
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading}>上传素材到图集</button>
+                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading}>
+                  {loading && uploadFeedback?.type === 'info' ? '上传处理中...' : '上传素材到图集'}
+                </button>
                 <button type="button" onClick={handleRenameAlbum} disabled={loading}>重命名图集</button>
                 <button type="button" className="danger" onClick={handleDeleteAlbum} disabled={loading}>删除图集</button>
               </>
@@ -305,7 +328,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             album={shareDialogAlbum}
             onClose={() => setShareDialogAlbum(null)}
             onChanged={() => {
-              if (shareDialogAlbum?.id === album.id) loadAlbum();
+              if (shareDialogAlbum?.id === album.id) void loadAlbum().catch(() => {});
             }}
           />
         </>
