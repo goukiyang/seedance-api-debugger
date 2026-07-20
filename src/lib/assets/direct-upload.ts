@@ -1,10 +1,7 @@
 import crypto from 'crypto';
 import path from 'path';
-import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { HttpRequest } from '@smithy/protocol-http';
-import { buildQueryString } from '@smithy/querystring-builder';
-import { SignatureV4 } from '@smithy/signature-v4';
-import { Hash } from '@smithy/hash-node';
+import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
 import {
@@ -92,12 +89,17 @@ type R2DirectUploadConfig = {
 
 function getR2DirectUploadConfig(): R2DirectUploadConfig | null {
   const {
+    R2_DIRECT_UPLOAD_ENABLED,
     R2_ACCOUNT_ID,
     R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY,
     R2_BUCKET,
     R2_PUBLIC_BASE_URL,
   } = process.env;
+
+  if (R2_DIRECT_UPLOAD_ENABLED !== 'true') {
+    return null;
+  }
 
   if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
     return null;
@@ -151,28 +153,6 @@ function createObjectKey(ownerId: string, mimeType: string) {
   const yyyy = String(now.getUTCFullYear());
   const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
   return `${userUploadPrefix(ownerId)}/${yyyy}${mm}/${uuidv4()}.${mimeTypeToExt(mimeType)}`;
-}
-
-function encodePath(pathname: string) {
-  return pathname
-    .split('/')
-    .map((part) => encodeURIComponent(part))
-    .join('/');
-}
-
-function formatPresignedUrl(request: {
-  protocol?: string;
-  hostname: string;
-  path: string;
-  query?: Record<string, string | Array<string> | null | undefined>;
-}) {
-  const protocol = request.protocol || 'https:';
-  const query: Record<string, string | Array<string> | null> = {};
-  for (const [key, value] of Object.entries(request.query || {})) {
-    if (value !== undefined) query[key] = value;
-  }
-  const queryString = buildQueryString(query);
-  return `${protocol}//${request.hostname}${request.path}${queryString ? `?${queryString}` : ''}`;
 }
 
 function signToken(payload: DirectUploadTokenPayload) {
@@ -240,7 +220,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
   if (!config) {
     return {
       directUploadAvailable: false,
-      reason: 'R2 直传未配置，已回退到普通上传。',
+      reason: 'R2 直传未启用或桶 CORS 未配置，已回退到普通上传。',
     };
   }
 
@@ -256,31 +236,18 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
     fileSize: input.fileSize,
     expiresAt,
   };
-  const signer = new SignatureV4({
-    service: 's3',
-    region: 'auto',
-    credentials: {
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
-    },
-    sha256: Hash.bind(null, 'sha256') as never,
+  const client = createR2Client(config);
+  const command = new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: key,
+    ContentType: mimeType,
   });
-  const request = new HttpRequest({
-    protocol: 'https:',
-    method: 'PUT',
-    hostname: config.endpointHostname,
-    path: encodePath(`/${config.bucket}/${key}`),
-    headers: {
-      host: config.endpointHostname,
-      'content-type': mimeType,
-    },
-  });
-  const signed = await signer.presign(request, { expiresIn: DIRECT_UPLOAD_EXPIRES_SECONDS });
+  const uploadUrl = await getSignedUrl(client, command, { expiresIn: DIRECT_UPLOAD_EXPIRES_SECONDS });
 
   return {
     directUploadAvailable: true,
     storageProvider: 'r2',
-    uploadUrl: formatPresignedUrl(signed),
+    uploadUrl,
     uploadToken: signToken(payload),
     publicUrl: `${config.publicBaseUrl}/${key}`,
     method: 'PUT',
