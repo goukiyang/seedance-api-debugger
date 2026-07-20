@@ -70,7 +70,7 @@ function resolveLocalPublicPath(url: string) {
   return resolvedPath;
 }
 
-function getUploadKind(mimeType: string): SiteUploadKind | null {
+export function getSiteUploadKind(mimeType: string): SiteUploadKind | null {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('video/')) return 'video';
   if (mimeType.startsWith('audio/')) return 'audio';
@@ -169,7 +169,7 @@ export function validateSiteUploadMetadata(input: { mimeType: string; fileSize: 
   if (!SITE_UPLOAD_ALLOWED_TYPES.includes(input.mimeType as (typeof SITE_UPLOAD_ALLOWED_TYPES)[number])) {
     return `不支持的文件类型：${input.mimeType || '未知'}。目前支持图片、MP4/MOV/WebM 视频、MP3/WAV/OGG 音频。`;
   }
-  const kind = getUploadKind(input.mimeType);
+  const kind = getSiteUploadKind(input.mimeType);
   if (!kind) return `不支持的文件类型：${input.mimeType || '未知'}`;
 
   const maxSize = SITE_UPLOAD_MAX_SIZE_BY_KIND[kind];
@@ -183,15 +183,25 @@ export function validateSiteUploadInput(file: File) {
   return validateSiteUploadMetadata({ mimeType: file.type, fileSize: file.size });
 }
 
+export function validateSiteUploadDuration(mimeType: string, durationSeconds: number | null | undefined) {
+  const kind = getSiteUploadKind(mimeType);
+  if (kind !== 'video' && kind !== 'audio') return null;
+  if (!Number.isFinite(durationSeconds) || !durationSeconds) {
+    return `${uploadKindLabel(kind)}时长读取失败，请确认文件完整、格式正确后重试。`;
+  }
+  if (durationSeconds < SITE_UPLOAD_DURATION_MIN_SECONDS || durationSeconds > SITE_UPLOAD_DURATION_MAX_SECONDS) {
+    return `${uploadKindLabel(kind)}时长需为 ${SITE_UPLOAD_DURATION_MIN_SECONDS}-${SITE_UPLOAD_DURATION_MAX_SECONDS} 秒，当前约 ${durationSeconds.toFixed(1)} 秒。`;
+  }
+  return null;
+}
+
 export async function validateSiteUploadBuffer(buffer: Buffer, fileName: string, mimeType: string) {
-  const kind = getUploadKind(mimeType);
+  const kind = getSiteUploadKind(mimeType);
   if (kind !== 'video' && kind !== 'audio') return null;
 
   try {
     const duration = await readMediaDurationSeconds(buffer, fileName);
-    if (duration < SITE_UPLOAD_DURATION_MIN_SECONDS || duration > SITE_UPLOAD_DURATION_MAX_SECONDS) {
-      return `${uploadKindLabel(kind)}时长需为 ${SITE_UPLOAD_DURATION_MIN_SECONDS}-${SITE_UPLOAD_DURATION_MAX_SECONDS} 秒，当前约 ${duration.toFixed(1)} 秒。`;
-    }
+    return validateSiteUploadDuration(mimeType, duration);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return '服务端缺少 ffprobe，暂时无法校验视频/音频时长，请先联系管理员补齐运行环境。';

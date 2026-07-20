@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { buildRawFileUploadRequest } from '@/lib/http/file-upload';
+import { uploadFileToHistory } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { Workspace, WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 
@@ -23,12 +23,6 @@ type ApiMessageResponse = {
 
 type WorkspaceResponse = ApiMessageResponse & {
   workspace?: Workspace;
-};
-
-type UploadAssetResponse = ApiMessageResponse & {
-  asset?: {
-    id?: string;
-  };
 };
 
 type ReferenceAlbumDetailResponse = ApiMessageResponse & {
@@ -113,14 +107,10 @@ export function useWorkspace(): UseWorkspaceResult {
   }, [fetchWorkspace]);
 
   const uploadAssetToHistory = useCallback(async (file: File) => {
-    const res = await fetch('/api/assets/upload', {
-      ...buildRawFileUploadRequest(file),
-    });
-    const data = await readJsonResponse<UploadAssetResponse>(res, {
+    const asset = await uploadFileToHistory(file, {
       invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
     });
-    if (!res.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
-    const assetId = data.asset?.id as string | undefined;
+    const assetId = asset.id as string | undefined;
     if (!assetId) throw new Error('素材上传成功，但没有返回素材 ID');
     return assetId;
   }, []);
