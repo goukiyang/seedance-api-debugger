@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { HttpRequest } from '@smithy/protocol-http';
+import { buildQueryString } from '@smithy/querystring-builder';
 import { SignatureV4 } from '@smithy/signature-v4';
 import { Hash } from '@smithy/hash-node';
 import { v4 as uuidv4 } from 'uuid';
@@ -166,15 +167,11 @@ function formatPresignedUrl(request: {
   query?: Record<string, string | Array<string> | null | undefined>;
 }) {
   const protocol = request.protocol || 'https:';
-  const query = new URLSearchParams();
+  const query: Record<string, string | Array<string> | null> = {};
   for (const [key, value] of Object.entries(request.query || {})) {
-    if (Array.isArray(value)) {
-      value.forEach((item) => query.append(key, String(item)));
-    } else if (value !== undefined) {
-      query.append(key, String(value));
-    }
+    if (value !== undefined) query[key] = value;
   }
-  const queryString = query.toString();
+  const queryString = buildQueryString(query);
   return `${protocol}//${request.hostname}${request.path}${queryString ? `?${queryString}` : ''}`;
 }
 
