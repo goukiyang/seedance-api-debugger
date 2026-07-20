@@ -44,6 +44,7 @@ type DirectUploadTokenPayload = {
   fileName: string;
   mimeType: string;
   fileSize: number;
+  hash: string;
   expiresAt: number;
 };
 
@@ -52,6 +53,7 @@ type CreateDirectUploadTicketInput = {
   fileName: string;
   mimeType: string;
   fileSize: number;
+  hash: string;
 };
 
 type CompleteDirectUploadInput = {
@@ -215,6 +217,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
   const mimeType = input.mimeType.split(';')[0]?.trim().toLowerCase() || '';
   const metadataError = validateSiteUploadMetadata({ mimeType, fileSize: input.fileSize });
   if (metadataError) throw new Error(metadataError);
+  const hash = assertSha256Hash(input.hash);
 
   const config = getR2DirectUploadConfig();
   if (!config) {
@@ -234,6 +237,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
     fileName: safeFileName(input.fileName),
     mimeType,
     fileSize: input.fileSize,
+    hash,
     expiresAt,
   };
   const client = createR2Client(config);
@@ -275,33 +279,9 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
   }
 
   const hash = assertSha256Hash(input.hash);
-  const existing = await prisma.asset.findFirst({
-    where: { owner_id: input.ownerId, hash },
-    orderBy: { created_at: 'desc' },
-  });
-  if (existing) {
-    const activeAsset = existing.status === 'active'
-      ? existing
-      : await prisma.asset.update({
-        where: { id: existing.id },
-        data: { status: 'active' },
-      });
-    return {
-      assetId: activeAsset.id,
-      originalUrl: activeAsset.original_url,
-      thumbnailUrl: activeAsset.thumbnail_url,
-      width: activeAsset.width ?? undefined,
-      height: activeAsset.height ?? undefined,
-      fileName: activeAsset.file_name,
-      fileSize: activeAsset.file_size,
-      mimeType: activeAsset.mime_type,
-      hash: activeAsset.hash ?? hash,
-      reused: true,
-      isPubliclyReachable: isPubliclyReachableUrl(activeAsset.original_url),
-      storageProvider: 'r2',
-    };
+  if (hash !== payload.hash) {
+    throw new Error('文件校验信息和上传票据不一致，请重新上传。');
   }
-
   const kind = getSiteUploadKind(payload.mimeType) || 'image';
   const width = kind === 'image' ? normalizeOptionalInt(input.width) : null;
   const height = kind === 'image' ? normalizeOptionalInt(input.height) : null;
@@ -317,7 +297,7 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
       width,
       height,
       file_size: payload.fileSize,
-      hash,
+      hash: null,
       status: 'active',
     },
   });
@@ -331,7 +311,7 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
     fileName: asset.file_name,
     fileSize: asset.file_size,
     mimeType: asset.mime_type,
-    hash: asset.hash ?? hash,
+    hash: asset.hash ?? '',
     reused: false,
     isPubliclyReachable: true,
     storageProvider: 'r2',

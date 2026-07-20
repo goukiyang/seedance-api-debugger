@@ -164,11 +164,18 @@ export async function uploadFileToHistory(
         fileName: file.name || 'upload.bin',
         mimeType: file.type || 'application/octet-stream',
         fileSize: file.size,
+        hash,
       }),
     });
-    const ticket = await readJsonResponse<DirectUploadTicketResponse>(ticketRes, { invalidJsonMessage });
+    let ticket: DirectUploadTicketResponse;
+    try {
+      ticket = await readJsonResponse<DirectUploadTicketResponse>(ticketRes, { invalidJsonMessage });
+    } catch (error) {
+      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
+      throw error;
+    }
     if (!ticketRes.ok) {
-      if (fallbackToRaw && ticketRes.status >= 500) return uploadWithRawFallback(file, invalidJsonMessage);
+      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
       throw new Error(ticket.error || ticket.message || '上传票据创建失败');
     }
     if (ticket.directUploadAvailable === false) {
@@ -197,18 +204,22 @@ export async function uploadFileToHistory(
         durationSeconds,
       }),
     });
-    const complete = await readJsonResponse<UploadAssetResponse>(completeRes, { invalidJsonMessage });
+    let complete: UploadAssetResponse;
+    try {
+      complete = await readJsonResponse<UploadAssetResponse>(completeRes, { invalidJsonMessage });
+    } catch (error) {
+      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
+      throw error;
+    }
     if (!completeRes.ok) {
+      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
       throw new Error(complete.error || complete.message || '上传完成但入库失败，请重新上传。');
     }
     if (!complete.asset?.id) throw new Error('上传完成但没有返回素材 ID');
     return complete.asset;
   } catch (error) {
     const message = error instanceof Error ? error.message : '素材上传失败，请重新选择后重试';
-    if (fallbackToRaw && message.includes('已回退到普通上传')) {
-      return uploadWithRawFallback(file, invalidJsonMessage);
-    }
-    if (fallbackToRaw && message.includes('直传未配置')) {
+    if (fallbackToRaw) {
       return uploadWithRawFallback(file, invalidJsonMessage);
     }
     throw error;

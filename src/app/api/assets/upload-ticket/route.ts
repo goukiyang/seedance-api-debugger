@@ -14,6 +14,7 @@ type UploadTicketBody = {
   fileName?: string;
   mimeType?: string;
   fileSize?: number;
+  hash?: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as UploadTicketBody;
     const fileName = typeof body.fileName === 'string' ? body.fileName : 'upload.bin';
     const mimeType = typeof body.mimeType === 'string' ? body.mimeType : '';
+    const hash = typeof body.hash === 'string' ? body.hash : '';
     const fileSize = Number(body.fileSize);
     if (!Number.isFinite(fileSize) || fileSize < 0) {
       return NextResponse.json({ error: '文件大小无效，请重新选择文件。' }, { status: 400 });
@@ -34,12 +36,17 @@ export async function POST(request: NextRequest) {
       fileName,
       mimeType,
       fileSize,
+      hash,
     });
 
     return NextResponse.json(ticket);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传票据创建失败';
-    const status = message.includes('不支持的文件类型') || message.includes('过大') ? 400 : 503;
+    const status = (
+      message.includes('不支持的文件类型') ||
+      message.includes('过大') ||
+      message.includes('文件校验信息无效')
+    ) ? 400 : 503;
     return NextResponse.json({ error: message }, { status });
   }
 }
