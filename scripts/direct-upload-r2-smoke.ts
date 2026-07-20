@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { createDirectUploadTicket } from '../src/lib/assets/direct-upload';
 
+const smokeHash = 'a'.repeat(64);
+
 const envKeys = [
   'R2_DIRECT_UPLOAD_ENABLED',
   'R2_ACCOUNT_ID',
@@ -28,6 +30,7 @@ async function run() {
     fileName: 'ok.png',
     mimeType: 'image/png',
     fileSize: 1024,
+    hash: smokeHash,
   });
   assert.equal(unavailable.directUploadAvailable, false);
 
@@ -37,6 +40,7 @@ async function run() {
       fileName: 'bad.bin',
       mimeType: 'application/octet-stream',
       fileSize: 1024,
+      hash: smokeHash,
     }),
     /不支持的文件类型/,
   );
@@ -47,8 +51,20 @@ async function run() {
       fileName: 'huge.png',
       mimeType: 'image/png',
       fileSize: 31 * 1024 * 1024,
+      hash: smokeHash,
     }),
     /图片过大/,
+  );
+
+  await assert.rejects(
+    () => createDirectUploadTicket({
+      ownerId: 'smoke-user',
+      fileName: 'bad-hash.png',
+      mimeType: 'image/png',
+      fileSize: 1024,
+      hash: 'bad',
+    }),
+    /文件校验信息无效/,
   );
 
   process.env.R2_ACCOUNT_ID = 'smoke-account';
@@ -63,6 +79,7 @@ async function run() {
     fileName: '../unsafe name.png',
     mimeType: 'image/png',
     fileSize: 1024,
+    hash: smokeHash,
   });
   if (ticket.directUploadAvailable !== true) {
     throw new Error('expected R2 direct upload ticket to be available');
@@ -83,10 +100,17 @@ async function run() {
   assert.match(completeSource, /getSession\(\)/, 'upload-complete route must require session');
   assert.match(completeSource, /completeDirectUpload/, 'upload-complete route must verify and register upload');
 
+  const directUploadSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/assets/direct-upload.ts'), 'utf8');
+  assert.match(directUploadSource, /hash: null/, 'direct uploads must not store client-provided hash as trusted file hash');
+  assert.doesNotMatch(directUploadSource, /where:\s*{\s*owner_id:\s*input\.ownerId,\s*hash\s*}/, 'direct uploads must not reuse assets by client-provided hash');
+
   const clientSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/http/file-upload.ts'), 'utf8');
   assert.match(clientSource, /\/api\/assets\/upload-ticket/, 'client must request upload ticket');
   assert.match(clientSource, /\/api\/assets\/upload-complete/, 'client must complete direct upload');
   assert.match(clientSource, /buildRawFileUploadRequest/, 'client must keep raw upload fallback');
+  assert.match(clientSource, /readJsonResponse<DirectUploadTicketResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallback/, 'ticket non-json errors must fallback');
+  assert.match(clientSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallback/, 'complete failures must fallback');
+  assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
 
   console.log('direct-upload-r2-smoke: ok');
 }
