@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
-import { buildRawFileUploadRequest } from '@/lib/http/file-upload';
+import { uploadFileToHistory } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { TemplateContextCardBoundImage } from '@/lib/templates/workbench';
 
@@ -63,17 +63,6 @@ type AlbumDetailResponse = ApiMessageResponse & {
 
 type HistoryListResponse = ApiMessageResponse & {
   assets?: UploadedImageItem[];
-};
-
-type UploadAssetResponse = ApiMessageResponse & {
-  asset?: {
-    id?: string;
-    originalUrl?: string | null;
-    thumbnailUrl?: string | null;
-    fileName?: string;
-    width?: number | null;
-    height?: number | null;
-  };
 };
 
 const SCOPES: Array<{ value: AlbumScope; label: string }> = [
@@ -228,14 +217,9 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
     setUploading(true);
     setError(null);
     try {
-      const res = await fetch('/api/assets/upload', {
-        ...buildRawFileUploadRequest(file),
-      });
-      const data = await readJsonResponse<UploadAssetResponse>(res, {
+      const asset = await uploadFileToHistory(file, {
         invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
       });
-      if (!res.ok) throw new Error(data.error || data.message || '图片上传失败');
-      const asset = data.asset;
       if (!asset?.id) throw new Error('图片上传成功，但没有返回素材 ID');
       const assetId = asset.id;
       const nextImage: TemplateContextCardBoundImage = {
