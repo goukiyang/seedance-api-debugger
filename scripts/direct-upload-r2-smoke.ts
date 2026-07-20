@@ -4,6 +4,7 @@ import path from 'path';
 import { createDirectUploadTicket } from '../src/lib/assets/direct-upload';
 
 const envKeys = [
+  'R2_DIRECT_UPLOAD_ENABLED',
   'R2_ACCOUNT_ID',
   'R2_ACCESS_KEY_ID',
   'R2_SECRET_ACCESS_KEY',
@@ -55,6 +56,7 @@ async function run() {
   process.env.R2_SECRET_ACCESS_KEY = 'smoke-secret-key';
   process.env.R2_BUCKET = 'smoke-bucket';
   process.env.R2_PUBLIC_BASE_URL = 'https://assets.example.com';
+  process.env.R2_DIRECT_UPLOAD_ENABLED = 'true';
 
   const ticket = await createDirectUploadTicket({
     ownerId: 'smoke-user',
@@ -67,7 +69,7 @@ async function run() {
   }
   assert.equal(ticket.method, 'PUT');
   assert.equal(ticket.headers['Content-Type'], 'image/png');
-  assert.match(ticket.uploadUrl, /^https:\/\/smoke-account\.r2\.cloudflarestorage\.com\/smoke-bucket\/seedance-direct-uploads\//);
+  assert.match(ticket.uploadUrl, /^https:\/\/smoke-bucket\.smoke-account\.r2\.cloudflarestorage\.com\/seedance-direct-uploads\//);
   assert.match(ticket.publicUrl, /^https:\/\/assets\.example\.com\/seedance-direct-uploads\//);
   assert.ok(ticket.uploadUrl.includes('X-Amz-Signature='));
   assert.equal(ticket.uploadUrl.includes('smoke-secret-key'), false);
