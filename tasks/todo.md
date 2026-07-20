@@ -25,32 +25,32 @@
 
 ### 2. 具体任务
 
-- [ ] 现状和能力确认：确认生产当前使用 R2，核对 `src/lib/assets/public-storage.ts` 的 R2 配置读取、`R2_PUBLIC_BASE_URL` 公网可访问、bucket CORS 是否允许浏览器 `PUT`，并确认不能输出任何 key/token/cookie。
-- [ ] 依赖决策：先探针 `@aws-sdk/s3-request-presigner` 是否可用；如果不可用，优先评估使用已存在的 `@smithy/signature-v4` 最小签名实现；只有确认本地实现风险高时，才规划新增 `@aws-sdk/s3-request-presigner` 依赖和锁文件改动。
-- [ ] 新增签名票据接口：创建 `src/app/api/assets/upload-ticket/route.ts`，只接受登录用户请求；入参为 `fileName`、`mimeType`、`fileSize`、`kind`；复用 `validateSiteUploadMetadata` 做类型/大小校验；生成短期有效的 R2 `PUT` 上传地址、对象 key、最终 public URL、必要 headers 和过期时间。
-- [ ] 新增完成入库接口：创建 `src/app/api/assets/upload-complete/route.ts`，只接受登录用户请求；校验 ticket/key 属于当前用户和允许前缀；确认对象已可访问或可 HEAD；写入/复用 `Asset` 记录，并返回和 `/api/assets/upload` 一致的 `asset` 结构。
-- [ ] 图片缩略图策略：第一版图片直接用 R2 原图作为可见预览，必要时服务端只下载小图生成缩略图；不要为了大视频/音频缩略图把完整文件再拉回服务器。
-- [ ] 媒体时长策略：前端在上传前用浏览器读取视频/音频时长，继续限制 2-15 秒；后端完成接口记录客户端时长并保留旧 raw upload 的服务端 ffprobe 回退；如需强校验，再单独做异步校验任务，不阻塞本次直传上线。
-- [ ] 前端上传 helper 改造：扩展 `src/lib/http/file-upload.ts`，新增 `uploadFileDirectToStorage(file, options)`；流程为拿 ticket -> `PUT` 到 R2 -> 调 complete -> 返回 asset；保留 `buildRawFileUploadRequest` 作为 fallback。
-- [ ] 生成页工作台接入：修改 `src/lib/hooks/useWorkspace.ts`，`uploadAssetToHistory` 优先走直传；ticket/PUT/complete 任一步失败时，用明确中文错误提示并允许 fallback 到 raw upload。
-- [ ] 模板绑定图片接入：修改 `src/components/templates/TemplateBoundImagePicker.tsx`，上传按钮复用直传 helper；成功后仍自动选择上传结果，不改变用户操作习惯。
-- [ ] 其他上传入口梳理：只读列出仍走 `/api/assets/upload`、`/api/reference-albums/[id]/images`、`/api/codex/assets/upload`、`/api/tools/ultimate-canvas/upload`、`/api/assets/upload-and-create` 的入口；本轮只改用户当前高频入口，其他入口保留 raw upload 并写后续项，避免一次改太大。
-- [ ] 错误提示统一：前端把错误拆成“文件类型/大小不支持”“上传到存储失败”“上传完成但入库失败”“登录失效”；不再把非 JSON 或 HTML 统称为系统异常。
-- [ ] 回退开关：加最小可控开关，例如服务端在没有 R2 配置、签名失败、CORS 未通过时返回 `directUploadAvailable=false`，前端自动走现有 raw upload；不要让用户看到新旧链路选择。
-- [ ] 安全边界：R2 key 必须包含用户隔离前缀和随机 ID，不能信任前端传入 key；上传票据有效期控制在 5-10 分钟；限制 `Content-Type`、大小、对象前缀；日志里不打印签名 URL 全量查询参数。
-- [ ] 清理策略：记录或至少可查询未完成 ticket/key；第一版如果不新增表，需要写清依赖 R2 生命周期或后续清理脚本；不能让废弃对象无限增长。
-- [ ] Smoke 测试：新增 `scripts/direct-upload-r2-smoke.ts` 或同类脚本，覆盖 ticket 校验、非法类型拒绝、超大文件拒绝、key 前缀隔离、complete 入库结构和签名 URL 不进日志。
-- [ ] 真实链路验证：用登录态在本地和公网各上传一张小 PNG；验证返回 JSON 200、历史上传列表可见、当前参考图可选；测试素材最后隐藏或标记为 smoke。
-- [ ] 部署上线：验证通过后按 sd2 规则执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并检查公网 `/api/config`、`/login`、生产 BUILD_ID 和静态 chunk 命中新代码。
+- [x] 现状和能力确认：确认生产当前使用 R2，核对 `src/lib/assets/public-storage.ts` 的 R2 配置读取、`R2_PUBLIC_BASE_URL` 公网可访问、bucket CORS 是否允许浏览器 `PUT`，并确认不能输出任何 key/token/cookie。结论：R2 SDK 写入和 public URL 可用；bucket CORS 预检返回 403，当前 R2 access key 修改 CORS 返回 `AccessDenied`。
+- [x] 依赖决策：先探针 `@aws-sdk/s3-request-presigner` 是否可用；如果不可用，优先评估使用已存在的 `@smithy/signature-v4` 最小签名实现；只有确认本地实现风险高时，才规划新增 `@aws-sdk/s3-request-presigner` 依赖和锁文件改动。结论：手写/Smithy 通用签名真实 PUT 403，已改用 Apache-2.0 的官方 `@aws-sdk/s3-request-presigner`。
+- [x] 新增签名票据接口：创建 `src/app/api/assets/upload-ticket/route.ts`，只接受登录用户请求；入参为 `fileName`、`mimeType`、`fileSize`、`kind`；复用 `validateSiteUploadMetadata` 做类型/大小校验；生成短期有效的 R2 `PUT` 上传地址、对象 key、最终 public URL、必要 headers 和过期时间。
+- [x] 新增完成入库接口：创建 `src/app/api/assets/upload-complete/route.ts`，只接受登录用户请求；校验 ticket/key 属于当前用户和允许前缀；确认对象已可访问或可 HEAD；写入/复用 `Asset` 记录，并返回和 `/api/assets/upload` 一致的 `asset` 结构。
+- [x] 图片缩略图策略：第一版图片直接用 R2 原图作为可见预览，必要时服务端只下载小图生成缩略图；不要为了大视频/音频缩略图把完整文件再拉回服务器。
+- [x] 媒体时长策略：前端在上传前用浏览器读取视频/音频时长，继续限制 2-15 秒；后端完成接口记录客户端时长并保留旧 raw upload 的服务端 ffprobe 回退；如需强校验，再单独做异步校验任务，不阻塞本次直传上线。
+- [x] 前端上传 helper 改造：扩展 `src/lib/http/file-upload.ts`，新增统一 `uploadFileToHistory(file, options)`；流程为拿 ticket -> `PUT` 到 R2 -> 调 complete -> 返回 asset；保留 `buildRawFileUploadRequest` 作为 fallback。
+- [x] 生成页工作台接入：修改 `src/lib/hooks/useWorkspace.ts`，`uploadAssetToHistory` 优先走直传；ticket/PUT/complete 任一步失败时，用明确中文错误提示并允许 fallback 到 raw upload。
+- [x] 模板绑定图片接入：修改 `src/components/templates/TemplateBoundImagePicker.tsx`，上传按钮复用直传 helper；成功后仍自动选择上传结果，不改变用户操作习惯。
+- [x] 其他上传入口梳理：只读列出仍走 `/api/assets/upload`、`/api/reference-albums/[id]/images`、`/api/codex/assets/upload`、`/api/tools/ultimate-canvas/upload`、`/api/assets/upload-and-create` 的入口；本轮只改用户当前高频入口，其他入口保留 raw upload 并写后续项，避免一次改太大。
+- [x] 错误提示统一：前端把错误拆成“文件类型/大小不支持”“上传到存储失败”“上传完成但入库失败”“登录失效”；不再把非 JSON 或 HTML 统称为系统异常。
+- [x] 回退开关：加最小可控开关，例如服务端在没有 R2 配置、签名失败、CORS 未通过时返回 `directUploadAvailable=false`，前端自动走现有 raw upload；不要让用户看到新旧链路选择。当前线上未设置 `R2_DIRECT_UPLOAD_ENABLED=true`，因此先安全回退。
+- [x] 安全边界：R2 key 必须包含用户隔离前缀和随机 ID，不能信任前端传入 key；上传票据有效期控制在 5-10 分钟；限制 `Content-Type`、大小、对象前缀；日志里不打印签名 URL 全量查询参数。
+- [ ] 清理策略：记录或至少可查询未完成 ticket/key；第一版如果不新增表，需要写清依赖 R2 生命周期或后续清理脚本；不能让废弃对象无限增长。本轮未新增 ticket 表；直传正式开启前还需要配置 R2 生命周期或清理脚本。
+- [x] Smoke 测试：新增 `scripts/direct-upload-r2-smoke.ts` 或同类脚本，覆盖 ticket 校验、非法类型拒绝、超大文件拒绝、key 前缀隔离、complete 入库结构和签名 URL 不进日志。
+- [ ] 真实链路验证：用登录态在本地和公网各上传一张小 PNG；验证返回 JSON 200、历史上传列表可见、当前参考图可选；测试素材最后隐藏或标记为 smoke。已验证公网 raw fallback 新素材上传 JSON 200 并隐藏；已验证开关打开时官方签名 PUT 能写入 R2 并清理；浏览器直传和页面可视化选择仍等待 R2 CORS 权限。
+- [x] 部署上线：验证通过后按 sd2 规则执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status sd2`，并检查公网 `/api/config`、`/login`、生产 BUILD_ID 和静态 chunk 命中新代码。
 
 ### 3. 验收/审查内容
 
-- [ ] 代码验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint` 必须通过；如有专项 smoke，也必须通过。
-- [ ] 接口验证：未登录访问 ticket/complete 返回 JSON 401；非法类型、超大文件返回明确 JSON 400；不能出现 HTML 响应或 `Unexpected token '<'`。
-- [ ] 真实上传验证：公网真实登录态上传小 PNG 成功；上传后历史列表能看到该素材；选择素材能加入当前参考图；刷新后仍存在。
-- [ ] 性能验证：同样 5MB 非法类型不能再慢到 20-40 秒；有效小图不再由 Next.js 先收完整文件再转存；浏览器能显示真实上传阶段。
-- [ ] 安全审查：签名 URL、R2 密钥、session cookie、内部路径不能进入日志、前端错误提示、版本登记或 Git；R2 key 不能由前端任意指定。
-- [ ] 兼容审查：没有 R2 或 CORS 配置错误时，现有 raw upload 仍可回退；旧的 `/api/assets/upload` 不删除，避免 Codex/无线画布/参考图集入口被打断。
+- [x] 代码验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint` 必须通过；如有专项 smoke，也必须通过。
+- [x] 接口验证：未登录访问 ticket/complete 返回 JSON 401；非法类型、超大文件返回明确 JSON 400；不能出现 HTML 响应或 `Unexpected token '<'`。
+- [ ] 真实上传验证：公网真实登录态上传小 PNG 成功；上传后历史列表能看到该素材；选择素材能加入当前参考图；刷新后仍存在。接口层已通过并隐藏测试素材，页面可视化选择还未独立完成。
+- [ ] 性能验证：同样 5MB 非法类型不能再慢到 20-40 秒；有效小图不再由 Next.js 先收完整文件再转存；浏览器能显示真实上传阶段。当前线上因 R2 CORS 未配置，仍走 raw fallback；直传性能收益待 CORS 权限到位后开启。
+- [x] 安全审查：签名 URL、R2 密钥、session cookie、内部路径不能进入日志、前端错误提示、版本登记或 Git；R2 key 不能由前端任意指定。
+- [x] 兼容审查：没有 R2 或 CORS 配置错误时，现有 raw upload 仍可回退；旧的 `/api/assets/upload` 不删除，避免 Codex/无线画布/参考图集入口被打断。
 - [ ] 独立只读审查：实现后创建独立只读审查 agent，审查 agent 不改文件、不提交、不补实现；只按本清单判断目标是否达标、证据是否充分、风险是否遗漏，并输出通过/不通过、证据、缺口和下一步。
 - [ ] 如果子 agent 暂不可用：由主线程按同一清单只读复查，不能改文件；该结果不是独立审查，可信度低于子 agent，不能把“独立只读审查”项标记为完成。
 
@@ -63,11 +63,11 @@
 
 ### 停止条件
 
-- [ ] 需要新增依赖但无法确认许可证、包体、维护状态或锁文件影响时，先停止并说明。
-- [ ] R2 CORS 或公网域名配置不支持浏览器直传时，先停止在配置层补齐，不用代码硬绕。
-- [ ] 发现签名 URL 会被前端、日志、错误提示或版本记录泄露时，停止上线。
-- [ ] 需要数据库 schema 变更但没有 SQLite 备份和回滚方案时，停止实现。
-- [ ] 真实上传会大量污染生产素材或消耗不可接受带宽时，停止批量测试，只保留单张 smoke 并清理。
+- [x] 需要新增依赖但无法确认许可证、包体、维护状态或锁文件影响时，先停止并说明。已确认官方 AWS SDK 包，许可证 Apache-2.0，锁文件已纳入提交。
+- [x] R2 CORS 或公网域名配置不支持浏览器直传时，先停止在配置层补齐，不用代码硬绕。已停止默认开启直传；线上先走 raw fallback，等待具备桶 CORS 权限后开启 `R2_DIRECT_UPLOAD_ENABLED=true`。
+- [x] 发现签名 URL 会被前端、日志、错误提示或版本记录泄露时，停止上线。验证过程只输出 host/status，不输出完整签名 URL。
+- [x] 需要数据库 schema 变更但没有 SQLite 备份和回滚方案时，停止实现。本轮无 schema 变更。
+- [x] 真实上传会大量污染生产素材或消耗不可接受带宽时，停止批量测试，只保留单张 smoke 并清理。公网测试素材已调用隐藏接口。
 
 ### Git Plan
 
