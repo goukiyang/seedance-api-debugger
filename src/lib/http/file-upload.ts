@@ -73,7 +73,19 @@ function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
 }
 
 function rawFallbackUnavailableMessage(reason: string) {
-  return `${reason}。当前文件需要浏览器直传对象存储；请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
+  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 8MB 以内图片自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
+}
+
+async function uploadWithRawFallbackOrThrow(
+  file: File,
+  invalidJsonMessage: string,
+  fallbackToRaw: boolean,
+  reason: string,
+) {
+  if (shouldUseRawFallback(file, fallbackToRaw)) {
+    return uploadWithRawFallback(file, invalidJsonMessage);
+  }
+  throw new Error(rawFallbackUnavailableMessage(reason));
 }
 
 async function sha256File(file: File) {
@@ -181,23 +193,33 @@ export async function uploadFileToHistory(
 
   validateClientMediaDuration(file, durationSeconds);
 
-  const ticketRes = await fetch('/api/assets/upload-ticket', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fileName: file.name || 'upload.bin',
-      mimeType: file.type || 'application/octet-stream',
-      fileSize: file.size,
-      hash,
-    }),
-  });
-  const ticket = await readJsonResponse<DirectUploadTicketResponse>(ticketRes, { invalidJsonMessage });
+  let ticket: DirectUploadTicketResponse;
+  let ticketRes: Response;
+  try {
+    ticketRes = await fetch('/api/assets/upload-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: file.name || 'upload.bin',
+        mimeType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        hash,
+      }),
+    });
+    ticket = await readJsonResponse<DirectUploadTicketResponse>(ticketRes, { invalidJsonMessage });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '上传票据创建失败';
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+  }
   if (!ticketRes.ok) {
-    throw new Error(ticket.error || ticket.message || '上传票据创建失败');
+    const message = ticket.error || ticket.message || '上传票据创建失败';
+    if (ticketRes.status >= 500) {
+      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+    }
+    throw new Error(message);
   }
   if (ticket.directUploadAvailable === false) {
-    if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage);
-    throw new Error(rawFallbackUnavailableMessage(ticket.reason || '直传暂不可用'));
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用');
   }
   if (!ticket.uploadUrl || !ticket.uploadToken || ticket.method !== 'PUT') {
     throw new Error('上传票据内容不完整，请刷新后重试。');
@@ -211,18 +233,25 @@ export async function uploadFileToHistory(
     throw new Error(rawFallbackUnavailableMessage(message));
   }
 
-  const completeRes = await fetch('/api/assets/upload-complete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      uploadToken: ticket.uploadToken,
-      hash,
-      width,
-      height,
-      durationSeconds,
-    }),
-  });
-  const complete = await readJsonResponse<UploadAssetResponse>(completeRes, { invalidJsonMessage });
+  let complete: UploadAssetResponse;
+  let completeRes: Response;
+  try {
+    completeRes = await fetch('/api/assets/upload-complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uploadToken: ticket.uploadToken,
+        hash,
+        width,
+        height,
+        durationSeconds,
+      }),
+    });
+    complete = await readJsonResponse<UploadAssetResponse>(completeRes, { invalidJsonMessage });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '上传完成登记失败';
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+  }
   if (!completeRes.ok) {
     throw new Error(complete.error || complete.message || '上传完成但入库失败，请重新上传。');
   }

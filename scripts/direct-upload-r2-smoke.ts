@@ -121,9 +121,11 @@ async function run() {
   assert.match(clientSource, /RAW_FALLBACK_MAX_SIZE_BYTES = 8 \* 1024 \* 1024/, 'raw upload fallback must be size-limited');
   assert.match(clientSource, /file\.type\.startsWith\('image\/'\)/, 'raw upload fallback must be limited to image uploads');
   assert.match(clientSource, /R2 CORS/, 'direct upload failures must tell admins to check R2 CORS');
-  assert.doesNotMatch(clientSource, /readJsonResponse<DirectUploadTicketResponse>[\s\S]{0,240}catch \(error\)[\s\S]+uploadWithRawFallback/, 'ticket non-json errors must not fallback to raw upload');
+  assert.match(clientSource, /readJsonResponse<DirectUploadTicketResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'ticket non-json errors must fallback safely or show a clear bounded error');
+  assert.match(clientSource, /ticketRes\.status >= 500[\s\S]+uploadWithRawFallbackOrThrow/, 'ticket server errors must use the safe fallback boundary');
   assert.match(clientSource, /putFileToStorage[\s\S]+catch \(error\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'object storage PUT fallback must stay behind the safe fallback guard');
-  assert.doesNotMatch(clientSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallback/, 'complete failures must not fallback to raw upload after object storage succeeds');
+  assert.match(clientSource, /readJsonResponse<UploadAssetResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'complete non-json errors must fallback safely or show a clear bounded error');
+  assert.doesNotMatch(clientSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallbackOrThrow/, 'complete JSON failures must not fallback to raw upload after object storage succeeds');
   assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client may fallback only when direct upload is explicitly unavailable');
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
 
