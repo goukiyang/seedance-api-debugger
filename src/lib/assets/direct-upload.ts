@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand, S3Client, type PutObjectCommandInput } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
@@ -63,6 +63,11 @@ type CompleteDirectUploadInput = {
   width?: number | null;
   height?: number | null;
   durationSeconds?: number | null;
+};
+
+type ProxyDirectUploadInput = CompleteDirectUploadInput & {
+  body: NonNullable<PutObjectCommandInput['Body']>;
+  contentLength?: number | null;
 };
 
 export type DirectUploadAssetResult = {
@@ -317,4 +322,33 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
     isPubliclyReachable: true,
     storageProvider: 'r2',
   };
+}
+
+export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput): Promise<DirectUploadAssetResult> {
+  const payload = verifyToken(input.uploadToken, input.ownerId);
+  const config = getR2DirectUploadConfig();
+  if (!config) throw new Error('R2 直传配置不可用，请刷新后重试。');
+
+  const hash = assertSha256Hash(input.hash);
+  if (hash !== payload.hash) {
+    throw new Error('文件校验信息和上传票据不一致，请重新上传。');
+  }
+
+  if (input.contentLength != null && input.contentLength !== payload.fileSize) {
+    throw new Error('上传文件大小和票据不一致，请重新上传。');
+  }
+
+  const durationError = validateSiteUploadDuration(payload.mimeType, input.durationSeconds);
+  if (durationError) throw new Error(durationError);
+
+  const client = createR2Client(config);
+  await client.send(new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: payload.key,
+    ContentType: payload.mimeType,
+    ContentLength: payload.fileSize,
+    Body: input.body,
+  }));
+
+  return completeDirectUpload(input);
 }

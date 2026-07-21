@@ -110,20 +110,29 @@ async function run() {
   assert.match(completeSource, /getSession\(\)/, 'upload-complete route must require session');
   assert.match(completeSource, /completeDirectUpload/, 'upload-complete route must verify and register upload');
 
+  const proxySource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/assets/upload-proxy/route.ts'), 'utf8');
+  assert.match(proxySource, /getSession\(\)/, 'upload-proxy route must require session');
+  assert.match(proxySource, /proxyDirectUploadToStorage/, 'upload-proxy route must use the direct upload proxy helper');
+  assert.match(proxySource, /Readable\.fromWeb/, 'upload-proxy route must stream the request body to storage');
+
   const directUploadSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/assets/direct-upload.ts'), 'utf8');
   assert.match(directUploadSource, /hash: null/, 'direct uploads must not store client-provided hash as trusted file hash');
   assert.doesNotMatch(directUploadSource, /where:\s*{\s*owner_id:\s*input\.ownerId,\s*hash\s*}/, 'direct uploads must not reuse assets by client-provided hash');
+  assert.match(directUploadSource, /proxyDirectUploadToStorage/, 'direct upload helper must expose a server-side proxy fallback');
+  assert.match(directUploadSource, /ContentLength:\s*payload\.fileSize/, 'server-side proxy fallback must preserve ticket file size');
 
   const clientSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/http/file-upload.ts'), 'utf8');
   assert.match(clientSource, /\/api\/assets\/upload-ticket/, 'client must request upload ticket');
   assert.match(clientSource, /\/api\/assets\/upload-complete/, 'client must complete direct upload');
+  assert.match(clientSource, /\/api\/assets\/upload-proxy/, 'client must use same-origin server proxy when R2 browser PUT fails');
   assert.match(clientSource, /buildRawFileUploadRequest/, 'client must keep raw upload fallback');
   assert.match(clientSource, /RAW_FALLBACK_MAX_SIZE_BYTES = 8 \* 1024 \* 1024/, 'raw upload fallback must be size-limited');
   assert.match(clientSource, /file\.type\.startsWith\('image\/'\)/, 'raw upload fallback must be limited to image uploads');
   assert.match(clientSource, /R2 CORS/, 'direct upload failures must tell admins to check R2 CORS');
   assert.match(clientSource, /readJsonResponse<DirectUploadTicketResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'ticket non-json errors must fallback safely or show a clear bounded error');
   assert.match(clientSource, /ticketRes\.status >= 500[\s\S]+uploadWithRawFallbackOrThrow/, 'ticket server errors must use the safe fallback boundary');
-  assert.match(clientSource, /putFileToStorage[\s\S]+catch \(error\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'object storage PUT fallback must stay behind the safe fallback guard');
+  assert.match(clientSource, /putFileToStorage[\s\S]+catch \(error\)[\s\S]+uploadWithServerProxy/, 'object storage PUT failure must try same-origin server proxy before giving up');
+  assert.match(clientSource, /uploadWithServerProxy[\s\S]+catch \(proxyError\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'raw fallback must stay behind proxy failure and the safe fallback guard');
   assert.match(clientSource, /readJsonResponse<UploadAssetResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'complete non-json errors must fallback safely or show a clear bounded error');
   assert.doesNotMatch(clientSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallbackOrThrow/, 'complete JSON failures must not fallback to raw upload after object storage succeeds');
   assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client may fallback only when direct upload is explicitly unavailable');

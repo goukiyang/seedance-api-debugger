@@ -42,6 +42,13 @@ type DirectUploadTicketResponse = {
   message?: string;
 };
 
+type UploadContext = {
+  hash: string;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+};
+
 export function buildRawFileUploadRequest(file: File): RequestInit {
   return {
     method: 'POST',
@@ -86,6 +93,33 @@ async function uploadWithRawFallbackOrThrow(
     return uploadWithRawFallback(file, invalidJsonMessage);
   }
   throw new Error(rawFallbackUnavailableMessage(reason));
+}
+
+async function uploadWithServerProxy(
+  ticket: DirectUploadTicketResponse,
+  file: File,
+  context: UploadContext,
+  invalidJsonMessage: string,
+) {
+  if (!ticket.uploadToken) throw new Error('缺少上传票据，请重新上传。');
+  const headers: Record<string, string> = {
+    'Content-Type': file.type || 'application/octet-stream',
+    'X-Upload-Token': ticket.uploadToken,
+    'X-File-Hash': context.hash,
+  };
+  if (context.width != null) headers['X-Image-Width'] = String(context.width);
+  if (context.height != null) headers['X-Image-Height'] = String(context.height);
+  if (context.durationSeconds != null) headers['X-Media-Duration'] = String(context.durationSeconds);
+
+  const res = await fetch('/api/assets/upload-proxy', {
+    method: 'POST',
+    headers,
+    body: file,
+  });
+  const data = await readJsonResponse<UploadAssetResponse>(res, { invalidJsonMessage });
+  if (!res.ok) throw new Error(data.error || data.message || '服务端中转上传失败，请重新选择后重试');
+  if (!data.asset?.id) throw new Error('服务端中转上传成功，但没有返回素材 ID');
+  return data.asset;
 }
 
 async function sha256File(file: File) {
@@ -228,9 +262,14 @@ export async function uploadFileToHistory(
   try {
     await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file);
   } catch (error) {
-    if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage);
     const message = error instanceof Error ? error.message : '上传到对象存储失败';
-    throw new Error(rawFallbackUnavailableMessage(message));
+    try {
+      return await uploadWithServerProxy(ticket, file, { hash, width, height, durationSeconds }, invalidJsonMessage);
+    } catch (proxyError) {
+      if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage);
+      const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
+      throw new Error(rawFallbackUnavailableMessage(`${message}；服务端中转也失败：${proxyMessage}`));
+    }
   }
 
   let complete: UploadAssetResponse;
