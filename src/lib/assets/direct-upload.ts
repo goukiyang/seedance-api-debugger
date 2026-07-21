@@ -99,7 +99,8 @@ function getR2DirectUploadConfig(): R2DirectUploadConfig | null {
     R2_PUBLIC_BASE_URL,
   } = process.env;
 
-  if (R2_DIRECT_UPLOAD_ENABLED !== 'true') {
+  const directUploadFlag = (R2_DIRECT_UPLOAD_ENABLED || '').trim().toLowerCase();
+  if (['0', 'false', 'off', 'disabled'].includes(directUploadFlag)) {
     return null;
   }
 

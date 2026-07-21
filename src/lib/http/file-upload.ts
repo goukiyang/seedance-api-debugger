@@ -3,6 +3,7 @@ import { readJsonResponse } from './json-response';
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const MEDIA_DURATION_MIN_SECONDS = 2;
 const MEDIA_DURATION_MAX_SECONDS = 15;
+const RAW_FALLBACK_MAX_SIZE_BYTES = 8 * 1024 * 1024;
 
 export type UploadedAssetPayload = {
   id?: string;
@@ -61,6 +62,18 @@ async function uploadWithRawFallback(file: File, invalidJsonMessage: string) {
   if (!res.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('素材上传成功，但没有返回素材 ID');
   return data.asset;
+}
+
+function canUseRawFallback(file: File) {
+  return file.type.startsWith('image/') && file.size <= RAW_FALLBACK_MAX_SIZE_BYTES;
+}
+
+function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
+  return fallbackToRaw && canUseRawFallback(file);
+}
+
+function rawFallbackUnavailableMessage(reason: string) {
+  return `${reason}。当前文件需要浏览器直传对象存储；请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
 }
 
 async function sha256File(file: File) {
@@ -128,7 +141,7 @@ function putFileToStorage(url: string, headers: Record<string, string>, file: Fi
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
       } else {
-        reject(new Error(`上传到对象存储失败（HTTP ${xhr.status || '未知'}），已尝试回退普通上传。`));
+        reject(new Error(`上传到对象存储失败（HTTP ${xhr.status || '未知'}）`));
       }
     };
     xhr.onerror = () => reject(new Error('上传到对象存储失败，请检查网络或稍后重试。'));
@@ -155,73 +168,64 @@ export async function uploadFileToHistory(
       readImageDimensions(file),
       readMediaDuration(file),
     ]);
-    validateClientMediaDuration(file, durationSeconds);
-
-    const ticketRes = await fetch('/api/assets/upload-ticket', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fileName: file.name || 'upload.bin',
-        mimeType: file.type || 'application/octet-stream',
-        fileSize: file.size,
-        hash,
-      }),
-    });
-    let ticket: DirectUploadTicketResponse;
-    try {
-      ticket = await readJsonResponse<DirectUploadTicketResponse>(ticketRes, { invalidJsonMessage });
-    } catch (error) {
-      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
-      throw error;
-    }
-    if (!ticketRes.ok) {
-      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
-      throw new Error(ticket.error || ticket.message || '上传票据创建失败');
-    }
-    if (ticket.directUploadAvailable === false) {
-      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
-      throw new Error(ticket.reason || '直传暂不可用');
-    }
-    if (!ticket.uploadUrl || !ticket.uploadToken || ticket.method !== 'PUT') {
-      throw new Error('上传票据内容不完整，请刷新后重试。');
-    }
-
-    try {
-      await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file);
-    } catch (putError) {
-      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
-      throw putError;
-    }
-
-    const completeRes = await fetch('/api/assets/upload-complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uploadToken: ticket.uploadToken,
-        hash,
-        width,
-        height,
-        durationSeconds,
-      }),
-    });
-    let complete: UploadAssetResponse;
-    try {
-      complete = await readJsonResponse<UploadAssetResponse>(completeRes, { invalidJsonMessage });
-    } catch (error) {
-      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
-      throw error;
-    }
-    if (!completeRes.ok) {
-      if (fallbackToRaw) return uploadWithRawFallback(file, invalidJsonMessage);
-      throw new Error(complete.error || complete.message || '上传完成但入库失败，请重新上传。');
-    }
-    if (!complete.asset?.id) throw new Error('上传完成但没有返回素材 ID');
-    return complete.asset;
   } catch (error) {
-    const message = error instanceof Error ? error.message : '素材上传失败，请重新选择后重试';
-    if (fallbackToRaw) {
+    if (
+      shouldUseRawFallback(file, fallbackToRaw) &&
+      error instanceof Error &&
+      error.message.includes('当前浏览器不支持文件校验')
+    ) {
       return uploadWithRawFallback(file, invalidJsonMessage);
     }
     throw error;
   }
+
+  validateClientMediaDuration(file, durationSeconds);
+
+  const ticketRes = await fetch('/api/assets/upload-ticket', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fileName: file.name || 'upload.bin',
+      mimeType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+      hash,
+    }),
+  });
+  const ticket = await readJsonResponse<DirectUploadTicketResponse>(ticketRes, { invalidJsonMessage });
+  if (!ticketRes.ok) {
+    throw new Error(ticket.error || ticket.message || '上传票据创建失败');
+  }
+  if (ticket.directUploadAvailable === false) {
+    if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage);
+    throw new Error(rawFallbackUnavailableMessage(ticket.reason || '直传暂不可用'));
+  }
+  if (!ticket.uploadUrl || !ticket.uploadToken || ticket.method !== 'PUT') {
+    throw new Error('上传票据内容不完整，请刷新后重试。');
+  }
+
+  try {
+    await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file);
+  } catch (error) {
+    if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage);
+    const message = error instanceof Error ? error.message : '上传到对象存储失败';
+    throw new Error(rawFallbackUnavailableMessage(message));
+  }
+
+  const completeRes = await fetch('/api/assets/upload-complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      uploadToken: ticket.uploadToken,
+      hash,
+      width,
+      height,
+      durationSeconds,
+    }),
+  });
+  const complete = await readJsonResponse<UploadAssetResponse>(completeRes, { invalidJsonMessage });
+  if (!completeRes.ok) {
+    throw new Error(complete.error || complete.message || '上传完成但入库失败，请重新上传。');
+  }
+  if (!complete.asset?.id) throw new Error('上传完成但没有返回素材 ID');
+  return complete.asset;
 }

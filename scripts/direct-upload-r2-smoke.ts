@@ -72,7 +72,7 @@ async function run() {
   process.env.R2_SECRET_ACCESS_KEY = 'smoke-secret-key';
   process.env.R2_BUCKET = 'smoke-bucket';
   process.env.R2_PUBLIC_BASE_URL = 'https://assets.example.com';
-  process.env.R2_DIRECT_UPLOAD_ENABLED = 'true';
+  delete process.env.R2_DIRECT_UPLOAD_ENABLED;
 
   const ticket = await createDirectUploadTicket({
     ownerId: 'smoke-user',
@@ -92,6 +92,16 @@ async function run() {
   assert.equal(ticket.uploadUrl.includes('smoke-secret-key'), false);
   assert.equal(ticket.uploadToken.includes('smoke-secret-key'), false);
 
+  process.env.R2_DIRECT_UPLOAD_ENABLED = 'false';
+  const explicitlyDisabled = await createDirectUploadTicket({
+    ownerId: 'smoke-user',
+    fileName: 'disabled.png',
+    mimeType: 'image/png',
+    fileSize: 1024,
+    hash: smokeHash,
+  });
+  assert.equal(explicitlyDisabled.directUploadAvailable, false, 'explicit false flag must disable direct upload');
+
   const routeSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/assets/upload-ticket/route.ts'), 'utf8');
   assert.match(routeSource, /getSession\(\)/, 'upload-ticket route must require session');
   assert.match(routeSource, /createDirectUploadTicket/, 'upload-ticket route must use direct upload helper');
@@ -108,8 +118,13 @@ async function run() {
   assert.match(clientSource, /\/api\/assets\/upload-ticket/, 'client must request upload ticket');
   assert.match(clientSource, /\/api\/assets\/upload-complete/, 'client must complete direct upload');
   assert.match(clientSource, /buildRawFileUploadRequest/, 'client must keep raw upload fallback');
-  assert.match(clientSource, /readJsonResponse<DirectUploadTicketResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallback/, 'ticket non-json errors must fallback');
-  assert.match(clientSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallback/, 'complete failures must fallback');
+  assert.match(clientSource, /RAW_FALLBACK_MAX_SIZE_BYTES = 8 \* 1024 \* 1024/, 'raw upload fallback must be size-limited');
+  assert.match(clientSource, /file\.type\.startsWith\('image\/'\)/, 'raw upload fallback must be limited to image uploads');
+  assert.match(clientSource, /R2 CORS/, 'direct upload failures must tell admins to check R2 CORS');
+  assert.doesNotMatch(clientSource, /readJsonResponse<DirectUploadTicketResponse>[\s\S]{0,240}catch \(error\)[\s\S]+uploadWithRawFallback/, 'ticket non-json errors must not fallback to raw upload');
+  assert.match(clientSource, /putFileToStorage[\s\S]+catch \(error\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'object storage PUT fallback must stay behind the safe fallback guard');
+  assert.doesNotMatch(clientSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallback/, 'complete failures must not fallback to raw upload after object storage succeeds');
+  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client may fallback only when direct upload is explicitly unavailable');
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
 
   console.log('direct-upload-r2-smoke: ok');
