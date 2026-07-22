@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -42,6 +43,26 @@ async function assertThumbnailAvailabilityRules() {
 }
 
 function assertLocalizationRunnerRules() {
+  const localizationRunnerSource = fs.readFileSync(
+    path.join(process.cwd(), 'src/lib/video/task-localization-runner.ts'),
+    'utf8',
+  );
+  assert.match(
+    localizationRunnerSource,
+    /DEFAULT_INTERVAL_MS = 30_000/,
+    'localization runner must not poll provider every 15 seconds under load',
+  );
+  assert.match(
+    localizationRunnerSource,
+    /DEFAULT_MAX_RUNTIME_MS = 5 \* 60 \* 1000/,
+    'localization runner must stop within 5 minutes and leave retries to the scheduled finalizer',
+  );
+  assert.match(
+    localizationRunnerSource,
+    /DEFAULT_SUCCESS_CACHE_TIMEOUT_MS = 120_000/,
+    'localization runner cache attempts must stay bounded so uploads and browsing are not starved',
+  );
+
   assert.equal(
     shouldContinueLocalization({
       task: {

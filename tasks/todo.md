@@ -1,6 +1,6 @@
 # V1.2 剩余模块落地 Todo
 
-更新时间：2026-07-20
+更新时间：2026-07-22
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
 
@@ -14,6 +14,67 @@
 ## 当前专项入口
 
 - [WallVerse 第一组「世界迁移」声音闭环](todo/wallverse-audio-20260715.md)
+
+## 2026-07-22 上传链路彻底修复：旧入口 502、R2 直传失败、后台队列降压
+
+### 1. 目标复述
+
+用户现在遇到的上传问题不是“按钮没反应”这么简单。真实飞书登录态测试已经确认：通用上传能靠 `/api/assets/upload-proxy` 成功入库，但浏览器直传 R2 会 `Failed to fetch`；旧入口 `/api/assets/upload-and-create` 会返回 Cloudflare 502 HTML，前端按 JSON 解析后就出现 `Unexpected token '<'` 或“服务返回页面内容”。同时后台视频本地化还有 48 条成功但未缓存的视频任务，会持续占用系统资源，放大上传、资产刷新和工作区加载的不稳定。
+
+本次修复目标：用户在生成页、上传历史、资产管理相关入口上传图片时，要么成功并立即看到素材，要么得到清楚的中文原因；不再出现 HTML 当 JSON、上传后没结果、旧入口 502、后台任务拖死上传的问题。做到完成的标准是：真实飞书登录态小图上传成功，重复上传复用已有素材，旧入口失败也返回本站 JSON，页面刷新后素材仍存在，线上日志不再出现本轮同类上传 502。
+
+### 2. 具体任务
+
+- [x] 冻结现状证据：记录本轮真实测试结果，包括 `/api/auth/me` 已登录、`/api/assets/upload-ticket` 200、浏览器直传 R2 `Failed to fetch`、`/api/assets/upload-proxy` 200、`/api/assets/upload-and-create` 502 HTML、SQLite `journal_mode=delete` 和 `busy_timeout=0`、48 条本地视频未缓存；证据只写状态和结论，不写 cookie、uploadToken、签名 URL、手机号、头像 URL 或完整用户资料。
+- [x] 处理测试素材遗留：只读列出 `codex-upload-audit-*` 和 `codex-subagent-upload-audit-*` 产生的 `Asset` 记录；本轮保留测试素材作为上传链路证据，不手工改数据库；后续清理必须走现有 UI/API 软删除。
+- [x] 修旧入口永远返回 JSON：修改 `src/app/api/assets/upload-and-create/route.ts`，给 `request.formData()`、`uploadPublicAsset()`、`createAsset()`、`seedanceAssetRepository.createWithStorageMetadata()` 每个阶段加明确 JSON 失败返回；任何异常都必须是 `NextResponse.json(...)`，不能让 Cloudflare HTML 泄到前端。
+- [x] 给官方 Seedance Asset 创建加超时：在 `/api/assets/upload-and-create` 调 `createAsset()` 时增加短超时和阶段错误，例如 20-30 秒；超时返回 JSON：文件已上传到公网但官方资产创建失败/超时，请稍后重试创建，不让请求拖到 Cloudflare 502。
+- [x] 复用重复素材：继续沿用 `fileHash` 去重逻辑；重复上传同一文件时返回 `success: true, reused: true`，前端显示上传成功并复用已有 providerAssetId，不要求用户重新上传。
+- [x] 收紧 R2 直传策略：修改 `src/lib/assets/direct-upload.ts` 和 `src/app/api/assets/upload-ticket/route.ts`，浏览器 PUT 只有在明确开启并验证 CORS 可用时才返回 `directUploadAvailable=true`；否则直接返回“请走后端中转”的票据或禁用直传，避免用户先失败一次再 fallback。
+- [x] 前端上传 helper 降噪：检查 `src/lib/http/file-upload.ts`，如果服务端明确直传不可用，不再尝试浏览器 PUT；直接走 `/api/assets/upload-proxy`，进度文案显示“正在通过服务器上传”，不要把可预期 fallback 表现成一次失败。
+- [x] 旧入口前端错误提示兜底：检查 `src/components/SeedanceAssetPanel.tsx`，确保 `/api/assets/upload-and-create` 返回非 JSON、502 或连接中断时，统一显示“素材上传服务异常，系统没有拿到有效结果，请稍后重试”，并保留真实阶段提示；不要再暴露 `Unexpected token '<'`。
+- [x] 后台视频本地化降压：检查 `/Users/gouki-youdoo/.youdoo/runtime/sd2-finalize-pending-videos.sh`、`scripts/finalize-pending-videos.ts`、`src/lib/video/task-localization-runner.ts`，把长期下载超时任务限制在小批量、低并发、可跳过重复失败；避免每 5 分钟长时间占用数据库和网络。
+- [x] SQLite 写入等待保护：评估在 Prisma/SQLite 初始化路径增加 `busy_timeout` 和 WAL 的最小方案；本轮已上线连接级 `PRAGMA busy_timeout=5000`；`journal_mode=WAL` 涉及生产库日志模式变化，单独规划，不夹在上传修复里强推。
+- [x] 加最小回归测试：补充或新增一个小测试/脚本，覆盖 `/api/assets/upload-and-create` 非 JSON 防回归、官方创建超时 JSON、重复素材复用、直传禁用时直接 proxy；不引入新测试框架。
+- [x] 本地验证：执行 `git diff --check`、`npx tsc --noEmit --pretty false`、`npm run lint`；针对上传接口跑最小 smoke，确认未登录 401、非法文件 400、旧入口失败 JSON、不再输出 HTML。
+- [x] 真实网页登录态验证：用本机飞书登录的 Chrome，在 `https://sd2.youdoodesign.com/assets` 上传小 PNG；确认通用上传走中转成功、同一文件二次申请票据直接返回 `reused=true`；旧入口重复上传返回同一 providerAssetId。
+- [x] 线上部署闭环：验证通过后按 sd2 规则执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`，再查公网 `/api/config`、`/login`、目标页面和上传接口；等待一个健康守护周期确认 `runs` 不异常增长。
+
+### 3. 验收/审查内容
+
+- [x] 接口验收：`/api/assets/upload-and-create` 在正常、重复、官方创建失败、上游超时、非法文件、未登录场景都返回 JSON；响应 `content-type` 必须是 `application/json`，不得出现 `text/html` 或 `<!DOCTYPE html>`。
+- [x] 上传验收：真实飞书登录态上传小 PNG 成功；通用上传和旧 Seedance 资产入口至少都能给出明确结果；失败时说明“上传成功但官方资产创建失败”或“文件不合规”，不说“服务响应格式错误”这种泛化话。
+- [x] 复用验收：同一文件重复上传时前端显示成功，后端返回复用标识，不重复创建同一素材，不让用户看到“当前账号不能直接复用”。
+- [x] 性能验收：用户上传小图不再先经历一次必然失败的 R2 PUT；后台 finalize 任务运行时，`/api/assets/upload-ticket`、`/api/assets/upload-proxy`、`/api/workspace` 不应出现新增 P1008 超时。
+- [x] 日志验收：上传链路失败日志包含阶段名、状态码和安全摘要；不打印签名 URL、uploadToken、cookie、手机号、头像 URL、完整用户 profile。
+- [x] 独立只读审查：实现后创建独立只读审查 agent，审查 agent 不改文件、不提交、不补实现；只按本清单判断目标是否达标、证据是否充分、风险是否遗漏，并输出通过/不通过、证据、缺口和下一步。
+- [ ] 如果子 agent 暂不可用：由主线程按同一清单只读复查，不能改文件；该结果不是独立审查，可信度低于子 agent，不能把“独立只读审查”项标记为完成。
+
+### 4. 审查对齐检查
+
+- [x] 审查必须围绕“用户上传能成功或得到清楚原因”这个目标，不要只检查代码有没有捕获异常。
+- [x] 审查必须覆盖旧入口 `/api/assets/upload-and-create`，因为这是已复现返回 Cloudflare 502 HTML 的入口；不能只验新通用上传。
+- [x] 审查必须确认用户操作习惯不变：仍然是点击上传、选择文件、看到进度/阶段、成功后图片出现；不要求用户理解 R2、proxy、Seedance Asset 或 providerAssetId。
+- [x] 审查必须确认后台队列不会继续拖死上传：至少核对 running 任务、本地视频未缓存数量、finalize 日志、SQLite 超时日志。
+- [x] 审查必须确认没有扩大范围：不改点数、支付、视频生成扣费、权限体系、项目管理主流程；只处理上传、资产登记、错误兜底和后台降压。
+
+### 停止条件
+
+- [ ] 需要打印或读取 `.env`、cookie、token、签名 URL、uploadToken、App Secret 时立即停止，改用安全摘要验证。
+- [ ] 如果官方 Seedance Asset 创建会产生大量真实资产或无法清理，停止批量测试，只保留 1 张小图 smoke。
+- [ ] 如果 WAL / busy_timeout 调整可能破坏当前生产 SQLite 或需要停机迁移，先停止并单独规划，不夹在上传修复里强推。
+- [ ] 如果线上部署后 `/api/config`、`/login` 或健康守护周期异常，立即回滚到本次部署前版本。
+
+### Git Plan
+
+- 当前工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 当前分支：`codex/seedream-5-pro-image-provider`。
+- 建议保持当前任务分支继续修复；若执行前出现他人改动，再新建 `codex/fix-upload-json-and-queue-pressure` 隔离。
+- 提交分组：
+  - 提交 1：`upload-and-create` JSON 兜底、provider 创建超时、重复复用修复。
+  - 提交 2：R2 直传禁用/代理兜底策略和前端进度文案修复。
+  - 提交 3：后台 finalize 降压、最小测试、真实验收修复。
+- 发布前 rollback tag：`rollback/2026-07-22-before-upload-chain-fix`。
 
 ## 2026-07-20 上传链路最优解：R2 预签名直传
 

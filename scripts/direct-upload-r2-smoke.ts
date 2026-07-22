@@ -74,6 +74,24 @@ async function run() {
   process.env.R2_PUBLIC_BASE_URL = 'https://assets.example.com';
   delete process.env.R2_DIRECT_UPLOAD_ENABLED;
 
+  const proxyOnlyTicket = await createDirectUploadTicket({
+    ownerId: 'smoke-user',
+    fileName: '../unsafe name.png',
+    mimeType: 'image/png',
+    fileSize: 1024,
+    hash: smokeHash,
+  });
+  if (proxyOnlyTicket.directUploadAvailable !== false) {
+    throw new Error('browser direct PUT must be opt-in when R2 CORS is unknown');
+  }
+  if (!('uploadToken' in proxyOnlyTicket)) {
+    throw new Error('expected R2 proxy ticket when R2 is configured and browser direct upload is disabled');
+  }
+  assert.equal(Boolean(proxyOnlyTicket.uploadToken), true, 'R2 configured but browser direct disabled must still provide server-proxy upload token');
+  assert.equal('uploadUrl' in proxyOnlyTicket, false, 'server-proxy ticket must not expose a browser PUT URL');
+  assert.match(proxyOnlyTicket.reason, /中转|CORS|直传/);
+
+  process.env.R2_DIRECT_UPLOAD_ENABLED = 'true';
   const ticket = await createDirectUploadTicket({
     ownerId: 'smoke-user',
     fileName: '../unsafe name.png',
@@ -100,7 +118,13 @@ async function run() {
     fileSize: 1024,
     hash: smokeHash,
   });
-  assert.equal(explicitlyDisabled.directUploadAvailable, false, 'explicit false flag must disable direct upload');
+  if (explicitlyDisabled.directUploadAvailable !== false) {
+    throw new Error('explicit false flag must disable browser direct upload');
+  }
+  if (!('uploadToken' in explicitlyDisabled)) {
+    throw new Error('expected R2 proxy ticket when direct upload is explicitly disabled');
+  }
+  assert.equal(Boolean(explicitlyDisabled.uploadToken), true, 'explicit false must keep same-origin server proxy available when R2 is configured');
 
   const routeSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/assets/upload-ticket/route.ts'), 'utf8');
   assert.match(routeSource, /getSession\(\)/, 'upload-ticket route must require session');
@@ -116,8 +140,12 @@ async function run() {
   assert.match(proxySource, /Readable\.fromWeb/, 'upload-proxy route must stream the request body to storage');
 
   const directUploadSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/assets/direct-upload.ts'), 'utf8');
-  assert.match(directUploadSource, /hash: null/, 'direct uploads must not store client-provided hash as trusted file hash');
-  assert.doesNotMatch(directUploadSource, /where:\s*{\s*owner_id:\s*input\.ownerId,\s*hash\s*}/, 'direct uploads must not reuse assets by client-provided hash');
+  assert.match(directUploadSource, /createHashingUploadBody/, 'server-proxy uploads must hash the real uploaded stream on the server');
+  assert.match(directUploadSource, /trustedHash\?: string \| null/, 'trusted hashes must be explicit and separate from client-provided hashes');
+  assert.match(directUploadSource, /hash: trustedHash/, 'only server-verified upload hashes may be stored for later reuse');
+  assert.match(directUploadSource, /findActiveAssetByTrustedHash/, 'trusted uploaded hashes must be reusable by the same owner');
+  assert.match(directUploadSource, /directUploadAvailable: false,[\s\S]+reused: true,[\s\S]+asset: assetRecordToPayload/, 'ticket creation must return an immediate reuse result for existing same-owner hashes');
+  assert.match(directUploadSource, /hashingBody\.digest\(\)/, 'server-proxy upload must finish with the hash of the actual uploaded bytes');
   assert.match(directUploadSource, /proxyDirectUploadToStorage/, 'direct upload helper must expose a server-side proxy fallback');
   assert.match(directUploadSource, /ContentLength:\s*payload\.fileSize/, 'server-side proxy fallback must preserve ticket file size');
 
@@ -164,10 +192,12 @@ async function run() {
   assert.match(clientSource, /phase:\s*'storage'/, 'object storage upload progress must identify the storage phase');
   assert.match(clientSource, /phase:\s*'complete'/, 'completion registration must show a stage instead of fake percent');
   assert.match(clientSource, /phase:\s*'done'/, 'successful upload must finish at measured 100 percent');
+  assert.match(clientSource, /ticket\.reused === true[\s\S]+ticket\.asset\?\.id[\s\S]+已复用相同素材[\s\S]+return ticket\.asset/, 'client must complete immediately when upload-ticket returns an existing same-file asset');
   assert.match(clientCompleteSource, /fetch\('\/api\/assets\/upload-complete'[\s\S]+catch \(error\)[\s\S]+uploadStageConnectionMessage\('上传完成登记', error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'complete connection errors must show upload-complete stage context');
   assert.match(clientCompleteSource, /readUploadJsonResponse<UploadAssetResponse>\(completeRes, '上传完成登记接口', invalidJsonMessage\)[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'complete non-json errors must fallback safely or show a clear bounded error');
   assert.doesNotMatch(clientCompleteSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallbackOrThrow/, 'complete JSON failures must not fallback to raw upload after object storage succeeds');
-  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client may fallback only when direct upload is explicitly unavailable');
+  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithServerProxy/, 'client must use same-origin proxy directly when browser PUT is intentionally unavailable');
+  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client must keep raw upload fallback when no proxy ticket exists');
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
 
   console.log('direct-upload-r2-smoke: ok');

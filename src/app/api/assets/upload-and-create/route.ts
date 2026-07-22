@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import * as crypto from 'crypto';
+import { getSession } from '@/lib/auth/session';
 import { uploadPublicAsset } from '@/lib/assets/public-storage';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
@@ -19,6 +20,8 @@ import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+const UPLOAD_AND_CREATE_PROVIDER_TIMEOUT_MS = 25_000;
 
 type SeedanceUploadAssetType = 'Image' | 'Video' | 'Audio';
 
@@ -80,40 +83,139 @@ function getAssetTypeLabel(assetType: SeedanceUploadAssetType): string {
   return '音频';
 }
 
-export async function POST(request: NextRequest) {
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
+}
+
+function safeLogDetails(details: Record<string, unknown>) {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (key === 'publicUrl') {
+      result.publicUrl = value ? '[redacted-url]' : null;
+      continue;
+    }
+    if (key === 'storageKey') {
+      result.storageKeyPresent = Boolean(value);
+      continue;
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+function jsonUploadAndCreateError(
+  code: string,
+  message: string,
+  status: number,
+  details: Record<string, unknown> = {},
+) {
+  console.error('[UploadAndCreate] Stage failed:', {
+    code,
+    message,
+    ...safeLogDetails(details),
+  });
+  return NextResponse.json(
+    {
+      success: false,
+      closedLoop: false,
+      reused: false,
+      code,
+      error: message,
+      message,
+      ...details,
+    },
+    { status: safeUploadAndCreateHttpStatus(status) },
+  );
+}
+
+function safeUploadAndCreateHttpStatus(status: number) {
+  // Cloudflare 会把源站 502/503/504 替换成 HTML 错误页，前端就会再次看到
+  // “Unexpected token '<'”。这些是应用内可解释失败，统一用 424 保留 JSON body。
+  if (status >= 500) return 424;
+  return status;
+}
+
+class ProviderCreateTimeoutError extends Error {
+  constructor() {
+    super('官方资产创建超时，请稍后重试。');
+    this.name = 'ProviderCreateTimeoutError';
+  }
+}
+
+async function withProviderTimeout<T>(operation: Promise<T>, timeoutMs = UPLOAD_AND_CREATE_PROVIDER_TIMEOUT_MS) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    const name = (formData.get('name') as string | null)?.trim();
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new ProviderCreateTimeoutError()), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-    }
+export async function POST(request: NextRequest) {
+  const user = await getSession();
+  if (!user) {
+    return jsonUploadAndCreateError('UNAUTHORIZED', '未登录，请重新登录后再上传素材。', 401);
+  }
 
-    const uploadType = resolveUploadType(file);
-    if (!uploadType) {
-      return NextResponse.json(
-        { error: `Unsupported file type: ${file.type || 'unknown'}. Supported: ${SUPPORTED_TYPE_LABELS}` },
-        { status: 400 }
-      );
-    }
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'FORM_PARSE_FAILED',
+      '素材上传请求读取失败，请重新选择文件后上传。',
+      400,
+      { reason: errorMessage(error, 'formData parse failed') },
+    );
+  }
 
-    if (file.size > uploadType.maxSize) {
-      return NextResponse.json(
-        {
-          error: `File too large: ${(file.size / MB).toFixed(1)}MB (max ${uploadType.maxSize / MB}MB)`,
-        },
-        { status: 400 }
-      );
-    }
+  const file = formData.get('file') as File | null;
+  const name = (formData.get('name') as string | null)?.trim();
 
-    const assetName = name || file.name || 'Untitled';
-    const buffer = Buffer.from(await file.arrayBuffer());
+  if (!file) {
+    return jsonUploadAndCreateError('NO_FILE', '没有收到上传文件，请重新选择文件。', 400);
+  }
 
-    // Step 1: 计算文件 hash
-    const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+  const uploadType = resolveUploadType(file);
+  if (!uploadType) {
+    return jsonUploadAndCreateError(
+      'UNSUPPORTED_FILE_TYPE',
+      `不支持的文件类型：${file.type || 'unknown'}。目前支持：${SUPPORTED_TYPE_LABELS}。`,
+      400,
+    );
+  }
 
-    // Step 2: 按 fileHash 查 Active 资产
+  if (file.size > uploadType.maxSize) {
+    return jsonUploadAndCreateError(
+      'FILE_TOO_LARGE',
+      `${getAssetTypeLabel(uploadType.assetType)}过大：${(file.size / MB).toFixed(1)}MB，最大 ${uploadType.maxSize / MB}MB。`,
+      400,
+    );
+  }
+
+  const assetName = name || file.name || 'Untitled';
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(await file.arrayBuffer());
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'FORM_PARSE_FAILED',
+      '素材文件读取失败，请重新选择文件后上传。',
+      400,
+      { reason: errorMessage(error, 'file arrayBuffer failed') },
+    );
+  }
+
+  // Step 1: 计算文件 hash
+  const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+  // Step 2: 按 fileHash 查 Active 资产
+  try {
     const existingByHash = await seedanceAssetRepository.findActiveByFileHash(fileHash);
     if (existingByHash) {
       return NextResponse.json({
@@ -128,27 +230,45 @@ export async function POST(request: NextRequest) {
         providerAssetId: existingByHash.providerAssetId,
       });
     }
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'DB_LOOKUP_FAILED',
+      '素材去重检查失败，请稍后重试。',
+      503,
+      { reason: errorMessage(error, 'database lookup failed') },
+    );
+  }
 
-    // Step 3: 上传公网存储（R2 > TOS > local-public > local）
-    const uploadResult = await uploadPublicAsset(buffer, file.name, uploadType.mimeType);
-    const isPublic = uploadResult.isPubliclyReachable || isPubliclyReachableUrl(uploadResult.publicUrl);
+  // Step 3: 上传公网存储（R2 > TOS > local-public > local）
+  let uploadResult: Awaited<ReturnType<typeof uploadPublicAsset>>;
+  try {
+    uploadResult = await uploadPublicAsset(buffer, file.name, uploadType.mimeType);
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'PUBLIC_UPLOAD_FAILED',
+      `素材文件上传到公网存储失败：${errorMessage(error, '存储上传失败')}`,
+      503,
+    );
+  }
+  const isPublic = uploadResult.isPubliclyReachable || isPubliclyReachableUrl(uploadResult.publicUrl);
 
-    if (!isPublic) {
-      return NextResponse.json({
-        success: true,
-        closedLoop: false,
-        reused: false,
-        message: uploadResult.warning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。',
-        storageProvider: uploadResult.storageProvider,
-        assetType: uploadType.assetType,
-        publicUrl: uploadResult.publicUrl,
-        storageKey: uploadResult.storageKey,
-        size: uploadResult.size,
-      });
-    }
+  if (!isPublic) {
+    return NextResponse.json({
+      success: true,
+      closedLoop: false,
+      reused: false,
+      message: uploadResult.warning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。',
+      storageProvider: uploadResult.storageProvider,
+      assetType: uploadType.assetType,
+      publicUrl: uploadResult.publicUrl,
+      storageKey: uploadResult.storageKey,
+      size: uploadResult.size,
+    });
+  }
 
-    // Step 4: 按 storageKey 查 Active 资产（同 R2 key 不重复上传）
-    if (uploadResult.storageProvider && uploadResult.storageKey) {
+  // Step 4: 按 storageKey 查 Active 资产（同 R2 key 不重复上传）
+  if (uploadResult.storageProvider && uploadResult.storageKey) {
+    try {
       const existingByKey = await seedanceAssetRepository.findActiveByStorageKey(
         uploadResult.storageProvider,
         uploadResult.storageKey
@@ -166,31 +286,77 @@ export async function POST(request: NextRequest) {
           providerAssetId: existingByKey.providerAssetId,
         });
       }
+    } catch (error) {
+      return jsonUploadAndCreateError(
+        'DB_LOOKUP_FAILED',
+        '素材存储去重检查失败，请稍后重试。',
+        503,
+        { reason: errorMessage(error, 'database lookup failed') },
+      );
     }
+  }
 
-    // Step 5: 调官方 /asset/create
-    const createResult = await createAsset({
+  // Step 5: 调官方 /asset/create
+  let createResult: Awaited<ReturnType<typeof createAsset>>;
+  try {
+    createResult = await withProviderTimeout(createAsset({
       assetType: uploadType.assetType,
       url: uploadResult.publicUrl,
       name: assetName,
-    });
-
-    if (createResult.error) {
-      return NextResponse.json({
-        success: false,
-        closedLoop: false,
-        reused: false,
-        message: `官方 /asset/create 失败：${createResult.error}`,
+    }));
+  } catch (error) {
+    const isTimeout = error instanceof ProviderCreateTimeoutError;
+    return jsonUploadAndCreateError(
+      isTimeout ? 'PROVIDER_CREATE_TIMEOUT' : 'PROVIDER_CREATE_FAILED',
+      isTimeout
+        ? '文件已上传成功，但官方 Seedance Asset 创建超时，请稍后重试创建。'
+        : `官方 Seedance Asset 创建失败：${errorMessage(error, '未知错误')}`,
+      isTimeout ? 504 : 502,
+      {
         storageProvider: uploadResult.storageProvider,
         assetType: uploadType.assetType,
         publicUrl: uploadResult.publicUrl,
         storageKey: uploadResult.storageKey,
         size: uploadResult.size,
         warning: uploadResult.warning,
-      }, { status: 502 });
-    }
+      },
+    );
+  }
 
-    // Step 6: 写入数据库（带存储元数据）
+  if (createResult.error) {
+    return jsonUploadAndCreateError(
+      'PROVIDER_CREATE_FAILED',
+      `官方 Seedance Asset 创建失败：${createResult.error}`,
+      502,
+      {
+        storageProvider: uploadResult.storageProvider,
+        assetType: uploadType.assetType,
+        publicUrl: uploadResult.publicUrl,
+        storageKey: uploadResult.storageKey,
+        size: uploadResult.size,
+        warning: uploadResult.warning,
+      },
+    );
+  }
+
+  if (!createResult.data?.providerAssetId) {
+    return jsonUploadAndCreateError(
+      'PROVIDER_CREATE_FAILED',
+      '官方 Seedance Asset 创建返回异常：没有素材 ID。',
+      502,
+      {
+        storageProvider: uploadResult.storageProvider,
+        assetType: uploadType.assetType,
+        publicUrl: uploadResult.publicUrl,
+        storageKey: uploadResult.storageKey,
+        size: uploadResult.size,
+        warning: uploadResult.warning,
+      },
+    );
+  }
+
+  // Step 6: 写入数据库（带存储元数据）
+  try {
     const record = await seedanceAssetRepository.createWithStorageMetadata({
       providerAssetId: createResult.data!.providerAssetId,
       assetType: uploadType.assetType,
@@ -217,10 +383,20 @@ export async function POST(request: NextRequest) {
       warning: uploadResult.warning,
     });
   } catch (error) {
-    console.error('[UploadAndCreate] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Upload and create failed' },
-      { status: 500 }
+    return jsonUploadAndCreateError(
+      'DB_CREATE_FAILED',
+      '官方 Seedance Asset 已创建，但本地素材登记失败，请稍后刷新素材列表或联系管理员处理。',
+      503,
+      {
+        reason: errorMessage(error, 'database create failed'),
+        storageProvider: uploadResult.storageProvider,
+        assetType: uploadType.assetType,
+        publicUrl: uploadResult.publicUrl,
+        storageKey: uploadResult.storageKey,
+        size: uploadResult.size,
+        providerAssetId: createResult.data!.providerAssetId,
+        warning: uploadResult.warning,
+      },
     );
   }
 }

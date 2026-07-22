@@ -38,11 +38,13 @@ type UploadAssetResponse = {
 
 type DirectUploadTicketResponse = {
   directUploadAvailable?: boolean;
+  reused?: boolean;
+  asset?: UploadedAssetPayload;
   storageProvider?: string;
   uploadUrl?: string;
   uploadToken?: string;
   publicUrl?: string;
-  method?: 'PUT';
+  method?: 'PUT' | 'POST';
   headers?: Record<string, string>;
   expiresAt?: string;
   reason?: string;
@@ -359,7 +361,19 @@ export async function uploadFileToHistory(
     }
     throw new Error(message);
   }
+  if (ticket.reused === true && ticket.asset?.id) {
+    notifyUploadProgress(onProgress, {
+      phase: 'done',
+      label: '已复用相同素材',
+      loadedBytes: file.size,
+      totalBytes: file.size,
+    });
+    return ticket.asset;
+  }
   if (ticket.directUploadAvailable === false) {
+    if (ticket.uploadToken && ticket.storageProvider === 'r2') {
+      return uploadWithServerProxy(ticket, file, { hash, width, height, durationSeconds }, invalidJsonMessage, onProgress);
+    }
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress);
   }
   if (!ticket.uploadUrl || !ticket.uploadToken || ticket.method !== 'PUT') {

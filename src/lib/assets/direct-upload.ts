@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
+import { Transform } from 'stream';
 import { HeadObjectCommand, PutObjectCommand, S3Client, type PutObjectCommandInput } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
@@ -29,12 +30,49 @@ export type DirectUploadTicket = {
   expiresAt: string;
 };
 
+export type DirectUploadProxyTicket = {
+  directUploadAvailable: false;
+  storageProvider: DirectUploadStorageProvider;
+  uploadToken: string;
+  publicUrl: string;
+  method: 'POST';
+  headers: Record<string, string>;
+  expiresAt: string;
+  reason: string;
+};
+
+export type DirectUploadAssetPayload = {
+  id: string;
+  originalUrl: string;
+  thumbnailUrl: string | null;
+  width?: number;
+  height?: number;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  hash: string;
+  reused: boolean;
+  isPubliclyReachable: boolean;
+  storageProvider: DirectUploadStorageProvider;
+};
+
+export type DirectUploadReusedTicket = {
+  directUploadAvailable: false;
+  reused: true;
+  reason: string;
+  asset: DirectUploadAssetPayload;
+};
+
 export type DirectUploadUnavailable = {
   directUploadAvailable: false;
   reason: string;
 };
 
-export type DirectUploadTicketResult = DirectUploadTicket | DirectUploadUnavailable;
+export type DirectUploadTicketResult =
+  | DirectUploadTicket
+  | DirectUploadProxyTicket
+  | DirectUploadReusedTicket
+  | DirectUploadUnavailable;
 
 type DirectUploadTokenPayload = {
   version: number;
@@ -60,6 +98,7 @@ type CompleteDirectUploadInput = {
   ownerId: string;
   uploadToken: string;
   hash: string;
+  trustedHash?: string | null;
   width?: number | null;
   height?: number | null;
   durationSeconds?: number | null;
@@ -85,6 +124,18 @@ export type DirectUploadAssetResult = {
   storageProvider: DirectUploadStorageProvider;
 };
 
+type DirectUploadAssetRecord = {
+  id: string;
+  original_url: string;
+  thumbnail_url: string | null;
+  width: number | null;
+  height: number | null;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string;
+  hash: string | null;
+};
+
 type R2DirectUploadConfig = {
   accountId: string;
   accessKeyId: string;
@@ -96,18 +147,12 @@ type R2DirectUploadConfig = {
 
 function getR2DirectUploadConfig(): R2DirectUploadConfig | null {
   const {
-    R2_DIRECT_UPLOAD_ENABLED,
     R2_ACCOUNT_ID,
     R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY,
     R2_BUCKET,
     R2_PUBLIC_BASE_URL,
   } = process.env;
-
-  const directUploadFlag = (R2_DIRECT_UPLOAD_ENABLED || '').trim().toLowerCase();
-  if (['0', 'false', 'off', 'disabled'].includes(directUploadFlag)) {
-    return null;
-  }
 
   if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
     return null;
@@ -124,6 +169,11 @@ function getR2DirectUploadConfig(): R2DirectUploadConfig | null {
     publicBaseUrl: R2_PUBLIC_BASE_URL.replace(/\/$/, ''),
     endpointHostname: `${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   };
+}
+
+function isBrowserDirectUploadEnabled() {
+  const flag = (process.env.R2_DIRECT_UPLOAD_ENABLED || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(flag);
 }
 
 function mimeTypeToExt(mimeType: string): string {
@@ -219,11 +269,128 @@ function createR2Client(config: R2DirectUploadConfig) {
   });
 }
 
+function assetRecordToPayload(
+  asset: DirectUploadAssetRecord,
+  reused: boolean,
+): DirectUploadAssetPayload {
+  return {
+    id: asset.id,
+    originalUrl: asset.original_url,
+    thumbnailUrl: asset.thumbnail_url,
+    width: asset.width ?? undefined,
+    height: asset.height ?? undefined,
+    fileName: asset.file_name,
+    fileSize: asset.file_size ?? 0,
+    mimeType: asset.mime_type,
+    hash: asset.hash ?? '',
+    reused,
+    isPubliclyReachable: true,
+    storageProvider: 'r2',
+  };
+}
+
+function assetRecordToResult(
+  asset: DirectUploadAssetRecord,
+  reused: boolean,
+): DirectUploadAssetResult {
+  const payload = assetRecordToPayload(asset, reused);
+  return {
+    assetId: payload.id,
+    originalUrl: payload.originalUrl,
+    thumbnailUrl: payload.thumbnailUrl,
+    width: payload.width,
+    height: payload.height,
+    fileName: payload.fileName,
+    fileSize: payload.fileSize,
+    mimeType: payload.mimeType,
+    hash: payload.hash,
+    reused: payload.reused,
+    isPubliclyReachable: payload.isPubliclyReachable,
+    storageProvider: payload.storageProvider,
+  };
+}
+
+async function findActiveAssetByTrustedHash(ownerId: string, trustedHash: string) {
+  return prisma.asset.findFirst({
+    where: {
+      owner_id: ownerId,
+      hash: trustedHash,
+      status: 'active',
+    },
+    orderBy: [
+      { created_at: 'desc' },
+    ],
+  });
+}
+
+function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']>) {
+  const hash = crypto.createHash('sha256');
+  let byteLength = 0;
+  let finalized = false;
+
+  const updateHash = (chunk: Buffer) => {
+    byteLength += chunk.length;
+    hash.update(chunk);
+  };
+
+  const digest = () => {
+    if (finalized) throw new Error('上传文件校验信息已读取，请重新上传。');
+    finalized = true;
+    return hash.digest('hex');
+  };
+
+  if (Buffer.isBuffer(body)) {
+    updateHash(body);
+    return { body, digest, byteLength: () => byteLength };
+  }
+
+  if (body instanceof Uint8Array) {
+    const buffer = Buffer.from(body);
+    updateHash(buffer);
+    return { body, digest, byteLength: () => byteLength };
+  }
+
+  if (typeof body === 'string') {
+    const buffer = Buffer.from(body);
+    updateHash(buffer);
+    return { body, digest, byteLength: () => byteLength };
+  }
+
+  const source = body as NodeJS.ReadableStream;
+  if (!source || typeof source.pipe !== 'function') {
+    throw new Error('上传文件内容不可读取，请重新上传。');
+  }
+
+  const hashingStream = new Transform({
+    transform(chunk, _encoding, callback) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      updateHash(buffer);
+      callback(null, chunk);
+    },
+  });
+
+  return {
+    body: source.pipe(hashingStream) as NonNullable<PutObjectCommandInput['Body']>,
+    digest,
+    byteLength: () => byteLength,
+  };
+}
+
 export async function createDirectUploadTicket(input: CreateDirectUploadTicketInput): Promise<DirectUploadTicketResult> {
   const mimeType = input.mimeType.split(';')[0]?.trim().toLowerCase() || '';
   const metadataError = validateSiteUploadMetadata({ mimeType, fileSize: input.fileSize });
   if (metadataError) throw new Error(metadataError);
   const hash = assertSha256Hash(input.hash);
+
+  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash);
+  if (existingAsset) {
+    return {
+      directUploadAvailable: false,
+      reused: true,
+      reason: '已检测到相同素材，已复用上传历史中的文件。',
+      asset: assetRecordToPayload(existingAsset, true),
+    };
+  }
 
   const config = getR2DirectUploadConfig();
   if (!config) {
@@ -252,6 +419,20 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
     Key: key,
     ContentType: mimeType,
   });
+
+  if (!isBrowserDirectUploadEnabled()) {
+    return {
+      directUploadAvailable: false,
+      storageProvider: 'r2',
+      uploadToken: signToken(payload),
+      publicUrl: `${config.publicBaseUrl}/${key}`,
+      method: 'POST',
+      headers: { 'Content-Type': mimeType },
+      expiresAt: new Date(expiresAt).toISOString(),
+      reason: '浏览器直传 R2 未开启或桶 CORS 未验证，已改用本站服务端中转上传。',
+    };
+  }
+
   const uploadUrl = await getSignedUrl(client, command, { expiresIn: DIRECT_UPLOAD_EXPIRES_SECONDS });
 
   return {
@@ -288,10 +469,22 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
   if (hash !== payload.hash) {
     throw new Error('文件校验信息和上传票据不一致，请重新上传。');
   }
+  const trustedHash = input.trustedHash ? assertSha256Hash(input.trustedHash) : null;
+  if (trustedHash && trustedHash !== payload.hash) {
+    throw new Error('上传文件内容和上传票据不一致，请重新上传。');
+  }
   const kind = getSiteUploadKind(payload.mimeType) || 'image';
   const width = kind === 'image' ? normalizeOptionalInt(input.width) : null;
   const height = kind === 'image' ? normalizeOptionalInt(input.height) : null;
   const publicUrl = `${config.publicBaseUrl}/${payload.key}`;
+
+  if (trustedHash) {
+    const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash);
+    if (existingAsset) {
+      return assetRecordToResult(existingAsset, true);
+    }
+  }
+
   const asset = await prisma.asset.create({
     data: {
       owner_id: input.ownerId,
@@ -303,25 +496,12 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
       width,
       height,
       file_size: payload.fileSize,
-      hash: null,
+      hash: trustedHash,
       status: 'active',
     },
   });
 
-  return {
-    assetId: asset.id,
-    originalUrl: asset.original_url,
-    thumbnailUrl: asset.thumbnail_url,
-    width: asset.width ?? undefined,
-    height: asset.height ?? undefined,
-    fileName: asset.file_name,
-    fileSize: asset.file_size,
-    mimeType: asset.mime_type,
-    hash: asset.hash ?? '',
-    reused: false,
-    isPubliclyReachable: true,
-    storageProvider: 'r2',
-  };
+  return assetRecordToResult(asset, false);
 }
 
 export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput): Promise<DirectUploadAssetResult> {
@@ -342,13 +522,21 @@ export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput):
   if (durationError) throw new Error(durationError);
 
   const client = createR2Client(config);
+  const hashingBody = createHashingUploadBody(input.body);
   await client.send(new PutObjectCommand({
     Bucket: config.bucket,
     Key: payload.key,
     ContentType: payload.mimeType,
     ContentLength: payload.fileSize,
-    Body: input.body,
+    Body: hashingBody.body,
   }));
+  if (hashingBody.byteLength() !== payload.fileSize) {
+    throw new Error('上传文件大小和票据不一致，请重新上传。');
+  }
+  const trustedHash = hashingBody.digest();
+  if (trustedHash !== hash) {
+    throw new Error('上传文件内容和文件校验信息不一致，请重新上传。');
+  }
 
-  return completeDirectUpload(input);
+  return completeDirectUpload({ ...input, hash: trustedHash, trustedHash });
 }

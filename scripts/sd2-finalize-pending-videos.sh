@@ -32,4 +32,4 @@ if [[ ! -x ./node_modules/.bin/tsx ]]; then
   exit 0
 fi
 
-npm run video:finalize-pending -- --limit 10 --max-seconds 1800 --cache-timeout-seconds 900 --missing-local-max-age-days 2
+npm run video:finalize-pending -- --limit 4 --max-seconds 240 --cache-timeout-seconds 120 --missing-local-max-age-days 1 --missing-local-limit 1

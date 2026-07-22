@@ -1,9 +1,9 @@
 import { finalizeVideoTaskStatus, isTerminalLocalStatus } from './task-finalizer';
 
 const DEFAULT_INITIAL_DELAY_MS = 10_000;
-const DEFAULT_INTERVAL_MS = 15_000;
-const DEFAULT_MAX_RUNTIME_MS = 20 * 60 * 1000;
-const DEFAULT_SUCCESS_CACHE_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_INTERVAL_MS = 30_000;
+const DEFAULT_MAX_RUNTIME_MS = 5 * 60 * 1000;
+const DEFAULT_SUCCESS_CACHE_TIMEOUT_MS = 120_000;
 
 type RunnerOptions = {
   initialDelayMs?: number;

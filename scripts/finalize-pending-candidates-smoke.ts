@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   isStaleSubmittedWithoutProvider,
   selectFinalizeCandidates,
@@ -58,5 +60,34 @@ assert.equal(isStaleSubmittedWithoutProvider({
   ...task('has-provider-id', 'submitted', '2026-07-01T03:00:00Z', '2026-07-01T03:00:00Z'),
   provider_task_id: 'provider-task',
 }, now, 30), false);
+
+const finalizeScriptSource = fs.readFileSync(
+  path.join(process.cwd(), 'scripts/finalize-pending-videos.ts'),
+  'utf8',
+);
+const prismaSource = fs.readFileSync(
+  path.join(process.cwd(), 'src/lib/prisma.ts'),
+  'utf8',
+);
+assert.match(
+  finalizeScriptSource,
+  /--missing-local-limit/,
+  'missing local video backfill must have an independent per-run limit',
+);
+assert.match(
+  finalizeScriptSource,
+  /Math\.min\(remainingLimit,\s*missingLocalLimitPerRun\)/,
+  'missing local video backfill must not consume the whole finalizer batch',
+);
+assert.match(
+  prismaSource,
+  /\$queryRawUnsafe\('PRAGMA busy_timeout = 5000'\)/,
+  'SQLite connections must wait briefly instead of failing immediately when another upload or worker holds the database lock',
+);
+assert.doesNotMatch(
+  prismaSource,
+  /journal_mode\\s*=\\s*WAL/i,
+  'WAL migration must remain a separate planned change, not be silently forced during upload repair',
+);
 
 console.log('finalize-pending-candidates smoke passed');

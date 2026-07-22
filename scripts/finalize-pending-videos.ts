@@ -109,6 +109,7 @@ async function main() {
   const orphanMinAgeMinutes = numberArg('--orphan-min-age-minutes', 30);
   const cacheTimeoutSeconds = numberArg('--cache-timeout-seconds', 900);
   const missingLocalMaxAgeDays = numberArg('--missing-local-max-age-days', 2);
+  const missingLocalLimitPerRun = numberArg('--missing-local-limit', 2);
   const taskId = stringArg('--task-id');
   const dryRun = hasArg('--dry-run');
   const startedAt = Date.now();
@@ -167,7 +168,8 @@ async function main() {
         })
       : [];
 
-    const missingLocalLimit = Math.max(0, limit - statusRefreshTasks.length - staleOrphanTasks.length);
+    const remainingLimit = Math.max(0, limit - statusRefreshTasks.length - staleOrphanTasks.length);
+    const missingLocalLimit = Math.min(remainingLimit, missingLocalLimitPerRun);
     const missingLocalTasks = missingLocalLimit > 0
       ? await prisma.videoTask.findMany({
           where: {
@@ -201,6 +203,7 @@ async function main() {
     maxSeconds,
     cacheTimeoutSeconds,
     missingLocalMaxAgeDays,
+    missingLocalLimitPerRun,
     taskId,
   });
 
