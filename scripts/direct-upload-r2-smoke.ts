@@ -122,6 +122,14 @@ async function run() {
   assert.match(directUploadSource, /ContentLength:\s*payload\.fileSize/, 'server-side proxy fallback must preserve ticket file size');
 
   const clientSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/http/file-upload.ts'), 'utf8');
+  const rawFallbackSource = clientSource.slice(
+    clientSource.indexOf('async function uploadWithRawFallback'),
+    clientSource.indexOf('function canUseRawFallback'),
+  );
+  const proxyFallbackSource = clientSource.slice(
+    clientSource.indexOf('async function uploadWithServerProxy'),
+    clientSource.indexOf('async function sha256File'),
+  );
   assert.match(clientSource, /\/api\/assets\/upload-ticket/, 'client must request upload ticket');
   assert.match(clientSource, /\/api\/assets\/upload-complete/, 'client must complete direct upload');
   assert.match(clientSource, /\/api\/assets\/upload-proxy/, 'client must use same-origin server proxy when R2 browser PUT fails');
@@ -129,11 +137,15 @@ async function run() {
   assert.match(clientSource, /RAW_FALLBACK_MAX_SIZE_BYTES = 8 \* 1024 \* 1024/, 'raw upload fallback must be size-limited');
   assert.match(clientSource, /file\.type\.startsWith\('image\/'\)/, 'raw upload fallback must be limited to image uploads');
   assert.match(clientSource, /R2 CORS/, 'direct upload failures must tell admins to check R2 CORS');
-  assert.match(clientSource, /readJsonResponse<DirectUploadTicketResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'ticket non-json errors must fallback safely or show a clear bounded error');
+  assert.match(clientSource, /readUploadJsonResponse<DirectUploadTicketResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'ticket non-json errors must fallback safely or show a clear bounded error');
   assert.match(clientSource, /ticketRes\.status >= 500[\s\S]+uploadWithRawFallbackOrThrow/, 'ticket server errors must use the safe fallback boundary');
   assert.match(clientSource, /putFileToStorage[\s\S]+catch \(error\)[\s\S]+uploadWithServerProxy/, 'object storage PUT failure must try same-origin server proxy before giving up');
   assert.match(clientSource, /uploadWithServerProxy[\s\S]+catch \(proxyError\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'raw fallback must stay behind proxy failure and the safe fallback guard');
-  assert.match(clientSource, /readJsonResponse<UploadAssetResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'complete non-json errors must fallback safely or show a clear bounded error');
+  assert.match(rawFallbackSource, /readUploadJsonResponse<UploadAssetResponse>/, 'raw fallback must translate non-json responses with upload-stage context');
+  assert.doesNotMatch(rawFallbackSource, /readJsonResponse<UploadAssetResponse>\(res, \{ invalidJsonMessage \}\)/, 'raw fallback must not leak the generic upload invalid-json message');
+  assert.match(proxyFallbackSource, /readUploadJsonResponse<UploadAssetResponse>/, 'server proxy fallback must translate non-json responses with upload-stage context');
+  assert.doesNotMatch(proxyFallbackSource, /readJsonResponse<UploadAssetResponse>\(res, \{ invalidJsonMessage \}\)/, 'server proxy fallback must not leak the generic upload invalid-json message');
+  assert.match(clientSource, /readUploadJsonResponse<UploadAssetResponse>[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message\)/, 'complete non-json errors must fallback safely or show a clear bounded error');
   assert.doesNotMatch(clientSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallbackOrThrow/, 'complete JSON failures must not fallback to raw upload after object storage succeeds');
   assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client may fallback only when direct upload is explicitly unavailable');
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');

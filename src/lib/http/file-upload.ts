@@ -61,11 +61,41 @@ export function buildRawFileUploadRequest(file: File): RequestInit {
   };
 }
 
-async function uploadWithRawFallback(file: File, invalidJsonMessage: string) {
-  const res = await fetch('/api/assets/upload', {
-    ...buildRawFileUploadRequest(file),
+function uploadStageInvalidJsonMessage(stage: string, fallbackMessage: string) {
+  const retryHint = fallbackMessage.includes('重新登录')
+    ? '请刷新后重试；如果仍出现，请重新登录。'
+    : '请重新上传后重试。';
+  return `${stage}返回了页面内容，系统没有拿到有效上传结果。${retryHint}`;
+}
+
+function uploadStageConnectionMessage(stage: string, error: unknown) {
+  const message = error instanceof Error ? error.message.trim() : '';
+  if (message.includes('返回了页面内容')) return message;
+  const detail = message && message !== 'Failed to fetch' ? `（${message}）` : '';
+  return `${stage}连接中断，系统没有拿到有效上传结果${detail}。请重新上传；如果文件较大，请压缩后重试。`;
+}
+
+async function readUploadJsonResponse<T>(
+  response: Response,
+  stage: string,
+  invalidJsonMessage: string,
+) {
+  return readJsonResponse<T>(response, {
+    invalidJsonMessage: uploadStageInvalidJsonMessage(stage, invalidJsonMessage),
+    includeDiagnostics: true,
   });
-  const data = await readJsonResponse<UploadAssetResponse>(res, { invalidJsonMessage });
+}
+
+async function uploadWithRawFallback(file: File, invalidJsonMessage: string) {
+  let res: Response;
+  try {
+    res = await fetch('/api/assets/upload', {
+      ...buildRawFileUploadRequest(file),
+    });
+  } catch (error) {
+    throw new Error(uploadStageConnectionMessage('普通上传', error));
+  }
+  const data = await readUploadJsonResponse<UploadAssetResponse>(res, '普通上传接口', invalidJsonMessage);
   if (!res.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('素材上传成功，但没有返回素材 ID');
   return data.asset;
@@ -111,12 +141,17 @@ async function uploadWithServerProxy(
   if (context.height != null) headers['X-Image-Height'] = String(context.height);
   if (context.durationSeconds != null) headers['X-Media-Duration'] = String(context.durationSeconds);
 
-  const res = await fetch('/api/assets/upload-proxy', {
-    method: 'POST',
-    headers,
-    body: file,
-  });
-  const data = await readJsonResponse<UploadAssetResponse>(res, { invalidJsonMessage });
+  let res: Response;
+  try {
+    res = await fetch('/api/assets/upload-proxy', {
+      method: 'POST',
+      headers,
+      body: file,
+    });
+  } catch (error) {
+    throw new Error(uploadStageConnectionMessage('服务端中转上传', error));
+  }
+  const data = await readUploadJsonResponse<UploadAssetResponse>(res, '服务端中转上传接口', invalidJsonMessage);
   if (!res.ok) throw new Error(data.error || data.message || '服务端中转上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('服务端中转上传成功，但没有返回素材 ID');
   return data.asset;
@@ -240,7 +275,7 @@ export async function uploadFileToHistory(
         hash,
       }),
     });
-    ticket = await readJsonResponse<DirectUploadTicketResponse>(ticketRes, { invalidJsonMessage });
+    ticket = await readUploadJsonResponse<DirectUploadTicketResponse>(ticketRes, '上传票据接口', invalidJsonMessage);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传票据创建失败';
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
@@ -286,7 +321,7 @@ export async function uploadFileToHistory(
         durationSeconds,
       }),
     });
-    complete = await readJsonResponse<UploadAssetResponse>(completeRes, { invalidJsonMessage });
+    complete = await readUploadJsonResponse<UploadAssetResponse>(completeRes, '上传完成登记接口', invalidJsonMessage);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传完成登记失败';
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
