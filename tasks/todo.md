@@ -7320,45 +7320,45 @@ HARD-GATE：
 
 ### 1. 目标复述
 
-- [ ] 用户要解决的是：素材上传又出现“服务返回页面内容”这类提示，用户看不懂，也会误以为整个平台坏了。
-- [ ] 这次目标不是只换一句文案，而是把上传失败按真实阶段拆清楚：票据、R2 直传、服务端中转、普通上传、完成登记。
-- [ ] 完成标准：能自动修正的场景自动兜底；不能自动修正的场景明确告诉用户是哪段失败、该刷新/重新登录/压缩文件/联系管理员；同类问题必须有回归脚本兜住。
+- [x] 用户要解决的是：素材上传又出现“服务返回页面内容”这类提示，用户看不懂，也会误以为整个平台坏了。
+- [x] 这次目标不是只换一句文案，而是把上传失败按真实阶段拆清楚：票据、R2 直传、服务端中转、普通上传、完成登记。
+- [x] 完成标准：能自动修正的场景自动兜底；不能自动修正的场景明确告诉用户是哪段失败、该刷新/重新登录/压缩文件/联系管理员；同类问题必须有回归脚本兜住。
 
 ### 2. 具体可执行任务
 
-- [ ] 查后台反馈和生产日志，确认最近是否有新的上传失败反馈、页面路径、用户、文件类型和错误时间；不能只看前端页面。
-- [ ] 梳理当前真实上传链路：`upload-ticket`、浏览器 PUT、`upload-proxy`、`upload`、`upload-complete`，确认每一段成功和失败时的返回格式。
-- [ ] 给 `src/lib/http/file-upload.ts` 建立统一的上传阶段错误处理：每个阶段非 JSON、HTML、网络中断、连接取消都要转成用户能理解的阶段提示。
-- [ ] 保留自动兜底边界：8MB 以内图片可以自动普通上传；大图、视频、音频优先走直传或服务端中转，不能静默塞进旧普通上传口。
-- [ ] 更新 `scripts/direct-upload-r2-smoke.ts`，至少锁住 raw/proxy/ticket/complete 四段非 JSON 不得泄漏通用“服务返回页面内容”。
-- [ ] 用登录态公网探针验证：票据生成、服务端中转小图、普通上传小图都返回 JSON；测试素材必须隐藏或清理。
-- [ ] 查生产包和公网静态 chunk，确认用户实际加载的新前端包含分段错误文案，不只看本地源码。
-- [ ] 更新 `tasks/lessons.md`，记录“新增任何上传兜底路径必须同步补异常路径回归”的复用规则。
+- [x] 查后台反馈和生产日志，确认最近是否有新的上传失败反馈、页面路径、用户、文件类型和错误时间；不能只看前端页面。证据：`Feedback` 表共 31 条，最近上传相关反馈为 `cmrsuymw200fwedw2y5wa74wi`，时间 `2026-07-20T06:43:10.562Z`，路径 `/generate`，内容“参考图无法上传”；生产日志有 `ECONNRESET/aborted` 上传流中断样本。
+- [x] 梳理当前真实上传链路：`upload-ticket`、浏览器 PUT、`upload-proxy`、`upload`、`upload-complete`，确认每一段成功和失败时的返回格式。
+- [x] 给 `src/lib/http/file-upload.ts` 建立统一的上传阶段错误处理：每个阶段非 JSON、HTML、网络中断、连接取消都要转成用户能理解的阶段提示。执行：补齐 `upload-ticket` 和 `upload-complete` 的 fetch 中断阶段提示。
+- [x] 保留自动兜底边界：8MB 以内图片可以自动普通上传；大图、视频、音频优先走直传或服务端中转，不能静默塞进旧普通上传口。
+- [x] 更新 `scripts/direct-upload-r2-smoke.ts`，锁住 raw/proxy/ticket/complete 四段非 JSON 和 ticket/complete 连接中断不得泄漏通用“服务返回页面内容”。
+- [x] 用登录态公网探针验证：票据生成、服务端中转小图、普通上传小图都返回 JSON；测试素材已通过 `/api/assets/history/[id]` 隐藏。
+- [x] 查生产包和公网静态 chunk，确认用户实际加载的新前端包含分段错误文案，不只看本地源码。证据：BUILD_ID `6okfj5gCaLArdCLpVQaKc`，公网 chunk `9802-6485d5e7c8dee98b.js` 返回 200 并命中 `上传票据创建`、`上传完成登记`、`上传票据接口`、`上传完成登记接口`、`普通上传接口`、`服务端中转上传接口`、`连接中断，系统没有拿到有效上传结果`。
+- [x] 更新 `tasks/lessons.md`，记录“新增任何上传兜底路径必须同步补异常路径回归”的复用规则，并补充连接中断也要按阶段锁。
 
 ### 3. 验收 / 审查内容
 
-- [ ] 创建独立只读审查 agent：只读检查 `src/lib/http/file-upload.ts`、`scripts/direct-upload-r2-smoke.ts`、生产日志证据、公网探针结果和部署证据；审查 agent 不改文件、不提交、不补实现。
-- [ ] 审查通过标准：四段上传接口都有阶段化错误处理；raw/proxy 不再直接用通用 `invalidJsonMessage` 解析非 JSON；连接中断有明确提示；自动兜底边界没有扩大到大文件。
-- [ ] 验证命令必须包含：`npx tsx scripts/direct-upload-r2-smoke.ts`、`npm run test:reference-media`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check`。
-- [ ] 公网验收必须包含：`/api/config` 200、`/login` 200、`_next` 新 build 静态资源 200、登录态上传探针 JSON 返回、健康守护周期后 `runs` 不增长。
-- [ ] 如果子 agent 暂不可用，由主线程按同一清单只读复查，不能改文件；该结果不是独立审查，可信度低于子 agent。
+- [x] 创建独立只读审查 agent：只读检查 `src/lib/http/file-upload.ts`、`scripts/direct-upload-r2-smoke.ts`、生产日志证据、公网探针结果和部署证据；审查 agent 不改文件、不提交、不补实现。结果：第二次只读审查确认代码和 smoke 已补齐，剩余缺口为 todo/Git 收口。
+- [x] 审查通过标准：四段上传接口都有阶段化错误处理；raw/proxy 不再直接用通用 `invalidJsonMessage` 解析非 JSON；连接中断有明确提示；自动兜底边界没有扩大到大文件。
+- [x] 验证命令必须包含：`npx tsx scripts/direct-upload-r2-smoke.ts`、`npm run test:reference-media`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check`。结果：全部通过；lint/build 只有既有 `<img>` 和 hook warning。
+- [x] 公网验收必须包含：`/api/config` 200、`/login` 200、`_next` 新 build 静态资源 200、登录态上传探针 JSON 返回、健康守护周期后 `runs` 不增长。结果：`/api/config` 200、`/login` 200、`_buildManifest.js` 200、新 chunk 200；登录态探针 ticket/proxy/raw 均 200 JSON；70 秒后 `runs` 仍为 5。
+- [x] 如果子 agent 暂不可用，由主线程按同一清单只读复查，不能改文件；该结果不是独立审查，可信度低于子 agent。结果：子 agent 可用，未走降级方案。
 
 ### 4. 审查是否对齐目标
 
-- [ ] 用户是否还能看到笼统的“素材上传服务返回了页面内容”？如果还能看到，必须能说明是哪个入口仍在使用旧文案，并继续修。
-- [ ] 错误提示是否把责任说清楚：用户可处理的问题让用户处理，管理员配置问题指向 R2 CORS，网络中断提示重新上传或压缩。
-- [ ] 自动兜底是否真的减少用户操作，而不是把失败从一个接口搬到另一个接口。
-- [ ] 回归脚本是否覆盖新增兜底路径，而不是只覆盖旧主路径。
+- [x] 用户是否还能看到笼统的“素材上传服务返回了页面内容”？如果还能看到，必须能说明是哪个入口仍在使用旧文案，并继续修。结论：上传主链路四段已改成阶段化提示；旧通用文案仍作为兜底常量存在，但 smoke 锁住 raw/proxy/ticket/complete 不直接泄漏。
+- [x] 错误提示是否把责任说清楚：用户可处理的问题让用户处理，管理员配置问题指向 R2 CORS，网络中断提示重新上传或压缩。
+- [x] 自动兜底是否真的减少用户操作，而不是把失败从一个接口搬到另一个接口。
+- [x] 回归脚本是否覆盖新增兜底路径，而不是只覆盖旧主路径。
 
 ### Git Plan
 
-- [ ] 当前生产工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
-- [ ] 当前工作分支：`codex/seedream-5-pro-image-provider`。
-- [ ] 提交分组：提交 1 上传阶段错误处理和 smoke；提交 2 项目 lessons / todo 记录；如只写规划，则单独 docs commit，不部署。
-- [ ] 上线前创建 rollback tag：`rollback/2026-07-22-before-upload-stage-errors` 或后续同名日期语义 tag。
+- [x] 当前生产工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- [x] 当前工作分支：`codex/seedream-5-pro-image-provider`。
+- [x] 提交分组：本轮作为一个聚焦修复提交，包含上传阶段错误处理、smoke、lessons 和 todo 销项。
+- [x] 上线前创建 rollback tag：`rollback/2026-07-22-before-upload-connection-stage-errors`。
 
 ### 停止条件
 
-- [ ] 无法复现或没有任何后台/日志/公网证据时，只能输出诊断结论，不能声称根因彻底修复。
-- [ ] 上传探针需要真实用户素材、隐私图片、付费生成或暴露 cookie/token 时立即停止，改用合成小图或脱敏证据。
-- [ ] 测试、构建、Git 推送、部署或公网验证任一失败时，不标记完成。
+- [x] 无法复现或没有任何后台/日志/公网证据时，只能输出诊断结论，不能声称根因彻底修复。结果：已有反馈、日志、公网探针和生产资源证据。
+- [x] 上传探针需要真实用户素材、隐私图片、付费生成或暴露 cookie/token 时立即停止，改用合成小图或脱敏证据。结果：使用合成 1x1 PNG；不输出 cookie/token。
+- [x] 测试、构建、Git 推送、部署或公网验证任一失败时，不标记完成。结果：测试、构建、部署、公网验证已通过；Git 推送待本段销项提交后完成。

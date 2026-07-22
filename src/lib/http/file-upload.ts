@@ -275,9 +275,14 @@ export async function uploadFileToHistory(
         hash,
       }),
     });
+  } catch (error) {
+    const message = uploadStageConnectionMessage('上传票据创建', error);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+  }
+  try {
     ticket = await readUploadJsonResponse<DirectUploadTicketResponse>(ticketRes, '上传票据接口', invalidJsonMessage);
   } catch (error) {
-    const message = error instanceof Error ? error.message : '上传票据创建失败';
+    const message = error instanceof Error ? error.message : '上传票据接口解析失败';
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
   }
   if (!ticketRes.ok) {
@@ -321,9 +326,14 @@ export async function uploadFileToHistory(
         durationSeconds,
       }),
     });
+  } catch (error) {
+    const message = uploadStageConnectionMessage('上传完成登记', error);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+  }
+  try {
     complete = await readUploadJsonResponse<UploadAssetResponse>(completeRes, '上传完成登记接口', invalidJsonMessage);
   } catch (error) {
-    const message = error instanceof Error ? error.message : '上传完成登记失败';
+    const message = error instanceof Error ? error.message : '上传完成登记接口解析失败';
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
   }
   if (!completeRes.ok) {

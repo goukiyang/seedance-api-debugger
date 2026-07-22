@@ -852,3 +852,4 @@
 - 诱因/根因：前一轮只锁了票据和完成登记接口；后来新增的 `/api/assets/upload-proxy` 和旧 `/api/assets/upload` 仍直接使用通用非 JSON 文案。生产日志同时出现上传流 `ECONNRESET/aborted`，这类中断可能绕开业务 JSON 错误。
 - 怎么处理：普通上传、服务端中转、票据、完成登记统一走分段 JSON 解析；连接中断给“连接中断/文件较大/请重新上传”的明确提示；smoke 增加 raw/proxy 非 JSON 不得泄漏通用文案的断言。
 - 可复用经验：只要给上传链路增加新的 fallback、proxy、direct、complete 或 cleanup 分支，就必须同时补异常路径回归。不能只测成功路径和主接口，否则旧错误会从新分支漏出来。
+- 2026-07-22 补充：只读复查发现票据创建和完成登记的 `fetch` 中断仍可能落到泛化 catch；上传 smoke 必须按 ticket/raw/proxy/complete 分段切片断言连接中断和非 JSON 两类异常，不能只用跨函数宽正则。
