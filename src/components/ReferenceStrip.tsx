@@ -2,22 +2,44 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { ReferenceThumb } from '@/components/ReferenceThumb';
 import { AddReferenceCard } from '@/components/AddReferenceCard';
+import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
 
 const MAX_REFS = 9;
 
 interface Props {
   assets: WorkspaceAssetItem[];
   uploadStatuses: Record<string, UploadStatus>;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   onRemove: (assetId: string) => Promise<void>;
   onReorder: (newOrder: Array<{ assetId: string; sortOrder: number }>) => Promise<void>;
-  onReplace: (assetId: string, file: File) => Promise<void>;
+  onReplace: (assetId: string, file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   onPreview: (url: string) => void;
   onOpenHistory?: () => void;
   generationMode?: string;
   loading?: boolean;
+}
+
+type ReferenceUploadProgress = {
+  label: string;
+  detail: string;
+  percent?: number;
+};
+
+function buildUploadProgress(
+  file: File,
+  fileIndex: number,
+  fileCount: number,
+  progress: UploadProgressSnapshot,
+): ReferenceUploadProgress {
+  const filePrefix = fileCount > 1 ? `${fileIndex + 1}/${fileCount} ` : '';
+  return {
+    label: `${filePrefix}${progress.label}`,
+    detail: file.name,
+    ...(progress.percent != null ? { percent: progress.percent } : {}),
+  };
 }
 
 function getFrameRole(asset: WorkspaceAssetItem, idx: number, assets: WorkspaceAssetItem[], mode?: string): FrameRole {
@@ -79,6 +101,7 @@ export function ReferenceStrip({
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
   const [dropReplaceKey, setDropReplaceKey] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<ReferenceUploadProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const replaceTargetAssetIdRef = useRef<string | null>(null);
@@ -225,22 +248,38 @@ export function ReferenceStrip({
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setUploading(true);
+    setUploadProgress(null);
     try {
       for (let i = 0; i < files.length; i++) {
-        await onUpload(files[i]);
+        const file = files[i];
+        setUploadProgress({
+          label: files.length > 1 ? `${i + 1}/${files.length} 准备上传` : '准备上传',
+          detail: file.name,
+        });
+        await onUpload(file, (progress) => {
+          setUploadProgress(buildUploadProgress(file, i, files.length, progress));
+        });
       }
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [onUpload]);
 
   const replaceAssetWithFile = useCallback(async (assetId: string, file: File) => {
     setUploading(true);
+    setUploadProgress({
+      label: '准备替换',
+      detail: file.name,
+    });
     try {
-      await onReplace(assetId, file);
+      await onReplace(assetId, file, (progress) => {
+        setUploadProgress(buildUploadProgress(file, 0, 1, progress));
+      });
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       setDropReplaceKey(null);
     }
   }, [onReplace]);
@@ -278,12 +317,21 @@ export function ReferenceStrip({
     );
     if (files.length === 0) return;
     setUploading(true);
+    setUploadProgress(null);
     try {
-      for (const file of files) {
-        await onUpload(file);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress({
+          label: files.length > 1 ? `${i + 1}/${files.length} 准备上传` : '准备上传',
+          detail: file.name,
+        });
+        await onUpload(file, (progress) => {
+          setUploadProgress(buildUploadProgress(file, i, files.length, progress));
+        });
       }
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }, [onUpload]);
 
@@ -395,7 +443,17 @@ export function ReferenceStrip({
       {/* 上传中状态 */}
       {(uploading || loading) && (
         <span className="ref-strip-uploading">
-          <span className="loading" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
+          {uploadProgress ? (
+            <UploadProgressIndicator
+              label={uploadProgress.label}
+              detail={uploadProgress.detail}
+              percent={uploadProgress.percent}
+              variant="dark"
+              className="ref-strip-upload-progress"
+            />
+          ) : (
+            <span className="loading" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
+          )}
         </span>
       )}
 

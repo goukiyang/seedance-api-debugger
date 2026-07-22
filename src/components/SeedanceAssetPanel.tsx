@@ -1,11 +1,39 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import { requestJsonWithUploadProgress, type UploadProgressSnapshot } from '@/lib/http/upload-progress';
 import type { LocalAssetRecord } from '@/lib/provider/seedance-assets-types';
 
 interface AssetPanelProps {
   visible: boolean;
   onClose: () => void;
+}
+
+type AssetUploadProgress = {
+  label: string;
+  detail: string;
+  percent?: number;
+};
+
+type UploadAndCreateResponse = {
+  error?: string;
+  message?: string;
+  reused?: boolean;
+  closedLoop?: boolean;
+  providerAssetId?: string;
+  storageProvider?: string;
+  publicUrl?: string;
+  reason?: string;
+  warning?: string;
+};
+
+function buildAssetUploadProgress(file: File, progress: UploadProgressSnapshot): AssetUploadProgress {
+  return {
+    label: progress.label,
+    detail: file.name,
+    ...(progress.percent != null ? { percent: progress.percent } : {}),
+  };
 }
 
 export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
@@ -26,6 +54,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const [uploadName, setUploadName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<AssetUploadProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 加载列表
@@ -154,14 +183,26 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
     if (!uploadFile) return;
     setUploading(true);
     setUploadMsg(null);
+    setUploadProgress({ label: '准备上传', detail: uploadFile.name });
     try {
       const formData = new FormData();
       formData.append('file', uploadFile);
       if (uploadName.trim()) formData.append('name', uploadName.trim());
-      const res = await fetch('/api/assets/upload-and-create', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) {
-        setUploadMsg(`❌ ${data.error}`);
+      const result = await requestJsonWithUploadProgress<UploadAndCreateResponse>({
+        url: '/api/assets/upload-and-create',
+        method: 'POST',
+        body: formData,
+        invalidJsonMessage: '资产上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
+        connectionMessage: '资产上传连接中断，系统没有拿到有效上传结果。请重新上传；如果文件较大，请压缩后重试。',
+        progress: {
+          phase: 'seedance-asset',
+          label: '正在上传并创建资产',
+        },
+        onProgress: (progress) => setUploadProgress(buildAssetUploadProgress(uploadFile, progress)),
+      });
+      const data = result.data;
+      if (!result.ok) {
+        setUploadMsg(`❌ ${data.error || data.message || '上传失败'}`);
       } else if (data.reused === true) {
         // 复用已有资产
         setUploadMsg(
@@ -201,10 +242,11 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
         if (fileInputRef.current) fileInputRef.current.value = '';
         await loadAssets();
       }
-    } catch {
-      setUploadMsg('❌ 网络错误');
+    } catch (uploadError) {
+      setUploadMsg(`❌ ${uploadError instanceof Error ? uploadError.message : '网络错误'}`);
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }, [uploadFile, uploadName, loadAssets]);
 
@@ -290,6 +332,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                 onChange={(e) => {
                   const f = e.target.files?.[0] || null;
                   setUploadFile(f);
+                  setUploadProgress(null);
                   if (f && !uploadName) setUploadName(f.name.replace(/\.[^.]+$/, ''));
                 }}
                 style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)' }}
@@ -315,6 +358,15 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                 {uploading ? '上传中...' : '上传并创建'}
               </button>
             </div>
+            {uploadProgress && (
+              <UploadProgressIndicator
+                label={uploadProgress.label}
+                detail={uploadProgress.detail}
+                percent={uploadProgress.percent}
+                variant="dark"
+                className="seedance-asset-upload-progress"
+              />
+            )}
             {uploadMsg && (
               <div style={{ fontSize: 11, color: uploadMsg.startsWith('✅') ? '#4ade80' : uploadMsg.includes('⚠️') ? '#fbbf24' : '#f87171', marginTop: 8, whiteSpace: 'pre-line' }}>{uploadMsg}</div>
             )}

@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { uploadFileToHistory } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { Workspace, WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
+import type { UploadProgressHandler } from '@/lib/http/file-upload';
 
 const TAB_ID_KEY = 'workspace_tab_id';
 const UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
@@ -58,8 +59,8 @@ export interface UseWorkspaceResult {
   // P0-1: 上传状态映射（assetId -> UploadStatus）
   uploadStatuses: Record<string, UploadStatus>;
   // P0-1: 上传素材（带状态追踪）
-  uploadAsset: (file: File) => Promise<void>;
-  uploadAssetToHistory: (file: File) => Promise<string>;
+  uploadAsset: (file: File, onProgress?: UploadProgressHandler) => Promise<void>;
+  uploadAssetToHistory: (file: File, onProgress?: UploadProgressHandler) => Promise<string>;
   addAssets: (assetIds: string[]) => Promise<void>;
   addReferenceImages: (referenceImageIds: string[]) => Promise<void>;
   loadReferenceAlbum: (albumId: string) => Promise<void>;
@@ -71,7 +72,7 @@ export interface UseWorkspaceResult {
   validatePrompt: (prompt: string) => Promise<{ valid: boolean; missing: string[] }>;
   refresh: () => Promise<void>;
   // P0-1: 替换素材
-  replaceAsset: (assetId: string, file: File) => Promise<void>;
+  replaceAsset: (assetId: string, file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   // P0-1: 设置 frame 角色
   setAssetFrameRole: (assetId: string, role: FrameRole) => Promise<void>;
 }
@@ -106,9 +107,10 @@ export function useWorkspace(): UseWorkspaceResult {
     fetchWorkspace();
   }, [fetchWorkspace]);
 
-  const uploadAssetToHistory = useCallback(async (file: File) => {
+  const uploadAssetToHistory = useCallback(async (file: File, onProgress?: UploadProgressHandler) => {
     const asset = await uploadFileToHistory(file, {
       invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
+      onProgress,
     });
     const assetId = asset.id as string | undefined;
     if (!assetId) throw new Error('素材上传成功，但没有返回素材 ID');
@@ -116,13 +118,13 @@ export function useWorkspace(): UseWorkspaceResult {
   }, []);
 
   // P0-1: 上传素材（带状态追踪）
-  const uploadAsset = useCallback(async (file: File) => {
+  const uploadAsset = useCallback(async (file: File, onProgress?: UploadProgressHandler) => {
     // 生成临时占位 assetId
     const tempId = `uploading_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     setLoading(true);
     setUploadStatuses((prev) => ({ ...prev, [tempId]: 'uploading' }));
     try {
-      const assetId = await uploadAssetToHistory(file);
+      const assetId = await uploadAssetToHistory(file, onProgress);
 
       // 添加到 workspace
       const addRes = await fetch('/api/workspace/assets', {
@@ -154,13 +156,13 @@ export function useWorkspace(): UseWorkspaceResult {
   }, [fetchWorkspace, uploadAssetToHistory]);
 
   // P0-1: 替换素材
-  const replaceAsset = useCallback(async (assetId: string, file: File) => {
+  const replaceAsset = useCallback(async (assetId: string, file: File, onProgress?: UploadProgressHandler) => {
     setUploadStatuses((prev) => ({ ...prev, [assetId]: 'uploading' }));
     try {
       const currentAssets = workspace?.assets ?? [];
       const targetAsset = currentAssets.find((asset) => asset.assetId === assetId);
 
-      const nextAssetId = await uploadAssetToHistory(file);
+      const nextAssetId = await uploadAssetToHistory(file, onProgress);
 
       const addRes = await fetch('/api/workspace/assets', {
         method: 'POST',

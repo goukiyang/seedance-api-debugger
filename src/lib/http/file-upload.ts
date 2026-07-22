@@ -1,4 +1,12 @@
 import { readJsonResponse } from './json-response';
+import {
+  notifyUploadProgress,
+  requestJsonWithUploadProgress,
+  type UploadProgressHandler,
+  type UploadProgressSnapshot,
+} from './upload-progress';
+
+export type { UploadProgressHandler, UploadProgressSnapshot };
 
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const MEDIA_DURATION_MIN_SECONDS = 2;
@@ -86,17 +94,34 @@ async function readUploadJsonResponse<T>(
   });
 }
 
-async function uploadWithRawFallback(file: File, invalidJsonMessage: string) {
-  let res: Response;
+async function uploadWithRawFallback(
+  file: File,
+  invalidJsonMessage: string,
+  onProgress?: UploadProgressHandler,
+) {
+  let result: { ok: boolean; status: number; data: UploadAssetResponse };
+  const request = buildRawFileUploadRequest(file);
   try {
-    res = await fetch('/api/assets/upload', {
-      ...buildRawFileUploadRequest(file),
+    result = await requestJsonWithUploadProgress<UploadAssetResponse>({
+      url: '/api/assets/upload',
+      method: 'POST',
+      headers: request.headers as Record<string, string>,
+      body: file,
+      invalidJsonMessage: uploadStageInvalidJsonMessage('普通上传接口', invalidJsonMessage),
+      connectionMessage: uploadStageConnectionMessage('普通上传', new Error('网络中断')),
+      progress: {
+        phase: 'raw',
+        label: '正在普通上传',
+        totalBytes: file.size,
+      },
+      onProgress,
     });
   } catch (error) {
+    if (error instanceof Error && error.message.includes('系统没有拿到有效上传结果')) throw error;
     throw new Error(uploadStageConnectionMessage('普通上传', error));
   }
-  const data = await readUploadJsonResponse<UploadAssetResponse>(res, '普通上传接口', invalidJsonMessage);
-  if (!res.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
+  const data = result.data;
+  if (!result.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('素材上传成功，但没有返回素材 ID');
   return data.asset;
 }
@@ -118,9 +143,10 @@ async function uploadWithRawFallbackOrThrow(
   invalidJsonMessage: string,
   fallbackToRaw: boolean,
   reason: string,
+  onProgress?: UploadProgressHandler,
 ) {
   if (shouldUseRawFallback(file, fallbackToRaw)) {
-    return uploadWithRawFallback(file, invalidJsonMessage);
+    return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
   }
   throw new Error(rawFallbackUnavailableMessage(reason));
 }
@@ -130,6 +156,7 @@ async function uploadWithServerProxy(
   file: File,
   context: UploadContext,
   invalidJsonMessage: string,
+  onProgress?: UploadProgressHandler,
 ) {
   if (!ticket.uploadToken) throw new Error('缺少上传票据，请重新上传。');
   const headers: Record<string, string> = {
@@ -141,18 +168,28 @@ async function uploadWithServerProxy(
   if (context.height != null) headers['X-Image-Height'] = String(context.height);
   if (context.durationSeconds != null) headers['X-Media-Duration'] = String(context.durationSeconds);
 
-  let res: Response;
+  let result: { ok: boolean; status: number; data: UploadAssetResponse };
   try {
-    res = await fetch('/api/assets/upload-proxy', {
+    result = await requestJsonWithUploadProgress<UploadAssetResponse>({
+      url: '/api/assets/upload-proxy',
       method: 'POST',
       headers,
       body: file,
+      invalidJsonMessage: uploadStageInvalidJsonMessage('服务端中转上传接口', invalidJsonMessage),
+      connectionMessage: uploadStageConnectionMessage('服务端中转上传', new Error('网络中断')),
+      progress: {
+        phase: 'proxy',
+        label: '正在服务端中转上传',
+        totalBytes: file.size,
+      },
+      onProgress,
     });
   } catch (error) {
+    if (error instanceof Error && error.message.includes('系统没有拿到有效上传结果')) throw error;
     throw new Error(uploadStageConnectionMessage('服务端中转上传', error));
   }
-  const data = await readUploadJsonResponse<UploadAssetResponse>(res, '服务端中转上传接口', invalidJsonMessage);
-  if (!res.ok) throw new Error(data.error || data.message || '服务端中转上传失败，请重新选择后重试');
+  const data = result.data;
+  if (!result.ok) throw new Error(data.error || data.message || '服务端中转上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('服务端中转上传成功，但没有返回素材 ID');
   return data.asset;
 }
@@ -213,11 +250,30 @@ function validateClientMediaDuration(file: File, durationSeconds: number | null)
   }
 }
 
-function putFileToStorage(url: string, headers: Record<string, string>, file: File): Promise<void> {
+function putFileToStorage(
+  url: string,
+  headers: Record<string, string>,
+  file: File,
+  onProgress?: UploadProgressHandler,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url);
     Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+    notifyUploadProgress(onProgress, {
+      phase: 'storage',
+      label: '正在上传到对象存储',
+      loadedBytes: 0,
+      totalBytes: file.size,
+    });
+    xhr.upload.onprogress = (event) => {
+      notifyUploadProgress(onProgress, {
+        phase: 'storage',
+        label: '正在上传到对象存储',
+        loadedBytes: event.loaded,
+        totalBytes: event.lengthComputable ? event.total : file.size,
+      });
+    };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
@@ -234,14 +290,20 @@ function putFileToStorage(url: string, headers: Record<string, string>, file: Fi
 
 export async function uploadFileToHistory(
   file: File,
-  options: { invalidJsonMessage?: string; fallbackToRaw?: boolean } = {},
+  options: { invalidJsonMessage?: string; fallbackToRaw?: boolean; onProgress?: UploadProgressHandler } = {},
 ) {
   const invalidJsonMessage = options.invalidJsonMessage || DEFAULT_UPLOAD_INVALID_JSON_MESSAGE;
   const fallbackToRaw = options.fallbackToRaw !== false;
+  const onProgress = options.onProgress;
   let hash = '';
   let width: number | null = null;
   let height: number | null = null;
   let durationSeconds: number | null = null;
+
+  notifyUploadProgress(onProgress, {
+    phase: 'preparing',
+    label: '正在读取文件信息',
+  });
 
   try {
     [hash, { width, height }, durationSeconds] = await Promise.all([
@@ -255,12 +317,17 @@ export async function uploadFileToHistory(
       error instanceof Error &&
       error.message.includes('当前浏览器不支持文件校验')
     ) {
-      return uploadWithRawFallback(file, invalidJsonMessage);
+      return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
     }
     throw error;
   }
 
   validateClientMediaDuration(file, durationSeconds);
+
+  notifyUploadProgress(onProgress, {
+    phase: 'ticket',
+    label: '正在申请上传通道',
+  });
 
   let ticket: DirectUploadTicketResponse;
   let ticketRes: Response;
@@ -277,40 +344,45 @@ export async function uploadFileToHistory(
     });
   } catch (error) {
     const message = uploadStageConnectionMessage('上传票据创建', error);
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
   }
   try {
     ticket = await readUploadJsonResponse<DirectUploadTicketResponse>(ticketRes, '上传票据接口', invalidJsonMessage);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传票据接口解析失败';
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
   }
   if (!ticketRes.ok) {
     const message = ticket.error || ticket.message || '上传票据创建失败';
     if (ticketRes.status >= 500) {
-      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
     }
     throw new Error(message);
   }
   if (ticket.directUploadAvailable === false) {
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用');
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress);
   }
   if (!ticket.uploadUrl || !ticket.uploadToken || ticket.method !== 'PUT') {
     throw new Error('上传票据内容不完整，请刷新后重试。');
   }
 
   try {
-    await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file);
+    await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file, onProgress);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传到对象存储失败';
     try {
-      return await uploadWithServerProxy(ticket, file, { hash, width, height, durationSeconds }, invalidJsonMessage);
+      return await uploadWithServerProxy(ticket, file, { hash, width, height, durationSeconds }, invalidJsonMessage, onProgress);
     } catch (proxyError) {
-      if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage);
+      if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
       const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
       throw new Error(rawFallbackUnavailableMessage(`${message}；服务端中转也失败：${proxyMessage}`));
     }
   }
+
+  notifyUploadProgress(onProgress, {
+    phase: 'complete',
+    label: '正在登记上传结果',
+  });
 
   let complete: UploadAssetResponse;
   let completeRes: Response;
@@ -328,17 +400,23 @@ export async function uploadFileToHistory(
     });
   } catch (error) {
     const message = uploadStageConnectionMessage('上传完成登记', error);
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
   }
   try {
     complete = await readUploadJsonResponse<UploadAssetResponse>(completeRes, '上传完成登记接口', invalidJsonMessage);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传完成登记接口解析失败';
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
   }
   if (!completeRes.ok) {
     throw new Error(complete.error || complete.message || '上传完成但入库失败，请重新上传。');
   }
   if (!complete.asset?.id) throw new Error('上传完成但没有返回素材 ID');
+  notifyUploadProgress(onProgress, {
+    phase: 'done',
+    label: '上传完成',
+    loadedBytes: file.size,
+    totalBytes: file.size,
+  });
   return complete.asset;
 }

@@ -145,6 +145,25 @@ async function main() {
   assertIncludes(generationComposer, 'referenceAudioUrls: workspace.assets', '生成提交必须从工作区收集参考音频 URL');
   assertIncludes(generationComposer, "asset.type === 'audio'", '生成提交必须按素材类型识别音频');
 
+  const uploadProgressHelper = read('src/lib/http/upload-progress.ts');
+  assertIncludes(uploadProgressHelper, 'xhr.upload.onprogress', '通用上传请求必须读取浏览器真实上传进度');
+  assertIncludes(uploadProgressHelper, 'event.lengthComputable', '上传百分比只能在浏览器提供总字节数时计算');
+  assertIncludes(uploadProgressHelper, 'percent?: number', '上传进度类型必须允许没有真实百分比的阶段状态');
+
+  const uploadProgressIndicator = read('src/components/UploadProgressIndicator.tsx');
+  assertIncludes(uploadProgressIndicator, "role={percentText ? 'progressbar' : 'status'}", '进度组件有真实百分比时才显示 progressbar');
+  assertIncludes(uploadProgressIndicator, '<em>处理中</em>', '没有真实百分比时必须显示阶段状态，不能伪造百分比');
+
+  const referenceStrip = read('src/components/ReferenceStrip.tsx');
+  assertIncludes(referenceStrip, 'UploadProgressIndicator', '生成工作台参考图上传必须显示进度组件');
+  assertIncludes(referenceStrip, 'onUpload(file, (progress)', '生成工作台参考图上传必须接收真实上传进度');
+  assertIncludes(referenceStrip, 'ref-strip-upload-progress', '生成工作台参考图上传必须有稳定进度条样式入口');
+
+  const uploadedImagePicker = read('src/components/UploadedImagePicker.tsx');
+  assertIncludes(uploadedImagePicker, 'UploadProgressIndicator', '上传历史图片弹窗必须显示进度组件');
+  assertIncludes(uploadedImagePicker, 'onUploadFile(file, (progress)', '上传历史图片弹窗必须接收真实上传进度');
+  assertIncludes(uploadedImagePicker, 'uploaded-picker-progress', '上传历史图片弹窗必须有稳定进度条样式入口');
+
   const generatePage = read('src/components/generate/GeneratePageClient.tsx');
   assertIncludes(generatePage, 'reference_video_urls: params.referenceVideoUrls || []', '普通生成页必须把参考视频 URL 传给创建任务接口');
   assertIncludes(generatePage, 'reference_audio_urls: params.referenceAudioUrls || []', '普通生成页必须把参考音频 URL 传给创建任务接口');
@@ -167,6 +186,9 @@ async function main() {
   const albumDetail = read('src/app/collections/[id]/ReferenceAlbumDetailClient.tsx');
   assertIncludes(albumDetail, 'canPreviewOriginalMedia', '图集详情页不应给无使用/下载权限者直接加载原始视频');
   assertIncludes(albumDetail, 'uploadFeedback', '图集详情页上传必须显示处理中和成功提示');
+  assertIncludes(albumDetail, 'requestJsonWithUploadProgress<AlbumUploadResponse>', '图集详情页上传必须使用真实上传进度请求');
+  assertIncludes(albumDetail, 'UploadProgressIndicator', '图集详情页上传必须显示进度组件');
+  assertIncludes(albumDetail, 'album-upload-progress', '图集详情页上传必须有稳定进度条样式入口');
   assertIncludes(albumDetail, '正在上传', '图集详情页上传开始后必须告诉用户正在处理');
   assertIncludes(albumDetail, '上传成功，正在刷新图集列表', '图集详情页上传成功后必须显示刷新状态');
   assertIncludes(albumDetail, '已上传 ${uploadedCount} 个素材到图集', '图集详情页刷新后必须显示上传成功提示');

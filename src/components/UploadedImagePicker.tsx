@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { readJsonResponse } from '@/lib/http/json-response';
+import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
 
 interface UploadedImageItem {
   id: string;
@@ -22,7 +24,7 @@ interface Props {
   currentCount: number;
   currentAssetIds: string[];
   onClose: () => void;
-  onUploadFile: (file: File) => Promise<string>;
+  onUploadFile: (file: File, onProgress?: UploadProgressHandler) => Promise<string>;
   onConfirm: (assetIds: string[]) => Promise<void>;
 }
 
@@ -41,6 +43,12 @@ type ApiMessageResponse = {
   message?: string;
 };
 
+type PickerUploadProgress = {
+  label: string;
+  detail: string;
+  percent?: number;
+};
+
 const PAGE_SIZE = 40;
 const MAX_REFS = 9;
 const HISTORY_INVALID_JSON_MESSAGE = '历史图片服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
@@ -57,6 +65,20 @@ function formatDate(value: string) {
   return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 }
 
+function buildPickerUploadProgress(
+  file: File,
+  fileIndex: number,
+  fileCount: number,
+  progress: UploadProgressSnapshot,
+): PickerUploadProgress {
+  const filePrefix = fileCount > 1 ? `${fileIndex + 1}/${fileCount} ` : '';
+  return {
+    label: `${filePrefix}${progress.label}`,
+    detail: file.name,
+    ...(progress.percent != null ? { percent: progress.percent } : {}),
+  };
+}
+
 export function UploadedImagePicker({
   open,
   currentCount,
@@ -71,6 +93,7 @@ export function UploadedImagePicker({
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<PickerUploadProgress | null>(null);
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<UploadedImageItem | null>(null);
@@ -111,6 +134,7 @@ export function UploadedImagePicker({
     if (!open) return;
     setSelectedAssetIds([]);
     setPreviewAsset(null);
+    setUploadProgress(null);
     void loadPage(1, 'replace');
   }, [loadPage, open]);
 
@@ -148,11 +172,19 @@ export function UploadedImagePicker({
     const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
     if (files.length === 0) return;
     setUploading(true);
+    setUploadProgress(null);
     setError(null);
     try {
       const uploadedAssetIds: string[] = [];
-      for (const file of files) {
-        uploadedAssetIds.push(await onUploadFile(file));
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress({
+          label: files.length > 1 ? `${i + 1}/${files.length} 准备上传` : '准备上传',
+          detail: file.name,
+        });
+        uploadedAssetIds.push(await onUploadFile(file, (progress) => {
+          setUploadProgress(buildPickerUploadProgress(file, i, files.length, progress));
+        }));
       }
       await loadPage(1, 'replace');
       setSelectedAssetIds((current) => {
@@ -169,6 +201,7 @@ export function UploadedImagePicker({
       setError(err instanceof Error ? err.message : '图片上传失败');
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -235,6 +268,15 @@ export function UploadedImagePicker({
         </div>
 
         {error && <div className="uploaded-picker-error">{error}</div>}
+        {uploadProgress && (
+          <UploadProgressIndicator
+            label={uploadProgress.label}
+            detail={uploadProgress.detail}
+            percent={uploadProgress.percent}
+            variant="light"
+            className="uploaded-picker-progress"
+          />
+        )}
 
         <div className="uploaded-picker-body">
           {loading && items.length === 0 ? (

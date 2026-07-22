@@ -2114,6 +2114,109 @@ a {
   animation: spin 0.8s linear infinite;
 }
 
+.upload-progress-indicator {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+  min-width: 180px;
+  padding: 8px 10px;
+}
+
+.upload-progress-indicator-dark {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(148, 163, 184, 0.22);
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.upload-progress-indicator-light {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.upload-progress-indicator-head {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  justify-content: space-between;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.upload-progress-indicator-head span,
+.upload-progress-indicator p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress-indicator-head strong,
+.upload-progress-indicator-head em {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.upload-progress-indicator-track {
+  background: rgba(148, 163, 184, 0.26);
+  border-radius: 999px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.upload-progress-indicator-track span {
+  background: #2563eb;
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 0.15s ease-out;
+}
+
+.upload-progress-indicator-stage {
+  align-items: center;
+  display: flex;
+  height: 8px;
+}
+
+.upload-progress-indicator-stage .loading {
+  border-width: 1.5px;
+  height: 12px;
+  width: 12px;
+}
+
+.upload-progress-indicator p {
+  font-size: 11px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.ref-strip-upload-progress {
+  max-width: 260px;
+  min-width: 220px;
+}
+
+.uploaded-picker-progress {
+  margin: 10px 16px 0;
+  max-width: none;
+  width: calc(100% - 32px);
+}
+
+.template-bound-image-progress,
+.seedance-asset-upload-progress {
+  margin-top: 8px;
+  max-width: none;
+}
+
+.album-upload-progress {
+  margin-bottom: 14px;
+  max-width: 440px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

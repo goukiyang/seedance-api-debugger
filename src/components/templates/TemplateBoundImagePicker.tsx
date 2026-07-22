@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
-import { uploadFileToHistory } from '@/lib/http/file-upload';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import { uploadFileToHistory, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { TemplateContextCardBoundImage } from '@/lib/templates/workbench';
 
@@ -65,6 +66,12 @@ type HistoryListResponse = ApiMessageResponse & {
   assets?: UploadedImageItem[];
 };
 
+type PickerUploadProgress = {
+  label: string;
+  detail: string;
+  percent?: number;
+};
+
 const SCOPES: Array<{ value: AlbumScope; label: string }> = [
   { value: 'mine', label: '我的图集' },
   { value: 'project', label: '项目图集' },
@@ -81,6 +88,14 @@ function formatDate(value: string) {
   return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 }
 
+function buildPickerUploadProgress(file: File, progress: UploadProgressSnapshot): PickerUploadProgress {
+  return {
+    label: progress.label,
+    detail: file.name,
+    ...(progress.percent != null ? { percent: progress.percent } : {}),
+  };
+}
+
 export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect }: Props) {
   const [tab, setTab] = useState<'album' | 'history'>('album');
   const [scope, setScope] = useState<AlbumScope>('mine');
@@ -90,6 +105,7 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
   const [historyImages, setHistoryImages] = useState<UploadedImageItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<PickerUploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -215,10 +231,15 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
     if (!file) return;
 
     setUploading(true);
+    setUploadProgress({
+      label: '准备上传',
+      detail: file.name,
+    });
     setError(null);
     try {
       const asset = await uploadFileToHistory(file, {
         invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
+        onProgress: (progress) => setUploadProgress(buildPickerUploadProgress(file, progress)),
       });
       if (!asset?.id) throw new Error('图片上传成功，但没有返回素材 ID');
       const assetId = asset.id;
@@ -250,6 +271,7 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
       setError(uploadError instanceof Error ? uploadError.message : '图片上传失败');
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (uploadInputRef.current) uploadInputRef.current.value = '';
     }
   };
@@ -278,6 +300,15 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
         </div>
 
         {error && <div className="template-drawer-error">{error}</div>}
+        {uploadProgress && (
+          <UploadProgressIndicator
+            label={uploadProgress.label}
+            detail={uploadProgress.detail}
+            percent={uploadProgress.percent}
+            variant="dark"
+            className="template-bound-image-progress"
+          />
+        )}
 
         {tab === 'album' ? (
           <div className="template-bound-image-body">
