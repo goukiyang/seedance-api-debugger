@@ -2174,7 +2174,9 @@ a {
   border-radius: inherit;
   display: block;
   height: 100%;
-  transition: width 0.15s ease-out;
+  transform-origin: left center;
+  transition: transform 0.15s ease-out;
+  width: 100%;
 }
 
 .upload-progress-indicator-stage {

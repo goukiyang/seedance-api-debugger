@@ -21,6 +21,7 @@ export function UploadProgressIndicator({
   className = '',
 }: UploadProgressIndicatorProps) {
   const percentText = formatPercent(percent);
+  const percentValue = percentText ? Math.max(0, Math.min(100, Math.round(percent || 0))) : undefined;
   const classNames = ['upload-progress-indicator', `upload-progress-indicator-${variant}`, className]
     .filter(Boolean)
     .join(' ');
@@ -34,7 +35,7 @@ export function UploadProgressIndicator({
         ? {
           'aria-valuemin': 0,
           'aria-valuemax': 100,
-          'aria-valuenow': Math.max(0, Math.min(100, Math.round(percent || 0))),
+          'aria-valuenow': percentValue,
         }
         : {})}
     >
@@ -44,7 +45,7 @@ export function UploadProgressIndicator({
       </div>
       {percentText ? (
         <div className="upload-progress-indicator-track">
-          <span style={{ width: percentText }} />
+          <span style={{ transform: `scaleX(${(percentValue ?? 0) / 100})` }} />
         </div>
       ) : (
         <div className="upload-progress-indicator-stage">
