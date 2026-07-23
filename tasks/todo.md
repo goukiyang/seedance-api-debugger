@@ -48,9 +48,9 @@
 - [x] 更新上传入口防回归测试：新增 `scripts/upload-entrypoint-inventory-smoke.ts` 或等价脚本，要求用户可见业务页面不得新增 `new FormData()` 直传业务接口；允许列表必须写明原因，例如登录表单、外部抠图代理、小图 raw fallback 内部路径。
 - [ ] 补分块上传升级设计但不抢跑实现：新增轻量设计记录或 todo 子项，明确 chunk 触发门槛，例如视频/音频超过 50MB、server proxy 真实失败率持续出现、或 Cloudflare/tunnel 超时无法消除；正式实现前不新增复杂协议，避免把第一阶段做成大改造。
 - [x] 更新参考图集集成测试：保留或改造 `scripts/reference-album-duplicate-upload-integration.ts`，新流程应验证“已有 Asset -> JSON 挂到图集 -> 旧 multipart 返回升级 JSON -> 不新增额外 Asset”。部署后用当前服务代码运行。
-- [ ] 本地验证：运行 `npx tsx scripts/upload-entrypoint-inventory-smoke.ts`、`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-integration.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`git diff --check`。（本轮已通过 4 个 smoke、`direct-upload-r2-smoke`、`template-bound-image-upload-smoke`、`npm run lint`、`npm run build`、独立 `tsc`、`git diff --check`；集成脚本待部署后跑当前服务。）
+- [x] 本地验证：运行 `npx tsx scripts/upload-entrypoint-inventory-smoke.ts`、`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-integration.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`git diff --check`。（本轮已通过 4 个 smoke、`direct-upload-r2-smoke`、`template-bound-image-upload-smoke`、`npm run lint`、`npm run build`、独立 `tsc`、`git diff --check`；部署后当前服务运行 `reference-album-duplicate-upload-integration` 通过。）
 - [ ] 真实网页登录态验证：在本机已登录飞书的 Chrome 上验证 `/generate` 参考图上传、上传历史图片、图集详情页多文件上传、模板绑定图片、反馈截图上传；每个入口至少覆盖一次成功、一次重复复用、一次不合规文件错误。
-- [ ] 线上部署闭环：通过后执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`；公网验证 `/api/config`、`/login`、目标页面；等待健康守护周期确认 `runs` 不异常增长。
+- [x] 线上部署闭环：通过后执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`；公网验证 `/api/config`、`/login`、目标页面；等待健康守护周期确认 `runs` 不异常增长。
 
 ### 3. 验收/审查内容
 
