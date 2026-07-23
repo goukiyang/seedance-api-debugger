@@ -6,7 +6,7 @@ import PageBanner from '@/components/PageBanner';
 import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/ShareAlbumDialog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
-import { requestJsonWithUploadProgress, type UploadProgressSnapshot } from '@/lib/http/upload-progress';
+import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 
 interface AlbumDetail {
   id: string;
@@ -64,6 +64,11 @@ type AlbumUploadResponse = {
   message?: string;
 };
 
+type PendingAlbumAttach = {
+  assetIds: string[];
+  fileNames: string[];
+};
+
 function mediaTypeLabel(type: string | null | undefined) {
   if (type === 'video') return '视频';
   if (type === 'audio') return '音频';
@@ -74,10 +79,10 @@ function isImageItem(image: ReferenceImageItem) {
   return !image.asset?.type || image.asset.type === 'image';
 }
 
-function formatUploadProgressDetail(files: File[], progress: UploadProgressSnapshot) {
-  const fileCountText = files.length > 1 ? `${files.length} 个素材` : files[0]?.name || '素材';
-  if (progress.percent != null) return fileCountText;
-  return files.length > 1 ? `${fileCountText}，正在准备上传` : fileCountText;
+function formatUploadProgressDetail(files: File[], file: File, index: number, progress: UploadProgressSnapshot) {
+  const itemText = files.length > 1 ? `第 ${index + 1}/${files.length} 个：${file.name}` : file.name;
+  if (progress.percent != null) return itemText;
+  return `${itemText}，${progress.label}`;
 }
 
 export default function ReferenceAlbumDetailClient({ albumId }: { albumId: string }) {
@@ -87,6 +92,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   const [error, setError] = useState<string | null>(null);
   const [uploadFeedback, setUploadFeedback] = useState<AlbumUploadFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = useState<AlbumUploadProgress | null>(null);
+  const [pendingAlbumAttach, setPendingAlbumAttach] = useState<PendingAlbumAttach | null>(null);
   const [loading, setLoading] = useState(false);
   const [shareDialogAlbum, setShareDialogAlbum] = useState<ShareAlbumDialogAlbum | null>(null);
   const [sharingImageId, setSharingImageId] = useState<string | null>(null);
@@ -114,47 +120,72 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
     void loadAlbum().catch(() => {});
   }, [loadAlbum]);
 
+  const attachAssetsToAlbum = useCallback(async (assetIds: string[], fileNames: string[]) => {
+    const res = await fetch(`/api/reference-albums/${albumId}/images`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assetIds,
+        source_type: 'upload',
+        metadata_json: {
+          source: 'album_asset_upload',
+          original_file_names: fileNames,
+        },
+      }),
+    });
+    const data = await res.json().catch(() => ({})) as AlbumUploadResponse;
+    if (!res.ok) throw new Error(data.error || data.message || '保存到图集失败');
+    return data;
+  }, [albumId]);
+
+  const finishAlbumAttach = useCallback(async (assetIds: string[], fileNames: string[], expectedCount: number) => {
+    setUploadProgress({ label: '正在加入图集', detail: `${assetIds.length} 个素材` });
+    let addData: AlbumUploadResponse;
+    try {
+      addData = await attachAssetsToAlbum(assetIds, fileNames);
+    } catch (err) {
+      setPendingAlbumAttach({ assetIds, fileNames });
+      const reason = err instanceof Error ? err.message : '保存到图集失败';
+      throw new Error(`素材已上传成功，但加入图集失败：${reason}`);
+    }
+    const uploadedCount = Array.isArray(addData.images) ? addData.images.length : expectedCount;
+    setUploadProgress(null);
+    setUploadFeedback({ type: 'info', message: '上传成功，正在刷新图集列表...' });
+    await loadAlbum();
+    setPendingAlbumAttach(null);
+    setUploadFeedback({ type: 'success', message: `已上传 ${uploadedCount} 个素材到图集。` });
+  }, [attachAssetsToAlbum, loadAlbum]);
+
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
     setLoading(true);
     setError(null);
     setUploadProgress(null);
+    setPendingAlbumAttach(null);
     setUploadFeedback({
       type: 'info',
       message: `正在上传 ${files.length} 个素材。视频或音频会先校验时长并上传到公网存储，文件较大时可能需要几十秒。`,
     });
     try {
-      const formData = new FormData();
-      for (const file of files) {
-        formData.append('file', file);
+      const assetIds: string[] = [];
+      const fileNames = files.map((file) => file.name || 'upload.bin');
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const asset = await uploadFileAsAsset(file, {
+          invalidJsonMessage: '图集上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
+          onProgress: (progress) => {
+            setUploadProgress({
+              label: progress.label,
+              detail: formatUploadProgressDetail(files, file, index, progress),
+              ...(progress.percent != null ? { percent: progress.percent } : {}),
+            });
+          },
+        });
+        if (!asset.id) throw new Error(`素材上传成功但没有返回 ID：${file.name}`);
+        assetIds.push(asset.id);
       }
-
-      const addResult = await requestJsonWithUploadProgress<AlbumUploadResponse>({
-        url: `/api/reference-albums/${albumId}/images`,
-        method: 'POST',
-        body: formData,
-        invalidJsonMessage: '图集上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
-        connectionMessage: '图集上传连接中断，系统没有拿到有效上传结果。请重新上传；如果文件较大，请压缩后重试。',
-        progress: {
-          phase: 'reference-album',
-          label: '正在上传到图集',
-        },
-        onProgress: (progress) => {
-          setUploadProgress({
-            label: progress.label,
-            detail: formatUploadProgressDetail(files, progress),
-            ...(progress.percent != null ? { percent: progress.percent } : {}),
-          });
-        },
-      });
-      const addData = addResult.data;
-      if (!addResult.ok) throw new Error(addData.error || addData.message || '保存到图集失败');
-      const uploadedCount = Array.isArray(addData.images) ? addData.images.length : files.length;
-      setUploadProgress(null);
-      setUploadFeedback({ type: 'info', message: '上传成功，正在刷新图集列表...' });
-      await loadAlbum();
-      setUploadFeedback({ type: 'success', message: `已上传 ${uploadedCount} 个素材到图集。` });
+      await finishAlbumAttach(assetIds, fileNames, files.length);
     } catch (err) {
       setError(err instanceof Error ? err.message : '上传失败');
       setUploadFeedback(null);
@@ -162,6 +193,26 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
       setUploadProgress(null);
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRetryAlbumAttach = async () => {
+    if (!pendingAlbumAttach) return;
+    setLoading(true);
+    setError(null);
+    setUploadFeedback({ type: 'info', message: '正在把已上传素材重新加入图集...' });
+    try {
+      await finishAlbumAttach(
+        pendingAlbumAttach.assetIds,
+        pendingAlbumAttach.fileNames,
+        pendingAlbumAttach.assetIds.length,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加入图集失败');
+      setUploadFeedback(null);
+    } finally {
+      setUploadProgress(null);
+      setLoading(false);
     }
   };
 
@@ -286,6 +337,13 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
           variant="light"
           className="album-upload-progress"
         />
+      )}
+      {pendingAlbumAttach && (
+        <div className="album-upload-retry">
+          <button type="button" onClick={handleRetryAlbumAttach} disabled={loading}>
+            {loading ? '正在重试...' : `重试加入图集（${pendingAlbumAttach.assetIds.length} 个）`}
+          </button>
+        </div>
       )}
 
       {album && (

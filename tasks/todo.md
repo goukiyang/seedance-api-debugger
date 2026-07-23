@@ -1,6 +1,6 @@
 # V1.2 剩余模块落地 Todo
 
-更新时间：2026-07-22
+更新时间：2026-07-23
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
 
@@ -14,6 +14,89 @@
 ## 当前专项入口
 
 - [WallVerse 第一组「世界迁移」声音闭环](todo/wallverse-audio-20260715.md)
+
+## 2026-07-23 上传链路统一架构：所有页面先生成 Asset，再挂载业务对象
+
+### 1. 目标复述
+
+用户要解决的不是“某个上传按钮偶发失败”，而是整个网站上传链路不统一：有些页面已经走 `/api/assets/upload-ticket`、`/api/assets/upload-proxy`、`/api/assets/upload-complete` 这套稳定路径；但参考图集、反馈附件、官方 Seedance 素材创建、部分工具页还在用旧的 `FormData` 单请求，把文件直接 POST 到业务接口。这个模式遇到公网 tunnel、较大文件、多文件、网络波动或页面切换，就容易出现 `aborted / ECONNRESET`，用户看到的就是“又无法上传”。
+
+本次目标：全站上传必须先走统一上传网关生成 `Asset`，业务接口只负责“把 Asset 挂到图集 / 生成页 / 模板 / 反馈 / 官方素材记录”。用户仍然只需要点击上传、选择文件、看到真实进度和结果；系统内部负责校验、上传、中转、复用、入库、挂载和失败恢复。完成标准是：用户可见上传入口不再把文件直接提交到业务接口；重复素材直接复用；失败提示能说明是文件问题、登录问题、传输中断、存储问题还是业务挂载失败。
+
+### 2. 具体任务
+
+- [x] 写上传入口盘点脚本：新增或改造 smoke，扫描 `src/app`、`src/components`、`src/lib` 中的 `request.formData()`、`file.arrayBuffer()`、`new FormData()`、`/api/assets/upload`、`/api/reference-albums/*/images`；输出每个入口属于“统一上传 / 业务挂载 / 兼容 fallback / 特殊外部处理”哪一类，禁止新增不明来源的文件上传入口。
+- [x] 反转旧图集上传测试：修改 `scripts/reference-album-duplicate-upload-smoke.ts`，不再断言图集页必须 `FormData` 直传；改为断言图集详情页上传必须先调用统一上传 helper，图集接口只接收 `assetIds/referenceImageIds` JSON，multipart 分支不得作为前端主路径。
+- [x] 定义唯一前端上传 helper 名称：在 `src/lib/http/file-upload.ts` 保留现有 `uploadFileToHistory` 兼容导出，同时新增语义更准确的 `uploadFileAsAsset` 或等价命名；所有新代码只用这个唯一 helper，避免“历史上传图”这个旧名字误导业务页面。
+- [x] 固化统一上传结果类型：统一 helper 返回标准字段 `id/originalUrl/thumbnailUrl/fileName/fileSize/mimeType/hash/reused/isPubliclyReachable/storageProvider`；业务页面不得自己拼 URL、不得自己算最终存储地址、不得直接理解 R2 签名 URL。
+- [x] 明确上传稳定性分层：第一阶段先把所有入口统一到 Asset + server proxy；第二阶段补 R2 CORS 后开启浏览器直传；第三阶段在大文件真实失败率仍高时再做 chunk 分块上传。不得把“还没做 chunk”当成第一阶段不完成，但要保留升级门槛和验收条件。
+- [ ] 补 R2 CORS 开启验收任务：只读确认 Cloudflare R2 bucket 是否允许 `https://sd2.youdoodesign.com` 的 `PUT/GET/HEAD` 和必要 headers；没有权限时记录阻塞并保持 server proxy；权限补齐后再开启 `R2_DIRECT_UPLOAD_ENABLED=true` 并做真实浏览器 PUT 验收。
+- [x] 迁移参考图集详情页上传：修改 `src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`，选择多个文件后逐个或低并发调用统一上传 helper；每个文件上传成功后收集 `asset.id`，最后 POST JSON 到 `/api/reference-albums/:id/images` 完成挂载。
+- [x] 图集上传进度改成真实分段：前端显示“第 N 个文件 / 文件名 / 上传中 / 已复用 / 正在加入图集 / 已完成”；百分比只来自统一 helper 的真实字节进度，挂载阶段只显示阶段文案，不显示假百分比。
+- [ ] 补业务挂载可恢复机制：如果文件已上传成 Asset，但加入图集、绑定模板、加入参考图或提交反馈失败，前端必须保留本轮已上传的 `assetId`，提示“素材已上传成功，加入目标失败，可重试”，重试时只重跑业务挂载，不重新上传文件。
+- [x] 改造图集接口职责：修改 `src/app/api/reference-albums/[id]/images/route.ts`，主路径只处理 JSON 的 `assetIds/referenceImageIds`；复用现有权限校验、`ensureReferenceAssetReady`、`createAlbumImageFromAsset`、`OperationLog`，不再在主路径读取文件 body。
+- [x] 处理图集 multipart 兼容边界：旧 multipart 分支要么删除，要么只保留为明确 JSON 错误：“当前上传入口已升级，请刷新页面后重试”；不得继续执行文件读取、上传和入库，避免旧链路继续复发。
+- [x] 迁移生成页参考图入口：检查 `src/components/UploadedImagePicker.tsx`、`src/components/ReferenceStrip.tsx`、`src/lib/hooks/useWorkspace.ts`、`src/components/GenerationComposer.tsx`、`src/components/generate/GeneratePageClient.tsx`，确认所有“上传到当前参考图 / 上传历史图 / 工作台参考图”都只通过统一 helper 产生 Asset，再通过 workspace 或 reference image JSON 绑定。
+- [x] 迁移模板绑定图片入口：检查 `src/components/templates/TemplateBoundImagePicker.tsx`、`src/components/templates/TemplateContextCardsPanel.tsx`，确认模板图片只拿统一 Asset 结果，不出现业务组件自己 `FormData` 传文件。
+- [x] 迁移官方 Seedance 素材创建入口：把 `src/components/SeedanceAssetPanel.tsx` 和 `/api/assets/upload-and-create` 改为“先统一上传 Asset，再用 assetId 创建官方 Seedance Asset”；接口保留 file multipart 兼容 JSON 错误或后台专用兼容，但用户前端不再走文件直传。
+- [x] 迁移反馈附件上传：检查 `src/components/FeedbackWidget.tsx` 和 `src/app/api/feedback/upload/route.ts`；反馈截图也优先走统一上传 Asset，再把安全 URL 写入 `Feedback.image_urls_json`。如果暂不改 Feedback schema，至少让反馈上传复用统一上传服务层，不再单独 `formData + arrayBuffer + uploadPublicAsset`。
+- [ ] 迁移工具类上传或明确例外：检查 `src/app/api/tools/ultimate-canvas/upload/route.ts`、`src/app/api/codex/assets/upload/route.ts`、`src/app/cutout/page.tsx`。如果本质是站内素材，迁移到统一 Asset；如果是外部处理服务，例如抠图代理，必须在盘点脚本里标为特殊外部处理，并使用同一套进度、错误提示和大小限制。
+- [x] 保留 `/api/assets/upload` 只作为统一 helper 的小图 raw fallback：它不能被业务页面直接调用；smoke 要断言普通页面没有直接 fetch 这个接口，只有 `src/lib/http/file-upload.ts` 可调用。
+- [ ] 补服务端防重复和审计一致性：所有业务挂载接口只记录“谁把哪个 assetId 挂到哪个对象”；文件 hash、复用、存储 provider、真实 URL 只由 Asset 上传层维护，业务日志不打印签名 URL、uploadToken、cookie 或完整公开资源 URL。
+- [ ] 补未挂载素材处理策略：上传成功但业务挂载失败的 Asset 不自动硬删；它应能在上传历史中被继续选择或重试挂载。后续如需清理，只做“长期未引用素材”的后台软删除/归档规划，不在用户重试前清掉。
+- [ ] 补失败恢复文案：统一错误文案分为“文件太大 / 类型不支持 / 未登录 / 上传中断 / 存储失败 / 上传成功但挂载失败 / 重复素材已复用”；不再出现 `Unexpected token '<'`、`Internal server error`、`服务响应格式错误` 这类用户无法行动的提示。
+- [x] 更新上传入口防回归测试：新增 `scripts/upload-entrypoint-inventory-smoke.ts` 或等价脚本，要求用户可见业务页面不得新增 `new FormData()` 直传业务接口；允许列表必须写明原因，例如登录表单、外部抠图代理、小图 raw fallback 内部路径。
+- [ ] 补分块上传升级设计但不抢跑实现：新增轻量设计记录或 todo 子项，明确 chunk 触发门槛，例如视频/音频超过 50MB、server proxy 真实失败率持续出现、或 Cloudflare/tunnel 超时无法消除；正式实现前不新增复杂协议，避免把第一阶段做成大改造。
+- [x] 更新参考图集集成测试：保留或改造 `scripts/reference-album-duplicate-upload-integration.ts`，新流程应验证“已有 Asset -> JSON 挂到图集 -> 旧 multipart 返回升级 JSON -> 不新增额外 Asset”。部署后用当前服务代码运行。
+- [ ] 本地验证：运行 `npx tsx scripts/upload-entrypoint-inventory-smoke.ts`、`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-integration.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`git diff --check`。（本轮已通过 4 个 smoke、`direct-upload-r2-smoke`、`template-bound-image-upload-smoke`、`npm run lint`、`npm run build`、独立 `tsc`、`git diff --check`；集成脚本待部署后跑当前服务。）
+- [ ] 真实网页登录态验证：在本机已登录飞书的 Chrome 上验证 `/generate` 参考图上传、上传历史图片、图集详情页多文件上传、模板绑定图片、反馈截图上传；每个入口至少覆盖一次成功、一次重复复用、一次不合规文件错误。
+- [ ] 线上部署闭环：通过后执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`；公网验证 `/api/config`、`/login`、目标页面；等待健康守护周期确认 `runs` 不异常增长。
+
+### 3. 验收/审查内容
+
+- [x] 架构验收：用户可见上传入口必须先生成 Asset，再通过 JSON 把 assetId 挂到业务对象；业务接口不得继续接收文件本体作为主路径。
+- [ ] 图集验收：`/collections/:id` 多文件上传不再命中旧 multipart 主链路；上传成功后图集立即出现素材，刷新后仍存在，重复文件显示成功并复用。
+- [ ] 生成页验收：`/generate` 上传参考图后能加入当前参考图，重复上传不报“当前账号不能直接复用”，不要求用户理解素材复用。
+- [ ] 模板验收：模板绑定图片上传仍可绑定到卡片，刷新后绑定关系存在，不出现旧上传错误文案。
+- [ ] 反馈验收：反馈截图上传失败时给可操作原因；成功时反馈记录保留可访问图片 URL，不泄露本机路径、签名 URL、token 或完整用户 profile。
+- [ ] 挂载恢复验收：人为制造“上传成功但加入图集/绑定模板失败”场景时，页面必须保留已上传 Asset 并允许只重试挂载；不能要求用户重新传同一文件。
+- [ ] R2 CORS 验收：CORS 未补齐时系统稳定走 server proxy；CORS 补齐并开启开关后，真实浏览器 PUT 到 R2 成功，失败时自动回到同源中转并说明阶段。
+- [ ] 大文件策略验收：第一阶段不承诺 chunk 已完成，但必须说明超过阈值的大文件当前走哪条链路、失败后怎么提示、何时升级到 chunk。
+- [ ] 错误验收：断网、未登录、文件过大、类型不支持、服务端中转失败、业务挂载失败要显示不同文案；不得出现 HTML 页面内容、`Unexpected token '<'` 或裸 `Internal server error`。
+- [x] 进度验收：只有真实传输字节可显示百分比；申请票据、计算 hash、登记完成、加入图集等阶段只能显示阶段文案。
+- [ ] 日志验收：上传日志只记录阶段、文件大小、mime、assetId、用户 id 摘要和错误码；不得打印签名 URL、uploadToken、cookie、手机号、头像 URL、完整公开资源 URL。
+- [x] 独立只读审查：实现后创建独立只读审查 agent；审查 agent 不改文件、不提交、不补实现，只按本清单判断目标是否达标、证据是否充分、风险是否遗漏，并输出通过/不通过、证据、缺口和下一步。
+- [ ] 如果子 agent 暂不可用：由主线程按同一清单只读复查，不能改文件；该结果不是独立审查，可信度低于子 agent，不能把“独立只读审查”项标记为完成。
+
+### 4. 审查对齐检查
+
+- [x] 审查必须围绕“全站上传入口统一”这个目标，不要只看某个页面能不能上传成功。
+- [x] 审查必须用入口盘点脚本确认没有遗漏旧 `FormData` 文件上传主路径。
+- [x] 审查必须区分“上传文件成功”和“业务挂载成功”：两者都成功才算用户看到结果。
+- [x] 审查必须确认用户操作习惯不变：仍然是选择文件、看进度、看到结果，不要求用户知道 Asset、R2、proxy、providerAssetId。
+- [x] 审查必须确认“上传成功但挂载失败”不会被包装成上传失败，也不会重复消耗用户时间和网络重新传文件。
+- [x] 审查必须确认 R2 CORS 和 chunk 分块是有边界的后续稳定性任务：第一阶段关闭旧链路，第二阶段打开直传，第三阶段处理大文件长请求。
+- [x] 审查必须确认没有扩大范围：不改点数、支付、视频生成扣费、权限体系、项目预算、审批流程。
+
+### 停止条件
+
+- [ ] 需要读取或打印 `.env`、cookie、token、签名 URL、uploadToken、App Secret 时立即停止，改用安全摘要验证。
+- [ ] 如果某个入口实际是外部处理服务而不是站内素材上传，先标为特殊例外并说明原因，不硬迁移导致功能损坏。
+- [ ] 如果真实上传测试会产生大量不可清理素材，停止批量测试，只保留 1-2 张小图 smoke，并用 UI/API 软删除或保留为证据。
+- [ ] 如果修改需要 Prisma schema 变更或数据迁移，先单独列 migration 风险，不夹在本轮前端/接口收敛里直接推。
+- [ ] 如果线上部署后 `/api/config`、`/login` 或健康守护周期异常，立即回滚到部署前版本。
+
+### Git Plan
+
+- 当前工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- 当前分支：`codex/seedream-5-pro-image-provider`。
+- 建议新建任务分支或保持当前分支连续修复；执行前先创建 rollback tag：`rollback/2026-07-23-before-unified-upload-entrypoints`。
+- 提交分组：
+  - 提交 1：上传入口盘点脚本和旧图集上传测试反转。
+  - 提交 2：统一 helper 命名、参考图集前端迁移、图集接口职责收敛。
+  - 提交 3：业务挂载失败可恢复、未挂载素材保留策略和错误文案收敛。
+  - 提交 4：Seedance 官方素材、反馈附件、工具类上传迁移或明确例外。
+  - 提交 5：R2 CORS 开启验收、chunk 升级边界、真实验收脚本、todo 结果更新、部署闭环记录。
 
 ## 2026-07-22 上传链路彻底修复：旧入口 502、R2 直传失败、后台队列降压
 

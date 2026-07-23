@@ -21,7 +21,6 @@ function fail(message: string): never {
 
 async function main() {
   const runId = `dup_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-  const existingOwnerId = `smoke_existing_${runId}`;
   const uploaderId = `smoke_uploader_${runId}`;
   const albumId = `smoke_album_${runId}`;
   const assetId = `smoke_asset_${runId}`;
@@ -31,18 +30,6 @@ async function main() {
   const thumbnailUrl = `https://example.invalid/smoke/${runId}_thumb.png`;
 
   try {
-    await prisma.user.create({
-      data: {
-        id: existingOwnerId,
-        name: 'Smoke Existing Owner',
-        username: `${runId}_existing`,
-        email: `${runId}_existing@example.invalid`,
-        password_hash: 'smoke-only',
-        role: 'user',
-        account_type: 'internal',
-        status: 'active',
-      },
-    });
     await prisma.user.create({
       data: {
         id: uploaderId,
@@ -58,7 +45,7 @@ async function main() {
     await prisma.asset.create({
       data: {
         id: assetId,
-        owner_id: existingOwnerId,
+        owner_id: uploaderId,
         type: 'image',
         original_url: originalUrl,
         thumbnail_url: thumbnailUrl,
@@ -80,16 +67,36 @@ async function main() {
       },
     });
 
-    const formData = new FormData();
-    formData.append('file', new Blob([content], { type: 'image/png' }), `${runId}.png`);
     const response = await fetch(`${baseUrl}/api/reference-albums/${albumId}/images`, {
       method: 'POST',
-      headers: { Cookie: buildSessionCookie(uploaderId) },
-      body: formData,
+      headers: {
+        Cookie: buildSessionCookie(uploaderId),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        assetIds: [assetId],
+        source_type: 'upload',
+        metadata_json: {
+          source: 'album_asset_upload_integration',
+          original_file_names: [`${runId}.png`],
+        },
+      }),
     });
     const payload = await response.json().catch(() => ({}));
     if (response.status !== 201) {
-      fail(`POST duplicate upload returned ${response.status}: ${JSON.stringify(payload)}`);
+      fail(`POST assetIds returned ${response.status}: ${JSON.stringify(payload)}`);
+    }
+
+    const multipartData = new FormData();
+    multipartData.append('file', new Blob([content], { type: 'image/png' }), `${runId}.png`);
+    const multipartResponse = await fetch(`${baseUrl}/api/reference-albums/${albumId}/images`, {
+      method: 'POST',
+      headers: { Cookie: buildSessionCookie(uploaderId) },
+      body: multipartData,
+    });
+    const multipartPayload = await multipartResponse.json().catch(() => ({}));
+    if (multipartResponse.status !== 400 || multipartPayload.code !== 'CURRENT_UPLOAD_ENTRYPOINT_UPGRADED') {
+      fail(`multipart branch must return upgrade JSON, got ${multipartResponse.status}: ${JSON.stringify(multipartPayload)}`);
     }
 
     const images = await prisma.referenceImage.findMany({
@@ -98,7 +105,7 @@ async function main() {
     });
     if (images.length !== 1) fail(`expected 1 reference image, got ${images.length}`);
     const image = images[0];
-    if (image.asset_id === assetId) fail('reference image used original owner asset instead of uploader-owned asset');
+    if (image.asset_id !== assetId) fail(`reference image asset_id=${image.asset_id}, expected ${assetId}`);
     if (image.url !== originalUrl) fail(`reference image url=${image.url}, expected ${originalUrl}`);
     if (image.thumbnail_url !== thumbnailUrl) {
       fail(`reference image thumbnail_url=${image.thumbnail_url}, expected ${thumbnailUrl}`);
@@ -107,15 +114,10 @@ async function main() {
       where: { hash },
       select: { id: true, owner_id: true },
     });
-    if (sameHashAssets.length !== 2) fail(`expected hash to keep one Asset row per user, got ${sameHashAssets.length}`);
-    const uploaderAsset = sameHashAssets.find((asset) => asset.owner_id === uploaderId);
-    if (!uploaderAsset) fail('expected uploader-owned Asset row');
-    if (image.asset_id !== uploaderAsset.id) {
-      fail(`reference image asset_id=${image.asset_id}, expected uploader asset ${uploaderAsset.id}`);
-    }
+    if (sameHashAssets.length !== 1) fail(`expected JSON attach to avoid creating extra Asset rows, got ${sameHashAssets.length}`);
     const metadata = image.metadata_json ? JSON.parse(image.metadata_json) : {};
-    if (metadata.reused_existing_asset !== true) {
-      fail(`metadata.reused_existing_asset was not true: ${image.metadata_json || '(empty)'}`);
+    if (metadata.source !== 'album_asset_upload_integration') {
+      fail(`metadata.source mismatch: ${image.metadata_json || '(empty)'}`);
     }
 
     console.log('reference-album-duplicate-upload-integration: ok');
@@ -124,7 +126,7 @@ async function main() {
     await prisma.referenceImage.deleteMany({ where: { album_id: albumId } });
     await prisma.referenceAlbum.deleteMany({ where: { id: albumId } });
     await prisma.asset.deleteMany({ where: { hash } });
-    await prisma.user.deleteMany({ where: { id: { in: [existingOwnerId, uploaderId] } } });
+    await prisma.user.deleteMany({ where: { id: uploaderId } });
     await prisma.$disconnect();
   }
 }

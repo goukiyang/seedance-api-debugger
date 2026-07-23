@@ -434,3 +434,5 @@ export async function uploadFileToHistory(
   });
   return complete.asset;
 }
+
+export const uploadFileAsAsset = uploadFileToHistory;

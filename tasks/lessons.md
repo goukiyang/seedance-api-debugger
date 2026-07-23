@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-07-23 - 上传链路要先 Asset 后业务挂载
+
+- 问题/背景：参考图集、反馈截图和 Seedance 官方素材创建偶发无法上传，用户看到“返回页面内容 / Unexpected token '<' / 上传后没有素材”等错误。
+- 诱因/根因：站内已有 `/api/assets/upload-ticket`、`upload-proxy`、`upload-complete` 统一上传链路，但部分业务接口仍直接接收 `FormData` 文件体。单请求把“传文件”和“挂业务对象”绑在一起，遇到 tunnel、网络中断、大文件或 provider 超时时，前端无法区分到底是上传失败还是业务挂载失败。
+- 当时思路：把上传拆成两步：先统一生成 `Asset`，再用 JSON `assetId` 挂到图集、反馈或官方素材记录；旧 multipart 业务入口只返回稳定 JSON 升级错误，不再读取文件体。
+- 改动位置：`src/lib/http/file-upload.ts`、`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/api/reference-albums/[id]/images/route.ts`、`src/components/FeedbackWidget.tsx`、`src/app/api/feedback/upload/route.ts`、`src/components/SeedanceAssetPanel.tsx`、`src/app/api/assets/upload-and-create/route.ts`、相关 smoke 脚本。
+- 怎么改：新增 `uploadFileAsAsset` 语义导出；图集页逐个上传成 Asset 后 JSON 挂载，并在挂载失败时保留 `assetIds` 重试；反馈截图直接复用 Asset URL；Seedance 面板先上传 Asset，再用 `assetId` 创建官方素材；后端拒绝旧 multipart 主路径。
+- 验证结果：`upload-entrypoint-inventory-smoke`、`reference-album-duplicate-upload-smoke`、`upload-and-create-json-smoke`、`reference-media-chain-smoke`、`direct-upload-r2-smoke`、`template-bound-image-upload-smoke`、`npm run lint`、`npm run build`、独立只读审查通过。
+- 可复用经验：上传能力不要分散在业务接口里。业务接口只做权限、挂载和审计；文件 hash、复用、对象存储、公网 URL、进度和上传失败提示都归统一 Asset 上传层。用户看到“上传成功但挂载失败”时，应能只重试挂载，不重新传文件。
+
 ## 2026-07-02 - 趋势图默认口径不能只跟当前自然月
 
 - 问题/背景：用户反馈进入新月份后，趋势图里前一个月份的内容看不到，但这些历史数据本来应该仍然可查。

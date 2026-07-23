@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { uploadFileAsAsset } from '@/lib/http/file-upload';
 
 type UploadItem = {
   id: string;
@@ -51,15 +52,17 @@ export default function FeedbackWidget() {
   };
 
   const uploadFile = async (item: UploadItem) => {
-    const formData = new FormData();
-    formData.append('file', item.file);
     try {
-      const response = await fetch('/api/feedback/upload', { method: 'POST', body: formData });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || '图片上传失败，请移除后重试。');
+      const asset = await uploadFileAsAsset(item.file, {
+        invalidJsonMessage: '反馈截图上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
+      });
+      const imageUrl = asset.originalUrl;
+      if (!asset.id || !imageUrl) {
+        throw new Error('图片上传成功，但没有返回可提交的图片地址。');
+      }
       setUploads((current) => current.map((upload) => (
         upload.id === item.id
-          ? { ...upload, uploading: false, imageUrl: data.imageUrl, error: data.warning || undefined }
+          ? { ...upload, uploading: false, imageUrl, error: asset.warning || undefined }
           : upload
       )));
     } catch (err) {

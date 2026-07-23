@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
-import { requestJsonWithUploadProgress, type UploadProgressSnapshot } from '@/lib/http/upload-progress';
+import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import type { LocalAssetRecord } from '@/lib/provider/seedance-assets-types';
 
 interface AssetPanelProps {
@@ -185,23 +185,23 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
     setUploadMsg(null);
     setUploadProgress({ label: '准备上传', detail: uploadFile.name });
     try {
-      const formData = new FormData();
-      formData.append('file', uploadFile);
-      if (uploadName.trim()) formData.append('name', uploadName.trim());
-      const result = await requestJsonWithUploadProgress<UploadAndCreateResponse>({
-        url: '/api/assets/upload-and-create',
-        method: 'POST',
-        body: formData,
+      const asset = await uploadFileAsAsset(uploadFile, {
         invalidJsonMessage: '资产上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
-        connectionMessage: '资产上传连接中断，系统没有拿到有效上传结果。请重新上传；如果文件较大，请压缩后重试。',
-        progress: {
-          phase: 'seedance-asset',
-          label: '正在上传并创建资产',
-        },
         onProgress: (progress) => setUploadProgress(buildAssetUploadProgress(uploadFile, progress)),
       });
-      const data = result.data;
-      if (!result.ok) {
+      if (!asset.id) throw new Error('素材上传成功，但没有返回素材 ID。');
+
+      setUploadProgress({ label: '正在创建官方资产', detail: asset.fileName || uploadFile.name });
+      const response = await fetch('/api/assets/upload-and-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetId: asset.id,
+          name: uploadName.trim() || uploadFile.name || asset.fileName,
+        }),
+      });
+      const data = await response.json().catch(() => ({ error: '官方资产创建服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。' })) as UploadAndCreateResponse;
+      if (!response.ok) {
         setUploadMsg(`❌ ${data.error || data.message || '上传失败'}`);
       } else if (data.reused === true) {
         // 复用已有资产

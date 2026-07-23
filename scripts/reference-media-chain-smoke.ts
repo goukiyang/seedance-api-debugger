@@ -114,7 +114,9 @@ async function main() {
     "asset.type !== 'image'",
     '参考图集保存不能继续拒绝非图片素材',
   );
-  assertIncludes(albumImagesRoute, 'validateSiteUploadBuffer', '参考图集上传必须校验视频/音频时长');
+  const fileUploadHelperForAlbum = read('src/lib/http/file-upload.ts');
+  assertIncludes(fileUploadHelperForAlbum, 'validateClientMediaDuration', '统一 Asset 上传必须在图集挂载前校验视频/音频时长');
+  assertIncludes(fileUploadHelperForAlbum, '/api/assets/upload-ticket', '统一 Asset 上传必须先走上传票据，不能让图集接口直收文件');
   assertIncludes(albumImagesRoute, "export const maxDuration = 120", '参考图集上传接口必须允许较长视频/音频上传处理时间');
   assertIncludes(albumImagesRoute, 'ensureSiteAssetPublicUrl', '参考图集复用历史视频/音频素材前必须补公网 URL');
   assertIncludes(albumImagesRoute, 'ensureReferenceAssetReady(sourceImage.asset)', '复制图集里的历史视频/音频素材前必须补公网 URL');
@@ -186,7 +188,9 @@ async function main() {
   const albumDetail = read('src/app/collections/[id]/ReferenceAlbumDetailClient.tsx');
   assertIncludes(albumDetail, 'canPreviewOriginalMedia', '图集详情页不应给无使用/下载权限者直接加载原始视频');
   assertIncludes(albumDetail, 'uploadFeedback', '图集详情页上传必须显示处理中和成功提示');
-  assertIncludes(albumDetail, 'requestJsonWithUploadProgress<AlbumUploadResponse>', '图集详情页上传必须使用真实上传进度请求');
+  assertIncludes(albumDetail, 'uploadFileAsAsset(file, {', '图集详情页上传必须先走统一 Asset 上传 helper');
+  assertIncludes(albumDetail, 'assetIds', '图集详情页上传必须通过 assetIds 挂载业务对象');
+  assertIncludes(albumDetail, 'pendingAlbumAttach', '图集详情页挂载失败后必须保留可重试的 assetIds');
   assertIncludes(albumDetail, 'UploadProgressIndicator', '图集详情页上传必须显示进度组件');
   assertIncludes(albumDetail, 'album-upload-progress', '图集详情页上传必须有稳定进度条样式入口');
   assertIncludes(albumDetail, '正在上传', '图集详情页上传开始后必须告诉用户正在处理');
