@@ -49,14 +49,14 @@
 - [ ] 补分块上传升级设计但不抢跑实现：新增轻量设计记录或 todo 子项，明确 chunk 触发门槛，例如视频/音频超过 50MB、server proxy 真实失败率持续出现、或 Cloudflare/tunnel 超时无法消除；正式实现前不新增复杂协议，避免把第一阶段做成大改造。
 - [x] 更新参考图集集成测试：保留或改造 `scripts/reference-album-duplicate-upload-integration.ts`，新流程应验证“已有 Asset -> JSON 挂到图集 -> 旧 multipart 返回升级 JSON -> 不新增额外 Asset”。部署后用当前服务代码运行。
 - [x] 本地验证：运行 `npx tsx scripts/upload-entrypoint-inventory-smoke.ts`、`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-smoke.ts`、`npx tsx scripts/reference-album-duplicate-upload-integration.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`git diff --check`。（本轮已通过 4 个 smoke、`direct-upload-r2-smoke`、`template-bound-image-upload-smoke`、`npm run lint`、`npm run build`、独立 `tsc`、`git diff --check`；部署后当前服务运行 `reference-album-duplicate-upload-integration` 通过。）
-- [ ] 真实网页登录态验证：在本机已登录飞书的 Chrome 上验证 `/generate` 参考图上传、上传历史图片、图集详情页多文件上传、模板绑定图片、反馈截图上传；每个入口至少覆盖一次成功、一次重复复用、一次不合规文件错误。
+- [ ] 真实网页登录态验证：在本机已登录飞书的 Chrome 上验证 `/generate` 参考图上传、上传历史图片、图集详情页多文件上传、模板绑定图片、反馈截图上传；每个入口至少覆盖一次成功、一次重复复用、一次不合规文件错误。2026-07-23 已补 `/generate` 真实 Chrome 小 PNG 上传：上传历史出现测试图、选中后加入当前参考图，页面从 `1/9` 变为 `2/9` 并出现 `@图片2`；另用临时账号公网 API 验证同文件重复上传 200、`reused=true`、同一账号第二次返回同一个 assetId 和同一个 R2 URL。测试 ReferenceImage、Asset、临时用户和 R2 对象已清理。图集、模板、反馈、不合规文件仍待测。
 - [x] 线上部署闭环：通过后执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`；公网验证 `/api/config`、`/login`、目标页面；等待健康守护周期确认 `runs` 不异常增长。
 
 ### 3. 验收/审查内容
 
 - [x] 架构验收：用户可见上传入口必须先生成 Asset，再通过 JSON 把 assetId 挂到业务对象；业务接口不得继续接收文件本体作为主路径。
 - [ ] 图集验收：`/collections/:id` 多文件上传不再命中旧 multipart 主链路；上传成功后图集立即出现素材，刷新后仍存在，重复文件显示成功并复用。
-- [ ] 生成页验收：`/generate` 上传参考图后能加入当前参考图，重复上传不报“当前账号不能直接复用”，不要求用户理解素材复用。
+- [x] 生成页验收：`/generate` 上传参考图后能加入当前参考图，重复上传不报“当前账号不能直接复用”，不要求用户理解素材复用。2026-07-23 用真实已登录 Chrome 在公网 `/generate` 上传 `codex-upload-e2e-1784815300821.png`，上传历史显示 `96x96 · 2 KB` 且“已选择”，点击“加入参考图”后页面显示 `2/9 张`、`@图片2 · codex-upload-e2e-1784815300821.png`；重复上传用临时账号走公网 `/api/assets/upload` 两次，均 200，`reused=true`，第二次复用同一个 assetId。
 - [ ] 模板验收：模板绑定图片上传仍可绑定到卡片，刷新后绑定关系存在，不出现旧上传错误文案。
 - [ ] 反馈验收：反馈截图上传失败时给可操作原因；成功时反馈记录保留可访问图片 URL，不泄露本机路径、签名 URL、token 或完整用户 profile。
 - [ ] 挂载恢复验收：人为制造“上传成功但加入图集/绑定模板失败”场景时，页面必须保留已上传 Asset 并允许只重试挂载；不能要求用户重新传同一文件。
