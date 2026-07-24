@@ -15,6 +15,30 @@
 
 - [WallVerse 第一组「世界迁移」声音闭环](todo/wallverse-audio-20260715.md)
 
+## 2026-07-24 生成页上传历史图中转失败后自动兜底修复
+
+### 1. 目标复述
+
+用户在生成页“上传历史图片”弹窗里仍看到“服务端中转上传连接中断”。这次要解决的是：当 R2 浏览器直传暂不可用、系统改走服务端中转时，如果中转链路偶发断开，8MB 以内图片应该自动继续走普通上传兜底，而不是直接把失败提示丢给用户。完成标准是：小图能自动兜底成功；大图不能兜底时才给出明确原因；测试锁住这条直接中转分支。
+
+### 2. 具体任务
+
+- [x] 定位 `src/lib/http/file-upload.ts` 中 `ticket.directUploadAvailable === false` 的直接中转路径，确认它是否漏掉 raw fallback。结论：该分支此前直接 `return uploadWithServerProxy(...)`，中转断开后没有进入小图普通上传兜底。
+- [x] 补齐直接中转失败后的安全兜底：仍只允许 8MB 以内图片自动改走普通上传，不扩大到视频、音频或大文件。
+- [x] 更新 `scripts/direct-upload-r2-smoke.ts`，要求直接中转分支不得直接 `return uploadWithServerProxy(...)`，必须经过带 raw fallback 的 helper；并补行为级模拟，验证 proxy 断开后小图请求 `/api/assets/upload`，大图不请求 raw fallback。
+- [x] 跑上传 smoke、TypeScript、lint、build，并做公网/运行态验证。结果：`direct-upload-r2-smoke`、入口盘点 smoke、重复上传 smoke、`tsc`、`lint`、本地 build、`youdoo-sites build/restart/status sd2` 通过；公网 chunk 命中新兜底文案；健康周期后 runs 未增长。
+
+### 3. 验收 / 审查内容
+
+- [x] 创建独立只读审查 agent：只读检查 diff、上传分支、fallback 边界、错误提示、测试覆盖和部署证据；审查 agent 不改文件、不提交、不补实现。结果：审查通过，指出需补行为级测试；主线程已补并通过。
+- [x] 通过标准：直接中转失败时，小图片会自动普通上传；大文件仍不会静默塞进普通上传；用户不再因为这个分支看到“服务端中转上传连接中断”作为最终结果。
+
+### 4. 审查是否对齐目标
+
+- [x] 是否修的是用户截图对应的 `/generate` 上传历史图片路径，而不是只改其他资产页？证据：`GenerationComposer -> UploadedImagePicker -> workspace.uploadAssetToHistory -> uploadFileToHistory`。
+- [x] 是否保持“统一上传链路”的目标，没有重新放开业务页面直传文件？证据：`upload-entrypoint-inventory-smoke` 通过。
+- [x] 是否有真实脚本、构建、部署和线上验证证据，不能只靠源码判断。证据：本地和生产构建通过，公网 `/api/config`、`/login` 200，线上静态 chunk 命中新文案，健康周期后服务稳定。
+
 ## 2026-07-23 上传链路统一架构：所有页面先生成 Asset，再挂载业务对象
 
 ### 1. 目标复述

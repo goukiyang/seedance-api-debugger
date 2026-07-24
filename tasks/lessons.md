@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-07-24 - 上传中转失败不能只给错误，要继续走安全兜底
+
+- 问题/背景：生成页“上传历史图片”弹窗仍出现“服务端中转上传连接中断”，用户需要重新上传，体验上像上传链路又坏了。
+- 诱因/根因：R2 浏览器直传未开启时，前端会直接走 `/api/assets/upload-proxy` 服务端中转；但这条 `ticket.directUploadAvailable === false` 分支漏掉了小图 raw fallback，中转一断就直接显示失败。此前只覆盖了“浏览器 PUT 失败后再中转失败”的兜底，没有覆盖“直接中转失败”。
+- 当时思路：把“中转上传”统一包一层 `uploadWithServerProxyOrRawFallback`；所有进入中转的路径失败后，都先按同一规则判断能不能自动普通上传。
+- 改动位置：`src/lib/http/file-upload.ts`、`scripts/direct-upload-r2-smoke.ts`。
+- 怎么改：直接中转路径和浏览器 PUT 失败后的中转路径共用同一个 helper；只有 8MB 以内图片能自动 raw fallback，大图、视频、音频继续给明确错误。
+- 验证结果：`direct-upload-r2-smoke` 增加行为级模拟：`/api/assets/upload-proxy` 断开后，小图会请求 `/api/assets/upload`，大图只尝试 proxy 后停止。
+- 可复用经验：上传链路的测试不能只查源码形态；凡是有 fallback，都要补一个最小行为测试，模拟上游失败后确认下一条路真的被调用，同时确认不该兜底的大文件不会被静默放行。
+
 ## 2026-07-23 - 上传链路要先 Asset 后业务挂载
 
 - 问题/背景：参考图集、反馈截图和 Seedance 官方素材创建偶发无法上传，用户看到“返回页面内容 / Unexpected token '<' / 上传后没有素材”等错误。

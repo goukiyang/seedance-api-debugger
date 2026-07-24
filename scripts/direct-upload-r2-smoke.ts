@@ -1,7 +1,9 @@
 import assert from 'assert';
+import { webcrypto } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { createDirectUploadTicket } from '../src/lib/assets/direct-upload';
+import { uploadFileToHistory } from '../src/lib/http/file-upload';
 
 const smokeHash = 'a'.repeat(64);
 
@@ -20,6 +22,148 @@ function restoreEnv() {
     const value = previousEnv[key];
     if (value == null) delete process.env[key];
     else process.env[key] = value;
+  }
+}
+
+type MockUploadRequest = {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  bodySize: number;
+};
+
+function installBrowserUploadMocks() {
+  const requests: MockUploadRequest[] = [];
+  const originalFetch = globalThis.fetch;
+  const originalXhr = (globalThis as any).XMLHttpRequest;
+  const originalImage = (globalThis as any).Image;
+  const originalCreateObjectUrl = URL.createObjectURL;
+  const originalRevokeObjectUrl = URL.revokeObjectURL;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    assert.equal(url, '/api/assets/upload-ticket', 'behavior smoke only expects upload-ticket fetch');
+    return new Response(JSON.stringify({
+      directUploadAvailable: false,
+      storageProvider: 'r2',
+      uploadToken: 'smoke-upload-token',
+      reason: 'R2 直传未启用，正在使用服务端中转。',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+
+  class MockImage {
+    naturalWidth = 16;
+    naturalHeight = 16;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+
+    set src(_value: string) {
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+
+  class MockXMLHttpRequest {
+    method = 'POST';
+    url = '';
+    timeout = 0;
+    status = 0;
+    responseText = '';
+    headers: Record<string, string> = {};
+    upload = { onprogress: null as ((event: any) => void) | null };
+    onload: ((event?: any) => void) | null = null;
+    onerror: ((event?: any) => void) | null = null;
+    onabort: ((event?: any) => void) | null = null;
+    ontimeout: ((event?: any) => void) | null = null;
+
+    open(method: string, url: string) {
+      this.method = method;
+      this.url = url;
+    }
+
+    setRequestHeader(key: string, value: string) {
+      this.headers[key] = value;
+    }
+
+    send(body: XMLHttpRequestBodyInit | Document) {
+      const bodySize = typeof (body as Blob).size === 'number' ? (body as Blob).size : 0;
+      requests.push({ method: this.method, url: this.url, headers: this.headers, bodySize });
+      this.upload.onprogress?.({ loaded: bodySize, total: bodySize, lengthComputable: true });
+      queueMicrotask(() => {
+        if (this.url === '/api/assets/upload-proxy') {
+          this.onerror?.({});
+          return;
+        }
+        if (this.url === '/api/assets/upload') {
+          this.status = 200;
+          this.responseText = JSON.stringify({
+            success: true,
+            asset: {
+              id: 'raw-fallback-asset',
+              originalUrl: 'https://example.invalid/raw.png',
+              thumbnailUrl: 'https://example.invalid/raw-thumb.png',
+            },
+          });
+          this.onload?.({});
+          return;
+        }
+        this.status = 404;
+        this.responseText = JSON.stringify({ error: `unexpected upload url ${this.url}` });
+        this.onload?.({});
+      });
+    }
+  }
+
+  (globalThis as any).Image = MockImage;
+  (globalThis as any).XMLHttpRequest = MockXMLHttpRequest;
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:smoke-upload' });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
+
+  return {
+    requests,
+    restore() {
+      globalThis.fetch = originalFetch;
+      (globalThis as any).XMLHttpRequest = originalXhr;
+      (globalThis as any).Image = originalImage;
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectUrl });
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectUrl });
+    },
+  };
+}
+
+async function assertProxyFailureRawFallbackBehavior() {
+  if (!globalThis.crypto?.subtle) {
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto });
+  }
+
+  const smallMocks = installBrowserUploadMocks();
+  try {
+    const smallImage = new File([new Uint8Array(1024)], 'small.png', { type: 'image/png' });
+    const asset = await uploadFileToHistory(smallImage);
+    assert.equal(asset.id, 'raw-fallback-asset', 'small image must return the raw fallback asset after proxy fails');
+    assert.deepEqual(
+      smallMocks.requests.map((request) => request.url),
+      ['/api/assets/upload-proxy', '/api/assets/upload'],
+      'small image must try proxy first, then raw fallback',
+    );
+  } finally {
+    smallMocks.restore();
+  }
+
+  const largeMocks = installBrowserUploadMocks();
+  try {
+    const largeImage = new File([new Uint8Array(8 * 1024 * 1024 + 1)], 'large.png', { type: 'image/png' });
+    await assert.rejects(
+      () => uploadFileToHistory(largeImage),
+      /仅支持 8MB 以内图片自动回退/,
+      'large images must not silently fall back to raw upload',
+    );
+    assert.deepEqual(
+      largeMocks.requests.map((request) => request.url),
+      ['/api/assets/upload-proxy'],
+      'large image must stop after proxy failure and avoid raw fallback',
+    );
+  } finally {
+    largeMocks.restore();
   }
 }
 
@@ -166,6 +310,10 @@ async function run() {
     clientSource.indexOf('let complete: UploadAssetResponse'),
     clientSource.indexOf('if (!completeRes.ok)'),
   );
+  const directUnavailableSource = clientSource.slice(
+    clientSource.indexOf('if (ticket.directUploadAvailable === false)'),
+    clientSource.indexOf('if (!ticket.uploadUrl'),
+  );
   assert.match(clientSource, /\/api\/assets\/upload-ticket/, 'client must request upload ticket');
   assert.match(clientSource, /\/api\/assets\/upload-complete/, 'client must complete direct upload');
   assert.match(clientSource, /\/api\/assets\/upload-proxy/, 'client must use same-origin server proxy when R2 browser PUT fails');
@@ -198,7 +346,11 @@ async function run() {
   assert.doesNotMatch(clientCompleteSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallbackOrThrow/, 'complete JSON failures must not fallback to raw upload after object storage succeeds');
   assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithServerProxy/, 'client must use same-origin proxy directly when browser PUT is intentionally unavailable');
   assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client must keep raw upload fallback when no proxy ticket exists');
+  assert.match(directUnavailableSource, /uploadWithServerProxyOrRawFallback[\s\S]+fallbackToRaw[\s\S]+ticket\.reason \|\| '直传暂不可用'/, 'direct-disabled proxy path must also fallback to raw upload for safe small images');
+  assert.doesNotMatch(directUnavailableSource, /return uploadWithServerProxy\(ticket, file/, 'direct-disabled proxy path must not throw proxy connection errors before raw fallback can run');
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
+
+  await assertProxyFailureRawFallbackBehavior();
 
   console.log('direct-upload-r2-smoke: ok');
 }
