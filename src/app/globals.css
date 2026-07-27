@@ -16836,6 +16836,88 @@ body.compare-fullscreen-open {
   padding: 0 10px;
 }
 
+.asset-library-upload-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid oklch(0.34 0.02 245);
+  border-radius: 8px;
+  background: oklch(0.19 0.012 250);
+}
+
+.asset-library-upload-input {
+  display: none;
+}
+
+.asset-library-upload-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.asset-library-upload-copy strong {
+  color: oklch(0.95 0.01 245);
+  font-size: 14px;
+}
+
+.asset-library-upload-copy span {
+  color: oklch(0.7 0.016 245);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-library-upload-progress {
+  max-width: none;
+  min-width: 0;
+}
+
+.asset-library-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.asset-library-upload-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid oklch(0.39 0.025 245);
+  border-radius: 8px;
+  color: oklch(0.88 0.015 245);
+  background: oklch(0.22 0.012 250);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.asset-library-upload-actions button.primary {
+  color: oklch(0.98 0.012 188);
+  border-color: oklch(0.62 0.11 188 / 0.7);
+  background: oklch(0.3 0.08 188 / 0.74);
+}
+
+.asset-library-upload-actions button:hover {
+  border-color: oklch(0.7 0.09 188);
+  color: oklch(0.96 0.012 188);
+  background: oklch(0.27 0.02 250);
+}
+
+.asset-library-upload-actions button:disabled {
+  color: oklch(0.56 0.012 245);
+  border-color: oklch(0.28 0.014 245);
+  background: oklch(0.19 0.01 250);
+  cursor: not-allowed;
+}
+
 .asset-library-notice,
 .asset-library-bulkbar,
 .asset-library-move-panel {
@@ -17528,6 +17610,10 @@ body.compare-fullscreen-open {
     grid-template-columns: 1fr 1fr;
   }
 
+  .asset-library-upload-panel {
+    grid-template-columns: 1fr;
+  }
+
   .asset-library-type-tabs,
   .asset-library-view-chip,
   .asset-library-search,
@@ -17551,6 +17637,14 @@ body.compare-fullscreen-open {
   .asset-library-filter-bar,
   .asset-library-move-panel {
     grid-template-columns: 1fr;
+  }
+
+  .asset-library-upload-actions {
+    justify-content: stretch;
+  }
+
+  .asset-library-upload-actions button {
+    flex: 1 1 130px;
   }
 
   .asset-library-filter-bar select,

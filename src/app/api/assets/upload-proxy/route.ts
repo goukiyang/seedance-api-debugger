@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    console.error('[UploadProxy] Error:', error);
     const message = error instanceof Error ? error.message : '服务端中转上传失败';
     return NextResponse.json({ error: message }, { status: 400 });
   }

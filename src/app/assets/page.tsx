@@ -3,14 +3,16 @@
 
 import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, X } from 'lucide-react';
+import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
 } from '@/lib/video/download-client';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import {
   createAssetLibraryCacheKey,
   readAssetLibraryCache,
@@ -120,6 +122,12 @@ type Pagination = {
   has_more: boolean;
 };
 
+type AssetLibraryUploadProgress = {
+  label: string;
+  detail: string;
+  percent?: number;
+};
+
 type MarqueeState = {
   active: boolean;
   append: boolean;
@@ -218,6 +226,39 @@ function readSavedTargetAlbumId() {
   } catch {
     return '';
   }
+}
+
+function formatAssetUploadBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function assetUploadTypeLabel(file: File | null) {
+  if (!file) return '素材';
+  if (file.type.startsWith('video/')) return '视频';
+  if (file.type.startsWith('image/')) return '图片';
+  return '素材';
+}
+
+function assetLibraryTypeFromFile(file: File): AssetType {
+  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('image/')) return 'image';
+  return 'all';
+}
+
+function buildAssetLibraryUploadProgress(file: File, progress: UploadProgressSnapshot): AssetLibraryUploadProgress {
+  const sizeText = formatAssetUploadBytes(file.size);
+  const loadedText = progress.loadedBytes != null ? formatAssetUploadBytes(progress.loadedBytes) : '';
+  const detailParts = [
+    file.name,
+    loadedText && sizeText ? `${loadedText} / ${sizeText}` : sizeText,
+  ].filter(Boolean);
+  return {
+    label: progress.label,
+    detail: detailParts.join(' · '),
+    ...(progress.percent != null ? { percent: progress.percent } : {}),
+  };
 }
 
 function getOrCreateWorkspaceTabId() {
@@ -426,9 +467,13 @@ function AssetsPageContent() {
   const [enhanceResolution, setEnhanceResolution] = useState<EnhanceResolution>('1080p');
   const [enhanceFps, setEnhanceFps] = useState<EnhanceFps>('none');
   const [enhanceSubmittingId, setEnhanceSubmittingId] = useState<AssetLibraryItemId | null>(null);
+  const [assetUploadFile, setAssetUploadFile] = useState<File | null>(null);
+  const [assetUploading, setAssetUploading] = useState(false);
+  const [assetUploadProgress, setAssetUploadProgress] = useState<AssetLibraryUploadProgress | null>(null);
 
   const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAdmin = user?.role === 'admin';
   const isEnhanceView = assetView === 'enhance';
@@ -1086,6 +1131,59 @@ function AssetsPageContent() {
     }
   };
 
+  const handleAssetUploadFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    setAssetUploadFile(file);
+    setAssetUploadProgress(null);
+    setError('');
+    setMessage(file ? `已选择${assetUploadTypeLabel(file)}：${file.name}` : '');
+  };
+
+  const handleAssetUpload = async () => {
+    if (!assetUploadFile) {
+      assetUploadInputRef.current?.click();
+      return;
+    }
+    setAssetUploading(true);
+    setError('');
+    setMessage('');
+    setAssetUploadProgress({
+      label: '准备上传',
+      detail: `${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`,
+    });
+    try {
+      const selectedFile = assetUploadFile;
+      const uploadedAsset = await uploadFileAsAsset(selectedFile, {
+        invalidJsonMessage: '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
+        onProgress: (progress) => {
+          setAssetUploadProgress(buildAssetLibraryUploadProgress(selectedFile, progress));
+        },
+      });
+      const nextType = assetLibraryTypeFromFile(selectedFile);
+      setAssetView('history');
+      setType(nextType);
+      setStatus('all');
+      setPage(1);
+      setKeyword('');
+      setKeywordDraft('');
+      clearSelection();
+      setMessage(`${assetUploadTypeLabel(selectedFile)}上传成功，正在刷新资产列表。${uploadedAsset.reused ? '已复用相同素材。' : ''}`);
+      setAssetUploadFile(null);
+      setAssetUploadProgress({
+        label: uploadedAsset.reused ? '已复用相同素材' : '上传完成',
+        detail: uploadedAsset.fileName || selectedFile.name,
+        percent: 100,
+      });
+      if (assetUploadInputRef.current) assetUploadInputRef.current.value = '';
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setAssetUploadProgress(null);
+      setError(err instanceof Error ? err.message : '素材上传失败，请重新选择后重试');
+    } finally {
+      setAssetUploading(false);
+    }
+  };
+
   const marqueeRect = marquee
     ? rectFromPoints({ x: marquee.startX, y: marquee.startY }, { x: marquee.currentX, y: marquee.currentY })
     : null;
@@ -1250,6 +1348,42 @@ function AssetsPageContent() {
             <option key={option.id} value={option.id}>{option.label}</option>
           ))}
         </select>
+      </section>
+
+      <section className="asset-library-upload-panel" aria-label="上传素材到资产库">
+        <input
+          ref={assetUploadInputRef}
+          type="file"
+          accept="image/*,video/*"
+          className="asset-library-upload-input"
+          onChange={handleAssetUploadFileChange}
+        />
+        <div className="asset-library-upload-copy">
+          <strong>上传素材</strong>
+          <span>
+            {assetUploadFile
+              ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`
+              : '支持图片和 2-15 秒视频，上传后自动进入资产列表。'}
+          </span>
+        </div>
+        {assetUploadProgress && (
+          <UploadProgressIndicator
+            label={assetUploadProgress.label}
+            detail={assetUploadProgress.detail}
+            percent={assetUploadProgress.percent}
+            variant="dark"
+            className="asset-library-upload-progress"
+          />
+        )}
+        <div className="asset-library-upload-actions">
+          <button type="button" onClick={() => assetUploadInputRef.current?.click()} disabled={assetUploading}>
+            选择文件
+          </button>
+          <button type="button" className="primary" onClick={handleAssetUpload} disabled={assetUploading}>
+            <Upload size={15} aria-hidden="true" />
+            {assetUploading ? '上传中...' : assetUploadFile ? '开始上传' : '上传素材'}
+          </button>
+        </div>
       </section>
 
       {(message || error) && (

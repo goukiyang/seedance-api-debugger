@@ -196,7 +196,14 @@ async function assertVideoProxyUploadBehavior() {
   const successMocks = installBrowserUploadMocks({ proxySucceeds: true });
   try {
     const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
-    const asset = await uploadFileToHistory(video);
+    const progressEvents: Array<{ phase: string; label: string; percent?: number }> = [];
+    const asset = await uploadFileToHistory(video, {
+      onProgress: (progress) => progressEvents.push({
+        phase: progress.phase,
+        label: progress.label,
+        ...(progress.percent != null ? { percent: progress.percent } : {}),
+      }),
+    });
     assert.equal(asset.id, 'proxy-upload-asset', 'video upload must use the server proxy asset result');
     assert.deepEqual(
       successMocks.requests.map((request) => request.url),
@@ -204,6 +211,21 @@ async function assertVideoProxyUploadBehavior() {
       'video upload must use proxy and must not raw fallback on success',
     );
     assert.equal(successMocks.requests[0]?.headers['X-Media-Duration'], '5', 'video upload must pass client-read media duration to proxy');
+    assert.deepEqual(
+      progressEvents.map((event) => event.phase),
+      ['preparing', 'ticket', 'proxy', 'proxy', 'done'],
+      'video upload must emit visible progress states from file metadata through completion',
+    );
+    assert.equal(
+      progressEvents.find((event) => event.phase === 'proxy' && event.percent === 100)?.label,
+      '正在服务端中转上传',
+      'video proxy upload must expose a real measured upload percentage',
+    );
+    assert.equal(
+      progressEvents[progressEvents.length - 1]?.label,
+      '上传完成',
+      'video upload must expose a completion progress state',
+    );
   } finally {
     successMocks.restore();
   }
@@ -265,18 +287,21 @@ async function assertVideoProxyUploadBehavior() {
   }
 }
 
-async function assertProxyFailureRawFallbackBehavior() {
+async function assertProxyFailureStopsBeforeRawFallback() {
   ensureWebCrypto();
 
   const smallMocks = installBrowserUploadMocks();
   try {
     const smallImage = new File([new Uint8Array(1024)], 'small.png', { type: 'image/png' });
-    const asset = await uploadFileToHistory(smallImage);
-    assert.equal(asset.id, 'raw-fallback-asset', 'small image must return the raw fallback asset after proxy fails');
+    await assert.rejects(
+      () => uploadFileToHistory(smallImage),
+      /服务端中转上传/,
+      'small image must keep the proxy-stage error instead of hiding it behind raw upload',
+    );
     assert.deepEqual(
       smallMocks.requests.map((request) => request.url),
-      ['/api/assets/upload-proxy', '/api/assets/upload'],
-      'small image must try proxy first, then raw fallback',
+      ['/api/assets/upload-proxy'],
+      'small image must stop after proxy failure and avoid raw fallback once a proxy ticket exists',
     );
   } finally {
     smallMocks.restore();
@@ -462,7 +487,7 @@ async function run() {
   assert.match(clientTicketSource, /readUploadJsonResponse<DirectUploadTicketResponse>\(ticketRes, '上传票据接口', invalidJsonMessage\)[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'ticket non-json errors must fallback safely or show a clear bounded error');
   assert.match(clientSource, /ticketRes\.status >= 500[\s\S]+uploadWithRawFallbackOrThrow/, 'ticket server errors must use the safe fallback boundary');
   assert.match(clientSource, /putFileToStorage[\s\S]+catch \(error\)[\s\S]+uploadWithServerProxy/, 'object storage PUT failure must try same-origin server proxy before giving up');
-  assert.match(clientSource, /uploadWithServerProxy[\s\S]+catch \(proxyError\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'raw fallback must stay behind proxy failure and the safe fallback guard');
+  assert.match(clientSource, /uploadWithServerProxyOrThrow/, 'client must keep proxy failures in the proxy stage once a proxy ticket exists');
   assert.match(rawFallbackSource, /requestJsonWithUploadProgress<UploadAssetResponse>/, 'raw fallback must report real browser upload progress');
   assert.match(rawFallbackSource, /phase:\s*'raw'/, 'raw fallback progress must identify the raw upload phase');
   assert.doesNotMatch(rawFallbackSource, /readJsonResponse<UploadAssetResponse>\(res, \{ invalidJsonMessage \}\)/, 'raw fallback must not leak the generic upload invalid-json message');
@@ -479,11 +504,11 @@ async function run() {
   assert.doesNotMatch(clientCompleteSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallbackOrThrow/, 'complete JSON failures must not fallback to raw upload after object storage succeeds');
   assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithServerProxy/, 'client must use same-origin proxy directly when browser PUT is intentionally unavailable');
   assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client must keep raw upload fallback when no proxy ticket exists');
-  assert.match(directUnavailableSource, /uploadWithServerProxyOrRawFallback[\s\S]+fallbackToRaw[\s\S]+ticket\.reason \|\| '直传暂不可用'/, 'direct-disabled proxy path must also fallback to raw upload for safe small images');
-  assert.doesNotMatch(directUnavailableSource, /return uploadWithServerProxy\(ticket, file/, 'direct-disabled proxy path must not throw proxy connection errors before raw fallback can run');
+  assert.match(directUnavailableSource, /uploadWithServerProxyOrThrow[\s\S]+ticket\.reason \|\| '直传暂不可用'/, 'direct-disabled proxy path must keep proxy errors in the proxy stage');
+  assert.doesNotMatch(directUnavailableSource, /uploadWithServerProxyOrRawFallback/, 'direct-disabled proxy path must not use the old proxy-to-raw fallback helper');
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
 
-  await assertProxyFailureRawFallbackBehavior();
+  await assertProxyFailureStopsBeforeRawFallback();
   await assertVideoProxyUploadBehavior();
 
   console.log('direct-upload-r2-smoke: ok');

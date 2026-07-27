@@ -199,6 +199,18 @@ async function main() {
   assertIncludes(albumDetail, 'await loadAlbum()', '图集详情页上传成功后必须等待列表刷新完成');
   assertIncludes(albumDetail, '上传处理中...', '图集详情页上传期间按钮文案必须反馈状态');
 
+  const assetLibraryPage = read('src/app/assets/page.tsx');
+  assertIncludes(assetLibraryPage, 'UploadProgressIndicator', '资产管理页本地上传必须显示进度组件');
+  assertIncludes(assetLibraryPage, 'uploadFileAsAsset(selectedFile, {', '资产管理页本地上传必须走统一 Asset 上传 helper');
+  assertIncludes(assetLibraryPage, 'onProgress: (progress)', '资产管理页本地上传必须接收真实上传进度');
+  assertIncludes(assetLibraryPage, 'accept="image/*,video/*"', '资产管理页本地上传必须允许视频文件');
+  assertIncludes(assetLibraryPage, 'asset-library-upload-progress', '资产管理页本地上传必须有稳定进度条样式入口');
+  assertIncludes(assetLibraryPage, '支持图片和 2-15 秒视频', '资产管理页必须向用户说明视频上传范围');
+
+  const globals = read('src/app/globals.css');
+  assertIncludes(globals, '.asset-library-upload-panel', '资产管理页上传条必须有稳定布局样式');
+  assertIncludes(globals, '.asset-library-upload-progress', '资产管理页上传进度必须有稳定样式入口');
+
   const referenceThumb = read('src/components/ReferenceThumb.tsx');
   assertIncludes(referenceThumb, '<video', '工作区参考素材缩略图必须能展示视频预览');
   assertIncludes(referenceThumb, 'ref-thumb-media-placeholder', '工作区参考素材缩略图必须能展示音频占位');

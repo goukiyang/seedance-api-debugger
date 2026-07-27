@@ -125,6 +125,12 @@ async function uploadWithRawFallback(
   const data = result.data;
   if (!result.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('素材上传成功，但没有返回素材 ID');
+  notifyUploadProgress(onProgress, {
+    phase: 'done',
+    label: data.asset.reused ? '已复用相同素材' : '上传完成',
+    loadedBytes: file.size,
+    totalBytes: file.size,
+  });
   return data.asset;
 }
 
@@ -193,22 +199,26 @@ async function uploadWithServerProxy(
   const data = result.data;
   if (!result.ok) throw new Error(data.error || data.message || '服务端中转上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('服务端中转上传成功，但没有返回素材 ID');
+  notifyUploadProgress(onProgress, {
+    phase: 'done',
+    label: data.asset.reused ? '已复用相同素材' : '上传完成',
+    loadedBytes: file.size,
+    totalBytes: file.size,
+  });
   return data.asset;
 }
 
-async function uploadWithServerProxyOrRawFallback(
+async function uploadWithServerProxyOrThrow(
   ticket: DirectUploadTicketResponse,
   file: File,
   context: UploadContext,
   invalidJsonMessage: string,
-  fallbackToRaw: boolean,
   reasonPrefix: string,
   onProgress?: UploadProgressHandler,
 ) {
   try {
     return await uploadWithServerProxy(ticket, file, context, invalidJsonMessage, onProgress);
   } catch (proxyError) {
-    if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
     const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
     throw new Error(rawFallbackUnavailableMessage(`${reasonPrefix}；服务端中转也失败：${proxyMessage}`));
   }
@@ -390,12 +400,11 @@ export async function uploadFileToHistory(
   }
   if (ticket.directUploadAvailable === false) {
     if (ticket.uploadToken && ticket.storageProvider === 'r2') {
-      return uploadWithServerProxyOrRawFallback(
+      return uploadWithServerProxyOrThrow(
         ticket,
         file,
         { hash, width, height, durationSeconds },
         invalidJsonMessage,
-        fallbackToRaw,
         ticket.reason || '直传暂不可用',
         onProgress,
       );
@@ -410,12 +419,11 @@ export async function uploadFileToHistory(
     await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file, onProgress);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传到对象存储失败';
-    return uploadWithServerProxyOrRawFallback(
+    return uploadWithServerProxyOrThrow(
       ticket,
       file,
       { hash, width, height, durationSeconds },
       invalidJsonMessage,
-      fallbackToRaw,
       message,
       onProgress,
     );
