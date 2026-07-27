@@ -162,9 +162,24 @@ async function main() {
   assertIncludes(referenceStrip, 'ref-strip-upload-progress', '生成工作台参考图上传必须有稳定进度条样式入口');
 
   const uploadedImagePicker = read('src/components/UploadedImagePicker.tsx');
-  assertIncludes(uploadedImagePicker, 'UploadProgressIndicator', '上传历史图片弹窗必须显示进度组件');
-  assertIncludes(uploadedImagePicker, 'onUploadFile(file, (progress)', '上传历史图片弹窗必须接收真实上传进度');
-  assertIncludes(uploadedImagePicker, 'uploaded-picker-progress', '上传历史图片弹窗必须有稳定进度条样式入口');
+  assertIncludes(uploadedImagePicker, 'UploadProgressIndicator', '历史素材弹窗必须显示进度组件');
+  assertIncludes(uploadedImagePicker, 'onUploadFile(file, (progress)', '历史素材弹窗必须接收真实上传进度');
+  assertIncludes(uploadedImagePicker, 'uploaded-picker-progress', '历史素材弹窗必须有稳定进度条样式入口');
+  assertIncludes(uploadedImagePicker, 'type: \'all\'', '生成页历史素材弹窗必须读取 image/video/audio 全部历史素材');
+  assertIncludes(uploadedImagePicker, 'accept="image/*,video/*,audio/*"', '历史素材弹窗文件选择必须允许视频和音频');
+  assertIncludes(uploadedImagePicker, "file.type.startsWith('video/')", '历史素材弹窗不能继续过滤掉视频文件');
+  assertIncludes(uploadedImagePicker, "file.type.startsWith('audio/')", '历史素材弹窗不能继续过滤掉音频文件');
+  assertIncludes(uploadedImagePicker, '<video', '历史素材弹窗必须能展示视频素材');
+  assertIncludes(uploadedImagePicker, 'await onConfirm(attachableIds)', '历史素材弹窗上传成功后必须自动加入当前参考区');
+  assertIncludes(uploadedImagePicker, '正在加入参考区', '历史素材弹窗必须提示上传后正在挂载参考区');
+
+  const assetHistoryRoute = read('src/app/api/assets/history/route.ts');
+  assertIncludes(assetHistoryRoute, "type HistoryAssetType = AssetType | 'all'", '历史素材接口必须支持 all 类型查询');
+  assertIncludes(assetHistoryRoute, "value === 'video'", '历史素材接口必须允许只查视频历史');
+  assertIncludes(assetHistoryRoute, "value === 'audio'", '历史素材接口必须允许只查音频历史');
+  assertIncludes(assetHistoryRoute, "return 'image'", '历史素材接口默认必须保持图片历史兼容');
+  assertIncludes(assetHistoryRoute, "type === 'all' ? {} : { type }", '历史素材接口 type=all 不能继续强制过滤图片');
+  assertIncludes(assetHistoryRoute, 'type: true', '历史素材接口返回项必须包含素材类型');
 
   const generatePage = read('src/components/generate/GeneratePageClient.tsx');
   assertIncludes(generatePage, 'reference_video_urls: params.referenceVideoUrls || []', '普通生成页必须把参考视频 URL 传给创建任务接口');

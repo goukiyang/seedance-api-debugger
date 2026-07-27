@@ -14880,17 +14880,33 @@ body.compare-fullscreen-open {
 .uploaded-picker-preview-button {
   background: transparent;
   border: none;
-  cursor: zoom-in;
+  cursor: pointer;
   display: block;
   padding: 0;
   width: 100%;
 }
 
-.uploaded-picker-card-main img {
+.uploaded-picker-preview-button.zoomable {
+  cursor: zoom-in;
+}
+
+.uploaded-picker-card-main img,
+.uploaded-picker-card-main video,
+.uploaded-picker-media-placeholder {
   aspect-ratio: 4 / 3;
   display: block;
   object-fit: cover;
   width: 100%;
+}
+
+.uploaded-picker-media-placeholder {
+  align-items: center;
+  background: linear-gradient(135deg, #f1f5f9, #dbeafe);
+  color: #243044;
+  display: flex;
+  font-size: 15px;
+  font-weight: 800;
+  justify-content: center;
 }
 
 .uploaded-picker-card-state {

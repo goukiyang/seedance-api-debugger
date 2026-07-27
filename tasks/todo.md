@@ -7584,3 +7584,84 @@ HARD-GATE：
 - [x] 无法复现或没有任何后台/日志/公网证据时，只能输出诊断结论，不能声称根因彻底修复。结果：已有反馈、日志、公网探针和生产资源证据。
 - [x] 上传探针需要真实用户素材、隐私图片、付费生成或暴露 cookie/token 时立即停止，改用合成小图或脱敏证据。结果：使用合成 1x1 PNG；不输出 cookie/token。
 - [x] 测试、构建、Git 推送、部署或公网验证任一失败时，不标记完成。结果：测试、构建、部署、公网验证已通过；Git 推送待本段销项提交后完成。
+
+## 2026-07-27 生成页增加附件统一支持视频上传规划
+
+### 1. 目标复述
+
+- [x] 用户要解决的是：在真实生成页点击“+ 参考 / 增加附件”时，应该能直接添加图片、视频、音频等参考素材，而不是被带到只支持图片的“上传历史图片”弹窗。结果：已改为“添加参考素材”统一弹窗。
+- [x] 当前根因已经确认：`ReferenceStrip` 底层支持 `image/*,video/*,audio/*`，但 `/generate` 给它传了 `onOpenHistory`，导致点击添加时打开 `UploadedImagePicker`；该弹窗和 `/api/assets/history` 都是图片专用链路，视频在前端就被过滤掉。结果：弹窗和历史接口已同步支持媒体素材。
+- [x] 完成标准：用户从生成页点击添加素材、选择 MP4 视频后，页面必须出现视频参考卡片，有真实上传进度，资产入库，工作台挂载，刷新后仍能看到，提交任务 payload 能带上 `reference_video_urls`。结果：线上 `https://sd2.youdoodesign.com/generate` 用合成 3 秒 MP4 验证通过，DB 中 `Asset.type=video`，`WorkspaceAsset.role=reference_video`，公网视频 URL 返回 200。
+
+### 2. 产品体验原则
+
+- [x] 主入口统一叫“添加素材”或“+ 参考”，不要让用户先理解“历史图片 / 图集 / 工作台 / 资产库”的技术区别。结果：弹窗标题和入口候选改为历史素材。
+- [x] 点击入口后，优先给用户两个清晰动作：`上传本地素材` 和 `从历史素材选择`；历史素材里用筛选区分图片、视频、音频，不再只叫“历史图片”。结果：历史弹窗一次性返回 image/video/audio，按钮改为“上传本地素材”。
+- [x] 上传过程必须显示真实阶段：准备上传、已上传字节进度、服务端登记、加入参考素材；没有真实百分比时只显示阶段文案，不做假进度。结果：沿用 `UploadProgressIndicator`，新增“正在加入参考区”阶段。
+- [x] 视频卡片要用视频缩略图或稳定视频占位，不要用图片标签、图片文案或 `<img>` 强行展示视频。结果：历史弹窗视频用 `<video muted playsInline preload="metadata">`。
+- [x] 失败提示要说清楚原因：文件类型不支持、视频太大、视频地址不可公网访问、上传中断、登记失败、加入工作台失败；不要泛化成“服务异常”。结果：历史素材读取/上传/删除文案已统一，新增不支持文件类型提示。
+
+### 3. 具体可执行任务
+
+- [x] 任务 1：把历史弹窗从图片专用升级为媒体素材选择器。
+  - 修改 `src/components/UploadedImagePicker.tsx`，或按最小影响新增 `src/components/UploadedAssetPicker.tsx` 并替换 `/generate` 调用。
+  - 类型从 `UploadedImageItem` 扩展为通用 `UploadedAssetItem`，字段保留 `id/originalUrl/thumbnailUrl/fileName/mimeType/fileSize/createdAt`，新增 `type: image | video | audio`。
+  - 文案从“上传历史图片”改为“添加参考素材”，空态改为“还没有历史素材”，按钮改为“上传本地素材”。
+  - 文件 input 改为 `accept="image/*,video/*,audio/*"`，但必须同步改过滤逻辑，不能只改 accept。
+
+- [x] 任务 2：让历史接口支持媒体类型。
+  - 修改 `src/app/api/assets/history/route.ts`，支持查询参数 `type=image|video|audio|all`，默认建议 `all` 或按前端传入值返回。
+  - 返回结构增加 `type`，并确保只返回当前用户 `owner_id=user.id`、`status=active` 的素材。
+  - `thumbnailUrl` 对视频可用时返回视频缩略图；没有缩略图时前端显示稳定占位，不阻断选择。
+  - 保留旧图片调用兼容：模板绑定图片入口如果仍只要图片，继续传 `type=image`。
+
+- [x] 任务 3：统一生成页点击入口。
+  - 修改 `src/components/GenerationComposer.tsx` 中 `ReferenceStrip` 的 `onOpenHistory` 行为，让点击 `+ 参考` 打开新的统一素材选择器，而不是旧图片弹窗。
+  - 保留拖拽上传路径：用户把视频拖到参考区时仍走 `workspace.uploadAsset`。
+  - 弹窗上传成功后，不只入历史库，还要自动选中并加入当前工作台，避免用户上传后还要再找一次。
+
+- [x] 任务 4：让选择和展示真正支持视频。
+  - 弹窗列表里图片用 `<img>`，视频用 `<video muted playsInline preload="metadata">` 或复用 `ReferenceThumb` 的展示逻辑，音频用稳定音频图标/文件卡。
+  - 选择视频后，`handleAddUploadedAssets` 走 `workspace.addAssets`，后端 `/api/workspace/assets` 已会按 `asset.type` 写 `reference_video`。
+  - 生成页参考条显示视频缩略图和文件名，点击预览不应按图片放大逻辑处理视频。
+
+- [x] 任务 5：确保任务提交带视频 URL。
+  - 复核 `src/components/GenerationComposer.tsx` 提交前的 `referenceVideoUrls` 构造逻辑，确认工作台视频资产会进入 `reference_video_urls`。
+  - 复核 `src/components/generate/GeneratePageClient.tsx` 和 `/api/tasks/create`，确保没有把视频误算成 `reference_image_ids`。
+  - 若视频公网 URL 不可达，沿用 `/api/workspace/assets` 的 `reference_media_url_not_public` 错误，并把前端提示改成用户能懂的“参考视频必须可访问，请重新上传”。
+
+- [x] 任务 6：补最小回归测试。
+  - 新增或扩展脚本，模拟历史接口 `type=all/type=image/type=video` 的返回过滤，防止视频被图片历史接口吞掉。
+  - 补前端轻量测试或脚本检查：`UploadedAssetPicker` 的 input accept、文件过滤、视频上传后自动选中、`onConfirm` 能提交 assetIds。
+  - 补真实浏览器 smoke：登录测试用户，打开 `/generate`，点击 `+ 参考`，上传合成 3 秒 MP4，断言页面出现视频参考卡片，数据库出现 `Asset.type=video` 和 `WorkspaceAsset.role=reference_video`。
+
+### 4. 验收 / 审查内容
+
+- [x] 创建独立只读审查 agent：只读检查 `ReferenceStrip`、统一素材选择器、`/api/assets/history`、`/api/workspace/assets`、任务提交 payload、测试证据和真实页面截图；审查 agent 不改文件、不提交、不补实现。结果：只读审查 agent `019fa365-e4cf-76f0-8243-376abfd8d1d4` 代码层通过。
+- [x] 审查通过标准：点击生成页 `+ 参考` 不再进入图片专用弹窗；上传 MP4 后页面出现视频参考卡；历史素材能看到视频；刷新后仍存在；提交 payload 有 `reference_video_urls`。结果：真实页面烟测确认 `+参考` 打开 accept 为 `image/*,video/*,audio/*` 的素材弹窗，上传后工作台出现视频素材。
+- [x] 真实验收必须覆盖公网或同一生产服务：`https://sd2.youdoodesign.com/generate` 登录态可用时直接验公网；若自动化登录受阻，可用 `http://localhost:3000/generate` 同生产服务做运行态验收，并明确公网登录态缺口。结果：公网 `https://sd2.youdoodesign.com/generate` 自动化注册测试用户并上传合成 MP4 成功。
+- [x] 验证命令建议包含：`npx tsc --noEmit --pretty false`、`npm run lint`、新增历史媒体接口 smoke、真实浏览器上传 MP4 smoke。结果：`npm run test:reference-media`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build/restart/status sd2`、公网真实上传烟测均已执行。
+
+### 5. 审查是否对齐目标
+
+- [x] 用户是否只需要点击一个“添加素材”入口，不需要分辨图片历史和视频上传？结果：是，`+参考` 进入统一历史素材弹窗。
+- [x] 上传视频是否有真实进度和明确阶段，不再出现“没有反应”？结果：是，上传后显示读取/上传/加入参考区阶段。
+- [x] 上传成功后是否自动加入当前参考区，而不是只进入历史库？结果：是，弹窗上传成功后调用 `onConfirm(attachableIds)`。
+- [x] 历史素材是否能同时管理图片、视频、音频，并且老的图片专用入口不被破坏？结果：是，`/api/assets/history` 默认仍是图片，生成页显式 `type=all`。
+- [x] 视频是否最终进入任务的 `reference_video_urls`，而不是只显示在前端？结果：是，`GenerationComposer` 按 `asset.type === 'video'` 组装 `referenceVideoUrls`，真实工作台里视频角色为 `reference_video`。
+- [x] 错误提示是否告诉用户可处理动作，例如重新上传、压缩视频、换成可访问素材？结果：已补素材服务、删除、类型不支持等提示；后续可继续把 `@图片N` 文案统一成 `@素材N`。
+
+### Git Plan
+
+- [x] 当前生产工作树：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
+- [x] 当前分支：`codex/seedream-5-pro-image-provider`。
+- [x] 实施前先确认工作区干净，避免把本规划提交和后续实现混在一起。结果：实施前仅本规划文件未提交，已纳入本轮聚焦提交。
+- [x] 建议提交分组：提交 1 统一素材选择器和历史接口；提交 2 生成页入口和工作台挂载；提交 3 测试、真实验收、审查修复和版本登记。结果：本轮改动范围集中，合并为一个可回滚提交。
+- [x] 上线前创建 rollback tag：`rollback/2026-07-27-before-generate-reference-media-upload`。结果：tag 已创建并推送到远端。
+
+### 停止条件
+
+- [x] 如果发现 `/api/assets/history` 被模板图片绑定等入口强依赖为纯图片，不能直接破坏兼容；必须让这些入口显式传 `type=image`。结果：接口默认保持 `image`，生成页弹窗显式 `type=all`。
+- [x] 如果视频上传成功但无法生成公网可访问 URL，不能声称“视频参考可用”；必须先修公开 URL 或提示用户重新上传。结果：测试视频 R2 公网 URL `HEAD 200`，`Content-Type: video/mp4`。
+- [x] 如果真实浏览器无法登录，只能报告到本机生产服务验收层，不能冒充公网用户验收通过。结果：公网自动化注册合成测试用户并登录成功，非本机替代。
+- [x] 如果测试、构建、只读审查、部署或公网验证任一失败，不得标记完成、不得归档反馈。结果：当前均已通过；Git 提交推送完成后闭环。

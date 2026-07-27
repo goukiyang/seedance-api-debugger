@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
+import type { AssetType } from '@/types';
 
 export const dynamic = 'force-dynamic';
+
+type HistoryAssetType = AssetType | 'all';
 
 function clampPage(value: string | null) {
   const page = Number(value || '1');
@@ -15,8 +18,19 @@ function clampLimit(value: string | null) {
   return Math.min(80, Math.max(12, Math.floor(limit)));
 }
 
+function parseHistoryAssetType(value: string | null): HistoryAssetType {
+  if (value === 'image' || value === 'video' || value === 'audio' || value === 'all') return value;
+  return 'image';
+}
+
+function normalizeAssetType(value: string): AssetType {
+  if (value === 'video' || value === 'audio') return value;
+  return 'image';
+}
+
 function serializeAsset(asset: {
   id: string;
+  type: string;
   original_url: string;
   thumbnail_url: string | null;
   file_name: string;
@@ -28,6 +42,7 @@ function serializeAsset(asset: {
 }) {
   return {
     id: asset.id,
+    type: normalizeAssetType(asset.type),
     originalUrl: asset.original_url,
     thumbnailUrl: asset.thumbnail_url || asset.original_url,
     fileName: asset.file_name,
@@ -46,12 +61,13 @@ export async function GET(request: NextRequest) {
 
     const page = clampPage(request.nextUrl.searchParams.get('page'));
     const limit = clampLimit(request.nextUrl.searchParams.get('limit'));
+    const type = parseHistoryAssetType(request.nextUrl.searchParams.get('type'));
     const skip = (page - 1) * limit;
 
     const where = {
       owner_id: user.id,
-      type: 'image',
       status: 'active',
+      ...(type === 'all' ? {} : { type }),
     };
 
     const [assets, total] = await Promise.all([
@@ -62,6 +78,7 @@ export async function GET(request: NextRequest) {
         take: limit,
         select: {
           id: true,
+          type: true,
           original_url: true,
           thumbnail_url: true,
           file_name: true,

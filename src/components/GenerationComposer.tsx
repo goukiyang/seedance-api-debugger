@@ -625,8 +625,8 @@ export function GenerationComposer({
         id: 'source:history',
         type: 'source',
         source: 'history',
-        label: '从历史图片选择',
-        description: sourceDisabled ? `已达 ${MAX_REFS} 张上限` : '选择曾经上传过的图片',
+        label: '从历史素材选择',
+        description: sourceDisabled ? `已达 ${MAX_REFS} 个上限` : '选择曾经上传过的图片、视频或音频',
         disabled: sourceDisabled,
       },
       {
