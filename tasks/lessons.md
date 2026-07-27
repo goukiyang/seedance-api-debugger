@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-07-27 - 视频上传要单独覆盖媒体元数据和兜底边界
+
+- 问题/背景：上传链路已有图片、小图 raw fallback 和中转失败测试，但视频文件上传还没有最小行为测试，容易被“统一上传 helper 已测过”误判为已覆盖。
+- 诱因/根因：视频上传比图片多一层浏览器媒体元数据读取：`readMediaDuration` 需要 `document.createElement('video')` 和 metadata；同时视频不能走 8MB 图片 raw fallback，必须守住服务端中转/直传边界。
+- 当时思路：不改生产代码，只在上传 smoke 中补最小视频行为测试；先红灯暴露 Node 测试环境没有 video metadata mock，再补 mock 让真实 helper 跑完整路径。
+- 改动位置：`scripts/direct-upload-r2-smoke.ts`。
+- 怎么改：视频 proxy 成功时断言只请求 `/api/assets/upload-proxy` 且携带 `X-Media-Duration=5`；proxy 失败时断言不会请求 `/api/assets/upload`；`directUploadAvailable=true` 但浏览器 PUT 失败时，视频只能转 proxy，proxy 再失败也不能 raw fallback。
+- 验证结果：`direct-upload-r2-smoke` 红绿通过；公网真实 3 秒 MP4 走 `upload-ticket` 和 `upload-proxy` 返回 200，DB 入库 `type=video`，测试 Asset、用户和 R2 对象已清理。
+- 可复用经验：图片、视频、音频虽然共用上传 helper，但测试不能只拿图片代表全部。任何媒体类型特有的元数据、大小限制、fallback 边界，都要有独立最小行为测试。
+
 ## 2026-07-24 - 上传中转失败不能只给错误，要继续走安全兜底
 
 - 问题/背景：生成页“上传历史图片”弹窗仍出现“服务端中转上传连接中断”，用户需要重新上传，体验上像上传链路又坏了。

@@ -15,6 +15,33 @@
 
 - [WallVerse 第一组「世界迁移」声音闭环](todo/wallverse-audio-20260715.md)
 
+## 2026-07-27 视频上传最小测试与真实验收
+
+### 1. 目标复述
+
+用户要确认“视频文件上传”这条链路不是只靠图片上传测试间接覆盖。本次目标是补一个最小单元/行为测试，专门验证视频上传经过统一上传 helper、读取视频时长、走服务端中转，并且在中转失败时不错误地退回普通图片兜底。完成标准是：测试先红后绿；子 agent 只读审查根因；公网用真实 3 秒 MP4 上传并清理测试数据。
+
+### 2. 具体任务
+
+- [x] 补最小测试红灯：在 `scripts/direct-upload-r2-smoke.ts` 增加视频上传行为断言，先确认旧测试环境没有覆盖视频元数据读取，红灯失败为 `document is not defined`。
+- [x] 补测试环境最小 mock：只在 smoke 内模拟 `document.createElement('video')` 和 5 秒 metadata，不改生产上传代码。
+- [x] 覆盖视频成功路径：视频上传成功时只请求 `/api/assets/upload-proxy`，并携带 `X-Media-Duration=5`。
+- [x] 覆盖视频失败边界：视频中转失败时不得 raw fallback，只能给“仅支持 8MB 以内图片自动回退”的明确错误。
+- [x] 补直传开启分支：当 `directUploadAvailable=true` 但浏览器 PUT 失败时，视频只能转 `/api/assets/upload-proxy`，proxy 再失败也不能 raw fallback。
+- [x] 做公网真实测试：生成 3 秒小 MP4，经 `https://sd2.youdoodesign.com/api/assets/upload-ticket` 和 `/api/assets/upload-proxy` 上传，确认返回 JSON 200、DB 入库为 `video`，并删除测试 Asset、临时用户和 R2 对象。
+
+### 3. 验收 / 审查内容
+
+- [x] 创建子 agent 只读审查：检查根因、测试是否真覆盖视频 helper、fallback 边界和真实测试证据；子 agent 不改文件、不提交、不部署、不写数据库。结果：审查通过，指出需补直传 PUT 失败后转 proxy 的视频测试；主线程已补齐。
+- [x] 本地验证：`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check` 通过。
+- [x] 真实测试：公网上传 3 秒 MP4，`upload-ticket=200`、`upload-proxy=200`、`storageProvider=r2`、`isPubliclyReachable=true`、DB `type=video`、R2 测试对象删除成功。
+
+### 4. 审查是否对齐目标
+
+- [x] 是否真的测了视频上传，而不是只继续测图片上传？结论：测试直接创建 `video/mp4` File，跑 `uploadFileToHistory`，并断言 `X-Media-Duration`。
+- [x] 是否没有扩大图片 raw fallback 到视频，避免视频大文件绕过中转/直传策略？结论：视频 proxy 失败和 PUT+proxy 都失败时均不请求 `/api/assets/upload`。
+- [x] 是否真实上传后做了清理，没有留下测试用户、测试 Asset 或测试 R2 对象？结论：真实测试输出 `cleanup:["deleted"]`，并删除临时用户和测试 Asset。
+
 ## 2026-07-24 生成页上传历史图中转失败后自动兜底修复
 
 ### 1. 目标复述

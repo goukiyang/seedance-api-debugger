@@ -32,17 +32,39 @@ type MockUploadRequest = {
   bodySize: number;
 };
 
-function installBrowserUploadMocks() {
+function ensureWebCrypto() {
+  if (!globalThis.crypto?.subtle) {
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto });
+  }
+}
+
+function installBrowserUploadMocks(
+  options: { proxySucceeds?: boolean; directUploadAvailable?: boolean } = {},
+) {
   const requests: MockUploadRequest[] = [];
   const originalFetch = globalThis.fetch;
   const originalXhr = (globalThis as any).XMLHttpRequest;
   const originalImage = (globalThis as any).Image;
+  const hadDocument = 'document' in globalThis;
+  const originalDocument = (globalThis as any).document;
   const originalCreateObjectUrl = URL.createObjectURL;
   const originalRevokeObjectUrl = URL.revokeObjectURL;
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     assert.equal(url, '/api/assets/upload-ticket', 'behavior smoke only expects upload-ticket fetch');
+    if (options.directUploadAvailable) {
+      return new Response(JSON.stringify({
+        directUploadAvailable: true,
+        storageProvider: 'r2',
+        uploadUrl: 'https://r2.example.invalid/smoke-upload.mp4',
+        uploadToken: 'smoke-upload-token',
+        publicUrl: 'https://assets.example.invalid/smoke-upload.mp4',
+        method: 'PUT',
+        headers: { 'Content-Type': 'video/mp4' },
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     return new Response(JSON.stringify({
       directUploadAvailable: false,
       storageProvider: 'r2',
@@ -59,6 +81,17 @@ function installBrowserUploadMocks() {
 
     set src(_value: string) {
       queueMicrotask(() => this.onload?.());
+    }
+  }
+
+  class MockMediaElement {
+    duration = 5;
+    preload = '';
+    onloadedmetadata: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+
+    set src(_value: string) {
+      queueMicrotask(() => this.onloadedmetadata?.());
     }
   }
 
@@ -89,7 +122,27 @@ function installBrowserUploadMocks() {
       requests.push({ method: this.method, url: this.url, headers: this.headers, bodySize });
       this.upload.onprogress?.({ loaded: bodySize, total: bodySize, lengthComputable: true });
       queueMicrotask(() => {
+        if (this.url === 'https://r2.example.invalid/smoke-upload.mp4') {
+          this.onerror?.({});
+          return;
+        }
         if (this.url === '/api/assets/upload-proxy') {
+          if (options.proxySucceeds) {
+            this.status = 200;
+            this.responseText = JSON.stringify({
+              success: true,
+              asset: {
+                id: 'proxy-upload-asset',
+                originalUrl: 'https://example.invalid/proxy-upload.mp4',
+                thumbnailUrl: null,
+                fileName: 'upload.mp4',
+                fileSize: bodySize,
+                mimeType: this.headers['Content-Type'] || 'application/octet-stream',
+              },
+            });
+            this.onload?.({});
+            return;
+          }
           this.onerror?.({});
           return;
         }
@@ -114,6 +167,12 @@ function installBrowserUploadMocks() {
   }
 
   (globalThis as any).Image = MockImage;
+  (globalThis as any).document = {
+    createElement(tagName: string) {
+      assert.match(tagName, /^(video|audio)$/, 'video upload behavior smoke only expects media elements');
+      return new MockMediaElement();
+    },
+  };
   (globalThis as any).XMLHttpRequest = MockXMLHttpRequest;
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:smoke-upload' });
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
@@ -124,16 +183,90 @@ function installBrowserUploadMocks() {
       globalThis.fetch = originalFetch;
       (globalThis as any).XMLHttpRequest = originalXhr;
       (globalThis as any).Image = originalImage;
+      if (hadDocument) (globalThis as any).document = originalDocument;
+      else delete (globalThis as any).document;
       Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectUrl });
       Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectUrl });
     },
   };
 }
 
-async function assertProxyFailureRawFallbackBehavior() {
-  if (!globalThis.crypto?.subtle) {
-    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto });
+async function assertVideoProxyUploadBehavior() {
+  ensureWebCrypto();
+  const successMocks = installBrowserUploadMocks({ proxySucceeds: true });
+  try {
+    const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
+    const asset = await uploadFileToHistory(video);
+    assert.equal(asset.id, 'proxy-upload-asset', 'video upload must use the server proxy asset result');
+    assert.deepEqual(
+      successMocks.requests.map((request) => request.url),
+      ['/api/assets/upload-proxy'],
+      'video upload must use proxy and must not raw fallback on success',
+    );
+    assert.equal(successMocks.requests[0]?.headers['X-Media-Duration'], '5', 'video upload must pass client-read media duration to proxy');
+  } finally {
+    successMocks.restore();
   }
+
+  const failureMocks = installBrowserUploadMocks();
+  try {
+    const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
+    await assert.rejects(
+      () => uploadFileToHistory(video),
+      /仅支持 8MB 以内图片自动回退/,
+      'video upload must not silently fall back to raw upload when proxy fails',
+    );
+    assert.deepEqual(
+      failureMocks.requests.map((request) => request.url),
+      ['/api/assets/upload-proxy'],
+      'video upload must stop after proxy failure and avoid raw fallback',
+    );
+  } finally {
+    failureMocks.restore();
+  }
+
+  const directPutFailureMocks = installBrowserUploadMocks({
+    directUploadAvailable: true,
+    proxySucceeds: true,
+  });
+  try {
+    const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
+    const asset = await uploadFileToHistory(video);
+    assert.equal(asset.id, 'proxy-upload-asset', 'video upload must use proxy when browser storage PUT fails');
+    assert.deepEqual(
+      directPutFailureMocks.requests.map((request) => request.url),
+      ['https://r2.example.invalid/smoke-upload.mp4', '/api/assets/upload-proxy'],
+      'video upload must try browser PUT, then proxy, and must not raw fallback',
+    );
+    assert.equal(
+      directPutFailureMocks.requests[1]?.headers['X-Media-Duration'],
+      '5',
+      'video upload must preserve media duration when falling back from browser PUT to proxy',
+    );
+  } finally {
+    directPutFailureMocks.restore();
+  }
+
+  const directPutAndProxyFailureMocks = installBrowserUploadMocks({ directUploadAvailable: true });
+  try {
+    const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
+    await assert.rejects(
+      () => uploadFileToHistory(video),
+      /仅支持 8MB 以内图片自动回退/,
+      'video upload must not raw fallback after both browser PUT and proxy fail',
+    );
+    assert.deepEqual(
+      directPutAndProxyFailureMocks.requests.map((request) => request.url),
+      ['https://r2.example.invalid/smoke-upload.mp4', '/api/assets/upload-proxy'],
+      'video upload must stop after proxy failure and avoid raw fallback',
+    );
+  } finally {
+    directPutAndProxyFailureMocks.restore();
+  }
+}
+
+async function assertProxyFailureRawFallbackBehavior() {
+  ensureWebCrypto();
 
   const smallMocks = installBrowserUploadMocks();
   try {
@@ -351,6 +484,7 @@ async function run() {
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
 
   await assertProxyFailureRawFallbackBehavior();
+  await assertVideoProxyUploadBehavior();
 
   console.log('direct-upload-r2-smoke: ok');
 }
