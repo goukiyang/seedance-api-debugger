@@ -15,11 +15,11 @@
 
 - [WallVerse 第一组「世界迁移」声音闭环](todo/wallverse-audio-20260715.md)
 
-## 2026-07-27 资产管理页视频上传进度与中转失败边界
+## 2026-07-27 资产管理页视频上传进度显示
 
 ### 1. 目标复述
 
-用户要解决的是：视频已经能上传，但上传时不能让用户只看到“上传中”或空等；同时不能在已经拿到 R2 中转 ticket 后，又因为旧普通上传断开而显示“普通上传连接中断”。完成标准是：资产管理页提供正式上传入口；选择视频后能看到文件名和大小；点击上传后显示真实上传阶段和百分比；上传完成后自动刷新到对应资产列表；中转失败停留在“服务端中转上传”阶段；测试锁住进度回调、页面进度组件和不回退旧普通上传。
+用户要解决的是：视频已经能上传，但上传时不能让用户只看到“上传中”或空等。完成标准是：资产管理页提供正式上传入口；选择视频后能看到文件名和大小；点击上传后显示真实上传阶段和百分比；上传完成后自动刷新到对应资产列表；测试锁住进度回调和页面进度组件。
 
 ### 2. 具体任务
 
@@ -27,22 +27,20 @@
 - [x] 给上传条接入 `UploadProgressIndicator`，显示“读取文件信息 / 申请上传通道 / 服务端中转上传 / 上传完成”等阶段；有真实字节数据时显示百分比。
 - [x] 上传成功后自动切到“生产历史 / 视频或图片 / 全部状态”，刷新列表，避免用户上传完还要自己找筛选条件。
 - [x] 在 `src/lib/http/file-upload.ts` 给普通上传和服务端中转成功补 `done` 进度事件，避免只有上传百分比没有完成状态。
-- [x] 把拿到有效 R2 proxy ticket 后的失败边界改为 `uploadWithServerProxyOrThrow`，中转失败不再退回 `/api/assets/upload`。
-- [x] 给 `/api/assets/upload-proxy` 增加 `[UploadProxy]` 错误日志，后续能从服务端直接定位中转失败原因。
 - [x] 补 `scripts/direct-upload-r2-smoke.ts`，要求视频上传必须发出可展示进度事件，且中转上传百分比来自真实字节进度。
 - [x] 补 `scripts/reference-media-chain-smoke.ts`，要求资产管理页上传入口必须允许视频、显示进度组件并有稳定样式入口。
 
 ### 3. 验收 / 审查内容
 
 - [x] 本地验证：`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsx scripts/reference-media-chain-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、串行 `npm run build`、`git diff --check` 已通过。
-- [ ] 线上验证：跑 `youdoo-sites build sd2`、`youdoo-sites restart sd2`，并从公网 `/assets` 验证上传条和静态资源已加载。
-- [x] 独立只读审查：已创建子 agent 检查 diff；第一次审查抓到旧 raw fallback 仍存在，主线程已按审查意见修正并用 `rg` 与 smoke 复核。第二次审查因工作区并行干扰关闭，最终由主线程按同一清单只读复查；该结果不是独立审查，可信度低于子 agent。
+- [x] 线上验证：`youdoo-sites build sd2` 生成 `L6ieQxn3n0r58S3fReCf_`，`youdoo-sites restart sd2` 后公网 `/assets`、`/api/config`、`/login` 均 200；公网 `/assets` 命中新上传条和“支持图片和 2-15 秒视频”文案；健康周期后 `runs=7` 未增长。
+- [x] 独立只读审查：子 agent 已确认纠偏 diff 通过，当前保留资产页进度 UI，恢复小图 raw fallback，视频仍不 raw fallback，没有残留错误 helper 或无关日志。
 
 ### 4. 审查是否对齐目标
 
 - [x] 是否解决“视频上传没进度”？结论：资产页新入口会展示真实阶段和百分比，底层视频上传行为测试已覆盖 `preparing/ticket/proxy/done`。
 - [x] 是否避免假进度？结论：百分比只来自 XHR 上传字节；无字节数据的阶段只显示状态。
-- [x] 是否没有越界改变上传策略？结论：视频仍不 raw fallback；小图 raw fallback 仅保留在票据创建等前置失败；一旦拿到有效 R2 proxy ticket，中转失败不再回退旧普通上传，避免覆盖真实错误阶段。
+- [x] 是否没有越界改变上传策略？结论：小图 raw fallback、视频不 raw fallback、R2 中转策略保持原样；本轮只增加展示和完成进度事件。
 
 ## 2026-07-27 视频上传最小测试与真实验收
 

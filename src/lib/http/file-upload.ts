@@ -208,17 +208,19 @@ async function uploadWithServerProxy(
   return data.asset;
 }
 
-async function uploadWithServerProxyOrThrow(
+async function uploadWithServerProxyOrRawFallback(
   ticket: DirectUploadTicketResponse,
   file: File,
   context: UploadContext,
   invalidJsonMessage: string,
+  fallbackToRaw: boolean,
   reasonPrefix: string,
   onProgress?: UploadProgressHandler,
 ) {
   try {
     return await uploadWithServerProxy(ticket, file, context, invalidJsonMessage, onProgress);
   } catch (proxyError) {
+    if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
     const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
     throw new Error(rawFallbackUnavailableMessage(`${reasonPrefix}；服务端中转也失败：${proxyMessage}`));
   }
@@ -400,11 +402,12 @@ export async function uploadFileToHistory(
   }
   if (ticket.directUploadAvailable === false) {
     if (ticket.uploadToken && ticket.storageProvider === 'r2') {
-      return uploadWithServerProxyOrThrow(
+      return uploadWithServerProxyOrRawFallback(
         ticket,
         file,
         { hash, width, height, durationSeconds },
         invalidJsonMessage,
+        fallbackToRaw,
         ticket.reason || '直传暂不可用',
         onProgress,
       );
@@ -419,11 +422,12 @@ export async function uploadFileToHistory(
     await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file, onProgress);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传到对象存储失败';
-    return uploadWithServerProxyOrThrow(
+    return uploadWithServerProxyOrRawFallback(
       ticket,
       file,
       { hash, width, height, durationSeconds },
       invalidJsonMessage,
+      fallbackToRaw,
       message,
       onProgress,
     );

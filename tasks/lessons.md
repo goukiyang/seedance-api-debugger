@@ -1,15 +1,5 @@
 # Lessons
 
-## 2026-07-27 - 有效中转票据失败后不要再退回普通上传
-
-- 问题/背景：用户看到“普通上传连接中断，系统没有拿到有效上传结果”，但真实入口已经拿到了 R2 服务端中转 ticket，错误阶段不该被普通上传覆盖。
-- 诱因/根因：旧策略允许 8MB 以内图片在 `/api/assets/upload-proxy` 失败后继续请求 `/api/assets/upload`。当旧普通上传也断开时，最终提示变成“普通上传连接中断”，排查方向被带偏。
-- 当时思路：普通上传兜底只保留在“还没拿到有效上传通道”的前置失败；一旦进入有效 R2 proxy ticket，proxy 失败就停在中转阶段，并由 `/api/assets/upload-proxy` 记录 `[UploadProxy]` 日志。
-- 改动位置：`src/lib/http/file-upload.ts`、`src/app/api/assets/upload-proxy/route.ts`、`scripts/direct-upload-r2-smoke.ts`。
-- 怎么改：`uploadWithServerProxyOrRawFallback` 改为 `uploadWithServerProxyOrThrow`；小图 proxy 失败不再请求 `/api/assets/upload`；smoke 改为断言只请求 `/api/assets/upload-proxy`。
-- 验证结果：`direct-upload-r2-smoke`、`reference-media-chain-smoke`、`tsc`、`lint` 和串行 `build` 通过。
-- 可复用经验：上传 fallback 要按“阶段”判断，不只按文件大小判断。已经拿到有效 ticket 并进入中转/完成登记后，继续换路会隐藏根因。
-
 ## 2026-07-27 - 上传链路成功不等于用户看得到进度
 
 - 问题/背景：视频后端上传链路已经真实跑通，但用户继续追问“上传视频是不是没有进度显示”。
@@ -32,7 +22,6 @@
 
 ## 2026-07-24 - 上传中转失败不能只给错误，要继续走安全兜底
 
-- 2026-07-27 修正：这条经验只适用于当时“没有有效中转兜底”的阶段；现在已改为“拿到有效 R2 proxy ticket 后，中转失败不得再退回普通上传”，避免真实错误阶段被覆盖。
 - 问题/背景：生成页“上传历史图片”弹窗仍出现“服务端中转上传连接中断”，用户需要重新上传，体验上像上传链路又坏了。
 - 诱因/根因：R2 浏览器直传未开启时，前端会直接走 `/api/assets/upload-proxy` 服务端中转；但这条 `ticket.directUploadAvailable === false` 分支漏掉了小图 raw fallback，中转一断就直接显示失败。此前只覆盖了“浏览器 PUT 失败后再中转失败”的兜底，没有覆盖“直接中转失败”。
 - 当时思路：把“中转上传”统一包一层 `uploadWithServerProxyOrRawFallback`；所有进入中转的路径失败后，都先按同一规则判断能不能自动普通上传。
