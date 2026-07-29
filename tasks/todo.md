@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [ ] 2026-07-28：主 todo 已瘦身；历史正文见 `tasks/todo/archive-2026-07-28-main.md`。新规划请写入子 todo 文档。
+- [ ] 2026-07-29：音频素材上传统一链路，正文见 `tasks/todo/2026-07-29-audio-upload.md`。
 
 ## 最近状态
 
@@ -15,4 +15,5 @@
 
 ## Todo 子文档索引
 
+- `tasks/todo/2026-07-29-audio-upload.md`：音频素材上传统一链路
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
