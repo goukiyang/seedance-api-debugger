@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [ ] 2026-07-29：音频素材上传统一链路，正文见 `tasks/todo/2026-07-29-audio-upload.md`。
+- [x] 2026-07-29：分享按钮失效修复，正文见 `tasks/todo/2026-07-29-share-button-fix.md`。
 
 ## 最近状态
 
@@ -16,4 +16,5 @@
 ## Todo 子文档索引
 
 - `tasks/todo/2026-07-29-audio-upload.md`：音频素材上传统一链路
+- `tasks/todo/2026-07-29-share-button-fix.md`：分享按钮失效修复
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环

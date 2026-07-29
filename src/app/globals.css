@@ -14294,6 +14294,26 @@ body.compare-fullscreen-open {
   margin: 0;
 }
 
+.share-dialog-inline-note,
+.share-dialog-inline-warning {
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 9px 10px;
+}
+
+.share-dialog-inline-note {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
+.share-dialog-inline-warning {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #c2410c;
+}
+
 .share-dialog-presets {
   display: grid;
   gap: 10px;

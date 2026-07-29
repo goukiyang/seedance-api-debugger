@@ -81,6 +81,8 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   const [targetId, setTargetId] = useState('');
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [publicFolders, setPublicFolders] = useState<PublicFolderOption[]>([]);
+  const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
+  const [folderLoadError, setFolderLoadError] = useState<string | null>(null);
   const [publicFolderId, setPublicFolderId] = useState('');
   const [publicName, setPublicName] = useState('');
   const [publicDescription, setPublicDescription] = useState('');
@@ -123,19 +125,30 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
   const loadShareTargets = useCallback(async () => {
     setOptionsLoading(true);
+    setProjectLoadError(null);
+    setFolderLoadError(null);
     try {
-      const [projectsRes, foldersRes] = await Promise.all([
-        fetch('/api/projects', { cache: 'no-store' }),
-        fetch('/api/reference-album-folders', { cache: 'no-store' }),
+      const [projectsResult, foldersResult] = await Promise.allSettled([
+        fetchJson<{ projects?: ProjectOption[] }>('/api/projects', '项目列表读取失败'),
+        fetchJson<{ folders?: PublicFolderOption[] }>('/api/reference-album-folders', '共享文件夹读取失败'),
       ]);
-      const projectsData = await projectsRes.json().catch(() => ({}));
-      const foldersData = await foldersRes.json().catch(() => ({}));
-      if (!projectsRes.ok) throw new Error(projectsData.error || projectsData.message || '项目列表读取失败');
-      if (!foldersRes.ok) throw new Error(foldersData.error || foldersData.message || '共享文件夹读取失败');
-      setProjects(Array.isArray(projectsData.projects) ? projectsData.projects : []);
-      setPublicFolders(Array.isArray(foldersData.folders) ? foldersData.folders : []);
+
+      if (projectsResult.status === 'fulfilled') {
+        setProjects(Array.isArray(projectsResult.value.projects) ? projectsResult.value.projects : []);
+      } else {
+        setProjects([]);
+        setProjectLoadError(projectsResult.reason instanceof Error ? projectsResult.reason.message : '项目列表读取失败');
+      }
+
+      if (foldersResult.status === 'fulfilled') {
+        setPublicFolders(Array.isArray(foldersResult.value.folders) ? foldersResult.value.folders : []);
+      } else {
+        setPublicFolders([]);
+        setFolderLoadError(foldersResult.reason instanceof Error ? foldersResult.reason.message : '共享文件夹读取失败');
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '共享目标读取失败');
+      setProjectLoadError(err instanceof Error ? err.message : '共享目标读取失败');
+      setFolderLoadError(err instanceof Error ? err.message : '共享目标读取失败');
     } finally {
       setOptionsLoading(false);
     }
@@ -170,8 +183,10 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   if (!open || !album) return null;
 
   const canSubmit = targetType === 'public_folder'
-    ? Boolean(publicFolderId && publicName.trim())
-    : Boolean(targetId.trim());
+    ? Boolean(publicFolderId && publicName.trim() && publicFolders.length > 0 && !folderLoadError)
+    : targetType === 'project'
+      ? Boolean(targetId.trim() && shareableProjects.length > 0 && !projectLoadError)
+      : Boolean(targetId.trim());
 
   const applyPreset = (nextPreset: PermissionPreset) => {
     setPreset(nextPreset);
@@ -184,6 +199,11 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   };
 
   const changeTargetType = (nextType: ShareTargetType) => {
+    if (nextType === 'public_folder' && publicFolders.length === 0) {
+      setNotice(null);
+      setError(folderLoadError || '还没有可用共享文件夹，请先让管理员创建共享文件夹。');
+      return;
+    }
     setTargetType(nextType);
     setError(null);
     setNotice(null);
@@ -365,7 +385,9 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
               共享方式
               <select value={targetType} onChange={(event) => changeTargetType(event.target.value as ShareTargetType)}>
                 <option value="project">共享给项目</option>
-                <option value="public_folder">提交到共享文件夹</option>
+                <option value="public_folder" disabled={publicFolders.length === 0}>
+                  提交到共享文件夹{publicFolders.length === 0 ? '（暂无文件夹）' : ''}
+                </option>
                 <option value="user">指定用户</option>
               </select>
             </label>
@@ -378,7 +400,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
                   disabled={optionsLoading || shareableProjects.length === 0}
                 >
                   {shareableProjects.length === 0 ? (
-                    <option value="">暂无可选项目</option>
+                    <option value="">{optionsLoading ? '正在读取项目...' : '暂无可选项目'}</option>
                   ) : (
                     shareableProjects.map((project) => (
                       <option key={project.id} value={project.id}>
@@ -408,7 +430,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
                   disabled={optionsLoading || publicFolders.length === 0}
                 >
                   {publicFolders.length === 0 ? (
-                    <option value="">暂无共享文件夹</option>
+                    <option value="">{optionsLoading ? '正在读取共享文件夹...' : '暂无共享文件夹'}</option>
                   ) : (
                     publicFolders.map((folder) => (
                       <option key={folder.id} value={folder.id}>
@@ -440,6 +462,22 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
               </label>
             )}
           </div>
+
+          {targetType === 'project' && projectLoadError && (
+            <div className="share-dialog-inline-warning">{projectLoadError}</div>
+          )}
+          {targetType === 'project' && !projectLoadError && shareableProjects.length === 0 && !optionsLoading && (
+            <div className="share-dialog-inline-warning">暂无可共享项目，请先创建或加入一个可管理素材的项目。</div>
+          )}
+          {folderLoadError && targetType !== 'public_folder' && (
+            <div className="share-dialog-inline-note">共享文件夹暂不可用，不影响共享给项目或指定用户。</div>
+          )}
+          {targetType === 'public_folder' && folderLoadError && (
+            <div className="share-dialog-inline-warning">{folderLoadError}</div>
+          )}
+          {targetType === 'public_folder' && !folderLoadError && publicFolders.length === 0 && !optionsLoading && (
+            <div className="share-dialog-inline-warning">还没有可用共享文件夹，请先让管理员创建共享文件夹。</div>
+          )}
 
           {targetType === 'public_folder' ? (
             <div className="share-dialog-public-fields">
@@ -620,7 +658,22 @@ function formatExpiresAt(value: string) {
   return `${date.toLocaleString('zh-CN')} 过期`;
 }
 
+async function fetchJson<T>(url: string, fallbackMessage: string): Promise<T> {
+  const response = await fetch(url, { cache: 'no-store' });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof data.error === 'string'
+      ? data.error
+      : typeof data.message === 'string'
+        ? data.message
+        : fallbackMessage;
+    throw new Error(message);
+  }
+  return data as T;
+}
+
 function formatProjectType(type?: string | null) {
+  if (type === 'company') return '公司级项目';
   if (type === 'team') return '团队项目';
   if (type === 'public') return '公共项目';
   if (type === 'personal') return '个人项目';
