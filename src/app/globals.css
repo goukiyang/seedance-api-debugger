@@ -17205,6 +17205,28 @@ body.compare-fullscreen-open {
   font-size: 12px;
 }
 
+.asset-card-audio-placeholder {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  color: oklch(0.82 0.06 188);
+  background:
+    linear-gradient(135deg, oklch(0.18 0.022 222), oklch(0.12 0.012 250)),
+    oklch(0.12 0.008 250);
+}
+
+.asset-card-audio-placeholder span {
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.asset-card-audio-placeholder small {
+  color: oklch(0.68 0.02 245);
+  font-size: 11px;
+}
+
 .asset-card-duration {
   position: absolute;
   left: 8px;
@@ -17567,6 +17589,25 @@ body.compare-fullscreen-open {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.asset-detail-audio-player {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  width: min(420px, 92%);
+  padding: 18px;
+  color: oklch(0.86 0.018 245);
+}
+
+.asset-detail-audio-player span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.asset-detail-audio-player audio {
+  width: 100%;
 }
 
 .asset-detail-preview.is-portrait video,

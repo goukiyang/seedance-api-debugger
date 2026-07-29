@@ -16,7 +16,7 @@ interface Props {
   onRemove: (assetId: string) => Promise<void>;
   onReorder: (newOrder: Array<{ assetId: string; sortOrder: number }>) => Promise<void>;
   onReplace: (assetId: string, file: File, onProgress?: UploadProgressHandler) => Promise<void>;
-  onPreview: (url: string) => void;
+  onPreview: (url: string, type?: WorkspaceAssetItem['type']) => void;
   onOpenHistory?: () => void;
   generationMode?: string;
   loading?: boolean;
@@ -459,12 +459,12 @@ export function ReferenceStrip({
 
       {/* 超出提示 */}
       {hasMore && (
-        <span className="ref-strip-more">+{assets.length - MAX_REFS} 张</span>
+        <span className="ref-strip-more">+{assets.length - MAX_REFS} 个</span>
       )}
 
       {/* 图号说明 */}
       <span className="ref-strip-count">
-        {assets.length === 0 ? '最多 9 张' : `${assets.length}/${MAX_REFS} 张`}
+        {assets.length === 0 ? '最多 9 个' : `${assets.length}/${MAX_REFS} 个`}
       </span>
     </div>
   );

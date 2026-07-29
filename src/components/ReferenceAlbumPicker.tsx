@@ -38,12 +38,17 @@ interface ReferenceImageItem {
   } | null;
 }
 
+export type ReferenceAlbumSelection = {
+  id: string;
+  type: 'image' | 'video' | 'audio';
+};
+
 interface Props {
   open: boolean;
   currentCount: number;
   currentReferenceImageIds?: string[];
   onClose: () => void;
-  onConfirm: (referenceImageIds: string[]) => Promise<void>;
+  onConfirm: (referenceImageIds: string[], assets?: ReferenceAlbumSelection[]) => Promise<void>;
 }
 
 const SCOPES: Array<{ value: AlbumScope; label: string }> = [
@@ -61,6 +66,12 @@ function mediaTypeLabel(type: string | null | undefined) {
 
 function isImageItem(image: ReferenceImageItem | null) {
   return !image?.asset?.type || image.asset.type === 'image';
+}
+
+function selectionTypeFromItem(image: ReferenceImageItem): ReferenceAlbumSelection['type'] {
+  if (image.asset?.type === 'video') return 'video';
+  if (image.asset?.type === 'audio') return 'audio';
+  return 'image';
 }
 
 export function ReferenceAlbumPicker({
@@ -148,7 +159,12 @@ export function ReferenceAlbumPicker({
     setLoading(true);
     setError(null);
     try {
-      await onConfirm(selectedImageIds);
+      const itemById = new Map(images.map((image) => [image.id, image]));
+      const selectedAssets = selectedImageIds
+        .map((id) => itemById.get(id))
+        .filter((image): image is ReferenceImageItem => Boolean(image))
+        .map((image) => ({ id: image.id, type: selectionTypeFromItem(image) }));
+      await onConfirm(selectedImageIds, selectedAssets);
       setSelectedImageIds([]);
       onClose();
     } catch (err) {
@@ -276,7 +292,7 @@ export function ReferenceAlbumPicker({
               onClick={handleConfirm}
               disabled={selectedImageIds.length === 0 || loading}
             >
-              加入并插入引用
+              加入参考区
             </button>
           </div>
         </div>

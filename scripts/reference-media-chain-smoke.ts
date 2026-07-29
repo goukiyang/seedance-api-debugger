@@ -160,6 +160,8 @@ async function main() {
   assertIncludes(referenceStrip, 'UploadProgressIndicator', '生成工作台参考图上传必须显示进度组件');
   assertIncludes(referenceStrip, 'onUpload(file, (progress)', '生成工作台参考图上传必须接收真实上传进度');
   assertIncludes(referenceStrip, 'ref-strip-upload-progress', '生成工作台参考图上传必须有稳定进度条样式入口');
+  assertIncludes(referenceStrip, '最多 9 个', '参考区容量文案不能继续把视频/音频叫成张');
+  assertIncludes(referenceStrip, '+{assets.length - MAX_REFS} 个', '参考区超出数量文案必须统一为个');
 
   const uploadedImagePicker = read('src/components/UploadedImagePicker.tsx');
   assertIncludes(uploadedImagePicker, 'UploadProgressIndicator', '历史素材弹窗必须显示进度组件');
@@ -170,7 +172,8 @@ async function main() {
   assertIncludes(uploadedImagePicker, "file.type.startsWith('video/')", '历史素材弹窗不能继续过滤掉视频文件');
   assertIncludes(uploadedImagePicker, "file.type.startsWith('audio/')", '历史素材弹窗不能继续过滤掉音频文件');
   assertIncludes(uploadedImagePicker, '<video', '历史素材弹窗必须能展示视频素材');
-  assertIncludes(uploadedImagePicker, 'await onConfirm(attachableIds)', '历史素材弹窗上传成功后必须自动加入当前参考区');
+  assertIncludes(uploadedImagePicker, 'type UploadedAssetSelection', '历史素材弹窗必须把选择素材类型回传给生成页');
+  assertIncludes(uploadedImagePicker, 'await onConfirm(attachableIds,', '历史素材弹窗上传成功后必须自动加入当前参考区并回传素材类型');
   assertIncludes(uploadedImagePicker, '正在加入参考区', '历史素材弹窗必须提示上传后正在挂载参考区');
 
   const assetHistoryRoute = read('src/app/api/assets/history/route.ts');
@@ -214,13 +217,44 @@ async function main() {
   assertIncludes(albumDetail, 'await loadAlbum()', '图集详情页上传成功后必须等待列表刷新完成');
   assertIncludes(albumDetail, '上传处理中...', '图集详情页上传期间按钮文案必须反馈状态');
 
+  const referenceAlbumPicker = read('src/components/ReferenceAlbumPicker.tsx');
+  assertIncludes(referenceAlbumPicker, 'type ReferenceAlbumSelection', '图集选择器必须把选择素材类型回传给生成页');
+  assertIncludes(referenceAlbumPicker, 'await onConfirm(selectedImageIds, selectedAssets)', '图集选择器确认时必须回传素材类型，避免音频被当成图片引用');
+  assertIncludes(referenceAlbumPicker, '加入参考区', '图集选择器按钮文案必须覆盖图片、视频、音频素材');
+
   const assetLibraryPage = read('src/app/assets/page.tsx');
   assertIncludes(assetLibraryPage, 'UploadProgressIndicator', '资产管理页本地上传必须显示进度组件');
   assertIncludes(assetLibraryPage, 'uploadFileAsAsset(selectedFile, {', '资产管理页本地上传必须走统一 Asset 上传 helper');
   assertIncludes(assetLibraryPage, 'onProgress: (progress)', '资产管理页本地上传必须接收真实上传进度');
-  assertIncludes(assetLibraryPage, 'accept="image/*,video/*"', '资产管理页本地上传必须允许视频文件');
+  assertIncludes(assetLibraryPage, "type AssetType = 'all' | 'video' | 'image' | 'audio' | 'reference'", '资产管理页类型筛选必须包含音频');
+  assertIncludes(assetLibraryPage, "{ id: 'audio', label: '音频' }", '资产管理页必须提供音频筛选 tab');
+  assertIncludes(assetLibraryPage, "file.type.startsWith('audio/')", '资产管理页上传成功后必须能切到音频分类');
+  assertIncludes(assetLibraryPage, 'accept="image/*,video/*,audio/*"', '资产管理页本地上传必须允许音频文件');
   assertIncludes(assetLibraryPage, 'asset-library-upload-progress', '资产管理页本地上传必须有稳定进度条样式入口');
-  assertIncludes(assetLibraryPage, '支持图片和 2-15 秒视频', '资产管理页必须向用户说明视频上传范围');
+  assertIncludes(assetLibraryPage, '支持图片、2-15 秒视频、2-15 秒音频', '资产管理页必须向用户说明音频上传范围');
+
+  const assetLibraryRoute = read('src/app/api/assets/library/route.ts');
+  assertIncludes(assetLibraryRoute, "const ITEM_TYPES = new Set(['all', 'video', 'image', 'audio', 'reference'])", '资产库接口必须允许 audio 类型筛选');
+  assertIncludes(assetLibraryRoute, "type LibraryItemKind = 'video' | 'image' | 'audio'", '资产库返回项必须能表达音频素材');
+  assertIncludes(assetLibraryRoute, "asset.type === 'audio' ? 'audio'", '资产库音频素材不能被序列化成图片');
+  assertIncludes(assetLibraryRoute, "where.type = 'audio'", '资产库接口必须能按音频筛选素材');
+  assertIncludes(assetLibraryRoute, "['image', 'video', 'audio']", '资产库全部分类不能漏掉音频资产');
+
+  const promptEditor = read('src/components/PromptEditor.tsx');
+  assertIncludes(promptEditor, '当前图片参考或历史素材', '提示词输入框必须区分图片 @ 引用和历史素材入口');
+  assertIncludes(promptEditor, '音频会自动作为参考音频传入', '提示词提示必须说明音频不会占用 @图片 标记');
+
+  const modeSelector = read('src/components/ModeSelector.tsx');
+  assertIncludes(modeSelector, '图片、视频和音频作为整体参考', '全能参考模式必须说明支持音频素材');
+  assertIncludes(modeSelector, '音频需要配图片或视频', '全能参考模式必须说明音频不能单独使用');
+  assertIncludes(modeSelector, 'imageAssetCount', '图片模式校验不能继续按全部素材数量计算');
+  assertIncludes(modeSelector, '首尾帧模式至少需要 <strong>2 个图片参考</strong>', '首尾帧模式必须提示图片参考数量不足');
+
+  assertIncludes(generationComposer, '音频参考需要配合图片或视频一起使用', '生成页必须在前端拦截单独音频参考，避免创建任务和冻结点数');
+  assertIncludes(generationComposer, 'const imageReferenceAssets = useMemo', '生成页必须单独计算图片参考，避免音频占用 @图片 序号');
+  assertIncludes(generationComposer, 'checkPrompt(prompt, imageReferenceAssets.length', '提示词 @图片 校验只能按图片参考数量计算');
+  assertIncludes(generationComposer, 'asset.type === \'image\'', '历史素材加入提示词时必须只给图片素材生成 @图片 标记');
+  assertIncludes(generationComposer, '<audio src={previewMedia.url}', '生成页音频缩略图预览必须走音频播放器，不能当图片渲染');
 
   const globals = read('src/app/globals.css');
   assertIncludes(globals, '.asset-library-upload-panel', '资产管理页上传条必须有稳定布局样式');
@@ -229,6 +263,7 @@ async function main() {
   const referenceThumb = read('src/components/ReferenceThumb.tsx');
   assertIncludes(referenceThumb, '<video', '工作区参考素材缩略图必须能展示视频预览');
   assertIncludes(referenceThumb, 'ref-thumb-media-placeholder', '工作区参考素材缩略图必须能展示音频占位');
+  assertIncludes(referenceThumb, 'onPreview(imageSrc, asset.type)', '工作区参考素材预览必须把音频/视频类型传给弹窗');
 
   await assertMediaDurationValidation();
 

@@ -12,12 +12,12 @@
 
 ## 2. 具体可执行任务
 
-- [ ] T1. 开工前确认范围和当前状态
+- [x] T1. 开工前确认范围和当前状态
   - 检查对象：`/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
   - 执行命令：`git status --short --branch`。
   - 完成标准：确认本轮只处理音频素材上传统一链路；不混入无关改动；如果工作区已有旧改动，按文件或 hunk 隔离本轮改动。
 
-- [ ] T2. 资产管理页支持音频分类和音频上传
+- [x] T2. 资产管理页支持音频分类和音频上传
   - 修改文件：`src/app/assets/page.tsx`。
   - 具体改动：
     - 把 `AssetType` 从 `all | video | image | reference` 扩展为 `all | video | image | audio | reference`。
@@ -28,7 +28,7 @@
     - 上传说明改为“支持图片、2-15 秒视频、2-15 秒音频，音频最大 15MB。”
   - 完成标准：用户在资产管理页点“选择文件”时可以选择 MP3/WAV/OGG；上传成功后自动切到音频列表并看到素材。
 
-- [ ] T3. 资产管理接口返回和筛选音频素材
+- [x] T3. 资产管理接口返回和筛选音频素材
   - 修改文件：`src/app/api/assets/library/route.ts`。
   - 具体改动：
     - `ITEM_TYPES` 增加 `audio`。
@@ -37,7 +37,7 @@
     - `loadAssetItems()` 允许 `type=audio`，`type=all` 时包含 `image/video/audio`。
   - 完成标准：`/api/assets/library?type=audio&scope=history` 能返回当前用户的音频资产；`type=all` 不漏掉音频。
 
-- [ ] T4. 生成页参考素材文案统一，避免用户误以为只能传图片
+- [x] T4. 生成页参考素材文案统一，避免用户误以为只能传图片
   - 修改文件：
     - `src/components/ReferenceStrip.tsx`
     - `src/components/AddReferenceCard.tsx`
@@ -51,7 +51,7 @@
     - 保留即梦官方图片引用规则 `@图片1`，但补清楚：音频会自动作为参考音频传给生成接口，不要求用户在提示词里 `@音频`。
   - 完成标准：生成页从第一眼看上去就是图片、视频、音频都可作为参考素材，不再出现明显只支持图片的入口文案。
 
-- [ ] T5. 生成提交前拦截“只有音频”的情况
+- [x] T5. 生成提交前拦截“只有音频”的情况
   - 修改文件：`src/components/GenerationComposer.tsx`。
   - 具体改动：
     - 在 `handleSubmit` 前统计当前工作台里图片、视频、音频数量。
@@ -59,7 +59,7 @@
     - 不发起任务创建请求，不冻结点数。
   - 完成标准：用户只放音频点击生成时，页面直接给出清楚原因；不会创建任务、不会消耗点数。
 
-- [ ] T6. 音频展示保持稳定，不做复杂播放器
+- [x] T6. 音频展示保持稳定，不做复杂播放器
   - 修改文件：
     - `src/components/ReferenceThumb.tsx`
     - `src/components/UploadedImagePicker.tsx`
@@ -70,7 +70,7 @@
     - 图片放大能力只作用于图片；音频不进入图片放大弹窗。
   - 完成标准：音频素材不会出现破图、空白卡片或错误图片预览；卡片尺寸不跳动。
 
-- [ ] T7. 补齐自动化验证
+- [x] T7. 补齐自动化验证
   - 修改文件：`scripts/reference-media-chain-smoke.ts`。
   - 具体改动：
     - 增加资产管理页 `accept="image/*,video/*,audio/*"` 断言。
@@ -120,7 +120,7 @@
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
 
-- [ ] R1. 独立只读审查：代码范围是否对齐
+- [x] R1. 独立只读审查：代码范围是否对齐
   - 检查对象：`src/app/assets/page.tsx`、`src/app/api/assets/library/route.ts`、`src/components/GenerationComposer.tsx`、`src/components/ReferenceStrip.tsx`、`src/components/AddReferenceCard.tsx`、`src/components/PromptEditor.tsx`、`src/components/ModeSelector.tsx`、`src/components/ReferenceThumb.tsx`、`src/components/UploadedImagePicker.tsx`、`scripts/reference-media-chain-smoke.ts`。
   - 通过标准：只改音频素材上传统一链路相关内容；没有新增上传接口；没有新增依赖；没有改数据库结构；没有改点数、支付、鉴权、Provider 价格等无关高风险逻辑。
   - 证据来源：`git diff --stat`、聚焦 `git diff`、相关文件只读检查。
@@ -147,7 +147,7 @@
 
 ## 4. 审查内容是否对齐目标
 
-- [ ] A1. R1 是否对齐“只改必要范围”
+- [x] A1. R1 是否对齐“只改必要范围”
   - 判断：R1 能证明本任务没有扩大到新上传系统、数据库结构、点数和 Provider 价格等无关范围。
 
 - [ ] A2. R2 是否对齐“用户能上传和找到音频”

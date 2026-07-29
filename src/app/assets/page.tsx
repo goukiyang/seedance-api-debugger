@@ -21,7 +21,7 @@ import {
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetView = AssetScope | 'enhance';
-type AssetType = 'all' | 'video' | 'image' | 'reference';
+type AssetType = 'all' | 'video' | 'image' | 'audio' | 'reference';
 type AssetStatus = 'all' | 'succeeded' | 'running' | 'submitted' | 'failed' | 'cancelled' | 'hidden';
 type AssetSort = 'created_desc' | 'created_asc' | 'completed_desc' | 'project' | 'user' | 'duration';
 type AssetGroup = 'date' | 'project' | 'user';
@@ -76,7 +76,7 @@ type ReferenceAlbumItem = {
 
 type AssetLibraryItem = {
   id: AssetLibraryItemId;
-  kind: 'video' | 'image';
+  kind: 'video' | 'image' | 'audio';
   source: 'video_task' | 'asset' | 'reference_image';
   taskId: string | null;
   assetId: string | null;
@@ -86,6 +86,7 @@ type AssetLibraryItem = {
   thumbnailUrl: string | null;
   previewUrl: string | null;
   downloadUrl: string | null;
+  fileSize: number | null;
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
@@ -149,6 +150,7 @@ const typeTabs: Array<{ id: AssetType; label: string }> = [
   { id: 'all', label: '全部' },
   { id: 'video', label: '视频' },
   { id: 'image', label: '图片' },
+  { id: 'audio', label: '音频' },
   { id: 'reference', label: '参考素材' },
 ];
 
@@ -188,7 +190,7 @@ const ASSET_BULK_ALBUM_STORAGE_KEY = 'asset_library_bulk_album_id';
 const WORKSPACE_TAB_ID_KEY = 'workspace_tab_id';
 
 function isAssetType(value: string | null): value is AssetType {
-  return value === 'all' || value === 'video' || value === 'image' || value === 'reference';
+  return value === 'all' || value === 'video' || value === 'image' || value === 'audio' || value === 'reference';
 }
 
 function isAssetCardSize(value: string | null): value is AssetCardSize {
@@ -237,12 +239,14 @@ function formatAssetUploadBytes(bytes: number) {
 function assetUploadTypeLabel(file: File | null) {
   if (!file) return '素材';
   if (file.type.startsWith('video/')) return '视频';
+  if (file.type.startsWith('audio/')) return '音频';
   if (file.type.startsWith('image/')) return '图片';
   return '素材';
 }
 
 function assetLibraryTypeFromFile(file: File): AssetType {
   if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('audio/')) return 'audio';
   if (file.type.startsWith('image/')) return 'image';
   return 'all';
 }
@@ -296,12 +300,16 @@ function formatResolution(value: string | null) {
   return normalized.toUpperCase();
 }
 
-function formatAssetSpec(item: Pick<AssetLibraryItem, 'resolution' | 'duration' | 'ratio'>) {
-  return [
+function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'duration' | 'ratio' | 'fileSize'>) {
+  const parts = [
     formatResolution(item.resolution),
     item.duration ? `${item.duration}s` : null,
     item.ratio,
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean);
+  if (item.kind === 'audio') {
+    parts.push(formatAssetUploadBytes(item.fileSize || 0) || '音频素材');
+  }
+  return parts.join(' · ');
 }
 
 function aspectRatioFromDimensions(width: number, height: number) {
@@ -499,7 +507,7 @@ function AssetsPageContent() {
     .map((item) => item.referenceImageId as string);
   const manageableProjects = projects.filter((project) => project.can_manage_project);
   const activePreviewAspectRatio = activeItem
-    ? detailMediaAspectRatio || getAssetPreviewAspectRatio(activeItem) || '16 / 10'
+    ? activeItem.kind === 'audio' ? '16 / 6' : detailMediaAspectRatio || getAssetPreviewAspectRatio(activeItem) || '16 / 10'
     : '16 / 10';
   const activePreviewIsPortrait = isPortraitAspectRatio(activePreviewAspectRatio);
 
@@ -1354,7 +1362,7 @@ function AssetsPageContent() {
         <input
           ref={assetUploadInputRef}
           type="file"
-          accept="image/*,video/*"
+          accept="image/*,video/*,audio/*"
           className="asset-library-upload-input"
           onChange={handleAssetUploadFileChange}
         />
@@ -1363,7 +1371,7 @@ function AssetsPageContent() {
           <span>
             {assetUploadFile
               ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`
-              : '支持图片和 2-15 秒视频，上传后自动进入资产列表。'}
+              : '支持图片、2-15 秒视频、2-15 秒音频，音频最大 15MB。'}
           </span>
         </div>
         {assetUploadProgress && (
@@ -1579,7 +1587,12 @@ function AssetsPageContent() {
                       </button>
                     )}
                     <span className="asset-card-media">
-                      {item.thumbnailUrl ? (
+                      {item.kind === 'audio' ? (
+                        <span className="asset-card-audio-placeholder">
+                          <span>音频</span>
+                          <small>{item.fileSize ? formatAssetUploadBytes(item.fileSize) : '参考音频'}</small>
+                        </span>
+                      ) : item.thumbnailUrl ? (
                         <img src={item.thumbnailUrl} alt={item.title} loading="lazy" />
                       ) : (
                         <span className="asset-card-empty">{statusLabel(item.status)}</span>
@@ -1718,7 +1731,7 @@ function AssetsPageContent() {
         <aside className="asset-detail-drawer" aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
-              <span>{activeItem.isEnhanceTask ? '超分视频资产' : activeItem.kind === 'video' ? '视频资产' : '图片资产'}</span>
+              <span>{activeItem.isEnhanceTask ? '超分视频资产' : activeItem.kind === 'video' ? '视频资产' : activeItem.kind === 'audio' ? '音频资产' : '图片资产'}</span>
               <h2>{shortText(activeItem.title, '资产详情', 42)}</h2>
             </div>
             <button type="button" onClick={() => setActiveItem(null)} aria-label="关闭详情">
@@ -1748,6 +1761,11 @@ function AssetsPageContent() {
                   if (ratio) setDetailMediaAspectRatio(ratio);
                 }}
               />
+            ) : activeItem.kind === 'audio' && activeItem.previewUrl ? (
+              <div className="asset-detail-audio-player">
+                <span>音频素材</span>
+                <audio src={activeItem.previewUrl} controls preload="metadata" />
+              </div>
             ) : activeItem.thumbnailUrl ? (
               <img
                 src={activeItem.thumbnailUrl}

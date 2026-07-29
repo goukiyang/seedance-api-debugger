@@ -21,13 +21,18 @@ interface UploadedAssetItem {
   createdAt: string;
 }
 
+export type UploadedAssetSelection = {
+  id: string;
+  type: AssetType;
+};
+
 interface Props {
   open: boolean;
   currentCount: number;
   currentAssetIds: string[];
   onClose: () => void;
   onUploadFile: (file: File, onProgress?: UploadProgressHandler) => Promise<string>;
-  onConfirm: (assetIds: string[]) => Promise<void>;
+  onConfirm: (assetIds: string[], assets?: UploadedAssetSelection[]) => Promise<void>;
 }
 
 type HistoryListResponse = {
@@ -57,6 +62,12 @@ const HISTORY_INVALID_JSON_MESSAGE = '历史素材服务返回了页面内容，
 
 function isSupportedReferenceFile(file: File) {
   return file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/');
+}
+
+function assetTypeFromFile(file: File): AssetType {
+  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('audio/')) return 'audio';
+  return 'image';
 }
 
 function assetTypeLabel(type: AssetType) {
@@ -205,23 +216,30 @@ export function UploadedImagePicker({
     setError(null);
     try {
       const uploadedAssetIds: string[] = [];
+      const uploadedSelections: UploadedAssetSelection[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         setUploadProgress({
           label: files.length > 1 ? `${i + 1}/${files.length} 准备上传` : '准备上传',
           detail: file.name,
         });
-        uploadedAssetIds.push(await onUploadFile(file, (progress) => {
+        const assetId = await onUploadFile(file, (progress) => {
           setUploadProgress(buildPickerUploadProgress(file, i, files.length, progress));
-        }));
+        });
+        uploadedAssetIds.push(assetId);
+        uploadedSelections.push({ id: assetId, type: assetTypeFromFile(file) });
       }
       const attachableIds = uploadedAssetIds.filter((id) => !currentAssetIdSet.has(id)).slice(0, remaining);
       if (attachableIds.length > 0) {
+        const selectionById = new Map(uploadedSelections.map((item) => [item.id, item]));
+        const attachableSelections = attachableIds
+          .map((id) => selectionById.get(id))
+          .filter((item): item is UploadedAssetSelection => Boolean(item));
         setUploadProgress({
           label: '正在加入参考区',
           detail: files.length > 1 ? `${attachableIds.length} 个素材` : files[0].name,
         });
-        await onConfirm(attachableIds);
+        await onConfirm(attachableIds, attachableSelections);
         setSelectedAssetIds([]);
         onClose();
       } else {
@@ -267,7 +285,12 @@ export function UploadedImagePicker({
     setLoading(true);
     setError(null);
     try {
-      await onConfirm(selectedAssetIds);
+      const itemById = new Map(items.map((item) => [item.id, item]));
+      const selectedAssets = selectedAssetIds
+        .map((id) => itemById.get(id))
+        .filter((item): item is UploadedAssetItem => Boolean(item))
+        .map((item) => ({ id: item.id, type: item.type }));
+      await onConfirm(selectedAssetIds, selectedAssets);
       setSelectedAssetIds([]);
       onClose();
     } catch (err) {

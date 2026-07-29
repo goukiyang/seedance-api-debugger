@@ -11,7 +11,7 @@ interface Props {
   frameRole?: FrameRole;
   onRemove: (assetId: string) => void;
   onReplace: (assetId: string) => void;
-  onPreview: (url: string) => void;
+  onPreview: (url: string, type?: WorkspaceAssetItem['type']) => void;
 }
 
 export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameRole, onRemove, onReplace, onPreview }: Props) {
@@ -47,7 +47,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
             setPreviewOpen(true);
             return;
           }
-          onPreview(imageSrc);
+          onPreview(imageSrc, asset.type);
         }}
       >
         {isImage && imageSrc && !imageFailed ? (

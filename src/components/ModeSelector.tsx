@@ -16,6 +16,8 @@ interface Props {
   onChange: (mode: GenerationMode) => void;
   /** 当前素材数量 */
   assetCount: number;
+  /** 当前图片参考数量；首尾帧和智能多帧只按图片参考校验 */
+  imageAssetCount?: number;
 }
 
 const MODE_INFO: Record<GenerationMode, {
@@ -29,10 +31,10 @@ const MODE_INFO: Record<GenerationMode, {
 }> = {
   all_in_one_reference: {
     label: '全能参考',
-    subtitle: '多图作为风格、角色、logo、画面参考',
-    适用场景: '上传多张图片作为整体参考，AI 根据所有参考图生成视频',
-    素材要求: '1 张以上',
-    引用逻辑: '@图片1、@图片2、@图片3... 均作为参考素材',
+    subtitle: '图片、视频和音频作为整体参考',
+    适用场景: '上传图片、视频或音频作为整体参考，AI 根据参考素材生成视频',
+    素材要求: '1 个以上，音频需要配图片或视频',
+    引用逻辑: '图片可用 @图片1、@图片2 引用；视频和音频会自动作为参考素材传入',
     最小素材: 1,
     icon: '🎯',
   },
@@ -40,7 +42,7 @@ const MODE_INFO: Record<GenerationMode, {
     label: '首尾帧',
     subtitle: '指定开头和结尾画面',
     适用场景: '上传首帧和尾帧图，AI 补全中间过渡动画',
-    素材要求: '至少 2 张',
+    素材要求: '至少 2 个图片参考',
     引用逻辑: '@图片1 = 首帧（视频开头），@图片2 = 尾帧（视频结尾）',
     最小素材: 2,
     icon: '↔️',
@@ -49,17 +51,25 @@ const MODE_INFO: Record<GenerationMode, {
     label: '智能多帧',
     subtitle: '多张图按顺序推进',
     适用场景: '上传多张图，AI 按顺序生成图与图之间的过渡视频',
-    素材要求: '2 张以上',
+    素材要求: '至少 3 个图片参考',
     引用逻辑: '@图片1 → @图片2 → @图片3 → ... 按顺序推进',
     最小素材: 3,
     icon: '🎬',
   },
 };
 
-export function ModeSelector({ value, onChange, assetCount }: Props) {
+function getValidationCount(mode: GenerationMode, assetCount: number, imageAssetCount?: number) {
+  if (mode === 'first_last_frame' || mode === 'smart_multi_frame') {
+    return imageAssetCount ?? assetCount;
+  }
+  return assetCount;
+}
+
+export function ModeSelector({ value, onChange, assetCount, imageAssetCount }: Props) {
   const info = MODE_INFO[value];
-  const isValid = assetCount >= info.最小素材;
-  const missing = info.最小素材 - assetCount;
+  const validationCount = getValidationCount(value, assetCount, imageAssetCount);
+  const isValid = validationCount >= info.最小素材;
+  const missing = info.最小素材 - validationCount;
 
   return (
     <div className="space-y-3">
@@ -67,7 +77,7 @@ export function ModeSelector({ value, onChange, assetCount }: Props) {
       <div className="radio-group flex-col gap-2">
         {(Object.keys(MODE_INFO) as GenerationMode[]).map((mode) => {
           const m = MODE_INFO[mode];
-          const meets = assetCount >= m.最小素材;
+          const meets = getValidationCount(mode, assetCount, imageAssetCount) >= m.最小素材;
 
           return (
             <label
@@ -125,8 +135,8 @@ export function ModeSelector({ value, onChange, assetCount }: Props) {
             <>
               <span className="mode-feedback-icon">⚠️</span>
               <span>
-                首尾帧模式至少需要 <strong>2 张</strong> 素材
-                {missing > 0 && <span className="text-red-500 ml-1">（还差 {missing} 张）</span>}
+                首尾帧模式至少需要 <strong>2 个图片参考</strong>
+                {missing > 0 && <span className="text-red-500 ml-1">（还差 {missing} 个）</span>}
               </span>
             </>
           )}
@@ -147,8 +157,8 @@ export function ModeSelector({ value, onChange, assetCount }: Props) {
             <>
               <span className="mode-feedback-icon">⚠️</span>
               <span>
-                智能多帧模式至少需要 <strong>3 张</strong> 素材
-                {missing > 0 && <span className="text-red-500 ml-1">（还差 {missing} 张）</span>}
+                智能多帧模式至少需要 <strong>3 个图片参考</strong>
+                {missing > 0 && <span className="text-red-500 ml-1">（还差 {missing} 个）</span>}
               </span>
             </>
           )}
@@ -160,7 +170,7 @@ export function ModeSelector({ value, onChange, assetCount }: Props) {
           <span className="mode-feedback-icon">✅</span>
           <span>全能参考模式已启用</span>
           <span className="text-gray-400 ml-1">
-            所有上传素材均作为参考图
+            所有上传素材均作为参考素材，音频需配图片或视频一起使用
           </span>
         </div>
       )}

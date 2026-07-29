@@ -10,14 +10,14 @@ import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/vid
 
 export const dynamic = 'force-dynamic';
 
-const ITEM_TYPES = new Set(['all', 'video', 'image', 'reference']);
+const ITEM_TYPES = new Set(['all', 'video', 'image', 'audio', 'reference']);
 const SCOPES = new Set(['history', 'project', 'user']);
 const STATUSES = new Set(['all', 'succeeded', 'running', 'submitted', 'failed', 'cancelled', 'hidden']);
 const SORTS = new Set(['created_desc', 'created_asc', 'completed_desc', 'project', 'user', 'duration']);
 const GROUPS = new Set(['date', 'project', 'user']);
 const ENHANCE_FILTERS = new Set(['none', 'all']);
 
-type LibraryItemKind = 'video' | 'image';
+type LibraryItemKind = 'video' | 'image' | 'audio';
 type LibraryItemSource = 'video_task' | 'asset' | 'reference_image';
 
 type LibraryUser = {
@@ -48,6 +48,7 @@ type LibraryItem = {
   thumbnailUrl: string | null;
   previewUrl: string | null;
   downloadUrl: string | null;
+  fileSize: number | null;
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
@@ -183,6 +184,7 @@ async function serializeTask(task: {
     thumbnailUrl,
     previewUrl: videoUrl,
     downloadUrl: videoUrl,
+    fileSize: null,
     duration: task.duration,
     ratio: task.ratio,
     resolution: task.resolution,
@@ -212,12 +214,13 @@ function serializeAsset(asset: {
   status: string;
   width: number | null;
   height: number | null;
+  file_size: number | null;
   created_at: Date;
   owner_id: string;
 }): LibraryItem {
   return {
     id: `asset:${asset.id}`,
-    kind: asset.type === 'video' ? 'video' : 'image',
+    kind: asset.type === 'audio' ? 'audio' : asset.type === 'video' ? 'video' : 'image',
     source: 'asset',
     taskId: null,
     assetId: asset.id,
@@ -227,6 +230,7 @@ function serializeAsset(asset: {
     thumbnailUrl: asset.thumbnail_url || asset.original_url,
     previewUrl: asset.original_url,
     downloadUrl: asset.original_url,
+    fileSize: asset.file_size ?? null,
     duration: null,
     ratio: asset.width && asset.height ? `${asset.width}:${asset.height}` : null,
     resolution: null,
@@ -271,6 +275,7 @@ function serializeReferenceImage(image: {
     thumbnailUrl: image.thumbnail_url || image.url,
     previewUrl: image.url,
     downloadUrl: image.url,
+    fileSize: null,
     duration: null,
     ratio: null,
     resolution: null,
@@ -447,7 +452,7 @@ async function loadAssetItems(options: {
   if (options.enhance !== 'none') {
     return { items: [] as LibraryItem[], total: 0 };
   }
-  if (options.type !== 'all' && options.type !== 'image' && options.type !== 'video') {
+  if (options.type !== 'all' && options.type !== 'image' && options.type !== 'video' && options.type !== 'audio') {
     return { items: [] as LibraryItem[], total: 0 };
   }
 
@@ -456,7 +461,8 @@ async function loadAssetItems(options: {
   };
   if (options.type === 'image') where.type = 'image';
   else if (options.type === 'video') where.type = 'video';
-  else where.type = { in: ['image', 'video'] };
+  else if (options.type === 'audio') where.type = 'audio';
+  else where.type = { in: ['image', 'video', 'audio'] };
   if (options.role === 'admin' && options.scope === 'user' && options.ownerUserId) {
     where.owner_id = options.ownerUserId;
   } else if (options.role !== 'admin') {
@@ -480,6 +486,7 @@ async function loadAssetItems(options: {
         status: true,
         width: true,
         height: true,
+        file_size: true,
         created_at: true,
         owner_id: true,
       },

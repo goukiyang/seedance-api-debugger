@@ -18,8 +18,8 @@ import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
-import { ReferenceAlbumPicker } from '@/components/ReferenceAlbumPicker';
-import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import { ReferenceAlbumPicker, type ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
+import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
@@ -432,7 +432,7 @@ export function GenerationComposer({
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{ url: string; type?: WorkspaceAssetItem['type'] } | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [showUploadedImagePicker, setShowUploadedImagePicker] = useState(false);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
@@ -494,9 +494,19 @@ export function GenerationComposer({
   // Validation
   // ============================================================================
 
+  const imageReferenceAssets = useMemo(() => {
+    return workspace.assets.filter((asset) => asset.type === 'image');
+  }, [workspace.assets]);
+
   const validation = useMemo(() => {
-    return checkPrompt(prompt, workspace.assets.length, duration);
-  }, [prompt, workspace.assets.length, duration]);
+    return checkPrompt(prompt, imageReferenceAssets.length, duration);
+  }, [prompt, imageReferenceAssets.length, duration]);
+
+  const hasAudioOnlyReferences = useMemo(() => {
+    const hasAudio = workspace.assets.some((asset) => asset.type === 'audio');
+    const hasVisualReference = workspace.assets.some((asset) => asset.type === 'image' || asset.type === 'video');
+    return hasAudio && !hasVisualReference;
+  }, [workspace.assets]);
 
   const submitBlocker = useMemo(() => {
     if (!prompt.trim()) return '请填写提示词';
@@ -508,20 +518,24 @@ export function GenerationComposer({
     const hasFailed = Object.values(workspace.uploadStatuses).some((s) => s === 'failed');
     if (hasFailed) return '存在上传失败的素材，请移除后重试';
 
-    if (generationMode === 'first_last_frame' && workspace.assets.length < 2) {
-      return `首尾帧模式至少需要 2 张素材，当前 ${workspace.assets.length} 张`;
+    if (hasAudioOnlyReferences) {
+      return '音频参考需要配合图片或视频一起使用，请再添加 1 个图片或视频参考素材。';
     }
-    if (generationMode === 'smart_multi_frame' && workspace.assets.length < 3) {
-      return `智能多帧模式至少需要 3 张素材，当前 ${workspace.assets.length} 张`;
+
+    if (generationMode === 'first_last_frame' && imageReferenceAssets.length < 2) {
+      return `首尾帧模式至少需要 2 个图片参考，当前 ${imageReferenceAssets.length} 个`;
+    }
+    if (generationMode === 'smart_multi_frame' && imageReferenceAssets.length < 3) {
+      return `智能多帧模式至少需要 3 个图片参考，当前 ${imageReferenceAssets.length} 个`;
     }
     if (!validation.valid) {
-      return `提示词引用了图${validation.maxMissing}，但当前只有 ${workspace.assets.length} 张素材`;
+      return `提示词引用了图${validation.maxMissing}，但当前只有 ${imageReferenceAssets.length} 个图片参考`;
     }
     if (need1080pApproval && !resolutionApprovalConfirmed) {
       return '1080p 生成需要先确认审批通过。';
     }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.assets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation]);
+  }, [prompt, workspace.uploadStatuses, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, hasAudioOnlyReferences]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -546,7 +560,7 @@ export function GenerationComposer({
     return { message: null, tone: 'ok' as const };
   }, [isSubmitting, mentionNotice, prompt, submitBlocker, submitDisabledReason]);
 
-  const canPressSubmit = !isSubmitting && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
+  const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
 
   const estimatedPoints = useMemo(() => {
     return calculateEstimatedCostClient(resolution, duration);
@@ -571,7 +585,7 @@ export function GenerationComposer({
   }, [validation.referencedFigures]);
 
   const referenceLabels = useMemo(() => {
-    return workspace.assets.map((asset, index) => {
+    return imageReferenceAssets.map((asset, index) => {
       const label = `图片${index + 1}`;
       const titleParts = [
         label,
@@ -583,7 +597,7 @@ export function GenerationComposer({
         title: titleParts.join(' · '),
       };
     });
-  }, [workspace.assets]);
+  }, [imageReferenceAssets]);
 
   const muskReady = muskConfig?.ready === true;
   const moduleBuilderDisabled = moduleBuilderBusy || muskConfigLoading || !muskReady;
@@ -603,7 +617,7 @@ export function GenerationComposer({
         label: '创建主体',
         description: '主体库下一批开放，当前先用图集复用',
       },
-      ...workspace.assets.map((asset, index): PromptMentionCandidate => {
+      ...imageReferenceAssets.map((asset, index): PromptMentionCandidate => {
         const label = `图片${index + 1}`;
         const titleParts = [
           asset.fileName,
@@ -638,7 +652,7 @@ export function GenerationComposer({
         disabled: sourceDisabled,
       },
     ];
-  }, [workspace.assets]);
+  }, [imageReferenceAssets, workspace.assets.length]);
 
   const currentReferenceImageIds = useMemo(() => {
     return workspace.assets
@@ -1079,8 +1093,8 @@ export function GenerationComposer({
     await refreshReferenceAlbums();
   }, [workspace, refreshReferenceAlbums]);
 
-  const handlePreview = useCallback((url: string) => {
-    setPreviewUrl(url);
+  const handlePreview = useCallback((url: string, type?: WorkspaceAssetItem['type']) => {
+    setPreviewMedia({ url, type });
   }, []);
 
   const resolvePendingMentionRequest = useCallback((insertText: string | null) => {
@@ -1097,12 +1111,15 @@ export function GenerationComposer({
     }
   }, [resolvePendingMentionRequest]);
 
-  const addReferenceImagesAndGetLabels = useCallback(async (referenceImageIds: string[]) => {
+  const addReferenceImagesAndGetLabels = useCallback(async (
+    referenceImageIds: string[],
+    selectedAssets: ReferenceAlbumSelection[] = [],
+  ) => {
     const uniqueReferenceImageIds = uniqueStrings(referenceImageIds);
     if (uniqueReferenceImageIds.length === 0) return [];
 
     const existingLabelByReferenceId = new Map<string, string>();
-    workspace.assets.forEach((asset, index) => {
+    imageReferenceAssets.forEach((asset, index) => {
       if (asset.referenceImageId) {
         existingLabelByReferenceId.set(asset.referenceImageId, `图片${index + 1}`);
       }
@@ -1115,8 +1132,13 @@ export function GenerationComposer({
     }
 
     const labelByReferenceId = new Map(existingLabelByReferenceId);
-    idsToAdd.forEach((id, index) => {
-      labelByReferenceId.set(id, `图片${workspace.assets.length + index + 1}`);
+    const selectedTypeByReferenceId = new Map(selectedAssets.map((asset) => [asset.id, asset.type]));
+    const imageIdsToAdd = idsToAdd.filter((id) => {
+      const assetType = selectedTypeByReferenceId.get(id);
+      return assetType == null || assetType === 'image';
+    });
+    imageIdsToAdd.forEach((id, index) => {
+      labelByReferenceId.set(id, `图片${imageReferenceAssets.length + index + 1}`);
     });
 
     const labelsToInsert = uniqueReferenceImageIds
@@ -1128,10 +1150,13 @@ export function GenerationComposer({
     }
     await refreshReferenceAlbums();
     return labelsToInsert;
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, imageReferenceAssets, refreshReferenceAlbums]);
 
-  const handleAddReferenceImages = useCallback(async (referenceImageIds: string[]) => {
-    const labelsToInsert = await addReferenceImagesAndGetLabels(referenceImageIds);
+  const handleAddReferenceImages = useCallback(async (
+    referenceImageIds: string[],
+    selectedAssets?: ReferenceAlbumSelection[],
+  ) => {
+    const labelsToInsert = await addReferenceImagesAndGetLabels(referenceImageIds, selectedAssets);
     const insertText = formatReferenceTokens(labelsToInsert);
     if (pendingMentionRequestRef.current?.source === 'album') {
       resolvePendingMentionRequest(insertText || null);
@@ -1147,12 +1172,15 @@ export function GenerationComposer({
     });
   }, [addReferenceImagesAndGetLabels, prompt, resolvePendingMentionRequest]);
 
-  const addUploadedAssetsAndGetLabels = useCallback(async (assetIds: string[]) => {
+  const addUploadedAssetsAndGetLabels = useCallback(async (
+    assetIds: string[],
+    selectedAssets: UploadedAssetSelection[] = [],
+  ) => {
     const uniqueAssetIds = uniqueStrings(assetIds);
     if (uniqueAssetIds.length === 0) return [];
 
     const existingLabelByAssetId = new Map<string, string>();
-    workspace.assets.forEach((asset, index) => {
+    imageReferenceAssets.forEach((asset, index) => {
       existingLabelByAssetId.set(asset.assetId, `图片${index + 1}`);
     });
 
@@ -1163,8 +1191,13 @@ export function GenerationComposer({
     }
 
     const labelByAssetId = new Map(existingLabelByAssetId);
-    idsToAdd.forEach((id, index) => {
-      labelByAssetId.set(id, `图片${workspace.assets.length + index + 1}`);
+    const selectedTypeByAssetId = new Map(selectedAssets.map((asset) => [asset.id, asset.type]));
+    const imageIdsToAdd = idsToAdd.filter((id) => {
+      const assetType = selectedTypeByAssetId.get(id);
+      return assetType == null || assetType === 'image';
+    });
+    imageIdsToAdd.forEach((id, index) => {
+      labelByAssetId.set(id, `图片${imageReferenceAssets.length + index + 1}`);
     });
     const labelsToInsert = uniqueAssetIds
       .map((id) => labelByAssetId.get(id))
@@ -1175,10 +1208,13 @@ export function GenerationComposer({
       await refreshReferenceAlbums();
     }
     return labelsToInsert;
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, imageReferenceAssets, refreshReferenceAlbums]);
 
-  const handleAddUploadedAssets = useCallback(async (assetIds: string[]) => {
-    const labelsToInsert = await addUploadedAssetsAndGetLabels(assetIds);
+  const handleAddUploadedAssets = useCallback(async (
+    assetIds: string[],
+    selectedAssets?: UploadedAssetSelection[],
+  ) => {
+    const labelsToInsert = await addUploadedAssetsAndGetLabels(assetIds, selectedAssets);
     const insertText = formatReferenceTokens(labelsToInsert);
     if (pendingMentionRequestRef.current?.source === 'history') {
       resolvePendingMentionRequest(insertText || null);
@@ -1729,22 +1765,24 @@ export function GenerationComposer({
       </div>
 
       {/* 预览弹窗 */}
-      {previewUrl && (
+      {previewMedia && (
         <div
           className="composer-preview-backdrop"
-          onClick={() => setPreviewUrl(null)}
+          onClick={() => setPreviewMedia(null)}
         >
           <div className="composer-preview-content" onClick={(e) => e.stopPropagation()}>
             <button
               className="composer-preview-close"
-              onClick={() => setPreviewUrl(null)}
+              onClick={() => setPreviewMedia(null)}
             >
               ×
             </button>
-            {previewUrl.match(/\.(mp4|mov|webm)/i) ? (
-              <video src={previewUrl} controls autoPlay className="composer-preview-media" />
+            {previewMedia.type === 'video' || previewMedia.url.match(/\.(mp4|mov|webm)(\?|$)/i) ? (
+              <video src={previewMedia.url} controls autoPlay className="composer-preview-media" />
+            ) : previewMedia.type === 'audio' || previewMedia.url.match(/\.(mp3|wav|ogg|m4a|aac|flac)(\?|$)/i) ? (
+              <audio src={previewMedia.url} controls autoPlay className="composer-preview-media" />
             ) : (
-              <img src={previewUrl} alt="预览" className="composer-preview-media" />
+              <img src={previewMedia.url} alt="预览" className="composer-preview-media" />
             )}
           </div>
         </div>

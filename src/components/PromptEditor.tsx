@@ -352,7 +352,7 @@ export function PromptEditor({
         onKeyDown={(event) => { handleMentionKeyDown(event, 'main'); }}
         onSelect={(event) => updateMentionState('main', event.currentTarget.value, event.currentTarget.selectionStart)}
         maxLength={MAX_CHARS}
-        placeholder="描述你想生成的视频内容，可输入 @ 选择当前素材或历史图片……"
+        placeholder="描述你想生成的视频内容，可输入 @ 选择当前图片参考或历史素材……"
         rows={4}
       />
       {mentionState?.target === 'main' && (
@@ -371,7 +371,7 @@ export function PromptEditor({
       <div className="composer-prompt-footer">
         <div className="composer-prompt-tools">
           <div className="composer-prompt-hint">
-            即梦规则：用 @图片1 指代当前第 1 张参考图
+            即梦规则：用 @图片1 指代当前第 1 个图片参考；音频会自动作为参考音频传入
           </div>
           <div className="composer-reference-buttons">
             {referenceButtons}
@@ -419,7 +419,7 @@ export function PromptEditor({
                 onKeyDown={(event) => { handleMentionKeyDown(event, 'expanded'); }}
                 onSelect={(event) => updateMentionState('expanded', event.currentTarget.value, event.currentTarget.selectionStart)}
                 maxLength={MAX_CHARS}
-                placeholder="描述你想生成的视频内容，可输入 @ 选择当前素材或历史图片……"
+                placeholder="描述你想生成的视频内容，可输入 @ 选择当前图片参考或历史素材……"
               />
               {mentionState?.target === 'expanded' && (
                 <PromptMentionPopover
