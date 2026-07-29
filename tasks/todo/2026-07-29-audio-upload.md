@@ -84,6 +84,7 @@
   - 完成标准：三个命令通过；失败时先修本任务相关问题，不跳过验证。
 
 - [ ] T8. 真实页面验收
+  - 2026-07-29 执行记录：已生成测试音频 `/tmp/sd2-audio-ref-3s.mp3`；受控浏览器访问 `https://sd2.youdoodesign.com/assets` 被重定向到 `/login`，没有登录态，无法完成真实上传写库验收。本项保持未完成。
   - 测试素材生成命令：`ffmpeg -v error -y -f lavfi -i sine=frequency=440:duration=3 -c:a libmp3lame /tmp/sd2-audio-ref-3s.mp3`。
   - 验收入口：
     - `https://sd2.youdoodesign.com/assets`
@@ -98,6 +99,7 @@
   - 完成标准：真实页面能走完上传、展示、选择、前端拦截和参数检查闭环。
 
 - [ ] T9. Git、部署和上线验证
+  - 2026-07-29 执行记录：代码 commit `b6b1e1fd1a209d380805371b190fce2d7409fec4` 已推送到 `origin/codex/seedream-5-pro-image-provider`；回退 tag `rollback/2026-07-29-before-audio-upload` 已推送并指向上一版 `7ed3708b6fd5bf62d34b6d0d250f384ce5cf3464`；`youdoo-sites build sd2` 生成生产 BUILD_ID `uMEngYVZfdY2OZ8x7RCob`；`restart/status`、本地 `/api/config`、公网 `/api/config`、公网 `/login` 均通过；守护周期后 `runs=9` 未增长。`/assets` 公网 HTML 已命中音频 tab、`audio/*` 上传 accept 和音频上传说明；`/generate` 未登录 307 到登录页，登录后页面验收仍归入 T8。
   - Git 计划：
     - 分支：沿用当前任务分支；如主线策略不适合直接推送，则新建 `codex/audio-upload-unified-chain`。
     - 只暂存本轮相关文件，不使用 `git add .`。

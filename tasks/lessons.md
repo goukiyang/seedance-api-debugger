@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-07-29 - 音频参考不能占用图片引用序号
+
+- 问题/背景：底层已经支持 `reference_audio_urls`，但资产页和生成页没有完整暴露音频入口，用户会感觉音频无法上传或上传后找不到。
+- 诱因/根因：图片、视频、音频共用参考素材工作台，但即梦提示词里的 `@图片1` 只适用于图片；如果按全部素材排序，音频会挤占图片序号，造成提示词校验和真实提交不一致。
+- 当时思路：不新建上传接口、不新增依赖、不改数据库结构；继续复用统一 Asset 上传链路，只在资产库、历史素材选择、图集选择和生成页校验里补齐音频类型。
+- 改动位置：`src/app/assets/page.tsx`、`src/app/api/assets/library/route.ts`、`src/components/GenerationComposer.tsx`、`src/components/UploadedImagePicker.tsx`、`src/components/ReferenceAlbumPicker.tsx`、`src/components/ReferenceThumb.tsx`、`scripts/reference-media-chain-smoke.ts`。
+- 怎么改：资产管理页增加音频 tab、`audio/*` 上传 accept 和音频播放器；生成页只把图片纳入 `@图片` 校验和自动插入，视频/音频只作为参考 URL 传入；只有音频时前端先拦截，不创建任务；音频缩略图点击走 `<audio>` 预览。
+- 验证结果：`npm run test:reference-media`、`npm run lint`、`npm run build`、独立只读审查通过；线上 BUILD_ID `uMEngYVZfdY2OZ8x7RCob` 已发布，公网 `/assets` 命中音频入口文案，健康守护周期后服务稳定。
+- 可复用经验：统一“参考素材”概念时不能把所有素材都塞进同一种提示词引用。UI 文案可以统一为素材，但模型引用、校验和自动插入必须按媒体类型分开。
+- 遗留边界：受控浏览器没有登录态，真实登录后音频上传写库和生成页选择音频仍需要登录态复验；不要把未登录静态页面证据说成完整 E2E 上传通过。
+
 ## 2026-07-27 - 上传链路成功不等于用户看得到进度
 
 - 问题/背景：视频后端上传链路已经真实跑通，但用户继续追问“上传视频是不是没有进度显示”。
