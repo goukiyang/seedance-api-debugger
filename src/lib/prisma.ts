@@ -21,8 +21,12 @@ function configureSqlitePragmas(client: PrismaClient) {
   if (!process.env.DATABASE_URL?.startsWith('file:')) return;
   globalForPrisma.prismaSqlitePragmasStarted = true;
 
-  void client.$queryRawUnsafe('PRAGMA busy_timeout = 5000').catch((error) => {
-    console.warn('[Prisma] Failed to configure SQLite busy_timeout:', error instanceof Error ? error.message : String(error));
+  void (async () => {
+    await client.$queryRawUnsafe('PRAGMA busy_timeout = 10000');
+    await client.$queryRawUnsafe('PRAGMA journal_mode = WAL');
+    await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
+  })().catch((error) => {
+    console.warn('[Prisma] Failed to configure SQLite pragmas:', error instanceof Error ? error.message : String(error));
   });
 }
 

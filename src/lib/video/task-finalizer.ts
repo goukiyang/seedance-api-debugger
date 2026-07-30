@@ -12,6 +12,28 @@ import { ensurePublicVideoDelivery, type PublicVideoDeliveryResult } from './pub
 const TERMINAL_LOCAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 const FINAL_PROVIDER_COST_STATUSES = new Set(['official_confirmed', 'reconciled', 'failed_no_charge']);
 const MAX_LOCAL_CACHE_CONCURRENCY = 3;
+const VIDEO_TASK_UPDATE_KEYS = [
+  'provider_status',
+  'local_status',
+  'raw_status_response',
+  'result_video_url',
+  'result_last_frame_url',
+  'model',
+  'seed',
+  'resolution',
+  'ratio',
+  'duration',
+  'error_message',
+  'error_code',
+  'completed_at',
+  'provider_usage_snapshot',
+  'provider_billing_status',
+  'provider_billing_time',
+  'provider_client_request_id',
+  'provider_cost_currency',
+  'provider_official_amount_micros',
+  'provider_final_amount_micros',
+] as const;
 
 let activeLocalCacheJobs = 0;
 const localCacheWaiters: Array<() => void> = [];
@@ -160,6 +182,26 @@ function addProviderBillingUpdate(
     updateData.provider_official_amount_micros = amountMicros;
     updateData.provider_final_amount_micros = amountMicros;
   }
+}
+
+function comparableValue(value: unknown) {
+  if (value instanceof Date) return value.getTime();
+  return value ?? null;
+}
+
+function hasVideoTaskUpdateChanges(
+  task: VideoTask,
+  updateData: Prisma.VideoTaskUncheckedUpdateInput,
+) {
+  const taskRecord = task as unknown as Record<string, unknown>;
+  const updateRecord = updateData as Record<string, unknown>;
+
+  return VIDEO_TASK_UPDATE_KEYS.some((key) => {
+    if (!Object.prototype.hasOwnProperty.call(updateRecord, key)) return false;
+    const nextValue = updateRecord[key];
+    if (nextValue === undefined) return false;
+    return comparableValue(taskRecord[key]) !== comparableValue(nextValue);
+  });
 }
 
 function buildProviderReportedCharge(statusResult: ProviderBillingStatus) {
@@ -503,6 +545,15 @@ export async function finalizeVideoTaskStatus(
     const isTerminal = isTerminalLocalStatus(statusResult.local_status);
     if (isTerminal && !task.completed_at) {
       updateData.completed_at = new Date();
+    }
+
+    if (!hasVideoTaskUpdateChanges(task, updateData)) {
+      return {
+        task,
+        statusRefreshed: true,
+        terminal: isTerminalLocalStatus(task.local_status),
+        skippedReason: 'unchanged_provider_status',
+      };
     }
 
     await prisma.videoTask.update({

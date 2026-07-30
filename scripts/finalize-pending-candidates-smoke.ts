@@ -81,13 +81,28 @@ assert.match(
 );
 assert.match(
   prismaSource,
-  /\$queryRawUnsafe\('PRAGMA busy_timeout = 5000'\)/,
+  /\$queryRawUnsafe\('PRAGMA busy_timeout = 10000'\)/,
   'SQLite connections must wait briefly instead of failing immediately when another upload or worker holds the database lock',
 );
-assert.doesNotMatch(
+assert.match(
   prismaSource,
-  /journal_mode\\s*=\\s*WAL/i,
-  'WAL migration must remain a separate planned change, not be silently forced during upload repair',
+  /\$queryRawUnsafe\('PRAGMA journal_mode = WAL'\)/,
+  'SQLite must use WAL so page reads are not blocked by background status writes',
+);
+
+const taskFinalizerSource = fs.readFileSync(
+  path.join(process.cwd(), 'src/lib/video/task-finalizer.ts'),
+  'utf8',
+);
+assert.match(
+  taskFinalizerSource,
+  /hasVideoTaskUpdateChanges\(task, updateData\)/,
+  'Provider status polling must skip identical writes instead of locking SQLite on every empty response',
+);
+assert.match(
+  taskFinalizerSource,
+  /skippedReason:\s*'unchanged_provider_status'/,
+  'No-op provider status refreshes must be observable in the finalizer result',
 );
 
 console.log('finalize-pending-candidates smoke passed');
