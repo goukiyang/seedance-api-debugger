@@ -400,6 +400,26 @@ async function cacheAndMaybeThumbnail(
   return { cacheResult, thumbnailResult, publicDeliveryResult };
 }
 
+async function persistProviderStatusError(taskId: string, task: VideoTask, error: unknown) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const latestTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
+  if (!latestTask) return task;
+
+  // 任务一旦已经进入终态，后续成本记录、缓存或缩略图失败不能再把它打回 running。
+  if (isTerminalLocalStatus(latestTask.local_status)) {
+    return latestTask;
+  }
+
+  return prisma.videoTask.update({
+    where: { id: taskId },
+    data: {
+      provider_status: 'unknown',
+      local_status: 'running',
+      raw_status_response: JSON.stringify({ error: errorMessage }),
+    },
+  });
+}
+
 export async function finalizeVideoTaskStatus(
   taskId: string,
   options: FinalizeVideoTaskOptions = {},
@@ -495,7 +515,14 @@ export async function finalizeVideoTaskStatus(
     }
 
     const createdBy = options.createdBy || task.user_id || task.owner_user_id || null;
-    await recordOfficialProviderCharge(taskId, createdBy, statusResult);
+    try {
+      await recordOfficialProviderCharge(taskId, createdBy, statusResult);
+    } catch (error) {
+      console.warn('[VideoFinalizer] Provider charge record skipped:', {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     const updatedTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
     let cacheResult: LocalVideoCacheResult | undefined;
@@ -530,19 +557,7 @@ export async function finalizeVideoTaskStatus(
       error: error instanceof Error ? error.message : String(error),
     });
 
-    const fallbackStatus = isTerminalLocalStatus(task.local_status) ? task.local_status : 'running';
-    await prisma.videoTask.update({
-      where: { id: taskId },
-      data: {
-        provider_status: 'unknown',
-        local_status: fallbackStatus,
-        raw_status_response: JSON.stringify({
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      },
-    });
-
-    const updatedTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
+    const updatedTask = await persistProviderStatusError(taskId, task, error);
     return {
       task: updatedTask || task,
       statusRefreshed: false,
