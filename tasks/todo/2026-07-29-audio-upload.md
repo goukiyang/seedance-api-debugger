@@ -85,6 +85,8 @@
 
 - [ ] T8. 真实页面验收
   - 2026-07-29 执行记录：已生成测试音频 `/tmp/sd2-audio-ref-3s.mp3`；受控浏览器访问 `https://sd2.youdoodesign.com/assets` 被重定向到 `/login`，没有登录态，无法完成真实上传写库验收。本项保持未完成。
+  - 2026-07-30 执行记录：用户确认可用本机飞书登录态后，已在真实页面完成飞书授权登录；`/generate` 刷新后停留在登录态，未再出现“使用飞书登录”。在 `/assets` 上传 `/tmp/sd2-audio-ref-3s.mp3`，页面显示“音频上传成功”，音频分类出现 `sd2-audio-ref-3s.mp3`；后台只读查库确认 `Asset` 写入 `type=audio`、`mime_type=audio/mpeg`、`file_size=24468`、`status=active`，并在 `WorkspaceAsset` 中挂载为 `role=reference_audio`。生成页“添加参考素材”面板内上传同一测试音频后，参考区从 `1/9 个` 变成 `2/9 个`，新增音频参考；未点击“视频生成”，未触发付费生成。
+  - 2026-07-30 剩余缺口：历史素材面板二次读取时浏览器控制器超时，尚未单独证明“从历史列表选择这条音频”；未破坏当前工作台去做“只剩音频再点生成”的真实页面拦截测试；未抓取真实任务创建请求参数。因此本项保持未完成，核心上传和工作区挂载证据已补齐。
   - 测试素材生成命令：`ffmpeg -v error -y -f lavfi -i sine=frequency=440:duration=3 -c:a libmp3lame /tmp/sd2-audio-ref-3s.mp3`。
   - 验收入口：
     - `https://sd2.youdoodesign.com/assets`
