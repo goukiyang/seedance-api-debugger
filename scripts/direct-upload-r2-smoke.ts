@@ -235,7 +235,7 @@ async function assertVideoProxyUploadBehavior() {
     const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
     await assert.rejects(
       () => uploadFileToHistory(video),
-      /仅支持 8MB 以内图片自动回退/,
+      /仅支持 8MB 以内图片或 15MB 以内音频自动回退/,
       'video upload must not silently fall back to raw upload when proxy fails',
     );
     assert.deepEqual(
@@ -274,7 +274,7 @@ async function assertVideoProxyUploadBehavior() {
     const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
     await assert.rejects(
       () => uploadFileToHistory(video),
-      /仅支持 8MB 以内图片自动回退/,
+      /仅支持 8MB 以内图片或 15MB 以内音频自动回退/,
       'video upload must not raw fallback after both browser PUT and proxy fail',
     );
     assert.deepEqual(
@@ -309,7 +309,7 @@ async function assertProxyFailureRawFallbackBehavior() {
     const largeImage = new File([new Uint8Array(8 * 1024 * 1024 + 1)], 'large.png', { type: 'image/png' });
     await assert.rejects(
       () => uploadFileToHistory(largeImage),
-      /仅支持 8MB 以内图片自动回退/,
+      /仅支持 8MB 以内图片或 15MB 以内音频自动回退/,
       'large images must not silently fall back to raw upload',
     );
     assert.deepEqual(
@@ -319,6 +319,20 @@ async function assertProxyFailureRawFallbackBehavior() {
     );
   } finally {
     largeMocks.restore();
+  }
+
+  const audioMocks = installBrowserUploadMocks();
+  try {
+    const audio = new File([new Uint8Array(1024)], 'voice.mp3', { type: 'audio/mpeg' });
+    const asset = await uploadFileToHistory(audio);
+    assert.equal(asset.id, 'raw-fallback-asset', 'small audio must return the raw fallback asset after proxy fails');
+    assert.deepEqual(
+      audioMocks.requests.map((request) => request.url),
+      ['/api/assets/upload-proxy', '/api/assets/upload'],
+      'small audio must try proxy first, then raw fallback',
+    );
+  } finally {
+    audioMocks.restore();
   }
 }
 
@@ -477,8 +491,10 @@ async function run() {
   assert.match(clientSource, /onProgress\?: UploadProgressHandler/, 'client upload helper must accept real upload progress callbacks');
   assert.match(clientSource, /notifyUploadProgress/, 'client upload helper must emit measured progress snapshots');
   assert.match(clientSource, /requestJsonWithUploadProgress<UploadAssetResponse>/, 'same-origin upload requests must use XHR upload progress');
-  assert.match(clientSource, /RAW_FALLBACK_MAX_SIZE_BYTES = 8 \* 1024 \* 1024/, 'raw upload fallback must be size-limited');
-  assert.match(clientSource, /file\.type\.startsWith\('image\/'\)/, 'raw upload fallback must be limited to image uploads');
+  assert.match(clientSource, /IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 8 \* 1024 \* 1024/, 'image raw upload fallback must be size-limited');
+  assert.match(clientSource, /AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 \* 1024 \* 1024/, 'audio raw upload fallback must stay within the existing audio upload limit');
+  assert.match(clientSource, /file\.type\.startsWith\('image\/'\)/, 'raw upload fallback must support bounded image uploads');
+  assert.match(clientSource, /file\.type\.startsWith\('audio\/'\)/, 'raw upload fallback must support bounded audio uploads');
   assert.match(clientSource, /R2 CORS/, 'direct upload failures must tell admins to check R2 CORS');
   assert.match(clientTicketSource, /fetch\('\/api\/assets\/upload-ticket'[\s\S]+catch \(error\)[\s\S]+uploadStageConnectionMessage\('上传票据创建', error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'ticket connection errors must show upload-ticket stage context');
   assert.match(clientTicketSource, /readUploadJsonResponse<DirectUploadTicketResponse>\(ticketRes, '上传票据接口', invalidJsonMessage\)[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'ticket non-json errors must fallback safely or show a clear bounded error');

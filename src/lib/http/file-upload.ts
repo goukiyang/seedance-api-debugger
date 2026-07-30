@@ -11,7 +11,8 @@ export type { UploadProgressHandler, UploadProgressSnapshot };
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const MEDIA_DURATION_MIN_SECONDS = 2;
 const MEDIA_DURATION_MAX_SECONDS = 15;
-const RAW_FALLBACK_MAX_SIZE_BYTES = 8 * 1024 * 1024;
+const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 8 * 1024 * 1024;
+const AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 * 1024 * 1024;
 
 export type UploadedAssetPayload = {
   id?: string;
@@ -135,7 +136,9 @@ async function uploadWithRawFallback(
 }
 
 function canUseRawFallback(file: File) {
-  return file.type.startsWith('image/') && file.size <= RAW_FALLBACK_MAX_SIZE_BYTES;
+  if (file.type.startsWith('image/')) return file.size <= IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES;
+  if (file.type.startsWith('audio/')) return file.size <= AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES;
+  return false;
 }
 
 function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
@@ -143,7 +146,7 @@ function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
 }
 
 function rawFallbackUnavailableMessage(reason: string) {
-  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 8MB 以内图片自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
+  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 8MB 以内图片或 15MB 以内音频自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
 }
 
 async function uploadWithRawFallbackOrThrow(
