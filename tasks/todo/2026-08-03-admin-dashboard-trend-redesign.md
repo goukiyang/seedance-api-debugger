@@ -20,6 +20,9 @@
   - 完成标准：能检查新图表入口、依赖、无旧遮挡标签、明细仍保留完整口径。
 - [x] T5. 构建、部署、线上验证
   - 完成标准：本地类型/ lint / build 通过；`youdoo-sites build sd2` 和 restart 通过；公网 `/admin` 对应新构建可见。
+- [x] T6. 按用户反馈改为双柱状图
+  - 修改文件：`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/globals.css`、`scripts/generation-dashboard-trend-layout-smoke.ts`。
+  - 完成标准：趋势图不再使用金额折线；每个周期并排显示金额柱和视频条数柱；两种柱子顶部都直接显示具体数值。
 
 ## 3. 验收/审查内容
 
@@ -31,8 +34,8 @@
   - 证据来源：真实页面截图或 DOM 检查、相关源码；环境支持时交给固定审核线程 `审核001 - sd2 固定只读审查`。
 - [x] R2. 只读数据口径审查
   - 检查对象：趋势 bucket 渲染逻辑、summary、tooltip、周期明细。
-  - 通过标准：生成次数、生成秒数、官方额度、待官方确认、零值都没有被删除或伪造。
-  - 证据来源：smoke 脚本、源码检查、页面实际文本。已通过 `npx tsx scripts/generation-dashboard-trend-layout-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint -- --file src/app/admin/AdminGenerationDashboardClient.tsx`、`npm run build`。
+  - 通过标准：生成次数、生成秒数、官方额度、待官方确认、零值都没有被删除或伪造；双柱状图顶部能直接看到金额和视频条数。
+  - 证据来源：smoke 脚本、源码检查、页面实际文本。已通过 `npx tsx scripts/generation-dashboard-trend-layout-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint -- --file src/app/admin/AdminGenerationDashboardClient.tsx`、`npm run build`；双柱图二次调整后再次通过 smoke。
 - [x] R3. 只读上线审查
   - 检查对象：生产构建 ID、公网资源、`/api/config`、`/login`、`sd2` 服务状态。
   - 通过标准：线上加载的是本次新构建，健康守护周期后服务没有反复重启。

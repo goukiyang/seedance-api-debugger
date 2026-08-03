@@ -7,7 +7,7 @@ import {
   Bar,
   CartesianGrid,
   ComposedChart,
-  Line,
+  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -75,8 +75,8 @@ const compactFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 1,
   notation: 'compact',
 });
-const TREND_CHART_HEIGHT = 250;
-const TREND_BUCKET_WIDTH = 86;
+const TREND_CHART_HEIGHT = 280;
+const TREND_BUCKET_WIDTH = 112;
 
 function formatCurrencyTotals(totals: DashboardCurrencyTotal[], fallback = '待官方确认') {
   if (!totals.length) return fallback;
@@ -267,6 +267,19 @@ function formatTrendBucketCost(bucket: DashboardTrendBucket) {
   return bucket.task_count > 0 ? '待官方确认' : '$0.00';
 }
 
+function formatTrendCostBarLabel(bucket: DashboardTrendBucket) {
+  if (!bucket.official_costs.length) return bucket.task_count > 0 ? '待确认' : '$0.00';
+  return bucket.official_costs
+    .map((total) => {
+      const amount = total.amount_micros / 1_000_000;
+      const currency = total.currency.toUpperCase();
+      if (currency === 'USD') return `$${amount.toFixed(2)}`;
+      if (currency === 'CNY') return `¥${amount.toFixed(2)}`;
+      return `${amount.toFixed(2)} ${currency}`;
+    })
+    .join(' / ');
+}
+
 function trendBucketClass(bucket: DashboardTrendBucket) {
   if (bucket.official_costs.length) return 'has-cost';
   if (bucket.task_count > 0) return 'needs-cost';
@@ -286,7 +299,7 @@ function formatCostAxis(value: number) {
 }
 
 function trendChartWidth(bucketCount: number) {
-  return Math.max(620, Math.max(1, bucketCount) * TREND_BUCKET_WIDTH + 128);
+  return Math.max(720, Math.max(1, bucketCount) * TREND_BUCKET_WIDTH + 156);
 }
 
 type TrendChartPoint = {
@@ -298,6 +311,7 @@ type TrendChartPoint = {
   officialCostMicros: number;
   officialCostAmount: number;
   officialCostLabel: string;
+  officialCostBarLabel: string;
   stateLabel: string;
   className: string;
 };
@@ -313,6 +327,7 @@ function toTrendChartPoint(bucket: DashboardTrendBucket): TrendChartPoint {
     officialCostMicros,
     officialCostAmount: officialCostMicros / 1_000_000,
     officialCostLabel: formatTrendBucketCost(bucket),
+    officialCostBarLabel: formatTrendCostBarLabel(bucket),
     stateLabel: bucket.official_costs.length ? '官方已确认' : bucket.task_count > 0 ? '待官方确认' : '暂无生成',
     className: trendBucketClass(bucket),
   };
@@ -331,8 +346,8 @@ function TrendTooltip({ active, payload }: { active?: boolean; payload?: TrendTo
       <strong>{point.label}</strong>
       <dl>
         <div>
-          <dt>生成次数</dt>
-          <dd>{formatInteger(point.taskCount)} 次</dd>
+          <dt>视频条数</dt>
+          <dd>{formatInteger(point.taskCount)} 条</dd>
         </div>
         <div>
           <dt>生成秒数</dt>
@@ -348,18 +363,53 @@ function TrendTooltip({ active, payload }: { active?: boolean; payload?: TrendTo
   );
 }
 
+type TrendBarLabelProps = {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  index?: number;
+};
+
+function numericSvgValue(value: number | string | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function renderTrendBarValueLabel(
+  props: TrendBarLabelProps,
+  chartData: TrendChartPoint[],
+  kind: 'cost' | 'count',
+) {
+  const point = typeof props.index === 'number' ? chartData[props.index] : null;
+  const x = numericSvgValue(props.x);
+  const y = numericSvgValue(props.y);
+  const width = numericSvgValue(props.width);
+  if (!point || x === null || y === null || width === null) return null;
+
+  const label = kind === 'count' ? `${formatInteger(point.taskCount)} 条` : point.officialCostBarLabel;
+  return (
+    <text
+      className={`admin-dashboard-trend-value-label is-${kind}`}
+      textAnchor="middle"
+      x={x + width / 2}
+      y={Math.max(13, y - 8)}
+    >
+      {label}
+    </text>
+  );
+}
+
 function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
   const chartData = useMemo(() => buckets.map(toTrendChartPoint), [buckets]);
   const chartWidth = trendChartWidth(chartData.length);
-  const hasCost = chartData.some((bucket) => bucket.officialCostMicros > 0);
 
   return (
     <div className="admin-dashboard-trend-chart">
       <div className="admin-dashboard-trend-chart-head">
         <div>
           <span>趋势图</span>
-          <strong>生成次数与官方额度</strong>
-          <small>柱形看生成次数，橙线看官方额度；秒数保留在摘要、悬停明细和周期卡片里。</small>
+          <strong>官方额度与视频条数</strong>
+          <small>橙色柱看金额，蓝色柱看视频条数；每根柱顶直接显示具体数值。</small>
         </div>
         <span>悬停查看完整数值</span>
       </div>
@@ -368,13 +418,15 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
           className="admin-dashboard-trend-recharts"
           style={{ minWidth: chartWidth }}
           role="img"
-          aria-label={`生成次数和官方额度趋势图，共 ${chartData.length} 个时间桶，生成秒数见周期明细`}
+          aria-label={`官方额度和视频条数双柱状趋势图，共 ${chartData.length} 个时间桶，生成秒数见周期明细`}
         >
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={TREND_CHART_HEIGHT}>
               <ComposedChart
                 data={chartData}
-                margin={{ top: 16, right: hasCost ? 12 : 4, bottom: 2, left: 0 }}
+                barCategoryGap={18}
+                barGap={6}
+                margin={{ top: 38, right: 10, bottom: 2, left: 0 }}
                 accessibilityLayer
               >
                 <CartesianGrid stroke="#dce5f2" strokeDasharray="3 3" vertical={false} />
@@ -398,7 +450,6 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                 />
                 <YAxis
                   axisLine={false}
-                  hide={!hasCost}
                   orientation="right"
                   tick={{ fill: '#92400e', fontSize: 12, fontWeight: 700 }}
                   tickFormatter={formatCostAxis}
@@ -408,25 +459,25 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                 />
                 <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }} />
                 <Bar
+                  dataKey="officialCostAmount"
+                  fill="var(--admin-dashboard-chart-cost)"
+                  maxBarSize={34}
+                  name="官方额度"
+                  radius={[6, 6, 0, 0]}
+                  yAxisId="cost"
+                >
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, chartData, 'cost')} />
+                </Bar>
+                <Bar
                   dataKey="taskCount"
                   fill="var(--admin-dashboard-chart-count)"
-                  maxBarSize={38}
-                  name="生成次数"
+                  maxBarSize={34}
+                  name="视频条数"
                   radius={[6, 6, 0, 0]}
                   yAxisId="count"
-                />
-                {hasCost && (
-                  <Line
-                    activeDot={{ r: 5 }}
-                    dataKey="officialCostAmount"
-                    dot={{ r: 3.4, strokeWidth: 2 }}
-                    name="官方额度"
-                    stroke="var(--admin-dashboard-chart-cost)"
-                    strokeWidth={2.4}
-                    type="monotone"
-                    yAxisId="cost"
-                  />
-                )}
+                >
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, chartData, 'count')} />
+                </Bar>
               </ComposedChart>
             </ResponsiveContainer>
           ) : (
@@ -601,13 +652,13 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           </div>
         </div>
         <div className="admin-dashboard-trend-summary">
-          <span><strong>{formatInteger(trendSummary.taskCount)}</strong>生成次数</span>
+          <span><strong>{formatInteger(trendSummary.taskCount)}</strong>视频条数</span>
           <span><strong>{formatSeconds(trendSummary.durationSeconds)}</strong>生成秒数</span>
           <span><strong>{formatCurrencyTotals(trendSummary.officialCosts, '待官方确认')}</strong>官方额度</span>
         </div>
         <div className="admin-dashboard-trend-legend" aria-label="趋势图例">
-          <span className="is-count">生成次数</span>
           <span className="is-cost">官方额度</span>
+          <span className="is-count">视频条数</span>
           <span className="is-seconds">明细含生成秒数</span>
         </div>
         <TrendChart buckets={trendBuckets} />

@@ -21,10 +21,12 @@ const requiredClientMarkers = [
   '<ResponsiveContainer',
   '<ComposedChart',
   '<Bar',
-  '<Line',
+  '<LabelList',
   '<Tooltip',
   'function TrendTooltip',
+  'renderTrendBarValueLabel',
   '官方额度',
+  '视频条数',
   '生成秒数',
   '周期明细',
   '待官方确认',
@@ -35,6 +37,7 @@ const requiredCssMarkers = [
   '.admin-dashboard-trend-recharts',
   '.admin-dashboard-trend-tooltip',
   '.admin-dashboard-trend-chart-head',
+  '.admin-dashboard-trend-value-label',
   '.admin-dashboard-trend-day em',
   'overflow-x: auto;',
   'max-height: 280px;',
@@ -47,6 +50,8 @@ const forbiddenMarkers = [
   'admin-dashboard-trend-node-label',
   'trendCostLabelY',
   'trendPolyline',
+  '<Line',
+  '橙线看',
 ];
 
 assert(pkg.dependencies?.recharts, 'package.json 缺少 recharts 依赖');
