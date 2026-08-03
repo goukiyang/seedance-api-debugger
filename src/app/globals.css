@@ -15284,6 +15284,8 @@ body.compare-fullscreen-open {
 
 .admin-dashboard-trend-panel {
   overflow: hidden;
+  --admin-dashboard-chart-count: #6ea3f8;
+  --admin-dashboard-chart-cost: #f59e0b;
 }
 
 .admin-dashboard-trend-summary {
@@ -15354,119 +15356,146 @@ body.compare-fullscreen-open {
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  min-height: 300px;
-  padding: 12px 12px 10px;
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px;
+}
+
+.admin-dashboard-trend-chart-head {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.admin-dashboard-trend-chart-head div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-dashboard-trend-chart-head span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.admin-dashboard-trend-chart-head > span {
+  background: #eef6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  color: #1d4ed8;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
+.admin-dashboard-trend-chart-head strong {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.admin-dashboard-trend-chart-head small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .admin-dashboard-trend-viewport {
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 2px 0 4px;
+  padding: 8px 8px 2px;
 }
 
-.admin-dashboard-trend-plot {
-  display: block;
-  height: auto;
-  max-width: none;
-  min-width: 100%;
-  overflow: visible;
-  width: auto;
+.admin-dashboard-trend-recharts {
+  height: 250px;
+  min-width: 620px;
 }
 
-.admin-dashboard-trend-gridline {
-  stroke: #dce5f2;
-  stroke-dasharray: 2 2;
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
+.admin-dashboard-trend-recharts .recharts-wrapper {
+  outline: none;
 }
 
-.admin-dashboard-trend-bar {
-  fill: #60a5fa;
-  opacity: 0.9;
+.admin-dashboard-trend-recharts .recharts-cartesian-axis-tick-value {
+  letter-spacing: 0;
 }
 
-.admin-dashboard-trend-bar.is-empty {
-  fill: #cbd5e1;
-  opacity: 0.55;
+.admin-dashboard-trend-recharts .recharts-bar-rectangle path {
+  transition: opacity 0.15s ease;
 }
 
-.admin-dashboard-trend-line {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.4;
-  vector-effect: non-scaling-stroke;
+.admin-dashboard-trend-recharts .recharts-bar-rectangle:hover path {
+  opacity: 0.84;
 }
 
-.admin-dashboard-trend-line.is-seconds {
-  stroke: #16a34a;
-}
-
-.admin-dashboard-trend-line.is-cost {
-  stroke: #f59e0b;
-}
-
-.admin-dashboard-trend-dot {
-  fill: #fbfcff;
-  stroke-width: 2.1;
-  vector-effect: non-scaling-stroke;
-}
-
-.admin-dashboard-trend-dot.is-seconds {
-  stroke: #16a34a;
-}
-
-.admin-dashboard-trend-dot.is-cost {
-  stroke: #f59e0b;
-}
-
-.admin-dashboard-trend-label {
-  fill: #0f172a;
-  font-size: 8px;
-  font-weight: 800;
-  paint-order: stroke;
-  stroke: #fbfcff;
-  stroke-width: 2.4;
-}
-
-.admin-dashboard-trend-count-label,
-.admin-dashboard-trend-node-label {
-  fill: #0f172a;
-  font-size: 9px;
-  font-weight: 900;
-  paint-order: stroke;
-  stroke: #fbfcff;
-  stroke-linejoin: round;
-  stroke-width: 3;
-}
-
-.admin-dashboard-trend-node-label.is-cost {
-  fill: #92400e;
-}
-
-.admin-dashboard-trend-axis {
-  align-items: center;
-  color: #64748b;
-  box-sizing: border-box;
+.admin-dashboard-trend-tooltip {
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.22);
+  color: #f8fafc;
   display: grid;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.2;
-  min-width: 100%;
-  min-height: 26px;
+  gap: 8px;
+  min-width: 206px;
+  padding: 10px 12px;
 }
 
-.admin-dashboard-trend-axis span {
-  min-width: 0;
-  text-align: center;
+.admin-dashboard-trend-tooltip strong {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.admin-dashboard-trend-tooltip dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.admin-dashboard-trend-tooltip dl div {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.admin-dashboard-trend-tooltip dt {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-dashboard-trend-tooltip dd {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  margin: 0;
+  max-width: 150px;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.admin-dashboard-trend-tooltip > span {
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 800;
+  padding-top: 7px;
 }
 
 .admin-dashboard-trend-daily {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-  margin-top: 12px;
-  max-height: 260px;
+  grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+  max-height: 280px;
   overflow: auto;
   padding: 2px 2px 4px;
 }
@@ -15477,7 +15506,7 @@ body.compare-fullscreen-open {
   border-radius: 8px;
   display: grid;
   gap: 3px;
-  min-height: 70px;
+  min-height: 86px;
   padding: 9px 10px;
 }
 
@@ -15501,6 +15530,14 @@ body.compare-fullscreen-open {
   font-weight: 700;
 }
 
+.admin-dashboard-trend-day em {
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
 .admin-dashboard-trend-day.has-cost {
   background: #fff8ed;
   border-color: #fed7aa;
@@ -15516,7 +15553,8 @@ body.compare-fullscreen-open {
 }
 
 .admin-dashboard-trend-day.is-empty strong,
-.admin-dashboard-trend-day.is-empty small {
+.admin-dashboard-trend-day.is-empty small,
+.admin-dashboard-trend-day.is-empty em {
   color: #94a3b8;
 }
 
@@ -16039,13 +16077,12 @@ body.compare-fullscreen-open {
     grid-template-columns: 1fr;
   }
 
-  .admin-dashboard-trend-chart {
-    min-height: 250px;
+  .admin-dashboard-trend-chart-head {
+    flex-direction: column;
   }
 
-  .admin-dashboard-trend-plot,
-  .admin-dashboard-trend-axis {
-    min-width: 100%;
+  .admin-dashboard-trend-chart-head > span {
+    width: fit-content;
   }
 
   .admin-dashboard-quick-links {

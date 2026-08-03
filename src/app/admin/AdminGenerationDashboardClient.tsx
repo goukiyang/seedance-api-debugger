@@ -4,6 +4,16 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Download, RefreshCcw } from 'lucide-react';
 import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
 } from '@/lib/costs/currency';
@@ -61,12 +71,12 @@ const trendGranularityOptions: Array<{ key: DashboardTrendGranularity; label: st
 ];
 
 const integerFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
-const TREND_CHART_HEIGHT = 132;
-const TREND_CHART_LEFT = 18;
-const TREND_CHART_RIGHT_PADDING = 28;
-const TREND_CHART_TOP = 22;
-const TREND_CHART_BOTTOM = 96;
-const TREND_BUCKET_WIDTH = 64;
+const compactFormatter = new Intl.NumberFormat('zh-CN', {
+  maximumFractionDigits: 1,
+  notation: 'compact',
+});
+const TREND_CHART_HEIGHT = 250;
+const TREND_BUCKET_WIDTH = 86;
 
 function formatCurrencyTotals(totals: DashboardCurrencyTotal[], fallback = '待官方确认') {
   if (!totals.length) return fallback;
@@ -252,16 +262,6 @@ function mergeTrendOfficialCosts(buckets: DashboardTrendBucket[]) {
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
-function formatTrendCostShort(bucket: DashboardTrendBucket) {
-  if (!bucket.official_costs.length) return '';
-  const [first] = bucket.official_costs;
-  const amount = first.amount_micros / 1_000_000;
-  const currency = first.currency.toUpperCase();
-  if (currency === 'USD') return `$${amount.toFixed(2)}`;
-  if (currency === 'CNY') return `¥${amount.toFixed(2)}`;
-  return `${amount.toFixed(2)} ${currency}`;
-}
-
 function formatTrendBucketCost(bucket: DashboardTrendBucket) {
   if (bucket.official_costs.length) return formatCurrencyTotals(bucket.official_costs, '$0.00');
   return bucket.task_count > 0 ? '待官方确认' : '$0.00';
@@ -273,137 +273,174 @@ function trendBucketClass(bucket: DashboardTrendBucket) {
   return 'is-empty';
 }
 
+function formatCompactNumber(value: number) {
+  if (Math.abs(value) < 1000) return formatInteger(value);
+  return compactFormatter.format(value);
+}
+
+function formatCostAxis(value: number) {
+  if (value === 0) return '$0';
+  if (Math.abs(value) >= 1000) return `$${compactFormatter.format(value)}`;
+  if (Math.abs(value) >= 10) return `$${Math.round(value)}`;
+  return `$${value.toFixed(1)}`;
+}
+
 function trendChartWidth(bucketCount: number) {
-  return TREND_CHART_LEFT + TREND_CHART_RIGHT_PADDING + Math.max(1, bucketCount) * TREND_BUCKET_WIDTH;
+  return Math.max(620, Math.max(1, bucketCount) * TREND_BUCKET_WIDTH + 128);
 }
 
-function trendChartRight(chartWidth: number) {
-  return chartWidth - TREND_CHART_RIGHT_PADDING;
+type TrendChartPoint = {
+  key: string;
+  label: string;
+  taskCount: number;
+  durationSeconds: number;
+  durationLabel: string;
+  officialCostMicros: number;
+  officialCostAmount: number;
+  officialCostLabel: string;
+  stateLabel: string;
+  className: string;
+};
+
+function toTrendChartPoint(bucket: DashboardTrendBucket): TrendChartPoint {
+  const officialCostMicros = trendOfficialMicros(bucket);
+  return {
+    key: bucket.key,
+    label: bucket.label,
+    taskCount: bucket.task_count,
+    durationSeconds: bucket.duration_seconds,
+    durationLabel: formatSeconds(bucket.duration_seconds),
+    officialCostMicros,
+    officialCostAmount: officialCostMicros / 1_000_000,
+    officialCostLabel: formatTrendBucketCost(bucket),
+    stateLabel: bucket.official_costs.length ? '官方已确认' : bucket.task_count > 0 ? '待官方确认' : '暂无生成',
+    className: trendBucketClass(bucket),
+  };
 }
 
-function trendX(index: number) {
-  return TREND_CHART_LEFT + index * TREND_BUCKET_WIDTH + TREND_BUCKET_WIDTH / 2;
-}
+type TrendTooltipPayloadItem = {
+  payload?: TrendChartPoint;
+};
 
-function trendY(value: number, max: number) {
-  if (max <= 0) return TREND_CHART_BOTTOM;
-  return TREND_CHART_BOTTOM - (value / max) * (TREND_CHART_BOTTOM - TREND_CHART_TOP);
-}
+function TrendTooltip({ active, payload }: { active?: boolean; payload?: TrendTooltipPayloadItem[] }) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) return null;
 
-function trendPolyline(buckets: DashboardTrendBucket[], value: (bucket: DashboardTrendBucket) => number, max: number) {
-  return buckets.map((bucket, index) => `${trendX(index)},${trendY(value(bucket), max)}`).join(' ');
-}
-
-function trendCostLabelY(y: number) {
-  return y < TREND_CHART_TOP + 18 ? y + 15 : y - 7;
+  return (
+    <div className="admin-dashboard-trend-tooltip">
+      <strong>{point.label}</strong>
+      <dl>
+        <div>
+          <dt>生成次数</dt>
+          <dd>{formatInteger(point.taskCount)} 次</dd>
+        </div>
+        <div>
+          <dt>生成秒数</dt>
+          <dd>{point.durationLabel}</dd>
+        </div>
+        <div>
+          <dt>官方额度</dt>
+          <dd>{point.officialCostLabel}</dd>
+        </div>
+      </dl>
+      <span>{point.stateLabel}</span>
+    </div>
+  );
 }
 
 function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
-  const countMax = Math.max(1, ...buckets.map((bucket) => bucket.task_count));
-  const secondsMax = Math.max(1, ...buckets.map((bucket) => bucket.duration_seconds));
-  const costMax = Math.max(1, ...buckets.map(trendOfficialMicros));
-  const chartWidth = trendChartWidth(buckets.length);
-  const chartRight = trendChartRight(chartWidth);
-  const barWidth = 26;
-  const hasCost = buckets.some((bucket) => trendOfficialMicros(bucket) > 0);
-  const hasSeconds = buckets.some((bucket) => bucket.duration_seconds > 0);
+  const chartData = useMemo(() => buckets.map(toTrendChartPoint), [buckets]);
+  const chartWidth = trendChartWidth(chartData.length);
+  const hasCost = chartData.some((bucket) => bucket.officialCostMicros > 0);
 
   return (
     <div className="admin-dashboard-trend-chart">
+      <div className="admin-dashboard-trend-chart-head">
+        <div>
+          <span>趋势图</span>
+          <strong>生成次数与官方额度</strong>
+          <small>柱形看生成次数，橙线看官方额度；秒数保留在摘要、悬停明细和周期卡片里。</small>
+        </div>
+        <span>悬停查看完整数值</span>
+      </div>
       <div className="admin-dashboard-trend-viewport">
-        <svg
-          className="admin-dashboard-trend-plot"
-          width={chartWidth}
-          height={TREND_CHART_HEIGHT}
-          viewBox={`0 0 ${chartWidth} ${TREND_CHART_HEIGHT}`}
-          role="img"
-          aria-label={`生成次数、生成秒数和官方额度趋势图，共 ${buckets.length} 个时间桶`}
-        >
-          {[TREND_CHART_TOP, 40, 58, 76, TREND_CHART_BOTTOM].map((y) => (
-            <line className="admin-dashboard-trend-gridline" key={y} x1={TREND_CHART_LEFT} x2={chartRight} y1={y} y2={y} />
-          ))}
-          {buckets.map((bucket, index) => {
-            const x = trendX(index);
-            const valueY = trendY(bucket.task_count, countMax);
-            const barHeight = bucket.task_count > 0 ? TREND_CHART_BOTTOM - valueY : 2;
-            const barY = bucket.task_count > 0 ? valueY : TREND_CHART_BOTTOM - barHeight;
-            return (
-              <g key={bucket.key}>
-                <rect
-                  className={`admin-dashboard-trend-bar ${bucket.task_count > 0 ? '' : 'is-empty'}`}
-                  x={x - barWidth / 2}
-                  y={barY}
-                  width={barWidth}
-                  height={barHeight}
-                  rx="3"
-                >
-                  <title>{bucket.label}：{bucket.task_count} 次，{formatSeconds(bucket.duration_seconds)}，{formatTrendBucketCost(bucket)}</title>
-                </rect>
-                <text className="admin-dashboard-trend-count-label" x={x} y={Math.max(12, barY - 5)} textAnchor="middle">
-                  {formatInteger(bucket.task_count)}
-                </text>
-              </g>
-            );
-          })}
-          {hasSeconds && (
-            <polyline
-              className="admin-dashboard-trend-line is-seconds"
-              points={trendPolyline(buckets, (bucket) => bucket.duration_seconds, secondsMax)}
-            />
-          )}
-          {hasCost && (
-            <polyline
-              className="admin-dashboard-trend-line is-cost"
-              points={trendPolyline(buckets, trendOfficialMicros, costMax)}
-            />
-          )}
-          {buckets.map((bucket, index) => {
-            const x = trendX(index);
-            const costMicros = trendOfficialMicros(bucket);
-            const costY = trendY(costMicros, costMax);
-            const secondsY = trendY(bucket.duration_seconds, secondsMax);
-            return (
-              <g key={`${bucket.key}-points`}>
-                {hasSeconds && (
-                  <circle className="admin-dashboard-trend-dot is-seconds" cx={x} cy={secondsY} r="3.2">
-                    <title>{bucket.label}：{formatSeconds(bucket.duration_seconds)}</title>
-                  </circle>
-                )}
-                {hasCost && (
-                  <circle className="admin-dashboard-trend-dot is-cost" cx={x} cy={costY} r="3.2">
-                    <title>{bucket.label}：{formatTrendBucketCost(bucket)}</title>
-                  </circle>
-                )}
-                {hasCost && costMicros > 0 && (
-                  <text className="admin-dashboard-trend-node-label is-cost" x={x} y={trendCostLabelY(costY)} textAnchor="middle">
-                    {formatTrendCostShort(bucket)}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
         <div
-          className="admin-dashboard-trend-axis"
-          aria-hidden="true"
-          style={{
-            width: chartWidth,
-            gridTemplateColumns: `repeat(${Math.max(1, buckets.length)}, ${TREND_BUCKET_WIDTH}px)`,
-            paddingLeft: TREND_CHART_LEFT,
-            paddingRight: TREND_CHART_RIGHT_PADDING,
-          }}
+          className="admin-dashboard-trend-recharts"
+          style={{ minWidth: chartWidth }}
+          role="img"
+          aria-label={`生成次数和官方额度趋势图，共 ${chartData.length} 个时间桶，生成秒数见周期明细`}
         >
-          {buckets.map((bucket) => (
-            <span key={bucket.key}>{bucket.label}</span>
-          ))}
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={TREND_CHART_HEIGHT}>
+              <ComposedChart
+                data={chartData}
+                margin={{ top: 16, right: hasCost ? 12 : 4, bottom: 2, left: 0 }}
+                accessibilityLayer
+              >
+                <CartesianGrid stroke="#dce5f2" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  axisLine={false}
+                  dataKey="label"
+                  interval={0}
+                  minTickGap={8}
+                  tick={{ fill: '#64748b', fontSize: 12, fontWeight: 700 }}
+                  tickLine={false}
+                  tickMargin={12}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  axisLine={false}
+                  tick={{ fill: '#64748b', fontSize: 12, fontWeight: 700 }}
+                  tickFormatter={formatCompactNumber}
+                  tickLine={false}
+                  width={46}
+                  yAxisId="count"
+                />
+                <YAxis
+                  axisLine={false}
+                  hide={!hasCost}
+                  orientation="right"
+                  tick={{ fill: '#92400e', fontSize: 12, fontWeight: 700 }}
+                  tickFormatter={formatCostAxis}
+                  tickLine={false}
+                  width={58}
+                  yAxisId="cost"
+                />
+                <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }} />
+                <Bar
+                  dataKey="taskCount"
+                  fill="var(--admin-dashboard-chart-count)"
+                  maxBarSize={38}
+                  name="生成次数"
+                  radius={[6, 6, 0, 0]}
+                  yAxisId="count"
+                />
+                {hasCost && (
+                  <Line
+                    activeDot={{ r: 5 }}
+                    dataKey="officialCostAmount"
+                    dot={{ r: 3.4, strokeWidth: 2 }}
+                    name="官方额度"
+                    stroke="var(--admin-dashboard-chart-cost)"
+                    strokeWidth={2.4}
+                    type="monotone"
+                    yAxisId="cost"
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="admin-dashboard-empty">当前口径暂无趋势数据。</p>
+          )}
         </div>
       </div>
-      <div className="admin-dashboard-trend-daily" aria-label="每日金额明细">
-        {buckets.map((bucket) => (
-          <div className={`admin-dashboard-trend-day ${trendBucketClass(bucket)}`} key={`${bucket.key}-daily`}>
+      <div className="admin-dashboard-trend-daily" aria-label="周期明细">
+        {chartData.map((bucket) => (
+          <div className={`admin-dashboard-trend-day ${bucket.className}`} key={`${bucket.key}-daily`}>
             <span>{bucket.label}</span>
-            <strong>{formatTrendBucketCost(bucket)}</strong>
-            <small>{formatInteger(bucket.task_count)} 次 · {formatSeconds(bucket.duration_seconds)}</small>
+            <strong>{bucket.officialCostLabel}</strong>
+            <small>{formatInteger(bucket.taskCount)} 次 · {bucket.durationLabel}</small>
+            <em>{bucket.stateLabel}</em>
           </div>
         ))}
       </div>
@@ -570,8 +607,8 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
         </div>
         <div className="admin-dashboard-trend-legend" aria-label="趋势图例">
           <span className="is-count">生成次数</span>
-          <span className="is-seconds">生成秒数</span>
           <span className="is-cost">官方额度</span>
+          <span className="is-seconds">明细含生成秒数</span>
         </div>
         <TrendChart buckets={trendBuckets} />
       </section>
