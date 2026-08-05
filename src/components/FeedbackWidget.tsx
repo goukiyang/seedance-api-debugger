@@ -8,6 +8,7 @@ type UploadItem = {
   id: string;
   file: File;
   previewUrl: string;
+  assetId?: string;
   imageUrl?: string;
   uploading: boolean;
   error?: string;
@@ -62,7 +63,7 @@ export default function FeedbackWidget() {
       }
       setUploads((current) => current.map((upload) => (
         upload.id === item.id
-          ? { ...upload, uploading: false, imageUrl, error: asset.warning || undefined }
+          ? { ...upload, uploading: false, assetId: asset.id, imageUrl, error: asset.warning || undefined }
           : upload
       )));
     } catch (err) {
@@ -121,6 +122,7 @@ export default function FeedbackWidget() {
     setError('');
     setMessage('');
     const imageUrls = uploads.filter((item) => item.imageUrl).map((item) => item.imageUrl as string);
+    const uploadedAssetIds = uploads.filter((item) => item.assetId).map((item) => item.assetId as string);
     if (!content.trim()) {
       setError('请输入反馈内容');
       return;
@@ -142,6 +144,7 @@ export default function FeedbackWidget() {
         body: JSON.stringify({
           content,
           imageUrls,
+          uploadedAssetIds,
           pageUrl: window.location.href,
           pathname: window.location.pathname,
         }),
@@ -157,10 +160,15 @@ export default function FeedbackWidget() {
         setOpen(false);
       }, 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '提交失败，请稍后重试。');
+      const reason = err instanceof Error ? err.message : '提交失败，请稍后重试。';
+      setError(imageUrls.length > 0 ? `截图已上传成功，但反馈提交失败：${reason}` : reason);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const retrySubmitUploadedAssets = () => {
+    void submit();
   };
 
   return (
@@ -257,6 +265,11 @@ export default function FeedbackWidget() {
             }}>
               {error || message}
             </div>
+          )}
+          {error.startsWith('截图已上传成功，但反馈提交失败') && (
+            <button type="button" onClick={retrySubmitUploadedAssets} disabled={submitting} style={{ ...linkButtonStyle, marginTop: 8 }}>
+              重新提交反馈
+            </button>
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>

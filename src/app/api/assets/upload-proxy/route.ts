@@ -7,6 +7,7 @@ import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { proxyDirectUploadToStorage } from '@/lib/assets/direct-upload';
+import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,9 +27,14 @@ function readOptionalNumberHeader(request: NextRequest, name: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
+  let userId: string | null = null;
+  const mimeType = request.headers.get('content-type') || null;
+  const fileSize = readOptionalNumberHeader(request, 'content-length');
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    userId = user.id;
     if (!request.body) return NextResponse.json({ error: '缺少上传文件内容，请重新上传。' }, { status: 400 });
 
     const uploadResult = await proxyDirectUploadToStorage({
@@ -38,10 +44,23 @@ export async function POST(request: NextRequest) {
       width: readOptionalNumberHeader(request, 'x-image-width'),
       height: readOptionalNumberHeader(request, 'x-image-height'),
       durationSeconds: readOptionalNumberHeader(request, 'x-media-duration'),
-      contentLength: readOptionalNumberHeader(request, 'content-length'),
+      contentLength: fileSize,
       body: Readable.fromWeb(request.body as any),
     });
 
+    await recordAssetUploadLog({
+      operatorId: user.id,
+      stage: 'proxy',
+      status: uploadResult.reused ? 'reused' : 'succeeded',
+      assetId: uploadResult.assetId,
+      fileName: uploadResult.fileName,
+      mimeType: uploadResult.mimeType,
+      fileSize: uploadResult.fileSize,
+      durationMs: Date.now() - startedAt,
+      reused: uploadResult.reused,
+      storageProvider: uploadResult.storageProvider,
+      uploadMode: 'proxy',
+    });
     return NextResponse.json({
       success: true,
       asset: {
@@ -61,6 +80,19 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : '服务端中转上传失败';
+    if (userId) {
+      await recordAssetUploadLog({
+        operatorId: userId,
+        stage: 'proxy',
+        status: 'failed',
+        mimeType,
+        fileSize,
+        durationMs: Date.now() - startedAt,
+        errorCode: 'proxy_failed',
+        errorMessage: message,
+        uploadMode: 'proxy',
+      });
+    }
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

@@ -13,6 +13,7 @@ import {
   validateSiteUploadInput,
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
+import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 export const runtime = 'nodejs';
 export const maxDuration = 180;
@@ -101,19 +102,39 @@ async function readUploadPayload(request: NextRequest): Promise<
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
+  let userId: string | null = null;
+  let fileName: string | null = decodeFileName(request.headers.get('x-file-name'));
+  let mimeType: string | null = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || null;
+  let fileSize: number | null = parseContentLength(request.headers.get('x-file-size') || request.headers.get('content-length'));
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    userId = user.id;
 
     const upload = await readUploadPayload(request);
     if (upload.response) return upload.response;
 
-    const { buffer, fileName, mimeType, fileSize } = upload.payload;
+    ({ fileName, mimeType, fileSize } = upload.payload);
+    const { buffer } = upload.payload;
     const mediaValidationError = await validateSiteUploadBuffer(buffer, fileName, mimeType);
     if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
 
     const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id);
 
+    await recordAssetUploadLog({
+      operatorId: user.id,
+      stage: 'raw',
+      status: uploadResult.reused ? 'reused' : 'succeeded',
+      assetId: uploadResult.assetId,
+      fileName,
+      mimeType,
+      fileSize,
+      durationMs: Date.now() - startedAt,
+      reused: uploadResult.reused,
+      storageProvider: uploadResult.storageProvider,
+      uploadMode: 'raw',
+    });
     return NextResponse.json({
       success: true,
       asset: {
@@ -134,6 +155,20 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[Upload] Error:', error);
+    if (userId) {
+      await recordAssetUploadLog({
+        operatorId: userId,
+        stage: 'raw',
+        status: 'failed',
+        fileName,
+        mimeType,
+        fileSize,
+        durationMs: Date.now() - startedAt,
+        errorCode: 'raw_failed',
+        errorMessage: error instanceof Error ? error.message : 'Upload failed',
+        uploadMode: 'raw',
+      });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Upload failed' },
       { status: 500 }

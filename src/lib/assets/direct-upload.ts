@@ -1,7 +1,16 @@
 import crypto from 'crypto';
 import path from 'path';
 import { Transform } from 'stream';
-import { HeadObjectCommand, PutObjectCommand, S3Client, type PutObjectCommandInput } from '@aws-sdk/client-s3';
+import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  UploadPartCommand,
+  type PutObjectCommandInput,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
@@ -16,6 +25,8 @@ const DIRECT_UPLOAD_EXPIRES_SECONDS = 10 * 60;
 const DIRECT_UPLOAD_PREFIX = 'seedance-direct-uploads';
 const DIRECT_UPLOAD_TOKEN_VERSION = 1;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
+const MULTIPART_UPLOAD_EXPIRES_SECONDS = 24 * 60 * 60;
+export const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
 
 type DirectUploadStorageProvider = 'r2';
 
@@ -74,6 +85,30 @@ export type DirectUploadTicketResult =
   | DirectUploadReusedTicket
   | DirectUploadUnavailable;
 
+export type MultipartUploadTicket = {
+  directUploadAvailable: true;
+  uploadMode: 'multipart';
+  storageProvider: DirectUploadStorageProvider;
+  uploadToken: string;
+  uploadId: string;
+  partSize: number;
+  partCount: number;
+  expiresAt: string;
+};
+
+export type MultipartUploadTicketResult =
+  | MultipartUploadTicket
+  | DirectUploadReusedTicket
+  | DirectUploadUnavailable;
+
+export type MultipartUploadPartTicket = {
+  uploadUrl: string;
+  method: 'PUT';
+  headers: Record<string, string>;
+  partNumber: number;
+  expiresAt: string;
+};
+
 type DirectUploadTokenPayload = {
   version: number;
   storageProvider: DirectUploadStorageProvider;
@@ -84,6 +119,9 @@ type DirectUploadTokenPayload = {
   fileSize: number;
   hash: string;
   expiresAt: number;
+  uploadMode?: 'single' | 'multipart';
+  uploadId?: string;
+  partSize?: number;
 };
 
 type CreateDirectUploadTicketInput = {
@@ -107,6 +145,23 @@ type CompleteDirectUploadInput = {
 type ProxyDirectUploadInput = CompleteDirectUploadInput & {
   body: NonNullable<PutObjectCommandInput['Body']>;
   contentLength?: number | null;
+};
+
+type CreateMultipartUploadTicketInput = CreateDirectUploadTicketInput;
+
+type SignMultipartUploadPartInput = {
+  ownerId: string;
+  uploadToken: string;
+  partNumber: number;
+};
+
+type CompleteMultipartUploadInput = CompleteDirectUploadInput & {
+  parts: Array<{ partNumber: number; eTag: string }>;
+};
+
+type AbortMultipartUploadInput = {
+  ownerId: string;
+  uploadToken: string;
 };
 
 export type DirectUploadAssetResult = {
@@ -171,9 +226,27 @@ function getR2DirectUploadConfig(): R2DirectUploadConfig | null {
   };
 }
 
-function isBrowserDirectUploadEnabled() {
-  const flag = (process.env.R2_DIRECT_UPLOAD_ENABLED || '').trim().toLowerCase();
+function envFlagEnabled(value: string | undefined) {
+  const flag = (value || '').trim().toLowerCase();
   return ['1', 'true', 'yes', 'on', 'enabled'].includes(flag);
+}
+
+function isR2DirectUploadCorsVerified() {
+  return envFlagEnabled(process.env.R2_DIRECT_UPLOAD_CORS_VERIFIED);
+}
+
+function isBrowserDirectUploadEnabled() {
+  return envFlagEnabled(process.env.R2_DIRECT_UPLOAD_ENABLED) && isR2DirectUploadCorsVerified();
+}
+
+function browserDirectUploadUnavailableReason() {
+  if (!envFlagEnabled(process.env.R2_DIRECT_UPLOAD_ENABLED)) {
+    return '浏览器直传 R2 未开启或桶 CORS 未验证，已改用本站服务端中转上传。';
+  }
+  if (!isR2DirectUploadCorsVerified()) {
+    return 'R2 直传开关已开启，但桶 CORS 尚未标记验收通过，已改用本站服务端中转上传。';
+  }
+  return '浏览器直传 R2 暂不可用，已改用本站服务端中转上传。';
 }
 
 function mimeTypeToExt(mimeType: string): string {
@@ -240,6 +313,22 @@ function verifyToken(token: string, ownerId: string): DirectUploadTokenPayload {
   if (payload.expiresAt <= Date.now()) throw new Error('上传票据已过期，请重新上传。');
   if (!payload.key.startsWith(`${userUploadPrefix(ownerId)}/`)) {
     throw new Error('上传对象路径无效，请重新上传。');
+  }
+  return payload;
+}
+
+function verifySingleUploadToken(token: string, ownerId: string) {
+  const payload = verifyToken(token, ownerId);
+  if (payload.uploadMode === 'multipart') {
+    throw new Error('上传票据类型不匹配，请重新上传。');
+  }
+  return payload;
+}
+
+function verifyMultipartUploadToken(token: string, ownerId: string) {
+  const payload = verifyToken(token, ownerId);
+  if (payload.uploadMode !== 'multipart' || !payload.uploadId || !payload.partSize) {
+    throw new Error('分块上传票据无效，请重新上传。');
   }
   return payload;
 }
@@ -321,6 +410,50 @@ async function findActiveAssetByTrustedHash(ownerId: string, trustedHash: string
       { created_at: 'desc' },
     ],
   });
+}
+
+async function createAssetFromCompletedUpload(input: {
+  ownerId: string;
+  payload: DirectUploadTokenPayload;
+  width?: number | null;
+  height?: number | null;
+  trustedHash?: string | null;
+  reused?: boolean;
+  config: R2DirectUploadConfig;
+}): Promise<DirectUploadAssetResult> {
+  const trustedHash = input.trustedHash ? assertSha256Hash(input.trustedHash) : null;
+  if (trustedHash && trustedHash !== input.payload.hash) {
+    throw new Error('上传文件内容和上传票据不一致，请重新上传。');
+  }
+  if (trustedHash) {
+    const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash);
+    if (existingAsset) {
+      return assetRecordToResult(existingAsset, true);
+    }
+  }
+
+  const kind = getSiteUploadKind(input.payload.mimeType) || 'image';
+  const width = kind === 'image' ? normalizeOptionalInt(input.width) : null;
+  const height = kind === 'image' ? normalizeOptionalInt(input.height) : null;
+  const publicUrl = `${input.config.publicBaseUrl}/${input.payload.key}`;
+
+  const asset = await prisma.asset.create({
+    data: {
+      owner_id: input.ownerId,
+      type: kind,
+      original_url: publicUrl,
+      thumbnail_url: kind === 'image' ? publicUrl : null,
+      file_name: input.payload.fileName,
+      mime_type: input.payload.mimeType,
+      width,
+      height,
+      file_size: input.payload.fileSize,
+      hash: trustedHash,
+      status: 'active',
+    },
+  });
+
+  return assetRecordToResult(asset, input.reused || false);
 }
 
 function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']>) {
@@ -429,7 +562,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
       method: 'POST',
       headers: { 'Content-Type': mimeType },
       expiresAt: new Date(expiresAt).toISOString(),
-      reason: '浏览器直传 R2 未开启或桶 CORS 未验证，已改用本站服务端中转上传。',
+      reason: browserDirectUploadUnavailableReason(),
     };
   }
 
@@ -448,7 +581,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
 }
 
 export async function completeDirectUpload(input: CompleteDirectUploadInput): Promise<DirectUploadAssetResult> {
-  const payload = verifyToken(input.uploadToken, input.ownerId);
+  const payload = verifySingleUploadToken(input.uploadToken, input.ownerId);
   const config = getR2DirectUploadConfig();
   if (!config) throw new Error('R2 直传配置不可用，请刷新后重试。');
 
@@ -473,39 +606,18 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
   if (trustedHash && trustedHash !== payload.hash) {
     throw new Error('上传文件内容和上传票据不一致，请重新上传。');
   }
-  const kind = getSiteUploadKind(payload.mimeType) || 'image';
-  const width = kind === 'image' ? normalizeOptionalInt(input.width) : null;
-  const height = kind === 'image' ? normalizeOptionalInt(input.height) : null;
-  const publicUrl = `${config.publicBaseUrl}/${payload.key}`;
-
-  if (trustedHash) {
-    const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash);
-    if (existingAsset) {
-      return assetRecordToResult(existingAsset, true);
-    }
-  }
-
-  const asset = await prisma.asset.create({
-    data: {
-      owner_id: input.ownerId,
-      type: kind,
-      original_url: publicUrl,
-      thumbnail_url: kind === 'image' ? publicUrl : null,
-      file_name: payload.fileName,
-      mime_type: payload.mimeType,
-      width,
-      height,
-      file_size: payload.fileSize,
-      hash: trustedHash,
-      status: 'active',
-    },
+  return createAssetFromCompletedUpload({
+    ownerId: input.ownerId,
+    payload,
+    width: input.width,
+    height: input.height,
+    trustedHash,
+    config,
   });
-
-  return assetRecordToResult(asset, false);
 }
 
 export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput): Promise<DirectUploadAssetResult> {
-  const payload = verifyToken(input.uploadToken, input.ownerId);
+  const payload = verifySingleUploadToken(input.uploadToken, input.ownerId);
   const config = getR2DirectUploadConfig();
   if (!config) throw new Error('R2 直传配置不可用，请刷新后重试。');
 
@@ -539,4 +651,177 @@ export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput):
   }
 
   return completeDirectUpload({ ...input, hash: trustedHash, trustedHash });
+}
+
+export async function createMultipartUploadTicket(input: CreateMultipartUploadTicketInput): Promise<MultipartUploadTicketResult> {
+  const mimeType = input.mimeType.split(';')[0]?.trim().toLowerCase() || '';
+  const metadataError = validateSiteUploadMetadata({ mimeType, fileSize: input.fileSize });
+  if (metadataError) throw new Error(metadataError);
+  const hash = assertSha256Hash(input.hash);
+
+  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash);
+  if (existingAsset) {
+    return {
+      directUploadAvailable: false,
+      reused: true,
+      reason: '已检测到相同素材，已复用上传历史中的文件。',
+      asset: assetRecordToPayload(existingAsset, true),
+    };
+  }
+
+  const config = getR2DirectUploadConfig();
+  if (!config) {
+    return {
+      directUploadAvailable: false,
+      reason: 'R2 分块上传配置不可用，请先配置 R2 存储。',
+    };
+  }
+  if (!isBrowserDirectUploadEnabled()) {
+    return {
+      directUploadAvailable: false,
+      reason: '大文件分块上传需要 R2 浏览器直传和 CORS 验收通过，当前已改用普通上传链路。',
+    };
+  }
+
+  const key = createObjectKey(input.ownerId, mimeType);
+  const expiresAt = Date.now() + MULTIPART_UPLOAD_EXPIRES_SECONDS * 1000;
+  const client = createR2Client(config);
+  const multipart = await client.send(new CreateMultipartUploadCommand({
+    Bucket: config.bucket,
+    Key: key,
+    ContentType: mimeType,
+  }));
+  if (!multipart.UploadId) {
+    throw new Error('分块上传初始化失败，请重新上传。');
+  }
+
+  const payload: DirectUploadTokenPayload = {
+    version: DIRECT_UPLOAD_TOKEN_VERSION,
+    storageProvider: 'r2',
+    ownerHash: userUploadOwnerHash(input.ownerId),
+    key,
+    fileName: safeFileName(input.fileName),
+    mimeType,
+    fileSize: input.fileSize,
+    hash,
+    expiresAt,
+    uploadMode: 'multipart',
+    uploadId: multipart.UploadId,
+    partSize: MULTIPART_UPLOAD_PART_SIZE_BYTES,
+  };
+
+  return {
+    directUploadAvailable: true,
+    uploadMode: 'multipart',
+    storageProvider: 'r2',
+    uploadToken: signToken(payload),
+    uploadId: multipart.UploadId,
+    partSize: MULTIPART_UPLOAD_PART_SIZE_BYTES,
+    partCount: Math.ceil(input.fileSize / MULTIPART_UPLOAD_PART_SIZE_BYTES),
+    expiresAt: new Date(expiresAt).toISOString(),
+  };
+}
+
+export async function signMultipartUploadPart(input: SignMultipartUploadPartInput): Promise<MultipartUploadPartTicket> {
+  const payload = verifyMultipartUploadToken(input.uploadToken, input.ownerId);
+  const config = getR2DirectUploadConfig();
+  if (!config) throw new Error('R2 分块上传配置不可用，请重新上传。');
+  if (!Number.isInteger(input.partNumber) || input.partNumber < 1 || input.partNumber > 10000) {
+    throw new Error('分块序号无效，请重新上传。');
+  }
+
+  const partCount = Math.ceil(payload.fileSize / payload.partSize!);
+  if (input.partNumber > partCount) {
+    throw new Error('分块序号超出文件大小，请重新上传。');
+  }
+
+  const client = createR2Client(config);
+  const command = new UploadPartCommand({
+    Bucket: config.bucket,
+    Key: payload.key,
+    UploadId: payload.uploadId,
+    PartNumber: input.partNumber,
+  });
+  const uploadUrl = await getSignedUrl(client, command, { expiresIn: DIRECT_UPLOAD_EXPIRES_SECONDS });
+
+  return {
+    uploadUrl,
+    method: 'PUT',
+    headers: {},
+    partNumber: input.partNumber,
+    expiresAt: new Date(Date.now() + DIRECT_UPLOAD_EXPIRES_SECONDS * 1000).toISOString(),
+  };
+}
+
+export async function completeMultipartUpload(input: CompleteMultipartUploadInput): Promise<DirectUploadAssetResult> {
+  const payload = verifyMultipartUploadToken(input.uploadToken, input.ownerId);
+  const config = getR2DirectUploadConfig();
+  if (!config) throw new Error('R2 分块上传配置不可用，请重新上传。');
+
+  const durationError = validateSiteUploadDuration(payload.mimeType, input.durationSeconds);
+  if (durationError) throw new Error(durationError);
+
+  const hash = assertSha256Hash(input.hash);
+  if (hash !== payload.hash) {
+    throw new Error('文件校验信息和上传票据不一致，请重新上传。');
+  }
+
+  const partCount = Math.ceil(payload.fileSize / payload.partSize!);
+  const parts = normalizeCompletedParts(input.parts, partCount);
+  const client = createR2Client(config);
+  await client.send(new CompleteMultipartUploadCommand({
+    Bucket: config.bucket,
+    Key: payload.key,
+    UploadId: payload.uploadId,
+    MultipartUpload: {
+      Parts: parts.map((part) => ({ PartNumber: part.partNumber, ETag: part.eTag })),
+    },
+  }));
+
+  const head = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }));
+  if (head.ContentLength != null && head.ContentLength !== payload.fileSize) {
+    throw new Error('分块上传文件大小和票据不一致，请重新上传。');
+  }
+
+  return createAssetFromCompletedUpload({
+    ownerId: input.ownerId,
+    payload,
+    width: input.width,
+    height: input.height,
+    trustedHash: null,
+    config,
+  });
+}
+
+export async function abortMultipartUpload(input: AbortMultipartUploadInput) {
+  const payload = verifyMultipartUploadToken(input.uploadToken, input.ownerId);
+  const config = getR2DirectUploadConfig();
+  if (!config) throw new Error('R2 分块上传配置不可用，请重新上传。');
+
+  const client = createR2Client(config);
+  await client.send(new AbortMultipartUploadCommand({
+    Bucket: config.bucket,
+    Key: payload.key,
+    UploadId: payload.uploadId,
+  }));
+}
+
+function normalizeCompletedParts(parts: Array<{ partNumber: number; eTag: string }>, expectedPartCount: number) {
+  if (!Array.isArray(parts) || parts.length !== expectedPartCount) {
+    throw new Error('分块上传结果不完整，请重新上传。');
+  }
+  const seen = new Set<number>();
+  const normalized = parts.map((part) => {
+    const partNumber = Number(part.partNumber);
+    const eTag = typeof part.eTag === 'string' ? part.eTag.trim() : '';
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > expectedPartCount || seen.has(partNumber)) {
+      throw new Error('分块上传结果无效，请重新上传。');
+    }
+    if (!eTag || eTag.length > 256) {
+      throw new Error('分块上传结果缺少 ETag，请确认 R2 CORS 暴露 ETag 后重试。');
+    }
+    seen.add(partNumber);
+    return { partNumber, eTag };
+  });
+  return normalized.sort((a, b) => a.partNumber - b.partNumber);
 }

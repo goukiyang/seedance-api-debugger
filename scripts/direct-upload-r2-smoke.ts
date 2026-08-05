@@ -15,6 +15,7 @@ const envKeys = [
   'R2_SECRET_ACCESS_KEY',
   'R2_BUCKET',
   'R2_PUBLIC_BASE_URL',
+  'R2_DIRECT_UPLOAD_CORS_VERIFIED',
 ] as const;
 const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 
@@ -412,6 +413,22 @@ async function run() {
   assert.match(proxyOnlyTicket.reason, /中转|CORS|直传/);
 
   process.env.R2_DIRECT_UPLOAD_ENABLED = 'true';
+  delete process.env.R2_DIRECT_UPLOAD_CORS_VERIFIED;
+  const corsUnverified = await createDirectUploadTicket({
+    ownerId: 'smoke-user',
+    fileName: 'cors-unverified.png',
+    mimeType: 'image/png',
+    fileSize: 1024,
+    hash: smokeHash,
+  });
+  if (corsUnverified.directUploadAvailable !== false) {
+    throw new Error('direct upload must stay disabled until R2 CORS is explicitly verified');
+  }
+  if (!('uploadToken' in corsUnverified)) {
+    throw new Error('CORS-unverified direct upload must keep server proxy available');
+  }
+
+  process.env.R2_DIRECT_UPLOAD_CORS_VERIFIED = 'true';
   const ticket = await createDirectUploadTicket({
     ownerId: 'smoke-user',
     fileName: '../unsafe name.png',
@@ -485,9 +502,10 @@ async function run() {
     clientSource.indexOf('let ticket: DirectUploadTicketResponse'),
     clientSource.indexOf('if (!ticketRes.ok)'),
   );
+  const clientCompleteStart = clientSource.indexOf('let complete: UploadAssetResponse');
   const clientCompleteSource = clientSource.slice(
-    clientSource.indexOf('let complete: UploadAssetResponse'),
-    clientSource.indexOf('if (!completeRes.ok)'),
+    clientCompleteStart,
+    clientSource.indexOf('if (!completeRes.ok)', clientCompleteStart),
   );
   const directUnavailableSource = clientSource.slice(
     clientSource.indexOf('if (ticket.directUploadAvailable === false)'),

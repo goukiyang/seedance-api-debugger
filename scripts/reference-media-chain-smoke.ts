@@ -173,7 +173,9 @@ async function main() {
   assertIncludes(uploadedImagePicker, "file.type.startsWith('audio/')", '历史素材弹窗不能继续过滤掉音频文件');
   assertIncludes(uploadedImagePicker, '<video', '历史素材弹窗必须能展示视频素材');
   assertIncludes(uploadedImagePicker, 'type UploadedAssetSelection', '历史素材弹窗必须把选择素材类型回传给生成页');
-  assertIncludes(uploadedImagePicker, 'await onConfirm(attachableIds,', '历史素材弹窗上传成功后必须自动加入当前参考区并回传素材类型');
+  assertIncludes(uploadedImagePicker, 'attachUploadedAssets', '历史素材弹窗上传成功后必须进入加入参考区的统一恢复函数');
+  assertIncludes(uploadedImagePicker, 'await onConfirm(assetIds, assets)', '历史素材弹窗上传成功后必须复用已上传 assetId 加入当前参考区并回传素材类型');
+  assertIncludes(uploadedImagePicker, 'retryPendingAttach', '历史素材弹窗加入参考区失败后必须能不重传文件直接重试');
   assertIncludes(uploadedImagePicker, '正在加入参考区', '历史素材弹窗必须提示上传后正在挂载参考区');
 
   const assetHistoryRoute = read('src/app/api/assets/history/route.ts');

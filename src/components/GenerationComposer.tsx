@@ -518,6 +518,10 @@ export function GenerationComposer({
     const hasFailed = Object.values(workspace.uploadStatuses).some((s) => s === 'failed');
     if (hasFailed) return '存在上传失败的素材，请移除后重试';
 
+    if (workspace.pendingWorkspaceAttach) {
+      return '素材已上传成功，但加入参考区失败，请先重试加入参考区。';
+    }
+
     if (hasAudioOnlyReferences) {
       return '音频参考需要配合图片或视频一起使用，请再添加 1 个图片或视频参考素材。';
     }
@@ -535,7 +539,7 @@ export function GenerationComposer({
       return '1080p 生成需要先确认审批通过。';
     }
     return null;
-  }, [prompt, workspace.uploadStatuses, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, hasAudioOnlyReferences]);
+  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, hasAudioOnlyReferences]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -1649,6 +1653,17 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
           </>
+        )}
+
+        {workspace.pendingWorkspaceAttach && (
+          <div className="workspace-attach-retry">
+            <span>
+              素材已上传成功，但加入参考区失败。系统已保留素材 ID，可直接重试，不需要重新上传。
+            </span>
+            <button type="button" onClick={() => { void workspace.retryPendingAttach(); }} disabled={workspace.loading}>
+              {workspace.loading ? '正在重试...' : `重试加入参考区（${workspace.pendingWorkspaceAttach.assetIds.length} 个）`}
+            </button>
+          </div>
         )}
 
         {templateEnabled ? (

@@ -41,6 +41,12 @@ type PromptValidationResponse = {
   missing?: string[];
 };
 
+type PendingWorkspaceAttach = {
+  assetIds: string[];
+  fileNames: string[];
+  statusIds: string[];
+};
+
 function getOrCreateTabId(): string {
   if (typeof window === 'undefined') return 'default';
   let tabId = sessionStorage.getItem(TAB_ID_KEY);
@@ -61,6 +67,8 @@ export interface UseWorkspaceResult {
   // P0-1: 上传素材（带状态追踪）
   uploadAsset: (file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   uploadAssetToHistory: (file: File, onProgress?: UploadProgressHandler) => Promise<string>;
+  pendingWorkspaceAttach: PendingWorkspaceAttach | null;
+  retryPendingAttach: () => Promise<void>;
   addAssets: (assetIds: string[]) => Promise<void>;
   addReferenceImages: (referenceImageIds: string[]) => Promise<void>;
   loadReferenceAlbum: (albumId: string) => Promise<void>;
@@ -84,6 +92,7 @@ export function useWorkspace(): UseWorkspaceResult {
   const tabIdRef = useRef<string>(getOrCreateTabId());
   // P0-1: 上传状态映射
   const [uploadStatuses, setUploadStatuses] = useState<Record<string, UploadStatus>>({});
+  const [pendingWorkspaceAttach, setPendingWorkspaceAttach] = useState<PendingWorkspaceAttach | null>(null);
 
   const fetchWorkspace = useCallback(async () => {
     try {
@@ -117,43 +126,71 @@ export function useWorkspace(): UseWorkspaceResult {
     return assetId;
   }, []);
 
+  const attachUploadedAssetsToWorkspace = useCallback(async (assetIds: string[], role?: FrameRole) => {
+    const res = await fetch('/api/workspace/assets', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tab-id': tabIdRef.current,
+      },
+      body: JSON.stringify({ assetIds, role }),
+    });
+    const data = await readJsonResponse<ApiMessageResponse>(res, {
+      invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
+    });
+    if (!res.ok) throw new Error(data.error || data.message || '素材加入参考区失败');
+    await fetchWorkspace();
+  }, [fetchWorkspace]);
+
   // P0-1: 上传素材（带状态追踪）
   const uploadAsset = useCallback(async (file: File, onProgress?: UploadProgressHandler) => {
     // 生成临时占位 assetId
     const tempId = `uploading_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     setLoading(true);
     setUploadStatuses((prev) => ({ ...prev, [tempId]: 'uploading' }));
+    setPendingWorkspaceAttach(null);
     try {
       const assetId = await uploadAssetToHistory(file, onProgress);
 
-      // 添加到 workspace
-      const addRes = await fetch('/api/workspace/assets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': tabIdRef.current,
-        },
-        body: JSON.stringify({ assetId }),
-      });
-      const addData = await readJsonResponse<ApiMessageResponse>(addRes, {
-        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
-      });
-      if (!addRes.ok) throw new Error(addData.error || addData.message || '素材加入工作台失败');
-
-      await fetchWorkspace();
+      try {
+        await attachUploadedAssetsToWorkspace([assetId]);
+      } catch (attachError) {
+        setPendingWorkspaceAttach({ assetIds: [assetId], fileNames: [file.name || 'upload.bin'], statusIds: [tempId] });
+        throw new Error(`素材已上传成功，但加入参考区失败：${attachError instanceof Error ? attachError.message : '加入参考区失败'}`);
+      }
       // 成功后移除临时状态
       setUploadStatuses((prev) => {
         const next = { ...prev };
         delete next[tempId];
         return next;
       });
+      setPendingWorkspaceAttach(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '素材上传失败');
       // 标记为失败
       setUploadStatuses((prev) => ({ ...prev, [tempId]: 'failed' }));
       setLoading(false);
     }
-  }, [fetchWorkspace, uploadAssetToHistory]);
+  }, [attachUploadedAssetsToWorkspace, uploadAssetToHistory]);
+
+  const retryPendingAttach = useCallback(async () => {
+    if (!pendingWorkspaceAttach) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await attachUploadedAssetsToWorkspace(pendingWorkspaceAttach.assetIds);
+      setUploadStatuses((prev) => {
+        const next = { ...prev };
+        pendingWorkspaceAttach.statusIds.forEach((id) => delete next[id]);
+        return next;
+      });
+      setPendingWorkspaceAttach(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加入参考区失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [attachUploadedAssetsToWorkspace, pendingWorkspaceAttach]);
 
   // P0-1: 替换素材
   const replaceAsset = useCallback(async (assetId: string, file: File, onProgress?: UploadProgressHandler) => {
@@ -459,6 +496,8 @@ export function useWorkspace(): UseWorkspaceResult {
     uploadStatuses,
     uploadAsset,
     uploadAssetToHistory,
+    pendingWorkspaceAttach,
+    retryPendingAttach,
     addAssets,
     addReferenceImages,
     loadReferenceAlbum,

@@ -9,6 +9,7 @@ import {
   canUseDirectAsset,
   getReferenceImageByIdForAccess,
 } from '@/lib/reference-albums/permissions';
+import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -62,9 +63,12 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  const startedAt = Date.now();
+  let userId: string | null = null;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    userId = user.id;
 
     const album = await assertCanEditAlbum(user, params.id);
     const contentType = request.headers.get('content-type') || '';
@@ -182,6 +186,15 @@ export async function POST(
       },
     });
 
+    await recordAssetUploadLog({
+      operatorId: user.id,
+      stage: 'mount',
+      status: 'succeeded',
+      assetId: assetIds[0] || sourceReferenceImageIds[0] || null,
+      durationMs: Date.now() - startedAt,
+      uploadMode: 'single',
+      totalParts: created.length,
+    });
     return NextResponse.json({
       images: created.map((image) => ({
         ...image,
@@ -192,12 +205,32 @@ export async function POST(
     }, { status: 201 });
   } catch (error) {
     if (error instanceof ReferenceAssetPublicUrlError) {
+      if (userId) {
+        await recordAssetUploadLog({
+          operatorId: userId,
+          stage: 'mount',
+          status: 'failed',
+          durationMs: Date.now() - startedAt,
+          errorCode: 'reference_asset_not_public',
+          errorMessage: error.message,
+        });
+      }
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     console.error('[ReferenceAlbumImages] Add error:', error);
+    if (userId) {
+      await recordAssetUploadLog({
+        operatorId: userId,
+        stage: 'mount',
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'reference_album_mount_failed',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 },

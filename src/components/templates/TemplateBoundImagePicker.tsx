@@ -106,6 +106,7 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<PickerUploadProgress | null>(null);
+  const [pendingUploadedImage, setPendingUploadedImage] = useState<TemplateContextCardBoundImage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -226,6 +227,22 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
     uploadInputRef.current?.click();
   };
 
+  const bindUploadedImage = (image: TemplateContextCardBoundImage) => {
+    try {
+      onSelect(image);
+      setPendingUploadedImage(null);
+      onClose();
+    } catch (bindError) {
+      setPendingUploadedImage(image);
+      setError(`图片已上传成功，但绑定失败：${bindError instanceof Error ? bindError.message : '请重试绑定'}`);
+    }
+  };
+
+  const retryPendingUploadedImage = () => {
+    if (!pendingUploadedImage) return;
+    bindUploadedImage(pendingUploadedImage);
+  };
+
   const handleUploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = Array.from(event.target.files || []).find((item) => item.type.startsWith('image/'));
     if (!file) return;
@@ -265,8 +282,7 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
         ...current.filter((item) => item.id !== asset.id),
       ]);
       setTab('history');
-      onSelect(nextImage);
-      onClose();
+      bindUploadedImage(nextImage);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : '图片上传失败');
     } finally {
@@ -300,6 +316,12 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
         </div>
 
         {error && <div className="template-drawer-error">{error}</div>}
+        {pendingUploadedImage && (
+          <div className="template-drawer-error">
+            <span>图片已上传成功，但绑定失败。可直接重试绑定，不需要重新上传。</span>
+            <button type="button" onClick={retryPendingUploadedImage}>重试绑定</button>
+          </div>
+        )}
         {uploadProgress && (
           <UploadProgressIndicator
             label={uploadProgress.label}

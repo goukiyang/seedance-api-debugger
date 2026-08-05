@@ -912,3 +912,11 @@
 - 怎么处理：普通上传、服务端中转、票据、完成登记统一走分段 JSON 解析；连接中断给“连接中断/文件较大/请重新上传”的明确提示；smoke 增加 raw/proxy 非 JSON 不得泄漏通用文案的断言。
 - 可复用经验：只要给上传链路增加新的 fallback、proxy、direct、complete 或 cleanup 分支，就必须同时补异常路径回归。不能只测成功路径和主接口，否则旧错误会从新分支漏出来。
 - 2026-07-22 补充：只读复查发现票据创建和完成登记的 `fetch` 中断仍可能落到泛化 catch；上传 smoke 必须按 ticket/raw/proxy/complete 分段切片断言连接中断和非 JSON 两类异常，不能只用跨函数宽正则。
+
+## 2026-08-05 - 上传根治要拆成文件传输和业务挂载两段
+
+- 问题/背景：上传问题反复出现在生成页、资产页、图集、模板和反馈里，用户看到的是“上传失败/网站挂了”，但真实失败点可能是 R2 CORS、本站中转、完成登记、业务挂载或反馈入库。
+- 诱因/根因：文件上传和业务挂载长期混在一个错误分支里；大文件依赖单个长请求；浏览器直传只看开关，没有独立 CORS 验收门；后台缺少按阶段定位的上传日志。
+- 怎么处理：统一上传入口继续走 Asset；R2 直传新增 `R2_DIRECT_UPLOAD_CORS_VERIFIED` 验收门；大视频新增 multipart start/sign-part/complete/abort；上传阶段写 `asset_upload_*` 安全摘要；工作台、模板和反馈保留已上传 assetId 并支持只重试挂载/提交。
+- 验证结果：`upload-root-cure-smoke`、`direct-upload-r2-smoke`、`upload-entrypoint-inventory-smoke`、`reference-media-chain-smoke`、`tsc`、`lint`、`build` 通过；lint 仅保留项目既有 warning。生产 R2 CORS 真实 PUT 仍需在桶配置完成并设置验收开关后单独验收。
+- 可复用经验：上传链路报错时先问“文件有没有变成 Asset”，再问“Asset 有没有绑定到当前业务对象”。前者是传输/存储问题，后者是业务挂载问题；两者必须分阶段提示、分阶段日志、分阶段重试，不能继续用一个“上传失败”兜底。

@@ -15,6 +15,7 @@ import {
   ReferenceImportError,
 } from '@/lib/assets/reference-import';
 import { ensureSiteAssetPublicUrl } from '@/lib/assets/site-upload';
+import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 function referenceRoleForAssetType(type: string | null | undefined, requestedRole?: string | null) {
   if (type === 'video') return 'reference_video';
@@ -38,9 +39,12 @@ async function ensureNonImageAssetReadyForGeneration(assetId: string, type: stri
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
+  let userId: string | null = null;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    userId = user.id;
 
     const body = await request.json();
     const { assetId, role } = body;
@@ -98,6 +102,15 @@ export async function POST(request: NextRequest) {
         workspaceAssetIds.push(waId);
       }
 
+      await recordAssetUploadLog({
+        operatorId: user.id,
+        stage: 'mount',
+        status: 'succeeded',
+        assetId: referenceImageIds[0] || null,
+        durationMs: Date.now() - startedAt,
+        uploadMode: 'single',
+        totalParts: referenceImageIds.length,
+      });
       return NextResponse.json({ success: true, workspaceAssetIds, workspaceId });
     }
 
@@ -150,6 +163,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    await recordAssetUploadLog({
+      operatorId: user.id,
+      stage: 'mount',
+      status: 'succeeded',
+      assetId: assetIds[0] || null,
+      durationMs: Date.now() - startedAt,
+      uploadMode: 'single',
+      totalParts: assetIds.length,
+    });
     return NextResponse.json({
       success: true,
       workspaceAssetId: workspaceAssetIds[0] || null,
@@ -160,9 +182,29 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof ReferenceImportError) {
+      if (userId) {
+        await recordAssetUploadLog({
+          operatorId: userId,
+          stage: 'mount',
+          status: 'failed',
+          durationMs: Date.now() - startedAt,
+          errorCode: error.code,
+          errorMessage: error.message,
+        });
+      }
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }
     console.error('[AddAssetToWorkspace] Error:', error);
+    if (userId) {
+      await recordAssetUploadLog({
+        operatorId: userId,
+        stage: 'mount',
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'workspace_mount_failed',
+        errorMessage: error instanceof Error ? error.message : 'Failed',
+      });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed' },
       { status: 500 }

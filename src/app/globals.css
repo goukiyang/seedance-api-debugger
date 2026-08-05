@@ -12537,6 +12537,42 @@ body.compare-fullscreen-open {
   color: #f87171;
 }
 
+.workspace-attach-retry {
+  align-items: center;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 8px;
+  color: #fecaca;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+}
+
+.workspace-attach-retry span {
+  font-size: 13px;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.workspace-attach-retry button {
+  background: rgba(239, 68, 68, 0.9);
+  border: 1px solid rgba(254, 202, 202, 0.35);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.workspace-attach-retry button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* ComposerActionBar */
 .composer-action-bar {
   display: flex;
@@ -14857,6 +14893,36 @@ body.compare-fullscreen-open {
   color: #b91c1c;
   font-size: 13px;
   padding: 10px 16px;
+}
+
+.uploaded-picker-attach-retry {
+  align-items: center;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  color: #334155;
+  display: flex;
+  font-size: 13px;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 16px;
+}
+
+.uploaded-picker-attach-retry button {
+  background: #2563eb;
+  border: 0;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 32px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.uploaded-picker-attach-retry button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .uploaded-picker-body {

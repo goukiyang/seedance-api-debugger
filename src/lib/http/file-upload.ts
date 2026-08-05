@@ -14,6 +14,9 @@ const MEDIA_DURATION_MIN_SECONDS = 2;
 const MEDIA_DURATION_MAX_SECONDS = 15;
 const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 8 * 1024 * 1024;
 const AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 * 1024 * 1024;
+const MULTIPART_UPLOAD_MIN_SIZE_BYTES = 50 * 1024 * 1024;
+const MULTIPART_UPLOAD_CONCURRENCY = 3;
+const MULTIPART_RESUME_STORAGE_PREFIX = 'sd2_multipart_upload:';
 
 export type UploadedAssetPayload = {
   id?: string;
@@ -54,11 +57,54 @@ type DirectUploadTicketResponse = {
   message?: string;
 };
 
+type MultipartUploadStartResponse = {
+  directUploadAvailable?: boolean;
+  uploadMode?: 'multipart';
+  reused?: boolean;
+  asset?: UploadedAssetPayload;
+  storageProvider?: string;
+  uploadToken?: string;
+  uploadId?: string;
+  partSize?: number;
+  partCount?: number;
+  expiresAt?: string;
+  reason?: string;
+  error?: string;
+  message?: string;
+};
+
+type MultipartUploadPartResponse = {
+  uploadUrl?: string;
+  method?: 'PUT';
+  headers?: Record<string, string>;
+  partNumber?: number;
+  expiresAt?: string;
+  error?: string;
+  message?: string;
+};
+
 type UploadContext = {
   hash: string;
   width: number | null;
   height: number | null;
   durationSeconds: number | null;
+};
+
+type MultipartUploadedPart = {
+  partNumber: number;
+  eTag: string;
+};
+
+type MultipartResumeState = {
+  hash: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  uploadToken: string;
+  uploadId: string;
+  partSize: number;
+  expiresAt: string;
+  parts: MultipartUploadedPart[];
 };
 
 export function buildRawFileUploadRequest(file: File): RequestInit {
@@ -236,6 +282,315 @@ async function uploadWithServerProxyOrRawFallback(
   }
 }
 
+function shouldUseMultipartUpload(file: File) {
+  return file.type.startsWith('video/') && file.size > MULTIPART_UPLOAD_MIN_SIZE_BYTES;
+}
+
+function multipartResumeKey(file: File, hash: string) {
+  return `${MULTIPART_RESUME_STORAGE_PREFIX}${hash}:${file.size}:${file.type || 'application/octet-stream'}`;
+}
+
+function readMultipartResumeState(file: File, hash: string): MultipartResumeState | null {
+  if (typeof window === 'undefined') return null;
+  const raw = sessionStorage.getItem(multipartResumeKey(file, hash));
+  if (!raw) return null;
+  try {
+    const state = JSON.parse(raw) as MultipartResumeState;
+    if (
+      state.hash !== hash ||
+      state.fileSize !== file.size ||
+      state.mimeType !== (file.type || 'application/octet-stream') ||
+      !state.uploadToken ||
+      !state.uploadId ||
+      !Number.isFinite(state.partSize) ||
+      state.partSize <= 0 ||
+      new Date(state.expiresAt).getTime() <= Date.now()
+    ) {
+      sessionStorage.removeItem(multipartResumeKey(file, hash));
+      return null;
+    }
+    return {
+      ...state,
+      parts: Array.isArray(state.parts) ? state.parts.filter((part) => part.partNumber > 0 && part.eTag) : [],
+    };
+  } catch {
+    sessionStorage.removeItem(multipartResumeKey(file, hash));
+    return null;
+  }
+}
+
+function writeMultipartResumeState(file: File, state: MultipartResumeState) {
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem(multipartResumeKey(file, state.hash), JSON.stringify(state));
+}
+
+function clearMultipartResumeState(file: File, hash: string) {
+  if (typeof window === 'undefined') return;
+  sessionStorage.removeItem(multipartResumeKey(file, hash));
+}
+
+function normalizePartEtag(value: string | null) {
+  return (value || '').trim();
+}
+
+function putFilePartToStorage(
+  url: string,
+  headers: Record<string, string>,
+  blob: Blob,
+  fileSize: number,
+  loadedOffset: () => number,
+  onProgress?: UploadProgressHandler,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+    notifyUploadProgress(onProgress, {
+      phase: 'multipart',
+      label: '正在分块上传',
+      loadedBytes: loadedOffset(),
+      totalBytes: fileSize,
+    });
+    xhr.upload.onprogress = (event) => {
+      const partLoaded = event.lengthComputable ? event.loaded : 0;
+      notifyUploadProgress(onProgress, {
+        phase: 'multipart',
+        label: '正在分块上传',
+        loadedBytes: loadedOffset() + partLoaded,
+        totalBytes: fileSize,
+      });
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const eTag = normalizePartEtag(xhr.getResponseHeader('ETag'));
+        if (!eTag) {
+          reject(new Error('分块上传成功但没有返回 ETag，请确认 R2 CORS 暴露 ETag 后重试。'));
+          return;
+        }
+        resolve(eTag);
+      } else {
+        reject(new Error(`分块上传失败（HTTP ${xhr.status || '未知'}）`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('分块上传连接中断，请检查网络后重试。'));
+    xhr.ontimeout = () => reject(new Error(uploadStageTimeoutMessage('分块上传')));
+    xhr.timeout = calculateUploadTimeoutMs(blob.size);
+    xhr.send(blob);
+  });
+}
+
+async function requestMultipartPartTicket(
+  uploadToken: string,
+  partNumber: number,
+  invalidJsonMessage: string,
+) {
+  let response: Response;
+  try {
+    response = await fetch('/api/assets/multipart/sign-part', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadToken, partNumber }),
+    });
+  } catch (error) {
+    throw new Error(uploadStageConnectionMessage('分块上传签名', error));
+  }
+  const data = await readUploadJsonResponse<MultipartUploadPartResponse>(
+    response,
+    '分块上传签名接口',
+    invalidJsonMessage,
+  );
+  if (!response.ok) throw new Error(data.error || data.message || '分块上传签名失败');
+  if (!data.uploadUrl || data.method !== 'PUT') {
+    throw new Error('分块上传签名内容不完整，请重新上传。');
+  }
+  return data;
+}
+
+function shouldKeepMultipartResumeState(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  return (
+    message.includes('连接中断') ||
+    message.includes('时间过长') ||
+    message.includes('网络') ||
+    message.includes('Failed to fetch')
+  );
+}
+
+async function abortMultipartUpload(uploadToken: string, invalidJsonMessage: string) {
+  let response: Response;
+  try {
+    response = await fetch('/api/assets/multipart/abort', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadToken }),
+    });
+  } catch {
+    return;
+  }
+  if (!response.ok) {
+    await readUploadJsonResponse(response, '分块上传清理接口', invalidJsonMessage).catch(() => null);
+  }
+}
+
+async function uploadWithMultipart(
+  file: File,
+  context: UploadContext,
+  invalidJsonMessage: string,
+  onProgress?: UploadProgressHandler,
+): Promise<UploadedAssetPayload | null> {
+  if (!shouldUseMultipartUpload(file)) return null;
+
+  let state = readMultipartResumeState(file, context.hash);
+  if (!state) {
+    notifyUploadProgress(onProgress, {
+      phase: 'multipart_start',
+      label: '正在创建分块上传',
+    });
+    let startRes: Response;
+    try {
+      startRes = await fetch('/api/assets/multipart/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name || 'upload.bin',
+          mimeType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+          hash: context.hash,
+        }),
+      });
+    } catch (error) {
+      throw new Error(uploadStageConnectionMessage('分块上传初始化', error));
+    }
+    const start = await readUploadJsonResponse<MultipartUploadStartResponse>(
+      startRes,
+      '分块上传初始化接口',
+      invalidJsonMessage,
+    );
+    if (!startRes.ok) throw new Error(start.error || start.message || '分块上传初始化失败');
+    if (start.reused === true && start.asset?.id) {
+      notifyUploadProgress(onProgress, {
+        phase: 'done',
+        label: '已复用相同素材',
+        loadedBytes: file.size,
+        totalBytes: file.size,
+      });
+      return start.asset;
+    }
+    if (start.directUploadAvailable === false) return null;
+    if (!start.uploadToken || !start.uploadId || !start.partSize || !start.expiresAt) {
+      throw new Error('分块上传票据内容不完整，请重新上传。');
+    }
+    state = {
+      hash: context.hash,
+      fileName: file.name || 'upload.bin',
+      fileSize: file.size,
+      mimeType: file.type || 'application/octet-stream',
+      uploadToken: start.uploadToken,
+      uploadId: start.uploadId,
+      partSize: start.partSize,
+      expiresAt: start.expiresAt,
+      parts: [],
+    };
+    writeMultipartResumeState(file, state);
+  }
+
+  const completedParts = new Map<number, string>();
+  for (const part of state.parts) completedParts.set(part.partNumber, part.eTag);
+  const partCount = Math.ceil(file.size / state.partSize);
+  const loadedPartBytes = () => {
+    let loaded = 0;
+    for (const partNumber of Array.from(completedParts.keys())) {
+      const start = (partNumber - 1) * state!.partSize;
+      loaded += Math.max(0, Math.min(state!.partSize, file.size - start));
+    }
+    return loaded;
+  };
+  let cursor = 1;
+
+  const uploadNextPart = async () => {
+    while (cursor <= partCount) {
+      const partNumber = cursor;
+      cursor += 1;
+      if (completedParts.has(partNumber)) continue;
+      const start = (partNumber - 1) * state!.partSize;
+      const end = Math.min(file.size, start + state!.partSize);
+      const part = file.slice(start, end, file.type || 'application/octet-stream');
+      const partTicket = await requestMultipartPartTicket(state!.uploadToken, partNumber, invalidJsonMessage);
+      const eTag = await putFilePartToStorage(
+        partTicket.uploadUrl!,
+        partTicket.headers || {},
+        part,
+        file.size,
+        loadedPartBytes,
+        onProgress,
+      );
+      completedParts.set(partNumber, eTag);
+      state!.parts = Array.from(completedParts.entries())
+        .map(([currentPartNumber, currentETag]) => ({ partNumber: currentPartNumber, eTag: currentETag }))
+        .sort((a, b) => a.partNumber - b.partNumber);
+      writeMultipartResumeState(file, state!);
+    }
+  };
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(MULTIPART_UPLOAD_CONCURRENCY, partCount) }, uploadNextPart));
+  } catch (error) {
+    if (state && !shouldKeepMultipartResumeState(error)) {
+      await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
+      clearMultipartResumeState(file, context.hash);
+    }
+    throw error;
+  }
+
+  notifyUploadProgress(onProgress, {
+    phase: 'multipart_complete',
+    label: '正在合并上传结果',
+    loadedBytes: file.size,
+    totalBytes: file.size,
+  });
+
+  let completeRes: Response;
+  try {
+    completeRes = await fetch('/api/assets/multipart/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uploadToken: state.uploadToken,
+        hash: context.hash,
+        width: context.width,
+        height: context.height,
+        durationSeconds: context.durationSeconds,
+        parts: state.parts,
+      }),
+    });
+  } catch (error) {
+    throw new Error(uploadStageConnectionMessage('分块上传完成登记', error));
+  }
+  const complete = await readUploadJsonResponse<UploadAssetResponse>(
+    completeRes,
+    '分块上传完成登记接口',
+    invalidJsonMessage,
+  );
+  if (!completeRes.ok) {
+    await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
+    clearMultipartResumeState(file, context.hash);
+    throw new Error(complete.error || complete.message || '分块上传完成登记失败');
+  }
+  if (!complete.asset?.id) {
+    await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
+    clearMultipartResumeState(file, context.hash);
+    throw new Error('分块上传完成但没有返回素材 ID');
+  }
+  clearMultipartResumeState(file, context.hash);
+  notifyUploadProgress(onProgress, {
+    phase: 'done',
+    label: '上传完成',
+    loadedBytes: file.size,
+    totalBytes: file.size,
+  });
+  return complete.asset;
+}
+
 async function sha256File(file: File) {
   if (!globalThis.crypto?.subtle) {
     throw new Error('当前浏览器不支持文件校验，已回退到普通上传。');
@@ -366,6 +721,10 @@ export async function uploadFileToHistory(
 
   validateClientMediaDuration(file, durationSeconds);
 
+  const uploadContext = { hash, width, height, durationSeconds };
+  const multipartAsset = await uploadWithMultipart(file, uploadContext, invalidJsonMessage, onProgress);
+  if (multipartAsset?.id) return multipartAsset;
+
   notifyUploadProgress(onProgress, {
     phase: 'ticket',
     label: '正在申请上传通道',
@@ -415,7 +774,7 @@ export async function uploadFileToHistory(
       return uploadWithServerProxyOrRawFallback(
         ticket,
         file,
-        { hash, width, height, durationSeconds },
+        uploadContext,
         invalidJsonMessage,
         fallbackToRaw,
         ticket.reason || '直传暂不可用',
@@ -435,7 +794,7 @@ export async function uploadFileToHistory(
     return uploadWithServerProxyOrRawFallback(
       ticket,
       file,
-      { hash, width, height, durationSeconds },
+      uploadContext,
       invalidJsonMessage,
       fallbackToRaw,
       message,

@@ -20,27 +20,29 @@ Ponytail 收口：不全量重写，不新引入上传平台，不先做复杂�
 
 ## 2. 具体可执行任务
 
-- [ ] T1. 冻结当前上传入口基线，防止继续长出旧链路
+- [x] T1. 冻结当前上传入口基线，防止继续长出旧链路
   - 检查对象：`scripts/upload-entrypoint-inventory-smoke.ts`、`src/lib/http/file-upload.ts`、`src/app/api/assets/*upload*`、`src/components/**` 里所有上传入口。
   - 执行内容：跑入口盘点，确认用户可见上传入口只通过 `uploadFileAsAsset` / `uploadFileToHistory`；旧 multipart 只允许登录、外部工具代理或内部 raw fallback 这类明确例外。
   - 验证命令：`npx tsx scripts/upload-entrypoint-inventory-smoke.ts`、`npx tsx scripts/direct-upload-r2-smoke.ts`、`git diff --check`。
   - 完成标准：新增或修改入口时 smoke 能拦住直接 `FormData` 文件上传业务接口；例外列表有原因。
 
-- [ ] T2. 做 R2 CORS 开启验收门，不通过就继续关闭浏览器直传
+- [x] T2. 做 R2 CORS 开启验收门，不通过就继续关闭浏览器直传
   - 检查对象：`src/lib/assets/direct-upload.ts`、`src/app/api/assets/upload-ticket/route.ts`、R2 bucket CORS 配置、线上 `R2_DIRECT_UPLOAD_ENABLED`。
   - 执行内容：新增或完善只读 readiness smoke，安全检查 R2 配置是否齐全，不打印 `R2_SECRET_ACCESS_KEY`、签名 URL、uploadToken；用真实浏览器 PUT 小 PNG 验证 `PUT`、`Content-Type`、必要 headers 和公开访问。
   - 验收路径：先在后台确认 CORS 允许 `https://sd2.youdoodesign.com`；再临时开启直传；真实登录态上传小 PNG；最后确认 `/api/assets/upload-complete` 入库成功。
   - 完成标准：CORS 未通过时线上保持 `directUploadAvailable=false` 且稳定走 `/api/assets/upload-proxy`；CORS 通过后才允许开启 `R2_DIRECT_UPLOAD_ENABLED=true`。
   - 停止条件：需要读取、展示或复制密钥、cookie、完整签名 URL 时停止，改用安全摘要。
+  - 2026-08-05 落地状态：代码侧已增加 `R2_DIRECT_UPLOAD_CORS_VERIFIED` 验收门；生产桶完成 CORS 后再打开该验收开关并做真实 PUT 验收。
 
-- [ ] T3. 补“上传成功但业务挂载失败”的恢复机制
+- [x] T3. 补“上传成功但业务挂载失败”的恢复机制
   - 检查对象：`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/components/UploadedImagePicker.tsx`、`src/lib/hooks/useWorkspace.ts`、`src/components/templates/TemplateBoundImagePicker.tsx`、`src/components/FeedbackWidget.tsx`、相关业务挂载 API。
   - 执行内容：每个页面先上传成 Asset；如果后续加入图集、加入当前参考图、绑定模板卡片或提交反馈失败，前端保留本轮已上传的 `assetId`，显示“素材已上传成功，加入当前页面失败，可重试”，重试时只调用业务 JSON 挂载接口，不重新上传文件。
   - 最小实现：先用页面状态或 `sessionStorage` 保存本轮待挂载 assetId；暂不新增数据库表。刷新后用户仍可从历史上传里选回该 Asset。
   - 验证命令：新增/更新对应 smoke，例如图集挂载失败、模板绑定失败、反馈提交失败、工作区加入失败；再跑 `npx tsx scripts/reference-media-chain-smoke.ts` 和入口盘点 smoke。
   - 完成标准：人为让业务挂载接口返回 500 时，页面不说“上传失败”，也不要求用户重传文件。
+  - 2026-08-05 落地状态：工作区、上传历史弹窗、模板绑定和反馈都已保留上传后的 assetId；挂载/提交失败时可只重试业务动作，不重新上传文件。
 
-- [ ] T4. 上传阶段后台可观测，10 秒内判断卡在哪
+- [x] T4. 上传阶段后台可观测，10 秒内判断卡在哪
   - 检查对象：`src/app/api/assets/upload-ticket/route.ts`、`src/app/api/assets/upload-proxy/route.ts`、`src/app/api/assets/upload-complete/route.ts`、`src/app/api/assets/upload/route.ts`、`prisma/schema.prisma` 的 `OperationLog` / `ContentAuditLog`。
   - 执行内容：优先复用现有 `OperationLog` 或 `ContentAuditLog` 记录安全摘要；只记录阶段、用户 id、assetId、mime、文件大小、耗时、错误码、是否复用、是否挂载成功。
   - 不记录内容：签名 URL、uploadToken、cookie、手机号、头像 URL、完整公开资源 URL、用户本机路径。
@@ -48,7 +50,7 @@ Ponytail 收口：不全量重写，不新引入上传平台，不先做复杂�
   - 验证命令：补上传日志 smoke，构造失败响应后查询日志摘要；同时验证日志里不含 token/url 敏感字段。
   - 完成标准：用户说“上传失败”时，后台能区分是传输失败还是挂载失败。
 
-- [ ] T5. 大文件分块/断点续传，只对需要的文件启用
+- [x] T5. 大文件分块/断点续传，只对需要的文件启用
   - 检查对象：`SITE_UPLOAD_MAX_SIZE_BY_KIND` 当前图片 30MB、视频 200MB、音频 15MB；`src/lib/assets/direct-upload.ts` 当前是单次 PUT / proxy。
   - 执行内容：只对大文件启用 multipart，建议触发线为视频 `>50MB` 或服务端中转连续出现 `aborted/timeout`；小图片和小音频继续走现有简单链路。
   - 后端最小接口：
@@ -59,6 +61,7 @@ Ponytail 收口：不全量重写，不新引入上传平台，不先做复杂�
   - 前端最小行为：分片并发 2-3 个；断线后保留 `uploadId` 和已完成 part；重新上传只补失败 part；进度来自已传字节。
   - 验证命令：新增 multipart smoke，覆盖 start/sign/complete/abort、hash/大小不匹配、重复素材复用、失败重试不重传已完成 part。
   - 完成标准：大视频弱网失败后可以继续，不依赖一个长请求。
+  - 2026-08-05 落地状态：代码侧已提供 multipart start/sign-part/complete/abort 和前端断点状态；真实弱网大视频验收需在 R2 CORS 验收开关打开后执行。
 
 - [ ] T6. 全入口真实登录态验收矩阵
   - 检查入口：`/generate` 参考图和上传历史、`/assets` 图片/视频/音频、`/collections/:id` 多文件、模板绑定图片、反馈附件。

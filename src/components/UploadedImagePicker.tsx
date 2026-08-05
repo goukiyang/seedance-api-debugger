@@ -56,6 +56,12 @@ type PickerUploadProgress = {
   percent?: number;
 };
 
+type PendingPickerAttach = {
+  assetIds: string[];
+  assets: UploadedAssetSelection[];
+  detail: string;
+};
+
 const PAGE_SIZE = 40;
 const MAX_REFS = 9;
 const HISTORY_INVALID_JSON_MESSAGE = '历史素材服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
@@ -120,6 +126,7 @@ export function UploadedImagePicker({
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<UploadedAssetItem | null>(null);
+  const [pendingAttach, setPendingAttach] = useState<PendingPickerAttach | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentAssetIdSet = useMemo(() => new Set(currentAssetIds), [currentAssetIds]);
@@ -159,6 +166,7 @@ export function UploadedImagePicker({
     setSelectedAssetIds([]);
     setPreviewAsset(null);
     setUploadProgress(null);
+    setPendingAttach(null);
     void loadPage(1, 'replace');
   }, [loadPage, open]);
 
@@ -192,6 +200,41 @@ export function UploadedImagePicker({
     fileInputRef.current?.click();
   };
 
+  const attachUploadedAssets = async (pending: PendingPickerAttach) => {
+    const assetIds = pending.assetIds.filter((id) => !currentAssetIdSet.has(id)).slice(0, remaining);
+    if (assetIds.length === 0) {
+      setPendingAttach(null);
+      await loadPage(1, 'replace');
+      return;
+    }
+    const selectionById = new Map(pending.assets.map((item) => [item.id, item]));
+    const assets = assetIds
+      .map((id) => selectionById.get(id))
+      .filter((item): item is UploadedAssetSelection => Boolean(item));
+    setUploadProgress({
+      label: '正在加入参考区',
+      detail: pending.detail,
+    });
+    await onConfirm(assetIds, assets);
+    setPendingAttach(null);
+    setSelectedAssetIds([]);
+    onClose();
+  };
+
+  const retryPendingAttach = async () => {
+    if (!pendingAttach) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await attachUploadedAssets(pendingAttach);
+    } catch (err) {
+      setError(err instanceof Error ? `素材已上传成功，但加入参考区仍失败：${err.message}` : '素材已上传成功，但加入参考区仍失败。');
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+    }
+  };
+
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const pickedFiles = Array.from(event.target.files || []);
     const files = pickedFiles.filter(isSupportedReferenceFile);
@@ -213,7 +256,9 @@ export function UploadedImagePicker({
     }
     setUploading(true);
     setUploadProgress(null);
+    setPendingAttach(null);
     setError(null);
+    let pendingUploadedAttach: PendingPickerAttach | null = null;
     try {
       const uploadedAssetIds: string[] = [];
       const uploadedSelections: UploadedAssetSelection[] = [];
@@ -235,18 +280,22 @@ export function UploadedImagePicker({
         const attachableSelections = attachableIds
           .map((id) => selectionById.get(id))
           .filter((item): item is UploadedAssetSelection => Boolean(item));
-        setUploadProgress({
-          label: '正在加入参考区',
+        pendingUploadedAttach = {
+          assetIds: attachableIds,
+          assets: attachableSelections,
           detail: files.length > 1 ? `${attachableIds.length} 个素材` : files[0].name,
-        });
-        await onConfirm(attachableIds, attachableSelections);
-        setSelectedAssetIds([]);
-        onClose();
+        };
+        await attachUploadedAssets(pendingUploadedAttach);
       } else {
         await loadPage(1, 'replace');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '素材上传失败');
+      if (pendingUploadedAttach) {
+        setPendingAttach(pendingUploadedAttach);
+        setError(err instanceof Error ? `素材已上传成功，但加入参考区失败：${err.message}` : '素材已上传成功，但加入参考区失败。');
+      } else {
+        setError(err instanceof Error ? err.message : '素材上传失败');
+      }
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -321,6 +370,14 @@ export function UploadedImagePicker({
         </div>
 
         {error && <div className="uploaded-picker-error">{error}</div>}
+        {pendingAttach && (
+          <div className="uploaded-picker-attach-retry">
+            <span>素材已上传成功，可直接重试加入当前参考区。</span>
+            <button type="button" onClick={() => { void retryPendingAttach(); }} disabled={uploading || loading}>
+              重试加入
+            </button>
+          </div>
+        )}
         {uploadProgress && (
           <UploadProgressIndicator
             label={uploadProgress.label}
