@@ -8,6 +8,11 @@ export type UploadProgressSnapshot = {
 
 export type UploadProgressHandler = (progress: UploadProgressSnapshot) => void;
 
+const DEFAULT_UPLOAD_TIMEOUT_MS = 120_000;
+const MAX_UPLOAD_TIMEOUT_MS = 10 * 60_000;
+const SLOW_UPLOAD_BYTES_PER_SECOND = 64 * 1024;
+const UPLOAD_TIMEOUT_GRACE_MS = 30_000;
+
 type ProgressInput = {
   phase: string;
   label: string;
@@ -22,6 +27,8 @@ type JsonUploadRequest<T> = {
   body: XMLHttpRequestBodyInit | Document;
   invalidJsonMessage: string;
   connectionMessage: string;
+  abortMessage?: string;
+  timeoutMessage?: string;
   progress: {
     phase: string;
     label: string;
@@ -30,6 +37,16 @@ type JsonUploadRequest<T> = {
   onProgress?: UploadProgressHandler;
   timeoutMs?: number;
 };
+
+export function calculateUploadTimeoutMs(totalBytes?: number | null) {
+  const bytes = typeof totalBytes === 'number' && Number.isFinite(totalBytes) && totalBytes > 0
+    ? totalBytes
+    : 0;
+  if (!bytes) return DEFAULT_UPLOAD_TIMEOUT_MS;
+
+  const estimatedMs = Math.ceil((bytes / SLOW_UPLOAD_BYTES_PER_SECOND) * 1000) + UPLOAD_TIMEOUT_GRACE_MS;
+  return Math.min(MAX_UPLOAD_TIMEOUT_MS, Math.max(DEFAULT_UPLOAD_TIMEOUT_MS, estimatedMs));
+}
 
 export function createUploadProgressSnapshot(input: ProgressInput): UploadProgressSnapshot {
   const totalBytes = Number.isFinite(input.totalBytes) && input.totalBytes! > 0
@@ -66,14 +83,16 @@ export function requestJsonWithUploadProgress<T>({
   body,
   invalidJsonMessage,
   connectionMessage,
+  abortMessage,
+  timeoutMessage,
   progress,
   onProgress,
-  timeoutMs = 120000,
+  timeoutMs,
 }: JsonUploadRequest<T>): Promise<{ ok: boolean; status: number; data: T }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(method, url);
-    xhr.timeout = timeoutMs;
+    xhr.timeout = timeoutMs ?? calculateUploadTimeoutMs(progress.totalBytes);
     Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
 
     notifyUploadProgress(onProgress, {
@@ -108,8 +127,8 @@ export function requestJsonWithUploadProgress<T>({
       });
     };
     xhr.onerror = () => reject(new Error(connectionMessage));
-    xhr.onabort = () => reject(new Error(connectionMessage));
-    xhr.ontimeout = () => reject(new Error(connectionMessage));
+    xhr.onabort = () => reject(new Error(abortMessage || connectionMessage));
+    xhr.ontimeout = () => reject(new Error(timeoutMessage || connectionMessage));
     xhr.send(body);
   });
 }

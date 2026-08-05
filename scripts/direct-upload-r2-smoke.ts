@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { createDirectUploadTicket } from '../src/lib/assets/direct-upload';
 import { uploadFileToHistory } from '../src/lib/http/file-upload';
+import { calculateUploadTimeoutMs } from '../src/lib/http/upload-progress';
 
 const smokeHash = 'a'.repeat(64);
 
@@ -30,6 +31,7 @@ type MockUploadRequest = {
   url: string;
   headers: Record<string, string>;
   bodySize: number;
+  timeout: number;
 };
 
 function ensureWebCrypto() {
@@ -119,7 +121,7 @@ function installBrowserUploadMocks(
 
     send(body: XMLHttpRequestBodyInit | Document) {
       const bodySize = typeof (body as Blob).size === 'number' ? (body as Blob).size : 0;
-      requests.push({ method: this.method, url: this.url, headers: this.headers, bodySize });
+      requests.push({ method: this.method, url: this.url, headers: this.headers, bodySize, timeout: this.timeout });
       this.upload.onprogress?.({ loaded: bodySize, total: bodySize, lengthComputable: true });
       queueMicrotask(() => {
         if (this.url === 'https://r2.example.invalid/smoke-upload.mp4') {
@@ -211,6 +213,7 @@ async function assertVideoProxyUploadBehavior() {
       'video upload must use proxy and must not raw fallback on success',
     );
     assert.equal(successMocks.requests[0]?.headers['X-Media-Duration'], '5', 'video upload must pass client-read media duration to proxy');
+    assert.equal(successMocks.requests[0]?.timeout, 120000, 'small proxy uploads must keep the existing minimum timeout');
     assert.deepEqual(
       progressEvents.map((event) => event.phase),
       ['preparing', 'ticket', 'proxy', 'proxy', 'done'],
@@ -337,6 +340,10 @@ async function assertProxyFailureRawFallbackBehavior() {
 }
 
 async function run() {
+  assert.equal(calculateUploadTimeoutMs(1024), 120000, 'small uploads keep the minimum timeout');
+  assert.ok(calculateUploadTimeoutMs(15 * 1024 * 1024) > 120000, 'larger uploads must get a size-aware timeout');
+  assert.ok(calculateUploadTimeoutMs(500 * 1024 * 1024) <= 10 * 60_000, 'upload timeout must stay capped');
+
   for (const key of envKeys) delete process.env[key];
   const unavailable = await createDirectUploadTicket({
     ownerId: 'smoke-user',
@@ -452,6 +459,9 @@ async function run() {
   assert.match(proxySource, /proxyDirectUploadToStorage/, 'upload-proxy route must use the direct upload proxy helper');
   assert.match(proxySource, /Readable\.fromWeb/, 'upload-proxy route must stream the request body to storage');
 
+  const rawUploadRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/assets/upload/route.ts'), 'utf8');
+  assert.match(rawUploadRouteSource, /export const maxDuration = 180/, 'raw upload fallback must have the same server window as upload-proxy');
+
   const directUploadSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/assets/direct-upload.ts'), 'utf8');
   assert.match(directUploadSource, /createHashingUploadBody/, 'server-proxy uploads must hash the real uploaded stream on the server');
   assert.match(directUploadSource, /trustedHash\?: string \| null/, 'trusted hashes must be explicit and separate from client-provided hashes');
@@ -491,6 +501,9 @@ async function run() {
   assert.match(clientSource, /onProgress\?: UploadProgressHandler/, 'client upload helper must accept real upload progress callbacks');
   assert.match(clientSource, /notifyUploadProgress/, 'client upload helper must emit measured progress snapshots');
   assert.match(clientSource, /requestJsonWithUploadProgress<UploadAssetResponse>/, 'same-origin upload requests must use XHR upload progress');
+  assert.match(clientSource, /calculateUploadTimeoutMs\(file\.size\)/, 'browser storage PUT must use a size-aware upload timeout');
+  assert.match(clientSource, /uploadStageTimeoutMessage\('普通上传'\)/, 'raw fallback timeouts must be shown as slow uploads, not generic network interruptions');
+  assert.match(clientSource, /uploadStageTimeoutMessage\('服务端中转上传'\)/, 'proxy fallback timeouts must be shown as slow uploads, not generic network interruptions');
   assert.match(clientSource, /IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 8 \* 1024 \* 1024/, 'image raw upload fallback must be size-limited');
   assert.match(clientSource, /AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 \* 1024 \* 1024/, 'audio raw upload fallback must stay within the existing audio upload limit');
   assert.match(clientSource, /file\.type\.startsWith\('image\/'\)/, 'raw upload fallback must support bounded image uploads');

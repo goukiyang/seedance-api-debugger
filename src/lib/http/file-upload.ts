@@ -1,5 +1,6 @@
 import { readJsonResponse } from './json-response';
 import {
+  calculateUploadTimeoutMs,
   notifyUploadProgress,
   requestJsonWithUploadProgress,
   type UploadProgressHandler,
@@ -86,6 +87,10 @@ function uploadStageConnectionMessage(stage: string, error: unknown) {
   return `${stage}连接中断，系统没有拿到有效上传结果${detail}。请重新上传；如果文件较大，请压缩后重试。`;
 }
 
+function uploadStageTimeoutMessage(stage: string) {
+  return `${stage}时间过长，系统还没有收到完整文件。请检查网络后重新上传；如果文件较大，请压缩后重试。`;
+}
+
 async function readUploadJsonResponse<T>(
   response: Response,
   stage: string,
@@ -112,6 +117,7 @@ async function uploadWithRawFallback(
       body: file,
       invalidJsonMessage: uploadStageInvalidJsonMessage('普通上传接口', invalidJsonMessage),
       connectionMessage: uploadStageConnectionMessage('普通上传', new Error('网络中断')),
+      timeoutMessage: uploadStageTimeoutMessage('普通上传'),
       progress: {
         phase: 'raw',
         label: '正在普通上传',
@@ -188,6 +194,7 @@ async function uploadWithServerProxy(
       body: file,
       invalidJsonMessage: uploadStageInvalidJsonMessage('服务端中转上传接口', invalidJsonMessage),
       connectionMessage: uploadStageConnectionMessage('服务端中转上传', new Error('网络中断')),
+      timeoutMessage: uploadStageTimeoutMessage('服务端中转上传'),
       progress: {
         phase: 'proxy',
         label: '正在服务端中转上传',
@@ -317,8 +324,8 @@ function putFileToStorage(
       }
     };
     xhr.onerror = () => reject(new Error('上传到对象存储失败，请检查网络或稍后重试。'));
-    xhr.ontimeout = () => reject(new Error('上传到对象存储超时，请稍后重试。'));
-    xhr.timeout = 120000;
+    xhr.ontimeout = () => reject(new Error(uploadStageTimeoutMessage('上传到对象存储')));
+    xhr.timeout = calculateUploadTimeoutMs(file.size);
     xhr.send(file);
   });
 }

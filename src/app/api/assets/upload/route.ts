@@ -15,7 +15,7 @@ import {
 } from '@/lib/assets/site-upload';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 type UploadPayload = {
   buffer: Buffer;
