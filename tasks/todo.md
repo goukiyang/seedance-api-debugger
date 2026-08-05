@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [ ] 2026-08-03：后台趋势图展示重做，正文见 `tasks/todo/2026-08-03-admin-dashboard-trend-redesign.md`。
+- [ ] 2026-08-05：上传链路根治收口，正文见 `tasks/todo/2026-08-05-upload-root-cure.md`。
 
 ## 最近状态
 
@@ -18,4 +18,5 @@
 - `tasks/todo/2026-07-29-audio-upload.md`：音频素材上传统一链路
 - `tasks/todo/2026-07-29-share-button-fix.md`：分享按钮失效修复
 - `tasks/todo/2026-08-03-admin-dashboard-trend-redesign.md`：后台趋势图展示重做
+- `tasks/todo/2026-08-05-upload-root-cure.md`：上传链路根治收口
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
