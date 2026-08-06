@@ -12,7 +12,7 @@ export type { UploadProgressHandler, UploadProgressSnapshot };
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const MEDIA_DURATION_MIN_SECONDS = 2;
 const MEDIA_DURATION_MAX_SECONDS = 15;
-const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 8 * 1024 * 1024;
+const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 30 * 1024 * 1024;
 const AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 * 1024 * 1024;
 const MULTIPART_UPLOAD_MIN_SIZE_BYTES = 50 * 1024 * 1024;
 const MULTIPART_UPLOAD_CONCURRENCY = 3;
@@ -130,11 +130,11 @@ function uploadStageConnectionMessage(stage: string, error: unknown) {
   const message = error instanceof Error ? error.message.trim() : '';
   if (message.includes('返回了页面内容')) return message;
   const detail = message && message !== 'Failed to fetch' ? `（${message}）` : '';
-  return `${stage}连接中断，系统没有拿到有效上传结果${detail}。请重新上传；如果文件较大，请压缩后重试。`;
+  return `${stage}连接中断，系统没有拿到有效上传结果${detail}。这通常是网络或上传中转链路中断，不等于文件过大；请重新上传，连续出现时请联系管理员检查上传链路。`;
 }
 
 function uploadStageTimeoutMessage(stage: string) {
-  return `${stage}时间过长，系统还没有收到完整文件。请检查网络后重新上传；如果文件较大，请压缩后重试。`;
+  return `${stage}时间过长，系统还没有收到完整文件。请检查网络后重新上传；连续出现时请联系管理员检查上传链路。`;
 }
 
 async function readUploadJsonResponse<T>(
@@ -198,7 +198,7 @@ function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
 }
 
 function rawFallbackUnavailableMessage(reason: string) {
-  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 8MB 以内图片或 15MB 以内音频自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
+  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 30MB 以内图片或 15MB 以内音频自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
 }
 
 async function uploadWithRawFallbackOrThrow(

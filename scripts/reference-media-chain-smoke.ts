@@ -128,6 +128,8 @@ async function main() {
   assertNotIncludes(siteUpload, 'SITE_UPLOAD_MAX_SIZE = 50', '不能继续使用 50MB 统一上传上限');
   assertNotIncludes(siteUpload, 'if (localResult.reused)', '复用旧素材时也必须尝试补公网 URL');
   assertIncludes(siteUpload, 'ensureSiteAssetPublicUrl', '必须提供历史素材补公网 URL 的复用兜底函数');
+  assertIncludes(siteUpload, 'sameOriginPublicUrlForLocalUpload', '站内已落盘素材必须优先转成 sd2 公网 URL，不能同步等待 R2 转存');
+  assertIncludes(siteUpload, "storageProvider: 'local-public'", '站内公网 URL 路径必须标记 local-public，便于后续链路识别');
   assertIncludes(siteUpload, '历史素材本地文件不存在', '历史本地素材缺文件时必须给明确错误');
 
   const workspaceAssetsRoute = read('src/app/api/workspace/assets/route.ts');

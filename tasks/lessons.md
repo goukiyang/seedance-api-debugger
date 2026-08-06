@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-08-06 - 小图片上传中断不是文件大小问题
+
+- 问题/背景：用户和同事反馈 1.5MB-1.6MB 图片上传仍提示“普通上传连接中断”，旧提示还让用户压缩文件，容易误判为图片过大。
+- 诱因/根因：R2 浏览器直传因 CORS 未验证不可用，上传被迫走本站 proxy/raw；proxy 会把浏览器请求继续中转到 R2，raw 也会在同一个请求里等待公网转存，导致小文件也可能拖到几十秒后被浏览器或链路中断。
+- 怎么改：已落盘到 `public/uploads` 的素材优先转成 `NEXT_PUBLIC_BASE_URL` 下的同源公网 URL，直接标记为 `local-public`，不再同步等待 R2；图片 raw fallback 上限与站内图片上限对齐到 30MB；通用连接中断提示不再暗示“小文件也该压缩”。
+- 验证结果：`direct-upload-r2-smoke`、`reference-media-chain-smoke`、`npx tsc --noEmit`、`npm run lint`、`npm run build` 通过。
+- 可复用经验：上传失败提示必须来自真实失败层。文件尺寸合规时不要让用户压缩；先查后台 `asset_upload_*` 流水里的 `durationMs/errorMessage/uploadMode/storageProvider`，再判断是用户素材问题、浏览器直传/CORS、本站中转、还是对象存储转存问题。
+
 ## 2026-07-30 - 音频上传中转失败应允许普通上传兜底
 
 - 问题/背景：上传音频参考时，R2 浏览器直传未开启，系统走服务端中转；中转接口返回页面内容或连接中断后，前端提示“当前文件不能自动改用普通上传（仅支持 8MB 以内图片自动回退）”。

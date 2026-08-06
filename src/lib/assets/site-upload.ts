@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { uploadAsset } from '@/lib/assets/storage';
 import { isPubliclyReachableUrl, uploadPublicAsset } from '@/lib/assets/public-storage';
 import { execFile } from 'child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
@@ -59,6 +59,13 @@ export type SiteAssetPublicUrlResult = {
 
 function isLocalPublicUrl(url: string) {
   return url.startsWith('/');
+}
+
+function sameOriginPublicUrlForLocalUpload(url: string) {
+  if (!isLocalPublicUrl(url)) return null;
+  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  if (!baseUrl || !isPubliclyReachableUrl(baseUrl)) return null;
+  return `${baseUrl}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
 function resolveLocalPublicPath(url: string) {
@@ -136,6 +143,34 @@ export async function ensureSiteAssetPublicUrl(assetId: string): Promise<SiteAss
   }
 
   const filePath = resolveLocalPublicPath(asset.original_url);
+  const sameOriginPublicUrl = sameOriginPublicUrlForLocalUpload(asset.original_url);
+  if (sameOriginPublicUrl) {
+    try {
+      await access(filePath);
+    } catch {
+      throw new Error(`历史素材本地文件不存在，无法补公网 URL: ${asset.file_name}`);
+    }
+    const updatedAsset = await prisma.asset.update({
+      where: { id: asset.id },
+      data: { original_url: sameOriginPublicUrl },
+      select: {
+        id: true,
+        type: true,
+        original_url: true,
+        thumbnail_url: true,
+        file_name: true,
+        mime_type: true,
+        file_size: true,
+      },
+    });
+
+    return {
+      asset: updatedAsset,
+      isPubliclyReachable: true,
+      storageProvider: 'local-public',
+    };
+  }
+
   let buffer: Buffer;
   try {
     buffer = await readFile(filePath);
@@ -229,6 +264,24 @@ export async function uploadSiteAsset(
       fileSize,
       mimeType,
       isPubliclyReachable: true,
+    };
+  }
+
+  const sameOriginPublicUrl = sameOriginPublicUrlForLocalUpload(localResult.originalUrl);
+  if (sameOriginPublicUrl) {
+    await prisma.asset.update({
+      where: { id: localResult.assetId },
+      data: { original_url: sameOriginPublicUrl },
+    });
+
+    return {
+      ...localResult,
+      originalUrl: sameOriginPublicUrl,
+      fileName,
+      fileSize,
+      mimeType,
+      isPubliclyReachable: true,
+      storageProvider: 'local-public',
     };
   }
 
