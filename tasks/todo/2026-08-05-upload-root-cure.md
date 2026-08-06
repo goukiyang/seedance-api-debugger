@@ -197,7 +197,7 @@ Ponytail 收口：不全量重写，不新引入上传平台，不先做复杂�
 - [ ] T16. 全链路验证、部署和固定审核线程审查
   - 修改对象：不固定，跟随 T8-T15 实际改动。
   - 验证命令：`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsx scripts/reference-media-chain-smoke.ts`、`npx tsc --noEmit`、`npm run lint`、`npm run build`、`git diff --check`。
-  - 线上验证：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`，再验证公网 `/api/config`、`/login` 和 `/generate` 上传入口。
+  - 线上验证：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`，再验证公网 `/api/config`、`/login` 和 `/generate` 上传入口；真实上传矩阵至少包含 1-2MB 图片、接近 30MB 图片、小音频、重复素材复用。
   - Git：聚焦 commit、push 当前分支，必要时登记 `/Volumes/Data/Projects/project-version-registry.md`。
   - 审核：发给固定审核线程 `审核001 - sd2 固定只读审查`，只读审查本轮 diff、测试证据、线上行为和风险。
   - 完成标准：本地、Git、线上、真实页面、独立审查五层都闭环；任一层没完成时不能说“彻底修好”。
