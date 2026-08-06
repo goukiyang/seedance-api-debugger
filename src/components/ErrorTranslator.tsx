@@ -78,6 +78,31 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   const hasNonPublic = debugInfo?.hasNonPublicUrls;
 
   if (
+    lower.includes('reference_media_too_small')
+    || (
+      lower.includes('pixel count')
+      && lower.includes('greater than or equal to')
+      && (lower.includes('409600') || lower.includes('content['))
+    )
+    || lower.includes('参考素材分辨率太低')
+  ) {
+    return {
+      code: 'REFERENCE_MEDIA_TOO_SMALL',
+      title: '参考素材分辨率太低',
+      reasons: [
+        '这不是系统整体故障，是当前某个参考图片或视频分辨率低于生成服务要求',
+        '请换更清晰的素材，或先放大、重新导出后再提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
     lower.includes('reference_image_too_large')
     || lower.includes('参考图尺寸过大')
     || lower.includes('图片尺寸过大')
@@ -90,6 +115,30 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
       reasons: [
         '这不是系统整体故障，是当前选择的参考图超过了视频生成服务允许的图片大小',
         '系统会优先自动压缩到合规尺寸；如果自动处理仍失败，需要换一张更小的图或先压缩后再提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_html_response')
+    || lower.includes('服务临时返回了异常页面')
+    || lower.includes('生成服务临时返回了异常页面')
+    || lower.includes('<!doctype')
+    || lower.includes('<html')
+    || lower.includes('<!--[if ')
+  ) {
+    return {
+      code: 'PROVIDER_HTML_RESPONSE',
+      title: '生成服务临时异常',
+      reasons: [
+        '生成服务或中间网关返回了异常页面，系统没有拿到有效创建结果',
+        '这类问题通常需要稍后重试；如果连续出现，需要管理员查看生成服务状态',
       ],
       actions: [
         { label: '重新提交', action: 'retry' },
@@ -221,8 +270,8 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
       code: 'JSON',
       title: '服务响应格式错误',
       reasons: [
-        'API 服务返回了非 JSON 格式的响应',
-        '服务临时异常',
+        '服务返回的数据格式不符合系统预期',
+        '请刷新后重试；如果连续出现，需要管理员查看接口日志',
       ],
       actions: [
         { label: '重新提交', action: 'retry' },

@@ -255,3 +255,45 @@ Ponytail 收口：不全量重写，不新引入上传平台，不先做复杂�
 
 - [ ] A10. 审查是否清楚标出未完成边界。
   - 判断：大视频、R2 CORS、付费真实生成、数据库 backfill 执行，都要有独立确认或验收证据，不能和小图片上传修复混在一起宣布完成。
+
+## 6. 生成创建错误展示追加修复（2026-08-06）
+
+### 6.1 大白话目标
+
+用户在生成页点提交后，如果生成服务或网关返回 HTML 错误页，页面不能把 `<!DOCTYPE html>` 这类技术内容直接展示出来；如果 Provider 明确说参考素材像素太低，应该告诉用户“素材分辨率不够，换更清晰素材或先放大/重新导出”，并说明冻结点数已返还。
+
+### 6.2 具体任务
+
+- [x] T17. 隐藏生成创建时的 HTML/DOCTYPE 原文
+  - 修改对象：`src/lib/http/json-response.ts`、`src/lib/provider/jimeng.ts`。
+  - 通过标准：HTTP 502 + `text/html` 或 `<!DOCTYPE` 响应只显示短提示，不把 HTML 原文露给用户。
+  - 2026-08-06 落地状态：`readJsonResponse` 对 HTML/DOCTYPE 响应改为短提示；Seedance 创建任务遇到 HTML 响应时只抛“返回异常页面”，不携带 HTML 正文。
+
+- [x] T18. 把 Provider 像素过低错误翻译成用户可操作提示
+  - 修改对象：`src/lib/provider/error-message.ts`、`src/app/api/tasks/create/route.ts`。
+  - 通过标准：`pixel count ... greater than or equal to 409600` 不再显示 `Create video task missing id` 或原始 JSON，而是提示参考素材分辨率太低，并保持冻结点数返还。
+  - 2026-08-06 落地状态：Provider error 对象先提取 `[code] message`；任务创建失败时把 `409600/pixel count` 归类为 `REFERENCE_MEDIA_TOO_SMALL`，返回 400 和“参考素材分辨率太低，已返还冻结点数”的用户提示；任务错误记录也写入同一友好文案，原始 Provider 错误保留在 `ProviderApiRequest` 里供后台追查。
+
+- [x] T19. 补回归 smoke
+  - 修改对象：新增或扩展 `scripts/*smoke.ts`。
+  - 通过标准：测试同时覆盖 HTML 响应清洗、Provider 缺 id 但带 error 对象、像素过低用户提示。
+  - 2026-08-06 落地状态：新增 `scripts/provider-create-error-smoke.ts`，已验证 HTML 不裸露、Provider 缺 id 但带 error 对象不再变成 `missing id`、像素过低转换为用户可操作提示、错误翻译组件含两类新分类；同时锁定 `agentRun`、执行步骤和模板记忆只写用户友好文案，不再写 Provider 原始技术错误。
+
+### 6.3 验收/审查内容
+
+这些审查项需要独立只读子 agent 或固定审核线程检查；审查 agent 不改文件、不提交、不补实现，只输出通过/不通过、证据、缺口、风险、下一步。若本轮工具不可用，由主线程按同一清单只读复查，并明确“非独立审查，可信度低于子 agent”。
+
+- [x] R13. 审查生成页错误展示是否不再暴露 HTML 原文
+  - 证据来源：smoke、源码、线上接口失败响应。
+  - 通过标准：用户不会再看到 `<!DOCTYPE html>`、IE 条件注释或大段 HTML。
+  - 2026-08-06 审查状态：独立只读子 agent `019fd6e2-3594-7c83-b2b9-b3b220d9e1b5` 审查通过；公网静态 chunk 已包含新文案，HTML/DOCTYPE 不再拼进用户错误。
+
+- [x] R14. 审查素材像素过低是否被归类为用户可修正问题
+  - 证据来源：Provider 错误样本、任务创建 API 响应、任务错误记录。
+  - 通过标准：提示明确说明素材分辨率不够、处理方式和点数返还，不说成系统整体故障。
+  - 2026-08-06 审查状态：独立只读子 agent 审查通过；其指出 `agentRun` 原始错误展示风险，已补为友好文案，原始 Provider 错误只留 `ProviderApiRequest` 后台追踪。
+
+### 6.4 审查内容是否对齐目标
+
+- [x] A11. 审查这次修复是否只处理错误归因和展示，不扩大到付费真实生成或上传链路重写。
+  - 2026-08-06 审查状态：本轮只改错误解析、错误分类、前端翻译和 smoke；未改上传链路、扣费规则、Provider 调用参数，也未发起付费真实生成。

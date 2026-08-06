@@ -76,6 +76,23 @@ function redactProviderResponseForLog(value: unknown): unknown {
   }, {});
 }
 
+function createNonJsonProviderError(response: Response, responseText: string) {
+  const contentType = response.headers.get('content-type') || 'unknown content-type';
+  const compactBody = responseText.replace(/\s+/g, ' ').trim().slice(0, 160);
+  const lowerBody = compactBody.toLowerCase();
+  const looksHtml = contentType.toLowerCase().includes('text/html')
+    || lowerBody.startsWith('<!doctype')
+    || lowerBody.startsWith('<html')
+    || lowerBody.includes('<html')
+    || lowerBody.includes('<!--[if ');
+
+  if (looksHtml) {
+    return new Error(`Seedance 创建任务返回异常页面（HTTP ${response.status}，${contentType}）`);
+  }
+
+  return new Error(`Seedance 创建任务返回非 JSON 响应（HTTP ${response.status}，${contentType}）：${compactBody}`);
+}
+
 export function buildProviderHttpErrorStatus(
   providerTaskId: string,
   httpStatus: number,
@@ -368,7 +385,7 @@ export async function createVideoTask(
       try {
         data = JSON.parse(responseText);
       } catch {
-        throw new Error(`Invalid JSON response: ${responseText.slice(0, 200)}`);
+        throw createNonJsonProviderError(response, responseText);
       }
     }
 
@@ -376,13 +393,15 @@ export async function createVideoTask(
     console.log(`[Create] Response:`, JSON.stringify(data, null, 2));
 
     if (!response.ok) {
-      throw new Error(`Create video task failed: ${response.status} ${JSON.stringify(data)}`);
+      const providerErrorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+      throw new Error(providerErrorMessage || `Seedance 创建任务失败（HTTP ${response.status}）`);
     }
 
     // 关键：只解析 id
     const providerTaskId = data.id as string;
     if (!providerTaskId) {
-      throw new Error(`Create video task missing id: ${JSON.stringify(data)}`);
+      const providerErrorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+      throw new Error(providerErrorMessage || 'Seedance 创建任务响应缺少任务 ID');
     }
 
     console.log(`\n✅ Step1 Complete: provider_task_id = ${providerTaskId}\n`);

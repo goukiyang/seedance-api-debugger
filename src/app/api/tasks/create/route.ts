@@ -15,6 +15,7 @@ import {
   isProviderReferenceImageSizeError,
   providerReferenceImageSizeMessage,
 } from '@/lib/provider/reference-image-safety';
+import { providerCreateFailureUserMessage } from '@/lib/provider/error-message';
 import { AuthError } from '@/lib/auth/session';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
@@ -1060,9 +1061,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const providerFailureMessage = err instanceof Error ? err.message : 'Seedance 调用异常';
-    const userFacingProviderMessage = isProviderReferenceImageSizeError(providerFailureMessage)
-      ? `${providerReferenceImageSizeMessage(providerFailureMessage)} 已返还冻结点数。`
-      : '视频生成服务异常，已返还冻结点数';
+    const userFacingFailure = providerCreateFailureUserMessage(providerFailureMessage);
     if (providerRequestId) {
       await markProviderApiRequestFailed({
         requestId: providerRequestId,
@@ -1074,7 +1073,7 @@ export async function POST(request: NextRequest) {
       taskId,
       user.id,
       estimatedCost,
-      providerFailureMessage,
+      userFacingFailure.message,
     );
     if (agentRun) {
       await prisma.$transaction(async (tx) => {
@@ -1082,7 +1081,7 @@ export async function POST(request: NextRequest) {
           where: { id: agentRun.id },
           data: {
             status: 'failed',
-            error_message: providerFailureMessage,
+            error_message: userFacingFailure.message,
             completed_at: new Date(),
           },
         });
@@ -1092,7 +1091,10 @@ export async function POST(request: NextRequest) {
             step_key: 'seedance_failed',
             title: 'Seedance 执行失败',
             input_json: JSON.stringify({ task_id: taskId }),
-            output_json: JSON.stringify({ error: providerFailureMessage }),
+            output_json: JSON.stringify({
+              error: userFacingFailure.code,
+              message: userFacingFailure.message,
+            }),
             sort_order: 6,
           },
         });
@@ -1105,18 +1107,21 @@ export async function POST(request: NextRequest) {
             memory_type: 'task_result',
             signal: 'negative',
             summary: 'Seedance 提交失败，已返还冻结点数',
-            metadata_json: JSON.stringify({ error: providerFailureMessage }),
+            metadata_json: JSON.stringify({
+              error: userFacingFailure.code,
+              message: userFacingFailure.message,
+            }),
           },
         });
       }).catch(() => {});
     }
     return NextResponse.json(
       {
-        error: 'PROVIDER_CREATE_FAILED',
-        message: userFacingProviderMessage,
+        error: userFacingFailure.code,
+        message: userFacingFailure.message,
         task_id: taskId,
       },
-      { status: 502 },
+      { status: userFacingFailure.status },
     );
   }
 }
