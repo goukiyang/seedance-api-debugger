@@ -10,6 +10,8 @@ import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+const MULTIPART_COMPAT_MAX_SIZE_BYTES = 8 * 1024 * 1024;
+
 function cleanString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -21,11 +23,30 @@ function roleForMimeType(mimeType: string, requestedRole: string) {
   return 'reference_image';
 }
 
+function parseContentLength(value: string | null) {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
+    const multipartContentLength = parseContentLength(request.headers.get('content-length'));
+    if (multipartContentLength == null) {
+      return NextResponse.json(
+        { error: '当前旧版表单上传缺少文件大小信息，请刷新页面后使用新版上传链路。' },
+        { status: 411 },
+      );
+    }
+    if (multipartContentLength != null && multipartContentLength > MULTIPART_COMPAT_MAX_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: '当前上传入口只兼容 8MB 以内旧版表单上传，请刷新页面后使用新版上传链路。' },
+        { status: 413 },
+      );
+    }
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });

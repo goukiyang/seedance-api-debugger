@@ -57,18 +57,26 @@ export type SiteAssetPublicUrlResult = {
   publicUploadWarning?: string;
 };
 
-function isLocalPublicUrl(url: string) {
-  return url.startsWith('/');
+export function isLocalPublicUploadUrl(url: string) {
+  return url.startsWith('/uploads/');
 }
 
-function sameOriginPublicUrlForLocalUpload(url: string) {
-  if (!isLocalPublicUrl(url)) return null;
+export function sameOriginPublicUrlForLocalUpload(url: string) {
+  if (!isLocalPublicUploadUrl(url)) return null;
   const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   if (!baseUrl || !isPubliclyReachableUrl(baseUrl)) return null;
-  return `${baseUrl}${url.startsWith('/') ? url : `/${url}`}`;
+  return `${baseUrl}${url}`;
+}
+
+function isSameOriginPublicUploadUrl(url: string) {
+  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  return Boolean(baseUrl && url.startsWith(`${baseUrl}/uploads/`));
 }
 
 function resolveLocalPublicPath(url: string) {
+  if (!isLocalPublicUploadUrl(url)) {
+    throw new Error('本地素材路径非法');
+  }
   const publicRoot = path.resolve(process.cwd(), 'public');
   const resolvedPath = path.resolve(publicRoot, url.replace(/^\/+/, ''));
   if (!resolvedPath.startsWith(`${publicRoot}${path.sep}`)) {
@@ -138,7 +146,7 @@ export async function ensureSiteAssetPublicUrl(assetId: string): Promise<SiteAss
   if (isPubliclyReachableUrl(asset.original_url)) {
     return { asset, isPubliclyReachable: true };
   }
-  if (!isLocalPublicUrl(asset.original_url)) {
+  if (!isLocalPublicUploadUrl(asset.original_url)) {
     throw new Error(`素材不是公网地址，也不是可恢复的本地文件: ${asset.original_url}`);
   }
 
@@ -264,6 +272,7 @@ export async function uploadSiteAsset(
       fileSize,
       mimeType,
       isPubliclyReachable: true,
+      storageProvider: isSameOriginPublicUploadUrl(localResult.originalUrl) ? 'local-public' : undefined,
     };
   }
 

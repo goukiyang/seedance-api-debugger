@@ -7,6 +7,7 @@ import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { proxyDirectUploadToStorage } from '@/lib/assets/direct-upload';
+import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 export const runtime = 'nodejs';
@@ -60,6 +61,9 @@ export async function POST(request: NextRequest) {
       reused: uploadResult.reused,
       storageProvider: uploadResult.storageProvider,
       uploadMode: 'proxy',
+      fallbackPath: 'proxy',
+      skippedProxy: false,
+      fileKind: getSiteUploadKind(uploadResult.mimeType),
     });
     return NextResponse.json({
       success: true,
@@ -91,6 +95,9 @@ export async function POST(request: NextRequest) {
         errorCode: 'proxy_failed',
         errorMessage: message,
         uploadMode: 'proxy',
+        fallbackPath: 'proxy',
+        skippedProxy: false,
+        fileKind: mimeType ? getSiteUploadKind(mimeType) : null,
       });
     }
     return NextResponse.json({ error: message }, { status: 400 });

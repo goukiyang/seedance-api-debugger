@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { completeDirectUpload } from '@/lib/assets/direct-upload';
+import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 export const runtime = 'nodejs';
@@ -56,6 +57,9 @@ export async function POST(request: NextRequest) {
       reused: uploadResult.reused,
       storageProvider: uploadResult.storageProvider,
       uploadMode: 'single',
+      fallbackPath: 'browser-put',
+      skippedProxy: true,
+      fileKind: getSiteUploadKind(uploadResult.mimeType),
     });
     return NextResponse.json({
       success: true,
@@ -85,6 +89,8 @@ export async function POST(request: NextRequest) {
         errorCode: 'complete_failed',
         errorMessage: message,
         uploadMode: 'single',
+        fallbackPath: 'browser-put',
+        skippedProxy: true,
       });
     }
     return NextResponse.json({ error: message }, { status: 400 });

@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import {
+  getSiteUploadKind,
   uploadSiteAsset,
   validateSiteUploadBuffer,
   validateSiteUploadInput,
@@ -17,6 +18,8 @@ import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 export const runtime = 'nodejs';
 export const maxDuration = 180;
+
+const MULTIPART_COMPAT_MAX_SIZE_BYTES = 8 * 1024 * 1024;
 
 type UploadPayload = {
   buffer: Buffer;
@@ -48,6 +51,23 @@ async function readUploadPayload(request: NextRequest): Promise<
   const contentType = contentTypeHeader.split(';')[0]?.trim().toLowerCase() || '';
 
   if (contentTypeHeader.toLowerCase().includes('multipart/form-data')) {
+    const multipartContentLength = parseContentLength(request.headers.get('content-length'));
+    if (multipartContentLength == null) {
+      return {
+        response: NextResponse.json(
+          { error: '当前旧版表单上传缺少文件大小信息，请刷新页面后使用新版上传链路。' },
+          { status: 411 },
+        ),
+      };
+    }
+    if (multipartContentLength != null && multipartContentLength > MULTIPART_COMPAT_MAX_SIZE_BYTES) {
+      return {
+        response: NextResponse.json(
+          { error: '当前上传入口只兼容 8MB 以内旧版表单上传，请刷新页面后使用新版上传链路。' },
+          { status: 413 },
+        ),
+      };
+    }
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
 
@@ -134,6 +154,9 @@ export async function POST(request: NextRequest) {
       reused: uploadResult.reused,
       storageProvider: uploadResult.storageProvider,
       uploadMode: 'raw',
+      fallbackPath: uploadResult.storageProvider === 'local-public' ? 'local-public' : 'raw',
+      skippedProxy: true,
+      fileKind: getSiteUploadKind(uploadResult.mimeType),
     });
     return NextResponse.json({
       success: true,
@@ -167,6 +190,9 @@ export async function POST(request: NextRequest) {
         errorCode: 'raw_failed',
         errorMessage: error instanceof Error ? error.message : 'Upload failed',
         uploadMode: 'raw',
+        fallbackPath: 'raw',
+        skippedProxy: true,
+        fileKind: mimeType ? getSiteUploadKind(mimeType) : null,
       });
     }
     return NextResponse.json(

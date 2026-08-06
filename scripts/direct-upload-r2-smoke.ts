@@ -239,7 +239,7 @@ async function assertVideoProxyUploadBehavior() {
     const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
     await assert.rejects(
       () => uploadFileToHistory(video),
-      /仅支持 30MB 以内图片或 15MB 以内音频自动回退/,
+      /当前视频不能自动改用普通上传/,
       'video upload must not silently fall back to raw upload when proxy fails',
     );
     assert.deepEqual(
@@ -278,7 +278,7 @@ async function assertVideoProxyUploadBehavior() {
     const video = new File([new Uint8Array(1024)], 'clip.mp4', { type: 'video/mp4' });
     await assert.rejects(
       () => uploadFileToHistory(video),
-      /仅支持 30MB 以内图片或 15MB 以内音频自动回退/,
+      /当前视频不能自动改用普通上传/,
       'video upload must not raw fallback after both browser PUT and proxy fail',
     );
     assert.deepEqual(
@@ -298,11 +298,11 @@ async function assertProxyFailureRawFallbackBehavior() {
   try {
     const smallImage = new File([new Uint8Array(1024)], 'small.png', { type: 'image/png' });
     const asset = await uploadFileToHistory(smallImage);
-    assert.equal(asset.id, 'raw-fallback-asset', 'small image must return the raw fallback asset after proxy fails');
+    assert.equal(asset.id, 'raw-fallback-asset', 'small image must return the raw fallback asset when direct upload is unavailable');
     assert.deepEqual(
       smallMocks.requests.map((request) => request.url),
-      ['/api/assets/upload-proxy', '/api/assets/upload'],
-      'small image must try proxy first, then raw fallback',
+      ['/api/assets/upload'],
+      'small image must skip proxy and use raw upload directly when direct upload is unavailable',
     );
   } finally {
     smallMocks.restore();
@@ -329,11 +329,11 @@ async function assertProxyFailureRawFallbackBehavior() {
   try {
     const audio = new File([new Uint8Array(1024)], 'voice.mp3', { type: 'audio/mpeg' });
     const asset = await uploadFileToHistory(audio);
-    assert.equal(asset.id, 'raw-fallback-asset', 'small audio must return the raw fallback asset after proxy fails');
+    assert.equal(asset.id, 'raw-fallback-asset', 'small audio must return the raw fallback asset when direct upload is unavailable');
     assert.deepEqual(
       audioMocks.requests.map((request) => request.url),
-      ['/api/assets/upload-proxy', '/api/assets/upload'],
-      'small audio must try proxy first, then raw fallback',
+      ['/api/assets/upload'],
+      'small audio must skip proxy and use raw upload directly when direct upload is unavailable',
     );
   } finally {
     audioMocks.restore();
@@ -483,7 +483,8 @@ async function run() {
   assert.match(directUploadSource, /createHashingUploadBody/, 'server-proxy uploads must hash the real uploaded stream on the server');
   assert.match(directUploadSource, /trustedHash\?: string \| null/, 'trusted hashes must be explicit and separate from client-provided hashes');
   assert.match(directUploadSource, /hash: trustedHash/, 'only server-verified upload hashes may be stored for later reuse');
-  assert.match(directUploadSource, /findActiveAssetByTrustedHash/, 'trusted uploaded hashes must be reusable by the same owner');
+  assert.match(directUploadSource, /findActiveAssetByTrustedHash/, 'trusted uploaded hashes must be reusable without uploading duplicate bytes');
+  assert.match(directUploadSource, /owner_id: ownerId[\s\S]+hash: trustedHash[\s\S]+const sharedAsset = await prisma\.asset\.findFirst/, 'trusted hash reuse must prefer current owner, then reuse a shared matching file URL');
   assert.match(directUploadSource, /directUploadAvailable: false,[\s\S]+reused: true,[\s\S]+asset: assetRecordToPayload/, 'ticket creation must return an immediate reuse result for existing same-owner hashes');
   assert.match(directUploadSource, /hashingBody\.digest\(\)/, 'server-proxy upload must finish with the hash of the actual uploaded bytes');
   assert.match(directUploadSource, /proxyDirectUploadToStorage/, 'direct upload helper must expose a server-side proxy fallback');
@@ -532,7 +533,7 @@ async function run() {
   assert.match(clientTicketSource, /readUploadJsonResponse<DirectUploadTicketResponse>\(ticketRes, '上传票据接口', invalidJsonMessage\)[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'ticket non-json errors must fallback safely or show a clear bounded error');
   assert.match(clientSource, /ticketRes\.status >= 500[\s\S]+uploadWithRawFallbackOrThrow/, 'ticket server errors must use the safe fallback boundary');
   assert.match(clientSource, /putFileToStorage[\s\S]+catch \(error\)[\s\S]+uploadWithServerProxy/, 'object storage PUT failure must try same-origin server proxy before giving up');
-  assert.match(clientSource, /uploadWithServerProxy[\s\S]+catch \(proxyError\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'raw fallback must stay behind proxy failure and the safe fallback guard');
+  assert.doesNotMatch(proxyFallbackSource, /catch \(proxyError\)[\s\S]+shouldUseRawFallback\(file, fallbackToRaw\)[\s\S]+uploadWithRawFallback/, 'raw fallback must not wait behind proxy failure for safe small images or audio');
   assert.match(rawFallbackSource, /requestJsonWithUploadProgress<UploadAssetResponse>/, 'raw fallback must report real browser upload progress');
   assert.match(rawFallbackSource, /phase:\s*'raw'/, 'raw fallback progress must identify the raw upload phase');
   assert.doesNotMatch(rawFallbackSource, /readJsonResponse<UploadAssetResponse>\(res, \{ invalidJsonMessage \}\)/, 'raw fallback must not leak the generic upload invalid-json message');
@@ -547,10 +548,13 @@ async function run() {
   assert.match(clientCompleteSource, /fetch\('\/api\/assets\/upload-complete'[\s\S]+catch \(error\)[\s\S]+uploadStageConnectionMessage\('上传完成登记', error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'complete connection errors must show upload-complete stage context');
   assert.match(clientCompleteSource, /readUploadJsonResponse<UploadAssetResponse>\(completeRes, '上传完成登记接口', invalidJsonMessage\)[\s\S]+catch \(error\)[\s\S]+uploadWithRawFallbackOrThrow\(file, invalidJsonMessage, fallbackToRaw, message, onProgress\)/, 'complete non-json errors must fallback safely or show a clear bounded error');
   assert.doesNotMatch(clientCompleteSource, /if \(!completeRes\.ok\) {[\s\S]+uploadWithRawFallbackOrThrow/, 'complete JSON failures must not fallback to raw upload after object storage succeeds');
-  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithServerProxy/, 'client must use same-origin proxy directly when browser PUT is intentionally unavailable');
-  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallback/, 'client must keep raw upload fallback when no proxy ticket exists');
-  assert.match(directUnavailableSource, /uploadWithServerProxyOrRawFallback[\s\S]+fallbackToRaw[\s\S]+ticket\.reason \|\| '直传暂不可用'/, 'direct-disabled proxy path must also fallback to raw upload for safe small images');
-  assert.doesNotMatch(directUnavailableSource, /return uploadWithServerProxy\(ticket, file/, 'direct-disabled proxy path must not throw proxy connection errors before raw fallback can run');
+  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithRawFallbackOrThrow/, 'client must use raw upload directly when browser PUT is intentionally unavailable and raw fallback is safe');
+  assert.match(clientSource, /ticket\.directUploadAvailable === false[\s\S]+uploadWithServerProxy/, 'client must keep same-origin proxy for files that cannot use raw fallback');
+  assert.doesNotMatch(directUnavailableSource, /uploadWithServerProxyOrRawFallback[\s\S]+fallbackToRaw[\s\S]+ticket\.reason \|\| '直传暂不可用'/, 'direct-disabled safe files must not proxy first before raw upload');
+  assert.ok(
+    directUnavailableSource.indexOf('shouldUseRawFallback(file, fallbackToRaw)') < directUnavailableSource.indexOf('uploadWithServerProxy('),
+    'direct-disabled branch must check raw fallback before using proxy for files that cannot use raw',
+  );
   assert.match(clientSource, /hash,/, 'client must send hash when creating ticket');
 
   await assertProxyFailureRawFallbackBehavior();

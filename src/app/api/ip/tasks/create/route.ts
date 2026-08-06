@@ -54,6 +54,7 @@ import {
   importReferenceImageUrlsToSite,
   ReferenceImportError,
 } from '@/lib/assets/reference-import';
+import { ensureSiteAssetPublicUrl, sameOriginPublicUrlForLocalUpload } from '@/lib/assets/site-upload';
 import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import {
@@ -650,6 +651,7 @@ export async function POST(request: NextRequest) {
       workspaceId,
       generationReferenceImageIds,
       requestedReferenceImageUrls,
+      user.id,
     ));
   } catch (error) {
     console.error('[IpTasksCreate] Reference image preparation failed:', error);
@@ -1399,6 +1401,7 @@ async function prepareReferenceImages(
   workspaceId: string,
   preferredReferenceImageIds: string[] = [],
   preferredReferenceImageUrls: string[] = [],
+  ownerId: string,
 ): Promise<{
   preparedImages: PreparedRefImage[];
   prepareErrors: string[];
@@ -1510,7 +1513,7 @@ async function prepareReferenceImages(
       if (item.asset) {
         const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset.width, item.asset.height));
         try {
-          const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset });
+          const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset, ownerId });
           providerUrl = safeReference.providerUrl;
           if (safeReference.resized) {
             r2Uploaded += 1;
@@ -1554,41 +1557,25 @@ async function prepareReferenceImages(
         continue;
       }
 
-      const buffer = fs.readFileSync(localFilePath);
-      const ext = path.extname(localFilePath).slice(1).toLowerCase();
-      const mimeMap: Record<string, string> = {
-        jpg: 'image/jpeg',
-        jpeg: 'image/jpeg',
-        png: 'image/png',
-        gif: 'image/gif',
-        webp: 'image/webp',
-        bmp: 'image/bmp',
-      };
-      const mimeType = mimeMap[ext] || 'image/jpeg';
-
-      let r2PublicUrl: string | null = null;
+      let providerUrl: string | null = null;
       try {
-        const { uploadPublicAsset } = await import('@/lib/assets/public-storage');
-        const fileName = item.asset?.file_name || path.basename(originalUrl) || `image.${ext}`;
-        const pubResult = await uploadPublicAsset(buffer, fileName, mimeType);
-        r2PublicUrl = pubResult.publicUrl;
+        if (item.asset?.id) {
+          const result = await ensureSiteAssetPublicUrl(item.asset.id);
+          providerUrl = result.asset.original_url;
+        } else {
+          providerUrl = sameOriginPublicUrlForLocalUpload(originalUrl);
+          if (!providerUrl) throw new Error(`本地素材没有可用公网地址: ${originalUrl}`);
+        }
       } catch (err) {
         skipped += 1;
-        prepareErrors.push(`[${i + 1}] R2 上传失败: ${err instanceof Error ? err.message : String(err)}`);
+        prepareErrors.push(`[${i + 1}] 本地素材公网链接准备失败: ${err instanceof Error ? err.message : String(err)}`);
         continue;
-      }
-
-      if (item.asset?.id) {
-        await prisma.asset.update({
-          where: { id: item.asset.id },
-          data: { original_url: r2PublicUrl },
-        }).catch(() => {});
       }
 
       r2Uploaded += 1;
       preparedImages.push({
         name: item.asset?.file_name || `图${i + 1}`,
-        originalUrl: r2PublicUrl,
+        originalUrl: providerUrl,
         sourceType: 'upload',
         order: i,
       });

@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { createMultipartUploadTicket } from '@/lib/assets/direct-upload';
+import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
 export const runtime = 'nodejs';
@@ -46,6 +47,9 @@ export async function POST(request: NextRequest) {
         errorCode: 'invalid_file_size',
         errorMessage: '文件大小无效',
         uploadMode: 'multipart',
+        fallbackPath: 'multipart',
+        skippedProxy: true,
+        fileKind: getSiteUploadKind(mimeType),
       });
       return NextResponse.json({ error: '文件大小无效，请重新选择文件。' }, { status: 400 });
     }
@@ -70,6 +74,9 @@ export async function POST(request: NextRequest) {
       reused: 'reused' in ticket ? ticket.reused === true : false,
       storageProvider: 'storageProvider' in ticket ? ticket.storageProvider : null,
       uploadMode: 'multipart',
+      fallbackPath: 'multipart',
+      skippedProxy: true,
+      fileKind: getSiteUploadKind(mimeType),
       totalParts: 'partCount' in ticket ? ticket.partCount : null,
     });
     return NextResponse.json(ticket);
@@ -87,6 +94,9 @@ export async function POST(request: NextRequest) {
         errorCode: 'multipart_start_failed',
         errorMessage: message,
         uploadMode: 'multipart',
+        fallbackPath: 'multipart',
+        skippedProxy: true,
+        fileKind: getSiteUploadKind(mimeType),
       });
     }
     const status = (

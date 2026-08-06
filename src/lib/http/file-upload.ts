@@ -197,7 +197,10 @@ function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
   return fallbackToRaw && canUseRawFallback(file);
 }
 
-function rawFallbackUnavailableMessage(reason: string) {
+function rawFallbackUnavailableMessage(reason: string, file?: File) {
+  if (file?.type.startsWith('video/')) {
+    return `${reason.replace(/[。；;,.，]+$/, '')}。当前视频不能自动改用普通上传；请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT、Content-Type 和 ETag，或启用视频分块上传验收路径。`;
+  }
   return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 30MB 以内图片或 15MB 以内音频自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
 }
 
@@ -211,7 +214,7 @@ async function uploadWithRawFallbackOrThrow(
   if (shouldUseRawFallback(file, fallbackToRaw)) {
     return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
   }
-  throw new Error(rawFallbackUnavailableMessage(reason));
+  throw new Error(rawFallbackUnavailableMessage(reason, file));
 }
 
 async function uploadWithServerProxy(
@@ -273,12 +276,15 @@ async function uploadWithServerProxyOrRawFallback(
   reasonPrefix: string,
   onProgress?: UploadProgressHandler,
 ) {
+  if (shouldUseRawFallback(file, fallbackToRaw)) {
+    return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
+  }
+
   try {
     return await uploadWithServerProxy(ticket, file, context, invalidJsonMessage, onProgress);
   } catch (proxyError) {
-    if (shouldUseRawFallback(file, fallbackToRaw)) return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
     const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
-    throw new Error(rawFallbackUnavailableMessage(`${reasonPrefix}；服务端中转也失败：${proxyMessage}`));
+    throw new Error(rawFallbackUnavailableMessage(`${reasonPrefix}；服务端中转也失败：${proxyMessage}`, file));
   }
 }
 
@@ -770,16 +776,16 @@ export async function uploadFileToHistory(
     return ticket.asset;
   }
   if (ticket.directUploadAvailable === false) {
+    if (shouldUseRawFallback(file, fallbackToRaw)) {
+      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress);
+    }
     if (ticket.uploadToken && ticket.storageProvider === 'r2') {
-      return uploadWithServerProxyOrRawFallback(
-        ticket,
-        file,
-        uploadContext,
-        invalidJsonMessage,
-        fallbackToRaw,
-        ticket.reason || '直传暂不可用',
-        onProgress,
-      );
+      try {
+        return await uploadWithServerProxy(ticket, file, uploadContext, invalidJsonMessage, onProgress);
+      } catch (proxyError) {
+        const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
+        throw new Error(rawFallbackUnavailableMessage(`${ticket.reason || '直传暂不可用'}；服务端中转也失败：${proxyMessage}`, file));
+      }
     }
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress);
   }

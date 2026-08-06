@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { Transform } from 'stream';
 import {
@@ -16,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
 import {
   getSiteUploadKind,
+  sameOriginPublicUrlForLocalUpload,
   validateSiteUploadDuration,
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
@@ -28,7 +30,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-produ
 const MULTIPART_UPLOAD_EXPIRES_SECONDS = 24 * 60 * 60;
 export const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
 
-type DirectUploadStorageProvider = 'r2';
+type DirectUploadStorageProvider = 'r2' | 'tos' | 'local-public' | 'local' | 'unknown';
 
 export type DirectUploadTicket = {
   directUploadAvailable: true;
@@ -347,6 +349,44 @@ function assertSha256Hash(hash: string) {
   return normalized;
 }
 
+function storageProviderForAssetUrl(url: string): DirectUploadStorageProvider {
+  const sameOriginUrl = sameOriginPublicUrlForLocalUpload(url);
+  const normalizedUrl = sameOriginUrl || url;
+  const siteBaseUrl = (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  const r2BaseUrl = (process.env.R2_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  const tosBaseUrl = (process.env.TOS_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+
+  if (sameOriginUrl || normalizedUrl.startsWith('/uploads/')) return 'local-public';
+  if (siteBaseUrl && normalizedUrl.startsWith(`${siteBaseUrl}/uploads/`)) return 'local-public';
+  if (r2BaseUrl && normalizedUrl.startsWith(`${r2BaseUrl}/`)) return 'r2';
+  if (tosBaseUrl && normalizedUrl.startsWith(`${tosBaseUrl}/`)) return 'tos';
+  if (normalizedUrl.includes('.r2.cloudflarestorage.com/')) return 'r2';
+  if (isPubliclyReachableUrl(normalizedUrl)) return 'unknown';
+  return 'local';
+}
+
+function publicUrlForAssetUrl(url: string) {
+  return sameOriginPublicUrlForLocalUpload(url) || url;
+}
+
+function localUploadUrlFromAssetUrl(url: string) {
+  const siteBaseUrl = (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  if (url.startsWith('/uploads/')) return url;
+  if (siteBaseUrl && url.startsWith(`${siteBaseUrl}/uploads/`)) {
+    return url.slice(siteBaseUrl.length);
+  }
+  return null;
+}
+
+function assetUrlCanBeReusedWithoutBody(url: string) {
+  const localUploadUrl = localUploadUrlFromAssetUrl(url);
+  if (!localUploadUrl) return true;
+  const publicRoot = path.resolve(process.cwd(), 'public');
+  const resolvedPath = path.resolve(publicRoot, localUploadUrl.replace(/^\/+/, ''));
+  if (!resolvedPath.startsWith(`${publicRoot}${path.sep}`)) return false;
+  return fs.existsSync(resolvedPath);
+}
+
 function createR2Client(config: R2DirectUploadConfig) {
   return new S3Client({
     region: 'auto',
@@ -362,10 +402,12 @@ function assetRecordToPayload(
   asset: DirectUploadAssetRecord,
   reused: boolean,
 ): DirectUploadAssetPayload {
+  const originalUrl = publicUrlForAssetUrl(asset.original_url);
+  const thumbnailUrl = asset.thumbnail_url ? publicUrlForAssetUrl(asset.thumbnail_url) : null;
   return {
     id: asset.id,
-    originalUrl: asset.original_url,
-    thumbnailUrl: asset.thumbnail_url,
+    originalUrl,
+    thumbnailUrl,
     width: asset.width ?? undefined,
     height: asset.height ?? undefined,
     fileName: asset.file_name,
@@ -373,8 +415,8 @@ function assetRecordToPayload(
     mimeType: asset.mime_type,
     hash: asset.hash ?? '',
     reused,
-    isPubliclyReachable: true,
-    storageProvider: 'r2',
+    isPubliclyReachable: isPubliclyReachableUrl(originalUrl),
+    storageProvider: storageProviderForAssetUrl(asset.original_url),
   };
 }
 
@@ -399,16 +441,54 @@ function assetRecordToResult(
   };
 }
 
-async function findActiveAssetByTrustedHash(ownerId: string, trustedHash: string) {
-  return prisma.asset.findFirst({
+async function findActiveAssetByTrustedHash(ownerId: string, trustedHash: string, mimeType?: string | null) {
+  const mimeTypeWhere = mimeType ? { mime_type: mimeType } : {};
+  const ownAsset = await prisma.asset.findFirst({
     where: {
       owner_id: ownerId,
       hash: trustedHash,
-      status: 'active',
+      ...mimeTypeWhere,
     },
     orderBy: [
       { created_at: 'desc' },
     ],
+  });
+  if (ownAsset) {
+    if (!assetUrlCanBeReusedWithoutBody(ownAsset.original_url)) return null;
+    if (ownAsset.status === 'active') return ownAsset;
+    return prisma.asset.update({
+      where: { id: ownAsset.id },
+      data: { status: 'active' },
+    });
+  }
+
+  const sharedAsset = await prisma.asset.findFirst({
+    where: {
+      hash: trustedHash,
+      status: 'active',
+      ...mimeTypeWhere,
+    },
+    orderBy: [
+      { created_at: 'desc' },
+    ],
+  });
+  if (!sharedAsset || !assetUrlCanBeReusedWithoutBody(sharedAsset.original_url)) return null;
+
+  return prisma.asset.create({
+    data: {
+      id: uuidv4(),
+      owner_id: ownerId,
+      type: getSiteUploadKind(sharedAsset.mime_type) || 'image',
+      original_url: sharedAsset.original_url,
+      thumbnail_url: sharedAsset.thumbnail_url,
+      file_name: sharedAsset.file_name,
+      mime_type: sharedAsset.mime_type,
+      width: sharedAsset.width,
+      height: sharedAsset.height,
+      file_size: sharedAsset.file_size,
+      hash: trustedHash,
+      status: 'active',
+    },
   });
 }
 
@@ -426,7 +506,7 @@ async function createAssetFromCompletedUpload(input: {
     throw new Error('上传文件内容和上传票据不一致，请重新上传。');
   }
   if (trustedHash) {
-    const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash);
+    const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash, input.payload.mimeType);
     if (existingAsset) {
       return assetRecordToResult(existingAsset, true);
     }
@@ -436,6 +516,34 @@ async function createAssetFromCompletedUpload(input: {
   const width = kind === 'image' ? normalizeOptionalInt(input.width) : null;
   const height = kind === 'image' ? normalizeOptionalInt(input.height) : null;
   const publicUrl = `${input.config.publicBaseUrl}/${input.payload.key}`;
+  const ownAsset = await prisma.asset.findFirst({
+    where: {
+      owner_id: input.ownerId,
+      hash: trustedHash,
+      mime_type: input.payload.mimeType,
+    },
+    orderBy: [
+      { created_at: 'desc' },
+    ],
+  });
+  if (ownAsset) {
+    const updatedAsset = await prisma.asset.update({
+      where: { id: ownAsset.id },
+      data: {
+        type: kind,
+        original_url: publicUrl,
+        thumbnail_url: kind === 'image' ? publicUrl : null,
+        file_name: input.payload.fileName,
+        mime_type: input.payload.mimeType,
+        width,
+        height,
+        file_size: input.payload.fileSize,
+        hash: trustedHash,
+        status: 'active',
+      },
+    });
+    return assetRecordToResult(updatedAsset, input.reused || false);
+  }
 
   const asset = await prisma.asset.create({
     data: {
@@ -515,7 +623,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
   if (metadataError) throw new Error(metadataError);
   const hash = assertSha256Hash(input.hash);
 
-  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash);
+  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
   if (existingAsset) {
     return {
       directUploadAvailable: false,
@@ -659,7 +767,7 @@ export async function createMultipartUploadTicket(input: CreateMultipartUploadTi
   if (metadataError) throw new Error(metadataError);
   const hash = assertSha256Hash(input.hash);
 
-  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash);
+  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
   if (existingAsset) {
     return {
       directUploadAvailable: false,

@@ -145,62 +145,71 @@ Ponytail 收口：不全量重写，不新引入上传平台，不先做复杂�
 
 ### 5.3 具体可执行任务
 
-- [ ] T8. 上传策略改成“本站直收先成功，R2 只做加速”
+- [x] T8. 上传策略改成“本站直收先成功，R2 只做加速”
   - 修改对象：`src/lib/http/file-upload.ts`、`scripts/direct-upload-r2-smoke.ts`。
   - 执行内容：当 upload ticket 返回 `directUploadAvailable=false` 且文件类型支持 raw fallback 时，前端直接走 `/api/assets/upload`，不要再先尝试 `/api/assets/upload-proxy`。`upload-proxy` 只保留给明确需要 R2 且当前文件不能 raw fallback 的路径。
   - 验证命令：`npx tsx scripts/direct-upload-r2-smoke.ts`。
   - 完成标准：R2 CORS 未验证时，小图片和小音频请求顺序是 `upload-ticket -> /api/assets/upload`；不出现“先等 proxy 失败，再回退 raw”的 15-60 秒延迟。
+  - 2026-08-06 落地状态：已改 `uploadWithServerProxyOrRawFallback` 和 direct-disabled 分支，小图片/小音频先走 raw，不再先等 proxy；`direct-upload-r2-smoke` 通过。
 
-- [ ] T9. 本站 `/uploads` 链接归一化，避免硬编码成 R2
+- [x] T9. 本站 `/uploads` 链接归一化，避免硬编码成 R2
   - 修改对象：`src/lib/assets/site-upload.ts`、`src/lib/assets/direct-upload.ts`。
   - 执行内容：把 local-public helper 限制到 `/uploads/`，不要把任意 `/xxx` 都当成本地公开资源；Asset payload 根据真实 URL 判断 `storageProvider`，不要把复用素材统一写成 `r2`。
   - 验证命令：补或更新 `npx tsx scripts/direct-upload-r2-smoke.ts` 中的复用素材断言。
   - 完成标准：`/uploads/...` 返回 `local-public`，R2 URL 才返回 `r2`；重复素材直接复用同一个后台链接并显示上传成功。
+  - 2026-08-06 落地状态：`sameOriginPublicUrlForLocalUpload` 只允许 `/uploads/`；重复素材 payload 按真实 URL 标记 `local-public/r2/tos/unknown/local`；跨账号同 hash 复用同一文件链接并给当前账号创建自己的资产记录。
 
-- [ ] T10. 生成任务引用历史本地素材时不再重新上传 R2
+- [x] T10. 生成任务引用历史本地素材时不再重新上传 R2
   - 修改对象：`src/app/api/tasks/create/route.ts`、`src/app/api/ip/tasks/create/route.ts`。
   - 执行内容：把本地 `/uploads/...` 图片、视频、音频统一转换成同源公网 URL；生成任务只使用这个可访问链接，不再在创建任务阶段调用 `uploadPublicAsset` 去补传 R2。
   - 验证命令：`npx tsx scripts/reference-media-chain-smoke.ts`，并补充本地 `/uploads` 历史素材场景。
   - 完成标准：选择上传历史里的本地素材生成时，不出现“R2 上传失败”导致提交失败。
+  - 2026-08-06 落地状态：普通生成和 IP 生成都使用 `ensureSiteAssetPublicUrl` / `sameOriginPublicUrlForLocalUpload`，不再动态导入 `uploadPublicAsset` 处理本地素材；`reference-media-chain-smoke` 通过。
 
-- [ ] T11. 自动压缩后的参考图走本站公开链接
+- [x] T11. 自动压缩后的参考图走本站公开链接
   - 修改对象：`src/lib/provider/reference-image-safety.ts`。
   - 执行内容：图片过大自动压缩成功后，优先写入本站上传目录并返回 `https://sd2.youdoodesign.com/uploads/...`；R2 只作为可用时的加速上传，不作为压缩成功后的必要条件。
   - 验证命令：新增或扩展 reference safety smoke，覆盖“原图过大 -> 自动压缩 -> 生成可访问 local-public URL”。
   - 完成标准：用户素材不合规时，系统能先自动处理；自动处理失败才明确说“图片大小/尺寸问题”，不再显示“服务响应格式错误”。
+  - 2026-08-06 落地状态：自动压缩参考图改走 `uploadSiteAsset`，压缩产物可落到本站公网链接；上传根治 smoke 已锁定不再直接依赖 R2/TOS。
 
-- [ ] T12. 历史 `/uploads` 资产做可回滚 backfill
+- [x] T12. 历史 `/uploads` 资产做可回滚 backfill
   - 修改对象：新增脚本 `scripts/backfill-local-upload-asset-urls.ts`，必要时只更新任务文档记录。
   - 执行内容：先 dry-run 统计 `Asset.original_url` 以 `/uploads/` 开头的有效记录，确认本地文件存在后，把它们改成 `https://sd2.youdoodesign.com/uploads/...`；执行前备份 SQLite，执行后输出更新/跳过/缺失数量。
   - 验证命令：`npx tsx scripts/backfill-local-upload-asset-urls.ts --dry-run`；真正执行需先确认数据库备份路径。
   - 停止条件：未拿到备份、发现同一条记录疑似跨用户污染、或脚本会改非 `/uploads/` URL 时停止。
   - 完成标准：历史上传图片能直接复用，不需要重新上传，也不会因 R2 不可用失败。
+  - 2026-08-06 落地状态：新增 `scripts/backfill-local-upload-asset-urls.ts`，默认 dry-run、`--execute` 才写库。已执行回填：更新 21 条历史资产，1 条原始文件缺失跳过；二次 dry-run 候选为 0。独立审查发现首次备份误命中项目根 0B `dev.db`，已修脚本为优先备份真实 `prisma/dev.db`，拒绝 0B 数据库，并补做真实数据库备份 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo/storage/backups/dev.db.local-upload-url-backfill.2026-08-06T08-38-00-711Z.bak`（80MB）。
 
-- [ ] T13. 清理旧 multipart/formData 风险入口
+- [x] T13. 清理旧 multipart/formData 风险入口
   - 修改对象：`src/app/api/assets/upload/route.ts`、`src/app/api/codex/assets/upload/route.ts`、`src/app/api/tools/ultimate-canvas/upload/route.ts`。
   - 执行内容：保留兼容入口，但大文件不要再走 `request.formData()` + `arrayBuffer()` 的旧解析方式；能走 raw helper 的统一走 raw helper，不能走的提前返回 JSON 错误。
   - 验证命令：构造非法 multipart、大于限制文件、未登录请求，确认响应都是 JSON，不返回 HTML。
   - 完成标准：不再复发 `Unexpected token '<'`、`<!DOCTYPE ... is not valid JSON` 这类“页面内容当 JSON 解析”的错误。
+  - 2026-08-06 落地状态：三个旧 multipart 入口都在 `request.formData()` 前按 `Content-Length` 做 8MB 兼容保护并返回 JSON 413；缺少 `Content-Length` 时直接返回 JSON 411，不再解析文件体。公网 `Transfer-Encoding: chunked` 表单请求已验证返回 411 JSON；上传根治 smoke 已锁定。
 
-- [ ] T14. 视频上传边界单独定清楚
+- [x] T14. 视频上传边界单独定清楚
   - 修改对象：`src/lib/http/file-upload.ts`、`src/lib/assets/direct-upload.ts`、视频上传入口相关 smoke。
   - 执行内容：视频大文件不要复用图片/音频 raw fallback 文案；R2 CORS 未验证时，明确提示“当前视频大文件需要管理员开启 R2 CORS 或使用分块上传验收路径”，不要说用户文件太大。
   - 验证命令：用小视频和超出 raw fallback 的视频各跑一次上传入口 smoke。
   - 完成标准：图片、音频、视频三类失败原因分开；视频问题不会再污染普通图片上传判断。
+  - 2026-08-06 落地状态：视频不能 raw fallback 时显示视频专用原因，指向 R2 CORS 或分块上传验收路径；`direct-upload-r2-smoke` 已覆盖 proxy 失败和 PUT+proxy 双失败。
 
-- [ ] T15. 后台上传日志补“是否跳过 proxy / 是否 local-public”
+- [x] T15. 后台上传日志补“是否跳过 proxy / 是否 local-public”
   - 修改对象：`src/lib/assets/upload-log.ts` 及相关上传 API 调用点。
   - 执行内容：日志里增加安全摘要字段：`storageProvider`、`fallbackPath`、`skippedProxy`、`durationMs`、`assetId`、`fileKind`。不记录签名 URL、token、cookie、完整本机路径。
   - 验证命令：上传成功、raw 失败、重复复用各跑一次，检查 OperationLog 或上传日志摘要。
   - 完成标准：用户反馈“上传卡住”时，后台能在 10 秒内判断是 ticket、raw、proxy、complete、mount 还是外部 R2 问题。
+  - 2026-08-06 落地状态：上传日志参数新增 `fallbackPath`、`skippedProxy`、`fileKind`，ticket/raw/proxy/complete/multipart start 调用点已写入安全摘要；上传根治 smoke 已检查不记录 token、cookie、签名 URL。
 
-- [ ] T16. 全链路验证、部署和固定审核线程审查
+- [x] T16. 全链路验证、部署和固定审核线程审查
   - 修改对象：不固定，跟随 T8-T15 实际改动。
   - 验证命令：`npx tsx scripts/direct-upload-r2-smoke.ts`、`npx tsx scripts/reference-media-chain-smoke.ts`、`npx tsc --noEmit`、`npm run lint`、`npm run build`、`git diff --check`。
   - 线上验证：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`、`status sd2`，再验证公网 `/api/config`、`/login` 和 `/generate` 上传入口；真实上传矩阵至少包含 1-2MB 图片、接近 30MB 图片、小音频、重复素材复用。
   - Git：聚焦 commit、push 当前分支，必要时登记 `/Volumes/Data/Projects/project-version-registry.md`。
   - 审核：发给固定审核线程 `审核001 - sd2 固定只读审查`，只读审查本轮 diff、测试证据、线上行为和风险。
   - 完成标准：本地、Git、线上、真实页面、独立审查五层都闭环；任一层没完成时不能说“彻底修好”。
+  - 2026-08-06 落地状态：`upload-root-cure-smoke`、`direct-upload-r2-smoke`、`reference-media-chain-smoke`、`upload-entrypoint-inventory-smoke`、`npx tsc --noEmit`、`npm run lint`、`git diff --check` 均通过；lint 仅剩既有 warning。已部署生产 BUILD_ID `4xDZW3A2HjpcEvAOApBFn`，`youdoo-sites status sd2` OK，健康周期后 `runs=11` 未增长。公网 2.2MB 图片真实验证通过：R2 未开启时 ticket 不复用缺文件旧记录，raw 上传返回 `200/local-public`，再次 ticket 返回 `reused=true/local-public`；旧 multipart chunked 请求返回 JSON 411。独立只读复审通过，剩余 Git 版本化随本轮提交推送完成。
 
 ### 5.4 验收/审查内容
 

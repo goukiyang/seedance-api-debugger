@@ -29,6 +29,9 @@ type RecordAssetUploadLogParams = {
   reused?: boolean | null;
   storageProvider?: string | null;
   uploadMode?: 'single' | 'multipart' | 'proxy' | 'raw' | null;
+  fallbackPath?: string | null;
+  skippedProxy?: boolean | null;
+  fileKind?: string | null;
   partNumber?: number | null;
   totalParts?: number | null;
 };
@@ -64,6 +67,9 @@ export async function recordAssetUploadLog(params: RecordAssetUploadLogParams) {
       reused: params.reused === true,
       storageProvider: cleanText(params.storageProvider, 40),
       uploadMode: cleanText(params.uploadMode, 40),
+      fallbackPath: cleanText(params.fallbackPath, 40),
+      skippedProxy: params.skippedProxy === true,
+      fileKind: cleanText(params.fileKind, 40),
       partNumber: normalizeNumber(params.partNumber),
       totalParts: normalizeNumber(params.totalParts),
       errorCode: cleanText(params.errorCode, 80),

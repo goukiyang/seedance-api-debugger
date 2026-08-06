@@ -18,6 +18,12 @@ import { prisma } from '@/lib/prisma';
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const ASSETS_DIR = path.join(UPLOAD_DIR, 'assets');
 const THUMBS_DIR = path.join(UPLOAD_DIR, 'thumbs');
+const KNOWN_SITE_UPLOAD_BASE_URLS = [
+  process.env.NEXT_PUBLIC_BASE_URL,
+  'https://sd2.youdoodesign.com',
+]
+  .filter((value): value is string => Boolean(value && value.trim()))
+  .map((value) => value.replace(/\/+$/, ''));
 
 // 确保目录存在
 function ensureDirs() {
@@ -28,17 +34,39 @@ function ensureDirs() {
   });
 }
 
-function isLocalUploadUrl(url: string | null | undefined): url is string {
-  return Boolean(url && url.startsWith('/uploads/'));
+function localUploadUrlFromAssetUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith('/uploads/')) return url;
+  for (const baseUrl of KNOWN_SITE_UPLOAD_BASE_URLS) {
+    if (url.startsWith(`${baseUrl}/uploads/`)) {
+      return url.slice(baseUrl.length);
+    }
+  }
+  return null;
 }
 
 function localPublicPath(url: string): string {
-  return path.join(process.cwd(), 'public', url.replace(/^\/+/, ''));
+  const localUrl = localUploadUrlFromAssetUrl(url);
+  if (!localUrl) throw new Error(`Not a local upload URL: ${url}`);
+  const publicRoot = path.resolve(process.cwd(), 'public');
+  const resolvedPath = path.resolve(publicRoot, localUrl.replace(/^\/+/, ''));
+  if (!resolvedPath.startsWith(`${publicRoot}${path.sep}`)) {
+    throw new Error(`Unsafe local upload URL: ${url}`);
+  }
+  return resolvedPath;
 }
 
 function localUploadExists(url: string | null | undefined): boolean {
-  if (!isLocalUploadUrl(url)) return true;
+  if (!url || !localUploadUrlFromAssetUrl(url)) return true;
   return fs.existsSync(localPublicPath(url));
+}
+
+function restoreMissingLocalUploadFile(url: string | null | undefined, buffer: Buffer) {
+  if (!url || localUploadExists(url) || !localUploadUrlFromAssetUrl(url)) return false;
+  const filePath = localPublicPath(url);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, buffer);
+  return true;
 }
 
 // ============================================================================
@@ -167,12 +195,7 @@ export async function uploadAsset(
       updates.status = 'active';
     }
 
-    if (isLocalUploadUrl(existing.original_url) && !localUploadExists(existing.original_url)) {
-      const storedFileName = `${hash}.${ext}`;
-      const filePath = path.join(ASSETS_DIR, storedFileName);
-      fs.writeFileSync(filePath, buffer);
-      updates.original_url = `/uploads/assets/${storedFileName}`;
-    }
+    restoreMissingLocalUploadFile(existing.original_url, buffer);
 
     if (assetType === 'image' && (!existing.thumbnail_url || !localUploadExists(existing.thumbnail_url))) {
       const metadata = await sharp(buffer).metadata();
@@ -233,13 +256,7 @@ export async function uploadAsset(
       updates.status = 'active';
     }
 
-    if (isLocalUploadUrl(sharedExisting.original_url) && !localUploadExists(sharedExisting.original_url)) {
-      const storedFileName = `${hash}.${ext}`;
-      const filePath = path.join(ASSETS_DIR, storedFileName);
-      fs.writeFileSync(filePath, buffer);
-      originalUrl = `/uploads/assets/${storedFileName}`;
-      updates.original_url = originalUrl;
-    }
+    restoreMissingLocalUploadFile(sharedExisting.original_url, buffer);
 
     if (assetType === 'image' && (!sharedExisting.thumbnail_url || !localUploadExists(sharedExisting.thumbnail_url))) {
       const metadata = await sharp(buffer).metadata();
@@ -363,12 +380,14 @@ export async function deleteAsset(id: string) {
   if (!asset) return;
 
   // 删除文件
-  const originalPath = path.join(process.cwd(), 'public', asset.original_url);
-  if (fs.existsSync(originalPath)) {
+  const originalPath = localUploadUrlFromAssetUrl(asset.original_url)
+    ? localPublicPath(asset.original_url)
+    : null;
+  if (originalPath && fs.existsSync(originalPath)) {
     fs.unlinkSync(originalPath);
   }
-  if (asset.thumbnail_url) {
-    const thumbPath = path.join(process.cwd(), 'public', asset.thumbnail_url);
+  if (asset.thumbnail_url && localUploadUrlFromAssetUrl(asset.thumbnail_url)) {
+    const thumbPath = localPublicPath(asset.thumbnail_url);
     if (fs.existsSync(thumbPath)) {
       fs.unlinkSync(thumbPath);
     }

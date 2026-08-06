@@ -1,6 +1,6 @@
 import path from 'path';
 import sharp from 'sharp';
-import { uploadPublicAsset } from '@/lib/assets/public-storage';
+import { uploadSiteAsset } from '@/lib/assets/site-upload';
 
 export const PROVIDER_REFERENCE_IMAGE_MAX_PIXELS = 36_000_000;
 const PROVIDER_REFERENCE_IMAGE_TARGET_PIXELS = 32_000_000;
@@ -95,6 +95,7 @@ async function fetchImageBuffer(url: string) {
 export async function ensureProviderSafeReferenceImageUrl(params: {
   originalUrl: string;
   asset?: ProviderReferenceImageAsset | null;
+  ownerId: string;
 }): Promise<ProviderSafeReferenceImageResult> {
   const { originalUrl, asset } = params;
   const knownResize = getProviderSafeImageResizeDimensions(asset?.width, asset?.height);
@@ -127,19 +128,21 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
     ? await resizedImage.png({ compressionLevel: 9 }).toBuffer()
     : await resizedImage.jpeg({ quality: 92, mozjpeg: true }).toBuffer();
 
-  const upload = await uploadPublicAsset(
+  const upload = await uploadSiteAsset(
     outputBuffer,
     outputName(asset?.file_name, outputMimeType),
     outputMimeType,
+    outputBuffer.byteLength,
+    params.ownerId,
   );
 
   if (!upload.isPubliclyReachable) {
-    throw new Error(upload.warning || '压缩后的参考图没有公网地址');
+    throw new Error(upload.publicUploadWarning || '压缩后的参考图没有公网地址');
   }
 
   return {
     originalUrl,
-    providerUrl: upload.publicUrl,
+    providerUrl: upload.originalUrl,
     resized: true,
     width: metadata.width,
     height: metadata.height,
