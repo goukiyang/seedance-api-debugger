@@ -177,6 +177,7 @@ const PROJECT_STORAGE_KEY = 'generate_project_id';
 const GENERATION_PREFERENCE_STORAGE_PREFIX = 'generation_defaults_v1:';
 const RECENT_TASK_PAGE_SIZE = 12;
 const MAX_ACTIVE_POLLING_TASKS = 12;
+const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
 
 type GenerateSurface = 'standard' | 'ip';
 
@@ -254,6 +255,23 @@ function mergeTasksById(primary: TaskItem[], secondary: TaskItem[]): TaskItem[] 
     seen.add(task.id);
     return true;
   });
+}
+
+function collectPollableTaskIds(tasks: Pick<TaskItem, 'id' | 'local_status'>[]): string[] {
+  return tasks
+    .filter((task) => task.id && POLLABLE_TASK_STATUSES.has(task.local_status))
+    .map((task) => task.id);
+}
+
+function mergePollingTaskIds(incomingIds: string[], currentIds: string[]): string[] {
+  const seen = new Set<string>();
+  return [...incomingIds, ...currentIds]
+    .filter((taskId) => {
+      if (!taskId || seen.has(taskId)) return false;
+      seen.add(taskId);
+      return true;
+    })
+    .slice(0, MAX_ACTIVE_POLLING_TASKS);
 }
 
 function formatRecentTaskChargeText(chargeText: string): string {
@@ -920,6 +938,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
 
       const { tasks, pagination } = normalizeRecentTaskListResponse(data);
+      const pollableTaskIds = collectPollableTaskIds(tasks);
       if (mode === 'replace') {
         setRecentTasks(tasks);
         recentTasksPageRef.current = pagination.page;
@@ -938,6 +957,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const hasMore = currentPage < pagination.total_pages;
       recentTasksHasMoreRef.current = hasMore;
       setRecentTasksHasMore(hasMore);
+      if (pollableTaskIds.length > 0) {
+        setActivePollingTaskIds((current) => mergePollingTaskIds(pollableTaskIds, current));
+      }
     } catch (err) {
       setRecentTasksError(err instanceof Error ? err.message : '最近任务加载失败');
     } finally {
@@ -992,8 +1014,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
     setIsPolling(true);
     let cancelled = false;
-    let pollCount = 0;
-    const MAX_POLLS = 120; // ~10 minutes at 5s interval
 
     const refreshRecentTasks = () => {
       void loadRecentTasksPage(1, 'merge-head');
@@ -1007,12 +1027,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     };
 
     const poll = async () => {
-      pollCount += 1;
       const terminalIds: string[] = [];
 
       await Promise.all(activePollingTaskIds.map(async (taskId) => {
         try {
-          const statusEndpoint = isIpSurface ? `/api/ip/video/status/${taskId}` : `/api/video/status/${taskId}`;
+          const statusEndpoint = isIpSurface ? `/api/ip/video/status/${taskId}` : `/api/video/status/${taskId}?refresh=true`;
           const res = await fetch(statusEndpoint);
           if (!res.ok) return;
           const data: PolledTask = await res.json();
@@ -1048,8 +1067,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         setActivePollingTaskIds((current) => current.filter((id) => !terminalIds.includes(id)));
         refreshRecentTasks();
         refreshCredits();
-      } else if (pollCount >= MAX_POLLS) {
-        setActivePollingTaskIds([]);
       }
     };
 

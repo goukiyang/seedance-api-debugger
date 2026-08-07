@@ -96,6 +96,7 @@ const PROJECT_STORAGE_KEY = 'template_generate_project_id';
 const VIDEO_CARD_STORAGE_KEY = 'template_generate_video_card_by_project_v1';
 const RECENT_TASK_PAGE_SIZE = 12;
 const MAX_ACTIVE_POLLING_TASKS = 12;
+const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
 
 function projectDisplayName(project: ProjectOption): string {
   return project.type === 'personal' ? '个人空间' : project.name;
@@ -114,6 +115,23 @@ function projectMetaLabel(project: ProjectOption): string {
 
 function formatRecentTaskChargeText(chargeText: string): string {
   return chargeText.replace(/\s*USD(?=（|$)/g, '');
+}
+
+function collectPollableTaskIds(tasks: Pick<TaskItem, 'id' | 'local_status'>[]): string[] {
+  return tasks
+    .filter((task) => task.id && POLLABLE_TASK_STATUSES.has(task.local_status))
+    .map((task) => task.id);
+}
+
+function mergePollingTaskIds(incomingIds: string[], currentIds: string[]): string[] {
+  const seen = new Set<string>();
+  return [...incomingIds, ...currentIds]
+    .filter((taskId) => {
+      if (!taskId || seen.has(taskId)) return false;
+      seen.add(taskId);
+      return true;
+    })
+    .slice(0, MAX_ACTIVE_POLLING_TASKS);
 }
 
 function formatRecentTaskTime(dateStr: string): string {
@@ -427,11 +445,15 @@ export function TemplateGenerateClient() {
       const currentPage = Number(pagination.page || page);
       const totalPages = Number(pagination.total_pages || currentPage);
       const hasMore = currentPage < totalPages;
+      const pollableTaskIds = collectPollableTaskIds(tasks);
       setRecentTasks((current) => mode === 'append' ? [...current, ...tasks.filter((task) => !current.some((item) => item.id === task.id))] : tasks);
       setRecentTasksPage(currentPage);
       setRecentTasksHasMore(hasMore);
       recentTasksPageRef.current = currentPage;
       recentTasksHasMoreRef.current = hasMore;
+      if (pollableTaskIds.length > 0) {
+        setActivePollingTaskIds((current) => mergePollingTaskIds(pollableTaskIds, current));
+      }
     } catch (error) {
       setRecentTasksError(error instanceof Error ? error.message : '最近任务加载失败');
     } finally {
@@ -468,7 +490,7 @@ export function TemplateGenerateClient() {
       try {
         const settled: string[] = [];
         for (const taskId of activePollingTaskIds) {
-          const response = await fetch(`/api/video/status/${taskId}`);
+          const response = await fetch(`/api/video/status/${taskId}?refresh=true`);
           if (!response.ok) continue;
           const data = await response.json();
           if (cancelled) return;
