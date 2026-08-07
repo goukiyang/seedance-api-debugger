@@ -29,9 +29,6 @@ export const SITE_UPLOAD_MAX_SIZE_BY_KIND: Record<SiteUploadKind, number> = {
   audio: 15 * 1024 * 1024,
 };
 
-const SITE_UPLOAD_DURATION_MIN_SECONDS = 2;
-const SITE_UPLOAD_DURATION_MAX_SECONDS = 15;
-
 export type SiteUploadResult = {
   assetId: string;
   originalUrl: string;
@@ -260,12 +257,7 @@ export function validateSiteUploadInput(file: File) {
 export function validateSiteUploadDuration(mimeType: string, durationSeconds: number | null | undefined) {
   const kind = getSiteUploadKind(mimeType);
   if (kind !== 'video' && kind !== 'audio') return null;
-  if (!Number.isFinite(durationSeconds) || !durationSeconds) {
-    return `${uploadKindLabel(kind)}时长读取失败，请确认文件完整、格式正确后重试。`;
-  }
-  if (durationSeconds < SITE_UPLOAD_DURATION_MIN_SECONDS || durationSeconds > SITE_UPLOAD_DURATION_MAX_SECONDS) {
-    return `${uploadKindLabel(kind)}时长需为 ${SITE_UPLOAD_DURATION_MIN_SECONDS}-${SITE_UPLOAD_DURATION_MAX_SECONDS} 秒，当前约 ${durationSeconds.toFixed(1)} 秒。`;
-  }
+  void durationSeconds;
   return null;
 }
 
@@ -278,9 +270,15 @@ export async function validateSiteUploadBuffer(buffer: Buffer, fileName: string,
     return validateSiteUploadDuration(mimeType, metadata.durationSeconds);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return '服务端缺少 ffprobe，暂时无法校验视频/音频时长，请先联系管理员补齐运行环境。';
+      console.warn('[SiteUpload] ffprobe unavailable while reading upload metadata:', { fileName, kind });
+      return null;
     }
-    return `无法读取${uploadKindLabel(kind)}时长，请确认文件完整、格式正确后重试。`;
+    console.warn('[SiteUpload] Failed to read upload media metadata, accepting asset for ingestion:', {
+      fileName,
+      kind,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
   }
 
   return null;

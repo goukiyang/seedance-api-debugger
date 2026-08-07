@@ -51,7 +51,7 @@ function generateTinyAudio(filePath: string, seconds: number) {
   ], { stdio: 'pipe' });
 }
 
-async function assertMediaDurationValidation() {
+async function assertMediaUploadValidation() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-ref-smoke-'));
   try {
     const { validateSiteUploadBuffer, validateSiteUploadInput } = await import('../src/lib/assets/site-upload');
@@ -68,22 +68,22 @@ async function assertMediaDurationValidation() {
     assert.equal(
       await validateSiteUploadBuffer(fs.readFileSync(validVideoPath), 'valid.mp4', 'video/mp4'),
       null,
-      '2 秒以上视频应该通过参考视频时长校验',
+      '2 秒以上视频应该通过上传入库校验',
     );
-    assert.match(
-      await validateSiteUploadBuffer(fs.readFileSync(shortVideoPath), 'short.mp4', 'video/mp4') || '',
-      /2-15 秒/,
-      '1 秒视频应该被参考视频时长校验拦截',
+    assert.equal(
+      await validateSiteUploadBuffer(fs.readFileSync(shortVideoPath), 'short.mp4', 'video/mp4'),
+      null,
+      '1 秒视频不应在上传入库阶段拦截，应交给生成前准入校验',
     );
     assert.equal(
       await validateSiteUploadBuffer(fs.readFileSync(validAudioPath), 'valid.mp3', 'audio/mpeg'),
       null,
-      '2 秒以上音频应该通过参考音频时长校验',
+      '2 秒以上音频应该通过上传入库校验',
     );
-    assert.match(
-      await validateSiteUploadBuffer(fs.readFileSync(shortAudioPath), 'short.mp3', 'audio/mpeg') || '',
-      /2-15 秒/,
-      '1 秒音频应该被参考音频时长校验拦截',
+    assert.equal(
+      await validateSiteUploadBuffer(fs.readFileSync(shortAudioPath), 'short.mp3', 'audio/mpeg'),
+      null,
+      '1 秒音频不应在上传入库阶段拦截，应交给生成前准入校验',
     );
 
     const oversizeAudio = { type: 'audio/mpeg', size: 16 * 1024 * 1024, name: 'large.mp3' } as File;
@@ -115,7 +115,8 @@ async function main() {
     '参考图集保存不能继续拒绝非图片素材',
   );
   const fileUploadHelperForAlbum = read('src/lib/http/file-upload.ts');
-  assertIncludes(fileUploadHelperForAlbum, 'validateClientMediaDuration', '统一 Asset 上传必须在图集挂载前校验视频/音频时长');
+  assertIncludes(fileUploadHelperForAlbum, 'validateClientMediaDuration', '统一 Asset 上传必须保留媒体元数据读取入口，但不能在上传阶段硬拦时长');
+  assertNotIncludes(fileUploadHelperForAlbum, 'throw new Error(`参考', '浏览器上传阶段不能再用参考素材时长规则中断上传');
   assertIncludes(fileUploadHelperForAlbum, '/api/assets/upload-ticket', '统一 Asset 上传必须先走上传票据，不能让图集接口直收文件');
   assertIncludes(albumImagesRoute, "export const maxDuration = 120", '参考图集上传接口必须允许较长视频/音频上传处理时间');
   assertIncludes(albumImagesRoute, 'ensureSiteAssetPublicUrl', '参考图集复用历史视频/音频素材前必须补公网 URL');
@@ -162,8 +163,9 @@ async function main() {
   assertIncludes(referenceStrip, 'UploadProgressIndicator', '生成工作台参考图上传必须显示进度组件');
   assertIncludes(referenceStrip, 'onUpload(file, (progress)', '生成工作台参考图上传必须接收真实上传进度');
   assertIncludes(referenceStrip, 'ref-strip-upload-progress', '生成工作台参考图上传必须有稳定进度条样式入口');
-  assertIncludes(referenceStrip, '最多 9 个', '参考区容量文案不能继续把视频/音频叫成张');
-  assertIncludes(referenceStrip, '+{assets.length - MAX_REFS} 个', '参考区超出数量文案必须统一为个');
+  assertIncludes(referenceStrip, '参考图最多 ${SEEDANCE_REFERENCE_IMAGE_LIMIT} 张', '参考区容量文案必须按图片/视频/音频分开说明');
+  assertIncludes(referenceStrip, '图 ${referenceCounts.image}', '参考区计数必须按图片/视频/音频分开展示');
+  assertNotIncludes(referenceStrip, 'MAX_REFS', '参考区不能继续用总 9 个硬限制隐藏素材或禁用添加');
 
   const uploadedImagePicker = read('src/components/UploadedImagePicker.tsx');
   assertIncludes(uploadedImagePicker, 'UploadProgressIndicator', '历史素材弹窗必须显示进度组件');
@@ -179,6 +181,8 @@ async function main() {
   assertIncludes(uploadedImagePicker, 'await onConfirm(assetIds, assets)', '历史素材弹窗上传成功后必须复用已上传 assetId 加入当前参考区并回传素材类型');
   assertIncludes(uploadedImagePicker, 'retryPendingAttach', '历史素材弹窗加入参考区失败后必须能不重传文件直接重试');
   assertIncludes(uploadedImagePicker, '正在加入参考区', '历史素材弹窗必须提示上传后正在挂载参考区');
+  assertIncludes(uploadedImagePicker, '生成前会按当前模型规则检查数量和素材参数', '历史素材弹窗不能继续把总 9 个说成加入参考区限制');
+  assertNotIncludes(uploadedImagePicker, 'MAX_REFS', '历史素材弹窗不能继续用总 9 个硬限制阻止选择或上传');
 
   const assetHistoryRoute = read('src/app/api/assets/history/route.ts');
   assertIncludes(assetHistoryRoute, "type HistoryAssetType = AssetType | 'all'", '历史素材接口必须支持 all 类型查询');
@@ -198,6 +202,14 @@ async function main() {
 
   const tasksCreate = read('src/app/api/tasks/create/route.ts');
   const ipTasksCreate = read('src/app/api/ip/tasks/create/route.ts');
+  const referenceMediaPolicy = read('src/lib/provider/reference-media-policy.ts');
+  assertIncludes(tasksCreate, 'validateReferenceMediaProviderPreflight', 'Seedance 任务创建必须集中执行生成服务参考素材准入校验');
+  assertIncludes(tasksCreate, 'validateSeedanceReferenceMediaPreflight', 'Seedance 任务创建必须复用官方规则表进行准入校验');
+  assertIncludes(ipTasksCreate, 'validateSeedanceReferenceMediaPreflight', 'IP 生成任务创建也必须复用同一套参考素材准入校验');
+  assertNotIncludes(tasksCreate, 'preparedImages.map((img) => img.originalUrl).slice(0, 9)', '普通生成接口不能静默截断超过 9 张参考图');
+  assertNotIncludes(ipTasksCreate, 'preparedImages.map((img) => img.originalUrl).slice(0, 9)', 'IP 生成接口不能静默截断超过 9 张参考图');
+  assertIncludes(referenceMediaPolicy, 'REFERENCE_VIDEO_DURATION_UNSUPPORTED', 'Seedance 准入规则必须能识别已知不合规视频时长');
+  assertIncludes(referenceMediaPolicy, 'REFERENCE_AUDIO_DURATION_UNSUPPORTED', 'Seedance 准入规则必须能识别已知不合规音频时长');
   for (const source of [tasksCreate, ipTasksCreate]) {
     assertIncludes(source, 'isPubliclyReachableUrl', '任务创建接口必须拦截非公网参考视频/音频 URL');
     assertIncludes(source, '音频参考不能单独使用', '任务创建接口必须拦截单独音频参考');
@@ -225,6 +237,7 @@ async function main() {
   assertIncludes(referenceAlbumPicker, 'type ReferenceAlbumSelection', '图集选择器必须把选择素材类型回传给生成页');
   assertIncludes(referenceAlbumPicker, 'await onConfirm(selectedImageIds, selectedAssets)', '图集选择器确认时必须回传素材类型，避免音频被当成图片引用');
   assertIncludes(referenceAlbumPicker, '加入参考区', '图集选择器按钮文案必须覆盖图片、视频、音频素材');
+  assertIncludes(referenceAlbumPicker, '生成前再检查各自上限', '图集选择器不能继续把总 9 个说成加入参考区限制');
 
   const assetLibraryPage = read('src/app/assets/page.tsx');
   assertIncludes(assetLibraryPage, 'UploadProgressIndicator', '资产管理页本地上传必须显示进度组件');
@@ -235,7 +248,8 @@ async function main() {
   assertIncludes(assetLibraryPage, "file.type.startsWith('audio/')", '资产管理页上传成功后必须能切到音频分类');
   assertIncludes(assetLibraryPage, 'accept="image/*,video/*,audio/*"', '资产管理页本地上传必须允许音频文件');
   assertIncludes(assetLibraryPage, 'asset-library-upload-progress', '资产管理页本地上传必须有稳定进度条样式入口');
-  assertIncludes(assetLibraryPage, '支持图片、2-15 秒视频、2-15 秒音频', '资产管理页必须向用户说明音频上传范围');
+  assertIncludes(assetLibraryPage, '支持图片、视频、音频上传', '资产管理页上传文案不能把生成时长限制说成上传限制');
+  assertIncludes(assetLibraryPage, '生成前会按当前模型规则检查时长、格式和分辨率', '资产管理页必须说明生成限制发生在生成前');
 
   const assetLibraryRoute = read('src/app/api/assets/library/route.ts');
   assertIncludes(assetLibraryRoute, "const ITEM_TYPES = new Set(['all', 'video', 'image', 'audio', 'reference'])", '资产库接口必须允许 audio 类型筛选');
@@ -254,7 +268,8 @@ async function main() {
   assertIncludes(modeSelector, 'imageAssetCount', '图片模式校验不能继续按全部素材数量计算');
   assertIncludes(modeSelector, '首尾帧模式至少需要 <strong>2 个图片参考</strong>', '首尾帧模式必须提示图片参考数量不足');
 
-  assertIncludes(generationComposer, '音频参考需要配合图片或视频一起使用', '生成页必须在前端拦截单独音频参考，避免创建任务和冻结点数');
+  assertIncludes(generationComposer, 'validateSeedanceReferenceMediaPreflight', '生成页必须在前端复用 Seedance 参考素材准入规则');
+  assertIncludes(referenceMediaPolicy, 'REFERENCE_AUDIO_REQUIRES_VISUAL', '生成页复用的规则必须在前端拦截单独音频参考，避免创建任务和冻结点数');
   assertIncludes(generationComposer, 'const imageReferenceAssets = useMemo', '生成页必须单独计算图片参考，避免音频占用 @图片 序号');
   assertIncludes(generationComposer, 'checkPrompt(prompt, imageReferenceAssets.length', '提示词 @图片 校验只能按图片参考数量计算');
   assertIncludes(generationComposer, 'asset.type === \'image\'', '历史素材加入提示词时必须只给图片素材生成 @图片 标记');
@@ -269,7 +284,7 @@ async function main() {
   assertIncludes(referenceThumb, 'ref-thumb-media-placeholder', '工作区参考素材缩略图必须能展示音频占位');
   assertIncludes(referenceThumb, 'onPreview(imageSrc, asset.type)', '工作区参考素材预览必须把音频/视频类型传给弹窗');
 
-  await assertMediaDurationValidation();
+  await assertMediaUploadValidation();
 
   console.log('reference-media-chain-smoke: ok');
 }

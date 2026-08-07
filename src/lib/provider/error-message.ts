@@ -123,6 +123,6 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
   return {
     code: 'PROVIDER_CREATE_FAILED',
     status: 502,
-    message: '视频生成服务异常，已返还冻结点数。',
+    message: '视频生成服务返回了未知异常，系统已记录错误摘要用于排查和补充规则。已返还冻结点数，请稍后重试；如果连续出现，请联系管理员查看生成服务日志。',
   };
 }

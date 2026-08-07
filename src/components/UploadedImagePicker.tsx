@@ -63,7 +63,6 @@ type PendingPickerAttach = {
 };
 
 const PAGE_SIZE = 40;
-const MAX_REFS = 9;
 const HISTORY_INVALID_JSON_MESSAGE = '历史素材服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 
 function isSupportedReferenceFile(file: File) {
@@ -130,7 +129,7 @@ export function UploadedImagePicker({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentAssetIdSet = useMemo(() => new Set(currentAssetIds), [currentAssetIds]);
-  const remaining = Math.max(0, MAX_REFS - currentCount);
+  void currentCount;
 
   const loadPage = useCallback(async (targetPage: number, mode: 'replace' | 'append' = 'replace') => {
     setLoading(true);
@@ -191,7 +190,6 @@ export function UploadedImagePicker({
     if (currentAssetIdSet.has(assetId)) return;
     setSelectedAssetIds((current) => {
       if (current.includes(assetId)) return current.filter((id) => id !== assetId);
-      if (current.length >= remaining) return current;
       return [...current, assetId];
     });
   };
@@ -201,7 +199,7 @@ export function UploadedImagePicker({
   };
 
   const attachUploadedAssets = async (pending: PendingPickerAttach) => {
-    const assetIds = pending.assetIds.filter((id) => !currentAssetIdSet.has(id)).slice(0, remaining);
+    const assetIds = pending.assetIds.filter((id) => !currentAssetIdSet.has(id));
     if (assetIds.length === 0) {
       setPendingAttach(null);
       await loadPage(1, 'replace');
@@ -244,16 +242,6 @@ export function UploadedImagePicker({
       return;
     }
     if (files.length === 0) return;
-    if (remaining <= 0) {
-      setError(`单次生成最多选择 ${MAX_REFS} 个参考素材，当前已达上限。`);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      return;
-    }
-    if (files.length > remaining) {
-      setError(`当前还可新增 ${remaining} 个参考素材，请减少选择数量后重试。`);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      return;
-    }
     setUploading(true);
     setUploadProgress(null);
     setPendingAttach(null);
@@ -274,7 +262,7 @@ export function UploadedImagePicker({
         uploadedAssetIds.push(assetId);
         uploadedSelections.push({ id: assetId, type: assetTypeFromFile(file) });
       }
-      const attachableIds = uploadedAssetIds.filter((id) => !currentAssetIdSet.has(id)).slice(0, remaining);
+      const attachableIds = uploadedAssetIds.filter((id) => !currentAssetIdSet.has(id));
       if (attachableIds.length > 0) {
         const selectionById = new Map(uploadedSelections.map((item) => [item.id, item]));
         const attachableSelections = attachableIds
@@ -364,7 +352,7 @@ export function UploadedImagePicker({
         <div className="uploaded-picker-header">
           <div>
             <h3>添加参考素材</h3>
-            <p>选择历史素材或上传图片、视频、音频加入当前参考区，最多 9 个。</p>
+            <p>选择历史素材或上传图片、视频、音频加入当前参考区；生成前会按当前模型规则检查数量和素材参数。</p>
           </div>
           <button type="button" className="uploaded-picker-close" onClick={onClose}>x</button>
         </div>
@@ -401,7 +389,6 @@ export function UploadedImagePicker({
               {items.map((item) => {
                 const selected = selectedAssetIds.includes(item.id);
                 const inWorkspace = currentAssetIdSet.has(item.id);
-                const disabledByLimit = !selected && !inWorkspace && selectedAssetIds.length >= remaining;
                 const dimensions = item.width && item.height ? `${item.width}x${item.height}` : '未知尺寸';
                 const previewTitle = item.type === 'image' ? '放大查看' : `选择${assetTypeLabel(item.type)}素材`;
                 return (
@@ -427,7 +414,7 @@ export function UploadedImagePicker({
                           }
                           toggleAsset(item.id);
                         }}
-                        disabled={item.type !== 'image' && (inWorkspace || disabledByLimit)}
+                        disabled={item.type !== 'image' && inWorkspace}
                         title={previewTitle}
                         aria-label={`${previewTitle}${item.fileName}`}
                       >
@@ -443,7 +430,7 @@ export function UploadedImagePicker({
                         type="button"
                         className="uploaded-picker-card-state"
                         onClick={() => toggleAsset(item.id)}
-                        disabled={inWorkspace || disabledByLimit}
+                        disabled={inWorkspace}
                       >
                         {inWorkspace ? '已在参考区' : selected ? '已选择' : '选择'}
                       </button>
@@ -468,7 +455,7 @@ export function UploadedImagePicker({
         </div>
 
         <div className="uploaded-picker-footer">
-          <span>已选 {selectedAssetIds.length} 个，当前还可新增 {remaining} 个</span>
+          <span>已选 {selectedAssetIds.length} 个；生成前会检查图片、视频、音频各自上限</span>
           <div className="uploaded-picker-actions">
             {hasMore && (
               <button

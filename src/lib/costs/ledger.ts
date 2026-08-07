@@ -339,6 +339,7 @@ export async function markProviderApiRequestFailed(params: {
   requestId: string;
   errorCode?: string | null;
   errorMessage?: string | null;
+  responseSummary?: unknown;
 }) {
   await prisma.providerApiRequest.update({
     where: { id: params.requestId },
@@ -346,6 +347,7 @@ export async function markProviderApiRequestFailed(params: {
       status: 'failed',
       error_code: params.errorCode || null,
       error_message: params.errorMessage || null,
+      response_summary_json: params.responseSummary ? JSON.stringify(params.responseSummary) : null,
       completed_at: new Date(),
     },
   });

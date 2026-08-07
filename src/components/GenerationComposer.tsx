@@ -22,7 +22,7 @@ import { ReferenceAlbumPicker, type ReferenceAlbumSelection } from '@/components
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { isReferenceMediaTooSmall, referenceMediaTooSmallMessage } from '@/lib/provider/reference-media-policy';
+import { validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
 import type { VolcengineIpModelOption } from '@/lib/integrations/volcengine-ip-models';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
@@ -34,7 +34,6 @@ const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
 const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
-const MAX_REFS = 9;
 const MAX_PROMPT_CHARS = 2000;
 const TEMPLATE_MODIFIERS = ['更科技', '更快节奏', '更品牌', '更产品', '更情绪化', '更克制'];
 const TEMPLATE_WORKBENCH_PREFS_KEY = 'seedance_template_workbench_preferences_v1';
@@ -503,26 +502,35 @@ export function GenerationComposer({
     return checkPrompt(prompt, imageReferenceAssets.length, duration);
   }, [prompt, imageReferenceAssets.length, duration]);
 
-  const hasAudioOnlyReferences = useMemo(() => {
-    const hasAudio = workspace.assets.some((asset) => asset.type === 'audio');
-    const hasVisualReference = workspace.assets.some((asset) => asset.type === 'image' || asset.type === 'video');
-    return hasAudio && !hasVisualReference;
-  }, [workspace.assets]);
-
-  const referenceMediaResolutionBlocker = useMemo(() => {
-    const lowResolutionAsset = workspace.assets.find((asset) => {
-      return (asset.type === 'image' || asset.type === 'video')
-        && isReferenceMediaTooSmall(asset.width, asset.height);
+  const referenceMediaPreflightBlocker = useMemo(() => {
+    const issue = validateSeedanceReferenceMediaPreflight({
+      images: workspace.assets
+        .filter((asset) => asset.type === 'image')
+        .map((asset) => ({
+          url: asset.originalUrl,
+          name: asset.fileName,
+          mimeType: asset.mimeType,
+          width: asset.width,
+          height: asset.height,
+        })),
+      videos: workspace.assets
+        .filter((asset) => asset.type === 'video')
+        .map((asset) => ({
+          url: asset.originalUrl,
+          name: asset.fileName,
+          mimeType: asset.mimeType,
+          width: asset.width,
+          height: asset.height,
+        })),
+      audios: workspace.assets
+        .filter((asset) => asset.type === 'audio')
+        .map((asset) => ({
+          url: asset.originalUrl,
+          name: asset.fileName,
+          mimeType: asset.mimeType,
+        })),
     });
-    if (!lowResolutionAsset) return null;
-    const index = workspace.assets.findIndex((asset) => asset.assetId === lowResolutionAsset.assetId);
-    return referenceMediaTooSmallMessage({
-      kind: lowResolutionAsset.type as 'image' | 'video',
-      name: lowResolutionAsset.fileName,
-      width: lowResolutionAsset.width,
-      height: lowResolutionAsset.height,
-      index,
-    });
+    return issue?.message || null;
   }, [workspace.assets]);
 
   const submitBlocker = useMemo(() => {
@@ -539,11 +547,8 @@ export function GenerationComposer({
       return '素材已上传成功，但加入参考区失败，请先重试加入参考区。';
     }
 
-    if (hasAudioOnlyReferences) {
-      return '音频参考需要配合图片或视频一起使用，请再添加 1 个图片或视频参考素材。';
-    }
-    if (referenceMediaResolutionBlocker) {
-      return referenceMediaResolutionBlocker;
+    if (referenceMediaPreflightBlocker) {
+      return referenceMediaPreflightBlocker;
     }
 
     if (generationMode === 'first_last_frame' && imageReferenceAssets.length < 2) {
@@ -559,7 +564,7 @@ export function GenerationComposer({
       return '1080p 生成需要先确认审批通过。';
     }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, hasAudioOnlyReferences, referenceMediaResolutionBlocker]);
+  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -632,7 +637,6 @@ export function GenerationComposer({
       : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
 
   const mentionCandidates = useMemo<PromptMentionCandidate[]>(() => {
-    const sourceDisabled = workspace.assets.length >= MAX_REFS;
     return [
       {
         id: 'create-subject',
@@ -664,19 +668,17 @@ export function GenerationComposer({
         type: 'source',
         source: 'history',
         label: '从历史素材选择',
-        description: sourceDisabled ? `已达 ${MAX_REFS} 个上限` : '选择曾经上传过的图片、视频或音频',
-        disabled: sourceDisabled,
+        description: '选择曾经上传过的图片、视频或音频',
       },
       {
         id: 'source:album',
         type: 'source',
         source: 'album',
         label: '从图集选择',
-        description: sourceDisabled ? `已达 ${MAX_REFS} 个上限` : '我的图集、项目图集、公共图集',
-        disabled: sourceDisabled,
+        description: '我的图集、项目图集、公共图集',
       },
     ];
-  }, [imageReferenceAssets, workspace.assets.length]);
+  }, [imageReferenceAssets]);
 
   const currentReferenceImageIds = useMemo(() => {
     return workspace.assets
@@ -1150,10 +1152,6 @@ export function GenerationComposer({
     });
 
     const idsToAdd = uniqueReferenceImageIds.filter((id) => !existingLabelByReferenceId.has(id));
-    const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
-    if (idsToAdd.length > availableSlots) {
-      throw new Error(`单次生成最多选择 ${MAX_REFS} 个参考素材，当前还可新增 ${availableSlots} 个`);
-    }
 
     const labelByReferenceId = new Map(existingLabelByReferenceId);
     const selectedTypeByReferenceId = new Map(selectedAssets.map((asset) => [asset.id, asset.type]));
@@ -1209,10 +1207,6 @@ export function GenerationComposer({
     });
 
     const idsToAdd = uniqueAssetIds.filter((id) => !existingLabelByAssetId.has(id));
-    const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
-    if (idsToAdd.length > availableSlots) {
-      throw new Error(`单次生成最多选择 ${MAX_REFS} 个参考素材，当前还可新增 ${availableSlots} 个`);
-    }
 
     const labelByAssetId = new Map(existingLabelByAssetId);
     const selectedTypeByAssetId = new Map(selectedAssets.map((asset) => [asset.id, asset.type]));
@@ -1675,9 +1669,9 @@ export function GenerationComposer({
           </>
         )}
 
-        {referenceMediaResolutionBlocker && (
+        {referenceMediaPreflightBlocker && (
           <div className="reference-media-quality-warning">
-            {referenceMediaResolutionBlocker}
+            {referenceMediaPreflightBlocker}
           </div>
         )}
 

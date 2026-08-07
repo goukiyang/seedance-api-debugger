@@ -131,6 +131,13 @@ async function main() {
   assert.ok(isProviderHtmlResponseError('Invalid JSON response: <!DOCTYPE html>'));
   assert.doesNotMatch(htmlMessage.message, /<!DOCTYPE|<html/i);
 
+  const unknownMessage = providerCreateFailureUserMessage('[NewProviderCode] provider changed a validation rule');
+  assert.equal(unknownMessage.code, 'PROVIDER_CREATE_FAILED');
+  assert.equal(unknownMessage.status, 502);
+  assert.match(unknownMessage.message, /已记录错误摘要/);
+  assert.match(unknownMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(unknownMessage.message, /NewProviderCode|provider changed/i);
+
   const errorTranslator = read('src/components/ErrorTranslator.tsx');
   assert.match(errorTranslator, /REFERENCE_MEDIA_TOO_SMALL/, '错误翻译组件必须识别参考素材分辨率太低');
   assert.match(errorTranslator, /PROVIDER_HTML_RESPONSE/, '错误翻译组件必须识别 Provider HTML 异常页');
@@ -140,6 +147,9 @@ async function main() {
   assert.match(tasksCreateRoute, /error_message:\s*userFacingFailure\.message/, 'Agent 运行失败展示字段必须写用户友好文案。');
   assert.match(tasksCreateRoute, /output_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, 'Agent 步骤输出必须写错误分类和用户友好文案。');
   assert.match(tasksCreateRoute, /metadata_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, '模板记忆元数据必须写错误分类和用户友好文案。');
+  assert.match(tasksCreateRoute, /errorCode:\s*userFacingFailure\.code/, 'Provider 请求失败记录必须写入归类后的错误码，方便后台补规则。');
+  assert.match(tasksCreateRoute, /responseSummary:\s*\{[\s\S]*reference_media:\s*buildReferenceMediaFailureSummary/, 'Provider 请求失败记录必须写入参考素材结构化摘要。');
+  assert.match(tasksCreateRoute, /host:\s*safeUrlHost\(url\)/, 'Provider 失败摘要只能记录 URL host，不能记录完整素材 URL。');
   assert.doesNotMatch(tasksCreateRoute, /error_message:\s*providerFailureMessage/, 'Agent 运行失败字段不能再直接写 Provider 原始错误。');
 
   console.log('provider-create-error-smoke: ok');

@@ -143,17 +143,15 @@ export async function POST(request: NextRequest) {
       mediaMetadata = await readSiteUploadMediaMetadata(buffer, fileName, mimeType);
     } catch (error) {
       const kind = getSiteUploadKind(mimeType);
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return NextResponse.json(
-          { error: '服务端缺少 ffprobe，暂时无法校验视频/音频时长，请先联系管理员补齐运行环境。' },
-          { status: 400 },
-        );
+      if (kind === 'video' || kind === 'audio') {
+        console.warn('[Upload] Media metadata unreadable, accepting asset ingestion:', {
+          fileName,
+          kind,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } else {
+        throw error;
       }
-      const label = kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '素材';
-      return NextResponse.json(
-        { error: `无法读取${label}时长，请确认文件完整、格式正确后重试。` },
-        { status: 400 },
-      );
     }
     const mediaValidationError = validateSiteUploadDuration(mimeType, mediaMetadata?.durationSeconds);
     if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });

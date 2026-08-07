@@ -1371,7 +1371,7 @@ function AssetsPageContent() {
           <span>
             {assetUploadFile
               ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`
-              : '支持图片、2-15 秒视频、2-15 秒音频，音频最大 15MB。'}
+              : '支持图片、视频、音频上传；音频最大 15MB。生成前会按当前模型规则检查时长、格式和分辨率。'}
           </span>
         </div>
         {assetUploadProgress && (

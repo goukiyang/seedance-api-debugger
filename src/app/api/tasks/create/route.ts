@@ -20,9 +20,10 @@ import {
 } from '@/lib/provider/reference-image-safety';
 import {
   isReferenceMediaTooSmall,
-  referenceMediaKindLabel,
   referenceMediaTooSmallMessage,
+  validateSeedanceReferenceMediaPreflight,
   type ReferenceMediaKind,
+  type SeedanceReferenceMediaItem,
 } from '@/lib/provider/reference-media-policy';
 import { providerCreateFailureUserMessage } from '@/lib/provider/error-message';
 import { AuthError } from '@/lib/auth/session';
@@ -104,11 +105,14 @@ function parseJsonRecord(value: string | null | undefined) {
 }
 
 function normalizeReferenceMediaUrls(value: unknown, max: number) {
+  return normalizeReferenceMediaUrlList(value).slice(0, max);
+}
+
+function normalizeReferenceMediaUrlList(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-    .slice(0, max);
+    .filter(Boolean);
 }
 
 function firstNonPublicReferenceMediaUrl(urls: string[]) {
@@ -116,7 +120,7 @@ function firstNonPublicReferenceMediaUrl(urls: string[]) {
 }
 
 type ReferenceMediaResolutionIssue = {
-  error: 'REFERENCE_MEDIA_TOO_SMALL' | 'REFERENCE_MEDIA_DIMENSIONS_MISSING';
+  error: string;
   message: string;
   details: {
     kind: ReferenceMediaKind;
@@ -142,6 +146,40 @@ function safeUrlHost(url: string) {
   }
 }
 
+function parseFps(value: unknown) {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const [numerator, denominator] = value.split('/').map((item) => Number(item));
+  if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
+    const next = numerator / denominator;
+    return Number.isFinite(next) && next > 0 ? next : null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeProbeDuration(value: unknown) {
+  const parsed = Number.parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function inferMimeTypeFromUrl(url: string | null | undefined) {
+  if (!url) return null;
+  const pathname = url.split('?')[0]?.toLowerCase() || '';
+  if (pathname.endsWith('.mp4')) return 'video/mp4';
+  if (pathname.endsWith('.mov')) return 'video/quicktime';
+  if (pathname.endsWith('.webm')) return 'video/webm';
+  if (pathname.endsWith('.mp3')) return 'audio/mpeg';
+  if (pathname.endsWith('.wav')) return 'audio/wav';
+  if (pathname.endsWith('.ogg')) return 'audio/ogg';
+  if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
+  if (pathname.endsWith('.png')) return 'image/png';
+  if (pathname.endsWith('.webp')) return 'image/webp';
+  if (pathname.endsWith('.gif')) return 'image/gif';
+  if (pathname.endsWith('.bmp')) return 'image/bmp';
+  return null;
+}
+
 async function probePublicImageDimensions(url: string) {
   if (!isPubliclyReachableUrl(url)) return null;
   const dimensions = await readProviderReferenceImageDimensions(url);
@@ -158,39 +196,39 @@ async function probePublicVideoDimensions(url: string) {
     '-select_streams',
     'v:0',
     '-show_entries',
-    'stream=width,height',
+    'stream=width,height,avg_frame_rate,r_frame_rate:format=duration',
     '-of',
     'json',
     url,
   ], { timeout: 15000, maxBuffer: 1024 * 32 });
-  const parsed = JSON.parse(String(stdout || '{}')) as { streams?: Array<{ width?: number; height?: number }> };
+  const parsed = JSON.parse(String(stdout || '{}')) as {
+    streams?: Array<{ width?: number; height?: number; avg_frame_rate?: string; r_frame_rate?: string }>;
+    format?: { duration?: string | number };
+  };
   const stream = parsed.streams?.[0];
   const width = normalizeProbeDimension(stream?.width);
   const height = normalizeProbeDimension(stream?.height);
-  return width && height ? { width, height } : null;
+  return {
+    width,
+    height,
+    durationSeconds: normalizeProbeDuration(parsed.format?.duration),
+    fps: parseFps(stream?.avg_frame_rate) ?? parseFps(stream?.r_frame_rate),
+  };
 }
 
-function buildMissingReferenceMediaDimensionsIssue(input: {
-  kind: ReferenceMediaKind;
-  name: string | null;
-  width: number | null;
-  height: number | null;
-  index: number;
-}): ReferenceMediaResolutionIssue {
-  const kindLabel = referenceMediaKindLabel(input.kind);
-  const fallbackName = `${kindLabel}${input.index + 1}`;
-  const name = input.name?.trim() || fallbackName;
-  return {
-    error: 'REFERENCE_MEDIA_DIMENSIONS_MISSING',
-    message: `参考${kindLabel}「${name}」无法读取分辨率，系统不能确认它是否符合生成服务要求。请重新上传这个${kindLabel}，或换一个能识别宽高的素材后再提交。`,
-    details: {
-      kind: input.kind,
-      name,
-      width: input.width,
-      height: input.height,
-      index: input.index,
-    },
-  };
+async function probePublicAudioMetadata(url: string) {
+  if (!isPubliclyReachableUrl(url)) return null;
+  const { stdout } = await execFileAsync('ffprobe', [
+    '-v',
+    'error',
+    '-show_entries',
+    'format=duration',
+    '-of',
+    'json',
+    url,
+  ], { timeout: 15000, maxBuffer: 1024 * 16 });
+  const parsed = JSON.parse(String(stdout || '{}')) as { format?: { duration?: string | number } };
+  return { durationSeconds: normalizeProbeDuration(parsed.format?.duration) };
 }
 
 function buildLowResolutionIssue(input: {
@@ -259,15 +297,6 @@ async function validateReferenceMediaResolution(input: {
       }
     }
 
-    if (width == null || height == null) {
-      return buildMissingReferenceMediaDimensionsIssue({
-        kind: 'image',
-        name,
-        width,
-        height,
-        index,
-      });
-    }
     if (isReferenceMediaTooSmall(width, height)) {
       return buildLowResolutionIssue({
         kind: 'image',
@@ -305,9 +334,9 @@ async function validateReferenceMediaResolution(input: {
       try {
         const probed = await probePublicVideoDimensions(url);
         if (probed) {
-          width = probed.width;
-          height = probed.height;
-          if (asset?.type === 'video') {
+          width = probed.width ?? width;
+          height = probed.height ?? height;
+          if (asset?.type === 'video' && width && height) {
             await prisma.asset.update({
               where: { id: asset.id },
               data: { width, height },
@@ -323,9 +352,6 @@ async function validateReferenceMediaResolution(input: {
       }
     }
 
-    if (width == null || height == null) {
-      return buildMissingReferenceMediaDimensionsIssue({ kind: 'video', name, width, height, index });
-    }
     if (isReferenceMediaTooSmall(width, height)) {
       return buildLowResolutionIssue({
         kind: 'video',
@@ -338,6 +364,166 @@ async function validateReferenceMediaResolution(input: {
   }
 
   return null;
+}
+
+async function validateReferenceMediaProviderPreflight(input: {
+  preparedImages: PreparedRefImage[];
+  imageUrls: string[];
+  referenceVideoUrls: string[];
+  referenceAudioUrls: string[];
+}): Promise<ReferenceMediaResolutionIssue | null> {
+  const allUrls = uniquePreserveOrder([
+    ...input.imageUrls,
+    ...input.referenceVideoUrls,
+    ...input.referenceAudioUrls,
+  ]);
+  const assets = allUrls.length > 0
+    ? await prisma.asset.findMany({
+        where: { original_url: { in: allUrls } },
+        select: {
+          id: true,
+          original_url: true,
+          file_name: true,
+          mime_type: true,
+          width: true,
+          height: true,
+          type: true,
+        },
+      })
+    : [];
+  const assetByUrl = new Map(assets.map((asset) => [asset.original_url, asset]));
+  const preparedImageByUrl = new Map(input.preparedImages.map((image) => [image.originalUrl, image]));
+
+  const images: SeedanceReferenceMediaItem[] = input.imageUrls.map((url, index) => {
+    const prepared = preparedImageByUrl.get(url) ?? null;
+    const asset = assetByUrl.get(url) ?? null;
+    return {
+      url,
+      index,
+      name: prepared?.name || asset?.file_name || `图片${index + 1}`,
+      mimeType: asset?.mime_type || inferMimeTypeFromUrl(url),
+      width: prepared?.width ?? asset?.width ?? null,
+      height: prepared?.height ?? asset?.height ?? null,
+    };
+  });
+
+  const videos: SeedanceReferenceMediaItem[] = [];
+  for (let index = 0; index < input.referenceVideoUrls.length; index += 1) {
+    const url = input.referenceVideoUrls[index];
+    const asset = assetByUrl.get(url) ?? null;
+    let width = asset?.width ?? null;
+    let height = asset?.height ?? null;
+    let durationSeconds: number | null = null;
+    let fps: number | null = null;
+    try {
+      const probed = await probePublicVideoDimensions(url);
+      if (probed) {
+        width = width ?? probed.width;
+        height = height ?? probed.height;
+        durationSeconds = probed.durationSeconds;
+        fps = probed.fps;
+        if (asset?.type === 'video' && (asset.width == null || asset.height == null) && width && height) {
+          await prisma.asset.update({ where: { id: asset.id }, data: { width, height } });
+        }
+      }
+    } catch (error) {
+      console.warn('[TasksCreate] Failed to probe reference video preflight metadata:', {
+        assetId: asset?.id ?? null,
+        urlHost: safeUrlHost(url),
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    videos.push({
+      url,
+      index,
+      name: asset?.file_name || `视频${index + 1}`,
+      mimeType: asset?.mime_type || inferMimeTypeFromUrl(url),
+      width,
+      height,
+      durationSeconds,
+      fps,
+    });
+  }
+
+  const audios: SeedanceReferenceMediaItem[] = [];
+  for (let index = 0; index < input.referenceAudioUrls.length; index += 1) {
+    const url = input.referenceAudioUrls[index];
+    const asset = assetByUrl.get(url) ?? null;
+    let durationSeconds: number | null = null;
+    try {
+      const probed = await probePublicAudioMetadata(url);
+      durationSeconds = probed?.durationSeconds ?? null;
+    } catch (error) {
+      console.warn('[TasksCreate] Failed to probe reference audio preflight metadata:', {
+        assetId: asset?.id ?? null,
+        urlHost: safeUrlHost(url),
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    audios.push({
+      url,
+      index,
+      name: asset?.file_name || `音频${index + 1}`,
+      mimeType: asset?.mime_type || inferMimeTypeFromUrl(url),
+      durationSeconds,
+    });
+  }
+
+  const issue = validateSeedanceReferenceMediaPreflight({ images, videos, audios });
+  if (!issue) return null;
+  return {
+    error: issue.code,
+    message: issue.message,
+    details: {
+      kind: issue.kind || 'image',
+      name: null,
+      width: null,
+      height: null,
+      index: issue.index ?? 0,
+    },
+  };
+}
+
+function buildReferenceMediaFailureSummary(input: {
+  preparedImages: PreparedRefImage[];
+  imageUrls: string[];
+  referenceVideoUrls: string[];
+  referenceAudioUrls: string[];
+}) {
+  const preparedImageByUrl = new Map(input.preparedImages.map((image) => [image.originalUrl, image]));
+  return {
+    images: {
+      count: input.imageUrls.length,
+      items: input.imageUrls.slice(0, 20).map((url, index) => {
+        const prepared = preparedImageByUrl.get(url) ?? null;
+        return {
+          index,
+          name: prepared?.name || `图片${index + 1}`,
+          host: safeUrlHost(url),
+          width: prepared?.width ?? null,
+          height: prepared?.height ?? null,
+          source_type: prepared?.sourceType ?? null,
+          resized: Boolean(prepared?.providerSafeResize),
+        };
+      }),
+    },
+    videos: {
+      count: input.referenceVideoUrls.length,
+      items: input.referenceVideoUrls.slice(0, 20).map((url, index) => ({
+        index,
+        host: safeUrlHost(url),
+        mime_type: inferMimeTypeFromUrl(url),
+      })),
+    },
+    audios: {
+      count: input.referenceAudioUrls.length,
+      items: input.referenceAudioUrls.slice(0, 20).map((url, index) => ({
+        index,
+        host: safeUrlHost(url),
+        mime_type: inferMimeTypeFromUrl(url),
+      })),
+    },
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -813,13 +999,21 @@ export async function POST(request: NextRequest) {
   let referenceImageUrls: string[] = [];
   let firstFrameUrl: string | undefined = body.first_frame_url;
   let lastFrameUrl: string | undefined = body.last_frame_url;
-  let frameImageUrls: string[] = normalizeReferenceMediaUrls(body.frame_image_urls, 9);
-  const referenceVideoUrls = normalizeReferenceMediaUrls(body.reference_video_urls, 3);
-  const referenceAudioUrls = normalizeReferenceMediaUrls(body.reference_audio_urls, 3);
+  let frameImageUrls: string[] = normalizeReferenceMediaUrlList(body.frame_image_urls);
+  const allReferenceVideoUrls = normalizeReferenceMediaUrlList(body.reference_video_urls);
+  const allReferenceAudioUrls = normalizeReferenceMediaUrlList(body.reference_audio_urls);
+  if (allReferenceVideoUrls.length > 3) {
+    return errorJson('Seedance 2.0 单次生成最多选择 3 个参考视频。', 400);
+  }
+  if (allReferenceAudioUrls.length > 3) {
+    return errorJson('Seedance 2.0 单次生成最多选择 3 个参考音频。', 400);
+  }
+  const referenceVideoUrls = allReferenceVideoUrls.slice(0, 3);
+  const referenceAudioUrls = allReferenceAudioUrls.slice(0, 3);
 
   switch (generationMode) {
     case 'all_in_one_reference':
-      referenceImageUrls = preparedImages.map((img) => img.originalUrl).slice(0, 9);
+      referenceImageUrls = preparedImages.map((img) => img.originalUrl);
       break;
     case 'first_last_frame':
       if (!firstFrameUrl) firstFrameUrl = preparedImages[0]?.originalUrl;
@@ -861,6 +1055,15 @@ export async function POST(request: NextRequest) {
   });
   if (referenceMediaResolutionIssue) {
     return NextResponse.json(referenceMediaResolutionIssue, { status: 400 });
+  }
+  const referenceMediaPreflightIssue = await validateReferenceMediaProviderPreflight({
+    preparedImages,
+    imageUrls: finalReferenceImageUrls,
+    referenceVideoUrls,
+    referenceAudioUrls,
+  });
+  if (referenceMediaPreflightIssue) {
+    return NextResponse.json(referenceMediaPreflightIssue, { status: 400 });
   }
 
   // --- Prompt validation + rendering ---
@@ -1317,8 +1520,20 @@ export async function POST(request: NextRequest) {
     if (providerRequestId) {
       await markProviderApiRequestFailed({
         requestId: providerRequestId,
-        errorCode: 'PROVIDER_CREATE_FAILED',
+        errorCode: userFacingFailure.code,
         errorMessage: providerFailureMessage,
+        responseSummary: {
+          error: {
+            code: userFacingFailure.code,
+            user_message: userFacingFailure.message,
+          },
+          reference_media: buildReferenceMediaFailureSummary({
+            preparedImages,
+            imageUrls: finalReferenceImageUrls,
+            referenceVideoUrls,
+            referenceAudioUrls,
+          }),
+        },
       }).catch(() => {});
     }
     await handleProviderFailure(
@@ -1544,8 +1759,8 @@ async function prepareReferenceImages(
   prepareErrors: string[];
   summary: { total: number; publicUrl: number; r2Uploaded: number; skipped: number; hasLocalPath: boolean };
 }> {
-  const selectedIds = uniquePreserveOrder(preferredReferenceImageIds).slice(0, 9);
-  const selectedReferenceImageUrls = uniquePreserveOrder(preferredReferenceImageUrls).slice(0, 9);
+  const selectedIds = uniquePreserveOrder(preferredReferenceImageIds);
+  const selectedReferenceImageUrls = uniquePreserveOrder(preferredReferenceImageUrls);
   const prepareErrors: string[] = [];
   let skipped = 0;
 
@@ -1628,8 +1843,6 @@ async function prepareReferenceImages(
         mime_type: item.asset.mime_type,
       }, originalUrl: item.asset.original_url }));
   }
-
-  imageItems = imageItems.slice(0, 9);
 
   const preparedImages: PreparedRefImage[] = [];
   let publicUrl = 0;

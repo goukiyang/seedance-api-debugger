@@ -80,11 +80,6 @@ export async function POST(request: NextRequest) {
       if (shouldReplace) {
         await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
       }
-      const existingCount = await prisma.workspaceAsset.count({ where: { workspace_id: workspaceId } });
-      if (existingCount + referenceImageIds.length > 9) {
-        return NextResponse.json({ error: '单次生成最多选择 9 个参考素材' }, { status: 400 });
-      }
-
       const workspaceAssetIds: string[] = [];
       for (const referenceImageId of referenceImageIds) {
         const image = await assertCanUseReferenceImage(user, referenceImageId);
@@ -123,11 +118,6 @@ export async function POST(request: NextRequest) {
       select: { asset_id: true },
     });
     const existingAssetIdSet = new Set(existingWorkspaceAssets.map((item) => item.asset_id));
-    const existingCount = await prisma.workspaceAsset.count({ where: { workspace_id: workspaceId } });
-    const newAssetCount = assetIds.filter((id) => !existingAssetIdSet.has(id)).length;
-    if (existingCount + newAssetCount > 9) {
-      return NextResponse.json({ error: '单次生成最多选择 9 个参考素材' }, { status: 400 });
-    }
 
     const workspaceAssetIds: string[] = [];
     const referenceImageIdsFromAssets: string[] = [];

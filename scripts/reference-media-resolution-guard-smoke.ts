@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import {
   PROVIDER_REFERENCE_MEDIA_MIN_PIXELS,
+  validateSeedanceReferenceMediaPreflight,
   isReferenceMediaTooSmall,
   referenceMediaTooSmallMessage,
 } from '../src/lib/provider/reference-media-policy';
@@ -22,6 +23,24 @@ assert.match(
   }),
   /参考视频「素材1\.mp4」分辨率太低/,
 );
+assert.equal(
+  validateSeedanceReferenceMediaPreflight({
+    images: [{ url: 'https://cdn.example.com/no-size.png', index: 0, name: '无尺寸图片', mimeType: 'image/png' }],
+    videos: [],
+    audios: [],
+  }),
+  null,
+  '缺少宽高的素材不应被当成已知低分辨率问题硬拦',
+);
+assert.match(
+  validateSeedanceReferenceMediaPreflight({
+    images: [{ url: 'https://cdn.example.com/small.png', index: 0, name: '低清图', mimeType: 'image/png', width: 480, height: 480 }],
+    videos: [],
+    audios: [],
+  })?.message || '',
+  /分辨率太低/,
+  '已知低分辨率素材仍应在生成前拦截',
+);
 
 const browserUpload = read('src/lib/http/file-upload.ts');
 assert.match(browserUpload, /videoWidth/);
@@ -38,17 +57,21 @@ assert.match(directUpload, /kind === 'audio' \? null : normalizeOptionalInt/);
 
 const taskCreate = read('src/app/api/tasks/create/route.ts');
 assert.match(taskCreate, /validateReferenceMediaResolution/);
+assert.match(taskCreate, /validateReferenceMediaProviderPreflight/);
+assert.match(taskCreate, /validateSeedanceReferenceMediaPreflight/);
 assert.match(taskCreate, /REFERENCE_MEDIA_TOO_SMALL/);
-assert.match(taskCreate, /REFERENCE_MEDIA_DIMENSIONS_MISSING/);
 assert.match(taskCreate, /probePublicImageDimensions/);
 assert.match(taskCreate, /probePublicVideoDimensions/);
+assert.match(taskCreate, /probePublicAudioMetadata/);
 assert.match(taskCreate, /urlHost: safeUrlHost/);
-assert.match(taskCreate, /frameImageUrls: string\[\] = normalizeReferenceMediaUrls\(body\.frame_image_urls, 9\)/);
+assert.match(taskCreate, /frameImageUrls: string\[\] = normalizeReferenceMediaUrlList\(body\.frame_image_urls\)/);
+assert.doesNotMatch(taskCreate, /frameImageUrls: string\[\] = normalizeReferenceMediaUrls\(body\.frame_image_urls, 9\)/);
 assert.doesNotMatch(taskCreate, /\\n\\s*url,\\n\\s*message:/);
 assert.doesNotMatch(taskCreate, /const imageUrls = uniquePreserveOrder\(input\.imageUrls\)\.slice\(0, 9\)/);
 
 const composer = read('src/components/GenerationComposer.tsx');
-assert.match(composer, /referenceMediaResolutionBlocker/);
+assert.match(composer, /referenceMediaPreflightBlocker/);
+assert.match(composer, /validateSeedanceReferenceMediaPreflight/);
 assert.match(composer, /reference-media-quality-warning/);
 
 const referenceStrip = read('src/components/ReferenceStrip.tsx');

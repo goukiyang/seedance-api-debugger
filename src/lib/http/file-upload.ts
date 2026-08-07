@@ -10,8 +10,6 @@ import {
 export type { UploadProgressHandler, UploadProgressSnapshot };
 
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
-const MEDIA_DURATION_MIN_SECONDS = 2;
-const MEDIA_DURATION_MAX_SECONDS = 15;
 const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 30 * 1024 * 1024;
 const AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 * 1024 * 1024;
 const MULTIPART_UPLOAD_MIN_SIZE_BYTES = 50 * 1024 * 1024;
@@ -658,7 +656,7 @@ function readMediaMetadata(file: File): Promise<{ durationSeconds: number | null
     };
     media.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error('无法读取视频/音频时长，请确认文件完整、格式正确后重试。'));
+      resolve({ durationSeconds: null, width: null, height: null });
     };
     media.src = url;
   });
@@ -666,13 +664,7 @@ function readMediaMetadata(file: File): Promise<{ durationSeconds: number | null
 
 function validateClientMediaDuration(file: File, durationSeconds: number | null) {
   if (!file.type.startsWith('video/') && !file.type.startsWith('audio/')) return;
-  const label = file.type.startsWith('video/') ? '视频' : '音频';
-  if (!Number.isFinite(durationSeconds) || !durationSeconds) {
-    throw new Error(`${label}时长读取失败，请确认文件完整、格式正确后重试。`);
-  }
-  if (durationSeconds < MEDIA_DURATION_MIN_SECONDS || durationSeconds > MEDIA_DURATION_MAX_SECONDS) {
-    throw new Error(`${label}时长需为 ${MEDIA_DURATION_MIN_SECONDS}-${MEDIA_DURATION_MAX_SECONDS} 秒，当前约 ${durationSeconds.toFixed(1)} 秒。`);
-  }
+  void durationSeconds;
 }
 
 function putFileToStorage(

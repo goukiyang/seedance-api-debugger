@@ -90,14 +90,10 @@ export function ReferenceAlbumPicker({
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<ReferenceImageItem | null>(null);
 
-  const remaining = Math.max(0, 9 - currentCount);
+  void currentCount;
   const currentReferenceImageIdSet = useMemo(
     () => new Set(currentReferenceImageIds.filter(Boolean)),
     [currentReferenceImageIds],
-  );
-  const selectedNewCount = useMemo(
-    () => selectedImageIds.filter((id) => !currentReferenceImageIdSet.has(id)).length,
-    [currentReferenceImageIdSet, selectedImageIds],
   );
   const selectedAlbum = useMemo(
     () => albums.find((album) => album.id === selectedAlbumId) || null,
@@ -146,10 +142,6 @@ export function ReferenceAlbumPicker({
   const toggleImage = (imageId: string) => {
     setSelectedImageIds((prev) => {
       if (prev.includes(imageId)) return prev.filter((id) => id !== imageId);
-      const isAlreadyInWorkspace = currentReferenceImageIdSet.has(imageId);
-      const prevNewCount = prev.filter((id) => !currentReferenceImageIdSet.has(id)).length;
-      const nextNewCount = prevNewCount + (isAlreadyInWorkspace ? 0 : 1);
-      if (nextNewCount > remaining) return prev;
       return [...prev, imageId];
     });
   };
@@ -180,7 +172,7 @@ export function ReferenceAlbumPicker({
         <div className="album-picker-header">
           <div>
             <h3>选择参考素材</h3>
-            <p>最多 9 个，顺序会进入生成工作台；图片、视频和音频会按类型传给生成接口。</p>
+            <p>顺序会进入生成工作台；图片、视频和音频会按类型传给生成接口，生成前再检查各自上限。</p>
           </div>
           <button type="button" className="album-picker-close" onClick={onClose}>×</button>
         </div>
@@ -240,7 +232,6 @@ export function ReferenceAlbumPicker({
             {!loading && selectedAlbum?.permissions.use && images.map((image) => {
               const checked = selectedImageIds.includes(image.id);
               const isAlreadyInWorkspace = currentReferenceImageIdSet.has(image.id);
-              const disabledByLimit = !checked && !isAlreadyInWorkspace && selectedNewCount >= remaining;
               const typeLabel = mediaTypeLabel(image.asset?.type);
               const isImage = isImageItem(image);
               const isVideo = image.asset?.type === 'video';
@@ -250,7 +241,6 @@ export function ReferenceAlbumPicker({
                   className={[
                     'album-picker-image-card',
                     checked ? 'selected' : '',
-                    disabledByLimit ? 'disabled' : '',
                   ].filter(Boolean).join(' ')}
                 >
                   <button
@@ -272,7 +262,6 @@ export function ReferenceAlbumPicker({
                     type="button"
                     className="album-picker-image-select"
                     onClick={() => toggleImage(image.id)}
-                    disabled={disabledByLimit}
                   >
                     {checked ? '已选择' : isAlreadyInWorkspace ? '已在工作台' : `${typeLabel} ${image.sort_order + 1}`}
                   </button>
@@ -283,7 +272,7 @@ export function ReferenceAlbumPicker({
         </div>
 
         <div className="album-picker-footer">
-          <span>已选 {selectedImageIds.length} 个，其中新增 {selectedNewCount} 个，当前工作台还可新增 {remaining} 个</span>
+          <span>已选 {selectedImageIds.length} 个；生成前会检查图片、视频、音频各自上限</span>
           <div>
             <button type="button" className="album-picker-cancel" onClick={onClose}>取消</button>
             <button

@@ -6,9 +6,13 @@ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { ReferenceThumb } from '@/components/ReferenceThumb';
 import { AddReferenceCard } from '@/components/AddReferenceCard';
 import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
-import { isReferenceMediaTooSmall, referenceMediaTooSmallMessage } from '@/lib/provider/reference-media-policy';
-
-const MAX_REFS = 9;
+import {
+  SEEDANCE_REFERENCE_AUDIO_LIMIT,
+  SEEDANCE_REFERENCE_IMAGE_LIMIT,
+  SEEDANCE_REFERENCE_VIDEO_LIMIT,
+  isReferenceMediaTooSmall,
+  referenceMediaTooSmallMessage,
+} from '@/lib/provider/reference-media-policy';
 
 interface Props {
   assets: WorkspaceAssetItem[];
@@ -347,8 +351,16 @@ export function ReferenceStrip({
     await replaceAssetWithFile(asset.assetId, files[0]);
   }, [replaceAssetWithFile]);
 
-  const displayAssets = orderedAssets.slice(0, MAX_REFS);
-  const hasMore = assets.length > MAX_REFS;
+  const displayAssets = orderedAssets;
+  const referenceCounts = orderedAssets.reduce(
+    (counts, asset) => {
+      if (asset.type === 'video') counts.video += 1;
+      else if (asset.type === 'audio') counts.audio += 1;
+      else counts.image += 1;
+      return counts;
+    },
+    { image: 0, video: 0, audio: 0 },
+  );
 
   // ============================================================================
   // Render
@@ -447,12 +459,10 @@ export function ReferenceStrip({
           );
         })}
 
-        {assets.length < MAX_REFS && (
-          <AddReferenceCard
-            onClick={handleAddClick}
-            disabled={uploading || loading}
-          />
-        )}
+        <AddReferenceCard
+          onClick={handleAddClick}
+          disabled={uploading || loading}
+        />
       </div>
 
       {/* 上传中状态 */}
@@ -472,14 +482,11 @@ export function ReferenceStrip({
         </span>
       )}
 
-      {/* 超出提示 */}
-      {hasMore && (
-        <span className="ref-strip-more">+{assets.length - MAX_REFS} 个</span>
-      )}
-
       {/* 图号说明 */}
       <span className="ref-strip-count">
-        {assets.length === 0 ? '最多 9 个' : `${assets.length}/${MAX_REFS} 个`}
+        {assets.length === 0
+          ? `参考图最多 ${SEEDANCE_REFERENCE_IMAGE_LIMIT} 张，视频/音频各最多 ${SEEDANCE_REFERENCE_VIDEO_LIMIT}/${SEEDANCE_REFERENCE_AUDIO_LIMIT} 个`
+          : `图 ${referenceCounts.image}/${SEEDANCE_REFERENCE_IMAGE_LIMIT} · 视频 ${referenceCounts.video}/${SEEDANCE_REFERENCE_VIDEO_LIMIT} · 音频 ${referenceCounts.audio}/${SEEDANCE_REFERENCE_AUDIO_LIMIT}`}
       </span>
     </div>
   );

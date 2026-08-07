@@ -24,6 +24,10 @@ import {
   providerReferenceImageSizeMessage,
 } from '@/lib/provider/reference-image-safety';
 import {
+  validateSeedanceReferenceMediaPreflight,
+  type SeedanceReferenceMediaItem,
+} from '@/lib/provider/reference-media-policy';
+import {
   getVolcengineIpApiSettings,
   isVolcengineIpApiReady,
 } from '@/lib/integrations/volcengine-ip';
@@ -104,16 +108,108 @@ function parseJsonRecord(value: string | null | undefined) {
   }
 }
 
-function normalizeReferenceMediaUrls(value: unknown, max: number) {
+function normalizeReferenceMediaUrlList(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-    .slice(0, max);
+    .filter(Boolean);
 }
 
 function firstNonPublicReferenceMediaUrl(urls: string[]) {
   return urls.find((url) => !isPubliclyReachableUrl(url)) || null;
+}
+
+function safeUrlHost(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+function inferMimeTypeFromUrl(url: string | null | undefined) {
+  if (!url) return null;
+  const pathname = url.split('?')[0]?.toLowerCase() || '';
+  if (pathname.endsWith('.mp4')) return 'video/mp4';
+  if (pathname.endsWith('.mov')) return 'video/quicktime';
+  if (pathname.endsWith('.webm')) return 'video/webm';
+  if (pathname.endsWith('.mp3')) return 'audio/mpeg';
+  if (pathname.endsWith('.wav')) return 'audio/wav';
+  if (pathname.endsWith('.ogg')) return 'audio/ogg';
+  if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
+  if (pathname.endsWith('.png')) return 'image/png';
+  if (pathname.endsWith('.webp')) return 'image/webp';
+  return null;
+}
+
+function seedanceImageItemsFromUrls(
+  preparedImages: PreparedRefImage[],
+  imageUrls: string[],
+): SeedanceReferenceMediaItem[] {
+  const preparedByUrl = new Map(preparedImages.map((image) => [image.originalUrl, image]));
+  return imageUrls.map((url, index) => {
+    const prepared = preparedByUrl.get(url) ?? null;
+    return {
+      url,
+      index,
+      name: prepared?.name || `图片${index + 1}`,
+      width: prepared?.width ?? null,
+      height: prepared?.height ?? null,
+    };
+  });
+}
+
+function seedanceMediaItemsFromUrls(
+  kind: 'video' | 'audio',
+  urls: string[],
+): SeedanceReferenceMediaItem[] {
+  return urls.map((url, index) => ({
+    url,
+    index,
+    name: `${kind === 'video' ? '视频' : '音频'}${index + 1}`,
+  }));
+}
+
+function buildReferenceMediaFailureSummary(input: {
+  preparedImages: PreparedRefImage[];
+  imageUrls: string[];
+  referenceVideoUrls: string[];
+  referenceAudioUrls: string[];
+}) {
+  const preparedImageByUrl = new Map(input.preparedImages.map((image) => [image.originalUrl, image]));
+  return {
+    images: {
+      count: input.imageUrls.length,
+      items: input.imageUrls.slice(0, 20).map((url, index) => {
+        const prepared = preparedImageByUrl.get(url) ?? null;
+        return {
+          index,
+          name: prepared?.name || `图片${index + 1}`,
+          host: safeUrlHost(url),
+          width: prepared?.width ?? null,
+          height: prepared?.height ?? null,
+          source_type: prepared?.sourceType ?? null,
+          resized: Boolean(prepared?.providerSafeResize),
+        };
+      }),
+    },
+    videos: {
+      count: input.referenceVideoUrls.length,
+      items: input.referenceVideoUrls.slice(0, 20).map((url, index) => ({
+        index,
+        host: safeUrlHost(url),
+        mime_type: inferMimeTypeFromUrl(url),
+      })),
+    },
+    audios: {
+      count: input.referenceAudioUrls.length,
+      items: input.referenceAudioUrls.slice(0, 20).map((url, index) => ({
+        index,
+        host: safeUrlHost(url),
+        mime_type: inferMimeTypeFromUrl(url),
+      })),
+    },
+  };
 }
 
 type IpIdempotentTask = {
@@ -676,13 +772,13 @@ export async function POST(request: NextRequest) {
   let referenceImageUrls: string[] = [];
   let firstFrameUrl: string | undefined = body.first_frame_url;
   let lastFrameUrl: string | undefined = body.last_frame_url;
-  let frameImageUrls: string[] = body.frame_image_urls ? [...body.frame_image_urls] : [];
-  const referenceVideoUrls = normalizeReferenceMediaUrls(body.reference_video_urls, 3);
-  const referenceAudioUrls = normalizeReferenceMediaUrls(body.reference_audio_urls, 3);
+  let frameImageUrls: string[] = normalizeReferenceMediaUrlList(body.frame_image_urls);
+  const referenceVideoUrls = normalizeReferenceMediaUrlList(body.reference_video_urls);
+  const referenceAudioUrls = normalizeReferenceMediaUrlList(body.reference_audio_urls);
 
   switch (generationMode) {
     case 'all_in_one_reference':
-      referenceImageUrls = preparedImages.map((img) => img.originalUrl).slice(0, 9);
+      referenceImageUrls = preparedImages.map((img) => img.originalUrl);
       break;
     case 'first_last_frame':
       if (!firstFrameUrl) firstFrameUrl = preparedImages[0]?.originalUrl;
@@ -709,6 +805,27 @@ export async function POST(request: NextRequest) {
     || referenceVideoUrls.length > 0;
   if (referenceAudioUrls.length > 0 && !hasVisualReference) {
     return errorJson('音频参考不能单独使用，至少还需要 1 个图片或视频参考素材。', 400);
+  }
+
+  const finalReferenceImageUrls = uniquePreserveOrder([
+    ...referenceImageUrls,
+    ...(firstFrameUrl ? [firstFrameUrl] : []),
+    ...(lastFrameUrl ? [lastFrameUrl] : []),
+    ...frameImageUrls,
+  ]);
+  const referenceMediaPreflightIssue = validateSeedanceReferenceMediaPreflight({
+    images: seedanceImageItemsFromUrls(preparedImages, finalReferenceImageUrls),
+    videos: seedanceMediaItemsFromUrls('video', referenceVideoUrls),
+    audios: seedanceMediaItemsFromUrls('audio', referenceAudioUrls),
+  });
+  if (referenceMediaPreflightIssue) {
+    return NextResponse.json(
+      {
+        error: referenceMediaPreflightIssue.code,
+        message: referenceMediaPreflightIssue.message,
+      },
+      { status: 400 },
+    );
   }
 
   // --- Prompt validation + rendering ---
@@ -1190,6 +1307,19 @@ export async function POST(request: NextRequest) {
         requestId: providerRequestId,
         errorCode: providerErrorCode,
         errorMessage: providerErrorMessage,
+        responseSummary: {
+          error: {
+            code: providerErrorCode,
+            user_message: userFacingProviderMessage,
+            http_status: providerHttpStatus,
+          },
+          reference_media: buildReferenceMediaFailureSummary({
+            preparedImages,
+            imageUrls: finalReferenceImageUrls,
+            referenceVideoUrls,
+            referenceAudioUrls,
+          }),
+        },
       }).catch(() => {});
     }
     await handleProviderFailure(
@@ -1355,6 +1485,8 @@ interface PreparedRefImage {
   originalUrl: string;
   sourceType: 'upload' | 'gallery' | 'external';
   order: number;
+  width?: number | null;
+  height?: number | null;
   providerSafeResize?: {
     originalWidth?: number;
     originalHeight?: number;
@@ -1407,8 +1539,8 @@ async function prepareReferenceImages(
   prepareErrors: string[];
   summary: { total: number; publicUrl: number; r2Uploaded: number; skipped: number; hasLocalPath: boolean };
 }> {
-  const selectedIds = uniquePreserveOrder(preferredReferenceImageIds).slice(0, 9);
-  const selectedReferenceImageUrls = uniquePreserveOrder(preferredReferenceImageUrls).slice(0, 9);
+  const selectedIds = uniquePreserveOrder(preferredReferenceImageIds);
+  const selectedReferenceImageUrls = uniquePreserveOrder(preferredReferenceImageUrls);
   const prepareErrors: string[] = [];
   let skipped = 0;
 
@@ -1492,8 +1624,6 @@ async function prepareReferenceImages(
       }, originalUrl: item.asset.original_url }));
   }
 
-  imageItems = imageItems.slice(0, 9);
-
   const preparedImages: PreparedRefImage[] = [];
   let publicUrl = 0;
   let r2Uploaded = 0;
@@ -1510,11 +1640,15 @@ async function prepareReferenceImages(
       let providerUrl = originalUrl;
       let sourceType: PreparedRefImage['sourceType'] = isR2 ? 'upload' : 'external';
       let providerSafeResize: PreparedRefImage['providerSafeResize'];
+      let safeWidth = item.asset?.width ?? null;
+      let safeHeight = item.asset?.height ?? null;
       if (item.asset) {
         const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset.width, item.asset.height));
         try {
           const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset, ownerId });
           providerUrl = safeReference.providerUrl;
+          safeWidth = safeReference.outputWidth ?? safeReference.width ?? safeWidth;
+          safeHeight = safeReference.outputHeight ?? safeReference.height ?? safeHeight;
           if (safeReference.resized) {
             r2Uploaded += 1;
             sourceType = 'upload';
@@ -1543,6 +1677,8 @@ async function prepareReferenceImages(
         originalUrl: providerUrl,
         sourceType,
         order: i,
+        width: safeWidth,
+        height: safeHeight,
         providerSafeResize,
       });
       continue;
@@ -1578,6 +1714,8 @@ async function prepareReferenceImages(
         originalUrl: providerUrl,
         sourceType: 'upload',
         order: i,
+        width: item.asset?.width ?? null,
+        height: item.asset?.height ?? null,
       });
       continue;
     }
