@@ -17,6 +17,12 @@ export const SITE_UPLOAD_ALLOWED_TYPES = [
 
 type SiteUploadKind = 'image' | 'video' | 'audio';
 
+export type SiteUploadMediaMetadata = {
+  durationSeconds?: number | null;
+  width?: number | null;
+  height?: number | null;
+};
+
 export const SITE_UPLOAD_MAX_SIZE_BY_KIND: Record<SiteUploadKind, number> = {
   image: 30 * 1024 * 1024,
   video: 200 * 1024 * 1024,
@@ -102,7 +108,21 @@ function formatMb(bytes: number) {
   return `${Math.round(bytes / 1024 / 1024)}MB`;
 }
 
-async function readMediaDurationSeconds(buffer: Buffer, fileName: string): Promise<number> {
+function normalizeProbeDimension(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const next = Math.floor(parsed);
+  return next > 0 && next < 100000 ? next : null;
+}
+
+export async function readSiteUploadMediaMetadata(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string,
+): Promise<SiteUploadMediaMetadata> {
+  const kind = getSiteUploadKind(mimeType);
+  if (kind !== 'video' && kind !== 'audio') return {};
+
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sd2-ref-media-'));
   const safeFileName = path.basename(fileName || 'media.bin') || 'media.bin';
   const tempPath = path.join(tempDir, safeFileName);
@@ -111,17 +131,28 @@ async function readMediaDurationSeconds(buffer: Buffer, fileName: string): Promi
     const { stdout } = await execFileAsync('ffprobe', [
       '-v',
       'error',
+      '-select_streams',
+      'v:0',
       '-show_entries',
-      'format=duration',
+      'stream=width,height:format=duration',
       '-of',
-      'default=noprint_wrappers=1:nokey=1',
+      'json',
       tempPath,
     ], { timeout: 15000, maxBuffer: 1024 * 64 });
-    const duration = Number.parseFloat(String(stdout).trim());
+    const parsed = JSON.parse(String(stdout || '{}')) as {
+      streams?: Array<{ width?: number; height?: number }>;
+      format?: { duration?: string | number };
+    };
+    const duration = Number.parseFloat(String(parsed.format?.duration ?? ''));
     if (!Number.isFinite(duration) || duration <= 0) {
       throw new Error('duration_unreadable');
     }
-    return duration;
+    const videoStream = parsed.streams?.[0];
+    return {
+      durationSeconds: duration,
+      width: kind === 'video' ? normalizeProbeDimension(videoStream?.width) : null,
+      height: kind === 'video' ? normalizeProbeDimension(videoStream?.height) : null,
+    };
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -243,8 +274,8 @@ export async function validateSiteUploadBuffer(buffer: Buffer, fileName: string,
   if (kind !== 'video' && kind !== 'audio') return null;
 
   try {
-    const duration = await readMediaDurationSeconds(buffer, fileName);
-    return validateSiteUploadDuration(mimeType, duration);
+    const metadata = await readSiteUploadMediaMetadata(buffer, fileName, mimeType);
+    return validateSiteUploadDuration(mimeType, metadata.durationSeconds);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return '服务端缺少 ffprobe，暂时无法校验视频/音频时长，请先联系管理员补齐运行环境。';
@@ -261,8 +292,9 @@ export async function uploadSiteAsset(
   mimeType: string,
   fileSize: number,
   ownerId: string,
+  mediaMetadata?: SiteUploadMediaMetadata | null,
 ): Promise<SiteUploadResult> {
-  const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId);
+  const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId, mediaMetadata);
   const localUrlIsPublic = isPubliclyReachableUrl(localResult.originalUrl);
 
   if (localUrlIsPublic) {

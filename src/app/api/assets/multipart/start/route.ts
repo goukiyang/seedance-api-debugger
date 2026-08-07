@@ -17,6 +17,8 @@ type MultipartStartBody = {
   mimeType?: string;
   fileSize?: number;
   hash?: string;
+  width?: number | null;
+  height?: number | null;
 };
 
 export async function POST(request: NextRequest) {
@@ -60,6 +62,8 @@ export async function POST(request: NextRequest) {
       mimeType,
       fileSize,
       hash,
+      width: body.width,
+      height: body.height,
     });
 
     await recordAssetUploadLog({

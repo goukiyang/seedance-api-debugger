@@ -22,6 +22,7 @@ import { ReferenceAlbumPicker, type ReferenceAlbumSelection } from '@/components
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { isReferenceMediaTooSmall, referenceMediaTooSmallMessage } from '@/lib/provider/reference-media-policy';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
 import type { VolcengineIpModelOption } from '@/lib/integrations/volcengine-ip-models';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
@@ -508,6 +509,22 @@ export function GenerationComposer({
     return hasAudio && !hasVisualReference;
   }, [workspace.assets]);
 
+  const referenceMediaResolutionBlocker = useMemo(() => {
+    const lowResolutionAsset = workspace.assets.find((asset) => {
+      return (asset.type === 'image' || asset.type === 'video')
+        && isReferenceMediaTooSmall(asset.width, asset.height);
+    });
+    if (!lowResolutionAsset) return null;
+    const index = workspace.assets.findIndex((asset) => asset.assetId === lowResolutionAsset.assetId);
+    return referenceMediaTooSmallMessage({
+      kind: lowResolutionAsset.type as 'image' | 'video',
+      name: lowResolutionAsset.fileName,
+      width: lowResolutionAsset.width,
+      height: lowResolutionAsset.height,
+      index,
+    });
+  }, [workspace.assets]);
+
   const submitBlocker = useMemo(() => {
     if (!prompt.trim()) return '请填写提示词';
 
@@ -525,6 +542,9 @@ export function GenerationComposer({
     if (hasAudioOnlyReferences) {
       return '音频参考需要配合图片或视频一起使用，请再添加 1 个图片或视频参考素材。';
     }
+    if (referenceMediaResolutionBlocker) {
+      return referenceMediaResolutionBlocker;
+    }
 
     if (generationMode === 'first_last_frame' && imageReferenceAssets.length < 2) {
       return `首尾帧模式至少需要 2 个图片参考，当前 ${imageReferenceAssets.length} 个`;
@@ -539,7 +559,7 @@ export function GenerationComposer({
       return '1080p 生成需要先确认审批通过。';
     }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, hasAudioOnlyReferences]);
+  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, hasAudioOnlyReferences, referenceMediaResolutionBlocker]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -1653,6 +1673,12 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
           </>
+        )}
+
+        {referenceMediaResolutionBlocker && (
+          <div className="reference-media-quality-warning">
+            {referenceMediaResolutionBlocker}
+          </div>
         )}
 
         {workspace.pendingWorkspaceAttach && (

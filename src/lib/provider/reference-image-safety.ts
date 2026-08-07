@@ -92,6 +92,15 @@ async function fetchImageBuffer(url: string) {
   }
 }
 
+export async function readProviderReferenceImageDimensions(url: string) {
+  const buffer = await fetchImageBuffer(url);
+  const metadata = await sharp(buffer, { limitInputPixels: false }).rotate().metadata();
+  return {
+    width: metadata.width ?? null,
+    height: metadata.height ?? null,
+  };
+}
+
 export async function ensureProviderSafeReferenceImageUrl(params: {
   originalUrl: string;
   asset?: ProviderReferenceImageAsset | null;

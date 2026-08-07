@@ -928,3 +928,11 @@
 - 怎么处理：统一上传入口继续走 Asset；R2 直传新增 `R2_DIRECT_UPLOAD_CORS_VERIFIED` 验收门；大视频新增 multipart start/sign-part/complete/abort；上传阶段写 `asset_upload_*` 安全摘要；工作台、模板和反馈保留已上传 assetId 并支持只重试挂载/提交。
 - 验证结果：`upload-root-cure-smoke`、`direct-upload-r2-smoke`、`upload-entrypoint-inventory-smoke`、`reference-media-chain-smoke`、`tsc`、`lint`、`build` 通过；lint 仅保留项目既有 warning。生产 R2 CORS 真实 PUT 仍需在桶配置完成并设置验收开关后单独验收。
 - 可复用经验：上传链路报错时先问“文件有没有变成 Asset”，再问“Asset 有没有绑定到当前业务对象”。前者是传输/存储问题，后者是业务挂载问题；两者必须分阶段提示、分阶段日志、分阶段重试，不能继续用一个“上传失败”兜底。
+
+## 2026-08-07 - Provider 素材硬性限制要在扣点和提交前拦截
+
+- 问题/背景：用户提交含 480x480 参考视频的任务后，Provider 返回“参考素材分辨率太低”，前端虽能解释错误，但失败发生在任务创建之后，体验像系统故障。
+- 诱因/根因：上传链路只稳定保存图片宽高，视频直传、中转、普通上传、分块和复用路径容易丢 `width/height`；生成创建接口也只在 Provider 返回后才知道素材低于 409600 像素。
+- 怎么处理：上传端读取视频宽高并随直传票据、完成登记、中转和普通上传传递；Asset 复用时补写缺失宽高；生成页已知低清素材直接提示并禁用提交；`/api/tasks/create` 在冻结点数和调用 Provider 前统一校验最终图片/视频 URL，缺尺寸时探测公网素材，探测不到或低于阈值就返回 400。
+- 验证结果：`reference-media-resolution-guard-smoke`、`npx tsc --noEmit`、`git diff --check` 通过；`npm run lint` 无报错，仅保留项目既有 warning；独立只读审查三轮复查后通过。
+- 可复用经验：Provider 对输入素材的硬性规则不能只靠错误翻译兜底。凡是会扣点、冻结点数或创建长任务的外部服务限制，都要前端先提示、后端在扣点前兜底，并覆盖历史素材和绕过前端的 API 输入。

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { calculateEstimatedCost } from '@/lib/pricing';
@@ -14,7 +16,14 @@ import {
   getProviderSafeImageResizeDimensions,
   isProviderReferenceImageSizeError,
   providerReferenceImageSizeMessage,
+  readProviderReferenceImageDimensions,
 } from '@/lib/provider/reference-image-safety';
+import {
+  isReferenceMediaTooSmall,
+  referenceMediaKindLabel,
+  referenceMediaTooSmallMessage,
+  type ReferenceMediaKind,
+} from '@/lib/provider/reference-media-policy';
 import { providerCreateFailureUserMessage } from '@/lib/provider/error-message';
 import { AuthError } from '@/lib/auth/session';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
@@ -65,6 +74,7 @@ const VALID_GENERATION_MODES: GenerationMode[] = [
 const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
+const execFileAsync = promisify(execFile);
 
 function cleanSourceMetadata(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -103,6 +113,231 @@ function normalizeReferenceMediaUrls(value: unknown, max: number) {
 
 function firstNonPublicReferenceMediaUrl(urls: string[]) {
   return urls.find((url) => !isPubliclyReachableUrl(url)) || null;
+}
+
+type ReferenceMediaResolutionIssue = {
+  error: 'REFERENCE_MEDIA_TOO_SMALL' | 'REFERENCE_MEDIA_DIMENSIONS_MISSING';
+  message: string;
+  details: {
+    kind: ReferenceMediaKind;
+    name: string | null;
+    width: number | null;
+    height: number | null;
+    index: number;
+  };
+};
+
+function normalizeProbeDimension(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const next = Math.floor(parsed);
+  return next > 0 && next < 100000 ? next : null;
+}
+
+function safeUrlHost(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+async function probePublicImageDimensions(url: string) {
+  if (!isPubliclyReachableUrl(url)) return null;
+  const dimensions = await readProviderReferenceImageDimensions(url);
+  return dimensions.width && dimensions.height
+    ? { width: dimensions.width, height: dimensions.height }
+    : null;
+}
+
+async function probePublicVideoDimensions(url: string) {
+  if (!isPubliclyReachableUrl(url)) return null;
+  const { stdout } = await execFileAsync('ffprobe', [
+    '-v',
+    'error',
+    '-select_streams',
+    'v:0',
+    '-show_entries',
+    'stream=width,height',
+    '-of',
+    'json',
+    url,
+  ], { timeout: 15000, maxBuffer: 1024 * 32 });
+  const parsed = JSON.parse(String(stdout || '{}')) as { streams?: Array<{ width?: number; height?: number }> };
+  const stream = parsed.streams?.[0];
+  const width = normalizeProbeDimension(stream?.width);
+  const height = normalizeProbeDimension(stream?.height);
+  return width && height ? { width, height } : null;
+}
+
+function buildMissingReferenceMediaDimensionsIssue(input: {
+  kind: ReferenceMediaKind;
+  name: string | null;
+  width: number | null;
+  height: number | null;
+  index: number;
+}): ReferenceMediaResolutionIssue {
+  const kindLabel = referenceMediaKindLabel(input.kind);
+  const fallbackName = `${kindLabel}${input.index + 1}`;
+  const name = input.name?.trim() || fallbackName;
+  return {
+    error: 'REFERENCE_MEDIA_DIMENSIONS_MISSING',
+    message: `参考${kindLabel}「${name}」无法读取分辨率，系统不能确认它是否符合生成服务要求。请重新上传这个${kindLabel}，或换一个能识别宽高的素材后再提交。`,
+    details: {
+      kind: input.kind,
+      name,
+      width: input.width,
+      height: input.height,
+      index: input.index,
+    },
+  };
+}
+
+function buildLowResolutionIssue(input: {
+  kind: ReferenceMediaKind;
+  name: string | null;
+  width: number | null;
+  height: number | null;
+  index: number;
+}): ReferenceMediaResolutionIssue {
+  return {
+    error: 'REFERENCE_MEDIA_TOO_SMALL',
+    message: referenceMediaTooSmallMessage(input),
+    details: input,
+  };
+}
+
+async function validateReferenceMediaResolution(input: {
+  preparedImages: PreparedRefImage[];
+  imageUrls: string[];
+  referenceVideoUrls: string[];
+}): Promise<ReferenceMediaResolutionIssue | null> {
+  const imageUrls = uniquePreserveOrder(input.imageUrls);
+  const preparedImageByUrl = new Map(input.preparedImages.map((image) => [image.originalUrl, image]));
+  const imageAssets = imageUrls.length > 0
+    ? await prisma.asset.findMany({
+        where: { original_url: { in: imageUrls } },
+        select: {
+          id: true,
+          original_url: true,
+          file_name: true,
+          width: true,
+          height: true,
+          type: true,
+        },
+      })
+    : [];
+  const imageAssetByUrl = new Map(imageAssets.map((asset) => [asset.original_url, asset]));
+
+  for (let index = 0; index < imageUrls.length; index += 1) {
+    const url = imageUrls[index];
+    const prepared = preparedImageByUrl.get(url) ?? null;
+    const asset = imageAssetByUrl.get(url) ?? null;
+    const name = prepared?.name || asset?.file_name || `图片${index + 1}`;
+    let width = prepared?.width ?? asset?.width ?? null;
+    let height = prepared?.height ?? asset?.height ?? null;
+
+    if (width == null || height == null) {
+      try {
+        const probed = await probePublicImageDimensions(url);
+        if (probed) {
+          width = probed.width;
+          height = probed.height;
+          if (asset?.type === 'image') {
+            await prisma.asset.update({
+              where: { id: asset.id },
+              data: { width, height },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[TasksCreate] Failed to probe reference image dimensions:', {
+          assetId: asset?.id ?? null,
+          urlHost: safeUrlHost(url),
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (width == null || height == null) {
+      return buildMissingReferenceMediaDimensionsIssue({
+        kind: 'image',
+        name,
+        width,
+        height,
+        index,
+      });
+    }
+    if (isReferenceMediaTooSmall(width, height)) {
+      return buildLowResolutionIssue({
+        kind: 'image',
+        name,
+        width,
+        height,
+        index,
+      });
+    }
+  }
+
+  const referenceVideoUrls = input.referenceVideoUrls;
+  if (referenceVideoUrls.length === 0) return null;
+  const videoAssets = await prisma.asset.findMany({
+    where: { original_url: { in: referenceVideoUrls } },
+    select: {
+      id: true,
+      original_url: true,
+      file_name: true,
+      width: true,
+      height: true,
+      type: true,
+    },
+  });
+  const videoAssetByUrl = new Map(videoAssets.map((asset) => [asset.original_url, asset]));
+
+  for (let index = 0; index < referenceVideoUrls.length; index += 1) {
+    const url = referenceVideoUrls[index];
+    const asset = videoAssetByUrl.get(url) ?? null;
+    const name = asset?.file_name || `视频${index + 1}`;
+    let width = asset?.width ?? null;
+    let height = asset?.height ?? null;
+
+    if (width == null || height == null) {
+      try {
+        const probed = await probePublicVideoDimensions(url);
+        if (probed) {
+          width = probed.width;
+          height = probed.height;
+          if (asset?.type === 'video') {
+            await prisma.asset.update({
+              where: { id: asset.id },
+              data: { width, height },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[TasksCreate] Failed to probe reference video dimensions:', {
+          assetId: asset?.id ?? null,
+          urlHost: safeUrlHost(url),
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (width == null || height == null) {
+      return buildMissingReferenceMediaDimensionsIssue({ kind: 'video', name, width, height, index });
+    }
+    if (isReferenceMediaTooSmall(width, height)) {
+      return buildLowResolutionIssue({
+        kind: 'video',
+        name,
+        width,
+        height,
+        index,
+      });
+    }
+  }
+
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -578,7 +813,7 @@ export async function POST(request: NextRequest) {
   let referenceImageUrls: string[] = [];
   let firstFrameUrl: string | undefined = body.first_frame_url;
   let lastFrameUrl: string | undefined = body.last_frame_url;
-  let frameImageUrls: string[] = body.frame_image_urls ? [...body.frame_image_urls] : [];
+  let frameImageUrls: string[] = normalizeReferenceMediaUrls(body.frame_image_urls, 9);
   const referenceVideoUrls = normalizeReferenceMediaUrls(body.reference_video_urls, 3);
   const referenceAudioUrls = normalizeReferenceMediaUrls(body.reference_audio_urls, 3);
 
@@ -611,6 +846,21 @@ export async function POST(request: NextRequest) {
     || referenceVideoUrls.length > 0;
   if (referenceAudioUrls.length > 0 && !hasVisualReference) {
     return errorJson('音频参考不能单独使用，至少还需要 1 个图片或视频参考素材。', 400);
+  }
+
+  const finalReferenceImageUrls = uniquePreserveOrder([
+    ...referenceImageUrls,
+    ...(firstFrameUrl ? [firstFrameUrl] : []),
+    ...(lastFrameUrl ? [lastFrameUrl] : []),
+    ...frameImageUrls,
+  ]);
+  const referenceMediaResolutionIssue = await validateReferenceMediaResolution({
+    preparedImages,
+    imageUrls: finalReferenceImageUrls,
+    referenceVideoUrls,
+  });
+  if (referenceMediaResolutionIssue) {
+    return NextResponse.json(referenceMediaResolutionIssue, { status: 400 });
   }
 
   // --- Prompt validation + rendering ---
@@ -673,6 +923,8 @@ export async function POST(request: NextRequest) {
       name: img.name,
       originalUrl: img.originalUrl,
       sourceType: img.sourceType,
+      width: img.width ?? null,
+      height: img.height ?? null,
       providerSafeResize: img.providerSafeResize,
     })),
     prepSummary,
@@ -1238,6 +1490,8 @@ interface PreparedRefImage {
   originalUrl: string;
   sourceType: 'upload' | 'gallery' | 'external';
   order: number;
+  width?: number | null;
+  height?: number | null;
   providerSafeResize?: {
     originalWidth?: number;
     originalHeight?: number;
@@ -1393,32 +1647,34 @@ async function prepareReferenceImages(
       let providerUrl = originalUrl;
       let sourceType: PreparedRefImage['sourceType'] = isR2 ? 'upload' : 'external';
       let providerSafeResize: PreparedRefImage['providerSafeResize'];
-      if (item.asset) {
-        const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset.width, item.asset.height));
-        try {
-          const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset, ownerId });
-          providerUrl = safeReference.providerUrl;
-          if (safeReference.resized) {
-            r2Uploaded += 1;
-            sourceType = 'upload';
-            providerSafeResize = {
-              originalWidth: safeReference.width,
-              originalHeight: safeReference.height,
-              outputWidth: safeReference.outputWidth,
-              outputHeight: safeReference.outputHeight,
-              originalPixels: safeReference.originalPixels,
-              maxPixels: safeReference.maxPixels,
-            };
-          }
-        } catch (error) {
-          skipped += 1;
-          const rawMessage = error instanceof Error ? error.message : String(error);
-          const message = shouldResize || isProviderReferenceImageSizeError(rawMessage)
-            ? providerReferenceImageSizeMessage(rawMessage)
-            : `参考图处理失败: ${rawMessage}`;
-          prepareErrors.push(`[${i + 1}] ${message}`);
-          continue;
+      const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset?.width, item.asset?.height));
+      let safeWidth = item.asset?.width ?? null;
+      let safeHeight = item.asset?.height ?? null;
+      try {
+        const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset, ownerId });
+        providerUrl = safeReference.providerUrl;
+        safeWidth = safeReference.outputWidth ?? safeReference.width ?? safeWidth;
+        safeHeight = safeReference.outputHeight ?? safeReference.height ?? safeHeight;
+        if (safeReference.resized) {
+          r2Uploaded += 1;
+          sourceType = 'upload';
+          providerSafeResize = {
+            originalWidth: safeReference.width,
+            originalHeight: safeReference.height,
+            outputWidth: safeReference.outputWidth,
+            outputHeight: safeReference.outputHeight,
+            originalPixels: safeReference.originalPixels,
+            maxPixels: safeReference.maxPixels,
+          };
         }
+      } catch (error) {
+        skipped += 1;
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = shouldResize || isProviderReferenceImageSizeError(rawMessage)
+          ? providerReferenceImageSizeMessage(rawMessage)
+          : `参考图处理失败: ${rawMessage}`;
+        prepareErrors.push(`[${i + 1}] ${message}`);
+        continue;
       }
       publicUrl += 1;
       preparedImages.push({
@@ -1426,6 +1682,8 @@ async function prepareReferenceImages(
         originalUrl: providerUrl,
         sourceType,
         order: i,
+        width: safeWidth,
+        height: safeHeight,
         providerSafeResize,
       });
       continue;
@@ -1461,6 +1719,8 @@ async function prepareReferenceImages(
         originalUrl: providerUrl,
         sourceType: 'upload',
         order: i,
+        width: item.asset?.width ?? null,
+        height: item.asset?.height ?? null,
       });
       continue;
     }

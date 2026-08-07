@@ -11935,6 +11935,11 @@ body.compare-fullscreen-open {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
 }
 
+.ref-thumb-wrap.ref-thumb-low-resolution .ref-thumb {
+  border-color: rgba(248, 113, 113, 0.92);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.28);
+}
+
 .ref-thumb-wrap.ref-thumb-drag-over {
   transform: scale(1.05);
 }
@@ -12064,6 +12069,22 @@ body.compare-fullscreen-open {
   text-align: center;
   padding: 2px 0;
   line-height: 1;
+}
+
+.ref-thumb-warning-badge {
+  background: rgba(220, 38, 38, 0.94);
+  border: 1px solid rgba(254, 202, 202, 0.55);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  left: 3px;
+  line-height: 1;
+  padding: 2px 3px;
+  pointer-events: none;
+  position: absolute;
+  top: 3px;
+  z-index: 4;
 }
 
 .ref-thumb-role-first {
@@ -12571,6 +12592,17 @@ body.compare-fullscreen-open {
 .workspace-attach-retry button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.reference-media-quality-warning {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 8px;
+  color: #fecaca;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+  padding: 10px 12px;
 }
 
 /* ComposerActionBar */

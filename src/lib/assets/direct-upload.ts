@@ -132,6 +132,8 @@ type CreateDirectUploadTicketInput = {
   mimeType: string;
   fileSize: number;
   hash: string;
+  width?: number | null;
+  height?: number | null;
 };
 
 type CompleteDirectUploadInput = {
@@ -441,6 +443,33 @@ function assetRecordToResult(
   };
 }
 
+async function fillMissingAssetDimensions(
+  asset: DirectUploadAssetRecord,
+  width: number | null,
+  height: number | null,
+): Promise<DirectUploadAssetRecord> {
+  const data: { width?: number; height?: number } = {};
+  if (width != null && asset.width == null) data.width = width;
+  if (height != null && asset.height == null) data.height = height;
+  if (Object.keys(data).length === 0) return asset;
+
+  return prisma.asset.update({
+    where: { id: asset.id },
+    data,
+    select: {
+      id: true,
+      original_url: true,
+      thumbnail_url: true,
+      width: true,
+      height: true,
+      file_name: true,
+      file_size: true,
+      mime_type: true,
+      hash: true,
+    },
+  });
+}
+
 async function findActiveAssetByTrustedHash(ownerId: string, trustedHash: string, mimeType?: string | null) {
   const mimeTypeWhere = mimeType ? { mime_type: mimeType } : {};
   const ownAsset = await prisma.asset.findFirst({
@@ -505,16 +534,18 @@ async function createAssetFromCompletedUpload(input: {
   if (trustedHash && trustedHash !== input.payload.hash) {
     throw new Error('上传文件内容和上传票据不一致，请重新上传。');
   }
+  const kind = getSiteUploadKind(input.payload.mimeType) || 'image';
+  const width = kind === 'audio' ? null : normalizeOptionalInt(input.width);
+  const height = kind === 'audio' ? null : normalizeOptionalInt(input.height);
+
   if (trustedHash) {
     const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash, input.payload.mimeType);
     if (existingAsset) {
-      return assetRecordToResult(existingAsset, true);
+      const updatedAsset = await fillMissingAssetDimensions(existingAsset, width, height);
+      return assetRecordToResult(updatedAsset, true);
     }
   }
 
-  const kind = getSiteUploadKind(input.payload.mimeType) || 'image';
-  const width = kind === 'image' ? normalizeOptionalInt(input.width) : null;
-  const height = kind === 'image' ? normalizeOptionalInt(input.height) : null;
   const publicUrl = `${input.config.publicBaseUrl}/${input.payload.key}`;
   const ownAsset = await prisma.asset.findFirst({
     where: {
@@ -622,14 +653,18 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
   const metadataError = validateSiteUploadMetadata({ mimeType, fileSize: input.fileSize });
   if (metadataError) throw new Error(metadataError);
   const hash = assertSha256Hash(input.hash);
+  const kind = getSiteUploadKind(mimeType) || 'image';
+  const width = kind === 'audio' ? null : normalizeOptionalInt(input.width);
+  const height = kind === 'audio' ? null : normalizeOptionalInt(input.height);
 
   const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
   if (existingAsset) {
+    const updatedAsset = await fillMissingAssetDimensions(existingAsset, width, height);
     return {
       directUploadAvailable: false,
       reused: true,
       reason: '已检测到相同素材，已复用上传历史中的文件。',
-      asset: assetRecordToPayload(existingAsset, true),
+      asset: assetRecordToPayload(updatedAsset, true),
     };
   }
 
@@ -766,14 +801,18 @@ export async function createMultipartUploadTicket(input: CreateMultipartUploadTi
   const metadataError = validateSiteUploadMetadata({ mimeType, fileSize: input.fileSize });
   if (metadataError) throw new Error(metadataError);
   const hash = assertSha256Hash(input.hash);
+  const kind = getSiteUploadKind(mimeType) || 'image';
+  const width = kind === 'audio' ? null : normalizeOptionalInt(input.width);
+  const height = kind === 'audio' ? null : normalizeOptionalInt(input.height);
 
   const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
   if (existingAsset) {
+    const updatedAsset = await fillMissingAssetDimensions(existingAsset, width, height);
     return {
       directUploadAvailable: false,
       reused: true,
       reason: '已检测到相同素材，已复用上传历史中的文件。',
-      asset: assetRecordToPayload(existingAsset, true),
+      asset: assetRecordToPayload(updatedAsset, true),
     };
   }
 

@@ -162,17 +162,31 @@ export interface UploadResult {
   height?: number;
 }
 
+export type UploadAssetMetadata = {
+  width?: number | null;
+  height?: number | null;
+};
+
+function normalizeStoredDimension(value: number | null | undefined) {
+  if (!Number.isFinite(value) || value == null) return null;
+  const next = Math.floor(value);
+  return next > 0 && next < 100000 ? next : null;
+}
+
 export async function uploadAsset(
   buffer: Buffer,
   fileName: string,
   mimeType: string,
-  ownerId = 'default-user'
+  ownerId = 'default-user',
+  mediaMetadata: UploadAssetMetadata | null = null
 ): Promise<UploadResult> {
   ensureDirs();
 
   const hash = computeHash(buffer);
   const ext = mimeTypeToExt(mimeType);
   const assetType = getAssetType(mimeType);
+  const providedWidth = assetType === 'video' ? normalizeStoredDimension(mediaMetadata?.width) : null;
+  const providedHeight = assetType === 'video' ? normalizeStoredDimension(mediaMetadata?.height) : null;
 
   // 同一用户重复上传同一文件时复用自己的记录，并恢复历史隐藏/删除状态。
   const existing = await prisma.asset.findFirst({
@@ -206,6 +220,16 @@ export async function uploadAsset(
       updates.thumbnail_url = thumbResult.thumbPath;
       updates.width = width;
       updates.height = height;
+    }
+    if (assetType === 'video') {
+      if (width == null && providedWidth != null) {
+        width = providedWidth;
+        updates.width = providedWidth;
+      }
+      if (height == null && providedHeight != null) {
+        height = providedHeight;
+        updates.height = providedHeight;
+      }
     }
 
     if (Object.keys(updates).length > 0) {
@@ -267,6 +291,16 @@ export async function uploadAsset(
       updates.thumbnail_url = thumbResult.thumbPath;
       updates.width = width;
       updates.height = height;
+    }
+    if (assetType === 'video') {
+      if (width == null && providedWidth != null) {
+        width = providedWidth;
+        updates.width = providedWidth;
+      }
+      if (height == null && providedHeight != null) {
+        height = providedHeight;
+        updates.height = providedHeight;
+      }
     }
 
     if (Object.keys(updates).length > 0) {
@@ -333,6 +367,10 @@ export async function uploadAsset(
 
     const thumbResult = await generateThumbnail(buffer, mimeType);
     thumbnailUrl = thumbResult.thumbPath;
+  }
+  if (assetType === 'video') {
+    width = providedWidth;
+    height = providedHeight;
   }
 
   // 写入数据库

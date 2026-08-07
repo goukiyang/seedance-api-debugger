@@ -9,8 +9,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import {
   getSiteUploadKind,
+  readSiteUploadMediaMetadata,
   uploadSiteAsset,
-  validateSiteUploadBuffer,
+  validateSiteUploadDuration,
   validateSiteUploadInput,
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
@@ -137,10 +138,27 @@ export async function POST(request: NextRequest) {
 
     ({ fileName, mimeType, fileSize } = upload.payload);
     const { buffer } = upload.payload;
-    const mediaValidationError = await validateSiteUploadBuffer(buffer, fileName, mimeType);
+    let mediaMetadata: Awaited<ReturnType<typeof readSiteUploadMediaMetadata>> | null = null;
+    try {
+      mediaMetadata = await readSiteUploadMediaMetadata(buffer, fileName, mimeType);
+    } catch (error) {
+      const kind = getSiteUploadKind(mimeType);
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return NextResponse.json(
+          { error: '服务端缺少 ffprobe，暂时无法校验视频/音频时长，请先联系管理员补齐运行环境。' },
+          { status: 400 },
+        );
+      }
+      const label = kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '素材';
+      return NextResponse.json(
+        { error: `无法读取${label}时长，请确认文件完整、格式正确后重试。` },
+        { status: 400 },
+      );
+    }
+    const mediaValidationError = validateSiteUploadDuration(mimeType, mediaMetadata?.durationSeconds);
     if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
 
-    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id);
+    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, mediaMetadata);
 
     await recordAssetUploadLog({
       operatorId: user.id,

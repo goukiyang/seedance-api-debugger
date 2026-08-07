@@ -107,14 +107,18 @@ type MultipartResumeState = {
   parts: MultipartUploadedPart[];
 };
 
-export function buildRawFileUploadRequest(file: File): RequestInit {
+export function buildRawFileUploadRequest(file: File, context?: Partial<UploadContext>): RequestInit {
+  const headers: Record<string, string> = {
+    'Content-Type': file.type || 'application/octet-stream',
+    'X-File-Name': encodeURIComponent(file.name || 'upload.bin'),
+    'X-File-Size': String(file.size),
+  };
+  if (context?.width != null) headers['X-Media-Width'] = String(context.width);
+  if (context?.height != null) headers['X-Media-Height'] = String(context.height);
+  if (context?.durationSeconds != null) headers['X-Media-Duration'] = String(context.durationSeconds);
   return {
     method: 'POST',
-    headers: {
-      'Content-Type': file.type || 'application/octet-stream',
-      'X-File-Name': encodeURIComponent(file.name || 'upload.bin'),
-      'X-File-Size': String(file.size),
-    },
+    headers,
     body: file,
   };
 }
@@ -152,9 +156,10 @@ async function uploadWithRawFallback(
   file: File,
   invalidJsonMessage: string,
   onProgress?: UploadProgressHandler,
+  context?: Partial<UploadContext>,
 ) {
   let result: { ok: boolean; status: number; data: UploadAssetResponse };
-  const request = buildRawFileUploadRequest(file);
+  const request = buildRawFileUploadRequest(file, context);
   try {
     result = await requestJsonWithUploadProgress<UploadAssetResponse>({
       url: '/api/assets/upload',
@@ -210,9 +215,10 @@ async function uploadWithRawFallbackOrThrow(
   fallbackToRaw: boolean,
   reason: string,
   onProgress?: UploadProgressHandler,
+  context?: Partial<UploadContext>,
 ) {
   if (shouldUseRawFallback(file, fallbackToRaw)) {
-    return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
+    return uploadWithRawFallback(file, invalidJsonMessage, onProgress, context);
   }
   throw new Error(rawFallbackUnavailableMessage(reason, file));
 }
@@ -230,8 +236,14 @@ async function uploadWithServerProxy(
     'X-Upload-Token': ticket.uploadToken,
     'X-File-Hash': context.hash,
   };
-  if (context.width != null) headers['X-Image-Width'] = String(context.width);
-  if (context.height != null) headers['X-Image-Height'] = String(context.height);
+  if (context.width != null) {
+    headers['X-Media-Width'] = String(context.width);
+    headers['X-Image-Width'] = String(context.width);
+  }
+  if (context.height != null) {
+    headers['X-Media-Height'] = String(context.height);
+    headers['X-Image-Height'] = String(context.height);
+  }
   if (context.durationSeconds != null) headers['X-Media-Duration'] = String(context.durationSeconds);
 
   let result: { ok: boolean; status: number; data: UploadAssetResponse };
@@ -277,7 +289,7 @@ async function uploadWithServerProxyOrRawFallback(
   onProgress?: UploadProgressHandler,
 ) {
   if (shouldUseRawFallback(file, fallbackToRaw)) {
-    return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
+    return uploadWithRawFallback(file, invalidJsonMessage, onProgress, context);
   }
 
   try {
@@ -462,6 +474,9 @@ async function uploadWithMultipart(
           mimeType: file.type || 'application/octet-stream',
           fileSize: file.size,
           hash: context.hash,
+          width: context.width,
+          height: context.height,
+          durationSeconds: context.durationSeconds,
         }),
       });
     } catch (error) {
@@ -624,15 +639,22 @@ function readImageDimensions(file: File): Promise<{ width: number | null; height
   });
 }
 
-function readMediaDuration(file: File): Promise<number | null> {
-  if (!file.type.startsWith('video/') && !file.type.startsWith('audio/')) return Promise.resolve(null);
+function readMediaMetadata(file: File): Promise<{ durationSeconds: number | null; width: number | null; height: number | null }> {
+  if (!file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+    return Promise.resolve({ durationSeconds: null, width: null, height: null });
+  }
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
-    const media = document.createElement(file.type.startsWith('video/') ? 'video' : 'audio');
+    const isVideo = file.type.startsWith('video/');
+    const media = document.createElement(isVideo ? 'video' : 'audio');
     media.preload = 'metadata';
     media.onloadedmetadata = () => {
       URL.revokeObjectURL(url);
-      resolve(Number.isFinite(media.duration) ? media.duration : null);
+      resolve({
+        durationSeconds: Number.isFinite(media.duration) ? media.duration : null,
+        width: isVideo ? (media as HTMLVideoElement).videoWidth || null : null,
+        height: isVideo ? (media as HTMLVideoElement).videoHeight || null : null,
+      });
     };
     media.onerror = () => {
       URL.revokeObjectURL(url);
@@ -709,11 +731,15 @@ export async function uploadFileToHistory(
   });
 
   try {
-    [hash, { width, height }, durationSeconds] = await Promise.all([
+    const [nextHash, imageDimensions, mediaMetadata] = await Promise.all([
       sha256File(file),
       readImageDimensions(file),
-      readMediaDuration(file),
+      readMediaMetadata(file),
     ]);
+    hash = nextHash;
+    width = mediaMetadata?.width ?? imageDimensions.width;
+    height = mediaMetadata?.height ?? imageDimensions.height;
+    durationSeconds = mediaMetadata?.durationSeconds ?? null;
   } catch (error) {
     if (
       shouldUseRawFallback(file, fallbackToRaw) &&
@@ -727,7 +753,12 @@ export async function uploadFileToHistory(
 
   validateClientMediaDuration(file, durationSeconds);
 
-  const uploadContext = { hash, width, height, durationSeconds };
+  const uploadContext = {
+    hash,
+    width,
+    height,
+    durationSeconds,
+  };
   const multipartAsset = await uploadWithMultipart(file, uploadContext, invalidJsonMessage, onProgress);
   if (multipartAsset?.id) return multipartAsset;
 
@@ -747,22 +778,25 @@ export async function uploadFileToHistory(
         mimeType: file.type || 'application/octet-stream',
         fileSize: file.size,
         hash,
+        width,
+        height,
+        durationSeconds,
       }),
     });
   } catch (error) {
     const message = uploadStageConnectionMessage('上传票据创建', error);
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
   }
   try {
     ticket = await readUploadJsonResponse<DirectUploadTicketResponse>(ticketRes, '上传票据接口', invalidJsonMessage);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传票据接口解析失败';
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
   }
   if (!ticketRes.ok) {
     const message = ticket.error || ticket.message || '上传票据创建失败';
     if (ticketRes.status >= 500) {
-      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
+      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
     }
     throw new Error(message);
   }
@@ -777,7 +811,7 @@ export async function uploadFileToHistory(
   }
   if (ticket.directUploadAvailable === false) {
     if (shouldUseRawFallback(file, fallbackToRaw)) {
-      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress);
+      return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress, uploadContext);
     }
     if (ticket.uploadToken && ticket.storageProvider === 'r2') {
       try {
@@ -787,7 +821,7 @@ export async function uploadFileToHistory(
         throw new Error(rawFallbackUnavailableMessage(`${ticket.reason || '直传暂不可用'}；服务端中转也失败：${proxyMessage}`, file));
       }
     }
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress, uploadContext);
   }
   if (!ticket.uploadUrl || !ticket.uploadToken || ticket.method !== 'PUT') {
     throw new Error('上传票据内容不完整，请刷新后重试。');
@@ -829,13 +863,13 @@ export async function uploadFileToHistory(
     });
   } catch (error) {
     const message = uploadStageConnectionMessage('上传完成登记', error);
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
   }
   try {
     complete = await readUploadJsonResponse<UploadAssetResponse>(completeRes, '上传完成登记接口', invalidJsonMessage);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传完成登记接口解析失败';
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress);
+    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
   }
   if (!completeRes.ok) {
     throw new Error(complete.error || complete.message || '上传完成但入库失败，请重新上传。');

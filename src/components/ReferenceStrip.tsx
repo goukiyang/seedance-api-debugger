@@ -6,6 +6,7 @@ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { ReferenceThumb } from '@/components/ReferenceThumb';
 import { AddReferenceCard } from '@/components/AddReferenceCard';
 import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
+import { isReferenceMediaTooSmall, referenceMediaTooSmallMessage } from '@/lib/provider/reference-media-policy';
 
 const MAX_REFS = 9;
 
@@ -386,6 +387,17 @@ export function ReferenceStrip({
           const isDragging = draggedKey === itemKey;
           const isInsertBefore = dragInsertIndex === idx && !isDragging;
           const isInsertAfter = dragInsertIndex === displayAssets.length && idx === displayAssets.length - 1;
+          const isLowResolution = (asset.type === 'image' || asset.type === 'video')
+            && isReferenceMediaTooSmall(asset.width, asset.height);
+          const lowResolutionTitle = isLowResolution
+            ? referenceMediaTooSmallMessage({
+                kind: asset.type as 'image' | 'video',
+                name: asset.fileName,
+                width: asset.width,
+                height: asset.height,
+                index: idx,
+              })
+            : undefined;
 
           return (
             <div
@@ -417,7 +429,9 @@ export function ReferenceStrip({
                 isInsertBefore ? 'ref-thumb-insert-before' : '',
                 isInsertAfter ? 'ref-thumb-insert-after' : '',
                 dropReplaceKey === itemKey ? 'ref-thumb-replace-target' : '',
+                isLowResolution ? 'ref-thumb-low-resolution' : '',
               ].filter(Boolean).join(' ')}
+              title={lowResolutionTitle}
             >
               <ReferenceThumb
                 asset={asset}
@@ -428,6 +442,7 @@ export function ReferenceStrip({
                 onReplace={handleReplaceClick}
                 onPreview={onPreview}
               />
+              {isLowResolution && <span className="ref-thumb-warning-badge">低清</span>}
             </div>
           );
         })}

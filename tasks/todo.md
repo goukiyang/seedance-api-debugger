@@ -2,8 +2,7 @@
 
 ## 当前入口
 
-- [x] 2026-08-06：上传链路本站直收优先修订，正文见 `tasks/todo/2026-08-05-upload-root-cure.md` 第 5 节。
-- [ ] 2026-08-05：上传链路根治收口，正文见 `tasks/todo/2026-08-05-upload-root-cure.md`。
+- [x] 2026-08-07：参考素材分辨率提交前拦截，正文见 `tasks/todo/2026-08-07-reference-media-resolution-guard.md`。
 
 ## 最近状态
 
@@ -20,4 +19,5 @@
 - `tasks/todo/2026-07-29-share-button-fix.md`：分享按钮失效修复
 - `tasks/todo/2026-08-03-admin-dashboard-trend-redesign.md`：后台趋势图展示重做
 - `tasks/todo/2026-08-05-upload-root-cure.md`：上传链路根治收口
+- `tasks/todo/2026-08-07-reference-media-resolution-guard.md`：参考素材分辨率提交前拦截
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
