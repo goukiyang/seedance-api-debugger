@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [x] 2026-08-07：长任务状态卡住修复，正文见 `tasks/todo/2026-08-07-stuck-video-polling-status.md`。
+- [ ] 2026-08-07：上传限制分层与生成准入收口，正文见 `tasks/todo/2026-08-07-upload-provider-rules.md`。
 
 ## 最近状态
 
@@ -21,4 +21,5 @@
 - `tasks/todo/2026-08-05-upload-root-cure.md`：上传链路根治收口
 - `tasks/todo/2026-08-07-reference-media-resolution-guard.md`：参考素材分辨率提交前拦截
 - `tasks/todo/2026-08-07-stuck-video-polling-status.md`：长任务状态卡住修复
+- `tasks/todo/2026-08-07-upload-provider-rules.md`：上传限制分层与生成准入收口
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
