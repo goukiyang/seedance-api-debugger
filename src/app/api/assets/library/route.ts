@@ -93,6 +93,25 @@ function userSummary(user: LibraryUser | null | undefined) {
   };
 }
 
+function legacyAssetOwnerSummary(ownerId: string | null | undefined) {
+  const id = ownerId?.trim();
+  if (!id) return null;
+  const isLegacyDefault = id === 'default-user';
+  const user: LibraryUser = {
+    id,
+    name: isLegacyDefault ? '历史默认用户' : null,
+    username: id,
+    email: '',
+    avatar_url: null,
+    account_type: 'internal',
+  };
+  return {
+    ...user,
+    displayName: isLegacyDefault ? '历史默认用户' : `用户 ${id.slice(0, 6)}`,
+    subtitle: isLegacyDefault ? '旧版上传素材' : '用户资料缺失',
+  };
+}
+
 function taskTitle(task: { project: LibraryProject | null; prompt: string; id: string }) {
   const projectName = task.project?.name;
   const prompt = task.prompt.trim();
@@ -217,7 +236,12 @@ function serializeAsset(asset: {
   file_size: number | null;
   created_at: Date;
   owner_id: string;
+  owner: LibraryUser | null;
 }): LibraryItem {
+  const thumbnailUrl = asset.type === 'image'
+    ? asset.thumbnail_url || asset.original_url
+    : asset.thumbnail_url;
+  const owner = userSummary(asset.owner) || legacyAssetOwnerSummary(asset.owner_id);
   return {
     id: `asset:${asset.id}`,
     kind: asset.type === 'audio' ? 'audio' : asset.type === 'video' ? 'video' : 'image',
@@ -227,7 +251,7 @@ function serializeAsset(asset: {
     referenceImageId: null,
     title: asset.file_name || `素材 ${asset.id.slice(0, 8)}`,
     prompt: null,
-    thumbnailUrl: asset.thumbnail_url || asset.original_url,
+    thumbnailUrl,
     previewUrl: asset.original_url,
     downloadUrl: asset.original_url,
     fileSize: asset.file_size ?? null,
@@ -245,7 +269,7 @@ function serializeAsset(asset: {
     createdAt: asset.created_at.toISOString(),
     completedAt: null,
     project: null,
-    owner: null,
+    owner,
     downloadable: false,
     movable: false,
   };
@@ -321,6 +345,10 @@ function addKeywordFilter(keyword: string | null): Prisma.VideoTaskWhereInput | 
       { user: { name: { contains: keyword } } },
     ],
   };
+}
+
+function shouldIncludeActiveLibraryMedia(status: string) {
+  return status === 'all' || status === 'succeeded';
 }
 
 async function loadVideoItems(options: {
@@ -456,6 +484,10 @@ async function loadAssetItems(options: {
     return { items: [] as LibraryItem[], total: 0 };
   }
 
+  if (options.status !== 'hidden' && !shouldIncludeActiveLibraryMedia(options.status)) {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
+
   const where: Prisma.AssetWhereInput = {
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
   };
@@ -494,7 +526,22 @@ async function loadAssetItems(options: {
     prisma.asset.count({ where }),
   ]);
 
-  return { items: assets.map(serializeAsset), total };
+  const ownerIds = Array.from(new Set(assets.map((asset) => asset.owner_id).filter(Boolean)));
+  const owners = ownerIds.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: ownerIds } },
+        select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true },
+      })
+    : [];
+  const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
+
+  return {
+    items: assets.map((asset) => serializeAsset({
+      ...asset,
+      owner: ownerById.get(asset.owner_id) || null,
+    })),
+    total,
+  };
 }
 
 async function loadReferenceItems(options: {
@@ -502,6 +549,7 @@ async function loadReferenceItems(options: {
   type: string;
   enhance: string;
   scope: string;
+  status: string;
   projectId: string | null;
   ownerUserId: string | null;
   keyword: string | null;
@@ -513,8 +561,13 @@ async function loadReferenceItems(options: {
   if (options.type !== 'all' && options.type !== 'reference') {
     return { items: [] as LibraryItem[], total: 0 };
   }
+  if (options.status !== 'hidden' && !shouldIncludeActiveLibraryMedia(options.status)) {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
 
-  const where: Prisma.ReferenceImageWhereInput = { status: 'active' };
+  const where: Prisma.ReferenceImageWhereInput = {
+    status: options.status === 'hidden' ? 'deleted' : 'active',
+  };
   if (options.projectId) {
     where.project_id = options.projectId;
   }
@@ -565,7 +618,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const type = enumParam(searchParams.get('type'), ITEM_TYPES, 'video');
     const scope = enumParam(searchParams.get('scope'), SCOPES, 'history');
-    const status = enumParam(searchParams.get('status'), STATUSES, 'all');
+    const status = enumParam(searchParams.get('status'), STATUSES, 'succeeded');
     const sort = enumParam(searchParams.get('sort'), SORTS, 'created_desc');
     const groupBy = enumParam(searchParams.get('group_by'), GROUPS, 'date');
     const enhance = enumParam(searchParams.get('enhance'), ENHANCE_FILTERS, 'none');
@@ -611,6 +664,7 @@ export async function GET(request: NextRequest) {
         type,
         enhance,
         scope,
+        status,
         projectId,
         ownerUserId,
         keyword,

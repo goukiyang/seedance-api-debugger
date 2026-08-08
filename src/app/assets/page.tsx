@@ -155,7 +155,7 @@ const typeTabs: Array<{ id: AssetType; label: string }> = [
 ];
 
 const statusOptions: Array<{ id: AssetStatus; label: string; adminOnly?: boolean }> = [
-  { id: 'all', label: '全部状态' },
+  { id: 'all', label: '全部状态（含失败）' },
   { id: 'succeeded', label: '已完成' },
   { id: 'running', label: '生成中' },
   { id: 'submitted', label: '排队中' },
@@ -285,6 +285,13 @@ function statusLabel(status: string) {
   if (status === 'hidden') return '已隐藏';
   if (status === 'deleted') return '已删除';
   return status || '未知';
+}
+
+function mediaFallbackLabel(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'status'>) {
+  if (item.kind === 'video' && item.source === 'asset') return '视频素材';
+  if (item.kind === 'video' && item.status === 'succeeded') return '暂无截图';
+  if (item.kind === 'image' && item.source === 'asset') return '图片素材';
+  return statusLabel(item.status);
 }
 
 function formatDuration(seconds: number | null) {
@@ -436,7 +443,7 @@ function AssetsPageContent() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [assetView, setAssetView] = useState<AssetView>('history');
   const [type, setType] = useState<AssetType>('video');
-  const [status, setStatus] = useState<AssetStatus>('all');
+  const [status, setStatus] = useState<AssetStatus>('succeeded');
   const [sort, setSort] = useState<AssetSort>('created_desc');
   const [groupBy, setGroupBy] = useState<AssetGroup>('date');
   const [cardSize, setCardSize] = useState<AssetCardSize>(() => readSavedAssetCardSize());
@@ -836,7 +843,7 @@ function AssetsPageContent() {
     if (nextView !== 'user') setOwnerUserId('');
     if (nextView === 'enhance') {
       setType('video');
-      setStatus('all');
+      setStatus('succeeded');
       setGroupBy('date');
     }
     setEnhanceMenuItemId(null);
@@ -1170,7 +1177,7 @@ function AssetsPageContent() {
       const nextType = assetLibraryTypeFromFile(selectedFile);
       setAssetView('history');
       setType(nextType);
-      setStatus('all');
+      setStatus('succeeded');
       setPage(1);
       setKeyword('');
       setKeywordDraft('');
@@ -1595,7 +1602,7 @@ function AssetsPageContent() {
                       ) : item.thumbnailUrl ? (
                         <img src={item.thumbnailUrl} alt={item.title} loading="lazy" />
                       ) : (
-                        <span className="asset-card-empty">{statusLabel(item.status)}</span>
+                        <span className="asset-card-empty">{mediaFallbackLabel(item)}</span>
                       )}
                       {enhanceStateLabel && (
                         <span className="asset-card-badge asset-card-badge-enhance">
@@ -1779,7 +1786,7 @@ function AssetsPageContent() {
                 }}
               />
             ) : (
-              <div>{statusLabel(activeItem.status)}</div>
+              <div>{mediaFallbackLabel(activeItem)}</div>
             )}
           </div>
           <dl className="asset-detail-list">

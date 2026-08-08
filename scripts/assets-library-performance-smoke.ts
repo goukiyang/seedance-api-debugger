@@ -52,7 +52,8 @@ function main() {
     assetsPage.includes("type AssetView = AssetScope | 'enhance'")
       && assetsPage.includes("id: 'enhance', label: '视频超分'")
       && assetsPage.includes("params.set('enhance', enhanceFilter)")
-      && assetsPage.includes('asset-card-badge-enhance-ready'),
+      && assetsPage.includes('asset-card-badge-enhance')
+      && assetsPage.includes('asset-card-enhance-trigger'),
     '资产页必须提供视频超分专属标签，并让超分结果/可超分视频更明显',
   );
   assert(
@@ -61,6 +62,18 @@ function main() {
       && assetsPage.includes('(selectionMode || selected) &&')
       && assetsPage.includes('if (!selectionMode) return;'),
     '资产页多选框必须由选择模式开关控制，不能常驻每张卡片',
+  );
+  assert(
+    assetsPage.includes("const [status, setStatus] = useState<AssetStatus>('succeeded')")
+      && assetsPage.includes("{ id: 'all', label: '全部状态（含失败）' }")
+      && assetsPage.includes("setStatus('succeeded')"),
+    '资产页默认必须只看已完成资产，全部状态必须明确包含失败项',
+  );
+  assert(
+    assetsPage.includes('function mediaFallbackLabel')
+      && assetsPage.includes("return '视频素材'")
+      && assetsPage.includes("return '暂无截图'"),
+    '资产卡片无缩略图时必须显示明确素材/截图状态，不能让用户误判为坏图',
   );
   assert(
     assetsPage.includes("scope !== 'project' && !(movePanelOpen && bulkTarget === 'video_project')"),
@@ -86,6 +99,28 @@ function main() {
       && assetLibraryRoute.includes("options.enhance !== 'none'"),
     '/api/assets/library 必须支持 enhance=all 服务端过滤',
   );
+  assert(
+    assetLibraryRoute.includes("const status = enumParam(searchParams.get('status'), STATUSES, 'succeeded')"),
+    '/api/assets/library 默认必须只返回已完成视频任务，避免失败任务占据资产页主视图',
+  );
+  assert(
+    assetLibraryRoute.includes("const thumbnailUrl = asset.type === 'image'")
+      && assetLibraryRoute.includes('asset.thumbnail_url || asset.original_url')
+      && assetLibraryRoute.includes(': asset.thumbnail_url'),
+    'Asset 视频/音频不能用 original_url 冒充图片缩略图，避免 mp4/mp3 被放进 img',
+  );
+  assert(
+    assetLibraryRoute.includes('function legacyAssetOwnerSummary')
+      && assetLibraryRoute.includes('ownerById.get(asset.owner_id)')
+      && assetLibraryRoute.includes('历史默认用户'),
+    'Asset 必须带 owner 信息，旧 default-user 也要有稳定用户兜底',
+  );
+  assert(
+    assetLibraryRoute.includes('function shouldIncludeActiveLibraryMedia')
+      && assetLibraryRoute.includes("options.status !== 'hidden' && !shouldIncludeActiveLibraryMedia(options.status)")
+      && assetLibraryRoute.includes("status: options.status === 'hidden' ? 'deleted' : 'active'"),
+    '失败/排队/取消等任务状态筛选不能混入 active 上传素材或参考图',
+  );
 
   const baseKey = createAssetLibraryCacheKey({
     view: 'history',
@@ -94,7 +129,7 @@ function main() {
     scope: 'history',
     type: 'video',
     enhance: 'none',
-    status: 'all',
+    status: 'succeeded',
     sort: 'created_desc',
     groupBy: 'date',
     projectId: '',
@@ -109,7 +144,7 @@ function main() {
     scope: 'history',
     type: 'video',
     enhance: 'none',
-    status: 'all',
+    status: 'succeeded',
     sort: 'created_desc',
     groupBy: 'date',
     projectId: '',
@@ -124,7 +159,7 @@ function main() {
     scope: 'project',
     type: 'video',
     enhance: 'none',
-    status: 'all',
+    status: 'succeeded',
     sort: 'created_desc',
     groupBy: 'date',
     projectId: 'project-1',
