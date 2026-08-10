@@ -42,7 +42,7 @@
 - [x] R3. 只读上线审查
   - 检查对象：生产构建 ID、公网资源、`/api/config`、`/login`、`sd2` 服务状态。
   - 通过标准：线上加载的是本次新构建，健康守护周期后服务没有反复重启。
-  - 证据来源：`youdoo-sites`、`curl`、生产静态资源检查。已验证 BUILD_ID `51cLZCHE9iZLv_V8Lz8Le`，公网 JS 命中“官方额度与视频条数”“视频条数”和柱顶标签逻辑，公网 CSS 含 `admin-dashboard-trend-value-label`，健康周期后 `runs=4` 未增长。
+  - 证据来源：`youdoo-sites`、`curl`、生产静态资源检查。双柱图版本已验证 BUILD_ID `51cLZCHE9iZLv_V8Lz8Le`；月份产出口径修复版本已验证 BUILD_ID `qGfYbjSgKgC-gw99xeoou`，公网 JS 命中“每日实际产出与成本”“每月实际产出与成本”“成功视频条数”，公网 CSS 含 `admin-dashboard-trend-value-label`，健康周期后 `runs=21` 未增长。
 - [x] R4. 月份产出对账审查
   - 检查对象：`scripts/generation-dashboard-smoke.ts`、只读 SQLite 对账、`/api/admin/generation-dashboard` 返回的 `trends.month`。
   - 通过标准：每个月趋势图的视频条数等于该月 `local_status='succeeded'` 且 `completed_at` 落在该月的真实视频产出数；成本只汇总这些成功产出的官方金额。
