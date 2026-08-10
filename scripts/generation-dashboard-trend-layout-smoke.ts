@@ -31,6 +31,8 @@ const requiredClientMarkers = [
   '周期明细',
   '待官方确认',
   '暂无生成',
+  'showProjectAvatar',
+  'admin-dashboard-project-avatar',
 ];
 
 const requiredCssMarkers = [
@@ -39,6 +41,8 @@ const requiredCssMarkers = [
   '.admin-dashboard-trend-chart-head',
   '.admin-dashboard-trend-value-label',
   '.admin-dashboard-trend-day em',
+  '.admin-dashboard-donut-label-line',
+  '.admin-dashboard-project-avatar .user-identity-avatar',
   'overflow-x: auto;',
   'max-height: 280px;',
 ];

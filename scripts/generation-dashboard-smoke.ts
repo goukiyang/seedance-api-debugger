@@ -1,5 +1,6 @@
 import { getGenerationDashboardData, parseDashboardRange } from '../src/lib/admin/generation-dashboard';
 import { prisma } from '../src/lib/prisma';
+import { displayUserName } from '../src/lib/users/display';
 
 function startOfDay(date: Date) {
   const copy = new Date(date);
@@ -101,6 +102,31 @@ async function main() {
     }
   });
 
+  const projectIds = allDashboard.project_breakdown
+    .map((item) => item.key)
+    .filter((key) => key !== 'unassigned');
+  const personalProjects = await prisma.project.findMany({
+    where: { id: { in: projectIds }, type: 'personal' },
+    select: {
+      id: true,
+      owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+    },
+  });
+  personalProjects.forEach((project) => {
+    const item = allDashboard.project_breakdown.find((entry) => entry.key === project.id);
+    if (!item) throw new Error(`个人默认项目缺少成本占比项：${project.id}`);
+    const expectedLabel = `${displayUserName(project.owner)}的默认项目`;
+    if (item.label !== expectedLabel) {
+      throw new Error(`个人默认项目显示名异常：${project.id} label=${item.label}, expected=${expectedLabel}`);
+    }
+    if (!item.user || item.user.id !== project.owner.id) {
+      throw new Error(`个人默认项目没有绑定负责人头像来源：${project.id}`);
+    }
+    if (project.owner.avatar_url && item.user.avatar_url !== project.owner.avatar_url) {
+      throw new Error(`个人默认项目负责人头像未透传：${project.id}`);
+    }
+  });
+
   const dashboard = await getGenerationDashboardData({ range: 'month' });
   const resolutionKeys = dashboard.resolution_breakdown.map((item) => item.key).sort();
   const expectedKeys = ['1080p', '480p', '720p', 'unknown'];
@@ -140,6 +166,7 @@ async function main() {
       duration_seconds: item.duration_seconds,
       official_cost_micros: item.official_costs.reduce((sum, total) => sum + total.amount_micros, 0),
     })),
+    personal_project_display_checked: personalProjects.length,
     range: dashboard.range,
     total_tasks: dashboard.kpis.total_tasks,
     resolution_keys: resolutionKeys,

@@ -219,7 +219,7 @@ function DonutChart({
   );
 }
 
-function DonutLegend({ items }: { items: DashboardBreakdownItem[] }) {
+function DonutLegend({ items, showProjectAvatar = false }: { items: DashboardBreakdownItem[]; showProjectAvatar?: boolean }) {
   return (
     <div className="admin-dashboard-donut-legend">
       {items.map((item, index) => (
@@ -230,9 +230,17 @@ function DonutLegend({ items }: { items: DashboardBreakdownItem[] }) {
             aria-hidden="true"
           />
           <span>
-            <strong>
-                      <UserIdentityBadge user={item.user || { id: item.key, name: item.label, username: null }} size="sm" />
-                    </strong>
+            <span className="admin-dashboard-donut-label-line">
+              {showProjectAvatar && (
+                <UserIdentityBadge
+                  user={item.user || { id: item.key, name: item.label, username: null }}
+                  size="sm"
+                  avatarOnly
+                  className="admin-dashboard-project-avatar"
+                />
+              )}
+              <strong>{item.label}</strong>
+            </span>
             <small>{item.count} 条 · {formatCurrencyTotals(item.official_costs)}</small>
           </span>
           <b>{breakdownShare(item, items)}</b>
@@ -683,7 +691,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 centerValue={`${dashboard.project_breakdown.reduce((sum, item) => sum + item.count, 0)} 条`}
                 ariaLabel="项目成本占比圆环图"
               />
-              <DonutLegend items={dashboard.project_breakdown} />
+              <DonutLegend items={dashboard.project_breakdown} showProjectAvatar />
             </div>
           )}
         </div>

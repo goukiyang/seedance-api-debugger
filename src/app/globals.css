@@ -15837,6 +15837,23 @@ body.compare-fullscreen-open {
   width: 9px;
 }
 
+.admin-dashboard-donut-label-line {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.admin-dashboard-project-avatar.user-identity-badge-avatar-only {
+  flex: 0 0 auto;
+}
+
+.admin-dashboard-project-avatar .user-identity-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
+}
+
 .admin-dashboard-donut-legend-row strong,
 .admin-dashboard-donut-legend-row small {
   display: block;

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
+import { displayUserName } from '@/lib/users/display';
 
 export type DashboardRangeKey = 'all' | '7d' | '30d' | 'month' | 'custom';
 export type DashboardResolutionKey = '480p' | '720p' | '1080p' | 'unknown';
@@ -26,6 +27,15 @@ export type DashboardCurrencyTotal = {
   currency: string;
   amount_micros: number;
   amount_minor: number;
+};
+
+export type DashboardUserSummary = {
+  id: string;
+  name: string | null;
+  username: string;
+  email: string;
+  avatar_url: string | null;
+  account_type: string;
 };
 
 export type DashboardRange = {
@@ -58,14 +68,7 @@ export type DashboardKpis = {
 export type DashboardBreakdownItem = {
   key: string;
   label: string;
-  user?: {
-    id: string;
-    name: string | null;
-    username: string;
-    email: string;
-    avatar_url: string | null;
-    account_type: string;
-  } | null;
+  user?: DashboardUserSummary | null;
   count: number;
   succeeded: number;
   failed: number;
@@ -112,14 +115,7 @@ export type DashboardRecentTask = {
   official_currency: string | null;
   created_at: string;
   completed_at: string | null;
-  owner: {
-    id: string;
-    name: string | null;
-    username: string;
-    email: string;
-    avatar_url: string | null;
-    account_type: string;
-  } | null;
+  owner: DashboardUserSummary | null;
   project: {
     id: string;
     name: string;
@@ -517,7 +513,16 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       completed_at: true,
       owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-      project: { select: { id: true, name: true, type: true, status: true } },
+      project: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          status: true,
+          owner_user_id: true,
+          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        },
+      },
       _count: { select: { cost_ledgers: true } },
     },
   });
@@ -576,6 +581,27 @@ function ownerSummary(task: DashboardTask) {
     avatar_url: owner.avatar_url,
     account_type: owner.account_type,
   };
+}
+
+function userSummary(user: DashboardTask['owner'] | NonNullable<DashboardTask['project']>['owner'] | null | undefined): DashboardUserSummary | null {
+  if (!user) return null;
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    email: user.email,
+    avatar_url: user.avatar_url,
+    account_type: user.account_type,
+  };
+}
+
+function projectBreakdownLabel(project: DashboardTask['project'] | null) {
+  if (!project) return '未归属项目';
+  if (project.type === 'personal') {
+    const ownerName = displayUserName(project.owner);
+    return ownerName === '未知用户' ? '个人默认项目' : `${ownerName}的默认项目`;
+  }
+  return project.name;
 }
 
 function isTerminal(task: DashboardTask) {
@@ -784,7 +810,8 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
     const durationSeconds = Math.max(0, task.duration ?? 0);
     const resolution = normalizeDashboardResolution(task.resolution);
     const projectKey = task.project_id || 'unassigned';
-    const projectLabel = task.project?.name || '未归属项目';
+    const projectLabel = projectBreakdownLabel(task.project);
+    const projectOwner = userSummary(task.project?.owner);
     const actorId = taskActorId(task) || 'unknown';
     const actor = task.owner || task.user;
     const actorLabel = actor?.name || actor?.username || '未知成员';
@@ -811,6 +838,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
         projectKey,
         projectLabel,
         outputParams(range, { project_id: projectKey }),
+        projectOwner,
       ));
     }
     addTaskToAccumulator(projectMap.get(projectKey)!, task);
