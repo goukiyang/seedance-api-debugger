@@ -26,6 +26,9 @@
 - [x] T7. 修复月份产出和实际不一致
   - 修改文件：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/AdminGenerationDashboardClient.tsx`、`scripts/generation-dashboard-smoke.ts`。
   - 完成标准：趋势图按成功任务的 `completed_at` 归入日/周/月 bucket，不再按任务 `created_at` 把失败、排队或跨月完成任务计入“视频条数”；官方成本跟随同一批成功产出统计。
+- [x] T8. 修复双柱图金额标签错位
+  - 修改文件：`src/app/admin/AdminGenerationDashboardClient.tsx`、`scripts/generation-dashboard-trend-layout-smoke.ts`。
+  - 完成标准：金额柱顶部标签必须读取当前柱子的 `payload`，不能用外部 `chartData[index]` 反查，避免横向滚动或多 bucket 时把前一个月份金额显示到当前月份。
 
 ## 3. 验收/审查内容
 
@@ -47,6 +50,10 @@
   - 检查对象：`scripts/generation-dashboard-smoke.ts`、只读 SQLite 对账、`/api/admin/generation-dashboard` 返回的 `trends.month`。
   - 通过标准：每个月趋势图的视频条数等于该月 `local_status='succeeded'` 且 `completed_at` 落在该月的真实视频产出数；成本只汇总这些成功产出的官方金额。
   - 证据来源：旧逻辑下 smoke 明确失败：`2026-04 trend=11, completed=2`；修复后 `npx tsx scripts/generation-dashboard-smoke.ts` 通过，并输出 2026-04 至 2026-08 分别为 `2 / 27 / 295 / 598 / 110` 条成功视频产出。
+- [x] R5. 金额标签和周期明细一致性审查
+  - 检查对象：`renderTrendBarValueLabel`、`LabelList`、周期明细卡。
+  - 通过标准：图上橙色金额标签和下方同一月份周期明细金额来自同一个 bucket；smoke 禁止 `chartData[props.index]` 这类容易错位的反查方式。
+  - 证据来源：新增 smoke 先在旧实现下失败 `趋势组件仍残留旧遮挡实现：chartData[props.index]`，修复后通过。
 
 ## 4. 审查内容是否对齐目标
 

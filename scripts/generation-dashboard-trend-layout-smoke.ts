@@ -56,6 +56,7 @@ const forbiddenMarkers = [
   'trendPolyline',
   '<Line',
   '橙线看',
+  'chartData[props.index]',
 ];
 
 assert(pkg.dependencies?.recharts, 'package.json 缺少 recharts 依赖');
@@ -73,6 +74,13 @@ forbiddenMarkers.forEach((marker) => {
   assert(!client.includes(marker), `趋势组件仍残留旧遮挡实现：${marker}`);
   assert(!css.includes(marker), `趋势样式仍残留旧遮挡实现：${marker}`);
 });
+
+const labelFunctionStart = client.indexOf('function renderTrendBarValueLabel');
+const labelFunctionEnd = client.indexOf('function TrendChart', labelFunctionStart);
+const labelFunctionSource = labelFunctionStart >= 0 && labelFunctionEnd > labelFunctionStart
+  ? client.slice(labelFunctionStart, labelFunctionEnd)
+  : '';
+assert(labelFunctionSource.includes('props.payload'), '趋势柱状图标签必须读取当前柱子的 payload，不能按外部数组下标反查');
 
 console.log(JSON.stringify({
   ok: true,

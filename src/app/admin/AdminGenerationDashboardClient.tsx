@@ -375,7 +375,7 @@ type TrendBarLabelProps = {
   x?: number | string;
   y?: number | string;
   width?: number | string;
-  index?: number;
+  payload?: TrendChartPoint;
 };
 
 function numericSvgValue(value: number | string | undefined) {
@@ -385,10 +385,10 @@ function numericSvgValue(value: number | string | undefined) {
 
 function renderTrendBarValueLabel(
   props: TrendBarLabelProps,
-  chartData: TrendChartPoint[],
   kind: 'cost' | 'count',
 ) {
-  const point = typeof props.index === 'number' ? chartData[props.index] : null;
+  // LabelList 的 index 可能和业务 bucket 错位；payload 才是当前这根柱子的原始数据。
+  const point = props.payload || null;
   const x = numericSvgValue(props.x);
   const y = numericSvgValue(props.y);
   const width = numericSvgValue(props.width);
@@ -474,7 +474,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                   radius={[6, 6, 0, 0]}
                   yAxisId="cost"
                 >
-                  <LabelList content={(props) => renderTrendBarValueLabel(props, chartData, 'cost')} />
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'cost')} />
                 </Bar>
                 <Bar
                   dataKey="taskCount"
@@ -484,7 +484,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                   radius={[6, 6, 0, 0]}
                   yAxisId="count"
                 >
-                  <LabelList content={(props) => renderTrendBarValueLabel(props, chartData, 'count')} />
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'count')} />
                 </Bar>
               </ComposedChart>
             </ResponsiveContainer>
