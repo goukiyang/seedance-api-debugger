@@ -65,9 +65,9 @@ const rangeOptions: Array<{ key: DashboardRangeKey; label: string }> = [
 ];
 
 const trendGranularityOptions: Array<{ key: DashboardTrendGranularity; label: string; title: string }> = [
-  { key: 'day', label: '按日', title: '每日生成量与成本' },
-  { key: 'week', label: '按周', title: '每周生成量与成本' },
-  { key: 'month', label: '按月', title: '每月生成量与成本' },
+  { key: 'day', label: '按日', title: '每日实际产出与成本' },
+  { key: 'week', label: '按周', title: '每周实际产出与成本' },
+  { key: 'month', label: '按月', title: '每月实际产出与成本' },
 ];
 
 const integerFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
@@ -346,7 +346,7 @@ function TrendTooltip({ active, payload }: { active?: boolean; payload?: TrendTo
       <strong>{point.label}</strong>
       <dl>
         <div>
-          <dt>视频条数</dt>
+          <dt>成功视频条数</dt>
           <dd>{formatInteger(point.taskCount)} 条</dd>
         </div>
         <div>
@@ -409,7 +409,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
         <div>
           <span>趋势图</span>
           <strong>官方额度与视频条数</strong>
-          <small>橙色柱看金额，蓝色柱看视频条数；每根柱顶直接显示具体数值。</small>
+          <small>按成功完成时间归入周期；橙色柱看金额，蓝色柱看成功视频条数。</small>
         </div>
         <span>悬停查看完整数值</span>
       </div>
@@ -418,7 +418,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
           className="admin-dashboard-trend-recharts"
           style={{ minWidth: chartWidth }}
           role="img"
-          aria-label={`官方额度和视频条数双柱状趋势图，共 ${chartData.length} 个时间桶，生成秒数见周期明细`}
+          aria-label={`官方额度和成功视频条数双柱状趋势图，共 ${chartData.length} 个时间桶，生成秒数见周期明细`}
         >
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={TREND_CHART_HEIGHT}>
@@ -472,7 +472,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                   dataKey="taskCount"
                   fill="var(--admin-dashboard-chart-count)"
                   maxBarSize={34}
-                  name="视频条数"
+                  name="成功视频条数"
                   radius={[6, 6, 0, 0]}
                   yAxisId="count"
                 >
@@ -652,13 +652,13 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           </div>
         </div>
         <div className="admin-dashboard-trend-summary">
-          <span><strong>{formatInteger(trendSummary.taskCount)}</strong>视频条数</span>
+          <span><strong>{formatInteger(trendSummary.taskCount)}</strong>成功视频条数</span>
           <span><strong>{formatSeconds(trendSummary.durationSeconds)}</strong>生成秒数</span>
           <span><strong>{formatCurrencyTotals(trendSummary.officialCosts, '待官方确认')}</strong>官方额度</span>
         </div>
         <div className="admin-dashboard-trend-legend" aria-label="趋势图例">
           <span className="is-cost">官方额度</span>
-          <span className="is-count">视频条数</span>
+          <span className="is-count">成功视频条数</span>
           <span className="is-seconds">明细含生成秒数</span>
         </div>
         <TrendChart buckets={trendBuckets} />

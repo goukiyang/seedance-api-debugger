@@ -1,4 +1,70 @@
 import { getGenerationDashboardData, parseDashboardRange } from '../src/lib/admin/generation-dashboard';
+import { prisma } from '../src/lib/prisma';
+
+function startOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function endOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(23, 59, 59, 999);
+  return copy;
+}
+
+function localDateFromIso(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+}
+
+function monthKey(date: Date) {
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  return `${date.getFullYear()}-${month}`;
+}
+
+function officialCostMicros(task: {
+  provider_official_amount_micros: number | null;
+  provider_official_amount_minor: number | null;
+}) {
+  if (task.provider_official_amount_micros !== null && task.provider_official_amount_micros !== undefined) {
+    return task.provider_official_amount_micros;
+  }
+  if (task.provider_official_amount_minor !== null && task.provider_official_amount_minor !== undefined) {
+    return task.provider_official_amount_minor * 10_000;
+  }
+  return null;
+}
+
+async function expectedCompletedMonthlyOutputs(range: { date_from: string; date_to: string }) {
+  const tasks = await prisma.videoTask.findMany({
+    where: {
+      local_status: 'succeeded',
+      completed_at: {
+        gte: startOfDay(localDateFromIso(range.date_from)),
+        lte: endOfDay(localDateFromIso(range.date_to)),
+      },
+    },
+    select: {
+      completed_at: true,
+      duration: true,
+      provider_cost_currency: true,
+      provider_official_amount_minor: true,
+      provider_official_amount_micros: true,
+    },
+  });
+  const expected = new Map<string, { count: number; duration: number; officialMicros: number }>();
+  tasks.forEach((task) => {
+    if (!task.completed_at) return;
+    const key = monthKey(task.completed_at);
+    const bucket = expected.get(key) || { count: 0, duration: 0, officialMicros: 0 };
+    bucket.count += 1;
+    bucket.duration += Math.max(0, task.duration ?? 0);
+    bucket.officialMicros += officialCostMicros(task) ?? 0;
+    expected.set(key, bucket);
+  });
+  return expected;
+}
 
 async function main() {
   const allRange = parseDashboardRange(
@@ -20,6 +86,20 @@ async function main() {
   if (allDashboard.range.date_from.slice(0, 7) !== allDashboard.range.date_to.slice(0, 7) && allDashboard.trends.month.length < 2) {
     throw new Error(`全部范围跨月但月趋势不足：${JSON.stringify(allDashboard.range)}`);
   }
+  const expectedMonthlyOutputs = await expectedCompletedMonthlyOutputs(allDashboard.range);
+  allDashboard.trends.month.forEach((bucket) => {
+    const expected = expectedMonthlyOutputs.get(bucket.key) || { count: 0, duration: 0, officialMicros: 0 };
+    const officialMicros = bucket.official_costs.reduce((sum, item) => sum + item.amount_micros, 0);
+    if (bucket.task_count !== expected.count) {
+      throw new Error(`按月趋势产出数与真实完成产出不一致：${bucket.key} trend=${bucket.task_count}, completed=${expected.count}`);
+    }
+    if (bucket.duration_seconds !== expected.duration) {
+      throw new Error(`按月趋势秒数与真实完成产出不一致：${bucket.key} trend=${bucket.duration_seconds}, completed=${expected.duration}`);
+    }
+    if (officialMicros !== expected.officialMicros) {
+      throw new Error(`按月趋势成本与真实完成产出不一致：${bucket.key} trend=${officialMicros}, completed=${expected.officialMicros}`);
+    }
+  });
 
   const dashboard = await getGenerationDashboardData({ range: 'month' });
   const resolutionKeys = dashboard.resolution_breakdown.map((item) => item.key).sort();
@@ -35,9 +115,11 @@ async function main() {
     throw new Error('缺少点数和美元成本口径说明');
   }
 
+  const currentRangeExpectedOutputs = await expectedCompletedMonthlyOutputs(dashboard.range);
+  const expectedCurrentOutputCount = Array.from(currentRangeExpectedOutputs.values()).reduce((sum, item) => sum + item.count, 0);
   const dayTrendTaskCount = dashboard.trends.day.reduce((sum, item) => sum + item.task_count, 0);
-  if (dayTrendTaskCount !== dashboard.kpis.total_tasks) {
-    throw new Error(`按日趋势任务数与 KPI 不一致：trend=${dayTrendTaskCount}, kpi=${dashboard.kpis.total_tasks}`);
+  if (dayTrendTaskCount !== expectedCurrentOutputCount) {
+    throw new Error(`按日趋势产出数与真实完成产出不一致：trend=${dayTrendTaskCount}, completed=${expectedCurrentOutputCount}`);
   }
 
   if (!dashboard.trends.week.length || !dashboard.trends.month.length) {
@@ -52,6 +134,12 @@ async function main() {
     ok: true,
     all_range: allDashboard.range,
     all_month_buckets: allDashboard.trends.month.length,
+    completed_month_outputs_checked: allDashboard.trends.month.map((item) => ({
+      key: item.key,
+      task_count: item.task_count,
+      duration_seconds: item.duration_seconds,
+      official_cost_micros: item.official_costs.reduce((sum, total) => sum + total.amount_micros, 0),
+    })),
     range: dashboard.range,
     total_tasks: dashboard.kpis.total_tasks,
     resolution_keys: resolutionKeys,

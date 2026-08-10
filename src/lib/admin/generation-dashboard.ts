@@ -411,7 +411,7 @@ function finalizeTrendBucket(bucket: DashboardTrendAccumulator): DashboardTrendB
   };
 }
 
-function buildTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granularity: DashboardTrendGranularity): DashboardTrendBucket[] {
+function buildOutputTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granularity: DashboardTrendGranularity): DashboardTrendBucket[] {
   const rangeStart = startOfDay(localDateFromIso(range.date_from));
   const rangeEnd = endOfDay(localDateFromIso(range.date_to));
   const buckets = new Map<string, DashboardTrendAccumulator>();
@@ -424,7 +424,8 @@ function buildTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granul
   }
 
   tasks.forEach((task) => {
-    const bucketKey = trendKey(trendStart(task.created_at, granularity), granularity);
+    if (task.local_status !== 'succeeded' || !task.completed_at) return;
+    const bucketKey = trendKey(trendStart(task.completed_at, granularity), granularity);
     const bucket = buckets.get(bucketKey);
     if (!bucket) return;
     const officialAmount = officialCostMicros(task);
@@ -551,6 +552,17 @@ function buildTaskWhere(range: DashboardRange, query: GenerationDashboardQuery):
     },
   };
   return where;
+}
+
+function buildOutputTrendWhere(range: DashboardRange, query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
+  return {
+    ...buildDashboardScopeWhere(query),
+    local_status: 'succeeded',
+    completed_at: {
+      gte: startOfDay(localDateFromIso(range.date_from)),
+      lte: endOfDay(localDateFromIso(range.date_to)),
+    },
+  };
 }
 
 function ownerSummary(task: DashboardTask) {
@@ -716,6 +728,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
   const range = parseDashboardRange(query, new Date(), { earliestDate: allRangeBounds?._min.created_at });
   const requestedResolution = query.resolution ? normalizeDashboardResolution(query.resolution) : null;
   const where = buildTaskWhere(range, query);
+  const trendWhere = buildOutputTrendWhere(range, query);
   const requestWhere: Prisma.ProviderApiRequestWhereInput = {
     created_at: {
       gte: startOfDay(localDateFromIso(range.date_from)),
@@ -725,8 +738,9 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
   if (query.projectId && query.projectId !== 'unassigned') requestWhere.project_id = query.projectId;
   if (query.ownerUserId) requestWhere.user_id = query.ownerUserId;
 
-  const [allTasks, auditSummary, providerFailureCount, stalePendingCount] = await Promise.all([
+  const [allTasks, allTrendTasks, auditSummary, providerFailureCount, stalePendingCount] = await Promise.all([
     fetchDashboardTasks(where),
+    fetchDashboardTasks(trendWhere),
     getCostLedgerAuditSummary(),
     prisma.providerApiRequest.count({ where: { ...requestWhere, status: 'failed' } }),
     prisma.providerApiRequest.count({
@@ -739,6 +753,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
   ]);
 
   const tasks = allTasks.filter((task) => taskMatchesResolution(task, requestedResolution));
+  const trendTasks = allTrendTasks.filter((task) => taskMatchesResolution(task, requestedResolution));
   const officialTotal = new Map<string, number>();
   const officialCostDurationTotal = new Map<string, number>();
   const resolutionMap = new Map<DashboardResolutionKey, DashboardBreakdownAccumulator>();
@@ -855,9 +870,9 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       .sort((a, b) => b.count - a.count || b.points - a.points)
       .slice(0, 8),
     trends: {
-      day: buildTrendBuckets(tasks, range, 'day'),
-      week: buildTrendBuckets(tasks, range, 'week'),
-      month: buildTrendBuckets(tasks, range, 'month'),
+      day: buildOutputTrendBuckets(trendTasks, range, 'day'),
+      week: buildOutputTrendBuckets(trendTasks, range, 'week'),
+      month: buildOutputTrendBuckets(trendTasks, range, 'month'),
     },
     warnings,
     recent_tasks: tasks.slice(0, 10).map((task) => ({
@@ -889,7 +904,8 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       href: `/tasks/${task.id}?return_to=${encodeURIComponent('/admin')}`,
     })),
     data_notes: [
-      '统计周期按 VideoTask.created_at 计算。',
+      '顶部 KPI、拆分榜和最近任务按 VideoTask.created_at 计算。',
+      '趋势图按成功任务的 VideoTask.completed_at 计算实际产出；失败、排队、未完成和跨月未完成任务不计入对应月份的视频条数。',
       '官方成本优先读取 provider_official_amount_micros，回退 provider_official_amount_minor；没有官方金额时显示“待官方确认”。',
       '每秒均价按“同币种官方成本 / 同币种且有视频时长的秒数”计算；未确认官方金额或没有时长的任务不进入秒价分母。',
       'actual_cost 是平台点数扣除，不是美元；estimated_cost 是预估点数，不能代表真实扣费。',

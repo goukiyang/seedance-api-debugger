@@ -23,6 +23,9 @@
 - [x] T6. 按用户反馈改为双柱状图
   - 修改文件：`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/globals.css`、`scripts/generation-dashboard-trend-layout-smoke.ts`。
   - 完成标准：趋势图不再使用金额折线；每个周期并排显示金额柱和视频条数柱；两种柱子顶部都直接显示具体数值。
+- [x] T7. 修复月份产出和实际不一致
+  - 修改文件：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/AdminGenerationDashboardClient.tsx`、`scripts/generation-dashboard-smoke.ts`。
+  - 完成标准：趋势图按成功任务的 `completed_at` 归入日/周/月 bucket，不再按任务 `created_at` 把失败、排队或跨月完成任务计入“视频条数”；官方成本跟随同一批成功产出统计。
 
 ## 3. 验收/审查内容
 
@@ -40,6 +43,10 @@
   - 检查对象：生产构建 ID、公网资源、`/api/config`、`/login`、`sd2` 服务状态。
   - 通过标准：线上加载的是本次新构建，健康守护周期后服务没有反复重启。
   - 证据来源：`youdoo-sites`、`curl`、生产静态资源检查。已验证 BUILD_ID `51cLZCHE9iZLv_V8Lz8Le`，公网 JS 命中“官方额度与视频条数”“视频条数”和柱顶标签逻辑，公网 CSS 含 `admin-dashboard-trend-value-label`，健康周期后 `runs=4` 未增长。
+- [x] R4. 月份产出对账审查
+  - 检查对象：`scripts/generation-dashboard-smoke.ts`、只读 SQLite 对账、`/api/admin/generation-dashboard` 返回的 `trends.month`。
+  - 通过标准：每个月趋势图的视频条数等于该月 `local_status='succeeded'` 且 `completed_at` 落在该月的真实视频产出数；成本只汇总这些成功产出的官方金额。
+  - 证据来源：旧逻辑下 smoke 明确失败：`2026-04 trend=11, completed=2`；修复后 `npx tsx scripts/generation-dashboard-smoke.ts` 通过，并输出 2026-04 至 2026-08 分别为 `2 / 27 / 295 / 598 / 110` 条成功视频产出。
 
 ## 4. 审查内容是否对齐目标
 
