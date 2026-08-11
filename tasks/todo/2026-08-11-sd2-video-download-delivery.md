@@ -113,7 +113,7 @@
   - 通过标准：用户能看懂当前是生成中还是稳定下载准备中；下载未就绪时有明确状态和可重试动作；稳定 URL 准备好后刷新仍可下载。
   - 证据来源：APP 内置浏览器或 Playwright 截图、API 响应、刷新后复查。
 
-- [ ] R6. 线上部署验收
+- [x] R6. 线上部署验收
   - 检查对象：`sd2.youdoodesign.com` 线上实例。
   - 通过标准：`youdoo-sites build sd2`、`youdoo-sites restart sd2` 成功；公网 `/api/config` 正常；新构建已加载；跨一个健康守护周期服务稳定；worker 进程和日志也必须在同一轮验收里通过。
   - 证据来源：`youdoo-sites status sd2`、本地和公网 `curl`、构建 ID、目标页面刷新。
@@ -166,4 +166,4 @@
 - [x] 真实回填修正：R2 未知长度视频流上传已改为先落临时文件拿到 `ContentLength` 再上传；worker 增加 5 分钟硬超时、`--once` 退出保护、Provider 签名结果 URL 转存前刷新、stale worker 写回保护。
 - [x] 真实回填证据：最近 7 天 3 个缺稳定 URL 的成功任务中，2 个已补齐稳定 URL；1 个任务 `cmsogtwfb026d145ryfzx922r` 刷新 Provider 地址后仍在 R2 转存阶段 5 分钟超时，已进入 `failed`，不会继续卡住队列。
 - [x] 最新指标：`npm run video:delivery-metrics -- --days 7` 显示 `stable_download_ready=137`、`missing_stable_download=1`、`queued_to_delivery.count=3`、`delivery_start_to_finish.p50_seconds=309`；当前缺口是 R2 传输能力/链路限制，不是页面状态未刷新。
-- [ ] 线上闭环：待完成 Git 提交/推送、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 API/页面验证、跨健康守护周期复查。
+- [x] 线上闭环：提交 `29eaffd50f55fede00889a9d1757a3a49b4bc6cf` 已推送到 `origin/codex/video-delivery-fast-path`；`youdoo-sites build sd2` 生成生产 BUILD_ID `XEWKlOy84beCz0KEQfa8s`；`youdoo-sites restart sd2` 成功；本地 `/api/config`、公网 `/api/config`、公网 `/login` 均 200；公网 `/assets` HTML 命中新 BUILD_ID 和“资产管理/选择/超分”入口；跨健康守护周期后 sd2 `runs=25` 未增长，worker LaunchAgent `last exit code=0`。
