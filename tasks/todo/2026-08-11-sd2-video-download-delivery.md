@@ -22,58 +22,58 @@
 
 ## 2. 具体可执行任务
 
-- [ ] T0. 先锁定不影响其他功能的实施边界
+- [x] T0. 先锁定不影响其他功能的实施边界
   - 范围：首期只处理普通 Seedance 视频任务：`provider = seedance`，且不包含 `generation_mode = enhance_video`，不包含 `provider = volcengine_mediakit`，不包含 IP 生成入口。
   - 要做：实施前列出所有调用 `startTaskLocalization`、`finalizeVideoTaskStatus`、`cacheTaskVideoToLocal`、`ensurePublicVideoDelivery` 的入口，并标注“普通生成 / IP 生成 / 超分增强 / 批量下载 / 历史补偿”。
   - 完成标准：普通 Seedance 新交付链路先独立上线；IP 生成、视频超分、批量下载、手动下载、旧任务播放继续走现有兼容路径，除非后续单独开任务迁移。
 
-- [ ] T1. 补全耗时观测字段和基线脚本
+- [x] T1. 补全耗时观测字段和基线脚本
   - 范围：`prisma/schema.prisma`、`src/lib/video/**`、`scripts/**`。
   - 要做：明确记录 `提交时间`、`Provider 完成时间`、`稳定下载入队时间`、`下载开始时间`、`下载完成时间`、`交付状态`、`重试次数`、`最后错误`。
   - 保护：schema 只做向后兼容的 nullable/additive 变更；迁移前备份 SQLite；先用 dry-run 脚本查影响数量，不直接写历史数据。
   - 完成标准：能用只读脚本输出最近 24 小时、7 天的 submit->provider、provider->delivery、submit->delivery 的平均值、P50、P90 和缺失数；如修改 `prisma/schema.prisma`，同时确认 `schema-base.prisma` 是否需要同步或明确保持不动的原因。
 
-- [ ] T2. 生成提交时固定写入系统回调地址
+- [x] T2. 生成提交时固定写入系统回调地址
   - 范围：`src/app/api/tasks/create/route.ts`、Provider 适配相关文件。
   - 要做：任务创建时自动设置系统级回调地址，优先使用 `NEXT_PUBLIC_BASE_URL` 或服务端配置拼出固定回调地址；Provider 适配层继续使用当前项目已有字段名 `callback_url`，不要把外部文档里的大小写直接硬塞进业务层；用户传入的临时 callback 不能覆盖生产稳定链路。
   - 保护：系统回调和外部调用方传入的 callback 要分离保存；不能简单吞掉外部 callback。若 Codex/API 调用方依赖原 callback，系统回调完成后需要转发，或至少记录待转发失败状态。
   - 完成标准：新建普通 Seedance 任务请求 Provider 时一定带系统回调地址，并把最终采用的系统回调地址、外部 callback 记录写入任务参数或专用字段便于审计；缺配置时直接给管理员可理解错误，不静默退回慢轮询。
 
-- [ ] T3. 新增 Provider 回调入口
+- [x] T3. 新增 Provider 回调入口
   - 范围：建议新增 `src/app/api/provider/seedance/callback/route.ts` 或同等清晰路径。
   - 要做：接收 Provider 完成通知，校验来源或共享密钥，按 `provider_task_id/task_id` 幂等更新任务状态，并立即写入视频交付队列。回调 payload 如果字段不完整，只作为“唤醒信号”，再走一次 Provider 状态查询获取权威结果。
   - 保护：回调和轮询必须共用同一套“终态落库 + 点数结算 + Provider 成本记录”逻辑，优先从 `finalizeVideoTaskStatus` 抽出共享函数；禁止在 callback route 里另写一套结算。
   - 完成标准：同一个回调重复发送不会重复扣点、不会重复创建多个下载任务、不会把终态任务打回 running；接口应快速返回，不在回调请求里做大文件下载。
 
-- [ ] T4. 建立 SQLite 持久化视频交付队列
+- [x] T4. 建立 SQLite 持久化视频交付队列
   - 范围：`prisma/schema.prisma`、`src/lib/video/delivery-queue.ts`。
   - 要做：新增最小够用的队列表，包含任务 ID、状态、优先级、重试次数、下次执行时间、锁定时间、错误信息和完成时间；用唯一键或语义锁保证同一任务同一交付类型只存在一个有效 job。
   - 完成标准：重启服务后未完成的交付任务不会丢；同一视频只能有一个有效交付任务；失败后按退避策略重试；队列为空时不影响现有页面和接口响应。
 
-- [ ] T5. 做独立 worker，把视频直接流式搬到稳定存储
+- [x] T5. 做独立 worker，把视频直接流式搬到稳定存储
   - 范围：`src/lib/video/public-delivery.ts`、`src/lib/assets/public-storage.ts`、建议新增 `scripts/process-video-delivery-jobs.ts`。
   - 要做：worker 从队列取任务，拿 Provider 结果 URL，遇到 403/过期先刷新结果 URL，然后把视频直接流式上传到 R2/TOS；避免先下载到本地再整文件读入内存再上传。
   - 保护：不要直接破坏现有 `uploadPublicAsset(buffer, ...)`，它还服务图片和素材上传；应新增视频专用 `uploadPublicVideoStream` 或同等 helper，保留原 buffer API 兼容。
   - 完成标准：成功后写入 `public_video_url/public_video_cached_at` 和交付耗时字段；失败时保存可读错误并可重试；单任务大文件不会把 Node 进程内存顶高；worker 有独立启动方式、日志位置、健康检查、卡死锁释放和部署后存活验证。
 
-- [ ] T6. 降级现有本地缓存 runner 为兜底，不再当主链路
+- [x] T6. 降级现有本地缓存 runner 为兜底，不再当主链路
   - 范围：`src/lib/video/task-localization-runner.ts`、`src/app/api/video/status/[id]/route.ts`。
   - 要做：状态查询不再阻塞等待缓存/缩略图；发现 Provider 已完成但交付未入队时，只负责补入队或触发高优先级补偿。
   - 保护：保留 `finalize-pending-videos.ts`、手动 `/api/video/download/[id]`、批量下载和历史补偿脚本的旧能力；不要让旧任务因为没有新队列表记录而无法播放或下载。
   - 完成标准：用户打开资产页或状态页不会因为缓存下载卡住；刷新/轮询最多推动补偿，不承担主交付；旧任务仍可按 `public_video_url -> local_video_path -> result_video_url` fallback 播放。
 
-- [ ] T7. 前端和 API 状态改成用户能理解的阶段
+- [x] T7. 前端和 API 状态改成用户能理解的阶段
   - 范围：`src/app/api/video/status/[id]/route.ts`、`src/app/api/video/download/[id]/route.ts`、任务列表/资产管理/最近任务相关组件。
   - 要做：区分 `生成中`、`已生成，正在准备稳定下载`、`稳定下载已就绪`、`准备失败，可重试`。下载按钮优先使用稳定公网 URL；未就绪时允许用户触发高优先级准备。
   - 保护：状态展示只能新增交付状态，不能把 `local_status` 的业务含义改乱；资产页、任务页、最近任务里已有的成功/失败/超分标签不能被交付状态覆盖；新增或修改下载准备接口必须继续执行 `getSession` 和 `assertCanViewTask` 权限检查。
   - 完成标准：用户不会看到“生成成功但点下载没反应”；失败时能看到明确原因和重试入口；能明确区分“可预览”和“稳定下载已就绪”。
 
-- [ ] T8. 补偿历史成功但未稳定缓存的视频
+- [x] T8. 补偿历史成功但未稳定缓存的视频
   - 范围：优先复用 `scripts/backfill-public-video-delivery.ts` 和队列 helper。
   - 要做：只读扫描历史成功任务，找出缺 `public_video_url/public_video_cached_at` 的任务；确认数量后再安全入队补偿。
   - 完成标准：不会覆盖已有稳定 URL；补偿脚本默认 dry-run，真实执行需要显式参数。
 
-- [ ] T9. Server 迁移后的升级路径预留
+- [x] T9. Server 迁移后的升级路径预留
   - 范围：规划和代码边界，不先落重依赖。
   - 要做：当前队列 helper 保持接口清晰，未来迁 PostgreSQL 后可替换为 pg-boss；只有 server 已有 Redis 或并发明显超过 SQLite 承载时才考虑 BullMQ。
   - 完成标准：本阶段不新增 Redis 运维负担；未来替换队列时不需要重写业务状态流。
@@ -152,3 +152,15 @@
 
 - [ ] A6. 审查是否覆盖非目标功能
   - 判断：R8/R9 必须证明 IP 生成、视频超分、资产页、旧任务播放下载、批量下载和账务结算没有被本次优化误伤；如果证据不足，不能上线。
+
+## 5. 2026-08-11 落地执行记录
+
+- [x] 代码落地：普通 Seedance 任务新增系统回调、稳定下载队列、流式上传、后台 worker、状态/下载 API、资产页和任务详情页状态提示。
+- [x] 旧链路保护：IP 生成和视频超分不进入普通 fast-path；非 fast-path 状态查询继续保留本地缓存和缩略图旧兜底。
+- [x] 安全边界：回调缺密钥 fail-closed；任务创建前预检回调配置，缺密钥不创建任务、不冻结点数；下载接口继续执行登录和任务可见性校验。
+- [x] 数据库保护：迁移前已备份 SQLite 到 `/Volumes/Data/Backups/sd2-db/sd2-dev-before-video-delivery-20260811-200457.db`；本次只新增 nullable 字段和 `VideoDeliveryJob` 队列表。
+- [x] 运维落地：新增 `video:deliver-public` worker 命令；本机 LaunchAgent `com.youdoo.sd2.video-delivery-worker` 已启动，15 秒一轮，每批最多 3 个任务。
+- [x] 观测与补偿：新增 `video:delivery-metrics`；`video:delivery-backfill --queue` 默认 dry-run，最近 7 天 dry-run 发现 3 个缺稳定 URL 的成功任务。
+- [x] 本地验证：`video-delivery-fast-path smoke`、`video-delivery-queue smoke`、`provider-status-router smoke`、`task-finalizer-terminal-guard smoke`、`check-video-public-delivery-rules`、`npm run lint`、`npm run build` 均通过；lint/build 只剩项目既有 `<img>` 和 hook warning。
+- [x] 独立只读审查：子 agent 复审通过，上线阻塞项为无；批量下载 public URL 缺显式 timeout 被标为 P2，不阻塞本次上线。
+- [ ] 线上闭环：待完成 Git 提交/推送、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 API/页面验证、跨健康守护周期复查。

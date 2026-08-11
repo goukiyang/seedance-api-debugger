@@ -1,4 +1,5 @@
 import { stat } from 'fs/promises';
+import { Readable } from 'stream';
 import { ZipFile } from 'yazl';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -34,6 +35,9 @@ type BulkVideoTask = CacheableVideoTask & {
   provider_final_amount_minor: number | null;
   provider_official_amount_micros: number | null;
   provider_final_amount_micros: number | null;
+  public_video_url: string | null;
+  public_video_file_size: number | null;
+  public_video_storage_provider: string | null;
   project: { id: string; name: string; type: string } | null;
   owner: { id: string; name: string | null; username: string; email: string; account_type: string } | null;
   user: { id: string; name: string | null; username: string; email: string; account_type: string } | null;
@@ -45,6 +49,7 @@ type BulkDownloadItem = {
   status: 'success' | 'failed';
   fileName: string;
   localVideoPath: string | null;
+  publicVideoUrl: string | null;
   absolutePath: string | null;
   fileSize: number | null;
   errorMessage: string | null;
@@ -79,6 +84,9 @@ const taskSelect = {
   result_video_url: true,
   result_last_frame_url: true,
   local_video_path: true,
+  public_video_url: true,
+  public_video_file_size: true,
+  public_video_storage_provider: true,
   resolution: true,
   duration: true,
   ratio: true,
@@ -125,6 +133,7 @@ function downloadableTaskWhere(): Prisma.VideoTaskWhereInput {
     local_status: 'succeeded',
     retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
     OR: [
+      { public_video_url: { not: null } },
       { local_video_path: { not: null } },
       { result_video_url: { not: null } },
     ],
@@ -305,6 +314,20 @@ async function fileSizeIfReady(absolutePath: string | null) {
 
 async function prepareDownloadItem(task: BulkVideoTask, index: number): Promise<BulkDownloadItem> {
   const fileName = buildVideoFileName(task, index);
+  if (task.public_video_url) {
+    return {
+      task,
+      taskId: task.id,
+      status: 'success',
+      fileName,
+      localVideoPath: null,
+      publicVideoUrl: task.public_video_url,
+      absolutePath: null,
+      fileSize: task.public_video_file_size,
+      errorMessage: null,
+    };
+  }
+
   const cached = await cacheTaskVideoToLocal(task);
   if (!cached.success || !cached.local_video_path) {
     return {
@@ -313,6 +336,7 @@ async function prepareDownloadItem(task: BulkVideoTask, index: number): Promise<
       status: 'failed',
       fileName,
       localVideoPath: null,
+      publicVideoUrl: null,
       absolutePath: null,
       fileSize: null,
       errorMessage: cached.message || cached.error || '视频缓存失败',
@@ -328,6 +352,7 @@ async function prepareDownloadItem(task: BulkVideoTask, index: number): Promise<
       status: 'failed',
       fileName,
       localVideoPath: cached.local_video_path,
+      publicVideoUrl: null,
       absolutePath,
       fileSize,
       errorMessage: '本地视频文件不可读',
@@ -340,6 +365,7 @@ async function prepareDownloadItem(task: BulkVideoTask, index: number): Promise<
     status: 'success',
     fileName,
     localVideoPath: cached.local_video_path,
+    publicVideoUrl: null,
     absolutePath,
     fileSize,
     errorMessage: null,
@@ -354,13 +380,29 @@ function buildZipFileName(scope: BulkDownloadScope) {
   return `seedance-videos-${scopeText}-${stamp}.zip`;
 }
 
-function createZipStream(items: BulkDownloadItem[]) {
+async function createZipStream(items: BulkDownloadItem[]) {
   const archive = new ZipFile();
-  items
-    .filter((item) => item.status === 'success' && item.absolutePath)
-    .forEach((item) => {
+  for (const item of items.filter((entry) => entry.status === 'success')) {
+    if (item.absolutePath) {
       archive.addFile(item.absolutePath as string, item.fileName, { compressionLevel: 0 });
-    });
+      continue;
+    }
+    if (!item.publicVideoUrl) continue;
+    try {
+      const response = await fetch(item.publicVideoUrl);
+      if (!response.ok || !response.body) {
+        throw new Error(`稳定下载 URL 读取失败：HTTP ${response.status}`);
+      }
+      archive.addReadStream(
+        Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+        item.fileName,
+        { compressionLevel: 0 },
+      );
+    } catch (error) {
+      item.status = 'failed';
+      item.errorMessage = error instanceof Error ? error.message : '稳定下载 URL 读取失败';
+    }
+  }
   archive.addBuffer(Buffer.from(buildManifestCsv(items), 'utf8'), 'manifest.csv');
   archive.end();
 
@@ -408,6 +450,7 @@ export async function buildBulkVideoDownloadPackage(
         status: 'failed',
         fileName: '',
         localVideoPath: null,
+        publicVideoUrl: null,
         absolutePath: null,
         fileSize: null,
         errorMessage: '无权下载此任务',
@@ -419,8 +462,8 @@ export async function buildBulkVideoDownloadPackage(
     permissionCheckedTasks.map((task, index) => prepareDownloadItem(task, index)),
   );
   const items = [...preparedItems, ...deniedItems];
-  const successCount = items.filter((item) => item.status === 'success').length;
-  const failedCount = items.length - successCount;
+  let successCount = items.filter((item) => item.status === 'success').length;
+  let failedCount = items.length - successCount;
 
   if (successCount === 0) {
     return jsonResult(400, {
@@ -432,12 +475,15 @@ export async function buildBulkVideoDownloadPackage(
       })),
     });
   }
+  const stream = await createZipStream(items);
+  successCount = items.filter((item) => item.status === 'success').length;
+  failedCount = items.length - successCount;
 
   return {
     kind: 'zip',
     status: 200,
     fileName: buildZipFileName(scope),
-    stream: createZipStream(items),
+    stream,
     summary: {
       total: items.length,
       success: successCount,

@@ -4,6 +4,8 @@ import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { cacheTaskVideoToLocal } from '@/lib/video/local-cache';
+import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
+import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 
 /**
  * POST /api/video/download/[id]
@@ -51,18 +53,44 @@ export async function POST(
       throw error;
     }
 
-    // 2. 检查是否有视频 URL
-    if (!task.result_video_url) {
+    if (task.public_video_url) {
+      return NextResponse.json({
+        success: true,
+        message: '稳定下载已就绪',
+        public_video_url: task.public_video_url,
+        stable_download_ready: true,
+      });
+    }
+
+    if (task.local_status !== 'succeeded') {
       return NextResponse.json(
-        { success: false, error: 'No video URL', message: 'Task has no result_video_url' },
+        { success: false, error: 'Task not completed', message: `Task status is ${task.local_status}` },
         { status: 400 }
       );
     }
 
-    // 3. 检查是否已完成
-    if (task.local_status !== 'succeeded') {
+    if (isVideoDeliveryFastPathTask(task) && !task.local_video_path) {
+      const enqueueResult = await enqueueVideoDeliveryJob(task.id, {
+        priority: 20,
+        force: true,
+        payload: { source: 'download_route' },
+      });
       return NextResponse.json(
-        { success: false, error: 'Task not completed', message: `Task status is ${task.local_status}` },
+        {
+          success: false,
+          error: 'STABLE_DOWNLOAD_PREPARING',
+          message: '视频已生成，系统正在准备稳定下载文件，请稍后重试。',
+          delivery_queued: enqueueResult.queued,
+          delivery_skipped_reason: enqueueResult.skippedReason ?? null,
+          stable_download_ready: false,
+        },
+        { status: 202 },
+      );
+    }
+
+    if (!task.result_video_url) {
+      return NextResponse.json(
+        { success: false, error: 'No video URL', message: 'Task has no result_video_url' },
         { status: 400 }
       );
     }

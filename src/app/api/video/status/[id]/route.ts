@@ -4,14 +4,21 @@ import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
+import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
+import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
+import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 
 export const dynamic = 'force-dynamic';
 
 function serializeTaskIdentity<T extends { owner?: unknown; user?: unknown }>(task: T) {
+  const deliveryStage = videoDeliveryStageForTask(task as T & Parameters<typeof videoDeliveryStageForTask>[0]);
   return {
     ...task,
     owner: task.owner || task.user || null,
     submitted_user: task.user || null,
+    delivery_stage: deliveryStage,
+    stable_download_ready: deliveryStage.stableDownloadReady,
+    preview_available: deliveryStage.previewAvailable,
   };
 }
 
@@ -65,12 +72,24 @@ export async function GET(
       return NextResponse.json(serializeTaskIdentity(task));
     }
 
+    const fastPathDelivery = isVideoDeliveryFastPathTask(task);
     const finalizeResult = await finalizeVideoTaskStatus(taskId, {
       forceProviderRefresh,
-      cacheOnSuccess: true,
-      generateThumbnail: true,
+      cacheOnSuccess: !fastPathDelivery,
+      generateThumbnail: !fastPathDelivery,
       createdBy: user.id,
     });
+
+    if (
+      finalizeResult.task
+      && finalizeResult.task.local_status === 'succeeded'
+      && fastPathDelivery
+    ) {
+      await enqueueVideoDeliveryJob(taskId, {
+        priority: forceProviderRefresh ? 8 : 3,
+        payload: { source: 'status_route' },
+      });
+    }
 
     const responseTask = await prisma.videoTask.findUnique({
       where: { id: taskId },

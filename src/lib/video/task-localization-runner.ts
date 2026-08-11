@@ -1,4 +1,6 @@
 import { finalizeVideoTaskStatus, isTerminalLocalStatus } from './task-finalizer';
+import { enqueueVideoDeliveryJob } from './delivery-queue';
+import { isVideoDeliveryFastPathTask } from './delivery-policy';
 
 const DEFAULT_INITIAL_DELAY_MS = 10_000;
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -10,6 +12,9 @@ type RunnerOptions = {
   intervalMs?: number;
   maxRuntimeMs?: number;
   cacheTimeoutMs?: number;
+  cacheOnSuccess?: boolean;
+  generateThumbnail?: boolean;
+  enqueueDeliveryOnSuccess?: boolean;
 };
 
 type LocalizationResultSnapshot = {
@@ -50,6 +55,9 @@ async function runTaskLocalization(taskId: string, options: RunnerOptions) {
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
   const maxRuntimeMs = options.maxRuntimeMs ?? DEFAULT_MAX_RUNTIME_MS;
   const cacheTimeoutMs = options.cacheTimeoutMs ?? DEFAULT_SUCCESS_CACHE_TIMEOUT_MS;
+  const cacheOnSuccess = options.cacheOnSuccess !== false;
+  const generateThumbnail = options.generateThumbnail !== false;
+  const enqueueDeliveryOnSuccess = options.enqueueDeliveryOnSuccess === true;
   const startedAt = Date.now();
   let attempt = 0;
 
@@ -60,12 +68,32 @@ async function runTaskLocalization(taskId: string, options: RunnerOptions) {
     try {
       const result = await finalizeVideoTaskStatus(taskId, {
         forceProviderRefresh: true,
-        cacheOnSuccess: true,
-        generateThumbnail: true,
+        cacheOnSuccess,
+        generateThumbnail,
         cacheTimeoutMs,
       });
 
       const status = result.task?.local_status || null;
+      if (
+        enqueueDeliveryOnSuccess
+        && result.task
+        && status === 'succeeded'
+        && isVideoDeliveryFastPathTask(result.task)
+      ) {
+        const enqueueResult = await enqueueVideoDeliveryJob(taskId, {
+          priority: 5,
+          payload: { source: 'localization_runner' },
+        });
+        console.log('[VideoLocalizationRunner] Enqueued video delivery:', {
+          taskId,
+          status,
+          attempts: attempt,
+          queued: enqueueResult.queued,
+          skippedReason: enqueueResult.skippedReason ?? null,
+        });
+        return;
+      }
+
       if (!shouldContinueLocalization(result)) {
         console.log('[VideoLocalizationRunner] Finalized task:', {
           taskId,

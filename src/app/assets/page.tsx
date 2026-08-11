@@ -30,6 +30,14 @@ type AssetBulkTarget = 'video_project' | 'album';
 type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `reference_image:${string}`;
 type EnhanceResolution = '720p' | '1080p' | '2k' | '4k';
 type EnhanceFps = 'none' | '30' | '60';
+type VideoDeliveryStageKey = 'generating' | 'preparing' | 'ready' | 'failed' | 'unavailable';
+
+type VideoDeliveryStage = {
+  key: VideoDeliveryStageKey;
+  label: string;
+  stableDownloadReady: boolean;
+  previewAvailable: boolean;
+};
 
 type SessionUser = {
   id: string;
@@ -113,6 +121,9 @@ type AssetLibraryItem = {
   } | null;
   downloadable: boolean;
   movable: boolean;
+  deliveryStage?: VideoDeliveryStage | null;
+  stableDownloadReady?: boolean;
+  previewAvailable?: boolean;
 };
 
 type Pagination = {
@@ -319,6 +330,27 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
   return parts.join(' · ');
 }
 
+function isFastPathAssetVideo(item: AssetLibraryItem) {
+  return item.kind === 'video'
+    && item.source === 'video_task'
+    && (item.provider || 'seedance') === 'seedance'
+    && item.generationMode !== 'enhance_video';
+}
+
+function shouldShowDeliveryStage(item: AssetLibraryItem) {
+  return isFastPathAssetVideo(item)
+    && Boolean(item.deliveryStage)
+    && item.deliveryStage?.key !== 'unavailable';
+}
+
+function deliveryStageClassName(stage: VideoDeliveryStage | null | undefined) {
+  if (!stage) return 'asset-card-delivery-stage';
+  if (stage.key === 'ready') return 'asset-card-delivery-stage is-ready';
+  if (stage.key === 'failed') return 'asset-card-delivery-stage is-failed';
+  if (stage.key === 'preparing') return 'asset-card-delivery-stage is-preparing';
+  return 'asset-card-delivery-stage';
+}
+
 function aspectRatioFromDimensions(width: number, height: number) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   return `${Math.round(width)} / ${Math.round(height)}`;
@@ -482,6 +514,7 @@ function AssetsPageContent() {
   const [enhanceResolution, setEnhanceResolution] = useState<EnhanceResolution>('1080p');
   const [enhanceFps, setEnhanceFps] = useState<EnhanceFps>('none');
   const [enhanceSubmittingId, setEnhanceSubmittingId] = useState<AssetLibraryItemId | null>(null);
+  const [preparingDownloadTaskId, setPreparingDownloadTaskId] = useState<string | null>(null);
   const [assetUploadFile, setAssetUploadFile] = useState<File | null>(null);
   const [assetUploading, setAssetUploading] = useState(false);
   const [assetUploadProgress, setAssetUploadProgress] = useState<AssetLibraryUploadProgress | null>(null);
@@ -1007,6 +1040,37 @@ function AssetsPageContent() {
       setError(err instanceof Error ? err.message : '批量下载失败');
     } finally {
       setBulkDownloading(false);
+    }
+  };
+
+  const prepareStableDownload = async (taskId: string) => {
+    setPreparingDownloadTaskId(taskId);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch(`/api/video/download/${taskId}`, {
+        method: 'POST',
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 202) {
+        setMessage(data.message || '视频已生成，正在准备稳定下载文件。');
+        return;
+      }
+      if (!response.ok || data.success === false) {
+        throw new Error(data.message || data.error || '稳定下载准备失败');
+      }
+      if (data.public_video_url) {
+        setMessage('稳定下载已就绪，可以下载视频。');
+        void reloadItems();
+        return;
+      }
+      setMessage(data.message || '下载准备请求已提交。');
+      void reloadItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '稳定下载准备失败');
+    } finally {
+      setPreparingDownloadTaskId(null);
     }
   };
 
@@ -1690,6 +1754,11 @@ function AssetsPageContent() {
                           AI MediaKit 超分结果
                         </span>
                       )}
+                      {shouldShowDeliveryStage(item) && (
+                        <span className={deliveryStageClassName(item.deliveryStage)}>
+                          {item.deliveryStage?.label}
+                        </span>
+                      )}
                       {specText && <span className="asset-card-spec">{specText}</span>}
                       <span>{item.project?.name || '未归属项目'} · {formatDateTime(item.createdAt)}</span>
                       {isAdmin && item.owner && (
@@ -1794,6 +1863,12 @@ function AssetsPageContent() {
               <dt>状态</dt>
               <dd>{statusLabel(activeItem.status)}</dd>
             </div>
+            {shouldShowDeliveryStage(activeItem) && (
+              <div>
+                <dt>稳定下载</dt>
+                <dd>{activeItem.deliveryStage?.label || '-'}</dd>
+              </div>
+            )}
             <div>
               <dt>项目</dt>
               <dd>{activeItem.project?.name || '未归属项目'}</dd>
@@ -1834,7 +1909,16 @@ function AssetsPageContent() {
             {activeItem.taskId && (
               <Link href={`/tasks/${activeItem.taskId}`}>打开任务详情</Link>
             )}
-            {activeItem.downloadable && (
+            {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady && activeItem.previewAvailable && (
+              <button
+                type="button"
+                onClick={() => void prepareStableDownload(activeItem.taskId as string)}
+                disabled={preparingDownloadTaskId === activeItem.taskId}
+              >
+                {preparingDownloadTaskId === activeItem.taskId ? '提交中...' : activeItem.deliveryStage?.key === 'failed' ? '重试稳定下载' : '准备稳定下载'}
+              </button>
+            )}
+            {activeItem.downloadable && (!isFastPathAssetVideo(activeItem) || activeItem.stableDownloadReady) && (
               <button type="button" onClick={() => {
                 if (activeItem.taskId) void downloadTaskIds([activeItem.taskId]);
               }}>

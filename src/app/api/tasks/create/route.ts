@@ -65,6 +65,11 @@ import { consumeApprovalForTask, findUsableApproval } from '@/lib/approvals';
 import { notifyProjectOwner } from '@/lib/notifications';
 import { evaluatePaidGenerationGuard, paidGenerationGuardError } from '@/lib/tasks/paid-generation-guard';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
+import {
+  isVideoDeliveryFastPathTask,
+  mergeVideoDeliveryCallbackParams,
+  resolveVideoDeliveryCallbackConfig,
+} from '@/lib/video/delivery-policy';
 import type { CreateVideoInput, GenerationMode, VideoResolution, VideoDuration } from '@/types';
 
 const VALID_GENERATION_MODES: GenerationMode[] = [
@@ -1081,6 +1086,30 @@ export async function POST(request: NextRequest) {
   const generateAudio = body.generate_audio ?? true;
   const returnLastFrame = body.return_last_frame ?? false;
   const watermark = body.watermark ?? false;
+  const requestCallbackUrl = typeof body.callback_url === 'string' && body.callback_url.trim()
+    ? body.callback_url.trim()
+    : null;
+  const isFastPathDelivery = isVideoDeliveryFastPathTask({
+    provider: 'seedance',
+    generation_mode: generationMode,
+  });
+  if (isFastPathDelivery) {
+    try {
+      resolveVideoDeliveryCallbackConfig({
+        baseUrl: process.env.NEXT_PUBLIC_BASE_URL,
+        taskId: 'preflight',
+        callbackSecret: process.env.VIDEO_DELIVERY_CALLBACK_SECRET || process.env.SEEDANCE_CALLBACK_SECRET || null,
+      });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'VIDEO_DELIVERY_CALLBACK_CONFIG_ERROR',
+          message: error instanceof Error ? error.message : '视频回调配置缺失，请联系管理员。',
+        },
+        { status: 500 },
+      );
+    }
+  }
 
   const providerInput: CreateVideoInput = {
     prompt: promptRendered,
@@ -1098,7 +1127,7 @@ export async function POST(request: NextRequest) {
     first_frame_url: firstFrameUrl,
     last_frame_url: lastFrameUrl,
     frame_image_urls: frameImageUrls,
-    callback_url: body.callback_url,
+    callback_url: undefined,
     execution_expires_after: body.execution_expires_after,
   };
 
@@ -1401,9 +1430,27 @@ export async function POST(request: NextRequest) {
   try {
     providerInput.clientRequestId = taskId;
     providerInput.client_request_id = taskId;
+    let callbackParamsJson: string | null = null;
+    if (isFastPathDelivery) {
+      const callbackConfig = resolveVideoDeliveryCallbackConfig({
+        baseUrl: process.env.NEXT_PUBLIC_BASE_URL,
+        taskId,
+        requestCallbackUrl,
+        callbackSecret: process.env.VIDEO_DELIVERY_CALLBACK_SECRET || process.env.SEEDANCE_CALLBACK_SECRET || null,
+      });
+      providerInput.callback_url = callbackConfig.providerCallbackUrl;
+      callbackParamsJson = mergeVideoDeliveryCallbackParams(JSON.stringify(taskParams), callbackConfig);
+    } else if (requestCallbackUrl) {
+      providerInput.callback_url = requestCallbackUrl;
+    }
+
     await prisma.videoTask.update({
       where: { id: taskId },
-      data: { provider_client_request_id: taskId },
+      data: {
+        provider_client_request_id: taskId,
+        callback_url: providerInput.callback_url || null,
+        ...(callbackParamsJson ? { params_json: callbackParamsJson } : {}),
+      },
     });
 
     const providerRequest = await createProviderApiRequest({
@@ -1482,7 +1529,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    startTaskLocalization(taskId);
+    startTaskLocalization(taskId, isFastPathDelivery
+      ? { cacheOnSuccess: false, generateThumbnail: false, enqueueDeliveryOnSuccess: true }
+      : {});
     const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
 
     return NextResponse.json({

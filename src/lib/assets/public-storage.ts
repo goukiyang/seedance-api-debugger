@@ -13,6 +13,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { createWriteStream } from 'fs';
+import { stat } from 'fs/promises';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import { TosClient } from '@volcengine/tos-sdk';
@@ -206,6 +210,108 @@ function uploadToLocalPublic(buffer: Buffer, fileName: string, mimeType: string)
   return { publicUrl, key };
 }
 
+function safeFileStem(fileName: string) {
+  const raw = path.basename(fileName, path.extname(fileName)).trim();
+  return (raw || 'video')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'video';
+}
+
+function objectKeyForStream(fileName: string, mimeType: string) {
+  const ext = mimeTypeToExt(mimeType);
+  return `seedance-videos/${safeFileStem(fileName)}-${uuidv4()}.${ext}`;
+}
+
+function toNodeReadable(body: NodeJS.ReadableStream | ReadableStream<Uint8Array>): Readable {
+  if ('pipe' in body && typeof body.pipe === 'function') {
+    return body as Readable;
+  }
+  return Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0]);
+}
+
+async function uploadStreamToR2(
+  body: NodeJS.ReadableStream | ReadableStream<Uint8Array>,
+  key: string,
+  mimeType: string,
+) {
+  const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL } = process.env;
+
+  if (!R2_PUBLIC_BASE_URL || !isPubliclyReachableUrl(R2_PUBLIC_BASE_URL)) {
+    throw new Error('R2_PUBLIC_BASE_URL 未配置为公网地址，无法生成可被 Seedance 下载的 publicUrl');
+  }
+
+  const client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: R2_ACCESS_KEY_ID!,
+      secretAccessKey: R2_SECRET_ACCESS_KEY!,
+    },
+  });
+
+  await client.send(new PutObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+    Body: toNodeReadable(body),
+    ContentType: mimeType,
+  }));
+
+  return {
+    publicUrl: `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`,
+    key,
+  };
+}
+
+async function uploadStreamToTOS(
+  body: NodeJS.ReadableStream | ReadableStream<Uint8Array>,
+  key: string,
+  mimeType: string,
+) {
+  const { TOS_REGION, TOS_BUCKET, TOS_ENDPOINT, TOS_ACCESS_KEY, TOS_SECRET_KEY, TOS_PUBLIC_BASE_URL } = process.env;
+
+  const region = TOS_REGION || 'ap-southeast-1';
+  const endpoint = TOS_ENDPOINT || `https://tos-ap-southeast-1.volces.com`;
+  const bucket = TOS_BUCKET!;
+  const client = new TosClient({
+    endpoint,
+    region,
+    accessKeyId: TOS_ACCESS_KEY!,
+    accessKeySecret: TOS_SECRET_KEY!,
+  });
+
+  await client.putObject({
+    bucket,
+    key,
+    body: toNodeReadable(body),
+    contentType: mimeType,
+  });
+
+  const publicBase = TOS_PUBLIC_BASE_URL || `https://${bucket}.${endpoint}`;
+  return {
+    publicUrl: `${publicBase.replace(/\/$/, '')}/${key}`,
+    key,
+  };
+}
+
+async function uploadStreamToLocalPublic(
+  body: NodeJS.ReadableStream | ReadableStream<Uint8Array>,
+  key: string,
+  mimeType: string,
+) {
+  const targetPath = path.join(process.cwd(), 'public', key);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  await pipeline(toNodeReadable(body), createWriteStream(targetPath));
+  const info = await stat(targetPath);
+  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  return {
+    publicUrl: `${baseUrl}/${key}`,
+    key,
+    size: info.size,
+    mimeType,
+  };
+}
+
 // ============================================================================
 // 工具函数
 // ============================================================================
@@ -246,6 +352,82 @@ export interface PublicUploadResult {
   isPubliclyReachable: boolean;
   /** 警告信息（如果非公网） */
   warning?: string;
+}
+
+export type PublicVideoStreamUploadInput = {
+  body: NodeJS.ReadableStream | ReadableStream<Uint8Array>;
+  fileName: string;
+  mimeType: string;
+  size?: number | null;
+};
+
+export async function uploadPublicVideoStream(input: PublicVideoStreamUploadInput): Promise<PublicUploadResult> {
+  const config = getStorageConfig();
+  const key = objectKeyForStream(input.fileName, input.mimeType);
+  const size = input.size && input.size > 0 ? input.size : 0;
+
+  switch (config.provider) {
+    case 'r2': {
+      try {
+        const result = await uploadStreamToR2(input.body, key, input.mimeType);
+        return {
+          publicUrl: result.publicUrl,
+          storageProvider: 'r2',
+          storageKey: result.key,
+          size,
+          mimeType: input.mimeType,
+          isPubliclyReachable: true,
+        };
+      } catch (err) {
+        console.error('[PublicStorage] R2 video stream upload failed:', err);
+        throw new Error(`R2 视频流式上传失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    case 'tos': {
+      try {
+        const result = await uploadStreamToTOS(input.body, key, input.mimeType);
+        return {
+          publicUrl: result.publicUrl,
+          storageProvider: 'tos',
+          storageKey: result.key,
+          size,
+          mimeType: input.mimeType,
+          isPubliclyReachable: true,
+        };
+      } catch (err) {
+        console.error('[PublicStorage] TOS video stream upload failed:', err);
+        throw new Error(`TOS 视频流式上传失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    case 'local-public': {
+      const result = await uploadStreamToLocalPublic(input.body, key, input.mimeType);
+      const reachable = isPubliclyReachableUrl(result.publicUrl);
+      return {
+        publicUrl: result.publicUrl,
+        storageProvider: 'local-public',
+        storageKey: result.key,
+        size: result.size,
+        mimeType: result.mimeType,
+        isPubliclyReachable: reachable,
+        warning: !reachable
+          ? '当前 BASE_URL 未配置为公网域名，本地预览可用，Seedance 官方可能无法访问。'
+          : undefined,
+      };
+    }
+    case 'local':
+    default: {
+      const result = await uploadStreamToLocalPublic(input.body, key, input.mimeType);
+      return {
+        publicUrl: result.publicUrl,
+        storageProvider: 'local',
+        storageKey: result.key,
+        size: result.size,
+        mimeType: result.mimeType,
+        isPubliclyReachable: false,
+        warning: '未配置公网对象存储，视频仅保存到本地公开目录，稳定下载不会走 CDN。',
+      };
+    }
+  }
 }
 
 /**

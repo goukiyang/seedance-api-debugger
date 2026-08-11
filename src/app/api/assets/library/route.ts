@@ -7,6 +7,7 @@ import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
 import { fileExists, thumbnailFilePath } from '@/lib/video/thumbnail';
 import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
+import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,9 @@ type LibraryItem = {
   canEnhanceVideo: boolean;
   enhanceSourceTaskId: string | null;
   status: string;
+  deliveryStage: VideoDeliveryStage;
+  stableDownloadReady: boolean;
+  previewAvailable: boolean;
   retentionStatus: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -119,6 +123,15 @@ function taskTitle(task: { project: LibraryProject | null; prompt: string; id: s
   return prompt ? prompt.slice(0, 32) : `任务 ${task.id.slice(0, 8)}`;
 }
 
+function nonTaskDeliveryStage(previewAvailable: boolean): VideoDeliveryStage {
+  return {
+    key: previewAvailable ? 'ready' : 'unavailable',
+    label: previewAvailable ? '素材可用' : '素材不可用',
+    stableDownloadReady: false,
+    previewAvailable,
+  };
+}
+
 function parseBaseWhere(
   baseWhere: Prisma.VideoTaskWhereInput,
   filters: Prisma.VideoTaskWhereInput[],
@@ -154,6 +167,7 @@ async function serializeTask(task: {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_status: string | null;
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
@@ -168,6 +182,7 @@ async function serializeTask(task: {
 }): Promise<LibraryItem> {
   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
+  const deliveryStage = videoDeliveryStageForTask(task);
   const owner = userSummary(task.owner || task.user);
   const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
   const hasThumbnailSource = canRequestTaskThumbnail({
@@ -214,6 +229,9 @@ async function serializeTask(task: {
     canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
     enhanceSourceTaskId,
     status: task.local_status,
+    deliveryStage,
+    stableDownloadReady: deliveryStage.stableDownloadReady,
+    previewAvailable: deliveryStage.previewAvailable,
     retentionStatus: task.retention_status,
     createdAt: task.created_at.toISOString(),
     completedAt: task.completed_at ? task.completed_at.toISOString() : null,
@@ -242,6 +260,7 @@ function serializeAsset(asset: {
     ? asset.thumbnail_url || asset.original_url
     : asset.thumbnail_url;
   const owner = userSummary(asset.owner) || legacyAssetOwnerSummary(asset.owner_id);
+  const deliveryStage = nonTaskDeliveryStage(Boolean(asset.original_url));
   return {
     id: `asset:${asset.id}`,
     kind: asset.type === 'audio' ? 'audio' : asset.type === 'video' ? 'video' : 'image',
@@ -265,6 +284,9 @@ function serializeAsset(asset: {
     canEnhanceVideo: false,
     enhanceSourceTaskId: null,
     status: asset.status,
+    deliveryStage,
+    stableDownloadReady: deliveryStage.stableDownloadReady,
+    previewAvailable: deliveryStage.previewAvailable,
     retentionStatus: null,
     createdAt: asset.created_at.toISOString(),
     completedAt: null,
@@ -287,6 +309,7 @@ function serializeReferenceImage(image: {
   album: { id: string; name: string } | null;
   asset_id: string | null;
 }): LibraryItem {
+  const deliveryStage = nonTaskDeliveryStage(Boolean(image.url));
   return {
     id: `reference_image:${image.id}`,
     kind: 'image',
@@ -310,6 +333,9 @@ function serializeReferenceImage(image: {
     canEnhanceVideo: false,
     enhanceSourceTaskId: null,
     status: image.status,
+    deliveryStage,
+    stableDownloadReady: deliveryStage.stableDownloadReady,
+    previewAvailable: deliveryStage.previewAvailable,
     retentionStatus: null,
     createdAt: image.created_at.toISOString(),
     completedAt: null,
@@ -444,6 +470,7 @@ async function loadVideoItems(options: {
         result_video_url: true,
         result_last_frame_url: true,
         local_video_path: true,
+        delivery_status: true,
         duration: true,
         ratio: true,
         resolution: true,

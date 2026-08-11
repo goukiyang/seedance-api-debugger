@@ -1121,6 +1121,11 @@ export default function TaskDetailPage() {
   };
 
   const downloadVideoToLocal = async (sourceTask: VideoTask): Promise<string | null> => {
+    if (sourceTask.public_video_url) {
+      setDownloadProgress('稳定下载已就绪');
+      setDownloadError(null);
+      return sourceTask.public_video_url;
+    }
     if (sourceTask.local_video_path) {
       return sourceTask.local_video_path;
     }
@@ -1132,7 +1137,7 @@ export default function TaskDetailPage() {
     }
 
     setDownloading(true);
-    setDownloadProgress('正在准备本地备用视频...');
+    setDownloadProgress('正在准备稳定下载视频...');
     setDownloadError(null);
     setOpenError(null);
     
@@ -1144,6 +1149,23 @@ export default function TaskDetailPage() {
       });
       const data = await res.json();
       
+      if (res.status === 202) {
+        setDownloadProgress(data.message || '视频已生成，正在准备稳定下载文件，请稍后重试。');
+        setTask((current) => (
+          current ? { ...current, delivery_status: 'pending' } : current
+        ));
+        return null;
+      }
+
+      if (res.ok && data.success && data.public_video_url) {
+        const publicVideoUrl = data.public_video_url as string;
+        setDownloadProgress('稳定下载已就绪');
+        setTask((current) => (
+          current ? { ...current, public_video_url: publicVideoUrl } : current
+        ));
+        return publicVideoUrl;
+      }
+
       if (res.ok && data.success && data.local_video_path) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         const fileSizeMB = (data.file_size / 1024 / 1024).toFixed(2);
@@ -1257,23 +1279,21 @@ export default function TaskDetailPage() {
     setOpenError(null);
 
     try {
-      let hasUsableLink = Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
-      if (!hasUsableLink) {
-        const localVideoPath = await downloadVideoToLocal(task);
-        if (!localVideoPath) {
+      let downloadHref = task.public_video_url
+        || (task.local_video_path ? taskPlaybackUrl(task) : '');
+      if (!downloadHref) {
+        const preparedVideoPath = await downloadVideoToLocal(task);
+        if (!preparedVideoPath) {
           setOpenError('视频还没有可下载的文件。请刷新结果后重试，或重新生成。');
           return;
         }
-        hasUsableLink = true;
-      }
-
-      if (!hasUsableLink) {
-        setOpenError('视频还没有可下载的文件。请刷新结果后重试，或重新生成。');
-        return;
+        downloadHref = preparedVideoPath.startsWith('http')
+          ? preparedVideoPath
+          : taskPlaybackUrl({ ...task, local_video_path: preparedVideoPath });
       }
 
       const anchor = document.createElement('a');
-      anchor.href = taskPlaybackUrl(task);
+      anchor.href = downloadHref;
       anchor.download = `seedance-${task.id}.mp4`;
       anchor.rel = 'noopener';
       document.body.appendChild(anchor);
@@ -1852,6 +1872,12 @@ export default function TaskDetailPage() {
                   >
                     <Download size={16} aria-hidden="true" />
                     {browserDownloading || downloading ? '准备中...' : '下载视频'}
+                  </button>
+                )}
+                {isPublicVideoPreparing && (
+                  <button className="btn btn-secondary" onClick={handleDownloadToLocal} disabled={downloading}>
+                    <Download size={16} aria-hidden="true" />
+                    {downloading ? '提交中...' : '准备稳定下载'}
                   </button>
                 )}
                 {task.local_status === 'failed' && (

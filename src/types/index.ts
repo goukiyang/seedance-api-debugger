@@ -157,6 +157,12 @@ export interface VideoTask {
   public_video_storage_key?: string;
   public_video_file_size?: number;
   public_video_cached_at?: Date;
+  delivery_status?: string;
+  delivery_queued_at?: Date;
+  delivery_started_at?: Date;
+  delivery_completed_at?: Date;
+  delivery_attempts?: number;
+  delivery_error?: string;
   raw_create_response?: string;
   raw_status_response?: string;
   error_message?: string;

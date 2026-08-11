@@ -17584,6 +17584,38 @@ body.compare-fullscreen-open {
   font-weight: 820;
 }
 
+.asset-card-delivery-stage {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid oklch(0.38 0.03 245);
+  border-radius: 6px;
+  color: oklch(0.72 0.018 245);
+  background: oklch(0.16 0.012 250);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.asset-card-delivery-stage.is-ready {
+  border-color: oklch(0.65 0.12 158 / 0.72);
+  color: oklch(0.8 0.11 158);
+  background: oklch(0.18 0.035 158 / 0.76);
+}
+
+.asset-card-delivery-stage.is-preparing {
+  border-color: oklch(0.72 0.12 78 / 0.64);
+  color: oklch(0.86 0.1 78);
+  background: oklch(0.18 0.03 78 / 0.7);
+}
+
+.asset-card-delivery-stage.is-failed {
+  border-color: oklch(0.66 0.16 25 / 0.72);
+  color: oklch(0.78 0.13 25);
+  background: oklch(0.19 0.04 25 / 0.74);
+}
+
 .asset-card-meta {
   display: grid;
   gap: 3px;
