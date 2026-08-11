@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [ ] 2026-08-08：资产管理失败项、缩略图与用户归属彻查修复，正文见 `tasks/todo/2026-08-08-asset-library-integrity.md`。
+- [ ] 2026-08-11：提交生成到稳定下载就绪优化，正文见 `tasks/todo/2026-08-11-sd2-video-download-delivery.md`。
 
 ## 最近状态
 
@@ -23,4 +23,5 @@
 - `tasks/todo/2026-08-07-stuck-video-polling-status.md`：长任务状态卡住修复
 - `tasks/todo/2026-08-07-upload-provider-rules.md`：上传限制分层与生成准入收口
 - `tasks/todo/2026-08-08-asset-library-integrity.md`：资产管理失败项、缩略图与用户归属彻查修复
+- `tasks/todo/2026-08-11-sd2-video-download-delivery.md`：提交生成到稳定下载就绪优化
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
