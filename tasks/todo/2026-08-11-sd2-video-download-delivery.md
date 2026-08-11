@@ -163,4 +163,7 @@
 - [x] 观测与补偿：新增 `video:delivery-metrics`；`video:delivery-backfill --queue` 默认 dry-run，最近 7 天 dry-run 发现 3 个缺稳定 URL 的成功任务。
 - [x] 本地验证：`video-delivery-fast-path smoke`、`video-delivery-queue smoke`、`provider-status-router smoke`、`task-finalizer-terminal-guard smoke`、`check-video-public-delivery-rules`、`npm run lint`、`npm run build` 均通过；lint/build 只剩项目既有 `<img>` 和 hook warning。
 - [x] 独立只读审查：子 agent 复审通过，上线阻塞项为无；批量下载 public URL 缺显式 timeout 被标为 P2，不阻塞本次上线。
+- [x] 真实回填修正：R2 未知长度视频流上传已改为先落临时文件拿到 `ContentLength` 再上传；worker 增加 5 分钟硬超时、`--once` 退出保护、Provider 签名结果 URL 转存前刷新、stale worker 写回保护。
+- [x] 真实回填证据：最近 7 天 3 个缺稳定 URL 的成功任务中，2 个已补齐稳定 URL；1 个任务 `cmsogtwfb026d145ryfzx922r` 刷新 Provider 地址后仍在 R2 转存阶段 5 分钟超时，已进入 `failed`，不会继续卡住队列。
+- [x] 最新指标：`npm run video:delivery-metrics -- --days 7` 显示 `stable_download_ready=137`、`missing_stable_download=1`、`queued_to_delivery.count=3`、`delivery_start_to_finish.p50_seconds=309`；当前缺口是 R2 传输能力/链路限制，不是页面状态未刷新。
 - [ ] 线上闭环：待完成 Git 提交/推送、`youdoo-sites build sd2`、`youdoo-sites restart sd2`、公网 API/页面验证、跨健康守护周期复查。

@@ -23,5 +23,18 @@ assert.match(schema, /delivery_status\s+String\?/, 'VideoTask should expose stab
 const queueSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/video/delivery-queue.ts'), 'utf8');
 assert.match(queueSource, /updateMany/, 'queue claim must use a conditional update to avoid duplicate worker claims');
 assert.match(queueSource, /claim\.count !== 1/, 'queue claim must verify that the worker actually claimed the job');
+assert.match(queueSource, /locked_by:\s*job\.locked_by/, 'job completion/failure must only update the lock owned by the current worker');
+assert.match(queueSource, /status:\s*VIDEO_DELIVERY_STATUS_RUNNING/, 'stale workers must not overwrite a job after it is no longer running');
+
+const publicStorageSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/assets/public-storage.ts'), 'utf8');
+assert.match(publicStorageSource, /PUBLIC_VIDEO_STREAM_TIMEOUT_MS/, 'public video stream delivery must have a real timeout');
+assert.match(publicStorageSource, /abortSignal/, 'R2 public video upload must be abortable');
+assert.match(publicStorageSource, /signal/, 'public video download spooling must abort stalled streams');
+
+const publicDeliverySource = fs.readFileSync(path.join(process.cwd(), 'src/lib/video/public-delivery.ts'), 'utf8');
+assert.match(publicDeliverySource, /await refreshResultUrl\(task\)[\s\S]*\|\|\s*task\.result_video_url/, 'provider video delivery should refresh signed result URLs before streaming');
+
+const workerScriptSource = fs.readFileSync(path.join(process.cwd(), 'scripts/process-video-delivery-jobs.ts'), 'utf8');
+assert.match(workerScriptSource, /once[\s\S]*process\.exit\(0\)/, 'one-shot worker must exit after a batch even if SDK sockets stay open');
 
 console.log('video-delivery-queue smoke passed');

@@ -160,7 +160,7 @@ async function refreshResultUrl(task: ProviderVideoDeliveryTask) {
 async function fetchProviderVideoWithRefresh(
   task: ProviderVideoDeliveryTask,
 ): Promise<Response & { body: ReadableStream<Uint8Array> }> {
-  let url = task.result_video_url || await refreshResultUrl(task);
+  let url = await refreshResultUrl(task) || task.result_video_url;
   if (!url) throw new Error('任务没有可交付的视频结果 URL');
 
   let response = await fetchProviderVideo(url);

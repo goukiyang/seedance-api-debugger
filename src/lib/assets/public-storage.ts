@@ -13,14 +13,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { createWriteStream } from 'fs';
-import { stat } from 'fs/promises';
+import { createReadStream, createWriteStream } from 'fs';
+import { mkdtemp, stat, unlink } from 'fs/promises';
+import { tmpdir } from 'os';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import { TosClient } from '@volcengine/tos-sdk';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+
+const PUBLIC_VIDEO_STREAM_TIMEOUT_MS = 5 * 60 * 1000;
 
 // ============================================================================
 // URL 判断工具
@@ -230,10 +233,61 @@ function toNodeReadable(body: NodeJS.ReadableStream | ReadableStream<Uint8Array>
   return Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0]);
 }
 
+function publicVideoStreamTimeoutMs() {
+  const raw = Number(process.env.VIDEO_PUBLIC_STREAM_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : PUBLIC_VIDEO_STREAM_TIMEOUT_MS;
+}
+
+async function withPublicVideoStreamTimeout<T>(
+  label: string,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutMs = publicVideoStreamTimeoutMs();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await run(controller.signal);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label} 超时，超过 ${Math.round(timeoutMs / 1000)} 秒未完成`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+type SpoolStreamTempFile = {
+  path: string;
+  size: number;
+  cleanup: () => Promise<void>;
+};
+
+async function spoolStreamToTempFile(
+  body: NodeJS.ReadableStream | ReadableStream<Uint8Array>,
+  fileName: string,
+  signal?: AbortSignal,
+): Promise<SpoolStreamTempFile> {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'sd2-video-delivery-'));
+  const tempPath = path.join(tempDir, `${safeFileStem(fileName)}-${uuidv4()}.bin`);
+  await pipeline(toNodeReadable(body), createWriteStream(tempPath), { signal });
+  const info = await stat(tempPath);
+  return {
+    path: tempPath,
+    size: info.size,
+    cleanup: async () => {
+      await unlink(tempPath).catch(() => undefined);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    },
+  };
+}
+
 async function uploadStreamToR2(
   body: NodeJS.ReadableStream | ReadableStream<Uint8Array>,
   key: string,
   mimeType: string,
+  size?: number | null,
+  signal?: AbortSignal,
 ) {
   const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL } = process.env;
 
@@ -250,12 +304,16 @@ async function uploadStreamToR2(
     },
   });
 
-  await client.send(new PutObjectCommand({
-    Bucket: R2_BUCKET,
-    Key: key,
-    Body: toNodeReadable(body),
-    ContentType: mimeType,
-  }));
+  await client.send(
+    new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Body: toNodeReadable(body),
+      ContentType: mimeType,
+      ...(size && size > 0 ? { ContentLength: size } : {}),
+    }),
+    { abortSignal: signal },
+  );
 
   return {
     publicUrl: `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`,
@@ -364,23 +422,35 @@ export type PublicVideoStreamUploadInput = {
 export async function uploadPublicVideoStream(input: PublicVideoStreamUploadInput): Promise<PublicUploadResult> {
   const config = getStorageConfig();
   const key = objectKeyForStream(input.fileName, input.mimeType);
-  const size = input.size && input.size > 0 ? input.size : 0;
+  const size = input.size && input.size > 0 ? input.size : null;
 
   switch (config.provider) {
     case 'r2': {
+      const tempFileRef: { current: SpoolStreamTempFile | null } = { current: null };
       try {
-        const result = await uploadStreamToR2(input.body, key, input.mimeType);
-        return {
-          publicUrl: result.publicUrl,
-          storageProvider: 'r2',
-          storageKey: result.key,
-          size,
-          mimeType: input.mimeType,
-          isPubliclyReachable: true,
-        };
+        return await withPublicVideoStreamTimeout('R2 视频稳定下载转存', async (signal) => {
+          let uploadBody: NodeJS.ReadableStream | ReadableStream<Uint8Array> = input.body;
+          let uploadSize = size;
+          if (!uploadSize) {
+            tempFileRef.current = await spoolStreamToTempFile(input.body, input.fileName, signal);
+            uploadBody = createReadStream(tempFileRef.current.path);
+            uploadSize = tempFileRef.current.size;
+          }
+          const result = await uploadStreamToR2(uploadBody, key, input.mimeType, uploadSize, signal);
+          return {
+            publicUrl: result.publicUrl,
+            storageProvider: 'r2',
+            storageKey: result.key,
+            size: uploadSize || 0,
+            mimeType: input.mimeType,
+            isPubliclyReachable: true,
+          };
+        });
       } catch (err) {
         console.error('[PublicStorage] R2 video stream upload failed:', err);
         throw new Error(`R2 视频流式上传失败：${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        await tempFileRef.current?.cleanup();
       }
     }
     case 'tos': {
@@ -390,7 +460,7 @@ export async function uploadPublicVideoStream(input: PublicVideoStreamUploadInpu
           publicUrl: result.publicUrl,
           storageProvider: 'tos',
           storageKey: result.key,
-          size,
+          size: size || 0,
           mimeType: input.mimeType,
           isPubliclyReachable: true,
         };

@@ -212,8 +212,13 @@ export async function completeVideoDeliveryJob(job: VideoDeliveryJobRecord, deta
   fileSize: number | null;
 }) {
   const now = details.now || new Date();
-  const updated = await deliveryJobs().update({
-    where: { id: job.id },
+  const completion = await deliveryJobs().updateMany({
+    where: {
+      id: job.id,
+      status: VIDEO_DELIVERY_STATUS_RUNNING,
+      locked_at: job.locked_at,
+      locked_by: job.locked_by,
+    },
     data: {
       status: VIDEO_DELIVERY_STATUS_SUCCEEDED,
       locked_at: null,
@@ -222,6 +227,13 @@ export async function completeVideoDeliveryJob(job: VideoDeliveryJobRecord, deta
       completed_at: now,
     },
   });
+  const updated = await deliveryJobs().findUnique({ where: { id: job.id } });
+  if (!updated) {
+    throw new Error(`视频交付任务 ${job.id} 不存在`);
+  }
+  if (completion.count !== 1) {
+    return updated;
+  }
 
   await prisma.videoTask.update({
     where: { id: job.task_id },
@@ -248,8 +260,13 @@ export async function failVideoDeliveryJob(job: VideoDeliveryJobRecord, error: u
   const status = terminal ? VIDEO_DELIVERY_STATUS_FAILED : VIDEO_DELIVERY_STATUS_PENDING;
   const runAfter = terminal ? job.run_after : nextVideoDeliveryRunAfter(job.attempts, now);
 
-  const updated = await deliveryJobs().update({
-    where: { id: job.id },
+  const failure = await deliveryJobs().updateMany({
+    where: {
+      id: job.id,
+      status: VIDEO_DELIVERY_STATUS_RUNNING,
+      locked_at: job.locked_at,
+      locked_by: job.locked_by,
+    },
     data: {
       status,
       run_after: runAfter,
@@ -259,6 +276,13 @@ export async function failVideoDeliveryJob(job: VideoDeliveryJobRecord, error: u
       completed_at: terminal ? now : null,
     },
   });
+  const updated = await deliveryJobs().findUnique({ where: { id: job.id } });
+  if (!updated) {
+    throw new Error(`视频交付任务 ${job.id} 不存在`);
+  }
+  if (failure.count !== 1) {
+    return updated;
+  }
 
   await prisma.videoTask.update({
     where: { id: job.task_id },
