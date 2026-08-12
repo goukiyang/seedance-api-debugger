@@ -115,7 +115,8 @@
 - 已验证本地视频播放：抽样无 `public_video_url` 的历史任务，服务器本地 MP4 和缩略图文件存在，公网 `/api/video/play/:id` 返回 `206 video/mp4` range。
 - 已准备后台补偿：`sd2-finalize-pending.timer`、`sd2-video-delivery.timer` 已安装但保持 `disabled`；`video:finalize-pending --dry-run` 可跑，发现 1 条 `succeeded_missing_local_video` 候选且未写库。
 - 已暂停新版视频冷热归档：本轮没有实现 7 天热视频、Mac 冷归档、老视频恢复请求、自动搬回 Mac 等策略。
-- 未闭环事项：未做正式域名切流；未启用后台补偿 timer；未跑真实生成或外部 API 付费生成；未做登录态下的完整 UI 操作验收；未创建迁移 Git 版本和 rollback tag。
+- Git 收口：迁移文档已提交并推送到 `codex/video-delivery-fast-path`；回退 tag `rollback/2026-08-12-before-sd2-server-gray` 已推送，指向本轮灰度迁移文档提交前的代码基线。
+- 未闭环事项：未做正式域名切流；未启用后台补偿 timer；未跑真实生成或外部 API 付费生成；未做登录态下的完整 UI 操作验收；未把服务器 systemd/nginx 配置模板纳入仓库。
 
 ## 3. 验收/审查内容
 
