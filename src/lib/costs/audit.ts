@@ -2,8 +2,15 @@ import { prisma } from '@/lib/prisma';
 
 const TERMINAL_TASK_STATUSES = ['succeeded', 'failed', 'cancelled'];
 const TERMINAL_COST_EVENTS = ['rule_settlement', 'failed_cost_unknown', 'failed_no_charge', 'official_charge'];
+const LEDGER_ID_QUERY_CHUNK_SIZE = 500;
 
 export type CostLedgerAuditSummary = Awaited<ReturnType<typeof getCostLedgerAuditSummary>>;
+
+type CostAmountRow = {
+  amount_minor: number | null;
+  amount_micros: number | null;
+  currency: string | null;
+};
 
 function countDuplicateProviderTaskIds(rows: Array<{ provider_task_id: string | null }>) {
   const counts = new Map<string, number>();
@@ -34,6 +41,32 @@ function sumCostByCurrency(rows: Array<{ amount_minor: number | null; amount_mic
   return Array.from(totals.entries())
     .map(([currency, amount_micros]) => ({ currency, amount_micros, amount_minor: Math.round(amount_micros / 10_000) }))
     .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+async function findOfficialChargeAllocations(ledgerIds: string[]) {
+  const rows: CostAmountRow[] = [];
+
+  // Prisma/SQLite 对单次 SQL 参数数量有限制；这里主动分批，避免后台数据增长后 /admin 直接服务端崩溃。
+  for (let start = 0; start < ledgerIds.length; start += LEDGER_ID_QUERY_CHUNK_SIZE) {
+    const batchLedgerIds = ledgerIds.slice(start, start + LEDGER_ID_QUERY_CHUNK_SIZE);
+    if (batchLedgerIds.length === 0) continue;
+
+    const batchRows = await prisma.costAllocation.findMany({
+      where: {
+        ledger_id: { in: batchLedgerIds },
+        amount_minor: { not: null },
+      },
+      select: {
+        amount_minor: true,
+        amount_micros: true,
+        currency: true,
+      },
+    });
+
+    rows.push(...batchRows);
+  }
+
+  return rows;
 }
 
 export async function getCostLedgerAuditSummary() {
@@ -122,19 +155,7 @@ export async function getCostLedgerAuditSummary() {
   ]);
 
   const officialChargeLedgerIds = officialChargeLedgers.map((ledger) => ledger.id);
-  const officialAllocations = officialChargeLedgerIds.length > 0
-    ? await prisma.costAllocation.findMany({
-        where: {
-          ledger_id: { in: officialChargeLedgerIds },
-          amount_minor: { not: null },
-        },
-        select: {
-          amount_minor: true,
-          amount_micros: true,
-          currency: true,
-        },
-      })
-    : [];
+  const officialAllocations = await findOfficialChargeAllocations(officialChargeLedgerIds);
 
   const duplicateProviderTaskIds = countDuplicateProviderTaskIds(duplicateProviderTaskRows);
   const issueCount =
