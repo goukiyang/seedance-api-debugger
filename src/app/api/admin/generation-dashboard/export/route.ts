@@ -76,15 +76,22 @@ export async function GET(request: NextRequest) {
       resolution: resolution ? normalizeDashboardResolution(resolution) : null,
     });
 
+    const trendExtra = (item: typeof dashboard.trends.day[number]) => [
+      `duration_seconds=${item.duration_seconds}`,
+      `regular_task_count=${Math.max(0, item.task_count - (item.enhance_task_count || 0))}`,
+      `enhance_task_count=${item.enhance_task_count || 0}`,
+      `date_from=${item.date_from}`,
+      `date_to=${item.date_to}`,
+    ].join(';');
     const rows: unknown[][] = [
       ['section', 'key', 'label', 'count', 'succeeded', 'failed', 'points', 'official_costs', 'official_costs_cny_estimate', 'extra'],
       ['summary', 'range', dashboard.range.label, dashboard.kpis.total_tasks, dashboard.kpis.succeeded_tasks, dashboard.kpis.failed_tasks, dashboard.kpis.total_points, totalsText(dashboard.kpis.official_costs), totalsCnyText(dashboard.kpis.official_costs), `warnings=${dashboard.kpis.warning_count}`],
       ...dashboard.resolution_breakdown.map((item) => ['resolution', item.key, item.label, item.count, item.succeeded, item.failed, item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `pending_official=${item.pending_official_count}`]),
       ...dashboard.project_breakdown.map((item) => ['project', item.key, item.label, item.count, item.succeeded, item.failed, item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `pending_official=${item.pending_official_count}`]),
       ...dashboard.member_ranking.map((item) => ['member', item.key, item.label, item.count, item.succeeded, item.failed, item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `pending_official=${item.pending_official_count}`]),
-      ...dashboard.trends.day.map((item) => ['trend_day', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `duration_seconds=${item.duration_seconds};date_from=${item.date_from};date_to=${item.date_to}`]),
-      ...dashboard.trends.week.map((item) => ['trend_week', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `duration_seconds=${item.duration_seconds};date_from=${item.date_from};date_to=${item.date_to}`]),
-      ...dashboard.trends.month.map((item) => ['trend_month', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `duration_seconds=${item.duration_seconds};date_from=${item.date_from};date_to=${item.date_to}`]),
+      ...dashboard.trends.day.map((item) => ['trend_day', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), trendExtra(item)]),
+      ...dashboard.trends.week.map((item) => ['trend_week', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), trendExtra(item)]),
+      ...dashboard.trends.month.map((item) => ['trend_month', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), trendExtra(item)]),
       ...dashboard.warnings.map((item) => ['warning', item.type, item.title, item.count, '', '', '', '', '', item.detail]),
       ['recent_tasks', 'task_id', 'prompt', 'status', 'resolution', 'duration', 'points', 'official_cost', 'official_cost_cny_estimate', 'project_or_owner'],
       ...dashboard.recent_tasks.map((task) => [

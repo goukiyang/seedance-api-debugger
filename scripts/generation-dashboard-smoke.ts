@@ -37,6 +37,13 @@ function officialCostMicros(task: {
   return null;
 }
 
+function isEnhanceTask(task: {
+  provider: string;
+  generation_mode: string;
+}) {
+  return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+}
+
 async function expectedCompletedMonthlyOutputs(range: { date_from: string; date_to: string }) {
   const tasks = await prisma.videoTask.findMany({
     where: {
@@ -48,18 +55,21 @@ async function expectedCompletedMonthlyOutputs(range: { date_from: string; date_
     },
     select: {
       completed_at: true,
+      provider: true,
+      generation_mode: true,
       duration: true,
       provider_cost_currency: true,
       provider_official_amount_minor: true,
       provider_official_amount_micros: true,
     },
   });
-  const expected = new Map<string, { count: number; duration: number; officialMicros: number }>();
+  const expected = new Map<string, { count: number; enhanceCount: number; duration: number; officialMicros: number }>();
   tasks.forEach((task) => {
     if (!task.completed_at) return;
     const key = monthKey(task.completed_at);
-    const bucket = expected.get(key) || { count: 0, duration: 0, officialMicros: 0 };
+    const bucket = expected.get(key) || { count: 0, enhanceCount: 0, duration: 0, officialMicros: 0 };
     bucket.count += 1;
+    if (isEnhanceTask(task)) bucket.enhanceCount += 1;
     bucket.duration += Math.max(0, task.duration ?? 0);
     bucket.officialMicros += officialCostMicros(task) ?? 0;
     expected.set(key, bucket);
@@ -89,10 +99,13 @@ async function main() {
   }
   const expectedMonthlyOutputs = await expectedCompletedMonthlyOutputs(allDashboard.range);
   allDashboard.trends.month.forEach((bucket) => {
-    const expected = expectedMonthlyOutputs.get(bucket.key) || { count: 0, duration: 0, officialMicros: 0 };
+    const expected = expectedMonthlyOutputs.get(bucket.key) || { count: 0, enhanceCount: 0, duration: 0, officialMicros: 0 };
     const officialMicros = bucket.official_costs.reduce((sum, item) => sum + item.amount_micros, 0);
     if (bucket.task_count !== expected.count) {
       throw new Error(`按月趋势产出数与真实完成产出不一致：${bucket.key} trend=${bucket.task_count}, completed=${expected.count}`);
+    }
+    if ((bucket.enhance_task_count || 0) !== expected.enhanceCount) {
+      throw new Error(`按月趋势超分数与真实完成产出不一致：${bucket.key} trend=${bucket.enhance_task_count || 0}, completed=${expected.enhanceCount}`);
     }
     if (bucket.duration_seconds !== expected.duration) {
       throw new Error(`按月趋势秒数与真实完成产出不一致：${bucket.key} trend=${bucket.duration_seconds}, completed=${expected.duration}`);
@@ -163,6 +176,8 @@ async function main() {
     completed_month_outputs_checked: allDashboard.trends.month.map((item) => ({
       key: item.key,
       task_count: item.task_count,
+      regular_task_count: Math.max(0, item.task_count - (item.enhance_task_count || 0)),
+      enhance_task_count: item.enhance_task_count || 0,
       duration_seconds: item.duration_seconds,
       official_cost_micros: item.official_costs.reduce((sum, total) => sum + total.amount_micros, 0),
     })),

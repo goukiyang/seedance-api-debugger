@@ -29,6 +29,9 @@
 - [x] T8. 修复双柱图金额标签错位
   - 修改文件：`src/app/admin/AdminGenerationDashboardClient.tsx`、`scripts/generation-dashboard-trend-layout-smoke.ts`。
   - 完成标准：金额柱顶部标签必须读取当前柱子的 `payload`，不能用外部 `chartData[index]` 反查，避免横向滚动或多 bucket 时把前一个月份金额显示到当前月份。
+- [x] T9. 月度趋势增加超分单独柱状
+  - 修改文件：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/globals.css`、`src/app/api/admin/generation-dashboard/export/route.ts`、`scripts/generation-dashboard-smoke.ts`、`scripts/generation-dashboard-trend-layout-smoke.ts`。
+  - 完成标准：趋势图不再把普通视频和超分只合在一根“视频条数”柱里；每个周期并排显示官方额度、普通视频条数、超分视频条数三类柱；三根柱顶部都能直接看见具体数值；导出 CSV 的趋势行也保留普通/超分拆分字段。
 
 ## 3. 验收/审查内容
 
@@ -54,9 +57,13 @@
   - 检查对象：`renderTrendBarValueLabel`、`LabelList`、周期明细卡。
   - 通过标准：图上橙色金额标签和下方同一月份周期明细金额来自同一个 bucket；smoke 禁止 `chartData[props.index]` 这类容易错位的反查方式。
   - 证据来源：新增 smoke 先在旧实现下失败 `趋势组件仍残留旧遮挡实现：chartData[props.index]`，修复后通过。
+- [x] R6. 超分柱状数据口径审查
+  - 检查对象：`DashboardTrendBucket.enhance_task_count`、`TrendChart`、导出 CSV、smoke 脚本。
+  - 通过标准：超分视频条数按 `generation_mode=enhance_video` 或 `provider=volcengine_mediakit` 的成功完成任务统计；普通视频条数等于总成功数减超分数；月度 smoke 能对账每月总成功、普通、超分和官方成本。
+  - 证据来源：`npx tsx scripts/generation-dashboard-smoke.ts`、`npx tsx scripts/generation-dashboard-trend-layout-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run build` 和线上静态资源检查。
 
 ## 4. 审查内容是否对齐目标
 
 - [x] A1. 审查项对齐检查
   - 判断：R1/R2/R3 覆盖“好看、直观、显示完整、真实上线”四个目标，不把代码通过误报成页面已好用。
-  - 结论：R1 仍需真实登录态视觉截图补强；本轮不把源码检查冒充最终视觉验收。
+  - 结论：R1 仍需真实登录态视觉截图补强；本轮不把源码检查冒充最终视觉验收。R6 覆盖用户新增的“超分内容单独一个柱状显示”要求。

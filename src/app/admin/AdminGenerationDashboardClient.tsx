@@ -76,7 +76,7 @@ const compactFormatter = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
 });
 const TREND_CHART_HEIGHT = 280;
-const TREND_BUCKET_WIDTH = 112;
+const TREND_BUCKET_WIDTH = 142;
 
 function formatCurrencyTotals(totals: DashboardCurrencyTotal[], fallback = '待官方确认') {
   if (!totals.length) return fallback;
@@ -314,6 +314,8 @@ type TrendChartPoint = {
   key: string;
   label: string;
   taskCount: number;
+  regularTaskCount: number;
+  enhanceTaskCount: number;
   durationSeconds: number;
   durationLabel: string;
   officialCostMicros: number;
@@ -326,10 +328,14 @@ type TrendChartPoint = {
 
 function toTrendChartPoint(bucket: DashboardTrendBucket): TrendChartPoint {
   const officialCostMicros = trendOfficialMicros(bucket);
+  const enhanceTaskCount = Math.max(0, bucket.enhance_task_count || 0);
+  const regularTaskCount = Math.max(0, bucket.task_count - enhanceTaskCount);
   return {
     key: bucket.key,
     label: bucket.label,
     taskCount: bucket.task_count,
+    regularTaskCount,
+    enhanceTaskCount,
     durationSeconds: bucket.duration_seconds,
     durationLabel: formatSeconds(bucket.duration_seconds),
     officialCostMicros,
@@ -354,7 +360,15 @@ function TrendTooltip({ active, payload }: { active?: boolean; payload?: TrendTo
       <strong>{point.label}</strong>
       <dl>
         <div>
-          <dt>成功视频条数</dt>
+          <dt>普通视频条数</dt>
+          <dd>{formatInteger(point.regularTaskCount)} 条</dd>
+        </div>
+        <div>
+          <dt>超分视频条数</dt>
+          <dd>{formatInteger(point.enhanceTaskCount)} 条</dd>
+        </div>
+        <div>
+          <dt>总成功视频</dt>
           <dd>{formatInteger(point.taskCount)} 条</dd>
         </div>
         <div>
@@ -385,7 +399,7 @@ function numericSvgValue(value: number | string | undefined) {
 
 function renderTrendBarValueLabel(
   props: TrendBarLabelProps,
-  kind: 'cost' | 'count',
+  kind: 'cost' | 'regular' | 'enhance',
 ) {
   // LabelList 的 index 可能和业务 bucket 错位；payload 才是当前这根柱子的原始数据。
   const point = props.payload || null;
@@ -394,10 +408,13 @@ function renderTrendBarValueLabel(
   const width = numericSvgValue(props.width);
   if (!point || x === null || y === null || width === null) return null;
 
-  const label = kind === 'count' ? `${formatInteger(point.taskCount)} 条` : point.officialCostBarLabel;
+  const label = kind === 'cost'
+    ? point.officialCostBarLabel
+    : `${formatInteger(kind === 'enhance' ? point.enhanceTaskCount : point.regularTaskCount)} 条`;
+  const labelKind = kind === 'regular' ? 'count' : kind;
   return (
     <text
-      className={`admin-dashboard-trend-value-label is-${kind}`}
+      className={`admin-dashboard-trend-value-label is-${labelKind}`}
       textAnchor="middle"
       x={x + width / 2}
       y={Math.max(13, y - 8)}
@@ -416,8 +433,8 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
       <div className="admin-dashboard-trend-chart-head">
         <div>
           <span>趋势图</span>
-          <strong>官方额度与视频条数</strong>
-          <small>按成功完成时间归入周期；橙色柱看金额，蓝色柱看成功视频条数。</small>
+          <strong>官方额度、普通视频与超分</strong>
+          <small>按成功完成时间归入周期；橙色柱看金额，蓝色柱看普通视频，紫色柱看超分视频。</small>
         </div>
         <span>悬停查看完整数值</span>
       </div>
@@ -433,7 +450,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
               <ComposedChart
                 data={chartData}
                 barCategoryGap={18}
-                barGap={6}
+                barGap={4}
                 margin={{ top: 38, right: 10, bottom: 2, left: 0 }}
                 accessibilityLayer
               >
@@ -469,7 +486,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                 <Bar
                   dataKey="officialCostAmount"
                   fill="var(--admin-dashboard-chart-cost)"
-                  maxBarSize={34}
+                  maxBarSize={28}
                   name="官方额度"
                   radius={[6, 6, 0, 0]}
                   yAxisId="cost"
@@ -477,14 +494,24 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                   <LabelList content={(props) => renderTrendBarValueLabel(props, 'cost')} />
                 </Bar>
                 <Bar
-                  dataKey="taskCount"
+                  dataKey="regularTaskCount"
                   fill="var(--admin-dashboard-chart-count)"
-                  maxBarSize={34}
-                  name="成功视频条数"
+                  maxBarSize={28}
+                  name="普通视频条数"
                   radius={[6, 6, 0, 0]}
                   yAxisId="count"
                 >
-                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'count')} />
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'regular')} />
+                </Bar>
+                <Bar
+                  dataKey="enhanceTaskCount"
+                  fill="var(--admin-dashboard-chart-enhance)"
+                  maxBarSize={28}
+                  name="超分视频条数"
+                  radius={[6, 6, 0, 0]}
+                  yAxisId="count"
+                >
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'enhance')} />
                 </Bar>
               </ComposedChart>
             </ResponsiveContainer>
@@ -498,7 +525,10 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
           <div className={`admin-dashboard-trend-day ${bucket.className}`} key={`${bucket.key}-daily`}>
             <span>{bucket.label}</span>
             <strong>{bucket.officialCostLabel}</strong>
-            <small>{formatInteger(bucket.taskCount)} 次 · {bucket.durationLabel}</small>
+            <small>
+              普通 {formatInteger(bucket.regularTaskCount)} · 超分 {formatInteger(bucket.enhanceTaskCount)} · 共 {formatInteger(bucket.taskCount)}
+            </small>
+            <small>{bucket.durationLabel}</small>
             <em>{bucket.stateLabel}</em>
           </div>
         ))}
@@ -559,9 +589,12 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
   );
   const trendSummary = useMemo(() => {
     const taskCount = trendBuckets.reduce((sum, bucket) => sum + bucket.task_count, 0);
+    const enhanceTaskCount = trendBuckets.reduce((sum, bucket) => sum + (bucket.enhance_task_count || 0), 0);
     const durationSeconds = trendBuckets.reduce((sum, bucket) => sum + bucket.duration_seconds, 0);
     return {
       taskCount,
+      enhanceTaskCount,
+      regularTaskCount: Math.max(0, taskCount - enhanceTaskCount),
       durationSeconds,
       officialCosts: mergeTrendOfficialCosts(trendBuckets),
     };
@@ -661,12 +694,15 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
         </div>
         <div className="admin-dashboard-trend-summary">
           <span><strong>{formatInteger(trendSummary.taskCount)}</strong>成功视频条数</span>
+          <span><strong>{formatInteger(trendSummary.regularTaskCount)}</strong>普通视频条数</span>
+          <span><strong>{formatInteger(trendSummary.enhanceTaskCount)}</strong>超分视频条数</span>
           <span><strong>{formatSeconds(trendSummary.durationSeconds)}</strong>生成秒数</span>
           <span><strong>{formatCurrencyTotals(trendSummary.officialCosts, '待官方确认')}</strong>官方额度</span>
         </div>
         <div className="admin-dashboard-trend-legend" aria-label="趋势图例">
           <span className="is-cost">官方额度</span>
-          <span className="is-count">成功视频条数</span>
+          <span className="is-count">普通视频条数</span>
+          <span className="is-enhance">超分视频条数</span>
           <span className="is-seconds">明细含生成秒数</span>
         </div>
         <TrendChart buckets={trendBuckets} />

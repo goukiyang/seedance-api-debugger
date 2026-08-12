@@ -131,6 +131,7 @@ export type DashboardTrendBucket = {
   date_from: string;
   date_to: string;
   task_count: number;
+  enhance_task_count: number;
   duration_seconds: number;
   points: number;
   official_costs: DashboardCurrencyTotal[];
@@ -387,6 +388,7 @@ function createTrendBucket(start: Date, rangeStart: Date, rangeEnd: Date, granul
     date_from: isoDate(bucketFrom),
     date_to: isoDate(bucketTo),
     task_count: 0,
+    enhance_task_count: 0,
     duration_seconds: 0,
     points: 0,
     official_costs: [],
@@ -401,10 +403,15 @@ function finalizeTrendBucket(bucket: DashboardTrendAccumulator): DashboardTrendB
     date_from: bucket.date_from,
     date_to: bucket.date_to,
     task_count: bucket.task_count,
+    enhance_task_count: bucket.enhance_task_count,
     duration_seconds: bucket.duration_seconds,
     points: bucket.points,
     official_costs: currencyTotals(bucket.currencyMap),
   };
+}
+
+function isEnhanceTrendTask(task: Pick<DashboardTask, 'provider' | 'generation_mode'>) {
+  return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
 }
 
 function buildOutputTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granularity: DashboardTrendGranularity): DashboardTrendBucket[] {
@@ -426,6 +433,7 @@ function buildOutputTrendBuckets(tasks: DashboardTask[], range: DashboardRange, 
     if (!bucket) return;
     const officialAmount = officialCostMicros(task);
     bucket.task_count += 1;
+    if (isEnhanceTrendTask(task)) bucket.enhance_task_count += 1;
     bucket.duration_seconds += Math.max(0, task.duration ?? 0);
     bucket.points += task.actual_cost ?? 0;
     addCurrency(bucket.currencyMap, task.provider_cost_currency, officialAmount);
@@ -934,6 +942,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
     data_notes: [
       '顶部 KPI、拆分榜和最近任务按 VideoTask.created_at 计算。',
       '趋势图按成功任务的 VideoTask.completed_at 计算实际产出；失败、排队、未完成和跨月未完成任务不计入对应月份的视频条数。',
+      '趋势图里的超分视频条数按 generation_mode=enhance_video 或 provider=volcengine_mediakit 的成功产出单独拆分。',
       '官方成本优先读取 provider_official_amount_micros，回退 provider_official_amount_minor；没有官方金额时显示“待官方确认”。',
       '每秒均价按“同币种官方成本 / 同币种且有视频时长的秒数”计算；未确认官方金额或没有时长的任务不进入秒价分母。',
       'actual_cost 是平台点数扣除，不是美元；estimated_cost 是预估点数，不能代表真实扣费。',
