@@ -162,6 +162,8 @@
 - 已新增完整回滚手册：`ops/server/sd2/rollback-to-mac.md` 明确不能只切 DNS；回滚前必须先停服务器 timer，再把服务器数据库和媒体同步回 Mac，再解除 Mac standby lock。
 - 独立只读审查已通过：审查 agent 确认正式域名带服务器识别头、Mac 3000 未监听、`youdoo-sites` external 模式不会误拉旧站、备份 timer enabled/active、备份 manifest 存在且 `integrity_check=ok`、回滚手册覆盖只允许一边写库。审查时只读复核显示 `succeeded_missing_local=48`，说明历史缺本地视频仍在继续收敛。
 - 已修复旧备案别名证书警告并改为直接打开服务器版：`sd2.youdooart.com` 曾因 nginx 没有独立站点块，落到 `artreview.youdooart.com` 证书和 ArtReview 路由，浏览器报 `net::ERR_CERT_COMMON_NAME_INVALID`。现已新增 `ops/server/sd2/nginx-sd2-youdooart-alias.conf` 并安装到服务器，HTTPS 直接反向代理到 `127.0.0.1:3302`，地址栏保持 `sd2.youdooart.com`；HTTP 只升级到同域名 HTTPS，不跳到 `sd2.youdoodesign.com`。公网证书主域名已匹配 `sd2.youdooart.com`。
+- 已把长期登录域对齐到 `sd2.youdooart.com`：服务器 `.env` 中 `NEXT_PUBLIC_BASE_URL`、`BASE_URL`、`NEXTAUTH_URL`、`FEISHU_REDIRECT_URI` 已改为 `https://sd2.youdooart.com`；`sd2-gray.service` 已重启。公网验证飞书授权第一跳的 `redirect_uri` 已变为 `https://sd2.youdooart.com/api/auth/feishu/callback`，不会再因为配置固定而回到 `sd2.youdoodesign.com`。
+- 已再次关停本机旧 sd2：Mac 上 `com.youdoo.site.sd2`、`com.youdoo.sd2.finalize-pending-videos`、`com.youdoo.sd2.video-delivery-worker` 均为 disabled，`127.0.0.1:3000` 关闭，`sd2-mac-standby.lock` 存在。
 - 未授权事项：未跑真实付费生成；普通网页生成、外部 API 生成、无线画布文字/图片/视频真实调用仍需单独授权后执行，避免无意消耗点数或 provider 额度。
 - 仍需观察：`sd2-backup.timer` 已启用，但严格证明“自然定时触发成功”需要等 03:20 后再查一次最新 manifest；服务器磁盘约 87%，需要继续观察或安排扩容/清理；依赖安全告警仍需单独专项处理；登录态 UI 全链路还未完成截图级验收。
 
