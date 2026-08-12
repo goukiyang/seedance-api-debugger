@@ -956,7 +956,9 @@ export async function POST(request: NextRequest) {
     ? requestedReferenceImageIds
     : requestedReferenceImageUrls.length > 0
       ? []
-      : workspaceReferenceImageIds;
+      : requestSource.source_type === 'codex_api'
+        ? []
+        : workspaceReferenceImageIds;
   if (generationReferenceImageIds.length > 9) {
     return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
   }
@@ -1096,7 +1098,6 @@ export async function POST(request: NextRequest) {
   if (isFastPathDelivery) {
     try {
       resolveVideoDeliveryCallbackConfig({
-        baseUrl: process.env.NEXT_PUBLIC_BASE_URL,
         taskId: 'preflight',
         callbackSecret: process.env.VIDEO_DELIVERY_CALLBACK_SECRET || process.env.SEEDANCE_CALLBACK_SECRET || null,
       });
@@ -1433,7 +1434,6 @@ export async function POST(request: NextRequest) {
     let callbackParamsJson: string | null = null;
     if (isFastPathDelivery) {
       const callbackConfig = resolveVideoDeliveryCallbackConfig({
-        baseUrl: process.env.NEXT_PUBLIC_BASE_URL,
         taskId,
         requestCallbackUrl,
         callbackSecret: process.env.VIDEO_DELIVERY_CALLBACK_SECRET || process.env.SEEDANCE_CALLBACK_SECRET || null,

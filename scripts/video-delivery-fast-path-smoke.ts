@@ -5,6 +5,7 @@ import {
   getExternalCallbackUrlFromParams,
   isVideoDeliveryFastPathTask,
   mergeVideoDeliveryCallbackParams,
+  resolveVideoDeliveryPublicBaseUrl,
   resolveVideoDeliveryCallbackConfig,
 } from '@/lib/video/delivery-policy';
 import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
@@ -44,6 +45,34 @@ const callbackConfig = resolveVideoDeliveryCallbackConfig({
 assert.equal(callbackConfig.systemCallbackUrl, 'https://sd2.youdoodesign.com/api/provider/seedance/callback?taskId=task-fast-001&token=secret+value');
 assert.equal(callbackConfig.providerCallbackUrl, callbackConfig.systemCallbackUrl);
 assert.equal(callbackConfig.externalCallbackUrl, 'https://client.example.com/original-callback');
+
+const previousBaseUrl = process.env.BASE_URL;
+const previousNextAuthUrl = process.env.NEXTAUTH_URL;
+const previousNextPublicBaseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+process.env.BASE_URL = 'https://sd2.youdooart.com';
+process.env.NEXTAUTH_URL = '';
+process.env.NEXT_PUBLIC_BASE_URL = 'https://sd2.youdoodesign.com';
+assert.equal(
+  resolveVideoDeliveryPublicBaseUrl(),
+  'https://sd2.youdooart.com',
+  'server callback base should prefer runtime BASE_URL over a stale build-time public URL',
+);
+const runtimeCallbackConfig = resolveVideoDeliveryCallbackConfig({
+  taskId: 'task-runtime-base',
+  callbackSecret: 'secret value',
+});
+assert.equal(
+  runtimeCallbackConfig.systemCallbackUrl,
+  'https://sd2.youdooart.com/api/provider/seedance/callback?taskId=task-runtime-base&token=secret+value',
+  'server-created tasks should use the runtime public host for provider callbacks',
+);
+if (previousBaseUrl === undefined) delete process.env.BASE_URL;
+else process.env.BASE_URL = previousBaseUrl;
+if (previousNextAuthUrl === undefined) delete process.env.NEXTAUTH_URL;
+else process.env.NEXTAUTH_URL = previousNextAuthUrl;
+if (previousNextPublicBaseUrl === undefined) delete process.env.NEXT_PUBLIC_BASE_URL;
+else process.env.NEXT_PUBLIC_BASE_URL = previousNextPublicBaseUrl;
+
 assert.throws(
   () => resolveVideoDeliveryCallbackConfig({
     baseUrl: 'https://sd2.youdoodesign.com',
@@ -111,6 +140,16 @@ assert.match(assetLibrarySource, /deliveryCompletedAt/, 'asset library items mus
 
 const createRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/tasks/create/route.ts'), 'utf8');
 assert.match(createRouteSource, /resolveVideoDeliveryCallbackConfig/, 'ordinary create route must set the system callback URL');
+assert.doesNotMatch(
+  createRouteSource,
+  /baseUrl:\s*process\.env\.NEXT_PUBLIC_BASE_URL/,
+  'ordinary create route must not pass build-time NEXT_PUBLIC_BASE_URL into server callback config',
+);
+assert.match(
+  createRouteSource,
+  /requestSource\.source_type === 'codex_api'\s*\?\s*\[\]/,
+  'Codex API requests without explicit references must not inherit stale workspace reference images',
+);
 assert.match(createRouteSource, /VIDEO_DELIVERY_CALLBACK_CONFIG_ERROR/, 'ordinary create route must preflight callback config before creating a task');
 assert.match(createRouteSource, /mergeVideoDeliveryCallbackParams/, 'ordinary create route must preserve external callback metadata');
 assert.match(createRouteSource, /enqueueDeliveryOnSuccess:\s*true/, 'ordinary create route should use the delivery queue fallback runner');

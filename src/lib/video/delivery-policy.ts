@@ -32,10 +32,17 @@ export function isVideoDeliveryFastPathTask(task: FastPathTask) {
   return true;
 }
 
-function publicBaseUrl(input: string | null | undefined) {
-  const baseUrl = (input || process.env.NEXT_PUBLIC_BASE_URL || '').trim();
+export function resolveVideoDeliveryPublicBaseUrl(input?: string | null) {
+  const baseUrl = (
+    input
+    || process.env.VIDEO_DELIVERY_PUBLIC_BASE_URL
+    || process.env.BASE_URL
+    || process.env.NEXTAUTH_URL
+    || process.env.NEXT_PUBLIC_BASE_URL
+    || ''
+  ).trim();
   if (!baseUrl || !isPubliclyReachableUrl(baseUrl)) {
-    throw new Error('缺少可公网访问的 NEXT_PUBLIC_BASE_URL，无法设置视频生成回调地址');
+    throw new Error('缺少可公网访问的 BASE_URL / NEXTAUTH_URL / NEXT_PUBLIC_BASE_URL，无法设置视频生成回调地址');
   }
   return baseUrl.replace(/\/$/, '');
 }
@@ -47,7 +54,7 @@ function normalizeExternalCallbackUrl(value: string | null | undefined) {
 }
 
 export function resolveVideoDeliveryCallbackConfig(input: CallbackConfigInput): VideoDeliveryCallbackConfig {
-  const url = new URL(SYSTEM_CALLBACK_PATH, publicBaseUrl(input.baseUrl));
+  const url = new URL(SYSTEM_CALLBACK_PATH, resolveVideoDeliveryPublicBaseUrl(input.baseUrl));
   url.searchParams.set('taskId', input.taskId);
   const secret = input.callbackSecret?.trim();
   if (!secret) {
