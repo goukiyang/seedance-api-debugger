@@ -150,6 +150,7 @@
 - 已停用 Mac 旧网页服务：`launchctl disable gui/501/com.youdoo.site.sd2` 后卸载，`127.0.0.1:3000` 已无监听，本地 `/api/config` 连接失败；正式公网 `https://sd2.youdoodesign.com/api/health` 仍 200 且带 `X-SD2-Origin: server-42-193`。
 - 已停用 Mac 旧后台写库任务：`com.youdoo.sd2.finalize-pending-videos` 和 `com.youdoo.sd2.video-delivery-worker` 均已 `disabled` 并从 `launchctl list` 消失，避免无人操作时写旧 SQLite。
 - 已加二次保险：`/Users/gouki-youdoo/.youdoo/runtime/sd2-mac-standby.lock` 存在时，`sd2-3000-start.sh`、`sd2-finalize-pending-videos.sh`、`sd2-video-delivery-worker.sh` 都会直接退出，不启动旧站、不跑旧库 worker。
+- 已做误恢复测试：`youdoo-sites heal sd2` 因 launchd disabled 无法 kickstart，`127.0.0.1:3000` 仍无监听，正式公网仍返回服务器识别头；因此后续健康守护即使误触发，也不会把 Mac 旧站恢复成可写服务。
 - 回滚注意：只有确认要把正式域名从服务器切回 Mac 时，才允许先移除 standby lock，再启用三个 Mac LaunchAgent；回滚前还必须先停用服务器补偿 timer，避免两边同时写。
 
 ## 3. 验收/审查内容
