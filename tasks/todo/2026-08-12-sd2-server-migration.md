@@ -161,6 +161,7 @@
 - 已新增观察脚本：`ops/server/sd2/observe.sh` 会检查正式公网服务器识别头、登录/注册、灰度健康、tools、服务器服务、三个 timer、数据库数量、缺本地视频、媒体/缩略图数量、磁盘和最近备份。
 - 已新增完整回滚手册：`ops/server/sd2/rollback-to-mac.md` 明确不能只切 DNS；回滚前必须先停服务器 timer，再把服务器数据库和媒体同步回 Mac，再解除 Mac standby lock。
 - 独立只读审查已通过：审查 agent 确认正式域名带服务器识别头、Mac 3000 未监听、`youdoo-sites` external 模式不会误拉旧站、备份 timer enabled/active、备份 manifest 存在且 `integrity_check=ok`、回滚手册覆盖只允许一边写库。审查时只读复核显示 `succeeded_missing_local=48`，说明历史缺本地视频仍在继续收敛。
+- 已修复旧备案别名证书警告：`sd2.youdooart.com` 曾因 nginx 没有独立站点块，落到 `artreview.youdooart.com` 证书和 ArtReview 路由，浏览器报 `net::ERR_CERT_COMMON_NAME_INVALID`。现已新增 `ops/server/sd2/nginx-sd2-youdooart-redirect.conf` 并安装到服务器，HTTP/HTTPS 均 301 跳转到 `https://sd2.youdoodesign.com$request_uri`，公网证书主域名已匹配 `sd2.youdooart.com`。
 - 未授权事项：未跑真实付费生成；普通网页生成、外部 API 生成、无线画布文字/图片/视频真实调用仍需单独授权后执行，避免无意消耗点数或 provider 额度。
 - 仍需观察：`sd2-backup.timer` 已启用，但严格证明“自然定时触发成功”需要等 03:20 后再查一次最新 manifest；服务器磁盘约 87%，需要继续观察或安排扩容/清理；依赖安全告警仍需单独专项处理；登录态 UI 全链路还未完成截图级验收。
 
