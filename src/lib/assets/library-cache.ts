@@ -11,6 +11,7 @@ type AssetLibraryCacheKeyInput = {
   scope: string;
   type: string;
   enhance?: string;
+  includeUploads: boolean;
   status: string;
   sort: string;
   groupBy: string;
@@ -109,6 +110,7 @@ export function createAssetLibraryCacheKey(input: AssetLibraryCacheKeyInput) {
     input.scope,
     input.type,
     input.enhance || '-',
+    input.includeUploads ? 'uploads' : 'no-uploads',
     input.status,
     input.sort,
     input.groupBy,

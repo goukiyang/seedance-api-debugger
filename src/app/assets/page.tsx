@@ -197,6 +197,7 @@ const cardSizeOptions: Array<{ id: AssetCardSize; label: string; title: string }
 ];
 
 const ASSET_CARD_SIZE_STORAGE_KEY = 'asset_library_card_size';
+const ASSET_SHOW_UPLOADS_STORAGE_KEY = 'asset_library_show_uploaded_assets';
 const ASSET_BULK_TARGET_STORAGE_KEY = 'asset_library_bulk_target';
 const ASSET_BULK_ALBUM_STORAGE_KEY = 'asset_library_bulk_album_id';
 const WORKSPACE_TAB_ID_KEY = 'workspace_tab_id';
@@ -220,6 +221,15 @@ function readSavedAssetCardSize(): AssetCardSize {
     return isAssetCardSize(value) ? value : 'standard';
   } catch {
     return 'standard';
+  }
+}
+
+function readSavedShowUploadedAssets() {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(ASSET_SHOW_UPLOADS_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
   }
 }
 
@@ -516,6 +526,7 @@ function AssetsPageContent() {
   const [sort, setSort] = useState<AssetSort>('created_desc');
   const [groupBy, setGroupBy] = useState<AssetGroup>('date');
   const [cardSize, setCardSize] = useState<AssetCardSize>(() => readSavedAssetCardSize());
+  const [showUploadedAssets, setShowUploadedAssets] = useState(() => readSavedShowUploadedAssets());
   const [projectId, setProjectId] = useState('');
   const [ownerUserId, setOwnerUserId] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -733,6 +744,7 @@ function AssetsPageContent() {
       scope,
       type: requestType,
       enhance: enhanceFilter,
+      includeUploads: showUploadedAssets,
       status,
       sort,
       groupBy,
@@ -754,6 +766,7 @@ function AssetsPageContent() {
       page: String(page),
       limit: '60',
     });
+    params.set('include_uploads', showUploadedAssets ? 'true' : 'false');
     if (enhanceFilter !== 'none') params.set('enhance', enhanceFilter);
     if (scope === 'project' && projectId) params.set('project_id', projectId);
     if (scope === 'user' && ownerUserId) params.set('owner_user_id', ownerUserId);
@@ -819,7 +832,7 @@ function AssetsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [user, assetView, scope, requestType, enhanceFilter, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
+  }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
 
   useEffect(() => {
     setDetailMediaAspectRatio(null);
@@ -1262,6 +1275,21 @@ function AssetsPageContent() {
     }
   };
 
+  const updateShowUploadedAssets = (value: boolean) => {
+    setShowUploadedAssets(value);
+    if (!value) {
+      setAssetUploadFile(null);
+      setAssetUploadProgress(null);
+      if (assetUploadInputRef.current) assetUploadInputRef.current.value = '';
+    }
+    try {
+      window.localStorage.setItem(ASSET_SHOW_UPLOADS_STORAGE_KEY, value ? 'true' : 'false');
+    } catch {
+      // 偏好保存失败不影响当次开关状态。
+    }
+    resetForFilterChange();
+  };
+
   const handleAssetUploadFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] || null;
     setAssetUploadFile(file);
@@ -1294,6 +1322,7 @@ function AssetsPageContent() {
       setAssetView('history');
       setType(nextType);
       setStatus('succeeded');
+      updateShowUploadedAssets(true);
       setPage(1);
       setKeyword('');
       setKeywordDraft('');
@@ -1380,6 +1409,19 @@ function AssetsPageContent() {
               </button>
             ))}
           </div>
+        )}
+
+        {!isEnhanceView && (
+          <button
+            type="button"
+            className={`asset-library-source-toggle ${showUploadedAssets ? 'active' : ''}`}
+            aria-pressed={showUploadedAssets}
+            title="打开后显示自己上传的图片、视频和音频素材"
+            onClick={() => updateShowUploadedAssets(!showUploadedAssets)}
+          >
+            <Upload size={14} aria-hidden="true" />
+            <span>上传素材</span>
+          </button>
         )}
 
         <form
@@ -1481,41 +1523,43 @@ function AssetsPageContent() {
         </select>
       </section>
 
-      <section className="asset-library-upload-panel" aria-label="上传素材到资产库">
-        <input
-          ref={assetUploadInputRef}
-          type="file"
-          accept="image/*,video/*,audio/*"
-          className="asset-library-upload-input"
-          onChange={handleAssetUploadFileChange}
-        />
-        <div className="asset-library-upload-copy">
-          <strong>上传素材</strong>
-          <span>
-            {assetUploadFile
-              ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`
-              : '支持图片、视频、音频上传；音频最大 15MB。生成前会按当前模型规则检查时长、格式和分辨率。'}
-          </span>
-        </div>
-        {assetUploadProgress && (
-          <UploadProgressIndicator
-            label={assetUploadProgress.label}
-            detail={assetUploadProgress.detail}
-            percent={assetUploadProgress.percent}
-            variant="dark"
-            className="asset-library-upload-progress"
+      {showUploadedAssets && (
+        <section className="asset-library-upload-panel" aria-label="上传素材到资产库">
+          <input
+            ref={assetUploadInputRef}
+            type="file"
+            accept="image/*,video/*,audio/*"
+            className="asset-library-upload-input"
+            onChange={handleAssetUploadFileChange}
           />
-        )}
-        <div className="asset-library-upload-actions">
-          <button type="button" onClick={() => assetUploadInputRef.current?.click()} disabled={assetUploading}>
-            选择文件
-          </button>
-          <button type="button" className="primary" onClick={handleAssetUpload} disabled={assetUploading}>
-            <Upload size={15} aria-hidden="true" />
-            {assetUploading ? '上传中...' : assetUploadFile ? '开始上传' : '上传素材'}
-          </button>
-        </div>
-      </section>
+          <div className="asset-library-upload-copy">
+            <strong>上传素材</strong>
+            <span>
+              {assetUploadFile
+                ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`
+                : '支持图片、视频、音频上传；音频最大 15MB。生成前会按当前模型规则检查时长、格式和分辨率。'}
+            </span>
+          </div>
+          {assetUploadProgress && (
+            <UploadProgressIndicator
+              label={assetUploadProgress.label}
+              detail={assetUploadProgress.detail}
+              percent={assetUploadProgress.percent}
+              variant="dark"
+              className="asset-library-upload-progress"
+            />
+          )}
+          <div className="asset-library-upload-actions">
+            <button type="button" onClick={() => assetUploadInputRef.current?.click()} disabled={assetUploading}>
+              选择文件
+            </button>
+            <button type="button" className="primary" onClick={handleAssetUpload} disabled={assetUploading}>
+              <Upload size={15} aria-hidden="true" />
+              {assetUploading ? '上传中...' : assetUploadFile ? '开始上传' : '上传素材'}
+            </button>
+          </div>
+        </section>
+      )}
 
       {(message || error) && (
         <div className={`asset-library-notice ${error ? 'error' : 'success'}`}>

@@ -662,6 +662,7 @@ export async function GET(request: NextRequest) {
     const keyword = optionalText(searchParams.get('keyword'));
     const page = positiveInt(searchParams.get('page'), 1, 10_000);
     const limit = positiveInt(searchParams.get('limit'), 40, 100);
+    const includeUploads = searchParams.get('include_uploads') === 'true';
     const includeForMerge = type === 'all';
 
     if (scope === 'user' && user.role !== 'admin') {
@@ -683,17 +684,19 @@ export async function GET(request: NextRequest) {
         limit,
         includeForMerge,
       }),
-      loadAssetItems({
-        userId: user.id,
-        role: user.role,
-        type,
-        enhance,
-        scope,
-        status,
-        ownerUserId,
-        keyword,
-        take: includeForMerge ? takeForMerge : limit,
-      }),
+      includeUploads
+        ? loadAssetItems({
+          userId: user.id,
+          role: user.role,
+          type,
+          enhance,
+          scope,
+          status,
+          ownerUserId,
+          keyword,
+          take: includeForMerge ? takeForMerge : limit,
+        })
+        : Promise.resolve({ items: [] as LibraryItem[], total: 0 }),
       loadReferenceItems({
         user,
         type,
@@ -730,6 +733,7 @@ export async function GET(request: NextRequest) {
         status,
         sort,
         enhance,
+        include_uploads: includeUploads,
         group_by: groupBy,
         project_id: projectId,
         owner_user_id: ownerUserId,

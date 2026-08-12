@@ -57,6 +57,14 @@ function main() {
     '资产页必须提供视频超分专属标签，并让超分结果/可超分视频更明显',
   );
   assert(
+    assetsPage.includes('ASSET_SHOW_UPLOADS_STORAGE_KEY')
+      && assetsPage.includes('readSavedShowUploadedAssets')
+      && assetsPage.includes('asset-library-source-toggle')
+      && assetsPage.includes("params.set('include_uploads', showUploadedAssets ? 'true' : 'false')")
+      && assetsPage.includes('showUploadedAssets && ('),
+    '资产页上传素材必须走独立开关，默认不显示上传面板和上传来源素材',
+  );
+  assert(
     assetsPage.includes('selectionMode')
       && assetsPage.includes('asset-library-select-toggle')
       && assetsPage.includes('(selectionMode || selected) &&')
@@ -104,6 +112,12 @@ function main() {
     '/api/assets/library 默认必须只返回已完成视频任务，避免失败任务占据资产页主视图',
   );
   assert(
+    assetLibraryRoute.includes("const includeUploads = searchParams.get('include_uploads') === 'true'")
+      && assetLibraryRoute.includes('includeUploads\n        ? loadAssetItems')
+      && assetLibraryRoute.includes("include_uploads: includeUploads"),
+    '/api/assets/library 必须默认排除自己上传素材，并只在 include_uploads=true 时返回',
+  );
+  assert(
     assetLibraryRoute.includes("const thumbnailUrl = asset.type === 'image'")
       && assetLibraryRoute.includes('asset.thumbnail_url || asset.original_url')
       && assetLibraryRoute.includes(': asset.thumbnail_url'),
@@ -129,6 +143,7 @@ function main() {
     scope: 'history',
     type: 'video',
     enhance: 'none',
+    includeUploads: false,
     status: 'succeeded',
     sort: 'created_desc',
     groupBy: 'date',
@@ -144,6 +159,7 @@ function main() {
     scope: 'history',
     type: 'video',
     enhance: 'none',
+    includeUploads: false,
     status: 'succeeded',
     sort: 'created_desc',
     groupBy: 'date',
@@ -159,6 +175,7 @@ function main() {
     scope: 'project',
     type: 'video',
     enhance: 'none',
+    includeUploads: false,
     status: 'succeeded',
     sort: 'created_desc',
     groupBy: 'date',
@@ -174,6 +191,7 @@ function main() {
     scope: 'history',
     type: 'video',
     enhance: 'all',
+    includeUploads: false,
     status: 'all',
     sort: 'created_desc',
     groupBy: 'date',
@@ -187,6 +205,23 @@ function main() {
   assert(baseKey !== otherUserKey, '缓存 key 必须按用户隔离');
   assert(baseKey !== otherFilterKey, '缓存 key 必须按筛选条件隔离');
   assert(baseKey !== enhanceViewKey, '缓存 key 必须区分普通资产视图和视频超分视图');
+  const uploadedAssetsKey = createAssetLibraryCacheKey({
+    view: 'history',
+    userId: 'u1',
+    role: 'admin',
+    scope: 'history',
+    type: 'video',
+    enhance: 'none',
+    includeUploads: true,
+    status: 'succeeded',
+    sort: 'created_desc',
+    groupBy: 'date',
+    projectId: '',
+    ownerUserId: '',
+    keyword: '',
+    page: 1,
+  });
+  assert(baseKey !== uploadedAssetsKey, '缓存 key 必须区分是否显示自己上传素材');
   console.log('assets-library-performance-smoke passed');
 }
 
