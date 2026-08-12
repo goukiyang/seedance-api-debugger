@@ -144,6 +144,14 @@
 - 回滚策略保持可用：Mac `youdoo-sites sd2` 暂不停止；如正式站异常，先停用服务器补偿 timer，再把 DNS route 指回 `codex-mobile-youdoodesign` tunnel。
 - 未完成项不冒充完成：没有跑真实付费生成；没有做登录态浏览器完整 UI 验收；历史成功但缺本地文件的 57 条任务进入后台追补范围，首次补偿已成功处理 2 条，`cacheSuccess=true`、`thumbnailSuccess=true`、失败 0，剩余 55 条按 timer 继续追补；正式观察期未结束。
 
+### 2026-08-13 Mac 旧服务冷备锁定记录
+
+- 已处理目标：避免 Mac 本地旧站继续接受写入，防止服务器正式库和 Mac 旧库同时扣点、结算或补偿导致点数错乱。
+- 已停用 Mac 旧网页服务：`launchctl disable gui/501/com.youdoo.site.sd2` 后卸载，`127.0.0.1:3000` 已无监听，本地 `/api/config` 连接失败；正式公网 `https://sd2.youdoodesign.com/api/health` 仍 200 且带 `X-SD2-Origin: server-42-193`。
+- 已停用 Mac 旧后台写库任务：`com.youdoo.sd2.finalize-pending-videos` 和 `com.youdoo.sd2.video-delivery-worker` 均已 `disabled` 并从 `launchctl list` 消失，避免无人操作时写旧 SQLite。
+- 已加二次保险：`/Users/gouki-youdoo/.youdoo/runtime/sd2-mac-standby.lock` 存在时，`sd2-3000-start.sh`、`sd2-finalize-pending-videos.sh`、`sd2-video-delivery-worker.sh` 都会直接退出，不启动旧站、不跑旧库 worker。
+- 回滚注意：只有确认要把正式域名从服务器切回 Mac 时，才允许先移除 standby lock，再启用三个 Mac LaunchAgent；回滚前还必须先停用服务器补偿 timer，避免两边同时写。
+
 ## 3. 验收/审查内容
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
