@@ -1,0 +1,9 @@
+tunnel: 573413e6-cfbb-4736-9d91-4378919bc9a3
+credentials-file: /etc/cloudflared/seedance2-server.json
+
+ingress:
+  - hostname: sd2-server.youdoodesign.com
+    service: http://127.0.0.1:80
+  - hostname: tools.youdoodesign.com
+    service: http://127.0.0.1:80
+  - service: http_status:404

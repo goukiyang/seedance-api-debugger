@@ -1,0 +1,13 @@
+[Unit]
+Description=sd2 finalize pending video tasks
+After=network.target sd2-gray.service
+
+[Service]
+Type=oneshot
+User=gouki
+Group=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run video:finalize-pending -- --limit 20 --max-seconds 900 --missing-local-limit 2
+StandardOutput=append:/var/log/video-api-debugger/sd2-finalize-pending.log
+StandardError=append:/var/log/video-api-debugger/sd2-finalize-pending.log

@@ -1,0 +1,20 @@
+[Unit]
+Description=sd2 gray Next.js service
+After=network.target
+
+[Service]
+Type=simple
+User=gouki
+Group=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+Environment=NODE_ENV=production
+Environment=NEXT_DIST_DIR=.next-prod
+Environment=PORT=3302
+ExecStart=/usr/bin/npm run start -- --hostname 127.0.0.1 --port 3302
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/video-api-debugger/sd2-gray.log
+StandardError=append:/var/log/video-api-debugger/sd2-gray.log
+
+[Install]
+WantedBy=multi-user.target

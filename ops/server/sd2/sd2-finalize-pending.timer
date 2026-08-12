@@ -1,0 +1,12 @@
+[Unit]
+Description=Run sd2 finalize pending video tasks periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+Persistent=true
+Unit=sd2-finalize-pending.service
+
+[Install]
+WantedBy=timers.target

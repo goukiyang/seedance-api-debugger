@@ -1,0 +1,12 @@
+[Unit]
+Description=Run sd2 public video delivery queue worker periodically
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+RandomizedDelaySec=15s
+Persistent=true
+Unit=sd2-video-delivery.service
+
+[Install]
+WantedBy=timers.target

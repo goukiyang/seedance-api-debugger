@@ -32,7 +32,7 @@
   - 完成标准：明确哪些必须迁移到服务器：数据库、上传资产、视频文件、缩略图、后台模型/API 设置、用户点数、CostLedger/CreditLedger、项目和视频卡。
   - 停止条件：真实数据库路径无法确认，或数据库正在高频写入且没有安全备份窗口。
 
-- [ ] T3. 制定并执行 Mac 端备份
+- [x] T3. 制定并执行 Mac 端备份
   - 要做什么：创建迁移前 Git 回退点；用 SQLite `.backup` 或等价安全方式备份数据库；用 `rsync --dry-run` 先预估媒体同步范围；记录文件数量、总大小和校验抽样。
   - 必须备份：数据库、`public/uploads`、`public/videos`、缩略图、`storage`、部署脚本、Cloudflare/youdoo-sites 相关非密钥配置。
   - 禁止事项：不要热拷贝正在变化的 `.db-wal/.db-shm` 当最终备份；不要把 `.env`、token、cookie、签名 URL 写进文档或 Git。
@@ -100,7 +100,7 @@
   - 观察内容：错误日志、生成任务终态、视频下载成功率、缩略图生成、点数流水、外部 API 调用、磁盘增长。
   - 完成标准：观察期无 P0/P1 问题，Mac 旧服务降为只读备份或归档。
 
-- [ ] T14. Git Plan 和版本登记
+- [x] T14. Git Plan 和版本登记
   - 要做什么：迁移相关脚本、systemd 配置模板、部署说明和 todo 改动形成聚焦 commit；推送远端；必要时创建 `rollback/YYYY-MM-DD-before-sd2-server-migration` tag。
   - 禁止事项：不提交 `.env`、数据库、媒体、`.next`、签名 URL、token、cookie、服务器私钥。
   - 完成标准：远端可见 commit/tag；`/Volumes/Data/Projects/project-version-registry.md` 记录迁移节点、commit、验证和回滚方式。
@@ -119,6 +119,18 @@
 - 独立只读审查：审查 agent 判断“灰度环境可用，但未切正式”通过；复核证据包括 `sd2-gray.service` active/enabled、3302 只监听本机、nginx 和 cloudflared 灰度路由存在、灰度公网基础接口 200、正式站和 tools 仍 200、SQLite 与媒体数量一致、抽样 MP4 range 播放 206。
 - 审查补充风险：后台补偿 timer 保持 `disabled`；服务器磁盘约 22G 可用、使用率约 88%，后续需要清理或扩容；依赖安全扫描存在 critical/high 告警，需单独专项处理。
 - 未闭环事项：未做正式域名切流；未启用后台补偿 timer；未跑真实生成或外部 API 付费生成；未做登录态下的完整 UI 操作验收；未把服务器 systemd/nginx 配置模板纳入仓库。
+
+### 2026-08-12 切流前准备补充记录
+
+- 已做切流前 Mac 数据库备份：`/Volumes/Data/Backups/video-api-debugger/server-cutover-prep-20260812-234048/dev.db`，校验 `integrity_check=ok`，`VideoTask=1187`，`Asset=500`，`User=24`。
+- 已做服务器灰度库备份：`/var/lib/video-api-debugger/backups/dev.db.predeploy-20260812-234112`，校验 `integrity_check=ok`，`VideoTask=1187`，`Asset=500`，`User=24`。
+- 已做媒体增量 dry-run：`public/uploads` 和 `storage` 无增量；`public/videos` 排除 `*.tmp`、`*.part`、`*.download` 后无正式文件需要同步。
+- 已隔离服务器无引用临时视频：服务器 `/var/lib/video-api-debugger/videos` 顶层 26 个 `*.tmp` 文件没有数据库引用，已移动到 `/var/lib/video-api-debugger/backups/orphan-video-tmp-20260812-234256`，没有永久删除。
+- 已补仓库内服务器模板：`ops/server/sd2/` 包含灰度服务、补偿 timer、nginx、cloudflared 示例、preflight 脚本和切流命令说明；模板不含密钥。
+- 已跑无付费 preflight：灰度 `/api/config`、`/api/health`、`/login`、`/register` 200；正式 `/api/config` 200；tools 首页 200；`sd2-gray.service` 和 tunnel active；补偿 timer 仍 disabled；服务器库和媒体数量通过。
+- 已做磁盘低风险清理：systemd journal 从约 2.9G 收缩到约 403M，服务器 `/` 可用空间从约 22G 提升到约 24G。`/tmp/supplier-backup-verify*` 约 21.5G 不属于 sd2，未处理。
+- 安全扫描现状：`npm audit --omit=dev` 仍有 10 个生产依赖告警，其中 `next` critical 可通过升级到 `14.2.35` 处理；`@volcengine/tos-sdk` 间接 axios 链无自动修复，需要单独专项评估，不在本轮切流准备中顺手升级。
+- 仍未闭环事项：正式域名切流、补偿 timer 启用、登录态 UI 验收、真实生成/外部 API 付费生成验收、依赖安全专项、非 sd2 大目录清理或服务器扩容。
 
 ## 3. 验收/审查内容
 
