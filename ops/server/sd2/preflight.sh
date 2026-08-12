@@ -22,6 +22,12 @@ curl_code gray_register "$GRAY_ORIGIN/register"
 curl_code prod_config "$PROD_ORIGIN/api/config"
 curl_code tools_home "$TOOLS_ORIGIN/"
 
+if [ "${EXPECT_PROD_ON_SERVER:-0}" = "1" ]; then
+  prod_header="$(curl -sS -o /tmp/sd2-preflight-prod.body -D - "$PROD_ORIGIN/api/health" | tr -d '\r')"
+  printf '%s\n' "$prod_header" | grep -qi '^x-sd2-origin: server-42-193$'
+  printf 'prod_origin_header=server-42-193 %s/api/health\n' "$PROD_ORIGIN"
+fi
+
 ssh "$SERVER" 'set -euo pipefail
 systemctl is-active sd2-gray.service
 systemctl is-active cloudflared-seedance2-server.service

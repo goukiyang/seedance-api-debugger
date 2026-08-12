@@ -23,13 +23,16 @@ bash ops/server/sd2/preflight.sh
 ## 正式切流时才启用后台补偿
 
 ```bash
+cloudflared tunnel route dns --overwrite-dns seedance2-server sd2.youdoodesign.com
 sudo systemctl enable --now sd2-finalize-pending.timer
 sudo systemctl enable --now sd2-video-delivery.timer
+EXPECT_PROD_ON_SERVER=1 bash ops/server/sd2/preflight.sh
 ```
 
 ## 回滚时停用后台补偿
 
 ```bash
+cloudflared tunnel route dns --overwrite-dns codex-mobile-youdoodesign sd2.youdoodesign.com
 sudo systemctl disable --now sd2-finalize-pending.timer
 sudo systemctl disable --now sd2-video-delivery.timer
 ```

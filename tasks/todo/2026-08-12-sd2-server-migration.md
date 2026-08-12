@@ -61,7 +61,7 @@
   - 完成标准：服务器数据库表数量、任务数量、用户数量、资产数量与 Mac 一致；现有视频和缩略图在服务器本地可访问；抽样视频可通过播放接口预览/下载。
   - 停止条件：点数流水、任务表、媒体文件数量或抽样 hash 明显不一致。
 
-- [ ] T8. 配置视频自动下载和补偿任务
+- [x] T8. 配置视频自动下载和补偿任务
   - 检查对象：`scripts/finalize-pending-videos.ts`、视频本地缓存逻辑、缩略图生成逻辑、公开播放路由。
   - 要做什么：在服务器配置 systemd timer 或 cron，定期处理生成成功但未下载、未截图、未结算完的任务。
   - 完成标准：服务重启后，pending/running/succeeded-but-not-local 的任务能继续补偿；日志能看到成功、失败、跳过原因。
@@ -88,7 +88,7 @@
   - 通过标准：图片生成进入资产库；视频生成进入统一任务和下载闭环；文字节点确实接后端 LLM，不是只前端输入。
   - 停止条件：画布静态资源缺失、API 404、模型配置缺失、项目/视频卡权限不一致。
 
-- [ ] T12. 准备域名切换和回滚
+- [x] T12. 准备域名切换和回滚
   - 推荐方式：优先把 Cloudflare Tunnel 的 `sd2.youdoodesign.com` origin 从 Mac `127.0.0.1:3000` 切到服务器服务；暂不优先走腾讯云公网 A 记录，避免备案和公网拦截问题。
   - 回滚方式：保留 Mac 服务 24-48 小时；切流失败时把 tunnel origin 切回 Mac。
   - 完成标准：切流方案写清“谁切、切哪里、怎么验证、怎么切回、切回后数据库差异如何处理”。
@@ -130,7 +130,19 @@
 - 已跑无付费 preflight：灰度 `/api/config`、`/api/health`、`/login`、`/register` 200；正式 `/api/config` 200；tools 首页 200；`sd2-gray.service` 和 tunnel active；补偿 timer 仍 disabled；服务器库和媒体数量通过。
 - 已做磁盘低风险清理：systemd journal 从约 2.9G 收缩到约 403M，服务器 `/` 可用空间从约 22G 提升到约 24G。`/tmp/supplier-backup-verify*` 约 21.5G 不属于 sd2，未处理。
 - 安全扫描现状：`npm audit --omit=dev` 仍有 10 个生产依赖告警，其中 `next` critical 可通过升级到 `14.2.35` 处理；`@volcengine/tos-sdk` 间接 axios 链无自动修复，需要单独专项评估，不在本轮切流准备中顺手升级。
-- 仍未闭环事项：正式域名切流、补偿 timer 启用、登录态 UI 验收、真实生成/外部 API 付费生成验收、依赖安全专项、非 sd2 大目录清理或服务器扩容。
+- 仍未闭环事项：24-48 小时观察期、登录态 UI 验收、真实生成/外部 API 付费生成验收、依赖安全专项、非 sd2 大目录清理或服务器扩容。
+
+### 2026-08-13 正式切流记录
+
+- 已完成最终 Mac 数据库备份：`/Volumes/Data/Backups/video-api-debugger/server-cutover-final-20260813-000207/dev.db`，校验 `integrity_check=ok`，`VideoTask=1187`，`Asset=500`，`User=24`。
+- 已完成最终媒体增量同步：服务器 `/var/lib/video-api-debugger/uploads` 上传文件 739，`/var/lib/video-api-debugger/videos` MP4 1047，缩略图 1050；`storage` 保持同步。
+- 已完成服务器正式化：应用公开域名切到 `https://sd2.youdoodesign.com`；nginx 同时接受 `sd2.youdoodesign.com` 和 `sd2-server.youdoodesign.com`；Cloudflare ingress 已加入正式域名；生产 BUILD_ID `QI_5PBIRFXMnwsgBIzIUL`。
+- 已完成正式 DNS route：`cloudflared tunnel route dns --overwrite-dns seedance2-server sd2.youdoodesign.com` 成功，正式域名进入 tunnel `573413e6-cfbb-4736-9d91-4378919bc9a3`。
+- 已启用后台补偿：`sd2-finalize-pending.timer`、`sd2-video-delivery.timer` 已 `enabled/active`；服务模板补 `TimeoutStartSec`，避免补偿任务异常长期挂住。
+- 已完成切流后 preflight：`EXPECT_PROD_ON_SERVER=1 ops/server/sd2/preflight.sh` 通过；正式 `/api/health` 带 `X-SD2-Origin: server-42-193`；`/login`、`/register` 200；`/generate`、`/tools/ultimate-canvas` 未登录 307 到同域登录；tools 首页 200。
+- 已验证已有视频链路命中服务器：抽样任务 `cmspwnuhu00snlwjvs7wvreob` 的 `/api/video/play/:id` 由服务器返回跳转，跟随后可拿到 `206 Partial Content`。
+- 回滚策略保持可用：Mac `youdoo-sites sd2` 暂不停止；如正式站异常，先停用服务器补偿 timer，再把 DNS route 指回 `codex-mobile-youdoodesign` tunnel。
+- 未完成项不冒充完成：没有跑真实付费生成；没有做登录态浏览器完整 UI 验收；历史成功但缺本地文件的 57 条任务进入后台追补范围，首次补偿正在处理 2 条候选；正式观察期未结束。
 
 ## 3. 验收/审查内容
 

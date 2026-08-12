@@ -9,5 +9,6 @@ Group=gouki
 WorkingDirectory=/srv/video-api-debugger/app
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/npm run video:deliver-public -- --once --limit 5
+TimeoutStartSec=300
 StandardOutput=append:/var/log/video-api-debugger/sd2-video-delivery.log
 StandardError=append:/var/log/video-api-debugger/sd2-video-delivery.log
