@@ -108,6 +108,51 @@ function countText(counts: MergeCounts) {
 
 const ADMIN_PROJECTS_PAGE_SIZE = 20;
 const SMOKE_ARCHIVE_PROJECT_NAME = 'Smoke Project Archive';
+const PROJECT_TABLE_SKELETON_ROWS = Array.from({ length: 8 }, (_, index) => index);
+
+function AdminProjectsTableSkeleton() {
+  return (
+    <table className="table admin-projects-table admin-projects-table-skeleton" aria-busy="true">
+      <caption>正在加载项目列表</caption>
+      <thead>
+        <tr>
+          <th />
+          <th>项目</th>
+          <th>类型</th>
+          <th>负责人</th>
+          <th>成员</th>
+          <th>内容</th>
+          <th>状态</th>
+          <th>更新</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {PROJECT_TABLE_SKELETON_ROWS.map((row) => (
+          <tr key={row}>
+            <td><span className="admin-projects-skeleton-check" /></td>
+            <td>
+              <span className="admin-projects-skeleton-line is-title" />
+              <span className="admin-projects-skeleton-line is-chip" />
+            </td>
+            <td><span className="admin-projects-skeleton-line is-medium" /></td>
+            <td>
+              <span className="admin-projects-skeleton-owner">
+                <span />
+                <i />
+              </span>
+            </td>
+            <td><span className="admin-projects-skeleton-line is-short" /></td>
+            <td><span className="admin-projects-skeleton-line is-wide" /></td>
+            <td><span className="admin-projects-skeleton-line is-short" /></td>
+            <td><span className="admin-projects-skeleton-line is-medium" /></td>
+            <td><span className="admin-projects-skeleton-line is-actions" /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 export default function AdminProjectsClient() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -180,6 +225,8 @@ export default function AdminProjectsClient() {
     (currentPage - 1) * ADMIN_PROJECTS_PAGE_SIZE,
     currentPage * ADMIN_PROJECTS_PAGE_SIZE,
   );
+  const initialTableLoading = loading && projects.length === 0;
+  const refreshingTable = loading && projects.length > 0;
 
   useEffect(() => {
     setPage(1);
@@ -409,10 +456,18 @@ export default function AdminProjectsClient() {
           </div>
         )}
 
-        {loading ? (
-          <p className="text-gray">加载中...</p>
-        ) : (
-          <table className="table admin-projects-table">
+        {refreshingTable && (
+          <div className="admin-projects-update-note" role="status" aria-live="polite">
+            <span className="loading" aria-hidden="true" />
+            正在更新项目列表
+          </div>
+        )}
+
+        <div className="admin-projects-table-region">
+          {initialTableLoading ? (
+            <AdminProjectsTableSkeleton />
+          ) : (
+            <table className="table admin-projects-table" aria-busy={refreshingTable}>
             <thead>
               <tr>
                 <th>
@@ -490,15 +545,18 @@ export default function AdminProjectsClient() {
               ))}
             </tbody>
           </table>
+          )}
+        </div>
+        {!initialTableLoading && (
+          <PaginationControls
+            page={currentPage}
+            totalPages={totalPages}
+            total={filteredProjects.length}
+            pageSize={ADMIN_PROJECTS_PAGE_SIZE}
+            label="项目"
+            onPageChange={setPage}
+          />
         )}
-        <PaginationControls
-          page={currentPage}
-          totalPages={totalPages}
-          total={filteredProjects.length}
-          pageSize={ADMIN_PROJECTS_PAGE_SIZE}
-          label="项目"
-          onPageChange={setPage}
-        />
       </div>
 
       {mergeOpen && (
