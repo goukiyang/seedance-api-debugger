@@ -94,6 +94,8 @@ const downloadRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/ap
 assert.match(downloadRouteSource, /getSession/, 'download preparation must keep login checks');
 assert.match(downloadRouteSource, /assertCanViewTask/, 'download preparation must keep task visibility checks');
 assert.match(downloadRouteSource, /enqueueVideoDeliveryJob/, 'download preparation should enqueue stable delivery instead of blocking on large files');
+assert.match(downloadRouteSource, /export async function GET/, 'download route should support direct browser downloads');
+assert.match(downloadRouteSource, /Content-Disposition/, 'direct video downloads must be returned as attachments');
 
 const statusRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/video/status/[id]/route.ts'), 'utf8');
 assert.match(statusRouteSource, /const fastPathDelivery = isVideoDeliveryFastPathTask\(task\)/, 'status route must classify fast-path tasks before finalizing');
@@ -105,6 +107,7 @@ assert.match(statusRouteSource, /videoDeliveryStageForTask/, 'status route shoul
 const assetLibrarySource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/assets/library/route.ts'), 'utf8');
 assert.match(assetLibrarySource, /videoDeliveryStageForTask/, 'asset library must distinguish preview availability from stable download readiness');
 assert.match(assetLibrarySource, /stableDownloadReady/, 'asset library items must expose stable download readiness');
+assert.match(assetLibrarySource, /deliveryCompletedAt/, 'asset library items must expose stable download completion time for hover stats');
 
 const createRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/tasks/create/route.ts'), 'utf8');
 assert.match(createRouteSource, /resolveVideoDeliveryCallbackConfig/, 'ordinary create route must set the system callback URL');
@@ -123,8 +126,18 @@ assert.match(bulkDownloadSource, /addReadStream/, 'bulk download ZIP should stre
 assert.match(bulkDownloadSource, /cacheTaskVideoToLocal/, 'bulk download should retain local cache fallback for legacy tasks');
 
 const assetsPageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/assets/page.tsx'), 'utf8');
-assert.match(assetsPageSource, /deliveryStageClassName/, 'asset page should show stable delivery stage without overlaying the cover');
+assert.match(assetsPageSource, /deliveryStatsTooltip/, 'asset page should show hover timing stats for ready downloads');
+assert.match(assetsPageSource, /asset-card-download-action/, 'asset page should render stable-ready downloads as a compact action');
+assert.match(assetsPageSource, /<span>下载<\/span>/, 'stable-ready asset card action should use the short 下载 label');
+assert.match(assetsPageSource, /data-tooltip=\{deliveryStatsTooltip\(item\)\}/, 'stable-ready download action should use the custom hover bubble payload');
+assert.match(assetsPageSource, /提交到生成完成/, 'hover bubble should include generation timing stats');
+assert.match(assetsPageSource, /item\.deliveryStage\?\.key !== 'ready'/, 'asset page should not render the ready download state as a separate status line');
+assert.match(assetsPageSource, /\/api\/video\/download\/\$\{item\.taskId\}/, 'asset page compact download action should use the direct download route');
 assert.match(assetsPageSource, /prepareStableDownload/, 'asset page detail should let users trigger stable-download preparation');
+
+const globalStylesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8');
+assert.match(globalStylesSource, /asset-card-download-action::after/, 'stable-ready download action should render a custom hover bubble');
+assert.match(globalStylesSource, /content: attr\(data-tooltip\)/, 'custom hover bubble should read generated timing text from data-tooltip');
 
 const runnerSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/video/task-localization-runner.ts'), 'utf8');
 assert.match(runnerSource, /enqueueDeliveryOnSuccess\?: boolean/, 'localization runner must support delivery queue fallback without affecting IP/enhance defaults');

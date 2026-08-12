@@ -66,6 +66,7 @@ type LibraryItem = {
   retentionStatus: string | null;
   createdAt: string;
   completedAt: string | null;
+  deliveryCompletedAt: string | null;
   project: LibraryProject | null;
   owner: (LibraryUser & { displayName: string; subtitle: string }) | null;
   downloadable: boolean;
@@ -176,6 +177,8 @@ async function serializeTask(task: {
   retention_status: string;
   created_at: Date;
   completed_at: Date | null;
+  public_video_cached_at: Date | null;
+  delivery_completed_at: Date | null;
   project: LibraryProject | null;
   owner: LibraryUser | null;
   user: LibraryUser | null;
@@ -235,6 +238,7 @@ async function serializeTask(task: {
     retentionStatus: task.retention_status,
     createdAt: task.created_at.toISOString(),
     completedAt: task.completed_at ? task.completed_at.toISOString() : null,
+    deliveryCompletedAt: (task.delivery_completed_at || task.public_video_cached_at)?.toISOString() || null,
     project: task.project,
     owner,
     downloadable: isDownloadableTask(task),
@@ -290,6 +294,7 @@ function serializeAsset(asset: {
     retentionStatus: null,
     createdAt: asset.created_at.toISOString(),
     completedAt: null,
+    deliveryCompletedAt: null,
     project: null,
     owner,
     downloadable: false,
@@ -339,6 +344,7 @@ function serializeReferenceImage(image: {
     retentionStatus: null,
     createdAt: image.created_at.toISOString(),
     completedAt: null,
+    deliveryCompletedAt: null,
     project: image.project,
     owner: userSummary(image.owner),
     downloadable: false,
@@ -479,6 +485,8 @@ async function loadVideoItems(options: {
         retention_status: true,
         created_at: true,
         completed_at: true,
+        public_video_cached_at: true,
+        delivery_completed_at: true,
         project: { select: { id: true, name: true, type: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },

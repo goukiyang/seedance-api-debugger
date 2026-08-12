@@ -108,6 +108,7 @@ type AssetLibraryItem = {
   retentionStatus: string | null;
   createdAt: string;
   completedAt: string | null;
+  deliveryCompletedAt: string | null;
   project: { id: string; name: string; type?: string | null; status?: string | null } | null;
   owner: {
     id: string;
@@ -390,6 +391,42 @@ function formatDateTime(value: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function timestampMs(value: string | null) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function formatElapsedTime(milliseconds: number) {
+  const totalSeconds = Math.max(1, Math.round(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}小时${minutes}分${seconds}秒`;
+  if (minutes > 0) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+}
+
+function elapsedBetween(start: string | null, end: string | null) {
+  const startMs = timestampMs(start);
+  const endMs = timestampMs(end);
+  if (startMs === null || endMs === null || endMs < startMs) return null;
+  return formatElapsedTime(endMs - startMs);
+}
+
+function deliveryStatsTooltip(item: AssetLibraryItem) {
+  const readyAt = item.deliveryCompletedAt || (item.stableDownloadReady ? item.completedAt : null);
+  const submitToComplete = elapsedBetween(item.createdAt, item.completedAt);
+  const submitToReady = elapsedBetween(item.createdAt, readyAt);
+  const completedToReady = elapsedBetween(item.completedAt, readyAt);
+  const lines = [];
+  if (submitToComplete) lines.push(`提交到生成完成：${submitToComplete}`);
+  if (completedToReady) lines.push(`生成完成到可下载：${completedToReady}`);
+  if (submitToReady) lines.push(`提交到可下载：${submitToReady}`);
+  if (lines.length === 0) lines.push('暂无完整生成时长统计');
+  return lines.join('\n');
 }
 
 function dateGroupLabel(value: string) {
@@ -1078,6 +1115,21 @@ function AssetsPageContent() {
     await downloadTaskIds(downloadableTaskIds);
   };
 
+  const downloadSingleVideo = (item: AssetLibraryItem) => {
+    if (!item.taskId) {
+      setError('当前资产缺少可下载的视频任务');
+      return;
+    }
+    const anchor = document.createElement('a');
+    anchor.href = `/api/video/download/${item.taskId}`;
+    anchor.download = `seedance-${item.taskId}.mp4`;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setMessage('已开始下载视频。');
+  };
+
   const rememberBulkTarget = (target: AssetBulkTarget) => {
     setBulkTarget(target);
     try {
@@ -1748,13 +1800,28 @@ function AssetsPageContent() {
                             )}
                           </div>
                         )}
+                        {shouldShowDeliveryStage(item) && item.deliveryStage?.key === 'ready' && item.taskId && (
+                          <button
+                            type="button"
+                            className="asset-card-download-action"
+                            data-tooltip={deliveryStatsTooltip(item)}
+                            aria-label={`${shortText(item.title, '视频', 24)} 下载；${deliveryStatsTooltip(item).replace(/\n/g, '；')}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              downloadSingleVideo(item);
+                            }}
+                          >
+                            <Download size={12} aria-hidden="true" />
+                            <span>下载</span>
+                          </button>
+                        )}
                       </div>
                       {enhanceStateLabel && (
                         <span className="asset-card-enhance-note is-result">
                           AI MediaKit 超分结果
                         </span>
                       )}
-                      {shouldShowDeliveryStage(item) && (
+                      {shouldShowDeliveryStage(item) && item.deliveryStage?.key !== 'ready' && (
                         <span className={deliveryStageClassName(item.deliveryStage)}>
                           {item.deliveryStage?.label}
                         </span>

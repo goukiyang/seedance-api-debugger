@@ -1,3 +1,6 @@
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -6,6 +9,140 @@ import { assertCanViewTask } from '@/lib/projects/permissions';
 import { cacheTaskVideoToLocal } from '@/lib/video/local-cache';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
+import { localPublicVideoPath } from '@/lib/video/thumbnail';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+const VIDEO_MIME_TYPE = 'video/mp4';
+
+function downloadFileName(taskId: string) {
+  return `seedance-${taskId}.mp4`;
+}
+
+function downloadHeaders(taskId: string, contentLength?: string | number | null) {
+  const headers: Record<string, string> = {
+    'Content-Type': VIDEO_MIME_TYPE,
+    'Content-Disposition': `attachment; filename="${downloadFileName(taskId)}"`,
+    'Cache-Control': 'no-store',
+  };
+  if (contentLength !== null && contentLength !== undefined && String(contentLength)) {
+    headers['Content-Length'] = String(contentLength);
+  }
+  return headers;
+}
+
+function nodeStreamToWebReadable(nodeStream: NodeJS.ReadableStream) {
+  return Readable.toWeb(nodeStream as Readable) as ReadableStream<Uint8Array>;
+}
+
+async function loadAuthorizedTask(taskId: string) {
+  const user = await getSession();
+  if (!user) {
+    return {
+      error: NextResponse.json(
+        { success: false, error: 'Unauthorized', message: '请先登录后再下载视频' },
+        { status: 401 },
+      ),
+      task: null,
+    };
+  }
+
+  const task = await prisma.videoTask.findUnique({
+    where: { id: taskId },
+  });
+
+  if (!task) {
+    return {
+      error: NextResponse.json(
+        { success: false, error: 'Task not found', message: `Task ${taskId} not found` },
+        { status: 404 },
+      ),
+      task: null,
+    };
+  }
+
+  try {
+    await assertCanViewTask(user, task);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return {
+        error: NextResponse.json(
+          { success: false, error: 'Forbidden', message: error.message },
+          { status: error.status },
+        ),
+        task: null,
+      };
+    }
+    throw error;
+  }
+
+  return { error: null, task };
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  void request;
+  const taskId = params.id;
+
+  try {
+    const { error, task } = await loadAuthorizedTask(taskId);
+    if (error) return error;
+    if (!task) {
+      return NextResponse.json(
+        { success: false, error: 'Task not found', message: `Task ${taskId} not found` },
+        { status: 404 },
+      );
+    }
+
+    if (task.public_video_url) {
+      const response = await fetch(task.public_video_url, { cache: 'no-store' });
+      if (!response.ok || !response.body) {
+        return NextResponse.json(
+          { success: false, error: 'Stable download unavailable', message: `稳定下载文件读取失败：HTTP ${response.status}` },
+          { status: 502 },
+        );
+      }
+      return new NextResponse(response.body, {
+        status: 200,
+        headers: downloadHeaders(taskId, response.headers.get('content-length')),
+      });
+    }
+
+    const absolutePath = localPublicVideoPath(task.local_video_path);
+    if (absolutePath) {
+      let info;
+      try {
+        info = await stat(absolutePath);
+      } catch {
+        info = null;
+      }
+      if (info?.isFile() && info.size > 0) {
+        return new NextResponse(nodeStreamToWebReadable(createReadStream(absolutePath)), {
+          status: 200,
+          headers: downloadHeaders(taskId, info.size),
+        });
+      }
+    }
+
+    return NextResponse.json(
+      { success: false, error: 'Video not ready', message: '视频还没有可下载文件，请稍后刷新后重试。' },
+      { status: 404 },
+    );
+  } catch (error) {
+    console.error('[Download] GET Error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Download failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 },
+    );
+  }
+}
 
 /**
  * POST /api/video/download/[id]
@@ -21,36 +158,13 @@ export async function POST(
   const taskId = params.id;
 
   try {
-    const user = await getSession();
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized', message: '请先登录后再下载视频' },
-        { status: 401 },
-      );
-    }
-
-    // 1. 查询任务
-    const task = await prisma.videoTask.findUnique({
-      where: { id: taskId },
-    });
-
+    const { error, task } = await loadAuthorizedTask(taskId);
+    if (error) return error;
     if (!task) {
       return NextResponse.json(
         { success: false, error: 'Task not found', message: `Task ${taskId} not found` },
-        { status: 404 }
+        { status: 404 },
       );
-    }
-
-    try {
-      await assertCanViewTask(user, task);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        return NextResponse.json(
-          { success: false, error: 'Forbidden', message: error.message },
-          { status: error.status },
-        );
-      }
-      throw error;
     }
 
     if (task.public_video_url) {
