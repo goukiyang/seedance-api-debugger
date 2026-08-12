@@ -142,7 +142,7 @@
 - 已完成切流后 preflight：`EXPECT_PROD_ON_SERVER=1 ops/server/sd2/preflight.sh` 通过；正式 `/api/health` 带 `X-SD2-Origin: server-42-193`；`/login`、`/register` 200；`/generate`、`/tools/ultimate-canvas` 未登录 307 到同域登录；tools 首页 200。
 - 已验证已有视频链路命中服务器：抽样任务 `cmspwnuhu00snlwjvs7wvreob` 的 `/api/video/play/:id` 由服务器返回跳转，跟随后可拿到 `206 Partial Content`。
 - 回滚策略保持可用：Mac `youdoo-sites sd2` 暂不停止；如正式站异常，先停用服务器补偿 timer，再把 DNS route 指回 `codex-mobile-youdoodesign` tunnel。
-- 未完成项不冒充完成：没有跑真实付费生成；没有做登录态浏览器完整 UI 验收；历史成功但缺本地文件的 57 条任务进入后台追补范围，首次补偿正在处理 2 条候选；正式观察期未结束。
+- 未完成项不冒充完成：没有跑真实付费生成；没有做登录态浏览器完整 UI 验收；历史成功但缺本地文件的 57 条任务进入后台追补范围，首次补偿已成功处理 2 条，`cacheSuccess=true`、`thumbnailSuccess=true`、失败 0，剩余 55 条按 timer 继续追补；正式观察期未结束。
 
 ## 3. 验收/审查内容
 
