@@ -153,6 +153,16 @@
 - 已做误恢复测试：`youdoo-sites heal sd2` 因 launchd disabled 无法 kickstart，`127.0.0.1:3000` 仍无监听，正式公网仍返回服务器识别头；因此后续健康守护即使误触发，也不会把 Mac 旧站恢复成可写服务。
 - 回滚注意：只有确认要把正式域名从服务器切回 Mac 时，才允许先移除 standby lock，再启用三个 Mac LaunchAgent；回滚前还必须先停用服务器补偿 timer，避免两边同时写。
 
+### 2026-08-13 服务器接管后收口记录
+
+- 已修正本机管理器误导：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites` 支持 `mode=external` 和公网响应头校验；`/Users/gouki-youdoo/.youdoo/sites.json` 的 sd2 条目已改为服务器外部健康模式。现在 `youdoo-sites status sd2` 显示 `launchd=server`、`port=skip`、`local=skip`、`sd2-server-health:200`、状态 OK，且要求正式公网返回 `X-SD2-Origin: server-42-193`。
+- 已落地每日数据库备份：服务器安装 `/usr/local/bin/sd2-backup.sh`、`sd2-backup.service`、`sd2-backup.timer`；每天 03:20 附近自动用 SQLite `.backup` 生成一致性快照，gzip 压缩，写 sha256 和 manifest，保留 30 天。
+- 已手动验证备份：`/var/lib/video-api-debugger/backups/daily/dev.db.20260813-010341.sqlite3.gz` 和更新 service 后的 `dev.db.20260813-010853.sqlite3.gz` 都生成成功；`integrity_check=ok`，`VideoTask=1187`、`Asset=500`、`User=24`，最新观察 `succeeded_missing_local=49`。
+- 已新增观察脚本：`ops/server/sd2/observe.sh` 会检查正式公网服务器识别头、登录/注册、灰度健康、tools、服务器服务、三个 timer、数据库数量、缺本地视频、媒体/缩略图数量、磁盘和最近备份。
+- 已新增完整回滚手册：`ops/server/sd2/rollback-to-mac.md` 明确不能只切 DNS；回滚前必须先停服务器 timer，再把服务器数据库和媒体同步回 Mac，再解除 Mac standby lock。
+- 未授权事项：未跑真实付费生成；普通网页生成、外部 API 生成、无线画布文字/图片/视频真实调用仍需单独授权后执行，避免无意消耗点数或 provider 额度。
+- 仍需观察：服务器磁盘约 87%，需要继续观察或安排扩容/清理；依赖安全告警仍需单独专项处理；登录态 UI 全链路还未完成截图级验收。
+
 ## 3. 验收/审查内容
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。

@@ -1,0 +1,16 @@
+[Unit]
+Description=sd2 daily SQLite backup
+After=network.target sd2-gray.service
+
+[Service]
+Type=oneshot
+User=gouki
+Group=gouki
+LogsDirectory=video-api-debugger
+Environment=DB_PATH=/var/lib/video-api-debugger/dev.db
+Environment=BACKUP_ROOT=/var/lib/video-api-debugger/backups/daily
+Environment=RETENTION_DAYS=30
+ExecStart=/usr/local/bin/sd2-backup.sh
+TimeoutStartSec=300
+StandardOutput=append:/var/log/video-api-debugger/sd2-backup.log
+StandardError=append:/var/log/video-api-debugger/sd2-backup.log

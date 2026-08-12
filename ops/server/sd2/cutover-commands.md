@@ -20,6 +20,26 @@ sudo systemctl enable --now sd2-gray.service
 bash ops/server/sd2/preflight.sh
 ```
 
+## 正式观察
+
+```bash
+EXPECT_PROD_ON_SERVER=1 bash ops/server/sd2/preflight.sh
+bash ops/server/sd2/observe.sh
+```
+
+## 安装每日 SQLite 备份
+
+```bash
+sudo install -d -o gouki -g gouki -m 0750 /var/lib/video-api-debugger/backups/daily
+sudo install -d -o gouki -g gouki -m 0750 /var/log/video-api-debugger
+sudo install -m 0755 sd2-backup.sh /usr/local/bin/sd2-backup.sh
+sudo install -m 0644 sd2-backup.service /etc/systemd/system/sd2-backup.service
+sudo install -m 0644 sd2-backup.timer /etc/systemd/system/sd2-backup.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now sd2-backup.timer
+sudo systemctl start sd2-backup.service
+```
+
 ## 正式切流时才启用后台补偿
 
 ```bash
@@ -37,8 +57,11 @@ sudo systemctl disable --now sd2-finalize-pending.timer
 sudo systemctl disable --now sd2-video-delivery.timer
 ```
 
+完整回滚步骤见 `ops/server/sd2/rollback-to-mac.md`。不能只切 DNS；必须先把服务器数据库和媒体同步回 Mac，否则点数和任务记录会倒退。
+
 ## 必须避免
 
 - 不提交 `.env`、数据库、媒体、`.next`、Cloudflare credential JSON。
 - 不在灰度和正式 Mac 同时运行会写库的补偿任务。
 - 不在未做最终增量同步前把 `sd2.youdoodesign.com` 切到服务器。
+- 不把 `youdoo-sites status sd2` 当作 Mac 本地站健康判断；迁移后它应显示 `launchd=server`、`port=skip`、`local=skip`，并用公网服务器识别头判断正式入口。

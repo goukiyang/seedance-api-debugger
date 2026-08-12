@@ -1,0 +1,11 @@
+[Unit]
+Description=Run sd2 daily SQLite backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=sd2-backup.service
+
+[Install]
+WantedBy=timers.target
