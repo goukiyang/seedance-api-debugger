@@ -17730,7 +17730,7 @@ body.compare-fullscreen-open {
 
 .asset-card-meta {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
   padding: 0 2px;
 }

@@ -93,6 +93,10 @@ function main() {
     '资产卡片无缩略图时必须显示明确素材/截图状态，不能让用户误判为坏图',
   );
   assert(
+    !assetsPage.includes("item.project?.name || '未归属项目'} · {formatDateTime(item.createdAt)"),
+    '资产卡片列表视图不能再单独显示项目和日期第三行，避免卡片信息分行过多',
+  );
+  assert(
     assetsPage.includes("scope !== 'project' && !(movePanelOpen && bulkTarget === 'video_project')"),
     '项目列表必须按需加载，不能首屏无条件请求',
   );

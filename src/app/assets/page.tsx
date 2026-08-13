@@ -1952,7 +1952,6 @@ function AssetsPageContent() {
                         </span>
                       )}
                       {specText && <span className="asset-card-spec">{specText}</span>}
-                      <span>{item.project?.name || '未归属项目'} · {formatDateTime(item.createdAt)}</span>
                       {isAdmin && item.owner && (
                         <UserIdentityBadge
                           user={item.owner}
