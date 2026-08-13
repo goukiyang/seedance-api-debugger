@@ -8,9 +8,14 @@ import { shouldContinueLocalization } from '../src/lib/video/task-localization-r
 
 async function assertThumbnailAvailabilityRules() {
   assert.equal(
-    canRequestTaskThumbnail({ localVideoPath: null, resultLastFrameUrl: null }),
+    canRequestTaskThumbnail({ publicVideoUrl: null, localVideoPath: null, resultLastFrameUrl: null }),
     false,
-    '远端 mp4-only 任务不能请求截图接口',
+    '没有本地视频、公开视频和尾帧时不能请求截图接口',
+  );
+  assert.equal(
+    canRequestTaskThumbnail({ publicVideoUrl: 'https://example.test/video.mp4', localVideoPath: null, resultLastFrameUrl: null }),
+    true,
+    '已有稳定公开视频时可以请求截图接口',
   );
   assert.equal(
     canRequestTaskThumbnail({ localVideoPath: '/videos/task.mp4', resultLastFrameUrl: null }),
@@ -25,6 +30,7 @@ async function assertThumbnailAvailabilityRules() {
   assert.equal(
     shouldExposeTaskThumbnailUrl({
       hasExistingThumbnail: true,
+      publicVideoUrl: null,
       localVideoPath: null,
       resultLastFrameUrl: null,
     }),
@@ -34,6 +40,7 @@ async function assertThumbnailAvailabilityRules() {
   assert.equal(
     shouldExposeTaskThumbnailUrl({
       hasExistingThumbnail: false,
+      publicVideoUrl: null,
       localVideoPath: null,
       resultLastFrameUrl: null,
     }),
@@ -152,10 +159,52 @@ async function assertThumbnailExtractPrefersLaterFrame() {
   }
 }
 
+async function assertThumbnailExtractUsesPublicVideoFallback() {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sd2-thumb-public-smoke-'));
+  const fakeFfmpegPath = path.join(tempDir, 'fake-ffmpeg.js');
+  const sourceLogPath = path.join(tempDir, 'source.log');
+  const taskId = `thumb-public-${Date.now()}`;
+  const thumbnailPath = path.join(process.cwd(), 'public', 'videos', 'thumbnails', `${taskId}.jpg`);
+  const publicVideoUrl = 'https://cdn.example.test/video.mp4';
+
+  await writeFile(fakeFfmpegPath, [
+    '#!/usr/bin/env node',
+    "const fs = require('fs');",
+    `const sourceLogPath = ${JSON.stringify(sourceLogPath)};`,
+    'const args = process.argv.slice(2);',
+    "const input = args[args.indexOf('-i') + 1];",
+    "fs.appendFileSync(sourceLogPath, `${input}\\n`);",
+    'const outputPath = args[args.length - 1];',
+    `if (input === ${JSON.stringify(publicVideoUrl)}) { fs.writeFileSync(outputPath, Buffer.from('fake-jpeg')); process.exit(0); }`,
+    "process.stderr.write(`unexpected input ${input}\\n`);",
+    'process.exit(1);',
+  ].join('\n'));
+  await chmod(fakeFfmpegPath, 0o755);
+  process.env.FFMPEG_PATH = fakeFfmpegPath;
+
+  try {
+    const { ensureTaskThumbnail } = await import('../src/lib/video/thumbnail');
+    const result = await ensureTaskThumbnail({
+      id: taskId,
+      public_video_url: publicVideoUrl,
+      local_video_path: `/videos/${taskId}-missing.mp4`,
+      result_video_url: 'https://provider.example.test/signed.mp4',
+      result_last_frame_url: null,
+    }, { allowRemoteFallback: true });
+
+    assert.equal(result.success, true);
+    assert.equal((await fs.promises.readFile(sourceLogPath, 'utf8')).trim(), publicVideoUrl);
+  } finally {
+    await rm(thumbnailPath, { force: true });
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await assertThumbnailAvailabilityRules();
   assertLocalizationRunnerRules();
   await assertThumbnailExtractPrefersLaterFrame();
+  await assertThumbnailExtractUsesPublicVideoFallback();
   console.log('thumbnail pipeline smoke passed');
 }
 

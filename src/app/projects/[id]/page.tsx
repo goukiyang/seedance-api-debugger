@@ -46,6 +46,7 @@ interface TaskItem {
   generation_mode: string;
   local_status: string;
   provider_task_id: string | null;
+  public_video_url?: string | null;
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   local_video_path?: string | null;
@@ -86,6 +87,7 @@ interface VideoCardPreviewTask {
   provider: string;
   generation_mode: string;
   local_status: string;
+  public_video_url: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
@@ -187,6 +189,7 @@ interface ReviewTaskItem {
   refund_amount?: number | null;
   provider_cost_status: string;
   error_message?: string | null;
+  public_video_url?: string | null;
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   local_video_path?: string | null;
@@ -964,6 +967,7 @@ export default function ProjectDetailPage() {
 	                    <td>
 	                      <TaskVideoThumbnail
 	                        taskId={task.id}
+	                        publicVideoUrl={task.public_video_url}
 	                        localVideoPath={task.local_video_path}
 	                        resultVideoUrl={task.result_video_url}
 	                        resultLastFrameUrl={task.result_last_frame_url}
@@ -1024,6 +1028,7 @@ export default function ProjectDetailPage() {
 	                        {task ? (
 	                          <TaskVideoThumbnail
 	                            taskId={task.id}
+	                            publicVideoUrl={task.public_video_url}
 	                            localVideoPath={task.local_video_path}
 	                            resultVideoUrl={task.result_video_url}
 	                            resultLastFrameUrl={task.result_last_frame_url}
@@ -1116,6 +1121,7 @@ export default function ProjectDetailPage() {
 	                  <td>
 	                    <TaskVideoThumbnail
 	                      taskId={task.id}
+	                      publicVideoUrl={task.public_video_url}
 	                      localVideoPath={task.local_video_path}
 	                      resultVideoUrl={task.result_video_url}
 	                      resultLastFrameUrl={task.result_last_frame_url}

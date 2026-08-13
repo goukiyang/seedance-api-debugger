@@ -40,6 +40,7 @@ interface OutputItem {
   provider_official_amount_minor: number | null;
   provider_official_amount_micros: number | null;
   provider_cost_currency: string | null;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -231,6 +232,7 @@ function OutputFramePreview({ output }: { output: OutputItem }) {
   return (
     <TaskVideoThumbnail
       taskId={output.id}
+      publicVideoUrl={output.public_video_url}
       localVideoPath={output.local_video_path}
       resultVideoUrl={output.result_video_url}
       resultLastFrameUrl={output.result_last_frame_url}

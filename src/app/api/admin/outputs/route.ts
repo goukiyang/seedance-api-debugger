@@ -163,6 +163,7 @@ export async function GET(request: NextRequest) {
           provider_official_amount_minor: true,
           provider_official_amount_micros: true,
           provider_cost_currency: true,
+          public_video_url: true,
           result_video_url: true,
           result_last_frame_url: true,
           local_video_path: true,

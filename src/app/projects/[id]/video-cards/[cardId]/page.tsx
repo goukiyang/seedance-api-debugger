@@ -54,6 +54,7 @@ interface TaskItem {
   duration: number | null;
   video_card_id: string | null;
   local_status: string;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -488,6 +489,7 @@ export default function VideoCardDetailPage() {
                 <article key={task.id} className="video-card-task-item">
                   <TaskVideoThumbnail
                     taskId={task.id}
+                    publicVideoUrl={task.public_video_url}
                     localVideoPath={task.local_video_path}
                     resultVideoUrl={task.result_video_url}
                     resultLastFrameUrl={task.result_last_frame_url}

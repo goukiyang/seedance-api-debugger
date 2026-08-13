@@ -52,6 +52,7 @@ interface TaskItem {
   provider: string;
   generation_mode: string;
   local_status: string;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -1223,6 +1224,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           provider: isIpSurface ? 'volcengine_ark' : 'seedance',
           generation_mode: params.generationMode,
           local_status: data.status || 'submitted',
+          public_video_url: null,
           result_video_url: null,
           result_last_frame_url: null,
           local_video_path: null,
@@ -1838,6 +1840,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                       <Link href={taskDetailHref(task.id, surfaceConfig.routePath)} className="composer-task-card-link">
 	                        <TaskVideoThumbnail
 	                          taskId={task.id}
+	                          publicVideoUrl={task.public_video_url}
 	                          localVideoPath={task.local_video_path}
 	                          resultVideoUrl={task.result_video_url}
 	                          resultLastFrameUrl={task.result_last_frame_url}

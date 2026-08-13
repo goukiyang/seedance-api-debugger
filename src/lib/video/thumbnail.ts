@@ -11,6 +11,7 @@ const THUMBNAIL_SEEK_SECONDS = ['2.5', '0.5'];
 
 export type ThumbnailSourceTask = {
   id: string;
+  public_video_url?: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
@@ -63,7 +64,7 @@ function isRemoteAssetUrl(value: string | null) {
 }
 
 export async function resolveThumbnailSources(
-  task: Pick<ThumbnailSourceTask, 'local_video_path' | 'result_video_url' | 'result_last_frame_url'>,
+  task: Pick<ThumbnailSourceTask, 'public_video_url' | 'local_video_path' | 'result_video_url' | 'result_last_frame_url'>,
   options: { allowRemoteFallback?: boolean } = {},
 ) {
   const sources: string[] = [];
@@ -71,6 +72,7 @@ export async function resolveThumbnailSources(
   if (localVideo && await fileExists(localVideo)) sources.push(localVideo);
 
   if (options.allowRemoteFallback !== false) {
+    if (isRemoteAssetUrl(task.public_video_url || null)) sources.push(task.public_video_url as string);
     if (isRemoteAssetUrl(task.result_video_url)) sources.push(task.result_video_url as string);
     if (isRemoteAssetUrl(task.result_last_frame_url)) sources.push(task.result_last_frame_url as string);
   }

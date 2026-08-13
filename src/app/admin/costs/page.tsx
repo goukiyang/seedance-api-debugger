@@ -341,8 +341,9 @@ export default async function AdminCostsPage({
         source_label: true,
         source_metadata_json: true,
         provider: true,
-        generation_mode: true,
+	        generation_mode: true,
 	        local_status: true,
+	        public_video_url: true,
 	        result_video_url: true,
 	        result_last_frame_url: true,
 	        local_video_path: true,
@@ -690,6 +691,7 @@ export default async function AdminCostsPage({
 	                  <td>
 	                    <TaskVideoThumbnail
 	                      taskId={task.id}
+	                      publicVideoUrl={task.public_video_url}
 	                      localVideoPath={task.local_video_path}
 	                      resultVideoUrl={task.result_video_url}
 	                      resultLastFrameUrl={task.result_last_frame_url}

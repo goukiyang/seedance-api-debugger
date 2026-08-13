@@ -107,6 +107,7 @@ export type DashboardRecentTask = {
   estimated_cost: number | null;
   frozen_cost: number | null;
   refund_amount: number | null;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -510,6 +511,7 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       provider_official_amount_minor: true,
       provider_official_amount_micros: true,
       provider_cost_currency: true,
+      public_video_url: true,
       result_video_url: true,
       result_last_frame_url: true,
       local_video_path: true,
@@ -927,6 +929,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       estimated_cost: task.estimated_cost,
       frozen_cost: task.frozen_cost,
       refund_amount: task.refund_amount,
+      public_video_url: task.public_video_url,
       result_video_url: task.result_video_url,
       result_last_frame_url: task.result_last_frame_url,
       local_video_path: task.local_video_path,

@@ -8,6 +8,7 @@ type ThumbnailSize = 'compact' | 'medium' | 'card';
 
 type Props = {
   taskId: string;
+  publicVideoUrl?: string | null;
   localVideoPath?: string | null;
   resultVideoUrl?: string | null;
   resultLastFrameUrl?: string | null;
@@ -32,6 +33,7 @@ function statusText(status?: string | null) {
 
 export function TaskVideoThumbnail({
   taskId,
+  publicVideoUrl,
   localVideoPath,
   resultLastFrameUrl,
   status,
@@ -44,7 +46,7 @@ export function TaskVideoThumbnail({
   overlay,
 }: Props) {
   const [failed, setFailed] = useState(false);
-  const hasSource = canRequestTaskThumbnail({ localVideoPath, resultLastFrameUrl });
+  const hasSource = canRequestTaskThumbnail({ publicVideoUrl, localVideoPath, resultLastFrameUrl });
   const thumbnailSrc = useMemo(() => `/api/video/thumbnail/${taskId}`, [taskId]);
   const content = hasSource && !failed ? (
     <img

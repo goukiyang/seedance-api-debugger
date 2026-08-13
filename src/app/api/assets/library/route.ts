@@ -189,12 +189,14 @@ async function serializeTask(task: {
   const owner = userSummary(task.owner || task.user);
   const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
   const hasThumbnailSource = canRequestTaskThumbnail({
+    publicVideoUrl: task.public_video_url,
     localVideoPath: task.local_video_path,
     resultLastFrameUrl: task.result_last_frame_url,
   });
   const hasExistingThumbnail = hasThumbnailSource ? false : await fileExists(thumbnailFilePath(task.id));
   const thumbnailUrl = shouldExposeTaskThumbnailUrl({
     hasExistingThumbnail,
+    publicVideoUrl: task.public_video_url,
     localVideoPath: task.local_video_path,
     resultLastFrameUrl: task.result_last_frame_url,
   }) ? `/api/video/thumbnail/${task.id}` : null;

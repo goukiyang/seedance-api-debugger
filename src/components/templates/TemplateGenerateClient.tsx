@@ -68,6 +68,7 @@ type TaskItem = {
   id: string;
   prompt: string;
   local_status: string;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -163,7 +164,7 @@ function truncatePrompt(prompt: string, maxLen = 64): string {
 
 function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPreviewModel {
   const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
-  const hasThumbnailSource = Boolean(task.local_video_path || task.result_video_url || task.result_last_frame_url);
+  const hasThumbnailSource = Boolean(task.local_video_path || task.public_video_url || task.result_video_url || task.result_last_frame_url);
   if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) return { kind: 'image', src: thumbnailSrc };
   return { kind: 'empty' };
 }
@@ -707,6 +708,7 @@ export function TemplateGenerateClient() {
           id: data.id,
           prompt: params.prompt,
           local_status: data.status || 'submitted',
+          public_video_url: null,
           result_video_url: null,
           result_last_frame_url: null,
           local_video_path: null,

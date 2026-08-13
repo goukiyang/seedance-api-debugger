@@ -54,6 +54,7 @@ export async function GET(
           duration: true,
           resolution: true,
           local_status: true,
+          public_video_url: true,
           result_video_url: true,
           result_last_frame_url: true,
           local_video_path: true,

@@ -42,6 +42,7 @@ export async function GET(
       select: {
         id: true,
         provider: true,
+        public_video_url: true,
         local_video_path: true,
         result_video_url: true,
         result_last_frame_url: true,
@@ -62,7 +63,7 @@ export async function GET(
 
     const thumbnailResult = await ensureTaskThumbnail({
       ...task,
-      // 浏览缩略图不能触发远程 mp4 拉取；无本地视频时只允许尾帧图片作为远程兜底。
+      // 浏览缩略图优先用本地视频；本地文件缺失时，只用我们自己的公开视频兜底，避免依赖第三方临时链接。
       result_video_url: null,
     }, { allowRemoteFallback: true });
     if (!thumbnailResult.success) {

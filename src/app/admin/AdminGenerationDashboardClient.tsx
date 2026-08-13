@@ -861,6 +861,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 <span>
                   <TaskVideoThumbnail
                     taskId={task.id}
+                    publicVideoUrl={task.public_video_url}
                     localVideoPath={task.local_video_path}
                     resultVideoUrl={task.result_video_url}
                     resultLastFrameUrl={task.result_last_frame_url}
