@@ -8,6 +8,7 @@ import {
   canDownloadOriginal,
   canUseAlbumImage,
 } from '@/lib/reference-albums/permissions';
+import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,8 +43,14 @@ export async function GET(
       : image.url;
     const contentType = image.asset?.mime_type || 'image/jpeg';
 
-    if (sourceUrl.startsWith('/')) {
-      const filePath = path.join(process.cwd(), 'public', sourceUrl);
+    const siteUploadPath = siteUploadPathFromUrl(sourceUrl);
+    if (siteUploadPath || sourceUrl.startsWith('/')) {
+      const publicRoot = path.resolve(process.cwd(), 'public');
+      const relativePath = (siteUploadPath || sourceUrl).replace(/^\/+/, '');
+      const filePath = path.resolve(publicRoot, relativePath);
+      if (!filePath.startsWith(`${publicRoot}${path.sep}`)) {
+        return NextResponse.json({ error: '素材路径非法' }, { status: 400 });
+      }
       if (!fs.existsSync(filePath)) return NextResponse.json({ error: '文件不存在' }, { status: 404 });
       const buffer = fs.readFileSync(filePath);
       return new NextResponse(buffer, {

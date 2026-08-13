@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
 import {
   getSiteUploadKind,
+  localUploadPathFromSiteUploadUrl,
   sameOriginPublicUrlForLocalUpload,
   validateSiteUploadDuration,
   validateSiteUploadMetadata,
@@ -352,13 +353,13 @@ function assertSha256Hash(hash: string) {
 }
 
 function storageProviderForAssetUrl(url: string): DirectUploadStorageProvider {
-  const sameOriginUrl = sameOriginPublicUrlForLocalUpload(url);
-  const normalizedUrl = sameOriginUrl || url;
+  const siteUploadPath = localUploadPathFromSiteUploadUrl(url);
+  const normalizedUrl = siteUploadPath ? (sameOriginPublicUrlForLocalUpload(url) || url) : url;
   const siteBaseUrl = (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   const r2BaseUrl = (process.env.R2_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   const tosBaseUrl = (process.env.TOS_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 
-  if (sameOriginUrl || normalizedUrl.startsWith('/uploads/')) return 'local-public';
+  if (siteUploadPath) return 'local-public';
   if (siteBaseUrl && normalizedUrl.startsWith(`${siteBaseUrl}/uploads/`)) return 'local-public';
   if (r2BaseUrl && normalizedUrl.startsWith(`${r2BaseUrl}/`)) return 'r2';
   if (tosBaseUrl && normalizedUrl.startsWith(`${tosBaseUrl}/`)) return 'tos';
@@ -372,12 +373,7 @@ function publicUrlForAssetUrl(url: string) {
 }
 
 function localUploadUrlFromAssetUrl(url: string) {
-  const siteBaseUrl = (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
-  if (url.startsWith('/uploads/')) return url;
-  if (siteBaseUrl && url.startsWith(`${siteBaseUrl}/uploads/`)) {
-    return url.slice(siteBaseUrl.length);
-  }
-  return null;
+  return localUploadPathFromSiteUploadUrl(url);
 }
 
 function assetUrlCanBeReusedWithoutBody(url: string) {

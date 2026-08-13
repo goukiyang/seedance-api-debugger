@@ -22,6 +22,7 @@ import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import { TosClient } from '@volcengine/tos-sdk';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { resolveSitePublicBaseUrl } from '@/lib/assets/site-url';
 
 const PUBLIC_VIDEO_STREAM_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -104,7 +105,7 @@ function getStorageConfig(): StorageConfig {
   }
 
   // 检查公网静态目录（已有公网域名）
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
+  const baseUrl = resolveSitePublicBaseUrl() || '';
   if (baseUrl && isPubliclyReachableUrl(baseUrl)) {
     return { provider: 'local-public', isPubliclyReachable: true };
   }
@@ -207,7 +208,7 @@ function uploadToLocalPublic(buffer: Buffer, fileName: string, mimeType: string)
   }
 
   const key = `uploads/assets/${storedFileName}`;
-  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const baseUrl = resolveSitePublicBaseUrl() || 'http://localhost:3000';
   const publicUrl = `${baseUrl}/${key}`;
 
   return { publicUrl, key };
@@ -361,7 +362,7 @@ async function uploadStreamToLocalPublic(
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   await pipeline(toNodeReadable(body), createWriteStream(targetPath));
   const info = await stat(targetPath);
-  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const baseUrl = resolveSitePublicBaseUrl() || 'http://localhost:3000';
   return {
     publicUrl: `${baseUrl}/${key}`,
     key,

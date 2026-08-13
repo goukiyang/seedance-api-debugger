@@ -3,6 +3,7 @@ import type { Asset } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { addAssetToWorkspace } from '@/lib/assets/workspace';
+import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 
 const CODEX_REFERENCE_ALBUM_NAME = 'Codex API 参考图';
@@ -68,7 +69,7 @@ function normalizeReferenceUrl(rawUrl: string) {
   }
 
   parsed.hash = '';
-  return parsed.toString();
+  return sameOriginPublicUrlForSiteUpload(parsed.toString()) || parsed.toString();
 }
 
 function inferImageMimeType(url: string) {
@@ -130,6 +131,10 @@ async function ensureReferenceImageRecord(
   }
 
   const metadataSource = context.metadataSource || 'codex_api';
+  const originalUrl = sameOriginPublicUrlForSiteUpload(asset.original_url) || asset.original_url;
+  const thumbnailUrl = asset.thumbnail_url
+    ? sameOriginPublicUrlForSiteUpload(asset.thumbnail_url) || asset.thumbnail_url
+    : null;
   const album = await getOrCreateReferenceAlbum(
     context.user,
     context.albumName,
@@ -151,8 +156,8 @@ async function ensureReferenceImageRecord(
       data: {
         workspace_id: context.workspaceId,
         project_id: context.projectId || referenceImage.project_id,
-        url: asset.original_url,
-        thumbnail_url: asset.thumbnail_url,
+        url: originalUrl,
+        thumbnail_url: thumbnailUrl,
         metadata_json: JSON.stringify({
           source: metadataSource,
           source_request_id: context.sourceRequestId || null,
@@ -172,8 +177,8 @@ async function ensureReferenceImageRecord(
         project_id: context.projectId || null,
         owner_user_id: context.user.id,
         asset_id: asset.id,
-        url: asset.original_url,
-        thumbnail_url: asset.thumbnail_url,
+        url: originalUrl,
+        thumbnail_url: thumbnailUrl,
         source_type: 'upload',
         source_content_id: context.sourceRequestId || null,
         sort_order: (currentMax._max.sort_order ?? -1) + 1,
@@ -219,7 +224,7 @@ async function ensureReferenceImageForAsset(
     assetId: asset.id,
     referenceImageId: referenceImage.id,
     workspaceAssetId,
-    originalUrl: asset.original_url,
+    originalUrl: sameOriginPublicUrlForSiteUpload(asset.original_url) || asset.original_url,
     fileName: asset.file_name,
   };
 }
@@ -288,7 +293,7 @@ export async function ensureWorkspaceImageAssetsHaveReferenceImages(
       assetId: workspaceAsset.asset.id,
       referenceImageId: referenceImage.id,
       workspaceAssetId: updatedWorkspaceAsset.id,
-      originalUrl: workspaceAsset.asset.original_url,
+      originalUrl: sameOriginPublicUrlForSiteUpload(workspaceAsset.asset.original_url) || workspaceAsset.asset.original_url,
       fileName: workspaceAsset.asset.file_name,
     });
   }

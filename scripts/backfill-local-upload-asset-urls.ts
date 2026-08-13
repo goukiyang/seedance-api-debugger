@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../src/lib/prisma';
+import { resolveSitePublicBaseUrl } from '../src/lib/assets/site-url';
 
-const DEFAULT_PUBLIC_BASE_URL = 'https://sd2.youdoodesign.com';
+const DEFAULT_PUBLIC_BASE_URL = 'https://sd2.youdooart.com';
 
 type Candidate = {
   id: string;
@@ -14,7 +15,7 @@ type Candidate = {
 };
 
 function normalizePublicBaseUrl() {
-  const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL).replace(/\/+$/, '');
+  const baseUrl = (resolveSitePublicBaseUrl() || DEFAULT_PUBLIC_BASE_URL).replace(/\/+$/, '');
   if (!/^https:\/\/[^/]+/.test(baseUrl)) {
     throw new Error('NEXT_PUBLIC_BASE_URL 必须是公网 HTTPS 地址，不能用于回填本地或相对地址。');
   }

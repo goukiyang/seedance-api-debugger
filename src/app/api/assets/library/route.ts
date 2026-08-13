@@ -8,6 +8,7 @@ import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
 import { fileExists, thumbnailFilePath } from '@/lib/video/thumbnail';
 import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
 import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
+import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +77,10 @@ type LibraryItem = {
 function enumParam(value: string | null, allowed: Set<string>, fallback: string) {
   const normalized = value?.trim();
   return normalized && allowed.has(normalized) ? normalized : fallback;
+}
+
+function publicAssetUrl(url: string | null) {
+  return url ? (sameOriginPublicUrlForSiteUpload(url) || url) : null;
 }
 
 function positiveInt(value: string | null, fallback: number, max: number) {
@@ -262,11 +267,13 @@ function serializeAsset(asset: {
   owner_id: string;
   owner: LibraryUser | null;
 }): LibraryItem {
+  const originalUrl = publicAssetUrl(asset.original_url);
+  const storedThumbnailUrl = publicAssetUrl(asset.thumbnail_url);
   const thumbnailUrl = asset.type === 'image'
-    ? asset.thumbnail_url || asset.original_url
-    : asset.thumbnail_url;
+    ? storedThumbnailUrl || originalUrl
+    : storedThumbnailUrl;
   const owner = userSummary(asset.owner) || legacyAssetOwnerSummary(asset.owner_id);
-  const deliveryStage = nonTaskDeliveryStage(Boolean(asset.original_url));
+  const deliveryStage = nonTaskDeliveryStage(Boolean(originalUrl));
   return {
     id: `asset:${asset.id}`,
     kind: asset.type === 'audio' ? 'audio' : asset.type === 'video' ? 'video' : 'image',
@@ -277,8 +284,8 @@ function serializeAsset(asset: {
     title: asset.file_name || `素材 ${asset.id.slice(0, 8)}`,
     prompt: null,
     thumbnailUrl,
-    previewUrl: asset.original_url,
-    downloadUrl: asset.original_url,
+    previewUrl: originalUrl,
+    downloadUrl: originalUrl,
     fileSize: asset.file_size ?? null,
     duration: null,
     ratio: asset.width && asset.height ? `${asset.width}:${asset.height}` : null,
@@ -316,7 +323,9 @@ function serializeReferenceImage(image: {
   album: { id: string; name: string } | null;
   asset_id: string | null;
 }): LibraryItem {
-  const deliveryStage = nonTaskDeliveryStage(Boolean(image.url));
+  const originalUrl = publicAssetUrl(image.url);
+  const thumbnailUrl = publicAssetUrl(image.thumbnail_url) || originalUrl;
+  const deliveryStage = nonTaskDeliveryStage(Boolean(originalUrl));
   return {
     id: `reference_image:${image.id}`,
     kind: 'image',
@@ -326,9 +335,9 @@ function serializeReferenceImage(image: {
     referenceImageId: image.id,
     title: image.album?.name || `参考素材 ${image.id.slice(0, 8)}`,
     prompt: image.source_type,
-    thumbnailUrl: image.thumbnail_url || image.url,
-    previewUrl: image.url,
-    downloadUrl: image.url,
+    thumbnailUrl,
+    previewUrl: originalUrl,
+    downloadUrl: originalUrl,
     fileSize: null,
     duration: null,
     ratio: null,

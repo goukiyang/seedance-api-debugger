@@ -119,8 +119,10 @@ function main() {
   );
   assert(
     assetLibraryRoute.includes("const thumbnailUrl = asset.type === 'image'")
-      && assetLibraryRoute.includes('asset.thumbnail_url || asset.original_url')
-      && assetLibraryRoute.includes(': asset.thumbnail_url'),
+      && assetLibraryRoute.includes('const originalUrl = publicAssetUrl(asset.original_url)')
+      && assetLibraryRoute.includes('const storedThumbnailUrl = publicAssetUrl(asset.thumbnail_url)')
+      && assetLibraryRoute.includes('? storedThumbnailUrl || originalUrl')
+      && assetLibraryRoute.includes(': storedThumbnailUrl'),
     'Asset 视频/音频不能用 original_url 冒充图片缩略图，避免 mp4/mp3 被放进 img',
   );
   assert(
