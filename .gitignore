@@ -41,9 +41,15 @@ test-api.sh
 
 # Database
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
 *.db.backup*
 *.db.bak*
 prisma/*.db
+prisma/*.db-journal
+prisma/*.db-shm
+prisma/*.db-wal
 prisma/*.db.backup*
 prisma/*.db.bak*
 
