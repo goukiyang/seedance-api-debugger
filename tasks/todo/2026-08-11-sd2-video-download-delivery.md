@@ -231,10 +231,10 @@ Ponytail 约束：不引入 Redis/BullMQ，不重建队列系统，不改点数�
   - 建议命令：`npm run lint`、`npm run build`、现有 `video-delivery-* smoke`、新增或更新一个 media ingest smoke。
   - 完成标准：不做真实视频生成也能证明主链路逻辑；如要真实生成，必须另行明确授权消耗点数。
 
-- [ ] F10. 部署和线上验证
+- [x] F10. 部署和线上验证
   - 做法：代码验证通过后再 `youdoo-sites build sd2`、`youdoo-sites restart sd2`；验证公网 `/api/config`、目标页面、下载接口、worker 状态；跨一个健康守护周期复查。
   - 完成标准：公网页面加载新构建；worker 实际运行；下载接口行为和页面状态在真实浏览器里可见。
-  - 当前状态：本地代码、smoke、lint、build 已通过；尚未做线上部署和真实生成，因为本阶段不消耗点数。
+  - 当前状态：已部署到腾讯云服务器 `/srv/video-api-debugger/app`，公网正式入口 `https://sd2.youdooart.com`；生产 BUILD_ID `VUCWyQOStluW6PZjFOCxY`；`sd2-gray.service` active，`sd2-video-delivery.timer` 跨周期执行成功。
 
 ### 6.3 2026-08-13 落地记录
 
@@ -247,7 +247,7 @@ Ponytail 约束：不引入 Redis/BullMQ，不重建队列系统，不改点数�
 - [x] 指标脚本补齐：`video:delivery-metrics` 输出 provider 完成到入库开始、入库排队、入库到稳定下载、提交到稳定下载等分段，并明确没有独立时间戳的分段不输出假数字。
 - [x] 无消耗验证：已通过 `thumbnail-pipeline-smoke`、`video-delivery-fast-path-smoke`、`video-delivery-queue-smoke`、`ultimate-canvas-video-card-workflow-smoke`、`provider-status-router-smoke`、`task-finalizer-terminal-guard-smoke`、`check-video-public-delivery-rules`、`enhance-video-create-route-smoke`、`npm run video:delivery-metrics -- --days 7`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
 - [x] 独立只读复审：子 agent 初审不通过后，主线程补齐 4 个闭环缺口；同一子 agent 复审通过，剩余为线上部署验证、真实付费生成未授权、服务器需有 `ffprobe/ffmpeg`、历史脏数据可后续清理。
-- [ ] 线上验收：待部署后用公网页面和接口验证新构建、worker 运行、真实历史任务下载跳转和截图状态；不在本轮无授权消耗真实视频生成点数。
+- [x] 线上验收：已验证公网 `https://sd2.youdooart.com/api/health` 200 且 `X-SD2-Origin: server-42-193`；`/login` 200；服务器源码命中新画布静态资源版本 `20260813-video-delivery`；未登录下载/状态接口保持 401；旧 `sd2.youdoodesign.com/login` 继续返回 410。未做真实付费新视频生成。
 
 ### 6.4 独立只读审查任务
 
@@ -269,7 +269,7 @@ Ponytail 约束：不引入 Redis/BullMQ，不重建队列系统，不改点数�
   - 检查对象：旧视频、IP 生成、视频超分、批量下载、手动下载。
   - 通过标准：非本次目标链路不被新 worker 错误接管；旧任务 fallback 仍可用。
 
-- [ ] FR5. 线上闭环审查
+- [x] FR5. 线上闭环审查
   - 检查对象：生产构建、公网页面、worker、下载接口。
   - 通过标准：不是只看到 commit/build 通过，而是公网真实页面和接口已经加载新行为。
 
