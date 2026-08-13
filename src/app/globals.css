@@ -17581,6 +17581,7 @@ body.compare-fullscreen-open {
   display: flex;
   flex: 0 0 auto;
   justify-content: flex-end;
+  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
 }
 
 .asset-card-enhance-trigger {
@@ -17778,6 +17779,24 @@ body.compare-fullscreen-open {
 .asset-card-compact .asset-card-download-action {
   height: 22px;
   padding: 0 6px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .asset-card:not(.enhance-menu-open) .asset-card-enhance-shell {
+    visibility: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  .asset-card:hover .asset-card-enhance-shell,
+  .asset-card:focus-within .asset-card-enhance-shell,
+  .asset-card.enhance-menu-open .asset-card-enhance-shell {
+    visibility: visible;
+    pointer-events: auto;
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .asset-library-page .user-identity-badge {
