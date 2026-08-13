@@ -7,6 +7,21 @@
 
     const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 
+    function numberOrNull(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    function shouldKeepPollingTerminalStatus(result) {
+        const status = result?.local_status || result?.status;
+        if (status !== 'succeeded') return false;
+        const deliveryStageKey = result?.delivery_stage?.key || result?.deliveryStage?.key || '';
+        if (deliveryStageKey === 'failed' || deliveryStageKey === 'ready') return false;
+        return deliveryStageKey === 'preparing'
+            || (numberOrNull(result?.retry_after_ms ?? result?.retryAfterMs) !== null
+                && (result?.stable_download_ready === false || result?.stableDownloadReady === false));
+    }
+
     function createGenerationTaskCoordinator(options) {
         const active = new Map();
         const ownedByNode = new Map();
@@ -100,9 +115,10 @@
                     return;
                 }
                 entry.errorCount = 0;
+                entry.serverDelayMs = numberOrNull(result.value?.retry_after_ms ?? result.value?.retryAfterMs);
                 options.onStatus(entry.nodeId, result.value, entry);
                 const status = result.value?.local_status || result.value?.status;
-                if (TERMINAL_STATUSES.has(status) && active.get(entry.taskId) === entry) {
+                if (TERMINAL_STATUSES.has(status) && !shouldKeepPollingTerminalStatus(result.value) && active.get(entry.taskId) === entry) {
                     unregister(entry.taskId);
                 }
             });

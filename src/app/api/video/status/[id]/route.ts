@@ -3,15 +3,36 @@ import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
-import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
+import { finalizeVideoTaskStatus, isTerminalLocalStatus } from '@/lib/video/task-finalizer';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
+import { shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
 
 export const dynamic = 'force-dynamic';
 
-function serializeTaskIdentity<T extends { owner?: unknown; user?: unknown }>(task: T) {
+function retryAfterMsForStage(stageKey: ReturnType<typeof videoDeliveryStageForTask>['key']) {
+  if (stageKey === 'generating') return 5_000;
+  if (stageKey === 'preparing') return 3_000;
+  if (stageKey === 'unavailable') return 10_000;
+  return null;
+}
+
+function serializeTaskIdentity<T extends {
+  id: string;
+  owner?: unknown;
+  user?: unknown;
+  public_video_url?: string | null;
+  local_video_path?: string | null;
+  result_video_url?: string | null;
+  result_last_frame_url?: string | null;
+}>(task: T) {
   const deliveryStage = videoDeliveryStageForTask(task as T & Parameters<typeof videoDeliveryStageForTask>[0]);
+  const thumbnailUrl = shouldExposeTaskThumbnailUrl({
+    publicVideoUrl: task.public_video_url,
+    localVideoPath: task.local_video_path,
+    resultLastFrameUrl: task.result_last_frame_url,
+  }) ? `/api/video/thumbnail/${task.id}` : null;
   return {
     ...task,
     owner: task.owner || task.user || null,
@@ -19,6 +40,10 @@ function serializeTaskIdentity<T extends { owner?: unknown; user?: unknown }>(ta
     delivery_stage: deliveryStage,
     stable_download_ready: deliveryStage.stableDownloadReady,
     preview_available: deliveryStage.previewAvailable,
+    play_url: deliveryStage.previewAvailable ? `/api/video/play/${task.id}` : null,
+    download_url: deliveryStage.stableDownloadReady ? `/api/video/download/${task.id}` : null,
+    thumbnail_url: thumbnailUrl,
+    retry_after_ms: retryAfterMsForStage(deliveryStage.key),
   };
 }
 
@@ -73,12 +98,21 @@ export async function GET(
     }
 
     const fastPathDelivery = isVideoDeliveryFastPathTask(task);
-    const finalizeResult = await finalizeVideoTaskStatus(taskId, {
-      forceProviderRefresh,
-      cacheOnSuccess: !fastPathDelivery,
-      generateThumbnail: !fastPathDelivery,
-      createdBy: user.id,
-    });
+    const shouldRefreshProvider = forceProviderRefresh && !isTerminalLocalStatus(task.local_status);
+    const shouldFinalizeProviderStatus = !(fastPathDelivery && isTerminalLocalStatus(task.local_status));
+    const finalizeResult: Awaited<ReturnType<typeof finalizeVideoTaskStatus>> = shouldFinalizeProviderStatus
+      ? await finalizeVideoTaskStatus(taskId, {
+          forceProviderRefresh: shouldRefreshProvider,
+          cacheOnSuccess: !fastPathDelivery,
+          generateThumbnail: !fastPathDelivery,
+          createdBy: user.id,
+        })
+      : {
+          task,
+          statusRefreshed: false,
+          terminal: true,
+          skippedReason: 'terminal_fast_path_status_cached',
+        };
 
     if (
       finalizeResult.task
@@ -86,7 +120,7 @@ export async function GET(
       && fastPathDelivery
     ) {
       await enqueueVideoDeliveryJob(taskId, {
-        priority: forceProviderRefresh ? 8 : 3,
+        priority: shouldRefreshProvider ? 8 : 3,
         payload: { source: 'status_route' },
       });
     }

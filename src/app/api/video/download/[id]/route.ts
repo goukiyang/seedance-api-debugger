@@ -98,17 +98,7 @@ export async function GET(
     }
 
     if (task.public_video_url) {
-      const response = await fetch(task.public_video_url, { cache: 'no-store' });
-      if (!response.ok || !response.body) {
-        return NextResponse.json(
-          { success: false, error: 'Stable download unavailable', message: `稳定下载文件读取失败：HTTP ${response.status}` },
-          { status: 502 },
-        );
-      }
-      return new NextResponse(response.body, {
-        status: 200,
-        headers: downloadHeaders(taskId, response.headers.get('content-length')),
-      });
+      return NextResponse.redirect(task.public_video_url, 302);
     }
 
     const absolutePath = localPublicVideoPath(task.local_video_path);

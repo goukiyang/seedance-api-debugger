@@ -283,6 +283,12 @@ contains(app, 'async function retryVideoTask', 'task retry uses real retry API')
 contains(app, 'async function moveVideoTasks', 'task migration uses real card API');
 contains(app, 'async function splitVideoCard', 'card split uses real split API');
 contains(app, 'async function mergeVideoCard', 'card merge uses real merge API');
+contains(app, 'entry.serverDelayMs', 'video polling can honor backend retry_after_ms');
+contains(app, 'normalized.stableDownloadReady', 'video node status distinguishes generation success from stable download readiness');
+contains(app, 'const downloadUrl = stableDownloadReady', 'restored video nodes should not invent a download URL before stable delivery is ready');
+contains(app, "node.data.generationStatus === 'succeeded' && !stableDownloadReady", 'restored succeeded video nodes keep polling until stable download is ready');
+contains(app, 'stableDownloadReady: normalized.stableDownloadReady', 'video nodes persist stable download readiness for reload recovery');
+contains(app, 'const downloadUrl = stableDownloadReady ? rawDownloadUrl :', 'video task action menu hides download until stable delivery is ready');
 
 const styles = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
 contains(styles, '.video-card-context-detail', 'video card detail styles exist');
@@ -305,6 +311,10 @@ contains(
 );
 
 const index = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
+const coordinator = readFileSync('public/tools/ultimate-canvas/generation-task-coordinator.js', 'utf8');
+contains(coordinator, 'shouldKeepPollingTerminalStatus', 'polling coordinator keeps succeeded video tasks alive until stable download is ready');
+contains(coordinator, 'retry_after_ms', 'polling coordinator reads backend polling cadence');
+
 assert.ok(index.includes('video-card-workflow.js'), 'index loads video card workflow');
 assert.ok(
   index.indexOf('video-card-workflow.js') < index.indexOf('app.js'),
@@ -312,6 +322,8 @@ assert.ok(
 );
 assert.match(index, /styles\.css\?v=20260715-generated-image-drag/);
 assert.match(index, /video-card-workflow\.js\?v=20260711-video-card-complete/);
-assert.match(index, /app\.js\?v=20260715-generated-image-drag/);
+assert.match(index, /generation-node-workflow\.js\?v=20260813-video-delivery/);
+assert.match(index, /generation-task-coordinator\.js\?v=20260813-video-delivery/);
+assert.match(index, /app\.js\?v=20260813-video-delivery/);
 
 console.log('ultimate-canvas-video-card-workflow-smoke passed');

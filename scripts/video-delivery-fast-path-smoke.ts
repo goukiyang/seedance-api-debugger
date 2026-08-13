@@ -125,6 +125,8 @@ assert.match(downloadRouteSource, /assertCanViewTask/, 'download preparation mus
 assert.match(downloadRouteSource, /enqueueVideoDeliveryJob/, 'download preparation should enqueue stable delivery instead of blocking on large files');
 assert.match(downloadRouteSource, /export async function GET/, 'download route should support direct browser downloads');
 assert.match(downloadRouteSource, /Content-Disposition/, 'direct video downloads must be returned as attachments');
+assert.match(downloadRouteSource, /NextResponse\.redirect\(task\.public_video_url,\s*302\)/, 'stable public downloads should redirect instead of proxying the whole video through Next');
+assert.doesNotMatch(downloadRouteSource, /fetch\(task\.public_video_url/, 'stable public downloads must not keep server-side public URL fetch/proxy');
 
 const statusRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/video/status/[id]/route.ts'), 'utf8');
 assert.match(statusRouteSource, /const fastPathDelivery = isVideoDeliveryFastPathTask\(task\)/, 'status route must classify fast-path tasks before finalizing');
@@ -132,6 +134,18 @@ assert.match(statusRouteSource, /cacheOnSuccess:\s*!fastPathDelivery/, 'status r
 assert.match(statusRouteSource, /generateThumbnail:\s*!fastPathDelivery/, 'status route must avoid blocking thumbnail work for fast-path status checks');
 assert.match(statusRouteSource, /enqueueVideoDeliveryJob/, 'status route must enqueue stable delivery when provider is already done');
 assert.match(statusRouteSource, /videoDeliveryStageForTask/, 'status route should expose stable delivery stage');
+assert.match(statusRouteSource, /play_url/, 'status route should expose a unified play URL for web, canvas, and external API callers');
+assert.match(statusRouteSource, /download_url/, 'status route should expose a stable download URL only when stable delivery is ready');
+assert.match(statusRouteSource, /thumbnail_url/, 'status route should expose a thumbnail URL when a thumbnail can be requested');
+assert.match(statusRouteSource, /retry_after_ms/, 'status route should tell callers when to poll again without guessing');
+assert.match(statusRouteSource, /isTerminalLocalStatus/, 'status route should know when a task is already terminal');
+assert.match(statusRouteSource, /terminal_fast_path_status_cached/, 'terminal fast-path status checks should not keep refreshing provider status while waiting for stable delivery');
+
+const videoListRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/video/list/route.ts'), 'utf8');
+assert.match(videoListRouteSource, /videoDeliveryStageForTask/, 'video list should expose delivery stage for refreshed recent-task polling');
+assert.match(videoListRouteSource, /stable_download_ready/, 'video list should expose stable download readiness');
+assert.match(videoListRouteSource, /retry_after_ms/, 'video list should expose backend polling cadence for succeeded-but-preparing tasks');
+assert.match(videoListRouteSource, /download_url:\s*deliveryStage\.stableDownloadReady/, 'video list should only expose download URL when stable delivery is ready');
 
 const assetLibrarySource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/assets/library/route.ts'), 'utf8');
 assert.match(assetLibrarySource, /videoDeliveryStageForTask/, 'asset library must distinguish preview availability from stable download readiness');
@@ -159,6 +173,17 @@ assert.match(taskDetailSource, /data\.public_video_url/, 'task detail download m
 assert.match(taskDetailSource, /res\.status === 202/, 'task detail download must show stable-download preparing state instead of generic failure');
 assert.match(taskDetailSource, /准备稳定下载/, 'task detail should expose a stable-download preparation action');
 
+const generatePageSource = fs.readFileSync(path.join(process.cwd(), 'src/components/generate/GeneratePageClient.tsx'), 'utf8');
+assert.match(generatePageSource, /shouldContinuePollingStableDelivery/, 'ordinary generate page should keep polling succeeded videos until stable delivery is ready');
+assert.match(generatePageSource, /stable_download_ready/, 'ordinary generate page should read stable download readiness from status API');
+assert.match(generatePageSource, /collectPollableTaskIds\(tasks,\s*isIpSurface\)/, 'ordinary generate page should resume polling succeeded-but-preparing tasks loaded from recent list');
+assert.match(generatePageSource, /POLLABLE_TASK_STATUSES\.has\(task\.local_status\)[\s\S]*shouldContinuePollingStableDelivery/, 'ordinary generate page should include stable-delivery waits in pollable task collection');
+
+const templateGenerateSource = fs.readFileSync(path.join(process.cwd(), 'src/components/templates/TemplateGenerateClient.tsx'), 'utf8');
+assert.match(templateGenerateSource, /shouldContinuePollingStableDelivery/, 'template generate page should keep polling succeeded videos until stable delivery is ready');
+assert.match(templateGenerateSource, /stable_download_ready/, 'template generate page should read stable download readiness from status API');
+assert.match(templateGenerateSource, /POLLABLE_TASK_STATUSES\.has\(task\.local_status\)[\s\S]*shouldContinuePollingStableDelivery/, 'template generate page should include stable-delivery waits in pollable task collection');
+
 const bulkDownloadSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/video/bulk-download.ts'), 'utf8');
 assert.match(bulkDownloadSource, /public_video_url/, 'bulk download must include stable public video URLs');
 assert.match(bulkDownloadSource, /addReadStream/, 'bulk download ZIP should stream public URLs without forcing local cache first');
@@ -173,6 +198,16 @@ assert.match(assetsPageSource, /提交到生成完成/, 'hover bubble should inc
 assert.match(assetsPageSource, /item\.deliveryStage\?\.key !== 'ready'/, 'asset page should not render the ready download state as a separate status line');
 assert.match(assetsPageSource, /\/api\/video\/download\/\$\{item\.taskId\}/, 'asset page compact download action should use the direct download route');
 assert.match(assetsPageSource, /prepareStableDownload/, 'asset page detail should let users trigger stable-download preparation');
+
+const ultimateCanvasWorkflowSource = fs.readFileSync(path.join(process.cwd(), 'public/tools/ultimate-canvas/generation-node-workflow.js'), 'utf8');
+assert.match(ultimateCanvasWorkflowSource, /task\.play_url/, 'ultimate canvas should use the backend-provided play URL');
+assert.match(ultimateCanvasWorkflowSource, /task\.download_url/, 'ultimate canvas should use the backend-provided stable download URL');
+assert.match(ultimateCanvasWorkflowSource, /stableDownloadReady/, 'ultimate canvas should keep stable download readiness separate from generation success');
+assert.doesNotMatch(
+  ultimateCanvasWorkflowSource,
+  /downloadUrl:\s*taskId\s*\?\s*`\/api\/video\/download/,
+  'ultimate canvas should not expose download before stable delivery is ready',
+);
 
 const globalStylesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8');
 assert.match(globalStylesSource, /asset-card-download-action::after/, 'stable-ready download action should render a custom hover bubble');
@@ -189,6 +224,7 @@ assert.doesNotMatch(callbackRouteSource, /cacheTaskVideoToLocal|uploadPublicAsse
 
 const publicDeliverySource = fs.readFileSync(path.join(process.cwd(), 'src/lib/video/public-delivery.ts'), 'utf8');
 assert.match(publicDeliverySource, /ensurePublicVideoDeliveryFromProvider/, 'worker should use provider-to-public delivery without local readFile buffering');
+assert.match(publicDeliverySource, /ingestTaskMediaFromProvider/, 'provider delivery should use the unified media ingest job');
 
 const workerScriptSource = fs.readFileSync(path.join(process.cwd(), 'scripts/process-video-delivery-jobs.ts'), 'utf8');
 assert.match(workerScriptSource, /processVideoDeliveryQueueBatch/, 'delivery worker script must process durable queue jobs');

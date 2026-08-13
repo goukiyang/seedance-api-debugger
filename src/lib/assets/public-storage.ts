@@ -419,6 +419,13 @@ export type PublicVideoStreamUploadInput = {
   size?: number | null;
 };
 
+export type PublicVideoFileUploadInput = {
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  size?: number | null;
+};
+
 export async function uploadPublicVideoStream(input: PublicVideoStreamUploadInput): Promise<PublicUploadResult> {
   const config = getStorageConfig();
   const key = objectKeyForStream(input.fileName, input.mimeType);
@@ -498,6 +505,18 @@ export async function uploadPublicVideoStream(input: PublicVideoStreamUploadInpu
       };
     }
   }
+}
+
+export async function uploadPublicVideoFile(input: PublicVideoFileUploadInput): Promise<PublicUploadResult> {
+  const size = input.size && input.size > 0
+    ? input.size
+    : (await stat(input.filePath)).size;
+  return uploadPublicVideoStream({
+    body: createReadStream(input.filePath),
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    size,
+  });
 }
 
 /**

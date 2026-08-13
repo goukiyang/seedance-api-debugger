@@ -56,6 +56,13 @@ interface TaskItem {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage?: { key?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  retry_after_ms?: number | null;
+  play_url?: string | null;
+  download_url?: string | null;
+  thumbnail_url?: string | null;
   provider_cost_currency: string | null;
   provider_official_amount_minor: number | null;
   provider_final_amount_minor: number | null;
@@ -90,8 +97,18 @@ interface PolledTask {
   id: string;
   local_status: string;
   provider_status: string | null;
+  public_video_url?: string | null;
   result_video_url: string | null;
+  result_last_frame_url?: string | null;
+  local_video_path?: string | null;
   error_message: string | null;
+  delivery_stage?: { key?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  retry_after_ms?: number | null;
+  play_url?: string | null;
+  download_url?: string | null;
+  thumbnail_url?: string | null;
   provider_cost_currency: string | null;
   provider_official_amount_minor: number | null;
   provider_final_amount_minor: number | null;
@@ -258,9 +275,15 @@ function mergeTasksById(primary: TaskItem[], secondary: TaskItem[]): TaskItem[] 
   });
 }
 
-function collectPollableTaskIds(tasks: Pick<TaskItem, 'id' | 'local_status'>[]): string[] {
+function collectPollableTaskIds(
+  tasks: Pick<TaskItem, 'id' | 'local_status' | 'delivery_stage' | 'stable_download_ready' | 'retry_after_ms'>[],
+  isIpSurface: boolean,
+): string[] {
   return tasks
-    .filter((task) => task.id && POLLABLE_TASK_STATUSES.has(task.local_status))
+    .filter((task) => task.id && (
+      POLLABLE_TASK_STATUSES.has(task.local_status)
+      || shouldContinuePollingStableDelivery(task, isIpSurface)
+    ))
     .map((task) => task.id);
 }
 
@@ -273,6 +296,13 @@ function mergePollingTaskIds(incomingIds: string[], currentIds: string[]): strin
       return true;
     })
     .slice(0, MAX_ACTIVE_POLLING_TASKS);
+}
+
+function shouldContinuePollingStableDelivery(task: Pick<PolledTask, 'local_status' | 'delivery_stage' | 'stable_download_ready' | 'retry_after_ms'>, isIpSurface: boolean) {
+  if (isIpSurface || task.local_status !== 'succeeded') return false;
+  if (task.delivery_stage?.key === 'ready' || task.delivery_stage?.key === 'failed') return false;
+  return task.delivery_stage?.key === 'preparing'
+    || (task.stable_download_ready === false && Boolean(task.retry_after_ms));
 }
 
 function formatRecentTaskChargeText(chargeText: string): string {
@@ -939,7 +969,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
 
       const { tasks, pagination } = normalizeRecentTaskListResponse(data);
-      const pollableTaskIds = collectPollableTaskIds(tasks);
+      const pollableTaskIds = collectPollableTaskIds(tasks, isIpSurface);
       if (mode === 'replace') {
         setRecentTasks(tasks);
         recentTasksPageRef.current = pagination.page;
@@ -1044,7 +1074,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
               ? {
                   ...task,
                   local_status: data.local_status,
+                  public_video_url: data.public_video_url ?? task.public_video_url,
                   result_video_url: data.result_video_url,
+                  result_last_frame_url: data.result_last_frame_url ?? task.result_last_frame_url,
+                  local_video_path: data.local_video_path ?? task.local_video_path,
+                  delivery_stage: data.delivery_stage ?? task.delivery_stage,
+                  stable_download_ready: data.stable_download_ready ?? task.stable_download_ready,
+                  preview_available: data.preview_available ?? task.preview_available,
+                  retry_after_ms: data.retry_after_ms ?? task.retry_after_ms,
+                  play_url: data.play_url ?? task.play_url,
+                  download_url: data.download_url ?? task.download_url,
+                  thumbnail_url: data.thumbnail_url ?? task.thumbnail_url,
                   provider_cost_currency: data.provider_cost_currency,
                   provider_official_amount_minor: data.provider_official_amount_minor,
                   provider_final_amount_minor: data.provider_final_amount_minor,
@@ -1054,7 +1094,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
               : task
           )));
 
-          if (['succeeded', 'failed', 'cancelled'].includes(data.local_status)) {
+          if (
+            ['failed', 'cancelled'].includes(data.local_status)
+            || (data.local_status === 'succeeded' && !shouldContinuePollingStableDelivery(data, isIpSurface))
+          ) {
             terminalIds.push(taskId);
           }
         } catch {

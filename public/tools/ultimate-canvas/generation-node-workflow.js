@@ -201,15 +201,28 @@
         const taskId = task.task_id || task.id || '';
         const status = task.local_status || task.status || 'submitted';
         const succeeded = status === 'succeeded';
+        const stableDownloadReady = task.stable_download_ready === true
+            || task.stableDownloadReady === true
+            || Boolean(task.public_video_url);
+        const previewAvailable = task.preview_available === true
+            || task.previewAvailable === true
+            || succeeded
+            || Boolean(task.result_video_url || task.local_video_path || task.result_last_frame_url);
+        const fallbackThumbnailUrl = previewAvailable && taskId
+            ? `/api/video/thumbnail/${encodeURIComponent(taskId)}`
+            : '';
         return {
             taskId,
             status,
             errorMessage: task.error_message || task.message || '',
             resultVideoUrl: task.result_video_url || task.video_url || '',
             resultLastFrameUrl: task.result_last_frame_url || '',
-            thumbnailUrl: succeeded && taskId ? `/api/video/thumbnail/${encodeURIComponent(taskId)}` : '',
-            playUrl: succeeded && taskId ? `/api/video/play/${encodeURIComponent(taskId)}` : '',
-            downloadUrl: taskId ? `/api/video/download/${encodeURIComponent(taskId)}` : ''
+            thumbnailUrl: task.thumbnail_url || task.thumbnailUrl || fallbackThumbnailUrl,
+            playUrl: task.play_url || task.playUrl || (previewAvailable && taskId ? `/api/video/play/${encodeURIComponent(taskId)}` : ''),
+            downloadUrl: task.download_url || task.downloadUrl || (stableDownloadReady && taskId ? `/api/video/download/${encodeURIComponent(taskId)}` : ''),
+            stableDownloadReady,
+            previewAvailable,
+            retryAfterMs: Number(task.retry_after_ms ?? task.retryAfterMs ?? 0) || null
         };
     }
 

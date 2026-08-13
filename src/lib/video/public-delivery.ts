@@ -1,15 +1,14 @@
-import { readFile, stat } from 'fs/promises';
+import { stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
-import { uploadPublicAsset, uploadPublicVideoStream, type PublicUploadResult } from '@/lib/assets/public-storage';
+import { uploadPublicVideoFile, type PublicUploadResult } from '@/lib/assets/public-storage';
 import { prisma } from '@/lib/prisma';
-import { refreshProviderTaskResultUrl } from '@/lib/provider/video-task-status';
 import { cacheTaskVideoToLocal, type CacheableVideoTask, type LocalVideoCacheResult } from './local-cache';
 import { localPublicVideoPath } from './thumbnail';
 import { isVideoDeliveryFastPathTask } from './delivery-policy';
+import { ingestTaskMediaFromProvider } from './media-ingest';
 
 const VIDEO_MIME_TYPE = 'video/mp4';
 const LOCAL_FALLBACK_PROVIDER = 'not_configured';
-const PROVIDER_VIDEO_FETCH_TIMEOUT_MS = 120 * 1000;
 
 type PublicVideoDeliveryTask = CacheableVideoTask & {
   generation_mode?: string | null;
@@ -113,142 +112,11 @@ function uploadResultIsUsableForVideo(result: PublicUploadResult, allowLocalPubl
   return result.isPubliclyReachable && isAcceleratedVideoDeliveryProvider(result.storageProvider, { allowLocalPublic });
 }
 
-function parseContentLength(value: string | null) {
-  if (!value) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
-}
-
-async function fetchProviderVideo(url: string, timeoutMs = PROVIDER_VIDEO_FETCH_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Accept': 'video/mp4,*/*',
-      },
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function refreshResultUrl(task: ProviderVideoDeliveryTask) {
-  const refreshed = await refreshProviderTaskResultUrl({
-    id: task.id,
-    provider: task.provider,
-    provider_task_id: task.provider_task_id,
-    result_last_frame_url: task.result_last_frame_url,
-  });
-  if (!refreshed) return null;
-
-  await prisma.videoTask.update({
-    where: { id: task.id },
-    data: {
-      result_video_url: refreshed.result_video_url,
-      result_last_frame_url: refreshed.result_last_frame_url,
-      raw_status_response: refreshed.raw !== undefined ? JSON.stringify(refreshed.raw) : undefined,
-    },
-  });
-
-  return refreshed.result_video_url;
-}
-
-async function fetchProviderVideoWithRefresh(
-  task: ProviderVideoDeliveryTask,
-): Promise<Response & { body: ReadableStream<Uint8Array> }> {
-  let url = await refreshResultUrl(task) || task.result_video_url;
-  if (!url) throw new Error('任务没有可交付的视频结果 URL');
-
-  let response = await fetchProviderVideo(url);
-  if (response.status === 401 || response.status === 403) {
-    const refreshedUrl = await refreshResultUrl(task);
-    if (refreshedUrl && refreshedUrl !== url) {
-      url = refreshedUrl;
-      response = await fetchProviderVideo(url);
-    }
-  }
-  if (!response.ok) {
-    throw new Error(`Provider 视频下载失败：HTTP ${response.status}`);
-  }
-  if (!response.body) {
-    throw new Error('Provider 视频响应没有可读取的 body');
-  }
-  return response as Response & { body: ReadableStream<Uint8Array> };
-}
-
 export async function ensurePublicVideoDeliveryFromProvider(
   task: ProviderVideoDeliveryTask | VideoTask,
   options: { allowLocalPublic?: boolean } = {},
 ): Promise<PublicVideoDeliveryResult> {
-  if (task.public_video_url) {
-    return {
-      success: true,
-      public_video_url: task.public_video_url,
-      storage_provider: task.public_video_storage_provider ?? null,
-      storage_key: task.public_video_storage_key ?? null,
-      file_size: task.public_video_file_size ?? null,
-      cached_at: task.public_video_cached_at ?? null,
-      already_exists: true,
-    };
-  }
-
-  if (!isVideoDeliveryFastPathTask(task)) {
-    return {
-      success: false,
-      skipped: true,
-      message: '非普通 Seedance 视频任务，保持现有本地缓存/播放链路。',
-    };
-  }
-
-  const response = await fetchProviderVideoWithRefresh(task);
-  const uploadResult = await uploadPublicVideoStream({
-    body: response.body,
-    fileName: `seedance-video-${task.id}.mp4`,
-    mimeType: response.headers.get('content-type')?.split(';')[0]?.trim() || VIDEO_MIME_TYPE,
-    size: parseContentLength(response.headers.get('content-length')),
-  });
-  const cachedAt = new Date();
-  const allowLocalPublic = options.allowLocalPublic === true || envAllowsLocalPublicDelivery();
-  const usableForVideo = uploadResultIsUsableForVideo(uploadResult, allowLocalPublic);
-
-  await prisma.videoTask.update({
-    where: { id: task.id },
-    data: {
-      public_video_url: usableForVideo ? uploadResult.publicUrl : null,
-      public_video_storage_provider: uploadResult.storageProvider,
-      public_video_storage_key: uploadResult.storageKey || null,
-      public_video_file_size: uploadResult.size,
-      public_video_cached_at: cachedAt,
-    },
-  });
-
-  if (!usableForVideo) {
-    const message = uploadResult.warning || '视频已落到备用存储，但该地址不是稳定 CDN 下载地址。';
-    return {
-      success: false,
-      fallback: true,
-      storage_provider: uploadResult.storageProvider,
-      storage_key: uploadResult.storageKey || null,
-      file_size: uploadResult.size,
-      cached_at: cachedAt,
-      warning: message,
-      message,
-    };
-  }
-
-  return {
-    success: true,
-    public_video_url: uploadResult.publicUrl,
-    storage_provider: uploadResult.storageProvider,
-    storage_key: uploadResult.storageKey || null,
-    file_size: uploadResult.size,
-    cached_at: cachedAt,
-    warning: uploadResult.warning,
-  };
+  return ingestTaskMediaFromProvider(task, options);
 }
 
 export async function ensurePublicVideoDelivery(
@@ -296,8 +164,12 @@ export async function ensurePublicVideoDelivery(
     return markLocalFallback(task.id, localVideo.size, '未配置 R2/TOS 视频分发，当前使用本站慢速备用播放。');
   }
 
-  const buffer = await readFile(localVideo.absolutePath);
-  const uploadResult = await uploadPublicAsset(buffer, `seedance-video-${task.id}.mp4`, VIDEO_MIME_TYPE);
+  const uploadResult = await uploadPublicVideoFile({
+    filePath: localVideo.absolutePath,
+    fileName: `seedance-video-${task.id}.mp4`,
+    mimeType: VIDEO_MIME_TYPE,
+    size: localVideo.size,
+  });
   const cachedAt = new Date();
   const usableForVideo = uploadResultIsUsableForVideo(uploadResult, allowLocalPublic);
 

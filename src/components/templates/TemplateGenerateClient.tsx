@@ -72,6 +72,13 @@ type TaskItem = {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage?: { key?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  retry_after_ms?: number | null;
+  play_url?: string | null;
+  download_url?: string | null;
+  thumbnail_url?: string | null;
   provider_cost_currency: string | null;
   provider_official_amount_minor: number | null;
   provider_final_amount_minor: number | null;
@@ -99,6 +106,18 @@ const RECENT_TASK_PAGE_SIZE = 12;
 const MAX_ACTIVE_POLLING_TASKS = 12;
 const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
 
+function shouldContinuePollingStableDelivery(task: {
+  local_status?: string | null;
+  delivery_stage?: { key?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  retry_after_ms?: number | null;
+}) {
+  if (task.local_status !== 'succeeded') return false;
+  if (task.delivery_stage?.key === 'ready' || task.delivery_stage?.key === 'failed') return false;
+  return task.delivery_stage?.key === 'preparing'
+    || (task.stable_download_ready === false && Boolean(task.retry_after_ms));
+}
+
 function projectDisplayName(project: ProjectOption): string {
   return project.type === 'personal' ? '个人空间' : project.name;
 }
@@ -118,9 +137,14 @@ function formatRecentTaskChargeText(chargeText: string): string {
   return chargeText.replace(/\s*USD(?=（|$)/g, '');
 }
 
-function collectPollableTaskIds(tasks: Pick<TaskItem, 'id' | 'local_status'>[]): string[] {
+function collectPollableTaskIds(
+  tasks: Pick<TaskItem, 'id' | 'local_status' | 'delivery_stage' | 'stable_download_ready' | 'retry_after_ms'>[],
+): string[] {
   return tasks
-    .filter((task) => task.id && POLLABLE_TASK_STATUSES.has(task.local_status))
+    .filter((task) => task.id && (
+      POLLABLE_TASK_STATUSES.has(task.local_status)
+      || shouldContinuePollingStableDelivery(task)
+    ))
     .map((task) => task.id);
 }
 
@@ -498,7 +522,12 @@ export function TemplateGenerateClient() {
           const task = data.task || data;
           setPolledResult(task);
           setRecentTasks((current) => current.map((item) => item.id === taskId ? { ...item, ...task } : item));
-          if (['succeeded', 'failed', 'cancelled'].includes(task.local_status)) settled.push(taskId);
+          if (
+            ['failed', 'cancelled'].includes(task.local_status)
+            || (task.local_status === 'succeeded' && !shouldContinuePollingStableDelivery(task))
+          ) {
+            settled.push(taskId);
+          }
         }
         if (settled.length > 0) {
           setActivePollingTaskIds((current) => current.filter((id) => !settled.includes(id)));

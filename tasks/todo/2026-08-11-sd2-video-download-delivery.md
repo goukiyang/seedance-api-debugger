@@ -181,52 +181,52 @@ Ponytail 约束：不引入 Redis/BullMQ，不重建队列系统，不改点数�
 
 ### 6.2 实施任务
 
-- [ ] F0. 锁定真实改动面和不可碰边界
+- [x] F0. 锁定真实改动面和不可碰边界
   - 修改范围：`src/app/api/video/**`、`src/lib/video/**`、`src/lib/assets/public-storage.ts`、生成结果相关前端组件、相关 smoke scripts。
   - 不改范围：点数定价、扣点结算规则、Provider 下单参数、用户权限模型、IP 生成和视频超分业务逻辑。
   - 完成标准：列出 `create -> status -> callback -> delivery worker -> play/download -> thumbnail` 的当前调用点，确认普通生成页、外部 API、无线画布最终都落到同一个 `VideoTask`。
 
-- [ ] F1. 下载接口改成最快路径
+- [x] F1. 下载接口改成最快路径
   - 目标：`/api/video/download/[id]` 在已有 `public_video_url` 时，不再由 Next 服务先 `fetch` 整个视频再转发。
   - 做法：保留登录态和 `assertCanViewTask` 权限校验；校验通过后对公开视频走 302 跳转，或生成短期签名 URL 后跳转；本地文件仍保留现有流式下载兜底。
   - 完成标准：公开视频下载不占用 Node 长连接和带宽；本地文件下载仍带正确文件名；无权限用户仍不能下载他人视频。
 
-- [ ] F2. 状态接口明确返回“可预览”和“可稳定下载”
+- [x] F2. 状态接口明确返回“可预览”和“可稳定下载”
   - 目标：用户不要把“生成成功”误认为“稳定下载已完成”。
   - 做法：复用并补齐 `delivery_stage`、`preview_available`、`stable_download_ready`；必要时新增 `play_url`、`download_url`、`thumbnail_url`、`retry_after_ms`，供网页、外部 API、无线画布统一使用。
   - 完成标准：provider 已有结果 URL 时页面可先预览；`public_video_url` 未准备好时下载按钮显示准备中/可重试；外部 API 能按字段判断下一步，而不是猜状态。
 
-- [ ] F3. 建立“一次下载，多处产出”的媒体入库 job
+- [x] F3. 建立“一次下载，多处产出”的媒体入库 job
   - 目标：同一个 MP4 不要为了本地保存、对象存储、截图被重复拉取。
   - 做法：新增或重构 `src/lib/video/media-ingest.ts`：刷新 provider 结果 URL -> 下载到受控临时文件 -> 校验文件大小和 mp4 可读性 -> 原子移动到 `public/videos` -> 用同一文件上传对象存储 -> 用同一文件抽缩略图 -> 最后一次性写回任务字段。
   - 完成标准：一个 job 成功后同时得到 `local_video_path`、`public_video_url`、`thumbnail_path` 或明确的分项失败状态；中途失败不会留下 0B 文件或半成品 URL。
 
-- [ ] F4. worker 改为主交付入口，状态页只做唤醒和兜底
+- [x] F4. worker 改为主交付入口，状态页只做唤醒和兜底
   - 目标：视频交付不能依赖用户打开状态页或刷新页面。
   - 做法：provider 回调成功后立即入队；状态接口发现成功但未入队时只补入队；worker 负责媒体入库和重试。
   - 完成标准：新任务即使没人打开页面，也会自动进入本地保存、对象存储和截图流程；重复回调、重复刷新不会产生多个有效 job。
 
-- [ ] F5. 回调优先，轮询兜底，轮询不要假勤奋
+- [x] F5. 回调优先，轮询兜底，轮询不要假勤奋
   - 目标：尽量接近 provider 真实完成时间，但不刷爆 provider。
   - 做法：确认 `VIDEO_DELIVERY_CALLBACK_SECRET` 和公网回调 base URL；回调不可用时才走后台轮询；轮询改为前期较快、后期降频，并返回 `retry_after_ms` 给前端/外部调用方。
   - 完成标准：回调缺配置时下单前能给管理员明确错误或走明确兜底；轮询不会无上限频繁刷新；日志能看出任务是 callback 唤醒还是 polling 唤醒。
 
-- [ ] F6. 前端统一状态和按钮行为
+- [x] F6. 前端统一状态和按钮行为
   - 范围：生成页最近任务、资产管理生成片段、任务详情、无线画布视频节点、外部 API 文档/示例如有相关状态说明。
   - 做法：播放按钮只看 `preview_available`；下载按钮只看 `stable_download_ready` 或 `download_url`；截图缺失时显示“截图准备中/暂无截图”，不影响视频播放下载。
   - 完成标准：不再出现“生成成功但视频无法预览/下载没反应/截图空白却没有解释”的状态。
 
-- [ ] F7. 历史任务和老视频兜底不破坏
+- [x] F7. 历史任务和老视频兜底不破坏
   - 目标：以前已经生成的视频不能因为新链路上线后无法下载。
   - 做法：下载和播放仍按 `public_video_url -> local_video_path -> result_video_url` 的兼容顺序处理；历史补偿脚本默认 dry-run，确认数量后再入队。
   - 完成标准：老任务可播放/可下载的继续可用；缺稳定 URL 的历史任务可批量补偿；补偿不覆盖已有稳定 URL。
 
-- [ ] F8. 指标和验收脚本补齐
+- [x] F8. 指标和验收脚本补齐
   - 目标：以后能知道到底慢在 provider、发现完成、下载、上传、截图里的哪一步。
   - 做法：补齐指标脚本输出 `submit_to_provider`、`provider_to_ingest_start`、`ingest_start_to_local`、`ingest_start_to_public`、`ingest_start_to_thumbnail`、`submit_to_stable_download` 的平均值、P50、P90、失败数。
   - 完成标准：不用真实付费生成，也能用 mock job 和历史数据跑出可读报告；真实任务上线后同一脚本能继续使用。
 
-- [ ] F9. 无消耗测试闭环
+- [x] F9. 无消耗测试闭环
   - 测试范围：下载接口 public URL 跳转、权限拒绝、队列幂等、回调重复、provider URL 过期刷新、媒体入库临时文件清理、截图生成失败不阻塞下载。
   - 建议命令：`npm run lint`、`npm run build`、现有 `video-delivery-* smoke`、新增或更新一个 media ingest smoke。
   - 完成标准：不做真实视频生成也能证明主链路逻辑；如要真实生成，必须另行明确授权消耗点数。
@@ -234,24 +234,38 @@ Ponytail 约束：不引入 Redis/BullMQ，不重建队列系统，不改点数�
 - [ ] F10. 部署和线上验证
   - 做法：代码验证通过后再 `youdoo-sites build sd2`、`youdoo-sites restart sd2`；验证公网 `/api/config`、目标页面、下载接口、worker 状态；跨一个健康守护周期复查。
   - 完成标准：公网页面加载新构建；worker 实际运行；下载接口行为和页面状态在真实浏览器里可见。
+  - 当前状态：本地代码、smoke、lint、build 已通过；尚未做线上部署和真实生成，因为本阶段不消耗点数。
 
-### 6.3 独立只读审查任务
+### 6.3 2026-08-13 落地记录
+
+- [x] 下载最快路径：`/api/video/download/[id]` 在已有稳定公开视频时改为权限校验后 302 跳转，不再由 Next 服务整段中转。
+- [x] 统一媒体入库：新增 `src/lib/video/media-ingest.ts`，普通 Seedance 视频成功后复用 `cacheTaskVideoToLocal` 只拉取一次，再用同一个本地 MP4 做对象存储上传和截图。
+- [x] 稳定链接保护：入库前增加 `ffprobe` 本地 MP4 可读性校验；坏文件不会写入 `public_video_url`。
+- [x] 状态接口补齐：`/api/video/status/[id]` 返回 `play_url`、`download_url`、`thumbnail_url`、`retry_after_ms`、`preview_available`、`stable_download_ready`，让网页、无线画布和外部 API 不再靠猜。
+- [x] 前端轮询闭环：普通生成页、模板生成页、无线画布视频节点在 `succeeded` 后仍会按后端 `retry_after_ms` 继续等稳定下载，不重复创建任务。
+- [x] 复审补洞：`/api/video/list` 已补交付字段；生成页/模板页刷新后会继续追 `succeeded-but-preparing`；状态页终态快路径不再反复查 Provider；坏 MP4 会删除并清 `local_video_path`；无线画布恢复旧节点不会提前暴露下载。
+- [x] 指标脚本补齐：`video:delivery-metrics` 输出 provider 完成到入库开始、入库排队、入库到稳定下载、提交到稳定下载等分段，并明确没有独立时间戳的分段不输出假数字。
+- [x] 无消耗验证：已通过 `thumbnail-pipeline-smoke`、`video-delivery-fast-path-smoke`、`video-delivery-queue-smoke`、`ultimate-canvas-video-card-workflow-smoke`、`provider-status-router-smoke`、`task-finalizer-terminal-guard-smoke`、`check-video-public-delivery-rules`、`enhance-video-create-route-smoke`、`npm run video:delivery-metrics -- --days 7`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [x] 独立只读复审：子 agent 初审不通过后，主线程补齐 4 个闭环缺口；同一子 agent 复审通过，剩余为线上部署验证、真实付费生成未授权、服务器需有 `ffprobe/ffmpeg`、历史脏数据可后续清理。
+- [ ] 线上验收：待部署后用公网页面和接口验证新构建、worker 运行、真实历史任务下载跳转和截图状态；不在本轮无授权消耗真实视频生成点数。
+
+### 6.4 独立只读审查任务
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。如果子 agent 工具不可用，由主线程按同一清单只读复查，并标明“非独立审查，可信度低于子 agent”。
 
-- [ ] FR1. 目标对齐审查
+- [x] FR1. 目标对齐审查
   - 检查对象：本阶段所有改动和 API 返回字段。
   - 通过标准：所有入口最终都走统一 `VideoTask` 媒体入库链路；没有只修某个页面导致外部 API 或无线画布掉队。
 
-- [ ] FR2. 性能审查
+- [x] FR2. 性能审查
   - 检查对象：下载接口、media ingest、worker。
   - 通过标准：公开视频下载不再经过服务器整段中转；主入库路径同一视频只下载一次；状态查询不做长时间文件下载。
 
-- [ ] FR3. 安全和账务审查
+- [x] FR3. 安全和账务审查
   - 检查对象：权限、点数、成本、日志。
   - 通过标准：下载仍有权限校验；重复回调/刷新不重复扣点；日志不打印 token、cookie、签名完整 URL 或 provider 密钥。
 
-- [ ] FR4. 旧任务回归审查
+- [x] FR4. 旧任务回归审查
   - 检查对象：旧视频、IP 生成、视频超分、批量下载、手动下载。
   - 通过标准：非本次目标链路不被新 worker 错误接管；旧任务 fallback 仍可用。
 
@@ -259,7 +273,7 @@ Ponytail 约束：不引入 Redis/BullMQ，不重建队列系统，不改点数�
   - 检查对象：生产构建、公网页面、worker、下载接口。
   - 通过标准：不是只看到 commit/build 通过，而是公网真实页面和接口已经加载新行为。
 
-### 6.4 停止条件和特别注意
+### 6.5 停止条件和特别注意
 
 - Provider 回调签名规则、结果 URL 刷新规则不清楚时，先停在模拟链路，不做真实消耗。
 - 发现会改动点数、结算、权限、Provider 下单参数时，停下来重新确认边界。

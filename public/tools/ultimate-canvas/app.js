@@ -2448,6 +2448,14 @@
                 return;
             }
             if (node.type === 'video' && node.data?.taskId) {
+                const result = node.data.generationResult || {};
+                const stableDownloadReady = node.data.stableDownloadReady === true
+                    || result.stable_download_ready === true
+                    || result.stableDownloadReady === true
+                    || Boolean(result.public_video_url || result.download_url || result.downloadUrl);
+                const downloadUrl = stableDownloadReady
+                    ? (node.data.videoDownloadUrl || result.download_url || result.downloadUrl || `/api/video/download/${node.data.taskId}`)
+                    : '';
                 decorateGeneratedNode(
                     node.id,
                     node.data.generationStatus === 'succeeded' ? '视频生成完成' : '视频生成任务',
@@ -2456,10 +2464,13 @@
                     {
                         taskId: node.data.taskId,
                         videoUrl: node.data.videoPreviewUrl || '',
-                        downloadUrl: node.data.videoDownloadUrl || `/api/video/download/${node.data.taskId}`
+                        downloadUrl
                     }
                 );
-                if (!['succeeded', 'failed', 'cancelled'].includes(node.data.generationStatus)) {
+                if (
+                    !['succeeded', 'failed', 'cancelled'].includes(node.data.generationStatus)
+                    || (node.data.generationStatus === 'succeeded' && !stableDownloadReady)
+                ) {
                     pollVideoTask(node.data.taskId, node.id);
                 }
             }
@@ -3259,10 +3270,15 @@
         const cardId = data.videoCardId || canvasRuntime.selectedVideoCardId || '';
         const detail = canvasRuntime.videoCardDetails.get(cardId);
         const cardSummary = canvasRuntime.bootstrap?.context?.video_cards?.find(card => card.id === cardId);
+        const stableDownloadReady = data.stableDownloadReady === true
+            || result.stable_download_ready === true
+            || result.stableDownloadReady === true
+            || Boolean(result.public_video_url || result.download_url || result.downloadUrl);
         const previewUrl = overrides.videoUrl ?? overrides.previewUrl ?? data.videoPreviewUrl
             ?? result.play_url ?? result.playUrl ?? result.result_video_url ?? result.resultVideoUrl;
-        const downloadUrl = overrides.downloadUrl ?? data.videoDownloadUrl
+        const rawDownloadUrl = overrides.downloadUrl ?? data.videoDownloadUrl
             ?? result.download_url ?? result.downloadUrl;
+        const downloadUrl = stableDownloadReady ? rawDownloadUrl : '';
         const actions = window.UltimateCanvasGenerationInteractions.videoTaskActionAvailability({
             taskId: data.taskId,
             status: data.generationStatus,
@@ -3492,7 +3508,15 @@
 
     function taskDescription(task) {
         const status = task?.local_status || task?.status || 'submitted';
-        if (status === 'succeeded') return '视频已生成，可预览、下载并在任务记录中追溯。';
+        if (status === 'succeeded') {
+            if (task?.stable_download_ready || task?.download_url || task?.public_video_url) {
+                return '视频已生成，稳定下载已就绪，可预览、下载并在任务记录中追溯。';
+            }
+            if (task?.preview_available || task?.play_url || task?.result_video_url || task?.local_video_path) {
+                return '视频已生成，可先预览，系统正在准备稳定下载。';
+            }
+            return '视频已生成，系统正在同步预览和下载资源。';
+        }
         if (status === 'failed') return task?.error_message || '视频生成失败，冻结点数会按后端规则释放。';
         if (status === 'cancelled') return '视频任务已取消。';
         return `任务状态：${status}，正在等待生成结果。`;
@@ -3603,6 +3627,7 @@
         delayFor: (entry, hidden) => {
             if (hidden) return 15000;
             if (entry.errorCount) return Math.min(20000, 5000 * entry.errorCount);
+            if (entry.serverDelayMs) return Math.min(30000, Math.max(1000, entry.serverDelayMs));
             if (entry.attempt < 4) return 3000;
             if (entry.attempt < 20) return 5000;
             return 8000;
@@ -3623,6 +3648,9 @@
             generationStatus: nextStatus,
             videoPreviewUrl: normalized.playUrl || node.data.videoPreviewUrl,
             videoDownloadUrl: normalized.downloadUrl,
+            stableDownloadReady: normalized.stableDownloadReady,
+            previewAvailable: normalized.previewAvailable,
+            retryAfterMs: normalized.retryAfterMs,
             resultVideoUrl: normalized.resultVideoUrl || node.data.resultVideoUrl,
             resultLastFrameUrl: normalized.resultLastFrameUrl || node.data.resultLastFrameUrl,
             thumbnailUrl: preview || node.data.thumbnailUrl,
@@ -3644,7 +3672,13 @@
         );
         renderGenerationNodeControls(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
-        if (nextStatus === 'succeeded') setNodeGenerationStatus(nodeEl, 'success', '视频生成完成');
+        if (nextStatus === 'succeeded') {
+            setNodeGenerationStatus(
+                nodeEl,
+                'success',
+                normalized.stableDownloadReady ? '视频生成完成，稳定下载已就绪' : '视频生成完成，正在准备稳定下载'
+            );
+        }
         else if (nextStatus === 'failed') setNodeGenerationStatus(nodeEl, 'error', normalized.errorMessage || '视频生成失败');
         else if (nextStatus === 'cancelled') setNodeGenerationStatus(nodeEl, 'warn', '视频任务已取消');
         else setNodeGenerationStatus(nodeEl, 'loading', `视频任务${nextStatus || '处理中'}`);

@@ -5,8 +5,44 @@ import { AuthError } from '@/lib/auth/session';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
+import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
+import { shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
 
 export const dynamic = 'force-dynamic';
+
+function retryAfterMsForStage(stageKey: ReturnType<typeof videoDeliveryStageForTask>['key']) {
+  if (stageKey === 'generating') return 5_000;
+  if (stageKey === 'preparing') return 3_000;
+  if (stageKey === 'unavailable') return 10_000;
+  return null;
+}
+
+function serializeTaskListItem<T extends {
+  id: string;
+  local_status: string | null;
+  public_video_url?: string | null;
+  local_video_path?: string | null;
+  result_video_url?: string | null;
+  result_last_frame_url?: string | null;
+  delivery_status?: string | null;
+}>(task: T) {
+  const deliveryStage = videoDeliveryStageForTask(task);
+  const thumbnailUrl = shouldExposeTaskThumbnailUrl({
+    publicVideoUrl: task.public_video_url,
+    localVideoPath: task.local_video_path,
+    resultLastFrameUrl: task.result_last_frame_url,
+  }) ? `/api/video/thumbnail/${task.id}` : null;
+  return {
+    ...task,
+    delivery_stage: deliveryStage,
+    stable_download_ready: deliveryStage.stableDownloadReady,
+    preview_available: deliveryStage.previewAvailable,
+    play_url: deliveryStage.previewAvailable ? `/api/video/play/${task.id}` : null,
+    download_url: deliveryStage.stableDownloadReady ? `/api/video/download/${task.id}` : null,
+    thumbnail_url: thumbnailUrl,
+    retry_after_ms: retryAfterMsForStage(deliveryStage.key),
+  };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -59,6 +95,7 @@ export async function GET(request: NextRequest) {
         public_video_url: true,
         public_video_storage_provider: true,
         public_video_cached_at: true,
+        delivery_status: true,
         result_video_url: true,
         result_last_frame_url: true,
         local_video_path: true,
@@ -105,7 +142,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      tasks,
+      tasks: tasks.map(serializeTaskListItem),
       pagination: {
         page,
         limit,

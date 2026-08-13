@@ -39,6 +39,14 @@ function summarize(values: Array<number | null>) {
   };
 }
 
+function countBy(values: string[]) {
+  return values.reduce<Record<string, number>>((acc, value) => {
+    const key = value || 'unknown';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
 async function main() {
   const days = numberArg('--days', 7);
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -55,27 +63,40 @@ async function main() {
       completed_at: true,
       public_video_url: true,
       public_video_cached_at: true,
+      delivery_status: true,
       delivery_queued_at: true,
       delivery_started_at: true,
       delivery_completed_at: true,
+      delivery_error: true,
     },
   });
 
   const fastPathTasks = tasks.filter(isVideoDeliveryFastPathTask);
-  const deliveryCompletedAt = fastPathTasks.map((task) => task.delivery_completed_at || task.public_video_cached_at || null);
+  const stableDownloadAt = fastPathTasks.map((task) => task.public_video_cached_at || task.delivery_completed_at || null);
 
   console.log(JSON.stringify({
     window_days: days,
     generated_at: new Date().toISOString(),
     total_succeeded_tasks: tasks.length,
     fast_path_succeeded_tasks: fastPathTasks.length,
-    stable_download_ready: fastPathTasks.filter((task) => Boolean(task.public_video_url)).length,
-    missing_stable_download: fastPathTasks.filter((task) => !task.public_video_url).length,
+    readiness_counts: {
+      stable_download_ready: fastPathTasks.filter((task) => Boolean(task.public_video_url)).length,
+      missing_stable_download: fastPathTasks.filter((task) => !task.public_video_url).length,
+      delivery_status: countBy(fastPathTasks.map((task) => task.delivery_status || 'unset')),
+      delivery_failed: fastPathTasks.filter((task) => task.delivery_status === 'failed' || task.delivery_error).length,
+    },
     submit_to_provider: summarize(fastPathTasks.map((task) => secondsBetween(task.created_at, task.completed_at))),
-    provider_to_delivery: summarize(fastPathTasks.map((task, index) => secondsBetween(task.completed_at, deliveryCompletedAt[index]))),
-    submit_to_delivery: summarize(fastPathTasks.map((task, index) => secondsBetween(task.created_at, deliveryCompletedAt[index]))),
-    queued_to_delivery: summarize(fastPathTasks.map((task, index) => secondsBetween(task.delivery_queued_at, deliveryCompletedAt[index]))),
+    provider_to_ingest_start: summarize(fastPathTasks.map((task) => secondsBetween(task.completed_at, task.delivery_started_at))),
+    ingest_queue_wait: summarize(fastPathTasks.map((task) => secondsBetween(task.delivery_queued_at, task.delivery_started_at))),
+    ingest_start_to_public: summarize(fastPathTasks.map((task) => secondsBetween(task.delivery_started_at, task.public_video_cached_at))),
+    provider_to_stable_download: summarize(fastPathTasks.map((task, index) => secondsBetween(task.completed_at, stableDownloadAt[index]))),
+    submit_to_stable_download: summarize(fastPathTasks.map((task, index) => secondsBetween(task.created_at, stableDownloadAt[index]))),
+    queued_to_stable_download: summarize(fastPathTasks.map((task, index) => secondsBetween(task.delivery_queued_at, stableDownloadAt[index]))),
     delivery_start_to_finish: summarize(fastPathTasks.map((task) => secondsBetween(task.delivery_started_at, task.delivery_completed_at))),
+    metric_notes: [
+      'ingest_start_to_public 目前覆盖本地缓存、对象存储上传和写回 public_video_url 的合计耗时。',
+      '本地缓存完成时间、截图完成时间当前没有独立数据库时间戳，因此不输出虚假百分比或虚假分段。',
+    ],
   }, null, 2));
 }
 
