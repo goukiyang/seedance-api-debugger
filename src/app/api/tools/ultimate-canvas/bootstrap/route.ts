@@ -376,6 +376,7 @@ export async function GET(request: NextRequest) {
         enabled: videoReady,
         label: '默认视频 API',
         model: videoConfig.model,
+        model_options: videoConfig.model_options,
         interaction: {
           modes: [
             'text-to-video',
@@ -392,6 +393,7 @@ export async function GET(request: NextRequest) {
           supports_audio: true,
           supports_last_frame: true,
           supports_watermark: true,
+          model_options: videoConfig.model_options,
           max_reference_images: 9,
         },
         endpoint: '/api/tasks/create',

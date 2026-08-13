@@ -10,6 +10,7 @@ import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspac
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
+import { parseSeedanceVideoModel, seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
 import {
   PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
   ensureProviderSafeReferenceImageUrl,
@@ -594,6 +595,9 @@ export async function POST(request: NextRequest) {
   if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
   if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
+  const parsedModel = parseSeedanceVideoModel(body.model);
+  if (!parsedModel.ok) return errorJson(parsedModel.message, 400);
+  const selectedModel = parsedModel.model;
 
   const paidGenerationGuard = evaluatePaidGenerationGuard({ request, body, requestSource });
   if (!paidGenerationGuard.allowed) {
@@ -763,7 +767,7 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Pricing ---
-  const pricing = calculateEstimatedCost(resolution, duration);
+  const pricing = calculateEstimatedCost(resolution, duration, seedanceVideoModelLabel(selectedModel));
   const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
@@ -781,6 +785,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         id: existing.id,
         status: existing.local_status,
+        model: existing.model,
         estimated_cost: existing.estimated_cost,
         frozen_cost: existing.frozen_cost,
         created_at: existing.created_at,
@@ -1130,6 +1135,7 @@ export async function POST(request: NextRequest) {
     frame_image_urls: frameImageUrls,
     callback_url: undefined,
     execution_expires_after: body.execution_expires_after,
+    model: selectedModel,
   };
 
   // --- Create snapshot ---
@@ -1139,9 +1145,10 @@ export async function POST(request: NextRequest) {
     generationMode,
     promptRaw: body.prompt,
     input: providerInput,
-    providerPayloadJson: JSON.stringify({ content_item_count: content.length, referenceCount: preparedImages.length }),
+    providerPayloadJson: JSON.stringify({ model: selectedModel, content_item_count: content.length, referenceCount: preparedImages.length }),
   });
   const taskParams = {
+    model: selectedModel,
     ratio, duration, resolution, seed,
     generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
     referenceAlbumIds: generationReferenceAlbumIds,
@@ -1193,7 +1200,7 @@ export async function POST(request: NextRequest) {
       const task = await tx.videoTask.create({
         data: {
           provider: 'seedance',
-          model: 'dreamina-seedance-2-0-260128',
+          model: selectedModel,
           generation_mode: generationMode,
           prompt: body.prompt.trim(),
           source_type: requestSource.source_type,
@@ -1537,6 +1544,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       id: taskId,
       provider_task_id: providerResult.provider_task_id,
+      model: selectedModel,
       status: 'submitted',
       estimated_cost: estimatedCost,
       frozen_cost: estimatedCost,

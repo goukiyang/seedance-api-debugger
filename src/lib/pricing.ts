@@ -29,6 +29,7 @@ export interface EnhanceVideoPricingSnapshot extends PricingSnapshot {
 export function calculateEstimatedCost(
   resolution: VideoResolution | string,
   duration: VideoDuration | number,
+  modelLabel = 'Seedance 2.0',
 ): PricingSnapshot {
   const baseCostPerSecond = SEEDANCE_VIDEO_COST_PER_SECOND;
   const internalMultiplier = 1.0;
@@ -36,7 +37,7 @@ export function calculateEstimatedCost(
   const estimatedCost = Math.ceil(finalCostPerSecond * (duration as number));
 
   return {
-    model: 'Seedance 2.0',
+    model: modelLabel,
     resolution: resolution as string,
     duration: duration as number,
     baseCostPerSecond,

@@ -12,6 +12,7 @@ export async function GET() {
     provider: 'seedance',
     base_url: config.baseUrl,
     model: config.model,
+    model_options: config.model_options,
     api_key_configured: isApiKeyConfigured(),
     aimediakit_enhance_video: {
       enabled: aiMediaKitConfig.enabled,

@@ -21,6 +21,7 @@ export interface CreateVideoInput {
   ratio?: VideoRatio;
   duration?: VideoDuration;
   resolution?: VideoResolution;
+  model?: string;
   seed?: number;
   generate_audio?: boolean;
   return_last_frame?: boolean;
@@ -61,6 +62,7 @@ export interface CreateVideoInput {
   ratio?: VideoRatio;
   duration?: VideoDuration;
   resolution?: VideoResolution;
+  model?: string;
   seed?: number;
   generate_audio?: boolean;
   return_last_frame?: boolean;
@@ -177,6 +179,7 @@ export interface ConfigResponse {
   provider: string;
   base_url: string;
   model: string;
+  model_options?: Array<{ id: string; label: string; detail: string }>;
   api_key_configured: boolean;
 }
 
