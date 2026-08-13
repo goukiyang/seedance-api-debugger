@@ -4,7 +4,7 @@ import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createDirectUploadTicket } from '../src/lib/assets/direct-upload';
 
 const LIVE_FLAG = '--live';
-const DEFAULT_ORIGIN = 'https://sd2.youdoodesign.com';
+const DEFAULT_ORIGIN = 'https://sd2.youdooart.com';
 
 const REQUIRED_ENV = [
   'R2_ACCOUNT_ID',

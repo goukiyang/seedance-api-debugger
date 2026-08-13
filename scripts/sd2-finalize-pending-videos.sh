@@ -3,7 +3,7 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export NEXT_TELEMETRY_DISABLED=1
-export NEXT_PUBLIC_BASE_URL="${NEXT_PUBLIC_BASE_URL:-https://sd2.youdoodesign.com}"
+export NEXT_PUBLIC_BASE_URL="${NEXT_PUBLIC_BASE_URL:-https://sd2.youdooart.com}"
 
 project_dir="/Volumes/Data/Projects/video-api-debugger-v12-full-todo"
 lock_dir="/tmp/youdoo-sd2-finalize-pending-videos.lock"

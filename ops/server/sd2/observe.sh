@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROD_ORIGIN="${PROD_ORIGIN:-https://sd2.youdoodesign.com}"
+PROD_ORIGIN="${PROD_ORIGIN:-https://sd2.youdooart.com}"
 GRAY_ORIGIN="${GRAY_ORIGIN:-https://sd2-server.youdoodesign.com}"
 TOOLS_ORIGIN="${TOOLS_ORIGIN:-https://tools.youdoodesign.com}"
 SERVER="${SERVER:-root@42.193.221.253}"

@@ -12,6 +12,9 @@ export type BulkVideoDownloadClientResult = {
   failed: number;
 };
 
+const CURRENT_PRODUCTION_ORIGIN = 'https://sd2.youdooart.com';
+const LEGACY_PRODUCTION_ORIGIN = 'https://sd2.youdoodesign.com';
+
 function fallbackZipName() {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, '0');
@@ -47,14 +50,35 @@ async function errorMessageFromResponse(response: Response) {
   }
 }
 
+function isLegacyOrigin() {
+  return typeof window !== 'undefined'
+    && window.location.origin === LEGACY_PRODUCTION_ORIGIN;
+}
+
+function networkDownloadErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (isLegacyOrigin()) {
+    return `当前打开的是旧入口 ${LEGACY_PRODUCTION_ORIGIN}，这个入口已经停用。请改用 ${CURRENT_PRODUCTION_ORIGIN} 后重新登录再下载。`;
+  }
+  if (message === 'Failed to fetch') {
+    return '批量下载请求没有连上服务器。请刷新页面后重试；如果仍出现，请确认当前网址是 https://sd2.youdooart.com。';
+  }
+  return message || '批量下载失败';
+}
+
 export async function downloadBulkVideoZip(
   payload: BulkVideoDownloadRequest,
 ): Promise<BulkVideoDownloadClientResult> {
-  const response = await fetch('/api/video/bulk-download', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  let response: Response;
+  try {
+    response = await fetch('/api/video/bulk-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new Error(networkDownloadErrorMessage(error));
+  }
 
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok || !contentType.includes('application/zip')) {

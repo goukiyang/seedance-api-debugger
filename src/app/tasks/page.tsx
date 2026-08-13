@@ -12,6 +12,9 @@ import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/vi
 import type { TaskGenerationMode } from '@/types';
 import { TASK_GENERATION_MODE_LABELS } from '@/types';
 
+const CURRENT_PRODUCTION_ORIGIN = 'https://sd2.youdooart.com';
+const LEGACY_PRODUCTION_ORIGIN = 'https://sd2.youdoodesign.com';
+
 interface Task {
   id: string;
   provider: string;
@@ -155,6 +158,17 @@ function taskDownloadDisabledReason(task: Task) {
   return '';
 }
 
+function taskLoadErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (typeof window !== 'undefined' && window.location.origin === LEGACY_PRODUCTION_ORIGIN) {
+    return `当前打开的是旧入口 ${LEGACY_PRODUCTION_ORIGIN}，这个入口已经停用。请改用 ${CURRENT_PRODUCTION_ORIGIN} 后重新登录。`;
+  }
+  if (message === 'Failed to fetch') {
+    return '任务列表没有连上服务器。请刷新页面后重试；如果仍出现，请确认当前网址是 https://sd2.youdooart.com。';
+  }
+  return message || '任务加载失败';
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
@@ -188,7 +202,7 @@ export default function TasksPage() {
       setPagination(data.pagination || null);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
-      setError(error instanceof Error ? error.message : '任务加载失败');
+      setError(taskLoadErrorMessage(error));
     } finally {
       setLoading(false);
     }

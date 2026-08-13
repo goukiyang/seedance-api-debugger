@@ -12,6 +12,7 @@ export type { UploadProgressHandler, UploadProgressSnapshot };
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 30 * 1024 * 1024;
 const AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 * 1024 * 1024;
+const R2_CORS_PRODUCTION_ORIGIN = 'https://sd2.youdooart.com';
 const MULTIPART_UPLOAD_MIN_SIZE_BYTES = 50 * 1024 * 1024;
 const MULTIPART_UPLOAD_CONCURRENCY = 3;
 const MULTIPART_RESUME_STORAGE_PREFIX = 'sd2_multipart_upload:';
@@ -202,9 +203,9 @@ function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
 
 function rawFallbackUnavailableMessage(reason: string, file?: File) {
   if (file?.type.startsWith('video/')) {
-    return `${reason.replace(/[。；;,.，]+$/, '')}。当前视频不能自动改用普通上传；请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT、Content-Type 和 ETag，或启用视频分块上传验收路径。`;
+    return `${reason.replace(/[。；;,.，]+$/, '')}。当前视频不能自动改用普通上传；请联系管理员确认 R2 CORS 已允许 ${R2_CORS_PRODUCTION_ORIGIN} 使用 PUT、Content-Type 和 ETag，或启用视频分块上传验收路径。`;
   }
-  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 30MB 以内图片或 15MB 以内音频自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 https://sd2.youdoodesign.com 使用 PUT 和 Content-Type。`;
+  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 30MB 以内图片或 15MB 以内音频自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 ${R2_CORS_PRODUCTION_ORIGIN} 使用 PUT 和 Content-Type。`;
 }
 
 async function uploadWithRawFallbackOrThrow(
