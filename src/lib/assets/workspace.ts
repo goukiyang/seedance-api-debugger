@@ -6,14 +6,20 @@ import { prisma } from '@/lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import { sameOriginPublicUrlForSiteUpload, siteUploadPathFromUrl } from '@/lib/assets/site-url';
 
 // ============================================================================
 // Workspace 管理
 // ============================================================================
 
 function localUploadExists(url: string | null): boolean {
-  if (!url || !url.startsWith('/uploads/')) return true;
-  return fs.existsSync(path.join(process.cwd(), 'public', url.replace(/^\/+/, '')));
+  const uploadPath = siteUploadPathFromUrl(url);
+  if (!url || !uploadPath) return true;
+  return fs.existsSync(path.join(process.cwd(), 'public', uploadPath.replace(/^\/+/, '')));
+}
+
+function publicAssetUrl(url: string | null) {
+  return url ? (sameOriginPublicUrlForSiteUpload(url) || url) : null;
 }
 
 /**
@@ -71,24 +77,30 @@ export async function getWorkspaceWithAssets(workspaceId: string) {
 
   return {
     ...workspace,
-    assets: workspaceAssets.map((wa) => ({
-      id: wa.id,
-      assetId: wa.asset.id,
-      referenceImageId: wa.reference_image_id,
-      referenceAlbumId: wa.reference_image?.album.status === 'active' ? wa.reference_image.album.id : null,
-      referenceAlbumName: wa.reference_image?.album.status === 'active' ? wa.reference_image.album.name : null,
-      sortOrder: wa.sort_order,
-      role: wa.role,
-      type: wa.asset.type,
-      originalUrl: wa.asset.original_url,
-      thumbnailUrl: localUploadExists(wa.asset.thumbnail_url) ? wa.asset.thumbnail_url : null,
-      fileName: wa.asset.file_name,
-      width: wa.asset.width,
-      height: wa.asset.height,
-      fileSize: wa.asset.file_size,
-      mimeType: wa.asset.mime_type,
-      createdAt: wa.asset.created_at,
-    })),
+    assets: workspaceAssets.map((wa) => {
+      const originalUrl = publicAssetUrl(wa.asset.original_url) || wa.asset.original_url;
+      const thumbnailUrl = localUploadExists(wa.asset.thumbnail_url)
+        ? publicAssetUrl(wa.asset.thumbnail_url)
+        : null;
+      return {
+        id: wa.id,
+        assetId: wa.asset.id,
+        referenceImageId: wa.reference_image_id,
+        referenceAlbumId: wa.reference_image?.album.status === 'active' ? wa.reference_image.album.id : null,
+        referenceAlbumName: wa.reference_image?.album.status === 'active' ? wa.reference_image.album.name : null,
+        sortOrder: wa.sort_order,
+        role: wa.role,
+        type: wa.asset.type,
+        originalUrl,
+        thumbnailUrl,
+        fileName: wa.asset.file_name,
+        width: wa.asset.width,
+        height: wa.asset.height,
+        fileSize: wa.asset.file_size,
+        mimeType: wa.asset.mime_type,
+        createdAt: wa.asset.created_at,
+      };
+    }),
   };
 }
 

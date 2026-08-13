@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import type { AssetType } from '@/types';
+import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,10 @@ function normalizeAssetType(value: string): AssetType {
   return 'image';
 }
 
+function publicAssetUrl(url: string | null) {
+  return url ? (sameOriginPublicUrlForSiteUpload(url) || url) : null;
+}
+
 function serializeAsset(asset: {
   id: string;
   type: string;
@@ -40,11 +45,13 @@ function serializeAsset(asset: {
   file_size: number;
   created_at: Date;
 }) {
+  const originalUrl = publicAssetUrl(asset.original_url) || asset.original_url;
+  const thumbnailUrl = publicAssetUrl(asset.thumbnail_url) || originalUrl;
   return {
     id: asset.id,
     type: normalizeAssetType(asset.type),
-    originalUrl: asset.original_url,
-    thumbnailUrl: asset.thumbnail_url || asset.original_url,
+    originalUrl,
+    thumbnailUrl,
     fileName: asset.file_name,
     mimeType: asset.mime_type,
     width: asset.width,

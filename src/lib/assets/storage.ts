@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
+import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 
 // ============================================================================
 // 目录配置
@@ -18,12 +19,6 @@ import { prisma } from '@/lib/prisma';
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const ASSETS_DIR = path.join(UPLOAD_DIR, 'assets');
 const THUMBS_DIR = path.join(UPLOAD_DIR, 'thumbs');
-const KNOWN_SITE_UPLOAD_BASE_URLS = [
-  process.env.NEXT_PUBLIC_BASE_URL,
-  'https://sd2.youdoodesign.com',
-]
-  .filter((value): value is string => Boolean(value && value.trim()))
-  .map((value) => value.replace(/\/+$/, ''));
 
 // 确保目录存在
 function ensureDirs() {
@@ -35,14 +30,7 @@ function ensureDirs() {
 }
 
 function localUploadUrlFromAssetUrl(url: string | null | undefined): string | null {
-  if (!url) return null;
-  if (url.startsWith('/uploads/')) return url;
-  for (const baseUrl of KNOWN_SITE_UPLOAD_BASE_URLS) {
-    if (url.startsWith(`${baseUrl}/uploads/`)) {
-      return url.slice(baseUrl.length);
-    }
-  }
-  return null;
+  return siteUploadPathFromUrl(url);
 }
 
 function localPublicPath(url: string): string {

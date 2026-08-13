@@ -123,14 +123,18 @@ assertIncludes(
 const siteUpload = read('src/lib/assets/site-upload.ts');
 assertIncludes(siteUpload, 'sameOriginPublicUrlForLocalUpload', '站内已落盘素材必须优先转成 sd2 公网 URL，不能同步等待 R2 转存。');
 assertIncludes(siteUpload, 'isSameOriginPublicUploadUrl', 'raw 复用已公网化的本站 /uploads URL 时必须仍标记 local-public。');
-assertIncludes(siteUpload, "url.startsWith('/uploads/')", '只有 /uploads/ 下的资源能被当成本站公开上传文件。');
+assertIncludes(siteUpload, 'siteUploadPathFromUrl', '只有统一识别出的 /uploads/ 资源能被当成本站公开上传文件。');
 assertIncludes(siteUpload, "storageProvider: 'local-public'", '站内公网 URL 路径必须标记 local-public，便于后续链路识别。');
 assertIncludes(siteUpload, '历史素材本地文件不存在', '历史本地素材缺文件时必须给明确错误。');
+const siteUrl = read('src/lib/assets/site-url.ts');
+assertIncludes(siteUrl, 'https://sd2.youdooart.com', '站内上传资源迁移后的默认生产域名必须是 sd2.youdooart.com。');
+assertIncludes(siteUrl, 'https://sd2.youdoodesign.com', '站内上传资源必须兼容历史 sd2.youdoodesign.com/uploads 旧记录。');
+assertIncludes(siteUrl, 'sameOriginPublicUrlForSiteUpload', '站内上传资源必须通过统一 helper 归一到当前生产域名。');
 
 const localStorage = read('src/lib/assets/storage.ts');
 assertIncludes(localStorage, 'localUploadUrlFromAssetUrl', '底层素材去重必须识别本站公网 /uploads URL，不能只识别相对路径。');
 assertIncludes(localStorage, 'restoreMissingLocalUploadFile', '重复素材如果本地文件缺失，raw 上传必须用本次文件内容恢复文件。');
-assertIncludes(localStorage, 'https://sd2.youdoodesign.com', '历史已经写入本站公网 URL，底层恢复逻辑必须兼容该固定线上域名。');
+assertIncludes(localStorage, 'siteUploadPathFromUrl', '历史已经写入本站公网 URL，底层恢复逻辑必须兼容新旧站内上传域名。');
 
 const tasksCreate = read('src/app/api/tasks/create/route.ts');
 const ipTasksCreate = read('src/app/api/ip/tasks/create/route.ts');
@@ -144,6 +148,9 @@ for (const source of [tasksCreate, ipTasksCreate]) {
 const referenceImageSafety = read('src/lib/provider/reference-image-safety.ts');
 assertNotIncludes(referenceImageSafety, "import { uploadPublicAsset }", '自动压缩参考图不能直接依赖 R2/TOS 上传。');
 assertIncludes(referenceImageSafety, 'uploadSiteAsset', '自动压缩参考图必须先走本站上传链路生成 local-public URL。');
+const referenceImageContentRoute = read('src/app/api/reference-images/[id]/content/route.ts');
+assertIncludes(referenceImageContentRoute, 'siteUploadPathFromUrl', '参考图内容代理必须识别历史旧域名 /uploads 资源并从本站本地文件读取。');
+assertIncludes(referenceImageContentRoute, 'path.resolve(publicRoot', '参考图内容代理读取本地文件时必须做路径边界校验。');
 
 const localUploadBackfill = read('scripts/backfill-local-upload-asset-urls.ts');
 assertIncludes(localUploadBackfill, 'dry-run', '历史 /uploads 资产回填脚本默认必须是 dry-run。');
