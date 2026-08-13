@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
 
     const includeArchived = request.nextUrl.searchParams.get('include_archived') === 'true';
     const includeAll = user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
+    const lite = request.nextUrl.searchParams.get('lite') === 'true';
     const statusWhere = includeArchived ? { not: 'deleted' } : 'active';
 
     const where = includeAll
@@ -30,6 +31,63 @@ export async function GET(request: NextRequest) {
             },
           ],
         };
+
+    if (lite) {
+      type LiteProject = {
+        id: string;
+        name: string;
+        type: string;
+        status: string;
+        owner_user_id: string;
+        members?: Array<{ role: string; status: string }>;
+      };
+
+      const projects = (includeAll
+        ? await prisma.project.findMany({
+            where,
+            orderBy: [{ type: 'asc' }, { updated_at: 'desc' }],
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              status: true,
+              owner_user_id: true,
+            },
+          })
+        : await prisma.project.findMany({
+            where,
+            orderBy: [{ type: 'asc' }, { updated_at: 'desc' }],
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              status: true,
+              owner_user_id: true,
+              members: { where: { user_id: user.id }, select: { role: true, status: true } },
+            },
+          })) as LiteProject[];
+
+      return NextResponse.json({
+        projects: projects.map((project) => {
+          const memberRole = project.members?.[0]?.role || null;
+          const myRole = includeAll
+            ? 'admin'
+            : (project.owner_user_id === user.id ? 'project_owner' : memberRole);
+          const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
+          return {
+            id: project.id,
+            name: project.name,
+            type: project.type,
+            status: project.status,
+            owner_user_id: project.owner_user_id,
+            my_role: myRole,
+            can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
+            can_manage_project: myRole === 'admin' || myRole === 'project_owner',
+            can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
+          };
+        }),
+      });
+    }
 
     const projects = await prisma.project.findMany({
       where,

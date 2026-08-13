@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Profiler, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
@@ -15,9 +15,12 @@ import { taskDetailHref } from '@/lib/navigation/return-to';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import {
   createAssetLibraryCacheKey,
+  deleteAssetLibraryCacheForUser,
   readAssetLibraryCache,
   writeAssetLibraryCache,
 } from '@/lib/assets/library-cache';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetView = AssetScope | 'enhance';
@@ -149,6 +152,11 @@ type MarqueeState = {
   currentX: number;
   currentY: number;
   previewIds: AssetLibraryItemId[];
+};
+
+type AssetCardRectSnapshot = {
+  id: AssetLibraryItemId;
+  rect: DOMRect;
 };
 
 const assetViewTabs: Array<{ id: AssetView; label: string; adminOnly?: boolean; tone?: 'enhance' }> = [
@@ -472,6 +480,10 @@ function intersects(a: DOMRect, b: DOMRect) {
   return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
 }
 
+function sameAssetIdList(a: AssetLibraryItemId[], b: AssetLibraryItemId[]) {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
 function rectFromPoints(a: { x: number; y: number }, b: { x: number; y: number }) {
   const left = Math.min(a.x, b.x);
   const top = Math.min(a.y, b.y);
@@ -519,7 +531,13 @@ function toCacheSafeAssetItem(item: AssetLibraryItem): AssetLibraryItem {
 }
 
 function AssetsPageContent() {
-  const [user, setUser] = useState<SessionUser | null>(null);
+  const {
+    user,
+    loadingUser,
+    hasLoadedUser,
+    userLoadError,
+    refreshUser,
+  } = useAppSession();
   const [assetView, setAssetView] = useState<AssetView>('history');
   const [type, setType] = useState<AssetType>('video');
   const [status, setStatus] = useState<AssetStatus>('succeeded');
@@ -568,6 +586,10 @@ function AssetsPageContent() {
   const [assetUploadProgress, setAssetUploadProgress] = useState<AssetLibraryUploadProgress | null>(null);
 
   const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
+  const cardRectSnapshot = useRef<AssetCardRectSnapshot[]>([]);
+  const marqueeStateRef = useRef<MarqueeState | null>(null);
+  const marqueePointRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeFrameRef = useRef<number | null>(null);
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -633,29 +655,32 @@ function AssetsPageContent() {
     clearSelection();
   };
 
+  const invalidateAssetCache = useCallback(async () => {
+    if (!user) return;
+    try {
+      await deleteAssetLibraryCacheForUser(user.id);
+    } catch {
+      // IndexedDB 失效失败不阻断真实网络刷新。
+    }
+  }, [user]);
+
   useEffect(() => {
-    let cancelled = false;
     const requestedType = new URLSearchParams(window.location.search).get('type');
     if (isAssetType(requestedType)) setType(requestedType);
+    void refreshUser();
+  }, [refreshUser]);
 
-    fetch('/api/auth/me', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data) => {
-        if (!cancelled) {
-          if (!data.user) {
-            window.location.href = '/login';
-            return;
-          }
-          setUser(data.user);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setError('登录状态加载失败');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useEffect(() => {
+    if (!hasLoadedUser || loadingUser || user || userLoadError) return;
+    window.location.href = '/login';
+  }, [hasLoadedUser, loadingUser, user, userLoadError]);
+
+  useEffect(() => {
+    if (!userLoadError || user) return;
+    setLoading(false);
+    setSyncingAssets(false);
+    setError(userLoadError);
+  }, [user, userLoadError]);
 
   useEffect(() => {
     if (!user) return;
@@ -678,8 +703,8 @@ function AssetsPageContent() {
     if (scope !== 'project' && !(movePanelOpen && bulkTarget === 'video_project')) return;
     let cancelled = false;
     const projectUrl = user.role === 'admin'
-      ? '/api/projects?include_archived=true&include_all=true'
-      : '/api/projects?include_archived=true';
+      ? '/api/projects?include_archived=true&include_all=true&lite=true'
+      : '/api/projects?include_archived=true&lite=true';
     fetch(projectUrl, { cache: 'no-store' })
       .then((response) => response.json())
       .then((data) => {
@@ -696,7 +721,7 @@ function AssetsPageContent() {
   useEffect(() => {
     if (!user || user.role !== 'admin' || scope !== 'user') return;
     let cancelled = false;
-    fetch('/api/admin/users', { cache: 'no-store' })
+    fetch('/api/admin/users?lite=true', { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
         if (!cancelled && data) setUsers(data.users || []);
@@ -833,6 +858,16 @@ function AssetsPageContent() {
       cancelled = true;
     };
   }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
+
+  useEffect(() => {
+    marqueeStateRef.current = marquee;
+  }, [marquee]);
+
+  useEffect(() => () => {
+    if (marqueeFrameRef.current !== null) {
+      window.cancelAnimationFrame(marqueeFrameRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     setDetailMediaAspectRatio(null);
@@ -1018,6 +1053,15 @@ function AssetsPageContent() {
     }
   };
 
+  const snapshotCardRects = () => {
+    cardRectSnapshot.current = items
+      .map((item) => {
+        const node = cardRefs.current.get(item.id);
+        return node ? { id: item.id, rect: node.getBoundingClientRect() } : null;
+      })
+      .filter((item): item is AssetCardRectSnapshot => Boolean(item));
+  };
+
   const detectMarqueeIds = (startX: number, startY: number, currentX: number, currentY: number) => {
     const selectionRect = new DOMRect(
       Math.min(startX, currentX),
@@ -1026,11 +1070,8 @@ function AssetsPageContent() {
       Math.abs(currentY - startY),
     );
     if (selectionRect.width < 4 && selectionRect.height < 4) return [];
-    return items
-      .filter((item) => {
-        const node = cardRefs.current.get(item.id);
-        return node ? intersects(selectionRect, node.getBoundingClientRect()) : false;
-      })
+    return cardRectSnapshot.current
+      .filter((item) => intersects(selectionRect, item.rect))
       .map((item) => item.id);
   };
 
@@ -1040,6 +1081,7 @@ function AssetsPageContent() {
     const target = event.target as HTMLElement;
     if (target.closest('[data-asset-card],button,a,input,select,textarea')) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    snapshotCardRects();
     setMarquee({
       active: true,
       append: event.metaKey || event.ctrlKey,
@@ -1053,13 +1095,45 @@ function AssetsPageContent() {
 
   const handleGridPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!marquee?.active) return;
-    const previewIds = detectMarqueeIds(marquee.startX, marquee.startY, event.clientX, event.clientY);
-    setMarquee({ ...marquee, currentX: event.clientX, currentY: event.clientY, previewIds });
+    marqueePointRef.current = { x: event.clientX, y: event.clientY };
+    if (marqueeFrameRef.current !== null) return;
+    marqueeFrameRef.current = window.requestAnimationFrame(() => {
+      marqueeFrameRef.current = null;
+      const currentMarquee = marqueeStateRef.current;
+      const point = marqueePointRef.current;
+      if (!currentMarquee?.active || !point) return;
+      const previewIds = detectMarqueeIds(
+        currentMarquee.startX,
+        currentMarquee.startY,
+        point.x,
+        point.y,
+      );
+      setMarquee((current) => {
+        if (!current?.active) return current;
+        if (
+          current.currentX === point.x
+          && current.currentY === point.y
+          && sameAssetIdList(current.previewIds, previewIds)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          currentX: point.x,
+          currentY: point.y,
+          previewIds,
+        };
+      });
+    });
   };
 
   const handleGridPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!marquee?.active) return;
-    const previewIds = marquee.previewIds;
+    if (marqueeFrameRef.current !== null) {
+      window.cancelAnimationFrame(marqueeFrameRef.current);
+      marqueeFrameRef.current = null;
+    }
+    const previewIds = detectMarqueeIds(marquee.startX, marquee.startY, event.clientX, event.clientY);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -1069,6 +1143,8 @@ function AssetsPageContent() {
       clearSelection();
     }
     setMarquee(null);
+    cardRectSnapshot.current = [];
+    marqueePointRef.current = null;
   };
 
   const downloadTaskIds = async (taskIds: string[]) => {
@@ -1219,6 +1295,7 @@ function AssetsPageContent() {
       if (!response.ok) throw new Error(data.error || data.message || '加入图集失败');
       setMessage(`已加入图集：${data.images?.length || reusableImageItems.length} 张图片`);
       clearSelection();
+      await invalidateAssetCache();
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加入图集失败');
@@ -1254,6 +1331,7 @@ function AssetsPageContent() {
       setMessage(`批量移动完成：移动 ${data.moved || 0} 个，跳过 ${data.unchanged || 0} 个，失败 ${data.failed || 0} 个`);
       clearSelection();
       setPage(1);
+      await invalidateAssetCache();
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量移动失败');
@@ -1262,7 +1340,8 @@ function AssetsPageContent() {
     }
   };
 
-  const reloadItems = () => {
+  const reloadItems = async () => {
+    await invalidateAssetCache();
     setReloadToken((value) => value + 1);
   };
 
@@ -1335,6 +1414,7 @@ function AssetsPageContent() {
         percent: 100,
       });
       if (assetUploadInputRef.current) assetUploadInputRef.current.value = '';
+      await invalidateAssetCache();
       setReloadToken((value) => value + 1);
     } catch (err) {
       setAssetUploadProgress(null);
@@ -1700,6 +1780,7 @@ function AssetsPageContent() {
           </div>
         )}
 
+        <Profiler id="AssetLibraryGrid" onRender={assetGridProfilerOnRender}>
         {!loading && groupedItems.map((group) => (
           <section key={group.key} className="asset-library-group">
             <h2>
@@ -1886,6 +1967,7 @@ function AssetsPageContent() {
             </div>
           </section>
         ))}
+        </Profiler>
 
         {pagination && pagination.total_pages > 1 && (
           <div className="asset-library-pagination">

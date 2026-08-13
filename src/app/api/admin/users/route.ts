@@ -21,6 +21,23 @@ export async function GET(request: NextRequest) {
     return errorJson('权限不足', 403);
   }
 
+  if (request.nextUrl.searchParams.get('lite') === 'true') {
+    const users = await prisma.user.findMany({
+      where: { status: { not: 'deleted' } },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        email: true,
+        avatar_url: true,
+        status: true,
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return NextResponse.json({ users });
+  }
+
   const now = new Date();
   const users = await prisma.user.findMany({
     where: { status: { not: 'deleted' } },

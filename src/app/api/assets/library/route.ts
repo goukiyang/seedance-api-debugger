@@ -395,6 +395,7 @@ function shouldIncludeActiveLibraryMedia(status: string) {
 }
 
 async function loadVideoItems(options: {
+  user: SessionUser;
   type: string;
   scope: string;
   enhance: string;
@@ -407,8 +408,7 @@ async function loadVideoItems(options: {
   limit: number;
   includeForMerge: boolean;
 }) {
-  const user = await getSession();
-  if (!user) throw new Error('missing_session');
+  const user = options.user;
 
   if (options.type !== 'all' && options.type !== 'video') {
     return { items: [] as LibraryItem[], total: 0 };
@@ -683,6 +683,7 @@ export async function GET(request: NextRequest) {
     const takeForMerge = page * limit;
     const [videoResult, assetResult, referenceResult] = await Promise.all([
       loadVideoItems({
+        user,
         type,
         scope,
         enhance,

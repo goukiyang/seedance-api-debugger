@@ -5267,10 +5267,15 @@ body.compare-fullscreen-open {
   transition: background-color 0.18s, border-color 0.18s, color 0.18s;
 }
 
-.shell-nav-link:hover {
+.shell-nav-link:hover,
+.shell-nav-link:active {
   background: oklch(0.965 0.012 245);
   border-color: oklch(0.9 0.022 245);
   color: oklch(0.42 0.13 255);
+}
+
+.shell-nav-link:active {
+  transform: translateY(1px);
 }
 
 .shell-nav-link.active {
@@ -6451,9 +6456,14 @@ body.compare-fullscreen-open {
   transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s, transform 0.15s;
 }
 
-.composer-topbar-nav-btn:hover {
+.composer-topbar-nav-btn:hover,
+.composer-topbar-nav-btn:active {
   color: oklch(0.98 0.004 255);
   background-color: rgba(255, 255, 255, 0.06);
+}
+
+.composer-topbar-nav-btn:active {
+  transform: translateY(1px);
 }
 
 .composer-topbar-nav-btn.active {
@@ -17302,6 +17312,8 @@ body.compare-fullscreen-open {
 .asset-library-group {
   display: grid;
   gap: 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 520px;
 }
 
 .asset-library-group h2 {
@@ -17409,6 +17421,7 @@ body.compare-fullscreen-open {
   border: 1px solid oklch(0.27 0.016 245);
   border-radius: 8px;
   background: oklch(0.12 0.008 250);
+  contain: layout paint style;
 }
 
 .asset-card-media img {

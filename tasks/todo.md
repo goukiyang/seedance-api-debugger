@@ -3,6 +3,7 @@
 ## 当前入口
 
 - [ ] 2026-08-13：Seedance 2.5 视频模型线上接入规划，正文见 `tasks/todo/2026-08-13-seedance-25-video-model.md`。
+- [ ] 2026-08-13：资产管理页面切换与点击卡顿优化，正文见 `tasks/todo/2026-08-13-assets-interaction-performance.md`。
 
 ## 最近状态
 
@@ -26,5 +27,6 @@
 - `tasks/todo/2026-08-11-sd2-video-download-delivery.md`：提交生成到稳定下载就绪优化
 - `tasks/todo/2026-08-12-admin-cost-audit-p2029.md`：后台成本审计 P2029 崩溃修复
 - `tasks/todo/2026-08-12-sd2-server-migration.md`：sd2 从 Mac 迁移到服务器闭环计划
+- `tasks/todo/2026-08-13-assets-interaction-performance.md`：资产管理页面切换与点击卡顿优化
 - `tasks/todo/2026-08-13-seedance-25-video-model.md`：Seedance 2.5 视频模型线上接入规划
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环

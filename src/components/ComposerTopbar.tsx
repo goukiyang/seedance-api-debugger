@@ -16,6 +16,7 @@ interface ComposerTopbarProps {
   user?: AccountMenuUser | null;
   loadingUser?: boolean;
   credits?: ComposerCreditSummary | null;
+  onSessionClear?: () => void;
 }
 
 function formatCredit(value: number | undefined) {
@@ -27,7 +28,12 @@ function isActivePath(pathname: string, item: typeof topbarQuickItems[number]) {
   return candidates.some((match) => pathname === match || (item.prefixMatch ? pathname.startsWith(`${match}/`) : false));
 }
 
-export default function ComposerTopbar({ user, loadingUser = false, credits }: ComposerTopbarProps) {
+export default function ComposerTopbar({
+  user,
+  loadingUser = false,
+  credits,
+  onSessionClear,
+}: ComposerTopbarProps) {
   const pathname = usePathname();
 
   return (
@@ -58,7 +64,12 @@ export default function ComposerTopbar({ user, loadingUser = false, credits }: C
           </div>
         )}
         <NotificationBell enabled={Boolean(user && !loadingUser)} />
-        <AccountMenu user={user} loading={loadingUser} variant="composer" />
+        <AccountMenu
+          user={user}
+          loading={loadingUser}
+          variant="composer"
+          onSessionClear={onSessionClear}
+        />
       </div>
     </header>
   );

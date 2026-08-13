@@ -20,6 +20,7 @@ interface AccountMenuProps {
   user?: AccountMenuUser | null;
   loading?: boolean;
   variant?: 'shell' | 'composer';
+  onSessionClear?: () => void;
 }
 
 function avatarLabel(user: AccountMenuUser | null | undefined, displayName: string | undefined) {
@@ -36,7 +37,12 @@ function roleLabel(user: AccountMenuUser | null | undefined) {
   return null;
 }
 
-export default function AccountMenu({ user, loading = false, variant = 'shell' }: AccountMenuProps) {
+export default function AccountMenu({
+  user,
+  loading = false,
+  variant = 'shell',
+  onSessionClear,
+}: AccountMenuProps) {
   const [loggingOut, setLoggingOut] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
@@ -58,6 +64,7 @@ export default function AccountMenu({ user, loading = false, variant = 'shell' }
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } finally {
+      onSessionClear?.();
       window.location.href = '/login';
     }
   };

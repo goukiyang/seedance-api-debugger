@@ -1,6 +1,7 @@
 const DB_NAME = 'sd2_asset_library_cache';
 const STORE_NAME = 'asset_library_pages';
 const DB_VERSION = 1;
+const CACHE_TTL_MS = 5 * 60_000;
 
 export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 1;
 
@@ -127,6 +128,7 @@ export async function readAssetLibraryCache<TItem, TPagination>(
 ) {
   const entry = await withStore<AssetLibraryCacheEntry<TItem, TPagination>>('readonly', (store) => store.get(key));
   if (!entry || entry.schemaVersion !== schemaVersion) return null;
+  if (Date.now() - entry.savedAt > CACHE_TTL_MS) return null;
   return entry.payload;
 }
 
@@ -143,6 +145,19 @@ export async function writeAssetLibraryCache<TItem, TPagination>(input: {
       schemaVersion: input.schemaVersion ?? ASSET_LIBRARY_CACHE_SCHEMA_VERSION,
       savedAt: Date.now(),
       payload: input.payload,
+    });
+  });
+}
+
+export async function deleteAssetLibraryCacheForUser(userId: string) {
+  const keys = await withStore<IDBValidKey[]>('readonly', (store) => store.getAllKeys());
+  if (!keys?.length) return;
+  const userKeyFragment = `|${userId}|`;
+  await withStore('readwrite', (store) => {
+    keys.forEach((key) => {
+      if (typeof key === 'string' && key.includes(userKeyFragment)) {
+        store.delete(key);
+      }
     });
   });
 }
