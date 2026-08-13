@@ -148,3 +148,97 @@ Thread ID：`019f44c6-64d3-7753-acd0-f31fc16763fb`
   - 后期未新增 Provider / 扣点：以六条源片最后一条扣点流水时间 `1784131818965` 为切点，只读查询 `VideoTask`、`CreditLedger`、`ProviderApiRequest` 均无新增记录，说明后期带声合成和四组合辑没有重新调用 Provider，也没有新增点数扣除。
 - 缺口：无阻塞缺口；仅保留正式投放前真人听感、品牌音乐/旁白、授权审查和投放剪辑节奏这几个非阻塞事项。
 - 建议下一步：执行线程可将第二至第四组带声预演片和四组合辑作为审核通过版本收口；如进入正式投放，补真人听感确认、品牌音频/旁白授权审查，并按投放渠道决定单条或合辑剪辑版本。
+
+### 2026-08-13 Seedance 2.5 视频模型入口规划风险项只读审查
+
+- 结论：不通过。
+- 审查对象：`tasks/todo/2026-08-13-seedance-25-video-model.md`，主题为“Seedance 2.5 视频模型入口规划的出错风险项是否闭环”。
+- 阻塞问题：
+  - 线上部署链路未闭环，且与当前项目规则冲突。规划 T8 仍要求执行 Mac 本地 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`restart sd2`，并检查 `sd2.youdoodesign.com`、`youdoo-sites status sd2`、LaunchAgent `runs`。但当前 `AGENTS.md` 明确规定正式生产入口是 `https://sd2.youdooart.com`，长期使用腾讯云 Ubuntu 服务器版，旧 `sd2.youdoodesign.com` / Mac Cloudflare Tunnel 不再作为生产入口；部署必须走本地 commit / rollback tag -> `git archive` -> 上传服务器 -> `/srv/video-api-debugger/releases/<commit>` -> `rsync` 到 `/srv/video-api-debugger/app` -> `NEXT_DIST_DIR=.next-prod-candidate npm run build` -> 切换 `.next-prod` -> 重启 `sd2-gray.service` -> 验证 `127.0.0.1:3302` 和公网 `sd2.youdooart.com`。当前规划没有按该服务器版规则写部署和验收，因此不能作为执行依据。
+- 已闭环风险项：
+  - 模型 ID 风险：规划写明新增模型 `dreamina-seedance-2-5-260628`，并保留稳定默认 `dreamina-seedance-2-0-260128`。
+  - 2.0 / 2.5 选择透传风险：T2/T3 要求 `/api/tasks/create`、`VideoTask.model`、`providerInput.model`、`ProviderApiRequest.requestPayload`、`taskParams`、返回 JSON 和 provider payload 使用同一个 `selectedModel`。
+  - 未知模型透传风险：T1/T7/R2 要求白名单解析，未知 `body.model` 回退默认或返回清晰 400，且 smoke 覆盖“未知模型不会透传”。
+  - 前端入口位置风险：T4/R1 明确入口必须放在 `/generate` 底部参数栏当前 `Seedance 2.0` chip 的下拉里，不新增页面、不新增顶部大按钮。
+  - `/api/config` / 无线画布同步风险：T6 要求 `/api/config` 返回 `model_options`，无线画布 `capabilities.video` 同步默认模型和允许模型列表，外部 API 说明也同步 2.0 / 2.5 白名单模型。
+  - 真实付费生成停止条件：T9 明确没有用户授权前不跑真实 Seedance 2.5 生成；授权后才用最小 4 秒、480p 样例并核对点数和成本闭环。
+  - Git 脏改隔离风险：T8 明确保护当前已有 `tasks/todo.md`、`tasks/todo/hygiene-log.md` 脏改，本轮改动用精确暂存、清晰 commit 并 push。
+  - 独立审核风险：R4 要求派给固定审核线程只读审查，并追加到 `tasks/audit-001-review.md` 后回执。
+- 未闭环或需修正风险项：
+  - 必须删除或改写 T8/R3 中旧 Mac `youdoo-sites`、`sd2.youdoodesign.com`、LaunchAgent `runs` 作为生产部署/验收依据的内容，改成当前服务器版 `sd2.youdooart.com`、`42.193.221.253`、`sd2-gray.service`、`/srv/video-api-debugger/app`、`.next-prod-candidate` 和公网资源/DOM 验证。
+  - 规划第 7 行同时写 `sd2.youdoodesign.com` / `sd2.youdooart.com` 当前生产服务，容易让执行线程把旧域名当生产入口；应改为只以 `sd2.youdooart.com` 为正式生产入口，旧域名最多作为迁移/停用状态确认。
+  - 服务器部署验收还缺明确的候选构建失败回滚条件和排除运行期产物清单引用；应在 T8 或 R3 中直接引用项目 `AGENTS.md` 的服务器部署规则，避免部署时覆盖 `.env`、`storage`、`public/uploads`、数据库和 `.next-prod`。
+- 非阻塞风险：
+  - 文档依据来自用户提供的动态文档链接，本轮只读审查未联网复核该文档当前内容；执行前如模型 ID 或接口字段有时效风险，应再由执行线程用官方/一手来源确认一次。
+  - T1 允许“未知模型自动回退默认或返回清晰 400”两种行为，安全性都可接受，但体验和测试期望应在实现前选定一种，避免前后端错误提示和 smoke 断言不一致。
+- 证据：
+  - `tasks/todo/2026-08-13-seedance-25-video-model.md:13-16` 写入模型白名单、2.0 默认、2.5 可选和未知模型不得透传。
+  - `tasks/todo/2026-08-13-seedance-25-video-model.md:18-26` 写入 `/api/tasks/create` 到 provider payload 的 `selectedModel` 一致性要求。
+  - `tasks/todo/2026-08-13-seedance-25-video-model.md:28-40` 写入底部模型 chip 入口、`/api/config`、无线画布和外部 API 同步要求。
+  - `tasks/todo/2026-08-13-seedance-25-video-model.md:42-56` 写入 mock smoke、未知模型不透传、保护脏改、真实付费生成需单独授权。
+  - `tasks/todo/2026-08-13-seedance-25-video-model.md:47-51` 仍写旧 Mac `youdoo-sites` 构建/重启、`sd2.youdoodesign.com`、LaunchAgent `runs`；`tasks/todo/2026-08-13-seedance-25-video-model.md:72-75` 的 R3 也仍以 `youdoo-sites build/restart/status sd2` 作为线上部署验收对象。
+  - `AGENTS.md:31-53` 明确当前生产链路为服务器版：`sd2.youdooart.com`、`42.193.221.253`、`sd2-gray.service`、`/srv/video-api-debugger/app`、`.next-prod-candidate` 构建和公网 `sd2.youdooart.com` 验证，并说明不再用 Mac `youdoo-sites` 当生产部署链路。
+  - `AGENTS.md:71-74` 再次要求用户可见页面/服务器版 sd2 改动必须按服务器生产托管规则完成，并用公网静态资源、DOM、截图或 API 响应证明新构建已加载。
+  - `git status --short --branch` 显示当前分支 `codex/video-delivery-fast-path...origin/codex/video-delivery-fast-path`，已有脏改为 `tasks/todo.md`、`tasks/todo/hygiene-log.md`；这与规划 T8 提到的脏改隔离对象一致。
+- 建议下一步：
+  - 先修正规划 T8/R3 和目标复述中的生产入口与部署链路，统一为服务器版 `sd2.youdooart.com`。
+  - 将部署步骤改为：本地形成 commit / rollback tag、`git archive` 上传服务器、解压 release、排除运行期产物 `rsync` 到 app、服务器候选构建 `.next-prod-candidate`、切换 `.next-prod`、重启 `sd2-gray.service`、验证服务器本地 `127.0.0.1:3302` 和公网 `https://sd2.youdooart.com`。
+  - 修正后再进入实现；实现完成后按 R1/R2/R3/R4 做只读复审，真实 2.5 付费生成继续等用户单独授权。
+
+### 2026-08-13 Seedance 2.5 视频模型入口实现与上线只读审核
+
+- 结论：不通过。
+- 审查对象：video-api-debugger / sd2 公开视频生成平台；代码审核路径 `/Volumes/Data/Projects/video-api-debugger-worktrees/seedance-25-video-model`；分支 `codex/seedance-25-video-model`；目标提交 `1889e015f1d5fb59686e99d7bb9ac0497e39fe82`；线上域名 `https://sd2.youdooart.com`。
+- 阻塞问题：
+  - 当前公网线上不可用，不能通过上线审核。只读复查时 `https://sd2.youdooart.com/api/config`、`https://sd2.youdooart.com/login`、`https://sd2.youdooart.com/generate` 均返回 `502 Bad Gateway`，响应头带 `X-SD2-Origin: server-42-193`，说明请求已到服务器入口但 nginx 上游不可用或服务未正常响应。该结果直接推翻“公网 `/api/config` 200、`/login` 200、`/generate` 静态 chunk 可验证”的上线证据。
+  - 本线程无法用 SSH 复核服务器本机状态：`ssh gouki@42.193.221.253 ...` 返回 `Permission denied (publickey)`，因此无法独立确认 `sd2-gray.service`、服务器 `.next-prod/BUILD_ID`、`127.0.0.1:3302` 和 live 静态资源状态。结合公网 502，线上证据不足以通过。
+- 已通过的代码层证据：
+  - 模型 ID 和白名单：`src/lib/provider/seedance-models.ts` 定义 `dreamina-seedance-2-0-260128` 为默认，`dreamina-seedance-2-5-260628` 为 2.5 选项；`parseSeedanceVideoModel` 对未知模型返回错误，不透传任意字符串。
+  - 入口位置：`GeneratePageClient` 对普通生成页传入 `SEEDANCE_VIDEO_MODEL_OPTIONS`，IP 页继续传入 `VOLCENGINE_IP_MODEL_OPTIONS`；`GenerationComposer` 将 `selectedModel` 放入提交参数；`ComposerActionBar` 在既有模型 chip 上渲染下拉选项，显示 label 和 detail。
+  - 后端校验和传递：`/api/tasks/create` 调用 `parseSeedanceVideoModel(body.model)`，将 `selectedModel` 写入 `providerInput.model`、snapshot `providerPayloadJson`、`taskParams.model`、`VideoTask.model`、`ProviderApiRequest.requestPayload` 和创建响应 `model`。
+  - Provider payload：`src/lib/provider/jimeng.ts` 使用 `resolveSeedanceVideoModel(input.model)` 构造 payload 的 `model`，不再固定只发 2.0；`getProviderConfig` 暴露默认模型和 `model_options`。
+  - 配置同步：`/api/config` 返回 `model_options`；ultimate-canvas bootstrap 的 `capabilities.video` 和 `interaction` 都暴露 `model_options`。
+  - 计费快照：`calculateEstimatedCost` 支持传入模型显示名，创建任务侧使用 `seedanceVideoModelLabel(selectedModel)`。
+- 已通过的本地只读验证：
+  - `npx tsx scripts/seedance-model-select-smoke.ts` 通过，输出 provider payload `Model: dreamina-seedance-2-5-260628`，并确认 2.5 options、未知模型拒绝、provider payload.model。
+  - `npx tsx scripts/volcengine-ip-generate-model-select-smoke.ts` 通过，说明火山 IP 生成页模型选项未被 Seedance 选项覆盖。
+  - `npx tsx scripts/provider-create-error-smoke.ts` 通过，保留 Provider 创建错误解析能力。
+  - `git diff --check` 通过。
+  - 本地 `.next-prod-candidate` 中能 grep 到 `Seedance 2.5` 与 `dreamina-seedance-2-5-260628`，但本地 candidate `BUILD_ID=7wzL5qsuw8gQnN5_H-bYJ`，不是工单给出的线上 `V4bDqseASHnQksHCbut8h`，不能替代 live 证据。
+- 版本和回滚证据：
+  - 当前 worktree HEAD 为 `55ea3926518a80bb2fa14875afa43aaee09307cc`，远端 `origin/codex/seedance-25-video-model` 也指向 `55ea392`，不是工单列出的目标提交 `1889e015...`。`1889e015` 仍是当前分支历史中的 Seedance 2.5 功能提交，后续 `55ea392` 是资产兼容修复提交。
+  - `rollback/2026-08-13-before-seedance-25-video-model^{}` 解析到 `7e82e80c1fe8b2c97dcfd0b1dea2a6b105de8042`，回滚点本地可见；远端 tag 也可见。
+  - `/Volumes/Data/Projects/project-version-registry.md` 记录了 Seedance 2.5 v0.9.59 和后续另一个同版本号的历史上传资源兼容修复版，版本登记存在同日同版本号复用，易造成定位混淆。
+- 缺口/风险：
+  - 线上 `502` 是阻塞缺口，必须先恢复服务并重新验证公网 `/api/config`、`/login`、`/generate`。
+  - 审核时 SSH 权限不可用，无法独立复核服务器 BUILD_ID、`sd2-gray.service`、3302 监听和服务器本机 `/api/config`；需要执行线程提供可复核输出或恢复审核线程 SSH 只读访问。
+  - 工单给的提交/BUILD_ID 与当前分支/本地 candidate/版本登记后续状态不一致；后续回执应明确当前线上到底审核 `1889e015` 还是包含 `55ea392` 的 HEAD，避免把旧证据冒充当前 live 状态。
+  - 未做真实付费生成本身不构成不通过；规划和 smoke 已证明不消耗点数的停止条件，真实扣费生成可继续等用户明确授权。
+- 建议下一步：
+  - 执行线程先修复服务器 502，确认 `sd2-gray.service` active、`NRestarts`、`/srv/video-api-debugger/app/.next-prod/BUILD_ID`、`127.0.0.1:3302/api/config` 和公网 `https://sd2.youdooart.com/api/config` 均正常。
+  - 重新提供当前 live HEAD、BUILD_ID、静态 chunk、rollback tag 和版本登记，明确是否以 `55ea392` 为最终审核版本。
+  - 恢复后再发固定只读复审；复审重点只需补线上可用性、BUILD_ID/静态 chunk 与当前 HEAD 对齐、`/api/config` model_options 和 `/generate` 入口可见。
+
+### 2026-08-13 Seedance 2.5 视频模型入口最终线上 HEAD 复核
+
+- 日期：2026-08-13
+- 审查对象：`video-api-debugger / sd2` Seedance 2.5 视频模型入口；功能提交 `1889e015f1d5fb59686e99d7bb9ac0497e39fe82`，当前最终线上 HEAD `55ea3926518a80bb2fa14875afa43aaee09307cc`
+- 结论：通过
+- 阻塞问题：无。本轮复核确认此前因公网 502 和线上 HEAD 记录不一致导致的不通过项已闭环；当前公网 API 与登录入口恢复，最终线上 HEAD 与远端分支、版本登记已对齐。
+- 非阻塞风险：
+  - 本审核线程 SSH 到 `42.193.221.253` 仍返回 `Permission denied (publickey)`，因此未能独立读取服务器本机 `sd2-gray.service`、`.next-prod/BUILD_ID` 和 live 静态 chunk；本结论基于公网 HTTP 证据、Git/registry 证据、当前 HEAD smoke 证据，以及执行线程补充的服务器本机证据综合判断。
+  - 未做真实付费生成，符合本轮“不执行真实付费生成”的停止条件；后续若要确认 2.5 官方端真实出片，需要用户单独授权消耗点数。
+  - 登录态 `/generate` DOM 自动读取仍不是本审核线程的独立证据；当前以公网 `/api/config`、同源 `/login`、匿名 `/generate` 跳转、smoke 与静态资源命中证据替代。后续如需更强 UI 证据，应补一次真实登录浏览器验收。
+  - `/Volumes/Data/Projects/project-version-registry.md` 存在同为 `v0.9.59` 的历史上传资源兼容记录，最新顶部记录已澄清 Seedance 功能提交、最终线上 HEAD 和 BUILD_ID；建议后续版本登记避免复用同一版本号造成审计混淆。
+- 证据：
+  - Git 本地状态为 `codex/seedance-25-video-model...origin/codex/seedance-25-video-model` 且干净；本地 `HEAD` 为 `55ea3926518a80bb2fa14875afa43aaee09307cc`。
+  - 最近提交链为 `55ea392 fix(assets): 兼容服务器域名下的历史上传资源` 在 `1889e01 feat: 接入 Seedance 2.5 视频模型入口` 之后；`git diff --name-status 1889e015...55ea392` 仅涉及资产 URL、历史上传、reference image content、workspace/template 资产兼容与对应 smoke 脚本，未见 Seedance 模型选择、任务创建、provider payload 或 `/api/config` 链路文件被二次改动。
+  - 远端 `origin/codex/seedance-25-video-model` 指向 `55ea3926518a80bb2fa14875afa43aaee09307cc`；rollback tag `rollback/2026-08-13-before-seedance-25-video-model^{}` 指向 `7e82e80c1fe8b2c97dcfd0b1dea2a6b105de8042`，远端 tag peeled 结果一致。
+  - 当前 HEAD 复跑 `npx tsx scripts/seedance-model-select-smoke.ts` 通过，输出确认 `provider payload.model=dreamina-seedance-2-5-260628`、2.5 options 存在、未知模型拒绝逻辑仍有效。
+  - 公网 `https://sd2.youdooart.com/api/config` 返回 `HTTP/1.1 200 OK`，响应头包含 `X-SD2-Origin: server-42-193`，响应 JSON 检查确认包含 `dreamina-seedance-2-5-260628`。
+  - 公网 `https://sd2.youdooart.com/login` 返回 `HTTP/1.1 200 OK` 且同样带 `X-SD2-Origin: server-42-193`；匿名访问 `https://sd2.youdooart.com/generate` 返回 `307 Temporary Redirect` 到同域 `/login?next=%2Fgenerate`，符合未登录访问生成页的预期。
+  - `/Volumes/Data/Projects/project-version-registry.md` 顶部 v0.9.59 记录已写明 Seedance 功能提交 `1889e015...`、当前最终线上 HEAD `55ea392...`、rollback tag `7e82e80...`、线上 BUILD_ID `xohpDio2xK39wmKoojg8E`、目标域名 `https://sd2.youdooart.com`、服务 `sd2-gray.service`，并保留 Seedance 2.5 模型 ID 与验证摘要。
+- 建议下一步：
+  - 可以把本轮 Seedance 2.5 模型入口视为“代码链路 + Git/rollback + 公网可用性”审核通过，继续后续产品验收或发布收口。
+  - 若进入最终发布证明阶段，建议补一次有登录态的 `/generate` 页面 DOM/截图验收，确认底部模型 chip 在真实页面可见且默认仍为 Seedance 2.0。
+  - 若要做真实 2.5 生成闭环，必须另行获得用户明确授权后再消耗点数。
