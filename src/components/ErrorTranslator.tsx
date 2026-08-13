@@ -70,7 +70,12 @@ interface TranslatedError {
   debugInfo?: DebugInfo;
 }
 
-function translateError(error: string, debugInfo?: DebugInfo): TranslatedError | null {
+function hasStatusCodeToken(error: string, code: number) {
+  const pattern = new RegExp(`(^|\\D)${code}(?!\\d)`);
+  return pattern.test(error);
+}
+
+export function translateError(error: string, debugInfo?: DebugInfo): TranslatedError | null {
   const lower = error.toLowerCase();
   const ctx = debugInfo?.providerContext;
   const diags = debugInfo?.referenceImageDiagnostics;
@@ -92,6 +97,66 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
       reasons: [
         '这不是系统整体故障，是当前某个参考图片或视频分辨率低于生成服务要求',
         '请换更清晰的素材，或先放大、重新导出后再提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_video_duration_unsupported')
+    || (lower.includes('参考视频') && lower.includes('时长'))
+  ) {
+    return {
+      code: 'REFERENCE_VIDEO_DURATION_UNSUPPORTED',
+      title: '参考视频时长不符合要求',
+      reasons: [
+        '这不是 API Key 或点数问题，是当前参考视频时长超过了生成服务允许范围',
+        'Seedance 2.0 参考视频需要 2-15 秒；请把视频裁到 15 秒以内后重新上传',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_audio_duration_unsupported')
+    || (lower.includes('参考音频') && lower.includes('时长'))
+  ) {
+    return {
+      code: 'REFERENCE_AUDIO_DURATION_UNSUPPORTED',
+      title: '参考音频时长不符合要求',
+      reasons: [
+        '这不是 API Key 或点数问题，是当前参考音频时长超过了生成服务允许范围',
+        'Seedance 2.0 参考音频需要 2-15 秒；请裁剪后重新上传',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_video_format_unsupported')
+    || (lower.includes('参考视频') && lower.includes('格式'))
+  ) {
+    return {
+      code: 'REFERENCE_VIDEO_FORMAT_UNSUPPORTED',
+      title: '参考视频格式不符合要求',
+      reasons: [
+        '当前参考视频格式不适合直接用于 Seedance 2.0 生成',
+        '请转成 MP4 或 MOV 后重新上传',
       ],
       actions: [
         { label: '重新提交', action: 'retry' },
@@ -150,7 +215,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 524 超时 — 重点处理
-  if (error.includes('524') || lower.includes('524') || ctx?.httpStatus === 524) {
+  if (hasStatusCodeToken(error, 524) || ctx?.httpStatus === 524) {
     const reasons: string[] = [];
     if (hasLocalUrls) {
       reasons.push('参考图中包含本地图片（需转 base64），大图导致 JSON payload 过大 → 网关超时');
@@ -183,7 +248,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 554 错误
-  if (error.includes('554') || lower.includes('554')) {
+  if (hasStatusCodeToken(error, 554) || ctx?.httpStatus === 554) {
     return {
       code: '554',
       title: '服务返回错误 (554)',
@@ -203,7 +268,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 401 未授权
-  if (error.includes('401') || lower.includes('unauthorized') || lower.includes('未授权')) {
+  if (hasStatusCodeToken(error, 401) || ctx?.httpStatus === 401 || lower.includes('unauthorized') || lower.includes('未授权')) {
     return {
       code: '401',
       title: 'API 认证失败',
@@ -218,7 +283,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 403 禁止
-  if (error.includes('403') || lower.includes('forbidden') || lower.includes('禁止')) {
+  if (hasStatusCodeToken(error, 403) || ctx?.httpStatus === 403 || lower.includes('forbidden') || lower.includes('禁止')) {
     return {
       code: '403',
       title: 'API 访问被拒绝',
@@ -233,7 +298,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 429 限流
-  if (error.includes('429') || lower.includes('rate limit') || lower.includes('限流')) {
+  if (hasStatusCodeToken(error, 429) || ctx?.httpStatus === 429 || lower.includes('rate limit') || lower.includes('限流')) {
     return {
       code: '429',
       title: '请求过于频繁',
