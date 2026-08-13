@@ -28,26 +28,29 @@
 - `typecheck`：当前未发现独立脚本
 - `test`：当前未发现通用测试脚本；仅发现 `npm run test:api`，该脚本面向 Seedance 外部接口调试，不应默认作为本地回归测试执行
 - `build`：`npm run build`
-- `sd2` 线上构建：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`
-- `sd2` 线上重启：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2`
-- `sd2` 线上状态：`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`
+- `sd2` 服务器状态：`ssh gouki@42.193.221.253 'systemctl is-active sd2-gray.service && curl -sS http://127.0.0.1:3302/api/config'`
+- `sd2` 公网验证：`curl -sS -D - https://sd2.youdooart.com/api/config -o /tmp/sd2-public-config.json`
+- `sd2` 服务器部署：按本文件“sd2 服务器生产托管规则”执行本地提交、归档上传、候选构建、服务重启、公网验证和回滚保护；不再用 Mac `youdoo-sites` 当生产部署链路
 - 数据库相关脚本：`npm run db:generate`、`npm run db:push`、`npm run db:studio`，默认不得执行会修改数据库状态的命令
 
-## sd2 线上托管规则
+## sd2 服务器生产托管规则
 
-- 当前 `sd2.youdoodesign.com` 生产来源是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，公网入口经 Cloudflare Tunnel 转到本机 `127.0.0.1:3000`，LaunchAgent 是 `com.youdoo.site.sd2`。
-- 线上部署不得直接运行 `NEXT_DIST_DIR=.next-prod npm run build`、`rm -rf .next-prod`、手动覆盖 `.next-prod`，也不得让构建过程直接写 live `.next-prod`。这会在构建期间删除生产构建产物，导致 tunnel 打到 `127.0.0.1:3000` 时出现 `connect refused` / `502`。
-- 线上构建必须使用 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`。该命令应调用 `/Users/gouki-youdoo/.youdoo/runtime/sd2-3000-build.sh`，先构建 `.next-prod-candidate`，验证 `BUILD_ID`、`prerender-manifest.json`、`server/pages-manifest.json` 后，再替换 live `.next-prod`。
-- `sd2` 启动必须走 `/Users/gouki-youdoo/.youdoo/runtime/sd2-3000-start.sh`；不得把 LaunchAgent 改回裸 `next start`，除非同时保留生产构建关键文件检查和缺失时的安全构建逻辑。
-- 常规恢复优先使用 `youdoo-sites restart sd2` 或 `youdoo-sites heal sd2`；不要把 `launchctl bootout/bootstrap` 当作普通重启方式。确需重载 LaunchAgent 时，重载后必须立即验证 `launchctl print gui/$(id -u)/com.youdoo.site.sd2`、端口监听、本地 health 和公网 health。
-- 每次涉及 `sd2` 部署、构建脚本、LaunchAgent、`sites.json` 或公网可见页面改动后，必须验证：
-  - `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites status sd2`
-  - `curl http://127.0.0.1:3000/api/config`
-  - `curl https://sd2.youdoodesign.com/api/config`
-  - `curl https://sd2.youdoodesign.com/login`
-  - `launchctl print ...` 中 `runs` 没有在健康守护周期内继续增长
-- 验证必须至少跨过一个健康守护周期：等待约 70 秒后再次检查 `youdoo-sites status sd2` 和 `runs`。只看到瞬时 200 不算完成。
-- 如果公网出现 `502`、Cloudflare 日志出现 `127.0.0.1:3000 connect refused`，先检查 `runs`、`.next-prod/BUILD_ID`、本地 `/api/config` 和 `/tmp/youdoo-sites-health.*.log`；不要先归因 DNS、Cloudflare 或“端口被挤掉”。
+- 当前正式生产入口是 `https://sd2.youdooart.com`，长期使用腾讯云 Ubuntu 服务器版。旧 `sd2.youdoodesign.com` / Mac 本地 Cloudflare Tunnel 入口不再作为生产入口；除非用户明确要求回滚或排查旧入口，不得重启 Mac 本地 `sd2` 当作恢复手段。
+- `sd2.youdooart.com` 必须直接打开服务器网站，不得用跳转临时代替。飞书 OAuth、回调地址、登录后跳转地址和前端公开域名配置都必须以 `sd2.youdooart.com` 为准；登录后跳回旧域名时，按配置错误处理。
+- 服务器默认是 `42.193.221.253:22`，普通操作用户 `gouki`；线上 nginx 反代到 `127.0.0.1:3302`，systemd 服务名 `sd2-gray.service`，服务器应用目录 `/srv/video-api-debugger/app`，公网响应应能看到 `X-SD2-Origin: server-42-193` 这类服务器来源标记。
+- 本地部署源默认是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，当前生产工作分支是 `codex/video-delivery-fast-path`。服务器目录里的 `.git` 不作为可信部署来源；不要默认在服务器上 `git pull`。
+- 服务器部署必须按 `server-deploy-closure` 思路执行：本地形成可追溯 commit / rollback tag -> 用 `git archive` 打包当前提交 -> 上传到服务器 `/tmp` -> 解压到 `/srv/video-api-debugger/releases/<commit>` -> `rsync -a --delete` 到 `/srv/video-api-debugger/app`。
+- 上传或同步服务器源码时必须排除 `.env`、`node_modules`、`.next`、`.next-prod`、`storage`、`public/uploads`、数据库文件、上传资产和其他运行期产物，避免覆盖密钥、现有视频、截图、用户上传和生产构建。
+- `sd2-gray.service` 使用 `NEXT_DIST_DIR=.next-prod`。普通 `npm run build` 只会更新 `.next`，不代表线上生效；服务器生产构建必须用 `NEXT_DIST_DIR=.next-prod-candidate npm run build`，验证 `BUILD_ID` 和预期变更后，再把 `.next-prod-candidate` 切换成 `.next-prod`。
+- 不得直接删除或原地构建 live `.next-prod`。切换前保留 `.next-prod-prev` 或等价回退目录；候选构建失败、候选内容不含预期变更、重启失败或公网仍是旧版本时，必须恢复上一版并停止报告。
+- 每次涉及 `sd2` 服务器部署、登录域名、nginx、systemd、构建目录、公开 API、用户可见页面或静态资源改动后，至少验证：
+  - `ssh gouki@42.193.221.253 'systemctl is-active sd2-gray.service'`
+  - `ssh gouki@42.193.221.253 'cd /srv/video-api-debugger/app && cat .next-prod/BUILD_ID'`
+  - `ssh gouki@42.193.221.253 'curl -sS -D - http://127.0.0.1:3302/api/config -o /tmp/sd2-local-config.json'`
+  - `curl -sS -D - https://sd2.youdooart.com/api/config -o /tmp/sd2-public-config.json`
+  - `curl -sS -D - https://sd2.youdooart.com/login -o /tmp/sd2-login.html`
+  - 前端改动还要验证公网 `_next/static/...` 资源、页面 DOM、截图或真实登录页面已加载新构建
+- `sd2.youdoodesign.com` 的状态只能用于确认旧入口已停用或迁移，不得把它的健康状态当成当前服务器生产站结论。以后排查“线上没生效 / 无法登录 / 生成失败 / 视频下载失败”时，默认先查服务器链路、`sd2-gray.service`、`127.0.0.1:3302` 和 `sd2.youdooart.com`。
 
 ## UI 规则
 
@@ -66,9 +69,9 @@
 - 每次只处理当前任务，不顺手重构、不扩大范围、不隐式改变业务规则。
 - 修改后执行任务要求的验证命令；如命令缺失、环境缺失或用户明确禁止执行，应在汇报中如实说明。
 - 完成任何用户可见页面、UI、样式或交互改动后，默认完成标准是刷新当前目标页面即可看到新效果；不能只停在本地代码、构建、Git 提交或远端可见。
-- 如果当前目标是 `sd2.youdoodesign.com` 或本机 `youdoo-sites` 管理的公开页面，除非用户明确要求“只做本地/只做代码”，否则必须执行 `youdoo-sites build sd2`、`youdoo-sites restart sd2`，再从公网 URL、静态资源、DOM/截图或 API 响应验证新构建已加载。
-- 用户反馈线上 `sd2.youdoodesign.com`、当前浏览器页面或已发布页面仍未生效时，必须把线上部署作为任务范围：检查 `.next-prod/BUILD_ID`、执行 `youdoo-sites build sd2` 和 `youdoo-sites restart sd2`，再从公网 URL 验证新静态资源、关键 CSS/JS 文案或页面行为。
-- `youdoo-sites status sd2` 只能证明服务健康，不能证明代码已更新；完成线上 UI 修复时必须额外用公网 `_next/static/...` 资源、页面 DOM/截图或 API 响应证明新构建已加载。
+- 如果当前目标是 `sd2.youdooart.com` 或服务器版 `sd2`，除非用户明确要求“只做本地/只做代码”，否则必须按“sd2 服务器生产托管规则”完成服务器候选构建、`sd2-gray.service` 重启、公网 URL、静态资源、DOM/截图或 API 响应验证。
+- 用户反馈线上 `sd2.youdooart.com`、当前浏览器页面或已发布页面仍未生效时，必须把服务器部署作为任务范围：检查服务器 `/srv/video-api-debugger/app/.next-prod/BUILD_ID`、`sd2-gray.service`、`127.0.0.1:3302`、nginx 和公网 `https://sd2.youdooart.com`，不要回到 Mac `youdoo-sites` 链路。
+- `systemctl is-active sd2-gray.service` 只能证明服务进程健康，不能证明代码已更新；完成线上 UI 修复时必须额外用公网 `_next/static/...` 资源、页面 DOM/截图或 API 响应证明新构建已加载。
 - 发现已有未提交改动时，不回滚、不覆盖非本轮产生的变更；若影响本轮任务，应先说明冲突和处理方式。
 - 输出汇报时明确列出实际修改文件、验证命令、验证结果、风险与遗留问题。
 
