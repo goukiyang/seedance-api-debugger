@@ -1,16 +1,22 @@
 /**
- * Seedance 2.0 Video Generation API Provider
+ * Seedance Video Generation API Provider
  * 
  * 按官方 Step1/Step2 结构设计：
  * - Step1: create task → 只返回 id
  * - Step2: query status → 返回完整结果含 video_url
  * 
- * Model: dreamina-seedance-2-0-260128
+ * Default model: dreamina-seedance-2-0-260128
  * Docs: https://docs.byteplus.com/en/docs/ModelArk/1520757
  */
 
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
 import { normalizeProviderErrorMessage } from './error-message';
+import {
+  DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+  SEEDANCE_VIDEO_MODEL_OPTIONS,
+  resolveSeedanceVideoModel,
+  type SeedanceVideoModelOption,
+} from './seedance-models';
 
 // ============================================================================
 // Environment Configuration
@@ -126,13 +132,15 @@ export function buildProviderHttpErrorStatus(
 export interface SeedanceConfig {
   baseUrl: string;
   model: string;
+  model_options: SeedanceVideoModelOption[];
   apiKeyMasked: string;
 }
 
 export function getProviderConfig(): SeedanceConfig {
   return {
     baseUrl: SEEDANCE_BASE_URL,
-    model: 'dreamina-seedance-2-0-260128',
+    model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+    model_options: SEEDANCE_VIDEO_MODEL_OPTIONS,
     apiKeyMasked: maskKey(SEEDANCE_API_KEY),
   };
 }
@@ -309,7 +317,7 @@ export async function createVideoTask(
   }
 
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
-  const model = 'dreamina-seedance-2-0-260128';
+  const model = resolveSeedanceVideoModel(input.model);
 
   // 构建 content 数组
   const content = buildContentArray(input);

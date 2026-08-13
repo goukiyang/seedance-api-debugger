@@ -4,7 +4,7 @@
 
 给线上 sd2 服务器版本增加 Seedance 2.5 视频模型。用户在生成页底部参数栏点击当前的 `Seedance 2.0` 模型 chip 时，可以选择 `Seedance 2.5`；提交后后端必须真的把 2.5 模型 ID 发给 Seedance Provider，任务记录、后台产出、成本和无线画布能力都能看到实际模型，不允许页面显示 2.5 但后台仍跑 2.0。
 
-本轮落点固定为 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，完成后必须部署到线上 `sd2.youdoodesign.com` / `sd2.youdooart.com` 当前生产服务。当前规划不授权真实付费生成；真实 2.5 生成验收需用户另行明确授权。
+本轮落点固定为 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，完成后必须部署到线上服务器版 `https://sd2.youdooart.com` 当前生产服务。旧 `sd2.youdoodesign.com` 只用于确认迁移/停用状态，不能作为本轮生产入口。当前规划不授权真实付费生成；真实 2.5 生成验收需用户另行明确授权。
 
 文档依据：用户提供的 `https://model.seedance-api.net/docs?menu=apiSeedance25`。该动态文档中 `ApiSeedance25` 与 `ApiSeedance25FullFeatured` 样例继续使用 `/server/api/call` 和 `/server/api/getResult`，请求字段沿用 `apiKey`、`content`、`generate_audio`、`ratio`、`duration`、`watermark`、`resolution`、`model`、`clientRequestId`；2.5 查询结果返回模型 `dreamina-seedance-2-5-260628`，Full-Featured 请求样例也直接使用该模型 ID。
 
@@ -44,11 +44,12 @@
   - 覆盖点：前端普通生成页传 `modelOptions`；后端读取 `body.model`；任务创建、provider payload 和日志摘要都使用 `selectedModel`；未知模型不会透传。
   - 完成标准：测试不调用真实 Provider，不消耗点数。
 
-- [ ] T8. 本地验证、Git、线上部署
+- [ ] T8. 本地验证、Git、服务器线上部署
   - 验证命令：`npx tsx scripts/seedance-model-select-smoke.ts`、相关 provider mock smoke、`npm run lint`、`npm run build`。
   - Git：保护当前已有 `tasks/todo.md`、`tasks/todo/hygiene-log.md` 脏改；本轮改动用精确暂存，形成清晰 commit 并 push。
-  - 部署：执行 `/Users/gouki-youdoo/.youdoo/bin/youdoo-sites build sd2`、`/Users/gouki-youdoo/.youdoo/bin/youdoo-sites restart sd2`。
-  - 公网验证：检查 `https://sd2.youdoodesign.com/api/config` 和 `https://sd2.youdooart.com/api/config` 返回模型列表；检查 `https://sd2.youdooart.com/generate` 的前端资源或 DOM 包含 `Seedance 2.5`；等待约 70 秒后再次确认 `youdoo-sites status sd2` 和 LaunchAgent `runs` 没异常增长。
+  - 服务器部署：按项目 `AGENTS.md` 的服务器生产托管规则执行；本地 commit / rollback tag 后，用 `git archive` 打包当前提交，上传到 `42.193.221.253`，解压到 `/srv/video-api-debugger/releases/<commit>`，排除 `.env`、`node_modules`、`.next`、`.next-prod`、`storage`、`public/uploads`、数据库和运行期产物，`rsync` 到 `/srv/video-api-debugger/app`。
+  - 候选构建：服务器上用 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 构建候选版本；候选构建失败、候选内容不含 `Seedance 2.5`、重启失败或公网仍是旧版本时，恢复上一版并停止。
+  - 公网验证：重启 `sd2-gray.service` 后，检查服务器本地 `http://127.0.0.1:3302/api/config` 和公网 `https://sd2.youdooart.com/api/config` 返回模型列表；检查 `https://sd2.youdooart.com/generate` 的前端资源、DOM 或截图包含 `Seedance 2.5`；确认公网响应带服务器来源标记且服务稳定。
 
 - [ ] T9. 真实 2.5 生成验收（需要单独授权）
   - 停止条件：没有用户明确授权真实扣费前，不跑真实 Seedance 2.5 生成。
@@ -70,9 +71,9 @@
   - 证据来源：mock fetch smoke、任务创建代码、必要时数据库只读查询。
 
 - [ ] R3. 线上部署验收
-  - 检查对象：`youdoo-sites build/restart/status sd2`、公网 `/api/config`、公网 `/generate`。
-  - 通过标准：新构建已加载，公网可见 2.5 模型选项；健康守护周期后服务仍稳定。
-  - 证据来源：命令输出、公网 HTTP 响应、静态资源或 DOM 证据。
+  - 检查对象：服务器 `/srv/video-api-debugger/app`、`.next-prod/BUILD_ID`、`sd2-gray.service`、`127.0.0.1:3302`、公网 `https://sd2.youdooart.com/api/config` 和 `/generate`。
+  - 通过标准：服务器候选构建已切换为生产 `.next-prod`，公网可见 2.5 模型选项；服务重启后稳定，公网不再加载旧构建。
+  - 证据来源：服务器命令输出、公网 HTTP 响应、静态资源、DOM 或截图证据。
 
 - [ ] R4. 固定审核线程只读审查
   - 检查对象：全部实现 diff、测试结果、Git 状态、线上证据。

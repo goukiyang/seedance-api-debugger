@@ -41,8 +41,8 @@ assert.ok(
   'IP generate client should reuse the shared official Volcengine IP model list',
 );
 assert.ok(
-  generateClientSource.includes('modelOptions={isIpSurface ? VOLCENGINE_IP_MODEL_OPTIONS : []}'),
-  'Only the IP surface should receive model options',
+  generateClientSource.includes('modelOptions={isIpSurface ? VOLCENGINE_IP_MODEL_OPTIONS : SEEDANCE_VIDEO_MODEL_OPTIONS}'),
+  'IP surface should keep Volcengine IP model options while standard generation receives Seedance video model options',
 );
 assert.match(
   generateClientSource,

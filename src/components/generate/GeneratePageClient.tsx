@@ -18,6 +18,7 @@ import {
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
+import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
 
 // ============================================================================
 // Types
@@ -1861,7 +1862,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           resultReturnTo={surfaceConfig.routePath}
           submitDisabledReason={surfaceConfig.submitDisabledReason}
           modelLabel={surfaceConfig.modelLabel}
-          modelOptions={isIpSurface ? VOLCENGINE_IP_MODEL_OPTIONS : []}
+          modelOptions={isIpSurface ? VOLCENGINE_IP_MODEL_OPTIONS : SEEDANCE_VIDEO_MODEL_OPTIONS}
         />
 
         {/* 最近任务 */}

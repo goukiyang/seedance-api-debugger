@@ -1,6 +1,6 @@
 # SD2 视频生成 API 外部接入说明
 
-本文面向外部系统接入方，说明如何通过 SD2 后台配置的 API token 调用 Seedance 2.0 视频生成能力，并让生成任务、点数扣费、成本记录和后台审计进入同一套 SD2 管理系统。
+本文面向外部系统接入方，说明如何通过 SD2 后台配置的 API token 调用 Seedance 2.0 / 2.5 视频生成能力，并让生成任务、点数扣费、成本记录和后台审计进入同一套 SD2 管理系统。
 
 ## 1. 接入范围
 
@@ -226,6 +226,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
   -d '{
     "prompt": "A clean cinematic product shot of a white sneaker rotating on a glass platform, soft studio light.",
     "generation_mode": "all_in_one_reference",
+    "model": "dreamina-seedance-2-0-260128",
     "ratio": "16:9",
     "duration": 5,
     "resolution": "720p",
@@ -392,6 +393,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 |---|---|---|
 | `prompt` | string | 视频提示词，不能为空 |
 | `generation_mode` | string | 生成模式，默认可用 `all_in_one_reference` |
+| `model` | string | 可选；不传时默认 `dreamina-seedance-2-0-260128` |
 | `ratio` | string | 画幅比例 |
 | `duration` | number | 视频时长，单位秒 |
 | `resolution` | string | 分辨率 |
@@ -401,6 +403,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 | 字段 | 可选值 |
 |---|---|
 | `generation_mode` | `all_in_one_reference`, `first_last_frame`, `smart_multi_frame` |
+| `model` | `dreamina-seedance-2-0-260128`, `dreamina-seedance-2-5-260628` |
 | `ratio` | `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16` |
 | `duration` | `4` 到 `15` |
 | `resolution` | `480p`, `720p`, `1080p` |
