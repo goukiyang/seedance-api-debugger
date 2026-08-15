@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [ ] 2026-08-15：H3 API 接入现有视频生成链路，正文见 `tasks/todo/2026-08-15-h3-api-integration.md`。
 - [ ] 2026-08-13：Seedance 2.5 视频模型线上接入规划，正文见 `tasks/todo/2026-08-13-seedance-25-video-model.md`。
 - [ ] 2026-08-13：资产管理页面切换与点击卡顿优化，正文见 `tasks/todo/2026-08-13-assets-interaction-performance.md`。
 
@@ -29,4 +30,5 @@
 - `tasks/todo/2026-08-12-sd2-server-migration.md`：sd2 从 Mac 迁移到服务器闭环计划
 - `tasks/todo/2026-08-13-assets-interaction-performance.md`：资产管理页面切换与点击卡顿优化
 - `tasks/todo/2026-08-13-seedance-25-video-model.md`：Seedance 2.5 视频模型线上接入规划
+- `tasks/todo/2026-08-15-h3-api-integration.md`：H3 API 接入现有视频生成链路
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环

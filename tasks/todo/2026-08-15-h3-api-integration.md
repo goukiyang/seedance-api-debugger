@@ -1,0 +1,237 @@
+# H3 API 接入现有视频生成链路
+
+> **For Codex:** 执行本计划时先读取 `${CODEX_HOME:-$HOME/.codex}/skills/executing-plans/SKILL.md`，并按任务逐项落地。
+
+## 1. 大白话目标复述
+
+这次要把 `/Volumes/Data/Downloads/Current/EXTERNAL_AGENT_API_GUIDE.md` 里的 H3 视频生成 API 接进 sd2 当前系统。普通用户不需要进入新的 H3 页面，而是在现有生成页把生成引擎切到「H3 本地工作站」；管理员在后台集成页配置 H3 API 地址、token、预设和队列状态。完成后，H3 任务必须进入现有 `VideoTask`、项目产出、状态轮询、结果缓存、缩略图、成本/记录和部署闭环，不允许成为一套孤立系统。
+
+## 2. 关键产品和技术决策
+
+- [ ] D1. 用户入口不新增顶部导航页面
+  - 普通生成入口仍是 `/generate`。
+  - 模板生成后续走 `/template-generate` 同一套生成引擎选择。
+  - 无线画布后续作为节点能力接入，不作为第一入口。
+
+- [ ] D2. 后台入口放在 `/admin/integrations`
+  - 新增「H3 本地生成服务」配置卡。
+  - 管理员 token 只存在服务端配置和后端调用里，不进入浏览器。
+
+- [ ] D3. 第一版不引入外部 Comfy 前端或 SDK
+  - 不接 ViewComfy、Kitchen ComfyUI、ComfyUI 前端。
+  - 不直接调用 worker 或 ComfyUI。
+  - 直接按 H3 gateway 的 `/api/h3/*` 写薄 adapter，减少依赖和页面混乱。
+
+- [ ] D4. H3 素材处理规则
+  - 首帧、尾帧、参考图先进入我们现有资产库。
+  - 后端读取图片字节，转 `base64` 调 H3 `/api/h3/inputs/images`。
+  - H3 返回的图片文件名再写入 `first_frame` / `last_frame`。
+  - 多余参考图第一版只转成提示词上下文，不假装 H3 已支持多图。
+  - 参考视频第一版不直传 H3；只作为上下文或后续等待 H3 新字段。
+  - 音频文件第一版不直传 H3；只支持 `audio_prompt` / `music_prompt` 文本。
+
+- [ ] D5. 真实生成前先做无成本 mock 验证
+  - 未得到明确授权前，不发起真实 H3 生成。
+  - 先用 mock fetch / mock adapter 证明：前端选择、后端入参、任务落库、provider payload、状态映射、结果缓存路径全部连通。
+
+## 3. 具体可执行任务
+
+- [ ] T0. 锁定 H3 接入前置条件
+  - 检查对象：`/Volumes/Data/Downloads/Current/EXTERNAL_AGENT_API_GUIDE.md`、`https://sd2.youdooart.com` 生产目标、服务器到 H3 公网 API 的可达性。
+  - 要确认：H3 公网 API 地址、`H3_API_TOKEN`、`H3_ADMIN_TOKEN`、默认 preset、队列上限、真实生成是否允许消耗本地算力。
+  - 完成标准：形成一份不包含 token 明文的接入参数摘要，明确 H3 是否可从 sd2 服务器访问。
+  - 停止条件：H3 只有 `127.0.0.1:8893` 且服务器无法访问时，不开放用户入口。
+
+- [ ] T1. 新增 H3 后台配置模型
+  - 创建：`src/lib/integrations/h3.ts`
+  - 创建：`src/app/api/admin/integrations/h3/route.ts`
+  - 修改：`src/app/admin/integrations/AdminIntegrationsClient.tsx`
+  - 内容：
+    - 配置字段：`enabled`、`base_url`、`api_token`、`admin_token`、`default_preset_id`。
+    - 安全 DTO：只返回 `api_token_configured`、`admin_token_configured`，不返回 token 明文。
+    - 支持保存、清空 token、健康检查、读取 presets。
+    - 操作写 `operationLog`，记录谁改了 H3 配置。
+  - 验证：新增 `scripts/h3-admin-settings-smoke.ts`，覆盖保存、读取、清空 token、安全 DTO 不泄漏 token。
+
+- [ ] T2. 新增 H3 provider adapter
+  - 创建：`src/lib/provider/h3.ts`
+  - 内容：
+    - `getH3Health`
+    - `listH3Presets`
+    - `uploadH3ReferenceImage`
+    - `createH3VideoJob`
+    - `getH3JobStatus`
+    - `listH3JobOutputs`
+    - `downloadH3JobOutput`
+    - 统一处理 400/401/403/404/502/503、`Retry-After`、超时和 AbortSignal。
+  - 验证：新增 `scripts/h3-provider-adapter-smoke.ts`，用 mock fetch 断言 URL、Header、payload、错误转换和 token 不被写入日志。
+
+- [ ] T3. 新增 H3 provider 状态映射
+  - 修改：`src/lib/provider/video-task-status.ts`
+  - 内容：
+    - 新增常量 `VIDEO_TASK_PROVIDER_H3 = 'h3'`。
+    - `pending` / `dispatching` / `queued` 映射为本地 `submitted`。
+    - `running` 映射为本地 `running`。
+    - `done` 映射为本地 `succeeded`。
+    - `failed` 映射为本地 `failed`。
+    - `cancelled` / `deleted` 映射为本地 `cancelled`。
+    - 输出视频不能直接暴露 H3 token；结果下载走后端下载器或内部缓存。
+  - 验证：扩展 `scripts/provider-status-router-smoke.ts`，覆盖 H3 状态和未知 provider 报错。
+
+- [ ] T4. 接通 H3 图片素材转交
+  - 创建：`src/lib/provider/h3-assets.ts`
+  - 修改：`src/app/api/tasks/create/route.ts`
+  - 复用：`src/lib/assets/site-upload.ts`、`src/lib/assets/public-storage.ts`、`src/lib/provider/reference-image-safety.ts`
+  - 内容：
+    - 将已授权的首帧、尾帧、参考图读成字节。
+    - 只允许图片类型进入 H3 `/api/h3/inputs/images`。
+    - H3 返回的 `filename` 写入 provider payload。
+    - 记录原始资产 ID、H3 文件名、用途、sha256 到 `provider_payload_json` 或 `params_json`。
+  - 验证：新增 `scripts/h3-reference-image-handoff-smoke.ts`，覆盖首帧、尾帧、非图片拒绝、多余参考图不直传。
+
+- [ ] T5. 在创建任务 API 中加入 H3 分支
+  - 修改：`src/app/api/tasks/create/route.ts`
+  - 内容：
+    - 解析 `provider` 或 `engine`，默认仍为 Seedance。
+    - H3 只允许已配置且启用后提交。
+    - H3 不支持的比例，例如当前 H3 文档未列出的 `21:9`，返回中文错误。
+    - `provider='h3'`，`model=<preset_id>`，`provider_task_id=<job_id>`。
+    - `ProviderApiRequest.endpoint='h3.generate'`。
+    - 不硬编码旧 Seedance 默认到 H3 任务里。
+    - 创建成功后仍启动现有 `startTaskLocalization`。
+  - 验证：新增 `scripts/h3-create-route-smoke.ts`，用 mock adapter 断言任务落库、payload、provider、model、job_id、错误分支。
+
+- [ ] T6. 处理 H3 结果下载和本地缓存
+  - 修改：`src/lib/video/task-finalizer.ts`
+  - 可能创建：`src/lib/video/provider-output-download.ts`
+  - 内容：
+    - H3 完成后，后端用 H3 token 下载 `/api/h3/jobs/{job_id}/outputs/{index}`。
+    - 不把带 token 的 H3 地址暴露给前端。
+    - 下载后继续走现有本地缓存、稳定下载 URL、缩略图生成。
+    - 如果 H3 输出列表为空，任务保持可重试失败状态，并显示中文错误。
+  - 验证：新增 `scripts/h3-finalizer-output-smoke.ts`，覆盖 done 有输出、done 无输出、failed、下载 404、下载 503。
+
+- [ ] T7. 在普通生成页增加「生成引擎」
+  - 修改：`src/components/generate/GeneratePageClient.tsx`
+  - 可能修改：`src/components/GenerationComposer.tsx`
+  - 内容：
+    - 增加用户可见选项：`Seedance 2.0` / `H3 本地工作站`。
+    - H3 preset 用中文标签：`推荐`、`画质优先`、`快速预览`；代码 ID 只在小字或调试信息中出现。
+    - H3 未启用时不向普通用户展示；管理员可见未配置提示和去后台配置入口。
+    - 首帧、尾帧区域保留，提示“会传给 H3”。
+    - 多余参考图、参考视频、音频提示“作为上下文，不直接传文件”。
+  - 验证：新增 `scripts/h3-generate-ui-smoke.ts`，覆盖配置启用/未启用、选择 H3 后 payload、普通用户不见未配置入口。
+
+- [ ] T8. 接入模板生成和无线画布能力声明
+  - 修改：`src/components/templates/TemplateGenerateClient.tsx`
+  - 修改：`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`
+  - 修改：`src/app/api/config` 对应文件，如存在 H3 能力暴露逻辑则补充。
+  - 内容：
+    - 模板生成只传最终提示词和用户选择的生成引擎，不新建 H3 模板页。
+    - 无线画布第一版只暴露能力状态，不急着重做节点生成。
+  - 验证：新增或扩展 `scripts/ultimate-canvas-generation-task-coordinator-smoke.ts`，确认 capabilities 里能看到 H3 是否可用。
+
+- [ ] T9. 后台增加 H3 队列折叠区
+  - 修改：`src/app/admin/integrations/AdminIntegrationsClient.tsx`
+  - 修改：`src/app/api/admin/integrations/h3/route.ts` 或新增 `src/app/api/admin/integrations/h3/queue/route.ts`
+  - 内容：
+    - 只对管理员显示。
+    - 支持读取队列、暂停、恢复、取消 pending、停止 running。
+    - destructive 操作需要二次确认。
+    - 不第一版新增 `/admin/h3-queue` 独立页。
+  - 验证：新增 `scripts/h3-admin-queue-smoke.ts`，覆盖普通用户拒绝、管理员可读、暂停/恢复只走后端。
+
+- [ ] T10. 成本、点数和审计规则收口
+  - 修改：`src/lib/pricing.ts` 或现有 pricing 配置文件。
+  - 修改：`src/lib/costs/ledger.ts` 如需新增 provider 标识。
+  - 内容：
+    - H3 本地算力没有官方账单时，不伪造官方成本。
+    - 第一版使用明确的内部点数规则或标记 provider cost 为 `unknown/manual`。
+    - ProviderApiRequest、CostLedger、OperationLog 都记录 `provider='h3'`、preset、job_id、外部请求 ID。
+  - 验证：新增 `scripts/h3-cost-ledger-smoke.ts`，确认没有把 H3 成本错记成 Seedance。
+
+- [ ] T11. 无成本集成验证
+  - 命令：
+    - `npx tsx scripts/h3-admin-settings-smoke.ts`
+    - `npx tsx scripts/h3-provider-adapter-smoke.ts`
+    - `npx tsx scripts/h3-reference-image-handoff-smoke.ts`
+    - `npx tsx scripts/h3-create-route-smoke.ts`
+    - `npx tsx scripts/h3-finalizer-output-smoke.ts`
+    - `npx tsx scripts/h3-generate-ui-smoke.ts`
+    - `npx tsx scripts/provider-status-router-smoke.ts`
+    - `npm run lint`
+    - `npm run build`
+  - 完成标准：不真实调用 H3 生成，也能证明选择值穿透 UI、API、provider payload、任务记录、状态映射和缓存路径。
+
+- [ ] T12. 真实 H3 连接验证
+  - 前提：用户明确授权使用 H3 本地算力。
+  - 命令：
+    - `curl -sS -D - <H3_PUBLIC_BASE_URL>/health -o /tmp/h3-health.json`
+    - 通过后台「测试连接」读取 health/presets。
+    - 提交 1 个短视频 H3 测试任务。
+    - 验证 `/tasks/<id>`、项目产出、后台产出、缩略图、下载链接。
+  - 完成标准：真实页面能看到 H3 生成结果，刷新后仍存在，下载稳定可用。
+
+- [ ] T13. 服务器部署闭环
+  - 按 `AGENTS.md` 的 sd2 服务器生产托管规则执行。
+  - 目标生产入口：`https://sd2.youdooart.com`。
+  - 验证：
+    - `ssh gouki@42.193.221.253 'systemctl is-active sd2-gray.service'`
+    - `ssh gouki@42.193.221.253 'cd /srv/video-api-debugger/app && cat .next-prod/BUILD_ID'`
+    - `curl -sS -D - https://sd2.youdooart.com/api/config -o /tmp/sd2-public-config.json`
+    - 真实登录页或目标页面 DOM 能看到 H3 入口。
+  - 停止条件：生产构建不含 H3 字符串、公网仍旧版本、登录跳回旧域名、H3 地址服务器不可达。
+
+## 4. 验收/审查内容
+
+这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
+
+- [ ] R1. 后台配置审查
+  - 检查对象：`src/lib/integrations/h3.ts`、`src/app/api/admin/integrations/h3/route.ts`、后台集成页。
+  - 通过标准：token 不泄漏、管理员权限生效、health/presets 可测、操作有日志。
+  - 证据来源：smoke 输出、代码检查、接口返回。
+
+- [ ] R2. 生成链路审查
+  - 检查对象：`/generate`、`src/app/api/tasks/create/route.ts`、`VideoTask` 记录、ProviderApiRequest。
+  - 通过标准：选择 H3 后 provider/model/job_id/payload 都正确；Seedance 默认链路不回归。
+  - 证据来源：mock create route smoke、任务记录、provider payload。
+
+- [ ] R3. 素材转交审查
+  - 检查对象：H3 图片上传 helper、任务创建入参、provider_payload_json。
+  - 通过标准：首帧/尾帧真实转成 H3 filename；视频/音频不被假传；多余参考图处理有明确提示。
+  - 证据来源：h3-reference-image-handoff smoke、payload 快照。
+
+- [ ] R4. 结果缓存审查
+  - 检查对象：H3 状态映射、输出下载、本地缓存、缩略图、稳定下载 URL。
+  - 通过标准：H3 token 不暴露给前端；完成任务可播放、可下载、可刷新复现。
+  - 证据来源：h3-finalizer-output smoke、真实或 mock 任务详情。
+
+- [ ] R5. 成本与审计审查
+  - 检查对象：pricing、CostLedger、ProviderApiRequest、OperationLog。
+  - 通过标准：H3 不被记成 Seedance 官方成本；未知成本明确标记；关键动作有审计。
+  - 证据来源：h3-cost-ledger smoke、数据库记录只读检查。
+
+- [ ] R6. 线上可见审查
+  - 检查对象：`https://sd2.youdooart.com/generate`、`/admin/integrations`、生产构建 ID。
+  - 通过标准：目标页面刷新后可见 H3 入口或后台配置；公网静态资源和 DOM 来自新构建。
+  - 证据来源：服务器 BUILD_ID、公网 API、真实登录态 DOM/截图。
+
+## 5. 审查内容是否对齐目标
+
+- [ ] A1. R1 是否证明“后台可配置且安全”
+  - 判断：不能只看 UI 表单出现，必须证明 token 不泄漏、权限和测试连接有效。
+
+- [ ] A2. R2 是否证明“H3 是现有生成引擎，不是孤立系统”
+  - 判断：必须检查 `VideoTask`、任务列表、项目产出和 provider payload，不只看生成页按钮。
+
+- [ ] A3. R3 是否覆盖用户关心的参考图/视频/音频处理
+  - 判断：必须明确哪些文件传给 H3，哪些只作为上下文，避免隐藏行为。
+
+- [ ] A4. R4 是否覆盖最终用户结果
+  - 判断：必须证明视频可播放、可下载、刷新后仍存在，不能只证明 H3 job done。
+
+- [ ] A5. R5 是否覆盖成本和审计风险
+  - 判断：必须防止 H3 成本混到 Seedance，并能复盘谁生成、用什么 preset、什么素材。
+
+- [ ] A6. R6 是否覆盖生产闭环
+  - 判断：必须以 `sd2.youdooart.com` 和服务器 `.next-prod` 为准，不能用本地构建或旧域名冒充上线。
