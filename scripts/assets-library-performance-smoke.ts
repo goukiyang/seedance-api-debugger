@@ -97,6 +97,20 @@ function main() {
     '资产卡片列表视图不能再单独显示项目和日期第三行，避免卡片信息分行过多',
   );
   assert(
+    globalCss.includes('@media (max-width: 980px)')
+      && globalCss.includes('.composer-topbar-nav {\n    display: none;')
+      && globalCss.includes('.composer-topbar-credit {\n    display: none;')
+      && globalCss.includes('.account-menu-composer .account-menu-name {\n    max-width: 136px;'),
+    '窄桌面宽度必须提前精简顶部导航，避免账号退出按钮被挤到右侧滚动条下',
+  );
+  assert(
+    globalCss.includes('top: calc(var(--composer-topbar-height, 48px) + 8px);')
+      && globalCss.includes('right: max(12px, env(safe-area-inset-right));')
+      && globalCss.includes('scrollbar-gutter: stable;')
+      && globalCss.includes('.asset-detail-header {\n  position: sticky;'),
+    '资产详情抽屉必须避开顶部栏和右侧滚动条，并保持关闭区可见',
+  );
+  assert(
     assetsPage.includes("scope !== 'project' && !(movePanelOpen && bulkTarget === 'video_project')"),
     '项目列表必须按需加载，不能首屏无条件请求',
   );
