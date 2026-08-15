@@ -34,13 +34,19 @@
   - 未得到明确授权前，不发起真实 H3 生成。
   - 先用 mock fetch / mock adapter 证明：前端选择、后端入参、任务落库、provider payload、状态映射、结果缓存路径全部连通。
 
+- [ ] D6. 所有影响 H3 最终请求的内容必须可见
+  - 多余参考图如果只作为上下文，不能偷偷生成隐藏描述。
+  - 要么由用户手写上下文，要么由 LLM 生成后显示在最终上下文/最终提示词里，管理员或用户确认后再提交。
+  - H3 第一版不支持的素材、字段和高级参数必须在 UI 上明说，不做无提示降级。
+
 ## 3. 具体可执行任务
 
 - [ ] T0. 锁定 H3 接入前置条件
   - 检查对象：`/Volumes/Data/Downloads/Current/EXTERNAL_AGENT_API_GUIDE.md`、`https://sd2.youdooart.com` 生产目标、服务器到 H3 公网 API 的可达性。
   - 要确认：H3 公网 API 地址、`H3_API_TOKEN`、`H3_ADMIN_TOKEN`、默认 preset、队列上限、真实生成是否允许消耗本地算力。
   - 完成标准：形成一份不包含 token 明文的接入参数摘要，明确 H3 是否可从 sd2 服务器访问。
-  - 停止条件：H3 只有 `127.0.0.1:8893` 且服务器无法访问时，不开放用户入口。
+  - 健康准入：只有 `api=ok`、`worker.worker=ok`、`worker.comfyui=ok`、公网反代/tunnel 稳定、队列上限启用时，才允许打开普通用户入口。
+  - 停止条件：H3 只有 `127.0.0.1:8893` 且服务器无法访问、worker/ComfyUI 不健康、公网反代不稳定或队列保护未开启时，不开放用户入口。
 
 - [ ] T1. 新增 H3 后台配置模型
   - 创建：`src/lib/integrations/h3.ts`
@@ -64,10 +70,15 @@
     - `listH3JobOutputs`
     - `downloadH3JobOutput`
     - 统一处理 400/401/403/404/502/503、`Retry-After`、超时和 AbortSignal。
-  - 验证：新增 `scripts/h3-provider-adapter-smoke.ts`，用 mock fetch 断言 URL、Header、payload、错误转换和 token 不被写入日志。
+    - 内置 H3 参数白名单：preset 只允许 `larry_v4_6step`、`larry_v4_8step`、`lightx2v_4step_turbo`。
+    - aspect_ratio 只允许 `16:9`、`9:16`、`1:1`、`4:3`、`3:4`。
+    - `duration_sec` 默认 5，最大 15；超出时返回中文错误，不静默截断。
+    - `seed` 只允许 `-1` 或安全整数；`width` / `height` 第一版隐藏，不开放普通用户填写。
+  - 验证：新增 `scripts/h3-provider-adapter-smoke.ts`，用 mock fetch 断言 URL、Header、payload、参数白名单、错误转换和 token 不被写入日志。
 
 - [ ] T3. 新增 H3 provider 状态映射
   - 修改：`src/lib/provider/video-task-status.ts`
+  - 修改：`src/lib/video/task-finalizer.ts`
   - 内容：
     - 新增常量 `VIDEO_TASK_PROVIDER_H3 = 'h3'`。
     - `pending` / `dispatching` / `queued` 映射为本地 `submitted`。
@@ -76,7 +87,10 @@
     - `failed` 映射为本地 `failed`。
     - `cancelled` / `deleted` 映射为本地 `cancelled`。
     - 输出视频不能直接暴露 H3 token；结果下载走后端下载器或内部缓存。
-  - 验证：扩展 `scripts/provider-status-router-smoke.ts`，覆盖 H3 状态和未知 provider 报错。
+    - 轮询遵守 H3 指南：3-5 秒间隔，遇到 `done`、`failed`、`cancelled`、`deleted` 立即停止。
+    - 遇到 `Retry-After` 按服务端建议退避，不密集打 H3。
+    - 超过最大等待时间或长时间无状态变化时，标记为可恢复异常并保留重试入口，不假装仍在生成。
+  - 验证：扩展 `scripts/provider-status-router-smoke.ts`，覆盖 H3 状态、轮询终态、`Retry-After`、超时和未知 provider 报错。
 
 - [ ] T4. 接通 H3 图片素材转交
   - 创建：`src/lib/provider/h3-assets.ts`
@@ -87,14 +101,16 @@
     - 只允许图片类型进入 H3 `/api/h3/inputs/images`。
     - H3 返回的 `filename` 写入 provider payload。
     - 记录原始资产 ID、H3 文件名、用途、sha256 到 `provider_payload_json` 或 `params_json`。
-  - 验证：新增 `scripts/h3-reference-image-handoff-smoke.ts`，覆盖首帧、尾帧、非图片拒绝、多余参考图不直传。
+    - 多余参考图如果转成文字上下文，必须写进最终上下文/最终提示词可见区域，不能作为隐藏 prompt 注入。
+  - 验证：新增 `scripts/h3-reference-image-handoff-smoke.ts`，覆盖首帧、尾帧、非图片拒绝、多余参考图不直传、多余参考图上下文可见。
 
 - [ ] T5. 在创建任务 API 中加入 H3 分支
   - 修改：`src/app/api/tasks/create/route.ts`
   - 内容：
     - 解析 `provider` 或 `engine`，默认仍为 Seedance。
     - H3 只允许已配置且启用后提交。
-    - H3 不支持的比例，例如当前 H3 文档未列出的 `21:9`，返回中文错误。
+    - H3 不支持的比例，例如当前 H3 文档未列出的 `21:9`，返回中文错误；不把不支持字段透传给 H3。
+    - H3 第一版不接受 `resolution`、`watermark`、`generate_audio` 这类 Seedance 专属字段影响 provider payload；声音只通过可见的 `audio_prompt` / `music_prompt` 文本传入。
     - `provider='h3'`，`model=<preset_id>`，`provider_task_id=<job_id>`。
     - `ProviderApiRequest.endpoint='h3.generate'`。
     - 不硬编码旧 Seedance 默认到 H3 任务里。
@@ -137,9 +153,11 @@
   - 内容：
     - 只对管理员显示。
     - 支持读取队列、暂停、恢复、取消 pending、停止 running。
+    - 支持 move pending job 的 `top`、`up`、`down`、`bottom`；如果第一版暂不实现 move，必须在 UI 中明确显示“暂不支持调整队列顺序”。
     - destructive 操作需要二次确认。
+    - 队列暂停、恢复、取消、停止、移动都写 `OperationLog`，包含操作者、job_id、动作、原因和结果。
     - 不第一版新增 `/admin/h3-queue` 独立页。
-  - 验证：新增 `scripts/h3-admin-queue-smoke.ts`，覆盖普通用户拒绝、管理员可读、暂停/恢复只走后端。
+  - 验证：新增 `scripts/h3-admin-queue-smoke.ts`，覆盖普通用户拒绝、管理员可读、暂停/恢复/取消/停止/move 或暂不支持提示、队列操作审计。
 
 - [ ] T10. 成本、点数和审计规则收口
   - 修改：`src/lib/pricing.ts` 或现有 pricing 配置文件。
@@ -148,7 +166,9 @@
     - H3 本地算力没有官方账单时，不伪造官方成本。
     - 第一版使用明确的内部点数规则或标记 provider cost 为 `unknown/manual`。
     - ProviderApiRequest、CostLedger、OperationLog 都记录 `provider='h3'`、preset、job_id、外部请求 ID。
-  - 验证：新增 `scripts/h3-cost-ledger-smoke.ts`，确认没有把 H3 成本错记成 Seedance。
+    - 失败、取消、队列满、H3 创建失败、输出下载失败时，明确点数冻结/退款/释放规则。
+    - H3 任务失败或取消不能吞掉冻结点数；CostLedger 需要能区分 `provider_request_failed`、`job_failed`、`job_cancelled`、`output_download_failed`。
+  - 验证：新增 `scripts/h3-cost-ledger-smoke.ts`，确认没有把 H3 成本错记成 Seedance，并覆盖失败、取消、队列满、下载失败的扣费/退款规则。
 
 - [ ] T11. 无成本集成验证
   - 命令：
@@ -169,8 +189,9 @@
     - `curl -sS -D - <H3_PUBLIC_BASE_URL>/health -o /tmp/h3-health.json`
     - 通过后台「测试连接」读取 health/presets。
     - 提交 1 个短视频 H3 测试任务。
+    - 再提交 1 个带首帧/尾帧图片的短视频 H3 测试任务。
     - 验证 `/tasks/<id>`、项目产出、后台产出、缩略图、下载链接。
-  - 完成标准：真实页面能看到 H3 生成结果，刷新后仍存在，下载稳定可用。
+  - 完成标准：真实页面能看到 H3 生成结果；纯文本任务和带首尾帧任务都能刷新后仍存在，下载稳定可用。
 
 - [ ] T13. 服务器部署闭环
   - 按 `AGENTS.md` 的 sd2 服务器生产托管规则执行。
@@ -198,23 +219,33 @@
 
 - [ ] R3. 素材转交审查
   - 检查对象：H3 图片上传 helper、任务创建入参、provider_payload_json。
-  - 通过标准：首帧/尾帧真实转成 H3 filename；视频/音频不被假传；多余参考图处理有明确提示。
+  - 通过标准：首帧/尾帧真实转成 H3 filename；视频/音频不被假传；多余参考图处理有明确提示；任何由图片推导出的文字上下文都在最终上下文/最终提示词里可见。
   - 证据来源：h3-reference-image-handoff smoke、payload 快照。
 
 - [ ] R4. 结果缓存审查
   - 检查对象：H3 状态映射、输出下载、本地缓存、缩略图、稳定下载 URL。
-  - 通过标准：H3 token 不暴露给前端；完成任务可播放、可下载、可刷新复现。
+  - 通过标准：H3 token 不暴露给前端；完成任务可播放、可下载、可刷新复现；轮询按 3-5 秒、终态停止、`Retry-After` 退避和超时恢复规则执行。
   - 证据来源：h3-finalizer-output smoke、真实或 mock 任务详情。
 
 - [ ] R5. 成本与审计审查
   - 检查对象：pricing、CostLedger、ProviderApiRequest、OperationLog。
-  - 通过标准：H3 不被记成 Seedance 官方成本；未知成本明确标记；关键动作有审计。
+  - 通过标准：H3 不被记成 Seedance 官方成本；未知成本明确标记；创建失败、队列满、任务失败、取消、下载失败都有扣费/退款/释放规则；关键动作有审计。
   - 证据来源：h3-cost-ledger smoke、数据库记录只读检查。
 
 - [ ] R6. 线上可见审查
   - 检查对象：`https://sd2.youdooart.com/generate`、`/admin/integrations`、生产构建 ID。
   - 通过标准：目标页面刷新后可见 H3 入口或后台配置；公网静态资源和 DOM 来自新构建。
   - 证据来源：服务器 BUILD_ID、公网 API、真实登录态 DOM/截图。
+
+- [ ] R7. H3 参数与服务准入审查
+  - 检查对象：H3 参数白名单、后台 health/presets、服务器到 H3 公网域名、worker/comfyui 健康、队列保护。
+  - 通过标准：preset、比例、时长、seed、width/height 开放范围都受控；只有 `api=ok + worker=ok + comfyui=ok + 队列保护启用 + sd2 服务器可达` 才对普通用户开放 H3。
+  - 证据来源：h3-provider-adapter smoke、后台测试连接、服务器 curl、队列状态只读查询。
+
+- [ ] R8. H3 队列操作审查
+  - 检查对象：后台队列折叠区、H3 admin routes、OperationLog。
+  - 通过标准：暂停、恢复、取消、停止、移动或暂不支持移动的提示都清晰；所有队列写操作只允许管理员后端触发并记录审计。
+  - 证据来源：h3-admin-queue smoke、权限测试、OperationLog 只读检查。
 
 ## 5. 审查内容是否对齐目标
 
@@ -235,3 +266,9 @@
 
 - [ ] A6. R6 是否覆盖生产闭环
   - 判断：必须以 `sd2.youdooart.com` 和服务器 `.next-prod` 为准，不能用本地构建或旧域名冒充上线。
+
+- [ ] A7. R7 是否覆盖 H3 专属服务风险
+  - 判断：必须证明 H3 参数、H3 公网入口、worker、ComfyUI 和队列保护都满足准入条件。
+
+- [ ] A8. R8 是否覆盖 H3 队列管理风险
+  - 判断：必须证明队列操作权限、审计和是否支持 move 都说清楚，不留下半成品后台按钮。
