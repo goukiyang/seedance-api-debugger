@@ -10,6 +10,7 @@ import {
   isH3PresetId,
   type H3PresetId,
 } from '@/lib/integrations/h3';
+import { buildH3DiagnosticSnapshot } from '@/lib/provider/h3-diagnostics';
 
 export const H3_VIDEO_PROVIDER = 'h3';
 export const H3_ALLOWED_PRESET_IDS = H3_PRESET_OPTIONS.map((option) => option.id);
@@ -463,6 +464,19 @@ export async function getH3TaskStatus(
         ...raw,
         code: 'h3_done_without_output',
         error: errorMessage,
+        h3_diagnostic: buildH3DiagnosticSnapshot({
+          phase: 'status_done_without_output',
+          jobId,
+          presetId: preset,
+          durationSec: typeof request.duration_sec === 'number' ? request.duration_sec : null,
+          aspectRatio: typeof request.aspect_ratio === 'string' ? request.aspect_ratio : null,
+          providerStatus,
+          localStatus: 'failed',
+          errorCode: 'h3_done_without_output',
+          errorMessage,
+          outputs: raw.outputs,
+          raw,
+        }),
       },
     };
   }
@@ -477,7 +491,21 @@ export async function getH3TaskStatus(
     ratio: typeof request.aspect_ratio === 'string' ? request.aspect_ratio : undefined,
     duration: typeof request.duration_sec === 'number' ? request.duration_sec : undefined,
     error_message: typeof raw.error === 'string' ? raw.error : undefined,
-    raw,
+    raw: {
+      ...raw,
+      h3_diagnostic: buildH3DiagnosticSnapshot({
+        phase: 'status_poll',
+        jobId,
+        presetId: preset,
+        durationSec: typeof request.duration_sec === 'number' ? request.duration_sec : null,
+        aspectRatio: typeof request.aspect_ratio === 'string' ? request.aspect_ratio : null,
+        providerStatus,
+        localStatus,
+        errorMessage: typeof raw.error === 'string' ? raw.error : null,
+        outputs: raw.outputs,
+        raw,
+      }),
+    },
   };
 }
 

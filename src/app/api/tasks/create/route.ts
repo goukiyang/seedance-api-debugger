@@ -13,9 +13,11 @@ import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/pr
 import { parseSeedanceVideoModel, seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
 import {
   H3_VIDEO_PROVIDER,
+  H3RequestError,
   createH3VideoJob,
   type H3GeneratePayload,
 } from '@/lib/provider/h3';
+import { buildH3DiagnosticSnapshot } from '@/lib/provider/h3-diagnostics';
 import { uploadH3ReferenceImagesForTask } from '@/lib/provider/h3-assets';
 import { getH3ApiSettings, isH3Operational, isH3PresetId } from '@/lib/integrations/h3';
 import {
@@ -1774,6 +1776,23 @@ export async function POST(request: NextRequest) {
             referenceVideoUrls,
             referenceAudioUrls,
           }),
+          h3_diagnostic: requestedProvider === H3_VIDEO_PROVIDER
+            ? buildH3DiagnosticSnapshot({
+                phase: 'create_failed',
+                taskId,
+                presetId: selectedModel,
+                durationSec: duration,
+                aspectRatio: ratio,
+                localStatus: 'failed',
+                errorCode: userFacingFailure.code,
+                errorMessage: providerFailureMessage,
+                httpStatus: err instanceof H3RequestError ? err.statusCode ?? null : null,
+                retryAfterSeconds: err instanceof H3RequestError ? err.retryAfterSeconds ?? null : null,
+                health: h3Settings?.health || null,
+                queue: h3Settings?.health?.queue || null,
+                raw: err instanceof H3RequestError ? err.raw : null,
+              })
+            : undefined,
         },
       }).catch(() => {});
     }

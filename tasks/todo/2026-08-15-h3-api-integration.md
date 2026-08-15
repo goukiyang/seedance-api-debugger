@@ -412,20 +412,22 @@
 
 ### 7.3 具体可执行任务
 
-- [ ] T21. 修复 workspace 串台导致旧参考图自动注入
+- [x] T21. 修复 workspace 串台导致旧参考图自动注入
   - 检查对象：`src/lib/workspace*`、任务创建入口、生成页 tab/workspace 选择逻辑、`getOrCreateWorkspace(tabId, ownerId)` 实际实现。
   - 要修什么：workspace 必须按当前用户和当前 tab/workspace 隔离；没有用户明确选择的参考图时，H3/Seedance 任务不得自动带入 active workspace 里的旧素材。
   - 完成标准：新建空白生成会话后提交 H3，`reference_image_urls=null`，prompt 不出现旧 `参考素材说明`；用户手动选图时才出现对应资产。
   - 补充核对：只读检查 `VideoTask.reference_image_ids`、`provider_payload_json.h3_payload`、`final_prompt_snapshot`、任务快照和 OperationLog，确认空白会话没有旧参考图、旧素材说明或隐藏上下文。
   - 验证命令：新增或扩展 workspace/H3 创建 smoke，至少覆盖“空白会话不带图”“手动选图才带图”“不同 tab 不串图”“任务快照和 provider payload 不带旧图”。
+  - 2026-08-16 状态：已改为按 `owner_id + status + tab workspace name` 查找 workspace，不再复用同用户最近 active workspace；新增 `scripts/workspace-tab-isolation-smoke.ts`，验证同 tab 复用、不同 tab 隔离、旧默认 active workspace 不被复用。
 
-- [ ] T22. 给 H3 失败链路补脱敏诊断包
+- [x] T22. 给 H3 失败链路补脱敏诊断包
   - 检查对象：`ProviderApiRequest`、`VideoTask.provider_payload_json`、H3 finalizer、后台任务详情或管理员可复制诊断摘要。
   - 要修什么：记录每个 H3 任务的 `preset_id`、`duration_sec`、`aspect_ratio`、`job_id`、sd2 task id、外部 request id、终态、H3 原始错误摘要、队列快照、是否 0 成本、是否有输出文件；不得记录 token。
   - 诊断包字段：必须包含轮询时间线、每次 HTTP status、`Retry-After`、health 快照、queue 提交前后快照、`/outputs` 摘要、worker/comfyui 状态或版本摘要。
   - 脱敏边界：不得包含 token、Authorization、cookie、原始请求头、内部 worker URL、内部 base_url 明文或服务器本机路径。
   - 完成标准：H3 failed / cancelled / running 卡住时，管理员能一键复制给 H3 侧排查，不需要从数据库里手挖。
   - 验证命令：新增 smoke 覆盖失败诊断摘要不含敏感字段、含 job id/preset/status/error/billing/health/queue/outputs/Retry-After。
+  - 2026-08-16 状态：新增 `src/lib/provider/h3-diagnostics.ts`，H3 创建失败和状态轮询都会写入 `h3_diagnostic` 脱敏摘要；新增 `scripts/h3-diagnostics-smoke.ts` 验证 token、Authorization、cookie、base_url、worker URL 不外泄。
 
 - [ ] T23. 重新跑 H3 机器侧最小隔离测试
   - 检查对象：H3 `/health`、`/api/h3/presets`、`/api/h3/generate`、`/api/h3/jobs/{job_id}`、`/outputs`。

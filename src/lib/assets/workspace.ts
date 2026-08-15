@@ -22,16 +22,26 @@ function publicAssetUrl(url: string | null) {
   return url ? (sameOriginPublicUrlForSiteUpload(url) || url) : null;
 }
 
+function workspaceNameForTab(tabId: string) {
+  const normalized = typeof tabId === 'string' && tabId.trim()
+    ? tabId.trim().slice(0, 96)
+    : 'default';
+  return `默认工作台:${normalized}`;
+}
+
 /**
  * 获取或创建当前用户的活跃工作区
  * 每个浏览器 tab 有独立 workspace（通过 tabId 区分）
  */
 export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-user'): Promise<{ id: string }> {
-  // 尝试查找现有 active workspace
+  const workspaceName = workspaceNameForTab(tabId);
+
+  // 尝试查找当前 tab 的 active workspace，避免复用同用户其他 tab 的旧参考素材。
   let workspace = await prisma.workspace.findFirst({
     where: {
       owner_id: ownerId,
       status: 'active',
+      name: workspaceName,
     },
     orderBy: { updated_at: 'desc' },
   });
@@ -41,7 +51,7 @@ export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-use
       data: {
         id: uuidv4(),
         owner_id: ownerId,
-        name: '默认工作台',
+        name: workspaceName,
         status: 'active',
       },
     });
