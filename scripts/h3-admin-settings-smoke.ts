@@ -57,9 +57,14 @@ const healthy = {
   ...saved,
   health: h3HealthSnapshotFromResponse({
     api: 'ok',
+    version: 'h3-api-0.3.0',
+    public_base_url: null,
     worker_url: 'http://127.0.0.1:8894',
+    default_preset: 'larry_v4_6step',
     preset_count: 3,
+    billing: { charged: false, cost: 0, currency: null, cost_model: 'free_local' },
     worker: { worker: 'ok', comfyui: 'ok' },
+    queue: { paused: false, pending: 0, running: 0, max_pending_jobs: 20, active: 0, max_active_jobs: 1 },
   }),
 };
 assert.equal(isH3Operational(healthy), true);
@@ -67,8 +72,16 @@ const healthyDto = safeH3ConfigDto(healthy);
 assert.equal(healthyDto.ready, true);
 assert.equal(healthyDto.admin_queue_ready, true);
 assert.equal(healthyDto.health?.api, 'ok');
+assert.equal(healthyDto.health?.version, 'h3-api-0.3.0');
+assert.equal(healthyDto.health?.public_base_url, null);
 assert.equal(healthyDto.health?.worker, 'ok');
 assert.equal(healthyDto.health?.comfyui, 'ok');
+assert.equal(healthyDto.health?.billing?.charged, false);
+assert.equal(healthyDto.health?.billing?.cost, 0);
+assert.equal(healthyDto.health?.billing?.cost_model, 'free_local');
+assert.equal(healthyDto.health?.queue?.paused, false);
+assert.equal(healthyDto.health?.queue?.pending, 0);
+assert.equal(healthyDto.health?.queue?.max_pending_jobs, 20);
 
 const clearedUserToken = buildH3ApiSettingsPatch(saved, { clear_api_token: true });
 assert.equal(clearedUserToken.enabled, false);

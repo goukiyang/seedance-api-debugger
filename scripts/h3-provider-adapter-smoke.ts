@@ -28,9 +28,13 @@ const fetchImpl: typeof fetch = async (url, init) => {
   if (String(url).endsWith('/health')) {
     return Response.json({
       api: 'ok',
+      version: 'h3-api-0.3.0',
+      public_base_url: null,
       default_preset: 'larry_v4_6step',
       preset_count: 3,
+      billing: { charged: false, cost: 0, currency: null, cost_model: 'free_local' },
       worker: { worker: 'ok', comfyui: 'ok' },
+      queue: { paused: false, pending: 0, running: 0, max_pending_jobs: 20 },
     });
   }
   if (String(url).endsWith('/api/h3/presets')) {
@@ -44,6 +48,9 @@ const fetchImpl: typeof fetch = async (url, init) => {
       original_filename: rawBody.filename,
       size_bytes: 11,
       sha256: 'sha256-smoke',
+      width: 1280,
+      height: 720,
+      mime_type: 'image/png',
     });
   }
   if (String(url).endsWith('/api/h3/generate')) {
@@ -61,7 +68,18 @@ const fetchImpl: typeof fetch = async (url, init) => {
       status: 'done',
       preset: 'larry_v4_6step',
       resolved: { seed: 123456 },
-      outputs: [{ index: 0, kind: 'video', download_url: '/api/h3/jobs/h3-20260815-013000-abc12345/outputs/0' }],
+      outputs: [{
+        index: 0,
+        kind: 'video',
+        download_url: '/api/h3/jobs/h3-20260815-013000-abc12345/outputs/0',
+        content_type: 'video/mp4',
+        size_bytes: 152003,
+        duration_sec: 5,
+        width: 1280,
+        height: 720,
+        fps: 24,
+        sha256: 'video-sha256-smoke',
+      }],
     });
   }
   if (String(url).endsWith('/api/h3/jobs/h3-empty-output')) {
@@ -76,7 +94,15 @@ const fetchImpl: typeof fetch = async (url, init) => {
   if (String(url).endsWith('/api/h3/jobs/h3-20260815-013000-abc12345/outputs')) {
     return Response.json({
       job_id: 'h3-20260815-013000-abc12345',
-      outputs: [{ index: 0, filename: 'out.mp4', kind: 'video', download_url: '/api/h3/jobs/h3-20260815-013000-abc12345/outputs/0' }],
+      outputs: [{
+        index: 0,
+        filename: 'out.mp4',
+        kind: 'video',
+        download_url: '/api/h3/jobs/h3-20260815-013000-abc12345/outputs/0',
+        content_type: 'video/mp4',
+        size_bytes: 152003,
+        sha256: 'video-sha256-smoke',
+      }],
     });
   }
   if (String(url).endsWith('/api/h3/generate-queue-full')) {
@@ -95,6 +121,10 @@ async function main() {
 
   const health = await getH3Health({ baseUrl: 'https://h3-api.example.com/', fetchImpl });
   assert.equal(health.api, 'ok');
+  assert.equal(health.version, 'h3-api-0.3.0');
+  assert.equal(health.billing?.charged, false);
+  assert.equal(health.billing?.cost_model, 'free_local');
+  assert.equal(health.queue?.max_pending_jobs, 20);
   assert.equal(calls.at(-1)?.url, 'https://h3-api.example.com/health');
   assert.equal((calls.at(-1)?.init?.headers as Record<string, string> | undefined)?.Authorization, undefined);
 
@@ -107,6 +137,9 @@ async function main() {
     contentB64: Buffer.from('hello image').toString('base64'),
   }, { baseUrl: 'https://h3-api.example.com', apiToken: 'secret-user-token', fetchImpl });
   assert.equal(uploaded.filename, 'h3ref-20260815-013000-abc12345.png');
+  assert.equal(uploaded.width, 1280);
+  assert.equal(uploaded.height, 720);
+  assert.equal(uploaded.mime_type, 'image/png');
   assert.equal((calls.at(-1)?.body as Record<string, unknown>).filename, 'first-frame.png');
   assert.equal((calls.at(-1)?.body as Record<string, unknown>).content_b64, Buffer.from('hello image').toString('base64'));
 
@@ -145,11 +178,13 @@ async function main() {
   const created = await createH3VideoJob(payload, {
     baseUrl: 'https://h3-api.example.com',
     apiToken: 'secret-user-token',
+    idempotencyKey: 'req-smoke-001',
     fetchImpl,
   });
   assert.equal(created.provider_task_id, 'h3-20260815-013000-abc12345');
   assert.equal(calls.at(-1)?.url, 'https://h3-api.example.com/api/h3/generate');
   assert.equal((calls.at(-1)?.init?.headers as Record<string, string>).Authorization, 'Bearer secret-user-token');
+  assert.equal((calls.at(-1)?.init?.headers as Record<string, string>)['Idempotency-Key'], 'req-smoke-001');
   assert.equal(JSON.stringify(calls.at(-1)?.body).includes('width'), false);
   assert.equal(JSON.stringify(calls.at(-1)?.body).includes('height'), false);
 
@@ -182,6 +217,8 @@ async function main() {
     fetchImpl,
   });
   assert.equal(outputs.outputs[0]?.filename, 'out.mp4');
+  assert.equal(outputs.outputs[0]?.size_bytes, 152003);
+  assert.equal(outputs.outputs[0]?.sha256, 'video-sha256-smoke');
 
   const queueFullFetch: typeof fetch = async () => new Response(JSON.stringify({ error: 'queue is full' }), {
     status: 503,

@@ -23,6 +23,7 @@ type H3FetchOptions = {
   apiToken?: string;
   adminToken?: string;
   signal?: AbortSignal;
+  idempotencyKey?: string | null;
 };
 
 export type H3GenerateInput = {
@@ -63,6 +64,9 @@ export type H3ReferenceImageUploadResult = {
   original_filename?: string;
   size_bytes?: number;
   sha256?: string;
+  width?: number;
+  height?: number;
+  mime_type?: string;
   raw: unknown;
 };
 
@@ -72,6 +76,13 @@ export type H3JobOutput = {
   kind?: string;
   type?: string;
   download_url?: string;
+  content_type?: string;
+  size_bytes?: number;
+  duration_sec?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  sha256?: string;
 };
 
 export type H3OutputsResult = {
@@ -108,6 +119,34 @@ export class H3RequestError extends Error {
     this.raw = input.raw;
   }
 }
+
+export type H3BillingInfo = {
+  charged?: boolean;
+  cost?: number;
+  currency?: string | null;
+  cost_model?: string | null;
+};
+
+export type H3QueueInfo = {
+  paused?: boolean;
+  pending?: number;
+  running?: number;
+  max_pending_jobs?: number;
+  active?: number;
+  max_active_jobs?: number;
+};
+
+export type H3HealthResponse = {
+  api?: string;
+  version?: string;
+  public_base_url?: string | null;
+  worker_url?: string;
+  default_preset?: string;
+  preset_count?: number;
+  billing?: H3BillingInfo;
+  worker?: { worker?: string; comfyui?: string };
+  queue?: H3QueueInfo;
+};
 
 function cleanBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, '');
@@ -200,8 +239,10 @@ async function requestJson<T>(
   const tokenKind = options.token || 'api';
   const resolved = await resolveOptions(options, tokenKind);
   const token = tokenKind === 'api' ? resolved.apiToken : tokenKind === 'admin' ? resolved.adminToken : undefined;
+  const idempotencyKey = cleanOptionalString(options.idempotencyKey);
   const headers: Record<string, string> = {
     ...(token ? authHeaders(token) : {}),
+    ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
   };
   const response = await resolved.fetchImpl(`${resolved.baseUrl}${path}`, {
@@ -273,13 +314,7 @@ export function buildH3GeneratePayload(input: H3GenerateInput): H3GeneratePayloa
 }
 
 export async function getH3Health(options: H3FetchOptions = {}) {
-  return requestJson<{
-    api?: string;
-    worker_url?: string;
-    default_preset?: string;
-    preset_count?: number;
-    worker?: { worker?: string; comfyui?: string };
-  }>(H3_HEALTH_PATH, { ...options, token: 'none' });
+  return requestJson<H3HealthResponse>(H3_HEALTH_PATH, { ...options, token: 'none' });
 }
 
 export async function listH3Presets(options: H3FetchOptions = {}) {
@@ -312,6 +347,9 @@ export async function uploadH3ReferenceImage(
     original_filename: typeof raw.original_filename === 'string' ? raw.original_filename : undefined,
     size_bytes: typeof raw.size_bytes === 'number' ? raw.size_bytes : undefined,
     sha256: typeof raw.sha256 === 'string' ? raw.sha256 : undefined,
+    width: typeof raw.width === 'number' ? raw.width : undefined,
+    height: typeof raw.height === 'number' ? raw.height : undefined,
+    mime_type: typeof raw.mime_type === 'string' ? raw.mime_type : undefined,
     raw,
   };
 }

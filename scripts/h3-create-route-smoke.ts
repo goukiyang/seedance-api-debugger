@@ -15,6 +15,8 @@ assert.match(routeSource, /uploadH3ReferenceImagesForTask/, 'H3 首尾帧图片�
 assert.match(routeSource, /appendH3VisibleContext/, 'H3 不支持的素材必须转成可见上下文');
 assert.match(routeSource, /provider:\s*requestedProvider/, 'VideoTask.provider 必须写入用户选择的 provider');
 assert.match(routeSource, /endpoint:\s*requestedProvider === H3_VIDEO_PROVIDER \? 'h3.generate' : 'seedance.createVideoTask'/, 'ProviderApiRequest endpoint 必须区分 H3');
+assert.match(routeSource, /const providerIdempotencyKey = requestedProvider === H3_VIDEO_PROVIDER[\s\S]*sourceRequestId \|\| idempotencyKey \|\| taskId/, 'H3 必须用外部请求号或本地任务 ID 作为幂等键');
+assert.match(routeSource, /createH3VideoJob\(h3GeneratePayload,[\s\S]*idempotencyKey:\s*providerIdempotencyKey/, 'H3 提交必须把 Idempotency-Key 传给外部 API');
 assert.match(routeSource, /step_key:\s*requestedProvider === H3_VIDEO_PROVIDER \? 'h3_submit' : 'seedance_submit'/, 'AgentRunStep 不能把 H3 写成 Seedance');
 assert.match(routeSource, /summary:\s*requestedProvider === H3_VIDEO_PROVIDER \? '任务已提交 H3，等待生成结果回写'/, '模板 Memory 不能把 H3 写成 Seedance');
 assert.match(routeSource, /providerResult\.provider_task_id/, 'H3 job_id 必须写回 provider_task_id');

@@ -1597,6 +1597,9 @@ export async function POST(request: NextRequest) {
         },
       };
     }
+    const providerIdempotencyKey = requestedProvider === H3_VIDEO_PROVIDER
+      ? sourceRequestId || idempotencyKey || taskId
+      : idempotencyKey || null;
     let callbackParamsJson: string | null = null;
     if (requestedProvider === 'seedance' && isFastPathDelivery) {
       const callbackConfig = resolveVideoDeliveryCallbackConfig({
@@ -1623,7 +1626,7 @@ export async function POST(request: NextRequest) {
       task: createdTask,
       endpoint: requestedProvider === H3_VIDEO_PROVIDER ? 'h3.generate' : 'seedance.createVideoTask',
       method: 'POST',
-      idempotencyKey: idempotencyKey || null,
+      idempotencyKey: providerIdempotencyKey,
       requestPayload: requestedProvider === H3_VIDEO_PROVIDER
         ? {
             ...h3GeneratePayload,
@@ -1650,6 +1653,7 @@ export async function POST(request: NextRequest) {
       ? await createH3VideoJob(h3GeneratePayload, {
           baseUrl: h3Settings.base_url,
           apiToken: h3Settings.api_token || undefined,
+          idempotencyKey: providerIdempotencyKey,
         })
       : await createVideoTask(providerInput);
 

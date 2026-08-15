@@ -102,6 +102,12 @@ export async function POST(request: NextRequest) {
     const workerRecord = healthRecord.worker && typeof healthRecord.worker === 'object' && !Array.isArray(healthRecord.worker)
       ? healthRecord.worker as Record<string, unknown>
       : {};
+    const billingRecord = healthRecord.billing && typeof healthRecord.billing === 'object' && !Array.isArray(healthRecord.billing)
+      ? healthRecord.billing as Record<string, unknown>
+      : {};
+    const queueRecord = healthRecord.queue && typeof healthRecord.queue === 'object' && !Array.isArray(healthRecord.queue)
+      ? healthRecord.queue as Record<string, unknown>
+      : {};
 
     await prisma.operationLog.create({
       data: {
@@ -113,10 +119,19 @@ export async function POST(request: NextRequest) {
           base_url: settings.base_url,
           api_token_configured: Boolean(settings.api_token),
           admin_token_configured: Boolean(settings.admin_token),
+          health_version: healthRecord.version ?? null,
+          public_base_url: healthRecord.public_base_url ?? null,
           health_api: healthRecord.api ?? null,
           health_worker: workerRecord.worker ?? null,
           health_comfyui: workerRecord.comfyui ?? null,
           preset_count: healthRecord.preset_count ?? null,
+          billing_charged: billingRecord.charged ?? null,
+          billing_cost: billingRecord.cost ?? null,
+          billing_cost_model: billingRecord.cost_model ?? null,
+          queue_paused: queueRecord.paused ?? null,
+          queue_pending: queueRecord.pending ?? null,
+          queue_running: queueRecord.running ?? null,
+          queue_max_pending_jobs: queueRecord.max_pending_jobs ?? null,
         }),
       },
     });

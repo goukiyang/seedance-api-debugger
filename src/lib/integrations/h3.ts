@@ -27,10 +27,27 @@ export type H3ApiSettings = {
 
 export type H3HealthSnapshot = {
   api: string | null;
+  version: string | null;
+  public_base_url: string | null;
   worker: string | null;
   comfyui: string | null;
   worker_url: string | null;
+  default_preset: string | null;
   preset_count: number | null;
+  billing: {
+    charged: boolean | null;
+    cost: number | null;
+    currency: string | null;
+    cost_model: string | null;
+  } | null;
+  queue: {
+    paused: boolean | null;
+    pending: number | null;
+    running: number | null;
+    max_pending_jobs: number | null;
+    active: number | null;
+    max_active_jobs: number | null;
+  } | null;
   checked_at: string | null;
 };
 
@@ -98,6 +115,42 @@ function normalizePresetId(value: unknown, fallback: H3PresetId = H3_DEFAULT_PRE
   return fallback;
 }
 
+function stringOrNull(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function numberOrNull(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function booleanOrNull(value: unknown) {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function normalizeHealthBilling(value: unknown): H3HealthSnapshot['billing'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  return {
+    charged: booleanOrNull(input.charged),
+    cost: numberOrNull(input.cost),
+    currency: stringOrNull(input.currency),
+    cost_model: stringOrNull(input.cost_model),
+  };
+}
+
+function normalizeHealthQueue(value: unknown): H3HealthSnapshot['queue'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  return {
+    paused: booleanOrNull(input.paused),
+    pending: numberOrNull(input.pending),
+    running: numberOrNull(input.running),
+    max_pending_jobs: numberOrNull(input.max_pending_jobs),
+    active: numberOrNull(input.active),
+    max_active_jobs: numberOrNull(input.max_active_jobs),
+  };
+}
+
 function normalizeHealthSnapshot(value: unknown): H3HealthSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const input = value as Partial<H3HealthSnapshot>;
@@ -105,13 +158,16 @@ function normalizeHealthSnapshot(value: unknown): H3HealthSnapshot | null {
     ? input.checked_at.trim()
     : null;
   return {
-    api: typeof input.api === 'string' ? input.api.trim() || null : null,
-    worker: typeof input.worker === 'string' ? input.worker.trim() || null : null,
-    comfyui: typeof input.comfyui === 'string' ? input.comfyui.trim() || null : null,
-    worker_url: typeof input.worker_url === 'string' ? input.worker_url.trim() || null : null,
-    preset_count: typeof input.preset_count === 'number' && Number.isFinite(input.preset_count)
-      ? input.preset_count
-      : null,
+    api: stringOrNull(input.api),
+    version: stringOrNull(input.version),
+    public_base_url: stringOrNull(input.public_base_url),
+    worker: stringOrNull(input.worker),
+    comfyui: stringOrNull(input.comfyui),
+    worker_url: stringOrNull(input.worker_url),
+    default_preset: stringOrNull(input.default_preset),
+    preset_count: numberOrNull(input.preset_count),
+    billing: normalizeHealthBilling(input.billing),
+    queue: normalizeHealthQueue(input.queue),
     checked_at: checkedAt,
   };
 }
@@ -250,13 +306,16 @@ export function h3HealthSnapshotFromResponse(health: unknown): H3HealthSnapshot 
     ? input.worker as Record<string, unknown>
     : {};
   return {
-    api: typeof input.api === 'string' ? input.api : null,
-    worker: typeof worker.worker === 'string' ? worker.worker : null,
-    comfyui: typeof worker.comfyui === 'string' ? worker.comfyui : null,
-    worker_url: typeof input.worker_url === 'string' ? input.worker_url : null,
-    preset_count: typeof input.preset_count === 'number' && Number.isFinite(input.preset_count)
-      ? input.preset_count
-      : null,
+    api: stringOrNull(input.api),
+    version: stringOrNull(input.version),
+    public_base_url: stringOrNull(input.public_base_url),
+    worker: stringOrNull(worker.worker),
+    comfyui: stringOrNull(worker.comfyui),
+    worker_url: stringOrNull(input.worker_url),
+    default_preset: stringOrNull(input.default_preset),
+    preset_count: numberOrNull(input.preset_count),
+    billing: normalizeHealthBilling(input.billing),
+    queue: normalizeHealthQueue(input.queue),
     checked_at: new Date().toISOString(),
   };
 }

@@ -47,7 +47,7 @@
   - 完成标准：形成一份不包含 token 明文的接入参数摘要，明确 H3 是否可从 sd2 服务器访问。
   - 健康准入：只有 `api=ok`、`worker.worker=ok`、`worker.comfyui=ok`、公网反代/tunnel 稳定、队列上限启用时，才允许打开普通用户入口。
   - 停止条件：H3 只有 `127.0.0.1:8893` 且服务器无法访问、worker/ComfyUI 不健康、公网反代不稳定或队列保护未开启时，不开放用户入口。
-  - 本轮状态：已按 H3 guide 完成代码接入参数和安全边界；普通用户 H3 入口现在必须等后台测试连接写入 `api=ok + worker=ok + comfyui=ok` 后才开放。2026-08-15 复查确认生产库没有 `h3_video_api_v1` 配置记录，生产服务器 `H3_*TOKEN` 未配置，服务器和本机 `127.0.0.1:8893` 都没有 H3 gateway 监听；本机 `8793` 是 media-link 服务，不是 H3。真实 H3 公网地址、token、worker/ComfyUI 健康和服务器可达性仍待 T12/T13 验证。
+  - 本轮状态：已按 H3 guide 完成代码接入参数和安全边界；普通用户 H3 入口现在必须等后台测试连接写入 `api=ok + worker=ok + comfyui=ok` 后才开放。2026-08-15 复查确认生产库没有 `h3_video_api_v1` 配置记录，生产服务器 `H3_*TOKEN` 未配置，服务器和本机 `127.0.0.1:8893` 都没有 H3 gateway 监听；本机 `8793` 是 media-link 服务，不是 H3。2026-08-15 H3 侧提供临时公网地址 `https://wherever-globe-lie-broadcast.trycloudflare.com` 后，本地只读验证 `GET /health` 返回 `api=ok`、`worker=ok`、`comfyui=ok`、`queue.pending=0`、`billing.charged=false`、`billing.cost=0`；sd2 来源 CORS 预检允许 `https://sd2.youdooart.com` 和 `Idempotency-Key`。仍缺安全渠道交付 `H3_API_TOKEN` / `H3_ADMIN_TOKEN`、生产固定域名和 sd2 服务器侧配置验证。
 
 - [x] T1. 新增 H3 后台配置模型
   - 创建：`src/lib/integrations/h3.ts`
@@ -60,6 +60,7 @@
     - 操作写 `operationLog`，记录谁改了 H3 配置。
   - 验证：新增 `scripts/h3-admin-settings-smoke.ts`，覆盖保存、读取、清空 token、安全 DTO 不泄漏 token。
   - 2026-08-15 加固：新增健康快照 `health`，配置齐全只代表 `configured=true`，只有测试连接通过后才返回 `ready=true` / `admin_queue_ready=true`。
+  - 2026-08-15 联调补充：健康快照新增保留 `version`、`public_base_url`、`default_preset`、`billing`、`queue`，连接测试 OperationLog 只记录安全摘要，不记录 token。
 
 - [x] T2. 新增 H3 provider adapter
   - 创建：`src/lib/provider/h3.ts`
@@ -78,6 +79,7 @@
     - `seed` 只允许 `-1` 或安全整数；`width` / `height` 第一版隐藏，不开放普通用户填写。
   - 验证：新增 `scripts/h3-provider-adapter-smoke.ts`，用 mock fetch 断言 URL、Header、payload、参数白名单、错误转换和 token 不被写入日志。
   - 2026-08-15 加固：`done` 但没有视频输出时转为 `failed`，错误码写入 `h3_done_without_output`，避免成功结算不可播放任务。
+  - 2026-08-15 联调补充：`createH3VideoJob` 支持 `Idempotency-Key` 请求头；输出类型承接 `content_type`、`size_bytes`、`duration_sec`、`width`、`height`、`fps`、`sha256`；图片上传类型承接 `width`、`height`、`mime_type`。
 
 - [x] T3. 新增 H3 provider 状态映射
   - 修改：`src/lib/provider/video-task-status.ts`
@@ -121,6 +123,7 @@
     - 创建成功后仍启动现有 `startTaskLocalization`。
   - 验证：新增 `scripts/h3-create-route-smoke.ts`，用 mock adapter 断言任务落库、payload、provider、model、job_id、错误分支。
   - 2026-08-15 加固：任务创建从 `isH3ApiReady` 改为 `isH3Operational`，未测试连接或健康检查未通过时拒绝普通生成。
+  - 2026-08-15 联调补充：H3 提交时使用 `sourceRequestId || idempotencyKey || taskId` 作为外部 `Idempotency-Key`，并同步记录到 ProviderApiRequest，避免外网重试生成重复 H3 job。
 
 - [x] T6. 处理 H3 结果下载和本地缓存
   - 修改：`src/lib/video/task-finalizer.ts`
@@ -191,7 +194,7 @@
     - `npm run lint`
     - `npm run build`
   - 完成标准：不真实调用 H3 生成，也能证明选择值穿透 UI、API、provider payload、任务记录、状态映射和缓存路径。
-  - 本轮证据：H3 全量 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check` 均通过；H3 免费修正后的 smoke 已断言 0 成本和跳过冻结路径。未发起真实 H3 生成，因为当前本机和生产服务器均无 H3 gateway 可用。
+  - 本轮证据：H3 全量 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check` 均通过；H3 免费修正后的 smoke 已断言 0 成本和跳过冻结路径。未发起真实 H3 生成，因为当前本机和生产服务器均无 H3 gateway 可用。2026-08-15 临时公网联调补充后，`npx tsx scripts/h3-provider-adapter-smoke.ts`、`npx tsx scripts/h3-admin-settings-smoke.ts`、`npx tsx scripts/h3-create-route-smoke.ts`、`npx tsx scripts/h3-reference-image-handoff-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check` 通过。
 
 - [x] T14. 审查阻塞修复
   - 来源：独立只读审查发现第一轮实现存在 5 个阻塞风险。
@@ -212,7 +215,7 @@
     - 再提交 1 个带首帧/尾帧图片的短视频 H3 测试任务。
     - 验证 `/tasks/<id>`、项目产出、后台产出、缩略图、下载链接。
   - 完成标准：真实页面能看到 H3 生成结果；纯文本任务和带首尾帧任务都能刷新后仍存在，下载稳定可用。
-  - 2026-08-15 阻塞状态：用户已授权使用 H3 本地算力并要求多跑几个视频，但当前没有可访问的 H3 gateway。已验证 `http://127.0.0.1:8893/health` 在本机和生产服务器均连接失败，生产库没有 H3 配置记录，生产 systemd 环境没有 H3 token。需要先启动/提供 H3 API gateway 地址和 token，或把 gateway 反代到生产服务器可访问地址后，才能提交真实 H3 任务。
+  - 2026-08-15 阻塞状态：用户已授权使用 H3 本地算力并要求多跑几个视频，但当前没有可公开使用的 token。已验证 `http://127.0.0.1:8893/health` 在本机和生产服务器均连接失败，生产库没有 H3 配置记录，生产 systemd 环境没有 H3 token。H3 临时公网 `GET /health` 和 sd2 CORS 预检已通过；`GET /api/h3/presets`、`POST /api/h3/generate`、轮询和 mp4 下载仍需通过安全渠道配置 `H3_API_TOKEN` 后才能从 sd2 执行。
 
 - [ ] T13. 服务器部署闭环
   - 按 `AGENTS.md` 的 sd2 服务器生产托管规则执行。
