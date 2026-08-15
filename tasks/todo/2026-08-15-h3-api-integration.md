@@ -434,6 +434,7 @@
   - 测试顺序：先 5 秒 `lightx2v_4step_turbo` 纯文本；再 5 秒 `larry_v4_6step`；能出 mp4 后再上 15 秒 720P 多题材。
   - 完成标准：至少一个直接 H3 任务 `done` 且 outputs 含 `kind=video`、mp4 可下载播放、`billing.charged=false`。
   - 停止条件：如果 5 秒 turbo 仍卡 `running 0.5` 或 preset 仍 failed，停止批量测试，生成脱敏交接包给 H3 侧，不继续占队列。
+  - 2026-08-16 阻塞状态：已新增 `scripts/h3-live-minimal-smoke.ts`，本地运行确认当前本地 DB/环境没有 H3 token；生产环境部署时 SSH 到 `gouki@42.193.221.253` 被 publickey 拒绝，无法上传本轮版本、无法在服务器生产配置环境执行 live smoke。该阻塞不是 H3 API 生成失败，需先恢复服务器 SSH 凭据或提供可用部署通道。
 
 - [ ] T24. 重新跑 sd2 侧 15 秒 720P 多题材 H3 压测
   - 检查对象：`/api/codex/video/create`、任务轮询、finalizer、本地缓存、项目产出、任务列表、下载播放。
