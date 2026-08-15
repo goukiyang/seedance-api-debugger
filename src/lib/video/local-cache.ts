@@ -4,6 +4,7 @@ import path from 'path';
 import { once } from 'events';
 import { prisma } from '@/lib/prisma';
 import { refreshProviderTaskResultUrl } from '@/lib/provider/video-task-status';
+import { downloadH3JobOutput, parseH3InternalOutputUrl } from '@/lib/provider/h3';
 
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
 const PUBLIC_VIDEO_DIR = path.join(process.cwd(), 'public', 'videos');
@@ -267,17 +268,39 @@ async function cacheTaskVideoToLocalInner(
   let lastFrameUrl = task.result_last_frame_url;
   let refreshedUrl = false;
   let response: Response;
+  const h3InternalOutput = parseH3InternalOutputUrl(sourceUrl);
 
-  try {
-    response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      return downloadTimeoutResult(timeoutMs);
+  if (h3InternalOutput) {
+    try {
+      const output = await downloadH3JobOutput(h3InternalOutput.jobId, h3InternalOutput.index);
+      const bytes = Buffer.from(output.data);
+      response = new Response(bytes, {
+        status: 200,
+        headers: {
+          'content-type': output.contentType,
+          'content-length': String(bytes.byteLength),
+        },
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: 'H3 output download failed',
+        message: error instanceof Error ? error.message : 'H3 输出下载失败',
+        status: 502,
+      };
     }
-    throw error;
+  } else {
+    try {
+      response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return downloadTimeoutResult(timeoutMs);
+      }
+      throw error;
+    }
   }
 
-  if (response.status === 403 && refreshOnForbidden) {
+  if (!h3InternalOutput && response.status === 403 && refreshOnForbidden) {
     const refreshed = await refreshResultUrl(task);
     if (refreshed?.result_video_url && refreshed.result_video_url !== sourceUrl) {
       sourceUrl = refreshed.result_video_url;

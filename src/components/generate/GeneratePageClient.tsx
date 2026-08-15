@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from 'react';
 import Link from 'next/link';
 import { Archive, Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
+import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
@@ -26,7 +27,9 @@ import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
 
 interface CreateResponse {
   id: string;
+  provider?: string;
   provider_task_id: string;
+  model?: string;
   status: string;
   created_at: string;
   project_id?: string;
@@ -126,6 +129,15 @@ interface CreditSummary {
   monthly_used: number;
   total_used: number;
 }
+
+type GenerationProvider = 'seedance' | 'h3';
+
+type H3VideoConfig = {
+  enabled: boolean;
+  ready: boolean;
+  default_preset_id: string;
+  preset_options: ComposerSelectOption[];
+};
 
 interface ProjectOption {
   id: string;
@@ -241,6 +253,31 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     modelLabel: '火山 IP 动画',
   },
 };
+
+function normalizeH3VideoConfig(value: unknown): H3VideoConfig | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<H3VideoConfig>;
+  const options = Array.isArray(raw.preset_options)
+    ? raw.preset_options
+        .filter((option): option is ComposerSelectOption => (
+          Boolean(option)
+          && typeof option === 'object'
+          && typeof (option as ComposerSelectOption).id === 'string'
+          && typeof (option as ComposerSelectOption).label === 'string'
+        ))
+        .map((option) => ({
+          id: option.id,
+          label: option.label,
+          detail: typeof option.detail === 'string' ? option.detail : '',
+        }))
+    : [];
+  return {
+    enabled: raw.enabled === true,
+    ready: raw.ready === true,
+    default_preset_id: typeof raw.default_preset_id === 'string' ? raw.default_preset_id : '',
+    preset_options: options,
+  };
+}
 
 function toPositiveInt(value: unknown, fallback: number): number {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -431,6 +468,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [credits, setCredits] = useState<CreditSummary | null>(null);
   const [currentUser, setCurrentUser] = useState<GeneratePageUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
 
   // ---- Current Project ----
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -457,6 +496,42 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [reuseMessage, setReuseMessage] = useState('');
   const [reuseLoading, setReuseLoading] = useState(false);
   const [reusingTaskId, setReusingTaskId] = useState<string | null>(null);
+
+  const h3Ready = !isIpSurface
+    && h3VideoConfig?.ready === true
+    && h3VideoConfig.preset_options.length > 0;
+  const generationProviderOptions = useMemo<ComposerSelectOption[]>(() => {
+    if (isIpSurface) return [];
+    const options: ComposerSelectOption[] = [
+      { id: 'seedance', label: 'Seedance 视频', detail: '默认云端视频模型' },
+    ];
+    if (h3Ready) {
+      options.push({ id: 'h3', label: 'H3 本地工作站', detail: '使用后台配置的本地 H3 生成服务' });
+    } else if (currentUser?.role === 'admin') {
+      options.push({
+        id: 'h3',
+        label: 'H3 未配置',
+        detail: '到 API 设置配置后开放给用户',
+        disabled: true,
+        disabledReason: 'H3 未启用或缺少用户 token',
+      });
+    }
+    return options;
+  }, [currentUser?.role, h3Ready, isIpSurface]);
+  const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
+    if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS;
+    if (selectedProvider === 'h3' && h3Ready) return h3VideoConfig?.preset_options || [];
+    return SEEDANCE_VIDEO_MODEL_OPTIONS;
+  }, [h3Ready, h3VideoConfig?.preset_options, isIpSurface, selectedProvider]);
+  const activeModelLabel = selectedProvider === 'h3' ? 'H3 预设' : surfaceConfig.modelLabel;
+  const activeProviderLabel = selectedProvider === 'h3' ? 'H3 本地工作站' : 'Seedance 视频';
+  const handleGenerationProviderChange = useCallback((provider: string) => {
+    if (provider === 'h3') {
+      if (h3Ready) setSelectedProvider('h3');
+      return;
+    }
+    setSelectedProvider('seedance');
+  }, [h3Ready]);
 
   // ============================================================================
   // Load collections
@@ -516,6 +591,33 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       cancelled = true;
     };
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (isIpSurface) return;
+    let cancelled = false;
+    fetch('/api/config', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (cancelled) return;
+        setH3VideoConfig(normalizeH3VideoConfig(data?.h3_video));
+      })
+      .catch(() => {
+        if (!cancelled) setH3VideoConfig(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isIpSurface]);
+
+  useEffect(() => {
+    if (isIpSurface && selectedProvider !== 'seedance') {
+      setSelectedProvider('seedance');
+      return;
+    }
+    if (selectedProvider === 'h3' && !h3Ready) {
+      setSelectedProvider('seedance');
+    }
+  }, [h3Ready, isIpSurface, selectedProvider]);
 
   useEffect(() => {
     fetch('/api/collections')
@@ -1191,6 +1293,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     agentPromptSnapshot?: string | null;
     finalPromptSnapshot?: string | null;
     promptUserEdited?: boolean;
+    provider?: string | null;
     model?: string | null;
   }) => {
     setSubmitting(true);
@@ -1210,6 +1313,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       return;
     }
     const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const requestedProvider: GenerationProvider = !isIpSurface && params.provider === 'h3' ? 'h3' : 'seedance';
 
     try {
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
@@ -1243,6 +1347,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           agent_prompt_snapshot: params.agentPromptSnapshot || null,
           final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
           prompt_user_edited: params.promptUserEdited === true,
+          provider: isIpSurface ? undefined : requestedProvider,
           model: params.model || undefined,
         }),
       });
@@ -1265,7 +1370,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         {
           id: data.id,
           prompt: params.prompt,
-          provider: isIpSurface ? 'volcengine_ark' : 'seedance',
+          provider: data.provider || (isIpSurface ? 'volcengine_ark' : requestedProvider),
           generation_mode: params.generationMode,
           local_status: data.status || 'submitted',
           public_video_url: null,
@@ -1861,8 +1966,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onReset={handleReset}
           resultReturnTo={surfaceConfig.routePath}
           submitDisabledReason={surfaceConfig.submitDisabledReason}
-          modelLabel={surfaceConfig.modelLabel}
-          modelOptions={isIpSurface ? VOLCENGINE_IP_MODEL_OPTIONS : SEEDANCE_VIDEO_MODEL_OPTIONS}
+          providerLabel={activeProviderLabel}
+          providerOptions={generationProviderOptions}
+          selectedProvider={selectedProvider}
+          onProviderChange={handleGenerationProviderChange}
+          modelLabel={activeModelLabel}
+          modelOptions={activeModelOptions}
         />
 
         {/* 最近任务 */}

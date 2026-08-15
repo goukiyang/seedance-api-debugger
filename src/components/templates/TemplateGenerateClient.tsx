@@ -6,18 +6,22 @@ import { useSearchParams } from 'next/navigation';
 import { Check, ChevronDown, Folder, Plus } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
+import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
 
 type CreateResponse = {
   id: string;
+  provider?: string;
   provider_task_id: string;
+  model?: string;
   status: string;
   created_at: string;
   project_id?: string;
@@ -41,6 +45,15 @@ type CreditSummary = {
   available: number;
   monthly_used: number;
   total_used: number;
+};
+
+type GenerationProvider = 'seedance' | 'h3';
+
+type H3VideoConfig = {
+  enabled: boolean;
+  ready: boolean;
+  default_preset_id: string;
+  preset_options: ComposerSelectOption[];
 };
 
 type ProjectOption = {
@@ -105,6 +118,31 @@ const VIDEO_CARD_STORAGE_KEY = 'template_generate_video_card_by_project_v1';
 const RECENT_TASK_PAGE_SIZE = 12;
 const MAX_ACTIVE_POLLING_TASKS = 12;
 const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
+
+function normalizeH3VideoConfig(value: unknown): H3VideoConfig | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<H3VideoConfig>;
+  const options = Array.isArray(raw.preset_options)
+    ? raw.preset_options
+        .filter((option): option is ComposerSelectOption => (
+          Boolean(option)
+          && typeof option === 'object'
+          && typeof (option as ComposerSelectOption).id === 'string'
+          && typeof (option as ComposerSelectOption).label === 'string'
+        ))
+        .map((option) => ({
+          id: option.id,
+          label: option.label,
+          detail: typeof option.detail === 'string' ? option.detail : '',
+        }))
+    : [];
+  return {
+    enabled: raw.enabled === true,
+    ready: raw.ready === true,
+    default_preset_id: typeof raw.default_preset_id === 'string' ? raw.default_preset_id : '',
+    preset_options: options,
+  };
+}
 
 function shouldContinuePollingStableDelivery(task: {
   local_status?: string | null;
@@ -241,6 +279,8 @@ export function TemplateGenerateClient() {
   const [currentUser, setCurrentUser] = useState<TemplateGenerateUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
+  const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
   const [collections, setCollections] = useState<AssetCollection[]>([]);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -285,6 +325,39 @@ export function TemplateGenerateClient() {
   const [recentTasksLoadingInitial, setRecentTasksLoadingInitial] = useState(true);
   const [recentTasksLoadingMore, setRecentTasksLoadingMore] = useState(false);
   const [recentTasksError, setRecentTasksError] = useState('');
+
+  const h3Ready = h3VideoConfig?.ready === true && h3VideoConfig.preset_options.length > 0;
+  const generationProviderOptions = useMemo<ComposerSelectOption[]>(() => {
+    const options: ComposerSelectOption[] = [
+      { id: 'seedance', label: 'Seedance 视频', detail: '默认云端视频模型' },
+    ];
+    if (h3Ready) {
+      options.push({ id: 'h3', label: 'H3 本地工作站', detail: '使用后台配置的本地 H3 生成服务' });
+    } else if (currentUser?.role === 'admin') {
+      options.push({
+        id: 'h3',
+        label: 'H3 未配置',
+        detail: '到 API 设置配置后开放给用户',
+        disabled: true,
+        disabledReason: 'H3 未启用或缺少用户 token',
+      });
+    }
+    return options;
+  }, [currentUser?.role, h3Ready]);
+  const activeModelOptions = useMemo<ComposerSelectOption[]>(() => (
+    selectedProvider === 'h3' && h3Ready
+      ? h3VideoConfig?.preset_options || []
+      : SEEDANCE_VIDEO_MODEL_OPTIONS
+  ), [h3Ready, h3VideoConfig?.preset_options, selectedProvider]);
+  const activeModelLabel = selectedProvider === 'h3' ? 'H3 预设' : 'Seedance 2.0';
+  const activeProviderLabel = selectedProvider === 'h3' ? 'H3 本地工作站' : 'Seedance 视频';
+  const handleGenerationProviderChange = useCallback((provider: string) => {
+    if (provider === 'h3') {
+      if (h3Ready) setSelectedProvider('h3');
+      return;
+    }
+    setSelectedProvider('seedance');
+  }, [h3Ready]);
 
   const projectNameCounts = useMemo(() => {
     return projects.reduce<Record<string, number>>((acc, project) => {
@@ -344,10 +417,25 @@ export function TemplateGenerateClient() {
       })
       .catch(() => {});
 
+    fetch('/api/config', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (!cancelled) setH3VideoConfig(normalizeH3VideoConfig(data?.h3_video));
+      })
+      .catch(() => {
+        if (!cancelled) setH3VideoConfig(null);
+      });
+
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedProvider === 'h3' && !h3Ready) {
+      setSelectedProvider('seedance');
+    }
+  }, [h3Ready, selectedProvider]);
 
   const loadProjects = useCallback(async (preferredProjectId?: string | null) => {
     setLoadingProjects(true);
@@ -668,6 +756,8 @@ export function TemplateGenerateClient() {
     agentPromptSnapshot?: string | null;
     finalPromptSnapshot?: string | null;
     promptUserEdited?: boolean;
+    provider?: string | null;
+    model?: string | null;
   }) => {
     setSubmitting(true);
     setError(null);
@@ -690,6 +780,7 @@ export function TemplateGenerateClient() {
       setSubmitting(false);
       return;
     }
+    const requestedProvider: GenerationProvider = params.provider === 'h3' ? 'h3' : 'seedance';
 
     try {
       const response = await fetch('/api/tasks/create', {
@@ -721,6 +812,8 @@ export function TemplateGenerateClient() {
           agent_prompt_snapshot: params.agentPromptSnapshot || null,
           final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
           prompt_user_edited: params.promptUserEdited === true,
+          provider: requestedProvider,
+          model: params.model || undefined,
         }),
       });
       const data = await readJsonResponse<CreateTaskResponse>(response);
@@ -982,6 +1075,12 @@ export function TemplateGenerateClient() {
           result={result}
           polledResult={polledResult}
           isPolling={isPolling}
+          providerLabel={activeProviderLabel}
+          providerOptions={generationProviderOptions}
+          selectedProvider={selectedProvider}
+          onProviderChange={handleGenerationProviderChange}
+          modelLabel={activeModelLabel}
+          modelOptions={activeModelOptions}
           onReset={() => {
             setResult(null);
             setError(null);

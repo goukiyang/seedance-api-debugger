@@ -4,7 +4,14 @@ import React, { useState } from 'react';
 import { ParamChip } from '@/components/ParamChip';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution } from '@/types';
 import { GENERATION_MODE_LABELS, RATIO_LABELS, RATIO_OPTIONS, DURATION_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
-import type { VolcengineIpModelOption } from '@/lib/integrations/volcengine-ip-models';
+
+export type ComposerSelectOption = {
+  id: string;
+  label: string;
+  detail: string;
+  disabled?: boolean;
+  disabledReason?: string;
+};
 
 interface Props {
   generationMode: GenerationMode;
@@ -24,8 +31,12 @@ interface Props {
   lockedResolution?: boolean;
   lockReason?: string;
   compactControls?: boolean;
+  providerLabel?: string;
+  providerOptions?: ComposerSelectOption[];
+  selectedProvider?: string | null;
+  onProviderChange?: (provider: string) => void;
   modelLabel?: string;
-  modelOptions?: VolcengineIpModelOption[];
+  modelOptions?: ComposerSelectOption[];
   selectedModel?: string | null;
   onModelChange?: (model: string) => void;
 }
@@ -48,14 +59,25 @@ export function ComposerActionBar({
   lockedResolution = false,
   lockReason = '此参数来自视频卡交付规格',
   compactControls = false,
+  providerLabel = 'Seedance 视频',
+  providerOptions = [],
+  selectedProvider = null,
+  onProviderChange,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
   selectedModel = null,
   onModelChange,
 }: Props) {
+  const hasProviderOptions = providerOptions.length > 1;
+  const selectedProviderOption = providerOptions.find((option) => option.id === selectedProvider)
+    || providerOptions.find((option) => !option.disabled)
+    || providerOptions[0]
+    || null;
+  const effectiveProviderLabel = selectedProviderOption?.label || providerLabel;
   const hasModelOptions = modelOptions.length > 0;
   const selectedModelOption = modelOptions.find((option) => option.id === selectedModel) || modelOptions[0] || null;
   const effectiveModelLabel = selectedModelOption?.label || modelLabel;
+  const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
@@ -66,6 +88,39 @@ export function ComposerActionBar({
     <div className="composer-chips">
         {/* 视频生成标签 */}
         <ParamChip label="视频生成" active />
+
+        {/* 生成引擎 */}
+        <div className="composer-chip-wrap">
+          <ParamChip
+            label={effectiveProviderLabel}
+            dropdown={hasProviderOptions}
+            onClick={hasProviderOptions ? () => setShowProviderMenu(!showProviderMenu) : undefined}
+          />
+          {showProviderMenu && hasProviderOptions && (
+            <>
+              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowProviderMenu(false)} />
+              <div className="composer-chip-dropdown composer-model-options">
+                {providerOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`composer-chip-dropdown-item ${option.id === selectedProviderOption?.id ? 'active' : ''}`}
+                    disabled={option.disabled}
+                    onClick={() => {
+                      if (option.disabled) return;
+                      onProviderChange?.(option.id);
+                      setShowProviderMenu(false);
+                    }}
+                    title={option.disabledReason || option.id}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.disabledReason || option.detail}</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
 
         {/* 模型标签 */}
         <div className="composer-chip-wrap">

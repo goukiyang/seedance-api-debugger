@@ -11,6 +11,7 @@ import {
   getImageGenerationApiSettings,
   isImageGenerationApiReady,
 } from '@/lib/integrations/image-generation';
+import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getCreditSummary } from '@/lib/credits/policy';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
@@ -82,11 +83,13 @@ export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-  const [muskSettings, imageSettings] = await Promise.all([
+  const [muskSettings, imageSettings, h3Settings] = await Promise.all([
     getMuskApiSettings(),
     getImageGenerationApiSettings(),
+    getH3ApiSettings(),
   ]);
   const videoConfig = getProviderConfig();
+  const h3VideoConfig = safeH3ConfigDto(h3Settings);
   const creditSummary = await prisma.$transaction((tx) => getCreditSummary(tx, user));
 
   await ensureDefaultProjectForUser(user.id);
@@ -289,7 +292,8 @@ export async function GET(request: NextRequest) {
   const textReady = isMuskApiReady(muskSettings);
   const imageReady = isImageGenerationApiReady(imageSettings);
   const imageLabel = imageModelLabel(imageSettings.provider, imageSettings.default_model);
-  const videoReady = isApiKeyConfigured();
+  const seedanceVideoReady = isApiKeyConfigured();
+  const videoReady = seedanceVideoReady || h3VideoConfig.ready;
 
   return NextResponse.json({
     backend: { mode: 'sd2', transport: 'same-origin', mock: false },
@@ -375,6 +379,30 @@ export async function GET(request: NextRequest) {
       video: {
         enabled: videoReady,
         label: '默认视频 API',
+        providers: [
+          {
+            id: 'seedance',
+            label: 'Seedance 视频',
+            enabled: seedanceVideoReady,
+            ready: seedanceVideoReady,
+            model_options: videoConfig.model_options,
+          },
+          {
+            id: 'h3',
+            label: 'H3 本地工作站',
+            enabled: h3VideoConfig.enabled,
+            ready: h3VideoConfig.ready,
+            model_options: h3VideoConfig.preset_options,
+            default_model: h3VideoConfig.default_preset_id,
+          },
+        ],
+        h3_video: {
+          enabled: h3VideoConfig.enabled,
+          ready: h3VideoConfig.ready,
+          default_preset_id: h3VideoConfig.default_preset_id,
+          preset_options: h3VideoConfig.preset_options,
+          admin_queue_ready: h3VideoConfig.admin_queue_ready,
+        },
         model: videoConfig.model,
         model_options: videoConfig.model_options,
         interaction: {
@@ -394,6 +422,13 @@ export async function GET(request: NextRequest) {
           supports_last_frame: true,
           supports_watermark: true,
           model_options: videoConfig.model_options,
+          provider_options: h3VideoConfig.ready
+            ? ['seedance', 'h3']
+            : ['seedance'],
+          h3_notes: [
+            '首帧和尾帧会由后端转交给 H3',
+            '多余参考图、参考视频和音频第一版只作为可见上下文',
+          ],
           max_reference_images: 9,
         },
         endpoint: '/api/tasks/create',

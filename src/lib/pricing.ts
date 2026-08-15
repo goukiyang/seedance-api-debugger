@@ -3,6 +3,9 @@ import type { VideoResolution, VideoDuration } from '@/types';
 const DEFAULT_PRICING_RULE_ID = 'default-seedance-v2';
 const DEFAULT_PRICING_RULE_VERSION = 2;
 const SEEDANCE_VIDEO_COST_PER_SECOND = 3;
+const H3_PRICING_RULE_ID = 'default-h3-local-video-v1';
+const H3_PRICING_RULE_VERSION = 1;
+const H3_VIDEO_COST_PER_SECOND = 3;
 const ENHANCE_VIDEO_PRICING_RULE_ID = 'default-aimediakit-enhance-video-v1';
 const ENHANCE_VIDEO_PRICING_RULE_VERSION = 1;
 
@@ -47,6 +50,30 @@ export function calculateEstimatedCost(
     formula: `ceil(${baseCostPerSecond} × ${internalMultiplier} × ${duration}) = ${estimatedCost}`,
     pricingRuleId: DEFAULT_PRICING_RULE_ID,
     pricingRuleVersion: DEFAULT_PRICING_RULE_VERSION,
+  };
+}
+
+export function calculateH3EstimatedCost(
+  duration: VideoDuration | number,
+  presetLabel = 'H3 本地工作站',
+): PricingSnapshot {
+  const normalizedDuration = Math.max(1, Math.ceil(duration as number));
+  const baseCostPerSecond = H3_VIDEO_COST_PER_SECOND;
+  const internalMultiplier = 1.0;
+  const finalCostPerSecond = baseCostPerSecond * internalMultiplier;
+  const estimatedCost = Math.ceil(finalCostPerSecond * normalizedDuration);
+
+  return {
+    model: presetLabel,
+    resolution: 'H3 auto',
+    duration: normalizedDuration,
+    baseCostPerSecond,
+    internalMultiplier,
+    finalCostPerSecond,
+    estimatedCost,
+    formula: `ceil(${baseCostPerSecond} × ${internalMultiplier} × ${normalizedDuration}) = ${estimatedCost}`,
+    pricingRuleId: H3_PRICING_RULE_ID,
+    pricingRuleVersion: H3_PRICING_RULE_VERSION,
   };
 }
 

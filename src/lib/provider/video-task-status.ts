@@ -1,10 +1,12 @@
 import type { ProviderStatusResponse } from '@/types';
 import { getAiMediaKitTaskStatus } from './aimediakit-enhance-video';
+import { H3_VIDEO_PROVIDER, getH3TaskStatus } from './h3';
 import { getVideoTaskStatus } from './jimeng';
 import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from './volcengine-ip';
 
 export const VIDEO_TASK_PROVIDER_SEEDANCE = 'seedance';
 export const VIDEO_TASK_PROVIDER_VOLCENGINE_MEDIAKIT = 'volcengine_mediakit';
+export const VIDEO_TASK_PROVIDER_H3 = H3_VIDEO_PROVIDER;
 
 export type ProviderStatusTask = {
   provider?: string | null;
@@ -22,6 +24,7 @@ export type ProviderStatusFetchers = {
   seedance: ProviderStatusFetcher;
   volcengineIp: ProviderStatusFetcher;
   aiMediaKitEnhanceVideo: ProviderStatusFetcher;
+  h3: ProviderStatusFetcher;
 };
 
 export type ProviderStatusRouterOptions = {
@@ -38,6 +41,7 @@ const defaultFetchers: ProviderStatusFetchers = {
   seedance: getVideoTaskStatus,
   volcengineIp: getVolcengineIpTaskStatus,
   aiMediaKitEnhanceVideo: getAiMediaKitTaskStatus,
+  h3: getH3TaskStatus,
 };
 
 function normalizeProvider(provider: string | null | undefined) {
@@ -48,6 +52,7 @@ function fetcherForProvider(provider: string, fetchers: ProviderStatusFetchers) 
   if (provider === VIDEO_TASK_PROVIDER_SEEDANCE) return fetchers.seedance;
   if (provider === VOLCENGINE_IP_VIDEO_PROVIDER) return fetchers.volcengineIp;
   if (provider === VIDEO_TASK_PROVIDER_VOLCENGINE_MEDIAKIT) return fetchers.aiMediaKitEnhanceVideo;
+  if (provider === VIDEO_TASK_PROVIDER_H3) return fetchers.h3;
   throw new Error(`暂不支持的任务 Provider: ${provider}`);
 }
 

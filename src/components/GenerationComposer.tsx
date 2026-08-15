@@ -16,7 +16,7 @@ import { ReferenceStrip } from '@/components/ReferenceStrip';
 import { PromptEditor } from '@/components/PromptEditor';
 import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
-import { ComposerActionBar } from '@/components/ComposerActionBar';
+import { ComposerActionBar, type ComposerSelectOption } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
 import { ReferenceAlbumPicker, type ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
@@ -24,7 +24,6 @@ import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
-import type { VolcengineIpModelOption } from '@/lib/integrations/volcengine-ip-models';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
@@ -377,6 +376,7 @@ interface Props {
     agentPromptSnapshot: string | null;
     finalPromptSnapshot: string | null;
     promptUserEdited: boolean;
+    provider: string | null;
     model: string | null;
   }) => Promise<void>;
   submitError: string | null;
@@ -397,8 +397,12 @@ interface Props {
   initialTemplateId?: string | null;
   resultReturnTo?: string;
   submitDisabledReason?: string | null;
+  providerLabel?: string;
+  providerOptions?: ComposerSelectOption[];
+  selectedProvider?: string | null;
+  onProviderChange?: (provider: string) => void;
   modelLabel?: string;
-  modelOptions?: VolcengineIpModelOption[];
+  modelOptions?: ComposerSelectOption[];
 }
 
 export function GenerationComposer({
@@ -424,6 +428,10 @@ export function GenerationComposer({
   initialTemplateId = null,
   resultReturnTo = '/generate',
   submitDisabledReason = null,
+  providerLabel = 'Seedance 视频',
+  providerOptions = [],
+  selectedProvider = 'seedance',
+  onProviderChange,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
 }: Props) {
@@ -883,6 +891,7 @@ export function GenerationComposer({
       agentPromptSnapshot,
       finalPromptSnapshot: prompt,
       promptUserEdited,
+      provider: selectedProvider || null,
       model: selectedModel || null,
     });
   }, [
@@ -907,6 +916,7 @@ export function GenerationComposer({
     selectedPlanKey,
     agentPromptSnapshot,
     promptUserEdited,
+    selectedProvider,
     selectedModel,
   ]);
 
@@ -1783,6 +1793,10 @@ export function GenerationComposer({
           canSubmit={canPressSubmit}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
+          providerLabel={providerLabel}
+          providerOptions={providerOptions}
+          selectedProvider={selectedProvider}
+          onProviderChange={onProviderChange}
           modelLabel={modelLabel}
           modelOptions={modelOptions}
           selectedModel={selectedModel}

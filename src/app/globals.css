@@ -2723,6 +2723,92 @@ a {
   border-color: #fecaca;
 }
 
+.h3-queue-panel {
+  margin-top: 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.h3-queue-panel summary {
+  cursor: pointer;
+  padding: 14px 16px;
+  list-style: none;
+}
+
+.h3-queue-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.h3-queue-panel summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.h3-queue-panel summary strong {
+  color: #111827;
+}
+
+.h3-queue-panel summary span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.h3-queue-body {
+  display: grid;
+  gap: 14px;
+  padding: 0 16px 16px;
+}
+
+.h3-queue-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.h3-queue-action-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(220px, 1.3fr) minmax(140px, 0.8fr) minmax(220px, 1.2fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.h3-queue-json {
+  max-height: 260px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid #dbeafe;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1100px) {
+  .h3-queue-action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .h3-queue-panel summary > div,
+  .h3-queue-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .h3-queue-action-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .codex-clear-token {
   align-items: center;
   color: #4b5563;
@@ -12769,6 +12855,16 @@ body.compare-fullscreen-open {
 .composer-chip-dropdown-item.active {
   background-color: rgba(37, 99, 235, 0.2);
   color: #60a5fa;
+}
+
+.composer-chip-dropdown-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.composer-chip-dropdown-item:disabled:hover {
+  background: none;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .composer-model-options {

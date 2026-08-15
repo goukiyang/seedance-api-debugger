@@ -5,12 +5,19 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
-import { calculateEstimatedCost } from '@/lib/pricing';
+import { calculateEstimatedCost, calculateH3EstimatedCost } from '@/lib/pricing';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { parseSeedanceVideoModel, seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
+import {
+  H3_VIDEO_PROVIDER,
+  createH3VideoJob,
+  type H3GeneratePayload,
+} from '@/lib/provider/h3';
+import { uploadH3ReferenceImagesForTask } from '@/lib/provider/h3-assets';
+import { getH3ApiSettings, isH3ApiReady, isH3PresetId } from '@/lib/integrations/h3';
 import {
   PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
   ensureProviderSafeReferenceImageUrl,
@@ -82,6 +89,36 @@ const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
 const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 const execFileAsync = promisify(execFile);
+
+type GenerationProvider = 'seedance' | typeof H3_VIDEO_PROVIDER;
+
+function normalizeGenerationProvider(value: unknown): GenerationProvider {
+  if (typeof value !== 'string' || !value.trim()) return 'seedance';
+  const normalized = value.trim().toLowerCase();
+  if (['seedance', 'jimeng', 'dreamina'].includes(normalized)) return 'seedance';
+  if (['h3', 'h3_video', 'h3-local', 'h3_local'].includes(normalized)) return H3_VIDEO_PROVIDER;
+  throw new Error('provider 只允许 seedance 或 h3');
+}
+
+function appendH3VisibleContext(input: {
+  prompt: string;
+  extraReferenceImageUrls: string[];
+  referenceVideoUrls: string[];
+  referenceAudioUrls: string[];
+}) {
+  const lines: string[] = [];
+  if (input.extraReferenceImageUrls.length > 0) {
+    lines.push(`参考图上下文（不直接传给 H3 文件字段）：${input.extraReferenceImageUrls.length} 张图片只作为画面参考，需在生成时保持主体、风格和构图意图。`);
+  }
+  if (input.referenceVideoUrls.length > 0) {
+    lines.push(`参考视频上下文（H3 第一版不直传视频文件）：${input.referenceVideoUrls.length} 个视频只作为动作、节奏或镜头参考。`);
+  }
+  if (input.referenceAudioUrls.length > 0) {
+    lines.push(`参考音频上下文（H3 第一版不直传音频文件）：${input.referenceAudioUrls.length} 个音频只作为声音氛围参考；如需声音请写入 audio_prompt 或 music_prompt。`);
+  }
+  if (lines.length === 0) return input.prompt;
+  return `${input.prompt.trim()}\n\n[H3 可见上下文]\n${lines.map((line) => `- ${line}`).join('\n')}`;
+}
 
 function cleanSourceMetadata(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -559,11 +596,17 @@ export async function POST(request: NextRequest) {
     return errorJson('账号已被禁用，无法生成', 403);
   }
 
-  if (!isApiKeyConfigured()) {
-    return errorJson('请在环境变量中配置 SEEDANCE_API_KEY', 500);
+  const body = await request.json();
+  let requestedProvider: GenerationProvider;
+  try {
+    requestedProvider = normalizeGenerationProvider(body.provider ?? body.engine);
+  } catch (error) {
+    return errorJson(error instanceof Error ? error.message : 'provider 无效', 400);
   }
 
-  const body = await request.json();
+  if (requestedProvider === 'seedance' && !isApiKeyConfigured()) {
+    return errorJson('请在环境变量中配置 SEEDANCE_API_KEY', 500);
+  }
 
   // --- Validation ---
   if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
@@ -595,9 +638,29 @@ export async function POST(request: NextRequest) {
   if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
   if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
-  const parsedModel = parseSeedanceVideoModel(body.model);
-  if (!parsedModel.ok) return errorJson(parsedModel.message, 400);
-  const selectedModel = parsedModel.model;
+  const h3Settings = requestedProvider === H3_VIDEO_PROVIDER ? await getH3ApiSettings() : null;
+  let selectedModel: string;
+  if (requestedProvider === H3_VIDEO_PROVIDER) {
+    if (!h3Settings || !isH3ApiReady(h3Settings)) {
+      return errorJson('H3 本地生成服务未启用，请管理员先在 API 设置页配置 H3 地址和用户 token。', 503);
+    }
+    const requestedPreset = typeof body.preset_id === 'string' && body.preset_id.trim()
+      ? body.preset_id.trim()
+      : typeof body.model === 'string' && body.model.trim()
+        ? body.model.trim()
+        : h3Settings.default_preset_id;
+    if (!isH3PresetId(requestedPreset)) {
+      return errorJson('H3 preset 只允许 larry_v4_6step、larry_v4_8step、lightx2v_4step_turbo', 400);
+    }
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4'].includes(ratio)) {
+      return errorJson('H3 比例只支持 16:9、9:16、1:1、4:3、3:4', 400);
+    }
+    selectedModel = requestedPreset;
+  } else {
+    const parsedModel = parseSeedanceVideoModel(body.model);
+    if (!parsedModel.ok) return errorJson(parsedModel.message, 400);
+    selectedModel = parsedModel.model;
+  }
 
   const paidGenerationGuard = evaluatePaidGenerationGuard({ request, body, requestSource });
   if (!paidGenerationGuard.allowed) {
@@ -767,7 +830,9 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Pricing ---
-  const pricing = calculateEstimatedCost(resolution, duration, seedanceVideoModelLabel(selectedModel));
+  const pricing = requestedProvider === H3_VIDEO_PROVIDER
+    ? calculateH3EstimatedCost(duration, selectedModel)
+    : calculateEstimatedCost(resolution, duration, seedanceVideoModelLabel(selectedModel));
   const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
@@ -826,6 +891,8 @@ export async function POST(request: NextRequest) {
     body_source_request_id: bodySourceRequestId,
     client_name: clientName,
     source_label: effectiveSourceLabel,
+    provider: requestedProvider,
+    model: selectedModel,
     paid_generation_guard: paidGenerationGuard.metadata,
   };
   const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
@@ -1015,10 +1082,10 @@ export async function POST(request: NextRequest) {
   const allReferenceVideoUrls = normalizeReferenceMediaUrlList(body.reference_video_urls);
   const allReferenceAudioUrls = normalizeReferenceMediaUrlList(body.reference_audio_urls);
   if (allReferenceVideoUrls.length > 3) {
-    return errorJson('Seedance 2.0 单次生成最多选择 3 个参考视频。', 400);
+    return errorJson(`${requestedProvider === H3_VIDEO_PROVIDER ? 'H3' : 'Seedance 2.0'} 单次生成最多选择 3 个参考视频。`, 400);
   }
   if (allReferenceAudioUrls.length > 3) {
-    return errorJson('Seedance 2.0 单次生成最多选择 3 个参考音频。', 400);
+    return errorJson(`${requestedProvider === H3_VIDEO_PROVIDER ? 'H3' : 'Seedance 2.0'} 单次生成最多选择 3 个参考音频。`, 400);
   }
   const referenceVideoUrls = allReferenceVideoUrls.slice(0, 3);
   const referenceAudioUrls = allReferenceAudioUrls.slice(0, 3);
@@ -1050,7 +1117,7 @@ export async function POST(request: NextRequest) {
     || Boolean(lastFrameUrl)
     || frameImageUrls.length > 0
     || referenceVideoUrls.length > 0;
-  if (referenceAudioUrls.length > 0 && !hasVisualReference) {
+  if (requestedProvider !== H3_VIDEO_PROVIDER && referenceAudioUrls.length > 0 && !hasVisualReference) {
     return errorJson('音频参考不能单独使用，至少还需要 1 个图片或视频参考素材。', 400);
   }
 
@@ -1063,19 +1130,21 @@ export async function POST(request: NextRequest) {
   const referenceMediaResolutionIssue = await validateReferenceMediaResolution({
     preparedImages,
     imageUrls: finalReferenceImageUrls,
-    referenceVideoUrls,
+    referenceVideoUrls: requestedProvider === H3_VIDEO_PROVIDER ? [] : referenceVideoUrls,
   });
   if (referenceMediaResolutionIssue) {
     return NextResponse.json(referenceMediaResolutionIssue, { status: 400 });
   }
-  const referenceMediaPreflightIssue = await validateReferenceMediaProviderPreflight({
-    preparedImages,
-    imageUrls: finalReferenceImageUrls,
-    referenceVideoUrls,
-    referenceAudioUrls,
-  });
-  if (referenceMediaPreflightIssue) {
-    return NextResponse.json(referenceMediaPreflightIssue, { status: 400 });
+  if (requestedProvider !== H3_VIDEO_PROVIDER) {
+    const referenceMediaPreflightIssue = await validateReferenceMediaProviderPreflight({
+      preparedImages,
+      imageUrls: finalReferenceImageUrls,
+      referenceVideoUrls,
+      referenceAudioUrls,
+    });
+    if (referenceMediaPreflightIssue) {
+      return NextResponse.json(referenceMediaPreflightIssue, { status: 400 });
+    }
   }
 
   // --- Prompt validation + rendering ---
@@ -1097,7 +1166,7 @@ export async function POST(request: NextRequest) {
     ? body.callback_url.trim()
     : null;
   const isFastPathDelivery = isVideoDeliveryFastPathTask({
-    provider: 'seedance',
+    provider: requestedProvider,
     generation_mode: generationMode,
   });
   if (isFastPathDelivery) {
@@ -1138,16 +1207,78 @@ export async function POST(request: NextRequest) {
     model: selectedModel,
   };
 
+  let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;
+  let h3GeneratePayload: H3GeneratePayload | null = null;
+  let storedFinalPromptSnapshot = finalPromptSnapshot;
+
+  if (requestedProvider === H3_VIDEO_PROVIDER && h3Settings) {
+    h3ReferenceTransfer = await uploadH3ReferenceImagesForTask({
+      firstFrameUrl: firstFrameUrl || null,
+      lastFrameUrl: lastFrameUrl || null,
+      options: {
+        baseUrl: h3Settings.base_url,
+        apiToken: h3Settings.api_token || undefined,
+      },
+    });
+    const directH3ImageUrls = new Set([
+      firstFrameUrl || '',
+      lastFrameUrl || '',
+    ].filter(Boolean));
+    const extraReferenceImageUrls = finalReferenceImageUrls.filter((url) => !directH3ImageUrls.has(url));
+    const h3Prompt = appendH3VisibleContext({
+      prompt: promptRendered,
+      extraReferenceImageUrls,
+      referenceVideoUrls,
+      referenceAudioUrls,
+    });
+    providerInput.prompt = h3Prompt;
+    storedFinalPromptSnapshot = h3Prompt;
+    h3GeneratePayload = {
+      preset_id: selectedModel as H3GeneratePayload['preset_id'],
+      prompt: h3Prompt,
+      audio_prompt: typeof body.audio_prompt === 'string' && body.audio_prompt.trim()
+        ? body.audio_prompt.trim().slice(0, 1200)
+        : undefined,
+      music_prompt: typeof body.music_prompt === 'string' && body.music_prompt.trim()
+        ? body.music_prompt.trim().slice(0, 1200)
+        : undefined,
+      aspect_ratio: ratio as H3GeneratePayload['aspect_ratio'],
+      duration_sec: duration,
+      seed,
+      first_frame: h3ReferenceTransfer.first_frame || undefined,
+      last_frame: h3ReferenceTransfer.last_frame || undefined,
+      metadata: {
+        external_user_id: user.id,
+        external_request_id: sourceRequestId || idempotencyKey || null,
+        sd2_provider: H3_VIDEO_PROVIDER,
+      },
+    };
+  }
+
   // --- Create snapshot ---
-  const content = buildContentArray(providerInput);
+  const content = requestedProvider === H3_VIDEO_PROVIDER ? [] : buildContentArray(providerInput);
   const snapshot = await createTaskSnapshot({
     workspaceId,
     generationMode,
     promptRaw: body.prompt,
     input: providerInput,
-    providerPayloadJson: JSON.stringify({ model: selectedModel, content_item_count: content.length, referenceCount: preparedImages.length }),
+    providerPayloadJson: JSON.stringify(requestedProvider === H3_VIDEO_PROVIDER
+      ? {
+          provider: H3_VIDEO_PROVIDER,
+          preset_id: selectedModel,
+          h3_payload: h3GeneratePayload,
+          h3_reference_transfers: h3ReferenceTransfer?.transfers.map((item) => ({
+            role: item.role,
+            source_url: item.source_url,
+            h3_filename: item.h3_filename,
+            sha256: item.sha256,
+            size_bytes: item.size_bytes,
+          })) || [],
+        }
+      : { model: selectedModel, content_item_count: content.length, referenceCount: preparedImages.length }),
   });
   const taskParams = {
+    provider: requestedProvider,
     model: selectedModel,
     ratio, duration, resolution, seed,
     generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
@@ -1168,6 +1299,19 @@ export async function POST(request: NextRequest) {
       providerSafeResize: img.providerSafeResize,
     })),
     prepSummary,
+    h3: requestedProvider === H3_VIDEO_PROVIDER ? {
+      preset_id: selectedModel,
+      first_frame: h3ReferenceTransfer?.first_frame || null,
+      last_frame: h3ReferenceTransfer?.last_frame || null,
+      reference_transfers: h3ReferenceTransfer?.transfers.map((item) => ({
+        role: item.role,
+        source_url: item.source_url,
+        h3_filename: item.h3_filename,
+        sha256: item.sha256,
+        size_bytes: item.size_bytes,
+      })) || [],
+      visible_context_in_final_prompt: true,
+    } : null,
     source: {
       type: requestSource.source_type,
       label: effectiveSourceLabel,
@@ -1199,7 +1343,7 @@ export async function POST(request: NextRequest) {
     const result = await prisma.$transaction(async (tx) => {
       const task = await tx.videoTask.create({
         data: {
-          provider: 'seedance',
+          provider: requestedProvider,
           model: selectedModel,
           generation_mode: generationMode,
           prompt: body.prompt.trim(),
@@ -1232,7 +1376,7 @@ export async function POST(request: NextRequest) {
           agent_run_id: agentRun?.id || null,
           selected_agent_plan_key: selectedAgentPlanKey,
           agent_prompt_snapshot: agentPromptSnapshot,
-          final_prompt_snapshot: finalPromptSnapshot,
+          final_prompt_snapshot: storedFinalPromptSnapshot,
           prompt_user_edited: promptUserEdited,
           visibility: project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
@@ -1361,6 +1505,10 @@ export async function POST(request: NextRequest) {
             template_id: generationTemplate?.id || null,
             agent_run_id: agentRun?.id || null,
             selected_agent_plan_key: selectedAgentPlanKey,
+            provider: requestedProvider,
+            model: selectedModel,
+            provider_task_id: task.provider_task_id,
+            pricing_rule_id: pricing.pricingRuleId,
             owner_user_id: user.id,
             estimated_cost: estimatedCost,
             billing_scope: billingScope,
@@ -1386,7 +1534,7 @@ export async function POST(request: NextRequest) {
             video_card_id: videoCard.id,
             status: 'submitted',
             selected_plan_key: selectedAgentPlanKey || undefined,
-            final_prompt_snapshot: finalPromptSnapshot,
+              final_prompt_snapshot: storedFinalPromptSnapshot,
             user_edited: promptUserEdited,
           },
         });
@@ -1433,13 +1581,22 @@ export async function POST(request: NextRequest) {
     throw err;
   }
 
-  // --- Call Seedance provider DIRECTLY (no internal HTTP) ---
+  // --- Call provider DIRECTLY (no internal HTTP) ---
   let providerRequestId: string | null = null;
   try {
     providerInput.clientRequestId = taskId;
     providerInput.client_request_id = taskId;
+    if (h3GeneratePayload) {
+      h3GeneratePayload = {
+        ...h3GeneratePayload,
+        metadata: {
+          ...(h3GeneratePayload.metadata || {}),
+          external_task_id: taskId,
+        },
+      };
+    }
     let callbackParamsJson: string | null = null;
-    if (isFastPathDelivery) {
+    if (requestedProvider === 'seedance' && isFastPathDelivery) {
       const callbackConfig = resolveVideoDeliveryCallbackConfig({
         taskId,
         requestCallbackUrl,
@@ -1462,22 +1619,37 @@ export async function POST(request: NextRequest) {
 
     const providerRequest = await createProviderApiRequest({
       task: createdTask,
-      endpoint: 'seedance.createVideoTask',
+      endpoint: requestedProvider === H3_VIDEO_PROVIDER ? 'h3.generate' : 'seedance.createVideoTask',
       method: 'POST',
       idempotencyKey: idempotencyKey || null,
-      requestPayload: {
-        ...providerInput,
-        source: {
-          type: requestSource.source_type,
-          label: effectiveSourceLabel,
-          requestId: sourceRequestId,
-          paidGenerationGuard: paidGenerationGuard.metadata,
-        },
-      },
+      requestPayload: requestedProvider === H3_VIDEO_PROVIDER
+        ? {
+            ...h3GeneratePayload,
+            source: {
+              type: requestSource.source_type,
+              label: effectiveSourceLabel,
+              requestId: sourceRequestId,
+              paidGenerationGuard: paidGenerationGuard.metadata,
+            },
+          }
+        : {
+            ...providerInput,
+            source: {
+              type: requestSource.source_type,
+              label: effectiveSourceLabel,
+              requestId: sourceRequestId,
+              paidGenerationGuard: paidGenerationGuard.metadata,
+            },
+          },
     });
     providerRequestId = providerRequest.id;
 
-    const providerResult = await createVideoTask(providerInput);
+    const providerResult = requestedProvider === H3_VIDEO_PROVIDER && h3GeneratePayload && h3Settings
+      ? await createH3VideoJob(h3GeneratePayload, {
+          baseUrl: h3Settings.base_url,
+          apiToken: h3Settings.api_token || undefined,
+        })
+      : await createVideoTask(providerInput);
 
     await prisma.videoTask.update({
       where: { id: taskId },
@@ -1507,15 +1679,15 @@ export async function POST(request: NextRequest) {
           data: {
             status: 'submitted',
             video_task_id: taskId,
-            final_prompt_snapshot: finalPromptSnapshot,
+            final_prompt_snapshot: storedFinalPromptSnapshot,
             user_edited: promptUserEdited,
           },
         });
         await tx.agentRunStep.create({
           data: {
             agent_run_id: agentRun.id,
-            step_key: 'seedance_submit',
-            title: 'Seedance 执行',
+            step_key: requestedProvider === H3_VIDEO_PROVIDER ? 'h3_submit' : 'seedance_submit',
+            title: requestedProvider === H3_VIDEO_PROVIDER ? 'H3 执行' : 'Seedance 执行',
             input_json: JSON.stringify({ task_id: taskId, template_id: generationTemplate?.id || null }),
             output_json: JSON.stringify({ provider_task_id: providerResult.provider_task_id, status: 'submitted' }),
             sort_order: 6,
@@ -1529,20 +1701,23 @@ export async function POST(request: NextRequest) {
             video_task_id: taskId,
             memory_type: 'task_result',
             signal: 'neutral',
-            summary: '任务已提交 Seedance，等待生成结果回写',
-            metadata_json: JSON.stringify({ provider_task_id: providerResult.provider_task_id }),
+            summary: requestedProvider === H3_VIDEO_PROVIDER ? '任务已提交 H3，等待生成结果回写' : '任务已提交 Seedance，等待生成结果回写',
+            metadata_json: JSON.stringify({ provider: requestedProvider, provider_task_id: providerResult.provider_task_id }),
           },
         });
       });
     }
 
-    startTaskLocalization(taskId, isFastPathDelivery
-      ? { cacheOnSuccess: false, generateThumbnail: false, enqueueDeliveryOnSuccess: true }
-      : {});
+    startTaskLocalization(taskId, requestedProvider === H3_VIDEO_PROVIDER
+      ? { initialDelayMs: 4000, intervalMs: 4000, maxRuntimeMs: 15 * 60 * 1000 }
+      : isFastPathDelivery
+        ? { cacheOnSuccess: false, generateThumbnail: false, enqueueDeliveryOnSuccess: true }
+        : {});
     const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
 
     return NextResponse.json({
       id: taskId,
+      provider: requestedProvider,
       provider_task_id: providerResult.provider_task_id,
       model: selectedModel,
       status: 'submitted',
@@ -1559,6 +1734,7 @@ export async function POST(request: NextRequest) {
       billing_account_id: billingAccountId,
       snapshot_id: snapshot.id,
       prompt_rendered: promptRendered,
+      final_prompt_snapshot: storedFinalPromptSnapshot,
       asset_mapping: assetMapping,
       reference_album_ids: generationReferenceAlbumIds,
       reference_image_ids: generationReferenceImageIds,
@@ -1572,7 +1748,9 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     });
   } catch (err) {
-    const providerFailureMessage = err instanceof Error ? err.message : 'Seedance 调用异常';
+    const providerFailureMessage = err instanceof Error
+      ? err.message
+      : requestedProvider === H3_VIDEO_PROVIDER ? 'H3 调用异常' : 'Seedance 调用异常';
     const userFacingFailure = providerCreateFailureUserMessage(providerFailureMessage);
     if (providerRequestId) {
       await markProviderApiRequestFailed({
@@ -1612,8 +1790,8 @@ export async function POST(request: NextRequest) {
         await tx.agentRunStep.create({
           data: {
             agent_run_id: agentRun.id,
-            step_key: 'seedance_failed',
-            title: 'Seedance 执行失败',
+            step_key: requestedProvider === H3_VIDEO_PROVIDER ? 'h3_failed' : 'seedance_failed',
+            title: requestedProvider === H3_VIDEO_PROVIDER ? 'H3 执行失败' : 'Seedance 执行失败',
             input_json: JSON.stringify({ task_id: taskId }),
             output_json: JSON.stringify({
               error: userFacingFailure.code,
@@ -1630,7 +1808,7 @@ export async function POST(request: NextRequest) {
             video_task_id: taskId,
             memory_type: 'task_result',
             signal: 'negative',
-            summary: 'Seedance 提交失败，已返还冻结点数',
+            summary: requestedProvider === H3_VIDEO_PROVIDER ? 'H3 提交失败，已返还冻结点数' : 'Seedance 提交失败，已返还冻结点数',
             metadata_json: JSON.stringify({
               error: userFacingFailure.code,
               message: userFacingFailure.message,

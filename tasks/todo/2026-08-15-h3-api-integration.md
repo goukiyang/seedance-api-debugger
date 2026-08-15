@@ -8,21 +8,21 @@
 
 ## 2. 关键产品和技术决策
 
-- [ ] D1. 用户入口不新增顶部导航页面
+- [x] D1. 用户入口不新增顶部导航页面
   - 普通生成入口仍是 `/generate`。
   - 模板生成后续走 `/template-generate` 同一套生成引擎选择。
   - 无线画布后续作为节点能力接入，不作为第一入口。
 
-- [ ] D2. 后台入口放在 `/admin/integrations`
+- [x] D2. 后台入口放在 `/admin/integrations`
   - 新增「H3 本地生成服务」配置卡。
   - 管理员 token 只存在服务端配置和后端调用里，不进入浏览器。
 
-- [ ] D3. 第一版不引入外部 Comfy 前端或 SDK
+- [x] D3. 第一版不引入外部 Comfy 前端或 SDK
   - 不接 ViewComfy、Kitchen ComfyUI、ComfyUI 前端。
   - 不直接调用 worker 或 ComfyUI。
   - 直接按 H3 gateway 的 `/api/h3/*` 写薄 adapter，减少依赖和页面混乱。
 
-- [ ] D4. H3 素材处理规则
+- [x] D4. H3 素材处理规则
   - 首帧、尾帧、参考图先进入我们现有资产库。
   - 后端读取图片字节，转 `base64` 调 H3 `/api/h3/inputs/images`。
   - H3 返回的图片文件名再写入 `first_frame` / `last_frame`。
@@ -30,11 +30,11 @@
   - 参考视频第一版不直传 H3；只作为上下文或后续等待 H3 新字段。
   - 音频文件第一版不直传 H3；只支持 `audio_prompt` / `music_prompt` 文本。
 
-- [ ] D5. 真实生成前先做无成本 mock 验证
+- [x] D5. 真实生成前先做无成本 mock 验证
   - 未得到明确授权前，不发起真实 H3 生成。
   - 先用 mock fetch / mock adapter 证明：前端选择、后端入参、任务落库、provider payload、状态映射、结果缓存路径全部连通。
 
-- [ ] D6. 所有影响 H3 最终请求的内容必须可见
+- [x] D6. 所有影响 H3 最终请求的内容必须可见
   - 多余参考图如果只作为上下文，不能偷偷生成隐藏描述。
   - 要么由用户手写上下文，要么由 LLM 生成后显示在最终上下文/最终提示词里，管理员或用户确认后再提交。
   - H3 第一版不支持的素材、字段和高级参数必须在 UI 上明说，不做无提示降级。
@@ -47,8 +47,9 @@
   - 完成标准：形成一份不包含 token 明文的接入参数摘要，明确 H3 是否可从 sd2 服务器访问。
   - 健康准入：只有 `api=ok`、`worker.worker=ok`、`worker.comfyui=ok`、公网反代/tunnel 稳定、队列上限启用时，才允许打开普通用户入口。
   - 停止条件：H3 只有 `127.0.0.1:8893` 且服务器无法访问、worker/ComfyUI 不健康、公网反代不稳定或队列保护未开启时，不开放用户入口。
+  - 本轮状态：已按 H3 guide 完成代码接入参数和安全边界；真实 H3 公网地址、token、worker/ComfyUI 健康和服务器可达性仍待 T12/T13 验证。
 
-- [ ] T1. 新增 H3 后台配置模型
+- [x] T1. 新增 H3 后台配置模型
   - 创建：`src/lib/integrations/h3.ts`
   - 创建：`src/app/api/admin/integrations/h3/route.ts`
   - 修改：`src/app/admin/integrations/AdminIntegrationsClient.tsx`
@@ -59,7 +60,7 @@
     - 操作写 `operationLog`，记录谁改了 H3 配置。
   - 验证：新增 `scripts/h3-admin-settings-smoke.ts`，覆盖保存、读取、清空 token、安全 DTO 不泄漏 token。
 
-- [ ] T2. 新增 H3 provider adapter
+- [x] T2. 新增 H3 provider adapter
   - 创建：`src/lib/provider/h3.ts`
   - 内容：
     - `getH3Health`
@@ -76,7 +77,7 @@
     - `seed` 只允许 `-1` 或安全整数；`width` / `height` 第一版隐藏，不开放普通用户填写。
   - 验证：新增 `scripts/h3-provider-adapter-smoke.ts`，用 mock fetch 断言 URL、Header、payload、参数白名单、错误转换和 token 不被写入日志。
 
-- [ ] T3. 新增 H3 provider 状态映射
+- [x] T3. 新增 H3 provider 状态映射
   - 修改：`src/lib/provider/video-task-status.ts`
   - 修改：`src/lib/video/task-finalizer.ts`
   - 内容：
@@ -92,7 +93,7 @@
     - 超过最大等待时间或长时间无状态变化时，标记为可恢复异常并保留重试入口，不假装仍在生成。
   - 验证：扩展 `scripts/provider-status-router-smoke.ts`，覆盖 H3 状态、轮询终态、`Retry-After`、超时和未知 provider 报错。
 
-- [ ] T4. 接通 H3 图片素材转交
+- [x] T4. 接通 H3 图片素材转交
   - 创建：`src/lib/provider/h3-assets.ts`
   - 修改：`src/app/api/tasks/create/route.ts`
   - 复用：`src/lib/assets/site-upload.ts`、`src/lib/assets/public-storage.ts`、`src/lib/provider/reference-image-safety.ts`
@@ -104,7 +105,7 @@
     - 多余参考图如果转成文字上下文，必须写进最终上下文/最终提示词可见区域，不能作为隐藏 prompt 注入。
   - 验证：新增 `scripts/h3-reference-image-handoff-smoke.ts`，覆盖首帧、尾帧、非图片拒绝、多余参考图不直传、多余参考图上下文可见。
 
-- [ ] T5. 在创建任务 API 中加入 H3 分支
+- [x] T5. 在创建任务 API 中加入 H3 分支
   - 修改：`src/app/api/tasks/create/route.ts`
   - 内容：
     - 解析 `provider` 或 `engine`，默认仍为 Seedance。
@@ -117,7 +118,7 @@
     - 创建成功后仍启动现有 `startTaskLocalization`。
   - 验证：新增 `scripts/h3-create-route-smoke.ts`，用 mock adapter 断言任务落库、payload、provider、model、job_id、错误分支。
 
-- [ ] T6. 处理 H3 结果下载和本地缓存
+- [x] T6. 处理 H3 结果下载和本地缓存
   - 修改：`src/lib/video/task-finalizer.ts`
   - 可能创建：`src/lib/video/provider-output-download.ts`
   - 内容：
@@ -127,7 +128,7 @@
     - 如果 H3 输出列表为空，任务保持可重试失败状态，并显示中文错误。
   - 验证：新增 `scripts/h3-finalizer-output-smoke.ts`，覆盖 done 有输出、done 无输出、failed、下载 404、下载 503。
 
-- [ ] T7. 在普通生成页增加「生成引擎」
+- [x] T7. 在普通生成页增加「生成引擎」
   - 修改：`src/components/generate/GeneratePageClient.tsx`
   - 可能修改：`src/components/GenerationComposer.tsx`
   - 内容：
@@ -138,7 +139,7 @@
     - 多余参考图、参考视频、音频提示“作为上下文，不直接传文件”。
   - 验证：新增 `scripts/h3-generate-ui-smoke.ts`，覆盖配置启用/未启用、选择 H3 后 payload、普通用户不见未配置入口。
 
-- [ ] T8. 接入模板生成和无线画布能力声明
+- [x] T8. 接入模板生成和无线画布能力声明
   - 修改：`src/components/templates/TemplateGenerateClient.tsx`
   - 修改：`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`
   - 修改：`src/app/api/config` 对应文件，如存在 H3 能力暴露逻辑则补充。
@@ -147,7 +148,7 @@
     - 无线画布第一版只暴露能力状态，不急着重做节点生成。
   - 验证：新增或扩展 `scripts/ultimate-canvas-generation-task-coordinator-smoke.ts`，确认 capabilities 里能看到 H3 是否可用。
 
-- [ ] T9. 后台增加 H3 队列折叠区
+- [x] T9. 后台增加 H3 队列折叠区
   - 修改：`src/app/admin/integrations/AdminIntegrationsClient.tsx`
   - 修改：`src/app/api/admin/integrations/h3/route.ts` 或新增 `src/app/api/admin/integrations/h3/queue/route.ts`
   - 内容：
@@ -159,7 +160,7 @@
     - 不第一版新增 `/admin/h3-queue` 独立页。
   - 验证：新增 `scripts/h3-admin-queue-smoke.ts`，覆盖普通用户拒绝、管理员可读、暂停/恢复/取消/停止/move 或暂不支持提示、队列操作审计。
 
-- [ ] T10. 成本、点数和审计规则收口
+- [x] T10. 成本、点数和审计规则收口
   - 修改：`src/lib/pricing.ts` 或现有 pricing 配置文件。
   - 修改：`src/lib/costs/ledger.ts` 如需新增 provider 标识。
   - 内容：
@@ -170,7 +171,7 @@
     - H3 任务失败或取消不能吞掉冻结点数；CostLedger 需要能区分 `provider_request_failed`、`job_failed`、`job_cancelled`、`output_download_failed`。
   - 验证：新增 `scripts/h3-cost-ledger-smoke.ts`，确认没有把 H3 成本错记成 Seedance，并覆盖失败、取消、队列满、下载失败的扣费/退款规则。
 
-- [ ] T11. 无成本集成验证
+- [x] T11. 无成本集成验证
   - 命令：
     - `npx tsx scripts/h3-admin-settings-smoke.ts`
     - `npx tsx scripts/h3-provider-adapter-smoke.ts`
@@ -182,6 +183,7 @@
     - `npm run lint`
     - `npm run build`
   - 完成标准：不真实调用 H3 生成，也能证明选择值穿透 UI、API、provider payload、任务记录、状态映射和缓存路径。
+  - 本轮证据：H3 全量 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 均通过；未发起真实 H3 生成。
 
 - [ ] T12. 真实 H3 连接验证
   - 前提：用户明确授权使用 H3 本地算力。

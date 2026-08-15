@@ -84,6 +84,26 @@ type AiMediaKitConfig = {
   missing: Array<'api_key'>;
 };
 
+type H3Config = {
+  enabled: boolean;
+  ready: boolean;
+  admin_queue_ready: boolean;
+  provider: 'h3_video';
+  base_url: string;
+  health_path: string;
+  presets_path: string;
+  generate_path: string;
+  default_preset_id: 'larry_v4_6step' | 'larry_v4_8step' | 'lightx2v_4step_turbo';
+  preset_options: Array<{
+    id: 'larry_v4_6step' | 'larry_v4_8step' | 'lightx2v_4step_turbo';
+    label: string;
+    detail: string;
+  }>;
+  api_token_configured: boolean;
+  admin_token_configured: boolean;
+  missing: Array<'api_token' | 'preset'>;
+};
+
 type SubmitState = {
   type: 'success' | 'error';
   message: string;
@@ -95,6 +115,15 @@ type MuskTestState = {
   model?: string;
   latency_ms?: number;
   tested_at?: string;
+} | null;
+
+type H3TestState = {
+  type: 'success' | 'error';
+  message: string;
+  tested_at?: string;
+  health_api?: string;
+  worker?: string;
+  comfyui?: string;
 } | null;
 
 const EMPTY_CONFIG: CodexConfig = {
@@ -197,6 +226,26 @@ const EMPTY_AIMEDIAKIT_CONFIG: AiMediaKitConfig = {
   missing: ['api_key'],
 };
 
+const EMPTY_H3_CONFIG: H3Config = {
+  enabled: false,
+  ready: false,
+  admin_queue_ready: false,
+  provider: 'h3_video',
+  base_url: 'http://127.0.0.1:8893',
+  health_path: '/health',
+  presets_path: '/api/h3/presets',
+  generate_path: '/api/h3/generate',
+  default_preset_id: 'larry_v4_6step',
+  preset_options: [
+    { id: 'larry_v4_6step', label: '推荐', detail: '默认质量和速度平衡' },
+    { id: 'larry_v4_8step', label: '画质优先', detail: '更多步数，细节更稳' },
+    { id: 'lightx2v_4step_turbo', label: '快速预览', detail: '速度优先，用于草稿' },
+  ],
+  api_token_configured: false,
+  admin_token_configured: false,
+  missing: ['api_token'],
+};
+
 function selectorLabel(type: UserSelectorType) {
   if (type === 'id') return '用户 ID';
   if (type === 'username') return '用户名';
@@ -215,6 +264,7 @@ export default function AdminIntegrationsClient() {
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
   const [volcengineConfig, setVolcengineConfig] = useState<VolcengineIpConfig>(EMPTY_VOLCENGINE_IP_CONFIG);
   const [aiMediaKitConfig, setAiMediaKitConfig] = useState<AiMediaKitConfig>(EMPTY_AIMEDIAKIT_CONFIG);
+  const [h3Config, setH3Config] = useState<H3Config>(EMPTY_H3_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [muskSaving, setMuskSaving] = useState(false);
@@ -222,6 +272,8 @@ export default function AdminIntegrationsClient() {
   const [imageSaving, setImageSaving] = useState(false);
   const [volcengineSaving, setVolcengineSaving] = useState(false);
   const [aiMediaKitSaving, setAiMediaKitSaving] = useState(false);
+  const [h3Saving, setH3Saving] = useState(false);
+  const [h3Testing, setH3Testing] = useState(false);
   const [token, setToken] = useState('');
   const [clearToken, setClearToken] = useState(false);
   const [muskApiKey, setMuskApiKey] = useState('');
@@ -232,8 +284,21 @@ export default function AdminIntegrationsClient() {
   const [clearVolcengineApiKey, setClearVolcengineApiKey] = useState(false);
   const [aiMediaKitApiKey, setAiMediaKitApiKey] = useState('');
   const [clearAiMediaKitApiKey, setClearAiMediaKitApiKey] = useState(false);
+  const [h3ApiToken, setH3ApiToken] = useState('');
+  const [h3AdminToken, setH3AdminToken] = useState('');
+  const [clearH3ApiToken, setClearH3ApiToken] = useState(false);
+  const [clearH3AdminToken, setClearH3AdminToken] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
   const [muskTestState, setMuskTestState] = useState<MuskTestState>(null);
+  const [h3TestState, setH3TestState] = useState<H3TestState>(null);
+  const [h3QueueOpen, setH3QueueOpen] = useState(false);
+  const [h3QueueLoading, setH3QueueLoading] = useState(false);
+  const [h3QueueState, setH3QueueState] = useState<unknown>(null);
+  const [h3QueueAction, setH3QueueAction] = useState<'pause' | 'resume' | 'cancel' | 'stop' | 'move'>('pause');
+  const [h3QueueJobId, setH3QueueJobId] = useState('');
+  const [h3QueueDirection, setH3QueueDirection] = useState<'top' | 'up' | 'down' | 'bottom'>('top');
+  const [h3QueueReason, setH3QueueReason] = useState('');
+  const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
 
   const statusText = useMemo(() => {
     if (config.ready) return '已启用，可被 Codex 调用';
@@ -284,21 +349,31 @@ export default function AdminIntegrationsClient() {
     return '配置未就绪';
   }, [aiMediaKitConfig]);
 
+  const h3StatusText = useMemo(() => {
+    if (h3Config.ready) return '已启用';
+    if (!h3Config.enabled) return '未启用';
+    if (!h3Config.base_url) return '缺少 API 地址';
+    if (!h3Config.api_token_configured) return '缺少用户 token';
+    return '配置未就绪';
+  }, [h3Config]);
+
   const loadConfig = async () => {
     try {
-      const [codexRes, muskRes, imageRes, volcengineRes, aiMediaKitRes] = await Promise.all([
+      const [codexRes, muskRes, imageRes, volcengineRes, aiMediaKitRes, h3Res] = await Promise.all([
         fetch('/api/admin/integrations/codex', { cache: 'no-store' }),
         fetch('/api/admin/integrations/musk', { cache: 'no-store' }),
         fetch('/api/admin/integrations/image-generation', { cache: 'no-store' }),
         fetch('/api/admin/integrations/volcengine-ip', { cache: 'no-store' }),
         fetch('/api/admin/integrations/aimediakit', { cache: 'no-store' }),
+        fetch('/api/admin/integrations/h3', { cache: 'no-store' }),
       ]);
-      const [codexData, muskData, imageData, volcengineData, aiMediaKitData] = await Promise.all([
+      const [codexData, muskData, imageData, volcengineData, aiMediaKitData, h3Data] = await Promise.all([
         codexRes.json(),
         muskRes.json(),
         imageRes.json(),
         volcengineRes.json(),
         aiMediaKitRes.json(),
+        h3Res.json(),
       ]);
 
       if (!codexRes.ok) {
@@ -321,11 +396,16 @@ export default function AdminIntegrationsClient() {
         setSubmitState({ type: 'error', message: aiMediaKitData.error || '读取 AI MediaKit 配置失败' });
         return;
       }
+      if (!h3Res.ok) {
+        setSubmitState({ type: 'error', message: h3Data.error || '读取 H3 配置失败' });
+        return;
+      }
       setConfig(codexData.config || EMPTY_CONFIG);
       setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
       setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
       setAiMediaKitConfig(aiMediaKitData.config || EMPTY_AIMEDIAKIT_CONFIG);
+      setH3Config(h3Data.config || EMPTY_H3_CONFIG);
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
@@ -530,6 +610,139 @@ export default function AdminIntegrationsClient() {
     }
   };
 
+  const saveH3Config = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setH3Saving(true);
+    setSubmitState(null);
+    setH3TestState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/h3', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: h3Config.enabled,
+          base_url: h3Config.base_url,
+          default_preset_id: h3Config.default_preset_id,
+          api_token: h3ApiToken,
+          admin_token: h3AdminToken,
+          clear_api_token: clearH3ApiToken,
+          clear_admin_token: clearH3AdminToken,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+        return;
+      }
+      setH3Config(data.config || h3Config);
+      setH3ApiToken('');
+      setH3AdminToken('');
+      setClearH3ApiToken(false);
+      setClearH3AdminToken(false);
+      setSubmitState({ type: 'success', message: 'H3 本地生成服务配置已保存。' });
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setH3Saving(false);
+    }
+  };
+
+  const testH3Config = async () => {
+    setH3Testing(true);
+    setSubmitState(null);
+    setH3TestState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/h3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setH3TestState({
+          type: 'error',
+          message: data.error || data.message || 'H3 连接测试失败',
+        });
+        return;
+      }
+      const health = data.test?.health || {};
+      setH3Config(data.config || h3Config);
+      setH3TestState({
+        type: 'success',
+        message: 'H3 连接测试通过。',
+        tested_at: data.test?.tested_at,
+        health_api: typeof health.api === 'string' ? health.api : undefined,
+        worker: typeof health.worker?.worker === 'string' ? health.worker.worker : undefined,
+        comfyui: typeof health.worker?.comfyui === 'string' ? health.worker.comfyui : undefined,
+      });
+    } catch (error) {
+      setH3TestState({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'H3 连接测试失败',
+      });
+    } finally {
+      setH3Testing(false);
+    }
+  };
+
+  const loadH3Queue = async () => {
+    setH3QueueLoading(true);
+    setH3QueueMessage(null);
+    try {
+      const res = await fetch('/api/admin/integrations/h3/queue', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) {
+        setH3QueueMessage({ type: 'error', message: data.error || data.message || '读取 H3 队列失败' });
+        return;
+      }
+      setH3QueueState(data.queue || null);
+      setH3QueueMessage({ type: 'success', message: 'H3 队列状态已刷新。' });
+    } catch (error) {
+      setH3QueueMessage({ type: 'error', message: error instanceof Error ? error.message : '读取 H3 队列失败' });
+    } finally {
+      setH3QueueLoading(false);
+    }
+  };
+
+  const submitH3QueueAction = async () => {
+    setH3QueueMessage(null);
+    const needsJobId = h3QueueAction === 'cancel' || h3QueueAction === 'stop' || h3QueueAction === 'move';
+    const trimmedJobId = h3QueueJobId.trim();
+    if (needsJobId && !trimmedJobId) {
+      setH3QueueMessage({ type: 'error', message: '请先填写 H3 job_id。' });
+      return;
+    }
+    if ((h3QueueAction === 'cancel' || h3QueueAction === 'stop')
+      && !window.confirm(`确认执行 H3 ${h3QueueAction === 'cancel' ? '取消排队任务' : '停止运行任务'}？`)) {
+      return;
+    }
+    setH3QueueLoading(true);
+    try {
+      const res = await fetch('/api/admin/integrations/h3/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: h3QueueAction,
+          job_id: trimmedJobId || undefined,
+          direction: h3QueueAction === 'move' ? h3QueueDirection : undefined,
+          reason: h3QueueReason.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setH3QueueMessage({ type: 'error', message: data.error || data.message || 'H3 队列操作失败' });
+        return;
+      }
+      setH3QueueMessage({ type: 'success', message: 'H3 队列操作已提交，并已写入操作日志。' });
+      await loadH3Queue();
+    } catch (error) {
+      setH3QueueMessage({ type: 'error', message: error instanceof Error ? error.message : 'H3 队列操作失败' });
+    } finally {
+      setH3QueueLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadConfig();
   }, []);
@@ -642,6 +855,13 @@ export default function AdminIntegrationsClient() {
           <strong className="stat-value">{aiMediaKitStatusText}</strong>
           <span className="stat-sub">{aiMediaKitConfig.base_url || '未设置 API 地址'} · {aiMediaKitConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}</span>
         </div>
+        <div className="stat-card">
+          <span className="stat-label">H3 本地生成服务</span>
+          <strong className="stat-value">{h3StatusText}</strong>
+          <span className="stat-sub">
+            {h3Config.default_preset_id} · {h3Config.api_token_configured ? '用户 token 已设置' : '用户 token 未设置'}
+          </span>
+        </div>
       </div>
 
       {submitState && (
@@ -649,6 +869,263 @@ export default function AdminIntegrationsClient() {
           {submitState.message}
         </div>
       )}
+
+      <form id="h3-video" className="card codex-config-form" onSubmit={saveH3Config}>
+        <div className="codex-config-head">
+          <div>
+            <h2 className="section-title mb-0">H3 本地生成服务</h2>
+            <p className="text-gray text-sm mt-2">
+              保存 H3 API 网关地址、用户 token 和管理员 token。普通生成只走服务端转发，不把 token 暴露给浏览器。
+            </p>
+          </div>
+          <label className="toggle-switch" aria-label="启用 H3 本地生成服务">
+            <input
+              type="checkbox"
+              checked={h3Config.enabled}
+              onChange={(event) => setH3Config((prev) => ({ ...prev, enabled: event.target.checked }))}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div className="codex-config-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-base-url">API 地址</label>
+            <input
+              id="h3-base-url"
+              className="input"
+              value={h3Config.base_url}
+              onChange={(event) => setH3Config((prev) => ({ ...prev, base_url: event.target.value }))}
+              placeholder="https://h3-api.example.com"
+              autoComplete="off"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-default-preset">默认预设</label>
+            <select
+              id="h3-default-preset"
+              className="input"
+              value={h3Config.default_preset_id}
+              onChange={(event) => setH3Config((prev) => ({
+                ...prev,
+                default_preset_id: event.target.value as H3Config['default_preset_id'],
+              }))}
+            >
+              {h3Config.preset_options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label} · {option.detail}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-api-token">用户 token</label>
+            <input
+              id="h3-api-token"
+              className="input"
+              type="password"
+              value={h3ApiToken}
+              onChange={(event) => {
+                setH3ApiToken(event.target.value);
+                if (event.target.value.trim()) setClearH3ApiToken(false);
+              }}
+              placeholder={h3Config.api_token_configured ? '当前已设置，留空不变' : '输入 H3_API_TOKEN'}
+              autoComplete="new-password"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-admin-token">管理员 token</label>
+            <input
+              id="h3-admin-token"
+              className="input"
+              type="password"
+              value={h3AdminToken}
+              onChange={(event) => {
+                setH3AdminToken(event.target.value);
+                if (event.target.value.trim()) setClearH3AdminToken(false);
+              }}
+              placeholder={h3Config.admin_token_configured ? '当前已设置，留空不变' : '输入 H3_ADMIN_TOKEN'}
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+
+        <div className="codex-config-status">
+          <div>
+            <span className="info-label">当前状态</span>
+            <strong>{h3StatusText}</strong>
+          </div>
+          <div>
+            <span className="info-label">健康检查</span>
+            <strong>{h3Config.health_path}</strong>
+          </div>
+          <div>
+            <span className="info-label">提交任务</span>
+            <strong>{h3Config.generate_path}</strong>
+          </div>
+          <div>
+            <span className="info-label">队列管理</span>
+            <strong>{h3Config.admin_queue_ready ? '已可用' : '未就绪'}</strong>
+          </div>
+          <div>
+            <span className="info-label">用户 token</span>
+            <strong>{h3Config.api_token_configured ? '已设置' : '未设置'}</strong>
+          </div>
+          <div>
+            <span className="info-label">管理员 token</span>
+            <strong>{h3Config.admin_token_configured ? '已设置' : '未设置'}</strong>
+          </div>
+        </div>
+
+        <details
+          className="h3-queue-panel"
+          open={h3QueueOpen}
+          onToggle={(event) => setH3QueueOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <div>
+              <strong>H3 队列管理</strong>
+              <span>{h3Config.admin_queue_ready ? '可读取队列并执行管理员操作' : '需要先配置管理员 token'}</span>
+            </div>
+          </summary>
+          <div className="h3-queue-body">
+            <div className="h3-queue-toolbar">
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={loadH3Queue}
+                disabled={h3QueueLoading || !h3Config.admin_queue_ready}
+              >
+                {h3QueueLoading ? '正在刷新' : '刷新队列'}
+              </button>
+              {!h3Config.admin_queue_ready && (
+                <span className="text-gray text-sm">队列操作只在 H3 API 地址、用户 token 和管理员 token 都就绪后开放。</span>
+              )}
+            </div>
+
+            {h3QueueMessage && (
+              <div className={`codex-config-test-result ${h3QueueMessage.type === 'success' ? 'is-success' : 'is-error'}`}>
+                <strong>{h3QueueMessage.message}</strong>
+              </div>
+            )}
+
+            <div className="h3-queue-action-grid">
+              <label className="form-group">
+                <span className="form-label">动作</span>
+                <select
+                  className="input"
+                  value={h3QueueAction}
+                  onChange={(event) => setH3QueueAction(event.target.value as typeof h3QueueAction)}
+                  disabled={!h3Config.admin_queue_ready}
+                >
+                  <option value="pause">暂停新任务启动</option>
+                  <option value="resume">恢复队列</option>
+                  <option value="cancel">取消排队任务</option>
+                  <option value="stop">停止运行任务</option>
+                  <option value="move">调整排队顺序</option>
+                </select>
+              </label>
+              <label className="form-group">
+                <span className="form-label">job_id</span>
+                <input
+                  className="input"
+                  value={h3QueueJobId}
+                  onChange={(event) => setH3QueueJobId(event.target.value)}
+                  placeholder="cancel / stop / move 时填写"
+                  disabled={!h3Config.admin_queue_ready || h3QueueAction === 'pause' || h3QueueAction === 'resume'}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="form-group">
+                <span className="form-label">移动方向</span>
+                <select
+                  className="input"
+                  value={h3QueueDirection}
+                  onChange={(event) => setH3QueueDirection(event.target.value as typeof h3QueueDirection)}
+                  disabled={!h3Config.admin_queue_ready || h3QueueAction !== 'move'}
+                >
+                  <option value="top">置顶</option>
+                  <option value="up">上移</option>
+                  <option value="down">下移</option>
+                  <option value="bottom">置底</option>
+                </select>
+              </label>
+              <label className="form-group">
+                <span className="form-label">原因</span>
+                <input
+                  className="input"
+                  value={h3QueueReason}
+                  onChange={(event) => setH3QueueReason(event.target.value)}
+                  placeholder="会写入操作日志"
+                  disabled={!h3Config.admin_queue_ready}
+                  maxLength={240}
+                />
+              </label>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={submitH3QueueAction}
+                disabled={h3QueueLoading || !h3Config.admin_queue_ready}
+              >
+                执行队列操作
+              </button>
+            </div>
+
+            <pre className="h3-queue-json">
+              {h3QueueState ? JSON.stringify(h3QueueState, null, 2) : '暂未读取队列。'}
+            </pre>
+          </div>
+        </details>
+
+        <div className="codex-config-actions">
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearH3ApiToken}
+              disabled={!h3Config.api_token_configured || Boolean(h3ApiToken.trim())}
+              onChange={(event) => setClearH3ApiToken(event.target.checked)}
+            />
+            清除当前用户 token
+          </label>
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearH3AdminToken}
+              disabled={!h3Config.admin_token_configured || Boolean(h3AdminToken.trim())}
+              onChange={(event) => setClearH3AdminToken(event.target.checked)}
+            />
+            清除当前管理员 token
+          </label>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={testH3Config}
+            disabled={h3Testing || h3Saving || !h3Config.base_url}
+          >
+            {h3Testing ? '正在测试' : '测试连接'}
+          </button>
+          <button className="btn btn-primary" type="submit" disabled={h3Saving}>
+            {h3Saving ? '正在保存' : '保存 H3 本地生成服务'}
+          </button>
+        </div>
+
+        {h3TestState && (
+          <div className={`codex-config-test-result ${h3TestState.type === 'success' ? 'is-success' : 'is-error'}`}>
+            <strong>{h3TestState.message}</strong>
+            {h3TestState.type === 'success' && (
+              <span>
+                API {h3TestState.health_api || '-'} · Worker {h3TestState.worker || '-'} · ComfyUI {h3TestState.comfyui || '-'}
+                {h3TestState.tested_at ? ` · ${new Date(h3TestState.tested_at).toLocaleString('zh-CN')}` : ''}
+              </span>
+            )}
+            {h3TestState.type === 'error' && <span>请确认 H3 API 公网地址、用户 token 和工作站服务状态。</span>}
+          </div>
+        )}
+      </form>
 
       <form id="aimediakit-enhance-video" className="card codex-config-form" onSubmit={saveAiMediaKitConfig}>
         <div className="codex-config-head">

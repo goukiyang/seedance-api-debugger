@@ -1,6 +1,7 @@
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage } from '../provider/error-message';
+import { H3RequestError } from '../provider/h3';
 import { getProviderTaskStatus } from '../provider/video-task-status';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
@@ -457,7 +458,11 @@ async function persistProviderStatusError(taskId: string, task: VideoTask, error
     data: {
       provider_status: 'unknown',
       local_status: 'running',
-      raw_status_response: JSON.stringify({ error: errorMessage }),
+      raw_status_response: JSON.stringify({
+        error: errorMessage,
+        code: error instanceof H3RequestError ? 'h3_request_failed' : undefined,
+        retryAfterSeconds: error instanceof H3RequestError ? error.retryAfterSeconds ?? null : undefined,
+      }),
     },
   });
 }
