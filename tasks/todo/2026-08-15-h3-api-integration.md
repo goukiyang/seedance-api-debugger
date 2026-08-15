@@ -396,3 +396,61 @@
 
 - [ ] A9. R9 是否证明“轻量但够用”
   - 判断：不能变成监控后台；不能只显示一个没解释的红点；必须在用户选择 H3 的同一处告诉用户能不能用、是否排队、是否免费和失败该怎么办。
+
+## 7. H3 真实压测后下一步收口计划
+
+### 7.1 大白话目标复述
+
+这轮真实压测已经证明：sd2 侧能把 H3 配置、状态机、队列提交和免费计费串起来，但 H3 机器侧还没有稳定产出 mp4。下一步不是继续堆新入口，而是先把会污染生成结果的参考图串台修掉，再把 H3 失败原因做成可复现、可交接、可验收的问题闭环。做到普通用户选择 H3 时不会被隐藏上下文误导，管理员能看到机器是否可用，H3 修好后能立刻重新跑通 15 秒 720P 多题材视频。
+
+### 7.2 最短闭环原则
+
+- 先修影响最终提示词/参考图的确定性 bug，再继续大批量生成测试。
+- 不新增独立 H3 监控大后台；第一版只保留现有轻量状态机、后台集成页和任务详情证据。
+- 不把 H3 worker failed 包装成 sd2 成功；没有 mp4 下载和播放就不能标记生成链路已通。
+- 不展示或记录 token 明文；所有交接包只保留脱敏配置、job id、preset、状态、错误码和时间线。
+
+### 7.3 具体可执行任务
+
+- [ ] T21. 修复 workspace 串台导致旧参考图自动注入
+  - 检查对象：`src/lib/workspace*`、任务创建入口、生成页 tab/workspace 选择逻辑、`getOrCreateWorkspace(tabId, ownerId)` 实际实现。
+  - 要修什么：workspace 必须按当前用户和当前 tab/workspace 隔离；没有用户明确选择的参考图时，H3/Seedance 任务不得自动带入 active workspace 里的旧素材。
+  - 完成标准：新建空白生成会话后提交 H3，`reference_image_urls=null`，prompt 不出现旧 `参考素材说明`；用户手动选图时才出现对应资产。
+  - 验证命令：新增或扩展 workspace/H3 创建 smoke，至少覆盖“空白会话不带图”“手动选图才带图”“不同 tab 不串图”。
+
+- [ ] T22. 给 H3 失败链路补脱敏诊断包
+  - 检查对象：`ProviderApiRequest`、`VideoTask.provider_payload_json`、H3 finalizer、后台任务详情或管理员可复制诊断摘要。
+  - 要修什么：记录每个 H3 任务的 `preset_id`、`duration_sec`、`aspect_ratio`、`job_id`、sd2 task id、外部 request id、终态、H3 原始错误摘要、队列快照、是否 0 成本、是否有输出文件；不得记录 token。
+  - 完成标准：H3 failed / cancelled / running 卡住时，管理员能一键复制给 H3 侧排查，不需要从数据库里手挖。
+  - 验证命令：新增 smoke 覆盖失败诊断摘要不含 token、含 job id/preset/status/error/billing。
+
+- [ ] T23. 重新跑 H3 机器侧最小隔离测试
+  - 检查对象：H3 `/health`、`/api/h3/presets`、`/api/h3/generate`、`/api/h3/jobs/{job_id}`、`/outputs`。
+  - 测试顺序：先 5 秒 `lightx2v_4step_turbo` 纯文本；再 5 秒 `larry_v4_6step`；能出 mp4 后再上 15 秒 720P 多题材。
+  - 完成标准：至少一个直接 H3 任务 `done` 且 outputs 含 `kind=video`、mp4 可下载播放、`billing.charged=false`。
+  - 停止条件：如果 5 秒 turbo 仍卡 `running 0.5` 或 preset 仍 failed，停止批量测试，生成脱敏交接包给 H3 侧，不继续占队列。
+
+- [ ] T24. 重新跑 sd2 侧 15 秒 720P 多题材 H3 压测
+  - 检查对象：`/api/codex/video/create`、任务轮询、finalizer、本地缓存、项目产出、任务列表、下载播放。
+  - 测试题材：赛车、舞蹈、武打、二次元；preset 至少覆盖 `larry_v4_8step` 和 `larry_v4_6step`，可加 `lightx2v_4step_turbo` 快速预览。
+  - 完成标准：每条任务创建成功、轮询到终态、成功任务有 mp4、可播放可下载、任务落在指定项目/视频卡、0 成本、无 CreditLedger 扣点。
+  - 停止条件：任一 preset 连续 2 次同类 failed 或卡住，先做故障归因，不继续盲提更多任务。
+
+- [ ] T25. 补真实页面状态机与免费计费验收
+  - 检查对象：`https://sd2.youdooart.com/generate`、模板生成页、后台集成页、任务详情/项目产出页。
+  - 要确认：选择 H3 时能看到轻量状态灯；hover 能说明 API/队列/免费；队列繁忙或不可用时不误导用户；生成后任务列表能看出 H3 免费且不扣点。
+  - 完成标准：真实登录态刷新页面可见；桌面和窄屏不挤压按钮；状态不暴露 token/公网机器地址/内部 worker URL。
+  - 验证方式：真实浏览器 DOM/截图 + `/api/config` 公网返回 + 数据库 `CreditLedger/CostLedger` 只读核对。
+
+### 7.4 验收 / 审查内容
+
+- [ ] R10. H3 压测后收口独立只读审查
+  - 审查方式：需要创建独立只读审查 agent；如果工具不可用，由主线程按同一清单只读复查，不能改文件，该结果不是独立审查，可信度低于子 agent。
+  - 检查对象：T21-T25 对应代码、smoke、生产 API、真实登录态页面、H3 job 证据、CreditLedger/CostLedger。
+  - 通过标准：没有隐藏参考图注入；H3 失败有可复制脱敏诊断；直接 H3 与 sd2 H3 均至少跑通一个 mp4；15 秒 720P 多题材测试结果可复盘；免费链路不扣点；状态机准确显示可用/繁忙/不可用。
+  - 证据来源：smoke 命令输出、H3 job id 与 outputs、服务器 BUILD_ID、公网 `/api/config`、真实页面截图、数据库只读查询。
+
+### 7.5 审查内容是否对齐目标
+
+- [ ] A10. R10 是否真正证明“用户可以放心用 H3”
+  - 判断：不能只证明按钮出现或任务创建成功；必须证明输入没有被旧素材污染、机器能产出 mp4、状态提示可信、失败能交接、免费不扣点。
