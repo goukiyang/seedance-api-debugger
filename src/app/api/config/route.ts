@@ -27,7 +27,7 @@ export async function GET() {
       enabled: h3Config.enabled,
       ready: h3Config.ready,
       configured: h3Config.configured,
-      base_url: h3Config.base_url,
+      base_url_configured: Boolean(h3Config.base_url),
       default_preset_id: h3Config.default_preset_id,
       preset_options: h3Config.preset_options,
       api_token_configured: h3Config.api_token_configured,
@@ -35,9 +35,28 @@ export async function GET() {
       health: h3Config.health
         ? {
             api: h3Config.health.api,
+            version: h3Config.health.version,
             worker: h3Config.health.worker,
             comfyui: h3Config.health.comfyui,
             preset_count: h3Config.health.preset_count,
+            billing: h3Config.health.billing
+              ? {
+                  charged: h3Config.health.billing.charged,
+                  cost: h3Config.health.billing.cost,
+                  currency: h3Config.health.billing.currency,
+                  cost_model: h3Config.health.billing.cost_model,
+                }
+              : null,
+            queue: h3Config.health.queue
+              ? {
+                  paused: h3Config.health.queue.paused,
+                  pending: h3Config.health.queue.pending,
+                  running: h3Config.health.queue.running,
+                  max_pending_jobs: h3Config.health.queue.max_pending_jobs,
+                  active: h3Config.health.queue.active,
+                  max_active_jobs: h3Config.health.queue.max_active_jobs,
+                }
+              : null,
             checked_at: h3Config.health.checked_at,
           }
         : null,

@@ -347,36 +347,42 @@
 
 ### 6.5 具体可执行任务
 
-- [ ] T15. 扩展 H3 safe DTO 前端可用字段
+- [x] T15. 扩展 H3 safe DTO 前端可用字段
   - 修改：`src/app/api/config/route.ts`、`src/lib/integrations/h3.ts`。
   - 内容：确认 safe DTO 能返回 `health.version`、`health.checked_at`、`health.billing`、`health.queue`，并继续不返回 token。
   - 验证：扩展 `scripts/h3-admin-settings-smoke.ts`，断言 public config 含状态摘要、不含 token 明文。
+  - 2026-08-15 状态：已把 `health.version`、`health.billing`、`health.queue` 加入 `/api/config` 的安全 DTO；继续不透出 `worker_url`、`public_base_url`、token；H3 地址只返回 `base_url_configured`，普通公开配置不再暴露具体机器地址。
 
-- [ ] T16. 增加轻量状态数据归一化 helper
+- [x] T16. 增加轻量状态数据归一化 helper
   - 修改：`src/components/generate/GeneratePageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`，或抽到 `src/components/H3MachineStatus.tsx`。
   - 内容：把 `h3_video` 转成统一状态：`available`、`busy`、`not_checked`、`unavailable`、`not_configured`。
   - 完成标准：普通生成页和模板生成页复用同一套状态判断，避免两处逻辑分叉。
+  - 2026-08-15 状态：新增 `src/components/H3MachineStatus.ts`，统一归一化 H3 配置并输出 `未配置 / 待检查 / 暂不可用 / 可用 / 队列繁忙 / 队列满 / 免费计费` 状态；健康快照超过 15 分钟时自动转为待检查，避免旧快照继续绿灯。
 
-- [ ] T17. 在 `ComposerActionBar` 增加可选 H3 状态块
+- [x] T17. 在 `ComposerActionBar` 增加可选 H3 状态块
   - 修改：`src/components/ComposerActionBar.tsx`、`src/app/globals.css`。
   - 内容：新增可选 prop，例如 `providerStatus`；只有当前选择 H3 或管理员看到 H3 禁用项时显示。
   - 展示：最多 3 个小圆点 + 一行短文案；hover 使用原生 `title` 或现有 tooltip 样式，第一版不做复杂 popover。
   - 布局：桌面放在生成引擎 chip 和模型 chip 后；窄屏放到参数折叠 summary 内或 chips 下一行，不挤压提交按钮。
+  - 2026-08-15 状态：`ComposerActionBar` 已支持 `providerStatus`，展示最多三枚灯点、一句短状态、原生 hover 提示；折叠参数摘要也显示短状态。
 
-- [ ] T18. 普通生成页接入状态块
+- [x] T18. 普通生成页接入状态块
   - 修改：`src/components/generate/GeneratePageClient.tsx`。
   - 内容：选择 H3 时显示 `H3 可用 / 繁忙 / 暂不可用 / 未配置`；未配置时管理员看到原因和 `/admin/integrations` 引导，普通用户不被迫理解配置。
   - 验证：扩展 `scripts/h3-generate-ui-smoke.ts`，检查普通生成页有 H3 状态 prop 和管理员禁用原因。
+  - 2026-08-15 状态：普通生成页已用 `buildH3MachineStatus` 生成状态，并传入 `GenerationComposer`；选择 H3 时会轻量刷新 `/api/config`。
 
-- [ ] T19. 模板生成页接入状态块
+- [x] T19. 模板生成页接入状态块
   - 修改：`src/components/templates/TemplateGenerateClient.tsx`。
   - 内容：与普通生成页一致，模板生成选择 H3 时显示同样状态，避免模板页漏状态。
   - 验证：扩展 `scripts/h3-generate-ui-smoke.ts`，检查模板页复用 H3 状态展示。
+  - 2026-08-15 状态：模板生成页已复用同一套 H3 状态 helper，并在折叠参数摘要和展开内容中显示状态。
 
-- [ ] T20. 状态样式和移动端约束
+- [x] T20. 状态样式和移动端约束
   - 修改：`src/app/globals.css`。
   - 内容：灯点大小固定 6-8px；状态块不超过一行，长文案截断；hover/focus 有可访问提示；390px 宽度下不顶开提交按钮。
   - 验证：新增或扩展 UI smoke，检查类名、短文案、无横向溢出风险；上线后补真实截图。
+  - 2026-08-15 状态：已新增 `composer-provider-status*` 样式，灯点尺寸固定、文案截断、折叠摘要短状态限制宽度；上线后仍需真实登录态截图确认。
 
 ### 6.6 验收 / 审查内容
 

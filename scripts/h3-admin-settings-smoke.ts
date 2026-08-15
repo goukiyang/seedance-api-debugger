@@ -6,6 +6,7 @@ import {
   H3_API_SETTING_KEY,
   H3_DEFAULT_BASE_URL,
   H3_DEFAULT_PRESET_ID,
+  H3_HEALTH_MAX_AGE_MS,
   buildH3ApiSettingsPatch,
   h3HealthSnapshotFromResponse,
   isH3ApiReady,
@@ -29,6 +30,7 @@ const saved = buildH3ApiSettingsPatch(current, {
 assert.equal(H3_API_SETTING_KEY, 'h3_video_api_v1');
 assert.equal(H3_DEFAULT_BASE_URL, 'http://127.0.0.1:8893');
 assert.equal(H3_DEFAULT_PRESET_ID, 'larry_v4_6step');
+assert.equal(H3_HEALTH_MAX_AGE_MS, 15 * 60 * 1000);
 assert.equal(saved.enabled, true);
 assert.equal(saved.base_url, 'https://h3-api.example.com');
 assert.equal(saved.api_token, 'secret-h3-user-token-1234567890');
@@ -83,6 +85,16 @@ assert.equal(healthyDto.health?.queue?.paused, false);
 assert.equal(healthyDto.health?.queue?.pending, 0);
 assert.equal(healthyDto.health?.queue?.max_pending_jobs, 20);
 
+const staleHealthy = {
+  ...healthy,
+  health: {
+    ...healthy.health,
+    checked_at: new Date(Date.now() - H3_HEALTH_MAX_AGE_MS - 1000).toISOString(),
+  },
+};
+assert.equal(isH3Operational(staleHealthy), false, '健康快照过期时不能继续开放 H3');
+assert.equal(safeH3ConfigDto(staleHealthy).ready, false);
+
 const clearedUserToken = buildH3ApiSettingsPatch(saved, { clear_api_token: true });
 assert.equal(clearedUserToken.enabled, false);
 assert.equal(clearedUserToken.api_token, null);
@@ -111,9 +123,16 @@ async function main() {
   assert.ok(publicConfigRouteSource.includes('getH3ApiSettings'));
   assert.ok(publicConfigRouteSource.includes('h3_video'));
   assert.ok(publicConfigRouteSource.includes('configured'));
+  assert.ok(publicConfigRouteSource.includes('base_url_configured: Boolean(h3Config.base_url)'));
   assert.ok(publicConfigRouteSource.includes('health'));
+  assert.ok(publicConfigRouteSource.includes('version: h3Config.health.version'));
+  assert.ok(publicConfigRouteSource.includes('billing: h3Config.health.billing'));
+  assert.ok(publicConfigRouteSource.includes('queue: h3Config.health.queue'));
   assert.ok(publicConfigRouteSource.includes('api_token_configured'));
+  assert.ok(!publicConfigRouteSource.includes('base_url: h3Config.base_url'));
   assert.ok(!publicConfigRouteSource.includes('admin_token_configured: h3Config.admin_token'));
+  assert.ok(!publicConfigRouteSource.includes('worker_url: h3Config.health.worker_url'));
+  assert.ok(!publicConfigRouteSource.includes('public_base_url: h3Config.health.public_base_url'));
 
   const clientSource = fs.readFileSync(
     `${process.cwd()}/src/app/admin/integrations/AdminIntegrationsClient.tsx`,

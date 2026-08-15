@@ -7,6 +7,7 @@ export const H3_DEFAULT_PRESET_ID = 'larry_v4_6step';
 export const H3_HEALTH_PATH = '/health';
 export const H3_PRESETS_PATH = '/api/h3/presets';
 export const H3_GENERATE_PATH = '/api/h3/generate';
+export const H3_HEALTH_MAX_AGE_MS = 15 * 60 * 1000;
 
 export const H3_PRESET_OPTIONS = [
   { id: 'larry_v4_6step', label: '推荐', detail: '默认质量和速度平衡' },
@@ -289,9 +290,12 @@ export function isH3ApiReady(settings: H3ApiSettings) {
 }
 
 export function isH3HealthReady(health: H3HealthSnapshot | null) {
+  const checkedAtMs = health?.checked_at ? Date.parse(health.checked_at) : Number.NaN;
   return health?.api === 'ok'
     && health.worker === 'ok'
-    && health.comfyui === 'ok';
+    && health.comfyui === 'ok'
+    && Number.isFinite(checkedAtMs)
+    && Date.now() - checkedAtMs <= H3_HEALTH_MAX_AGE_MS;
 }
 
 export function isH3Operational(settings: H3ApiSettings) {

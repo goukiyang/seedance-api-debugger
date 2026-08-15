@@ -11,6 +11,12 @@ import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import {
+  buildH3MachineStatus,
+  h3DisabledReason,
+  normalizeH3VideoConfig,
+  type H3VideoConfig,
+} from '@/components/H3MachineStatus';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { taskDetailHref } from '@/lib/navigation/return-to';
@@ -132,20 +138,6 @@ interface CreditSummary {
 
 type GenerationProvider = 'seedance' | 'h3';
 
-type H3VideoConfig = {
-  enabled: boolean;
-  ready: boolean;
-  configured?: boolean;
-  default_preset_id: string;
-  preset_options: ComposerSelectOption[];
-  health?: {
-    api?: string | null;
-    worker?: string | null;
-    comfyui?: string | null;
-    checked_at?: string | null;
-  } | null;
-};
-
 interface ProjectOption {
   id: string;
   name: string;
@@ -260,40 +252,6 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     modelLabel: '火山 IP 动画',
   },
 };
-
-function normalizeH3VideoConfig(value: unknown): H3VideoConfig | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Partial<H3VideoConfig>;
-  const options = Array.isArray(raw.preset_options)
-    ? raw.preset_options
-        .filter((option): option is ComposerSelectOption => (
-          Boolean(option)
-          && typeof option === 'object'
-          && typeof (option as ComposerSelectOption).id === 'string'
-          && typeof (option as ComposerSelectOption).label === 'string'
-        ))
-        .map((option) => ({
-          id: option.id,
-          label: option.label,
-          detail: typeof option.detail === 'string' ? option.detail : '',
-        }))
-    : [];
-  return {
-    enabled: raw.enabled === true,
-    ready: raw.ready === true,
-    configured: raw.configured === true,
-    default_preset_id: typeof raw.default_preset_id === 'string' ? raw.default_preset_id : '',
-    health: raw.health && typeof raw.health === 'object' ? raw.health as H3VideoConfig['health'] : null,
-    preset_options: options,
-  };
-}
-
-function h3DisabledReason(config: H3VideoConfig | null) {
-  if (!config?.enabled) return 'H3 未启用';
-  if (!config.configured) return 'H3 缺少用户 token 或预设';
-  if (!config.health) return 'H3 还没有通过测试连接';
-  return 'H3 健康检查未通过';
-}
 
 function toPositiveInt(value: unknown, fallback: number): number {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -541,13 +499,34 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   }, [h3Ready, h3VideoConfig?.preset_options, isIpSurface, selectedProvider]);
   const activeModelLabel = selectedProvider === 'h3' ? 'H3 预设' : surfaceConfig.modelLabel;
   const activeProviderLabel = selectedProvider === 'h3' ? 'H3 本地工作站' : 'Seedance 视频';
+  const refreshH3VideoConfig = useCallback(async () => {
+    if (isIpSurface) return null;
+    try {
+      const response = await fetch('/api/config', { cache: 'no-store' });
+      const data = response.ok ? await response.json() : null;
+      const nextConfig = normalizeH3VideoConfig(data?.h3_video);
+      setH3VideoConfig(nextConfig);
+      return nextConfig;
+    } catch {
+      setH3VideoConfig(null);
+      return null;
+    }
+  }, [isIpSurface]);
+  const h3MachineStatus = useMemo(() => buildH3MachineStatus({
+    config: h3VideoConfig,
+    selectedProvider,
+    isAdmin: currentUser?.role === 'admin',
+  }), [currentUser?.role, h3VideoConfig, selectedProvider]);
   const handleGenerationProviderChange = useCallback((provider: string) => {
     if (provider === 'h3') {
-      if (h3Ready) setSelectedProvider('h3');
+      if (h3Ready) {
+        setSelectedProvider('h3');
+        void refreshH3VideoConfig();
+      }
       return;
     }
     setSelectedProvider('seedance');
-  }, [h3Ready]);
+  }, [h3Ready, refreshH3VideoConfig]);
 
   // ============================================================================
   // Load collections
@@ -1986,6 +1965,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           providerOptions={generationProviderOptions}
           selectedProvider={selectedProvider}
           onProviderChange={handleGenerationProviderChange}
+          providerStatus={h3MachineStatus}
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}
         />

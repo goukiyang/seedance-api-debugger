@@ -13,6 +13,22 @@ export type ComposerSelectOption = {
   disabledReason?: string;
 };
 
+export type ComposerProviderStatusTone = 'ready' | 'busy' | 'warning' | 'error' | 'muted';
+
+export type ComposerProviderStatus = {
+  label: string;
+  tone: ComposerProviderStatusTone;
+  title: string;
+  dots?: Array<{
+    label: string;
+    tone: ComposerProviderStatusTone;
+    title?: string;
+  }>;
+  href?: string;
+  hrefLabel?: string;
+  visible?: boolean;
+};
+
 interface Props {
   generationMode: GenerationMode;
   ratio: VideoRatio;
@@ -35,6 +51,7 @@ interface Props {
   providerOptions?: ComposerSelectOption[];
   selectedProvider?: string | null;
   onProviderChange?: (provider: string) => void;
+  providerStatus?: ComposerProviderStatus | null;
   modelLabel?: string;
   modelOptions?: ComposerSelectOption[];
   selectedModel?: string | null;
@@ -63,6 +80,7 @@ export function ComposerActionBar({
   providerOptions = [],
   selectedProvider = null,
   onProviderChange,
+  providerStatus = null,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
   selectedModel = null,
@@ -83,6 +101,7 @@ export function ComposerActionBar({
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
   const [showResolutionMenu, setShowResolutionMenu] = useState(false);
+  const shouldShowProviderStatus = Boolean(providerStatus && providerStatus.visible !== false);
 
   const chips = (
     <div className="composer-chips">
@@ -121,6 +140,32 @@ export function ComposerActionBar({
             </>
           )}
         </div>
+
+        {shouldShowProviderStatus && providerStatus && (
+          <span
+            className={`composer-provider-status composer-provider-status-${providerStatus.tone}`}
+            role="status"
+            aria-label={providerStatus.title}
+            tabIndex={0}
+            title={providerStatus.title}
+          >
+            <span className="composer-provider-status-dots" aria-hidden="true">
+              {(providerStatus.dots || []).map((item) => (
+                <span
+                  key={item.label}
+                  className={`composer-provider-status-dot composer-provider-status-dot-${item.tone}`}
+                  title={item.title || item.label}
+                />
+              ))}
+            </span>
+            <span className="composer-provider-status-label">{providerStatus.label}</span>
+            {providerStatus.href && (
+              <a className="composer-provider-status-link" href={providerStatus.href}>
+                {providerStatus.hrefLabel || '设置'}
+              </a>
+            )}
+          </span>
+        )}
 
         {/* 模型标签 */}
         <div className="composer-chip-wrap">
@@ -271,7 +316,17 @@ export function ComposerActionBar({
         <details className="composer-advanced-params">
           <summary>
             <span>生成参数</span>
-            <strong>{effectiveModelLabel} · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}</strong>
+            <strong>
+              {effectiveModelLabel} · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}
+              {shouldShowProviderStatus && providerStatus && (
+                <em
+                  className={`composer-provider-status-summary composer-provider-status-summary-${providerStatus.tone}`}
+                  title={providerStatus.title}
+                >
+                  {providerStatus.label}
+                </em>
+              )}
+            </strong>
           </summary>
           {chips}
         </details>

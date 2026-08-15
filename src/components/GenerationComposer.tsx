@@ -16,7 +16,7 @@ import { ReferenceStrip } from '@/components/ReferenceStrip';
 import { PromptEditor } from '@/components/PromptEditor';
 import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
-import { ComposerActionBar, type ComposerSelectOption } from '@/components/ComposerActionBar';
+import { ComposerActionBar, type ComposerProviderStatus, type ComposerSelectOption } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
 import { ReferenceAlbumPicker, type ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
@@ -401,6 +401,7 @@ interface Props {
   providerOptions?: ComposerSelectOption[];
   selectedProvider?: string | null;
   onProviderChange?: (provider: string) => void;
+  providerStatus?: ComposerProviderStatus | null;
   modelLabel?: string;
   modelOptions?: ComposerSelectOption[];
 }
@@ -432,6 +433,7 @@ export function GenerationComposer({
   providerOptions = [],
   selectedProvider = 'seedance',
   onProviderChange,
+  providerStatus = null,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
 }: Props) {
@@ -1797,6 +1799,7 @@ export function GenerationComposer({
           providerOptions={providerOptions}
           selectedProvider={selectedProvider}
           onProviderChange={onProviderChange}
+          providerStatus={providerStatus}
           modelLabel={modelLabel}
           modelOptions={modelOptions}
           selectedModel={selectedModel}
