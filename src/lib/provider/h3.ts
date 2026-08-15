@@ -392,6 +392,15 @@ function firstVideoOutput(outputs: unknown): H3JobOutput | null {
   return null;
 }
 
+const DATABASE_INT_MIN = -2147483648;
+const DATABASE_INT_MAX = 2147483647;
+
+function databaseSafeSeed(value: unknown) {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return undefined;
+  if (value < DATABASE_INT_MIN || value > DATABASE_INT_MAX) return undefined;
+  return value;
+}
+
 export function h3InternalOutputUrl(jobId: string, index = 0) {
   return `${H3_INTERNAL_OUTPUT_SCHEME}${jobId}/${index}`;
 }
@@ -436,10 +445,8 @@ export async function getH3TaskStatus(
       ? request.preset_id
       : undefined;
   const seed = typeof resolved.seed === 'number'
-    ? resolved.seed
-    : typeof request.seed === 'number'
-      ? request.seed
-      : undefined;
+    ? databaseSafeSeed(resolved.seed)
+    : databaseSafeSeed(request.seed);
 
   if (localStatus === 'succeeded' && !output) {
     const errorMessage = 'H3 任务已完成但没有返回视频输出';

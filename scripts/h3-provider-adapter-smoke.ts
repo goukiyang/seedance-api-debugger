@@ -91,6 +91,17 @@ const fetchImpl: typeof fetch = async (url, init) => {
       outputs: [],
     });
   }
+  if (String(url).endsWith('/api/h3/jobs/h3-huge-seed')) {
+    return Response.json({
+      job_id: 'h3-huge-seed',
+      status: 'failed',
+      preset: 'larry_v4_6step',
+      resolved: { seed: 6412923026406281000 },
+      request: { preset_id: 'larry_v4_6step', seed: -1 },
+      outputs: [],
+      error: 'error',
+    });
+  }
   if (String(url).endsWith('/api/h3/jobs/h3-20260815-013000-abc12345/outputs')) {
     return Response.json({
       job_id: 'h3-20260815-013000-abc12345',
@@ -210,6 +221,15 @@ async function main() {
   assert.equal(emptyOutputStatus.result_video_url, undefined);
   assert.equal(emptyOutputStatus.error_message, 'H3 任务已完成但没有返回视频输出');
   assert.equal((emptyOutputStatus.raw as Record<string, unknown>).code, 'h3_done_without_output');
+
+  const hugeSeedStatus = await getH3TaskStatus('h3-huge-seed', {
+    baseUrl: 'https://h3-api.example.com',
+    apiToken: 'secret-user-token',
+    fetchImpl,
+  });
+  assert.equal(hugeSeedStatus.local_status, 'failed');
+  assert.equal(hugeSeedStatus.seed, undefined);
+  assert.equal((hugeSeedStatus.raw as { resolved?: { seed?: number } }).resolved?.seed, 6412923026406281000);
 
   const outputs = await listH3JobOutputs('h3-20260815-013000-abc12345', {
     baseUrl: 'https://h3-api.example.com',
