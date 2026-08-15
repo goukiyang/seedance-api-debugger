@@ -298,3 +298,95 @@
 
 - [ ] A8. R8 是否覆盖 H3 队列管理风险
   - 判断：必须证明队列操作权限、审计和是否支持 move 都说清楚，不留下半成品后台按钮。
+
+## 6. H3 前端状态机轻量展示规划
+
+### 6.1 大白话目标复述
+
+用户在普通生成页或模板生成页选择「H3 本地工作站」时，旁边要立刻看到这台 H3 API 机器当前能不能用、忙不忙、是不是免费、缺什么配置。这个提示只做成小状态块，不新建监控后台，不展示 token、内部公网地址、服务器目录或复杂日志。做到用户不用猜“点了会不会失败”，管理员也能快速知道该去哪里修。
+
+### 6.2 设计原则
+
+- 入口位置：放在「生成引擎 / H3 本地工作站」chip 旁边，或底部操作栏里紧贴模型选择区域；不要放到页面右侧大面板，避免挤占提示词和素材区。
+- 展示重量：默认只显示一行小状态，不超过 3 个灯点 + 1 个短文案；详细解释只放 hover tooltip 或点击后的轻量 popover。
+- 可见范围：普通用户只看业务可理解状态；管理员可多看配置缺口、队列数字和最近检查时间。
+- 安全边界：前端永远不显示 token、admin token、内部 worker URL、服务器路径、ComfyUI 本机地址或原始错误堆栈。
+- 状态来源：优先使用 `/api/config` 返回的 `h3_video.health`、`ready`、`configured`、`api_token_configured`、`admin_queue_ready`；不要前端直接打 H3 公网 API。
+- 刷新节奏：进入页面读取一次；选择 H3 时触发一次轻量刷新；不要高频轮询。队列数字如果后端已有安全 DTO，再按 30-60 秒节流刷新。
+
+### 6.3 状态灯设计
+
+- 总状态灯：
+  - 绿灯 `可用`：`ready=true`，`api=ok`、`worker=ok`、`comfyui=ok`。
+  - 黄灯 `待检查`：已配置但没有健康快照，或健康快照过旧。
+  - 黄灯 `繁忙`：机器健康，但 `queue.pending + queue.running > 0` 或 pending 接近上限。
+  - 红灯 `不可用`：未启用、未配置 token、健康检查失败、worker/ComfyUI 异常。
+  - 灰灯 `未配置`：管理员可见；普通用户不展示 H3 入口或仅展示不可选原因。
+- 子状态灯：
+  - `API`：H3 gateway 是否 ok。
+  - `队列`：空闲、繁忙、满载。
+  - `计费`：免费、本地免费异常、未知。
+- 文案示例：
+  - 绿灯：`H3 可用 · 免费 · 队列空闲`
+  - 黄灯：`H3 可用 · 队列中 2 个任务`
+  - 红灯：`H3 暂不可用`
+  - 灰灯：`H3 未配置`
+
+### 6.4 Tooltip / Popover 内容
+
+- 普通用户 hover：
+  - `H3 本地工作站当前可用，本地模型不扣点。`
+  - `H3 队列正在处理任务，提交后可能需要等待。`
+  - `H3 暂不可用，请改用 Seedance。`
+- 管理员 hover：
+  - 显示 `api / worker / comfyui / queue / billing` 的短状态。
+  - 显示 `最近检查时间`。
+  - 显示缺口，例如 `缺少 H3_API_TOKEN`、`未测试连接`、`worker 异常`。
+  - 提供小链接 `去 API 设置`，指向 `/admin/integrations`。
+- 不展示内容：token、内部 worker URL、原始异常、Cloudflare 临时 URL、服务器路径。
+
+### 6.5 具体可执行任务
+
+- [ ] T15. 扩展 H3 safe DTO 前端可用字段
+  - 修改：`src/app/api/config/route.ts`、`src/lib/integrations/h3.ts`。
+  - 内容：确认 safe DTO 能返回 `health.version`、`health.checked_at`、`health.billing`、`health.queue`，并继续不返回 token。
+  - 验证：扩展 `scripts/h3-admin-settings-smoke.ts`，断言 public config 含状态摘要、不含 token 明文。
+
+- [ ] T16. 增加轻量状态数据归一化 helper
+  - 修改：`src/components/generate/GeneratePageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`，或抽到 `src/components/H3MachineStatus.tsx`。
+  - 内容：把 `h3_video` 转成统一状态：`available`、`busy`、`not_checked`、`unavailable`、`not_configured`。
+  - 完成标准：普通生成页和模板生成页复用同一套状态判断，避免两处逻辑分叉。
+
+- [ ] T17. 在 `ComposerActionBar` 增加可选 H3 状态块
+  - 修改：`src/components/ComposerActionBar.tsx`、`src/app/globals.css`。
+  - 内容：新增可选 prop，例如 `providerStatus`；只有当前选择 H3 或管理员看到 H3 禁用项时显示。
+  - 展示：最多 3 个小圆点 + 一行短文案；hover 使用原生 `title` 或现有 tooltip 样式，第一版不做复杂 popover。
+  - 布局：桌面放在生成引擎 chip 和模型 chip 后；窄屏放到参数折叠 summary 内或 chips 下一行，不挤压提交按钮。
+
+- [ ] T18. 普通生成页接入状态块
+  - 修改：`src/components/generate/GeneratePageClient.tsx`。
+  - 内容：选择 H3 时显示 `H3 可用 / 繁忙 / 暂不可用 / 未配置`；未配置时管理员看到原因和 `/admin/integrations` 引导，普通用户不被迫理解配置。
+  - 验证：扩展 `scripts/h3-generate-ui-smoke.ts`，检查普通生成页有 H3 状态 prop 和管理员禁用原因。
+
+- [ ] T19. 模板生成页接入状态块
+  - 修改：`src/components/templates/TemplateGenerateClient.tsx`。
+  - 内容：与普通生成页一致，模板生成选择 H3 时显示同样状态，避免模板页漏状态。
+  - 验证：扩展 `scripts/h3-generate-ui-smoke.ts`，检查模板页复用 H3 状态展示。
+
+- [ ] T20. 状态样式和移动端约束
+  - 修改：`src/app/globals.css`。
+  - 内容：灯点大小固定 6-8px；状态块不超过一行，长文案截断；hover/focus 有可访问提示；390px 宽度下不顶开提交按钮。
+  - 验证：新增或扩展 UI smoke，检查类名、短文案、无横向溢出风险；上线后补真实截图。
+
+### 6.6 验收 / 审查内容
+
+- [ ] R9. H3 前端状态展示审查
+  - 审查方式：需要创建独立只读审查 agent；如果工具不可用，由主线程按同一清单只读复查，不能改文件，该结果不是独立审查，可信度低于子 agent。
+  - 检查对象：`/generate`、`/template-generate`、`ComposerActionBar`、`/api/config` safe DTO、H3 状态样式。
+  - 通过标准：选择 H3 后能看到轻量状态；状态含 API、队列、免费计费的基础摘要；hover 文案能解释原因；普通用户不看到内部技术细节；管理员能知道去哪里处理配置；移动端不挤压提交按钮；Seedance 默认流程不受影响。
+  - 证据来源：`h3-generate-ui-smoke`、`h3-admin-settings-smoke`、`npm run lint`、`npm run build`、公网或登录态截图。
+
+### 6.7 审查内容是否对齐目标
+
+- [ ] A9. R9 是否证明“轻量但够用”
+  - 判断：不能变成监控后台；不能只显示一个没解释的红点；必须在用户选择 H3 的同一处告诉用户能不能用、是否排队、是否免费和失败该怎么办。
