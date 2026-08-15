@@ -5,6 +5,7 @@ import type { SessionUser } from '@/lib/auth/session';
 import { addAssetToWorkspace } from '@/lib/assets/workspace';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
+import { isPrivateNetworkHost } from '@/lib/media/public-url';
 
 const CODEX_REFERENCE_ALBUM_NAME = 'Codex API 参考图';
 const WORKSPACE_REFERENCE_ALBUM_NAME = '生成工作台参考图';
@@ -53,18 +54,7 @@ function normalizeReferenceUrl(rawUrl: string) {
     throw new ReferenceImportError(`参考图必须是公网 HTTPS URL: ${rawUrl}`, 400, 'reference_url_not_https');
   }
 
-  const hostname = parsed.hostname.toLowerCase();
-  const isPrivateHost = hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '0.0.0.0'
-    || hostname === '::1'
-    || hostname.startsWith('10.')
-    || hostname.startsWith('127.')
-    || hostname.startsWith('169.254.')
-    || hostname.startsWith('192.168.')
-    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
-    || hostname.endsWith('.local');
-  if (isPrivateHost) {
+  if (isPrivateNetworkHost(parsed.hostname)) {
     throw new ReferenceImportError(`参考图不能使用本地或内网地址: ${rawUrl}`, 400, 'reference_url_not_public');
   }
 

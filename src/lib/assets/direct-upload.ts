@@ -23,6 +23,7 @@ import {
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
 import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
+import { generateAssetVideoThumbnail } from '@/lib/assets/video-thumbnail';
 
 const DIRECT_UPLOAD_EXPIRES_SECONDS = 10 * 60;
 const DIRECT_UPLOAD_PREFIX = 'seedance-direct-uploads';
@@ -385,6 +386,65 @@ function assetUrlCanBeReusedWithoutBody(url: string) {
   return fs.existsSync(resolvedPath);
 }
 
+async function generateDirectUploadVideoThumbnail(originalUrl: string, outputName: string) {
+  const result = await generateAssetVideoThumbnail({
+    sourcePath: publicUrlForAssetUrl(originalUrl),
+    outputDir: path.resolve(process.cwd(), 'public', 'uploads', 'thumbs'),
+    outputName,
+  });
+  if (!result.success || !result.thumbnailPath) {
+    console.warn('[DirectUpload] Video thumbnail skipped:', {
+      originalUrl,
+      error: result.error,
+    });
+    return null;
+  }
+  return `/uploads/thumbs/${path.basename(result.thumbnailPath)}`;
+}
+
+async function thumbnailUrlForCompletedUpload(
+  kind: ReturnType<typeof getSiteUploadKind> | 'image',
+  originalUrl: string,
+  outputName: string,
+) {
+  if (kind === 'image') return originalUrl;
+  if (kind !== 'video') return null;
+  return generateDirectUploadVideoThumbnail(originalUrl, outputName);
+}
+
+async function fillMissingAssetMetadata(
+  asset: DirectUploadAssetRecord,
+  kind: ReturnType<typeof getSiteUploadKind> | 'image',
+  width: number | null,
+  height: number | null,
+  outputName: string,
+): Promise<DirectUploadAssetRecord> {
+  const data: { width?: number; height?: number; thumbnail_url?: string | null } = {};
+  if (width != null && asset.width == null) data.width = width;
+  if (height != null && asset.height == null) data.height = height;
+  if (!asset.thumbnail_url && kind === 'video') {
+    const thumbnailUrl = await generateDirectUploadVideoThumbnail(asset.original_url, outputName);
+    if (thumbnailUrl) data.thumbnail_url = thumbnailUrl;
+  }
+  if (Object.keys(data).length === 0) return asset;
+
+  return prisma.asset.update({
+    where: { id: asset.id },
+    data,
+    select: {
+      id: true,
+      original_url: true,
+      thumbnail_url: true,
+      width: true,
+      height: true,
+      file_name: true,
+      file_size: true,
+      mime_type: true,
+      hash: true,
+    },
+  });
+}
+
 function createR2Client(config: R2DirectUploadConfig) {
   return new S3Client({
     region: 'auto',
@@ -437,33 +497,6 @@ function assetRecordToResult(
     isPubliclyReachable: payload.isPubliclyReachable,
     storageProvider: payload.storageProvider,
   };
-}
-
-async function fillMissingAssetDimensions(
-  asset: DirectUploadAssetRecord,
-  width: number | null,
-  height: number | null,
-): Promise<DirectUploadAssetRecord> {
-  const data: { width?: number; height?: number } = {};
-  if (width != null && asset.width == null) data.width = width;
-  if (height != null && asset.height == null) data.height = height;
-  if (Object.keys(data).length === 0) return asset;
-
-  return prisma.asset.update({
-    where: { id: asset.id },
-    data,
-    select: {
-      id: true,
-      original_url: true,
-      thumbnail_url: true,
-      width: true,
-      height: true,
-      file_name: true,
-      file_size: true,
-      mime_type: true,
-      hash: true,
-    },
-  });
 }
 
 async function findActiveAssetByTrustedHash(ownerId: string, trustedHash: string, mimeType?: string | null) {
@@ -537,7 +570,7 @@ async function createAssetFromCompletedUpload(input: {
   if (trustedHash) {
     const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash, input.payload.mimeType);
     if (existingAsset) {
-      const updatedAsset = await fillMissingAssetDimensions(existingAsset, width, height);
+      const updatedAsset = await fillMissingAssetMetadata(existingAsset, kind, width, height, trustedHash);
       return assetRecordToResult(updatedAsset, true);
     }
   }
@@ -553,13 +586,15 @@ async function createAssetFromCompletedUpload(input: {
       { created_at: 'desc' },
     ],
   });
+  const completedThumbnailUrl = ownAsset?.thumbnail_url
+    || await thumbnailUrlForCompletedUpload(kind, publicUrl, trustedHash || input.payload.hash);
   if (ownAsset) {
     const updatedAsset = await prisma.asset.update({
       where: { id: ownAsset.id },
       data: {
         type: kind,
         original_url: publicUrl,
-        thumbnail_url: kind === 'image' ? publicUrl : null,
+        thumbnail_url: completedThumbnailUrl || ownAsset.thumbnail_url,
         file_name: input.payload.fileName,
         mime_type: input.payload.mimeType,
         width,
@@ -577,7 +612,7 @@ async function createAssetFromCompletedUpload(input: {
       owner_id: input.ownerId,
       type: kind,
       original_url: publicUrl,
-      thumbnail_url: kind === 'image' ? publicUrl : null,
+      thumbnail_url: completedThumbnailUrl,
       file_name: input.payload.fileName,
       mime_type: input.payload.mimeType,
       width,
@@ -655,7 +690,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
 
   const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
   if (existingAsset) {
-    const updatedAsset = await fillMissingAssetDimensions(existingAsset, width, height);
+    const updatedAsset = await fillMissingAssetMetadata(existingAsset, kind, width, height, hash);
     return {
       directUploadAvailable: false,
       reused: true,
@@ -803,7 +838,7 @@ export async function createMultipartUploadTicket(input: CreateMultipartUploadTi
 
   const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
   if (existingAsset) {
-    const updatedAsset = await fillMissingAssetDimensions(existingAsset, width, height);
+    const updatedAsset = await fillMissingAssetMetadata(existingAsset, kind, width, height, hash);
     return {
       directUploadAvailable: false,
       reused: true,

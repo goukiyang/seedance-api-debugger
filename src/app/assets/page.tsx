@@ -19,6 +19,7 @@ import {
   readAssetLibraryCache,
   writeAssetLibraryCache,
 } from '@/lib/assets/library-cache';
+import { cacheSafeAssetUrl } from '@/lib/assets/library-cache-policy';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
 
@@ -498,11 +499,6 @@ function rectFromPoints(a: { x: number; y: number }, b: { x: number; y: number }
 function isReusableImageItem(item: AssetLibraryItem) {
   return (item.source === 'asset' && item.kind === 'image' && Boolean(item.assetId))
     || (item.source === 'reference_image' && Boolean(item.referenceImageId));
-}
-
-function cacheSafeAssetUrl(value: string | null) {
-  if (!value) return null;
-  return value.startsWith('/') ? value : null;
 }
 
 function toCacheSafeOwner(owner: AssetLibraryItem['owner']): AssetLibraryItem['owner'] {

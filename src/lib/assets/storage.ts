@@ -1,16 +1,19 @@
 /**
  * 资产存储服务
  * - 图片：原始文件 + 2:3 缩略图
- * - 视频/音频：仅原始文件
+ * - 视频：原始文件 + 首帧封面
+ * - 音频：仅原始文件
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
+import { generateAssetVideoThumbnail } from '@/lib/assets/video-thumbnail';
 
 // ============================================================================
 // 目录配置
@@ -55,6 +58,12 @@ function restoreMissingLocalUploadFile(url: string | null | undefined, buffer: B
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, buffer);
   return true;
+}
+
+function existingLocalUploadPath(url: string | null | undefined) {
+  if (!url || !localUploadUrlFromAssetUrl(url)) return null;
+  const filePath = localPublicPath(url);
+  return fs.existsSync(filePath) ? filePath : null;
 }
 
 // ============================================================================
@@ -161,6 +170,45 @@ function normalizeStoredDimension(value: number | null | undefined) {
   return next > 0 && next < 100000 ? next : null;
 }
 
+async function generateVideoThumbnailFromFile(sourcePath: string, outputName: string) {
+  const result = await generateAssetVideoThumbnail({
+    sourcePath,
+    outputDir: THUMBS_DIR,
+    outputName,
+  });
+  if (!result.success || !result.thumbnailPath) {
+    console.warn('[Assets] Video thumbnail skipped:', {
+      sourcePath,
+      error: result.error,
+    });
+    return null;
+  }
+  return `/uploads/thumbs/${path.basename(result.thumbnailPath)}`;
+}
+
+async function generateVideoThumbnailFromBuffer(buffer: Buffer, ext: string, outputName: string) {
+  const tempPath = path.join(os.tmpdir(), `sd2-asset-video-${process.pid}-${Date.now()}-${uuidv4()}.${ext}`);
+  fs.writeFileSync(tempPath, buffer);
+  try {
+    return await generateVideoThumbnailFromFile(tempPath, outputName);
+  } finally {
+    fs.rmSync(tempPath, { force: true });
+  }
+}
+
+async function generateVideoThumbnailForUpload(
+  originalUrl: string | null | undefined,
+  buffer: Buffer,
+  ext: string,
+  outputName: string,
+) {
+  const localSourcePath = existingLocalUploadPath(originalUrl);
+  if (localSourcePath) {
+    return generateVideoThumbnailFromFile(localSourcePath, outputName);
+  }
+  return generateVideoThumbnailFromBuffer(buffer, ext, outputName);
+}
+
 export async function uploadAsset(
   buffer: Buffer,
   fileName: string,
@@ -217,6 +265,13 @@ export async function uploadAsset(
       if (height == null && providedHeight != null) {
         height = providedHeight;
         updates.height = providedHeight;
+      }
+      if (!existing.thumbnail_url || !localUploadExists(existing.thumbnail_url)) {
+        const videoThumbUrl = await generateVideoThumbnailForUpload(existing.original_url, buffer, ext, hash);
+        if (videoThumbUrl) {
+          thumbnailUrl = videoThumbUrl;
+          updates.thumbnail_url = videoThumbUrl;
+        }
       }
     }
 
@@ -289,6 +344,13 @@ export async function uploadAsset(
         height = providedHeight;
         updates.height = providedHeight;
       }
+      if (!sharedExisting.thumbnail_url || !localUploadExists(sharedExisting.thumbnail_url)) {
+        const videoThumbUrl = await generateVideoThumbnailForUpload(sharedExisting.original_url, buffer, ext, hash);
+        if (videoThumbUrl) {
+          thumbnailUrl = videoThumbUrl;
+          updates.thumbnail_url = videoThumbUrl;
+        }
+      }
     }
 
     if (Object.keys(updates).length > 0) {
@@ -359,6 +421,7 @@ export async function uploadAsset(
   if (assetType === 'video') {
     width = providedWidth;
     height = providedHeight;
+    thumbnailUrl = await generateVideoThumbnailFromFile(filePath, hash);
   }
 
   // 写入数据库

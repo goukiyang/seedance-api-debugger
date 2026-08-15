@@ -12,6 +12,12 @@
 - 上传视频素材、参考图、模板素材、反馈截图等非任务媒体，也有清楚的缩略图/预览兜底策略。
 - 线上 `https://sd2.youdooart.com` 真实页面能看到缩略图，不只停留在代码入口存在。
 
+本轮落地决策：
+
+- 先不新增 `VideoTask` 数据库字段，避免生产 SQLite 迁移风险；任务截图继续使用已有稳定文件路径 `/videos/thumbnails/{taskId}.jpg` 和鉴权 API `/api/video/thumbnail/{taskId}`。
+- 后台 finalizer、任务列表、任务状态接口、资产页接口和 `TaskVideoThumbnail` 统一识别 `public_video_url`、`local_video_path`、公网 `result_video_url`、公网尾帧；内部 `h3-internal-output://` 不当作可抽帧公网链接。
+- 视频 Asset 复用现有 `Asset.thumbnail_url` 字段保存上传视频封面；上传封面失败不阻断素材上传。
+
 ## 2. 系统级同类风险排查表
 
 | 编号 | 风险面 | 当前线索/相关位置 | 为什么会出现同类问题 | 影响入口 | 根治动作 | 验收标准 |
@@ -41,44 +47,44 @@
 
 ## 3. 具体可执行任务
 
-- [ ] T1. 建立统一媒体投影和状态模型
-  - 修改对象：`src/lib/video/thumbnail-availability.ts` 或新增 `src/lib/media/media-projection.ts`。
-  - 要做什么：统一输出 `previewUrl`、`thumbnailUrl`、`downloadUrl`、`thumbnailStatus`、`previewAvailable`、`stableDownloadReady`、`reason`。
-  - 完成标准：资产页、任务列表、状态接口不再各自散写“哪些字段算可预览/可截图”。
+- [x] T1. 建立统一视频截图来源判断
+  - 修改对象：`src/lib/video/thumbnail-availability.ts`、相关 API 和组件调用处。
+  - 要做什么：统一判断哪些字段可以请求任务缩略图，覆盖 `public_video_url`、`local_video_path`、公网 `result_video_url`、公网尾帧，并排除内部专用链接。
+  - 完成标准：资产页、任务列表、状态接口、任务缩略图组件不再各自散写“哪些字段算可截图”。
 
 - [ ] T2. 给 `VideoTask` 增加稳定截图字段和状态
   - 修改对象：`prisma/schema.prisma`、相关序列化接口。
-  - 要做什么：增加视频截图地址、存储来源、截图状态、错误原因、生成时间字段；如已有等价字段则复用，不重复建模。
-  - 完成标准：任务完成后截图是否成功有明确记录，不再只能靠文件是否存在猜。
+  - 要做什么：本轮暂缓新增字段，先复用 `/videos/thumbnails/{taskId}.jpg`；后续如果要做失败统计/监控，再增加截图状态、错误原因、生成时间字段。
+  - 完成标准：需要生产迁移方案、回滚方案和历史兼容验证后再落地。
 
-- [ ] T3. 把视频任务完成链路改成先固化截图
+- [x] T3. 把视频任务完成链路改成先固化截图
   - 修改对象：`src/lib/video/task-finalizer.ts`、`src/lib/video/media-ingest.ts`、`src/lib/video/thumbnail.ts`。
-  - 要做什么：成功任务缓存/分发视频后，用 FFmpeg 抽帧，写入稳定截图地址和状态；失败只影响截图状态，不回滚视频成功和点数结算。
-  - 完成标准：新成功任务在后台完成后即具备稳定截图，不需要用户打开资产页才触发。
+  - 要做什么：成功任务缓存/分发视频后，用 FFmpeg 抽帧；本地缓存失败时允许公网 `result_video_url` 兜底；失败只影响截图，不回滚视频成功和点数结算。
+  - 完成标准：新成功任务在后台 finalizer 阶段会尝试生成稳定截图，不需要用户打开资产页才触发。
 
-- [ ] T4. 补齐 Asset 上传视频缩略图链路
+- [x] T4. 补齐 Asset 上传视频缩略图链路
   - 修改对象：`src/app/api/assets/upload*`、`src/lib/assets/storage.ts`。
   - 要做什么：上传视频素材时抽一张封面并写入 `Asset.thumbnail_url`；图片继续用图片缩略图；音频使用稳定音频占位。
   - 完成标准：上传视频素材在资产页、生成页历史素材弹窗里有封面。
 
-- [ ] T5. 修复资产页缓存策略
+- [x] T5. 修复资产页缓存策略
   - 修改对象：`src/app/assets/page.tsx`、`src/lib/assets/library-cache.ts`。
-  - 要做什么：缓存允许可信公网媒体 URL；缓存中保存媒体状态和失败原因；网络同步失败时不把可用缩略图清空。
-  - 完成标准：弱网或接口失败时可以显示上次有效缩略图，并提示“当前显示缓存”。
+  - 要做什么：缓存允许公网 http/https 媒体 URL，拒绝本机/内网/非 http 协议；网络同步失败时不把可用公网缩略图静默清空。
+  - 完成标准：弱网或接口失败时可以显示上次有效公网缩略图。
 
 - [ ] T6. 统一所有展示入口
   - 修改对象：`src/app/assets/page.tsx`、`src/app/api/assets/library/route.ts`、`src/app/api/video/list/route.ts`、`src/app/api/video/status/[id]/route.ts`、`src/components/templates/*`、`src/components/UploadedImagePicker.tsx`、`src/components/ReferenceThumb.tsx`。
   - 要做什么：各入口统一读取媒体投影字段；不再手写 `thumbnail_url || url` 的散乱规则。
   - 完成标准：同一资产/任务在不同页面显示同一张缩略图和同一状态。
 
-- [ ] T7. 历史任务和历史素材补偿脚本
+- [x] T7. 历史任务和历史素材补偿脚本
   - 新增对象：`scripts/backfill-video-thumbnails.ts` 或复用现有 finalize 脚本。
   - 要做什么：扫描成功任务、Asset 视频、参考视频，补齐缺失截图；无法补的写原因，不静默跳过。
   - 完成标准：dry-run 能列出待修数量；真实执行后输出成功、失败、跳过明细。
 
-- [ ] T8. 补测试和 smoke
+- [x] T8. 补测试和 smoke
   - 修改/新增对象：`scripts/*thumbnail*smoke.ts`、必要的 API smoke。
-  - 要做什么：覆盖任务视频、Asset 视频、图片上传、缓存外链、批量下载未就绪过滤。
+  - 要做什么：覆盖任务视频、Asset 视频、直传视频、图片上传、缓存外链、批量下载未就绪过滤。
   - 完成标准：本地至少通过 `npm run lint`、`npm run build` 和新增 smoke；不需要付费生成。
 
 - [ ] T9. 服务器上线和真实页面验证

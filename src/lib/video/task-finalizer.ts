@@ -445,7 +445,7 @@ async function cacheAndMaybeThumbnail(
   }
 
   if (options.generateThumbnail && taskForThumbnail.local_status === 'succeeded') {
-    thumbnailResult = await ensureTaskThumbnail(taskForThumbnail, { allowRemoteFallback: false });
+    thumbnailResult = await ensureTaskThumbnail(taskForThumbnail, { allowRemoteFallback: true });
     if (!thumbnailResult.success) {
       console.warn('[VideoFinalizer] Thumbnail skipped:', {
         taskId: task.id,

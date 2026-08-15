@@ -61,11 +61,7 @@ export async function GET(
 
     await assertCanViewTask(user, task);
 
-    const thumbnailResult = await ensureTaskThumbnail({
-      ...task,
-      // 浏览缩略图优先用本地视频；本地文件缺失时，只用我们自己的公开视频兜底，避免依赖第三方临时链接。
-      result_video_url: null,
-    }, { allowRemoteFallback: true });
+    const thumbnailResult = await ensureTaskThumbnail(task, { allowRemoteFallback: true });
     if (!thumbnailResult.success) {
       return NextResponse.json({ error: thumbnailResult.message || '视频截图不可用' }, { status: 404 });
     }

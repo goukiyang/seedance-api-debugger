@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import path from 'path';
 import { promisify } from 'util';
 import { mkdir, rename, stat, unlink } from 'fs/promises';
+import { isPublicHttpUrl } from '@/lib/media/public-url';
 
 const execFileAsync = promisify(execFile);
 const PUBLIC_VIDEO_ROOT = path.join(process.cwd(), 'public');
@@ -53,16 +54,6 @@ export function localPublicVideoPath(localVideoPath: string | null) {
   return path.join(PUBLIC_VIDEO_ROOT, localVideoPath.slice(1));
 }
 
-function isRemoteAssetUrl(value: string | null) {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 export async function resolveThumbnailSources(
   task: Pick<ThumbnailSourceTask, 'public_video_url' | 'local_video_path' | 'result_video_url' | 'result_last_frame_url'>,
   options: { allowRemoteFallback?: boolean } = {},
@@ -72,9 +63,9 @@ export async function resolveThumbnailSources(
   if (localVideo && await fileExists(localVideo)) sources.push(localVideo);
 
   if (options.allowRemoteFallback !== false) {
-    if (isRemoteAssetUrl(task.public_video_url || null)) sources.push(task.public_video_url as string);
-    if (isRemoteAssetUrl(task.result_video_url)) sources.push(task.result_video_url as string);
-    if (isRemoteAssetUrl(task.result_last_frame_url)) sources.push(task.result_last_frame_url as string);
+    if (isPublicHttpUrl(task.public_video_url || null)) sources.push(task.public_video_url as string);
+    if (isPublicHttpUrl(task.result_video_url)) sources.push(task.result_video_url as string);
+    if (isPublicHttpUrl(task.result_last_frame_url)) sources.push(task.result_last_frame_url as string);
   }
 
   return sources;

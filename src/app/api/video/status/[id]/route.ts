@@ -31,6 +31,7 @@ function serializeTaskIdentity<T extends {
   const thumbnailUrl = shouldExposeTaskThumbnailUrl({
     publicVideoUrl: task.public_video_url,
     localVideoPath: task.local_video_path,
+    resultVideoUrl: task.result_video_url,
     resultLastFrameUrl: task.result_last_frame_url,
   }) ? `/api/video/thumbnail/${task.id}` : null;
   return {
