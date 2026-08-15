@@ -221,6 +221,7 @@
     - `curl -sS -D - https://sd2.youdooart.com/api/config -o /tmp/sd2-public-config.json`
     - 真实登录页或目标页面 DOM 能看到 H3 入口。
   - 停止条件：生产构建不含 H3 字符串、公网仍旧版本、登录跳回旧域名、H3 地址服务器不可达。
+  - 2026-08-15 部署状态：服务器候选构建 `.next-prod-candidate` 通过并切换为 `.next-prod`，`sd2-gray.service` 已重启且 active；本机 `127.0.0.1:3302/api/config` 和公网 `https://sd2.youdooart.com/api/config` 均返回 H3 safe DTO；公网 `_next/static/chunks/8953-968081530b4b369a.js` 返回 200 且包含 `H3 本地工作站` / `H3 健康检查未通过`，不包含 `api_token` / `admin_token` 明文字段。由于 `/generate` 匿名访问 307 到登录页，本轮还未拿到真实登录态 DOM/截图，因此 T13 保持未勾选。
 
 ## 4. 验收/审查内容
 
