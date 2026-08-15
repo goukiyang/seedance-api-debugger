@@ -135,8 +135,15 @@ type GenerationProvider = 'seedance' | 'h3';
 type H3VideoConfig = {
   enabled: boolean;
   ready: boolean;
+  configured?: boolean;
   default_preset_id: string;
   preset_options: ComposerSelectOption[];
+  health?: {
+    api?: string | null;
+    worker?: string | null;
+    comfyui?: string | null;
+    checked_at?: string | null;
+  } | null;
 };
 
 interface ProjectOption {
@@ -274,9 +281,18 @@ function normalizeH3VideoConfig(value: unknown): H3VideoConfig | null {
   return {
     enabled: raw.enabled === true,
     ready: raw.ready === true,
+    configured: raw.configured === true,
     default_preset_id: typeof raw.default_preset_id === 'string' ? raw.default_preset_id : '',
+    health: raw.health && typeof raw.health === 'object' ? raw.health as H3VideoConfig['health'] : null,
     preset_options: options,
   };
+}
+
+function h3DisabledReason(config: H3VideoConfig | null) {
+  if (!config?.enabled) return 'H3 未启用';
+  if (!config.configured) return 'H3 缺少用户 token 或预设';
+  if (!config.health) return 'H3 还没有通过测试连接';
+  return 'H3 健康检查未通过';
 }
 
 function toPositiveInt(value: unknown, fallback: number): number {
@@ -513,11 +529,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         label: 'H3 未配置',
         detail: '到 API 设置配置后开放给用户',
         disabled: true,
-        disabledReason: 'H3 未启用或缺少用户 token',
+        disabledReason: h3DisabledReason(h3VideoConfig),
       });
     }
     return options;
-  }, [currentUser?.role, h3Ready, isIpSurface]);
+  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface]);
   const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
     if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS;
     if (selectedProvider === 'h3' && h3Ready) return h3VideoConfig?.preset_options || [];

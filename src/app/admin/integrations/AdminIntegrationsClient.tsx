@@ -87,6 +87,7 @@ type AiMediaKitConfig = {
 type H3Config = {
   enabled: boolean;
   ready: boolean;
+  configured: boolean;
   admin_queue_ready: boolean;
   provider: 'h3_video';
   base_url: string;
@@ -101,6 +102,14 @@ type H3Config = {
   }>;
   api_token_configured: boolean;
   admin_token_configured: boolean;
+  health: {
+    api: string | null;
+    worker: string | null;
+    comfyui: string | null;
+    worker_url: string | null;
+    preset_count: number | null;
+    checked_at: string | null;
+  } | null;
   missing: Array<'api_token' | 'preset'>;
 };
 
@@ -229,6 +238,7 @@ const EMPTY_AIMEDIAKIT_CONFIG: AiMediaKitConfig = {
 const EMPTY_H3_CONFIG: H3Config = {
   enabled: false,
   ready: false,
+  configured: false,
   admin_queue_ready: false,
   provider: 'h3_video',
   base_url: 'http://127.0.0.1:8893',
@@ -243,6 +253,7 @@ const EMPTY_H3_CONFIG: H3Config = {
   ],
   api_token_configured: false,
   admin_token_configured: false,
+  health: null,
   missing: ['api_token'],
 };
 
@@ -354,7 +365,9 @@ export default function AdminIntegrationsClient() {
     if (!h3Config.enabled) return '未启用';
     if (!h3Config.base_url) return '缺少 API 地址';
     if (!h3Config.api_token_configured) return '缺少用户 token';
-    return '配置未就绪';
+    if (!h3Config.configured) return '配置未就绪';
+    if (!h3Config.health) return '待测试连接';
+    return '健康检查未通过';
   }, [h3Config]);
 
   const loadConfig = async () => {
@@ -961,7 +974,15 @@ export default function AdminIntegrationsClient() {
           </div>
           <div>
             <span className="info-label">健康检查</span>
-            <strong>{h3Config.health_path}</strong>
+            <strong>
+              {h3Config.health
+                ? `API ${h3Config.health.api || '-'} · Worker ${h3Config.health.worker || '-'} · ComfyUI ${h3Config.health.comfyui || '-'}`
+                : h3Config.health_path}
+            </strong>
+          </div>
+          <div>
+            <span className="info-label">最近测试</span>
+            <strong>{h3Config.health?.checked_at ? new Date(h3Config.health.checked_at).toLocaleString() : '未测试'}</strong>
           </div>
           <div>
             <span className="info-label">提交任务</span>
@@ -989,7 +1010,7 @@ export default function AdminIntegrationsClient() {
           <summary>
             <div>
               <strong>H3 队列管理</strong>
-              <span>{h3Config.admin_queue_ready ? '可读取队列并执行管理员操作' : '需要先配置管理员 token'}</span>
+              <span>{h3Config.admin_queue_ready ? '可读取队列并执行管理员操作' : '需要健康检查通过并配置管理员 token'}</span>
             </div>
           </summary>
           <div className="h3-queue-body">
@@ -1003,7 +1024,7 @@ export default function AdminIntegrationsClient() {
                 {h3QueueLoading ? '正在刷新' : '刷新队列'}
               </button>
               {!h3Config.admin_queue_ready && (
-                <span className="text-gray text-sm">队列操作只在 H3 API 地址、用户 token 和管理员 token 都就绪后开放。</span>
+                <span className="text-gray text-sm">队列操作只在 H3 健康检查通过且管理员 token 就绪后开放。</span>
               )}
             </div>
 

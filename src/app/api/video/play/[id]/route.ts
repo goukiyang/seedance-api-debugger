@@ -8,6 +8,11 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const MIME_TYPE = 'video/mp4';
+const H3_INTERNAL_OUTPUT_SCHEME = 'h3-internal-output://';
+
+function isInternalOnlyResultUrl(value: string | null | undefined) {
+  return Boolean(value?.startsWith(H3_INTERNAL_OUTPUT_SCHEME));
+}
 
 function parseRange(header: string | null, fileSize: number) {
   if (!header) return null;
@@ -115,6 +120,10 @@ export async function GET(
         },
       });
     }
+  }
+
+  if (isInternalOnlyResultUrl(task.result_video_url)) {
+    return NextResponse.json({ error: 'H3 输出正在缓存，刷新后再试' }, { status: 425 });
   }
 
   if (task.result_video_url) {

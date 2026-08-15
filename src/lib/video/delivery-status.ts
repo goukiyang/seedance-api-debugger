@@ -14,11 +14,17 @@ export type VideoDeliveryStage = {
   previewAvailable: boolean;
 };
 
+const H3_INTERNAL_OUTPUT_SCHEME = 'h3-internal-output://';
+
+function isInternalOnlyResultUrl(value: string | null | undefined) {
+  return Boolean(value?.startsWith(H3_INTERNAL_OUTPUT_SCHEME));
+}
+
 function hasPreview(task: VideoDeliveryStageTask) {
   return Boolean(
     task.public_video_url
     || task.local_video_path
-    || task.result_video_url
+    || (task.result_video_url && !isInternalOnlyResultUrl(task.result_video_url))
     || task.result_last_frame_url
   );
 }

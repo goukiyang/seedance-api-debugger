@@ -26,11 +26,21 @@ export async function GET() {
       provider: h3Config.provider,
       enabled: h3Config.enabled,
       ready: h3Config.ready,
+      configured: h3Config.configured,
       base_url: h3Config.base_url,
       default_preset_id: h3Config.default_preset_id,
       preset_options: h3Config.preset_options,
       api_token_configured: h3Config.api_token_configured,
       admin_queue_ready: h3Config.admin_queue_ready,
+      health: h3Config.health
+        ? {
+            api: h3Config.health.api,
+            worker: h3Config.health.worker,
+            comfyui: h3Config.health.comfyui,
+            preset_count: h3Config.health.preset_count,
+            checked_at: h3Config.health.checked_at,
+          }
+        : null,
     },
   }, {
     headers: {

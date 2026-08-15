@@ -392,6 +392,7 @@ export async function GET(request: NextRequest) {
             label: 'H3 本地工作站',
             enabled: h3VideoConfig.enabled,
             ready: h3VideoConfig.ready,
+            configured: h3VideoConfig.configured,
             model_options: h3VideoConfig.preset_options,
             default_model: h3VideoConfig.default_preset_id,
           },
@@ -399,9 +400,19 @@ export async function GET(request: NextRequest) {
         h3_video: {
           enabled: h3VideoConfig.enabled,
           ready: h3VideoConfig.ready,
+          configured: h3VideoConfig.configured,
           default_preset_id: h3VideoConfig.default_preset_id,
           preset_options: h3VideoConfig.preset_options,
           admin_queue_ready: h3VideoConfig.admin_queue_ready,
+          health: h3VideoConfig.health
+            ? {
+                api: h3VideoConfig.health.api,
+                worker: h3VideoConfig.health.worker,
+                comfyui: h3VideoConfig.health.comfyui,
+                preset_count: h3VideoConfig.health.preset_count,
+                checked_at: h3VideoConfig.health.checked_at,
+              }
+            : null,
         },
         model: videoConfig.model,
         model_options: videoConfig.model_options,

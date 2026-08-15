@@ -19,6 +19,9 @@ export type CostTaskSnapshot = {
   estimated_cost?: number | null;
   pricing_rule_id?: string | null;
   pricing_snapshot?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  raw_status_response?: string | null;
 };
 
 export type ProviderReportedChargeParams = {
@@ -195,6 +198,66 @@ function costSnapshot(task: CostTaskSnapshot, pricing?: PricingSnapshot | null) 
   };
 }
 
+function taskHasFailureSignal(task: CostTaskSnapshot, signals: string[]) {
+  const haystack = [
+    task.error_code,
+    task.error_message,
+    task.raw_status_response,
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join('\n')
+    .toLowerCase();
+  return signals.some((signal) => haystack.includes(signal.toLowerCase()));
+}
+
+export function taskCostFailureClassification(task: CostTaskSnapshot, terminalStatus: string) {
+  const acceptedByProvider = Boolean(task.provider_task_id);
+  const provider = providerName(task);
+
+  if (provider === 'h3') {
+    if (terminalStatus === 'cancelled') {
+      return {
+        eventType: 'job_cancelled',
+        confidence: 'unknown',
+        providerCostStatus: acceptedByProvider ? 'unknown' : 'failed_no_charge',
+        reason: acceptedByProvider
+          ? 'H3 任务已取消，是否产生外部成本待确认'
+          : 'H3 任务取消且未获得 job_id，暂按未收费处理',
+      };
+    }
+    if (!acceptedByProvider) {
+      return {
+        eventType: 'provider_request_failed',
+        confidence: 'confirmed',
+        providerCostStatus: 'failed_no_charge',
+        reason: 'H3 请求未获得 job_id，暂按未收费处理',
+      };
+    }
+    if (taskHasFailureSignal(task, ['output_download_failed', 'h3_done_without_output'])) {
+      return {
+        eventType: 'output_download_failed',
+        confidence: 'unknown',
+        providerCostStatus: 'unknown',
+        reason: 'H3 任务已完成但输出文件不可用，官方是否收费待确认',
+      };
+    }
+    return {
+      eventType: 'job_failed',
+      confidence: 'unknown',
+      providerCostStatus: 'unknown',
+      reason: 'H3 job 执行失败，官方是否收费待确认',
+    };
+  }
+
+  return {
+    eventType: acceptedByProvider ? 'failed_cost_unknown' : 'failed_no_charge',
+    confidence: acceptedByProvider ? 'unknown' : 'confirmed',
+    providerCostStatus: acceptedByProvider ? 'unknown' : 'failed_no_charge',
+    reason: acceptedByProvider
+      ? '任务失败但供应商已接受请求，官方是否收费待确认'
+      : '任务失败且未获得供应商任务，暂按未收费处理',
+  };
+}
+
 async function ensureDefaultAllocation(
   tx: LedgerClient,
   ledgerId: string,
@@ -360,11 +423,11 @@ export async function recordTaskCostSettlement(
   createdBy?: string | null,
 ) {
   const succeeded = terminalStatus === 'succeeded';
-  const acceptedByProvider = Boolean(task.provider_task_id);
   const duration = task.duration || null;
   const idempotencyKey = `task:${task.id}:cost_${terminalStatus}:v1`;
-  const confidence = succeeded ? 'provisional' : (acceptedByProvider ? 'unknown' : 'confirmed');
-  const eventType = succeeded ? 'rule_settlement' : (acceptedByProvider ? 'failed_cost_unknown' : 'failed_no_charge');
+  const failure = succeeded ? null : taskCostFailureClassification(task, terminalStatus);
+  const confidence = succeeded ? 'provisional' : failure?.confidence;
+  const eventType = succeeded ? 'rule_settlement' : failure?.eventType;
 
   const ledger = await tx.costLedger.upsert({
     where: { idempotency_key: idempotencyKey },
@@ -377,18 +440,16 @@ export async function recordTaskCostSettlement(
       project_id: task.project_id,
       provider_name: providerName(task),
       provider_task_id: task.provider_task_id || null,
-      event_type: eventType,
+      event_type: eventType || 'failed_cost_unknown',
       usage_quantity: duration,
       usage_unit: duration === null ? null : 'video_second',
       cost_source: 'rule',
-      confidence,
+      confidence: confidence || 'unknown',
       pricing_rule_id: task.pricing_rule_id || null,
       pricing_snapshot: task.pricing_snapshot || null,
       reason: succeeded
         ? '任务成功，按内部规则先做临时成本结算，等待官方实际扣费'
-        : acceptedByProvider
-          ? '任务失败但供应商已接受请求，官方是否收费待确认'
-          : '任务失败且未获得供应商任务，暂按未收费处理',
+        : failure?.reason || '任务失败，官方是否收费待确认',
       idempotency_key: idempotencyKey,
       created_by: createdBy || null,
     },
@@ -406,7 +467,7 @@ export async function recordTaskCostSettlement(
   await tx.videoTask.update({
     where: { id: task.id },
     data: {
-      provider_cost_status: succeeded ? 'provisional_settled' : (acceptedByProvider ? 'unknown' : 'failed_no_charge'),
+      provider_cost_status: succeeded ? 'provisional_settled' : (failure?.providerCostStatus || 'unknown'),
       cost_allocation_status: task.project_id ? 'allocated' : 'unallocated',
     },
   });

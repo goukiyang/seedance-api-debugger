@@ -9,7 +9,7 @@ assert.match(routeSource, /normalizeGenerationProvider/, '创建任务必须先�
 assert.match(routeSource, /requestedProvider === H3_VIDEO_PROVIDER/, '创建任务必须有 H3 provider 分支');
 assert.match(routeSource, /requestedProvider === 'seedance' && !isApiKeyConfigured\(\)/, 'Seedance API Key 检查不能阻塞 H3');
 assert.match(routeSource, /getH3ApiSettings/, 'H3 任务必须读取后台 H3 配置');
-assert.match(routeSource, /isH3ApiReady/, 'H3 未启用或缺 token 时必须拒绝普通生成');
+assert.match(routeSource, /isH3Operational/, 'H3 必须健康检查通过后才允许普通生成');
 assert.match(routeSource, /createH3VideoJob/, 'H3 任务必须通过 H3 adapter 创建');
 assert.match(routeSource, /uploadH3ReferenceImagesForTask/, 'H3 首尾帧图片必须先转交给 H3');
 assert.match(routeSource, /appendH3VisibleContext/, 'H3 不支持的素材必须转成可见上下文');

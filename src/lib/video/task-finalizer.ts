@@ -1,7 +1,7 @@
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage } from '../provider/error-message';
-import { H3RequestError } from '../provider/h3';
+import { H3RequestError, H3_VIDEO_PROVIDER, isH3InternalOutputUrl } from '../provider/h3';
 import { getProviderTaskStatus } from '../provider/video-task-status';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
@@ -76,6 +76,7 @@ export type FinalizeVideoTaskResult = {
   thumbnailResult?: EnsureTaskThumbnailResult;
   publicDeliveryResult?: PublicVideoDeliveryResult;
   providerError?: string;
+  retryAfterMs?: number;
   skippedReason?: string;
 };
 
@@ -443,6 +444,38 @@ async function cacheAndMaybeThumbnail(
   return { cacheResult, thumbnailResult, publicDeliveryResult };
 }
 
+function h3OutputFailureRaw(task: VideoTask, cacheResult: LocalVideoCacheResult | undefined) {
+  const raw = parseJsonRecord(task.raw_status_response) || {};
+  return JSON.stringify({
+    ...raw,
+    code: 'output_download_failed',
+    h3_output_cache: {
+      success: false,
+      error: cacheResult?.error || 'H3 output download failed',
+      message: cacheResult?.message || 'H3 输出下载失败',
+      status: cacheResult?.status ?? null,
+    },
+  });
+}
+
+async function markH3OutputDownloadFailed(
+  task: VideoTask,
+  cacheResult: LocalVideoCacheResult | undefined,
+) {
+  return prisma.videoTask.update({
+    where: { id: task.id },
+    data: {
+      provider_status: task.provider_status || 'done',
+      local_status: 'failed',
+      error_code: 'output_download_failed',
+      error_message: cacheResult?.message || 'H3 输出下载失败，无法生成可播放视频文件。',
+      raw_status_response: h3OutputFailureRaw(task, cacheResult),
+      result_video_url: null,
+      completed_at: task.completed_at || new Date(),
+    },
+  });
+}
+
 async function persistProviderStatusError(taskId: string, task: VideoTask, error: unknown) {
   const errorMessage = error instanceof Error ? error.message : String(error);
   const latestTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
@@ -462,6 +495,9 @@ async function persistProviderStatusError(taskId: string, task: VideoTask, error
         error: errorMessage,
         code: error instanceof H3RequestError ? 'h3_request_failed' : undefined,
         retryAfterSeconds: error instanceof H3RequestError ? error.retryAfterSeconds ?? null : undefined,
+        retry_after_ms: error instanceof H3RequestError && error.retryAfterSeconds !== undefined
+          ? Math.max(1000, Math.ceil(error.retryAfterSeconds * 1000))
+          : undefined,
       }),
     },
   });
@@ -520,6 +556,8 @@ export async function finalizeVideoTaskStatus(
 
     if (statusResult.result_video_url) {
       updateData.result_video_url = statusResult.result_video_url;
+    } else if (task.provider === H3_VIDEO_PROVIDER && statusResult.local_status !== 'succeeded') {
+      updateData.result_video_url = null;
     }
     if (statusResult.result_last_frame_url) {
       updateData.result_last_frame_url = statusResult.result_last_frame_url;
@@ -551,8 +589,39 @@ export async function finalizeVideoTaskStatus(
     if (isTerminal && !task.completed_at) {
       updateData.completed_at = new Date();
     }
+    const shouldDeferH3Settlement = task.provider === H3_VIDEO_PROVIDER
+      && statusResult.local_status === 'succeeded'
+      && isH3InternalOutputUrl(statusResult.result_video_url);
 
     if (!hasVideoTaskUpdateChanges(task, updateData)) {
+      if (shouldDeferH3Settlement) {
+        const localResult = await cacheAndMaybeThumbnail(task, { cacheOnSuccess, generateThumbnail, cacheTimeoutMs });
+        if (localResult.cacheResult?.success !== true) {
+          const failedTask = await markH3OutputDownloadFailed(task, localResult.cacheResult);
+          if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
+            await settleTask(taskId, task.user_id, task.frozen_cost, 'failed');
+          }
+          return {
+            task: failedTask,
+            statusRefreshed: true,
+            terminal: true,
+            cacheResult: localResult.cacheResult,
+            thumbnailResult: localResult.thumbnailResult,
+            publicDeliveryResult: localResult.publicDeliveryResult,
+          };
+        }
+        if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
+          await settleTask(taskId, task.user_id, task.frozen_cost, 'succeeded');
+        }
+        return {
+          task: await prisma.videoTask.findUnique({ where: { id: taskId } }) || task,
+          statusRefreshed: true,
+          terminal: true,
+          cacheResult: localResult.cacheResult,
+          thumbnailResult: localResult.thumbnailResult,
+          publicDeliveryResult: localResult.publicDeliveryResult,
+        };
+      }
       return {
         task,
         statusRefreshed: true,
@@ -566,18 +635,20 @@ export async function finalizeVideoTaskStatus(
       data: updateData,
     });
 
-    if (isTerminal && task.user_id && task.frozen_cost && task.frozen_cost > 0) {
+    if (isTerminal && !shouldDeferH3Settlement && task.user_id && task.frozen_cost && task.frozen_cost > 0) {
       await settleTask(taskId, task.user_id, task.frozen_cost, statusResult.local_status);
     }
 
     const createdBy = options.createdBy || task.user_id || task.owner_user_id || null;
-    try {
-      await recordOfficialProviderCharge(taskId, createdBy, statusResult);
-    } catch (error) {
-      console.warn('[VideoFinalizer] Provider charge record skipped:', {
-        taskId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    if (!shouldDeferH3Settlement) {
+      try {
+        await recordOfficialProviderCharge(taskId, createdBy, statusResult);
+      } catch (error) {
+        console.warn('[VideoFinalizer] Provider charge record skipped:', {
+          taskId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     const updatedTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
@@ -588,6 +659,33 @@ export async function finalizeVideoTaskStatus(
       cacheResult = localResult.cacheResult;
       thumbnailResult = localResult.thumbnailResult;
       const publicDeliveryResult = localResult.publicDeliveryResult;
+      if (shouldDeferH3Settlement && cacheResult?.success !== true) {
+        const failedTask = await markH3OutputDownloadFailed(updatedTask, cacheResult);
+        if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
+          await settleTask(taskId, task.user_id, task.frozen_cost, 'failed');
+        }
+        return {
+          task: failedTask,
+          statusRefreshed: true,
+          terminal: true,
+          cacheResult,
+          thumbnailResult,
+          publicDeliveryResult,
+        };
+      }
+      if (shouldDeferH3Settlement) {
+        if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
+          await settleTask(taskId, task.user_id, task.frozen_cost, 'succeeded');
+        }
+        try {
+          await recordOfficialProviderCharge(taskId, createdBy, statusResult);
+        } catch (error) {
+          console.warn('[VideoFinalizer] Provider charge record skipped:', {
+            taskId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       const finalTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
       return {
         task: finalTask || updatedTask || task,
@@ -613,12 +711,16 @@ export async function finalizeVideoTaskStatus(
       error: error instanceof Error ? error.message : String(error),
     });
 
+    const retryAfterMs = error instanceof H3RequestError && error.retryAfterSeconds !== undefined
+      ? Math.max(1000, Math.ceil(error.retryAfterSeconds * 1000))
+      : undefined;
     const updatedTask = await persistProviderStatusError(taskId, task, error);
     return {
       task: updatedTask || task,
       statusRefreshed: false,
       terminal: isTerminalLocalStatus((updatedTask || task).local_status),
       providerError: error instanceof Error ? error.message : String(error),
+      retryAfterMs,
     };
   }
 }

@@ -7,6 +7,7 @@ import {
   createH3VideoJob,
   getH3Health,
   getH3TaskStatus,
+  isH3InternalOutputUrl,
   listH3JobOutputs,
   listH3Presets,
   uploadH3ReferenceImage,
@@ -61,6 +62,15 @@ const fetchImpl: typeof fetch = async (url, init) => {
       preset: 'larry_v4_6step',
       resolved: { seed: 123456 },
       outputs: [{ index: 0, kind: 'video', download_url: '/api/h3/jobs/h3-20260815-013000-abc12345/outputs/0' }],
+    });
+  }
+  if (String(url).endsWith('/api/h3/jobs/h3-empty-output')) {
+    return Response.json({
+      job_id: 'h3-empty-output',
+      status: 'done',
+      preset: 'larry_v4_6step',
+      request: { preset_id: 'larry_v4_6step', aspect_ratio: '16:9', duration_sec: 5 },
+      outputs: [],
     });
   }
   if (String(url).endsWith('/api/h3/jobs/h3-20260815-013000-abc12345/outputs')) {
@@ -154,6 +164,17 @@ async function main() {
   assert.equal(status.provider_model, 'larry_v4_6step');
   assert.equal(status.seed, 123456);
   assert.equal(status.result_video_url, 'h3-internal-output://h3-20260815-013000-abc12345/0');
+  assert.equal(isH3InternalOutputUrl(status.result_video_url), true);
+
+  const emptyOutputStatus = await getH3TaskStatus('h3-empty-output', {
+    baseUrl: 'https://h3-api.example.com',
+    apiToken: 'secret-user-token',
+    fetchImpl,
+  });
+  assert.equal(emptyOutputStatus.local_status, 'failed');
+  assert.equal(emptyOutputStatus.result_video_url, undefined);
+  assert.equal(emptyOutputStatus.error_message, 'H3 任务已完成但没有返回视频输出');
+  assert.equal((emptyOutputStatus.raw as Record<string, unknown>).code, 'h3_done_without_output');
 
   const outputs = await listH3JobOutputs('h3-20260815-013000-abc12345', {
     baseUrl: 'https://h3-api.example.com',

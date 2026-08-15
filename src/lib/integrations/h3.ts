@@ -22,6 +22,16 @@ export type H3ApiSettings = {
   api_token: string | null;
   admin_token: string | null;
   default_preset_id: H3PresetId;
+  health: H3HealthSnapshot | null;
+};
+
+export type H3HealthSnapshot = {
+  api: string | null;
+  worker: string | null;
+  comfyui: string | null;
+  worker_url: string | null;
+  preset_count: number | null;
+  checked_at: string | null;
 };
 
 export type H3ApiSettingsInput = Partial<Omit<H3ApiSettings, 'default_preset_id'>>
@@ -37,9 +47,11 @@ export type H3SafeConfig = {
   presets_path: string;
   generate_path: string;
   default_preset_id: H3PresetId;
+  configured: boolean;
   preset_options: Array<{ id: H3PresetId; label: string; detail: string }>;
   api_token_configured: boolean;
   admin_token_configured: boolean;
+  health: H3HealthSnapshot | null;
   missing: Array<'api_token' | 'preset'>;
 };
 
@@ -49,6 +61,7 @@ export const DEFAULT_H3_API_SETTINGS: H3ApiSettings = {
   api_token: null,
   admin_token: null,
   default_preset_id: H3_DEFAULT_PRESET_ID,
+  health: null,
 };
 
 export function isH3PresetId(value: unknown): value is H3PresetId {
@@ -85,6 +98,24 @@ function normalizePresetId(value: unknown, fallback: H3PresetId = H3_DEFAULT_PRE
   return fallback;
 }
 
+function normalizeHealthSnapshot(value: unknown): H3HealthSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Partial<H3HealthSnapshot>;
+  const checkedAt = typeof input.checked_at === 'string' && input.checked_at.trim()
+    ? input.checked_at.trim()
+    : null;
+  return {
+    api: typeof input.api === 'string' ? input.api.trim() || null : null,
+    worker: typeof input.worker === 'string' ? input.worker.trim() || null : null,
+    comfyui: typeof input.comfyui === 'string' ? input.comfyui.trim() || null : null,
+    worker_url: typeof input.worker_url === 'string' ? input.worker_url.trim() || null : null,
+    preset_count: typeof input.preset_count === 'number' && Number.isFinite(input.preset_count)
+      ? input.preset_count
+      : null,
+    checked_at: checkedAt,
+  };
+}
+
 function envFallbackSettings(): H3ApiSettings {
   const apiToken = cleanString(process.env.H3_API_TOKEN, '');
   const adminToken = cleanString(process.env.H3_ADMIN_TOKEN, '');
@@ -99,6 +130,7 @@ function envFallbackSettings(): H3ApiSettings {
     api_token: apiToken || null,
     admin_token: adminToken || null,
     default_preset_id: presetId,
+    health: null,
   };
 }
 
@@ -113,6 +145,7 @@ export function normalizeH3ApiSettings(value: unknown): H3ApiSettings {
     api_token: cleanString(input.api_token, '').slice(0, 2000) || null,
     admin_token: cleanString(input.admin_token, '').slice(0, 2000) || null,
     default_preset_id: normalizePresetId(input.default_preset_id),
+    health: normalizeHealthSnapshot((input as { health?: unknown }).health),
   };
 }
 
@@ -156,13 +189,21 @@ export function buildH3ApiSettingsPatch(
     ? input.enabled
     : current.enabled || shouldAutoEnable;
 
-  return normalizeH3ApiSettings({
+  const settings = normalizeH3ApiSettings({
     enabled: input.clear_api_token === true ? false : nextEnabled,
     base_url: nextBaseUrl,
     api_token: nextApiToken,
     admin_token: nextAdminToken,
     default_preset_id: nextPresetId,
+    health: current.health,
   });
+  const baseUrlChanged = settings.base_url !== current.base_url;
+  const presetChanged = settings.default_preset_id !== current.default_preset_id;
+  const authChanged = hasNewApiToken || input.clear_api_token === true;
+  return {
+    ...settings,
+    health: baseUrlChanged || presetChanged || authChanged ? null : settings.health,
+  };
 }
 
 export async function saveH3ApiSettings(input: H3ApiSettingsInput, updatedBy: string) {
@@ -191,6 +232,61 @@ export function isH3ApiReady(settings: H3ApiSettings) {
     && isH3PresetId(settings.default_preset_id);
 }
 
+export function isH3HealthReady(health: H3HealthSnapshot | null) {
+  return health?.api === 'ok'
+    && health.worker === 'ok'
+    && health.comfyui === 'ok';
+}
+
+export function isH3Operational(settings: H3ApiSettings) {
+  return isH3ApiReady(settings) && isH3HealthReady(settings.health);
+}
+
+export function h3HealthSnapshotFromResponse(health: unknown): H3HealthSnapshot {
+  const input = health && typeof health === 'object' && !Array.isArray(health)
+    ? health as Record<string, unknown>
+    : {};
+  const worker = input.worker && typeof input.worker === 'object' && !Array.isArray(input.worker)
+    ? input.worker as Record<string, unknown>
+    : {};
+  return {
+    api: typeof input.api === 'string' ? input.api : null,
+    worker: typeof worker.worker === 'string' ? worker.worker : null,
+    comfyui: typeof worker.comfyui === 'string' ? worker.comfyui : null,
+    worker_url: typeof input.worker_url === 'string' ? input.worker_url : null,
+    preset_count: typeof input.preset_count === 'number' && Number.isFinite(input.preset_count)
+      ? input.preset_count
+      : null,
+    checked_at: new Date().toISOString(),
+  };
+}
+
+export async function saveH3HealthSnapshot(
+  health: unknown,
+  updatedBy: string,
+) {
+  const current = await getH3ApiSettings();
+  const settings = normalizeH3ApiSettings({
+    ...current,
+    health: h3HealthSnapshotFromResponse(health),
+  });
+
+  await prisma.platformSetting.upsert({
+    where: { key: H3_API_SETTING_KEY },
+    update: {
+      value_json: JSON.stringify(settings),
+      updated_by: updatedBy,
+    },
+    create: {
+      key: H3_API_SETTING_KEY,
+      value_json: JSON.stringify(settings),
+      updated_by: updatedBy,
+    },
+  });
+
+  return settings;
+}
+
 export function safeH3ConfigDto(settings: H3ApiSettings): H3SafeConfig {
   const missing: H3SafeConfig['missing'] = [];
   if (!settings.api_token) missing.push('api_token');
@@ -199,16 +295,18 @@ export function safeH3ConfigDto(settings: H3ApiSettings): H3SafeConfig {
   return {
     provider: 'h3_video',
     enabled: settings.enabled,
-    ready: isH3ApiReady(settings),
-    admin_queue_ready: isH3ApiReady(settings) && Boolean(settings.admin_token),
+    ready: isH3Operational(settings),
+    admin_queue_ready: isH3Operational(settings) && Boolean(settings.admin_token),
     base_url: settings.base_url,
     health_path: H3_HEALTH_PATH,
     presets_path: H3_PRESETS_PATH,
     generate_path: H3_GENERATE_PATH,
     default_preset_id: settings.default_preset_id,
+    configured: isH3ApiReady(settings),
     preset_options: H3_PRESET_OPTIONS.map((option) => ({ ...option })),
     api_token_configured: Boolean(settings.api_token),
     admin_token_configured: Boolean(settings.admin_token),
+    health: settings.health,
     missing,
   };
 }

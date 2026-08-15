@@ -47,7 +47,7 @@
   - 完成标准：形成一份不包含 token 明文的接入参数摘要，明确 H3 是否可从 sd2 服务器访问。
   - 健康准入：只有 `api=ok`、`worker.worker=ok`、`worker.comfyui=ok`、公网反代/tunnel 稳定、队列上限启用时，才允许打开普通用户入口。
   - 停止条件：H3 只有 `127.0.0.1:8893` 且服务器无法访问、worker/ComfyUI 不健康、公网反代不稳定或队列保护未开启时，不开放用户入口。
-  - 本轮状态：已按 H3 guide 完成代码接入参数和安全边界；真实 H3 公网地址、token、worker/ComfyUI 健康和服务器可达性仍待 T12/T13 验证。
+  - 本轮状态：已按 H3 guide 完成代码接入参数和安全边界；普通用户 H3 入口现在必须等后台测试连接写入 `api=ok + worker=ok + comfyui=ok` 后才开放。真实 H3 公网地址、token、worker/ComfyUI 健康和服务器可达性仍待 T12/T13 验证。
 
 - [x] T1. 新增 H3 后台配置模型
   - 创建：`src/lib/integrations/h3.ts`
@@ -59,6 +59,7 @@
     - 支持保存、清空 token、健康检查、读取 presets。
     - 操作写 `operationLog`，记录谁改了 H3 配置。
   - 验证：新增 `scripts/h3-admin-settings-smoke.ts`，覆盖保存、读取、清空 token、安全 DTO 不泄漏 token。
+  - 2026-08-15 加固：新增健康快照 `health`，配置齐全只代表 `configured=true`，只有测试连接通过后才返回 `ready=true` / `admin_queue_ready=true`。
 
 - [x] T2. 新增 H3 provider adapter
   - 创建：`src/lib/provider/h3.ts`
@@ -76,6 +77,7 @@
     - `duration_sec` 默认 5，最大 15；超出时返回中文错误，不静默截断。
     - `seed` 只允许 `-1` 或安全整数；`width` / `height` 第一版隐藏，不开放普通用户填写。
   - 验证：新增 `scripts/h3-provider-adapter-smoke.ts`，用 mock fetch 断言 URL、Header、payload、参数白名单、错误转换和 token 不被写入日志。
+  - 2026-08-15 加固：`done` 但没有视频输出时转为 `failed`，错误码写入 `h3_done_without_output`，避免成功结算不可播放任务。
 
 - [x] T3. 新增 H3 provider 状态映射
   - 修改：`src/lib/provider/video-task-status.ts`
@@ -92,6 +94,7 @@
     - 遇到 `Retry-After` 按服务端建议退避，不密集打 H3。
     - 超过最大等待时间或长时间无状态变化时，标记为可恢复异常并保留重试入口，不假装仍在生成。
   - 验证：扩展 `scripts/provider-status-router-smoke.ts`，覆盖 H3 状态、轮询终态、`Retry-After`、超时和未知 provider 报错。
+  - 2026-08-15 加固：轮询器读取 `retryAfterMs`，H3 返回 `Retry-After` 时按服务端建议等待。
 
 - [x] T4. 接通 H3 图片素材转交
   - 创建：`src/lib/provider/h3-assets.ts`
@@ -117,6 +120,7 @@
     - 不硬编码旧 Seedance 默认到 H3 任务里。
     - 创建成功后仍启动现有 `startTaskLocalization`。
   - 验证：新增 `scripts/h3-create-route-smoke.ts`，用 mock adapter 断言任务落库、payload、provider、model、job_id、错误分支。
+  - 2026-08-15 加固：任务创建从 `isH3ApiReady` 改为 `isH3Operational`，未测试连接或健康检查未通过时拒绝普通生成。
 
 - [x] T6. 处理 H3 结果下载和本地缓存
   - 修改：`src/lib/video/task-finalizer.ts`
@@ -127,6 +131,7 @@
     - 下载后继续走现有本地缓存、稳定下载 URL、缩略图生成。
     - 如果 H3 输出列表为空，任务保持可重试失败状态，并显示中文错误。
   - 验证：新增 `scripts/h3-finalizer-output-smoke.ts`，覆盖 done 有输出、done 无输出、failed、下载 404、下载 503。
+  - 2026-08-15 加固：H3 内部输出地址不会作为前端预览/播放链接；播放接口遇到内部地址返回 `425`；H3 成功结算延后到后端缓存成功，输出下载失败时任务转 `failed` 并写 `output_download_failed`。
 
 - [x] T7. 在普通生成页增加「生成引擎」
   - 修改：`src/components/generate/GeneratePageClient.tsx`
@@ -159,6 +164,7 @@
     - 队列暂停、恢复、取消、停止、移动都写 `OperationLog`，包含操作者、job_id、动作、原因和结果。
     - 不第一版新增 `/admin/h3-queue` 独立页。
   - 验证：新增 `scripts/h3-admin-queue-smoke.ts`，覆盖普通用户拒绝、管理员可读、暂停/恢复/取消/停止/move 或暂不支持提示、队列操作审计。
+  - 2026-08-15 加固：队列后端也必须等 H3 健康检查通过才允许读取或执行队列操作，不能只靠前端按钮禁用。
 
 - [x] T10. 成本、点数和审计规则收口
   - 修改：`src/lib/pricing.ts` 或现有 pricing 配置文件。
@@ -170,6 +176,7 @@
     - 失败、取消、队列满、H3 创建失败、输出下载失败时，明确点数冻结/退款/释放规则。
     - H3 任务失败或取消不能吞掉冻结点数；CostLedger 需要能区分 `provider_request_failed`、`job_failed`、`job_cancelled`、`output_download_failed`。
   - 验证：新增 `scripts/h3-cost-ledger-smoke.ts`，确认没有把 H3 成本错记成 Seedance，并覆盖失败、取消、队列满、下载失败的扣费/退款规则。
+  - 2026-08-15 加固：`CostLedger.event_type` 区分 `provider_request_failed`、`job_failed`、`job_cancelled`、`output_download_failed`，审计汇总把这些事件视为 H3 终态成本记录。
 
 - [x] T11. 无成本集成验证
   - 命令：
@@ -183,7 +190,17 @@
     - `npm run lint`
     - `npm run build`
   - 完成标准：不真实调用 H3 生成，也能证明选择值穿透 UI、API、provider payload、任务记录、状态映射和缓存路径。
-  - 本轮证据：H3 全量 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build` 均通过；未发起真实 H3 生成。
+  - 本轮证据：H3 全量 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check` 均通过；未发起真实 H3 生成。
+
+- [x] T14. 审查阻塞修复
+  - 来源：独立只读审查发现第一轮实现存在 5 个阻塞风险。
+  - 已修复：
+    - H3 `done` 无输出不再算成功。
+    - H3 内部输出地址不再进入前端播放链路。
+    - H3 `Retry-After` 进入轮询等待。
+    - H3 普通用户入口改为健康检查通过后开放。
+    - H3 失败成本事件细分并进入后台审计终态事件清单。
+  - 验证：`scripts/h3-admin-settings-smoke.ts`、`scripts/h3-provider-adapter-smoke.ts`、`scripts/h3-finalizer-output-smoke.ts`、`scripts/h3-cost-ledger-smoke.ts` 已补直接断言。
 
 - [ ] T12. 真实 H3 连接验证
   - 前提：用户明确授权使用 H3 本地算力。

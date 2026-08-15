@@ -7,7 +7,9 @@ import {
   H3_DEFAULT_BASE_URL,
   H3_DEFAULT_PRESET_ID,
   buildH3ApiSettingsPatch,
+  h3HealthSnapshotFromResponse,
   isH3ApiReady,
+  isH3Operational,
   safeH3ConfigDto,
 } from '@/lib/integrations/h3';
 
@@ -33,11 +35,13 @@ assert.equal(saved.api_token, 'secret-h3-user-token-1234567890');
 assert.equal(saved.admin_token, 'secret-h3-admin-token-1234567890');
 assert.equal(saved.default_preset_id, 'larry_v4_8step');
 assert.equal(isH3ApiReady(saved), true);
+assert.equal(isH3Operational(saved), false, '配置齐全但没健康检查时不能开放 H3');
 
 const dto = safeH3ConfigDto(saved);
 assert.equal(dto.provider, 'h3_video');
 assert.equal(dto.enabled, true);
-assert.equal(dto.ready, true);
+assert.equal(dto.configured, true);
+assert.equal(dto.ready, false);
 assert.equal(dto.base_url, 'https://h3-api.example.com');
 assert.equal(dto.default_preset_id, 'larry_v4_8step');
 assert.equal(dto.health_path, '/health');
@@ -48,6 +52,23 @@ assert.equal(dto.admin_token_configured, true);
 assert.deepEqual(dto.missing, []);
 assert.equal(JSON.stringify(dto).includes('secret-h3-user-token'), false);
 assert.equal(JSON.stringify(dto).includes('secret-h3-admin-token'), false);
+
+const healthy = {
+  ...saved,
+  health: h3HealthSnapshotFromResponse({
+    api: 'ok',
+    worker_url: 'http://127.0.0.1:8894',
+    preset_count: 3,
+    worker: { worker: 'ok', comfyui: 'ok' },
+  }),
+};
+assert.equal(isH3Operational(healthy), true);
+const healthyDto = safeH3ConfigDto(healthy);
+assert.equal(healthyDto.ready, true);
+assert.equal(healthyDto.admin_queue_ready, true);
+assert.equal(healthyDto.health?.api, 'ok');
+assert.equal(healthyDto.health?.worker, 'ok');
+assert.equal(healthyDto.health?.comfyui, 'ok');
 
 const clearedUserToken = buildH3ApiSettingsPatch(saved, { clear_api_token: true });
 assert.equal(clearedUserToken.enabled, false);
@@ -60,6 +81,7 @@ assert.equal(clearedAdminToken.enabled, true, 'admin token is not required for o
 assert.equal(clearedAdminToken.api_token, saved.api_token);
 assert.equal(clearedAdminToken.admin_token, null);
 assert.equal(isH3ApiReady(clearedAdminToken), true);
+assert.equal(isH3Operational(clearedAdminToken), false);
 
 async function main() {
   const routeModuleUrl = pathToFileURL(`${process.cwd()}/src/app/api/admin/integrations/h3/route.ts`).href;
@@ -75,6 +97,8 @@ async function main() {
   );
   assert.ok(publicConfigRouteSource.includes('getH3ApiSettings'));
   assert.ok(publicConfigRouteSource.includes('h3_video'));
+  assert.ok(publicConfigRouteSource.includes('configured'));
+  assert.ok(publicConfigRouteSource.includes('health'));
   assert.ok(publicConfigRouteSource.includes('api_token_configured'));
   assert.ok(!publicConfigRouteSource.includes('admin_token_configured: h3Config.admin_token'));
 

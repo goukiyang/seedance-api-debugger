@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
-import { H3_API_SETTING_KEY, getH3ApiSettings } from '@/lib/integrations/h3';
+import { H3_API_SETTING_KEY, getH3ApiSettings, isH3Operational } from '@/lib/integrations/h3';
 import { H3ConfigurationError, H3RequestError, getH3QueueState, postH3AdminAction } from '@/lib/provider/h3';
 
 export const dynamic = 'force-dynamic';
@@ -61,6 +61,9 @@ export async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getH3ApiSettings();
+    if (!isH3Operational(settings)) {
+      return NextResponse.json({ error: 'H3 健康检查未通过，请先在 API 设置页测试连接。' }, { status: 503 });
+    }
     const queue = await getH3QueueState(h3AdminOptions(settings));
     return NextResponse.json({
       ok: true,
@@ -92,6 +95,9 @@ export async function POST(request: NextRequest) {
     }
 
     const settings = await getH3ApiSettings();
+    if (!isH3Operational(settings)) {
+      return NextResponse.json({ error: 'H3 健康检查未通过，请先在 API 设置页测试连接。' }, { status: 503 });
+    }
     const result = await postH3AdminAction(
       queueActionPath(action, jobId),
       actionBody(action, { reason, direction }),

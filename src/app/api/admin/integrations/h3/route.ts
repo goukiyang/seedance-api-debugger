@@ -8,6 +8,7 @@ import {
   getH3ApiSettings,
   safeH3ConfigDto,
   saveH3ApiSettings,
+  saveH3HealthSnapshot,
 } from '@/lib/integrations/h3';
 import { getH3Health, listH3Presets } from '@/lib/provider/h3';
 
@@ -94,6 +95,13 @@ export async function POST(request: NextRequest) {
     const presets = settings.api_token
       ? await listH3Presets({ baseUrl: settings.base_url, apiToken: settings.api_token })
       : null;
+    const saved = await saveH3HealthSnapshot(health, admin.id);
+    const healthRecord = health && typeof health === 'object'
+      ? health as Record<string, unknown>
+      : {};
+    const workerRecord = healthRecord.worker && typeof healthRecord.worker === 'object' && !Array.isArray(healthRecord.worker)
+      ? healthRecord.worker as Record<string, unknown>
+      : {};
 
     await prisma.operationLog.create({
       data: {
@@ -105,7 +113,10 @@ export async function POST(request: NextRequest) {
           base_url: settings.base_url,
           api_token_configured: Boolean(settings.api_token),
           admin_token_configured: Boolean(settings.admin_token),
-          health_api: typeof health === 'object' && health ? (health as Record<string, unknown>).api : null,
+          health_api: healthRecord.api ?? null,
+          health_worker: workerRecord.worker ?? null,
+          health_comfyui: workerRecord.comfyui ?? null,
+          preset_count: healthRecord.preset_count ?? null,
         }),
       },
     });
@@ -113,7 +124,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       setting_key: H3_API_SETTING_KEY,
-      config: safeH3ConfigDto(settings),
+      config: safeH3ConfigDto(saved),
       test: { health, presets, tested_at: new Date().toISOString() },
     });
   } catch (error) {

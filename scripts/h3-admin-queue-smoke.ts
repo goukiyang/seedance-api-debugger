@@ -7,6 +7,7 @@ async function main() {
   const clientSource = readFileSync('src/app/admin/integrations/AdminIntegrationsClient.tsx', 'utf8');
 
   assert.match(routeSource, /getAdminUser\(request\)/, 'H3 队列接口必须只允许管理员调用');
+  assert.match(routeSource, /isH3Operational/, 'H3 队列后端必须等健康检查通过后才开放');
   assert.match(routeSource, /getH3QueueState/, 'H3 队列 GET 必须走服务端 adapter');
   assert.match(routeSource, /postH3AdminAction/, 'H3 队列写操作必须走服务端 adapter');
   assert.match(routeSource, /pause[\s\S]+resume[\s\S]+cancel[\s\S]+stop[\s\S]+move/, 'H3 队列接口必须覆盖 pause/resume/cancel/stop/move');

@@ -60,11 +60,13 @@ async function runTaskLocalization(taskId: string, options: RunnerOptions) {
   const enqueueDeliveryOnSuccess = options.enqueueDeliveryOnSuccess === true;
   const startedAt = Date.now();
   let attempt = 0;
+  let nextWaitMs = intervalMs;
 
   await wait(initialDelayMs);
 
   while (Date.now() - startedAt <= maxRuntimeMs) {
     attempt += 1;
+    nextWaitMs = intervalMs;
     try {
       const result = await finalizeVideoTaskStatus(taskId, {
         forceProviderRefresh: true,
@@ -72,6 +74,9 @@ async function runTaskLocalization(taskId: string, options: RunnerOptions) {
         generateThumbnail,
         cacheTimeoutMs,
       });
+      if (result.retryAfterMs && Number.isFinite(result.retryAfterMs) && result.retryAfterMs > 0) {
+        nextWaitMs = result.retryAfterMs;
+      }
 
       const status = result.task?.local_status || null;
       if (
@@ -115,6 +120,7 @@ async function runTaskLocalization(taskId: string, options: RunnerOptions) {
         cacheError: result.cacheResult?.error ?? null,
         thumbnailSuccess: result.thumbnailResult?.success ?? null,
         thumbnailError: result.thumbnailResult?.error ?? null,
+        nextWaitMs,
       });
     } catch (error) {
       console.warn('[VideoLocalizationRunner] Poll failed:', {
@@ -124,7 +130,7 @@ async function runTaskLocalization(taskId: string, options: RunnerOptions) {
       });
     }
 
-    await wait(intervalMs);
+    await wait(nextWaitMs);
   }
 
   console.warn('[VideoLocalizationRunner] Max runtime reached:', {

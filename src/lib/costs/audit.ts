@@ -1,7 +1,16 @@
 import { prisma } from '@/lib/prisma';
 
 const TERMINAL_TASK_STATUSES = ['succeeded', 'failed', 'cancelled'];
-const TERMINAL_COST_EVENTS = ['rule_settlement', 'failed_cost_unknown', 'failed_no_charge', 'official_charge'];
+const TERMINAL_COST_EVENTS = [
+  'rule_settlement',
+  'failed_cost_unknown',
+  'failed_no_charge',
+  'provider_request_failed',
+  'job_failed',
+  'job_cancelled',
+  'output_download_failed',
+  'official_charge',
+];
 const LEDGER_ID_QUERY_CHUNK_SIZE = 500;
 
 export type CostLedgerAuditSummary = Awaited<ReturnType<typeof getCostLedgerAuditSummary>>;

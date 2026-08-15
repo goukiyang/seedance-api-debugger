@@ -358,8 +358,12 @@ export function h3InternalOutputUrl(jobId: string, index = 0) {
   return `${H3_INTERNAL_OUTPUT_SCHEME}${jobId}/${index}`;
 }
 
+export function isH3InternalOutputUrl(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.startsWith(H3_INTERNAL_OUTPUT_SCHEME);
+}
+
 export function parseH3InternalOutputUrl(value: string | null | undefined) {
-  if (!value?.startsWith(H3_INTERNAL_OUTPUT_SCHEME)) return null;
+  if (!isH3InternalOutputUrl(value)) return null;
   const tail = value.slice(H3_INTERNAL_OUTPUT_SCHEME.length);
   const [jobId, indexText] = tail.split('/');
   const index = Number(indexText);
@@ -398,6 +402,25 @@ export async function getH3TaskStatus(
     : typeof request.seed === 'number'
       ? request.seed
       : undefined;
+
+  if (localStatus === 'succeeded' && !output) {
+    const errorMessage = 'H3 任务已完成但没有返回视频输出';
+    return {
+      provider_task_id: jobId,
+      provider_status: providerStatus,
+      local_status: 'failed',
+      provider_model: preset,
+      seed,
+      ratio: typeof request.aspect_ratio === 'string' ? request.aspect_ratio : undefined,
+      duration: typeof request.duration_sec === 'number' ? request.duration_sec : undefined,
+      error_message: errorMessage,
+      raw: {
+        ...raw,
+        code: 'h3_done_without_output',
+        error: errorMessage,
+      },
+    };
+  }
 
   return {
     provider_task_id: jobId,

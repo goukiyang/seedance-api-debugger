@@ -17,7 +17,7 @@ import {
   type H3GeneratePayload,
 } from '@/lib/provider/h3';
 import { uploadH3ReferenceImagesForTask } from '@/lib/provider/h3-assets';
-import { getH3ApiSettings, isH3ApiReady, isH3PresetId } from '@/lib/integrations/h3';
+import { getH3ApiSettings, isH3Operational, isH3PresetId } from '@/lib/integrations/h3';
 import {
   PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
   ensureProviderSafeReferenceImageUrl,
@@ -641,8 +641,8 @@ export async function POST(request: NextRequest) {
   const h3Settings = requestedProvider === H3_VIDEO_PROVIDER ? await getH3ApiSettings() : null;
   let selectedModel: string;
   if (requestedProvider === H3_VIDEO_PROVIDER) {
-    if (!h3Settings || !isH3ApiReady(h3Settings)) {
-      return errorJson('H3 本地生成服务未启用，请管理员先在 API 设置页配置 H3 地址和用户 token。', 503);
+    if (!h3Settings || !isH3Operational(h3Settings)) {
+      return errorJson('H3 本地生成服务未就绪，请管理员先在 API 设置页保存配置并测试连接通过。', 503);
     }
     const requestedPreset = typeof body.preset_id === 'string' && body.preset_id.trim()
       ? body.preset_id.trim()
