@@ -259,7 +259,20 @@ export async function settleTask(
 ) {
   await prisma.$transaction(async (tx) => {
     const freshTask = await tx.videoTask.findUnique({ where: { id: taskId } });
-    if (!freshTask || !freshTask.frozen_cost || freshTask.frozen_cost <= 0) return;
+    if (!freshTask) return;
+
+    const effectiveFrozenAmount = Math.max(0, Number(freshTask.frozen_cost ?? frozenAmount ?? 0));
+    if (effectiveFrozenAmount <= 0) {
+      const settledTask = await tx.videoTask.update({
+        where: { id: taskId },
+        data: terminalStatus === 'succeeded'
+          ? { frozen_cost: 0, actual_cost: 0 }
+          : { frozen_cost: 0, actual_cost: 0, refund_amount: 0 },
+      });
+
+      await recordTaskCostSettlement(tx, settledTask, terminalStatus, userId);
+      return;
+    }
 
     if (freshTask.billing_scope === 'project' && freshTask.project_id) {
       const existingProjectSettlement = await tx.projectBudgetLedger.findUnique({
@@ -271,7 +284,7 @@ export async function settleTask(
         projectId: freshTask.project_id,
         taskId,
         terminalStatus,
-        frozenAmount,
+        frozenAmount: effectiveFrozenAmount,
         freezeSnapshot: freshTask.credit_freeze_snapshot,
         operatorId: userId,
       });
@@ -299,7 +312,7 @@ export async function settleTask(
       taskId,
       userId,
       terminalStatus,
-      frozenAmount,
+      frozenAmount: effectiveFrozenAmount,
       freezeSnapshot: freshTask.credit_freeze_snapshot,
     });
 
@@ -458,6 +471,10 @@ function h3OutputFailureRaw(task: VideoTask, cacheResult: LocalVideoCacheResult 
   });
 }
 
+function shouldSettleTerminalCosts(task: VideoTask) {
+  return Boolean(task.user_id && ((task.frozen_cost ?? 0) > 0 || task.provider === H3_VIDEO_PROVIDER));
+}
+
 async function markH3OutputDownloadFailed(
   task: VideoTask,
   cacheResult: LocalVideoCacheResult | undefined,
@@ -598,8 +615,8 @@ export async function finalizeVideoTaskStatus(
         const localResult = await cacheAndMaybeThumbnail(task, { cacheOnSuccess, generateThumbnail, cacheTimeoutMs });
         if (localResult.cacheResult?.success !== true) {
           const failedTask = await markH3OutputDownloadFailed(task, localResult.cacheResult);
-          if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
-            await settleTask(taskId, task.user_id, task.frozen_cost, 'failed');
+          if (shouldSettleTerminalCosts(task)) {
+            await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, 'failed');
           }
           return {
             task: failedTask,
@@ -610,8 +627,8 @@ export async function finalizeVideoTaskStatus(
             publicDeliveryResult: localResult.publicDeliveryResult,
           };
         }
-        if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
-          await settleTask(taskId, task.user_id, task.frozen_cost, 'succeeded');
+        if (shouldSettleTerminalCosts(task)) {
+          await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, 'succeeded');
         }
         return {
           task: await prisma.videoTask.findUnique({ where: { id: taskId } }) || task,
@@ -635,8 +652,8 @@ export async function finalizeVideoTaskStatus(
       data: updateData,
     });
 
-    if (isTerminal && !shouldDeferH3Settlement && task.user_id && task.frozen_cost && task.frozen_cost > 0) {
-      await settleTask(taskId, task.user_id, task.frozen_cost, statusResult.local_status);
+    if (isTerminal && !shouldDeferH3Settlement && shouldSettleTerminalCosts(task)) {
+      await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, statusResult.local_status);
     }
 
     const createdBy = options.createdBy || task.user_id || task.owner_user_id || null;
@@ -661,8 +678,8 @@ export async function finalizeVideoTaskStatus(
       const publicDeliveryResult = localResult.publicDeliveryResult;
       if (shouldDeferH3Settlement && cacheResult?.success !== true) {
         const failedTask = await markH3OutputDownloadFailed(updatedTask, cacheResult);
-        if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
-          await settleTask(taskId, task.user_id, task.frozen_cost, 'failed');
+        if (shouldSettleTerminalCosts(task)) {
+          await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, 'failed');
         }
         return {
           task: failedTask,
@@ -674,8 +691,8 @@ export async function finalizeVideoTaskStatus(
         };
       }
       if (shouldDeferH3Settlement) {
-        if (task.user_id && task.frozen_cost && task.frozen_cost > 0) {
-          await settleTask(taskId, task.user_id, task.frozen_cost, 'succeeded');
+        if (shouldSettleTerminalCosts(task)) {
+          await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, 'succeeded');
         }
         try {
           await recordOfficialProviderCharge(taskId, createdBy, statusResult);

@@ -4,8 +4,8 @@ const DEFAULT_PRICING_RULE_ID = 'default-seedance-v2';
 const DEFAULT_PRICING_RULE_VERSION = 2;
 const SEEDANCE_VIDEO_COST_PER_SECOND = 3;
 const H3_PRICING_RULE_ID = 'default-h3-local-video-v1';
-const H3_PRICING_RULE_VERSION = 1;
-const H3_VIDEO_COST_PER_SECOND = 3;
+const H3_PRICING_RULE_VERSION = 2;
+const H3_VIDEO_COST_PER_SECOND = 0;
 const ENHANCE_VIDEO_PRICING_RULE_ID = 'default-aimediakit-enhance-video-v1';
 const ENHANCE_VIDEO_PRICING_RULE_VERSION = 1;
 
@@ -71,7 +71,7 @@ export function calculateH3EstimatedCost(
     internalMultiplier,
     finalCostPerSecond,
     estimatedCost,
-    formula: `ceil(${baseCostPerSecond} × ${internalMultiplier} × ${normalizedDuration}) = ${estimatedCost}`,
+    formula: 'free_local_h3 = 0',
     pricingRuleId: H3_PRICING_RULE_ID,
     pricingRuleVersion: H3_PRICING_RULE_VERSION,
   };

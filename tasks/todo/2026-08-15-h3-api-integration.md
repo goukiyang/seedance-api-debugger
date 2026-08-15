@@ -47,7 +47,7 @@
   - 完成标准：形成一份不包含 token 明文的接入参数摘要，明确 H3 是否可从 sd2 服务器访问。
   - 健康准入：只有 `api=ok`、`worker.worker=ok`、`worker.comfyui=ok`、公网反代/tunnel 稳定、队列上限启用时，才允许打开普通用户入口。
   - 停止条件：H3 只有 `127.0.0.1:8893` 且服务器无法访问、worker/ComfyUI 不健康、公网反代不稳定或队列保护未开启时，不开放用户入口。
-  - 本轮状态：已按 H3 guide 完成代码接入参数和安全边界；普通用户 H3 入口现在必须等后台测试连接写入 `api=ok + worker=ok + comfyui=ok` 后才开放。真实 H3 公网地址、token、worker/ComfyUI 健康和服务器可达性仍待 T12/T13 验证。
+  - 本轮状态：已按 H3 guide 完成代码接入参数和安全边界；普通用户 H3 入口现在必须等后台测试连接写入 `api=ok + worker=ok + comfyui=ok` 后才开放。2026-08-15 复查确认生产库没有 `h3_video_api_v1` 配置记录，生产服务器 `H3_*TOKEN` 未配置，服务器和本机 `127.0.0.1:8893` 都没有 H3 gateway 监听；本机 `8793` 是 media-link 服务，不是 H3。真实 H3 公网地址、token、worker/ComfyUI 健康和服务器可达性仍待 T12/T13 验证。
 
 - [x] T1. 新增 H3 后台配置模型
   - 创建：`src/lib/integrations/h3.ts`
@@ -171,12 +171,13 @@
   - 修改：`src/lib/costs/ledger.ts` 如需新增 provider 标识。
   - 内容：
     - H3 本地算力没有官方账单时，不伪造官方成本。
-    - 第一版使用明确的内部点数规则或标记 provider cost 为 `unknown/manual`。
+    - H3 本地模型是免费链路，内部点数规则必须返回 0，不冻结、不扣除用户点数，也不预占项目预算。
     - ProviderApiRequest、CostLedger、OperationLog 都记录 `provider='h3'`、preset、job_id、外部请求 ID。
-    - 失败、取消、队列满、H3 创建失败、输出下载失败时，明确点数冻结/退款/释放规则。
-    - H3 任务失败或取消不能吞掉冻结点数；CostLedger 需要能区分 `provider_request_failed`、`job_failed`、`job_cancelled`、`output_download_failed`。
+    - 失败、取消、队列满、H3 创建失败、输出下载失败时，明确 0 成本结算规则，不进入点数或项目预算释放路径。
+    - H3 任务成功、失败或取消都要有 CostLedger 终态记录；失败事件需要能区分 `provider_request_failed`、`job_failed`、`job_cancelled`、`output_download_failed`。
   - 验证：新增 `scripts/h3-cost-ledger-smoke.ts`，确认没有把 H3 成本错记成 Seedance，并覆盖失败、取消、队列满、下载失败的扣费/退款规则。
   - 2026-08-15 加固：`CostLedger.event_type` 区分 `provider_request_failed`、`job_failed`、`job_cancelled`、`output_download_failed`，审计汇总把这些事件视为 H3 终态成本记录。
+  - 2026-08-15 免费修正：`calculateH3EstimatedCost` 返回 `estimatedCost=0`、`baseCostPerSecond=0`、`formula=free_local_h3 = 0`；创建任务只有 `estimatedCost > 0` 才冻结用户点数或项目预算；0 成本失败和成功都写 `actual_cost=0` / `refund_amount=0` 并记录 CostLedger，不创建 `task_freeze`、`task_success_deduct` 或项目预算扣减流水。
 
 - [x] T11. 无成本集成验证
   - 命令：
@@ -190,7 +191,7 @@
     - `npm run lint`
     - `npm run build`
   - 完成标准：不真实调用 H3 生成，也能证明选择值穿透 UI、API、provider payload、任务记录、状态映射和缓存路径。
-  - 本轮证据：H3 全量 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check` 均通过；未发起真实 H3 生成。
+  - 本轮证据：H3 全量 smoke、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`git diff --check` 均通过；H3 免费修正后的 smoke 已断言 0 成本和跳过冻结路径。未发起真实 H3 生成，因为当前本机和生产服务器均无 H3 gateway 可用。
 
 - [x] T14. 审查阻塞修复
   - 来源：独立只读审查发现第一轮实现存在 5 个阻塞风险。
@@ -211,6 +212,7 @@
     - 再提交 1 个带首帧/尾帧图片的短视频 H3 测试任务。
     - 验证 `/tasks/<id>`、项目产出、后台产出、缩略图、下载链接。
   - 完成标准：真实页面能看到 H3 生成结果；纯文本任务和带首尾帧任务都能刷新后仍存在，下载稳定可用。
+  - 2026-08-15 阻塞状态：用户已授权使用 H3 本地算力并要求多跑几个视频，但当前没有可访问的 H3 gateway。已验证 `http://127.0.0.1:8893/health` 在本机和生产服务器均连接失败，生产库没有 H3 配置记录，生产 systemd 环境没有 H3 token。需要先启动/提供 H3 API gateway 地址和 token，或把 gateway 反代到生产服务器可访问地址后，才能提交真实 H3 任务。
 
 - [ ] T13. 服务器部署闭环
   - 按 `AGENTS.md` 的 sd2 服务器生产托管规则执行。

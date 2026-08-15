@@ -1446,46 +1446,48 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      let freezeSnapshot: string;
-      try {
-        if (billingScope === 'project') {
-          const freeze = await allocateProjectTaskBudget(tx, {
-            projectId: project.id,
-            taskId: task.id,
-            amount: estimatedCost,
-            operatorId: user.id,
-          });
-          freezeSnapshot = freeze.snapshot;
-        } else {
-          const freeze = await allocateTaskCredits(tx, {
-            id: user.id,
-            role: user.role,
-            account_type: user.account_type,
-            user_profile: user.user_profile,
-            status: user.status,
-          }, estimatedCost, task.id);
-          freezeSnapshot = freeze.snapshot;
+      let freezeSnapshot = '[]';
+      if (estimatedCost > 0) {
+        try {
+          if (billingScope === 'project') {
+            const freeze = await allocateProjectTaskBudget(tx, {
+              projectId: project.id,
+              taskId: task.id,
+              amount: estimatedCost,
+              operatorId: user.id,
+            });
+            freezeSnapshot = freeze.snapshot;
+          } else {
+            const freeze = await allocateTaskCredits(tx, {
+              id: user.id,
+              role: user.role,
+              account_type: user.account_type,
+              user_profile: user.user_profile,
+              status: user.status,
+            }, estimatedCost, task.id);
+            freezeSnapshot = freeze.snapshot;
 
-          await tx.creditLedger.create({
-            data: {
-              user_id: user.id,
-              type: 'task_freeze',
-              amount: -estimatedCost,
-              balance_before: freeze.balance_before,
-              balance_after: freeze.balance_after,
-              frozen_before: freeze.frozen_before,
-              frozen_after: freeze.frozen_after,
-              related_task_id: task.id,
-              reason: `任务创建冻结 ${estimatedCost} 点`,
-              metadata_json: JSON.stringify({ allocations: freeze.allocations, source_metadata: sourceMetadata }),
-            },
-          });
+            await tx.creditLedger.create({
+              data: {
+                user_id: user.id,
+                type: 'task_freeze',
+                amount: -estimatedCost,
+                balance_before: freeze.balance_before,
+                balance_after: freeze.balance_after,
+                frozen_before: freeze.frozen_before,
+                frozen_after: freeze.frozen_after,
+                related_task_id: task.id,
+                reason: `任务创建冻结 ${estimatedCost} 点`,
+                metadata_json: JSON.stringify({ allocations: freeze.allocations, source_metadata: sourceMetadata }),
+              },
+            });
+          }
+        } catch (error) {
+          throw new CreditError(
+            error instanceof Error ? error.message : billingScope === 'project' ? '项目预算不足' : '点数不足',
+            billingScope === 'project' ? 'INSUFFICIENT_PROJECT_BUDGET' : 'INSUFFICIENT_CREDITS',
+          );
         }
-      } catch (error) {
-        throw new CreditError(
-          error instanceof Error ? error.message : billingScope === 'project' ? '项目预算不足' : '点数不足',
-          billingScope === 'project' ? 'INSUFFICIENT_PROJECT_BUDGET' : 'INSUFFICIENT_CREDITS',
-        );
       }
 
       await tx.videoTask.update({
@@ -1808,7 +1810,7 @@ export async function POST(request: NextRequest) {
             video_task_id: taskId,
             memory_type: 'task_result',
             signal: 'negative',
-            summary: requestedProvider === H3_VIDEO_PROVIDER ? 'H3 提交失败，已返还冻结点数' : 'Seedance 提交失败，已返还冻结点数',
+            summary: requestedProvider === H3_VIDEO_PROVIDER ? 'H3 提交失败，未消耗点数' : 'Seedance 提交失败，已返还冻结点数',
             metadata_json: JSON.stringify({
               error: userFacingFailure.code,
               message: userFacingFailure.message,
@@ -1871,12 +1873,27 @@ async function handleProviderFailure(
       },
     });
 
+    const effectiveFrozenAmount = Math.max(0, Number(taskBeforeSettlement.frozen_cost ?? frozenAmount ?? 0));
+    if (effectiveFrozenAmount <= 0) {
+      const failedTask = await tx.videoTask.update({
+        where: { id: taskId },
+        data: {
+          frozen_cost: 0,
+          actual_cost: 0,
+          refund_amount: 0,
+        },
+      });
+
+      await recordTaskCostSettlement(tx, failedTask, 'failed', userId);
+      return;
+    }
+
     if (taskBeforeSettlement.billing_scope === 'project' && taskBeforeSettlement.project_id) {
       const settlement = await settleProjectTaskBudget(tx, {
         projectId: taskBeforeSettlement.project_id,
         taskId,
         terminalStatus: 'failed',
-        frozenAmount,
+        frozenAmount: effectiveFrozenAmount,
         freezeSnapshot: taskBeforeSettlement.credit_freeze_snapshot,
         operatorId: userId,
       });
@@ -1898,7 +1915,7 @@ async function handleProviderFailure(
       taskId,
       userId,
       terminalStatus: 'failed',
-      frozenAmount,
+      frozenAmount: effectiveFrozenAmount,
       freezeSnapshot: taskBeforeSettlement.credit_freeze_snapshot,
     });
 

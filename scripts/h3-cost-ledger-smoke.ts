@@ -11,7 +11,10 @@ assert.equal(h3.pricingRuleId, 'default-h3-local-video-v1');
 assert.notEqual(h3.pricingRuleId, seedance.pricingRuleId, 'H3 成本规则不能和 Seedance 混用');
 assert.equal(h3.resolution, 'H3 auto');
 assert.equal(h3.model, 'H3 推荐');
-assert.equal(h3.estimatedCost, 15);
+assert.equal(h3.baseCostPerSecond, 0, 'H3 是本地免费模型，不能按秒计用户点数');
+assert.equal(h3.finalCostPerSecond, 0, 'H3 是本地免费模型，最终点数单价必须为 0');
+assert.equal(h3.estimatedCost, 0, 'H3 创建任务不能冻结或扣除用户点数');
+assert.equal(h3.formula, 'free_local_h3 = 0');
 
 const baseH3Task = {
   id: 'task-h3-001',
@@ -44,6 +47,8 @@ assert.equal(taskCostFailureClassification({
 const routeSource = readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
 const auditSource = readFileSync('src/lib/costs/audit.ts', 'utf8');
 assert.match(routeSource, /calculateH3EstimatedCost\(duration, selectedModel\)/, 'H3 创建任务必须走独立成本计算');
+assert.match(routeSource, /if \(estimatedCost > 0\)/, 'H3 0 成本任务必须跳过点数或项目预算冻结');
+assert.match(routeSource, /effectiveFrozenAmount <= 0/, 'H3 0 成本任务失败时不能进入点数或项目预算释放');
 assert.match(routeSource, /provider:\s*requestedProvider/, 'VideoTask/source metadata/操作日志必须记录 provider');
 assert.match(routeSource, /pricing_rule_id:\s*pricing\.pricingRuleId/, '操作日志必须记录 pricing rule');
 assert.match(routeSource, /recordTaskCostEstimate\(tx, task, pricing, user\.id\)/, 'H3 必须复用现有成本估算记录入口');

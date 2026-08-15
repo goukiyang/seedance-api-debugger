@@ -25,7 +25,8 @@ assert.match(h3AssetsSource, /first_frame/, 'H3 图片转交必须支持首帧')
 assert.match(h3AssetsSource, /last_frame/, 'H3 图片转交必须支持尾帧');
 assert.match(h3AssetsSource, /sha256/, 'H3 图片转交必须记录 sha256');
 
-assert.match(pricingSource, /calculateH3EstimatedCost/, 'H3 必须有独立内部点数规则，不能伪装成 Seedance 官方成本');
+assert.match(pricingSource, /calculateH3EstimatedCost/, 'H3 必须有独立免费成本规则，不能伪装成 Seedance 官方成本');
 assert.match(pricingSource, /default-h3-local-video-v1/, 'H3 成本规则 ID 必须和 Seedance 区分');
+assert.match(pricingSource, /const H3_VIDEO_COST_PER_SECOND = 0/, 'H3 是本地免费模型，不能按秒消耗用户点数');
 
 console.log('h3-create-route smoke passed');
