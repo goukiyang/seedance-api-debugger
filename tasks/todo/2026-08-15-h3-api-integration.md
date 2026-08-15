@@ -428,6 +428,7 @@
   - 完成标准：H3 failed / cancelled / running 卡住时，管理员能一键复制给 H3 侧排查，不需要从数据库里手挖。
   - 验证命令：新增 smoke 覆盖失败诊断摘要不含敏感字段、含 job id/preset/status/error/billing/health/queue/outputs/Retry-After。
   - 2026-08-16 状态：新增 `src/lib/provider/h3-diagnostics.ts`，H3 创建失败和状态轮询都会写入 `h3_diagnostic` 脱敏摘要；新增 `scripts/h3-diagnostics-smoke.ts` 验证 token、Authorization、cookie、base_url、worker URL 不外泄。
+  - 2026-08-16 审查修正：补齐 finalizer 轮询异常路径 `status_poll_failed` 的 `h3_diagnostic`；诊断中的普通字符串值也会脱敏 Bearer token、URL、IP:端口和长 hex token。
 
 - [ ] T23. 重新跑 H3 机器侧最小隔离测试
   - 检查对象：H3 `/health`、`/api/h3/presets`、`/api/h3/generate`、`/api/h3/jobs/{job_id}`、`/outputs`。

@@ -12,7 +12,7 @@ const diagnostic = buildH3DiagnosticSnapshot({
   providerStatus: 'failed',
   localStatus: 'failed',
   errorCode: 'h3_request_failed',
-  errorMessage: 'worker error',
+  errorMessage: 'worker error with Bearer hidden-token and http://127.0.0.1:8793/internal',
   httpStatus: 503,
   retryAfterSeconds: 30,
   health: {
@@ -27,6 +27,7 @@ const diagnostic = buildH3DiagnosticSnapshot({
   },
   raw: {
     status: 'failed',
+    message: 'failed at https://temporary.example.invalid with 4cdab586cc6848b54431e0506b338fdd9646cb191a9c147cb26a1cab8890eb6b',
     headers: { Authorization: 'Bearer secret-token' },
     api_token: 'secret-token',
     base_url: 'https://temporary.example.invalid',
@@ -58,9 +59,12 @@ assert.ok(!json.includes('127.0.0.1:8793'), 'diagnostic must not expose worker U
 
 const h3Source = readFileSync('src/lib/provider/h3.ts', 'utf8');
 const createRouteSource = readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+const finalizerSource = readFileSync('src/lib/video/task-finalizer.ts', 'utf8');
 
 assert.match(h3Source, /h3_diagnostic/, 'H3 status polling must attach diagnostic snapshot');
 assert.match(createRouteSource, /phase:\s*'create_failed'/, 'H3 create failure must attach diagnostic snapshot');
 assert.match(createRouteSource, /retryAfterSeconds/, 'H3 create failure diagnostic must include Retry-After');
+assert.match(finalizerSource, /phase:\s*'status_poll_failed'/, 'H3 status polling exception must attach diagnostic snapshot');
+assert.match(finalizerSource, /retryAfterSeconds/, 'H3 status polling exception diagnostic must include Retry-After');
 
 console.log('h3-diagnostics smoke passed');

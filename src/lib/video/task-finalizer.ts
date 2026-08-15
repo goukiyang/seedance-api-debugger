@@ -2,6 +2,7 @@ import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage } from '../provider/error-message';
 import { H3RequestError, H3_VIDEO_PROVIDER, isH3InternalOutputUrl } from '../provider/h3';
+import { buildH3DiagnosticSnapshot } from '../provider/h3-diagnostics';
 import { getProviderTaskStatus } from '../provider/video-task-status';
 import { recordProviderReportedCharge, recordTaskCostSettlement } from '../costs/ledger';
 import { settleTaskCredits } from '../credits/policy';
@@ -514,6 +515,23 @@ async function persistProviderStatusError(taskId: string, task: VideoTask, error
         retryAfterSeconds: error instanceof H3RequestError ? error.retryAfterSeconds ?? null : undefined,
         retry_after_ms: error instanceof H3RequestError && error.retryAfterSeconds !== undefined
           ? Math.max(1000, Math.ceil(error.retryAfterSeconds * 1000))
+          : undefined,
+        h3_diagnostic: task.provider === H3_VIDEO_PROVIDER
+          ? buildH3DiagnosticSnapshot({
+              phase: 'status_poll_failed',
+              taskId,
+              jobId: task.provider_task_id || null,
+              presetId: task.model || null,
+              durationSec: typeof task.duration === 'number' ? task.duration : null,
+              aspectRatio: task.ratio || null,
+              providerStatus: 'unknown',
+              localStatus: 'running',
+              errorCode: error instanceof H3RequestError ? 'h3_request_failed' : 'provider_status_error',
+              errorMessage,
+              httpStatus: error instanceof H3RequestError ? error.statusCode ?? null : null,
+              retryAfterSeconds: error instanceof H3RequestError ? error.retryAfterSeconds ?? null : null,
+              raw: error instanceof H3RequestError ? error.raw : null,
+            })
           : undefined,
       }),
     },

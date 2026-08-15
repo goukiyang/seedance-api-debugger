@@ -20,11 +20,25 @@ type DiagnosticInput = {
 };
 
 const SENSITIVE_KEY_PATTERN = /(token|authorization|cookie|secret|base_?url|worker_?url|public_?base_?url|headers?)/i;
+const SENSITIVE_VALUE_PATTERNS = [
+  /Bearer\s+[A-Za-z0-9._~+/=-]+/gi,
+  /https?:\/\/[^\s"'，。；]+/gi,
+  /\b(?:\d{1,3}\.){3}\d{1,3}:\d+\b/g,
+  /\b[A-Fa-f0-9]{32,}\b/g,
+];
+
+function redactSensitiveText(value: string) {
+  return SENSITIVE_VALUE_PATTERNS.reduce(
+    (text, pattern) => text.replace(pattern, '[redacted]'),
+    value,
+  );
+}
 
 function cleanString(value: unknown, maxLength = 300) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  return trimmed ? trimmed.slice(0, maxLength) : null;
+  const redacted = redactSensitiveText(trimmed);
+  return redacted ? redacted.slice(0, maxLength) : null;
 }
 
 function finiteNumber(value: unknown) {
@@ -40,6 +54,7 @@ function objectKeys(value: unknown) {
 function sanitizeRecord(value: unknown, depth = 0): unknown {
   if (depth > 4) return '[max_depth]';
   if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeRecord(item, depth + 1));
+  if (typeof value === 'string') return cleanString(value, 1000);
   if (!value || typeof value !== 'object') return value;
 
   const result: Record<string, unknown> = {};
@@ -132,7 +147,7 @@ export function buildH3DiagnosticSnapshot(input: DiagnosticInput) {
       provider_status: input.providerStatus || null,
       local_status: input.localStatus || null,
       error_code: input.errorCode || null,
-      error_message: input.errorMessage ? input.errorMessage.slice(0, 500) : null,
+      error_message: cleanString(input.errorMessage, 500),
       http_status: input.httpStatus ?? null,
       retry_after_seconds: input.retryAfterSeconds ?? null,
     },
