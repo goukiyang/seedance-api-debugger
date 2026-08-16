@@ -151,7 +151,7 @@
   - 根因：线上 `sd2-gray.service` 以 `gouki` 用户运行，但 `public/videos` 被发布同步成 `root:root`，服务无法创建 `public/videos/thumbnails`，日志出现 `EACCES: permission denied, mkdir '/srv/video-api-debugger/app/public/videos/thumbnails'`，导致普通生成页最近任务卡片请求缩略图失败后显示“暂无截图”。
   - 要做什么：生产机创建并修正运行目录权限；发布规则排除 `public/videos`；每次 rsync 后运行目录守护脚本，确认 `gouki` 对上传、视频、缩略图和备份目录有写入权限。
   - 完成标准：截图中可访问源视频的旧任务已生成 `public/videos/thumbnails/*.jpg`；`gouki` 可写 `public/videos/thumbnails`；后续发布不会再覆盖运行期视频和截图目录。
-  - 本轮结果：生产机 `public/videos` 与 `public/videos/thumbnails` 已为 `gouki:gouki 775`；截图中 4 条可访问源视频的任务已生成 jpg 缩略图；1 条很老的任务源视频已不可访问，无法凭空抽帧；同时发现并替换了指向 Mac 本机路径的坏 `storage` 软链，已创建 `storage/backups` 并确认 `gouki` 可写。
+  - 本轮结果：生产机 `public/videos` 与 `public/videos/thumbnails` 已为 `gouki:gouki 775`；截图中 4 条可访问源视频的任务已生成 jpg 缩略图；1 条很老的任务源视频已不可访问，无法凭空抽帧；同时发现并替换了指向 Mac 本机路径的坏 `storage` 软链，已创建 `storage/backups` 并确认 `gouki` 可写；独立只读初审指出生产目录缺少新守护脚本，已将 `scripts/server-ensure-runtime-dirs.sh` 同步到 `/srv/video-api-debugger/app/scripts/server-ensure-runtime-dirs.sh` 并执行通过。
 
 ## 3. 验收/审查内容
 
