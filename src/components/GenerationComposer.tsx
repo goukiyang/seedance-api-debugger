@@ -404,6 +404,7 @@ interface Props {
   providerStatus?: ComposerProviderStatus | null;
   modelLabel?: string;
   modelOptions?: ComposerSelectOption[];
+  onModelChange?: (model: string) => void;
 }
 
 export function GenerationComposer({
@@ -436,6 +437,7 @@ export function GenerationComposer({
   providerStatus = null,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
+  onModelChange,
 }: Props) {
   const workspace = useWorkspace();
   const templateEnabled = templateMode === 'workbench';
@@ -857,8 +859,9 @@ export function GenerationComposer({
     }
     if (!modelOptions.some((option) => option.id === selectedModel)) {
       setSelectedModel(fallbackModel);
+      onModelChange?.(fallbackModel);
     }
-  }, [modelOptions, selectedModel]);
+  }, [modelOptions, onModelChange, selectedModel]);
 
   // ============================================================================
   // Handlers
@@ -1803,7 +1806,10 @@ export function GenerationComposer({
           modelLabel={modelLabel}
           modelOptions={modelOptions}
           selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
+          onModelChange={(model) => {
+            setSelectedModel(model);
+            onModelChange?.(model);
+          }}
           onModeChange={setGenerationMode}
           onRatioChange={setRatio}
           onDurationChange={setDuration}

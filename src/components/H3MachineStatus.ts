@@ -167,23 +167,18 @@ function buildBaseTitle(parts: string[]) {
 export function buildH3MachineStatus({
   config,
   selectedProvider,
-  isAdmin = false,
 }: {
   config: H3VideoConfig | null;
   selectedProvider?: string | null;
-  isAdmin?: boolean;
 }): ComposerProviderStatus | null {
-  const shouldShow = selectedProvider === 'h3' || (isAdmin && config?.ready !== true);
+  const shouldShow = selectedProvider === 'h3';
   if (!shouldShow) return null;
 
-  const adminHref = isAdmin ? '/admin/integrations' : undefined;
   if (!config) {
     return {
-      label: isAdmin ? 'H3 未配置' : 'H3 暂不可用',
+      label: 'H3 暂不可用',
       tone: 'muted',
-      title: isAdmin ? '没有读取到 H3 配置。管理员可到 API 设置补齐地址和 token。' : 'H3 暂不可用，请改用 Seedance。',
-      href: adminHref,
-      hrefLabel: 'API 设置',
+      title: '没有读取到 H3 当前状态。可点击检查状态重新读取机器状态。',
       dots: [
         dot('API', 'muted', 'H3 配置未读取'),
         dot('队列', 'muted', '暂无队列状态'),
@@ -194,11 +189,9 @@ export function buildH3MachineStatus({
 
   if (!config.enabled) {
     return {
-      label: isAdmin ? 'H3 未启用' : 'H3 暂不可用',
+      label: 'H3 未启用',
       tone: 'muted',
-      title: isAdmin ? 'H3 本地工作站已关闭。管理员可在 API 设置中启用。' : 'H3 暂不可用，请改用 Seedance。',
-      href: adminHref,
-      hrefLabel: 'API 设置',
+      title: 'H3 本地工作站当前未启用。可点击检查状态确认最新机器状态。',
       dots: [
         dot('API', 'muted', 'H3 未启用'),
         dot('队列', 'muted', '未启用时不读取队列'),
@@ -209,11 +202,9 @@ export function buildH3MachineStatus({
 
   if (!config.configured || !config.api_token_configured) {
     return {
-      label: isAdmin ? 'H3 未配置' : 'H3 暂不可用',
+      label: 'H3 未配置',
       tone: 'error',
-      title: isAdmin ? 'H3 缺少用户 token 或有效预设，暂时不能提交生成。' : 'H3 暂不可用，请改用 Seedance。',
-      href: adminHref,
-      hrefLabel: 'API 设置',
+      title: 'H3 缺少用户 token 或有效预设，暂时不能提交生成。可点击检查状态复查。',
       dots: [
         dot('API', 'error', '缺少生成 token 或预设'),
         dot('队列', 'muted', '配置未完成，队列不可用'),
@@ -228,8 +219,6 @@ export function buildH3MachineStatus({
       label: 'H3 待检查',
       tone: 'warning',
       title: 'H3 已配置，但还没有通过测试连接。提交前需要管理员先检查机器状态。',
-      href: adminHref,
-      hrefLabel: 'API 设置',
       dots: [
         dot('API', 'warning', '还没有健康检查快照'),
         dot('队列', 'muted', '还没有队列状态'),
@@ -243,8 +232,6 @@ export function buildH3MachineStatus({
       label: 'H3 待检查',
       tone: 'warning',
       title: 'H3 上次健康检查已过期。管理员需要重新测试连接后再开放使用。',
-      href: adminHref,
-      hrefLabel: 'API 设置',
       dots: [
         dot('API', 'warning', '健康快照已过期'),
         dot('队列', 'muted', '快照过期，队列状态需要复查'),
@@ -264,8 +251,6 @@ export function buildH3MachineStatus({
       label: 'H3 暂不可用',
       tone: 'error',
       title,
-      href: adminHref,
-      hrefLabel: 'API 设置',
       dots: [
         dot('API', health.api === 'ok' ? 'ready' : 'error', `API: ${health.api || '未知'}`),
         dot('队列', 'muted', '机器未健康时不建议提交队列'),
@@ -318,8 +303,6 @@ export function buildH3MachineStatus({
       billingTitle,
       formatCheckedAt(health.checked_at),
     ]),
-    href: adminHref && tone !== 'ready' ? adminHref : undefined,
-    hrefLabel: 'API 设置',
     dots: [
       dot('API', 'ready', 'API、Worker、ComfyUI 正常'),
       dot('队列', queuePaused || queueFull || queueNearFull ? 'warning' : totalQueue > 0 ? 'busy' : 'ready', queueTitle),

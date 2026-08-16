@@ -26,6 +26,10 @@ export type ComposerProviderStatus = {
   }>;
   href?: string;
   hrefLabel?: string;
+  actionLabel?: string;
+  actionTitle?: string;
+  actionBusy?: boolean;
+  onAction?: () => void;
   visible?: boolean;
 };
 
@@ -108,45 +112,47 @@ export function ComposerActionBar({
         {/* 视频生成标签 */}
         <ParamChip label="视频生成" active />
 
-        {/* 生成引擎 */}
-        <div className="composer-chip-wrap">
-          <ParamChip
-            label={effectiveProviderLabel}
-            dropdown={hasProviderOptions}
-            onClick={hasProviderOptions ? () => setShowProviderMenu(!showProviderMenu) : undefined}
-          />
-          {showProviderMenu && hasProviderOptions && (
-            <>
-              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowProviderMenu(false)} />
-              <div className="composer-chip-dropdown composer-model-options">
-                {providerOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={`composer-chip-dropdown-item ${option.id === selectedProviderOption?.id ? 'active' : ''}`}
-                    disabled={option.disabled}
-                    onClick={() => {
-                      if (option.disabled) return;
-                      onProviderChange?.(option.id);
-                      setShowProviderMenu(false);
-                    }}
-                    title={option.disabledReason || option.id}
-                  >
-                    <span>{option.label}</span>
-                    <small>{option.disabledReason || option.detail}</small>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+        {/* 生成引擎：只有多引擎并列时才显示，避免和模型下拉重复 */}
+        {hasProviderOptions && (
+          <div className="composer-chip-wrap">
+            <ParamChip
+              label={effectiveProviderLabel}
+              dropdown
+              onClick={() => setShowProviderMenu(!showProviderMenu)}
+            />
+            {showProviderMenu && (
+              <>
+                <div className="composer-chip-dropdown-backdrop" onClick={() => setShowProviderMenu(false)} />
+                <div className="composer-chip-dropdown composer-model-options">
+                  {providerOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`composer-chip-dropdown-item ${option.id === selectedProviderOption?.id ? 'active' : ''}`}
+                      disabled={option.disabled}
+                      onClick={() => {
+                        if (option.disabled) return;
+                        onProviderChange?.(option.id);
+                        setShowProviderMenu(false);
+                      }}
+                      title={option.disabledReason || option.id}
+                    >
+                      <span>{option.label}</span>
+                      <small>{option.disabledReason || option.detail}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {shouldShowProviderStatus && providerStatus && (
           <span
             className={`composer-provider-status composer-provider-status-${providerStatus.tone}`}
             role="status"
             aria-label={providerStatus.title}
-            tabIndex={0}
+            tabIndex={providerStatus.onAction ? undefined : 0}
             title={providerStatus.title}
           >
             <span className="composer-provider-status-dots" aria-hidden="true">
@@ -163,6 +169,20 @@ export function ComposerActionBar({
               <a className="composer-provider-status-link" href={providerStatus.href}>
                 {providerStatus.hrefLabel || '设置'}
               </a>
+            )}
+            {providerStatus.onAction && (
+              <button
+                className="composer-provider-status-action"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  providerStatus.onAction?.();
+                }}
+                disabled={providerStatus.actionBusy}
+                title={providerStatus.actionTitle || providerStatus.actionLabel}
+              >
+                {providerStatus.actionBusy ? '检查中' : providerStatus.actionLabel || '检查状态'}
+              </button>
             )}
           </span>
         )}

@@ -12952,6 +12952,33 @@ body.compare-fullscreen-open {
   text-decoration: underline;
 }
 
+.composer-provider-status-action {
+  align-items: center;
+  appearance: none;
+  background: rgba(37, 99, 235, 0.28);
+  border: 1px solid rgba(147, 197, 253, 0.32);
+  border-radius: 9999px;
+  color: rgba(219, 234, 254, 0.96);
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+  min-height: 20px;
+  padding: 2px 7px;
+}
+
+.composer-provider-status-action:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.42);
+  border-color: rgba(191, 219, 254, 0.52);
+}
+
+.composer-provider-status-action:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
 .composer-chip-arrow {
   font-size: 9px;
   opacity: 0.6;

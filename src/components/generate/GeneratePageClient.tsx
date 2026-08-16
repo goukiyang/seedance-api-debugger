@@ -137,6 +137,7 @@ interface CreditSummary {
 }
 
 type GenerationProvider = 'seedance' | 'h3';
+const H3_INLINE_MODEL_ID = 'h3';
 
 interface ProjectOption {
   id: string;
@@ -443,6 +444,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [currentUser, setCurrentUser] = useState<GeneratePageUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
+  const [h3StatusChecking, setH3StatusChecking] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
 
   // ---- Current Project ----
@@ -474,31 +476,26 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const h3Ready = !isIpSurface
     && h3VideoConfig?.ready === true
     && h3VideoConfig.preset_options.length > 0;
-  const generationProviderOptions = useMemo<ComposerSelectOption[]>(() => {
-    if (isIpSurface) return [];
-    const options: ComposerSelectOption[] = [
-      { id: 'seedance', label: 'Seedance 视频', detail: '默认云端视频模型' },
-    ];
-    if (h3Ready) {
-      options.push({ id: 'h3', label: 'H3 本地工作站', detail: '使用后台配置的本地 H3 生成服务' });
-    } else if (currentUser?.role === 'admin') {
+  const selectedH3Preset = h3VideoConfig?.preset_options.find((option) => option.id === h3VideoConfig.default_preset_id)
+    || h3VideoConfig?.preset_options[0]
+    || null;
+  const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
+    if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS;
+    const options = [...SEEDANCE_VIDEO_MODEL_OPTIONS];
+    const canSeeH3 = h3Ready || currentUser?.role === 'admin';
+    if (canSeeH3) {
       options.push({
-        id: 'h3',
-        label: 'H3 未配置',
-        detail: '到 API 设置配置后开放给用户',
-        disabled: true,
-        disabledReason: h3DisabledReason(h3VideoConfig),
+        id: H3_INLINE_MODEL_ID,
+        label: h3Ready ? 'H3 本地模型' : 'H3 待检查',
+        detail: h3Ready
+          ? `本地免费 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'}`
+          : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
       });
     }
     return options;
-  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface]);
-  const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
-    if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS;
-    if (selectedProvider === 'h3' && h3Ready) return h3VideoConfig?.preset_options || [];
-    return SEEDANCE_VIDEO_MODEL_OPTIONS;
-  }, [h3Ready, h3VideoConfig?.preset_options, isIpSurface, selectedProvider]);
-  const activeModelLabel = selectedProvider === 'h3' ? 'H3 预设' : surfaceConfig.modelLabel;
-  const activeProviderLabel = selectedProvider === 'h3' ? 'H3 本地工作站' : 'Seedance 视频';
+  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, selectedH3Preset?.label]);
+  const activeModelLabel = surfaceConfig.modelLabel;
+  const activeProviderLabel = 'Seedance 视频';
   const refreshH3VideoConfig = useCallback(async () => {
     if (isIpSurface) return null;
     try {
@@ -512,21 +509,48 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       return null;
     }
   }, [isIpSurface]);
-  const h3MachineStatus = useMemo(() => buildH3MachineStatus({
-    config: h3VideoConfig,
-    selectedProvider,
-    isAdmin: currentUser?.role === 'admin',
-  }), [currentUser?.role, h3VideoConfig, selectedProvider]);
-  const handleGenerationProviderChange = useCallback((provider: string) => {
-    if (provider === 'h3') {
-      if (h3Ready) {
-        setSelectedProvider('h3');
-        void refreshH3VideoConfig();
+  const checkH3MachineStatus = useCallback(async () => {
+    if (isIpSurface || h3StatusChecking) return;
+    setH3StatusChecking(true);
+    setError(null);
+    try {
+      const response = currentUser?.role === 'admin'
+        ? await fetch('/api/admin/integrations/h3', { method: 'POST', cache: 'no-store' })
+        : await fetch('/api/config', { cache: 'no-store' });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || data?.message || `H3 状态检查失败 (HTTP ${response.status})`);
       }
+      setH3VideoConfig(normalizeH3VideoConfig(currentUser?.role === 'admin' ? data?.config : data?.h3_video));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'H3 状态检查失败');
+    } finally {
+      setH3StatusChecking(false);
+    }
+  }, [currentUser?.role, h3StatusChecking, isIpSurface]);
+  const h3MachineStatus = useMemo(() => {
+    const status = buildH3MachineStatus({
+      config: h3VideoConfig,
+      selectedProvider,
+    });
+    if (!status) return null;
+    if (currentUser?.role !== 'admin') return status;
+    return {
+      ...status,
+      actionLabel: '检查状态',
+      actionTitle: '立即检查 H3 API、Worker、队列和免费计费状态',
+      actionBusy: h3StatusChecking,
+      onAction: checkH3MachineStatus,
+    };
+  }, [checkH3MachineStatus, currentUser?.role, h3StatusChecking, h3VideoConfig, selectedProvider]);
+  const handleGenerationModelChange = useCallback((model: string) => {
+    if (model === H3_INLINE_MODEL_ID) {
+      setSelectedProvider('h3');
+      void refreshH3VideoConfig();
       return;
     }
     setSelectedProvider('seedance');
-  }, [h3Ready, refreshH3VideoConfig]);
+  }, [refreshH3VideoConfig]);
 
   // ============================================================================
   // Load collections
@@ -607,12 +631,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   useEffect(() => {
     if (isIpSurface && selectedProvider !== 'seedance') {
       setSelectedProvider('seedance');
-      return;
     }
-    if (selectedProvider === 'h3' && !h3Ready) {
-      setSelectedProvider('seedance');
-    }
-  }, [h3Ready, isIpSurface, selectedProvider]);
+  }, [isIpSurface, selectedProvider]);
 
   useEffect(() => {
     fetch('/api/collections')
@@ -1308,7 +1328,16 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       return;
     }
     const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const requestedProvider: GenerationProvider = !isIpSurface && params.provider === 'h3' ? 'h3' : 'seedance';
+    const selectedH3Model = !isIpSurface && params.model === H3_INLINE_MODEL_ID;
+    const requestedProvider: GenerationProvider = selectedH3Model ? 'h3' : 'seedance';
+    const requestedModel = selectedH3Model
+      ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id || ''
+      : params.model || '';
+    if (selectedH3Model && (!h3Ready || !requestedModel)) {
+      setError(`${h3DisabledReason(h3VideoConfig)}，请先点击「检查状态」刷新机器状态。`);
+      setSubmitting(false);
+      return;
+    }
 
     try {
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
@@ -1343,7 +1372,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
           prompt_user_edited: params.promptUserEdited === true,
           provider: isIpSurface ? undefined : requestedProvider,
-          model: params.model || undefined,
+          model: requestedModel || undefined,
         }),
       });
 
@@ -1407,7 +1436,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     } finally {
       setSubmitting(false);
     }
-	  }, [isIpSurface, saveGenerationDefaults, selectedProjectId, selectedVideoBranchId, selectedVideoCardId, videoCards]);
+	  }, [
+    h3Ready,
+    h3VideoConfig,
+    isIpSurface,
+    saveGenerationDefaults,
+    selectedH3Preset?.id,
+    selectedProjectId,
+    selectedVideoBranchId,
+    selectedVideoCardId,
+    videoCards,
+  ]);
 
   // ============================================================================
   // Collection handlers
@@ -1962,12 +2001,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           resultReturnTo={surfaceConfig.routePath}
           submitDisabledReason={surfaceConfig.submitDisabledReason}
           providerLabel={activeProviderLabel}
-          providerOptions={generationProviderOptions}
+          providerOptions={[]}
           selectedProvider={selectedProvider}
-          onProviderChange={handleGenerationProviderChange}
           providerStatus={h3MachineStatus}
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}
+          onModelChange={handleGenerationModelChange}
         />
 
         {/* 最近任务 */}
