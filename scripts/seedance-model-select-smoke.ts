@@ -106,7 +106,7 @@ async function main() {
     'Selected model should flow through provider input, task params, task record, and response',
   );
 
-  assert.ok(modelRegistrySource.includes('[SEEDANCE_2_5_MODEL_ID]: 1.5'), 'Seedance 2.5 must have 1.5x internal multiplier');
+  assert.ok(modelRegistrySource.includes('internal_credit_multiplier: 1.5'), 'Seedance 2.5 must have 1.5x internal multiplier');
   assert.ok(pricingSource.includes('seedanceVideoModelInternalMultiplier(model)'), 'Server pricing must resolve model multiplier');
   assert.ok(pricingSource.includes('DEFAULT_PRICING_RULE_VERSION = 3'), 'Pricing rule version must bump after multiplier change');
   assert.ok(pricingClientSource.includes('seedanceVideoModelInternalMultiplier(model)'), 'Client pricing must resolve the same model multiplier');
@@ -125,10 +125,10 @@ async function main() {
       && generateClientSource.includes('modelOptions={activeModelOptions}'),
     'Standard generate page should pass Seedance model options to the existing footer chip',
   );
-  assert.ok(configRouteSource.includes('model_options: config.model_options'), '/api/config must expose model options');
+  assert.ok(configRouteSource.includes('model_options: config.model_options'), '/api/config must expose priced model options');
   assert.ok(codexConfigRouteSource.includes('SEEDANCE_VIDEO_MODEL_OPTIONS.map'), 'Codex config must expose Seedance model options');
   assert.ok(codexConfigRouteSource.includes('internal_credit_multiplier'), 'Codex config must expose internal credit multiplier');
-  assert.ok(canvasBootstrapSource.includes('model_options: videoConfig.model_options'), 'Ultimate canvas bootstrap must expose video model options');
+  assert.ok(canvasBootstrapSource.includes('model_options: videoConfig.model_options'), 'Ultimate canvas bootstrap must expose priced video model options');
   assert.ok(pricingSource.includes('model = DEFAULT_SEEDANCE_VIDEO_MODEL_ID'), 'Pricing snapshot should keep Seedance 2.0 as default model');
   assert.ok(externalApiDoc.includes('dreamina-seedance-2-5-260628'), 'External API doc must mention Seedance 2.5 model');
   assert.ok(externalApiDoc.includes('1.5'), 'External API doc must mention Seedance 2.5 internal credit multiplier');

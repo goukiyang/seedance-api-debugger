@@ -2,6 +2,7 @@ export type SeedanceVideoModelOption = {
   id: string;
   label: string;
   detail: string;
+  internal_credit_multiplier?: number;
 };
 
 export const SEEDANCE_2_0_MODEL_ID = 'dreamina-seedance-2-0-260128';
@@ -13,19 +14,17 @@ export const SEEDANCE_VIDEO_MODEL_OPTIONS: SeedanceVideoModelOption[] = [
     id: SEEDANCE_2_0_MODEL_ID,
     label: 'Seedance 2.0',
     detail: '当前稳定默认模型',
+    internal_credit_multiplier: 1.0,
   },
   {
     id: SEEDANCE_2_5_MODEL_ID,
     label: 'Seedance 2.5',
     detail: '新一代视频模型',
+    internal_credit_multiplier: 1.5,
   },
 ];
 
 const MODEL_IDS = new Set(SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => option.id));
-const MODEL_INTERNAL_CREDIT_MULTIPLIERS: Record<string, number> = {
-  [SEEDANCE_2_0_MODEL_ID]: 1.0,
-  [SEEDANCE_2_5_MODEL_ID]: 1.5,
-};
 
 function findSeedanceVideoModelOption(value: string | null | undefined): SeedanceVideoModelOption | null {
   const requested = typeof value === 'string' ? value.trim() : '';
@@ -55,8 +54,10 @@ export function seedanceVideoModelPricingLabel(value: string | null | undefined)
 
 export function seedanceVideoModelInternalMultiplier(value: string | null | undefined): number {
   const option = findSeedanceVideoModelOption(value);
-  if (!option) return MODEL_INTERNAL_CREDIT_MULTIPLIERS[DEFAULT_SEEDANCE_VIDEO_MODEL_ID];
-  return MODEL_INTERNAL_CREDIT_MULTIPLIERS[option.id] ?? MODEL_INTERNAL_CREDIT_MULTIPLIERS[DEFAULT_SEEDANCE_VIDEO_MODEL_ID];
+  if (!option) {
+    return seedanceVideoModelInternalMultiplier(DEFAULT_SEEDANCE_VIDEO_MODEL_ID);
+  }
+  return option.internal_credit_multiplier ?? 1.0;
 }
 
 export function parseSeedanceVideoModel(value: unknown): {

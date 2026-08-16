@@ -179,7 +179,7 @@ export interface ConfigResponse {
   provider: string;
   base_url: string;
   model: string;
-  model_options?: Array<{ id: string; label: string; detail: string }>;
+  model_options?: Array<{ id: string; label: string; detail: string; internal_credit_multiplier?: number }>;
   api_key_configured: boolean;
 }
 

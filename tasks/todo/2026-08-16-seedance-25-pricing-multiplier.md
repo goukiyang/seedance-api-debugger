@@ -28,10 +28,10 @@
   - 文件：`docs/sd2-external-api-integration.md`
   - 做法：对外说明 `model` 会影响平台内部点数扣费；2.5 是 2.0 的 1.5 倍；官方美元成本以任务完成后的 provider 字段为准。
   - 完成标准：外部接入方知道扣点差异，不会把点数当美元。
-- [x] T6. 外部配置接口暴露模型倍率
-  - 文件：`src/app/api/codex/config/route.ts`
-  - 做法：`supported_settings.model` 返回 2.0 / 2.5 的 ID、标签、默认项和 `internal_credit_multiplier`。
-  - 完成标准：外部接入方调用 `/api/codex/config` 即可发现 2.5 是 1.5 倍内部点数。
+- [x] T6. 配置接口统一暴露模型倍率
+  - 文件：`src/lib/provider/seedance-models.ts`、`src/app/api/config/route.ts`、`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`、`src/app/api/codex/config/route.ts`
+  - 做法：模型选项本身携带 `internal_credit_multiplier`；普通配置、无线画布 bootstrap 和 `/api/codex/config` 都沿用同一份模型倍率。
+  - 完成标准：外部接入方调用 `/api/codex/config`、内部页面调用 `/api/config`、无线画布读取 bootstrap 时，都能发现 2.5 是 1.5 倍内部点数。
 
 ## 3. 验收/审查内容
 
@@ -50,13 +50,13 @@
   - 通过标准：平台内部点数和供应商 USD 成本仍清楚分离；没有写成“2.5 美元一定是 2.0 的 1.5 倍”这类未经 provider result 逐单确认的话。
   - 证据来源：文档 diff、后台已有 `provider_official_amount_micros` 逻辑不改动。
 
-只读审查结果：独立子 agent `01a00984-bc28-7353-874c-a937a1af07ec` 判定“通过”，并指出 `/api/codex/config` 需补充模型枚举和倍率说明；该补项已作为 T6 完成。主线程复验命令：`npx tsx scripts/seedance-model-select-smoke.ts`、`npx tsx scripts/provider-create-error-smoke.ts`、`npm run lint`、`npm run build`、点数复核 `4s: 2.0=12 / 2.5=18；5s: 2.0=15 / 2.5=23`。
+只读审查结果：独立子 agent `01a00984-bc28-7353-874c-a937a1af07ec` 判定“通过”，并指出配置接口需补充模型枚举和倍率说明；该补项已作为 T6 完成，并扩展到普通 `/api/config` 和无线画布 bootstrap。主线程复验命令：`npx tsx scripts/seedance-model-select-smoke.ts`、`npx tsx scripts/provider-create-error-smoke.ts`、`npm run lint`、`npm run build`、点数复核 `4s: 2.0=12 / 2.5=18；5s: 2.0=15 / 2.5=23`。
 
 ## 4. 审查内容是否对齐目标
 
 - [x] A1. R1 是否对齐目标
   - 判断：R1 能证明“2.5 按 2.0 的 1.5 倍扣点”，不是只证明模型选项存在。
 - [x] A2. R2 是否对齐目标
-  - 判断：R2 能覆盖普通生成页、无线画布和外部 API 的统一入口，避免只改单个页面显示。
+  - 判断：R2 能覆盖普通生成页、无线画布和外部 API 的统一入口和配置入口，避免只改单个页面显示。
 - [x] A3. R3 是否对齐目标
   - 判断：R3 能防止内部点数和供应商美元成本混淆，保留真实成本字段的权威性。
