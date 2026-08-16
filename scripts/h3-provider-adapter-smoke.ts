@@ -28,7 +28,7 @@ const fetchImpl: typeof fetch = async (url, init) => {
   if (String(url).endsWith('/health')) {
     return Response.json({
       api: 'ok',
-      version: 'h3-api-0.3.0',
+      version: 'h3-api-0.3.1',
       public_base_url: null,
       default_preset: 'larry_v4_6step',
       preset_count: 3,
@@ -39,7 +39,12 @@ const fetchImpl: typeof fetch = async (url, init) => {
   }
   if (String(url).endsWith('/api/h3/presets')) {
     return Response.json({
-      presets: H3_ALLOWED_PRESET_IDS.map((id) => ({ id })),
+      presets: H3_ALLOWED_PRESET_IDS.map((id) => ({
+        id,
+        estimated_runtime_sec: id === 'lightx2v_4step_turbo' ? 89.33 : id === 'larry_v4_8step' ? 342.14 : 266.96,
+        recommended_timeout_sec: id === 'lightx2v_4step_turbo' ? 300 : id === 'larry_v4_8step' ? 750 : 630,
+        runtime_policy: 'benchmark_estimated',
+      })),
     });
   }
   if (String(url).endsWith('/api/h3/inputs/images')) {
@@ -67,6 +72,10 @@ const fetchImpl: typeof fetch = async (url, init) => {
       job_id: 'h3-20260815-013000-abc12345',
       status: 'done',
       preset: 'larry_v4_6step',
+      progress_detail: { stage: 'finalizing', elapsed_sec: 95 },
+      estimated_runtime_sec: 266.96,
+      recommended_timeout_sec: 630,
+      risk_flags: [],
       resolved: { seed: 123456 },
       outputs: [{
         index: 0,
@@ -102,6 +111,20 @@ const fetchImpl: typeof fetch = async (url, init) => {
       error: 'error',
     });
   }
+  if (String(url).endsWith('/api/h3/jobs/h3-oom')) {
+    return Response.json({
+      job_id: 'h3-oom',
+      status: 'failed',
+      preset: 'larry_v4_8step',
+      request: { preset_id: 'larry_v4_8step', aspect_ratio: '16:9', duration_sec: 15 },
+      progress_detail: { stage: 'failed', elapsed_sec: 201 },
+      estimated_runtime_sec: 342.14,
+      recommended_timeout_sec: 750,
+      risk_flags: ['high_vram_margin', 'above_benchmark_frame_count', 'long_720p_oom_risk'],
+      error_code: 'gpu_out_of_memory',
+      error: 'ComfyUI OOM',
+    });
+  }
   if (String(url).endsWith('/api/h3/jobs/h3-20260815-013000-abc12345/outputs')) {
     return Response.json({
       job_id: 'h3-20260815-013000-abc12345',
@@ -132,7 +155,7 @@ async function main() {
 
   const health = await getH3Health({ baseUrl: 'https://h3-api.example.com/', fetchImpl });
   assert.equal(health.api, 'ok');
-  assert.equal(health.version, 'h3-api-0.3.0');
+  assert.equal(health.version, 'h3-api-0.3.1');
   assert.equal(health.billing?.charged, false);
   assert.equal(health.billing?.cost_model, 'free_local');
   assert.equal(health.queue?.max_pending_jobs, 20);
@@ -211,6 +234,18 @@ async function main() {
   assert.equal(status.seed, 123456);
   assert.equal(status.result_video_url, 'h3-internal-output://h3-20260815-013000-abc12345/0');
   assert.equal(isH3InternalOutputUrl(status.result_video_url), true);
+  assert.equal((status.raw as Record<string, unknown>).recommended_timeout_sec, 630);
+  assert.deepEqual((status.raw as Record<string, unknown>).risk_flags, []);
+
+  const oomStatus = await getH3TaskStatus('h3-oom', {
+    baseUrl: 'https://h3-api.example.com',
+    apiToken: 'secret-user-token',
+    fetchImpl,
+  });
+  assert.equal(oomStatus.local_status, 'failed');
+  assert.equal(oomStatus.error_message?.includes('显存风险高'), true);
+  assert.equal((oomStatus.raw as Record<string, unknown>).error_code, 'gpu_out_of_memory');
+  assert.equal((oomStatus.raw as Record<string, unknown>).recommended_timeout_sec, 750);
 
   const emptyOutputStatus = await getH3TaskStatus('h3-empty-output', {
     baseUrl: 'https://h3-api.example.com',

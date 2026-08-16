@@ -59,7 +59,7 @@ const healthy = {
   ...saved,
   health: h3HealthSnapshotFromResponse({
     api: 'ok',
-    version: 'h3-api-0.3.0',
+    version: 'h3-api-0.3.1',
     public_base_url: null,
     worker_url: 'http://127.0.0.1:8894',
     default_preset: 'larry_v4_6step',
@@ -67,6 +67,27 @@ const healthy = {
     billing: { charged: false, cost: 0, currency: null, cost_model: 'free_local' },
     worker: { worker: 'ok', comfyui: 'ok' },
     queue: { paused: false, pending: 0, running: 0, max_pending_jobs: 20, active: 0, max_active_jobs: 1 },
+  }, {
+    presets: [
+      {
+        id: 'larry_v4_6step',
+        estimated_runtime_sec: 266.96,
+        recommended_timeout_sec: 630,
+        runtime_policy: 'benchmark_estimated',
+      },
+      {
+        id: 'larry_v4_8step',
+        estimated_runtime_sec: 342.14,
+        recommended_timeout_sec: 750,
+        runtime_policy: 'benchmark_estimated',
+      },
+      {
+        id: 'lightx2v_4step_turbo',
+        estimated_runtime_sec: 89.33,
+        recommended_timeout_sec: 300,
+        runtime_policy: 'benchmark_estimated',
+      },
+    ],
   }),
 };
 assert.equal(isH3Operational(healthy), true);
@@ -74,7 +95,7 @@ const healthyDto = safeH3ConfigDto(healthy);
 assert.equal(healthyDto.ready, true);
 assert.equal(healthyDto.admin_queue_ready, true);
 assert.equal(healthyDto.health?.api, 'ok');
-assert.equal(healthyDto.health?.version, 'h3-api-0.3.0');
+assert.equal(healthyDto.health?.version, 'h3-api-0.3.1');
 assert.equal(healthyDto.health?.public_base_url, null);
 assert.equal(healthyDto.health?.worker, 'ok');
 assert.equal(healthyDto.health?.comfyui, 'ok');
@@ -84,6 +105,10 @@ assert.equal(healthyDto.health?.billing?.cost_model, 'free_local');
 assert.equal(healthyDto.health?.queue?.paused, false);
 assert.equal(healthyDto.health?.queue?.pending, 0);
 assert.equal(healthyDto.health?.queue?.max_pending_jobs, 20);
+assert.equal(healthyDto.preset_options[0]?.recommended_timeout_sec, 630);
+assert.equal(healthyDto.preset_options[0]?.estimated_runtime_sec, 266.96);
+assert.equal(healthyDto.preset_options[0]?.runtime_policy, 'benchmark_estimated');
+assert.ok(healthyDto.preset_options[0]?.detail.includes('建议等待 约 11 分钟'));
 
 const staleHealthy = {
   ...healthy,

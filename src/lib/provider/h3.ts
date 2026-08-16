@@ -402,6 +402,25 @@ function databaseSafeSeed(value: unknown) {
   return value;
 }
 
+function h3ErrorMessageFromRaw(raw: Record<string, unknown>) {
+  const rawError = typeof raw.error === 'string' && raw.error.trim()
+    ? raw.error.trim()
+    : typeof raw.message === 'string' && raw.message.trim()
+      ? raw.message.trim()
+      : '';
+  const errorCode = typeof raw.error_code === 'string' ? raw.error_code.trim() : '';
+  if (errorCode === 'gpu_out_of_memory') {
+    const flags = Array.isArray(raw.risk_flags)
+      ? raw.risk_flags.filter((item): item is string => typeof item === 'string')
+      : [];
+    const advice = flags.includes('long_720p_oom_risk')
+      ? '15 秒 720P Larry 显存风险高，建议改用 LightX2V、降低分辨率或缩短秒数。'
+      : '当前 H3 机器显存不足，建议换低显存预设、降低分辨率或稍后重试。';
+    return rawError ? `${rawError}。${advice}` : advice;
+  }
+  return rawError || undefined;
+}
+
 export function h3InternalOutputUrl(jobId: string, index = 0) {
   return `${H3_INTERNAL_OUTPUT_SCHEME}${jobId}/${index}`;
 }
@@ -448,6 +467,8 @@ export async function getH3TaskStatus(
   const seed = typeof resolved.seed === 'number'
     ? databaseSafeSeed(resolved.seed)
     : databaseSafeSeed(request.seed);
+  const errorCode = typeof raw.error_code === 'string' ? raw.error_code : null;
+  const errorMessage = h3ErrorMessageFromRaw(raw);
 
   if (localStatus === 'succeeded' && !output) {
     const errorMessage = 'H3 任务已完成但没有返回视频输出';
@@ -490,7 +511,7 @@ export async function getH3TaskStatus(
     seed,
     ratio: typeof request.aspect_ratio === 'string' ? request.aspect_ratio : undefined,
     duration: typeof request.duration_sec === 'number' ? request.duration_sec : undefined,
-    error_message: typeof raw.error === 'string' ? raw.error : undefined,
+    error_message: errorMessage,
     raw: {
       ...raw,
       h3_diagnostic: buildH3DiagnosticSnapshot({
@@ -501,7 +522,8 @@ export async function getH3TaskStatus(
         aspectRatio: typeof request.aspect_ratio === 'string' ? request.aspect_ratio : null,
         providerStatus,
         localStatus,
-        errorMessage: typeof raw.error === 'string' ? raw.error : null,
+        errorCode,
+        errorMessage: errorMessage || null,
         outputs: raw.outputs,
         raw,
       }),

@@ -17,6 +17,13 @@ export const H3_PRESET_OPTIONS = [
 
 export type H3PresetId = typeof H3_PRESET_OPTIONS[number]['id'];
 
+export type H3PresetRuntimePolicy = {
+  id: H3PresetId;
+  estimated_runtime_sec: number | null;
+  recommended_timeout_sec: number | null;
+  runtime_policy: string | null;
+};
+
 export type H3ApiSettings = {
   enabled: boolean;
   base_url: string;
@@ -49,6 +56,7 @@ export type H3HealthSnapshot = {
     active: number | null;
     max_active_jobs: number | null;
   } | null;
+  presets: H3PresetRuntimePolicy[] | null;
   checked_at: string | null;
 };
 
@@ -66,7 +74,14 @@ export type H3SafeConfig = {
   generate_path: string;
   default_preset_id: H3PresetId;
   configured: boolean;
-  preset_options: Array<{ id: H3PresetId; label: string; detail: string }>;
+  preset_options: Array<{
+    id: H3PresetId;
+    label: string;
+    detail: string;
+    estimated_runtime_sec: number | null;
+    recommended_timeout_sec: number | null;
+    runtime_policy: string | null;
+  }>;
   api_token_configured: boolean;
   admin_token_configured: boolean;
   health: H3HealthSnapshot | null;
@@ -152,6 +167,28 @@ function normalizeHealthQueue(value: unknown): H3HealthSnapshot['queue'] {
   };
 }
 
+function normalizePresetRuntime(value: unknown): H3PresetRuntimePolicy | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const id = input.id;
+  if (!isH3PresetId(id)) return null;
+  return {
+    id,
+    estimated_runtime_sec: numberOrNull(input.estimated_runtime_sec),
+    recommended_timeout_sec: numberOrNull(input.recommended_timeout_sec),
+    runtime_policy: stringOrNull(input.runtime_policy),
+  };
+}
+
+function normalizePresetRuntimeList(value: unknown): H3PresetRuntimePolicy[] | null {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>).presets
+    : value;
+  if (!Array.isArray(source)) return null;
+  const presets = source.map(normalizePresetRuntime).filter((item): item is H3PresetRuntimePolicy => Boolean(item));
+  return presets.length > 0 ? presets : null;
+}
+
 function normalizeHealthSnapshot(value: unknown): H3HealthSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const input = value as Partial<H3HealthSnapshot>;
@@ -169,6 +206,7 @@ function normalizeHealthSnapshot(value: unknown): H3HealthSnapshot | null {
     preset_count: numberOrNull(input.preset_count),
     billing: normalizeHealthBilling(input.billing),
     queue: normalizeHealthQueue(input.queue),
+    presets: normalizePresetRuntimeList(input.presets),
     checked_at: checkedAt,
   };
 }
@@ -302,7 +340,23 @@ export function isH3Operational(settings: H3ApiSettings) {
   return isH3ApiReady(settings) && isH3HealthReady(settings.health);
 }
 
-export function h3HealthSnapshotFromResponse(health: unknown): H3HealthSnapshot {
+function formatRuntimeSeconds(value: number | null) {
+  if (value === null) return null;
+  if (value < 60) return `${Math.round(value)} 秒`;
+  return `约 ${Math.round(value / 60)} 分钟`;
+}
+
+function buildPresetDetail(option: typeof H3_PRESET_OPTIONS[number], runtime: H3PresetRuntimePolicy | undefined) {
+  const parts: string[] = [option.detail];
+  const estimated = formatRuntimeSeconds(runtime?.estimated_runtime_sec ?? null);
+  const timeout = formatRuntimeSeconds(runtime?.recommended_timeout_sec ?? null);
+  if (estimated) parts.push(`预计 ${estimated}`);
+  if (timeout) parts.push(`建议等待 ${timeout}`);
+  if (runtime?.runtime_policy) parts.push(runtime.runtime_policy);
+  return parts.join(' · ');
+}
+
+export function h3HealthSnapshotFromResponse(health: unknown, presets?: unknown): H3HealthSnapshot {
   const input = health && typeof health === 'object' && !Array.isArray(health)
     ? health as Record<string, unknown>
     : {};
@@ -320,6 +374,7 @@ export function h3HealthSnapshotFromResponse(health: unknown): H3HealthSnapshot 
     preset_count: numberOrNull(input.preset_count),
     billing: normalizeHealthBilling(input.billing),
     queue: normalizeHealthQueue(input.queue),
+    presets: normalizePresetRuntimeList(presets),
     checked_at: new Date().toISOString(),
   };
 }
@@ -327,11 +382,12 @@ export function h3HealthSnapshotFromResponse(health: unknown): H3HealthSnapshot 
 export async function saveH3HealthSnapshot(
   health: unknown,
   updatedBy: string,
+  presets?: unknown,
 ) {
   const current = await getH3ApiSettings();
   const settings = normalizeH3ApiSettings({
     ...current,
-    health: h3HealthSnapshotFromResponse(health),
+    health: h3HealthSnapshotFromResponse(health, presets),
   });
 
   await prisma.platformSetting.upsert({
@@ -366,7 +422,16 @@ export function safeH3ConfigDto(settings: H3ApiSettings): H3SafeConfig {
     generate_path: H3_GENERATE_PATH,
     default_preset_id: settings.default_preset_id,
     configured: isH3ApiReady(settings),
-    preset_options: H3_PRESET_OPTIONS.map((option) => ({ ...option })),
+    preset_options: H3_PRESET_OPTIONS.map((option) => {
+      const runtime = settings.health?.presets?.find((item) => item.id === option.id);
+      return {
+        ...option,
+        detail: buildPresetDetail(option, runtime),
+        estimated_runtime_sec: runtime?.estimated_runtime_sec ?? null,
+        recommended_timeout_sec: runtime?.recommended_timeout_sec ?? null,
+        runtime_policy: runtime?.runtime_policy ?? null,
+      };
+    }),
     api_token_configured: Boolean(settings.api_token),
     admin_token_configured: Boolean(settings.admin_token),
     health: settings.health,

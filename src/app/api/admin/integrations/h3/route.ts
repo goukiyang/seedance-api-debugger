@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     const presets = settings.api_token
       ? await listH3Presets({ baseUrl: settings.base_url, apiToken: settings.api_token })
       : null;
-    const saved = await saveH3HealthSnapshot(health, admin.id);
+    const saved = await saveH3HealthSnapshot(health, admin.id, presets);
     const healthRecord = health && typeof health === 'object'
       ? health as Record<string, unknown>
       : {};
@@ -132,6 +132,10 @@ export async function POST(request: NextRequest) {
           queue_pending: queueRecord.pending ?? null,
           queue_running: queueRecord.running ?? null,
           queue_max_pending_jobs: queueRecord.max_pending_jobs ?? null,
+          preset_runtime_policy_ready: Boolean(
+            Array.isArray((presets as { presets?: unknown[] } | null)?.presets)
+              && (presets as { presets?: unknown[] }).presets!.length > 0,
+          ),
         }),
       },
     });

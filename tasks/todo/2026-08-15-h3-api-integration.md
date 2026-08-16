@@ -510,7 +510,7 @@
   - 免费分支补测：至少用 mock/smoke 覆盖 `queue_full`、`job_failed`、`job_cancelled`、`output_download_failed`，确认这些失败终态同样不产生扣点、冻结或预算扣减，且 `CostLedger` 记录 0 成本终态。
   - 队列清理：测试结束后只读确认 H3 `/api/h3/queue` 没有本轮遗留 `pending/running` 任务；如脚本停止了 job，必须确认任务终态是 `cancelled/deleted/failed` 之一且有脱敏诊断。
   - 临时 tunnel 风险：H3 当前公网地址是 Cloudflare Quick Tunnel，只能作为联调入口；如 `/health` 不稳定、返回 530/502、CORS 失败或 public base URL 变化，停止 live smoke，不把临时地址当生产完成。
-  - 停止条件：如果仍卡 `running 0.5` 超过脚本限制，脚本必须 stop 当前 job；如果 preset failed，停止批量测试并导出脱敏诊断包给 H3 侧；如发现任何扣点、冻结、预算扣减或队列无法清空，停止压测并回滚普通用户入口。
+  - 停止条件：H3 API 0.3.1 之后不得再把 `progress=0.5` 当作卡死依据；必须读取 preset/job 的 `recommended_timeout_sec` 作为等待窗口。只有超过推荐等待仍无终态、或返回 `failed/cancelled`、或 `risk_flags` 明确高风险时，才停止当前任务并导出脱敏诊断；如发现任何扣点、冻结、预算扣减或队列无法清空，停止压测并回滚普通用户入口。
   - 2026-08-16 落地结果：已刷新生产 H3 健康快照，公网 `/api/config` 返回 `ready=true`、`admin_queue_ready=true`、`api/worker/comfyui=ok`、`billing.charged=false`、`cost=0`、队列 `pending=0/running=0`。`lightx2v_4step_turbo` 5 秒 smoke 成功，job `h3idem-be43a170c2ea57b947d3f9c5` 到 `done`，下载 mp4 `493204` 字节，`duration_sec=5`、`fps=24`、`sha256_present=true`，H3 返回免费计费。`larry_v4_6step` 5 秒 smoke job `h3idem-a8ec2714441e97bdbceabaa2` 在进度 `0.5` 卡约 99 秒，脚本已按停止条件 stop，复查终态为 `cancelled` / `stopped by operator`。队列复查 `active_count=0`、`pending_count=0`、`free_slots=1`。本轮直连 H3 smoke 不创建 sd2 `VideoTask`，生产 DB 最近一小时无 H3 `VideoTask`、无 `CreditLedger` 扣点/冻结、无 H3 `CostLedger`。sd2 登录态任务创建 E2E 尚未闭环。
 
 - [ ] T30. 继续 sd2 侧 15 秒 720P 多题材压测
@@ -519,6 +519,16 @@
   - 完成标准：任务从 sd2 创建、轮询、终态、缓存、缩略图、播放、下载、项目产出、后台产出全链路闭环；所有任务 0 成本且无 `CreditLedger` 扣点。
   - 停止条件：任一 preset 连续 2 次 failed 或卡住，先归因并出诊断，不继续盲提任务。
   - 2026-08-16 当前状态：暂不执行批量压测。原因是 `larry_v4_6step` 5 秒最小 smoke 已触发 stale-progress stop，历史队列里也有多条 `larry_v4_8step` 15 秒 failed/cancelled 记录；继续提交赛车、舞蹈、武打、二次元 15 秒 720P 会违反“卡住先归因，不继续盲提任务”的停止条件。下一步应先把 H3 侧 6step/8step 卡 `0.5` 和 15 秒失败原因定位清楚，再恢复 T30。
+
+- [x] T31. 适配 H3 API 0.3.1 的推荐超时、进度详情和风险标记
+  - 背景：H3 侧确认旧 `progress=0.5` 是 running 占位，不是真实逐步进度；Larry 15 秒 720P 历史失败存在 `gpu_out_of_memory` 和 `long_720p_oom_risk`。
+  - 具体做法：
+    - `/api/config` 的 H3 `preset_options` 带上 `estimated_runtime_sec`、`recommended_timeout_sec`、`runtime_policy`，并把建议等待拼进预设说明。
+    - H3 provider 状态转换保留 `progress_detail`、`recommended_timeout_sec`、`risk_flags`、`error_code` 到 `raw_status_response`；`gpu_out_of_memory` 转成用户可读显存风险提示。
+    - 任务详情高级信息显示 H3 进度说明、预计耗时、建议等待、风险标记和 H3 错误码。
+    - `scripts/h3-live-minimal-smoke.ts` 不再用固定 99 秒 stale-progress stop；先读 `/api/h3/presets` 的推荐超时，轮询时再用 job 返回的 `recommended_timeout_sec` 覆盖。
+  - 验证：`npx tsx scripts/h3-admin-settings-smoke.ts`、`npx tsx scripts/h3-provider-adapter-smoke.ts`、`npx tsc --noEmit --pretty false`。
+  - 后续限制：15 秒 720P Larry 仍不作为常规压测路径，除非 H3 侧进一步确认显存优化完成；当前推荐普通路径仍是 LightX2V 或降低分辨率/秒数。
 
 ### 8.3 验收 / 审查内容
 

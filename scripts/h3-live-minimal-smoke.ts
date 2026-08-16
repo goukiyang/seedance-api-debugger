@@ -12,7 +12,9 @@ import { getH3ApiSettings } from '../src/lib/integrations/h3';
 
 loadEnvConfig(process.cwd());
 
-const timeoutMs = Number(process.env.H3_LIVE_SMOKE_TIMEOUT_MS || 180000);
+const manualTimeoutMs = process.env.H3_LIVE_SMOKE_TIMEOUT_MS
+  ? Number(process.env.H3_LIVE_SMOKE_TIMEOUT_MS)
+  : null;
 const pollMs = Number(process.env.H3_LIVE_SMOKE_POLL_MS || 5000);
 const presetId = process.env.H3_LIVE_SMOKE_PRESET || 'lightx2v_4step_turbo';
 const durationSec = Number(process.env.H3_LIVE_SMOKE_DURATION || 5);
@@ -39,6 +41,29 @@ function rawObject(value: unknown) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function numberOrNull(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function riskFlags(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function recommendedTimeoutMsFromPresets(presets: unknown, preset: string) {
+  const list = Array.isArray(presets)
+    ? presets
+    : Array.isArray(rawObject(presets).presets)
+      ? rawObject(presets).presets as unknown[]
+      : [];
+  const match = list
+    .map(rawObject)
+    .find((item) => item.id === preset);
+  const seconds = numberOrNull(match?.recommended_timeout_sec);
+  return seconds !== null ? Math.ceil(seconds * 1000) : null;
 }
 
 async function stopJob(jobId: string, settings: Awaited<ReturnType<typeof getH3ApiSettings>>) {
@@ -74,6 +99,9 @@ async function main() {
     : Array.isArray(rawObject(presets).presets)
       ? (rawObject(presets).presets as unknown[]).length
       : null;
+  let maxWaitMs = manualTimeoutMs && Number.isFinite(manualTimeoutMs) && manualTimeoutMs > 0
+    ? manualTimeoutMs
+    : recommendedTimeoutMsFromPresets(presets, presetId) ?? 180000;
 
   console.log(JSON.stringify({
     phase: 'preflight',
@@ -89,6 +117,7 @@ async function main() {
       queue: queueSummary(health.queue),
     },
     preset_count: presetCount,
+    timeout_ms: maxWaitMs,
   }));
 
   const created = await createH3VideoJob({
@@ -110,17 +139,15 @@ async function main() {
   console.log(JSON.stringify({ phase: 'created', job_id: jobId, preset_id: presetId, duration_sec: durationSec }));
 
   const startedAt = Date.now();
-  let lastProgress: unknown = null;
-  let unchangedProgressSince = Date.now();
 
-  while (Date.now() - startedAt < timeoutMs) {
+  while (Date.now() - startedAt < maxWaitMs) {
     await sleep(pollMs);
     const status = await getH3TaskStatus(jobId, requestOptions);
     const raw = rawObject(status.raw);
     const progress = raw.progress ?? raw.percent ?? null;
-    if (progress !== lastProgress) {
-      lastProgress = progress;
-      unchangedProgressSince = Date.now();
+    const recommendedTimeoutSec = numberOrNull(raw.recommended_timeout_sec);
+    if (!manualTimeoutMs && recommendedTimeoutSec !== null) {
+      maxWaitMs = Math.max(maxWaitMs, Math.ceil(recommendedTimeoutSec * 1000));
     }
 
     console.log(JSON.stringify({
@@ -129,7 +156,11 @@ async function main() {
       provider_status: status.provider_status,
       local_status: status.local_status,
       progress,
+      progress_detail: raw.progress_detail ?? null,
+      recommended_timeout_sec: recommendedTimeoutSec,
+      risk_flags: riskFlags(raw.risk_flags),
       elapsed_sec: Math.round((Date.now() - startedAt) / 1000),
+      timeout_sec: Math.round(maxWaitMs / 1000),
     }));
 
     if (status.local_status === 'succeeded') {
@@ -161,12 +192,6 @@ async function main() {
 
     if (status.local_status === 'failed' || status.local_status === 'cancelled') {
       throw new Error(`H3 terminal status: ${status.local_status}; ${status.error_message || 'no error message'}`);
-    }
-
-    if (progress === 0.5 && Date.now() - unchangedProgressSince > 90000) {
-      const stopped = await stopJob(jobId, settings);
-      console.log(JSON.stringify({ phase: 'stopped_stale_progress', job_id: jobId, stopped }));
-      process.exit(2);
     }
   }
 

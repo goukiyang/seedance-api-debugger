@@ -621,6 +621,73 @@ function extractProviderBilling(task: VideoTask): ProviderBillingMeta {
   };
 }
 
+type H3RuntimeMeta = {
+  progressText: string | null;
+  estimatedRuntimeText: string | null;
+  recommendedTimeoutText: string | null;
+  riskText: string | null;
+  errorCode: string | null;
+};
+
+function formatRuntimeSeconds(value: number | null) {
+  if (value === null) return null;
+  if (value < 60) return `${Math.round(value)} 秒`;
+  return `约 ${Math.round(value / 60)} 分钟`;
+}
+
+function h3RiskLabel(flag: string) {
+  if (flag === 'long_720p_oom_risk') return '15 秒 720P 显存风险高，建议改用 LightX2V、降低分辨率或缩短秒数';
+  if (flag === 'high_vram_margin') return '显存余量偏低';
+  if (flag === 'above_benchmark_frame_count') return '帧数超过当前 benchmark 范围';
+  return flag;
+}
+
+function extractH3RuntimeMeta(task: VideoTask): H3RuntimeMeta | null {
+  if (task.provider !== 'h3') return null;
+  const raw = parseJsonObject(task.raw_status_response);
+  const rawCandidates = [
+    raw,
+    asRecord(raw?.data),
+    asRecord(raw?.result),
+    asRecord(raw?.response),
+  ].filter(Boolean) as Record<string, unknown>[];
+  const firstNumberWithValue = (keys: string[]) => {
+    for (const candidate of rawCandidates) {
+      const value = pickNumberValue(candidate, keys);
+      if (value !== null) return value;
+    }
+    return null;
+  };
+  const firstStringWithValue = (keys: string[]) => {
+    for (const candidate of rawCandidates) {
+      const value = pickStringValue(candidate, keys);
+      if (value) return value;
+    }
+    return null;
+  };
+  const progressDetail = rawCandidates
+    .map((candidate) => asRecord(candidate.progress_detail))
+    .find(Boolean) || null;
+  const progressRatio = firstNumberWithValue(['progress', 'percent']);
+  const progressText = progressDetail
+    ? [
+        pickStringValue(progressDetail, ['stage', 'phase', 'label']),
+        formatRuntimeSeconds(pickNumberValue(progressDetail, ['elapsed_sec', 'elapsed_seconds'])),
+      ].filter(Boolean).join(' · ') || null
+    : progressRatio !== null ? `${Math.round(progressRatio * 100)}%` : null;
+  const riskFlags = rawCandidates
+    .flatMap((candidate) => Array.isArray(candidate.risk_flags) ? candidate.risk_flags : [])
+    .filter((item): item is string => typeof item === 'string');
+
+  return {
+    progressText,
+    estimatedRuntimeText: formatRuntimeSeconds(firstNumberWithValue(['estimated_runtime_sec'])),
+    recommendedTimeoutText: formatRuntimeSeconds(firstNumberWithValue(['recommended_timeout_sec'])),
+    riskText: riskFlags.length > 0 ? riskFlags.map(h3RiskLabel).join('；') : null,
+    errorCode: firstStringWithValue(['error_code', 'code']),
+  };
+}
+
 function normalizeOfficialChargeLedger(value: unknown): OfficialChargeLedger | null {
   const record = asRecord(value);
   if (!record) return null;
@@ -1480,6 +1547,7 @@ export default function TaskDetailPage() {
   const enhanceSourceKind = pickStringValue(taskParams, ['source_video_kind']);
   const enhanceFps = pickNumberValue(taskParams, ['fps']);
   const providerBilling = extractProviderBilling(task);
+  const h3RuntimeMeta = extractH3RuntimeMeta(task);
   const hasResultVideo = task.local_status === 'succeeded' && !!videoSrc && !isPublicVideoPreparing;
   const enhanceSourceVideoSrc = taskVideoSource(enhanceSourceTask);
   const showEnhanceCompare = isEnhanceTask && hasResultVideo && Boolean(enhanceSourceVideoSrc);
@@ -2186,6 +2254,31 @@ export default function TaskDetailPage() {
                 </strong>
               </div>
             </div>
+
+            {h3RuntimeMeta && (
+              <div className="task-param-grid task-billing-grid">
+                <div className="task-param-item">
+                  <span>H3 进度说明</span>
+                  <strong>{h3RuntimeMeta.progressText || '等待 H3 返回'}</strong>
+                </div>
+                <div className="task-param-item">
+                  <span>预计耗时</span>
+                  <strong>{h3RuntimeMeta.estimatedRuntimeText || '待 H3 返回'}</strong>
+                </div>
+                <div className="task-param-item">
+                  <span>建议等待</span>
+                  <strong>{h3RuntimeMeta.recommendedTimeoutText || '待 H3 返回'}</strong>
+                </div>
+                <div className="task-param-item">
+                  <span>风险标记</span>
+                  <strong>{h3RuntimeMeta.riskText || '未返回高风险标记'}</strong>
+                </div>
+                <div className="task-param-item">
+                  <span>H3 错误码</span>
+                  <strong>{h3RuntimeMeta.errorCode || '-'}</strong>
+                </div>
+              </div>
+            )}
 
             <div className="task-param-grid task-billing-grid">
               <div className="task-param-item">
