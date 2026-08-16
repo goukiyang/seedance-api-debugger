@@ -231,6 +231,7 @@ export function TemplateGenerateClient() {
   const [credits, setCredits] = useState<CreditSummary | null>(null);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
   const [h3StatusChecking, setH3StatusChecking] = useState(false);
+  const [selectedH3LoraId, setSelectedH3LoraId] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
   const [collections, setCollections] = useState<AssetCollection[]>([]);
 
@@ -281,6 +282,13 @@ export function TemplateGenerateClient() {
   const selectedH3Preset = h3VideoConfig?.preset_options.find((option) => option.id === h3VideoConfig.default_preset_id)
     || h3VideoConfig?.preset_options[0]
     || null;
+  const selectedH3Lora = h3VideoConfig?.lora_options.find((option) => option.id === selectedH3LoraId)
+    || h3VideoConfig?.lora_options.find((option) => option.id === h3VideoConfig.default_lora_id)
+    || h3VideoConfig?.lora_options[0]
+    || null;
+  const activeH3LoraOptions = selectedProvider === 'h3' && h3Ready
+    ? h3VideoConfig?.lora_options || []
+    : [];
   const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
     const options = [...SEEDANCE_VIDEO_MODEL_OPTIONS];
     const canSeeH3 = h3Ready || currentUser?.role === 'admin';
@@ -289,12 +297,12 @@ export function TemplateGenerateClient() {
         id: H3_INLINE_MODEL_ID,
         label: h3Ready ? 'H3 本地模型' : 'H3 待检查',
         detail: h3Ready
-          ? `本地免费 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'}`
+          ? `本地免费 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'} · ${selectedH3Lora?.label || h3VideoConfig?.default_lora_id || '默认 LoRA'}`
           : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
       });
     }
     return options;
-  }, [currentUser?.role, h3Ready, h3VideoConfig, selectedH3Preset?.label]);
+  }, [currentUser?.role, h3Ready, h3VideoConfig, selectedH3Lora?.label, selectedH3Preset?.label]);
   const activeModelLabel = 'Seedance 2.0';
   const activeProviderLabel = 'Seedance 视频';
   const refreshH3VideoConfig = useCallback(async () => {
@@ -353,6 +361,17 @@ export function TemplateGenerateClient() {
     }
     setSelectedProvider('seedance');
   }, [refreshH3VideoConfig]);
+
+  useEffect(() => {
+    const options = h3VideoConfig?.lora_options || [];
+    if (options.length === 0) {
+      if (selectedH3LoraId) setSelectedH3LoraId('');
+      return;
+    }
+    if (!options.some((option) => option.id === selectedH3LoraId)) {
+      setSelectedH3LoraId(h3VideoConfig?.default_lora_id || options[0]?.id || '');
+    }
+  }, [h3VideoConfig, selectedH3LoraId]);
 
   const projectNameCounts = useMemo(() => {
     return projects.reduce<Record<string, number>>((acc, project) => {
@@ -776,6 +795,7 @@ export function TemplateGenerateClient() {
     promptUserEdited?: boolean;
     provider?: string | null;
     model?: string | null;
+    h3LoraId?: string | null;
   }) => {
     setSubmitting(true);
     setError(null);
@@ -803,8 +823,16 @@ export function TemplateGenerateClient() {
     const requestedModel = selectedH3Model
       ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id || ''
       : params.model || '';
+    const requestedH3LoraId = selectedH3Model
+      ? params.h3LoraId || selectedH3LoraId || h3VideoConfig?.default_lora_id || ''
+      : '';
     if (selectedH3Model && (!h3Ready || !requestedModel)) {
       setError(`${h3DisabledReason(h3VideoConfig)}，请先点击「检查状态」刷新机器状态。`);
+      setSubmitting(false);
+      return;
+    }
+    if (selectedH3Model && !requestedH3LoraId) {
+      setError('H3 LoRA 配置缺失，请刷新页面后重试。');
       setSubmitting(false);
       return;
     }
@@ -841,6 +869,7 @@ export function TemplateGenerateClient() {
           prompt_user_edited: params.promptUserEdited === true,
           provider: requestedProvider,
           model: requestedModel || undefined,
+          lora_id: selectedH3Model ? requestedH3LoraId : undefined,
         }),
       });
       const data = await readJsonResponse<CreateTaskResponse>(response);
@@ -899,6 +928,7 @@ export function TemplateGenerateClient() {
     ensureVideoCardForSubmit,
     h3Ready,
     h3VideoConfig,
+    selectedH3LoraId,
     selectedH3Preset?.id,
     selectedProjectId,
   ]);
@@ -1117,6 +1147,10 @@ export function TemplateGenerateClient() {
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}
           onModelChange={handleGenerationModelChange}
+          auxiliaryLabel="LoRA"
+          auxiliaryOptions={activeH3LoraOptions}
+          selectedAuxiliary={selectedH3LoraId}
+          onAuxiliaryChange={setSelectedH3LoraId}
           onReset={() => {
             setResult(null);
             setError(null);

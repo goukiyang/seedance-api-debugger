@@ -8,6 +8,7 @@ export const H3_HEALTH_PATH = '/health';
 export const H3_PRESETS_PATH = '/api/h3/presets';
 export const H3_GENERATE_PATH = '/api/h3/generate';
 export const H3_HEALTH_MAX_AGE_MS = 15 * 60 * 1000;
+export const H3_DEFAULT_LORA_ID = 'lightx2v_turbo_lora';
 
 export const H3_PRESET_OPTIONS = [
   { id: 'larry_v4_6step', label: '推荐', detail: '默认质量和速度平衡' },
@@ -15,7 +16,35 @@ export const H3_PRESET_OPTIONS = [
   { id: 'lightx2v_4step_turbo', label: '快速预览', detail: '速度优先，用于草稿' },
 ] as const;
 
+export const H3_LORA_OPTIONS = [
+  {
+    id: 'lightx2v_turbo_lora',
+    label: 'LightX2V 快速 LoRA',
+    detail: '默认 · 4-step turbo，显存压力更低，适合先跑通',
+    node_type: 'MiniMaxH3TurboLoRA',
+    lora_name: 'minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+    strength: 1,
+    low_vram: false,
+  },
+  {
+    id: 'larry_v4_turbo_lora',
+    label: 'Larry 高质量 LoRA',
+    detail: '画质优先，15 秒 16:9 场景显存风险更高',
+    node_type: 'MiniMaxH3TurboLoRA',
+    lora_name: 'minimax_h3_turbo_v4_step600_ema.safetensors',
+    strength: 1,
+    low_vram: false,
+  },
+] as const;
+
 export type H3PresetId = typeof H3_PRESET_OPTIONS[number]['id'];
+export type H3LoraId = typeof H3_LORA_OPTIONS[number]['id'];
+export type H3LoraPayload = {
+  node_type: string;
+  lora_name: string;
+  strength: number;
+  low_vram: boolean;
+};
 
 export type H3PresetRuntimePolicy = {
   id: H3PresetId;
@@ -30,6 +59,7 @@ export type H3ApiSettings = {
   api_token: string | null;
   admin_token: string | null;
   default_preset_id: H3PresetId;
+  default_lora_id: H3LoraId;
   health: H3HealthSnapshot | null;
 };
 
@@ -60,8 +90,8 @@ export type H3HealthSnapshot = {
   checked_at: string | null;
 };
 
-export type H3ApiSettingsInput = Partial<Omit<H3ApiSettings, 'default_preset_id'>>
-  & { default_preset_id?: unknown; clear_api_token?: unknown; clear_admin_token?: unknown };
+export type H3ApiSettingsInput = Partial<Omit<H3ApiSettings, 'default_preset_id' | 'default_lora_id'>>
+  & { default_preset_id?: unknown; default_lora_id?: unknown; clear_api_token?: unknown; clear_admin_token?: unknown };
 
 export type H3SafeConfig = {
   provider: 'h3_video';
@@ -73,6 +103,7 @@ export type H3SafeConfig = {
   presets_path: string;
   generate_path: string;
   default_preset_id: H3PresetId;
+  default_lora_id: H3LoraId;
   configured: boolean;
   preset_options: Array<{
     id: H3PresetId;
@@ -81,6 +112,11 @@ export type H3SafeConfig = {
     estimated_runtime_sec: number | null;
     recommended_timeout_sec: number | null;
     runtime_policy: string | null;
+  }>;
+  lora_options: Array<{
+    id: H3LoraId;
+    label: string;
+    detail: string;
   }>;
   api_token_configured: boolean;
   admin_token_configured: boolean;
@@ -94,12 +130,18 @@ export const DEFAULT_H3_API_SETTINGS: H3ApiSettings = {
   api_token: null,
   admin_token: null,
   default_preset_id: H3_DEFAULT_PRESET_ID,
+  default_lora_id: H3_DEFAULT_LORA_ID,
   health: null,
 };
 
 export function isH3PresetId(value: unknown): value is H3PresetId {
   return typeof value === 'string'
     && H3_PRESET_OPTIONS.some((option) => option.id === value);
+}
+
+export function isH3LoraId(value: unknown): value is H3LoraId {
+  return typeof value === 'string'
+    && H3_LORA_OPTIONS.some((option) => option.id === value);
 }
 
 function cleanString(value: unknown, fallback = '') {
@@ -129,6 +171,72 @@ function normalizePresetId(value: unknown, fallback: H3PresetId = H3_DEFAULT_PRE
     throw new Error(`H3 preset 只允许 ${H3_PRESET_OPTIONS.map((item) => item.id).join(', ')}`);
   }
   return fallback;
+}
+
+function normalizeLoraId(value: unknown, fallback: H3LoraId = H3_DEFAULT_LORA_ID): H3LoraId {
+  if (isH3LoraId(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    throw new Error(`H3 LoRA 只允许 ${H3_LORA_OPTIONS.map((item) => item.id).join(', ')}`);
+  }
+  return fallback;
+}
+
+export function resolveH3LoraOption(value: unknown, fallback: H3LoraId = H3_DEFAULT_LORA_ID) {
+  const loraId = normalizeLoraId(value, fallback);
+  return (H3_LORA_OPTIONS.find((option) => option.id === loraId) || H3_LORA_OPTIONS[0]) as typeof H3_LORA_OPTIONS[number];
+}
+
+export function h3LoraOptionToPayload(option: typeof H3_LORA_OPTIONS[number]): H3LoraPayload {
+  return {
+    node_type: option.node_type,
+    lora_name: option.lora_name,
+    strength: option.strength,
+    low_vram: option.low_vram,
+  };
+}
+
+function readH3LoraPayload(value: unknown): H3LoraPayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const keys = Object.keys(input);
+  if (keys.some((key) => !['node_type', 'lora_name', 'strength', 'low_vram'].includes(key))) return null;
+  if (
+    typeof input.node_type !== 'string'
+    || typeof input.lora_name !== 'string'
+    || typeof input.strength !== 'number'
+    || typeof input.low_vram !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    node_type: input.node_type,
+    lora_name: input.lora_name,
+    strength: input.strength,
+    low_vram: input.low_vram,
+  };
+}
+
+function sameH3LoraPayload(a: H3LoraPayload, b: H3LoraPayload) {
+  return a.node_type === b.node_type
+    && a.lora_name === b.lora_name
+    && a.strength === b.strength
+    && a.low_vram === b.low_vram;
+}
+
+export function validateH3LoraPayload(value: unknown): H3LoraPayload {
+  const payload = readH3LoraPayload(value);
+  if (!payload) {
+    throw new Error(`H3 LoRA 只允许 ${H3_LORA_OPTIONS.map((item) => item.id).join(', ')}`);
+  }
+  const allowed = H3_LORA_OPTIONS.some((option) => sameH3LoraPayload(payload, h3LoraOptionToPayload(option)));
+  if (!allowed) {
+    throw new Error(`H3 LoRA 只允许 ${H3_LORA_OPTIONS.map((item) => item.id).join(', ')}`);
+  }
+  return payload;
+}
+
+export function resolveH3LoraPayload(value: unknown, fallback: H3LoraId = H3_DEFAULT_LORA_ID): H3LoraPayload {
+  return h3LoraOptionToPayload(resolveH3LoraOption(value, fallback));
 }
 
 function stringOrNull(value: unknown) {
@@ -218,6 +326,7 @@ function envFallbackSettings(): H3ApiSettings {
     process.env.H3_PUBLIC_BASE_URL || process.env.H3_API_BASE_URL || process.env.H3_BASE_URL,
   );
   const presetId = normalizePresetId(process.env.H3_DEFAULT_PRESET_ID);
+  const loraId = normalizeLoraId(process.env.H3_DEFAULT_LORA_ID);
 
   return {
     enabled: Boolean(apiToken && baseUrl),
@@ -225,6 +334,7 @@ function envFallbackSettings(): H3ApiSettings {
     api_token: apiToken || null,
     admin_token: adminToken || null,
     default_preset_id: presetId,
+    default_lora_id: loraId,
     health: null,
   };
 }
@@ -240,6 +350,7 @@ export function normalizeH3ApiSettings(value: unknown): H3ApiSettings {
     api_token: cleanString(input.api_token, '').slice(0, 2000) || null,
     admin_token: cleanString(input.admin_token, '').slice(0, 2000) || null,
     default_preset_id: normalizePresetId(input.default_preset_id),
+    default_lora_id: normalizeLoraId(input.default_lora_id),
     health: normalizeHealthSnapshot((input as { health?: unknown }).health),
   };
 }
@@ -279,6 +390,7 @@ export function buildH3ApiSettingsPatch(
       : current.admin_token;
   const nextBaseUrl = input.base_url ?? current.base_url;
   const nextPresetId = input.default_preset_id ?? current.default_preset_id;
+  const nextLoraId = input.default_lora_id ?? current.default_lora_id;
   const shouldAutoEnable = hasNewApiToken && Boolean(nextBaseUrl && nextPresetId);
   const nextEnabled = typeof input.enabled === 'boolean'
     ? input.enabled
@@ -290,6 +402,7 @@ export function buildH3ApiSettingsPatch(
     api_token: nextApiToken,
     admin_token: nextAdminToken,
     default_preset_id: nextPresetId,
+    default_lora_id: nextLoraId,
     health: current.health,
   });
   const baseUrlChanged = settings.base_url !== current.base_url;
@@ -421,6 +534,7 @@ export function safeH3ConfigDto(settings: H3ApiSettings): H3SafeConfig {
     presets_path: H3_PRESETS_PATH,
     generate_path: H3_GENERATE_PATH,
     default_preset_id: settings.default_preset_id,
+    default_lora_id: settings.default_lora_id,
     configured: isH3ApiReady(settings),
     preset_options: H3_PRESET_OPTIONS.map((option) => {
       const runtime = settings.health?.presets?.find((item) => item.id === option.id);
@@ -432,6 +546,11 @@ export function safeH3ConfigDto(settings: H3ApiSettings): H3SafeConfig {
         runtime_policy: runtime?.runtime_policy ?? null,
       };
     }),
+    lora_options: H3_LORA_OPTIONS.map((option) => ({
+      id: option.id,
+      label: option.label,
+      detail: option.detail,
+    })),
     api_token_configured: Boolean(settings.api_token),
     admin_token_configured: Boolean(settings.admin_token),
     health: settings.health,

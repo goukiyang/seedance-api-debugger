@@ -13,12 +13,15 @@ assert.match(actionBarSource, /providerStatus/, '底部参数栏必须支持 H3 
 assert.match(actionBarSource, /composer-provider-status-dot/, 'H3 状态块必须有基础灯点');
 assert.match(actionBarSource, /composer-provider-status-action/, 'H3 状态块可以提供手动刷新兜底');
 assert.match(actionBarSource, /composer-provider-status-summary/, '折叠参数栏摘要也必须能看到 H3 状态');
+assert.match(actionBarSource, /auxiliaryOptions/, '底部参数栏必须支持 H3 LoRA 这类附加下拉选项');
+assert.match(actionBarSource, /onAuxiliaryChange/, 'LoRA 下拉变化必须能回传页面状态');
 assert.ok(
   actionBarSource.indexOf('/* 模型标签 */') < actionBarSource.indexOf('{shouldShowProviderStatus && providerStatus &&'),
   '模型下拉必须显示在 H3 状态块左侧',
 );
 
 assert.match(composerSource, /provider:\s*selectedProvider \|\| null/, '提交参数必须包含选中的 provider');
+assert.match(composerSource, /h3LoraId:\s*selectedAuxiliary \|\| null/, '提交参数必须包含选中的 H3 LoRA');
 assert.match(composerSource, /onModelChange\?: \(model: string\) => void/, '生成编辑器必须把模型切换回传给页面');
 assert.match(composerSource, /providerStatus/, '生成编辑器必须把状态块传给底部参数栏');
 
@@ -49,6 +52,8 @@ assert.match(generatePageSource, /providerOptions=\{\[\]\}/, '普通生成页不
 assert.match(generatePageSource, /onModelChange=\{handleGenerationModelChange\}/, '普通生成页必须由模型选择驱动 provider');
 assert.match(generatePageSource, /provider:\s*isIpSurface \? undefined : requestedProvider/, '普通生成提交必须透传 provider');
 assert.match(generatePageSource, /model:\s*requestedModel \|\| undefined/, '普通生成提交必须把 H3 模型映射成默认 preset');
+assert.match(generatePageSource, /lora_id:\s*selectedH3Model \? requestedH3LoraId : undefined/, '普通生成提交必须把 H3 LoRA 选择透传给后端');
+assert.match(generatePageSource, /auxiliaryOptions=\{activeH3LoraOptions\}/, '普通生成页必须只在 H3 模型下显示 LoRA 下拉');
 assert.match(generatePageSource, /data\.provider \|\| \(isIpSurface \? 'volcengine_ark' : requestedProvider\)/, '最近任务 provider 必须跟创建结果或用户选择一致');
 
 assert.match(templatePageSource, /fetch\('\/api\/config'/, '模板生成页必须读取 H3 公开配置');
@@ -57,6 +62,8 @@ assert.match(templatePageSource, /buildH3MachineStatus/, '模板生成页必须�
 assert.match(templatePageSource, /providerStatus=\{h3MachineStatus\}/, '模板生成页必须把 H3 状态传入编辑器');
 assert.match(templatePageSource, /provider:\s*requestedProvider/, '模板生成提交必须透传 provider');
 assert.match(templatePageSource, /model:\s*requestedModel \|\| undefined/, '模板生成提交必须把 H3 模型映射成默认 preset');
+assert.match(templatePageSource, /lora_id:\s*selectedH3Model \? requestedH3LoraId : undefined/, '模板生成提交必须把 H3 LoRA 选择透传给后端');
+assert.match(templatePageSource, /auxiliaryOptions=\{activeH3LoraOptions\}/, '模板生成页必须只在 H3 模型下显示 LoRA 下拉');
 assert.match(templatePageSource, /providerOptions=\{\[\]\}/, '模板生成页不能再单独暴露 H3 引擎下拉');
 assert.match(templatePageSource, /onModelChange=\{handleGenerationModelChange\}/, '模板生成页必须由模型选择驱动 provider');
 assert.match(templatePageSource, /H3 本地模型/, '模板生成页必须复用 H3 模型入口');

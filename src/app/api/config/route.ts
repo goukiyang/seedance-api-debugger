@@ -29,7 +29,9 @@ export async function GET() {
       configured: h3Config.configured,
       base_url_configured: Boolean(h3Config.base_url),
       default_preset_id: h3Config.default_preset_id,
+      default_lora_id: h3Config.default_lora_id,
       preset_options: h3Config.preset_options,
+      lora_options: h3Config.lora_options,
       api_token_configured: h3Config.api_token_configured,
       admin_queue_ready: h3Config.admin_queue_ready,
       health: h3Config.health

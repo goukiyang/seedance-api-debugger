@@ -378,6 +378,7 @@ interface Props {
     promptUserEdited: boolean;
     provider: string | null;
     model: string | null;
+    h3LoraId: string | null;
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
@@ -405,6 +406,10 @@ interface Props {
   modelLabel?: string;
   modelOptions?: ComposerSelectOption[];
   onModelChange?: (model: string) => void;
+  auxiliaryLabel?: string;
+  auxiliaryOptions?: ComposerSelectOption[];
+  selectedAuxiliary?: string | null;
+  onAuxiliaryChange?: (value: string) => void;
 }
 
 export function GenerationComposer({
@@ -438,6 +443,10 @@ export function GenerationComposer({
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
   onModelChange,
+  auxiliaryLabel = '',
+  auxiliaryOptions = [],
+  selectedAuxiliary = null,
+  onAuxiliaryChange,
 }: Props) {
   const workspace = useWorkspace();
   const templateEnabled = templateMode === 'workbench';
@@ -898,6 +907,7 @@ export function GenerationComposer({
       promptUserEdited,
       provider: selectedProvider || null,
       model: selectedModel || null,
+      h3LoraId: selectedAuxiliary || null,
     });
   }, [
     submitBlocker,
@@ -923,6 +933,7 @@ export function GenerationComposer({
     promptUserEdited,
     selectedProvider,
     selectedModel,
+    selectedAuxiliary,
   ]);
 
   const handlePromptChange = useCallback((nextPrompt: string) => {
@@ -1810,6 +1821,10 @@ export function GenerationComposer({
             setSelectedModel(model);
             onModelChange?.(model);
           }}
+          auxiliaryLabel={auxiliaryLabel}
+          auxiliaryOptions={auxiliaryOptions}
+          selectedAuxiliary={selectedAuxiliary}
+          onAuxiliaryChange={onAuxiliaryChange}
           onModeChange={setGenerationMode}
           onRatioChange={setRatio}
           onDurationChange={setDuration}

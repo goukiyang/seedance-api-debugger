@@ -3,6 +3,7 @@
 ## 当前入口
 
 - [x] 2026-08-16：Seedance 2.5 按 2.0 的 1.5 倍扣费，正文见 `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`。
+- [ ] 2026-08-16：H3 LoRA 下拉选择闭环，正文见 `tasks/todo/2026-08-16-h3-lora-selector.md`。
 - [ ] 2026-08-16：任务卡片缩略图可靠显示修复，正文见 `tasks/todo/2026-08-16-reliable-task-thumbnails.md`。
 - [ ] 2026-08-15：视频截图稳定固化与历史补偿，正文见 `tasks/todo/2026-08-15-stable-video-thumbnails.md`。
 - [ ] 2026-08-15：H3 API 接入现有视频生成链路，正文见 `tasks/todo/2026-08-15-h3-api-integration.md`。
@@ -35,6 +36,7 @@
 - `tasks/todo/2026-08-13-seedance-25-video-model.md`：Seedance 2.5 视频模型线上接入规划
 - `tasks/todo/2026-08-15-h3-api-integration.md`：H3 API 接入现有视频生成链路
 - `tasks/todo/2026-08-15-stable-video-thumbnails.md`：视频截图稳定固化与历史补偿
+- `tasks/todo/2026-08-16-h3-lora-selector.md`：H3 LoRA 下拉选择闭环
 - `tasks/todo/2026-08-16-reliable-task-thumbnails.md`：任务卡片缩略图可靠显示修复
 - `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`：Seedance 2.5 按 2.0 的 1.5 倍扣费
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环

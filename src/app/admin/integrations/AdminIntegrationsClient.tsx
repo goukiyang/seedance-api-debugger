@@ -95,8 +95,14 @@ type H3Config = {
   presets_path: string;
   generate_path: string;
   default_preset_id: 'larry_v4_6step' | 'larry_v4_8step' | 'lightx2v_4step_turbo';
+  default_lora_id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora';
   preset_options: Array<{
     id: 'larry_v4_6step' | 'larry_v4_8step' | 'lightx2v_4step_turbo';
+    label: string;
+    detail: string;
+  }>;
+  lora_options: Array<{
+    id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora';
     label: string;
     detail: string;
   }>;
@@ -246,16 +252,36 @@ const EMPTY_H3_CONFIG: H3Config = {
   presets_path: '/api/h3/presets',
   generate_path: '/api/h3/generate',
   default_preset_id: 'larry_v4_6step',
+  default_lora_id: 'lightx2v_turbo_lora',
   preset_options: [
     { id: 'larry_v4_6step', label: '推荐', detail: '默认质量和速度平衡' },
     { id: 'larry_v4_8step', label: '画质优先', detail: '更多步数，细节更稳' },
     { id: 'lightx2v_4step_turbo', label: '快速预览', detail: '速度优先，用于草稿' },
+  ],
+  lora_options: [
+    { id: 'lightx2v_turbo_lora', label: 'LightX2V 快速 LoRA', detail: '默认 · 4-step turbo，显存压力更低，适合先跑通' },
+    { id: 'larry_v4_turbo_lora', label: 'Larry 高质量 LoRA', detail: '画质优先，15 秒 16:9 场景显存风险更高' },
   ],
   api_token_configured: false,
   admin_token_configured: false,
   health: null,
   missing: ['api_token'],
 };
+
+function normalizeH3Config(value: unknown): H3Config {
+  const input = value && typeof value === 'object' ? value as Partial<H3Config> : {};
+  return {
+    ...EMPTY_H3_CONFIG,
+    ...input,
+    preset_options: Array.isArray(input.preset_options) && input.preset_options.length > 0
+      ? input.preset_options
+      : EMPTY_H3_CONFIG.preset_options,
+    lora_options: Array.isArray(input.lora_options) && input.lora_options.length > 0
+      ? input.lora_options
+      : EMPTY_H3_CONFIG.lora_options,
+    default_lora_id: input.default_lora_id || EMPTY_H3_CONFIG.default_lora_id,
+  };
+}
 
 function selectorLabel(type: UserSelectorType) {
   if (type === 'id') return '用户 ID';
@@ -418,7 +444,7 @@ export default function AdminIntegrationsClient() {
       setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
       setAiMediaKitConfig(aiMediaKitData.config || EMPTY_AIMEDIAKIT_CONFIG);
-      setH3Config(h3Data.config || EMPTY_H3_CONFIG);
+      setH3Config(normalizeH3Config(h3Data.config));
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
@@ -637,6 +663,7 @@ export default function AdminIntegrationsClient() {
           enabled: h3Config.enabled,
           base_url: h3Config.base_url,
           default_preset_id: h3Config.default_preset_id,
+          default_lora_id: h3Config.default_lora_id,
           api_token: h3ApiToken,
           admin_token: h3AdminToken,
           clear_api_token: clearH3ApiToken,
@@ -648,7 +675,7 @@ export default function AdminIntegrationsClient() {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
-      setH3Config(data.config || h3Config);
+      setH3Config(normalizeH3Config(data.config || h3Config));
       setH3ApiToken('');
       setH3AdminToken('');
       setClearH3ApiToken(false);
@@ -680,7 +707,7 @@ export default function AdminIntegrationsClient() {
         return;
       }
       const health = data.test?.health || {};
-      setH3Config(data.config || h3Config);
+      setH3Config(normalizeH3Config(data.config || h3Config));
       setH3TestState({
         type: 'success',
         message: 'H3 连接测试通过。',
@@ -872,7 +899,7 @@ export default function AdminIntegrationsClient() {
           <span className="stat-label">H3 本地生成服务</span>
           <strong className="stat-value">{h3StatusText}</strong>
           <span className="stat-sub">
-            {h3Config.default_preset_id} · {h3Config.api_token_configured ? '用户 token 已设置' : '用户 token 未设置'}
+            {h3Config.default_preset_id} · {h3Config.default_lora_id} · {h3Config.api_token_configured ? '用户 token 已设置' : '用户 token 未设置'}
           </span>
         </div>
       </div>
@@ -927,6 +954,25 @@ export default function AdminIntegrationsClient() {
               }))}
             >
               {h3Config.preset_options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label} · {option.detail}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-default-lora">默认 LoRA</label>
+            <select
+              id="h3-default-lora"
+              className="input"
+              value={h3Config.default_lora_id}
+              onChange={(event) => setH3Config((prev) => ({
+                ...prev,
+                default_lora_id: event.target.value as H3Config['default_lora_id'],
+              }))}
+            >
+              {h3Config.lora_options.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label} · {option.detail}
                 </option>

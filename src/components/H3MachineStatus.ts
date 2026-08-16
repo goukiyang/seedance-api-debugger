@@ -25,7 +25,9 @@ export type H3VideoConfig = {
   ready: boolean;
   configured?: boolean;
   default_preset_id: string;
+  default_lora_id: string;
   preset_options: ComposerSelectOption[];
+  lora_options: ComposerSelectOption[];
   api_token_configured?: boolean;
   admin_queue_ready?: boolean;
   health?: {
@@ -100,6 +102,20 @@ export function normalizeH3VideoConfig(value: unknown): H3VideoConfig | null {
           detail: typeof option.detail === 'string' ? option.detail : '',
         }))
     : [];
+  const loraOptions = Array.isArray(raw.lora_options)
+    ? raw.lora_options
+        .filter((option): option is ComposerSelectOption => (
+          Boolean(option)
+          && typeof option === 'object'
+          && typeof (option as ComposerSelectOption).id === 'string'
+          && typeof (option as ComposerSelectOption).label === 'string'
+        ))
+        .map((option) => ({
+          id: option.id,
+          label: option.label,
+          detail: typeof option.detail === 'string' ? option.detail : '',
+        }))
+    : [];
 
   return {
     enabled: raw.enabled === true,
@@ -108,7 +124,9 @@ export function normalizeH3VideoConfig(value: unknown): H3VideoConfig | null {
     api_token_configured: raw.api_token_configured === true,
     admin_queue_ready: raw.admin_queue_ready === true,
     default_preset_id: typeof raw.default_preset_id === 'string' ? raw.default_preset_id : '',
+    default_lora_id: typeof raw.default_lora_id === 'string' ? raw.default_lora_id : '',
     preset_options: options,
+    lora_options: loraOptions,
     health: normalizeHealth(raw.health),
   };
 }

@@ -19,7 +19,13 @@ import {
 } from '@/lib/provider/h3';
 import { buildH3DiagnosticSnapshot } from '@/lib/provider/h3-diagnostics';
 import { uploadH3ReferenceImagesForTask } from '@/lib/provider/h3-assets';
-import { getH3ApiSettings, isH3Operational, isH3PresetId } from '@/lib/integrations/h3';
+import {
+  getH3ApiSettings,
+  h3LoraOptionToPayload,
+  isH3Operational,
+  isH3PresetId,
+  resolveH3LoraOption,
+} from '@/lib/integrations/h3';
 import {
   PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
   ensureProviderSafeReferenceImageUrl,
@@ -642,6 +648,7 @@ export async function POST(request: NextRequest) {
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
   const h3Settings = requestedProvider === H3_VIDEO_PROVIDER ? await getH3ApiSettings() : null;
   let selectedModel: string;
+  let selectedH3Lora: ReturnType<typeof resolveH3LoraOption> | null = null;
   if (requestedProvider === H3_VIDEO_PROVIDER) {
     if (!h3Settings || !isH3Operational(h3Settings)) {
       return errorJson('H3 本地生成服务未就绪，请管理员先在 API 设置页保存配置并测试连接通过。', 503);
@@ -656,6 +663,18 @@ export async function POST(request: NextRequest) {
     }
     if (!['16:9', '9:16', '1:1', '4:3', '3:4'].includes(ratio)) {
       return errorJson('H3 比例只支持 16:9、9:16、1:1、4:3、3:4', 400);
+    }
+    try {
+      selectedH3Lora = resolveH3LoraOption(
+        typeof body.lora_id === 'string' && body.lora_id.trim()
+          ? body.lora_id.trim()
+          : typeof body.h3_lora_id === 'string' && body.h3_lora_id.trim()
+            ? body.h3_lora_id.trim()
+            : h3Settings.default_lora_id,
+        h3Settings.default_lora_id,
+      );
+    } catch (error) {
+      return errorJson(error instanceof Error ? error.message : 'H3 LoRA 无效', 400);
     }
     selectedModel = requestedPreset;
   } else {
@@ -895,6 +914,10 @@ export async function POST(request: NextRequest) {
     source_label: effectiveSourceLabel,
     provider: requestedProvider,
     model: selectedModel,
+    ...(selectedH3Lora ? {
+      h3_lora_id: selectedH3Lora.id,
+      h3_lora_label: selectedH3Lora.label,
+    } : {}),
     paid_generation_guard: paidGenerationGuard.metadata,
   };
   const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
@@ -1238,6 +1261,7 @@ export async function POST(request: NextRequest) {
     h3GeneratePayload = {
       preset_id: selectedModel as H3GeneratePayload['preset_id'],
       prompt: h3Prompt,
+      lora: selectedH3Lora ? h3LoraOptionToPayload(selectedH3Lora) : undefined,
       audio_prompt: typeof body.audio_prompt === 'string' && body.audio_prompt.trim()
         ? body.audio_prompt.trim().slice(0, 1200)
         : undefined,
@@ -1268,6 +1292,7 @@ export async function POST(request: NextRequest) {
       ? {
           provider: H3_VIDEO_PROVIDER,
           preset_id: selectedModel,
+          lora_id: selectedH3Lora?.id || null,
           h3_payload: h3GeneratePayload,
           h3_reference_transfers: h3ReferenceTransfer?.transfers.map((item) => ({
             role: item.role,
@@ -1303,6 +1328,8 @@ export async function POST(request: NextRequest) {
     prepSummary,
     h3: requestedProvider === H3_VIDEO_PROVIDER ? {
       preset_id: selectedModel,
+      lora_id: selectedH3Lora?.id || null,
+      lora_label: selectedH3Lora?.label || null,
       first_frame: h3ReferenceTransfer?.first_frame || null,
       last_frame: h3ReferenceTransfer?.last_frame || null,
       reference_transfers: h3ReferenceTransfer?.transfers.map((item) => ({

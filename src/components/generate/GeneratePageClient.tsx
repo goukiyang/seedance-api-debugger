@@ -451,6 +451,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [loadingUser, setLoadingUser] = useState(true);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
   const [h3StatusChecking, setH3StatusChecking] = useState(false);
+  const [selectedH3LoraId, setSelectedH3LoraId] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
 
   // ---- Current Project ----
@@ -485,6 +486,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const selectedH3Preset = h3VideoConfig?.preset_options.find((option) => option.id === h3VideoConfig.default_preset_id)
     || h3VideoConfig?.preset_options[0]
     || null;
+  const selectedH3Lora = h3VideoConfig?.lora_options.find((option) => option.id === selectedH3LoraId)
+    || h3VideoConfig?.lora_options.find((option) => option.id === h3VideoConfig.default_lora_id)
+    || h3VideoConfig?.lora_options[0]
+    || null;
+  const activeH3LoraOptions = selectedProvider === 'h3' && h3Ready
+    ? h3VideoConfig?.lora_options || []
+    : [];
   const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
     if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS;
     const options = [...SEEDANCE_VIDEO_MODEL_OPTIONS];
@@ -494,12 +502,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         id: H3_INLINE_MODEL_ID,
         label: h3Ready ? 'H3 本地模型' : 'H3 待检查',
         detail: h3Ready
-          ? `本地免费 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'}`
+          ? `本地免费 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'} · ${selectedH3Lora?.label || h3VideoConfig?.default_lora_id || '默认 LoRA'}`
           : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
       });
     }
     return options;
-  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, selectedH3Preset?.label]);
+  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, selectedH3Lora?.label, selectedH3Preset?.label]);
   const activeModelLabel = surfaceConfig.modelLabel;
   const activeProviderLabel = 'Seedance 视频';
   const refreshH3VideoConfig = useCallback(async () => {
@@ -560,6 +568,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     }
     setSelectedProvider('seedance');
   }, [refreshH3VideoConfig]);
+
+  useEffect(() => {
+    const options = h3VideoConfig?.lora_options || [];
+    if (options.length === 0) {
+      if (selectedH3LoraId) setSelectedH3LoraId('');
+      return;
+    }
+    if (!options.some((option) => option.id === selectedH3LoraId)) {
+      setSelectedH3LoraId(h3VideoConfig?.default_lora_id || options[0]?.id || '');
+    }
+  }, [h3VideoConfig, selectedH3LoraId]);
 
   // ============================================================================
   // Load collections
@@ -1368,6 +1387,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     promptUserEdited?: boolean;
     provider?: string | null;
     model?: string | null;
+    h3LoraId?: string | null;
   }) => {
     setSubmitting(true);
     setError(null);
@@ -1391,8 +1411,16 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     const requestedModel = selectedH3Model
       ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id || ''
       : params.model || '';
+    const requestedH3LoraId = selectedH3Model
+      ? params.h3LoraId || selectedH3LoraId || h3VideoConfig?.default_lora_id || ''
+      : '';
     if (selectedH3Model && (!h3Ready || !requestedModel)) {
       setError(`${h3DisabledReason(h3VideoConfig)}，请先点击「检查状态」刷新机器状态。`);
+      setSubmitting(false);
+      return;
+    }
+    if (selectedH3Model && !requestedH3LoraId) {
+      setError('H3 LoRA 配置缺失，请刷新页面后重试。');
       setSubmitting(false);
       return;
     }
@@ -1431,6 +1459,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           prompt_user_edited: params.promptUserEdited === true,
           provider: isIpSurface ? undefined : requestedProvider,
           model: requestedModel || undefined,
+          lora_id: selectedH3Model ? requestedH3LoraId : undefined,
         }),
       });
 
@@ -1500,6 +1529,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     isIpSurface,
     saveGenerationDefaults,
     selectedH3Preset?.id,
+    selectedH3LoraId,
     selectedProjectId,
     selectedVideoBranchId,
     selectedVideoCardId,
@@ -2065,6 +2095,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}
           onModelChange={handleGenerationModelChange}
+          auxiliaryLabel="LoRA"
+          auxiliaryOptions={activeH3LoraOptions}
+          selectedAuxiliary={selectedH3LoraId}
+          onAuxiliaryChange={setSelectedH3LoraId}
         />
 
         {/* 最近任务 */}

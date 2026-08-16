@@ -60,6 +60,10 @@ interface Props {
   modelOptions?: ComposerSelectOption[];
   selectedModel?: string | null;
   onModelChange?: (model: string) => void;
+  auxiliaryLabel?: string;
+  auxiliaryOptions?: ComposerSelectOption[];
+  selectedAuxiliary?: string | null;
+  onAuxiliaryChange?: (value: string) => void;
 }
 
 export function ComposerActionBar({
@@ -89,6 +93,10 @@ export function ComposerActionBar({
   modelOptions = [],
   selectedModel = null,
   onModelChange,
+  auxiliaryLabel = '',
+  auxiliaryOptions = [],
+  selectedAuxiliary = null,
+  onAuxiliaryChange,
 }: Props) {
   const hasProviderOptions = providerOptions.length > 1;
   const selectedProviderOption = providerOptions.find((option) => option.id === selectedProvider)
@@ -99,9 +107,16 @@ export function ComposerActionBar({
   const hasModelOptions = modelOptions.length > 0;
   const selectedModelOption = modelOptions.find((option) => option.id === selectedModel) || modelOptions[0] || null;
   const effectiveModelLabel = selectedModelOption?.label || modelLabel;
+  const hasAuxiliaryOptions = auxiliaryOptions.length > 0;
+  const selectedAuxiliaryOption = auxiliaryOptions.find((option) => option.id === selectedAuxiliary)
+    || auxiliaryOptions.find((option) => !option.disabled)
+    || auxiliaryOptions[0]
+    || null;
+  const effectiveAuxiliaryLabel = selectedAuxiliaryOption?.label || auxiliaryLabel;
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [showAuxiliaryMenu, setShowAuxiliaryMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
   const [showResolutionMenu, setShowResolutionMenu] = useState(false);
@@ -177,6 +192,40 @@ export function ComposerActionBar({
             </>
           )}
         </div>
+
+        {hasAuxiliaryOptions && (
+          <div className="composer-chip-wrap">
+            <ParamChip
+              label={effectiveAuxiliaryLabel}
+              dropdown
+              onClick={() => setShowAuxiliaryMenu(!showAuxiliaryMenu)}
+            />
+            {showAuxiliaryMenu && (
+              <>
+                <div className="composer-chip-dropdown-backdrop" onClick={() => setShowAuxiliaryMenu(false)} />
+                <div className="composer-chip-dropdown composer-model-options">
+                  {auxiliaryOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`composer-chip-dropdown-item ${option.id === selectedAuxiliaryOption?.id ? 'active' : ''}`}
+                      disabled={option.disabled}
+                      onClick={() => {
+                        if (option.disabled) return;
+                        onAuxiliaryChange?.(option.id);
+                        setShowAuxiliaryMenu(false);
+                      }}
+                      title={option.disabledReason || option.id}
+                    >
+                      <span>{option.label}</span>
+                      <small>{option.disabledReason || option.detail}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {shouldShowProviderStatus && providerStatus && (
           <span
@@ -337,7 +386,10 @@ export function ComposerActionBar({
           <summary>
             <span>生成参数</span>
             <strong>
-              {effectiveModelLabel} · {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}
+              {effectiveModelLabel}
+              {hasAuxiliaryOptions && effectiveAuxiliaryLabel ? ` · ${effectiveAuxiliaryLabel}` : ''}
+              {' · '}
+              {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}
               {shouldShowProviderStatus && providerStatus && (
                 <em
                   className={`composer-provider-status-summary composer-provider-status-summary-${providerStatus.tone}`}

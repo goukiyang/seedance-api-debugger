@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   H3_ALLOWED_ASPECT_RATIOS,
+  H3_ALLOWED_LORA_IDS,
   H3_ALLOWED_PRESET_IDS,
   H3RequestError,
   buildH3GeneratePayload,
@@ -151,6 +152,7 @@ const fetchImpl: typeof fetch = async (url, init) => {
 
 async function main() {
   assert.deepEqual(H3_ALLOWED_PRESET_IDS, ['larry_v4_6step', 'larry_v4_8step', 'lightx2v_4step_turbo']);
+  assert.deepEqual(H3_ALLOWED_LORA_IDS, ['lightx2v_turbo_lora', 'larry_v4_turbo_lora']);
   assert.deepEqual(H3_ALLOWED_ASPECT_RATIOS, ['16:9', '9:16', '1:1', '4:3', '3:4']);
 
   const health = await getH3Health({ baseUrl: 'https://h3-api.example.com/', fetchImpl });
@@ -185,6 +187,7 @@ async function main() {
     aspect_ratio: '9:16',
     duration_sec: 15,
     seed: -1,
+    lora_id: 'larry_v4_turbo_lora',
     first_frame: 'h3ref-first.png',
     last_frame: 'h3ref-last.png',
     metadata: { external_user_id: 'user_1' },
@@ -199,6 +202,12 @@ async function main() {
     aspect_ratio: '9:16',
     duration_sec: 15,
     seed: -1,
+    lora: {
+      node_type: 'MiniMaxH3TurboLoRA',
+      lora_name: 'minimax_h3_turbo_v4_step600_ema.safetensors',
+      strength: 1,
+      low_vram: false,
+    },
     first_frame: 'h3ref-first.png',
     last_frame: 'h3ref-last.png',
     metadata: { external_user_id: 'user_1' },
@@ -208,6 +217,16 @@ async function main() {
   assert.throws(() => buildH3GeneratePayload({ prompt: 'x', aspect_ratio: '21:9' }), /H3 比例只允许/);
   assert.throws(() => buildH3GeneratePayload({ prompt: 'x', duration_sec: 16 }), /H3 时长最多 15 秒/);
   assert.throws(() => buildH3GeneratePayload({ prompt: 'x', seed: 1.5 }), /H3 seed/);
+  assert.throws(() => buildH3GeneratePayload({ prompt: 'x', lora_id: 'unknown_lora' }), /H3 LoRA 只允许/);
+  assert.throws(() => buildH3GeneratePayload({
+    prompt: 'x',
+    lora: {
+      node_type: 'MiniMaxH3TurboLoRA',
+      lora_name: 'unknown.safetensors',
+      strength: 1,
+      low_vram: false,
+    },
+  }), /H3 LoRA 只允许/);
 
   const created = await createH3VideoJob(payload, {
     baseUrl: 'https://h3-api.example.com',
@@ -221,6 +240,12 @@ async function main() {
   assert.equal((calls.at(-1)?.init?.headers as Record<string, string>)['Idempotency-Key'], 'req-smoke-001');
   assert.equal(JSON.stringify(calls.at(-1)?.body).includes('width'), false);
   assert.equal(JSON.stringify(calls.at(-1)?.body).includes('height'), false);
+  assert.deepEqual((calls.at(-1)?.body as Record<string, unknown>).lora, {
+    node_type: 'MiniMaxH3TurboLoRA',
+    lora_name: 'minimax_h3_turbo_v4_step600_ema.safetensors',
+    strength: 1,
+    low_vram: false,
+  });
 
   const status = await getH3TaskStatus('h3-20260815-013000-abc12345', {
     baseUrl: 'https://h3-api.example.com',

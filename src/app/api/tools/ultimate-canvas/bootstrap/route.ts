@@ -395,6 +395,8 @@ export async function GET(request: NextRequest) {
             configured: h3VideoConfig.configured,
             model_options: h3VideoConfig.preset_options,
             default_model: h3VideoConfig.default_preset_id,
+            lora_options: h3VideoConfig.lora_options,
+            default_lora_id: h3VideoConfig.default_lora_id,
           },
         ],
         h3_video: {
@@ -402,7 +404,9 @@ export async function GET(request: NextRequest) {
           ready: h3VideoConfig.ready,
           configured: h3VideoConfig.configured,
           default_preset_id: h3VideoConfig.default_preset_id,
+          default_lora_id: h3VideoConfig.default_lora_id,
           preset_options: h3VideoConfig.preset_options,
+          lora_options: h3VideoConfig.lora_options,
           admin_queue_ready: h3VideoConfig.admin_queue_ready,
           health: h3VideoConfig.health
             ? {
@@ -439,6 +443,7 @@ export async function GET(request: NextRequest) {
           h3_notes: [
             '首帧和尾帧会由后端转交给 H3',
             '多余参考图、参考视频和音频第一版只作为可见上下文',
+            'H3 可通过 lora_id 选择 LoRA；未传时使用 default_lora_id',
           ],
           max_reference_images: 9,
         },

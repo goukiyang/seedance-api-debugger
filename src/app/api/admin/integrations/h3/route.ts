@@ -58,6 +58,7 @@ export async function PUT(request: NextRequest) {
           enabled: saved.enabled,
           base_url: saved.base_url,
           default_preset_id: saved.default_preset_id,
+          default_lora_id: saved.default_lora_id,
           api_token_configured: Boolean(saved.api_token),
           admin_token_configured: Boolean(saved.admin_token),
           api_token_changed: typeof body.api_token === 'string' && Boolean(body.api_token.trim()),
@@ -77,7 +78,7 @@ export async function PUT(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    if (error instanceof Error && (error.message.startsWith('H3 API 地址') || error.message.startsWith('H3 preset'))) {
+    if (error instanceof Error && (error.message.startsWith('H3 API 地址') || error.message.startsWith('H3 preset') || error.message.startsWith('H3 LoRA'))) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error('[Admin/H3Integration] PUT failed:', error);

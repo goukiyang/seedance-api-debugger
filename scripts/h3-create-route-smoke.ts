@@ -10,6 +10,9 @@ assert.match(routeSource, /requestedProvider === H3_VIDEO_PROVIDER/, '创建任�
 assert.match(routeSource, /requestedProvider === 'seedance' && !isApiKeyConfigured\(\)/, 'Seedance API Key 检查不能阻塞 H3');
 assert.match(routeSource, /getH3ApiSettings/, 'H3 任务必须读取后台 H3 配置');
 assert.match(routeSource, /isH3Operational/, 'H3 必须健康检查通过后才允许普通生成');
+assert.match(routeSource, /resolveH3LoraOption/, 'H3 任务必须用白名单解析 LoRA');
+assert.match(routeSource, /h3LoraOptionToPayload/, 'H3 任务必须把 lora_id 转成 provider payload');
+assert.match(routeSource, /typeof body\.lora_id === 'string'/, 'H3 任务必须支持 lora_id 请求字段');
 assert.match(routeSource, /createH3VideoJob/, 'H3 任务必须通过 H3 adapter 创建');
 assert.match(routeSource, /uploadH3ReferenceImagesForTask/, 'H3 首尾帧图片必须先转交给 H3');
 assert.match(routeSource, /appendH3VisibleContext/, 'H3 不支持的素材必须转成可见上下文');
@@ -20,6 +23,8 @@ assert.match(routeSource, /createH3VideoJob\(h3GeneratePayload,[\s\S]*idempotenc
 assert.match(routeSource, /step_key:\s*requestedProvider === H3_VIDEO_PROVIDER \? 'h3_submit' : 'seedance_submit'/, 'AgentRunStep 不能把 H3 写成 Seedance');
 assert.match(routeSource, /summary:\s*requestedProvider === H3_VIDEO_PROVIDER \? '任务已提交 H3，等待生成结果回写'/, '模板 Memory 不能把 H3 写成 Seedance');
 assert.match(routeSource, /providerResult\.provider_task_id/, 'H3 job_id 必须写回 provider_task_id');
+assert.match(routeSource, /lora_id:\s*selectedH3Lora\?\.id \|\| null/, 'H3 任务参数必须记录所选 LoRA');
+assert.match(routeSource, /lora:\s*selectedH3Lora \? h3LoraOptionToPayload\(selectedH3Lora\) : undefined/, 'H3 创建 payload 必须包含所选 LoRA');
 
 assert.match(h3AssetsSource, /fetchH3ReferenceImageBytes/, 'H3 图片转交必须从现有素材 URL 读取字节');
 assert.match(h3AssetsSource, /contentB64/, 'H3 图片转交必须上传 base64 内容');

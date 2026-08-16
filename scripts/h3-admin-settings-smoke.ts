@@ -5,6 +5,7 @@ import {
   DEFAULT_H3_API_SETTINGS,
   H3_API_SETTING_KEY,
   H3_DEFAULT_BASE_URL,
+  H3_DEFAULT_LORA_ID,
   H3_DEFAULT_PRESET_ID,
   H3_HEALTH_MAX_AGE_MS,
   buildH3ApiSettingsPatch,
@@ -25,17 +26,20 @@ const saved = buildH3ApiSettingsPatch(current, {
   api_token: 'secret-h3-user-token-1234567890',
   admin_token: 'secret-h3-admin-token-1234567890',
   default_preset_id: 'larry_v4_8step',
+  default_lora_id: 'larry_v4_turbo_lora',
 });
 
 assert.equal(H3_API_SETTING_KEY, 'h3_video_api_v1');
 assert.equal(H3_DEFAULT_BASE_URL, 'http://127.0.0.1:8893');
 assert.equal(H3_DEFAULT_PRESET_ID, 'larry_v4_6step');
+assert.equal(H3_DEFAULT_LORA_ID, 'lightx2v_turbo_lora');
 assert.equal(H3_HEALTH_MAX_AGE_MS, 15 * 60 * 1000);
 assert.equal(saved.enabled, true);
 assert.equal(saved.base_url, 'https://h3-api.example.com');
 assert.equal(saved.api_token, 'secret-h3-user-token-1234567890');
 assert.equal(saved.admin_token, 'secret-h3-admin-token-1234567890');
 assert.equal(saved.default_preset_id, 'larry_v4_8step');
+assert.equal(saved.default_lora_id, 'larry_v4_turbo_lora');
 assert.equal(isH3ApiReady(saved), true);
 assert.equal(isH3Operational(saved), false, '配置齐全但没健康检查时不能开放 H3');
 
@@ -51,6 +55,9 @@ assert.equal(dto.presets_path, '/api/h3/presets');
 assert.equal(dto.generate_path, '/api/h3/generate');
 assert.equal(dto.api_token_configured, true);
 assert.equal(dto.admin_token_configured, true);
+assert.equal(dto.default_lora_id, 'larry_v4_turbo_lora');
+assert.equal(dto.lora_options[0]?.id, 'lightx2v_turbo_lora');
+assert.equal(dto.lora_options[1]?.id, 'larry_v4_turbo_lora');
 assert.deepEqual(dto.missing, []);
 assert.equal(JSON.stringify(dto).includes('secret-h3-user-token'), false);
 assert.equal(JSON.stringify(dto).includes('secret-h3-admin-token'), false);
@@ -148,6 +155,8 @@ async function main() {
   assert.ok(publicConfigRouteSource.includes('getH3ApiSettings'));
   assert.ok(publicConfigRouteSource.includes('h3_video'));
   assert.ok(publicConfigRouteSource.includes('configured'));
+  assert.ok(publicConfigRouteSource.includes('default_lora_id'));
+  assert.ok(publicConfigRouteSource.includes('lora_options'));
   assert.ok(publicConfigRouteSource.includes('base_url_configured: Boolean(h3Config.base_url)'));
   assert.ok(publicConfigRouteSource.includes('health'));
   assert.ok(publicConfigRouteSource.includes('version: h3Config.health.version'));

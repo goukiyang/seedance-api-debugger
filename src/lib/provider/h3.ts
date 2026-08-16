@@ -3,17 +3,22 @@ import {
   H3_DEFAULT_PRESET_ID,
   H3_GENERATE_PATH,
   H3_HEALTH_PATH,
+  H3_LORA_OPTIONS,
   H3_PRESETS_PATH,
   H3_PRESET_OPTIONS,
   getH3ApiSettings,
   h3SettingsToRequestOptions,
   isH3PresetId,
+  resolveH3LoraPayload,
+  type H3LoraPayload,
   type H3PresetId,
+  validateH3LoraPayload,
 } from '@/lib/integrations/h3';
 import { buildH3DiagnosticSnapshot } from '@/lib/provider/h3-diagnostics';
 
 export const H3_VIDEO_PROVIDER = 'h3';
 export const H3_ALLOWED_PRESET_IDS = H3_PRESET_OPTIONS.map((option) => option.id);
+export const H3_ALLOWED_LORA_IDS = H3_LORA_OPTIONS.map((option) => option.id);
 export const H3_ALLOWED_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
 export const H3_INTERNAL_OUTPUT_SCHEME = 'h3-internal-output://';
 
@@ -35,6 +40,8 @@ export type H3GenerateInput = {
   aspect_ratio?: string;
   duration_sec?: number;
   seed?: number;
+  lora_id?: string | null;
+  lora?: H3LoraPayload | null;
   first_frame?: string | null;
   last_frame?: string | null;
   metadata?: Record<string, unknown>;
@@ -50,6 +57,7 @@ export type H3GeneratePayload = {
   aspect_ratio: H3AspectRatio;
   duration_sec: number;
   seed: number;
+  lora?: H3LoraPayload;
   first_frame?: string;
   last_frame?: string;
   metadata?: Record<string, unknown>;
@@ -290,6 +298,7 @@ export function buildH3GeneratePayload(input: H3GenerateInput): H3GeneratePayloa
   if (!Number.isSafeInteger(seed) || seed < -1) {
     throw new Error('H3 seed 只允许 -1 或安全整数');
   }
+  const lora = input.lora ? validateH3LoraPayload(input.lora) : resolveH3LoraPayload(input.lora_id);
 
   const payload: H3GeneratePayload = {
     preset_id: presetId,
@@ -297,6 +306,7 @@ export function buildH3GeneratePayload(input: H3GenerateInput): H3GeneratePayloa
     aspect_ratio: aspectRatio as H3AspectRatio,
     duration_sec: Math.floor(durationSec),
     seed,
+    lora,
   };
   const audioPrompt = cleanOptionalString(input.audio_prompt);
   const musicPrompt = cleanOptionalString(input.music_prompt);
