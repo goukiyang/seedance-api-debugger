@@ -484,8 +484,8 @@
   - 停止条件：仍然 `Permission denied (publickey)` 时不继续部署、不绕过到服务器 `.git pull`、不改生产文件。
 
 - [ ] T27. 部署当前 Git 版本到服务器候选构建
-  - 当前目标 commit：`18433d47ac121f984c9b108f9ad76c0a19ad107e`。
-  - 代码变更基线：T21/T22 代码到 `ae3b86e5808ed009dd45089495bcd000deccb1d3`；部署目标采用当前远端 HEAD `18433d47ac121f984c9b108f9ad76c0a19ad107e`，避免漏掉计划、脚本和审查记录。
+  - 部署目标确认方式：执行部署前必须重新读取 `git rev-parse HEAD` 和 `git ls-remote --heads origin codex/video-delivery-fast-path`，两者一致后才把该 HEAD 作为部署目标写入执行回执；不要从本节复制历史提交号作为固定目标。
+  - 代码变更基线：T21/T22 代码到 `ae3b86e5808ed009dd45089495bcd000deccb1d3`；后续闭环计划修正也必须随最新远端 HEAD 一起部署，避免漏掉计划、脚本和审查记录。
   - 当前 rollback tag：`rollback/2026-08-16-before-h3-workspace-diagnostics`，指向 `88797a164291f6bcd594c3f9282c956ce6b35d79`。
   - 具体做法：本地 `git archive` 当前 commit，上传到服务器 `/tmp`，解压到 `/srv/video-api-debugger/releases/<commit>`，用 `rsync -a --delete` 同步到 `/srv/video-api-debugger/app`。
   - 排除项：必须排除 `.env`、`node_modules`、`.next`、`.next-prod*`、`storage`、`public/uploads`、`prisma/dev.db*`，避免覆盖生产密钥、上传素材、视频文件和数据库。
