@@ -478,14 +478,14 @@
 - [ ] T26. 恢复服务器 SSH 登录
   - 检查对象：本机 `~/.ssh/codex_gouki_42_193_221_253.pub`、服务器 `gouki` 用户的 `~/.ssh/authorized_keys`、腾讯云控制台/VNC/已有管理员通道。
   - 具体做法：把当前本机公钥重新加入服务器 `gouki` 用户 authorized_keys；或者提供新的可用部署 key；或者由有权限的人临时恢复 `gouki@42.193.221.253` SSH 登录。
-  - 服务器侧校验：确认 `/home/gouki/.ssh` 属主为 `gouki`、权限为 `700`，`authorized_keys` 属主为 `gouki`、权限为 `600`，`sshd` 允许公钥登录；如 SSH 不通，只能通过腾讯云控制台/VNC/既有管理员通道修复，不在聊天里传密码。
+  - 服务器侧校验：确认 `/home/gouki/.ssh` 属主为 `gouki`、权限为 `700`，`authorized_keys` 属主为 `gouki`、权限为 `600`，`sshd` 允许公钥登录；建议用 `sshd -T | grep -i '^pubkeyauthentication'` 或等价只读命令留证；如 SSH 不通，只能通过腾讯云控制台/VNC/既有管理员通道修复，不在聊天里传密码。
   - 验证命令：`ssh -i ~/.ssh/codex_gouki_42_193_221_253 -o BatchMode=yes gouki@42.193.221.253 'echo ok'`。
   - 完成标准：返回 `ok`；不得要求或暴露服务器密码、token、cookie。
   - 停止条件：仍然 `Permission denied (publickey)` 时不继续部署、不绕过到服务器 `.git pull`、不改生产文件。
 
 - [ ] T27. 部署当前 Git 版本到服务器候选构建
-  - 当前目标 commit：`da571c92015b0de06d8ffd608fd476cb5cf3cf5b`。
-  - 代码变更基线：T21/T22 代码到 `ae3b86e5808ed009dd45089495bcd000deccb1d3`；部署目标采用当前远端 HEAD `da571c92015b0de06d8ffd608fd476cb5cf3cf5b`，避免漏掉计划、脚本和审查记录。
+  - 当前目标 commit：`18433d47ac121f984c9b108f9ad76c0a19ad107e`。
+  - 代码变更基线：T21/T22 代码到 `ae3b86e5808ed009dd45089495bcd000deccb1d3`；部署目标采用当前远端 HEAD `18433d47ac121f984c9b108f9ad76c0a19ad107e`，避免漏掉计划、脚本和审查记录。
   - 当前 rollback tag：`rollback/2026-08-16-before-h3-workspace-diagnostics`，指向 `88797a164291f6bcd594c3f9282c956ce6b35d79`。
   - 具体做法：本地 `git archive` 当前 commit，上传到服务器 `/tmp`，解压到 `/srv/video-api-debugger/releases/<commit>`，用 `rsync -a --delete` 同步到 `/srv/video-api-debugger/app`。
   - 排除项：必须排除 `.env`、`node_modules`、`.next`、`.next-prod*`、`storage`、`public/uploads`、`prisma/dev.db*`，避免覆盖生产密钥、上传素材、视频文件和数据库。
