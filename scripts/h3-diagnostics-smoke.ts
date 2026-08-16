@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildH3DiagnosticSnapshot } from '../src/lib/provider/h3-diagnostics';
 
-const longHexToken = '4cdab586cc6848b54431e0506b338fdd9646cb191a9c147cb26a1cab8890eb6b';
+const longHexToken = 'a'.repeat(64);
 
 const diagnostic = buildH3DiagnosticSnapshot({
   phase: 'create_failed',
