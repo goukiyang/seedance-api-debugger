@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [ ] 2026-08-16：任务卡片缩略图可靠显示修复，正文见 `tasks/todo/2026-08-16-reliable-task-thumbnails.md`。
 - [ ] 2026-08-15：视频截图稳定固化与历史补偿，正文见 `tasks/todo/2026-08-15-stable-video-thumbnails.md`。
 - [ ] 2026-08-15：H3 API 接入现有视频生成链路，正文见 `tasks/todo/2026-08-15-h3-api-integration.md`。
 - [ ] 2026-08-13：Seedance 2.5 视频模型线上接入规划，正文见 `tasks/todo/2026-08-13-seedance-25-video-model.md`。
@@ -33,4 +34,5 @@
 - `tasks/todo/2026-08-13-seedance-25-video-model.md`：Seedance 2.5 视频模型线上接入规划
 - `tasks/todo/2026-08-15-h3-api-integration.md`：H3 API 接入现有视频生成链路
 - `tasks/todo/2026-08-15-stable-video-thumbnails.md`：视频截图稳定固化与历史补偿
+- `tasks/todo/2026-08-16-reliable-task-thumbnails.md`：任务卡片缩略图可靠显示修复
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环

@@ -1,0 +1,153 @@
+# 任务卡片缩略图可靠显示修复
+
+## 1. 大白话目标复述
+
+这次要解决的是：普通生成页、任务列表、后台、项目页、视频卡页、超分入口里，同一个“任务视频缩略图”不能因为一次加载失败、H3 暂无输出、稳定下载还在准备，就一直显示成没图。
+
+最优解不是新增一个图片库，也不是每个页面单独补丁；而是把任务缩略图做成一个可靠的小组件：能读接口返回的 `thumbnail_url`，能根据任务状态显示正确文案，失败后按任务状态自动重试，数据变化后自动恢复。模板生成页里独立写的预览逻辑也要并回同一套规则。
+
+做到完成的标准：
+
+- H3 排队、生成中、失败、无输出时，卡片显示清楚状态，不误导成“缩略图坏了”。
+- Seedance/H3 任务从生成中变成有视频源后，不刷新页面也能自动出现缩略图。
+- 缩略图接口早期 404 或抽帧短暂失败，不会把卡片永久锁死成占位。
+- 普通生成页、任务列表、后台、项目页、视频卡页、超分入口共用同一个缩略图行为。
+- 模板生成页不再维护另一套 `failedSrcs` 预览失败逻辑。
+- 不新增重型依赖；只借鉴开源图片库的“有限重试、备用源、状态重置”模式。
+
+本轮开源取舍：
+
+| 候选 | 结论 | 原因 |
+| --- | --- | --- |
+| `react-graceful-image` | 不直接引入，借鉴有限重试思路 | 能处理图片失败重试，但不知道我们的任务状态、H3 队列和稳定下载阶段。 |
+| `react-image` | 不直接引入 | 支持备用源，但失败源页面内不重试，不适合异步生成缩略图。 |
+| `@rc-component/image` | 不直接引入 | 偏图片预览器，依赖和 UI 行为偏重。 |
+| SWR / TanStack Query | 不直接引入 | 数据轮询能力强，但为一个缩略图组件接数据层过重。 |
+| `fluent-ffmpeg` | 不使用 | npm 已标记不再维护；现有 `ffmpeg` 命令已经能抽帧。 |
+
+## 2. 具体可执行任务
+
+- [ ] T1. 扩展统一任务缩略图组件入参
+  - 修改对象：`src/components/TaskVideoThumbnail.tsx`。
+  - 要做什么：新增 `thumbnailUrl`、`deliveryStage`、`previewAvailable`、`stableDownloadReady`、`retryAfterMs` 入参；保留现有调用兼容。
+  - 完成标准：旧调用不报错，新调用能优先使用接口返回的 `thumbnail_url`。
+
+- [ ] T2. 实现状态变化自动恢复
+  - 修改对象：`src/components/TaskVideoThumbnail.tsx`。
+  - 要做什么：当 `taskId`、`thumbnailUrl`、`publicVideoUrl`、`localVideoPath`、`resultVideoUrl`、`resultLastFrameUrl`、`deliveryStage`、`stableDownloadReady` 变化时，清空失败状态并重新加载。
+  - 完成标准：任务从 `submitted/running/preparing` 变成可预览后，卡片不用刷新页面也会重试缩略图。
+
+- [ ] T3. 实现有限重试和退避
+  - 修改对象：`src/components/TaskVideoThumbnail.tsx`。
+  - 要做什么：图片 `onError` 后最多重试 3 次；优先使用 `retryAfterMs`，否则用 2s、4s、8s；重试时给 URL 加轻量 cache bust 参数，例如 `?retry=1`。
+  - 完成标准：接口短暂 404/抽帧延迟不会永久失败；真正没有源或最终失败不会无限请求。
+
+- [ ] T4. 改清楚占位文案
+  - 修改对象：`src/components/TaskVideoThumbnail.tsx`、必要 CSS。
+  - 要做什么：把单一“暂无截图”拆成 `排队中`、`生成中`、`正在准备预览`、`视频未产出`、`失败`、`暂无截图`。
+  - 完成标准：最近任务顶部 H3 失败/排队任务不会让用户误以为系统缩略图整体坏了。
+
+- [ ] T5. 普通生成页使用接口返回的缩略图字段
+  - 修改对象：`src/components/generate/GeneratePageClient.tsx`。
+  - 要做什么：调用 `TaskVideoThumbnail` 时传入 `task.thumbnail_url`、`delivery_stage`、`preview_available`、`stable_download_ready`、`retry_after_ms`。
+  - 完成标准：`/api/video/list` 或 `/api/video/status/[id]` 返回缩略图字段后，普通生成页卡片立即消费。
+
+- [ ] T6. 覆盖所有复用入口
+  - 修改对象：
+    - `src/app/tasks/page.tsx`
+    - `src/app/admin/outputs/AdminOutputsClient.tsx`
+    - `src/app/admin/costs/page.tsx`
+    - `src/app/admin/AdminGenerationDashboardClient.tsx`
+    - `src/app/projects/[id]/page.tsx`
+    - `src/app/projects/[id]/video-cards/[cardId]/page.tsx`
+    - `src/components/generate/EnhanceVideoPageClient.tsx`
+  - 要做什么：只补传已有字段，不重写各页 UI。
+  - 完成标准：所有复用 `TaskVideoThumbnail` 的入口状态和重试行为一致。
+
+- [ ] T7. 模板生成页删除独立失败逻辑
+  - 修改对象：`src/components/templates/TemplateGenerateClient.tsx`。
+  - 要做什么：移除 `TemplateTaskPreview` 中独立的 `failedSrcs` 缩略图逻辑，改为复用 `TaskVideoThumbnail`。
+  - 完成标准：模板生成页和普通生成页同一任务显示一致。
+
+- [ ] T8. 保持服务端轻改，不新增库
+  - 检查对象：
+    - `src/app/api/video/list/route.ts`
+    - `src/app/api/video/status/[id]/route.ts`
+    - `src/app/api/video/thumbnail/[id]/route.ts`
+    - `src/lib/video/thumbnail-availability.ts`
+  - 要做什么：确认 `thumbnail_url`、`delivery_stage`、`preview_available`、`stable_download_ready`、`retry_after_ms` 已返回；如果缺字段只补序列化，不改数据库。
+  - 完成标准：前端所需状态字段都来自 API，不靠页面私自猜。
+
+- [ ] T9. 增加最小 smoke 测试
+  - 新增或修改对象：`scripts/task-video-thumbnail-state-smoke.ts`。
+  - 要做什么：用纯函数/轻量渲染模型验证这些场景：
+    - submitted 显示排队中，不请求缩略图。
+    - running 显示生成中，不永久失败。
+    - succeeded + preparing + retry_after_ms 会重试。
+    - succeeded + thumbnail_url 使用接口 URL。
+    - failed 显示失败，不无限重试。
+    - source 变化后失败状态清空。
+  - 完成标准：`npx tsx scripts/task-video-thumbnail-state-smoke.ts` 通过。
+
+- [ ] T10. 真实生产数据只读抽样验证
+  - 检查对象：生产服务器 Prisma 只读抽样、公开视频 HEAD、ffmpeg 抽帧 smoke。
+  - 要做什么：不打印 token 和视频 URL，只输出布尔值、状态码、content-type、文件是否存在。
+  - 完成标准：能区分“任务没有输出源”和“有源但前端没重试”。
+
+- [ ] T11. 本地验证和构建
+  - 命令：
+    - `npm run lint`
+    - `npm run build`
+    - `npx tsx scripts/task-video-thumbnail-state-smoke.ts`
+  - 完成标准：全部通过；如失败，先修根因，不带失败提交。
+
+- [ ] T12. 上线闭环
+  - 执行对象：按项目 `AGENTS.md` 的 sd2 服务器生产托管规则。
+  - 要做什么：形成聚焦 commit、rollback tag、归档上传、服务器 candidate build、切换 `.next-prod`、重启 `sd2-gray.service`、公网验证。
+  - 完成标准：`https://sd2.youdooart.com/generate` 登录态刷新后，最近任务卡片状态正确；成功任务缩略图可恢复显示。
+
+## 3. 验收/审查内容
+
+这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
+
+- [ ] R1. 组件行为只读审查
+  - 检查对象：`src/components/TaskVideoThumbnail.tsx`。
+  - 通过标准：失败状态会随任务/源/投递状态变化清空；重试有限；不会无限打接口。
+  - 证据来源：源码、smoke 输出。
+
+- [ ] R2. 调用入口只读审查
+  - 检查对象：所有 `TaskVideoThumbnail` 调用处，以及模板生成页。
+  - 通过标准：没有遗漏核心入口；模板生成页没有保留冲突的独立失败逻辑。
+  - 证据来源：`rg "TaskVideoThumbnail|failedSrcs|thumbnail_url"` 搜索结果。
+
+- [ ] R3. API 字段只读审查
+  - 检查对象：`/api/video/list`、`/api/video/status/[id]`。
+  - 通过标准：前端需要的 `thumbnail_url`、`delivery_stage`、`preview_available`、`stable_download_ready`、`retry_after_ms` 都可用。
+  - 证据来源：源码、接口抽样响应。
+
+- [ ] R4. 真实页面只读审查
+  - 检查对象：`https://sd2.youdooart.com/generate`、`/tasks`、后台最近生成或产出页。
+  - 通过标准：H3 无输出任务显示真实状态；Seedance 成功任务能显示/恢复缩略图；刷新后行为一致。
+  - 证据来源：登录态浏览器截图、DOM、网络请求。
+
+- [ ] R5. 部署闭环只读审查
+  - 检查对象：Git commit/push、rollback tag、服务器 `.next-prod/BUILD_ID`、公网 `/api/config`、目标页面静态资源。
+  - 通过标准：远端可回档，服务器加载新构建，公网入口不是旧缓存。
+  - 证据来源：Git、SSH、公网 curl、浏览器验证。
+
+## 4. 审查内容是否对齐目标
+
+- [ ] A1. R1 是否对齐根因
+  - 判断：不能只看能不能显示图片；必须证明“失败后不重试”的根因已消除。
+
+- [ ] A2. R2 是否覆盖系统同类问题
+  - 判断：不能只改普通生成页；所有复用入口和模板生成页都要纳入。
+
+- [ ] A3. R3 是否避免前端私自猜状态
+  - 判断：前端状态必须来自 API 字段，不能又在页面散写判断。
+
+- [ ] A4. R4 是否符合用户真实体验
+  - 判断：必须看真实页面，不把源码检查当成用户可见完成。
+
+- [ ] A5. R5 是否符合上线闭环
+  - 判断：本地 build、commit 或服务器 active 都不能单独当完成，必须证明公网加载新版本。
