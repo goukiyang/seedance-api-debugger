@@ -15,6 +15,7 @@ import {
   findSimilarVideoCards,
   getVideoCardArchiveAnomalies,
 } from '@/lib/video-cards/suggestions';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,20 +32,28 @@ function asOptionalNumber(value: unknown) {
 function serializeTaskPreview(task: null | {
   id: string;
   prompt: string;
+  provider?: string | null;
+  generation_mode?: string | null;
   local_status: string;
   public_video_url: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
+  result_last_frame_url?: string | null;
+  delivery_status?: string | null;
   created_at: Date;
 }) {
   if (!task) return null;
   return {
     id: task.id,
     prompt: task.prompt,
+    provider: task.provider ?? null,
+    generation_mode: task.generation_mode ?? null,
     local_status: task.local_status,
     public_video_url: task.public_video_url,
     local_video_path: task.local_video_path,
     result_video_url: task.result_video_url,
+    result_last_frame_url: task.result_last_frame_url ?? null,
+    ...taskThumbnailProjection(task),
     created_at: task.created_at,
   };
 }
@@ -121,11 +130,11 @@ export async function GET(
       orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        current_best_task: {
-          select: { id: true, prompt: true, local_status: true, public_video_url: true, local_video_path: true, result_video_url: true, created_at: true },
+      current_best_task: {
+          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, local_status: true, public_video_url: true, local_video_path: true, result_video_url: true, created_at: true },
+          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
@@ -229,11 +238,11 @@ export async function POST(
       },
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        current_best_task: {
-          select: { id: true, prompt: true, local_status: true, public_video_url: true, local_video_path: true, result_video_url: true, created_at: true },
+      current_best_task: {
+          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, local_status: true, public_video_url: true, local_video_path: true, result_video_url: true, created_at: true },
+          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });

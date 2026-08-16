@@ -7,6 +7,7 @@ import {
   safeVolcengineIpUserMessage,
 } from '@/lib/provider/volcengine-ip';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +47,7 @@ function serializeTaskForIpStatus<T extends {
   frame_image_urls?: string | null;
   local_status: string;
   provider_status: string | null;
+  delivery_status?: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
@@ -96,6 +98,11 @@ function serializeTaskForIpStatus<T extends {
     frame_image_urls: task.frame_image_urls ?? null,
     local_status: task.local_status,
     provider_status: task.provider_status,
+    ...taskThumbnailProjection({
+      ...task,
+      result_video_url: null,
+      result_last_frame_url: null,
+    }),
     result_video_url: null,
     result_last_frame_url: null,
     local_video_path: task.local_video_path,

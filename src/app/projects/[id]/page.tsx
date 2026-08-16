@@ -50,6 +50,11 @@ interface TaskItem {
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   local_video_path?: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   owner_user_id: string | null;
   user_id: string | null;
   estimated_cost: number | null;
@@ -91,6 +96,11 @@ interface VideoCardPreviewTask {
   local_video_path: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   created_at: string;
 }
 
@@ -193,6 +203,11 @@ interface ReviewTaskItem {
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   local_video_path?: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   created_at: string;
   owner?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   user?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
@@ -967,11 +982,16 @@ export default function ProjectDetailPage() {
 	                    <td>
 	                      <TaskVideoThumbnail
 	                        taskId={task.id}
+	                        thumbnailUrl={task.thumbnail_url}
 	                        publicVideoUrl={task.public_video_url}
 	                        localVideoPath={task.local_video_path}
 	                        resultVideoUrl={task.result_video_url}
 	                        resultLastFrameUrl={task.result_last_frame_url}
 	                        status={task.local_status}
+	                        deliveryStage={task.delivery_stage}
+	                        previewAvailable={task.preview_available}
+	                        stableDownloadReady={task.stable_download_ready}
+	                        retryAfterMs={task.retry_after_ms}
 	                        isEnhanceTask={isEnhanceTask(task)}
 	                        href={taskDetailHref(task.id, projectReturnTo)}
 	                        size="compact"
@@ -1028,11 +1048,16 @@ export default function ProjectDetailPage() {
 	                        {task ? (
 	                          <TaskVideoThumbnail
 	                            taskId={task.id}
+	                            thumbnailUrl={task.thumbnail_url}
 	                            publicVideoUrl={task.public_video_url}
 	                            localVideoPath={task.local_video_path}
 	                            resultVideoUrl={task.result_video_url}
 	                            resultLastFrameUrl={task.result_last_frame_url}
 	                            status={task.local_status}
+	                            deliveryStage={task.delivery_stage}
+	                            previewAvailable={task.preview_available}
+	                            stableDownloadReady={task.stable_download_ready}
+	                            retryAfterMs={task.retry_after_ms}
 	                            isEnhanceTask={isEnhanceTask(task)}
 	                            href={taskDetailHref(task.id, projectReturnTo)}
 	                            size="compact"
@@ -1121,11 +1146,16 @@ export default function ProjectDetailPage() {
 	                  <td>
 	                    <TaskVideoThumbnail
 	                      taskId={task.id}
+	                      thumbnailUrl={task.thumbnail_url}
 	                      publicVideoUrl={task.public_video_url}
 	                      localVideoPath={task.local_video_path}
 	                      resultVideoUrl={task.result_video_url}
 	                      resultLastFrameUrl={task.result_last_frame_url}
 	                      status={task.local_status}
+	                      deliveryStage={task.delivery_stage}
+	                      previewAvailable={task.preview_available}
+	                      stableDownloadReady={task.stable_download_ready}
+	                      retryAfterMs={task.retry_after_ms}
 	                      isEnhanceTask={isEnhanceTask(task)}
 	                      href={taskDetailHref(task.id, projectReturnTo)}
 	                      size="compact"

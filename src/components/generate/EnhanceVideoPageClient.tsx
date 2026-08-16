@@ -17,6 +17,11 @@ type EnhanceTaskCandidate = {
   result_last_frame_url: string | null;
   local_video_path: string | null;
   public_video_url?: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   duration: number | null;
   resolution: string | null;
   created_at: string;
@@ -176,11 +181,16 @@ export default function EnhanceVideoPageClient() {
               <article className="enhance-video-card" key={task.id}>
                 <TaskVideoThumbnail
                   taskId={task.id}
+                  thumbnailUrl={task.thumbnail_url}
                   publicVideoUrl={task.public_video_url}
                   localVideoPath={task.local_video_path}
                   resultVideoUrl={task.result_video_url}
                   resultLastFrameUrl={task.result_last_frame_url}
                   status={task.local_status}
+                  deliveryStage={task.delivery_stage}
+                  previewAvailable={task.preview_available}
+                  stableDownloadReady={task.stable_download_ready}
+                  retryAfterMs={task.retry_after_ms}
                   provider={task.provider}
                   generationMode={task.generation_mode}
                   href={taskDetailHref(task.id, '/generate/enhance')}

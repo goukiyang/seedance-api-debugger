@@ -31,6 +31,11 @@ interface Task {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   error_message: string | null;
   estimated_cost: number | null;
   actual_cost: number | null;
@@ -359,11 +364,16 @@ export default function TasksPage() {
                     <div className="tasks-preview-cell">
                       <TaskVideoThumbnail
                         taskId={task.id}
+                        thumbnailUrl={task.thumbnail_url}
                         publicVideoUrl={task.public_video_url}
                         localVideoPath={task.local_video_path}
                         resultVideoUrl={task.result_video_url}
                         resultLastFrameUrl={task.result_last_frame_url}
                         status={task.local_status}
+                        deliveryStage={task.delivery_stage}
+                        previewAvailable={task.preview_available}
+                        stableDownloadReady={task.stable_download_ready}
+                        retryAfterMs={task.retry_after_ms}
                         provider={task.provider}
                         generationMode={task.generation_mode}
                         href={taskDetailHref(task.id, '/tasks')}

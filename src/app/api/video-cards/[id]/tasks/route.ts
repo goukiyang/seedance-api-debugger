@@ -5,6 +5,7 @@ import { AuthError } from '@/lib/auth/session';
 import { assertCanManageVideoCard, assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { moveTasksBetweenVideoCards } from '@/lib/video-cards/workflow';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,6 +55,7 @@ export async function GET(
           duration: true,
           resolution: true,
           local_status: true,
+          delivery_status: true,
           public_video_url: true,
           result_video_url: true,
           result_last_frame_url: true,
@@ -85,7 +87,10 @@ export async function GET(
     ]);
 
     return NextResponse.json({
-      tasks,
+      tasks: tasks.map((task) => ({
+        ...task,
+        ...taskThumbnailProjection(task),
+      })),
       pagination: {
         page,
         limit,

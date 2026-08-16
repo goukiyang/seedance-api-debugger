@@ -7,6 +7,7 @@ import { Check, ChevronDown, Folder, Plus } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import {
   H3_AUTO_CHECK_MIN_GAP_MS,
   buildH3MachineStatus,
@@ -82,6 +83,8 @@ type VideoCardOption = {
 type TaskItem = {
   id: string;
   prompt: string;
+  provider: string;
+  generation_mode: string;
   local_status: string;
   public_video_url: string | null;
   result_video_url: string | null;
@@ -108,11 +111,6 @@ type TaskItem = {
   prompt_user_edited?: boolean;
   generation_template?: { id: string; name: string; template_key: string; version: string } | null;
   created_at: string;
-};
-
-type TaskPreviewModel = {
-  kind: 'image' | 'empty';
-  src?: string;
 };
 
 const PROJECT_STORAGE_KEY = 'template_generate_project_id';
@@ -201,13 +199,6 @@ function truncatePrompt(prompt: string, maxLen = 64): string {
   return clean.length > maxLen ? `${clean.slice(0, maxLen)}...` : clean;
 }
 
-function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPreviewModel {
-  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
-  const hasThumbnailSource = Boolean(task.local_video_path || task.public_video_url || task.result_video_url || task.result_last_frame_url);
-  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) return { kind: 'image', src: thumbnailSrc };
-  return { kind: 'empty' };
-}
-
 function readRememberedVideoCards(): Record<string, string> {
   if (typeof window === 'undefined') return {};
   try {
@@ -224,25 +215,6 @@ function rememberVideoCard(projectId: string, videoCardId: string) {
     ...readRememberedVideoCards(),
     [projectId]: videoCardId,
   }));
-}
-
-function TemplateTaskPreview({ task }: { task: TaskItem }) {
-  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
-  const preview = getRecentTaskPreview(task, failedSrcs);
-  return (
-    <div className={`composer-task-card-preview composer-task-card-preview-${preview.kind}`}>
-      {preview.kind === 'image' && preview.src ? (
-        <img
-          src={preview.src}
-          alt="任务截图"
-          loading="lazy"
-          onError={() => setFailedSrcs((current) => preview.src && !current.includes(preview.src) ? [...current, preview.src] : current)}
-        />
-      ) : (
-        <span>暂无截图</span>
-      )}
-    </div>
-  );
 }
 
 export function TemplateGenerateClient() {
@@ -884,6 +856,8 @@ export function TemplateGenerateClient() {
         {
           id: data.id,
           prompt: params.prompt,
+          provider: requestedProvider,
+          generation_mode: params.generationMode,
           local_status: data.status || 'submitted',
           public_video_url: null,
           result_video_url: null,
@@ -1161,7 +1135,23 @@ export function TemplateGenerateClient() {
                   return (
                     <article key={task.id} className="composer-task-card">
                       <Link href={taskDetailHref(task.id, '/template-generate')} className="composer-task-card-link">
-                        <TemplateTaskPreview task={task} />
+                        <TaskVideoThumbnail
+                          taskId={task.id}
+                          thumbnailUrl={task.thumbnail_url}
+                          publicVideoUrl={task.public_video_url}
+                          localVideoPath={task.local_video_path}
+                          resultVideoUrl={task.result_video_url}
+                          resultLastFrameUrl={task.result_last_frame_url}
+                          status={task.local_status}
+                          deliveryStage={task.delivery_stage}
+                          previewAvailable={task.preview_available}
+                          stableDownloadReady={task.stable_download_ready}
+                          retryAfterMs={task.retry_after_ms}
+                          provider={task.provider}
+                          generationMode={task.generation_mode}
+                          size="card"
+                          className="composer-task-card-preview"
+                        />
                         <div className="composer-task-card-body">
                           <div className="composer-task-card-prompt" title={`${formatAbsoluteTime(task.created_at)} · ${task.prompt}`}>
                             <time className="composer-task-card-prompt-time" dateTime={task.created_at}>

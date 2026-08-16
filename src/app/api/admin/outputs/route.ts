@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { prisma } from '@/lib/prisma';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -148,6 +149,7 @@ export async function GET(request: NextRequest) {
           source_label: true,
           source_request_id: true,
           local_status: true,
+          delivery_status: true,
           provider_task_id: true,
           provider_status: true,
           model: true,
@@ -213,6 +215,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       outputs: tasks.map((task) => ({
         ...task,
+        ...taskThumbnailProjection(task),
         is_enhance_task: task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit',
         owner: userSummary(task.owner || task.user),
         submitted_user: userSummary(task.user),

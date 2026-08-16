@@ -7,6 +7,7 @@ import { getProjectBudgetSummary } from '@/lib/projects/budget';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
 import { getVideoCardArchiveAnomalies } from '@/lib/video-cards/suggestions';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,7 @@ function serializeTaskPreview(task: null | {
   provider: string;
   generation_mode: string;
   local_status: string;
+  delivery_status?: string | null;
   public_video_url: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
@@ -62,6 +64,7 @@ function serializeTaskPreview(task: null | {
     provider: task.provider,
     generation_mode: task.generation_mode,
     local_status: task.local_status,
+    ...taskThumbnailProjection(task),
     public_video_url: task.public_video_url,
     local_video_path: task.local_video_path,
     result_video_url: task.result_video_url,
@@ -135,6 +138,7 @@ export async function GET(
         provider: true,
         generation_mode: true,
         local_status: true,
+        delivery_status: true,
         provider_task_id: true,
         public_video_url: true,
         result_video_url: true,
@@ -167,10 +171,10 @@ export async function GET(
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         current_best_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
@@ -287,6 +291,7 @@ export async function GET(
               provider: true,
               generation_mode: true,
               local_status: true,
+              delivery_status: true,
               provider_task_id: true,
               public_video_url: true,
               result_video_url: true,
@@ -338,6 +343,7 @@ export async function GET(
           provider: true,
           generation_mode: true,
           local_status: true,
+          delivery_status: true,
           estimated_cost: true,
           actual_cost: true,
           provider_cost_status: true,
@@ -360,6 +366,7 @@ export async function GET(
           provider: true,
           generation_mode: true,
           local_status: true,
+          delivery_status: true,
           error_message: true,
           estimated_cost: true,
           refund_amount: true,
@@ -382,6 +389,25 @@ export async function GET(
       archiveAnomalies: await getVideoCardArchiveAnomalies(tx, params.id),
     }));
     const primaryOfficialCost = officialCostTotals[0] || null;
+    const projectedTasks = tasks.map((task) => ({
+      ...task,
+      ...taskThumbnailProjection(task),
+    }));
+    const projectedHighCostTasks = highCostTasks.map((task) => ({
+      ...task,
+      ...taskThumbnailProjection(task),
+    }));
+    const projectedFailedTasks = failedTasks.map((task) => ({
+      ...task,
+      ...taskThumbnailProjection(task),
+    }));
+    const projectedCostLedgers = costLedgers.map((ledger) => ({
+      ...ledger,
+      task: ledger.task ? {
+        ...ledger.task,
+        ...taskThumbnailProjection(ledger.task),
+      } : null,
+    }));
     const reviewSummary = {
       task_count: taskCount,
       succeeded_count: succeededCount,
@@ -397,8 +423,8 @@ export async function GET(
       official_cost_totals: officialCostTotals,
       official_pending_count: officialPendingCount,
       cost_unknown_count: costUnknownCount,
-      high_cost_tasks: highCostTasks,
-      failed_tasks: failedTasks,
+      high_cost_tasks: projectedHighCostTasks,
+      failed_tasks: projectedFailedTasks,
     };
 
     return NextResponse.json({
@@ -434,8 +460,8 @@ export async function GET(
           summary: summary ? serializeVideoCardSummary(summary) : null,
         };
       }),
-      tasks,
-      cost_ledgers: costLedgers,
+      tasks: projectedTasks,
+      cost_ledgers: projectedCostLedgers,
       budget: budgetSummary,
       archive_anomalies: archiveAnomalies,
       review_summary: reviewSummary,

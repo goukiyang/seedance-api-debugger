@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
 import { displayUserName } from '@/lib/users/display';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export type DashboardRangeKey = 'all' | '7d' | '30d' | 'month' | 'custom';
 export type DashboardResolutionKey = '480p' | '720p' | '1080p' | 'unknown';
@@ -111,6 +112,11 @@ export type DashboardRecentTask = {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage: ReturnType<typeof taskThumbnailProjection>['delivery_stage'];
+  stable_download_ready: boolean;
+  preview_available: boolean;
+  thumbnail_url: string | null;
+  retry_after_ms: number | null;
   official_amount_micros: number | null;
   official_amount_minor: number | null;
   official_currency: string | null;
@@ -496,6 +502,7 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       source_type: true,
       source_label: true,
       local_status: true,
+      delivery_status: true,
       provider: true,
       generation_mode: true,
       provider_task_id: true,
@@ -933,6 +940,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       result_video_url: task.result_video_url,
       result_last_frame_url: task.result_last_frame_url,
       local_video_path: task.local_video_path,
+      ...taskThumbnailProjection(task),
       official_amount_micros: task.provider_official_amount_micros,
       official_amount_minor: task.provider_official_amount_minor,
       official_currency: task.provider_cost_currency,

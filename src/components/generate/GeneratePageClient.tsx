@@ -2063,11 +2063,16 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                       <Link href={taskDetailHref(task.id, surfaceConfig.routePath)} className="composer-task-card-link">
 	                        <TaskVideoThumbnail
 	                          taskId={task.id}
+	                          thumbnailUrl={task.thumbnail_url}
 	                          publicVideoUrl={task.public_video_url}
 	                          localVideoPath={task.local_video_path}
 	                          resultVideoUrl={task.result_video_url}
 	                          resultLastFrameUrl={task.result_last_frame_url}
 	                          status={task.local_status}
+	                          deliveryStage={task.delivery_stage}
+	                          previewAvailable={task.preview_available}
+	                          stableDownloadReady={task.stable_download_ready}
+	                          retryAfterMs={task.retry_after_ms}
 	                          provider={task.provider}
 	                          generationMode={task.generation_mode}
 	                          size="card"

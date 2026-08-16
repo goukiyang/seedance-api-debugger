@@ -27,33 +27,33 @@
 
 ## 2. 具体可执行任务
 
-- [ ] T1. 扩展统一任务缩略图组件入参
+- [x] T1. 扩展统一任务缩略图组件入参
   - 修改对象：`src/components/TaskVideoThumbnail.tsx`。
   - 要做什么：新增 `thumbnailUrl`、`deliveryStage`、`previewAvailable`、`stableDownloadReady`、`retryAfterMs` 入参；保留现有调用兼容。
   - 完成标准：旧调用不报错，新调用能优先使用接口返回的 `thumbnail_url`。
 
-- [ ] T2. 实现状态变化自动恢复
+- [x] T2. 实现状态变化自动恢复
   - 修改对象：`src/components/TaskVideoThumbnail.tsx`。
   - 要做什么：当 `taskId`、`thumbnailUrl`、`publicVideoUrl`、`localVideoPath`、`resultVideoUrl`、`resultLastFrameUrl`、`deliveryStage`、`stableDownloadReady` 变化时，清空失败状态并重新加载。
   - 额外要求：图片成功加载后清理重试状态；组件卸载时清理定时器，避免卸载后继续 `setState`。
   - 完成标准：任务从 `submitted/running/preparing` 变成可预览后，卡片不用刷新页面也会重试缩略图。
 
-- [ ] T3. 实现有限重试和退避
+- [x] T3. 实现有限重试和退避
   - 修改对象：`src/components/TaskVideoThumbnail.tsx`。
   - 要做什么：图片 `onError` 后最多重试 3 次；优先使用 `retryAfterMs`，否则用 2s、4s、8s；重试时给 URL 加轻量 cache bust 参数，例如 `?retry=1`，已有 query 时必须正确追加参数。
   - 完成标准：接口短暂 404/抽帧延迟不会永久失败；真正没有源或最终失败不会无限请求。
 
-- [ ] T4. 改清楚占位文案
+- [x] T4. 改清楚占位文案
   - 修改对象：`src/components/TaskVideoThumbnail.tsx`、必要 CSS。
   - 要做什么：把单一“暂无截图”拆成 `排队中`、`生成中`、`正在准备预览`、`视频未产出`、`失败`、`暂无截图`。
   - 完成标准：最近任务顶部 H3 失败/排队任务不会让用户误以为系统缩略图整体坏了。
 
-- [ ] T5. 普通生成页使用接口返回的缩略图字段
+- [x] T5. 普通生成页使用接口返回的缩略图字段
   - 修改对象：`src/components/generate/GeneratePageClient.tsx`。
   - 要做什么：调用 `TaskVideoThumbnail` 时传入 `task.thumbnail_url`、`delivery_stage`、`preview_available`、`stable_download_ready`、`retry_after_ms`。
   - 完成标准：`/api/video/list` 或 `/api/video/status/[id]` 返回缩略图字段后，普通生成页卡片立即消费。
 
-- [ ] T6. 覆盖所有复用入口
+- [x] T6. 覆盖所有复用入口
   - 修改对象：
     - `src/app/tasks/page.tsx`
     - `src/app/admin/outputs/AdminOutputsClient.tsx`
@@ -66,12 +66,12 @@
   - 字段要求：每个调用处都要有类型支持 `thumbnail_url`、`delivery_stage`、`preview_available`、`stable_download_ready`、`retry_after_ms`；如果该页面的数据来源还没返回这些字段，要同步补查询/序列化/类型，不能只在 JSX 里补参数。
   - 完成标准：所有复用 `TaskVideoThumbnail` 的入口状态和重试行为一致。
 
-- [ ] T7. 模板生成页删除独立失败逻辑
+- [x] T7. 模板生成页删除独立失败逻辑
   - 修改对象：`src/components/templates/TemplateGenerateClient.tsx`。
   - 要做什么：移除 `TemplateTaskPreview` 中独立的 `failedSrcs` 缩略图逻辑，改为复用 `TaskVideoThumbnail`。
   - 完成标准：模板生成页和普通生成页同一任务显示一致。
 
-- [ ] T8. 保持服务端轻改，不新增库
+- [x] T8. 保持服务端轻改，不新增库
   - 检查对象：
     - `src/app/api/video/list/route.ts`
     - `src/app/api/video/status/[id]/route.ts`
@@ -90,7 +90,7 @@
   - 特别注意：普通视频接口已经有这些字段，但 IP 视频、后台产出、后台首页、后台成本、项目页和视频卡页存在独立查询，必须逐个确认。
   - 完成标准：前端所需状态字段都来自 API，不靠页面私自猜。
 
-- [ ] T9. 增加最小 smoke 测试
+- [x] T9. 增加最小 smoke 测试
   - 新增或修改对象：`scripts/task-video-thumbnail-state-smoke.ts`。
   - 要做什么：优先从 `TaskVideoThumbnail` 抽出小的纯函数状态机/helper，再用 smoke 验证这些场景；不要为了这一个点新增测试框架。
     - submitted 显示排队中，不请求缩略图。
@@ -108,12 +108,13 @@
   - 要做什么：通过服务器只读查询或临时 Node 脚本抽样；不打印 token、完整视频 URL、cookie 或私有路径，只输出布尔值、状态码、content-type、文件是否存在和任务状态摘要。
   - 完成标准：能区分“任务没有输出源”和“有源但前端没重试”。
 
-- [ ] T11. 本地验证和构建
+- [x] T11. 本地验证和构建
   - 命令：
     - `npm run lint`
     - `npm run build`
     - `npx tsx scripts/task-video-thumbnail-state-smoke.ts`
   - 完成标准：全部通过；如失败，先修根因，不带失败提交。
+  - 本轮结果：`npx tsx scripts/task-video-thumbnail-state-smoke.ts` 通过；`npm run lint` 通过且仅有既有 warning；`npm run build` 通过且仅有既有 warning。
 
 - [ ] T12. 上线闭环
   - 执行对象：按项目 `AGENTS.md` 的 sd2 服务器生产托管规则。
@@ -124,20 +125,23 @@
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
 
-- [ ] R1. 组件行为只读审查
+- [x] R1. 组件行为只读审查
   - 检查对象：`src/components/TaskVideoThumbnail.tsx`。
   - 通过标准：失败状态会随任务/源/投递状态变化清空；重试有限；不会无限打接口。
   - 证据来源：源码、smoke 输出。
+  - 本轮结果：独立只读复查通过；确认失败状态重置、有限重试、定时器清理和状态文案达标。
 
-- [ ] R2. 调用入口只读审查
+- [x] R2. 调用入口只读审查
   - 检查对象：所有 `TaskVideoThumbnail` 调用处，以及模板生成页。
   - 通过标准：没有遗漏核心入口；模板生成页没有保留冲突的独立失败逻辑。
   - 证据来源：`rg "TaskVideoThumbnail|failedSrcs|thumbnail_url"` 搜索结果。
+  - 本轮结果：独立只读复查通过；11 个 `TaskVideoThumbnail` 调用点已接入统一字段，模板生成页旧 `failedSrcs` 逻辑已删除。
 
-- [ ] R3. API 字段只读审查
+- [x] R3. API 字段只读审查
   - 检查对象：普通视频 API、IP 视频 API、后台产出 API、后台首页数据、后台成本页查询、项目页 API、视频卡 API。
   - 通过标准：前端需要的 `thumbnail_url`、`delivery_stage`、`preview_available`、`stable_download_ready`、`retry_after_ms` 都可用；所有 TypeScript 类型同步包含这些字段。
   - 证据来源：源码、接口抽样响应。
+  - 本轮结果：独立只读复查通过；普通视频、IP 视频、后台产出、后台首页、后台成本、项目页和视频卡接口/查询已接入统一投影或必要字段。
 
 - [ ] R4. 真实页面只读审查
   - 检查对象：`https://sd2.youdooart.com/generate`、`/template-generate`、`/tasks`、后台最近生成或产出页。
@@ -151,13 +155,13 @@
 
 ## 4. 审查内容是否对齐目标
 
-- [ ] A1. R1 是否对齐根因
+- [x] A1. R1 是否对齐根因
   - 判断：不能只看能不能显示图片；必须证明“失败后不重试”的根因已消除。
 
-- [ ] A2. R2 是否覆盖系统同类问题
+- [x] A2. R2 是否覆盖系统同类问题
   - 判断：不能只改普通生成页；所有复用入口和模板生成页都要纳入。
 
-- [ ] A3. R3 是否避免前端私自猜状态
+- [x] A3. R3 是否避免前端私自猜状态
   - 判断：前端状态必须来自 API 字段，不能又在页面散写判断；不能只补普通视频接口，漏掉 IP、后台、项目页和视频卡的独立数据源。
 
 - [ ] A4. R4 是否符合用户真实体验

@@ -8,6 +8,7 @@ import {
 } from '@/lib/provider/volcengine-ip';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
         duration: true,
         resolution: true,
         local_status: true,
+        delivery_status: true,
         local_video_path: true,
         public_video_url: true,
         public_video_storage_provider: true,
@@ -112,6 +114,11 @@ export async function GET(request: NextRequest) {
         ...task,
         result_video_url: null,
         result_last_frame_url: null,
+        ...taskThumbnailProjection({
+          ...task,
+          result_video_url: null,
+          result_last_frame_url: null,
+        }),
         error_message: safeVolcengineIpUserMessage(task.error_message),
       })),
       pagination: {

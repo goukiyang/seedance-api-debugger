@@ -14,6 +14,7 @@ import {
   usdToCnyRateText,
 } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import OfficialChargeForm from './OfficialChargeForm';
 import OfficialChargeImportForm from './OfficialChargeImportForm';
 import ProviderBalancePanel from './ProviderBalancePanel';
@@ -343,6 +344,7 @@ export default async function AdminCostsPage({
         provider: true,
 	        generation_mode: true,
 	        local_status: true,
+	        delivery_status: true,
 	        public_video_url: true,
 	        result_video_url: true,
 	        result_last_frame_url: true,
@@ -423,6 +425,10 @@ export default async function AdminCostsPage({
     }),
   ]);
   const officialCostTotals = sumCostRowsByCurrency(officialCostRows);
+  const projectedRecentIssues = recentIssues.map((task) => ({
+    ...task,
+    ...taskThumbnailProjection(task),
+  }));
   const providerBalanceViews = providerBalanceSnapshots.map(providerBalanceSnapshotDto);
   const latestProviderBalance = providerBalanceViews[0] || null;
   const providerBalanceSyncEnabled = Boolean(process.env.SEEDANCE_BALANCE_ENDPOINT?.trim());
@@ -656,7 +662,7 @@ export default async function AdminCostsPage({
       </div>
 
       <OfficialChargeForm
-        pendingTasks={recentIssues.map((task) => ({
+        pendingTasks={projectedRecentIssues.map((task) => ({
           id: task.id,
           prompt: task.prompt || task.id,
           provider_task_id: task.provider_task_id,
@@ -667,7 +673,7 @@ export default async function AdminCostsPage({
 
       <div className="card" id="pending-costs">
         <h2 className="section-title">待处理队列</h2>
-        {recentIssues.length === 0 ? (
+        {projectedRecentIssues.length === 0 ? (
           <p className="text-gray">当前没有成本待办。</p>
         ) : (
           <table className="table">
@@ -686,16 +692,21 @@ export default async function AdminCostsPage({
               </tr>
             </thead>
             <tbody>
-              {recentIssues.map((task) => (
+              {projectedRecentIssues.map((task) => (
 	                <tr key={task.id}>
 	                  <td>
 	                    <TaskVideoThumbnail
 	                      taskId={task.id}
+	                      thumbnailUrl={task.thumbnail_url}
 	                      publicVideoUrl={task.public_video_url}
 	                      localVideoPath={task.local_video_path}
 	                      resultVideoUrl={task.result_video_url}
 	                      resultLastFrameUrl={task.result_last_frame_url}
 	                      status={task.local_status}
+	                      deliveryStage={task.delivery_stage}
+	                      previewAvailable={task.preview_available}
+	                      stableDownloadReady={task.stable_download_ready}
+	                      retryAfterMs={task.retry_after_ms}
 	                      provider={task.provider}
 	                      generationMode={task.generation_mode}
 	                      href={taskDetailHref(task.id, '/admin/costs')}

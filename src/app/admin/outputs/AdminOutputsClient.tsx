@@ -44,6 +44,11 @@ interface OutputItem {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   reference_image_ids: string | null;
   reference_album_ids: string | null;
   project_id: string | null;
@@ -232,11 +237,16 @@ function OutputFramePreview({ output }: { output: OutputItem }) {
   return (
     <TaskVideoThumbnail
       taskId={output.id}
+      thumbnailUrl={output.thumbnail_url}
       publicVideoUrl={output.public_video_url}
       localVideoPath={output.local_video_path}
       resultVideoUrl={output.result_video_url}
       resultLastFrameUrl={output.result_last_frame_url}
       status={output.local_status}
+      deliveryStage={output.delivery_stage}
+      previewAvailable={output.preview_available}
+      stableDownloadReady={output.stable_download_ready}
+      retryAfterMs={output.retry_after_ms}
       isEnhanceTask={output.is_enhance_task}
       href={taskDetailHref(output.id, '/admin/outputs')}
       size="medium"
