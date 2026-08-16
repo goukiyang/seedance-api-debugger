@@ -117,6 +117,24 @@ curl -sS "$BASE_URL/api/codex/config" \
   "auth": {
     "type": "bearer",
     "header": "Authorization"
+  },
+  "supported_settings": {
+    "model": [
+      {
+        "id": "dreamina-seedance-2-0-260128",
+        "label": "Seedance 2.0",
+        "detail": "当前稳定默认模型",
+        "default": true,
+        "internal_credit_multiplier": 1
+      },
+      {
+        "id": "dreamina-seedance-2-5-260628",
+        "label": "Seedance 2.5",
+        "detail": "新一代视频模型",
+        "default": false,
+        "internal_credit_multiplier": 1.5
+      }
+    ]
   }
 }
 ```
@@ -393,7 +411,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 |---|---|---|
 | `prompt` | string | 视频提示词，不能为空 |
 | `generation_mode` | string | 生成模式，默认可用 `all_in_one_reference` |
-| `model` | string | 可选；不传时默认 `dreamina-seedance-2-0-260128` |
+| `model` | string | 可选；不传时默认 `dreamina-seedance-2-0-260128`；会影响平台内部点数扣费 |
 | `ratio` | string | 画幅比例 |
 | `duration` | number | 视频时长，单位秒 |
 | `resolution` | string | 分辨率 |
@@ -407,6 +425,13 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 | `ratio` | `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16` |
 | `duration` | `4` 到 `15` |
 | `resolution` | `480p`, `720p`, `1080p` |
+
+模型扣点规则：
+
+- `dreamina-seedance-2-0-260128`：Seedance 2.0，按平台基础 Seedance 视频点数规则计费。
+- `dreamina-seedance-2-5-260628`：Seedance 2.5，平台内部点数按 Seedance 2.0 的 `1.5` 倍计费。
+
+这里的“点数”是 SD2 平台内部给用户冻结和扣除的额度，不等于供应商美元成本。供应商实际美元成本以任务完成后 Provider 返回的 `actual_cost` 和 `currency_or_credit_type` 为准。
 
 常用可选字段：
 
@@ -522,6 +547,8 @@ GET /api/video/status/:taskId?refresh=true
 - `ProviderApiRequest`：供应商请求记录。
 - `CostLedger provider_request_submitted`：供应商已接受请求记录。
 - `OperationLog generation_create_codex_api`：Codex API 来源的创建操作。
+
+内部点数扣费按模型区分：Seedance 2.0 使用基础 Seedance 视频点数规则，Seedance 2.5 使用 Seedance 2.0 的 `1.5` 倍。冻结点数、成功扣点和 `pricing_snapshot` 都按创建任务时传入的 `model` 计算；不传 `model` 时按默认 Seedance 2.0 计算。
 
 任务进入终态后：
 

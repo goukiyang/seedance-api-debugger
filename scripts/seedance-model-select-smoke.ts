@@ -9,6 +9,8 @@ import {
   parseSeedanceVideoModel,
   seedanceVideoModelLabel,
 } from '../src/lib/provider/seedance-models';
+import { calculateEstimatedCost } from '../src/lib/pricing';
+import { calculateEstimatedCostClient } from '../src/lib/pricing-client';
 
 function read(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
@@ -59,12 +61,29 @@ async function main() {
   assert.deepEqual(parseSeedanceVideoModel(SEEDANCE_2_5_MODEL_ID), { ok: true, model: SEEDANCE_2_5_MODEL_ID });
   assert.equal(parseSeedanceVideoModel('bad-model').ok, false, 'Unknown model must not be accepted');
 
+  const seedance20Pricing = calculateEstimatedCost('720p', 4, SEEDANCE_2_0_MODEL_ID);
+  const seedance25Pricing = calculateEstimatedCost('720p', 4, SEEDANCE_2_5_MODEL_ID);
+  assert.equal(seedance20Pricing.internalMultiplier, 1.0, 'Seedance 2.0 should keep the base internal multiplier');
+  assert.equal(seedance25Pricing.internalMultiplier, 1.5, 'Seedance 2.5 should use 1.5x internal multiplier');
+  assert.equal(seedance20Pricing.estimatedCost, 12, 'Seedance 2.0 4s cost should keep the old 3 points/s rule');
+  assert.equal(seedance25Pricing.estimatedCost, 18, 'Seedance 2.5 4s cost should be 1.5x Seedance 2.0');
+  assert.equal(
+    calculateEstimatedCostClient('720p', 4, SEEDANCE_2_5_MODEL_ID),
+    seedance25Pricing.estimatedCost,
+    'Client estimate must match server pricing for Seedance 2.5',
+  );
+
   const providerSource = read('src/lib/provider/jimeng.ts');
   const createRouteSource = read('src/app/api/tasks/create/route.ts');
+  const estimateRouteSource = read('src/app/api/tasks/estimate/route.ts');
   const generateClientSource = read('src/components/generate/GeneratePageClient.tsx');
+  const generationComposerSource = read('src/components/GenerationComposer.tsx');
   const configRouteSource = read('src/app/api/config/route.ts');
+  const codexConfigRouteSource = read('src/app/api/codex/config/route.ts');
   const canvasBootstrapSource = read('src/app/api/tools/ultimate-canvas/bootstrap/route.ts');
   const pricingSource = read('src/lib/pricing.ts');
+  const pricingClientSource = read('src/lib/pricing-client.ts');
+  const modelRegistrySource = read('src/lib/provider/seedance-models.ts');
   const todoSource = read('tasks/todo/2026-08-13-seedance-25-video-model.md');
   const externalApiDoc = read('docs/sd2-external-api-integration.md');
 
@@ -73,13 +92,13 @@ async function main() {
 
   assert.ok(createRouteSource.includes('parseSeedanceVideoModel(body.model)'), 'Create route must parse request body model');
   assert.ok(createRouteSource.includes('model: selectedModel'), 'Create route must store selected model');
-  assert.ok(createRouteSource.includes('seedanceVideoModelLabel(selectedModel)'), 'Pricing snapshot should use selected model label');
+  assert.ok(createRouteSource.includes('calculateEstimatedCost(resolution, duration, selectedModel)'), 'Pricing snapshot should use selected model id');
   assert.ok(
-    createRouteSource.includes('providerPayloadJson: JSON.stringify({ model: selectedModel'),
+    /providerPayloadJson:\s*JSON\.stringify\([\s\S]*\{ model: selectedModel, content_item_count/.test(createRouteSource),
     'Task snapshot should record selected model in provider payload metadata',
   );
   assert.ok(
-    createRouteSource.includes('const taskParams = {\n    model: selectedModel,'),
+    /const taskParams = \{[\s\S]*provider: requestedProvider,[\s\S]*model: selectedModel,/.test(createRouteSource),
     'Callback/task params should carry selected model',
   );
   assert.ok(
@@ -87,15 +106,32 @@ async function main() {
     'Selected model should flow through provider input, task params, task record, and response',
   );
 
+  assert.ok(modelRegistrySource.includes('[SEEDANCE_2_5_MODEL_ID]: 1.5'), 'Seedance 2.5 must have 1.5x internal multiplier');
+  assert.ok(pricingSource.includes('seedanceVideoModelInternalMultiplier(model)'), 'Server pricing must resolve model multiplier');
+  assert.ok(pricingSource.includes('DEFAULT_PRICING_RULE_VERSION = 3'), 'Pricing rule version must bump after multiplier change');
+  assert.ok(pricingClientSource.includes('seedanceVideoModelInternalMultiplier(model)'), 'Client pricing must resolve the same model multiplier');
+  assert.ok(estimateRouteSource.includes("parseSeedanceVideoModel(searchParams.get('model'))"), 'Estimate API must parse model from query');
+  assert.ok(
+    estimateRouteSource.includes('calculateEstimatedCost(resolution, duration, parsedModel.model)'),
+    'Estimate API must price the parsed selected model',
+  );
+  assert.ok(
+    generationComposerSource.includes('calculateEstimatedCostClient(resolution, duration, selectedModel)'),
+    'Composer estimate must include selected model',
+  );
   assert.ok(generateClientSource.includes('SEEDANCE_VIDEO_MODEL_OPTIONS'), 'Standard generate page must import Seedance video model options');
   assert.ok(
-    generateClientSource.includes('modelOptions={isIpSurface ? VOLCENGINE_IP_MODEL_OPTIONS : SEEDANCE_VIDEO_MODEL_OPTIONS}'),
+    generateClientSource.includes('const options = [...SEEDANCE_VIDEO_MODEL_OPTIONS]')
+      && generateClientSource.includes('modelOptions={activeModelOptions}'),
     'Standard generate page should pass Seedance model options to the existing footer chip',
   );
   assert.ok(configRouteSource.includes('model_options: config.model_options'), '/api/config must expose model options');
+  assert.ok(codexConfigRouteSource.includes('SEEDANCE_VIDEO_MODEL_OPTIONS.map'), 'Codex config must expose Seedance model options');
+  assert.ok(codexConfigRouteSource.includes('internal_credit_multiplier'), 'Codex config must expose internal credit multiplier');
   assert.ok(canvasBootstrapSource.includes('model_options: videoConfig.model_options'), 'Ultimate canvas bootstrap must expose video model options');
-  assert.ok(pricingSource.includes("modelLabel = 'Seedance 2.0'"), 'Pricing snapshot should accept selected model label while keeping 2.0 default');
+  assert.ok(pricingSource.includes('model = DEFAULT_SEEDANCE_VIDEO_MODEL_ID'), 'Pricing snapshot should keep Seedance 2.0 as default model');
   assert.ok(externalApiDoc.includes('dreamina-seedance-2-5-260628'), 'External API doc must mention Seedance 2.5 model');
+  assert.ok(externalApiDoc.includes('1.5'), 'External API doc must mention Seedance 2.5 internal credit multiplier');
 
   assert.ok(todoSource.includes('https://sd2.youdooart.com'), 'Plan must use the current server production domain');
   assert.ok(todoSource.includes('sd2-gray.service'), 'Plan must use server systemd service for deployment verification');

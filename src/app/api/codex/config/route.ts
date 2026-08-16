@@ -4,6 +4,11 @@ import {
   CodexApiAuthError,
   codexVideoApiStatus,
 } from '@/lib/integrations/codex';
+import {
+  DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+  SEEDANCE_VIDEO_MODEL_OPTIONS,
+  seedanceVideoModelInternalMultiplier,
+} from '@/lib/provider/seedance-models';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +41,11 @@ export async function GET(request: NextRequest) {
       },
       supported_settings: {
         generation_mode: ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'],
+        model: SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => ({
+          ...option,
+          default: option.id === DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+          internal_credit_multiplier: seedanceVideoModelInternalMultiplier(option.id),
+        })),
         ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
         duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         resolution: ['480p', '720p', '1080p'],

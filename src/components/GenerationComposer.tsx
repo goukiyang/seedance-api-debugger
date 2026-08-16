@@ -604,8 +604,8 @@ export function GenerationComposer({
   const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
 
   const estimatedPoints = useMemo(() => {
-    return calculateEstimatedCostClient(resolution, duration);
-  }, [resolution, duration]);
+    return calculateEstimatedCostClient(resolution, duration, selectedModel);
+  }, [resolution, duration, selectedModel]);
 
   const activeRules = useMemo(() => {
     return selectedTemplate?.rules.filter((rule) => rule.status === 'active') || [];

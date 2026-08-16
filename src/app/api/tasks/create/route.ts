@@ -10,7 +10,7 @@ import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspac
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
-import { parseSeedanceVideoModel, seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
+import { parseSeedanceVideoModel } from '@/lib/provider/seedance-models';
 import {
   H3_VIDEO_PROVIDER,
   H3RequestError,
@@ -834,7 +834,7 @@ export async function POST(request: NextRequest) {
   // --- Pricing ---
   const pricing = requestedProvider === H3_VIDEO_PROVIDER
     ? calculateH3EstimatedCost(duration, selectedModel)
-    : calculateEstimatedCost(resolution, duration, seedanceVideoModelLabel(selectedModel));
+    : calculateEstimatedCost(resolution, duration, selectedModel);
   const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;

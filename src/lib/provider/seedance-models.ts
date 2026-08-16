@@ -22,6 +22,22 @@ export const SEEDANCE_VIDEO_MODEL_OPTIONS: SeedanceVideoModelOption[] = [
 ];
 
 const MODEL_IDS = new Set(SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => option.id));
+const MODEL_INTERNAL_CREDIT_MULTIPLIERS: Record<string, number> = {
+  [SEEDANCE_2_0_MODEL_ID]: 1.0,
+  [SEEDANCE_2_5_MODEL_ID]: 1.5,
+};
+
+function findSeedanceVideoModelOption(value: string | null | undefined): SeedanceVideoModelOption | null {
+  const requested = typeof value === 'string' ? value.trim() : '';
+  if (!requested) {
+    return SEEDANCE_VIDEO_MODEL_OPTIONS.find((option) => option.id === DEFAULT_SEEDANCE_VIDEO_MODEL_ID) || null;
+  }
+  const normalized = requested.toLowerCase();
+  return SEEDANCE_VIDEO_MODEL_OPTIONS.find((option) => (
+    option.id === requested
+    || option.label.toLowerCase() === normalized
+  )) || null;
+}
 
 export function isSeedanceVideoModelId(value: string): boolean {
   return MODEL_IDS.has(value);
@@ -29,6 +45,18 @@ export function isSeedanceVideoModelId(value: string): boolean {
 
 export function seedanceVideoModelLabel(modelId: string): string {
   return SEEDANCE_VIDEO_MODEL_OPTIONS.find((option) => option.id === modelId)?.label || modelId;
+}
+
+export function seedanceVideoModelPricingLabel(value: string | null | undefined): string {
+  const option = findSeedanceVideoModelOption(value);
+  if (option) return option.label;
+  return typeof value === 'string' && value.trim() ? value.trim() : seedanceVideoModelLabel(DEFAULT_SEEDANCE_VIDEO_MODEL_ID);
+}
+
+export function seedanceVideoModelInternalMultiplier(value: string | null | undefined): number {
+  const option = findSeedanceVideoModelOption(value);
+  if (!option) return MODEL_INTERNAL_CREDIT_MULTIPLIERS[DEFAULT_SEEDANCE_VIDEO_MODEL_ID];
+  return MODEL_INTERNAL_CREDIT_MULTIPLIERS[option.id] ?? MODEL_INTERNAL_CREDIT_MULTIPLIERS[DEFAULT_SEEDANCE_VIDEO_MODEL_ID];
 }
 
 export function parseSeedanceVideoModel(value: unknown): {

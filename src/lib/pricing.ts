@@ -1,7 +1,12 @@
 import type { VideoResolution, VideoDuration } from '@/types';
+import {
+  DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+  seedanceVideoModelInternalMultiplier,
+  seedanceVideoModelPricingLabel,
+} from '@/lib/provider/seedance-models';
 
 const DEFAULT_PRICING_RULE_ID = 'default-seedance-v2';
-const DEFAULT_PRICING_RULE_VERSION = 2;
+const DEFAULT_PRICING_RULE_VERSION = 3;
 const SEEDANCE_VIDEO_COST_PER_SECOND = 3;
 const H3_PRICING_RULE_ID = 'default-h3-local-video-v1';
 const H3_PRICING_RULE_VERSION = 2;
@@ -32,12 +37,13 @@ export interface EnhanceVideoPricingSnapshot extends PricingSnapshot {
 export function calculateEstimatedCost(
   resolution: VideoResolution | string,
   duration: VideoDuration | number,
-  modelLabel = 'Seedance 2.0',
+  model = DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
 ): PricingSnapshot {
   const baseCostPerSecond = SEEDANCE_VIDEO_COST_PER_SECOND;
-  const internalMultiplier = 1.0;
+  const internalMultiplier = seedanceVideoModelInternalMultiplier(model);
   const finalCostPerSecond = baseCostPerSecond * internalMultiplier;
   const estimatedCost = Math.ceil(finalCostPerSecond * (duration as number));
+  const modelLabel = seedanceVideoModelPricingLabel(model);
 
   return {
     model: modelLabel,

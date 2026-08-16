@@ -1,11 +1,15 @@
+import { seedanceVideoModelInternalMultiplier } from './provider/seedance-models';
+
 const SEEDANCE_VIDEO_COST_PER_SECOND = 3;
 
 export function calculateEstimatedCostClient(
   resolution: string,
   duration: number,
+  model?: string | null,
 ): number {
   void resolution;
-  return Math.ceil(SEEDANCE_VIDEO_COST_PER_SECOND * duration);
+  const internalMultiplier = seedanceVideoModelInternalMultiplier(model);
+  return Math.ceil(SEEDANCE_VIDEO_COST_PER_SECOND * internalMultiplier * duration);
 }
 
 export function calculateEnhanceVideoEstimatedCostClient(input: {
