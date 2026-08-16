@@ -41,8 +41,9 @@
 - `sd2.youdooart.com` 必须直接打开服务器网站，不得用跳转临时代替。飞书 OAuth、回调地址、登录后跳转地址和前端公开域名配置都必须以 `sd2.youdooart.com` 为准；登录后跳回旧域名时，按配置错误处理。
 - 服务器默认是 `42.193.221.253:22`，普通操作用户 `gouki`；线上 nginx 反代到 `127.0.0.1:3302`，systemd 服务名 `sd2-gray.service`，服务器应用目录 `/srv/video-api-debugger/app`，公网响应应能看到 `X-SD2-Origin: server-42-193` 这类服务器来源标记。
 - 本地部署源默认是 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`，当前生产工作分支是 `codex/video-delivery-fast-path`。服务器目录里的 `.git` 不作为可信部署来源；不要默认在服务器上 `git pull`。
-- 服务器部署必须按 `server-deploy-closure` 思路执行：本地形成可追溯 commit / rollback tag -> 用 `git archive` 打包当前提交 -> 上传到服务器 `/tmp` -> 解压到 `/srv/video-api-debugger/releases/<commit>` -> `rsync -a --delete` 到 `/srv/video-api-debugger/app`。
-- 上传或同步服务器源码时必须排除 `.env`、`node_modules`、`.next`、`.next-prod`、`storage`、`public/uploads`、数据库文件、上传资产和其他运行期产物，避免覆盖密钥、现有视频、截图、用户上传和生产构建。
+- 服务器部署必须按 `server-deploy-closure` 思路执行：本地形成可追溯 commit / rollback tag -> 用 `git archive` 打包当前提交 -> 上传到服务器 `/tmp` -> 解压到 `/srv/video-api-debugger/releases/<commit>` -> `rsync -a --delete` 到 `/srv/video-api-debugger/app` -> 执行 `scripts/server-ensure-runtime-dirs.sh /srv/video-api-debugger/app` 或等价命令确认运行目录权限。
+- 上传或同步服务器源码时必须排除 `.env`、`node_modules`、`.next`、`.next-prod`、`storage`、`public/uploads`、`public/videos`、数据库文件、上传资产、视频、截图和其他运行期产物，避免覆盖密钥、现有视频、截图、用户上传和生产构建。
+- 每次同步服务器源码后必须确认 `public/uploads`、`public/uploads/assets`、`public/uploads/thumbs`、`public/videos`、`public/videos/thumbnails`、`storage/backups` 存在且 `gouki` 可写；否则缩略图接口、上传、视频封面补偿和备份脚本会在运行时失败。
 - `sd2-gray.service` 使用 `NEXT_DIST_DIR=.next-prod`。普通 `npm run build` 只会更新 `.next`，不代表线上生效；服务器生产构建必须用 `NEXT_DIST_DIR=.next-prod-candidate npm run build`，验证 `BUILD_ID` 和预期变更后，再把 `.next-prod-candidate` 切换成 `.next-prod`。
 - 不得直接删除或原地构建 live `.next-prod`。切换前保留 `.next-prod-prev` 或等价回退目录；候选构建失败、候选内容不含预期变更、重启失败或公网仍是旧版本时，必须恢复上一版并停止报告。
 - 每次涉及 `sd2` 服务器部署、登录域名、nginx、systemd、构建目录、公开 API、用户可见页面或静态资源改动后，至少验证：

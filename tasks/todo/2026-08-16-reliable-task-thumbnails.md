@@ -146,6 +146,13 @@
   - 完成标准：`https://sd2.youdooart.com/generate` 加载新构建；普通生成页最近任务优先显示有画面的卡片，卡片封面区域明显变大。
   - 本轮结果：commit `689ced877109a6d5c52297bafa5c82f6c64ce3b8` 已推送；rollback tag `rollback/2026-08-16-before-recent-task-visual-priority` 已推送；服务器 `.next-prod/BUILD_ID=JYB2QgQiHVpAsfbLybruW`；`sd2-gray.service` active；公网 `/api/config` 200 且 `X-SD2-Origin: server-42-193`；公网 `_buildManifest.js` 200；公网 CSS 含 `.composer-task-card-preview{aspect-ratio:16/9...}` 和 `max-width:none`。
 
+- [x] T16. 生产运行目录权限返修
+  - 修改对象：生产服务器 `/srv/video-api-debugger/app/public/videos`、`/srv/video-api-debugger/app/public/videos/thumbnails`，以及仓库 `scripts/server-ensure-runtime-dirs.sh`、`AGENTS.md`。
+  - 根因：线上 `sd2-gray.service` 以 `gouki` 用户运行，但 `public/videos` 被发布同步成 `root:root`，服务无法创建 `public/videos/thumbnails`，日志出现 `EACCES: permission denied, mkdir '/srv/video-api-debugger/app/public/videos/thumbnails'`，导致普通生成页最近任务卡片请求缩略图失败后显示“暂无截图”。
+  - 要做什么：生产机创建并修正运行目录权限；发布规则排除 `public/videos`；每次 rsync 后运行目录守护脚本，确认 `gouki` 对上传、视频、缩略图和备份目录有写入权限。
+  - 完成标准：截图中可访问源视频的旧任务已生成 `public/videos/thumbnails/*.jpg`；`gouki` 可写 `public/videos/thumbnails`；后续发布不会再覆盖运行期视频和截图目录。
+  - 本轮结果：生产机 `public/videos` 与 `public/videos/thumbnails` 已为 `gouki:gouki 775`；截图中 4 条可访问源视频的任务已生成 jpg 缩略图；1 条很老的任务源视频已不可访问，无法凭空抽帧；同时发现并替换了指向 Mac 本机路径的坏 `storage` 软链，已创建 `storage/backups` 并确认 `gouki` 可写。
+
 ## 3. 验收/审查内容
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
@@ -186,6 +193,12 @@
   - 证据来源：源码、smoke 输出、构建输出、生产服务器只读查询、公网响应。
   - 审查方式：已创建独立只读审查 agent；第一次审查不通过，指出“只排序前端已加载 12 条”无法覆盖生产第一页全无图的真实问题。主线程已按意见补首屏最多预取 4 页、移动端封面不收缩，并补 smoke 覆盖第一页全无图场景。
 
+- [ ] R7. 生产运行目录只读审查
+  - 检查对象：`scripts/server-ensure-runtime-dirs.sh`、`AGENTS.md`、生产服务器 `/srv/video-api-debugger/app/public/videos/thumbnails`、`sd2-gray.service` 日志。
+  - 通过标准：部署规则明确排除 `public/videos`；运行目录守护脚本会创建上传、视频、缩略图和备份目录并检查 `gouki` 可写；生产日志不再出现缩略图目录 `EACCES`；可访问源视频的任务能生成本地 jpg。
+  - 证据来源：源码、smoke、SSH 只读目录权限、生产日志抽样、缩略图文件抽样。
+  - 审查方式：创建独立只读审查 agent；审查 agent 不改文件、不提交、不部署。
+
 ## 4. 审查内容是否对齐目标
 
 - [x] A1. R1 是否对齐根因
@@ -206,3 +219,6 @@
 - [x] A6. R6 是否覆盖本次用户反馈
   - 判断：不能只证明缩略图组件能显示；还要证明普通生成页第一屏不会被无图任务占满，且卡片封面大小对用户可见。
   - 本轮结果：已覆盖。生产抽样显示原始前 8 条均为 H3 无输出任务；新逻辑会在初始加载时继续预取后续页，并按有真实视频/缩略图源优先展示，避免有图任务被无图任务挡住。
+
+- [ ] A7. R7 是否覆盖本次根因
+  - 判断：不能只证明组件能重试；还要证明服务器运行目录不会因发布同步回到 `root:root` 导致缩略图 API 再次失败。
