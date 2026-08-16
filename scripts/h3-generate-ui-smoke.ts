@@ -52,7 +52,8 @@ assert.match(generatePageSource, /providerOptions=\{\[\]\}/, '普通生成页不
 assert.match(generatePageSource, /onModelChange=\{handleGenerationModelChange\}/, '普通生成页必须由模型选择驱动 provider');
 assert.match(generatePageSource, /provider:\s*isIpSurface \? undefined : requestedProvider/, '普通生成提交必须透传 provider');
 assert.match(generatePageSource, /model:\s*requestedModel \|\| undefined/, '普通生成提交必须把 H3 模型映射成默认 preset');
-assert.match(generatePageSource, /lora_id:\s*selectedH3Model \? requestedH3LoraId : undefined/, '普通生成提交必须把 H3 LoRA 选择透传给后端');
+assert.match(generatePageSource, /h3VideoConfig\?\.lora_options\.find\(\(option\) => option\.id === params\.h3LoraId\)\?\.id/, '普通生成提交前必须用最新 H3 LoRA 配置过滤旧值');
+assert.match(generatePageSource, /lora_id:\s*selectedH3Model \? requestedH3LoraId : undefined/, '普通生成提交必须把过滤后的 H3 LoRA 选择透传给后端');
 assert.match(generatePageSource, /auxiliaryOptions=\{activeH3LoraOptions\}/, '普通生成页必须只在 H3 模型下显示 LoRA 下拉');
 assert.match(generatePageSource, /data\.provider \|\| \(isIpSurface \? 'volcengine_ark' : requestedProvider\)/, '最近任务 provider 必须跟创建结果或用户选择一致');
 
@@ -62,7 +63,8 @@ assert.match(templatePageSource, /buildH3MachineStatus/, '模板生成页必须�
 assert.match(templatePageSource, /providerStatus=\{h3MachineStatus\}/, '模板生成页必须把 H3 状态传入编辑器');
 assert.match(templatePageSource, /provider:\s*requestedProvider/, '模板生成提交必须透传 provider');
 assert.match(templatePageSource, /model:\s*requestedModel \|\| undefined/, '模板生成提交必须把 H3 模型映射成默认 preset');
-assert.match(templatePageSource, /lora_id:\s*selectedH3Model \? requestedH3LoraId : undefined/, '模板生成提交必须把 H3 LoRA 选择透传给后端');
+assert.match(templatePageSource, /h3VideoConfig\?\.lora_options\.find\(\(option\) => option\.id === params\.h3LoraId\)\?\.id/, '模板生成提交前必须用最新 H3 LoRA 配置过滤旧值');
+assert.match(templatePageSource, /lora_id:\s*selectedH3Model \? requestedH3LoraId : undefined/, '模板生成提交必须把过滤后的 H3 LoRA 选择透传给后端');
 assert.match(templatePageSource, /auxiliaryOptions=\{activeH3LoraOptions\}/, '模板生成页必须只在 H3 模型下显示 LoRA 下拉');
 assert.match(templatePageSource, /providerOptions=\{\[\]\}/, '模板生成页不能再单独暴露 H3 引擎下拉');
 assert.match(templatePageSource, /onModelChange=\{handleGenerationModelChange\}/, '模板生成页必须由模型选择驱动 provider');

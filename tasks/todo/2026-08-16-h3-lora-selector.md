@@ -60,5 +60,5 @@
 
 - 现象：生成页选择 `LightX2V 8-step LoRA` 后，H3 创建阶段直接失败，页面显示“未知异常”。
 - 根因：H3 API 0.3.2 当前 allowlist 只接受 `minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors` 和 `minimax_h3_turbo_v4_step600_ema.safetensors`。8-step 文件即使机器上存在，也不等于 API 白名单可用。
-- 修正：前端和外部 `/api/tasks/create` 只保留两个当前可用 LoRA；H3 返回 `code=unsupported_lora` 时显示明确中文原因，不再落到“未知异常”。
+- 修正：前端和外部 `/api/tasks/create` 只保留两个当前可用 LoRA；提交前按最新 `/api/config` 过滤旧浏览器状态里的 LoRA 值；H3 返回 `code=unsupported_lora` 时显示明确中文原因，不再落到“未知异常”。
 - 验收重点：以后新增 LoRA 必须以 H3 API allowlist / presets 实际可提交为准，不能只看机器文件是否存在。

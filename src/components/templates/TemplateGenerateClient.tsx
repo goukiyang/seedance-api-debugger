@@ -824,7 +824,10 @@ export function TemplateGenerateClient() {
       ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id || ''
       : params.model || '';
     const requestedH3LoraId = selectedH3Model
-      ? params.h3LoraId || selectedH3LoraId || h3VideoConfig?.default_lora_id || ''
+      ? h3VideoConfig?.lora_options.find((option) => option.id === params.h3LoraId)?.id
+        || selectedH3Lora?.id
+        || h3VideoConfig?.default_lora_id
+        || ''
       : '';
     if (selectedH3Model && (!h3Ready || !requestedModel)) {
       setError(`${h3DisabledReason(h3VideoConfig)}，请先点击「检查状态」刷新机器状态。`);
@@ -928,7 +931,7 @@ export function TemplateGenerateClient() {
     ensureVideoCardForSubmit,
     h3Ready,
     h3VideoConfig,
-    selectedH3LoraId,
+    selectedH3Lora?.id,
     selectedH3Preset?.id,
     selectedProjectId,
   ]);
