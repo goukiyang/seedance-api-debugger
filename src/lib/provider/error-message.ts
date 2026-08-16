@@ -89,8 +89,36 @@ export function isProviderReferenceMediaTooSmallError(message: string | null | u
     && (lower.includes(String(MIN_PROVIDER_REFERENCE_PIXELS)) || lower.includes('content['));
 }
 
+export function isH3UnsupportedLoraError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('unsupported_lora')
+    || lower.includes('lora is not in the h3 allowlist')
+    || lower.includes('lora 不在 h3 白名单');
+}
+
+export function isH3LoraNotFoundError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('lora_not_found')
+    || lower.includes('lora file does not exist on the h3 machine')
+    || lower.includes('找不到这个 lora 文件');
+}
+
+export function isH3UnsupportedLoraNodeTypeError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('unsupported_lora_node_type')
+    || lower.includes('only minimaxh3turbolora is supported')
+    || lower.includes('minimaxh3turbolora 类型');
+}
+
 export type ProviderCreateFailureUserMessage = {
-  code: 'REFERENCE_MEDIA_TOO_SMALL' | 'REFERENCE_IMAGE_TOO_LARGE' | 'PROVIDER_HTML_RESPONSE' | 'PROVIDER_CREATE_FAILED';
+  code:
+    | 'REFERENCE_MEDIA_TOO_SMALL'
+    | 'REFERENCE_IMAGE_TOO_LARGE'
+    | 'PROVIDER_HTML_RESPONSE'
+    | 'H3_UNSUPPORTED_LORA'
+    | 'H3_LORA_NOT_FOUND'
+    | 'H3_UNSUPPORTED_LORA_NODE_TYPE'
+    | 'PROVIDER_CREATE_FAILED';
   message: string;
   status: number;
 };
@@ -117,6 +145,30 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
       code: 'PROVIDER_HTML_RESPONSE',
       status: 502,
       message: '生成服务临时返回了异常页面，系统没有拿到有效创建结果。已返还冻结点数。请稍后重试；如果连续出现，请联系管理员查看生成服务状态。',
+    };
+  }
+
+  if (isH3UnsupportedLoraError(rawMessage)) {
+    return {
+      code: 'H3_UNSUPPORTED_LORA',
+      status: 400,
+      message: '当前选择的 H3 LoRA 不在 H3 服务白名单里，系统已取消提交并返还冻结点数。请切换为下拉菜单里可用的 LoRA 后重试；如果下拉仍出现该选项，请刷新页面。',
+    };
+  }
+
+  if (isH3LoraNotFoundError(rawMessage)) {
+    return {
+      code: 'H3_LORA_NOT_FOUND',
+      status: 400,
+      message: 'H3 机器上找不到当前选择的 LoRA 文件，系统已取消提交并返还冻结点数。请切换为其他 LoRA，或联系管理员同步模型文件和白名单。',
+    };
+  }
+
+  if (isH3UnsupportedLoraNodeTypeError(rawMessage)) {
+    return {
+      code: 'H3_UNSUPPORTED_LORA_NODE_TYPE',
+      status: 400,
+      message: 'H3 当前只支持 MiniMaxH3TurboLoRA 类型的 LoRA，系统已取消提交并返还冻结点数。请切换为系统内置 LoRA 后重试。',
     };
   }
 

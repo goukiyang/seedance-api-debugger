@@ -138,7 +138,7 @@ const fetchImpl: typeof fetch = async (url, init) => {
     return Response.json({
       job_id: 'h3-unsupported-lora',
       status: 'failed',
-      error_code: 'unsupported_lora',
+      code: 'unsupported_lora',
       error: 'LoRA is not in the H3 allowlist',
     });
   }
@@ -184,7 +184,7 @@ const fetchImpl: typeof fetch = async (url, init) => {
 
 async function main() {
   assert.deepEqual(H3_ALLOWED_PRESET_IDS, ['lightx2v_4step_turbo', 'larry_v4_6step', 'larry_v4_8step']);
-  assert.deepEqual(H3_ALLOWED_LORA_IDS, ['lightx2v_turbo_lora', 'larry_v4_turbo_lora', 'lightx2v_8step_lora']);
+  assert.deepEqual(H3_ALLOWED_LORA_IDS, ['lightx2v_turbo_lora', 'larry_v4_turbo_lora']);
   assert.deepEqual(H3_ALLOWED_ASPECT_RATIOS, ['16:9', '9:16', '1:1', '4:3', '3:4']);
 
   const health = await getH3Health({ baseUrl: 'https://h3-api.example.com/', fetchImpl });
@@ -268,15 +268,10 @@ async function main() {
     strength: 1,
     low_vram: false,
   });
-  assert.deepEqual(buildH3GeneratePayload({
+  assert.throws(() => buildH3GeneratePayload({
     prompt: '8-step lora',
     lora_id: 'lightx2v_8step_lora',
-  }).lora, {
-    node_type: 'MiniMaxH3TurboLoRA',
-    lora_name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
-    strength: 1,
-    low_vram: false,
-  });
+  }), /H3 LoRA 只允许/);
 
   const created = await createH3VideoJob(payload, {
     baseUrl: 'https://h3-api.example.com',

@@ -228,6 +228,10 @@ function messageForHttpStatus(status: number, body: unknown) {
     : typeof body === 'string'
       ? body
       : '';
+  const h3Message = body && typeof body === 'object' && !Array.isArray(body)
+    ? h3ErrorMessageFromRaw(body as Record<string, unknown>)
+    : undefined;
+  if (h3Message) return h3Message;
   if (status === 400) return providerMessage || 'H3 请求参数无效。';
   if (status === 401) return 'H3 用户 token 无效或缺失，请管理员检查 API 设置。';
   if (status === 403) return 'H3 管理员权限不足，请检查 admin token。';
@@ -418,7 +422,11 @@ function h3ErrorMessageFromRaw(raw: Record<string, unknown>) {
     : typeof raw.message === 'string' && raw.message.trim()
       ? raw.message.trim()
       : '';
-  const errorCode = typeof raw.error_code === 'string' ? raw.error_code.trim() : '';
+  const errorCode = typeof raw.error_code === 'string' && raw.error_code.trim()
+    ? raw.error_code.trim()
+    : typeof raw.code === 'string'
+      ? raw.code.trim()
+      : '';
   if (errorCode === 'unsupported_lora') {
     const advice = 'LoRA 不在 H3 白名单里，请切换为系统下拉里的 LoRA 后重试。';
     return rawError ? `${rawError}。${advice}` : advice;

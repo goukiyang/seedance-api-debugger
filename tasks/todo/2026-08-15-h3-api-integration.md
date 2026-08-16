@@ -534,7 +534,7 @@
   - 背景：H3 方确认 `/api/h3/generate` 支持顶层 `lora`，也兼容 `settings.lora`；字段名固定为 `node_type`、`lora_name`、`strength`、`low_vram`；任务状态和结果会在 `GET /api/h3/jobs/{job_id}` 的 `resolved.lora`、`resolved.estimated_runtime_sec`、`resolved.recommended_timeout_sec`、`risk_flags` 回显实际使用配置。
   - 已对齐：
     - 用户侧默认 preset 改为 H3 API 当前默认推荐 `lightx2v_4step_turbo`，避免 sd2 默认和 H3 机器默认不一致。
-    - LoRA 白名单保留 `lightx2v_turbo_lora`、`larry_v4_turbo_lora`，并新增机器真实存在的 `lightx2v_8step_lora`，默认仍是 `lightx2v_turbo_lora`。
+    - LoRA 白名单保留 `lightx2v_turbo_lora`、`larry_v4_turbo_lora`，默认仍是 `lightx2v_turbo_lora`；后续发现 8-step 文件即使机器存在，也未进入 H3 API allowlist，不能作为前端/外部接口可选项暴露。
     - H3 provider 对 `unsupported_lora`、`lora_not_found`、`unsupported_lora_node_type`、`gpu_out_of_memory` 返回用户可读错误，不只透传英文。
     - H3 脱敏诊断摘要新增 `resolved.lora`、推荐超时、预计耗时和风险标记，方便后续确认任务到底用了哪个 LoRA。
   - 验证：`npx tsx scripts/h3-admin-settings-smoke.ts`、`npx tsx scripts/h3-provider-adapter-smoke.ts`、`npx tsx scripts/h3-diagnostics-smoke.ts`、`npx tsx scripts/h3-generate-ui-smoke.ts`、`npx tsx scripts/h3-create-route-smoke.ts`、`npx tsx scripts/ultimate-canvas-h3-capabilities-smoke.ts`。

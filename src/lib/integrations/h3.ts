@@ -35,15 +35,6 @@ export const H3_LORA_OPTIONS = [
     strength: 1,
     low_vram: false,
   },
-  {
-    id: 'lightx2v_8step_lora',
-    label: 'LightX2V 8-step LoRA',
-    detail: '备用 · 8-step，速度和显存风险介于默认与 Larry 之间',
-    node_type: 'MiniMaxH3TurboLoRA',
-    lora_name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
-    strength: 1,
-    low_vram: false,
-  },
 ] as const;
 
 export type H3PresetId = typeof H3_PRESET_OPTIONS[number]['id'];

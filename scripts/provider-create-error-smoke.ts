@@ -131,6 +131,13 @@ async function main() {
   assert.ok(isProviderHtmlResponseError('Invalid JSON response: <!DOCTYPE html>'));
   assert.doesNotMatch(htmlMessage.message, /<!DOCTYPE|<html/i);
 
+  const h3UnsupportedLoraMessage = providerCreateFailureUserMessage('[unsupported_lora] LoRA is not in the H3 allowlist');
+  assert.equal(h3UnsupportedLoraMessage.code, 'H3_UNSUPPORTED_LORA');
+  assert.equal(h3UnsupportedLoraMessage.status, 400);
+  assert.match(h3UnsupportedLoraMessage.message, /不在 H3 服务白名单/);
+  assert.match(h3UnsupportedLoraMessage.message, /已取消提交并返还冻结点数/);
+  assert.doesNotMatch(h3UnsupportedLoraMessage.message, /allowlist/i);
+
   const unknownMessage = providerCreateFailureUserMessage('[NewProviderCode] provider changed a validation rule');
   assert.equal(unknownMessage.code, 'PROVIDER_CREATE_FAILED');
   assert.equal(unknownMessage.status, 502);
