@@ -494,14 +494,14 @@
   - 验证命令：服务器 `NEXT_DIST_DIR=.next-prod-candidate npm run build`。
   - 完成标准：候选构建成功，且构建产物包含本轮 H3 workspace/diagnostic 变更。
   - 停止条件：执行部署前如果远端 HEAD 已变化，必须重新确认目标 commit 和 rollback tag；候选构建失败、构建产物不含本轮变更、或排除项无法确认时，不切换 `.next-prod`。
-  - 2026-08-16 落地结果：首次部署本地 HEAD 与远端均为 `0867ceda844a600b5da380e414dd5231b41df824`；记录联调结果后，又按“部署前动态确认 HEAD”规则部署到 `f62f9b2cc86f0e5c0e3ae47620a208c402548fad`。该次归档 `/tmp/sd2-f62f9b2cc86f-20260816122123.tar`，SHA256 `5299935927f4933d588de813077b81e3c9e4a48dbd7d514f3fab2fbd9cce7a51`，release `/srv/video-api-debugger/releases/f62f9b2cc86f-20260816122123`。首次 `rsync --dry-run` 发现 `.next-prod-prev.*` 历史回滚目录会被删除，已停止并改用 `.next-prod*` 通配排除；复跑后风险删除/变更计数为 0，未触碰 `.env`、`storage`、`public/uploads`、`prisma/dev.db*`、`.next-prod*`。候选构建 `.next-prod-candidate-f62f9b2cc86f` 通过，候选 BUILD_ID `2jdu4WKKzkJhCuGZk38Ze`，构建产物命中 `H3 本地工作站`、`h3_diagnostic`。后续如因记录或安全修正产生新提交，仍以部署执行回执中的现场 HEAD、归档 SHA256、release 和 BUILD_ID 为准，不复制本段历史提交号当目标。
+  - 2026-08-16 落地结果：首次部署本地 HEAD 与远端均为 `0867ceda844a600b5da380e414dd5231b41df824`；记录联调结果后，又按“部署前动态确认 HEAD”规则部署到 `f62f9b2cc86f0e5c0e3ae47620a208c402548fad`。该次归档 `/tmp/sd2-f62f9b2cc86f-20260816122123.tar`，SHA256 `5299935927f4933d588de813077b81e3c9e4a48dbd7d514f3fab2fbd9cce7a51`，release `/srv/video-api-debugger/releases/f62f9b2cc86f-20260816122123`。首次 `rsync --dry-run` 发现 `.next-prod-prev.*` 历史回滚目录会被删除，已停止并改用 `.next-prod*` 通配排除；复跑后风险删除/变更计数为 0，未触碰 `.env`、`storage`、`public/uploads`、`prisma/dev.db*`、`.next-prod*`。该次候选构建 `.next-prod-candidate-f62f9b2cc86f` 通过，构建产物命中 `H3 本地工作站`、`h3_diagnostic`。后续因记录或安全修正产生的新提交，仍按同一流程用现场 HEAD 重新归档、dry-run、同步、候选构建和切换；最终以执行回执中的 HEAD、归档 SHA256、release 和 BUILD_ID 为准，不复制本段历史提交号当目标。
 
 - [x] T28. 切换生产构建并验证公网新版本
   - 具体做法：保留上一版 `.next-prod-prev`，把 `.next-prod-candidate` 切到 `.next-prod`，重启 `sd2-gray.service`。
   - 验证命令：`systemctl is-active sd2-gray.service`、读取 `/srv/video-api-debugger/app/.next-prod/BUILD_ID`、公网 `https://sd2.youdooart.com/api/config`、公网 `/login`、公网 `_next/static` 目标 chunk 或真实登录态 DOM。
   - 完成标准：服务 active，公网响应含服务器来源标记，BUILD_ID 更新，公网页面/API 不是旧构建，页面能看到 H3 状态机或 H3 诊断相关新文案。
   - 回滚条件：服务重启失败、公网仍旧版本、`/api/config` 失败、登录页不可达，立即恢复 `.next-prod-prev` 并停止。
-  - 2026-08-16 落地结果：已保留上一版 `.next-prod-prev` 和更早 `.next-prod-prev.*` 回滚目录，生产 BUILD_ID 最终从 `Mzx1-hc0JSD_4at4lXNJT` 切到 `2jdu4WKKzkJhCuGZk38Ze`，`sd2-gray.service` 重启后 active。服务器本机 `/api/config` 200，公网 `https://sd2.youdooart.com/api/config` 200 且含 `X-SD2-Origin: server-42-193`，公网 `/login` 200；公网静态 chunk `/_next/static/chunks/9338-b30f7994d4c7ac6f.js` 200，并命中 `H3 本地工作站`、`H3 健康检查未通过`。
+  - 2026-08-16 落地结果：已保留上一版 `.next-prod-prev` 和更早 `.next-prod-prev.*` 回滚目录，每次候选切换后 `sd2-gray.service` 均重启 active。服务器本机 `/api/config` 200，公网 `https://sd2.youdooart.com/api/config` 200 且含 `X-SD2-Origin: server-42-193`，公网 `/login` 200；公网静态 chunk `/_next/static/chunks/9338-b30f7994d4c7ac6f.js` 200，并命中 `H3 本地工作站`、`H3 健康检查未通过`。最终生产 BUILD_ID 以收尾回执的服务器和公网实测为准。
 
 - [ ] T29. 在生产配置环境跑 H3 5 秒最小 live smoke
   - 检查对象：`scripts/h3-live-minimal-smoke.ts`、生产 `PlatformSetting` 里的 H3 配置、H3 `/health`、`/api/h3/presets`、`/api/h3/generate`、`/jobs/{id}`、`/outputs`。
