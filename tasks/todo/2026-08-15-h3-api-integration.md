@@ -466,3 +466,62 @@
 
 - [ ] A10. R10 是否真正证明“用户可以放心用 H3”
   - 判断：不能只证明按钮出现或任务创建成功；必须证明输入没有被旧素材污染、机器能产出 mp4、状态提示可信、失败能交接、免费不扣点。
+
+## 8. H3 SSH 恢复与生产部署闭环计划
+
+### 8.1 大白话目标复述
+
+现在代码侧 T21/T22 已经修好并推到 Git，但线上还没有加载新版本，因为本机到生产服务器 `gouki@42.193.221.253` 的 SSH publickey 被拒。下一步最优路径是先恢复部署通道，再把当前 commit 部署到 `sd2.youdooart.com`，随后在生产配置环境里跑 H3 5 秒最小测试。只有这样，才能证明参考图串台修复、H3 诊断、状态机、免费计费和 mp4 输出是同一条真实产品链路，不是本地或孤立 H3 测试。
+
+### 8.2 执行顺序
+
+- [ ] T26. 恢复服务器 SSH 登录
+  - 检查对象：本机 `~/.ssh/codex_gouki_42_193_221_253.pub`、服务器 `gouki` 用户的 `~/.ssh/authorized_keys`、腾讯云控制台/VNC/已有管理员通道。
+  - 具体做法：把当前本机公钥重新加入服务器 `gouki` 用户 authorized_keys；或者提供新的可用部署 key；或者由有权限的人临时恢复 `gouki@42.193.221.253` SSH 登录。
+  - 验证命令：`ssh -i ~/.ssh/codex_gouki_42_193_221_253 -o BatchMode=yes gouki@42.193.221.253 'echo ok'`。
+  - 完成标准：返回 `ok`；不得要求或暴露服务器密码、token、cookie。
+  - 停止条件：仍然 `Permission denied (publickey)` 时不继续部署、不绕过到服务器 `.git pull`、不改生产文件。
+
+- [ ] T27. 部署当前 Git 版本到服务器候选构建
+  - 当前目标 commit：`ae3b86e5808ed009dd45089495bcd000deccb1d3`。
+  - 当前 rollback tag：`rollback/2026-08-16-before-h3-workspace-diagnostics`，指向 `88797a164291f6bcd594c3f9282c956ce6b35d79`。
+  - 具体做法：本地 `git archive` 当前 commit，上传到服务器 `/tmp`，解压到 `/srv/video-api-debugger/releases/<commit>`，用 `rsync -a --delete` 同步到 `/srv/video-api-debugger/app`。
+  - 排除项：必须排除 `.env`、`node_modules`、`.next`、`.next-prod*`、`storage`、`public/uploads`、`prisma/dev.db*`，避免覆盖生产密钥、上传素材、视频文件和数据库。
+  - 验证命令：服务器 `NEXT_DIST_DIR=.next-prod-candidate npm run build`。
+  - 完成标准：候选构建成功，且构建产物包含本轮 H3 workspace/diagnostic 变更。
+  - 停止条件：候选构建失败、构建产物不含本轮变更、或排除项无法确认时，不切换 `.next-prod`。
+
+- [ ] T28. 切换生产构建并验证公网新版本
+  - 具体做法：保留上一版 `.next-prod-prev`，把 `.next-prod-candidate` 切到 `.next-prod`，重启 `sd2-gray.service`。
+  - 验证命令：`systemctl is-active sd2-gray.service`、读取 `/srv/video-api-debugger/app/.next-prod/BUILD_ID`、公网 `https://sd2.youdooart.com/api/config`、公网 `/login`。
+  - 完成标准：服务 active，公网响应含服务器来源标记，BUILD_ID 更新，公网页面/API 不是旧构建。
+  - 回滚条件：服务重启失败、公网仍旧版本、`/api/config` 失败、登录页不可达，立即恢复 `.next-prod-prev` 并停止。
+
+- [ ] T29. 在生产配置环境跑 H3 5 秒最小 live smoke
+  - 检查对象：`scripts/h3-live-minimal-smoke.ts`、生产 `PlatformSetting` 里的 H3 配置、H3 `/health`、`/api/h3/presets`、`/api/h3/generate`、`/jobs/{id}`、`/outputs`。
+  - 测试顺序：先 `lightx2v_4step_turbo`，5 秒，16:9，纯文本；成功后再 `larry_v4_6step`，5 秒。
+  - 完成标准：至少一个任务 `done`，outputs 至少有一个 `kind=video`，mp4 可下载，`billing.charged=false`、`cost=0`。
+  - 停止条件：如果仍卡 `running 0.5` 超过脚本限制，脚本必须 stop 当前 job；如果 preset failed，停止批量测试并导出脱敏诊断包给 H3 侧。
+
+- [ ] T30. 继续 sd2 侧 15 秒 720P 多题材压测
+  - 前提：T29 至少一个 5 秒 H3 任务已真实产出 mp4。
+  - 测试题材：赛车、舞蹈、武打、二次元；至少覆盖 `larry_v4_8step` 和 `larry_v4_6step`。
+  - 完成标准：任务从 sd2 创建、轮询、终态、缓存、缩略图、播放、下载、项目产出、后台产出全链路闭环；所有任务 0 成本且无 `CreditLedger` 扣点。
+  - 停止条件：任一 preset 连续 2 次 failed 或卡住，先归因并出诊断，不继续盲提任务。
+
+### 8.3 验收 / 审查内容
+
+- [ ] R11. SSH 恢复与生产部署只读审查
+  - 审查方式：需要创建独立只读审查 agent；如果工具不可用，由主线程按同一清单只读复查，不能改文件，该结果不是独立审查，可信度低于子 agent。
+  - 检查对象：SSH 登录证据、部署 release 目录、生产 BUILD_ID、`sd2-gray.service`、公网 `/api/config`、公网页面、rollback tag、`.next-prod-prev`。
+  - 通过标准：能证明当前 commit 已上线，旧版本可回退，公网加载新构建；没有覆盖 `.env/storage/uploads/db` 等生产运行数据。
+
+- [ ] R12. H3 live smoke 与免费计费只读审查
+  - 审查方式：需要创建独立只读审查 agent；如果工具不可用，由主线程按同一清单只读复查。
+  - 检查对象：H3 job id、outputs、下载文件、`VideoTask`、`ProviderApiRequest`、`CostLedger`、`CreditLedger`、任务详情/项目产出页面。
+  - 通过标准：至少一个 H3 mp4 真实可下载播放；失败或卡住任务有脱敏诊断；成功/失败/取消均不扣点；页面状态机和数据库状态一致。
+
+### 8.4 审查内容是否对齐目标
+
+- [ ] A11. R11/R12 是否证明“线上用户可以用”
+  - 判断：不能只证明 SSH 通、build 过或 H3 job 创建成功；必须证明 `sd2.youdooart.com` 生产页面、任务、计费、输出、回滚都闭环。
