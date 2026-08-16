@@ -28,6 +28,7 @@ import {
 } from '@/lib/preferences/generation';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 
 // ============================================================================
 // Types
@@ -209,6 +210,8 @@ interface AuthMeResponse {
 const PROJECT_STORAGE_KEY = 'generate_project_id';
 const GENERATION_PREFERENCE_STORAGE_PREFIX = 'generation_defaults_v1:';
 const RECENT_TASK_PAGE_SIZE = 12;
+const RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES = 4;
+const RECENT_TASK_INITIAL_MIN_VISUALS = 6;
 const MAX_ACTIVE_POLLING_TASKS = 12;
 const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
 
@@ -548,6 +551,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       onAction: checkH3MachineStatus,
     };
   }, [checkH3MachineStatus, currentUser?.role, h3StatusChecking, h3VideoConfig, selectedProvider]);
+  const displayRecentTasks = useMemo(() => orderRecentTaskCards(recentTasks), [recentTasks]);
   const handleGenerationModelChange = useCallback((model: string) => {
     if (model === H3_INLINE_MODEL_ID) {
       setSelectedProvider('h3');
@@ -1113,15 +1117,34 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
     try {
       const listEndpoint = isIpSurface ? '/api/ip/video/list' : '/api/video/list';
-      const res = await fetch(`${listEndpoint}?page=${page}&limit=${RECENT_TASK_PAGE_SIZE}`, {
-        cache: 'no-store',
-      });
-      const data = await res.json() as TaskListResponse;
-      if (!res.ok) {
-        throw new Error(data.message || data.error || '最近任务加载失败');
-      }
+      const fetchPage = async (targetPage: number) => {
+        const res = await fetch(`${listEndpoint}?page=${targetPage}&limit=${RECENT_TASK_PAGE_SIZE}`, {
+          cache: 'no-store',
+        });
+        const data = await res.json() as TaskListResponse;
+        if (!res.ok) {
+          throw new Error(data.message || data.error || '最近任务加载失败');
+        }
+        return normalizeRecentTaskListResponse(data);
+      };
 
-      const { tasks, pagination } = normalizeRecentTaskListResponse(data);
+      let { tasks, pagination } = await fetchPage(page);
+      if (mode === 'replace') {
+        let visualCount = tasks.filter(recentTaskHasVisualPreview).length;
+        let fetchedPages = 1;
+        while (
+          visualCount < RECENT_TASK_INITIAL_MIN_VISUALS
+          && fetchedPages < RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES
+          && pagination.page < pagination.total_pages
+        ) {
+          const nextPage = pagination.page + 1;
+          const next = await fetchPage(nextPage);
+          tasks = mergeTasksById(tasks, next.tasks);
+          pagination = next.pagination;
+          visualCount = tasks.filter(recentTaskHasVisualPreview).length;
+          fetchedPages += 1;
+        }
+      }
       const pollableTaskIds = collectPollableTaskIds(tasks, isIpSurface);
       if (mode === 'replace') {
         setRecentTasks(tasks);
@@ -2050,7 +2073,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             <div className="composer-recent-title">最近任务</div>
             {recentTasks.length > 0 && (
               <div className="composer-recent-grid">
-                {recentTasks.map((task) => {
+                {displayRecentTasks.map((task) => {
                   const chargeText = formatProviderUsdCharge(task);
                   const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;
                   const enhanceTask = isRecentEnhanceTask(task);

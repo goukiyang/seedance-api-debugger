@@ -7511,13 +7511,13 @@ body.compare-fullscreen-open {
 
 .composer-recent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
 }
 
 .composer-task-card {
   position: relative;
-  min-height: 148px;
+  min-height: 316px;
   background-color: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
@@ -7537,17 +7537,18 @@ body.compare-fullscreen-open {
   align-items: start;
   display: grid;
   gap: 12px;
-  grid-template-columns: 104px minmax(0, 1fr);
-  min-height: 82px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   color: inherit;
   text-decoration: none;
 }
 
 .composer-task-card-preview {
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 9;
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   position: relative;
   width: 100%;
@@ -7596,24 +7597,24 @@ body.compare-fullscreen-open {
   display: flex;
   align-items: baseline;
   flex-direction: row;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 6px;
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.8);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   overflow: hidden;
 }
 
 .composer-task-card-prompt-text {
   color: rgba(255, 255, 255, 0.8);
-  display: inline-block;
+  display: -webkit-box;
   flex: 1 1 auto;
   font-size: 12px;
   line-height: 1.45;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .composer-task-card-prompt-time {
@@ -13477,7 +13478,7 @@ body.compare-fullscreen-open {
   }
 
   .composer-task-card-preview {
-    max-width: 240px;
+    max-width: none;
   }
 
   .composer-recent-footer {

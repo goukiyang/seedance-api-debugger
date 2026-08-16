@@ -123,6 +123,28 @@
   - 完成标准：`https://sd2.youdooart.com/generate` 登录态刷新后，最近任务卡片状态正确；成功任务缩略图可恢复显示。
   - 本轮结果：commit `4874343000c02709805d0b6541c7e68ed39fd857` 已推送；rollback tag `rollback/2026-08-16-before-reliable-task-thumbnails` 已推送；服务器 `.next-prod/BUILD_ID=g-RQn7-5n8ZZ2qUnIp_m0`；`sd2-gray.service` active；公网 `/api/config` 200 且 `X-SD2-Origin: server-42-193`；公网静态 JS 含 `thumb_retry` / `正在准备预览` 标记。Chrome 已打开 `https://sd2.youdooart.com/generate`，但当前工具没有可用调试 session，未取得登录态 DOM/截图。
 
+- [x] T13. 追加返修：普通生成页最近任务优先显示有画面的卡片
+  - 修改对象：`src/components/generate/GeneratePageClient.tsx`、`src/lib/video/recent-task-card-order.ts`。
+  - 根因：生产最近任务前排被 H3 failed/submitted/running 且无任何视频源的任务占据；成功 Seedance 任务虽然有视频源，但被创建时间更晚的无图任务挤到后面。
+  - 要做什么：普通生成页展示层按视觉可用性排序，不改接口分页；优先级为“有缩略图/视频源” > “已完成但预览准备中” > “正在生成/排队” > “失败/取消”。
+  - 完成标准：只要已加载任务里存在真实缩略图或视频源，普通生成页最近任务第一屏优先展示这些卡片。
+  - 本轮结果：已新增 `orderRecentTaskCards` helper 并接入普通生成页。
+
+- [x] T14. 追加返修：普通生成页最近任务卡片放大封面区
+  - 修改对象：`src/app/globals.css`。
+  - 根因：旧卡片缩略图只有 104px 宽，成功任务即使有画面也不明显。
+  - 要做什么：把最近任务卡片改成顶部 16:9 大封面，下方显示时间、提示词、视频卡和状态；提示词最多显示两行，避免挤压封面。
+  - 完成标准：普通生成页最近任务卡片第一眼先看到画面，不再是文字占主体。
+  - 本轮结果：本地样式已更新。
+
+- [ ] T15. 追加返修上线闭环
+  - 执行对象：按项目 `AGENTS.md` 的 sd2 服务器生产托管规则。
+  - 验证命令：
+    - `npx tsx scripts/recent-task-card-visual-priority-smoke.ts`
+    - `npm run build`
+    - 服务器 candidate build、`sd2-gray.service`、公网 `/api/config`、公网静态资源标记。
+  - 完成标准：`https://sd2.youdooart.com/generate` 加载新构建；普通生成页最近任务优先显示有画面的卡片，卡片封面区域明显变大。
+
 ## 3. 验收/审查内容
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
@@ -157,6 +179,12 @@
   - 证据来源：Git、SSH、公网 curl、浏览器验证。
   - 本轮结果：通过；远端分支和 rollback tag 可见，服务器生产 BUILD_ID 已切换，公网 `/api/config` 和静态资源已验证。
 
+- [ ] R6. 追加返修只读审查：普通生成页最近任务视觉优先级
+  - 检查对象：`src/lib/video/recent-task-card-order.ts`、`src/components/generate/GeneratePageClient.tsx`、`src/app/globals.css`、`scripts/recent-task-card-visual-priority-smoke.ts`、生产最近任务抽样。
+  - 通过标准：无图 H3 任务不会挡住有真实视频/缩略图源的任务；最近任务卡片封面区域足够明显；排序不改变接口分页和任务数据本身；验证证据包含 smoke、build、生产数据抽样和公网新构建。
+  - 证据来源：源码、smoke 输出、构建输出、生产服务器只读查询、公网响应。
+  - 审查方式：需要独立只读审查；如果子 agent 工具不可用，则由主线程按同一清单只读复查，不能改文件，该结果不是独立审查，可信度低于子 agent。
+
 ## 4. 审查内容是否对齐目标
 
 - [x] A1. R1 是否对齐根因
@@ -173,3 +201,6 @@
 
 - [x] A5. R5 是否符合上线闭环
   - 判断：本地 build、commit 或服务器 active 都不能单独当完成，必须证明公网加载新版本。
+
+- [ ] A6. R6 是否覆盖本次用户反馈
+  - 判断：不能只证明缩略图组件能显示；还要证明普通生成页第一屏不会被无图任务占满，且卡片封面大小对用户可见。
