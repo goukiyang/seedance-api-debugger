@@ -475,15 +475,16 @@
 
 ### 8.2 执行顺序
 
-- [ ] T26. 恢复服务器 SSH 登录
+- [x] T26. 恢复服务器 SSH 登录
   - 检查对象：本机 `~/.ssh/codex_gouki_42_193_221_253.pub`、服务器 `gouki` 用户的 `~/.ssh/authorized_keys`、腾讯云控制台/VNC/已有管理员通道。
   - 具体做法：把当前本机公钥重新加入服务器 `gouki` 用户 authorized_keys；或者提供新的可用部署 key；或者由有权限的人临时恢复 `gouki@42.193.221.253` SSH 登录。
   - 服务器侧校验：确认 `/home/gouki/.ssh` 属主为 `gouki`、权限为 `700`，`authorized_keys` 属主为 `gouki`、权限为 `600`，`sshd` 允许公钥登录；建议用 `sshd -T | grep -i '^pubkeyauthentication'` 或等价只读命令留证；如 SSH 不通，只能通过腾讯云控制台/VNC/既有管理员通道修复，不在聊天里传密码。
   - 验证命令：`ssh -i ~/.ssh/codex_gouki_42_193_221_253 -o BatchMode=yes gouki@42.193.221.253 'echo ok'`。
   - 完成标准：返回 `ok`；不得要求或暴露服务器密码、token、cookie。
   - 停止条件：仍然 `Permission denied (publickey)` 时不继续部署、不绕过到服务器 `.git pull`、不改生产文件。
+  - 2026-08-16 落地结果：`gouki` 登录最初仍被 `Permission denied (publickey)` 拒绝；已通过可用 root 通道只修复 `gouki` 的 `authorized_keys`、目录属主和权限，验证 `/home/gouki/.ssh=700`、`authorized_keys=600`、`pubkeyauthentication yes`，随后 `gouki@42.193.221.253` 返回 `ok`。未在聊天或日志输出服务器密码、token、cookie。
 
-- [ ] T27. 部署当前 Git 版本到服务器候选构建
+- [x] T27. 部署当前 Git 版本到服务器候选构建
   - 部署目标确认方式：执行部署前必须重新读取 `git rev-parse HEAD` 和 `git ls-remote --heads origin codex/video-delivery-fast-path`，两者一致后才把该 HEAD 作为部署目标写入执行回执；不要从本节复制历史提交号作为固定目标。
   - 代码变更基线：T21/T22 代码到 `ae3b86e5808ed009dd45089495bcd000deccb1d3`；后续闭环计划修正也必须随最新远端 HEAD 一起部署，避免漏掉计划、脚本和审查记录。
   - 当前 rollback tag：`rollback/2026-08-16-before-h3-workspace-diagnostics`，指向 `88797a164291f6bcd594c3f9282c956ce6b35d79`。
@@ -493,12 +494,14 @@
   - 验证命令：服务器 `NEXT_DIST_DIR=.next-prod-candidate npm run build`。
   - 完成标准：候选构建成功，且构建产物包含本轮 H3 workspace/diagnostic 变更。
   - 停止条件：执行部署前如果远端 HEAD 已变化，必须重新确认目标 commit 和 rollback tag；候选构建失败、构建产物不含本轮变更、或排除项无法确认时，不切换 `.next-prod`。
+  - 2026-08-16 落地结果：本地 HEAD 与远端 `origin/codex/video-delivery-fast-path` 均为 `0867ceda844a600b5da380e414dd5231b41df824`；归档 `/tmp/sd2-0867ceda844a-20260816120822.tar`，SHA256 `a939da2e883c0dd7b1730ad84bc1c76248056f381ce7c35ed9e76f386f558f58`，release `/srv/video-api-debugger/releases/0867ceda844a-20260816120822`。`rsync --dry-run` 风险删除/变更计数为 0，未触碰 `.env`、`storage`、`public/uploads`、`prisma/dev.db*`、`.next-prod*`。候选构建 `.next-prod-candidate-0867ceda844a` 通过，候选 BUILD_ID `Mzx1-hc0JSD_4at4lXNJT`，构建产物命中 `H3 本地工作站`、`h3_diagnostic`、`free_local_h3 = 0`。
 
-- [ ] T28. 切换生产构建并验证公网新版本
+- [x] T28. 切换生产构建并验证公网新版本
   - 具体做法：保留上一版 `.next-prod-prev`，把 `.next-prod-candidate` 切到 `.next-prod`，重启 `sd2-gray.service`。
   - 验证命令：`systemctl is-active sd2-gray.service`、读取 `/srv/video-api-debugger/app/.next-prod/BUILD_ID`、公网 `https://sd2.youdooart.com/api/config`、公网 `/login`、公网 `_next/static` 目标 chunk 或真实登录态 DOM。
   - 完成标准：服务 active，公网响应含服务器来源标记，BUILD_ID 更新，公网页面/API 不是旧构建，页面能看到 H3 状态机或 H3 诊断相关新文案。
   - 回滚条件：服务重启失败、公网仍旧版本、`/api/config` 失败、登录页不可达，立即恢复 `.next-prod-prev` 并停止。
+  - 2026-08-16 落地结果：已保留上一版 `.next-prod-prev`，生产 BUILD_ID 从 `iEzWKmlMfFnbMZ_rFp-hP` 切到 `Mzx1-hc0JSD_4at4lXNJT`，`sd2-gray.service` 重启后 active。服务器本机 `/api/config` 200，公网 `https://sd2.youdooart.com/api/config` 200 且含 `X-SD2-Origin: server-42-193`，公网 `/login` 200；公网静态 chunk `/_next/static/chunks/9338-b30f7994d4c7ac6f.js` 200，并命中 `H3 本地工作站`、`H3 健康检查未通过`。
 
 - [ ] T29. 在生产配置环境跑 H3 5 秒最小 live smoke
   - 检查对象：`scripts/h3-live-minimal-smoke.ts`、生产 `PlatformSetting` 里的 H3 配置、H3 `/health`、`/api/h3/presets`、`/api/h3/generate`、`/jobs/{id}`、`/outputs`。
@@ -508,12 +511,14 @@
   - 队列清理：测试结束后只读确认 H3 `/api/h3/queue` 没有本轮遗留 `pending/running` 任务；如脚本停止了 job，必须确认任务终态是 `cancelled/deleted/failed` 之一且有脱敏诊断。
   - 临时 tunnel 风险：H3 当前公网地址是 Cloudflare Quick Tunnel，只能作为联调入口；如 `/health` 不稳定、返回 530/502、CORS 失败或 public base URL 变化，停止 live smoke，不把临时地址当生产完成。
   - 停止条件：如果仍卡 `running 0.5` 超过脚本限制，脚本必须 stop 当前 job；如果 preset failed，停止批量测试并导出脱敏诊断包给 H3 侧；如发现任何扣点、冻结、预算扣减或队列无法清空，停止压测并回滚普通用户入口。
+  - 2026-08-16 落地结果：已刷新生产 H3 健康快照，公网 `/api/config` 返回 `ready=true`、`admin_queue_ready=true`、`api/worker/comfyui=ok`、`billing.charged=false`、`cost=0`、队列 `pending=0/running=0`。`lightx2v_4step_turbo` 5 秒 smoke 成功，job `h3idem-be43a170c2ea57b947d3f9c5` 到 `done`，下载 mp4 `493204` 字节，`duration_sec=5`、`fps=24`、`sha256_present=true`，H3 返回免费计费。`larry_v4_6step` 5 秒 smoke job `h3idem-a8ec2714441e97bdbceabaa2` 在进度 `0.5` 卡约 99 秒，脚本已按停止条件 stop，复查终态为 `cancelled` / `stopped by operator`。队列复查 `active_count=0`、`pending_count=0`、`free_slots=1`。本轮直连 H3 smoke 不创建 sd2 `VideoTask`，生产 DB 最近一小时无 H3 `VideoTask`、无 `CreditLedger` 扣点/冻结、无 H3 `CostLedger`。sd2 登录态任务创建 E2E 尚未闭环。
 
 - [ ] T30. 继续 sd2 侧 15 秒 720P 多题材压测
   - 前提：T29 至少一个 5 秒 H3 任务已真实产出 mp4。
   - 测试题材：赛车、舞蹈、武打、二次元；至少覆盖 `larry_v4_8step` 和 `larry_v4_6step`。
   - 完成标准：任务从 sd2 创建、轮询、终态、缓存、缩略图、播放、下载、项目产出、后台产出全链路闭环；所有任务 0 成本且无 `CreditLedger` 扣点。
   - 停止条件：任一 preset 连续 2 次 failed 或卡住，先归因并出诊断，不继续盲提任务。
+  - 2026-08-16 当前状态：暂不执行批量压测。原因是 `larry_v4_6step` 5 秒最小 smoke 已触发 stale-progress stop，历史队列里也有多条 `larry_v4_8step` 15 秒 failed/cancelled 记录；继续提交赛车、舞蹈、武打、二次元 15 秒 720P 会违反“卡住先归因，不继续盲提任务”的停止条件。下一步应先把 H3 侧 6step/8step 卡 `0.5` 和 15 秒失败原因定位清楚，再恢复 T30。
 
 ### 8.3 验收 / 审查内容
 
