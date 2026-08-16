@@ -153,6 +153,24 @@
   - 完成标准：截图中可访问源视频的旧任务已生成 `public/videos/thumbnails/*.jpg`；`gouki` 可写 `public/videos/thumbnails`；后续发布不会再覆盖运行期视频和截图目录。
   - 本轮结果：生产机 `public/videos` 与 `public/videos/thumbnails` 已为 `gouki:gouki 775`；截图中 4 条可访问源视频的任务已生成 jpg 缩略图；1 条很老的任务源视频已不可访问，无法凭空抽帧；同时发现并替换了指向 Mac 本机路径的坏 `storage` 软链，已创建 `storage/backups` 并确认 `gouki` 可写；独立只读初审指出生产目录缺少新守护脚本，已将 `scripts/server-ensure-runtime-dirs.sh` 同步到 `/srv/video-api-debugger/app/scripts/server-ensure-runtime-dirs.sh` 并执行通过。
 
+- [ ] T17. 历史任务缩略图批量补偿
+  - 修改对象：`scripts/backfill-video-thumbnails.ts`、`scripts/backfill-video-thumbnails-options-smoke.ts`、生产服务器任务缩略图缓存目录。
+  - 根因：目录权限修好后，只能保证新任务和被页面实际请求到的少数任务能生成封面；生产只读抽样显示最近 200 条已完成且有视频源的任务里只有 41 条有正式 jpg，159 条仍缺缩略图，因此往后滚动的历史卡片仍显示“暂无截图”。
+  - 要做什么：给补偿脚本增加 `--tasks-only` 和 `--max-candidates`，只生成任务缩略图文件，不更新素材库数据库；在生产按小批次跑任务缩略图补偿，覆盖最近任务列表后续分页。
+  - 完成标准：生产最近已完成、有视频源的任务批量生成 `public/videos/thumbnails/*.jpg`；补偿过程不写 `Asset.thumbnail_url`，不改计费、点数、任务状态和权限；每轮有清楚的 scanned/candidates/generated/skipped 输出。
+
+- [ ] T18. 运行期目录持久化根治
+  - 修改对象：`scripts/server-ensure-runtime-dirs.sh`、`scripts/server-runtime-dirs-smoke.ts`、`AGENTS.md`、生产服务器 `/srv/video-api-debugger/app/public/videos`。
+  - 根因：线上 `public/videos`、`public/uploads`、`storage` 是发布目录里的普通目录，不是 `/var/lib/video-api-debugger` 下的持久目录软链接；一次 `rsync --delete` 后会把已经生成的历史视频和封面清掉，所以用户只能看到发布后重新生成的最近几张。
+  - 要做什么：运行目录守护脚本先把现有运行数据复制到 `/var/lib/video-api-debugger`，再把 `public/uploads`、`public/videos`、`storage` 改成持久目录软链接，并验证 `gouki` 可写。
+  - 完成标准：生产 `public/videos` 指向 `/var/lib/video-api-debugger/videos`；原有持久目录中的 1000+ 视频/封面重新被 Next 静态路径访问；后续发布同步不会再清掉历史封面。
+
+- [ ] T19. `/videos` 运行期文件动态读取
+  - 修改对象：`src/app/videos/[...path]/route.ts`、`scripts/videos-dynamic-route-smoke.ts`。
+  - 根因：生产 Next 对运行中新生成到 `public/videos` 的文件会出现静态路径 404；项目之前已经给 `/uploads/[...path]` 做过动态路由兜底，但 `/videos/thumbnails/*.jpg` 和 `/videos/*.mp4` 还缺同样兜底。
+  - 要做什么：新增受控 `/videos/[...path]` 动态路由，只允许读取 `public/videos` 内文件，支持 GET、HEAD、Range 和图片/视频 MIME，路径穿越返回 400。
+  - 完成标准：刚生成的 `/videos/thumbnails/{taskId}.jpg` 不需要重启或重新 build 也能公网 200；视频文件支持 Range 播放；非法路径不能越界。
+
 ## 3. 验收/审查内容
 
 这些审查项需要创建独立子 agent 做只读审查；审查 agent 不改文件、不提交、不补实现，只判断是否达标、证据是否充分、风险是否遗漏，并输出“通过 / 不通过、证据、缺口、风险、下一步”。
@@ -200,6 +218,12 @@
   - 审查方式：创建独立只读审查 agent；审查 agent 不改文件、不提交、不部署。
   - 本轮结果：独立只读初审不通过，指出生产目录缺少 `scripts/server-ensure-runtime-dirs.sh`；补同步并执行守护脚本后复审通过。生产脚本 hash 与 commit 内容一致，关键目录均为 `gouki:gouki 775` 且 `gouki` 可写，近 30 分钟日志无 `EACCES`、`permission denied`、`public/videos/thumbnails`、`mkdir` 错误。
 
+- [ ] R8. 历史缩略图补偿只读审查
+  - 检查对象：`scripts/backfill-video-thumbnails.ts`、`scripts/server-ensure-runtime-dirs.sh`、`src/app/videos/[...path]/route.ts`、生产软链接状态、生产缩略图文件抽样、生产任务只读统计。
+  - 通过标准：`--tasks-only` 模式不会触发数据库备份和素材库更新；生产 `public/videos` 是持久目录软链接；生产最近已完成且有视频源的任务缩略图覆盖率明显提升；`/videos/thumbnails/{taskId}.jpg` 新旧文件都能公网 200；失败样本是源视频不可访问或视频文件本身问题，不是权限、发布清理或脚本漏跑。
+  - 证据来源：smoke、生产只读统计、补偿执行摘要、生产日志抽样。
+  - 审查方式：创建独立只读审查 agent；审查 agent 不改文件、不提交、不补实现。
+
 ## 4. 审查内容是否对齐目标
 
 - [x] A1. R1 是否对齐根因
@@ -224,3 +248,6 @@
 - [x] A7. R7 是否覆盖本次根因
   - 判断：不能只证明组件能重试；还要证明服务器运行目录不会因发布同步回到 `root:root` 导致缩略图 API 再次失败。
   - 本轮结果：已覆盖。发布规则排除 `public/videos`，生产目录已有并已执行运行目录守护脚本，权限和日志复审通过。
+
+- [ ] A8. R8 是否覆盖本次用户反馈
+  - 判断：不能只补最近几张；要证明后续分页里的历史视频任务能重新读到持久封面目录，并批量补齐仍缺的封面，或者明确哪些旧任务因为源视频不可访问无法补。

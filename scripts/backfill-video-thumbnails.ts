@@ -17,6 +17,25 @@ function parseLimit() {
   return Number.isFinite(limit) && limit > 0 ? limit : 200;
 }
 
+function parseMaxCandidates() {
+  const raw = process.argv.find((item) => item.startsWith('--max-candidates='))?.split('=')[1];
+  if (!raw) return null;
+  const maxCandidates = Number.parseInt(raw, 10);
+  return Number.isFinite(maxCandidates) && maxCandidates > 0 ? maxCandidates : null;
+}
+
+function hasFlag(name: string) {
+  return process.argv.includes(name);
+}
+
+function shouldBackfillTasks() {
+  return !hasFlag('--assets-only');
+}
+
+function shouldBackfillAssets() {
+  return !hasFlag('--tasks-only');
+}
+
 function databasePathFromEnv() {
   const rawUrl = process.env.DATABASE_URL || 'file:./dev.db';
   if (!rawUrl.startsWith('file:')) return null;
@@ -75,7 +94,7 @@ async function assetThumbnailExists(thumbnailUrl: string | null) {
   return fs.existsSync(localPath) && fs.statSync(localPath).isFile();
 }
 
-async function backfillTaskThumbnails(mode: BackfillMode, limit: number) {
+async function backfillTaskThumbnails(mode: BackfillMode, limit: number, maxCandidates: number | null) {
   const tasks = await prisma.videoTask.findMany({
     where: {
       local_status: 'succeeded',
@@ -103,6 +122,7 @@ async function backfillTaskThumbnails(mode: BackfillMode, limit: number) {
 
   for (const task of tasks) {
     if (await fileExists(thumbnailFilePath(task.id))) continue;
+    if (maxCandidates !== null && candidateCount >= maxCandidates) break;
     candidateCount += 1;
     if (mode === 'dry-run') {
       console.log(`- task ${task.id}: 可补任务截图`);
@@ -115,12 +135,15 @@ async function backfillTaskThumbnails(mode: BackfillMode, limit: number) {
     } else {
       skipped.push({ id: task.id, reason: result.message || result.error || '截图生成失败' });
     }
+    if (candidateCount % 10 === 0) {
+      console.log(`[backfill-video-thumbnails] tasks progress candidates=${candidateCount} generated=${generatedCount} skipped=${skipped.length}`);
+    }
   }
 
   return { scanned: tasks.length, candidateCount, generatedCount, skipped };
 }
 
-async function backfillAssetThumbnails(mode: BackfillMode, limit: number) {
+async function backfillAssetThumbnails(mode: BackfillMode, limit: number, maxCandidates: number | null) {
   const assets = await prisma.asset.findMany({
     where: {
       type: 'video',
@@ -150,6 +173,7 @@ async function backfillAssetThumbnails(mode: BackfillMode, limit: number) {
       continue;
     }
 
+    if (maxCandidates !== null && candidateCount >= maxCandidates) break;
     candidateCount += 1;
     if (mode === 'dry-run') {
       console.log(`- asset ${asset.id} ${asset.file_name}: 可补视频封面`);
@@ -171,6 +195,9 @@ async function backfillAssetThumbnails(mode: BackfillMode, limit: number) {
       data: { thumbnail_url: `/uploads/thumbs/${path.basename(result.thumbnailPath)}` },
     });
     generatedCount += 1;
+    if (candidateCount % 10 === 0) {
+      console.log(`[backfill-video-thumbnails] assets progress candidates=${candidateCount} generated=${generatedCount} skipped=${skipped.length}`);
+    }
   }
 
   return { scanned: assets.length, candidateCount, generatedCount, skipped };
@@ -179,11 +206,21 @@ async function backfillAssetThumbnails(mode: BackfillMode, limit: number) {
 async function main() {
   const mode = parseMode();
   const limit = parseLimit();
-  console.log(`[backfill-video-thumbnails] mode=${mode} limit=${limit}`);
-  if (mode === 'execute') backupSqliteDatabase();
+  const maxCandidates = parseMaxCandidates();
+  const runTasks = shouldBackfillTasks();
+  const runAssets = shouldBackfillAssets();
+  if (!runTasks && !runAssets) {
+    throw new Error('不能同时跳过任务和素材缩略图补偿。');
+  }
+  console.log(`[backfill-video-thumbnails] mode=${mode} limit=${limit} maxCandidates=${maxCandidates ?? 'all'} tasks=${runTasks} assets=${runAssets}`);
+  if (mode === 'execute' && runAssets) backupSqliteDatabase();
 
-  const taskResult = await backfillTaskThumbnails(mode, limit);
-  const assetResult = await backfillAssetThumbnails(mode, limit);
+  const taskResult = runTasks
+    ? await backfillTaskThumbnails(mode, limit, maxCandidates)
+    : { scanned: 0, candidateCount: 0, generatedCount: 0, skipped: [] as Array<{ id: string; reason: string }> };
+  const assetResult = runAssets
+    ? await backfillAssetThumbnails(mode, limit, maxCandidates)
+    : { scanned: 0, candidateCount: 0, generatedCount: 0, skipped: [] as Array<{ id: string; fileName: string; reason: string }> };
 
   console.log(`[backfill-video-thumbnails] tasks scanned=${taskResult.scanned} candidates=${taskResult.candidateCount} generated=${taskResult.generatedCount} skipped=${taskResult.skipped.length}`);
   console.log(`[backfill-video-thumbnails] assets scanned=${assetResult.scanned} candidates=${assetResult.candidateCount} generated=${assetResult.generatedCount} skipped=${assetResult.skipped.length}`);

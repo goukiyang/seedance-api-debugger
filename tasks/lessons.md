@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-08-16 - 视频封面不能放在会被发布清理的源码目录里
+
+- 问题/背景：普通生成页最近任务只有最近几张有封面，往后分页大量显示“暂无截图”；补过一轮后又只剩少数新封面。
+- 诱因/根因：生产 `public/videos`、`public/uploads`、`storage` 曾是发布目录里的普通目录，不是 `/var/lib/video-api-debugger` 下的持久软链接；`rsync --delete` 发布后会清掉历史视频和缩略图。同时 `/videos/...` 缺少类似 `/uploads/[...path]` 的动态读取路由，运行中新生成的文件可能被 Next 静态清单挡成 404。
+- 怎么改：运行目录守护脚本负责迁移并软链接运行期目录；历史缩略图补偿脚本支持 `--tasks-only` 和 `--max-candidates` 分批生成；新增 `/videos/[...path]` 受控动态路由读取 `public/videos` 下的 jpg/mp4，并支持 HEAD/Range。
+- 验证结果：生产 `public/videos` 指向 `/var/lib/video-api-debugger/videos`；最近 200 条成功且有源任务缩略图从 165/200 补到 200/200；本地 `videos-dynamic-route-smoke`、`server-runtime-dirs-smoke`、`backfill-video-thumbnails-options-smoke`、`thumbnail-pipeline-smoke`、`npm run build` 通过。
+- 可复用经验：运行期生成的上传、视频、缩略图、备份不能只靠源码目录权限；必须放持久目录并用软链接或动态路由读出来。发布脚本要排除运行期目录，发布后再跑目录守护脚本。
+
 ## 2026-08-06 - 小图片上传中断不是文件大小问题
 
 - 问题/背景：用户和同事反馈 1.5MB-1.6MB 图片上传仍提示“普通上传连接中断”，旧提示还让用户压缩文件，容易误判为图片过大。
