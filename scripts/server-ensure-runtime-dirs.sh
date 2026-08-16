@@ -66,6 +66,8 @@ migrate_runtime_path_to_shared "$APP_DIR/public/uploads" "$SHARED_ROOT/uploads"
 migrate_runtime_path_to_shared "$APP_DIR/public/videos" "$SHARED_ROOT/videos"
 migrate_runtime_path_to_shared "$APP_DIR/storage" "$SHARED_ROOT/storage"
 
+chown "$RUN_USER:$RUN_GROUP" "$APP_DIR" "$APP_DIR/public"
+
 install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 775 \
   "$SHARED_ROOT/uploads" \
   "$SHARED_ROOT/uploads/assets" \
@@ -88,6 +90,7 @@ chmod 775 \
   "$SHARED_ROOT/storage/backups"
 
 for dir in \
+  "$APP_DIR" \
   "$APP_DIR/public/uploads" \
   "$APP_DIR/public/uploads/assets" \
   "$APP_DIR/public/uploads/thumbs" \

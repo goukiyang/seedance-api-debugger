@@ -24,6 +24,8 @@ assert.match(runtimeScript, /\[\[ -L "\$app_path" && ! -e "\$app_path" \]\]/, 'r
 assert.match(runtimeScript, /migrate_runtime_path_to_shared "\$APP_DIR\/public\/uploads" "\$SHARED_ROOT\/uploads"/, 'runtime dir script must link public/uploads to shared storage');
 assert.match(runtimeScript, /migrate_runtime_path_to_shared "\$APP_DIR\/public\/videos" "\$SHARED_ROOT\/videos"/, 'runtime dir script must link public/videos to shared storage');
 assert.match(runtimeScript, /migrate_runtime_path_to_shared "\$APP_DIR\/storage" "\$SHARED_ROOT\/storage"/, 'runtime dir script must link storage to shared storage');
+assert.match(runtimeScript, /chown "\$RUN_USER:\$RUN_GROUP" "\$APP_DIR" "\$APP_DIR\/public"/, 'runtime dir script must keep app root writable for candidate builds');
+assert.match(runtimeScript, /for dir in \\\n  "\$APP_DIR"/, 'runtime dir script must verify app root write permission');
 assert.match(runtimeScript, /runtime path is not linked to shared storage/, 'runtime dir script must fail when symlink protection is missing');
 assert.match(agentRules, /public\/videos/, 'deployment rules must preserve public/videos as runtime output');
 assert.match(agentRules, /\/var\/lib\/video-api-debugger/, 'deployment rules must mention persistent runtime storage');
