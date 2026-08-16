@@ -1,6 +1,8 @@
 import type { ComposerProviderStatus, ComposerProviderStatusTone, ComposerSelectOption } from '@/components/ComposerActionBar';
 
 const H3_HEALTH_MAX_AGE_MS = 15 * 60 * 1000;
+export const H3_AUTO_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+export const H3_AUTO_CHECK_MIN_GAP_MS = 60 * 1000;
 
 type H3HealthBilling = {
   charged?: boolean | null;
@@ -136,6 +138,14 @@ function isHealthSnapshotStale(value: string | null | undefined) {
   if (!value) return true;
   const time = new Date(value).getTime();
   return !Number.isFinite(time) || Date.now() - time > H3_HEALTH_MAX_AGE_MS;
+}
+
+export function isH3HealthCheckDue(config: H3VideoConfig | null) {
+  if (!config?.enabled || !config.configured || !config.api_token_configured) return false;
+  const checkedAt = config.health?.checked_at;
+  if (!checkedAt) return true;
+  const checkedAtMs = new Date(checkedAt).getTime();
+  return !Number.isFinite(checkedAtMs) || Date.now() - checkedAtMs >= H3_AUTO_CHECK_INTERVAL_MS;
 }
 
 function isFreeBilling(billing: H3HealthBilling) {

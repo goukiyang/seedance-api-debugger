@@ -12,8 +12,10 @@ import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import {
+  H3_AUTO_CHECK_MIN_GAP_MS,
   buildH3MachineStatus,
   h3DisabledReason,
+  isH3HealthCheckDue,
   normalizeH3VideoConfig,
   type H3VideoConfig,
 } from '@/components/H3MachineStatus';
@@ -433,6 +435,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const recentTasksLoadingRef = useRef(false);
   const recentTasksPageRef = useRef(0);
   const recentTasksHasMoreRef = useRef(false);
+  const lastH3AutoCheckAtRef = useRef(0);
 
   // ---- Result Polling ----
   const [polledResult, setPolledResult] = useState<PolledTask | null>(null);
@@ -509,10 +512,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       return null;
     }
   }, [isIpSurface]);
-  const checkH3MachineStatus = useCallback(async () => {
+  const checkH3MachineStatus = useCallback(async (options?: { silent?: boolean }) => {
     if (isIpSurface || h3StatusChecking) return;
     setH3StatusChecking(true);
-    setError(null);
+    if (!options?.silent) setError(null);
     try {
       const response = currentUser?.role === 'admin'
         ? await fetch('/api/admin/integrations/h3', { method: 'POST', cache: 'no-store' })
@@ -523,7 +526,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
       setH3VideoConfig(normalizeH3VideoConfig(currentUser?.role === 'admin' ? data?.config : data?.h3_video));
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'H3 状态检查失败');
+      if (!options?.silent) {
+        setError(error instanceof Error ? error.message : 'H3 状态检查失败');
+      }
     } finally {
       setH3StatusChecking(false);
     }
@@ -537,8 +542,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     if (currentUser?.role !== 'admin') return status;
     return {
       ...status,
-      actionLabel: '检查状态',
-      actionTitle: '立即检查 H3 API、Worker、队列和免费计费状态',
+      actionLabel: '刷新',
+      actionTitle: '状态会自动刷新；这里用于手动立即刷新 H3 API、Worker、队列和免费计费状态',
       actionBusy: h3StatusChecking,
       onAction: checkH3MachineStatus,
     };
@@ -633,6 +638,36 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setSelectedProvider('seedance');
     }
   }, [isIpSurface, selectedProvider]);
+
+  const triggerH3AutoCheck = useCallback(() => {
+    if (isIpSurface || selectedProvider !== 'h3' || currentUser?.role !== 'admin') return;
+    if (h3StatusChecking || !isH3HealthCheckDue(h3VideoConfig)) return;
+    const now = Date.now();
+    if (now - lastH3AutoCheckAtRef.current < H3_AUTO_CHECK_MIN_GAP_MS) return;
+    lastH3AutoCheckAtRef.current = now;
+    void checkH3MachineStatus({ silent: true });
+  }, [
+    checkH3MachineStatus,
+    currentUser?.role,
+    h3StatusChecking,
+    h3VideoConfig,
+    isIpSurface,
+    selectedProvider,
+  ]);
+
+  useEffect(() => {
+    triggerH3AutoCheck();
+  }, [triggerH3AutoCheck]);
+
+  useEffect(() => {
+    if (isIpSurface || selectedProvider !== 'h3' || currentUser?.role !== 'admin') return;
+    const timer = window.setInterval(triggerH3AutoCheck, H3_AUTO_CHECK_MIN_GAP_MS);
+    window.addEventListener('focus', triggerH3AutoCheck);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', triggerH3AutoCheck);
+    };
+  }, [currentUser?.role, isIpSurface, selectedProvider, triggerH3AutoCheck]);
 
   useEffect(() => {
     fetch('/api/collections')

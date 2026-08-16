@@ -147,6 +147,37 @@ export function ComposerActionBar({
           </div>
         )}
 
+        {/* 模型标签 */}
+        <div className="composer-chip-wrap">
+          <ParamChip
+            label={effectiveModelLabel}
+            dropdown={hasModelOptions}
+            onClick={hasModelOptions ? () => setShowModelMenu(!showModelMenu) : undefined}
+          />
+          {showModelMenu && hasModelOptions && (
+            <>
+              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowModelMenu(false)} />
+              <div className="composer-chip-dropdown composer-model-options">
+                {modelOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`composer-chip-dropdown-item ${option.id === selectedModelOption?.id ? 'active' : ''}`}
+                    onClick={() => {
+                      onModelChange?.(option.id);
+                      setShowModelMenu(false);
+                    }}
+                    title={option.id}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.detail}</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
         {shouldShowProviderStatus && providerStatus && (
           <span
             className={`composer-provider-status composer-provider-status-${providerStatus.tone}`}
@@ -181,42 +212,11 @@ export function ComposerActionBar({
                 disabled={providerStatus.actionBusy}
                 title={providerStatus.actionTitle || providerStatus.actionLabel}
               >
-                {providerStatus.actionBusy ? '检查中' : providerStatus.actionLabel || '检查状态'}
+                {providerStatus.actionBusy ? '刷新中' : providerStatus.actionLabel || '刷新'}
               </button>
             )}
           </span>
         )}
-
-        {/* 模型标签 */}
-        <div className="composer-chip-wrap">
-          <ParamChip
-            label={effectiveModelLabel}
-            dropdown={hasModelOptions}
-            onClick={hasModelOptions ? () => setShowModelMenu(!showModelMenu) : undefined}
-          />
-          {showModelMenu && hasModelOptions && (
-            <>
-              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowModelMenu(false)} />
-              <div className="composer-chip-dropdown composer-model-options">
-                {modelOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={`composer-chip-dropdown-item ${option.id === selectedModelOption?.id ? 'active' : ''}`}
-                    onClick={() => {
-                      onModelChange?.(option.id);
-                      setShowModelMenu(false);
-                    }}
-                    title={option.id}
-                  >
-                    <span>{option.label}</span>
-                    <small>{option.detail}</small>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
 
         {/* 模式选择 */}
         <div className="composer-chip-wrap">
