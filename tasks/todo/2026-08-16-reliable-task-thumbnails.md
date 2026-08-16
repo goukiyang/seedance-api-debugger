@@ -103,10 +103,11 @@
     - retry URL 已有 query 时正确追加 cache bust 参数。
   - 完成标准：`npx tsx scripts/task-video-thumbnail-state-smoke.ts` 通过。
 
-- [ ] T10. 真实生产数据只读抽样验证
+- [x] T10. 真实生产数据只读抽样验证
   - 检查对象：生产服务器 Prisma 只读抽样、公开视频 HEAD、ffmpeg 抽帧 smoke。
   - 要做什么：通过服务器只读查询或临时 Node 脚本抽样；不打印 token、完整视频 URL、cookie 或私有路径，只输出布尔值、状态码、content-type、文件是否存在和任务状态摘要。
   - 完成标准：能区分“任务没有输出源”和“有源但前端没重试”。
+  - 本轮结果：服务器 Prisma 只读抽样完成，未打印 URL/token/cookie。最近 H3 样本多为 failed/submitted/running 且无任何视频源，应显示状态文案；另抽样 8 条 Seedance 成功任务均有 public/local/result 视频源，应提供 `/api/video/thumbnail/{taskId}` 缩略图入口。
 
 - [x] T11. 本地验证和构建
   - 命令：
@@ -116,10 +117,11 @@
   - 完成标准：全部通过；如失败，先修根因，不带失败提交。
   - 本轮结果：`npx tsx scripts/task-video-thumbnail-state-smoke.ts` 通过；`npm run lint` 通过且仅有既有 warning；`npm run build` 通过且仅有既有 warning。
 
-- [ ] T12. 上线闭环
+- [x] T12. 上线闭环
   - 执行对象：按项目 `AGENTS.md` 的 sd2 服务器生产托管规则。
   - 要做什么：形成聚焦 commit、rollback tag、归档上传、服务器 candidate build、切换 `.next-prod`、重启 `sd2-gray.service`、公网验证。
   - 完成标准：`https://sd2.youdooart.com/generate` 登录态刷新后，最近任务卡片状态正确；成功任务缩略图可恢复显示。
+  - 本轮结果：commit `4874343000c02709805d0b6541c7e68ed39fd857` 已推送；rollback tag `rollback/2026-08-16-before-reliable-task-thumbnails` 已推送；服务器 `.next-prod/BUILD_ID=g-RQn7-5n8ZZ2qUnIp_m0`；`sd2-gray.service` active；公网 `/api/config` 200 且 `X-SD2-Origin: server-42-193`；公网静态 JS 含 `thumb_retry` / `正在准备预览` 标记。Chrome 已打开 `https://sd2.youdooart.com/generate`，但当前工具没有可用调试 session，未取得登录态 DOM/截图。
 
 ## 3. 验收/审查内容
 
@@ -147,11 +149,13 @@
   - 检查对象：`https://sd2.youdooart.com/generate`、`/template-generate`、`/tasks`、后台最近生成或产出页。
   - 通过标准：H3 无输出任务显示真实状态；Seedance 成功任务能显示/恢复缩略图；刷新后行为一致。
   - 证据来源：登录态浏览器截图、DOM、网络请求。
+  - 本轮结果：未关闭。Chrome 已打开目标生产页，但 ClickOps 默认 session 不存在、Chrome DevTools 9222 不可用，未取得登录态 DOM/截图；当前证据只能证明目标 tab 打开和公网新静态资源可访问。
 
-- [ ] R5. 部署闭环只读审查
+- [x] R5. 部署闭环只读审查
   - 检查对象：Git commit/push、rollback tag、服务器 `.next-prod/BUILD_ID`、公网 `/api/config`、目标页面静态资源。
   - 通过标准：远端可回档，服务器加载新构建，公网入口不是旧缓存。
   - 证据来源：Git、SSH、公网 curl、浏览器验证。
+  - 本轮结果：通过；远端分支和 rollback tag 可见，服务器生产 BUILD_ID 已切换，公网 `/api/config` 和静态资源已验证。
 
 ## 4. 审查内容是否对齐目标
 
@@ -167,5 +171,5 @@
 - [ ] A4. R4 是否符合用户真实体验
   - 判断：必须看真实页面，不把源码检查当成用户可见完成。
 
-- [ ] A5. R5 是否符合上线闭环
+- [x] A5. R5 是否符合上线闭环
   - 判断：本地 build、commit 或服务器 active 都不能单独当完成，必须证明公网加载新版本。
