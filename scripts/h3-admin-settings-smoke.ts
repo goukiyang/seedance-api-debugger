@@ -31,7 +31,7 @@ const saved = buildH3ApiSettingsPatch(current, {
 
 assert.equal(H3_API_SETTING_KEY, 'h3_video_api_v1');
 assert.equal(H3_DEFAULT_BASE_URL, 'http://127.0.0.1:8893');
-assert.equal(H3_DEFAULT_PRESET_ID, 'lightx2v_4step_turbo');
+assert.equal(H3_DEFAULT_PRESET_ID, 'larry_v4_6step');
 assert.equal(H3_DEFAULT_LORA_ID, 'lightx2v_turbo_lora');
 assert.equal(H3_HEALTH_MAX_AGE_MS, 15 * 60 * 1000);
 assert.equal(saved.enabled, true);
@@ -58,7 +58,6 @@ assert.equal(dto.admin_token_configured, true);
 assert.equal(dto.default_lora_id, 'larry_v4_turbo_lora');
 assert.equal(dto.lora_options[0]?.id, 'lightx2v_turbo_lora');
 assert.equal(dto.lora_options[1]?.id, 'larry_v4_turbo_lora');
-assert.equal(dto.lora_options[2]?.id, 'lightx2v_8step_lora');
 assert.deepEqual(dto.missing, []);
 assert.equal(JSON.stringify(dto).includes('secret-h3-user-token'), false);
 assert.equal(JSON.stringify(dto).includes('secret-h3-admin-token'), false);
@@ -67,22 +66,16 @@ const healthy = {
   ...saved,
   health: h3HealthSnapshotFromResponse({
     api: 'ok',
-    version: 'h3-api-0.3.2',
+    version: 'h3-api-0.3.1',
     public_base_url: null,
     worker_url: 'http://127.0.0.1:8894',
-    default_preset: 'lightx2v_4step_turbo',
+    default_preset: 'larry_v4_6step',
     preset_count: 3,
     billing: { charged: false, cost: 0, currency: null, cost_model: 'free_local' },
     worker: { worker: 'ok', comfyui: 'ok' },
     queue: { paused: false, pending: 0, running: 0, max_pending_jobs: 20, active: 0, max_active_jobs: 1 },
   }, {
     presets: [
-      {
-        id: 'lightx2v_4step_turbo',
-        estimated_runtime_sec: 89,
-        recommended_timeout_sec: 300,
-        runtime_policy: 'benchmark_estimated',
-      },
       {
         id: 'larry_v4_6step',
         estimated_runtime_sec: 266.96,
@@ -95,6 +88,12 @@ const healthy = {
         recommended_timeout_sec: 750,
         runtime_policy: 'benchmark_estimated',
       },
+      {
+        id: 'lightx2v_4step_turbo',
+        estimated_runtime_sec: 89.33,
+        recommended_timeout_sec: 300,
+        runtime_policy: 'benchmark_estimated',
+      },
     ],
   }),
 };
@@ -103,7 +102,7 @@ const healthyDto = safeH3ConfigDto(healthy);
 assert.equal(healthyDto.ready, true);
 assert.equal(healthyDto.admin_queue_ready, true);
 assert.equal(healthyDto.health?.api, 'ok');
-assert.equal(healthyDto.health?.version, 'h3-api-0.3.2');
+assert.equal(healthyDto.health?.version, 'h3-api-0.3.1');
 assert.equal(healthyDto.health?.public_base_url, null);
 assert.equal(healthyDto.health?.worker, 'ok');
 assert.equal(healthyDto.health?.comfyui, 'ok');
@@ -113,11 +112,10 @@ assert.equal(healthyDto.health?.billing?.cost_model, 'free_local');
 assert.equal(healthyDto.health?.queue?.paused, false);
 assert.equal(healthyDto.health?.queue?.pending, 0);
 assert.equal(healthyDto.health?.queue?.max_pending_jobs, 20);
-assert.equal(healthyDto.preset_options[0]?.id, 'lightx2v_4step_turbo');
-assert.equal(healthyDto.preset_options[0]?.recommended_timeout_sec, 300);
-assert.equal(healthyDto.preset_options[0]?.estimated_runtime_sec, 89);
+assert.equal(healthyDto.preset_options[0]?.recommended_timeout_sec, 630);
+assert.equal(healthyDto.preset_options[0]?.estimated_runtime_sec, 266.96);
 assert.equal(healthyDto.preset_options[0]?.runtime_policy, 'benchmark_estimated');
-assert.ok(healthyDto.preset_options[0]?.detail.includes('建议等待 约 5 分钟'));
+assert.ok(healthyDto.preset_options[0]?.detail.includes('建议等待 约 11 分钟'));
 
 const staleHealthy = {
   ...healthy,

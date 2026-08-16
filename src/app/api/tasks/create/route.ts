@@ -659,7 +659,7 @@ export async function POST(request: NextRequest) {
         ? body.model.trim()
         : h3Settings.default_preset_id;
     if (!isH3PresetId(requestedPreset)) {
-      return errorJson('H3 preset 只允许 lightx2v_4step_turbo、larry_v4_6step、larry_v4_8step', 400);
+      return errorJson('H3 preset 只允许 larry_v4_6step、larry_v4_8step、lightx2v_4step_turbo', 400);
     }
     if (!['16:9', '9:16', '1:1', '4:3', '3:4'].includes(ratio)) {
       return errorJson('H3 比例只支持 16:9、9:16、1:1、4:3、3:4', 400);

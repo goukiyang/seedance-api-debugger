@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 
 export const H3_API_SETTING_KEY = 'h3_video_api_v1';
 export const H3_DEFAULT_BASE_URL = 'http://127.0.0.1:8893';
-export const H3_DEFAULT_PRESET_ID = 'lightx2v_4step_turbo';
+export const H3_DEFAULT_PRESET_ID = 'larry_v4_6step';
 export const H3_HEALTH_PATH = '/health';
 export const H3_PRESETS_PATH = '/api/h3/presets';
 export const H3_GENERATE_PATH = '/api/h3/generate';
@@ -11,9 +11,9 @@ export const H3_HEALTH_MAX_AGE_MS = 15 * 60 * 1000;
 export const H3_DEFAULT_LORA_ID = 'lightx2v_turbo_lora';
 
 export const H3_PRESET_OPTIONS = [
-  { id: 'lightx2v_4step_turbo', label: '推荐', detail: '默认 · 速度优先，显存风险更低' },
-  { id: 'larry_v4_6step', label: '质量增强', detail: '质量更好但更慢，720P 长秒数有显存风险' },
-  { id: 'larry_v4_8step', label: '画质优先', detail: '更多步数，更慢，适合谨慎测试' },
+  { id: 'larry_v4_6step', label: '推荐', detail: '默认质量和速度平衡' },
+  { id: 'larry_v4_8step', label: '画质优先', detail: '更多步数，细节更稳' },
+  { id: 'lightx2v_4step_turbo', label: '快速预览', detail: '速度优先，用于草稿' },
 ] as const;
 
 export const H3_LORA_OPTIONS = [
@@ -32,15 +32,6 @@ export const H3_LORA_OPTIONS = [
     detail: '画质优先，15 秒 16:9 场景显存风险更高',
     node_type: 'MiniMaxH3TurboLoRA',
     lora_name: 'minimax_h3_turbo_v4_step600_ema.safetensors',
-    strength: 1,
-    low_vram: false,
-  },
-  {
-    id: 'lightx2v_8step_lora',
-    label: 'LightX2V 8-step LoRA',
-    detail: '备用 · 8-step，速度和显存风险介于默认与 Larry 之间',
-    node_type: 'MiniMaxH3TurboLoRA',
-    lora_name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
     strength: 1,
     low_vram: false,
   },

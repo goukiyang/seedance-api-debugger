@@ -94,15 +94,15 @@ type H3Config = {
   health_path: string;
   presets_path: string;
   generate_path: string;
-  default_preset_id: 'lightx2v_4step_turbo' | 'larry_v4_6step' | 'larry_v4_8step';
-  default_lora_id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora' | 'lightx2v_8step_lora';
+  default_preset_id: 'larry_v4_6step' | 'larry_v4_8step' | 'lightx2v_4step_turbo';
+  default_lora_id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora';
   preset_options: Array<{
-    id: 'lightx2v_4step_turbo' | 'larry_v4_6step' | 'larry_v4_8step';
+    id: 'larry_v4_6step' | 'larry_v4_8step' | 'lightx2v_4step_turbo';
     label: string;
     detail: string;
   }>;
   lora_options: Array<{
-    id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora' | 'lightx2v_8step_lora';
+    id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora';
     label: string;
     detail: string;
   }>;
@@ -251,17 +251,16 @@ const EMPTY_H3_CONFIG: H3Config = {
   health_path: '/health',
   presets_path: '/api/h3/presets',
   generate_path: '/api/h3/generate',
-  default_preset_id: 'lightx2v_4step_turbo',
+  default_preset_id: 'larry_v4_6step',
   default_lora_id: 'lightx2v_turbo_lora',
   preset_options: [
-    { id: 'lightx2v_4step_turbo', label: '推荐', detail: '默认 · 速度优先，显存风险更低' },
-    { id: 'larry_v4_6step', label: '质量增强', detail: '质量更好但更慢，720P 长秒数有显存风险' },
-    { id: 'larry_v4_8step', label: '画质优先', detail: '更多步数，更慢，适合谨慎测试' },
+    { id: 'larry_v4_6step', label: '推荐', detail: '默认质量和速度平衡' },
+    { id: 'larry_v4_8step', label: '画质优先', detail: '更多步数，细节更稳' },
+    { id: 'lightx2v_4step_turbo', label: '快速预览', detail: '速度优先，用于草稿' },
   ],
   lora_options: [
     { id: 'lightx2v_turbo_lora', label: 'LightX2V 快速 LoRA', detail: '默认 · 4-step turbo，显存压力更低，适合先跑通' },
     { id: 'larry_v4_turbo_lora', label: 'Larry 高质量 LoRA', detail: '画质优先，15 秒 16:9 场景显存风险更高' },
-    { id: 'lightx2v_8step_lora', label: 'LightX2V 8-step LoRA', detail: '备用 · 8-step，速度和显存风险介于默认与 Larry 之间' },
   ],
   api_token_configured: false,
   admin_token_configured: false,

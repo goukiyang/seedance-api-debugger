@@ -128,29 +128,6 @@ function summarizeQueue(queue: unknown) {
   };
 }
 
-function summarizeResolved(raw: Record<string, unknown> | null) {
-  if (!raw) return null;
-  const resolved = raw.resolved && typeof raw.resolved === 'object' && !Array.isArray(raw.resolved)
-    ? raw.resolved as Record<string, unknown>
-    : {};
-  const lora = resolved.lora && typeof resolved.lora === 'object' && !Array.isArray(resolved.lora)
-    ? resolved.lora as Record<string, unknown>
-    : null;
-  return {
-    lora: lora ? {
-      node_type: cleanString(lora.node_type),
-      lora_name: cleanString(lora.lora_name),
-      strength: finiteNumber(lora.strength),
-      low_vram: typeof lora.low_vram === 'boolean' ? lora.low_vram : null,
-    } : null,
-    estimated_runtime_sec: finiteNumber(raw.estimated_runtime_sec ?? resolved.estimated_runtime_sec),
-    recommended_timeout_sec: finiteNumber(raw.recommended_timeout_sec ?? resolved.recommended_timeout_sec),
-    risk_flags: Array.isArray(raw.risk_flags)
-      ? raw.risk_flags.filter((item): item is string => typeof item === 'string').slice(0, 20)
-      : [],
-  };
-}
-
 export function buildH3DiagnosticSnapshot(input: DiagnosticInput) {
   const rawRecord = input.raw && typeof input.raw === 'object' ? input.raw as Record<string, unknown> : null;
   const rawOutputs = input.outputs ?? rawRecord?.outputs;
@@ -180,7 +157,6 @@ export function buildH3DiagnosticSnapshot(input: DiagnosticInput) {
         ? (input.health as Record<string, unknown>).queue
         : null
     )),
-    resolved: summarizeResolved(rawRecord),
     outputs: summarizeOutputs(rawOutputs),
     raw_summary: {
       keys: objectKeys(input.raw),
