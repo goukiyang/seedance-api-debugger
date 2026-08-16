@@ -29,9 +29,9 @@ const fetchImpl: typeof fetch = async (url, init) => {
   if (String(url).endsWith('/health')) {
     return Response.json({
       api: 'ok',
-      version: 'h3-api-0.3.1',
+      version: 'h3-api-0.3.2',
       public_base_url: null,
-      default_preset: 'larry_v4_6step',
+      default_preset: 'lightx2v_4step_turbo',
       preset_count: 3,
       billing: { charged: false, cost: 0, currency: null, cost_model: 'free_local' },
       worker: { worker: 'ok', comfyui: 'ok' },
@@ -42,7 +42,7 @@ const fetchImpl: typeof fetch = async (url, init) => {
     return Response.json({
       presets: H3_ALLOWED_PRESET_IDS.map((id) => ({
         id,
-        estimated_runtime_sec: id === 'lightx2v_4step_turbo' ? 89.33 : id === 'larry_v4_8step' ? 342.14 : 266.96,
+        estimated_runtime_sec: id === 'lightx2v_4step_turbo' ? 89 : id === 'larry_v4_8step' ? 342.14 : 266.96,
         recommended_timeout_sec: id === 'lightx2v_4step_turbo' ? 300 : id === 'larry_v4_8step' ? 750 : 630,
         runtime_policy: 'benchmark_estimated',
       })),
@@ -72,12 +72,20 @@ const fetchImpl: typeof fetch = async (url, init) => {
     return Response.json({
       job_id: 'h3-20260815-013000-abc12345',
       status: 'done',
-      preset: 'larry_v4_6step',
+      preset: 'lightx2v_4step_turbo',
       progress_detail: { stage: 'finalizing', elapsed_sec: 95 },
-      estimated_runtime_sec: 266.96,
-      recommended_timeout_sec: 630,
+      estimated_runtime_sec: 89,
+      recommended_timeout_sec: 300,
       risk_flags: [],
-      resolved: { seed: 123456 },
+      resolved: {
+        seed: 123456,
+        lora: {
+          node_type: 'MiniMaxH3TurboLoRA',
+          lora_name: 'minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+          strength: 1,
+          low_vram: false,
+        },
+      },
       outputs: [{
         index: 0,
         kind: 'video',
@@ -126,6 +134,30 @@ const fetchImpl: typeof fetch = async (url, init) => {
       error: 'ComfyUI OOM',
     });
   }
+  if (String(url).endsWith('/api/h3/jobs/h3-unsupported-lora')) {
+    return Response.json({
+      job_id: 'h3-unsupported-lora',
+      status: 'failed',
+      error_code: 'unsupported_lora',
+      error: 'LoRA is not in the H3 allowlist',
+    });
+  }
+  if (String(url).endsWith('/api/h3/jobs/h3-lora-not-found')) {
+    return Response.json({
+      job_id: 'h3-lora-not-found',
+      status: 'failed',
+      error_code: 'lora_not_found',
+      error: 'LoRA file does not exist on the H3 machine',
+    });
+  }
+  if (String(url).endsWith('/api/h3/jobs/h3-unsupported-node-type')) {
+    return Response.json({
+      job_id: 'h3-unsupported-node-type',
+      status: 'failed',
+      error_code: 'unsupported_lora_node_type',
+      error: 'only MiniMaxH3TurboLoRA is supported',
+    });
+  }
   if (String(url).endsWith('/api/h3/jobs/h3-20260815-013000-abc12345/outputs')) {
     return Response.json({
       job_id: 'h3-20260815-013000-abc12345',
@@ -151,13 +183,13 @@ const fetchImpl: typeof fetch = async (url, init) => {
 };
 
 async function main() {
-  assert.deepEqual(H3_ALLOWED_PRESET_IDS, ['larry_v4_6step', 'larry_v4_8step', 'lightx2v_4step_turbo']);
-  assert.deepEqual(H3_ALLOWED_LORA_IDS, ['lightx2v_turbo_lora', 'larry_v4_turbo_lora']);
+  assert.deepEqual(H3_ALLOWED_PRESET_IDS, ['lightx2v_4step_turbo', 'larry_v4_6step', 'larry_v4_8step']);
+  assert.deepEqual(H3_ALLOWED_LORA_IDS, ['lightx2v_turbo_lora', 'larry_v4_turbo_lora', 'lightx2v_8step_lora']);
   assert.deepEqual(H3_ALLOWED_ASPECT_RATIOS, ['16:9', '9:16', '1:1', '4:3', '3:4']);
 
   const health = await getH3Health({ baseUrl: 'https://h3-api.example.com/', fetchImpl });
   assert.equal(health.api, 'ok');
-  assert.equal(health.version, 'h3-api-0.3.1');
+  assert.equal(health.version, 'h3-api-0.3.2');
   assert.equal(health.billing?.charged, false);
   assert.equal(health.billing?.cost_model, 'free_local');
   assert.equal(health.queue?.max_pending_jobs, 20);
@@ -228,6 +260,24 @@ async function main() {
     },
   }), /H3 LoRA 只允许/);
 
+  const defaultPayload = buildH3GeneratePayload({ prompt: 'default path' });
+  assert.equal(defaultPayload.preset_id, 'lightx2v_4step_turbo');
+  assert.deepEqual(defaultPayload.lora, {
+    node_type: 'MiniMaxH3TurboLoRA',
+    lora_name: 'minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+    strength: 1,
+    low_vram: false,
+  });
+  assert.deepEqual(buildH3GeneratePayload({
+    prompt: '8-step lora',
+    lora_id: 'lightx2v_8step_lora',
+  }).lora, {
+    node_type: 'MiniMaxH3TurboLoRA',
+    lora_name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
+    strength: 1,
+    low_vram: false,
+  });
+
   const created = await createH3VideoJob(payload, {
     baseUrl: 'https://h3-api.example.com',
     apiToken: 'secret-user-token',
@@ -255,12 +305,27 @@ async function main() {
   assert.equal(status.provider_task_id, 'h3-20260815-013000-abc12345');
   assert.equal(status.provider_status, 'done');
   assert.equal(status.local_status, 'succeeded');
-  assert.equal(status.provider_model, 'larry_v4_6step');
+  assert.equal(status.provider_model, 'lightx2v_4step_turbo');
   assert.equal(status.seed, 123456);
   assert.equal(status.result_video_url, 'h3-internal-output://h3-20260815-013000-abc12345/0');
   assert.equal(isH3InternalOutputUrl(status.result_video_url), true);
-  assert.equal((status.raw as Record<string, unknown>).recommended_timeout_sec, 630);
+  assert.equal((status.raw as Record<string, unknown>).recommended_timeout_sec, 300);
   assert.deepEqual((status.raw as Record<string, unknown>).risk_flags, []);
+  assert.deepEqual(
+    ((status.raw as Record<string, unknown>).h3_diagnostic as Record<string, unknown>)
+      .resolved,
+    {
+      lora: {
+        node_type: 'MiniMaxH3TurboLoRA',
+        lora_name: 'minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+        strength: 1,
+        low_vram: false,
+      },
+      estimated_runtime_sec: 89,
+      recommended_timeout_sec: 300,
+      risk_flags: [],
+    },
+  );
 
   const oomStatus = await getH3TaskStatus('h3-oom', {
     baseUrl: 'https://h3-api.example.com',
@@ -271,6 +336,20 @@ async function main() {
   assert.equal(oomStatus.error_message?.includes('显存风险高'), true);
   assert.equal((oomStatus.raw as Record<string, unknown>).error_code, 'gpu_out_of_memory');
   assert.equal((oomStatus.raw as Record<string, unknown>).recommended_timeout_sec, 750);
+
+  for (const [jobId, messagePart] of [
+    ['h3-unsupported-lora', 'LoRA 不在 H3 白名单'],
+    ['h3-lora-not-found', '找不到这个 LoRA 文件'],
+    ['h3-unsupported-node-type', 'MiniMaxH3TurboLoRA'],
+  ] as const) {
+    const errorStatus = await getH3TaskStatus(jobId, {
+      baseUrl: 'https://h3-api.example.com',
+      apiToken: 'secret-user-token',
+      fetchImpl,
+    });
+    assert.equal(errorStatus.local_status, 'failed');
+    assert.equal(errorStatus.error_message?.includes(messagePart), true);
+  }
 
   const emptyOutputStatus = await getH3TaskStatus('h3-empty-output', {
     baseUrl: 'https://h3-api.example.com',

@@ -419,6 +419,18 @@ function h3ErrorMessageFromRaw(raw: Record<string, unknown>) {
       ? raw.message.trim()
       : '';
   const errorCode = typeof raw.error_code === 'string' ? raw.error_code.trim() : '';
+  if (errorCode === 'unsupported_lora') {
+    const advice = 'LoRA 不在 H3 白名单里，请切换为系统下拉里的 LoRA 后重试。';
+    return rawError ? `${rawError}。${advice}` : advice;
+  }
+  if (errorCode === 'lora_not_found') {
+    const advice = 'H3 机器上找不到这个 LoRA 文件，请联系管理员检查模型文件。';
+    return rawError ? `${rawError}。${advice}` : advice;
+  }
+  if (errorCode === 'unsupported_lora_node_type') {
+    const advice = 'H3 只支持 MiniMaxH3TurboLoRA 类型的 LoRA。';
+    return rawError ? `${rawError}。${advice}` : advice;
+  }
   if (errorCode === 'gpu_out_of_memory') {
     const flags = Array.isArray(raw.risk_flags)
       ? raw.risk_flags.filter((item): item is string => typeof item === 'string')

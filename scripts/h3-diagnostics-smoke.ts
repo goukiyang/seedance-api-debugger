@@ -19,7 +19,7 @@ const diagnostic = buildH3DiagnosticSnapshot({
   retryAfterSeconds: 30,
   health: {
     api: 'ok',
-    version: 'h3-api-0.3.0',
+    version: 'h3-api-0.3.2',
     worker: 'ok',
     comfyui: 'ok',
     worker_url: 'http://127.0.0.1:8793',
@@ -43,6 +43,17 @@ const diagnostic = buildH3DiagnosticSnapshot({
         size_bytes: 1234,
       },
     ],
+    resolved: {
+      lora: {
+        node_type: 'MiniMaxH3TurboLoRA',
+        lora_name: 'minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors',
+        strength: 1,
+        low_vram: false,
+      },
+    },
+    estimated_runtime_sec: 89,
+    recommended_timeout_sec: 300,
+    risk_flags: ['queued_for_test'],
   },
 });
 
@@ -54,6 +65,9 @@ assert.equal(diagnostic.health?.billing?.cost_model, 'free_local');
 assert.equal(diagnostic.queue?.pending, 2);
 assert.equal(diagnostic.outputs.count, 1);
 assert.equal(diagnostic.outputs.videos[0]?.has_download_url, true);
+assert.equal(diagnostic.resolved?.lora?.lora_name, 'minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors');
+assert.equal(diagnostic.resolved?.recommended_timeout_sec, 300);
+assert.deepEqual(diagnostic.resolved?.risk_flags, ['queued_for_test']);
 assert.ok(json.includes('[redacted]'), 'diagnostic should redact sensitive fields');
 assert.ok(!json.includes('secret-token'), 'diagnostic must not expose token values');
 assert.ok(!json.includes(longHexToken), 'diagnostic must not expose long hex token values');
