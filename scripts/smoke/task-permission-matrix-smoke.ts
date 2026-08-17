@@ -5,13 +5,13 @@ import {
   assertCanGenerateInProject,
   assertCanManageProject,
   assertCanViewProject,
-} from '../src/lib/projects/permissions';
+} from '../../src/lib/projects/permissions';
 import {
   assertCanGenerateInVideoCard,
   assertCanManageVideoCard,
   assertCanViewVideoCard,
-} from '../src/lib/video-cards/permissions';
-import type { SessionUser } from '../src/lib/auth/session';
+} from '../../src/lib/video-cards/permissions';
+import type { SessionUser } from '../../src/lib/auth/session';
 
 loadEnvConfig(process.cwd());
 

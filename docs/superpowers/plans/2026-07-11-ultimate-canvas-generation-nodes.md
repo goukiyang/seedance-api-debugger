@@ -23,7 +23,7 @@
 
 **Files:**
 - Create: `public/tools/ultimate-canvas/generation-node-workflow.js`
-- Create: `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/index.html`
 
 **Interfaces:**
@@ -45,7 +45,7 @@ assert.deepEqual(workflow.videoRequest({
 
 - [ ] **Step 2: Run the smoke and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
 
 Expected: FAIL because `generation-node-workflow.js` does not exist.
 
@@ -55,14 +55,14 @@ Implement whitelisted image/video modes, validation, request payloads, result no
 
 - [ ] **Step 4: Load the module before `app.js` and verify GREEN**
 
-Run: `node --check public/tools/ultimate-canvas/generation-node-workflow.js` and `npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts`.
+Run: `node --check public/tools/ultimate-canvas/generation-node-workflow.js` and `npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`.
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add public/tools/ultimate-canvas/generation-node-workflow.js public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+git add public/tools/ultimate-canvas/generation-node-workflow.js public/tools/ultimate-canvas/index.html scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 git commit -m "feat: add canvas generation node contracts"
 ```
 
@@ -71,7 +71,7 @@ git commit -m "feat: add canvas generation node contracts"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/canvas-engine.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Test: `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
 
 **Interfaces:**
 - Produces stable `data-generation-*` controls consumed by `app.js`.
@@ -97,8 +97,8 @@ Keep controls within the existing 640px panel; use a single column below 720px a
 
 ```powershell
 node --check public/tools/ultimate-canvas/canvas-engine.js
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-git add public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+git add public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 git commit -m "feat: add functional generation node controls"
 ```
 
@@ -106,7 +106,7 @@ git commit -m "feat: add functional generation node controls"
 
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js`
-- Test: `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
 
 **Interfaces:**
 - Consumes `UltimateCanvasGenerationNodes.imageRequest()` and direct incoming image connections.
@@ -132,8 +132,8 @@ Selecting an existing asset while a target node is active creates an image node 
 
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-git add public/tools/ultimate-canvas/app.js scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+git add public/tools/ultimate-canvas/app.js scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 git commit -m "feat: complete canvas image generation node"
 ```
 
@@ -141,7 +141,7 @@ git commit -m "feat: complete canvas image generation node"
 
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js`
-- Test: `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
 
 **Interfaces:**
 - Consumes `UltimateCanvasGenerationNodes.videoRequest()` and ordered image reference IDs.
@@ -171,8 +171,8 @@ Show task details, play, download, frozen points, regenerate, and terminal state
 
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-git add public/tools/ultimate-canvas/app.js scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+git add public/tools/ultimate-canvas/app.js scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 git commit -m "feat: complete canvas video generation node"
 ```
 
@@ -180,8 +180,8 @@ git commit -m "feat: complete canvas video generation node"
 
 **Files:**
 - Modify: `scripts/ultimate-canvas-preview-server.mjs`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts`
-- Modify: `scripts/ultimate-canvas-complete-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-complete-smoke.ts`
 
 **Interfaces:**
 - Preview server mirrors only the same-origin contracts needed by the page.
@@ -193,7 +193,7 @@ Assert image payload/action/settings/references, video payload/settings/referenc
 
 - [ ] **Step 2: Run and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-preview-api-smoke.ts`.
+Run: `npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts`.
 
 Expected: FAIL on missing captured request fields or response metadata.
 
@@ -204,12 +204,12 @@ Record submitted image/video payloads, return complete image asset identifiers/U
 - [ ] **Step 4: Verify all canvas smokes and commit**
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
-npx tsx scripts/ultimate-canvas-normal-user-access-smoke.ts
-npx tsx scripts/ultimate-canvas-context-rules-smoke.ts
-git add scripts/ultimate-canvas-preview-server.mjs scripts/ultimate-canvas-preview-api-smoke.ts scripts/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts
+git add scripts/ultimate-canvas-preview-server.mjs scripts/smoke/ultimate-canvas-preview-api-smoke.ts scripts/smoke/ultimate-canvas-complete-smoke.ts
 git commit -m "test: verify canvas generation node lifecycle"
 ```
 

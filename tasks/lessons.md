@@ -5,7 +5,7 @@
 - 问题/背景：用户反馈进入新月份后，趋势图里前一个月份的内容看不到，但这些历史数据本来应该仍然可查。
 - 诱因/根因：管理中心首屏默认请求 `range=month`，后端默认时间范围也是本月；新月份开始后，旧月份数据没有丢失，只是被默认筛选条件排除。
 - 当时思路：把“看完整历史”做成一等范围 `all`，默认用全部历史；保留本月/7 天/30 天/自定义作为主动筛选，不让自然月份切换影响历史可见性。
-- 改动位置：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/page.tsx`、`src/app/admin/AdminGenerationDashboardClient.tsx`、管理中心趋势 API/导出 API、`scripts/generation-dashboard-smoke.ts`。
+- 改动位置：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/page.tsx`、`src/app/admin/AdminGenerationDashboardClient.tsx`、管理中心趋势 API/导出 API、`scripts/smoke/generation-dashboard-smoke.ts`。
 - 怎么改：`all` 从当前筛选条件下最早任务日期统计到今天；管理中心首屏默认 `all`；前端增加“全部”tab，并在全部范围默认按月看趋势；smoke 验证跨月时月趋势桶不被压成当前月。
 - 验证结果：专项 smoke、类型检查、lint 和生产构建通过；线上部署验证完成后回填到 `tasks/todo.md`。
 - 可复用经验：经营/后台趋势图的默认口径应优先保证历史可见，当前月只是筛选项；自然时间边界变更不能让历史数据在默认视图中“像丢了一样”。
@@ -15,7 +15,7 @@
 - 问题/背景：AI MediaKit 视频超分先做了后台配置、独立 `/generate/enhance` 页面和任务详情入口，但用户仍反馈“没有找到入口”“在哪里做超分”，并要求改成资产卡片 hover 直接发起。
 - 诱因/根因：前一版把“功能存在”和“用户能在真实工作流里自然发现”混在一起；独立页面能证明能力上线，但用户真实路径是先看到某个视频资产，再决定是否超分，不会先去理解一个新功能页。
 - 当时思路：把主入口放到视频资产封面上，独立页只作为补充筛选页；超分结果必须在列表、详情和对比结果里持续可识别，不能和普通生成混在一起。
-- 改动位置：`src/app/api/assets/library/route.ts`、`src/app/assets/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/globals.css`、`scripts/enhance-video-entry-smoke.ts`、`tasks/todo.md`。
+- 改动位置：`src/app/api/assets/library/route.ts`、`src/app/assets/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/globals.css`、`scripts/smoke/enhance-video-entry-smoke.ts`、`tasks/todo.md`。
 - 怎么改：资产接口返回 `isEnhanceTask/canEnhanceVideo/enhanceSourceTaskId`；普通成功视频 hover 出“超分”按钮和分辨率/帧率菜单；超分结果封面左上角常驻“超分”；超分任务详情页改成原视频和超分视频左右同步播放。
 - 验证结果：专项 smoke、`tsc`、`lint`、本地生产 build、`youdoo-sites build/restart/status sd2` 均通过；公网静态 chunk 命中新入口和对比展示；公网配置 ready。真实登录态 hover 截图未完成，因为当前 Chrome 停在登录页，没有可复用登录态。
 - 可复用经验：用户可见能力不能只用“有路由 / 有按钮 / 有页面”验收；必须按入口 -> 操作 -> 等待 -> 结果 -> 失败恢复的真实路径检查。对象型能力优先跟随对象出现，例如视频超分应该跟着视频卡片走，而不是只放在一个独立功能页里。
@@ -48,7 +48,7 @@
 - 当时思路：先用 smoke 测试锁住 Module Builder Agent 的 JSON 解析和校验协议，再补 Musk API Key、OpenAI-compatible 调用、管理员生成接口和前端真实请求。
 - 改动位置：`src/lib/integrations/musk.ts`、`src/lib/templates/module-builder.ts`、`src/app/api/templates/module-builder/generate/route.ts`、`src/app/admin/integrations/AdminIntegrationsClient.tsx`、`src/components/GenerationComposer.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`。
 - 怎么改：Musk 配置增加 API Key 但不回显；Module Builder 接口只生成草稿，不直接保存模块；生成过程写入 `AgentRun`、`AgentRunStep`、`TemplateMemory` 和 `OperationLog`；主工作台 UI 显示等待、错误、追问、规则和执行链路。
-- 验证结果：`npx tsx scripts/module-builder-agent-smoke.ts`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网静态 chunk 命中真实 Module Builder API 和 API Key 配置标识。
+- 验证结果：`npx tsx scripts/smoke/module-builder-agent-smoke.ts`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart/status sd2` 通过；公网静态 chunk 命中真实 Module Builder API 和 API Key 配置标识。
 - 可复用经验：凡是标成 LLM/Agent 的功能，验收必须至少覆盖“模型配置含密钥、服务端调用器、结构化输出校验、权限、审计链路、前端真实请求”；只有本地模拟或静态 UI 时必须明确标注为骨架。
 
 ## 2026-06-14 - 删除/归档类按钮不要依赖浏览器原生 confirm
@@ -128,7 +128,7 @@
 - 当时思路：管理、成本、任务详情和导出属于审计场景，默认隐藏某个币种会增加误读风险；采用“原币种 + 人民币估算”同时展示，极窄图表点位只允许短标签，完整值放在 title 或详情里。
 - 改动位置：`src/lib/costs/currency.ts`、`src/app/tasks/[id]/page.tsx`、`src/app/generate/page.tsx`、`src/app/admin/costs/page.tsx`、`src/app/admin/costs/ProviderBalancePanel.tsx`、`src/app/admin/costs/OfficialChargeImportForm.tsx`、`src/app/projects/[id]/page.tsx`、`src/app/admin/page.tsx`、导出路由和 `src/app/globals.css`。
 - 怎么改：公共金额 helper 固定输出 `$0.35 USD（约 ¥2.55）`；小于 0.01 的金额显示 `< $0.01 USD`；页面统一调用固定双币种 helper；CSV 保留原始金额并增加人民币估算列；长金额胶囊允许换行。
-- 验证结果：`scripts/currency-format-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx tsx scripts/generation-dashboard-smoke.ts`、`youdoo-sites build sd2`、`youdoo-sites restart sd2` 通过；线上 `sd2` health 返回 200。
+- 验证结果：`scripts/smoke/currency-format-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`npx tsx scripts/smoke/generation-dashboard-smoke.ts`、`youdoo-sites build sd2`、`youdoo-sites restart sd2` 通过；线上 `sd2` health 返回 200。
 - 可复用经验：官方扣费、人民币估算、平台点数必须分层；金额类审计页面默认双币种明示，不用点击切换隐藏关键信息。
 
 ## 2026-06-10 - SVG 图表和图标不得非等比拉伸
@@ -146,9 +146,9 @@
 - 问题/背景：视频生成管理页参考图要求“每日生成量与成本”，用户纠正指出只做了圆环占比，没有做生成秒数、次数、额度趋势。
 - 诱因/根因：实现时把参考图理解成整体视觉风格，优先落了项目/清晰度占比，漏拆参考图中最关键的柱线趋势模块。
 - 当时思路：把趋势作为驾驶舱首屏的产能和成本主图，后端统一聚合按日/按周/按月数据，前端用同一口径渲染柱线图。
-- 改动位置：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/api/admin/generation-dashboard/export/route.ts`、`src/app/globals.css`、`scripts/generation-dashboard-smoke.ts`。
+- 改动位置：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/AdminGenerationDashboardClient.tsx`、`src/app/api/admin/generation-dashboard/export/route.ts`、`src/app/globals.css`、`scripts/smoke/generation-dashboard-smoke.ts`。
 - 怎么改：新增 `trends.day/week/month`，每个 bucket 包含生成次数、生成秒数、点数和官方额度；页面新增“每日/每周/每月生成量与成本”图，柱子显示次数，两条折线显示秒数和官方额度；导出补 `trend_day/trend_week/trend_month`。
-- 验证结果：`npx tsc --noEmit --pretty false`、`npx tsx scripts/generation-dashboard-smoke.ts`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2` 通过；线上 `sd2` health 返回 200。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npx tsx scripts/smoke/generation-dashboard-smoke.ts`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2` 通过；线上 `sd2` health 返回 200。
 - 可复用经验：按参考图做管理驾驶舱时，必须先拆出主图表、指标口径和交互切换，不得只抽视觉样式或次级占比模块。
 
 ## 2026-06-10 - 连续生成和用户默认生成参数
@@ -158,7 +158,7 @@
 - 当时思路：把“任务创建成功”从表单主流程中拆出去，作为队列提示和最近任务更新；用户偏好只保存可复用配置，不保存素材 URL、签名 URL、本地路径或一次性上传地址。
 - 改动位置：`src/app/generate/page.tsx`、`src/components/GenerationComposer.tsx`、`src/app/api/me/preferences/generation/route.ts`、`src/lib/preferences/generation.ts`、`prisma/schema.prisma`。
 - 怎么改：新增 `UserPreference` 和生成偏好 API；生成页读取偏好并在提交成功后异步保存；提交成功后新任务进入最近任务顶部，旧任务继续后台轮询；结果卡改为轻量队列提示。
-- 验证结果：`npm run db:generate`、生成偏好归一化 smoke、`npx tsc --noEmit --pretty false`、`npm run build`、`BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts` 均通过。
+- 验证结果：`npm run db:generate`、生成偏好归一化 smoke、`npx tsc --noEmit --pretty false`、`npm run build`、`BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts` 均通过。
 - 可复用经验：用户默认值服务端持久化要有 localStorage 降级，尤其是 Prisma 迁移尚未应用时；连续生成不能把轮询生命周期绑死在当前表单结果卡上。
 
 ## 2026-06-10 - 图集删除入口和历史引用保护
@@ -168,7 +168,7 @@
 - 当时思路：先定义“删除图集”的产品语义为从管理列表隐藏，而不是删除素材；封面图继续走参考图内容接口，保留权限边界。
 - 改动位置：`src/app/api/reference-albums/route.ts`、`src/app/api/reference-albums/[id]/route.ts`、`src/app/collections/ReferenceAlbumsClient.tsx`、`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/globals.css`。
 - 怎么改：列表 API 返回 `cover_image_url`；列表和详情补重命名/删除入口；DELETE 改为归档图集并保留 `ReferenceImage`；列表只展示 active 图集。
-- 验证结果：`npx tsc --noEmit --pretty false`、`npm run build`、图集只读 smoke、`BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts` 均通过。
+- 验证结果：`npx tsc --noEmit --pretty false`、`npm run build`、图集只读 smoke、`BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts` 均通过。
 - 可复用经验：给“删除”补入口前必须先确认数据语义，尤其是被历史任务引用的素材；优先用归档隐藏替代级联删除。
 
 ## 2026-06-10 - 生成者头像和技术账号显示
@@ -416,9 +416,9 @@
 - 问题/背景：V1.2 要求公共项目立项、追加预算、1080p、比例变更和视频卡重开都通过审批闭环生效；旧审批中心只会把记录改成 approved/rejected。
 - 诱因/根因：只有 `ApprovalRecord` 表和审批页面，不代表公共项目已创建、预算已入账或高成本动作已受控；如果验收只看“有记录”，会继续产生假完成。
 - 当时思路：先落地公共项目立项和追加预算两条最小业务副作用，再用事务回滚 smoke 证明审批通过会改业务状态，审批拒绝不会改预算。
-- 改动位置：`src/lib/approvals.ts`、`src/app/api/approvals/route.ts`、`src/app/api/approvals/[id]/route.ts`、`src/app/approvals/page.tsx`、`src/app/projects/page.tsx`、`scripts/approval-effects-smoke.ts`。
+- 改动位置：`src/lib/approvals.ts`、`src/app/api/approvals/route.ts`、`src/app/api/approvals/[id]/route.ts`、`src/app/approvals/page.tsx`、`src/app/projects/page.tsx`、`scripts/smoke/approval-effects-smoke.ts`。
 - 怎么改：`project_create` 通过后创建 `type='public'` 项目、项目负责人关系和预算账户；`budget_increase` 通过后调用 `adjustProjectBudget` 写入 `ProjectBudgetLedger`；拒绝只记录决策原因，不改预算。
-- 验证结果：`npx tsx scripts/approval-effects-smoke.ts` 通过，脚本验证公共项目创建、初始预算流水、追加预算通过入账、追加预算拒绝不入账、操作日志写入，并主动回滚测试数据。
+- 验证结果：`npx tsx scripts/smoke/approval-effects-smoke.ts` 通过，脚本验证公共项目创建、初始预算流水、追加预算通过入账、追加预算拒绝不入账、操作日志写入，并主动回滚测试数据。
 - 可复用经验：审批类需求的完成标准必须是“记录 + 权限 + 业务副作用 + 失败/拒绝不半更新 + 可回证验证”，不能把审批状态字段当成业务闭环。
 
 ## 2026-06-14 - Agent 链路页必须和实际落库步骤同源
@@ -687,7 +687,7 @@
 - 问题/背景：用户澄清“规则全部显示”不是只把 rules 数组列出来，而是所有会影响最终输入给 LLM 的上下文内容都必须在卡片编辑里可见，包括标题、插入方式、启用状态、排序、绑定图片，以及旧模块名这类历史字段。
 - 诱因/根因：上一轮只解决了 LLM 草稿和模板规则可见，但真实生成方案仍会读取旧 `module_bindings`；卡片标题也会进入管理页最终提示词影响预览，却没有明确标注“会写入最终输入”。
 - 当时思路：先追真实生成链路，区分“直接进入最终提示词”“影响 Agent 方案”“只影响 LLM 改写”“仅用于保存归档”的字段，再把这些来源放回卡片编辑弹窗。
-- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/lib/agent-plans/template-plans.ts`、`src/app/globals.css`、`scripts/template-card-final-context-smoke.ts`。
+- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/lib/agent-plans/template-plans.ts`、`src/app/globals.css`、`scripts/smoke/template-card-final-context-smoke.ts`。
 - 怎么改：卡片编辑页新增“实际进入最终输入”预览；标题、启用、强制/参考、读取顺序、绑定图片都在编辑弹窗中可见；规则折叠栏新增影响来源说明；生成方案有上下文卡片时改用卡片内容，不再追加旧模块名。
 - 验证结果：以本轮 `template-card-final-context-smoke`、TypeScript、lint、build、部署和公网资源命中为准。
 - 可复用经验：凡是会影响 LLM 的内容，不能只在代码、旧字段、保存逻辑或生成逻辑里存在。编辑界面必须让管理员看到它、理解它会怎么生效，并能明确判断它是否直接进入最终提示词。
@@ -697,7 +697,7 @@
 - 问题/背景：用户截图反馈模板上下文卡片列表再次崩版，正文、标题、强制/参考按钮、删除/启用/编辑按钮互相重叠。
 - 诱因/根因：卡片列表同时展示完整正文、绑定图片长状态、模式按钮和右侧操作，且右侧操作列宽度过窄；列表承担了编辑页职责，内容长度稍变就会挤爆布局。
 - 当时思路：从第一性原理拆分列表和编辑页职责。列表用于排序、选择、启用和查看摘要；完整内容、规则、LLM 改写和最终输入说明都进入三级弹窗。
-- 改动位置：`src/app/globals.css`、`scripts/template-card-layout-smoke.ts`、`tasks/todo.md`。
+- 改动位置：`src/app/globals.css`、`scripts/smoke/template-card-layout-smoke.ts`、`tasks/todo.md`。
 - 怎么改：卡片行改为固定四区布局，拖拽、图片、内容摘要、操作区互不抢宽；正文在列表里只显示两行摘要；右侧操作区固定宽度；窄屏下操作按钮变为三列。
 - 验证结果：以本轮布局 smoke、TypeScript、lint、build、部署和公网资源命中为准。
 - 可复用经验：任何可拖拽列表都不能同时塞完整正文和完整编辑控件。列表必须有固定列、固定摘要高度、操作区固定宽度和窄屏断点，否则新增一个长字段就会复发崩版。
@@ -707,7 +707,7 @@
 - 问题/背景：用户指出“规则全部显示”不是继续放在折叠区里展示，而是所有最终会影响 LLM 的规则都必须变成可编辑文本，直接写进“最终输入给 LLM 的上下文内容”输入框。
 - 诱因/根因：之前把规则做成“规则与非最终输入来源”折叠区，虽然能看到，但它仍然是正文之外的第二来源；`template.rules` 也仍可能在生成链路里额外拼接，形成管理员编辑不到的隐藏影响。
 - 当时思路：把规则来源收敛成一个模型：规则也是上下文卡片正文。旧结构化规则只允许用于首次生成“生成规则”卡片，之后不再作为最终提示词的独立输入。
-- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/lib/templates/workbench.ts`、`src/lib/agent-plans/template-plans.ts`、`src/app/globals.css`、`scripts/template-rules-editable-text-smoke.ts`。
+- 改动位置：`src/components/templates/TemplateContextCardsPanel.tsx`、`src/components/templates/TemplateEditorDrawer.tsx`、`src/lib/templates/workbench.ts`、`src/lib/agent-plans/template-plans.ts`、`src/app/globals.css`、`scripts/smoke/template-rules-editable-text-smoke.ts`。
 - 怎么改：删除规则折叠区和隐藏 LLM 参考入口；旧 active rules 序列化为“生成规则”卡片正文；有上下文卡片时生成方案不再读取 `template.rules`；LLM 改写只接收卡片标题、当前正文和管理员输入。
 - 验证结果：以本轮 smoke、TypeScript、lint、build、部署和公网验收为准。
 - 可复用经验：模板卡片编辑页只能有一个最终输入来源：可编辑正文。标题、图片、强制/参考和启停可以作为明确 UI 开关存在；规则内容不能再放在独立折叠区、旧数组、隐藏参考字段或任何管理员改不到的地方。
@@ -717,7 +717,7 @@
 - 问题/背景：用户指出无线画布文本节点只有 LLM 生成入口，缺少能影响最终上下文的规则编辑能力，并要求暂时只给管理员开放。
 - 诱因/根因：无线画布节点只有 `prompt` 和来源节点会进入生成 payload，缺少节点级规则字段；如果只在前端隐藏按钮，普通用户仍可能伪造请求字段。
 - 当时思路：把规则作为文本节点数据的一部分保存到 `node.data.contextRules`，入口放在 LLM 模型旁边，保持画布流轻量；后端只在 `user.role === 'admin'` 时把规则写入 LLM 上下文。
-- 改动位置：`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/styles.css`、`src/app/api/tools/ultimate-canvas/generate/route.ts`、`scripts/ultimate-canvas-context-rules-smoke.ts`。
+- 改动位置：`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/styles.css`、`src/app/api/tools/ultimate-canvas/generate/route.ts`、`scripts/smoke/ultimate-canvas-context-rules-smoke.ts`。
 - 怎么改：文本节点底部新增管理员可见“规则”按钮；弹窗编辑规则文本并触发画布自动保存；生成 payload 带 `contextRules`；后端将管理员规则作为高优先级上下文写入 LLM 请求，非管理员伪造字段会被忽略并记录。
 - 验证结果：以本轮 smoke、JS 语法检查、TypeScript、lint、build、部署和公网资源验收为准。
 - 可复用经验：任何“只给管理员开放”的上下文、规则、提示词能力都不能只靠前端隐藏。前端负责入口和体验，后端负责是否真正应用，日志要能区分已应用和被忽略。
@@ -737,7 +737,7 @@
 - 问题/背景：AI MediaKit 视频超分链路、API Key 设置和任务详情内按钮已经上线，但用户反馈“没有找到入口”，不知道在哪里做超分。
 - 诱因/根因：首版只在成功任务详情/视频卡结果区放了折叠的“超分/增强”组件，没有在主创作入口、导航、控制台或独立页面给用户一个明确的任务起点；从工程视角看功能存在，从用户视角看入口不可达。
 - 当时思路：按真实用户任务流补齐“先找到能力，再选择源视频，再提交任务”的直达路径，不改 Provider、扣点或任务创建核心链路。
-- 改动位置：`src/app/generate/enhance/page.tsx`、`src/components/generate/EnhanceVideoPageClient.tsx`、`src/lib/navigation.ts`、`src/components/generate/GeneratePageClient.tsx`、`src/app/dashboard/page.tsx`、`src/app/globals.css`、`scripts/enhance-video-entry-smoke.ts`。
+- 改动位置：`src/app/generate/enhance/page.tsx`、`src/components/generate/EnhanceVideoPageClient.tsx`、`src/lib/navigation.ts`、`src/components/generate/GeneratePageClient.tsx`、`src/app/dashboard/page.tsx`、`src/app/globals.css`、`scripts/smoke/enhance-video-entry-smoke.ts`。
 - 怎么改：新增 `/generate/enhance` 视频超分直达页，列出可超分的成功视频并复用原有 `EnhanceVideoAction`；生成页顶部、侧边栏、控制台都加入口；导航高亮只落到“视频超分”。
 - 验证结果：入口 smoke、AI MediaKit 设置 smoke、超分创建 API smoke、TypeScript、lint、Next build、`youdoo-sites build/restart` 和公网构建产物验证通过。
 - 可复用经验：新增用户能力必须至少有一个稳定主入口和一个就近上下文入口。只把动作塞进详情页、折叠区、hover 区或成功态下方，不算入口闭环；用户找不到时要按产品缺陷处理，而不是解释“其实已经做了”。
@@ -747,7 +747,7 @@
 - 问题/背景：参考图集详情页上传别人已经传过的同一张图片时，页面提示“联系管理员开放共享”，但用户真实目标是先把图片贴进当前图集。
 - 诱因/根因：图集页上传走的是“先上传到个人历史素材，再绑定到图集”的两步流；个人素材层按 `Asset.hash` 去重并阻止跨用户复用，导致图集绑定步骤根本没有执行。
 - 当时思路：拆开两种业务语义。个人历史素材仍保持归属限制；图集上传是用户本地选择同一二进制文件后创建图集图片，允许只复用已有后台内容链接。
-- 改动位置：`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/api/reference-albums/[id]/images/route.ts`、`scripts/reference-album-duplicate-upload-smoke.ts`。
+- 改动位置：`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/api/reference-albums/[id]/images/route.ts`、`scripts/smoke/reference-album-duplicate-upload-smoke.ts`。
 - 怎么改：图集页直接 multipart 提交到当前图集图片接口；后端先算文件 hash，命中已有图片资产则创建新的 `ReferenceImage` 并复用旧 `asset_id/original_url/thumbnail_url`，未命中才走 `uploadSiteAsset`。
 - 验证结果：`reference-album-duplicate-upload-smoke`、`reference-album-duplicate-upload-integration`、`git diff --check`、`tsc`、`lint`、`build` 通过；已部署 BUILD_ID `QxmU9C1GexK7-UVnz4RvH`，公网 `/api/config`、`/login` 和生产包关键字符串命中，健康周期后 `runs=36` 未增长。
 - 可复用经验：同一个文件去重规则不能替代业务动作。图集、工作台、个人历史素材是不同使用场景；跨用户 hash 命中时，应在具体入口决定是阻止、复制引用，还是复用内容链接。
@@ -757,7 +757,7 @@
 - 问题/背景：用户刷新登录后的无线画布页后，在文本节点底部看不到预期的“规则”按钮。
 - 诱因/根因：规则按钮已经写进文本节点，但被放在 `.node-input-bar` 里；这个输入栏默认只有节点被选中时才显示，所以刷新后管理员很容易看不到入口。另外入口 HTML 没有给静态脚本加版本号，线上刷新时也容易受旧资源缓存影响。
 - 当时思路：把“管理员需要一眼看到的规则入口”和“选中后展开的 LLM 输入栏”分开。规则入口应该在文本卡片本体底部可见，输入栏里可以保留同一能力作为补充入口。
-- 改动位置：`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/styles.css`、`public/tools/ultimate-canvas/index.html`、`scripts/ultimate-canvas-context-rules-smoke.ts`。
+- 改动位置：`public/tools/ultimate-canvas/canvas-engine.js`、`public/tools/ultimate-canvas/app.js`、`public/tools/ultimate-canvas/styles.css`、`public/tools/ultimate-canvas/index.html`、`scripts/smoke/ultimate-canvas-context-rules-smoke.ts`。
 - 怎么改：文本节点卡片底部新增管理员可见的 `规则` 按钮；刷新按钮状态时同步更新同一节点里的所有规则按钮；入口 HTML 给 `styles.css`、`canvas-engine.js`、`app.js` 加版本号；smoke 检查覆盖卡片底部入口和版本号。
 - 验证结果：JS 语法、规则 smoke、TypeScript、lint、Next build、`youdoo-sites build/restart`、本地/公网 `/api/config` 与 `/login` 均通过；lint 仅保留项目既有 img/hook 警告。
 - 可复用经验：用户说“刷新后应该看到某按钮”，不要只检查 DOM 是否存在，还要检查父级是否在默认态隐藏。管理员常用入口不能依赖 hover、selected、折叠面板或旧静态资源缓存才能出现。
@@ -767,7 +767,7 @@
 - 问题/背景：用户在模板卡片编辑页指出，选择绑定图片的窗口需要有上传图片功能按键。
 - 诱因/根因：绑定图片弹窗只提供“参考图集”和“历史上传图”两种已有素材来源；如果当前图片还没上传，管理员必须离开当前编辑流去别处上传，再返回绑定，链路不闭环。
 - 当时思路：这个窗口的目标不是素材管理，而是给当前卡片绑定 1 张图片，所以上传动作应直接完成绑定，按钮文案明确为“上传并绑定图片”。
-- 改动位置：`src/components/templates/TemplateBoundImagePicker.tsx`、`src/app/globals.css`、`scripts/template-bound-image-upload-smoke.ts`。
+- 改动位置：`src/components/templates/TemplateBoundImagePicker.tsx`、`src/app/globals.css`、`scripts/smoke/template-bound-image-upload-smoke.ts`。
 - 怎么改：弹窗内加入隐藏 file input 和 footer 上传按钮；调用既有 `/api/assets/upload`，上传成功后用返回的 `asset.id/originalUrl/thumbnailUrl/fileName` 写入卡片 `bound_image`，来源标记为 `upload_history`，并切到历史上传图语义。
 - 验证结果：以本轮上传入口 smoke、TypeScript、lint、build、部署和公网资源验收为准。
 - 可复用经验：选择窗口如果承担“绑定/引用”决策，就不能只展示已有项。遇到素材缺失时，应在同一窗口提供最短上传路径，并让上传结果直接进入当前业务对象。
@@ -797,7 +797,7 @@
 - 问题/背景：用户反馈当前版本选择图片上传流程正常，但点完上传后页面没有出现图片。
 - 诱因/根因：`/api/assets/upload` 按文件 hash 复用其他用户已有 Asset，随后 `/api/workspace/assets` 把这个 Asset 当成别人的私有素材，在参考图归档时返回 `reference_asset_forbidden`；上传历史也只查当前用户自己的 `owner_id`，所以同一张图不会出现在历史里。
 - 当时思路：文件内容去重和用户可见记录要拆开。存储文件和公网链接可以复用，但当前用户必须拥有自己的 Asset 记录，后续历史、工作区、参考图归档才会自然通过权限检查。
-- 改动位置：`prisma/schema.prisma`、`src/lib/assets/storage.ts`、`src/app/api/assets/upload/route.ts`、`src/app/api/reference-albums/[id]/images/route.ts`、`scripts/workspace-duplicate-upload-smoke.ts`。
+- 改动位置：`prisma/schema.prisma`、`src/lib/assets/storage.ts`、`src/app/api/assets/upload/route.ts`、`src/app/api/reference-albums/[id]/images/route.ts`、`scripts/smoke/workspace-duplicate-upload-smoke.ts`。
 - 怎么改：`Asset.hash` 改为 `owner_id + hash` 唯一；跨用户重复上传时创建当前用户 Asset，复用已有 `original_url/thumbnail_url`；图集上传统一走 `uploadSiteAsset`；新增 smoke 覆盖跨用户重复上传后历史可见并可加入工作区。
 - 验证结果：`site-upload-dedupe-smoke`、`workspace-duplicate-upload-smoke`、`reference-album-duplicate-upload-smoke`、`reference-album-duplicate-upload-integration`、TypeScript、lint、build 通过；数据库已备份后同步索引；已部署 BUILD_ID `b55InuVW1hopeSQRgTb-s`，公网真实复现确认历史可见和工作区加入成功。
 - 可复用经验：同一文件的“存储去重”不能等同于“业务对象去重”。凡是后续链路按 owner、权限、历史列表或归档对象判断的地方，跨用户复用必须给当前用户创建自己的业务记录，只复用底层文件链接。

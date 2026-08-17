@@ -25,8 +25,8 @@
 
 **Files:**
 - Modify: `public/tools/ultimate-canvas/generation-node-interactions.js`
-- Test: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- Test: `scripts/ultimate-canvas-result-layout-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
 
 **Interfaces:**
 - Produces: `generationNodeDimensions(ratio, longEdge = 350)` returning `{ ratio, numerator, denominator, width, height }`.
@@ -55,7 +55,7 @@ assert.equal(interactions.generationNodeDimensions('16:9', 0).width, 350);
 
 - [ ] **Step 2: Run the focused smoke and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 
 Expected: FAIL because `generationNodeDimensions` is not exported.
 
@@ -92,8 +92,8 @@ Add `generationNodeDimensions` to the returned public API.
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
 ```
 
 Expected: both exit 0.
@@ -101,7 +101,7 @@ Expected: both exit 0.
 - [ ] **Step 5: Commit Task 1**
 
 ```powershell
-git add public/tools/ultimate-canvas/generation-node-interactions.js scripts/ultimate-canvas-generation-node-interactions-smoke.ts scripts/ultimate-canvas-result-layout-smoke.ts
+git add public/tools/ultimate-canvas/generation-node-interactions.js scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts scripts/smoke/ultimate-canvas-result-layout-smoke.ts
 git commit -m "feat: add canvas ratio dimension contract"
 ```
 
@@ -112,8 +112,8 @@ git commit -m "feat: add canvas ratio dimension contract"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js:3057-3129, 4088-4089`
 - Modify: `public/tools/ultimate-canvas/styles.css:1517-1610, 1682-1795, 2144-2160, 3943-4026`
-- Test: `scripts/ultimate-canvas-result-layout-smoke.ts`
-- Test: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 
 **Interfaces:**
 - Consumes: `generationNodeDimensions(ratio, longEdge)` from Task 1.
@@ -148,7 +148,7 @@ Also reject selected-only width/height declarations and require the card body/re
 
 - [ ] **Step 2: Run focused tests and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
 
 Expected: FAIL because cards still use fixed `350x240` dimensions and panels are not centered with `left: 50%`.
 
@@ -219,9 +219,9 @@ Preserve the existing desktop row and toolbar layout; retain existing narrow-vie
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
 ```
 
 Expected: all exit 0.
@@ -229,7 +229,7 @@ Expected: all exit 0.
 - [ ] **Step 6: Commit Task 2**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-result-layout-smoke.ts scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-result-layout-smoke.ts scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 git commit -m "feat: size canvas nodes from generation ratio"
 ```
 
@@ -241,8 +241,8 @@ git commit -m "feat: size canvas nodes from generation ratio"
 - Modify: `public/tools/ultimate-canvas/generation-node-interactions.js`
 - Modify: `public/tools/ultimate-canvas/app.js:1882-1998, 3057-3256, 3968-4089, 5753-5802`
 - Modify: `public/tools/ultimate-canvas/styles.css:1838-1968`
-- Test: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- Test: `scripts/ultimate-canvas-result-layout-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
 
 **Interfaces:**
 - Produces: `videoTaskActionAvailability(context)` returning URLs and permission-gated command booleans.
@@ -273,7 +273,7 @@ Add source/markup assertions proving:
 
 - [ ] **Step 2: Run focused tests and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 
 Expected: FAIL because `videoTaskActionAvailability` and the task-actions popover do not exist.
 
@@ -349,9 +349,9 @@ Use existing popover colors, radius, focus, hover, and viewport positioning. Do 
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 ```
 
 Expected: all exit 0; task actions are absent from media-card markup and present in the task popover contract.
@@ -359,7 +359,7 @@ Expected: all exit 0; task actions are absent from media-card markup and present
 - [ ] **Step 8: Commit Task 3**
 
 ```powershell
-git add public/tools/ultimate-canvas/generation-node-interactions.js public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-generation-node-interactions-smoke.ts scripts/ultimate-canvas-result-layout-smoke.ts
+git add public/tools/ultimate-canvas/generation-node-interactions.js public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts scripts/smoke/ultimate-canvas-result-layout-smoke.ts
 git commit -m "feat: move video task actions into prompt menu"
 ```
 

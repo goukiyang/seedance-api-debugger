@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import { loadEnvConfig } from '@next/env';
 import { PrismaClient } from '@prisma/client';
-import { uploadSiteAsset } from '../src/lib/assets/site-upload';
-import { addAssetToWorkspace, getOrCreateWorkspace } from '../src/lib/assets/workspace';
-import { attachAssetToSiteReferenceImage } from '../src/lib/assets/reference-import';
+import { uploadSiteAsset } from '../../src/lib/assets/site-upload';
+import { addAssetToWorkspace, getOrCreateWorkspace } from '../../src/lib/assets/workspace';
+import { attachAssetToSiteReferenceImage } from '../../src/lib/assets/reference-import';
 
 loadEnvConfig(process.cwd());
 

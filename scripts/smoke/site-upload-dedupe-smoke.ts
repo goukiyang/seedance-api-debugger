@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { loadEnvConfig } from '@next/env';
 import { PrismaClient } from '@prisma/client';
-import { uploadSiteAsset } from '../src/lib/assets/site-upload';
+import { uploadSiteAsset } from '../../src/lib/assets/site-upload';
 
 loadEnvConfig(process.cwd());
 

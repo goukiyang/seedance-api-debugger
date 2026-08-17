@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildProviderHttpErrorStatus } from '../src/lib/provider/jimeng';
+import { buildProviderHttpErrorStatus } from '../../src/lib/provider/jimeng';
 
 const terminalFailure = buildProviderHttpErrorStatus(
   'provider-task-1',

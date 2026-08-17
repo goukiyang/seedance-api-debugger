@@ -25,13 +25,13 @@
 - `public/tools/ultimate-canvas/app.js`: uses capability messages when image/video generation is disabled.
 - `public/tools/ultimate-canvas/index.html`: cache-busts changed frontend modules.
 - `scripts/ultimate-canvas-preview-server.mjs`: serves local fixtures, selects preview or explicit test Mock mode, and owns the 503 rejection contract.
-- `scripts/ultimate-canvas-preview-no-generation-smoke.ts`: new default-mode API regression coverage.
-- `scripts/ultimate-canvas-preview-api-smoke.ts`: existing lifecycle coverage, changed to opt into test Mock explicitly.
-- `scripts/ultimate-canvas-same-origin-backend-smoke.ts`: backend-state, endpoint-contract, and production-safety coverage.
-- `scripts/ultimate-canvas-context-rules-smoke.ts`: frontend cache-key assertion.
-- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`: frontend cache-key assertion.
-- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`: disabled capability message and cache-key assertions.
-- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`: frontend cache-key assertion.
+- `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`: new default-mode API regression coverage.
+- `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`: existing lifecycle coverage, changed to opt into test Mock explicitly.
+- `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`: backend-state, endpoint-contract, and production-safety coverage.
+- `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`: frontend cache-key assertion.
+- `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`: frontend cache-key assertion.
+- `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`: disabled capability message and cache-key assertions.
+- `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`: frontend cache-key assertion.
 - `docs/handoffs/ultimate-canvas-implementation-report.md`: delivery receipt and safety record.
 
 ---
@@ -42,11 +42,11 @@
 - Modify: `public/tools/ultimate-canvas/backend-contract.js:93-106`
 - Modify: `public/tools/ultimate-canvas/app.js:3757-3791`
 - Modify: `public/tools/ultimate-canvas/index.html:305-312`
-- Modify: `scripts/ultimate-canvas-same-origin-backend-smoke.ts:15-35`
-- Modify: `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
-- Modify: `scripts/ultimate-canvas-context-rules-smoke.ts`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- Modify: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts:15-35`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 **Interfaces:**
 - Consumes: Bootstrap metadata `{ mode, transport, mock }` and capability `{ enabled, message }` objects.
@@ -54,7 +54,7 @@
 
 - [ ] **Step 1: Write failing backend-state and message assertions**
 
-In `scripts/ultimate-canvas-same-origin-backend-smoke.ts`, add the preview state before the existing Mock and SD2 assertions:
+In `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`, add the preview state before the existing Mock and SD2 assertions:
 
 ```ts
 assert.deepEqual(contract.backendStatus({
@@ -72,7 +72,7 @@ assert.deepEqual(contract.backendStatus({
 
 Change the explicit Mock expectation to label `测试 Mock`. Keep the production SD2 assertion unchanged.
 
-In `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`, assert that disabled image and video branches use their capability-specific message before the generic safe message:
+In `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`, assert that disabled image and video branches use their capability-specific message before the generic safe message:
 
 ```ts
 assert.match(appSource, /capabilities\.image\?\.message\s*\|\|\s*window\.UltimateCanvasBackendContract\.SAFE_UNAVAILABLE_MESSAGE/);
@@ -84,8 +84,8 @@ assert.match(appSource, /capabilities\.video\?\.message\s*\|\|\s*window\.Ultimat
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 ```
 
 Expected: the first command fails because preview metadata maps to `unverified`; the second fails because image/video disabled branches ignore the capability message.
@@ -125,11 +125,11 @@ Update `backend-contract.js` and `app.js` cache keys in `index.html` to `2026071
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-context-rules-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 ```
 
 Expected: all five commands exit 0.
@@ -137,7 +137,7 @@ Expected: all five commands exit 0.
 - [ ] **Step 5: Commit Task 1**
 
 ```powershell
-git add public/tools/ultimate-canvas/backend-contract.js public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-same-origin-backend-smoke.ts scripts/ultimate-canvas-generation-node-workflow-smoke.ts scripts/ultimate-canvas-context-rules-smoke.ts scripts/ultimate-canvas-generation-node-interactions-smoke.ts scripts/ultimate-canvas-video-card-workflow-smoke.ts
+git add public/tools/ultimate-canvas/backend-contract.js public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/index.html scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts scripts/smoke/ultimate-canvas-context-rules-smoke.ts scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 git commit -m "feat: distinguish local preview from test mock"
 ```
 
@@ -147,9 +147,9 @@ git commit -m "feat: distinguish local preview from test mock"
 
 **Files:**
 - Modify: `scripts/ultimate-canvas-preview-server.mjs:6-10, 226-275, 361-435, 437-917`
-- Create: `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts:6-12, 54-70`
-- Modify: `scripts/ultimate-canvas-same-origin-backend-smoke.ts:168-236`
+- Create: `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts:6-12, 54-70`
+- Modify: `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts:168-236`
 
 **Interfaces:**
 - Consumes: Optional literal CLI flag `--mock-generation`.
@@ -157,7 +157,7 @@ git commit -m "feat: distinguish local preview from test mock"
 
 - [ ] **Step 1: Add the default no-generation smoke in RED state**
 
-Create `scripts/ultimate-canvas-preview-no-generation-smoke.ts` with a random local port and start the server without any extra flag:
+Create `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts` with a random local port and start the server without any extra flag:
 
 ```ts
 import assert from 'node:assert/strict';
@@ -207,7 +207,7 @@ Always kill the child process in `finally`.
 
 - [ ] **Step 2: Make the existing lifecycle smoke explicitly request test Mock**
 
-Change the spawn arguments in `scripts/ultimate-canvas-preview-api-smoke.ts` to:
+Change the spawn arguments in `scripts/smoke/ultimate-canvas-preview-api-smoke.ts` to:
 
 ```ts
 [
@@ -224,8 +224,8 @@ Keep its existing bootstrap expectation `{ mode: 'mock', transport: 'same-origin
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
 ```
 
 Expected before server implementation: the new default smoke fails because bootstrap still reports Mock and generation succeeds; the existing lifecycle smoke remains GREEN after adding the flag.
@@ -293,7 +293,7 @@ Do not gate document save/restore, fixture library reads, context switching, can
 
 - [ ] **Step 5: Update source-contract assertions**
 
-In `scripts/ultimate-canvas-same-origin-backend-smoke.ts`, replace the single preview-server Mock source assertion with assertions for:
+In `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`, replace the single preview-server Mock source assertion with assertions for:
 
 ```ts
 assert.match(previewServerSource, /process\.argv\.includes\('--mock-generation'\)/);
@@ -308,9 +308,9 @@ assert.doesNotMatch(previewServerSource, /process\.env\.[A-Z0-9_]*MOCK/);
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 ```
 
 Expected: all three commands exit 0. The first reports default preview rejection, the second reports explicit test Mock lifecycle success, and the third reports contract success.
@@ -318,7 +318,7 @@ Expected: all three commands exit 0. The first reports default preview rejection
 - [ ] **Step 7: Commit Task 2**
 
 ```powershell
-git add scripts/ultimate-canvas-preview-server.mjs scripts/ultimate-canvas-preview-no-generation-smoke.ts scripts/ultimate-canvas-preview-api-smoke.ts scripts/ultimate-canvas-same-origin-backend-smoke.ts
+git add scripts/ultimate-canvas-preview-server.mjs scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts scripts/smoke/ultimate-canvas-preview-api-smoke.ts scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 git commit -m "fix: disable fake preview generation by default"
 ```
 

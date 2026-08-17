@@ -4,7 +4,7 @@ import {
   selectFinalizeCandidates,
   taskFinalizeReason,
   type PendingFinalizeCandidate,
-} from '../src/lib/video/finalize-pending-candidates';
+} from '../../src/lib/video/finalize-pending-candidates';
 
 function task(
   id: string,

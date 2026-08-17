@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { writeResponseToFile } from '../src/lib/video/local-cache';
+import { writeResponseToFile } from '../../src/lib/video/local-cache';
 
 async function main() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sd2-local-cache-timeout-'));

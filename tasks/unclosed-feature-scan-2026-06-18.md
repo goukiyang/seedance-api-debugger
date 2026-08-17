@@ -317,8 +317,8 @@
 - `src/components/templates/TemplateContextCardsPanel.tsx`
 - `src/lib/templates/module-builder.ts`
 - `src/lib/templates/template-config-builder.ts`
-- `scripts/template-builder-entrypoints-smoke.ts`
-- `scripts/template-llm-contract-smoke.ts`
+- `scripts/smoke/template-builder-entrypoints-smoke.ts`
+- `scripts/smoke/template-llm-contract-smoke.ts`
 
 仍未完成的关键项：
 

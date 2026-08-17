@@ -1052,10 +1052,10 @@ Memory 用途：
 
 | 脚本 | 作用 |
 |---|---|
-| `scripts/template-builder-entrypoints-smoke.ts` | 检查模板、模块、LLM 入口文案和关键代码是否存在 |
-| `scripts/template-llm-contract-smoke.ts` | 检查模板 LLM 输出结构、模块补丁和保存契约 |
-| `scripts/module-builder-agent-smoke.ts` | 检查 Module Builder Agent 解析、校验和 prompt_format 要求 |
-| `scripts/workbench-closure-smoke.ts` | 检查模板工作台闭环相关入口 |
+| `scripts/smoke/template-builder-entrypoints-smoke.ts` | 检查模板、模块、LLM 入口文案和关键代码是否存在 |
+| `scripts/smoke/template-llm-contract-smoke.ts` | 检查模板 LLM 输出结构、模块补丁和保存契约 |
+| `scripts/smoke/module-builder-agent-smoke.ts` | 检查 Module Builder Agent 解析、校验和 prompt_format 要求 |
+| `scripts/smoke/workbench-closure-smoke.ts` | 检查模板工作台闭环相关入口 |
 
 建议后续验证顺序：
 

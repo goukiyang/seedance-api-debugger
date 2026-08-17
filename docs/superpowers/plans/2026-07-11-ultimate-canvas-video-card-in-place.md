@@ -27,10 +27,10 @@
 - Modify `public/tools/ultimate-canvas/index.html`: 在 `app.js` 前加载工作流模块。
 - Modify `public/tools/ultimate-canvas/app.js`: 画布运行时、原位菜单、真实请求、保存恢复、节点动作。
 - Modify `public/tools/ultimate-canvas/styles.css`: 原位菜单详情、任务行、表单和响应式样式。
-- Create `scripts/ultimate-canvas-video-card-workflow-smoke.ts`: 纯模块和源码契约测试。
-- Create `scripts/ultimate-canvas-preview-api-smoke.ts`: 启动本机预览服务并测试完整内存 API 闭环。
+- Create `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`: 纯模块和源码契约测试。
+- Create `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`: 启动本机预览服务并测试完整内存 API 闭环。
 - Modify `scripts/ultimate-canvas-preview-server.mjs`: 模拟视频卡详情、方向、版本和高级动作。
-- Modify `scripts/ultimate-canvas-complete-smoke.ts`: 保留跨文件总约束。
+- Modify `scripts/smoke/ultimate-canvas-complete-smoke.ts`: 保留跨文件总约束。
 - Modify `docs/handoffs/ultimate-canvas-implementation-report.md`: 最终回执。
 
 ---
@@ -39,7 +39,7 @@
 
 **Files:**
 - Create: `public/tools/ultimate-canvas/video-card-workflow.js`
-- Create: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/index.html`
 
 **Interfaces:**
@@ -49,7 +49,7 @@
 
 - [ ] **Step 1: Write the failing workflow smoke test**
 
-Create `scripts/ultimate-canvas-video-card-workflow-smoke.ts` with assertions equivalent to:
+Create `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts` with assertions equivalent to:
 
 ```ts
 import assert from 'node:assert/strict';
@@ -103,7 +103,7 @@ console.log('ultimate-canvas-video-card-workflow-smoke passed');
 
 - [ ] **Step 2: Run the test and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 Expected: FAIL with `Cannot find module '../public/tools/ultimate-canvas/video-card-workflow.js'`.
 
@@ -147,7 +147,7 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/video-card-workflow.js
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 ```
 
 Expected: syntax exit `0`; smoke prints `ultimate-canvas-video-card-workflow-smoke passed`.
@@ -155,7 +155,7 @@ Expected: syntax exit `0`; smoke prints `ultimate-canvas-video-card-workflow-smo
 - [ ] **Step 6: Commit Task 1**
 
 ```powershell
-git add public/tools/ultimate-canvas/video-card-workflow.js public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-video-card-workflow-smoke.ts
+git add public/tools/ultimate-canvas/video-card-workflow.js public/tools/ultimate-canvas/index.html scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 git commit -m "feat: add canvas video card workflow contracts"
 ```
 
@@ -165,8 +165,8 @@ git commit -m "feat: add canvas video card workflow contracts"
 
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js`
-- Modify: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
-- Modify: `scripts/ultimate-canvas-complete-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-complete-smoke.ts`
 
 **Interfaces:**
 - Consumes: `UltimateCanvasVideoCards.chooseBranch` and `generationContext` from Task 1.
@@ -188,7 +188,7 @@ contains(app, 'UltimateCanvasVideoCards.generationContext', 'generation uses sha
 
 - [ ] **Step 2: Run RED verification**
 
-Run: `npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 Expected: FAIL on `runtime tracks selected branch`.
 
@@ -226,8 +226,8 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
 ```
 
 Expected: all commands exit `0` and both smoke scripts print `passed`.
@@ -235,7 +235,7 @@ Expected: all commands exit `0` and both smoke scripts print `passed`.
 - [ ] **Step 7: Commit Task 2**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js scripts/ultimate-canvas-video-card-workflow-smoke.ts scripts/ultimate-canvas-complete-smoke.ts
+git add public/tools/ultimate-canvas/app.js scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts scripts/smoke/ultimate-canvas-complete-smoke.ts
 git commit -m "feat: persist canvas video branch context"
 ```
 
@@ -246,7 +246,7 @@ git commit -m "feat: persist canvas video branch context"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Modify: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 **Interfaces:**
 - Consumes: Task 2 cache/load functions.
@@ -259,7 +259,7 @@ Require the source to contain all selectors above and CSS to contain `.video-car
 
 - [ ] **Step 2: Run RED verification**
 
-Run: `npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 Expected: FAIL on `data-video-card-search`.
 
@@ -281,7 +281,7 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 git diff --check
 ```
 
@@ -290,7 +290,7 @@ Expected: all exit `0`.
 - [ ] **Step 7: Commit Task 3**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-video-card-workflow-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 git commit -m "feat: add in-place video card menu"
 ```
 
@@ -301,7 +301,7 @@ git commit -m "feat: add in-place video card menu"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Modify: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 **Interfaces:**
 - Consumes: `requestFor` operations `card-update`, `card-seal`, `card-archive`, `card-discard`, `approval-ratio`, `approval-reopen`.
@@ -313,7 +313,7 @@ Assert presence of `data-video-card-info-form`, `data-video-card-seal`, `data-vi
 
 - [ ] **Step 2: Run RED verification**
 
-Run: `npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 Expected: FAIL on `data-video-card-info-form`.
 
@@ -335,8 +335,8 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-normal-user-access-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts
 ```
 
 Expected: all exit `0`.
@@ -344,7 +344,7 @@ Expected: all exit `0`.
 - [ ] **Step 7: Commit Task 4**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-video-card-workflow-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 git commit -m "feat: manage video cards within canvas"
 ```
 
@@ -355,8 +355,8 @@ git commit -m "feat: manage video cards within canvas"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Modify: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
-- Modify: `scripts/ultimate-canvas-context-rules-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`
 
 **Interfaces:**
 - Consumes: `requestFor('branch-create'|'branch-action')` and Task 2 selected branch state.
@@ -372,8 +372,8 @@ Require source markers for branch create, set primary, close, merge, promote, br
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-context-rules-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts
 ```
 
 Expected: workflow smoke fails on missing branch controls.
@@ -396,9 +396,9 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-context-rules-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
 ```
 
 Expected: all exit `0`.
@@ -406,7 +406,7 @@ Expected: all exit `0`.
 - [ ] **Step 7: Commit Task 5**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-video-card-workflow-smoke.ts scripts/ultimate-canvas-context-rules-smoke.ts scripts/ultimate-canvas-complete-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts scripts/smoke/ultimate-canvas-context-rules-smoke.ts scripts/smoke/ultimate-canvas-complete-smoke.ts
 git commit -m "feat: bind canvas generation to video branches"
 ```
 
@@ -417,7 +417,7 @@ git commit -m "feat: bind canvas generation to video branches"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/app.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Modify: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 **Interfaces:**
 - Consumes: Task 1 operations `version-*`, `task-retry`, `tasks-move`, `card-split`, `card-merge`.
@@ -429,7 +429,7 @@ Assert that task rows contain version controls and that result nodes expose play
 
 - [ ] **Step 2: Run RED verification**
 
-Run: `npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 Expected: FAIL on the first missing task action selector.
 
@@ -459,8 +459,8 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
 ```
 
 Expected: all exit `0`.
@@ -468,7 +468,7 @@ Expected: all exit `0`.
 - [ ] **Step 9: Commit Task 6**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-video-card-workflow-smoke.ts scripts/ultimate-canvas-complete-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts scripts/smoke/ultimate-canvas-complete-smoke.ts
 git commit -m "feat: complete canvas video card task workflow"
 ```
 
@@ -477,7 +477,7 @@ git commit -m "feat: complete canvas video card task workflow"
 ### Task 7: 本机 API 闭环、视觉验收和交付回执
 
 **Files:**
-- Create: `scripts/ultimate-canvas-preview-api-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
 - Modify: `scripts/ultimate-canvas-preview-server.mjs`
 - Modify: `docs/handoffs/ultimate-canvas-implementation-report.md`
 
@@ -505,7 +505,7 @@ assert.equal(approval.approval.status, 'pending');
 
 - [ ] **Step 2: Run RED verification**
 
-Run: `npx tsx scripts/ultimate-canvas-preview-api-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
 
 Expected: FAIL because the preview server returns `501` for the first unimplemented video-card endpoint.
 
@@ -519,7 +519,7 @@ Run:
 
 ```powershell
 node --check scripts/ultimate-canvas-preview-server.mjs
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
 ```
 
 Expected: syntax exit `0`; smoke prints `ultimate-canvas-preview-api-smoke passed`.
@@ -534,11 +534,11 @@ node --check public/tools/ultimate-canvas/video-card-workflow.js
 node --check public/tools/ultimate-canvas/app.js
 node --check public/tools/ultimate-canvas/canvas-engine.js
 npx tsc --noEmit --pretty false
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
-npx tsx scripts/ultimate-canvas-normal-user-access-smoke.ts
-npx tsx scripts/ultimate-canvas-context-rules-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts
 npm run lint
 npm run build
 ```
@@ -569,7 +569,7 @@ Update all ten required report sections with exact changed files, validation com
 - [ ] **Step 8: Commit Task 7**
 
 ```powershell
-git add scripts/ultimate-canvas-preview-api-smoke.ts scripts/ultimate-canvas-preview-server.mjs docs/handoffs/ultimate-canvas-implementation-report.md
+git add scripts/smoke/ultimate-canvas-preview-api-smoke.ts scripts/ultimate-canvas-preview-server.mjs docs/handoffs/ultimate-canvas-implementation-report.md
 git commit -m "test: verify complete canvas video card workflow"
 ```
 

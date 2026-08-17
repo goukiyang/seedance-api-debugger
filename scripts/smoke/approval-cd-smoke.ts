@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { loadEnvConfig } from '@next/env';
 import { PrismaClient } from '@prisma/client';
-import { consumeApprovalForTask, createApprovalRequest, decideApproval } from '../src/lib/approvals';
+import { consumeApprovalForTask, createApprovalRequest, decideApproval } from '../../src/lib/approvals';
 
 loadEnvConfig(process.cwd());
 

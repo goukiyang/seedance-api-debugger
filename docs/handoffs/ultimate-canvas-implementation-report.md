@@ -14,12 +14,12 @@
 - `public/tools/ultimate-canvas/canvas-engine.js`
 - `public/tools/ultimate-canvas/styles.css`
 - `public/tools/ultimate-canvas/index.html`
-- `scripts/ultimate-canvas-result-layout-smoke.ts`
-- `scripts/ultimate-canvas-context-rules-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
-- `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
-- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
+- `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`
+- `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 - `docs/handoffs/ultimate-canvas-implementation-report.md`
 
 ## 3. 每个文件改了什么
@@ -34,8 +34,8 @@
 
 ## 4. 跑了哪些验证命令
 
-- TDD RED：`npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`
-- 缓存键 RED：`npx tsx scripts/ultimate-canvas-context-rules-smoke.ts`
+- TDD RED：`npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
+- 缓存键 RED：`npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts`
 - 全部 16 个 `scripts/ultimate-canvas-*-smoke.ts`
 - `npx tsc --noEmit --pretty false`
 - `node --check public/tools/ultimate-canvas/app.js`
@@ -93,12 +93,12 @@
 - `public/tools/ultimate-canvas/app.js`
 - `public/tools/ultimate-canvas/styles.css`
 - `public/tools/ultimate-canvas/index.html`
-- `scripts/ultimate-canvas-compact-generation-ui-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
-- `scripts/ultimate-canvas-context-rules-smoke.ts`
-- `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
-- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- `scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`
+- `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`
+- `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 - `docs/handoffs/ultimate-canvas-implementation-report.md`
 
 ## 3. 每个文件改了什么
@@ -177,11 +177,11 @@
 - `docs/plans/2026-07-15-ultimate-canvas-local-sd2-live-link-design.md`
 - `docs/superpowers/plans/2026-07-15-ultimate-canvas-local-sd2-live-link.md`
 - `scripts/lib/ultimate-canvas-sd2-proxy.mjs`
-- `scripts/ultimate-canvas-feishu-local-relay-smoke.ts`
-- `scripts/ultimate-canvas-preview-api-smoke.ts`
-- `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
+- `scripts/smoke/ultimate-canvas-feishu-local-relay-smoke.ts`
+- `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
+- `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`
 - `scripts/ultimate-canvas-preview-server.mjs`
-- `scripts/ultimate-canvas-sd2-live-proxy-smoke.ts`
+- `scripts/smoke/ultimate-canvas-sd2-live-proxy-smoke.ts`
 - `src/app/api/auth/feishu/callback/route.ts`
 - `src/lib/auth/feishu-local-relay.ts`
 
@@ -263,9 +263,9 @@ Branch base: `aa23f57` (`docs: plan local SD2 live link`). Implementation commit
 
 - `scripts/lib/ultimate-canvas-sd2-proxy.mjs` (new): allowlisted streaming HTTP/HTTPS proxy for the canvas auth, project, card, asset, task, video, reference-album, approval, and upload paths; strips hop-by-hop headers and rewrites upstream `Host`, `Origin`, and `Referer` headers.
 - `scripts/ultimate-canvas-preview-server.mjs`: adds `--sd2-live`, local login shell, session-cookie gate, mutually exclusive mode guard, and delegation to the SD2 proxy. The default preview behavior is retained.
-- `scripts/ultimate-canvas-sd2-live-proxy-smoke.ts` (new): verifies the path allowlist, header filtering/rewrites, body and response streaming, upstream failures, and the default server safety boundary.
-- `scripts/ultimate-canvas-preview-api-smoke.ts`: adds live-mode argument coverage.
-- `scripts/ultimate-canvas-preview-no-generation-smoke.ts`: verifies the no-generation boundary in default preview mode.
+- `scripts/smoke/ultimate-canvas-sd2-live-proxy-smoke.ts` (new): verifies the path allowlist, header filtering/rewrites, body and response streaming, upstream failures, and the default server safety boundary.
+- `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`: adds live-mode argument coverage.
+- `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`: verifies the no-generation boundary in default preview mode.
 - `docs/handoffs/ultimate-canvas-implementation-report.md`: this Task 3 verification handoff section.
 
 No production application file changed on this branch: `public/tools/ultimate-canvas/app.js` and `public/tools/ultimate-canvas/canvas-engine.js` were checked for syntax only.
@@ -346,8 +346,8 @@ Task 8 基线：`f72fc26716ef43d4905e5ea03bb511139c32f20e`
 先按 TDD 运行并记录 RED：
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
 ```
 
 随后运行：`git diff --check`；8 个画布 JavaScript 文件的 `node --check`；全部 11 个 `ultimate-canvas-*-smoke.ts`；`npx tsc --noEmit --pretty false`；`npm run lint`；`npm run build`。自动验证代理未改动 4399 预览进程；父代理在代码审查通过后重启本地预览服务器，并在应用内浏览器完成最终交互验收。
@@ -397,9 +397,9 @@ The semantic smoke now rejects selection-based card enlargement and verifies exa
 
 ### Review hardening follow-up
 
-Modified files for the final layout follow-up are `public/tools/ultimate-canvas/styles.css`, `scripts/ultimate-canvas-result-layout-smoke.ts`, `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`, and this handoff. The stylesheet keeps selected image/video cards at the compact base size, centers the existing editor panel below them, and only shrinks cards below 350px when the viewport itself is narrower.
+Modified files for the final layout follow-up are `public/tools/ultimate-canvas/styles.css`, `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`, `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`, and this handoff. The stylesheet keeps selected image/video cards at the compact base size, centers the existing editor panel below them, and only shrinks cards below 350px when the viewport itself is narrower.
 
-TDD RED for selection stability was recorded with `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`: the existing production rule returned `620px` instead of the required `350px`. A second RED captured the compressed video action row before its fixed 24px height was added. After the CSS fix, the semantic layout smoke and all 11 canvas smokes passed, followed by TypeScript, lint, build, and `git diff --check`.
+TDD RED for selection stability was recorded with `npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts`: the existing production rule returned `620px` instead of the required `350px`. A second RED captured the compressed video action row before its fixed 24px height was added. After the CSS fix, the semantic layout smoke and all 11 canvas smokes passed, followed by TypeScript, lint, build, and `git diff --check`.
 
 The semantic smoke parses the stylesheet AST and checks exact declarations; it does not itself provide computed browser rectangles, stacking/hit-test evidence, clicks, or executed `ResizeObserver` behavior. Parent browser QA supplied the missing rendering evidence: desktop result geometry and hit testing passed, 390px document overflow stayed at zero, the mobile popover stayed within 12px viewport margins, and the browser console reported zero warning/error entries.
 
@@ -425,7 +425,7 @@ The first focused RED run failed for the intended missing behavior:
 - `ultimate-canvas-save-coordinator-smoke.ts`: `canvas-save-coordinator.js` did not exist.
 - A second save RED proved stale context delivery by changing the current document from `replacement-document` to `stale-document`.
 
-New executable coverage is in `scripts/ultimate-canvas-generation-lifecycle-smoke.ts` and `scripts/ultimate-canvas-save-coordinator-smoke.ts`. Existing interaction and task-coordinator smokes now cover disabled/missing/enabled capability recovery, image `size_options`, explicit empty arrays, capped maxima, normalized nonterminal statuses, video duplicate readiness, nested durable references, unavailable-reference mode gating, one-node ownership, and stale replaced-task responses.
+New executable coverage is in `scripts/smoke/ultimate-canvas-generation-lifecycle-smoke.ts` and `scripts/smoke/ultimate-canvas-save-coordinator-smoke.ts`. Existing interaction and task-coordinator smokes now cover disabled/missing/enabled capability recovery, image `size_options`, explicit empty arrays, capped maxima, normalized nonterminal statuses, video duplicate readiness, nested durable references, unavailable-reference mode gating, one-node ownership, and stale replaced-task responses.
 
 All 11 `ultimate-canvas*-smoke.ts` scripts pass, including the local mock preview API smoke. Eight JavaScript syntax checks pass (the seven existing canvas scripts plus the new save coordinator), as do `npx tsc --noEmit --pretty false`, `git diff --check`, `npm run lint`, and `npm run build`. Lint retains only pre-existing warnings in unrelated React files.
 
@@ -441,7 +441,7 @@ The follow-up review identified that a newly created canvas document ID is mutab
 
 Image capability normalization now preserves explicit empty `interaction.size_options` while also exposing the configured outer `capability.size` as `fixedSize`. Enabled fixed-size providers remain submit-ready and render the fixed size read-only. Providers with neither selectable sizes nor a fixed size are disabled with the specific unavailable-spec reason rather than a positive backend message such as `可用`.
 
-The current hardening inventory includes `public/tools/ultimate-canvas/canvas-save-coordinator.js`, `scripts/ultimate-canvas-generation-lifecycle-smoke.ts`, and `scripts/ultimate-canvas-save-coordinator-smoke.ts`. The production cache key for `app.js`, generation interactions, task coordination, and save coordination is `20260712-final-hardening`. Lifecycle coverage now separates document-only metadata creation, same-object card switching, and detached replacement cleanup; capability coverage separates empty-plus-fixed, empty-without-fixed, absent-field defaults, and explicit selectable lists.
+The current hardening inventory includes `public/tools/ultimate-canvas/canvas-save-coordinator.js`, `scripts/smoke/ultimate-canvas-generation-lifecycle-smoke.ts`, and `scripts/smoke/ultimate-canvas-save-coordinator-smoke.ts`. The production cache key for `app.js`, generation interactions, task coordination, and save coordination is `20260712-final-hardening`. Lifecycle coverage now separates document-only metadata creation, same-object card switching, and detached replacement cleanup; capability coverage separates empty-plus-fixed, empty-without-fixed, absent-field defaults, and explicit selectable lists.
 
 No online generation or paid retry was run, and points consumed remain zero. Protected backend/provider/credit/schema/package/secret areas remain untouched. Parent desktop/mobile browser acceptance passed after this correction commit.
 
@@ -480,8 +480,8 @@ Tracker completion remains identity-based. If the old promise later settles, its
 
 - `public/tools/ultimate-canvas/generation-node-interactions.js`：新增可测试的图片/视频长边策略，图片为 640、视频为 350，并保留移动端 12px 双侧边距。
 - `public/tools/ultimate-canvas/app.js`：按节点类型应用长边策略；打开中的规格弹层会在节点状态刷新后从当前数据重新渲染，因此比例、尺寸、数量、摘要按钮和节点尺寸使用同一份状态。
-- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`：覆盖图片/视频桌面与移动端长边，并实际执行规格弹层刷新函数，验证比例、尺寸、数量和重新定位。
-- `scripts/ultimate-canvas-result-layout-smoke.ts`：覆盖 21:9 图片节点 `640 x 274.286`，验证其横向宽度与提示词面板一致。
+- `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`：覆盖图片/视频桌面与移动端长边，并实际执行规格弹层刷新函数，验证比例、尺寸、数量和重新定位。
+- `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`：覆盖 21:9 图片节点 `640 x 274.286`，验证其横向宽度与提示词面板一致。
 
 TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦烟测转为 GREEN。应用内浏览器实测图片规格从 1:1 切回 21:9 后，下拉和摘要均显示 `21:9`，节点变量为 `640 x 274.286`，提示词面板为 `640px`，中心点一致；视频 9:16 仍为 `196.875 x 350`。测试结束后已恢复图片节点原有 21:9 设置和 100% 画布缩放。
 
@@ -513,14 +513,14 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 - public/tools/ultimate-canvas/backend-contract.js
 - public/tools/ultimate-canvas/generation-api.js
 - public/tools/ultimate-canvas/index.html
-- scripts/ultimate-canvas-context-rules-smoke.ts
-- scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-- scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-- scripts/ultimate-canvas-normal-user-access-smoke.ts
-- scripts/ultimate-canvas-preview-api-smoke.ts
+- scripts/smoke/ultimate-canvas-context-rules-smoke.ts
+- scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+- scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+- scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts
+- scripts/smoke/ultimate-canvas-preview-api-smoke.ts
 - scripts/ultimate-canvas-preview-server.mjs
-- scripts/ultimate-canvas-same-origin-backend-smoke.ts
-- scripts/ultimate-canvas-video-card-workflow-smoke.ts
+- scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
+- scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 - src/app/api/tools/ultimate-canvas/bootstrap/route.ts
 - src/app/api/tools/ultimate-canvas/generate/route.ts
 
@@ -535,10 +535,10 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 - src/app/api/tools/ultimate-canvas/bootstrap/route.ts：在既有访问控制不变的情况下，返回生产后端标识 backend: { mode: 'sd2', transport: 'same-origin', mock: false }。
 - src/app/api/tools/ultimate-canvas/generate/route.ts：保留原有认证和普通用户授权检查，将文字生成不可用时的响应改为面向普通用户的“文本生成能力暂不可用，请稍后联系管理员。”文案。
 - scripts/ultimate-canvas-preview-server.mjs：本地预览 bootstrap 响应标识为 Mock，确保预览不会伪装为 SD2 生产后端。
-- scripts/ultimate-canvas-same-origin-backend-smoke.ts：新增同源后端集成烟测，覆盖能力路由白名单、请求契约、任务状态、错误文案、生产/Mock 标识和浏览器无第三方密钥。
-- scripts/ultimate-canvas-normal-user-access-smoke.ts：补充普通用户安全访问和文案断言。
-- scripts/ultimate-canvas-context-rules-smoke.ts、scripts/ultimate-canvas-generation-node-interactions-smoke.ts、scripts/ultimate-canvas-generation-node-workflow-smoke.ts、scripts/ultimate-canvas-video-card-workflow-smoke.ts：更新 app.js 缓存版本断言，防止旧缓存掩盖本次接入。
-- scripts/ultimate-canvas-preview-api-smoke.ts：验证本地预览 bootstrap 明确返回 Mock 同源运行时标识。
+- scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts：新增同源后端集成烟测，覆盖能力路由白名单、请求契约、任务状态、错误文案、生产/Mock 标识和浏览器无第三方密钥。
+- scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts：补充普通用户安全访问和文案断言。
+- scripts/smoke/ultimate-canvas-context-rules-smoke.ts、scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts、scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts、scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts：更新 app.js 缓存版本断言，防止旧缓存掩盖本次接入。
+- scripts/smoke/ultimate-canvas-preview-api-smoke.ts：验证本地预览 bootstrap 明确返回 Mock 同源运行时标识。
 - 其余上述 smoke 变更共同确保本地 Mock API 预览与既有节点、视频卡和上下文流程仍可执行。
 
 ### 4. 跑了哪些验证命令
@@ -580,7 +580,7 @@ TDD RED 分别因缺少 `generationNodeLongEdge` 失败；实现后两个聚焦�
 - 在具备写权限后执行目标分支推送；若仍受限，交付当前 commit 的 patch，不宣称已推送或已上线。
 ## Task 2 browser QA and delivery receipt (2026-07-13)
 
-Task 2 validated the approved Task 1 commit `3060e46` (`fix: move video settings into footer`) without changing application code. Task 1 production changes are `public/tools/ultimate-canvas/canvas-engine.js`, `public/tools/ultimate-canvas/index.html`, and `public/tools/ultimate-canvas/styles.css`. Its updated smoke files are `scripts/ultimate-canvas-context-rules-smoke.ts`, `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`, `scripts/ultimate-canvas-result-layout-smoke.ts`, and `scripts/ultimate-canvas-video-card-workflow-smoke.ts`.
+Task 2 validated the approved Task 1 commit `3060e46` (`fix: move video settings into footer`) without changing application code. Task 1 production changes are `public/tools/ultimate-canvas/canvas-engine.js`, `public/tools/ultimate-canvas/index.html`, and `public/tools/ultimate-canvas/styles.css`. Its updated smoke files are `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`, `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`, `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`, and `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`.
 
 RED/GREEN evidence: the Task 1 diff shows the prior video `generation-summary-row` above `generation-node-toolbar` and the prior footer as wrapping flex. The approved revision moves the same mode/spec controls after `video-model-info` inside `video-props-footer`, places `video-footer-right` after them, and changes the desktop footer to a three-column grid. `ultimate-canvas-result-layout-smoke.ts` now asserts toolbar-before-footer, model-before-settings-before-cost/submit, and the grid placements. The full 12-script smoke run was GREEN.
 
@@ -623,17 +623,17 @@ No real text, image, or video generation occurred. No paid retry, credit mutatio
 - `public/tools/ultimate-canvas/app.js`
 - `public/tools/ultimate-canvas/index.html`
 - `scripts/ultimate-canvas-preview-server.mjs`
-- `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
-- `scripts/ultimate-canvas-preview-api-smoke.ts`
-- `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
-- `scripts/ultimate-canvas-context-rules-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
-- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`
+- `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
+- `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`
+- `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 
 `9937708..HEAD` 不包含边界提交 `9937708` 本身，因此会排除该提交中的设计文档，只显示其余 13 个 tracked 文件；该区间不代表本次工作的完整文件范围。
 
-本轮最终审查修复实际修改的 tracked 文件为 `scripts/ultimate-canvas-preview-server.mjs`、`scripts/ultimate-canvas-preview-no-generation-smoke.ts` 和本回执。另新增忽略的本地报告 `.superpowers/sdd/final-review-fix-report.md`，它不属于 Git 区间统计。`scripts/ultimate-canvas-same-origin-backend-smoke.ts` 本轮仅执行验证，没有修改。
+本轮最终审查修复实际修改的 tracked 文件为 `scripts/ultimate-canvas-preview-server.mjs`、`scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts` 和本回执。另新增忽略的本地报告 `.superpowers/sdd/final-review-fix-report.md`，它不属于 Git 区间统计。`scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts` 本轮仅执行验证，没有修改。
 
 ### 3. 每个文件改了什么
 
@@ -650,12 +650,12 @@ No real text, image, or video generation occurred. No paid retry, credit mutatio
 
 Task 1 的 RED：
 
-- `npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts`：实现前 preview 元数据被映射为未验证状态。
-- `npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts`：实现前图片/视频禁用分支未使用能力专属消息。
+- `npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`：实现前 preview 元数据被映射为未验证状态。
+- `npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`：实现前图片/视频禁用分支未使用能力专属消息。
 
 Task 2 的 RED：
 
-- `npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts`：实现前无参数服务返回 Mock bootstrap。
+- `npx tsx scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`：实现前无参数服务返回 Mock bootstrap。
 - 扩展隐藏任务隔离断言后，默认模式对预置候选任务的卡片 PATCH 曾错误返回 200；改为仅基于 `visibleVideoTasks()` 后转为 GREEN。
 
 Task 3 完整验证：
@@ -680,9 +680,9 @@ git diff --check 9937708^..HEAD
 最终审查修复的 GREEN 验证命令：
 
 ```powershell
-npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 node --check scripts/ultimate-canvas-preview-server.mjs
 git diff --check c2fd70a..HEAD
 ```
@@ -736,7 +736,7 @@ git diff --check c2fd70a..HEAD
 ### 2. 实际修改了哪些文件
 
 - `public/tools/ultimate-canvas/styles.css`
-- `scripts/ultimate-canvas-result-layout-smoke.ts`
+- `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
 - `docs/superpowers/specs/2026-07-15-ultimate-canvas-image-preview-card-design.md`
 - `docs/superpowers/plans/2026-07-15-ultimate-canvas-image-preview-card.md`
 - `docs/handoffs/ultimate-canvas-implementation-report.md`
@@ -750,7 +750,7 @@ git diff --check c2fd70a..HEAD
 
 ### 4. 跑了哪些验证命令
 
-- 修改前 `npx tsx scripts/ultimate-canvas-result-layout-smoke.ts`：PASS。
+- 修改前 `npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts`：PASS。
 - 加入回归断言后同一命令：按预期 FAIL，缺少 `display: grid`。
 - 实现后聚焦布局与交互 smoke：PASS。
 - 全部 `ultimate-canvas-*-smoke.ts`：13/13 PASS。
@@ -803,10 +803,10 @@ git diff --check c2fd70a..HEAD
 - `public/tools/ultimate-canvas/canvas-engine.js`
 - `public/tools/ultimate-canvas/generation-node-interactions.js`
 - `public/tools/ultimate-canvas/styles.css`
-- `scripts/ultimate-canvas-compact-generation-ui-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
-- `scripts/ultimate-canvas-result-layout-smoke.ts`
+- `scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
+- `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
 - `docs/handoffs/ultimate-canvas-implementation-report.md`
 
 Task 4 新增的窄屏弹层定位修复位于 `app.js`，对应运行时回归加入现有 `ultimate-canvas-generation-node-interactions-smoke.ts`；旧规格控件契约的修订位于 `ultimate-canvas-generation-node-workflow-smoke.ts`。本轮没有另建画布、生成流程或测试专用应用页面。

@@ -89,7 +89,7 @@
 
 建议新增：
 
-- `scripts/task-permission-matrix-smoke.ts`
+- `scripts/smoke/task-permission-matrix-smoke.ts`
 
 脚本职责：
 
@@ -118,8 +118,8 @@
 
 ### 任务清单
 
-- [x] 新建 `scripts/task-permission-matrix-smoke.ts`。
-- [x] 在脚本里复用现有 session cookie 签名方式，参考 `scripts/project-ui-smoke.ts`。
+- [x] 新建 `scripts/smoke/task-permission-matrix-smoke.ts`。
+- [x] 在脚本里复用现有 session cookie 签名方式，参考 `scripts/smoke/project-ui-smoke.ts`。
 - [x] 查询测试用户和测试任务，不足时输出跳过原因，不自动创建付费任务。
 - [x] 覆盖 `/api/video/list`，断言普通用户不返回非授权任务。
 - [x] 覆盖 `/api/video/status/:id`，断言非授权任务返回 403 或 404。
@@ -132,7 +132,7 @@
 ### 验收命令
 
 ```bash
-npx tsx scripts/task-permission-matrix-smoke.ts
+npx tsx scripts/smoke/task-permission-matrix-smoke.ts
 npx tsc --noEmit --pretty false
 npm run build
 ```
@@ -145,7 +145,7 @@ npm run build
 
 ### 执行记录 - 2026-06-10
 
-已新增 `scripts/task-permission-matrix-smoke.ts`，通过当前本地服务 `BASE_URL=http://localhost:3000` 跑完 16 个 HTTP 检查：
+已新增 `scripts/smoke/task-permission-matrix-smoke.ts`，通过当前本地服务 `BASE_URL=http://localhost:3000` 跑完 16 个 HTTP 检查：
 
 - 管理员：`/api/video/list`、`/api/video/list?include_all=true`、`/api/admin/outputs` 均返回 200。
 - 普通用户 `kay`：任务列表返回 200，`include_all=true` 不扩大权限；访问非授权任务状态、截图、非授权项目列表均返回 403；访问 `/api/admin/outputs` 返回 403。
@@ -155,7 +155,7 @@ npm run build
 验证命令：
 
 ```bash
-BASE_URL=http://localhost:3000 npx tsx scripts/task-permission-matrix-smoke.ts
+BASE_URL=http://localhost:3000 npx tsx scripts/smoke/task-permission-matrix-smoke.ts
 npx tsc --noEmit --pretty false
 npm run build
 ```
@@ -272,13 +272,13 @@ npm run build
 建议新增脚本：
 
 ```bash
-npx tsx scripts/project-billing-smoke.ts --dry-run
+npx tsx scripts/smoke/project-billing-smoke.ts --dry-run
 ```
 
 真实验收需要授权后再跑付费生成：
 
 ```bash
-ALLOW_PAID_PROVIDER_SMOKE=1 npx tsx scripts/workbench-closure-smoke.ts
+ALLOW_PAID_PROVIDER_SMOKE=1 npx tsx scripts/smoke/workbench-closure-smoke.ts
 ```
 
 ### 风险与注意
@@ -481,7 +481,7 @@ npm run db:generate
 npx tsx -e "import { normalizeGenerationDefaults, serializeGenerationDefaults, parseStoredGenerationDefaults } from './src/lib/preferences/generation.ts'; /* smoke */"
 npx tsc --noEmit --pretty false
 npm run build
-BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts
+BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts
 ```
 
 验证结果：
@@ -578,7 +578,7 @@ BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts
 npx tsx -e "import { sanitizeReturnTo, taskReturnLabel, taskDetailHref } from './src/lib/navigation/return-to.ts'; ..."
 npx tsc --noEmit --pretty false
 npm run build
-BASE_URL=http://localhost:3000 npx tsx scripts/project-ui-smoke.ts
+BASE_URL=http://localhost:3000 npx tsx scripts/smoke/project-ui-smoke.ts
 ```
 
 结果：全部通过；ClickOps CLI 可启动 session，但本次 session 未在后续 CLI 调用中保留，因此未拿到浏览器 snapshot，已用构建和本地 UI smoke 替代。
@@ -825,7 +825,7 @@ npm run build
 ```bash
 npx tsc --noEmit --pretty false
 npm run build
-BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts
+BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts
 ```
 
 额外只读 smoke：
@@ -944,7 +944,7 @@ npm run build
 npx tsx -e "import { displayUserName, displayUserSubtitle, isSyntheticFeishuEmail, isTechnicalUsername } from './src/lib/users/display.ts'; ..."
 npx tsc --noEmit --pretty false
 npm run build
-BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts
+BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts
 ```
 
 额外只读 smoke：
@@ -1054,7 +1054,7 @@ npm run build
 npx tsx -e "import { displayUserName, displayUserSubtitle, isSyntheticFeishuEmail, isTechnicalUsername } from './src/lib/users/display.ts'; ..."
 npx tsc --noEmit --pretty false
 npm run build
-BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts
+BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts
 npx impeccable detect src/components/AccountMenu.tsx
 npx impeccable detect src/app/admin/users/AdminUsersClient.tsx
 ```
@@ -1219,7 +1219,7 @@ npm run build
 
 任务：
 
-- 新增 `scripts/task-permission-matrix-smoke.ts`。
+- 新增 `scripts/smoke/task-permission-matrix-smoke.ts`。
 - 跑出权限矩阵。
 - 如果无越权，只记录结论。
 - 如果有越权，进入 Batch 2。
@@ -1227,7 +1227,7 @@ npm run build
 验证：
 
 ```bash
-npx tsx scripts/task-permission-matrix-smoke.ts
+npx tsx scripts/smoke/task-permission-matrix-smoke.ts
 ```
 
 ### Batch 2：安全修复
@@ -1243,7 +1243,7 @@ npx tsx scripts/task-permission-matrix-smoke.ts
 验证：
 
 ```bash
-npx tsx scripts/task-permission-matrix-smoke.ts
+npx tsx scripts/smoke/task-permission-matrix-smoke.ts
 npx tsc --noEmit --pretty false
 npm run build
 ```
@@ -1266,7 +1266,7 @@ npm run build
 npm run db:generate
 npx tsc --noEmit --pretty false
 npm run build
-BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts
+BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts
 ```
 
 ### Batch 4：图集管理

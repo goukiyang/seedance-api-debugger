@@ -47,13 +47,13 @@ Thread ID：`019f44c6-64d3-7753-acd0-f31fc16763fb`
   - 生成返回和日志：`/api/assets/generate` 成功响应包含 `source_model_label`、`size`、`output_format`、`response_format`、`reference_image_count`，operation log detail 包含 `model_label`、`size`、`output_format`、`response_format`、`reference_image_count`。
   - 无线画布：bootstrap 的 image capability 返回可读 `label`、`size`、`output_format`、`response_format`、`watermark` 和 Seedream 能力限制。
   - 固定审核规则：`AGENTS.md` 和本文档已写入审核线程只读边界、唯一允许追加文档、记录格式和固定收尾语。
-  - 独立复跑通过：`npx tsx scripts/seedream-image-generation-smoke.ts`、`npx tsx scripts/seedream-admin-settings-smoke.ts`、`npx tsx scripts/seedream-generate-route-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`；lint 仅输出既有 `<img>` 和 hook dependency warning，命令退出码为 0。
+  - 独立复跑通过：`npx tsx scripts/smoke/seedream-image-generation-smoke.ts`、`npx tsx scripts/smoke/seedream-admin-settings-smoke.ts`、`npx tsx scripts/smoke/seedream-generate-route-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`；lint 仅输出既有 `<img>` 和 hook dependency warning，命令退出码为 0。
 - 建议下一步：执行线程先处理非阻塞风险，尤其是聚焦提交范围和是否补更严路径校验；随后再按 sd2 规则做提交、远端版本、部署和公网验收。
 
 ### 2026-07-09 Seedream 5.0 Pro `/uploads/` 路径边界小修复只读复核
 
 - 结论：通过。
-- 审查对象：`src/app/api/assets/generate/route.ts` 的本地 `/uploads/...` 路径校验小修复，以及 `scripts/seedream-generate-route-smoke.ts` 的回归检查。
+- 审查对象：`src/app/api/assets/generate/route.ts` 的本地 `/uploads/...` 路径校验小修复，以及 `scripts/smoke/seedream-generate-route-smoke.ts` 的回归检查。
 - 阻塞问题：无。
 - 非阻塞风险：
   - 本次只读复核未重跑 `npm run build`，因为 build 会写构建产物；执行线程报告 build 通过，需要由执行线程保留原始构建证据。
@@ -61,6 +61,6 @@ Thread ID：`019f44c6-64d3-7753-acd0-f31fc16763fb`
 - 证据：
   - `src/app/api/assets/generate/route.ts` 当前 `localUploadPath()` 先固定 `uploadsRoot = path.join(publicRoot, 'uploads')`，再计算 `relativePath = path.relative(uploadsRoot, filePath)`，并用 `relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)` 决定是否允许返回本地文件路径。
   - 该校验能拒绝 `/uploads/../uploads_evil/...` 这类规范化后落到相邻前缀目录的路径，因为相对 `uploadsRoot` 会变成 `..` 开头；相比旧的 `filePath.startsWith(path.join(publicRoot, 'uploads'))`，已解决相邻前缀误通过风险。
-  - `scripts/seedream-generate-route-smoke.ts` 已增加对 `path.relative(uploadsRoot, filePath)` 和 `!path.isAbsolute(relativePath)` 的检查，能防止该路径边界逻辑退回简单字符串前缀判断。
-  - 独立复跑通过：`npx tsx scripts/seedream-generate-route-smoke.ts`、`npx tsx scripts/seedream-image-generation-smoke.ts`、`npx tsx scripts/seedream-admin-settings-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check -- src/app/api/assets/generate/route.ts scripts/seedream-generate-route-smoke.ts`、`npm run lint`；lint 仅输出既有 warning，命令退出码为 0。
+  - `scripts/smoke/seedream-generate-route-smoke.ts` 已增加对 `path.relative(uploadsRoot, filePath)` 和 `!path.isAbsolute(relativePath)` 的检查，能防止该路径边界逻辑退回简单字符串前缀判断。
+  - 独立复跑通过：`npx tsx scripts/smoke/seedream-generate-route-smoke.ts`、`npx tsx scripts/smoke/seedream-image-generation-smoke.ts`、`npx tsx scripts/smoke/seedream-admin-settings-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check -- src/app/api/assets/generate/route.ts scripts/smoke/seedream-generate-route-smoke.ts`、`npm run lint`；lint 仅输出既有 warning，命令退出码为 0。
 - 建议下一步：执行线程可继续收口提交；提交前确认是否拆分或说明非 Seedream todo 规划改动，并按原计划保留 build、Git、部署和公网验收证据。

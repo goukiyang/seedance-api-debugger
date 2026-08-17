@@ -1,4 +1,4 @@
-import { getGenerationDashboardData, parseDashboardRange } from '../src/lib/admin/generation-dashboard';
+import { getGenerationDashboardData, parseDashboardRange } from '../../src/lib/admin/generation-dashboard';
 
 async function main() {
   const allRange = parseDashboardRange(

@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import {
   createFeishuExchangePermitStore,
   proxySd2CanvasRequest,
-} from './lib/ultimate-canvas-sd2-proxy.mjs';
+} from '../lib/ultimate-canvas-sd2-proxy.mjs';
 
 async function listen(server: http.Server): Promise<number> {
   server.listen(0, '127.0.0.1');

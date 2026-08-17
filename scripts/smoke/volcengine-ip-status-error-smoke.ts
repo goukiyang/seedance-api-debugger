@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {
   VolcengineIpRequestError,
   volcengineRequestErrorToStatus,
-} from '../src/lib/provider/volcengine-ip';
+} from '../../src/lib/provider/volcengine-ip';
 
 function requestError(code: string, message: string, statusCode = 400) {
   return new VolcengineIpRequestError({

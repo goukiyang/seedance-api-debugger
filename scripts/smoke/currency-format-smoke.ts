@@ -5,7 +5,7 @@ import {
   formatCnyAmountFixed,
   formatProviderUsdCharge,
   usdToCny,
-} from '../src/lib/costs/currency';
+} from '../../src/lib/costs/currency';
 
 function assertEqual(actual: string | null, expected: string, label: string) {
   if (actual !== expected) {

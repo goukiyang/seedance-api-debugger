@@ -3,7 +3,7 @@ import path from 'path';
 import {
   ASSET_LIBRARY_CACHE_SCHEMA_VERSION,
   createAssetLibraryCacheKey,
-} from '../src/lib/assets/library-cache';
+} from '../../src/lib/assets/library-cache';
 
 function assert(condition: unknown, message: string) {
   if (!condition) {

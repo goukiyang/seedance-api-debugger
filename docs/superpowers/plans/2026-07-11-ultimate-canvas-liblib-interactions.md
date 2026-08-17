@@ -26,7 +26,7 @@
 
 **Files:**
 - Create: `public/tools/ultimate-canvas/generation-node-interactions.js`
-- Create: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/index.html`
 
 **Interfaces:**
@@ -40,7 +40,7 @@
 
 - [ ] **Step 1: Write the failing interaction contract smoke test**
 
-Create `scripts/ultimate-canvas-generation-node-interactions-smoke.ts` with these behavioral assertions:
+Create `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts` with these behavioral assertions:
 
 ```ts
 import assert from 'node:assert/strict';
@@ -100,7 +100,7 @@ console.log('ultimate-canvas-generation-node-interactions-smoke passed');
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 ```
 
 Expected: FAIL with `Cannot find module '../public/tools/ultimate-canvas/generation-node-interactions.js'`.
@@ -140,7 +140,7 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/generation-node-interactions.js
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 ```
 
 Expected: both commands PASS.
@@ -148,7 +148,7 @@ Expected: both commands PASS.
 - [ ] **Step 5: Commit Task 1**
 
 ```powershell
-git add public/tools/ultimate-canvas/generation-node-interactions.js public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+git add public/tools/ultimate-canvas/generation-node-interactions.js public/tools/ultimate-canvas/index.html scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 git commit -m "feat: add canvas interaction contracts"
 ```
 
@@ -160,9 +160,9 @@ git commit -m "feat: add canvas interaction contracts"
 - Modify: `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`
 - Modify: `public/tools/ultimate-canvas/generation-node-workflow.js`
 - Modify: `scripts/ultimate-canvas-preview-server.mjs`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- Modify: `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
 
 **Interfaces:**
 - Extends `capabilities.image.interaction` and `capabilities.video.interaction`.
@@ -192,8 +192,8 @@ Extend the generation workflow smoke to assert that `smart-multi-frame-video` ma
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 ```
 
 Expected: FAIL because `capabilities.video.interaction` is undefined.
@@ -252,9 +252,9 @@ Add this real backend-supported mode to `VIDEO_MODES` in `generation-node-workfl
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 npx tsc --noEmit --pretty false
 ```
 
@@ -263,7 +263,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 2**
 
 ```powershell
-git add src/app/api/tools/ultimate-canvas/bootstrap/route.ts public/tools/ultimate-canvas/generation-node-workflow.js scripts/ultimate-canvas-preview-server.mjs scripts/ultimate-canvas-preview-api-smoke.ts scripts/ultimate-canvas-generation-node-interactions-smoke.ts scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+git add src/app/api/tools/ultimate-canvas/bootstrap/route.ts public/tools/ultimate-canvas/generation-node-workflow.js scripts/ultimate-canvas-preview-server.mjs scripts/smoke/ultimate-canvas-preview-api-smoke.ts scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 git commit -m "feat: expose canvas interaction capabilities"
 ```
 
@@ -274,7 +274,7 @@ git commit -m "feat: expose canvas interaction capabilities"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/canvas-engine.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 
 **Interfaces:**
 - Produces `engine.selectNode(nodeId)`.
@@ -304,7 +304,7 @@ Add CSS assertions for `.canvas-node.selected`, `.canvas-node:not(.selected) .no
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 ```
 
 Expected: FAIL on the first missing public engine method.
@@ -356,8 +356,8 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/canvas-engine.js
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
 ```
 
 Expected: PASS.
@@ -365,7 +365,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Task 3**
 
 ```powershell
-git add public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+git add public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 git commit -m "feat: add expandable canvas node foundation"
 ```
 
@@ -378,7 +378,7 @@ git commit -m "feat: add expandable canvas node foundation"
 - Modify: `public/tools/ultimate-canvas/app.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
 - Modify: `public/tools/ultimate-canvas/index.html`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 
 **Interfaces:**
 - Adds `openGenerationPopover(nodeId, kind, anchor)` and `closeGenerationPopover()` in `app.js`.
@@ -435,8 +435,8 @@ Run:
 ```powershell
 node --check public/tools/ultimate-canvas/app.js
 node --check public/tools/ultimate-canvas/canvas-engine.js
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 ```
 
 Expected: PASS.
@@ -444,7 +444,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit Task 4**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css public/tools/ultimate-canvas/index.html scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 git commit -m "feat: add canvas generation popovers"
 ```
 
@@ -456,8 +456,8 @@ git commit -m "feat: add canvas generation popovers"
 - Modify: `public/tools/ultimate-canvas/app.js`
 - Modify: `public/tools/ultimate-canvas/canvas-engine.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
 
 **Interfaces:**
 - Adds `startReferenceSelection(targetNodeId)`.
@@ -515,9 +515,9 @@ Keep the existing global asset-library auto-connect route operational by calling
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 ```
 
 Expected: PASS.
@@ -525,7 +525,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Task 5**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-generation-node-interactions-smoke.ts scripts/ultimate-canvas-preview-api-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts scripts/smoke/ultimate-canvas-preview-api-smoke.ts
 git commit -m "feat: add canvas reference selection mode"
 ```
 
@@ -537,8 +537,8 @@ git commit -m "feat: add canvas reference selection mode"
 - Modify: `public/tools/ultimate-canvas/app.js`
 - Modify: `public/tools/ultimate-canvas/canvas-engine.js`
 - Modify: `public/tools/ultimate-canvas/styles.css`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
 
 **Interfaces:**
 - `decorateGeneratedNode` updates the media/result region only.
@@ -580,9 +580,9 @@ Before `JSON.stringify`, call `sanitizeSerializable` on the payload returned by 
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
 ```
 
 Expected: PASS.
@@ -590,7 +590,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit Task 6**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-generation-node-interactions-smoke.ts scripts/ultimate-canvas-preview-api-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts scripts/smoke/ultimate-canvas-preview-api-smoke.ts
 git commit -m "feat: keep canvas results editable in place"
 ```
 
@@ -600,10 +600,10 @@ git commit -m "feat: keep canvas results editable in place"
 
 **Files:**
 - Create: `public/tools/ultimate-canvas/generation-task-coordinator.js`
-- Create: `scripts/ultimate-canvas-generation-task-coordinator-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-generation-task-coordinator-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/index.html`
 - Modify: `public/tools/ultimate-canvas/app.js`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 
 **Interfaces:**
 - Produces `createGenerationTaskCoordinator(options)`.
@@ -654,7 +654,7 @@ assert.equal(timer, null);
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-task-coordinator-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-task-coordinator-smoke.ts
 ```
 
 Expected: FAIL with missing module.
@@ -673,10 +673,10 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/generation-task-coordinator.js
-npx tsx scripts/ultimate-canvas-generation-task-coordinator-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-task-coordinator-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 ```
 
 Expected: PASS.
@@ -684,7 +684,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Task 7**
 
 ```powershell
-git add public/tools/ultimate-canvas/generation-task-coordinator.js public/tools/ultimate-canvas/index.html public/tools/ultimate-canvas/app.js scripts/ultimate-canvas-generation-task-coordinator-smoke.ts scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+git add public/tools/ultimate-canvas/generation-task-coordinator.js public/tools/ultimate-canvas/index.html public/tools/ultimate-canvas/app.js scripts/smoke/ultimate-canvas-generation-task-coordinator-smoke.ts scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 git commit -m "feat: coordinate canvas task polling"
 ```
 
@@ -697,8 +697,8 @@ git commit -m "feat: coordinate canvas task polling"
 - Modify: `public/tools/ultimate-canvas/styles.css`
 - Modify: `public/tools/ultimate-canvas/index.html`
 - Modify: `scripts/ultimate-canvas-preview-server.mjs`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 - Modify: `docs/handoffs/ultimate-canvas-implementation-report.md`
 
 **Interfaces:**
@@ -743,14 +743,14 @@ node --check public/tools/ultimate-canvas/generation-node-interactions.js
 node --check public/tools/ultimate-canvas/generation-node-workflow.js
 node --check public/tools/ultimate-canvas/generation-task-coordinator.js
 node --check scripts/ultimate-canvas-preview-server.mjs
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-task-coordinator-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-complete-smoke.ts
-npx tsx scripts/ultimate-canvas-normal-user-access-smoke.ts
-npx tsx scripts/ultimate-canvas-context-rules-smoke.ts
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-task-coordinator-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-complete-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 npx tsc --noEmit --pretty false
 npm run lint
 npm run build
@@ -771,7 +771,7 @@ Verify the nine browser acceptance steps from the design: compact/expanded nodes
 - [ ] **Step 7: Commit Task 8**
 
 ```powershell
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-preview-server.mjs scripts/ultimate-canvas-preview-api-smoke.ts scripts/ultimate-canvas-generation-node-interactions-smoke.ts docs/handoffs/ultimate-canvas-implementation-report.md
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-preview-server.mjs scripts/smoke/ultimate-canvas-preview-api-smoke.ts scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts docs/handoffs/ultimate-canvas-implementation-report.md
 git commit -m "feat: complete canvas interaction workflow"
 ```
 

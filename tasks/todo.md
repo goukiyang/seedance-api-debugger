@@ -188,7 +188,7 @@ Review：已上线到生产 BUILD_ID `8-plVoagPP7tPNn_QFF47`。专项 smoke 证�
 - [ ] WAL 或数据库设置影响生产启动时停止并回滚数据库备份。
 - [ ] 缩略图策略需要拉取远端大 mp4 或产生额外付费/带宽风险时停止。
 
-Review：2026-07-03 已上线到生产 BUILD_ID `8l1n_n4ANzXdi-fj52iff`，Git commit `b620635`，回滚 tag `rollback/2026-07-03-before-assets-cache-performance` 指向上线前 `b4fcc86`。本轮完成 Phase 1、Phase 3、Phase 4 前两项：资产页 IndexedDB 秒开缓存、缓存 key 按用户/角色/筛选隔离、缓存写入过滤 prompt/外部 URL/用户邮箱等字段、接口失败保留旧列表；首屏不再无条件拉项目、管理员用户和图集；`/api/projects` GET 不再触发默认项目写入。验证通过：`npx tsx scripts/assets-library-performance-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、限定 lint、完整 `npm run lint`、`npm run build`、子 agent 只读审查并修复 2 个 P2、`youdoo-sites build/restart/status sd2`。公网验证：`/api/config` 200、`/login` 200、`/assets?type=video` 200、`/api/assets/library?type=video&limit=1` 未登录 401 符合权限预期、资产页公网 chunk 200 且包含 `sd2_asset_library_cache` / `asset_library_pages` / “正在同步最新资产”。等待健康守护周期后 launchd `runs=24` 未增长。
+Review：2026-07-03 已上线到生产 BUILD_ID `8l1n_n4ANzXdi-fj52iff`，Git commit `b620635`，回滚 tag `rollback/2026-07-03-before-assets-cache-performance` 指向上线前 `b4fcc86`。本轮完成 Phase 1、Phase 3、Phase 4 前两项：资产页 IndexedDB 秒开缓存、缓存 key 按用户/角色/筛选隔离、缓存写入过滤 prompt/外部 URL/用户邮箱等字段、接口失败保留旧列表；首屏不再无条件拉项目、管理员用户和图集；`/api/projects` GET 不再触发默认项目写入。验证通过：`npx tsx scripts/smoke/assets-library-performance-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、限定 lint、完整 `npm run lint`、`npm run build`、子 agent 只读审查并修复 2 个 P2、`youdoo-sites build/restart/status sd2`。公网验证：`/api/config` 200、`/login` 200、`/assets?type=video` 200、`/api/assets/library?type=video&limit=1` 未登录 401 符合权限预期、资产页公网 chunk 200 且包含 `sd2_asset_library_cache` / `asset_library_pages` / “正在同步最新资产”。等待健康守护周期后 launchd `runs=24` 未增长。
 
 ### Git Plan
 
@@ -263,7 +263,7 @@ Review：2026-07-02 已用真实 Key 在公网创建 4 秒超分任务 `cmr2z696
 
 体验原则：入口跟着视频走，不让用户先理解“超分功能在哪里”；超分结果必须持续可识别，不能混在普通生成里；对比页只服务一个判断：超分后有没有变好。
 
-Review：2026-07-02 已上线到生产 BUILD_ID `eW9697UV1jcc4VUslEVPw`。本轮把主入口改到资产管理页：普通成功视频封面 hover 后出现“查看 / 超分”，超分二级菜单可选 `720p/1080p/2K/4K` 和“不插帧/30fps/60fps”，并显示预计冻结点数；超分结果卡片和详情预览左上角持续显示“超分”。任务详情页对 AI MediaKit 超分任务改为左右对比播放，左侧“原视频”、右侧“超分视频”，播放、暂停、拖动进度会同步。验证通过：`npx tsx scripts/enhance-video-entry-smoke.ts`、`npx tsx scripts/enhance-video-create-route-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build/restart/status sd2`；公网 `/api/config` 200 且 `aimediakit_enhance_video.ready=true`，公网 assets/task 静态 chunk 命中 `asset-card-hover-enhance`、`asset-card-badge`、`task-result-compare-stage`、`原视频`、`超分视频`。受控无登录浏览器访问 `/assets?type=video&status=succeeded` 被正确跳转到 `/login`；真实登录态 hover 截图未完成，原因是当前 Chrome 没有可复用登录态。
+Review：2026-07-02 已上线到生产 BUILD_ID `eW9697UV1jcc4VUslEVPw`。本轮把主入口改到资产管理页：普通成功视频封面 hover 后出现“查看 / 超分”，超分二级菜单可选 `720p/1080p/2K/4K` 和“不插帧/30fps/60fps”，并显示预计冻结点数；超分结果卡片和详情预览左上角持续显示“超分”。任务详情页对 AI MediaKit 超分任务改为左右对比播放，左侧“原视频”、右侧“超分视频”，播放、暂停、拖动进度会同步。验证通过：`npx tsx scripts/smoke/enhance-video-entry-smoke.ts`、`npx tsx scripts/smoke/enhance-video-create-route-smoke.ts`、`npx tsc --noEmit --pretty false`、`npm run lint`、`npm run build`、`youdoo-sites build/restart/status sd2`；公网 `/api/config` 200 且 `aimediakit_enhance_video.ready=true`，公网 assets/task 静态 chunk 命中 `asset-card-hover-enhance`、`asset-card-badge`、`task-result-compare-stage`、`原视频`、`超分视频`。受控无登录浏览器访问 `/assets?type=video&status=succeeded` 被正确跳转到 `/login`；真实登录态 hover 截图未完成，原因是当前 Chrome 没有可复用登录态。
 
 Follow-up：2026-07-02 根据用户反馈，超分操作按钮从视频封面 hover 层移出，封面 hover 只保留“查看”；普通成功视频的“超分”改到卡片标题行右侧，默认隐藏，卡片 hover/focus 后显示，点击后在按钮旁展开分辨率和帧率菜单。上线 BUILD_ID `h1a-TilZA-dFsC6THZVt5`，公网 assets JS/CSS 命中 `asset-card-enhance-trigger`、`asset-card-enhance-shell`、`asset-card-title-row`，不再命中 `asset-card-hover-enhance`。
 
@@ -1123,7 +1123,7 @@ HARD-GATE：
 - [x] 公网 `/api/admin/integrations/musk` 未登录返回 401，公网 `/admin/settings` 未登录 307 跳转登录。
 - [x] 跨健康守护周期后 `status sd2` 仍 OK，LaunchAgent `runs=58` 未增长。
 - [x] 2026-06-15 追加验证：公网 `/template-generate` 加载 `page-4516379bf9413f43.js`；公网 JS/CSS 命中 `template-llm-builder`、`Module Builder`、`draft_requires_admin_review`、`prompt_format`。
-- [x] 2026-06-15 真实 LLM P0 验证：当前开发目录 `npx tsx scripts/module-builder-agent-smoke.ts`、`./node_modules/.bin/tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npx impeccable detect ...`、`npm run build` 通过；线上运行目录 `youdoo-sites build sd2` 通过，`.next-prod/BUILD_ID=BIS0m47He12PEqUzMiqLZ`，`youdoo-sites restart/status sd2` OK；公网 `POST /api/templates/module-builder/generate` 未登录 401，公网 `/api/admin/integrations/musk` 未登录 401，公网静态 chunk 命中 `/api/templates/module-builder/generate`、`LLM 生成中`、`查看生成链路`、`Module Builder Agent`、`api_key_configured`、`clear_api_key`、`缺少 API Key`、`gpt-5.4`。
+- [x] 2026-06-15 真实 LLM P0 验证：当前开发目录 `npx tsx scripts/smoke/module-builder-agent-smoke.ts`、`./node_modules/.bin/tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npx impeccable detect ...`、`npm run build` 通过；线上运行目录 `youdoo-sites build sd2` 通过，`.next-prod/BUILD_ID=BIS0m47He12PEqUzMiqLZ`，`youdoo-sites restart/status sd2` OK；公网 `POST /api/templates/module-builder/generate` 未登录 401，公网 `/api/admin/integrations/musk` 未登录 401，公网静态 chunk 命中 `/api/templates/module-builder/generate`、`LLM 生成中`、`查看生成链路`、`Module Builder Agent`、`api_key_configured`、`clear_api_key`、`缺少 API Key`、`gpt-5.4`。
 
 ## 动画模板选择页 Todo
 
@@ -1160,8 +1160,8 @@ HARD-GATE：
 问题定义：
 
 - 本地只读统计发现当前 `Project` 表存在 19 个 active/team 的 `Smoke Project ...`。
-- 这些项目不是 `scripts/project-ui-smoke.ts` 产生的；该脚本只读检查 `/api/projects`。
-- 真实来源是 `scripts/workbench-closure-smoke.ts`，它每次运行都会 `POST /api/projects` 创建随机命名的 `Smoke Project ${randomSuffix()}`，但脚本结束后没有清理，也没有复用固定测试项目。
+- 这些项目不是 `scripts/smoke/project-ui-smoke.ts` 产生的；该脚本只读检查 `/api/projects`。
+- 真实来源是 `scripts/smoke/workbench-closure-smoke.ts`，它每次运行都会 `POST /api/projects` 创建随机命名的 `Smoke Project ${randomSuffix()}`，但脚本结束后没有清理，也没有复用固定测试项目。
 - 当前 19 个 Smoke Project 下已有 14 条 `VideoTask`、11 张 `VideoCard`、19 个 `CanvasDocument`、50 条 `CostLedger`、36 条 `CostAllocation`。因此不能直接批量删除，只能走“合并迁移 + 审计留痕 + 源项目归档/删除”的闭环。
 
 目标：
@@ -1179,12 +1179,12 @@ HARD-GATE：
 
 ### 第一阶段：阻止继续产生垃圾项目
 
-- [x] 修改 `scripts/workbench-closure-smoke.ts`。
+- [x] 修改 `scripts/smoke/workbench-closure-smoke.ts`。
 - [x] 新增环境变量 `SMOKE_PROJECT_ID`：传入时直接复用该项目，不再创建新项目。
 - [x] 新增环境变量 `SMOKE_PROJECT_NAME`：没有 `SMOKE_PROJECT_ID` 时，按固定名称查找或创建，例如 `Smoke Project Archive`。
 - [x] 默认行为从“每次随机新建项目”改成“复用固定 smoke 项目”；只有显式设置 `SMOKE_CREATE_UNIQUE_PROJECT=1` 时才允许创建随机项目。
 - [x] 脚本输出里标明 `projectMode=reused | created | unique`，方便日志审计。
-- [ ] 验证命令：`BASE_URL=http://localhost:3000 npx tsx scripts/workbench-closure-smoke.ts`，预期不会新增随机 `Smoke Project ...`。
+- [ ] 验证命令：`BASE_URL=http://localhost:3000 npx tsx scripts/smoke/workbench-closure-smoke.ts`，预期不会新增随机 `Smoke Project ...`。
 
 ### 第二阶段：项目合并后端能力
 
@@ -1893,7 +1893,7 @@ type SelectionState = {
 
 - 2026-06-14：公共项目立项审批通过后会创建 `type='public'` 项目、设置申请人为项目负责人、初始化项目预算账户，并按申请的初始预算写入 `ProjectBudgetLedger`。
 - 2026-06-14：追加预算审批通过后调用 `adjustProjectBudget` 写入预算流水；追加预算审批拒绝只更新审批状态，不改变项目预算。
-- 2026-06-14：新增 `scripts/approval-effects-smoke.ts`，在事务中验证公共项目立项、初始预算、追加预算通过、追加预算拒绝和操作日志，验证后主动回滚，不污染数据库。
+- 2026-06-14：新增 `scripts/smoke/approval-effects-smoke.ts`，在事务中验证公共项目立项、初始预算、追加预算通过、追加预算拒绝和操作日志，验证后主动回滚，不污染数据库。
 
 **验收：**
 
@@ -2137,7 +2137,7 @@ type SelectionState = {
 - `src/lib/video-cards/permissions.ts`
 - `src/lib/taskStatus.ts`
 - `src/lib/approvals.ts`
-- `scripts/task-permission-matrix-smoke.ts`
+- `scripts/smoke/task-permission-matrix-smoke.ts`
 
 **任务：**
 
@@ -3359,7 +3359,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 
 ## Batch 1：权限矩阵与隔离验证
 
-- [x] 新增 `scripts/task-permission-matrix-smoke.ts`。
+- [x] 新增 `scripts/smoke/task-permission-matrix-smoke.ts`。
 - [x] 复用当前 session cookie 签名方式，不打印 cookie、token 或签名 URL。
 - [x] 自动选择本地 active 管理员、普通用户、项目成员作为样本。
 - [x] 校验 `/api/video/list` 和 `/api/video/list?include_all=true` 不向普通用户/项目成员泄露非授权任务。
@@ -3367,7 +3367,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 校验非授权 `/api/video/thumbnail/:id` 返回 403/404。
 - [x] 校验非管理员访问 `/api/admin/outputs` 返回 401/403。
 - [x] 校验项目成员只能访问自己有权限的项目任务列表。
-- [x] 运行 `BASE_URL=http://localhost:3000 npx tsx scripts/task-permission-matrix-smoke.ts`，16 个 HTTP 检查通过。
+- [x] 运行 `BASE_URL=http://localhost:3000 npx tsx scripts/smoke/task-permission-matrix-smoke.ts`，16 个 HTTP 检查通过。
 - [x] 运行 `npx tsc --noEmit --pretty false`，通过。
 - [x] 运行 `npm run build`，通过；仅有既有 `<img>` 和 React hooks lint warning。
 
@@ -3386,7 +3386,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 运行 `npx tsx -e "import { sanitizeReturnTo, taskReturnLabel, taskDetailHref } from './src/lib/navigation/return-to.ts'; ..."`，通过。
 - [x] 运行 `npx tsc --noEmit --pretty false`，通过。
 - [x] 运行 `npm run build`，通过；仅有既有 `<img>` 和 React hooks lint warning。
-- [x] 运行 `BASE_URL=http://localhost:3000 npx tsx scripts/project-ui-smoke.ts`，通过。
+- [x] 运行 `BASE_URL=http://localhost:3000 npx tsx scripts/smoke/project-ui-smoke.ts`，通过。
 
 说明：ClickOps CLI 健康检查、能力列表和可调用工具列表通过；本次启动 debug session 后，后续 CLI 调用未能保留该 session，未获得浏览器 snapshot，因此用构建和本地 UI smoke 作为本批次验证证据。
 
@@ -3406,7 +3406,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 运行生成偏好归一化 smoke，通过。
 - [x] 运行 `npx tsc --noEmit --pretty false`，通过。
 - [x] 运行 `npm run build`，通过；仅有既有 `<img>` lint warning。
-- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts`，通过。
+- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts`，通过。
 
 注意：跨设备服务端偏好持久化依赖 `20260610083000_add_user_preferences` 迁移上线；本地未执行数据库写入迁移前会自动降级到 localStorage。
 
@@ -3423,7 +3423,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 运行 `npx tsc --noEmit --pretty false`，通过。
 - [x] 运行 `npm run build`，通过；仅有既有 `<img>` lint warning。
 - [x] 运行图集只读 smoke，通过：列表和详情都返回 `cover_image_url`，页面路由返回 200。
-- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts`，通过。
+- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts`，通过。
 
 注意：本批次没有执行真实 PATCH/DELETE，避免修改当前本地真实图集数据；写路径已通过类型检查和构建覆盖。
 
@@ -3440,7 +3440,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 运行 `npx tsc --noEmit --pretty false`，通过。
 - [x] 运行 `npm run build`，通过；仅有既有 `<img>` lint warning。
 - [x] 运行 Batch 5 只读 smoke，通过。
-- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts`，通过。
+- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts`，通过。
 
 注意：本批次没有执行隐藏/恢复/生成等写动作；`impeccable` 未找到项目级 PRODUCT/DESIGN，本次按 product register 和现有后台视觉体系执行。
 
@@ -3456,7 +3456,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 运行 `npx tsc --noEmit --pretty false`，通过。
 - [x] 运行 `npm run build`，通过；仅有既有 `<img>` lint warning。
 - [x] 运行 Batch 6 只读页面 smoke，通过。
-- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/project-ui-smoke.ts`，通过。
+- [x] 运行 `BASE_URL=http://localhost:3002 npx tsx scripts/smoke/project-ui-smoke.ts`，通过。
 - [x] 运行 `npx impeccable detect src/components/AccountMenu.tsx`，通过。
 - [x] 运行 `npx impeccable detect src/app/admin/users/AdminUsersClient.tsx`，通过。
 
@@ -3945,7 +3945,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [ ] `npx tsc --noEmit --pretty false`
 - [ ] `npm run lint`
 - [ ] `npm run build`
-- [ ] `npx tsx scripts/generation-dashboard-smoke.ts`
+- [ ] `npx tsx scripts/smoke/generation-dashboard-smoke.ts`
 - [ ] 本地浏览器检查 `/admin`：
   - 看得到“视频生成成本与产能驾驶舱”。
   - 第一屏主维度是清晰度，不是模型。
@@ -3976,11 +3976,11 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] `/admin/outputs` 支持从 URL 初始化 `resolution`、`date_from`、`date_to`、`owner_user_id`、`project_id`，并在高级筛选中展示清晰度和日期筛选。
 - [x] `/api/admin/outputs` 支持 `resolution=480p/720p/1080p/unknown` 和 `project_id=unassigned` 追溯查询。
 - [x] `/admin/costs` 补 `audit-checks`、`pending-costs`、`provider-errors` 锚点，异常预警可以跳转到处理区域。
-- [x] 新增 `scripts/generation-dashboard-smoke.ts`，验证本月范围、清晰度聚合键和点数/美元口径说明。
+- [x] 新增 `scripts/smoke/generation-dashboard-smoke.ts`，验证本月范围、清晰度聚合键和点数/美元口径说明。
 - [x] 根据参考图调整驾驶舱分析区：项目占比和清晰度占比改为圆环图，圆环使用 `aspect-ratio: 1 / 1` 保证正圆。
 - [x] 页面成员排行、项目占比和驾驶舱 CSV 导出移除失败相关比率字段，后续规划也不再把失败维度作为展示或排序维度。
 - [x] 按参考图补“每日生成量与成本”趋势模块：支持按日 / 按周 / 按月切换，展示生成次数、生成秒数和官方额度；驾驶舱导出同步增加 `trend_day / trend_week / trend_month`。
-- [x] 本地验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npx tsx scripts/generation-dashboard-smoke.ts`、`npm run lint`、`npm run build`、`npx impeccable detect` 通过。
+- [x] 本地验证：`git diff --check`、`npx tsc --noEmit --pretty false`、`npx tsx scripts/smoke/generation-dashboard-smoke.ts`、`npm run lint`、`npm run build`、`npx impeccable detect` 通过。
 - [x] 上线验证：`youdoo-sites build sd2`、`youdoo-sites restart sd2`、`youdoo-sites status`、`/api/health` 通过；`.next-prod` 可检索到新标题、新清晰度模块和新 API。
 - [ ] 浏览器视觉自动化验收未闭环：Codex in-app browser 能列出 `sd2.youdoodesign.com/admin/users` 标签，但导航 `/admin` 超时；本次以构建产物、生产健康和 smoke/API 鉴权作为验收证据。
 - [ ] P2 未做：保存时间范围、项目/成员展开更多、全页联动筛选增强。
@@ -4048,7 +4048,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 
 ### 验证计划
 
-- [x] `git diff --check -- src/lib/costs/currency.ts src/app/tasks/[id]/page.tsx src/app/tasks/page.tsx src/app/generate/page.tsx src/app/admin/outputs/AdminOutputsClient.tsx src/app/admin/costs/page.tsx src/app/admin/costs/ProviderBalancePanel.tsx src/app/admin/costs/OfficialChargeImportForm.tsx src/app/admin/AdminGenerationDashboardClient.tsx src/app/projects/[id]/page.tsx src/app/admin/page.tsx src/app/api/admin/generation-dashboard/export/route.ts src/app/api/projects/[id]/costs/export/route.ts scripts/currency-format-smoke.ts`
+- [x] `git diff --check -- src/lib/costs/currency.ts src/app/tasks/[id]/page.tsx src/app/tasks/page.tsx src/app/generate/page.tsx src/app/admin/outputs/AdminOutputsClient.tsx src/app/admin/costs/page.tsx src/app/admin/costs/ProviderBalancePanel.tsx src/app/admin/costs/OfficialChargeImportForm.tsx src/app/admin/AdminGenerationDashboardClient.tsx src/app/projects/[id]/page.tsx src/app/admin/page.tsx src/app/api/admin/generation-dashboard/export/route.ts src/app/api/projects/[id]/costs/export/route.ts scripts/smoke/currency-format-smoke.ts`
 - [x] `npx tsc --noEmit --pretty false`
 - [x] `npm run lint`
 - [x] `npm run build`
@@ -4068,7 +4068,7 @@ curl -I "https://sd2.youdoodesign.com/videos/<taskId>.mp4"
 - [x] 任务详情、生成页最近任务、任务列表、后台产出、后台成本、供应商余额、项目复盘、后台首页统一使用固定双币种 helper。
 - [x] 导出补人民币估算列：驾驶舱导出增加 `official_costs_cny_estimate`，项目导出补 `official_cost_micros/final_cost_micros` 及对应人民币估算。
 - [x] 最近任务和任务详情金额胶囊允许换行，不再把长金额挤出文本区或压到缩略图上。
-- [x] 新增 `scripts/currency-format-smoke.ts` 覆盖 USD、CNY、空值和微金额边界。
+- [x] 新增 `scripts/smoke/currency-format-smoke.ts` 覆盖 USD、CNY、空值和微金额边界。
 - [x] 上线 `sd2` 后公网 `/api/health` 返回 200；`youdoo-sites status` 显示 `sd2` 为 OK。
 
 ---
@@ -5810,7 +5810,7 @@ npx tsx -e "import { detectMentionAtCursor, replaceMentionAtCursor } from './src
 - [x] Module Builder / Rule Builder 已接真实 `/api/templates/module-builder/*` 接口，支持生成、规则设定、保存模块、拒绝草稿、查看链路。
 - [x] Template Config Agent 已接 `/api/templates/config-builder/*`，顶部保留为整套模板配置生成入口。
 - [x] 管理导航已加入“模块库”，后台总览已加入模块库和执行链路入口；API 设置页保留 Musk API 地址 `https://api.muskapis.com/` 和默认模型 `gpt-5.4`。
-- [x] 本地验证通过：`npx tsx scripts/template-builder-entrypoints-smoke.ts`、`npx tsx scripts/template-llm-contract-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npx impeccable detect src/components/templates/TemplateEditorDrawer.tsx`、`npm run build`。
+- [x] 本地验证通过：`npx tsx scripts/smoke/template-builder-entrypoints-smoke.ts`、`npx tsx scripts/smoke/template-llm-contract-smoke.ts`、`npx tsc --noEmit --pretty false`、`git diff --check`、`npm run lint`、`npx impeccable detect src/components/templates/TemplateEditorDrawer.tsx`、`npm run build`。
 - [x] 线上部署通过：`youdoo-sites build sd2` 生成 `BUILD_ID=ia_RbEzZ6Nkpl_LbV6hkh`，`youdoo-sites restart sd2` 后服务运行正常。
 - [x] 公网验证通过：`/api/config`、`/api/health`、`/login`、`/templates` 返回 200；公网静态 chunk `6349-f96c1a130ed4d936.js` 命中 `新增模块（LLM）`、`新增规则（LLM）`、`LLM 生成本类规则`。
 - [x] 健康守护周期后复查通过：`youdoo-sites status sd2` 为 OK，LaunchAgent `runs=64` 未增加。
@@ -6914,8 +6914,8 @@ HARD-GATE：
 ### Review
 
 - [x] 已把卡片列表改成编排摘要视图，完整内容回到三级弹窗。
-- [x] 已新增 `scripts/template-card-layout-smoke.ts`，防止四区布局、两行摘要和移动端操作区规则被后续改丢。
-- [x] 本地验证已通过：`npx tsx scripts/template-card-layout-smoke.ts`、`git diff --check`、`npx impeccable detect ...`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
+- [x] 已新增 `scripts/smoke/template-card-layout-smoke.ts`，防止四区布局、两行摘要和移动端操作区规则被后续改丢。
+- [x] 本地验证已通过：`npx tsx scripts/smoke/template-card-layout-smoke.ts`、`git diff --check`、`npx impeccable detect ...`、`./node_modules/.bin/tsc --noEmit --pretty false`、`npm run lint`、`npm run build`。
 - [x] 已完成线上部署，生产 BUILD_ID `sBmW_xsIQ1G8W1uDWCCXk`；公网 CSS 命中 `scrollbar-gutter:stable`、`20px 76px minmax(260px,1fr) 92px`、`-webkit-line-clamp:2` 和移动端三列操作按钮规则。
 
 ## 2026-06-20 公司级项目类型规划
@@ -7355,7 +7355,7 @@ HARD-GATE：
 - [x] 新增 IP 专用取消接口 `src/app/api/ip/tasks/[id]/cancel/route.ts`，调用火山 DELETE 后走本地点数返还。
 - [x] `src/lib/video/task-finalizer.ts` 和 `src/lib/video/local-cache.ts` 增加 provider 分派：普通任务走旧 Seedance，IP 任务走火山查询和 URL 转存。
 - [x] `/generate/ip` 前端提交、轮询、最近任务切到 `/api/ip/...`，普通页面仍走 `/api/tasks/create`、`/api/video/...`。
-- [x] 新增 `scripts/volcengine-ip-provider-smoke.ts`，mock 验证 480p、4 秒、参考图、创建/查询/列表/删除四个官方接口路径。
+- [x] 新增 `scripts/smoke/volcengine-ip-provider-smoke.ts`，mock 验证 480p、4 秒、参考图、创建/查询/列表/删除四个官方接口路径。
 - [x] 普通 `/api/video/list` 排除 IP 任务，避免普通生成页最近任务混入火山 IP 记录。
 - [x] 普通 `/api/video/status/[id]` 和 `/api/video/retry/[id]` 拒绝 IP 任务，避免详情页误走普通生成重试。
 - [x] IP 状态接口改为白名单响应，不直接返回 raw provider response、params 或 source metadata。
@@ -7373,7 +7373,7 @@ HARD-GATE：
 
 ### 验证
 
-- [x] `npx tsx scripts/volcengine-ip-provider-smoke.ts`
+- [x] `npx tsx scripts/smoke/volcengine-ip-provider-smoke.ts`
 - [x] `npx tsc --noEmit --pretty false`
 - [x] `git diff --check`
 - [x] `npm run lint`
@@ -7439,9 +7439,9 @@ HARD-GATE：
 
 - [x] `npx prisma generate`
 - [x] `npx prisma db push --accept-data-loss`
-- [x] `npx tsx scripts/site-upload-dedupe-smoke.ts`
-- [x] `npx tsx scripts/workspace-duplicate-upload-smoke.ts`
-- [x] `npx tsx scripts/reference-album-duplicate-upload-smoke.ts`
+- [x] `npx tsx scripts/smoke/site-upload-dedupe-smoke.ts`
+- [x] `npx tsx scripts/smoke/workspace-duplicate-upload-smoke.ts`
+- [x] `npx tsx scripts/smoke/reference-album-duplicate-upload-smoke.ts`
 - [x] `npx tsx scripts/reference-album-duplicate-upload-integration.ts`
 - [x] `npx tsc --noEmit --pretty false`
 - [x] `npm run lint`
@@ -7534,7 +7534,7 @@ HARD-GATE：
 
 ### 3. 验收/审查
 
-- [x] 执行 `npx tsx scripts/enhance-thumbnail-badge-smoke.ts`，确认超分缩略图和最近任务标识规则通过。
+- [x] 执行 `npx tsx scripts/smoke/enhance-thumbnail-badge-smoke.ts`，确认超分缩略图和最近任务标识规则通过。
 - [x] 执行 TypeScript、lint、build 和 diff 检查。
 - [x] 创建独立只读审查；本轮工具规则要求“用户未显式要求 sub-agent 时不派生”，已用只读 diff、旧选择器搜索、关键源码搜索和验证日志替代审查。
 - [x] 部署后验证 `https://sd2.youdoodesign.com/assets`、`/generate` 或相关静态资源已加载新构建。
@@ -7550,7 +7550,7 @@ HARD-GATE：
 - [x] “超分 / 无线画布 / 工具”入口改为管理员可见，侧边栏复用同一套 `adminOnly` 过滤。
 - [x] 普通用户页面内的超分发起入口已收起：生成页快捷入口、资产卡片二级菜单、任务详情、视频卡详情。
 - [x] 超分创建接口、无线画布 API、AI 抠图代理接口已补后端管理员限制，避免绕过页面入口直接调用。
-- [x] 已验证：`npx tsx scripts/enhance-video-entry-smoke.ts`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
+- [x] 已验证：`npx tsx scripts/smoke/enhance-video-entry-smoke.ts`、`npm run lint`、`npm run build`、`youdoo-sites build sd2`、`youdoo-sites restart sd2`。
 
 ## 2026-07-05 用户 Bug 反馈自动通知与 Codex 修复链路规划
 

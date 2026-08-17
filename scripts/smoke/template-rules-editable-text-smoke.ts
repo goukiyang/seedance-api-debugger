@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createTemplatePlanResult } from '../src/lib/agent-plans/template-plans';
-import { serializeGenerationTemplate } from '../src/lib/templates/workbench';
+import { createTemplatePlanResult } from '../../src/lib/agent-plans/template-plans';
+import { serializeGenerationTemplate } from '../../src/lib/templates/workbench';
 
 const now = new Date();
 

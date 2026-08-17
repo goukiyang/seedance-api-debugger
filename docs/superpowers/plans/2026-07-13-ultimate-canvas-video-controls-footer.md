@@ -21,10 +21,10 @@
 ### Task 1: Move Video Settings Into the Footer
 
 **Files:**
-- Modify: `scripts/ultimate-canvas-result-layout-smoke.ts`
-- Modify: `scripts/ultimate-canvas-generation-node-workflow-smoke.ts`
-- Modify: `scripts/ultimate-canvas-context-rules-smoke.ts`
-- Modify: `scripts/ultimate-canvas-video-card-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-context-rules-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/canvas-engine.js:787-822`
 - Modify: `public/tools/ultimate-canvas/styles.css:1732-1754,1800-1806,2140-2144`
 - Modify: `public/tools/ultimate-canvas/index.html:11,304`
@@ -78,10 +78,10 @@ Update the existing `styles.css` and `canvas-engine.js` cache assertions across 
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
-npx tsx scripts/ultimate-canvas-context-rules-smoke.ts
-npx tsx scripts/ultimate-canvas-video-card-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-context-rules-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 ```
 
 Expected: at least the layout smoke fails because the summary occurs before the footer and the footer still uses flex; cache tests fail because `index.html` still uses `20260711-liblib-interactions`.
@@ -160,8 +160,8 @@ Run:
 
 ```powershell
 node --check public/tools/ultimate-canvas/canvas-engine.js
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-task-coordinator-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-task-coordinator-smoke.ts
 npx tsc --noEmit --pretty false
 git diff --check
 ```
@@ -171,7 +171,7 @@ Expected: every command exits 0.
 - [ ] **Step 6: Commit the tested layout change**
 
 ```powershell
-git add public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-result-layout-smoke.ts scripts/ultimate-canvas-generation-node-workflow-smoke.ts scripts/ultimate-canvas-context-rules-smoke.ts scripts/ultimate-canvas-video-card-workflow-smoke.ts
+git add public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/styles.css public/tools/ultimate-canvas/index.html scripts/smoke/ultimate-canvas-result-layout-smoke.ts scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts scripts/smoke/ultimate-canvas-context-rules-smoke.ts scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts
 git commit -m "fix: move video settings into footer"
 ```
 

@@ -25,15 +25,15 @@
 ## File Structure
 
 - Create `public/tools/ultimate-canvas/backend-contract.js`: pure endpoint, backend-mode, and request-error boundary helpers usable in browser and Node tests.
-- Create `scripts/ultimate-canvas-same-origin-backend-smoke.ts`: focused regression coverage for endpoint policy, script order, runtime markers, and production/Mock separation.
+- Create `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`: focused regression coverage for endpoint policy, script order, runtime markers, and production/Mock separation.
 - Modify `public/tools/ultimate-canvas/index.html`: load the backend contract before generation and app scripts.
 - Modify `public/tools/ultimate-canvas/generation-api.js`: sanitize configured endpoints before fallback submission.
 - Modify `public/tools/ultimate-canvas/app.js`: route capability endpoints, status polling, JSON requests, visible backend status, and HTTP errors through the contract.
 - Modify `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`: expose the non-secret SD2 same-origin runtime marker.
 - Modify `src/app/api/tools/ultimate-canvas/generate/route.ts`: replace admin-directed provider configuration copy with ordinary-user-safe copy.
 - Modify `scripts/ultimate-canvas-preview-server.mjs`: expose `backend.mode = "mock"` in local bootstrap payloads.
-- Modify `scripts/ultimate-canvas-preview-api-smoke.ts`: assert the preview server identifies itself as Mock.
-- Modify `scripts/ultimate-canvas-normal-user-access-smoke.ts`: lock the ordinary-user-safe error and real backend marker.
+- Modify `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`: assert the preview server identifies itself as Mock.
+- Modify `scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts`: lock the ordinary-user-safe error and real backend marker.
 - Modify `docs/handoffs/ultimate-canvas-implementation-report.md`: record files, commands, live calls, points, protected areas, remaining deployment work, and risks.
 
 ---
@@ -42,7 +42,7 @@
 
 **Files:**
 - Create: `public/tools/ultimate-canvas/backend-contract.js`
-- Create: `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/index.html:303-312`
 
 **Interfaces:**
@@ -51,7 +51,7 @@
 
 - [ ] **Step 1: Write the failing backend contract smoke test**
 
-Create `scripts/ultimate-canvas-same-origin-backend-smoke.ts` with the exact contract cases:
+Create `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts` with the exact contract cases:
 
 ```ts
 import assert from 'node:assert/strict';
@@ -95,7 +95,7 @@ console.log('ultimate-canvas-same-origin-backend-smoke passed');
 Run:
 
 ```bash
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 ```
 
 Expected: FAIL because `public/tools/ultimate-canvas/backend-contract.js` does not exist.
@@ -168,7 +168,7 @@ Insert immediately before `generation-api.js` in `public/tools/ultimate-canvas/i
 Run:
 
 ```bash
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 ```
 
 Expected: `ultimate-canvas-same-origin-backend-smoke passed`.
@@ -176,7 +176,7 @@ Expected: `ultimate-canvas-same-origin-backend-smoke passed`.
 - [ ] **Step 6: Commit Task 1**
 
 ```bash
-git add public/tools/ultimate-canvas/backend-contract.js public/tools/ultimate-canvas/index.html scripts/ultimate-canvas-same-origin-backend-smoke.ts
+git add public/tools/ultimate-canvas/backend-contract.js public/tools/ultimate-canvas/index.html scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 git commit -m "feat: add canvas same-origin backend contract"
 ```
 
@@ -187,7 +187,7 @@ git commit -m "feat: add canvas same-origin backend contract"
 **Files:**
 - Modify: `public/tools/ultimate-canvas/generation-api.js:1-55`
 - Modify: `public/tools/ultimate-canvas/app.js:83-150,751-823,1433-1474,3527-3565,3995-4015`
-- Test: `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
+- Test: `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`
 
 **Interfaces:**
 - Consumes: `UltimateCanvasBackendContract.resolveApiEndpoint`, `resolveTaskStatusEndpoint`, `backendStatus`, and `requestErrorMessage` from Task 1.
@@ -216,7 +216,7 @@ assert.ok(!appSource.includes("descriptor.url = capabilities.video?.endpoint || 
 Run:
 
 ```bash
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 ```
 
 Expected: FAIL on the first missing runtime wiring assertion.
@@ -327,10 +327,10 @@ Use `backend.label` for the successful `contextStatus` branch so production disp
 Run:
 
 ```bash
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-lifecycle-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-task-coordinator-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-lifecycle-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-task-coordinator-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-workflow-smoke.ts
 ```
 
 Expected: all four tests print `passed`.
@@ -338,7 +338,7 @@ Expected: all four tests print `passed`.
 - [ ] **Step 8: Commit Task 2**
 
 ```bash
-git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/generation-api.js scripts/ultimate-canvas-same-origin-backend-smoke.ts
+git add public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/generation-api.js scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 git commit -m "feat: enforce canvas same-origin API routing"
 ```
 
@@ -350,9 +350,9 @@ git commit -m "feat: enforce canvas same-origin API routing"
 - Modify: `src/app/api/tools/ultimate-canvas/bootstrap/route.ts:320-400`
 - Modify: `src/app/api/tools/ultimate-canvas/generate/route.ts:195-206`
 - Modify: `scripts/ultimate-canvas-preview-server.mjs:361-433`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts:1-120`
-- Modify: `scripts/ultimate-canvas-normal-user-access-smoke.ts:35-70`
-- Test: `scripts/ultimate-canvas-same-origin-backend-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts:1-120`
+- Modify: `scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts:35-70`
+- Test: `scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts`
 
 **Interfaces:**
 - Produces: bootstrap `backend: { mode, transport, mock }` metadata with no secrets.
@@ -392,9 +392,9 @@ In `ultimate-canvas-normal-user-access-smoke.ts`, require the production marker 
 Run:
 
 ```bash
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-normal-user-access-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts
 ```
 
 Expected: at least the runtime metadata assertions fail.
@@ -442,9 +442,9 @@ Do not change provider readiness logic or settings access.
 Run:
 
 ```bash
-npx tsx scripts/ultimate-canvas-same-origin-backend-smoke.ts
-npx tsx scripts/ultimate-canvas-preview-api-smoke.ts
-npx tsx scripts/ultimate-canvas-normal-user-access-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts
 ```
 
 Expected: all three tests print `passed`.
@@ -452,7 +452,7 @@ Expected: all three tests print `passed`.
 - [ ] **Step 7: Commit Task 3**
 
 ```bash
-git add src/app/api/tools/ultimate-canvas/bootstrap/route.ts src/app/api/tools/ultimate-canvas/generate/route.ts scripts/ultimate-canvas-preview-server.mjs scripts/ultimate-canvas-preview-api-smoke.ts scripts/ultimate-canvas-normal-user-access-smoke.ts scripts/ultimate-canvas-same-origin-backend-smoke.ts
+git add src/app/api/tools/ultimate-canvas/bootstrap/route.ts src/app/api/tools/ultimate-canvas/generate/route.ts scripts/ultimate-canvas-preview-server.mjs scripts/smoke/ultimate-canvas-preview-api-smoke.ts scripts/smoke/ultimate-canvas-normal-user-access-smoke.ts scripts/smoke/ultimate-canvas-same-origin-backend-smoke.ts
 git commit -m "feat: identify canvas backend runtime"
 ```
 

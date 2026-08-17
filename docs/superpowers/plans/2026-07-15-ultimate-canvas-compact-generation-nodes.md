@@ -26,7 +26,7 @@
 ### Task 1: Compact Shared Node and Editor Structure
 
 **Files:**
-- Create: `scripts/ultimate-canvas-compact-generation-ui-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/canvas-engine.js:501-509`
 - Modify: `public/tools/ultimate-canvas/canvas-engine.js:787-858`
 - Modify: `public/tools/ultimate-canvas/app.js:3091-3150`
@@ -39,7 +39,7 @@
 
 - [ ] **Step 1: Write the failing compact-structure smoke test**
 
-Create `scripts/ultimate-canvas-compact-generation-ui-smoke.ts` with:
+Create `scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts` with:
 
 ```ts
 import assert from 'node:assert/strict';
@@ -97,7 +97,7 @@ console.log('ultimate-canvas-compact-generation-ui-smoke passed');
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-compact-generation-ui-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts
 ```
 
 Expected: FAIL because compact classes, the new quick-mode choices, and hidden empty-reference behavior do not exist yet.
@@ -306,9 +306,9 @@ Add this narrow-viewport rule so summary controls use the first row and model/su
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-compact-generation-ui-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
 node --check public/tools/ultimate-canvas/canvas-engine.js
 node --check public/tools/ultimate-canvas/app.js
 git diff --check
@@ -319,7 +319,7 @@ Expected: all scripts print `passed`; syntax and diff checks exit 0.
 Commit:
 
 ```powershell
-git add -- public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-compact-generation-ui-smoke.ts
+git add -- public/tools/ultimate-canvas/canvas-engine.js public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts
 git commit -m "feat: compact image and video generation editors"
 ```
 
@@ -328,8 +328,8 @@ git commit -m "feat: compact image and video generation editors"
 ### Task 2: Capability-backed Tile Specification Popover
 
 **Files:**
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
-- Modify: `scripts/ultimate-canvas-compact-generation-ui-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/app.js:3188-3242`
 - Modify: `public/tools/ultimate-canvas/app.js:4139-4175`
 - Modify: `public/tools/ultimate-canvas/styles.css:1869-1962`
@@ -368,8 +368,8 @@ assert.match(styles, /\.generation-choice-button\[aria-pressed="true"\]/);
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-compact-generation-ui-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts
 ```
 
 Expected: FAIL because the popover still renders native selects and has no tile-choice event path.
@@ -516,8 +516,8 @@ Use:
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-compact-generation-ui-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts
 node --check public/tools/ultimate-canvas/app.js
 git diff --check
 ```
@@ -527,7 +527,7 @@ Expected: both smoke scripts pass and no native `<select>` remains in the genera
 Commit:
 
 ```powershell
-git add -- public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-generation-node-interactions-smoke.ts scripts/ultimate-canvas-compact-generation-ui-smoke.ts
+git add -- public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts
 git commit -m "feat: add compact generation specification tiles"
 ```
 
@@ -536,8 +536,8 @@ git commit -m "feat: add compact generation specification tiles"
 ### Task 3: Unobstructed Results, Status, and Contextual Actions
 
 **Files:**
-- Modify: `scripts/ultimate-canvas-result-layout-smoke.ts`
-- Modify: `scripts/ultimate-canvas-generation-node-interactions-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/app.js:3248-3351`
 - Modify: `public/tools/ultimate-canvas/app.js:3425-3441`
 - Modify: `public/tools/ultimate-canvas/app.js:5862-5891`
@@ -601,8 +601,8 @@ assert.ok(appSource.includes('card.append(status)'));
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 ```
 
 Expected: FAIL because image actions still live inside the preview and statuses still prepend the editor.
@@ -758,9 +758,9 @@ Remove selected/unselected `.generated-action-row` sizing rules because result a
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
-npx tsx scripts/ultimate-canvas-compact-generation-ui-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-compact-generation-ui-smoke.ts
 node --check public/tools/ultimate-canvas/app.js
 git diff --check
 ```
@@ -770,7 +770,7 @@ Expected: all smoke tests pass, result previews contain no inline action row, an
 Commit:
 
 ```powershell
-git add -- public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-result-layout-smoke.ts scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+git add -- public/tools/ultimate-canvas/app.js public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-result-layout-smoke.ts scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 git commit -m "feat: streamline generated media cards"
 ```
 

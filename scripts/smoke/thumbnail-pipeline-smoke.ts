@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '../src/lib/video/thumbnail-availability';
-import { shouldContinueLocalization } from '../src/lib/video/task-localization-runner';
+import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '../../src/lib/video/thumbnail-availability';
+import { shouldContinueLocalization } from '../../src/lib/video/task-localization-runner';
 
 async function assertThumbnailAvailabilityRules() {
   assert.equal(
@@ -115,7 +115,7 @@ async function assertThumbnailExtractPrefersLaterFrame() {
   process.env.FFMPEG_PATH = fakeFfmpegPath;
 
   try {
-    const { ensureTaskThumbnail } = await import('../src/lib/video/thumbnail');
+    const { ensureTaskThumbnail } = await import('../../src/lib/video/thumbnail');
     const result = await ensureTaskThumbnail({
       id: taskId,
       local_video_path: `/videos/${taskId}.mp4`,

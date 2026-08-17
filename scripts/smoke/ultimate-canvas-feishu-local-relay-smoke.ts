@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import {
   buildFeishuLocalCallbackUrl,
   parseFeishuLocalRelay,
-} from '../src/lib/auth/feishu-local-relay';
-import { isAllowedSd2CanvasPath } from './lib/ultimate-canvas-sd2-proxy.mjs';
+} from '../../src/lib/auth/feishu-local-relay';
+import { isAllowedSd2CanvasPath } from '../lib/ultimate-canvas-sd2-proxy.mjs';
 
 const RELAY_PATH = '/__sd2-feishu-local-relay';
 const LOCAL_NEXT = '/tools/ultimate-canvas/index.html?open=video-card';

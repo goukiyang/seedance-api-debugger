@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { cacheTaskVideoToLocal } from '../src/lib/video/local-cache';
+import { cacheTaskVideoToLocal } from '../../src/lib/video/local-cache';
 
 async function main() {
   const server = http.createServer((_, response) => {

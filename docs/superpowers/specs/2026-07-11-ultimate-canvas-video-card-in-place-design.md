@@ -176,7 +176,7 @@
 - `public/tools/ultimate-canvas/index.html`：按现有脚本顺序加载工作流模块，不改变页面入口。
 - `public/tools/ultimate-canvas/styles.css`：扩展现有菜单、表单、任务行和移动端样式，不增加固定工作台布局。
 - `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`：仅补足现有响应中缺少的非敏感权限和展示字段。
-- `scripts/ultimate-canvas-video-card-workflow-smoke.ts`：锁定接口路径、payload、权限、保存恢复和无第三方直连约束。
+- `scripts/smoke/ultimate-canvas-video-card-workflow-smoke.ts`：锁定接口路径、payload、权限、保存恢复和无第三方直连约束。
 - `scripts/ultimate-canvas-preview-server.mjs`：补齐上述操作的内存 Mock，仅用于无点数本机 UI 验收。
 - `docs/handoffs/ultimate-canvas-implementation-report.md`：记录文件、命令、真实调用和点数情况。
 

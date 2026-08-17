@@ -25,7 +25,7 @@
 
 **Files:**
 - Create: `scripts/lib/ultimate-canvas-sd2-proxy.mjs`
-- Create: `scripts/ultimate-canvas-sd2-live-proxy-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-sd2-live-proxy-smoke.ts`
 
 **Interfaces:**
 - Produces: `SD2_CANVAS_PROXY_PATHS`, `isAllowedSd2CanvasPath(pathname)`, and `proxySd2CanvasRequest(request, response, options)`.
@@ -37,7 +37,7 @@ Create a fake upstream server and assert that login returns an unchanged `Set-Co
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-sd2-live-proxy-smoke.ts`  
+Run: `npx tsx scripts/smoke/ultimate-canvas-sd2-live-proxy-smoke.ts`  
 Expected: FAIL because `scripts/lib/ultimate-canvas-sd2-proxy.mjs` does not exist.
 
 - [ ] **Step 3: Implement the minimal allowlist and streaming proxy**
@@ -46,15 +46,15 @@ Implement exact prefix matching, select `http` or `https` from the configured or
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
-Run: `npx tsx scripts/ultimate-canvas-sd2-live-proxy-smoke.ts`  
+Run: `npx tsx scripts/smoke/ultimate-canvas-sd2-live-proxy-smoke.ts`  
 Expected: `ultimate-canvas-sd2-live-proxy-smoke passed`.
 
 ### Task 2: Opt-in Preview Server Live Mode
 
 **Files:**
 - Modify: `scripts/ultimate-canvas-preview-server.mjs`
-- Modify: `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
-- Modify: `scripts/ultimate-canvas-preview-api-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-api-smoke.ts`
 
 **Interfaces:**
 - Consumes: `proxySd2CanvasRequest()` from Task 1.
@@ -66,7 +66,7 @@ Assert that conflicting `--mock-generation --sd2-live` flags fail, default boots
 
 - [ ] **Step 2: Run both preview tests and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts; npx tsx scripts/ultimate-canvas-preview-api-smoke.ts`  
+Run: `npx tsx scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts; npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts`  
 Expected: FAIL on missing live-mode assertions.
 
 - [ ] **Step 3: Add mode selection, login page, and proxy dispatch**
@@ -75,7 +75,7 @@ Parse `--sd2-live`, reject conflicting flags, redirect unauthenticated canvas HT
 
 - [ ] **Step 4: Run preview and proxy tests and verify GREEN**
 
-Run: `npx tsx scripts/ultimate-canvas-sd2-live-proxy-smoke.ts; npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts; npx tsx scripts/ultimate-canvas-preview-api-smoke.ts`  
+Run: `npx tsx scripts/smoke/ultimate-canvas-sd2-live-proxy-smoke.ts; npx tsx scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts; npx tsx scripts/smoke/ultimate-canvas-preview-api-smoke.ts`  
 Expected: all three scripts pass.
 
 ### Task 3: Documentation and End-to-End Verification
@@ -107,11 +107,11 @@ Confirm no `.env`, admin settings, provider secrets, credits core files, or sche
 
 **Files:**
 - Create: `src/lib/auth/feishu-local-relay.ts`
-- Create: `scripts/ultimate-canvas-feishu-local-relay-smoke.ts`
+- Create: `scripts/smoke/ultimate-canvas-feishu-local-relay-smoke.ts`
 - Modify: `src/app/api/auth/feishu/callback/route.ts`
 - Modify: `scripts/lib/ultimate-canvas-sd2-proxy.mjs`
 - Modify: `scripts/ultimate-canvas-preview-server.mjs`
-- Modify: `scripts/ultimate-canvas-preview-no-generation-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts`
 
 **Interfaces:**
 - Produces: `parseFeishuLocalRelay(next)` and `buildFeishuLocalCallbackUrl(relay, result)` for the deployed callback.
@@ -124,7 +124,7 @@ Assert that only `http://127.0.0.1:<1024-65535>/__sd2-feishu-callback`, `localho
 
 - [x] **Step 2: Run focused tests and verify RED**
 
-Run: `npx tsx scripts/ultimate-canvas-feishu-local-relay-smoke.ts; npx tsx scripts/ultimate-canvas-preview-no-generation-smoke.ts; npx tsx scripts/ultimate-canvas-sd2-live-proxy-smoke.ts`
+Run: `npx tsx scripts/smoke/ultimate-canvas-feishu-local-relay-smoke.ts; npx tsx scripts/smoke/ultimate-canvas-preview-no-generation-smoke.ts; npx tsx scripts/smoke/ultimate-canvas-sd2-live-proxy-smoke.ts`
 Expected: FAIL because the relay helper, callback branch, Feishu login UI, and allowlist entry do not exist.
 
 - [x] **Step 3: Implement the minimal state-validated relay**

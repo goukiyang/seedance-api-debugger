@@ -4,12 +4,12 @@ import {
   projectDisplayName,
   projectMetaLabel,
   projectRemovalAction,
-} from '../src/lib/projects/display';
+} from '../../src/lib/projects/display';
 import {
   videoCardRemovalAction,
   videoCardSpecLabel,
   videoCardStatusLabel,
-} from '../src/lib/video-cards/display';
+} from '../../src/lib/video-cards/display';
 
 function read(relativePath: string) {
   return readFileSync(relativePath, 'utf8');

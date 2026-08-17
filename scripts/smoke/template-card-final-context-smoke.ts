@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { createTemplatePlanResult } from '../src/lib/agent-plans/template-plans';
-import type { SerializedGenerationTemplate } from '../src/lib/templates/workbench';
+import { createTemplatePlanResult } from '../../src/lib/agent-plans/template-plans';
+import type { SerializedGenerationTemplate } from '../../src/lib/templates/workbench';
 
 const template: SerializedGenerationTemplate = {
   id: 'template-card-context-smoke',

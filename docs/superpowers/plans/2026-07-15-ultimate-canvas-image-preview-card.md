@@ -22,7 +22,7 @@
 ### Task 1: Compact Image Result Layout
 
 **Files:**
-- Modify: `scripts/ultimate-canvas-result-layout-smoke.ts`
+- Modify: `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`
 - Modify: `public/tools/ultimate-canvas/styles.css`
 
 **Interfaces:**
@@ -31,7 +31,7 @@
 
 - [ ] **Step 1: Write the failing layout assertions**
 
-Add the following assertions after the shared generated-reference-card assertion in `scripts/ultimate-canvas-result-layout-smoke.ts`:
+Add the following assertions after the shared generated-reference-card assertion in `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`:
 
 ```ts
 const imageResultCard = ruleWith([
@@ -67,7 +67,7 @@ assertDeclarations(imageResultPreview, {
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
 ```
 
 Expected: FAIL because the current image result card does not set `display: grid` and the current preview still has a fixed `max-height`.
@@ -112,8 +112,8 @@ Do not change `.node-card` dimensions, generation-node ratio variables, prompt-p
 Run:
 
 ```powershell
-npx tsx scripts/ultimate-canvas-result-layout-smoke.ts
-npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-result-layout-smoke.ts
+npx tsx scripts/smoke/ultimate-canvas-generation-node-interactions-smoke.ts
 git diff --check
 ```
 
@@ -122,7 +122,7 @@ Expected: both smoke scripts print their `passed` messages and `git diff --check
 - [ ] **Step 5: Commit the tested layout change**
 
 ```powershell
-git add -- public/tools/ultimate-canvas/styles.css scripts/ultimate-canvas-result-layout-smoke.ts
+git add -- public/tools/ultimate-canvas/styles.css scripts/smoke/ultimate-canvas-result-layout-smoke.ts
 git commit -m "fix: expand image node previews"
 ```
 
@@ -187,7 +187,7 @@ Append a dated section to `docs/handoffs/ultimate-canvas-implementation-report.m
 ## Image preview card optimization (2026-07-15)
 
 - Goal: compact uploaded/generated image cards so only the filename precedes a full uncropped preview.
-- Files changed: `public/tools/ultimate-canvas/styles.css`, `scripts/ultimate-canvas-result-layout-smoke.ts`, design/plan documents, and this report.
+- Files changed: `public/tools/ultimate-canvas/styles.css`, `scripts/smoke/ultimate-canvas-result-layout-smoke.ts`, design/plan documents, and this report.
 - Verification: list each command from Step 3 and its actual result, plus desktop/mobile browser measurements.
 - Real generation: not invoked.
 - Points consumed: 0.

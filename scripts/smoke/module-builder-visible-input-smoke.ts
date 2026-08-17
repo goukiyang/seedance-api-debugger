@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildModuleBuilderUserPrompt } from '../src/lib/templates/module-builder';
-import type { SerializedGenerationTemplate } from '../src/lib/templates/workbench';
+import { buildModuleBuilderUserPrompt } from '../../src/lib/templates/module-builder';
+import type { SerializedGenerationTemplate } from '../../src/lib/templates/workbench';
 
 const template: SerializedGenerationTemplate = {
   id: 'module-builder-visible-input-smoke',
