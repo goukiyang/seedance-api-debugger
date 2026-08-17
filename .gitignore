@@ -47,6 +47,9 @@ storage
 test-api.sh
 /scripts/*.sh
 
+# Acceptance session cookie
+.acceptance-cookie
+
 # Database
 *.db
 *.db.backup*
