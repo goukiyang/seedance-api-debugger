@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${1:-/srv/video-api-debugger/app}"
 RUN_USER="${SD2_RUN_USER:-gouki}"
 RUN_GROUP="${SD2_RUN_GROUP:-gouki}"
-SHARED_ROOT="${SD2_SHARED_ROOT:-/var/lib/video-api-debugger}"
+SHARED_ROOT="${SD2_SHARED_ROOT:-/data/video-api-debugger/var-lib}"
 
 if [[ ! -d "$APP_DIR" ]]; then
   echo "app directory not found: $APP_DIR" >&2

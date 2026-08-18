@@ -8,7 +8,7 @@ const agentRules = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
 
 for (const marker of [
   'SD2_SHARED_ROOT',
-  '/var/lib/video-api-debugger',
+  '/data/video-api-debugger/var-lib',
   'public/uploads',
   'public/uploads/assets',
   'public/uploads/thumbs',
@@ -28,7 +28,7 @@ assert.match(runtimeScript, /chown "\$RUN_USER:\$RUN_GROUP" "\$APP_DIR" "\$APP_D
 assert.match(runtimeScript, /for dir in \\\n  "\$APP_DIR"/, 'runtime dir script must verify app root write permission');
 assert.match(runtimeScript, /runtime path is not linked to shared storage/, 'runtime dir script must fail when symlink protection is missing');
 assert.match(agentRules, /public\/videos/, 'deployment rules must preserve public/videos as runtime output');
-assert.match(agentRules, /\/var\/lib\/video-api-debugger/, 'deployment rules must mention persistent runtime storage');
+assert.match(agentRules, /\/data\/video-api-debugger\/var-lib/, 'deployment rules must mention production persistent runtime storage');
 assert.match(agentRules, /server-ensure-runtime-dirs\.sh/, 'deployment rules must run runtime dir guard after rsync');
 
 console.log('[server-runtime-dirs-smoke] ok');

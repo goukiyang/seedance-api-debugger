@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-08-18 - 创建任务 500 的直接原因是根盘写满
+
+- 问题/背景：用户在生成页创建任务失败，前端显示“创建失败 (HTTP 500)”；随后公网 `/api/config` 一度返回 nginx `502 Bad Gateway`。
+- 诱因/根因：服务器旧根盘 `/` 100% 满，`sd2-gray.service` 反复启动失败；启动后日志进一步确认 `prisma.videoTask.create()` 写 SQLite 时返回 `database or disk is full`。大头不是 sd2 业务数据，而是同机其他目录和旧 `/tmp/supplier-backup-verify*` 临时验证包占用大量空间。
+- 怎么改：先把 `/tmp/supplier-backup-verify*` 移到 `/data/quarantine/tmp-20260818` 保留，释放旧根盘约 20GB；再把 sd2 的 `/var/lib/video-api-debugger`、`/var/log/video-api-debugger`、`/srv/video-api-debugger/releases`、`/srv/video-api-debugger/backups` 迁到 `/data/video-api-debugger`，旧路径保留软链接。
+- 验证结果：`sd2-gray.service` active；公网 `https://sd2.youdooart.com/api/config` 返回 200 JSON；`/generate` 未登录按预期 307 到同域登录；`gouki` 对数据库、上传、视频、storage、日志、release/backups 路径写权限探针通过；SQLite `PRAGMA quick_check` 返回 `ok`。
+- 可复用经验：加硬盘不等于服务自动使用新盘。生产事故排查要先看真实服务状态、端口、日志和磁盘；sd2 的运行数据、日志、发布包和备份必须明确落到 `/data`，否则同机其他项目继续填满旧根盘时，创建任务和服务启动都会再次失败。
+
 ## 2026-08-16 - 视频封面不能放在会被发布清理的源码目录里
 
 - 问题/背景：普通生成页最近任务只有最近几张有封面，往后分页大量显示“暂无截图”；补过一轮后又只剩少数新封面。
