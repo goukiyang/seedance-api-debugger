@@ -69,6 +69,7 @@ interface TaskItem {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  error_message?: string | null;
   delivery_stage?: { key?: string | null } | null;
   stable_download_ready?: boolean | null;
   preview_available?: boolean | null;
@@ -1269,6 +1270,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
               ? {
                   ...task,
                   local_status: data.local_status,
+                  error_message: data.error_message ?? task.error_message ?? null,
                   public_video_url: data.public_video_url ?? task.public_video_url,
                   result_video_url: data.result_video_url,
                   result_last_frame_url: data.result_last_frame_url ?? task.result_last_frame_url,
@@ -1491,6 +1493,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           result_video_url: null,
           result_last_frame_url: null,
           local_video_path: null,
+          error_message: null,
+          delivery_stage: null,
+          stable_download_ready: false,
+          preview_available: false,
+          retry_after_ms: null,
+          play_url: null,
+          download_url: null,
+          thumbnail_url: null,
           provider_cost_currency: null,
           provider_official_amount_minor: null,
           provider_final_amount_minor: null,
@@ -2114,6 +2124,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                   const chargeText = formatProviderUsdCharge(task);
                   const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;
                   const enhanceTask = isRecentEnhanceTask(task);
+                  const taskErrorMessage = task.error_message?.trim();
 
                   return (
                     <article
@@ -2175,6 +2186,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                                 task.local_status === 'failed' ? '失败' : task.local_status}
                             </span>
                           </div>
+                          {task.local_status === 'failed' && taskErrorMessage && (
+                            <div className="composer-task-card-error" title={taskErrorMessage}>
+                              {taskErrorMessage}
+                            </div>
+                          )}
                         </div>
                       </Link>
                       {enhanceTask ? (

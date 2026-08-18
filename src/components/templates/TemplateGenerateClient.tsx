@@ -23,6 +23,7 @@ import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { orderRecentTaskCards } from '@/lib/video/recent-task-card-order';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
 
@@ -90,6 +91,7 @@ type TaskItem = {
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  error_message?: string | null;
   delivery_stage?: { key?: string | null } | null;
   stable_download_ready?: boolean | null;
   preview_available?: boolean | null;
@@ -895,6 +897,14 @@ export function TemplateGenerateClient() {
           result_video_url: null,
           result_last_frame_url: null,
           local_video_path: null,
+          error_message: null,
+          delivery_stage: null,
+          stable_download_ready: false,
+          preview_available: false,
+          retry_after_ms: null,
+          play_url: null,
+          download_url: null,
+          thumbnail_url: null,
           provider_cost_currency: null,
           provider_official_amount_minor: null,
           provider_final_amount_minor: null,
@@ -937,6 +947,7 @@ export function TemplateGenerateClient() {
   ]);
 
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
+  const displayRecentTasks = useMemo(() => orderRecentTaskCards(recentTasks), [recentTasks]);
 
   return (
     <div className="composer-page template-generate-page">
@@ -1166,9 +1177,10 @@ export function TemplateGenerateClient() {
             <div className="composer-recent-title">最近任务</div>
             {recentTasks.length > 0 && (
               <div className="composer-recent-grid">
-                {recentTasks.map((task) => {
+                {displayRecentTasks.map((task) => {
                   const chargeText = formatProviderUsdCharge(task);
                   const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;
+                  const taskErrorMessage = task.error_message?.trim();
                   return (
                     <article key={task.id} className="composer-task-card">
                       <Link href={taskDetailHref(task.id, '/template-generate')} className="composer-task-card-link">
@@ -1214,6 +1226,11 @@ export function TemplateGenerateClient() {
                                       : task.local_status}
                             </span>
                           </div>
+                          {task.local_status === 'failed' && taskErrorMessage && (
+                            <div className="composer-task-card-error" title={taskErrorMessage}>
+                              {taskErrorMessage}
+                            </div>
+                          )}
                         </div>
                       </Link>
                       {currentUser?.role === 'admin' && task.agent_run_id && (

@@ -22,10 +22,12 @@ export function recentTaskHasVisualPreview(task: RecentTaskCardOrderItem): boole
 }
 
 export function recentTaskVisualRank(task: RecentTaskCardOrderItem): number {
-  if (recentTaskHasVisualPreview(task)) return 0;
-  if (task.local_status === 'succeeded' || task.preview_available || task.stable_download_ready) return 1;
-  if (task.local_status === 'submitted' || task.local_status === 'running') return 2;
-  return 3;
+  const status = task.local_status || '';
+  if (status === 'submitted' || status === 'running' || status === 'queued') return 0;
+  if (status === 'failed' || status === 'cancelled') return 1;
+  if (recentTaskHasVisualPreview(task)) return 2;
+  if (status === 'succeeded' || task.preview_available || task.stable_download_ready) return 3;
+  return 4;
 }
 
 function createdAtMs(task: RecentTaskCardOrderItem): number {
