@@ -1828,6 +1828,7 @@ export async function POST(request: NextRequest) {
       user.id,
       estimatedCost,
       userFacingFailure.message,
+      userFacingFailure.code,
     );
     if (agentRun) {
       await prisma.$transaction(async (tx) => {
@@ -1886,6 +1887,7 @@ async function handleProviderFailure(
   userId: string,
   frozenAmount: number,
   errorMessage: string,
+  errorCode: string,
 ) {
   await prisma.$transaction(async (tx) => {
     const existingSettlement = await tx.creditLedger.findFirst({
@@ -1918,7 +1920,7 @@ async function handleProviderFailure(
       data: {
         local_status: 'failed',
         error_message: errorMessage,
-        error_code: 'PROVIDER_CREATE_FAILED',
+        error_code: errorCode || 'PROVIDER_CREATE_FAILED',
         completed_at: new Date(),
       },
     });

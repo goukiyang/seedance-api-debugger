@@ -89,6 +89,21 @@ export function isProviderReferenceMediaTooSmallError(message: string | null | u
     && (lower.includes(String(MIN_PROVIDER_REFERENCE_PIXELS)) || lower.includes('content['));
 }
 
+export function isProviderReferenceImagePrivacySensitiveError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('inputimagesensitivecontentdetected.privacyinformation')
+    || (
+      lower.includes('input image')
+      && lower.includes('may contain real person')
+    )
+    || (
+      lower.includes('privacyinformation')
+      && lower.includes('content[')
+    )
+    || lower.includes('参考图可能包含真实人物')
+    || lower.includes('参考图包含真实人物隐私');
+}
+
 export function isH3UnsupportedLoraError(message: string | null | undefined) {
   const lower = normalizedLower(message);
   return lower.includes('unsupported_lora')
@@ -113,6 +128,7 @@ export function isH3UnsupportedLoraNodeTypeError(message: string | null | undefi
 export type ProviderCreateFailureUserMessage = {
   code:
     | 'REFERENCE_MEDIA_TOO_SMALL'
+    | 'REFERENCE_IMAGE_PRIVACY_SENSITIVE'
     | 'REFERENCE_IMAGE_TOO_LARGE'
     | 'PROVIDER_HTML_RESPONSE'
     | 'H3_UNSUPPORTED_LORA'
@@ -137,6 +153,14 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
       code: 'REFERENCE_IMAGE_TOO_LARGE',
       status: 400,
       message: '参考图尺寸过大，已超过视频生成服务允许的图片大小。系统会优先自动压缩到合规尺寸；如果自动处理仍失败，请换一张更小的图或先压缩后再提交。已返还冻结点数。',
+    };
+  }
+
+  if (isProviderReferenceImagePrivacySensitiveError(rawMessage)) {
+    return {
+      code: 'REFERENCE_IMAGE_PRIVACY_SENSITIVE',
+      status: 400,
+      message: '参考图可能包含真实人物或隐私信息，视频生成服务已拒绝使用这张图。请更换为非真人、已授权或隐私风险更低的参考图后重新提交。已返还冻结点数。',
     };
   }
 

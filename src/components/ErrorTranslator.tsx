@@ -191,6 +191,29 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   }
 
   if (
+    lower.includes('reference_image_privacy_sensitive')
+    || lower.includes('inputimagesensitivecontentdetected.privacyinformation')
+    || (lower.includes('input image') && lower.includes('may contain real person'))
+    || lower.includes('参考图可能包含真实人物')
+    || lower.includes('参考图包含真实人物隐私')
+  ) {
+    return {
+      code: 'REFERENCE_IMAGE_PRIVACY_SENSITIVE',
+      title: '参考图存在真人隐私风险',
+      reasons: [
+        '这不是系统整体故障，是视频生成服务拒绝了当前某张参考图',
+        '通常是参考图被识别为可能包含真实人物或隐私信息',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
     lower.includes('provider_html_response')
     || lower.includes('服务临时返回了异常页面')
     || lower.includes('生成服务临时返回了异常页面')

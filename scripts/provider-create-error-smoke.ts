@@ -4,6 +4,7 @@ import path from 'node:path';
 import { readJsonResponse } from '../src/lib/http/json-response';
 import {
   isProviderHtmlResponseError,
+  isProviderReferenceImagePrivacySensitiveError,
   isProviderReferenceMediaTooSmallError,
   normalizeProviderErrorMessage,
   providerCreateFailureUserMessage,
@@ -15,6 +16,14 @@ const lowPixelProviderError = {
     code: 'InvalidParameter',
     message: 'The parameter `content[5]` specified in the request is not valid: the parameter video pixel count specified in the request must be greater than or equal to 409600 for model dreamina-seedance-2-0 in r2v. Request id: smoke',
     param: 'content[5]',
+    type: 'BadRequest',
+  },
+};
+const privacyProviderError = {
+  error: {
+    code: 'InputImageSensitiveContentDetected.PrivacyInformation',
+    message: "The request failed because the input image 'content[1]' may contain real person. Request id: smoke",
+    param: '',
     type: 'BadRequest',
   },
 };
@@ -125,6 +134,19 @@ async function main() {
   assert.match(userMessage.message, /已返还冻结点数/);
   assert.doesNotMatch(userMessage.message, /Create video task missing id|content\[5\]|InvalidParameter/);
 
+  const privacyNormalized = normalizeProviderErrorMessage(privacyProviderError.error);
+  assert.ok(privacyNormalized);
+  assert.ok(
+    isProviderReferenceImagePrivacySensitiveError(privacyNormalized),
+    '真人隐私拦截必须被归类为用户可修正素材问题',
+  );
+  const privacyMessage = providerCreateFailureUserMessage(privacyNormalized);
+  assert.equal(privacyMessage.code, 'REFERENCE_IMAGE_PRIVACY_SENSITIVE');
+  assert.equal(privacyMessage.status, 400);
+  assert.match(privacyMessage.message, /参考图可能包含真实人物或隐私信息/);
+  assert.match(privacyMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(privacyMessage.message, /InputImageSensitiveContentDetected|content\[1\]|Request id/i);
+
   const htmlMessage = providerCreateFailureUserMessage('Seedance 创建任务返回异常页面（HTTP 502，text/html; charset=UTF-8）');
   assert.equal(htmlMessage.code, 'PROVIDER_HTML_RESPONSE');
   assert.equal(htmlMessage.status, 502);
@@ -147,6 +169,7 @@ async function main() {
 
   const errorTranslator = read('src/components/ErrorTranslator.tsx');
   assert.match(errorTranslator, /REFERENCE_MEDIA_TOO_SMALL/, '错误翻译组件必须识别参考素材分辨率太低');
+  assert.match(errorTranslator, /REFERENCE_IMAGE_PRIVACY_SENSITIVE/, '错误翻译组件必须识别参考图真人隐私拦截');
   assert.match(errorTranslator, /PROVIDER_HTML_RESPONSE/, '错误翻译组件必须识别 Provider HTML 异常页');
   assert.doesNotMatch(errorTranslator, /API 服务返回了非 JSON 格式的响应/, '错误翻译组件不能继续用容易误导的旧 JSON 泛化文案');
 
@@ -155,6 +178,7 @@ async function main() {
   assert.match(tasksCreateRoute, /output_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, 'Agent 步骤输出必须写错误分类和用户友好文案。');
   assert.match(tasksCreateRoute, /metadata_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, '模板记忆元数据必须写错误分类和用户友好文案。');
   assert.match(tasksCreateRoute, /errorCode:\s*userFacingFailure\.code/, 'Provider 请求失败记录必须写入归类后的错误码，方便后台补规则。');
+  assert.match(tasksCreateRoute, /handleProviderFailure\([\s\S]*userFacingFailure\.code/, '任务失败记录必须写入归类后的错误码，方便后台和报表筛选。');
   assert.match(tasksCreateRoute, /responseSummary:\s*\{[\s\S]*reference_media:\s*buildReferenceMediaFailureSummary/, 'Provider 请求失败记录必须写入参考素材结构化摘要。');
   assert.match(tasksCreateRoute, /host:\s*safeUrlHost\(url\)/, 'Provider 失败摘要只能记录 URL host，不能记录完整素材 URL。');
   assert.doesNotMatch(tasksCreateRoute, /error_message:\s*providerFailureMessage/, 'Agent 运行失败字段不能再直接写 Provider 原始错误。');
