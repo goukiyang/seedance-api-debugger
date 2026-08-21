@@ -42,7 +42,7 @@ export default function ComposerTopbar({
         <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
         <nav className="composer-topbar-nav" aria-label="快捷入口">
           {topbarQuickItems
-            .filter((item) => isNavItemVisible(item, user?.role === 'admin'))
+            .filter((item) => isNavItemVisible(item, user))
             .map((item) => (
             <Link
               key={item.href}

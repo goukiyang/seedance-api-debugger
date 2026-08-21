@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import { getSession } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
@@ -7,6 +8,7 @@ export const dynamic = 'force-dynamic';
 export default async function UltimateCanvasPage() {
   const user = await getSession();
   if (!user) redirect('/login?next=/tools/ultimate-canvas');
+  if (isExternalUser(user)) redirect(externalFallbackPath());
 
   return (
     <div className="ultimate-canvas-page">

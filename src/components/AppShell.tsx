@@ -51,7 +51,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         onSessionClear={clearSession}
       />
       <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}`}>
-        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} />}
+        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
         <main className={`shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`}>
           {children}
         </main>

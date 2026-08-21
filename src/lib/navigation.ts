@@ -4,6 +4,7 @@ export interface NavItem {
   match?: string[];
   prefixMatch?: boolean;
   adminOnly?: boolean;
+  externalHidden?: boolean;
 }
 
 export interface NavGroup {
@@ -55,12 +56,12 @@ const shellRoutePrefixes = [
 ] as const;
 
 export const topbarQuickItems: NavItem[] = [
-  { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'] },
+  { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
   { label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
-  { label: '模板', href: '/templates', match: ['/templates', '/template-generate'], prefixMatch: true },
+  { label: '模板', href: '/templates', match: ['/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
-  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true },
+  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
   { label: '工具', href: '/cutout', match: ['/cutout'], prefixMatch: true, adminOnly: true },
   { label: '管理中心', href: '/admin', match: ['/admin'], prefixMatch: true, adminOnly: true },
 ];
@@ -69,11 +70,11 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '创作',
     items: [
-      { label: '生成视频', href: '/generate', match: ['/generate'] },
+      { label: '生成视频', href: '/generate', match: ['/generate'], externalHidden: true },
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
-      { label: '模板生成', href: '/template-generate', prefixMatch: true },
-      { label: '动画模板', href: '/templates', prefixMatch: true },
-      { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'] },
+      { label: '模板生成', href: '/template-generate', prefixMatch: true, externalHidden: true },
+      { label: '动画模板', href: '/templates', prefixMatch: true, externalHidden: true },
+      { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], externalHidden: true },
       ...(showLegacyVideoWorkbenchEntry
         ? [{ label: '视频工作台', href: '/workbench', prefixMatch: true }]
         : []),
@@ -122,8 +123,18 @@ export function isNavItemActive(pathname: string, item: NavItem) {
   ));
 }
 
-export function isNavItemVisible(item: NavItem, isAdmin: boolean) {
-  return !item.adminOnly || isAdmin;
+export function isNavItemVisible(
+  item: NavItem,
+  viewer: boolean | { role?: string | null; account_type?: string | null } | null | undefined,
+) {
+  const isAdmin = typeof viewer === 'boolean' ? viewer : viewer?.role === 'admin';
+  const isExternal = typeof viewer === 'boolean'
+    ? false
+    : viewer?.role !== 'admin' && viewer?.account_type === 'external';
+
+  if (item.adminOnly && !isAdmin) return false;
+  if (item.externalHidden && isExternal) return false;
+  return true;
 }
 
 export function shouldUseNavigationShell(pathname: string) {

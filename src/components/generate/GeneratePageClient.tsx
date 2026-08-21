@@ -21,6 +21,7 @@ import {
 } from '@/components/H3MachineStatus';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
+import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import {
   normalizeGenerationDefaults,
@@ -592,6 +593,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       .then((r) => r.json())
       .then((data: AuthMeResponse) => {
         if (!cancelled) {
+          if (!isIpSurface && isExternalUser(data.user)) {
+            window.location.replace(externalFallbackPath());
+            return;
+          }
           setCurrentUser(data.user || null);
         }
       })
@@ -609,7 +614,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isIpSurface]);
 
   useEffect(() => {
     if (!currentUser?.id) return;

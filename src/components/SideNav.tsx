@@ -6,11 +6,18 @@ import { adminNavGroups, isNavItemActive, isNavItemVisible, userNavGroups, type 
 
 interface SideNavProps {
   isAdmin: boolean;
+  user?: { role?: string | null; account_type?: string | null } | null;
 }
 
-function SideNavGroup({ group, isAdmin }: { group: NavGroup; isAdmin: boolean }) {
+function SideNavGroup({
+  group,
+  user,
+}: {
+  group: NavGroup;
+  user?: { role?: string | null; account_type?: string | null } | null;
+}) {
   const pathname = usePathname();
-  const visibleItems = group.items.filter((item) => isNavItemVisible(item, isAdmin));
+  const visibleItems = group.items.filter((item) => isNavItemVisible(item, user));
 
   if (visibleItems.length === 0) return null;
 
@@ -36,15 +43,15 @@ function SideNavGroup({ group, isAdmin }: { group: NavGroup; isAdmin: boolean })
   );
 }
 
-export default function SideNav({ isAdmin }: SideNavProps) {
+export default function SideNav({ isAdmin, user }: SideNavProps) {
   return (
     <aside className="shell-sidebar">
       {userNavGroups.map((group) => (
-        <SideNavGroup group={group} isAdmin={isAdmin} key={group.title} />
+        <SideNavGroup group={group} user={user} key={group.title} />
       ))}
 
       {isAdmin && adminNavGroups.map((group) => (
-        <SideNavGroup group={group} isAdmin={isAdmin} key={group.title} />
+        <SideNavGroup group={group} user={user} key={group.title} />
       ))}
     </aside>
   );

@@ -9,6 +9,7 @@ export interface AppSessionUser {
   email: string | null;
   avatar_url?: string | null;
   role: 'admin' | 'user';
+  account_type?: 'internal' | 'external' | string | null;
 }
 
 export interface AppCreditSummary {
