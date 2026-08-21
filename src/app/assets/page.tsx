@@ -292,6 +292,10 @@ function AssetsPageContent() {
             window.location.href = '/login';
             return;
           }
+          if (isExternalUser(data.user)) {
+            window.location.replace('/generate/ip');
+            return;
+          }
           setUser(data.user);
         }
       })
@@ -302,8 +306,6 @@ function AssetsPageContent() {
       cancelled = true;
     };
   }, []);
-
-  const externalUser = isExternalUser(user);
 
   useEffect(() => {
     if (!user) return;
@@ -795,9 +797,7 @@ function AssetsPageContent() {
           <div className="asset-library-empty">
             <h2>暂无资产</h2>
             <p>调整筛选条件，或先到生成页创建视频。</p>
-            <Link href={externalUser ? '/generate/ip' : '/generate'}>
-              {externalUser ? '去 IP 生成' : '去生成视频'}
-            </Link>
+            <Link href="/generate">去生成视频</Link>
           </div>
         )}
 

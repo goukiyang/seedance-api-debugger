@@ -59,9 +59,8 @@ export const userNavItems: NavItem[] = [
 ];
 
 export const externalUserNavItems: NavItem[] = [
-  { label: '资产管理', href: '/assets', prefixMatch: true },
+  { label: 'IP生成', href: '/generate/ip' },
   { label: '我的任务', href: '/tasks', prefixMatch: true },
-  { label: '参考图集', href: '/collections', prefixMatch: true },
 ];
 
 export const adminNavItems: NavItem[] = [
