@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { grantInitialCredits } from '@/lib/credits/policy';
+import { getDefaultFeatureProfileId } from '@/lib/users/profiles';
 import { usernameBaseFromEmail } from './config';
 
 async function generateUniqueUsername(tx: Prisma.TransactionClient, email: string): Promise<string> {
@@ -22,6 +23,9 @@ export async function createRegisteredUser(
 ) {
   const username = await generateUniqueUsername(tx, input.email);
   const displayName = input.name || input.email.split('@')[0] || username;
+  const accountType = 'external';
+  const userProfile = 'other';
+  const featureProfileId = getDefaultFeatureProfileId(accountType, userProfile);
 
   const user = await tx.user.create({
     data: {
@@ -30,9 +34,9 @@ export async function createRegisteredUser(
       email: input.email,
 	      password_hash: input.passwordHash,
 	      role: 'user',
-	      account_type: 'internal',
-	      user_profile: 'other',
-	      feature_profile_id: 'standard_internal',
+	      account_type: accountType,
+	      user_profile: userProfile,
+	      feature_profile_id: featureProfileId,
 	      status: 'active',
 	    },
   });
@@ -79,9 +83,9 @@ export async function createRegisteredUser(
         target_type: 'User',
         target_id: user.id,
 	        detail: JSON.stringify({
-	          account_type: 'internal',
-	          user_profile: 'other',
-	          feature_profile_id: 'standard_internal',
+	          account_type: accountType,
+	          user_profile: userProfile,
+	          feature_profile_id: featureProfileId,
 	        }),
 	      },
       {

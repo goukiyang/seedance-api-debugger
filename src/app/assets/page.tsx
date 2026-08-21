@@ -8,6 +8,7 @@ import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
 } from '@/lib/video/download-client';
+import { isExternalUser } from '@/lib/access/external-user';
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetType = 'all' | 'video' | 'image' | 'reference';
@@ -22,6 +23,7 @@ type SessionUser = {
   name?: string | null;
   username?: string | null;
   email?: string | null;
+  account_type?: 'internal' | 'external' | string | null;
 };
 
 type ProjectItem = {
@@ -288,6 +290,10 @@ function AssetsPageContent() {
         if (!cancelled) {
           if (!data.user) {
             window.location.href = '/login';
+            return;
+          }
+          if (isExternalUser(data.user)) {
+            window.location.replace('/generate/ip');
             return;
           }
           setUser(data.user);

@@ -14,6 +14,7 @@ export interface AccountMenuUser {
   email?: string | null;
   avatar_url?: string | null;
   role?: 'admin' | 'user' | string | null;
+  account_type?: 'internal' | 'external' | string | null;
 }
 
 interface AccountMenuProps {
@@ -32,6 +33,7 @@ function avatarColor(user: AccountMenuUser | null | undefined, displayName: stri
 
 function roleLabel(user: AccountMenuUser | null | undefined) {
   if (user?.role === 'admin') return '管理员';
+  if (user?.account_type === 'external') return '外部用户';
   if (user?.role === 'user') return '普通用户';
   return null;
 }

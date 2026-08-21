@@ -6,6 +6,7 @@ import ComposerTopbar from './ComposerTopbar';
 import SideNav from './SideNav';
 import FeedbackWidget from './FeedbackWidget';
 import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
+import { isExternalAllowedPath, isExternalUser } from '@/lib/access/external-user';
 
 interface SessionUserSummary {
   name: string | null;
@@ -13,6 +14,7 @@ interface SessionUserSummary {
   email: string | null;
   avatar_url?: string | null;
   role: 'admin' | 'user';
+  account_type: 'internal' | 'external';
 }
 
 interface CreditSummary {
@@ -29,6 +31,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
   const topbarOnlyShell = useMemo(() => shouldUseTopbarOnlyShell(pathname), [pathname]);
+  const externalUser = isExternalUser(user);
 
   useEffect(() => {
     if (!showShell) return;
@@ -85,6 +88,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [showShell, user, pathname]);
 
+  useEffect(() => {
+    if (!user || !externalUser || isExternalAllowedPath(pathname)) return;
+    window.location.replace('/generate/ip');
+  }, [externalUser, pathname, user]);
+
   if (!showShell) {
     return (
       <>
@@ -98,7 +106,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="shell-root">
       <ComposerTopbar user={user} loadingUser={loadingUser} credits={credits} />
       <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}`}>
-        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} />}
+        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} isExternal={externalUser} />}
         <main className={`shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`}>
           {children}
         </main>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { login } from '@/lib/auth/session';
 import { setSessionCookie } from '@/lib/auth/session-cookie';
+import { defaultLandingForUser, safeLandingForUser } from '@/lib/access/external-user';
 
 function safeRedirectPath(value: unknown, fallback: string) {
   if (typeof value !== 'string') return fallback;
@@ -40,10 +41,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (isFormSubmit) {
-      const fallback = '/generate';
+      const fallback = defaultLandingForUser(result.user);
       const response = new NextResponse(null, {
         status: 303,
-        headers: { Location: safeRedirectPath(body.next, fallback) },
+        headers: { Location: safeLandingForUser(safeRedirectPath(body.next, fallback), result.user) },
       });
       return setSessionCookie(response, result.token);
     }
