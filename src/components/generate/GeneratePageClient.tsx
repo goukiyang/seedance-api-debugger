@@ -481,6 +481,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [reuseMessage, setReuseMessage] = useState('');
   const [reuseLoading, setReuseLoading] = useState(false);
   const [reusingTaskId, setReusingTaskId] = useState<string | null>(null);
+  const isExternalIpUser = isIpSurface && isExternalUser(currentUser);
+  const hideExternalIpInternalControls = isIpSurface && (loadingUser || isExternalUser(currentUser));
 
   const h3Ready = !isIpSurface
     && h3VideoConfig?.ready === true
@@ -1401,14 +1403,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setErrorDebug(null);
     setResult(null);
 
-    const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
-    if (!selectedProjectId || !selectedVideoCard) {
-      setError('请先选择项目和视频卡');
+    let selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
+    if (!selectedProjectId) {
+      setError('请先选择项目');
       setSubmitting(false);
       return;
     }
-    if (selectedVideoCard.status === 'sealed' || selectedVideoCard.status === 'archived') {
-      setError('当前视频卡已封板或归档，不能继续生成');
+    if (!selectedVideoCard && !isExternalIpUser) {
+      setError('请先选择项目和视频卡');
       setSubmitting(false);
       return;
     }
@@ -1436,6 +1438,41 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     }
 
     try {
+      if (!selectedVideoCard && isExternalIpUser) {
+        const cardResponse = await fetch(`/api/projects/${selectedProjectId}/video-cards`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'IP生成默认视频卡',
+            objective: '外部用户 IP 生成默认归档',
+            platform: 'ip',
+            ratio: params.ratio,
+            duration: params.duration,
+            target_resolution: params.resolution,
+            confirm_duplicate: true,
+          }),
+        });
+        const cardData = await readJsonResponse<{ video_card?: VideoCardOption; error?: string; message?: string }>(cardResponse);
+        if (!cardResponse.ok || !cardData.video_card) {
+          throw new Error(cardData.message || cardData.error || '默认视频卡创建失败，请刷新后重试');
+        }
+        selectedVideoCard = cardData.video_card;
+        setVideoCards((current) => (
+          current.some((card) => card.id === cardData.video_card?.id)
+            ? current
+            : [cardData.video_card as VideoCardOption, ...current]
+        ));
+        setSelectedVideoCardId(cardData.video_card.id);
+      }
+
+      if (!selectedVideoCard) {
+        throw new Error('请先选择项目和视频卡');
+      }
+      if (selectedVideoCard.status === 'sealed' || selectedVideoCard.status === 'archived') {
+        throw new Error('当前视频卡已封板或归档，不能继续生成');
+      }
+      const readyVideoCard = selectedVideoCard;
+
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
       const res = await fetch(createEndpoint, {
         method: 'POST',
@@ -1456,7 +1493,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           resolution_approval_confirmed: params.resolutionApprovalConfirmed,
           idempotency_key: idempotencyKey,
           project_id: selectedProjectId,
-          video_card_id: selectedVideoCard.id,
+          video_card_id: readyVideoCard.id,
           video_branch_id: selectedVideoBranchId || undefined,
           reference_image_ids: params.referenceImageIds || [],
           reference_video_urls: params.referenceVideoUrls || [],
@@ -1512,18 +1549,18 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           provider_official_amount_micros: null,
           provider_final_amount_micros: null,
           project_id: data.project_id || selectedProjectId,
-          video_card_id: data.video_card_id || selectedVideoCard.id,
+          video_card_id: data.video_card_id || readyVideoCard.id,
           template_id: data.template_id || null,
           agent_run_id: data.agent_run_id || null,
           selected_agent_plan_key: data.selected_agent_plan_key || null,
           prompt_user_edited: params.promptUserEdited === true,
           generation_template: null,
           video_card: {
-            id: selectedVideoCard.id,
-            title: selectedVideoCard.title,
-            objective: selectedVideoCard.objective,
-            status: selectedVideoCard.status,
-            project_id: selectedVideoCard.project_id,
+            id: readyVideoCard.id,
+            title: readyVideoCard.title,
+            objective: readyVideoCard.objective,
+            status: readyVideoCard.status,
+            project_id: readyVideoCard.project_id,
           },
           created_at: data.created_at,
         },
@@ -1551,6 +1588,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     selectedProjectId,
     selectedVideoBranchId,
     selectedVideoCardId,
+    isExternalIpUser,
     videoCards,
   ]);
 
@@ -1697,21 +1735,23 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           <p className="composer-hero-sub">
             {surfaceConfig.subtitle}
           </p>
-          <div className="composer-hero-actions">
-            {surfaceConfig.heroLinks
-              .filter((link) => !link.adminOnly || currentUser?.role === 'admin')
-              .filter((link) => !link.externalHidden || !isExternalUser(currentUser))
-              .map((link) => (
-              <Link href={link.href} className="composer-hero-action composer-hero-action-secondary" key={link.href}>
-                {link.label}
-              </Link>
-            ))}
-            {isIpSurface && (
-              <span className="composer-hero-action composer-hero-action-muted">
-                火山官方 API
-              </span>
-            )}
-          </div>
+          {!hideExternalIpInternalControls && (
+            <div className="composer-hero-actions">
+              {surfaceConfig.heroLinks
+                .filter((link) => !link.adminOnly || currentUser?.role === 'admin')
+                .filter((link) => !link.externalHidden || !isExternalUser(currentUser))
+                .map((link) => (
+                <Link href={link.href} className="composer-hero-action composer-hero-action-secondary" key={link.href}>
+                  {link.label}
+                </Link>
+              ))}
+              {isIpSurface && (
+                <span className="composer-hero-action composer-hero-action-muted">
+                  火山官方 API
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="composer-project-panel">
@@ -1956,6 +1996,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         )}
       </div>
 
+      {!hideExternalIpInternalControls && (
       <div className={`composer-video-card-panel ${videoCardPanelOpen ? 'is-open' : ''}`}>
         <button
           type="button"
@@ -2073,6 +2114,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           </div>
         )}
       </div>
+      )}
 
         {surfaceConfig.notice && (
           <div className="composer-prefill-notice">
