@@ -28,7 +28,6 @@ import {
 import { AudioCard, GenerationCard, ImageCard, TextCard, VideoCard } from './nodes';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { displayUserName } from '@/lib/users/display';
-import { isExternalUser } from '@/lib/access/external-user';
 import { buildSeedanceRequest, exportCanvas, syncGenerationInputs } from './seedanceApi';
 import { initialEdges, initialNodes } from './seedanceCanvas';
 import type {
@@ -137,7 +136,6 @@ interface CreditSummary {
 interface AuthMeResponse {
   user?: {
     role?: string | null;
-    account_type?: string | null;
   } | null;
 }
 
@@ -818,13 +816,7 @@ function CanvasWorkspace() {
     fetch('/api/auth/me', { cache: 'no-store' })
       .then((response) => response.json())
       .then((payload: AuthMeResponse) => {
-        if (!cancelled) {
-          if (isExternalUser(payload.user)) {
-            window.location.replace('/generate/ip');
-            return;
-          }
-          setCanExportCanvasJson(payload.user?.role === 'admin');
-        }
+        if (!cancelled) setCanExportCanvasJson(payload.user?.role === 'admin');
       })
       .catch(() => {
         if (!cancelled) setCanExportCanvasJson(false);

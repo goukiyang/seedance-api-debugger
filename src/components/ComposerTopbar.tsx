@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import AccountMenu, { type AccountMenuUser } from './AccountMenu';
-import { isExternalUser } from '@/lib/access/external-user';
 
 export interface ComposerCreditSummary {
   available?: number;
@@ -35,10 +34,6 @@ const navItems: ComposerNavItem[] = [
   { label: '我的任务', href: '/tasks', matches: ['/tasks'] },
 ] as const;
 
-const externalNavItems: ComposerNavItem[] = [
-  { label: 'IP生成', href: '/generate/ip', matches: ['/generate/ip'], exact: true },
-] as const;
-
 function formatCredit(value: number | undefined) {
   return Math.max(0, Math.floor(value || 0)).toString();
 }
@@ -50,7 +45,6 @@ function isActivePath(pathname: string, matches: readonly string[], exact = fals
 export default function ComposerTopbar({ user, loadingUser = false, credits }: ComposerTopbarProps) {
   const pathname = usePathname();
   const [unreadCount, setUnreadCount] = useState(0);
-  const visibleNavItems = isExternalUser(user) ? externalNavItems : navItems;
 
   useEffect(() => {
     if (!user) {
@@ -78,7 +72,7 @@ export default function ComposerTopbar({ user, loadingUser = false, credits }: C
       <div className="composer-topbar-left">
         <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
         <nav className="composer-topbar-nav">
-          {visibleNavItems.map((item) => (
+          {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}

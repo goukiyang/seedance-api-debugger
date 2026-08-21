@@ -58,11 +58,6 @@ export const userNavItems: NavItem[] = [
   { label: '通知', href: '/notifications' },
 ];
 
-export const externalUserNavItems: NavItem[] = [
-  { label: 'IP生成', href: '/generate/ip' },
-  { label: '我的任务', href: '/tasks', prefixMatch: true },
-];
-
 export const adminNavItems: NavItem[] = [
   { label: '后台总览', href: '/admin' },
   { label: '用户管理', href: '/admin/users' },

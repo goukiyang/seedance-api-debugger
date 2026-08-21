@@ -2,23 +2,21 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { adminNavItems, externalUserNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
+import { adminNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
 
 interface SideNavProps {
   isAdmin: boolean;
-  isExternal?: boolean;
 }
 
-export default function SideNav({ isAdmin, isExternal = false }: SideNavProps) {
+export default function SideNav({ isAdmin }: SideNavProps) {
   const pathname = usePathname();
-  const navItems = isExternal ? externalUserNavItems : userNavItems;
 
   return (
     <aside className="shell-sidebar">
       <nav className="shell-nav-group" aria-label="Primary">
         <div className="shell-nav-title">工作台</div>
         <div className="shell-nav-list">
-          {navItems.map((item) => {
+          {userNavItems.map((item) => {
             const active = isNavItemActive(pathname, item);
             return (
               <Link

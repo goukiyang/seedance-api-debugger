@@ -2,11 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { defaultLandingForUser, safeLandingForUser } from '@/lib/access/external-user';
 
 type CallbackUser = {
   role?: string;
-  account_type?: string;
 };
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -30,7 +28,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 function defaultLanding(user?: CallbackUser | null) {
-  return defaultLandingForUser(user);
+  return '/generate';
 }
 
 function safeLandingPath(value: string | null | undefined, fallback: string) {
@@ -61,7 +59,7 @@ export default function FeishuCallbackPage({
           setMessage('登录态确认失败，请重新登录');
           return;
         }
-        const next = safeLandingForUser(safeLandingPath(searchParams?.next, ''), data.user);
+        const next = safeLandingPath(searchParams?.next, defaultLanding(data.user));
         window.location.replace(new URL(next, window.location.origin).toString());
       })
       .catch(() => {

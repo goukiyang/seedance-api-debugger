@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar, { type ComposerCreditSummary } from '@/components/ComposerTopbar';
-import { isExternalUser } from '@/lib/access/external-user';
 
 type IpGenerateUser = AccountMenuUser & { id?: string };
 
@@ -183,7 +182,6 @@ export default function IpGeneratePage() {
     confirmed_at: draft.authorizationConfirmed ? 'submit_time' : null,
     confirmed_by: draft.authorizationConfirmed ? 'current_user' : null,
   }), [draft]);
-  const externalUser = isExternalUser(user);
 
   return (
     <div className="composer-page ip-generate-page">
@@ -198,19 +196,17 @@ export default function IpGeneratePage() {
               面向授权角色、授权真人素材和品牌 IP 的视频生成入口。当前 API 凭据未到位，页面只做配置与授权准备，不会提交生成任务。
             </p>
           </div>
-          {!externalUser && (
-            <div className="ip-generate-hero-actions">
-              <Link href="/generate" className="composer-hero-action composer-hero-action-secondary">
-                普通生成
-              </Link>
-              <Link href="/projects" className="composer-hero-action composer-hero-action-secondary">
-                我的项目
-              </Link>
-              <button type="button" className="ip-generate-disabled-action" disabled>
-                生成暂未开启
-              </button>
-            </div>
-          )}
+          <div className="ip-generate-hero-actions">
+            <Link href="/generate" className="composer-hero-action composer-hero-action-secondary">
+              普通生成
+            </Link>
+            <Link href="/projects" className="composer-hero-action composer-hero-action-secondary">
+              我的项目
+            </Link>
+            <button type="button" className="ip-generate-disabled-action" disabled>
+              生成暂未开启
+            </button>
+          </div>
         </section>
 
         <section className="ip-generate-status" aria-label="火山配置状态">

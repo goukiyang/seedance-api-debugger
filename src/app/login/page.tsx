@@ -2,11 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { defaultLandingForUser, safeLandingForUser } from '@/lib/access/external-user';
 
 type LoginUser = {
   role?: string;
-  account_type?: string;
 };
 
 const LOGIN_ERROR_MESSAGES: Record<string, string> = {
@@ -15,7 +13,7 @@ const LOGIN_ERROR_MESSAGES: Record<string, string> = {
 };
 
 function defaultLanding(user?: LoginUser | null) {
-  return defaultLandingForUser(user);
+  return '/generate';
 }
 
 function safeLandingPath(value: string | null | undefined, fallback: string) {
@@ -61,7 +59,7 @@ export default function LoginPage({
       .then(r => r.json())
       .then(d => {
         if (d.user) {
-          window.location.replace(currentOriginLandingUrl(safeLandingForUser(next, d.user), defaultLanding(d.user)));
+          window.location.replace(currentOriginLandingUrl(next, defaultLanding(d.user)));
         }
       })
       .catch(() => {});
@@ -87,7 +85,7 @@ export default function LoginPage({
       }
 
       const next = new URLSearchParams(window.location.search).get('next');
-      window.location.assign(currentOriginLandingUrl(safeLandingForUser(next, data.user), defaultLanding(data.user)));
+      window.location.assign(currentOriginLandingUrl(next, defaultLanding(data.user)));
     } catch {
       setError('网络错误，请重试');
       setLoading(false);
@@ -131,7 +129,7 @@ export default function LoginPage({
             setFeishuLoading(false);
             return;
           }
-          window.location.assign(currentOriginLandingUrl(safeLandingForUser(safeNext, cliData.user), defaultLanding(cliData.user)));
+          window.location.assign(currentOriginLandingUrl(safeNext, defaultLanding(cliData.user)));
           return;
         }
 

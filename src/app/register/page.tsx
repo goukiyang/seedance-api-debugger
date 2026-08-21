@@ -3,15 +3,13 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { defaultLandingForUser, safeLandingForUser } from '@/lib/access/external-user';
 
 type RegisterUser = {
   role?: string;
-  account_type?: string;
 };
 
 function defaultLanding(user?: RegisterUser | null) {
-  return defaultLandingForUser(user);
+  return '/generate';
 }
 
 function safeLandingPath(value: string | null | undefined, fallback: string) {
@@ -60,7 +58,7 @@ export default function RegisterPage() {
     fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => {
-        if (data.user) router.replace(safeLandingForUser(next, data.user));
+        if (data.user) router.replace(safeLandingPath(next, defaultLanding(data.user)));
       })
       .catch(() => {});
   }, [router]);
@@ -108,7 +106,7 @@ export default function RegisterPage() {
       }
       if (data.user) {
         const next = new URLSearchParams(window.location.search).get('next');
-        router.replace(safeLandingForUser(next, data.user));
+        router.replace(safeLandingPath(next, defaultLanding(data.user)));
         return;
       }
       setCodeSent(true);
@@ -144,7 +142,7 @@ export default function RegisterPage() {
         return;
       }
       const next = new URLSearchParams(window.location.search).get('next');
-      router.replace(safeLandingForUser(next, data.user));
+      router.replace(safeLandingPath(next, defaultLanding(data.user)));
     } catch {
       setError('网络错误，请重试');
     } finally {
@@ -185,7 +183,7 @@ export default function RegisterPage() {
             setFeishuLoading(false);
             return;
           }
-          window.location.assign(currentOriginLandingUrl(safeLandingForUser(safeNext, cliData.user), defaultLanding(cliData.user)));
+          window.location.assign(currentOriginLandingUrl(safeNext, defaultLanding(cliData.user)));
           return;
         }
 

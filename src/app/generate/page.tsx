@@ -14,7 +14,6 @@ import {
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
 import { displayUserName } from '@/lib/users/display';
-import { isExternalUser } from '@/lib/access/external-user';
 
 // ============================================================================
 // Types
@@ -368,10 +367,6 @@ export default function GeneratePage() {
       .then((r) => r.json())
       .then((data: AuthMeResponse) => {
         if (!cancelled) {
-          if (isExternalUser(data.user)) {
-            window.location.replace('/generate/ip');
-            return;
-          }
           setCurrentUser(data.user || null);
         }
       })
