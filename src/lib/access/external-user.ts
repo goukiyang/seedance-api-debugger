@@ -25,6 +25,8 @@ export function isExternalAllowedPath(pathname: string) {
   return (
     pathname === '/generate/ip'
     || pathname.startsWith('/tasks')
+    || pathname.startsWith('/assets')
+    || pathname.startsWith('/collections')
     || pathname === '/account'
     || pathname === '/notifications'
     || pathname === '/login'

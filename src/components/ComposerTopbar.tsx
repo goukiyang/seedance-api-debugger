@@ -37,6 +37,9 @@ const navItems: ComposerNavItem[] = [
 
 const externalNavItems: ComposerNavItem[] = [
   { label: 'IP生成', href: '/generate/ip', matches: ['/generate/ip'], exact: true },
+  { label: '资产管理', href: '/assets', matches: ['/assets'] },
+  { label: '我的任务', href: '/tasks', matches: ['/tasks'] },
+  { label: '参考图集', href: '/collections', matches: ['/collections'] },
 ] as const;
 
 function formatCredit(value: number | undefined) {
