@@ -10,6 +10,7 @@ export interface AppSessionUser {
   avatar_url?: string | null;
   role: 'admin' | 'user';
   account_type?: 'internal' | 'external' | string | null;
+  feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null } | null;
 }
 
 export interface AppCreditSummary {

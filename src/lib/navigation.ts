@@ -125,12 +125,20 @@ export function isNavItemActive(pathname: string, item: NavItem) {
 
 export function isNavItemVisible(
   item: NavItem,
-  viewer: boolean | { role?: string | null; account_type?: string | null } | null | undefined,
+  viewer: boolean | {
+    role?: string | null;
+    account_type?: string | null;
+    feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null } | null;
+  } | null | undefined,
 ) {
   const isAdmin = typeof viewer === 'boolean' ? viewer : viewer?.role === 'admin';
   const isExternal = typeof viewer === 'boolean'
     ? false
-    : viewer?.role !== 'admin' && viewer?.account_type === 'external';
+    : viewer?.role !== 'admin'
+      && (
+        viewer?.account_type === 'external'
+        || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)
+      );
 
   if (item.adminOnly && !isAdmin) return false;
   if (item.externalHidden && isExternal) return false;

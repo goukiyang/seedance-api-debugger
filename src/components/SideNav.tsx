@@ -6,7 +6,11 @@ import { adminNavGroups, isNavItemActive, isNavItemVisible, userNavGroups, type 
 
 interface SideNavProps {
   isAdmin: boolean;
-  user?: { role?: string | null; account_type?: string | null } | null;
+  user?: {
+    role?: string | null;
+    account_type?: string | null;
+    feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null } | null;
+  } | null;
 }
 
 function SideNavGroup({
@@ -14,7 +18,11 @@ function SideNavGroup({
   user,
 }: {
   group: NavGroup;
-  user?: { role?: string | null; account_type?: string | null } | null;
+  user?: {
+    role?: string | null;
+    account_type?: string | null;
+    feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null } | null;
+  } | null;
 }) {
   const pathname = usePathname();
   const visibleItems = group.items.filter((item) => isNavItemVisible(item, user));
