@@ -251,7 +251,7 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     routePath: '/generate/ip',
     titleLead: '(IP) 生成',
     titleAccent: '页',
-    subtitle: '保留普通生成页完整工作流，提交时走火山官方授权 IP 动画接口',
+    subtitle: '可以生成IP授权视频',
     heroLinks: [
       { href: '/generate', label: '普通生成', externalHidden: true },
       { href: '/generate/enhance', label: '视频超分', adminOnly: true },
