@@ -224,7 +224,7 @@ interface GenerateSurfaceConfig {
   titleLead: string;
   titleAccent: string;
   subtitle: string;
-  heroLinks: Array<{ href: string; label: string; adminOnly?: boolean }>;
+  heroLinks: Array<{ href: string; label: string; adminOnly?: boolean; externalHidden?: boolean }>;
   notice?: string;
   submitDisabledReason?: string;
   modelLabel: string;
@@ -253,7 +253,7 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     titleAccent: '页',
     subtitle: '保留普通生成页完整工作流，提交时走火山官方授权 IP 动画接口',
     heroLinks: [
-      { href: '/generate', label: '普通生成' },
+      { href: '/generate', label: '普通生成', externalHidden: true },
       { href: '/generate/enhance', label: '视频超分', adminOnly: true },
       { href: '/projects', label: '查看我的项目' },
     ],
@@ -1700,6 +1700,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           <div className="composer-hero-actions">
             {surfaceConfig.heroLinks
               .filter((link) => !link.adminOnly || currentUser?.role === 'admin')
+              .filter((link) => !link.externalHidden || !isExternalUser(currentUser))
               .map((link) => (
               <Link href={link.href} className="composer-hero-action composer-hero-action-secondary" key={link.href}>
                 {link.label}
