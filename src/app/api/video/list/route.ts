@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
@@ -33,6 +34,7 @@ export async function GET(request: NextRequest) {
         { status: 401 },
       );
     }
+    assertInternalOnly(user, '外部账号请使用 IP 任务列表。');
 
     const searchParams = request.nextUrl.searchParams;
     const page = parseInt(searchParams.get('page') || '1');

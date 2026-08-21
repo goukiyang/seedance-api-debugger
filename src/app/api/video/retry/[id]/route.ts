@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession, AuthError } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import {
   assertCanViewTask,
   getProjectForGeneration,
@@ -56,6 +57,7 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: '未登录', message: '请先登录后再重试任务' }, { status: 401 });
     }
+    assertInternalOnly(user, '外部账号无权重试普通生成任务。');
 
     const originalTask = await prisma.videoTask.findUnique({
       where: { id: params.id },

@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isExternalUser } from '@/lib/access/external-role';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
@@ -175,6 +177,7 @@ function taskLoadErrorMessage(error: unknown) {
 }
 
 export default function TasksPage() {
+  const { user: currentUser, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
@@ -191,15 +194,20 @@ export default function TasksPage() {
   const selectedTasks = tasks.filter((task) => selectedSet.has(task.id));
   const selectedDownloadableTasks = selectedTasks.filter(isTaskDownloadable);
   const selectedTooMany = selectedDownloadableTasks.length > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT;
+  const externalUser = isExternalUser(currentUser);
+  const createTaskHref = externalUser ? '/generate/ip' : '/generate';
+  const createTaskLabel = externalUser ? '创建 IP 视频' : '创建新任务';
 
   useEffect(() => {
-    fetchTasks();
-  }, [page]);
+    if (!hasLoadedUser && !loadingUser) void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser]);
 
-  const fetchTasks = async () => {
+  const fetchTasks = useCallback(async () => {
+    if (!hasLoadedUser) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/video/list?page=${page}&limit=20`);
+      const endpoint = externalUser ? '/api/ip/video/list' : '/api/video/list';
+      const res = await fetch(`${endpoint}?page=${page}&limit=20`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || '任务加载失败');
       setTasks(data.tasks || []);
@@ -211,7 +219,11 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [externalUser, hasLoadedUser, page]);
+
+  useEffect(() => {
+    void fetchTasks();
+  }, [fetchTasks]);
 
   const removeTask = async (task: Task) => {
     if (!window.confirm('从我的任务列表移除此记录？管理员仍可在后台留存区审计和恢复。')) return;
@@ -287,8 +299,8 @@ export default function TasksPage() {
           <button className="btn btn-secondary" onClick={fetchTasks}>
             刷新列表
           </button>
-          <Link href="/generate" className="btn btn-primary">
-            创建新任务
+          <Link href={createTaskHref} className="btn btn-primary">
+            {createTaskLabel}
           </Link>
           </>
         )}
@@ -307,12 +319,13 @@ export default function TasksPage() {
           <div className="tasks-empty">
             <h2>暂无任务</h2>
             <p>先创建一个视频任务，生成记录会出现在这里。</p>
-            <Link href="/generate" className="btn btn-primary">
-              创建第一个任务
+            <Link href={createTaskHref} className="btn btn-primary">
+              {createTaskLabel}
             </Link>
           </div>
         ) : (
           <>
+            {!externalUser && (
             <div className="bulk-download-toolbar">
               <label className="bulk-download-check">
                 <input
@@ -348,6 +361,7 @@ export default function TasksPage() {
                 </button>
               </div>
             </div>
+            )}
             {selectedTooMany && (
               <div className="alert alert-warning">
                 第一批即时打包最多支持 {BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT} 个视频；更大批量后续走后台任务。
@@ -448,9 +462,12 @@ export default function TasksPage() {
                       <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
                         查看详情
                       </Link>
+                      {!externalUser && (
                       <Link href={enhanceTask ? '/generate/enhance' : `/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
                         {enhanceTask ? '继续超分' : '重新生成'}
                       </Link>
+                      )}
+                      {!externalUser && (
                       <button
                         type="button"
                         className="btn btn-secondary"
@@ -459,6 +476,7 @@ export default function TasksPage() {
                       >
                         {deletingTaskId === task.id ? '移除中...' : '从列表移除'}
                       </button>
+                      )}
                     </div>
                   </article>
                 );

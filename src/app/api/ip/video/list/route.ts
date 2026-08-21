@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
+import { isExternalUser } from '@/lib/access/external-role';
 import {
   VOLCENGINE_IP_VIDEO_PROVIDER,
   safeVolcengineIpUserMessage,
@@ -11,6 +12,23 @@ import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
+
+function redactIpTaskForExternal<T extends Record<string, unknown>>(task: T) {
+  return {
+    ...task,
+    provider_task_id: null,
+    public_video_storage_key: null,
+    provider_cost_currency: null,
+    provider_official_amount_minor: null,
+    provider_final_amount_minor: null,
+    provider_official_amount_micros: null,
+    provider_final_amount_micros: null,
+    template_id: null,
+    agent_run_id: null,
+    selected_agent_plan_key: null,
+    generation_template: null,
+  };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -109,18 +127,22 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    const external = isExternalUser(user);
     return NextResponse.json({
-      tasks: tasks.map((task) => ({
-        ...task,
+      tasks: tasks.map((task) => {
+        const visibleTask = external ? redactIpTaskForExternal(task) : task;
+        return {
+        ...visibleTask,
         result_video_url: null,
         result_last_frame_url: null,
         ...taskThumbnailProjection({
-          ...task,
+          ...visibleTask,
           result_video_url: null,
           result_last_frame_url: null,
         }),
         error_message: safeVolcengineIpUserMessage(task.error_message),
-      })),
+      };
+      }),
       pagination: {
         page,
         limit,

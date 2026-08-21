@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { finalizeVideoTaskStatus, isTerminalLocalStatus } from '@/lib/video/task-finalizer';
@@ -42,6 +43,7 @@ export async function GET(
     if (!user) {
       return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
     }
+    assertInternalOnly(user, '外部账号请使用 IP 任务状态接口。');
 
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },

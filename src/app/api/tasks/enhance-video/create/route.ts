@@ -5,6 +5,7 @@ import type { VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { calculateEnhanceVideoEstimatedCost } from '@/lib/pricing';
@@ -233,6 +234,12 @@ export async function POST(request: NextRequest) {
   }
   if (user.status !== 'active') {
     return errorJson('账号已被禁用，无法创建超分任务', 403);
+  }
+  try {
+    assertInternalOnly(user, '外部账号无权使用视频超分。');
+  } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
+    throw error;
   }
 
   let body;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { recordContentAuditLog } from '@/lib/content-audit';
 import {
   normalizeTaskDeleteReason,
@@ -17,6 +18,7 @@ export async function DELETE(
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权移除任务记录。');
 
     const body = await request.json().catch(() => ({}));
     const reason = normalizeTaskDeleteReason(body.reason) || '用户从任务列表移除';
@@ -73,6 +75,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, task: updated });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('[TaskRetention] Delete error:', error);
     return NextResponse.json(
       { error: '任务移除失败', message: error instanceof Error ? error.message : 'Unknown error' },

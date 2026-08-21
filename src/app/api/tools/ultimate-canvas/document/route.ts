@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { getProjectAccess } from '@/lib/projects/permissions';
 
 export const dynamic = 'force-dynamic';
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权使用无线画布。');
 
     const documentId = request.nextUrl.searchParams.get('document_id')?.trim() || '';
     const projectId = request.nextUrl.searchParams.get('project_id')?.trim() || null;
@@ -100,6 +102,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权使用无线画布。');
 
     const body = await request.json() as Record<string, unknown>;
     const documentId = cleanString(body.document_id || body.documentId);

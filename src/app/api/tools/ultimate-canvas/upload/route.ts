@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { uploadSiteAsset, validateSiteUploadBuffer, validateSiteUploadInput } from '@/lib/assets/site-upload';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
 import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/assets/reference-import';
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权使用无线画布上传。');
 
     const multipartContentLength = parseContentLength(request.headers.get('content-length'));
     if (multipartContentLength == null) {

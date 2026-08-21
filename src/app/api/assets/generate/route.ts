@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import {
   createImageGeneration,
   getImageGenerationApiSettings,
@@ -331,6 +332,8 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
   try {
+    assertInternalOnly(user, '外部账号无权使用资产图形生成。');
+
     const body = await request.json() as Record<string, unknown>;
     const action = normalizeAction(body.action);
     if (!action) return NextResponse.json({ error: '图形生成 action 无效' }, { status: 400 });

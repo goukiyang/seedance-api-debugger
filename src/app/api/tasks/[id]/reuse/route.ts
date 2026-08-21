@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
@@ -51,6 +52,7 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
     }
+    assertInternalOnly(user, '外部账号无权复用普通生成任务。');
 
     const task = await prisma.videoTask.findUnique({
       where: { id: params.id },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 
 export const dynamic = 'force-dynamic';
@@ -9,6 +10,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权使用无线画布健康检查。');
     if (user.role !== 'admin') {
       return NextResponse.json({ error: '权限不足', message: '无线画布本地化健康检查只对管理员开放' }, { status: 403 });
     }
@@ -61,6 +63,9 @@ export async function GET(request: NextRequest) {
       note: '该接口只读；实际补偿由 finalize-pending-videos 脚本或生产定时任务执行。',
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('[UltimateCanvasLocalizationHealth] Error:', error);
     return NextResponse.json(
       { error: '本地化健康信息读取失败', message: error instanceof Error ? error.message : 'Unknown error' },

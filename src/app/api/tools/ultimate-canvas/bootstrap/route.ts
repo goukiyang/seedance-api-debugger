@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { ensureDefaultProjectForUser } from '@/lib/projects/permissions';
 import { canGenerateInVideoCardStatus } from '@/lib/video-cards/permissions';
 import {
@@ -82,6 +83,14 @@ function savedVideoCardId(documentJson: string | null | undefined) {
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  try {
+    assertInternalOnly(user, '外部账号无权使用无线画布。');
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
 
   const [muskSettings, imageSettings, h3Settings] = await Promise.all([
     getMuskApiSettings(),

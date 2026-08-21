@@ -109,16 +109,23 @@ export async function loadCollectionIntoWorkspace(
   return { count: items.length };
 }
 
-export async function deleteCollection(id: string) {
-  await prisma.assetCollection.delete({ where: { id } });
+export async function deleteCollection(id: string, ownerId = 'default-user') {
+  const where = ownerId === 'default-user' ? { id } : { id, owner_id: ownerId };
+  const collection = await prisma.assetCollection.findFirst({ where, select: { id: true } });
+  if (!collection) throw new Error('Collection not found');
+  await prisma.assetCollection.delete({ where: { id: collection.id } });
 }
 
 export async function updateCollection(
   id: string,
-  data: { name?: string; description?: string; visibility?: string; cover_asset_id?: string }
+  data: { name?: string; description?: string; visibility?: string; cover_asset_id?: string },
+  ownerId = 'default-user'
 ) {
+  const where = ownerId === 'default-user' ? { id } : { id, owner_id: ownerId };
+  const collection = await prisma.assetCollection.findFirst({ where, select: { id: true } });
+  if (!collection) throw new Error('Collection not found');
   return prisma.assetCollection.update({
-    where: { id },
+    where: { id: collection.id },
     data,
   });
 }

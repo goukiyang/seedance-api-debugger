@@ -5,6 +5,7 @@ export interface NavItem {
   prefixMatch?: boolean;
   adminOnly?: boolean;
   externalHidden?: boolean;
+  externalOnlyHidden?: boolean;
 }
 
 export interface NavGroup {
@@ -83,8 +84,8 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '项目',
     items: [
-      { label: '我的项目', href: '/projects', prefixMatch: true },
-      { label: 'IP生成', href: '/generate/ip' },
+      { label: '我的项目', href: '/projects', prefixMatch: true, externalHidden: true },
+      { label: 'IP生成', href: '/generate/ip', externalHidden: true },
       { label: '我的任务', href: '/tasks', prefixMatch: true },
       { label: '资产管理', href: '/assets', prefixMatch: true },
       { label: '参考图集', href: '/collections', prefixMatch: true },
@@ -141,7 +142,7 @@ export function isNavItemVisible(
       );
 
   if (item.adminOnly && !isAdmin) return false;
-  if (item.externalHidden && isExternal) return false;
+  if ((item.externalHidden || item.externalOnlyHidden) && isExternal) return false;
   return true;
 }
 

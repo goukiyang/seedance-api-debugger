@@ -2,6 +2,8 @@ import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { assertCanViewTask } from '@/lib/projects/permissions';
 import { isSafeTaskId, localPublicVideoPath } from '@/lib/video/thumbnail';
 
 export const dynamic = 'force-dynamic';
@@ -66,14 +68,35 @@ export async function GET(
   if (!isSafeTaskId(taskId)) {
     return NextResponse.json({ error: '任务 ID 无效' }, { status: 400 });
   }
+  const user = await getSession();
+  if (!user) {
+    return NextResponse.json({ error: '未登录', message: '请先登录后再查看视频' }, { status: 401 });
+  }
 
   const task = await prisma.videoTask.findUnique({
     where: { id: taskId },
-    select: { public_video_url: true, local_video_path: true, result_video_url: true },
+    select: {
+      id: true,
+      public_video_url: true,
+      local_video_path: true,
+      result_video_url: true,
+      project_id: true,
+      owner_user_id: true,
+      user_id: true,
+      retention_status: true,
+    },
   });
 
   if (!task) {
     return NextResponse.json({ error: '任务不存在' }, { status: 404 });
+  }
+  try {
+    await assertCanViewTask(user, task);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
+    }
+    throw error;
   }
 
   if (task.public_video_url) {

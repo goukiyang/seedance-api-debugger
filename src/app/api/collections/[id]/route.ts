@@ -5,13 +5,16 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteCollection, updateCollection } from '@/lib/assets/collection';
+import { getSession } from '@/lib/auth/session';
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    await deleteCollection(params.id);
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    await deleteCollection(params.id, user.id);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[DeleteCollection] Error:', error);
@@ -27,8 +30,10 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     const body = await request.json();
-    const collection = await updateCollection(params.id, body);
+    const collection = await updateCollection(params.id, body, user.id);
     return NextResponse.json({ collection });
   } catch (error) {
     console.error('[UpdateCollection] Error:', error);

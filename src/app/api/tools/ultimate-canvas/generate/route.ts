@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession, type SessionUser } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import {
   createMuskChatCompletion,
   getMuskApiSettings,
@@ -129,6 +130,14 @@ async function assertCanUseCanvasDocument(
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录，请先登录后再使用无线画布 LLM' }, { status: 401 });
+  try {
+    assertInternalOnly(user, '外部账号无权使用无线画布生成。');
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
 
   let body: Record<string, unknown>;
   try {

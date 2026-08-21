@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
+import { isExternalUser } from '@/lib/access/external-role';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import {
   VOLCENGINE_IP_VIDEO_PROVIDER,
@@ -18,6 +19,24 @@ const IP_TASK_STATUS_INCLUDE = {
   owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
   user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
 } as const;
+
+function redactIpTaskForExternal<T extends Record<string, unknown>>(task: T) {
+  return {
+    ...task,
+    provider_task_id: null,
+    source_request_id: null,
+    public_video_storage_key: null,
+    template_id: null,
+    agent_run_id: null,
+    selected_agent_plan_key: null,
+    provider_cost_currency: null,
+    provider_official_amount_minor: null,
+    provider_final_amount_minor: null,
+    provider_official_amount_micros: null,
+    provider_final_amount_micros: null,
+    generation_template: null,
+  };
+}
 
 function serializeTaskForIpStatus<T extends {
   owner?: unknown;
@@ -71,66 +90,69 @@ function serializeTaskForIpStatus<T extends {
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
-}>(task: T) {
+}>(task: T, options: { external?: boolean } = {}) {
+  const visibleTask = (
+    options.external ? redactIpTaskForExternal(task as T & Record<string, unknown>) : task
+  ) as T;
   return {
-    id: task.id,
-    provider: task.provider,
-    model: task.model ?? null,
-    provider_task_id: task.provider_task_id,
-    prompt: task.prompt,
-    source_type: task.source_type ?? null,
-    source_label: task.source_label ?? null,
-    source_request_id: task.source_request_id ?? null,
-    generation_mode: task.generation_mode,
-    ratio: task.ratio,
-    duration: task.duration,
-    resolution: task.resolution,
-    seed: task.seed ?? null,
-    generate_audio: task.generate_audio ?? null,
-    return_last_frame: task.return_last_frame ?? null,
-    watermark: task.watermark ?? null,
-    reference_image_ids: task.reference_image_ids ?? null,
-    reference_image_urls: task.reference_image_urls ?? null,
-    reference_video_urls: task.reference_video_urls ?? null,
-    reference_audio_urls: task.reference_audio_urls ?? null,
-    first_frame_url: task.first_frame_url ?? null,
-    last_frame_url: task.last_frame_url ?? null,
-    frame_image_urls: task.frame_image_urls ?? null,
-    local_status: task.local_status,
-    provider_status: task.provider_status,
+    id: visibleTask.id,
+    provider: visibleTask.provider,
+    model: visibleTask.model ?? null,
+    provider_task_id: visibleTask.provider_task_id,
+    prompt: visibleTask.prompt,
+    source_type: visibleTask.source_type ?? null,
+    source_label: visibleTask.source_label ?? null,
+    source_request_id: visibleTask.source_request_id ?? null,
+    generation_mode: visibleTask.generation_mode,
+    ratio: visibleTask.ratio,
+    duration: visibleTask.duration,
+    resolution: visibleTask.resolution,
+    seed: visibleTask.seed ?? null,
+    generate_audio: visibleTask.generate_audio ?? null,
+    return_last_frame: visibleTask.return_last_frame ?? null,
+    watermark: visibleTask.watermark ?? null,
+    reference_image_ids: visibleTask.reference_image_ids ?? null,
+    reference_image_urls: visibleTask.reference_image_urls ?? null,
+    reference_video_urls: visibleTask.reference_video_urls ?? null,
+    reference_audio_urls: visibleTask.reference_audio_urls ?? null,
+    first_frame_url: visibleTask.first_frame_url ?? null,
+    last_frame_url: visibleTask.last_frame_url ?? null,
+    frame_image_urls: visibleTask.frame_image_urls ?? null,
+    local_status: visibleTask.local_status,
+    provider_status: visibleTask.provider_status,
     ...taskThumbnailProjection({
-      ...task,
+      ...visibleTask,
       result_video_url: null,
       result_last_frame_url: null,
     }),
     result_video_url: null,
     result_last_frame_url: null,
-    local_video_path: task.local_video_path,
-    public_video_url: task.public_video_url ?? null,
-    public_video_storage_provider: task.public_video_storage_provider ?? null,
-    public_video_storage_key: task.public_video_storage_key ?? null,
-    public_video_file_size: task.public_video_file_size ?? null,
-    public_video_cached_at: task.public_video_cached_at ?? null,
-    error_message: safeVolcengineIpUserMessage(task.error_message),
-    project_id: task.project_id,
-    video_card_id: task.video_card_id,
-    template_id: task.template_id ?? null,
-    agent_run_id: task.agent_run_id ?? null,
-    selected_agent_plan_key: task.selected_agent_plan_key ?? null,
-    prompt_user_edited: task.prompt_user_edited ?? false,
-    provider_cost_currency: task.provider_cost_currency,
-    provider_official_amount_minor: task.provider_official_amount_minor,
-    provider_final_amount_minor: task.provider_final_amount_minor,
-    provider_official_amount_micros: task.provider_official_amount_micros,
-    provider_final_amount_micros: task.provider_final_amount_micros,
-    project: 'project' in task ? task.project : null,
-    video_card: 'video_card' in task ? task.video_card : null,
-    generation_template: 'generation_template' in task ? task.generation_template : null,
-    owner: task.owner || task.user || null,
-    submitted_user: task.user || null,
-    created_at: task.created_at,
-    updated_at: task.updated_at,
-    completed_at: task.completed_at,
+    local_video_path: visibleTask.local_video_path,
+    public_video_url: visibleTask.public_video_url ?? null,
+    public_video_storage_provider: visibleTask.public_video_storage_provider ?? null,
+    public_video_storage_key: visibleTask.public_video_storage_key ?? null,
+    public_video_file_size: visibleTask.public_video_file_size ?? null,
+    public_video_cached_at: visibleTask.public_video_cached_at ?? null,
+    error_message: safeVolcengineIpUserMessage(visibleTask.error_message),
+    project_id: visibleTask.project_id,
+    video_card_id: visibleTask.video_card_id,
+    template_id: visibleTask.template_id ?? null,
+    agent_run_id: visibleTask.agent_run_id ?? null,
+    selected_agent_plan_key: visibleTask.selected_agent_plan_key ?? null,
+    prompt_user_edited: visibleTask.prompt_user_edited ?? false,
+    provider_cost_currency: visibleTask.provider_cost_currency,
+    provider_official_amount_minor: visibleTask.provider_official_amount_minor,
+    provider_final_amount_minor: visibleTask.provider_final_amount_minor,
+    provider_official_amount_micros: visibleTask.provider_official_amount_micros,
+    provider_final_amount_micros: visibleTask.provider_final_amount_micros,
+    project: 'project' in visibleTask ? visibleTask.project : null,
+    video_card: 'video_card' in visibleTask ? visibleTask.video_card : null,
+    generation_template: 'generation_template' in visibleTask ? visibleTask.generation_template : null,
+    owner: visibleTask.owner || visibleTask.user || null,
+    submitted_user: visibleTask.user || null,
+    created_at: visibleTask.created_at,
+    updated_at: visibleTask.updated_at,
+    completed_at: visibleTask.completed_at,
   };
 }
 
@@ -175,7 +197,7 @@ export async function GET(
     }
 
     if (!task.provider_task_id) {
-      return NextResponse.json(serializeTaskForIpStatus(task));
+      return NextResponse.json(serializeTaskForIpStatus(task, { external: isExternalUser(user) }));
     }
 
     const finalizeResult = await finalizeVideoTaskStatus(taskId, {
@@ -199,13 +221,13 @@ export async function GET(
 
     if (finalizeResult.providerError) {
       return NextResponse.json({
-        ...serializeTaskForIpStatus(responseTask),
+        ...serializeTaskForIpStatus(responseTask, { external: isExternalUser(user) }),
         error_message: safeVolcengineIpUserMessage(responseTask.error_message)
           || '火山任务状态同步失败，请稍后重试。',
       });
     }
 
-    return NextResponse.json(serializeTaskForIpStatus(responseTask));
+    return NextResponse.json(serializeTaskForIpStatus(responseTask, { external: isExternalUser(user) }));
   } catch (error) {
     console.error('[IpVideoStatus] Get task status error:', error);
     return NextResponse.json(

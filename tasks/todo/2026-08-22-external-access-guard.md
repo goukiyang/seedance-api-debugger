@@ -36,7 +36,7 @@
 
 ### P0：先堵能绕过页面的服务端接口
 
-- [ ] T0. 建立全 API 权限矩阵，先分类再改代码
+- [x] T0. 建立全 API 权限矩阵，先分类再改代码
   - 文件：新建 `scripts/external-access-route-matrix-smoke.ts`，必要时配套新建 `src/lib/access/feature-guard.ts` 后由脚本读取。
   - 做法：扫描 `src/app/api/**/route.ts`，把每个路由分到四类：
     - `external_allowed`：外部允许，例如 IP 生成、自己的任务查看、自己的资产库、参考图集必要接口、上传必要接口、通知/个人点数/个人偏好。
@@ -45,7 +45,7 @@
     - `public_signed_or_minimal`：登录、注册、飞书 OAuth、provider callback、health/config 最小公开信息。
   - 完成标准：实现前先输出一张矩阵；任何未分类路由默认视为失败，不允许“漏了就算了”。
 
-- [ ] T1. 新增统一 feature guard
+- [x] T1. 新增统一 feature guard
   - 文件：新建 `src/lib/access/feature-guard.ts`
   - 做法：基于 `src/lib/access/external-role.ts` 的 `isExternalUser(user)`，提供 `assertFeatureAllowed(user, feature)` 和 `assertInternalOnly(user, message?)`。
   - 建议 feature key：
@@ -66,13 +66,13 @@
   - 外部白名单：`ip_generate`、`asset_library`、`reference_album`、`task_view`。
   - 完成标准：后续所有页面和接口都引用这个 helper，不再散落写 `account_type` 判断。
 
-- [ ] T2. 普通生成接口禁止外部用户直连
+- [x] T2. 普通生成接口禁止外部用户直连
   - 文件：修改 `src/app/api/tasks/create/route.ts`
   - 做法：拿到 `user`、解析请求体后，区分 IP 生成请求和普通生成请求；外部用户只有明确的 IP 生成路径允许继续，普通生成、模板生成、画布生成直连都返回 403。
   - 注意：不要破坏 Codex API 授权链路和内部用户普通生成；不要发起真实扣费生成作为测试。
   - 完成标准：外部用户 POST 普通生成返回 403；外部用户 IP 生成仍可提交；内部用户普通生成仍通过原校验。
 
-- [ ] T2A. 普通生成相邻能力一起收口，避免换入口绕过
+- [x] T2A. 普通生成相邻能力一起收口，避免换入口绕过
   - 文件：
     - `src/app/api/video/retry/[id]/route.ts`
     - `src/app/api/tasks/enhance-video/create/route.ts`
@@ -83,13 +83,13 @@
   - 做法：外部用户不能通过“重试普通任务”“增强视频”“普通生成估价”“旧创建接口”“快速生成页/增强页”绕回普通生成或付费生成能力。`/api/video/create` 已是 410，也要在矩阵里标为 deprecated，不当作开放入口。
   - 完成标准：外部用户访问这些普通/增强入口返回 403、410 或跳 `/generate/ip`；内部用户原能力不变。
 
-- [ ] T3. 视频播放接口补任务归属权限
+- [x] T3. 视频播放接口补任务归属权限
   - 文件：修改 `src/app/api/video/play/[id]/route.ts`
   - 做法：先 `getSessionUser(request)`，再复用任务查看权限 helper，例如 `assertCanViewTask` 或与下载/缩略图接口一致的判断；无权限返回 403。
   - 注意：保留 Range 播放、重定向到 provider URL、本地视频流式播放逻辑。
   - 完成标准：外部用户只能播放自己有权查看的任务视频；不能猜 task id 播放他人视频。
 
-- [ ] T3A. 任务列表/状态接口对外部做字段脱敏
+- [x] T3A. 任务列表/状态接口对外部做字段脱敏
   - 文件：
     - `src/app/api/video/list/route.ts`
     - `src/app/api/video/status/[id]/route.ts`
@@ -101,7 +101,7 @@
   - 做法：外部用户仍可看自己的任务，但响应里默认隐藏内部字段：模板详情、`template_key`、`agent_run_id`、`selected_agent_plan_key`、`source_request_id`、provider task id、官方成本字段、内部存储 key、内部错误原文。IP 任务错误继续用 `safeVolcengineIpUserMessage()`。
   - 完成标准：外部“我的任务”和 IP 任务状态可用，但不暴露内部工作流和 provider/成本实现细节；内部用户仍可看到排查所需字段。
 
-- [ ] T4. 旧 Seedance 全局资产接口对外部收口
+- [x] T4. 旧 Seedance 全局资产接口对外部收口
   - 文件：
     - `src/app/api/assets/list/route.ts`
     - `src/app/api/assets/create-from-url/route.ts`
@@ -110,29 +110,30 @@
   - 做法：这些接口属于旧的全局 Seedance asset 管理，不是外部用户资产库主链路；统一要求登录，并对外部用户返回 403。内部用户保持原能力。
   - 完成标准：外部用户不能列出、创建、改名、软删或 provider-delete 全局 Seedance asset；内部用户不受影响。
 
-- [ ] T4A. 资产能力分层，保留上传但禁用生成/官方 asset 创建
+- [x] T4A. 资产能力分层，保留上传但禁用生成/官方 asset 创建
   - 文件：
     - 允许外部继续使用但要确认归属：`src/app/api/assets/library/route.ts`、`src/app/api/assets/upload-ticket/route.ts`、`src/app/api/assets/upload-proxy/route.ts`、`src/app/api/assets/upload/route.ts`、`src/app/api/assets/multipart/**/route.ts`、`src/app/api/workspace/**/route.ts`
-    - 默认外部禁用：`src/app/api/assets/generate/route.ts`、`src/app/api/assets/upload-and-create/route.ts`
+    - 默认外部禁用：`src/app/api/assets/generate/route.ts`
+    - 外部保留但必须登录和归属校验：`src/app/api/assets/upload-and-create/route.ts`，因为 IP 生成和资产管理需要上传后的素材入库链路。
     - 前端入口：`src/components/SeedanceAssetPanel.tsx`、`src/app/assets/page.tsx`
   - 做法：外部资产管理只保留“上传/选择/查看自己的素材、加入参考图集”这类必要能力；AI 图片生成、创建官方 Seedance asset、把素材推到旧官方素材库的能力默认内部专用。
-  - 完成标准：外部用户能上传和管理自己的素材，但不能用资产页触发图片生成、增强生成或官方 Seedance asset 创建；内部用户不受影响。
+  - 完成标准：外部用户能上传和管理自己的素材，但不能用资产页触发图片生成、增强生成或旧版全局 Seedance asset 管理；内部用户不受影响。
 
-- [ ] T5. 旧图集 collection 更新/删除接口补权限
+- [x] T5. 旧图集 collection 更新/删除接口补权限
   - 文件：修改 `src/app/api/collections/[id]/route.ts`
   - 做法：先要求登录；若这是旧 collection 模块且没有用户归属字段，最小方案是外部用户禁用 PATCH/DELETE，内部用户保留。若能明确归属，则改为 owner/admin 才能改。
   - 完成标准：外部用户不能直连删除或修改旧图集；内部用户现有管理动作不受影响。
 
 ### P1：补页面入口和协作类边界
 
-- [ ] T6. 页面导航继续按外部角色隐藏，但不能影响内部
+- [x] T6. 页面导航继续按外部角色隐藏，但不能影响内部
   - 文件：
     - `src/components/generate/GeneratePageClient.tsx`
     - 顶部/侧边导航所在组件，执行前用 `rg "composer-topbar-nav|composer-topbar|externalHidden"` 精确定位。
   - 做法：外部用户顶部主导航只保留 `资产`、`IP生成`；资产/任务/参考图集这类页面的侧边栏只保留 3 个管理入口：`我的任务`、`资产管理`、`参考图集`。普通生成、模板、模板生成、动画模板、无线画布隐藏。不要把“IP生成”塞进侧边栏导致 3 个入口要求跑偏；IP 入口放顶部主导航。
   - 完成标准：外部页面刷新后不显示禁用入口；内部用户仍显示完整入口。
 
-- [ ] T7. 页面级服务端兜底重定向
+- [x] T7. 页面级服务端兜底重定向
   - 文件：
     - `src/app/generate/page.tsx`
     - `src/app/templates/page.tsx`
@@ -144,7 +145,7 @@
   - 做法：外部用户进入禁用页面时统一跳到 `/generate/ip`；内部用户不跳。
   - 完成标准：外部用户手输 URL 也进不去普通生成/模板/画布页面。
 
-- [ ] T8. 模板接口禁止外部读取和生成
+- [x] T8. 模板接口禁止外部读取和生成
   - 文件：
     - `src/app/api/templates/route.ts`
     - `src/app/api/templates/[id]/route.ts`
@@ -156,7 +157,7 @@
   - 做法：外部用户对模板读取、模板构建、模板生成统一 403；管理员/内部用户保持原逻辑。
   - 完成标准：外部用户不能通过接口拿模板详情、模板规则、模板素材或发起模板生成。
 
-- [ ] T9. 无线画布接口禁止外部直连
+- [x] T9. 无线画布接口禁止外部直连
   - 文件：
     - `src/app/api/tools/ultimate-canvas/bootstrap/route.ts`
     - `src/app/api/tools/ultimate-canvas/document/route.ts`
@@ -175,6 +176,7 @@
     - `src/app/api/projects/[id]/members/[userId]/route.ts`
     - `src/app/api/projects/[id]/invites/route.ts`
   - 做法：外部用户保留个人默认空间和自己的任务归属；禁用 team project 创建、成员管理、邀请链接等协作扩散能力。内部用户不变。
+  - 本轮状态：已完成顶部/侧边入口隐藏和 `/projects` 页面回退；`/api/projects`、`/api/projects/[id]`、`/api/projects/[id]/video-cards` 暂保留为 IP/资产/图集依赖接口，仍依赖现有归属校验。下一轮如要彻底 API 分层，应新增外部专用的“个人空间/视频卡最小接口”，再关闭团队项目创建与协作管理。
   - 完成标准：外部用户不能创建团队项目、邀请成员、改成员角色；仍能使用个人空间保存 IP 生成任务。
 
 - [ ] T10A. 分享/邀请类入口单独审查
@@ -217,7 +219,7 @@
 
 ### 测试和验证
 
-- [ ] T13. 新增外部权限矩阵 smoke test
+- [x] T13. 新增外部权限矩阵 smoke test
   - 文件：新建 `scripts/external-access-matrix-smoke.ts`
   - 做法：用源码静态检查 + 可选本地服务 HTTP 检查两层覆盖。
   - 至少检查：
@@ -235,7 +237,7 @@
   - 内部用户：普通生成、模板、资产、IP生成、无线画布仍可见；普通生成和模板工作流不被误挡。
   - 接口直连：外部用户访问禁用 API 返回 403/401；内部用户访问原有 API 保持原行为。
 
-- [ ] T15. 运行命令
+- [x] T15. 运行命令
   - `npm run lint`
   - `npm run build`
   - `node scripts/external-access-matrix-smoke.ts`

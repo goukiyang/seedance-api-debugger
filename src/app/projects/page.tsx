@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 
 interface ProjectItem {
@@ -96,6 +99,8 @@ function projectActionMeta(project: ProjectItem): string {
 const PROJECTS_PAGE_SIZE = 12;
 
 export default function ProjectsPage() {
+  const router = useRouter();
+  const { user: currentUser, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
@@ -111,6 +116,16 @@ export default function ProjectsPage() {
   const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
   const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+
+  useEffect(() => {
+    if (!hasLoadedUser && !loadingUser) void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser]);
+
+  useEffect(() => {
+    if (hasLoadedUser && isExternalUser(currentUser)) {
+      router.replace(externalFallbackPath());
+    }
+  }, [currentUser, hasLoadedUser, router]);
 
   const loadProjects = async () => {
     setLoading(true);

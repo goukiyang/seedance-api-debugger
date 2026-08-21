@@ -7,6 +7,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { deleteAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 
@@ -15,6 +17,10 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权删除旧版 Seedance 官方素材。');
+
     const record = await seedanceAssetRepository.get(params.id);
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
@@ -45,6 +51,9 @@ export async function DELETE(
       message: '官方资产已删除',
     });
   } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error('[ProviderDeleteAsset] Error:', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '删除失败' },

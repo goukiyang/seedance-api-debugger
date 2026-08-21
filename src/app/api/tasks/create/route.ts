@@ -43,6 +43,7 @@ import {
 } from '@/lib/provider/reference-media-policy';
 import { providerCreateFailureUserMessage } from '@/lib/provider/error-message';
 import { AuthError } from '@/lib/auth/session';
+import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import {
@@ -602,6 +603,12 @@ export async function POST(request: NextRequest) {
 
   if (user.status !== 'active') {
     return errorJson('账号已被禁用，无法生成', 403);
+  }
+  try {
+    assertFeatureAllowed(user, 'standard_generate', '外部账号无权使用普通生成，请使用 IP 生成。');
+  } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
+    throw error;
   }
 
   const body = await request.json();
