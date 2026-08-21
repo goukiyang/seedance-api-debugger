@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [ ] 2026-08-22：外部用户权限收口与风险闭环，正文见 `tasks/todo/2026-08-22-external-access-guard.md`。
 - [x] 2026-08-16：Seedance 2.5 按 2.0 的 1.5 倍扣费，正文见 `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`。
 - [x] 2026-08-16：H3 LoRA 下拉选择闭环，正文见 `tasks/todo/2026-08-16-h3-lora-selector.md`。
 - [ ] 2026-08-16：任务卡片缩略图可靠显示修复，正文见 `tasks/todo/2026-08-16-reliable-task-thumbnails.md`。
@@ -39,4 +40,5 @@
 - `tasks/todo/2026-08-16-h3-lora-selector.md`：H3 LoRA 下拉选择闭环
 - `tasks/todo/2026-08-16-reliable-task-thumbnails.md`：任务卡片缩略图可靠显示修复
 - `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`：Seedance 2.5 按 2.0 的 1.5 倍扣费
+- `tasks/todo/2026-08-22-external-access-guard.md`：外部用户权限收口与风险闭环
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
