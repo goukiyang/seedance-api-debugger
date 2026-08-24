@@ -54,6 +54,7 @@ type LibraryItem = {
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  model: string | null;
   provider: string | null;
   generationMode: string | null;
   videoCardId: string | null;
@@ -177,6 +178,7 @@ async function serializeTask(task: {
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  model: string;
   video_card_id: string | null;
   params_json: string | null;
   retention_status: string;
@@ -234,6 +236,7 @@ async function serializeTask(task: {
     duration: task.duration,
     ratio: task.ratio,
     resolution: task.resolution,
+    model: task.model,
     provider: task.provider,
     generationMode: task.generation_mode,
     videoCardId: task.video_card_id,
@@ -292,6 +295,7 @@ function serializeAsset(asset: {
     duration: null,
     ratio: asset.width && asset.height ? `${asset.width}:${asset.height}` : null,
     resolution: null,
+    model: null,
     provider: null,
     generationMode: null,
     videoCardId: null,
@@ -344,6 +348,7 @@ function serializeReferenceImage(image: {
     duration: null,
     ratio: null,
     resolution: null,
+    model: null,
     provider: null,
     generationMode: null,
     videoCardId: null,
@@ -493,6 +498,7 @@ async function loadVideoItems(options: {
         duration: true,
         ratio: true,
         resolution: true,
+        model: true,
         video_card_id: true,
         params_json: true,
         retention_status: true,

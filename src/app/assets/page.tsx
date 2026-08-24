@@ -102,6 +102,7 @@ type AssetLibraryItem = {
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  model: string | null;
   provider: string | null;
   generationMode: string | null;
   videoCardId: string | null;
@@ -338,11 +339,27 @@ function formatResolution(value: string | null) {
   return normalized.toUpperCase();
 }
 
-function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'duration' | 'ratio' | 'fileSize'>) {
+function formatModelShortLabel(value: string | null) {
+  const normalized = value?.trim();
+  if (!normalized) return '';
+
+  const seedanceVersion = normalized.match(/seedance[\s-]*(\d+)(?:[.\s-]*(\d+))?/i);
+  if (seedanceVersion) {
+    const major = seedanceVersion[1];
+    const minor = seedanceVersion[2];
+    return minor && minor !== '0' ? `SD${major}.${minor}` : `SD${major}`;
+  }
+
+  if (/enhance[-_\s]*video/i.test(normalized)) return '超分';
+  return normalized.length > 18 ? `${normalized.slice(0, 18)}...` : normalized;
+}
+
+function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'duration' | 'ratio' | 'fileSize' | 'model'>) {
   const parts = [
     formatResolution(item.resolution),
     item.duration ? `${item.duration}s` : null,
     item.ratio,
+    formatModelShortLabel(item.model),
   ].filter(Boolean);
   if (item.kind === 'audio') {
     parts.push(formatAssetUploadBytes(item.fileSize || 0) || '音频素材');
