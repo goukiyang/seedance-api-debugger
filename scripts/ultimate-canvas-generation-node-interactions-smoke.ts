@@ -94,7 +94,7 @@ for (const [taskId, previewUrl, downloadUrl] of [
   ['refreshed-task', '/api/video/play/refreshed-task', '/api/video/download/refreshed-task'],
   ['restored-task', '/restored-preview', '/api/video/download/restored-task'],
 ]) {
-  const node = { id: `${taskId}-node`, type: 'video', data: { taskId, generationStatus: 'succeeded', videoCardId: 'card-1' } };
+  const node = { id: `${taskId}-node`, type: 'video', data: { taskId, generationStatus: 'succeeded', stableDownloadReady: true, videoCardId: 'card-1' } };
   const { api, body, nodeEl, toolbar } = taskActionPopoverHarness(node);
   api.syncVideoTaskActionsTrigger(nodeEl, node, { videoUrl: previewUrl, downloadUrl });
   const trigger = {
@@ -109,7 +109,7 @@ for (const [taskId, previewUrl, downloadUrl] of [
 }
 
 const specPopoverSource = appSource.slice(
-  appSource.indexOf('function generationSelect'),
+  appSource.indexOf('function generationChoiceGroup'),
   appSource.indexOf('function renderCameraPopover'),
 );
 const specPopoverElement = { isConnected: true, innerHTML: 'stale controls' };
@@ -137,9 +137,9 @@ const imageSpecNode = {
   id: 'image-spec-node', type: 'image', data: { imageSettings: { ratio: '21:9', size: '2K', count: 3 } },
 };
 assert.equal(specPopoverApi.refreshOpenGenerationSpecPopover(imageSpecNode), true);
-assert.ok(specPopoverElement.innerHTML.includes('value="21:9" selected'), 'open ratio control follows current image settings');
-assert.ok(specPopoverElement.innerHTML.includes('value="2K" selected'), 'open size control follows current image settings');
-assert.ok(specPopoverElement.innerHTML.includes('value="3"'), 'open count control follows current image settings');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="21:9" aria-pressed="true"'), 'open ratio control follows current image settings');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="2K" aria-pressed="true"'), 'open size control follows current image settings');
+assert.ok(specPopoverElement.innerHTML.includes('data-generation-value="3" aria-pressed="true"'), 'open count control follows current image settings');
 assert.equal(specPopoverPositionCalls, 1, 'refreshed specification controls are repositioned');
 
 contains(appSource, 'generationNodeDimensions(settings.ratio, generationNodeLongEdge(nodeEl))', 'render derives card dimensions from the node type and current settings');
@@ -175,7 +175,7 @@ matches(
 );
 matches(
   stylesSource,
-  /\.canvas-node:not\(\.selected\)[\s\S]*?\.generated-action-row\s*\{[\s\S]*?display:\s*none;/,
+  /\.generation-node:not\(\.selected\) \.generated-action-row\s*\{[\s\S]*?display:\s*none;/,
   'unselected generated nodes hide result actions to preserve compact dimensions',
 );
 matches(stylesSource, /\.node-connector\s*\{[\s\S]*?top:\s*50%;[\s\S]*?translateY\(-50%\)/, 'ports stay vertically centered on the card');
@@ -204,7 +204,7 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260715-generated-image-drag', 'canvas app cache key matches the generated image drag state');
+contains(indexSource, 'app.js?v=20260826-canvas-module-refresh', 'canvas app cache key matches the canvas module refresh state');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
 contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
 contains(appSource, '350', 'video estimates debounce for 350ms');
@@ -251,7 +251,7 @@ assert.ok(!engineSource.includes('data-video-mode='), 'video generation modes ar
 
 const quickModeSource = appSource.slice(
   appSource.indexOf('function applyGenerationQuickMode'),
-  appSource.indexOf('function generationSelect'),
+  appSource.indexOf('function generationChoiceGroup'),
 );
 assert.ok(quickModeSource.includes('applyGenerationQuickAction'), 'quick mode delegates to the executable contract');
 assert.ok(!quickModeSource.includes('submitNodeGeneration'), 'quick mode never submits generation');

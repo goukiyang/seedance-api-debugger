@@ -226,7 +226,10 @@ assert.deepEqual(workflow.normalizeVideoStatus({
   resultLastFrameUrl: '/uploads/last.png',
   thumbnailUrl: '/api/video/thumbnail/task-1',
   playUrl: '/api/video/play/task-1',
-  downloadUrl: '/api/video/download/task-1',
+  downloadUrl: '',
+  stableDownloadReady: false,
+  previewAvailable: true,
+  retryAfterMs: null,
 });
 
 function contains(source: string, needle: string, label: string) {
@@ -266,14 +269,12 @@ contains(appSource, 'function generationSettingsForNode', 'node settings have on
 contains(appSource, 'function generationReferenceItems', 'incoming image references are ordered');
 contains(appSource, 'function renderGenerationNodeControls', 'node controls rehydrate from node data');
 contains(appSource, 'function renderSpecPopover', 'specification controls render in the shared popover');
-contains(appSource, 'data-generation-setting="ratio"', 'ratio setting exists');
-contains(appSource, 'data-generation-setting="size"', 'image size setting exists');
-contains(appSource, 'data-generation-setting="count"', 'image count setting exists');
-contains(appSource, 'data-generation-setting="duration"', 'video duration setting exists');
-contains(appSource, 'data-generation-setting="resolution"', 'video resolution setting exists');
-contains(appSource, 'data-generation-setting="generateAudio"', 'video audio setting exists');
-contains(appSource, 'data-generation-setting="returnLastFrame"', 'last frame setting exists');
-contains(appSource, 'data-generation-setting="watermark"', 'watermark setting exists');
+contains(appSource, 'function generationChoiceGroup', 'specification choices render as compact tiles');
+contains(appSource, 'function generationDurationSlider', 'video duration setting renders as a compact slider');
+contains(appSource, 'data-generation-setting-choice', 'tile settings expose one event target');
+contains(appSource, 'data-generation-duration-slider', 'duration slider exposes one event target');
+contains(appSource, "const allowed = new Set(['ratio', 'size', 'count'])", 'image settings stay allowlisted');
+contains(appSource, "const allowed = new Set(['ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark'])", 'video settings stay allowlisted');
 contains(appSource, 'function updateGenerationNodeModelLabel', 'new nodes receive the backend model label');
 contains(appSource, 'pendingGenerationReferenceTargetId', 'asset selection targets a generation node');
 contains(appSource, 'referenceTarget.x - 720', 'selected reference nodes do not cover their target');
@@ -283,14 +284,14 @@ contains(appSource, "data-generated-image-action=\"open\"", 'image result can op
 contains(appSource, "data-generated-image-action=\"download\"", 'image result can download');
 contains(appSource, "data-generated-image-action=\"regenerate\"", 'image result can regenerate');
 contains(appSource, "data-generated-image-action=\"create-video\"", 'image result creates downstream video');
-contains(appSource, "scheduleCanvasSave('image_settings_change')", 'image settings persist');
+contains(appSource, "scheduleCanvasSave(`${node.type}_settings_change`)", 'generation settings persist');
 contains(appSource, 'function optimizeVideoPrompt', 'video prompt optimizer calls the text backend');
 contains(appSource, 'function renderCameraPresetMenu', 'camera preset menu renders');
 contains(appSource, 'function applyCameraPreset', 'camera preset updates the prompt');
 contains(appSource, 'UltimateCanvasGenerationInteractions.modeOptions', 'mode values are sourced from the interaction contract');
 contains(appSource, 'modeButton.dataset.generationMode', 'popover mode values persist from stable contract ids');
 contains(appSource, 'scheduleCanvasSave(`${node.type}_mode_change`)', 'generation mode persists');
-contains(appSource, "scheduleCanvasSave('video_settings_change')", 'video settings persist');
+contains(appSource, "scheduleCanvasSave(`${node.type}_settings_change`)", 'video settings persist through the shared setting path');
 contains(appSource, "videoRequest({", 'video submission uses the contract module');
 contains(appSource, 'validateVideo({', 'video request is validated by the contract module');
 contains(appSource, 'normalizeVideoCreate', 'video create response is normalized');
@@ -309,9 +310,9 @@ assert.match(
   /capabilities\.video\?\.message\s*\|\|\s*window\.UltimateCanvasBackendContract\.SAFE_UNAVAILABLE_MESSAGE/,
 );
 
-assert.match(indexSource, /styles\.css\?v=20260715-generated-image-drag/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260715-generated-image-drag/);
-assert.match(indexSource, /generation-node-workflow\.js\?v=20260711-liblib-interactions/);
-assert.match(indexSource, /app\.js\?v=20260715-generated-image-drag/);
+assert.match(indexSource, /styles\.css\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /generation-node-workflow\.js\?v=20260813-video-delivery/);
+assert.match(indexSource, /app\.js\?v=20260826-canvas-module-refresh/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

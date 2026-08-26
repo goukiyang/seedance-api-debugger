@@ -2441,8 +2441,9 @@
                     node.data.description || node.data.prompt || '已恢复图片节点',
                     node.data.previewImage || node.data.thumbnailUrl || '',
                     {
-                        imageUrl: node.data.originalUrl || node.data.previewImage || node.data.thumbnailUrl || '',
-                        downloadUrl: node.data.originalUrl || node.data.previewImage || node.data.thumbnailUrl || ''
+                        imageUrl: node.data.originalUrl || node.data.imageUrl || node.data.previewImage || node.data.thumbnailUrl || '',
+                        downloadUrl: node.data.imageDownloadUrl || node.data.originalUrl
+                            || node.data.imageUrl || node.data.previewImage || node.data.thumbnailUrl || ''
                     }
                 );
                 return;
@@ -3105,13 +3106,14 @@
         const nodeMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
-        const modeState = generationModeState(node);
+        const referenceCount = availableGenerationReferenceItems(nodeId).length;
+        const modeState = generationModeState(node, referenceCount);
         const mode = modeState.selected;
         const interactionReadiness = window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
             node.type,
             modeState.capability,
             node.data || {},
-            availableGenerationReferenceItems(nodeId).length,
+            referenceCount,
             nodeMode,
             { transientPending: hasCurrentGenerationSubmission(nodeId) }
         );
@@ -3119,6 +3121,20 @@
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
         const modeLabel = nodeEl.querySelector('[data-generation-mode-label]');
         if (modeLabel) modeLabel.textContent = mode?.label || nodeMode;
+        let supportedQuickChoices = 0;
+        nodeEl.querySelectorAll('[data-generation-quick-mode]').forEach(quickMode => {
+            const quickModeState = window.UltimateCanvasGenerationInteractions.quickModeActionability(
+                modeState.options,
+                quickMode.dataset.generationQuickMode,
+                referenceCount,
+                modeState.capability.enabled
+            );
+            quickMode.hidden = !quickModeState.visible;
+            quickMode.disabled = !quickModeState.enabled;
+            if (quickModeState.visible) supportedQuickChoices += 1;
+        });
+        const quickActions = nodeEl.querySelector('.generation-empty-actions');
+        if (quickActions) quickActions.hidden = supportedQuickChoices === 0;
         const submit = nodeEl.querySelector('[data-generation-submit]');
         if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready;
         const existingStatus = nodeEl.querySelector('.node-generation-status');
@@ -3155,6 +3171,7 @@
         const references = generationReferenceItems(nodeId);
         const referenceList = nodeEl.querySelector('[data-generation-reference-list]');
         if (referenceList) {
+            referenceList.hidden = references.length === 0;
             referenceList.innerHTML = references.length
                 ? references.map((item, index) => `
                     <span class="generation-reference-item ${item.available ? '' : 'is-unavailable'}" title="${escapeHtml(item.available ? item.title : `${item.title} 尚未入库`)}">
@@ -3166,9 +3183,10 @@
                         <button type="button" class="generation-reference-remove" data-generation-reference-remove="${escapeHtml(item.nodeId)}"
                             title="移除参考图" aria-label="移除参考图">&times;</button>
                     </span>`).join('')
-                : '<span class="generation-reference-empty">未连接参考图</span>';
+                : '';
         }
         refreshOpenGenerationSpecPopover(node);
+        syncImageResultActionsTrigger(nodeEl, node);
         syncVideoTaskActionsTrigger(nodeEl, node);
     }
 
@@ -3179,7 +3197,16 @@
     function applyGenerationQuickMode(nodeId, mode) {
         const node = engine.nodes.get(nodeId);
         if (!node || !['image', 'video'].includes(node.type)) return false;
-        const selectedMode = generationModeState(node).options.find(option => option.id === mode);
+        const referenceCount = availableGenerationReferenceItems(nodeId).length;
+        const modeState = generationModeState(node, referenceCount);
+        const selectedMode = modeState.options.find(option => option.id === mode);
+        const quickModeState = window.UltimateCanvasGenerationInteractions.quickModeActionability(
+            modeState.options,
+            mode,
+            referenceCount,
+            modeState.capability.enabled
+        );
+        if (!quickModeState.visible || !quickModeState.enabled) return false;
         window.UltimateCanvasGenerationInteractions.applyGenerationQuickAction({
             selectNode: id => engine.selectNode(id),
             configureMode: (id, selected) => {
@@ -3194,15 +3221,62 @@
             nodeType: node.type,
             mode,
             minimumReferences: selectedMode?.minimumReferences || 0,
-            referenceCount: availableGenerationReferenceItems(nodeId).length
+            referenceCount
         });
         return true;
     }
 
-    function generationSelect(name, label, values, selected) {
-        return `<label><span>${label}</span><select data-generation-setting="${name}">${values.map(value =>
-            `<option value="${escapeHtml(String(value))}" ${String(value) === String(selected) ? 'selected' : ''}>${escapeHtml(String(value))}</option>`
-        ).join('')}</select></label>`;
+    function generationChoiceGroup(name, label, values, selected, format = value => String(value)) {
+        return `<section class="generation-choice-section" data-generation-choice-section="${escapeHtml(name)}">
+            <h3>${escapeHtml(label)}</h3>
+            <div class="generation-choice-grid">
+                ${values.map(value => {
+                    const raw = String(value);
+                    const active = raw === String(selected);
+                    const ratio = name === 'ratio' && /^\d+:\d+$/.test(raw)
+                        ? `<span class="generation-ratio-glyph" style="--generation-choice-ratio:${raw.replace(':', ' / ')}" aria-hidden="true"></span>`
+                        : '';
+                    return `<button type="button" class="generation-choice-button" data-generation-setting-choice="${escapeHtml(name)}"
+                        data-generation-value="${escapeHtml(raw)}" aria-pressed="${active}">${ratio}<span>${escapeHtml(format(value))}</span></button>`;
+                }).join('')}
+            </div>
+        </section>`;
+    }
+
+    function generationDurationSlider(values, selected) {
+        const durations = values.map(Number).filter(Number.isFinite);
+        if (!durations.length) {
+            return '<section class="generation-choice-section"><h3>时长</h3><div class="generation-spec-static">不可用</div></section>';
+        }
+        const selectedIndex = durations.findIndex(value => value === Number(selected));
+        const activeIndex = selectedIndex >= 0 ? selectedIndex : 0;
+        const activeDuration = durations[activeIndex];
+        return `<section class="generation-choice-section generation-duration-section" data-generation-choice-section="duration">
+            <div class="generation-duration-heading">
+                <h3>时长</h3>
+                <output data-generation-duration-output>${escapeHtml(`${activeDuration}s`)}</output>
+            </div>
+            <input type="range" class="generation-duration-slider" min="0" max="${durations.length - 1}" step="1" value="${activeIndex}"
+                data-generation-duration-slider data-generation-duration-values="${escapeHtml(durations.join(','))}"
+                aria-label="时长" aria-valuetext="${escapeHtml(`${activeDuration}秒`)}">
+            <div class="generation-duration-scale" aria-hidden="true"><span>${escapeHtml(`${durations[0]}s`)}</span><span>${escapeHtml(`${durations.at(-1)}s`)}</span></div>
+        </section>`;
+    }
+
+    function syncGenerationDurationSlider(slider) {
+        const durations = String(slider?.dataset?.generationDurationValues || '')
+            .split(',')
+            .map(Number)
+            .filter(Number.isFinite);
+        if (!durations.length) return null;
+        const index = Math.max(0, Math.min(durations.length - 1, Number(slider.value) || 0));
+        const duration = durations[index];
+        slider.value = String(index);
+        slider.setAttribute('aria-valuetext', `${duration}秒`);
+        const output = slider.closest('[data-generation-choice-section="duration"]')
+            ?.querySelector('[data-generation-duration-output]');
+        if (output) output.textContent = `${duration}s`;
+        return duration;
     }
 
     function renderModePopover(node) {
@@ -3228,24 +3302,59 @@
         );
         if (node.type === 'image') {
             const sizeControl = capability.sizeOptions.length
-                ? generationSelect('size', '尺寸', capability.sizeOptions, settings.size)
+                ? generationChoiceGroup('size', '尺寸', capability.sizeOptions, settings.size)
                 : capability.fixedSize
-                    ? `<label><span>尺寸</span><input type="text" value="${escapeHtml(capability.fixedSize)}" readonly data-generation-fixed-size></label>`
-                    : '<label><span>尺寸</span><input type="text" value="不可用" readonly data-generation-size-unavailable></label>';
+                    ? `<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">${escapeHtml(capability.fixedSize)}</div></section>`
+                    : '<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">不可用</div></section>';
+            const counts = Array.from({ length: settings.maximumCount }, (_, index) => index + 1);
             return `<div class="generation-popover-spec" data-generation-settings="image">
-                ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
+                ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
                 ${sizeControl}
-                <label><span>数量</span><input type="number" min="1" max="${settings.maximumCount}" value="${settings.count}" data-generation-setting="count"></label>
+                ${generationChoiceGroup('count', '生成数量', counts, settings.count, value => `${value}张`)}
             </div>`;
         }
         return `<div class="generation-popover-spec" data-generation-settings="video">
-            ${generationSelect('ratio', '比例', capability.ratios, settings.ratio)}
-            ${generationSelect('duration', '时长', capability.durations.map(value => `${value}`), settings.duration)}
-            ${generationSelect('resolution', '分辨率', capability.resolutions, settings.resolution)}
-            ${capability.supportsAudio ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="generateAudio" ${settings.generateAudio ? 'checked' : ''}><span>生成声音</span></label>` : ''}
-            ${capability.supportsLastFrame ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="returnLastFrame" ${settings.returnLastFrame ? 'checked' : ''}><span>返回尾帧</span></label>` : ''}
-            ${capability.supportsWatermark ? `<label class="generation-toggle"><input type="checkbox" data-generation-setting="watermark" ${settings.watermark ? 'checked' : ''}><span>添加水印</span></label>` : ''}
+            ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
+            ${generationDurationSlider(capability.durations, settings.duration)}
+            ${generationChoiceGroup('resolution', '分辨率', capability.resolutions, settings.resolution)}
+            ${capability.supportsAudio ? generationChoiceGroup('generateAudio', '生成声音', [true, false], settings.generateAudio, value => value ? '开启' : '关闭') : ''}
+            ${capability.supportsLastFrame ? generationChoiceGroup('returnLastFrame', '返回尾帧', [true, false], settings.returnLastFrame, value => value ? '开启' : '关闭') : ''}
+            ${capability.supportsWatermark ? generationChoiceGroup('watermark', '水印', [true, false], settings.watermark, value => value ? '开启' : '关闭') : ''}
         </div>`;
+    }
+
+    function applyGenerationSettingChoice(node, name, rawValue) {
+        const current = generationSettingsForNode(node);
+        if (node.type === 'image') {
+            const allowed = new Set(['ratio', 'size', 'count']);
+            if (!allowed.has(name)) return false;
+            node.data = {
+                ...node.data,
+                imageSettings: {
+                    ratio: name === 'ratio' ? rawValue : current.ratio,
+                    size: name === 'size' ? rawValue : current.size,
+                    count: name === 'count' ? Number(rawValue) : current.count
+                }
+            };
+        } else if (node.type === 'video') {
+            const allowed = new Set(['ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark']);
+            if (!allowed.has(name)) return false;
+            const booleanValue = rawValue === 'true';
+            node.data = {
+                ...node.data,
+                videoSettings: {
+                    ratio: name === 'ratio' ? rawValue : current.ratio,
+                    duration: name === 'duration' ? Number(rawValue) : current.duration,
+                    resolution: name === 'resolution' ? rawValue : current.resolution,
+                    generateAudio: name === 'generateAudio' ? booleanValue : current.generateAudio,
+                    returnLastFrame: name === 'returnLastFrame' ? booleanValue : current.returnLastFrame,
+                    watermark: name === 'watermark' ? booleanValue : current.watermark
+                }
+            };
+        } else return false;
+        renderGenerationNodeControls(node.id);
+        scheduleCanvasSave(`${node.type}_settings_change`);
+        return true;
     }
 
     function refreshOpenGenerationSpecPopover(node) {
@@ -3323,6 +3432,50 @@
         </div>`;
     }
 
+    function imageResultActionsForNode(node, overrides = {}) {
+        if (node?.type !== 'image') return null;
+        const data = node.data || {};
+        const result = data.generationResult || {};
+        const imageUrl = data.originalUrl || overrides.imageUrl || data.imageUrl || data.previewImage
+            || result.original_url || result.originalUrl || result.image_url || result.imageUrl;
+        if (!imageUrl) return null;
+        return {
+            imageUrl,
+            downloadUrl: data.imageDownloadUrl || overrides.downloadUrl || data.originalUrl
+                || result.download_url || result.downloadUrl || imageUrl
+        };
+    }
+
+    function syncImageResultActionsTrigger(nodeEl, node, overrides = {}) {
+        const toolbar = nodeEl?.querySelector('.generation-node-toolbar');
+        const existing = toolbar?.querySelector('[data-generation-popover="result-actions"]');
+        if (existing && canvasRuntime.generationPopover?.anchor === existing) closeGenerationPopover();
+        existing?.remove();
+        const actions = imageResultActionsForNode(node, overrides);
+        if (!toolbar || !actions) return;
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'generation-command generation-task-more generation-icon-command';
+        trigger.dataset.generationPopover = 'result-actions';
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-label', '更多操作');
+        trigger.title = '更多操作';
+        trigger.textContent = '更多';
+        trigger._generationResultActions = actions;
+        toolbar.appendChild(trigger);
+    }
+
+    function renderImageResultActionsPopover(node, actionModel = null) {
+        const actions = actionModel || imageResultActionsForNode(node);
+        if (!actions) return '';
+        return `<div class="generation-popover-list generation-task-action-menu">
+            <a data-generated-image-action="open" href="${escapeHtml(actions.imageUrl)}" target="_blank" rel="noreferrer">打开原图</a>
+            <a data-generated-image-action="download" href="${escapeHtml(actions.downloadUrl)}" download>下载</a>
+            <button type="button" data-generated-image-action="regenerate" data-node-id="${escapeHtml(node.id)}">再次生成</button>
+            <button type="button" data-generated-image-action="create-video" data-node-id="${escapeHtml(node.id)}">生成视频</button>
+        </div>`;
+    }
+
     function closeGenerationPopover() {
         const state = canvasRuntime.generationPopover;
         if (!state) return;
@@ -3335,13 +3488,17 @@
         if (!state?.anchor?.isConnected || !state.element?.isConnected) return closeGenerationPopover();
         const gap = 6;
         const margin = 12;
+        const headerBottom = document.getElementById?.('header-bar')?.getBoundingClientRect().bottom || 0;
+        const safeTop = Math.max(margin, Math.ceil(headerBottom) + margin);
+        const maxHeight = Math.max(80, Math.min(560, window.innerHeight - safeTop - margin));
+        state.element.style.maxHeight = `${maxHeight}px`;
         const anchorRect = state.anchor.getBoundingClientRect();
         const popoverRect = state.element.getBoundingClientRect();
         const left = Math.min(Math.max(margin, anchorRect.left), window.innerWidth - popoverRect.width - margin);
         const below = anchorRect.bottom + gap;
         const top = below + popoverRect.height <= window.innerHeight - margin
             ? below
-            : Math.max(margin, anchorRect.top - popoverRect.height - gap);
+            : Math.max(safeTop, anchorRect.top - popoverRect.height - gap);
         state.element.style.left = `${left}px`;
         state.element.style.top = `${top}px`;
     }
@@ -3360,8 +3517,9 @@
         element.innerHTML = kind === 'mode' ? renderModePopover(node)
             : kind === 'spec' ? renderSpecPopover(node)
                 : kind === 'camera' ? renderCameraPopover(node)
-                    : kind === 'task-actions' ? renderVideoTaskActionsPopover(node, anchor._generationTaskActions)
-                        : '';
+                    : kind === 'result-actions' ? renderImageResultActionsPopover(node, anchor._generationResultActions)
+                        : kind === 'task-actions' ? renderVideoTaskActionsPopover(node, anchor._generationTaskActions)
+                            : '';
         document.body.appendChild(element);
         anchor.setAttribute('aria-expanded', 'true');
         canvasRuntime.generationPopover = { nodeId, kind, anchor, element };
@@ -3440,16 +3598,16 @@
 
     function setNodeGenerationStatus(nodeEl, state, message) {
         if (!nodeEl) return;
-        const panel = nodeEl.querySelector('.node-input-bar, .node-video-props, .node-image-props');
-        if (!panel) return;
-        let status = panel.querySelector('.node-generation-status');
+        const card = nodeEl.querySelector('.node-card');
+        if (!card) return;
+        let status = card.querySelector(':scope > .node-generation-status');
         if (!message) {
             status?.remove();
             return;
         }
         if (!status) {
             status = document.createElement('div');
-            panel.prepend(status);
+            card.append(status);
         }
         status.className = `node-generation-status ${state || 'info'}`;
         status.textContent = message;
@@ -4171,38 +4329,39 @@
         applyCameraPreset(nodeEl, node, preset.dataset.generationCameraPreset);
     });
 
-    document.addEventListener('change', event => {
-        const control = event.target.closest('[data-generation-setting]');
-        const panel = control?.closest('[data-generation-settings]');
+    document.addEventListener('click', event => {
+        const choice = event.target.closest('[data-generation-setting-choice]');
         const state = canvasRuntime.generationPopover;
-        if (!control || !panel || !state?.element.contains(control)) return;
+        if (!choice || state?.kind !== 'spec' || !state.element?.contains(choice)) return;
         const node = engine.nodes.get(state.nodeId);
-        if (!node || panel.dataset.generationSettings !== node.type) return;
+        const panel = choice.closest('[data-generation-settings]');
+        if (!node || panel?.dataset.generationSettings !== node.type) return;
+        event.preventDefault();
+        event.stopPropagation();
+        applyGenerationSettingChoice(
+            node,
+            choice.dataset.generationSettingChoice,
+            choice.dataset.generationValue
+        );
+    });
 
-        const ratio = panel.querySelector('[data-generation-setting="ratio"]')?.value || '16:9';
-        if (node.type === 'image') {
-            const size = panel.querySelector('[data-generation-setting="size"]')?.value || '1K';
-            const count = Number(panel.querySelector('[data-generation-setting="count"]')?.value || 1);
-            node.data = {
-                ...node.data,
-                imageSettings: { ratio, size, count }
-            };
-            scheduleCanvasSave('image_settings_change');
-        } else if (node.type === 'video') {
-            node.data = {
-                ...node.data,
-                videoSettings: {
-                    ratio,
-                    duration: Number(panel.querySelector('[data-generation-setting="duration"]')?.value || 5),
-                    resolution: panel.querySelector('[data-generation-setting="resolution"]')?.value || '720p',
-                    generateAudio: panel.querySelector('[data-generation-setting="generateAudio"]')?.checked === true,
-                    returnLastFrame: panel.querySelector('[data-generation-setting="returnLastFrame"]')?.checked === true,
-                    watermark: panel.querySelector('[data-generation-setting="watermark"]')?.checked === true
-                }
-            };
-            scheduleCanvasSave('video_settings_change');
-        }
-        renderGenerationNodeControls(node.id);
+    document.addEventListener('input', event => {
+        const slider = event.target.closest?.('[data-generation-duration-slider]');
+        const state = canvasRuntime.generationPopover;
+        if (!slider || state?.kind !== 'spec' || !state.element?.contains(slider)) return;
+        syncGenerationDurationSlider(slider);
+    });
+
+    document.addEventListener('change', event => {
+        const slider = event.target.closest?.('[data-generation-duration-slider]');
+        const state = canvasRuntime.generationPopover;
+        if (!slider || state?.kind !== 'spec' || !state.element?.contains(slider)) return;
+        const node = engine.nodes.get(state.nodeId);
+        const panel = slider.closest('[data-generation-settings]');
+        if (!node || node.type !== 'video' || panel?.dataset.generationSettings !== 'video') return;
+        const duration = syncGenerationDurationSlider(slider);
+        if (duration === null) return;
+        applyGenerationSettingChoice(node, 'duration', String(duration));
     });
 
     document.addEventListener('click', event => {
@@ -5898,27 +6057,14 @@
         const resultRegion = nodeEl?.querySelector('[data-generation-result-region]');
         if (!resultRegion) return;
         const node = engine.nodes.get(nodeId);
-        const imageActions = options.imageUrl ? `
-            <div class="generated-action-row generated-image-actions">
-                <a data-generated-image-action="open" href="${escapeHtml(options.imageUrl)}" target="_blank" rel="noreferrer">打开原图</a>
-                <a data-generated-image-action="download" href="${escapeHtml(options.downloadUrl || options.imageUrl)}" download>下载</a>
-                <button type="button" data-generated-image-action="regenerate" data-node-id="${escapeHtml(nodeId)}">再次生成</button>
-                <button type="button" data-generated-image-action="create-video" data-node-id="${escapeHtml(nodeId)}">生成视频</button>
-            </div>` : '';
         window.UltimateCanvasGenerationInteractions.updateGenerationResultRegion(nodeEl, `
             <div class="generated-reference-card">
-                <button class="prompt-card-expand" data-prompt-expand title="展开提示词">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
-                </button>
-                <div>
-                    <strong>${escapeHtml(title)}</strong>
-                    <p>${escapeHtml(description)}</p>
-                </div>
+                <strong class="generated-result-title">${escapeHtml(title)}</strong>
                 ${previewImage
                     ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}" draggable="false">`
-                    : '<div class="generated-frame-lines"></div>'}
-                ${imageActions}
+                    : '<div class="generated-result-placeholder" aria-hidden="true"></div>'}
             </div>`);
+        syncImageResultActionsTrigger(nodeEl, node, options);
         if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
     }
 

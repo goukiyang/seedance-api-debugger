@@ -320,10 +320,10 @@ assert.ok(
   index.indexOf('video-card-workflow.js') < index.indexOf('app.js'),
   'workflow loads before app',
 );
-assert.match(index, /styles\.css\?v=20260715-generated-image-drag/);
+assert.match(index, /styles\.css\?v=20260826-canvas-module-refresh/);
 assert.match(index, /video-card-workflow\.js\?v=20260711-video-card-complete/);
 assert.match(index, /generation-node-workflow\.js\?v=20260813-video-delivery/);
 assert.match(index, /generation-task-coordinator\.js\?v=20260813-video-delivery/);
-assert.match(index, /app\.js\?v=20260813-video-delivery/);
+assert.match(index, /app\.js\?v=20260826-canvas-module-refresh/);
 
 console.log('ultimate-canvas-video-card-workflow-smoke passed');

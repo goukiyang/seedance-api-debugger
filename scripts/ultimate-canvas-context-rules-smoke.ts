@@ -29,9 +29,9 @@ assert.match(cssSource, /\.is-canvas-admin \.node-type-text \.context-rules-butt
 assert.match(cssSource, /\.context-rules-button\.has-rules/);
 assert.match(cssSource, /\.context-rules-modal/);
 
-assert.match(indexSource, /styles\.css\?v=20260715-generated-image-drag/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260715-generated-image-drag/);
-assert.match(indexSource, /app\.js\?v=20260715-generated-image-drag/);
+assert.match(indexSource, /styles\.css\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /app\.js\?v=20260826-canvas-module-refresh/);
 
 assert.match(routeSource, /const rawContextRules =/);
 assert.match(routeSource, /const contextRules = user\.role === 'admin' \? rawContextRules : ''/);
