@@ -57,6 +57,11 @@ type LibraryItem = {
   model: string | null;
   provider: string | null;
   generationMode: string | null;
+  providerCostCurrency: string | null;
+  providerOfficialAmountMinor: number | null;
+  providerFinalAmountMinor: number | null;
+  providerOfficialAmountMicros: number | null;
+  providerFinalAmountMicros: number | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -180,6 +185,11 @@ async function serializeTask(task: {
   resolution: string | null;
   model: string;
   video_card_id: string | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
   params_json: string | null;
   retention_status: string;
   created_at: Date;
@@ -239,6 +249,11 @@ async function serializeTask(task: {
     model: task.model,
     provider: task.provider,
     generationMode: task.generation_mode,
+    providerCostCurrency: task.provider_cost_currency,
+    providerOfficialAmountMinor: task.provider_official_amount_minor,
+    providerFinalAmountMinor: task.provider_final_amount_minor,
+    providerOfficialAmountMicros: task.provider_official_amount_micros,
+    providerFinalAmountMicros: task.provider_final_amount_micros,
     videoCardId: task.video_card_id,
     isEnhanceTask,
     canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
@@ -298,6 +313,11 @@ function serializeAsset(asset: {
     model: null,
     provider: null,
     generationMode: null,
+    providerCostCurrency: null,
+    providerOfficialAmountMinor: null,
+    providerFinalAmountMinor: null,
+    providerOfficialAmountMicros: null,
+    providerFinalAmountMicros: null,
     videoCardId: null,
     isEnhanceTask: false,
     canEnhanceVideo: false,
@@ -351,6 +371,11 @@ function serializeReferenceImage(image: {
     model: null,
     provider: null,
     generationMode: null,
+    providerCostCurrency: null,
+    providerOfficialAmountMinor: null,
+    providerFinalAmountMinor: null,
+    providerOfficialAmountMicros: null,
+    providerFinalAmountMicros: null,
     videoCardId: null,
     isEnhanceTask: false,
     canEnhanceVideo: false,
@@ -500,6 +525,11 @@ async function loadVideoItems(options: {
         resolution: true,
         model: true,
         video_card_id: true,
+        provider_cost_currency: true,
+        provider_official_amount_minor: true,
+        provider_final_amount_minor: true,
+        provider_official_amount_micros: true,
+        provider_final_amount_micros: true,
         params_json: true,
         retention_status: true,
         created_at: true,

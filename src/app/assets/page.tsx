@@ -105,6 +105,11 @@ type AssetLibraryItem = {
   model: string | null;
   provider: string | null;
   generationMode: string | null;
+  providerCostCurrency: string | null;
+  providerOfficialAmountMinor: number | null;
+  providerFinalAmountMinor: number | null;
+  providerOfficialAmountMicros: number | null;
+  providerFinalAmountMicros: number | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -365,6 +370,28 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
     parts.push(formatAssetUploadBytes(item.fileSize || 0) || '音频素材');
   }
   return parts.join(' · ');
+}
+
+function formatUsdCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
+  if (item.kind !== 'video' || item.source !== 'video_task') return '';
+  if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return '';
+  const amountMicros = item.providerFinalAmountMicros ?? item.providerOfficialAmountMicros;
+  const amountMinor = item.providerFinalAmountMinor ?? item.providerOfficialAmountMinor;
+  const amount = amountMicros !== null && amountMicros !== undefined
+    ? amountMicros / 1_000_000
+    : amountMinor !== null && amountMinor !== undefined
+      ? amountMinor / 100
+      : null;
+  if (amount === null || !Number.isFinite(amount) || amount < 0) return '';
+  const formatted = amount > 0 && amount < 0.01
+    ? '< $0.01 USD'
+    : new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount);
+  return `实扣 ${formatted}${formatted.includes('USD') ? '' : ' USD'}`;
 }
 
 function isFastPathAssetVideo(item: AssetLibraryItem) {
@@ -1814,6 +1841,7 @@ function AssetsPageContent() {
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
                 const specText = formatAssetSpec(item);
+                const usdCostBadge = formatUsdCostBadge(item);
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
@@ -1858,10 +1886,19 @@ function AssetsPageContent() {
                       ) : (
                         <span className="asset-card-empty">{mediaFallbackLabel(item)}</span>
                       )}
-                      {enhanceStateLabel && (
-                        <span className="asset-card-badge asset-card-badge-enhance">
-                          <Sparkles size={12} aria-hidden="true" />
-                          {enhanceStateLabel}
+                      {(usdCostBadge || enhanceStateLabel) && (
+                        <span className="asset-card-top-left-badges">
+                          {usdCostBadge && (
+                            <span className="asset-card-badge asset-card-cost-badge">
+                              {usdCostBadge}
+                            </span>
+                          )}
+                          {enhanceStateLabel && (
+                            <span className="asset-card-badge asset-card-badge-enhance">
+                              <Sparkles size={12} aria-hidden="true" />
+                              {enhanceStateLabel}
+                            </span>
+                          )}
                         </span>
                       )}
                       {duration && <span className="asset-card-duration">{duration}</span>}

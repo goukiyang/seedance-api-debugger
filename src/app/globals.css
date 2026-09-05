@@ -17712,6 +17712,31 @@ body.compare-fullscreen-open {
   font-weight: 850;
 }
 
+.asset-card-top-left-badges {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  max-width: calc(100% - 16px);
+  pointer-events: none;
+}
+
+.asset-card-top-left-badges .asset-card-badge {
+  position: static;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.asset-card-cost-badge {
+  color: oklch(0.98 0.012 92);
+  background: oklch(0.2 0.035 92 / 0.88);
+  box-shadow: 0 6px 20px oklch(0.08 0.01 250 / 0.3);
+}
+
 .asset-card-badge-enhance {
   color: oklch(0.98 0.014 188);
   background: linear-gradient(135deg, oklch(0.52 0.14 188 / 0.96), oklch(0.48 0.12 232 / 0.94));

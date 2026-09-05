@@ -100,6 +100,24 @@ function main() {
     '资产卡片列表视图不能再单独显示项目和日期第三行，避免卡片信息分行过多',
   );
   assert(
+    assetsPage.includes('function formatUsdCostBadge')
+      && assetsPage.includes("item.providerCostCurrency?.trim().toUpperCase() !== 'USD'")
+      && assetsPage.includes('providerFinalAmountMicros')
+      && assetsPage.includes('providerOfficialAmountMicros')
+      && assetsPage.includes('className="asset-card-badge asset-card-cost-badge"')
+      && assetsPage.includes('const usdCostBadge = formatUsdCostBadge(item)')
+      && !assetsPage.includes('function formatActualCost')
+      && !assetsPage.includes('return `实扣 ${amount} 点`'),
+    '资产卡片实际扣费必须使用 Provider USD 官方成本，并显示在视频缩略图左上角，不能把平台点数放进下方信息',
+  );
+  assert(
+    globalCss.includes('.asset-card-top-left-badges')
+      && globalCss.includes('.asset-card-cost-badge')
+      && globalCss.includes('top: 8px;')
+      && globalCss.includes('left: 8px;'),
+    '资产卡片 USD 成本角标必须定位在视频缩略图左上角',
+  );
+  assert(
     globalCss.includes('@media (max-width: 980px)')
       && globalCss.includes('.composer-topbar-nav {\n    display: none;')
       && globalCss.includes('.composer-topbar-credit {\n    display: none;')
@@ -146,6 +164,13 @@ function main() {
       && assetLibraryRoute.includes('includeUploads\n        ? loadAssetItems')
       && assetLibraryRoute.includes("include_uploads: includeUploads"),
     '/api/assets/library 必须默认排除自己上传素材，并只在 include_uploads=true 时返回',
+  );
+  assert(
+    assetLibraryRoute.includes('providerCostCurrency: string | null')
+      && assetLibraryRoute.includes('provider_cost_currency: true')
+      && assetLibraryRoute.includes('providerOfficialAmountMicros: task.provider_official_amount_micros')
+      && !assetLibraryRoute.includes('actualCost: task.actual_cost'),
+    '/api/assets/library 必须透出 Provider 官方 USD 成本字段给视频角标，不能把平台点数 actual_cost 当美金',
   );
   assert(
     assetLibraryRoute.includes("const thumbnailUrl = asset.type === 'image'")
