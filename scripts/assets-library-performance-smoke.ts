@@ -106,16 +106,20 @@ function main() {
       && assetsPage.includes('providerOfficialAmountMicros')
       && assetsPage.includes('className="asset-card-badge asset-card-cost-badge"')
       && assetsPage.includes('const usdCostBadge = formatUsdCostBadge(item)')
+      && assetsPage.includes("'< $0.01'")
+      && !assetsPage.includes('return `实扣 ')
+      && !assetsPage.includes("'' : ' USD'")
       && !assetsPage.includes('function formatActualCost')
       && !assetsPage.includes('return `实扣 ${amount} 点`'),
-    '资产卡片实际扣费必须使用 Provider USD 官方成本，并显示在视频缩略图左上角，不能把平台点数放进下方信息',
+    '资产卡片实际扣费必须使用 Provider USD 官方成本，并显示纯美元金额，不能带“实扣”或“USD”文案，也不能把平台点数放进下方信息',
   );
   assert(
-    globalCss.includes('.asset-card-top-left-badges')
+    globalCss.includes('.asset-card-top-right-badges')
       && globalCss.includes('.asset-card-cost-badge')
       && globalCss.includes('top: 8px;')
-      && globalCss.includes('left: 8px;'),
-    '资产卡片 USD 成本角标必须定位在视频缩略图左上角',
+      && globalCss.includes('right: 8px;')
+      && !globalCss.includes('.asset-card-top-left-badges'),
+    '资产卡片 USD 成本角标必须定位在视频缩略图右上角',
   );
   assert(
     globalCss.includes('@media (max-width: 980px)')

@@ -383,15 +383,14 @@ function formatUsdCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'pr
       ? amountMinor / 100
       : null;
   if (amount === null || !Number.isFinite(amount) || amount < 0) return '';
-  const formatted = amount > 0 && amount < 0.01
-    ? '< $0.01 USD'
+  return amount > 0 && amount < 0.01
+    ? '< $0.01'
     : new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }).format(amount);
-  return `实扣 ${formatted}${formatted.includes('USD') ? '' : ' USD'}`;
 }
 
 function isFastPathAssetVideo(item: AssetLibraryItem) {
@@ -1887,7 +1886,7 @@ function AssetsPageContent() {
                         <span className="asset-card-empty">{mediaFallbackLabel(item)}</span>
                       )}
                       {(usdCostBadge || enhanceStateLabel) && (
-                        <span className="asset-card-top-left-badges">
+                        <span className="asset-card-top-right-badges">
                           {usdCostBadge && (
                             <span className="asset-card-badge asset-card-cost-badge">
                               {usdCostBadge}

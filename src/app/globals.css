@@ -17712,20 +17712,20 @@ body.compare-fullscreen-open {
   font-weight: 850;
 }
 
-.asset-card-top-left-badges {
+.asset-card-top-right-badges {
   position: absolute;
   z-index: 4;
   top: 8px;
-  left: 8px;
+  right: 8px;
   display: inline-flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 5px;
   max-width: calc(100% - 16px);
   pointer-events: none;
 }
 
-.asset-card-top-left-badges .asset-card-badge {
+.asset-card-top-right-badges .asset-card-badge {
   position: static;
   max-width: 100%;
   white-space: nowrap;
