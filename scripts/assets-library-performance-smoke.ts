@@ -100,15 +100,6 @@ function main() {
     '资产卡片列表视图不能再单独显示项目和日期第三行，避免卡片信息分行过多',
   );
   assert(
-    assetsPage.includes('actualCost: number | null')
-      && assetsPage.includes('function formatActualCost')
-      && assetsPage.includes('return `实扣 ${amount} 点`')
-      && assetsPage.includes('function formatAssetCardInfo')
-      && assetsPage.includes('const specText = formatAssetCardInfo(item)')
-      && !assetsPage.includes('<dt>实际扣费</dt>'),
-    '资产卡片必须把实际扣费并入下方规格信息，同排显示，不能在详情或卡片里新增单独扣费行',
-  );
-  assert(
     globalCss.includes('@media (max-width: 980px)')
       && globalCss.includes('.composer-topbar-nav {\n    display: none;')
       && globalCss.includes('.composer-topbar-credit {\n    display: none;')
@@ -155,12 +146,6 @@ function main() {
       && assetLibraryRoute.includes('includeUploads\n        ? loadAssetItems')
       && assetLibraryRoute.includes("include_uploads: includeUploads"),
     '/api/assets/library 必须默认排除自己上传素材，并只在 include_uploads=true 时返回',
-  );
-  assert(
-    assetLibraryRoute.includes('actualCost: number | null')
-      && assetLibraryRoute.includes('actual_cost: true')
-      && assetLibraryRoute.includes('actualCost: task.actual_cost'),
-    '/api/assets/library 必须把 videoTask.actual_cost 作为只读字段透出给资产卡片显示真实扣点',
   );
   assert(
     assetLibraryRoute.includes("const thumbnailUrl = asset.type === 'image'")

@@ -105,7 +105,6 @@ type AssetLibraryItem = {
   model: string | null;
   provider: string | null;
   generationMode: string | null;
-  actualCost: number | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -366,22 +365,6 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
     parts.push(formatAssetUploadBytes(item.fileSize || 0) || '音频素材');
   }
   return parts.join(' · ');
-}
-
-function formatActualCost(value: number | null | undefined) {
-  if (value === null || value === undefined) return '';
-  if (!Number.isFinite(value) || value < 0) return '';
-  const amount = new Intl.NumberFormat('zh-CN', {
-    maximumFractionDigits: 2,
-  }).format(value);
-  return `实扣 ${amount} 点`;
-}
-
-function formatAssetCardInfo(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'duration' | 'ratio' | 'fileSize' | 'model' | 'actualCost'>) {
-  return [
-    formatAssetSpec(item),
-    formatActualCost(item.actualCost),
-  ].filter(Boolean).join(' · ');
 }
 
 function isFastPathAssetVideo(item: AssetLibraryItem) {
@@ -1830,7 +1813,7 @@ function AssetsPageContent() {
                 const selected = selectedSet.has(item.id);
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
-                const specText = formatAssetCardInfo(item);
+                const specText = formatAssetSpec(item);
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
