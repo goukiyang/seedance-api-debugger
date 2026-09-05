@@ -14,15 +14,21 @@ export const dynamic = 'force-dynamic';
 function serializeTaskListItem<T extends {
   id: string;
   local_status: string | null;
+  user_id?: string | null;
+  owner_user_id?: string | null;
+  retention_status?: string | null;
   public_video_url?: string | null;
   local_video_path?: string | null;
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   delivery_status?: string | null;
   error_message?: string | null;
-}>(task: T) {
+}>(task: T, currentUserId: string) {
+  const ownerId = task.owner_user_id || task.user_id || null;
+
   return {
     ...task,
+    can_delete: Boolean(ownerId && ownerId === currentUserId && task.retention_status !== 'admin_hidden'),
     error_message: task.local_status === 'failed'
       ? visibleProviderErrorMessage(task.error_message)
       : task.error_message,
@@ -129,7 +135,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      tasks: tasks.map(serializeTaskListItem),
+      tasks: tasks.map((task) => serializeTaskListItem(task, user.id)),
       pagination: {
         page,
         limit,

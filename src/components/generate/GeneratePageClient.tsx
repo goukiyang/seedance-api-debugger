@@ -91,6 +91,7 @@ interface TaskItem {
   selected_agent_plan_key?: string | null;
   prompt_user_edited?: boolean;
   generation_template?: { id: string; name: string; template_key: string; version: string } | null;
+  can_delete?: boolean;
   created_at: string;
 }
 
@@ -436,6 +437,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [recentTasksLoadingInitial, setRecentTasksLoadingInitial] = useState(true);
   const [recentTasksLoadingMore, setRecentTasksLoadingMore] = useState(false);
   const [recentTasksError, setRecentTasksError] = useState('');
+  const [deletingRecentTaskId, setDeletingRecentTaskId] = useState<string | null>(null);
   const recentTasksSentinelRef = useRef<HTMLDivElement | null>(null);
   const recentTasksLoadingRef = useRef(false);
   const recentTasksPageRef = useRef(0);
@@ -1214,6 +1216,31 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     void loadRecentTasksPage(page, mode);
   }, [loadRecentTasksPage, recentTasks.length]);
 
+  const deleteRecentTask = useCallback(async (task: TaskItem) => {
+    if (isIpSurface || task.can_delete === false || deletingRecentTaskId) return;
+    const confirmed = window.confirm('从最近生成移除此记录？视频文件不会物理删除，管理员仍可在留存区审计和恢复。');
+    if (!confirmed) return;
+
+    setDeletingRecentTaskId(task.id);
+    setRecentTasksError('');
+    try {
+      const response = await fetch(`/api/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '用户从最近生成移除' }),
+      });
+      const data = await readJsonResponse<{ error?: string; message?: string }>(response);
+      if (!response.ok) throw new Error(data.message || data.error || '最近生成删除失败');
+      setRecentTasks((current) => current.filter((item) => item.id !== task.id));
+      setActivePollingTaskIds((current) => current.filter((taskId) => taskId !== task.id));
+      setPolledResult((current) => current?.id === task.id ? null : current);
+    } catch (err) {
+      setRecentTasksError(err instanceof Error ? err.message : '最近生成删除失败');
+    } finally {
+      setDeletingRecentTaskId(null);
+    }
+  }, [deletingRecentTaskId, isIpSurface]);
+
   useEffect(() => {
     void loadRecentTasksPage(1, 'replace');
   }, [loadRecentTasksPage]);
@@ -1555,6 +1582,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           selected_agent_plan_key: data.selected_agent_plan_key || null,
           prompt_user_edited: params.promptUserEdited === true,
           generation_template: null,
+          can_delete: !isIpSurface,
           video_card: {
             id: readyVideoCard.id,
             title: readyVideoCard.title,
@@ -2179,6 +2207,22 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                       key={task.id}
                       className="composer-task-card"
                     >
+                      {!isIpSurface && task.can_delete !== false && (
+                        <button
+                          type="button"
+                          className="composer-task-card-delete"
+                          disabled={deletingRecentTaskId === task.id}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void deleteRecentTask(task);
+                          }}
+                          aria-label="从最近生成移除"
+                          title="从最近生成移除"
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </button>
+                      )}
                       <Link href={taskDetailHref(task.id, surfaceConfig.routePath)} className="composer-task-card-link">
 	                        <TaskVideoThumbnail
 	                          taskId={task.id}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Check, ChevronDown, Folder, Plus } from 'lucide-react';
+import { Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
@@ -23,7 +23,7 @@ import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
-import { orderRecentTaskCards } from '@/lib/video/recent-task-card-order';
+import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
 
@@ -112,12 +112,15 @@ type TaskItem = {
   selected_agent_plan_key?: string | null;
   prompt_user_edited?: boolean;
   generation_template?: { id: string; name: string; template_key: string; version: string } | null;
+  can_delete?: boolean;
   created_at: string;
 };
 
 const PROJECT_STORAGE_KEY = 'template_generate_project_id';
 const VIDEO_CARD_STORAGE_KEY = 'template_generate_video_card_by_project_v1';
 const RECENT_TASK_PAGE_SIZE = 12;
+const RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES = 4;
+const RECENT_TASK_INITIAL_MIN_VISUALS = 6;
 const MAX_ACTIVE_POLLING_TASKS = 12;
 const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
 
@@ -279,6 +282,7 @@ export function TemplateGenerateClient() {
   const [recentTasksLoadingInitial, setRecentTasksLoadingInitial] = useState(true);
   const [recentTasksLoadingMore, setRecentTasksLoadingMore] = useState(false);
   const [recentTasksError, setRecentTasksError] = useState('');
+  const [deletingRecentTaskId, setDeletingRecentTaskId] = useState<string | null>(null);
 
   const h3Ready = h3VideoConfig?.ready === true && h3VideoConfig.preset_options.length > 0;
   const selectedH3Preset = h3VideoConfig?.preset_options.find((option) => option.id === h3VideoConfig.default_preset_id)
@@ -580,22 +584,53 @@ export function TemplateGenerateClient() {
     if (mode === 'append') setRecentTasksLoadingMore(true);
     setRecentTasksError('');
     try {
-      const response = await fetch(`/api/video/list?page=${page}&limit=${RECENT_TASK_PAGE_SIZE}`, { cache: 'no-store' });
-      if (response.status === 401) {
-        window.location.href = '/login?next=/template-generate';
-        return;
+      const fetchPage = async (targetPage: number) => {
+        const response = await fetch(`/api/video/list?page=${targetPage}&limit=${RECENT_TASK_PAGE_SIZE}`, { cache: 'no-store' });
+        if (response.status === 401) {
+          window.location.href = '/login?next=/template-generate';
+          return null;
+        }
+        const data = await readJsonResponse<{
+          tasks?: TaskItem[];
+          pagination?: { page?: number; total_pages?: number };
+          error?: string;
+          message?: string;
+        }>(response);
+        if (!response.ok) throw new Error(data.message || data.error || '最近任务加载失败');
+        const pagination = data.pagination || {};
+        const currentPage = Number(pagination.page || targetPage);
+        return {
+          tasks: Array.isArray(data.tasks) ? data.tasks as TaskItem[] : [],
+          currentPage,
+          totalPages: Number(pagination.total_pages || currentPage),
+        };
+      };
+
+      const firstPage = await fetchPage(page);
+      if (!firstPage) return;
+      let tasks = firstPage.tasks;
+      let currentPage = firstPage.currentPage;
+      let totalPages = firstPage.totalPages;
+      if (mode === 'replace') {
+        let visualCount = tasks.filter(recentTaskHasVisualPreview).length;
+        let fetchedPages = 1;
+        while (
+          visualCount < RECENT_TASK_INITIAL_MIN_VISUALS
+          && fetchedPages < RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES
+          && currentPage < totalPages
+        ) {
+          const nextPage = await fetchPage(currentPage + 1);
+          if (!nextPage) return;
+          tasks = [
+            ...tasks,
+            ...nextPage.tasks.filter((task) => !tasks.some((item) => item.id === task.id)),
+          ];
+          currentPage = nextPage.currentPage;
+          totalPages = nextPage.totalPages;
+          visualCount = tasks.filter(recentTaskHasVisualPreview).length;
+          fetchedPages += 1;
+        }
       }
-      const data = await readJsonResponse<{
-        tasks?: TaskItem[];
-        pagination?: { page?: number; total_pages?: number };
-        error?: string;
-        message?: string;
-      }>(response);
-      if (!response.ok) throw new Error(data.message || data.error || '最近任务加载失败');
-      const tasks = Array.isArray(data.tasks) ? data.tasks as TaskItem[] : [];
-      const pagination = data.pagination || {};
-      const currentPage = Number(pagination.page || page);
-      const totalPages = Number(pagination.total_pages || currentPage);
       const hasMore = currentPage < totalPages;
       const pollableTaskIds = collectPollableTaskIds(tasks);
       setRecentTasks((current) => mode === 'append' ? [...current, ...tasks.filter((task) => !current.some((item) => item.id === task.id))] : tasks);
@@ -623,6 +658,31 @@ export function TemplateGenerateClient() {
     if (recentTasksLoadingRef.current || !recentTasksHasMoreRef.current) return;
     void loadRecentTasksPage(recentTasksPageRef.current + 1, 'append');
   }, [loadRecentTasksPage]);
+
+  const deleteRecentTask = useCallback(async (task: TaskItem) => {
+    if (task.can_delete === false || deletingRecentTaskId) return;
+    const confirmed = window.confirm('从最近生成移除此记录？视频文件不会物理删除，管理员仍可在留存区审计和恢复。');
+    if (!confirmed) return;
+
+    setDeletingRecentTaskId(task.id);
+    setRecentTasksError('');
+    try {
+      const response = await fetch(`/api/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '用户从最近生成移除' }),
+      });
+      const data = await readJsonResponse<{ error?: string; message?: string }>(response);
+      if (!response.ok) throw new Error(data.message || data.error || '最近生成删除失败');
+      setRecentTasks((current) => current.filter((item) => item.id !== task.id));
+      setActivePollingTaskIds((current) => current.filter((taskId) => taskId !== task.id));
+      setPolledResult((current) => current?.id === task.id ? null : current);
+    } catch (error) {
+      setRecentTasksError(error instanceof Error ? error.message : '最近生成删除失败');
+    } finally {
+      setDeletingRecentTaskId(null);
+    }
+  }, [deletingRecentTaskId]);
 
   useEffect(() => {
     const sentinel = recentTasksSentinelRef.current;
@@ -917,6 +977,7 @@ export function TemplateGenerateClient() {
           selected_agent_plan_key: data.selected_agent_plan_key || params.selectedAgentPlanKey || null,
           prompt_user_edited: params.promptUserEdited === true,
           generation_template: null,
+          can_delete: true,
           video_card: {
             id: selectedCard.id,
             title: selectedCard.title,
@@ -1183,6 +1244,22 @@ export function TemplateGenerateClient() {
                   const taskErrorMessage = task.error_message?.trim();
                   return (
                     <article key={task.id} className="composer-task-card">
+                      {task.can_delete !== false && (
+                        <button
+                          type="button"
+                          className="composer-task-card-delete"
+                          disabled={deletingRecentTaskId === task.id}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void deleteRecentTask(task);
+                          }}
+                          aria-label="从最近生成移除"
+                          title="从最近生成移除"
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </button>
+                      )}
                       <Link href={taskDetailHref(task.id, '/template-generate')} className="composer-task-card-link">
                         <TaskVideoThumbnail
                           taskId={task.id}

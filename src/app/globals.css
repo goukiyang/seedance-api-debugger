@@ -7533,6 +7533,45 @@ body.compare-fullscreen-open {
   transform: translateY(-1px);
 }
 
+.composer-task-card-delete {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 8px;
+  color: rgba(254, 202, 202, 0.96);
+  cursor: pointer;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  transform: translateY(-4px);
+  transition: opacity 0.16s, transform 0.16s, background-color 0.16s, border-color 0.16s;
+  width: 30px;
+  z-index: 4;
+}
+
+.composer-task-card:hover .composer-task-card-delete,
+.composer-task-card:focus-within .composer-task-card-delete,
+.composer-task-card-delete:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.composer-task-card-delete:hover:not(:disabled) {
+  background: rgba(127, 29, 29, 0.82);
+  border-color: rgba(254, 202, 202, 0.72);
+}
+
+.composer-task-card-delete:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .composer-task-card-link {
   align-items: start;
   display: grid;
