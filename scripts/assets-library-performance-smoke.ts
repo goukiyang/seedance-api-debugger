@@ -100,18 +100,19 @@ function main() {
     '资产卡片列表视图不能再单独显示项目和日期第三行，避免卡片信息分行过多',
   );
   assert(
-    assetsPage.includes('function formatUsdCostBadge')
+    assetsPage.includes('function formatCnyCostBadge')
       && assetsPage.includes("item.providerCostCurrency?.trim().toUpperCase() !== 'USD'")
       && assetsPage.includes('providerFinalAmountMicros')
       && assetsPage.includes('providerOfficialAmountMicros')
+      && assetsPage.includes('costAmountToCnyEstimate({')
       && assetsPage.includes('className="asset-card-badge asset-card-cost-badge"')
-      && assetsPage.includes('const usdCostBadge = formatUsdCostBadge(item)')
-      && assetsPage.includes("'< $0.01'")
+      && assetsPage.includes('const cnyCostBadge = formatCnyCostBadge(item)')
       && !assetsPage.includes('return `实扣 ')
       && !assetsPage.includes("'' : ' USD'")
+      && !assetsPage.includes('const usdCostBadge = formatUsdCostBadge(item)')
       && !assetsPage.includes('function formatActualCost')
       && !assetsPage.includes('return `实扣 ${amount} 点`'),
-    '资产卡片实际扣费必须使用 Provider USD 官方成本，并显示纯美元金额，不能带“实扣”或“USD”文案，也不能把平台点数放进下方信息',
+    '资产卡片实际扣费必须使用 Provider USD 官方成本换算成人民币短金额，不能带“实扣”或“USD”文案，也不能把平台点数放进下方信息',
   );
   assert(
     assetsPage.includes("import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency'")

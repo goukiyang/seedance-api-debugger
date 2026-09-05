@@ -373,25 +373,21 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
   return parts.join(' · ');
 }
 
-function formatUsdCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
+function formatCnyCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
   if (item.kind !== 'video' || item.source !== 'video_task') return '';
   if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return '';
   const amountMicros = item.providerFinalAmountMicros ?? item.providerOfficialAmountMicros;
   const amountMinor = item.providerFinalAmountMinor ?? item.providerOfficialAmountMinor;
-  const amount = amountMicros !== null && amountMicros !== undefined
-    ? amountMicros / 1_000_000
-    : amountMinor !== null && amountMinor !== undefined
-      ? amountMinor / 100
-      : null;
-  if (amount === null || !Number.isFinite(amount) || amount < 0) return '';
-  return amount > 0 && amount < 0.01
-    ? '< $0.01'
-    : new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(amount);
+  const hasMicros = amountMicros !== null && amountMicros !== undefined;
+  const hasMinor = amountMinor !== null && amountMinor !== undefined;
+  if (!hasMicros && !hasMinor) return '';
+  const usdValue = hasMicros ? amountMicros / 1_000_000 : (amountMinor as number) / 100;
+  if (!Number.isFinite(usdValue) || usdValue < 0) return '';
+  return costAmountToCnyEstimate({
+    amount_micros: hasMicros ? amountMicros : null,
+    amount_minor: hasMicros ? null : amountMinor,
+    currency: item.providerCostCurrency,
+  });
 }
 
 function formatUsdDetailAmount(value: number, maxDigits: number) {
@@ -1879,7 +1875,7 @@ function AssetsPageContent() {
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
                 const specText = formatAssetSpec(item);
-                const usdCostBadge = formatUsdCostBadge(item);
+                const cnyCostBadge = formatCnyCostBadge(item);
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
@@ -1924,11 +1920,11 @@ function AssetsPageContent() {
                       ) : (
                         <span className="asset-card-empty">{mediaFallbackLabel(item)}</span>
                       )}
-                      {(usdCostBadge || enhanceStateLabel) && (
+                      {(cnyCostBadge || enhanceStateLabel) && (
                         <span className="asset-card-top-right-badges">
-                          {usdCostBadge && (
+                          {cnyCostBadge && (
                             <span className="asset-card-badge asset-card-cost-badge">
-                              {usdCostBadge}
+                              {cnyCostBadge}
                             </span>
                           )}
                           {enhanceStateLabel && (
