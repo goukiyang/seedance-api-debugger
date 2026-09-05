@@ -57,6 +57,7 @@ type LibraryItem = {
   model: string | null;
   provider: string | null;
   generationMode: string | null;
+  actualCost: number | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -180,6 +181,7 @@ async function serializeTask(task: {
   resolution: string | null;
   model: string;
   video_card_id: string | null;
+  actual_cost: number | null;
   params_json: string | null;
   retention_status: string;
   created_at: Date;
@@ -239,6 +241,7 @@ async function serializeTask(task: {
     model: task.model,
     provider: task.provider,
     generationMode: task.generation_mode,
+    actualCost: task.actual_cost,
     videoCardId: task.video_card_id,
     isEnhanceTask,
     canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
@@ -298,6 +301,7 @@ function serializeAsset(asset: {
     model: null,
     provider: null,
     generationMode: null,
+    actualCost: null,
     videoCardId: null,
     isEnhanceTask: false,
     canEnhanceVideo: false,
@@ -351,6 +355,7 @@ function serializeReferenceImage(image: {
     model: null,
     provider: null,
     generationMode: null,
+    actualCost: null,
     videoCardId: null,
     isEnhanceTask: false,
     canEnhanceVideo: false,
@@ -500,6 +505,7 @@ async function loadVideoItems(options: {
         resolution: true,
         model: true,
         video_card_id: true,
+        actual_cost: true,
         params_json: true,
         retention_status: true,
         created_at: true,
