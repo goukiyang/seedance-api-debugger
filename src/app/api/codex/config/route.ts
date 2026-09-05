@@ -29,6 +29,9 @@ export async function GET(request: NextRequest) {
         username: context.user.username,
         email: context.user.email,
         role: context.user.role,
+        account_type: context.user.account_type,
+        user_profile: context.user.user_profile,
+        feature_profile_id: context.user.feature_profile_id,
       },
       endpoints: {
         upload_asset: '/api/codex/assets/upload',

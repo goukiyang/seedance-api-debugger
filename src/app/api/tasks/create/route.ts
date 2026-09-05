@@ -605,7 +605,13 @@ export async function POST(request: NextRequest) {
     return errorJson('账号已被禁用，无法生成', 403);
   }
   try {
-    assertFeatureAllowed(user, 'standard_generate', '外部账号无权使用普通生成，请使用 IP 生成。');
+    // Codex API 绑定用户由后台管理员显式配置，允许内部普通服务账号
+    // 复用普通生成链路；普通邮箱网页登录仍继续走外部账号收口规则。
+    const isCodexInternalServiceUser = requestSource.source_type === 'codex_api'
+      && user.account_type === 'internal';
+    if (!isCodexInternalServiceUser) {
+      assertFeatureAllowed(user, 'standard_generate', '外部账号无权使用普通生成，请使用 IP 生成。');
+    }
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;
