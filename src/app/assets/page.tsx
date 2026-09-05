@@ -21,6 +21,7 @@ import {
 } from '@/lib/assets/library-cache';
 import { cacheSafeAssetUrl } from '@/lib/assets/library-cache-policy';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
 
 type AssetScope = 'history' | 'project' | 'user';
@@ -393,6 +394,43 @@ function formatUsdCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'pr
       }).format(amount);
 }
 
+function formatUsdDetailAmount(value: number, maxDigits: number) {
+  const fixed = value.toFixed(maxDigits);
+  const trimmed = fixed
+    .replace(/(\.\d*?[1-9])0+$/, '$1')
+    .replace(/\.0+$/, '.00');
+  const [integerPart, decimalPart = ''] = trimmed.split('.');
+  const normalizedDecimal = decimalPart.length >= 2
+    ? decimalPart
+    : decimalPart.padEnd(2, '0');
+  return `$${integerPart}.${normalizedDecimal} USD`;
+}
+
+function formatAssetCostBreakdown(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
+  if (item.kind !== 'video' || item.source !== 'video_task') return null;
+  if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return null;
+  const amountMicros = item.providerFinalAmountMicros ?? item.providerOfficialAmountMicros;
+  const amountMinor = item.providerFinalAmountMinor ?? item.providerOfficialAmountMinor;
+  const hasMicros = amountMicros !== null && amountMicros !== undefined;
+  const hasMinor = amountMinor !== null && amountMinor !== undefined;
+  if (!hasMicros && !hasMinor) return null;
+
+  const usdValue = hasMicros ? amountMicros / 1_000_000 : (amountMinor as number) / 100;
+  if (!Number.isFinite(usdValue) || usdValue < 0) return null;
+  const cny = costAmountToCnyEstimate({
+    amount_micros: hasMicros ? amountMicros : null,
+    amount_minor: hasMicros ? null : amountMinor,
+    currency: item.providerCostCurrency,
+  });
+  if (!cny) return null;
+
+  return {
+    usd: formatUsdDetailAmount(usdValue, hasMicros ? 6 : 2),
+    cny: `约 ${cny}`,
+    rate: usdToCnyRateText(),
+  };
+}
+
 function isFastPathAssetVideo(item: AssetLibraryItem) {
   return item.kind === 'video'
     && item.source === 'video_task'
@@ -659,6 +697,7 @@ function AssetsPageContent() {
     ? activeItem.kind === 'audio' ? '16 / 6' : detailMediaAspectRatio || getAssetPreviewAspectRatio(activeItem) || '16 / 10'
     : '16 / 10';
   const activePreviewIsPortrait = isPortraitAspectRatio(activePreviewAspectRatio);
+  const activeItemCostBreakdown = activeItem ? formatAssetCostBreakdown(activeItem) : null;
 
   const groupedItems = useMemo(() => {
     const groups = new Map<string, { key: string; label: string; owner: AssetLibraryItem['owner']; items: AssetLibraryItem[] }>();
@@ -2099,6 +2138,19 @@ function AssetsPageContent() {
               <div>{mediaFallbackLabel(activeItem)}</div>
             )}
           </div>
+          {activeItemCostBreakdown && (
+            <div className="asset-detail-cost-panel" aria-label="扣费金额">
+              <div>
+                <span>美金扣费</span>
+                <strong>{activeItemCostBreakdown.usd}</strong>
+              </div>
+              <div>
+                <span>人民币扣费</span>
+                <strong>{activeItemCostBreakdown.cny}</strong>
+              </div>
+              <small>{activeItemCostBreakdown.rate}</small>
+            </div>
+          )}
           <dl className="asset-detail-list">
             <div>
               <dt>状态</dt>

@@ -114,12 +114,30 @@ function main() {
     '资产卡片实际扣费必须使用 Provider USD 官方成本，并显示纯美元金额，不能带“实扣”或“USD”文案，也不能把平台点数放进下方信息',
   );
   assert(
+    assetsPage.includes("import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency'")
+      && assetsPage.includes('function formatAssetCostBreakdown')
+      && assetsPage.includes('const activeItemCostBreakdown = activeItem ? formatAssetCostBreakdown(activeItem) : null')
+      && assetsPage.includes('className="asset-detail-cost-panel"')
+      && assetsPage.includes('美金扣费')
+      && assetsPage.includes('人民币扣费')
+      && assetsPage.includes('activeItemCostBreakdown.usd')
+      && assetsPage.includes('activeItemCostBreakdown.cny')
+      && assetsPage.includes('activeItemCostBreakdown.rate'),
+    '资产详情抽屉预览区必须显示完整美金扣费和人民币扣费，并复用统一汇率 helper',
+  );
+  assert(
     globalCss.includes('.asset-card-top-right-badges')
       && globalCss.includes('.asset-card-cost-badge')
       && globalCss.includes('top: 8px;')
       && globalCss.includes('right: 8px;')
       && !globalCss.includes('.asset-card-top-left-badges'),
     '资产卡片 USD 成本角标必须定位在视频缩略图右上角',
+  );
+  assert(
+    globalCss.includes('.asset-detail-cost-panel')
+      && globalCss.includes('.asset-detail-cost-panel strong')
+      && globalCss.includes('.asset-detail-cost-panel small'),
+    '资产详情抽屉成本金额必须有独立样式，保证美金和人民币金额清晰可读',
   );
   assert(
     globalCss.includes('@media (max-width: 980px)')
