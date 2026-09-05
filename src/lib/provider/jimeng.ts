@@ -10,7 +10,7 @@
  */
 
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
-import { normalizeProviderErrorMessage } from './error-message';
+import { normalizeProviderErrorMessage, providerFailureUserMessage } from './error-message';
 import {
   DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
   SEEDANCE_VIDEO_MODEL_OPTIONS,
@@ -115,12 +115,15 @@ export function buildProviderHttpErrorStatus(
 
   const errorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
   if (!errorMessage) return null;
+  const userFacingError = providerFailureUserMessage(errorMessage, {
+    fallbackCode: 'PROVIDER_TASK_FAILED',
+  });
 
   return {
     provider_task_id: providerTaskId,
     provider_status: 'failed',
     local_status: 'failed',
-    error_message: errorMessage,
+    error_message: userFacingError.message,
     raw: data,
   };
 }
@@ -490,6 +493,9 @@ export async function getVideoTaskStatus(
 
     // 提取错误信息
     const errorMessage = normalizeProviderErrorMessage(data.error ?? data.message);
+    const userFacingErrorMessage = errorMessage
+      ? providerFailureUserMessage(errorMessage, { fallbackCode: 'PROVIDER_TASK_FAILED' }).message
+      : undefined;
 
     // 提取扩展字段
     const providerModel = data.model as string | undefined;
@@ -521,7 +527,7 @@ export async function getVideoTaskStatus(
       console.log(`   Billing:   ${actualCost ?? 'N/A'} ${currencyOrCreditType || ''} (${billingStatus || 'unknown'})\n`);
     } else if (localStatus === 'failed') {
       console.log(`\n❌ Step2 Complete: status = failed`);
-      console.log(`   Error: ${errorMessage || 'Unknown error'}\n`);
+      console.log(`   Error: ${userFacingErrorMessage || 'Unknown error'}\n`);
     } else {
       console.log(`\n⏳ Step2 Complete: status = ${officialStatus || 'unknown'} (${localStatus})\n`);
     }
@@ -532,7 +538,7 @@ export async function getVideoTaskStatus(
       local_status: localStatus,
       result_video_url: resultVideoUrl,
       result_last_frame_url: resultLastFrameUrl,
-      error_message: errorMessage,
+      error_message: userFacingErrorMessage,
       // 扩展字段
       provider_model: providerModel,
       seed: seed,

@@ -104,6 +104,71 @@ export function isProviderReferenceImagePrivacySensitiveError(message: string | 
     || lower.includes('参考图包含真实人物隐私');
 }
 
+export function isProviderOutputAudioCopyrightError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('outputaudiosensitivecontentdetected.policyviolation')
+    || (
+      lower.includes('output audio')
+      && lower.includes('copyright restriction')
+    )
+    || lower.includes('输出音频可能涉及版权限制');
+}
+
+export function isProviderOutputVideoCopyrightError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('outputvideosensitivecontentdetected.policyviolation')
+    || (
+      lower.includes('output video')
+      && lower.includes('copyright restriction')
+    )
+    || lower.includes('输出视频可能涉及版权限制');
+}
+
+export function isProviderOutputAudioSensitiveError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('outputaudiosensitivecontentdetected')
+    || (
+      lower.includes('output audio')
+      && lower.includes('sensitive information')
+    )
+    || lower.includes('输出音频可能包含敏感内容');
+}
+
+export function isProviderOutputVideoSensitiveError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('outputvideosensitivecontentdetected')
+    || (
+      lower.includes('output video')
+      && lower.includes('sensitive information')
+    )
+    || lower.includes('输出视频可能包含敏感内容');
+}
+
+export function isProviderContentPolicyError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('policyviolation')
+    || lower.includes('sensitivecontentdetected')
+    || lower.includes('content safety')
+    || lower.includes('copyright restriction')
+    || lower.includes('内容安全')
+    || lower.includes('版权审核');
+}
+
+export function isH3GpuOutOfMemoryError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('gpu out of memory')
+    || lower.includes('显存不足')
+    || lower.includes('显存风险高');
+}
+
+export function isProviderTooLittleErrorMessage(message: string | null | undefined) {
+  const lower = normalizedLower(message).trim();
+  return lower === 'error'
+    || lower === 'unknown error'
+    || lower === 'failed'
+    || lower === 'failure';
+}
+
 export function isH3UnsupportedLoraError(message: string | null | undefined) {
   const lower = normalizedLower(message);
   return lower.includes('unsupported_lora')
@@ -130,21 +195,42 @@ export type ProviderCreateFailureUserMessage = {
     | 'REFERENCE_MEDIA_TOO_SMALL'
     | 'REFERENCE_IMAGE_PRIVACY_SENSITIVE'
     | 'REFERENCE_IMAGE_TOO_LARGE'
+    | 'OUTPUT_AUDIO_COPYRIGHT_RESTRICTED'
+    | 'OUTPUT_VIDEO_COPYRIGHT_RESTRICTED'
+    | 'OUTPUT_AUDIO_SENSITIVE'
+    | 'OUTPUT_VIDEO_SENSITIVE'
+    | 'PROVIDER_CONTENT_POLICY_VIOLATION'
     | 'PROVIDER_HTML_RESPONSE'
+    | 'H3_GPU_OUT_OF_MEMORY'
     | 'H3_UNSUPPORTED_LORA'
     | 'H3_LORA_NOT_FOUND'
     | 'H3_UNSUPPORTED_LORA_NODE_TYPE'
+    | 'PROVIDER_EMPTY_ERROR'
+    | 'PROVIDER_TASK_FAILED'
     | 'PROVIDER_CREATE_FAILED';
   message: string;
   status: number;
 };
 
-export function providerCreateFailureUserMessage(rawMessage: string | null | undefined): ProviderCreateFailureUserMessage {
+function appendRefundText(message: string, includeRefundText: boolean) {
+  if (!includeRefundText) return message;
+  return message.includes('返还冻结点数') ? message : `${message}已返还冻结点数。`;
+}
+
+export function providerFailureUserMessage(
+  rawMessage: string | null | undefined,
+  options: { includeRefundText?: boolean; fallbackCode?: 'PROVIDER_CREATE_FAILED' | 'PROVIDER_TASK_FAILED' } = {},
+): ProviderCreateFailureUserMessage {
+  const includeRefundText = options.includeRefundText === true;
+
   if (isProviderReferenceMediaTooSmallError(rawMessage)) {
     return {
       code: 'REFERENCE_MEDIA_TOO_SMALL',
       status: 400,
-      message: `参考素材分辨率太低，低于视频生成服务的最低要求（至少 ${MIN_PROVIDER_REFERENCE_PIXELS} 像素，约等于 640×640）。请换更清晰的图片或视频，或先放大/重新导出后再提交。已返还冻结点数。`,
+      message: appendRefundText(
+        `参考素材分辨率太低，低于视频生成服务的最低要求（至少 ${MIN_PROVIDER_REFERENCE_PIXELS} 像素，约等于 640×640）。请换更清晰的图片或视频，或先放大/重新导出后再提交。`,
+        includeRefundText,
+      ),
     };
   }
 
@@ -152,7 +238,10 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
     return {
       code: 'REFERENCE_IMAGE_TOO_LARGE',
       status: 400,
-      message: '参考图尺寸过大，已超过视频生成服务允许的图片大小。系统会优先自动压缩到合规尺寸；如果自动处理仍失败，请换一张更小的图或先压缩后再提交。已返还冻结点数。',
+      message: appendRefundText(
+        '参考图尺寸过大，已超过视频生成服务允许的图片大小。系统会优先自动压缩到合规尺寸；如果自动处理仍失败，请换一张更小的图或先压缩后再提交。',
+        includeRefundText,
+      ),
     };
   }
 
@@ -160,7 +249,76 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
     return {
       code: 'REFERENCE_IMAGE_PRIVACY_SENSITIVE',
       status: 400,
-      message: '参考图可能包含真实人物或隐私信息，视频生成服务已拒绝使用这张图。请更换为非真人、已授权或隐私风险更低的参考图后重新提交。已返还冻结点数。',
+      message: appendRefundText(
+        '参考图可能包含真实人物或隐私信息，视频生成服务已拒绝使用这张图。请更换为非真人、已授权或隐私风险更低的参考图后重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderOutputAudioCopyrightError(rawMessage)) {
+    return {
+      code: 'OUTPUT_AUDIO_COPYRIGHT_RESTRICTED',
+      status: 400,
+      message: appendRefundText(
+        '输出音频可能涉及版权限制，视频生成服务已拒绝生成。请关闭音频生成，或避免使用歌曲、歌词、知名旋律、影视配乐、歌手/乐队名称、版权音乐风格等描述后重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderOutputVideoCopyrightError(rawMessage)) {
+    return {
+      code: 'OUTPUT_VIDEO_COPYRIGHT_RESTRICTED',
+      status: 400,
+      message: appendRefundText(
+        '输出视频可能涉及版权限制，视频生成服务已拒绝生成。请替换参考素材，或避免使用影视 IP、知名角色、品牌标识、受版权保护的画面风格等描述后重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderOutputAudioSensitiveError(rawMessage)) {
+    return {
+      code: 'OUTPUT_AUDIO_SENSITIVE',
+      status: 400,
+      message: appendRefundText(
+        '输出音频可能包含敏感内容，视频生成服务已拒绝生成。请调整音频相关提示词，避免危险、违规、隐私或不适合公开生成的声音内容后重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderOutputVideoSensitiveError(rawMessage)) {
+    return {
+      code: 'OUTPUT_VIDEO_SENSITIVE',
+      status: 400,
+      message: appendRefundText(
+        '输出视频可能包含敏感内容，视频生成服务已拒绝生成。请调整提示词或参考素材，避开违规、敏感、隐私或不适合公开生成的画面内容后重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderContentPolicyError(rawMessage)) {
+    return {
+      code: 'PROVIDER_CONTENT_POLICY_VIOLATION',
+      status: 400,
+      message: appendRefundText(
+        '生成内容未通过视频生成服务的内容安全或版权审核。请调整提示词、参考素材和授权信息后重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isH3GpuOutOfMemoryError(rawMessage)) {
+    return {
+      code: 'H3_GPU_OUT_OF_MEMORY',
+      status: 503,
+      message: appendRefundText(
+        'H3 机器显存不足，本次视频没有生成成功。请降低分辨率、缩短时长、换低显存预设，或稍后再试。',
+        includeRefundText,
+      ),
     };
   }
 
@@ -168,7 +326,10 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
     return {
       code: 'PROVIDER_HTML_RESPONSE',
       status: 502,
-      message: '生成服务临时返回了异常页面，系统没有拿到有效创建结果。已返还冻结点数。请稍后重试；如果连续出现，请联系管理员查看生成服务状态。',
+      message: appendRefundText(
+        '生成服务临时返回了异常页面，系统没有拿到有效创建结果。请稍后重试；如果连续出现，请联系管理员查看生成服务状态。',
+        includeRefundText,
+      ),
     };
   }
 
@@ -176,7 +337,10 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
     return {
       code: 'H3_UNSUPPORTED_LORA',
       status: 400,
-      message: '当前选择的 H3 LoRA 不在 H3 服务白名单里，系统已取消提交并返还冻结点数。请切换为下拉菜单里可用的 LoRA 后重试；如果下拉仍出现该选项，请刷新页面。',
+      message: appendRefundText(
+        '当前选择的 H3 LoRA 不在 H3 服务白名单里，系统已取消提交。请切换为下拉菜单里可用的 LoRA 后重试；如果下拉仍出现该选项，请刷新页面。',
+        includeRefundText,
+      ),
     };
   }
 
@@ -184,7 +348,10 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
     return {
       code: 'H3_LORA_NOT_FOUND',
       status: 400,
-      message: 'H3 机器上找不到当前选择的 LoRA 文件，系统已取消提交并返还冻结点数。请切换为其他 LoRA，或联系管理员同步模型文件和白名单。',
+      message: appendRefundText(
+        'H3 机器上找不到当前选择的 LoRA 文件，系统已取消提交。请切换为其他 LoRA，或联系管理员同步模型文件和白名单。',
+        includeRefundText,
+      ),
     };
   }
 
@@ -192,13 +359,49 @@ export function providerCreateFailureUserMessage(rawMessage: string | null | und
     return {
       code: 'H3_UNSUPPORTED_LORA_NODE_TYPE',
       status: 400,
-      message: 'H3 当前只支持 MiniMaxH3TurboLoRA 类型的 LoRA，系统已取消提交并返还冻结点数。请切换为系统内置 LoRA 后重试。',
+      message: appendRefundText(
+        'H3 当前只支持 MiniMaxH3TurboLoRA 类型的 LoRA，系统已取消提交。请切换为系统内置 LoRA 后重试。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderTooLittleErrorMessage(rawMessage)) {
+    return {
+      code: 'PROVIDER_EMPTY_ERROR',
+      status: 502,
+      message: appendRefundText(
+        '视频生成服务只返回了“失败”状态，没有给出具体原因。系统已记录原始响应，管理员可以按任务 ID 到后台继续排查。',
+        includeRefundText,
+      ),
     };
   }
 
   return {
-    code: 'PROVIDER_CREATE_FAILED',
+    code: options.fallbackCode || 'PROVIDER_CREATE_FAILED',
     status: 502,
-    message: '视频生成服务返回了未知异常，系统已记录错误摘要用于排查和补充规则。已返还冻结点数，请稍后重试；如果连续出现，请联系管理员查看生成服务日志。',
+    message: appendRefundText(
+      '视频生成服务返回了暂未归类的异常，系统已记录错误摘要用于排查和补充中文规则。请稍后重试；如果连续出现，请联系管理员查看生成服务日志。',
+      includeRefundText,
+    ),
   };
+}
+
+export function providerCreateFailureUserMessage(rawMessage: string | null | undefined): ProviderCreateFailureUserMessage {
+  return providerFailureUserMessage(rawMessage, {
+    includeRefundText: true,
+    fallbackCode: 'PROVIDER_CREATE_FAILED',
+  });
+}
+
+export function visibleProviderErrorMessage(message: string | null | undefined) {
+  const trimmed = message?.trim();
+  if (!trimmed) return message || null;
+  const translated = providerFailureUserMessage(trimmed, {
+    fallbackCode: 'PROVIDER_TASK_FAILED',
+  });
+  if (translated.code === 'PROVIDER_TASK_FAILED' && /[\u4e00-\u9fff]/.test(trimmed)) {
+    return trimmed;
+  }
+  return translated.message;
 }

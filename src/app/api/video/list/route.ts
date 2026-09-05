@@ -7,6 +7,7 @@ import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,9 +19,13 @@ function serializeTaskListItem<T extends {
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   delivery_status?: string | null;
+  error_message?: string | null;
 }>(task: T) {
   return {
     ...task,
+    error_message: task.local_status === 'failed'
+      ? visibleProviderErrorMessage(task.error_message)
+      : task.error_message,
     ...taskThumbnailProjection(task),
   };
 }

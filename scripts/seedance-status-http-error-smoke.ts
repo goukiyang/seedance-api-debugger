@@ -9,7 +9,10 @@ const terminalFailure = buildProviderHttpErrorStatus(
 
 assert.equal(terminalFailure?.local_status, 'failed');
 assert.equal(terminalFailure?.provider_status, 'failed');
-assert.equal(terminalFailure?.error_message, '[ProviderTaskFailed] copyright restriction');
+assert.equal(
+  terminalFailure?.error_message,
+  '生成内容未通过视频生成服务的内容安全或版权审核。请调整提示词、参考素材和授权信息后重新提交。',
+);
 assert.equal(terminalFailure?.provider_task_id, 'provider-task-1');
 
 assert.equal(

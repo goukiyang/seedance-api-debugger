@@ -1,6 +1,6 @@
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
-import { normalizeProviderErrorMessage } from '../provider/error-message';
+import { normalizeProviderErrorMessage, providerFailureUserMessage } from '../provider/error-message';
 import { H3RequestError, H3_VIDEO_PROVIDER, isH3InternalOutputUrl } from '../provider/h3';
 import { buildH3DiagnosticSnapshot } from '../provider/h3-diagnostics';
 import { getProviderTaskStatus } from '../provider/video-task-status';
@@ -614,7 +614,12 @@ export async function finalizeVideoTaskStatus(
     }
     const errorMessage = normalizeProviderErrorMessage(statusResult.error_message);
     if (errorMessage) {
-      updateData.error_message = errorMessage;
+      const userFacingError = providerFailureUserMessage(errorMessage, {
+        includeRefundText: shouldSettleTerminalCosts(task) && statusResult.local_status === 'failed',
+        fallbackCode: 'PROVIDER_TASK_FAILED',
+      });
+      updateData.error_message = userFacingError.message;
+      updateData.error_code = userFacingError.code;
     } else if (statusResult.local_status === 'succeeded') {
       updateData.error_message = null;
       updateData.error_code = null;

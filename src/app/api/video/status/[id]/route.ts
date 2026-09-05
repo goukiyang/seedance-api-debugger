@@ -8,6 +8,7 @@ import { finalizeVideoTaskStatus, isTerminalLocalStatus } from '@/lib/video/task
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isCodexInternalServiceUser } from '@/lib/integrations/codex';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
+import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 import {
   taskThumbnailProjection,
   type TaskThumbnailProjectionSource,
@@ -23,11 +24,16 @@ function serializeTaskIdentity<T extends {
   local_video_path?: string | null;
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
+  error_message?: string | null;
+  local_status?: string | null;
 }>(task: T) {
   return {
     ...task,
     owner: task.owner || task.user || null,
     submitted_user: task.user || null,
+    error_message: task.local_status === 'failed'
+      ? visibleProviderErrorMessage(task.error_message)
+      : task.error_message,
     ...taskThumbnailProjection(task as T & TaskThumbnailProjectionSource),
   };
 }
@@ -137,7 +143,7 @@ export async function GET(
     if (finalizeResult.providerError) {
       return NextResponse.json({
         ...serializeTaskIdentity(responseTask),
-        error_message: responseTask.error_message || finalizeResult.providerError,
+        error_message: visibleProviderErrorMessage(responseTask.error_message || finalizeResult.providerError),
       });
     }
 

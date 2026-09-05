@@ -214,6 +214,139 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   }
 
   if (
+    lower.includes('output_audio_copyright_restricted')
+    || lower.includes('outputaudiosensitivecontentdetected.policyviolation')
+    || (lower.includes('output audio') && lower.includes('copyright restriction'))
+    || lower.includes('输出音频可能涉及版权限制')
+  ) {
+    return {
+      code: 'OUTPUT_AUDIO_COPYRIGHT_RESTRICTED',
+      title: '输出音频可能涉及版权限制',
+      reasons: [
+        '这不是网站上传失败，是视频生成服务拒绝了本次要生成的音频内容',
+        '请关闭音频生成，或避开歌曲、歌词、知名旋律、影视配乐、歌手/乐队名称、版权音乐风格等描述',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('output_video_copyright_restricted')
+    || lower.includes('outputvideosensitivecontentdetected.policyviolation')
+    || (lower.includes('output video') && lower.includes('copyright restriction'))
+    || lower.includes('输出视频可能涉及版权限制')
+  ) {
+    return {
+      code: 'OUTPUT_VIDEO_COPYRIGHT_RESTRICTED',
+      title: '输出视频可能涉及版权限制',
+      reasons: [
+        '这不是网站上传失败，是视频生成服务拒绝了本次要生成的视频画面',
+        '请替换参考素材，或避开影视 IP、知名角色、品牌标识、受版权保护的画面风格等描述',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('output_audio_sensitive')
+    || lower.includes('outputaudiosensitivecontentdetected')
+    || (lower.includes('output audio') && lower.includes('sensitive information'))
+    || lower.includes('输出音频可能包含敏感内容')
+  ) {
+    return {
+      code: 'OUTPUT_AUDIO_SENSITIVE',
+      title: '输出音频可能包含敏感内容',
+      reasons: [
+        '视频生成服务认为本次要生成的音频存在敏感风险',
+        '请调整音频相关提示词，避开危险、违规、隐私或不适合公开生成的声音内容',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('output_video_sensitive')
+    || lower.includes('outputvideosensitivecontentdetected')
+    || (lower.includes('output video') && lower.includes('sensitive information'))
+    || lower.includes('输出视频可能包含敏感内容')
+  ) {
+    return {
+      code: 'OUTPUT_VIDEO_SENSITIVE',
+      title: '输出视频可能包含敏感内容',
+      reasons: [
+        '视频生成服务认为本次要生成的画面存在敏感风险',
+        '请调整提示词或参考素材，避开违规、敏感、隐私或不适合公开生成的画面内容',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_content_policy_violation')
+    || lower.includes('policyviolation')
+    || lower.includes('sensitivecontentdetected')
+    || lower.includes('content safety')
+    || lower.includes('copyright restriction')
+  ) {
+    return {
+      code: 'PROVIDER_CONTENT_POLICY_VIOLATION',
+      title: '内容安全或版权审核未通过',
+      reasons: [
+        '视频生成服务认为本次提示词、参考素材或输出内容存在合规风险',
+        '请调整提示词、参考素材和授权信息后重新提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('h3_gpu_out_of_memory')
+    || lower.includes('gpu out of memory')
+    || lower.includes('显存不足')
+    || lower.includes('显存风险高')
+  ) {
+    return {
+      code: 'H3_GPU_OUT_OF_MEMORY',
+      title: 'H3 机器显存不足',
+      reasons: [
+        '本次视频参数对当前 H3 机器来说太重，没有生成成功',
+        '请降低分辨率、缩短时长、换低显存预设，或稍后再试',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
     lower.includes('provider_html_response')
     || lower.includes('服务临时返回了异常页面')
     || lower.includes('生成服务临时返回了异常页面')
@@ -369,7 +502,20 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   }
 
   // 默认未知错误
-  return null;
+  return {
+    code: 'UNCLASSIFIED_ERROR',
+    title: '创建失败',
+    reasons: [
+      '系统已经记录原始错误，管理员可以按任务 ID 到后台继续排查',
+      '如果连续出现，请先换素材或稍后重试，再联系管理员补充中文规则',
+    ],
+    actions: [
+      { label: '重新提交', action: 'retry' },
+      { label: '复制错误', action: 'copy' },
+    ],
+    showDiagnostics: !!debugInfo,
+    debugInfo,
+  };
 }
 
 // ---- Diagnostics Panel ----

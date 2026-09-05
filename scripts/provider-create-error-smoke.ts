@@ -4,10 +4,15 @@ import path from 'node:path';
 import { readJsonResponse } from '../src/lib/http/json-response';
 import {
   isProviderHtmlResponseError,
+  isProviderOutputAudioCopyrightError,
+  isProviderOutputAudioSensitiveError,
+  isProviderOutputVideoCopyrightError,
   isProviderReferenceImagePrivacySensitiveError,
   isProviderReferenceMediaTooSmallError,
   normalizeProviderErrorMessage,
   providerCreateFailureUserMessage,
+  providerFailureUserMessage,
+  visibleProviderErrorMessage,
 } from '../src/lib/provider/error-message';
 
 const html502 = '<!DOCTYPE html> <!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]--> <html><body>Bad gateway</body></html>';
@@ -27,6 +32,9 @@ const privacyProviderError = {
     type: 'BadRequest',
   },
 };
+const outputAudioCopyrightError = '[OutputAudioSensitiveContentDetected.PolicyViolation] The request failed because the output audio may be related to copyright restrictions. Request id: smoke';
+const outputVideoCopyrightError = '[OutputVideoSensitiveContentDetected.PolicyViolation] The request failed because the output video may be related to copyright restrictions. Request id: smoke';
+const outputAudioSensitiveError = '[OutputAudioSensitiveContentDetected] The request failed because the output audio may contain sensitive information. Request id: smoke';
 
 function read(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
@@ -147,6 +155,27 @@ async function main() {
   assert.match(privacyMessage.message, /已返还冻结点数/);
   assert.doesNotMatch(privacyMessage.message, /InputImageSensitiveContentDetected|content\[1\]|Request id/i);
 
+  assert.ok(isProviderOutputAudioCopyrightError(outputAudioCopyrightError), '输出音频版权拦截必须被识别');
+  const outputAudioCopyrightMessage = providerFailureUserMessage(outputAudioCopyrightError, { includeRefundText: true });
+  assert.equal(outputAudioCopyrightMessage.code, 'OUTPUT_AUDIO_COPYRIGHT_RESTRICTED');
+  assert.equal(outputAudioCopyrightMessage.status, 400);
+  assert.match(outputAudioCopyrightMessage.message, /输出音频可能涉及版权限制/);
+  assert.match(outputAudioCopyrightMessage.message, /关闭音频生成/);
+  assert.match(outputAudioCopyrightMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(outputAudioCopyrightMessage.message, /OutputAudioSensitiveContentDetected|Request id|copyright restrictions/i);
+
+  assert.ok(isProviderOutputVideoCopyrightError(outputVideoCopyrightError), '输出视频版权拦截必须被识别');
+  const outputVideoCopyrightMessage = providerFailureUserMessage(outputVideoCopyrightError);
+  assert.equal(outputVideoCopyrightMessage.code, 'OUTPUT_VIDEO_COPYRIGHT_RESTRICTED');
+  assert.match(outputVideoCopyrightMessage.message, /输出视频可能涉及版权限制/);
+  assert.doesNotMatch(outputVideoCopyrightMessage.message, /OutputVideoSensitiveContentDetected|Request id|copyright restrictions/i);
+
+  assert.ok(isProviderOutputAudioSensitiveError(outputAudioSensitiveError), '输出音频敏感内容拦截必须被识别');
+  const outputAudioSensitiveMessage = providerFailureUserMessage(outputAudioSensitiveError);
+  assert.equal(outputAudioSensitiveMessage.code, 'OUTPUT_AUDIO_SENSITIVE');
+  assert.match(outputAudioSensitiveMessage.message, /输出音频可能包含敏感内容/);
+  assert.doesNotMatch(outputAudioSensitiveMessage.message, /OutputAudioSensitiveContentDetected|Request id|sensitive information/i);
+
   const htmlMessage = providerCreateFailureUserMessage('Seedance 创建任务返回异常页面（HTTP 502，text/html; charset=UTF-8）');
   assert.equal(htmlMessage.code, 'PROVIDER_HTML_RESPONSE');
   assert.equal(htmlMessage.status, 502);
@@ -157,8 +186,22 @@ async function main() {
   assert.equal(h3UnsupportedLoraMessage.code, 'H3_UNSUPPORTED_LORA');
   assert.equal(h3UnsupportedLoraMessage.status, 400);
   assert.match(h3UnsupportedLoraMessage.message, /不在 H3 服务白名单/);
-  assert.match(h3UnsupportedLoraMessage.message, /已取消提交并返还冻结点数/);
+  assert.match(h3UnsupportedLoraMessage.message, /已取消提交/);
+  assert.match(h3UnsupportedLoraMessage.message, /已返还冻结点数/);
   assert.doesNotMatch(h3UnsupportedLoraMessage.message, /allowlist/i);
+
+  const h3GpuMessage = providerFailureUserMessage('GPU out of memory during generation。15 秒 720P Larry 显存风险高');
+  assert.equal(h3GpuMessage.code, 'H3_GPU_OUT_OF_MEMORY');
+  assert.match(h3GpuMessage.message, /H3 机器显存不足/);
+  assert.doesNotMatch(h3GpuMessage.message, /GPU out of memory/i);
+
+  const emptyErrorMessage = visibleProviderErrorMessage('error');
+  assert.equal(emptyErrorMessage, '视频生成服务只返回了“失败”状态，没有给出具体原因。系统已记录原始响应，管理员可以按任务 ID 到后台继续排查。');
+
+  assert.equal(
+    visibleProviderErrorMessage('当前火山账号没有这个模型、接口或素材权限，请确认模型已开通。'),
+    '当前火山账号没有这个模型、接口或素材权限，请确认模型已开通。',
+  );
 
   const unknownMessage = providerCreateFailureUserMessage('[NewProviderCode] provider changed a validation rule');
   assert.equal(unknownMessage.code, 'PROVIDER_CREATE_FAILED');
@@ -170,6 +213,8 @@ async function main() {
   const errorTranslator = read('src/components/ErrorTranslator.tsx');
   assert.match(errorTranslator, /REFERENCE_MEDIA_TOO_SMALL/, '错误翻译组件必须识别参考素材分辨率太低');
   assert.match(errorTranslator, /REFERENCE_IMAGE_PRIVACY_SENSITIVE/, '错误翻译组件必须识别参考图真人隐私拦截');
+  assert.match(errorTranslator, /OUTPUT_AUDIO_COPYRIGHT_RESTRICTED/, '错误翻译组件必须识别输出音频版权拦截');
+  assert.match(errorTranslator, /OUTPUT_VIDEO_COPYRIGHT_RESTRICTED/, '错误翻译组件必须识别输出视频版权拦截');
   assert.match(errorTranslator, /PROVIDER_HTML_RESPONSE/, '错误翻译组件必须识别 Provider HTML 异常页');
   assert.doesNotMatch(errorTranslator, /API 服务返回了非 JSON 格式的响应/, '错误翻译组件不能继续用容易误导的旧 JSON 泛化文案');
 
@@ -182,6 +227,16 @@ async function main() {
   assert.match(tasksCreateRoute, /responseSummary:\s*\{[\s\S]*reference_media:\s*buildReferenceMediaFailureSummary/, 'Provider 请求失败记录必须写入参考素材结构化摘要。');
   assert.match(tasksCreateRoute, /host:\s*safeUrlHost\(url\)/, 'Provider 失败摘要只能记录 URL host，不能记录完整素材 URL。');
   assert.doesNotMatch(tasksCreateRoute, /error_message:\s*providerFailureMessage/, 'Agent 运行失败字段不能再直接写 Provider 原始错误。');
+
+  const finalizer = read('src/lib/video/task-finalizer.ts');
+  assert.match(finalizer, /providerFailureUserMessage\(errorMessage/, '任务状态最终化必须把 Provider 终态失败翻成中文再写库。');
+  assert.match(finalizer, /updateData\.error_code\s*=\s*userFacingError\.code/, '任务状态最终化必须写入归类后的错误码。');
+
+  const listRoute = read('src/app/api/video/list/route.ts');
+  assert.match(listRoute, /visibleProviderErrorMessage/, '任务列表接口必须兜底翻译旧任务错误。');
+
+  const statusRoute = read('src/app/api/video/status/[id]/route.ts');
+  assert.match(statusRoute, /visibleProviderErrorMessage/, '任务状态接口必须兜底翻译旧任务错误。');
 
   console.log('provider-create-error-smoke: ok');
 }
