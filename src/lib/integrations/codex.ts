@@ -327,11 +327,11 @@ function validateLinkedUser(user: CodexLinkedUser | null): asserts user is Codex
   if (user.expires_at && user.expires_at.getTime() <= Date.now()) {
     throw new CodexApiAuthError('Codex 视频接口绑定用户已过期', 403, 'codex_api_user_expired');
   }
-  if (user.role !== 'admin' && user.role !== 'user') {
-    throw new CodexApiAuthError('Codex 视频接口绑定用户角色无效', 403, 'codex_api_user_invalid_role');
+  if (user.role !== 'user') {
+    throw new CodexApiAuthError('Codex 视频接口绑定用户必须是普通用户', 403, 'codex_api_user_must_be_normal_user');
   }
-  if (user.account_type !== 'internal' && user.account_type !== 'external') {
-    throw new CodexApiAuthError('Codex 视频接口绑定用户类型无效', 403, 'codex_api_user_invalid_account_type');
+  if (user.account_type !== 'internal') {
+    throw new CodexApiAuthError('Codex 视频接口绑定用户必须是内部普通账号', 403, 'codex_api_user_must_be_internal');
   }
 }
 
@@ -359,6 +359,22 @@ function toSessionUser(user: CodexLinkedUser): SessionUser {
       last_sync_at: user.last_feishu_sync_at,
     },
   };
+}
+
+
+export async function isCodexInternalServiceUser(user: Pick<SessionUser, 'id' | 'role' | 'account_type'> | null | undefined) {
+  if (!user || user.role !== 'user' || user.account_type !== 'internal') return false;
+  const settings = await getCodexVideoApiSettings();
+  if (!settings.enabled) return false;
+  const linkedUser = await resolveCodexLinkedUser(settings);
+  return Boolean(
+    linkedUser
+    && linkedUser.id === user.id
+    && linkedUser.role === 'user'
+    && linkedUser.account_type === 'internal'
+    && linkedUser.status === 'active'
+    && (!linkedUser.expires_at || linkedUser.expires_at.getTime() > Date.now())
+  );
 }
 
 export async function authenticateCodexVideoApi(request: NextRequest) {

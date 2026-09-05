@@ -6,6 +6,7 @@ import { assertCanViewTask } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { finalizeVideoTaskStatus, isTerminalLocalStatus } from '@/lib/video/task-finalizer';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
+import { isCodexInternalServiceUser } from '@/lib/integrations/codex';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import {
   taskThumbnailProjection,
@@ -43,7 +44,12 @@ export async function GET(
     if (!user) {
       return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
     }
-    assertInternalOnly(user, '外部账号请使用 IP 任务状态接口。');
+    // Codex API 的后台绑定服务账号没有飞书身份，但它是管理员显式配置的
+    // 内部普通账号；允许它查询自己生成任务的标准状态，普通邮箱账号仍走外部拦截。
+    const codexInternalServiceUser = await isCodexInternalServiceUser(user);
+    if (!codexInternalServiceUser) {
+      assertInternalOnly(user, '外部账号请使用 IP 任务状态接口。');
+    }
 
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
