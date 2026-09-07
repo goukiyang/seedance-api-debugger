@@ -1505,7 +1505,7 @@
     function updateGenerationLabels(data) {
         const caps = data?.capabilities || {};
         document.querySelectorAll('.model-selector span:nth-child(2)').forEach(el => {
-            el.textContent = caps.text?.model || 'gpt5.4';
+            el.textContent = caps.text?.model || 'GPT-5.5';
         });
         document.querySelectorAll('.node-type-image .video-model-info span:nth-child(2)').forEach(el => {
             el.textContent = caps.image?.model || caps.image?.label || '图形生成';

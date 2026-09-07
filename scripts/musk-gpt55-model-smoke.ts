@@ -8,6 +8,10 @@ const runtimeFiles = [
   'src/app/admin/integrations/AdminIntegrationsClient.tsx',
   'src/app/api/tools/ultimate-canvas/bootstrap/route.ts',
   'src/components/GenerationComposer.tsx',
+  'scripts/ultimate-canvas-preview-server.mjs',
+  'public/tools/ultimate-canvas/app.js',
+  'public/tools/ultimate-canvas/index.html',
+  'public/tools/ultimate-canvas/canvas-engine.js',
 ];
 
 for (const file of runtimeFiles) {

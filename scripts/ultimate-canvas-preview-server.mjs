@@ -412,7 +412,7 @@ function bootstrapPayload(url) {
       generation_blocked_reason: null,
     },
     capabilities: {
-      text: { enabled: mockGenerationEnabled, model: 'gpt-5.4', endpoint: '/api/tools/ultimate-canvas/generate', message: generationMessage },
+      text: { enabled: mockGenerationEnabled, model: 'gpt-5.5', endpoint: '/api/tools/ultimate-canvas/generate', message: generationMessage },
       image: {
         enabled: mockGenerationEnabled,
         model: 'Seedream 5.0 Pro',

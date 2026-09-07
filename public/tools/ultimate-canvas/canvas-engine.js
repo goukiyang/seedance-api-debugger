@@ -775,7 +775,7 @@ class CanvasEngine {
                     <div class="node-input-left">
                         <div class="model-selector">
                             <span class="model-icon">🧠</span>
-                            <span>gpt5.4</span>
+                            <span>GPT-5.5</span>
                             <span class="chevron">▾</span>
                         </div>
                         <button class="context-rules-button" data-context-rules-open title="编辑影响本节点 LLM 上下文的规则">
