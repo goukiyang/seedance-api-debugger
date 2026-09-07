@@ -654,7 +654,7 @@ export function GenerationComposer({
   const muskStatusText = muskConfigLoading
     ? '正在检查 LLM 配置...'
     : muskReady
-      ? `LLM 已就绪：${muskConfig?.default_model || 'gpt-5.4'}`
+      ? `LLM 已就绪：${muskConfig?.default_model || 'gpt-5.5'}`
       : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
 
   const mentionCandidates = useMemo<PromptMentionCandidate[]>(() => {

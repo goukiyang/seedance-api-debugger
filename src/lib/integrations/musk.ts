@@ -17,7 +17,7 @@ export type MuskApiSettingsInput = Partial<MuskApiSettings> & {
 export const DEFAULT_MUSK_API_SETTINGS: MuskApiSettings = {
   enabled: false,
   base_url: 'https://api.muskapis.com/',
-  default_model: 'gpt-5.4',
+  default_model: 'gpt-5.5',
   api_key: null,
 };
 

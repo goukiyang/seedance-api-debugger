@@ -158,7 +158,7 @@ const EMPTY_MUSK_CONFIG: MuskConfig = {
   enabled: false,
   ready: false,
   base_url: 'https://api.muskapis.com/',
-  default_model: 'gpt-5.4',
+  default_model: 'gpt-5.5',
   api_key_configured: false,
 };
 
@@ -876,7 +876,7 @@ export default function AdminIntegrationsClient() {
         <div className="stat-card">
           <span className="stat-label">Musk API</span>
           <strong className="stat-value">{muskStatusText}</strong>
-          <span className="stat-sub">{muskConfig.default_model || 'gpt-5.4'} · {muskConfig.base_url || '未配置地址'}</span>
+          <span className="stat-sub">{muskConfig.default_model || 'gpt-5.5'} · {muskConfig.base_url || '未配置地址'}</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">图形生成 API</span>
@@ -1448,7 +1448,7 @@ export default function AdminIntegrationsClient() {
               className="input"
               value={muskConfig.default_model}
               onChange={(event) => setMuskConfig((prev) => ({ ...prev, default_model: event.target.value }))}
-              placeholder="gpt-5.4"
+              placeholder="gpt-5.5"
               autoComplete="off"
               maxLength={80}
               required

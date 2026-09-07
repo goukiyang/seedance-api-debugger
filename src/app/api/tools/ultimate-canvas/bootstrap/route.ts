@@ -357,8 +357,8 @@ export async function GET(request: NextRequest) {
     capabilities: {
       text: {
         enabled: textReady,
-        label: 'gpt5.4 文本能力',
-        model: muskSettings.default_model || 'gpt-5.4',
+        label: 'GPT-5.5 文本能力',
+        model: muskSettings.default_model || 'gpt-5.5',
         endpoint: '/api/tools/ultimate-canvas/generate',
         billing: 'operation_log',
         message: textReady ? '可用' : '文本生成能力暂不可用，请稍后联系管理员',
