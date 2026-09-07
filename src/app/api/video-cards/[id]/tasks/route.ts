@@ -6,6 +6,7 @@ import { assertCanManageVideoCard, assertCanViewVideoCard } from '@/lib/video-ca
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { moveTasksBetweenVideoCards } from '@/lib/video-cards/workflow';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,6 +90,9 @@ export async function GET(
     return NextResponse.json({
       tasks: tasks.map((task) => ({
         ...task,
+        error_message: task.local_status === 'failed'
+          ? visibleProviderErrorMessage(task.error_message)
+          : task.error_message,
         ...taskThumbnailProjection(task),
       })),
       pagination: {

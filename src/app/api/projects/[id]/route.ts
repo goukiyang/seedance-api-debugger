@@ -8,6 +8,7 @@ import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
 import { getVideoCardArchiveAnomalies } from '@/lib/video-cards/suggestions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 
 export const dynamic = 'force-dynamic';
 
@@ -399,6 +400,7 @@ export async function GET(
     }));
     const projectedFailedTasks = failedTasks.map((task) => ({
       ...task,
+      error_message: visibleProviderErrorMessage(task.error_message),
       ...taskThumbnailProjection(task),
     }));
     const projectedCostLedgers = costLedgers.map((ledger) => ({

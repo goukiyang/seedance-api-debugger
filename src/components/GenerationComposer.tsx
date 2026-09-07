@@ -1753,7 +1753,6 @@ export function GenerationComposer({
               error={submitError}
               rawError={submitError}
               debugInfo={submitErrorDebug as Parameters<typeof ErrorTranslator>[0]['debugInfo']}
-              onRetry={() => {}}
               onCopy={() => { navigator.clipboard.writeText(submitError); }}
             />
           </div>

@@ -9,6 +9,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { providerReferenceNumberFromError } from '@/lib/provider/error-message';
 
 // ---- Types ----
 
@@ -65,7 +66,7 @@ interface TranslatedError {
   code: string;
   title: string;
   reasons: string[];
-  actions: Array<{ label: string; action?: 'retry' | 'copy' | 'debug' }>;
+  actions: Array<{ label: string; action?: 'retry' | 'reload' | 'copy' | 'debug' }>;
   showDiagnostics?: boolean;
   debugInfo?: DebugInfo;
 }
@@ -81,6 +82,9 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   const diags = debugInfo?.referenceImageDiagnostics;
   const hasLocalUrls = debugInfo?.hasLocalUrls;
   const hasNonPublic = debugInfo?.hasNonPublicUrls;
+  const referenceNumber = providerReferenceNumberFromError(error);
+  const referenceItem = referenceNumber ? `第${referenceNumber}项参考素材` : '参考素材';
+  const referenceImage = referenceNumber ? `第${referenceNumber}张参考图` : '参考图';
 
   if (
     lower.includes('reference_media_too_small')
@@ -93,9 +97,9 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   ) {
     return {
       code: 'REFERENCE_MEDIA_TOO_SMALL',
-      title: '参考素材分辨率太低',
+      title: `${referenceItem}分辨率太低`,
       reasons: [
-        '这不是系统整体故障，是当前某个参考图片或视频分辨率低于生成服务要求',
+        `这不是系统整体故障，是${referenceItem}分辨率低于生成服务要求`,
         '请换更清晰的素材，或先放大、重新导出后再提交',
       ],
       actions: [
@@ -176,9 +180,9 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   ) {
     return {
       code: 'REFERENCE_IMAGE_TOO_LARGE',
-      title: '参考图尺寸过大',
+      title: `${referenceItem}尺寸过大`,
       reasons: [
-        '这不是系统整体故障，是当前选择的参考图超过了视频生成服务允许的图片大小',
+        `这不是系统整体故障，是${referenceItem}超过了视频生成服务允许的图片大小`,
         '系统会优先自动压缩到合规尺寸；如果自动处理仍失败，需要换一张更小的图或先压缩后再提交',
       ],
       actions: [
@@ -199,13 +203,78 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   ) {
     return {
       code: 'REFERENCE_IMAGE_PRIVACY_SENSITIVE',
-      title: '参考图存在真人隐私风险',
+      title: `${referenceImage}未通过人像检查`,
       reasons: [
-        '这不是系统整体故障，是视频生成服务拒绝了当前某张参考图',
-        '通常是参考图被识别为可能包含真实人物或隐私信息',
+        `${referenceImage}上传服务方人像库失败，服务方判断它可能包含真实人物或隐私信息`,
+        '这不是网站整体故障；请更换为非真人、已授权或隐私风险更低的参考图',
       ],
       actions: [
         { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_resource_unavailable')
+    || lower.includes('resource download failed')
+    || lower.includes('resource not found')
+    || lower.includes('timeout while fetching resource')
+    || lower.includes('素材链接无法读取')
+    || lower.includes('素材链接已失效')
+  ) {
+    return {
+      code: 'REFERENCE_RESOURCE_UNAVAILABLE',
+      title: `${referenceItem}无法读取`,
+      reasons: [
+        `${referenceItem}的链接已失效、无法访问，或视频生成服务读取超时`,
+        '请重新上传这项素材后再提交；这不是提示词或点数问题',
+      ],
+      actions: [
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_total_duration_too_long')
+    || (lower.includes('video total duration') && lower.includes('less than or equal to'))
+    || lower.includes('参考素材总时长超过')
+  ) {
+    return {
+      code: 'REFERENCE_TOTAL_DURATION_TOO_LONG',
+      title: '参考素材总时长超限',
+      reasons: [
+        '参考视频或音频总时长超过视频生成服务允许的上限（15.2 秒）',
+        '请裁短或减少参考素材后重新提交',
+      ],
+      actions: [
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_model_not_open')
+    || lower.includes('modelnotopen')
+    || lower.includes('model not exist')
+    || lower.includes('has not activated the model')
+    || lower.includes('当前账号未开通所选模型')
+  ) {
+    return {
+      code: 'PROVIDER_MODEL_NOT_OPEN',
+      title: '所选视频模型未开通',
+      reasons: [
+        '当前生成服务账号没有开通所选模型，或该模型已不可用',
+        '这不是素材问题；请切换可用模型，或联系管理员开通模型权限',
+      ],
+      actions: [
         { label: '复制错误', action: 'copy' },
       ],
       showDiagnostics: !!debugInfo,
@@ -228,6 +297,50 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
       ],
       actions: [
         { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_transaction_conflict')
+    || lower.includes('transaction api error')
+    || lower.includes('transaction not found')
+    || lower.includes('系统保存任务时发生数据冲突')
+  ) {
+    return {
+      code: 'PROVIDER_TRANSACTION_CONFLICT',
+      title: '任务保存发生短暂冲突',
+      reasons: [
+        '系统保存任务时发生数据冲突，本次请求没有正常完成',
+        '请刷新页面后重试；如果连续出现，请联系管理员按提交时间排查',
+      ],
+      actions: [
+        { label: '刷新页面', action: 'reload' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('missing_provider_task_id')
+    || lower.includes('missing task id')
+    || lower.includes('no task id in create response')
+    || lower.includes('任务提交后没有拿到外部任务号')
+  ) {
+    return {
+      code: 'MISSING_PROVIDER_TASK_ID',
+      title: '生成服务没有返回任务号',
+      reasons: [
+        '系统无法确认任务是否创建成功，请先刷新任务列表确认',
+        '确认任务列表里没有这条任务后再重新提交，避免重复创建',
+      ],
+      actions: [
+        { label: '刷新页面', action: 'reload' },
         { label: '复制错误', action: 'copy' },
       ],
       showDiagnostics: !!debugInfo,
@@ -370,8 +483,35 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
     };
   }
 
+  if (
+    lower.includes('page_version_mismatch')
+    || lower.includes('failed to find server action')
+    || lower.includes('request might be from an older or newer deployment')
+    || lower.includes('页面版本已更新')
+    || lower.includes('页面版本和服务器版本不一致')
+  ) {
+    return {
+      code: 'PAGE_VERSION_MISMATCH',
+      title: '页面版本已更新',
+      reasons: [
+        '这不是素材或点数问题，是当前浏览器页面还停留在旧版本，和服务器新版本对不上',
+        '请刷新页面后重新提交；刷新前不要重复点击提交，避免产生重复请求',
+      ],
+      actions: [
+        { label: '刷新页面', action: 'reload' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
   // 524 超时 — 重点处理
-  if (hasStatusCodeToken(error, 524) || ctx?.httpStatus === 524) {
+  if (
+    lower.includes('provider_gateway_timeout')
+    || hasStatusCodeToken(error, 524)
+    || ctx?.httpStatus === 524
+  ) {
     const reasons: string[] = [];
     if (hasLocalUrls) {
       reasons.push('参考图中包含本地图片（需转 base64），大图导致 JSON payload 过大 → 网关超时');
@@ -391,10 +531,10 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
 
     return {
       code: '524',
-      title: '创建失败：Seedance 服务响应超时',
+      title: '视频生成服务响应超时',
       reasons,
       actions: [
-        { label: '重新提交', action: 'retry' },
+        { label: '刷新页面', action: 'reload' },
         { label: '复制错误', action: 'copy' },
         { label: '查看诊断', action: 'debug' },
       ],
@@ -404,17 +544,21 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   }
 
   // 554 错误
-  if (hasStatusCodeToken(error, 554) || ctx?.httpStatus === 554) {
+  if (
+    lower.includes('provider_gateway_error')
+    || hasStatusCodeToken(error, 554)
+    || ctx?.httpStatus === 554
+  ) {
     return {
       code: '554',
-      title: '服务返回错误 (554)',
+      title: '视频生成服务网关异常',
       reasons: [
         '当前参数组合不被服务支持',
         'API 限流、额度不足或服务异常',
         '服务端处理超时或内部错误',
       ],
       actions: [
-        { label: '重新提交', action: 'retry' },
+        { label: '刷新页面', action: 'reload' },
         { label: '复制错误', action: 'copy' },
         { label: '查看调试信息', action: 'debug' },
       ],
@@ -486,7 +630,11 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   }
 
   // JSON 解析错误
-  if (lower.includes('json') || lower.includes('unexpected end')) {
+  if (
+    lower.includes('provider_response_format_error')
+    || lower.includes('json')
+    || lower.includes('unexpected end')
+  ) {
     return {
       code: 'JSON',
       title: '服务响应格式错误',
@@ -495,7 +643,7 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
         '请刷新后重试；如果连续出现，需要管理员查看接口日志',
       ],
       actions: [
-        { label: '重新提交', action: 'retry' },
+        { label: '刷新页面', action: 'reload' },
         { label: '复制错误', action: 'copy' },
       ],
     };
@@ -504,13 +652,13 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
   // 默认未知错误
   return {
     code: 'UNCLASSIFIED_ERROR',
-    title: '创建失败',
+    title: '本次提交没有正常完成',
     reasons: [
-      '系统已经记录原始错误，管理员可以按任务 ID 到后台继续排查',
-      '如果连续出现，请先换素材或稍后重试，再联系管理员补充中文规则',
+      '系统收到了尚未归类的原始错误，目前不能准确判断是素材、服务还是网络问题',
+      '请先刷新页面，再复制错误交给管理员；不要仅凭这条提示反复换素材或连续提交',
     ],
     actions: [
-      { label: '重新提交', action: 'retry' },
+      { label: '刷新页面', action: 'reload' },
       { label: '复制错误', action: 'copy' },
     ],
     showDiagnostics: !!debugInfo,
@@ -621,8 +769,16 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
       <div className="error-translate-actions">
         {translated.actions.map((action, i) => {
           if (action.action === 'retry') {
+            if (!onRetry) return null;
             return (
               <button key={i} className="btn btn-sm btn-primary" onClick={() => { onRetry?.(); }}>
+                {action.label}
+              </button>
+            );
+          }
+          if (action.action === 'reload') {
+            return (
+              <button key={i} className="btn btn-sm btn-primary" onClick={() => { window.location.reload(); }}>
                 {action.label}
               </button>
             );

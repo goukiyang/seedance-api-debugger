@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonResponse } from '../src/lib/http/json-response';
+import { translateError } from '../src/components/ErrorTranslator';
 import {
   isProviderHtmlResponseError,
+  isNextServerActionVersionMismatchError,
   isProviderOutputAudioCopyrightError,
   isProviderOutputAudioSensitiveError,
   isProviderOutputVideoCopyrightError,
@@ -35,6 +37,10 @@ const privacyProviderError = {
 const outputAudioCopyrightError = '[OutputAudioSensitiveContentDetected.PolicyViolation] The request failed because the output audio may be related to copyright restrictions. Request id: smoke';
 const outputVideoCopyrightError = '[OutputVideoSensitiveContentDetected.PolicyViolation] The request failed because the output video may be related to copyright restrictions. Request id: smoke';
 const outputAudioSensitiveError = '[OutputAudioSensitiveContentDetected] The request failed because the output audio may contain sensitive information. Request id: smoke';
+const serverActionVersionMismatchError = 'Failed to find Server Action "x". This request might be from an older or newer deployment. Original error: Cannot read properties of undefined (reading "workers")';
+const resourceDownloadError = '[InvalidParameter] The parameter `content[3].image_url` specified in the request is not valid: resource download failed. Request id: smoke';
+const totalDurationError = '[InvalidParameter] The parameter `content` specified in the request is not valid: the parameter video total duration (seconds) specified in the request must be less than or equal to 15.2 for model dreamina-seedance-2-0 in r2v. Request id: smoke';
+const modelNotOpenError = 'Your account has not activated the model doubao-seedance-2-0-260128. Please activate the model service in the Ark Console. Request id: smoke';
 
 function read(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
@@ -138,7 +144,7 @@ async function main() {
   const userMessage = providerCreateFailureUserMessage(normalized);
   assert.equal(userMessage.code, 'REFERENCE_MEDIA_TOO_SMALL');
   assert.equal(userMessage.status, 400);
-  assert.match(userMessage.message, /参考素材分辨率太低/);
+  assert.match(userMessage.message, /第5项参考素材分辨率太低/);
   assert.match(userMessage.message, /已返还冻结点数/);
   assert.doesNotMatch(userMessage.message, /Create video task missing id|content\[5\]|InvalidParameter/);
 
@@ -151,9 +157,51 @@ async function main() {
   const privacyMessage = providerCreateFailureUserMessage(privacyNormalized);
   assert.equal(privacyMessage.code, 'REFERENCE_IMAGE_PRIVACY_SENSITIVE');
   assert.equal(privacyMessage.status, 400);
-  assert.match(privacyMessage.message, /参考图可能包含真实人物或隐私信息/);
+  assert.match(privacyMessage.message, /第1张参考图上传服务方人像库失败/);
+  assert.match(privacyMessage.message, /可能包含真实人物或隐私信息/);
   assert.match(privacyMessage.message, /已返还冻结点数/);
   assert.doesNotMatch(privacyMessage.message, /InputImageSensitiveContentDetected|content\[1\]|Request id/i);
+
+  const resourceMessage = providerCreateFailureUserMessage(resourceDownloadError);
+  assert.equal(resourceMessage.code, 'REFERENCE_RESOURCE_UNAVAILABLE');
+  assert.equal(resourceMessage.status, 400);
+  assert.match(resourceMessage.message, /第3项参考素材暂时无法/);
+  assert.doesNotMatch(resourceMessage.message, /resource download failed|content\[3\]|Request id/i);
+
+  const durationMessage = providerCreateFailureUserMessage(totalDurationError);
+  assert.equal(durationMessage.code, 'REFERENCE_TOTAL_DURATION_TOO_LONG');
+  assert.match(durationMessage.message, /总时长超过/);
+  assert.doesNotMatch(durationMessage.message, /video total duration|Request id/i);
+
+  const modelMessage = providerCreateFailureUserMessage(modelNotOpenError);
+  assert.equal(modelMessage.code, 'PROVIDER_MODEL_NOT_OPEN');
+  assert.equal(modelMessage.status, 403);
+  assert.match(modelMessage.message, /尚未开通所选视频模型/);
+  assert.doesNotMatch(modelMessage.message, /activated the model|Ark Console|Request id/i);
+
+  const gatewayTimeoutMessage = providerCreateFailureUserMessage('Create video task failed: 524 {}');
+  assert.equal(gatewayTimeoutMessage.code, 'PROVIDER_GATEWAY_TIMEOUT');
+  assert.match(gatewayTimeoutMessage.message, /先刷新任务列表确认/);
+
+  const responseFormatMessage = providerCreateFailureUserMessage('Unexpected end of JSON input');
+  assert.equal(responseFormatMessage.code, 'PROVIDER_RESPONSE_FORMAT_ERROR');
+  assert.doesNotMatch(responseFormatMessage.message, /JSON|Unexpected end/i);
+
+  const transactionMessage = providerCreateFailureUserMessage('Transaction API error: Transaction not found.');
+  assert.equal(transactionMessage.code, 'PROVIDER_TRANSACTION_CONFLICT');
+  assert.doesNotMatch(transactionMessage.message, /Transaction/i);
+
+  const translatedPrivacy = translateError(privacyNormalized);
+  assert.equal(translatedPrivacy?.title, '第1张参考图未通过人像检查');
+  assert.match(translatedPrivacy?.reasons.join('；') || '', /第1张参考图上传服务方人像库失败/);
+
+  const translatedResource = translateError(resourceDownloadError);
+  assert.equal(translatedResource?.title, '第3项参考素材无法读取');
+
+  const translatedUnknown = translateError('[NewProviderCode] provider changed a validation rule');
+  assert.equal(translatedUnknown?.title, '本次提交没有正常完成');
+  assert.ok(translatedUnknown?.actions.some((action) => action.action === 'reload'));
+  assert.doesNotMatch(translatedUnknown?.reasons.join('；') || '', /请先换素材/);
 
   assert.ok(isProviderOutputAudioCopyrightError(outputAudioCopyrightError), '输出音频版权拦截必须被识别');
   const outputAudioCopyrightMessage = providerFailureUserMessage(outputAudioCopyrightError, { includeRefundText: true });
@@ -181,6 +229,15 @@ async function main() {
   assert.equal(htmlMessage.status, 502);
   assert.ok(isProviderHtmlResponseError('Invalid JSON response: <!DOCTYPE html>'));
   assert.doesNotMatch(htmlMessage.message, /<!DOCTYPE|<html/i);
+
+  assert.ok(isNextServerActionVersionMismatchError(serverActionVersionMismatchError), '页面版本错位必须被识别为可刷新恢复的问题');
+  const versionMismatchMessage = providerCreateFailureUserMessage(serverActionVersionMismatchError);
+  assert.equal(versionMismatchMessage.code, 'PAGE_VERSION_MISMATCH');
+  assert.equal(versionMismatchMessage.status, 409);
+  assert.match(versionMismatchMessage.message, /页面版本已更新/);
+  assert.match(versionMismatchMessage.message, /刷新页面后重新提交/);
+  assert.match(versionMismatchMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(versionMismatchMessage.message, /Server Action|workers|deployment/i);
 
   const h3UnsupportedLoraMessage = providerCreateFailureUserMessage('[unsupported_lora] LoRA is not in the H3 allowlist');
   assert.equal(h3UnsupportedLoraMessage.code, 'H3_UNSUPPORTED_LORA');
@@ -216,10 +273,24 @@ async function main() {
   assert.match(errorTranslator, /OUTPUT_AUDIO_COPYRIGHT_RESTRICTED/, '错误翻译组件必须识别输出音频版权拦截');
   assert.match(errorTranslator, /OUTPUT_VIDEO_COPYRIGHT_RESTRICTED/, '错误翻译组件必须识别输出视频版权拦截');
   assert.match(errorTranslator, /PROVIDER_HTML_RESPONSE/, '错误翻译组件必须识别 Provider HTML 异常页');
+  assert.match(errorTranslator, /PAGE_VERSION_MISMATCH/, '错误翻译组件必须识别页面版本错位');
+  assert.match(errorTranslator, /REFERENCE_RESOURCE_UNAVAILABLE/, '错误翻译组件必须识别参考素材无法读取');
+  assert.match(errorTranslator, /REFERENCE_TOTAL_DURATION_TOO_LONG/, '错误翻译组件必须识别参考素材总时长超限');
+  assert.match(errorTranslator, /PROVIDER_MODEL_NOT_OPEN/, '错误翻译组件必须识别模型未开通');
+  assert.match(errorTranslator, /PROVIDER_TRANSACTION_CONFLICT/, '错误翻译组件必须识别数据事务冲突');
+  assert.match(errorTranslator, /MISSING_PROVIDER_TASK_ID/, '错误翻译组件必须识别生成服务未返回任务号');
+  assert.match(errorTranslator, /failed to find server action/, '错误翻译组件必须识别 Next Server Action 版本错位原文');
+  assert.match(errorTranslator, /window\.location\.reload\(\)/, '刷新类错误必须提供真实刷新动作');
   assert.doesNotMatch(errorTranslator, /API 服务返回了非 JSON 格式的响应/, '错误翻译组件不能继续用容易误导的旧 JSON 泛化文案');
 
   const tasksCreateRoute = read('src/app/api/tasks/create/route.ts');
   assert.match(tasksCreateRoute, /error_message:\s*userFacingFailure\.message/, 'Agent 运行失败展示字段必须写用户友好文案。');
+
+  const projectRoute = read('src/app/api/projects/[id]/route.ts');
+  assert.match(projectRoute, /visibleProviderErrorMessage\(task\.error_message\)/, '项目失败任务必须翻译历史 Provider 英文错误。');
+
+  const videoCardTasksRoute = read('src/app/api/video-cards/[id]/tasks/route.ts');
+  assert.match(videoCardTasksRoute, /visibleProviderErrorMessage\(task\.error_message\)/, '视频卡任务必须翻译历史 Provider 英文错误。');
   assert.match(tasksCreateRoute, /output_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, 'Agent 步骤输出必须写错误分类和用户友好文案。');
   assert.match(tasksCreateRoute, /metadata_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, '模板记忆元数据必须写错误分类和用户友好文案。');
   assert.match(tasksCreateRoute, /errorCode:\s*userFacingFailure\.code/, 'Provider 请求失败记录必须写入归类后的错误码，方便后台补规则。');

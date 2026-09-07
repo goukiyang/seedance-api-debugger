@@ -1541,7 +1541,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
       if (!res.ok) {
         setErrorDebug(data._debug || null);
-        throw new Error(data.message || data.error || `创建失败 (HTTP ${res.status})`);
+        const message = data.message || data.error || `创建失败 (HTTP ${res.status})`;
+        throw new Error(data.error && data.message ? `[${data.error}] ${message}` : message);
       }
 
       setResult(data);

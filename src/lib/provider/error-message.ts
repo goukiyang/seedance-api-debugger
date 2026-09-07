@@ -62,6 +62,28 @@ function normalizedLower(message: string | null | undefined) {
   return (message || '').toLowerCase();
 }
 
+export function providerReferenceNumberFromError(message: string | null | undefined) {
+  const raw = message || '';
+  const contentMatch = raw.match(/content\[(\d+)\]/i);
+  if (contentMatch) {
+    const value = Number(contentMatch[1]);
+    if (Number.isInteger(value) && value > 0) return value;
+  }
+
+  const imageDataMatch = raw.match(/image data\s+(\d+)/i);
+  if (imageDataMatch) {
+    const value = Number(imageDataMatch[1]);
+    if (Number.isInteger(value) && value > 0) return value;
+  }
+
+  return null;
+}
+
+function referenceLabel(message: string | null | undefined, fallback: string) {
+  const referenceNumber = providerReferenceNumberFromError(message);
+  return referenceNumber ? `第${referenceNumber}项参考素材` : fallback;
+}
+
 export function isProviderHtmlResponseError(message: string | null | undefined) {
   const lower = normalizedLower(message);
   return lower.includes('invalid json response')
@@ -87,6 +109,73 @@ export function isProviderReferenceMediaTooSmallError(message: string | null | u
   return lower.includes('pixel count')
     && lower.includes('greater than or equal to')
     && (lower.includes(String(MIN_PROVIDER_REFERENCE_PIXELS)) || lower.includes('content['));
+}
+
+export function isProviderReferenceResourceUnavailableError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return (
+    lower.includes('image_url')
+    || lower.includes('reference image')
+    || lower.includes('参考素材')
+  ) && (
+    lower.includes('resource download failed')
+    || lower.includes('resource not found')
+    || lower.includes('timeout while fetching resource')
+    || lower.includes('素材链接无法读取')
+    || lower.includes('素材链接已失效')
+  );
+}
+
+export function isProviderReferenceTotalDurationTooLongError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return (
+    lower.includes('video total duration')
+    && lower.includes('less than or equal to')
+  ) || lower.includes('参考素材总时长超过');
+}
+
+export function isProviderModelNotOpenError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('modelnotopen')
+    || lower.includes('model not exist')
+    || (lower.includes('has not activated the model') && lower.includes('ark console'))
+    || lower.includes('当前账号未开通所选模型');
+}
+
+export function isProviderGatewayTimeoutError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return /(^|\D)524(?!\d)/.test(lower)
+    || lower.includes('provider_gateway_timeout')
+    || lower.includes('生成服务响应超时');
+}
+
+export function isProviderGatewayError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return /(^|\D)554(?!\d)/.test(lower)
+    || lower.includes('provider_gateway_error')
+    || lower.includes('生成服务网关异常');
+}
+
+export function isProviderResponseFormatError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('unexpected end of json input')
+    || lower.includes('provider_response_format_error')
+    || lower.includes('服务响应格式错误');
+}
+
+export function isProviderTransactionConflictError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('transaction api error')
+    || lower.includes('transaction not found')
+    || lower.includes('系统保存任务时发生数据冲突');
+}
+
+export function isProviderMissingTaskIdError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('missing_provider_task_id')
+    || lower.includes('missing task id')
+    || lower.includes('no task id in create response')
+    || lower.includes('任务提交后没有拿到外部任务号');
 }
 
 export function isProviderReferenceImagePrivacySensitiveError(message: string | null | undefined) {
@@ -169,6 +258,14 @@ export function isProviderTooLittleErrorMessage(message: string | null | undefin
     || lower === 'failure';
 }
 
+export function isNextServerActionVersionMismatchError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('failed to find server action')
+    || lower.includes('request might be from an older or newer deployment')
+    || lower.includes('页面版本已更新')
+    || lower.includes('页面版本和服务器版本不一致');
+}
+
 export function isH3UnsupportedLoraError(message: string | null | undefined) {
   const lower = normalizedLower(message);
   return lower.includes('unsupported_lora')
@@ -195,12 +292,21 @@ export type ProviderCreateFailureUserMessage = {
     | 'REFERENCE_MEDIA_TOO_SMALL'
     | 'REFERENCE_IMAGE_PRIVACY_SENSITIVE'
     | 'REFERENCE_IMAGE_TOO_LARGE'
+    | 'REFERENCE_RESOURCE_UNAVAILABLE'
+    | 'REFERENCE_TOTAL_DURATION_TOO_LONG'
+    | 'PROVIDER_MODEL_NOT_OPEN'
     | 'OUTPUT_AUDIO_COPYRIGHT_RESTRICTED'
     | 'OUTPUT_VIDEO_COPYRIGHT_RESTRICTED'
     | 'OUTPUT_AUDIO_SENSITIVE'
     | 'OUTPUT_VIDEO_SENSITIVE'
     | 'PROVIDER_CONTENT_POLICY_VIOLATION'
     | 'PROVIDER_HTML_RESPONSE'
+    | 'PROVIDER_GATEWAY_TIMEOUT'
+    | 'PROVIDER_GATEWAY_ERROR'
+    | 'PROVIDER_RESPONSE_FORMAT_ERROR'
+    | 'PROVIDER_TRANSACTION_CONFLICT'
+    | 'MISSING_PROVIDER_TASK_ID'
+    | 'PAGE_VERSION_MISMATCH'
     | 'H3_GPU_OUT_OF_MEMORY'
     | 'H3_UNSUPPORTED_LORA'
     | 'H3_LORA_NOT_FOUND'
@@ -224,33 +330,71 @@ export function providerFailureUserMessage(
   const includeRefundText = options.includeRefundText === true;
 
   if (isProviderReferenceMediaTooSmallError(rawMessage)) {
+    const subject = referenceLabel(rawMessage, '参考素材');
     return {
       code: 'REFERENCE_MEDIA_TOO_SMALL',
       status: 400,
       message: appendRefundText(
-        `参考素材分辨率太低，低于视频生成服务的最低要求（至少 ${MIN_PROVIDER_REFERENCE_PIXELS} 像素，约等于 640×640）。请换更清晰的图片或视频，或先放大/重新导出后再提交。`,
+        `${subject}分辨率太低，低于视频生成服务的最低要求（至少 ${MIN_PROVIDER_REFERENCE_PIXELS} 像素，约等于 640×640）。请换更清晰的图片或视频，或先放大/重新导出后再提交。`,
         includeRefundText,
       ),
     };
   }
 
   if (isProviderReferenceImageTooLargeError(rawMessage)) {
+    const subject = referenceLabel(rawMessage, '参考图');
     return {
       code: 'REFERENCE_IMAGE_TOO_LARGE',
       status: 400,
       message: appendRefundText(
-        '参考图尺寸过大，已超过视频生成服务允许的图片大小。系统会优先自动压缩到合规尺寸；如果自动处理仍失败，请换一张更小的图或先压缩后再提交。',
+        `${subject}尺寸过大，已超过视频生成服务允许的图片大小。系统会优先自动压缩到合规尺寸；如果自动处理仍失败，请换一张更小的图或先压缩后再提交。`,
         includeRefundText,
       ),
     };
   }
 
   if (isProviderReferenceImagePrivacySensitiveError(rawMessage)) {
+    const referenceNumber = providerReferenceNumberFromError(rawMessage);
+    const subject = referenceNumber ? `第${referenceNumber}张参考图` : '参考图';
     return {
       code: 'REFERENCE_IMAGE_PRIVACY_SENSITIVE',
       status: 400,
       message: appendRefundText(
-        '参考图可能包含真实人物或隐私信息，视频生成服务已拒绝使用这张图。请更换为非真人、已授权或隐私风险更低的参考图后重新提交。',
+        `${subject}上传服务方人像库失败，服务方判断它可能包含真实人物或隐私信息。请更换为非真人、已授权或隐私风险更低的参考图后重新提交。`,
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderReferenceResourceUnavailableError(rawMessage)) {
+    const subject = referenceLabel(rawMessage, '参考素材');
+    return {
+      code: 'REFERENCE_RESOURCE_UNAVAILABLE',
+      status: 400,
+      message: appendRefundText(
+        `${subject}暂时无法被视频生成服务读取，可能是素材链接已失效、无法访问或读取超时。请重新上传这项素材后再提交。`,
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderReferenceTotalDurationTooLongError(rawMessage)) {
+    return {
+      code: 'REFERENCE_TOTAL_DURATION_TOO_LONG',
+      status: 400,
+      message: appendRefundText(
+        '参考视频或音频的总时长超过视频生成服务允许的上限（15.2 秒）。请裁短或减少参考素材后重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderModelNotOpenError(rawMessage)) {
+    return {
+      code: 'PROVIDER_MODEL_NOT_OPEN',
+      status: 403,
+      message: appendRefundText(
+        '当前生成服务账号尚未开通所选视频模型，或该模型已不可用。这不是素材问题，请切换为可用模型，或联系管理员开通模型权限。',
         includeRefundText,
       ),
     };
@@ -328,6 +472,72 @@ export function providerFailureUserMessage(
       status: 502,
       message: appendRefundText(
         '生成服务临时返回了异常页面，系统没有拿到有效创建结果。请稍后重试；如果连续出现，请联系管理员查看生成服务状态。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderGatewayTimeoutError(rawMessage)) {
+    return {
+      code: 'PROVIDER_GATEWAY_TIMEOUT',
+      status: 504,
+      message: appendRefundText(
+        '视频生成服务响应超时，系统没有拿到明确的创建结果。请先刷新任务列表确认是否已经生成任务；确认没有任务后再重新提交，避免重复创建。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderGatewayError(rawMessage)) {
+    return {
+      code: 'PROVIDER_GATEWAY_ERROR',
+      status: 502,
+      message: appendRefundText(
+        '视频生成服务网关临时异常，系统没有拿到有效创建结果。请稍后刷新页面再试；如果连续出现，请联系管理员查看生成服务状态。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderResponseFormatError(rawMessage)) {
+    return {
+      code: 'PROVIDER_RESPONSE_FORMAT_ERROR',
+      status: 502,
+      message: appendRefundText(
+        '视频生成服务返回的数据不完整，系统无法确认创建结果。请先刷新任务列表确认是否已有任务；确认没有后再重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderTransactionConflictError(rawMessage)) {
+    return {
+      code: 'PROVIDER_TRANSACTION_CONFLICT',
+      status: 503,
+      message: appendRefundText(
+        '系统保存任务时发生短暂数据冲突，本次请求没有正常完成。请刷新页面后重试；如果连续出现，请联系管理员按提交时间排查。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isProviderMissingTaskIdError(rawMessage)) {
+    return {
+      code: 'MISSING_PROVIDER_TASK_ID',
+      status: 502,
+      message: appendRefundText(
+        '视频生成服务没有返回任务号，系统无法确认任务是否创建成功。请先刷新任务列表确认；确认没有任务后再重新提交。',
+        includeRefundText,
+      ),
+    };
+  }
+
+  if (isNextServerActionVersionMismatchError(rawMessage)) {
+    return {
+      code: 'PAGE_VERSION_MISMATCH',
+      status: 409,
+      message: appendRefundText(
+        '页面版本已更新，当前浏览器还停留在旧页面，和服务器新版本对不上。请刷新页面后重新提交；刷新前不要重复点击提交。',
         includeRefundText,
       ),
     };
