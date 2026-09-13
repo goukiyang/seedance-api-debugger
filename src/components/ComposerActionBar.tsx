@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { ParamChip } from '@/components/ParamChip';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution } from '@/types';
+import { seedanceRatioFollowsFirstFrame } from '@/lib/provider/seedance-models';
 import { GENERATION_MODE_LABELS, RATIO_LABELS, RATIO_OPTIONS, DURATION_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 
 export type ComposerSelectOption = {
@@ -119,6 +120,9 @@ export function ComposerActionBar({
   const [showAuxiliaryMenu, setShowAuxiliaryMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
+  const followsFirstFrame = seedanceRatioFollowsFirstFrame(selectedModel, generationMode);
+  const ratioLocked = lockedRatio || followsFirstFrame;
+  const ratioLabel = followsFirstFrame ? '跟随首帧' : ratio;
   const [showResolutionMenu, setShowResolutionMenu] = useState(false);
   const shouldShowProviderStatus = Boolean(providerStatus && providerStatus.visible !== false);
 
@@ -296,13 +300,13 @@ export function ComposerActionBar({
         {/* 比例选择 */}
         <div className="composer-chip-wrap">
           <ParamChip
-            label={ratio}
-            dropdown={!lockedRatio}
-            disabled={lockedRatio}
-            title={lockedRatio ? lockReason : undefined}
-            onClick={lockedRatio ? undefined : () => setShowRatioMenu(!showRatioMenu)}
+            label={ratioLabel}
+            dropdown={!ratioLocked}
+            disabled={ratioLocked}
+            title={followsFirstFrame ? 'Seedance 2.5 首尾帧的画面比例由首帧决定；需要固定比例时，请先调整首帧图片。' : lockedRatio ? lockReason : undefined}
+            onClick={ratioLocked ? undefined : () => setShowRatioMenu(!showRatioMenu)}
           />
-          {showRatioMenu && !lockedRatio && (
+          {showRatioMenu && !ratioLocked && (
             <>
               <div className="composer-chip-dropdown-backdrop" onClick={() => setShowRatioMenu(false)} />
               <div className="composer-chip-dropdown">
@@ -389,7 +393,7 @@ export function ComposerActionBar({
               {effectiveModelLabel}
               {hasAuxiliaryOptions && effectiveAuxiliaryLabel ? ` · ${effectiveAuxiliaryLabel}` : ''}
               {' · '}
-              {GENERATION_MODE_LABELS[generationMode]} · {ratio} · {duration}s · {resolution}
+              {GENERATION_MODE_LABELS[generationMode]} · {ratioLabel} · {duration}s · {resolution}
               {shouldShowProviderStatus && providerStatus && (
                 <em
                   className={`composer-provider-status-summary composer-provider-status-summary-${providerStatus.tone}`}

@@ -43,6 +43,17 @@ async function assertProviderPayloadModel() {
     assert.ok(capture.payload, 'Provider smoke should capture request payload');
     assert.equal(capture.payload.model, SEEDANCE_2_5_MODEL_ID, 'Provider payload must use selected Seedance 2.5 model');
     assert.equal(capture.payload.apiKey, 'smoke-key', 'Provider smoke should still send configured API key');
+    assert.equal(capture.payload.ratio, '16:9', '2.5 reference mode preserves the requested ratio');
+    for (const model of [SEEDANCE_2_0_MODEL_ID, SEEDANCE_2_5_MODEL_ID]) {
+      for (const lastFrame of [undefined, 'https://example.test/last.jpg']) {
+        await createVideoTask({
+          prompt: 'smoke', generation_mode: 'first_last_frame', model,
+          first_frame_url: 'https://example.test/first.jpg', last_frame_url: lastFrame,
+          ratio: '16:9', duration: 4, resolution: '480p', generate_audio: false,
+        });
+        assert.equal(capture.payload?.ratio, model === SEEDANCE_2_5_MODEL_ID ? 'adaptive' : '16:9');
+      }
+    }
   } finally {
     globalThis.fetch = originalFetch;
     if (previousApiKey == null) delete process.env.SEEDANCE_API_KEY;

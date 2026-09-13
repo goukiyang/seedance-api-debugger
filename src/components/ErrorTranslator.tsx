@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { providerReferenceNumberFromError } from '@/lib/provider/error-message';
+import { isProviderFirstFrameRatioError, providerReferenceNumberFromError } from '@/lib/provider/error-message';
 
 // ---- Types ----
 
@@ -77,6 +77,14 @@ function hasStatusCodeToken(error: string, code: number) {
 }
 
 export function translateError(error: string, debugInfo?: DebugInfo): TranslatedError | null {
+  if (isProviderFirstFrameRatioError(error)) {
+    return {
+      code: 'FIRST_FRAME_RATIO_REQUIRED',
+      title: '画面比例需跟随首帧',
+      reasons: ['当前首帧或首尾帧模式不接受固定画面比例。', '请使用“跟随首帧”后重新提交；需要固定比例时，请先调整首帧图片的比例。'],
+      actions: [{ label: '重新提交', action: 'retry' }, { label: '复制错误', action: 'copy' }],
+    };
+  }
   const lower = error.toLowerCase();
   const ctx = debugInfo?.providerContext;
   const diags = debugInfo?.referenceImageDiagnostics;

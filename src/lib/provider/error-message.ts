@@ -62,6 +62,15 @@ function normalizedLower(message: string | null | undefined) {
   return (message || '').toLowerCase();
 }
 
+export function isProviderFirstFrameRatioError(message: string | null | undefined) {
+  const lower = normalizedLower(message);
+  return lower.includes('first_frame_ratio_required')
+    || lower.includes('首尾帧模式的画面比例必须跟随首帧')
+    || (lower.includes('invalidparameter.tasktypeconstraint')
+      && lower.includes('ratio')
+      && lower.includes('output ratio follows the first-frame image'));
+}
+
 export function providerReferenceNumberFromError(message: string | null | undefined) {
   const raw = message || '';
   const contentMatch = raw.match(/content\[(\d+)\]/i);
@@ -289,6 +298,7 @@ export function isH3UnsupportedLoraNodeTypeError(message: string | null | undefi
 
 export type ProviderCreateFailureUserMessage = {
   code:
+    | 'FIRST_FRAME_RATIO_REQUIRED'
     | 'REFERENCE_MEDIA_TOO_SMALL'
     | 'REFERENCE_IMAGE_PRIVACY_SENSITIVE'
     | 'REFERENCE_IMAGE_TOO_LARGE'
@@ -328,6 +338,14 @@ export function providerFailureUserMessage(
   options: { includeRefundText?: boolean; fallbackCode?: 'PROVIDER_CREATE_FAILED' | 'PROVIDER_TASK_FAILED' } = {},
 ): ProviderCreateFailureUserMessage {
   const includeRefundText = options.includeRefundText === true;
+
+  if (isProviderFirstFrameRatioError(rawMessage)) {
+    return {
+      code: 'FIRST_FRAME_RATIO_REQUIRED',
+      status: 400,
+      message: appendRefundText('首帧或首尾帧模式的画面比例必须跟随首帧，不能指定固定比例。请使用“跟随首帧”后重新提交；如需固定比例，请先将首帧图片调整为目标比例。', includeRefundText),
+    };
+  }
 
   if (isProviderReferenceMediaTooSmallError(rawMessage)) {
     const subject = referenceLabel(rawMessage, '参考素材');

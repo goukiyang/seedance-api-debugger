@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-09-14 - Seedance 2.5 首尾帧比例约束
+
+- 后台两次创建失败原文均为 `InvalidParameter.TaskTypeConstraint`，明确指出首帧/首尾帧的比例跟随首帧；不是上传失败或版权拒绝。任务 `cmu03wuci091t4ebl3mkekeol`、`cmu04r3is092u4eblqq5yq72m` 各 54 点均有退款流水。
+- 修复限定为 2.5 的 `first_last_frame`：Provider 参数采用 `adaptive`；比例控件显示“跟随首帧”，保留其他模式的原有选择。任务业务比例保留原值供视频卡锁定校验使用，Provider 快照分别记录请求比例和实际自适应参数，不能提前覆盖业务比例。中文分类同时覆盖原始响应与已翻译文本。
+- 不自动重新生成或重写历史账目。全站审计因用户要求优先处理此故障而暂停，尚未完成，不作全站通过结论。
+
 ## 2026-09-07 - 报错必须按原始错误归类，不能把相邻日志强行关联
 
 - 问题/背景：生成页截图显示通用“创建失败”，但截图提示词没有对应的任务或 Provider 请求记录；日志中虽存在 `Failed to find Server Action ... older or newer deployment`，时间却不能证明它就是截图根因。

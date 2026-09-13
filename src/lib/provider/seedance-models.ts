@@ -9,6 +9,10 @@ export const SEEDANCE_2_0_MODEL_ID = 'dreamina-seedance-2-0-260128';
 export const SEEDANCE_2_5_MODEL_ID = 'dreamina-seedance-2-5-260628';
 export const DEFAULT_SEEDANCE_VIDEO_MODEL_ID = SEEDANCE_2_0_MODEL_ID;
 
+export function seedanceRatioFollowsFirstFrame(model: string | null | undefined, mode: string): boolean {
+  return model === SEEDANCE_2_5_MODEL_ID && mode === 'first_last_frame';
+}
+
 export const SEEDANCE_VIDEO_MODEL_OPTIONS: SeedanceVideoModelOption[] = [
   {
     id: SEEDANCE_2_0_MODEL_ID,

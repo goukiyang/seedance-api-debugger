@@ -15,6 +15,7 @@ import {
   DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
   SEEDANCE_VIDEO_MODEL_OPTIONS,
   resolveSeedanceVideoModel,
+  seedanceRatioFollowsFirstFrame,
   type SeedanceVideoModelOption,
 } from './seedance-models';
 
@@ -340,7 +341,9 @@ export async function createVideoTask(
   if (input.duration) {
     payload.duration = input.duration;
   }
-  if (input.ratio) {
+  if (seedanceRatioFollowsFirstFrame(model, input.generation_mode)) {
+    payload.ratio = 'adaptive';
+  } else if (input.ratio) {
     payload.ratio = input.ratio;
   }
   if (input.resolution) {
@@ -371,7 +374,7 @@ export async function createVideoTask(
   console.log(`Mode:      ${input.generation_mode}`);
   console.log(`Prompt:    ${input.prompt?.slice(0, 100)}...`);
   console.log(`Duration:  ${input.duration || 'default'}s`);
-  console.log(`Ratio:     ${input.ratio || 'default'}`);
+  console.log(`Ratio:     ${payload.ratio || 'default'}`);
   console.log(`Resolution: ${input.resolution || 'default'}`);
   console.log(`Seed:      ${input.seed ?? 'random'}`);
   console.log(`ClientReq: ${clientRequestId || '(none)'}`);

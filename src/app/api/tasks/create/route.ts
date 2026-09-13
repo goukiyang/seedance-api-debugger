@@ -10,7 +10,7 @@ import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspac
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
-import { parseSeedanceVideoModel } from '@/lib/provider/seedance-models';
+import { parseSeedanceVideoModel, seedanceRatioFollowsFirstFrame } from '@/lib/provider/seedance-models';
 import {
   H3_VIDEO_PROVIDER,
   H3RequestError,
@@ -1315,7 +1315,9 @@ export async function POST(request: NextRequest) {
             size_bytes: item.size_bytes,
           })) || [],
         }
-      : { model: selectedModel, content_item_count: content.length, referenceCount: preparedImages.length }),
+      : { model: selectedModel, content_item_count: content.length, referenceCount: preparedImages.length,
+          requested_ratio: ratio,
+          ratio: seedanceRatioFollowsFirstFrame(selectedModel, generationMode) ? 'adaptive' : ratio }),
   });
   const taskParams = {
     provider: requestedProvider,
