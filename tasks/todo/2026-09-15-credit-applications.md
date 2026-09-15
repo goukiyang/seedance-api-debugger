@@ -12,7 +12,7 @@
 - [x] T2. 顶部二级弹窗、记录、审批备用入口；姓名带头像；低于 500 仅在提交时检查，审批显示最新可用（代码与构建通过，真实页面待验）。
 - [x] T3. 飞书现代 card.action.trigger 签名、加密、租户/应用/审批人/nonce 校验；选择额度后再次确认；消息失败重试不重复发分（本地协议测试，手机联调待验）。
 - [ ] T4. 核对生产审批人稳定账号 ID、同一飞书应用的身份、机器人权限和固定回调；配置缺失保持关闭，不伪装已开放。
-- [ ] T5. 全部修改后统一运行隔离数据库专项测试、类型检查、构建；独立审查后聚焦提交推送。
+- [x] T5. 全部修改后统一运行隔离数据库专项测试、类型检查、构建；独立审查后聚焦提交推送（候选代码 c3a443d7e5086f695f9191d61841f76ff22cf9b8，已推送独立分支，非上线版本）。
 - [ ] T6. 数据备份、兼容迁移、候选构建、可回退发布、定时发送服务、正式页面与手机实测；确认实际发放测试对象后测试，不擅自向真实用户发积分。
 
 复用：现有 getCreditSummary、CreditAccount、CreditLedger、站内 Notification、UserIdentityBadge 和原生 dialog，无新增依赖。已读飞书官方 Node SDK dispatcher/request-handle.ts（https://github.com/larksuite/node-sdk/blob/main/dispatcher/request-handle.ts），仅参考协议，以 Node crypto 实现严格校验。已读服务器 ArtReview relay 源码，不直接复用其业务配置，防跨项目串线。
