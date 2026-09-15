@@ -18,6 +18,7 @@ export const showLegacyVideoWorkbenchEntry = false;
 export const shellRoutes = [
   '/workbench',
   '/account',
+  '/points',
   '/notifications',
   '/assets',
   '/templates',
