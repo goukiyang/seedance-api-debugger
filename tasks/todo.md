@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [ ] 2026-09-15：积分申请与飞书审批，正文见 `tasks/todo/2026-09-15-credit-applications.md`。
 - [ ] 2026-08-22：外部用户权限收口与风险闭环，正文见 `tasks/todo/2026-08-22-external-access-guard.md`。
 - [x] 2026-08-16：Seedance 2.5 按 2.0 的 1.5 倍扣费，正文见 `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`。
 - [x] 2026-08-16：H3 LoRA 下拉选择闭环，正文见 `tasks/todo/2026-08-16-h3-lora-selector.md`。

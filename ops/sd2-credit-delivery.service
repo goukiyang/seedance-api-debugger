@@ -1,0 +1,14 @@
+[Unit]
+Description=SD2 credit request notification delivery
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+EnvironmentFile=/srv/video-api-debugger/app/.env
+ExecStart=/usr/bin/env node --import tsx scripts/process-credit-request-deliveries.ts
+TimeoutStartSec=240
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

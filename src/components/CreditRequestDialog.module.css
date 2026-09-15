@@ -1,0 +1,20 @@
+.dialog { width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 48px)); margin: auto; padding: 0; border: 1px solid #374246; border-radius: 8px; background: #111719; color: #e8eded; }
+.dialog::backdrop { background: rgb(4 8 10 / 65%); }
+.header { display: flex; gap: 12px; align-items: center; padding: 18px 20px; border-bottom: 1px solid #374246; }
+.header h2 { flex: 1; font-size: 20px; margin: 0; }
+.header button, .balance button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; background: transparent; color: inherit; border: 1px solid #465457; border-radius: 6px; cursor: pointer; }
+.body { padding: 20px; overflow-wrap: anywhere; }
+.body h3 { font-size: 15px; margin: 24px 0 12px; }
+.body p { margin: 12px 0; line-height: 1.6; }
+.body label { display: block; margin: 12px 0 6px; }
+.body textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #59666a; border-radius: 6px; background: #1b2225; color: inherit; resize: vertical; font: inherit; }
+.balance, .row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.balance strong { font-size: 22px; }
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+.actions span, .body small { color: #a7b3b7; font-size: 12px; }
+.list { padding: 0; margin: 0; list-style: none; }
+.list li { padding: 16px 0; border-top: 1px solid #374246; }
+.row strong { font-size: 13px; }
+.error { color: #ffafa5; }
+.dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.dialog button:focus-visible, .body textarea:focus-visible { outline: 2px solid #7acfc2; outline-offset: 2px; }

@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry SD2 credit request notifications
+
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=15s
+Unit=sd2-credit-delivery.service
+
+[Install]
+WantedBy=timers.target

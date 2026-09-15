@@ -252,6 +252,8 @@ model User {
   generated_review_cards  ReviewCard[]         @relation("ReviewCardGenerator")
   feedbacks               Feedback[]
   preferences             UserPreference[]
+  credit_requests         CreditRequest[] @relation("CreditRequester")
+  credit_decisions        CreditRequest[] @relation("CreditDecisionMaker")
 
   @@index([username])
   @@index([email])
@@ -260,6 +262,52 @@ model User {
   @@index([status])
   @@index([feishu_union_id])
   @@index([feishu_tenant_key])
+}
+
+model CreditRequest {
+  id                  String @id @default(cuid())
+  user_id             String
+  approver_id         String
+  pending_key         String? @unique
+  status              String @default("pending")
+  purpose             String
+  available_at_submit Float
+  amount              Int?
+  decision_reason     String?
+  nonce               String
+  proposed_amount     Int?
+  confirmation_nonce  String?
+  confirmation_until  DateTime?
+  applicant_open_id   String
+  approver_open_id    String
+  tenant_key          String
+  app_id              String
+  created_at          DateTime @default(now())
+  decided_at          DateTime?
+  updated_at          DateTime @updatedAt
+  requester           User @relation("CreditRequester", fields: [user_id], references: [id], onDelete: Restrict)
+  approver            User @relation("CreditDecisionMaker", fields: [approver_id], references: [id], onDelete: Restrict)
+  deliveries          CreditRequestDelivery[]
+  @@index([user_id, created_at])
+  @@index([approver_id, status, created_at])
+}
+
+model CreditRequestDelivery {
+  id             String @id @default(cuid())
+  request_id     String
+  kind           String
+  status         String @default("pending")
+  payload_json   String
+  attempts       Int @default(0)
+  next_attempt   DateTime @default(now())
+  lease_until    DateTime?
+  lease_token    String?
+  error_code     String?
+  sent_at        DateTime?
+  created_at     DateTime @default(now())
+  request        CreditRequest @relation(fields: [request_id], references: [id], onDelete: Restrict)
+  @@unique([request_id, kind])
+  @@index([status, next_attempt])
 }
 
 model PlatformSetting {

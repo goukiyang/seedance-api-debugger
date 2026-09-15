@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import AccountMenu, { type AccountMenuUser } from './AccountMenu';
 import NotificationBell from './NotificationBell';
+import CreditRequestDialog from './CreditRequestDialog';
 import { isNavItemVisible, topbarQuickItems } from '@/lib/navigation';
 
 export interface ComposerCreditSummary {
@@ -17,10 +18,6 @@ interface ComposerTopbarProps {
   loadingUser?: boolean;
   credits?: ComposerCreditSummary | null;
   onSessionClear?: () => void;
-}
-
-function formatCredit(value: number | undefined) {
-  return Math.max(0, Math.floor(value || 0)).toString();
 }
 
 function isActivePath(pathname: string, item: typeof topbarQuickItems[number]) {
@@ -55,14 +52,7 @@ export default function ComposerTopbar({
         </nav>
       </div>
       <div className="composer-topbar-right">
-        {credits && (
-          <div
-            className="composer-topbar-credit"
-            title={`冻结 ${formatCredit(credits.frozen_credits)} 点，本月已用 ${formatCredit(credits.monthly_used)} 点`}
-          >
-            可用 {formatCredit(credits.available)}
-          </div>
-        )}
+        {user && <CreditRequestDialog />}
         <NotificationBell enabled={Boolean(user && !loadingUser)} />
         <AccountMenu
           user={user}
