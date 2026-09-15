@@ -1,0 +1,17 @@
+[Unit]
+Description=Feishu shared callback routing for SD2 credits
+After=network-online.target artreview-feishu-relay.service sd2-gray.service
+
+[Service]
+User=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+EnvironmentFile=/home/gouki/10-sites/artreview-pro/shared/env/artreview-pro.env
+ExecStart=/usr/bin/node /srv/video-api-debugger/app/ops/feishu-credit-gateway.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

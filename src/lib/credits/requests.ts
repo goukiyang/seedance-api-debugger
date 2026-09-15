@@ -11,7 +11,8 @@ export function creditRequestsConfigured() {
   return process.env.CREDIT_REQUESTS_ENABLED === 'true'
     && Boolean(process.env.CREDIT_REQUEST_APPROVER_ID && process.env.FEISHU_APP_ID
       && process.env.FEISHU_APP_SECRET && process.env.FEISHU_ALLOWED_TENANT_KEY
-      && process.env.FEISHU_CREDIT_ENCRYPT_KEY && process.env.FEISHU_CREDIT_VERIFICATION_TOKEN);
+      && (process.env.CREDIT_CALLBACK_MODE === 'relay-v1'
+        || (process.env.FEISHU_CREDIT_ENCRYPT_KEY && process.env.FEISHU_CREDIT_VERIFICATION_TOKEN)));
 }
 
 function active(user: User | null): asserts user is User {
