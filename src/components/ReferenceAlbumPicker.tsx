@@ -258,13 +258,16 @@ export function ReferenceAlbumPicker({
                       <div className="album-picker-media-placeholder">音频</div>
                     )}
                   </button>
-                  <button
-                    type="button"
-                    className="album-picker-image-select"
-                    onClick={() => toggleImage(image.id)}
-                  >
-                    {checked ? '已选择' : isAlreadyInWorkspace ? '已在工作台' : `${typeLabel} ${image.sort_order + 1}`}
-                  </button>
+                  <label className="album-picker-image-select">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleImage(image.id)}
+                      aria-label={`选择${image.asset?.file_name || `${typeLabel} ${image.sort_order + 1}`}`}
+                    />
+                    <span>{checked ? `已选 ${selectedImageIds.indexOf(image.id) + 1}` : '选择'}</span>
+                    {isAlreadyInWorkspace && <small>已在工作台</small>}
+                  </label>
                 </article>
               );
             })}

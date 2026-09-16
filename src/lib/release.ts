@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新增积分申请，可在飞书选择额度、确认发放并接收结果通知。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '参考素材新增清晰的勾选入口和选中顺序，预览与选择分开操作。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);
