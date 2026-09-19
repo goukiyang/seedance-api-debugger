@@ -648,6 +648,11 @@ function AssetsPageContent() {
   const [targetAlbumId, setTargetAlbumId] = useState(() => readSavedTargetAlbumId());
   const [moving, setMoving] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDownloadStage, setBulkDownloadStage] = useState('');
+  const [readyVideoDownload, setReadyVideoDownload] = useState<{ url: string; fileName: string } | null>(null);
+  useEffect(() => () => {
+    if (readyVideoDownload) URL.revokeObjectURL(readyVideoDownload.url);
+  }, [readyVideoDownload]);
   const [aiMediaKitReady, setAiMediaKitReady] = useState<boolean | null>(null);
   const [enhanceMenuItemId, setEnhanceMenuItemId] = useState<AssetLibraryItemId | null>(null);
   const [enhanceResolution, setEnhanceResolution] = useState<EnhanceResolution>('1080p');
@@ -1231,15 +1236,18 @@ function AssetsPageContent() {
       return;
     }
     setBulkDownloading(true);
+    setReadyVideoDownload(null);
     setError('');
     setMessage('');
     try {
-      const result = await downloadBulkVideoZip({ taskIds });
-      setMessage(`已开始下载视频包：${result.success} 个成功${result.failed ? `，${result.failed} 个失败见 manifest` : ''}`);
+      const result = await downloadBulkVideoZip({ taskIds }, setBulkDownloadStage);
+      setReadyVideoDownload({ url: URL.createObjectURL(result.blob), fileName: result.fileName });
+      setMessage(`视频包已准备好：${result.success} 个视频${result.failed ? `，${result.failed} 个失败，详情见包内清单` : ''}。已请求浏览器下载；若未开始，请点击“保存视频包”。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量下载失败');
     } finally {
       setBulkDownloading(false);
+      setBulkDownloadStage('');
     }
   };
 
@@ -1730,6 +1738,16 @@ function AssetsPageContent() {
         </div>
       )}
 
+      {(bulkDownloading || readyVideoDownload) && (
+        <div className="asset-library-notice" role="status">
+          {bulkDownloading ? <span>{bulkDownloadStage}</span> : readyVideoDownload && (
+            <a href={readyVideoDownload.url} download={readyVideoDownload.fileName}>
+              <Download size={15} /> 保存视频包
+            </a>
+          )}
+        </div>
+      )}
+
       {selectedIds.length > 0 && (
         <section className="asset-library-bulkbar">
           <div>
@@ -1743,7 +1761,7 @@ function AssetsPageContent() {
             <button type="button" onClick={clearSelection}>取消选择</button>
             <button type="button" onClick={handleDownload} disabled={bulkDownloading || downloadableTaskIds.length === 0}>
               <Download size={15} />
-              下载视频（{downloadableTaskIds.length}/{selectedIds.length}）
+              {bulkDownloading ? bulkDownloadStage : `下载视频（${downloadableTaskIds.length}/${selectedIds.length}）`}
             </button>
             <button type="button" onClick={handleAddImagesToWorkspace} disabled={moving || reusableImageItems.length === 0}>
               <ImagePlus size={15} />

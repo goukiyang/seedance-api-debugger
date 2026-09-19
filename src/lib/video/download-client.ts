@@ -6,6 +6,7 @@ export type BulkVideoDownloadRequest = {
 };
 
 export type BulkVideoDownloadClientResult = {
+  blob: Blob;
   fileName: string;
   total: number;
   success: number;
@@ -38,7 +39,8 @@ function triggerDownload(blob: Blob, fileName: string) {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  // Keep the object URL alive until the browser has accepted the download.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 async function errorMessageFromResponse(response: Response) {
@@ -68,7 +70,9 @@ function networkDownloadErrorMessage(error: unknown) {
 
 export async function downloadBulkVideoZip(
   payload: BulkVideoDownloadRequest,
+  onStage?: (stage: string) => void,
 ): Promise<BulkVideoDownloadClientResult> {
+  onStage?.('正在打包视频…');
   let response: Response;
   try {
     response = await fetch('/api/video/bulk-download', {
@@ -86,9 +90,18 @@ export async function downloadBulkVideoZip(
   }
 
   const fileName = fileNameFromDisposition(response.headers.get('content-disposition'));
-  triggerDownload(await response.blob(), fileName);
+  onStage?.('正在接收视频包…');
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch {
+    throw new Error('视频包接收中断，请重新下载');
+  }
+  if (!blob.size) throw new Error('收到的视频包为空，请重新下载');
+  triggerDownload(blob, fileName);
 
   return {
+    blob,
     fileName,
     total: Number(response.headers.get('x-bulk-download-total') || 0),
     success: Number(response.headers.get('x-bulk-download-success') || 0),
