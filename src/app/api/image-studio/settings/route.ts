@@ -1,0 +1,36 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSession, AuthError } from '@/lib/auth/session';
+import { getAdminUser } from '@/lib/auth/api-helpers';
+import { getImageStudioSettings, saveImageStudioSettings, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/settings';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  const user = await getSession();
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  try {
+    const settings = await getImageStudioSettings();
+    return NextResponse.json(user.role === 'admin' ? settings : {
+      model: settings.model, revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch {
+    return NextResponse.json({ error: '读取设置失败，请重试' }, { status: 503 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const user = await getAdminUser(request);
+    const body = await request.json();
+    if (typeof body.context !== 'string' || body.context.length > 20000
+      || !IMAGE_STUDIO_MODELS.includes(body.model) || !Number.isInteger(body.revision) || body.revision < 0) {
+      return NextResponse.json({ error: '设置无效，上下文最多 20000 字' }, { status: 400 });
+    }
+    const settings = await saveImageStudioSettings(body, user.id);
+    if (!settings) return NextResponse.json({ error: '设置已在其他页面更新，请重新读取后修改' }, { status: 409 });
+    return NextResponse.json(settings);
+  } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: '保存失败，修改仍保留在当前页面，请重试' }, { status: 500 });
+  }
+}
