@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  try { return NextResponse.json(await listStudioTasks(user.id, request.nextUrl.searchParams.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } }); }
+  try { return NextResponse.json(await listStudioTasks(user.id, request.nextUrl.searchParams.get('cursor') || undefined, request.nextUrl.searchParams.get('moduleId') || undefined), { headers: { 'Cache-Control': 'no-store' } }); }
   catch { return NextResponse.json({ error: '生成记录读取失败，请重试' }, { status: 503 }); }
 }
 export async function POST(request: NextRequest) {

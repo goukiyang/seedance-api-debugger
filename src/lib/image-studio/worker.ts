@@ -2,13 +2,15 @@ import { prisma } from '@/lib/prisma';
 import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
 import { uploadAsset } from '@/lib/assets/storage';
 import { claimStudioTask, finishStudioTask } from './tasks';
-import { requestStudioImages } from './provider';
+import { requestStudioImages, StudioProviderError } from './provider';
 import { normalizeStudioImage, readStudioImage } from './media';
 
 export async function processStudioTask(generate: typeof requestStudioImages = requestStudioImages) {
   const task = await claimStudioTask();
   if (!task) return false;
   let providerStarted = false;
+  let stage = 'prepare';
+  const started = Date.now();
   try {
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
@@ -21,15 +23,26 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
       images.push({ bytes: await normalizeStudioImage(await readStudioImage(asset.original_url)), mimeType: 'image/png' });
     }
     providerStarted = true;
+    stage = 'provider';
     const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
-      prompt: `${task.context}\n\n---\n本次画面要求：\n${task.prompt}`, count: 1, images, signal: AbortSignal.timeout(300000) });
+      prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
+      count: 1, images, signal: AbortSignal.timeout(300000) });
+    stage = 'normalize';
     if (result.images[0].length > 28 * 1024 * 1024) throw new Error('生成图片过大');
     const bytes = await normalizeStudioImage(Buffer.from(result.images[0], 'base64'));
+    stage = 'save';
     const asset = await uploadAsset(bytes, `image-${task.id}.png`, 'image/png', task.owner_id);
+    stage = 'settle';
     await finishStudioTask(task, 'succeeded', { assetId: asset.assetId, usage: result.usage });
-  } catch {
+  } catch (error) {
+    const detail = error instanceof StudioProviderError ? error : null;
+    console.error('[image-studio]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage,
+      code: detail?.code || 'processing_failed', httpStatus: detail?.status, elapsedMs: Date.now() - started }));
+    const deliveryFailed = detail?.stage === 'download' || ['normalize', 'save', 'settle'].includes(stage);
     await finishStudioTask(task, providerStarted ? 'uncertain' : 'failed', { error: providerStarted
-      ? '本次未能交付图片，冻结积分已释放。上游结果未确认，重试会新建生成任务。'
+      ? deliveryFailed
+        ? '图片服务已返回结果，但图片保存失败，冻结积分已释放。请联系管理员；重新生成会再次请求上游。'
+        : '本次未能交付图片，冻结积分已释放。上游结果未确认，重试会新建生成任务。'
       : '参考图或图片服务暂不可用，冻结积分已释放。' });
   }
   return true;

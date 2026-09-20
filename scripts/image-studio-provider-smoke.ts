@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { requestStudioImages } from '../src/lib/image-studio/provider';
+import { requestStudioImages, StudioProviderError } from '../src/lib/image-studio/provider';
+import { readStudioImage } from '../src/lib/image-studio/media';
 
 async function main() {
   const requests: Array<{ url: string; init: RequestInit }> = [];
@@ -33,7 +34,25 @@ async function main() {
     assert.ok(error instanceof Error && !error.message.includes('secret'));
     return true;
   });
+  let downloads = 0;
+  const linkResponse = async () => Response.json({ data: [{ url: 'https://example.invalid/result.png?private=not-logged' }] });
+  const linked = await requestStudioImages(params, linkResponse, async (_url, signal) => {
+    downloads++; assert.equal(signal, params.signal); return Buffer.from('image');
+  });
+  assert.deepEqual(linked.images, ['aW1hZ2U=']); assert.equal(downloads, 1);
+  await assert.rejects(requestStudioImages(params, linkResponse, async () => { throw new Error('secret URL or key'); }), error => {
+    assert.ok(error instanceof StudioProviderError && error.stage === 'download' && !error.message.includes('secret')); return true;
+  });
+  await assert.rejects(requestStudioImages(params, async () => Response.json({ data: [{ url: 'http://127.0.0.1/private' }] })));
+  await assert.rejects(requestStudioImages(params, async () => Response.json({ data: [null] })));
+  await assert.rejects(readStudioImage('https://127.0.0.1/private'));
+  await assert.rejects(readStudioImage('https://169.254.169.254/latest/meta-data'));
+  await assert.rejects(readStudioImage('file:///etc/passwd'));
+  if (process.env.STUDIO_PUBLIC_DOWNLOAD_TEST === '1') {
+    const bytes = await readStudioImage('https://api.muskapis.com/logo.svg', AbortSignal.timeout(15000));
+    assert.ok(bytes.length > 0, 'real Node HTTPS lookup must accept the pinned address');
+  }
   assert.equal(requests.length, 2);
-  console.log('PASS: text/image payloads, model/count limits, empty output, sanitized upstream failure; no paid calls.');
+  console.log('PASS: text/image payloads, URL/base64 outputs, private-address rejection, limits, sanitized stage errors; no paid calls.');
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

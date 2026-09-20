@@ -8,7 +8,8 @@ import { isPrivateNetworkHost } from '@/lib/media/public-url';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
-export async function readStudioImage(url: string): Promise<Buffer> {
+export async function readStudioImage(url: string, signal?: AbortSignal): Promise<Buffer> {
+  signal?.throwIfAborted();
   const local = siteUploadPathFromUrl(url);
   if (local) {
     const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
@@ -26,6 +27,8 @@ export async function readStudioImage(url: string): Promise<Buffer> {
   // Pin the vetted address so DNS cannot change between validation and download.
   return new Promise((resolve, reject) => {
     const request = https.get(parsed, {
+      // The vetted lookup returns one IPv4 address, not an auto-family address list.
+      family: 4, signal,
       lookup: (_hostname, _options, callback) => callback(null, addresses[0].address, addresses[0].family),
     }, response => {
       if (response.statusCode !== 200) { response.resume(); reject(new Error('图片读取失败')); return; }

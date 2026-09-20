@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
 import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
+import { defaultStudioModuleId, validStudioModuleId } from './modules';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -12,17 +13,20 @@ export class StudioError extends Error {
 export function parseStudioRequest(body: Record<string, unknown>) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioError('提交内容无效');
   if (typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new StudioError('提交编号无效');
-  if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 12000) throw new StudioError('请输入 12000 字以内的画面描述');
+  if (typeof body.prompt !== 'string' || body.prompt.length > 12000) throw new StudioError('画面描述不能超过 12000 字');
   if (!Number.isInteger(body.count) || Number(body.count) < 1 || Number(body.count) > 8) throw new StudioError('生成张数必须为 1 到 8');
   if (!Number.isInteger(body.revision)) throw new StudioError('请刷新生成设置');
   if (!Array.isArray(body.referenceIds) || body.referenceIds.length > 2 || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError('最多使用两张有效参考图');
+  if (!body.prompt.trim() && !body.referenceIds.length) throw new StudioError('请添加参考图片或填写画面描述');
   return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), referenceIds: body.referenceIds as string[] };
 }
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>) {
   const input = parseStudioRequest(body);
+  const moduleId = body.moduleId;
+  if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
-  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined })).digest('hex');
+  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}) })).digest('hex');
   const previous = await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
@@ -31,7 +35,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或积分已更新，请重新读取设置后确认提交', 409);
   const price = settings.prices[settings.model];
-  if (price === null || !Number.isInteger(price) || price < 0 || price > 100000 || !settings.context.trim()) throw new StudioError('管理员尚未设置有效的生成规则和积分', 409);
+  if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置有效的生成积分', 409);
   if (!isMuskApiReady(await getMuskApiSettings())) throw new StudioError('图片服务尚未配置', 503);
   await prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
@@ -41,6 +45,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     const user = await tx.user.findUnique({ where: { id: ownerId } });
     if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);
+    const workspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
+    if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
+    const context = [settings.context.trim(), workspace?.context.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
+    if (!context) throw new StudioError('请管理员先设置通用上下文或模块上下文', 409);
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
     if (active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
     const references = await tx.asset.findMany({ where: { id: { in: input.referenceIds }, owner_id: ownerId, status: 'active', type: 'image' } });
@@ -49,8 +57,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const id = `${batchId}-${i}`;
       const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       await tx.imageStudioTask.create({ data: {
-        id, batch_id: batchId, owner_id: ownerId, ordinal: i + 1, fingerprint,
-        prompt: input.prompt, context: settings.context, revision: settings.revision, model: settings.model,
+        id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, ordinal: i + 1, fingerprint,
+        prompt: input.prompt, context, revision: settings.revision, model: settings.model,
         reference_ids: JSON.stringify(input.referenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       } });
       if (freeze) await tx.creditLedger.create({ data: {
@@ -94,8 +102,10 @@ export async function claimStudioTask() {
   return changed.count ? { ...candidate, status: 'running', lease_token: leaseToken } : null;
 }
 
-export async function listStudioTasks(ownerId: string, cursor?: string) {
-  const rows = await prisma.imageStudioTask.findMany({ where: { owner_id: ownerId },
+export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string) {
+  if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
+  const rows = await prisma.imageStudioTask.findMany({ where: { owner_id: ownerId,
+    ...(moduleId ? moduleId === defaultStudioModuleId(ownerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] } : { module_id: moduleId } : {}) },
     orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 25,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const items = rows.slice(0, 24);

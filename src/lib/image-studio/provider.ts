@@ -1,12 +1,20 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
+import { readStudioImage } from './media';
 
 export type StudioImageInput = { bytes: Uint8Array; mimeType: string };
+
+export class StudioProviderError extends Error {
+  constructor(public stage: 'request' | 'response' | 'download', public code: string, public status?: number) {
+    super(`图片服务处理失败（${code}）`);
+    this.name = 'StudioProviderError';
+  }
+}
 
 // Keep GPT image requests isolated from the existing Gemini/Seedream adapters.
 export async function requestStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal;
-}, fetcher: typeof fetch = fetch): Promise<{ images: string[]; usage: unknown }> {
+}, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
   if (params.images.length > 2) throw new Error('最多使用两张参考图');
@@ -28,12 +36,26 @@ export async function requestStudioImages(params: {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify({ model: params.model, prompt: params.prompt, n: params.count, output_format: 'png' });
   }
-  const response = await fetcher(url, { method: 'POST', headers, body, signal: params.signal });
-  if (!response.ok) throw new Error(`图片服务暂时未能完成请求（${response.status}），请勿连续重复提交`);
-  const value = await response.json();
-  const images = Array.isArray(value.data) ? value.data.map((item: { b64_json?: unknown }) => item.b64_json)
-    .filter((item: unknown): item is string => typeof item === 'string' && item.length > 0) : [];
-  if (!images.length) throw new Error('图片服务未返回可保存的图片');
-  if (images.length > params.count) throw new Error('图片服务返回数量异常');
+  let response: Response;
+  try { response = await fetcher(url, { method: 'POST', headers, body, signal: params.signal }); }
+  catch { throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network'); }
+  if (!response.ok) throw new StudioProviderError('request', 'http_error', response.status);
+  const value = await response.json().catch(() => { throw new StudioProviderError('response', 'invalid_json', response.status); });
+  if (!Array.isArray(value?.data) || !value.data.length) throw new StudioProviderError('response', 'empty_output', response.status);
+  if (value.data.length > params.count) throw new StudioProviderError('response', 'unexpected_count', response.status);
+  const images: string[] = [];
+  for (const item of value.data) {
+    if (typeof item?.b64_json === 'string' && item.b64_json.length) {
+      if (item.b64_json.length > 28 * 1024 * 1024) throw new StudioProviderError('response', 'image_too_large', response.status);
+      images.push(item.b64_json);
+    } else if (typeof item?.url === 'string' && item.url.length) {
+      try {
+        if (new URL(item.url).protocol !== 'https:') throw new Error('HTTPS required');
+        images.push((await readImage(item.url, params.signal)).toString('base64'));
+      } catch { throw new StudioProviderError('download', 'image_download_failed', response.status); }
+    } else {
+      throw new StudioProviderError('response', 'unsupported_output', response.status);
+    }
+  }
   return { images, usage: value.usage ?? null };
 }
