@@ -310,6 +310,34 @@ model CreditRequestDelivery {
   @@index([status, next_attempt])
 }
 
+model ImageStudioTask {
+  id             String   @id
+  batch_id       String
+  owner_id       String
+  ordinal        Int
+  fingerprint    String
+  prompt         String
+  context        String
+  revision       Int
+  model          String
+  reference_ids  String
+  unit_credits   Float
+  freeze_snapshot String?
+  status         String   @default("queued")
+  lease_token    String?
+  lease_until    DateTime?
+  asset_id       String?
+  error          String?
+  usage_json     String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  finished_at    DateTime?
+
+  @@index([owner_id, created_at])
+  @@index([status, created_at])
+  @@index([batch_id, owner_id])
+}
+
 model PlatformSetting {
   id         String   @id @default(cuid())
   key        String   @unique
