@@ -239,3 +239,22 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 ```
 
 统一diff：https://github.com/goukiyang/seedance-api-debugger/compare/1dd19fe1a72ee57fdd1571d6c7eb3a0f182a7dbf...96585c3901cab78a225f0aaa3397362040187149 。本地副本 `/tmp/sd2-image-modules-v0.4.0.diff`。未关闭的问题：无本轮阻塞项；历史失败图片无法按原响应追回，须由用户决定是否重新生成。
+
+## 14. A1-A6 图片生成闭环补强（2026-09-21，发布前）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| A1 | 比例选择与保存 | 常用/自定义比例、实际尺寸传递、模块/任务快照、旧请求兼容 | 本地实现与验证完成，待线上验收 |
+| A2 | 结果删除 | 本人软删除、二次确认、刷新不回插、Asset/积分流水保留 | 本地实现与验证完成，待线上验收 |
+| A3 | 生成结果进入资产库 | 复用既有 Asset 归档、权限和筛选；图片列表不依赖上传素材开关 | 本地实现与验证完成，待线上验收 |
+| A4 | 完整生成快照与重新生成 | 保存上下文/模块/提示词/模型/张数/比例/参考图等；恢复不自动提交扣费，未保存内容有保护 | 本地实现与隔离验证完成，待线上验收 |
+| A5 | 模块级模型与定价 | 模型/价格归属模块；管理员价格权限；服务端按当前模块规则计费，历史价格不影响新扣费 | 本地实现与隔离验证完成，待线上验收 |
+| A6 | 参考图上限 | 选择、上传、粘贴、保存、复现、服务端和 Provider 统一最多10张 | 代码/服务端/Provider smoke 完成；上游10张能力待供应商确认 |
+
+- 本轮新增迁移为纯增量列：模块 `model`、`prices_json`、`reproduce_task_id`，任务 `snapshot_json`；存量模块/任务按旧字段和全局历史默认值兼容，任务快照不回写。
+- 复现来源已持久化到模块并按当前账号校验；恢复后可退出历史模式，管理员修改上下文/模型/价格会退出；上传或保存中不能恢复；生成成功后清除历史绑定。
+- 资产库 generated-only 改用 `Asset EXISTS ImageStudioTask` 的参数化有界查询与 count，普通用户仍固定按本人资产权限筛选；删除生成记录只隐藏任务展示，不删共享 Asset 或积分流水。
+- 版本由 `0.5.0` 升为 `0.6.0`（SemVer MINOR），更新摘要通过既有 ReleaseNotice 唯一版本来源。
+- 验证通过：`npx prisma generate`；`npm run lint`（仅保留既有全库 warning）；定向 `tsc`；provider smoke；隔离 SQLite integration smoke（含跨设备模块 source、历史上下文/参考图强制、权限、幂等、结算/退款、PNG、软删）；候选 `npm run build`；精确范围 `git diff --check`。没有新增付费调用。
+- 固定只读审核线程复审通过，确认曾发现的 `saveModule(null)` 旧 revision 清除风险已修复；审核记录已追加到 `tasks/audit-001-review.md`。正式服务器发布、候选切换、线上页面与 A1/A2/A3/A4/A5/A6 浏览器证据待本节后续补记。
+- 上游风险已反馈主控：MuskAPIs 官方文档本轮只明确多图融合传两张，不能把文档示例推断为供应商保证十张；本轮不做真实付费十图测试，不在产品记录中宣称上游已支持十张。

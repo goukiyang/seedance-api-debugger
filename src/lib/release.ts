@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成可选择常用比例，自动保存自定义比例；生成图片新增删除按钮和二次确认，保留其他模块与参考图。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成支持模块级模型与计费规则、最多 10 张参考图，并为每张结果保存完整设置快照，生成结果可在资产库复用。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

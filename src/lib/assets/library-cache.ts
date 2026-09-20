@@ -3,7 +3,7 @@ const STORE_NAME = 'asset_library_pages';
 const DB_VERSION = 1;
 const CACHE_TTL_MS = 5 * 60_000;
 
-export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 1;
+export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 2;
 
 type AssetLibraryCacheKeyInput = {
   view?: string;
@@ -13,6 +13,7 @@ type AssetLibraryCacheKeyInput = {
   type: string;
   enhance?: string;
   includeUploads: boolean;
+  includeGenerated?: boolean;
   status: string;
   sort: string;
   groupBy: string;
@@ -112,6 +113,7 @@ export function createAssetLibraryCacheKey(input: AssetLibraryCacheKeyInput) {
     input.type,
     input.enhance || '-',
     input.includeUploads ? 'uploads' : 'no-uploads',
+    input.includeGenerated ? 'generated' : 'no-generated',
     input.status,
     input.sort,
     input.groupBy,

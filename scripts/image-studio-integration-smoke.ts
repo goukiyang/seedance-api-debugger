@@ -31,7 +31,8 @@ async function main() {
   await assert.rejects(submitStudioBatch(user.id, { ...input, prompt: 'changed' }));
   await assert.rejects(submitStudioBatch(user.id, { ...input, requestId: 'another-request-1234', referenceIds: ['not-owned'] }));
   assert.throws(() => parseStudioRequest({ ...input, count: 9 }));
-  assert.throws(() => parseStudioRequest({ ...input, referenceIds: ['a', 'b', 'c'] }));
+  assert.throws(() => parseStudioRequest({ ...input, referenceIds: Array.from({ length: 11 }, () => 'a') }));
+  assert.equal(parseStudioRequest({ ...input, referenceIds: Array.from({ length: 10 }, (_, index) => `asset-${index}`) }).referenceIds.length, 10);
   await saveImageStudioSettings({ ...config, context: 'New context' }, user.id);
   const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ff0000' } }).png().toBuffer();
   await processStudioTask(async args => {
@@ -61,10 +62,13 @@ async function main() {
   assert.equal(parseStudioRequest({ ...input, prompt: '', referenceIds: ['image'] }).prompt, '');
   const moduleId = randomUUID();
   const created = await saveStudioModule(user.id, { id: moduleId }, true);
-  const moduleBody = { id: moduleId, revision: created.revision, name: 'Saved module', prompt: '', count: 1, aspectRatio: '5:3', referenceIds: [], context: 'Module context' };
+  const moduleBody = { id: moduleId, revision: created.revision, name: 'Saved module', prompt: '', count: 1, aspectRatio: '5:3', model: 'gpt-image-2.5-sunburst', prices: { 'gpt-image-2.5-flare': 7, 'gpt-image-2.5-sunburst': 9 }, referenceIds: [], context: 'Module context' };
   await assert.rejects(saveStudioModule(user.id, moduleBody), /仅管理员/);
   const saved = await saveStudioModule(user.id, moduleBody, false, true);
   assert.equal(saved.aspectRatio, '5:3');
+  assert.equal(saved.model, 'gpt-image-2.5-sunburst');
+  assert.equal(saved.unitCredits, 9);
+  await assert.rejects(saveStudioModule(user.id, { ...moduleBody, revision: saved.revision, context: undefined, prices: { 'gpt-image-2.5-flare': 1, 'gpt-image-2.5-sunburst': 1 } }), /普通用户不能修改模块积分/);
   await changeStudioRatio(user.id, '10:6');
   await changeStudioRatio(user.id, '5:3');
   assert.deepEqual(await listStudioRatios(user.id), ['5:3']);
@@ -86,9 +90,15 @@ async function main() {
   await fs.mkdir(path.join(working, 'public/uploads'), { recursive: true });
   await fs.writeFile(path.join(working, 'public/uploads/reference.png'), png);
   const reference = await prisma.asset.create({ data: { owner_id: user.id, type: 'image', original_url: '/uploads/reference.png', file_name: 'reference.png', mime_type: 'image/png', file_size: png.length } });
+  const referenceTwo = await prisma.asset.create({ data: { owner_id: user.id, type: 'image', original_url: '/uploads/reference.png', file_name: 'reference-two.png', mime_type: 'image/png', file_size: png.length } });
   const moduleBatch = await submitStudioBatch(user.id, { ...input, requestId: 'module-image-only-1234', moduleId, prompt: '', count: 1, aspectRatio: '5:3', referenceIds: [reference.id], revision: latest.revision });
   await assert.rejects(submitStudioBatch(user.id, { ...input, requestId: 'module-image-only-1234', moduleId, prompt: '', count: 1, aspectRatio: '4:3', referenceIds: [reference.id], revision: latest.revision }), /其他请求/);
-  assert.equal((await prisma.imageStudioTask.findFirstOrThrow({ where: { batch_id: moduleBatch } })).context, 'New context\n\n---\n模块上下文：\nModule context');
+  const moduleTaskBeforeRun = await prisma.imageStudioTask.findFirstOrThrow({ where: { batch_id: moduleBatch } });
+  assert.equal(moduleTaskBeforeRun.context, 'New context\n\n---\n模块上下文：\nModule context');
+  const moduleSnapshot = JSON.parse(moduleTaskBeforeRun.snapshot_json || '{}');
+  assert.equal(moduleSnapshot.model, 'gpt-image-2.5-sunburst');
+  assert.equal(moduleSnapshot.unitCredits, 9);
+  assert.equal(moduleSnapshot.referenceImages[0].id, reference.id);
   await processStudioTask(async args => {
     assert.equal(args.size, '1360x816');
     assert.equal(args.images.length, 1); assert.ok(args.prompt.endsWith('Module context')); assert.ok(!args.prompt.includes('本次画面要求'));
@@ -98,8 +108,24 @@ async function main() {
   assert.equal((await listStudioTasks(user.id, undefined, defaultStudioModuleId(user.id))).tasks.length, 3);
   assert.equal((await listStudioTasks(stranger.id, undefined, moduleId)).tasks.length, 0);
   assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks[0].status, 'succeeded');
+  assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks[0].snapshot.referenceImages[0].id, reference.id);
+  const historicalTask = await prisma.imageStudioTask.findFirstOrThrow({ where: { batch_id: moduleBatch } });
+  const changedModule = await saveStudioModule(user.id, { ...moduleBody, revision: saved.revision, context: 'Current module context', reproduceFromTaskId: historicalTask.id }, false, true);
+  assert.equal(changedModule.reproduceFromTaskId, historicalTask.id);
+  assert.equal((await listStudioModules(user.id, undefined, true)).modules.find(item => item.id === moduleId)?.reproduceFromTaskId, historicalTask.id);
+  const reproducedBatch = await submitStudioBatch(user.id, {
+    ...input, requestId: 'reproduce-history-1234', moduleId, moduleRevision: changedModule.revision,
+    prompt: 'changed prompt with a new reference', count: 1, aspectRatio: '5:3', referenceIds: [referenceTwo.id], revision: latest.revision,
+  });
+  const reproducedTask = await prisma.imageStudioTask.findFirstOrThrow({ where: { batch_id: reproducedBatch } });
+  assert.equal(reproducedTask.context, 'New context\n\n---\n模块上下文：\nModule context', 'reproduction must use the source snapshot context');
+  assert.equal(JSON.parse(reproducedTask.snapshot_json || '{}').moduleContext, 'Module context');
+  assert.deepEqual(JSON.parse(reproducedTask.reference_ids), [referenceTwo.id], 'reproduction must use the references currently selected by the user');
+  const clearedModule = await saveStudioModule(user.id, { ...moduleBody, revision: changedModule.revision, context: 'Current module context', reproduceFromTaskId: null }, false, true);
+  assert.equal(clearedModule.reproduceFromTaskId, null);
+  await processStudioTask(async () => ({ images: [png.toString('base64')], usage: null }));
   await assert.rejects(submitStudioBatch(stranger.id, { ...input, requestId: 'forbidden-module-1234', revision: latest.revision, moduleId }), /无权/);
-  const result = (await listStudioTasks(user.id, undefined, moduleId)).tasks[0];
+  const result = (await listStudioTasks(user.id, undefined, moduleId)).tasks.find(task => task.batchId === moduleBatch)!;
   assert.equal(result.aspectRatio, '5:3'); assert.equal(result.outputSize, '1360x816');
   const beforeDelete = await prisma.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
   const ledgerCount = await prisma.creditLedger.count();
@@ -107,7 +133,7 @@ async function main() {
   const failed = await prisma.imageStudioTask.findFirstOrThrow({ where: { status: 'uncertain' } });
   await assert.rejects(deleteStudioResult(user.id, failed.id), /只能删除/);
   await deleteStudioResult(user.id, result.id); await deleteStudioResult(user.id, result.id);
-  assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks.length, 0);
+  assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks.length, 1);
   assert.equal((await listStudioTasks(user.id, undefined, defaultStudioModuleId(user.id))).tasks.length, 3);
   assert.ok((await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: result.id } })).deleted_at);
   assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: result.asset!.id } })).status, 'active');

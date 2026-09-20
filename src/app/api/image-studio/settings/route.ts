@@ -12,9 +12,11 @@ export async function GET() {
   try {
     const settings = await getImageStudioSettings();
     const providerReady = isMuskApiReady(await getMuskApiSettings());
-    return NextResponse.json({ ...(user.role === 'admin' ? settings : {
-      model: settings.model, revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
-    }), providerReady, unitCredits: settings.prices[settings.model], contextConfigured: Boolean(settings.context.trim()) }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ ...(user.role === 'admin' ? {
+      context: settings.context, revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
+    } : {
+      revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
+    }), providerReady }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json({ error: '读取设置失败，请重试' }, { status: 503 });
   }
@@ -25,12 +27,14 @@ export async function PUT(request: NextRequest) {
     const user = await getAdminUser(request);
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.context !== 'string' || body.context.length > 20000
-      || !IMAGE_STUDIO_MODELS.includes(body.model) || !Number.isInteger(body.revision) || body.revision < 0
-      || !body.prices || IMAGE_STUDIO_MODELS.some(model => body.prices[model] !== null
-        && (!Number.isInteger(body.prices[model]) || body.prices[model] < 0 || body.prices[model] > 100000))) {
+      || (body.model !== undefined && !IMAGE_STUDIO_MODELS.includes(body.model)) || !Number.isInteger(body.revision) || body.revision < 0
+      || (body.prices !== undefined && (!body.prices || typeof body.prices !== 'object' || Array.isArray(body.prices)
+        || IMAGE_STUDIO_MODELS.some(model => body.prices[model] !== null
+          && (!Number.isInteger(body.prices[model]) || body.prices[model] < 0 || body.prices[model] > 100000))))) {
       return NextResponse.json({ error: '设置无效，上下文最多 20000 字' }, { status: 400 });
     }
-    const settings = await saveImageStudioSettings(body, user.id);
+    const current = await getImageStudioSettings();
+    const settings = await saveImageStudioSettings({ ...current, ...body, model: body.model ?? current.model, prices: body.prices ?? current.prices }, user.id);
     if (!settings) return NextResponse.json({ error: '设置已在其他页面更新，请重新读取后修改' }, { status: 409 });
     return NextResponse.json(settings);
   } catch (error) {

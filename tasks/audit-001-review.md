@@ -27,6 +27,57 @@ Thread ID：`019f44c6-64d3-7753-acd0-f31fc16763fb`
 
 ## 审查记录
 
+### 2026-09-14 全站代码与生产后台审计
+
+- 结论：不通过。已完成本轮核心链路代码、后台存量和运行恢复检查；不是所有页面的登录实操验收。
+- 审查来源：`9d690e206084ca0fa3472aee5ceb3e05adcecbeb`，正式源 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`；正式站 `https://sd2.youdooart.com`，构建 `YDuUR_IWSmyCUWs8Wkfhq`。刚发布的 2.5 首尾帧比例专项修复不等于全站通过。
+- 范围：上传与素材身份、视频封面与交付、任务终态与结算、登录与权限、资产/任务/项目/通知列表、后台反馈、依赖安全、备份和版本恢复。沿用中断前的只读审查，对未改动代码复核并补线上数据证据。
+- 边界：没有改业务代码、配置、数据库或反馈状态，没有调用付费生成或实施生产攻击测试；只追加本审计记录。现有 todo 脏改保留。Chrome 飞书仍需扫码，登录后的跨账号、上传、生成及视觉验收未完成。
+
+#### 高优先级问题
+
+| 编号 | 优先级 | 问题与触发 | 证据和边界 | 建议修复与验收 |
+| --- | --- | --- | --- | --- |
+| A01 | P1 | 任务先保存终态、再结算；后续响应不变时跳过补结算。结束并不保证冻结已清。 | `src/lib/video/task-finalizer.ts:636,673,679`；生产 5 个终态任务仍冻结 84 点：4 成功共69点、1失败15点，相关2个账户冻结合计84；关联流水只有 task_freeze。历史事故的具体触发时刻未还原，不能说这5条全部由同一次异常造成。 | 终态和结算具备可重入恢复；单独扫描终态未结算任务。先备份对账，再授权补偿；测试结算失败后重入。 |
+| A02 | P1 | 直传/分块完成没有可靠哈希时，以 owner + hash:null + MIME 查旧素材并覆盖。 | `src/lib/assets/direct-upload.ts:579,592,964`；同用户不同文件可复用同一ID、替换原地址并保留旧封面，上一轮内存替身已复现。生产有效图片13条 hash为空，只证明存在可命中对象，不证明全部已被覆盖。 | 无哈希不能作为去重身份；用已验证内容哈希或本次上传唯一键。验证连续上传同类型不同文件不串图、不覆盖。 |
+| A03 | P1 | 登录凭据没有服务端到期/会话版本；退出或管理员改密不撤销已经复制的凭据。 | `src/lib/auth/session.ts:61,137`、`src/app/api/auth/logout/route.ts:6`、`src/app/api/admin/users/[id]/route.ts:200`。账号禁用、账号 expires_at 到期和当前角色仍会被查询校验，不能误报为这些控制也无效。未做真实凭据重放。 | 服务端会话过期和撤销机制；验证退出、改密、七天到期后的旧凭据被拒绝，兼顾账号禁用和角色变化。 |
+| A04 | P1 | Provider已返回任务号，后续本地保存失败仍进入“创建失败+退款”的统一catch。 | `src/app/api/tasks/create/route.ts:1702,1704,1713,1800`；有重复外部生成、账实不一致风险。生产本次查询未发现 error_code=PROVIDER_CREATE_FAILED 且已有外部任务号的失败记录；不能称线上已发生。 | 区分提交拒绝、提交结果不确定、外部已受理后本地保存失败；持久化请求身份并恢复，不盲目重提。 |
+| A05 | P1 | 依赖停留在 Next 14.2.5，命中已公开安全公告的版本范围。 | `package.json`和生产构建确认版本；npm audit --omit=dev 返回10个包级漏洞汇总（1 critical、7 high、2 moderate），不等于10项均可利用。官方 GHSA-f82v-jwr5-mffw 确认14.2.25之前中间件绕过；nginx配置未检出该公告建议的请求头拦截。接口自身鉴权仍需逐条核对，未做攻击验证；Windows限定问题不套用Ubuntu。 | 逐项核对实际暴露面、选择有安全补丁且兼容的版本，隔离升级后回归，禁止直接 audit fix --force。 |
+| A06 | P1 | 远程参考素材内容接口跟随重定向，缺少跳转目的地/DNS内网检查，也会完整缓冲远程内容。 | `src/app/api/reference-images/[id]/content/route.ts:64,68`；导入可保存经初始URL字符串校验的HTTPS地址。存在内网读取和大响应占内存风险；未请求真实内网或压测，不能声称已泄露。 | 复用安全远程拉取入口，逐跳验证、超时、字节上限和流式返回，做本地受控重定向测试。 |
+
+#### 用户体验及一致性问题
+
+| 编号 | 优先级 | 问题与证据 | 验收重点 |
+| --- | --- | --- | --- |
+| A07 | P2 | 上传视频封面临时路径以 `.jpg.tmp-...` 结尾且未指定FFmpeg输出格式：`src/lib/assets/video-thumbnail.ts:35,54`。真实本机FFmpeg对同类文件名返回无法确定输出格式；生产70条active视频Asset全部无封面记录。不能把这等同于全部生成视频封面也损坏。 | 指定编码/容器或保留标准扩展名；用真实FFmpeg覆盖普通上传、直传、分块和存量补偿，不再仅靠假FFmpeg写文件测试。 |
+| A08 | P2 | 重复结算时 frozen_cost=0 分支清零 actual_cost/refund_amount：`src/lib/video/task-finalizer.ts:266`。生产有3条成功任务 actual_cost=0，但有非零 task_success_deduct 流水；历史具体触发尚未还原。 | 幂等返回已有结算结果，不覆盖账目；串行/并发重复调用后费用和流水保持一致。 |
+| A09 | P2 | 单类型资产列表只 take、不 skip，最终分页仅作用于all：`src/app/api/assets/library/route.ts:674,759,769`。第2页重复第1页，后续素材不可达；生产有3个账户active图片超过60条。 | 同类型61条以上测试跨页完整、不重复；同时核对总数与排序。 |
+| A10 | P2 | 任务末页删除最后一条仅减总数，不修正当前页，空态隐藏分页：`src/app/tasks/page.tsx:243,486`。内存复现21条中移除第2页唯一项后显示暂无任务。 | 自动回退到有效页并加载；仍有数据时不能显示全局空态。 |
+| A11 | P2 | 通知列表无过期响应防护：`src/app/notifications/NotificationsPageClient.tsx:65`。内存复现“全部”慢响应覆盖“未读”快响应。 | 控制响应顺序测试，当前筛选只接受对应请求结果。 |
+| A12 | P2 | 项目接口HTTP500合法JSON被转为空列表：`src/app/projects/page.tsx:138`。内存复现列表清空、错误提示为空。 | 失败保留上下文，显示加载失败与重试，不伪装成无项目。 |
+| A13 | P2 | 原图无缩略图时 thumbnail 变体直接返回原图，图片类型又不进入额外原始媒体权限校验：`src/app/api/reference-images/[id]/content/route.ts:27,41`。 | 仅有预览权而无下载权的账号不能经回退获取完整原图；需双账号字节级测试。 |
+| A14 | P2 | 缺任务号的实际中文异常与专门翻译规则不匹配：`src/lib/provider/jimeng.ts:420`、`src/lib/provider/error-message.ts:182`。可能再次显示泛化 PROVIDER_CREATE_FAILED。 | 直接把真实抛错传入分类器，验证原文、二次中文和前端一致，不仅测试手造关键词。 |
+
+#### 存量、规则与覆盖缺口
+
+- 交付：1863条生成成功任务中，89条delivery_status=failed；其中42条已有公网地址，53条已有本地路径，因此89不等于89条都不能播放。36条两类稳定副本都未登记，其中5条还记录上游链接过期。`src/lib/video/delivery-queue.ts:259`重试到上限进入failed；应核对文件实存、稳定地址与失败告警/人工恢复入口，不能以任务生成成功代替交付完成。
+- H3：10条active、codex_api来源的任务自2026-08-15仍为submitted/running，均冻结0点。可能为历史测试任务，不能未经核实批量删除、改失败或退款。需核对外部状态及为何持续未收敛。
+- 跨用户去重：产品已明确允许同文件复用后台链接，不建议取消该目标；但`direct-upload.ts:691,523`仅凭客户端哈希即可取他人素材地址和文件名，缺少持有文件的证明。哈希难猜不等于权限校验，需在不重复传输大文件的前提下确定安全复用方案。
+- 预算：负责人可自行批准追加预算的代码路径成立，但现有Spec未明确“必须由其他人/管理员审批”，暂列业务规则待确认，不列为已证实违规。直接改预算接口只允管理员，是需要对齐的相反线索。
+- 反馈：后台7条new、37条archived；未归档内容涉及参考图预览、素材删除/设置保留、任务提交耗时、视频封面、IP审核。未逐项做当前登录验收，不能仅按旧提交记录自动销单。
+- 版本：应用package仍0.1.0，历史登记另有0.1.10；实际构建可以追溯，但未找到统一可见版本、主动检测及更新提醒机制。只读审计不抬产品版本，不用文档版本冒充用户实际加载版本。
+- 恢复：服务active，根盘59%、数据盘8%；上传/视频/storage软链均指向数据盘。2026-09-13每日数据库备份manifest完整性ok，SHA256与gzip校验通过，构建回退目录存在。这能证明备份文件与恢复材料存在，不能替代整站恢复演练；该备份脚本只备数据库，媒体独立副本与异机恢复未验证。
+
+#### 验证及来源
+
+- 生产只读SQLite查询：Feedback状态和内容摘要、VideoTask终态/冻结/交付字段、CreditLedger结算流水、CreditAccount冻结合计、Asset类型与封面/哈希数量；未输出凭据、用户姓名或素材原始链接。
+- 只读运行检查：systemctl状态、BUILD_ID、deployed-commit、df、持久目录软链、备份manifest、sha256sum -c、gzip -t；公网api/config及新构建证据复用同版本刚完成的验证。
+- 最小实验：真实FFmpeg使用lavfi合成16x16画面和同类错误临时扩展名，按预期失败；未写入生产素材。两轮独立代码审查及内存替身验证不等于生产集成测试。
+- 依赖检查：npm audit --omit=dev --json，只读查询，没有执行升级或安装。
+- 官方安全依据：[Next.js中间件绕过公告](https://github.com/vercel/next.js/security/advisories/GHSA-f82v-jwr5-mffw)。封面方案复用现有FFmpeg：[官方格式参数说明](https://ffmpeg.org/ffmpeg.html#Main-options)。没有引入新包或声称未经测试的开源模块可直接替换。
+- 建议顺序：先处理A01/A02/A03/A04/A05/A06的资金、资产身份和安全边界；再处理封面和稳定交付存量；随后统一修正列表状态与中文错误。生产补偿另做备份、逐项对账和明确授权，不把审计授权当数据修改授权。
+
+
 暂无正式审查记录。
 
 ### 2026-07-09 Seedream 5.0 Pro 图片生成 API 接入现场只读审核
@@ -241,4 +292,28 @@ Thread ID：`019f44c6-64d3-7753-acd0-f31fc16763fb`
 - 建议下一步：
   - 可以把本轮 Seedance 2.5 模型入口视为“代码链路 + Git/rollback + 公网可用性”审核通过，继续后续产品验收或发布收口。
   - 若进入最终发布证明阶段，建议补一次有登录态的 `/generate` 页面 DOM/截图验收，确认底部模型 chip 在真实页面可见且默认仍为 Seedance 2.0。
-  - 若要做真实 2.5 生成闭环，必须另行获得用户明确授权后再消耗点数。
+- 若要做真实 2.5 生成闭环，必须另行获得用户明确授权后再消耗点数。
+
+### 2026-09-21 Image Studio A1-A6 independent read-only review
+
+- 审查对象：`video-api-debugger / sd2` image-studio A1-A6 implementation in `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`; scope included module-scoped model/pricing, server-side charging and permissions, immutable generation snapshots and reproduction, ten-reference limits, asset-library archival, A1/A2 compatibility, migration and release metadata.
+- 结论：通过，允许进入发布；未发现 P0/P1 阻塞问题，必须修正项：无。
+- P2 / non-blocking risk: MuskAPIs official documentation checked for this round explicitly describes two-image fusion, not a guaranteed ten-image paid path. Code, server validation and Provider request shaping cover ten references and local smoke tests pass, but the product must not claim upstream ten-image support until the provider confirms it. No paid call was made.
+- Evidence: `src/lib/image-studio/modules.ts` returns module-scoped model/prices and rejects ordinary-user price edits; `src/lib/image-studio/tasks.ts` resolves current module pricing server-side, owner-scopes source-task reproduction, freezes the full snapshot, and keeps deletion as a soft hide without changing Asset or credit ledger; `src/lib/image-studio/provider.ts`, `src/lib/image-studio/limits.ts`, and the UI cover the ten-reference limit; `src/app/api/assets/library/route.ts` scopes generated assets by owner and now includes generated assets even when uploaded-material display is off; the append-only migration adds module settings and task snapshot columns.
+- Verification: isolated `tsc` passed; provider smoke passed with ten references and no paid call; integration smoke passed for immutable context, idempotency, settlement/refund, owner isolation, stale-setting conflict, expired lease recovery, saved PNG, module pricing permissions, historical-context reproduction and source-reference enforcement; scoped `git diff --check` passed.
+- Follow-up: before final acceptance, verify candidate/live build and browser evidence on the authorized production target `https://sd2.youdooart.com/image-studio`; retain the upstream ten-reference limitation as an explicit acceptance gap.
+
+### 2026-09-21 Image Studio A1-A6 follow-up review
+
+- 结论：通过，允许继续发布；上一轮发现的 P1 已修复，未发现新的 P0/P1/P2 阻断。
+- 修复证据：`src/app/image-studio/studio.tsx` 的 `saveModule` 支持显式 revision；生成前保存返回的 `submitModuleRevision` 会传给成功后的 `saveModule(null, submitModuleRevision)`，清除 `reproduce_task_id` 不再使用旧闭包版本号导致 409。模块弹窗状态改为完整 `moduleDirty`，模型/价格变更不会误显示为已保存。
+- 复审证据：模块来源仍由 owner + snapshot 校验，历史复现强制使用源快照参考图并校验当前用户资产；资产库 generated-only 使用参数化 `EXISTS` 查询和有界 `LIMIT`/`COUNT`；跨设备 source 持久化、自动保存竞态、旧客户端字段可空兼容均已核对。执行侧 `tsc`、隔离 integration smoke、`git diff --check` 通过；未进行付费调用、生产写入或部署。
+- 非阻塞风险：上游 MuskAPIs 官方资料本轮仍只明确两张图融合，不能据此宣称供应商已保证十张参考图；保留为发布验收缺口，代码入口/服务端/Provider 的十张上限校验和无付费 smoke 已覆盖。
+
+### 2026-09-21 Image Studio A1-A6 final semantic review
+
+- 结论：通过，允许继续发布；按最新“历史上下文 / 当前输入”语义复审，未发现新的 P0/P1/P2 阻断。
+- 关键复审证据：历史复现只从 `snapshot_json` 恢复历史全局上下文和模块上下文，不再覆盖当前 `referenceIds`；新任务继续使用用户当前确认的参考图，并执行 owner、active、image 校验。提示词、比例、张数、参考图、生成模型和积分编辑不会隐式清除 `reproduce_task_id`，只有显式退出历史模式或管理员修改模块上下文才退出；历史价格不回填，新任务按当前授权模块价格计费。
+- 前一轮 P1 证据仍成立：生成成功后使用提交时返回的 `submitModuleRevision` 清除复现来源；模块保存脏状态覆盖模型、价格和来源；资产库 generated-only 使用参数化 `EXISTS` 查询；追加式迁移字段可空，兼容旧模块和旧任务。
+- 验证证据：执行侧报告 isolated `tsc`、provider smoke、integration smoke 和 `git diff --check` 已通过；integration smoke 覆盖“历史上下文保持、当前参考图生效”；本轮审查未改文件、未提交、未部署、未进行付费调用。
+- 非阻塞风险：MuskAPIs 官方资料仍只明确两张图融合，不能据此宣称供应商已保证十张参考图；发布后的浏览器与生产证据仍待执行侧补齐。

@@ -4,8 +4,9 @@ import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
 import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
-import { defaultStudioModuleId, validStudioModuleId } from './modules';
+import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { normalizeStudioRatio, studioRatioSize } from './ratios';
+import { MAX_REFERENCE_IMAGES } from './limits';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -17,12 +18,16 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (typeof body.prompt !== 'string' || body.prompt.length > 12000) throw new StudioError('画面描述不能超过 12000 字');
   if (!Number.isInteger(body.count) || Number(body.count) < 1 || Number(body.count) > 8) throw new StudioError('生成张数必须为 1 到 8');
   if (!Number.isInteger(body.revision)) throw new StudioError('请刷新生成设置');
-  if (!Array.isArray(body.referenceIds) || body.referenceIds.length > 2 || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError('最多使用两张有效参考图');
+  if (!Array.isArray(body.referenceIds) || body.referenceIds.length > MAX_REFERENCE_IMAGES || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError(`最多使用 ${MAX_REFERENCE_IMAGES} 张有效参考图`);
   if (!body.prompt.trim() && !body.referenceIds.length) throw new StudioError('请添加参考图片或填写画面描述');
   let aspectRatio: string | undefined;
   try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
   catch (error) { throw new StudioError((error as Error).message); }
-  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}) };
+  const moduleRevision = body.moduleRevision === undefined ? undefined : Number(body.moduleRevision);
+  if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
+  const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
+  if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
+  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}) };
 }
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>) {
@@ -37,9 +42,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     return batchId;
   }
   const settings = await getImageStudioSettings();
-  if (settings.revision !== input.revision) throw new StudioError('生成规则或积分已更新，请重新读取设置后确认提交', 409);
-  const price = settings.prices[settings.model];
-  if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置有效的生成积分', 409);
+  if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
   if (!isMuskApiReady(await getMuskApiSettings())) throw new StudioError('图片服务尚未配置', 503);
   await prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
@@ -51,20 +54,73 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);
     const workspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
-    const context = [settings.context.trim(), workspace?.context.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
+    if (workspace && input.moduleRevision !== undefined && workspace.revision !== input.moduleRevision) throw new StudioError('模块已在其他页面更新，请刷新后核对', 409);
+    const generation = resolveStudioModuleGenerationConfig(workspace, settings);
+    const price = generation.prices[generation.model];
+    if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
+    let snapshotGlobalContext = settings.context;
+    let snapshotModuleContext = workspace?.context || '';
+    let context = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
+    let referenceIds = input.referenceIds;
+    const reproduceFromTaskId = input.reproduceFromTaskId || workspace?.reproduce_task_id || undefined;
+    if (reproduceFromTaskId) {
+      const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId } });
+      if (!source?.snapshot_json) throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
+      try {
+        const sourceSnapshot = JSON.parse(source.snapshot_json) as { globalContext?: unknown; moduleContext?: unknown; referenceImages?: unknown };
+        const sourceContext = [sourceSnapshot.globalContext, sourceSnapshot.moduleContext]
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .map(value => value.trim()).join('\n\n---\n模块上下文：\n');
+        if (!sourceContext) throw new Error('empty_context');
+        context = sourceContext;
+        snapshotGlobalContext = typeof sourceSnapshot.globalContext === 'string' ? sourceSnapshot.globalContext : '';
+        snapshotModuleContext = typeof sourceSnapshot.moduleContext === 'string' ? sourceSnapshot.moduleContext : '';
+      } catch {
+        throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
+      }
+    }
     if (!context) throw new StudioError('请管理员先设置通用上下文或模块上下文', 409);
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
     if (active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
-    const references = await tx.asset.findMany({ where: { id: { in: input.referenceIds }, owner_id: ownerId, status: 'active', type: 'image' } });
-    if (references.length !== new Set(input.referenceIds).size) throw new StudioError('参考图不存在或无权使用', 403);
+    const references = await tx.asset.findMany({ where: { id: { in: referenceIds }, owner_id: ownerId, status: 'active', type: 'image' },
+      select: { id: true, original_url: true, thumbnail_url: true, file_name: true, mime_type: true, width: true, height: true, file_size: true, hash: true } });
+    if (references.length !== new Set(referenceIds).size) throw new StudioError('参考图不存在或无权使用', 403);
+    const referencesById = new Map(references.map(reference => [reference.id, reference]));
+    const referenceSnapshot = referenceIds.map(id => {
+      const reference = referencesById.get(id);
+      return { id, originalUrl: reference?.original_url || null, thumbnailUrl: reference?.thumbnail_url || null,
+        fileName: reference?.file_name || null, mimeType: reference?.mime_type || null, width: reference?.width || null,
+        height: reference?.height || null, fileSize: reference?.file_size || null, hash: reference?.hash || null };
+    });
+    const aspectRatio = input.aspectRatio || 'auto';
+    const outputSize = studioRatioSize(input.aspectRatio);
+    const snapshot = JSON.stringify({
+      version: 1,
+      referenceImages: referenceSnapshot,
+      globalContext: snapshotGlobalContext,
+      moduleContext: snapshotModuleContext,
+      moduleId: workspace?.id || moduleId || null,
+      reproducedFromTaskId: reproduceFromTaskId || null,
+      moduleName: workspace?.name || null,
+      prompt: input.prompt,
+      model: generation.model,
+      prices: generation.prices,
+      unitCredits: price,
+      count: input.count,
+      aspectRatio,
+      outputSize: outputSize || null,
+      outputFormat: 'png',
+      settingsRevision: settings.revision,
+        moduleRevision: workspace?.revision ?? null,
+    });
     for (let i = 0; i < input.count; i++) {
       const id = `${batchId}-${i}`;
       const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       await tx.imageStudioTask.create({ data: {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, ordinal: i + 1, fingerprint,
-        prompt: input.prompt, context, revision: settings.revision, model: settings.model,
-        aspect_ratio: input.aspectRatio || 'auto', output_size: studioRatioSize(input.aspectRatio),
-        reference_ids: JSON.stringify(input.referenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
+        prompt: input.prompt, context, revision: settings.revision, model: generation.model, snapshot_json: snapshot,
+        aspect_ratio: aspectRatio, output_size: outputSize,
+        reference_ids: JSON.stringify(referenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       } });
       if (freeze) await tx.creditLedger.create({ data: {
         user_id: ownerId, type: 'task_freeze', amount: -price,
@@ -114,14 +170,44 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 25,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const items = rows.slice(0, 24);
-  const assets = await prisma.asset.findMany({ where: { id: { in: items.flatMap(item => item.asset_id ? [item.asset_id] : []) }, owner_id: ownerId, status: 'active' },
+  const outputAssetIds = items.flatMap(item => item.asset_id ? [item.asset_id] : []);
+  const referenceIds = Array.from(new Set(items.flatMap(item => {
+    try { return JSON.parse(item.reference_ids) as string[]; } catch { return []; }
+  })));
+  const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, owner_id: ownerId, status: 'active' },
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
+  const assetById = new Map(assets.map(asset => [asset.id, asset]));
   return { tasks: items.map(task => ({ id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
     prompt: task.prompt, model: task.model, status: task.status, error: task.error, unitCredits: task.unit_credits,
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,
     createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
-    asset: assets.find(asset => asset.id === task.asset_id) || null,
+    snapshot: publicStudioSnapshot(task, assetById),
+    asset: assetById.get(task.asset_id || '') || null,
   })), nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
+}
+
+function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>) {
+  let parsed: Record<string, unknown> = {};
+  try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
+  const snapshotReferences = Array.isArray(parsed.referenceImages) ? parsed.referenceImages : [];
+  const sourceAvailable = typeof task.snapshot_json === 'string' && task.snapshot_json.length > 0 && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string';
+  const fallbackReferences = (() => {
+    try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset?.original_url || null, thumbnailUrl: asset?.thumbnail_url || null, width: asset?.width || null, height: asset?.height || null }; }); }
+    catch { return []; }
+  })();
+  const referenceImages = (snapshotReferences.length ? snapshotReferences : fallbackReferences).filter(item => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string');
+  const count = Number.isInteger(parsed.count) && Number(parsed.count) >= 1 && Number(parsed.count) <= 8 ? Number(parsed.count) : 1;
+  const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
+  return {
+    prompt: typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
+    model: typeof parsed.model === 'string' ? parsed.model : task.model,
+    count,
+    aspectRatio: typeof parsed.aspectRatio === 'string' ? parsed.aspectRatio : task.aspect_ratio,
+    outputSize: typeof parsed.outputSize === 'string' ? parsed.outputSize : task.output_size,
+    unitCredits,
+    sourceAvailable,
+    referenceImages,
+  };
 }
 
 export async function deleteStudioResult(ownerId: string, id: unknown) {

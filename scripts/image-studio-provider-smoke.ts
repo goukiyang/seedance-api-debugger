@@ -22,10 +22,18 @@ async function main() {
   await requestStudioImages({ ...params, images: [
     { bytes: new Uint8Array([1]), mimeType: 'image/png' },
     { bytes: new Uint8Array([2]), mimeType: 'image/jpeg' },
+    { bytes: new Uint8Array([3]), mimeType: 'image/png' },
+    { bytes: new Uint8Array([4]), mimeType: 'image/png' },
+    { bytes: new Uint8Array([5]), mimeType: 'image/png' },
+    { bytes: new Uint8Array([6]), mimeType: 'image/png' },
+    { bytes: new Uint8Array([7]), mimeType: 'image/png' },
+    { bytes: new Uint8Array([8]), mimeType: 'image/png' },
+    { bytes: new Uint8Array([9]), mimeType: 'image/png' },
+    { bytes: new Uint8Array([10]), mimeType: 'image/png' },
   ] }, fetcher);
   assert.equal(requests[1].url, 'https://example.invalid/v1/images/edits');
   const form = requests[1].init.body as FormData;
-  assert.equal(form.getAll('image[]').length, 2);
+  assert.equal(form.getAll('image[]').length, 10, 'all ten references must reach the provider request');
   assert.equal(form.get('prompt'), params.prompt);
   assert.equal(form.get('n'), '1');
   assert.equal(studioRatioSize('auto'), undefined);
@@ -48,6 +56,7 @@ async function main() {
   await assert.rejects(requestStudioImages({ ...params, size: '99999x16' }, fetcher));
   for (const count of [0, 9, 1.5, NaN]) await assert.rejects(requestStudioImages({ ...params, count }, fetcher));
   await assert.rejects(requestStudioImages({ ...params, model: 'unknown' }, fetcher));
+  await assert.rejects(requestStudioImages({ ...params, images: Array.from({ length: 11 }, () => ({ bytes: new Uint8Array([1]), mimeType: 'image/png' })) }, fetcher), /最多使用 10 张/);
   await assert.rejects(requestStudioImages(params, async () => Response.json({ data: [] })));
   await assert.rejects(requestStudioImages(params, async () => new Response('secret upstream error', { status: 502 })), error => {
     assert.ok(error instanceof Error && !error.message.includes('secret'));
