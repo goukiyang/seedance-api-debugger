@@ -258,3 +258,23 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 验证通过：`npx prisma generate`；`npm run lint`（仅保留既有全库 warning）；定向 `tsc`；provider smoke；隔离 SQLite integration smoke（含跨设备模块 source、历史上下文/参考图强制、权限、幂等、结算/退款、PNG、软删）；候选 `npm run build`；精确范围 `git diff --check`。没有新增付费调用。
 - 固定只读审核线程复审通过，确认曾发现的 `saveModule(null)` 旧 revision 清除风险已修复；审核记录已追加到 `tasks/audit-001-review.md`。正式服务器发布、候选切换、线上页面与 A1/A2/A3/A4/A5/A6 浏览器证据待本节后续补记。
 - 上游风险已反馈主控：MuskAPIs 官方文档本轮只明确多图融合传两张，不能把文档示例推断为供应商保证十张；本轮不做真实付费十图测试，不在产品记录中宣称上游已支持十张。
+
+## 15. v0.6.0 A1-A6 正式发布收口（2026-09-21）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| A1 | 比例选择与保存 | 常用/自定义比例、实际尺寸传递、模块/任务快照、旧请求兼容 | 已完成 |
+| A2 | 结果删除 | 本人软删除、二次确认、刷新不回插、Asset/积分流水保留 | 已完成 |
+| A3 | 生成结果进入资产库 | 复用既有 Asset 归档、权限和筛选；图片列表不依赖上传素材开关 | 已完成 |
+| A4 | 完整生成快照与重新生成 | 保存完整设置；恢复不自动提交扣费，未保存内容有保护 | 已完成 |
+| A5 | 模块级模型与定价 | 模型/价格归属模块；管理员价格权限；服务端按当前规则计费 | 已完成 |
+| A6 | 参考图上限 | 选择、上传、粘贴、保存、复现、服务端和 Provider 统一最多10张 | 已完成（上游十图能力待供应商确认） |
+
+- 正式目标：`https://sd2.youdooart.com/image-studio`；发布分支 `codex/image-studio-release`；代码提交 `3ca1728c34bb22c677a730222bfec8e9baf29a88`；版本 `0.6.0`；生产 BUILD_ID `ds5-BZ7DJjoAJQRSjb7OI`。
+- 发布归档：`/tmp/sd2-image-studio-a6-3ca1728-v2.tar`，本地与服务器 SHA256 均为 `cf90767f6b86142294fb09f34caaf93e3bde1c3c8cbdb08b93cee9a6275b23c8`；运行期 `.env`、`node_modules`、`.next-prod`、上传、视频、storage 和数据库未随源码包覆盖。
+- 数据库：先停止图片 worker，备份 `/data/video-api-debugger/var-lib/dev.db` 到 `/srv/video-api-debugger/backups/image-studio-a6-3ca1728/dev.db`，备份 SHA256 `792dc45e8aba8c5e6bfc37fc72e28f81a938138e688f9dd9d0b8af08e538aded`；仅执行 `20260921110000_image_studio_module_settings_snapshots` 纯增量 SQL，前后 `PRAGMA quick_check=ok`。
+- 回退：`rollback/2026-09-21-before-image-studio-a6` 已推送，解引用指向发布前线上 `629a692c9e32cb2267062ded08852c4c3d5790ef`；旧构建保留为服务器 `/srv/video-api-debugger/app/.next-prod-prev-a6-3ca1728`。
+- 服务与公网：`sd2-gray.service`、`sd2-image-studio.service` active，健康周期后均 `NRestarts=0`；本机 `127.0.0.1:3302/api/release`、公网 `/api/release` 均为 `0.6.0`，公网 `/login` 和新 BUILD_ID 的 `_buildManifest.js` 为200，匿名 `/image-studio` 按预期跳登录；来源头为 `server-42-193`。
+- 浏览器验收（TaskSpace4，正式管理员登录态）：新版本页面显示参考图 `2/10`；比例菜单包含常用比例、自定义“其他”及 `3:1/1:3`；模块设置展示模型与管理员积分单价并提示自动保存；生成结果在资产页默认“图片”筛选中可见；点击历史“重新生成”仅恢复表单并明确提示点击“生成图片”后才创建任务扣积分；删除确认已打开并点击“取消”，未删除生产数据。旧客户端的更新提醒已实际显示并通过“立即刷新”载入0.6.0。
+- 验证命令：候选 `npm run build`、候选本机 `/api/release`/`/api/config`/`/login`；公网 `/api/release`/`/api/config`/`/login`/`/image-studio`/静态 BUILD_ID；图片 Provider smoke、隔离 SQLite integration smoke、定向 `tsc`、精确范围 `git diff --check`；均通过。未执行真实付费生成，未确认上游十图能力，未确认删除生产记录。
+- 上游限制保持不变：MuskAPIs 官方资料本轮只明确两张图融合；产品可保证本地选择/保存/服务端/Provider 的最多10张边界，但不能宣称供应商已保证十张上游生成能力。
