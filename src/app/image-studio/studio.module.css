@@ -7,6 +7,12 @@
 .page button:not(:disabled):hover { background: #30393d; }
 .page button:focus-visible, .page input:focus-visible, .page textarea:focus-visible, .page select:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .workspace { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 32px; }
+.module { border-top: 1px solid #465057; padding: 28px 0; scroll-margin-top: 90px; }
+.module[data-active=true] { border-top-color: #79daca; }
+.page .moduleName { width: min(300px, 100%); font-size: 18px; font-weight: 600; }
+.module .header { align-items: center; flex-wrap: wrap; }
+.module .counts { align-items: center; }
+.page .newModule { display: flex; margin: 24px auto; }
 .inputs { border-right: 1px solid #333b40; padding-right: 28px; min-width: 0; }
 .label { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; margin: 20px 0 10px; }
 .label span, .muted { color: #adb6bd; font-size: 13px; }

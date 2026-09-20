@@ -3,10 +3,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../src/lib/prisma';
 import { submitStudioBatch, listStudioTasks, parseStudioRequest, finishStudioTask } from '../src/lib/image-studio/tasks';
 import { getImageStudioSettings, saveImageStudioSettings } from '../src/lib/image-studio/settings';
 import { processStudioTask, recoverStudioTasks } from '../src/lib/image-studio/worker';
+import { defaultStudioModuleId, listStudioModules, saveStudioModule } from '../src/lib/image-studio/modules';
 
 async function main() {
   if (!process.env.DATABASE_URL?.startsWith('file:/tmp/sd2-image-studio-test-')) throw new Error('Use an isolated /tmp/sd2-image-studio-test-* database');
@@ -54,6 +56,32 @@ async function main() {
   const recovered = await prisma.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
   assert.equal(recovered.balance, 18); assert.equal(recovered.frozen_credits, 0);
   assert.equal(await prisma.creditLedger.count({ where: { type: 'task_success_deduct' } }), 1);
+  assert.throws(() => parseStudioRequest({ ...input, prompt: '  ', referenceIds: [] }));
+  assert.equal(parseStudioRequest({ ...input, prompt: '', referenceIds: ['image'] }).prompt, '');
+  const moduleId = randomUUID();
+  const created = await saveStudioModule(user.id, { id: moduleId }, true);
+  const moduleBody = { id: moduleId, revision: created.revision, name: 'Saved module', prompt: '', count: 1, referenceIds: [], context: 'Module context' };
+  await assert.rejects(saveStudioModule(user.id, moduleBody), /仅管理员/);
+  const saved = await saveStudioModule(user.id, moduleBody, false, true);
+  await assert.rejects(saveStudioModule(stranger.id, { ...moduleBody, revision: saved.revision }, false, true), /无权/);
+  await assert.rejects(saveStudioModule(user.id, moduleBody, false, true), /其他页面/);
+  assert.ok(!(await listStudioModules(user.id)).modules.some(item => 'context' in item));
+  assert.equal((await listStudioModules(user.id, undefined, true)).modules.find(item => item.id === moduleId)?.context, 'Module context');
+  assert.equal((await listStudioModules(stranger.id)).modules.length, 1);
+  await fs.mkdir(path.join(working, 'public/uploads'), { recursive: true });
+  await fs.writeFile(path.join(working, 'public/uploads/reference.png'), png);
+  const reference = await prisma.asset.create({ data: { owner_id: user.id, type: 'image', original_url: '/uploads/reference.png', file_name: 'reference.png', mime_type: 'image/png', file_size: png.length } });
+  const moduleBatch = await submitStudioBatch(user.id, { ...input, requestId: 'module-image-only-1234', moduleId, prompt: '', count: 1, referenceIds: [reference.id], revision: latest.revision });
+  assert.equal((await prisma.imageStudioTask.findFirstOrThrow({ where: { batch_id: moduleBatch } })).context, 'New context\n\n---\n模块上下文：\nModule context');
+  await processStudioTask(async args => {
+    assert.equal(args.images.length, 1); assert.ok(args.prompt.endsWith('Module context')); assert.ok(!args.prompt.includes('本次画面要求'));
+    return { images: [png.toString('base64')], usage: null };
+  });
+  assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks.length, 1);
+  assert.equal((await listStudioTasks(user.id, undefined, defaultStudioModuleId(user.id))).tasks.length, 3);
+  assert.equal((await listStudioTasks(stranger.id, undefined, moduleId)).tasks.length, 0);
+  assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks[0].status, 'succeeded');
+  await assert.rejects(submitStudioBatch(stranger.id, { ...input, requestId: 'forbidden-module-1234', revision: latest.revision, moduleId }), /无权/);
   console.log('PASS: immutable context, idempotent submit/settlement, per-image charging/refund, owner isolation, stale-setting conflict, expired lease recovery, saved PNG. No network generation.');
   await prisma.$disconnect();
 }

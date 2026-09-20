@@ -1,13 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import styles from './studio.module.css';
 
 type SettingsValue = { context?: string; model: string; revision: number; contextConfigured?: boolean; providerReady: boolean; unitCredits: number | null; prices?: Record<string, number | null> };
 type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; createdAt: string; asset: { original_url: string } | null };
+type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
 const models = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 async function readResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
@@ -16,15 +17,86 @@ async function readResponse(response: Response) {
 }
 
 export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
+  const [modules, setModules] = useState<StudioModule[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [active, setActive] = useState('');
   const [settings, setSettings] = useState<SettingsValue | null>(null);
+  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  const [settingsReload, setSettingsReload] = useState(0);
+  const createId = useRef<string | null>(null);
+  const createLock = useRef(false);
+  const listLock = useRef(false);
+  const loadModules = useCallback(async (next?: string) => {
+    if (listLock.current) return;
+    listLock.current = true; setLoading(true); setError('');
+    try {
+      const data = await readResponse(await fetch(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`, { cache: 'no-store' }));
+      setModules(current => {
+        const ids = new Set(current.map(item => item.id));
+        return [...current, ...data.modules.filter((item: StudioModule) => !ids.has(item.id))]
+          .sort((a, b) => Number(b.id === `default-${userId}`) - Number(a.id === `default-${userId}`)
+            || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
+      });
+      setCursor(data.nextCursor); setActive(current => current || data.modules[0]?.id || '');
+    } catch (e) { setError(e instanceof Error ? e.message : '模块读取失败'); }
+    finally { listLock.current = false; setLoading(false); }
+  }, [userId]);
+  useEffect(() => { void loadModules(); }, [loadModules]);
+  async function createModule() {
+    if (createLock.current) return;
+    createLock.current = true; setCreating(true); setError('');
+    createId.current ||= crypto.randomUUID();
+    try {
+      const workspace: StudioModule = await readResponse(await fetch('/api/image-studio/modules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: createId.current }) }));
+      setModules(current => current.some(item => item.id === workspace.id) ? current : [...current, workspace]);
+      setActive(workspace.id); createId.current = null;
+      requestAnimationFrame(() => document.getElementById(`module-${workspace.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    } catch (e) { setError(e instanceof Error ? e.message : '新建失败'); }
+    finally { createLock.current = false; setCreating(false); }
+  }
+  return <main className={styles.page}>
+    <header className={styles.header}><h1>图片生成</h1><div className={styles.counts}>
+      {isAdmin && <button type="button" disabled={!settings} onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
+      <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
+    {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
+    {modules.map((module, index) => <ImageStudioBlock key={module.id} module={module} isAdmin={isAdmin} isFirst={index === 0}
+      userId={userId} settings={settings} setSettings={setSettings} active={active === module.id} onActivate={() => setActive(module.id)}
+      globalSettingsOpen={globalSettingsOpen && index === 0} onCloseGlobal={() => setGlobalSettingsOpen(false)}
+      settingsReload={settingsReload} onReloadSettings={() => setSettingsReload(current => current + 1)} />)}
+    {loading && <p role="status">正在读取模块…</p>}
+    {cursor && <button disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模块</button>}
+    {modules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
+  </main>;
+}
+
+function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSettings, active, onActivate, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings }: {
+  isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; settings: SettingsValue | null;
+  setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void;
+  globalSettingsOpen: boolean; onCloseGlobal: () => void;
+  settingsReload: number; onReloadSettings: () => void;
+}) {
   const [draftContext, setDraftContext] = useState('');
   const [draftModel, setDraftModel] = useState('gpt-image-2.5-flare');
   const [draftPrices, setDraftPrices] = useState<Record<string, number | null>>({ 'gpt-image-2.5-flare': null, 'gpt-image-2.5-sunburst': null });
   const [saveStatus, setSaveStatus] = useState('');
   const [settingsError, setSettingsError] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [count, setCount] = useState(1);
-  const [images, setImages] = useState<UploadedAssetPayload[]>([]);
+  const [prompt, setPrompt] = useState(module.prompt);
+  const [count, setCount] = useState(module.count);
+  const [images, setImages] = useState<UploadedAssetPayload[]>(module.images);
+  const [name, setName] = useState(module.name);
+  const [moduleRevision, setModuleRevision] = useState(module.revision);
+  const [moduleSaving, setModuleSaving] = useState(false);
+  const [moduleContext, setModuleContext] = useState(module.context || '');
+  const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
+  const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
+  const [moduleSaveError, setModuleSaveError] = useState('');
+  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, count: module.count, referenceIds: module.images.map(image => image.id) }) : '');
+  const moduleSaveLock = useRef(false);
+  const section = useRef<HTMLElement>(null);
+  const [visible, setVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
@@ -44,17 +116,57 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const uploadLock = useRef(false);
   const saving = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
+  const moduleDialog = useRef<HTMLDialogElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const currentDraft = useRef({ context: draftContext, model: draftModel, prices: draftPrices });
   currentDraft.current = { context: draftContext, model: draftModel, prices: draftPrices };
-  const dirty = Boolean(isAdmin && settings && (draftContext !== (settings.context || '') || draftModel !== settings.model || JSON.stringify(draftPrices) !== JSON.stringify(settings.prices)));
-  const draftKey = `sd2-image-studio-draft:${userId}`;
-  const pendingKey = `sd2-image-studio-pending:${userId}`;
+  const dirty = Boolean(isFirst && isAdmin && settings && (draftContext !== (settings.context || '') || draftModel !== settings.model || JSON.stringify(draftPrices) !== JSON.stringify(settings.prices)));
+  const globalDirty = useRef(dirty);
+  const settingsRequest = useRef(0);
+  globalDirty.current = dirty;
+  const unsavedContext = dirty || (isAdmin && moduleContext !== savedModuleContext);
+  const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
+  const draftKey = `sd2-image-studio-draft:${suffix}`;
+  const pendingKey = `sd2-image-studio-pending:${suffix}`;
+  const moduleDraft = { name, prompt, count, referenceIds: images.map(image => image.id) };
+  const moduleDirty = JSON.stringify(moduleDraft) !== moduleSaved || (isAdmin && moduleContext !== savedModuleContext);
+
+  useEffect(() => { if (globalSettingsOpen) dialog.current?.showModal(); }, [globalSettingsOpen]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => setVisible(entries.some(entry => entry.isIntersecting)), { rootMargin: '200px' });
+    if (section.current) observer.observe(section.current);
+    return () => observer.disconnect();
+  }, []);
+
+  async function saveModule() {
+    if (moduleSaveLock.current || uploading) return false;
+    moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
+    const snapshot = moduleDraft;
+    const contextSnapshot = moduleContext;
+    try {
+      const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: module.id, revision: moduleRevision, ...snapshot, ...(isAdmin ? { context: contextSnapshot } : {}) }) }));
+      setModuleRevision(result.revision); setModuleSaved(JSON.stringify(snapshot));
+      setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
+      return true;
+    } catch (e) { const message = e instanceof Error ? e.message : '保存失败'; setError(message); setModuleSaveError(message); return false; }
+    finally { moduleSaveLock.current = false; setModuleSaving(false); }
+  }
+
+  useEffect(() => {
+    if (!isAdmin || moduleContext === savedModuleContext || moduleSaveError || moduleSaving) return;
+    const timer = setTimeout(() => { void saveModule(); }, 700);
+    return () => clearTimeout(timer);
+    // Save the latest module fields together with its context revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, name, prompt, count, images, moduleRevision]);
 
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(draftKey) || 'null');
-      if (saved) {
+      if (saved && (!module.saved || saved.revision === module.revision)) {
+        if (typeof saved.name === 'string') setName(saved.name.slice(0, 80));
         if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 12000));
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
         if (Array.isArray(saved.images)) setImages(saved.images.filter((image: UploadedAssetPayload) => image && typeof image.id === 'string' && typeof image.originalUrl === 'string').slice(0, 2));
@@ -63,28 +175,45 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       if (pending && typeof pending.requestId === 'string') setPendingSubmission(pending);
     } catch { /* A damaged local draft must not block the page. */ }
     setDraftLoaded(true);
-  }, [draftKey, pendingKey]);
+  }, [draftKey, pendingKey, module.saved, module.revision, isAdmin]);
   useEffect(() => {
     if (!draftLoaded) return;
-    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, images })); } catch { /* Generation does not depend on browser storage. */ }
-  }, [draftLoaded, draftKey, prompt, count, images]);
+    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, images, name, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
+  }, [draftLoaded, draftKey, prompt, count, images, name, moduleRevision]);
 
   function closeSettings() {
     if (dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
     dialog.current?.close();
+    onCloseGlobal();
   }
 
   const loadSettings = useCallback(async () => {
+    if (saving.current) {
+      setSettingsError('正在保存，请保存完成后重新读取');
+      return;
+    }
+    const request = ++settingsRequest.current;
+    const draftBeforeLoad = JSON.stringify(currentDraft.current);
     setSettingsError('');
     try {
       const value: SettingsValue = await readResponse(await fetch('/api/image-studio/settings', { cache: 'no-store' }));
+      if (request !== settingsRequest.current) return;
+      if (JSON.stringify(currentDraft.current) !== draftBeforeLoad) {
+        setSettingsError('读取期间有新的修改，已保留草稿。请保存当前修改或重新读取');
+        return;
+      }
       setSettings(value); setDraftContext(value.context || ''); setDraftModel(value.model); if (value.prices) setDraftPrices(value.prices); setSaveStatus('');
-    } catch (e) { setSettingsError(e instanceof Error ? e.message : '读取失败'); }
-  }, []);
-  useEffect(() => { void loadSettings(); }, [loadSettings]);
+    } catch (e) { if (request === settingsRequest.current) setSettingsError(e instanceof Error ? e.message : '读取失败'); }
+  }, [setSettings]);
+  useEffect(() => {
+    if (!isFirst) return;
+    if (globalDirty.current) { setSettingsError('通用设置已更新，请先保存当前修改或重新读取'); return; }
+    void loadSettings();
+  }, [isFirst, loadSettings, settingsReload]);
 
   const saveSettings = useCallback(async () => {
-    if (!settings || !isAdmin || saving.current) return;
+    if (!settings || !isFirst || !isAdmin || saving.current) return;
+    ++settingsRequest.current;
     saving.current = true;
     const snapshot = { ...currentDraft.current, revision: settings.revision };
     setSaveStatus('正在保存'); setSettingsError('');
@@ -93,22 +222,25 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot),
       }));
       setSettings({ ...settings, ...value, contextConfigured: Boolean(value.context?.trim()), unitCredits: value.prices?.[value.model] ?? null });
+      setSettingsError('');
       setSaveStatus(JSON.stringify(currentDraft.current) === JSON.stringify({ context: snapshot.context, model: snapshot.model, prices: snapshot.prices }) ? '已保存，下次生成生效' : '等待保存');
     } catch (e) { setSaveStatus('未保存'); setSettingsError(e instanceof Error ? e.message : '保存失败'); }
     finally { saving.current = false; }
-  }, [settings, isAdmin]);
+  }, [settings, isAdmin, isFirst, setSettings]);
 
   useEffect(() => {
-    if (!isAdmin || !dirty || settingsError) return;
+    if (!isFirst || !isAdmin || !dirty || settingsError) return;
     const timer = setTimeout(() => { void saveSettings(); }, 700);
     return () => clearTimeout(timer);
-  }, [dirty, draftContext, draftModel, draftPrices, isAdmin, saveSettings, settingsError]);
+  }, [dirty, draftContext, draftModel, draftPrices, isAdmin, isFirst, saveSettings, settingsError]);
 
   const loadTasks = useCallback(async (cursor?: string) => {
     if (listLock.current) return;
     listLock.current = true;
     try {
-      const result = await readResponse(await fetch(`/api/image-studio/tasks${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { cache: 'no-store' }));
+      const query = new URLSearchParams({ moduleId: module.id });
+      if (cursor) query.set('cursor', cursor);
+      const result = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store' }));
       setTasks(current => {
         const fresh: StudioTask[] = result.tasks;
         const ids = new Set(fresh.map(task => task.id));
@@ -119,31 +251,33 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       setTasksError('');
     } catch (e) { setTasksError(e instanceof Error ? e.message : '读取记录失败'); }
     finally { listLock.current = false; setLoadingTasks(false); }
-  }, []);
-  useEffect(() => { void loadTasks(); }, [loadTasks]);
+  }, [module.id]);
+  useEffect(() => { if (visible) void loadTasks(); }, [visible, loadTasks]);
   const hasPending = tasks.some(task => task.status === 'queued' || task.status === 'running');
   useEffect(() => {
+    if (!visible) return;
     const timer = setInterval(() => { if (!document.hidden) void loadTasks(); }, hasPending ? 5000 : 15000);
     return () => clearInterval(timer);
-  }, [hasPending, loadTasks]);
+  }, [hasPending, loadTasks, visible]);
   useEffect(() => {
-    const refresh = () => { if (!document.hidden) void loadTasks(); };
+    const refresh = () => { if (!document.hidden && visible) void loadTasks(); };
     document.addEventListener('visibilitychange', refresh);
     return () => document.removeEventListener('visibilitychange', refresh);
-  }, [loadTasks]);
+  }, [loadTasks, visible]);
   useEffect(() => () => { if (downloadReady) URL.revokeObjectURL(downloadReady.url); }, [downloadReady]);
 
   async function submit(retryTask?: StudioTask) {
     if (!settings || submitLock.current) return;
     if (retryTask && !window.confirm(`将按当前设置重新生成 1 张，预计 ${settings.unitCredits ?? 0} 积分。确定继续吗？`)) return;
-    const payload = pendingSubmission || { requestId: crypto.randomUUID(), prompt: retryTask?.prompt || prompt,
-      count: retryTask ? 1 : count, revision: settings.revision, referenceIds: retryTask?.referenceIds || images.map(image => image.id) };
+    if (!pendingSubmission && moduleDirty && !await saveModule()) return;
+    const payload = pendingSubmission || { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
+      moduleId: module.id, count: retryTask ? 1 : count, revision: settings.revision, referenceIds: retryTask?.referenceIds || images.map(image => image.id) };
     try { sessionStorage.setItem(pendingKey, JSON.stringify(payload)); } catch { /* The in-memory request ID still prevents duplicate retries. */ }
     submitLock.current = true; setSubmitting(true); setError('');
     let ambiguous = true;
     try {
       const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409 && !dirty) await loadSettings(); await readResponse(response); }
+      if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) onReloadSettings(); await readResponse(response); }
       else { await readResponse(response); setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} await loadTasks(); }
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交结果未确认');
@@ -171,10 +305,10 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     } catch (e) { setError(e instanceof Error ? e.message : '下载失败，请重试'); }
     finally { setDownloadBusy(false); }
   }
-  const ready = Boolean(settings?.providerReady && settings.contextConfigured && settings.unitCredits !== null && !dirty && !settingsError);
+  const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && settings.unitCredits !== null && !dirty && !settingsError && (!isAdmin || moduleContext === savedModuleContext));
 
   useEffect(() => {
-    if (!isAdmin || !dirty) return;
+    if (!isAdmin || !unsavedContext) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     const guardNavigation = (event: MouseEvent) => {
       const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
@@ -190,9 +324,9 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       window.removeEventListener('beforeunload', warn);
       document.removeEventListener('click', guardNavigation, true);
     };
-  }, [dirty, isAdmin]);
+  }, [unsavedContext, isAdmin]);
 
-  async function addImages(files: File[]) {
+  const addImages = useCallback(async (files: File[]) => {
     if (uploadLock.current || submitting || pendingSubmission || !files.length) return;
     if (files.length + images.length > 2) { setError('最多选择两张参考图'); return; }
     if (files.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024)) {
@@ -207,18 +341,33 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       }
     } catch (e) { setError(e instanceof Error ? e.message : '上传失败'); }
     finally { uploadLock.current = false; setUploading(false); }
-  }
+  }, [images.length, submitting, pendingSubmission]);
 
-  return <main className={styles.page}>
+  useEffect(() => {
+    const paste = (event: ClipboardEvent) => {
+      if (!active || document.querySelector('dialog[open]') || preview || event.defaultPrevented) return;
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
+      if (!files.length) return;
+      event.preventDefault();
+      void addImages(files);
+    };
+    document.addEventListener('paste', paste);
+    return () => document.removeEventListener('paste', paste);
+  }, [addImages, preview, active]);
+
+  return <section ref={section} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
+    onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
     <header className={styles.header}>
-      <h1>图片生成</h1>
-      {isAdmin && <button type="button" onClick={() => dialog.current?.showModal()}><Settings size={17} />上下文设置</button>}
+      <input className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} />
+      <div className={styles.counts}><span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleDirty ? '未保存' : '已保存'}</span>
+        <button type="button" disabled={moduleSaving || uploading || submitting || !moduleDirty} onClick={() => void saveModule()}><Save size={17} />保存模块</button>
+        {isAdmin && <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>}
+      </div>
     </header>
     <div className={styles.workspace}>
-      <section className={styles.inputs} aria-label="生成参数" onPaste={event => {
-        const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
-        if (files.length) { event.preventDefault(); void addImages(files); }
-      }}>
+      <section className={styles.inputs} aria-label="生成参数">
         <label className={styles.label}>参考图片 <span>选填 · {images.length}/2</span></label>
         <div className={styles.references} onDragOver={event => event.preventDefault()} onDrop={event => {
           event.preventDefault(); void addImages(Array.from(event.dataTransfer.files));
@@ -235,17 +384,17 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => {
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
         }} />
-        <label className={styles.label} htmlFor="studio-prompt">画面描述</label>
-        <textarea id="studio-prompt" disabled={submitting || Boolean(pendingSubmission)} value={prompt} maxLength={12000} onChange={event => setPrompt(event.target.value)} placeholder="描述想生成的画面" rows={9} />
-        <label className={styles.label} htmlFor="studio-count">生成张数</label>
+        <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>画面描述 <span>有图片时选填</span></label>
+        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={prompt} maxLength={12000} onChange={event => setPrompt(event.target.value)} placeholder="描述想生成的画面" rows={9} />
+        <label className={styles.label} htmlFor={`studio-count-${module.id}`}>生成张数</label>
         <div className={styles.counts}>
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
-          <input id="studio-count" disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
+          <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
         </div>
         <p className={styles.muted}>{settings?.model === 'gpt-image-2.5-sunburst' ? 'GPT Image 2.5 Sunburst' : 'GPT Image 2.5 Flare'}</p>
         {error && <p role="alert" className={styles.error}>{error}</p>}
         <p className={styles.muted}>{settings?.unitCredits == null ? '积分单价尚未设置' : `每张 ${settings.unitCredits} 积分 · 本次 ${settings.unitCredits * (Number.isInteger(count) ? count : 0)} 积分`}</p>
-        <button type="button" className={styles.generate} disabled={submitting || uploading || (!pendingSubmission && (!ready || !prompt.trim() || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        <button type="button" className={styles.generate} disabled={submitting || uploading || moduleSaving || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
         {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={() => {
           if (window.confirm('上次提交可能已成功，请先查看生成记录。确定放弃核对并开始新任务吗？')) { setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} }
         }}>放弃核对</button></p>}
@@ -264,7 +413,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
           <div className={styles.resultMedia}>{task.asset ? <>
             <button type="button" className={styles.preview} aria-label="预览生成图片" onClick={() => setPreview(task.asset!.original_url)}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={task.asset.original_url} alt={task.prompt} loading="lazy" />
+              <img src={task.asset.original_url} alt={task.prompt || '参考图生成结果'} loading="lazy" />
             </button>
             <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
@@ -272,7 +421,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
             }} />
           </> : <div className={styles.taskState}>{['queued', 'running'].includes(task.status) && <LoaderCircle className={styles.spinner} size={24} />}
             {task.status === 'queued' ? '等待生成' : task.status === 'running' ? '正在生成' : task.status === 'succeeded' ? '图片已移除' : '未能交付图片'}</div>}</div>
-          <p className={styles.prompt} title={task.prompt}>{task.prompt}</p>
+          <p className={styles.prompt} title={task.prompt || '参考图生成'}>{task.prompt || '参考图生成'}</p>
           <div className={styles.resultActions}><span className={styles.muted}>{new Date(task.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
             {task.asset && <button type="button" disabled={downloadBusy} onClick={() => void download([task.id])}><Download size={15} />下载</button>}
             {['failed', 'uncertain'].includes(task.status) && <button type="button" disabled={!ready || submitting || Boolean(pendingSubmission)} onClick={() => void submit(task)}><RefreshCw size={15} />重新生成</button>}
@@ -281,8 +430,19 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
         {nextCursor && <button type="button" onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
       </section>
     </div>
-    {isAdmin && <dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); closeSettings(); }}>
-      <header className={styles.header}><h2>上下文设置</h2><button type="button" title="关闭" aria-label="关闭设置" onClick={() => {
+    {isAdmin && <dialog ref={moduleDialog} className={styles.dialog} onCancel={event => {
+      if (moduleContext !== savedModuleContext && !window.confirm('上下文尚未保存，确定关闭吗？当前草稿会保留。')) event.preventDefault();
+    }}>
+      <header className={styles.header}><h2>模块上下文</h2><button type="button" aria-label="关闭模块上下文" onClick={() => {
+        if (moduleContext === savedModuleContext || window.confirm('上下文尚未保存，确定关闭吗？当前草稿会保留。')) moduleDialog.current?.close();
+      }}><X size={20} /></button></header>
+      <textarea aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => { setModuleContext(event.target.value); setModuleSaveError(''); }} />
+      <p className={styles.muted}>仅用于这个模块的新生成任务，与通用上下文一起生效。修改后自动保存。</p>
+      <p role="status">{moduleSaving ? '正在保存' : moduleContext === savedModuleContext ? '已保存' : '未保存'}</p>
+      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
+    </dialog>}
+    {isAdmin && isFirst && <dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); closeSettings(); }}>
+      <header className={styles.header}><h2>通用上下文</h2><button type="button" title="关闭" aria-label="关闭设置" onClick={() => {
         closeSettings();
       }}><X size={20} /></button></header>
       {settings && <>
@@ -291,9 +451,9 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
           <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option>
           <option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option>
         </select>
-        <label className={styles.label} htmlFor="studio-context">固定上下文</label>
+        <label className={styles.label} htmlFor="studio-context">通用上下文</label>
         <textarea id="studio-context" rows={12} maxLength={20000} value={draftContext} onChange={event => setDraftContext(event.target.value)} />
-        <p className={styles.muted}>适用于所有用户的新生成任务；正在执行的任务不受影响。</p>
+        <p className={styles.muted}>适用于所有用户、所有模块的新生成任务；正在执行的任务不受影响。</p>
         {models.map(model => <label className={styles.label} key={model}>{model.endsWith('flare') ? 'Flare' : 'Sunburst'} 每张积分
           <input type="number" min={0} max={100000} step={1} placeholder="未设置" value={draftPrices[model] ?? ''} onChange={event => {
             const next = event.target.value === '' ? null : Number(event.target.value);
@@ -311,5 +471,5 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     </dialog>}
     {!settings && settingsError && <p role="alert" className={styles.error}>{settingsError}<button onClick={() => void loadSettings()}>重试</button></p>}
     {preview && <ZoomableImagePreview src={preview} alt="参考图片" onClose={() => setPreview(null)} />}
-  </main>;
+  </section>;
 }
