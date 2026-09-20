@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { listStudioTasks, StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
+import { deleteStudioResult, listStudioTasks, StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
 
 export const dynamic = 'force-dynamic';
+export async function DELETE(request: NextRequest) {
+  const user = await getSession();
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  try { await deleteStudioResult(user.id, (await request.json()).id); return NextResponse.json({ deleted: true }); }
+  catch (error) {
+    if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: '删除未确认，请重试；不会重复删除其他图片' }, { status: 503 });
+  }
+}
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });

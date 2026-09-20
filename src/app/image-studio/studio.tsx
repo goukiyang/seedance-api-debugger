@@ -1,14 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save } from 'lucide-react';
+import { Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import styles from './studio.module.css';
+import { RatioPicker } from './ratio-picker';
+import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 
 type SettingsValue = { context?: string; model: string; revision: number; contextConfigured?: boolean; providerReady: boolean; unitCredits: number | null; prices?: Record<string, number | null> };
-type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; createdAt: string; asset: { original_url: string } | null };
-type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
+type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; asset: { original_url: string; width?: number; height?: number } | null };
+type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; aspectRatio: string; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
+type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 const models = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 async function readResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
@@ -26,6 +29,20 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const [settings, setSettings] = useState<SettingsValue | null>(null);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [settingsReload, setSettingsReload] = useState(0);
+  const [customRatios, setCustomRatios] = useState<string[]>([]);
+  const [ratiosBusy, setRatiosBusy] = useState(false);
+  const [ratiosError, setRatiosError] = useState('');
+  const ratiosLock = useRef(false);
+  async function syncRatios(ratio?: string, remove = false) {
+    if (ratiosLock.current) return false;
+    ratiosLock.current = true; setRatiosBusy(true); setRatiosError('');
+    try {
+      const result = await readResponse(await fetch('/api/image-studio/ratios', ratio ? { method: remove ? 'DELETE' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ratio }) } : { cache: 'no-store' }));
+      setCustomRatios(result.ratios); return true;
+    } catch (e) { setRatiosError(e instanceof Error ? e.message : '比例未保存'); return false; }
+    finally { ratiosLock.current = false; setRatiosBusy(false); }
+  }
+  useEffect(() => { void syncRatios(); }, []);
   const createId = useRef<string | null>(null);
   const createLock = useRef(false);
   const listLock = useRef(false);
@@ -65,6 +82,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     {modules.map((module, index) => <ImageStudioBlock key={module.id} module={module} isAdmin={isAdmin} isFirst={index === 0}
       userId={userId} settings={settings} setSettings={setSettings} active={active === module.id} onActivate={() => setActive(module.id)}
       globalSettingsOpen={globalSettingsOpen && index === 0} onCloseGlobal={() => setGlobalSettingsOpen(false)}
+      ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       settingsReload={settingsReload} onReloadSettings={() => setSettingsReload(current => current + 1)} />)}
     {loading && <p role="status">正在读取模块…</p>}
     {cursor && <button disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模块</button>}
@@ -72,11 +90,12 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   </main>;
 }
 
-function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSettings, active, onActivate, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings }: {
+function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSettings, active, onActivate, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
   isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; settings: SettingsValue | null;
   setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void;
   globalSettingsOpen: boolean; onCloseGlobal: () => void;
   settingsReload: number; onReloadSettings: () => void;
+  ratios: RatioPreferences;
 }) {
   const [draftContext, setDraftContext] = useState('');
   const [draftModel, setDraftModel] = useState('gpt-image-2.5-flare');
@@ -85,6 +104,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [settingsError, setSettingsError] = useState('');
   const [prompt, setPrompt] = useState(module.prompt);
   const [count, setCount] = useState(module.count);
+  const [aspectRatio, setAspectRatio] = useState(module.aspectRatio || 'auto');
+  const [ratioEditing, setRatioEditing] = useState(false);
   const [images, setImages] = useState<UploadedAssetPayload[]>(module.images);
   const [name, setName] = useState(module.name);
   const [moduleRevision, setModuleRevision] = useState(module.revision);
@@ -93,7 +114,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
   const [moduleSaveError, setModuleSaveError] = useState('');
-  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, count: module.count, referenceIds: module.images.map(image => image.id) }) : '');
+  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, count: module.count, aspectRatio: module.aspectRatio || 'auto', referenceIds: module.images.map(image => image.id) }) : '');
   const moduleSaveLock = useRef(false);
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -109,6 +130,12 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [downloadBusy, setDownloadBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StudioTask | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deletedIds = useRef(new Set<string>());
+  const deleteLock = useRef(false);
+  const deleteDialog = useRef<HTMLDialogElement>(null);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
   const submitLock = useRef(false);
   const listLock = useRef(false);
@@ -128,10 +155,11 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
-  const moduleDraft = { name, prompt, count, referenceIds: images.map(image => image.id) };
+  const moduleDraft = { name, prompt, count, aspectRatio, referenceIds: images.map(image => image.id) };
   const moduleDirty = JSON.stringify(moduleDraft) !== moduleSaved || (isAdmin && moduleContext !== savedModuleContext);
 
   useEffect(() => { if (globalSettingsOpen) dialog.current?.showModal(); }, [globalSettingsOpen]);
+  useEffect(() => { if (deleteTarget) deleteDialog.current?.showModal(); else deleteDialog.current?.close(); }, [deleteTarget]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(entries => setVisible(entries.some(entry => entry.isIntersecting)), { rootMargin: '200px' });
@@ -160,7 +188,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     return () => clearTimeout(timer);
     // Save the latest module fields together with its context revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, name, prompt, count, images, moduleRevision]);
+  }, [isAdmin, moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, name, prompt, count, aspectRatio, images, moduleRevision]);
 
   useEffect(() => {
     try {
@@ -169,6 +197,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         if (typeof saved.name === 'string') setName(saved.name.slice(0, 80));
         if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 12000));
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
+        if (typeof saved.aspectRatio === 'string') { try { setAspectRatio(normalizeStudioRatio(saved.aspectRatio)); } catch {} }
         if (Array.isArray(saved.images)) setImages(saved.images.filter((image: UploadedAssetPayload) => image && typeof image.id === 'string' && typeof image.originalUrl === 'string').slice(0, 2));
       }
       const pending = JSON.parse(sessionStorage.getItem(pendingKey) || 'null');
@@ -178,8 +207,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   }, [draftKey, pendingKey, module.saved, module.revision, isAdmin]);
   useEffect(() => {
     if (!draftLoaded) return;
-    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, images, name, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
-  }, [draftLoaded, draftKey, prompt, count, images, name, moduleRevision]);
+    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, aspectRatio, images, name, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
+  }, [draftLoaded, draftKey, prompt, count, aspectRatio, images, name, moduleRevision]);
 
   function closeSettings() {
     if (dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
@@ -242,9 +271,10 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       if (cursor) query.set('cursor', cursor);
       const result = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store' }));
       setTasks(current => {
-        const fresh: StudioTask[] = result.tasks;
+        const fresh: StudioTask[] = result.tasks.filter((task: StudioTask) => !deletedIds.current.has(task.id));
         const ids = new Set(fresh.map(task => task.id));
-        return cursor ? [...current.filter(task => !ids.has(task.id)), ...fresh] : [...fresh, ...current.filter(task => !ids.has(task.id))];
+        const previous = current.filter(task => !ids.has(task.id) && !deletedIds.current.has(task.id));
+        return cursor ? [...previous, ...fresh] : loadedMore.current ? [...fresh, ...previous] : fresh;
       });
       if (cursor || !loadedMore.current) setNextCursor(result.nextCursor);
       if (cursor) loadedMore.current = true;
@@ -267,11 +297,11 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   useEffect(() => () => { if (downloadReady) URL.revokeObjectURL(downloadReady.url); }, [downloadReady]);
 
   async function submit(retryTask?: StudioTask) {
-    if (!settings || submitLock.current) return;
+    if (!settings || submitLock.current || ratioEditing) return;
     if (retryTask && !window.confirm(`将按当前设置重新生成 1 张，预计 ${settings.unitCredits ?? 0} 积分。确定继续吗？`)) return;
     if (!pendingSubmission && moduleDirty && !await saveModule()) return;
     const payload = pendingSubmission || { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
-      moduleId: module.id, count: retryTask ? 1 : count, revision: settings.revision, referenceIds: retryTask?.referenceIds || images.map(image => image.id) };
+      moduleId: module.id, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, revision: settings.revision, referenceIds: retryTask?.referenceIds || images.map(image => image.id) };
     try { sessionStorage.setItem(pendingKey, JSON.stringify(payload)); } catch { /* The in-memory request ID still prevents duplicate retries. */ }
     submitLock.current = true; setSubmitting(true); setError('');
     let ambiguous = true;
@@ -304,6 +334,20 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       document.body.appendChild(anchor); anchor.click(); anchor.remove();
     } catch (e) { setError(e instanceof Error ? e.message : '下载失败，请重试'); }
     finally { setDownloadBusy(false); }
+  }
+  async function deleteResult() {
+    if (!deleteTarget || deleteLock.current) return;
+    const target = deleteTarget;
+    deleteLock.current = true; setDeleting(true); setDeleteError('');
+    try {
+      await readResponse(await fetch('/api/image-studio/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: target.id }) }));
+      deletedIds.current.add(target.id);
+      setTasks(current => current.filter(task => task.id !== target.id));
+      setSelected(current => current.filter(id => id !== target.id));
+      setDownloadReady(null); setDeleteTarget(null);
+      if (preview === target.asset?.original_url) setPreview(null);
+    } catch (e) { setDeleteError(e instanceof Error ? e.message : '删除未确认，请重试'); }
+    finally { deleteLock.current = false; setDeleting(false); }
   }
   const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && settings.unitCredits !== null && !dirty && !settingsError && (!isAdmin || moduleContext === savedModuleContext));
 
@@ -386,6 +430,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         }} />
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>画面描述 <span>有图片时选填</span></label>
         <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={prompt} maxLength={12000} onChange={event => setPrompt(event.target.value)} placeholder="描述想生成的画面" rows={9} />
+        <RatioPicker value={aspectRatio} onChange={setAspectRatio} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <label className={styles.label} htmlFor={`studio-count-${module.id}`}>生成张数</label>
         <div className={styles.counts}>
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
@@ -394,7 +439,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         <p className={styles.muted}>{settings?.model === 'gpt-image-2.5-sunburst' ? 'GPT Image 2.5 Sunburst' : 'GPT Image 2.5 Flare'}</p>
         {error && <p role="alert" className={styles.error}>{error}</p>}
         <p className={styles.muted}>{settings?.unitCredits == null ? '积分单价尚未设置' : `每张 ${settings.unitCredits} 积分 · 本次 ${settings.unitCredits * (Number.isInteger(count) ? count : 0)} 积分`}</p>
-        <button type="button" className={styles.generate} disabled={submitting || uploading || moduleSaving || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        <button type="button" className={styles.generate} disabled={submitting || uploading || moduleSaving || ratioEditing || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
         {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={() => {
           if (window.confirm('上次提交可能已成功，请先查看生成记录。确定放弃核对并开始新任务吗？')) { setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} }
         }}>放弃核对</button></p>}
@@ -415,6 +460,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={task.asset.original_url} alt={task.prompt || '参考图生成结果'} loading="lazy" />
             </button>
+            <button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成图片" aria-label={`删除第 ${task.ordinal} 张生成图片`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button>
             <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
@@ -422,14 +468,21 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
           </> : <div className={styles.taskState}>{['queued', 'running'].includes(task.status) && <LoaderCircle className={styles.spinner} size={24} />}
             {task.status === 'queued' ? '等待生成' : task.status === 'running' ? '正在生成' : task.status === 'succeeded' ? '图片已移除' : '未能交付图片'}</div>}</div>
           <p className={styles.prompt} title={task.prompt || '参考图生成'}>{task.prompt || '参考图生成'}</p>
+          {task.asset?.width && task.asset.height && <p className={styles.muted}>{task.asset.width} × {task.asset.height}{task.outputSize && `${task.asset.width}x${task.asset.height}` !== task.outputSize ? ` · 模型返回尺寸与请求 ${task.outputSize} 不同` : ''}</p>}
           <div className={styles.resultActions}><span className={styles.muted}>{new Date(task.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
             {task.asset && <button type="button" disabled={downloadBusy} onClick={() => void download([task.id])}><Download size={15} />下载</button>}
-            {['failed', 'uncertain'].includes(task.status) && <button type="button" disabled={!ready || submitting || Boolean(pendingSubmission)} onClick={() => void submit(task)}><RefreshCw size={15} />重新生成</button>}
+            {['failed', 'uncertain'].includes(task.status) && <button type="button" disabled={!ready || submitting || ratioEditing || Boolean(pendingSubmission)} onClick={() => void submit(task)}><RefreshCw size={15} />重新生成</button>}
           </div>{task.error && <p className={styles.error}>{task.error}</p>}
         </article>)}</div>
         {nextCursor && <button type="button" onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
       </section>
     </div>
+    <dialog ref={deleteDialog} className={styles.dialog} aria-labelledby={`delete-title-${module.id}`} onCancel={event => { if (deleting) event.preventDefault(); else setDeleteTarget(null); }}>
+      <h2 id={`delete-title-${module.id}`}>删除这张图片？</h2>
+      <p>将从本模块的生成结果中移除，不退还已消耗积分。其他模块、参考图和已保存的副本不受影响。</p>
+      {deleteError && <p role="alert" className={styles.error}>{deleteError}</p>}
+      <div className={styles.resultActions}><button type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : '确认删除'}</button></div>
+    </dialog>
     {isAdmin && <dialog ref={moduleDialog} className={styles.dialog} onCancel={event => {
       if (moduleContext !== savedModuleContext && !window.confirm('上下文尚未保存，确定关闭吗？当前草稿会保留。')) event.preventDefault();
     }}>

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   const ids = Array.from(new Set(request.nextUrl.searchParams.getAll('id')));
   if (!ids.length || ids.length > 8) return NextResponse.json({ error: '每次请选择 1 至 8 张图片' }, { status: 400 });
-  const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: ids }, owner_id: user.id, status: 'succeeded' } });
+  const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: ids }, owner_id: user.id, status: 'succeeded', deleted_at: null } });
   if (tasks.length !== ids.length) return NextResponse.json({ error: '部分图片不可下载或无权访问' }, { status: 403 });
   try {
     const files: Array<{ name: string; bytes: Buffer }> = [];

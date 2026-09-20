@@ -34,7 +34,22 @@
 .result { min-width: 0; }
 .resultMedia { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; }
 .taskState { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #adb6bd; }
-.page .select { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; accent-color: #2ba98e; }
+.page .select { position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; accent-color: #2ba98e; }
+.page .deleteResult { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; padding: 0; background: #171c1f; opacity: 0; }
+.resultMedia:hover .deleteResult, .resultMedia:focus-within .deleteResult { opacity: 1; }
+.page .danger { color: #ffb4ab; border-color: #a44949; }
+.ratioPicker { position: relative; }
+.page .ratioTrigger { width: 100%; justify-content: space-between; }
+.ratioMenu { position: absolute; top: 76px; left: 0; width: 100%; max-height: 300px; overflow-y: auto; z-index: 10; border: 1px solid #465057; background: #171c1f; border-radius: 6px; padding: 6px; box-sizing: border-box; box-shadow: 0 8px 24px #0006; }
+.ratioRow { display: flex; align-items: center; min-height: 38px; }
+.ratioRow > button:first-child { flex: 1; justify-content: space-between; border: 0; background: transparent; }
+.ratioRow button[aria-pressed=true] { color: #a4f2df; background: #123b33; }
+.page .ratioDelete { opacity: 0; padding: 6px; width: 32px; height: 32px; }
+.ratioRow:hover .ratioDelete, .ratioRow:focus-within .ratioDelete { opacity: 1; }
+.page .ratioOther { width: 100%; margin-top: 4px; }
+.customRatio { display: flex; gap: 8px; margin-top: 8px; }
+.customRatio input { min-width: 0; flex: 1; }
+@media (hover: none) { .page .deleteResult, .page .ratioDelete { opacity: 1; } }
 .prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; margin: 10px 0 6px; }
 .resultActions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .resultActions button { padding: 5px 8px; font-size: 13px; }
@@ -44,7 +59,8 @@
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .empty { display: flex; justify-content: center; align-items: center; min-height: 360px; color: #adb6bd; border-bottom: 1px solid #333b40; }
 .error { color: #ffb4ab; font-size: 14px; overflow-wrap: anywhere; }
-.dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
+.dialog { box-sizing: border-box; margin: auto; width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
+.dialog > p { margin: 16px 0; line-height: 1.6; }
 .dialog::backdrop { background: rgb(0 0 0 / 65%); }
 .dialog select { width: 100%; }
 @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } }

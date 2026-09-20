@@ -317,6 +317,7 @@ model ImageStudioModule {
   prompt        String   @default("")
   context       String   @default("")
   count         Int      @default(1)
+  aspect_ratio  String   @default("auto")
   reference_ids String   @default("[]")
   revision      Int      @default(0)
   created_at    DateTime @default(now())
@@ -336,6 +337,9 @@ model ImageStudioTask {
   context        String
   revision       Int
   model          String
+  aspect_ratio   String   @default("auto")
+  output_size    String?
+  deleted_at     DateTime?
   reference_ids  String
   unit_credits   Float
   freeze_snapshot String?
