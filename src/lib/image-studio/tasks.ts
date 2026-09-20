@@ -5,6 +5,7 @@ import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
 import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
 import { defaultStudioModuleId, validStudioModuleId } from './modules';
+import { normalizeStudioRatio, studioRatioSize } from './ratios';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -18,7 +19,10 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (!Number.isInteger(body.revision)) throw new StudioError('请刷新生成设置');
   if (!Array.isArray(body.referenceIds) || body.referenceIds.length > 2 || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError('最多使用两张有效参考图');
   if (!body.prompt.trim() && !body.referenceIds.length) throw new StudioError('请添加参考图片或填写画面描述');
-  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), referenceIds: body.referenceIds as string[] };
+  let aspectRatio: string | undefined;
+  try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
+  catch (error) { throw new StudioError((error as Error).message); }
+  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}) };
 }
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>) {
@@ -59,6 +63,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       await tx.imageStudioTask.create({ data: {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, ordinal: i + 1, fingerprint,
         prompt: input.prompt, context, revision: settings.revision, model: settings.model,
+        aspect_ratio: input.aspectRatio || 'auto', output_size: studioRatioSize(input.aspectRatio),
         reference_ids: JSON.stringify(input.referenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       } });
       if (freeze) await tx.creditLedger.create({ data: {
@@ -104,16 +109,26 @@ export async function claimStudioTask() {
 
 export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string) {
   if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
-  const rows = await prisma.imageStudioTask.findMany({ where: { owner_id: ownerId,
+  const rows = await prisma.imageStudioTask.findMany({ where: { owner_id: ownerId, deleted_at: null,
     ...(moduleId ? moduleId === defaultStudioModuleId(ownerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] } : { module_id: moduleId } : {}) },
     orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 25,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const items = rows.slice(0, 24);
   const assets = await prisma.asset.findMany({ where: { id: { in: items.flatMap(item => item.asset_id ? [item.asset_id] : []) }, owner_id: ownerId, status: 'active' },
-    select: { id: true, original_url: true, thumbnail_url: true } });
+    select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   return { tasks: items.map(task => ({ id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
     prompt: task.prompt, model: task.model, status: task.status, error: task.error, unitCredits: task.unit_credits,
+    aspectRatio: task.aspect_ratio, outputSize: task.output_size,
     createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
     asset: assets.find(asset => asset.id === task.asset_id) || null,
   })), nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
+}
+
+export async function deleteStudioResult(ownerId: string, id: unknown) {
+  if (typeof id !== 'string' || id.length > 100 || !id) throw new StudioError('图片编号无效');
+  const task = await prisma.imageStudioTask.findFirst({ where: { id, owner_id: ownerId } });
+  if (!task) throw new StudioError('图片不存在或无权删除', 404);
+  if (task.status !== 'succeeded') throw new StudioError('只能删除已生成的图片', 409);
+  // Hide the result, not the shared asset or immutable billing/task history.
+  await prisma.imageStudioTask.updateMany({ where: { id, owner_id: ownerId, status: 'succeeded', deleted_at: null }, data: { deleted_at: new Date() } });
 }

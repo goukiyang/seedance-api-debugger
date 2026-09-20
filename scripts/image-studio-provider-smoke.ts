@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { requestStudioImages, StudioProviderError } from '../src/lib/image-studio/provider';
 import { readStudioImage } from '../src/lib/image-studio/media';
+import { normalizeStudioRatio, STUDIO_RATIOS, studioRatioSize } from '../src/lib/image-studio/ratios';
 
 async function main() {
   const requests: Array<{ url: string; init: RequestInit }> = [];
@@ -27,6 +28,24 @@ async function main() {
   assert.equal(form.getAll('image[]').length, 2);
   assert.equal(form.get('prompt'), params.prompt);
   assert.equal(form.get('n'), '1');
+  assert.equal(studioRatioSize('auto'), undefined);
+  assert.equal(normalizeStudioRatio('1920:1080'), '16:9');
+  assert.equal(normalizeStudioRatio('1.5：1'), '3:2');
+  assert.throws(() => normalizeStudioRatio('99999.99:50000'));
+  for (const value of ['1.41:1', '9999:5000', '21:9']) assert.equal(normalizeStudioRatio(normalizeStudioRatio(value)), normalizeStudioRatio(value));
+  for (const invalid of ['0:1', '4:1', '1:4', '-1:2', 'NaN:1', '1:Infinity', 'garbage', '1:']) assert.throws(() => normalizeStudioRatio(invalid));
+  for (const ratio of [...STUDIO_RATIOS, '5:3', '1.41:1', '9999:5000']) {
+    const size = studioRatioSize(ratio)!;
+    const [w, h] = size.split('x').map(Number);
+    const [rw, rh] = normalizeStudioRatio(ratio).split(':').map(Number);
+    assert.ok(w % 16 === 0 && h % 16 === 0 && w * h >= 655360 && w * h <= 1572864 && Math.max(w, h) <= 2048);
+    assert.ok(Math.abs(w / h / (rw / rh) - 1) < .01);
+  }
+  await requestStudioImages({ ...params, size: studioRatioSize('16:9') }, fetcher);
+  assert.equal(JSON.parse(String(requests[2].init.body)).size, '1280x720');
+  await requestStudioImages({ ...params, size: studioRatioSize('5:3'), images: [{ bytes: new Uint8Array([1]), mimeType: 'image/png' }] }, fetcher);
+  assert.equal((requests[3].init.body as FormData).get('size'), '1360x816');
+  await assert.rejects(requestStudioImages({ ...params, size: '99999x16' }, fetcher));
   for (const count of [0, 9, 1.5, NaN]) await assert.rejects(requestStudioImages({ ...params, count }, fetcher));
   await assert.rejects(requestStudioImages({ ...params, model: 'unknown' }, fetcher));
   await assert.rejects(requestStudioImages(params, async () => Response.json({ data: [] })));
@@ -52,7 +71,7 @@ async function main() {
     const bytes = await readStudioImage('https://api.muskapis.com/logo.svg', AbortSignal.timeout(15000));
     assert.ok(bytes.length > 0, 'real Node HTTPS lookup must accept the pinned address');
   }
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 4);
   console.log('PASS: text/image payloads, URL/base64 outputs, private-address rejection, limits, sanitized stage errors; no paid calls.');
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

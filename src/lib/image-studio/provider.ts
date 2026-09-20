@@ -14,10 +14,15 @@ export class StudioProviderError extends Error {
 export async function requestStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal;
+  size?: string;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
   if (params.images.length > 2) throw new Error('最多使用两张参考图');
+  if (params.size) {
+    const [w, h] = params.size.split('x').map(Number);
+    if (!/^\d+x\d+$/.test(params.size) || w % 16 || h % 16 || w < 16 || h < 16 || Math.max(w, h) > 3840 || w / h > 3 || h / w > 3 || w * h < 655360 || w * h > 8294400) throw new Error('生成尺寸无效');
+  }
   const url = new URL(params.baseUrl);
   url.pathname = `${url.pathname.replace(/\/$/, '').replace(/\/v1$/, '')}/v1/images/${params.images.length ? 'edits' : 'generations'}`;
   const headers: Record<string, string> = { Authorization: `Bearer ${params.apiKey}` };
@@ -28,13 +33,14 @@ export async function requestStudioImages(params: {
     form.set('prompt', params.prompt);
     form.set('n', String(params.count));
     form.set('output_format', 'png');
+    if (params.size) form.set('size', params.size);
     params.images.forEach((image, index) => {
       form.append('image[]', new Blob([new Uint8Array(image.bytes)], { type: image.mimeType }), `reference-${index + 1}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType === 'image/webp' ? 'webp' : 'png'}`);
     });
     body = form;
   } else {
     headers['Content-Type'] = 'application/json';
-    body = JSON.stringify({ model: params.model, prompt: params.prompt, n: params.count, output_format: 'png' });
+    body = JSON.stringify({ model: params.model, prompt: params.prompt, n: params.count, output_format: 'png', ...(params.size ? { size: params.size } : {}) });
   }
   let response: Response;
   try { response = await fetcher(url, { method: 'POST', headers, body, signal: params.signal }); }
