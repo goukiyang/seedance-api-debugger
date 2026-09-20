@@ -316,6 +316,9 @@ model ImageStudioModule {
   name          String   @default("未命名模块")
   prompt        String   @default("")
   context       String   @default("")
+  model         String?
+  prices_json   String?
+  reproduce_task_id String?
   count         Int      @default(1)
   aspect_ratio  String   @default("auto")
   reference_ids String   @default("[]")
@@ -337,6 +340,7 @@ model ImageStudioTask {
   context        String
   revision       Int
   model          String
+  snapshot_json  String?
   aspect_ratio   String   @default("auto")
   output_size    String?
   deleted_at     DateTime?

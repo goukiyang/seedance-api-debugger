@@ -1,5 +1,6 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
 import { readStudioImage } from './media';
+import { MAX_REFERENCE_IMAGES } from './limits';
 
 export type StudioImageInput = { bytes: Uint8Array; mimeType: string };
 
@@ -18,7 +19,7 @@ export async function requestStudioImages(params: {
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
-  if (params.images.length > 2) throw new Error('最多使用两张参考图');
+  if (params.images.length > MAX_REFERENCE_IMAGES) throw new Error(`最多使用 ${MAX_REFERENCE_IMAGES} 张参考图`);
   if (params.size) {
     const [w, h] = params.size.split('x').map(Number);
     if (!/^\d+x\d+$/.test(params.size) || w % 16 || h % 16 || w < 16 || h < 16 || Math.max(w, h) > 3840 || w / h > 3 || h / w > 3 || w * h < 655360 || w * h > 8294400) throw new Error('生成尺寸无效');

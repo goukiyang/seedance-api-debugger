@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { Prisma } from '@prisma/client';
+import { Prisma, type Prisma as PrismaTypes } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSession, type SessionUser } from '@/lib/auth/session';
 import { getAccessibleProjectIds, getTaskWhereForUser } from '@/lib/projects/permissions';
@@ -559,6 +559,8 @@ async function loadAssetItems(options: {
   status: string;
   ownerUserId: string | null;
   keyword: string | null;
+  includeUploads: boolean;
+  includeGenerated: boolean;
   take: number;
 }) {
   if (options.enhance !== 'none') {
@@ -572,7 +574,7 @@ async function loadAssetItems(options: {
     return { items: [] as LibraryItem[], total: 0 };
   }
 
-  const where: Prisma.AssetWhereInput = {
+  const where: PrismaTypes.AssetWhereInput = {
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
   };
   if (options.type === 'image') where.type = 'image';
@@ -588,27 +590,79 @@ async function loadAssetItems(options: {
     where.file_name = { contains: options.keyword };
   }
 
-  const [assets, total] = await Promise.all([
-    prisma.asset.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: options.take,
-      select: {
-        id: true,
-        original_url: true,
-        thumbnail_url: true,
-        file_name: true,
-        type: true,
-        status: true,
-        width: true,
-        height: true,
-        file_size: true,
-        created_at: true,
-        owner_id: true,
-      },
-    }),
-    prisma.asset.count({ where }),
-  ]);
+  type AssetLibraryDbRow = {
+    id: string;
+    original_url: string;
+    thumbnail_url: string | null;
+    file_name: string;
+    type: string;
+    status: string;
+    width: number | null;
+    height: number | null;
+    file_size: number | null;
+    created_at: Date;
+    owner_id: string;
+  };
+  const generatedOnly = options.includeGenerated && !options.includeUploads;
+  let assets: AssetLibraryDbRow[];
+  let total: number;
+  if (generatedOnly) {
+    const statusFilter = options.status === 'hidden'
+      ? Prisma.sql`asset."status" IN ('hidden', 'deleted')`
+      : Prisma.sql`asset."status" = 'active'`;
+    const typeFilter = options.type === 'all'
+      ? Prisma.sql`asset."type" IN ('image', 'video', 'audio')`
+      : Prisma.sql`asset."type" = ${options.type}`;
+    const ownerFilter = options.role !== 'admin'
+      ? Prisma.sql`AND asset."owner_id" = ${options.userId}`
+      : options.scope === 'user' && options.ownerUserId
+        ? Prisma.sql`AND asset."owner_id" = ${options.ownerUserId}`
+        : Prisma.empty;
+    const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
+    const generatedFilter = Prisma.sql`AND EXISTS (
+      SELECT 1 FROM "ImageStudioTask" generated_task
+      WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'
+    )`;
+    const [generatedAssets, generatedCount] = await Promise.all([
+      prisma.$queryRaw<AssetLibraryDbRow[]>(Prisma.sql`
+        SELECT asset."id", asset."original_url", asset."thumbnail_url", asset."file_name", asset."type", asset."status",
+          asset."width", asset."height", asset."file_size", asset."created_at", asset."owner_id"
+        FROM "Asset" asset
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter}
+        ORDER BY asset."created_at" DESC
+        LIMIT ${options.take}
+      `),
+      prisma.$queryRaw<Array<{ count: bigint | number }>>(Prisma.sql`
+        SELECT COUNT(DISTINCT asset."id") AS count
+        FROM "Asset" asset
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter}
+      `),
+    ]);
+    assets = generatedAssets;
+    total = Number(generatedCount[0]?.count || 0);
+  } else {
+    [assets, total] = await Promise.all([
+      prisma.asset.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: options.take,
+        select: {
+          id: true,
+          original_url: true,
+          thumbnail_url: true,
+          file_name: true,
+          type: true,
+          status: true,
+          width: true,
+          height: true,
+          file_size: true,
+          created_at: true,
+          owner_id: true,
+        },
+      }),
+      prisma.asset.count({ where }),
+    ]);
+  }
 
   const ownerIds = Array.from(new Set(assets.map((asset) => asset.owner_id).filter(Boolean)));
   const owners = ownerIds.length > 0
@@ -712,6 +766,7 @@ export async function GET(request: NextRequest) {
     const page = positiveInt(searchParams.get('page'), 1, 10_000);
     const limit = positiveInt(searchParams.get('limit'), 40, 100);
     const includeUploads = searchParams.get('include_uploads') === 'true';
+    const includeGenerated = searchParams.get('include_generated') === 'true';
     const includeForMerge = type === 'all';
 
     if (scope === 'user' && user.role !== 'admin') {
@@ -734,7 +789,7 @@ export async function GET(request: NextRequest) {
         limit,
         includeForMerge,
       }),
-      includeUploads
+      (includeUploads || includeGenerated)
         ? loadAssetItems({
           userId: user.id,
           role: user.role,
@@ -744,6 +799,8 @@ export async function GET(request: NextRequest) {
           status,
           ownerUserId,
           keyword,
+          includeUploads,
+          includeGenerated,
           take: includeForMerge ? takeForMerge : limit,
         })
         : Promise.resolve({ items: [] as LibraryItem[], total: 0 }),
@@ -784,6 +841,7 @@ export async function GET(request: NextRequest) {
         sort,
         enhance,
         include_uploads: includeUploads,
+        include_generated: includeGenerated,
         group_by: groupBy,
         project_id: projectId,
         owner_user_id: ownerUserId,

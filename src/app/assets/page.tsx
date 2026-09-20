@@ -849,6 +849,7 @@ function AssetsPageContent() {
       type: requestType,
       enhance: enhanceFilter,
       includeUploads: showUploadedAssets,
+      includeGenerated: true,
       status,
       sort,
       groupBy,
@@ -871,6 +872,7 @@ function AssetsPageContent() {
       limit: '60',
     });
     params.set('include_uploads', showUploadedAssets ? 'true' : 'false');
+    params.set('include_generated', 'true');
     if (enhanceFilter !== 'none') params.set('enhance', enhanceFilter);
     if (scope === 'project' && projectId) params.set('project_id', projectId);
     if (scope === 'user' && ownerUserId) params.set('owner_user_id', ownerUserId);
