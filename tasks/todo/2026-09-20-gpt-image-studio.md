@@ -276,5 +276,6 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 回退：`rollback/2026-09-21-before-image-studio-a6` 已推送，解引用指向发布前线上 `629a692c9e32cb2267062ded08852c4c3d5790ef`；旧构建保留为服务器 `/srv/video-api-debugger/app/.next-prod-prev-a6-3ca1728`。
 - 服务与公网：`sd2-gray.service`、`sd2-image-studio.service` active，健康周期后均 `NRestarts=0`；本机 `127.0.0.1:3302/api/release`、公网 `/api/release` 均为 `0.6.0`，公网 `/login` 和新 BUILD_ID 的 `_buildManifest.js` 为200，匿名 `/image-studio` 按预期跳登录；来源头为 `server-42-193`。
 - 浏览器验收（TaskSpace4，正式管理员登录态）：新版本页面显示参考图 `2/10`，仅证明当前计数/上限显示，不证明已在浏览器完成10张选择或粘贴；比例菜单包含常用比例、自定义“其他”及 `3:1/1:3`；模块设置展示模型与管理员积分单价并提示自动保存；生成结果在资产页默认“图片”筛选中可见；点击历史“重新生成”仅恢复表单并明确提示点击“生成图片”后才创建任务扣积分；删除确认已打开并点击“取消”，未删除生产数据。旧客户端的更新提醒已实际显示并通过“立即刷新”载入0.6.0；本轮未重复验证“稍后/手动重新打开”与未保存草稿拦截，沿用既有 v0.4.0 证据。
+- 隔离候选上限回归（不接生产数据库/存储）：TaskSpace4 在 `localhost:3408` 先用文件选择累计9张，再用合成粘贴加入第10张；继续粘贴第11张后显示“最多选择10张参考图”，前10张仍保留为 `10/10`。模块自动保存后刷新页面仍为 `10/10`，隔离 SQLite 中该模块 `reference_ids` 数组长度为10、revision为4。未点击生成、未扣费；临时 Next 服务、SSH 隧道和3408端口已关闭。
 - 验证命令：候选 `npm run build`、候选本机 `/api/release`/`/api/config`/`/login`；公网 `/api/release`/`/api/config`/`/login`/`/image-studio`/静态 BUILD_ID；图片 Provider smoke、隔离 SQLite integration smoke、定向 `tsc`、精确范围 `git diff --check`；均通过。未执行真实付费生成，未确认上游十图能力，未确认删除生产记录。
 - 上游限制保持不变：MuskAPIs 官方资料本轮只明确两张图融合；产品可保证本地选择/保存/服务端/Provider 的最多10张边界，但不能宣称供应商已保证十张上游生成能力。
