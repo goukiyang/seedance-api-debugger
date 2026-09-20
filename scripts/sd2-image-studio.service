@@ -1,0 +1,19 @@
+[Unit]
+Description=SD2 image generation queue
+After=network-online.target sd2-gray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gouki
+Group=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+EnvironmentFile=/srv/video-api-debugger/app/.env
+ExecStart=/usr/bin/env DATABASE_URL=file:/data/video-api-debugger/var-lib/dev.db node --import tsx scripts/process-image-studio.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=420
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

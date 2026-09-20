@@ -24,6 +24,18 @@
 .counts input { width: 68px; }
 .page .generate { width: 100%; margin-top: 12px; background: #126f5d; }
 .outputs { min-width: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 20px; }
+.result { min-width: 0; }
+.resultMedia { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; }
+.taskState { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #adb6bd; }
+.page .select { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; accent-color: #2ba98e; }
+.prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; margin: 10px 0 6px; }
+.resultActions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.resultActions button { padding: 5px 8px; font-size: 13px; }
+.spinner { animation: spin 1s linear infinite; }
+.page a { color: #8ce5d2; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .empty { display: flex; justify-content: center; align-items: center; min-height: 360px; color: #adb6bd; border-bottom: 1px solid #333b40; }
 .error { color: #ffb4ab; font-size: 14px; overflow-wrap: anywhere; }
 .dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
