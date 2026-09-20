@@ -11,8 +11,8 @@
 | 编号 | 任务 | 完成标准 | 当前状态 |
 |---|---|---|---|
 | I1 | 核对接口与现有能力 | 确认真实模型、计费及复用入口 | 已完成；真实模型已核实，独立单价由管理员设置 |
-| I2 | 实现生图页与上下文设置 | 权限、上传、生成、保存、下载完整衔接 | 需修复；页面与模拟流程已实现，2026-09-20 真实中转测试发现 URL 输出不兼容及下载器错误，见第10节 |
-| I3 | 验证与发布 | 检查通过，线上页面可用并有回退点 | 发布已完成但交付验收未通过；v0.3.0 页面/进程正常不代表真实图片生成交付成功，待修复后复验 |
+| I2 | 实现生图页与上下文设置 | 权限、上传、生成、保存、下载完整衔接 | 已完成；v0.4.0 修复交付并通过真实上游测试，见第12节 |
+| I3 | 验证与发布 | 检查通过，线上页面可用并有回退点 | 已完成；v0.4.0 已上线，登录页面与回退点已核验，见第12节 |
 
 - 实证：通过已有服务端配置调用中转 /v1/models，200，包含 gpt-image-2、gpt-image-2.5-flare、gpt-image-2.5-sunburst；不输出凭据、未付费生成。
 - 现有 src/lib/integrations/image-generation.ts 走 Gemini/Seedream，保持不变；新增独立 src/lib/image-studio 适配器。
@@ -142,11 +142,11 @@ git diff --cached --check
 
 ### 修复边界与待验收
 
-- [ ] 兼容Base64及HTTPS URL输出，沿用安全取图、图片格式/尺寸校验和本地资产保存；不能仅添加 `response_format` 参数后假定中转一定遵守。
-- [ ] 修正固定DNS地址下载器的单地址/数组回调，保留私网阻断、DNS固定、大小/超时/重定向限制；不通过移除安全检查绕过错误。
-- [ ] 记录脱敏的失败阶段、HTTP状态、错误类别及可用请求编号；不写密钥、原始上下文、图片Base64、签名URL。区分生成拒绝、结果未知与生成成功但交付失败，不自动重新付费生成。
-- [ ] 补全URL/Base64、真实Node20下载、危险地址拒绝、保存/结算失败、单次请求不重发的回归；修复后在剩余授权预算内做最小真实取图、持久保存、页面刷新预览与实际下载验收。
-- [ ] 以当前正式发布分支隔离发布修复，排除暂停的旧批量视频下载修改；保留候选构建和回退点，不覆盖既有失败任务/余额/用户素材。
+- [x] 兼容Base64及HTTPS URL输出，沿用安全取图、图片格式/尺寸校验和本地资产保存；不能仅添加 `response_format` 参数后假定中转一定遵守。
+- [x] 修正固定DNS地址下载器的单地址/数组回调，保留私网阻断、DNS固定、大小/超时/重定向限制；不通过移除安全检查绕过错误。
+- [x] 记录脱敏的失败阶段、HTTP状态、错误类别及可用请求编号；不写密钥、原始上下文、图片Base64、签名URL。区分生成拒绝、结果未知与生成成功但交付失败，不自动重新付费生成。
+- [x] 补全URL/Base64、真实Node20下载、危险地址拒绝、保存/结算失败、单次请求不重发的回归；修复后在剩余授权预算内做最小真实取图、持久保存、页面刷新预览与实际下载验收。
+- [x] 以当前正式发布分支隔离发布修复，排除暂停的旧批量视频下载修改；保留候选构建和回退点，不覆盖既有失败任务/余额/用户素材。
 
 本轮只进行诊断和固定记录更新；未改业务源文件、未重启/部署、未修改管理员设置或用户余额。临时诊断脚本 `/tmp/sd2-image-diagnose-once.cjs` 在本机及服务器，仅用于单次授权取证，没有密钥/提示词硬编码，不属于产品交付文件。守门员：真实付费动作按本轮授权执行1次；其余生产操作只读，无分级误判。
 
@@ -157,9 +157,9 @@ git diff --cached --check
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | F1 | 查明图片生成失败根因 | 找到实际失败环节与证据，明确修复方案 | 已完成 |
-| F2 | 修复交付并补齐输入方式 | 支持链接取图、仅图片生成、粘贴图片 | 验证通过，待发布 |
-| F3 | 验证并上线 | 真实生成后可预览下载，正式页面生效 | 验证通过，发布中 |
-| F4 | 模块保存与新建 | 账号保存、下方追加、结果隔离、模块与通用上下文正确生效 | 验证通过，待发布 |
+| F2 | 修复交付并补齐输入方式 | 支持链接取图、仅图片生成、粘贴图片 | 已完成 |
+| F3 | 验证并上线 | 真实生成后可预览下载，正式页面生效 | 已完成 |
+| F4 | 模块保存与新建 | 账号保存、下方追加、结果隔离、模块与通用上下文正确生效 | 已完成 |
 
 - 范围：仅 image-studio 相关页面、接口、任务/下载器、测试和增量表结构，版本0.4.0。保持旧视频、Gemini/Seedream、积分规则不变。
 - 新增 ImageStudioModule、ImageStudioTask.module_id 可空字段及索引；旧任务不回写、不迁移归属，默认模块查询兼容null记录。发布前一致性备份，只执行新增表/字段SQL，禁止全库db push。
@@ -176,3 +176,42 @@ git diff --cached --check
 - 隔离候选浏览器：真实管理员/普通用户测试账号登录；原生剪贴板图片+Command/Ctrl+V成功；空白不可生成、仅图片可生成；模块保存服务端并刷新恢复，新建追加第二模块不影响第一模块。1440px与390px截图已检查，390px无横向溢出。
 - 在隔离测试账号调用真实上游2次（加诊断1次，总计3/10次），仅图片请求21.08秒、仅文字请求20.28秒，均succeeded并写入图片资产，未修改生产账号积分。浏览器真实PNG下载完成并确认为1264x848有效图片。模块结果查询、权限与存储使用候选版本实际接口，不用伪造响应冒充成功。
 - 临时运行证据：`/tmp/sd2-image-modules-desktop.png`、`/tmp/sd2-image-modules-mobile.png`、`/tmp/sd2-image-fix-native.png`；临时服务器候选`/tmp/sd2-image-fix-check`，测试数据与生产隔离。生产发布与最终公网验收另记，以上不冒充已上线。
+
+## 12. v0.4.0 最终交付（2026-09-21）
+
+- 正式入口：https://sd2.youdooart.com/image-studio 。运行提交 `96585c3901cab78a225f0aaa3397362040187149`，BUILD_ID `y9OeME-1zJRJHFWWZrmfu`；开发功能提交 `9073b1ec3a354ab840661f99c057c63cf105f9e1`。两个分支均已推送并远端复核。本节关闭第10节的修复待验收项；历史失败记录不删除、不自动重试扣费。
+- 发布归档排除 `.env*`、上传、视频、storage、DB等运行数据；上传前后 SHA256 一致：`fe9ba3f2ba84a70e47e89f05566a715d3745e22ac2f713be46d3d4e9318ba33e`。发布窗口已登记并确认，本次流程实际执行守门检查，而非只写配置。
+- 一致性备份、旧源码与旧构建位于 `/srv/video-api-debugger/backups/image-modules-96585c3901cab78a225f0aaa3397362040187149/`；回退tag `rollback/2026-09-21-before-image-modules` 已推送并指向6a95da91。先执行事务内纯增量SQL，再生成Client与候选构建，旧任务归属不回写。回退保留新增表/字段，不覆盖上线后用户数据。
+- 部署脚本独立审查通过：修正增量SQL先后顺序、两次构建目录移动间失败的回退、逐服务健康检查。新构建通过后切换 `.next-prod`，主服务/图片worker/积分网关/积分timer/飞书relay逐一active；主服务和图片worker均NRestarts=0。
+- 公网 `/api/config`、`/login` 返回200且来源 `server-42-193`；本机3302 API200；`/api/release` 为0.4.0。浏览器实际加载 `/_next/static/chunks/app/image-studio/page-69c4a94993c4b7b2.js`，该资源公网200。
+- 已登录正式账号打开新页面，通用上下文/模块上下文/保存模块/新建模块入口可见。原有2张参考图、正文和生成张数2保留；按原内容保存为“模块1”，刷新后服务端仍为saved=true、2refs、count=2；原2条失败历史保留。未添加生产测试任务、未改生产上下文或用户积分。
+- 更新提醒真实验证：保持旧0.3.0页面，正式发布后收到0.4.0提醒；“稍后”持久去重，手动检查可重新打开；点击立即刷新并确认后载入0.4.0，检测完成清除旧提醒记录。标题“发现新版本”20px加粗，摘要对应本次功能。
+- 真实测试生成共3次（诊断1+修复验收2，授权上限10）；修复验收使用同版本隔离账号/数据库和真实上游，输出都成功持久保存。原生浏览器PNG、2张ZIP均成功下载，`unzip -t` 两个条目均OK，图片实际加载。正式站未重复付费测试，权限/积分未被测试篡改。
+- 截图临时证据：`/tmp/sd2-image-modules-production.png`、`/tmp/sd2-image-update-production.png`、`/tmp/sd2-image-modules-results.png`。PNG/ZIP证据 `/tmp/sd2-image-fix-native.png`、`/tmp/sd2-image-fix-native.zip`。预览服务和SSH转发已停止；临时文件不进入发布。
+- 守门员：涉及上下文权限、任务与增量表，已独立只读审查、隔离业务验证与可回退发布；无本轮分级误判。未改视频/Gemini/Seedream规则或依赖，原有无关todo和本地构建目录未覆盖/提交。
+
+本轮17个修改文件及用途（相对上述正式源码目录）：
+
+| 文件 | 修改内容 |
+|---|---|
+| `src/app/image-studio/studio.tsx`、`studio.module.css` | 多模块保存/新建、两层上下文、仅图生成、原生粘贴、保存冲突保护及响应式排列 |
+| `src/app/api/image-studio/modules/route.ts`、`src/lib/image-studio/modules.ts` | 账号隔离模块存储、分页、版本冲突、上下文权限 |
+| `src/app/api/image-studio/tasks/route.ts`、`src/lib/image-studio/tasks.ts` | 按模块查结果、上下文快照、兼容旧记录及无描述输入 |
+| `src/lib/image-studio/provider.ts`、`media.ts`、`worker.ts` | URL/Base64输出兼容、Node20固定DNS取图、脱敏失败阶段 |
+| `prisma/schema.prisma`、`prisma/migrations/20260921001000_image_studio_modules/migration.sql` | 模块表、可空任务归属字段和索引 |
+| `scripts/image-studio-provider-smoke.ts`、`scripts/image-studio-integration-smoke.ts` | 协议/安全与权限/保存/任务回归 |
+| `package.json`、`package-lock.json`、`src/lib/release.ts` | 唯一版本0.4.0及更新摘要，无依赖变化 |
+| 本todo | 确认需求、问题、验证和发布证据 |
+
+本轮通过的主要命令（测试DB与生产隔离）：
+
+```sh
+STUDIO_PUBLIC_DOWNLOAD_TEST=1 node --import tsx scripts/image-studio-provider-smoke.ts
+DATABASE_URL=file:/tmp/sd2-image-studio-test-fix-r2-20260921.db node --import tsx scripts/image-studio-integration-smoke.ts
+node node_modules/typescript/bin/tsc -p /tmp/sd2-image-studio-tsconfig.json --noEmit
+NEXT_DIST_DIR=.next-prod-candidate-image-modules npm run build
+unzip -t /tmp/sd2-image-fix-native.zip
+git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.prisma
+```
+
+统一diff：https://github.com/goukiyang/seedance-api-debugger/compare/1dd19fe1a72ee57fdd1571d6c7eb3a0f182a7dbf...96585c3901cab78a225f0aaa3397362040187149 。本地副本 `/tmp/sd2-image-modules-v0.4.0.diff`。未关闭的问题：无本轮阻塞项；历史失败图片无法按原响应追回，须由用户决定是否重新生成。
