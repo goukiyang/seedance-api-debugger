@@ -30,11 +30,14 @@ fi
 
 ssh "$SERVER" 'set -euo pipefail
 systemctl is-active sd2-gray.service
+systemctl is-active sd2-image-studio.service sd2-finalize-pending.timer sd2-video-delivery.timer sd2-backup.timer
 systemctl is-active cloudflared-seedance2-server.service
 systemctl is-enabled sd2-finalize-pending.timer sd2-video-delivery.timer 2>/dev/null || true
 ss -ltnp | grep ":3302"
 test -L /var/lib/video-api-debugger
 test "$(readlink -f /var/lib/video-api-debugger)" = /data/video-api-debugger/var-lib
+test "$(systemctl show sd2-gray.service -p NRestarts --value)" = 0
+test "$(systemctl show sd2-image-studio.service -p NRestarts --value)" = 0
 test -L /srv/video-api-debugger/app/public/uploads
 test "$(readlink -f /srv/video-api-debugger/app/public/uploads)" = /data/video-api-debugger/var-lib/uploads
 test -L /srv/video-api-debugger/app/public/videos

@@ -47,5 +47,12 @@ for (const marker of [
 }
 assert.match(cutoverCommands, /bash ops\/server\/sd2\/preflight\.sh/, 'cutover instructions must run preflight before release');
 assert.match(cutoverCommands, /EXPECT_PROD_ON_SERVER=1 bash ops\/server\/sd2\/preflight\.sh/, 'cutover instructions must run production preflight after switch');
+for (const marker of [
+  'systemctl is-active sd2-image-studio.service sd2-finalize-pending.timer sd2-video-delivery.timer sd2-backup.timer',
+  'systemctl show sd2-gray.service -p NRestarts --value',
+  'systemctl show sd2-image-studio.service -p NRestarts --value',
+]) {
+  assert.match(serverPreflight, new RegExp(marker.replaceAll('/', '\\/')), `server preflight must check ${marker}`);
+}
 
 console.log('[server-runtime-dirs-smoke] ok');
