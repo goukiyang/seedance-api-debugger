@@ -12571,6 +12571,20 @@ body.compare-fullscreen-open {
   flex-shrink: 0;
 }
 
+.composer-prompt-counter.is-error,
+.composer-prompt-expanded-head strong.is-error,
+.composer-prompt-limit-error {
+  color: rgba(248, 113, 113, 0.92);
+}
+
+.composer-prompt-limit-error {
+  font-size: 11px;
+  line-height: 1.4;
+  margin-left: auto;
+  max-width: min(360px, 45vw);
+  text-align: right;
+}
+
 .composer-prompt-expanded-overlay {
   align-items: center;
   background: rgba(8, 13, 24, 0.76);

@@ -8,6 +8,10 @@ import {
   replaceMentionRange,
   type PromptMentionRange,
 } from '@/lib/prompt/mention';
+import {
+  GENERATION_PROMPT_LIMIT_MESSAGE,
+  MAX_GENERATION_PROMPT_CHARS,
+} from '@/lib/prompt/limits';
 
 interface ReferenceLabel {
   label: string;
@@ -24,10 +28,13 @@ interface Props {
   onMentionSelect?: (candidate: PromptMentionCandidate) => Promise<string | null | undefined> | string | null | undefined;
 }
 
-const MAX_CHARS = 2000;
 const PROMPT_TEXTAREA_MAX_HEIGHT = 320;
 const PROMPT_TEXTAREA_MOBILE_MAX_HEIGHT = 280;
 const MOBILE_QUERY = '(max-width: 640px)';
+
+function promptLimitMessage(length: number) {
+  return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${length} 字`;
+}
 
 function insertTextAtRange(value: string, insertText: string, start: number, end: number) {
   const next = `${value.slice(0, start)}${insertText}${value.slice(end)}`;
@@ -70,9 +77,10 @@ export function PromptEditor({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const activeMentionIndexRef = useRef(0);
   const [mentionLoading, setMentionLoading] = useState(false);
+  const [limitNotice, setLimitNotice] = useState<string | null>(null);
 
   const hasReferences = referenceLabels.length > 0;
-  const canOpenExpanded = value.length <= MAX_CHARS;
+  const canOpenExpanded = value.length <= MAX_GENERATION_PROMPT_CHARS;
   const visibleMentionCandidates = useMemo(() => {
     if (!mentionState) return [];
     const query = mentionState.range.query.trim().toLowerCase();
@@ -110,18 +118,24 @@ export function PromptEditor({
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
-    if (text.length <= MAX_CHARS) {
-      onChange(text);
-      updateMentionState('main', text, e.target.selectionStart);
+    if (text.length > MAX_GENERATION_PROMPT_CHARS) {
+      setLimitNotice(promptLimitMessage(text.length));
+      return;
     }
+    setLimitNotice(null);
+    onChange(text);
+    updateMentionState('main', text, e.target.selectionStart);
   }, [onChange, updateMentionState]);
 
   const handleDraftChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
-    if (text.length <= MAX_CHARS) {
-      setDraft(text);
-      updateMentionState('expanded', text, e.target.selectionStart);
+    if (text.length > MAX_GENERATION_PROMPT_CHARS) {
+      setLimitNotice(promptLimitMessage(text.length));
+      return;
     }
+    setLimitNotice(null);
+    setDraft(text);
+    updateMentionState('expanded', text, e.target.selectionStart);
   }, [updateMentionState]);
 
   const focusTextareaAt = useCallback((ref: React.RefObject<HTMLTextAreaElement>, cursor: number) => {
@@ -139,7 +153,11 @@ export function PromptEditor({
     const start = textarea?.selectionStart ?? value.length;
     const end = textarea?.selectionEnd ?? start;
     const { next, cursor } = insertTextAtRange(value, marker, start, end);
-    if (next.length > MAX_CHARS) return;
+    if (next.length > MAX_GENERATION_PROMPT_CHARS) {
+      setLimitNotice(promptLimitMessage(next.length));
+      return;
+    }
+    setLimitNotice(null);
     onChange(next);
     onInsertReferenceLabel?.(label);
     focusTextareaAt(textareaRef, cursor);
@@ -151,7 +169,11 @@ export function PromptEditor({
     const start = textarea?.selectionStart ?? draft.length;
     const end = textarea?.selectionEnd ?? start;
     const { next, cursor } = insertTextAtRange(draft, marker, start, end);
-    if (next.length > MAX_CHARS) return;
+    if (next.length > MAX_GENERATION_PROMPT_CHARS) {
+      setLimitNotice(promptLimitMessage(next.length));
+      return;
+    }
+    setLimitNotice(null);
     setDraft(next);
     focusTextareaAt(expandedTextareaRef, cursor);
   }, [draft, focusTextareaAt]);
@@ -164,14 +186,22 @@ export function PromptEditor({
     if (!insertText.trim()) return;
     if (target === 'main') {
       const { next, cursor } = replaceMentionRange(value, range, insertText);
-      if (next.length > MAX_CHARS) return;
+      if (next.length > MAX_GENERATION_PROMPT_CHARS) {
+        setLimitNotice(promptLimitMessage(next.length));
+        return;
+      }
+      setLimitNotice(null);
       onChange(next);
       focusTextareaAt(textareaRef, cursor);
       return;
     }
 
     const { next, cursor } = replaceMentionRange(draft, range, insertText);
-    if (next.length > MAX_CHARS) return;
+    if (next.length > MAX_GENERATION_PROMPT_CHARS) {
+      setLimitNotice(promptLimitMessage(next.length));
+      return;
+    }
+    setLimitNotice(null);
     setDraft(next);
     focusTextareaAt(expandedTextareaRef, cursor);
   }, [draft, focusTextareaAt, onChange, value]);
@@ -258,6 +288,10 @@ export function PromptEditor({
   }, [draft, value]);
 
   const commitExpanded = useCallback(() => {
+    if (draft.length > MAX_GENERATION_PROMPT_CHARS) {
+      setLimitNotice(promptLimitMessage(draft.length));
+      return;
+    }
     onChange(draft);
     setExpanded(false);
     setMentionState(null);
@@ -266,6 +300,14 @@ export function PromptEditor({
   useLayoutEffect(() => {
     resizeMainTextarea();
   }, [resizeMainTextarea, value]);
+
+  useEffect(() => {
+    if (value.length > MAX_GENERATION_PROMPT_CHARS) {
+      setLimitNotice(promptLimitMessage(value.length));
+    } else {
+      setLimitNotice(null);
+    }
+  }, [value]);
 
   useEffect(() => {
     const handleResize = () => resizeMainTextarea();
@@ -348,10 +390,10 @@ export function PromptEditor({
         ref={textareaRef}
         className="composer-prompt-textarea"
         value={value}
+        aria-invalid={Boolean(limitNotice)}
         onChange={handleChange}
         onKeyDown={(event) => { handleMentionKeyDown(event, 'main'); }}
         onSelect={(event) => updateMentionState('main', event.currentTarget.value, event.currentTarget.selectionStart)}
-        maxLength={MAX_CHARS}
         placeholder="描述你想生成的视频内容，可输入 @ 选择当前图片参考或历史素材……"
         rows={4}
       />
@@ -387,8 +429,8 @@ export function PromptEditor({
             <Maximize2 size={13} aria-hidden="true" />
             放大编辑
           </button>
-          <div className="composer-prompt-counter">
-            {value.length} / {MAX_CHARS}
+          <div className={`composer-prompt-counter${limitNotice ? ' is-error' : ''}`} aria-live="polite">
+            {limitNotice || `${value.length} / ${MAX_GENERATION_PROMPT_CHARS}`}
           </div>
         </div>
       </div>
@@ -399,8 +441,9 @@ export function PromptEditor({
             <div className="composer-prompt-expanded-head">
               <div>
                 <span>提示词编辑</span>
-                <strong>{draft.length} / {MAX_CHARS}</strong>
+                <strong className={limitNotice ? 'is-error' : undefined}>{draft.length} / {MAX_GENERATION_PROMPT_CHARS}</strong>
               </div>
+              {limitNotice && <span className="composer-prompt-limit-error" role="alert">{limitNotice}</span>}
               <button type="button" className="composer-prompt-icon-button" onClick={closeExpanded} aria-label="关闭提示词编辑">
                 <X size={16} aria-hidden="true" />
               </button>
@@ -415,10 +458,10 @@ export function PromptEditor({
                 ref={expandedTextareaRef}
                 className="composer-prompt-expanded-textarea"
                 value={draft}
+                aria-invalid={Boolean(limitNotice)}
                 onChange={handleDraftChange}
                 onKeyDown={(event) => { handleMentionKeyDown(event, 'expanded'); }}
                 onSelect={(event) => updateMentionState('expanded', event.currentTarget.value, event.currentTarget.selectionStart)}
-                maxLength={MAX_CHARS}
                 placeholder="描述你想生成的视频内容，可输入 @ 选择当前图片参考或历史素材……"
               />
               {mentionState?.target === 'expanded' && (

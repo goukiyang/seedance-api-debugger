@@ -9,6 +9,11 @@ import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspac
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
 import {
+  exceedsGenerationPromptLimit,
+  GENERATION_PROMPT_LIMIT_MESSAGE,
+  generationPromptLimitMessage,
+} from '@/lib/prompt/limits';
+import {
   VOLCENGINE_IP_VIDEO_PROVIDER,
   VolcengineIpConfigurationError,
   VolcengineIpRequestError,
@@ -347,6 +352,9 @@ export async function POST(request: NextRequest) {
   if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
     return errorJson('提示词不能为空', 400);
   }
+  if (exceedsGenerationPromptLimit(body.prompt)) {
+    return errorJson(GENERATION_PROMPT_LIMIT_MESSAGE, 400);
+  }
 
   const generationMode: GenerationMode = body.generation_mode || 'all_in_one_reference';
   if (!VALID_GENERATION_MODES.includes(generationMode)) {
@@ -363,11 +371,17 @@ export async function POST(request: NextRequest) {
     ? body.selected_agent_plan_key.trim().slice(0, 16)
     : null;
   const agentPromptSnapshot = typeof body.agent_prompt_snapshot === 'string' && body.agent_prompt_snapshot.trim()
-    ? body.agent_prompt_snapshot.trim().slice(0, 12000)
+    ? body.agent_prompt_snapshot.trim()
     : null;
   const finalPromptSnapshot = typeof body.final_prompt_snapshot === 'string' && body.final_prompt_snapshot.trim()
-    ? body.final_prompt_snapshot.trim().slice(0, 12000)
+    ? body.final_prompt_snapshot.trim()
     : body.prompt.trim();
+  if (exceedsGenerationPromptLimit(agentPromptSnapshot)) {
+    return errorJson(generationPromptLimitMessage('方案提示词'), 400);
+  }
+  if (exceedsGenerationPromptLimit(finalPromptSnapshot)) {
+    return errorJson(generationPromptLimitMessage('最终提示词'), 400);
+  }
   const promptUserEdited = body.prompt_user_edited === true;
 
   if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
