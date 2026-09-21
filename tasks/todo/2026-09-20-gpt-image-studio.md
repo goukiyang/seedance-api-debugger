@@ -279,3 +279,16 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 隔离候选上限回归（不接生产数据库/存储）：TaskSpace4 在 `localhost:3408` 先用文件选择累计9张，再用合成粘贴加入第10张；继续粘贴第11张后显示“最多选择10张参考图”，前10张仍保留为 `10/10`。模块自动保存后刷新页面仍为 `10/10`，隔离 SQLite 中该模块 `reference_ids` 数组长度为10、revision为4。未点击生成、未扣费；临时 Next 服务、SSH 隧道和3408端口已关闭。
 - 验证命令：候选 `npm run build`、候选本机 `/api/release`/`/api/config`/`/login`；公网 `/api/release`/`/api/config`/`/login`/`/image-studio`/静态 BUILD_ID；图片 Provider smoke、隔离 SQLite integration smoke、定向 `tsc`、精确范围 `git diff --check`；均通过。未执行真实付费生成，未确认上游十图能力，未确认删除生产记录。
 - 上游限制保持不变：MuskAPIs 官方资料本轮只明确两张图融合；产品可保证本地选择/保存/服务端/Provider 的最多10张边界，但不能宣称供应商已保证十张上游生成能力。
+
+## 16. F2 9月21日参考图失效修复（2026-09-21）
+
+| 任务 | 完成标准 | 状态 |
+|---|---|---|
+| F2 | 受影响 Asset 恢复公网访问；生成页同源浏览器能加载参考图；运行目录不会随发布再次脱离持久盘 | 已完成 |
+
+- 根因：`Asset.original_url` 和 `hash` 没有错误，反馈中的 7938、ea0f、c88f 三个文件都在 `/data/video-api-debugger/var-lib/uploads/assets`，文件内容 SHA256 与文件名一致；A6 发布后 `/srv/video-api-debugger/app/public/uploads` 却是普通目录，三文件只在持久盘、没有出现在发布目录，所以本机 3302 和公网 `/uploads/assets/...` 均 404。同期 `public/videos` 也是普通目录，`storage` 缺失；这是发布后运行目录软链未落地且没有被 preflight 拦截，不是数据库 URL 失效，也不是 `/uploads` 动态路由代码失效。
+- 生产恢复：停写并核对 `sd2-gray.service`、`sd2-image-studio.service`、视频/备份 timer 后，保留两侧清单和 SHA256；uploads 侧补回 app-only 文件，videos 侧保留 shared 旧冲突文件并以当前 app 版本合并，storage 直接接回持久盘；随后恢复为：`public/uploads -> /data/video-api-debugger/var-lib/uploads`、`public/videos -> /data/video-api-debugger/var-lib/videos`、`storage -> /data/video-api-debugger/var-lib/storage`。回退资料与 50 个视频冲突文件副本位于 `/data/video-api-debugger/var-lib/backups/f2-runtime-recovery-20260921-163402/`；原发布目录副本保留在 `/srv/video-api-debugger/app/public/.f2-original-20260921-163402-*`。未改数据库、Asset URL、反馈状态、积分、用户素材内容，也未触发付费生成。
+- 真实结果：7938、ea0f、c88f 三条受影响 Asset 以及 9月21日反馈截图 fd3e 的公网 `HEAD/GET` 均为 200，完整下载 SHA256 与 Asset hash 一致，`Range: bytes=0-1023` 均返回 `206/1024`。登录态浏览器在正式 `/generate` 页面上下文中用同源 `HEAD + Image` 加载四张图，均 `loaded=true`；前三张实际尺寸 `1672x941`，反馈截图 `1749x1014`。截图工具单独取图超时，未把它冒充为截图通过；浏览器图片节点与尺寸证据仍有效。
+- 防复发：`ops/server/sd2/preflight.sh` 新增三条运行目录软链、持久目录、目录写权限检查；`scripts/server-runtime-dirs-smoke.ts` 固化这些检查。以后 preflight 遇到普通目录、目标不在 `/data/video-api-debugger/var-lib` 或 `gouki` 不可写时直接失败，不进入发布验收。
+- 生产健康：恢复后 `sd2-gray.service`、`sd2-image-studio.service`、`sd2-finalize-pending.timer`、`sd2-video-delivery.timer`、`sd2-backup.timer` 均 active，主服务和图片 worker `NRestarts=0`，本机 `127.0.0.1:3302/api/config` 通过。反馈记录仍保留为原始证据，未自动改为已处理。
+- 本轮验证：`node --import tsx scripts/server-runtime-dirs-smoke.ts`、`bash -n scripts/server-ensure-runtime-dirs.sh ops/server/sd2/preflight.sh`、精确 `git diff --check` 通过；公网四个素材的 HEAD/GET、SHA256、Range 及登录态浏览器图片加载通过。未做生成、扣费或数据库写入。

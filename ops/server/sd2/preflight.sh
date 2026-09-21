@@ -33,6 +33,20 @@ systemctl is-active sd2-gray.service
 systemctl is-active cloudflared-seedance2-server.service
 systemctl is-enabled sd2-finalize-pending.timer sd2-video-delivery.timer 2>/dev/null || true
 ss -ltnp | grep ":3302"
+test -L /srv/video-api-debugger/app/public/uploads
+test "$(readlink -f /srv/video-api-debugger/app/public/uploads)" = /data/video-api-debugger/var-lib/uploads
+test -L /srv/video-api-debugger/app/public/videos
+test "$(readlink -f /srv/video-api-debugger/app/public/videos)" = /data/video-api-debugger/var-lib/videos
+test -L /srv/video-api-debugger/app/storage
+test "$(readlink -f /srv/video-api-debugger/app/storage)" = /data/video-api-debugger/var-lib/storage
+test -d /data/video-api-debugger/var-lib/uploads/assets
+test -d /data/video-api-debugger/var-lib/uploads/thumbs
+test -d /data/video-api-debugger/var-lib/videos/thumbnails
+test -d /data/video-api-debugger/var-lib/storage/backups
+runuser -u gouki -- test -w /srv/video-api-debugger/app
+runuser -u gouki -- test -w /data/video-api-debugger/var-lib/uploads/assets
+runuser -u gouki -- test -w /data/video-api-debugger/var-lib/videos/thumbnails
+runuser -u gouki -- test -w /data/video-api-debugger/var-lib/storage/backups
 sqlite3 /var/lib/video-api-debugger/dev.db "pragma integrity_check; select count(*) from VideoTask; select count(*) from Asset; select count(*) from User;"
 find /var/lib/video-api-debugger/uploads -type f | wc -l
 find /var/lib/video-api-debugger/videos -name "*.mp4" -type f | wc -l

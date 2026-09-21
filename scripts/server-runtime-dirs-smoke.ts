@@ -5,6 +5,7 @@ import path from 'node:path';
 const root = process.cwd();
 const runtimeScript = fs.readFileSync(path.join(root, 'scripts/server-ensure-runtime-dirs.sh'), 'utf8');
 const agentRules = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
+const serverPreflight = fs.readFileSync(path.join(root, 'ops/server/sd2/preflight.sh'), 'utf8');
 
 for (const marker of [
   'SD2_SHARED_ROOT',
@@ -30,5 +31,16 @@ assert.match(runtimeScript, /runtime path is not linked to shared storage/, 'run
 assert.match(agentRules, /public\/videos/, 'deployment rules must preserve public/videos as runtime output');
 assert.match(agentRules, /\/data\/video-api-debugger\/var-lib/, 'deployment rules must mention production persistent runtime storage');
 assert.match(agentRules, /server-ensure-runtime-dirs\.sh/, 'deployment rules must run runtime dir guard after rsync');
+for (const marker of [
+  'test -L /srv/video-api-debugger/app/public/uploads',
+  'test -L /srv/video-api-debugger/app/public/videos',
+  'test -L /srv/video-api-debugger/app/storage',
+  'readlink -f /srv/video-api-debugger/app/public/uploads',
+  'readlink -f /srv/video-api-debugger/app/public/videos',
+  'readlink -f /srv/video-api-debugger/app/storage',
+  'runuser -u gouki -- test -w /data/video-api-debugger/var-lib/uploads/assets',
+]) {
+  assert.match(serverPreflight, new RegExp(marker.replaceAll('/', '\\/')), `server preflight must check ${marker}`);
+}
 
 console.log('[server-runtime-dirs-smoke] ok');
