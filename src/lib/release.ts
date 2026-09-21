@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '视频生成提示词上限提升到 20,000 字，输入、恢复、保存和提交校验保持一致。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成统一走独立 API，新增 Banana 2、Banana Pro、GPT Image 2 与 2.5 模型及上游成本记录。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);
