@@ -293,3 +293,25 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 生产健康：恢复后 `sd2-gray.service`、`sd2-image-studio.service`、`sd2-finalize-pending.timer`、`sd2-video-delivery.timer`、`sd2-backup.timer` 均 active，主服务和图片 worker `NRestarts=0`，本机 `127.0.0.1:3302/api/config` 通过。反馈记录仍保留为原始证据，未自动改为已处理。
 - 本轮验证：`node --import tsx scripts/server-runtime-dirs-smoke.ts`、`bash -n scripts/server-ensure-runtime-dirs.sh ops/server/sd2/preflight.sh`、精确 `git diff --check` 通过；公网四个素材的 HEAD/GET、SHA256、Range 及登录态浏览器图片加载通过。未做生成、扣费或数据库写入。
 - 防复发门禁已落到实际服务器：本地/发布分支/服务器 `/srv/video-api-debugger/app/ops/server/sd2/preflight.sh` 的 SHA256 均为 `2d6aad75af2aa31b7e7b307c06993bb1c744467bcb4b4c009263f03c99f4dd8b`；旧服务器脚本保留为 `/srv/video-api-debugger/app/ops/server/sd2/preflight.sh.f2-before-20260921`。服务器实际文件已通过 `bash -n`，本地控制端执行 `EXPECT_PROD_ON_SERVER=1 SERVER=root@42.193.221.253 bash ops/server/sd2/preflight.sh` 通过。仓库和服务器均未发现独立 A6 发布脚本，正式切换统一受 `ops/server/sd2/cutover-commands.md` 的发布前/切换后双 preflight 门禁约束。
+
+## 17. F3 生成提示词上限调整（2026-09-21）
+
+| 任务 | 完成标准 | 状态 |
+|---|---|---|
+| F3 | `/generate`（含共用 IP 入口）的输入、粘贴、恢复、保存、服务端请求统一允许最多 20,000 字；20,001 字明确阻止；正式页面刷新可见 | 已完成 |
+
+- 已定位：`src/components/PromptEditor.tsx` 与 `src/components/GenerationComposer.tsx` 当前限制为 2,000；`/api/tasks/create` 与 `/api/ip/tasks/create` 没有主提示词同等长度拒绝，但 Agent/最终快照会截到 12,000，导致输入、保存和请求口径不一致。
+- 独立入口暂不纳入本轮：`/image-studio` 画面描述为 12,000，`/tools/ultimate-canvas` 提示词为 12,000；除非另行确认，不改成视频生成提示词的 20,000 规则。
+- 执行计划：建立视频生成提示词共享上限常量；更新主输入框、放大编辑、引用标记插入和程序化恢复的超限提示；两条视频创建 API 在扣费/创建任务前拒绝 20,001 字，并把快照上限同步到 20,000；补隔离边界 smoke 和正式 `/generate` 页面验收，不调用真实生成、不扣费。
+- 验收证据：共享常量边界测试、前端源码/服务端源码检查、服务器候选 `npm run build`（含类型检查）通过；本地 `npm run lint` 在本机无输出长时间未结束，正式构建仅保留既有 lint/Autoprefixer warning。正式页面刷新后计数显示 `0 / 20000`，20,000 字可保留，20,001 字显示超限且不允许提交；公网 `/api/config`、`/api/release` 与 4 张 F2 图片回归继续通过。
+
+### F3 实施与正式发布结果
+
+- 共享 `MAX_GENERATION_PROMPT_CHARS = 20_000`，主 `/generate` 与 `/generate/ip` 共用；主输入、放大编辑、引用/mention 插入、方案生成、草稿/历史恢复、提交按钮和两条创建 API 均按同一边界处理。20,001 字不再被 `maxLength` 或 `slice` 静默截短，而是显示“提示词最多 20000 字，当前 20001 字”并阻止提交。
+- `/api/tasks/create` 与 `/api/ip/tasks/create` 在扣费/建任务前校验用户提示词、方案提示词快照和最终提示词快照；快照不再截到 12,000。H3 后续添加的系统上下文仍按既有流程保存，不把系统追加文本误当成用户输入超限。`/image-studio` 与 `/tools/ultimate-canvas` 的独立 12,000 字规则未改。
+- 版本由 `0.6.0` 升为 `0.6.1`，`/api/release` 更新摘要与实际 F3 变化一致。开发远端 `codex/gpt-image-studio` 为 `020dec7190eec61ee7df8cb27dc871abf292b32c`；正式发布分支 `codex/image-studio-release` 为 `de3865a9db8c9abafd5bf3763167c39e8dc3543f`；回退 tag `rollback/2026-09-21-before-f3-prompt-limit` 指向发布前 `b89140fcd357283c91c56db4cf3be30e501f8f14`。
+- 正式包已按 SHA256 `8dca3fc3908a82ab77f39cc086178483231daa9898961a66fd0b736e9c4fd2d` 上传服务器；候选构建 `npm run build` 通过（保留既有 ESLint/Autoprefixer warning），候选 BUILD_ID `J52leeag6XyiHAgYAigqJ`。生产已切换到上述 commit / v0.6.1，旧 BUILD_ID `ds5-BZ7DJjoAJQRSjb7OI` 保留在 `/srv/video-api-debugger/app/.next-prod-prev-f3-de3865a9db8c`。
+- 发布前、切换后和一个健康守护周期后的 `EXPECT_PROD_ON_SERVER=1 SERVER=root@42.193.221.253 bash ops/server/sd2/preflight.sh` 均通过；主服务与图片 worker active，`NRestarts=0`，公网 `/api/config`、`/api/release`、`/login` 正常，匿名 `/generate` 按预期跳登录。公网生成页静态 chunk 返回 200 并命中 `20000`。
+- 已授权的 Xiaobo Chrome Agent Window 在刷新并核对当前版本后实际验收普通 `/generate` 与 `/generate/ip`：初始计数 `0 / 20000`；填入 20,000 字显示 `20000 / 20000`；填入 20,001 字显示明确超限文案，输入不以截断成功态保留，提交按钮 DOM 为 `disabled=true`。未点击生成，未扣点，未写数据库。
+- F2 四个受影响公网图片在本轮切换后继续通过 HEAD 200、Range `206/1024`、完整下载 SHA256 与 Asset hash 一致：`7938d39d3028d0dde4e462cab0f1063b03c1bc1b8731dc20e74069d71d73318c`、`ea0fa44f2ac49d0721eca51f2a1cf058ff699041c2f4ba148cddc3171da88d66`、`c88f7f91074a3f4c5f08ef98fb95ffd4bdfc1075fcc33f29d444f66fdbf3af1c`、`fd3eb06425c0e97d95db477964b04592ad39120f52a4941e1d3651d12da94247`。
+- 本轮没有真实视频/IP生成、付费上游调用、积分变更或数据库写入；原有 `tasks/todo.md`、`tasks/todo/hygiene-log.md` 和非本轮构建/素材脏改均未纳入 F3 提交。固定只读审核线程对 F3 专项结论为通过；其先前的 Seedance 2.5 审查结论未作为本轮证据使用。
