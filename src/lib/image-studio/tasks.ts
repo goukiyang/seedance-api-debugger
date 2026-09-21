@@ -3,10 +3,11 @@ import type { ImageStudioTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
-import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
+import { getImageGenerationApiSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { normalizeStudioRatio, studioRatioSize } from './ratios';
 import { MAX_REFERENCE_IMAGES } from './limits';
+import { IMAGE_STUDIO_MODEL_COST_USD } from './model-catalog';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -15,7 +16,7 @@ export class StudioError extends Error {
 export function parseStudioRequest(body: Record<string, unknown>) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioError('提交内容无效');
   if (typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new StudioError('提交编号无效');
-  if (typeof body.prompt !== 'string' || body.prompt.length > 12000) throw new StudioError('画面描述不能超过 12000 字');
+  if (typeof body.prompt !== 'string' || body.prompt.length > 20000) throw new StudioError('画面描述不能超过 20000 字');
   if (!Number.isInteger(body.count) || Number(body.count) < 1 || Number(body.count) > 8) throw new StudioError('生成张数必须为 1 到 8');
   if (!Number.isInteger(body.revision)) throw new StudioError('请刷新生成设置');
   if (!Array.isArray(body.referenceIds) || body.referenceIds.length > MAX_REFERENCE_IMAGES || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError(`最多使用 ${MAX_REFERENCE_IMAGES} 张有效参考图`);
@@ -43,7 +44,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   }
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
-  if (!isMuskApiReady(await getMuskApiSettings())) throw new StudioError('图片服务尚未配置', 503);
+  const imageApi = await getImageGenerationApiSettings();
+  if (imageApi.provider !== 'musk' || !isImageGenerationApiReady(imageApi)) throw new StudioError('图片专用 Musk API 尚未配置', 503);
   await prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
@@ -118,7 +120,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       await tx.imageStudioTask.create({ data: {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, ordinal: i + 1, fingerprint,
-        prompt: input.prompt, context, revision: settings.revision, model: generation.model, snapshot_json: snapshot,
+        prompt: input.prompt, context, revision: settings.revision, model: generation.model,
+        provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(referenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       } });
@@ -179,6 +182,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
   return { tasks: items.map(task => ({ id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
     prompt: task.prompt, model: task.model, status: task.status, error: task.error, unitCredits: task.unit_credits,
+    providerCostUsd: task.provider_cost_usd,
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,
     createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
     snapshot: publicStudioSnapshot(task, assetById),

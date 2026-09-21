@@ -19,6 +19,14 @@ async function main() {
   assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
     model: params.model, prompt: params.prompt, n: 1, output_format: 'png',
   });
+  const geminiRequests: Array<{ url: string; init: RequestInit }> = [];
+  const geminiResult = await requestStudioImages({ ...params, model: 'gemini-3.1-flash-image-preview', images: [{ bytes: new Uint8Array([1, 2]), mimeType: 'image/png' }] }, async (url, init) => {
+    geminiRequests.push({ url: String(url), init: init || {} });
+    return Response.json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }] } }], usageMetadata: { promptTokenCount: 2 } });
+  });
+  assert.deepEqual(geminiResult.images, ['aW1hZ2U=']);
+  assert.equal(geminiRequests[0].url, 'https://example.invalid/v1beta/models/gemini-3.1-flash-image-preview:generateContent');
+  assert.equal(JSON.parse(String(geminiRequests[0].init.body)).contents[0].parts.length, 2);
   await requestStudioImages({ ...params, images: [
     { bytes: new Uint8Array([1]), mimeType: 'image/png' },
     { bytes: new Uint8Array([2]), mimeType: 'image/jpeg' },

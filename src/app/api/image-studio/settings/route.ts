@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { getImageStudioSettings, saveImageStudioSettings, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/settings';
-import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
+import { getImageGenerationApiSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +11,8 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
     const settings = await getImageStudioSettings();
-    const providerReady = isMuskApiReady(await getMuskApiSettings());
+    const imageApi = await getImageGenerationApiSettings();
+    const providerReady = imageApi.provider === 'musk' && isImageGenerationApiReady(imageApi);
     return NextResponse.json({ ...(user.role === 'admin' ? {
       context: settings.context, revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
     } : {

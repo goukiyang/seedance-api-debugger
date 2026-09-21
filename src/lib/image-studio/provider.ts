@@ -4,6 +4,11 @@ import { MAX_REFERENCE_IMAGES } from './limits';
 
 export type StudioImageInput = { bytes: Uint8Array; mimeType: string };
 
+const GEMINI_IMAGE_MODELS = new Set([
+  'gemini-3.1-flash-image-preview',
+  'gemini-3-pro-image-preview',
+]);
+
 export class StudioProviderError extends Error {
   constructor(public stage: 'request' | 'response' | 'download', public code: string, public status?: number) {
     super(`图片服务处理失败（${code}）`);
@@ -23,6 +28,9 @@ export async function requestStudioImages(params: {
   if (params.size) {
     const [w, h] = params.size.split('x').map(Number);
     if (!/^\d+x\d+$/.test(params.size) || w % 16 || h % 16 || w < 16 || h < 16 || Math.max(w, h) > 3840 || w / h > 3 || h / w > 3 || w * h < 655360 || w * h > 8294400) throw new Error('生成尺寸无效');
+  }
+  if (GEMINI_IMAGE_MODELS.has(params.model)) {
+    return requestGeminiStudioImages(params, fetcher);
   }
   const url = new URL(params.baseUrl);
   url.pathname = `${url.pathname.replace(/\/$/, '').replace(/\/v1$/, '')}/v1/images/${params.images.length ? 'edits' : 'generations'}`;
@@ -65,4 +73,41 @@ export async function requestStudioImages(params: {
     }
   }
   return { images, usage: value.usage ?? null };
+}
+
+async function requestGeminiStudioImages(params: {
+  baseUrl: string; apiKey: string; model: string; prompt: string;
+  count: number; images: StudioImageInput[]; signal: AbortSignal; size?: string;
+}, fetcher: typeof fetch): Promise<{ images: string[]; usage: unknown }> {
+  const url = new URL(params.baseUrl);
+  const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
+  url.pathname = `${basePath}/v1beta/models/${encodeURIComponent(params.model)}:generateContent`;
+  const parts: Array<Record<string, unknown>> = [{ text: params.prompt }];
+  for (const image of params.images) {
+    parts.push({ inlineData: { mimeType: image.mimeType, data: Buffer.from(image.bytes).toString('base64') } });
+  }
+  let response: Response;
+  try {
+    response = await fetcher(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${params.apiKey}` },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { responseModalities: ['IMAGE'] },
+      }),
+      signal: params.signal,
+    });
+  } catch {
+    throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network');
+  }
+  const value = await response.json().catch(() => { throw new StudioProviderError('response', 'invalid_json', response.status); });
+  if (!response.ok) throw new StudioProviderError('request', 'http_error', response.status);
+  const images = (value?.candidates || []).flatMap((candidate: { content?: { parts?: Array<Record<string, unknown>> } }) => candidate.content?.parts || [])
+    .map((part: Record<string, unknown>) => {
+      const inline = (part.inlineData || part.inline_data) as { data?: unknown } | undefined;
+      return typeof inline?.data === 'string' ? inline.data : null;
+    })
+    .filter((image: unknown): image is string => typeof image === 'string' && image.length > 0);
+  if (!images.length) throw new StudioProviderError('response', 'empty_output', response.status);
+  return { images: images.slice(0, params.count), usage: value.usageMetadata || value.usage || null };
 }

@@ -49,10 +49,10 @@ export function RatioPicker({ value, onChange, custom, busy, disabled, error, on
   }}>
     <span className={styles.label} id={`${id}-label`}>图片比例</span>
     <button ref={trigger} type="button" className={styles.ratioTrigger} aria-labelledby={`${id}-label ${id}-value`} aria-expanded={open} aria-controls={`${id}-menu`} disabled={disabled} onClick={() => setOpen(current => !current)}>
-      <span id={`${id}-value`}>{other ? '其他' : value === 'auto' ? '自动' : preset || value}</span><ChevronDown size={16} />
+      <span id={`${id}-value`}>{other ? '其他' : value === 'auto' ? '自动（跟随原图）' : preset || value}</span><ChevronDown size={16} />
     </button>
     {open && <div id={`${id}-menu`} data-ratio-menu className={styles.ratioMenu} role="group" aria-label="选择图片比例">
-      {[{ label: '自动', ratio: 'auto' }, ...STUDIO_RATIOS.map(label => ({ label, ratio: normalizeStudioRatio(label) })), ...custom.map(ratio => ({ label: ratio, ratio }))].map(({ label, ratio }) => <div className={styles.ratioRow} key={ratio}>
+      {[{ label: '自动（跟随原图）', ratio: 'auto' }, ...STUDIO_RATIOS.map(label => ({ label, ratio: normalizeStudioRatio(label) })), ...custom.map(ratio => ({ label: ratio, ratio }))].map(({ label, ratio }) => <div className={styles.ratioRow} key={ratio}>
         <button type="button" aria-pressed={!other && value === ratio} disabled={disabled || busy} onClick={() => select(ratio)}><span>{label}</span>{!other && value === ratio && <Check size={15} />}</button>
         {custom.includes(ratio) && <button type="button" className={styles.ratioDelete} title={`删除比例 ${label}`} aria-label={`删除比例 ${label}`} disabled={busy || disabled} onClick={async () => {
           if (await onCustom(ratio, true)) trigger.current?.focus();

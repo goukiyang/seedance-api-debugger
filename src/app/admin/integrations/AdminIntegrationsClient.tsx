@@ -216,6 +216,11 @@ const IMAGE_MODEL_OPTIONS: Array<{
   },
 ];
 
+const IMAGE_API_ENDPOINT_OPTIONS = [
+  { label: 'MuskAPI', value: 'https://api.muskapis.com/' },
+  { label: 'AI Media VIP', value: 'https://api.ai-media.vip/v1/' },
+] as const;
+
 const EMPTY_VOLCENGINE_IP_CONFIG: VolcengineIpConfig = {
   enabled: false,
   ready: false,
@@ -1584,6 +1589,17 @@ export default function AdminIntegrationsClient() {
 
           <div className="form-group">
             <label className="form-label" htmlFor="image-base-url">API 地址</label>
+            <select
+              id="image-api-endpoint"
+              className="input mb-2"
+              value={IMAGE_API_ENDPOINT_OPTIONS.some((option) => option.value === imageConfig.base_url) ? imageConfig.base_url : ''}
+              onChange={(event) => {
+                if (event.target.value) setImageConfig((prev) => ({ ...prev, base_url: event.target.value }));
+              }}
+            >
+              <option value="">自定义地址</option>
+              {IMAGE_API_ENDPOINT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
             <input
               id="image-base-url"
               className="input"

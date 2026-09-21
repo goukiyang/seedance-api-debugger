@@ -18,9 +18,9 @@ async function main() {
   const user = await prisma.user.create({ data: { id: 'image-test-owner', name: 'Test', username: 'image-test-owner', email: 'image-test@example.invalid', password_hash: 'not-a-login-password' } });
   const stranger = await prisma.user.create({ data: { id: 'image-test-other', name: 'Test2', username: 'image-test-other', email: 'image-other@example.invalid', password_hash: 'not-a-login-password' } });
   await prisma.creditAccount.create({ data: { user_id: user.id, balance: 20 } });
-  await prisma.platformSetting.create({ data: { key: 'musk_api_v1', value_json: JSON.stringify({ enabled: true, base_url: 'https://example.invalid/', api_key: 'test-only', default_model: 'gpt-5.5' }) } });
+  await prisma.platformSetting.create({ data: { key: 'image_generation_api_v1', value_json: JSON.stringify({ enabled: true, provider: 'musk', base_url: 'https://example.invalid/', api_key: 'test-only', default_model: 'gemini-3.1-flash-image-preview' }) } });
   const initial = await getImageStudioSettings();
-  const config = await saveImageStudioSettings({ ...initial, context: 'Fixed studio context', prices: { 'gpt-image-2.5-flare': 2, 'gpt-image-2.5-sunburst': null } }, user.id);
+  const config = await saveImageStudioSettings({ ...initial, context: 'Fixed studio context', prices: { ...initial.prices, 'gpt-image-2.5-flare': 2, 'gpt-image-2.5-sunburst': null } }, user.id);
   assert.ok(config);
   assert.equal(await saveImageStudioSettings(initial, user.id), null, 'stale revision must conflict');
   const input = { requestId: 'test-request-12345678', prompt: 'Draw a square', count: 2, revision: config.revision, referenceIds: [] };
@@ -62,7 +62,7 @@ async function main() {
   assert.equal(parseStudioRequest({ ...input, prompt: '', referenceIds: ['image'] }).prompt, '');
   const moduleId = randomUUID();
   const created = await saveStudioModule(user.id, { id: moduleId }, true);
-  const moduleBody = { id: moduleId, revision: created.revision, name: 'Saved module', prompt: '', count: 1, aspectRatio: '5:3', model: 'gpt-image-2.5-sunburst', prices: { 'gpt-image-2.5-flare': 7, 'gpt-image-2.5-sunburst': 9 }, referenceIds: [], context: 'Module context' };
+  const moduleBody = { id: moduleId, revision: created.revision, name: 'Saved module', prompt: '', count: 1, aspectRatio: '5:3', model: 'gpt-image-2.5-sunburst', prices: { ...config.prices, 'gpt-image-2.5-flare': 7, 'gpt-image-2.5-sunburst': 9 }, referenceIds: [], context: 'Module context' };
   await assert.rejects(saveStudioModule(user.id, moduleBody), /仅管理员/);
   const saved = await saveStudioModule(user.id, moduleBody, false, true);
   assert.equal(saved.aspectRatio, '5:3');

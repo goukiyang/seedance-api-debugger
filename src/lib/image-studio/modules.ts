@@ -101,7 +101,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   const count = createOnly ? 1 : body.count;
   const ids = createOnly ? [] : body.referenceIds;
   const revision = createOnly ? 0 : body.revision;
-  if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof prompt !== 'string' || prompt.length > 12000
+  if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof prompt !== 'string' || prompt.length > 20000
     || !Number.isInteger(count) || Number(count) < 1 || Number(count) > 8 || !Number.isInteger(revision) || Number(revision) < 0
     || !Array.isArray(ids) || ids.length > MAX_REFERENCE_IMAGES || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
   const row = await prisma.$transaction(async tx => {

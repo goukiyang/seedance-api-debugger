@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
+import { getImageGenerationApiSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
 import { uploadAsset } from '@/lib/assets/storage';
 import { claimStudioTask, finishStudioTask } from './tasks';
 import { requestStudioImages, StudioProviderError } from './provider';
@@ -14,8 +14,8 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
   try {
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
-    const settings = await getMuskApiSettings();
-    if (!isMuskApiReady(settings)) throw new Error('图片服务暂不可用');
+    const settings = await getImageGenerationApiSettings();
+    if (settings.provider !== 'musk' || !isImageGenerationApiReady(settings)) throw new Error('图片专用 Musk API 暂不可用');
     const images = [];
     for (const id of JSON.parse(task.reference_ids) as string[]) {
       const asset = await prisma.asset.findFirst({ where: { id, owner_id: task.owner_id, status: 'active', type: 'image' } });

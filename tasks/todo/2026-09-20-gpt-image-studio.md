@@ -214,6 +214,17 @@ git diff --cached --check
 - 截图临时证据：`/tmp/sd2-image-modules-production.png`、`/tmp/sd2-image-update-production.png`、`/tmp/sd2-image-modules-results.png`。PNG/ZIP证据 `/tmp/sd2-image-fix-native.png`、`/tmp/sd2-image-fix-native.zip`。预览服务和SSH转发已停止；临时文件不进入发布。
 - 守门员：涉及上下文权限、任务与增量表，已独立只读审查、隔离业务验证与可回退发布；无本轮分级误判。未改视频/Gemini/Seedream规则或依赖，原有无关todo和本地构建目录未覆盖/提交。
 
+## 14. 独立图片模型与 API 通道（2026-09-22，进行中）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| M1 | 独立图片 API | 图片生成只读取 `image_generation_api_v1`，不读取 GPT-5.5 共用 Musk 配置；新增 `https://api.ai-media.vip/v1` 可选通道 | 已实现，待上线验证 |
+| M2 | 模型目录 | 图片页可选 Banana 2、Banana Pro、GPT Image 2、GPT Image 2.5 Flare、GPT Image 2.5 Sunburst，并映射到真实上游模型 ID | 已实现，待上线验证 |
+| M3 | 上游成本 | 记录每张图片的美元成本快照；Banana 2 `$0.06`、Banana Pro `$0.096`、Flare/Sunburst `$0.064`；GPT Image 2 价格待补充，不擅自推算 | 已实现，待上线验证 |
+| M4 | 回归与发布 | 类型、Lint、构建、协议 smoke 通过；数据库增量迁移、服务重启、公网 `/image-studio` 与图片专用配置验证 | 进行中 |
+
+实现边界：上游美元成本与用户站内积分分开保存；GPT Image 2 可展示但成本显示“待配置”，避免把未确认价格写成事实。生成张数和生成按钮位于画面描述下方；比例默认显示“自动（跟随原图）”。用户后续追加的大图空白处关闭、左右键切图属于下一项预览交互，待本批上线后补做。
+
 本轮17个修改文件及用途（相对上述正式源码目录）：
 
 | 文件 | 修改内容 |

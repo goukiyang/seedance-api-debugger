@@ -8,13 +8,14 @@ import styles from './studio.module.css';
 import { RatioPicker } from './ratio-picker';
 import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 
 type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean };
 type StudioSnapshot = { prompt: string; model: string; count: number; aspectRatio: string; outputSize?: string | null; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; width?: number; height?: number } | null };
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; aspectRatio: string; model: string; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
-const models = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+const models = IMAGE_STUDIO_MODELS;
 async function readResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
   if (!response.ok) throw new Error(value.error || '请求失败，请重试');
@@ -199,7 +200,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       const saved = JSON.parse(localStorage.getItem(draftKey) || 'null');
       if (saved && (!module.saved || saved.revision === module.revision)) {
         if (typeof saved.name === 'string') setName(saved.name.slice(0, 80));
-        if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 12000));
+        if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 20000));
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
         if (typeof saved.model === 'string') setModuleModel(saved.model);
         if (isAdmin && saved.prices && typeof saved.prices === 'object') setModulePrices(saved.prices);
@@ -402,6 +403,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     finally { deleteLock.current = false; setDeleting(false); }
   }
   const moduleUnitCredits = modulePrices[moduleModel] ?? null;
+  const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
   const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && (!isAdmin || moduleContext === savedModuleContext));
 
   useEffect(() => {
@@ -483,21 +485,20 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
         }} />
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>画面描述 <span>有图片时选填</span></label>
-        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={prompt} maxLength={12000} onChange={event => setPrompt(event.target.value)} placeholder="描述想生成的画面" rows={9} />
-        <RatioPicker value={aspectRatio} onChange={setAspectRatio} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
-        <label className={styles.label} htmlFor={`studio-model-${module.id}`}>生成模型</label>
-        <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
-          <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option>
-          <option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option>
-        </select>
-        <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`}</p>
+        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder="描述想生成的画面" rows={9} />
         <label className={styles.label} htmlFor={`studio-count-${module.id}`}>生成张数</label>
         <div className={styles.counts}>
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
         </div>
-        {error && <p role="alert" className={styles.error}>{error}</p>}
         <button type="button" className={styles.generate} disabled={submitting || uploading || moduleSaving || ratioEditing || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        <RatioPicker value={aspectRatio} onChange={setAspectRatio} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
+        <label className={styles.label} htmlFor={`studio-model-${module.id}`}>生成模型</label>
+        <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
+          {models.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
+        </select>
+        <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
+        {error && <p role="alert" className={styles.error}>{error}</p>}
         {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={() => {
           if (window.confirm('上次提交可能已成功，请先查看生成记录。确定放弃核对并开始新任务吗？')) { setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} }
         }}>放弃核对</button></p>}
@@ -550,16 +551,15 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       <textarea aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => { if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。'); setModuleContext(event.target.value); setModuleSaveError(''); }} />
       <label className={styles.label} htmlFor={`studio-module-model-${module.id}`}>模块模型</label>
       <select id={`studio-module-model-${module.id}`} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
-        <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option>
-        <option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option>
+        {models.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
       </select>
-      {models.map(model => <label className={styles.label} key={model}>{model.endsWith('flare') ? 'Flare' : 'Sunburst'} 每张积分
+      {models.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
         <input type="number" min={0} max={100000} step={1} placeholder="未设置" value={modulePrices[model] ?? ''} onChange={event => {
           const next = event.target.value === '' ? null : Number(event.target.value);
           setModulePrices(current => ({ ...current, [model]: next }));
         }} />
       </label>)}
-      <p className={styles.muted}>模型选择属于当前模块；积分单价仅管理员可修改。修改后自动保存。</p>
+      <p className={styles.muted}>模型选择属于当前模块；积分单价仅管理员可修改。上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后自动保存。</p>
       <p role="status">{moduleSaving ? '正在保存' : moduleDirty ? '未保存' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>}

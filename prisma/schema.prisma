@@ -340,6 +340,7 @@ model ImageStudioTask {
   context        String
   revision       Int
   model          String
+  provider_cost_usd Float?
   snapshot_json  String?
   aspect_ratio   String   @default("auto")
   output_size    String?

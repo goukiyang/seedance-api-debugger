@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/prisma';
+import { IMAGE_STUDIO_MODELS } from './model-catalog';
+
+export { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS } from './model-catalog';
 
 export const IMAGE_STUDIO_SETTING_KEY = 'gpt_image_studio_v1';
-export const IMAGE_STUDIO_MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] as const;
 export type ImageStudioSettings = {
   context: string;
   model: typeof IMAGE_STUDIO_MODELS[number];
@@ -9,7 +11,7 @@ export type ImageStudioSettings = {
   prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null>;
 };
 
-export const DEFAULT_STUDIO_PRICES = { 'gpt-image-2.5-flare': null, 'gpt-image-2.5-sunburst': null };
+export const DEFAULT_STUDIO_PRICES = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, null])) as ImageStudioSettings['prices'];
 
 export async function getImageStudioSettings(): Promise<ImageStudioSettings> {
   const row = await prisma.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
