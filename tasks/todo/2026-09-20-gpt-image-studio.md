@@ -249,13 +249,13 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 | A3 | 生成结果进入资产库 | 复用既有 Asset 归档、权限和筛选；图片列表不依赖上传素材开关 | 本地实现与验证完成，待线上验收 |
 | A4 | 完整生成快照与重新生成 | 保存上下文/模块/提示词/模型/张数/比例/参考图等；恢复不自动提交扣费，未保存内容有保护 | 本地实现与隔离验证完成，待线上验收 |
 | A5 | 模块级模型与定价 | 模型/价格归属模块；管理员价格权限；服务端按当前模块规则计费，历史价格不影响新扣费 | 本地实现与隔离验证完成，待线上验收 |
-| A6 | 参考图上限 | 选择、上传、粘贴、保存、复现、服务端和 Provider 统一最多10张 | 代码/服务端/Provider smoke 完成；上游10张能力待供应商确认 |
+| A6 | 参考图上限 | 选择、上传、粘贴、保存、复现、服务端和 Provider 统一最多10张 | 已实现，10张上游生成待确认 |
 
 - 本轮新增迁移为纯增量列：模块 `model`、`prices_json`、`reproduce_task_id`，任务 `snapshot_json`；存量模块/任务按旧字段和全局历史默认值兼容，任务快照不回写。
-- 复现来源已持久化到模块并按当前账号校验；恢复后可退出历史模式，管理员修改上下文/模型/价格会退出；上传或保存中不能恢复；生成成功后清除历史绑定。
+- 复现来源已持久化到模块并按当前账号校验；历史复现只冻结历史全局/模块上下文，真正提交使用用户当前确认的参考图；编辑提示词、比例、张数、参考图、模型和积分不会隐式退出，只有显式退出历史模式或管理员修改模块上下文才退出；上传或保存中不能恢复；生成成功后清除历史绑定。
 - 资产库 generated-only 改用 `Asset EXISTS ImageStudioTask` 的参数化有界查询与 count，普通用户仍固定按本人资产权限筛选；删除生成记录只隐藏任务展示，不删共享 Asset 或积分流水。
 - 版本由 `0.5.0` 升为 `0.6.0`（SemVer MINOR），更新摘要通过既有 ReleaseNotice 唯一版本来源。
-- 验证通过：`npx prisma generate`；`npm run lint`（仅保留既有全库 warning）；定向 `tsc`；provider smoke；隔离 SQLite integration smoke（含跨设备模块 source、历史上下文/参考图强制、权限、幂等、结算/退款、PNG、软删）；候选 `npm run build`；精确范围 `git diff --check`。没有新增付费调用。
+- 验证通过：`npx prisma generate`；`npm run lint`（仅保留既有全库 warning）；定向 `tsc`；provider smoke；隔离 SQLite integration smoke（含跨设备模块 source、历史上下文保持、当前参考图生效、权限、幂等、结算/退款、PNG、软删）；候选 `npm run build`；精确范围 `git diff --check`。没有新增付费调用。
 - 固定只读审核线程复审通过，确认曾发现的 `saveModule(null)` 旧 revision 清除风险已修复；审核记录已追加到 `tasks/audit-001-review.md`。正式服务器发布、候选切换、线上页面与 A1/A2/A3/A4/A5/A6 浏览器证据待本节后续补记。
 - 上游风险已反馈主控：MuskAPIs 官方文档本轮只明确多图融合传两张，不能把文档示例推断为供应商保证十张；本轮不做真实付费十图测试，不在产品记录中宣称上游已支持十张。
 
@@ -268,14 +268,14 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 | A3 | 生成结果进入资产库 | 复用既有 Asset 归档、权限和筛选；图片列表不依赖上传素材开关 | 已完成 |
 | A4 | 完整生成快照与重新生成 | 保存完整设置；恢复不自动提交扣费，未保存内容有保护 | 已完成 |
 | A5 | 模块级模型与定价 | 模型/价格归属模块；管理员价格权限；服务端按当前规则计费 | 已完成 |
-| A6 | 参考图上限 | 选择、上传、粘贴、保存、复现、服务端和 Provider 统一最多10张 | 已完成（上游十图能力待供应商确认） |
+| A6 | 参考图上限 | 选择、上传、粘贴、保存、复现、服务端和 Provider 统一最多10张 | 已实现，10张上游生成待确认 |
 
 - 正式目标：`https://sd2.youdooart.com/image-studio`；发布分支 `codex/image-studio-release`；代码提交 `3ca1728c34bb22c677a730222bfec8e9baf29a88`；版本 `0.6.0`；生产 BUILD_ID `ds5-BZ7DJjoAJQRSjb7OI`。
 - 发布归档：`/tmp/sd2-image-studio-a6-3ca1728-v2.tar`，本地与服务器 SHA256 均为 `cf90767f6b86142294fb09f34caaf93e3bde1c3c8cbdb08b93cee9a6275b23c8`；运行期 `.env`、`node_modules`、`.next-prod`、上传、视频、storage 和数据库未随源码包覆盖。
 - 数据库：先停止图片 worker，备份 `/data/video-api-debugger/var-lib/dev.db` 到 `/srv/video-api-debugger/backups/image-studio-a6-3ca1728/dev.db`，备份 SHA256 `792dc45e8aba8c5e6bfc37fc72e28f81a938138e688f9dd9d0b8af08e538aded`；仅执行 `20260921110000_image_studio_module_settings_snapshots` 纯增量 SQL，前后 `PRAGMA quick_check=ok`。
 - 回退：`rollback/2026-09-21-before-image-studio-a6` 已推送，解引用指向发布前线上 `629a692c9e32cb2267062ded08852c4c3d5790ef`；旧构建保留为服务器 `/srv/video-api-debugger/app/.next-prod-prev-a6-3ca1728`。
 - 服务与公网：`sd2-gray.service`、`sd2-image-studio.service` active，健康周期后均 `NRestarts=0`；本机 `127.0.0.1:3302/api/release`、公网 `/api/release` 均为 `0.6.0`，公网 `/login` 和新 BUILD_ID 的 `_buildManifest.js` 为200，匿名 `/image-studio` 按预期跳登录；来源头为 `server-42-193`。
-- 浏览器验收（TaskSpace4，正式管理员登录态）：新版本页面显示参考图 `2/10`；比例菜单包含常用比例、自定义“其他”及 `3:1/1:3`；模块设置展示模型与管理员积分单价并提示自动保存；生成结果在资产页默认“图片”筛选中可见；点击历史“重新生成”仅恢复表单并明确提示点击“生成图片”后才创建任务扣积分；删除确认已打开并点击“取消”，未删除生产数据。旧客户端的更新提醒已实际显示并通过“立即刷新”载入0.6.0。
+- 浏览器验收（TaskSpace4，正式管理员登录态）：新版本页面显示参考图 `2/10`，仅证明当前计数/上限显示，不证明已在浏览器完成10张选择或粘贴；比例菜单包含常用比例、自定义“其他”及 `3:1/1:3`；模块设置展示模型与管理员积分单价并提示自动保存；生成结果在资产页默认“图片”筛选中可见；点击历史“重新生成”仅恢复表单并明确提示点击“生成图片”后才创建任务扣积分；删除确认已打开并点击“取消”，未删除生产数据。旧客户端的更新提醒已实际显示并通过“立即刷新”载入0.6.0；本轮未重复验证“稍后/手动重新打开”与未保存草稿拦截，沿用既有 v0.4.0 证据。
 - 隔离候选上限回归（不接生产数据库/存储）：TaskSpace4 在 `localhost:3408` 先用文件选择累计9张，再用合成粘贴加入第10张；继续粘贴第11张后显示“最多选择10张参考图”，前10张仍保留为 `10/10`。模块自动保存后刷新页面仍为 `10/10`，隔离 SQLite 中该模块 `reference_ids` 数组长度为10、revision为4。未点击生成、未扣费；临时 Next 服务、SSH 隧道和3408端口已关闭。
 - 验证命令：候选 `npm run build`、候选本机 `/api/release`/`/api/config`/`/login`；公网 `/api/release`/`/api/config`/`/login`/`/image-studio`/静态 BUILD_ID；图片 Provider smoke、隔离 SQLite integration smoke、定向 `tsc`、精确范围 `git diff --check`；均通过。未执行真实付费生成，未确认上游十图能力，未确认删除生产记录。
 - 上游限制保持不变：MuskAPIs 官方资料本轮只明确两张图融合；产品可保证本地选择/保存/服务端/Provider 的最多10张边界，但不能宣称供应商已保证十张上游生成能力。
@@ -293,3 +293,25 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 生产健康：恢复后 `sd2-gray.service`、`sd2-image-studio.service`、`sd2-finalize-pending.timer`、`sd2-video-delivery.timer`、`sd2-backup.timer` 均 active，主服务和图片 worker `NRestarts=0`，本机 `127.0.0.1:3302/api/config` 通过。反馈记录仍保留为原始证据，未自动改为已处理。
 - 本轮验证：`node --import tsx scripts/server-runtime-dirs-smoke.ts`、`bash -n scripts/server-ensure-runtime-dirs.sh ops/server/sd2/preflight.sh`、精确 `git diff --check` 通过；公网四个素材的 HEAD/GET、SHA256、Range 及登录态浏览器图片加载通过。未做生成、扣费或数据库写入。
 - 防复发门禁已落到实际服务器：本地/发布分支/服务器 `/srv/video-api-debugger/app/ops/server/sd2/preflight.sh` 的 SHA256 均为 `2d6aad75af2aa31b7e7b307c06993bb1c744467bcb4b4c009263f03c99f4dd8b`；旧服务器脚本保留为 `/srv/video-api-debugger/app/ops/server/sd2/preflight.sh.f2-before-20260921`。服务器实际文件已通过 `bash -n`，本地控制端执行 `EXPECT_PROD_ON_SERVER=1 SERVER=root@42.193.221.253 bash ops/server/sd2/preflight.sh` 通过。仓库和服务器均未发现独立 A6 发布脚本，正式切换统一受 `ops/server/sd2/cutover-commands.md` 的发布前/切换后双 preflight 门禁约束。
+
+## 17. F3 生成提示词上限调整（2026-09-21）
+
+| 任务 | 完成标准 | 状态 |
+|---|---|---|
+| F3 | `/generate`（含共用 IP 入口）的输入、粘贴、恢复、保存、服务端请求统一允许最多 20,000 字；20,001 字明确阻止；正式页面刷新可见 | 已完成 |
+
+- 已定位：`src/components/PromptEditor.tsx` 与 `src/components/GenerationComposer.tsx` 当前限制为 2,000；`/api/tasks/create` 与 `/api/ip/tasks/create` 没有主提示词同等长度拒绝，但 Agent/最终快照会截到 12,000，导致输入、保存和请求口径不一致。
+- 独立入口暂不纳入本轮：`/image-studio` 画面描述为 12,000，`/tools/ultimate-canvas` 提示词为 12,000；除非另行确认，不改成视频生成提示词的 20,000 规则。
+- 执行计划：建立视频生成提示词共享上限常量；更新主输入框、放大编辑、引用标记插入和程序化恢复的超限提示；两条视频创建 API 在扣费/创建任务前拒绝 20,001 字，并把快照上限同步到 20,000；补隔离边界 smoke 和正式 `/generate` 页面验收，不调用真实生成、不扣费。
+- 验收证据：共享常量边界测试、前端源码/服务端源码检查、服务器候选 `npm run build`（含类型检查）通过；本地 `npm run lint` 在本机无输出长时间未结束，正式构建仅保留既有 lint/Autoprefixer warning。正式页面刷新后计数显示 `0 / 20000`，20,000 字可保留，20,001 字显示超限且不允许提交；公网 `/api/config`、`/api/release` 与 4 张 F2 图片回归继续通过。
+
+### F3 实施与正式发布结果
+
+- 共享 `MAX_GENERATION_PROMPT_CHARS = 20_000`，主 `/generate` 与 `/generate/ip` 共用；主输入、放大编辑、引用/mention 插入、方案生成、草稿/历史恢复、提交按钮和两条创建 API 均按同一边界处理。20,001 字不再被 `maxLength` 或 `slice` 静默截短，而是显示“提示词最多 20000 字，当前 20001 字”并阻止提交。
+- `/api/tasks/create` 与 `/api/ip/tasks/create` 在扣费/建任务前校验用户提示词、方案提示词快照和最终提示词快照；快照不再截到 12,000。H3 后续添加的系统上下文仍按既有流程保存，不把系统追加文本误当成用户输入超限。`/image-studio` 与 `/tools/ultimate-canvas` 的独立 12,000 字规则未改。
+- 版本由 `0.6.0` 升为 `0.6.1`，`/api/release` 更新摘要与实际 F3 变化一致。开发远端 `codex/gpt-image-studio` 为 `020dec7190eec61ee7df8cb27dc871abf292b32c`；正式发布分支 `codex/image-studio-release` 为 `de3865a9db8c9abafd5bf3763167c39e8dc3543f`；回退 tag `rollback/2026-09-21-before-f3-prompt-limit` 指向发布前 `b89140fcd357283c91c56db4cf3be30e501f8f14`。
+- 正式包已按 SHA256 `8dca3fc3908a82ab77f39cc086178483231daa9898961a66fd0b736e9c4fd2d` 上传服务器；候选构建 `npm run build` 通过（保留既有 ESLint/Autoprefixer warning），候选 BUILD_ID `J52leeag6XyiHAgYAigqJ`。生产已切换到上述 commit / v0.6.1，旧 BUILD_ID `ds5-BZ7DJjoAJQRSjb7OI` 保留在 `/srv/video-api-debugger/app/.next-prod-prev-f3-de3865a9db8c`。
+- 发布前、切换后和一个健康守护周期后的 `EXPECT_PROD_ON_SERVER=1 SERVER=root@42.193.221.253 bash ops/server/sd2/preflight.sh` 均通过；主服务与图片 worker active，`NRestarts=0`，公网 `/api/config`、`/api/release`、`/login` 正常，匿名 `/generate` 按预期跳登录。公网生成页静态 chunk 返回 200 并命中 `20000`。
+- 已授权的 Xiaobo Chrome Agent Window 在刷新并核对当前版本后实际验收普通 `/generate` 与 `/generate/ip`：初始计数 `0 / 20000`；填入 20,000 字显示 `20000 / 20000`；填入 20,001 字显示明确超限文案，输入不以截断成功态保留，提交按钮 DOM 为 `disabled=true`。未点击生成，未扣点，未写数据库。
+- F2 四个受影响公网图片在本轮切换后继续通过 HEAD 200、Range `206/1024`、完整下载 SHA256 与 Asset hash 一致：`7938d39d3028d0dde4e462cab0f1063b03c1bc1b8731dc20e74069d71d73318c`、`ea0fa44f2ac49d0721eca51f2a1cf058ff699041c2f4ba148cddc3171da88d66`、`c88f7f91074a3f4c5f08ef98fb95ffd4bdfc1075fcc33f29d444f66fdbf3af1c`、`fd3eb06425c0e97d95db477964b04592ad39120f52a4941e1d3651d12da94247`。
+- 本轮没有真实视频/IP生成、付费上游调用、积分变更或数据库写入；原有 `tasks/todo.md`、`tasks/todo/hygiene-log.md` 和非本轮构建/素材脏改均未纳入 F3 提交。固定只读审核线程对 F3 专项结论为通过；其先前的 Seedance 2.5 审查结论未作为本轮证据使用。
