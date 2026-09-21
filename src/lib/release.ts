@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成支持模块级模型与计费规则、最多 10 张参考图，并为每张结果保存完整设置快照，生成结果可在资产库复用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '视频生成提示词上限提升到 20,000 字，输入、恢复、保存和提交校验保持一致。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

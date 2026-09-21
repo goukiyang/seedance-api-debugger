@@ -28,12 +28,15 @@ import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsa
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
 import { Bot, FileJson, Settings2 } from 'lucide-react';
+import {
+  GENERATION_PROMPT_LIMIT_MESSAGE,
+  MAX_GENERATION_PROMPT_CHARS,
+} from '@/lib/prompt/limits';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
 const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
-const MAX_PROMPT_CHARS = 2000;
 const TEMPLATE_MODIFIERS = ['更科技', '更快节奏', '更品牌', '更产品', '更情绪化', '更克制'];
 const TEMPLATE_WORKBENCH_PREFS_KEY = 'seedance_template_workbench_preferences_v1';
 
@@ -556,6 +559,9 @@ export function GenerationComposer({
 
   const submitBlocker = useMemo(() => {
     if (!prompt.trim()) return '请填写提示词';
+    if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
+      return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
+    }
 
     // 检查上传状态
     const hasUploading = Object.values(workspace.uploadStatuses).some((s) => s === 'uploading');
@@ -1211,12 +1217,12 @@ export function GenerationComposer({
       return;
     }
     const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
-    if (nextPrompt.length > MAX_PROMPT_CHARS) {
-      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
+    if (nextPrompt.length > MAX_GENERATION_PROMPT_CHARS) {
+      throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
     }
     setPrompt((currentPrompt) => {
       const next = appendReferenceMarkers(currentPrompt, labelsToInsert);
-      return next.length <= MAX_PROMPT_CHARS ? next : currentPrompt;
+      return next.length <= MAX_GENERATION_PROMPT_CHARS ? next : currentPrompt;
     });
   }, [addReferenceImagesAndGetLabels, prompt, resolvePendingMentionRequest]);
 
@@ -1265,12 +1271,12 @@ export function GenerationComposer({
       return;
     }
     const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
-    if (nextPrompt.length > MAX_PROMPT_CHARS) {
-      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
+    if (nextPrompt.length > MAX_GENERATION_PROMPT_CHARS) {
+      throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
     }
     setPrompt((currentPrompt) => {
       const next = appendReferenceMarkers(currentPrompt, labelsToInsert);
-      return next.length <= MAX_PROMPT_CHARS ? next : currentPrompt;
+      return next.length <= MAX_GENERATION_PROMPT_CHARS ? next : currentPrompt;
     });
   }, [addUploadedAssetsAndGetLabels, prompt, resolvePendingMentionRequest]);
 
