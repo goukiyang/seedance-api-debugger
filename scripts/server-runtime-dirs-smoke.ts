@@ -33,6 +33,8 @@ assert.match(agentRules, /public\/videos/, 'deployment rules must preserve publi
 assert.match(agentRules, /\/data\/video-api-debugger\/var-lib/, 'deployment rules must mention production persistent runtime storage');
 assert.match(agentRules, /server-ensure-runtime-dirs\.sh/, 'deployment rules must run runtime dir guard after rsync');
 for (const marker of [
+  'test -L /var/lib/video-api-debugger',
+  'readlink -f /var/lib/video-api-debugger',
   'test -L /srv/video-api-debugger/app/public/uploads',
   'test -L /srv/video-api-debugger/app/public/videos',
   'test -L /srv/video-api-debugger/app/storage',
