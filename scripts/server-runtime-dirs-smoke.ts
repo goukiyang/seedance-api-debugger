@@ -6,6 +6,7 @@ const root = process.cwd();
 const runtimeScript = fs.readFileSync(path.join(root, 'scripts/server-ensure-runtime-dirs.sh'), 'utf8');
 const agentRules = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
 const serverPreflight = fs.readFileSync(path.join(root, 'ops/server/sd2/preflight.sh'), 'utf8');
+const cutoverCommands = fs.readFileSync(path.join(root, 'ops/server/sd2/cutover-commands.md'), 'utf8');
 
 for (const marker of [
   'SD2_SHARED_ROOT',
@@ -42,5 +43,7 @@ for (const marker of [
 ]) {
   assert.match(serverPreflight, new RegExp(marker.replaceAll('/', '\\/')), `server preflight must check ${marker}`);
 }
+assert.match(cutoverCommands, /bash ops\/server\/sd2\/preflight\.sh/, 'cutover instructions must run preflight before release');
+assert.match(cutoverCommands, /EXPECT_PROD_ON_SERVER=1 bash ops\/server\/sd2\/preflight\.sh/, 'cutover instructions must run production preflight after switch');
 
 console.log('[server-runtime-dirs-smoke] ok');
