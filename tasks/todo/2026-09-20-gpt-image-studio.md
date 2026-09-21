@@ -225,6 +225,14 @@ git diff --cached --check
 
 实现边界：上游美元成本与用户站内积分分开保存；GPT Image 2 可展示但成本显示“待配置”，避免把未确认价格写成事实。生成张数和生成按钮位于画面描述下方；比例默认显示“自动（跟随原图）”。用户后续追加的大图空白处关闭、左右键切图属于下一项预览交互，待本批上线后补做。
 
+### M4 发布结果（2026-09-22）
+
+- 发布提交：`ac5999c091a44e6c910523eec7b14a40d90aca5e`，版本 `0.7.0`；回退 tag：`rollback/2026-09-22-before-musk-image-api`。
+- 服务器源码归档 SHA256：`8e1b8f6aa1df65e5f667605ecd6f900c7b82f3dbf69ba87b41c9603264efe261`；运行目录 `/srv/video-api-debugger/app`，上一版构建保留在 `.next-prod-prev-ac5999c`。
+- 生产数据库先做 SQLite backup，再只增量增加 `ImageStudioTask.provider_cost_usd`；未执行 `prisma migrate deploy`，未覆盖旧迁移、资产、任务或积分流水。
+- 线上候选构建 BUILD_ID：`D32tj9inwbmObNl9niewb`；`sd2-gray.service` 与 `sd2-image-studio.service` 均 active，NRestarts 均为 0；公网 `/api/release` 返回 `0.7.0` 和本次图片模型摘要。
+- 公网静态资源验证包含：Banana 2/Pro、GPT Image 2、Flare、Sunburst、`自动（跟随原图）`、20000 字限制和 `api.ai-media.vip`；浏览器自动化工具本轮连接超时，未把它冒充成登录态视觉验收。生产未执行付费生图。
+
 本轮17个修改文件及用途（相对上述正式源码目录）：
 
 | 文件 | 修改内容 |
