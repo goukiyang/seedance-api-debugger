@@ -33,6 +33,8 @@ systemctl is-active sd2-gray.service
 systemctl is-active cloudflared-seedance2-server.service
 systemctl is-enabled sd2-finalize-pending.timer sd2-video-delivery.timer 2>/dev/null || true
 ss -ltnp | grep ":3302"
+test -L /var/lib/video-api-debugger
+test "$(readlink -f /var/lib/video-api-debugger)" = /data/video-api-debugger/var-lib
 test -L /srv/video-api-debugger/app/public/uploads
 test "$(readlink -f /srv/video-api-debugger/app/public/uploads)" = /data/video-api-debugger/var-lib/uploads
 test -L /srv/video-api-debugger/app/public/videos
