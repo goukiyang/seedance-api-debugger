@@ -4,7 +4,9 @@ export const SEEDANCE_DRAFT_CONTRACT_VERSION = 'seedance-draft-v1';
 
 export type SeedanceDraftContentItem = {
   type: 'draft_task';
-  draft_task_id: string;
+  draft_task: {
+    id: string;
+  };
 };
 
 export function isSeedanceDraftCreateEnabled() {
@@ -22,7 +24,7 @@ export function canCreateSeedanceDraft(model: string) {
 export function buildSeedanceDraftContent(providerDraftTaskId: string): SeedanceDraftContentItem[] {
   const normalized = providerDraftTaskId.trim();
   if (!normalized) throw new Error('provider Draft ID 不能为空');
-  return [{ type: 'draft_task', draft_task_id: normalized }];
+  return [{ type: 'draft_task', draft_task: { id: normalized } }];
 }
 
 export function buildSeedanceDraftUpgradePayload(input: {

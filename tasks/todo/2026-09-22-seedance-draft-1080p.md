@@ -3,7 +3,7 @@
 > 项目：`video-api-debugger`；记录日期：2026-09-22；风险：L3（用户可见、涉及计费和 Provider 状态）。
 > 生产基线：`c68b3cff3a2d9d94bc41be121b2215930a4432d`；本任务分支：`codex/seedance-draft-1080p`。
 > 目标页面：`https://sd2.youdooart.com/generate`。本轮不直接部署，不触碰生产工作树中画布相关脏改。
-> 当前状态：代码、迁移、Mock 与本地低层校验已完成；真实 Provider 升级开关默认关闭，lint/build 因隔离工作树依赖不完整未通过；待主控审核后决定是否补依赖验证和真实契约验证。
+> 当前状态：代码、迁移、Mock 与本地低层校验已完成；`draft_task` 已按原版嵌套对象契约输出，费用复用现有按模型计价规则；真实 Provider 升级开关默认关闭，lint/build 因隔离工作树依赖不完整未通过；待主控审核后决定是否补依赖验证和真实契约验证。
 
 ## 1. 大白话目标复述
 
@@ -15,7 +15,7 @@
 
 - [x] D1. 固化 Provider 契约和能力开关
   - 文件：`src/lib/provider/seedance-draft.ts`、`src/lib/provider/jimeng.ts`、`src/types/index.ts`。
-  - 内容：定义 Draft 创建、Draft 升级请求的最小字段；升级 `content` 只能包含 `draft_task`；能力开关默认关闭；补齐查询按 `clientRequestId` 恢复所需的适配器。
+  - 内容：定义 Draft 创建、Draft 升级请求的最小字段；升级 `content` 只能包含嵌套的 `draft_task: { id }`；能力开关默认关闭；补齐查询按 `clientRequestId` 恢复所需的适配器。
   - 完成标准：纯函数能被 Mock 检查；关闭开关时不会发真实升级请求。
 
 - [x] D2. 接入 Draft 创建

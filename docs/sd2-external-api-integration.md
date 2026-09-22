@@ -528,11 +528,11 @@ POST /api/codex/video/draft-upgrade
 }
 ```
 
-接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求只发送 `draft_task` 引用和 `1080p`，不会从外部请求接收或重复发送 prompt、素材、seed、比例、时长等字段。
+接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求只发送嵌套的 `draft_task: { id }` 引用和 `1080p`，不会从外部请求接收或重复发送 prompt、素材、seed、比例、时长等字段。
 
 `draft_task_id` 必须是 SD2 本地任务 ID，不能填写 Seedance 官方任务 ID，也不能填写 `provider_task_id`。Draft 和正式任务分别记录点数冻结、Provider 请求、轮询和成本台账；重复的 `idempotency_key` 会返回原正式任务。
 
-当前公开供应商示例只核验到 `draft` 创建字段，尚未核验到 `draft_task` 升级请求和响应。因此 `GET /api/codex/config` 中 `seedance_draft.upgrade_enabled` 默认是 `false`，关闭时接口返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起真实供应商升级请求。启用前必须由管理员完成供应商契约验证；本项目的 Mock 回归不等同于真实供应商可用。
+当前公开供应商示例只核验到 `draft` 创建字段，尚未核验到嵌套 `draft_task: { id }` 升级请求和响应。因此 `GET /api/codex/config` 中 `seedance_draft.upgrade_enabled` 默认是 `false`，关闭时接口返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起真实供应商升级请求。计费复用现有按模型的 `calculateEstimatedCost` 规则，不新增 Draft 专属价格；2.0 旧规则保持不变。启用前必须由管理员完成供应商契约验证；本项目的 Mock 回归不等同于真实供应商可用。
 
 ## 10. 任务状态与结果
 

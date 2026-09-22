@@ -399,7 +399,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
         params_json: JSON.stringify(taskParams),
         provider_payload_json: JSON.stringify({
           model: draft.model,
-          content: [{ type: 'draft_task' }],
+          content: [{ type: 'draft_task', draft_task: { id: draft.provider_draft_task_id } }],
           resolution: '1080p',
           contract_version: SEEDANCE_DRAFT_CONTRACT_VERSION,
         }),

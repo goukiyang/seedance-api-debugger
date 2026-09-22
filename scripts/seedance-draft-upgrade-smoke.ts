@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { buildSeedanceDraftContent, buildSeedanceDraftUpgradePayload, seedanceDraftCapability } from '@/lib/provider/seedance-draft';
+import { calculateEstimatedCost } from '@/lib/pricing';
+import { SEEDANCE_2_0_MODEL_ID, SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
 
 async function main() {
   const previousCreateGate = process.env.SEEDANCE_DRAFT_CREATE_ENABLED;
@@ -8,7 +10,7 @@ async function main() {
   delete process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED;
   assert.equal(seedanceDraftCapability().upgrade_enabled, false, 'Draft 升级默认必须关闭');
   assert.deepEqual(buildSeedanceDraftContent('provider-draft-123'), [
-    { type: 'draft_task', draft_task_id: 'provider-draft-123' },
+    { type: 'draft_task', draft_task: { id: 'provider-draft-123' } },
   ]);
 
   const upgradePayload = buildSeedanceDraftUpgradePayload({
@@ -16,12 +18,17 @@ async function main() {
     providerDraftTaskId: 'provider-draft-123',
     clientRequestId: 'local-formal-task-123',
   });
-  assert.deepEqual(upgradePayload.content, [{ type: 'draft_task', draft_task_id: 'provider-draft-123' }]);
+  assert.deepEqual(upgradePayload.content, [{ type: 'draft_task', draft_task: { id: 'provider-draft-123' } }]);
   assert.equal(upgradePayload.resolution, '1080p');
   assert.equal('prompt' in upgradePayload, false);
   assert.equal('seed' in upgradePayload, false);
   assert.equal('ratio' in upgradePayload, false);
   assert.equal('duration' in upgradePayload, false);
+
+  const seedance20Pricing = calculateEstimatedCost('1080p', 4, SEEDANCE_2_0_MODEL_ID);
+  const seedance25Pricing = calculateEstimatedCost('1080p', 4, SEEDANCE_2_5_MODEL_ID);
+  assert.equal(seedance20Pricing.estimatedCost, 12, 'Draft upgrade must preserve the existing Seedance 2.0 3 points/s rule');
+  assert.equal(seedance25Pricing.estimatedCost, 18, 'Draft upgrade must reuse the existing Seedance 2.5 model multiplier');
 
   process.env.SEEDANCE_API_KEY = 'smoke-only-key';
   const calls: Array<{ url: string; payload: Record<string, unknown> }> = [];
@@ -63,7 +70,7 @@ async function main() {
   const draftCreatePayload = calls[0]?.payload;
   assert.equal(draftCreatePayload?.draft, true);
   const formalPayload = calls[1]?.payload;
-  assert.deepEqual(formalPayload?.content, [{ type: 'draft_task', draft_task_id: 'provider-draft-123' }]);
+  assert.deepEqual(formalPayload?.content, [{ type: 'draft_task', draft_task: { id: 'provider-draft-123' } }]);
   assert.equal(formalPayload?.resolution, '1080p');
   assert.equal('prompt' in formalPayload, false);
   assert.equal('seed' in formalPayload, false);
