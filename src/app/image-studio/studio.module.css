@@ -6,6 +6,9 @@
 .moduleRailGroup > span { padding: 0 6px 4px; color: #849098; font-size: 11px; font-weight: 700; }
 .page .moduleRailGroup button { justify-content: space-between; }
 .moduleRailGroup button small { color: #849098; font-size: 11px; }
+.moduleRailChildren { display: grid; gap: 2px; margin: 2px 0 0 10px; border-left: 1px solid #314047; padding-left: 8px; }
+.page .moduleRail .moduleRailChild { width: auto; padding: 5px 6px; color: #aeb9bf; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page .moduleRail .moduleRailChild:hover { color: #b9f7e8; background: #1b2a2b; }
 .page .moduleRail button { width: 100%; justify-content: flex-start; padding: 7px 8px; border-color: transparent; background: transparent; color: #c6d0d5; font-size: 13px; text-align: left; }
 .page .moduleRail button:hover, .page .moduleRail .moduleRailActive { background: #203d38; border-color: #367d70; color: #b9f7e8; }
 .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
@@ -47,6 +50,8 @@
 .counts button[aria-pressed=true] { border-color: #79daca; color: #a4f2df; background: #123b33; }
 .counts input { width: 68px; }
 .page .generate { width: 100%; margin-top: 12px; background: #126f5d; }
+.moduleQuickActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid #2d383d; }
+.moduleQuickActions button { padding: 7px 9px; font-size: 12px; }
 .outputs { min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 20px; }
 .result { min-width: 0; }
@@ -79,10 +84,21 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .empty { display: flex; justify-content: center; align-items: center; min-height: 360px; color: #adb6bd; border-bottom: 1px solid #333b40; }
+.coverGrid { min-width: 0; }
+.coverGridInner { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
+.page .coverCard { display: grid; grid-template-rows: 3fr 1fr; gap: 0; aspect-ratio: 3 / 4; align-items: stretch; padding: 0; overflow: hidden; text-align: left; border-color: #364248; background: #171c1f; }
+.coverVisual { display: flex; align-items: center; justify-content: center; min-height: 0; color: #87949a; background: #0b0e0f center / cover no-repeat; }
+.coverDescription { display: grid; gap: 6px; min-height: 0; overflow: hidden; box-sizing: border-box; padding: 10px; }
+.coverDescription strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coverDescription small { display: -webkit-box; overflow: hidden; color: #adb6bd; font-size: 12px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .error { color: #ffb4ab; font-size: 14px; overflow-wrap: anywhere; }
 .dialog { box-sizing: border-box; margin: auto; width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
 .dialog > p { margin: 16px 0; line-height: 1.6; }
 .dialog::backdrop { background: rgb(0 0 0 / 65%); }
 .dialog select { width: 100%; }
+.presetList { display: grid; gap: 8px; }
+.presetItem { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #2d383d; border-radius: 6px; background: #151a1d; }
+.presetItem > div { display: grid; gap: 4px; min-width: 0; }
+.presetItem span { color: #adb6bd; font-size: 12px; }
 @media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: 0; bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
 @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } }

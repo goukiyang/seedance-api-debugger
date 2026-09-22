@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
-import { normalizeImageStudioQuality } from './model-catalog';
+import { defaultImageStudioQuality, normalizeImageStudioQuality } from './model-catalog';
 import { MAX_REFERENCE_IMAGES } from './limits';
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
@@ -105,10 +105,15 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       if (!source) throw new StudioModuleError('历史生成记录不存在或无权复现', 403);
     }
     const selectedModel = model || current?.model || (await getImageStudioSettings()).model;
+    const selectedQuality = quality !== undefined
+      ? normalizeImageStudioQuality(String(selectedModel), String(quality))
+      : createOnly
+        ? defaultImageStudioQuality(String(selectedModel))
+        : normalizeImageStudioQuality(String(selectedModel), current?.quality);
     const data = { name: name.trim(), prompt, count: Number(count), reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
       ...(aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
       ...(model !== undefined ? { model: model as string } : {}),
-      ...(quality !== undefined ? { quality: normalizeImageStudioQuality(String(selectedModel), String(quality)) } : {}),
+      quality: selectedQuality,
       ...(groupName !== undefined ? { group_name: groupName.trim() || '未分组' } : {}),
       ...(bannerAssetId !== undefined ? { banner_asset_id: bannerAssetId } : {}),
       ...(reproduceFromTaskId !== undefined ? { reproduce_task_id: reproduceFromTaskId } : {}),

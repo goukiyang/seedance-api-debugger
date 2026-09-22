@@ -38,7 +38,12 @@ export const IMAGE_STUDIO_QUALITY_LABELS: Record<ImageStudioQuality, string> = {
   auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高',
 };
 
+export function defaultImageStudioQuality(model: string): ImageStudioQuality {
+  const options = IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as ImageStudioModel] || ['auto'];
+  return options[options.length - 1] || 'auto';
+}
+
 export function normalizeImageStudioQuality(model: string, value: unknown): ImageStudioQuality {
   const options = IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as ImageStudioModel] || ['auto'];
-  return options.includes(value as ImageStudioQuality) ? value as ImageStudioQuality : 'auto';
+  return options.includes(value as ImageStudioQuality) ? value as ImageStudioQuality : defaultImageStudioQuality(model);
 }

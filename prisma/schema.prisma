@@ -332,6 +332,27 @@ model ImageStudioModule {
   @@index([owner_id, created_at])
 }
 
+model ImageStudioPreset {
+  id            String   @id
+  owner_id      String
+  scope         String   // admin | creator
+  name          String
+  group_name    String   @default("未分组")
+  prompt        String   @default("")
+  context       String   @default("")
+  model         String
+  quality       String   @default("auto")
+  count         Int      @default(1)
+  aspect_ratio  String   @default("auto")
+  banner_asset_id String?
+  reference_ids String   @default("[]")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@index([scope, created_at])
+  @@index([owner_id, scope, created_at])
+}
+
 model ImageStudioTask {
   id             String   @id
   batch_id       String
