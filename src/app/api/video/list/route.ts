@@ -78,7 +78,13 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         provider: true,
+        model: true,
         provider_task_id: true,
+        is_draft: true,
+        provider_draft_task_id: true,
+        draft_upgrade_mode: true,
+        source_draft_task_id: true,
+        draft_contract_version: true,
         prompt: true,
         generation_mode: true,
         ratio: true,

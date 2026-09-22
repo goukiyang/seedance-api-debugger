@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getAiMediaKitApiSettings, safeAiMediaKitConfigDto } from '@/lib/integrations/aimediakit';
 import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
+import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,7 @@ export async function GET() {
     model: config.model,
     model_options: config.model_options,
     api_key_configured: isApiKeyConfigured(),
+    seedance_draft: seedanceDraftCapability(),
     aimediakit_enhance_video: {
       enabled: aiMediaKitConfig.enabled,
       ready: aiMediaKitConfig.ready,
