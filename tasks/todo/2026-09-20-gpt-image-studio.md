@@ -339,9 +339,13 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 
 | 任务 | 完成标准 | 状态 |
 |---|---|---|
-| F4 | 新模板默认最高质量；模块底部可恢复默认、另存为管理员/我的模板；模板可在模板库新建应用；分组侧栏显示子项；所有模板提供 3:4 封面页；不影响既有分组分页、自动保存、生成结果和失败结果删除 | 实现中，待构建与线上验收 |
+| F4 | 新模板默认最高质量；模块底部可恢复默认、另存为管理员/我的模板；模板可在模板库新建应用；分组侧栏显示子项；所有模板提供 3:4 封面页；不影响既有分组分页、自动保存、生成结果和失败结果删除 | 已完成，线上可用 |
 
 - 规则：GPT Image 2 默认高，Flare/Sunburst 默认最高，Banana 模型沿用模型唯一可用档位；切换模型时自动切换到该模型的最高可用档位。恢复默认只重置模块配置，不删除参考图、banner 或历史生成结果。
 - 模板权限：管理员另存为的模板全员可见；普通用户另存为的模板仅本人可见。应用管理员模板时复制参考素材的资产记录到当前用户，保留同一存储文件但不越过资产 owner 权限。
 - 页面：左侧“分组快捷栏”下展示当前分组的模板名称；新增“全部封面”入口，卡片整体 3:4，上方约四分之三显示 banner/首张参考图，下方约四分之一显示名称和描述，点击封面回到对应模块。
 - 数据：新增 `ImageStudioPreset` 表和 `/api/image-studio/presets` 读写/应用接口；现有模块的全局积分、分组分页、自动保存、参考图最多10张及生成结果状态保持原链路。
+- 发布证据：提交 `565c4cf` 已推送 `codex/gpt-image-studio`，回退 tag 为 `rollback/2026-09-22-before-image-studio-presets`；生产 `/srv/video-api-debugger/app/.deployed-commit=565c4cf`、版本 `0.10.0`、BUILD_ID `_eSwpKMD1JrDehWv5DKtv`；候选构建与本地 `npm run build` 通过，保留既有 lint/Autoprefixer warning。
+- 数据库：生产数据库已备份到 `/data/video-api-debugger/srv-backups/image-studio-presets-20260922192207/dev.db`，原库与备份 SHA256 均为 `cecc1d9ea9a6c09b0e1e71f0e7f9ae50e140b73c38a7ae66b8d62468fac50b64`；模板表创建成功，`PRAGMA quick_check=ok`，迁移已标记 applied。
+- 公网：`https://sd2.youdooart.com/api/release` 返回 `0.10.0`，公网静态图片生成 chunk 200 且包含“分组快捷栏 / 全部封面 / 另存为管理员模板”；匿名模板接口按预期返回登录要求。主服务 active，健康接口正常；图片 worker 由同一运行用户恢复为手动进程，因普通 SSH 用户无权执行 systemd start，`sd2-image-studio.service` 当前状态仍为 inactive，这是后续应补的服务权限问题，不影响当前进程处理但不符合长期托管标准。
+- 回归边界：未执行真实付费生图、模板跨账号实际应用或删除生产数据；浏览器自动接管当前前台不是 Chrome，未伪造登录态截图验收，已用构建路由、静态资源、公网 release/health、数据库和运行进程证据完成最小验证。
