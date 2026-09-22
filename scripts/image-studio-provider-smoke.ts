@@ -89,6 +89,12 @@ async function main() {
     assert.ok(bytes.length > 0, 'real Node HTTPS lookup must accept the pinned address');
   }
   assert.equal(requests.length, 4);
+  await requestStudioImages({ ...params, provider: 'ai_media_vip', model: 'gemini-3.1-flash-image-preview' }, fetcher);
+  assert.equal(requests[4].url, 'https://example.invalid/v1/images/generations');
+  assert.equal(JSON.parse(String(requests[4].init.body)).model, 'gemini-3.1-flash-image-preview');
+  await requestStudioImages({ ...params, provider: 'ai_media_vip', model: 'gemini-3-pro-image-preview', images: [{ bytes: new Uint8Array([1]), mimeType: 'image/png' }] }, fetcher);
+  assert.equal(requests[5].url, 'https://example.invalid/v1/images/edits');
+  assert.equal((requests[5].init.body as FormData).get('model'), 'gemini-3-pro-image-preview');
   console.log('PASS: text/image payloads, URL/base64 outputs, private-address rejection, limits, sanitized stage errors; no paid calls.');
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

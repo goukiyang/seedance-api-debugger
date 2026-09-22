@@ -19,6 +19,7 @@ export class StudioProviderError extends Error {
 // Keep GPT image requests isolated from the existing Gemini/Seedream adapters.
 export async function requestStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
+  provider?: 'musk' | 'ai_media_vip';
   count: number; images: StudioImageInput[]; signal: AbortSignal;
   size?: string;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
@@ -29,7 +30,7 @@ export async function requestStudioImages(params: {
     const [w, h] = params.size.split('x').map(Number);
     if (!/^\d+x\d+$/.test(params.size) || w % 16 || h % 16 || w < 16 || h < 16 || Math.max(w, h) > 3840 || w / h > 3 || h / w > 3 || w * h < 655360 || w * h > 8294400) throw new Error('生成尺寸无效');
   }
-  if (GEMINI_IMAGE_MODELS.has(params.model)) {
+  if (params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
     return requestGeminiStudioImages(params, fetcher);
   }
   const url = new URL(params.baseUrl);

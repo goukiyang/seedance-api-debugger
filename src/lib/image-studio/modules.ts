@@ -81,8 +81,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   catch (error) { throw new StudioModuleError((error as Error).message); }
   if (body.context !== undefined && (typeof body.context !== 'string' || body.context.length > 20000)) throw new StudioModuleError('模块上下文最多 20000 字');
   const model = body.model === undefined ? undefined : body.model;
-  if (model !== undefined && (!isAdmin || !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))) {
-    if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) throw new StudioModuleError('模块模型无效');
+  if (model !== undefined && !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) {
+    throw new StudioModuleError('模块模型无效');
   }
   let prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null> | undefined;
   if (body.prices !== undefined) {

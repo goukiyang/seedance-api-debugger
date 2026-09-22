@@ -5,7 +5,7 @@ import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_COST_USD, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 
 type UserSelectorType = 'id' | 'email' | 'username';
 
@@ -578,8 +578,8 @@ export default function AdminIntegrationsClient() {
       default_size: option.defaultSize,
       output_format: prev.output_format || 'png',
       response_format: prev.response_format || 'url',
-      provider: prev.provider === 'seedream' ? 'musk' : prev.provider,
-      base_url: prev.provider === 'seedream' ? IMAGE_CHANNEL_OPTIONS[0].baseUrl : prev.base_url,
+      provider: option.model === 'doubao-seedream-5-0-pro-260628' ? 'seedream' : prev.provider === 'seedream' ? 'musk' : prev.provider,
+      base_url: option.model === 'doubao-seedream-5-0-pro-260628' ? IMAGE_CHANNEL_OPTIONS[2].baseUrl : prev.provider === 'seedream' ? IMAGE_CHANNEL_OPTIONS[0].baseUrl : prev.base_url,
       watermark: prev.provider === 'seedream' ? false : prev.watermark,
       supports_text_to_image: true,
       supports_image_to_image: true,
@@ -1604,6 +1604,7 @@ export default function AdminIntegrationsClient() {
                   >
                     <span>{option.label}</span>
                     <small>{option.summary}</small>
+                    {option.model in IMAGE_STUDIO_MODEL_COST_USD && <small>{IMAGE_STUDIO_MODEL_COST_USD[option.model as ImageStudioModel] === null ? '美元成本待设置' : `$${IMAGE_STUDIO_MODEL_COST_USD[option.model as ImageStudioModel]} / 张`}</small>}
                     <em>{option.tags.join(' / ')}</em>
                   </button>
                 );
@@ -1618,7 +1619,8 @@ export default function AdminIntegrationsClient() {
               className="input mb-2"
               value={IMAGE_API_ENDPOINT_OPTIONS.some((option) => option.value === imageConfig.base_url) ? imageConfig.base_url : ''}
               onChange={(event) => {
-                if (event.target.value) setImageConfig((prev) => ({ ...prev, base_url: event.target.value }));
+                const channel = IMAGE_CHANNEL_OPTIONS.find(option => option.baseUrl === event.target.value);
+                if (channel) applyImageChannel(channel.provider);
               }}
             >
               <option value="">自定义地址</option>

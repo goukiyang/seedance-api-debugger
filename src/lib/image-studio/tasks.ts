@@ -81,7 +81,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       }
     }
-    if (!context) throw new StudioError('请管理员先设置通用上下文或模块上下文', 409);
+    if (!context) throw new StudioError('请先设置当前模块的上下文', 409);
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
     if (active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
     const references = await tx.asset.findMany({ where: { id: { in: referenceIds }, owner_id: ownerId, status: 'active', type: 'image' },
@@ -206,7 +206,7 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
     : [];
   const ownerIds = Array.from(new Set(rows.map(task => task.owner_id)));
   const owners = ownerIds.length
-    ? await prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true, username: true, email: true } })
+    ? await prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true, username: true, email: true, avatar_url: true } })
     : [];
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
   const ownerById = new Map(owners.map(owner => [owner.id, owner]));
