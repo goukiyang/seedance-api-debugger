@@ -7,7 +7,7 @@
 - 目标页面：现有画布工具页面
 - 目标：在现有画布中搭建、保存和执行由多个图片生成模板组成的工具流
 - 优先级：P1
-- 当前状态：实施与发布收口中
+- 当前状态：已完成（待审核）
 
 ## 用户目标
 
@@ -132,21 +132,23 @@
 | 2 | 增加工具流模式和基础节点 | 可创建输入、模板、筛选、确认、输出节点 | 已完成 |
 | 3 | 增加连线校验和图保存 | 阻止无输入、无输出、循环和不兼容端口；刷新可恢复 | 已完成 |
 | 4 | 增加工具流版本快照 | 运行使用固定版本，编辑不污染运行中流程 | 已完成 |
-| 5 | 接入现有图片任务队列 | 单节点串行执行可用，状态和结果可追踪 | 已完成 |
+| 5 | 接入现有图片任务队列 | 单节点串行执行可用，状态和结果可追踪 | 已完成（真实付费执行待授权） |
 | 6 | 实现并行分支与汇总 | 一张图片可同时运行多个模板，完成后进入下一节点 | 已完成 |
 | 7 | 实现结果筛选和人工确认 | 可单选/多选、重试、继续或暂停流程 | 已完成 |
 | 8 | 接入积分、失败恢复和资产归档 | 不重复扣费，结果完整进入资产库 | 已完成 |
 | 9 | 权限、运行记录和飞书通知 | 权限正确，等待确认和失败可通知 | 已完成 |
-| 10 | 回归与发布 | 旧画布、图片生成、资产库、积分和登录功能不受影响 | 进行中 |
+| 10 | 回归与发布 | 旧画布、图片生成、资产库、积分和登录功能不受影响 | 已完成（真实付费执行待授权） |
 
 ## 执行证据（2026-09-22）
 
 - 任务 2–3：`CanvasEngine` 新增 `flow-input`、`flow-template`、`flow-select`、`flow-confirm`、`flow-output` 节点；前后端均校验输入/输出、连线类型、重复边和循环；工具流定义独立保存，画布刷新仍由原 `loadCanvasDocument()` 恢复。
 - 任务 4：`ToolFlowRun.snapshot_json` 保存 `toolflow.v1` 不可变快照；保存新版本只递增 `ToolFlow.version`，运行调度只读取运行快照。
-- 任务 5–8：新增工具流 API 与运行编排器，图片模板节点写入现有 `ImageStudioTask` 队列；worker 成功、失败、租约过期均回写节点状态；并行模板、部分失败保留成功结果、筛选/确认、暂停/继续/重试、积分冻结/释放和资产 `metadata_json` 标记均已接入。
+- 任务 5–8：新增工具流 API 与运行编排器，图片模板节点写入现有 `ImageStudioTask` 队列；worker 成功、失败、租约过期均回写节点状态；并行模板、部分失败保留成功结果、筛选/确认、暂停/继续/重试、积分冻结/释放和资产 `metadata_json` 标记均已接入。真实上游生成未在本轮主动触发，避免未获单独授权时产生费用。
 - 任务 9：复用现有项目访问、内部账号和模板/资产 owner 校验；运行操作写入 `OperationLog`；等待和完成复用现有站内通知边界，未新增飞书密钥或直连队列。
 - 本地验证：`npm run db:generate`、`npx tsc --noEmit`、`npm run test:toolflow`、`npx prisma validate`、`npm run lint`、`npm run build` 和相关浏览器脚本 `node --check` 已通过。
-- 迁移验证：全量临时 SQLite 部署被仓库既有历史迁移 `20260513143000_add_projects_permissions` 的基线缺表问题阻断；本轮未执行生产 `db push` 或写库操作，线上迁移需在候选发布阶段按既有数据库基线执行并复核。
+- 迁移验证：生产库先完成 `/data/video-api-debugger/var-lib/backups/daily/dev.db.20260922-231011.sqlite3.gz` 备份；针对历史“实际表结构已存在但迁移未登记”的漂移，按实际 schema 将对应历史迁移登记为已应用，再成功应用 `20260613203000_baseline_cost_ledger_tables`、`20260701143000_asset_hash_per_owner`、`20260922180000_add_canvas_toolflows`、`20260922190000_toolflow_queue_metadata`；最终 `prisma migrate status` 报 schema up to date，未执行 `db push`。
+- 发布验证：提交 `7d0d405786a846204e38a5f6ea8dcbc34abeaae6` 已推送到 `origin/codex/gpt-image-studio`，回退标签 `rollback/2026-09-22-before-canvas-toolflow` 已推送；服务器候选 build ID 为 `VKd92yBvO9mOVSVeOE5BX`，`sd2-gray.service` 与 `sd2-image-studio.service` 经过健康守护周期仍为 active 且 `NRestarts=0`；`https://sd2.youdooart.com/api/release` 返回 `0.11.0` 和工具流摘要，公网 health 返回 `x-sd2-origin: server-42-193`。
+- 真实页面验证：用 Xiaobo Chrome 的同一 Default profile 新建 Agent Window 完成已有飞书授权后打开正式无线画布，页面显示 `v0.11.0`、工具流入口和输入/模板/筛选/确认/输出控件；会话结束后已停止浏览器 session。未执行带费用的真实图片生成、筛选提交或积分扣费验收。
 - 真实付费图片链路：本轮未主动触发，以免在没有明确测试资产/积分授权时产生上游费用；待发布后由有授权的登录用户用已有图片资产执行一次真实链路验收。
 
 ## 盘点结果（2026-09-22）
