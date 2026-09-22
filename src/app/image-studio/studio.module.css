@@ -1,6 +1,6 @@
-.page { position: relative; display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 24px; padding: 24px; max-width: 1600px; margin: auto; color: #e6e8eb; background: #101315; min-height: 85vh; }
+.page { position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
 .content { min-width: 0; }
-.moduleRail { position: sticky; top: 88px; align-self: start; max-height: calc(100dvh - 112px); overflow-y: auto; padding: 14px 10px; border: 1px solid #2d383d; border-radius: 8px; background: #151a1d; }
+.moduleRail { position: fixed; left: 0; top: 73px; bottom: 0; z-index: 15; box-sizing: border-box; width: 236px; max-height: none; overflow-y: auto; padding: 18px 14px; border: 0; border-right: 1px solid #2d383d; border-radius: 0; background: #151a1d; }
 .moduleRailTitle { margin: 0 6px 14px; color: #a4f2df; font-size: 13px; font-weight: 800; }
 .moduleRailGroup { display: grid; gap: 4px; margin-top: 14px; }
 .moduleRailGroup > span { padding: 0 6px 4px; color: #849098; font-size: 11px; font-weight: 700; }
@@ -80,5 +80,5 @@
 .dialog > p { margin: 16px 0; line-height: 1.6; }
 .dialog::backdrop { background: rgb(0 0 0 / 65%); }
 .dialog select { width: 100%; }
-@media (max-width: 1000px) { .page { grid-template-columns: 1fr; } .moduleRail { position: sticky; top: 0; z-index: 5; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
+@media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: 0; bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
 @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } }
