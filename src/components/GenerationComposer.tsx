@@ -23,6 +23,7 @@ import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/U
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
+import { SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
@@ -382,6 +383,7 @@ interface Props {
     provider: string | null;
     model: string | null;
     h3LoraId: string | null;
+    draft: boolean;
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
@@ -413,6 +415,10 @@ interface Props {
   auxiliaryOptions?: ComposerSelectOption[];
   selectedAuxiliary?: string | null;
   onAuxiliaryChange?: (value: string) => void;
+  seedanceDraft?: {
+    createEnabled: boolean;
+    message: string;
+  };
 }
 
 export function GenerationComposer({
@@ -450,6 +456,10 @@ export function GenerationComposer({
   auxiliaryOptions = [],
   selectedAuxiliary = null,
   onAuxiliaryChange,
+  seedanceDraft = {
+    createEnabled: false,
+    message: '供应商 Draft 能力尚未完成核验，暂不可用。',
+  },
 }: Props) {
   const workspace = useWorkspace();
   const templateEnabled = templateMode === 'workbench';
@@ -505,10 +515,15 @@ export function GenerationComposer({
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
   const [selectedModel, setSelectedModel] = useState(modelOptions[0]?.id || '');
+  const [draftMode, setDraftMode] = useState(false);
   const [resolutionApprovalConfirmed, setResolutionApprovalConfirmed] = useState(false);
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
   const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
+
+  useEffect(() => {
+    if (selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
+  }, [selectedModel]);
   const selectedTemplate = useMemo(() => {
     if (!templateEnabled) return null;
     return templates.find((template) => template.id === selectedTemplateId) || templates[0] || null;
@@ -590,8 +605,11 @@ export function GenerationComposer({
     if (need1080pApproval && !resolutionApprovalConfirmed) {
       return '1080p 生成需要先确认审批通过。';
     }
+    if (draftMode && !seedanceDraft.createEnabled) {
+      return seedanceDraft.message;
+    }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker]);
+  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -914,6 +932,7 @@ export function GenerationComposer({
       provider: selectedProvider || null,
       model: selectedModel || null,
       h3LoraId: selectedAuxiliary || null,
+      draft: draftMode,
     });
   }, [
     submitBlocker,
@@ -940,6 +959,7 @@ export function GenerationComposer({
     selectedProvider,
     selectedModel,
     selectedAuxiliary,
+    draftMode,
   ]);
 
   const handlePromptChange = useCallback((nextPrompt: string) => {
@@ -1774,6 +1794,21 @@ export function GenerationComposer({
             <span>
               我已确认审批中心存在有效 1080p 审批记录，允许直接生成
               <a href="/approvals" target="_blank" rel="noreferrer">查看审批</a>
+            </span>
+          </label>
+        )}
+
+        {selectedModel === SEEDANCE_2_5_MODEL_ID && (
+          <label className="composer-resolution-approval" title={seedanceDraft.message}>
+            <input
+              type="checkbox"
+              checked={draftMode}
+              disabled={!seedanceDraft.createEnabled}
+              onChange={(event) => setDraftMode(event.currentTarget.checked)}
+            />
+            <span>
+              样片 Draft
+              <small>{seedanceDraft.createEnabled ? '先确认内容，再生成正式 1080p' : seedanceDraft.message}</small>
             </span>
           </label>
         )}

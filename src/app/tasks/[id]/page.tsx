@@ -55,6 +55,11 @@ interface VideoTask {
   execution_expires_after: number | null;
   local_status: string;
   provider_task_id: string | null;
+  is_draft?: boolean;
+  provider_draft_task_id?: string | null;
+  draft_upgrade_mode?: string | null;
+  source_draft_task_id?: string | null;
+  draft_contract_version?: string | null;
   provider_status: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
@@ -1607,6 +1612,8 @@ export default function TaskDetailPage() {
       ]
     : [
         { label: '模型', value: task.model || 'Seedance 2.0' },
+        ...(task.is_draft ? [{ label: '任务类型', value: '样片 Draft' }] : []),
+        ...(task.source_draft_task_id ? [{ label: '来源 Draft', value: shortId(task.source_draft_task_id, 16) }] : []),
         { label: '模式', value: modeLabel },
         { label: '比例', value: task.ratio || '-' },
         { label: '时长', value: task.duration ? `${task.duration} 秒` : '-' },
@@ -1623,6 +1630,7 @@ export default function TaskDetailPage() {
         { label: '音频', value: task.generate_audio ? '开启' : '关闭' },
         { label: '尾帧', value: task.return_last_frame ? '返回' : '不返回' },
         { label: '水印', value: task.watermark ? '开启' : '关闭' },
+        ...(task.draft_upgrade_mode ? [{ label: 'Draft 流程', value: task.draft_upgrade_mode === 'draft_upgrade' ? '沿用样片生成 1080p' : '样片创建' }] : []),
         ...(resolvedModeLabel ? [{ label: 'Resolved 模式', value: resolvedModeLabel }] : []),
       ];
 

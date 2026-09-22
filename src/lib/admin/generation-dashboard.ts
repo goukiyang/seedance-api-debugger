@@ -100,6 +100,9 @@ export type DashboardRecentTask = {
   generation_mode: string;
   provider_cost_status: string;
   model: string;
+  is_draft: boolean;
+  draft_upgrade_mode: string | null;
+  source_draft_task_id: string | null;
   resolution: DashboardResolutionKey;
   raw_resolution: string | null;
   duration: number | null;
@@ -507,6 +510,9 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       generation_mode: true,
       provider_task_id: true,
       model: true,
+      is_draft: true,
+      draft_upgrade_mode: true,
+      source_draft_task_id: true,
       resolution: true,
       duration: true,
       ratio: true,
@@ -928,6 +934,9 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       generation_mode: task.generation_mode,
       provider_cost_status: task.provider_cost_status,
       model: task.model,
+      is_draft: task.is_draft,
+      draft_upgrade_mode: task.draft_upgrade_mode,
+      source_draft_task_id: task.source_draft_task_id,
       resolution: normalizeDashboardResolution(task.resolution),
       raw_resolution: task.resolution,
       duration: task.duration,

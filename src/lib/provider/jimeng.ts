@@ -18,6 +18,7 @@ import {
   seedanceRatioFollowsFirstFrame,
   type SeedanceVideoModelOption,
 } from './seedance-models';
+import { buildSeedanceDraftContent } from './seedance-draft';
 
 // ============================================================================
 // Environment Configuration
@@ -361,6 +362,9 @@ export async function createVideoTask(
   if (input.watermark !== undefined) {
     payload.watermark = input.watermark;
   }
+  if (input.draft === true) {
+    payload.draft = true;
+  }
   if (input.callback_url) {
     payload.callback_url = input.callback_url;
   }
@@ -428,6 +432,60 @@ export async function createVideoTask(
     console.error('\n❌ Step1 Create failed:', error);
     throw error;
   }
+}
+
+export async function createSeedanceDraftUpgradeTask(input: {
+  model: string;
+  providerDraftTaskId: string;
+  clientRequestId: string;
+}): Promise<ProviderCreateResponse> {
+  if (!isApiKeyConfigured()) {
+    throw new Error('API key not configured');
+  }
+
+  const endpoint = `${SEEDANCE_BASE_URL}/call`;
+  const payload = {
+    apiKey: SEEDANCE_API_KEY,
+    model: input.model,
+    content: buildSeedanceDraftContent(input.providerDraftTaskId),
+    resolution: '1080p',
+    clientRequestId: input.clientRequestId,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('Seedance Draft 升级请求超时');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+  const responseText = await response.text();
+  let data: Record<string, unknown> = {};
+  if (responseText.trim()) {
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw createNonJsonProviderError(response, responseText);
+    }
+  }
+  if (!response.ok) {
+    const message = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+    throw new Error(message || `Seedance Draft 升级失败（HTTP ${response.status}）`);
+  }
+  const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']);
+  if (!providerTaskId) {
+    throw new Error('Seedance Draft 升级响应缺少任务 ID');
+  }
+  return { provider_task_id: providerTaskId, raw: data };
 }
 
 // ============================================================================
@@ -563,6 +621,42 @@ export async function getVideoTaskStatus(
     console.error('\n❌ Step2 Query failed:', error);
     throw error;
   }
+}
+
+export async function getVideoTaskStatusByClientRequestId(
+  clientRequestId: string,
+): Promise<ProviderStatusResponse> {
+  const endpoint = `${SEEDANCE_BASE_URL}/getResult`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientRequestId }),
+  });
+  const responseText = await response.text();
+  let data: Record<string, unknown> = {};
+  if (responseText.trim()) {
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(`Seedance 查询返回非 JSON 响应：${responseText.slice(0, 200)}`);
+    }
+  }
+  if (!response.ok) {
+    throw new Error(`Seedance 按 clientRequestId 查询失败（HTTP ${response.status}）`);
+  }
+  const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']) || clientRequestId;
+  const officialStatus = typeof data.status === 'string' ? data.status : 'unknown';
+  const content = data.content as Record<string, unknown> | undefined;
+  return {
+    provider_task_id: providerTaskId,
+    provider_status: officialStatus,
+    local_status: mapProviderStatus(officialStatus),
+    result_video_url: typeof content?.video_url === 'string' ? content.video_url : undefined,
+    result_last_frame_url: typeof content?.last_frame_url === 'string' ? content.last_frame_url : undefined,
+    error_message: normalizeProviderErrorMessage(data.error ?? data.message) || undefined,
+    client_request_id: pickString(data, ['clientRequestId', 'client_request_id', 'client_requestId']),
+    raw: data,
+  };
 }
 
 // ============================================================================

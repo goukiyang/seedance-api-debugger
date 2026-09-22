@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [ ] 2026-09-20：GPT Image 独立生图页与固定上下文，正文见 `tasks/todo/2026-09-20-gpt-image-studio.md`。
+- [ ] 2026-09-22：Seedance 2.5 Draft 到 1080p 直出，正文见 `tasks/todo/2026-09-22-seedance-draft-1080p.md`。
 
 ## 最近状态
 
@@ -34,9 +34,10 @@
 - `tasks/todo/2026-08-16-reliable-task-thumbnails.md`：任务卡片缩略图可靠显示修复
 - `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`：Seedance 2.5 按 2.0 的 1.5 倍扣费
 - `tasks/todo/2026-08-22-external-access-guard.md`：外部用户权限收口与风险闭环
-- `tasks/todo/2026-08-26-ultimate-canvas-module-refresh.md`：Ultimate Canvas Module Refresh Implementation Plan
 - `tasks/todo/2026-09-15-credit-applications.md`：积分申请与飞书审批
 - `tasks/todo/2026-09-16-reference-picker-selection.md`：参考素材选择入口修复
 - `tasks/todo/2026-09-19-assets-bulk-download.md`：资产管理批量下载无反馈
 - `tasks/todo/2026-09-20-gpt-image-studio.md`：GPT Image 独立生图页与固定上下文
+- `tasks/todo/2026-09-22-canvas-toolflow.md`：画布工具流基础能力
+- `tasks/todo/2026-09-22-seedance-draft-1080p.md`：Seedance 2.5 Draft 到 1080p 直出
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环

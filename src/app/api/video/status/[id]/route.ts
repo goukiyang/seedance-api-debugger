@@ -9,6 +9,7 @@ import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isCodexInternalServiceUser } from '@/lib/integrations/codex';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
+import { getVideoTaskStatusByClientRequestId } from '@/lib/provider/jimeng';
 import {
   taskThumbnailProjection,
   type TaskThumbnailProjectionSource,
@@ -91,6 +92,35 @@ export async function GET(
     }
 
     if (!task.provider_task_id) {
+      if (task.draft_upgrade_mode === 'draft_upgrade' && task.provider_client_request_id) {
+        try {
+          const recovered = await getVideoTaskStatusByClientRequestId(task.provider_client_request_id);
+          if (recovered.provider_task_id && recovered.provider_task_id !== task.provider_client_request_id) {
+            await prisma.videoTask.update({
+              where: { id: task.id },
+              data: {
+                provider_task_id: recovered.provider_task_id,
+                provider_status: recovered.provider_status,
+                raw_status_response: JSON.stringify(recovered.raw),
+                error_message: null,
+              },
+            });
+            const recoveredTask = await prisma.videoTask.findUnique({
+              where: { id: task.id },
+              include: {
+                project: { select: { id: true, name: true, type: true } },
+                video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
+                generation_template: { select: { id: true, name: true, template_key: true, version: true, status: true } },
+                owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+                user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+              },
+            });
+            if (recoveredTask) return NextResponse.json(serializeTaskIdentity(recoveredTask));
+          }
+        } catch {
+          // Provider 查询失败时保留 submitted，下一次轮询继续按 clientRequestId 恢复。
+        }
+      }
       return NextResponse.json(serializeTaskIdentity(task));
     }
 
