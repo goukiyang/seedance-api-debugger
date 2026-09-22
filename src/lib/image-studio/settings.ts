@@ -11,11 +11,15 @@ export type ImageStudioSettings = {
   prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null>;
 };
 
-export const DEFAULT_STUDIO_PRICES = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, null])) as ImageStudioSettings['prices'];
+// Pro keeps an explicit opt-in price because its upstream cost is higher.
+export const DEFAULT_STUDIO_PRICES = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [
+  model,
+  model === 'gemini-3-pro-image-preview' ? null : 20,
+])) as ImageStudioSettings['prices'];
 
 export async function getImageStudioSettings(): Promise<ImageStudioSettings> {
   const row = await prisma.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
-  if (!row) return { context: '', model: IMAGE_STUDIO_MODELS[0], revision: 0, prices: DEFAULT_STUDIO_PRICES };
+  if (!row) return { context: '', model: IMAGE_STUDIO_MODELS[0], revision: 0, prices: { ...DEFAULT_STUDIO_PRICES } };
   const value = JSON.parse(row.value_json) as ImageStudioSettings;
   if (!IMAGE_STUDIO_MODELS.includes(value.model) || typeof value.context !== 'string' || !Number.isInteger(value.revision)) {
     throw new Error('图片生成设置暂时无法读取');

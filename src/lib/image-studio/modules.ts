@@ -18,21 +18,6 @@ export type StudioModuleGenerationConfig = {
   prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null>;
 };
 
-function parseModulePrices(value: string | null | undefined, fallback: ImageStudioSettings['prices']) {
-  if (!value) return { ...fallback };
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    return Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [
-      model,
-      parsed[model] === null ? null : Number.isInteger(parsed[model]) && Number(parsed[model]) >= 0 && Number(parsed[model]) <= 100000
-        ? Number(parsed[model])
-        : fallback[model],
-    ])) as StudioModuleGenerationConfig['prices'];
-  } catch {
-    return { ...fallback };
-  }
-}
-
 export function resolveStudioModuleGenerationConfig(
   row: { model?: string | null; quality?: string | null; prices_json?: string | null } | null | undefined,
   fallback: ImageStudioSettings,
@@ -40,7 +25,9 @@ export function resolveStudioModuleGenerationConfig(
   const model = row?.model && IMAGE_STUDIO_MODELS.includes(row.model as StudioModuleGenerationConfig['model'])
     ? row.model as StudioModuleGenerationConfig['model']
     : fallback.model;
-  return { model, quality: normalizeImageStudioQuality(model, row?.quality), prices: parseModulePrices(row?.prices_json, fallback.prices) };
+  // Prices are global rules. Keep the legacy column readable for old records,
+  // but never let a module override the shared administrator setting.
+  return { model, quality: normalizeImageStudioQuality(model, row?.quality), prices: { ...fallback.prices } };
 }
 
 type StudioModuleRow = {
@@ -95,16 +82,6 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   if (groupName !== undefined && (typeof groupName !== 'string' || groupName.trim().length > 40)) throw new StudioModuleError('模块分组名称最多 40 字');
   const bannerAssetId = body.bannerAssetId === undefined ? undefined : body.bannerAssetId;
   if (bannerAssetId !== undefined && bannerAssetId !== null && (typeof bannerAssetId !== 'string' || bannerAssetId.length > 100)) throw new StudioModuleError('模块 banner 图片无效');
-  let prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null> | undefined;
-  if (body.prices !== undefined) {
-    if (!isAdmin) throw new StudioModuleError('普通用户不能修改模块积分设置', 403);
-    if (!body.prices || typeof body.prices !== 'object' || Array.isArray(body.prices)
-      || IMAGE_STUDIO_MODELS.some(item => (body.prices as Record<string, unknown>)[item] !== null
-        && (!Number.isInteger((body.prices as Record<string, unknown>)[item]) || Number((body.prices as Record<string, unknown>)[item]) < 0 || Number((body.prices as Record<string, unknown>)[item]) > 100000))) {
-      throw new StudioModuleError('模块积分设置无效');
-    }
-    prices = Object.fromEntries(IMAGE_STUDIO_MODELS.map(item => [item, (body.prices as Record<string, unknown>)[item] === null ? null : Number((body.prices as Record<string, unknown>)[item])])) as typeof prices;
-  }
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && reproduceFromTaskId !== null
     && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioModuleError('历史生成记录无效');
@@ -134,7 +111,6 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       ...(quality !== undefined ? { quality: normalizeImageStudioQuality(String(selectedModel), String(quality)) } : {}),
       ...(groupName !== undefined ? { group_name: groupName.trim() || '未分组' } : {}),
       ...(bannerAssetId !== undefined ? { banner_asset_id: bannerAssetId } : {}),
-      ...(prices !== undefined ? { prices_json: JSON.stringify(prices) } : {}),
       ...(reproduceFromTaskId !== undefined ? { reproduce_task_id: reproduceFromTaskId } : {}),
       ...(typeof body.context === 'string' ? { context: body.context } : {}) };
     if (bannerAssetId) {

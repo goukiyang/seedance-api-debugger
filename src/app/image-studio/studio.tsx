@@ -10,7 +10,7 @@ import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
 
-type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean };
+type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean; prices: Record<string, number | null> };
 type StudioSnapshot = { prompt: string; model: string; quality?: string; count: number; aspectRatio: string; outputSize?: string | null; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; width?: number; height?: number } | null };
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; aspectRatio: string; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
@@ -127,7 +127,6 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [quality, setQuality] = useState(module.quality || 'auto');
   const [groupName, setGroupName] = useState(module.groupName || '未分组');
   const [banner, setBanner] = useState<UploadedAssetPayload | null>(module.banner || null);
-  const [modulePrices, setModulePrices] = useState<Record<string, number | null>>(module.prices);
   const [ratioEditing, setRatioEditing] = useState(false);
   const [images, setImages] = useState<UploadedAssetPayload[]>(module.images);
   const [name, setName] = useState(module.name);
@@ -137,7 +136,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
   const [moduleSaveError, setModuleSaveError] = useState('');
-  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: module.quality || 'auto', groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, ...(isAdmin ? { prices: module.prices } : {}) }) : '');
+  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: module.quality || 'auto', groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null }) : '');
   const moduleSaveLock = useRef(false);
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -171,9 +170,12 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const moduleDialog = useRef<HTMLDialogElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const bannerFileInput = useRef<HTMLInputElement>(null);
-  const currentDraft = useRef({ context: draftContext });
-  currentDraft.current = { context: draftContext };
-  const dirty = Boolean(isFirst && isAdmin && settings && draftContext !== (settings.context || ''));
+  const [globalPrices, setGlobalPrices] = useState<Record<string, number | null>>(settings?.prices || module.prices);
+  const currentDraft = useRef({ context: draftContext, prices: globalPrices });
+  currentDraft.current = { context: draftContext, prices: globalPrices };
+  const dirty = Boolean(isFirst && isAdmin && settings && (
+    draftContext !== (settings.context || '') || JSON.stringify(globalPrices) !== JSON.stringify(settings.prices)
+  ));
   const globalDirty = useRef(dirty);
   const settingsRequest = useRef(0);
   globalDirty.current = dirty;
@@ -182,7 +184,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
   const moduleDraft = { name, prompt, context: moduleContext, count, aspectRatio, model: moduleModel, quality, groupName, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null };
-  const moduleSaveSnapshot = { ...moduleDraft, ...(isAdmin ? { prices: modulePrices } : {}) };
+  const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
 
   useEffect(() => { if (globalSettingsOpen) dialog.current?.showModal(); }, [globalSettingsOpen]);
@@ -201,8 +203,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     const contextSnapshot = moduleContext;
     try {
       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: module.id, revision: revisionOverride, ...snapshot, context: contextSnapshot, ...(isAdmin ? { prices: modulePrices } : {}) }) }));
-      setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot, ...(isAdmin ? { prices: modulePrices } : {}) }));
+        body: JSON.stringify({ id: module.id, revision: revisionOverride, ...snapshot, context: contextSnapshot }) }));
+      setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
       setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
       onModuleChange(result);
       return result.revision as number;
@@ -216,7 +218,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     return () => clearTimeout(timer);
     // Save the latest module fields together with its context revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, bannerUploading, moduleDirty, name, prompt, count, aspectRatio, moduleModel, quality, groupName, banner, modulePrices, images, reproduceSourceTaskId, moduleRevision]);
+  }, [moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, bannerUploading, moduleDirty, name, prompt, count, aspectRatio, moduleModel, quality, groupName, banner, images, reproduceSourceTaskId, moduleRevision]);
 
   useEffect(() => {
     try {
@@ -229,7 +231,6 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         if (typeof saved.quality === 'string') setQuality(saved.quality);
         if (typeof saved.groupName === 'string') setGroupName(saved.groupName.slice(0, 40));
         if (saved.banner && typeof saved.banner.id === 'string') setBanner(saved.banner);
-        if (isAdmin && saved.prices && typeof saved.prices === 'object') setModulePrices(saved.prices);
         if (typeof saved.aspectRatio === 'string') { try { setAspectRatio(normalizeStudioRatio(saved.aspectRatio)); } catch {} }
         if (Array.isArray(saved.images)) setImages(saved.images.filter((image: UploadedAssetPayload) => image && typeof image.id === 'string' && typeof image.originalUrl === 'string').slice(0, MAX_REFERENCE_IMAGES));
         if (Object.prototype.hasOwnProperty.call(saved, 'reproduceSourceTaskId')) {
@@ -243,8 +244,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   }, [draftKey, pendingKey, module.saved, module.revision, isAdmin]);
   useEffect(() => {
     if (!draftLoaded) return;
-    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, aspectRatio, images, name, model: moduleModel, quality, groupName, banner, prices: isAdmin ? modulePrices : undefined, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
-  }, [draftLoaded, draftKey, prompt, count, aspectRatio, images, name, moduleModel, quality, groupName, banner, modulePrices, reproduceSourceTaskId, isAdmin, moduleRevision]);
+    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, aspectRatio, images, name, model: moduleModel, quality, groupName, banner, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
+  }, [draftLoaded, draftKey, prompt, count, aspectRatio, images, name, moduleModel, quality, groupName, banner, reproduceSourceTaskId, moduleRevision]);
 
   function closeSettings() {
     if (dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
@@ -267,20 +268,20 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         setSettingsError('读取期间有新的修改，已保留草稿。请保存当前修改或重新读取');
         return;
       }
-      setSettings(value); setDraftContext(value.context || ''); setSaveStatus('');
+      setSettings(value); setDraftContext(value.context || ''); setGlobalPrices(value.prices || module.prices); setSaveStatus('');
     } catch (e) { if (request === settingsRequest.current) setSettingsError(e instanceof Error ? e.message : '读取失败'); }
-  }, [setSettings]);
+  }, [setSettings, module.prices]);
   useEffect(() => {
     if (!isFirst) return;
     if (globalDirty.current) { setSettingsError('通用设置已更新，请先保存当前修改或重新读取'); return; }
     void loadSettings();
-  }, [isFirst, loadSettings, settingsReload]);
+  }, [isFirst, loadSettings, settingsReload, module.prices]);
 
   const saveSettings = useCallback(async () => {
     if (!settings || !isFirst || !isAdmin || saving.current) return;
     ++settingsRequest.current;
     saving.current = true;
-    const snapshot = { context: currentDraft.current.context, revision: settings.revision };
+    const snapshot = { context: currentDraft.current.context, prices: currentDraft.current.prices, revision: settings.revision };
     setSaveStatus('正在保存'); setSettingsError('');
     try {
       const value: SettingsValue = await readResponse(await fetch('/api/image-studio/settings', {
@@ -288,7 +289,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       }));
       setSettings({ ...settings, ...value, contextConfigured: Boolean(value.context?.trim()) });
       setSettingsError('');
-      setSaveStatus(JSON.stringify(currentDraft.current) === JSON.stringify({ context: snapshot.context }) ? '已保存，下次生成生效' : '等待保存');
+      setSaveStatus(JSON.stringify(currentDraft.current) === JSON.stringify({ context: snapshot.context, prices: snapshot.prices }) ? '已保存，下次生成生效' : '等待保存');
     } catch (e) { setSaveStatus('未保存'); setSettingsError(e instanceof Error ? e.message : '保存失败'); }
     finally { saving.current = false; }
   }, [settings, isAdmin, isFirst, setSettings]);
@@ -297,7 +298,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     if (!isFirst || !isAdmin || !dirty || settingsError) return;
     const timer = setTimeout(() => { void saveSettings(); }, 700);
     return () => clearTimeout(timer);
-  }, [dirty, draftContext, isAdmin, isFirst, saveSettings, settingsError]);
+  }, [dirty, draftContext, globalPrices, isAdmin, isFirst, saveSettings, settingsError]);
 
   const loadTasks = useCallback(async (cursor?: string) => {
     if (listLock.current) return;
@@ -429,7 +430,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     } catch (e) { setDeleteError(e instanceof Error ? e.message : '删除未确认，请重试'); }
     finally { deleteLock.current = false; setDeleting(false); }
   }
-  const moduleUnitCredits = modulePrices[moduleModel] ?? null;
+  const moduleUnitCredits = settings?.prices?.[moduleModel] ?? module.prices[moduleModel] ?? null;
   const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
   const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && moduleContext === savedModuleContext);
 
@@ -617,13 +618,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       <select id={`studio-module-group-${module.id}`} value={groupName} onChange={event => setGroupName(event.target.value)}>
         {['未分组', '常用', '角色', '场景', '海报', '其他'].map(group => <option key={group} value={group}>{group}</option>)}
       </select>
-      {isAdmin && models.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
-        <input type="number" min={0} max={100000} step={1} placeholder="未设置" value={modulePrices[model] ?? ''} onChange={event => {
-          const next = event.target.value === '' ? null : Number(event.target.value);
-          setModulePrices(current => ({ ...current, [model]: next }));
-        }} />
-      </label>)}
-      <p className={styles.muted}>{isAdmin ? '模型选择属于当前模块；积分单价仅管理员可修改。' : '这是当前账号自己的模块上下文，只有你能查看和修改。'}上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后自动保存。</p>
+      <p className={styles.muted}>{isAdmin ? '模型和质量属于当前模块；积分规则统一在通用上下文中设置。' : '这是当前账号自己的模块上下文，只有你能查看和修改。'}上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后自动保存。</p>
       <p role="status">{moduleSaving ? '正在保存' : moduleDirty ? '未保存' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>
@@ -634,7 +629,14 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       {settings && <>
         <label className={styles.label} htmlFor="studio-context">通用上下文</label>
         <textarea id="studio-context" rows={12} maxLength={20000} value={draftContext} onChange={event => setDraftContext(event.target.value)} />
-        <p className={styles.muted}>仅适用于所有模块的通用上下文；模型和积分单价已移到各模块设置。存量模块未单独设置时，继续继承历史默认值。</p>
+        <p className={styles.label}>通用模型积分规则</p>
+        {models.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
+          <input type="number" min={0} max={100000} step={1} placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={globalPrices[model] ?? ''} onChange={event => {
+            const next = event.target.value === '' ? null : Number(event.target.value);
+            setGlobalPrices(current => ({ ...current, [model]: next }));
+          }} />
+        </label>)}
+        <p className={styles.muted}>这组积分规则对所有模块生效。默认除 Banana Pro 外均为 20；Banana Pro 需要单独设置。修改后自动保存。</p>
         <p role="status">{saveStatus || '修改后自动保存'}</p>
       </>}
       {settingsError && <div role="alert" className={styles.error}>{settingsError}<button type="button" onClick={() => { if (settings) void saveSettings(); else void loadSettings(); }}><RefreshCw size={16} />重试</button>

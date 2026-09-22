@@ -13,7 +13,7 @@ export async function GET() {
     const settings = await getImageStudioSettings();
     const imageApi = await getImageGenerationApiSettings();
     const providerReady = isStudioImageGenerationProvider(imageApi.provider) && isImageGenerationApiReady(imageApi);
-    return NextResponse.json({ ...(user.role === 'admin' ? {
+    return NextResponse.json({ prices: settings.prices, ...(user.role === 'admin' ? {
       context: settings.context, revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
     } : {
       revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
