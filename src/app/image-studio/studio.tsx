@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -8,12 +8,12 @@ import styles from './studio.module.css';
 import { RatioPicker } from './ratio-picker';
 import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
 
 type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean };
-type StudioSnapshot = { prompt: string; model: string; count: number; aspectRatio: string; outputSize?: string | null; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[] };
-type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; width?: number; height?: number } | null };
-type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; aspectRatio: string; model: string; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
+type StudioSnapshot = { prompt: string; model: string; quality?: string; count: number; aspectRatio: string; outputSize?: string | null; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[] };
+type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; width?: number; height?: number } | null };
+type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; aspectRatio: string; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 const models = IMAGE_STUDIO_MODELS;
 async function readResponse(response: Response) {
@@ -77,25 +77,42 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     } catch (e) { setError(e instanceof Error ? e.message : '新建失败'); }
     finally { createLock.current = false; setCreating(false); }
   }
+  const groupedModules = useMemo(() => modules.reduce<Record<string, StudioModule[]>>((groups, item) => {
+    const group = item.groupName || '未分组';
+    (groups[group] ||= []).push(item);
+    return groups;
+  }, {}), [modules]);
   return <main className={styles.page}>
+    <aside className={styles.moduleRail} aria-label="模板快捷入口">
+      <div className={styles.moduleRailTitle}>模板快捷入口</div>
+      {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
+        <span>{group}</span>
+        {items.map(item => <button type="button" key={item.id} className={active === item.id ? styles.moduleRailActive : ''} onClick={() => {
+          setActive(item.id); document.getElementById(`module-${item.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }}>{item.name || '未命名模块'}</button>)}
+      </div>)}
+    </aside>
+    <div className={styles.content}>
     <header className={styles.header}><h1>图片生成</h1><div className={styles.counts}>
       {isAdmin && <button type="button" disabled={!settings} onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
     {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
     {modules.map((module, index) => <ImageStudioBlock key={module.id} module={module} isAdmin={isAdmin} isFirst={index === 0}
       userId={userId} settings={settings} setSettings={setSettings} active={active === module.id} onActivate={() => setActive(module.id)}
+      onModuleChange={next => setModules(current => current.map(item => item.id === next.id ? next : item))}
       globalSettingsOpen={globalSettingsOpen && index === 0} onCloseGlobal={() => setGlobalSettingsOpen(false)}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       settingsReload={settingsReload} onReloadSettings={() => setSettingsReload(current => current + 1)} />)}
     {loading && <p role="status">正在读取模块…</p>}
     {cursor && <button disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模块</button>}
     {modules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
+    </div>
   </main>;
 }
 
-function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSettings, active, onActivate, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
+function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
   isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; settings: SettingsValue | null;
-  setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void;
+  setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
   globalSettingsOpen: boolean; onCloseGlobal: () => void;
   settingsReload: number; onReloadSettings: () => void;
   ratios: RatioPreferences;
@@ -107,6 +124,9 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [count, setCount] = useState(module.count);
   const [aspectRatio, setAspectRatio] = useState(module.aspectRatio || 'auto');
   const [moduleModel, setModuleModel] = useState(module.model);
+  const [quality, setQuality] = useState(module.quality || 'auto');
+  const [groupName, setGroupName] = useState(module.groupName || '未分组');
+  const [banner, setBanner] = useState<UploadedAssetPayload | null>(module.banner || null);
   const [modulePrices, setModulePrices] = useState<Record<string, number | null>>(module.prices);
   const [ratioEditing, setRatioEditing] = useState(false);
   const [images, setImages] = useState<UploadedAssetPayload[]>(module.images);
@@ -117,11 +137,12 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
   const [moduleSaveError, setModuleSaveError] = useState('');
-  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, aspectRatio: module.aspectRatio || 'auto', model: module.model, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, ...(isAdmin ? { prices: module.prices } : {}) }) : '');
+  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: module.quality || 'auto', groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, ...(isAdmin ? { prices: module.prices } : {}) }) : '');
   const moduleSaveLock = useRef(false);
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [tasks, setTasks] = useState<StudioTask[]>([]);
@@ -149,6 +170,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const dialog = useRef<HTMLDialogElement>(null);
   const moduleDialog = useRef<HTMLDialogElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const bannerFileInput = useRef<HTMLInputElement>(null);
   const currentDraft = useRef({ context: draftContext });
   currentDraft.current = { context: draftContext };
   const dirty = Boolean(isFirst && isAdmin && settings && draftContext !== (settings.context || ''));
@@ -159,7 +181,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
-  const moduleDraft = { name, prompt, context: moduleContext, count, aspectRatio, model: moduleModel, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null };
+  const moduleDraft = { name, prompt, context: moduleContext, count, aspectRatio, model: moduleModel, quality, groupName, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null };
   const moduleSaveSnapshot = { ...moduleDraft, ...(isAdmin ? { prices: modulePrices } : {}) };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
 
@@ -173,7 +195,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   }, []);
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = moduleRevision) {
-    if (moduleSaveLock.current || uploading) return false;
+    if (moduleSaveLock.current || uploading || bannerUploading) return false;
     moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
     const snapshot = { ...moduleDraft, reproduceFromTaskId: reproduceTaskId || null };
     const contextSnapshot = moduleContext;
@@ -182,6 +204,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         body: JSON.stringify({ id: module.id, revision: revisionOverride, ...snapshot, context: contextSnapshot, ...(isAdmin ? { prices: modulePrices } : {}) }) }));
       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot, ...(isAdmin ? { prices: modulePrices } : {}) }));
       setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
+      onModuleChange(result);
       return result.revision as number;
     } catch (e) { const message = e instanceof Error ? e.message : '保存失败'; setError(message); setModuleSaveError(message); return false; }
     finally { moduleSaveLock.current = false; setModuleSaving(false); }
@@ -193,7 +216,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     return () => clearTimeout(timer);
     // Save the latest module fields together with its context revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, moduleDirty, name, prompt, count, aspectRatio, moduleModel, modulePrices, images, reproduceSourceTaskId, moduleRevision]);
+  }, [moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, bannerUploading, moduleDirty, name, prompt, count, aspectRatio, moduleModel, quality, groupName, banner, modulePrices, images, reproduceSourceTaskId, moduleRevision]);
 
   useEffect(() => {
     try {
@@ -203,6 +226,9 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 20000));
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
         if (typeof saved.model === 'string') setModuleModel(saved.model);
+        if (typeof saved.quality === 'string') setQuality(saved.quality);
+        if (typeof saved.groupName === 'string') setGroupName(saved.groupName.slice(0, 40));
+        if (saved.banner && typeof saved.banner.id === 'string') setBanner(saved.banner);
         if (isAdmin && saved.prices && typeof saved.prices === 'object') setModulePrices(saved.prices);
         if (typeof saved.aspectRatio === 'string') { try { setAspectRatio(normalizeStudioRatio(saved.aspectRatio)); } catch {} }
         if (Array.isArray(saved.images)) setImages(saved.images.filter((image: UploadedAssetPayload) => image && typeof image.id === 'string' && typeof image.originalUrl === 'string').slice(0, MAX_REFERENCE_IMAGES));
@@ -217,8 +243,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   }, [draftKey, pendingKey, module.saved, module.revision, isAdmin]);
   useEffect(() => {
     if (!draftLoaded) return;
-    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, aspectRatio, images, name, model: moduleModel, prices: isAdmin ? modulePrices : undefined, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
-  }, [draftLoaded, draftKey, prompt, count, aspectRatio, images, name, moduleModel, modulePrices, reproduceSourceTaskId, isAdmin, moduleRevision]);
+    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, aspectRatio, images, name, model: moduleModel, quality, groupName, banner, prices: isAdmin ? modulePrices : undefined, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
+  }, [draftLoaded, draftKey, prompt, count, aspectRatio, images, name, moduleModel, quality, groupName, banner, modulePrices, reproduceSourceTaskId, isAdmin, moduleRevision]);
 
   function closeSettings() {
     if (dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
@@ -357,6 +383,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     try { setAspectRatio(normalizeStudioRatio(snapshot.aspectRatio || 'auto')); } catch { setAspectRatio('auto'); }
     setImages(snapshot.referenceImages.filter(image => image && typeof image.id === 'string' && typeof image.originalUrl === 'string').slice(0, MAX_REFERENCE_IMAGES));
     if (typeof snapshot.model === 'string' && snapshot.model) setModuleModel(snapshot.model);
+    if (typeof snapshot.quality === 'string') setQuality(normalizeImageStudioQuality(snapshot.model || moduleModel, snapshot.quality));
     setReproduceSourceTaskId(snapshot.sourceAvailable ? task.id : null);
     setSelected([]);
     setError(snapshot.sourceAvailable
@@ -442,6 +469,20 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     finally { uploadLock.current = false; setUploading(false); }
   }, [images.length, submitting, pendingSubmission]);
 
+  async function uploadBanner(file: File) {
+    if (bannerUploading || submitting || pendingSubmission) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) {
+      setError('banner 请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
+    }
+    setBannerUploading(true); setError('');
+    try {
+      const asset = await uploadFileAsAsset(file);
+      if (!asset.id || !asset.originalUrl) throw new Error('banner 上传结果不完整，请重试');
+      setBanner(asset);
+    } catch (e) { setError(e instanceof Error ? e.message : 'banner 上传失败'); }
+    finally { setBannerUploading(false); }
+  }
+
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
       if (!active || document.querySelector('dialog[open]') || preview || event.defaultPrevented) return;
@@ -465,6 +506,14 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>
       </div>
     </header>
+    <div className={styles.moduleBanner} style={banner?.originalUrl ? { backgroundImage: `url("${banner.originalUrl.replaceAll('"', '%22')}")` } : undefined}>
+      {banner?.originalUrl ? <>
+        <span className={styles.bannerLabel}>模块 banner</span>
+        <button type="button" className={styles.bannerReplace} disabled={bannerUploading || submitting} onClick={() => bannerFileInput.current?.click()}>{bannerUploading ? '上传中' : '更换图片'}</button>
+        <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label="移除模块 banner"><X size={16} /></button>
+      </> : <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => bannerFileInput.current?.click()}><ImagePlus size={20} />{bannerUploading ? '上传中' : '点击上传模块 banner'}</button>}
+    </div>
+    <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void uploadBanner(file); event.target.value = ''; }} />
     <div className={styles.workspace}>
       <section className={styles.inputs} aria-label="生成参数">
         {reproduceSourceTaskId && <p role="status" className={styles.muted}>历史复现模式：生成时会沿用所选历史记录的上下文；当前修改不会自动提交或扣积分。<button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button></p>}
@@ -494,9 +543,14 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
         <button type="button" className={styles.generate} disabled={submitting || uploading || moduleSaving || ratioEditing || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <label className={styles.label} htmlFor={`studio-model-${module.id}`}>生成模型</label>
-        <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
+        <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => { const next = event.target.value; setModuleModel(next); setQuality(normalizeImageStudioQuality(next, quality)); }}>
           {models.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
         </select>
+        <label className={styles.label} htmlFor={`studio-quality-${module.id}`}>图片质量</label>
+        <select id={`studio-quality-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={normalizeImageStudioQuality(moduleModel, quality)} onChange={event => setQuality(event.target.value)}>
+          {(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || ['auto']).map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option]}</option>)}
+        </select>
+        {!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.some(option => option !== 'auto') && <p className={styles.muted}>当前模型不支持质量档位，按模型默认质量生成。</p>}
         <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
         {error && <p role="alert" className={styles.error}>{error}</p>}
         {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={() => {
@@ -528,9 +582,11 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
             {task.status === 'queued' ? '等待生成' : task.status === 'running' ? '正在生成' : task.status === 'succeeded' ? '图片已移除' : '未能交付图片'}</div>}</div>
           <p className={styles.prompt} title={task.prompt || '参考图生成'}>{task.prompt || '参考图生成'}</p>
           {task.asset?.width && task.asset.height && <p className={styles.muted}>{task.asset.width} × {task.asset.height}{task.outputSize && `${task.asset.width}x${task.asset.height}` !== task.outputSize ? ` · 模型返回尺寸与请求 ${task.outputSize} 不同` : ''}</p>}
-          <div className={styles.resultActions}><span className={styles.muted}>{new Date(task.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+          <div className={styles.resultActions}><span className={styles.muted}>{new Date(task.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><div className={styles.resultCommands}>
             {task.asset && <button type="button" disabled={downloadBusy} onClick={() => void download([task.id])}><Download size={15} />下载</button>}
             {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} onClick={() => restoreTask(task)}><RefreshCw size={15} />重新生成</button>}
+            <button type="button" className={styles.deleteInline} disabled={deleting || downloadBusy} title="删除生成记录" aria-label="删除生成记录" onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={15} /></button>
+          </div>
           </div>{task.error && <p className={styles.error}>{task.error}</p>}
         </article>)}</div>
         {nextCursor && <button type="button" onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
@@ -550,8 +606,16 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       }}><X size={20} /></button></header>
       <textarea aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => { if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。'); setModuleContext(event.target.value); setModuleSaveError(''); }} />
       <label className={styles.label} htmlFor={`studio-module-model-${module.id}`}>模块模型</label>
-      <select id={`studio-module-model-${module.id}`} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
+      <select id={`studio-module-model-${module.id}`} value={moduleModel} onChange={event => { const next = event.target.value; setModuleModel(next); setQuality(normalizeImageStudioQuality(next, quality)); }}>
         {models.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
+      </select>
+      <label className={styles.label} htmlFor={`studio-module-quality-${module.id}`}>图片质量</label>
+      <select id={`studio-module-quality-${module.id}`} value={normalizeImageStudioQuality(moduleModel, quality)} onChange={event => setQuality(event.target.value)}>
+        {(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || ['auto']).map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option]}</option>)}
+      </select>
+      <label className={styles.label} htmlFor={`studio-module-group-${module.id}`}>模板分组</label>
+      <select id={`studio-module-group-${module.id}`} value={groupName} onChange={event => setGroupName(event.target.value)}>
+        {['未分组', '常用', '角色', '场景', '海报', '其他'].map(group => <option key={group} value={group}>{group}</option>)}
       </select>
       {isAdmin && models.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
         <input type="number" min={0} max={100000} step={1} placeholder="未设置" value={modulePrices[model] ?? ''} onChange={event => {

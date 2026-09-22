@@ -317,6 +317,9 @@ model ImageStudioModule {
   prompt        String   @default("")
   context       String   @default("")
   model         String?
+  quality       String        @default("auto")
+  group_name    String        @default("未分组")
+  banner_asset_id String?
   prices_json   String?
   reproduce_task_id String?
   count         Int      @default(1)
@@ -340,6 +343,7 @@ model ImageStudioTask {
   context        String
   revision       Int
   model          String
+  quality        String         @default("auto")
   provider_cost_usd Float?
   snapshot_json  String?
   aspect_ratio   String   @default("auto")

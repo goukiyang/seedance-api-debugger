@@ -11,13 +11,13 @@ async function main() {
   };
   const params = {
     baseUrl: 'https://example.invalid/v1/', apiKey: 'test-only', model: 'gpt-image-2.5-flare',
-    prompt: 'fixed context\nuser prompt', count: 1, images: [], signal: AbortSignal.timeout(1000),
+    prompt: 'fixed context\nuser prompt', count: 1, images: [], quality: 'high', signal: AbortSignal.timeout(1000),
   };
   const result = await requestStudioImages(params, fetcher);
   assert.equal(result.images.length, 1);
   assert.equal(requests[0].url, 'https://example.invalid/v1/images/generations');
   assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
-    model: params.model, prompt: params.prompt, n: 1, output_format: 'png',
+    model: params.model, prompt: params.prompt, n: 1, output_format: 'png', quality: 'high',
   });
   const geminiRequests: Array<{ url: string; init: RequestInit }> = [];
   const geminiResult = await requestStudioImages({ ...params, model: 'gemini-3.1-flash-image-preview', images: [{ bytes: new Uint8Array([1, 2]), mimeType: 'image/png' }] }, async (url, init) => {

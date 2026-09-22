@@ -5385,6 +5385,10 @@ body.compare-fullscreen-open {
   padding: 0;
 }
 
+.shell-body-image-studio {
+  display: block;
+}
+
 .ultimate-canvas-page {
   min-height: calc(100vh - 121px);
   display: grid;

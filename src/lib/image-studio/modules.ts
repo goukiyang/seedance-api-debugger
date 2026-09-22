@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
+import { normalizeImageStudioQuality } from './model-catalog';
 import { MAX_REFERENCE_IMAGES } from './limits';
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
@@ -13,6 +14,7 @@ export function validStudioModuleId(id: unknown, ownerId: string): id is string 
 
 export type StudioModuleGenerationConfig = {
   model: typeof IMAGE_STUDIO_MODELS[number];
+  quality: import('./model-catalog').ImageStudioQuality;
   prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null>;
 };
 
@@ -32,27 +34,30 @@ function parseModulePrices(value: string | null | undefined, fallback: ImageStud
 }
 
 export function resolveStudioModuleGenerationConfig(
-  row: { model?: string | null; prices_json?: string | null } | null | undefined,
+  row: { model?: string | null; quality?: string | null; prices_json?: string | null } | null | undefined,
   fallback: ImageStudioSettings,
 ): StudioModuleGenerationConfig {
   const model = row?.model && IMAGE_STUDIO_MODELS.includes(row.model as StudioModuleGenerationConfig['model'])
     ? row.model as StudioModuleGenerationConfig['model']
     : fallback.model;
-  return { model, prices: parseModulePrices(row?.prices_json, fallback.prices) };
+  return { model, quality: normalizeImageStudioQuality(model, row?.quality), prices: parseModulePrices(row?.prices_json, fallback.prices) };
 }
 
 type StudioModuleRow = {
-  id: string; name: string; prompt: string; context: string; model?: string | null; prices_json?: string | null; reproduce_task_id?: string | null;
+  id: string; name: string; prompt: string; context: string; model?: string | null; quality?: string | null; group_name?: string | null; banner_asset_id?: string | null; prices_json?: string | null; reproduce_task_id?: string | null;
   count: number; aspect_ratio?: string; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
 };
 
 async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, _isAdmin = false) {
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
-  const assets = await prisma.asset.findMany({ where: { id: { in: ids }, owner_id: ownerId, status: 'active', type: 'image' },
+  const assetIds = [...ids, ...(row.banner_asset_id ? [row.banner_asset_id] : [])];
+  const assets = await prisma.asset.findMany({ where: { id: { in: assetIds }, owner_id: ownerId, status: 'active', type: 'image' },
     select: { id: true, original_url: true, thumbnail_url: true } });
   const generation = resolveStudioModuleGenerationConfig(row, settings);
+  const quality = normalizeImageStudioQuality(generation.model, row.quality);
+  const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
   return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, aspectRatio: row.aspect_ratio || 'auto', revision: row.revision, saved,
-    model: generation.model, prices: generation.prices, unitCredits: generation.prices[generation.model],
+    model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: banner.original_url, thumbnailUrl: banner.thumbnail_url } : null, prices: generation.prices, unitCredits: generation.prices[generation.model],
     reproduceFromTaskId: row.reproduce_task_id || null,
     // The module is already restricted to ownerId. A user's own context is safe
     // to return, while the separate global context remains admin-only.
@@ -84,6 +89,12 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   if (model !== undefined && !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) {
     throw new StudioModuleError('模块模型无效');
   }
+  const quality = body.quality === undefined ? undefined : body.quality;
+  if (quality !== undefined && typeof quality !== 'string') throw new StudioModuleError('图片质量设置无效');
+  const groupName = body.groupName === undefined ? undefined : body.groupName;
+  if (groupName !== undefined && (typeof groupName !== 'string' || groupName.trim().length > 40)) throw new StudioModuleError('模块分组名称最多 40 字');
+  const bannerAssetId = body.bannerAssetId === undefined ? undefined : body.bannerAssetId;
+  if (bannerAssetId !== undefined && bannerAssetId !== null && (typeof bannerAssetId !== 'string' || bannerAssetId.length > 100)) throw new StudioModuleError('模块 banner 图片无效');
   let prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null> | undefined;
   if (body.prices !== undefined) {
     if (!isAdmin) throw new StudioModuleError('普通用户不能修改模块积分设置', 403);
@@ -116,12 +127,20 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId, snapshot_json: { not: null } }, select: { id: true } });
       if (!source) throw new StudioModuleError('历史生成记录不存在或无权复现', 403);
     }
+    const selectedModel = model || current?.model || (await getImageStudioSettings()).model;
     const data = { name: name.trim(), prompt, count: Number(count), reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
       ...(aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
       ...(model !== undefined ? { model: model as string } : {}),
+      ...(quality !== undefined ? { quality: normalizeImageStudioQuality(String(selectedModel), String(quality)) } : {}),
+      ...(groupName !== undefined ? { group_name: groupName.trim() || '未分组' } : {}),
+      ...(bannerAssetId !== undefined ? { banner_asset_id: bannerAssetId } : {}),
       ...(prices !== undefined ? { prices_json: JSON.stringify(prices) } : {}),
       ...(reproduceFromTaskId !== undefined ? { reproduce_task_id: reproduceFromTaskId } : {}),
       ...(typeof body.context === 'string' ? { context: body.context } : {}) };
+    if (bannerAssetId) {
+      const banner = await tx.asset.findFirst({ where: { id: bannerAssetId, owner_id: ownerId, type: 'image', status: 'active' }, select: { id: true } });
+      if (!banner) throw new StudioModuleError('banner 图片不存在或无权使用', 403);
+    }
     if (!current) return tx.imageStudioModule.create({ data: { id, owner_id: ownerId, ...data } });
     const changed = await tx.imageStudioModule.updateMany({ where: { id, owner_id: ownerId, revision: Number(revision) }, data });
     if (!changed.count) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对', 409);

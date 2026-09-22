@@ -65,7 +65,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let context = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     let referenceIds = input.referenceIds;
     const reproduceFromTaskId = input.reproduceFromTaskId || workspace?.reproduce_task_id || undefined;
-    if (reproduceFromTaskId) {
+  if (reproduceFromTaskId) {
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId } });
       if (!source?.snapshot_json) throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       try {
@@ -106,6 +106,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       moduleName: workspace?.name || null,
       prompt: input.prompt,
       model: generation.model,
+      quality: generation.quality,
       prices: generation.prices,
       unitCredits: price,
       count: input.count,
@@ -121,6 +122,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       await tx.imageStudioTask.create({ data: {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, ordinal: i + 1, fingerprint,
         prompt: input.prompt, context, revision: settings.revision, model: generation.model,
+        quality: generation.quality,
         provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(referenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
@@ -181,7 +183,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
   return { tasks: items.map(task => ({ id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
-    prompt: task.prompt, model: task.model, status: task.status, error: task.error, unitCredits: task.unit_credits,
+    prompt: task.prompt, model: task.model, quality: task.quality, status: task.status, error: task.error, unitCredits: task.unit_credits,
     providerCostUsd: task.provider_cost_usd,
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,
     createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
@@ -233,7 +235,7 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
   return { tasks: items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
-function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>) {
+function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>) {
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
   const snapshotReferences = Array.isArray(parsed.referenceImages) ? parsed.referenceImages : [];
@@ -248,6 +250,7 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
   return {
     prompt: typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
     model: typeof parsed.model === 'string' ? parsed.model : task.model,
+    quality: typeof parsed.quality === 'string' ? parsed.quality : task.quality,
     count,
     aspectRatio: typeof parsed.aspectRatio === 'string' ? parsed.aspectRatio : task.aspect_ratio,
     outputSize: typeof parsed.outputSize === 'string' ? parsed.outputSize : task.output_size,
@@ -261,7 +264,7 @@ export async function deleteStudioResult(ownerId: string, id: unknown) {
   if (typeof id !== 'string' || id.length > 100 || !id) throw new StudioError('图片编号无效');
   const task = await prisma.imageStudioTask.findFirst({ where: { id, owner_id: ownerId } });
   if (!task) throw new StudioError('图片不存在或无权删除', 404);
-  if (task.status !== 'succeeded') throw new StudioError('只能删除已生成的图片', 409);
-  // Hide the result, not the shared asset or immutable billing/task history.
-  await prisma.imageStudioTask.updateMany({ where: { id, owner_id: ownerId, status: 'succeeded', deleted_at: null }, data: { deleted_at: new Date() } });
+  if (task.deleted_at) throw new StudioError('这条记录已经删除', 409);
+  // Hide the result or failed record, not the shared asset or immutable billing/task history.
+  await prisma.imageStudioTask.updateMany({ where: { id, owner_id: ownerId, deleted_at: null }, data: { deleted_at: new Date() } });
 }

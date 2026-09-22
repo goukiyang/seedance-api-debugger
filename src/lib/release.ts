@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片 API 支持五个图片模型和两个独立通道；用户模块、任务与资产按账号隔离，管理员可审计。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成支持按模型选择质量、模板分组、banner 和快捷入口；失败记录可删除。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

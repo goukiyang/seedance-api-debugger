@@ -22,6 +22,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
   const topbarOnlyShell = useMemo(() => shouldUseTopbarOnlyShell(pathname), [pathname]);
+  const imageStudioShell = pathname === '/image-studio';
 
   useEffect(() => {
     if (!showShell || hasLoadedUser || loadingUser) return;
@@ -50,8 +51,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         credits={credits}
         onSessionClear={clearSession}
       />
-      <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}`}>
-        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
+      <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}${imageStudioShell ? ' shell-body-image-studio' : ''}`}>
+        {!topbarOnlyShell && !imageStudioShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
         <main className={`shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`}>
           {children}
         </main>

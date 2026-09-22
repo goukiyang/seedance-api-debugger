@@ -20,6 +20,7 @@ export class StudioProviderError extends Error {
 export async function requestStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
   provider?: 'musk' | 'ai_media_vip';
+  quality?: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal;
   size?: string;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
@@ -43,6 +44,7 @@ export async function requestStudioImages(params: {
     form.set('prompt', params.prompt);
     form.set('n', String(params.count));
     form.set('output_format', 'png');
+    if (params.quality && params.quality !== 'auto') form.set('quality', params.quality);
     if (params.size) form.set('size', params.size);
     params.images.forEach((image, index) => {
       form.append('image[]', new Blob([new Uint8Array(image.bytes)], { type: image.mimeType }), `reference-${index + 1}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType === 'image/webp' ? 'webp' : 'png'}`);
@@ -50,7 +52,7 @@ export async function requestStudioImages(params: {
     body = form;
   } else {
     headers['Content-Type'] = 'application/json';
-    body = JSON.stringify({ model: params.model, prompt: params.prompt, n: params.count, output_format: 'png', ...(params.size ? { size: params.size } : {}) });
+    body = JSON.stringify({ model: params.model, prompt: params.prompt, n: params.count, output_format: 'png', ...(params.size ? { size: params.size } : {}), ...(params.quality && params.quality !== 'auto' ? { quality: params.quality } : {}) });
   }
   let response: Response;
   try { response = await fetcher(url, { method: 'POST', headers, body, signal: params.signal }); }

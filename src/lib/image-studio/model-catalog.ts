@@ -7,6 +7,7 @@ export const IMAGE_STUDIO_MODELS = [
 ] as const;
 
 export type ImageStudioModel = typeof IMAGE_STUDIO_MODELS[number];
+export type ImageStudioQuality = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export const IMAGE_STUDIO_MODEL_LABELS: Record<ImageStudioModel, string> = {
   'gemini-3.1-flash-image-preview': 'Banana 2',
@@ -24,3 +25,20 @@ export const IMAGE_STUDIO_MODEL_COST_USD: Record<ImageStudioModel, number | null
   'gpt-image-2.5-flare': 0.064,
   'gpt-image-2.5-sunburst': 0.064,
 };
+
+export const IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: Record<ImageStudioModel, ImageStudioQuality[]> = {
+  'gemini-3.1-flash-image-preview': ['auto'],
+  'gemini-3-pro-image-preview': ['auto'],
+  'gpt-image-2': ['auto', 'low', 'medium', 'high'],
+  'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+  'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+};
+
+export const IMAGE_STUDIO_QUALITY_LABELS: Record<ImageStudioQuality, string> = {
+  auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高',
+};
+
+export function normalizeImageStudioQuality(model: string, value: unknown): ImageStudioQuality {
+  const options = IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as ImageStudioModel] || ['auto'];
+  return options.includes(value as ImageStudioQuality) ? value as ImageStudioQuality : 'auto';
+}
