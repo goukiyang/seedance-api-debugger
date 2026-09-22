@@ -363,3 +363,11 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 数据：为 `ImageStudioModule` 和 `ImageStudioPreset` 增加 `reference_limit` 增量字段，默认10；不执行全库 `db push`，发布时只应用对应迁移。
 - 版本：本轮版本升为 `0.12.1`，release 摘要同步实际用户可见变化。
 - 风险：固定为1张时一次粘贴多张只保留最后一张；上游仍可能有自己的参考图数量限制，产品本地最多10张不等于供应商保证10张。
+
+### T1-T5 发布结果（2026-09-23）
+
+- Git 提交：`30fb1a32b9391a963a34bb0e6acdffd7d6e9c649`，分支 `codex/gpt-image-studio` 已推送；回退点 `rollback/2026-09-23-before-image-studio-template-ux` 指向发布前线上提交 `5b36d3c335330809d165acaf797cf966cda6f6b3`。
+- 发布包：本地与服务器 SHA256 均为 `74d4b34eca659ef0747ef414a69cf3c99a986df0ca72cedcec233a502397b109`；服务器候选构建 `JCLJ-BorhAyX_7rF0NlQ6`，线上 `.deployed-commit` 与目标提交一致。
+- 数据库：迁移前备份保存在 `/srv/video-api-debugger/backups/image-studio-template-ux-30fb1a32b9391a963a34bb0e6acdffd7d6e9c649/dev.db`，备份与迁移后数据库 `pragma quick_check` 均为 `ok`；`reference_limit` 两列和迁移记录已核对。
+- 公网：`https://sd2.youdooart.com/api/release` 返回 `0.12.1`，`/api/config`、`/api/health`、`/login` 正常；匿名访问 `/image-studio` 按预期跳转登录；`sd2-gray.service` 与 `sd2-image-studio.service` 均 active，连续健康检查后 `NRestarts=0`。
+- 浏览器缺口：本轮无法接管用户现有登录态 Chrome，原因是 DevTools endpoint 返回404；因此未把登录后视觉细节标为已验收。源码、构建、运行时、数据库和公网版本证据已通过，登录态页面需在 Chrome 允许调试后补一次真实视觉检查。
