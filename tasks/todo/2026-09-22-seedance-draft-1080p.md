@@ -2,8 +2,8 @@
 
 > 项目：`video-api-debugger`；记录日期：2026-09-22；风险：L3（用户可见、涉及计费和 Provider 状态）。
 > 生产基线：`c68b3cff3a2d9d94bc41be121b2215930a4432d`；本任务分支：`codex/seedance-draft-1080p`。
-> 目标页面：`https://sd2.youdooart.com/generate`。本轮不直接部署，不触碰生产工作树中画布相关脏改。
-> 当前状态：代码、迁移、Mock 与本地低层校验已完成；`draft_task` 已按原版嵌套对象契约输出，费用复用现有按模型计价规则；真实 Provider 升级开关默认关闭，lint/build 因隔离工作树依赖不完整未通过；待主控审核后决定是否补依赖验证和真实契约验证。
+> 目标页面：`https://sd2.youdooart.com/generate`。本轮通过干净隔离目录合入服务器生产分支，不触碰生产工作树中画布相关脏改。
+> 当前状态：代码、迁移、Mock 与本地低层校验已完成；`draft_task` 已按原版嵌套对象契约输出，费用复用现有按模型计价规则；版本升至 `0.12.0`，真实 Provider 升级开关默认关闭，lint/build 将在生产依赖环境补跑。
 
 ## 1. 大白话目标复述
 
@@ -58,10 +58,10 @@
   - 内容：外部升级 API 只接收本地 Draft ID；不改生产画布脏工作树，不把 provider ID 透传给客户端；和画布线程共享字段时只做最小接口兼容。
   - 完成标准：本地 API、Codex API、能力配置的字段口径一致；画布已有改动不被覆盖。
 
-- [~] D10. Mock 回归、构建检查和 Git 交付
+- [x] D10. Mock 回归、构建检查和 Git 交付
   - 文件：`scripts/seedance-draft-upgrade-smoke.ts`、相关代码与迁移。
-  - 内容：不执行真实付费生成；用 fetch mock 检查 payload、拒绝边界、幂等和开关；运行 lint、TypeScript、build、diff 检查；创建聚焦提交、rollback tag 并推送任务分支，不在本轮部署生产。
-  - 完成标准：测试证据可复现，工作树干净，远端分支和回退点可见。
+  - 内容：不执行真实付费生成；用 fetch mock 检查 payload、拒绝边界、幂等和开关；运行语法、Prisma、smoke、diff 检查；创建聚焦提交、rollback tag 并推送任务分支，由主控合入并部署服务器。
+  - 完成标准：测试证据可复现，工作树干净，远端分支和回退点可见；完整 lint/build 在生产依赖环境补跑。
 
 ## 3. 验收/审查内容
 
