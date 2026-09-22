@@ -335,6 +335,7 @@ model ImageStudioModule {
   prices_json   String?
   reproduce_task_id String?
   count         Int      @default(1)
+  reference_limit Int    @default(10)
   aspect_ratio  String   @default("auto")
   reference_ids String   @default("[]")
   revision      Int      @default(0)
@@ -355,6 +356,7 @@ model ImageStudioPreset {
   model         String
   quality       String   @default("auto")
   count         Int      @default(1)
+  reference_limit Int    @default(10)
   aspect_ratio  String   @default("auto")
   banner_asset_id String?
   reference_ids String   @default("[]")

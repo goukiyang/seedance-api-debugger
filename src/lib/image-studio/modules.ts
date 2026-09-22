@@ -32,7 +32,7 @@ export function resolveStudioModuleGenerationConfig(
 
 type StudioModuleRow = {
   id: string; name: string; prompt: string; context: string; model?: string | null; quality?: string | null; group_name?: string | null; banner_asset_id?: string | null; prices_json?: string | null; reproduce_task_id?: string | null;
-  count: number; aspect_ratio?: string; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
+  count: number; reference_limit?: number; aspect_ratio?: string; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
 };
 
 async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, _isAdmin = false) {
@@ -43,7 +43,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   const generation = resolveStudioModuleGenerationConfig(row, settings);
   const quality = normalizeImageStudioQuality(generation.model, row.quality);
   const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
-  return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, aspectRatio: row.aspect_ratio || 'auto', revision: row.revision, saved,
+  return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)), aspectRatio: row.aspect_ratio || 'auto', revision: row.revision, saved,
     model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: banner.original_url, thumbnailUrl: banner.thumbnail_url } : null, prices: generation.prices, unitCredits: generation.prices[generation.model],
     reproduceFromTaskId: row.reproduce_task_id || null,
     // The module is already restricted to ownerId. A user's own context is safe
@@ -61,7 +61,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin)));
   if (!cursor) {
     const first = await prisma.imageStudioModule.findFirst({ where: { id: defaultId, owner_id: ownerId } });
-    modules.unshift(await moduleDTO(first || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(first), isAdmin));
+    modules.unshift(await moduleDTO(first || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: MAX_REFERENCE_IMAGES, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(first), isAdmin));
   }
   return { modules, nextCursor: rows.length > 12 ? visible[visible.length - 1].id : null };
 }
@@ -88,11 +88,14 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   const name = createOnly ? '未命名模块' : body.name;
   const prompt = createOnly ? '' : body.prompt;
   const count = createOnly ? 1 : body.count;
+  const referenceLimitValue = createOnly ? MAX_REFERENCE_IMAGES : body.referenceLimit;
+  const referenceLimit = referenceLimitValue === undefined ? MAX_REFERENCE_IMAGES : Number(referenceLimitValue);
   const ids = createOnly ? [] : body.referenceIds;
   const revision = createOnly ? 0 : body.revision;
   if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof prompt !== 'string' || prompt.length > 20000
-    || !Number.isInteger(count) || Number(count) < 1 || Number(count) > 8 || !Number.isInteger(revision) || Number(revision) < 0
-    || !Array.isArray(ids) || ids.length > MAX_REFERENCE_IMAGES || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
+    || !Number.isInteger(count) || Number(count) < 1 || Number(count) > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES
+    || !Number.isInteger(revision) || Number(revision) < 0
+    || !Array.isArray(ids) || ids.length > referenceLimit || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${referenceLimit} 张）`);
   const row = await prisma.$transaction(async tx => {
     const current = await tx.imageStudioModule.findUnique({ where: { id } });
     if (current && current.owner_id !== ownerId) throw new StudioModuleError('无权修改这个模块', 403);
@@ -110,7 +113,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       : createOnly
         ? defaultImageStudioQuality(String(selectedModel))
         : normalizeImageStudioQuality(String(selectedModel), current?.quality);
-    const data = { name: name.trim(), prompt, count: Number(count), reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
+    const data = { name: name.trim(), prompt, count: Number(count), reference_limit: referenceLimit, reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
       ...(aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
       ...(model !== undefined ? { model: model as string } : {}),
       quality: selectedQuality,

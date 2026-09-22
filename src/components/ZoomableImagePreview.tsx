@@ -159,6 +159,9 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
         onPointerUp={finishDrag}
         onPointerCancel={finishDrag}
         onAuxClick={(event) => event.preventDefault()}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
         onDoubleClick={() => {
           if (scale > 1) resetView();
           else zoomAtCenter(2);
