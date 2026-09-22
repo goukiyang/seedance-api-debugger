@@ -4,6 +4,8 @@
 .moduleRailTitle { margin: 0 6px 14px; color: #a4f2df; font-size: 13px; font-weight: 800; }
 .moduleRailGroup { display: grid; gap: 4px; margin-top: 14px; }
 .moduleRailGroup > span { padding: 0 6px 4px; color: #849098; font-size: 11px; font-weight: 700; }
+.page .moduleRailGroup button { justify-content: space-between; }
+.moduleRailGroup button small { color: #849098; font-size: 11px; }
 .page .moduleRail button { width: 100%; justify-content: flex-start; padding: 7px 8px; border-color: transparent; background: transparent; color: #c6d0d5; font-size: 13px; text-align: left; }
 .page .moduleRail button:hover, .page .moduleRail .moduleRailActive { background: #203d38; border-color: #367d70; color: #b9f7e8; }
 .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
@@ -19,6 +21,8 @@
 .page .moduleName { width: min(300px, 100%); font-size: 18px; font-weight: 600; }
 .module .header { align-items: center; flex-wrap: wrap; }
 .module .counts { align-items: center; }
+.moduleGroupControl { display: inline-flex; align-items: center; gap: 6px; color: #adb6bd; font-size: 13px; }
+.moduleGroupControl select { min-width: 116px; padding: 7px 9px; }
 .moduleBanner { position: relative; min-height: 96px; margin: -8px 0 24px; border: 1px dashed #465057; border-radius: 8px; background-color: #151a1d; background-position: center; background-size: cover; overflow: hidden; }
 .moduleBanner::before { content: ''; position: absolute; inset: 0; background: rgb(8 10 11 / 42%); }
 .bannerLabel { position: absolute; top: 12px; left: 14px; color: #eef0f2; font-size: 12px; font-weight: 700; }

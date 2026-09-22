@@ -16,6 +16,7 @@ type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; aspectRatio: string; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 const models = IMAGE_STUDIO_MODELS;
+const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
 async function readResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
   if (!response.ok) throw new Error(value.error || '请求失败，请重试');
@@ -29,6 +30,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState('');
   const [settings, setSettings] = useState<SettingsValue | null>(null);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [settingsReload, setSettingsReload] = useState(0);
@@ -72,7 +74,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     try {
       const workspace: StudioModule = await readResponse(await fetch('/api/image-studio/modules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: createId.current }) }));
       setModules(current => current.some(item => item.id === workspace.id) ? current : [...current, workspace]);
-      setActive(workspace.id); createId.current = null;
+      setSelectedGroup(workspace.groupName || '未分组'); setActive(workspace.id); createId.current = null;
       requestAnimationFrame(() => document.getElementById(`module-${workspace.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     } catch (e) { setError(e instanceof Error ? e.message : '新建失败'); }
     finally { createLock.current = false; setCreating(false); }
@@ -82,36 +84,62 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     (groups[group] ||= []).push(item);
     return groups;
   }, {}), [modules]);
+  const groups = useMemo(() => Array.from(new Set([...DEFAULT_GROUPS, ...modules.map(item => item.groupName).filter(Boolean)])), [modules]);
+  const visibleModules = useMemo(() => selectedGroup ? modules.filter(item => item.groupName === selectedGroup) : modules, [modules, selectedGroup]);
+  useEffect(() => {
+    if (!groups.length) return;
+    setSelectedGroup(current => current && groups.includes(current) ? current : groups[0]);
+  }, [groups]);
+  async function deleteGroup(group: string) {
+    if (DEFAULT_GROUPS.includes(group)) return;
+    const targets = modules.filter(item => item.groupName === group);
+    if (!targets.length || !window.confirm(`删除分组“${group}”？其中的模块会移到“未分组”，图片和生成结果不会删除。`)) return;
+    try {
+      const replacements: StudioModule[] = [];
+      for (const item of targets) {
+        replacements.push(await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          id: item.id, revision: item.revision, name: item.name, prompt: item.prompt, context: item.context || '', count: item.count,
+          aspectRatio: item.aspectRatio, model: item.model, quality: item.quality, groupName: '未分组', bannerAssetId: item.banner?.id || null,
+          referenceIds: item.images.map(image => image.id), reproduceFromTaskId: item.reproduceFromTaskId || null,
+        }) })));
+      }
+      const replacementById = new Map(replacements.map(item => [item.id, item]));
+      setModules(current => current.map(item => replacementById.get(item.id) || item));
+      setSelectedGroup('未分组');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '删除分组失败，请重试');
+      void loadModules();
+    }
+  }
   return <main className={styles.page}>
-    <aside className={styles.moduleRail} aria-label="模板快捷入口">
-      <div className={styles.moduleRailTitle}>模板快捷入口</div>
+    <aside className={styles.moduleRail} aria-label="分组快捷栏">
+      <div className={styles.moduleRailTitle}>分组快捷栏</div>
       {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
-        <span>{group}</span>
-        {items.map(item => <button type="button" key={item.id} className={active === item.id ? styles.moduleRailActive : ''} onClick={() => {
-          setActive(item.id); document.getElementById(`module-${item.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        }}>{item.name || '未命名模块'}</button>)}
+        <button type="button" className={selectedGroup === group ? styles.moduleRailActive : ''} aria-current={selectedGroup === group ? 'page' : undefined} onClick={() => {
+          setSelectedGroup(group); setActive(items[0]?.id || '');
+        }}><span>{group}</span><small>{items.length}</small></button>
       </div>)}
     </aside>
     <div className={styles.content}>
-    <header className={styles.header}><h1>图片生成</h1><div className={styles.counts}>
+    <header className={styles.header}><div><h1>图片生成</h1><p className={styles.muted}>当前分组：{selectedGroup || '未分组'}</p></div><div className={styles.counts}>
       {isAdmin && <button type="button" disabled={!settings} onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
     {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
-    {modules.map((module, index) => <ImageStudioBlock key={module.id} module={module} isAdmin={isAdmin} isFirst={index === 0}
+    {visibleModules.map((module, index) => <ImageStudioBlock key={module.id} module={module} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} isFirst={index === 0}
       userId={userId} settings={settings} setSettings={setSettings} active={active === module.id} onActivate={() => setActive(module.id)}
-      onModuleChange={next => setModules(current => current.map(item => item.id === next.id ? next : item))}
+      onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? next : item)); setSelectedGroup(next.groupName || '未分组'); }}
       globalSettingsOpen={globalSettingsOpen && index === 0} onCloseGlobal={() => setGlobalSettingsOpen(false)}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       settingsReload={settingsReload} onReloadSettings={() => setSettingsReload(current => current + 1)} />)}
     {loading && <p role="status">正在读取模块…</p>}
     {cursor && <button disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模块</button>}
-    {modules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
+    {visibleModules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
     </div>
   </main>;
 }
 
-function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
-  isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; settings: SettingsValue | null;
+function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGroup, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
+  isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; settings: SettingsValue | null;
   setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
   globalSettingsOpen: boolean; onCloseGlobal: () => void;
   settingsReload: number; onReloadSettings: () => void;
@@ -251,6 +279,12 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     if (dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
     dialog.current?.close();
     onCloseGlobal();
+  }
+
+  function changeGroup(value: string) {
+    if (value !== '__other__') { setGroupName(value); return; }
+    const next = window.prompt('输入新分组名称（最多 40 字）', '未命名分组')?.trim().slice(0, 40);
+    if (next) setGroupName(next);
   }
 
   const loadSettings = useCallback(async () => {
@@ -502,7 +536,15 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
     <header className={styles.header}>
       <input className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} />
-      <div className={styles.counts}><span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleDirty ? '未保存' : '已保存'}</span>
+      <div className={styles.counts}>
+        <label className={styles.moduleGroupControl}>分组
+          <select aria-label="模块分组" value={groupName} onChange={event => changeGroup(event.target.value)}>
+            {groups.map(group => <option key={group} value={group}>{group}</option>)}
+            <option value="__other__">其他…</option>
+          </select>
+        </label>
+        {!DEFAULT_GROUPS.includes(groupName) && <button type="button" title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
+        <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleDirty ? '未保存' : '已保存'}</span>
         <button type="button" disabled={moduleSaving || uploading || submitting || !moduleDirty} onClick={() => void saveModule()}><Save size={17} />保存模块</button>
         <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>
       </div>
@@ -613,10 +655,6 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       <label className={styles.label} htmlFor={`studio-module-quality-${module.id}`}>图片质量</label>
       <select id={`studio-module-quality-${module.id}`} value={normalizeImageStudioQuality(moduleModel, quality)} onChange={event => setQuality(event.target.value)}>
         {(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || ['auto']).map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option]}</option>)}
-      </select>
-      <label className={styles.label} htmlFor={`studio-module-group-${module.id}`}>模板分组</label>
-      <select id={`studio-module-group-${module.id}`} value={groupName} onChange={event => setGroupName(event.target.value)}>
-        {['未分组', '常用', '角色', '场景', '海报', '其他'].map(group => <option key={group} value={group}>{group}</option>)}
       </select>
       <p className={styles.muted}>{isAdmin ? '模型和质量属于当前模块；积分规则统一在通用上下文中设置。' : '这是当前账号自己的模块上下文，只有你能查看和修改。'}上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后自动保存。</p>
       <p role="status">{moduleSaving ? '正在保存' : moduleDirty ? '未保存' : '已保存'}</p>
