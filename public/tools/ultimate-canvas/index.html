@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20260826-canvas-module-refresh">
+    <link rel="stylesheet" href="styles.css?v=20260923-toolflow-ux">
     <link rel="icon" href="data:,">
     <style>
         html[data-auth-check="pending"] body { visibility: hidden; }
@@ -119,27 +119,63 @@
         </div>
 
         <div id="toolflow-panel" class="side-panel toolflow-panel">
-            <div class="panel-header"><span>工具流</span><button class="panel-close" data-close-panel>✕</button></div>
+            <div class="panel-header toolflow-header">
+                <div>
+                    <strong>图片工作流</strong>
+                    <small>选素材、选模板，按步骤生成</small>
+                </div>
+                <div class="toolflow-header-actions">
+                    <button type="button" class="toolflow-mode-toggle" data-toolflow-mode title="切换到高级画布">高级画布</button>
+                    <button class="panel-close" data-close-panel aria-label="关闭">✕</button>
+                </div>
+            </div>
             <div class="toolflow-panel-body">
-                <div class="toolflow-intro">把输入、图片模板、筛选和确认连成一条可重复执行的流程。</div>
-                <div class="toolflow-actions">
-                    <button type="button" class="context-command" data-toolflow-new>新建</button>
-                    <button type="button" class="context-command primary" data-toolflow-save>保存</button>
-                    <button type="button" class="context-command primary" data-toolflow-run>运行</button>
-                </div>
-                <label class="toolflow-field"><span>当前工具流</span><select data-toolflow-select><option value="">未选择</option></select></label>
-                <label class="toolflow-field"><span>共享范围</span><select data-toolflow-visibility><option value="private">仅自己</option><option value="shared">项目成员</option><option value="public">公开</option></select></label>
-                <label class="toolflow-field"><span>输入图片资产 ID（逗号分隔）</span><input data-toolflow-input-assets placeholder="请填已有图片资产 ID"></label>
-                <div class="toolflow-node-settings" data-toolflow-node-settings><span>选中图片模板节点后可选择授权模板。</span></div>
-                <div class="toolflow-run-state" data-toolflow-state>尚未运行</div>
-                <div class="toolflow-approval" data-toolflow-approval hidden>
-                    <strong data-toolflow-approval-title>需要确认</strong>
-                    <div data-toolflow-approval-detail>流程已暂停，请确认后继续。</div>
-                    <div class="toolflow-actions"><button type="button" class="context-command primary" data-toolflow-approve>继续</button><button type="button" class="context-command danger" data-toolflow-cancel>取消</button></div>
-                </div>
-                <div class="toolflow-run-actions"><button type="button" class="context-command" data-toolflow-pause>暂停</button><button type="button" class="context-command" data-toolflow-resume>继续运行</button></div>
-                <div class="toolflow-node-results" data-toolflow-node-results></div>
-                <div class="toolflow-list" data-toolflow-list><div class="empty-state"><strong>正在读取工具流</strong><span>保存后会出现在这里。</span></div></div>
+                <section class="toolflow-guided" data-toolflow-guided>
+                    <label class="toolflow-name-field">
+                        <span>流程名称</span>
+                        <input data-toolflow-name placeholder="例如：角色三视图批量生成">
+                    </label>
+                    <div class="toolflow-step-list" data-toolflow-steps></div>
+                    <button type="button" class="guided-add-step" data-toolflow-add-template>
+                        <span>＋</span>添加生图模板
+                    </button>
+                    <div class="guided-optional-steps">
+                        <span>可选步骤</span>
+                        <button type="button" data-toolflow-add-step="select">筛选结果</button>
+                        <button type="button" data-toolflow-add-step="confirm">人工确认</button>
+                    </div>
+                    <div class="toolflow-guided-actions">
+                        <button type="button" class="context-command" data-toolflow-new>新建</button>
+                        <button type="button" class="context-command" data-toolflow-save>保存</button>
+                        <button type="button" class="context-command primary" data-toolflow-run>开始生成</button>
+                    </div>
+                    <div class="toolflow-run-state guided-state" data-toolflow-state>准备开始</div>
+                </section>
+
+                <section class="toolflow-advanced" data-toolflow-advanced hidden>
+                    <div class="toolflow-advanced-heading">
+                        <div><strong>高级画布</strong><span>适合并行分支和复杂编排</span></div>
+                        <button type="button" class="context-command" data-toolflow-mode>返回步骤模式</button>
+                    </div>
+                    <div class="toolflow-actions">
+                        <button type="button" class="context-command" data-toolflow-new>新建</button>
+                        <button type="button" class="context-command primary" data-toolflow-save>保存</button>
+                        <button type="button" class="context-command primary" data-toolflow-run>运行</button>
+                    </div>
+                    <label class="toolflow-field"><span>当前工作流</span><select data-toolflow-select><option value="">未选择</option></select></label>
+                    <label class="toolflow-field"><span>共享范围</span><select data-toolflow-visibility><option value="private">仅自己</option><option value="shared">项目成员</option><option value="public">公开</option></select></label>
+                    <label class="toolflow-field"><span>输入素材 ID（高级模式）</span><input data-toolflow-input-assets placeholder="多个 ID 用逗号分隔"></label>
+                    <div class="toolflow-node-settings" data-toolflow-node-settings><span>选中图片模板节点后可选择模板。</span></div>
+                    <div class="toolflow-run-state" data-toolflow-state>尚未运行</div>
+                    <div class="toolflow-approval" data-toolflow-approval hidden>
+                        <strong data-toolflow-approval-title>需要确认</strong>
+                        <div data-toolflow-approval-detail>流程已暂停，请确认后继续。</div>
+                        <div class="toolflow-actions"><button type="button" class="context-command primary" data-toolflow-approve>继续</button><button type="button" class="context-command danger" data-toolflow-cancel>取消</button></div>
+                    </div>
+                    <div class="toolflow-run-actions"><button type="button" class="context-command" data-toolflow-pause>暂停</button><button type="button" class="context-command" data-toolflow-resume>继续运行</button></div>
+                    <div class="toolflow-node-results" data-toolflow-node-results></div>
+                    <div class="toolflow-list" data-toolflow-list><div class="empty-state"><strong>正在读取工作流</strong><span>保存后会出现在这里。</span></div></div>
+                </section>
             </div>
         </div>
 
@@ -348,7 +384,7 @@
     <script src="generation-task-coordinator.js?v=20260813-video-delivery"></script>
     <script src="canvas-save-coordinator.js?v=20260712-final-hardening"></script>
     <script src="app.js?v=20260826-canvas-module-refresh"></script>
-    <script src="toolflow-workflow.js?v=20260922-toolflow-v2"></script>
+    <script src="toolflow-workflow.js?v=20260923-toolflow-ux"></script>
     <script type="module" src="director-3d.js"></script>
 </body>
 </html>
