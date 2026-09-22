@@ -236,6 +236,8 @@ model User {
   owned_projects          Project[]            @relation("ProjectOwner")
   created_projects        Project[]            @relation("ProjectCreator")
   canvas_documents        CanvasDocument[]     @relation("CanvasDocumentOwner")
+  tool_flows              ToolFlow[]           @relation("ToolFlowOwner")
+  tool_flow_runs          ToolFlowRun[]        @relation("ToolFlowRunOwner")
   project_memberships     ProjectMember[]      @relation("ProjectMemberUser")
   joined_project_members  ProjectMember[]      @relation("ProjectMemberJoinedBy")
   created_project_invites ProjectInvite[]      @relation("ProjectInviteCreatedBy")
@@ -377,6 +379,10 @@ model ImageStudioTask {
   lease_token    String?
   lease_until    DateTime?
   asset_id       String?
+  tool_flow_run_id String?
+  tool_flow_node_id String?
+  tool_flow_version Int?
+  tool_flow_item_index Int?
   error          String?
   usage_json     String?
   created_at     DateTime @default(now())
@@ -387,6 +393,7 @@ model ImageStudioTask {
   @@index([status, created_at])
   @@index([batch_id, owner_id])
   @@index([owner_id, module_id, created_at])
+  @@index([tool_flow_run_id, tool_flow_node_id, status])
 }
 
 model PlatformSetting {
@@ -602,6 +609,7 @@ model Project {
   feishu_requirements   FeishuRequirement[]
   review_cards          ReviewCard[]
   notifications         Notification[]
+  tool_flows            ToolFlow[]
 
   @@index([workspace_id])
   @@index([owner_user_id])
@@ -702,6 +710,74 @@ model CanvasDocument {
   @@index([project_id])
   @@index([status])
   @@index([updated_at])
+}
+
+model ToolFlow {
+  id          String   @id @default(cuid())
+  owner_id    String
+  project_id  String?
+  name        String
+  visibility  String   @default("private")
+  status      String   @default("draft")
+  version     Int      @default(1)
+  graph_json  String
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  owner User @relation("ToolFlowOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  runs ToolFlowRun[]
+
+  @@index([owner_id, updated_at])
+  @@index([project_id, status])
+  @@index([visibility, status])
+}
+
+model ToolFlowRun {
+  id               String   @id @default(cuid())
+  flow_id          String
+  owner_id         String
+  flow_version     Int
+  status           String   @default("queued")
+  current_node_id  String?
+  snapshot_json    String
+  estimated_credits Float?
+  frozen_credits   Float?
+  actual_credits   Float?
+  error            String?
+  created_at       DateTime @default(now())
+  started_at       DateTime?
+  finished_at      DateTime?
+  updated_at       DateTime @updatedAt
+
+  flow ToolFlow @relation(fields: [flow_id], references: [id], onDelete: Cascade)
+  owner User @relation("ToolFlowRunOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  node_runs ToolFlowNodeRun[]
+
+  @@index([owner_id, created_at])
+  @@index([flow_id, flow_version])
+  @@index([status, updated_at])
+}
+
+model ToolFlowNodeRun {
+  id                 String   @id @default(cuid())
+  run_id             String
+  node_id            String
+  status             String   @default("pending")
+  input_asset_ids    String   @default("[]")
+  output_asset_ids   String   @default("[]")
+  selected_asset_ids String   @default("[]")
+  result_json        String?
+  error              String?
+  started_at         DateTime?
+  finished_at        DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  run ToolFlowRun @relation(fields: [run_id], references: [id], onDelete: Cascade)
+
+  @@unique([run_id, node_id])
+  @@index([run_id, status])
 }
 
 model ProjectMember {
@@ -1309,6 +1385,9 @@ model Asset {
 
   // 去重
   hash String?
+
+  // 生成流程归档标记；只存结构化引用，不存图片二进制。
+  metadata_json String?
 
   status String @default("active") // active | hidden | deleted
 

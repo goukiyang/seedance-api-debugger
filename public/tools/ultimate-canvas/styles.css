@@ -4408,3 +4408,32 @@ body.director-studio-open {
 }
 
 .hidden { display: none !important; }
+.toolflow-panel { width: 350px; }
+.toolflow-panel-body { padding: 14px; overflow: auto; }
+.toolflow-intro { color: var(--text-secondary); font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
+.toolflow-actions, .toolflow-run-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.toolflow-field { display: grid; gap: 6px; color: var(--text-secondary); font-size: 11px; margin: 12px 0; }
+.toolflow-field input, .toolflow-field select { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); border-radius: 6px; padding: 8px; }
+.toolflow-node-settings, .toolflow-run-state { border: 1px solid var(--border-color); border-radius: 6px; padding: 9px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.toolflow-node-settings select { width: 100%; margin-top: 8px; padding: 7px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; }
+.toolflow-run-state[data-tone="success"] { color: #72e2bf; border-color: rgba(114,226,191,.45); }
+.toolflow-run-state[data-tone="error"] { color: #ff9b9b; border-color: rgba(255,100,100,.45); }
+.toolflow-run-state[data-tone="waiting"] { color: #ffd789; border-color: rgba(255,215,137,.45); }
+.toolflow-node-results { display: grid; gap: 6px; margin-top: 8px; }
+.toolflow-node-result { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 11px; }
+.toolflow-list { display: grid; gap: 7px; margin-top: 12px; }
+.toolflow-list-item { display: grid; gap: 4px; text-align: left; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); border-radius: 6px; padding: 9px; cursor: pointer; }
+.toolflow-list-item span { color: var(--text-secondary); font-size: 11px; }
+.toolflow-list-item.is-active { border-color: #67d8bb; background: rgba(103,216,187,.12); }
+.toolflow-approval { border: 1px solid rgba(255,215,137,.55); border-radius: 6px; padding: 10px; margin-top: 12px; display: grid; gap: 8px; color: var(--text-primary); font-size: 12px; }
+.toolflow-approval[hidden] { display: none; }
+.toolflow-selection-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+.toolflow-selection-list label { display: grid; grid-template-columns: auto 1fr; gap: 5px; align-items: center; }
+.toolflow-selection-list code { grid-column: 2; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
+.flow-menu-mark, .flow-icon { display: inline-flex; min-width: 24px; justify-content: center; color: #72e2bf; font-size: 10px; font-weight: 700; }
+.toolflow-node .node-card { border-color: rgba(103,216,187,.65); }
+.toolflow-node .image-placeholder, .toolflow-node-summary { min-height: 80px; display: grid; place-items: center; align-content: center; gap: 5px; color: #72e2bf; text-align: center; }
+.toolflow-node-summary strong { color: var(--text-primary); font-size: 12px; }
+.toolflow-node-summary small, .toolflow-node-properties small { color: var(--text-secondary); font-size: 10px; }
+.toolflow-node-properties { display: grid; gap: 7px; padding: 8px; }
+.toolflow-node-prompt { min-height: 54px; resize: vertical; width: 100%; box-sizing: border-box; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 7px; font: inherit; font-size: 11px; }

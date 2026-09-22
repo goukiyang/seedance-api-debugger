@@ -103,6 +103,7 @@ class CanvasEngine {
         this.onNodeDeselected = null;
         this.onConnectionCreated = null;
         this.onConnectionDeleted = null;
+        this.onConnectionRejected = null;
         this.onNodeDeleted = null;
         this.onViewportChanged = null;
 
@@ -760,11 +761,21 @@ class CanvasEngine {
                     </div>
                 </div>`;
             }
+            case 'flow-input': return `<div class="toolflow-node-summary"><span class="flow-icon">IN</span><strong>输入图片</strong><small>接收运行时输入资产</small></div>`;
+            case 'flow-template': return `<div class="toolflow-node-summary"><span class="flow-icon">T</span><strong>图片模板</strong><small data-toolflow-node-template>请在工具流面板选择模板</small></div>`;
+            case 'flow-select': return `<div class="toolflow-node-summary"><span class="flow-icon">✓</span><strong>结果筛选</strong><small>可单选或多选继续结果</small></div>`;
+            case 'flow-confirm': return `<div class="toolflow-node-summary"><span class="flow-icon">?</span><strong>人工确认</strong><small>确认后才会继续下游节点</small></div>`;
+            case 'flow-output': return `<div class="toolflow-node-summary"><span class="flow-icon">OUT</span><strong>流程输出</strong><small>结果已归档到资产库</small></div>`;
             default: return `<div class="image-placeholder"><span>${this._label(type, id)}</span></div>`;
         }
     }
 
     _propsPanel(type, id) {
+        if (type === 'flow-input') return `<div class="toolflow-node-properties"><small>运行时从工具流面板提供输入图片资产。</small></div>`;
+        if (type === 'flow-template') return `<div class="toolflow-node-properties"><textarea class="toolflow-node-prompt" data-toolflow-node-prompt="${id}" placeholder="可选：覆盖模板提示词"></textarea><small>模板权限由服务器校验，不能在画布中写入图片二进制。</small></div>`;
+        if (type === 'flow-select') return `<div class="toolflow-node-properties"><small>运行时暂停并等待你选择一个或多个结果。</small></div>`;
+        if (type === 'flow-confirm') return `<div class="toolflow-node-properties"><small>运行时暂停，点击确认后继续。</small></div>`;
+        if (type === 'flow-output') return `<div class="toolflow-node-properties"><small>成功图片会进入资产库，并带流程、版本和节点标记。</small></div>`;
         if (type === 'text') return `
             <div class="node-input-bar">
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
@@ -998,7 +1009,32 @@ class CanvasEngine {
         };
     }
     _createConnection(fromId, toId) {
-        if (this.connections.find(c => c.from === fromId && c.to === toId)) return;
+        const source = this.nodes.get(fromId);
+        const target = this.nodes.get(toId);
+        if (!source || !target || this.connections.find(c => c.from === fromId && c.to === toId)) return false;
+        const sourceIsFlow = source.type.startsWith('flow-');
+        const targetIsFlow = target.type.startsWith('flow-');
+        if (sourceIsFlow || targetIsFlow) {
+            const allowed = sourceIsFlow && targetIsFlow
+                && source.type !== 'flow-output'
+                && target.type !== 'flow-input';
+            const createsCycle = (() => {
+                const seen = new Set([toId]);
+                const stack = [toId];
+                while (stack.length) {
+                    const current = stack.pop();
+                    if (current === fromId) return true;
+                    this.connections.filter(item => item.from === current).forEach(item => {
+                        if (!seen.has(item.to)) { seen.add(item.to); stack.push(item.to); }
+                    });
+                }
+                return false;
+            })();
+            if (!allowed || createsCycle) {
+                this.onConnectionRejected?.(fromId, toId, !allowed ? '工具流节点类型不兼容' : '工具流不能形成循环');
+                return false;
+            }
+        }
         const lineId = `conn-${fromId}-${toId}`;
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         line.id = lineId;
@@ -1012,6 +1048,7 @@ class CanvasEngine {
         requestAnimationFrame(() => this._updateConnections());
         setTimeout(() => this._updateConnections(), 350);
         this.onConnectionCreated?.(fromId, toId);
+        return true;
     }
     _connectionPair(startConnector, endConnector) {
         const startId = startConnector?.closest('.canvas-node')?.dataset.nodeId;

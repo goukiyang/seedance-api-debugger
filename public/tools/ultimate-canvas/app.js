@@ -80,6 +80,15 @@
         pendingGenerationSubmissions: window.UltimateCanvasGenerationInteractions.createGenerationSubmissionTracker()
     };
 
+    window.UltimateCanvasRuntime = {
+        get selectedProjectId() { return canvasRuntime.selectedProjectId; },
+        get selectedVideoCardId() { return canvasRuntime.selectedVideoCardId; },
+        get selectedVideoBranchId() { return canvasRuntime.selectedVideoBranchId; },
+        get documentId() { return canvasRuntime.documentId; },
+        get bootstrap() { return canvasRuntime.bootstrap; },
+        markChanged(reason = 'toolflow_change') { scheduleCanvasSave(reason); },
+    };
+
     function backendEndpoint(candidate, fallback, policy = 'canvas') {
         return window.UltimateCanvasBackendContract.resolveApiEndpoint(
             candidate,
@@ -1858,6 +1867,7 @@
     }
 
     installAutosaveHooks();
+    engine.onConnectionRejected = (_fromId, _toId, reason) => showCanvasNotice(reason || '这条连线不兼容。', 'warn');
     loadCanvasBootstrap();
 
     document.addEventListener('input', event => {

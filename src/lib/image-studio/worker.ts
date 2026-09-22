@@ -4,6 +4,7 @@ import { uploadAsset } from '@/lib/assets/storage';
 import { claimStudioTask, finishStudioTask } from './tasks';
 import { requestStudioImages, StudioProviderError } from './provider';
 import { normalizeStudioImage, readStudioImage } from './media';
+import { completeToolFlowTask } from '@/lib/tools/toolflow-runtime';
 
 export async function processStudioTask(generate: typeof requestStudioImages = requestStudioImages) {
   const task = await claimStudioTask();
@@ -35,6 +36,7 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
     const asset = await uploadAsset(bytes, `image-${task.id}.png`, 'image/png', task.owner_id);
     stage = 'settle';
     await finishStudioTask(task, 'succeeded', { assetId: asset.assetId, usage: result.usage });
+    await completeToolFlowTask(task.id);
   } catch (error) {
     const detail = error instanceof StudioProviderError ? error : null;
     console.error('[image-studio]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage,
@@ -45,11 +47,15 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
         ? '图片服务已返回结果，但图片保存失败，冻结积分已释放。请联系管理员；重新生成会再次请求上游。'
         : '本次未能交付图片，冻结积分已释放。上游结果未确认，重试会新建生成任务。'
       : '参考图或图片服务暂不可用，冻结积分已释放。' });
+    await completeToolFlowTask(task.id);
   }
   return true;
 }
 
 export async function recoverStudioTasks() {
   const expired = await prisma.imageStudioTask.findMany({ where: { status: 'running', lease_until: { lt: new Date() } }, take: 20 });
-  for (const task of expired) await finishStudioTask(task, 'uncertain', { error: '生成连接中断，结果未确认，冻结积分已释放；不会自动重复生成。' });
+  for (const task of expired) {
+    await finishStudioTask(task, 'uncertain', { error: '生成连接中断，结果未确认，冻结积分已释放；不会自动重复生成。' });
+    await completeToolFlowTask(task.id);
+  }
 }

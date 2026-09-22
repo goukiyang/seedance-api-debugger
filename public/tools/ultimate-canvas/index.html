@@ -75,6 +75,12 @@
                     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
             </button>
+            <button class="toolbar-btn" id="tool-toolflow" data-tooltip="工具流" data-panel="toolflow-panel">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/>
+                    <path d="M7 6h10M6.5 7.5l4 8M17.5 7.5l-4 8"/>
+                </svg>
+            </button>
             <button class="toolbar-btn" id="tool-toolbox" data-tooltip="打开工具箱" data-panel="toolbox-panel">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.73 12.73l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
@@ -110,6 +116,31 @@
                 <button class="panel-close" data-close-panel>✕</button>
             </div>
             <div class="toolbox-grid" id="toolbox-grid"></div>
+        </div>
+
+        <div id="toolflow-panel" class="side-panel toolflow-panel">
+            <div class="panel-header"><span>工具流</span><button class="panel-close" data-close-panel>✕</button></div>
+            <div class="toolflow-panel-body">
+                <div class="toolflow-intro">把输入、图片模板、筛选和确认连成一条可重复执行的流程。</div>
+                <div class="toolflow-actions">
+                    <button type="button" class="context-command" data-toolflow-new>新建</button>
+                    <button type="button" class="context-command primary" data-toolflow-save>保存</button>
+                    <button type="button" class="context-command primary" data-toolflow-run>运行</button>
+                </div>
+                <label class="toolflow-field"><span>当前工具流</span><select data-toolflow-select><option value="">未选择</option></select></label>
+                <label class="toolflow-field"><span>共享范围</span><select data-toolflow-visibility><option value="private">仅自己</option><option value="shared">项目成员</option><option value="public">公开</option></select></label>
+                <label class="toolflow-field"><span>输入图片资产 ID（逗号分隔）</span><input data-toolflow-input-assets placeholder="请填已有图片资产 ID"></label>
+                <div class="toolflow-node-settings" data-toolflow-node-settings><span>选中图片模板节点后可选择授权模板。</span></div>
+                <div class="toolflow-run-state" data-toolflow-state>尚未运行</div>
+                <div class="toolflow-approval" data-toolflow-approval hidden>
+                    <strong data-toolflow-approval-title>需要确认</strong>
+                    <div data-toolflow-approval-detail>流程已暂停，请确认后继续。</div>
+                    <div class="toolflow-actions"><button type="button" class="context-command primary" data-toolflow-approve>继续</button><button type="button" class="context-command danger" data-toolflow-cancel>取消</button></div>
+                </div>
+                <div class="toolflow-run-actions"><button type="button" class="context-command" data-toolflow-pause>暂停</button><button type="button" class="context-command" data-toolflow-resume>继续运行</button></div>
+                <div class="toolflow-node-results" data-toolflow-node-results></div>
+                <div class="toolflow-list" data-toolflow-list><div class="empty-state"><strong>正在读取工具流</strong><span>保存后会出现在这里。</span></div></div>
+            </div>
         </div>
 
         <div id="assets-panel" class="side-panel">
@@ -256,6 +287,13 @@
                 <span class="badge beta">Beta</span>
             </div>
             <div class="menu-divider"></div>
+            <div class="menu-section-title">工具流节点</div>
+            <div class="menu-item" data-node-type="flow-input"><span class="flow-menu-mark">IN</span><span>输入</span></div>
+            <div class="menu-item" data-node-type="flow-template"><span class="flow-menu-mark">T</span><span>图片模板</span></div>
+            <div class="menu-item" data-node-type="flow-select"><span class="flow-menu-mark">✓</span><span>结果筛选</span></div>
+            <div class="menu-item" data-node-type="flow-confirm"><span class="flow-menu-mark">?</span><span>人工确认</span></div>
+            <div class="menu-item" data-node-type="flow-output"><span class="flow-menu-mark">OUT</span><span>输出</span></div>
+            <div class="menu-divider"></div>
             <div class="menu-section-title">添加资源</div>
             <div class="menu-item" data-action="upload">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -310,6 +348,7 @@
     <script src="generation-task-coordinator.js?v=20260813-video-delivery"></script>
     <script src="canvas-save-coordinator.js?v=20260712-final-hardening"></script>
     <script src="app.js?v=20260826-canvas-module-refresh"></script>
+    <script src="toolflow-workflow.js?v=20260922-toolflow-v2"></script>
     <script type="module" src="director-3d.js"></script>
 </body>
 </html>
