@@ -6,6 +6,7 @@ import AccountMenu, { type AccountMenuUser } from './AccountMenu';
 import NotificationBell from './NotificationBell';
 import CreditRequestDialog from './CreditRequestDialog';
 import { isNavItemVisible, topbarQuickItems } from '@/lib/navigation';
+import { release } from '@/lib/release';
 
 export interface ComposerCreditSummary {
   available?: number;
@@ -36,7 +37,7 @@ export default function ComposerTopbar({
   return (
     <header className="composer-topbar">
       <div className="composer-topbar-left">
-        <Link href="/" className="composer-topbar-logo">Seedance 2.0</Link>
+        <Link href="/" className="composer-topbar-logo" aria-label={`Seedance 2.0 v${release.version}`}>Seedance 2.0 <span className="composer-topbar-version">v{release.version}</span></Link>
         <nav className="composer-topbar-nav" aria-label="快捷入口">
           {topbarQuickItems
             .filter((item) => isNavItemVisible(item, user))

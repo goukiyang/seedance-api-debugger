@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -13,6 +13,7 @@
     "seed:admin": "tsx scripts/seed-admin.ts",
     "test:api": "tsx scripts/test-seedance-api.ts",
     "test:reference-media": "tsx scripts/reference-media-chain-smoke.ts",
+    "test:image-api": "tsx scripts/image-generation-api-smoke.ts",
     "video:finalize-pending": "tsx scripts/finalize-pending-videos.ts",
     "video:deliver-public": "tsx scripts/process-video-delivery-jobs.ts",
     "video:delivery-metrics": "tsx scripts/video-delivery-metrics.ts",

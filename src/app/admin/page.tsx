@@ -103,6 +103,7 @@ export default async function AdminPage() {
       desc: '生成结果、留存、隐藏恢复和用户反馈放在一处。',
       links: [
         { title: '产出留存', desc: '检查预览、隐藏恢复和任务追溯', href: '/admin/outputs' },
+        { title: '图片任务审计', desc: '按用户查看图片任务、结果和下载记录', href: '/admin/image-studio' },
         { title: '反馈管理', desc: '查看、归档和导出用户反馈', href: '/admin/feedback' },
       ],
     },

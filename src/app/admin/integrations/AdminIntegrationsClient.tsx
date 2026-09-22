@@ -5,6 +5,7 @@ import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 
 type UserSelectorType = 'id' | 'email' | 'username';
 
@@ -38,12 +39,12 @@ type MuskConfig = {
   api_key_configured: boolean;
 };
 
-type ImageGenerationProvider = 'musk' | 'seedream';
+type ImageGenerationProvider = 'musk' | 'ai_media_vip' | 'seedream';
 
 type ImageGenerationConfig = {
   enabled: boolean;
   ready: boolean;
-  provider: 'musk' | 'seedream';
+  provider: ImageGenerationProvider;
   base_url: string;
   default_model: string;
   api_key_configured: boolean;
@@ -181,39 +182,32 @@ const EMPTY_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
   supports_async_task: false,
 };
 
-const IMAGE_MODEL_OPTIONS: Array<{
+const IMAGE_CHANNEL_OPTIONS: Array<{
   provider: ImageGenerationProvider;
   label: string;
-  model: string;
   baseUrl: string;
+  model: string;
+}> = [
+  { provider: 'musk', label: 'MuskAPI', baseUrl: 'https://api.muskapis.com/', model: 'gemini-3.1-flash-image-preview' },
+  { provider: 'ai_media_vip', label: 'AI Media VIP', baseUrl: 'https://api.ai-media.vip/v1/', model: 'gemini-3.1-flash-image-preview' },
+  { provider: 'seedream', label: 'Seedream 5.0 Pro（兼容旧资产接口）', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedream-5-0-pro-260628' },
+];
+
+const IMAGE_MODEL_OPTIONS: Array<{
+  model: string;
+  label: string;
   summary: string;
   tags: string[];
   maxOutputs: number;
   supportsAsyncTask: boolean;
   defaultSize: '1K' | '2K';
 }> = [
-  {
-    provider: 'musk',
-    label: 'Gemini Image (Musk)',
-    model: 'gemini-3.1-flash-image-preview',
-    baseUrl: 'https://api.muskapis.com/',
-    summary: '通用草图、普通参考图和兼容旧配置。',
-    tags: ['文生图', '图生图', '通用草图'],
-    maxOutputs: 8,
-    supportsAsyncTask: false,
-    defaultSize: '2K',
-  },
-  {
-    provider: 'seedream',
-    label: 'Seedream 5.0 Pro',
-    model: 'doubao-seedream-5-0-pro-260628',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    summary: '适合高质量参考图、首帧、尾帧和多参考图生图。',
-    tags: ['高质量参考图', '最多 10 张参考图', '1K/2K', '单张输出'],
-    maxOutputs: 1,
-    supportsAsyncTask: false,
-    defaultSize: '2K',
-  },
+  { model: IMAGE_STUDIO_MODELS[0], label: IMAGE_STUDIO_MODEL_LABELS[IMAGE_STUDIO_MODELS[0]], summary: '快速草图与通用参考图。', tags: ['文生图', '图生图'], maxOutputs: 8, supportsAsyncTask: false, defaultSize: '2K' },
+  { model: IMAGE_STUDIO_MODELS[1], label: IMAGE_STUDIO_MODEL_LABELS[IMAGE_STUDIO_MODELS[1]], summary: '质量优先的专业参考图。', tags: ['文生图', '图生图'], maxOutputs: 8, supportsAsyncTask: false, defaultSize: '2K' },
+  { model: IMAGE_STUDIO_MODELS[2], label: IMAGE_STUDIO_MODEL_LABELS[IMAGE_STUDIO_MODELS[2]], summary: 'GPT Image 2 通用图像生成。', tags: ['文生图', '图生图'], maxOutputs: 8, supportsAsyncTask: false, defaultSize: '2K' },
+  { model: IMAGE_STUDIO_MODELS[3], label: IMAGE_STUDIO_MODEL_LABELS[IMAGE_STUDIO_MODELS[3]], summary: 'Flare 风格图像生成。', tags: ['文生图', '图生图'], maxOutputs: 8, supportsAsyncTask: false, defaultSize: '2K' },
+  { model: IMAGE_STUDIO_MODELS[4], label: IMAGE_STUDIO_MODEL_LABELS[IMAGE_STUDIO_MODELS[4]], summary: 'Sunburst 风格图像生成。', tags: ['文生图', '图生图'], maxOutputs: 8, supportsAsyncTask: false, defaultSize: '2K' },
+  { model: 'doubao-seedream-5-0-pro-260628', label: 'Seedream 5.0 Pro', summary: '兼容旧版资产生成与多参考图。', tags: ['最多 10 张参考图', '单张输出'], maxOutputs: 1, supportsAsyncTask: false, defaultSize: '2K' },
 ];
 
 const IMAGE_API_ENDPOINT_OPTIONS = [
@@ -369,7 +363,11 @@ export default function AdminIntegrationsClient() {
   }, [imageConfig]);
 
   const selectedImageModel = useMemo(
-    () => IMAGE_MODEL_OPTIONS.find((option) => option.provider === imageConfig.provider) || IMAGE_MODEL_OPTIONS[0],
+    () => IMAGE_MODEL_OPTIONS.find((option) => option.model === imageConfig.default_model) || IMAGE_MODEL_OPTIONS[0],
+    [imageConfig.default_model],
+  );
+  const selectedImageChannel = useMemo(
+    () => IMAGE_CHANNEL_OPTIONS.find((option) => option.provider === imageConfig.provider) || IMAGE_CHANNEL_OPTIONS[0],
     [imageConfig.provider],
   );
   const isSeedreamImageModel = imageConfig.provider === 'seedream';
@@ -571,21 +569,37 @@ export default function AdminIntegrationsClient() {
     }
   };
 
-  const applyImageModel = (provider: ImageGenerationProvider) => {
-    const option = IMAGE_MODEL_OPTIONS.find((item) => item.provider === provider) || IMAGE_MODEL_OPTIONS[0];
+  const applyImageModel = (model: string) => {
+    const option = IMAGE_MODEL_OPTIONS.find((item) => item.model === model) || IMAGE_MODEL_OPTIONS[0];
     setImageConfig((prev) => ({
       ...prev,
-      provider: option.provider,
-      base_url: option.baseUrl,
       default_model: option.model,
       max_outputs_per_request: option.maxOutputs,
       default_size: option.defaultSize,
       output_format: prev.output_format || 'png',
       response_format: prev.response_format || 'url',
-      watermark: option.provider === 'seedream' ? false : prev.watermark,
+      provider: prev.provider === 'seedream' ? 'musk' : prev.provider,
+      base_url: prev.provider === 'seedream' ? IMAGE_CHANNEL_OPTIONS[0].baseUrl : prev.base_url,
+      watermark: prev.provider === 'seedream' ? false : prev.watermark,
       supports_text_to_image: true,
       supports_image_to_image: true,
       supports_async_task: option.supportsAsyncTask,
+    }));
+  };
+
+  const applyImageChannel = (provider: ImageGenerationProvider) => {
+    const channel = IMAGE_CHANNEL_OPTIONS.find((item) => item.provider === provider) || IMAGE_CHANNEL_OPTIONS[0];
+    setImageConfig((prev) => ({
+      ...prev,
+      provider: channel.provider,
+      base_url: channel.baseUrl,
+      ...(channel.provider === 'seedream' ? {
+        default_model: channel.model,
+        max_outputs_per_request: 1,
+      } : prev.provider === 'seedream' ? {
+        default_model: channel.model,
+        max_outputs_per_request: 8,
+      } : {}),
     }));
   };
 
@@ -1554,29 +1568,39 @@ export default function AdminIntegrationsClient() {
 
         <div className="codex-config-grid">
           <div className="form-group image-model-field">
-            <label className="form-label" htmlFor="image-provider">图片模型</label>
+            <label className="form-label" htmlFor="image-channel">图片 API 通道</label>
             <select
-              id="image-provider"
+              id="image-channel"
               className="input"
               value={imageConfig.provider}
-              onChange={(event) => applyImageModel(event.target.value as ImageGenerationProvider)}
+              onChange={(event) => applyImageChannel(event.target.value as ImageGenerationProvider)}
             >
-              {IMAGE_MODEL_OPTIONS.map((option) => (
+              {IMAGE_CHANNEL_OPTIONS.map((option) => (
                 <option key={option.provider} value={option.provider}>
                   {option.label}
                 </option>
               ))}
             </select>
+            <small className="text-gray">图片生成只读取独立的 image_generation_api_v1；这里不会使用 GPT-5.5 的 Musk API 配置。</small>
+            <label className="form-label mt-3" htmlFor="image-default-model">图片模型</label>
+            <select
+              id="image-default-model"
+              className="input"
+              value={imageConfig.default_model}
+              onChange={(event) => applyImageModel(event.target.value)}
+            >
+              {IMAGE_MODEL_OPTIONS.map((option) => <option key={option.model} value={option.model}>{option.label}</option>)}
+            </select>
             <div className="image-model-options" aria-label="图片模型能力">
               {IMAGE_MODEL_OPTIONS.map((option) => {
-                const active = imageConfig.provider === option.provider;
+                const active = imageConfig.default_model === option.model;
                 return (
                   <button
-                    key={option.provider}
+                    key={option.model}
                     className={`image-model-option${active ? ' is-active' : ''}`}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => applyImageModel(option.provider)}
+                    onClick={() => applyImageModel(option.model)}
                   >
                     <span>{option.label}</span>
                     <small>{option.summary}</small>
@@ -1605,15 +1629,15 @@ export default function AdminIntegrationsClient() {
               className="input"
               value={imageConfig.base_url}
               onChange={(event) => setImageConfig((prev) => ({ ...prev, base_url: event.target.value }))}
-              placeholder={selectedImageModel.baseUrl}
+              placeholder={selectedImageChannel.baseUrl}
               autoComplete="off"
             />
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="image-default-model">默认模型</label>
+            <label className="form-label" htmlFor="image-model-id">上游模型 ID</label>
             <input
-              id="image-default-model"
+              id="image-model-id"
               className="input"
               value={imageConfig.default_model}
               onChange={(event) => setImageConfig((prev) => ({ ...prev, default_model: event.target.value }))}

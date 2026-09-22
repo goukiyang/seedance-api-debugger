@@ -16,6 +16,7 @@ import { prisma } from '@/lib/prisma';
 import { getProjectAccess, getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
+import { IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -73,7 +74,9 @@ function normalizeCount(value: unknown, fallback: number, min: number, max: numb
 
 function imageGenerationModelLabel(provider: string, model: string) {
   if (provider === 'seedream') return 'Seedream 5.0 Pro';
-  if (provider === 'musk') return 'Gemini Image (Musk)';
+  if (model in IMAGE_STUDIO_MODEL_LABELS) return IMAGE_STUDIO_MODEL_LABELS[model as ImageStudioModel];
+  if (provider === 'musk') return 'MuskAPI 图片模型';
+  if (provider === 'ai_media_vip') return 'AI Media VIP 图片模型';
   return model || provider;
 }
 

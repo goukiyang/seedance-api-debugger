@@ -2,15 +2,7 @@
 
 ## 当前入口
 
-- [ ] 2026-09-15：积分申请与飞书审批，正文见 `tasks/todo/2026-09-15-credit-applications.md`。
-- [ ] 2026-08-22：外部用户权限收口与风险闭环，正文见 `tasks/todo/2026-08-22-external-access-guard.md`。
-- [x] 2026-08-16：Seedance 2.5 按 2.0 的 1.5 倍扣费，正文见 `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`。
-- [x] 2026-08-16：H3 LoRA 下拉选择闭环，正文见 `tasks/todo/2026-08-16-h3-lora-selector.md`。
-- [ ] 2026-08-16：任务卡片缩略图可靠显示修复，正文见 `tasks/todo/2026-08-16-reliable-task-thumbnails.md`。
-- [ ] 2026-08-15：视频截图稳定固化与历史补偿，正文见 `tasks/todo/2026-08-15-stable-video-thumbnails.md`。
-- [ ] 2026-08-15：H3 API 接入现有视频生成链路，正文见 `tasks/todo/2026-08-15-h3-api-integration.md`。
-- [ ] 2026-08-13：Seedance 2.5 视频模型线上接入规划，正文见 `tasks/todo/2026-08-13-seedance-25-video-model.md`。
-- [ ] 2026-08-13：资产管理页面切换与点击卡顿优化，正文见 `tasks/todo/2026-08-13-assets-interaction-performance.md`。
+- [ ] 2026-09-20：GPT Image 独立生图页与固定上下文，正文见 `tasks/todo/2026-09-20-gpt-image-studio.md`。
 
 ## 最近状态
 
@@ -34,7 +26,7 @@
 - `tasks/todo/2026-08-11-sd2-video-download-delivery.md`：提交生成到稳定下载就绪优化
 - `tasks/todo/2026-08-12-admin-cost-audit-p2029.md`：后台成本审计 P2029 崩溃修复
 - `tasks/todo/2026-08-12-sd2-server-migration.md`：sd2 从 Mac 迁移到服务器闭环计划
-- `tasks/todo/2026-08-13-assets-interaction-performance.md`：资产管理页面切换与点击卡顿优化
+- `tasks/todo/2026-08-13-assets-interaction-performance.md`：2026-08-13 资产管理页面切换与点击卡顿优化
 - `tasks/todo/2026-08-13-seedance-25-video-model.md`：Seedance 2.5 视频模型线上接入规划
 - `tasks/todo/2026-08-15-h3-api-integration.md`：H3 API 接入现有视频生成链路
 - `tasks/todo/2026-08-15-stable-video-thumbnails.md`：视频截图稳定固化与历史补偿
@@ -42,4 +34,9 @@
 - `tasks/todo/2026-08-16-reliable-task-thumbnails.md`：任务卡片缩略图可靠显示修复
 - `tasks/todo/2026-08-16-seedance-25-pricing-multiplier.md`：Seedance 2.5 按 2.0 的 1.5 倍扣费
 - `tasks/todo/2026-08-22-external-access-guard.md`：外部用户权限收口与风险闭环
+- `tasks/todo/2026-08-26-ultimate-canvas-module-refresh.md`：Ultimate Canvas Module Refresh Implementation Plan
+- `tasks/todo/2026-09-15-credit-applications.md`：积分申请与飞书审批
+- `tasks/todo/2026-09-16-reference-picker-selection.md`：参考素材选择入口修复
+- `tasks/todo/2026-09-19-assets-bulk-download.md`：资产管理批量下载无反馈
+- `tasks/todo/2026-09-20-gpt-image-studio.md`：GPT Image 独立生图页与固定上下文
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环

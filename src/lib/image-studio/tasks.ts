@@ -3,7 +3,7 @@ import type { ImageStudioTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
-import { getImageGenerationApiSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
+import { getImageGenerationApiSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { normalizeStudioRatio, studioRatioSize } from './ratios';
 import { MAX_REFERENCE_IMAGES } from './limits';
@@ -45,7 +45,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
   const imageApi = await getImageGenerationApiSettings();
-  if (imageApi.provider !== 'musk' || !isImageGenerationApiReady(imageApi)) throw new StudioError('图片专用 Musk API 尚未配置', 503);
+  if (!isStudioImageGenerationProvider(imageApi.provider) || !isImageGenerationApiReady(imageApi)) throw new StudioError('图片专用 API 尚未配置', 503);
   await prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
@@ -188,6 +188,49 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     snapshot: publicStudioSnapshot(task, assetById),
     asset: assetById.get(task.asset_id || '') || null,
   })), nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
+}
+
+export async function listAdminStudioTasks(cursor?: string, moduleId?: string, ownerId?: string) {
+  const rows = await prisma.imageStudioTask.findMany({
+    where: {
+      ...(moduleId ? { module_id: moduleId } : {}),
+      ...(ownerId ? { owner_id: ownerId } : {}),
+    },
+    orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+    take: 25,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+  });
+  const assetIds = rows.flatMap(task => task.asset_id ? [task.asset_id] : []);
+  const assets = assetIds.length
+    ? await prisma.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true, status: true } })
+    : [];
+  const ownerIds = Array.from(new Set(rows.map(task => task.owner_id)));
+  const owners = ownerIds.length
+    ? await prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true, username: true, email: true } })
+    : [];
+  const assetById = new Map(assets.map(asset => [asset.id, asset]));
+  const ownerById = new Map(owners.map(owner => [owner.id, owner]));
+  const items = rows.slice(0, 24).map(task => ({
+    id: task.id,
+    batchId: task.batch_id,
+    ownerId: task.owner_id,
+    owner: ownerById.get(task.owner_id) || null,
+    moduleId: task.module_id,
+    ordinal: task.ordinal,
+    prompt: task.prompt,
+    model: task.model,
+    status: task.status,
+    deletedAt: task.deleted_at,
+    error: task.error,
+    unitCredits: task.unit_credits,
+    providerCostUsd: task.provider_cost_usd,
+    aspectRatio: task.aspect_ratio,
+    outputSize: task.output_size,
+    createdAt: task.created_at,
+    finishedAt: task.finished_at,
+    asset: assetById.get(task.asset_id || '') || null,
+  }));
+  return { tasks: items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
 function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>) {

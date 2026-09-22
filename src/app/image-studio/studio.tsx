@@ -117,7 +117,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
   const [moduleSaveError, setModuleSaveError] = useState('');
-  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, count: module.count, aspectRatio: module.aspectRatio || 'auto', model: module.model, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, ...(isAdmin ? { prices: module.prices } : {}) }) : '');
+  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, aspectRatio: module.aspectRatio || 'auto', model: module.model, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, ...(isAdmin ? { prices: module.prices } : {}) }) : '');
   const moduleSaveLock = useRef(false);
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -155,13 +155,13 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   const globalDirty = useRef(dirty);
   const settingsRequest = useRef(0);
   globalDirty.current = dirty;
-  const unsavedContext = dirty || (isAdmin && moduleContext !== savedModuleContext);
+  const unsavedContext = dirty || moduleContext !== savedModuleContext;
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
-  const moduleDraft = { name, prompt, count, aspectRatio, model: moduleModel, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null };
+  const moduleDraft = { name, prompt, context: moduleContext, count, aspectRatio, model: moduleModel, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null };
   const moduleSaveSnapshot = { ...moduleDraft, ...(isAdmin ? { prices: modulePrices } : {}) };
-  const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved || (isAdmin && moduleContext !== savedModuleContext);
+  const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
 
   useEffect(() => { if (globalSettingsOpen) dialog.current?.showModal(); }, [globalSettingsOpen]);
   useEffect(() => { if (deleteTarget) deleteDialog.current?.showModal(); else deleteDialog.current?.close(); }, [deleteTarget]);
@@ -179,8 +179,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
     const contextSnapshot = moduleContext;
     try {
       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: module.id, revision: revisionOverride, ...snapshot, ...(isAdmin ? { context: contextSnapshot, prices: modulePrices } : {}) }) }));
-      setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, ...(isAdmin ? { prices: modulePrices } : {}) }));
+        body: JSON.stringify({ id: module.id, revision: revisionOverride, ...snapshot, context: contextSnapshot, ...(isAdmin ? { prices: modulePrices } : {}) }) }));
+      setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot, ...(isAdmin ? { prices: modulePrices } : {}) }));
       setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
       return result.revision as number;
     } catch (e) { const message = e instanceof Error ? e.message : '保存失败'; setError(message); setModuleSaveError(message); return false; }
@@ -404,10 +404,10 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
   }
   const moduleUnitCredits = modulePrices[moduleModel] ?? null;
   const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
-  const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && (!isAdmin || moduleContext === savedModuleContext));
+  const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && moduleContext === savedModuleContext);
 
   useEffect(() => {
-    if (!isAdmin || !unsavedContext) return;
+    if (!unsavedContext) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     const guardNavigation = (event: MouseEvent) => {
       const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
@@ -423,7 +423,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       window.removeEventListener('beforeunload', warn);
       document.removeEventListener('click', guardNavigation, true);
     };
-  }, [unsavedContext, isAdmin]);
+  }, [unsavedContext]);
 
   const addImages = useCallback(async (files: File[]) => {
     if (uploadLock.current || submitting || pendingSubmission || !files.length) return;
@@ -462,7 +462,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       <input className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} />
       <div className={styles.counts}><span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleDirty ? '未保存' : '已保存'}</span>
         <button type="button" disabled={moduleSaving || uploading || submitting || !moduleDirty} onClick={() => void saveModule()}><Save size={17} />保存模块</button>
-        {isAdmin && <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>}
+        <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>
       </div>
     </header>
     <div className={styles.workspace}>
@@ -542,7 +542,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       {deleteError && <p role="alert" className={styles.error}>{deleteError}</p>}
       <div className={styles.resultActions}><button type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : '确认删除'}</button></div>
     </dialog>
-    {isAdmin && <dialog ref={moduleDialog} className={styles.dialog} onCancel={event => {
+    <dialog ref={moduleDialog} className={styles.dialog} onCancel={event => {
       if (moduleContext !== savedModuleContext && !window.confirm('上下文尚未保存，确定关闭吗？当前草稿会保留。')) event.preventDefault();
     }}>
       <header className={styles.header}><h2>模块上下文</h2><button type="button" aria-label="关闭模块上下文" onClick={() => {
@@ -553,16 +553,16 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, settings, setSetti
       <select id={`studio-module-model-${module.id}`} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
         {models.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
       </select>
-      {models.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
+      {isAdmin && models.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
         <input type="number" min={0} max={100000} step={1} placeholder="未设置" value={modulePrices[model] ?? ''} onChange={event => {
           const next = event.target.value === '' ? null : Number(event.target.value);
           setModulePrices(current => ({ ...current, [model]: next }));
         }} />
       </label>)}
-      <p className={styles.muted}>模型选择属于当前模块；积分单价仅管理员可修改。上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后自动保存。</p>
+      <p className={styles.muted}>{isAdmin ? '模型选择属于当前模块；积分单价仅管理员可修改。' : '这是当前账号自己的模块上下文，只有你能查看和修改。'}上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后自动保存。</p>
       <p role="status">{moduleSaving ? '正在保存' : moduleDirty ? '未保存' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
-    </dialog>}
+    </dialog>
     {isAdmin && isFirst && <dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); closeSettings(); }}>
       <header className={styles.header}><h2>通用上下文</h2><button type="button" title="关闭" aria-label="关闭设置" onClick={() => {
         closeSettings();

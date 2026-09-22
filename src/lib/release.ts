@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成统一走独立 API，新增 Banana 2、Banana Pro、GPT Image 2 与 2.5 模型及上游成本记录。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片 API 支持五个图片模型和两个独立通道；用户模块、任务与资产按账号隔离，管理员可审计。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

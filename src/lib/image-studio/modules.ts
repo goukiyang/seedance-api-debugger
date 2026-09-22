@@ -46,7 +46,7 @@ type StudioModuleRow = {
   count: number; aspect_ratio?: string; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
 };
 
-async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false) {
+async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, _isAdmin = false) {
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
   const assets = await prisma.asset.findMany({ where: { id: { in: ids }, owner_id: ownerId, status: 'active', type: 'image' },
     select: { id: true, original_url: true, thumbnail_url: true } });
@@ -54,7 +54,9 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, aspectRatio: row.aspect_ratio || 'auto', revision: row.revision, saved,
     model: generation.model, prices: generation.prices, unitCredits: generation.prices[generation.model],
     reproduceFromTaskId: row.reproduce_task_id || null,
-    contextConfigured: Boolean(row.context.trim()), ...(isAdmin ? { context: row.context } : {}),
+    // The module is already restricted to ownerId. A user's own context is safe
+    // to return, while the separate global context remains admin-only.
+    contextConfigured: Boolean(row.context.trim()), context: row.context,
     createdAt: row.created_at, updatedAt: row.updated_at,
     images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url }] : []; }) };
 }
@@ -77,7 +79,6 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   let aspectRatio: string | undefined;
   try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
   catch (error) { throw new StudioModuleError((error as Error).message); }
-  if (body.context !== undefined && !isAdmin) throw new StudioModuleError('仅管理员可以编辑上下文', 403);
   if (body.context !== undefined && (typeof body.context !== 'string' || body.context.length > 20000)) throw new StudioModuleError('模块上下文最多 20000 字');
   const model = body.model === undefined ? undefined : body.model;
   if (model !== undefined && (!isAdmin || !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))) {
@@ -120,7 +121,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       ...(model !== undefined ? { model: model as string } : {}),
       ...(prices !== undefined ? { prices_json: JSON.stringify(prices) } : {}),
       ...(reproduceFromTaskId !== undefined ? { reproduce_task_id: reproduceFromTaskId } : {}),
-      ...(typeof body.context === 'string' && isAdmin ? { context: body.context } : {}) };
+      ...(typeof body.context === 'string' ? { context: body.context } : {}) };
     if (!current) return tx.imageStudioModule.create({ data: { id, owner_id: ownerId, ...data } });
     const changed = await tx.imageStudioModule.updateMany({ where: { id, owner_id: ownerId, revision: Number(revision) }, data });
     if (!changed.count) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对', 409);

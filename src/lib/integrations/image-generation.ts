@@ -3,9 +3,10 @@ import { prisma } from '@/lib/prisma';
 
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
 
-export const IMAGE_GENERATION_PROVIDERS = ['musk', 'seedream'] as const;
+export const IMAGE_GENERATION_PROVIDERS = ['musk', 'ai_media_vip', 'seedream'] as const;
 export const DEFAULT_MUSK_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
 export const DEFAULT_MUSK_IMAGE_BASE_URL = 'https://api.muskapis.com/';
+export const DEFAULT_AI_MEDIA_IMAGE_BASE_URL = 'https://api.ai-media.vip/v1/';
 export const DEFAULT_SEEDREAM_IMAGE_MODEL = 'doubao-seedream-5-0-pro-260628';
 export const DEFAULT_SEEDREAM_IMAGE_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 
@@ -94,6 +95,20 @@ function providerDefaults(provider: ImageGenerationProvider) {
       watermark: false,
     };
   }
+  if (provider === 'ai_media_vip') {
+    return {
+      base_url: DEFAULT_AI_MEDIA_IMAGE_BASE_URL,
+      default_model: DEFAULT_MUSK_IMAGE_MODEL,
+      max_outputs_per_request: 1,
+      supports_text_to_image: true,
+      supports_image_to_image: true,
+      supports_async_task: false,
+      default_size: '2K' as ImageGenerationSize,
+      output_format: 'png' as ImageGenerationOutputFormat,
+      response_format: 'url' as ImageGenerationResponseFormat,
+      watermark: false,
+    };
+  }
   return {
     base_url: DEFAULT_MUSK_IMAGE_BASE_URL,
     default_model: DEFAULT_MUSK_IMAGE_MODEL,
@@ -106,6 +121,10 @@ function providerDefaults(provider: ImageGenerationProvider) {
     response_format: 'url' as ImageGenerationResponseFormat,
     watermark: false,
   };
+}
+
+export function isStudioImageGenerationProvider(provider: ImageGenerationProvider) {
+  return provider === 'musk' || provider === 'ai_media_vip';
 }
 
 function normalizeDefaultModel(value: unknown, provider: ImageGenerationProvider) {
@@ -321,7 +340,7 @@ function buildMuskGeminiGenerateContentUrl(baseUrl: string, model: string) {
   return url.toString();
 }
 
-function buildSeedreamImagesGenerationUrl(baseUrl: string) {
+function buildOpenAiImagesGenerationUrl(baseUrl: string) {
   const url = new URL(baseUrl);
   const path = url.pathname.replace(/\/+$/, '');
   if (path.endsWith('/images/generations')) return url.toString();
@@ -399,16 +418,17 @@ function normalizeReferenceImages(value: unknown, limit: number) {
   return images;
 }
 
-function seedreamSize(params: {
+function imageGenerationSize(params: {
   size?: string;
   settings: ImageGenerationApiSettings;
 }) {
   return normalizeSize(params.size, params.settings.default_size);
 }
 
-function buildSeedreamRequestBody(params: {
+function buildOpenAiImageRequestBody(params: {
   settings: ImageGenerationApiSettings;
   prompt: string;
+  count?: number;
   size?: string;
   referenceImages?: string[];
 }) {
@@ -416,7 +436,8 @@ function buildSeedreamRequestBody(params: {
   const body: Record<string, unknown> = {
     model: params.settings.default_model,
     prompt: params.prompt,
-    size: seedreamSize({ size: params.size, settings: params.settings }),
+    ...(params.count && params.settings.provider !== 'seedream' ? { n: params.count } : {}),
+    size: imageGenerationSize({ size: params.size, settings: params.settings }),
     output_format: params.settings.output_format,
     response_format: params.settings.response_format,
     watermark: params.settings.watermark,
@@ -444,7 +465,12 @@ function upstreamErrorMessage(data: Record<string, unknown>, fallbackStatus: num
     || `图形生成 API 调用失败 (HTTP ${fallbackStatus})`;
 }
 
-async function createMuskImageGeneration(params: {
+const GEMINI_IMAGE_MODELS = new Set([
+  'gemini-3.1-flash-image-preview',
+  'gemini-3-pro-image-preview',
+]);
+
+async function createGeminiImageGeneration(params: {
   settings: ImageGenerationApiSettings;
   prompt: string;
   count: number;
@@ -454,7 +480,9 @@ async function createMuskImageGeneration(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-goog-api-key': params.settings.api_key || '',
+      ...(params.settings.provider === 'musk'
+        ? { 'x-goog-api-key': params.settings.api_key || '' }
+        : { Authorization: `Bearer ${params.settings.api_key || ''}` }),
     },
     body: JSON.stringify({
       contents: [{
@@ -485,20 +513,21 @@ async function createMuskImageGeneration(params: {
   };
 }
 
-async function createSeedreamImageGeneration(params: {
+async function createOpenAiImageGeneration(params: {
   settings: ImageGenerationApiSettings;
   prompt: string;
+  count: number;
   size?: string;
   referenceImages?: string[];
   signal: AbortSignal;
 }) {
-  const response = await fetch(buildSeedreamImagesGenerationUrl(params.settings.base_url), {
+  const response = await fetch(buildOpenAiImagesGenerationUrl(params.settings.base_url), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${params.settings.api_key || ''}`,
     },
-    body: JSON.stringify(buildSeedreamRequestBody(params)),
+    body: JSON.stringify(buildOpenAiImageRequestBody(params)),
     signal: params.signal,
   });
 
@@ -517,7 +546,7 @@ async function createSeedreamImageGeneration(params: {
   }
 
   return {
-    images: images.slice(0, 1),
+    images: images.slice(0, params.settings.provider === 'seedream' ? 1 : params.count),
     model: params.settings.default_model,
     raw: data,
   };
@@ -545,17 +574,20 @@ export async function createImageGeneration(params: {
   const timeout = setTimeout(() => controller.abort(), params.settings.timeout_ms);
 
   try {
-    if (params.settings.provider === 'seedream') {
-      return await createSeedreamImageGeneration({
+    const useMuskGeminiProtocol = params.settings.provider === 'musk'
+      && GEMINI_IMAGE_MODELS.has(params.settings.default_model);
+    if (!useMuskGeminiProtocol) {
+      return await createOpenAiImageGeneration({
         settings: params.settings,
         prompt: params.prompt,
+        count,
         size: params.size,
         referenceImages: params.referenceImages,
         signal: controller.signal,
       });
     }
 
-    return await createMuskImageGeneration({
+    return await createGeminiImageGeneration({
       settings: params.settings,
       prompt: params.prompt,
       count,

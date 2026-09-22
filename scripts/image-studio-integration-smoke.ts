@@ -20,7 +20,7 @@ async function main() {
   await prisma.creditAccount.create({ data: { user_id: user.id, balance: 20 } });
   await prisma.platformSetting.create({ data: { key: 'image_generation_api_v1', value_json: JSON.stringify({ enabled: true, provider: 'musk', base_url: 'https://example.invalid/', api_key: 'test-only', default_model: 'gemini-3.1-flash-image-preview' }) } });
   const initial = await getImageStudioSettings();
-  const config = await saveImageStudioSettings({ ...initial, context: 'Fixed studio context', prices: { ...initial.prices, 'gpt-image-2.5-flare': 2, 'gpt-image-2.5-sunburst': null } }, user.id);
+  const config = await saveImageStudioSettings({ ...initial, context: 'Fixed studio context', prices: { ...initial.prices, 'gemini-3.1-flash-image-preview': 2, 'gpt-image-2.5-flare': 2, 'gpt-image-2.5-sunburst': null } }, user.id);
   assert.ok(config);
   assert.equal(await saveImageStudioSettings(initial, user.id), null, 'stale revision must conflict');
   const input = { requestId: 'test-request-12345678', prompt: 'Draw a square', count: 2, revision: config.revision, referenceIds: [] };
@@ -63,8 +63,11 @@ async function main() {
   const moduleId = randomUUID();
   const created = await saveStudioModule(user.id, { id: moduleId }, true);
   const moduleBody = { id: moduleId, revision: created.revision, name: 'Saved module', prompt: '', count: 1, aspectRatio: '5:3', model: 'gpt-image-2.5-sunburst', prices: { ...config.prices, 'gpt-image-2.5-flare': 7, 'gpt-image-2.5-sunburst': 9 }, referenceIds: [], context: 'Module context' };
-  await assert.rejects(saveStudioModule(user.id, moduleBody), /仅管理员/);
-  const saved = await saveStudioModule(user.id, moduleBody, false, true);
+  const ordinarySaved = await saveStudioModule(user.id, { ...moduleBody, model: 'gpt-image-2.5-flare', prices: undefined });
+  assert.equal(ordinarySaved.context, 'Module context');
+  assert.equal(ordinarySaved.model, 'gpt-image-2.5-flare');
+  assert.equal(ordinarySaved.unitCredits, 2);
+  const saved = await saveStudioModule(user.id, { ...moduleBody, revision: ordinarySaved.revision }, false, true);
   assert.equal(saved.aspectRatio, '5:3');
   assert.equal(saved.model, 'gpt-image-2.5-sunburst');
   assert.equal(saved.unitCredits, 9);
@@ -84,7 +87,7 @@ async function main() {
   assert.equal((await listStudioModules(user.id)).modules.find(item => item.id === moduleId)?.aspectRatio, '5:3', 'deleting a favorite does not change saved modules');
   await assert.rejects(saveStudioModule(stranger.id, { ...moduleBody, revision: saved.revision }, false, true), /无权/);
   await assert.rejects(saveStudioModule(user.id, moduleBody, false, true), /其他页面/);
-  assert.ok(!(await listStudioModules(user.id)).modules.some(item => 'context' in item));
+  assert.equal((await listStudioModules(user.id)).modules.find(item => item.id === moduleId)?.context, 'Module context');
   assert.equal((await listStudioModules(user.id, undefined, true)).modules.find(item => item.id === moduleId)?.context, 'Module context');
   assert.equal((await listStudioModules(stranger.id)).modules.length, 1);
   await fs.mkdir(path.join(working, 'public/uploads'), { recursive: true });
