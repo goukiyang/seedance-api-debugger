@@ -9,6 +9,7 @@
 - 检查接口配置：`GET /api/codex/config`
 - 上传参考素材：`POST /api/codex/assets/upload`
 - 创建视频生成任务：`POST /api/codex/video/create`
+- 从本地 Seedance 2.5 Draft 升级 1080p：`POST /api/codex/video/draft-upgrade`
 - 兼容创建入口：`POST /api/tasks/create`
 
 任务状态查询、下载、后台产出和成本复盘目前仍沿用站内登录态与管理员后台：
@@ -112,6 +113,7 @@ curl -sS "$BASE_URL/api/codex/config" \
   "endpoints": {
     "upload_asset": "/api/codex/assets/upload",
     "create_video": "/api/codex/video/create",
+    "draft_upgrade": "/api/codex/video/draft-upgrade",
     "create_video_direct": "/api/tasks/create"
   },
   "auth": {
@@ -119,6 +121,11 @@ curl -sS "$BASE_URL/api/codex/config" \
     "header": "Authorization"
   },
   "supported_settings": {
+    "seedance_draft": {
+      "create_enabled": false,
+      "upgrade_enabled": false,
+      "status": "provider_contract_pending"
+    },
     "model": [
       {
         "id": "dreamina-seedance-2-0-260128",
@@ -503,7 +510,31 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 
 如果同一个绑定用户重复提交相同 `idempotency_key`，接口会返回已存在任务，并带上 `deduplicated: true`。
 
-## 9. 任务状态与结果
+## 9. Seedance 2.5 Draft 直出 1080p
+
+Draft 流程是“先确认样片，再生成正式片”：先在站内生成并完成一个 Seedance 2.5 样片 Draft，确认样片成功后，调用方只提交 SD2 的本地 Draft 任务 ID：
+
+```http
+POST /api/codex/video/draft-upgrade
+```
+
+请求示例：
+
+```json
+{
+  "draft_task_id": "sd2_local_draft_task_id",
+  "resolution_approval_confirmed": true,
+  "idempotency_key": "draft-upgrade-sd2_local_draft_task_id"
+}
+```
+
+接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求只发送嵌套的 `draft_task: { id }` 引用和 `1080p`，不会从外部请求接收或重复发送 prompt、素材、seed、比例、时长等字段。
+
+`draft_task_id` 必须是 SD2 本地任务 ID，不能填写 Seedance 官方任务 ID，也不能填写 `provider_task_id`。Draft 和正式任务分别记录点数冻结、Provider 请求、轮询和成本台账；重复的 `idempotency_key` 会返回原正式任务。
+
+当前公开供应商示例只核验到 `draft` 创建字段，尚未核验到嵌套 `draft_task: { id }` 升级请求和响应。因此 `GET /api/codex/config` 中 `seedance_draft.upgrade_enabled` 默认是 `false`，关闭时接口返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起真实供应商升级请求。计费复用现有按模型的 `calculateEstimatedCost` 规则，不新增 Draft 专属价格；2.0 旧规则保持不变。启用前必须由管理员完成供应商契约验证；本项目的 Mock 回归不等同于真实供应商可用。
+
+## 10. 任务状态与结果
 
 当前 Bearer token 创建任务后，外部响应会立即返回 `id` 和 `provider_task_id`。创建响应只代表任务已提交，不代表生成完成。SD2 会在后台自动轮询 Provider 状态；任务成功后，系统会优先把视频下载到服务器本地并写入 `local_video_path`，站内页面和后台预览优先使用这个本地地址。
 
@@ -537,7 +568,7 @@ GET /api/video/status/:taskId?refresh=true
 4. 在 `/admin/outputs` 检查任务来源、外部请求 ID、Provider 任务 ID 和实际扣除。
 5. 在 `/admin/costs` 检查点数结算、Provider 请求记录和官方扣费记录。
 
-## 10. 扣费与成本记录
+## 11. 扣费与成本记录
 
 任务创建成功后，SD2 会立即冻结绑定用户点数，并记录：
 
@@ -569,7 +600,7 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 - `provider_request_id`
 - `official_charge_id`
 
-## 11. 常见错误
+## 12. 常见错误
 
 | HTTP 状态 | 错误 | 处理方式 |
 |---|---|---|
@@ -591,7 +622,7 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 - Provider 返回实际扣费，但没有 `CostLedger official_charge`：成本对账断了。
 - 参考图只停留在 URL，没有形成 `Asset -> ReferenceImage -> WorkspaceAsset`：后续复用、重试和后台检查会丢来源。
 
-## 12. 接入限制与上线前验收
+## 13. 接入限制与上线前验收
 
 这一节是上线前必须确认的边界，避免外部系统按“完整开放平台 API”理解当前接口。
 
@@ -677,7 +708,7 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 
 非付费自测只能证明接口和参数保护基本可用，不等于真实生成、扣费、结果下载和成本账本已经闭环。
 
-## 13. 接入前检查清单
+## 14. 接入前检查清单
 
 接入方：
 
@@ -702,7 +733,7 @@ SD2 管理员：
 - `/admin/costs` 能看到点数结算和供应商成本记录。
 - 状态刷新、完整下载、`ffprobe`、contact sheet 和首尾帧抽取验收链路已跑通。
 
-## 14. 管理员自测
+## 15. 管理员自测
 
 非真实生成的连接检查：
 

@@ -28,7 +28,7 @@ import {
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
-import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 
 // ============================================================================
@@ -52,6 +52,13 @@ interface CreateResponse {
   frozen_cost?: number;
   deduplicated?: boolean;
   reference_image_notice?: string | null;
+  is_draft?: boolean;
+}
+
+interface SeedanceDraftCapability {
+  create_enabled: boolean;
+  upgrade_enabled: boolean;
+  message: string;
 }
 
 type CreateTaskResponse = CreateResponse & {
@@ -65,6 +72,12 @@ interface TaskItem {
   prompt: string;
   provider: string;
   generation_mode: string;
+  model?: string | null;
+  is_draft?: boolean;
+  provider_draft_task_id?: string | null;
+  draft_upgrade_mode?: string | null;
+  source_draft_task_id?: string | null;
+  draft_contract_version?: string | null;
   local_status: string;
   public_video_url: string | null;
   result_video_url: string | null;
@@ -454,6 +467,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [currentUser, setCurrentUser] = useState<GeneratePageUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
+  const [seedanceDraftCapability, setSeedanceDraftCapability] = useState<SeedanceDraftCapability>({
+    create_enabled: false,
+    upgrade_enabled: false,
+    message: '供应商 Draft 能力尚未完成核验，暂不可用。',
+  });
+  const [draftUpgradeTaskId, setDraftUpgradeTaskId] = useState<string | null>(null);
   const [h3StatusChecking, setH3StatusChecking] = useState(false);
   const [selectedH3LoraId, setSelectedH3LoraId] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
@@ -501,7 +520,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     : [];
   const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
     if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS;
-    const options = [...SEEDANCE_VIDEO_MODEL_OPTIONS];
+    const options = SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => option.id === SEEDANCE_2_5_MODEL_ID
+      ? {
+          ...option,
+          detail: `${option.detail} · ${seedanceDraftCapability.create_enabled ? '支持样片 Draft' : '样片 Draft 待供应商确认'}`,
+        }
+      : option);
     const canSeeH3 = h3Ready || currentUser?.role === 'admin';
     if (canSeeH3) {
       options.push({
@@ -513,7 +537,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       });
     }
     return options;
-  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, selectedH3Lora?.label, selectedH3Preset?.label]);
+  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, seedanceDraftCapability.create_enabled, selectedH3Lora?.label, selectedH3Preset?.label]);
   const activeModelLabel = surfaceConfig.modelLabel;
   const activeProviderLabel = 'Seedance 视频';
   const refreshH3VideoConfig = useCallback(async () => {
@@ -523,6 +547,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const data = response.ok ? await response.json() : null;
       const nextConfig = normalizeH3VideoConfig(data?.h3_video);
       setH3VideoConfig(nextConfig);
+      if (data?.seedance_draft) setSeedanceDraftCapability(data.seedance_draft);
       return nextConfig;
     } catch {
       setH3VideoConfig(null);
@@ -542,6 +567,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         throw new Error(data?.error || data?.message || `H3 状态检查失败 (HTTP ${response.status})`);
       }
       setH3VideoConfig(normalizeH3VideoConfig(currentUser?.role === 'admin' ? data?.config : data?.h3_video));
+      if (data?.seedance_draft) setSeedanceDraftCapability(data.seedance_draft);
     } catch (error) {
       if (!options?.silent) {
         setError(error instanceof Error ? error.message : 'H3 状态检查失败');
@@ -657,6 +683,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       .then((data) => {
         if (cancelled) return;
         setH3VideoConfig(normalizeH3VideoConfig(data?.h3_video));
+        if (data?.seedance_draft) setSeedanceDraftCapability(data.seedance_draft);
       })
       .catch(() => {
         if (!cancelled) setH3VideoConfig(null);
@@ -1241,6 +1268,33 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     }
   }, [deletingRecentTaskId, isIpSurface]);
 
+  const upgradeDraftTask = useCallback(async (task: TaskItem) => {
+    if (isIpSurface || !task.is_draft || task.local_status !== 'succeeded' || !seedanceDraftCapability.upgrade_enabled || draftUpgradeTaskId) return;
+    setDraftUpgradeTaskId(task.id);
+    setRecentTasksError('');
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/draft-upgrade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resolution_approval_confirmed: true,
+          idempotency_key: `draft-upgrade:${task.id}`,
+        }),
+      });
+      const data = await readJsonResponse<{ task_id?: string; id?: string; provider_task_id?: string | null; error?: string; message?: string }>(response);
+      if (!response.ok) throw new Error(data.message || data.error || 'Draft 升级失败');
+      const formalTaskId = data.task_id || data.id;
+      if (formalTaskId) {
+        setActivePollingTaskIds((current) => [formalTaskId, ...current.filter((id) => id !== formalTaskId)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+      }
+      await loadRecentTasksPage(1, 'merge-head');
+    } catch (error) {
+      setRecentTasksError(error instanceof Error ? error.message : 'Draft 升级失败');
+    } finally {
+      setDraftUpgradeTaskId(null);
+    }
+  }, [draftUpgradeTaskId, isIpSurface, loadRecentTasksPage, seedanceDraftCapability.upgrade_enabled]);
+
   useEffect(() => {
     void loadRecentTasksPage(1, 'replace');
   }, [loadRecentTasksPage]);
@@ -1424,6 +1478,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     provider?: string | null;
     model?: string | null;
     h3LoraId?: string | null;
+    draft?: boolean;
   }) => {
     setSubmitting(true);
     setError(null);
@@ -1533,6 +1588,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           prompt_user_edited: params.promptUserEdited === true,
           provider: isIpSurface ? undefined : requestedProvider,
           model: requestedModel || undefined,
+          draft: !isIpSurface && requestedProvider === 'seedance' && requestedModel === SEEDANCE_2_5_MODEL_ID && params.draft === true,
           lora_id: selectedH3Model ? requestedH3LoraId : undefined,
         }),
       });
@@ -1558,6 +1614,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           prompt: params.prompt,
           provider: data.provider || (isIpSurface ? 'volcengine_ark' : requestedProvider),
           generation_mode: params.generationMode,
+          model: data.model || requestedModel || null,
+          is_draft: data.is_draft === true,
+          provider_draft_task_id: null,
+          draft_upgrade_mode: data.is_draft === true ? 'draft' : null,
+          source_draft_task_id: null,
+          draft_contract_version: null,
           local_status: data.status || 'submitted',
           public_video_url: null,
           result_video_url: null,
@@ -2189,6 +2251,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           auxiliaryOptions={activeH3LoraOptions}
           selectedAuxiliary={selectedH3LoraId}
           onAuxiliaryChange={setSelectedH3LoraId}
+          seedanceDraft={{
+            createEnabled: seedanceDraftCapability.create_enabled,
+            message: seedanceDraftCapability.message,
+          }}
         />
 
         {/* 最近任务 */}
@@ -2262,6 +2328,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                             </div>
                           )}
                           <div className="composer-task-card-meta">
+                            {task.is_draft && (
+                              <span className="composer-task-card-enhance-chip">
+                                样片 Draft
+                              </span>
+                            )}
                             {enhanceTask && (
                               <span className="composer-task-card-enhance-chip">
                                 视频超分
@@ -2286,7 +2357,23 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           )}
                         </div>
                       </Link>
-                      {enhanceTask ? (
+                      {task.is_draft ? (
+                        <button
+                          type="button"
+                          className="composer-task-card-reuse"
+                          disabled={task.local_status !== 'succeeded' || !seedanceDraftCapability.upgrade_enabled || draftUpgradeTaskId !== null}
+                          onClick={() => void upgradeDraftTask(task)}
+                          title={seedanceDraftCapability.upgrade_enabled ? '沿用样片内容生成 1080p' : seedanceDraftCapability.message}
+                        >
+                          {draftUpgradeTaskId === task.id
+                            ? '提交中...'
+                            : task.local_status !== 'succeeded'
+                              ? '等待样片完成'
+                              : seedanceDraftCapability.upgrade_enabled
+                                ? '沿用样片内容生成 1080p'
+                                : '1080p 升级待确认'}
+                        </button>
+                      ) : enhanceTask ? (
                         <Link
                           href={taskDetailHref(task.id, surfaceConfig.routePath)}
                           className="composer-task-card-reuse composer-task-card-reuse-link"

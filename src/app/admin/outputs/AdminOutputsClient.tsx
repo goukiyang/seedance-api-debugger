@@ -29,6 +29,9 @@ interface OutputItem {
   local_status: string;
   provider_task_id: string | null;
   model: string;
+  is_draft: boolean;
+  draft_upgrade_mode: string | null;
+  source_draft_task_id: string | null;
   resolution: string | null;
   duration: number | null;
   ratio: string | null;
@@ -524,6 +527,15 @@ export default function AdminOutputsClient() {
 
                   <div className="outputs-item-main">
                     <div className="outputs-item-kicker">
+                      {output.is_draft ? (
+                        <span className="status-badge status-badge-enhance">
+                          样片 Draft
+                        </span>
+                      ) : output.source_draft_task_id ? (
+                        <span className="status-badge status-badge-enhance">
+                          Draft 转 1080p
+                        </span>
+                      ) : null}
                       {output.is_enhance_task && (
                         <span className="status-badge status-badge-enhance">
                           超分
@@ -558,6 +570,8 @@ export default function AdminOutputsClient() {
                       <summary>审计信息</summary>
                       <div>
                         <span>任务：{shortId(output.id, 14)}</span>
+                        {output.source_draft_task_id && <span>来源 Draft：{shortId(output.source_draft_task_id, 18)}</span>}
+                        {output.draft_upgrade_mode && <span>Draft 流程：{output.draft_upgrade_mode}</span>}
                         <span>来源请求：{shortId(output.source_request_id, 18)}</span>
                         <span>Provider：{shortId(output.provider_task_id, 18)}</span>
                         <span>成本状态：{output.provider_cost_status}</span>

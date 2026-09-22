@@ -9,6 +9,7 @@ import {
   SEEDANCE_VIDEO_MODEL_OPTIONS,
   seedanceVideoModelInternalMultiplier,
 } from '@/lib/provider/seedance-models';
+import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
       endpoints: {
         upload_asset: '/api/codex/assets/upload',
         create_video: '/api/codex/video/create',
+        draft_upgrade: '/api/codex/video/draft-upgrade',
         create_video_direct: '/api/tasks/create',
       },
       auth: {
@@ -43,6 +45,7 @@ export async function GET(request: NextRequest) {
         header: 'Authorization',
       },
       supported_settings: {
+        seedance_draft: seedanceDraftCapability(),
         generation_mode: ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'],
         model: SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => ({
           ...option,

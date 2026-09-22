@@ -878,6 +878,8 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 </span>
                 <span>
                   <strong>{shortPrompt(task.prompt || task.id)}</strong>
+                  {task.is_draft && <span className="task-enhance-chip">样片 Draft</span>}
+                  {!task.is_draft && task.source_draft_task_id && <span className="task-enhance-chip">Draft 转 1080p</span>}
                   {isDashboardEnhanceTask(task) && <span className="task-enhance-chip">视频超分</span>}
                   <small>{dateTimeText(task.created_at)}</small>
                 </span>

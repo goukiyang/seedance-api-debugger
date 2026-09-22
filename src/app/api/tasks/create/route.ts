@@ -17,6 +17,11 @@ import {
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { parseSeedanceVideoModel, seedanceRatioFollowsFirstFrame } from '@/lib/provider/seedance-models';
 import {
+  canCreateSeedanceDraft,
+  isSeedanceDraftCreateEnabled,
+  SEEDANCE_DRAFT_CONTRACT_VERSION,
+} from '@/lib/provider/seedance-draft';
+import {
   H3_VIDEO_PROVIDER,
   H3RequestError,
   createH3VideoJob,
@@ -710,6 +715,16 @@ export async function POST(request: NextRequest) {
     selectedModel = parsedModel.model;
   }
 
+  const draftRequested = body.draft === true;
+  if (draftRequested) {
+    if (requestedProvider !== 'seedance' || !canCreateSeedanceDraft(selectedModel)) {
+      return errorJson('样片 Draft 只支持 Seedance 2.5', 400);
+    }
+    if (!isSeedanceDraftCreateEnabled()) {
+      return errorJson('供应商 Draft 能力尚未完成核验，暂不能创建样片 Draft', 503);
+    }
+  }
+
   const paidGenerationGuard = evaluatePaidGenerationGuard({ request, body, requestSource });
   if (!paidGenerationGuard.allowed) {
     return NextResponse.json(paidGenerationGuardError(paidGenerationGuard), { status: 403 });
@@ -1257,6 +1272,7 @@ export async function POST(request: NextRequest) {
     callback_url: undefined,
     execution_expires_after: body.execution_expires_after,
     model: selectedModel,
+    draft: draftRequested,
   };
 
   let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;
@@ -1425,6 +1441,9 @@ export async function POST(request: NextRequest) {
           last_frame_url: lastFrameUrl || null,
           frame_image_urls: frameImageUrls.length > 0 ? JSON.stringify(frameImageUrls) : null,
           local_status: 'submitted',
+          is_draft: draftRequested,
+          draft_upgrade_mode: draftRequested ? 'draft' : null,
+          draft_contract_version: draftRequested ? SEEDANCE_DRAFT_CONTRACT_VERSION : null,
           user_id: user.id,
           owner_user_id: user.id,
           project_id: project.id,
@@ -1719,6 +1738,7 @@ export async function POST(request: NextRequest) {
       where: { id: taskId },
       data: {
         provider_task_id: providerResult.provider_task_id,
+        ...(draftRequested ? { provider_draft_task_id: providerResult.provider_task_id } : {}),
         raw_create_response: JSON.stringify(providerResult.raw),
         local_status: 'submitted',
       },
@@ -1783,6 +1803,8 @@ export async function POST(request: NextRequest) {
       id: taskId,
       provider: requestedProvider,
       provider_task_id: providerResult.provider_task_id,
+      is_draft: draftRequested,
+      draft_contract_version: draftRequested ? SEEDANCE_DRAFT_CONTRACT_VERSION : null,
       model: selectedModel,
       status: 'submitted',
       estimated_cost: estimatedCost,

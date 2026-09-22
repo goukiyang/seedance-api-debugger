@@ -22,6 +22,8 @@ export interface CreateVideoInput {
   duration?: VideoDuration;
   resolution?: VideoResolution;
   model?: string;
+  draft?: boolean;
+  draft_task_id?: string;
   seed?: number;
   generate_audio?: boolean;
   return_last_frame?: boolean;
@@ -63,6 +65,8 @@ export interface CreateVideoInput {
   duration?: VideoDuration;
   resolution?: VideoResolution;
   model?: string;
+  draft?: boolean;
+  draft_task_id?: string;
   seed?: number;
   generate_audio?: boolean;
   return_last_frame?: boolean;
@@ -150,6 +154,11 @@ export interface VideoTask {
   execution_expires_after?: number;
   local_status: LocalStatus;
   provider_task_id?: string;
+  is_draft?: boolean;
+  provider_draft_task_id?: string;
+  draft_upgrade_mode?: string;
+  source_draft_task_id?: string | null;
+  draft_contract_version?: string | null;
   provider_status?: string;
   result_video_url?: string;
   result_last_frame_url?: string;
@@ -188,6 +197,9 @@ export interface TaskListItem {
   id: string;
   provider_task_id?: string;
   prompt: string;
+  model?: string;
+  is_draft?: boolean;
+  source_draft_task_id?: string | null;
   generation_mode: GenerationMode;
   local_status: LocalStatus;
   created_at: Date;
