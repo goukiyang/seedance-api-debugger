@@ -455,6 +455,17 @@
         if (node.type === 'flow-output') node.data.title = node.data.title || '最终输出';
     }
 
+    function normalizeLoadedFlowNodes() {
+        const current = engine();
+        if (!current) return;
+        current.nodes.forEach(addFlowNodeDefaults);
+        current.refreshToolflowNodes?.();
+        renderNodeSettings();
+    }
+
+    window.UltimateCanvasToolflow = window.UltimateCanvasToolflow || {};
+    window.UltimateCanvasToolflow.normalizeLoadedFlowNodes = normalizeLoadedFlowNodes;
+
     function ensureGuidedGraph() {
         if (state.mode !== 'guided' || !engine()) return;
         const nodes = [...engine().nodes.values()];

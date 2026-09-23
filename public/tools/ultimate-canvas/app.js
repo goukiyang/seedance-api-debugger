@@ -2541,6 +2541,7 @@
             stopAllVideoPolling();
             clearAllVideoEstimates();
             engine.restore(parsed.canvas || parsed);
+            window.UltimateCanvasToolflow?.normalizeLoadedFlowNodes?.();
             recoveredTasklessVideoStatus = hydrateNodeViews();
             refreshContextRulesButtons();
             canvasRuntime.saveState = 'saved';
