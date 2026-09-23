@@ -96,6 +96,9 @@ class CanvasEngine {
 
         this.nodes = new Map();
         this.connections = [];
+        this.flowTemplateOptions = [];
+        this.flowSystemSettings = { model: 'gpt-image-2', quality: 'auto', providerReady: false };
+        this.flowInputUploadState = new Map();
         this.selectedNodeId = null;
         this.nextNodeId = 1;
 
@@ -431,7 +434,7 @@ class CanvasEngine {
             this.nodeResizeObserver?.unobserve(node);
             node.remove();
         });
-        this.svg.querySelectorAll('.connection-line').forEach(line => line.remove());
+        this.svg.querySelectorAll('.connection-line, .connection-delete-control').forEach(line => line.remove());
         this.nodes.clear();
         this.connections = [];
         this.selectedNodeId = null;
@@ -473,6 +476,7 @@ class CanvasEngine {
         this.connections = this.connections.filter(c => {
             if (c.from === nodeId || c.to === nodeId) {
                 document.getElementById(c.lineId)?.remove();
+                document.getElementById(`conn-delete-${c.lineId}`)?.remove();
                 this.onConnectionDeleted?.(c.from, c.to);
                 return false;
             }
@@ -491,7 +495,7 @@ class CanvasEngine {
     _buildNode(nd) {
         const { id, type, x, y } = nd;
         const wrap = document.createElement('div');
-        wrap.className = `canvas-node node-type-${type}${type === 'image' || type === 'video' ? ' generation-node' : ''}`;
+        wrap.className = `canvas-node node-type-${type}${type === 'image' || type === 'video' ? ' generation-node' : ''}${type.startsWith('flow-') ? ' toolflow-node' : ''}`;
         wrap.dataset.nodeId = id;
         wrap.style.left = x + 'px';
         wrap.style.top = y + 'px';
@@ -761,8 +765,8 @@ class CanvasEngine {
                     </div>
                 </div>`;
             }
-            case 'flow-input': return `<div class="toolflow-node-summary"><span class="flow-icon">IN</span><strong>输入图片</strong><small>接收运行时输入资产</small></div>`;
-            case 'flow-template': return `<div class="toolflow-node-summary"><span class="flow-icon">T</span><strong>图片模板</strong><small data-toolflow-node-template>请在工具流面板选择模板</small></div>`;
+            case 'flow-input': return this._flowInputCard(id);
+            case 'flow-template': return this._flowTemplateCard(id);
             case 'flow-select': return `<div class="toolflow-node-summary"><span class="flow-icon">✓</span><strong>结果筛选</strong><small>可单选或多选继续结果</small></div>`;
             case 'flow-confirm': return `<div class="toolflow-node-summary"><span class="flow-icon">?</span><strong>人工确认</strong><small>确认后才会继续下游节点</small></div>`;
             case 'flow-output': return `<div class="toolflow-node-summary"><span class="flow-icon">OUT</span><strong>流程输出</strong><small>结果已归档到资产库</small></div>`;
@@ -771,8 +775,8 @@ class CanvasEngine {
     }
 
     _propsPanel(type, id) {
-        if (type === 'flow-input') return `<div class="toolflow-node-properties"><small>运行时从工具流面板提供输入图片资产。</small></div>`;
-        if (type === 'flow-template') return `<div class="toolflow-node-properties"><textarea class="toolflow-node-prompt" data-toolflow-node-prompt="${id}" placeholder="可选：覆盖模板提示词"></textarea><small>模板权限由服务器校验，不能在画布中写入图片二进制。</small></div>`;
+        if (type === 'flow-input') return `<div class="toolflow-node-properties"><small>已上传的 assetId 会随工作流保存，运行时仍由服务器重新校验权限。</small></div>`;
+        if (type === 'flow-template') return `<div class="toolflow-node-properties"><small>节点内的模板与配置会写入工作流快照，运行前服务器会重新校验权限和模板版本。</small></div>`;
         if (type === 'flow-select') return `<div class="toolflow-node-properties"><small>运行时暂停并等待你选择一个或多个结果。</small></div>`;
         if (type === 'flow-confirm') return `<div class="toolflow-node-properties"><small>运行时暂停，点击确认后继续。</small></div>`;
         if (type === 'flow-output') return `<div class="toolflow-node-properties"><small>成功图片会进入资产库，并带流程、版本和节点标记。</small></div>`;
@@ -946,6 +950,135 @@ class CanvasEngine {
         return '';
     }
 
+    _escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = String(value ?? '');
+        return div.innerHTML;
+    }
+
+    _flowTemplateFor(node) {
+        if (!node) return null;
+        const source = node.data?.templateId || node.data?.template_id ? 'preset' : node.data?.moduleId || node.data?.module_id ? 'module' : '';
+        const id = source === 'preset'
+            ? node.data.templateId || node.data.template_id
+            : node.data?.moduleId || node.data?.module_id;
+        return this.flowTemplateOptions.find(item => item.source === source && item.id === id) || null;
+    }
+
+    _flowTemplateOptionValue(item) { return `${item.source === 'module' ? 'module' : 'preset'}:${item.id}`; }
+
+    _flowModelLabel(model) {
+        return {
+            'gemini-3.1-flash-image-preview': 'Banana 2',
+            'gemini-3-pro-image-preview': 'Banana Pro',
+            'gpt-image-2': 'GPT Image 2',
+            'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
+            'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst'
+        }[model] || model || '当前模型';
+    }
+
+    _flowQualityOptions(model) {
+        const options = {
+            'gemini-3.1-flash-image-preview': ['auto'],
+            'gemini-3-pro-image-preview': ['auto'],
+            'gpt-image-2': ['auto', 'low', 'medium', 'high'],
+            'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+            'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
+        };
+        return options[model] || ['auto'];
+    }
+
+    _flowQualityLabel(value) { return ({ auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' }[value] || value); }
+
+    _flowInputCard(id) {
+        const node = this.nodes.get(id);
+        const assets = Array.isArray(node?.data?.assetPreviews) ? node.data.assetPreviews : [];
+        const ids = Array.isArray(node?.data?.assetIds) ? node.data.assetIds : [];
+        const upload = this.flowInputUploadState.get(id);
+        const cards = assets.length
+            ? assets.map(asset => `<div class="toolflow-input-asset" data-toolflow-input-asset="${this._escapeHtml(asset.id || asset.assetId)}"><span class="toolflow-input-thumb">${asset.thumbnailUrl || asset.originalUrl ? `<img src="${this._escapeHtml(asset.thumbnailUrl || asset.originalUrl)}" alt="">` : '<span>图</span>'}</span><span class="toolflow-input-asset-copy"><strong>${this._escapeHtml(asset.title || asset.fileName || '已上传图片')}</strong><small>已上传 · ${this._escapeHtml(asset.id || asset.assetId)}</small></span><button type="button" data-toolflow-input-remove="${this._escapeHtml(asset.id || asset.assetId)}" aria-label="移除图片">×</button></div>`).join('')
+            : ids.map(assetId => `<div class="toolflow-input-asset"><span class="toolflow-input-thumb"><span>图</span></span><span class="toolflow-input-asset-copy"><strong>已保存图片</strong><small>assetId · ${this._escapeHtml(assetId)}</small></span><button type="button" data-toolflow-input-remove="${this._escapeHtml(assetId)}" aria-label="移除图片">×</button></div>`).join('');
+        const status = upload?.status === 'uploading'
+            ? `上传中${Number.isFinite(upload.progress) ? ` · ${Math.round(upload.progress * 100)}%` : ' · 正在保存'}`
+            : upload?.status === 'error' ? `上传失败：${this._escapeHtml(upload.message || '请重试')}`
+                : ids.length ? `已选 ${ids.length} 张，运行前仍会检查权限` : '点击选择，或把图片拖入此节点，也可直接粘贴';
+        return `<div class="toolflow-input-card" data-toolflow-input-node="${this._escapeHtml(id)}" data-drop-target="toolflow-input">
+            <div class="toolflow-node-summary"><span class="flow-icon">IN</span><strong>输入图片</strong><small>${this._escapeHtml(status)}</small></div>
+            <button type="button" class="toolflow-input-pick" data-toolflow-input-choose="${this._escapeHtml(id)}">选择图片</button>
+            <input type="file" accept="image/*" multiple hidden data-toolflow-input-file="${this._escapeHtml(id)}">
+            <div class="toolflow-input-assets">${cards || '<div class="toolflow-input-empty">尚未加入图片</div>'}</div>
+            ${upload?.status === 'error' ? `<button type="button" class="toolflow-input-retry" data-toolflow-input-retry="${this._escapeHtml(id)}">重试上次上传</button>` : ''}
+        </div>`;
+    }
+
+    _flowTemplateCard(id) {
+        const node = this.nodes.get(id);
+        const data = node?.data || {};
+        const template = this._flowTemplateFor(node);
+        const selected = template ? this._flowTemplateOptionValue(template) : '';
+        const options = this.flowTemplateOptions.map(item => `<option value="${this._escapeHtml(this._flowTemplateOptionValue(item))}"${this._flowTemplateOptionValue(item) === selected ? ' selected' : ''}>${this._escapeHtml(item.name)}${item.source === 'module' ? ' · 我的模块' : ' · 授权模板'}</option>`).join('');
+        const model = data.model || template?.model || this.flowSystemSettings.model || 'gpt-image-2';
+        const modelOptions = template?.allowedModels || [template?.model].filter(Boolean);
+        const systemModels = Object.entries(this.flowSystemSettings.prices || {}).filter(([, price]) => price !== null && price !== undefined).map(([name]) => name);
+        const availableModels = (template ? modelOptions : systemModels.length ? systemModels : [model]).filter(Boolean);
+        const quality = data.quality || template?.quality || this.flowSystemSettings.quality || this._flowQualityOptions(model)[0];
+        const ratio = data.ratio || data.aspectRatio || template?.aspectRatio || 'auto';
+        const count = Number(data.count) || Number(template?.count) || 1;
+        const qualityOptions = this._flowQualityOptions(model).map(value => `<option value="${this._escapeHtml(value)}"${value === quality ? ' selected' : ''}>${this._escapeHtml(this._flowQualityLabel(value))}</option>`).join('');
+        const ratios = [...new Set(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', template?.aspectRatio || 'auto'])];
+        const ratioOptions = ratios.map(value => `<option value="${this._escapeHtml(value)}"${value === ratio ? ' selected' : ''}>${this._escapeHtml(value === 'auto' ? '自动' : value)}</option>`).join('');
+        const sourceLabel = template ? `${template.name} · 当前生效` : '系统默认生图 · 当前生效';
+        const contextState = template
+            ? (template.contextConfigured || String(template.context || '').trim() ? '已配置模板上下文' : '未配置模板上下文')
+            : (this.flowSystemSettings.providerReady ? '系统图片 API 已就绪' : '系统图片 API 将在运行前校验');
+        const fixedReferences = template && Array.isArray(template.images) ? template.images.length : 0;
+        const referenceLimit = template ? Number(template.referenceLimit) || 10 : 9;
+        return `<div class="toolflow-template-card" data-toolflow-template-node="${this._escapeHtml(id)}">
+            <div class="toolflow-node-summary"><span class="flow-icon">T</span><strong>生图模板</strong><small>${this._escapeHtml(sourceLabel)}</small></div>
+            <label class="toolflow-card-field"><span>来源</span><select data-toolflow-node-template-select="${this._escapeHtml(id)}"><option value="">系统默认生图</option>${options}</select></label>
+            <div class="toolflow-template-effective">${this._escapeHtml(contextState)} · 固定参考图 ${fixedReferences} 张 · 输入参考图上限 ${referenceLimit} 张</div>
+            <div class="toolflow-template-settings">
+                <label class="toolflow-card-field"><span>模型</span><select data-toolflow-node-field="model" data-toolflow-node-id="${this._escapeHtml(id)}">${availableModels.map(value => `<option value="${this._escapeHtml(value)}"${value === model ? ' selected' : ''}>${this._escapeHtml(this._flowModelLabel(value))}</option>`).join('')}</select></label>
+                <label class="toolflow-card-field"><span>质量</span><select data-toolflow-node-field="quality" data-toolflow-node-id="${this._escapeHtml(id)}">${qualityOptions}</select></label>
+                <label class="toolflow-card-field"><span>比例</span><select data-toolflow-node-field="ratio" data-toolflow-node-id="${this._escapeHtml(id)}">${ratioOptions}</select></label>
+                <label class="toolflow-card-field"><span>生成张数</span><input type="number" min="1" max="8" step="1" value="${Math.min(8, Math.max(1, count))}" data-toolflow-node-field="count" data-toolflow-node-id="${this._escapeHtml(id)}"></label>
+            </div>
+            <label class="toolflow-card-field"><span>提示词补充</span><textarea data-toolflow-node-field="prompt" data-toolflow-node-id="${this._escapeHtml(id)}" placeholder="可选，补充本次画面要求">${this._escapeHtml(data.prompt || '')}</textarea></label>
+        </div>`;
+    }
+
+    setFlowTemplateOptions(options = []) {
+        this.flowTemplateOptions = Array.isArray(options) ? options : [];
+        this.nodes.forEach(node => { if (node.type === 'flow-template') this.refreshToolflowNode(node.id); });
+    }
+
+    setFlowSystemSettings(settings = {}) {
+        this.flowSystemSettings = { ...this.flowSystemSettings, ...settings };
+        this.refreshToolflowNodes();
+    }
+
+    setFlowInputUploadState(nodeId, state) {
+        if (state) this.flowInputUploadState.set(nodeId, state);
+        else this.flowInputUploadState.delete(nodeId);
+        this.refreshToolflowNode(nodeId);
+    }
+
+    refreshToolflowNode(nodeId) {
+        const node = this.nodes.get(nodeId);
+        const wrap = document.querySelector(`[data-node-id="${nodeId}"]`);
+        if (!node || !wrap || !node.type.startsWith('flow-')) return;
+        const body = wrap.querySelector('.node-body');
+        if (body) body.innerHTML = this._body(node.type, nodeId);
+        const props = wrap.querySelector('.toolflow-node-properties');
+        if (props) props.outerHTML = this._propsPanel(node.type, nodeId);
+    }
+
+    refreshToolflowNodes() {
+        this.nodes.forEach(node => {
+            if (node.type.startsWith('flow-')) this.refreshToolflowNode(node.id);
+        });
+    }
+
     // --- Selection ---
     selectNode(nodeId) {
         if (!this.nodes.has(nodeId)) return false;
@@ -967,7 +1100,12 @@ class CanvasEngine {
 
     // --- Connections ---
     connectNodes(fromId, toId) {
-        if (!this.nodes.has(fromId) || !this.nodes.has(toId) || fromId === toId) return false;
+        if (!this.nodes.has(fromId) || !this.nodes.has(toId)) return false;
+        if (fromId === toId) {
+            this._showNodeIssue(fromId, '不能连接到自己');
+            this.onConnectionRejected?.(fromId, toId, '不能连接到自己');
+            return false;
+        }
         const before = this.connections.length;
         this._createConnection(fromId, toId);
         return this.connections.length > before;
@@ -976,7 +1114,10 @@ class CanvasEngine {
     disconnectNodes(fromId, toId) {
         const removed = this.connections.filter(item => item.from === fromId && item.to === toId);
         if (!removed.length) return false;
-        removed.forEach(item => document.getElementById(item.lineId)?.remove());
+        removed.forEach(item => {
+            document.getElementById(item.lineId)?.remove();
+            document.getElementById(`conn-delete-${item.lineId}`)?.remove();
+        });
         this.connections = this.connections.filter(item => !(item.from === fromId && item.to === toId));
         removed.forEach(item => this.onConnectionDeleted?.(item.from, item.to));
         this._updateConnections();
@@ -1011,7 +1152,12 @@ class CanvasEngine {
     _createConnection(fromId, toId) {
         const source = this.nodes.get(fromId);
         const target = this.nodes.get(toId);
-        if (!source || !target || this.connections.find(c => c.from === fromId && c.to === toId)) return false;
+        if (!source || !target) return false;
+        if (this.connections.find(c => c.from === fromId && c.to === toId)) {
+            this._showNodeIssue(toId, '这条连接已存在');
+            this.onConnectionRejected?.(fromId, toId, '这条连接已存在');
+            return false;
+        }
         const sourceIsFlow = source.type.startsWith('flow-');
         const targetIsFlow = target.type.startsWith('flow-');
         if (sourceIsFlow || targetIsFlow) {
@@ -1031,6 +1177,7 @@ class CanvasEngine {
                 return false;
             })();
             if (!allowed || createsCycle) {
+                this._showNodeIssue(toId, !allowed ? '不能连接这个节点类型' : '不能形成循环');
                 this.onConnectionRejected?.(fromId, toId, !allowed ? '工具流节点类型不兼容' : '工具流不能形成循环');
                 return false;
             }
@@ -1039,9 +1186,13 @@ class CanvasEngine {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         line.id = lineId;
         line.classList.add('connection-line');
+        line.setAttribute('tabindex', '0');
+        line.setAttribute('aria-label', '删除这条连接');
         this.svg.appendChild(line);
 
-        this.connections.push({ from: fromId, to: toId, lineId });
+        const connection = { from: fromId, to: toId, lineId };
+        connection.deleteControl = this._createConnectionDeleteControl(connection);
+        this.connections.push(connection);
         this._updateConnections();
         // Deferred updates: CSS nodeAppear animation takes 0.3s,
         // getBoundingClientRect() returns intermediate values during animation
@@ -1049,6 +1200,51 @@ class CanvasEngine {
         setTimeout(() => this._updateConnections(), 350);
         this.onConnectionCreated?.(fromId, toId);
         return true;
+    }
+    _createConnectionDeleteControl(connection) {
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.id = `conn-delete-${connection.lineId}`;
+        group.classList.add('connection-delete-control');
+        group.setAttribute('role', 'button');
+        group.setAttribute('tabindex', '0');
+        group.setAttribute('aria-label', '删除这条连接');
+        group.innerHTML = '<circle r="10"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3"></path>';
+        const setVisible = visible => group.classList.toggle('is-visible', visible);
+        const hideSoon = () => window.setTimeout(() => {
+            if (!group.matches(':hover') && !document.getElementById(connection.lineId)?.matches(':hover')) setVisible(false);
+        }, 100);
+        group.addEventListener('mouseenter', () => setVisible(true));
+        group.addEventListener('mouseleave', hideSoon);
+        group.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.disconnectNodes(connection.from, connection.to);
+        });
+        group.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                this.disconnectNodes(connection.from, connection.to);
+            }
+        });
+        document.getElementById(connection.lineId)?.addEventListener('mouseenter', () => setVisible(true));
+        document.getElementById(connection.lineId)?.addEventListener('mouseleave', hideSoon);
+        this.svg.appendChild(group);
+        return group;
+    }
+
+    _showNodeIssue(nodeId, message) {
+        const node = document.querySelector(`[data-node-id="${nodeId}"]`);
+        if (!node) return;
+        let issue = node.querySelector('.toolflow-node-issue');
+        if (!issue) {
+            issue = document.createElement('div');
+            issue.className = 'toolflow-node-issue';
+            node.appendChild(issue);
+        }
+        issue.textContent = message;
+        issue.classList.add('is-visible');
+        window.clearTimeout(issue._hideTimer);
+        issue._hideTimer = window.setTimeout(() => issue.classList.remove('is-visible'), 3600);
     }
     _connectionPair(startConnector, endConnector) {
         const startId = startConnector?.closest('.canvas-node')?.dataset.nodeId;
@@ -1067,8 +1263,9 @@ class CanvasEngine {
         // every visible line remains owned by the live connection list and
         // continues to follow drag/zoom/restore updates.
         const liveLineIds = new Set(this.connections.map(connection => connection.lineId));
-        this.svg.querySelectorAll('.connection-line:not(.temp)').forEach(line => {
-            if (!liveLineIds.has(line.id)) line.remove();
+        this.svg.querySelectorAll('.connection-line:not(.temp), .connection-delete-control').forEach(line => {
+            const lineId = line.classList.contains('connection-delete-control') ? line.id.replace('conn-delete-', '') : line.id;
+            if (!liveLineIds.has(lineId)) line.remove();
         });
         this.connections.forEach(c => {
             const fEl = document.querySelector(`[data-node-id="${c.from}"] .node-connector.output`);
@@ -1079,6 +1276,8 @@ class CanvasEngine {
                 const t = this._getConnectorPos(tEl);
                 const d = this._bezier(f.x, f.y, t.x, t.y);
                 line.setAttribute('d', d);
+                const control = document.getElementById(`conn-delete-${c.lineId}`);
+                if (control) control.setAttribute('transform', `translate(${(f.x + t.x) / 2} ${(f.y + t.y) / 2})`);
             }
         });
     }

@@ -139,7 +139,8 @@ export function validateToolFlowGraph(value: unknown) {
       const data = node.data || {};
       const hasAuthorizedBinding = Boolean(clean(data.template_id || data.templateId || data.module_id || data.moduleId));
       const hasPrompt = Boolean(clean(data.prompt));
-      if (!hasAuthorizedBinding && !hasPrompt) throw new AuthError('图片模板节点需要选择模板或填写提示词', 400);
+      const hasSystemDefault = !hasAuthorizedBinding && (clean(data.source) === 'system' || clean(data.model) || clean(data.ratio));
+      if (!hasAuthorizedBinding && !hasPrompt && !hasSystemDefault) throw new AuthError('图片模板节点需要选择模板、使用系统默认或填写提示词', 400);
     }
   });
 

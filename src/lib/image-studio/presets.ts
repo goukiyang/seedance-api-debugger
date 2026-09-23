@@ -36,7 +36,7 @@ export async function listStudioPresets(_userId: string, _isAdmin: boolean) {
   return rows.map(row => {
     const ids = parsePreset(row);
     return {
-      id: row.id, name: row.name, scope: row.scope, groupName: row.group_name,
+      id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: row.context, revision: row.updated_at.toISOString(),
       model: row.model, quality: normalizeImageStudioQuality(row.model, row.quality), count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)),
       aspectRatio: row.aspect_ratio, contextConfigured: Boolean(row.context.trim()),
       images: ids.flatMap(id => { const asset = byId.get(id); return asset ? [{ id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url }] : []; }),

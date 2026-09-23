@@ -4210,6 +4210,7 @@ body.director-studio-open {
     stroke-linecap: round;
     filter: drop-shadow(0 0 4px var(--connection-glow));
     transition: stroke 0.15s ease;
+    pointer-events: stroke;
 }
 .connection-line:hover {
     stroke-width: 3;
@@ -4220,6 +4221,10 @@ body.director-studio-open {
     animation: dashFlow 0.6s linear infinite;
     stroke-width: 2;
 }
+.connection-delete-control { opacity: 0; pointer-events: none; cursor: pointer; transition: opacity .15s ease; }
+.connection-delete-control.is-visible { opacity: 1; pointer-events: auto; }
+.connection-delete-control circle { fill: var(--bg-card); stroke: #ff9b9b; stroke-width: 1.5; filter: drop-shadow(0 2px 5px rgba(0,0,0,.35)); }
+.connection-delete-control path { stroke: #ff9b9b; stroke-width: 1.7; stroke-linecap: round; pointer-events: none; }
 
 /* ===== Floating Canvas Bottom Toolbar (Unified Pill Panel) ===== */
 .canvas-floating-toolbar {
@@ -4437,6 +4442,29 @@ body.director-studio-open {
 .toolflow-node-summary small, .toolflow-node-properties small { color: var(--text-secondary); font-size: 10px; }
 .toolflow-node-properties { display: grid; gap: 7px; padding: 8px; }
 .toolflow-node-prompt { min-height: 54px; resize: vertical; width: 100%; box-sizing: border-box; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 7px; font: inherit; font-size: 11px; }
+.toolflow-input-card, .toolflow-template-card { display: grid; gap: 8px; padding: 9px; text-align: left; }
+.toolflow-input-card { min-width: 0; }
+.toolflow-node-summary { min-width: 0; }
+.toolflow-node-summary small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
+.toolflow-input-pick, .toolflow-input-retry { border: 1px solid rgba(103,216,187,.55); background: rgba(103,216,187,.12); color: #72e2bf; border-radius: 5px; padding: 6px 8px; font: inherit; font-size: 10px; cursor: pointer; }
+.toolflow-input-retry { color: #ffd789; border-color: rgba(255,215,137,.55); background: rgba(255,215,137,.08); }
+.toolflow-input-assets { display: grid; gap: 5px; max-height: 148px; overflow: auto; }
+.toolflow-input-asset { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-radius: 5px; padding: 4px; background: rgba(255,255,255,.025); }
+.toolflow-input-thumb { width: 30px; height: 30px; border-radius: 4px; overflow: hidden; display: grid; place-items: center; background: #11181b; color: var(--text-tertiary); font-size: 9px; }
+.toolflow-input-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.toolflow-input-asset-copy { min-width: 0; }
+.toolflow-input-asset-copy strong, .toolflow-input-asset-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolflow-input-asset-copy strong { color: var(--text-primary); font-size: 10px; }
+.toolflow-input-asset-copy small { color: var(--text-secondary); font-size: 8px; margin-top: 2px; }
+.toolflow-input-asset button { border: 0; background: transparent; color: var(--text-tertiary); cursor: pointer; font-size: 15px; padding: 2px 4px; }
+.toolflow-input-empty, .toolflow-template-empty { color: var(--text-secondary); font-size: 10px; line-height: 1.5; padding: 4px 0; }
+.toolflow-card-field { display: grid; gap: 4px; color: var(--text-secondary); font-size: 9px; }
+.toolflow-card-field select, .toolflow-card-field input, .toolflow-card-field textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-card); color: var(--text-primary); padding: 6px; font: inherit; font-size: 10px; }
+.toolflow-card-field textarea { min-height: 42px; resize: vertical; }
+.toolflow-template-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.toolflow-template-effective { color: var(--text-secondary); font-size: 9px; line-height: 1.45; border-radius: 5px; padding: 6px; background: rgba(103,216,187,.07); }
+.toolflow-node-issue { position: absolute; z-index: 8; left: 8px; right: 8px; bottom: -30px; padding: 6px 8px; border: 1px solid rgba(255,100,100,.55); border-radius: 5px; background: rgba(75,24,28,.95); color: #ffb1b1; font-size: 10px; opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity .15s ease, transform .15s ease; }
+.toolflow-node-issue.is-visible { opacity: 1; transform: translateY(0); }
 .toolflow-header { gap: 10px; }
 .toolflow-header small, .toolflow-advanced-heading span { display: block; color: var(--text-secondary); font-size: 11px; font-weight: 400; margin-top: 3px; }
 .toolflow-header-actions { display: flex; align-items: center; gap: 6px; }

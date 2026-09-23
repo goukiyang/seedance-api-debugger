@@ -85,6 +85,8 @@
         get selectedVideoCardId() { return canvasRuntime.selectedVideoCardId; },
         get selectedVideoBranchId() { return canvasRuntime.selectedVideoBranchId; },
         get documentId() { return canvasRuntime.documentId; },
+        get libraryItems() { return canvasRuntime.libraryItems; },
+        get historyItems() { return canvasRuntime.historyItems; },
         get bootstrap() { return canvasRuntime.bootstrap; },
         markChanged(reason = 'toolflow_change') { scheduleCanvasSave(reason); },
     };
@@ -2635,7 +2637,7 @@
             return;
         }
         container.innerHTML = `<div class="canvas-library-list">${items.map(item => `
-            <button class="canvas-library-item" data-library-id="${escapeHtml(item.id)}">
+            <button class="canvas-library-item" draggable="true" data-library-id="${escapeHtml(item.id)}">
                 <span class="library-thumb">
                     ${itemPreview(item)
                         ? `<img src="${escapeHtml(itemPreview(item))}" alt="${escapeHtml(item.title)}">`

@@ -5,7 +5,7 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { allocateTaskCredits, settleTaskCredits, type CreditPolicyUser } from '@/lib/credits/policy';
 import { createInAppNotification } from '@/lib/notifications';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
-import { defaultImageStudioQuality, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
+import { defaultImageStudioQuality, normalizeImageStudioQuality, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { normalizeStudioRatio, studioRatioSize } from '@/lib/image-studio/ratios';
 import { assertCanUseToolFlow, parseJsonObject, validateToolFlowGraph, type ToolFlowGraph, type ToolFlowNode } from './toolflow';
 
@@ -199,11 +199,12 @@ async function resolveTemplate(
   const data = node.data || {};
   const templateId = clean(data.template_id || data.templateId) || null;
   const moduleId = clean(data.module_id || data.moduleId) || null;
-  if (!templateId && !moduleId && flowOwnerId !== ownerId) {
+  if (!templateId && !moduleId && clean(data.source, 'system') !== 'system' && flowOwnerId !== ownerId) {
     throw new AuthError('共享工具流中的图片模板未绑定授权模板', 403);
   }
 
-  let prompt = clean(data.prompt);
+  const promptSupplement = clean(data.prompt);
+  let prompt = '';
   let context = settings.context;
   let model: string = settings.model;
   let quality = defaultImageStudioQuality(model);
@@ -211,6 +212,7 @@ async function resolveTemplate(
   let aspectRatio = clean(data.ratio || data.aspect_ratio, 'auto');
   let outputSize: string | null = clean(data.size || data.output_size) || null;
   let templateReferenceIds: string[] = [];
+  const templateVersion = data.template_version ?? data.templateVersion;
 
   if (templateId) {
     const preset = await tx.imageStudioPreset.findFirst({
@@ -221,27 +223,39 @@ async function resolveTemplate(
     });
     if (!preset) throw new AuthError('图片模板不存在或未授权', 403);
     const presetIds = safeJsonArray(preset.reference_ids);
+    if (templateVersion && String(templateVersion) !== preset.updated_at.toISOString()) throw new AuthError('图片模板已更新，请刷新后重新确认节点配置', 409);
     templateReferenceIds = await clonePresetAssets(tx, preset.owner_id, ownerId, presetIds);
-    prompt = prompt || preset.prompt;
+    if (data.model && clean(data.model) !== preset.model) throw new AuthError('当前模板不允许切换到该图片模型', 400);
+    prompt = [preset.prompt, promptSupplement].filter(Boolean).join('\n\n');
     context = preset.context || settings.context;
     model = preset.model || settings.model;
-    quality = normalizeImageStudioQuality(model, preset.quality);
+    quality = normalizeImageStudioQuality(model, data.quality || preset.quality);
     count = numberInRange(data.count, numberInRange(preset.count, 1, 1, 8), 1, 8);
     aspectRatio = clean(data.ratio || data.aspect_ratio, preset.aspect_ratio || 'auto');
     outputSize = clean(data.size || data.output_size) || studioRatioSize(aspectRatio) || null;
   } else if (moduleId) {
     const studioModule = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId } });
     if (!studioModule) throw new AuthError('图片模块不存在或未授权', 403);
+    if (templateVersion && String(templateVersion) !== String(studioModule.revision)) throw new AuthError('图片模块已更新，请刷新后重新确认节点配置', 409);
     templateReferenceIds = await clonePresetAssets(tx, ownerId, ownerId, safeJsonArray(studioModule.reference_ids));
-    prompt = prompt || studioModule.prompt;
+    if (data.model && clean(data.model) !== studioModule.model) throw new AuthError('当前模板不允许切换到该图片模型', 400);
+    prompt = [studioModule.prompt, promptSupplement].filter(Boolean).join('\n\n');
     context = studioModule.context || settings.context;
     model = studioModule.model || settings.model;
-    quality = normalizeImageStudioQuality(model, studioModule.quality);
+    quality = normalizeImageStudioQuality(model, data.quality || studioModule.quality);
     count = numberInRange(data.count, numberInRange(studioModule.count, 1, 1, 8), 1, 8);
     aspectRatio = clean(data.ratio || data.aspect_ratio, studioModule.aspect_ratio || 'auto');
     outputSize = clean(data.size || data.output_size) || studioRatioSize(aspectRatio) || null;
+  } else {
+    prompt = promptSupplement;
+    model = clean(data.model, settings.model);
+    quality = normalizeImageStudioQuality(model, data.quality || defaultImageStudioQuality(model));
+    count = numberInRange(data.count, 1, 1, 8);
+    aspectRatio = clean(data.ratio || data.aspect_ratio, 'auto');
+    outputSize = clean(data.size || data.output_size) || null;
   }
 
+  if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) throw new AuthError('当前图片模型未配置或不可用', 409);
   // A saved image module may intentionally keep the user-facing prompt empty
   // and store the reusable instruction in its context. The image worker uses
   // that context as the provider prompt when no extra scene description is
@@ -251,7 +265,7 @@ async function resolveTemplate(
     throw new AuthError('当前图片模型尚未配置工具流生成积分', 409);
   }
   try { aspectRatio = normalizeStudioRatio(aspectRatio); } catch { aspectRatio = 'auto'; }
-  const referenceIds = Array.from(new Set(inputAssetIds.concat(templateReferenceIds))).slice(0, 9);
+  const referenceIds = Array.from(new Set(templateReferenceIds.concat(inputAssetIds))).slice(0, 9);
   return {
     prompt: prompt.slice(0, 20000),
     context: context.slice(0, 20000),
