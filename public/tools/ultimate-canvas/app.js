@@ -2714,6 +2714,9 @@
             taskId: item.taskId || null,
             previewImage: itemPreview(item),
             thumbnailUrl: item.thumbnailUrl || itemPreview(item),
+            originalUrl: item.originalUrl || item.downloadUrl || '',
+            width: item.width || null,
+            height: item.height || null,
             videoPreviewUrl: item.previewUrl || null,
             videoDownloadUrl: item.downloadUrl || null,
             source: item.source,
@@ -2796,6 +2799,8 @@
             previewImage: imagePreview,
             thumbnailUrl: imagePreview,
             originalUrl: asset.originalUrl || '',
+            width: asset.width || null,
+            height: asset.height || null,
             videoPreviewUrl: type === 'video' ? asset.originalUrl || '' : '',
             source: 'upload'
         });
@@ -2826,14 +2831,28 @@
             const limits = capability.capabilities || {};
             const current = node.data?.imageSettings || {};
             const maximum = Math.max(1, Number(limits.max_outputs_per_request) || 1);
+            const references = availableGenerationReferenceItems(node.id);
+            const firstReference = references.find(item => Number.isInteger(Number(item.width)) && Number(item.width) > 0
+                && Number.isInteger(Number(item.height)) && Number(item.height) > 0) || null;
+            const ratioResolution = window.UltimateCanvasGenerationInteractions.resolveImageRatio(
+                current.ratio || 'auto', firstReference, '1:1'
+            );
+            const resolutionOptions = Array.isArray(limits.size_options) && limits.size_options.length
+                ? limits.size_options
+                : ['1K', '2K'];
+            const requestedResolution = resolutionOptions.includes(current.resolution)
+                ? current.resolution
+                : resolutionOptions.includes(current.size) ? current.size : capability.default_resolution || resolutionOptions[resolutionOptions.length - 1];
+            const customSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size) ? current.size : '';
             return {
-                ratio: current.ratio || selectedVideoCard()?.ratio || '16:9',
-                size: current.size || capability.size || limits.size_options?.[0] || '1K',
+                ratio: ratioResolution.resolved,
+                requestedRatio: ratioResolution.requested,
+                ratioSource: ratioResolution.source,
+                resolution: requestedResolution,
+                size: customSize || window.UltimateCanvasGenerationInteractions.imageSizeForRatio(ratioResolution.resolved, requestedResolution),
                 count: Math.max(1, Math.min(maximum, Number(current.count) || 1)),
                 maximumCount: maximum,
-                sizeOptions: Array.isArray(limits.size_options) && limits.size_options.length
-                    ? limits.size_options
-                    : [current.size || capability.size || '1K']
+                sizeOptions: resolutionOptions
             };
         }
         if (node.type === 'video') {
@@ -2917,6 +2936,8 @@
                     referenceImageId,
                     preview,
                     title: data.title || `参考图 ${index + 1}`,
+                    width: data.width || data.assetWidth || null,
+                    height: data.height || data.assetHeight || null,
                     available: Boolean(referenceImageId)
                 };
             })
@@ -3162,7 +3183,7 @@
             const spec = nodeEl.querySelector('[data-generation-spec]');
             const cost = nodeEl.querySelector('[data-generation-cost]');
             if (cost) cost.textContent = '后台计费';
-            if (spec) spec.textContent = `${settings.ratio} · ${settings.size} · ${settings.count}张`;
+            if (spec) spec.textContent = `${settings.ratio}${settings.ratioSource === 'reference' ? '（跟随原图）' : ''} · ${settings.resolution} · ${settings.size} · ${settings.count}张`;
         } else {
             const spec = nodeEl.querySelector('[data-generation-spec]');
             if (spec) {
@@ -3315,13 +3336,14 @@
         );
         if (node.type === 'image') {
             const sizeControl = capability.sizeOptions.length
-                ? generationChoiceGroup('size', '尺寸', capability.sizeOptions, settings.size)
+                ? generationChoiceGroup('resolution', '分辨率', capability.sizeOptions, settings.resolution || settings.size)
                 : capability.fixedSize
                     ? `<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">${escapeHtml(capability.fixedSize)}</div></section>`
                     : '<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">不可用</div></section>';
             const counts = Array.from({ length: settings.maximumCount }, (_, index) => index + 1);
             return `<div class="generation-popover-spec" data-generation-settings="image">
-                ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
+                ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.requestedRatio || settings.ratio)}
+                <p class="generation-spec-hint">当前生效：${escapeHtml(settings.ratio)} · ${escapeHtml(settings.ratioSource === 'reference' ? '首张有效参考图' : '模型默认或手动选择')} · ${escapeHtml(settings.size)}</p>
                 ${sizeControl}
                 ${generationChoiceGroup('count', '生成数量', counts, settings.count, value => `${value}张`)}
             </div>`;
@@ -3339,13 +3361,14 @@
     function applyGenerationSettingChoice(node, name, rawValue) {
         const current = generationSettingsForNode(node);
         if (node.type === 'image') {
-            const allowed = new Set(['ratio', 'size', 'count']);
+            const allowed = new Set(['ratio', 'resolution', 'count']);
             if (!allowed.has(name)) return false;
             node.data = {
                 ...node.data,
                 imageSettings: {
-                    ratio: name === 'ratio' ? rawValue : current.ratio,
-                    size: name === 'size' ? rawValue : current.size,
+                    ratio: name === 'ratio' ? rawValue : current.requestedRatio,
+                    resolution: name === 'resolution' ? rawValue : current.resolution,
+                    size: current.size,
                     count: name === 'count' ? Number(rawValue) : current.count
                 }
             };
@@ -3712,6 +3735,13 @@
                 assetId: normalized.assetId,
                 referenceImageId: normalized.referenceImageId,
                 workspaceAssetId: normalized.workspaceAssetId,
+                imageSettings: {
+                    ...(node.data?.imageSettings || {}),
+                    ratio: payload.settings?.requestedRatio || payload.settings?.ratio || node.data?.imageSettings?.ratio || 'auto',
+                    resolution: payload.settings?.resolution || node.data?.imageSettings?.resolution || '1K',
+                    size: result?.size || payload.settings?.size || node.data?.imageSettings?.size || '1024x1024',
+                    resolvedRatio: result?.resolved_ratio || payload.settings?.ratio || null,
+                },
                 generationPayload: payload,
                 generationResult: result,
                 generationStatus: 'succeeded'
@@ -4439,7 +4469,7 @@
                     sourceNodeId: node.id,
                     prompt: node.data?.prompt || node.data?.description || '',
                     videoSettings: {
-                        ratio: node.data?.imageSettings?.ratio || ratioFromContext(),
+                        ratio: generationSettingsForNode(node).ratio || ratioFromContext(),
                         duration: durationFromContext(),
                         resolution: resolutionFromContext(),
                         generateAudio: false,

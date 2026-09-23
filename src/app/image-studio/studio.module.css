@@ -53,10 +53,12 @@
 .preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .page .remove { position: absolute; top: 6px; right: 6px; padding: 4px; width: 28px; height: 28px; background: #15191e; }
 .counts { display: flex; gap: 8px; flex-wrap: wrap; }
+.downloadModeBar { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; color: #d8f4ed; font-size: 12px; }
+.downloadModeBar button { padding: 6px 8px; }
 .counts button { min-width: 40px; }
 .counts button[aria-pressed=true] { border-color: #79daca; color: #a4f2df; background: #123b33; }
 .counts input { width: 68px; }
-.modelQualityRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, .55fr); gap: 10px; margin-top: 20px; }
+.modelQualityRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, .55fr) minmax(110px, .55fr); gap: 10px; margin-top: 20px; }
 .compactField { display: grid; gap: 8px; min-width: 0; font-size: 14px; }
 .compactField strong { font-weight: 750; }
 .compactField select { width: 100%; }
@@ -87,9 +89,12 @@
 @media (hover: none) { .page .deleteResult, .page .ratioDelete, .resultCommands { opacity: 1; } }
 .prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; margin: 10px 0 6px; }
 .resultActions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.resultMeta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; margin: 0 0 8px; color: #adb6bd; font-size: 12px; line-height: 1.35; }
+.resultMeta span:first-child { color: #d8f4ed; font-weight: 800; cursor: help; }
 .resultActions button { padding: 5px 8px; font-size: 13px; }
 .resultCommands { display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity .16s ease; }
 .result:hover .resultCommands, .result:focus-within .resultCommands { opacity: 1; }
+.copyFeedback { display: block; margin-top: 5px; color: #8ce5d2; font-size: 12px; }
 .deleteInline { color: #ffb4ab !important; border-color: #a44949 !important; }
 .spinner { animation: spin 1s linear infinite; }
 .page a { color: #8ce5d2; }
@@ -97,11 +102,18 @@
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .empty { display: flex; justify-content: center; align-items: center; min-height: 360px; color: #adb6bd; border-bottom: 1px solid #333b40; }
 .coverGrid { min-width: 0; }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; color: #adb6bd; font-size: 13px; }
 .coverGridInner { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
-.page .coverCard { display: grid; grid-template-rows: 3fr 1fr; gap: 0; aspect-ratio: 3 / 4; align-items: stretch; padding: 0; overflow: hidden; text-align: left; border-color: #364248; background: #171c1f; }
-.coverVisual { display: flex; align-items: center; justify-content: center; min-height: 0; color: #87949a; background: #0b0e0f center / cover no-repeat; }
-.coverDescription { display: grid; gap: 6px; min-height: 0; overflow: hidden; box-sizing: border-box; padding: 10px; }
-.coverDescription strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page .coverCard { display: grid; grid-template-rows: minmax(0, 1fr) 112px; gap: 0; aspect-ratio: 3 / 4; align-items: stretch; padding: 0; overflow: hidden; text-align: left; border-color: #364248; background: #171c1f; }
+.coverVisual { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; justify-content: center; min-height: 0; overflow: hidden; color: #87949a; background: #0b0e0f; }
+.coverVisual:has(> img:only-child) { display: block; }
+.coverVisual > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.coverComparisonPane { position: relative; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid rgb(255 255 255 / 20%); }
+.coverComparisonPane:last-child { border-right: 0; }
+.coverComparisonPane img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.coverComparisonPane small { position: absolute; left: 6px; bottom: 6px; padding: 3px 5px; border-radius: 4px; background: rgb(0 0 0 / 65%); color: #fff; font-size: 10px; }
+.coverDescription { display: grid; grid-template-rows: minmax(44px, 1fr) minmax(0, 2fr); gap: 6px; min-height: 0; overflow: hidden; box-sizing: border-box; padding: 12px; }
+.coverDescription strong { display: -webkit-box; overflow: hidden; font-size: 22px; font-weight: 850; line-height: 1.1; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .coverDescription small { display: -webkit-box; overflow: hidden; color: #adb6bd; font-size: 12px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .error { color: #ffb4ab; font-size: 14px; overflow-wrap: anywhere; }
 .dialog { box-sizing: border-box; margin: auto; width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
@@ -113,4 +125,4 @@
 .presetItem > div { display: grid; gap: 4px; min-width: 0; }
 .presetItem span { color: #adb6bd; font-size: 12px; }
 @media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: 0; bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
-@media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } .modelQualityRow { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } .modelQualityRow { grid-template-columns: 1fr; } .page .coverCard { grid-template-rows: minmax(0, 1fr) 122px; } .coverDescription strong { font-size: 20px; } }

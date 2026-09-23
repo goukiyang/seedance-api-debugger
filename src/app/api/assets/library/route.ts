@@ -50,6 +50,8 @@ type LibraryItem = {
   thumbnailUrl: string | null;
   previewUrl: string | null;
   downloadUrl: string | null;
+  width: number | null;
+  height: number | null;
   fileSize: number | null;
   duration: number | null;
   ratio: string | null;
@@ -242,6 +244,8 @@ async function serializeTask(task: {
     thumbnailUrl,
     previewUrl: videoUrl,
     downloadUrl: videoUrl,
+    width: null,
+    height: null,
     fileSize: null,
     duration: task.duration,
     ratio: task.ratio,
@@ -306,6 +310,8 @@ function serializeAsset(asset: {
     thumbnailUrl,
     previewUrl: originalUrl,
     downloadUrl: originalUrl,
+    width: asset.width ?? null,
+    height: asset.height ?? null,
     fileSize: asset.file_size ?? null,
     duration: null,
     ratio: asset.width && asset.height ? `${asset.width}:${asset.height}` : null,
@@ -348,6 +354,7 @@ function serializeReferenceImage(image: {
   owner: LibraryUser | null;
   album: { id: string; name: string } | null;
   asset_id: string | null;
+  asset: { width: number | null; height: number | null } | null;
 }): LibraryItem {
   const originalUrl = publicAssetUrl(image.url);
   const thumbnailUrl = publicAssetUrl(image.thumbnail_url) || originalUrl;
@@ -364,6 +371,8 @@ function serializeReferenceImage(image: {
     thumbnailUrl,
     previewUrl: originalUrl,
     downloadUrl: originalUrl,
+    width: image.asset?.width ?? null,
+    height: image.asset?.height ?? null,
     fileSize: null,
     duration: null,
     ratio: null,
@@ -737,6 +746,7 @@ async function loadReferenceItems(options: {
         status: true,
         created_at: true,
         asset_id: true,
+        asset: { select: { width: true, height: true } },
         project: { select: { id: true, name: true, type: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         album: { select: { id: true, name: true } },

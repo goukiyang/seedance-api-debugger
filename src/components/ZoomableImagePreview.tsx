@@ -3,13 +3,35 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent, PointerEvent, WheelEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import styles from './ZoomableImagePreview.module.css';
+
+export type ImageComparisonSource = {
+  src: string;
+  alt: string;
+  fileName?: string;
+};
+
+export type ImagePreviewMetadata = {
+  context?: string;
+  model?: string;
+  quality?: string;
+  ratio?: string;
+  resolution?: string;
+  time?: string;
+};
 
 type ZoomableImagePreviewProps = {
   src: string;
   alt: string;
   fileName?: string;
+  title?: string;
+  previewKey?: string;
+  metadata?: ImagePreviewMetadata;
+  comparison?: ImageComparisonSource;
+  hasNavigation?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
   onClose: () => void;
 };
 
@@ -21,7 +43,7 @@ function clampScale(value: number) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 }
 
-export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, metadata, comparison, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -30,6 +52,10 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [comparisonMode, setComparisonMode] = useState(false);
+  const [comparisonAxis, setComparisonAxis] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [comparisonLoaded, setComparisonLoaded] = useState(false);
+  const [comparisonError, setComparisonError] = useState(false);
 
   const resetView = useCallback(() => {
     setScale(1);
@@ -50,6 +76,8 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
+      if (event.key === 'ArrowLeft' && hasNavigation) { event.preventDefault(); onPrevious?.(); }
+      if (event.key === 'ArrowRight' && hasNavigation) { event.preventDefault(); onNext?.(); }
       if (event.key === '+' || event.key === '=') zoomAtCenter(SCALE_STEP);
       if (event.key === '-') zoomAtCenter(1 / SCALE_STEP);
       if (event.key === '0') resetView();
@@ -60,13 +88,17 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose, resetView, zoomAtCenter]);
+  }, [hasNavigation, onClose, onNext, onPrevious, resetView, zoomAtCenter]);
 
   useEffect(() => {
     resetView();
     setImageLoaded(false);
     setImageError(false);
-  }, [resetView, src]);
+    setComparisonMode(false);
+    setComparisonAxis('horizontal');
+    setComparisonLoaded(false);
+    setComparisonError(false);
+  }, [resetView, previewKey, src, comparison?.src]);
 
   const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -89,11 +121,12 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
 
   const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 && event.button !== 1) return;
+    if (scale <= 1) return;
     event.preventDefault();
     dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     setDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
-  }, []);
+  }, [scale]);
 
   const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
@@ -130,10 +163,24 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
     >
       <div className={styles.toolbar}>
         <div className={styles.title}>
-          <strong>{fileName || alt}</strong>
+          <strong>{title || fileName || alt}</strong>
           <span>{imageError ? '加载失败' : imageLoaded ? `${Math.round(scale * 100)}%` : '加载中...'}</span>
+          {metadata && <div className={styles.metadata} title={metadata.context || undefined}>
+            {metadata.context && <span>上下文：{metadata.context}</span>}
+            {(metadata.model || metadata.quality || metadata.ratio || metadata.resolution || metadata.time) && <span>{[metadata.model, metadata.quality, metadata.ratio, metadata.resolution, metadata.time].filter(Boolean).join(' · ')}</span>}
+          </div>}
         </div>
         <div className={styles.actions}>
+          {hasNavigation && <>
+            <button type="button" onClick={onPrevious} title="上一张" aria-label="上一张生成图片"><ArrowLeft size={16} /></button>
+            <button type="button" onClick={onNext} title="下一张" aria-label="下一张生成图片"><ArrowRight size={16} /></button>
+          </>}
+          {comparison && <button type="button" data-image-preview-compare aria-pressed={comparisonMode} onClick={() => { setComparisonMode((current) => !current); resetView(); }} title="对比参考图" aria-label="对比参考图">
+            <ArrowLeftRight size={16} />
+          </button>}
+          {comparison && comparisonMode && <button type="button" data-image-preview-direction onClick={() => { setComparisonAxis((current) => current === 'horizontal' ? 'vertical' : 'horizontal'); resetView(); }} title={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'} aria-label={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'}>
+            {comparisonAxis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}
+          </button>}
           <button type="button" onClick={() => zoomAtCenter(1 / SCALE_STEP)} title="缩小" aria-label="缩小图片">
             <ZoomOut size={16} />
           </button>
@@ -152,7 +199,8 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
         ref={stageRef}
         className={`${styles.stage} ${dragging ? styles.stageDragging : ''}`}
         title="滚轮缩放，拖动查看"
-        aria-busy={!imageLoaded && !imageError}
+        data-image-preview-stage
+        aria-busy={!imageLoaded && !imageError || comparisonMode && !comparisonLoaded && !comparisonError}
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -162,10 +210,7 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
         onClick={(event) => {
           if (event.target === event.currentTarget) onClose();
         }}
-        onDoubleClick={() => {
-          if (scale > 1) resetView();
-          else zoomAtCenter(2);
-        }}
+        onDoubleClick={resetView}
       >
         {/* 参考图来源可能是本地、远程或临时地址，这里保留原生 img 以支持原图缩放查看。 */}
         {(!imageLoaded || imageError) && (
@@ -176,23 +221,41 @@ export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableIm
           </div>
         )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={src}
-          alt={alt}
-          className={`${styles.image} ${imageLoaded ? styles.imageReady : styles.imageLoading}`}
-          draggable={false}
-          onLoad={() => {
-            setImageLoaded(true);
-            setImageError(false);
-          }}
-          onError={() => {
-            setImageLoaded(false);
-            setImageError(true);
-          }}
-          style={{
-            transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
-          }}
-        />
+        {comparison && comparisonMode ? <div className={`${styles.compareFrame} ${comparisonAxis === 'vertical' ? styles.compareVertical : styles.compareHorizontal}`} data-image-preview-compare-frame>
+          <div className={styles.comparePane} data-image-preview-pane="reference" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+            <span className={styles.compareLabel}>参考图</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={comparison.src} alt={comparison.alt} className={`${styles.compareImage} ${comparisonLoaded ? styles.imageReady : styles.imageLoading}`} draggable={false}
+              onLoad={() => { setComparisonLoaded(true); setComparisonError(false); }} onError={() => { setComparisonLoaded(false); setComparisonError(true); }}
+              style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} />
+          </div>
+          <div className={styles.comparePane} data-image-preview-pane="result" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+            <span className={styles.compareLabel}>生成图</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={alt} className={`${styles.compareImage} ${imageLoaded ? styles.imageReady : styles.imageLoading}`} draggable={false}
+              onLoad={() => { setImageLoaded(true); setImageError(false); }} onError={() => { setImageLoaded(false); setImageError(true); }}
+              style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} />
+          </div>
+        </div> : <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={alt}
+            className={`${styles.image} ${imageLoaded ? styles.imageReady : styles.imageLoading}`}
+            draggable={false}
+            onLoad={() => {
+              setImageLoaded(true);
+              setImageError(false);
+            }}
+            onError={() => {
+              setImageLoaded(false);
+              setImageError(true);
+            }}
+            style={{
+              transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
+            }}
+          />
+        </>}
       </div>
     </div>
   );

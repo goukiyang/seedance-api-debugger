@@ -330,6 +330,7 @@ model ImageStudioModule {
   context       String   @default("")
   model         String?
   quality       String        @default("auto")
+  resolution    String        @default("4K")
   group_name    String        @default("未分组")
   banner_asset_id String?
   prices_json   String?
@@ -355,6 +356,7 @@ model ImageStudioPreset {
   context       String   @default("")
   model         String
   quality       String   @default("auto")
+  resolution    String   @default("4K")
   count         Int      @default(1)
   reference_limit Int    @default(10)
   aspect_ratio  String   @default("auto")

@@ -273,7 +273,7 @@ contains(appSource, 'function generationChoiceGroup', 'specification choices ren
 contains(appSource, 'function generationDurationSlider', 'video duration setting renders as a compact slider');
 contains(appSource, 'data-generation-setting-choice', 'tile settings expose one event target');
 contains(appSource, 'data-generation-duration-slider', 'duration slider exposes one event target');
-contains(appSource, "const allowed = new Set(['ratio', 'size', 'count'])", 'image settings stay allowlisted');
+contains(appSource, "const allowed = new Set(['ratio', 'resolution', 'count'])", 'image settings stay allowlisted');
 contains(appSource, "const allowed = new Set(['ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark'])", 'video settings stay allowlisted');
 contains(appSource, 'function updateGenerationNodeModelLabel', 'new nodes receive the backend model label');
 contains(appSource, 'pendingGenerationReferenceTargetId', 'asset selection targets a generation node');
@@ -310,9 +310,9 @@ assert.match(
   /capabilities\.video\?\.message\s*\|\|\s*window\.UltimateCanvasBackendContract\.SAFE_UNAVAILABLE_MESSAGE/,
 );
 
-assert.match(indexSource, /styles\.css\?v=20260826-canvas-module-refresh/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /styles\.css\?v=20260924-canvas-parallel/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260924-canvas-parallel/);
 assert.match(indexSource, /generation-node-workflow\.js\?v=20260813-video-delivery/);
-assert.match(indexSource, /app\.js\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /app\.js\?v=20260924-canvas-parallel/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

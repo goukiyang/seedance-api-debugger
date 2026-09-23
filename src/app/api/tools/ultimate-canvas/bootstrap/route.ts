@@ -29,6 +29,7 @@ import {
   videoCardStatusLabel,
 } from '@/lib/video-cards/display';
 import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,12 +43,14 @@ function imageModelLabel(provider: string, model: string) {
   return model || provider || '图片模型';
 }
 
-function imageModelCapabilities(provider: string) {
+function imageModelCapabilities(provider: string, model: string) {
+  const sizeOptions = imageResolutionOptions(model, provider);
   if (provider === 'seedream') {
     return {
       reference_image_limit: 10,
       max_outputs_per_request: 1,
-      size_options: ['1K', '2K'],
+      size_options: sizeOptions,
+      default_resolution: defaultImageResolution(model, provider),
       output_formats: ['png', 'jpeg'],
       supports_stream: false,
       supports_sequential_generation: false,
@@ -57,7 +60,8 @@ function imageModelCapabilities(provider: string) {
   return {
     reference_image_limit: 9,
     max_outputs_per_request: 8,
-    size_options: [],
+    size_options: sizeOptions,
+    default_resolution: defaultImageResolution(model, provider),
     output_formats: ['png'],
     supports_stream: false,
     supports_sequential_generation: false,
@@ -372,13 +376,13 @@ export async function GET(request: NextRequest) {
         output_format: imageSettings.output_format,
         response_format: imageSettings.response_format,
         watermark: imageSettings.watermark,
-        capabilities: imageModelCapabilities(imageSettings.provider),
+        capabilities: imageModelCapabilities(imageSettings.provider, imageSettings.default_model),
         interaction: {
           modes: ['text-to-image', 'image-to-image', 'upscale-image', 'first-frame-draft', 'last-frame-draft'],
-          ratios: RATIO_OPTIONS,
-          size_options: imageModelCapabilities(imageSettings.provider).size_options,
-          max_outputs_per_request: imageModelCapabilities(imageSettings.provider).max_outputs_per_request,
-          max_reference_images: imageModelCapabilities(imageSettings.provider).reference_image_limit,
+          ratios: ['auto', ...RATIO_OPTIONS],
+          size_options: imageModelCapabilities(imageSettings.provider, imageSettings.default_model).size_options,
+          max_outputs_per_request: imageModelCapabilities(imageSettings.provider, imageSettings.default_model).max_outputs_per_request,
+          max_reference_images: imageModelCapabilities(imageSettings.provider, imageSettings.default_model).reference_image_limit,
         },
         endpoint: '/api/assets/generate',
         billing: 'site_asset_generation',

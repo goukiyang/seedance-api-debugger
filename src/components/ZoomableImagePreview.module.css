@@ -39,6 +39,22 @@
   font-size: 12px;
 }
 
+.metadata {
+  display: grid;
+  max-width: min(72vw, 900px);
+  gap: 2px;
+  overflow: hidden;
+  color: oklch(0.78 0 0);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.metadata span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .actions {
   display: flex;
   gap: 6px;
@@ -55,6 +71,16 @@
   background: oklch(0.28 0 0 / 0.86);
   color: oklch(0.96 0 0);
   cursor: pointer;
+}
+
+.actions button:has(.actionLabel) {
+  width: auto;
+  padding: 0 9px;
+}
+
+.actionLabel {
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .actions button:hover {
@@ -124,6 +150,54 @@
   will-change: transform;
 }
 
+.compareFrame {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  background: oklch(0.08 0 0);
+}
+
+.compareHorizontal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.compareVertical { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+
+.comparePane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid oklch(0.9 0 0 / 0.12);
+  background: oklch(0.12 0 0);
+}
+
+.compareLabel {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: oklch(0.08 0 0 / 0.7);
+  color: oklch(0.96 0 0);
+  font-size: 12px;
+  font-weight: 750;
+  pointer-events: none;
+}
+
+.compareImage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: 94%;
+  max-height: 94%;
+  object-fit: contain;
+  transform-origin: center;
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.stageDragging .compareImage { transition: none; }
+
 .imageLoading {
   opacity: 0;
 }
@@ -155,6 +229,11 @@
   .actions button {
     width: 38px;
     height: 38px;
+  }
+
+  .actions button:has(.actionLabel) {
+    width: auto;
+    padding: 0 8px;
   }
 
 }

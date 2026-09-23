@@ -1,6 +1,7 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
 import { readStudioImage } from './media';
 import { MAX_REFERENCE_IMAGES } from './limits';
+import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
 
 export type StudioImageInput = { bytes: Uint8Array; mimeType: string };
 
@@ -21,15 +22,14 @@ export async function requestStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
   provider?: 'musk' | 'ai_media_vip';
   quality?: string;
-  count: number; images: StudioImageInput[]; signal: AbortSignal;
+  count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string;
   size?: string;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
   if (params.images.length > MAX_REFERENCE_IMAGES) throw new Error(`最多使用 ${MAX_REFERENCE_IMAGES} 张参考图`);
-  if (params.size) {
-    const [w, h] = params.size.split('x').map(Number);
-    if (!/^\d+x\d+$/.test(params.size) || w % 16 || h % 16 || w < 16 || h < 16 || Math.max(w, h) > 3840 || w / h > 3 || h / w > 3 || w * h < 655360 || w * h > 8294400) throw new Error('生成尺寸无效');
+  if (params.size && (!isGeminiImageModel(params.model) || params.provider === 'ai_media_vip') && !isValidImageDimension(params.size)) {
+    throw new Error('生成尺寸无效');
   }
   if (params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
     return requestGeminiStudioImages(params, fetcher);
@@ -80,7 +80,7 @@ export async function requestStudioImages(params: {
 
 async function requestGeminiStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
-  count: number; images: StudioImageInput[]; signal: AbortSignal; size?: string;
+  count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string; size?: string;
 }, fetcher: typeof fetch): Promise<{ images: string[]; usage: unknown }> {
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
@@ -96,7 +96,13 @@ async function requestGeminiStudioImages(params: {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${params.apiKey}` },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { responseModalities: ['IMAGE'] },
+        generationConfig: {
+          responseModalities: ['IMAGE'],
+          imageConfig: {
+            ...(params.ratio ? { aspectRatio: params.ratio } : {}),
+            ...(params.size ? { imageSize: params.size } : {}),
+          },
+        },
       }),
       signal: params.signal,
     });

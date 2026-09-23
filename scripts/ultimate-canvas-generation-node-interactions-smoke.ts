@@ -32,6 +32,10 @@ assert.deepEqual(interactions.generationNodeDimensions('9:16', 296), {
 });
 assert.equal(interactions.generationNodeDimensions('bad').ratio, '16:9');
 assert.equal(interactions.generationNodeDimensions('16:9', 0).width, 350);
+assert.deepEqual(interactions.resolveImageRatio('auto', { width: 1600, height: 900 }), { requested: 'auto', resolved: '16:9', source: 'reference' });
+assert.deepEqual(interactions.resolveImageRatio('auto', { width: 900, height: 1600 }), { requested: 'auto', resolved: '9:16', source: 'reference' });
+assert.deepEqual(interactions.resolveImageRatio('auto', null), { requested: 'auto', resolved: '1:1', source: 'model-default' });
+assert.equal(interactions.imageSizeForRatio('16:9', '4K'), '3840x2160');
 assert.equal(interactions.generationNodeLongEdge('image', 1200), 640, 'desktop image nodes align their long edge with the prompt panel');
 assert.equal(interactions.generationNodeLongEdge('video', 1200), 640, 'desktop video nodes align their long edge with the prompt panel');
 assert.equal(interactions.generationNodeLongEdge('image', 390), 366, 'image nodes respect the mobile viewport gutter');
@@ -204,7 +208,7 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260826-canvas-module-refresh', 'canvas app cache key matches the canvas module refresh state');
+contains(indexSource, 'app.js?v=20260924-canvas-parallel', 'canvas app cache key matches the current canvas module refresh state');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
 contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
 contains(appSource, '350', 'video estimates debounce for 350ms');
@@ -350,7 +354,7 @@ const imageDefaultSizeCapability = interactions.normalizeCapabilities('image', {
   enabled: true,
   interaction: {},
 });
-assert.deepEqual(imageDefaultSizeCapability.sizeOptions, ['1K', '2K'], 'missing image sizes use compatibility defaults');
+assert.deepEqual(imageDefaultSizeCapability.sizeOptions, ['1K', '2K', '4K'], 'missing image sizes use resolution defaults');
 assert.equal(imageDefaultSizeCapability.fixedSize, '');
 assert.equal(imageResolutionCapability.fixedSize, '');
 
@@ -691,7 +695,7 @@ function engineHarness() {
 const originalDocument = globalThis.document;
 const originalAnimationFrame = globalThis.requestAnimationFrame;
 (globalThis as any).document = {
-  createElementNS: () => ({ id: '', classList: { add() {} } }),
+  createElementNS: () => ({ id: '', classList: { add() {}, toggle() {} }, setAttribute() {}, addEventListener() {}, matches: () => false, innerHTML: '' }),
   getElementById: () => null,
   querySelector: () => null,
 };

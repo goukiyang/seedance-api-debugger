@@ -28,7 +28,7 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
     const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
       provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk',
       prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
-      count: 1, images, size: task.output_size || undefined, quality: task.quality, signal: AbortSignal.timeout(300000) });
+      count: 1, images, size: task.output_size || undefined, ratio: task.aspect_ratio, quality: task.quality, signal: AbortSignal.timeout(300000) });
     stage = 'normalize';
     if (result.images[0].length > 28 * 1024 * 1024) throw new Error('生成图片过大');
     const bytes = await normalizeStudioImage(Buffer.from(result.images[0], 'base64'));

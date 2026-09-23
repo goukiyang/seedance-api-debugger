@@ -8,6 +8,7 @@ export const IMAGE_STUDIO_MODELS = [
 
 export type ImageStudioModel = typeof IMAGE_STUDIO_MODELS[number];
 export type ImageStudioQuality = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export { defaultImageResolution, imageOutputSize, imageResolutionOptions, normalizeImageResolution, type ImageResolution } from '@/lib/image-generation/resolution';
 
 export const IMAGE_STUDIO_MODEL_LABELS: Record<ImageStudioModel, string> = {
   'gemini-3.1-flash-image-preview': 'Banana 2',
@@ -15,6 +16,14 @@ export const IMAGE_STUDIO_MODEL_LABELS: Record<ImageStudioModel, string> = {
   'gpt-image-2': 'GPT Image 2',
   'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
   'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst',
+};
+
+export const IMAGE_STUDIO_MODEL_SHORT_LABELS: Record<ImageStudioModel, string> = {
+  'gemini-3.1-flash-image-preview': 'B2',
+  'gemini-3-pro-image-preview': 'BP',
+  'gpt-image-2': 'GI2',
+  'gpt-image-2.5-flare': 'FL',
+  'gpt-image-2.5-sunburst': 'SB',
 };
 
 // Provider USD cost is deliberately separate from the site's credit price.
@@ -32,6 +41,14 @@ export const IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: Record<ImageStudioModel, ImageS
   'gpt-image-2': ['auto', 'low', 'medium', 'high'],
   'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
   'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+};
+
+export const IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS: Record<ImageStudioModel, import('@/lib/image-generation/resolution').ImageResolution[]> = {
+  'gemini-3.1-flash-image-preview': ['0.5K', '1K', '2K', '4K'],
+  'gemini-3-pro-image-preview': ['1K', '2K', '4K'],
+  'gpt-image-2': ['1K', '2K', '4K'],
+  'gpt-image-2.5-flare': ['1K', '2K', '4K'],
+  'gpt-image-2.5-sunburst': ['1K', '2K', '4K'],
 };
 
 export const IMAGE_STUDIO_QUALITY_LABELS: Record<ImageStudioQuality, string> = {

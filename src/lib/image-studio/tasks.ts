@@ -5,7 +5,8 @@ import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
 import { getImageGenerationApiSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
-import { normalizeStudioRatio, studioRatioSize } from './ratios';
+import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
+import { imageOutputSize, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD } from './model-catalog';
 import { studioAssetUrl } from './media';
@@ -25,11 +26,16 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   let aspectRatio: string | undefined;
   try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
   catch (error) { throw new StudioError((error as Error).message); }
+  let resolution: string | undefined;
+  if (body.resolution !== undefined) {
+    if (typeof body.resolution !== 'string' || !IMAGE_RESOLUTION_OPTIONS.includes(body.resolution as typeof IMAGE_RESOLUTION_OPTIONS[number])) throw new StudioError('分辨率设置无效');
+    resolution = body.resolution;
+  }
   const moduleRevision = body.moduleRevision === undefined ? undefined : Number(body.moduleRevision);
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
-  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}) };
+  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}) };
 }
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>) {
@@ -95,8 +101,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         fileName: reference?.file_name || null, mimeType: reference?.mime_type || null, width: reference?.width || null,
         height: reference?.height || null, fileSize: reference?.file_size || null, hash: reference?.hash || null };
     });
-    const aspectRatio = input.aspectRatio || 'auto';
-    const outputSize = studioRatioSize(input.aspectRatio);
+    const requestedAspectRatio = input.aspectRatio || 'auto';
+    const firstReference = referenceIds.map(id => referencesById.get(id)).find(reference => reference?.width && reference?.height) || null;
+    const ratioResolution = resolveStudioAspectRatio(requestedAspectRatio, firstReference);
+    const aspectRatio = ratioResolution.requested;
+    const resolvedAspectRatio = ratioResolution.resolved;
+    const aspectRatioSource = ratioResolution.source;
+    const resolution = normalizeImageResolution(generation.model, input.resolution || generation.resolution, imageApi.provider);
+    const outputSize = imageOutputSize(generation.model, resolution, resolvedAspectRatio, imageApi.provider);
     const snapshot = JSON.stringify({
       version: 1,
       referenceImages: referenceSnapshot,
@@ -112,7 +124,11 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       unitCredits: price,
       count: input.count,
       aspectRatio,
+      resolvedAspectRatio,
+      aspectRatioSource,
+      resolution,
       outputSize: outputSize || null,
+      resolvedOutputSize: outputSize || null,
       outputFormat: 'png',
       settingsRevision: settings.revision,
         moduleRevision: workspace?.revision ?? null,
@@ -240,7 +256,9 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
   const snapshotReferences = Array.isArray(parsed.referenceImages) ? parsed.referenceImages : [];
-  const sourceAvailable = typeof task.snapshot_json === 'string' && task.snapshot_json.length > 0 && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string';
+  const sourceAvailable = typeof task.snapshot_json === 'string' && task.snapshot_json.length > 0
+    && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string'
+    && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim());
   const fallbackReferences = (() => {
     try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset?.original_url || null, thumbnailUrl: asset?.thumbnail_url || null, width: asset?.width || null, height: asset?.height || null }; }); }
     catch { return []; }
@@ -254,7 +272,12 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
     quality: typeof parsed.quality === 'string' ? parsed.quality : task.quality,
     count,
     aspectRatio: typeof parsed.aspectRatio === 'string' ? parsed.aspectRatio : task.aspect_ratio,
+    resolvedAspectRatio: typeof parsed.resolvedAspectRatio === 'string' ? parsed.resolvedAspectRatio : task.aspect_ratio,
+    aspectRatioSource: typeof parsed.aspectRatioSource === 'string' ? parsed.aspectRatioSource : 'model-default',
+    resolution: typeof parsed.resolution === 'string' ? parsed.resolution : null,
     outputSize: typeof parsed.outputSize === 'string' ? parsed.outputSize : task.output_size,
+    globalContext: typeof parsed.globalContext === 'string' ? parsed.globalContext : '',
+    moduleContext: typeof parsed.moduleContext === 'string' ? parsed.moduleContext : '',
     unitCredits,
     sourceAvailable,
     referenceImages,

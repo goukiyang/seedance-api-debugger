@@ -2,11 +2,12 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { Check, ChevronDown, Trash2, X } from 'lucide-react';
-import { normalizeStudioRatio, STUDIO_RATIOS, studioRatioSize } from '@/lib/image-studio/ratios';
+import { resolveStudioAspectRatio, normalizeStudioRatio, STUDIO_RATIOS } from '@/lib/image-studio/ratios';
+import { imageOutputSize } from '@/lib/image-generation/resolution';
 import styles from './studio.module.css';
 
-export function RatioPicker({ value, onChange, custom, busy, disabled, error, onRetry, onCustom, onEditing }: {
-  value: string; onChange: (ratio: string) => void; custom: string[]; busy: boolean; disabled: boolean; error: string;
+export function RatioPicker({ value, onChange, reference, model, resolution, custom, busy, disabled, error, onRetry, onCustom, onEditing }: {
+  value: string; onChange: (ratio: string) => void; reference?: { width?: unknown; height?: unknown } | null; model: string; resolution: string; custom: string[]; busy: boolean; disabled: boolean; error: string;
   onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean>; onEditing: (editing: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -34,7 +35,8 @@ export function RatioPicker({ value, onChange, custom, busy, disabled, error, on
     try { if (await onCustom(ratio, false)) select(ratio); }
     finally { saving.current = false; }
   }
-  const size = studioRatioSize(value);
+  const ratioResolution = resolveStudioAspectRatio(value, reference);
+  const size = imageOutputSize(model, resolution, ratioResolution.resolved);
   const preset = STUDIO_RATIOS.find(item => normalizeStudioRatio(item) === value);
   return <div ref={root} className={styles.ratioPicker} onKeyDown={event => {
     if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); trigger.current?.focus(); }
@@ -66,10 +68,7 @@ export function RatioPicker({ value, onChange, custom, busy, disabled, error, on
       <button type="button" title="取消自定义比例" aria-label="取消自定义比例" disabled={busy} onMouseDown={event => event.preventDefault()} onClick={() => { setOther(false); setValidation(''); }}><X size={16} /></button>
     </div>}
     {other && <p className={styles.muted}>宽:高，支持 1:3 至 3:1；输入完成后回车或离开输入框，自动保存到你的比例列表。</p>}
-    {!other && size && <p className={styles.muted}>请求尺寸 {size.replace('x', ' × ')}{(() => {
-      const [w, h] = value.split(':').map(Number), [sw, sh] = size.split('x').map(Number);
-      return w * sh !== h * sw ? '（按接口要求取整，接近所选比例）' : '';
-    })()}</p>}
+    {!other && <p className={styles.muted}>当前生效比例 {ratioResolution.resolved}（{ratioResolution.source === 'reference' ? '首张有效参考图' : ratioResolution.source === 'explicit' ? '手动选择' : '模型默认'}） · {size.includes('x') ? `请求尺寸 ${size.replace('x', ' × ')}` : `请求档位 ${size}`}</p>}
     {busy && <p role="status" className={styles.muted}>正在同步比例…</p>}
     {(validation || error) && <p role="alert" className={styles.error}>{validation || error}{error && <button type="button" onClick={other ? () => void saveCustom() : onRetry}>重试</button>}</p>}
   </div>;

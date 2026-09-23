@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { isValidImageDimension } from '@/lib/image-generation/resolution';
 
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
 
@@ -422,6 +423,7 @@ function imageGenerationSize(params: {
   size?: string;
   settings: ImageGenerationApiSettings;
 }) {
+  if (isValidImageDimension(params.size)) return params.size;
   return normalizeSize(params.size, params.settings.default_size);
 }
 
@@ -474,8 +476,16 @@ async function createGeminiImageGeneration(params: {
   settings: ImageGenerationApiSettings;
   prompt: string;
   count: number;
+  ratio?: string;
+  size?: string;
+  referenceImages?: string[];
   signal: AbortSignal;
 }) {
+  const parts: Array<Record<string, unknown>> = [{ text: params.prompt }];
+  for (const source of params.referenceImages || []) {
+    const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
+    if (match) parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+  }
   const response = await fetch(buildMuskGeminiGenerateContentUrl(params.settings.base_url, params.settings.default_model), {
     method: 'POST',
     headers: {
@@ -486,8 +496,15 @@ async function createGeminiImageGeneration(params: {
     },
     body: JSON.stringify({
       contents: [{
-        parts: [{ text: params.prompt }],
+        parts,
       }],
+      generationConfig: {
+        responseModalities: ['IMAGE'],
+        imageConfig: {
+          ...(params.ratio ? { aspectRatio: params.ratio } : {}),
+          ...(params.size ? { imageSize: params.size } : {}),
+        },
+      },
     }),
     signal: params.signal,
   });
@@ -591,6 +608,9 @@ export async function createImageGeneration(params: {
       settings: params.settings,
       prompt: params.prompt,
       count,
+      ratio: params.ratio,
+      size: params.size,
+      referenceImages: params.referenceImages,
       signal: controller.signal,
     });
   } catch (error) {

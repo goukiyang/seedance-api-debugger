@@ -24,6 +24,7 @@
     };
 
     const RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
+    const IMAGE_RATIOS = new Set(['auto', ...RATIOS]);
     const RESOLUTIONS = new Set(['480p', '720p', '1080p']);
 
     function clean(value) {
@@ -109,8 +110,9 @@
                 action: mode.action,
                 input: {
                     prompt,
-                    ratio: RATIOS.has(clean(settings.ratio)) ? clean(settings.ratio) : '16:9',
+                    ratio: IMAGE_RATIOS.has(clean(settings.ratio)) ? clean(settings.ratio) : '16:9',
                     size: clean(settings.size) || '1K',
+                    ...(clean(settings.resolution) ? { resolution: clean(settings.resolution) } : {}),
                     count: Math.max(1, Math.floor(Number(settings.count) || 1)),
                     reference_image_ids: uniqueStrings(input.referenceImageIds, 10),
                     mode: IMAGE_MODES[input.mode] ? input.mode : 'text-to-image'

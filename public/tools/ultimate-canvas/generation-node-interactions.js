@@ -24,15 +24,17 @@
         ])
     });
 
-    const VALID_RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
+    const VALID_RATIOS = new Set(['auto', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16', '3:2', '2:3', '4:5', '5:4', '2:1', '1:2', '9:21', '3:1', '1:3']);
     const VALID_VIDEO_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
-    const VALID_IMAGE_RESOLUTIONS = new Set(['1K', '2K']);
+    const VALID_IMAGE_RESOLUTIONS = new Set(['0.5K', '1K', '2K', '4K']);
     const GENERATION_RATIOS = Object.freeze({
         '21:9': [21, 9], '16:9': [16, 9], '4:3': [4, 3],
-        '1:1': [1, 1], '3:4': [3, 4], '9:16': [9, 16]
+        '1:1': [1, 1], '3:4': [3, 4], '9:16': [9, 16],
+        '3:2': [3, 2], '2:3': [2, 3], '4:5': [4, 5], '5:4': [5, 4],
+        '2:1': [2, 1], '1:2': [1, 2], '9:21': [9, 21], '3:1': [3, 1], '1:3': [1, 3]
     });
     const DEFAULTS = Object.freeze({
-        image: Object.freeze({ modes: MODE_DEFINITIONS.image.map(mode => mode.id), ratios: ['1:1', '4:3', '16:9', '9:16'], durations: [], resolutions: ['1K', '2K'], supportsAudio: false, supportsLastFrame: false, supportsWatermark: false, maxReferenceImages: 10 }),
+        image: Object.freeze({ modes: MODE_DEFINITIONS.image.map(mode => mode.id), ratios: ['auto', '1:1', '4:3', '16:9', '9:16'], durations: [], resolutions: ['1K', '2K', '4K'], supportsAudio: false, supportsLastFrame: false, supportsWatermark: false, maxReferenceImages: 10 }),
         video: Object.freeze({ modes: MODE_DEFINITIONS.video.map(mode => mode.id), ratios: ['16:9', '9:16'], durations: [5, 10], resolutions: ['720p', '1080p'], supportsAudio: false, supportsLastFrame: false, supportsWatermark: true, maxReferenceImages: 9 })
     });
 
@@ -53,6 +55,40 @@
             width: round(numerator * scale),
             height: round(denominator * scale)
         };
+    }
+
+    function ratioFromImageDimensions(width, height) {
+        const w = Number(width), h = Number(height);
+        if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0 || w / h > 3 || h / w > 3) return null;
+        let a = w, b = h;
+        while (b) { const next = a % b; a = b; b = next; }
+        return `${w / a}:${h / a}`;
+    }
+
+    function resolveImageRatio(requested, reference, fallback = '1:1') {
+        const value = clean(requested);
+        if (value && value !== 'auto' && Object.hasOwn(GENERATION_RATIOS, value)) return { requested: value, resolved: value, source: 'explicit' };
+        const referenceRatio = ratioFromImageDimensions(reference?.width, reference?.height);
+        return referenceRatio
+            ? { requested: 'auto', resolved: referenceRatio, source: 'reference' }
+            : { requested: 'auto', resolved: Object.hasOwn(GENERATION_RATIOS, fallback) ? fallback : '1:1', source: 'model-default' };
+    }
+
+    function imageSizeForRatio(ratio, resolution = '1K') {
+        const normalized = Object.hasOwn(GENERATION_RATIOS, clean(ratio)) ? clean(ratio) : '1:1';
+        const [numerator, denominator] = GENERATION_RATIOS[normalized];
+        const targetArea = resolution === '4K' ? 8294400 : resolution === '2K' ? 4194304 : 1048576;
+        const maxEdge = resolution === '4K' ? 3840 : resolution === '2K' ? 2880 : 2048;
+        let best = null;
+        for (let width = 512; width <= maxEdge; width += 16) {
+            const height = Math.round(width * denominator / numerator / 16) * 16;
+            const area = width * height;
+            if (height < 512 || height > maxEdge || area < 655360 || area > targetArea || width / height > 3 || height / width > 3) continue;
+            const error = Math.abs(width / height / (numerator / denominator) - 1);
+            const distance = Math.abs(area - targetArea);
+            if (!best || error < best.error - 1e-10 || Math.abs(error - best.error) < 1e-10 && distance < best.distance) best = { width, height, error, distance };
+        }
+        return best ? `${best.width}x${best.height}` : '1024x1024';
     }
 
     function generationNodeLongEdge(nodeType, viewportWidth) {
@@ -479,6 +515,9 @@
 
     return {
         generationNodeDimensions,
+        ratioFromImageDimensions,
+        resolveImageRatio,
+        imageSizeForRatio,
         generationNodeLongEdge,
         normalizeCapabilities,
         videoTaskActionAvailability,

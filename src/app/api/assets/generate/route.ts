@@ -17,6 +17,8 @@ import { getProjectAccess, getProjectForGeneration } from '@/lib/projects/permis
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
+import { imageOutputSize, isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -378,9 +380,7 @@ export async function POST(request: NextRequest) {
     for (const referenceImageId of referenceImageIds) {
       referenceImages.push(await assertCanUseReferenceImage(user, referenceImageId));
     }
-    const referenceInputs = settings.provider === 'seedream'
-      ? resolveImageGenerationReferenceInputs(referenceImages)
-      : [];
+    const referenceInputs = resolveImageGenerationReferenceInputs(referenceImages);
 
     if (!isImageGenerationApiReady(settings)) {
       await writeGenerationAttemptLog({
@@ -412,8 +412,20 @@ export async function POST(request: NextRequest) {
       1,
       settings.max_outputs_per_request,
     );
-    const ratio = cleanString(input.ratio || body.ratio, settings.default_ratio);
-    const imageSize = cleanString(input.size || input.default_size || input.resolution || body.size, settings.default_size);
+    const rawRatio = input.ratio ?? body.ratio;
+    let requestedRatio: string;
+    try { requestedRatio = normalizeStudioRatio(rawRatio === undefined ? settings.default_ratio : rawRatio); }
+    catch (error) { return NextResponse.json({ error: 'image_generation_invalid_ratio', message: error instanceof Error ? error.message : '图片比例无效' }, { status: 400 }); }
+    const firstReference = referenceImages.find(image => image.asset?.width && image.asset?.height)?.asset || null;
+    const ratioResolution = resolveStudioAspectRatio(requestedRatio, firstReference);
+    const ratio = ratioResolution.resolved;
+    const rawRequestedResolution = cleanString(input.resolution || body.resolution)
+      || (IMAGE_RESOLUTION_OPTIONS.includes(cleanString(input.size) as typeof IMAGE_RESOLUTION_OPTIONS[number]) ? cleanString(input.size) : '');
+    const resolution = normalizeImageResolution(settings.default_model, rawRequestedResolution || settings.default_size, settings.provider);
+    const requestedSize = cleanString(input.size || input.default_size || body.size);
+    const imageSize = isValidImageDimension(requestedSize)
+      ? requestedSize
+      : imageOutputSize(settings.default_model, resolution, ratio, settings.provider);
     const explicitWorkspaceId = cleanString(body.workspace_id || body.workspaceId);
     let workspaceId = explicitWorkspaceId;
     if (workspaceId) {
@@ -513,6 +525,10 @@ export async function POST(request: NextRequest) {
       model: settings.default_model,
       source_model_label: modelLabel,
       size: imageSize,
+      resolution,
+      requested_ratio: ratioResolution.requested,
+      resolved_ratio: ratio,
+      aspect_ratio_source: ratioResolution.source,
       output_format: settings.output_format,
       response_format: settings.response_format,
       reference_image_count: referenceImageIds.length,

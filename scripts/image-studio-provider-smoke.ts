@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { requestStudioImages, StudioProviderError } from '../src/lib/image-studio/provider';
 import { readStudioImage } from '../src/lib/image-studio/media';
-import { normalizeStudioRatio, STUDIO_RATIOS, studioRatioSize } from '../src/lib/image-studio/ratios';
+import { normalizeStudioRatio, ratioFromImageDimensions, resolveStudioAspectRatio, STUDIO_RATIOS, studioRatioSize } from '../src/lib/image-studio/ratios';
+import { defaultImageResolution, imageOutputSize, imageResolutionOptions, isValidImageDimension, normalizeImageResolution } from '../src/lib/image-generation/resolution';
 
 async function main() {
   const requests: Array<{ url: string; init: RequestInit }> = [];
@@ -20,13 +21,15 @@ async function main() {
     model: params.model, prompt: params.prompt, n: 1, output_format: 'png', quality: 'high',
   });
   const geminiRequests: Array<{ url: string; init: RequestInit }> = [];
-  const geminiResult = await requestStudioImages({ ...params, model: 'gemini-3.1-flash-image-preview', images: [{ bytes: new Uint8Array([1, 2]), mimeType: 'image/png' }] }, async (url, init) => {
+  const geminiResult = await requestStudioImages({ ...params, model: 'gemini-3.1-flash-image-preview', ratio: '16:9', size: '4K', images: [{ bytes: new Uint8Array([1, 2]), mimeType: 'image/png' }] }, async (url, init) => {
     geminiRequests.push({ url: String(url), init: init || {} });
     return Response.json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }] } }], usageMetadata: { promptTokenCount: 2 } });
   });
   assert.deepEqual(geminiResult.images, ['aW1hZ2U=']);
   assert.equal(geminiRequests[0].url, 'https://example.invalid/v1beta/models/gemini-3.1-flash-image-preview:generateContent');
-  assert.equal(JSON.parse(String(geminiRequests[0].init.body)).contents[0].parts.length, 2);
+  const geminiBody = JSON.parse(String(geminiRequests[0].init.body));
+  assert.equal(geminiBody.contents[0].parts.length, 2);
+  assert.deepEqual(geminiBody.generationConfig.imageConfig, { aspectRatio: '16:9', imageSize: '4K' });
   await requestStudioImages({ ...params, images: [
     { bytes: new Uint8Array([1]), mimeType: 'image/png' },
     { bytes: new Uint8Array([2]), mimeType: 'image/jpeg' },
@@ -47,6 +50,17 @@ async function main() {
   assert.equal(studioRatioSize('auto'), undefined);
   assert.equal(normalizeStudioRatio('1920:1080'), '16:9');
   assert.equal(normalizeStudioRatio('1.5：1'), '3:2');
+  assert.equal(ratioFromImageDimensions(1600, 900), '16:9');
+  assert.equal(ratioFromImageDimensions(900, 1600), '9:16');
+  assert.deepEqual(resolveStudioAspectRatio('auto', { width: 900, height: 1600 }), { requested: 'auto', resolved: '9:16', source: 'reference' });
+  assert.deepEqual(resolveStudioAspectRatio('auto'), { requested: 'auto', resolved: '1:1', source: 'model-default' });
+  assert.deepEqual(imageResolutionOptions('gemini-3.1-flash-image-preview'), ['0.5K', '1K', '2K', '4K']);
+  assert.deepEqual(imageResolutionOptions('gemini-3-pro-image-preview'), ['1K', '2K', '4K']);
+  assert.equal(defaultImageResolution('gpt-image-2'), '4K');
+  assert.equal(normalizeImageResolution('gemini-3-pro-image-preview', '0.5K'), '4K');
+  assert.equal(imageOutputSize('gpt-image-2', '4K', '16:9'), '3840x2160');
+  assert.ok(isValidImageDimension('3840x2160'));
+  assert.equal(isValidImageDimension('4000x2000'), false);
   assert.throws(() => normalizeStudioRatio('99999.99:50000'));
   for (const value of ['1.41:1', '9999:5000', '21:9']) assert.equal(normalizeStudioRatio(normalizeStudioRatio(value)), normalizeStudioRatio(value));
   for (const invalid of ['0:1', '4:1', '1:4', '-1:2', 'NaN:1', '1:Infinity', 'garbage', '1:']) assert.throws(() => normalizeStudioRatio(invalid));
@@ -60,7 +74,7 @@ async function main() {
   await requestStudioImages({ ...params, size: studioRatioSize('16:9') }, fetcher);
   assert.equal(JSON.parse(String(requests[2].init.body)).size, '1280x720');
   await requestStudioImages({ ...params, size: studioRatioSize('5:3'), images: [{ bytes: new Uint8Array([1]), mimeType: 'image/png' }] }, fetcher);
-  assert.equal((requests[3].init.body as FormData).get('size'), '1360x816');
+  assert.equal((requests[3].init.body as FormData).get('size'), studioRatioSize('5:3'));
   await assert.rejects(requestStudioImages({ ...params, size: '99999x16' }, fetcher));
   for (const count of [0, 9, 1.5, NaN]) await assert.rejects(requestStudioImages({ ...params, count }, fetcher));
   await assert.rejects(requestStudioImages({ ...params, model: 'unknown' }, fetcher));

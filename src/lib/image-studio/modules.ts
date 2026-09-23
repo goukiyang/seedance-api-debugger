@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
-import { defaultImageStudioQuality, normalizeImageStudioQuality } from './model-catalog';
+import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, type ImageResolution } from './model-catalog';
 import { MAX_REFERENCE_IMAGES } from './limits';
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
@@ -15,11 +15,12 @@ export function validStudioModuleId(id: unknown, ownerId: string): id is string 
 export type StudioModuleGenerationConfig = {
   model: typeof IMAGE_STUDIO_MODELS[number];
   quality: import('./model-catalog').ImageStudioQuality;
+  resolution: ImageResolution;
   prices: Record<typeof IMAGE_STUDIO_MODELS[number], number | null>;
 };
 
 export function resolveStudioModuleGenerationConfig(
-  row: { model?: string | null; quality?: string | null; prices_json?: string | null } | null | undefined,
+  row: { model?: string | null; quality?: string | null; resolution?: string | null; prices_json?: string | null } | null | undefined,
   fallback: ImageStudioSettings,
 ): StudioModuleGenerationConfig {
   const model = row?.model && IMAGE_STUDIO_MODELS.includes(row.model as StudioModuleGenerationConfig['model'])
@@ -27,30 +28,51 @@ export function resolveStudioModuleGenerationConfig(
     : fallback.model;
   // Prices are global rules. Keep the legacy column readable for old records,
   // but never let a module override the shared administrator setting.
-  return { model, quality: normalizeImageStudioQuality(model, row?.quality), prices: { ...fallback.prices } };
+  return {
+    model,
+    quality: normalizeImageStudioQuality(model, row?.quality),
+    resolution: normalizeImageResolution(model, row?.resolution || defaultImageResolution(model)),
+    prices: { ...fallback.prices },
+  };
 }
 
 type StudioModuleRow = {
   id: string; name: string; prompt: string; context: string; model?: string | null; quality?: string | null; group_name?: string | null; banner_asset_id?: string | null; prices_json?: string | null; reproduce_task_id?: string | null;
-  count: number; reference_limit?: number; aspect_ratio?: string; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
+  count: number; reference_limit?: number; aspect_ratio?: string; resolution?: string | null; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
 };
 
 async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, _isAdmin = false) {
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
   const assetIds = [...ids, ...(row.banner_asset_id ? [row.banner_asset_id] : [])];
   const assets = await prisma.asset.findMany({ where: { id: { in: assetIds }, owner_id: ownerId, status: 'active', type: 'image' },
-    select: { id: true, original_url: true, thumbnail_url: true } });
+    select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const generation = resolveStudioModuleGenerationConfig(row, settings);
   const quality = normalizeImageStudioQuality(generation.model, row.quality);
+  const latestTask = row.id.startsWith('default-') ? null : await prisma.imageStudioTask.findFirst({
+    where: { module_id: row.id, owner_id: ownerId, status: 'succeeded', deleted_at: null, asset_id: { not: null } },
+    orderBy: { finished_at: 'desc' },
+    select: { asset_id: true, snapshot_json: true },
+  });
+  const latestResult = latestTask?.asset_id
+    ? await prisma.asset.findFirst({ where: { id: latestTask.asset_id, owner_id: ownerId, status: 'active', type: 'image' }, select: { original_url: true, thumbnail_url: true } })
+    : null;
+  let representativeReference: string | null = null;
+  try {
+    const parsed = latestTask?.snapshot_json ? JSON.parse(latestTask.snapshot_json) as { referenceImages?: Array<{ originalUrl?: unknown; thumbnailUrl?: unknown }> } : null;
+    const referenceImages = Array.isArray(parsed?.referenceImages) ? parsed.referenceImages : [];
+    if (referenceImages.length === 1) representativeReference = String(referenceImages[0]?.originalUrl || referenceImages[0]?.thumbnailUrl || '') || null;
+  } catch { representativeReference = null; }
   const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
-  return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)), aspectRatio: row.aspect_ratio || 'auto', revision: row.revision, saved,
-    model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: banner.original_url, thumbnailUrl: banner.thumbnail_url } : null, prices: generation.prices, unitCredits: generation.prices[generation.model],
+  return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)), aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
+    model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: banner.original_url, thumbnailUrl: banner.thumbnail_url, width: banner.width, height: banner.height } : null,
+    cover: latestResult ? { resultUrl: latestResult.original_url, thumbnailUrl: latestResult.thumbnail_url, referenceUrl: representativeReference } : null,
+    prices: generation.prices, unitCredits: generation.prices[generation.model],
     reproduceFromTaskId: row.reproduce_task_id || null,
     // The module is already restricted to ownerId. A user's own context is safe
     // to return, while the separate global context remains admin-only.
     contextConfigured: Boolean(row.context.trim()), context: row.context,
     createdAt: row.created_at, updatedAt: row.updated_at,
-    images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url }] : []; }) };
+    images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url, width: asset.width, height: asset.height }] : []; }) };
 }
 export async function listStudioModules(ownerId: string, cursor?: string, isAdmin = false) {
   const settings = await getImageStudioSettings();
@@ -113,10 +135,11 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       : createOnly
         ? defaultImageStudioQuality(String(selectedModel))
         : normalizeImageStudioQuality(String(selectedModel), current?.quality);
+    const selectedResolution = normalizeImageResolution(String(selectedModel), body.resolution !== undefined ? body.resolution : current?.resolution);
     const data = { name: name.trim(), prompt, count: Number(count), reference_limit: referenceLimit, reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
       ...(aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
       ...(model !== undefined ? { model: model as string } : {}),
-      quality: selectedQuality,
+      quality: selectedQuality, resolution: selectedResolution,
       ...(groupName !== undefined ? { group_name: groupName.trim() || '未分组' } : {}),
       ...(bannerAssetId !== undefined ? { banner_asset_id: bannerAssetId } : {}),
       ...(reproduceFromTaskId !== undefined ? { reproduce_task_id: reproduceFromTaskId } : {}),
