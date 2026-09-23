@@ -447,3 +447,17 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 已解决的交互冲突：删除最终只保留结果区域悬浮入口；底部保留下载、复制上下文、重新生成；复选框不占位且仅下载选择模式显示；对比按钮只对“当前生成图恰好一张参考图”显示；封面分页按响应式列数保持最多三行；自动比例优先第一张有有效宽高的参考图，无法解析时回到模型默认；模型切换时分辨率归一到该模型可用档位。
 
 执行顺序固定为：本地类型/构建与全批次 smoke → 精确 diff/版本和迁移检查 → 聚焦提交并推送回退点 → 生产数据库备份并应用增量迁移 → 候选构建、运行目录/preflight、切换与健康守护周期 → 公网版本/静态资源/API → 登录态桌面和移动页面验收；全程不发起付费生成。
+
+### 22.1 0.13.4 正式发布与真实验收（2026-09-24）
+
+本批次 1-7 已完成闭环。最终实现提交为 `7b83b1c324a56bfa0da9061f63cde25345d847cc`，分支 `codex/gpt-image-studio` 已推送；正式版本为 `0.13.4`。上线前线上版本 `0.13.3` 的可回退点使用 `rollback/2026-09-24-before-image-studio-0.13.4-live`，指向 `a643c11abe03ec53162a17590810a63e249930ff`。
+
+- 本地验证全部通过：`npx tsc --noEmit`、`npx prisma validate`、`npx tsx scripts/image-studio-provider-smoke.ts`、`npx tsx scripts/image-studio-ui-smoke.ts`、`npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts`、`npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts`、`npx tsx scripts/toolflow-smoke.ts`、相关 `node --check`、`npm run lint`、`npm run build`、`git diff --check`。仅保留既有 lint/Autoprefixer warning；Provider smoke 未发起付费调用。
+- 生产迁移与运行：增量迁移 `20260924090000_image_studio_resolution` 已应用，数据库完整性检查通过；上传目录仍由 `public/uploads` 指向 `/data/video-api-debugger/var-lib/uploads`，生产用户可写。候选构建成功后切换到 BUILD_ID `-OrW6rdngd9YXd-uXB3y1`，旧 BUILD_ID `I26DICEzaQjJQycr4s4Pr` 保留；`.deployed-commit`、`.deployed-version`、公网 `/api/release` 均与 `7b83b1c` / `0.13.4` 一致。
+- 发布前、切换后及跨过健康守护周期的 `EXPECT_PROD_ON_SERVER=1 bash ops/server/sd2/preflight.sh` 均通过；`sd2-gray.service`、`sd2-image-studio.service` active，`NRestarts=0`，公网 `/api/config`、`/api/health`、`/login` 正常。
+- Xiaobo Chrome Agent Window 登录态真实验收通过：桌面与 iPhone 14 视图的封面最多三行分页、刷新后页码恢复、空页边界夹紧；模板封面使用代表生成图、单参考图前后布局；原图比例显示真实宽高和请求尺寸；结果卡片显示短模型、质量、分辨率、尺寸和相对时间；有历史上下文时可复制且显示成功反馈。
+- 大图预览验证通过：单参考图才显示对比入口，左右/上下对比可切换；同一结果列表使用左右键切换并首尾循环，元信息同步更新；下载模式只在进入后显示复选框，取消后退出；结果媒体区域每张结果仅有一个删除悬浮入口，底部没有重复删除入口。未执行生产删除或付费生图。
+- 封面页在首次发布后发现并修复了两处刷新恢复边界：`a643c11` 修复首次读取本地页码，`7b83b1c` 修复模块异步加载时过早夹紧；最终 `0.13.4` 已重新部署并完成刷新复验。
+- 本轮未纳入提交的既有脏改（`tasks/audit-001-review.md`、未跟踪候选构建目录、`tmp/` 及其他 todo）均保持原样，未覆盖、未回滚、未误提交。
+
+结论：第 22 节列出的 1-7 项均已完成；原始上传权限故障已通过运行目录保护和线上可写验证闭环。固定记录可继续作为后续图片工作室迭代的唯一入口。
