@@ -49,7 +49,8 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   if (pathname.startsWith('/uploads/assets/') || pathname.startsWith('/uploads/thumbs/')) {
-    const accessUrl = new URL('/api/image-studio/upload-access', request.url);
+    const internalOrigin = `http://127.0.0.1:${process.env.PORT || '3302'}`;
+    const accessUrl = new URL('/api/image-studio/upload-access', internalOrigin);
     accessUrl.searchParams.set('path', pathname);
     const accessResponse = await fetch(accessUrl, {
       cache: 'no-store',
