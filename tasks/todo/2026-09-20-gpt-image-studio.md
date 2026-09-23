@@ -461,3 +461,15 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 本轮未纳入提交的既有脏改（`tasks/audit-001-review.md`、未跟踪候选构建目录、`tmp/` 及其他 todo）均保持原样，未覆盖、未回滚、未误提交。
 
 结论：第 22 节列出的 1-7 项均已完成；原始上传权限故障已通过运行目录保护和线上可写验证闭环。固定记录可继续作为后续图片工作室迭代的唯一入口。
+
+### 22.2 0.13.5 画布并行连接命中回归（2026-09-24）
+
+用户反馈高级画布仍不能创建并行连接。本次先在真实登录态 v0.13.4 页面复现，再定位到前端端口命中层：连接线和临时线使用 `pointer-events: stroke`，SVG path 覆盖端口后，`_onMouseUp` 的 `elementFromPoint().closest('.node-connector')` 得不到连接端口，因此第二条分支不会进入 `_createConnection`。`validateToolFlowGraph` 已允许输入一对多、模板多对一，`advanceToolFlowRun` 已按同一 topological ready wave 调度全部分支并等待汇合父节点；序列化/恢复 smoke 也通过，均不是根因。
+
+- 修复范围：`canvas-engine.js` 改为用 `elementsFromPoint` 跳过 SVG 覆盖层查找端口；`styles.css` 让连接线不拦截端口，同时保留删除控制自己的命中；`index.html` 更新资源 cache key；`scripts/toolflow-smoke.ts` 增加 SVG 覆盖命中回归与 CSS 断言；更新工作流 smoke 的 cache key；版本和 release 摘要升为 `0.13.5`。
+- 本地验证：`npx tsx scripts/toolflow-smoke.ts`、`npm run test:toolflow`、`npx tsx scripts/ultimate-canvas-generation-node-interactions-smoke.ts`、`npx tsx scripts/ultimate-canvas-generation-node-workflow-smoke.ts`、相关 `node --check`、`npx tsc --noEmit`、`npm run lint`、`npm run build`、`git diff --check` 均通过；仅保留既有 ESLint/Autoprefixer warning。运行时并行调度以 ready-wave 代码和 toolflow smoke 验证，未点击真实运行，避免消耗点数或调用付费 Provider。
+- Git：`414d8732e0ad4e59fe3ef282cc82aea144c4c31a`（`fix: restore parallel canvas connection hit testing`）已推送到 `codex/gpt-image-studio`；回退 tag `rollback/2026-09-24-before-canvas-parallel-ports-0.13.5` 指向上一线上提交 `21294da`。发布归档 SHA256 为 `66e6aeedf96f741bb65f0ef26c92073a98b7dc73805c84b8974baa3071fb0ffa`。
+- 服务器：部署前后 `bash ops/server/sd2/preflight.sh` / `EXPECT_PROD_ON_SERVER=1 bash ops/server/sd2/preflight.sh` 均通过；候选构建 manifest、`BUILD_ID` 和资源标记通过，线上 `.deployed-commit=414d8732e0ad`、`.deployed-version=0.13.5`、`.next-prod/BUILD_ID=RlYUNNfGqN3mh4tGI0hm7`；旧构建 `.next-prod-prev-0.13.4-20260924-061303` 保留。数据库备份位于 `/srv/video-api-debugger/backups/release-0.13.5-20260924-061039/dev.db`，SHA256 为 `d7be62056e71b3a15b2e6c02ac1fc100e6f054d34de6b013631aefd66ac06346`；未执行迁移、未改变上传/视频/存储持久化 symlink。
+- 公网：`/api/release` 返回 `0.13.5`，`/api/config`、`/api/health`、`/login` 返回200；`sd2-gray.service` 保持 active、`NRestarts=0`，跨过约70秒健康周期后仍正常。
+- 真实页面：Xiaobo Chrome Agent Window 登录态显示 `Seedance 2.0 v0.13.5`，实际加载 `canvas-engine.js/styles.css?v=20260924-canvas-parallel-ports`。当前画布保存并刷新后保留 `node-3 -> node-7`、`node-3 -> node-10`、`node-7 -> node-5`、`node-10 -> node-5` 四条并行边（另有既有 `node-2 -> node-1`）；输入 fan-out=2、输出 merge=2。真实删除 `node-7 -> node-5` 后重新拖拽连接成功，保存接口返回200，硬刷新后仍恢复；拖动节点时对应 SVG path 的 `d` 同步变化。未执行真实生图、未消耗点数。
+- 本轮既有脏改（`tasks/audit-001-review.md`、未跟踪候选构建目录、`tasks/todo/2026-08-26-ultimate-canvas-module-refresh.md`、`tmp/`）保持原样，未提交。
