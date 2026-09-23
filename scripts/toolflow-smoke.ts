@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { validateToolFlowGraph } from '../src/lib/tools/toolflow';
+
+const require = createRequire(import.meta.url);
+const { CanvasEngine } = require('../public/tools/ultimate-canvas/canvas-engine.js');
 
 const graph = {
   version: 1,
@@ -45,6 +49,7 @@ const runtime = readFileSync(new URL('../src/lib/tools/toolflow-runtime.ts', imp
 const worker = readFileSync(new URL('../src/lib/image-studio/worker.ts', import.meta.url), 'utf8');
 const workflow = readFileSync(new URL('../public/tools/ultimate-canvas/toolflow-workflow.js', import.meta.url), 'utf8');
 const canvasEngine = readFileSync(new URL('../public/tools/ultimate-canvas/canvas-engine.js', import.meta.url), 'utf8');
+const canvasStyles = readFileSync(new URL('../public/tools/ultimate-canvas/styles.css', import.meta.url), 'utf8');
 assert.match(runtime, /snapshot_json/);
 assert.match(runtime, /tool_flow_run_id/);
 assert.match(runtime, /settleTaskCredits/);
@@ -57,6 +62,26 @@ assert.match(workflow, /if \(root\.contains\(event\.target\)\) return;/);
 assert.match(workflow, /data-toolflow-context-save/);
 assert.match(canvasEngine, /connection-line:not\(\.temp\)/);
 assert.match(canvasEngine, /connection-delete-control/);
+assert.match(canvasEngine, /_connectorFromPoint/);
+assert.match(canvasEngine, /elementsFromPoint/);
+assert.match(canvasStyles, /\.connection-line\s*\{[\s\S]*?pointer-events:\s*none;/, 'connection paths must not block connector hit testing');
+assert.match(canvasStyles, /\.connection-delete-control\s*\{[\s\S]*?pointer-events:\s*auto;/, 'connection delete controls retain their own hit target');
+const previousDocument = globalThis.document;
+const connector = { closest: (selector: string) => selector === '.node-connector' ? connector : null };
+const overlayPath = { closest: () => null };
+(globalThis as any).document = {
+  elementsFromPoint: () => [overlayPath, connector],
+  elementFromPoint: () => overlayPath,
+};
+try {
+  assert.equal(
+    CanvasEngine.prototype._connectorFromPoint.call({}, 10, 20),
+    connector,
+    'connector hit testing must skip an SVG overlay and find the underlying port',
+  );
+} finally {
+  (globalThis as any).document = previousDocument;
+}
 assert.match(canvasEngine, /arrangeToolflowNodes/);
 assert.match(canvasEngine, /不覆盖通用上下文/);
 

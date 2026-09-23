@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片工作室支持原图比例与分辨率、生成结果对比与大图切换、模板封面分页和上下文复制；同时修复图片上传目录权限与封面分页刷新恢复边界。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片工作室支持原图比例与分辨率、生成结果对比与大图切换、模板封面分页和上下文复制；同时修复图片上传目录权限、封面分页刷新恢复和画布并行连线命中问题。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

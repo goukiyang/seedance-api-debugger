@@ -294,7 +294,7 @@ class CanvasEngine {
         }
         if (this.isDrawingConnection) {
             const target = document.elementFromPoint(e.clientX, e.clientY);
-            const conn = target?.closest('.node-connector');
+            const conn = this._connectorFromPoint(e.clientX, e.clientY);
             const startConnector = this.connectionStartConnector;
             if (conn && conn !== startConnector) {
                 const pair = this._connectionPair(startConnector, conn);
@@ -310,6 +310,15 @@ class CanvasEngine {
             }
             this._cancelConnection();
         }
+    }
+
+    _connectorFromPoint(x, y) {
+        const elements = typeof document.elementsFromPoint === 'function'
+            ? document.elementsFromPoint(x, y)
+            : [document.elementFromPoint(x, y)];
+        return elements
+            .map(element => element?.closest?.('.node-connector'))
+            .find(Boolean) || null;
     }
 
     _onWheel(e) {

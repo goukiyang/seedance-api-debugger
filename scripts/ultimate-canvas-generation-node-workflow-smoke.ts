@@ -310,8 +310,8 @@ assert.match(
   /capabilities\.video\?\.message\s*\|\|\s*window\.UltimateCanvasBackendContract\.SAFE_UNAVAILABLE_MESSAGE/,
 );
 
-assert.match(indexSource, /styles\.css\?v=20260924-canvas-parallel/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260924-canvas-parallel/);
+assert.match(indexSource, /styles\.css\?v=20260924-canvas-parallel-ports/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260924-canvas-parallel-ports/);
 assert.match(indexSource, /generation-node-workflow\.js\?v=20260813-video-delivery/);
 assert.match(indexSource, /app\.js\?v=20260924-canvas-parallel/);
 
