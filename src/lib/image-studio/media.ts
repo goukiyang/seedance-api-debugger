@@ -8,6 +8,10 @@ import { isPrivateNetworkHost } from '@/lib/media/public-url';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
+export function studioAssetUrl(assetId: string) {
+  return `/api/image-studio/assets/${encodeURIComponent(assetId)}`;
+}
+
 export async function readStudioImage(url: string, signal?: AbortSignal): Promise<Buffer> {
   signal?.throwIfAborted();
   const local = siteUploadPathFromUrl(url);

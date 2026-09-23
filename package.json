@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",

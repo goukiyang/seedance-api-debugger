@@ -178,7 +178,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     <dialog ref={presetDialog} className={styles.dialog} onCancel={() => setPresetDialogOpen(false)}>
       <header className={styles.header}><h2>模板库</h2><button type="button" aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
-      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.scope === 'admin' ? '管理员模板' : '我的模板'} · {preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model}</span></div><button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></article>)}</div>}
+      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></article>)}</div>}
     </dialog>
   </main>;
 }
@@ -297,26 +297,18 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
     setModuleSaveError('');
   }
 
-  async function saveAsPreset(scope: 'admin' | 'creator') {
-    const presetName = window.prompt(scope === 'admin' ? '管理员模板名称' : '我的模板名称', name);
+  async function saveAsPreset() {
+    const presetName = window.prompt('模板名称', name);
     if (!presetName?.trim()) return;
     try {
       await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        scope, name: presetName.trim(), groupName, prompt, context: moduleContext, model: moduleModel, quality,
+        scope: isAdmin ? 'admin' : 'creator', name: presetName.trim(), groupName, prompt, context: moduleContext, model: moduleModel, quality,
         count, referenceLimit, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id),
       }) }));
-      setSaveStatus(scope === 'admin' ? '管理员模板已保存' : '我的模板已保存');
+      setSaveStatus('模板已保存');
       window.setTimeout(() => setSaveStatus(''), 2200);
     } catch (e) { setError(e instanceof Error ? e.message : '模板保存失败'); }
   }
-
-  useEffect(() => {
-    if (moduleSaveError || moduleSaving || uploading || !moduleDirty) return;
-    const timer = setTimeout(() => { void saveModule(); }, 700);
-    return () => clearTimeout(timer);
-    // Save the latest module fields together with its context revision.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moduleContext, savedModuleContext, moduleSaveError, moduleSaving, uploading, bannerUploading, moduleDirty, name, prompt, count, referenceLimit, aspectRatio, moduleModel, quality, groupName, banner, images, reproduceSourceTaskId, moduleRevision]);
 
   useEffect(() => {
     try {
@@ -682,8 +674,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
         <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <button type="button" onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
-          {isAdmin && <button type="button" onClick={() => void saveAsPreset('admin')}><Save size={16} />另存为管理员模板</button>}
-          <button type="button" onClick={() => void saveAsPreset('creator')}><Save size={16} />另存为我的模板</button>
+          <button type="button" disabled={moduleSaving || uploading || bannerUploading || !moduleDirty} className={moduleDirty ? styles.saveReady : ''} onClick={() => void saveModule()}><Save size={16} />保存当前模板配置</button>
+          <button type="button" onClick={() => void saveAsPreset()}><Save size={16} />另存为模板</button>
         </div>
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -751,7 +743,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
           </select>
         </label>
       </div>
-      <p className={styles.muted}>{isAdmin ? '模型和质量属于当前模块；积分规则统一在通用上下文中设置。' : '这是当前账号自己的模块上下文，只有你能查看和修改。'}上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后自动保存。</p>
+      <p className={styles.muted}>{isAdmin ? '模型和质量属于当前模块；积分规则统一在通用上下文中设置。' : '这是当前账号自己的模块上下文，只有你能查看和修改。'}上游美元成本由模型目录记录，GPT Image 2 的价格待补充。修改后请点击“保存当前模板配置”。</p>
       <p role="status">{moduleSaving ? '正在保存' : moduleDirty ? '未保存' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>

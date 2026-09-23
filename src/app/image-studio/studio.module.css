@@ -31,7 +31,7 @@
 .moduleBanner { position: relative; min-height: 96px; margin: -8px 0 24px; border: 1px dashed #465057; border-radius: 8px; background-color: #151a1d; overflow: hidden; }
 .moduleBannerHasImage { min-height: 0; }
 .moduleBanner::before { content: ''; position: absolute; inset: 0; background: rgb(8 10 11 / 42%); }
-.moduleBannerImage { display: block; position: relative; z-index: 0; width: 100%; height: auto; max-height: 360px; object-fit: contain; margin: 0 auto; }
+.moduleBannerImage { display: block; position: relative; z-index: 0; inline-size: 100%; max-inline-size: none; block-size: auto; object-fit: contain; margin: 0; }
 .bannerLabel { position: absolute; top: 12px; left: 14px; color: #eef0f2; font-size: 12px; font-weight: 700; }
 .bannerEmpty, .bannerReplace, .bannerRemove { position: absolute; z-index: 1; }
 .bannerEmpty { inset: 0; width: 100%; height: 100%; flex-direction: column; border: 0 !important; background: transparent !important; color: #aeb9bf !important; }
@@ -63,6 +63,7 @@
 .page .generate { width: 100%; margin-top: 12px; background: #126f5d; }
 .moduleQuickActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid #2d383d; }
 .moduleQuickActions button { padding: 7px 9px; font-size: 12px; }
+.moduleQuickActions .saveReady { border-color: #79daca; color: #a4f2df; background: #123b33; }
 .outputs { min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 20px; }
 .result { min-width: 0; }

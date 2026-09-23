@@ -22,9 +22,11 @@ function parsePreset(row: { reference_ids: string }) {
   try { return parseIds(JSON.parse(row.reference_ids)); } catch { return []; }
 }
 
-export async function listStudioPresets(userId: string, _isAdmin: boolean) {
+export async function listStudioPresets(_userId: string, _isAdmin: boolean) {
   const rows = await prisma.imageStudioPreset.findMany({
-    where: { OR: [{ scope: 'admin' }, { scope: 'creator', owner_id: userId }] },
+    // The library is readable by every signed-in user. Applying a preset
+    // creates a private module copy, so the source preset remains immutable.
+    where: { OR: [{ scope: 'admin' }, { scope: 'creator' }] },
     orderBy: [{ scope: 'asc' }, { updated_at: 'desc' }],
   });
   const assetIds = rows.flatMap(parsePreset);
@@ -65,7 +67,7 @@ export async function saveStudioPreset(userId: string, body: PresetDraft, isAdmi
 }
 
 export async function applyStudioPreset(userId: string, presetId: string, isAdmin: boolean) {
-  const preset = await prisma.imageStudioPreset.findFirst({ where: { id: presetId, OR: [{ scope: 'admin' }, { scope: 'creator', owner_id: userId }] } });
+  const preset = await prisma.imageStudioPreset.findFirst({ where: { id: presetId, OR: [{ scope: 'admin' }, { scope: 'creator' }] } });
   if (!preset) throw new StudioModuleError('模板不存在或无权使用', 404);
   const ids = parsePreset(preset);
   const allIds = Array.from(new Set([...ids, ...(preset.banner_asset_id ? [preset.banner_asset_id] : [])]));

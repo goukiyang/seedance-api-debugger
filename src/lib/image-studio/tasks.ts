@@ -8,6 +8,7 @@ import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudio
 import { normalizeStudioRatio, studioRatioSize } from './ratios';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD } from './model-catalog';
+import { studioAssetUrl } from './media';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -188,7 +189,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,
     createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
     snapshot: publicStudioSnapshot(task, assetById),
-    asset: assetById.get(task.asset_id || '') || null,
+    asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!) } : null,
   })), nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 

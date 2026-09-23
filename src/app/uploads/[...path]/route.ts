@@ -2,6 +2,8 @@ import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSession } from '@/lib/auth/session';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -38,6 +40,29 @@ function safeUploadPath(segments: string[]) {
 
 function contentTypeFor(filePath: string) {
   return MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+}
+
+async function generatedAssetAccess(pathname: string) {
+  const assets = await prisma.asset.findMany({
+    where: { original_url: pathname },
+    select: { id: true },
+  });
+  if (!assets.length) return { generated: false, allowed: true };
+
+  const generatedTasks = await prisma.imageStudioTask.findMany({
+    where: { asset_id: { in: assets.map(asset => asset.id) }, status: 'succeeded' },
+    select: { owner_id: true, deleted_at: true },
+  });
+  if (!generatedTasks.length) return { generated: false, allowed: true };
+
+  const user = await getSession();
+  if (!user) return { generated: true, allowed: false };
+  if (user.role === 'admin') return { generated: true, allowed: true };
+
+  return {
+    generated: true,
+    allowed: generatedTasks.some(task => task.owner_id === user.id && !task.deleted_at),
+  };
 }
 
 function parseRange(header: string | null, fileSize: number) {
@@ -93,6 +118,18 @@ async function uploadResponse(
     return NextResponse.json({ error: '上传文件路径无效' }, { status: 400 });
   }
 
+  let assetAccess;
+  try {
+    assetAccess = await generatedAssetAccess(`/uploads/${(params.path || []).join('/')}`);
+  } catch {
+    // If the ownership check cannot be completed, fail closed rather than
+    // accidentally exposing a generated result during a database outage.
+    return NextResponse.json({ error: '上传文件访问暂时不可用' }, { status: 503 });
+  }
+  if (assetAccess.generated && !assetAccess.allowed) {
+    return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404 });
+  }
+
   let fileInfo;
   try {
     fileInfo = await stat(filePath);
@@ -109,7 +146,7 @@ async function uploadResponse(
   const baseHeaders: Record<string, string> = {
     'Content-Type': contentTypeFor(filePath),
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'public, max-age=31536000, immutable',
+    'Cache-Control': assetAccess.generated ? 'private, no-store' : 'public, max-age=31536000, immutable',
     'Cross-Origin-Resource-Policy': 'cross-origin',
   };
 
