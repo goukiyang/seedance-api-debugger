@@ -4437,6 +4437,7 @@ body.director-studio-open {
 .toolflow-selection-list code { grid-column: 2; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
 .flow-menu-mark, .flow-icon { display: inline-flex; min-width: 24px; justify-content: center; color: #72e2bf; font-size: 10px; font-weight: 700; }
 .toolflow-node .node-card { border-color: rgba(103,216,187,.65); }
+.toolflow-node.toolflow-main-path .node-card { border-color: rgba(103,216,187,.95); box-shadow: 0 0 0 1px rgba(103,216,187,.2), var(--shadow-node); }
 .toolflow-node .image-placeholder, .toolflow-node-summary { min-height: 80px; display: grid; place-items: center; align-content: center; gap: 5px; color: #72e2bf; text-align: center; }
 .toolflow-node-summary strong { color: var(--text-primary); font-size: 12px; }
 .toolflow-node-summary small, .toolflow-node-properties small { color: var(--text-secondary); font-size: 10px; }
@@ -4459,10 +4460,25 @@ body.director-studio-open {
 .toolflow-input-asset button { border: 0; background: transparent; color: var(--text-tertiary); cursor: pointer; font-size: 15px; padding: 2px 4px; }
 .toolflow-input-empty, .toolflow-template-empty { color: var(--text-secondary); font-size: 10px; line-height: 1.5; padding: 4px 0; }
 .toolflow-card-field { display: grid; gap: 4px; color: var(--text-secondary); font-size: 9px; }
-.toolflow-card-field select, .toolflow-card-field input, .toolflow-card-field textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-card); color: var(--text-primary); padding: 6px; font: inherit; font-size: 10px; }
+.toolflow-card-field select, .toolflow-card-field input, .toolflow-card-field textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 5px; background: #121a1e; color: #f5faf9; padding: 6px; font: inherit; font-size: 10px; }
+.toolflow-card-field select, .toolflow-field select, .toolflow-node-settings select { color-scheme: dark; }
+.toolflow-card-field select option, .toolflow-field select option, .toolflow-node-settings select option { background: #121a1e; color: #f5faf9; }
+.toolflow-card-field select:focus, .toolflow-card-field input:focus, .toolflow-card-field textarea:focus { outline: none; border-color: #67d8bb; box-shadow: 0 0 0 2px rgba(103,216,187,.12); }
 .toolflow-card-field textarea { min-height: 42px; resize: vertical; }
 .toolflow-template-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .toolflow-template-effective { color: var(--text-secondary); font-size: 9px; line-height: 1.45; border-radius: 5px; padding: 6px; background: rgba(103,216,187,.07); }
+.toolflow-template-advanced { border-top: 1px solid rgba(255,255,255,.08); padding-top: 7px; }
+.toolflow-template-advanced summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-secondary); cursor: pointer; font-size: 10px; list-style: none; }
+.toolflow-template-advanced summary::-webkit-details-marker { display: none; }
+.toolflow-template-advanced summary::before { content: '＋'; color: #72e2bf; font-size: 12px; }
+.toolflow-template-advanced[open] summary::before { content: '−'; }
+.toolflow-template-advanced summary span { margin-left: auto; color: var(--text-tertiary); font-size: 9px; }
+.toolflow-template-advanced[open] summary span { color: #ffd789; }
+.toolflow-template-advanced > *:not(summary) { margin-top: 8px; }
+.toolflow-context-save-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.toolflow-context-save-row small { color: var(--text-tertiary); font-size: 9px; }
+.toolflow-context-save { border: 1px solid rgba(103,216,187,.55); border-radius: 5px; background: rgba(103,216,187,.13); color: #72e2bf; padding: 5px 7px; cursor: pointer; font: inherit; font-size: 9px; }
+.toolflow-context-save:disabled { border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.04); color: var(--text-tertiary); cursor: default; }
 .toolflow-node-issue { position: absolute; z-index: 8; left: 8px; right: 8px; bottom: -30px; padding: 6px 8px; border: 1px solid rgba(255,100,100,.55); border-radius: 5px; background: rgba(75,24,28,.95); color: #ffb1b1; font-size: 10px; opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity .15s ease, transform .15s ease; }
 .toolflow-node-issue.is-visible { opacity: 1; transform: translateY(0); }
 .toolflow-header { gap: 10px; }

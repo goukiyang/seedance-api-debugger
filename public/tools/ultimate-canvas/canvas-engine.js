@@ -549,7 +549,7 @@ class CanvasEngine {
         wrap.querySelector('.node-card').addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             if (e.target.closest('.node-connector')
-                || e.target.closest('textarea, input, select, button, a, [contenteditable]')
+                || e.target.closest('textarea, input, select, button, a, details, summary, [contenteditable]')
                 || e.target.closest('.node-action-row') || e.target.closest('.video-props-tab')
                 || e.target.closest('.video-tool-btn') || e.target.closest('.image-props-tools')
                 || e.target.closest('.model-selector') || e.target.closest('.director-actor')
@@ -1028,22 +1028,31 @@ class CanvasEngine {
         const ratios = [...new Set(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', template?.aspectRatio || 'auto'])];
         const ratioOptions = ratios.map(value => `<option value="${this._escapeHtml(value)}"${value === ratio ? ' selected' : ''}>${this._escapeHtml(value === 'auto' ? '自动' : value)}</option>`).join('');
         const sourceLabel = template ? `${template.name} · 当前生效` : '系统默认生图 · 当前生效';
-        const contextState = template
-            ? (template.contextConfigured || String(template.context || '').trim() ? '已配置模板上下文' : '未配置模板上下文')
-            : (this.flowSystemSettings.providerReady ? '系统图片 API 已就绪' : '系统图片 API 将在运行前校验');
+        const contextState = template && (template.contextConfigured || String(template.context || '').trim())
+            ? '读取模板上下文与通用规则'
+            : '读取已生效通用规则';
         const fixedReferences = template && Array.isArray(template.images) ? template.images.length : 0;
         const referenceLimit = template ? Number(template.referenceLimit) || 10 : 9;
+        const nodeContext = String(data.context ?? data.moduleContext ?? '');
+        const savedContext = String(data.savedContext ?? nodeContext);
+        const contextDirty = nodeContext !== savedContext;
+        const contextStatus = contextDirty ? '有未保存修改' : '已保存到此节点';
         return `<div class="toolflow-template-card" data-toolflow-template-node="${this._escapeHtml(id)}">
             <div class="toolflow-node-summary"><span class="flow-icon">T</span><strong>生图模板</strong><small>${this._escapeHtml(sourceLabel)}</small></div>
             <label class="toolflow-card-field"><span>来源</span><select data-toolflow-node-template-select="${this._escapeHtml(id)}"><option value="">系统默认生图</option>${options}</select></label>
             <div class="toolflow-template-effective">${this._escapeHtml(contextState)} · 固定参考图 ${fixedReferences} 张 · 输入参考图上限 ${referenceLimit} 张</div>
-            <div class="toolflow-template-settings">
-                <label class="toolflow-card-field"><span>模型</span><select data-toolflow-node-field="model" data-toolflow-node-id="${this._escapeHtml(id)}">${availableModels.map(value => `<option value="${this._escapeHtml(value)}"${value === model ? ' selected' : ''}>${this._escapeHtml(this._flowModelLabel(value))}</option>`).join('')}</select></label>
-                <label class="toolflow-card-field"><span>质量</span><select data-toolflow-node-field="quality" data-toolflow-node-id="${this._escapeHtml(id)}">${qualityOptions}</select></label>
-                <label class="toolflow-card-field"><span>比例</span><select data-toolflow-node-field="ratio" data-toolflow-node-id="${this._escapeHtml(id)}">${ratioOptions}</select></label>
-                <label class="toolflow-card-field"><span>生成张数</span><input type="number" min="1" max="8" step="1" value="${Math.min(8, Math.max(1, count))}" data-toolflow-node-field="count" data-toolflow-node-id="${this._escapeHtml(id)}"></label>
-            </div>
-            <label class="toolflow-card-field"><span>提示词补充</span><textarea data-toolflow-node-field="prompt" data-toolflow-node-id="${this._escapeHtml(id)}" placeholder="可选，补充本次画面要求">${this._escapeHtml(data.prompt || '')}</textarea></label>
+            <details class="toolflow-template-advanced">
+                <summary>展开设置 <span>${this._escapeHtml(contextStatus)}</span></summary>
+                <div class="toolflow-template-settings">
+                    <label class="toolflow-card-field"><span>模型</span><select data-toolflow-node-field="model" data-toolflow-node-id="${this._escapeHtml(id)}">${availableModels.map(value => `<option value="${this._escapeHtml(value)}"${value === model ? ' selected' : ''}>${this._escapeHtml(this._flowModelLabel(value))}</option>`).join('')}</select></label>
+                    <label class="toolflow-card-field"><span>质量</span><select data-toolflow-node-field="quality" data-toolflow-node-id="${this._escapeHtml(id)}">${qualityOptions}</select></label>
+                    <label class="toolflow-card-field"><span>比例</span><select data-toolflow-node-field="ratio" data-toolflow-node-id="${this._escapeHtml(id)}">${ratioOptions}</select></label>
+                    <label class="toolflow-card-field"><span>生成张数</span><input type="number" min="1" max="8" step="1" value="${Math.min(8, Math.max(1, count))}" data-toolflow-node-field="count" data-toolflow-node-id="${this._escapeHtml(id)}"></label>
+                </div>
+                <label class="toolflow-card-field"><span>提示词补充</span><textarea data-toolflow-node-field="prompt" data-toolflow-node-id="${this._escapeHtml(id)}" placeholder="可选，补充本次画面要求">${this._escapeHtml(data.prompt || '')}</textarea></label>
+                <label class="toolflow-card-field"><span>节点上下文</span><textarea data-toolflow-node-field="context" data-toolflow-node-id="${this._escapeHtml(id)}" placeholder="可选，只写入当前模板节点，不覆盖通用上下文">${this._escapeHtml(nodeContext)}</textarea></label>
+                <div class="toolflow-context-save-row"><small data-toolflow-context-status="${this._escapeHtml(id)}">${this._escapeHtml(contextStatus)}</small><button type="button" class="toolflow-context-save" data-toolflow-context-save="${this._escapeHtml(id)}"${contextDirty ? '' : ' disabled'}>${contextDirty ? '保存节点上下文' : '已保存'}</button></div>
+            </details>
         </div>`;
     }
 
@@ -1344,6 +1353,64 @@ class CanvasEngine {
         this.offsetX = (r.width - w*this.scale)/2 - minX*this.scale + p*this.scale;
         this.offsetY = (r.height - h*this.scale)/2 - minY*this.scale + p*this.scale;
         this._applyTransform(); this._updateZoom(); this._updateConnections();
+    }
+
+    arrangeToolflowNodes() {
+        const flowNodes = [...this.nodes.values()].filter(node => String(node.type || '').startsWith('flow-'));
+        if (flowNodes.length < 2) return false;
+        const ids = new Set(flowNodes.map(node => node.id));
+        const outgoing = new Map(flowNodes.map(node => [node.id, []]));
+        const incoming = new Map(flowNodes.map(node => [node.id, []]));
+        this.connections.forEach(connection => {
+            if (!ids.has(connection.from) || !ids.has(connection.to)) return;
+            outgoing.get(connection.from).push(connection.to);
+            incoming.get(connection.to).push(connection.from);
+        });
+        const indegree = new Map(flowNodes.map(node => [node.id, incoming.get(node.id).length]));
+        const queue = flowNodes.filter(node => indegree.get(node.id) === 0).map(node => node.id);
+        const topo = [];
+        while (queue.length) {
+            const id = queue.shift();
+            topo.push(id);
+            outgoing.get(id).forEach(next => {
+                indegree.set(next, indegree.get(next) - 1);
+                if (indegree.get(next) === 0) queue.push(next);
+            });
+        }
+        if (topo.length !== flowNodes.length) return false;
+        const depth = new Map(flowNodes.map(node => [node.id, 0]));
+        topo.forEach(id => outgoing.get(id).forEach(next => depth.set(next, Math.max(depth.get(next), depth.get(id) + 1))));
+        const distance = new Map(flowNodes.map(node => [node.id, 0]));
+        [...topo].reverse().forEach(id => outgoing.get(id).forEach(next => distance.set(id, Math.max(distance.get(id), distance.get(next) + 1))));
+        const mainPath = new Set();
+        let current = flowNodes.find(node => node.type === 'flow-input')?.id || topo[0];
+        while (current && !mainPath.has(current)) {
+            mainPath.add(current);
+            const next = outgoing.get(current) || [];
+            current = next.slice().sort((a, b) => distance.get(b) - distance.get(a))[0];
+        }
+        const byDepth = new Map();
+        flowNodes.forEach(node => {
+            const level = depth.get(node.id) || 0;
+            if (!byDepth.has(level)) byDepth.set(level, []);
+            byDepth.get(level).push(node);
+        });
+        const order = { 'flow-input': 0, 'flow-template': 1, 'flow-select': 2, 'flow-confirm': 3, 'flow-output': 4 };
+        byDepth.forEach((nodes, level) => {
+            nodes.sort((a, b) => Number(mainPath.has(b.id)) - Number(mainPath.has(a.id)) || (order[a.type] || 9) - (order[b.type] || 9) || String(a.id).localeCompare(String(b.id)));
+            nodes.forEach((node, index) => {
+                node.x = 100 + level * 440;
+                node.y = 120 + index * 360;
+                const element = document.querySelector(`[data-node-id="${node.id}"]`);
+                if (element) {
+                    element.style.left = `${node.x}px`;
+                    element.style.top = `${node.y}px`;
+                    element.classList.toggle('toolflow-main-path', mainPath.has(node.id));
+                }
+            });
+        });
+        this._updateConnections();
+        return true;
     }
 }
 

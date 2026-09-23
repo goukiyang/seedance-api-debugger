@@ -206,6 +206,7 @@ async function resolveTemplate(
   const promptSupplement = clean(data.prompt);
   let prompt = '';
   let context = settings.context;
+  let templateContext = '';
   let model: string = settings.model;
   let quality = defaultImageStudioQuality(model);
   let count = numberInRange(data.count, 1, 1, 8);
@@ -227,7 +228,7 @@ async function resolveTemplate(
     templateReferenceIds = await clonePresetAssets(tx, preset.owner_id, ownerId, presetIds);
     if (data.model && clean(data.model) !== preset.model) throw new AuthError('当前模板不允许切换到该图片模型', 400);
     prompt = [preset.prompt, promptSupplement].filter(Boolean).join('\n\n');
-    context = preset.context || settings.context;
+    templateContext = preset.context || '';
     model = preset.model || settings.model;
     quality = normalizeImageStudioQuality(model, data.quality || preset.quality);
     count = numberInRange(data.count, numberInRange(preset.count, 1, 1, 8), 1, 8);
@@ -240,7 +241,7 @@ async function resolveTemplate(
     templateReferenceIds = await clonePresetAssets(tx, ownerId, ownerId, safeJsonArray(studioModule.reference_ids));
     if (data.model && clean(data.model) !== studioModule.model) throw new AuthError('当前模板不允许切换到该图片模型', 400);
     prompt = [studioModule.prompt, promptSupplement].filter(Boolean).join('\n\n');
-    context = studioModule.context || settings.context;
+    templateContext = studioModule.context || '';
     model = studioModule.model || settings.model;
     quality = normalizeImageStudioQuality(model, data.quality || studioModule.quality);
     count = numberInRange(data.count, numberInRange(studioModule.count, 1, 1, 8), 1, 8);
@@ -254,6 +255,9 @@ async function resolveTemplate(
     aspectRatio = clean(data.ratio || data.aspect_ratio, 'auto');
     outputSize = clean(data.size || data.output_size) || null;
   }
+
+  const nodeContext = clean(data.context || data.module_context || data.moduleContext);
+  context = [settings.context, templateContext, nodeContext].map((value) => clean(value)).filter(Boolean).join('\n\n---\n');
 
   if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) throw new AuthError('当前图片模型未配置或不可用', 409);
   // A saved image module may intentionally keep the user-facing prompt empty
@@ -417,12 +421,20 @@ export async function advanceToolFlowRun(runId: string) {
       : null;
     let progressed = false;
 
-    for (const node of graph.nodes) {
+    // Build one topological ready wave up front. Every branch in the same wave
+    // is queued in this transaction, while a merge waits for all parents and
+    // receives their combined asset results.
+    const readyNodes = graph.nodes.filter((node) => {
+      const nodeRun = nodeRuns.get(node.id);
+      if (!nodeRun || nodeRun.status !== 'pending') return false;
+      const upstreamRuns = parents(graph, node.id).map((id) => nodeRuns.get(id)).filter(Boolean) as typeof run.node_runs;
+      return upstreamRuns.every((item) => TERMINAL_TASK_STATUSES.has(item.status));
+    });
+    for (const node of readyNodes) {
       const nodeRun = nodeRuns.get(node.id);
       if (!nodeRun || nodeRun.status !== 'pending') continue;
       const upstreamIds = parents(graph, node.id);
       const upstreamRuns = upstreamIds.map((id) => nodeRuns.get(id)).filter(Boolean) as typeof run.node_runs;
-      if (upstreamRuns.some((item) => !TERMINAL_TASK_STATUSES.has(item.status))) continue;
       const inputAssetIds = Array.from(new Set(upstreamRuns.flatMap(resultAssets)));
       if (node.type === 'flow-input') {
         await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {

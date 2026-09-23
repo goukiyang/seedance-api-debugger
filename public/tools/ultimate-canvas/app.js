@@ -6664,8 +6664,16 @@
     document.getElementById('zoom-in')?.addEventListener('click', () => engine.setZoom(engine.scale + 0.1));
     document.getElementById('zoom-out')?.addEventListener('click', () => engine.setZoom(engine.scale - 0.1));
 
-    // Arrange canvas (整理画布)
-    document.getElementById('btn-fit')?.addEventListener('click', () => engine.fitView());
+    // Arrange canvas (整理画布): put the tool-flow main path on one lane,
+    // keep branches stacked beside it, then fit the result into the viewport.
+    document.getElementById('btn-fit')?.addEventListener('click', () => {
+        const arranged = engine.arrangeToolflowNodes?.();
+        engine.fitView();
+        if (arranged) {
+            scheduleCanvasSave('toolflow_layout');
+            showCanvasNotice('工具流主路径已整理，分支已并列排开。', 'success');
+        }
+    });
 
     // Snapping toggle (吸附)
     document.getElementById('btn-snap')?.addEventListener('click', (e) => {

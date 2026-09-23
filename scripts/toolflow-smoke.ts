@@ -21,6 +21,22 @@ const graph = {
 
 assert.equal(validateToolFlowGraph(graph).nodes.length, 5);
 assert.equal(validateToolFlowGraph({ ...graph, nodes: graph.nodes.map(node => node.id === 'template-a' ? { ...node, data: { source: 'system', model: 'gpt-image-2' } } : node) }).nodes.length, 5);
+const parallelGraph = {
+  version: 1,
+  nodes: [
+    { id: 'input', type: 'flow-input', data: {} },
+    { id: 'template-a', type: 'flow-template', data: { source: 'system', model: 'gpt-image-2' } },
+    { id: 'template-b', type: 'flow-template', data: { source: 'system', model: 'gpt-image-2' } },
+    { id: 'output', type: 'flow-output', data: {} },
+  ],
+  connections: [
+    { from: 'input', to: 'template-a' },
+    { from: 'input', to: 'template-b' },
+    { from: 'template-a', to: 'output' },
+    { from: 'template-b', to: 'output' },
+  ],
+};
+assert.equal(validateToolFlowGraph(parallelGraph).connections.length, 4);
 assert.throws(() => validateToolFlowGraph({ ...graph, connections: [...graph.connections, { from: 'output', to: 'input' }] }), /不兼容|循环/);
 assert.throws(() => validateToolFlowGraph({ ...graph, connections: [{ from: 'input', to: 'template-a' }, { from: 'template-a', to: 'select' }, { from: 'select', to: 'confirm' }, { from: 'confirm', to: 'output' }, { from: 'select', to: 'template-a' }] }), /循环/);
 assert.throws(() => validateToolFlowGraph({ ...graph, nodes: graph.nodes.map(node => node.id === 'template-a' ? { ...node, data: {} } : node) }), /提示词/);
@@ -37,7 +53,11 @@ assert.match(workflow, /\/api\/image-studio\/modules/);
 assert.match(workflow, /moduleId/);
 assert.match(workflow, /data-toolflow-node-template-select/);
 assert.match(workflow, /data-toolflow-input-file/);
+assert.match(workflow, /if \(root\.contains\(event\.target\)\) return;/);
+assert.match(workflow, /data-toolflow-context-save/);
 assert.match(canvasEngine, /connection-line:not\(\.temp\)/);
 assert.match(canvasEngine, /connection-delete-control/);
+assert.match(canvasEngine, /arrangeToolflowNodes/);
+assert.match(canvasEngine, /不覆盖通用上下文/);
 
 console.log('toolflow smoke passed');

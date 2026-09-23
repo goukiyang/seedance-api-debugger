@@ -405,3 +405,18 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 真实浏览器：Xiaobo Chrome Agent Window 复用登录态，刷新后确认 v0.12.2；普通上传请求返回 JSON 200，上传票据返回200，上传后的图片请求返回200，参考区实际显示新缩略图并从2/10变为4/10；随后移除测试图片，未保存模块配置，未点击生成。
 - 诊断证据：浏览器网络记录包含一次旧的无效测试图片 500（服务端 JSON 报 `Input buffer contains unsupported image format`）和一次真实有效上传 200；服务日志中的历史失败为 `EACCES mkdir '/srv/video-api-debugger/app/public/uploads/assets'`。`recordAssetUploadLog` 本身有独立 try/catch，不是二次抛错根因。
 - 资料：用户原始截图和本轮成功验收截图已登记在 `docs/materials/index.md`；未输出视频签名链接或凭据。线上未执行付费生成；本轮上传测试生成了一个管理员名下的 `browser-upload-smoke.png` 资产记录，未保存到模块配置。
+
+## 21. 无线画布并联、布局与节点上下文（2026-09-24）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| C1 | 画布节点交互 | 输入/模板/输出卡片可操作，上传素材卡片的选择、重试、删除点击可达 | 已实现，待线上回归 |
+| C2 | 工具流并联与布局 | 一对多、多对一及分支汇合可保存，运行时按拓扑并行推进；整理后主路径清晰、分支并列 | 已实现，烟测通过，待线上回归 |
+| C3 | 通用规则与节点上下文 | 普通模板只读生效的通用规则；每个模板节点独立编辑、独立保存，不覆盖通用上下文 | 已实现，候选构建通过，待线上回归 |
+| C4 | 无线画布视觉 | 隐藏系统左导航但保留画布工具栏；模板下拉深色可读；高级设置默认收起 | 已实现，候选构建通过，待线上回归 |
+| C5 | 发布与证据 | 候选构建、Git、服务、公网接口、登录态页面和健康守护周期一致 | 进行中 |
+
+- 根因沿用 U3 结论：线上上传目录必须由 `scripts/server-ensure-runtime-dirs.sh` 接回 `/data/video-api-debugger/var-lib/uploads`；本轮部署不得把持久化软链覆盖成发布包普通目录。当前服务器已核对为 `gouki:gouki` 可写，未改数据库、点数或 Provider 密钥。
+- 代码范围：`canvas-engine.js` 增加节点上下文保存状态、主路径整理、分支样式和连接端点清理；`toolflow-workflow.js` 把画布卡片事件接到文档级事件代理，并让节点上下文只有显式保存才写入；`toolflow-runtime.ts` 合并通用/模板/节点上下文并按 ready wave 并行推进；`app.js` 将整理布局接入适配按钮；页面和导航改为满屏无线画布；版本升为 `0.13.0`。
+- 本地证据：`npm run test:toolflow`、`npm run lint`、`node --check public/tools/ultimate-canvas/{canvas-engine.js,app.js,toolflow-workflow.js}`、`git diff --check` 通过；候选 `npm run build` 通过，候选 BUILD_ID `uv7KWpa4vBL8Flkd-M4xq`；lint/构建仅保留既有 ESLint 与 Autoprefixer warning。
+- 线上回归要求：保留现有画布文档的输入素材，部署后真实点击删除并刷新确认已移除；展开任一模板高级设置，编辑上下文后确认按钮亮起，点击保存后变灰并刷新仍保留；整理画布后确认主路径、并联连线和删除/重连不回归。未执行真实生图，不消耗点数。

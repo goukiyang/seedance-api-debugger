@@ -448,7 +448,7 @@
         if (!node?.type?.startsWith('flow-')) return;
         node.data = { ...(node.data || {}) };
         if (node.type === 'flow-input') Object.assign(node.data, { assetIds: inputAssetIds(node), asset_ids: inputAssetIds(node), assetPreviews: Array.isArray(node.data.assetPreviews) ? node.data.assetPreviews : [] });
-        if (node.type === 'flow-template') Object.assign(node.data, { title: node.data.title || '生图模板', source: node.data.source || 'system', prompt: node.data.prompt || '', count: node.data.count || 1, ratio: node.data.ratio || 'auto', size: node.data.size || '2K' });
+        if (node.type === 'flow-template') Object.assign(node.data, { title: node.data.title || '生图模板', source: node.data.source || 'system', prompt: node.data.prompt || '', context: node.data.context || '', savedContext: node.data.savedContext ?? node.data.context ?? '', count: node.data.count || 1, ratio: node.data.ratio || 'auto', size: node.data.size || '2K' });
         if (node.type === 'flow-input') node.data.title = node.data.title || '输入图片';
         if (node.type === 'flow-select') node.data.title = node.data.title || '筛选结果';
         if (node.type === 'flow-confirm') node.data.title = node.data.title || '人工确认';
@@ -564,6 +564,8 @@
             count: Number(item?.count) || 1,
             size: undefined,
             prompt: '',
+            context: '',
+            savedContext: '',
         };
         engine()?.refreshToolflowNode?.(node.id);
         renderNodeSettings();
@@ -580,6 +582,31 @@
             renderNodeSettings();
         }
         runtime().markChanged?.(`toolflow_node_${field}_change`);
+    }
+
+    function updateTemplateContextSaveState(node) {
+        if (!node || node.type !== 'flow-template') return;
+        const card = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"] [data-toolflow-template-node]`);
+        if (!card) return;
+        const value = String(card.querySelector(`[data-toolflow-node-field="context"][data-toolflow-node-id="${CSS.escape(node.id)}"]`)?.value ?? node.data?.context ?? '');
+        const saved = String(node.data?.savedContext ?? value);
+        const dirty = value !== saved;
+        const button = card.querySelector(`[data-toolflow-context-save="${CSS.escape(node.id)}"]`);
+        const status = card.querySelector(`[data-toolflow-context-status="${CSS.escape(node.id)}"]`);
+        const summary = card.querySelector('summary span');
+        if (button) { button.disabled = !dirty; button.textContent = dirty ? '保存节点上下文' : '已保存'; }
+        if (status) status.textContent = dirty ? '有未保存修改' : '已保存到此节点';
+        if (summary) summary.textContent = dirty ? '有未保存修改' : '已保存到此节点';
+    }
+
+    function saveTemplateNodeContext(node) {
+        if (!node || node.type !== 'flow-template') return;
+        const card = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"] [data-toolflow-template-node]`);
+        const value = String(card?.querySelector(`[data-toolflow-node-field="context"][data-toolflow-node-id="${CSS.escape(node.id)}"]`)?.value ?? node.data?.context ?? '');
+        node.data = { ...(node.data || {}), context: value, savedContext: value };
+        engine()?.refreshToolflowNode?.(node.id);
+        runtime().markChanged?.('toolflow_node_context_save');
+        notice('节点上下文已保存，不会覆盖通用上下文。', 'success');
     }
 
     function updateInputNodeAssets(node, assets) {
@@ -736,7 +763,7 @@
             }
             const inputRemove = event.target.closest('[data-toolflow-input-remove]');
             if (inputRemove) {
-                const node = flowInputNode();
+                const node = nodeById(inputRemove.closest('[data-toolflow-input-node]')?.dataset.toolflowInputNode || '') || flowInputNode();
                 if (node) updateInputNodeAssets(node, (node.data?.assetPreviews || []).filter(asset => (asset.id || asset.assetId) !== inputRemove.dataset.toolflowInputRemove));
                 return;
             }
@@ -792,6 +819,25 @@
             const retry = event.target.closest('[data-toolflow-retry]');
             if (retry) updateRun('retry', { node_id: retry.dataset.toolflowRetry });
         });
+        document.addEventListener('click', event => {
+            if (root.contains(event.target)) return;
+            const inputChoose = event.target.closest('[data-toolflow-input-choose]');
+            if (inputChoose) { openInputFilePicker(inputChoose.dataset.toolflowInputChoose); return; }
+            const inputRetry = event.target.closest('[data-toolflow-input-retry]');
+            if (inputRetry) {
+                const pending = state.inputUploads.get(inputRetry.dataset.toolflowInputRetry);
+                if (pending?.file) uploadInputFile(pending.file, inputRetry.dataset.toolflowInputRetry);
+                return;
+            }
+            const inputRemove = event.target.closest('[data-toolflow-input-remove]');
+            if (inputRemove) {
+                const node = nodeById(inputRemove.closest('[data-toolflow-input-node]')?.dataset.toolflowInputNode || '') || flowInputNode();
+                if (node) updateInputNodeAssets(node, (node.data?.assetPreviews || []).filter(asset => (asset.id || asset.assetId) !== inputRemove.dataset.toolflowInputRemove));
+                return;
+            }
+            const contextSave = event.target.closest('[data-toolflow-context-save]');
+            if (contextSave) saveTemplateNodeContext(nodeById(contextSave.dataset.toolflowContextSave));
+        });
         root.querySelector('[data-toolflow-select]')?.addEventListener('change', event => selectFlow(event.target.value));
         root.querySelector('[data-toolflow-node-settings]')?.addEventListener('change', event => {
             if (!event.target.matches('[data-toolflow-template-select]')) return;
@@ -813,6 +859,10 @@
                 return;
             }
             const field = event.target.closest('[data-toolflow-node-field]');
+            if (field && field.dataset.toolflowNodeField === 'context') {
+                updateTemplateContextSaveState(nodeById(field.dataset.toolflowNodeId));
+                return;
+            }
             if (field) updateTemplateNodeField(nodeById(field.dataset.toolflowNodeId), field.dataset.toolflowNodeField, field.value);
         });
         root.addEventListener('input', event => {
@@ -828,6 +878,11 @@
             const field = event.target.closest('[data-toolflow-node-field]');
             if (field && field.dataset.toolflowNodeField === 'prompt') {
                 updateTemplateNodeField(nodeById(field.dataset.toolflowNodeId), 'prompt', field.value, false);
+                return;
+            }
+            if (field && field.dataset.toolflowNodeField === 'context') {
+                const node = nodeById(field.dataset.toolflowNodeId);
+                updateTemplateContextSaveState(node);
                 return;
             }
             const prompt = event.target.closest('[data-toolflow-node-prompt]');

@@ -40,7 +40,7 @@ export const shellRoutes = [
   '/admin/feedback',
 ] as const;
 
-const topbarOnlyShellRoutes = [] as const;
+const topbarOnlyShellRoutes = ['/tools/ultimate-canvas'] as const;
 
 const shellRoutePrefixes = [
   '/tasks',
