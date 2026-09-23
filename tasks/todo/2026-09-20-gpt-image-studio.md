@@ -410,13 +410,22 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| C1 | 画布节点交互 | 输入/模板/输出卡片可操作，上传素材卡片的选择、重试、删除点击可达 | 已实现，待线上回归 |
-| C2 | 工具流并联与布局 | 一对多、多对一及分支汇合可保存，运行时按拓扑并行推进；整理后主路径清晰、分支并列 | 已实现，烟测通过，待线上回归 |
-| C3 | 通用规则与节点上下文 | 普通模板只读生效的通用规则；每个模板节点独立编辑、独立保存，不覆盖通用上下文 | 已实现，候选构建通过，待线上回归 |
-| C4 | 无线画布视觉 | 隐藏系统左导航但保留画布工具栏；模板下拉深色可读；高级设置默认收起 | 已实现，候选构建通过，待线上回归 |
-| C5 | 发布与证据 | 候选构建、Git、服务、公网接口、登录态页面和健康守护周期一致 | 进行中 |
+| C1 | 画布节点交互 | 输入/模板/输出卡片可操作，上传素材卡片的选择、重试、删除点击可达 | 已完成，线上回归通过 |
+| C2 | 工具流并联与布局 | 一对多、多对一及分支汇合可保存，运行时按拓扑并行推进；整理后主路径清晰、分支并列 | 已完成，线上回归通过 |
+| C3 | 通用规则与节点上下文 | 普通模板只读生效的通用规则；每个模板节点独立编辑、独立保存，不覆盖通用上下文 | 已完成，线上回归通过 |
+| C4 | 无线画布视觉 | 隐藏系统左导航但保留画布工具栏；模板下拉深色可读；高级设置默认收起 | 已完成，线上回归通过 |
+| C5 | 发布与证据 | 候选构建、Git、服务、公网接口、登录态页面和健康守护周期一致 | 已完成，线上与健康守护周期通过 |
 
 - 根因沿用 U3 结论：线上上传目录必须由 `scripts/server-ensure-runtime-dirs.sh` 接回 `/data/video-api-debugger/var-lib/uploads`；本轮部署不得把持久化软链覆盖成发布包普通目录。当前服务器已核对为 `gouki:gouki` 可写，未改数据库、点数或 Provider 密钥。
-- 代码范围：`canvas-engine.js` 增加节点上下文保存状态、主路径整理、分支样式和连接端点清理；`toolflow-workflow.js` 把画布卡片事件接到文档级事件代理，并让节点上下文只有显式保存才写入；`toolflow-runtime.ts` 合并通用/模板/节点上下文并按 ready wave 并行推进；`app.js` 将整理布局接入适配按钮；页面和导航改为满屏无线画布；版本升为 `0.13.0`。
-- 本地证据：`npm run test:toolflow`、`npm run lint`、`node --check public/tools/ultimate-canvas/{canvas-engine.js,app.js,toolflow-workflow.js}`、`git diff --check` 通过；候选 `npm run build` 通过，候选 BUILD_ID `uv7KWpa4vBL8Flkd-M4xq`；lint/构建仅保留既有 ESLint 与 Autoprefixer warning。
+- 代码范围：`canvas-engine.js` 增加节点上下文保存状态、主路径整理、分支样式和连接端点清理；`toolflow-workflow.js` 把画布卡片事件接到文档级事件代理，并让节点上下文只有显式保存才写入；`toolflow-runtime.ts` 合并通用/模板/节点上下文并按 ready wave 并行推进；`app.js` 将整理布局接入适配按钮；页面和导航改为满屏无线画布；版本升为 `0.13.1`，并补齐旧快照模板节点的默认字段归一化。
+- 首轮 0.13.0 本地证据：`npm run test:toolflow`、`npm run lint`、`node --check public/tools/ultimate-canvas/{canvas-engine.js,app.js,toolflow-workflow.js}`、`git diff --check` 和候选 `npm run build` 通过，候选 BUILD_ID `uv7KWpa4vBL8Flkd-M4xq`；lint/构建仅保留既有 ESLint 与 Autoprefixer warning。0.13.1 修复后的复测见下方发布结果。
 - 线上回归要求：保留现有画布文档的输入素材，部署后真实点击删除并刷新确认已移除；展开任一模板高级设置，编辑上下文后确认按钮亮起，点击保存后变灰并刷新仍保留；整理画布后确认主路径、并联连线和删除/重连不回归。未执行真实生图，不消耗点数。
+
+### C1-C5 发布结果（2026-09-24）
+
+- Git：`dc09db743b89e122102c80d8a60ba009843f0b5b`（`fix: normalize restored canvas template nodes`）已推送到 `codex/gpt-image-studio`；回退点 `rollback/2026-09-24-before-canvas-parallel-ui`、`rollback/2026-09-24-before-canvas-restore-fix` 均已推送。
+- 本地验证：`npm run test:toolflow`、`npm run lint`、`node --check public/tools/ultimate-canvas/{canvas-engine.js,app.js,toolflow-workflow.js}`、`git diff --check` 和候选 `npm run build` 均通过；仅保留既有 lint/Autoprefixer warning，未执行付费生图或数据库写入。
+- 服务器：线上 `.deployed-commit=dc09db7`、`.deployed-version=0.13.1`、`.next-prod/BUILD_ID=td33WXt7v-N5040rnJWiU`；`sd2-gray.service` 与 `sd2-image-studio.service` active，`NRestarts=0`，本地 health 通过；`EXPECT_PROD_ON_SERVER=1 SERVER=root@42.193.221.253 bash ops/server/sd2/preflight.sh` 通过。
+- 上传运行目录：`public/uploads` 已恢复指向 `/data/video-api-debugger/var-lib/uploads`，生产用户 `gouki` 可写；部署过程保留运行目录，未再次覆盖持久化软链。
+- 公网：`/api/release` 返回 `0.13.1`，`/api/config`、`/login` 返回200，未登录访问 `/tools/ultimate-canvas` 按预期跳转登录；健康守护周期后服务仍 active、`NRestarts=0`。
+- 登录态画布：页面显示 `Seedance 2.0 v0.13.1`。旧 flow-template 节点填写上下文后按钮由“已保存”变为“保存节点上下文”，点击后刷新仍保留；随后已清空临时上下文和提示词，刷新后均为空且按钮回到“已保存”。输入节点资产删除后刷新仍保持空；连接删除/重连及自动布局保存后刷新保持；深色下拉文字与背景可读。浏览器截图留存于 `/tmp/sd2-canvas-0131-final.png`。
