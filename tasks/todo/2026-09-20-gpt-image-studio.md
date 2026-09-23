@@ -473,3 +473,14 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 公网：`/api/release` 返回 `0.13.5`，`/api/config`、`/api/health`、`/login` 返回200；`sd2-gray.service` 保持 active、`NRestarts=0`，跨过约70秒健康周期后仍正常。
 - 真实页面：Xiaobo Chrome Agent Window 登录态显示 `Seedance 2.0 v0.13.5`，实际加载 `canvas-engine.js/styles.css?v=20260924-canvas-parallel-ports`。当前画布保存并刷新后保留 `node-3 -> node-7`、`node-3 -> node-10`、`node-7 -> node-5`、`node-10 -> node-5` 四条并行边（另有既有 `node-2 -> node-1`）；输入 fan-out=2、输出 merge=2。真实删除 `node-7 -> node-5` 后重新拖拽连接成功，保存接口返回200，硬刷新后仍恢复；拖动节点时对应 SVG path 的 `d` 同步变化。未执行真实生图、未消耗点数。
 - 本轮既有脏改（`tasks/audit-001-review.md`、未跟踪候选构建目录、`tasks/todo/2026-08-26-ultimate-canvas-module-refresh.md`、`tmp/`）保持原样，未提交。
+
+### 22.3 0.13.6 大图查看器真实对比入口（2026-09-24）
+
+用户确认旧验收记录中的“对比”不符合当前页面实际体验。本次在公网登录态先复现：双参考图结果正确隐藏入口，单参考图结果只有图标入口，用户不容易识别为对比功能。现已将查看器顶部入口改为明确的“对比”按钮，并显示当前“左右对比/上下对比”状态；真实参考图和生成图仍由查看器状态传入，不是静态占位。
+
+- 代码：入口为 `src/components/ZoomableImagePreview.tsx`；父层 `src/app/image-studio/studio.tsx` 的 `singleReferenceComparison(task)` 只在快照中恰好一张参考图且有 `originalUrl/thumbnailUrl` 时传入；对比布局、方向状态、同步 `scale/offset`、结果切换重置、Esc/空白关闭均在查看器中完成。
+- Git：`f54190c8745f8eecc7b1c32bbbd49cc5b410e412`（`feat: expose image result comparison controls`）已推送；回退 tag `rollback/2026-09-24-before-image-studio-compare-0.13.6` 已推送，指向 `c5ef6c4`。
+- 构建与发布：本地 `npm run build` 通过；发布包 SHA256 为 `484be5e72e57a0fc37a38672f29b88b95f69748c0a65c63383386faa8f613446`；线上 `.deployed-commit=f54190c8745f`、`.deployed-version=0.13.6`、`.next-prod/BUILD_ID=pg3sbTbW5zlSJ8VF8HVTT`，旧构建 `.next-prod-prev-0.13.5-20260924-071528` 保留。数据库备份位于 `/srv/video-api-debugger/backups/release-0.13.6-20260924-071327/dev.db`，未执行迁移或数据写入。
+- 公网：`/api/release` 返回 `0.13.6`，`/api/config`、`/api/health`、`/login` 返回200；部署前后 preflight 通过，跨过约70秒健康周期后 `sd2-gray.service` active、`NRestarts=0`。
+- 登录态手动页面：页面显示 `Seedance 2.0 v0.13.6`。双参考图结果的全屏查看器没有 `data-image-preview-compare` 入口；单参考图结果实际显示“对比”按钮，点击后加载真实参考图 URL 和生成图 URL，出现双面板。方向按钮从“左右”切换到“上下”，两个面板的 transform 同步；左右键切换结果后对比模式重置，Esc 关闭查看器。未点击生成、下载、删除或保存配置。
+- 按用户本次要求，不新增或安排自动测试门槛，后续以用户手动查看为准；浏览器控制台仅见 Chrome 扩展自身 `chrome-extension://invalid/` 资源错误，产品接口与图片请求均为200。
