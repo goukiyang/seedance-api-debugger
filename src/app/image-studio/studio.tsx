@@ -131,7 +131,15 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const [active, setActive] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [coverView, setCoverView] = useState(false);
-  const [coverPage, setCoverPage] = useState(0);
+  const [coverPage, setCoverPage] = useState(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const stored = Number(window.localStorage.getItem('sd2-image-studio-cover-page'));
+      return Number.isInteger(stored) && stored >= 0 ? stored : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [coverColumns, setCoverColumns] = useState(4);
   const [settings, setSettings] = useState<SettingsValue | null>(null);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
