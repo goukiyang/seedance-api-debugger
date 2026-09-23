@@ -242,7 +242,11 @@ async function resolveTemplate(
     outputSize = clean(data.size || data.output_size) || studioRatioSize(aspectRatio) || null;
   }
 
-  if (!prompt) throw new AuthError('图片模板没有有效提示词', 400);
+  // A saved image module may intentionally keep the user-facing prompt empty
+  // and store the reusable instruction in its context. The image worker uses
+  // that context as the provider prompt when no extra scene description is
+  // supplied, so do not reject a selected module solely for an empty prompt.
+  if (!prompt && !context.trim()) throw new AuthError('图片模板没有有效提示词', 400);
   if (!settings.prices[model as keyof typeof settings.prices] && settings.prices[model as keyof typeof settings.prices] !== 0) {
     throw new AuthError('当前图片模型尚未配置工具流生成积分', 409);
   }

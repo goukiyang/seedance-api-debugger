@@ -39,6 +39,25 @@
     function presetLabel(preset) {
         return [preset?.model, preset?.aspectRatio || '自动比例', `${preset?.count || 1} 张`].filter(Boolean).join(' · ');
     }
+    function templateSource(item) { return item?.source === 'module' ? 'module' : 'preset'; }
+    function templateOptionValue(item) { return `${templateSource(item)}:${item.id}`; }
+    function selectedTemplate(step) {
+        if (!step) return null;
+        return state.presets.find(item => templateSource(item) === 'preset' && item.id === step.templateId)
+            || state.presets.find(item => templateSource(item) === 'module' && item.id === step.moduleId)
+            || null;
+    }
+    function templateBinding(item) {
+        return templateSource(item) === 'module'
+            ? { templateId: '', moduleId: item.id }
+            : { templateId: item.id, moduleId: '' };
+    }
+    function parseTemplateOptionValue(value) {
+        const [source, ...rest] = String(value || '').split(':');
+        const id = rest.join(':');
+        if (!id || !['preset', 'module'].includes(source)) return null;
+        return { source, id };
+    }
 
     async function request(url, options = {}) {
         const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
@@ -84,6 +103,7 @@
                 nodeId: node.id,
                 kind: node.type === 'flow-template' ? 'template' : node.type === 'flow-select' ? 'select' : 'confirm',
                 templateId: node.data?.templateId || node.data?.template_id || '',
+                moduleId: node.data?.moduleId || node.data?.module_id || '',
             }));
         state.templatePickerStepId = '';
         state.selectedInputAssetIds = [];
@@ -111,7 +131,7 @@
         const query = state.templateSearch.trim().toLowerCase();
         return state.presets.filter(preset => {
             if (!query) return true;
-            return [preset.name, preset.groupName, preset.model].filter(Boolean).join(' ').toLowerCase().includes(query);
+            return [preset.name, preset.groupName, preset.model, templateSource(preset) === 'module' ? '我的模块' : '管理员模板'].filter(Boolean).join(' ').toLowerCase().includes(query);
         });
     }
 
@@ -120,7 +140,7 @@
         const presets = filteredPresets();
         const groups = new Map();
         presets.forEach(preset => {
-            const group = preset.groupName || (preset.scope === 'admin' ? '管理员模板' : '我的模板');
+            const group = preset.groupName || (templateSource(preset) === 'module' ? '我的模块' : preset.scope === 'admin' ? '管理员模板' : '我的模板');
             if (!groups.has(group)) groups.set(group, []);
             groups.get(group).push(preset);
         });
@@ -128,10 +148,10 @@
             <section class="guided-template-group">
                 <h4>${escapeHtml(group)}</h4>
                 <div class="guided-template-options">
-                    ${items.map(preset => `<button type="button" class="guided-template-option ${preset.id === step.templateId ? 'is-selected' : ''}" data-guided-template="${escapeHtml(preset.id)}" data-guided-step="${escapeHtml(step.id)}">
+                    ${items.map(preset => `<button type="button" class="guided-template-option ${selectedTemplate(step)?.id === preset.id && templateSource(selectedTemplate(step)) === templateSource(preset) ? 'is-selected' : ''}" data-guided-template="${escapeHtml(preset.id)}" data-guided-template-source="${escapeHtml(templateSource(preset))}" data-guided-step="${escapeHtml(step.id)}">
                         <span class="guided-template-thumb">${presetPreview(preset) ? `<img src="${escapeHtml(presetPreview(preset))}" alt="">` : '<span>图</span>'}</span>
-                        <span class="guided-template-copy"><strong>${escapeHtml(preset.name)}</strong><small>${escapeHtml(presetLabel(preset))}</small></span>
-                        <span class="guided-template-check">${preset.id === step.templateId ? '✓' : ''}</span>
+                        <span class="guided-template-copy"><strong>${escapeHtml(preset.name)}</strong><small>${escapeHtml(presetLabel(preset))}${templateSource(preset) === 'module' ? ' · 我的模块' : ' · 授权模板'}</small></span>
+                        <span class="guided-template-check">${selectedTemplate(step)?.id === preset.id && templateSource(selectedTemplate(step)) === templateSource(preset) ? '✓' : ''}</span>
                     </button>`).join('')}
                 </div>
             </section>`).join('');
@@ -158,10 +178,10 @@
                 </div>
             </article>
             ${state.guidedSteps.map((step, index) => {
-                const preset = state.presets.find(item => item.id === step.templateId);
+                const preset = selectedTemplate(step);
                 if (step.kind === 'select') return `<article class="guided-step-card guided-control-step"><div class="guided-step-heading"><span class="guided-step-number">${index + 2}</span><div><strong>筛选结果</strong><small>选择要继续使用的图片</small></div><button type="button" class="guided-remove-step" data-toolflow-remove-step="${escapeHtml(step.id)}" aria-label="删除筛选步骤">×</button></div></article>`;
                 if (step.kind === 'confirm') return `<article class="guided-step-card guided-control-step"><div class="guided-step-heading"><span class="guided-step-number">${index + 2}</span><div><strong>人工确认</strong><small>确认后再继续下一步</small></div><button type="button" class="guided-remove-step" data-toolflow-remove-step="${escapeHtml(step.id)}" aria-label="删除确认步骤">×</button></div></article>`;
-                return `<article class="guided-step-card guided-template-step ${step.templateId ? 'has-template' : ''}">
+                return `<article class="guided-step-card guided-template-step ${step.templateId || step.moduleId ? 'has-template' : ''}">
                     <div class="guided-step-heading"><span class="guided-step-number">${index + 2}</span><div><strong>生图模板</strong><small>${preset ? escapeHtml(preset.name) : '请选择一个模板'}</small></div><div class="guided-step-reorder"><button type="button" data-guided-move="up" data-guided-step="${escapeHtml(step.id)}" aria-label="上移">↑</button><button type="button" data-guided-move="down" data-guided-step="${escapeHtml(step.id)}" aria-label="下移">↓</button><button type="button" class="guided-remove-step" data-toolflow-remove-step="${escapeHtml(step.id)}" aria-label="删除模板步骤">×</button></div></div>
                     <button type="button" class="guided-template-trigger" data-guided-template-open="${escapeHtml(step.id)}">${preset ? `<span class="guided-template-thumb">${presetPreview(preset) ? `<img src="${escapeHtml(presetPreview(preset))}" alt="">` : '<span>图</span>'}</span><span><strong>${escapeHtml(preset.name)}</strong><small>${escapeHtml(presetLabel(preset))}</small></span><span class="guided-chevron">⌄</span>` : '<span class="guided-template-empty">选择一个生图模板</span><span class="guided-chevron">⌄</span>'}</button>
                     ${renderTemplatePicker(step)}
@@ -213,12 +233,34 @@
     }
 
     async function loadPresets() {
-        try {
-            const result = await request('/api/image-studio/presets');
-            state.presets = result.presets || [];
+        const results = await Promise.allSettled([
+            request('/api/image-studio/presets'),
+            request('/api/image-studio/modules'),
+        ]);
+        const presetResult = results[0];
+        const moduleResult = results[1];
+        const errors = results.filter(result => result.status === 'rejected');
+        if (errors.length === results.length) {
+            state.presets = [];
+            const error = errors[0]?.reason;
+            setState(error?.message || '模板读取失败，请刷新重试。', 'error');
+            notice(error?.message || '模板读取失败，请刷新重试。', 'error');
             renderNodeSettings();
             renderGuided();
-        } catch { state.presets = []; }
+            return;
+        }
+        const presets = presetResult.status === 'fulfilled' && Array.isArray(presetResult.value.presets)
+            ? presetResult.value.presets.map(item => ({ ...item, source: 'preset' }))
+            : [];
+        const modules = moduleResult.status === 'fulfilled' && Array.isArray(moduleResult.value.modules)
+            ? moduleResult.value.modules
+                .filter(item => item?.id && (String(item.prompt || '').trim() || String(item.context || '').trim()))
+                .map(item => ({ ...item, source: 'module' }))
+            : [];
+        state.presets = [...presets, ...modules];
+        if (errors.length) notice('部分模板读取失败，已显示当前可用模板。', 'warn');
+        renderNodeSettings();
+        renderGuided();
     }
 
     async function loadFlows() {
@@ -242,9 +284,13 @@
             root.innerHTML = '<span>选中图片模板节点后可选择授权模板。</span>';
             return;
         }
-        const selected = node.data?.templateId || node.data?.template_id || '';
+        const selected = node.data?.templateId || node.data?.template_id
+            ? `preset:${node.data.templateId || node.data.template_id}`
+            : node.data?.moduleId || node.data?.module_id
+                ? `module:${node.data.moduleId || node.data.module_id}`
+                : '';
         root.innerHTML = `<span>图片模板节点：${escapeHtml(node.id)}</span>
-            <select data-toolflow-template-select><option value="">使用当前节点提示词</option>${state.presets.map(preset => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}${preset.scope === 'admin' ? ' · 管理员模板' : ''}</option>`).join('')}</select>`;
+            <select data-toolflow-template-select><option value="">使用当前节点提示词</option>${state.presets.map(preset => `<option value="${escapeHtml(templateOptionValue(preset))}">${escapeHtml(preset.name)}${templateSource(preset) === 'module' ? ' · 我的模块' : preset.scope === 'admin' ? ' · 管理员模板' : ''}</option>`).join('')}</select>`;
         const select = root.querySelector('[data-toolflow-template-select]');
         if (select) select.value = selected;
     }
@@ -390,13 +436,13 @@
             let node = step.nodeId ? engine().nodes.get(step.nodeId) : null;
             const type = step.kind === 'select' ? 'flow-select' : step.kind === 'confirm' ? 'flow-confirm' : 'flow-template';
             if (!node || node.type !== type) {
-                const defaults = type === 'flow-template' ? { title: '生图模板', templateId: step.templateId || '', template_id: step.templateId || '' } : {};
+                const defaults = type === 'flow-template' ? { title: '生图模板', templateId: step.templateId || '', template_id: step.templateId || '', moduleId: step.moduleId || '', module_id: step.moduleId || '' } : {};
                 const nodeId = engine().addNode(type, 420 + index * 340, 220, defaults);
                 node = engine().nodes.get(nodeId);
                 step.nodeId = nodeId;
             }
             if (type === 'flow-template') {
-                node.data = { ...(node.data || {}), templateId: step.templateId || undefined, template_id: step.templateId || undefined };
+                node.data = { ...(node.data || {}), templateId: step.templateId || undefined, template_id: step.templateId || undefined, moduleId: step.moduleId || undefined, module_id: step.moduleId || undefined };
             }
             engine()._createConnection?.(previous.id, node.id);
             previous = node;
@@ -409,7 +455,7 @@
     }
 
     function addGuidedStep(kind = 'template') {
-        const step = { id: `guided-${kind}-${Date.now().toString(36)}`, kind, nodeId: '', templateId: '' };
+        const step = { id: `guided-${kind}-${Date.now().toString(36)}`, kind, nodeId: '', templateId: '', moduleId: '' };
         state.guidedSteps.push(step);
         state.templatePickerStepId = kind === 'template' ? step.id : '';
         ensureGuidedGraph();
@@ -523,9 +569,12 @@
             if (templateChoice) {
                 const step = state.guidedSteps.find(item => item.id === templateChoice.dataset.guidedStep);
                 if (step) {
-                    step.templateId = templateChoice.dataset.guidedTemplate;
+                    const item = state.presets.find(preset => preset.id === templateChoice.dataset.guidedTemplate && templateSource(preset) === (templateChoice.dataset.guidedTemplateSource || 'preset'));
+                    const binding = item ? templateBinding(item) : { templateId: templateChoice.dataset.guidedTemplate, moduleId: '' };
+                    step.templateId = binding.templateId;
+                    step.moduleId = binding.moduleId;
                     const node = step.nodeId ? engine()?.nodes.get(step.nodeId) : null;
-                    if (node) node.data = { ...(node.data || {}), templateId: step.templateId, template_id: step.templateId };
+                    if (node) node.data = { ...(node.data || {}), templateId: step.templateId || undefined, template_id: step.templateId || undefined, moduleId: step.moduleId || undefined, module_id: step.moduleId || undefined };
                     runtime().markChanged?.('toolflow_guided_template_change');
                 }
                 state.templatePickerStepId = '';
@@ -553,7 +602,8 @@
             if (!event.target.matches('[data-toolflow-template-select]')) return;
             const node = currentNode();
             if (!node) return;
-            node.data = { ...(node.data || {}), templateId: event.target.value || undefined, template_id: event.target.value || undefined };
+            const binding = parseTemplateOptionValue(event.target.value);
+            node.data = { ...(node.data || {}), templateId: binding?.source === 'preset' ? binding.id : undefined, template_id: binding?.source === 'preset' ? binding.id : undefined, moduleId: binding?.source === 'module' ? binding.id : undefined, module_id: binding?.source === 'module' ? binding.id : undefined };
             runtime().markChanged?.('toolflow_template_change');
             renderNodeSettings();
         });

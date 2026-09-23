@@ -26,9 +26,14 @@ assert.throws(() => validateToolFlowGraph({ ...graph, nodes: graph.nodes.map(nod
 
 const runtime = readFileSync(new URL('../src/lib/tools/toolflow-runtime.ts', import.meta.url), 'utf8');
 const worker = readFileSync(new URL('../src/lib/image-studio/worker.ts', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../public/tools/ultimate-canvas/toolflow-workflow.js', import.meta.url), 'utf8');
+const canvasEngine = readFileSync(new URL('../public/tools/ultimate-canvas/canvas-engine.js', import.meta.url), 'utf8');
 assert.match(runtime, /snapshot_json/);
 assert.match(runtime, /tool_flow_run_id/);
 assert.match(runtime, /settleTaskCredits/);
 assert.match(worker, /completeToolFlowTask/);
+assert.match(workflow, /\/api\/image-studio\/modules/);
+assert.match(workflow, /moduleId/);
+assert.match(canvasEngine, /connection-line:not\(\.temp\)/);
 
 console.log('toolflow smoke passed');

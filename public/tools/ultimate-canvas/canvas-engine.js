@@ -1062,6 +1062,14 @@ class CanvasEngine {
         return { fromId: startId, toId: endId };
     }
     _updateConnections() {
+        // Tool-flow rebuilding can replace the in-memory connection list while
+        // an old SVG path is still mounted. Remove those orphan paths here so
+        // every visible line remains owned by the live connection list and
+        // continues to follow drag/zoom/restore updates.
+        const liveLineIds = new Set(this.connections.map(connection => connection.lineId));
+        this.svg.querySelectorAll('.connection-line:not(.temp)').forEach(line => {
+            if (!liveLineIds.has(line.id)) line.remove();
+        });
         this.connections.forEach(c => {
             const fEl = document.querySelector(`[data-node-id="${c.from}"] .node-connector.output`);
             const tEl = document.querySelector(`[data-node-id="${c.to}"] .node-connector.input`);
