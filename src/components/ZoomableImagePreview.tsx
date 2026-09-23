@@ -152,6 +152,8 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
     if (event.target === event.currentTarget) onClose();
   }, [onClose]);
 
+  const comparisonLayoutLabel = comparisonAxis === 'horizontal' ? '左右' : '上下';
+
   const preview = (
     <div
       className={styles.backdrop}
@@ -164,7 +166,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
       <div className={styles.toolbar}>
         <div className={styles.title}>
           <strong>{title || fileName || alt}</strong>
-          <span>{imageError ? '加载失败' : imageLoaded ? `${Math.round(scale * 100)}%` : '加载中...'}</span>
+          <span>{comparisonMode ? `${comparisonLayoutLabel}对比 · ${Math.round(scale * 100)}%` : imageError ? '加载失败' : imageLoaded ? `${Math.round(scale * 100)}%` : '加载中...'}</span>
           {metadata && <div className={styles.metadata} title={metadata.context || undefined}>
             {metadata.context && <span>上下文：{metadata.context}</span>}
             {(metadata.model || metadata.quality || metadata.ratio || metadata.resolution || metadata.time) && <span>{[metadata.model, metadata.quality, metadata.ratio, metadata.resolution, metadata.time].filter(Boolean).join(' · ')}</span>}
@@ -175,11 +177,11 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
             <button type="button" onClick={onPrevious} title="上一张" aria-label="上一张生成图片"><ArrowLeft size={16} /></button>
             <button type="button" onClick={onNext} title="下一张" aria-label="下一张生成图片"><ArrowRight size={16} /></button>
           </>}
-          {comparison && <button type="button" data-image-preview-compare aria-pressed={comparisonMode} onClick={() => { setComparisonMode((current) => !current); resetView(); }} title="对比参考图" aria-label="对比参考图">
-            <ArrowLeftRight size={16} />
+          {comparison && <button type="button" data-image-preview-compare aria-pressed={comparisonMode} onClick={() => { setComparisonMode((current) => !current); resetView(); }} title={comparisonMode ? '退出对比' : '对比参考图'} aria-label={comparisonMode ? '退出对比' : '对比参考图'}>
+            <ArrowLeftRight size={16} /><span className={styles.actionLabel}>对比</span>
           </button>}
           {comparison && comparisonMode && <button type="button" data-image-preview-direction onClick={() => { setComparisonAxis((current) => current === 'horizontal' ? 'vertical' : 'horizontal'); resetView(); }} title={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'} aria-label={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'}>
-            {comparisonAxis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}
+            {comparisonAxis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}<span className={styles.actionLabel}>{comparisonLayoutLabel}</span>
           </button>}
           <button type="button" onClick={() => zoomAtCenter(1 / SCALE_STEP)} title="缩小" aria-label="缩小图片">
             <ZoomOut size={16} />
