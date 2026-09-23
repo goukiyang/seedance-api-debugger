@@ -232,7 +232,10 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const coverPageSize = coverColumns * 3;
   const coverPageCount = Math.max(1, Math.ceil(modules.length / coverPageSize));
   const visibleCoverModules = useMemo(() => modules.slice(coverPage * coverPageSize, (coverPage + 1) * coverPageSize), [coverPage, coverPageSize, modules]);
-  useEffect(() => { setCoverPage(current => Math.min(current, coverPageCount - 1)); }, [coverPageCount]);
+  useEffect(() => {
+    if (!modules.length) return;
+    setCoverPage(current => Math.min(current, coverPageCount - 1));
+  }, [coverPageCount, modules.length]);
   useEffect(() => { try { localStorage.setItem('sd2-image-studio-cover-page', String(coverPage)); } catch { /* Pagination is a convenience, not a dependency. */ } }, [coverPage]);
   useEffect(() => {
     if (!groups.length) return;
