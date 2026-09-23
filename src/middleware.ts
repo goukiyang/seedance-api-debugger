@@ -43,11 +43,25 @@ function legacyRedirectUrl(request: NextRequest) {
   return new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, targetOrigin);
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const redirectUrl = legacyRedirectUrl(request);
   if (redirectUrl) return NextResponse.redirect(redirectUrl, 308);
 
   const { pathname } = request.nextUrl;
+  if (pathname.startsWith('/uploads/assets/') || pathname.startsWith('/uploads/thumbs/')) {
+    const accessUrl = new URL('/api/image-studio/upload-access', request.url);
+    accessUrl.searchParams.set('path', pathname);
+    const accessResponse = await fetch(accessUrl, {
+      cache: 'no-store',
+      headers: {
+        cookie: request.headers.get('cookie') || '',
+        'x-image-studio-upload-access-check': '1',
+      },
+    });
+    if (accessResponse.status !== 204) {
+      return NextResponse.json({ error: '图片不存在或无权访问' }, { status: accessResponse.status === 404 ? 404 : 503 });
+    }
+  }
   const needsAuth = PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   if (!needsAuth) return NextResponse.next();
 
