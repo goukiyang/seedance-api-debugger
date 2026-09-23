@@ -390,3 +390,18 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 图片访问复核：匿名生成图片 `/uploads/assets/48c7cd2413798d40822e9cf5cbe87fbd62e73df6c530ac14f80f622a58837fe2.png` 返回404；普通参考素材 `/uploads/assets/47b3d71e25034abf398192912f5e56e5bf1dc39c58571354437a1d4498a06b6d.jpg` 返回200；`/api/health`、`/api/release` 正常，服务 `NRestarts=0`。
 - 上传故障复盘：部署包曾覆盖线上 `public/uploads` 持久化软链接，造成 `EACCES: permission denied, mkdir .../public/uploads/assets`。已运行既有 `scripts/server-ensure-runtime-dirs.sh` 恢复到 `/data/video-api-debugger/var-lib/uploads`，并验证 `gouki` 对 `assets`、`thumbs` 可写；未改数据库、未执行付费生图。
 - 登录态页面仍缺真实浏览器视觉证据；模板跨账号应用和一次真实登录上传需在 Chrome 调试连接恢复后补验。
+
+## 20. 上线后普通上传故障复核（2026-09-23）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| U1 | 真实客户端复现 | 在登录态 image-studio 页面抓到普通上传、上传票据和缩略图请求结果 | 已完成 |
+| U2 | 根因定位 | 区分登录、请求体大小、代理超时、HTML错误页和服务端目录权限 | 已完成 |
+| U3 | 线上恢复 | 恢复上传持久化目录，验证服务用户可写且不影响普通素材链路 | 已完成 |
+| U4 | 登录态闭环 | 上传成功、缩略图可见、参考区可继续使用，不触发付费生成 | 已完成 |
+
+- 根因：此前部署包覆盖了线上 `public/uploads` 持久化软链接，服务用户 `gouki` 在普通上传接口中创建 `public/uploads/assets` 时得到 `EACCES`；不是登录失效，也不是 Nginx 的 413/502/504。线上 Nginx 当前 `client_max_body_size=1024m`，代理读写超时均为300秒。
+- 运行修复：已运行既有 `scripts/server-ensure-runtime-dirs.sh /srv/video-api-debugger/app`，恢复 `public/uploads -> /data/video-api-debugger/var-lib/uploads`，并验证 `assets`、`thumbs` 对 `gouki` 可写；未改数据库结构。
+- 真实浏览器：Xiaobo Chrome Agent Window 复用登录态，刷新后确认 v0.12.2；普通上传请求返回 JSON 200，上传票据返回200，上传后的图片请求返回200，参考区实际显示新缩略图并从2/10变为4/10；随后移除测试图片，未保存模块配置，未点击生成。
+- 诊断证据：浏览器网络记录包含一次旧的无效测试图片 500（服务端 JSON 报 `Input buffer contains unsupported image format`）和一次真实有效上传 200；服务日志中的历史失败为 `EACCES mkdir '/srv/video-api-debugger/app/public/uploads/assets'`。`recordAssetUploadLog` 本身有独立 try/catch，不是二次抛错根因。
+- 资料：用户原始截图和本轮成功验收截图已登记在 `docs/materials/index.md`；未输出视频签名链接或凭据。线上未执行付费生成；本轮上传测试生成了一个管理员名下的 `browser-upload-smoke.png` 资产记录，未保存到模块配置。
