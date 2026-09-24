@@ -5,6 +5,7 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { allocateTaskCredits, settleTaskCredits, type CreditPolicyUser } from '@/lib/credits/policy';
 import { createInAppNotification } from '@/lib/notifications';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
+import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { defaultImageStudioQuality, normalizeImageStudioQuality, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { normalizeStudioRatio, studioRatioSize } from '@/lib/image-studio/ratios';
 import { assertCanUseToolFlow, parseJsonObject, validateToolFlowGraph, type ToolFlowGraph, type ToolFlowNode } from './toolflow';
@@ -43,6 +44,7 @@ type TemplateConfig = {
   referenceIds: string[];
   moduleId: string | null;
   templateId: string | null;
+  sourcePresetId: string | null;
 };
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'uncertain', 'cancelled']);
@@ -195,6 +197,7 @@ async function resolveTemplate(
   node: ToolFlowNode,
   inputAssetIds: string[],
   settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
+  identity: ImageStudioIdentity,
 ): Promise<TemplateConfig> {
   const data = node.data || {};
   const templateId = clean(data.template_id || data.templateId) || null;
@@ -213,16 +216,13 @@ async function resolveTemplate(
   let aspectRatio = clean(data.ratio || data.aspect_ratio, 'auto');
   let outputSize: string | null = clean(data.size || data.output_size) || null;
   let templateReferenceIds: string[] = [];
+  let sourcePresetId: string | null = null;
   const templateVersion = data.template_version ?? data.templateVersion;
 
   if (templateId) {
-    const preset = await tx.imageStudioPreset.findFirst({
-      where: {
-        id: templateId,
-        OR: [{ scope: 'admin' }, { scope: 'creator', owner_id: ownerId }],
-      },
-    });
-    if (!preset) throw new AuthError('图片模板不存在或未授权', 403);
+    const preset = await tx.imageStudioPreset.findUnique({ where: { id: templateId } });
+    if (!preset || !canViewStudioPreset(identity, preset)) throw new AuthError('图片模板不存在或未授权', 403);
+    sourcePresetId = preset.id;
     const presetIds = safeJsonArray(preset.reference_ids);
     if (templateVersion && String(templateVersion) !== preset.updated_at.toISOString()) throw new AuthError('图片模板已更新，请刷新后重新确认节点配置', 409);
     templateReferenceIds = await clonePresetAssets(tx, preset.owner_id, ownerId, presetIds);
@@ -237,6 +237,11 @@ async function resolveTemplate(
   } else if (moduleId) {
     const studioModule = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId } });
     if (!studioModule) throw new AuthError('图片模块不存在或未授权', 403);
+    if (studioModule.source_preset_id) {
+      sourcePresetId = studioModule.source_preset_id;
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: studioModule.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
+      if (!source || !canViewStudioPreset(identity, source)) throw new AuthError('该模板已停止共享，不能新建任务', 403);
+    }
     if (templateVersion && String(templateVersion) !== String(studioModule.revision)) throw new AuthError('图片模块已更新，请刷新后重新确认节点配置', 409);
     templateReferenceIds = await clonePresetAssets(tx, ownerId, ownerId, safeJsonArray(studioModule.reference_ids));
     if (data.model && clean(data.model) !== studioModule.model) throw new AuthError('当前模板不允许切换到该图片模型', 400);
@@ -281,6 +286,7 @@ async function resolveTemplate(
     referenceIds,
     moduleId,
     templateId,
+    sourcePresetId,
   };
 }
 
@@ -296,6 +302,7 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
       batch_id: `toolflow:${run.flow_id}:${run.version}:${node.id}`,
       owner_id: ownerId,
       module_id: config.moduleId,
+      source_preset_id: config.sourcePresetId,
       ordinal: itemIndex + 1,
       fingerprint: createHash('sha256').update(stringify({ run: run.flow_id, version: run.version, node: node.id, index: itemIndex, prompt: config.prompt, references: config.referenceIds })).digest('hex'),
       prompt: config.prompt,
@@ -310,6 +317,7 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
         runId,
         nodeId: node.id,
         templateId: config.templateId,
+        sourcePresetId: config.sourcePresetId,
         prompt: config.prompt,
         context: config.context,
         model: config.model,
@@ -358,7 +366,7 @@ async function scheduleTemplateNode(
 ) {
   const previous = parseNodeResult(nodeRun.result_json);
   const existingSuccesses = previous.succeededAssetIds || [];
-  const config = await resolveTemplate(tx, runRow.owner_id, run.flow_owner_id, node, inputAssetIds, settings);
+  const config = await resolveTemplate(tx, runRow.owner_id, run.flow_owner_id, node, inputAssetIds, settings, creditUser as unknown as ImageStudioIdentity);
   const expected = Math.max(existingSuccesses.length, config.count);
   const remaining = Math.max(0, expected - existingSuccesses.length);
   const taskIds: string[] = [];
@@ -413,8 +421,9 @@ export async function advanceToolFlowRun(runId: string) {
     const nodeRuns = new Map(run.node_runs.map((item) => [item.node_id, item]));
     const creditUser = await tx.user.findUniqueOrThrow({
       where: { id: run.owner_id },
-      select: { id: true, role: true, account_type: true, user_profile: true, status: true },
+      select: { id: true, role: true, account_type: true, user_profile: true, status: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true },
     });
+    if (!canUseCompanyTemplates(creditUser)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
     const existingWaiting = run.node_runs.find((item) => item.status === 'waiting_selection' || item.status === 'waiting_confirmation');
     let waiting: 'selection' | 'confirmation' | null = existingWaiting
       ? existingWaiting.status === 'waiting_selection' ? 'selection' : 'confirmation'
@@ -519,6 +528,7 @@ export async function advanceToolFlowRun(runId: string) {
 }
 
 export async function createToolFlowRun(user: SessionUser, flowId: string, inputAssetIds: string[]) {
+  if (!canUseCompanyTemplates(user)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
   const flow = await assertCanUseToolFlow(user, flowId);
   const graph = validateToolFlowGraph(JSON.parse(flow.graph_json));
   const ids = parseIds(inputAssetIds);

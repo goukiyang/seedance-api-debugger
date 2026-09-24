@@ -62,6 +62,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
       id: true, role: true, account_type: true, status: true,
+      user_profile: true,
       feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
     } });
     if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);
@@ -286,9 +287,20 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
     .map(item => {
       if (!item || typeof item !== 'object') return null;
       const record = item as Record<string, unknown>;
-      return typeof record.id === 'string' ? { ...record, originalUrl: studioTemplateAssetUrl(record.id), thumbnailUrl: studioTemplateAssetUrl(record.id) } : null;
+      if (typeof record.id !== 'string') return null;
+      return {
+        id: record.id,
+        originalUrl: studioTemplateAssetUrl(record.id),
+        thumbnailUrl: studioTemplateAssetUrl(record.id),
+        fileName: typeof record.fileName === 'string' ? record.fileName : null,
+        mimeType: typeof record.mimeType === 'string' ? record.mimeType : null,
+        width: typeof record.width === 'number' ? record.width : null,
+        height: typeof record.height === 'number' ? record.height : null,
+        fileSize: typeof record.fileSize === 'number' ? record.fileSize : null,
+        hash: typeof record.hash === 'string' ? record.hash : null,
+      };
     })
-    .filter((item): item is Record<string, unknown> => Boolean(item));
+    .filter((item): item is NonNullable<typeof item> => item !== null);
   const count = Number.isInteger(parsed.count) && Number(parsed.count) >= 1 && Number(parsed.count) <= 8 ? Number(parsed.count) : 1;
   const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
   return {

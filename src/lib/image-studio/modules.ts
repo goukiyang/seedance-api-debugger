@@ -178,7 +178,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       if (source?.owner_id === ownerId && source.scope === 'admin') {
         await tx.imageStudioPreset.update({ where: { id: current.source_preset_id }, data: {
           name: saved.name, group_name: saved.group_name, prompt: saved.prompt, context: saved.context,
-          model: saved.model, quality: saved.quality, resolution: saved.resolution, count: saved.count,
+          model: saved.model || 'gemini-3.1-flash-image-preview', quality: saved.quality, resolution: saved.resolution, count: saved.count,
           reference_limit: saved.reference_limit, aspect_ratio: saved.aspect_ratio,
           banner_asset_id: saved.banner_asset_id, reference_ids: saved.reference_ids,
         } });

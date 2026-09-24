@@ -111,7 +111,7 @@ async function main() {
   assert.equal((await listStudioTasks(user.id, undefined, defaultStudioModuleId(user.id))).tasks.length, 3);
   assert.equal((await listStudioTasks(stranger.id, undefined, moduleId)).tasks.length, 0);
   assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks[0].status, 'succeeded');
-  assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks[0].snapshot.referenceImages[0].id, reference.id);
+  assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks[0]!.snapshot!.referenceImages[0]!.id, reference.id);
   const historicalTask = await prisma.imageStudioTask.findFirstOrThrow({ where: { batch_id: moduleBatch } });
   const changedModule = await saveStudioModule(user.id, { ...moduleBody, revision: saved.revision, context: 'Current module context', reproduceFromTaskId: historicalTask.id }, false, true);
   assert.equal(changedModule.reproduceFromTaskId, historicalTask.id);
