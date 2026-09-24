@@ -509,7 +509,15 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 | P1 | 独立图片预览 | 预览使用 portal 独立渲染；点击、滚轮、右键和左右键只作用于预览，不触发页面操作 | 已完成 |
 | P2 | 顶部参考图切换 | 单参考图结果在顶部最左侧显示缩略图；点击可在参考图与生成图之间切换；预览不显示上下文内容 | 已完成 |
 | P3 | 结果操作图标化 | 下载、重新生成、复制上下文仅保留图形并继续悬浮显示；新增一键复制图片图标及成功/失败反馈 | 已完成 |
-| P4 | 构建、发布与验证 | 版本、构建、服务、公网页面/API一致，保留回退点 | 进行中 |
+| P4 | 构建、发布与验证 | 版本、构建、服务、公网页面/API一致，保留回退点 | 已完成 |
 
 - 实现范围：`ZoomableImagePreview` 通过 `document.body` portal 独立承载，并在 capture 阶段拦截预览快捷键；参考图缩略图固定在预览工具栏左侧。`studio.tsx` 仅在快照恰好一张参考图时提供缩略图，生成结果操作改为 Lucide 图标；复制图片通过当前登录态读取图片 Blob 写入剪贴板，不改变资产权限。
 - 边界：不显示上下文正文，不改变生成、下载接口、任务权限或数据库；多参考图继续隐藏对比/参考切换入口；复制图片失败只反馈重试，不回退到外部公开地址。
+
+### 24.1 0.14.1 发布结果（2026-09-25）
+
+- Git：`e17e959b80c1100e6e77337649b3b701cd68263b` 已推送到 `codex/gpt-image-studio`；回退点 `rollback/2026-09-25-before-image-preview-0.14.1` 已推送。
+- 本地验证：`git diff --check`、`npm run build` 通过；仅保留既有 ESLint/Autoprefixer warning，未执行付费生图、数据库写入或生产数据删除。
+- 服务器：候选构建成功，线上 `.deployed-commit=e17e959b80c1100e6e77337649b3b701cd68263b`、`.deployed-version=0.14.1`、`.next-prod/BUILD_ID=z_VqeOMefc7NbIKF2EyWf`；旧构建 `.next-prod-prev-image-preview-20260925` 保留。发布过程中曾发现并修复发布同步遗漏 `node_modules` 排除、源码属主和 Prisma Client 生成三个部署环境问题，未切换失败候选。
+- 公网：`https://sd2.youdooart.com/api/release` 返回 `0.14.1` 及本次摘要，`/api/health` 返回 `ok` 且带 `X-SD2-Origin: server-42-193`，`/login` 返回200，`/image-studio` 未登录按预期跳转登录；`sd2-gray.service` 与 `sd2-image-studio.service` active，`NRestarts=0`。当前页刷新后即可看到本次版本。
+- 运行期保护：`public/uploads` 仍指向 `/data/video-api-debugger/var-lib/uploads`；未覆盖上传、视频、数据库和现有用户结果。
