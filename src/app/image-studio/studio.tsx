@@ -13,8 +13,8 @@ import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LA
 type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean; prices: Record<string, number | null> };
 type StudioSnapshot = { prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; width?: number; height?: number } | null };
-type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
-type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
+type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
+type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type ImagePreviewState = { taskId?: string; src: string; alt: string; title?: string; fileName?: string; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string } };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 const models = IMAGE_STUDIO_MODELS;
@@ -151,6 +151,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const presetDialog = useRef<HTMLDialogElement>(null);
   const presetApplyLock = useRef(false);
   const [presetApplying, setPresetApplying] = useState(false);
+  const [presetSharingId, setPresetSharingId] = useState<string | null>(null);
   useEffect(() => { if (presetDialogOpen) presetDialog.current?.showModal(); else presetDialog.current?.close(); }, [presetDialogOpen]);
   const [customRatios, setCustomRatios] = useState<string[]>([]);
   const [ratiosBusy, setRatiosBusy] = useState(false);
@@ -222,6 +223,44 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     } catch (e) { setPresetsError(e instanceof Error ? e.message : '应用模板失败'); }
     finally { presetApplyLock.current = false; setPresetApplying(false); }
   }
+  async function togglePresetSharing(preset: StudioPreset) {
+    if (!preset.canManageSharing || presetSharingId) return;
+    const next = !preset.isShared;
+    setPresetSharingId(preset.id); setPresetsError('');
+    setPresets(current => current.map(item => item.id === preset.id ? { ...item, isShared: next } : item));
+    try {
+      const result = await readResponse(await fetch('/api/image-studio/presets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-sharing', presetId: preset.id, isShared: next }),
+      }));
+      setPresets(current => current.map(item => item.id === preset.id ? { ...item, isShared: result.isShared === true } : item));
+    } catch (e) {
+      setPresets(current => current.map(item => item.id === preset.id ? { ...item, isShared: preset.isShared } : item));
+      setPresetsError(e instanceof Error ? e.message : '共享状态保存失败，请重试');
+    } finally { setPresetSharingId(null); }
+  }
+  async function toggleModuleSharing(module: StudioModule) {
+    if (!module.sourcePresetCanManageSharing || !module.sourcePresetId || presetSharingId) return;
+    const next = module.sourcePresetShared !== true;
+    const previous = module.sourcePresetShared === true;
+    setPresetSharingId(module.sourcePresetId);
+    setError('');
+    setModules(current => current.map(item => item.id === module.id ? { ...item, sourcePresetShared: next } : item));
+    setPresets(current => current.map(item => item.id === module.sourcePresetId ? { ...item, isShared: next } : item));
+    try {
+      const result = await readResponse(await fetch('/api/image-studio/presets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-sharing', presetId: module.sourcePresetId, isShared: next }),
+      }));
+      const effective = result.isShared === true;
+      setModules(current => current.map(item => item.id === module.id ? { ...item, sourcePresetShared: effective } : item));
+      setPresets(current => current.map(item => item.id === module.sourcePresetId ? { ...item, isShared: effective } : item));
+    } catch (e) {
+      setModules(current => current.map(item => item.id === module.id ? { ...item, sourcePresetShared: previous } : item));
+      setPresets(current => current.map(item => item.id === module.sourcePresetId ? { ...item, isShared: previous } : item));
+      setError(e instanceof Error ? e.message : '共享状态保存失败，请重试');
+    } finally { setPresetSharingId(null); }
+  }
   const groupedModules = useMemo(() => modules.reduce<Record<string, StudioModule[]>>((groups, item) => {
     const group = item.groupName || '未分组';
     (groups[group] ||= []).push(item);
@@ -288,7 +327,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
         <span className={styles.coverDescription}><strong title={module.name}>{module.name}</strong><small>{module.prompt.trim() ? module.prompt.trim().slice(0, 96) : `以${module.name}为主题，按当前参考图和模型设置生成图片。`}</small></span>
       </button>;
     })}</div><div className={styles.pagination} aria-label="模板封面分页"><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模板</button>}</section> : <>
-    {visibleModules.map((module, index) => <ImageStudioBlock key={module.id} module={module} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} isFirst={index === 0}
+    {visibleModules.map((module, index) => <ImageStudioBlock key={module.id} module={module} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} isFirst={index === 0} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       userId={userId} settings={settings} setSettings={setSettings} active={active === module.id} onActivate={() => setActive(module.id)}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? next : item)); setSelectedGroup(next.groupName || '未分组'); }}
       globalSettingsOpen={globalSettingsOpen && index === 0} onCloseGlobal={() => setGlobalSettingsOpen(false)}
@@ -302,13 +341,13 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     <dialog ref={presetDialog} className={styles.dialog} onCancel={() => setPresetDialogOpen(false)}>
       <header className={styles.header}><h2>模板库</h2><button type="button" aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
-      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></article>)}</div>}
+      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><div className={styles.presetActions}>{preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={presetSharingId === preset.id} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}<button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></div></article>)}</div>}
     </dialog>
   </main>;
 }
 
-function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGroup, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
-  isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; settings: SettingsValue | null;
+function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGroup, onToggleSharing, sharingId, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
+  isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule) => Promise<void>; sharingId: string | null; settings: SettingsValue | null;
   setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
   globalSettingsOpen: boolean; onCloseGlobal: () => void;
   settingsReload: number; onReloadSettings: () => void;
@@ -337,7 +376,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
   const [moduleSaveError, setModuleSaveError] = useState('');
-  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: module.referenceLimit || MAX_REFERENCE_IMAGES, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: module.quality || 'auto', resolution: module.resolution || defaultImageResolution(module.model), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null }) : '');
+  const [moduleSaved, setModuleSaved] = useState(module.saved ? JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: module.referenceLimit || MAX_REFERENCE_IMAGES, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: module.quality || 'auto', resolution: module.resolution || defaultImageResolution(module.model), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null }) : '');
   const moduleSaveLock = useRef(false);
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -386,9 +425,10 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
-  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality, resolution, groupName, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null };
+  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality, resolution, groupName, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null };
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
+  const sourceSharingBlocked = Boolean(module.sourcePresetId && module.sourcePresetShared === false);
 
   useEffect(() => { if (globalSettingsOpen) dialog.current?.showModal(); }, [globalSettingsOpen]);
   useEffect(() => { if (deleteTarget) deleteDialog.current?.showModal(); else deleteDialog.current?.close(); }, [deleteTarget]);
@@ -430,7 +470,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
     try {
       await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         scope: isAdmin ? 'admin' : 'creator', name: presetName.trim(), groupName, prompt, context: moduleContext, model: moduleModel, quality, resolution,
-        count, referenceLimit, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id),
+        count, referenceLimit, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), sourceModuleId: isAdmin ? module.id : undefined,
       }) }));
       setSaveStatus('模板已保存');
       window.setTimeout(() => setSaveStatus(''), 2200);
@@ -744,7 +784,10 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
   return <section ref={section} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
     onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
     <header className={styles.header}>
-      {nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
+      <div className={styles.moduleTitleRow}>
+        {nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
+        {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{module.sourcePresetShared === true ? '共享给同事' : '仅自己可见'}</button>}
+      </div>
       <div className={styles.counts}>
         <label className={styles.moduleGroupControl}>分组
           <select aria-label="模块分组" value={groupName} onChange={event => changeGroup(event.target.value)}>
@@ -801,7 +844,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
         </div>
-        <button type="button" className={styles.generate} disabled={submitting || uploading || moduleSaving || ratioEditing || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        <button type="button" className={styles.generate} disabled={sourceSharingBlocked || submitting || uploading || moduleSaving || ratioEditing || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={images.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>

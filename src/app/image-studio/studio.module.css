@@ -25,6 +25,8 @@
 .page .moduleNameDisplay { justify-content: flex-start; width: min(420px, 100%); padding: 0; border: 0; background: transparent; color: #eef0f2; font-size: 22px; font-weight: 800; text-align: left; }
 .page .moduleNameDisplay:hover { background: transparent; color: #b9f7e8; }
 .module .header { align-items: center; flex-wrap: wrap; }
+.moduleTitleRow { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.moduleSharing { flex: 0 0 auto; padding: 6px 9px !important; font-size: 12px !important; }
 .module .counts { align-items: center; }
 .moduleGroupControl { display: inline-flex; align-items: center; gap: 6px; color: #adb6bd; font-size: 13px; }
 .moduleGroupControl select { min-width: 116px; padding: 7px 9px; }
@@ -124,5 +126,8 @@
 .presetItem { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #2d383d; border-radius: 6px; background: #151a1d; }
 .presetItem > div { display: grid; gap: 4px; min-width: 0; }
 .presetItem span { color: #adb6bd; font-size: 12px; }
+.presetActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.presetSharing[aria-checked="true"] { border-color: #3fc8a7; color: #c5fff0; background: #123b33; }
+.presetSharing[aria-checked="false"] { color: #adb6bd; background: #20262a; }
 @media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: 0; bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
 @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } .modelQualityRow { grid-template-columns: 1fr; } .page .coverCard { grid-template-rows: minmax(0, 1fr) 122px; } .coverDescription strong { font-size: 20px; } }

@@ -5,11 +5,12 @@ import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
 import { getImageGenerationApiSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
+import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
 import { imageOutputSize, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD } from './model-catalog';
-import { studioAssetUrl } from './media';
+import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -59,10 +60,20 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (duplicate.fingerprint !== fingerprint) throw new StudioError('提交编号冲突', 409);
       return;
     }
-    const user = await tx.user.findUnique({ where: { id: ownerId } });
+    const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
+      id: true, role: true, account_type: true, status: true,
+      feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
+    } });
     if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);
+    const identity: ImageStudioIdentity = user;
+    if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
     const workspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
+    let sourcePresetId = workspace?.source_preset_id || null;
+    if (workspace?.source_preset_id) {
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
+      if (!source || !canViewStudioPreset(identity, source)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
+    }
     if (workspace && input.moduleRevision !== undefined && workspace.revision !== input.moduleRevision) throw new StudioError('模块已在其他页面更新，请刷新后核对', 409);
     const generation = resolveStudioModuleGenerationConfig(workspace, settings);
     const price = generation.prices[generation.model];
@@ -72,11 +83,17 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let context = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     let referenceIds = input.referenceIds;
     const reproduceFromTaskId = input.reproduceFromTaskId || workspace?.reproduce_task_id || undefined;
-  if (reproduceFromTaskId) {
-      const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId } });
+    if (reproduceFromTaskId) {
+      const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId }, select: { source_preset_id: true, snapshot_json: true } });
       if (!source?.snapshot_json) throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       try {
-        const sourceSnapshot = JSON.parse(source.snapshot_json) as { globalContext?: unknown; moduleContext?: unknown; referenceImages?: unknown };
+        const sourceSnapshot = JSON.parse(source.snapshot_json) as { globalContext?: unknown; moduleContext?: unknown; referenceImages?: unknown; sourcePresetId?: unknown };
+        const historicalSourcePresetId = source.source_preset_id || (typeof sourceSnapshot.sourcePresetId === 'string' ? sourceSnapshot.sourcePresetId : null);
+        if (!sourcePresetId && historicalSourcePresetId) sourcePresetId = historicalSourcePresetId;
+        if (historicalSourcePresetId) {
+          const historicalSource = await tx.imageStudioPreset.findUnique({ where: { id: historicalSourcePresetId }, select: { owner_id: true, scope: true, is_shared: true } });
+          if (!historicalSource || !canViewStudioPreset(identity, historicalSource)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
+        }
         const sourceContext = [sourceSnapshot.globalContext, sourceSnapshot.moduleContext]
           .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
           .map(value => value.trim()).join('\n\n---\n模块上下文：\n');
@@ -84,7 +101,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         context = sourceContext;
         snapshotGlobalContext = typeof sourceSnapshot.globalContext === 'string' ? sourceSnapshot.globalContext : '';
         snapshotModuleContext = typeof sourceSnapshot.moduleContext === 'string' ? sourceSnapshot.moduleContext : '';
-      } catch {
+      } catch (error) {
+        if (error instanceof StudioError) throw error;
         throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       }
     }
@@ -97,7 +115,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const referencesById = new Map(references.map(reference => [reference.id, reference]));
     const referenceSnapshot = referenceIds.map(id => {
       const reference = referencesById.get(id);
-      return { id, originalUrl: reference?.original_url || null, thumbnailUrl: reference?.thumbnail_url || null,
+      return { id, originalUrl: reference ? studioTemplateAssetUrl(id) : null, thumbnailUrl: reference ? studioTemplateAssetUrl(id) : null,
         fileName: reference?.file_name || null, mimeType: reference?.mime_type || null, width: reference?.width || null,
         height: reference?.height || null, fileSize: reference?.file_size || null, hash: reference?.hash || null };
     });
@@ -115,6 +133,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       globalContext: snapshotGlobalContext,
       moduleContext: snapshotModuleContext,
       moduleId: workspace?.id || moduleId || null,
+      sourcePresetId,
       reproducedFromTaskId: reproduceFromTaskId || null,
       moduleName: workspace?.name || null,
       prompt: input.prompt,
@@ -137,7 +156,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const id = `${batchId}-${i}`;
       const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       await tx.imageStudioTask.create({ data: {
-        id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, ordinal: i + 1, fingerprint,
+        id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
         prompt: input.prompt, context, revision: settings.revision, model: generation.model,
         quality: generation.quality,
         provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: snapshot,
@@ -260,10 +279,16 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
     && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string'
     && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim());
   const fallbackReferences = (() => {
-    try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset?.original_url || null, thumbnailUrl: asset?.thumbnail_url || null, width: asset?.width || null, height: asset?.height || null }; }); }
+    try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset ? studioTemplateAssetUrl(id) : null, thumbnailUrl: asset ? studioTemplateAssetUrl(id) : null, width: asset?.width || null, height: asset?.height || null }; }); }
     catch { return []; }
   })();
-  const referenceImages = (snapshotReferences.length ? snapshotReferences : fallbackReferences).filter(item => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string');
+  const referenceImages = (snapshotReferences.length ? snapshotReferences : fallbackReferences)
+    .map(item => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      return typeof record.id === 'string' ? { ...record, originalUrl: studioTemplateAssetUrl(record.id), thumbnailUrl: studioTemplateAssetUrl(record.id) } : null;
+    })
+    .filter((item): item is Record<string, unknown> => Boolean(item));
   const count = Number.isInteger(parsed.count) && Number(parsed.count) >= 1 && Number(parsed.count) <= 8 ? Number(parsed.count) : 1;
   const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
   return {

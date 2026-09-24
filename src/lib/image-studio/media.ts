@@ -12,6 +12,10 @@ export function studioAssetUrl(assetId: string) {
   return `/api/image-studio/assets/${encodeURIComponent(assetId)}`;
 }
 
+export function studioTemplateAssetUrl(assetId: string) {
+  return `/api/image-studio/template-assets/${encodeURIComponent(assetId)}`;
+}
+
 export async function readStudioImage(url: string, signal?: AbortSignal): Promise<Buffer> {
   signal?.throwIfAborted();
   const local = siteUploadPathFromUrl(url);

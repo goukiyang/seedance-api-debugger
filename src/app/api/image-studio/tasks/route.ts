@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { deleteStudioResult, listStudioTasks, StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
+import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 
 export const dynamic = 'force-dynamic';
 export async function DELETE(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404 });
   try { await deleteStudioResult(user.id, (await request.json()).id); return NextResponse.json({ deleted: true }); }
   catch (error) {
     if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
@@ -15,12 +17,14 @@ export async function DELETE(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
   try { return NextResponse.json(await listStudioTasks(user.id, request.nextUrl.searchParams.get('cursor') || undefined, request.nextUrl.searchParams.get('moduleId') || undefined), { headers: { 'Cache-Control': 'no-store' } }); }
   catch { return NextResponse.json({ error: '生成记录读取失败，请重试' }, { status: 503 }); }
 }
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
   try {
     const batchId = await submitStudioBatch(user.id, await request.json());
     return NextResponse.json({ batchId }, { status: 202 });

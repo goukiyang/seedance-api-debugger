@@ -335,6 +335,7 @@ model ImageStudioModule {
   banner_asset_id String?
   prices_json   String?
   reproduce_task_id String?
+  source_preset_id String?
   count         Int      @default(1)
   reference_limit Int    @default(10)
   aspect_ratio  String   @default("auto")
@@ -344,12 +345,14 @@ model ImageStudioModule {
   updated_at    DateTime @updatedAt
 
   @@index([owner_id, created_at])
+  @@index([source_preset_id])
 }
 
 model ImageStudioPreset {
   id            String   @id
   owner_id      String
   scope         String   // admin | creator
+  is_shared     Boolean  @default(true)
   name          String
   group_name    String   @default("未分组")
   prompt        String   @default("")
@@ -374,6 +377,7 @@ model ImageStudioTask {
   batch_id       String
   owner_id       String
   module_id      String?
+  source_preset_id String?
   ordinal        Int
   fingerprint    String
   prompt         String
@@ -407,6 +411,7 @@ model ImageStudioTask {
   @@index([status, created_at])
   @@index([batch_id, owner_id])
   @@index([owner_id, module_id, created_at])
+  @@index([source_preset_id, created_at])
   @@index([tool_flow_run_id, tool_flow_node_id, status])
 }
 
