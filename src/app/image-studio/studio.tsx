@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
+import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import { ZoomableImagePreview, type ImagePreviewMetadata } from '@/components/ZoomableImagePreview';
 import styles from './studio.module.css';
@@ -15,7 +15,7 @@ type StudioSnapshot = { prompt: string; model: string; quality?: string; resolut
 type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; width?: number; height?: number } | null };
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
 type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
-type ImagePreviewState = { taskId?: string; src: string; alt: string; title?: string; fileName?: string; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string } };
+type ImagePreviewState = { taskId?: string; src: string; alt: string; title?: string; fileName?: string; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 const models = IMAGE_STUDIO_MODELS;
 const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
@@ -45,20 +45,19 @@ function singleReferenceComparison(task: StudioTask) {
   if (references.length !== 1) return undefined;
   const reference = references[0];
   const src = reference?.originalUrl || reference?.thumbnailUrl;
-  return src ? { src, alt: '唯一参考图', fileName: reference.fileName || undefined } : undefined;
+  return src ? { src, thumbnailSrc: reference.thumbnailUrl || src, alt: '唯一参考图', fileName: reference.fileName || undefined } : undefined;
 }
 
 function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
   const snapshot = task.snapshot;
   const model = IMAGE_STUDIO_MODEL_LABELS[task.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || task.model;
   const quality = IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动';
-  const context = snapshot?.sourceAvailable ? [snapshot.globalContext?.trim(), snapshot.moduleContext?.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n') : '';
   return {
     taskId: task.id,
     src: task.asset?.original_url || '',
     alt: task.prompt || '参考图生成结果',
     title: task.prompt || '参考图生成结果',
-    metadata: { context: context || undefined, model: `模型 ${model}`, quality: `质量 ${quality}`, ratio: `比例 ${snapshot?.resolvedAspectRatio || task.aspectRatio || 'auto'}`, resolution: `分辨率 ${snapshot?.resolution || task.outputSize || '自动'}`, time: `时间 ${formatStudioAbsoluteTime(task.createdAt)}` },
+    metadata: { model: `模型 ${model}`, quality: `质量 ${quality}`, ratio: `比例 ${snapshot?.resolvedAspectRatio || task.aspectRatio || 'auto'}`, resolution: `分辨率 ${snapshot?.resolution || task.outputSize || '自动'}`, time: `时间 ${formatStudioAbsoluteTime(task.createdAt)}` },
     comparison: singleReferenceComparison(task),
   };
 }
@@ -704,6 +703,25 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
+  async function copyTaskImage(task: StudioTask) {
+    const imageUrl = task.asset?.original_url;
+    if (!imageUrl) return;
+    setCopyFeedback({ id: task.id, text: '复制中…' });
+    let copied = false;
+    try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('当前浏览器不支持复制图片');
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error('图片读取失败');
+      const blob = await response.blob();
+      if (!blob.size) throw new Error('图片为空');
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type || 'image/png']: blob })]);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+    setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
+    window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
+  }
   const moduleUnitCredits = settings?.prices?.[moduleModel] ?? module.prices[moduleModel] ?? null;
   const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
   const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && moduleContext === savedModuleContext);
@@ -908,9 +926,10 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
             {task.asset?.width && task.asset.height && <><span>·</span><span>{task.asset.width} × {task.asset.height}</span></>}
           </p>
           <div className={styles.resultActions}><time className={styles.muted} title={formatStudioAbsoluteTime(task.createdAt)} dateTime={task.createdAt}>{formatStudioRelativeTime(task.createdAt)}</time><div className={styles.resultCommands}>
-            {task.asset && <button type="button" disabled={downloadBusy} onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} />下载</button>}
-            {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} onClick={() => restoreTask(task)}><RefreshCw size={15} />重新生成</button>}
-            {task.snapshot?.sourceAvailable && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制本次生成的上下文和设置" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} />复制上下文</button>}
+            {task.asset && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
+            {task.asset && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
+            {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="重新生成" aria-label="重新生成" onClick={() => restoreTask(task)}><RefreshCw size={15} /></button>}
+            {task.snapshot?.sourceAvailable && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
           </div>
           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
         </article>)}</div>

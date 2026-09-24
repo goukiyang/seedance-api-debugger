@@ -10,6 +10,7 @@ export type ImageComparisonSource = {
   src: string;
   alt: string;
   fileName?: string;
+  thumbnailSrc?: string;
 };
 
 export type ImagePreviewMetadata = {
@@ -44,6 +45,7 @@ function clampScale(value: number) {
 }
 
 export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, metadata, comparison, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -56,6 +58,10 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   const [comparisonAxis, setComparisonAxis] = useState<'horizontal' | 'vertical'>('horizontal');
   const [comparisonLoaded, setComparisonLoaded] = useState(false);
   const [comparisonError, setComparisonError] = useState(false);
+  const [showReference, setShowReference] = useState(false);
+
+  const activeSrc = showReference && comparison ? comparison.src : src;
+  const activeAlt = showReference && comparison ? comparison.alt : alt;
 
   const resetView = useCallback(() => {
     setScale(1);
@@ -71,22 +77,31 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   }, []);
 
   useEffect(() => {
+    backdropRef.current?.focus();
+  }, [portalRoot]);
+
+  useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      const handled = event.key === 'Escape' || event.key === 'ArrowLeft' || event.key === 'ArrowRight'
+        || event.key === '+' || event.key === '=' || event.key === '-' || event.key === '0';
+      if (!handled) return;
+      event.preventDefault();
+      event.stopPropagation();
       if (event.key === 'Escape') onClose();
-      if (event.key === 'ArrowLeft' && hasNavigation) { event.preventDefault(); onPrevious?.(); }
-      if (event.key === 'ArrowRight' && hasNavigation) { event.preventDefault(); onNext?.(); }
+      if (event.key === 'ArrowLeft' && hasNavigation) onPrevious?.();
+      if (event.key === 'ArrowRight' && hasNavigation) onNext?.();
       if (event.key === '+' || event.key === '=') zoomAtCenter(SCALE_STEP);
       if (event.key === '-') zoomAtCenter(1 / SCALE_STEP);
       if (event.key === '0') resetView();
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [hasNavigation, onClose, onNext, onPrevious, resetView, zoomAtCenter]);
 
@@ -98,6 +113,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
     setComparisonAxis('horizontal');
     setComparisonLoaded(false);
     setComparisonError(false);
+    setShowReference(false);
   }, [resetView, previewKey, src, comparison?.src]);
 
   const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
@@ -156,19 +172,37 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
 
   const preview = (
     <div
+      ref={backdropRef}
       className={styles.backdrop}
       role="dialog"
       aria-modal="true"
       aria-label="参考图预览"
+      tabIndex={-1}
       onClick={handleBackdropClick}
       onPointerDown={(event) => event.stopPropagation()}
+      onWheel={(event) => event.preventDefault()}
+      onContextMenu={(event) => event.preventDefault()}
     >
       <div className={styles.toolbar}>
+        {comparison && <button
+          type="button"
+          className={`${styles.referenceThumb} ${showReference ? styles.referenceThumbActive : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            setShowReference((current) => !current);
+            setComparisonMode(false);
+            resetView();
+          }}
+          title={showReference ? '查看生成图' : '查看参考图'}
+          aria-label={showReference ? '查看生成图' : '查看参考图'}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={comparison.thumbnailSrc || comparison.src} alt="参考图缩略图" draggable={false} />
+        </button>}
         <div className={styles.title}>
           <strong>{title || fileName || alt}</strong>
           <span>{comparisonMode ? `${comparisonLayoutLabel}对比 · ${Math.round(scale * 100)}%` : imageError ? '加载失败' : imageLoaded ? `${Math.round(scale * 100)}%` : '加载中...'}</span>
-          {metadata && <div className={styles.metadata} title={metadata.context || undefined}>
-            {metadata.context && <span>上下文：{metadata.context}</span>}
+          {metadata && <div className={styles.metadata}>
             {(metadata.model || metadata.quality || metadata.ratio || metadata.resolution || metadata.time) && <span>{[metadata.model, metadata.quality, metadata.ratio, metadata.resolution, metadata.time].filter(Boolean).join(' · ')}</span>}
           </div>}
         </div>
@@ -213,6 +247,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
           if (event.target === event.currentTarget) onClose();
         }}
         onDoubleClick={resetView}
+        onContextMenu={(event) => event.preventDefault()}
       >
         {/* 参考图来源可能是本地、远程或临时地址，这里保留原生 img 以支持原图缩放查看。 */}
         {(!imageLoaded || imageError) && (
@@ -241,8 +276,8 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
         </div> : <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={src}
-            alt={alt}
+            src={activeSrc}
+            alt={activeAlt}
             className={`${styles.image} ${imageLoaded ? styles.imageReady : styles.imageLoading}`}
             draggable={false}
             onLoad={() => {

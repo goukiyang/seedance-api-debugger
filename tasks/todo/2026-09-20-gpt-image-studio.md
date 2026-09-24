@@ -501,3 +501,15 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 发布证据（2026-09-24）：最终代码提交 `bea44640cbb1414a936c0aff15c7a74e9d45c113`，版本 `0.14.0`，线上 `BUILD_ID=8Tc9Miqp7fRlxY24qnydg`；`/api/release` 返回 `0.14.0`，`/api/config`、`/login` 均为 200，公网响应带 `X-SD2-Origin: server-42-193`。匿名 `/api/image-studio/presets` 返回 401，匿名未知受控资产返回 404；线上 `/api/image-studio/template-assets/[assetId]` 已进入生产构建。生产数据库迁移 `20260924100000_image_studio_preset_sharing`、`20260924103000_image_studio_module_source_preset` 已应用，`PRAGMA quick_check` 返回 `ok`；生产备份为 `/data/video-api-debugger/srv-backups/image-studio-template-sharing-20260924-before-migration/dev.db`，SHA256 与线上库一致。上传目录实际解析到 `/data/video-api-debugger/var-lib/uploads`，既有持久化软链保留；`sd2-gray.service`、`sd2-image-studio.service`、`sd2-credit-gateway.service` 及 `sd2-credit-delivery.timer` 均 active，线上 BUILD_ID 已切换且旧 `.next-prod-prev-template-sharing-20260924` 保留。回退 tag：`rollback/2026-09-24-before-template-sharing`。Chrome 登录态因当前 DevTools 接入不可用，未读取或输出任何 cookie/token，管理员/内部同事/外部账号的真实页面验收仍留给手动验收。
 
 边界：只处理图片模板/素材授权和由此导致的上传访问问题，不改变点数、Provider、生成 worker 对已提交任务的处理，不覆盖既有 `public/uploads` 持久化软链和生产数据。关闭模板共享不撤销已提交任务，也不删除历史结果；模板只显式共享 banner/参考图，不把历史生成结果自动变成模板素材。
+
+## 24. 图片独立预览与结果操作（2026-09-25）
+
+| 编号 | 任务 | 完成标准 | 当前状态 |
+|---|---|---|---|
+| P1 | 独立图片预览 | 预览使用 portal 独立渲染；点击、滚轮、右键和左右键只作用于预览，不触发页面操作 | 已完成 |
+| P2 | 顶部参考图切换 | 单参考图结果在顶部最左侧显示缩略图；点击可在参考图与生成图之间切换；预览不显示上下文内容 | 已完成 |
+| P3 | 结果操作图标化 | 下载、重新生成、复制上下文仅保留图形并继续悬浮显示；新增一键复制图片图标及成功/失败反馈 | 已完成 |
+| P4 | 构建、发布与验证 | 版本、构建、服务、公网页面/API一致，保留回退点 | 进行中 |
+
+- 实现范围：`ZoomableImagePreview` 通过 `document.body` portal 独立承载，并在 capture 阶段拦截预览快捷键；参考图缩略图固定在预览工具栏左侧。`studio.tsx` 仅在快照恰好一张参考图时提供缩略图，生成结果操作改为 Lucide 图标；复制图片通过当前登录态读取图片 Blob 写入剪贴板，不改变资产权限。
+- 边界：不显示上下文正文，不改变生成、下载接口、任务权限或数据库；多参考图继续隐藏对比/参考切换入口；复制图片失败只反馈重试，不回退到外部公开地址。

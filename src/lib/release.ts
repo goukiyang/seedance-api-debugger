@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片模板新增管理员共享开关；公司飞书同事可使用共享模板，模板素材和个人配置按权限隔离。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片预览独立浮层支持参考图切换；生成结果操作改为悬浮图标并支持一键复制图片。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);
