@@ -3625,7 +3625,7 @@
             prompt: prompt || node.data?.prompt || node.data?.description || '',
             contextRules,
             context_rules: contextRules,
-            model: nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '',
+            model: nodeEl.querySelector('[data-generation-image-model] option:checked')?.textContent.trim() || nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '',
             spec: nodeEl.querySelector('[data-generation-spec]')?.textContent.trim() || '',
             sourceNodes: nodeSourcePayloads(nodeId),
             referenceImageIds: generationReferenceImageIds(nodeId),
@@ -4550,7 +4550,7 @@
         const label = nodeEl.querySelector('.node-label')?.textContent.trim()
             || node.data?.title
             || nodeId;
-        const model = nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '';
+        const model = nodeEl.querySelector('[data-generation-image-model] option:checked')?.textContent.trim() || nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '';
         const spec = nodeEl.querySelector('.video-res-info')?.textContent.trim() || '';
         const sourceNodes = nodeSourcePayloads(nodeId);
         const prompt = promptValueFor(nodeEl, node);
