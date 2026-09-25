@@ -373,7 +373,7 @@ export async function GET(request: NextRequest) {
         label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,
-        model_options: (imageSettings.provider === 'seedream' ? [imageSettings.default_model] : [...new Set([...IMAGE_STUDIO_MODELS, imageSettings.default_model])]).map(model => ({
+        model_options: (imageSettings.provider === 'seedream' ? [imageSettings.default_model] : Array.from(new Set([...IMAGE_STUDIO_MODELS, imageSettings.default_model]))).map(model => ({
           value: model,
           label: IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || imageModelLabel(imageSettings.provider, model),
           capabilities: imageModelCapabilities(imageSettings.provider, model),
