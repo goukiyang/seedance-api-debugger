@@ -1033,6 +1033,19 @@ class CanvasEngine {
         const quality = data.quality || template?.quality || this.flowSystemSettings.quality || this._flowQualityOptions(model)[0];
         const ratio = data.ratio || data.aspectRatio || template?.aspectRatio || 'auto';
         const count = Number(data.count) || Number(template?.count) || 1;
+        const pricingCount = Math.min(8, Math.max(1, count));
+        const modelCostFor = value => {
+            const unit = this.flowSystemSettings.prices?.[value];
+            if (!Number.isInteger(pricingCount)) return { label: '张数无效', detail: '生成张数须为整数' };
+            if (typeof unit !== 'number' || !Number.isSafeInteger(unit) || unit < 0 || !Number.isSafeInteger(unit * pricingCount)) {
+                return { label: '未配置报价', detail: '模型单价未配置，暂时无法预估用量' };
+            }
+            return {
+                label: `预计 ${unit * pricingCount} 积分`,
+                detail: `全局单价 ${unit} 积分/张 × ${pricingCount} 张；预计用量，运行时按实际执行结算`
+            };
+        };
+        const modelCost = modelCostFor(model);
         const qualityOptions = this._flowQualityOptions(model).map(value => `<option value="${this._escapeHtml(value)}"${value === quality ? ' selected' : ''}>${this._escapeHtml(this._flowQualityLabel(value))}</option>`).join('');
         const ratios = [...new Set(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', template?.aspectRatio || 'auto'])];
         const ratioOptions = ratios.map(value => `<option value="${this._escapeHtml(value)}"${value === ratio ? ' selected' : ''}>${this._escapeHtml(value === 'auto' ? '自动' : value)}</option>`).join('');
@@ -1053,7 +1066,7 @@ class CanvasEngine {
             <details class="toolflow-template-advanced">
                 <summary>展开设置 <span>${this._escapeHtml(contextStatus)}</span></summary>
                 <div class="toolflow-template-settings">
-                    <label class="toolflow-card-field"><span>模型</span><select data-toolflow-node-field="model" data-toolflow-node-id="${this._escapeHtml(id)}">${availableModels.map(value => `<option value="${this._escapeHtml(value)}"${value === model ? ' selected' : ''}>${this._escapeHtml(this._flowModelLabel(value))}</option>`).join('')}</select></label>
+                    <label class="toolflow-card-field toolflow-model-price-field"><span>模型</span><span class="toolflow-model-price-row"><select data-toolflow-node-field="model" data-toolflow-node-id="${this._escapeHtml(id)}">${availableModels.map(value => `<option value="${this._escapeHtml(value)}"${value === model ? ' selected' : ''}>${this._escapeHtml(this._flowModelLabel(value))} · ${this._escapeHtml(modelCostFor(value).label)}</option>`).join('')}</select><span class="toolflow-model-price" title="${this._escapeHtml(modelCost.detail)}">${this._escapeHtml(modelCost.label)}</span></span></label>
                     <label class="toolflow-card-field"><span>质量</span><select data-toolflow-node-field="quality" data-toolflow-node-id="${this._escapeHtml(id)}">${qualityOptions}</select></label>
                     <label class="toolflow-card-field"><span>比例</span><select data-toolflow-node-field="ratio" data-toolflow-node-id="${this._escapeHtml(id)}">${ratioOptions}</select></label>
                     <label class="toolflow-card-field"><span>生成张数</span><input type="number" min="1" max="8" step="1" value="${Math.min(8, Math.max(1, count))}" data-toolflow-node-field="count" data-toolflow-node-id="${this._escapeHtml(id)}"></label>

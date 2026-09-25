@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
 import fs from 'fs';
 import { execFile } from 'child_process';
@@ -770,6 +771,13 @@ export async function POST(request: NextRequest) {
     project = await getProjectForGeneration(user, requestedVideoCard.project_id);
     const videoCardAccess = await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
     videoCard = videoCardAccess.videoCard;
+    const canvasDocumentIds = new Set([
+      body.canvas_document_id,
+      cleanSourceMetadata(body.source_metadata).canvas_document_id,
+      requestSource.source_metadata?.canvas_document_id,
+    ].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map(value => value.trim()));
+    if (canvasDocumentIds.size > 1) throw new AuthError('画布归属信息不一致', 400);
+    for (const canvasDocumentId of Array.from(canvasDocumentIds)) await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;

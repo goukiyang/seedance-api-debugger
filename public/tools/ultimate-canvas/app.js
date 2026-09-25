@@ -43,6 +43,19 @@
         bootstrapLoaded: false,
         bootstrapError: null,
         documentId: null,
+        documentRevision: 0,
+        documentTitle: '未命名画布',
+        explicitDocumentId: new URLSearchParams(window.location.search).get('document_id'),
+        documentWritable: false,
+        documentDirty: false,
+        editSequence: 0,
+        documentOperation: false,
+        saveConflict: false,
+        pendingCopy: null,
+        flushPromise: null,
+        failedSaveRequest: null,
+        libraryMounted: false,
+        pendingDocumentCreate: null,
         documentLoaded: false,
         documentRestoring: false,
         saveTimer: null,
@@ -1426,12 +1439,10 @@
         }
         const documentMeta = data?.context?.canvas_document || null;
         if (canvasRuntime.documentProjectId !== project?.id) {
-            canvasRuntime.documentId = documentMeta?.id || null;
+            canvasRuntime.documentId = canvasRuntime.explicitDocumentId || null;
             canvasRuntime.documentProjectId = project?.id || null;
             canvasRuntime.documentVideoCardId = null;
             canvasRuntime.documentLoaded = false;
-        } else if (!canvasRuntime.documentId && documentMeta?.id) {
-            canvasRuntime.documentId = documentMeta.id;
         }
         const projectNameEl = document.getElementById('project-name');
         const avatarEl = document.getElementById('user-avatar');
@@ -1477,6 +1488,9 @@
                     : data?.context?.generation_blocked_reason || `视频卡${videoCardStatusFor(card)}`;
         const resolvedContextStatus = contextReady ? backend.label : contextStatus;
         wrap.innerHTML = `
+            <button type="button" class="context-command" data-canvas-library>画布列表</button>
+            <button type="button" class="context-command canvas-document-title" data-canvas-rename title="重命名画布">${escapeHtml(canvasRuntime.documentTitle)}</button>
+            <button type="button" class="context-command" data-canvas-new>新建画布</button>
             <div class="canvas-context-picker" data-context-picker="project">
                 <span class="context-picker-label">项目</span>
                 <button type="button" class="canvas-context-trigger" data-context-toggle="project" aria-expanded="${canvasRuntime.openContextMenu === 'project'}">
@@ -1600,6 +1614,7 @@
     function setContextSwitching(busy) {
         canvasRuntime.contextSwitching = busy;
         renderRuntimeContextControls();
+        updateDocumentInteraction();
     }
 
     function invalidateGenerationContext() {
@@ -1647,6 +1662,7 @@
 
     function clearCanvasForContext() {
         invalidateGenerationContext();
+        disposeCanvasPricing();
         canvasRuntime.documentRestoring = true;
         try {
             clearAllVideoEstimates();
@@ -1657,12 +1673,21 @@
     }
 
     function resetProjectScopedRuntime(projectId) {
+        ++canvasRuntime.documentRequestId;
         invalidateGenerationContext();
+        disposeCanvasPricing();
         stopAllVideoPolling();
         canvasRuntime.selectedProjectId = projectId || null;
         canvasRuntime.selectedVideoCardId = null;
         canvasRuntime.selectedVideoBranchId = null;
         canvasRuntime.documentId = null;
+        canvasRuntime.explicitDocumentId = null;
+        canvasRuntime.documentRevision = 0;
+        canvasRuntime.documentWritable = false;
+        canvasRuntime.documentDirty = false;
+        canvasRuntime.documentTitle = '未命名画布';
+        canvasRuntime.failedSaveRequest = null;
+        canvasRuntime.saveConflict = false;
         canvasRuntime.documentProjectId = null;
         canvasRuntime.documentVideoCardId = null;
         canvasRuntime.documentLoaded = false;
@@ -1879,7 +1904,7 @@
 
     installAutosaveHooks();
     engine.onConnectionRejected = (_fromId, _toId, reason) => showCanvasNotice(reason || '这条连线不兼容。', 'warn');
-    loadCanvasBootstrap();
+    initializeCanvasDocuments();
 
     document.addEventListener('input', event => {
         const search = event.target.closest('[data-video-card-search]');
@@ -2271,17 +2296,369 @@
     });
 
     function updateSaveIndicator() {
+        updateDocumentInteraction();
         const el = document.getElementById('canvas-save-state');
         if (!el) return;
         const labels = {
             idle: '未保存',
             saving: '保存中',
             saved: '已保存',
-            error: '保存失败'
+            error: '保存失败',
+            conflict: '版本冲突',
+            offline: '离线待同步'
         };
-        el.textContent = labels[canvasRuntime.saveState] || '未保存';
+        el.textContent = canvasRuntime.documentLoaded && !canvasRuntime.documentWritable ? '只读' : labels[canvasRuntime.saveState] || '未保存';
         el.className = `context-status save ${canvasRuntime.saveState}`;
         if (canvasRuntime.saveError) el.title = canvasRuntime.saveError;
+        el.disabled = !canvasRuntime.documentWritable || canvasRuntime.contextSwitching || canvasRuntime.saveState === 'saving';
+        let recovery = document.getElementById('canvas-save-recovery');
+        if (!recovery) {
+            recovery = document.createElement('div');
+            recovery.id = 'canvas-save-recovery';
+            recovery.className = 'canvas-save-recovery';
+            recovery.innerHTML = '<span>修改尚未同步</span><button type="button" data-canvas-save-copy>另存副本</button><button type="button" data-canvas-reload>重新读取</button><button type="button" data-canvas-recover-backup>恢复冲突备份</button>';
+            document.body.appendChild(recovery);
+        }
+        const failed = ['conflict', 'error', 'offline'].includes(canvasRuntime.saveState);
+        const backup = readConflictBackups().length > 0;
+        recovery.hidden = !failed && !backup;
+        recovery.querySelector('span').textContent = failed ? '修改尚未同步' : '此设备保留了冲突备份';
+        recovery.querySelector('[data-canvas-recover-backup]').hidden = !backup;
+        recovery.querySelector('[data-canvas-save-copy]').hidden = !failed || !canvasRuntime.documentWritable;
+        recovery.querySelector('[data-canvas-reload]').hidden = !failed;
+        recovery.querySelectorAll('button').forEach(button => { button.disabled = canvasRuntime.documentOperation; });
+    }
+
+    function hasUnsavedCanvasChanges() {
+        return canvasRuntime.documentDirty || canvasRuntime.saveState === 'saving'
+            || Boolean(canvasRuntime.failedSaveRequest) || canvasRuntime.documentOperation;
+    }
+
+    function updateDocumentInteraction() {
+        const busy = canvasRuntime.documentOperation || canvasRuntime.contextSwitching || canvasRuntime.documentRestoring;
+        const locked = busy || !canvasRuntime.documentWritable;
+        document.body.classList.toggle('canvas-document-busy', busy);
+        document.body.classList.toggle('canvas-document-readonly', !canvasRuntime.documentWritable);
+        const workspace = document.getElementById('canvas-workspace');
+        if (workspace) workspace.inert = locked;
+        document.querySelectorAll('[data-canvas-new], [data-canvas-library], [data-canvas-rename]').forEach(button => {
+            button.disabled = busy || (button.hasAttribute('data-canvas-rename') && !canvasRuntime.documentWritable);
+        });
+        if (window.parent !== window) window.parent.postMessage({ type: 'sd2-canvas-dirty', dirty: hasUnsavedCanvasChanges() }, window.location.origin);
+    }
+
+    // Also covers shortcuts registered outside the editor subtree.
+    ['keydown', 'paste', 'drop', 'pointerdown', 'mousedown', 'click', 'beforeinput'].forEach(type => {
+        window.addEventListener(type, event => {
+            const target = event.target instanceof Element ? event.target : null;
+            const busy = canvasRuntime.documentOperation || canvasRuntime.contextSwitching || canvasRuntime.documentRestoring;
+            if (target?.closest('[data-canvas-confirm]')) return;
+            if (target?.closest('#ultimate-canvas-documents') && !busy) return;
+            const editorEvent = target?.closest('#canvas-workspace, .generation-popover, [data-prompt-editor], [data-context-rules-editor]');
+            const shortcut = ['keydown', 'paste', 'drop'].includes(type) && !target?.closest('#header-bar, #canvas-save-recovery');
+            if ((busy && (editorEvent || shortcut || target?.closest('#header-bar, #canvas-save-recovery')))
+                || (!canvasRuntime.documentWritable && (editorEvent || shortcut))) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+        }, true);
+    });
+
+    async function withDocumentOperation(action) {
+        if (canvasRuntime.documentOperation || canvasRuntime.contextSwitching) throw new Error('画布正在处理，请稍后再操作。');
+        canvasRuntime.documentOperation = true;
+        updateDocumentInteraction();
+        try {
+            if (canvasRuntime.flushPromise) await canvasRuntime.flushPromise;
+            return await action();
+        }
+        finally {
+            canvasRuntime.documentOperation = false;
+            updateSaveIndicator();
+            if (canvasRuntime.documentDirty && canvasRuntime.saveState === 'idle' && !canvasRuntime.failedSaveRequest && !canvasRuntime.saveConflict) {
+                scheduleCanvasSave('after_document_operation');
+            }
+        }
+    }
+
+    function disposeCanvasPricing() {
+        engine.nodes.forEach((_node, nodeId) => window.UltimateCanvasNodePricing?.dispose(nodeId));
+    }
+
+    function documentMutationId() {
+        return crypto.randomUUID();
+    }
+
+    function draftStorageKey() {
+        const userId = canvasRuntime.bootstrap?.user?.id;
+        return userId && canvasRuntime.documentId
+            ? `sd2:canvas-draft:${userId}:${canvasRuntime.selectedProjectId}:${canvasRuntime.documentId}` : null;
+    }
+
+    function cacheCanvasDraft(snapshot) {
+        const key = draftStorageKey();
+        if (!key || !snapshot?.request) return;
+        try {
+            localStorage.setItem(key, JSON.stringify({ baseRevision: canvasRuntime.documentRevision, savedAt: Date.now(), request: snapshot.request }));
+        } catch {
+            showCanvasNotice('本地草稿空间不足，请保持页面打开并保存到服务器。', 'warn');
+        }
+    }
+
+    function readConflictBackups() {
+        const key = draftStorageKey();
+        if (!key) return [];
+        try {
+            const items = JSON.parse(localStorage.getItem(key.replace('sd2:canvas-draft:', 'sd2:canvas-conflict:')) || '[]');
+            return Array.isArray(items) ? items.filter(item => item?.request?.document_json) : [];
+        } catch { return []; }
+    }
+
+    function preserveConflictBackup(snapshot) {
+        const key = draftStorageKey();
+        if (!key || !snapshot?.request) throw new Error('无法保留备份，已取消重新读取。');
+        const items = readConflictBackups();
+        if (!items.some(item => item.request.document_json === snapshot.request.document_json)) {
+            items.push({ request: snapshot.request, baseRevision: snapshot.request.base_revision, savedAt: Date.now() });
+        }
+        try { localStorage.setItem(key.replace('sd2:canvas-draft:', 'sd2:canvas-conflict:'), JSON.stringify(items)); }
+        catch { throw new Error('本地空间不足，备份未保存；请先另存副本。'); }
+    }
+
+    function snapshotWithoutLiveTasks(raw) {
+        const clean = value => {
+            if (Array.isArray(value)) return value.map(clean);
+            if (!value || typeof value !== 'object') return value;
+            return Object.fromEntries(Object.entries(value)
+                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost)$/i.test(key))
+                .map(([key, item]) => [key, key === 'generationStatus' ? 'idle' : clean(item)]));
+        };
+        return JSON.stringify(clean(JSON.parse(raw)));
+    }
+
+    async function createRecoveryCopy(snapshot, title) {
+        const content = snapshotWithoutLiveTasks(snapshot.request.document_json);
+        const signaturePayload = JSON.parse(content);
+        delete signaturePayload.savedAt;
+        const signature = JSON.stringify([snapshot.request.project_id, title, signaturePayload]);
+        if (canvasRuntime.pendingCopy && canvasRuntime.pendingCopy.signature !== signature) {
+            throw new Error('上次副本创建结果尚未确认，请先重新读取或恢复原备份后重试。');
+        }
+        const pending = canvasRuntime.pendingCopy || { signature, request: {
+            ...snapshot.request, document_id: undefined, document_json: content,
+            base_revision: 0, protocol_version: 2, mutation_id: documentMutationId(), title
+        } };
+        canvasRuntime.pendingCopy = pending;
+        if (!pending.document) {
+            const result = await postJson('/api/tools/ultimate-canvas/document', pending.request);
+            pending.document = result.document;
+        }
+        invalidateGenerationContext();
+        stopAllVideoPolling();
+        const result = await requestJson(`/api/tools/ultimate-canvas/document?document_id=${encodeURIComponent(pending.document.id)}`, { cache: 'no-store' });
+        if (!result.document?.document_json) throw new Error('副本已创建，但正文读取失败，请重试。');
+        canvasRuntime.pendingCopy = null;
+        return result.document;
+    }
+
+    function syncDocumentUrl() {
+        if (!canvasRuntime.documentId) return;
+        const url = new URL(window.location.href);
+        url.searchParams.set('document_id', canvasRuntime.documentId);
+        history.replaceState(null, '', url);
+        if (window.parent !== window) window.parent.postMessage({ type: 'sd2-canvas-document', documentId: canvasRuntime.documentId }, window.location.origin);
+    }
+
+    async function openManagedDocument(doc) {
+        return withDocumentOperation(() => openManagedDocumentNow(doc));
+    }
+
+    async function openManagedDocumentNow(doc, options = {}) {
+        if (!options.skipSave && canvasRuntime.documentWritable && !await flushCanvasSave('before_document_open', true)) throw new Error('保存失败，未切换画布。');
+        invalidateGenerationContext();
+        stopAllVideoPolling();
+        disposeCanvasPricing();
+        const data = doc.document_json ? { document: doc }
+            : await requestJson(`/api/tools/ultimate-canvas/document?document_id=${encodeURIComponent(doc.id)}`, { cache: 'no-store' });
+        if (!data.document || !['active', 'archived'].includes(data.document.status)) throw new Error('画布不存在或无权访问。');
+        const parsed = JSON.parse(data.document.document_json);
+        const nextProjectId = data.document.project_id;
+        if (!nextProjectId) throw new Error('此旧画布尚未关联项目，已保留原内容，请管理员处理归属。');
+        const previous = {
+            bootstrap: canvasRuntime.bootstrap, selectedProjectId: canvasRuntime.selectedProjectId,
+            selectedVideoCardId: canvasRuntime.selectedVideoCardId, selectedVideoBranchId: canvasRuntime.selectedVideoBranchId,
+            documentId: canvasRuntime.documentId, explicitDocumentId: canvasRuntime.explicitDocumentId,
+            documentProjectId: canvasRuntime.documentProjectId, documentVideoCardId: canvasRuntime.documentVideoCardId,
+            documentWritable: canvasRuntime.documentWritable, documentLoaded: canvasRuntime.documentLoaded
+        };
+        canvasRuntime.documentWritable = false;
+        canvasRuntime.explicitDocumentId = data.document.id;
+        setContextSwitching(true);
+        try {
+            const bootstrap = await loadCanvasBootstrap(nextProjectId, parsed?.context?.video_card_id || null, { restoreDocument: false });
+            if (!bootstrap) throw new Error('项目读取失败，未覆盖原画布。');
+            canvasRuntime.documentLoaded = false;
+            const loaded = await loadCanvasDocument({ document: data.document, skipDraft: options.skipDraft });
+            if (!loaded) throw new Error('画布未恢复，请重试。');
+            window.UltimateCanvasDocuments?.hide();
+        } catch (error) {
+            Object.assign(canvasRuntime, previous);
+            canvasRuntime.bootstrapLoaded = Boolean(previous.bootstrap);
+            renderRuntimeContextControls();
+            throw error;
+        } finally {
+            setContextSwitching(false);
+        }
+    }
+
+    async function createManagedDocument(projectId, title, meta = {}) {
+        return withDocumentOperation(() => createManagedDocumentNow(projectId, title, meta));
+    }
+
+    async function createManagedDocumentNow(projectId, title, meta = {}) {
+        if (canvasRuntime.documentWritable && !await flushCanvasSave('before_document_create', true)) throw new Error('当前画布尚未保存。');
+        if (canvasRuntime.pendingDocumentCreate && meta.mutation_id
+            && canvasRuntime.pendingDocumentCreate.mutation_id !== meta.mutation_id) {
+            throw new Error('上次创建结果尚未确认，请先重试原创建操作。');
+        }
+        const request = canvasRuntime.pendingDocumentCreate || {
+            protocol_version: 2, base_revision: 0, mutation_id: meta.mutation_id || documentMutationId(), project_id: projectId,
+            title: title || '未命名画布', document_json: JSON.stringify({ schema: 'ultimate_canvas.v1', context: { project_id: projectId }, canvas: { nodes: [], connections: [], panX: 0, panY: 0, scale: 1 } })
+        };
+        canvasRuntime.pendingDocumentCreate = request;
+        const result = await postJson('/api/tools/ultimate-canvas/document', request);
+        canvasRuntime.pendingDocumentCreate = null;
+        return result.document;
+    }
+
+    async function initializeCanvasDocuments() {
+        canvasRuntime.documentOperation = true;
+        updateDocumentInteraction();
+        document.body.classList.add('canvas-document-loading');
+        try {
+            let initial = null;
+            if (canvasRuntime.explicitDocumentId) {
+                initial = (await requestJson(`/api/tools/ultimate-canvas/document?document_id=${encodeURIComponent(canvasRuntime.explicitDocumentId)}`, { cache: 'no-store' })).document;
+                if (!initial) throw new Error('画布不存在或无权访问。');
+            }
+            const initialContext = initial ? JSON.parse(initial.document_json)?.context : null;
+            const bootstrap = await loadCanvasBootstrap(initial?.project_id || null, initialContext?.video_card_id || null, { restoreDocument: false });
+            if (!bootstrap) throw new Error('项目读取失败，请刷新重试。');
+            window.UltimateCanvasDocuments?.mount({
+                requestJson,
+                getProjects: () => canvasRuntime.bootstrap?.context?.projects || [],
+                getCurrentDocument: () => ({ id: canvasRuntime.documentId, project_id: canvasRuntime.selectedProjectId, title: canvasRuntime.documentTitle, revision: canvasRuntime.documentRevision }),
+                openDocument: openManagedDocument,
+                createDocument: createManagedDocument,
+                beforeLeave: async () => {
+                    return withDocumentOperation(async () => {
+                        const saved = canvasRuntime.documentWritable ? await flushCanvasSave('before_library', true) : true;
+                        if (saved) {
+                            invalidateGenerationContext();
+                            stopAllVideoPolling();
+                            disposeCanvasPricing();
+                            canvasRuntime.documentWritable = false;
+                        }
+                        return saved;
+                    });
+                },
+                notice: showCanvasNotice
+            });
+            canvasRuntime.libraryMounted = true;
+            window.UltimateCanvasNodePricing?.mount({ requestJson, getNodeSettings: generationSettingsForNode, getProjectId: () => canvasRuntime.selectedProjectId, getBootstrap: () => canvasRuntime.bootstrap });
+            if (initial) {
+                await loadCanvasDocument({ document: initial });
+            } else {
+                window.UltimateCanvasDocuments?.show();
+            }
+        } catch (error) {
+            showCanvasNotice(error.message || '画布加载失败，请刷新重试。', 'error');
+        } finally {
+            canvasRuntime.documentOperation = false;
+            document.body.classList.remove('canvas-document-loading');
+            updateSaveIndicator();
+        }
+    }
+
+    document.addEventListener('click', async event => {
+        try {
+            if (event.target.closest('[data-canvas-save-copy]')) {
+                await withDocumentOperation(async () => {
+                    await canvasRuntime.saveCoordinator.flush();
+                    const snapshot = canvasSaveSnapshot('conflict_copy');
+                    if (!snapshot?.request) return;
+                    preserveConflictBackup(snapshot);
+                    const copy = await createRecoveryCopy(snapshot, `${canvasRuntime.documentTitle.slice(0, 112)}（副本）`);
+                    if (snapshot.documentId !== canvasRuntime.documentId || snapshot.projectId !== canvasRuntime.selectedProjectId
+                        || snapshot.editSequence !== canvasRuntime.editSequence) {
+                        cacheCanvasDraft(canvasSaveSnapshot('copy_pending_changes'));
+                        showCanvasNotice('副本已创建，期间产生的新修改仍留在当前画布，请继续保存。', 'warn');
+                        return;
+                    }
+                    await openManagedDocumentNow(copy, { skipSave: true, skipDraft: true });
+                });
+            } else if (event.target.closest('[data-canvas-reload]')) {
+                await withDocumentOperation(async () => {
+                    if (!await requestCanvasConfirmation({ title: '重新读取画布', message: '未同步内容会独立保留为冲突备份，之后可另存恢复。', confirmLabel: '重新读取' })) return;
+                    await canvasRuntime.saveCoordinator.flush();
+                    preserveConflictBackup(canvasSaveSnapshot('before_reload'));
+                    await openManagedDocumentNow({ id: canvasRuntime.documentId }, { skipSave: true, skipDraft: true });
+                });
+            } else if (event.target.closest('[data-canvas-recover-backup]')) {
+                await withDocumentOperation(async () => {
+                    const backups = readConflictBackups();
+                    const choices = backups.map((item, index) => `${index + 1}. ${new Date(item.savedAt).toLocaleString()}`).join('\n');
+                    const selected = window.prompt(`选择要另存恢复的备份编号：\n${choices}`, String(backups.length));
+                    if (selected === null) return;
+                    const backup = backups[Number(selected) - 1];
+                    if (!backup) throw new Error('备份编号无效。');
+                    if (canvasRuntime.documentWritable && !await flushCanvasSave('before_backup_recovery', true)) throw new Error('请先保存当前修改或另存副本。');
+                    const copy = await createRecoveryCopy(backup, `${String(backup.request.title || '画布').slice(0, 108)}（恢复副本）`);
+                    await openManagedDocumentNow(copy, { skipSave: true, skipDraft: true });
+                });
+            } else if (event.target.closest('[data-canvas-library]')) {
+                await showManagedLibrary();
+            } else if (event.target.closest('[data-canvas-new]')) {
+                if (!canvasRuntime.selectedProjectId) return window.UltimateCanvasDocuments?.show();
+                await withDocumentOperation(async () => {
+                    const doc = await createManagedDocumentNow(canvasRuntime.selectedProjectId, '未命名画布');
+                    await openManagedDocumentNow(doc);
+                });
+            } else if (event.target.closest('[data-canvas-rename]')) {
+                if (!canvasRuntime.documentWritable) return;
+                const title = window.prompt('画布名称', canvasRuntime.documentTitle);
+                if (!title?.trim()) return;
+                canvasRuntime.documentTitle = title.trim().slice(0, 120);
+                renderRuntimeContextControls();
+                scheduleCanvasSave('rename');
+            }
+        } catch (error) { showCanvasNotice(error.message || '画布操作失败', 'error'); }
+    });
+
+    document.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault();
+            if (canvasRuntime.documentWritable) void flushCanvasSave('keyboard');
+        }
+    }, true);
+    window.addEventListener('beforeunload', event => {
+        // The React host owns the prompt when embedded, avoiding a second iframe prompt.
+        if (window.parent === window && hasUnsavedCanvasChanges()) { event.preventDefault(); event.returnValue = ''; }
+    });
+    window.UltimateCanvasHasUnsavedChanges = hasUnsavedCanvasChanges;
+    window.addEventListener('online', () => {
+        if (canvasRuntime.saveState === 'offline') void flushCanvasSave('reconnect');
+    });
+
+    async function showManagedLibrary() {
+        return withDocumentOperation(async () => {
+            if (canvasRuntime.documentWritable && !await flushCanvasSave('before_library', true)) return;
+            invalidateGenerationContext();
+            stopAllVideoPolling();
+            canvasRuntime.documentWritable = false;
+            disposeCanvasPricing();
+            await window.UltimateCanvasDocuments?.show();
+        });
     }
 
     function syncNodeDataFromDom(nodeId, node) {
@@ -2324,6 +2701,7 @@
 
     function canvasSaveSnapshot(reason) {
         if (canvasRuntime.documentRestoring) return true;
+        if (!canvasRuntime.documentWritable) return true;
         if (!canvasRuntime.bootstrapLoaded || !canvasRuntime.selectedProjectId) return true;
         const projectId = canvasRuntime.selectedProjectId;
         const videoCardId = canvasRuntime.selectedVideoCardId;
@@ -2335,6 +2713,7 @@
         );
         return {
             contextEpoch: canvasRuntime.contextEpoch,
+            editSequence: canvasRuntime.editSequence,
             projectId,
             videoCardId,
             videoBranchId,
@@ -2342,7 +2721,10 @@
             request: {
                 document_id: documentId,
                 project_id: projectId,
-                title: selectedVideoCard()?.title ? `无线画布 / ${selectedVideoCard().title}` : '无线画布',
+                title: canvasRuntime.documentTitle,
+                protocol_version: 2,
+                base_revision: canvasRuntime.documentRevision,
+                mutation_id: documentMutationId(),
                 active_generation_node_id: engine.selectedNodeId,
                 document_json: JSON.stringify(payload),
                 save_reason: reason
@@ -2352,6 +2734,7 @@
 
     function canvasSaveContextMatches(snapshot) {
         return snapshot.contextEpoch === canvasRuntime.contextEpoch
+            && snapshot.documentId === canvasRuntime.documentId
             && snapshot.projectId === canvasRuntime.selectedProjectId
             && snapshot.videoCardId === canvasRuntime.selectedVideoCardId
             && snapshot.videoBranchId === canvasRuntime.selectedVideoBranchId;
@@ -2361,12 +2744,23 @@
         isCurrent: job => canvasSaveContextMatches(job.snapshot),
         executor: job => {
             const request = { ...job.snapshot.request };
+            if (!canvasSaveContextMatches(job.snapshot)) throw new Error('画布已切换，已停止旧保存请求。');
+            if (canvasRuntime.saveConflict) throw Object.assign(new Error('请先处理版本冲突。'), { status: 409 });
+            if (canvasRuntime.failedSaveRequest) throw new Error('上次保存结果未确认，请先重试保存。');
+            request.base_revision = canvasRuntime.documentRevision;
             if (!request.document_id
                 && canvasSaveContextMatches(job.snapshot)
                 && canvasRuntime.documentProjectId === job.snapshot.projectId) {
                 request.document_id = canvasRuntime.documentId;
             }
-            return postJson('/api/tools/ultimate-canvas/document', request);
+            return postJson('/api/tools/ultimate-canvas/document', request).catch(error => {
+                if (canvasSaveContextMatches(job.snapshot)) {
+                    const status = Number(error?.status);
+                    canvasRuntime.failedSaveRequest = !status || status >= 500 || [408, 429].includes(status) ? request : null;
+                    canvasRuntime.saveConflict = status === 409;
+                }
+                throw error;
+            });
         },
         onStart: job => {
             if (!canvasSaveContextMatches(job.snapshot)) return;
@@ -2374,19 +2768,23 @@
             canvasRuntime.saveError = null;
             updateSaveIndicator();
         },
-        onSuccess: (result, job) => {
+        onSuccess: (result, job, state) => {
             const snapshot = job.snapshot;
             if (!canvasSaveContextMatches(snapshot)) return;
             canvasRuntime.documentId = result.document?.id || snapshot.documentId || canvasRuntime.documentId;
             canvasRuntime.documentProjectId = snapshot.projectId;
             canvasRuntime.documentVideoCardId = snapshot.videoCardId;
-            canvasRuntime.saveState = 'saved';
+            canvasRuntime.documentRevision = result.document?.revision ?? canvasRuntime.documentRevision;
+            canvasRuntime.documentDirty = snapshot.editSequence !== canvasRuntime.editSequence || Boolean(state.hasPending || canvasRuntime.saveTimer);
+            canvasRuntime.saveState = canvasRuntime.documentDirty ? 'idle' : 'saved';
             canvasRuntime.saveError = null;
+            if (!canvasRuntime.documentDirty) { try { localStorage.removeItem(draftStorageKey()); } catch {} }
+            syncDocumentUrl();
             updateSaveIndicator();
         },
         onError: (error, job, state) => {
             if (!canvasSaveContextMatches(job.snapshot) || state.hasPending) return;
-            canvasRuntime.saveState = 'error';
+            canvasRuntime.saveState = error?.status === 409 ? 'conflict' : navigator.onLine ? 'error' : 'offline';
             canvasRuntime.saveError = error?.message || '保存失败';
             showCanvasNotice(canvasRuntime.saveError, 'warn');
             updateSaveIndicator();
@@ -2394,29 +2792,81 @@
     });
 
     async function saveCanvasDocument(reason = 'autosave') {
+        if (canvasRuntime.documentOperation || canvasRuntime.saveConflict) return false;
         const snapshot = canvasSaveSnapshot(reason);
         if (!snapshot || snapshot === true) return true;
         const outcome = await canvasRuntime.saveCoordinator.request(snapshot);
         return outcome.ok;
     }
 
-    async function flushCanvasSave(reason = 'flush') {
+    async function flushCanvasSave(reason = 'flush', insideDocumentOperation = false) {
+        if (canvasRuntime.documentOperation && !insideDocumentOperation) return false;
+        if (canvasRuntime.flushPromise) return canvasRuntime.flushPromise;
+        const pending = flushCanvasSaveNow(reason);
+        canvasRuntime.flushPromise = pending;
+        try { return await pending; }
+        finally { if (canvasRuntime.flushPromise === pending) canvasRuntime.flushPromise = null; }
+    }
+
+    async function flushCanvasSaveNow(reason) {
+        if (!canvasRuntime.documentWritable) return true;
+        if (canvasRuntime.saveConflict) return false;
+        if (!canvasRuntime.documentDirty && canvasRuntime.saveState === 'saved' && !canvasRuntime.failedSaveRequest) return true;
         window.clearTimeout(canvasRuntime.saveTimer);
         canvasRuntime.saveTimer = null;
-        const snapshot = canvasSaveSnapshot(reason);
-        if (!snapshot || snapshot === true) return true;
-        const outcome = await canvasRuntime.saveCoordinator.flush(snapshot);
-        return outcome.ok;
+        await canvasRuntime.saveCoordinator.flush();
+        if (canvasRuntime.saveConflict) return false;
+        const identity = canvasSaveSnapshot(reason);
+        if (!identity?.request) return !canvasRuntime.documentDirty;
+        if (canvasRuntime.failedSaveRequest) {
+            const failedRequest = canvasRuntime.failedSaveRequest;
+            try {
+                canvasRuntime.saveState = 'saving';
+                updateSaveIndicator();
+                const result = await postJson('/api/tools/ultimate-canvas/document', failedRequest);
+                if (!canvasSaveContextMatches(identity)) return false;
+                canvasRuntime.documentRevision = result.document.revision;
+                canvasRuntime.failedSaveRequest = null;
+            } catch (error) {
+                if (!canvasSaveContextMatches(identity)) return false;
+                const status = Number(error?.status);
+                if (status && status < 500 && ![408, 429].includes(status)) canvasRuntime.failedSaveRequest = null;
+                canvasRuntime.saveConflict = status === 409;
+                canvasRuntime.saveState = status === 409 ? 'conflict' : navigator.onLine ? 'error' : 'offline';
+                updateSaveIndicator();
+                showCanvasNotice(error.message || '保存重试失败，草稿已保留。', 'warn');
+                return false;
+            }
+        }
+        // A save is a barrier only once it includes every edit made while it was in flight.
+        while (canvasSaveContextMatches(identity)) {
+            window.clearTimeout(canvasRuntime.saveTimer);
+            canvasRuntime.saveTimer = null;
+            const snapshot = canvasSaveSnapshot(reason);
+            if (!snapshot?.request) return false;
+            cacheCanvasDraft(snapshot);
+            const outcome = await canvasRuntime.saveCoordinator.flush(snapshot);
+            if (!outcome.ok || !canvasSaveContextMatches(identity)) return false;
+            if (snapshot.editSequence === canvasRuntime.editSequence) return true;
+        }
+        return false;
     }
 
     function scheduleCanvasSave(reason = 'change') {
-        if (canvasRuntime.documentRestoring) return;
+        if (canvasRuntime.documentRestoring || !canvasRuntime.documentWritable) return;
+        canvasRuntime.editSequence += 1;
+        canvasRuntime.documentDirty = true;
         window.clearTimeout(canvasRuntime.saveTimer);
-        if (canvasRuntime.saveState === 'saved') {
+        if (!canvasRuntime.saveConflict && canvasRuntime.saveState !== 'saving') {
             canvasRuntime.saveState = 'idle';
-            updateSaveIndicator();
         }
-        canvasRuntime.saveTimer = window.setTimeout(() => saveCanvasDocument(reason), 900);
+        updateSaveIndicator();
+        canvasRuntime.saveTimer = window.setTimeout(() => {
+            canvasRuntime.saveTimer = null;
+            cacheCanvasDraft(canvasSaveSnapshot(reason));
+            if (!navigator.onLine) { canvasRuntime.saveState = 'offline'; updateSaveIndicator(); return; }
+            if (!canvasRuntime.failedSaveRequest && !canvasRuntime.saveConflict && !canvasRuntime.documentOperation) void saveCanvasDocument(reason);
+        }, 900);
     }
 
     function hydrateNodeViews() {
@@ -2501,16 +2951,23 @@
     }
 
     async function loadCanvasDocument(options = {}) {
-        if (!canvasRuntime.selectedProjectId || canvasRuntime.documentLoaded) return;
+        if (!canvasRuntime.selectedProjectId || canvasRuntime.documentLoaded) return false;
+        canvasRuntime.documentWritable = false;
         const projectId = canvasRuntime.selectedProjectId;
         const requestId = ++canvasRuntime.documentRequestId;
+        const explicitId = canvasRuntime.explicitDocumentId;
+        const isCurrent = () => requestId === canvasRuntime.documentRequestId
+            && projectId === canvasRuntime.selectedProjectId && explicitId === canvasRuntime.explicitDocumentId;
         let recoveredTasklessVideoStatus = false;
+        let recoveredDraft = false;
+        canvasRuntime.documentRestoring = true;
+        updateDocumentInteraction();
         try {
             const url = new URL('/api/tools/ultimate-canvas/document', window.location.origin);
             url.searchParams.set('project_id', projectId);
-            const data = await requestJson(url.toString(), { cache: 'no-store' });
-            if (requestId !== canvasRuntime.documentRequestId || projectId !== canvasRuntime.selectedProjectId) return;
-            canvasRuntime.documentLoaded = true;
+            if (canvasRuntime.explicitDocumentId) url.searchParams.set('document_id', canvasRuntime.explicitDocumentId);
+            const data = options.document ? { document: options.document } : await requestJson(url.toString(), { cache: 'no-store' });
+            if (!isCurrent()) return false;
             if (!data.document?.document_json) {
                 if (options.clearWhenMissing !== false) {
                     stopAllVideoPolling();
@@ -2520,46 +2977,97 @@
                 canvasRuntime.documentProjectId = projectId;
                 canvasRuntime.documentVideoCardId = canvasRuntime.selectedVideoCardId;
                 canvasRuntime.saveState = 'idle';
+                canvasRuntime.documentLoaded = true;
+                canvasRuntime.documentDirty = false;
                 updateSaveIndicator();
-                return;
+                return false;
             }
-            const parsed = JSON.parse(data.document.document_json);
+            let documentToRestore = data.document;
+            let parsed = JSON.parse(documentToRestore.document_json);
             const savedProjectId = parsed?.context?.project_id || data.document.project_id;
             if (savedProjectId && savedProjectId !== projectId) {
                 throw new Error('画布文档归属与当前项目不一致，已停止恢复。');
             }
-            canvasRuntime.documentId = data.document.id;
-            canvasRuntime.documentProjectId = projectId;
-            canvasRuntime.documentVideoCardId = parsed?.context?.video_card_id || canvasRuntime.selectedVideoCardId;
+            const userId = canvasRuntime.bootstrap?.user?.id;
+            const draftKey = userId ? `sd2:canvas-draft:${userId}:${projectId}:${documentToRestore.id}` : null;
+            let draft = null;
+            try { if (draftKey) draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch {}
+            if (!options.skipDraft && documentToRestore.status === 'active' && draft?.request?.document_json
+                && draft.request.document_json !== documentToRestore.document_json) {
+                const sameRevision = draft.baseRevision === documentToRestore.revision;
+                const recover = await requestCanvasConfirmation({ title: '发现未保存草稿',
+                    message: sameRevision ? '要恢复这台设备的未保存修改吗？' : '服务器内容已更新。恢复草稿会另存新画布，不覆盖原画布。', confirmLabel: '恢复草稿' });
+                if (!isCurrent()) return false;
+                if (recover) {
+                    if (sameRevision) {
+                        parsed = JSON.parse(draft.request.document_json);
+                        recoveredDraft = true;
+                    } else {
+                        documentToRestore = await createRecoveryCopy(draft, `${documentToRestore.title.slice(0, 108)}（恢复副本）`);
+                        if (!isCurrent()) return false;
+                        // New documents are restored exclusively from the server's sanitized body.
+                        parsed = JSON.parse(documentToRestore.document_json);
+                    }
+                }
+            }
             const savedVideoBranchId = parsed?.context?.video_branch_id || null;
-            canvasRuntime.selectedVideoBranchId = savedVideoBranchId;
+            let branchId = savedVideoBranchId;
             if (savedVideoBranchId && canvasRuntime.selectedVideoCardId) {
                 try {
                     const workspace = await loadVideoCardWorkspace(canvasRuntime.selectedVideoCardId);
-                    canvasRuntime.selectedVideoBranchId = window.UltimateCanvasVideoCards.chooseBranch(
+                    if (!isCurrent()) return false;
+                    branchId = window.UltimateCanvasVideoCards.chooseBranch(
                         workspace?.branches || [],
                         savedVideoBranchId
                     ) || null;
                 } catch (error) {
-                    canvasRuntime.selectedVideoBranchId = null;
+                    if (!isCurrent()) return false;
+                    branchId = null;
                     showCanvasNotice(error?.message || '\u89c6\u9891\u65b9\u5411\u6062\u590d\u5931\u8d25\uff0c\u5df2\u56de\u9000\u5230\u9ed8\u8ba4\u65b9\u5411\u3002', 'warn');
                 }
             }
+            if (!isCurrent()) return false;
+            if (!Array.isArray(parsed?.canvas?.nodes) || !Array.isArray(parsed?.canvas?.connections)) throw new Error('画布正文不完整，已停止恢复。');
+            if (parsed.context?.project_id && parsed.context.project_id !== projectId) throw new Error('草稿项目不一致，已停止恢复。');
             invalidateGenerationContext();
-            canvasRuntime.documentRestoring = true;
             stopAllVideoPolling();
+            disposeCanvasPricing();
             clearAllVideoEstimates();
+            window.clearTimeout(canvasRuntime.saveTimer);
+            canvasRuntime.saveTimer = null;
+            canvasRuntime.documentId = documentToRestore.id;
+            canvasRuntime.explicitDocumentId = documentToRestore.id;
+            canvasRuntime.documentRevision = documentToRestore.revision || 0;
+            canvasRuntime.documentTitle = recoveredDraft ? draft.request.title : documentToRestore.title || '未命名画布';
+            canvasRuntime.failedSaveRequest = null;
+            canvasRuntime.saveConflict = false;
+            canvasRuntime.documentProjectId = projectId;
+            canvasRuntime.documentVideoCardId = parsed?.context?.video_card_id || canvasRuntime.selectedVideoCardId;
+            canvasRuntime.selectedVideoBranchId = branchId;
+            canvasRuntime.documentWritable = documentToRestore.status === 'active';
             engine.restore(parsed.canvas || parsed);
             window.UltimateCanvasToolflow?.normalizeLoadedFlowNodes?.();
             recoveredTasklessVideoStatus = hydrateNodeViews();
             refreshContextRulesButtons();
             canvasRuntime.saveState = 'saved';
             canvasRuntime.saveError = null;
+            canvasRuntime.documentLoaded = true;
+            canvasRuntime.documentDirty = recoveredDraft;
+            canvasRuntime.editSequence += 1;
+            syncDocumentUrl();
+            renderRuntimeContextControls();
+            if (!canvasRuntime.documentWritable) {
+                stopAllVideoPolling();
+                showCanvasNotice('此画布已归档，只能查看。请到画布列表恢复后编辑。', 'info');
+            }
+            return true;
         } catch (error) {
-            if (requestId !== canvasRuntime.documentRequestId || projectId !== canvasRuntime.selectedProjectId) return;
+            if (requestId !== canvasRuntime.documentRequestId || projectId !== canvasRuntime.selectedProjectId) return false;
+            canvasRuntime.documentLoaded = false;
             canvasRuntime.saveState = 'error';
             canvasRuntime.saveError = error?.message || '画布恢复失败';
             showCanvasNotice(canvasRuntime.saveError, 'warn');
+            return false;
         } finally {
             if (requestId === canvasRuntime.documentRequestId) {
                 canvasRuntime.documentRestoring = false;
@@ -2567,6 +3075,7 @@
                 if (recoveredTasklessVideoStatus && projectId === canvasRuntime.selectedProjectId) {
                     scheduleCanvasSave('recover_taskless_video_status');
                 }
+                if (canvasRuntime.documentDirty) scheduleCanvasSave('draft_recovery');
             }
         }
     }
@@ -2582,6 +3091,7 @@
         };
         const originalDeleteNode = engine.deleteNode.bind(engine);
         engine.deleteNode = (...args) => {
+            window.UltimateCanvasNodePricing?.dispose(args[0]);
             const deletedNode = engine.nodes.get(args[0]);
             if (deletedNode?.data?.taskId) stopVideoPolling(deletedNode.data.taskId, deletedNode.id);
             const estimate = canvasRuntime.videoEstimates.get(args[0]);
@@ -2881,7 +3391,7 @@
     }
 
     function videoEstimateSignature(settings) {
-        return `${settings.resolution}:${settings.duration}`;
+        return `${canvasRuntime.bootstrap?.capabilities?.video?.model || ''}:${settings.resolution}:${settings.duration}`;
     }
 
     function scheduleVideoEstimate(nodeId) {
@@ -2901,6 +3411,8 @@
             const url = new URL(endpoint, window.location.origin);
             url.searchParams.set('resolution', settings.resolution);
             url.searchParams.set('duration', String(settings.duration));
+            const model = canvasRuntime.bootstrap?.capabilities?.video?.model;
+            if (model) url.searchParams.set('model', model);
             try {
                 const data = await requestJson(url.toString(), {
                     cache: 'no-store',
@@ -3193,7 +3705,8 @@
         if (node.type === 'image') {
             const spec = nodeEl.querySelector('[data-generation-spec]');
             const cost = nodeEl.querySelector('[data-generation-cost]');
-            if (cost) cost.textContent = '后台计费';
+            if (cost) cost.hidden = true;
+            window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
             if (spec) spec.textContent = `${settings.ratio}${settings.ratioSource === 'reference' ? '（跟随原图）' : ''} · ${settings.resolution} · ${settings.size} · ${settings.count}张`;
         } else {
             const spec = nodeEl.querySelector('[data-generation-spec]');
@@ -3204,6 +3717,8 @@
             const estimate = canvasRuntime.videoEstimates.get(nodeId);
             const estimateSignature = videoEstimateSignature(settings);
             if (cost) {
+                nodeEl.querySelector('.video-model-info')?.appendChild(cost);
+                cost.classList.add('canvas-node-credits');
                 cost.textContent = node.data?.frozenCost
                     ? `已冻结 ${node.data.frozenCost}`
                     : estimate?.signature === estimateSignature && estimate.status === 'success'
@@ -3985,6 +4500,9 @@
         }
         const project = selectedProject();
         const card = selectedVideoCard();
+        if (!canvasRuntime.documentWritable || !canvasRuntime.documentId) {
+            return { ready: false, message: '请先打开一张可编辑画布。' };
+        }
         if (canvasRuntime.contextSwitching) {
             return { ready: false, message: '项目或视频卡正在切换，请稍后再生成。' };
         }
@@ -6775,9 +7293,9 @@
     // =====================
     // Logo
     // =====================
-    document.getElementById('logo')?.addEventListener('click', () => {
-        if (engine.nodes.size > 0 && confirm('确定要返回首页吗？未保存的更改将丢失。'))
-            window.location.reload();
+    document.getElementById('logo')?.addEventListener('click', async () => {
+        try { await showManagedLibrary(); }
+        catch (error) { showCanvasNotice(error.message || '画布列表打开失败。', 'warn'); }
     });
 
     // =====================

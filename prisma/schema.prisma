@@ -719,16 +719,55 @@ model CanvasDocument {
   document_json             String
   active_generation_node_id String?
   status                    String   @default("active") // active | archived | deleted
+  revision                  Int      @default(0)
+  schema_version            Int      @default(1)
+  protocol_version          Int      @default(1)
+  access_scope              String   @default("legacy") // legacy | private; never inferred from protocol
+  legacy_document_json      String?  // Original snapshot retained once on v2 upgrade, not exposed by API.
   created_at                DateTime @default(now())
   updated_at                DateTime @updatedAt
 
   owner   User     @relation("CanvasDocumentOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
   project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  revisions CanvasDocumentRevision[]
+  mutations CanvasDocumentMutation[]
 
   @@index([owner_user_id])
   @@index([project_id])
   @@index([status])
   @@index([updated_at])
+  @@index([owner_user_id, project_id, status, updated_at, id])
+}
+
+model CanvasDocumentRevision {
+  id                        String   @id @default(cuid())
+  document_id               String
+  revision                  Int
+  schema_version            Int
+  title                     String
+  document_json             String
+  active_generation_node_id String?
+  resource_refs_json        String
+  created_at                DateTime @default(now())
+  document CanvasDocument @relation(fields: [document_id], references: [id], onDelete: Cascade)
+
+  @@unique([document_id, revision])
+}
+
+// Metadata-only receipts expire after seven days, independently of snapshot history.
+model CanvasDocumentMutation {
+  id             String   @id @default(cuid())
+  actor_user_id  String
+  mutation_id    String
+  request_hash   String
+  document_id    String
+  response_json  String
+  created_at     DateTime @default(now())
+  document CanvasDocument @relation(fields: [document_id], references: [id], onDelete: Cascade)
+
+  @@unique([actor_user_id, mutation_id])
+  @@index([document_id])
+  @@index([created_at])
 }
 
 model ToolFlow {

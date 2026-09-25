@@ -14,7 +14,7 @@
         video: '/api/tasks/create'
     });
     const CANVAS_PATHS = [
-        /^\/api\/tools\/ultimate-canvas\/(?:bootstrap|document|upload)$/,
+        /^\/api\/tools\/ultimate-canvas\/(?:bootstrap|document|upload|quote)$/,
         /^\/api\/assets\/library$/,
         /^\/api\/projects(?:\/[^/]+(?:\/video-cards)?)?$/,
         /^\/api\/video-cards\/[^/]+(?:\/branches(?:\/[^/]+)?|\/tasks|\/split|\/merge)?$/,

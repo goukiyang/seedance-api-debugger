@@ -4554,3 +4554,23 @@ select[data-generation-image-model] {
     color-scheme: dark;
 }
 select[data-generation-image-model] option { color: #e8eeee; background: #252929; }
+body.canvas-document-loading #canvas-container { pointer-events: none; opacity: .45; }
+body.canvas-document-busy #canvas-workspace { pointer-events: none; cursor: progress; }
+body.canvas-document-readonly #canvas-workspace { pointer-events: none; }
+body.canvas-document-readonly #left-toolbar { opacity: .45; }
+body.canvas-document-busy #logo { pointer-events: none; }
+.canvas-save-recovery { position: fixed; top: 88px; right: 16px; z-index: 1500; display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 12px; background: #292623; border: 1px solid #b99e76; border-radius: 6px; color: #f1ded0; }
+.canvas-save-recovery[hidden] { display: none; }
+.canvas-save-recovery { flex-wrap: wrap; }
+.canvas-save-recovery button:disabled { opacity: .5; cursor: wait; }
+.canvas-save-recovery button { padding: 6px 10px; border: 1px solid #8d8478; color: inherit; background: transparent; border-radius: 4px; cursor: pointer; }
+.video-model-info .canvas-node-credits { margin-left: auto; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.canvas-document-title { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#canvas-context-controls { flex-wrap: wrap; }
+.context-status.save.conflict, .context-status.save.error { color: #f4aba0; }
+.context-status.save.offline { color: #e4c879; }
+@media (max-width: 900px) {
+    #canvas-context-controls .context-picker-label, #canvas-context-controls .context-trigger-copy small { display: none; }
+    #canvas-context-controls .canvas-context-trigger { min-width: 0; }
+    .canvas-document-title { max-width: 130px; }
+}

@@ -1,167 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
-import { getProjectAccess } from '@/lib/projects/permissions';
+import {
+  CanvasDocumentError, MAX_CANVAS_BYTES, canvasDetail, canvasHistory,
+  latestCanvasDocument, listCanvasDocuments, mutateCanvasDocument, readCanvasDocument,
+} from '@/lib/canvas-documents';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const MAX_DOCUMENT_JSON_BYTES = 2 * 1024 * 1024;
-
-function cleanString(value: unknown, fallback = '') {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+function json(value: unknown, status = 200) {
+  return NextResponse.json(value, { status, headers: { 'Cache-Control': 'private, no-store' } });
 }
 
-function byteLength(value: string) {
-  return Buffer.byteLength(value, 'utf8');
+function failure(error: unknown) {
+  if (error instanceof CanvasDocumentError) return json({ error: error.message, code: error.code, ...error.details }, error.status);
+  if (error instanceof AuthError) return json({ error: error.message }, error.status);
+  if (error instanceof SyntaxError) return json({ error: '画布内容不是有效 JSON', code: 'invalid_document' }, 400);
+  // Prisma errors may contain snapshots; do not log their messages or request bodies.
+  console.error('[UltimateCanvasDocument] Request failed', error instanceof Error ? error.name : 'UnknownError');
+  return json({ error: '画布操作失败，请保留当前内容后重试' }, 500);
 }
 
-function safeDate(value: Date | string | null | undefined) {
-  if (!value) return null;
-  return value instanceof Date ? value.toISOString() : value;
-}
-
-function serializeDocument(document: {
-  id: string;
-  owner_user_id: string;
-  project_id: string | null;
-  title: string;
-  document_json: string;
-  active_generation_node_id: string | null;
-  status: string;
-  created_at: Date;
-  updated_at: Date;
-}) {
-  return {
-    id: document.id,
-    owner_user_id: document.owner_user_id,
-    project_id: document.project_id,
-    title: document.title,
-    document_json: document.document_json,
-    active_generation_node_id: document.active_generation_node_id,
-    status: document.status,
-    created_at: safeDate(document.created_at),
-    updated_at: safeDate(document.updated_at),
-  };
-}
-
-async function assertCanUseCanvasProject(user: SessionUser, projectId: string | null) {
-  if (!projectId) return null;
-  const access = await getProjectAccess(user, projectId);
-  if (!access.project) throw new AuthError('项目不存在', 404);
-  if (!access.canGenerate) throw new AuthError('无权在此项目中编辑无线画布', 403);
-  return access.project;
-}
-
-async function assertCanEditCanvasDocument(user: SessionUser, documentId: string) {
-  const document = await prisma.canvasDocument.findUnique({ where: { id: documentId } });
-  if (!document || document.status === 'deleted') throw new AuthError('画布不存在', 404);
-  if (user.role === 'admin' || document.owner_user_id === user.id) return document;
-  if (!document.project_id) throw new AuthError('无权编辑此画布', 403);
-  const access = await getProjectAccess(user, document.project_id);
-  if (!access.canGenerate) throw new AuthError('无权编辑此画布', 403);
-  return document;
+async function session() {
+  const user = await getSession();
+  if (!user) throw new AuthError('未登录', 401);
+  assertInternalOnly(user, '外部账号无权使用无线画布。');
+  return user;
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await getSession();
-    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-    assertInternalOnly(user, '外部账号无权使用无线画布。');
-
-    const documentId = request.nextUrl.searchParams.get('document_id')?.trim() || '';
-    const projectId = request.nextUrl.searchParams.get('project_id')?.trim() || null;
-
-    if (documentId) {
-      const document = await assertCanEditCanvasDocument(user, documentId);
-      return NextResponse.json({ document: serializeDocument(document) });
+    const user = await session();
+    const params = request.nextUrl.searchParams;
+    if (params.get('list') === '1') return json(await listCanvasDocuments(user, params));
+    const documentId = params.get('document_id')?.trim();
+    if (params.get('history') === '1') {
+      if (!documentId) throw new AuthError('缺少 document_id', 400);
+      return json(await canvasHistory(user, documentId));
     }
-
-    if (projectId) await assertCanUseCanvasProject(user, projectId);
-    const document = await prisma.canvasDocument.findFirst({
-      where: {
-        owner_user_id: user.id,
-        project_id: projectId || undefined,
-        status: 'active',
-      },
-      orderBy: { updated_at: 'desc' },
-    });
-
-    return NextResponse.json({ document: document ? serializeDocument(document) : null });
-  } catch (error) {
-    if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    console.error('[UltimateCanvasDocument] Load failed:', error);
-    return NextResponse.json({ error: '画布读取失败' }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const user = await getSession();
-    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-    assertInternalOnly(user, '外部账号无权使用无线画布。');
-
-    const body = await request.json() as Record<string, unknown>;
-    const documentId = cleanString(body.document_id || body.documentId);
-    const projectId = cleanString(body.project_id || body.projectId) || null;
-    const title = cleanString(body.title, '无线画布').slice(0, 120);
-    const activeNodeId = cleanString(body.active_generation_node_id || body.activeGenerationNodeId) || null;
-    const rawDocumentJson = typeof body.document_json === 'string'
-      ? body.document_json
-      : typeof body.documentJson === 'string'
-        ? body.documentJson
-        : JSON.stringify(body.document || {});
-
-    if (!rawDocumentJson || rawDocumentJson === '{}') {
-      return NextResponse.json({ error: '画布内容不能为空' }, { status: 400 });
-    }
-    if (byteLength(rawDocumentJson) > MAX_DOCUMENT_JSON_BYTES) {
-      return NextResponse.json({ error: '画布内容超过 2MB，请拆分后保存' }, { status: 413 });
-    }
-    JSON.parse(rawDocumentJson);
-
-    await assertCanUseCanvasProject(user, projectId);
-
     const document = documentId
-      ? await (async () => {
-          const existing = await assertCanEditCanvasDocument(user, documentId);
-          if (projectId && existing.project_id && existing.project_id !== projectId) {
-            throw new AuthError('画布不属于当前项目', 400);
-          }
-          return prisma.canvasDocument.update({
-            where: { id: documentId },
-            data: {
-              project_id: projectId || existing.project_id,
-              title,
-              document_json: rawDocumentJson,
-              active_generation_node_id: activeNodeId,
-              status: 'active',
-            },
-          });
-        })()
-      : await prisma.canvasDocument.create({
-          data: {
-            owner_user_id: user.id,
-            project_id: projectId,
-            title,
-            document_json: rawDocumentJson,
-            active_generation_node_id: activeNodeId,
-            status: 'active',
-          },
-        });
-
-    return NextResponse.json({ success: true, document: serializeDocument(document) });
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      return NextResponse.json({ error: '画布内容不是有效 JSON' }, { status: 400 });
-    }
-    if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    console.error('[UltimateCanvasDocument] Save failed:', error);
-    return NextResponse.json({ error: '画布保存失败' }, { status: 500 });
-  }
+      ? await readCanvasDocument(user, documentId)
+      : await latestCanvasDocument(user, params.get('project_id')?.trim() || null);
+    const requestedProject = params.get('project_id')?.trim();
+    if (document && requestedProject && document.project_id !== requestedProject) throw new AuthError('画布不属于当前项目', 400);
+    return json({ document: document ? canvasDetail(document) : null });
+  } catch (error) { return failure(error); }
 }
+
+async function mutate(request: NextRequest, method: 'POST' | 'PATCH') {
+  try {
+    const user = await session();
+    // JSON-in-JSON escaping may increase the wire size beyond the snapshot size.
+    const maxBodyBytes = MAX_CANVAS_BYTES * 3 + 64 * 1024;
+    if (Number(request.headers.get('content-length')) > maxBodyBytes) {
+      throw new CanvasDocumentError('请求过大，请拆分画布后保存', 413, 'document_too_large');
+    }
+    const reader = request.body?.getReader();
+    if (!reader) throw new AuthError('缺少请求内容', 400);
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > maxBodyBytes) {
+          await reader.cancel();
+          throw new CanvasDocumentError('请求过大，请拆分画布后保存', 413, 'document_too_large');
+        }
+        chunks.push(chunk.value);
+      }
+    } finally { reader.releaseLock(); }
+    const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AuthError('请求内容必须是对象', 400);
+    return json(await mutateCanvasDocument(user, body as Record<string, unknown>, method));
+  } catch (error) { return failure(error); }
+}
+
+export async function POST(request: NextRequest) { return mutate(request, 'POST'); }
+export async function PATCH(request: NextRequest) { return mutate(request, 'PATCH'); }

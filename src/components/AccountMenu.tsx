@@ -61,11 +61,23 @@ export default function AccountMenu({
 
   const handleLogout = async () => {
     if (loggingOut) return;
+    const canvasDraftKeys: string[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('sd2:canvas-draft:') || key?.startsWith('sd2:canvas-conflict:')) canvasDraftKeys.push(key);
+      }
+    } catch { /* Storage may be unavailable in restricted browser sessions. */ }
+    if (canvasDraftKeys.length && !window.confirm('这台设备有未同步的画布草稿。退出会清除这些本地草稿，服务器已保存内容不受影响。确认退出？')) return;
     setLoggingOut(true);
 
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } finally {
+      try {
+        canvasDraftKeys.forEach(key => localStorage.removeItem(key));
+        localStorage.removeItem('ultimate-canvas:last-library-document');
+      } catch { /* The next session still requires server authorization. */ }
       onSessionClear?.();
       window.location.href = '/login';
     }

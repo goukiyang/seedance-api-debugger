@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
     await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
 
     if (canvasDocumentId) {
+      await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
       const canvas = await prisma.canvasDocument.findUnique({
         where: { id: canvasDocumentId },
         select: { id: true, owner_user_id: true, project_id: true, status: true },

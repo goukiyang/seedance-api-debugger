@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import { prisma } from '@/lib/prisma';
 import { getSession, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -107,6 +108,7 @@ async function assertCanUseCanvasDocument(
   projectId: string | null,
 ) {
   if (!canvasDocumentId) return;
+  await assertCanEditCanvasDocument(user, canvasDocumentId, projectId);
 
   const canvas = await prisma.canvasDocument.findUnique({
     where: { id: canvasDocumentId },

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import fs from 'fs';
 import path from 'path';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
@@ -302,6 +303,7 @@ async function writeGenerationAttemptLog(params: {
 }
 
 async function assertCanAttachCanvasContext(user: SessionUser, canvasDocumentId: string) {
+  await assertCanEditCanvasDocument(user, canvasDocumentId);
   const canvas = await prisma.canvasDocument.findUnique({
     where: { id: canvasDocumentId },
     select: {

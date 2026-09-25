@@ -1,0 +1,62 @@
+.node-type-image .video-model-info.has-canvas-node-price {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    gap: 6px;
+}
+
+.node-type-image .has-canvas-node-price select[data-generation-image-model] {
+    flex: 1 1 0;
+    min-width: 0;
+    width: 0;
+    text-overflow: ellipsis;
+}
+
+.node-type-image .canvas-node-price-slot {
+    margin-left: auto;
+    flex: 0 0 auto;
+    max-width: 50%;
+    text-align: right;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-secondary, #a8b4b4);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+}
+
+.node-type-image [data-canvas-node-price]:focus-visible {
+    outline: 1px solid var(--accent-blue, #8ca8c0);
+    outline-offset: 2px;
+}
+
+.toolflow-template-settings .toolflow-model-price-field {
+    grid-column: 1 / -1;
+    min-width: 0;
+}
+
+.toolflow-model-price-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.toolflow-model-price-row select[data-toolflow-node-field="model"] {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    text-overflow: ellipsis;
+}
+
+.toolflow-model-price {
+    flex: 0 0 auto;
+    max-width: 50%;
+    margin-left: auto;
+    text-align: right;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+}
