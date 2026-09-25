@@ -631,7 +631,19 @@
             catch (error) { fail(error, '离开画布'); }
             finally { busy = false; updateControls(); }
         });
-        actions.append(ui.manage, ui.newButton, ui.close);
+        const exit = el('a', 'uc-doc-project-link', '返回网站');
+        exit.href = '/generate';
+        exit.target = '_top';
+        exit.addEventListener('click', async event => {
+            event.preventDefault();
+            if (busy) return;
+            busy = true;
+            updateControls();
+            try { if (await leave()) window.top.location.href = exit.href; }
+            catch (error) { fail(error, '离开画布'); }
+            finally { busy = false; updateControls(); }
+        });
+        actions.append(exit, ui.manage, ui.newButton, ui.close);
         heading.append(title, actions);
         const filters = el('div', 'uc-doc-filters');
         const projectLabel = el('label', 'uc-doc-field');
@@ -758,8 +770,12 @@
         return root;
     }
 
-    async function show() {
+    async function show(selection = {}) {
         if (!root) throw new Error('Mount UltimateCanvasDocuments first');
+        if (selection.projectId) {
+            projectId = String(selection.projectId);
+            selectedInitialProject = true;
+        }
         if (root.hidden) previousFocus = document.activeElement;
         root.hidden = false;
         document.body.classList.add('canvas-library-open');

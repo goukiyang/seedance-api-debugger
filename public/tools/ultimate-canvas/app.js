@@ -1713,7 +1713,7 @@
         if (engine.nodes.size > 0 || canvasRuntime.documentId) {
             const confirmed = await requestCanvasConfirmation({
                 title: '切换项目',
-                message: '当前画布会先保存到原项目，再加载目标项目最近的画布。两个项目的节点和素材不会混用。',
+                message: '当前画布会先保存，再打开目标项目的画布列表。你可以选择已有画布，或新建画布。',
                 detail: `当前：${projectDisplayNameFor(selectedProject())}`,
                 confirmLabel: '保存并切换'
             });
@@ -1726,12 +1726,11 @@
         try {
             const saved = await flushCanvasSave('before_project_change');
             if (!saved) throw new Error('当前画布保存失败，已取消切换项目，避免内容错存。');
-            resetProjectScopedRuntime(projectId);
-            clearCanvasForContext();
-            canvasRuntime.bootstrapLoaded = false;
-            const data = await loadCanvasBootstrap(projectId, null, { restoreDocument: true, clearWhenMissing: true });
-            if (!data) throw new Error('项目切换失败，请稍后重试。');
-            showCanvasNotice(`已切换到「${projectDisplayNameFor(selectedProject())}」`, 'info');
+            invalidateGenerationContext();
+            stopAllVideoPolling();
+            disposeCanvasPricing();
+            canvasRuntime.documentWritable = false;
+            await window.UltimateCanvasDocuments?.show({ projectId });
         } catch (error) {
             showCanvasNotice(error?.message || '项目切换失败。', 'error');
         } finally {
@@ -1775,11 +1774,14 @@
             if (!data?.project?.id) throw new Error('后端没有返回新项目 ID');
             const saved = await flushCanvasSave('before_project_create_switch');
             if (!saved) throw new Error('当前画布保存失败，新项目已创建但未切换。');
-            resetProjectScopedRuntime(data.project.id);
-            clearCanvasForContext();
-            canvasRuntime.bootstrapLoaded = false;
-            await loadCanvasBootstrap(data.project.id, null, { restoreDocument: true, clearWhenMissing: true });
-            showCanvasNotice(`已新建并切换到「${data.project.name}」`, 'info');
+            const projects = canvasRuntime.bootstrap?.context?.projects;
+            if (projects && !projects.some(project => project.id === data.project.id)) projects.push(data.project);
+            invalidateGenerationContext();
+            stopAllVideoPolling();
+            disposeCanvasPricing();
+            canvasRuntime.documentWritable = false;
+            await window.UltimateCanvasDocuments?.show({ projectId: data.project.id });
+            showCanvasNotice(`已新建「${data.project.name}」，请选择新建画布。`, 'info');
         } catch (error) {
             showCanvasNotice(error?.message || '新建项目失败。', 'error');
         } finally {
