@@ -401,18 +401,21 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| P2 | 批量补齐现有图片缩略图 | 处理全部正常图片，保留原图，记录失败项 | 进行中 |
+| P2 | 批量补齐现有图片缩略图 | 处理全部正常图片，保留原图，记录失败项 | 已完成全量尝试；793张就绪、11张失败已记录 |
 
 - 用户明确要求把现有图片全部跑一遍。执行时正常图片804张，隐藏140张、删除1张不恢复或处理；只读资产表，串行低优先级调用已上线readStudioThumbnail，复用已有缓存，逐图检查WebP格式及640px尺寸上限，不修改资产记录和原图，不调用生图接口。
 - 服务器报告：`/srv/video-api-debugger/app/storage/studio-thumbnails/warm-1790347195009.json`；临时执行脚本`/tmp/sd2-warm-thumbnails-20260925.ts`。不新增产品版本。
+- 最终804张全部处理，793张成功（771新建、22复用），11张失败：4张超过20MB、5张超过像素安全限制、1张源文件缺失、1张读取失败。缓存累计19,734,296字节；成功记录对应file_size合计1,694,268,269字节（数据库口径，非实测网络流量）。原图、资产记录、隐藏/删除状态均未更改，无生成费用。失败资产ID及原因保留在报告中，未放宽在线安全限制；不能宣称全部图片已成功或真实页面加载验收通过。
 
 ### 2026-09-25 banner 与大图操作隔离
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | P3 | 排查 banner 变大 | 确认原因，避免误改原有比例 | 待页面证据 |
-| P4 | 隔离大图操作 | 滚轮、拖动不影响底层网页，关闭后恢复 | 已实现并只读审核，待构建发布和手动验收 |
+| P4 | 隔离大图操作 | 滚轮、拖动不影响底层网页，关闭后恢复 | 已上线0.15.4；真实鼠标操作待手动验收 |
 
 - P3：现有样式宽100%、高auto且无高度上限，存在高图占屏过大的风险；但线上模块banner为2804x561，缓存640x128比例一致，0.15.3未改banner CSS，不能把该风险当作本次已确认根因。已请求模板名称/截图或重新打开浏览器许可，未收到前不盲改比例。
 - P4：ZoomableImagePreview原React onWheel不能可靠取消被动滚轮事件，且缺少传播隔离。改为window capture原生passive:false监听，限定预览内事件，拦截wheel/touchmove，html/body滚动锁、指针/鼠标冒泡隔离及关闭清理；保留缩放、切图和对比。Tab在弹层按钮内循环，关闭恢复焦点。独立只读审核通过，按用户要求不运行产品测试或付费生成。
 - 参考：MDN https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener 与开源react-remove-scroll的非被动监听方法 https://github.com/theKashey/react-remove-scroll 。复用现有预览组件，不新增依赖。
+- 发布源码eb709ce1e99db992108020ee919363cc1d96fe41，候选构建通过（仅既有警告），线上BUILD_ID `_PDcwH-ipZG9FuEDZGGOG`；服务active、本机/公网config、login、release正常，公网版本0.15.4。image-studio引用的共享chunk `/_next/static/chunks/5017-267e2d2add9aa718.js` 返回200并含wheel、passive:false、stopImmediatePropagation和touchmove。更新提醒沿用ReleaseNotice，摘要已对应本次修复，不强制刷新；未做旧客户端弹窗或真实鼠标操作测试。
+- 回退tag `rollback/2026-09-25-before-preview-isolation` 已推送，服务器旧构建 `.next-prod-before-eb709ce` 保留，无数据库和计费改动。原有审计文件脏改和临时目录未覆盖。本轮守门员：execution + deployment，缺口为真实页面验收与P3现场证据，分级误判无。
