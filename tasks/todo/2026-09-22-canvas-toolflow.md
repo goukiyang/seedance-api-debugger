@@ -387,9 +387,12 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| P1 | 生图封面缩略图化 | 接入缩略图生成与展示，保留原图预览和下载，部署上线 | 进行中 |
+| P1 | 生图封面缩略图化 | 接入缩略图生成与展示，保留原图预览和下载，部署上线 | 已实现并部署0.15.3；真实登录加载/体积验收待手动确认 |
 
 - 根因：studio结果卡片直接请求original_url，模块/参考素材thumbnailUrl也指原图接口。画布普通生图已有thumbnail优先链路，继续复用；新入库图片缩略图改为等比例640px以内WebP，不放大、不裁剪，原图不改。
 - 方案复用已安装Sharp0.34.5（Apache-2.0），读取本地lib/resize.js实现并核对官方https://sharp.pixelplumbing.com/api-resize/ 和https://sharp.pixelplumbing.com/api-output/ 。无需新依赖或独立图像代理服务。
 - studio已授权素材接口增加thumbnail=1；旧图按需生成640px WebP，私有storage缓存原子写入，同图合并请求、并发2、待处理上限32。任何缓存读取仍先通过现有鉴权，HTTP保持private/no-store，不用公共缓存绕过共享撤回。源文件地址按现有不可变资产约定参与缓存key，替换内容必须新资产URL。
 - 生图结果、全部模板封面、banner及参考图缩略展示改用thumbnail；大图、复制、下载及生成引用原图不变。列表缩略图失败不自动回退读取原图。按用户安排不做付费生成或产品测试；编译、独立只读审查和发布确认另记。
+- 独立只读审核通过，聚焦源码7870a597751522ea55351455bf406349fed390db已推送。服务器候选构建通过（仅既有警告），线上BUILD_ID为4dkMvhFCsRV0g_haB70Mr；服务active，本机/公网config、login、release、公开image-studio静态chunk均正常，chunk含thumbnail_url展示；服务账号可写storage缓存目录。
+- 前次浏览器被用户手动停止，本轮已询问是否允许恢复只读页面确认，尚无答复，因此未再操作浏览器。未进行真实登录缩略图尺寸/传输体积核验，未触发生图，不虚报性能提升倍数。用户手动验收需确认Network封面为thumbnail=1/WebP，打开原图仍高清。
+- 回退tag rollback/2026-09-25-before-thumbnails已推送，旧构建.next-prod-before-7870a59保留，无数据库迁移和原图覆盖。私有缩略图缓存可保留，不影响回退；现有长期worker未重启以保护运行任务，studio历史和新结果均由Web按需生成缩略图。
