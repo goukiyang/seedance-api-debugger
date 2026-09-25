@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MouseEvent, PointerEvent } from 'react';
+import type { CSSProperties, MouseEvent, PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import styles from './ZoomableImagePreview.module.css';
@@ -44,6 +44,46 @@ function clampScale(value: number) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 }
 
+function displaySource(src: string, mode: 'preview' | 'thumbnail') {
+  if (!/^\/api\/image-studio\/(?:assets|template-assets)\//.test(src)) return src;
+  const url = new URL(src, 'https://sd2.youdooart.com');
+  url.searchParams.delete('thumbnail');
+  url.searchParams.delete('preview');
+  url.searchParams.set(mode, '1');
+  return `${url.pathname}${url.search}`;
+}
+
+function PreviewImage({ src, alt, original, className, style }: { src: string; alt: string; original: boolean; className: string; style: CSSProperties }) {
+  const image = useRef<HTMLImageElement>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [loadedKey, setLoadedKey] = useState('');
+  const [failedKey, setFailedKey] = useState('');
+  const displaySrc = original ? src : displaySource(src, 'preview');
+  const thumbnail = displaySource(src, 'thumbnail');
+  const key = `${displaySrc}:${attempt}`;
+  const loaded = loadedKey === key;
+  const failed = failedKey === key;
+  useEffect(() => {
+    if (image.current?.complete && image.current.naturalWidth > 0) {
+      setLoadedKey(key);
+      return;
+    }
+    if (loaded) return;
+    const timer = window.setTimeout(() => setFailedKey(key), 30000);
+    return () => window.clearTimeout(timer);
+  }, [key, loaded]);
+  return <>
+    {thumbnail !== src && !loaded && <img src={thumbnail} alt="" aria-hidden="true" className={className} style={style} draggable={false} />}
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img ref={image} key={key} src={displaySrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false}
+      onLoad={() => { setLoadedKey(key); setFailedKey(''); }} onError={() => setFailedKey(key)} />
+    {!loaded && <div className={styles.imageStatus} role="status">
+      <span>{failed ? '图片未能加载' : original ? '原图加载中' : '高清预览加载中'}</span>
+      {failed && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setAttempt(value => value + 1); }}><RotateCcw size={16} /></button>}
+    </div>}
+  </>;
+}
+
 export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, metadata, comparison, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -52,12 +92,9 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageError, setImageError] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
   const [comparisonMode, setComparisonMode] = useState(false);
   const [comparisonAxis, setComparisonAxis] = useState<'horizontal' | 'vertical'>('horizontal');
-  const [comparisonLoaded, setComparisonLoaded] = useState(false);
-  const [comparisonError, setComparisonError] = useState(false);
   const [showReference, setShowReference] = useState(false);
 
   const activeSrc = showReference && comparison ? comparison.src : src;
@@ -130,12 +167,9 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
 
   useEffect(() => {
     resetView();
-    setImageLoaded(false);
-    setImageError(false);
+    setShowOriginal(false);
     setComparisonMode(false);
     setComparisonAxis('horizontal');
-    setComparisonLoaded(false);
-    setComparisonError(false);
     setShowReference(false);
   }, [resetView, previewKey, src, comparison?.src]);
 
@@ -251,12 +285,13 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
         </button>}
         <div className={styles.title}>
           <strong>{title || fileName || alt}</strong>
-          <span>{comparisonMode ? `${comparisonLayoutLabel}对比 · ${Math.round(scale * 100)}%` : imageError ? '加载失败' : imageLoaded ? `${Math.round(scale * 100)}%` : '加载中...'}</span>
+          <span>{comparisonMode ? `${comparisonLayoutLabel}对比 · ` : ''}{Math.round(scale * 100)}%</span>
           {metadata && <div className={styles.metadata}>
             {(metadata.model || metadata.quality || metadata.ratio || metadata.resolution || metadata.time) && <span>{[metadata.model, metadata.quality, metadata.ratio, metadata.resolution, metadata.time].filter(Boolean).join(' · ')}</span>}
           </div>}
         </div>
         <div className={styles.actions}>
+          {displaySource(activeSrc, 'preview') !== activeSrc && <button type="button" aria-pressed={showOriginal} onClick={() => setShowOriginal(value => !value)} title={showOriginal ? '切换高清预览' : '加载完整原图'}><span className={styles.actionLabel}>{showOriginal ? '原图' : '高清预览'}</span></button>}
           {hasNavigation && <>
             <button type="button" onClick={onPrevious} title="上一张" aria-label="上一张生成图片"><ArrowLeft size={16} /></button>
             <button type="button" onClick={onNext} title="下一张" aria-label="下一张生成图片"><ArrowRight size={16} /></button>
@@ -286,7 +321,6 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
         className={`${styles.stage} ${dragging ? styles.stageDragging : ''}`}
         title="滚轮缩放，拖动查看"
         data-image-preview-stage
-        aria-busy={!imageLoaded && !imageError || comparisonMode && !comparisonLoaded && !comparisonError}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishDrag}
@@ -298,45 +332,27 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
         onDoubleClick={resetView}
         onContextMenu={(event) => event.preventDefault()}
       >
-        {/* 参考图来源可能是本地、远程或临时地址，这里保留原生 img 以支持原图缩放查看。 */}
-        {(!imageLoaded || imageError) && (
-          <div className={styles.loadingState} role="status" aria-live="polite">
-            {!imageError && <span className={styles.loadingSpinner} />}
-            <strong>{imageError ? '图片加载失败' : '图片加载中...'}</strong>
-            <small>{imageError ? '请关闭后重试，或检查图片地址。' : '原图较大时可能需要几秒。'}</small>
-          </div>
-        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {comparison && comparisonMode ? <div className={`${styles.compareFrame} ${comparisonAxis === 'vertical' ? styles.compareVertical : styles.compareHorizontal}`} data-image-preview-compare-frame>
           <div className={styles.comparePane} data-image-preview-pane="reference" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
             <span className={styles.compareLabel}>参考图</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={comparison.src} alt={comparison.alt} className={`${styles.compareImage} ${comparisonLoaded ? styles.imageReady : styles.imageLoading}`} draggable={false}
-              onLoad={() => { setComparisonLoaded(true); setComparisonError(false); }} onError={() => { setComparisonLoaded(false); setComparisonError(true); }}
+            <PreviewImage src={comparison.src} alt={comparison.alt} original={showOriginal} className={styles.compareImage}
               style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} />
           </div>
           <div className={styles.comparePane} data-image-preview-pane="result" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
             <span className={styles.compareLabel}>生成图</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt={alt} className={`${styles.compareImage} ${imageLoaded ? styles.imageReady : styles.imageLoading}`} draggable={false}
-              onLoad={() => { setImageLoaded(true); setImageError(false); }} onError={() => { setImageLoaded(false); setImageError(true); }}
+            <PreviewImage src={src} alt={alt} original={showOriginal} className={styles.compareImage}
               style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} />
           </div>
         </div> : <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <PreviewImage
             src={activeSrc}
             alt={activeAlt}
-            className={`${styles.image} ${imageLoaded ? styles.imageReady : styles.imageLoading}`}
-            draggable={false}
-            onLoad={() => {
-              setImageLoaded(true);
-              setImageError(false);
-            }}
-            onError={() => {
-              setImageLoaded(false);
-              setImageError(true);
-            }}
+            className={styles.image}
+            original={showOriginal}
             style={{
               transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
             }}

@@ -419,3 +419,13 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 - 参考：MDN https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener 与开源react-remove-scroll的非被动监听方法 https://github.com/theKashey/react-remove-scroll 。复用现有预览组件，不新增依赖。
 - 发布源码eb709ce1e99db992108020ee919363cc1d96fe41，候选构建通过（仅既有警告），线上BUILD_ID `_PDcwH-ipZG9FuEDZGGOG`；服务active、本机/公网config、login、release正常，公网版本0.15.4。image-studio引用的共享chunk `/_next/static/chunks/5017-267e2d2add9aa718.js` 返回200并含wheel、passive:false、stopImmediatePropagation和touchmove。更新提醒沿用ReleaseNotice，摘要已对应本次修复，不强制刷新；未做旧客户端弹窗或真实鼠标操作测试。
 - 回退tag `rollback/2026-09-25-before-preview-isolation` 已推送，服务器旧构建 `.next-prod-before-eb709ce` 保留，无数据库和计费改动。原有审计文件脏改和临时目录未覆盖。本轮守门员：execution + deployment，缺口为真实页面验收与P3现场证据，分级误判无。
+
+### 2026-09-25 大图长期加载
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| P5 | 排查大图长时间加载 | 找到卡点，修复并确认原图能返回 | 已实现，待审查/构建发布，真实页面待确认 |
+
+- 现场请求证据：nginx最近原图请求57f40b85、d91fb328为200但多次仅部分传输；对应本地PNG为5,832,200与5,971,579字节，2048x2048，磁盘读取8ms/3ms，未发现对应权限拒绝或源文件缺失。说明整张大PNG传输是明确负担，但日志无request_time，尚不能断言唯一网络瓶颈或用户端确切耗时。
+- 使用现有Sharp的2048px/quality88 WebP高清预览（样本425,410/452,174字节，转换504/609ms），仍鉴权后读取私有缓存；缩略图640缓存键和原图路径保持不变，不降原图下载、复制或生成引用质量，不新增依赖/收费。
+- 弹层先展示缩略图，默认高清预览，可切换完整原图；加载状态跟随请求key，已加载缓存图片复核complete/naturalWidth，30秒仍未完成显示重试而非无限转圈，晚到成功仍可恢复。未授权重新启动之前被手动停止的浏览器控制，已询问当前具体模板及只读查看许可。

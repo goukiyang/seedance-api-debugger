@@ -23,7 +23,17 @@ const thumbnailWaiters: Array<() => void> = [];
 
 // Call only after the asset route has checked the current viewer's permissions.
 export async function readStudioThumbnail(url: string): Promise<Buffer> {
-  const key = createHash('sha256').update(`webp-640-v1:${url}`).digest('hex');
+  return readStudioDisplayImage(url, false);
+}
+
+export async function readStudioPreview(url: string): Promise<Buffer> {
+  return readStudioDisplayImage(url, true);
+}
+
+async function readStudioDisplayImage(url: string, preview: boolean): Promise<Buffer> {
+  const size = preview ? 2048 : 640;
+  const quality = preview ? 88 : 78;
+  const key = createHash('sha256').update(`${preview ? 'webp-2048-q88-v1' : 'webp-640-v1'}:${url}`).digest('hex');
   const directory = path.join(process.cwd(), 'storage', 'studio-thumbnails');
   const file = path.join(directory, `${key}.webp`);
   try { return await fs.readFile(file); } catch (error) {
@@ -38,7 +48,7 @@ export async function readStudioThumbnail(url: string): Promise<Buffer> {
     try {
       const original = await readStudioImage(url);
       const bytes = await sharp(original, { limitInputPixels: 40_000_000, animated: false })
-        .rotate().resize(640, 640, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
+        .rotate().resize(size, size, { fit: 'inside', withoutEnlargement: true }).webp({ quality }).toBuffer();
       await fs.mkdir(directory, { recursive: true });
       const temporary = `${file}.${randomUUID()}.tmp`;
       try { await fs.writeFile(temporary, bytes); await fs.rename(temporary, file); }

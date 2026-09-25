@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { readStudioImage, readStudioThumbnail } from '@/lib/image-studio/media';
+import { readStudioImage, readStudioThumbnail, readStudioPreview } from '@/lib/image-studio/media';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 
 export const runtime = 'nodejs';
@@ -21,9 +21,11 @@ export async function GET(_request: NextRequest, { params }: { params: { assetId
   if (!asset) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404 });
   try {
     const thumbnail = _request.nextUrl.searchParams.get('thumbnail') === '1';
-    const bytes = await (thumbnail ? readStudioThumbnail(asset.original_url) : readStudioImage(asset.original_url));
+    const preview = _request.nextUrl.searchParams.get('preview') === '1';
+    const bytes = await (thumbnail ? readStudioThumbnail(asset.original_url) : preview ? readStudioPreview(asset.original_url) : readStudioImage(asset.original_url));
     return new Response(new Uint8Array(bytes), { headers: {
-      'Content-Type': thumbnail ? 'image/webp' : 'image/png',
+      'Content-Type': thumbnail || preview ? 'image/webp' : 'image/png',
+      'Content-Length': String(bytes.length),
       'Cache-Control': 'private, no-store',
       'Content-Disposition': 'inline',
       'X-Content-Type-Options': 'nosniff',
