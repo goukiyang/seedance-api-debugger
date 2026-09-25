@@ -1,6 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { isValidImageDimension } from '@/lib/image-generation/resolution';
+import { IMAGE_STUDIO_MODELS, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
+import { requestStudioImages, StudioProviderError, type StudioImageInput } from '@/lib/image-studio/provider';
+import { readStudioImage, normalizeStudioImage } from '@/lib/image-studio/media';
 
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
 
@@ -576,6 +579,7 @@ export async function createImageGeneration(params: {
   size?: string;
   count?: number;
   referenceImages?: string[];
+  quality?: string;
 }): Promise<ImageGenerationResult> {
   if (!isImageGenerationApiReady(params.settings)) {
     throw new ImageGenerationApiError('图形生成 API 未启用或缺少配置', 503, 'image_generation_api_not_configured');
@@ -591,6 +595,37 @@ export async function createImageGeneration(params: {
   const timeout = setTimeout(() => controller.abort(), params.settings.timeout_ms);
 
   try {
+    if (isStudioImageGenerationProvider(params.settings.provider)
+      && IMAGE_STUDIO_MODELS.includes(params.settings.default_model as typeof IMAGE_STUDIO_MODELS[number])) {
+      const images: StudioImageInput[] = [];
+      for (const source of normalizeReferenceImages(params.referenceImages, 10)) {
+        const inline = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
+        if (inline && inline[2].length > 28 * 1024 * 1024) {
+          throw new ImageGenerationApiError('参考图过大，请压缩后重试', 413, 'image_generation_reference_image_too_large');
+        }
+        const bytes = inline ? Buffer.from(inline[2], 'base64') : await readStudioImage(source, controller.signal);
+        images.push({ bytes: await normalizeStudioImage(bytes), mimeType: 'image/png' });
+      }
+      // Share only the provider transport, not template permissions or billing.
+      const result = await requestStudioImages({
+        baseUrl: params.settings.base_url,
+        apiKey: params.settings.api_key || '',
+        provider: params.settings.provider as 'musk' | 'ai_media_vip',
+        model: params.settings.default_model,
+        prompt: params.prompt,
+        quality: normalizeImageStudioQuality(params.settings.default_model, params.quality || 'auto'),
+        count,
+        images,
+        ratio: params.ratio,
+        size: params.size,
+        signal: controller.signal,
+      });
+      return {
+        images: result.images.map(b64Json => ({ b64Json })),
+        model: params.settings.default_model,
+        raw: { usage: result.usage },
+      };
+    }
     const useMuskGeminiProtocol = params.settings.provider === 'musk'
       && GEMINI_IMAGE_MODELS.has(params.settings.default_model);
     if (!useMuskGeminiProtocol) {
@@ -615,6 +650,14 @@ export async function createImageGeneration(params: {
     });
   } catch (error) {
     if (error instanceof ImageGenerationApiError) throw error;
+    if (error instanceof StudioProviderError) {
+      const message = error.code === 'invalid_json'
+        ? '图片服务未返回有效结果，请管理员检查生图接口地址；请勿连续重复生成'
+        : error.code === 'timeout'
+          ? '图片服务响应超时，上游结果尚未确认，请勿连续重复生成'
+          : `图片服务处理失败（${error.code}${error.status ? `，HTTP ${error.status}` : ''}）`;
+      throw new ImageGenerationApiError(message, error.code === 'timeout' ? 504 : 502, `image_generation_${error.code}`);
+    }
     if (error instanceof Error && error.name === 'AbortError') {
       throw new ImageGenerationApiError('图形生成 API 调用超时', 504, 'image_generation_timeout');
     }
