@@ -4543,3 +4543,14 @@ body.director-studio-open {
 .toolflow-run-state.guided-state { margin-top: 0; }
 .toolflow-advanced-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; color: var(--text-primary); font-size: 12px; }
 .toolflow-guided[hidden], .toolflow-advanced[hidden] { display: none; }
+select[data-generation-image-model] {
+    color: #e8eeee;
+    background: #252929;
+    border: 1px solid #4c5757;
+    border-radius: 6px;
+    padding: 6px;
+    max-width: 210px;
+    cursor: pointer;
+    color-scheme: dark;
+}
+select[data-generation-image-model] option { color: #e8eeee; background: #252929; }

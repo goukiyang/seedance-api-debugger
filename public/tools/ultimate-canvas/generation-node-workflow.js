@@ -110,6 +110,7 @@
                 action: mode.action,
                 input: {
                     prompt,
+                    ...(clean(settings.model) ? { model: clean(settings.model) } : {}),
                     ratio: IMAGE_RATIOS.has(clean(settings.ratio)) ? clean(settings.ratio) : '16:9',
                     size: clean(settings.size) || '1K',
                     ...(clean(settings.resolution) ? { resolution: clean(settings.resolution) } : {}),

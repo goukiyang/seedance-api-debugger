@@ -16,7 +16,7 @@ import { prisma } from '@/lib/prisma';
 import { getProjectAccess, getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
-import { IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { imageOutputSize, isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 
@@ -370,7 +370,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
     }
 
-    const settings = await getImageGenerationApiSettings();
+    const settings = { ...await getImageGenerationApiSettings() };
+    const requestedModel = cleanString(input.model);
+    if (requestedModel && requestedModel !== settings.default_model) {
+      if (settings.provider === 'seedream' || !IMAGE_STUDIO_MODELS.includes(requestedModel as ImageStudioModel)) {
+        return NextResponse.json({ error: '当前图片接口不支持所选模型，请重新选择' }, { status: 400 });
+      }
+      settings.default_model = requestedModel;
+    }
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
     const referenceLimit = settings.provider === 'seedream'
       ? SEEDREAM_REFERENCE_IMAGE_LIMIT

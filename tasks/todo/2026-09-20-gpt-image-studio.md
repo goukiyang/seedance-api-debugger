@@ -521,3 +521,12 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 - 服务器：候选构建成功，线上 `.deployed-commit=e17e959b80c1100e6e77337649b3b701cd68263b`、`.deployed-version=0.14.1`、`.next-prod/BUILD_ID=z_VqeOMefc7NbIKF2EyWf`；旧构建 `.next-prod-prev-image-preview-20260925` 保留。发布过程中曾发现并修复发布同步遗漏 `node_modules` 排除、源码属主和 Prisma Client 生成三个部署环境问题，未切换失败候选。
 - 公网：`https://sd2.youdooart.com/api/release` 返回 `0.14.1` 及本次摘要，`/api/health` 返回 `ok` 且带 `X-SD2-Origin: server-42-193`，`/login` 返回200，`/image-studio` 未登录按预期跳转登录；`sd2-gray.service` 与 `sd2-image-studio.service` active，`NRestarts=0`。当前页刷新后即可看到本次版本。
 - 运行期保护：`public/uploads` 仍指向 `/data/video-api-debugger/var-lib/uploads`；未覆盖上传、视频、数据库和现有用户结果。
+
+## 25. 普通画布图片节点模型选择（2026-09-25）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| M1 | 修复画布模型选择 | 下拉可打开、可切换可用模型，并保留选择 | 进行中：代码已补齐，待发布；交互由用户手动验收 |
+
+- 根因：普通 image 节点底部仅显示模型文字，并非下拉；bootstrap 未返回模型选项，生成请求未带模型，接口固定读取默认模型。工具流模板节点是另一套入口，不能以其模型列表代替普通节点支持情况。
+- 修复：沿用原生 select 和节点 imageSettings；模型名单及规格由 bootstrap 返回；请求传 input.model，服务端按当前 Provider 白名单验证，只改请求配置副本。Seedream 不跨 Provider；不改密钥、计费规则和已有任务，不付费生图。

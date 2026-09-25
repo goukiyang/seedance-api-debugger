@@ -867,7 +867,7 @@ class CanvasEngine {
                 <div class="generation-editor-footer image-props-footer">
                     <div class="video-model-info">
                         <svg class="model-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
-                        <span data-generation-model-label>图像生成</span>
+                        <select data-generation-image-model aria-label="生成图片模型"><option value="">加载模型中</option></select>
                     </div>
                     <div class="generation-summary-row">
                         <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">

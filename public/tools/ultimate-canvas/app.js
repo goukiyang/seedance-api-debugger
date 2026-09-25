@@ -1528,6 +1528,15 @@
     }
 
     function updateGenerationNodeModelLabel(nodeEl, node) {
+        const imageSelect = nodeEl?.querySelector('[data-generation-image-model]');
+        if (imageSelect && node?.type === 'image') {
+            const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
+            const options = capability.model_options || [{ value: capability.model, label: capability.label || capability.model }];
+            const selected = node.data?.imageSettings?.model || capability.model;
+            imageSelect.innerHTML = options.filter(item => item.value).map(item => `<option value="${escapeHtml(item.value)}"${item.value === selected ? ' selected' : ''}>${escapeHtml(item.label || item.value)}</option>`).join('');
+            imageSelect.disabled = !capability.enabled || !options.length;
+            return;
+        }
         const label = nodeEl?.querySelector('.video-model-info span:nth-child(2)');
         if (!label || !node) return;
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
@@ -2828,8 +2837,9 @@
         if (!node) return {};
         if (node.type === 'image') {
             const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
-            const limits = capability.capabilities || {};
             const current = node.data?.imageSettings || {};
+            const model = current.model || capability.model;
+            const limits = capability.model_options?.find(item => item.value === model)?.capabilities || capability.capabilities || {};
             const maximum = Math.max(1, Number(limits.max_outputs_per_request) || 1);
             const references = availableGenerationReferenceItems(node.id);
             const firstReference = references.find(item => Number.isInteger(Number(item.width)) && Number(item.width) > 0
@@ -2842,9 +2852,10 @@
                 : ['1K', '2K'];
             const requestedResolution = resolutionOptions.includes(current.resolution)
                 ? current.resolution
-                : resolutionOptions.includes(current.size) ? current.size : capability.default_resolution || resolutionOptions[resolutionOptions.length - 1];
+                : resolutionOptions.includes(current.size) ? current.size : limits.default_resolution || resolutionOptions[resolutionOptions.length - 1];
             const customSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size) ? current.size : '';
             return {
+                model,
                 ratio: ratioResolution.resolved,
                 requestedRatio: ratioResolution.requested,
                 ratioSource: ratioResolution.source,
@@ -3335,8 +3346,8 @@
             canvasRuntime.bootstrap?.capabilities?.[node.type]
         );
         if (node.type === 'image') {
-            const sizeControl = capability.sizeOptions.length
-                ? generationChoiceGroup('resolution', '分辨率', capability.sizeOptions, settings.resolution || settings.size)
+            const sizeControl = settings.sizeOptions.length
+                ? generationChoiceGroup('resolution', '分辨率', settings.sizeOptions, settings.resolution || settings.size)
                 : capability.fixedSize
                     ? `<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">${escapeHtml(capability.fixedSize)}</div></section>`
                     : '<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">不可用</div></section>';
@@ -3366,9 +3377,10 @@
             node.data = {
                 ...node.data,
                 imageSettings: {
+                    model: current.model,
                     ratio: name === 'ratio' ? rawValue : current.requestedRatio,
                     resolution: name === 'resolution' ? rawValue : current.resolution,
-                    size: current.size,
+                    size: name === 'ratio' || name === 'resolution' ? '' : current.size,
                     count: name === 'count' ? Number(rawValue) : current.count
                 }
             };
@@ -4396,6 +4408,18 @@
     });
 
     document.addEventListener('change', event => {
+        const imageModelSelect = event.target.closest?.('[data-generation-image-model]');
+        if (imageModelSelect) {
+            const node = engine.nodes.get(imageModelSelect.closest('[data-node-id]')?.dataset.nodeId);
+            if (!node || node.type !== 'image') return;
+            const option = canvasRuntime.bootstrap?.capabilities?.image?.model_options?.find(item => item.value === imageModelSelect.value);
+            if (!option) return;
+            node.data = { ...node.data, imageSettings: { ...node.data?.imageSettings, model: option.value, resolution: option.capabilities.default_resolution, size: '' } };
+            renderGenerationNodeControls(node.id);
+            scheduleCanvasSave('image_model_change');
+            refreshOpenGenerationSpecPopover(node);
+            return;
+        }
         const slider = event.target.closest?.('[data-generation-duration-slider]');
         const state = canvasRuntime.generationPopover;
         if (!slider || state?.kind !== 'spec' || !state.element?.contains(slider)) return;

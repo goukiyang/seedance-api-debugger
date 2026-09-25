@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片预览独立浮层支持参考图切换；生成结果操作改为悬浮图标并支持一键复制图片。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复画布图片生成节点无法选择模型；模型选择随节点保存，生成使用所选模型。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

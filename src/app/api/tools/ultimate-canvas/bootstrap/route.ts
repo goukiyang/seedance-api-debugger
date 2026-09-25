@@ -30,6 +30,7 @@ import {
 } from '@/lib/video-cards/display';
 import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-generation/resolution';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -372,6 +373,11 @@ export async function GET(request: NextRequest) {
         label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,
+        model_options: (imageSettings.provider === 'seedream' ? [imageSettings.default_model] : [...new Set([...IMAGE_STUDIO_MODELS, imageSettings.default_model])]).map(model => ({
+          value: model,
+          label: IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || imageModelLabel(imageSettings.provider, model),
+          capabilities: imageModelCapabilities(imageSettings.provider, model),
+        })),
         size: imageSettings.default_size,
         output_format: imageSettings.output_format,
         response_format: imageSettings.response_format,
