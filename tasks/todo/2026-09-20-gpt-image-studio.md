@@ -526,7 +526,9 @@ git diff --check -- src/app/image-studio src/lib/image-studio prisma/schema.pris
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| M1 | 修复画布模型选择 | 下拉可打开、可切换可用模型，并保留选择 | 进行中：代码已补齐，待发布；交互由用户手动验收 |
+| M1 | 修复画布模型选择 | 下拉可打开、可切换可用模型，并保留选择 | 实现及发布完成；按用户要求，交互与真实生成待手动验收 |
 
 - 根因：普通 image 节点底部仅显示模型文字，并非下拉；bootstrap 未返回模型选项，生成请求未带模型，接口固定读取默认模型。工具流模板节点是另一套入口，不能以其模型列表代替普通节点支持情况。
 - 修复：沿用原生 select 和节点 imageSettings；模型名单及规格由 bootstrap 返回；请求传 input.model，服务端按当前 Provider 白名单验证，只改请求配置副本。Seedream 不跨 Provider；不改密钥、计费规则和已有任务，不付费生图。
+- 发布：v0.14.2，源码 `f1628d7f875f9ba4332a76b781957e380199795a`，BUILD_ID `a5OQqDFlsNRtUE4KKmXGG`。对应分支与 `rollback/2026-09-25-before-canvas-model-0.14.2` 已推送。服务器候选构建通过，公网 release=0.14.2、health=ok、login=200、config 正常，服务 active。第一次候选因 Set 展开与项目编译目标不兼容而失败，未切换线上；改 Array.from 后重新构建成功。
+- 验证边界：独立只读审核通过，无阻塞；补齐选中模型名称采集。`node --check`、`git diff --check` 通过。单独 tsc 无输出长时间未结束，已停止，以服务器完整构建的类型检查为准。未运行自动化产品测试、浏览器交互或付费生成；匿名访问画布脚本按预期重定向登录，不能将此当作登录后 UI 验收。
