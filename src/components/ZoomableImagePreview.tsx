@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MouseEvent, PointerEvent, WheelEvent } from 'react';
+import type { MouseEvent, PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import styles from './ZoomableImagePreview.module.css';
@@ -77,19 +77,43 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   }, []);
 
   useEffect(() => {
-    backdropRef.current?.focus();
+    backdropRef.current?.focus({ preventScroll: true });
   }, [portalRoot]);
 
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const elements = [document.documentElement, document.body];
+    const previous = elements.map(element => ({ overflow: element.style.overflow, overscrollBehavior: element.style.overscrollBehavior }));
+    const focused = document.activeElement;
+    elements.forEach(element => {
+      element.style.overflow = 'hidden';
+      element.style.overscrollBehavior = 'none';
+    });
+    return () => {
+      elements.forEach((element, index) => {
+        element.style.overflow = previous[index].overflow;
+        element.style.overscrollBehavior = previous[index].overscrollBehavior;
+      });
+      if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
+    };
+  }, []);
 
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        const buttons = Array.from(backdropRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
+        if (!buttons.length) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        buttons[(index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus({ preventScroll: true });
+        return;
+      }
       const handled = event.key === 'Escape' || event.key === 'ArrowLeft' || event.key === 'ArrowRight'
-        || event.key === '+' || event.key === '=' || event.key === '-' || event.key === '0';
+        || event.key === '+' || event.key === '=' || event.key === '-' || event.key === '0'
+        || ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key);
       if (!handled) return;
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       if (event.key === 'Escape') onClose();
       if (event.key === 'ArrowLeft' && hasNavigation) onPrevious?.();
       if (event.key === 'ArrowRight' && hasNavigation) onNext?.();
@@ -100,7 +124,6 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [hasNavigation, onClose, onNext, onPrevious, resetView, zoomAtCenter]);
@@ -116,10 +139,9 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
     setShowReference(false);
   }, [resetView, previewKey, src, comparison?.src]);
 
-  const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
-    event.preventDefault();
+  const handleWheel = useCallback((event: WheelEvent) => {
     const stage = stageRef.current;
-    if (!stage) return;
+    if (!stage || !event.deltaY) return;
 
     const rect = stage.getBoundingClientRect();
     const cursorX = event.clientX - rect.left - rect.width / 2;
@@ -134,6 +156,27 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
       y: cursorY - (cursorY - current.y) * ratio,
     }));
   }, [scale]);
+
+  useEffect(() => {
+    // React delegates wheel listeners as passive; cancel the native event before it reaches the page.
+    const wheel = (event: WheelEvent) => {
+      if (!(event.target instanceof Node) || !backdropRef.current?.contains(event.target)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (stageRef.current?.contains(event.target)) handleWheel(event);
+    };
+    const touchMove = (event: TouchEvent) => {
+      if (!(event.target instanceof Node) || !backdropRef.current?.contains(event.target)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener('wheel', wheel, { capture: true, passive: false });
+    window.addEventListener('touchmove', touchMove, { capture: true, passive: false });
+    return () => {
+      window.removeEventListener('wheel', wheel, true);
+      window.removeEventListener('touchmove', touchMove, true);
+    };
+  }, [handleWheel]);
 
   const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 && event.button !== 1) return;
@@ -180,7 +223,14 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
       tabIndex={-1}
       onClick={handleBackdropClick}
       onPointerDown={(event) => event.stopPropagation()}
-      onWheel={(event) => event.preventDefault()}
+      onPointerMove={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onMouseMove={(event) => event.stopPropagation()}
+      onMouseUp={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      onKeyUp={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
       <div className={styles.toolbar}>
@@ -237,7 +287,6 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
         title="滚轮缩放，拖动查看"
         data-image-preview-stage
         aria-busy={!imageLoaded && !imageError || comparisonMode && !comparisonLoaded && !comparisonError}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishDrag}

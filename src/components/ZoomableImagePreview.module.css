@@ -6,6 +6,8 @@
   grid-template-rows: auto minmax(0, 1fr);
   background: oklch(0.11 0 0 / 0.92);
   color: oklch(0.97 0 0);
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 .toolbar {
