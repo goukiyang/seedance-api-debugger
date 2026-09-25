@@ -531,6 +531,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       action,
+      requested_count: count,
+      delivered_count: generatedAssets.length,
+      partial: generatedAssets.length < count,
+      message: generatedAssets.length < count
+        ? `本次请求 ${count} 张，已交付 ${generatedAssets.length} 张，其余未确认交付；已保留成功图片，未自动重试。`
+        : `已生成 ${generatedAssets.length} 张图片，并保存到资产库。`,
       provider: settings.provider,
       model: settings.default_model,
       source_model_label: modelLabel,

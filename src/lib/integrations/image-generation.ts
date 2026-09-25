@@ -607,7 +607,7 @@ export async function createImageGeneration(params: {
         images.push({ bytes: await normalizeStudioImage(bytes), mimeType: 'image/png' });
       }
       // Share only the provider transport, not template permissions or billing.
-      const result = await requestStudioImages({
+      const request = {
         baseUrl: params.settings.base_url,
         apiKey: params.settings.api_key || '',
         provider: params.settings.provider as 'musk' | 'ai_media_vip',
@@ -619,11 +619,22 @@ export async function createImageGeneration(params: {
         ratio: params.ratio,
         size: params.size,
         signal: controller.signal,
-      });
+      };
+      // Gemini generateContent produces one image per call; count is not an API parameter.
+      // Each slot is requested once, never retried after an uncertain upstream result.
+      const attempts = params.settings.provider === 'musk' && GEMINI_IMAGE_MODELS.has(params.settings.default_model)
+        ? Array.from({ length: count }, () => requestStudioImages({ ...request, count: 1 }))
+        : [requestStudioImages(request)];
+      const completed = await Promise.allSettled(attempts);
+      const outputs = completed.flatMap(item => item.status === 'fulfilled' ? item.value.images : []);
+      if (!outputs.length) {
+        const failed = completed.find(item => item.status === 'rejected');
+        throw failed?.status === 'rejected' ? failed.reason : new StudioProviderError('response', 'empty_output');
+      }
       return {
-        images: result.images.map(b64Json => ({ b64Json })),
+        images: outputs.map(b64Json => ({ b64Json })),
         model: params.settings.default_model,
-        raw: { usage: result.usage },
+        raw: { usage: completed.flatMap(item => item.status === 'fulfilled' ? [item.value.usage] : []) },
       };
     }
     const useMuskGeminiProtocol = params.settings.provider === 'musk'

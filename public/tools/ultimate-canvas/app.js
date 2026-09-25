@@ -4281,8 +4281,35 @@
             downloadUrl: normalized.originalUrl || imageUrl
         });
         renderGenerationNodeControls(payload.nodeId);
-        setNodeGenerationStatus(nodeEl, 'success', '图片生成完成并已入库');
-        showCanvasNotice('图片生成完成，已进入资产库。', 'info');
+        if (node) {
+            const sourceElement = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
+            const stepX = Math.max(400, sourceElement?.offsetWidth || 0) + 40;
+            const stepY = Math.max(400, sourceElement?.offsetHeight || 0) + 40;
+            normalized.assets.slice(1).forEach((asset, index) => {
+                const outputId = `image-result-${asset.assetId}`;
+                if (engine.nodes.has(outputId)) return;
+                let x = node.x + stepX * (1 + index % 2);
+                let y = node.y + stepY * Math.floor(index / 2);
+                while (Array.from(engine.nodes.values()).some(other => Math.abs(other.x - x) < stepX && Math.abs(other.y - y) < stepY)) y += stepY;
+                const preview = asset.thumbnailUrl || asset.originalUrl || '';
+                const id = engine.addNode('image', x, y, {
+                    id: outputId, title: asset.fileName || `生成图片 ${index + 2}`,
+                    prompt: payload.prompt, previewImage: preview, imageUrl: preview,
+                    thumbnailUrl: preview, originalUrl: asset.originalUrl,
+                    assetId: asset.assetId, referenceImageId: asset.referenceImageId,
+                    workspaceAssetId: asset.workspaceAssetId, width: asset.width, height: asset.height,
+                    imageSettings: { ...node.data.imageSettings, count: 1 },
+                    generationStatus: 'succeeded', source: 'generation',
+                });
+                decorateGeneratedNode(id, asset.fileName || `生成图片 ${index + 2}`, desc, preview, {
+                    imageUrl: asset.originalUrl || preview, downloadUrl: asset.originalUrl || preview
+                });
+                renderGenerationNodeControls(id);
+            });
+        }
+        const message = result?.message || `已生成 ${normalized.assets.length || 1} 张图片，并保存到资产库。`;
+        setNodeGenerationStatus(nodeEl, 'success', message);
+        showCanvasNotice(message, result?.partial ? 'warn' : 'info');
         scheduleCanvasSave('image_generation');
         loadLibraryPanels(true);
     }
