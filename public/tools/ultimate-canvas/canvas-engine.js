@@ -878,7 +878,6 @@ class CanvasEngine {
                         </button>
                     </div>
                     <div class="video-footer-right">
-                        <span class="cost-label" data-generation-cost>后台计费</span>
                         <button class="submit-btn" data-generation-submit title="生成图片">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>

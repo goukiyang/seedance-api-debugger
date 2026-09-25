@@ -13,7 +13,6 @@
         }
         if (mounted) mounted.dispose();
         const states = new Map();
-        const labels = new WeakMap();
         let active = 0;
         let stopped = false;
 
@@ -43,11 +42,7 @@
         function priceText(quote) {
             return quote?.status === 'estimate' && quote.chargeEnabled === false
                 && Number.isFinite(quote.estimatedCredits) && quote.estimatedCredits >= 0
-                ? `预估 ${quote.estimatedCredits} 积分` : reasonText(quote?.reason);
-        }
-
-        function writeText(el, text) {
-            if (el.textContent !== text) el.textContent = text;
+                ? `${quote.estimatedCredits}积分` : '—';
         }
 
         function paint(state) {
@@ -55,53 +50,96 @@
             const select = state.el.querySelector('[data-generation-image-model]');
             const line = select.closest('.video-model-info');
             if (!line) return;
-            let badge = line.querySelector('[data-canvas-node-price]');
-            if (!badge) {
-                // The wrapper keeps this span out of legacy span:nth-child(2) model selectors.
-                const holder = document.createElement('div');
-                holder.className = 'canvas-node-price-slot';
-                badge = document.createElement('span');
-                badge.dataset.canvasNodePrice = '';
-                badge.tabIndex = 0;
-                badge.setAttribute('role', 'button');
-                badge.setAttribute('aria-label', '刷新当前节点报价');
-                const refreshCurrent = event => {
-                    event.stopPropagation();
-                    if (usable(state)) refresh(state.el, state.node);
-                };
-                badge.addEventListener('click', refreshCurrent);
-                badge.addEventListener('focus', refreshCurrent);
-                badge.addEventListener('keydown', event => {
-                    if (event.key !== 'Enter' && event.key !== ' ') return;
-                    event.preventDefault();
-                    refreshCurrent(event);
-                });
-                // Keep activating the price from starting a canvas drag; preserve native focus.
-                badge.addEventListener('pointerdown', event => event.stopPropagation());
-                badge.addEventListener('mousedown', event => event.stopPropagation());
-                holder.appendChild(badge);
-                line.appendChild(holder);
-            }
-            if (!line.classList.contains('has-canvas-node-price')) line.classList.add('has-canvas-node-price');
-            const quote = state.quote;
-            const text = quote ? priceText(quote) : state.message;
-            writeText(badge, text);
-            const detail = quote?.status === 'estimate'
-                ? `每张 ${quote.unitCredits} 积分 × ${quote.count} 张；仅为用量预估，不会从此处扣分。`
-                : `${text}；不会从此处扣分。`;
-            const title = `${detail} 点击或聚焦刷新过期报价。`;
-            if (badge.title !== title) badge.title = title;
-            for (const option of select.options) {
-                let base = labels.get(option);
-                if (base === undefined) {
-                    const configured = getBootstrap()?.capabilities?.image?.model_options?.find(item => item.value === option.value);
-                    base = configured?.label || option.textContent;
-                    labels.set(option, base);
-                }
-                const item = quote?.modelOptions?.find(entry => entry.model === option.value);
-                writeText(option, `${base} · ${item ? priceText(item) : quote ? '报价不可用' : state.message}`);
-            }
+            paintModelMenu(state, select, line);
         }
+
+        function paintModelMenu(state, select, line) {
+            if (!state.menu || state.select !== select) {
+                state.menu?.remove();
+                state.trigger?.remove();
+                state.select = select;
+                select.hidden = true;
+                const trigger = document.createElement('button');
+                trigger.type = 'button';
+                trigger.className = 'canvas-model-trigger';
+                trigger.setAttribute('aria-haspopup', 'menu');
+                trigger.setAttribute('aria-expanded', 'false');
+                const label = document.createElement('span');
+                const arrow = document.createElement('i');
+                arrow.textContent = '⌄';
+                arrow.setAttribute('aria-hidden', 'true');
+                trigger.append(label, arrow);
+                const menu = document.createElement('div');
+                menu.className = 'canvas-model-menu';
+                menu.id = `canvas-model-menu-${state.id}`;
+                menu.setAttribute('popover', 'auto');
+                menu.setAttribute('role', 'menu');
+                menu.setAttribute('aria-label', '生成图片模型');
+                trigger.setAttribute('aria-controls', menu.id);
+                for (const type of ['pointerdown', 'mousedown']) {
+                    trigger.addEventListener(type, event => event.stopPropagation());
+                    menu.addEventListener(type, event => event.stopPropagation());
+                }
+                trigger.addEventListener('click', event => {
+                    event.stopPropagation();
+                    if (menu.matches(':popover-open')) { menu.hidePopover(); return; }
+                    refresh(state.el, state.node);
+                    const rect = trigger.getBoundingClientRect();
+                    menu.style.width = `${Math.min(340, window.innerWidth - 16)}px`;
+                    menu.showPopover();
+                    const box = menu.getBoundingClientRect();
+                    menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - box.width - 8))}px`;
+                    menu.style.top = `${Math.max(8, Math.min(rect.top - box.height - 6, window.innerHeight - box.height - 8))}px`;
+                    menu.querySelector('[aria-checked="true"]')?.focus();
+                });
+                menu.addEventListener('toggle', () => trigger.setAttribute('aria-expanded', String(menu.matches(':popover-open'))));
+                menu.addEventListener('keydown', event => {
+                    const rows = [...menu.querySelectorAll('button:not(:disabled)')];
+                    const index = rows.indexOf(document.activeElement);
+                    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault();
+                    const next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+                    rows[next]?.focus();
+                });
+                line.appendChild(trigger);
+                document.body.appendChild(menu);
+                state.trigger = trigger;
+                state.menu = menu;
+            }
+            line.classList.add('has-canvas-node-price');
+            state.trigger.firstChild.textContent = select.selectedOptions[0]?.textContent || '选择模型';
+            state.trigger.disabled = select.disabled;
+            const options = [...select.options];
+            if (state.menu.dataset.options !== JSON.stringify(options.map(option => option.value))) {
+                state.menu.replaceChildren();
+                state.menu.dataset.options = JSON.stringify(options.map(option => option.value));
+                for (const option of options) {
+                    const row = document.createElement('button');
+                    row.type = 'button';
+                    row.setAttribute('role', 'menuitemradio');
+                    row.dataset.model = option.value;
+                    row.append(document.createElement('span'), document.createElement('small'));
+                    row.addEventListener('click', event => {
+                        event.stopPropagation();
+                        select.value = row.dataset.model;
+                        state.menu.hidePopover();
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                        state.trigger?.focus();
+                    });
+                    state.menu.appendChild(row);
+                }
+            }
+            options.forEach((option, index) => {
+                const row = state.menu.children[index];
+                row.firstChild.textContent = option.textContent;
+                row.disabled = option.disabled || !option.value;
+                row.setAttribute('aria-checked', String(option.selected));
+                const quote = state.quote?.modelOptions?.find(item => item.model === option.value);
+                row.lastChild.textContent = priceText(quote);
+                row.lastChild.title = quote?.status === 'estimate' ? `预估用量：${quote.unitCredits}积分 × ${quote.count}张` : reasonText(quote?.reason);
+            });
+        }
+
 
         function cancel(state) {
             clearTimeout(state.timer);
@@ -122,11 +160,11 @@
             const state = states.get(String(nodeId));
             if (!state) return;
             cancel(state);
+            state.menu?.remove();
+            state.trigger?.remove();
+            if (state.select) state.select.hidden = false;
             state.el.querySelector('.canvas-node-price-slot')?.remove();
             state.el.querySelector('.has-canvas-node-price')?.classList.remove('has-canvas-node-price');
-            for (const option of state.el.querySelectorAll('[data-generation-image-model] option')) {
-                if (labels.has(option)) writeText(option, labels.get(option));
-            }
             states.delete(state.id);
         }
 

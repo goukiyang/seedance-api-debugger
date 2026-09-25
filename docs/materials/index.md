@@ -2,6 +2,7 @@
 
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
 |---|---|---|---|---|---|
+| 2026-09-25 | 模型积分挤压换行 / codex-clipboard-50e75a81-d98a-4bf3-bb2a-26d3da01999b.png | 用户截图 / SD2画布 | 下拉菜单模型与积分分列，积分小字右对齐；移除底部重复计费说明 | [原图](2026-09-25-model-price/codex-clipboard-50e75a81-d98a-4bf3-bb2a-26d3da01999b.png) | 原始版本；图像已阅，cmp一致 |
 | 2026-09-25 | 画布重复顶部信息 / codex-clipboard-7439a5b1-4633-4c5a-9bed-60bf08c52a1a.png | 用户本轮截图 / SD2 | 移除画布第二行重复名称、余额、账号及占位入口；顶部增加图片生成入口 | [原图](2026-09-25-canvas-header/codex-clipboard-7439a5b1-4633-4c5a-9bed-60bf08c52a1a.png) | 原始版本，无替代；图像已阅，cmp一致 |
 | 2026-09-16 | 参考素材缺少选择入口 / codex-clipboard-72580c2d-35f5-46f8-a2b2-23b8f044c765.png | 用户本轮截图 / SD2 | 生成页参考素材弹窗；复现选择入口不明显，核对复选框修复 | [原图](2026-09-16-reference-picker/codex-clipboard-72580c2d-35f5-46f8-a2b2-23b8f044c765.png) | 原始版本，无替代；图像已阅，cmp归档一致 |
 | 2026-09-16 | verified-selection-v0.2.1.png | 本轮真实Chrome验收 / SD2 | 两张素材选中、复选框及顺序显示 | [验收截图](2026-09-16-reference-picker/verified-selection-v0.2.1.png) | v0.2.1结果证据，不替代用户原图；已打开核对 |

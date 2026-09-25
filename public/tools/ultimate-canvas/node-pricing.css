@@ -6,6 +6,31 @@
     gap: 6px;
 }
 
+.node-type-image select[data-generation-image-model][hidden] { display: none !important; }
+.node-type-image .canvas-model-trigger {
+    display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%;
+    border: 0; background: transparent; color: inherit; cursor: pointer;
+    font: inherit; padding: 0; letter-spacing: 0;
+}
+.canvas-model-trigger > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-model-trigger > i { margin-left: auto; font-style: normal; }
+.canvas-model-menu {
+    position: fixed; inset: auto; margin: 0; padding: 4px;
+    max-width: calc(100vw - 16px); max-height: min(320px, calc(100vh - 16px));
+    overflow: auto; border: 1px solid #505555; border-radius: 6px;
+    background: #262a2a; color: #f3f5f5; box-shadow: 0 8px 24px #0006;
+    font: 13px/1.4 var(--font-family, sans-serif); letter-spacing: 0;
+}
+.canvas-model-menu button {
+    display: flex; align-items: center; gap: 16px; width: 100%; min-height: 34px;
+    border: 0; border-radius: 4px; padding: 8px 10px; background: transparent;
+    color: inherit; cursor: pointer; text-align: left; font: inherit; letter-spacing: 0;
+}
+.canvas-model-menu button:hover, .canvas-model-menu button:focus-visible { background: #3a4444; outline: none; }
+.canvas-model-menu button[aria-checked="true"] { background: #304b48; }
+.canvas-model-menu button > span { min-width: 0; overflow-wrap: anywhere; }
+.canvas-model-menu small { margin-left: auto; flex-shrink: 0; white-space: nowrap; text-align: right; font-size: 11px; color: #aebcba; font-variant-numeric: tabular-nums; }
+
 .node-type-image .has-canvas-node-price select[data-generation-image-model] {
     flex: 1 1 0;
     min-width: 0;
