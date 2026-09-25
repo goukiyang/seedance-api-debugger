@@ -62,12 +62,12 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   try {
     const parsed = latestTask?.snapshot_json ? JSON.parse(latestTask.snapshot_json) as { referenceImages?: Array<{ id?: unknown }> } : null;
     const referenceImages = Array.isArray(parsed?.referenceImages) ? parsed.referenceImages : [];
-    if (referenceImages.length === 1 && typeof referenceImages[0]?.id === 'string') representativeReference = studioTemplateAssetUrl(referenceImages[0].id);
+    if (referenceImages.length === 1 && typeof referenceImages[0]?.id === 'string') representativeReference = studioTemplateAssetUrl(referenceImages[0].id, true);
   } catch { representativeReference = null; }
   const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
   return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)), aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
-    model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id), width: banner.width, height: banner.height } : null,
-    cover: latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id), referenceUrl: representativeReference } : null,
+    model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id, true), width: banner.width, height: banner.height } : null,
+    cover: latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: representativeReference } : null,
     prices: generation.prices, unitCredits: generation.prices[generation.model],
     reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: row.source_preset_id || null,
     sourcePresetShared: row.source_preset_id ? Boolean(sourcePreset && (sourcePreset.owner_id === ownerId || sourcePreset.is_shared)) : null,
@@ -76,7 +76,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     // to return, while the separate global context remains admin-only.
     contextConfigured: Boolean(row.context.trim()), context: row.context,
     createdAt: row.created_at, updatedAt: row.updated_at,
-    images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id), width: asset.width, height: asset.height }] : []; }) };
+    images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : []; }) };
 }
 export async function listStudioModules(ownerId: string, cursor?: string, isAdmin = false) {
   const settings = await getImageStudioSettings();

@@ -3,17 +3,54 @@ import path from 'node:path';
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 import sharp from 'sharp';
+import { createHash, randomUUID } from 'node:crypto';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
-export function studioAssetUrl(assetId: string) {
-  return `/api/image-studio/assets/${encodeURIComponent(assetId)}`;
+export function studioAssetUrl(assetId: string, thumbnail = false) {
+  return `/api/image-studio/assets/${encodeURIComponent(assetId)}${thumbnail ? '?thumbnail=1' : ''}`;
 }
 
-export function studioTemplateAssetUrl(assetId: string) {
-  return `/api/image-studio/template-assets/${encodeURIComponent(assetId)}`;
+export function studioTemplateAssetUrl(assetId: string, thumbnail = false) {
+  return `/api/image-studio/template-assets/${encodeURIComponent(assetId)}${thumbnail ? '?thumbnail=1' : ''}`;
+}
+
+const thumbnailJobs = new Map<string, Promise<Buffer>>();
+let thumbnailActive = 0;
+const thumbnailWaiters: Array<() => void> = [];
+
+// Call only after the asset route has checked the current viewer's permissions.
+export async function readStudioThumbnail(url: string): Promise<Buffer> {
+  const key = createHash('sha256').update(`webp-640-v1:${url}`).digest('hex');
+  const directory = path.join(process.cwd(), 'storage', 'studio-thumbnails');
+  const file = path.join(directory, `${key}.webp`);
+  try { return await fs.readFile(file); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const pending = thumbnailJobs.get(key);
+  if (pending) return pending;
+  if (thumbnailJobs.size >= 32) throw new Error('缩略图处理中，请稍后重试');
+  const job = (async () => {
+    if (thumbnailActive >= 2) await new Promise<void>(resolve => thumbnailWaiters.push(resolve));
+    else thumbnailActive += 1;
+    try {
+      const original = await readStudioImage(url);
+      const bytes = await sharp(original, { limitInputPixels: 40_000_000, animated: false })
+        .rotate().resize(640, 640, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
+      await fs.mkdir(directory, { recursive: true });
+      const temporary = `${file}.${randomUUID()}.tmp`;
+      try { await fs.writeFile(temporary, bytes); await fs.rename(temporary, file); }
+      finally { await fs.unlink(temporary).catch(() => {}); }
+      return bytes;
+    } finally {
+      const next = thumbnailWaiters.shift();
+      if (next) next(); else thumbnailActive -= 1;
+    }
+  })();
+  thumbnailJobs.set(key, job);
+  try { return await job; } finally { thumbnailJobs.delete(key); }
 }
 
 export async function readStudioImage(url: string, signal?: AbortSignal): Promise<Buffer> {

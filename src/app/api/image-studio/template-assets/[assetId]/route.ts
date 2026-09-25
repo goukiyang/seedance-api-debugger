@@ -1,6 +1,6 @@
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { readStudioImage } from '@/lib/image-studio/media';
+import { readStudioImage, readStudioThumbnail } from '@/lib/image-studio/media';
 import { canViewStudioPreset, canUseCompanyTemplates } from '@/lib/image-studio/access';
 
 export const runtime = 'nodejs';
@@ -17,8 +17,9 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
     if (!presets.some(preset => canViewStudioPreset(user, preset))) return new Response('Not found', { status: 404 });
   }
   try {
-    const bytes = await readStudioImage(asset.original_url);
-    return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, no-store', 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff' } });
+    const thumbnail = new URL(_request.url).searchParams.get('thumbnail') === '1';
+    const bytes = await (thumbnail ? readStudioThumbnail(asset.original_url) : readStudioImage(asset.original_url));
+    return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': thumbnail ? 'image/webp' : 'image/png', 'Cache-Control': 'private, no-store', 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff' } });
   } catch {
     return new Response('Image unavailable', { status: 503 });
   }

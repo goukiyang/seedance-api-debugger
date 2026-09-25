@@ -116,7 +116,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const referencesById = new Map(references.map(reference => [reference.id, reference]));
     const referenceSnapshot = referenceIds.map(id => {
       const reference = referencesById.get(id);
-      return { id, originalUrl: reference ? studioTemplateAssetUrl(id) : null, thumbnailUrl: reference ? studioTemplateAssetUrl(id) : null,
+      return { id, originalUrl: reference ? studioTemplateAssetUrl(id) : null, thumbnailUrl: reference ? studioTemplateAssetUrl(id, true) : null,
         fileName: reference?.file_name || null, mimeType: reference?.mime_type || null, width: reference?.width || null,
         height: reference?.height || null, fileSize: reference?.file_size || null, hash: reference?.hash || null };
     });
@@ -225,7 +225,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,
     createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
     snapshot: publicStudioSnapshot(task, assetById),
-    asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!) } : null,
+    asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
   })), nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
@@ -280,7 +280,7 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
     && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string'
     && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim());
   const fallbackReferences = (() => {
-    try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset ? studioTemplateAssetUrl(id) : null, thumbnailUrl: asset ? studioTemplateAssetUrl(id) : null, width: asset?.width || null, height: asset?.height || null }; }); }
+    try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset ? studioTemplateAssetUrl(id) : null, thumbnailUrl: asset ? studioTemplateAssetUrl(id, true) : null, width: asset?.width || null, height: asset?.height || null }; }); }
     catch { return []; }
   })();
   const referenceImages = (snapshotReferences.length ? snapshotReferences : fallbackReferences)
@@ -291,7 +291,7 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
       return {
         id: record.id,
         originalUrl: studioTemplateAssetUrl(record.id),
-        thumbnailUrl: studioTemplateAssetUrl(record.id),
+        thumbnailUrl: studioTemplateAssetUrl(record.id, true),
         fileName: typeof record.fileName === 'string' ? record.fileName : null,
         mimeType: typeof record.mimeType === 'string' ? record.mimeType : null,
         width: typeof record.width === 'number' ? record.width : null,

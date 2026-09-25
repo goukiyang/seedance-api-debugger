@@ -41,7 +41,7 @@ export async function listStudioPresets(user: ImageStudioIdentity) {
     const toPayload = (id: string) => {
       const asset = byId.get(id);
       if (!asset || asset.owner_id !== row.owner_id) return null;
-      return { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id), width: asset.width, height: asset.height };
+      return { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height };
     };
     return {
       id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: row.context, revision: row.updated_at.toISOString(),

@@ -82,19 +82,19 @@ async function generateThumbnail(
   buffer: Buffer,
   mimeType: string
 ): Promise<{ thumbPath: string; width: number; height: number }> {
-  const thumbWidth = 300;
-  const thumbHeight = 450; // 2:3
+  const thumbWidth = 640;
+  const thumbHeight = 640;
 
-  const thumbBuffer = await sharp(buffer)
+  const { data: thumbBuffer, info } = await sharp(buffer, { animated: false }).rotate()
     .resize(thumbWidth, thumbHeight, {
-      fit: 'cover',
-      position: 'center',
+      fit: 'inside',
+      withoutEnlargement: true,
     })
-    .toFormat(mimeTypeToSharpFormat(mimeType), { quality: 85 })
-    .toBuffer();
+    .webp({ quality: 78 })
+    .toBuffer({ resolveWithObject: true });
 
   const thumbHash = computeHash(thumbBuffer);
-  const ext = mimeTypeToExt(mimeType);
+  const ext = 'webp';
   const thumbFileName = `${thumbHash}_thumb.${ext}`;
   const thumbPath = path.join(THUMBS_DIR, thumbFileName);
 
@@ -102,8 +102,8 @@ async function generateThumbnail(
 
   return {
     thumbPath: `/uploads/thumbs/${thumbFileName}`,
-    width: thumbWidth,
-    height: thumbHeight,
+    width: info.width,
+    height: info.height,
   };
 }
 

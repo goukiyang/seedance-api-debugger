@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { readStudioImage } from '@/lib/image-studio/media';
+import { readStudioImage, readStudioThumbnail } from '@/lib/image-studio/media';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 
 export const runtime = 'nodejs';
@@ -20,9 +20,10 @@ export async function GET(_request: NextRequest, { params }: { params: { assetId
   const asset = await prisma.asset.findFirst({ where: { id: assetId, owner_id: user.id, status: 'active', type: 'image' }, select: { original_url: true } });
   if (!asset) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404 });
   try {
-    const bytes = await readStudioImage(asset.original_url);
+    const thumbnail = _request.nextUrl.searchParams.get('thumbnail') === '1';
+    const bytes = await (thumbnail ? readStudioThumbnail(asset.original_url) : readStudioImage(asset.original_url));
     return new Response(new Uint8Array(bytes), { headers: {
-      'Content-Type': 'image/png',
+      'Content-Type': thumbnail ? 'image/webp' : 'image/png',
       'Cache-Control': 'private, no-store',
       'Content-Disposition': 'inline',
       'X-Content-Type-Options': 'nosniff',

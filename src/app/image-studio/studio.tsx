@@ -12,7 +12,7 @@ import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LA
 
 type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean; prices: Record<string, number | null> };
 type StudioSnapshot = { prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[] };
-type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; width?: number; height?: number } | null };
+type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number } | null };
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
 type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type ImagePreviewState = { taskId?: string; src: string; alt: string; title?: string; fileName?: string; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
@@ -27,16 +27,16 @@ async function readResponse(response: Response) {
 
 function TemplateCoverVisual({ module }: { module: StudioModule }) {
   const [failed, setFailed] = useState(false);
-  const resultUrl = module.cover?.resultUrl || module.banner?.originalUrl || module.images[0]?.originalUrl || '';
+  const resultUrl = module.cover?.thumbnailUrl || module.banner?.thumbnailUrl || module.images[0]?.thumbnailUrl || '';
   const referenceUrl = module.cover?.referenceUrl || '';
   if (module.cover?.referenceUrl && !failed) {
     return <span className={styles.coverVisual} data-cover-source="前后对比">
-      <span className={styles.coverComparisonPane}><img src={referenceUrl} alt="生成前参考图" onError={() => setFailed(true)} /><small>参考图</small></span>
-      <span className={styles.coverComparisonPane}><img src={resultUrl} alt="生成结果" onError={() => setFailed(true)} /><small>生成结果</small></span>
+      <span className={styles.coverComparisonPane}><img decoding="async" src={referenceUrl} loading="lazy" alt="生成前参考图" onError={() => setFailed(true)} /><small>参考图</small></span>
+      <span className={styles.coverComparisonPane}><img decoding="async" src={resultUrl} loading="lazy" alt="生成结果" onError={() => setFailed(true)} /><small>生成结果</small></span>
     </span>;
   }
   return <span className={styles.coverVisual} data-cover-source={resultUrl && !failed ? (module.cover?.resultUrl ? '代表生成图' : '模板素材') : '占位'}>
-    {resultUrl && !failed ? <img src={module.cover?.thumbnailUrl || resultUrl} alt={`${module.name}封面`} onError={() => setFailed(true)} /> : <span>暂无代表图</span>}
+    {resultUrl && !failed ? <img decoding="async" src={module.cover?.thumbnailUrl || resultUrl} loading="lazy" alt={`${module.name}封面`} onError={() => setFailed(true)} /> : <span>暂无代表图</span>}
   </span>;
 }
 
@@ -822,7 +822,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
       {banner?.originalUrl ? <>
         {/* 保留图片原始比例，让 banner 高度随上传图片自适应。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className={styles.moduleBannerImage} src={banner.originalUrl} alt="模块 banner" />
+        <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt="模块 banner" />
         <span className={styles.bannerLabel}>模块 banner</span>
         <button type="button" className={styles.bannerReplace} disabled={bannerUploading || submitting} onClick={() => bannerFileInput.current?.click()}>{bannerUploading ? '上传中' : '更换图片'}</button>
         <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label="移除模块 banner"><X size={16} /></button>
@@ -846,7 +846,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
           {images.map((asset, index) => <div key={`${asset.id}-${index}`} className={styles.reference}>
             <button type="button" className={styles.preview} onClick={() => asset.originalUrl && setPreview({ src: asset.originalUrl, alt: `参考图 ${index + 1}`, fileName: asset.fileName })} aria-label={`预览参考图 ${index + 1}`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={asset.originalUrl || ''} alt={`参考图 ${index + 1}`} />
+              <img decoding="async" src={asset.thumbnailUrl || undefined} alt={`参考图 ${index + 1}`} />
             </button>
             <button type="button" className={styles.remove} disabled={uploading || submitting || Boolean(pendingSubmission)} onClick={() => setImages(current => current.filter((_, i) => i !== index))} title="移除参考图" aria-label={`移除参考图 ${index + 1}`}><X size={16} /></button>
           </div>)}
@@ -909,7 +909,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
           <div className={styles.resultMedia}>{task.asset ? <>
             <button type="button" className={styles.preview} aria-label="预览生成图片" onClick={() => openTaskPreview(task)}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={task.asset.original_url} alt={task.prompt || '参考图生成结果'} loading="lazy" />
+              <img decoding="async" src={task.asset.thumbnail_url || undefined} alt={task.prompt || '参考图生成结果'} loading="lazy" />
             </button>
             {downloadMode && <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }

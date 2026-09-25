@@ -382,3 +382,14 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 - 支持菜单键盘上下/Home/End、Escape和外部点击关闭，沿用接口过期与参数校验；未执行生成测试。参考原图与来源见[资料索引](../../docs/materials/index.md)。
 - 发布`89f87e2d8da5c333ace6c0ea9ad77f2e6251f667`，BUILD_ID `d6JLAQt5cyt3uF-ajYNL9`。语法/diff检查及候选构建通过，服务active，本机/公网config、login、release及静态chunk200。真实登录页面显示0.15.2，原有图片节点底部重复文案已消失；点击菜单时浏览器报告用户手动中断，未重试，已释放会话。菜单展开排版及键盘行为只完成代码检查，不能标为真实验证通过。截图`/tmp/sd2-price-menu-v0152.png`仅证明闭合状态。
 - 回退tag`rollback/2026-09-25-before-model-price`已推送，旧构建`.next-prod-before-89f87e2`保留；无数据库/计费改动，无付费生成。
+
+### 2026-09-25 生图封面缩略图
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| P1 | 生图封面缩略图化 | 接入缩略图生成与展示，保留原图预览和下载，部署上线 | 进行中 |
+
+- 根因：studio结果卡片直接请求original_url，模块/参考素材thumbnailUrl也指原图接口。画布普通生图已有thumbnail优先链路，继续复用；新入库图片缩略图改为等比例640px以内WebP，不放大、不裁剪，原图不改。
+- 方案复用已安装Sharp0.34.5（Apache-2.0），读取本地lib/resize.js实现并核对官方https://sharp.pixelplumbing.com/api-resize/ 和https://sharp.pixelplumbing.com/api-output/ 。无需新依赖或独立图像代理服务。
+- studio已授权素材接口增加thumbnail=1；旧图按需生成640px WebP，私有storage缓存原子写入，同图合并请求、并发2、待处理上限32。任何缓存读取仍先通过现有鉴权，HTTP保持private/no-store，不用公共缓存绕过共享撤回。源文件地址按现有不可变资产约定参与缓存key，替换内容必须新资产URL。
+- 生图结果、全部模板封面、banner及参考图缩略展示改用thumbnail；大图、复制、下载及生成引用原图不变。列表缩略图失败不自动回退读取原图。按用户安排不做付费生成或产品测试；编译、独立只读审查和发布确认另记。
