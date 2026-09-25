@@ -455,6 +455,7 @@ export async function POST(request: NextRequest) {
       size: imageSize,
       count,
       referenceImages: referenceInputs,
+      quality: cleanString(input.quality || body.quality),
     });
     const generatedAssets: Array<{
       assetId: string;
