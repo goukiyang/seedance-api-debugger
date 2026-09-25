@@ -794,6 +794,7 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 }
 
 .header-right { display: flex; align-items: center; gap: 6px; }
+.header-bar [hidden] { display: none !important; }
 .header-btn {
     display: flex; align-items: center; gap: 5px;
     border: none; cursor: pointer; font-family: var(--font-family); font-size: 12px;

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20260925-canvas-documents">
+    <link rel="stylesheet" href="styles.css?v=20260925-canvas-header">
     <link rel="stylesheet" href="document-library.css?v=20260925-canvas-documents">
     <link rel="stylesheet" href="node-pricing.css?v=20260925-canvas-documents">
     <link rel="icon" href="data:,">
@@ -37,16 +37,16 @@
 <body>
     <!-- Top Header Bar -->
     <header id="header-bar" class="header-bar">
-        <div class="header-left">
-            <div class="logo" id="logo">
+        <div class="header-left" aria-label="画布操作">
+            <div class="logo" id="logo" hidden>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
                 </svg>
                 <span class="logo-text">无线画布</span>
             </div>
-            <div class="project-name" id="project-name" title="当前项目 / 视频卡">未命名</div>
+            <div class="project-name" id="project-name" title="当前项目 / 视频卡" hidden>未命名</div>
         </div>
-        <div class="header-right">
+        <div class="header-right" hidden>
             <button class="header-btn icon-btn is-coming-soon" id="btn-collab" title="协作待接入" data-coming-soon="多人协作还没有接入后台权限和实时同步，当前不会创建协作空间。">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>
@@ -387,7 +387,7 @@
     <script src="canvas-save-coordinator.js?v=20260712-final-hardening"></script>
     <script src="document-library.js?v=20260925-canvas-documents"></script>
     <script src="node-pricing.js?v=20260925-canvas-documents"></script>
-    <script src="app.js?v=20260925-canvas-documents"></script>
+    <script src="app.js?v=20260925-canvas-header"></script>
     <script src="toolflow-workflow.js?v=20260924-canvas-parallel"></script>
     <script type="module" src="director-3d.js"></script>
 </body>

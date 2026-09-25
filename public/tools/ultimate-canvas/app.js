@@ -1475,7 +1475,6 @@
         }
         const projects = data?.context?.projects || [];
         const cards = data?.context?.video_cards || [];
-        const credits = data?.context?.credits || {};
         const project = selectedProjectFromBootstrap(data);
         const card = selectedVideoCardFromBootstrap(data);
         const contextReady = Boolean(project?.can_generate && card?.can_generate);
@@ -1515,12 +1514,9 @@
                 </button>
                 ${videoCardMenuHtml(cards, project, data.context.selected_video_card_id)}
             </div>
-            <span class="context-status ${contextReady ? 'ok' : 'warn'}" title="${escapeHtml(resolvedContextStatus)}">
+            ${contextReady ? '' : `<span class="context-status warn" title="${escapeHtml(resolvedContextStatus)}">
                 ${escapeHtml(resolvedContextStatus)}
-            </span>
-            <span class="context-status credits" title="可用点数 / 冻结点数">
-                可用 ${escapeHtml(formatCredits(credits.available))} 点 · 冻结 ${escapeHtml(formatCredits(credits.frozen_credits))} 点
-            </span>
+            </span>`}
             <button type="button" id="canvas-save-state" data-save-now class="context-status save ${canvasRuntime.saveState}" title="点击立即保存" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>
                 ${canvasRuntime.saveState === 'saved' ? '已保存' : canvasRuntime.saveState === 'saving' ? '保存中' : canvasRuntime.saveState === 'error' ? '保存失败' : '未保存'}
             </button>
