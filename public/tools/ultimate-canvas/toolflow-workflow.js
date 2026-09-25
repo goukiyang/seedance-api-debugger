@@ -236,7 +236,7 @@
         if (select) select.value = state.selectedFlowId;
         const flow = currentFlow();
         const visibility = panel()?.querySelector('[data-toolflow-visibility]');
-        if (visibility) visibility.value = flow?.visibility || 'private';
+        if (visibility) visibility.value = 'private';
         hydrateGuidedFromFlow(flow);
         renderList();
     }
@@ -249,7 +249,7 @@
         select.value = state.selectedFlowId;
         root.innerHTML = state.flows.length ? state.flows.map(flow => `
             <button type="button" class="toolflow-list-item ${flow.id === state.selectedFlowId ? 'is-active' : ''}" data-toolflow-pick="${escapeHtml(flow.id)}">
-                <strong>${escapeHtml(flow.name)}</strong><span>v${flow.version} · ${flow.visibility === 'private' ? '仅自己' : flow.visibility === 'shared' ? '项目成员' : '公开'}</span>
+                <strong>${escapeHtml(flow.name)}</strong><span>v${flow.version} · 仅自己</span>
             </button>`).join('') : '<div class="empty-state"><strong>还没有工具流</strong><span>先添加工具流节点，再点击保存。</span></div>';
     }
 

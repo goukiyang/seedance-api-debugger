@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
       take: 100,
       select: { id: true, owner_id: true, project_id: true, name: true, visibility: true, status: true, version: true, graph_json: true, created_at: true, updated_at: true },
     });
-    return NextResponse.json({ flows }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ flows: flows.map(flow => ({ ...flow, visibility: 'private' })) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('[ToolFlow] List failed:', error);
