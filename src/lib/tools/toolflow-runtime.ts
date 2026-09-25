@@ -564,13 +564,13 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
 
 export async function getToolFlowRun(user: SessionUser, runId: string) {
   const run = await prisma.toolFlowRun.findUnique({ where: { id: runId }, include: { flow: true, node_runs: true } });
-  if (!run || (user.role !== 'admin' && run.owner_id !== user.id)) throw new AuthError('工具流运行不存在', 404);
+  if (!run || run.owner_id !== user.id) throw new AuthError('工具流运行不存在', 404);
   return run;
 }
 
 export async function listToolFlowRuns(user: SessionUser, flowId?: string) {
   return prisma.toolFlowRun.findMany({
-    where: { ...(user.role === 'admin' ? {} : { owner_id: user.id }), ...(flowId ? { flow_id: flowId } : {}) },
+    where: { owner_id: user.id, ...(flowId ? { flow_id: flowId } : {}) },
     orderBy: { created_at: 'desc' },
     take: 30,
     include: { node_runs: true },

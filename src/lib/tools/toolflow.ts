@@ -192,7 +192,7 @@ export async function assertToolFlowProjectAccess(user: SessionUser, projectId: 
 export async function assertCanUseToolFlow(user: SessionUser, flowId: string) {
   const flow = await prisma.toolFlow.findUnique({ where: { id: flowId } });
   if (!flow || flow.status === 'deleted') throw new AuthError('工具流不存在', 404);
-  if (user.role === 'admin' || flow.owner_id === user.id || flow.visibility === 'public' || flow.visibility === 'shared') {
+  if (flow.owner_id === user.id) {
     await assertToolFlowProjectAccess(user, flow.project_id);
     return flow;
   }

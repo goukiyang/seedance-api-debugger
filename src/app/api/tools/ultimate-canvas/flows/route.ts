@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       where: {
         status: { not: 'deleted' },
         ...(projectId ? { project_id: projectId } : {}),
-        ...(user.role === 'admin' ? {} : { OR: [{ owner_id: user.id }, { visibility: { in: ['shared', 'public'] } }] }),
+        owner_id: user.id,
       },
       orderBy: { updated_at: 'desc' },
       take: 100,
@@ -47,13 +47,10 @@ export async function POST(request: NextRequest) {
     const projectId = clean(body.project_id || body.projectId) || null;
     await assertToolFlowProjectAccess(user, projectId);
     const name = clean(body.name, '未命名工具流').slice(0, 120);
-    const requestedVisibility = clean(body.visibility, 'private');
-    const visibility = user.role === 'admin' && ['private', 'shared', 'public'].includes(requestedVisibility)
-      ? requestedVisibility
-      : 'private';
+    const visibility = 'private';
     const flowId = clean(body.id);
     const existing = flowId ? await prisma.toolFlow.findUnique({ where: { id: flowId } }) : null;
-    if (existing && existing.owner_id !== user.id && user.role !== 'admin') throw new AuthError('无权编辑此工具流', 403);
+    if (existing && existing.owner_id !== user.id) throw new AuthError('无权编辑此工具流', 403);
     const saved = existing
       ? await prisma.toolFlow.update({
           where: { id: existing.id },

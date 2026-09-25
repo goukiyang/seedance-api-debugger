@@ -1,8 +1,8 @@
--- Additive only: existing snapshots and collaborative access are unchanged.
+-- Additive only: snapshots stay unchanged; access is owner-only for old and new canvases.
 ALTER TABLE "CanvasDocument" ADD COLUMN "revision" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "CanvasDocument" ADD COLUMN "schema_version" INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE "CanvasDocument" ADD COLUMN "protocol_version" INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE "CanvasDocument" ADD COLUMN "access_scope" TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE "CanvasDocument" ADD COLUMN "access_scope" TEXT NOT NULL DEFAULT 'private';
 ALTER TABLE "CanvasDocument" ADD COLUMN "legacy_document_json" TEXT;
 
 CREATE TABLE "CanvasDocumentRevision" (

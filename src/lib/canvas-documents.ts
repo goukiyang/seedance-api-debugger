@@ -155,11 +155,9 @@ async function assertProject(user: SessionUser, projectId: string | null, write:
 
 async function assertDocument(user: SessionUser, document: Metadata | null, write: boolean): Promise<void> {
   if (!document || document.status === 'deleted') throw new AuthError('画布不存在', 404);
+  // Personal canvases are owner-only, including historical links and admin accounts.
+  if (document.owner_user_id !== user.id) throw new AuthError('无权访问此画布', 403);
   await assertProject(user, document.project_id, write);
-  if (user.role === 'admin' || document.owner_user_id === user.id) return;
-  if (document.access_scope !== 'legacy' || !document.project_id) throw new AuthError('无权访问此画布', 403);
-  // Historical direct-link collaboration stays compatible, but never expands the list.
-  await assertProject(user, document.project_id, true);
 }
 
 export async function readCanvasDocument(user: SessionUser, documentId: string) {

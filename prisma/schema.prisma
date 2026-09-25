@@ -722,7 +722,7 @@ model CanvasDocument {
   revision                  Int      @default(0)
   schema_version            Int      @default(1)
   protocol_version          Int      @default(1)
-  access_scope              String   @default("legacy") // legacy | private; never inferred from protocol
+  access_scope              String   @default("private") // Personal canvases are owner-only.
   legacy_document_json      String?  // Original snapshot retained once on v2 upgrade, not exposed by API.
   created_at                DateTime @default(now())
   updated_at                DateTime @updatedAt
