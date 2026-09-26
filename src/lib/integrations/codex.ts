@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import type { Prisma, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
+import { normalizeSeedanceEditPilot, type SeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
 
 export const CODEX_VIDEO_SOURCE_TYPE = 'codex_api';
 export const CODEX_VIDEO_API_SETTING_KEY = 'codex_video_api_v1';
@@ -10,6 +11,7 @@ export const CODEX_VIDEO_API_SETTING_KEY = 'codex_video_api_v1';
 type UserSelectorType = 'id' | 'email' | 'username';
 
 export type CodexVideoApiSettings = {
+  video_edit_pilot?: SeedanceEditPilot;
   enabled: boolean;
   source_label: string;
   user_selector: {
@@ -150,6 +152,7 @@ function normalizeSettings(value: unknown): CodexVideoApiSettings {
 
   return {
     enabled: input.enabled === true,
+    video_edit_pilot: normalizeSeedanceEditPilot(input.video_edit_pilot),
     source_label: cleanString(input.source_label, DEFAULT_CODEX_VIDEO_API_SETTINGS.source_label).slice(0, 80),
     user_selector: selector.value ? selector : DEFAULT_CODEX_VIDEO_API_SETTINGS.user_selector,
     token_hash: normalizeTokenHash(input.token_hash),
@@ -210,6 +213,8 @@ export function buildCodexVideoApiSettingsPatch(
 ): CodexVideoApiSettingsSaveResult {
   const nextInput: Partial<CodexVideoApiSettings> = {
     ...current,
+    video_edit_pilot: input.video_edit_pilot === undefined
+      ? current.video_edit_pilot : normalizeSeedanceEditPilot(input.video_edit_pilot),
     enabled: input.enabled === true,
     source_label: cleanString(input.source_label, current.source_label),
     user_selector: normalizeSelector(input.user_selector || {

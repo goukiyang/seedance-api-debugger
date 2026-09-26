@@ -9,6 +9,35 @@ export type SeedanceEditReference = {
   durationSeconds: number;
 };
 
+export type SeedanceProviderInput = CreateVideoInput & { seedance_edit_reference?: SeedanceEditReference };
+export type SeedanceEditPilot = { enabled: boolean; project_ids: string[] };
+
+export function normalizeSeedanceEditPilot(value: unknown): SeedanceEditPilot {
+  const input = value && typeof value === 'object' ? value as Partial<SeedanceEditPilot> : {};
+  const validIds = Array.isArray(input.project_ids)
+    && input.project_ids.length <= 50
+    && input.project_ids.every((id) => typeof id === 'string' && id.trim().length > 0 && id.length <= 128);
+  const project_ids = validIds ? Array.from(new Set(input.project_ids!.map((id) => id.trim()))) : [];
+  return { enabled: input.enabled === true && project_ids.length > 0, project_ids };
+}
+
+export function isSeedanceEditPilotAllowed(value: unknown, projectId: string): boolean {
+  const pilot = normalizeSeedanceEditPilot(value);
+  return pilot.enabled && pilot.project_ids.includes(projectId);
+}
+
+/** Optional caller budget, evaluated against existing server pricing before freeze. */
+export function validateRequestCostCeiling(ceiling: unknown, estimatedCost: number): string | null {
+  if (ceiling === undefined) return null;
+  if (typeof ceiling !== 'number' || !Number.isFinite(ceiling) || !Number.isInteger(ceiling) || ceiling < 0) {
+    return 'max_estimated_cost 必须是非负整数积分上限。';
+  }
+  if (!Number.isFinite(estimatedCost) || estimatedCost < 0 || estimatedCost > ceiling) {
+    return '本次估价超出您设置的积分上限，未提交生成或冻结积分。';
+  }
+  return null;
+}
+
 export function validateSeedanceEditMode(input: {
   taskType: unknown;
   provider: string;
@@ -61,7 +90,7 @@ export function validateSeedanceEditReference(input: {
 }
 
 /** Narrow provider-only override. Business input remains positive and unchanged. */
-export function seedanceVideoEditParameters(input: CreateVideoInput): {
+export function seedanceVideoEditParameters(input: SeedanceProviderInput): {
   omni_reference_task_type?: 'edit'; ratio?: 'adaptive'; duration?: -1;
 } {
   if (input.omni_reference_task_type === undefined) return {};

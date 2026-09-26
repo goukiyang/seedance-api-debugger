@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import type { CreateVideoInput } from '../src/types';
 import { SEEDANCE_2_0_MODEL_ID, SEEDANCE_2_5_MODEL_ID } from '../src/lib/provider/seedance-models';
 import { calculateEstimatedCost } from '../src/lib/pricing';
-import { seedanceVideoEditParameters, validateSeedanceEditMode, validateSeedanceEditReference } from '../src/lib/provider/seedance-video-edit';
+import { seedanceVideoEditParameters, validateSeedanceEditMode, validateSeedanceEditReference,
+  normalizeSeedanceEditPilot, isSeedanceEditPilotAllowed, validateRequestCostCeiling,
+  type SeedanceProviderInput } from '../src/lib/provider/seedance-video-edit';
 
 const url = 'https://example.test/action.mp4';
 const reference = { url, width: 768, height: 768, durationSeconds: 4 };
 const mode = { taskType: 'edit', provider: 'seedance', model: SEEDANCE_2_5_MODEL_ID, mode: 'all_in_one_reference' };
 const contract = { urls: [url], reference, duration: 4, ratio: '1:1' };
-const edit: CreateVideoInput = {
+const edit: SeedanceProviderInput = {
   prompt: '编辑视频，仅替换角色。', model: SEEDANCE_2_5_MODEL_ID,
   generation_mode: 'all_in_one_reference', omni_reference_task_type: 'edit',
   ratio: '1:1', duration: 4, resolution: '480p', generate_audio: false,
@@ -19,6 +20,49 @@ const edit: CreateVideoInput = {
 };
 
 async function main() {
+  for (const value of [undefined, null, {}, { enabled: true }, { enabled: true, project_ids: [] },
+    { enabled: true, project_ids: [''] }, { enabled: 'true', project_ids: ['project-a'] }]) {
+    assert.equal(normalizeSeedanceEditPilot(value).enabled, false);
+  }
+  const pilot = { enabled: true, project_ids: ['project-a'] };
+  assert.equal(isSeedanceEditPilotAllowed(pilot, 'project-a'), true);
+  assert.equal(isSeedanceEditPilotAllowed(pilot, 'project-b'), false);
+  assert.equal(isSeedanceEditPilotAllowed({ ...pilot, enabled: false }, 'project-a'), false);
+  assert.equal(validateRequestCostCeiling(undefined, 18), null);
+  assert.equal(validateRequestCostCeiling(18, 18), null);
+  for (const ceiling of [17, 0, -1, 18.5, NaN, Infinity, '18', null]) assert.ok(validateRequestCostCeiling(ceiling, 18));
+  assert.ok(validateRequestCostCeiling(18, NaN));
+  // Exercise the existing admin config patch without constructing/connecting a DB.
+  const runtime = globalThis as any;
+  const previousPrisma = runtime.prisma;
+  const previousPragmas = runtime.prismaSqlitePragmasStarted;
+  runtime.prisma = new Proxy({}, { get() { throw new Error('Smoke must not access any database'); } });
+  runtime.prismaSqlitePragmasStarted = true;
+  try {
+    const { buildCodexVideoApiSettingsPatch } = await import('../src/lib/integrations/codex');
+    const existing = {
+      enabled: true, source_label: 'Codex API', user_selector: { type: 'id' as const, value: 'fixture-user' },
+      token_hash: 'sha256:' + '0'.repeat(64), token_preview: 'fixture',
+    };
+    const enable = buildCodexVideoApiSettingsPatch(existing, {
+      enabled: true, user_selector: existing.user_selector, video_edit_pilot: pilot,
+    });
+    assert.deepEqual(enable.settings.video_edit_pilot, pilot);
+    assert.equal(enable.settings.token_hash, existing.token_hash);
+    assert.equal(enable.token_changed, false);
+    const ordinaryAdminSave = buildCodexVideoApiSettingsPatch(enable.settings, {
+      enabled: true, user_selector: existing.user_selector, source_label: 'updated label',
+    });
+    assert.deepEqual(ordinaryAdminSave.settings.video_edit_pilot, pilot);
+    const disable = buildCodexVideoApiSettingsPatch(enable.settings, {
+      enabled: true, user_selector: existing.user_selector, video_edit_pilot: { enabled: false, project_ids: ['project-a'] },
+    });
+    assert.equal(disable.settings.video_edit_pilot?.enabled, false);
+    assert.equal(buildCodexVideoApiSettingsPatch(existing, { enabled: true }).settings.video_edit_pilot?.enabled, false);
+  } finally {
+    runtime.prisma = previousPrisma;
+    runtime.prismaSqlitePragmasStarted = previousPragmas;
+  }
   assert.equal(validateSeedanceEditMode(mode), null);
   assert.equal(validateSeedanceEditMode({ ...mode, taskType: undefined, provider: 'h3' }), null);
   for (const changed of [
@@ -105,6 +149,13 @@ async function main() {
   // Wiring checks supplement executed pure validation/provider tests, not DB acceptance.
   const route = fs.readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
   assert.ok(route.indexOf('if (editReferenceError)') < route.indexOf('const result = await prisma.$transaction'));
+  assert.ok(route.indexOf('if (costCeilingError)') < route.indexOf('const result = await prisma.$transaction'));
+  assert.ok(route.includes('editPilotSettings = codexContext.settings.video_edit_pilot'));
+  assert.ok(route.includes('isSeedanceEditPilotAllowed(editPilotSettings, requestedVideoCard.project_id)'));
+  assert.doesNotMatch(route, /body\.video_edit_pilot/);
+  const config = fs.readFileSync('src/app/api/codex/config/route.ts', 'utf8');
+  assert.ok(config.includes("omni_reference_task_type: editPilot.enabled ? ['edit'] : []"));
+  assert.ok(config.includes('provider_verified: false'));
   assert.ok(route.includes('calculateEstimatedCost(resolution, duration, selectedModel)'));
   assert.ok(route.includes('requested_ratio: ratio, requested_duration: duration, ...seedanceVideoEditParameters(providerInput)'));
   assert.doesNotMatch(route, /body\.seedance_edit_reference/);

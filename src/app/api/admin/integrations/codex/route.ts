@@ -17,6 +17,7 @@ function safeConfigDto(settings: Awaited<ReturnType<typeof getCodexVideoApiSetti
     enabled: settings.enabled,
     ready: settings.enabled && Boolean(settings.token_hash) && Boolean(linkedUser && linkedUser.status === 'active'),
     source_label: settings.source_label,
+    video_edit_pilot: settings.video_edit_pilot || { enabled: false, project_ids: [] },
     user_selector: settings.user_selector,
     token_configured: Boolean(settings.token_hash),
     token_preview: settings.token_preview,
@@ -82,6 +83,7 @@ export async function PUT(request: NextRequest) {
         detail: JSON.stringify({
           enabled: saved.settings.enabled,
           source_label: saved.settings.source_label,
+          video_edit_pilot: saved.settings.video_edit_pilot,
           user_selector: saved.settings.user_selector,
           token_changed: saved.token_changed,
           token_cleared: saved.token_cleared,

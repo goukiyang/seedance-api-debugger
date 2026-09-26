@@ -10,6 +10,7 @@ import {
   seedanceVideoModelInternalMultiplier,
 } from '@/lib/provider/seedance-models';
 import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
+import { normalizeSeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,7 @@ export async function GET(request: NextRequest) {
   try {
     const context = await authenticateCodexVideoApi(request);
     const status = await codexVideoApiStatus();
+    const editPilot = normalizeSeedanceEditPilot(context.settings.video_edit_pilot);
 
     return NextResponse.json({
       ok: true,
@@ -45,8 +47,12 @@ export async function GET(request: NextRequest) {
         header: 'Authorization',
       },
       supported_settings: {
-        omni_reference_task_type: ['edit'],
+        omni_reference_task_type: editPilot.enabled ? ['edit'] : [],
+        request_cost_ceiling: { field: 'max_estimated_cost', unit: 'credits', enforced_before_freeze: true },
         video_edit_constraints: {
+          status: editPilot.enabled ? 'restricted_pilot' : 'disabled',
+          provider_verified: false,
+          scope: 'admin_configured_project_allowlist',
           model: 'dreamina-seedance-2-5-260628',
           generation_mode: 'all_in_one_reference',
           reference_video_count: 1,

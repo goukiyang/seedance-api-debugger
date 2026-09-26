@@ -21,6 +21,10 @@ import {
   validateSeedanceEditMode,
   validateSeedanceEditReference,
   seedanceVideoEditParameters,
+  normalizeSeedanceEditPilot,
+  isSeedanceEditPilotAllowed,
+  validateRequestCostCeiling,
+  type SeedanceProviderInput,
   type SeedanceEditReference,
 } from '@/lib/provider/seedance-video-edit';
 import {
@@ -601,6 +605,7 @@ function buildReferenceMediaFailureSummary(input: {
 
 export async function POST(request: NextRequest) {
   let user;
+  let editPilotSettings: unknown;
   let requestSource: GenerationRequestSource = webRequestSource(request);
 
   if (hasCodexApiAuthSignal(request)) {
@@ -608,6 +613,7 @@ export async function POST(request: NextRequest) {
       const codexContext = await authenticateCodexVideoApi(request);
       user = codexContext.user;
       requestSource = codexContext.source;
+      editPilotSettings = codexContext.settings.video_edit_pilot;
     } catch (error) {
       if (error instanceof CodexApiAuthError) {
         return errorJson(error.message, error.status);
@@ -733,6 +739,10 @@ export async function POST(request: NextRequest) {
   });
   if (editModeError) return errorJson(editModeError, 400);
   const videoEditRequested = body.omni_reference_task_type === 'edit';
+  if (videoEditRequested && (requestSource.source_type !== 'codex_api'
+    || !normalizeSeedanceEditPilot(editPilotSettings).enabled)) {
+    return errorJson('视频编辑试验尚未启用，请由管理员确认试验项目后配置。', 503);
+  }
   if (draftRequested) {
     if (requestedProvider !== 'seedance' || !canCreateSeedanceDraft(selectedModel)) {
       return errorJson('样片 Draft 只支持 Seedance 2.5', 400);
@@ -779,6 +789,9 @@ export async function POST(request: NextRequest) {
   }
   if (requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
     return errorJson('视频卡不属于当前项目', 400);
+  }
+  if (videoEditRequested && !isSeedanceEditPilotAllowed(editPilotSettings, requestedVideoCard.project_id)) {
+    return errorJson('当前项目未获准使用视频编辑试验。', 403);
   }
 
   let project;
@@ -921,6 +934,8 @@ export async function POST(request: NextRequest) {
     ? calculateH3EstimatedCost(duration, selectedModel)
     : calculateEstimatedCost(resolution, duration, selectedModel);
   const estimatedCost = pricing.estimatedCost;
+  const costCeilingError = validateRequestCostCeiling(body.max_estimated_cost, estimatedCost);
+  if (costCeilingError) return errorJson(costCeilingError, 400);
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
 
@@ -1289,7 +1304,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const providerInput: CreateVideoInput = {
+  const providerInput: SeedanceProviderInput = {
     ...(videoEditRequested ? { omni_reference_task_type: 'edit' as const, seedance_edit_reference: editReference } : {}),
     prompt: promptRendered,
     generation_mode: generationMode,
@@ -1388,6 +1403,7 @@ export async function POST(request: NextRequest) {
           ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
   });
   const taskParams = {
+    ...(body.max_estimated_cost !== undefined ? { max_estimated_cost: body.max_estimated_cost } : {}),
     ...(videoEditRequested ? { omni_reference_task_type: 'edit', seedance_edit_reference: editReference } : {}),
     provider: requestedProvider,
     model: selectedModel,

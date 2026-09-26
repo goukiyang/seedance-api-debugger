@@ -19,7 +19,7 @@ import {
   type SeedanceVideoModelOption,
 } from './seedance-models';
 import { buildSeedanceDraftContent } from './seedance-draft';
-import { seedanceVideoEditParameters } from './seedance-video-edit';
+import { seedanceVideoEditParameters, type SeedanceProviderInput } from './seedance-video-edit';
 
 // ============================================================================
 // Environment Configuration
@@ -316,7 +316,7 @@ export function buildContentArray(input: CreateVideoInput & { generation_mode: G
 // ============================================================================
 
 export async function createVideoTask(
-  input: CreateVideoInput & { generation_mode: GenerationMode }
+  input: SeedanceProviderInput & { generation_mode: GenerationMode }
 ): Promise<ProviderCreateResponse> {
   if (!isApiKeyConfigured()) {
     throw new Error('API key not configured');
