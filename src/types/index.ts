@@ -16,6 +16,9 @@ export type LocalStatus = 'draft' | 'submitted' | 'running' | 'succeeded' | 'fai
 
 // Create video task input
 export interface CreateVideoInput {
+  omni_reference_task_type?: 'edit';
+  // Populated only by the server media probe; never copied from request JSON.
+  seedance_edit_reference?: import('../lib/provider/seedance-video-edit').SeedanceEditReference;
   prompt: string;
   generation_mode: GenerationMode;
   ratio?: VideoRatio;

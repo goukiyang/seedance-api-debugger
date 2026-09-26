@@ -19,6 +19,7 @@ import {
   type SeedanceVideoModelOption,
 } from './seedance-models';
 import { buildSeedanceDraftContent } from './seedance-draft';
+import { seedanceVideoEditParameters } from './seedance-video-edit';
 
 // ============================================================================
 // Environment Configuration
@@ -350,6 +351,7 @@ export async function createVideoTask(
   if (input.resolution) {
     payload.resolution = input.resolution;
   }
+  Object.assign(payload, seedanceVideoEditParameters(input));
   if (input.seed !== undefined) {
     payload.seed = input.seed;
   }

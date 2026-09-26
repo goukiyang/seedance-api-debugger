@@ -45,6 +45,16 @@ export async function GET(request: NextRequest) {
         header: 'Authorization',
       },
       supported_settings: {
+        omni_reference_task_type: ['edit'],
+        video_edit_constraints: {
+          model: 'dreamina-seedance-2-5-260628',
+          generation_mode: 'all_in_one_reference',
+          reference_video_count: 1,
+          duration_source: 'server_probed_reference_video',
+          provider_ratio: 'adaptive',
+          provider_duration: -1,
+          business_duration_range: [4, 15],
+        },
         seedance_draft: seedanceDraftCapability(),
         generation_mode: ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'],
         model: SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => ({

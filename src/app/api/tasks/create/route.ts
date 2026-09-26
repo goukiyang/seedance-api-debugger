@@ -18,6 +18,12 @@ import {
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { parseSeedanceVideoModel, seedanceRatioFollowsFirstFrame } from '@/lib/provider/seedance-models';
 import {
+  validateSeedanceEditMode,
+  validateSeedanceEditReference,
+  seedanceVideoEditParameters,
+  type SeedanceEditReference,
+} from '@/lib/provider/seedance-video-edit';
+import {
   canCreateSeedanceDraft,
   isSeedanceDraftCreateEnabled,
   SEEDANCE_DRAFT_CONTRACT_VERSION,
@@ -434,6 +440,7 @@ async function validateReferenceMediaProviderPreflight(input: {
   imageUrls: string[];
   referenceVideoUrls: string[];
   referenceAudioUrls: string[];
+  onVideoProbed?: (reference: SeedanceEditReference) => void;
 }): Promise<ReferenceMediaResolutionIssue | null> {
   const allUrls = uniquePreserveOrder([
     ...input.imageUrls,
@@ -485,6 +492,9 @@ async function validateReferenceMediaProviderPreflight(input: {
         height = height ?? probed.height;
         durationSeconds = probed.durationSeconds;
         fps = probed.fps;
+        if (probed.width && probed.height && durationSeconds != null) {
+          input.onVideoProbed?.({ url, width: probed.width, height: probed.height, durationSeconds });
+        }
         if (asset?.type === 'video' && (asset.width == null || asset.height == null) && width && height) {
           await prisma.asset.update({ where: { id: asset.id }, data: { width, height } });
         }
@@ -717,6 +727,12 @@ export async function POST(request: NextRequest) {
   }
 
   const draftRequested = body.draft === true;
+  const editModeError = validateSeedanceEditMode({
+    taskType: body.omni_reference_task_type, provider: requestedProvider,
+    model: selectedModel, mode: generationMode, draft: draftRequested,
+  });
+  if (editModeError) return errorJson(editModeError, 400);
+  const videoEditRequested = body.omni_reference_task_type === 'edit';
   if (draftRequested) {
     if (requestedProvider !== 'seedance' || !canCreateSeedanceDraft(selectedModel)) {
       return errorJson('样片 Draft 只支持 Seedance 2.5', 400);
@@ -1164,6 +1180,9 @@ export async function POST(request: NextRequest) {
   }
   const referenceVideoUrls = allReferenceVideoUrls.slice(0, 3);
   const referenceAudioUrls = allReferenceAudioUrls.slice(0, 3);
+  if (videoEditRequested && referenceVideoUrls.length !== 1) {
+    return errorJson('本次视频编辑必须绑定一个且仅一个待编辑视频。', 400);
+  }
 
   switch (generationMode) {
     case 'all_in_one_reference':
@@ -1210,16 +1229,25 @@ export async function POST(request: NextRequest) {
   if (referenceMediaResolutionIssue) {
     return NextResponse.json(referenceMediaResolutionIssue, { status: 400 });
   }
+  const editReferences: SeedanceEditReference[] = [];
   if (requestedProvider !== H3_VIDEO_PROVIDER) {
     const referenceMediaPreflightIssue = await validateReferenceMediaProviderPreflight({
       preparedImages,
       imageUrls: finalReferenceImageUrls,
       referenceVideoUrls,
       referenceAudioUrls,
+      onVideoProbed: videoEditRequested ? (reference) => editReferences.push(reference) : undefined,
     });
     if (referenceMediaPreflightIssue) {
       return NextResponse.json(referenceMediaPreflightIssue, { status: 400 });
     }
+  }
+  const editReference = editReferences[0];
+  if (videoEditRequested) {
+    const editReferenceError = validateSeedanceEditReference({
+      urls: referenceVideoUrls, reference: editReference || null, duration, ratio,
+    });
+    if (editReferenceError) return errorJson(editReferenceError, 400);
   }
 
   // --- Prompt validation + rendering ---
@@ -1262,6 +1290,7 @@ export async function POST(request: NextRequest) {
   }
 
   const providerInput: CreateVideoInput = {
+    ...(videoEditRequested ? { omni_reference_task_type: 'edit' as const, seedance_edit_reference: editReference } : {}),
     prompt: promptRendered,
     generation_mode: generationMode,
     ratio: ratio as CreateVideoInput['ratio'],
@@ -1355,9 +1384,11 @@ export async function POST(request: NextRequest) {
         }
       : { model: selectedModel, content_item_count: content.length, referenceCount: preparedImages.length,
           requested_ratio: ratio,
-          ratio: seedanceRatioFollowsFirstFrame(selectedModel, generationMode) ? 'adaptive' : ratio }),
+          ratio: seedanceRatioFollowsFirstFrame(selectedModel, generationMode) ? 'adaptive' : ratio,
+          ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
   });
   const taskParams = {
+    ...(videoEditRequested ? { omni_reference_task_type: 'edit', seedance_edit_reference: editReference } : {}),
     provider: requestedProvider,
     model: selectedModel,
     ratio, duration, resolution, seed,
@@ -1724,6 +1755,7 @@ export async function POST(request: NextRequest) {
           }
         : {
             ...providerInput,
+            ...(videoEditRequested ? { requested_ratio: ratio, requested_duration: duration, ...seedanceVideoEditParameters(providerInput) } : {}),
             source: {
               type: requestSource.source_type,
               label: effectiveSourceLabel,
