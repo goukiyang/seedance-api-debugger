@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { Profiler, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
+import { CheckSquare, Download, Eye, Film, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
@@ -12,6 +12,8 @@ import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { isExternalUser } from '@/lib/access/external-role';
+import { animationWorkbenchHref } from '@/components/animation/model';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import {
   createAssetLibraryCacheKey,
@@ -672,6 +674,7 @@ function AssetsPageContent() {
   const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAdmin = user?.role === 'admin';
+  const canOpenAnimationWorkbench = Boolean(hasLoadedUser && user && !isExternalUser(user));
   const isEnhanceView = assetView === 'enhance';
   const scope: AssetScope = isEnhanceView ? 'history' : assetView;
   const requestType: AssetType = isEnhanceView ? 'video' : type;
@@ -744,8 +747,13 @@ function AssetsPageContent() {
   }, [user]);
 
   useEffect(() => {
-    const requestedType = new URLSearchParams(window.location.search).get('type');
+    const requestedParams = new URLSearchParams(window.location.search);
+    const requestedType = requestedParams.get('type');
+    const requestedScope = requestedParams.get('scope');
+    const requestedProjectId = requestedParams.get('project_id');
     if (isAssetType(requestedType)) setType(requestedType);
+    if (requestedScope === 'project' || requestedProjectId) setAssetView('project');
+    if (requestedProjectId) setProjectId(requestedProjectId);
     void refreshUser();
   }, [refreshUser]);
 
@@ -1052,6 +1060,16 @@ function AssetsPageContent() {
   const currentAssetReturnTo = () => {
     if (typeof window === 'undefined') return '/assets?type=video';
     return `${window.location.pathname}${window.location.search || ''}`;
+  };
+
+  const animationWorkbenchReturnTo = () => {
+    const params = new URLSearchParams();
+    if (scope === 'project') {
+      params.set('scope', 'project');
+      if (projectId) params.set('project_id', projectId);
+    }
+    params.set('type', type);
+    return `/assets?${params.toString()}`;
   };
 
   const enhanceEstimatedCost = (item: AssetLibraryItem) => {
@@ -1521,6 +1539,17 @@ function AssetsPageContent() {
           <p>按生产历史、项目和用户查看视频资产，支持框选、多选、批量下载、加入工作区、加入图集和移动视频。</p>
         </div>
         <div className="asset-library-header-actions">
+          {canOpenAnimationWorkbench && (
+            <Link
+              className="asset-library-secondary-link"
+              href={animationWorkbenchHref({
+                projectId: scope === 'project' && projectId ? projectId : undefined,
+                returnTo: animationWorkbenchReturnTo(),
+              })}
+            >
+              <Film size={15} aria-hidden="true" />抽帧动画
+            </Link>
+          )}
           <button className="asset-library-icon-button" type="button" onClick={reloadItems} aria-label="刷新资产">
             <RefreshCcw size={16} />
           </button>

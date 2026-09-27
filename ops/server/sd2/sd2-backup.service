@@ -11,6 +11,6 @@ Environment=DB_PATH=/var/lib/video-api-debugger/dev.db
 Environment=BACKUP_ROOT=/var/lib/video-api-debugger/backups/daily
 Environment=RETENTION_DAYS=30
 ExecStart=/usr/local/bin/sd2-backup.sh
-TimeoutStartSec=300
+TimeoutStartSec=7200
 StandardOutput=append:/var/log/video-api-debugger/sd2-backup.log
 StandardError=append:/var/log/video-api-debugger/sd2-backup.log

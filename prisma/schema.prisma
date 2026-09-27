@@ -1684,3 +1684,145 @@ model GenerationTaskSnapshot {
 
   workspace Workspace? @relation(fields: [workspace_id], references: [id])
 }
+
+model AnimationDocument {
+  id                  String   @id
+  project_id          String
+  owner_user_id       String
+  title               String
+  status              String   @default("active")
+  revision            Int      @default(1)
+  sequence_json       String
+  review_status       String   @default("unsubmitted")
+  review_revision     Int?
+  review_note         String   @default("")
+  game_status         String   @default("unverified")
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  @@index([project_id, status, updated_at, id])
+  @@index([owner_user_id, updated_at])
+}
+
+model AnimationRevision {
+  id             String   @id
+  document_id    String
+  revision       Int
+  sequence_json  String
+  actor_user_id  String
+  reason         String   @default("edit")
+  created_at     DateTime @default(now())
+
+  @@unique([document_id, revision])
+  @@index([document_id, created_at])
+}
+
+model AnimationFile {
+  id             String   @id
+  document_id    String
+  project_id     String
+  created_by     String
+  name           String
+  role           String
+  mime           String
+  bytes          Int
+  sha256         String
+  width          Int?
+  height         Int?
+  blob_key       String   @unique
+  created_at     DateTime @default(now())
+
+  @@unique([document_id, role, sha256])
+  @@index([project_id, document_id, role])
+  @@index([document_id, created_at])
+}
+
+model AnimationJob {
+  id                  String   @id
+  document_id         String
+  project_id          String
+  actor_user_id       String
+  kind                String
+  status              String   @default("queued")
+  revision            Int
+  parameters_json     String
+  parameters_hash     String
+  stage               String   @default("queued")
+  error_code          String?
+  error_message       String?
+  result_json         String?
+  attempt             Int      @default(0)
+  lease_token         String?
+  lease_expires_at    DateTime?
+  heartbeat_at        DateTime?
+  queue_reserved      Boolean  @default(false)
+  reserved_storage_bytes BigInt @default(0)
+  timeout_at          DateTime
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  @@index([status, created_at, id])
+  @@index([document_id, created_at])
+  @@index([project_id, status])
+  @@index([lease_expires_at])
+}
+
+model AnimationExport {
+  id            String   @id
+  document_id   String
+  project_id    String
+  job_id        String   @unique
+  revision      Int
+  mode          String
+  blob_key      String   @unique
+  file_name     String
+  bytes         Int
+  sha256        String
+  entry_count   Int
+  total_ticks   Int
+  warnings_json String
+  created_at    DateTime @default(now())
+
+  @@index([document_id, revision, created_at])
+  @@index([project_id, created_at])
+}
+
+model AnimationRequest {
+  id             String   @id
+  actor_user_id  String
+  request_id     String
+  operation      String
+  request_hash   String
+  document_id    String?
+  response_json  String?
+  created_at     DateTime @default(now())
+
+  @@unique([actor_user_id, request_id])
+  @@index([document_id, created_at])
+  @@index([created_at])
+}
+
+model AnimationQueueState {
+  id                    String   @id
+  active_count          Int      @default(0)
+  reserved_storage_bytes BigInt  @default(0)
+  worker_token          String?
+  worker_lease_expires_at DateTime?
+  updated_at            DateTime @updatedAt
+}
+
+model AnimationUploadState {
+  id                    String   @id
+  active_count          Int      @default(0)
+  reserved_storage_bytes BigInt  @default(0)
+  updated_at            DateTime @updatedAt
+}
+
+model AnimationUploadReservation {
+  id            String   @id
+  reserved_bytes BigInt
+  expires_at    DateTime
+  created_at    DateTime @default(now())
+
+  @@index([expires_at])
+}

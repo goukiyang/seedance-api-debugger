@@ -101,6 +101,7 @@ export const userNavGroups: NavGroup[] = [
     title: '工具',
     items: [
       { label: 'AI 抠图', href: '/cutout', prefixMatch: true, adminOnly: true },
+      { label: '抽帧动画', href: '/tools/animation-workbench', prefixMatch: true, externalHidden: true },
     ],
   },
 ];

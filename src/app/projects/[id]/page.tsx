@@ -3,10 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { Film } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isExternalUser } from '@/lib/access/external-role';
+import { animationWorkbenchHref } from '@/components/animation/model';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 
@@ -412,6 +416,8 @@ function providerTaskIdLabel(ledger: CostLedgerItem): string {
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
+  const { user, hasLoadedUser, refreshUser } = useAppSession();
+  const showAnimationWorkbenchLink = Boolean(user && !isExternalUser(user));
   const projectReturnTo = `/projects/${projectId}`;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -445,6 +451,10 @@ export default function ProjectDetailPage() {
   const [savingBudget, setSavingBudget] = useState(false);
   const [pendingProjectAction, setPendingProjectAction] = useState<ProjectAction | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+
+  useEffect(() => {
+    if (!hasLoadedUser) void refreshUser();
+  }, [hasLoadedUser, refreshUser]);
 
   const loadProject = async () => {
     setLoading(true);
@@ -727,13 +737,23 @@ export default function ProjectDetailPage() {
               {statusLabel(project.status)} · {roleLabel(permissions.role)} · 成员 {project._count?.members ?? 0} · 任务 {project._count?.tasks ?? 0} · 图集 {project._count?.reference_albums ?? 0}
             </p>
           </div>
-          {permissions.can_generate ? (
-            <a href="#project-video-cards" className="btn btn-primary">
-              选择视频卡生成
-            </a>
-          ) : (
-            <span className="text-gray text-sm">当前状态或权限不可生成</span>
-          )}
+          <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {showAnimationWorkbenchLink && (
+              <Link
+                href={animationWorkbenchHref({ projectId: project.id, returnTo: `/projects/${project.id}` })}
+                className="btn btn-secondary"
+              >
+                <Film size={16} aria-hidden="true" />抽帧动画
+              </Link>
+            )}
+            {permissions.can_generate ? (
+              <a href="#project-video-cards" className="btn btn-primary">
+                选择视频卡生成
+              </a>
+            ) : (
+              <span className="text-gray text-sm">当前状态或权限不可生成</span>
+            )}
+          </div>
         </div>
       </div>
 

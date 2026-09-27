@@ -1,0 +1,32 @@
+[Unit]
+Description=SD2 deterministic animation processing queue
+After=sd2-gray.service
+
+[Service]
+Type=simple
+User=gouki
+Group=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+Environment=NODE_ENV=production
+Environment=DATABASE_URL=file:/data/video-api-debugger/var-lib/dev.db
+Environment=ANIMATION_STORAGE_ROOT=/data/video-api-debugger/var-lib/storage/animation
+ExecStart=/usr/bin/env node --import tsx scripts/process-animation-jobs.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
+KillMode=control-group
+UMask=0077
+Nice=5
+CPUQuota=100%
+MemoryMax=1536M
+TasksMax=128
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/data/video-api-debugger/var-lib
+ReadOnlyPaths=/data/video-api-debugger/var-lib/uploads /data/video-api-debugger/var-lib/videos
+
+[Install]
+WantedBy=multi-user.target
