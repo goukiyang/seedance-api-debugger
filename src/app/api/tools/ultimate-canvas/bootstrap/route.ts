@@ -29,6 +29,7 @@ import {
   videoCardStatusLabel,
 } from '@/lib/video-cards/display';
 import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-models';
 import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 
@@ -451,6 +452,8 @@ export async function GET(request: NextRequest) {
           ],
           ratios: RATIO_OPTIONS,
           durations: DURATION_OPTIONS,
+          // Legacy canvas requests still use the default model; do not widen it.
+          duration_by_model: seedanceVideoDurationCapabilities(),
           resolutions: RESOLUTION_OPTIONS,
           supports_audio: true,
           supports_last_frame: true,

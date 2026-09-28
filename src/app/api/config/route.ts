@@ -3,6 +3,7 @@ import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getAiMediaKitApiSettings, safeAiMediaKitConfigDto } from '@/lib/integrations/aimediakit';
 import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
 import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
+import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-models';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,7 @@ export async function GET() {
     base_url: config.baseUrl,
     model: config.model,
     model_options: config.model_options,
+    duration_by_model: seedanceVideoDurationCapabilities(),
     api_key_configured: isApiKeyConfigured(),
     seedance_draft: seedanceDraftCapability(),
     aimediakit_enhance_video: {

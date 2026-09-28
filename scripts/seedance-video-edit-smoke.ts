@@ -72,6 +72,11 @@ async function main() {
   ]) assert.ok(validateSeedanceEditMode({ ...mode, ...changed }));
 
   assert.equal(validateSeedanceEditReference(contract), null);
+  assert.equal(validateSeedanceEditReference({ ...contract, duration: 15, reference: { ...reference, durationSeconds: 15 } }), null);
+  for (const duration of [16, 30]) {
+    assert.ok(validateSeedanceEditReference({ ...contract, duration, reference: { ...reference, durationSeconds: duration } }),
+      'The ordinary 2.5 output expansion must not expand edit duration');
+  }
   assert.equal(validateSeedanceEditReference({ ...contract, duration: 5, reference: { ...reference, durationSeconds: 4.1 } }), null);
   for (const changed of [
     { urls: [] }, { urls: [url, url] }, { urls: ['https://example.test/other.mp4'] },
@@ -159,7 +164,7 @@ async function main() {
   assert.ok(route.includes('calculateEstimatedCost(resolution, duration, selectedModel)'));
   assert.ok(route.includes('requested_ratio: ratio, requested_duration: duration, ...seedanceVideoEditParameters(providerInput)'));
   assert.doesNotMatch(route, /body\.seedance_edit_reference/);
-  assert.ok(route.includes("if (!VALID_DURATIONS.includes(duration))"));
+  assert.ok(route.includes('isSeedanceVideoDuration(duration, selectedModel)'));
   assert.ok(route.includes('if (videoCard.ratio_locked && videoCard.ratio && ratio !== videoCard.ratio)'));
 
   const source = process.argv[2];

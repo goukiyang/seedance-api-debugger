@@ -1,11 +1,13 @@
 import type { GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
-import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { isSeedanceVideoDuration, isSeedanceVideoModelId } from '@/lib/provider/seedance-models';
 
 export const GENERATION_DEFAULTS_PREFERENCE_KEY = 'generation_defaults_v1';
 
 export type GenerationSeedMode = 'random';
 
 export type GenerationDefaults = {
+  model?: string | null;
   generationMode: GenerationMode;
   ratio: VideoRatio;
   duration: VideoDuration;
@@ -18,6 +20,7 @@ export type GenerationDefaults = {
 };
 
 type StoredGenerationDefaults = {
+  model?: unknown;
   generation_mode?: unknown;
   ratio?: unknown;
   duration?: unknown;
@@ -36,6 +39,7 @@ const GENERATION_MODES: GenerationMode[] = [
 ];
 
 export const DEFAULT_GENERATION_DEFAULTS: GenerationDefaults = {
+  model: null,
   generationMode: 'all_in_one_reference',
   ratio: '16:9',
   duration: 5,
@@ -55,10 +59,6 @@ function isVideoRatio(value: unknown): value is VideoRatio {
   return typeof value === 'string' && RATIO_OPTIONS.includes(value as VideoRatio);
 }
 
-function isVideoDuration(value: unknown): value is VideoDuration {
-  return typeof value === 'number' && DURATION_OPTIONS.includes(value as VideoDuration);
-}
-
 function isVideoResolution(value: unknown): value is VideoResolution {
   return typeof value === 'string' && RESOLUTION_OPTIONS.includes(value as VideoResolution);
 }
@@ -75,13 +75,17 @@ export function normalizeGenerationDefaults(value: unknown): GenerationDefaults 
   const returnLastFrame = record.returnLastFrame ?? record.return_last_frame;
   const seedMode = record.seedMode ?? record.seed_mode;
   const projectId = record.projectId ?? record.project_id;
+  const model = typeof record.model === 'string' && isSeedanceVideoModelId(record.model)
+    ? record.model
+    : null;
 
   return {
+    model,
     generationMode: isGenerationMode(generationMode)
       ? generationMode
       : DEFAULT_GENERATION_DEFAULTS.generationMode,
     ratio: isVideoRatio(record.ratio) ? record.ratio : DEFAULT_GENERATION_DEFAULTS.ratio,
-    duration: isVideoDuration(record.duration) ? record.duration : DEFAULT_GENERATION_DEFAULTS.duration,
+    duration: isSeedanceVideoDuration(record.duration, model) ? record.duration : DEFAULT_GENERATION_DEFAULTS.duration,
     resolution: isVideoResolution(record.resolution) ? record.resolution : DEFAULT_GENERATION_DEFAULTS.resolution,
     generateAudio: typeof generateAudio === 'boolean' ? generateAudio : DEFAULT_GENERATION_DEFAULTS.generateAudio,
     returnLastFrame: typeof returnLastFrame === 'boolean'
@@ -105,6 +109,7 @@ export function parseStoredGenerationDefaults(valueJson: string | null | undefin
 export function serializeGenerationDefaults(settings: GenerationDefaults): string {
   const normalized = normalizeGenerationDefaults(settings);
   const stored: StoredGenerationDefaults = {
+    model: normalized.model,
     generation_mode: normalized.generationMode,
     ratio: normalized.ratio,
     duration: normalized.duration,

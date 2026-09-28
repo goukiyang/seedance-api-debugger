@@ -51,7 +51,7 @@ export function checkPrompt(value: string, assetCount: number, paramDuration: nu
   // 解析时间描述：X秒、X秒后、第X秒、X秒内
   const durationMatch = value.match(/(?:第?(\d+)秒|(\d+)秒(?:后|内|时))/);
   const durationNumbers = durationMatch
-    ? durationMatch.slice(1).map((g) => parseInt(g || '0', 10)).filter((n) => n >= 1 && n <= 15)
+    ? durationMatch.slice(1).map((g) => parseInt(g || '0', 10)).filter((n) => n >= 1 && n <= 30)
     : [];
   // 取最大值作为提示词中的时长
   const durationInPrompt = durationNumbers.length > 0 ? Math.max(...durationNumbers) : null;

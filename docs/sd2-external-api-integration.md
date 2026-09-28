@@ -430,7 +430,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 | `generation_mode` | `all_in_one_reference`, `first_last_frame`, `smart_multi_frame` |
 | `model` | `dreamina-seedance-2-0-260128`, `dreamina-seedance-2-5-260628` |
 | `ratio` | `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16` |
-| `duration` | `4` 到 `15` |
+| `duration` | 普通 Seedance 2.5 为 `4` 到 `30` 整数秒；默认 Seedance 2.0、IP 和 H3 仍为 `4` 到 `15` |
 | `resolution` | `480p`, `720p`, `1080p` |
 
 模型扣点规则：
@@ -605,7 +605,7 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 | HTTP 状态 | 错误 | 处理方式 |
 |---|---|---|
 | 400 | `ratio 无效` | 使用支持的比例 |
-| 400 | `duration 必须是 4-15` | 调整时长 |
+| 400 | `当前模型时长须为 4–15/30 秒的整数` | 根据所选模型重新选择时长；不自动截短 |
 | 400 | `resolution 无效` | 使用 `480p`, `720p`, `1080p` |
 | 400 | `REFERENCE_IMAGE_NOT_IN_WORKSPACE` | 先用上传接口导入参考图，再传 `reference_image_ids` |
 | 401 | `codex_api_invalid_token` | 检查 token 是否正确 |
@@ -672,7 +672,8 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 ### 12.6 生成参数与业务预期
 
 - `generate_audio` 默认是 `false`。如果业务需要音频，必须显式传 `generate_audio: true`。
-- `duration` 只能是 4 到 15 秒，`resolution` 只能是 `480p`、`720p`、`1080p`。
+- 普通生成的 `duration`：Seedance 2.5 为 4 到 30 整数秒，默认2.0、IP、H3仍4到15秒；`resolution` 只能是 `480p`、`720p`、`1080p`。`/api/config` 与 `/api/codex/config` 的 `duration_by_model` 为普通生成的模型时长表；旧顶层 duration 仍表示默认模型范围。Codex可使用同一Bearer鉴权GET `/api/tasks/estimate?model=...&resolution=480p&duration=30`获取估价，无付费生成。
+- 输出30秒不代表参考输入或编辑试点放宽：当前参考视频/音频仍逐条2–15秒，参考总时长是否被上游接受需按对应模型核实；edit试点仍单参考4–15秒且默认禁用。不得用分段规避已知上游总时长限制。旧无线画布默认2.0，未增加2.5模型选择器。2.5按既有费率估算30秒135积分，未修改积分费率，实际结算仍以任务账本为准。
 - `project_id` 不是任意字符串。绑定用户必须有该项目的生成权限，否则会返回权限错误。
 - `client_name` 建议固定为外部系统名称，方便管理员在 `source_metadata_json` 和审计日志里排查来源。
 

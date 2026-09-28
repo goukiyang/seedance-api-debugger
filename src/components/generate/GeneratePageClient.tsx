@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } fro
 import Link from 'next/link';
 import { Archive, Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
-import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
@@ -28,7 +28,7 @@ import {
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
-import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 
 // ============================================================================
@@ -172,6 +172,7 @@ interface ProjectOption {
 }
 
 interface ReuseDraft {
+  model?: string | null;
   taskId: string;
   reuseKey: number;
   prompt: string;
@@ -416,7 +417,8 @@ function asVideoRatio(value?: string | null): VideoRatio | null {
 }
 
 function asVideoDuration(value?: number | null): VideoDuration | null {
-  return DURATION_OPTIONS.includes(value as VideoDuration) ? value as VideoDuration : null;
+  // Preserve the card's delivery duration; the composer validates it against the selected model.
+  return isSeedanceVideoDuration(value, SEEDANCE_2_5_MODEL_ID) ? value : null;
 }
 
 function asVideoResolution(value?: string | null): VideoResolution | null {
@@ -1084,6 +1086,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       });
       const data = await readJsonResponse<{
         draft: {
+          model?: string | null;
           task_id: string;
           prompt?: string;
           generation_mode?: GenerationMode;
@@ -1107,6 +1110,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         throw new Error(data.message || data.error || '复用任务失败');
       }
       setReuseDraft({
+        model: data.draft.model || null,
         taskId: data.draft.task_id,
         reuseKey: Date.now(),
         prompt: data.draft.prompt || '',
@@ -1421,6 +1425,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   // ============================================================================
 
   const saveGenerationDefaults = useCallback((params: {
+    model?: string | null;
     generationMode: GenerationMode;
     ratio: VideoRatio;
     duration: VideoDuration;
@@ -1430,6 +1435,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     watermark: boolean;
   }) => {
     const settings: GenerationDefaults = {
+      model: params.model || null,
       generationMode: params.generationMode,
       ratio: params.ratio,
       duration: params.duration,
@@ -1502,6 +1508,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     const requestedModel = selectedH3Model
       ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id || ''
       : params.model || '';
+    const durationModel = isIpSurface || selectedH3Model ? null : requestedModel;
+    if (!isSeedanceVideoDuration(params.duration, durationModel)) {
+      setError(`当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，请重新选择时长后提交。当前时长未自动修改，也未扣点。`);
+      setSubmitting(false);
+      return;
+    }
     const requestedH3LoraId = selectedH3Model
       ? h3VideoConfig?.lora_options.find((option) => option.id === params.h3LoraId)?.id
         || selectedH3Lora?.id
@@ -2246,6 +2258,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           providerStatus={h3MachineStatus}
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}
+          allowExtendedSeedanceDuration={!isIpSurface}
           onModelChange={handleGenerationModelChange}
           auxiliaryLabel="LoRA"
           auxiliaryOptions={activeH3LoraOptions}

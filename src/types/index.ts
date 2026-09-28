@@ -5,8 +5,9 @@ export type TaskGenerationMode = GenerationMode | 'enhance_video';
 // Video aspect ratios (网页版 6 个比例)
 export type VideoRatio = '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
 
-// Video duration options (4-15 秒)
-export type VideoDuration = 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+// Superset only; validate against the selected model before pricing/submission.
+export type VideoDuration = 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
+  | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30;
 
 // Video resolution options (480p, 720p, 1080p)
 export type VideoResolution = '480p' | '720p' | '1080p';

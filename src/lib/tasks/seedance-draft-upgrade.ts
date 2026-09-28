@@ -22,7 +22,7 @@ import {
   isSeedanceDraftUpgradeEnabled,
   SEEDANCE_DRAFT_CONTRACT_VERSION,
 } from '@/lib/provider/seedance-draft';
-import { SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
+import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 
 export class DraftUpgradeError extends Error {
@@ -310,7 +310,10 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       })
     : null;
 
-  const duration = Math.max(4, Math.min(15, draft.duration || 5));
+  const duration = draft.duration ?? 5;
+  if (!isSeedanceVideoDuration(duration, draft.model)) {
+    throw new DraftUpgradeError('样片时长不在当前模型范围内，未提交升级。', 400, 'INVALID_DRAFT_DURATION');
+  }
   const pricing = calculateEstimatedCost('1080p', duration, draft.model);
   const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';

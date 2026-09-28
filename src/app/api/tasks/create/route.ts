@@ -16,7 +16,7 @@ import {
   generationPromptLimitMessage,
 } from '@/lib/prompt/limits';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
-import { parseSeedanceVideoModel, seedanceRatioFollowsFirstFrame } from '@/lib/provider/seedance-models';
+import { parseSeedanceVideoModel, seedanceRatioFollowsFirstFrame, isSeedanceVideoDuration, seedanceVideoDurationError } from '@/lib/provider/seedance-models';
 import {
   validateSeedanceEditMode,
   validateSeedanceEditReference,
@@ -116,7 +116,6 @@ const VALID_GENERATION_MODES: GenerationMode[] = [
   'smart_multi_frame',
 ];
 const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
-const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 const execFileAsync = promisify(execFile);
 
@@ -670,7 +669,7 @@ export async function POST(request: NextRequest) {
   }
 
   const ratio = body.ratio || '16:9';
-  const duration: VideoDuration = body.duration || 5;
+  const duration: VideoDuration = body.duration ?? 5;
   const resolution: VideoResolution = body.resolution || '720p';
   const resolutionApprovalConfirmed = body.resolution_approval_confirmed === true || body.resolutionApprovalConfirmed === true;
   const requestedTemplateId = typeof body.template_id === 'string' && body.template_id.trim() ? body.template_id.trim() : null;
@@ -693,7 +692,6 @@ export async function POST(request: NextRequest) {
   const promptUserEdited = body.prompt_user_edited === true;
 
   if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
-  if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
   const h3Settings = requestedProvider === H3_VIDEO_PROVIDER ? await getH3ApiSettings() : null;
   let selectedModel: string;
@@ -730,6 +728,10 @@ export async function POST(request: NextRequest) {
     const parsedModel = parseSeedanceVideoModel(body.model);
     if (!parsedModel.ok) return errorJson(parsedModel.message, 400);
     selectedModel = parsedModel.model;
+  }
+
+  if (!isSeedanceVideoDuration(duration, selectedModel)) {
+    return errorJson(seedanceVideoDurationError(selectedModel), 400);
   }
 
   const draftRequested = body.draft === true;

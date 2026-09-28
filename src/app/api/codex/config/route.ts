@@ -8,6 +8,8 @@ import {
   DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
   SEEDANCE_VIDEO_MODEL_OPTIONS,
   seedanceVideoModelInternalMultiplier,
+  seedanceVideoDurationOptions,
+  seedanceVideoDurationCapabilities,
 } from '@/lib/provider/seedance-models';
 import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
 import { normalizeSeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
@@ -41,6 +43,7 @@ export async function GET(request: NextRequest) {
         create_video: '/api/codex/video/create',
         draft_upgrade: '/api/codex/video/draft-upgrade',
         create_video_direct: '/api/tasks/create',
+        estimate_video: '/api/tasks/estimate',
       },
       auth: {
         type: 'bearer',
@@ -67,9 +70,11 @@ export async function GET(request: NextRequest) {
           ...option,
           default: option.id === DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
           internal_credit_multiplier: seedanceVideoModelInternalMultiplier(option.id),
+          durations: seedanceVideoDurationOptions(option.id),
         })),
         ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
         duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        duration_by_model: seedanceVideoDurationCapabilities(),
         resolution: ['480p', '720p', '1080p'],
         reference_fields: [
           'reference_image_ids',

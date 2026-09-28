@@ -3,8 +3,8 @@
 import React, { useState } from 'react';
 import { ParamChip } from '@/components/ParamChip';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution } from '@/types';
-import { seedanceRatioFollowsFirstFrame } from '@/lib/provider/seedance-models';
-import { GENERATION_MODE_LABELS, RATIO_LABELS, RATIO_OPTIONS, DURATION_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { seedanceRatioFollowsFirstFrame, seedanceVideoDurationOptions, isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
+import { GENERATION_MODE_LABELS, RATIO_LABELS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 
 export type ComposerSelectOption = {
   id: string;
@@ -39,7 +39,7 @@ interface Props {
   ratio: VideoRatio;
   duration: VideoDuration;
   resolution: VideoResolution;
-  points?: number;
+  points?: number | null;
   canSubmit: boolean;
   isSubmitting: boolean;
   onSubmit: () => void;
@@ -60,6 +60,7 @@ interface Props {
   modelLabel?: string;
   modelOptions?: ComposerSelectOption[];
   selectedModel?: string | null;
+  durationModel?: string | null;
   onModelChange?: (model: string) => void;
   auxiliaryLabel?: string;
   auxiliaryOptions?: ComposerSelectOption[];
@@ -93,6 +94,7 @@ export function ComposerActionBar({
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
   selectedModel = null,
+  durationModel = selectedModel,
   onModelChange,
   auxiliaryLabel = '',
   auxiliaryOptions = [],
@@ -121,6 +123,8 @@ export function ComposerActionBar({
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
   const followsFirstFrame = seedanceRatioFollowsFirstFrame(selectedModel, generationMode);
+  const durationOptions = seedanceVideoDurationOptions(durationModel);
+  const durationValid = isSeedanceVideoDuration(duration, durationModel);
   const ratioLocked = lockedRatio || followsFirstFrame;
   const ratioLabel = followsFirstFrame ? '跟随首帧' : ratio;
   const [showResolutionMenu, setShowResolutionMenu] = useState(false);
@@ -328,7 +332,7 @@ export function ComposerActionBar({
         {/* 时长选择 */}
         <div className="composer-chip-wrap">
           <ParamChip
-            label={`${duration}s`}
+            label={`${duration}s${durationValid ? '' : ' · 不支持'}`}
             dropdown={!lockedDuration}
             disabled={lockedDuration}
             title={lockedDuration ? lockReason : undefined}
@@ -337,8 +341,8 @@ export function ComposerActionBar({
           {showDurationMenu && !lockedDuration && (
             <>
               <div className="composer-chip-dropdown-backdrop" onClick={() => setShowDurationMenu(false)} />
-              <div className="composer-chip-dropdown">
-                {DURATION_OPTIONS.map((d) => (
+              <div className="composer-chip-dropdown" style={{ maxHeight: 'min(320px, 50vh)', overflowY: 'auto' }}>
+                {durationOptions.map((d) => (
                   <button
                     key={d}
                     type="button"
@@ -410,12 +414,12 @@ export function ComposerActionBar({
 
       {/* 右侧：点数 + 提交按钮 */}
       <div className="composer-action-right">
-        <div className="composer-points">✦ {points}</div>
+        <div className="composer-points">{points === null ? '待确认时长' : `✦ ${points}`}</div>
 
         <button
           type="button"
           className="composer-submit-btn"
-          disabled={!canSubmit || isSubmitting}
+          disabled={!canSubmit || !durationValid || isSubmitting}
           onClick={onSubmit}
         >
           {isSubmitting ? (

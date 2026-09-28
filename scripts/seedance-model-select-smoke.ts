@@ -8,6 +8,7 @@ import {
   SEEDANCE_VIDEO_MODEL_OPTIONS,
   parseSeedanceVideoModel,
   seedanceVideoModelLabel,
+  seedanceVideoDurationOptions,
 } from '../src/lib/provider/seedance-models';
 import { calculateEstimatedCost } from '../src/lib/pricing';
 import { calculateEstimatedCostClient } from '../src/lib/pricing-client';
@@ -71,6 +72,8 @@ async function main() {
   assert.deepEqual(parseSeedanceVideoModel(null), { ok: true, model: SEEDANCE_2_0_MODEL_ID });
   assert.deepEqual(parseSeedanceVideoModel(SEEDANCE_2_5_MODEL_ID), { ok: true, model: SEEDANCE_2_5_MODEL_ID });
   assert.equal(parseSeedanceVideoModel('bad-model').ok, false, 'Unknown model must not be accepted');
+  assert.equal(seedanceVideoDurationOptions(DEFAULT_SEEDANCE_VIDEO_MODEL_ID).at(-1), 15);
+  assert.equal(seedanceVideoDurationOptions(SEEDANCE_2_5_MODEL_ID).at(-1), 30);
 
   const seedance20Pricing = calculateEstimatedCost('720p', 4, SEEDANCE_2_0_MODEL_ID);
   const seedance25Pricing = calculateEstimatedCost('720p', 4, SEEDANCE_2_5_MODEL_ID);
@@ -132,7 +135,7 @@ async function main() {
   );
   assert.ok(generateClientSource.includes('SEEDANCE_VIDEO_MODEL_OPTIONS'), 'Standard generate page must import Seedance video model options');
   assert.ok(
-    generateClientSource.includes('const options = [...SEEDANCE_VIDEO_MODEL_OPTIONS]')
+    /const options = (?:\[\.\.\.SEEDANCE_VIDEO_MODEL_OPTIONS\]|SEEDANCE_VIDEO_MODEL_OPTIONS\.map\()/.test(generateClientSource)
       && generateClientSource.includes('modelOptions={activeModelOptions}'),
     'Standard generate page should pass Seedance model options to the existing footer chip',
   );

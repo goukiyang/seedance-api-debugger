@@ -1,13 +1,38 @@
+import type { VideoDuration } from '@/types';
+
 export type SeedanceVideoModelOption = {
   id: string;
   label: string;
   detail: string;
   internal_credit_multiplier?: number;
+  durations?: VideoDuration[];
 };
 
 export const SEEDANCE_2_0_MODEL_ID = 'dreamina-seedance-2-0-260128';
 export const SEEDANCE_2_5_MODEL_ID = 'dreamina-seedance-2-5-260628';
 export const DEFAULT_SEEDANCE_VIDEO_MODEL_ID = SEEDANCE_2_0_MODEL_ID;
+
+// Official model capability, not a reference-media or edit-pilot duration limit.
+// https://seed.bytedance.com/zh/seedance2_5 (verified 2026-09-28)
+export function seedanceVideoMaxDuration(model?: string | null): number {
+  return model === SEEDANCE_2_5_MODEL_ID ? 30 : 15;
+}
+
+export function seedanceVideoDurationOptions(model?: string | null): VideoDuration[] {
+  return Array.from({ length: seedanceVideoMaxDuration(model) - 3 }, (_, index) => (index + 4) as VideoDuration);
+}
+
+export function isSeedanceVideoDuration(value: unknown, model?: string | null): value is VideoDuration {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 4 && value <= seedanceVideoMaxDuration(model);
+}
+
+export function seedanceVideoDurationError(model?: string | null): string {
+  return `当前模型时长须为 4–${seedanceVideoMaxDuration(model)} 秒的整数，请重新选择时长。`;
+}
+
+export function seedanceVideoDurationCapabilities() {
+  return Object.fromEntries(SEEDANCE_VIDEO_MODEL_OPTIONS.map(({ id }) => [id, seedanceVideoDurationOptions(id)]));
+}
 
 export function seedanceRatioFollowsFirstFrame(model: string | null | undefined, mode: string): boolean {
   return model === SEEDANCE_2_5_MODEL_ID && mode === 'first_last_frame';

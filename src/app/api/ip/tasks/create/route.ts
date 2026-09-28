@@ -84,7 +84,6 @@ const VALID_GENERATION_MODES: GenerationMode[] = [
   'smart_multi_frame',
 ];
 const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
-const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
 
 function cleanSourceMetadata(value: unknown) {
@@ -363,7 +362,7 @@ export async function POST(request: NextRequest) {
   }
 
   const ratio = body.ratio || '16:9';
-  const duration: VideoDuration = body.duration || 5;
+  const duration: VideoDuration = body.duration ?? 5;
   const resolution: VideoResolution = body.resolution || '720p';
   const resolutionApprovalConfirmed = body.resolution_approval_confirmed === true || body.resolutionApprovalConfirmed === true;
   const requestedTemplateId = typeof body.template_id === 'string' && body.template_id.trim() ? body.template_id.trim() : null;
@@ -386,7 +385,7 @@ export async function POST(request: NextRequest) {
   const promptUserEdited = body.prompt_user_edited === true;
 
   if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
-  if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
+  if (!Number.isInteger(duration) || duration < 4 || duration > 15) return errorJson('IP 生成时长必须是 4-15 秒的整数', 400);
   if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
 
   const paidGenerationGuard = evaluatePaidGenerationGuard({ request, body, requestSource });

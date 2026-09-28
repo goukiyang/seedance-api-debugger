@@ -23,7 +23,7 @@ import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/U
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
-import { SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
+import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
@@ -343,6 +343,7 @@ interface Props {
     resolution?: VideoResolution | null;
   } | null;
   reuseDraft?: {
+    model?: string | null;
     taskId: string;
     reuseKey: number;
     prompt: string;
@@ -410,6 +411,7 @@ interface Props {
   providerStatus?: ComposerProviderStatus | null;
   modelLabel?: string;
   modelOptions?: ComposerSelectOption[];
+  allowExtendedSeedanceDuration?: boolean;
   onModelChange?: (model: string) => void;
   auxiliaryLabel?: string;
   auxiliaryOptions?: ComposerSelectOption[];
@@ -451,6 +453,7 @@ export function GenerationComposer({
   providerStatus = null,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
+  allowExtendedSeedanceDuration = false,
   onModelChange,
   auxiliaryLabel = '',
   auxiliaryOptions = [],
@@ -572,7 +575,13 @@ export function GenerationComposer({
     return issue?.message || null;
   }, [workspace.assets]);
 
+  const durationModel = allowExtendedSeedanceDuration && selectedProvider === 'seedance' ? selectedModel : null;
+  const durationBlocker = isSeedanceVideoDuration(duration, durationModel)
+    ? null
+    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。${lockedSettings?.duration ? '请切换支持该时长的模型，或修改视频卡时长。' : '请重新选择时长，或切换支持该时长的模型。'}确认前不会提交或扣点。`;
+
   const submitBlocker = useMemo(() => {
+    if (durationBlocker) return durationBlocker;
     if (!prompt.trim()) return '请填写提示词';
     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
@@ -609,12 +618,13 @@ export function GenerationComposer({
       return seedanceDraft.message;
     }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft]);
+  }, [durationBlocker, prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
       return { message: '提交中...', tone: 'progress' as const };
     }
+    if (durationBlocker) return { message: durationBlocker, tone: 'error' as const };
     if (mentionNotice) {
       return { message: mentionNotice, tone: 'hint' as const };
     }
@@ -632,13 +642,14 @@ export function GenerationComposer({
       return { message: submitDisabledReason, tone: 'hint' as const };
     }
     return { message: null, tone: 'ok' as const };
-  }, [isSubmitting, mentionNotice, prompt, submitBlocker, submitDisabledReason]);
+  }, [isSubmitting, durationBlocker, mentionNotice, prompt, submitBlocker, submitDisabledReason]);
 
   const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
 
   const estimatedPoints = useMemo(() => {
+    if (durationBlocker) return null;
     return calculateEstimatedCostClient(resolution, duration, selectedModel);
-  }, [resolution, duration, selectedModel]);
+  }, [resolution, duration, selectedModel, durationBlocker]);
 
   const activeRules = useMemo(() => {
     return selectedTemplate?.rules.filter((rule) => rule.status === 'active') || [];
@@ -841,6 +852,10 @@ export function GenerationComposer({
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
     setDuration(reuseDraft.duration);
+    if (reuseDraft.model && modelOptions.some((option) => option.id === reuseDraft.model)) {
+      setSelectedModel(reuseDraft.model);
+      onModelChange?.(reuseDraft.model);
+    }
     setResolution(reuseDraft.resolution);
     setSeed(reuseDraft.seed);
     setGenerateAudio(true);
@@ -850,7 +865,7 @@ export function GenerationComposer({
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
     void workspace.refresh();
-  }, [reuseDraft, require1080pApproval, workspace]);
+  }, [reuseDraft, require1080pApproval, workspace, modelOptions, onModelChange]);
 
   useEffect(() => {
     if (!initialSettings || appliedInitialSettingsRef.current || reuseDraft) return;
@@ -858,13 +873,17 @@ export function GenerationComposer({
     setGenerationMode(initialSettings.generationMode);
     setRatio(initialSettings.ratio);
     setDuration(initialSettings.duration);
+    if (initialSettings.model && modelOptions.some((option) => option.id === initialSettings.model)) {
+      setSelectedModel(initialSettings.model);
+      onModelChange?.(initialSettings.model);
+    }
     setResolution(initialSettings.resolution);
     setSeed(-1);
     setGenerateAudio(initialSettings.generateAudio);
     setReturnLastFrame(initialSettings.returnLastFrame);
     setWatermark(initialSettings.watermark);
     setResolutionApprovalConfirmed(false);
-  }, [initialSettings, reuseDraft]);
+  }, [initialSettings, reuseDraft, modelOptions, onModelChange]);
 
   useEffect(() => {
     if (!lockedSettings) return;
@@ -1857,6 +1876,7 @@ export function GenerationComposer({
           modelLabel={modelLabel}
           modelOptions={modelOptions}
           selectedModel={selectedModel}
+          durationModel={durationModel}
           onModelChange={(model) => {
             setSelectedModel(model);
             onModelChange?.(model);

@@ -16,6 +16,9 @@ import {
   SEEDANCE_VIDEO_MODEL_OPTIONS,
   resolveSeedanceVideoModel,
   seedanceRatioFollowsFirstFrame,
+  seedanceVideoDurationOptions,
+  isSeedanceVideoDuration,
+  seedanceVideoDurationError,
   type SeedanceVideoModelOption,
 } from './seedance-models';
 import { buildSeedanceDraftContent } from './seedance-draft';
@@ -146,7 +149,7 @@ export function getProviderConfig(): SeedanceConfig {
   return {
     baseUrl: SEEDANCE_BASE_URL,
     model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
-    model_options: SEEDANCE_VIDEO_MODEL_OPTIONS,
+    model_options: SEEDANCE_VIDEO_MODEL_OPTIONS.map(option => ({ ...option, durations: seedanceVideoDurationOptions(option.id) })),
     apiKeyMasked: maskKey(SEEDANCE_API_KEY),
   };
 }
@@ -324,6 +327,9 @@ export async function createVideoTask(
 
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
   const model = resolveSeedanceVideoModel(input.model);
+  if (input.duration !== undefined && !isSeedanceVideoDuration(input.duration, model)) {
+    throw new Error(seedanceVideoDurationError(model));
+  }
 
   // 构建 content 数组
   const content = buildContentArray(input);
