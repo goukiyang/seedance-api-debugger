@@ -422,6 +422,9 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 
 ### 2026-09-28 画布 Banana Pro 503 排查
 
+- 用户追加：Banana 2也返回503，范围扩展为两个Banana模型共用的Gemini适配链路。2026-09-28再次只读核对：20:28:19画布生成入口502，20:29:06成功记录实际为gpt-image-2.5-sunburst；15:52/15:54成功记录为gpt-image-2，不能据此称Banana恢复，亦不能仅凭时间对应到用户的原请求。
+- 新兼容性疑点：生产5a12535的requestGeminiStudioImages为两个Banana模型发送generationConfig.responseModalities=['IMAGE']，而muskapis-gemini-image-api技能的历史实测记录明确曾在移除此字段后稳定。该历史记录不证明当前503由此引起；公开供应商首页为JavaScript页面，本轮未取得当前兼容要求。需要同一模型、相同输入/尺寸、仅此字段不同的受控对照及脱敏供应商错误信息，区分请求兼容与上游通道故障。未实施付费对照、修改线上配置或部署，不将疑点写成已确认根因。
+
 - 用户截图：[Banana Pro生成失败](../../docs/materials/2026-09-28-canvas-banana-503/codex-clipboard-724cf0f5-2cfe-4d3e-877c-eacd6a0029f7.jpg)，5参考图、2K/16:9、2张。2026-09-28读取线上v0.18.0，commit 5a125358214359e135676c4f982c383ed90b3291，sd2-gray.service active；未覆盖新版本。
 - 运行代码中截图文案来自StudioProviderError的上游HTTP状态，不是本站缩略图/原图读取错误。nginx本地时间15:20:41记录POST /api/assets/generate返回502；15:22:29同入口200，OperationLog记录musk/gpt-image-2.5-sunburst成功。根据时间和截图可对应到本次故障，但缺少请求ID，不能证明两个请求属于同一人。
 - 已确认上游生图请求返回503；上游响应正文和请求ID没有留存，无法进一步确认拥堵、通道或供应商内部故障，不能宣称已修复或Banana Pro已恢复。未自动重试、切换用户模型、付费生成、修改积分/配置/生产数据或部署。
