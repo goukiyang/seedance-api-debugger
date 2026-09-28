@@ -1,0 +1,154 @@
+{
+  "started_at": "2026-09-28T12:42:16.255Z",
+  "deployed_commit": "5a125358214359e135676c4f982c383ed90b3291",
+  "provider": "musk",
+  "host": "api.muskapis.com",
+  "reference_count": 1,
+  "ratio": "16:9",
+  "resolution": "2K",
+  "count_per_model": 1,
+  "timeout_ms": 90000,
+  "output": "/tmp/sd2-image-model-probe-1790599336206",
+  "results": [
+    {
+      "model": "gemini-3.1-flash-image-preview",
+      "label": "Banana 2",
+      "started_at": "2026-09-28T12:42:16.256Z",
+      "requested_size": "2K",
+      "quality": "auto",
+      "requests": [
+        {
+          "path": "/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+          "status": 503,
+          "response_ms": 1403,
+          "content_type": "application/json; charset=utf-8",
+          "request_id": "",
+          "error_code": "model_not_found",
+          "error_type": "muskapis_error",
+          "error_message": "No available channel for model gemini-3.1-flash-image-preview under group 悦动GPT专线 (distributor) (request id: 20260928124217481731839G2B5NiyP)"
+        }
+      ],
+      "ok": false,
+      "error": {
+        "name": "StudioProviderError",
+        "code": "http_error",
+        "stage": "request",
+        "status": 503,
+        "message": "图片服务处理失败（http_error）"
+      },
+      "elapsed_ms": 1407
+    },
+    {
+      "model": "gemini-3-pro-image-preview",
+      "label": "Banana Pro",
+      "started_at": "2026-09-28T12:42:17.664Z",
+      "requested_size": "2K",
+      "quality": "auto",
+      "requests": [
+        {
+          "path": "/v1beta/models/gemini-3-pro-image-preview:generateContent",
+          "status": 503,
+          "response_ms": 312,
+          "content_type": "application/json; charset=utf-8",
+          "request_id": "",
+          "error_code": "model_not_found",
+          "error_type": "muskapis_error",
+          "error_message": "No available channel for model gemini-3-pro-image-preview under group 悦动GPT专线 (distributor) (request id: 20260928124217895808079O0ya42d3)"
+        }
+      ],
+      "ok": false,
+      "error": {
+        "name": "StudioProviderError",
+        "code": "http_error",
+        "stage": "request",
+        "status": 503,
+        "message": "图片服务处理失败（http_error）"
+      },
+      "elapsed_ms": 313
+    },
+    {
+      "model": "gpt-image-2",
+      "label": "GPT Image 2",
+      "started_at": "2026-09-28T12:42:17.978Z",
+      "requested_size": "2560x1440",
+      "quality": "high",
+      "requests": [
+        {
+          "path": "/v1/images/edits",
+          "status": 200,
+          "response_ms": 39554,
+          "content_type": "application/json; charset=utf-8",
+          "request_id": "37a8a0d84a9048599165387364d40d11"
+        }
+      ],
+      "images": [
+        {
+          "path": "/tmp/sd2-image-model-probe-1790599336206/gpt-image-2-0.png",
+          "bytes": 4202706,
+          "width": 2560,
+          "height": 1440,
+          "format": "png",
+          "decoded": true
+        }
+      ],
+      "ok": true,
+      "elapsed_ms": 40922
+    },
+    {
+      "model": "gpt-image-2.5-flare",
+      "label": "GPT Image 2.5 Flare",
+      "started_at": "2026-09-28T12:42:58.902Z",
+      "requested_size": "2560x1440",
+      "quality": "high",
+      "requests": [
+        {
+          "path": "/v1/images/edits",
+          "status": 200,
+          "response_ms": 27837,
+          "content_type": "application/json",
+          "request_id": ""
+        }
+      ],
+      "images": [
+        {
+          "path": "/tmp/sd2-image-model-probe-1790599336206/gpt-image-2.5-flare-0.png",
+          "bytes": 3649872,
+          "width": 2560,
+          "height": 1440,
+          "format": "png",
+          "decoded": true
+        }
+      ],
+      "ok": true,
+      "elapsed_ms": 34784
+    },
+    {
+      "model": "gpt-image-2.5-sunburst",
+      "label": "GPT Image 2.5 Sunburst",
+      "started_at": "2026-09-28T12:43:33.686Z",
+      "requested_size": "2560x1440",
+      "quality": "high",
+      "requests": [
+        {
+          "path": "/v1/images/edits",
+          "status": 200,
+          "response_ms": 37919,
+          "content_type": "application/json",
+          "request_id": ""
+        }
+      ],
+      "images": [
+        {
+          "path": "/tmp/sd2-image-model-probe-1790599336206/gpt-image-2.5-sunburst-0.png",
+          "bytes": 3827989,
+          "width": 2560,
+          "height": 1440,
+          "format": "png",
+          "decoded": true
+        }
+      ],
+      "ok": true,
+      "elapsed_ms": 42991
+    }
+  ]
+}

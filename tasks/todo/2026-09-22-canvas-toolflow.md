@@ -431,6 +431,20 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 - 待补：生图Provider错误记录安全白名单字段（状态、供应商错误码、request-id、耗时），避免记录提示词、参考图、密钥、完整返回；画布失败记录当前未覆盖ImageGenerationApiError分支。实施需以最新线上版本为来源，不能整体发布旧工作区。本站/供应商本次扣费状态未核实，不宣称已退款。
 - 2026-09-28追加核实独立API：线上assets/generate调用getImageGenerationApiSettings，读取image_generation_api_v1（enabled=true、provider=musk、base_url=https://api.muskapis.com/）；model-catalog把Banana Pro映射到gemini-3-pro-image-preview，节点input.model覆盖默认模型，Provider使用此配置base_url/api_key请求Gemini generateContent。image-studio worker也读取同一份独立生图配置。数据库内部仅比较密钥是否相同，结果different，对照musk_api_v1默认模型gpt-5.5；未读取或输出密钥正文。因此当前配置与代码链路确认生图与GPT-5.5不同Key，不代表已核实供应商账单是否分账户，也不补足503原请求日志缺失。
 
+### 2026-09-28 五个生图模型真实调用结果
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| M1 | 实测全部生图模型 | 逐个记录成功/失败、耗时及有效图片结果 | 已完成：5次真实单张请求，3成功、2失败；未修复供应商通道 |
+
+- 用户本轮明确授权“都测一下这几个模型的实际情况”，覆盖之前不主动付费测试的限制。北京时间20:42–20:44在正式服务器、v0.18.0 / 5a12535同一源码上执行；复用实际requestStudioImages及image_generation_api_v1，独立Musk生图密钥只在服务器进程内使用，未输出或存入报告。
+- 统一使用自制杯子参考图1张、同一提示词、16:9、2K、每模型1张，GPT质量high，Banana质量auto；按线上设置90秒超时，逐个请求、无重试，不改线上参数。直接调用适配器，不通过用户任务/积分入口，无站内任务、素材或积分数据库写入。不是完整浏览器流程、5参考图/2张组合或质量对比验收。
+- Banana 2：1.407秒，HTTP503，model_not_found；Banana Pro：0.313秒，同一错误。供应商明确返回No available channel for model ... under group 悦动GPT专线 (distributor)。这两次实测确认是当前密钥分组无可用模型通道；不能再把请求参数疑点或通用拥堵当成已确认根因。具体是该分组未配置、通道停用还是临时不可用，需供应商核对；未静默换组、换密钥或换模型。
+- 供应商定位编号：Banana 2 `20260928124217481731839G2B5NiyP`；Banana Pro `20260928124217895808079O0ya42d3`。供应商需为当前独立生图密钥所属分组配置/恢复gemini-3.1-flash-image-preview及gemini-3-pro-image-preview通道；本轮未代发给供应商。
+- GPT Image 2：40.922秒，HTTP200，4,202,706字节；Flare：34.784秒，HTTP200，3,649,872字节；Sunburst：42.991秒，HTTP200，3,827,989字节。均返回1张2560x1440 PNG，Sharp metadata及完整像素解码检查成功。时间包含返回图片/解码/落盘，不代表长期平均时长。未作画质评审。
+- [脱敏实测报告](../../docs/materials/2026-09-28-canvas-banana-503/model-probe-report.json)保存模型、状态、错误码/供应商请求编号、耗时、输出尺寸/字节数；测试脚本服务器`/tmp/sd2-image-model-probe-20260928.ts`，测试图片和报告服务器`/tmp/sd2-image-model-probe-1790599336206/`（临时且仅服务用户可读，未发布到资产库）。报告已下载归档，图片仍为临时测试产物。实际供应商账单未查询，不宣称失败免费或已退款。
+- 收尾：生产commit不变，sd2-gray.service active；不改业务代码、不发布、不升产品版本。保留既有审查文件脏改。守门员等价核对：测试范围/付费授权/正式目标/线上源码/独立凭据来源/不写用户数据及结果证据已核对；缺口是供应商通道恢复和原始复杂场景复测，非完整站点验收，分级误判无。
+
 ### 2026-09-25 大图长期加载
 
 | 编号 | 任务 | 完成标准 | 状态 |
