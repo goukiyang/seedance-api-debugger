@@ -3,7 +3,7 @@ import type { ImageStudioTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
-import { getImageGenerationApiSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
@@ -52,8 +52,6 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   }
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
-  const imageApi = await getImageGenerationApiSettings();
-  if (!isStudioImageGenerationProvider(imageApi.provider) || !isImageGenerationApiReady(imageApi)) throw new StudioError('图片专用 API 尚未配置', 503);
   await prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
@@ -77,6 +75,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     if (workspace && input.moduleRevision !== undefined && workspace.revision !== input.moduleRevision) throw new StudioError('模块已在其他页面更新，请刷新后核对', 409);
     const generation = resolveStudioModuleGenerationConfig(workspace, settings);
+    const imageApi = await getImageGenerationSettingsForModel(generation.model, tx);
+    if (!isStudioImageGenerationProvider(imageApi.provider) || !isImageGenerationApiReady(imageApi)) {
+      throw new StudioError(generation.model.startsWith('gemini-') ? 'Banana 专用通道尚未配置，请管理员在后台 API 设置填写专用 Key' : '图片专用 API 尚未配置', 503);
+    }
     const price = generation.prices[generation.model];
     if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
     let snapshotGlobalContext = settings.context;

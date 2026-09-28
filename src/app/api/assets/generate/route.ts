@@ -6,7 +6,8 @@ import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import {
   createImageGeneration,
-  getImageGenerationApiSettings,
+  getImageGenerationChannels,
+  selectImageGenerationSettings,
   ImageGenerationApiError,
   isImageGenerationApiReady,
 } from '@/lib/integrations/image-generation';
@@ -372,14 +373,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
     }
 
-    const settings = { ...await getImageGenerationApiSettings() };
+    const channels = await getImageGenerationChannels();
     const requestedModel = cleanString(input.model);
-    if (requestedModel && requestedModel !== settings.default_model) {
-      if (settings.provider === 'seedream' || !IMAGE_STUDIO_MODELS.includes(requestedModel as ImageStudioModel)) {
+    const selectedModel = requestedModel || channels.shared.default_model;
+    if (requestedModel && requestedModel !== channels.shared.default_model) {
+      const banana = requestedModel === 'gemini-3.1-flash-image-preview' || requestedModel === 'gemini-3-pro-image-preview';
+      if ((!banana && channels.shared.provider === 'seedream') || !IMAGE_STUDIO_MODELS.includes(requestedModel as ImageStudioModel)) {
         return NextResponse.json({ error: '当前图片接口不支持所选模型，请重新选择' }, { status: 400 });
       }
-      settings.default_model = requestedModel;
     }
+    const settings = selectImageGenerationSettings(channels, selectedModel);
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
     const referenceLimit = settings.provider === 'seedream'
       ? SEEDREAM_REFERENCE_IMAGE_LIMIT
@@ -408,7 +411,7 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json({
         error: 'image_generation_api_not_configured',
-        message: '图形生成 API 未启用或缺少配置，请先到后台 API 设置保存 API 地址、模型和 API Key。',
+        message: selectedModel.startsWith('gemini-') ? 'Banana 专用通道未配置或未启用，请管理员在后台 API 设置中保存 Banana 专用 Key。' : '图形生成 API 未启用或缺少配置，请先到后台 API 设置保存 API 地址、模型和 API Key。',
       }, { status: 503 });
     }
 

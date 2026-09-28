@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { getImageGenerationApiSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { uploadAsset } from '@/lib/assets/storage';
 import { claimStudioTask, finishStudioTask } from './tasks';
 import { requestStudioImages, StudioProviderError } from './provider';
@@ -15,7 +15,7 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
   try {
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
-    const settings = await getImageGenerationApiSettings();
+    const settings = await getImageGenerationSettingsForModel(task.model);
     if (!isStudioImageGenerationProvider(settings.provider) || !isImageGenerationApiReady(settings)) throw new Error('图片专用 API 暂不可用');
     const images = [];
     for (const id of JSON.parse(task.reference_ids) as string[]) {

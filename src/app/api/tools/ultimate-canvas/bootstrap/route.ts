@@ -9,7 +9,8 @@ import {
   isMuskApiReady,
 } from '@/lib/integrations/musk';
 import {
-  getImageGenerationApiSettings,
+  getImageGenerationChannels,
+  selectImageGenerationSettings,
   isImageGenerationApiReady,
 } from '@/lib/integrations/image-generation';
 import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
@@ -98,11 +99,12 @@ export async function GET(request: NextRequest) {
     throw error;
   }
 
-  const [muskSettings, imageSettings, h3Settings] = await Promise.all([
+  const [muskSettings, imageChannels, h3Settings] = await Promise.all([
     getMuskApiSettings(),
-    getImageGenerationApiSettings(),
+    getImageGenerationChannels(),
     getH3ApiSettings(),
   ]);
+  const imageSettings = selectImageGenerationSettings(imageChannels, imageChannels.shared.default_model);
   const videoConfig = getProviderConfig();
   const h3VideoConfig = safeH3ConfigDto(h3Settings);
   const creditSummary = await prisma.$transaction((tx) => getCreditSummary(tx, user));
@@ -305,7 +307,10 @@ export async function GET(request: NextRequest) {
     || null;
 
   const textReady = isMuskApiReady(muskSettings);
-  const imageReady = isImageGenerationApiReady(imageSettings);
+  const imageModels = imageChannels.shared.provider === 'seedream'
+    ? [imageChannels.shared.default_model, 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview']
+    : Array.from(new Set([...IMAGE_STUDIO_MODELS, imageChannels.shared.default_model]));
+  const imageReady = imageModels.some(model => isImageGenerationApiReady(selectImageGenerationSettings(imageChannels, model)));
   const imageLabel = imageModelLabel(imageSettings.provider, imageSettings.default_model);
   const seedanceVideoReady = isApiKeyConfigured();
   const videoReady = seedanceVideoReady || h3VideoConfig.ready;
@@ -374,10 +379,11 @@ export async function GET(request: NextRequest) {
         label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,
-        model_options: (imageSettings.provider === 'seedream' ? [imageSettings.default_model] : Array.from(new Set([...IMAGE_STUDIO_MODELS, imageSettings.default_model]))).map(model => ({
+        model_options: imageModels.map(model => ({
           value: model,
           label: IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || imageModelLabel(imageSettings.provider, model),
-          capabilities: imageModelCapabilities(imageSettings.provider, model),
+          capabilities: imageModelCapabilities(selectImageGenerationSettings(imageChannels, model).provider, model),
+          ready: isImageGenerationApiReady(selectImageGenerationSettings(imageChannels, model)),
         })),
         size: imageSettings.default_size,
         output_format: imageSettings.output_format,

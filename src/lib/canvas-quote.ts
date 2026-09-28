@@ -3,7 +3,8 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
-import { getImageGenerationApiSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
+import { getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
+import { isGeminiImageModel } from '@/lib/image-generation/resolution';
 
 export type CanvasQuoteInput = {
   kind: 'image';
@@ -46,27 +47,30 @@ export function parseCanvasQuoteInput(value: unknown): CanvasQuoteInput {
 export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteInput) {
   assertInternalOnly(user, '外部账号无权使用无线画布。');
   await assertCanGenerateInProject(user, input.project_id);
-  const providerSettings = await getImageGenerationApiSettings();
+  const channels = await getImageGenerationChannels();
+  const providerSettings = selectImageGenerationSettings(channels, input.model);
   const studio = await getImageStudioSettings();
   const provider = providerSettings.provider;
-  const providerReady = isImageGenerationApiReady(providerSettings);
-  const models = provider === 'seedream'
-    ? [providerSettings.default_model]
-    : Array.from(new Set([...IMAGE_STUDIO_MODELS, providerSettings.default_model]));
+  const models = channels.shared.provider === 'seedream'
+    ? [channels.shared.default_model, ...IMAGE_STUDIO_MODELS.filter(isGeminiImageModel)]
+    : Array.from(new Set([...IMAGE_STUDIO_MODELS, channels.shared.default_model]));
   const maximumCount = provider === 'seedream' ? 1 : providerSettings.max_outputs_per_request;
   const quoteModel = (model: string) => {
+    const api = selectImageGenerationSettings(channels, model);
+    const providerReady = isImageGenerationApiReady(api);
+    const modelMaximumCount = api.provider === 'seedream' ? 1 : api.max_outputs_per_request;
     const studioModel = IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel);
-    const allowedModel = provider === 'seedream' ? model === providerSettings.default_model : studioModel;
-    const price = provider !== 'seedream' && studioModel ? studio.prices[model as ImageStudioModel] : null;
+    const allowedModel = api.provider === 'seedream' ? model === channels.shared.default_model : studioModel;
+    const price = api.provider !== 'seedream' && studioModel ? studio.prices[model as ImageStudioModel] : null;
     const estimated = typeof price === 'number' ? price * input.count : null;
     const reason = !allowedModel ? 'model_unavailable'
       : !providerReady ? 'provider_unavailable'
-        : input.count > maximumCount ? 'count_exceeds_limit'
+        : input.count > modelMaximumCount ? 'count_exceeds_limit'
           : typeof price !== 'number' || !Number.isSafeInteger(price) || price < 0
             || estimated === null || !Number.isSafeInteger(estimated) ? 'price_unconfigured' : null;
     return {
       model,
-      label: studioModel ? IMAGE_STUDIO_MODEL_LABELS[model as ImageStudioModel] : (provider === 'seedream' ? 'Seedream 5.0 Pro' : model),
+      label: studioModel ? IMAGE_STUDIO_MODEL_LABELS[model as ImageStudioModel] : (api.provider === 'seedream' ? 'Seedream 5.0 Pro' : model),
       status: reason ? 'unavailable' as const : 'estimate' as const,
       reason,
       unitCredits: reason ? null : price,

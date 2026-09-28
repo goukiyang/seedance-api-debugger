@@ -1,11 +1,12 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { isValidImageDimension } from '@/lib/image-generation/resolution';
+import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
 import { requestStudioImages, StudioProviderError, type StudioImageInput } from '@/lib/image-studio/provider';
 import { readStudioImage, normalizeStudioImage } from '@/lib/image-studio/media';
 
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
+export const BANANA_IMAGE_API_SETTING_KEY = 'banana_image_api_v1';
 
 export const IMAGE_GENERATION_PROVIDERS = ['musk', 'ai_media_vip', 'seedream'] as const;
 export const DEFAULT_MUSK_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
@@ -233,15 +234,43 @@ export function normalizeImageGenerationApiSettings(value: unknown): ImageGenera
 
 export async function getImageGenerationApiSettings(
   client: Prisma.TransactionClient | typeof prisma = prisma,
+  channel: 'default' | 'banana' = 'default',
 ): Promise<ImageGenerationApiSettings> {
-  const setting = await client.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_API_SETTING_KEY } });
-  if (!setting) return DEFAULT_IMAGE_GENERATION_API_SETTINGS;
+  const fallback = channel === 'banana'
+    ? { ...DEFAULT_IMAGE_GENERATION_API_SETTINGS, max_outputs_per_request: 8 }
+    : DEFAULT_IMAGE_GENERATION_API_SETTINGS;
+  const setting = await client.platformSetting.findUnique({ where: { key: channel === 'banana' ? BANANA_IMAGE_API_SETTING_KEY : IMAGE_GENERATION_API_SETTING_KEY } });
+  if (!setting) return fallback;
 
   try {
-    return normalizeImageGenerationApiSettings(JSON.parse(setting.value_json));
+    const value = JSON.parse(setting.value_json);
+    return normalizeImageGenerationApiSettings(channel === 'banana'
+      ? { ...value, provider: 'musk', default_model: DEFAULT_MUSK_IMAGE_MODEL }
+      : value);
   } catch {
-    return DEFAULT_IMAGE_GENERATION_API_SETTINGS;
+    return fallback;
   }
+}
+
+export async function getImageGenerationChannels(client: Prisma.TransactionClient | typeof prisma = prisma) {
+  const [shared, banana] = await Promise.all([
+    getImageGenerationApiSettings(client),
+    getImageGenerationApiSettings(client, 'banana'),
+  ]);
+  return { shared, banana };
+}
+
+// A missing Banana key must never silently use the shared image/LLM credential.
+export function selectImageGenerationSettings(
+  channels: Awaited<ReturnType<typeof getImageGenerationChannels>>,
+  model: string,
+): ImageGenerationApiSettings {
+  return { ...(isGeminiImageModel(model) ? channels.banana : channels.shared), default_model: model };
+}
+
+export async function getImageGenerationSettingsForModel(model: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  const settings = await getImageGenerationApiSettings(client, isGeminiImageModel(model) ? 'banana' : 'default');
+  return { ...settings, default_model: model };
 }
 
 export function buildImageGenerationApiSettingsPatch(

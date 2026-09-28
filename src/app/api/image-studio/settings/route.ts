@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { getImageStudioSettings, saveImageStudioSettings, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/settings';
-import { getImageGenerationApiSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,13 +11,17 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
     const settings = await getImageStudioSettings();
-    const imageApi = await getImageGenerationApiSettings();
-    const providerReady = isStudioImageGenerationProvider(imageApi.provider) && isImageGenerationApiReady(imageApi);
+    const channels = await getImageGenerationChannels();
+    const modelReady = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => {
+      const api = selectImageGenerationSettings(channels, model);
+      return [model, isStudioImageGenerationProvider(api.provider) && isImageGenerationApiReady(api)];
+    }));
+    const providerReady = Object.values(modelReady).some(Boolean);
     return NextResponse.json({ model: settings.model, prices: settings.prices, ...(user.role === 'admin' ? {
       context: settings.context, revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
     } : {
       revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
-    }), providerReady }, { headers: { 'Cache-Control': 'no-store' } });
+    }), providerReady, modelReady }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json({ error: '读取设置失败，请重试' }, { status: 503 });
   }

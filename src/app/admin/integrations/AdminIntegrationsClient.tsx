@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
+import BananaImageChannel from './BananaImageChannel';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
@@ -1548,6 +1549,8 @@ export default function AdminIntegrationsClient() {
         )}
       </form>
 
+      <BananaImageChannel />
+
       <form className="card codex-config-form" onSubmit={saveImageConfig}>
         <div className="codex-config-head">
           <div>
@@ -1581,7 +1584,7 @@ export default function AdminIntegrationsClient() {
                 </option>
               ))}
             </select>
-            <small className="text-gray">图片生成只读取独立的 image_generation_api_v1；这里不会使用 GPT-5.5 的 Musk API 配置。</small>
+            <small className="text-gray">GPT Image 等模型使用此通道；Banana 2 / Pro 始终使用上方 Banana 专用通道，均不共用 GPT-5.5 的 Key。</small>
             <label className="form-label mt-3" htmlFor="image-default-model">图片模型</label>
             <select
               id="image-default-model"

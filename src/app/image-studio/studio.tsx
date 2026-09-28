@@ -10,7 +10,7 @@ import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-stud
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
-type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean; prices: Record<string, number | null> };
+type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean; modelReady?: Record<string, boolean>; prices: Record<string, number | null> };
 type StudioSnapshot = { prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number } | null };
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
@@ -143,6 +143,21 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const [settings, setSettings] = useState<SettingsValue | null>(null);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [settingsReload, setSettingsReload] = useState(0);
+  useEffect(() => {
+    let disposed = false;
+    const refreshAvailability = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const response = await fetch('/api/image-studio/settings', { cache: 'no-store' });
+        if (!response.ok) return;
+        const value: SettingsValue = await response.json();
+        if (!disposed) setSettings(current => current ? { ...current, providerReady: value.providerReady, modelReady: value.modelReady } : current);
+      } catch { /* Preserve drafts and last-known availability on transient errors. */ }
+    };
+    window.addEventListener('focus', refreshAvailability);
+    document.addEventListener('visibilitychange', refreshAvailability);
+    return () => { disposed = true; window.removeEventListener('focus', refreshAvailability); document.removeEventListener('visibilitychange', refreshAvailability); };
+  }, []);
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [presets, setPresets] = useState<StudioPreset[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(false);
@@ -724,7 +739,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
   }
   const moduleUnitCredits = settings?.prices?.[moduleModel] ?? module.prices[moduleModel] ?? null;
   const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
-  const ready = Boolean(settings?.providerReady && (settings.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && moduleContext === savedModuleContext);
+  const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
+  const ready = Boolean(selectedProviderReady && (settings?.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && moduleContext === savedModuleContext);
   const previewableTasks = tasks.filter(task => Boolean(task.asset));
   function openTaskPreview(task: StudioTask) { setPreview(studioTaskPreviewState(task)); }
   function movePreview(direction: -1 | 1) {
@@ -894,7 +910,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
         {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={() => {
           if (window.confirm('上次提交可能已成功，请先查看生成记录。确定放弃核对并开始新任务吗？')) { setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} }
         }}>放弃核对</button></p>}
-        {!ready && <p className={styles.muted}>{dirty ? '等待设置保存完成' : !settings?.providerReady ? '图片服务尚未就绪' : '请管理员先完成上下文和积分设置'}</p>}
+        {!ready && <p className={styles.muted}>{dirty ? '等待设置保存完成' : !selectedProviderReady ? moduleModel.startsWith('gemini-') ? 'Banana 专用通道尚未配置，请联系管理员' : '图片服务尚未就绪' : '请管理员先完成上下文和积分设置'}</p>}
       </section>
       <section className={styles.outputs} aria-label="生成结果">
         <header className={styles.header}><h2>生成结果</h2><div className={styles.counts}>
