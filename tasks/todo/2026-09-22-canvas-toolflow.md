@@ -420,6 +420,13 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 - 发布源码eb709ce1e99db992108020ee919363cc1d96fe41，候选构建通过（仅既有警告），线上BUILD_ID `_PDcwH-ipZG9FuEDZGGOG`；服务active、本机/公网config、login、release正常，公网版本0.15.4。image-studio引用的共享chunk `/_next/static/chunks/5017-267e2d2add9aa718.js` 返回200并含wheel、passive:false、stopImmediatePropagation和touchmove。更新提醒沿用ReleaseNotice，摘要已对应本次修复，不强制刷新；未做旧客户端弹窗或真实鼠标操作测试。
 - 回退tag `rollback/2026-09-25-before-preview-isolation` 已推送，服务器旧构建 `.next-prod-before-eb709ce` 保留，无数据库和计费改动。原有审计文件脏改和临时目录未覆盖。本轮守门员：execution + deployment，缺口为真实页面验收与P3现场证据，分级误判无。
 
+### 2026-09-28 画布 Banana Pro 503 排查
+
+- 用户截图：[Banana Pro生成失败](../../docs/materials/2026-09-28-canvas-banana-503/codex-clipboard-724cf0f5-2cfe-4d3e-877c-eacd6a0029f7.jpg)，5参考图、2K/16:9、2张。2026-09-28读取线上v0.18.0，commit 5a125358214359e135676c4f982c383ed90b3291，sd2-gray.service active；未覆盖新版本。
+- 运行代码中截图文案来自StudioProviderError的上游HTTP状态，不是本站缩略图/原图读取错误。nginx本地时间15:20:41记录POST /api/assets/generate返回502；15:22:29同入口200，OperationLog记录musk/gpt-image-2.5-sunburst成功。根据时间和截图可对应到本次故障，但缺少请求ID，不能证明两个请求属于同一人。
+- 已确认上游生图请求返回503；上游响应正文和请求ID没有留存，无法进一步确认拥堵、通道或供应商内部故障，不能宣称已修复或Banana Pro已恢复。未自动重试、切换用户模型、付费生成、修改积分/配置/生产数据或部署。
+- 待补：生图Provider错误记录安全白名单字段（状态、供应商错误码、request-id、耗时），避免记录提示词、参考图、密钥、完整返回；画布失败记录当前未覆盖ImageGenerationApiError分支。实施需以最新线上版本为来源，不能整体发布旧工作区。本站/供应商本次扣费状态未核实，不宣称已退款。
+
 ### 2026-09-25 大图长期加载
 
 | 编号 | 任务 | 完成标准 | 状态 |
