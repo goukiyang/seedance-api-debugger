@@ -2,7 +2,7 @@
 
 ## 1. 大白话目标复述
 
-文档版本：1.0.0。日期：2026-09-29。项目：Seedance 内部生成平台（video-api-debugger）。
+文档版本：1.1.0。日期：2026-09-29。项目：Seedance 内部生成平台（video-api-debugger）。
 
 用户需求：沿用图片生成的模板使用方式，把图片和视频放进同一个工作台，分成两个大类；视频类既能只做提示词，也能继续生成视频。成功标准是同事从找模板到取到产物不需要重新拼接素材、提示词和后台参数，失败后能继续，费用和历史能对上。
 
@@ -28,7 +28,7 @@
 | `prisma/schema.prisma` 的 `AgentRun`、`VideoTask` | 提示词快照、模板关联、任务防重键 | AgentRun 只有一个 `video_task_id` 且随模板级联删除；需要解决一份提示词多次生成与模板归档后的追溯 |
 | `src/app/api/tasks/create/route.ts`、`src/lib/tasks/seedance-draft-upgrade.ts`、`src/lib/video/delivery-*.ts` | 既有任务创建、Draft 升级、视频交付 | 必须复用正式链路，不能增加独立扣费、轮询、下载系统 |
 
-外部方案核对：已阅读 [Handlebars 变量表达式官方说明](https://handlebarsjs.com/guide/expressions.html)，可借鉴变量填空方式；本轮未读其库实现、未安装、未验证适配，不将其列为必装依赖。首期优先复用本项目模板组合、React 表单、Prisma 及 lucide-react；只有变量规则确实超出现有实现时才另评估包版本、许可证与成本。
+外部方案核对：初版只读了 [Handlebars 变量表达式官方说明](https://handlebarsjs.com/guide/expressions.html)，不足以决定采用。1.1.0 已补读六个候选项目的相关源码、包声明及许可证，比较结论见1.5；均未安装、未做本项目运行兼容验证，不将源码可用等同接入成功。
 
 ### 1.2 入口和页面安排
 
@@ -117,21 +117,65 @@ flowchart TD
 - 正式视频仍调用 `/api/tasks/create`、`/api/video/status/[id]`、`/api/video/play/[id]`、`/api/video/download/[id]`；升级复用 `/api/tasks/[id]/draft-upgrade`。不复制另一套外部生成后台，不改既有 Codex 外部 API 契约。
 - 普通客户端只收到有权查看的模板内容、资产投影、模型能力与价格；不返回服务端路径、Key、完整诊断请求、其他用户历史或管理员专用上下文。
 
+### 1.5 开源方案复查与更省成本的路线
+
+本节回应用户2026-09-29“有没有其他最优解，例如开源方案和代码”。推荐是当前需求和已读代码下的工程判断，不宣称所有方案都经过运行比较。
+
+**结论：统一模板配方和使用体验，复用两个既有生成系统；借鉴开源成熟机制，不部署第二套平台。** 现有后台已承担身份、素材、点数、异步视频、交付与Draft升级，整套替换并不能省掉这些对接。只复制页面也不够，因为提示词历史、权限和结果恢复仍需打通。
+
+| 路线 | 能省什么 | 新增成本／缺口 | 当前判断 |
+|---|---|---|---|
+| 只复制图片页面做视频页 | 初始排版快 | 容易复制第二套草稿、状态和权限；无法解决现有假LLM和历史关系 | 不选作为完整实现方案 |
+| Dify等完整工作流平台 | 图形编排、多步执行与管理能力 | 需额外运维、身份映射、视频异步适配、账务对账；许可也不能当纯Apache处理 | 当前两大类模板不需要这一级平台 |
+| 本站外壳 + 开源库全面重搭 | 表单、LLM与模板都有现成工具 | 多个新依赖、默认行为差异、旧功能回归，未必比既有代码少 | 按实际缺口选择，不整套引入 |
+| 本站外壳 + 既有执行链路 + 有限借鉴 | 最大限度保留已用的后台，补模板和历史缺口 | 仍需实现专属素材表单、快照与权限，不能省掉验收 | 首期推荐 |
+
+#### 1.5.1 实际源码核对
+
+以下为2026-09-29读取的仓库快照。版本是对应源码的包声明／compose镜像声明，不保证等于npm最新已发布稳定版；采用前重新核对发行版、安全公告与锁定版本。维护日期取默认分支最近提交，只反映当时活跃度，不代表安全认证。
+
+| 方案 | 已读代码与事实 | 适配／许可证／维护 | 使用决定 |
+|---|---|---|---|
+| Dify | [模板执行辅助层](https://github.com/langgenius/dify/blob/e6f1d77ed5869e659e426b5459439d44bdabdbe5/api/core/helper/code_executor/template_transformer.py)有代码与输入编码、运行结果解码；[部署文件](https://github.com/langgenius/dify/blob/e6f1d77ed5869e659e426b5459439d44bdabdbe5/docker/docker-compose.yaml)包含API、worker、web、数据库、Redis、sandbox等，另有可选服务，不是所有列出的服务都必须启动 | Python后台而本站是Next/Prisma/SQLite；镜像声明1.17.1，最近提交09-28。[LICENSE](https://github.com/langgenius/dify/blob/e6f1d77ed5869e659e426b5459439d44bdabdbe5/LICENSE)有多租户和前端标识附加条件，具体适用需核对 | 暂不引入；真正需要用户自由连节点、条件分支、循环时再评估，不为两类模板加工作流平台 |
+| Langfuse | [createPrompt](https://github.com/langfuse/langfuse/blob/536c2d6905d4311cc7c2b177454a084907328c43/web/src/features/prompts/server/actions/createPrompt.ts)有项目内版本递增、标签、变量名冲突和版本唯一性冲突识别；[部署文件](https://github.com/langfuse/langfuse/blob/536c2d6905d4311cc7c2b177454a084907328c43/docker-compose.yml)另含Postgres、ClickHouse、Redis、MinIO、web/worker | 核心[MIT、ee目录另有条款](https://github.com/langfuse/langfuse/blob/536c2d6905d4311cc7c2b177454a084907328c43/LICENSE)；最近提交09-28。其Prisma代码依赖自家服务，不能直接拷来接SQLite | 借鉴不可变版本与发布指针；不部署。以后确有跨团队提示词评估、追踪需求再接观测，不让它与本站争当模板唯一来源 |
+| Vercel AI SDK | [兼容Provider](https://github.com/vercel/ai/blob/76303af79af8a4e92e7a2f9d4845e88b8249d8c4/packages/openai-compatible/src/openai-compatible-provider.ts)可配置baseURL、headers、fetch；[prepare-retries](https://github.com/vercel/ai/blob/76303af79af8a4e92e7a2f9d4845e88b8249d8c4/packages/ai/src/util/prepare-retries.ts)默认最多重试2次 | [Apache-2.0](https://github.com/vercel/ai/blob/76303af79af8a4e92e7a2f9d4845e88b8249d8c4/LICENSE)；快照ai7.0.118、compatible3.0.57要求Node>=22及Zod peer；最近提交09-28。尚未证明当前Muskapis完整兼容 | 首期复用`musk.ts`；需要多Provider、流式或统一结构化输出时再引入服务端适配，不替换视频任务。若采用，付费且受理不明的调用显式禁自动重试，再由应用查状态恢复 |
+| React JSON Schema Form（RJSF） | [SchemaField](https://github.com/rjsf-team/react-jsonschema-form/blob/b1e39dc1f4d1d94c48be30268fa31c6299fe4c97/packages/core/src/components/fields/SchemaField.tsx)按schema类型选字段，支持自定义field注册与组合schema | [包声明](https://github.com/rjsf-team/react-jsonschema-form/blob/b1e39dc1f4d1d94c48be30268fa31c6299fe4c97/packages/core/package.json)6.10.1、React>=18、Node>=20；[Apache-2.0](https://github.com/rjsf-team/react-jsonschema-form/blob/b1e39dc1f4d1d94c48be30268fa31c6299fe4c97/LICENSE.md)；最近提交09-24。还需utils、validator和本站样式适配，素材组件仍得自做 | 当前有限字段先复用现有控件；出现大量嵌套/条件表单再优先做RJSF适配实验，不重写完整通用表单引擎 |
+| Mustache.js | [mustache.js](https://github.com/janl/mustache.js/blob/972fd2b27a036888acfcb60d6119317744fac7ee/mustache.js)有parse/render；默认HTML转义；lookup会调用函数值、section支持函数，不能因“logic-less”就当任意输入安全 | [MIT](https://github.com/janl/mustache.js/blob/972fd2b27a036888acfcb60d6119317744fac7ee/LICENSE)；[4.2.0包声明](https://github.com/janl/mustache.js/blob/972fd2b27a036888acfcb60d6119317744fac7ee/package.json)无运行依赖；默认分支最近提交2023-01-21，维护较慢，安全状态未审计 | 纯结构化字段拼接不必引入；若必须支持用户写`{{变量}}`，再评估成熟解析器及受限语法，不自己用多层正则造语言 |
+| promptfoo | [json断言](https://github.com/promptfoo/promptfoo/blob/2e4328646517239e7edbdac8d0fa1f040981374a/src/assertions/json.ts)解析输出后可用Ajv验证结构；[regex断言](https://github.com/promptfoo/promptfoo/blob/2e4328646517239e7edbdac8d0fa1f040981374a/src/assertions/regex.ts)针对输出，不是搜索源码字符串 | [MIT](https://github.com/promptfoo/promptfoo/blob/2e4328646517239e7edbdac8d0fa1f040981374a/LICENSE)；[包声明](https://github.com/promptfoo/promptfoo/blob/2e4328646517239e7edbdac8d0fa1f040981374a/package.json)0.123.1、Node>=22.22.0、76个直接依赖；最近提交09-28 | 可用于后续开发侧批量提示词评估，不进生产前端。首期复用tsx smoke和固定样例；真实模型评估单独给预算，不默认上传私有素材／提示词 |
+
+没有测量任何候选的实际压缩包、浏览器增量或生产内存，不填虚构体积／耗时／节省比例。上述依赖数不是打包大小。RJSF、AI SDK等若采用，应先在隔离分支对比构建增量、类型兼容、错误恢复与既有样式，检查通过才批准进入实现。
+
+#### 1.5.2 对原规划的收紧
+
+1. **模板是配方，不是新的工作流。** 一份配方描述固定要求、用户输入、素材槽位、推荐参数和可用动作。采用共享的有类型数据边界，图片和视频各自适配；不合并数据库表、不引任意代码执行、循环、工具调用或用户自定义API地址。
+2. **“只要提示词”是本次动作，不是必须建立的第三种模板对象。** 视频模板可声明默认动作和支持动作；整理出的提示词能继续生成。没有对应生成能力的提示词模板仍能保存，但转视频前走普通能力校验。保持1.4输出意图的用途，不让用户为同一配方维护两份副本。
+3. **先做少量明确输入，避免造完整表单框架。** 建议首期文本、多行文本、单选、数值、开关，加独立素材槽位；必填、长度、选项、上下限前后端一致校验。表单结构与界面样式分开，后续需要RJSF时可接适配器；远程`$ref`、任意JS、可执行字段配置均不开放。
+4. **提示词按结构化内容块组合。** 复用`workbench.ts`已有prompt blocks/context cards与`template-plans.ts`组合边界，字段值作为数据插入一次，不递归解释用户文本。首期不要求用户学习Mustache/Handlebars。若未来开放模板语法，要限定标识符、允许的字段和语法，禁函数/partials/未声明访问，限制输入及输出长度；纯文本发送不做HTML实体转义，界面仍用React文本安全展示，不用raw HTML。
+5. **版本和发布分开。** 借鉴Langfuse机制，本站数据库是唯一权威来源；已发布版本不可变，个人草稿另存。应用模板时固定版本，不能每次提交自动取latest；发布指针切换不改历史。并发发布靠唯一约束和事务/冲突反馈，不只“查最大版本再+1”。不复制Langfuse整套依赖图与数据库服务。
+6. **LLM只是可选一步。** 普通模板展开零模型请求；AI整理沿用现有文字通道，提示词确认后再由用户生成视频。应用层防重只能防自己重复发，不能保证不支持查询/防重的上游在超时后未执行；这种情况保留“结果待确认”，禁止SDK或页面自动再投递。
+7. **固定样例先于引入评估平台。** 准备有权限的文字、素材、首尾帧、缺变量、转义字符、恶意模板和模型不兼容样例；离线检查字段、引用、归属、输出结构与请求次数，人工检查提示词是否忠于意图。结构通过不等于视频质量通过，Mock通过不等于上游实际兼容。
+
+采用顺序是“已有实现能满足就复用 → 确有重复复杂逻辑才选单个成熟库 → 真实需要跨步骤编排才评估整套平台”。不因本表列出了候选而默认安装；不开新后台、不新增账号体系、不绕开现有点数与媒体交付。
+
 ## 2. 具体可执行任务
 
 实施状态全部未开始。顺序为 T01 → T02/T03 → T04/T05 → T06 → T07 → T08 → T09；有依赖的任务不并行共改文件。整批实现及关联测试代码完成后统一验证，失败汇总后整批修正。
 
 - [ ] T01. 锁定生产来源与入口契约。
   - 读取 `AGENTS.md`、本规划、图片／Draft专项、`src/components/GenerationComposer.tsx`、两套模板 API；核对生产提交及并行工作。将两大类 URL、旧入口映射、角色权限、文字计费现状和模型能力整理成实施契约。
+  - 按1.5锁定首期有限字段、配方与动作的关系，以及不新增依赖的默认路线；需要候选库时先核对稳定发行版、Node/React/锁文件、许可证、安全信息与构建增量，不安装仓库main快照冒充稳定版。
   - 完成标准：模板库、模块、提示词历史、视频结果、维护入口都可定位；现有付费与分享规则有来源，未确认的新业务策略不伪装为既有规则。
 - [ ] T02. 补视频草稿、模板版本与提示词历史。
   - 在 `prisma/schema.prisma`、`prisma/migrations/`、`src/lib/templates/`、`src/lib/agent-plans/` 增量实现 1.4；支持保存、恢复、编辑版本、归档与一对多任务关系。
+  - 固定应用时的模板版本；发布指针、用户草稿、运行快照分离。并发发布有唯一性和冲突处理，禁止只查询最新版本后无保护地递增。
   - 完成标准：刷新／换设备可恢复自己的草稿；另存私有模板不公开内容；修改模板不改历史；旧模板/AgentRun 可继续读；冲突不覆盖；迁移前后计数、关系、空值及恢复方案可核验。生产迁移单独走明确授权与备份关卡。
 - [ ] T03. 做统一工作台外壳和兼容入口。
   - 拟新增 `src/app/template-studio/page.tsx`；复用并小范围拆分 `src/app/image-studio/studio.tsx` 与 `src/components/templates/`，修改实际导航组件（实施时定位），保留 `/image-studio`、`/templates`、`/template-generate` 的 ID、筛选和返回参数。
+  - 共享目录/筛选/有限字段组件，图片和视频分别适配，素材槽位沿用本站权限与上传。首期不做任意schema编辑器，不复制RJSF完整表单引擎。
   - 完成标准：两大类、个人分组、搜索、模板应用、个人草稿保存与恢复可用；现有图片功能无减项；旧链接不死路；模板和任务长列表分批加载。视频封面与人物头像符合项目规则。
 - [ ] T04. 实现真实文字模型整理和直接套用两条路径。
   - 在 `src/app/api/agent/template-plans/route.ts`、`src/lib/agent-plans/template-plans.ts` 及相关 run API 接入 `src/lib/integrations/musk.ts`；保留老规则调用契约，新增持久执行、防重、超时与结果校验；不能把管理员配置生成接口直接开放给普通用户。
+  - 按1.5结构化内容块一次性插入字段，阻止模板代码执行；保留纯文本字符，不把HTML转义后的字符串发给模型。沿用现有文字wrapper；确需SDK时显式确定重试策略、超时和usage映射，结果未知不自动重发。
   - 完成标准：规则模式零上游请求；LLM 模式确实使用后台配置，文本可编辑、保存、复制和继续生成；取消/断线后能查询已受理结果；超时不自动重复扣费；文字价格缺配置时直接套用仍可用。
 - [ ] T05. 打通素材、权限和提交前校验。
   - 复用 `src/lib/assets/`、现有上传／模板受控素材接口、`src/lib/image-studio/access.ts` 的已适用规则；视频素材新增角色时不要复用仅 image 的校验器。所有新入口和旧兼容入口复用服务端同一授权判断。
@@ -144,6 +188,7 @@ flowchart TD
   - 完成标准：离开再回仍见进行中/失败任务；文件保存与缩略图状态真实；原图/视频下载完整且可读；同一任务各入口一致；下载故障不重复生成；复用从快照新建草稿；空间或入库问题有维护入口和审计记录。
 - [ ] T08. 完成统一验收、修正和固定审核。
   - 新增 `scripts/template-studio-contract-smoke.ts` 与 `scripts/template-studio-flow-smoke.ts`（拟定），以行为/数据库/API契约为断言，不照抄源码；与下节已有回归纳入实际发布检查入口。多角色和 UI 路径按 V01–V14 执行。
+  - V03补`& < > 引号 花括号`文本保真、未知/缺失字段与禁止执行输入；V05补应用版本固定和并发发布；V08捕获网络故障时真实出站次数。任何可选库需要和原路线用同一组样例对比；promptfoo不作为本期强制依赖。
   - 完成标准：同一候选版本全部必要检查有证据，问题整批修复复测；固定审核线程只读审查通过。付费真实验收需新的明确预算，前一轮 Banana 单张20点授权已用尽，不转用于本功能。
 - [ ] T09. 按生产流程发布并交付。
   - 重核生产有效版本后按兼容新增能力升 MINOR，不现在预占版本号；复用 `src/lib/release.ts` 与现有升级弹窗。聚焦提交、push和远端回退点，候选构建保留旧产物与数据回退方案。
@@ -236,13 +281,15 @@ npx --no-install tsx scripts/template-studio-flow-smoke.ts
 - A06 [Draft升级既有规划](2026-09-22-seedance-draft-1080p.md)：草稿到1080p的专项边界与当前记录。
 - A07 [资料索引](../../docs/materials/index.md)、`tasks/lessons.md`：已提供素材入口及模板上下文、引用顺序等历史教训。
 - A08 现有模板示例图/视频：本轮未挑选或复制；实施T01按模板ID在正式站授权范围确认。只有明确选作模板示例的媒体随工单附上资产ID、用途和受控链接；不传播私人历史结果或临时签名下载地址。
+- A09 本文1.5.1的六组固定提交源码、包声明、许可证与部署文件：用于技术选型与风险核对，已在线读取相关实现；未安装或运行。Handlebars仅读文档，不冒充已读其实现。实施前重核将采用的稳定版本。
 
 以上本地源文件与Markdown入口已读取或存在性核对；没有新用户附件，不新增伪造截图/样片。跨机器执行随Git获取文档和源码；受保护示例需正常登录，不在工单放任何密钥。
 
 ### 4.2 本轮回执
 
-- 仅更新本规划、固定todo索引及工具生成的hygiene记录；恢复工具默认替换的原有进行中入口，保留旧任务原文。
-- 文档检查：确认任务依赖、V01–V14覆盖、现有参考路径与链接；`git diff --check` 作为格式验收。规划版本1.0.0，不升级应用0.19.0，不执行应用测试或部署。
+- 1.0.0初版：更新本规划、固定todo索引及工具生成的hygiene记录；恢复工具默认替换的原有进行中入口，保留旧任务原文。
+- 1.1.0补充：六个开源候选源码复查、三种替代路线与推荐路线、有限字段/配方/动作边界、模板版本并发及SDK重试风险，落实到T01/T02/T03/T04/T08；只修改本规划和固定todo入口，不改业务与依赖。
+- 文档检查：确认任务依赖、V01–V14覆盖、现有参考路径与链接；`git diff --check` 作为格式验收。规划版本1.1.0，不升级应用0.19.0，不执行应用测试或部署。依赖安全审计、实际打包体积、Provider兼容实测尚未执行。
 - 本轮分级/归类误判记录：无。独立实施审核未执行，留待候选产物完成后按3.3办理。
 
 ### 4.3 给后续执行者的交接正文
@@ -251,8 +298,9 @@ npx --no-install tsx scripts/template-studio-flow-smoke.ts
 图片视频模板工作台落地
 项目：Seedance 内部生成平台（video-api-debugger）。
 生产源：/Volumes/Data/Projects/video-api-debugger-v12-full-todo；先核对线上最新提交，再确定隔离执行工作树。
-规划：tasks/todo/2026-09-29-unified-image-video-template-workbench.md，版本1.0.0；固定入口tasks/todo.md。
-先读第1节代码事实与第4.1节A01–A08参考，按T01–T09推进。图片/视频两大类，视频支持独立提示词及后续生成，复用同一后台。
+规划：tasks/todo/2026-09-29-unified-image-video-template-workbench.md，版本1.1.0；固定入口tasks/todo.md。
+先读第1节代码事实与第4.1节A01–A09参考，按T01–T09推进。图片/视频两大类，视频支持独立提示词及后续生成，复用同一后台。
+执行1.5选型结论：首期复用本站组件与执行链，提示词是视频配方的可选动作；不部署Dify/Langfuse，不默认引入SDK或表单库。若确有缺口按对应候选的兼容、安全、许可证与成本关卡再采用。
 重点补真实LLM、个人草稿/模板、素材与首尾帧透传、费用防重、历史快照、交付与Draft升级，不扩大旧共享范围。
 全部关联实现和测试代码完成后统一跑第3节及V01–V14；固定审核001只读审查，不能把Mock当真实付费验收。
 当前只批准了规划。执行以届时明确指令为准；真实付费、生产迁移/覆盖和权限扩大单独核对授权，遇不可恢复数据影响停受影响步骤。
