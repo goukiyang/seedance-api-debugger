@@ -9,6 +9,9 @@
   - 固定审核为`019f44c6-64d3-7753-acd0-f31fc16763fb`，当前工具缺任务消息入口；未提交，不能用内部执行回执冒充。三国媒体审核另归其审核01。
   - 2026-09-28统一本地检查：新增duration及model/edit/draft/upload/provider-error共6项通过，TypeScript未报错，构建完成。reference-media-resolution-guard在`fillMissingAssetDimensions`源码断言失败、IP模型smoke在旧`VolcengineIpModelOption`类型名断言失败，两者已在未改的97d48e8工作树复现；不删断言假装全绿，不在本任务重写上传或IP模型。嵌套worktree导致ESLint读入父仓配置冲突，补本仓`.eslintrc.json`的`root:true`隔离；无规则关闭、依赖升级。待复测lint/tsc、服务器候选构建及页面确认。
   - F1素材任务、原件与批准身份图、全216条/1340ticks统计、费用授权及产物入口见`/Volumes/Data/Projects/三国/tasks/work-order-guanyu-replacement.md#f1-全动作长片识别与复刻试验2026-09-28`。本地代码/线上能力/真实生成/视觉复刻四层分别验收，不因时长入口完成即关闭F1。
+  - 发布回执：代码`5a125358214359e135676c4f982c383ed90b3291`已推送本任务分支，rollback标签`rollback/2026-09-28-before-seedance25-duration30`指向97d48e8并已推送。2026-09-28约12:59正式`/api/release`=0.18.0，BUILD_ID`9RCHEM-om35a3grUXJu70`；归档sha256`ea39f531a9a37938d44ea8545732e1bc65c4a359f99f343dae8883f614d50d3e`，服务器release目录为完整commit，旧源码/旧构建在`/srv/video-api-debugger/backups/duration30-20260928`。依赖/DB/认证配置未改，运行目录软链保留，service active/running/NRestarts=0。
+  - 本地复测lint通过（既有React/img告警）、tsc exit0；服务器候选构建通过。真实Codex普通账号GET `/api/codex/config`=200/ready、2.5时长[4..30]；估价2.5/30=200/135，2.5/31和2.0/30=400，2.0/15=200/45，无认证401。公网config/login=200且`X-SD2-Origin: server-42-193`，manifest中的`5957-c992dc6cb909b946.js`公网200，含“待确认时长”“已保留你选择的”和2.5模型ID。没有付费create或上传调用。
+  - 未闭环：真实Chrome UI及旧客户端升级交互缺证，BrowserSkill无用户tab、ClickOps auto-connect Connection closed、CUA app-server缺失；固定审核001消息工具不可用，未送审/无回执。P1保持未勾选；不能写“页面审核通过/30秒上游生成成功”。媒体F1另待135积分单次授权，输入参考总30上游限制亦待真实验证。本条后续仅记录回执，不改变已发布代码commit。
 
 - [ ] 2026-09-22：Seedance 2.5 Draft 到 1080p 直出，正文见 `tasks/todo/2026-09-22-seedance-draft-1080p.md`。
 
