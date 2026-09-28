@@ -426,6 +426,7 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 - 运行代码中截图文案来自StudioProviderError的上游HTTP状态，不是本站缩略图/原图读取错误。nginx本地时间15:20:41记录POST /api/assets/generate返回502；15:22:29同入口200，OperationLog记录musk/gpt-image-2.5-sunburst成功。根据时间和截图可对应到本次故障，但缺少请求ID，不能证明两个请求属于同一人。
 - 已确认上游生图请求返回503；上游响应正文和请求ID没有留存，无法进一步确认拥堵、通道或供应商内部故障，不能宣称已修复或Banana Pro已恢复。未自动重试、切换用户模型、付费生成、修改积分/配置/生产数据或部署。
 - 待补：生图Provider错误记录安全白名单字段（状态、供应商错误码、request-id、耗时），避免记录提示词、参考图、密钥、完整返回；画布失败记录当前未覆盖ImageGenerationApiError分支。实施需以最新线上版本为来源，不能整体发布旧工作区。本站/供应商本次扣费状态未核实，不宣称已退款。
+- 2026-09-28追加核实独立API：线上assets/generate调用getImageGenerationApiSettings，读取image_generation_api_v1（enabled=true、provider=musk、base_url=https://api.muskapis.com/）；model-catalog把Banana Pro映射到gemini-3-pro-image-preview，节点input.model覆盖默认模型，Provider使用此配置base_url/api_key请求Gemini generateContent。image-studio worker也读取同一份独立生图配置。数据库内部仅比较密钥是否相同，结果different，对照musk_api_v1默认模型gpt-5.5；未读取或输出密钥正文。因此当前配置与代码链路确认生图与GPT-5.5不同Key，不代表已核实供应商账单是否分账户，也不补足503原请求日志缺失。
 
 ### 2026-09-25 大图长期加载
 
