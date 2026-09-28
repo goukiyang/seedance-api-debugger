@@ -436,6 +436,7 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 |---|---|---|---|
 | B1 | 增加 Banana 独立通道 | 后台可配置，两个模型统一使用独立配置，密钥不回显 | 已完成实现、类型/隔离检查与独立只读审查；实际Key由用户填写 |
 | B2 | 发布并核对生效链路 | 正式站能看到设置，画布和模板生成均按模型选通道 | 已发布0.19.0并核对公网新资源；登录态界面实点尚未验收 |
+| K1 | 写入生产 Banana 专用 Key | 独立通道启用；Gemini走专用配置、GPT与LLM保持原配置；操作日志脱敏 | 已完成配置与只读核验；未做付费生成 |
 
 - 用户已确认：为Banana 2/Pro单独配置Key，在后台提供输入通道并直接生效。线上5a125358214359e135676c4f982c383ed90b3291 / v0.18.0为本次源；独立工作区、分支codex/banana-image-channel-20260928，保护旧分支未发布修改。新增兼容能力版本0.19.0。
 - 复用PlatformSetting、现有管理员鉴权、图片Provider和后台表单样式；独立键banana_image_api_v1，无数据库迁移、不安装依赖。两个模型名字保持gemini-3.1-flash-image-preview和gemini-3-pro-image-preview；默认Musk地址与Gemini兼容协议，仅Key为空、通道未启用，不复制GPT/其他通道Key。
@@ -447,3 +448,4 @@ Git/发布：执行前检查当前线上和所有脏改，按文件/分块隔离
 - 本机/公网config及公网login均200，/api/release为0.19.0且摘要对应本次改动；公网后台实际manifest资源`/_next/static/chunks/6293-95fbf2ec60511463.js`返回200并包含Banana专用通道、保存按钮、Key输入与API路径；匿名访问新管理API返回JSON401。服务器执行同一模拟隔离检查通过，无真实生成或生产配置写入。
 - 回退：tag `rollback/2026-09-28-before-banana-channel`已推送，指向5a12535；服务器`/srv/video-api-debugger/backups/banana-channel-20260928`保留previous-build及source，无数据库迁移/数据回写。部署脚本为服务器`/tmp/sd2-banana-channel-deploy-20260928.sh`，全局部署登记与服务器锁实际启用。旧客户端沿用现有ReleaseNotice提醒与手动检查机制，不强制刷新；本轮未测试升级弹窗或恢复浏览器控制。
 - 固定审核线程结论：通过，无阻断；其环境无法运行tsx，但执行侧本机与生产服务器均已跑过不联网隔离检查。守门员等价检查完成：正式入口、当前生产来源、脏改隔离、管理员边界/不回显、无Key不回退、版本/归档/候选/回退、公网新资源均核对；缺口仅登录态实际表单操作及用户填入新Key后的真实出图，未冒充验证通过。分级误判无。
+- K1生产配置回执（2026-09-28）：用唯一有效管理员“杨波”写入并启用`banana_image_api_v1`，API地址为`https://api.muskapis.com/`，默认模型`gemini-3.1-flash-image-preview`。服务器内存比对确认保存值与本次输入Key相同，未回显/记录Key；两个Gemini图片模型读取Banana专用配置，三个GPT图片模型继续读取共享图形配置；`image_generation_api_v1`与`musk_api_v1`保持原值，`updated_by`与审计操作人均为“杨波”，操作日志只含脱敏状态字段。首次写事务后的命令包装器因stdin未结束未返回，未重跑写入；单独只读核验完整通过。临时Key文件和一次性脚本已清理；Web服务、图片队列均active，本机`/api/config`为200。未生成图片、未消耗额度、未部署/重启、未改应用代码；真实上游出图仍未验证。
