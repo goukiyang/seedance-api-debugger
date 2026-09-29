@@ -9,18 +9,22 @@ import { submitStudioBatch, listStudioTasks, parseStudioRequest, finishStudioTas
 import { changeStudioRatio, listStudioRatios } from '../src/lib/image-studio/ratio-preferences';
 import { getImageStudioSettings, saveImageStudioSettings } from '../src/lib/image-studio/settings';
 import { processStudioTask, recoverStudioTasks } from '../src/lib/image-studio/worker';
-import { defaultStudioModuleId, listStudioModules, saveStudioModule } from '../src/lib/image-studio/modules';
+import { defaultStudioModuleId, listStudioModules, resolveStudioModuleGenerationConfig, saveStudioModule } from '../src/lib/image-studio/modules';
+import { BANANA_IMAGE_API_SETTING_KEY, IMAGE_GENERATION_API_SETTING_KEY } from '../src/lib/integrations/image-generation';
 
 async function main() {
   if (!process.env.DATABASE_URL?.startsWith('file:/tmp/sd2-image-studio-test-')) throw new Error('Use an isolated /tmp/sd2-image-studio-test-* database');
+  process.env.FEISHU_ALLOWED_TENANT_KEY = 'image-studio-smoke-tenant';
   const working = await fs.mkdtemp(path.join(os.tmpdir(), 'sd2-image-studio-fixture-'));
   process.chdir(working);
-  const user = await prisma.user.create({ data: { id: 'image-test-owner', name: 'Test', username: 'image-test-owner', email: 'image-test@example.invalid', password_hash: 'not-a-login-password' } });
-  const stranger = await prisma.user.create({ data: { id: 'image-test-other', name: 'Test2', username: 'image-test-other', email: 'image-other@example.invalid', password_hash: 'not-a-login-password' } });
+  const user = await prisma.user.create({ data: { id: 'image-test-owner', name: 'Test', username: 'image-test-owner', email: 'image-test@example.invalid', password_hash: 'not-a-login-password', feishu_user_id: 'image-owner-fixture', feishu_tenant_key: 'image-studio-smoke-tenant' } });
+  const stranger = await prisma.user.create({ data: { id: 'image-test-other', name: 'Test2', username: 'image-test-other', email: 'image-other@example.invalid', password_hash: 'not-a-login-password', feishu_user_id: 'image-other-fixture', feishu_tenant_key: 'image-studio-smoke-tenant' } });
   await prisma.creditAccount.create({ data: { user_id: user.id, balance: 20 } });
-  await prisma.platformSetting.create({ data: { key: 'image_generation_api_v1', value_json: JSON.stringify({ enabled: true, provider: 'musk', base_url: 'https://example.invalid/', api_key: 'test-only', default_model: 'gemini-3.1-flash-image-preview' }) } });
+  for (const key of [IMAGE_GENERATION_API_SETTING_KEY, BANANA_IMAGE_API_SETTING_KEY]) {
+    await prisma.platformSetting.create({ data: { key, value_json: JSON.stringify({ enabled: true, provider: 'musk', base_url: 'https://example.invalid/', api_key: 'test-only', default_model: 'gemini-3.1-flash-image-preview' }) } });
+  }
   const initial = await getImageStudioSettings();
-  const config = await saveImageStudioSettings({ ...initial, context: 'Fixed studio context', prices: { ...initial.prices, 'gemini-3.1-flash-image-preview': 2, 'gpt-image-2.5-flare': 2, 'gpt-image-2.5-sunburst': null } }, user.id);
+  const config = await saveImageStudioSettings({ ...initial, context: 'Fixed studio context', prices: { ...initial.prices, 'gemini-3.1-flash-image-preview': 2, 'gpt-image-2.5-flare': 2, 'gpt-image-2.5-sunburst': 2 } }, user.id);
   assert.ok(config);
   assert.equal(await saveImageStudioSettings(initial, user.id), null, 'stale revision must conflict');
   const input = { requestId: 'test-request-12345678', prompt: 'Draw a square', count: 2, revision: config.revision, referenceIds: [] };
@@ -70,8 +74,8 @@ async function main() {
   const saved = await saveStudioModule(user.id, { ...moduleBody, revision: ordinarySaved.revision }, false, true);
   assert.equal(saved.aspectRatio, '5:3');
   assert.equal(saved.model, 'gpt-image-2.5-sunburst');
-  assert.equal(saved.unitCredits, 9);
-  await assert.rejects(saveStudioModule(user.id, { ...moduleBody, revision: saved.revision, context: undefined, prices: { 'gpt-image-2.5-flare': 1, 'gpt-image-2.5-sunburst': 1 } }), /普通用户不能修改模块积分/);
+  assert.equal(saved.unitCredits, 2, 'module payload cannot override global prices');
+  assert.deepEqual(resolveStudioModuleGenerationConfig({ prices_json: JSON.stringify(moduleBody.prices) }, config).prices, config.prices, 'legacy module prices cannot override global prices');
   await changeStudioRatio(user.id, '10:6');
   await changeStudioRatio(user.id, '5:3');
   assert.deepEqual(await listStudioRatios(user.id), ['5:3']);
@@ -100,10 +104,10 @@ async function main() {
   assert.equal(moduleTaskBeforeRun.context, 'New context\n\n---\n模块上下文：\nModule context');
   const moduleSnapshot = JSON.parse(moduleTaskBeforeRun.snapshot_json || '{}');
   assert.equal(moduleSnapshot.model, 'gpt-image-2.5-sunburst');
-  assert.equal(moduleSnapshot.unitCredits, 9);
+  assert.equal(moduleSnapshot.unitCredits, 2);
   assert.equal(moduleSnapshot.referenceImages[0].id, reference.id);
   await processStudioTask(async args => {
-    assert.equal(args.size, '1360x816');
+    assert.equal(args.size, '3680x2208', 'default 4K budget preserves the requested 5:3 ratio');
     assert.equal(args.images.length, 1); assert.ok(args.prompt.endsWith('Module context')); assert.ok(!args.prompt.includes('本次画面要求'));
     return { images: [png.toString('base64')], usage: null };
   });
@@ -129,15 +133,17 @@ async function main() {
   await processStudioTask(async () => ({ images: [png.toString('base64')], usage: null }));
   await assert.rejects(submitStudioBatch(stranger.id, { ...input, requestId: 'forbidden-module-1234', revision: latest.revision, moduleId }), /无权/);
   const result = (await listStudioTasks(user.id, undefined, moduleId)).tasks.find(task => task.batchId === moduleBatch)!;
-  assert.equal(result.aspectRatio, '5:3'); assert.equal(result.outputSize, '1360x816');
+  assert.equal(result.aspectRatio, '5:3'); assert.equal(result.outputSize, '3680x2208');
   const beforeDelete = await prisma.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
   const ledgerCount = await prisma.creditLedger.count();
   await assert.rejects(deleteStudioResult(stranger.id, result.id), /无权/);
   const failed = await prisma.imageStudioTask.findFirstOrThrow({ where: { status: 'uncertain' } });
-  await assert.rejects(deleteStudioResult(user.id, failed.id), /只能删除/);
-  await deleteStudioResult(user.id, result.id); await deleteStudioResult(user.id, result.id);
+  await deleteStudioResult(user.id, failed.id);
+  assert.ok((await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: failed.id } })).deleted_at, 'failed records may be hidden without changing billing');
+  await deleteStudioResult(user.id, result.id);
+  await assert.rejects(deleteStudioResult(user.id, result.id), /已经删除/);
   assert.equal((await listStudioTasks(user.id, undefined, moduleId)).tasks.length, 1);
-  assert.equal((await listStudioTasks(user.id, undefined, defaultStudioModuleId(user.id))).tasks.length, 3);
+  assert.equal((await listStudioTasks(user.id, undefined, defaultStudioModuleId(user.id))).tasks.length, 2);
   assert.ok((await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: result.id } })).deleted_at);
   assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: result.asset!.id } })).status, 'active');
   assert.equal(await prisma.creditLedger.count(), ledgerCount);

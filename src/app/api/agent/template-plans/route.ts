@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import { createTemplatePlanResult, normalizeTemplateUserInput } from '@/lib/agent-plans/template-plans';
 import { serializeGenerationTemplate, TEMPLATE_INCLUDE } from '@/lib/templates/workbench';
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权访问动画模板。');
 
     const body = await request.json();
     const templateId = typeof body.template_id === 'string' && body.template_id.trim() ? body.template_id.trim() : null;
@@ -182,10 +184,8 @@ export async function POST(request: NextRequest) {
       steps: agentRun.steps,
     });
   } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('[TemplatePlans] Generate error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: '模板方案暂时无法生成，请稍后重试' }, { status: 500 });
   }
 }

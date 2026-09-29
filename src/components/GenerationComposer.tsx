@@ -27,6 +27,13 @@ import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration, seedanceVideoMaxDuratio
 import type { GenerationDefaults } from '@/lib/preferences/generation';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
+import type { StudioAssetRole, StudioGenerationHandoff } from '@/lib/template-studio/types';
+import {
+  formatUnsupportedStudioParameters,
+  getMissingRequiredStudioAssetSlot,
+  getStudioMaterialCompatibilityError,
+  mapStudioVideoParameters,
+} from '@/lib/template-studio-video-handoff';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
 import { Bot, FileJson, Settings2 } from 'lucide-react';
 import {
@@ -171,6 +178,34 @@ function uniqueStrings(values: string[]): string[] {
     seen.add(value);
     return true;
   });
+}
+
+function studioRoleForAsset(
+  assetId: string,
+  workspaceRole: string | null,
+  handoff: StudioGenerationHandoff,
+): StudioAssetRole {
+  if (workspaceRole === 'first_frame') return 'first';
+  if (workspaceRole === 'last_frame') return 'last';
+  return handoff.assets.find((asset) => asset.assetId === assetId)?.role || 'reference';
+}
+
+function studioParameterField(key: string): string | null {
+  const aliases: Record<string, string[]> = {
+    provider: ['provider'],
+    model: ['model'],
+    generationMode: ['generationMode', 'generation_mode', 'mode'],
+    ratio: ['ratio', 'aspectRatio', 'aspect_ratio'],
+    duration: ['duration', 'durationSeconds', 'duration_seconds'],
+    resolution: ['resolution'],
+    seed: ['seed'],
+    generateAudio: ['generateAudio', 'generate_audio'],
+    returnLastFrame: ['returnLastFrame', 'return_last_frame'],
+    watermark: ['watermark'],
+    draft: ['draft'],
+    h3LoraId: ['h3LoraId', 'h3_lora_id', 'loraId', 'lora_id'],
+  };
+  return Object.entries(aliases).find(([, keys]) => keys.includes(key))?.[0] || null;
 }
 
 function appendReferenceMarkers(value: string, labels: string[]): string {
@@ -357,6 +392,7 @@ interface Props {
     watermark: boolean;
     resolutionApprovalConfirmed?: boolean;
   } | null;
+  studioHandoff?: StudioGenerationHandoff | null;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
@@ -385,6 +421,9 @@ interface Props {
     model: string | null;
     h3LoraId: string | null;
     draft: boolean;
+    templateStudioRunId: string | null;
+    templateStudioAssets: Array<{ assetId: string; role: StudioAssetRole; type: 'image' | 'video' | 'audio'; slotKey?: string }>;
+    templateStudioParameters: Record<string, unknown>;
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
@@ -403,11 +442,13 @@ interface Props {
   templateMode?: 'disabled' | 'workbench';
   initialTemplateId?: string | null;
   resultReturnTo?: string;
+  studioReturnTo?: string | null;
   submitDisabledReason?: string | null;
   providerLabel?: string;
   providerOptions?: ComposerSelectOption[];
   selectedProvider?: string | null;
   onProviderChange?: (provider: string) => void;
+  h3CapabilitiesReady?: boolean;
   providerStatus?: ComposerProviderStatus | null;
   modelLabel?: string;
   modelOptions?: ComposerSelectOption[];
@@ -439,17 +480,20 @@ export function GenerationComposer({
   isPolling,
   onReset,
   reuseDraft,
+  studioHandoff = null,
   require1080pApproval,
   selectedVideoCardId,
   canManageTemplates = false,
   templateMode = 'disabled',
   initialTemplateId = null,
   resultReturnTo = '/generate',
+  studioReturnTo = null,
   submitDisabledReason = null,
   providerLabel = 'Seedance 视频',
   providerOptions = [],
   selectedProvider = 'seedance',
   onProviderChange,
+  h3CapabilitiesReady = false,
   providerStatus = null,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
@@ -520,13 +564,99 @@ export function GenerationComposer({
   const [selectedModel, setSelectedModel] = useState(modelOptions[0]?.id || '');
   const [draftMode, setDraftMode] = useState(false);
   const [resolutionApprovalConfirmed, setResolutionApprovalConfirmed] = useState(false);
+  const [studioSettingsReady, setStudioSettingsReady] = useState(false);
+  const [studioCorrectedParameters, setStudioCorrectedParameters] = useState<string[]>([]);
+  const appliedStudioBaseRunRef = React.useRef<string | null>(null);
+  const appliedStudioProviderRunRef = React.useRef<string | null>(null);
+  const appliedStudioModelRunRef = React.useRef<string | null>(null);
+  const appliedStudioLoraRunRef = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!studioHandoff) {
+      setStudioSettingsReady(true);
+      return;
+    }
+    const mapping = mapStudioVideoParameters(studioHandoff.parameters);
+    const parameters = mapping.supported;
+
+    if (appliedStudioBaseRunRef.current !== studioHandoff.runId) {
+      setStudioSettingsReady(false);
+      setStudioCorrectedParameters([]);
+      setPrompt(studioHandoff.prompt);
+      if (parameters.generationMode) setGenerationMode(parameters.generationMode);
+      else if (studioHandoff.assets.some((asset) => asset.role === 'first' || asset.role === 'last')) {
+        setGenerationMode('first_last_frame');
+      }
+      if (parameters.ratio) setRatio(parameters.ratio);
+      if (parameters.duration) setDuration(parameters.duration);
+      if (parameters.resolution) setResolution(parameters.resolution);
+      if (parameters.seed !== undefined) setSeed(parameters.seed);
+      if (parameters.generateAudio !== undefined) setGenerateAudio(parameters.generateAudio);
+      if (parameters.returnLastFrame !== undefined) setReturnLastFrame(parameters.returnLastFrame);
+      if (parameters.watermark !== undefined) setWatermark(parameters.watermark);
+      if (parameters.draft !== undefined) setDraftMode(parameters.draft);
+      appliedStudioBaseRunRef.current = studioHandoff.runId;
+    }
+
+    if (parameters.provider && appliedStudioProviderRunRef.current !== studioHandoff.runId) {
+      onProviderChange?.(parameters.provider);
+      appliedStudioProviderRunRef.current = studioHandoff.runId;
+    }
+
+    const requestedProvider = parameters.provider || selectedProvider;
+    const hasModelParameter = parameters.model !== undefined;
+    if (hasModelParameter && appliedStudioModelRunRef.current !== studioHandoff.runId) {
+      const capabilitiesReady = requestedProvider === 'h3' ? h3CapabilitiesReady : modelOptions.length > 0;
+      if (selectedProvider !== requestedProvider || !capabilitiesReady) return;
+      if (parameters.model && modelOptions.some((option) => option.id === parameters.model)) {
+        setSelectedModel(parameters.model);
+        onModelChange?.(parameters.model);
+        appliedStudioModelRunRef.current = studioHandoff.runId;
+      }
+    }
+
+    const hasLoraParameter = parameters.h3LoraId !== undefined;
+    if (hasLoraParameter && requestedProvider === 'h3' && appliedStudioLoraRunRef.current !== studioHandoff.runId) {
+      if (selectedProvider !== 'h3') return;
+      if (!h3CapabilitiesReady) return;
+      if (parameters.h3LoraId && auxiliaryOptions.some((option) => option.id === parameters.h3LoraId)) {
+        onAuxiliaryChange?.(parameters.h3LoraId);
+        appliedStudioLoraRunRef.current = studioHandoff.runId;
+      }
+    }
+
+    setStudioSettingsReady(true);
+  }, [studioHandoff, modelOptions, auxiliaryOptions, selectedProvider, h3CapabilitiesReady, onProviderChange, onModelChange, onAuxiliaryChange]);
+
+  const studioUnsupportedReason = useMemo(() => {
+    if (!studioHandoff) return null;
+    const mapping = mapStudioVideoParameters(studioHandoff.parameters);
+    const unsupported = mapping.unsupported.filter(({ key }) => {
+      const field = studioParameterField(key);
+      return !field || !studioCorrectedParameters.includes(field);
+    });
+    if (mapping.supported.model && !modelOptions.some((option) => option.id === mapping.supported.model)
+      && !studioCorrectedParameters.includes('model')) {
+      unsupported.push({ key: 'model', value: mapping.supported.model });
+    }
+    if (mapping.supported.h3LoraId && selectedProvider === 'h3'
+      && !auxiliaryOptions.some((option) => option.id === mapping.supported.h3LoraId)
+      && !studioCorrectedParameters.includes('h3LoraId')) {
+      unsupported.push({ key: 'h3LoraId', value: mapping.supported.h3LoraId });
+    }
+    return formatUnsupportedStudioParameters(unsupported);
+  }, [studioHandoff, studioCorrectedParameters, modelOptions, auxiliaryOptions, selectedProvider]);
+
+  const markStudioParameterCorrected = useCallback((field: string) => {
+    setStudioCorrectedParameters((current) => current.includes(field) ? current : [...current, field]);
+  }, []);
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
   const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
 
   useEffect(() => {
-    if (selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
-  }, [selectedModel]);
+    if (!studioHandoff && selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
+  }, [selectedModel, studioHandoff]);
   const selectedTemplate = useMemo(() => {
     if (!templateEnabled) return null;
     return templates.find((template) => template.id === selectedTemplateId) || templates[0] || null;
@@ -537,8 +667,9 @@ export function GenerationComposer({
   // ============================================================================
 
   const imageReferenceAssets = useMemo(() => {
-    return workspace.assets.filter((asset) => asset.type === 'image');
-  }, [workspace.assets]);
+    return workspace.assets.filter((asset) => asset.type === 'image'
+      && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'));
+  }, [studioHandoff, workspace.assets]);
 
   const validation = useMemo(() => {
     return checkPrompt(prompt, imageReferenceAssets.length, duration);
@@ -582,6 +713,15 @@ export function GenerationComposer({
 
   const submitBlocker = useMemo(() => {
     if (durationBlocker) return durationBlocker;
+    if (studioHandoff && lockedSettings?.ratio && ratio !== lockedSettings.ratio) {
+      return `模板比例 ${ratio} 与当前视频卡锁定比例 ${lockedSettings.ratio} 不一致`;
+    }
+    if (studioHandoff && lockedSettings?.duration && duration !== lockedSettings.duration) {
+      return `模板时长 ${duration}s 与当前视频卡锁定时长 ${lockedSettings.duration}s 不一致`;
+    }
+    if (studioHandoff && lockedSettings?.resolution && resolution !== lockedSettings.resolution) {
+      return `模板分辨率 ${resolution} 与当前视频卡锁定分辨率 ${lockedSettings.resolution} 不一致`;
+    }
     if (!prompt.trim()) return '请填写提示词';
     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
@@ -602,7 +742,56 @@ export function GenerationComposer({
       return referenceMediaPreflightBlocker;
     }
 
-    if (generationMode === 'first_last_frame' && imageReferenceAssets.length < 2) {
+    if (studioHandoff && !studioSettingsReady) return '正在恢复模板参数与模型能力，请稍候';
+    if (studioHandoff && studioUnsupportedReason) return studioUnsupportedReason;
+    if (studioHandoff) {
+      const materialCompatibilityError = getStudioMaterialCompatibilityError({
+        provider: selectedProvider || 'seedance',
+        generationMode,
+        assets: workspace.assets.map((asset) => ({
+          role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff),
+          type: asset.type,
+        })),
+      });
+      if (materialCompatibilityError) return materialCompatibilityError;
+    }
+    if (studioHandoff && draftMode && (selectedProvider !== 'seedance' || selectedModel !== SEEDANCE_2_5_MODEL_ID)) {
+      return '模板 Draft 参数与当前 Provider/模型不兼容，请修正后提交';
+    }
+    if (studioHandoff && generationMode !== 'first_last_frame'
+      && workspace.assets.some((asset) => {
+        const role = studioRoleForAsset(asset.assetId, asset.role, studioHandoff);
+        return role === 'first' || role === 'last';
+      })) {
+      return '模板包含首尾帧素材，请切换到首尾帧模式后提交';
+    }
+    if (studioHandoff) {
+      const currentStudioAssets = workspace.assets.map((asset) => {
+        const sourceAsset = studioHandoff.assets.find((item) => item.assetId === asset.assetId);
+        return {
+          assetId: asset.assetId,
+          role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff),
+          type: asset.type,
+          ...(sourceAsset?.slotKey ? { slotKey: sourceAsset.slotKey } : {}),
+        };
+      });
+      const missingRequiredSlot = getMissingRequiredStudioAssetSlot(
+        studioHandoff.snapshot.recipe?.assetSlots,
+        currentStudioAssets,
+      );
+      if (missingRequiredSlot) return `模板必填素材槽「${missingRequiredSlot.label}」缺少素材，请返回模板工作台补齐`;
+    }
+    if (generationMode === 'first_last_frame' && studioHandoff) {
+      const studioFrames = workspace.assets.filter((asset) => {
+        const role = studioRoleForAsset(asset.assetId, asset.role, studioHandoff);
+        return role === 'first' || role === 'last';
+      });
+      if (studioFrames.some((asset) => asset.type !== 'image')) return '首尾帧素材必须是图片，当前模板参数不能安全映射';
+      if (studioFrames.filter((asset) => studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'first').length !== 1
+        || studioFrames.filter((asset) => studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'last').length > 1) {
+        return '首尾帧素材角色不完整，请返回模板工作台修正';
+      }
+    } else if (generationMode === 'first_last_frame' && imageReferenceAssets.length < 2) {
       return `首尾帧模式至少需要 2 个图片参考，当前 ${imageReferenceAssets.length} 个`;
     }
     if (generationMode === 'smart_multi_frame' && imageReferenceAssets.length < 3) {
@@ -618,7 +807,7 @@ export function GenerationComposer({
       return seedanceDraft.message;
     }
     return null;
-  }, [durationBlocker, prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft]);
+  }, [durationBlocker, prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, studioSettingsReady, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel]);
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -846,7 +1035,7 @@ export function GenerationComposer({
 
   useEffect(() => {
     const reuseKey = reuseDraft ? `${reuseDraft.taskId}:${reuseDraft.reuseKey}` : null;
-    if (!reuseDraft || appliedReuseDraftRef.current === reuseKey) return;
+    if (!reuseDraft || studioHandoff || appliedReuseDraftRef.current === reuseKey) return;
     appliedReuseDraftRef.current = reuseKey;
     setPrompt(reuseDraft.prompt);
     setGenerationMode(reuseDraft.generationMode);
@@ -865,10 +1054,10 @@ export function GenerationComposer({
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
     void workspace.refresh();
-  }, [reuseDraft, require1080pApproval, workspace, modelOptions, onModelChange]);
+  }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange]);
 
   useEffect(() => {
-    if (!initialSettings || appliedInitialSettingsRef.current || reuseDraft) return;
+    if (!initialSettings || appliedInitialSettingsRef.current || reuseDraft || studioHandoff) return;
     appliedInitialSettingsRef.current = true;
     setGenerationMode(initialSettings.generationMode);
     setRatio(initialSettings.ratio);
@@ -883,10 +1072,10 @@ export function GenerationComposer({
     setReturnLastFrame(initialSettings.returnLastFrame);
     setWatermark(initialSettings.watermark);
     setResolutionApprovalConfirmed(false);
-  }, [initialSettings, reuseDraft, modelOptions, onModelChange]);
+  }, [initialSettings, reuseDraft, studioHandoff, modelOptions, onModelChange]);
 
   useEffect(() => {
-    if (!lockedSettings) return;
+    if (!lockedSettings || studioHandoff) return;
     if (lockedSettings.ratio) setRatio(lockedSettings.ratio);
     if (lockedSettings.duration) setDuration(lockedSettings.duration);
     if (lockedSettings.resolution) setResolution(lockedSettings.resolution);
@@ -895,6 +1084,7 @@ export function GenerationComposer({
     lockedSettings?.ratio,
     lockedSettings?.duration,
     lockedSettings?.resolution,
+    studioHandoff,
   ]);
 
   useEffect(() => {
@@ -904,6 +1094,7 @@ export function GenerationComposer({
   }, [need1080pApproval]);
 
   useEffect(() => {
+    if (studioHandoff && !studioSettingsReady && Object.hasOwn(studioHandoff.parameters, 'model')) return;
     const fallbackModel = modelOptions[0]?.id || '';
     if (!fallbackModel) {
       if (selectedModel) setSelectedModel('');
@@ -913,7 +1104,7 @@ export function GenerationComposer({
       setSelectedModel(fallbackModel);
       onModelChange?.(fallbackModel);
     }
-  }, [modelOptions, onModelChange, selectedModel]);
+  }, [modelOptions, onModelChange, selectedModel, studioHandoff, studioSettingsReady]);
 
   // ============================================================================
   // Handlers
@@ -933,14 +1124,14 @@ export function GenerationComposer({
       watermark,
       resolutionApprovalConfirmed: need1080pApproval ? resolutionApprovalConfirmed : false,
       referenceImageIds: workspace.assets
-        .filter((asset) => asset.type === 'image')
+        .filter((asset) => asset.type === 'image' && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
       referenceVideoUrls: workspace.assets
-        .filter((asset) => asset.type === 'video' && Boolean(asset.originalUrl))
+        .filter((asset) => asset.type === 'video' && Boolean(asset.originalUrl) && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
         .map((asset) => asset.originalUrl),
       referenceAudioUrls: workspace.assets
-        .filter((asset) => asset.type === 'audio' && Boolean(asset.originalUrl))
+        .filter((asset) => asset.type === 'audio' && Boolean(asset.originalUrl) && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
         .map((asset) => asset.originalUrl),
       templateId: selectedTemplate?.id || null,
       agentRunId,
@@ -952,6 +1143,29 @@ export function GenerationComposer({
       model: selectedModel || null,
       h3LoraId: selectedAuxiliary || null,
       draft: draftMode,
+      templateStudioRunId: studioHandoff?.runId || null,
+      templateStudioAssets: studioHandoff ? workspace.assets.map((asset) => ({
+        assetId: asset.assetId,
+        role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff),
+        type: asset.type,
+        ...(studioHandoff.assets.find((sourceAsset) => sourceAsset.assetId === asset.assetId)?.slotKey
+          ? { slotKey: studioHandoff.assets.find((sourceAsset) => sourceAsset.assetId === asset.assetId)?.slotKey }
+          : {}),
+      })) : [],
+      templateStudioParameters: studioHandoff ? {
+        provider: selectedProvider,
+        model: selectedModel,
+        generationMode,
+        ratio,
+        duration,
+        resolution,
+        seed,
+        generateAudio,
+        returnLastFrame,
+        watermark,
+        draft: draftMode,
+        h3LoraId: selectedProvider === 'h3' ? selectedAuxiliary || '' : '',
+      } : {},
     });
   }, [
     submitBlocker,
@@ -979,6 +1193,7 @@ export function GenerationComposer({
     selectedModel,
     selectedAuxiliary,
     draftMode,
+    studioHandoff,
   ]);
 
   const handlePromptChange = useCallback((nextPrompt: string) => {
@@ -1823,7 +2038,10 @@ export function GenerationComposer({
               type="checkbox"
               checked={draftMode}
               disabled={!seedanceDraft.createEnabled}
-              onChange={(event) => setDraftMode(event.currentTarget.checked)}
+              onChange={(event) => {
+                markStudioParameterCorrected('draft');
+                setDraftMode(event.currentTarget.checked);
+              }}
             />
             <span>
               样片 Draft
@@ -1851,6 +2069,7 @@ export function GenerationComposer({
             </div>
             <div className="composer-queue-actions">
               <a href={taskDetailHref(result.id, resultReturnTo)} className="composer-result-link">查看详情</a>
+              {studioReturnTo && <a href={studioReturnTo} className="composer-result-link">返回模板工作台</a>}
               <button type="button" className="composer-result-reset" onClick={onReset}>
                 收起
               </button>
@@ -1871,24 +2090,43 @@ export function GenerationComposer({
           providerLabel={providerLabel}
           providerOptions={providerOptions}
           selectedProvider={selectedProvider}
-          onProviderChange={onProviderChange}
+          onProviderChange={(provider) => {
+            markStudioParameterCorrected('provider');
+            onProviderChange?.(provider);
+          }}
           providerStatus={providerStatus}
           modelLabel={modelLabel}
           modelOptions={modelOptions}
           selectedModel={selectedModel}
           durationModel={durationModel}
           onModelChange={(model) => {
+            markStudioParameterCorrected('model');
             setSelectedModel(model);
             onModelChange?.(model);
           }}
           auxiliaryLabel={auxiliaryLabel}
           auxiliaryOptions={auxiliaryOptions}
           selectedAuxiliary={selectedAuxiliary}
-          onAuxiliaryChange={onAuxiliaryChange}
-          onModeChange={setGenerationMode}
-          onRatioChange={setRatio}
-          onDurationChange={setDuration}
-          onResolutionChange={setResolution}
+          onAuxiliaryChange={(value) => {
+            markStudioParameterCorrected('h3LoraId');
+            onAuxiliaryChange?.(value);
+          }}
+          onModeChange={(value) => {
+            markStudioParameterCorrected('generationMode');
+            setGenerationMode(value);
+          }}
+          onRatioChange={(value) => {
+            markStudioParameterCorrected('ratio');
+            setRatio(value);
+          }}
+          onDurationChange={(value) => {
+            markStudioParameterCorrected('duration');
+            setDuration(value);
+          }}
+          onResolutionChange={(value) => {
+            markStudioParameterCorrected('resolution');
+            setResolution(value);
+          }}
           lockedRatio={Boolean(lockedSettings?.ratio)}
           lockedDuration={Boolean(lockedSettings?.duration)}
           lockedResolution={Boolean(lockedSettings?.resolution)}

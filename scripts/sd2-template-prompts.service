@@ -1,0 +1,25 @@
+[Unit]
+Description=SD2 template prompt queue
+After=network-online.target sd2-gray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+EnvironmentFile=/srv/video-api-debugger/app/.env
+Environment=NODE_ENV=production
+Environment=DATABASE_URL=file:/data/video-api-debugger/var-lib/dev.db
+ExecStart=/usr/bin/node --import tsx scripts/process-template-prompts.ts
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -84,6 +84,9 @@ model VideoTask {
   video_branch_id String?
   template_id     String?
   agent_run_id    String?
+  template_studio_run_id String?
+  template_studio_snapshot_json String?
+  request_fingerprint String?
   visibility      String  @default("project") // private | project | selected | public
   version_role    String  @default("normal") // normal | candidate | current_best | final | discarded
   selected_agent_plan_key String?
@@ -140,6 +143,7 @@ model VideoTask {
   source_draft           VideoTask?           @relation("VideoTaskDraftUpgrade", fields: [source_draft_task_id], references: [id], onDelete: SetNull)
   draft_upgrades         VideoTask[]          @relation("VideoTaskDraftUpgrade")
   generation_template   GenerationTemplate?  @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  template_studio_run   VideoStudioRun? @relation(fields: [template_studio_run_id], references: [id], onDelete: SetNull)
   current_best_for_cards VideoCard[]          @relation("VideoCardCurrentBest")
   final_for_cards        VideoCard[]          @relation("VideoCardFinal")
   provider_api_requests  ProviderApiRequest[]
@@ -161,6 +165,7 @@ model VideoTask {
   @@index([video_branch_id])
   @@index([template_id])
   @@index([agent_run_id])
+  @@index([template_studio_run_id])
   @@index([version_role])
   @@index([source_type])
   @@index([source_request_id])
@@ -237,6 +242,9 @@ model User {
   operation_logs          OperationLog[]
   tasks                   VideoTask[]          @relation("VideoTaskUser")
   owned_tasks             VideoTask[]          @relation("VideoTaskOwner")
+  video_studio_templates  VideoStudioTemplate[] @relation("VideoStudioTemplateOwner")
+  video_studio_drafts     VideoStudioDraft[]    @relation("VideoStudioDraftOwner")
+  video_studio_runs       VideoStudioRun[]      @relation("VideoStudioRunOwner")
   owned_video_cards       VideoCard[]          @relation("VideoCardOwner")
   created_video_cards     VideoCard[]          @relation("VideoCardCreator")
   sealed_video_cards      VideoCard[]          @relation("VideoCardSealer")
@@ -556,6 +564,106 @@ model AgentRunStep {
   @@index([agent_run_id])
   @@index([step_key])
   @@index([sort_order])
+}
+
+model VideoStudioTemplate {
+  id                  String   @id @default(cuid())
+  owner_user_id       String
+  name                String
+  description         String?
+  group_name          String   @default("未分组")
+  status              String   @default("draft") // draft | published | archived
+  visibility          String   @default("private") // private | shared
+  revision            Int      @default(1)
+  recipe_json         String   @default("{}")
+  published_version_id String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @default(now()) @updatedAt
+
+  owner             User                         @relation("VideoStudioTemplateOwner", fields: [owner_user_id], references: [id], onDelete: Restrict)
+  versions          VideoStudioTemplateVersion[] @relation("VideoStudioTemplateVersions")
+  published_version VideoStudioTemplateVersion?  @relation("VideoStudioPublishedVersion", fields: [published_version_id], references: [id], onDelete: SetNull)
+
+  @@index([owner_user_id, status, updated_at])
+  @@index([visibility, status, updated_at])
+  @@index([published_version_id])
+}
+
+model VideoStudioTemplateVersion {
+  id             String   @id @default(cuid())
+  template_id    String
+  version_number Int
+  name           String
+  description    String?
+  group_name     String
+  recipe_json    String
+  created_by     String
+  created_at     DateTime @default(now())
+
+  template                 VideoStudioTemplate   @relation("VideoStudioTemplateVersions", fields: [template_id], references: [id], onDelete: Restrict)
+  published_by_templates   VideoStudioTemplate[] @relation("VideoStudioPublishedVersion")
+
+  @@unique([template_id, version_number])
+  @@index([template_id, created_at])
+  @@index([created_by])
+}
+
+model VideoStudioDraft {
+  id                    String   @id @default(cuid())
+  owner_user_id         String
+  name                  String
+  group_name            String   @default("未分组")
+  prompt                String   @default("")
+  values_json           String   @default("{}")
+  assets_json           String   @default("[]")
+  parameters_json       String   @default("{}")
+  revision              Int      @default(1)
+  template_source       String   @default("blank") // blank | legacy | studio
+  source_template_id    String?
+  source_version_id     String?
+  template_snapshot_json String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @default(now()) @updatedAt
+
+  owner User            @relation("VideoStudioDraftOwner", fields: [owner_user_id], references: [id], onDelete: Restrict)
+  runs  VideoStudioRun[]
+
+  @@index([owner_user_id, updated_at])
+  @@index([template_source, source_template_id])
+}
+
+model VideoStudioRun {
+  id                 String    @id @default(cuid())
+  owner_user_id      String
+  draft_id           String
+  draft_revision     Int       @default(1)
+  request_id         String
+  request_fingerprint String
+  source             String // blank | legacy | studio
+  mode               String // direct | llm
+  status             String    @default("queued") // queued | running | succeeded | failed | uncertain | cancelled
+  delivery_state     String    @default("not_sent") // not_sent | sending | response_received | unknown
+  prompt             String?
+  snapshot_json      String
+  model              String?
+  usage_json         String?
+  error_message      String?
+  lease_token        String?
+  lease_expires_at   DateTime?
+  attempt            Int       @default(0)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+  completed_at       DateTime?
+
+  owner  User             @relation("VideoStudioRunOwner", fields: [owner_user_id], references: [id], onDelete: Restrict)
+  draft  VideoStudioDraft @relation(fields: [draft_id], references: [id], onDelete: Restrict)
+  tasks  VideoTask[]
+
+  @@unique([owner_user_id, request_id])
+  @@index([owner_user_id, created_at])
+  @@index([draft_id, created_at])
+  @@index([status, delivery_state, created_at])
+  @@index([status, lease_expires_at])
 }
 
 model TemplateMemory {

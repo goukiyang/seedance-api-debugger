@@ -292,6 +292,7 @@ export function UploadedImagePicker({
   };
 
   const handleDelete = async (asset: UploadedAssetItem) => {
+    if (asset.type !== 'image' || deletingAssetId === asset.id) return;
     const stillInWorkspace = currentAssetIdSet.has(asset.id);
     const confirmed = window.confirm(
       stillInWorkspace
@@ -439,14 +440,16 @@ export function UploadedImagePicker({
                       <strong title={item.fileName}>{item.fileName}</strong>
                       <span>{assetTypeLabel(item.type)} · {dimensions} · {formatBytes(item.fileSize)} · {formatDate(item.createdAt)}</span>
                     </div>
-                    <button
-                      type="button"
-                      className="uploaded-picker-delete"
-                      onClick={() => { void handleDelete(item); }}
-                      disabled={deletingAssetId === item.id}
-                    >
-                      删除
-                    </button>
+                    {item.type === 'image' && (
+                      <button
+                        type="button"
+                        className="uploaded-picker-delete"
+                        onClick={() => { void handleDelete(item); }}
+                        disabled={deletingAssetId === item.id}
+                      >
+                        删除
+                      </button>
+                    )}
                   </article>
                 );
               })}

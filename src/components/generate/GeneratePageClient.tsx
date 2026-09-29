@@ -30,6 +30,8 @@ import {
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
 import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
+import type { StudioGenerationHandoff } from '@/lib/template-studio/types';
+import { stableGenerationPayloadJson } from '@/lib/template-studio-video-handoff';
 
 // ============================================================================
 // Types
@@ -45,6 +47,7 @@ interface CreateResponse {
   project_id?: string;
   video_card_id?: string;
   template_id?: string | null;
+  template_studio_run_id?: string | null;
   agent_run_id?: string | null;
   selected_agent_plan_key?: string | null;
   prompt_rendered?: string;
@@ -64,8 +67,61 @@ interface SeedanceDraftCapability {
 type CreateTaskResponse = CreateResponse & {
   error?: string;
   message?: string;
+  code?: string;
+  existing_task_id?: string;
   _debug?: object | null;
 };
+
+type GenerationSubmitParams = {
+  prompt: string;
+  generationMode: GenerationMode;
+  ratio: VideoRatio;
+  duration: VideoDuration;
+  resolution: VideoResolution;
+  seed: number;
+  generateAudio: boolean;
+  returnLastFrame: boolean;
+  watermark: boolean;
+  resolutionApprovalConfirmed: boolean;
+  referenceImageIds?: string[];
+  referenceVideoUrls?: string[];
+  referenceAudioUrls?: string[];
+  templateId?: string | null;
+  agentRunId?: string | null;
+  selectedAgentPlanKey?: string | null;
+  agentPromptSnapshot?: string | null;
+  finalPromptSnapshot?: string | null;
+  promptUserEdited?: boolean;
+  provider?: string | null;
+  model?: string | null;
+  h3LoraId?: string | null;
+  draft?: boolean;
+  templateStudioRunId: string | null;
+  templateStudioAssets: Array<{
+    assetId: string;
+    role: 'reference' | 'first' | 'last';
+    type: 'image' | 'video' | 'audio';
+    slotKey?: string;
+  }>;
+  templateStudioParameters: Record<string, unknown>;
+};
+
+function safeTemplateStudioReturnTo(value: string | null, runId: string | null, origin: string) {
+  const fallback = runId
+    ? `/template-studio?type=video&view=run&runId=${encodeURIComponent(runId)}`
+    : null;
+  if (!value) return fallback;
+  if (value.includes('\\') || /[\u0000-\u001f\u007f]/.test(value)) return fallback;
+  try {
+    const target = new URL(value, origin);
+    if (target.origin !== origin || target.pathname !== '/template-studio' || target.username || target.password) {
+      return fallback;
+    }
+    return `${target.pathname}${target.search}`;
+  } catch {
+    return fallback;
+  }
+}
 
 interface TaskItem {
   id: string;
@@ -469,6 +525,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [currentUser, setCurrentUser] = useState<GeneratePageUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
+  const [h3CapabilitiesReady, setH3CapabilitiesReady] = useState(isIpSurface);
   const [seedanceDraftCapability, setSeedanceDraftCapability] = useState<SeedanceDraftCapability>({
     create_enabled: false,
     upgrade_enabled: false,
@@ -478,6 +535,55 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [h3StatusChecking, setH3StatusChecking] = useState(false);
   const [selectedH3LoraId, setSelectedH3LoraId] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
+  const [studioHandoff, setStudioHandoff] = useState<StudioGenerationHandoff | null>(null);
+  const [studioRunId, setStudioRunId] = useState<string | null>(null);
+  const [studioReturnTo, setStudioReturnTo] = useState<string | null>(null);
+  const [studioWorkspaceTabId, setStudioWorkspaceTabId] = useState<string | null>(null);
+  const [studioHandoffLoading, setStudioHandoffLoading] = useState(false);
+  const [studioHandoffError, setStudioHandoffError] = useState<string | null>(null);
+  const [unconfirmedGenerationRequest, setUnconfirmedGenerationRequest] = useState(false);
+  const studioHandoffRequestRef = useRef<string | null>(null);
+  const forceNewGenerationRef = useRef(false);
+  const unconfirmedGenerationParamsRef = useRef<GenerationSubmitParams | null>(null);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const runId = searchParams.get('template_studio_run_id')?.trim() || null;
+    setStudioReturnTo(safeTemplateStudioReturnTo(
+      searchParams.get('template_studio_return_to'),
+      runId,
+      window.location.origin,
+    ));
+    if (!runId) return;
+    setStudioRunId(runId);
+    if (studioHandoffRequestRef.current === runId) return;
+    studioHandoffRequestRef.current = runId;
+    setStudioHandoffLoading(true);
+    setStudioHandoffError(null);
+
+    fetch('/api/template-studio-video-handoff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId }),
+    }).then(async (response) => {
+      const data = await readJsonResponse<{
+        handoff?: StudioGenerationHandoff;
+        workspaceTabId?: string;
+        error?: string;
+        message?: string;
+      }>(response);
+      if (!response.ok || !data.handoff || !data.workspaceTabId) {
+        throw new Error(data.message || data.error || '模板运行记录暂时无法接入普通生成');
+      }
+      sessionStorage.setItem('workspace_tab_id', data.workspaceTabId);
+      setStudioWorkspaceTabId(data.workspaceTabId);
+      setStudioHandoff(data.handoff);
+    }).catch((loadError) => {
+      setStudioHandoffError(loadError instanceof Error ? loadError.message : '模板运行记录读取失败');
+    }).finally(() => {
+      setStudioHandoffLoading(false);
+    });
+  }, []);
 
   // ---- Current Project ----
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -541,6 +647,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     return options;
   }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, seedanceDraftCapability.create_enabled, selectedH3Lora?.label, selectedH3Preset?.label]);
   const activeModelLabel = surfaceConfig.modelLabel;
+  const generationReturnTo = useMemo(() => {
+    if (!studioRunId && !studioReturnTo) return surfaceConfig.routePath;
+    const params = new URLSearchParams();
+    if (studioRunId) params.set('template_studio_run_id', studioRunId);
+    if (studioReturnTo) params.set('template_studio_return_to', studioReturnTo);
+    return `${surfaceConfig.routePath}?${params.toString()}`;
+  }, [studioReturnTo, studioRunId, surfaceConfig.routePath]);
   const activeProviderLabel = 'Seedance 视频';
   const refreshH3VideoConfig = useCallback(async () => {
     if (isIpSurface) return null;
@@ -549,10 +662,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const data = response.ok ? await response.json() : null;
       const nextConfig = normalizeH3VideoConfig(data?.h3_video);
       setH3VideoConfig(nextConfig);
+      setH3CapabilitiesReady(true);
       if (data?.seedance_draft) setSeedanceDraftCapability(data.seedance_draft);
       return nextConfig;
     } catch {
       setH3VideoConfig(null);
+      setH3CapabilitiesReady(true);
       return null;
     }
   }, [isIpSurface]);
@@ -569,6 +684,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         throw new Error(data?.error || data?.message || `H3 状态检查失败 (HTTP ${response.status})`);
       }
       setH3VideoConfig(normalizeH3VideoConfig(currentUser?.role === 'admin' ? data?.config : data?.h3_video));
+      setH3CapabilitiesReady(true);
       if (data?.seedance_draft) setSeedanceDraftCapability(data.seedance_draft);
     } catch (error) {
       if (!options?.silent) {
@@ -576,6 +692,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
     } finally {
       setH3StatusChecking(false);
+      setH3CapabilitiesReady(true);
     }
   }, [currentUser?.role, h3StatusChecking, isIpSurface]);
   const h3MachineStatus = useMemo(() => {
@@ -685,10 +802,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       .then((data) => {
         if (cancelled) return;
         setH3VideoConfig(normalizeH3VideoConfig(data?.h3_video));
+        setH3CapabilitiesReady(true);
         if (data?.seedance_draft) setSeedanceDraftCapability(data.seedance_draft);
       })
       .catch(() => {
-        if (!cancelled) setH3VideoConfig(null);
+        if (!cancelled) {
+          setH3VideoConfig(null);
+          setH3CapabilitiesReady(true);
+        }
       });
     return () => {
       cancelled = true;
@@ -1461,31 +1582,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     });
   }, [currentUser?.id, selectedProjectId]);
 
-  const handleSubmit = useCallback(async (params: {
-    prompt: string;
-    generationMode: GenerationMode;
-    ratio: VideoRatio;
-    duration: VideoDuration;
-    resolution: VideoResolution;
-    seed: number;
-    generateAudio: boolean;
-    returnLastFrame: boolean;
-    watermark: boolean;
-    resolutionApprovalConfirmed: boolean;
-    referenceImageIds?: string[];
-    referenceVideoUrls?: string[];
-    referenceAudioUrls?: string[];
-    templateId?: string | null;
-    agentRunId?: string | null;
-    selectedAgentPlanKey?: string | null;
-    agentPromptSnapshot?: string | null;
-    finalPromptSnapshot?: string | null;
-    promptUserEdited?: boolean;
-    provider?: string | null;
-    model?: string | null;
-    h3LoraId?: string | null;
-    draft?: boolean;
-  }) => {
+  const handleSubmit = useCallback(async (params: GenerationSubmitParams) => {
+    const explicitlyStartingNew = forceNewGenerationRef.current;
+    forceNewGenerationRef.current = false;
+    unconfirmedGenerationParamsRef.current = params;
     setSubmitting(true);
     setError(null);
     setErrorDebug(null);
@@ -1502,7 +1602,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setSubmitting(false);
       return;
     }
-    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const selectedH3Model = !isIpSurface && params.model === H3_INLINE_MODEL_ID;
     const requestedProvider: GenerationProvider = selectedH3Model ? 'h3' : 'seedance';
     const requestedModel = selectedH3Model
@@ -1568,51 +1667,155 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const readyVideoCard = selectedVideoCard;
 
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
-      const res = await fetch(createEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
-        },
-        body: JSON.stringify({
-          prompt: params.prompt,
-          generation_mode: params.generationMode,
-          ratio: params.ratio,
-          duration: params.duration,
-          resolution: params.resolution,
-          seed: params.seed,
-          generate_audio: params.generateAudio,
-          return_last_frame: params.returnLastFrame,
-          watermark: params.watermark,
-          resolution_approval_confirmed: params.resolutionApprovalConfirmed,
-          idempotency_key: idempotencyKey,
-          project_id: selectedProjectId,
-          video_card_id: readyVideoCard.id,
-          video_branch_id: selectedVideoBranchId || undefined,
-          reference_image_ids: params.referenceImageIds || [],
-          reference_video_urls: params.referenceVideoUrls || [],
-          reference_audio_urls: params.referenceAudioUrls || [],
-          template_id: params.templateId || null,
-          agent_run_id: params.agentRunId || null,
-          selected_agent_plan_key: params.selectedAgentPlanKey || null,
-          agent_prompt_snapshot: params.agentPromptSnapshot || null,
-          final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
-          prompt_user_edited: params.promptUserEdited === true,
-          provider: isIpSurface ? undefined : requestedProvider,
-          model: requestedModel || undefined,
-          draft: !isIpSurface && requestedProvider === 'seedance' && requestedModel === SEEDANCE_2_5_MODEL_ID && params.draft === true,
-          lora_id: selectedH3Model ? requestedH3LoraId : undefined,
-        }),
-      });
+      const requestBody = {
+        prompt: params.prompt,
+        generation_mode: params.generationMode,
+        ratio: params.ratio,
+        duration: params.duration,
+        resolution: params.resolution,
+        seed: params.seed,
+        generate_audio: params.generateAudio,
+        return_last_frame: params.returnLastFrame,
+        watermark: params.watermark,
+        resolution_approval_confirmed: params.resolutionApprovalConfirmed,
+        project_id: selectedProjectId,
+        video_card_id: readyVideoCard.id,
+        video_branch_id: selectedVideoBranchId || undefined,
+        reference_image_ids: params.referenceImageIds || [],
+        reference_video_urls: params.referenceVideoUrls || [],
+        reference_audio_urls: params.referenceAudioUrls || [],
+        template_id: params.templateId || null,
+        agent_run_id: params.agentRunId || null,
+        selected_agent_plan_key: params.selectedAgentPlanKey || null,
+        agent_prompt_snapshot: params.agentPromptSnapshot || null,
+        final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
+        prompt_user_edited: params.promptUserEdited === true,
+        provider: isIpSurface ? undefined : requestedProvider,
+        model: requestedModel || undefined,
+        draft: !isIpSurface && requestedProvider === 'seedance' && requestedModel === SEEDANCE_2_5_MODEL_ID && params.draft === true,
+        lora_id: selectedH3Model ? requestedH3LoraId : undefined,
+        template_studio_run_id: params.templateStudioRunId || undefined,
+        template_studio_assets: params.templateStudioRunId ? params.templateStudioAssets : undefined,
+        template_studio_parameters: params.templateStudioRunId ? params.templateStudioParameters : undefined,
+        first_frame_asset_id: params.templateStudioAssets.find((asset) => asset.role === 'first')?.assetId,
+        last_frame_asset_id: params.templateStudioAssets.find((asset) => asset.role === 'last')?.assetId,
+      };
+      const requestFingerprint = stableGenerationPayloadJson(requestBody);
+      const requestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${params.templateStudioRunId || 'standard'}`;
+      const readPendingRequest = () => {
+        try {
+          const raw = sessionStorage.getItem(requestStorageKey);
+          if (!raw) return null;
+          const parsed = JSON.parse(raw) as { key?: unknown; fingerprint?: unknown };
+          return typeof parsed.key === 'string' && typeof parsed.fingerprint === 'string'
+            ? { key: parsed.key, fingerprint: parsed.fingerprint }
+            : null;
+        } catch {
+          return null;
+        }
+      };
+      const recoverAcceptedRequest = async (key: string) => {
+        if (!params.templateStudioRunId) return null;
+        const query = new URLSearchParams({ idempotency_key: key });
+        query.set('template_studio_run_id', params.templateStudioRunId);
+        const response = await fetch(`/api/template-studio-video-handoff?${query.toString()}`, { cache: 'no-store' });
+        const payload = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
+        if (!response.ok) throw new Error(payload.message || payload.error || '无法确认上次请求是否已受理');
+        return payload.task || null;
+      };
+      const acceptRecoveredTask = (task: CreateTaskResponse, currentPayloadChanged = false) => {
+        sessionStorage.removeItem(requestStorageKey);
+        setUnconfirmedGenerationRequest(currentPayloadChanged);
+        unconfirmedGenerationParamsRef.current = currentPayloadChanged ? params : null;
+        setResult(task);
+        setError(currentPayloadChanged
+          ? `上次请求已受理为任务 ${task.id}，但当前内容与原请求不同。请先核对该任务；如仍要生成当前内容，再明确新建任务。`
+          : null);
+        setPolledResult(null);
+        setActivePollingTaskIds((current) => [task.id, ...current.filter((id) => id !== task.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+        void loadRecentTasksPage(0, 'replace');
+      };
+
+      let pendingRequest = readPendingRequest();
+      if (pendingRequest && explicitlyStartingNew) {
+        sessionStorage.removeItem(requestStorageKey);
+        pendingRequest = null;
+      }
+      if (pendingRequest) {
+        const currentPayloadChanged = pendingRequest.fingerprint !== requestFingerprint;
+        const accepted = await recoverAcceptedRequest(pendingRequest.key);
+        if (accepted) {
+          acceptRecoveredTask(accepted, currentPayloadChanged);
+          return;
+        }
+        if (currentPayloadChanged) {
+          setUnconfirmedGenerationRequest(true);
+          throw new Error('上次请求尚未确认，当前内容已变化。先查询任务状态；如要按当前内容另建任务，请使用“按当前内容新建任务”。');
+        }
+      }
+      const idempotencyKey = pendingRequest?.key || window.crypto.randomUUID();
+      if (!pendingRequest) {
+        pendingRequest = { key: idempotencyKey, fingerprint: requestFingerprint };
+        sessionStorage.setItem(requestStorageKey, JSON.stringify(pendingRequest));
+      }
+
+      let res: Response;
+      try {
+        res = await fetch(createEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
+          },
+          body: JSON.stringify({ ...requestBody, idempotency_key: idempotencyKey }),
+        });
+      } catch {
+        try {
+          const accepted = await recoverAcceptedRequest(idempotencyKey);
+          if (accepted) {
+            acceptRecoveredTask(accepted);
+            return;
+          }
+        } catch {
+          // Keep the same request key when its acceptance state cannot be read.
+        }
+        setUnconfirmedGenerationRequest(true);
+        throw new Error('网络中断，尚不能确认任务是否已受理。请求号已保留；再次提交会先查询原任务。');
+      }
 
       const data = await readJsonResponse<CreateTaskResponse>(res);
 
       if (!res.ok) {
         setErrorDebug(data._debug || null);
+        if (res.status >= 500) {
+          try {
+            const accepted = await recoverAcceptedRequest(idempotencyKey);
+            if (accepted) {
+              acceptRecoveredTask(accepted);
+              return;
+            }
+          } catch {
+            // Keep the original request key while the task state is uncertain.
+          }
+          setUnconfirmedGenerationRequest(true);
+          throw new Error(data.message || data.error || `服务暂未确认请求结果 (HTTP ${res.status})；请求号已保留`);
+        }
+        if (res.status === 409 && typeof data.code === 'string' && data.code.startsWith('IDEMPOTENCY_')) {
+          setUnconfirmedGenerationRequest(true);
+          unconfirmedGenerationParamsRef.current = params;
+          const taskHint = typeof data.existing_task_id === 'string' ? `（任务 ${data.existing_task_id}）` : '';
+          throw new Error(`${data.error || data.message || '请求号已关联已有任务'}${taskHint}。请先核对原任务；系统保留当前请求号，只有确认需要另行生成时再明确新建。`);
+        }
+        sessionStorage.removeItem(requestStorageKey);
+        setUnconfirmedGenerationRequest(false);
+        unconfirmedGenerationParamsRef.current = null;
         const message = data.message || data.error || `创建失败 (HTTP ${res.status})`;
         throw new Error(data.error && data.message ? `[${data.error}] ${message}` : message);
       }
 
+      sessionStorage.removeItem(requestStorageKey);
+      setUnconfirmedGenerationRequest(false);
+      unconfirmedGenerationParamsRef.current = null;
       setResult(data);
       setErrorDebug(null);
       setPolledResult(null);
@@ -1693,6 +1896,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     selectedVideoCardId,
     isExternalIpUser,
     videoCards,
+    currentUser?.id,
+    loadRecentTasksPage,
+    surface,
   ]);
 
   // ============================================================================
@@ -2231,11 +2437,38 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           </div>
         )}
 
+        {studioRunId && (
+          <div className="composer-prefill-notice">
+            {studioHandoffLoading
+              ? '正在安全恢复模板运行记录与素材...'
+              : studioHandoffError || '模板运行记录已接入普通视频生成；编辑内容只写入新任务快照。'}
+            {' '}
+            <Link href={studioReturnTo || `/template-studio?type=video&view=run&runId=${encodeURIComponent(studioRunId)}`}>返回模板工作台</Link>
+          </div>
+        )}
+
+        {unconfirmedGenerationRequest && unconfirmedGenerationParamsRef.current && (
+          <button
+            type="button"
+            className="composer-prefill-notice"
+            onClick={() => {
+              const params = unconfirmedGenerationParamsRef.current;
+              if (!params) return;
+              forceNewGenerationRef.current = true;
+              void handleSubmit(params);
+            }}
+          >
+            按当前内容新建任务
+          </button>
+        )}
+
         <GenerationComposer
+          key={`${studioHandoff?.runId || 'standard'}:${studioWorkspaceTabId || 'workspace'}`}
           collections={collections}
           initialSettings={generationDefaults}
           lockedSettings={selectedVideoCardLockedSettings}
           reuseDraft={reuseDraft}
+          studioHandoff={studioHandoff}
           selectedVideoCardId={selectedVideoCardId}
           canManageTemplates={currentUser?.role === 'admin'}
           require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
@@ -2250,11 +2483,15 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           polledResult={polledResult}
           isPolling={isPolling}
           onReset={handleReset}
-          resultReturnTo={surfaceConfig.routePath}
-          submitDisabledReason={surfaceConfig.submitDisabledReason}
+          resultReturnTo={generationReturnTo}
+          studioReturnTo={studioReturnTo}
+          submitDisabledReason={studioRunId && (studioHandoffLoading || !studioHandoff)
+            ? studioHandoffLoading ? '模板运行记录加载中，请稍候' : studioHandoffError || '模板运行记录尚未通过授权校验'
+            : surfaceConfig.submitDisabledReason}
           providerLabel={activeProviderLabel}
           providerOptions={[]}
           selectedProvider={selectedProvider}
+          h3CapabilitiesReady={h3CapabilitiesReady}
           providerStatus={h3MachineStatus}
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}
@@ -2303,7 +2540,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           <Trash2 size={14} aria-hidden="true" />
                         </button>
                       )}
-                      <Link href={taskDetailHref(task.id, surfaceConfig.routePath)} className="composer-task-card-link">
+                      <Link href={taskDetailHref(task.id, generationReturnTo)} className="composer-task-card-link">
 	                        <TaskVideoThumbnail
 	                          taskId={task.id}
 	                          thumbnailUrl={task.thumbnail_url}
@@ -2388,7 +2625,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                         </button>
                       ) : enhanceTask ? (
                         <Link
-                          href={taskDetailHref(task.id, surfaceConfig.routePath)}
+                          href={taskDetailHref(task.id, generationReturnTo)}
                           className="composer-task-card-reuse composer-task-card-reuse-link"
                         >
                           查看超分结果

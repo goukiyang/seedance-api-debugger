@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '后台新增 Banana 专用通道，Banana 2 和 Pro 可单独设置 Key，保存后新请求生效；其他图片模型继续使用原通道。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新增图片与视频模板工作台。视频提示词可保存草稿、复用历史输入，并带素材进入生成页；旧图片工具和视频模板继续保留。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

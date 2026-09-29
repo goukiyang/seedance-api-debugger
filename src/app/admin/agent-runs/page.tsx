@@ -45,7 +45,11 @@ export default async function AdminAgentRunsPage() {
           <h1>执行链路</h1>
           <p>查看模板、规则、方案和 Prompt 如何进入 Seedance 任务。</p>
         </div>
-        <Link href="/generate">返回生成页</Link>
+        <div className="admin-agent-runs-actions">
+          <Link href="/admin/agent-runs/template-prompts">模板提示词异常</Link>
+          <Link href="/template-studio?type=video&view=prompts">模板工作台</Link>
+          <Link href="/generate">返回生成页</Link>
+        </div>
       </header>
 
       <section className="admin-agent-runs-table">

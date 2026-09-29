@@ -12,7 +12,9 @@ assert.match(pickerSource, /上传并绑定图片/);
 assert.match(pickerSource, /uploadFileToHistory\(file, \{/);
 assert.match(pickerSource, /onProgress: \(progress\) => setUploadProgress/);
 assert.match(pickerSource, /source: 'upload_history'/);
-assert.match(pickerSource, /onSelect\(nextImage\)/);
+assert.match(pickerSource, /bindUploadedImage\(nextImage\)/);
+assert.match(pickerSource, /onSelect\(image\)/);
+assert.match(pickerSource, /setPendingUploadedImage\(image\)/);
 assert.match(pickerSource, /setTab\('history'\)/);
 
 assert.match(cssSource, /\.template-bound-image-file-input\s*\{/);

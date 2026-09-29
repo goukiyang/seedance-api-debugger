@@ -15,7 +15,6 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const run = await prisma.agentRun.findUnique({
       where: { id: params.id },
       include: {
-        template: { include: TEMPLATE_INCLUDE },
         steps: { orderBy: { sort_order: 'asc' } },
       },
     });
@@ -25,10 +24,13 @@ export async function GET(_request: NextRequest, { params }: Params) {
     }
 
     const memories = await prisma.templateMemory.findMany({
-      where: { agent_run_id: run.id },
+      where: { agent_run_id: run.id, ...(user.role === 'admin' ? {} : { user_id: user.id }) },
       orderBy: { created_at: 'desc' },
       take: 20,
     });
+    const template = user.role === 'admin'
+      ? await prisma.generationTemplate.findUnique({ where: { id: run.template_id }, include: TEMPLATE_INCLUDE })
+      : null;
 
     return NextResponse.json({
       run: {
@@ -49,13 +51,17 @@ export async function GET(_request: NextRequest, { params }: Params) {
         created_at: run.created_at,
         updated_at: run.updated_at,
         completed_at: run.completed_at,
-        template: serializeGenerationTemplate(run.template),
+        template: template ? serializeGenerationTemplate(template) : null,
         steps: run.steps.map((step) => ({
           id: step.id,
           step_key: step.step_key,
           title: step.title,
-          input: safeJson(step.input_json, null),
-          output: safeJson(step.output_json, null),
+          input: user.role === 'admin' || !['template_load', 'rule_compute', 'module_composer', 'prompt_compose'].includes(step.step_key)
+            ? safeJson(step.input_json, null)
+            : null,
+          output: user.role === 'admin' || !['template_load', 'rule_compute', 'module_composer', 'prompt_compose'].includes(step.step_key)
+            ? safeJson(step.output_json, null)
+            : null,
           sort_order: step.sort_order,
           created_at: step.created_at,
         })),
@@ -71,10 +77,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     });
   } catch (error) {
     console.error('[AgentRuns] Detail error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: '执行记录暂时无法读取，请稍后重试' }, { status: 500 });
   }
 }
 
