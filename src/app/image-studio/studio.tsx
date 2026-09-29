@@ -298,7 +298,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const navigation = useMemo(() => {
     const items = new Map(directory.map(item => [item.id, item]));
     modules.forEach(item => items.set(item.id, { id: item.id, name: item.name, groupName: item.groupName }));
-    return [...items.values()];
+    return Array.from(items.values());
   }, [directory, modules]);
   const groupedModules = useMemo(() => navigation.reduce<Record<string, typeof navigation>>((groups, item) => {
     const group = item.groupName || '未分组';
