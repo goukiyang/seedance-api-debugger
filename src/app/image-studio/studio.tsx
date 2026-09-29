@@ -2,7 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
-import { uploadFileAsAsset, type UploadedAssetPayload } from '@/lib/http/file-upload';
+import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+
+function studioUploadProgress(file: File, index: number, count: number, progress: UploadProgressSnapshot) {
+  const transferring = ['raw', 'proxy', 'storage', 'multipart'].includes(progress.phase);
+  const sent = transferring && progress.totalBytes && progress.loadedBytes != null && progress.loadedBytes >= progress.totalBytes;
+  return {
+    label: sent ? '上传已传完，服务器处理中' : progress.label,
+    detail: `${index + 1}/${count} · ${file.name}`,
+    percent: transferring && !sent && progress.totalBytes && progress.loadedBytes != null
+      ? Math.min(99, Math.floor(progress.loadedBytes / progress.totalBytes * 100)) : undefined,
+  };
+}
 import { ZoomableImagePreview, type ImagePreviewMetadata } from '@/components/ZoomableImagePreview';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import styles from './studio.module.css';
@@ -452,6 +464,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
+  const [bannerProgress, setBannerProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ImagePreviewState | null>(null);
@@ -874,13 +888,14 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     }
     uploadLock.current = true; setUploading(true); setError('');
     try {
-      for (const file of uploadFiles) {
-        const asset = await uploadFileAsAsset(file);
+      for (let index = 0; index < uploadFiles.length; index++) {
+        const file = uploadFiles[index];
+        const asset = await uploadFileAsAsset(file, { onProgress: progress => setUploadProgress(studioUploadProgress(file, index, uploadFiles.length, progress)) });
         if (!asset.id || !asset.originalUrl) throw new Error('上传结果不完整，请重试');
         setImages(current => replaceSingle && referenceLimit === 1 ? [asset] : [...current, asset]);
       }
     } catch (e) { setError(e instanceof Error ? e.message : '上传失败'); }
-    finally { uploadLock.current = false; setUploading(false); }
+    finally { uploadLock.current = false; setUploading(false); setUploadProgress(null); }
   }, [images.length, referenceLimit, submitting, pendingSubmission]);
 
   async function uploadBanner(file: File) {
@@ -890,11 +905,11 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     }
     setBannerUploading(true); setError('');
     try {
-      const asset = await uploadFileAsAsset(file);
+      const asset = await uploadFileAsAsset(file, { onProgress: progress => setBannerProgress(studioUploadProgress(file, 0, 1, progress)) });
       if (!asset.id || !asset.originalUrl) throw new Error('banner 上传结果不完整，请重试');
       setBanner(asset);
     } catch (e) { setError(e instanceof Error ? e.message : 'banner 上传失败'); }
-    finally { setBannerUploading(false); }
+    finally { setBannerUploading(false); setBannerProgress(null); }
   }
 
   useEffect(() => {
@@ -944,6 +959,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
       </> : <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => bannerFileInput.current?.click()}><ImagePlus size={20} />{bannerUploading ? '上传中' : '点击上传模块 banner'}</button>}
     </div>
     <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void uploadBanner(file); event.target.value = ''; }} />
+    {bannerProgress && <UploadProgressIndicator {...bannerProgress} />}
     <div className={styles.workspace}>
       <section className={styles.inputs} aria-label="生成参数">
         {reproduceSourceTaskId && <p role="status" className={styles.muted}>历史复现模式：生成时会沿用所选历史记录的上下文；当前修改不会自动提交或扣积分。<button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button></p>}
@@ -967,6 +983,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
           </div>)}
           {images.length < referenceLimit && <button type="button" className={styles.add} disabled={uploading || submitting || Boolean(pendingSubmission)} onClick={() => fileInput.current?.click()}><ImagePlus size={24} />{uploading ? '上传中' : '添加图片'}</button>}
         </div>
+        {uploadProgress && <UploadProgressIndicator {...uploadProgress} />}
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => {
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
         }} />
