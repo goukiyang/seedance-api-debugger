@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '添加图片可选本地上传或资产库；已有图片按已生成、已上传分类选择。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '生成按钮旁直接显示不能提交的原因和处理办法，明确缺少的输入与素材。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

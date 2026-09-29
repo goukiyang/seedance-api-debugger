@@ -814,7 +814,7 @@ export function GenerationComposer({
       return { message: '提交中...', tone: 'progress' as const };
     }
     if (durationBlocker) return { message: durationBlocker, tone: 'error' as const };
-    if (mentionNotice) {
+    if (mentionNotice && !submitBlocker && !submitDisabledReason) {
       return { message: mentionNotice, tone: 'hint' as const };
     }
     if (!prompt.trim()) {
@@ -2078,6 +2078,7 @@ export function GenerationComposer({
         )}
 
         {/* 参数栏 */}
+        {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || '请先确认1080p审批已通过。'}</p>}
         <ComposerActionBar
           generationMode={generationMode}
           ratio={ratio}

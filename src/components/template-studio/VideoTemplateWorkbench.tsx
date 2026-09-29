@@ -1390,6 +1390,15 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const canContinue = (run: StudioRunDto) => run.status === 'succeeded' && Boolean(run.prompt || (activeRunDetail?.run.id === run.id && activeRunDetail.snapshot.prompt));
   const fieldErrors = activeDraft?.recipe?.fields.map((field) => ({ field, message: fieldError(field, fieldValue(activeDraft.values, field)) })).filter((item) => item.message) || [];
   const missingSlots = missingAssetSlots(activeDraft?.recipe || null, activeDraft?.assets || []);
+  const inputBlocker = working ? '正在处理，请等待本次操作完成。'
+    : assetBusy ? '素材还在处理，请等待素材加入后继续。'
+    : authExpired ? '登录已失效，请重新登录；当前草稿保留。'
+    : conflict ? '草稿与服务器版本冲突，请先处理页面上的版本冲突提示。'
+    : pendingRun && requestUnknown ? '上次提交结果尚未确认，请先点击“查询这次请求”，避免重复提交。'
+    : fieldErrors.length ? `请补齐模板输入：${fieldErrors.map(item => `${item.field.label}（${item.message}）`).join('；')}`
+    : missingSlots.length ? `请添加必填素材：${missingSlots.map(slot => slot.label).join('、')}` : '';
+  const directBlocker = inputBlocker || (activeDraft && !composeDraftPrompt(activeDraft) ? '请先填写提示词，或选择带有固定要求的模板。' : '');
+  const llmBlocker = inputBlocker || (!capabilities?.llmEnabled ? capabilityError || capabilities?.llmReason || '正在读取AI整理配置，请稍候；长时间无变化请刷新页面。' : '');
   const assetIds = activeDraft?.assets.map((item) => item.assetId) || [];
   const loginNext = `/template-studio?${searchParams.toString()}`;
 
@@ -1613,11 +1622,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       <div className={styles.sectionTitle}><span>提示词操作</span><span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span></div>
                       {fieldErrors.length > 0 && <span className={styles.fieldError}>还有 {fieldErrors.length} 项模板输入未完成。</span>}
                       <div className={styles.promptTools}>
-                        <button className={styles.primaryButton} type="button" disabled={working || Boolean(fieldErrors.length || missingSlots.length) || !composeDraftPrompt(activeDraft)} onClick={() => void submitRun('direct')}><Check size={15} />直接套用</button>
-                        <button className={styles.quietButton} type="button" disabled={working || !capabilities?.llmEnabled || Boolean(fieldErrors.length || missingSlots.length)} title={!capabilities?.llmEnabled ? capabilities?.llmReason || 'AI整理暂不可用' : 'AI整理提示词'} onClick={() => void submitRun('llm')}><Sparkles size={15} />AI整理</button>
+                        <button className={styles.primaryButton} type="button" disabled={Boolean(directBlocker)} title={directBlocker || undefined} onClick={() => void submitRun('direct')}><Check size={15} />直接套用</button>
+                        <button className={styles.quietButton} type="button" disabled={Boolean(llmBlocker)} title={llmBlocker || 'AI整理提示词'} onClick={() => void submitRun('llm')}><Sparkles size={15} />AI整理</button>
                         {capabilities && !capabilities.llmEnabled && <span className={styles.fieldHint}>{capabilities.llmReason || 'AI整理当前不可用；可以继续手写和直接套用。'}</span>}
                         {capabilityError && <span className={styles.fieldHint}>{capabilityError}</span>}
                       </div>
+                      {directBlocker && <p role="status" className={styles.fieldError}>直接套用：{directBlocker}</p>}
+                      {llmBlocker && <p role="status" className={styles.fieldError}>AI整理：{llmBlocker}</p>}
                       {pendingRun && requestUnknown && (
                         <div className={`${styles.callout} ${styles.calloutWarning}`} role="alert">
                           <span>这次请求的结果还未确认。先查询，未查到后才能按原请求号重试。</span>

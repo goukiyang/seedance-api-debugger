@@ -859,6 +859,22 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
   const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
   const ready = Boolean(selectedProviderReady && (settings?.contextConfigured || moduleContextConfigured) && moduleUnitCredits !== null && !dirty && !settingsError && moduleContext === savedModuleContext);
+  const generationBlocker = sourceSharingBlocked ? '该模板已停止共享，请换一个可用模板。'
+    : submitting ? '正在提交，请等待结果，不要重复点击。'
+    : uploading || bannerUploading ? '图片还在上传或处理，请等待图片显示后再生成。'
+    : moduleSaving ? '正在保存模板，请稍候。'
+    : ratioEditing ? '图片比例尚未确认，请先完成比例设置。'
+    : pendingSubmission ? ''
+    : settingsError ? '生成设置读取失败，请重试读取设置或刷新页面。'
+    : !settings ? '正在读取生成设置，请稍候；长时间无变化请刷新页面。'
+    : !selectedProviderReady ? '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。'
+    : !(settings.contextConfigured || moduleContextConfigured) ? '缺少上下文要求，请填写并保存模板上下文，或请管理员配置通用上下文。'
+    : moduleUnitCredits === null ? '当前模型尚未设置点数，请换一个模型或联系管理员配置。'
+    : dirty ? '通用上下文或点数设置有未保存修改，请先保存这些设置。'
+    : moduleContext !== savedModuleContext ? '模板上下文有未保存修改，请先在“模块上下文”中保存。'
+    : !prompt.trim() && !images.length ? '请填写补充提示词，或添加至少一张参考图。'
+    : !Number.isInteger(count) || count < 1 || count > 8 ? '生成张数应为1到8的整数，请修改张数。'
+    : !ready ? '生成条件尚未就绪，请检查模型和上下文设置。' : '';
   const previewableTasks = tasks.filter(task => Boolean(task.asset));
   function openTaskPreview(task: StudioTask) { setPreview(studioTaskPreviewState(task)); }
   function movePreview(direction: -1 | 1) {
@@ -1002,7 +1018,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
         </div>
-        <button type="button" className={styles.generate} disabled={sourceSharingBlocked || submitting || uploading || moduleSaving || ratioEditing || (!pendingSubmission && (!ready || (!prompt.trim() && !images.length) || !Number.isInteger(count) || count < 1 || count > 8))} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        <button type="button" className={styles.generate} disabled={Boolean(generationBlocker)} title={generationBlocker || undefined} aria-describedby={generationBlocker ? `generation-blocker-${module.id}` : undefined} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        {generationBlocker && <p id={`generation-blocker-${module.id}`} role="status" className={styles.error}>{generationBlocker}</p>}
         {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={images.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
