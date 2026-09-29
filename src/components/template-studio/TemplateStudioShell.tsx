@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import ImageStudio from '@/app/image-studio/studio';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import VideoTemplateWorkbench from './VideoTemplateWorkbench';
+import TemplateCatalog from './TemplateCatalog';
 import styles from './template-studio.module.css';
 
 type StudioType = 'image' | 'video';
@@ -30,13 +31,22 @@ export default function TemplateStudioShell({
     && allowedTypes.includes(requestedType)
     ? requestedType
     : initialType;
+  const isWorkspaceRoute = searchParams.get('workspace') === '1';
+  const hasImageModuleLink = requestedType === 'image' && Boolean(searchParams.get('moduleId'));
+  const hasVideoWorkbenchLink = requestedType === 'video' && Boolean(
+    searchParams.get('view') || searchParams.get('templateId') || searchParams.get('draftId')
+    || searchParams.get('moduleId') || searchParams.get('runId'),
+  );
+  const workspaceType = isWorkspaceRoute
+    ? allowedTypes.includes(activeType) ? activeType : null
+    : hasImageModuleLink && allowedTypes.includes('image') ? 'image'
+      : hasVideoWorkbenchLink && allowedTypes.includes('video') ? 'video' : null;
   const userChanged = hasLoadedUser && (!user || user.id !== userId);
   const query = useMemo(() => new URLSearchParams(searchParams.toString()), [searchParams]);
 
-  function changeType(type: StudioType) {
-    if (!allowedTypes.includes(type)) return;
+  function dismissImageTemplateManagement() {
     const next = new URLSearchParams(query);
-    next.set('type', type);
+    next.delete('view');
     router.replace(`/template-studio?${next.toString()}`, { scroll: false });
   }
 
@@ -58,30 +68,25 @@ export default function TemplateStudioShell({
           <span className={styles.kicker}>创作</span>
           <h1>模板工作台</h1>
         </div>
-        <nav className={styles.categoryTabs} aria-label="内容类型" role="tablist">
-          {allowedTypes.map((type) => (
-            <button
-              key={type}
-              className={activeType === type ? styles.activeCategory : ''}
-              type="button"
-              role="tab"
-              aria-selected={activeType === type}
-              onClick={() => changeType(type)}
-            >
-              {type === 'image' ? '图片' : '视频'}
-            </button>
-          ))}
-        </nav>
       </header>
 
-      {activeType === 'image' ? (
-        <div className={styles.imageSurface} role="tabpanel">
-          <ImageStudio isAdmin={isAdmin} userId={userId} />
+      {workspaceType === 'image' ? (
+        <div className={styles.imageSurface}>
+          <ImageStudio
+            key={`${userId}:image:${searchParams.get('moduleId') || 'default'}`}
+            isAdmin={isAdmin}
+            userId={userId}
+            initialModuleId={searchParams.get('moduleId') || undefined}
+            initialPresetManagement={searchParams.get('view') === 'template-management'}
+            onPresetManagementDismiss={dismissImageTemplateManagement}
+          />
         </div>
-      ) : (
-        <div role="tabpanel">
+      ) : workspaceType === 'video' ? (
+        <div>
           <VideoTemplateWorkbench key={`${userId}:video`} userId={userId} />
         </div>
+      ) : (
+        <TemplateCatalog key={userId} userId={userId} allowedTypes={allowedTypes} />
       )}
     </section>
   );

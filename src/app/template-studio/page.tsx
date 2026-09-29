@@ -7,8 +7,10 @@ import TemplateStudioShell from '@/components/template-studio/TemplateStudioShel
 export const dynamic = 'force-dynamic';
 
 type SearchParams = {
+  workspace?: string;
   type?: string;
   view?: string;
+  status?: string;
   runId?: string;
   draftId?: string;
   moduleId?: string;
@@ -18,7 +20,7 @@ type SearchParams = {
 
 function safeWorkbenchQuery(params: SearchParams) {
   const query = new URLSearchParams();
-  for (const key of ['type', 'view', 'runId', 'draftId', 'moduleId', 'templateId', 'templateSource'] as const) {
+  for (const key of ['workspace', 'type', 'view', 'status', 'runId', 'draftId', 'moduleId', 'templateId', 'templateSource'] as const) {
     const value = params[key];
     if (!value || value.length > 200 || /[\u0000-\u001f\u007f]/.test(value)) continue;
     query.set(key, value);

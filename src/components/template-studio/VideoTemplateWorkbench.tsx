@@ -44,6 +44,7 @@ type SaveState = { label: string; tone?: 'success' | 'warning' | 'error' };
 type RunDetail = StudioRunDetailResponse;
 
 const API = '/api/template-studio';
+const guardedVideoNavigationEvents = new WeakSet<Event>();
 const RUN_STATUSES: Array<{ value: StatusFilter; label: string }> = [
   { value: '', label: '全部状态' },
   { value: 'queued', label: '排队中' },
@@ -228,6 +229,10 @@ function routeWith(searchParams: URLSearchParams, patch: Record<string, string |
   return `/template-studio?${next.toString()}`;
 }
 
+function editableTemplateSignature(template: StudioTemplateDto) {
+  return JSON.stringify({ name: template.name, description: template.description, groupName: template.groupName, recipe: template.recipe });
+}
+
 function statusFilter(value: string | null): StatusFilter {
   return RUN_STATUSES.some((item) => item.value === value) ? value as StatusFilter : '';
 }
@@ -368,6 +373,14 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const activeTemplate = useMemo(() => templates.find((item) => item.id === routedTemplateId && item.source === routedTemplateSource) || null, [routedTemplateId, routedTemplateSource, templates]);
   const activeDraft = draft?.id === routedDraftId ? draft : null;
   const activeRunDetail = runDetail?.run.id === routedRunId ? runDetail : null;
+  const templateEditBaseline = templateEdit && templates.find((item) => item.id === templateEdit.id && item.source === templateEdit.source);
+  const templateEditDirty = Boolean(templateEdit && (!templateEditBaseline
+    || editableTemplateSignature(templateEdit) !== editableTemplateSignature(templateEditBaseline)));
+  const hasUnsavedVideoWork = Boolean(
+    (activeDraft && JSON.stringify(activeDraft) !== savedSignature.current)
+    || templateEditDirty || createTemplateOpen || working || assetBusy || templateEditBusy || createTemplateBusy
+    || pendingRun || requestUnknown,
+  );
   const currentRouteKey = `${view}:${routedDraftId || ''}:${routedTemplateId || ''}:${routedRunId || ''}`;
   const currentRouteKeyRef = useRef(currentRouteKey);
   currentRouteKeyRef.current = currentRouteKey;
@@ -421,6 +434,28 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   }, [userId]);
 
   useEffect(() => {
+    if (!hasUnsavedVideoWork) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    const guardNavigation = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+      if (!(link instanceof HTMLAnchorElement) || link.target === '_blank' || link.hasAttribute('download')) return;
+      if (link.href === window.location.href || link.hash && link.pathname === window.location.pathname) return;
+      if (guardedVideoNavigationEvents.has(event)) return;
+      guardedVideoNavigationEvents.add(event);
+      if (!window.confirm('视频工作区有未保存内容或操作正在进行。确定返回模板目录吗？')) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('beforeunload', warn);
+    document.addEventListener('click', guardNavigation, true);
+    return () => {
+      window.removeEventListener('beforeunload', warn);
+      document.removeEventListener('click', guardNavigation, true);
+    };
+  }, [hasUnsavedVideoWork]);
+
+  useEffect(() => {
     currentUserId.current = userId;
     return () => {
       const latest = draftRef.current;
@@ -461,7 +496,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       const page = await requestJson<TemplateListResponse>(`${API}/templates${queryString ? `?${queryString}` : ''}`);
       if (sequence !== templateSequence.current || currentUserId.current !== userId) return;
       setTemplates((current) => {
-        const next = append ? [...current, ...page.items] : page.items;
+        const routedItem = !append && routedTemplateId
+          ? current.find((item) => item.id === routedTemplateId && (!templateSourceValue || item.source === templateSourceValue))
+          : null;
+        const next = append ? [...current, ...page.items] : routedItem ? [routedItem, ...page.items] : page.items;
         const seen = new Set<string>();
         return next.filter((item) => {
           const key = `${item.source}:${item.id}`;
@@ -480,7 +518,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     } finally {
       if (sequence === templateSequence.current) setTemplateBusy(false);
     }
-  }, [appliedTemplateFilters, handleAuthExpired, userId]);
+  }, [appliedTemplateFilters, handleAuthExpired, routedTemplateId, templateSourceValue, userId]);
 
   useEffect(() => {
     setTemplates([]);
@@ -633,6 +671,44 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   useEffect(() => {
     setTemplateRecoveryAvailable(Boolean(routedTemplateId && readTemplateRecovery(userId, routedTemplateId)));
   }, [routedTemplateId, userId]);
+
+  useEffect(() => {
+    if (!templateEdit || !templateEditDirty) return;
+    saveTemplateRecovery(userId, templateEdit);
+    setTemplateRecoveryAvailable(true);
+  }, [templateEdit, templateEditDirty, userId]);
+
+  const routedTemplateLookupSequence = useRef(0);
+  const [routedTemplateLookupBusy, setRoutedTemplateLookupBusy] = useState(false);
+  useEffect(() => {
+    if (!routedTemplateId || activeTemplate) {
+      setRoutedTemplateLookupBusy(false);
+      return;
+    }
+    const controller = new AbortController();
+    const sequence = ++routedTemplateLookupSequence.current;
+    setRoutedTemplateLookupBusy(true);
+    const query = new URLSearchParams({ source: routedTemplateSource });
+    void requestJson<StudioTemplateDetailResponse>(`${API}/templates/${encodeURIComponent(routedTemplateId)}?${query}`, { signal: controller.signal }).then((value) => {
+      if (controller.signal.aborted || sequence !== routedTemplateLookupSequence.current || currentUserId.current !== userId) return;
+      if (value.template.id !== routedTemplateId || value.template.source !== routedTemplateSource) {
+        setNotice('模板链接与读取结果不一致，请从目录重新打开。');
+        return;
+      }
+      setTemplates((current) => {
+        const found = current.some((item) => item.id === value.template.id && item.source === value.template.source);
+        return found ? current : [value.template, ...current];
+      });
+    }).catch((error) => {
+      if (!controller.signal.aborted && sequence === routedTemplateLookupSequence.current && currentUserId.current === userId) {
+        handleAuthExpired(error);
+        setNotice(messageForFailure(error));
+      }
+    }).finally(() => {
+      if (sequence === routedTemplateLookupSequence.current) setRoutedTemplateLookupBusy(false);
+    });
+    return () => controller.abort();
+  }, [activeTemplate, handleAuthExpired, routedTemplateId, routedTemplateSource, userId]);
 
   useEffect(() => {
     if (!routedTemplateId || !activeTemplate?.canManage) {
@@ -1406,6 +1482,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           ))}
         </nav>
         <div className={styles.headerActions}>
+          <a className={styles.calloutLink} href="/template-studio">返回模板目录</a>
           <span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span>
           <button className={styles.primaryButton} type="button" onClick={() => void createBlankDraft()} disabled={working}>
             <Plus size={16} aria-hidden="true" /> 新建空白模块
@@ -1668,6 +1745,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                 onArchive={() => void archiveTemplate(activeTemplate)}
                 onBack={() => navigate({ templateId: null, templateSource: null })}
               />
+            ) : routedTemplateLookupBusy ? (
+              <div className={styles.emptyState} role="status"><LoaderCircle size={22} /><h2>正在读取模板</h2><p>正在按当前账号权限核对模板详情。</p></div>
             ) : (
               <div className={styles.emptyState}><FolderOpen size={22} /><h2>选择一个模板，或新建空白模块</h2><p>模板会填入有限的字段和推荐素材位置。空白模块可以直接写提示词，保存后下次继续。</p><button className={styles.primaryButton} type="button" onClick={() => void createBlankDraft()} disabled={working}><Plus size={15} />新建空白模块</button></div>
             )

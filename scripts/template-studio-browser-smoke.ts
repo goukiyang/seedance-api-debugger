@@ -48,6 +48,21 @@ type FixtureAccount = {
   password: string;
 };
 
+type UnifiedCatalogFixture = {
+  imagePresetId: string;
+  imagePresetName: string;
+  imageGroup: string;
+  imagePrompt: string;
+  privateImagePresetName: string;
+  previewAssetId: string;
+  videoTemplateId: string;
+  videoTemplateName: string;
+  videoGroup: string;
+  videoDescription: string;
+  videoInstruction: string;
+  privateVideoTemplateName: string;
+};
+
 type StudioApiDiagnostic = { method: string; path: string; status: number | null; code?: string; error?: string };
 type PlaywrightRequestLike = { method(): string; postDataJSON(): unknown };
 type PlaywrightResponseLike = { request(): PlaywrightRequestLike; status(): number; url(): string };
@@ -697,6 +712,528 @@ async function addFixtureHistoryAsset(prismaClient: any, ownerId: string, type: 
   return { id: asset.id as string, fileName };
 }
 
+async function addUnifiedCatalogFixtures(prismaClient: any, ownerId: string, previewAssetId: string): Promise<UnifiedCatalogFixture> {
+  const suffix = smokeId.slice(0, 8);
+  const imageGroup = `catalog-${suffix}-image`;
+  const videoGroup = `catalog-${suffix}-video`;
+  const imagePresetId = `studio-smoke-catalog-image-${suffix}`;
+  const videoTemplateId = `studio-smoke-catalog-video-${suffix}`;
+  const videoVersionId = `studio-smoke-catalog-version-${suffix}`;
+  const imagePresetName = `共享图片目录 ${suffix}`;
+  const videoTemplateName = `共享视频目录 ${suffix}`;
+  const privateImagePresetName = `他人私有图片 ${suffix}`;
+  const privateVideoTemplateName = `他人私有视频 ${suffix}`;
+  const imagePrompt = `共享图片提示内容 <img src=x onerror="window.__templateStudioCatalogXss=1">`;
+  const videoDescription = `共享视频说明 <svg onload="window.__templateStudioCatalogXss=1">`;
+  const videoInstruction = `共享视频配方内容 ${suffix}`;
+  const recipe = {
+    instruction: videoInstruction,
+    fields: [],
+    assetSlots: [],
+    defaultParameters: {},
+  };
+
+  await prismaClient.imageStudioPreset.create({
+    data: {
+      id: imagePresetId,
+      owner_id: ownerId,
+      scope: 'admin',
+      is_shared: true,
+      name: imagePresetName,
+      group_name: imageGroup,
+      prompt: imagePrompt,
+      context: '统一目录浏览器 fixture',
+      model: 'gemini-3.1-flash-image-preview',
+      quality: 'auto',
+      resolution: '1K',
+      count: 1,
+      reference_limit: 1,
+      aspect_ratio: 'auto',
+      banner_asset_id: previewAssetId,
+      reference_ids: JSON.stringify([previewAssetId]),
+    },
+  });
+  await prismaClient.imageStudioPreset.create({
+    data: {
+      id: `studio-smoke-catalog-image-private-${suffix}`,
+      owner_id: ownerId,
+      scope: 'admin',
+      is_shared: false,
+      name: privateImagePresetName,
+      group_name: imageGroup,
+      prompt: '不可向非所有者展示的本地 fixture',
+      context: '',
+      model: 'gemini-3.1-flash-image-preview',
+      quality: 'auto',
+      resolution: '1K',
+      count: 1,
+      reference_limit: 1,
+      aspect_ratio: 'auto',
+      banner_asset_id: null,
+      reference_ids: '[]',
+    },
+  });
+
+  await prismaClient.videoStudioTemplate.create({
+    data: {
+      id: videoTemplateId,
+      owner_user_id: ownerId,
+      name: videoTemplateName,
+      description: videoDescription,
+      group_name: videoGroup,
+      status: 'published',
+      visibility: 'shared',
+      revision: 1,
+      recipe_json: JSON.stringify(recipe),
+      published_version_id: null,
+    },
+  });
+  await prismaClient.videoStudioTemplateVersion.create({
+    data: {
+      id: videoVersionId,
+      template_id: videoTemplateId,
+      version_number: 1,
+      name: videoTemplateName,
+      description: videoDescription,
+      group_name: videoGroup,
+      recipe_json: JSON.stringify(recipe),
+      created_by: ownerId,
+    },
+  });
+  await prismaClient.videoStudioTemplate.update({
+    where: { id: videoTemplateId },
+    data: { published_version_id: videoVersionId },
+  });
+  await prismaClient.videoStudioTemplate.create({
+    data: {
+      id: `studio-smoke-catalog-video-private-${suffix}`,
+      owner_user_id: ownerId,
+      name: privateVideoTemplateName,
+      description: '不可向非所有者展示的本地 fixture',
+      group_name: videoGroup,
+      status: 'draft',
+      visibility: 'private',
+      revision: 1,
+      recipe_json: JSON.stringify(recipe),
+      published_version_id: null,
+    },
+  });
+
+  return {
+    imagePresetId,
+    imagePresetName,
+    imageGroup,
+    imagePrompt,
+    privateImagePresetName,
+    previewAssetId,
+    videoTemplateId,
+    videoTemplateName,
+    videoGroup,
+    videoDescription,
+    videoInstruction,
+    privateVideoTemplateName,
+  };
+}
+
+async function snapshotCatalogRecordCounts() {
+  const [imageModules, imagePresets, imageTasks, videoTemplates, videoDrafts, videoRuns] = await Promise.all([
+    prisma.imageStudioModule.count(),
+    prisma.imageStudioPreset.count(),
+    prisma.imageStudioTask.count(),
+    prisma.videoStudioTemplate.count(),
+    prisma.videoStudioDraft.count(),
+    prisma.videoStudioRun.count(),
+  ]);
+  return { imageModules, imagePresets, imageTasks, videoTemplates, videoDrafts, videoRuns };
+}
+
+function groupDetails(page: any, groupName: string) {
+  return page.locator('details').filter({ hasText: groupName });
+}
+
+async function waitForCatalogItems(page: any, fixture: UnifiedCatalogFixture) {
+  const imageGroup = groupDetails(page, fixture.imageGroup);
+  const videoGroup = groupDetails(page, fixture.videoGroup);
+  await imageGroup.locator('summary').waitFor({ state: 'visible', timeout: browserTimeout });
+  await videoGroup.locator('summary').waitFor({ state: 'visible', timeout: browserTimeout });
+  await page.locator('[aria-label="图片模板"]').getByText(fixture.imagePresetName, { exact: true }).waitFor({ state: 'attached', timeout: browserTimeout });
+  await page.locator('[aria-label="视频模板"]').getByText(fixture.videoTemplateName, { exact: true }).waitFor({ state: 'attached', timeout: browserTimeout });
+}
+
+async function setGroupCollapsed(page: any, groupName: string, collapsed: boolean) {
+  const group = groupDetails(page, groupName);
+  assert.equal(await group.count(), 1, `catalog should have one collapsible group named ${groupName}`);
+  const isOpen = await group.evaluate((element: HTMLDetailsElement) => element.open);
+  if (isOpen === collapsed) await group.locator('summary').click();
+  assert.equal(await group.evaluate((element: HTMLDetailsElement) => element.open), !collapsed);
+}
+
+async function openTemplateCatalogFromWorkspace(page: any, fixture: UnifiedCatalogFixture) {
+  const directoryLink = page.getByRole('link', { name: /^(返回模板目录|模板目录)$/ }).first();
+  await directoryLink.waitFor({ state: 'visible', timeout: browserTimeout });
+  const href = await directoryLink.getAttribute('href');
+  assert.ok(href, 'workspace must expose a real link back to the template catalog');
+  assert.equal(href, '/template-studio');
+  const destination = new URL(href, page.url());
+  assert.equal(destination.pathname, '/template-studio');
+  assert.notEqual(destination.searchParams.get('workspace'), '1');
+  await directoryLink.click();
+  await page.waitForURL((url: URL) => url.pathname === '/template-studio' && url.searchParams.get('workspace') !== '1', { timeout: browserTimeout });
+  await page.locator('[aria-label="统一模板目录"]').waitFor({ state: 'visible', timeout: browserTimeout });
+  await waitForCatalogItems(page, fixture);
+}
+
+async function useCatalogImagePreset(page: any, fixture: UnifiedCatalogFixture) {
+  await setGroupCollapsed(page, fixture.imageGroup, false);
+  const imageCard = page.locator(`article[data-template-card="image"][data-template-id="${fixture.imagePresetId}"]`);
+  const responsePromise = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/image-studio/presets' && response.request().method() === 'POST';
+  }, { timeout: browserTimeout });
+  await imageCard.getByRole('button', { name: '使用模板', exact: true }).click();
+  const response = await responsePromise;
+  assert.equal(response.status(), 200, 'explicit image use should create the owner’s personal module');
+  const payload = await response.json();
+  const moduleId = payload?.id as string | undefined;
+  assert.ok(moduleId);
+  await page.waitForURL((url: URL) => url.pathname === '/template-studio'
+    && url.searchParams.get('workspace') === '1'
+    && url.searchParams.get('type') === 'image', { timeout: browserTimeout });
+  await page.locator(`#module-${moduleId}`).waitFor({ state: 'visible', timeout: browserTimeout });
+  return moduleId;
+}
+
+async function useCatalogVideoTemplate(page: any, fixture: UnifiedCatalogFixture) {
+  await setGroupCollapsed(page, fixture.videoGroup, false);
+  const videoCard = page.locator(`article[data-template-card="video"][data-template-id="${fixture.videoTemplateId}"]`);
+  await videoCard.getByRole('button', { name: '查看模板', exact: true }).click();
+  const useButton = page.getByRole('button', { name: '用此模板新建模块' });
+  await useButton.waitFor({ state: 'visible', timeout: browserTimeout });
+  const responsePromise = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/template-studio/drafts' && response.request().method() === 'POST';
+  }, { timeout: browserTimeout });
+  await useButton.click();
+  const response = await responsePromise;
+  assert.equal(response.status(), 201, 'explicit video use should create the owner’s personal draft');
+  const payload = await response.json();
+  const draftId = payload?.draft?.id as string | undefined;
+  assert.ok(draftId);
+  await page.waitForURL((url: URL) => url.pathname === '/template-studio'
+    && url.searchParams.get('workspace') === '1'
+    && url.searchParams.get('type') === 'video'
+    && url.searchParams.get('draftId') === draftId, { timeout: browserTimeout });
+  await page.locator('#studio-prompt').waitFor({ state: 'visible', timeout: browserTimeout });
+  return draftId;
+}
+
+async function assertCatalogWritesAndServerErrors(page: any, writes: Array<{ method: string; path: string }>, failures: Array<{ method: string; path: string; status: number }>) {
+  assert.deepEqual(writes, [], `catalog browsing must not send API write requests: ${JSON.stringify(writes)}`);
+  assert.deepEqual(failures, [], `catalog API requests must not return 5xx: ${JSON.stringify(failures)}`);
+}
+
+async function assertUnifiedCatalog(
+  browserInstance: any,
+  baseUrl: string,
+  firstAccount: FixtureAccount,
+  firstUserId: string,
+  secondAccount: FixtureAccount,
+  fixture: UnifiedCatalogFixture,
+) {
+  const context = await browserInstance.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } });
+  await installLocalOnlyBrowserRoutes(context);
+  const page = await context.newPage();
+  trackStudioApiDiagnostics(page, baseUrl);
+  failureCapturePage = page;
+  await loginThroughUi(page, firstAccount, '/account');
+
+  const studioPrefixes = ['/api/image-studio/', '/api/template-studio/'];
+  const writes: Array<{ method: string; path: string }> = [];
+  const failures: Array<{ method: string; path: string; status: number }> = [];
+  page.on('request', (request: any) => {
+    try {
+      const url = new URL(request.url());
+      if (url.origin !== baseUrl || !studioPrefixes.some((prefix) => url.pathname.startsWith(prefix))) return;
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) writes.push({ method: request.method(), path: url.pathname });
+    } catch { /* Diagnostics must not affect browser behavior. */ }
+  });
+  page.on('response', (response: any) => {
+    try {
+      const url = new URL(response.url());
+      if (url.origin === baseUrl && studioPrefixes.some((prefix) => url.pathname.startsWith(prefix)) && response.status() >= 500) {
+        failures.push({ method: response.request().method(), path: url.pathname, status: response.status() });
+      }
+    } catch { /* Diagnostics must not affect browser behavior. */ }
+  });
+
+  const countBeforeBrowsing = await snapshotCatalogRecordCounts();
+  const imageListResponse = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.origin === baseUrl && url.pathname === '/api/image-studio/presets' && response.request().method() === 'GET';
+  }, { timeout: browserTimeout });
+  const videoListResponse = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.origin === baseUrl && url.pathname === '/api/template-studio/templates' && response.request().method() === 'GET';
+  }, { timeout: browserTimeout });
+  await page.goto('/template-studio');
+  await page.getByRole('heading', { name: '模板工作台' }).waitFor({ state: 'visible', timeout: browserTimeout });
+  const catalog = page.locator('[aria-label="统一模板目录"]');
+  const imageSection = catalog.locator('[aria-label="图片模板"]');
+  const videoSection = catalog.locator('[aria-label="视频模板"]');
+  await catalog.waitFor({ state: 'visible', timeout: browserTimeout });
+  await imageSection.waitFor({ state: 'visible', timeout: browserTimeout });
+  await videoSection.waitFor({ state: 'visible', timeout: browserTimeout });
+  const [imageResponse, videoResponse] = await Promise.all([imageListResponse, videoListResponse]);
+  assert.equal(imageResponse.status(), 200, 'shared image preset GET must succeed without applying it');
+  assert.equal(videoResponse.status(), 200, 'shared video template GET must succeed without applying it');
+  const imagePayload = await imageResponse.json();
+  const videoPayload = await videoResponse.json();
+  assert.ok(imagePayload?.presets?.some((item: any) => item.id === fixture.imagePresetId), 'authorized shared image preset must be returned to a non-owner');
+  assert.ok(videoPayload?.items?.some((item: any) => item.id === fixture.videoTemplateId), 'authorized shared video template must be returned to a non-owner');
+  assert.equal(imagePayload?.presets?.some((item: any) => item.name === fixture.privateImagePresetName), false, 'another owner’s private image preset must not reach the API response');
+  assert.equal(videoPayload?.items?.some((item: any) => item.name === fixture.privateVideoTemplateName), false, 'another owner’s private video template must not reach the API response');
+
+  await imageSection.getByText(fixture.imagePresetName, { exact: true }).waitFor({ state: 'visible', timeout: browserTimeout });
+  await videoSection.getByText(fixture.videoTemplateName, { exact: true }).waitFor({ state: 'visible', timeout: browserTimeout });
+  await imageSection.getByText(fixture.imagePrompt).waitFor({ state: 'visible', timeout: browserTimeout });
+  await videoSection.getByText(fixture.videoDescription).waitFor({ state: 'visible', timeout: browserTimeout });
+  await videoSection.getByText(fixture.videoInstruction).waitFor({ state: 'visible', timeout: browserTimeout });
+  assert.equal(await page.getByText(fixture.privateImagePresetName, { exact: true }).count(), 0, 'another owner’s private image preset must stay hidden');
+  assert.equal(await page.getByText(fixture.privateVideoTemplateName, { exact: true }).count(), 0, 'another owner’s private video template must stay hidden');
+  const preview = page.locator(`img[src*="/api/image-studio/template-assets/${fixture.previewAssetId}"]`).first();
+  await preview.waitFor({ state: 'visible', timeout: browserTimeout });
+  await page.waitForFunction((assetId: string) => Array.from(document.images).some((image) => image.src.includes(assetId) && image.complete && image.naturalWidth > 0), fixture.previewAssetId, { timeout: browserTimeout });
+  assert.equal(await page.locator('img[onerror],svg[onload]').count(), 0, 'untrusted template text must remain text, not executable markup');
+  assert.equal(await page.evaluate(() => (window as any).__templateStudioCatalogXss), undefined, 'catalog text must not execute injected handlers');
+
+  await page.screenshot({ path: path.join(artifactRoot, 'template-studio-catalog.png'), fullPage: true });
+  await setGroupCollapsed(page, fixture.imageGroup, true);
+  await setGroupCollapsed(page, fixture.videoGroup, true);
+  await assertCatalogWritesAndServerErrors(page, writes, failures);
+  const imageReloadResponse = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.origin === baseUrl && url.pathname === '/api/image-studio/presets' && response.request().method() === 'GET';
+  }, { timeout: browserTimeout });
+  const videoReloadResponse = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.origin === baseUrl && url.pathname === '/api/template-studio/templates' && response.request().method() === 'GET';
+  }, { timeout: browserTimeout });
+  await page.reload();
+  await page.locator('[aria-label="统一模板目录"]').waitFor({ state: 'visible', timeout: browserTimeout });
+  const [imageReload, videoReload] = await Promise.all([imageReloadResponse, videoReloadResponse]);
+  assert.equal(imageReload.status(), 200, 'image catalog GET after refresh must finish successfully');
+  assert.equal(videoReload.status(), 200, 'video catalog GET after refresh must finish successfully');
+  await waitForCatalogItems(page, fixture);
+  assert.equal(await page.locator('[aria-label="图片模板"]').getByText(fixture.imagePresetName, { exact: true }).count(), 1);
+  assert.equal(await page.locator('[aria-label="视频模板"]').getByText(fixture.videoTemplateName, { exact: true }).count(), 1);
+  assert.equal(await groupDetails(page, fixture.imageGroup).evaluate((element: HTMLDetailsElement) => element.open), false, 'image subcategory collapse must survive refresh');
+  assert.equal(await groupDetails(page, fixture.videoGroup).evaluate((element: HTMLDetailsElement) => element.open), false, 'video subcategory collapse must survive refresh');
+  assert.deepEqual(await snapshotCatalogRecordCounts(), countBeforeBrowsing, 'opening, folding, and refreshing the catalog must not create modules, drafts, or runs');
+  await assertCatalogWritesAndServerErrors(page, writes, failures);
+
+  const preferenceStorage = await page.evaluate(() => Object.fromEntries(
+    Array.from({ length: localStorage.length }, (_, index) => {
+      const key = localStorage.key(index)!;
+      return [key, localStorage.getItem(key) || ''];
+    }),
+  ));
+  const secondContext = await browserInstance.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 900 } });
+  await secondContext.addInitScript((entries: Record<string, string>) => {
+    for (const [key, value] of Object.entries(entries)) localStorage.setItem(key, value);
+  }, preferenceStorage);
+  await installLocalOnlyBrowserRoutes(secondContext);
+  const secondPage = await secondContext.newPage();
+  trackStudioApiDiagnostics(secondPage, baseUrl);
+  failureCapturePage = secondPage;
+  await loginThroughUi(secondPage, secondAccount, '/account');
+  const secondPageWrites: Array<{ method: string; path: string }> = [];
+  const secondPageFailures: Array<{ method: string; path: string; status: number }> = [];
+  secondPage.on('request', (request: any) => {
+    try {
+      const url = new URL(request.url());
+      if (url.origin === baseUrl && studioPrefixes.some((prefix) => url.pathname.startsWith(prefix))
+        && !['GET', 'HEAD', 'OPTIONS'].includes(request.method())) secondPageWrites.push({ method: request.method(), path: url.pathname });
+    } catch { /* Diagnostics must not affect browser behavior. */ }
+  });
+  secondPage.on('response', (response: any) => {
+    try {
+      const url = new URL(response.url());
+      if (url.origin === baseUrl && studioPrefixes.some((prefix) => url.pathname.startsWith(prefix)) && response.status() >= 500) {
+        secondPageFailures.push({ method: response.request().method(), path: url.pathname, status: response.status() });
+      }
+    } catch { /* Diagnostics must not affect browser behavior. */ }
+  });
+  const countsBeforeSecondBrowse = await snapshotCatalogRecordCounts();
+  await secondPage.goto('/template-studio');
+  await secondPage.locator('[aria-label="统一模板目录"]').waitFor({ state: 'visible', timeout: browserTimeout });
+  await waitForCatalogItems(secondPage, fixture);
+  assert.equal(await groupDetails(secondPage, fixture.imageGroup).evaluate((element: HTMLDetailsElement) => element.open), true, 'a second internal user must not inherit the first user’s collapsed image groups');
+  assert.equal(await groupDetails(secondPage, fixture.videoGroup).evaluate((element: HTMLDetailsElement) => element.open), true, 'a second internal user must not inherit the first user’s collapsed video groups');
+  assert.equal(await secondPage.getByText(fixture.privateImagePresetName, { exact: true }).count(), 0);
+  assert.equal(await secondPage.getByText(fixture.privateVideoTemplateName, { exact: true }).count(), 0);
+  assert.deepEqual(await snapshotCatalogRecordCounts(), countsBeforeSecondBrowse, 'a second user browsing the catalog must not create personal records');
+  await assertCatalogWritesAndServerErrors(secondPage, secondPageWrites, secondPageFailures);
+  await secondContext.close();
+  failureCapturePage = page;
+
+  await setGroupCollapsed(page, fixture.videoGroup, false);
+  const videoCountBeforeDetails = await snapshotCatalogRecordCounts();
+  const videoCard = page.locator(`article[data-template-card="video"][data-template-id="${fixture.videoTemplateId}"]`);
+  await videoCard.getByRole('button', { name: '查看模板', exact: true }).click();
+  await page.getByRole('button', { name: '用此模板新建模块' }).waitFor({ state: 'visible', timeout: browserTimeout });
+  assert.deepEqual(await snapshotCatalogRecordCounts(), videoCountBeforeDetails, 'opening a shared video template detail must not create a draft');
+  await assertCatalogWritesAndServerErrors(page, writes, failures);
+  const videoUseResponsePromise = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.origin === baseUrl && url.pathname === '/api/template-studio/drafts' && response.request().method() === 'POST';
+  }, { timeout: browserTimeout });
+  const videoUse = page.getByRole('button', { name: '用此模板新建模块' });
+  await videoUse.waitFor({ state: 'visible', timeout: browserTimeout });
+  await videoUse.click();
+  const videoUseResponse = await videoUseResponsePromise;
+  assert.equal(videoUseResponse.status(), 201, 'explicit video use should create exactly the owner’s personal draft');
+  const videoUseRequest = videoUseResponse.request().postDataJSON() as Record<string, unknown>;
+  assert.equal(videoUseRequest.templateId, fixture.videoTemplateId);
+  assert.equal(videoUseRequest.templateSource, 'studio');
+  const videoUsePayload = await videoUseResponse.json();
+  const createdVideoDraftId = videoUsePayload?.draft?.id as string | undefined;
+  assert.ok(createdVideoDraftId);
+  await page.waitForURL((url: URL) => url.pathname === '/template-studio'
+    && url.searchParams.get('workspace') === '1'
+    && url.searchParams.get('type') === 'video'
+    && url.searchParams.get('draftId') === createdVideoDraftId, { timeout: browserTimeout });
+  await page.locator('#studio-prompt').waitFor({ state: 'visible', timeout: browserTimeout });
+  const createdVideoDraft = await prisma.videoStudioDraft.findUnique({ where: { id: createdVideoDraftId } });
+  assert.equal(createdVideoDraft?.owner_user_id, firstUserId);
+  assert.equal(createdVideoDraft?.template_source, 'studio');
+  assert.equal(createdVideoDraft?.source_template_id, fixture.videoTemplateId);
+  const afterVideoUse = await snapshotCatalogRecordCounts();
+  assert.equal(afterVideoUse.videoDrafts, countBeforeBrowsing.videoDrafts + 1);
+  assert.equal(afterVideoUse.videoRuns, countBeforeBrowsing.videoRuns, 'using a template must not call a model or create a run');
+  assert.equal(afterVideoUse.imageModules, countBeforeBrowsing.imageModules);
+  assert.equal(afterVideoUse.imageTasks, countBeforeBrowsing.imageTasks);
+  assert.equal(afterVideoUse.videoTemplates, countBeforeBrowsing.videoTemplates, 'using a shared template must not create or mutate a template');
+
+  const unsavedPrompt = `返回目录保护未保存文本 ${smokeId}`;
+  const heldSaveReady = deferred<void>();
+  const releaseHeldSave = deferred<void>();
+  const heldSaveFinished = deferred<void>();
+  let heldSaveError: unknown;
+  let heldSaveStarted = false;
+  const draftSavePattern = `**/api/template-studio/drafts/${createdVideoDraftId}`;
+  const holdUnsavedSave = async (route: any) => {
+    const request = route.request();
+    if (request.method() === 'PUT') {
+      let body: unknown;
+      try { body = request.postDataJSON(); } catch { body = null; }
+      if (isRecord(body) && body.prompt === unsavedPrompt) {
+        heldSaveStarted = true;
+        heldSaveReady.resolve();
+        await releaseHeldSave.promise;
+        try {
+          await route.continue();
+        } catch (error) {
+          heldSaveError = error;
+        } finally {
+          heldSaveFinished.resolve();
+        }
+        return;
+      }
+    }
+    await route.continue();
+  };
+  await page.route(draftSavePattern, holdUnsavedSave);
+  try {
+    await page.locator('#studio-prompt').fill(unsavedPrompt);
+    await waitWithTimeout(heldSaveReady.promise, browserTimeout, 'directory navigation guard did not reach the held draft save');
+    let nativeGuardShown = false;
+    const directoryLink = page.getByRole('link', { name: '返回模板目录', exact: true });
+    await directoryLink.waitFor({ state: 'visible', timeout: browserTimeout });
+    const directoryHref = await directoryLink.getAttribute('href');
+    assert.ok(directoryHref, 'workspace must expose its real catalog return link during a pending save');
+    assert.equal(directoryHref, '/template-studio');
+    const directoryTarget = new URL(directoryHref, page.url());
+    assert.equal(directoryTarget.pathname, '/template-studio');
+    assert.notEqual(directoryTarget.searchParams.get('workspace'), '1');
+    page.once('dialog', async (dialog: any) => {
+      nativeGuardShown = true;
+      await dialog.dismiss();
+    });
+    await directoryLink.click();
+
+    const customGuard = page.getByRole('dialog');
+    const customGuardShown = await customGuard.waitFor({ state: 'visible', timeout: 1000 }).then(() => true, () => false);
+    if (customGuardShown) await customGuard.getByRole('button', { name: /继续编辑|取消|留下/ }).click();
+    const navigationDisabled = await directoryLink.getAttribute('aria-disabled') === 'true';
+    assert.ok(nativeGuardShown || customGuardShown || navigationDisabled, 'returning to the catalog during a pending save must be blocked by a real guard');
+    const guardedUrl = new URL(page.url());
+    assert.equal(guardedUrl.pathname, '/template-studio', 'unsaved guard must keep the workspace open');
+    assert.equal(guardedUrl.searchParams.get('workspace'), '1');
+    assert.equal(guardedUrl.searchParams.get('type'), 'video');
+    assert.equal(guardedUrl.searchParams.get('draftId'), createdVideoDraftId);
+    assert.equal(await page.locator('#studio-prompt').inputValue(), unsavedPrompt, 'returning to the catalog must not discard a save-pending edit');
+  } finally {
+    releaseHeldSave.resolve();
+    if (heldSaveStarted) await waitWithTimeout(heldSaveFinished.promise, browserTimeout, 'held save handler did not finish');
+    await page.unroute(draftSavePattern, holdUnsavedSave);
+  }
+  if (heldSaveError) throw heldSaveError;
+  await waitForSaved(page);
+  assert.equal((await prisma.videoStudioDraft.findUnique({ where: { id: createdVideoDraftId } }))?.prompt, unsavedPrompt);
+
+  const returnToCatalog = async () => {
+    await openTemplateCatalogFromWorkspace(page, fixture);
+    await setGroupCollapsed(page, fixture.imageGroup, false);
+    await setGroupCollapsed(page, fixture.videoGroup, false);
+    await page.locator('[aria-label="图片模板"]').getByText(fixture.imagePresetName, { exact: true }).waitFor({ state: 'visible', timeout: browserTimeout });
+    await page.locator('[aria-label="视频模板"]').getByText(fixture.videoTemplateName, { exact: true }).waitFor({ state: 'visible', timeout: browserTimeout });
+  };
+  const writesBeforeReturning = writes.length;
+  await returnToCatalog();
+  assert.equal(writes.length, writesBeforeReturning, 'returning to the catalog must not write business data');
+  const imageUseResponsePromise = page.waitForResponse((response: any) => {
+    const url = new URL(response.url());
+    return url.origin === baseUrl && url.pathname === '/api/image-studio/presets' && response.request().method() === 'POST';
+  }, { timeout: browserTimeout });
+  const imageCard = page.locator(`article[data-template-card="image"][data-template-id="${fixture.imagePresetId}"]`);
+  const imageUse = imageCard.getByRole('button', { name: '使用模板', exact: true });
+  await imageUse.waitFor({ state: 'visible', timeout: browserTimeout });
+  await imageUse.click();
+  const imageUseResponse = await imageUseResponsePromise;
+  assert.equal(imageUseResponse.status(), 200, 'explicit image use should create the owner’s personal module');
+  const imageUseRequest = imageUseResponse.request().postDataJSON() as Record<string, unknown>;
+  assert.equal(imageUseRequest.action, 'apply');
+  assert.equal(imageUseRequest.presetId, fixture.imagePresetId);
+  const imageUsePayload = await imageUseResponse.json();
+  const createdImageModuleId = imageUsePayload?.id as string | undefined;
+  assert.ok(createdImageModuleId);
+  await page.waitForURL((url: URL) => url.pathname === '/template-studio'
+    && url.searchParams.get('workspace') === '1'
+    && url.searchParams.get('type') === 'image', { timeout: browserTimeout });
+  await page.locator(`#module-${createdImageModuleId}`).waitFor({ state: 'visible', timeout: browserTimeout });
+  const createdImageModule = await prisma.imageStudioModule.findUnique({ where: { id: createdImageModuleId } });
+  assert.equal(createdImageModule?.owner_id, firstUserId);
+  assert.equal(createdImageModule?.source_preset_id, fixture.imagePresetId);
+  const afterImageUse = await snapshotCatalogRecordCounts();
+  assert.equal(afterImageUse.imageModules, afterVideoUse.imageModules + 1);
+  assert.equal(afterImageUse.videoDrafts, afterVideoUse.videoDrafts);
+  assert.equal(afterImageUse.videoRuns, afterVideoUse.videoRuns, 'image template use must not create a video run');
+  assert.equal(afterImageUse.imageTasks, afterVideoUse.imageTasks, 'using an image preset must not create a generation task');
+  assert.equal(afterImageUse.imagePresets, afterVideoUse.imagePresets);
+  assert.equal(afterImageUse.videoTemplates, afterVideoUse.videoTemplates);
+
+  const writesBeforeImageReturn = writes.length;
+  await returnToCatalog();
+  assert.equal(writes.length, writesBeforeImageReturn, 'returning after image use must not write business data');
+  const postPaths = writes.filter((entry) => entry.method === 'POST').map((entry) => entry.path).sort();
+  assert.deepEqual(postPaths, ['/api/image-studio/presets', '/api/template-studio/drafts']);
+  assert.equal(writes.some((entry) => entry.path === '/api/template-studio/runs'), false, 'catalog use must not invoke AI or create a run');
+  assert.deepEqual(failures, [], `catalog API requests must not return 5xx: ${JSON.stringify(failures)}`);
+  log(`catalog screenshot: ${path.join(artifactRoot, 'template-studio-catalog.png')}`);
+  log('unified catalog shows shared image/video content and previews before use; browsing is read-only, group folds persist per user, use creates only personal copies, and returning to the catalog preserves save-pending edits');
+  await context.close();
+}
+
 async function pickAssetForSlot(page: any, fileName: string, slotIndex: number) {
   await page.getByRole('button', { name: '添加到此槽位' }).nth(slotIndex).click();
   await page.getByRole('heading', { name: '添加参考素材' }).waitFor({ state: 'visible', timeout: browserTimeout });
@@ -706,31 +1243,38 @@ async function pickAssetForSlot(page: any, fileName: string, slotIndex: number) 
   await page.getByRole('heading', { name: '添加参考素材' }).waitFor({ state: 'hidden', timeout: browserTimeout });
 }
 
-async function assertVideoOnlyAccess(browserInstance: any, baseUrl: string, account: FixtureAccount) {
+async function assertVideoOnlyAccess(browserInstance: any, baseUrl: string, account: FixtureAccount, fixture: UnifiedCatalogFixture) {
   const context = await browserInstance.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 900 } });
   await installLocalOnlyBrowserRoutes(context);
   const page = await context.newPage();
   trackStudioApiDiagnostics(page, baseUrl);
   failureCapturePage = page;
-  await loginThroughUi(page, account, '/template-studio?type=video');
-  await page.goto('/template-studio?type=image');
+  await loginThroughUi(page, account, '/template-studio');
   await page.getByRole('heading', { name: '模板工作台' }).waitFor({ state: 'visible', timeout: browserTimeout });
-  assert.equal(await page.getByRole('tab', { name: '图片', exact: true }).count(), 0, 'video-only internal account must not see image access');
-  assert.equal(await page.getByRole('tab', { name: '视频', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.locator('[aria-label="统一模板目录"]').waitFor({ state: 'visible', timeout: browserTimeout });
+  await page.locator('[aria-label="视频模板"]').getByText(fixture.videoTemplateName, { exact: true }).waitFor({ state: 'attached', timeout: browserTimeout });
+  assert.equal(await page.locator('[aria-label="图片模板"]').count(), 0, 'video-only internal account must not see image catalog access after video catalog content loads');
+  const videoDraftId = await useCatalogVideoTemplate(page, fixture);
+  assert.ok(videoDraftId, 'video-only internal account must enter the video workspace through shared template use');
   await context.close();
 }
 
-async function assertCompanyAccess(browserInstance: any, baseUrl: string, account: FixtureAccount) {
+async function assertCompanyAccess(browserInstance: any, baseUrl: string, account: FixtureAccount, fixture: UnifiedCatalogFixture) {
   const context = await browserInstance.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 900 } });
   await installLocalOnlyBrowserRoutes(context);
   const page = await context.newPage();
   trackStudioApiDiagnostics(page, baseUrl);
   failureCapturePage = page;
-  await loginThroughUi(page, account, '/template-studio?type=image');
-  await page.goto('/template-studio?type=image');
+  await loginThroughUi(page, account, '/template-studio');
   await page.getByRole('heading', { name: '模板工作台' }).waitFor({ state: 'visible', timeout: browserTimeout });
-  assert.equal(await page.getByRole('tab', { name: '图片', exact: true }).getAttribute('aria-selected'), 'true');
-  assert.equal(await page.getByRole('tab', { name: '视频', exact: true }).count(), 1, 'allowed-tenant company user must retain video access');
+  await page.locator('[aria-label="统一模板目录"]').waitFor({ state: 'visible', timeout: browserTimeout });
+  const imageSection = page.locator('[aria-label="图片模板"]');
+  const videoSection = page.locator('[aria-label="视频模板"]');
+  await imageSection.getByText(fixture.imagePresetName, { exact: true }).waitFor({ state: 'attached', timeout: browserTimeout });
+  await videoSection.getByText(fixture.videoTemplateName, { exact: true }).waitFor({ state: 'attached', timeout: browserTimeout });
+  await useCatalogImagePreset(page, fixture);
+  await openTemplateCatalogFromWorkspace(page, fixture);
+  await useCatalogVideoTemplate(page, fixture);
   await context.close();
 }
 
@@ -740,8 +1284,8 @@ async function assertExternalAccessDenied(browserInstance: any, baseUrl: string,
   const page = await context.newPage();
   trackStudioApiDiagnostics(page, baseUrl);
   failureCapturePage = page;
-  await loginThroughUi(page, account, '/template-studio?type=video');
-  await page.goto('/template-studio?type=video');
+  await loginThroughUi(page, account, '/template-studio?workspace=1&type=video');
+  await page.goto('/template-studio?workspace=1&type=video');
   await page.waitForURL((url: URL) => url.pathname === '/generate/ip', { timeout: browserTimeout });
   assert.equal(await page.getByRole('heading', { name: '模板工作台' }).count(), 0, 'external account must not enter the workbench');
   await context.close();
@@ -799,7 +1343,7 @@ async function assertAdminTemplatePromptAccess(
   const userPage = await userContext.newPage();
   trackStudioApiDiagnostics(userPage, baseUrl);
   failureCapturePage = userPage;
-  await loginThroughUi(userPage, ordinaryUser, '/template-studio?type=video');
+  await loginThroughUi(userPage, ordinaryUser, '/template-studio?workspace=1&type=video');
   await userPage.goto('/admin/agent-runs/template-prompts');
   await userPage.waitForURL((url: URL) => url.pathname === '/generate', { timeout: browserTimeout });
   const listApi = await browserJson(userPage, '/api/admin/template-studio/runs', 'GET');
@@ -899,10 +1443,12 @@ async function runBrowserSmoke() {
 
   const admin = await createAccount(prisma, hashPassword, 'admin', 'internal');
   const companyUser = await createAccount(prisma, hashPassword, 'user', 'internal', tenantAllowlist);
+  const secondCompanyUser = await createAccount(prisma, hashPassword, 'user', 'internal', tenantAllowlist);
   const videoOnly = await createAccount(prisma, hashPassword, 'user', 'internal', `non-image-${smokeId}`);
   const external = await createAccount(prisma, hashPassword, 'user', 'external');
   const firstAsset = await addFixtureAsset(prisma, admin.user.id, 'first');
   const lastAsset = await addFixtureAsset(prisma, admin.user.id, 'last');
+  const catalogFixture = await addUnifiedCatalogFixtures(prisma, admin.user.id, firstAsset.id);
   const videoHistoryAsset = await addFixtureHistoryAsset(prisma, admin.user.id, 'video', firstAsset.fileName);
   const audioHistoryAsset = await addFixtureHistoryAsset(prisma, admin.user.id, 'audio', firstAsset.fileName);
   const uncertainRunFixture = await addUncertainRunFixture(prisma, companyUser.user.id);
@@ -916,13 +1462,14 @@ async function runBrowserSmoke() {
   log(`next start ready on 127.0.0.1:${port}; build=${builtDist}; database is isolated under /tmp`);
 
   browser = await chromium.launch({ channel: 'chrome', headless: true });
+  await assertUnifiedCatalog(browser, baseUrl, companyUser.account, companyUser.user.id, secondCompanyUser.account, catalogFixture);
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
   await installLocalOnlyBrowserRoutes(context);
   const page = await context.newPage();
   trackStudioApiDiagnostics(page, baseUrl);
   failureCapturePage = page;
-  await loginThroughUi(page, admin.account, '/template-studio?type=video');
-  await page.goto('/template-studio?type=video');
+  await loginThroughUi(page, admin.account, '/template-studio?workspace=1&type=video');
+  await page.goto('/template-studio?workspace=1&type=video');
   await page.getByRole('heading', { name: '模板工作台' }).waitFor({ state: 'visible', timeout: browserTimeout });
   await assertAdminTemplatePromptAccess(browser, baseUrl, admin.account, companyUser.account, uncertainRunFixture);
   failureCapturePage = page;
@@ -931,19 +1478,21 @@ async function runBrowserSmoke() {
   assert.equal(capabilities.status, 200);
   assert.equal((capabilities.payload as any)?.llmEnabled, false, 'AI整理 must remain disabled in the isolated fixture DB');
 
-  await page.getByRole('tab', { name: '图片', exact: true }).click();
-  await page.waitForURL((url: URL) => url.searchParams.get('type') === 'image', { timeout: browserTimeout });
-  assert.equal(await page.getByRole('tab', { name: '图片', exact: true }).getAttribute('aria-selected'), 'true');
-  await page.getByRole('tab', { name: '视频', exact: true }).click();
-  await page.waitForURL((url: URL) => url.searchParams.get('type') === 'video', { timeout: browserTimeout });
-  assert.equal(await page.getByRole('tab', { name: '视频', exact: true }).getAttribute('aria-selected'), 'true');
+  await openTemplateCatalogFromWorkspace(page, catalogFixture);
+  const imageCatalogSection = page.locator('[aria-label="图片模板"]');
+  const videoCatalogSection = page.locator('[aria-label="视频模板"]');
+  await imageCatalogSection.getByText(catalogFixture.imagePresetName, { exact: true }).waitFor({ state: 'attached', timeout: browserTimeout });
+  await videoCatalogSection.getByText(catalogFixture.videoTemplateName, { exact: true }).waitFor({ state: 'attached', timeout: browserTimeout });
+  await useCatalogImagePreset(page, catalogFixture);
+  await openTemplateCatalogFromWorkspace(page, catalogFixture);
+  await useCatalogVideoTemplate(page, catalogFixture);
   await page.getByRole('tab', { name: '我的提示词', exact: true }).click();
   await page.waitForURL((url: URL) => url.searchParams.get('view') === 'prompts', { timeout: browserTimeout });
   await page.getByRole('tab', { name: '视频结果', exact: true }).click();
   await page.waitForURL((url: URL) => url.searchParams.get('view') === 'results', { timeout: browserTimeout });
   await page.getByRole('tab', { name: '模板', exact: true }).click();
   await page.waitForURL((url: URL) => url.searchParams.get('view') === 'templates', { timeout: browserTimeout });
-  log('admin image/video category and video-view switching passed');
+  log('unified catalog use enters image/video workspaces; video-view tabs remain available');
 
   const draftDetailPattern = '**/api/template-studio/drafts/*';
   const detailResponseReady = deferred<void>();
@@ -1213,7 +1762,7 @@ async function runBrowserSmoke() {
   assert.equal(returnedRunRoute.searchParams.get('templateSource'), null);
   log('continue-generation uses /generate handoff and returns to the originating run/module context');
 
-  await page.goto('/template-studio?type=video');
+  await page.goto('/template-studio?workspace=1&type=video');
   await page.getByRole('button', { name: '新建空白模块' }).first().click();
   await page.locator('#studio-prompt').waitFor({ state: 'visible', timeout: browserTimeout });
   await page.locator('#studio-prompt').fill('延迟响应开始前的文本');
@@ -1244,7 +1793,7 @@ async function runBrowserSmoke() {
   await page.unroute('**/api/template-studio/runs');
   log('late real run response does not overwrite a newer manual edit');
 
-  await page.goto(`/template-studio?type=video&view=templates&templateId=${encodeURIComponent(template.id)}&templateSource=studio`);
+  await page.goto(`/template-studio?workspace=1&type=video&view=templates&templateId=${encodeURIComponent(template.id)}&templateSource=studio`);
   await page.getByRole('button', { name: '用此模板新建模块' }).waitFor({ state: 'visible', timeout: browserTimeout });
   await page.getByRole('button', { name: '用此模板新建模块' }).click();
   await page.locator('#studio-value-style').waitFor({ state: 'visible', timeout: browserTimeout });
@@ -1371,8 +1920,8 @@ async function runBrowserSmoke() {
   failureCapturePage = page;
   log('template draft conflict recovery preserves recipe, values, parameters, and first/last asset slots');
 
-  await assertCompanyAccess(browser, baseUrl, companyUser.account);
-  await assertVideoOnlyAccess(browser, baseUrl, videoOnly.account);
+  await assertCompanyAccess(browser, baseUrl, companyUser.account, catalogFixture);
+  await assertVideoOnlyAccess(browser, baseUrl, videoOnly.account, catalogFixture);
   await assertExternalAccessDenied(browser, baseUrl, external.account);
   assert.equal(externalBrowserRequestCount, 0, 'browser attempted a non-local request; all such requests are blocked');
   assert.ok(expectedExternalStaticRequestCount > 0, 'expected upload preview fixtures were not requested');

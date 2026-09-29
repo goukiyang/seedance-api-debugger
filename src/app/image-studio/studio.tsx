@@ -19,6 +19,7 @@ type ImagePreviewState = { taskId?: string; src: string; alt: string; title?: st
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 const models = IMAGE_STUDIO_MODELS;
 const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
+const guardedImageNavigationEvents = new WeakSet<Event>();
 async function readResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
   if (!response.ok) throw new Error(value.error || '请求失败，请重试');
@@ -121,7 +122,15 @@ async function copyStudioText(value: string) {
   } catch { return false; }
 }
 
-export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
+type ImageStudioProps = {
+  isAdmin: boolean;
+  userId: string;
+  initialModuleId?: string;
+  initialPresetManagement?: boolean;
+  onPresetManagementDismiss?: () => void;
+};
+
+export default function ImageStudio({ isAdmin, userId, initialModuleId, initialPresetManagement, onPresetManagementDismiss }: ImageStudioProps) {
   const [modules, setModules] = useState<StudioModule[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -163,6 +172,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [presetsError, setPresetsError] = useState('');
   const presetDialog = useRef<HTMLDialogElement>(null);
+  const managementRouteOpened = useRef(false);
   const presetApplyLock = useRef(false);
   const [presetApplying, setPresetApplying] = useState(false);
   const [presetSharingId, setPresetSharingId] = useState<string | null>(null);
@@ -193,22 +203,38 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const createId = useRef<string | null>(null);
   const createLock = useRef(false);
   const listLock = useRef(false);
-  const loadModules = useCallback(async (next?: string) => {
+  const loadModules = useCallback(async (next?: string, targetId?: string) => {
     if (listLock.current) return;
     listLock.current = true; setLoading(true); setError('');
     try {
-      const data = await readResponse(await fetch(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`, { cache: 'no-store' }));
-      setModules(current => {
-        const ids = new Set(current.map(item => item.id));
-        return [...current, ...data.modules.filter((item: StudioModule) => !ids.has(item.id))]
-          .sort((a, b) => Number(b.id === `default-${userId}`) - Number(a.id === `default-${userId}`)
-            || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
-      });
-      setCursor(data.nextCursor); setActive(current => current || data.modules[0]?.id || '');
+      let pageCursor = targetId ? undefined : next;
+      do {
+        const data = await readResponse(await fetch(`/api/image-studio/modules${pageCursor ? `?cursor=${encodeURIComponent(pageCursor)}` : ''}`, { cache: 'no-store' }));
+        setModules(current => {
+          const ids = new Set(current.map(item => item.id));
+          return [...current, ...data.modules.filter((item: StudioModule) => !ids.has(item.id))]
+            .sort((a, b) => Number(b.id === `default-${userId}`) - Number(a.id === `default-${userId}`)
+              || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
+        });
+        setCursor(data.nextCursor);
+        if (targetId) {
+          const target = data.modules.find((item: StudioModule) => item.id === targetId);
+          if (target) {
+            setActive(target.id);
+            setSelectedGroup(target.groupName || '未分组');
+            break;
+          }
+          if (!data.nextCursor) break;
+          pageCursor = data.nextCursor;
+        } else {
+          setActive(current => current || data.modules[0]?.id || '');
+          break;
+        }
+      } while (pageCursor);
     } catch (e) { setError(e instanceof Error ? e.message : '模块读取失败'); }
     finally { listLock.current = false; setLoading(false); }
   }, [userId]);
-  useEffect(() => { void loadModules(); }, [loadModules]);
+  useEffect(() => { void loadModules(undefined, initialModuleId); }, [initialModuleId, loadModules]);
   async function createModule() {
     if (createLock.current) return;
     createLock.current = true; setCreating(true); setError('');
@@ -221,18 +247,26 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     } catch (e) { setError(e instanceof Error ? e.message : '新建失败'); }
     finally { createLock.current = false; setCreating(false); }
   }
-  async function openPresetLibrary() {
+  const openPresetLibrary = useCallback(async () => {
     setPresetDialogOpen(true); setPresetsLoading(true); setPresetsError('');
     try { const result = await readResponse(await fetch('/api/image-studio/presets', { cache: 'no-store' })); setPresets(result.presets); }
     catch (e) { setPresetsError(e instanceof Error ? e.message : '模板读取失败'); }
     finally { setPresetsLoading(false); }
+  }, []);
+  useEffect(() => {
+    if (initialPresetManagement && !managementRouteOpened.current) void openPresetLibrary();
+    managementRouteOpened.current = Boolean(initialPresetManagement);
+  }, [initialPresetManagement, openPresetLibrary]);
+  function closePresetLibrary() {
+    setPresetDialogOpen(false);
+    if (initialPresetManagement) onPresetManagementDismiss?.();
   }
   async function applyPreset(preset: StudioPreset) {
     if (presetApplyLock.current) return;
     presetApplyLock.current = true; setPresetApplying(true); setPresetsError('');
     try {
       const created: StudioModule = await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'apply', presetId: preset.id }) }));
-      setModules(current => [created, ...current.filter(item => item.id !== created.id)]); setSelectedGroup(created.groupName || '未分组'); setActive(created.id); setPresetDialogOpen(false);
+      setModules(current => [created, ...current.filter(item => item.id !== created.id)]); setSelectedGroup(created.groupName || '未分组'); setActive(created.id); closePresetLibrary();
       requestAnimationFrame(() => document.getElementById(`module-${created.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     } catch (e) { setPresetsError(e instanceof Error ? e.message : '应用模板失败'); }
     finally { presetApplyLock.current = false; setPresetApplying(false); }
@@ -295,6 +329,15 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     const availableGroups = Object.keys(groupedModules);
     setSelectedGroup(current => current && availableGroups.includes(current) ? current : availableGroups[0] || groups[0]);
   }, [groups, groupedModules]);
+  const initialTarget = initialModuleId ? modules.find(item => item.id === initialModuleId) : null;
+  const focusedInitialModule = useRef('');
+  useEffect(() => {
+    if (!initialTarget || focusedInitialModule.current === initialTarget.id) return;
+    focusedInitialModule.current = initialTarget.id;
+    setSelectedGroup(initialTarget.groupName || '未分组');
+    setActive(initialTarget.id);
+    requestAnimationFrame(() => document.getElementById(`module-${initialTarget.id}`)?.scrollIntoView({ block: 'start' }));
+  }, [initialTarget]);
   async function deleteGroup(group: string) {
     if (DEFAULT_GROUPS.includes(group)) return;
     const targets = modules.filter(item => item.groupName === group);
@@ -331,29 +374,31 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     </aside>
     <div className={styles.content}>
     <header className={styles.header}><div><h1>{coverView ? '模板封面' : '图片生成'}</h1><p className={styles.muted}>{coverView ? '所有模板的 3:4 封面预览' : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
-      <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
+      <a href="/template-studio">模板目录</a>
+      <button className={styles.managementButton} type="button" onClick={() => void openPresetLibrary()}>管理模板</button>
       {isAdmin && <button type="button" disabled={!settings} onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
-    {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
+    {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void (initialModuleId ? loadModules(undefined, initialModuleId) : loadModules(cursor || undefined))}>重试读取</button></p>}
+    {initialModuleId && !initialTarget && !error && <p role="status" className={styles.muted}>{loading ? '正在定位图片模块…' : '找不到目标图片模块，可能已删除或当前账号无权访问。'} {!loading && <button type="button" onClick={() => void loadModules(undefined, initialModuleId)}>重新定位</button>}</p>}
     {coverView ? <section className={styles.coverGrid} aria-label="模板封面"><div className={styles.coverGridInner}>{visibleCoverModules.map(module => {
       return <button key={module.id} type="button" className={styles.coverCard} onClick={() => { setCoverView(false); setSelectedGroup(module.groupName || '未分组'); setActive(module.id); requestAnimationFrame(() => document.getElementById(`module-${module.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })); }}>
         <TemplateCoverVisual module={module} />
         <span className={styles.coverDescription}><strong title={module.name}>{module.name}</strong><small>{module.prompt.trim() ? module.prompt.trim().slice(0, 96) : `以${module.name}为主题，按当前参考图和模型设置生成图片。`}</small></span>
       </button>;
     })}</div><div className={styles.pagination} aria-label="模板封面分页"><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模板</button>}</section> : <>
-    {visibleModules.map((module, index) => <ImageStudioBlock key={module.id} module={module} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} isFirst={index === 0} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
+    {(!initialModuleId || initialTarget) && visibleModules.map((module, index) => <ImageStudioBlock key={module.id} module={module} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} isFirst={index === 0} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       userId={userId} settings={settings} setSettings={setSettings} active={active === module.id} onActivate={() => setActive(module.id)}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? next : item)); setSelectedGroup(next.groupName || '未分组'); }}
       globalSettingsOpen={globalSettingsOpen && index === 0} onCloseGlobal={() => setGlobalSettingsOpen(false)}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       settingsReload={settingsReload} onReloadSettings={() => setSettingsReload(current => current + 1)} />)}
-    {loading && <p role="status">正在读取模块…</p>}
+    {loading && !initialModuleId && <p role="status">正在读取模块…</p>}
     {cursor && <button disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模块</button>}
     {visibleModules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
     </>}
     </div>
-    <dialog ref={presetDialog} className={styles.dialog} onCancel={() => setPresetDialogOpen(false)}>
-      <header className={styles.header}><h2>模板库</h2><button type="button" aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
+    <dialog ref={presetDialog} className={styles.dialog} onCancel={closePresetLibrary}>
+      <header className={styles.header}><h2>模板库</h2><button type="button" aria-label="关闭模板库" onClick={closePresetLibrary}><X size={20} /></button></header>
       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
       {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><div className={styles.presetActions}>{preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={presetSharingId === preset.id} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}<button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></div></article>)}</div>}
     </dialog>
@@ -751,13 +796,17 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
   }
 
   useEffect(() => {
-    if (!unsavedContext) return;
+    const hasUnfinishedImageWork = unsavedContext || moduleDirty || submitting || Boolean(pendingSubmission)
+      || moduleSaving || uploading || bannerUploading;
+    if (!hasUnfinishedImageWork) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     const guardNavigation = (event: MouseEvent) => {
       const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
       if (!(link instanceof HTMLAnchorElement) || link.target === '_blank' || link.hasAttribute('download')) return;
       if (link.href === window.location.href || link.hash && link.pathname === window.location.pathname) return;
-      if (!window.confirm('上下文尚未保存，离开后将丢失这次修改。确定离开吗？')) {
+      if (guardedImageNavigationEvents.has(event)) return;
+      guardedImageNavigationEvents.add(event);
+      if (!window.confirm('图片模块有未保存内容或正在进行的生成、上传。确定离开吗？')) {
         event.preventDefault(); event.stopPropagation();
       }
     };
@@ -767,7 +816,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
       window.removeEventListener('beforeunload', warn);
       document.removeEventListener('click', guardNavigation, true);
     };
-  }, [unsavedContext]);
+  }, [unsavedContext, moduleDirty, submitting, pendingSubmission, moduleSaving, uploading, bannerUploading]);
 
   const addImages = useCallback(async (files: File[], replaceSingle = false) => {
     if (uploadLock.current || submitting || pendingSubmission || !files.length) return;
