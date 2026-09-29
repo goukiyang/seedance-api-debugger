@@ -1183,8 +1183,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         </label>
       </div>
       <p className={styles.muted}>{isAdmin ? '模型和质量属于当前模块；积分规则统一在通用上下文中设置。' : '这是当前账号自己的模块上下文，只有你能查看和修改。'}修改后请点击“保存设置”。</p>
-      <button type="button" disabled={moduleSaving || uploading || bannerUploading || !moduleDirty} onClick={() => void saveModule()}><Save size={16} />保存设置</button>
-      <p role="status">{moduleSaving ? '正在保存' : moduleDirty ? '未保存' : '已保存'}</p>
+      <button type="button" disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存上下文</button>
+      <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>
     {isAdmin && isFirst && <dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); closeSettings(); }}>
