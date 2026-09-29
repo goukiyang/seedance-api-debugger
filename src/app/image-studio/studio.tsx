@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 
 function studioUploadProgress(file: File, index: number, count: number, progress: UploadProgressSnapshot) {
   const transferring = ['raw', 'proxy', 'storage', 'multipart'].includes(progress.phase);
@@ -464,6 +465,13 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [imageSourceTarget, setImageSourceTarget] = useState<'reference' | 'banner'>('reference');
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+  const imageSourceDialog = useRef<HTMLDialogElement>(null);
+  function openImageSource(target: 'reference' | 'banner') {
+    setImageSourceTarget(target);
+    imageSourceDialog.current?.showModal();
+  }
   const [uploadProgress, setUploadProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
   const [bannerProgress, setBannerProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
   const [bannerUploading, setBannerUploading] = useState(false);
@@ -914,7 +922,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
-      if (!active || document.querySelector('dialog[open]') || preview || event.defaultPrevented) return;
+      if (!active || assetPickerOpen || document.querySelector('dialog[open]') || preview || event.defaultPrevented) return;
       const files = Array.from(event.clipboardData?.items || [])
         .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
         .map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
@@ -924,7 +932,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     };
     document.addEventListener('paste', paste);
     return () => document.removeEventListener('paste', paste);
-  }, [addImages, preview, active, referenceLimit]);
+  }, [addImages, preview, active, referenceLimit, assetPickerOpen]);
 
   return <section ref={section} hidden={hidden} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
     onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
@@ -954,9 +962,9 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt="模块 banner" />
         <span className={styles.bannerLabel}>模块 banner</span>
-        <button type="button" className={styles.bannerReplace} disabled={bannerUploading || submitting} onClick={() => bannerFileInput.current?.click()}>{bannerUploading ? '上传中' : '更换图片'}</button>
+        <button type="button" className={styles.bannerReplace} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}>{bannerUploading ? '上传中' : '更换图片'}</button>
         <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label="移除模块 banner"><X size={16} /></button>
-      </> : <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => bannerFileInput.current?.click()}><ImagePlus size={20} />{bannerUploading ? '上传中' : '点击上传模块 banner'}</button>}
+      </> : <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : '添加模块 banner'}</button>}
     </div>
     <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void uploadBanner(file); event.target.value = ''; }} />
     {bannerProgress && <UploadProgressIndicator {...bannerProgress} />}
@@ -981,7 +989,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
             </button>
             <button type="button" className={styles.remove} disabled={uploading || submitting || Boolean(pendingSubmission)} onClick={() => setImages(current => current.filter((_, i) => i !== index))} title="移除参考图" aria-label={`移除参考图 ${index + 1}`}><X size={16} /></button>
           </div>)}
-          {images.length < referenceLimit && <button type="button" className={styles.add} disabled={uploading || submitting || Boolean(pendingSubmission)} onClick={() => fileInput.current?.click()}><ImagePlus size={24} />{uploading ? '上传中' : '添加图片'}</button>}
+          {images.length < referenceLimit && <button type="button" className={styles.add} disabled={uploading || submitting || Boolean(pendingSubmission)} onClick={() => openImageSource('reference')}><ImagePlus size={24} />{uploading ? '上传中' : '添加图片'}</button>}
         </div>
         {uploadProgress && <UploadProgressIndicator {...uploadProgress} />}
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => {
@@ -1069,6 +1077,31 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         {nextCursor && <button type="button" onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
       </section>
     </div>
+    <dialog ref={imageSourceDialog} className={styles.dialog}>
+      <h3>添加图片</h3>
+      <button type="button" onClick={() => { imageSourceDialog.current?.close(); (imageSourceTarget === 'banner' ? bannerFileInput : fileInput).current?.click(); }}><ImagePlus size={18} />上传图片</button>
+      <button type="button" onClick={() => { imageSourceDialog.current?.close(); setAssetPickerOpen(true); }}><ImagePlus size={18} />从资产库选择</button>
+      <button type="button" aria-label="关闭" onClick={() => imageSourceDialog.current?.close()}><X size={18} /></button>
+    </dialog>
+    {assetPickerOpen && <UploadedImagePicker open imageOnly selectionOnly
+      currentCount={imageSourceTarget === 'banner' ? 0 : images.length}
+      currentAssetIds={imageSourceTarget === 'banner' ? [] : images.flatMap(image => image.id ? [image.id] : [])}
+      maxSelection={imageSourceTarget === 'banner' ? 1 : Math.max(0, referenceLimit - images.length)}
+      onClose={() => setAssetPickerOpen(false)}
+      onUploadFile={async () => { throw new Error('请从上传图片入口上传'); }}
+      onConfirm={async (_ids, assets) => {
+        if (submitting || pendingSubmission || uploading || bannerUploading) throw new Error('当前操作尚未结束，请稍后选择');
+        const picked = (assets || []).filter(asset => asset.type === 'image' && asset.originalUrl);
+        if (!picked.length || picked.length !== _ids.length) throw new Error('图片信息不完整，请重新选择');
+        if (imageSourceTarget === 'banner') {
+          if (picked.length !== 1) throw new Error('请选择一张图片');
+          setBanner(picked[0]);
+        } else {
+          const additions = picked.filter(asset => !images.some(image => image.id === asset.id));
+          if (images.length + additions.length > referenceLimit) throw new Error(`最多选择 ${referenceLimit} 张参考图`);
+          setImages(current => [...current, ...additions]);
+        }
+      }} />}
     <dialog ref={deleteDialog} className={styles.dialog} aria-labelledby={`delete-title-${module.id}`} onCancel={event => { if (deleting) event.preventDefault(); else setDeleteTarget(null); }}>
       <h2 id={`delete-title-${module.id}`}>删除这张图片？</h2>
       <p>将从本模块的生成结果中移除，不退还已消耗积分。其他模块、参考图和已保存的副本不受影响。</p>

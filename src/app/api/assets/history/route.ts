@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import type { AssetType } from '@/types';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
+import { Prisma } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,18 +71,30 @@ export async function GET(request: NextRequest) {
     const limit = clampLimit(request.nextUrl.searchParams.get('limit'));
     const type = parseHistoryAssetType(request.nextUrl.searchParams.get('type'));
     const skip = (page - 1) * limit;
+    const source = request.nextUrl.searchParams.get('source');
+    let sourceIds: string[] | undefined;
+    let sourceTotal: number | undefined;
+    if (type === 'image' && (source === 'generated' || source === 'uploaded')) {
+      const generated = Prisma.sql`(EXISTS (SELECT 1 FROM ImageStudioTask t WHERE t.asset_id = a.id AND t.owner_id = ${user.id} AND t.status = 'succeeded') OR CASE WHEN json_valid(a.metadata_json) THEN json_extract(a.metadata_json, '$.source') IN ('image_generation_api', 'workspace_generation') ELSE 0 END)`;
+      const condition = Prisma.sql`a.owner_id = ${user.id} AND a.status = 'active' AND a.type = 'image' AND ${source === 'generated' ? generated : Prisma.sql`NOT COALESCE(${generated}, 0)`}`;
+      const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT a.id FROM Asset a WHERE ${condition} ORDER BY a.created_at DESC LIMIT ${limit} OFFSET ${skip}`);
+      const totals = await prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`SELECT COUNT(*) AS total FROM Asset a WHERE ${condition}`);
+      sourceIds = rows.map(row => row.id);
+      sourceTotal = Number(totals[0]?.total || 0);
+    }
 
     const where = {
       owner_id: user.id,
       status: 'active',
       ...(type === 'all' ? {} : { type }),
+      ...(sourceIds ? { id: { in: sourceIds } } : {}),
     };
 
     const [assets, total] = await Promise.all([
       prisma.asset.findMany({
         where,
         orderBy: { created_at: 'desc' },
-        skip,
+        skip: sourceIds ? 0 : skip,
         take: limit,
         select: {
           id: true,
@@ -96,7 +109,7 @@ export async function GET(request: NextRequest) {
           created_at: true,
         },
       }),
-      prisma.asset.count({ where }),
+      sourceTotal !== undefined ? Promise.resolve(sourceTotal) : prisma.asset.count({ where }),
     ]);
 
     const totalPages = Math.max(1, Math.ceil(total / limit));

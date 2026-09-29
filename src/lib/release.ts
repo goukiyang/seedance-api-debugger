@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板参考图和banner显示真实上传进度，传完后单独显示服务器处理状态。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '添加图片可选本地上传或资产库；已有图片按已生成、已上传分类选择。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

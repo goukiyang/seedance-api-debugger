@@ -24,9 +24,17 @@ interface UploadedAssetItem {
 export type UploadedAssetSelection = {
   id: string;
   type: AssetType;
+  originalUrl?: string;
+  thumbnailUrl?: string;
+  fileName?: string;
+  width?: number | null;
+  height?: number | null;
 };
 
 interface Props {
+  imageOnly?: boolean;
+  selectionOnly?: boolean;
+  maxSelection?: number;
   open: boolean;
   currentCount: number;
   currentAssetIds: string[];
@@ -108,6 +116,9 @@ function buildPickerUploadProgress(
 }
 
 export function UploadedImagePicker({
+  imageOnly = false,
+  selectionOnly = false,
+  maxSelection,
   open,
   currentCount,
   currentAssetIds,
@@ -116,6 +127,8 @@ export function UploadedImagePicker({
   onConfirm,
 }: Props) {
   const [items, setItems] = useState<UploadedAssetItem[]>([]);
+  const [source, setSource] = useState('all');
+  const loadSequence = useRef(0);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -132,11 +145,13 @@ export function UploadedImagePicker({
   void currentCount;
 
   const loadPage = useCallback(async (targetPage: number, mode: 'replace' | 'append' = 'replace') => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
-        type: 'all',
+        type: imageOnly ? 'image' : 'all',
+        source: imageOnly ? source : 'all',
         page: String(targetPage),
         limit: String(PAGE_SIZE),
       });
@@ -145,6 +160,7 @@ export function UploadedImagePicker({
         invalidJsonMessage: HISTORY_INVALID_JSON_MESSAGE,
       });
       if (!res.ok) throw new Error(data.error || data.message || '历史素材读取失败');
+      if (sequence !== loadSequence.current) return;
       const nextItems: UploadedAssetItem[] = data.assets || [];
       setItems((current) => {
         if (mode === 'replace') return nextItems;
@@ -154,11 +170,12 @@ export function UploadedImagePicker({
       setPage(data.pagination?.page || targetPage);
       setHasMore(Boolean(data.pagination?.has_more));
     } catch (err) {
+      if (sequence !== loadSequence.current) return;
       setError(err instanceof Error ? err.message : '历史素材读取失败');
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
-  }, []);
+  }, [imageOnly, source]);
 
   useEffect(() => {
     if (!open) return;
@@ -166,7 +183,9 @@ export function UploadedImagePicker({
     setPreviewAsset(null);
     setUploadProgress(null);
     setPendingAttach(null);
+    setItems([]);
     void loadPage(1, 'replace');
+    return () => { loadSequence.current++; };
   }, [loadPage, open]);
 
   useEffect(() => {
@@ -188,6 +207,9 @@ export function UploadedImagePicker({
 
   const toggleAsset = (assetId: string) => {
     if (currentAssetIdSet.has(assetId)) return;
+    if (!selectedAssetIds.includes(assetId) && maxSelection !== undefined && selectedAssetIds.length >= maxSelection) {
+      setError(`最多还能选择 ${maxSelection} 张图片`); return;
+    }
     setSelectedAssetIds((current) => {
       if (current.includes(assetId)) return current.filter((id) => id !== assetId);
       return [...current, assetId];
@@ -327,7 +349,7 @@ export function UploadedImagePicker({
       const selectedAssets = selectedAssetIds
         .map((id) => itemById.get(id))
         .filter((item): item is UploadedAssetItem => Boolean(item))
-        .map((item) => ({ id: item.id, type: item.type }));
+        .map((item) => ({ id: item.id, type: item.type, originalUrl: item.originalUrl, thumbnailUrl: item.thumbnailUrl, fileName: item.fileName, width: item.width, height: item.height }));
       await onConfirm(selectedAssetIds, selectedAssets);
       setSelectedAssetIds([]);
       onClose();
@@ -352,13 +374,16 @@ export function UploadedImagePicker({
 
         <div className="uploaded-picker-header">
           <div>
-            <h3>添加参考素材</h3>
-            <p>选择历史素材或上传图片、视频、音频加入当前参考区；生成前会按当前模型规则检查数量和素材参数。</p>
+            <h3>{imageOnly ? '选择图片' : '添加参考素材'}</h3>
+            {!imageOnly && <p>选择历史素材或上传图片、视频、音频加入当前参考区；生成前会按当前模型规则检查数量和素材参数。</p>}
           </div>
           <button type="button" className="uploaded-picker-close" onClick={onClose}>x</button>
         </div>
 
         {error && <div className="uploaded-picker-error">{error}</div>}
+        {imageOnly && <div className="uploaded-picker-actions" role="tablist" aria-label="图片来源">
+          {[['all', '全部'], ['generated', '已生成'], ['uploaded', '已上传']].map(([value, label]) => <button key={value} className={source === value ? 'uploaded-picker-confirm' : 'uploaded-picker-cancel'} type="button" role="tab" aria-selected={source === value} disabled={uploading} onClick={() => setSource(value)}>{label}</button>)}
+        </div>}
         {pendingAttach && (
           <div className="uploaded-picker-attach-retry">
             <span>素材已上传成功，可直接重试加入当前参考区。</span>
@@ -383,7 +408,7 @@ export function UploadedImagePicker({
           ) : items.length === 0 ? (
             <div className="uploaded-picker-empty">
               <strong>还没有历史素材</strong>
-              <span>点击下方“上传本地素材”添加第一份参考。</span>
+              {!selectionOnly && <span>点击下方“上传本地素材”添加第一份参考。</span>}
             </div>
           ) : (
             <div className="uploaded-picker-grid">
@@ -440,7 +465,7 @@ export function UploadedImagePicker({
                       <strong title={item.fileName}>{item.fileName}</strong>
                       <span>{assetTypeLabel(item.type)} · {dimensions} · {formatBytes(item.fileSize)} · {formatDate(item.createdAt)}</span>
                     </div>
-                    {item.type === 'image' && (
+                    {item.type === 'image' && !selectionOnly && (
                       <button
                         type="button"
                         className="uploaded-picker-delete"
@@ -458,7 +483,7 @@ export function UploadedImagePicker({
         </div>
 
         <div className="uploaded-picker-footer">
-          <span>已选 {selectedAssetIds.length} 个；生成前会检查图片、视频、音频各自上限</span>
+          <span>{imageOnly ? `已选 ${selectedAssetIds.length} 张${maxSelection !== undefined ? `，最多 ${maxSelection} 张` : ''}` : `已选 ${selectedAssetIds.length} 个；生成前会检查图片、视频、音频各自上限`}</span>
           <div className="uploaded-picker-actions">
             {hasMore && (
               <button
@@ -470,9 +495,9 @@ export function UploadedImagePicker({
                 加载更多
               </button>
             )}
-            <button type="button" className="uploaded-picker-upload" onClick={handleUploadClick} disabled={uploading}>
+            {!selectionOnly && <button type="button" className="uploaded-picker-upload" onClick={handleUploadClick} disabled={uploading}>
               {uploading ? '上传中...' : '上传本地素材'}
-            </button>
+            </button>}
             <button type="button" className="uploaded-picker-cancel" onClick={onClose}>取消</button>
             <button
               type="button"
