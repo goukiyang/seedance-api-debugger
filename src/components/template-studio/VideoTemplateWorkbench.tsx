@@ -7,6 +7,7 @@ import {
   Image as ImageIcon, ImagePlus, LoaderCircle, Plus, Save, Search, Sparkles, Trash2, X,
 } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import { uploadFileAsAsset, type UploadProgressHandler } from '@/lib/http/file-upload';
 import type {
@@ -290,6 +291,7 @@ function runQuery(filters: RunFilters, cursor?: string | null) {
 export default function VideoTemplateWorkbench({ userId }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  useRememberedScroll(`video-studio:${userId}:${searchParams.toString()}`);
   const viewValue = searchParams.get('view') || '';
   const view: StudioView = viewValue === 'prompts' ? 'prompts' : viewValue === 'results' || viewValue === 'run' ? 'results' : 'templates';
   const routedDraftId = searchParams.get('draftId') || searchParams.get('moduleId') || '';

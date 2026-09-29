@@ -9,7 +9,7 @@ import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity }
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
 import { imageOutputSize, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
-import { IMAGE_STUDIO_MODEL_COST_USD } from './model-catalog';
+import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from './model-catalog';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { displayUserName } from '@/lib/users/display';
 
@@ -34,10 +34,14 @@ export function parseStudioRequest(body: Record<string, unknown>) {
     resolution = body.resolution;
   }
   const moduleRevision = body.moduleRevision === undefined ? undefined : Number(body.moduleRevision);
+  const model = body.model === undefined ? undefined : body.model;
+  if (model !== undefined && (typeof model !== 'string' || !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))) throw new StudioError('生成模型无效');
+  const quality = body.quality === undefined ? undefined : body.quality;
+  if (quality !== undefined && (typeof quality !== 'string' || quality.length > 30)) throw new StudioError('图片质量无效');
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
-  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}) };
+  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
 }
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>) {
@@ -75,7 +79,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (!source || !canViewStudioPreset(identity, source)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
     }
     if (workspace && input.moduleRevision !== undefined && workspace.revision !== input.moduleRevision) throw new StudioError('模块已在其他页面更新，请刷新后核对', 409);
-    const generation = resolveStudioModuleGenerationConfig(workspace, settings);
+    const requestedModel = input.model || workspace?.model || settings.model;
+    if (input.quality !== undefined && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[requestedModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] as readonly string[] | undefined)?.includes(input.quality)) throw new StudioError('当前模型不支持所选图片质量');
+    const generation = resolveStudioModuleGenerationConfig({ ...workspace, ...(input.model ? { model: input.model } : {}), ...(input.quality !== undefined ? { quality: input.quality } : {}) }, settings);
     const imageApi = await getImageGenerationSettingsForModel(generation.model, tx);
     if (!isStudioImageGenerationProvider(imageApi.provider) || !isImageGenerationApiReady(imageApi)) {
       throw new StudioError(generation.model.startsWith('gemini-') ? 'Banana 专用通道尚未配置，请管理员在后台 API 设置填写专用 Key' : '图片专用 API 尚未配置', 503);

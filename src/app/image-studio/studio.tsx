@@ -5,6 +5,7 @@ import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCir
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 
 function studioUploadProgress(file: File, index: number, count: number, progress: UploadProgressSnapshot) {
   const transferring = ['raw', 'proxy', 'storage', 'multipart'].includes(progress.phase);
@@ -147,6 +148,20 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
+  const [viewRestored, setViewRestored] = useState(false);
+  useRememberedScroll(`image-studio:${userId}`, viewRestored);
+  useEffect(() => {
+    try {
+      const view = JSON.parse(sessionStorage.getItem(`sd2-studio-view:${userId}`) || 'null');
+      if (typeof view?.group === 'string') setSelectedGroup(view.group);
+      if (typeof view?.active === 'string') setActive(view.active);
+    } catch {}
+    setViewRestored(true);
+  }, [userId]);
+  useEffect(() => {
+    if (!viewRestored) return;
+    try { sessionStorage.setItem(`sd2-studio-view:${userId}`, JSON.stringify({ group: selectedGroup, active })); } catch {}
+  }, [viewRestored, userId, selectedGroup, active]);
   const [coverView, setCoverView] = useState(false);
   const [coverPage, setCoverPage] = useState(() => {
     if (typeof window === 'undefined') return 0;
@@ -331,6 +346,9 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     const firstPage = (groupedModules[selectedGroup] || []).slice(0, 12);
     void hydrateModules(firstPage.filter(item => !modules.some(module => module.id === item.id)).map(item => item.id));
   }, [selectedGroup, groupedModules, modules, hydrateModules]);
+  useEffect(() => {
+    if (active && navigation.some(item => item.id === active) && !modules.some(item => item.id === active)) void hydrateModules([active]);
+  }, [active, navigation, modules, hydrateModules]);
   const coverPageSize = coverColumns * 3;
   const coverPageCount = Math.max(1, Math.ceil(modules.length / coverPageSize));
   const visibleCoverModules = useMemo(() => modules.slice(coverPage * coverPageSize, (coverPage + 1) * coverPageSize), [coverPage, coverPageSize, modules]);
@@ -340,10 +358,10 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   }, [coverPageCount, modules.length]);
   useEffect(() => { try { localStorage.setItem('sd2-image-studio-cover-page', String(coverPage)); } catch { /* Pagination is a convenience, not a dependency. */ } }, [coverPage]);
   useEffect(() => {
-    if (!groups.length) return;
+    if (!navigation.length) return;
     const availableGroups = Object.keys(groupedModules);
     setSelectedGroup(current => current && availableGroups.includes(current) ? current : availableGroups[0] || groups[0]);
-  }, [groups, groupedModules]);
+  }, [groups, groupedModules, navigation.length]);
   async function deleteGroup(group: string) {
     if (DEFAULT_GROUPS.includes(group)) return;
     // Read unloaded members too; deleting a group must not omit later pages.
@@ -376,7 +394,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     }
   }
   return <main className={styles.page}>
-    <aside className={styles.moduleRail} aria-label="分组快捷栏">
+    <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label="分组快捷栏">
       <div className={styles.moduleRailTitle}>分组快捷栏</div>
       {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
         <button type="button" className={selectedGroup === group ? styles.moduleRailActive : ''} aria-current={selectedGroup === group ? 'page' : undefined} onClick={() => {
@@ -434,6 +452,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
 }) {
   const [draftContext, setDraftContext] = useState(settings?.context || '');
   const [saveStatus, setSaveStatus] = useState('');
+  const [recoverableDraft, setRecoverableDraft] = useState<Record<string, any> | null>(null);
+  const [savedAsSignature, setSavedAsSignature] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [prompt, setPrompt] = useState(module.prompt);
   const [count, setCount] = useState(module.count);
@@ -523,7 +543,11 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality, resolution, groupName, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null };
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
-  const automaticSnapshot = JSON.stringify({ ...moduleDraft, context: savedModuleContext });
+  const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
+  const generationDraft = JSON.stringify({ prompt, count, referenceLimit, aspectRatio, resolution, referenceIds: images.map(image => image.id), model: moduleModel, quality });
+  const defaultGenerationDraft = JSON.stringify({ prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: baseline.resolution, referenceIds: baseline.referenceIds, model: baseline.model, quality: baseline.quality });
+  const generationChanged = generationDraft !== defaultGenerationDraft;
+  const automaticSnapshot = JSON.stringify({ ...moduleDraft, prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: baseline.resolution, referenceIds: baseline.referenceIds, model: baseline.model, quality: baseline.quality, context: savedModuleContext });
   const automaticDirty = automaticSnapshot !== moduleSaved;
   const settingsDirty = moduleContext !== savedModuleContext;
   const sourceSharingBlocked = Boolean(module.sourcePresetId && module.sourcePresetShared === false);
@@ -550,7 +574,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true) {
     if (moduleSaveLock.current || moduleDeleteLock.current || uploading || bannerUploading) return false;
     moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
-    const snapshot = { ...(manualSettings ? moduleDraft : JSON.parse(automaticSnapshot) as typeof moduleDraft), reproduceFromTaskId: reproduceTaskId || null };
+    const snapshot = { ...JSON.parse(automaticSnapshot) as typeof moduleDraft, context: manualSettings ? moduleContext : savedModuleContext, reproduceFromTaskId: reproduceTaskId || null };
     const contextSnapshot = snapshot.context;
     try {
       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -565,10 +589,10 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   }
 
   function restoreDefaults() {
-    if (!window.confirm('恢复当前模块默认设置？参考图、banner 和历史生成结果会保留。')) return;
-    const nextModel = moduleModel;
-    setPrompt(''); setModuleContext(''); setCount(1); setReferenceLimit(MAX_REFERENCE_IMAGES); setAspectRatio('auto'); setModuleModel(nextModel);
-    setQuality(defaultImageStudioQuality(nextModel)); setResolution(defaultImageResolution(nextModel)); setGroupName('未分组'); setReproduceSourceTaskId(null);
+    if (!window.confirm('恢复当前模板默认参数和参考图？上次临时草稿仍可恢复。')) return;
+    try { const saved = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (saved) setRecoverableDraft(saved); } catch {}
+    setPrompt(baseline.prompt); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
+    setQuality(baseline.quality); setResolution(baseline.resolution); setImages(module.images); setReproduceSourceTaskId(null);
     setModuleSaveError('');
   }
 
@@ -594,40 +618,46 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         count, referenceLimit, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), sourceModuleId: isAdmin ? module.id : undefined,
       }) }));
       setSaveStatus('模板已保存');
+      setSavedAsSignature(generationDraft);
       window.setTimeout(() => setSaveStatus(''), 2200);
     } catch (e) { setError(e instanceof Error ? e.message : '模板保存失败'); }
   }
 
-  useEffect(() => {
-    if (restoredDraftKey.current === draftKey) return;
-    restoredDraftKey.current = draftKey;
-    try {
-      const saved = JSON.parse(localStorage.getItem(draftKey) || 'null');
-      if (saved && (!module.saved || saved.revision === module.revision)) {
-        if (typeof saved.name === 'string') setName(saved.name.slice(0, 80));
+  function restoreTemporaryDraft() {
+      const saved = recoverableDraft;
+      if (saved) {
         if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 20000));
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
         if (Number.isInteger(saved.referenceLimit) && saved.referenceLimit >= 1 && saved.referenceLimit <= MAX_REFERENCE_IMAGES) setReferenceLimit(saved.referenceLimit);
         if (typeof saved.model === 'string') setModuleModel(saved.model);
         if (typeof saved.resolution === 'string') setResolution(normalizeImageResolution(typeof saved.model === 'string' ? saved.model : module.model, saved.resolution));
         if (typeof saved.quality === 'string') setQuality(saved.quality);
-        if (typeof saved.groupName === 'string') setGroupName(saved.groupName.slice(0, 40));
-        if (saved.banner && typeof saved.banner.id === 'string') setBanner(saved.banner);
         if (typeof saved.aspectRatio === 'string') { try { setAspectRatio(normalizeStudioRatio(saved.aspectRatio)); } catch {} }
         if (Array.isArray(saved.images)) setImages(saved.images.filter((image: UploadedAssetPayload) => image && typeof image.id === 'string' && typeof image.originalUrl === 'string').slice(0, Number.isInteger(saved.referenceLimit) ? saved.referenceLimit : MAX_REFERENCE_IMAGES));
         if (Object.prototype.hasOwnProperty.call(saved, 'reproduceSourceTaskId')) {
           setReproduceSourceTaskId(typeof saved.reproduceSourceTaskId === 'string' && saved.reproduceSourceTaskId.length <= 120 ? saved.reproduceSourceTaskId : null);
         }
       }
+      setRecoverableDraft(null);
+      setSavedAsSignature('');
+  }
+  useEffect(() => {
+    if (restoredDraftKey.current === draftKey) return;
+    restoredDraftKey.current = draftKey;
+    try {
+      const saved = JSON.parse(localStorage.getItem(draftKey) || 'null');
+      if (saved && typeof saved === 'object') setRecoverableDraft(saved);
       const pending = JSON.parse(sessionStorage.getItem(pendingKey) || 'null');
       if (pending && typeof pending.requestId === 'string') setPendingSubmission(pending);
     } catch { /* A damaged local draft must not block the page. */ }
     setDraftLoaded(true);
   }, [draftKey, pendingKey, module.saved, module.revision, module.model, isAdmin]);
   useEffect(() => {
-    if (!draftLoaded) return;
-    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, referenceLimit, aspectRatio, resolution, images, name, model: moduleModel, quality, groupName, banner, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision })); } catch { /* Generation does not depend on browser storage. */ }
-  }, [draftLoaded, draftKey, prompt, count, referenceLimit, aspectRatio, resolution, images, name, moduleModel, quality, groupName, banner, reproduceSourceTaskId, moduleRevision]);
+    if (!draftLoaded || !generationChanged) return;
+    setRecoverableDraft(null);
+    try { localStorage.setItem(draftKey, JSON.stringify({ prompt, count, referenceLimit, aspectRatio, resolution, images, model: moduleModel, quality, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision })); }
+    catch { setError('临时草稿未能保存到浏览器，请勿刷新；当前内容仍可生成或另存为。'); }
+  }, [draftLoaded, draftKey, generationChanged, prompt, count, referenceLimit, aspectRatio, resolution, images, moduleModel, quality, reproduceSourceTaskId, moduleRevision]);
 
   useEffect(() => {
     if (draftLoaded) onMetadataChange(module.id, name, groupName);
@@ -735,13 +765,13 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing) return;
     if (settingsDirty || dirty) { setError('上下文或积分规则尚未保存，请先保存这些设置。'); return; }
     let submitModuleRevision = moduleRevision;
-    if (!pendingSubmission && moduleDirty) {
-      const savedRevision = await saveModule();
+    if (!pendingSubmission && automaticDirty) {
+      const savedRevision = await saveModule(reproduceSourceTaskId, revisionRef.current, false);
       if (!savedRevision) return;
       submitModuleRevision = savedRevision;
     }
     const payload = pendingSubmission || { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
-      moduleId: module.id, moduleRevision: submitModuleRevision, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings.revision, referenceIds: retryTask?.referenceIds || images.map(image => image.id) };
+      moduleId: module.id, moduleRevision: submitModuleRevision, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings.revision, referenceIds: retryTask?.referenceIds || images.map(image => image.id) };
     try { sessionStorage.setItem(pendingKey, JSON.stringify(payload)); } catch { /* The in-memory request ID still prevents duplicate retries. */ }
     submitLock.current = true; setSubmitting(true); setError('');
     let ambiguous = true;
@@ -1046,8 +1076,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <button type="button" onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
-          <button type="button" disabled={moduleSaving || uploading || bannerUploading || !moduleDirty} className={moduleDirty ? styles.saveReady : ''} onClick={() => void saveModule()}><Save size={16} />保存设置</button>
-          <button type="button" onClick={() => void saveAsPreset()}><Save size={16} />另存为模板</button>
+          <button type="button" disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存上下文</button>
+          <button type="button" disabled={uploading || bannerUploading || submitting || (!recoverableDraft && (!generationChanged || generationDraft === savedAsSignature))} className={recoverableDraft || (generationChanged && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : '另存为'}</button>
         </div>
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
