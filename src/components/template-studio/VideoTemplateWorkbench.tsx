@@ -97,6 +97,7 @@ async function requestJson<T>(url: string, init?: RequestInit, expectedStatus?: 
     const apiError = body && typeof body === 'object' ? body as StudioApiError : undefined;
     throw new ApiFailure(response.status, apiError?.code, safeApiMessage(response.status, body));
   }
+  if (body === null) throw new ApiFailure(0, 'UNAVAILABLE', '服务返回不完整，操作结果尚未确认，请先查询记录。');
   if (expectedStatus !== undefined && response.status !== expectedStatus) {
     throw new ApiFailure(response.status, 'INVALID', '服务未返回完整的新模块，当前编辑仍保留；请稍后重试。');
   }
@@ -550,7 +551,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       const page = await requestJson<StudioRunListResponse>(`${API}/runs${query ? `?${query}` : ''}`);
       if (sequence !== runSequence.current || currentUserId.current !== userId) return;
       setRuns((current) => {
-        const next = append ? [...current, ...page.items] : page.items;
+        const moduleRecords = currentRouteKeyRef.current.startsWith('templates:') ? current.filter(item => item.draftId === currentDraftId.current) : [];
+        const next = append ? [...current, ...page.items] : [...page.items, ...moduleRecords];
         const seen = new Set<string>();
         return next.filter((item) => {
           if (seen.has(item.id)) return false;
@@ -1120,6 +1122,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       const response = await requestJson<CreateStudioRunResponse>(`${API}/runs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
+      if (!response.run?.id) throw new ApiFailure(0, 'UNAVAILABLE', '未收到完整任务信息，请先查询这次请求。');
       if (currentUserId.current !== userId) return;
       const run = response.run;
       setRuns((currentRuns) => [run, ...currentRuns.filter((item) => item.id !== run.id)]);
