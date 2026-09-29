@@ -18,6 +18,8 @@
 - M02用户补充：缩放必须以鼠标为轴心。普通预览原来已有单次滚轮定位公式，但横/纵对比错误使用总stage中心，连续事件分离更新scale/offset还有旧值风险。使用同一view函数式更新，按鼠标所在pane中心换算；缩放按钮/键盘沿用最近画面指针位置，未指向画面才回退中心；移除transform延迟以免移动鼠标时追赶旧位置。保留拖动防误关、Esc/背景关闭、还原和对比联动。参考[anvaka/panzoom实际zoomByRatio实现](https://github.com/anvaka/panzoom/blob/main/index.js)，现有共享组件已具备行为，无需替换或新增依赖。
 - 统一本地验证：`node --import tsx scripts/image-studio-result-identity-smoke.ts`通过，真实listStudioTasks配内存Prisma验证五简称/模型ID不变、owner查询隔离、DTO仅id/name/avatar_url、失去owner时null；未连接真实DB。`image-studio-ui-smoke.ts`、`npx tsc --noEmit`、`npm run lint`通过（仅既存警告）。
 - 扩展`image-preview-drag-browser-smoke.ts`使用真实组件、CSS和Chrome鼠标wheel，单图及横/纵对比两侧的放大/缩小、键盘/按钮、同批次滚轮、0.5x/6x极限均保持鼠标下像素误差<0.25px；拖动/背景轻点/Esc/按钮关闭回归通过，无外网/生成调用。首轮测试误把小数坐标当成MouseEvent整数坐标，最大倍数时出现3px测试误差，校正测量点后通过，未为此改业务代码。旧884d81a组件相同测试在键盘轴心环节失败，证实回归脚本能识别旧行为。
+- 固定审核001发现鼠标捕获拖出stage后会保存区域外坐标（回执将M01/M02编号写反，实际属于M02）；新增命中区域校验，离开预览区域保留最后有效缩放点，并补真实拖出后按钮缩放回归。首个5624a83候选已构建但未上线，待此修正统一复测后用新提交替换；不重复抬版本，不覆盖生产数据。
+- 修正后完整缩放/拖动浏览器脚本通过；同一脚本对5624a83在“outside drag must retain last in-stage y anchor”失败，确认新增回归能复现审查问题。固定审核001已静态复核防护通过，M01 owner隔离结论也通过；不把静态审查冒充页面验收。
 
 ## S01 分组侧栏整理（2026-09-29）
 

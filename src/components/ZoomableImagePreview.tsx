@@ -138,7 +138,9 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   const rememberZoomPoint = useCallback((clientX: number, clientY: number) => {
     const stage = stageRef.current;
     if (!stage) return null;
-    const pane = document.elementFromPoint(clientX, clientY)?.closest('[data-image-preview-pane]');
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target || !stage.contains(target)) return null;
+    const pane = target.closest('[data-image-preview-pane]');
     const surface = pane && stage.contains(pane) ? pane : stage;
     const rect = surface.getBoundingClientRect();
     const point = { x: clientX - rect.left - rect.width / 2, y: clientY - rect.top - rect.height / 2 };

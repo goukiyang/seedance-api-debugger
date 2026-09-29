@@ -236,6 +236,30 @@ async function main() {
     await preview.waitFor({ state: 'detached', timeout: timeoutMs });
     log('PASS image click stays open; close button still works');
 
+    await page.getByTestId('open').click();
+    await preview.waitFor({ state: 'visible', timeout: timeoutMs });
+    await page.getByRole('button', { name: '放大图片' }).click();
+    const stageBounds = await page.locator('[data-image-preview-stage]').boundingBox();
+    const startBounds = await image.boundingBox();
+    assert.ok(stageBounds && startBounds);
+    const lastInside = { x: Math.round(stageBounds.x + stageBounds.width / 2), y: Math.round(stageBounds.y + 10) };
+    await page.mouse.move(startBounds.x + startBounds.width / 2, startBounds.y + startBounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(lastInside.x, lastInside.y);
+    await page.mouse.move(lastInside.x, 8);
+    await page.mouse.up();
+    assert.equal(await preview.count(), 1, 'drag out of stage must stay open');
+    const outsideBefore = await image.boundingBox();
+    assert.ok(outsideBefore);
+    const anchoredPixel = { x: (lastInside.x - outsideBefore.x) / outsideBefore.width, y: (lastInside.y - outsideBefore.y) / outsideBefore.height };
+    await page.getByRole('button', { name: '放大图片' }).click();
+    const outsideAfter = await image.boundingBox();
+    assert.ok(outsideAfter);
+    assert.ok(Math.abs(outsideAfter.x + outsideAfter.width * anchoredPixel.x - lastInside.x) < 0.25, 'outside drag must retain last in-stage x anchor');
+    assert.ok(Math.abs(outsideAfter.y + outsideAfter.height * anchoredPixel.y - lastInside.y) < 0.25, 'outside drag must retain last in-stage y anchor');
+    await page.keyboard.press('Escape');
+    log('PASS dragging outside the stage retains the last valid zoom anchor');
+
     for (const vertical of [false, true]) {
       await page.getByTestId('open').click();
       await preview.waitFor({ state: 'visible', timeout: timeoutMs });
