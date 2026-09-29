@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新增图片与视频模板工作台。视频提示词可保存草稿、复用历史输入，并带素材进入生成页；旧图片工具和视频模板继续保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复放大图片拖动后预览意外关闭的问题，保留原有页面布局和关闭操作。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

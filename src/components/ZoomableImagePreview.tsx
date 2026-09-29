@@ -39,6 +39,19 @@ type ZoomableImagePreviewProps = {
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 6;
 const SCALE_STEP = 1.2;
+const DRAG_THRESHOLD = 5;
+
+type ActiveDrag = {
+  pointerId: number;
+  x: number;
+  y: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+  startedOnBackground: boolean;
+};
+
+type CapturedClick = { pointerId: number; closeOnClick: boolean };
 
 function clampScale(value: number) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
@@ -87,7 +100,8 @@ function PreviewImage({ src, alt, original, className, style }: { src: string; a
 export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, metadata, comparison, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const dragRef = useRef<ActiveDrag | null>(null);
+  const capturedClickRef = useRef<CapturedClick | null>(null);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -213,10 +227,21 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   }, [handleWheel]);
 
   const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    capturedClickRef.current = null;
     if (event.button !== 0 && event.button !== 1) return;
-    if (scale <= 1) return;
+    if (scale <= 1 || dragRef.current) return;
     event.preventDefault();
-    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    const startedOnBackground = event.target === event.currentTarget
+      || event.target instanceof Element && event.target.matches('[data-image-preview-pane]');
+    dragRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      startedOnBackground,
+    };
     setDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   }, [scale]);
@@ -227,18 +252,38 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
 
     const deltaX = event.clientX - drag.x;
     const deltaY = event.clientY - drag.y;
-    dragRef.current = { ...drag, x: event.clientX, y: event.clientY };
+    const moved = drag.moved || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > DRAG_THRESHOLD;
+    dragRef.current = { ...drag, x: event.clientX, y: event.clientY, moved };
     setOffset((current) => ({ x: current.x + deltaX, y: current.y + deltaY }));
   }, []);
 
   const finishDrag = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
-    if (drag && event.currentTarget.hasPointerCapture(drag.pointerId)) {
-      event.currentTarget.releasePointerCapture(drag.pointerId);
-    }
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const cancelled = event.type !== 'pointerup';
+    const moved = drag.moved || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > DRAG_THRESHOLD;
+    capturedClickRef.current = { pointerId: drag.pointerId, closeOnClick: !cancelled && !moved && drag.startedOnBackground };
     dragRef.current = null;
     setDragging(false);
+    if (event.currentTarget.hasPointerCapture(drag.pointerId)) {
+      event.currentTarget.releasePointerCapture(drag.pointerId);
+    }
   }, []);
+
+  const handleStageClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const capturedClick = capturedClickRef.current;
+    if (capturedClick) {
+      const pointerId = (event.nativeEvent as globalThis.PointerEvent).pointerId;
+      if (pointerId === capturedClick.pointerId || pointerId === undefined && event.detail > 0) {
+        capturedClickRef.current = null;
+        if (capturedClick.closeOnClick) onClose();
+        return;
+      }
+      capturedClickRef.current = null;
+    }
+    const target = event.target;
+    if (target === event.currentTarget || target instanceof Element && target.matches('[data-image-preview-pane]')) onClose();
+  }, [onClose]);
 
   const handleBackdropClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -325,22 +370,21 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
         onPointerMove={handlePointerMove}
         onPointerUp={finishDrag}
         onPointerCancel={finishDrag}
+        onLostPointerCapture={finishDrag}
         onAuxClick={(event) => event.preventDefault()}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) onClose();
-        }}
+        onClick={handleStageClick}
         onDoubleClick={resetView}
         onContextMenu={(event) => event.preventDefault()}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {comparison && comparisonMode ? <div className={`${styles.compareFrame} ${comparisonAxis === 'vertical' ? styles.compareVertical : styles.compareHorizontal}`} data-image-preview-compare-frame>
-          <div className={styles.comparePane} data-image-preview-pane="reference" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+          <div className={styles.comparePane} data-image-preview-pane="reference">
             <span className={styles.compareLabel}>参考图</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <PreviewImage src={comparison.src} alt={comparison.alt} original={showOriginal} className={styles.compareImage}
               style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} />
           </div>
-          <div className={styles.comparePane} data-image-preview-pane="result" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+          <div className={styles.comparePane} data-image-preview-pane="result">
             <span className={styles.compareLabel}>生成图</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <PreviewImage src={src} alt={alt} original={showOriginal} className={styles.compareImage}
