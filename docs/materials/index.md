@@ -2,6 +2,8 @@
 
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
 |---|---|---|---|---|---|
+| 2026-09-29 | sidebar-layout-fixture.png | 本轮Playwright / SD2 S01 | 两份真实CSS Module，合成侧栏与标题；用于核对不遮挡标题，不含用户提示词 | [布局截图](2026-09-29-sidebar/sidebar-layout-fixture.png) | 候选0.20.4，已打开核对；可再生辅助图不逐项hash，不替代线上证据 |
+| 2026-09-29 | 分组侧栏整理 / codex-clipboard-7f1d54ac-22df-4c68-ac05-41b6042e98c7.png | 用户本轮截图 / SD2 | 红框标记侧栏，标题遮挡、白色滚动条；保留侧栏与页面上下滚动，S01参考 | [原图](2026-09-29-sidebar/codex-clipboard-7f1d54ac-22df-4c68-ac05-41b6042e98c7.png) | 原始v0.20.3画面；图像已阅，复制cmp一致，不替代修复后验收 |
 | 2026-09-29 | banner-layout-fixture.png | 本轮Playwright / SD2 B01 | 真实CSS、合成图片，桌面横幅180px与下方工作区；不含用户私有内容，不替代线上截图 | [布局截图](2026-09-29-banner/banner-layout-fixture.png) | 候选0.20.3，已打开核对；可再生辅助截图不单独计算hash |
 | 2026-09-29 | 浏览器标注1：模块banner过大（原文件名未提供） | 用户浏览器标注 / SD2 | 图片横幅撑满首屏；B01尺寸修复的原始反馈，不用于更改模板内容 | 本轮对话附件；页面 https://sd2.youdooart.com/template-studio?type=image ，实现记录 [B01](../../tasks/todo.md#b01-模块-banner-高度2026-09-29) | 截图可见已阅，未提供可访问本地文件路径，无法复制归档；不声称文件完整性校验已完成 |
 | 2026-09-29 | template-studio-desktop.png / template-studio-mobile.png | 本轮隔离Playwright验收 / SD2模板工作台 | 两大类、草稿、字段与首尾素材槽的桌面1440/手机390布局；仅本地合成账号与素材，不是生产截图 | [桌面](2026-09-29-template-studio/template-studio-desktop.png)、[手机](2026-09-29-template-studio/template-studio-mobile.png) | 候选0.20.0，BUILD_ID `o7mFYXUrhzPNCN16exgqn`；来自通过运行artifact `sYphBd`，已打开核对；辅助截图未逐项计算哈希，不替代线上验收 |

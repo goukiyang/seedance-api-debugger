@@ -36,6 +36,8 @@
 }
 
 .headerTitle { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.imageHeader { padding-inline-start: 268px; }
+@media (max-width: 1000px) { .imageHeader { padding-inline-start: 26px; } }
 .headerTitle h1 { margin: 0; font-size: 19px; line-height: 1.2; font-weight: 750; }
 .kicker { color: var(--muted); font-size: 12px; }
 

@@ -53,7 +53,7 @@ export default function TemplateStudioShell({
 
   return (
     <section className={styles.workbench} aria-label="模板工作台">
-      <header className={styles.header}>
+      <header className={`${styles.header} ${activeType === 'image' ? styles.imageHeader : ''}`}>
         <div className={styles.headerTitle}>
           <span className={styles.kicker}>创作</span>
           <h1>模板工作台</h1>
