@@ -9,13 +9,16 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| S01 | 整理左侧分组栏 | 不遮挡标题、滚动条弱化，原有上下滚动和导航保持可用 | 进行中 |
+| S01 | 整理左侧分组栏 | 不遮挡标题、滚动条弱化，原有上下滚动和导航保持可用 | 已完成 |
 
 - 用户确认保留侧边与页面上下翻动；只整理标注侧栏，不重做模板目录、不修改上下文、分组选择或生成接口。原图与来源见[资料索引](../docs/materials/index.md)。
 - 原因：侧栏固定top73px与实际顶部导航48px不一致，模板工作台标题没有为236px侧栏留位，原生白底滚动条未按深色侧栏适配。修正为复用导航高度变量、仅图片模式标题左侧留268px（与原内容起点一致），侧栏细灰滚动条及小幅组间距调整。不添加滚轮拦截、页面滚动锁或新依赖，保留滚动条可拖动。窄屏保留既有横向导航，仅避免粘性导航被顶部栏挡住。
 - 复用现有原生overflow滚动，参考[MDN scrollbar-color](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/scrollbar-color)及WebKit兼容样式；不用新滚动库，不隐藏滚动条。
 - 0.20.3生产接续候选0.20.4；统一验证原CSS的真实wheel侧栏/页面独立滚动、首尾可达、标题无重叠、手机不被桌面留白挤窄，关联banner/UI回归、类型/lint、候选构建、正式页只读DOM/滚动验收。不付费、不写生产数据，保留0.20.3回退。
 - 两份真实CSS Module隔离编译的Chrome测试通过：1617×873侧栏与页面真实wheel互不影响，侧栏末项可达；1294×698标题不重叠、侧栏高度随窗口适配；390×844保留既有横向导航，标题没有桌面缩进残留。banner 9项与旧UI smoke通过；[合成布局图](../docs/materials/2026-09-29-sidebar/sidebar-layout-fixture.png)已查看。不读取私有上下文，不把合成DOM称为生产截图。
+- 发布：`npx tsc --noEmit`、`npm run lint`、`git diff --check`通过（lint只有既存警告）。产品提交`884d81af3f7e8430efdc0bd42b8d4a48c64e09e7`与`rollback/2026-09-29-before-sidebar-scroll`→`ca6b417`远端可见；归档SHA256 `153fa5f5903485c8963e8d16959b08a02e938e3c7136c91f681299344b375a73`本地/服务器一致。候选数据库副本构建通过，v0.20.4 / BUILD_ID `Y-OqOk0NnSCyINO2So0Lm`上线；三服务active，源站/公网config、release、login、登录页13资源200；0.20.3回退构建保留于`backups/sidebar-scroll-884d81af3f7e8430efdc0bd42b8d4a48c64e09e7/live-build`，未迁移/覆盖数据库或媒体。
+- 正式登录态Chrome 1200×753：顶部栏bottom48，侧栏top48/width236/height705，模板标题x302（侧栏right236），scrollbar-width thin、灰色透明轨道。侧栏PageDown后scrollTop134、window.scrollY0且末项可见；右侧PageDown后window.scrollY713、侧栏仍134/top48；点击第二子模块后对应activeLabel正确、目标标题进入视口，分组仍正确。无输入变更、无生成；临时聚焦标题编辑后已离开且nameEditing=false。自有浏览器会话已停止，用户原标签页未改。
+- 旧客户端v0.20.3手动检查更新真实出现v0.20.4、正确摘要和20px/700字重的5字标题；“稍后”关闭后仍为旧版，手动检查可再次打开；新页面DOM显示v0.20.4。复用既有自动检测与刷新前确认代码，无新增机制；周期/自动前台触发本轮未等待重测。此项未读取上下文或整页截图，生产以目标DOM与键盘滚动行为为证，合成截图承担布局视觉核验。
 
 ## B01 模块 banner 高度（2026-09-29）
 
