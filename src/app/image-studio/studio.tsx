@@ -836,7 +836,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, groups, onDeleteGr
     </header>
     <div className={`${styles.moduleBanner} ${banner?.originalUrl ? styles.moduleBannerHasImage : ''}`}>
       {banner?.originalUrl ? <>
-        {/* 保留图片原始比例，让 banner 高度随上传图片自适应。 */}
+        {/* 固定 banner 高度并完整等比显示图片，不裁切。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt="模块 banner" />
         <span className={styles.bannerLabel}>模块 banner</span>
