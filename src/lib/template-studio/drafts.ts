@@ -4,6 +4,8 @@ import { authorizeStudioAssets } from './assets';
 import { encodeCursor, parseCursor } from './common';
 import { StudioError } from './errors';
 import { getStudioTemplate } from './templates';
+import { publicRecipe } from './projection';
+import { copyModuleContext } from './context';
 import {
   normalizeAssets,
   normalizeGroupName,
@@ -52,7 +54,7 @@ function serializeDraft(row: any): StudioDraftDto {
     values: parseJsonRecord(row.values_json, '字段值'),
     assets: parseJsonArray(row.assets_json, '素材') as StudioDraftDto['assets'],
     parameters: parseJsonRecord(row.parameters_json, '参数'),
-    recipe: snapshot?.recipe ?? null,
+    recipe: publicRecipe(snapshot?.recipe ?? null),
     revision: row.revision,
     template: snapshot?.ref ?? null,
     createdAt: row.created_at.toISOString(),
@@ -84,7 +86,8 @@ async function createStudioDraftFromRun(user: SessionUser, runId: string) {
   const snapshot = readRunSnapshot(run.snapshot_json);
   const ref = snapshot.templateVersion;
   if (run.source !== (ref?.templateSource || 'blank')) throw new StudioError('运行来源与历史快照不一致，无法复用输入', 409, 'CONFLICT');
-  const row = await prisma.videoStudioDraft.create({
+  const row = await prisma.$transaction(async tx => {
+  const created = await tx.videoStudioDraft.create({
     data: {
       owner_user_id: user.id,
       name: snapshot.input.name,
@@ -98,6 +101,9 @@ async function createStudioDraftFromRun(user: SessionUser, runId: string) {
       source_version_id: ref?.versionId || null,
       template_snapshot_json: ref && snapshot.recipe ? JSON.stringify({ ref, recipe: snapshot.recipe }) : null,
     },
+  });
+  if (snapshot.privateContext) await copyModuleContext(tx, created.id, user.id, { text: snapshot.privateContext.module });
+  return created;
   });
   return serializeDraft(row);
 }
@@ -154,7 +160,7 @@ async function createStudioDraftFromDraft(user: SessionUser, draftId: string, re
       || currentSource.template_snapshot_json !== source.template_snapshot_json) {
       throw new StudioError('原草稿模板快照已变化，请重新恢复', 409, 'CONFLICT');
     }
-    return tx.videoStudioDraft.create({
+    const created = await tx.videoStudioDraft.create({
       data: {
         owner_user_id: user.id,
         name: recovery.name ?? currentSource.name,
@@ -169,6 +175,8 @@ async function createStudioDraftFromDraft(user: SessionUser, draftId: string, re
         template_snapshot_json: currentSource.template_snapshot_json,
       },
     });
+    await copyModuleContext(tx, created.id, user.id, { draftId });
+    return created;
   });
   return serializeDraft(row);
 }
@@ -187,7 +195,7 @@ async function resolveTemplateSnapshot(user: SessionUser, templateId: string, so
     include: { published_version: true },
   });
   if (!row) throw new StudioError('模板不存在', 404, 'NOT_FOUND');
-  let recipe = detail.template.recipe;
+  let recipe = normalizeRecipe(JSON.parse(row.recipe_json));
   let versionId: string | null = null;
   let versionNumber: number | null = null;
   if (row.visibility === 'shared' && row.status === 'published') {

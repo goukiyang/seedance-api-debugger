@@ -170,6 +170,8 @@ export type UpdateStudioDraftRequest = {
 };
 
 export type StudioRunSnapshot = {
+  privateContext?: { global: string; module: string; globalRevision: number; moduleRevision: number };
+  sourceRunId?: string;
   input: {
     name: string;
     groupName: string;
@@ -185,11 +187,13 @@ export type StudioRunSnapshot = {
     userId: string;
     username: string;
     displayName: string;
+    avatarUrl?: string | null;
     accountType: 'internal' | 'external';
   };
 };
 
 export type StudioRunDto = {
+  owner?: { displayName: string; avatarUrl: string | null };
   id: string;
   draftId: string;
   requestId: string;
@@ -302,6 +306,7 @@ export type StudioRunDetailResponse = {
 export type CancelStudioRunRequest = { action: 'cancel' };
 
 export type StudioCapabilitiesResponse = {
+  billingLabel: string;
   llmEnabled: boolean;
   llmReason: string | null;
   canManageTemplates: boolean;

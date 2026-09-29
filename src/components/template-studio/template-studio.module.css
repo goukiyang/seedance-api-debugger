@@ -81,6 +81,10 @@
 .imageSurface > * { min-width: 0; }
 
 .videoWorkbench { min-width: 0; }
+.resultMetadata { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; min-width: 0; }
+.resultMetadata h3 { font-size: 15px; margin: 0; }
+.resultMetadata > :global(.user-identity-badge) { max-width: 140px; min-width: 0; }
+.formColumn details > summary { cursor: pointer; padding: 8px 0; color: var(--muted); }
 .videoHeader {
   display: flex;
   align-items: center;

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Archive, ArrowDown, ArrowUp, Check, CircleAlert, Copy, Film, FolderOpen,
-  Image as ImageIcon, ImagePlus, LoaderCircle, Plus, Save, Search, Sparkles, Trash2, X,
+  Archive, ArrowDown, ArrowUp, Check, CircleAlert, Film, FolderOpen,
+  Image as ImageIcon, ImagePlus, LoaderCircle, Plus, Save, Search, Settings, Sparkles, Trash2, X,
 } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
@@ -34,6 +34,8 @@ import type {
   UpdateStudioTemplateRequest,
 } from '@/lib/template-studio/types';
 import styles from './template-studio.module.css';
+import VideoContextEditor from './VideoContextEditor';
+import VideoPromptResult from './VideoPromptResult';
 
 type Props = { userId: string };
 type StudioView = 'templates' | 'prompts' | 'results';
@@ -117,7 +119,7 @@ function completeDraftFromResponse(body: unknown): StudioDraftDto | null {
     && (asset.type === 'image' || asset.type === 'video' || asset.type === 'audio')
     && (asset.slotKey === undefined || (typeof asset.slotKey === 'string' && Boolean(asset.slotKey.trim()))));
   const completeRecipe = recipe === null || (isRecord(recipe)
-    && typeof recipe.instruction === 'string' && Boolean(recipe.instruction.trim())
+    && typeof recipe.instruction === 'string'
     && Array.isArray(recipe.fields)
     && recipe.fields.every(isRecord)
     && Array.isArray(recipe.assetSlots)
@@ -239,7 +241,6 @@ function fieldValue(values: Record<string, StudioJsonValue>, field: StudioTempla
 
 function composeDraftPrompt(draft: StudioDraftDto) {
   return [
-    draft.recipe?.instruction,
     ...(draft.recipe?.fields || []).flatMap((field) => draft.values[field.key] === undefined
       ? []
       : [`${field.label}: ${String(draft.values[field.key])}`]),
@@ -336,6 +337,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const [capabilityError, setCapabilityError] = useState('');
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState('');
+  const [contextEditor, setContextEditor] = useState<{ draftId?: string } | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('prompt');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSlotKey, setPickerSlotKey] = useState<string | null>(null);
@@ -353,6 +355,16 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const [createTemplateBusy, setCreateTemplateBusy] = useState(false);
   const [pendingRun, setPendingRun] = useState<{ requestId: string; draftId: string; revision: number; mode: 'direct' | 'llm'; inputSignature: string } | null>(null);
   const [requestUnknown, setRequestUnknown] = useState(false);
+  const submitting = useRef(false);
+  const pendingKey = `sd2-video-pending:${userId}`;
+  useEffect(() => {
+    try {
+      const operation = JSON.parse(sessionStorage.getItem(pendingKey) || 'null');
+      if (operation?.requestId && operation?.draftId && Number.isInteger(operation.revision)) {
+        setPendingRun(operation); setRequestUnknown(true);
+      }
+    } catch { /* No pending request to restore. */ }
+  }, [pendingKey]);
   const templateSequence = useRef(0);
   const draftListSequence = useRef(0);
   const draftDetailSequence = useRef(0);
@@ -370,6 +382,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const activeTemplate = useMemo(() => templates.find((item) => item.id === routedTemplateId && item.source === routedTemplateSource) || null, [routedTemplateId, routedTemplateSource, templates]);
   const activeDraft = draft?.id === routedDraftId ? draft : null;
   const activeRunDetail = runDetail?.run.id === routedRunId ? runDetail : null;
+  const moduleRun = activeDraft && activeRunDetail && activeRunDetail.run.draftId === activeDraft.id ? activeRunDetail.run
+    : runs.find(item => item.draftId === activeDraft?.id && (!routedRunId || item.id === routedRunId));
   const currentRouteKey = `${view}:${routedDraftId || ''}:${routedTemplateId || ''}:${routedRunId || ''}`;
   const currentRouteKeyRef = useRef(currentRouteKey);
   currentRouteKeyRef.current = currentRouteKey;
@@ -557,12 +571,40 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   }, [appliedRunFilters, handleAuthExpired, userId]);
 
   useEffect(() => {
-    if (view === 'templates') return;
     setRuns([]);
     runCursorRef.current = null;
     setRunCursor(null);
     void loadRuns();
   }, [loadRuns, view]);
+
+  useEffect(() => {
+    if (!routedDraftId) return;
+    const controller = new AbortController();
+    void requestJson<StudioRunListResponse>(`${API}/runs?draft_id=${encodeURIComponent(routedDraftId)}`, { signal: controller.signal }).then(page => {
+      if (!controller.signal.aborted && currentUserId.current === userId) setRuns(current => [...page.items, ...current.filter(item => !page.items.some(incoming => incoming.id === item.id))]);
+    }).catch(error => { if (!controller.signal.aborted) setRunError(messageForFailure(error)); });
+    return () => controller.abort();
+  }, [routedDraftId, userId]);
+
+  const pollingRun = moduleRun || activeRunDetail?.run;
+  useEffect(() => {
+    if (!pollingRun || !['queued', 'running'].includes(pollingRun.status)) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const value = await requestJson<RunDetail>(`${API}/runs/${encodeURIComponent(pollingRun.id)}`);
+        if (cancelled) return;
+        setRuns(current => current.map(item => item.id === value.run.id ? value.run : item));
+        setRunDetail(current => current?.run.id === value.run.id ? value : current);
+        if (['queued', 'running'].includes(value.run.status)) timer = setTimeout(poll, 3000);
+      } catch {
+        if (!cancelled) { setNotice('状态读取暂时失败，正在继续查询；请勿重复提交。'); timer = setTimeout(poll, 6000); }
+      }
+    };
+    timer = setTimeout(poll, 1500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [pollingRun?.id, pollingRun?.status]);
 
   useEffect(() => {
     if (!routedDraftId) {
@@ -592,11 +634,14 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           || JSON.stringify(currentDraft) !== draftSnapshotAtRequestStart;
         if (changedDuringLoad) return;
       }
-      setCurrentDraft(loaded);
-      savedSignature.current = JSON.stringify(loaded);
+      const local = readRecovery(userId, loaded.id);
+      if (!local && loaded.prompt.trim()) saveRecovery(userId, loaded);
+      const defaults = draftAtRequestStart ? loaded : { ...loaded, prompt: '', values: Object.fromEntries((loaded.recipe?.fields || []).flatMap(field => field.defaultValue === undefined ? [] : [[field.key, field.defaultValue]])) };
+      setCurrentDraft(defaults);
+      savedSignature.current = JSON.stringify(defaults);
       blockedSaveSignature.current = '';
       setConflict(false);
-      setSaveState({ label: '已保存', tone: 'success' });
+      setSaveState({ label: '已载入默认输入', tone: 'success' });
       setRecoveryAvailable(Boolean(readRecovery(userId, loaded.id)));
       setAuthExpired(false);
     }).catch((error) => {
@@ -688,7 +733,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       const latest = draftRef.current;
       const changedWhileSaving = latest?.id === saved.id && JSON.stringify(latest) !== JSON.stringify({ ...candidate, revision: saved.revision, updatedAt: saved.updatedAt });
       if (changedWhileSaving && latest) saveRecovery(userId, { ...latest, revision: saved.revision, updatedAt: saved.updatedAt });
-      else clearRecovery(userId, saved.id);
+      else saveRecovery(userId, saved);
       if (currentDraftId.current === saved.id) {
         setConflict(false);
         setRecoveryAvailable(changedWhileSaving);
@@ -740,6 +785,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       if (!current) return current;
       return transform(current);
     });
+    saveRecovery(userId, draftRef.current);
     setSaveState({ label: '有未保存改动' });
   }
 
@@ -853,10 +899,12 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     const local = readRecovery(userId, activeDraft.id);
     if (!local) { setRecoveryAvailable(false); return; }
     markDraftEdited(local.id);
-    setCurrentDraft(local);
-    blockedSaveSignature.current = `${local.id}:${local.revision}`;
-    setConflict(true);
-    setSaveState({ label: '本机内容已恢复，需处理版本冲突', tone: 'warning' });
+    const outdated = local.revision !== activeDraft.revision;
+    setCurrentDraft({ ...activeDraft, prompt: local.prompt, values: local.values, assets: local.assets, parameters: local.parameters });
+    blockedSaveSignature.current = outdated ? `${activeDraft.id}:${activeDraft.revision}` : '';
+    setConflict(outdated);
+    setRecoveryAvailable(false);
+    setSaveState({ label: outdated ? '本机内容已恢复，需处理版本冲突' : '已恢复上一次输入', tone: outdated ? 'warning' : 'success' });
   }
 
   async function saveRecoveredAsNewDraft() {
@@ -982,13 +1030,6 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     updateDraft((current) => ({ ...current, assets: current.assets.filter((_, position) => position !== index) }));
   }
 
-  async function copyText(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setNotice('已复制提示词。');
-    } catch { setNotice('复制失败，请手动选择文本复制。'); }
-  }
-
   async function queryRequest(requestId: string) {
     const operation = pendingRun?.requestId === requestId ? pendingRun : null;
     const routeAtStart = currentRouteKeyRef.current;
@@ -1002,10 +1043,11 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       if (match) {
         setRuns((current) => [match, ...current.filter((item) => item.id !== match.id)]);
         setPendingRun(null);
+        sessionStorage.removeItem(pendingKey);
         setRequestUnknown(false);
         if (operation && currentDraftId.current === operation.draftId && currentRouteKeyRef.current === routeAtStart) {
           navigate({
-            type: 'video', view: 'prompts', runId: match.id, draftId: match.draftId,
+            type: 'video', view: 'templates', runId: match.id, draftId: match.draftId,
             moduleId: match.draftId, templateId: null, templateSource: null,
           }, true);
           setNotice(`本次请求状态：${statusLabel(match.status)}。`);
@@ -1025,8 +1067,11 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   }
 
   async function submitRun(mode: 'direct' | 'llm', reuseRequest = false) {
-    if (!activeDraft) return;
+    if (!activeDraft || submitting.current) return;
     if (mode === 'llm' && capabilities?.llmEnabled !== true) return;
+    if (!reuseRequest && mode === 'llm' && moduleRun && ['queued', 'running', 'uncertain'].includes(moduleRun.status)) {
+      setNotice('上一条文案尚未完成或结果待确认，请先查看记录。'); return;
+    }
     if (pendingRun && requestUnknown && !reuseRequest) {
       setNotice('请先查询未确认的请求；确认后再用当前内容发起新请求。');
       return;
@@ -1034,32 +1079,38 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     const recipe = activeDraft.recipe;
     const errors = recipe?.fields.map((field) => ({ field, message: fieldError(field, fieldValue(activeDraft.values, field)) })).filter((item) => item.message) || [];
     const missingSlots = missingAssetSlots(recipe, activeDraft.assets);
-    if (errors.length || missingSlots.length) {
+    if (mode === 'direct' && (errors.length || missingSlots.length)) {
       setNotice(errors[0]?.message || `还缺少素材：${missingSlots.map((slot) => slot.label).join('、')}`);
       return;
     }
-    if (mode === 'direct' && !composeDraftPrompt(activeDraft)) {
+    if (!composeDraftPrompt(activeDraft)) {
       setNotice('请先填写提示词，或使用模板中已有的要求。');
       return;
     }
-    const saved = await saveDraft(activeDraft, true);
-    if (!saved) return;
+    submitting.current = true;
+    setWorking(true);
+    for (let i = 0; i < 50 && savingDraftIds.current.has(activeDraft.id); i++) await new Promise(resolve => setTimeout(resolve, 100));
+    if (savingDraftIds.current.has(activeDraft.id)) { setNotice('草稿仍在保存，请稍后再试。'); submitting.current = false; setWorking(false); return; }
+    const latestDraft = draftRef.current;
+    if (!latestDraft || latestDraft.id !== activeDraft.id) { submitting.current = false; setWorking(false); return; }
+    const saved = reuseRequest || await saveDraft(latestDraft, true);
+    if (!saved) { submitting.current = false; setWorking(false); return; }
     const current = draftRef.current;
-    if (!current || current.id !== activeDraft.id) return;
+    if (!current || current.id !== activeDraft.id) { submitting.current = false; setWorking(false); return; }
     const inputSignature = JSON.stringify({ name: current.name, groupName: current.groupName, prompt: current.prompt, values: current.values, assets: current.assets, parameters: current.parameters });
-    const operation = reuseRequest && pendingRun && pendingRun.draftId === current.id && pendingRun.mode === mode && pendingRun.inputSignature === inputSignature
+    if (reuseRequest && (!pendingRun || pendingRun.inputSignature !== inputSignature || pendingRun.draftId !== current.id || pendingRun.mode !== mode)) {
+      setNotice('当前内容已变化，请先查询原请求；不能按旧请求号提交新内容。'); submitting.current = false; setWorking(false); return;
+    }
+    const operation = reuseRequest && pendingRun
       ? pendingRun
       : { requestId: crypto.randomUUID(), draftId: current.id, revision: current.revision, mode, inputSignature };
-    if (reuseRequest && operation.inputSignature !== inputSignature) {
-      setNotice('当前内容与未确认请求不同，不能复用原请求号；请先查询原请求。');
-      return;
-    }
     const routeAtStart = currentRouteKeyRef.current;
     setPendingRun(operation);
     setRequestUnknown(false);
     setWorking(true);
     setNotice(mode === 'direct' ? '正在保存本次直接套用记录。' : '正在提交提示词整理。');
     try {
+      sessionStorage.setItem(pendingKey, JSON.stringify(operation));
       const body: CreateStudioRunRequest = {
         draftId: operation.draftId,
         revision: operation.revision,
@@ -1073,12 +1124,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       const run = response.run;
       setRuns((currentRuns) => [run, ...currentRuns.filter((item) => item.id !== run.id)]);
       setPendingRun(null);
+      sessionStorage.removeItem(pendingKey);
       setRequestUnknown(false);
       const latest = draftRef.current;
       const latestSignature = latest?.id === current.id ? JSON.stringify({ name: latest.name, groupName: latest.groupName, prompt: latest.prompt, values: latest.values, assets: latest.assets, parameters: latest.parameters }) : '';
       if (currentDraftId.current === current.id && currentRouteKeyRef.current === routeAtStart && latestSignature === inputSignature) {
         navigate({
-          type: 'video', view: 'prompts', runId: run.id, draftId: current.id,
+          type: 'video', view: 'templates', runId: run.id, draftId: current.id,
           moduleId: current.id, templateId: null, templateSource: null,
         }, true);
         setNotice(run.status === 'succeeded' ? '已保存本次记录。' : `请求已记录：${statusLabel(run.status)}。`);
@@ -1089,12 +1141,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       if (currentUserId.current !== userId) return;
       const isUnknown = error instanceof ApiFailure && (error.status === 0 || (error.status >= 500 && error.status !== 503));
       setRequestUnknown(isUnknown);
+      if (!isUnknown) { sessionStorage.removeItem(pendingKey); setPendingRun(null); }
       if (error instanceof ApiFailure && error.status === 401) {
         handleAuthExpired(error);
         if (draftRef.current?.id !== current.id) saveRecovery(userId, current);
       }
       setNotice(messageForFailure(error));
-    } finally { setWorking(false); }
+    } finally { submitting.current = false; setWorking(false); }
   }
 
   async function cancelRun(run: StudioRunDto) {
@@ -1112,18 +1165,24 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     finally { setWorking(false); }
   }
 
-  function continueGeneration(run: StudioRunDto) {
-    const detail = runDetail?.run.id === run.id ? runDetail : null;
-    const savedPrompt = run.prompt || detail?.snapshot.prompt;
+  async function continueGeneration(run: StudioRunDto, finalText: string) {
+    const savedPrompt = finalText;
     if (!savedPrompt) { setNotice('这条记录没有可继续使用的已保存文本。'); return; }
     if (run.status !== 'succeeded') { setNotice('这条记录还没有成功完成，请先查看状态后再继续。'); return; }
-    const returnView = view === 'templates' ? 'results' : view;
+    setWorking(true);
+    try {
+    const revision = await requestJson<{ runId: string }>(`${API}/runs/${encodeURIComponent(run.id)}/handoff`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: savedPrompt }),
+    });
+    const returnView = view;
     const returnTo = `/template-studio?type=video&view=${returnView}&runId=${encodeURIComponent(run.id)}&draftId=${encodeURIComponent(run.draftId)}&moduleId=${encodeURIComponent(run.draftId)}`;
     const query = new URLSearchParams({
-      template_studio_run_id: run.id,
+      template_studio_run_id: revision.runId,
       template_studio_return_to: returnTo,
     });
     router.push(`/generate?${query.toString()}`);
+    } catch (error) { setNotice(messageForFailure(error)); }
+    finally { setWorking(false); }
   }
 
   async function copyRunToDraft(detail: RunDetail) {
@@ -1389,7 +1448,6 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     );
   };
 
-  const canContinue = (run: StudioRunDto) => run.status === 'succeeded' && Boolean(run.prompt || (activeRunDetail?.run.id === run.id && activeRunDetail.snapshot.prompt));
   const fieldErrors = activeDraft?.recipe?.fields.map((field) => ({ field, message: fieldError(field, fieldValue(activeDraft.values, field)) })).filter((item) => item.message) || [];
   const missingSlots = missingAssetSlots(activeDraft?.recipe || null, activeDraft?.assets || []);
   const inputBlocker = working ? '正在处理，请等待本次操作完成。'
@@ -1397,10 +1455,11 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     : authExpired ? '登录已失效，请重新登录；当前草稿保留。'
     : conflict ? '草稿与服务器版本冲突，请先处理页面上的版本冲突提示。'
     : pendingRun && requestUnknown ? '上次提交结果尚未确认，请先点击“查询这次请求”，避免重复提交。'
-    : fieldErrors.length ? `请补齐模板输入：${fieldErrors.map(item => `${item.field.label}（${item.message}）`).join('；')}`
-    : missingSlots.length ? `请添加必填素材：${missingSlots.map(slot => slot.label).join('、')}` : '';
-  const directBlocker = inputBlocker || (activeDraft && !composeDraftPrompt(activeDraft) ? '请先填写提示词，或选择带有固定要求的模板。' : '');
-  const llmBlocker = inputBlocker || (!capabilities?.llmEnabled ? capabilityError || capabilities?.llmReason || '正在读取AI整理配置，请稍候；长时间无变化请刷新页面。' : '');
+    : '';
+  const directBlocker = inputBlocker || (fieldErrors.length ? '请补齐模板输入。' : missingSlots.length ? `请添加必填素材：${missingSlots.map(slot => slot.label).join('、')}` : activeDraft && !composeDraftPrompt(activeDraft) ? '请先填写本次需求。' : '');
+  const llmBlocker = inputBlocker || (moduleRun && ['queued', 'running', 'uncertain'].includes(moduleRun.status)
+    ? moduleRun.status === 'uncertain' ? '上一条文案结果待确认，请先联系管理员核对，避免重复费用。' : '已有文案正在处理，请等待结果或在历史中取消排队。'
+    : !capabilities?.llmEnabled ? capabilityError || capabilities?.llmReason || '正在读取文字服务配置，请稍候。' : activeDraft && !composeDraftPrompt(activeDraft) ? '请先填写本次需求。' : '');
   const assetIds = activeDraft?.assets.map((item) => item.assetId) || [];
   const loginNext = `/template-studio?${searchParams.toString()}`;
 
@@ -1417,6 +1476,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           ))}
         </nav>
         <div className={styles.headerActions}>
+          {capabilities?.canManageTemplates && <button type="button" className={styles.quietButton} onClick={() => setContextEditor({})}><Settings size={15} />通用上下文</button>}
           <span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span>
           <button className={styles.primaryButton} type="button" onClick={() => void createBlankDraft()} disabled={working}>
             <Plus size={16} aria-hidden="true" /> 新建空白模块
@@ -1425,7 +1485,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       </header>
 
       <div className={styles.layout}>
-        <aside className={styles.sidebar}>
+        <aside className={styles.sidebar} data-remember-scroll="video-groups">
           {view === 'templates' ? (
             <>
               <section className={styles.sidebarSection} aria-label="模板目录">
@@ -1522,15 +1582,22 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                     </div>
                   </div>
                 )}
-                {recoveryAvailable && !conflict && <div className={styles.callout}><span>检测到本账号为此模块保留的本机副本。</span><button className={styles.quietButton} type="button" onClick={restoreLocalDraft}>恢复本机副本</button></div>}
+                {recoveryAvailable && !conflict && <div className={styles.callout}><span>上次输入已保留。</span><button className={styles.quietButton} type="button" onClick={restoreLocalDraft}>恢复上一次</button></div>}
                 <div className={styles.contentHeader}>
                   <div>
                     <h2>{activeDraft.name || '未命名模块'}</h2>
                     <p>{activeDraft.template ? `${activeDraft.template.templateName} · 固定版本 V${activeDraft.template.versionNumber || '未知'}` : '空白模块'} · 修订 {activeDraft.revision}</p>
                   </div>
                   <div className={styles.headerActions}>
+                    <button type="button" className={styles.quietButton} onClick={() => setContextEditor({ draftId: activeDraft.id })}><Settings size={15} />模块上下文</button>
                     <button className={styles.quietButton} type="button" disabled={working || savingDraftIds.current.has(activeDraft.id)} onClick={() => void saveDraft(activeDraft, true)}><Save size={15} />保存</button>
-                    {capabilities?.canCreatePrivateTemplates && <button className={styles.quietButton} type="button" onClick={() => { setNewTemplateName(activeDraft.name); setNewTemplateGroup(activeDraft.groupName); setNewTemplateInstruction(activeDraft.recipe?.instruction || activeDraft.prompt); setCreateTemplateOpen(true); }}>另存为个人模板</button>}
+                    {capabilities?.canCreatePrivateTemplates && <button className={styles.quietButton} type="button" onClick={() => {
+                      const id = activeDraft.id;
+                      void requestJson<{ context?: string }>(`${API}/context?draftId=${encodeURIComponent(id)}`).then(value => {
+                        if (currentDraftId.current !== id) return;
+                        setNewTemplateName(activeDraft.name); setNewTemplateGroup(activeDraft.groupName); setNewTemplateInstruction(value.context || ''); setCreateTemplateOpen(true);
+                      }).catch(error => setNotice(messageForFailure(error)));
+                    }}>另存为个人模板</button>}
                   </div>
                 </div>
                 <div className={styles.editorGrid}>
@@ -1539,7 +1606,6 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       <div className={styles.field}><label htmlFor="studio-draft-name">模块名称</label><input id="studio-draft-name" value={activeDraft.name} maxLength={120} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} /></div>
                       <div className={styles.field}><label htmlFor="studio-draft-group">用途分组</label><input id="studio-draft-group" value={activeDraft.groupName} maxLength={80} onChange={(event) => updateDraft((current) => ({ ...current, groupName: event.target.value }))} /></div>
                     </div>
-                    {activeDraft.recipe?.instruction && <div className={styles.callout}><span>{activeDraft.recipe.instruction}</span></div>}
                     {activeDraft.recipe?.fields.length ? (
                       <div className={styles.fieldGrid}>
                         {activeDraft.recipe.fields.map((field) => {
@@ -1569,10 +1635,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       </div>
                     ) : null}
                     <div className={styles.field}>
-                      <label htmlFor="studio-prompt">提示词</label>
-                      <textarea id="studio-prompt" value={activeDraft.prompt} onPaste={(event) => { void pasteImage(event); }} onChange={(event) => updateDraft((current) => ({ ...current, prompt: event.target.value }))} placeholder="写下要直接使用或整理的提示词" />
+                      <label htmlFor="studio-prompt">本次需求</label>
+                      <textarea id="studio-prompt" value={activeDraft.prompt} maxLength={12000} onPaste={(event) => { void pasteImage(event); }} onChange={(event) => updateDraft((current) => ({ ...current, prompt: event.target.value }))} placeholder="这次想拍什么？描述主体、场景、动作或镜头" />
                       {activeDraft.recipe?.fields.length ? <span className={styles.fieldHint}>已填写的模板字段会随本次操作保存。</span> : null}
                     </div>
+                    <details className={styles.sectionRule}>
+                      <summary>参考素材与视频参数（可选）</summary>
+                      <p className={styles.fieldHint}>文案生成仅使用文字说明，不读取图片内容。素材与参数供后续视频生成使用。</p>
                     <section className={styles.sectionRule} aria-label="参考素材">
                       <div className={styles.sectionTitle}><span>素材与模板槽位</span>{recipeSlots.length === 0 && <button className={styles.quietButton} type="button" onClick={() => { setPickerSlotKey(null); setPickerOpen(true); }} disabled={assetBusy || activeDraft.assets.length >= 12}><ImagePlus size={15} />添加素材</button>}</div>
                       {missingSlots.length > 0 && <div className={`${styles.callout} ${styles.calloutWarning}`}>仍缺少必填素材：{missingSlots.map((slot) => slot.label).join('、')}</div>}
@@ -1620,17 +1689,19 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                         {([['generateAudio', '生成音频'], ['returnLastFrame', '返回尾帧'], ['watermark', '添加水印'], ['draft', '样片模式']] as const).map(([key, label]) => <label className={styles.owner} key={key}><input type="checkbox" checked={Boolean(activeDraft.parameters[key])} onChange={(event) => updateParameter(key, event.target.checked)} />{label}</label>)}
                       </div>
                     </section>
+                    </details>
                     <section className={styles.sectionRule}>
-                      <div className={styles.sectionTitle}><span>提示词操作</span><span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span></div>
+                      <div className={styles.sectionTitle}><span>文案生成</span><span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span></div>
                       {fieldErrors.length > 0 && <span className={styles.fieldError}>还有 {fieldErrors.length} 项模板输入未完成。</span>}
                       <div className={styles.promptTools}>
-                        <button className={styles.primaryButton} type="button" disabled={Boolean(directBlocker)} title={directBlocker || undefined} onClick={() => void submitRun('direct')}><Check size={15} />直接套用</button>
-                        <button className={styles.quietButton} type="button" disabled={Boolean(llmBlocker)} title={llmBlocker || 'AI整理提示词'} onClick={() => void submitRun('llm')}><Sparkles size={15} />AI整理</button>
+                        <button className={styles.primaryButton} type="button" disabled={Boolean(llmBlocker)} title={llmBlocker || undefined} onClick={() => void submitRun('llm')}><Sparkles size={15} />生成文案</button>
+                        <button className={styles.quietButton} type="button" disabled={Boolean(directBlocker)} title={directBlocker || undefined} onClick={() => void submitRun('direct')}><Check size={15} />直接使用输入</button>
                         {capabilities && !capabilities.llmEnabled && <span className={styles.fieldHint}>{capabilities.llmReason || 'AI整理当前不可用；可以继续手写和直接套用。'}</span>}
                         {capabilityError && <span className={styles.fieldHint}>{capabilityError}</span>}
                       </div>
+                      {capabilities?.billingLabel && <p className={styles.fieldHint}>{capabilities.billingLabel}</p>}
                       {directBlocker && <p role="status" className={styles.fieldError}>直接套用：{directBlocker}</p>}
-                      {llmBlocker && <p role="status" className={styles.fieldError}>AI整理：{llmBlocker}</p>}
+                      {llmBlocker && <p role="status" className={styles.fieldError}>生成文案：{llmBlocker}</p>}
                       {pendingRun && requestUnknown && (
                         <div className={`${styles.callout} ${styles.calloutWarning}`} role="alert">
                           <span>这次请求的结果还未确认。先查询，未查到后才能按原请求号重试。</span>
@@ -1646,10 +1717,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       <button type="button" role="tab" aria-selected={resultTab === 'video'} onClick={() => setResultTab('video')}>视频</button>
                     </div>
                     {resultTab === 'prompt' ? (
-                      <div className={styles.resultPanel}>
-                        <div className={styles.ownerLine}><span>当前文本</span><button className={styles.iconButton} type="button" title="复制提示词" aria-label="复制提示词" disabled={!activeDraft.prompt} onClick={() => void copyText(activeDraft.prompt)}><Copy size={14} /></button></div>
-                        <p className={styles.runPrompt}>{activeDraft.prompt || '填写提示词后，可直接套用或整理。'}</p>
-                      </div>
+                      moduleRun ? <VideoPromptResult key={moduleRun.id} run={moduleRun} userId={userId} busy={working} onContinue={text => void continueGeneration(moduleRun, text)} onRegenerate={() => void submitRun('llm')} onHistory={() => setView('prompts')} />
+                      : <div className={styles.emptyState}>暂无文案结果</div>
                     ) : (
                       <div className={styles.resultPanel}>
                         {(runs.filter((run) => run.draftId === activeDraft.id)).map((run) => (
@@ -1658,7 +1727,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                             <p className={styles.runPrompt}>{run.prompt || (run.status === 'uncertain' ? '上游结果待核对，请先查询记录。' : '尚无可展示的提示词结果。')}</p>
                             <div className={styles.promptTools}>
                               <button className={styles.listAction} type="button" onClick={() => void openRun(run)}>查看记录</button>
-                              {canContinue(run) && <button className={styles.listAction} type="button" onClick={() => continueGeneration(run)}>继续生成</button>}
+                              {run.status === 'succeeded' && <button className={styles.listAction} type="button" onClick={() => void openRun(run)}>编辑文案后继续</button>}
                             </div>
                           </article>
                         ))}
@@ -1687,11 +1756,11 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           ) : (
             activeRunDetail ? (
               <RunDetailPanel
+                userId={userId}
                 detail={activeRunDetail}
                 busy={working}
-                onCopy={() => void copyText(activeRunDetail.run.prompt || activeRunDetail.snapshot.prompt)}
                 onCopyToDraft={() => void copyRunToDraft(activeRunDetail)}
-                onContinue={() => continueGeneration(activeRunDetail.run)}
+                onContinue={text => void continueGeneration(activeRunDetail.run, text)}
                 onCancel={() => void cancelRun(activeRunDetail.run)}
                 onRefresh={() => void refreshRunDetail(activeRunDetail.run)}
               />
@@ -1722,6 +1791,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           </section>
         </div>
       )}
+      {contextEditor && <VideoContextEditor key={contextEditor.draftId || 'global'} draftId={contextEditor.draftId} onClose={() => setContextEditor(null)} />}
 
       {createTemplateOpen && activeDraft && (
         <div className={styles.dialogBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateTemplateOpen(false); }}>
@@ -1761,7 +1831,7 @@ function TemplateOverview({
         <div><h2>{template.name || '未命名模板'}</h2><p>{template.description || '暂无说明'} · {template.groupName || '未分组'} · {isLegacy ? '旧版模板' : template.version ? `版本 V${template.version.number}` : '尚未发布'}</p></div>
         <div className={styles.headerActions}>
           <button className={styles.quietButton} type="button" onClick={onBack}>返回模板列表</button>
-          {!isLegacy && template.canManage && <button className={styles.quietButton} type="button" onClick={onEdit}>编辑草稿</button>}
+          {!isLegacy && template.canManage && <button className={styles.quietButton} type="button" onClick={onEdit}><Settings size={15} />模块上下文</button>}
           {!isLegacy && template.canPublish && <button className={styles.primaryButton} type="button" disabled={busy || !recipe} title={!recipe ? '模板配方尚未完成' : '发布当前版本'} onClick={onPublish}>发布版本</button>}
           {!isLegacy && template.canManage && template.status !== 'archived' && <button className={`${styles.quietButton} ${styles.dangerButton}`} type="button" disabled={busy} onClick={onArchive}><Archive size={15} />停用模板</button>}
           <button className={styles.primaryButton} type="button" disabled={!isLegacy && (busy || template.status === 'archived' || !recipe)} onClick={onApply}>{isLegacy ? '在原模板生成页使用' : busy ? '处理中' : '用此模板新建模块'}</button>
@@ -1776,7 +1846,6 @@ function TemplateOverview({
       ) : !recipe ? <div className={styles.calloutWarning}>模板尚无可用配方，不能直接套用或发布。</div> : (
         <div className={styles.templateRecipe}>
           <h3>模板内容</h3>
-          {recipe.instruction && <p className={styles.runPrompt}>{recipe.instruction}</p>}
           {recipe.fields.map((field) => <div className={styles.slotRow} key={field.key}><span>{field.label}{'required' in field && field.required ? ' · 必填' : ''}</span><span>{field.type === 'select' ? field.options.join(' / ') : field.type}</span></div>)}
           {recipe.assetSlots.map((slot) => <div className={styles.slotRow} key={slot.key}><span>{slot.label}{slot.required ? ' · 必填' : ''}</span><span>{slot.role === 'first' ? '首帧' : slot.role === 'last' ? '尾帧' : '参考素材'} · {slot.types.join('、')}</span></div>)}
           {recipe.fields.length === 0 && recipe.assetSlots.length === 0 && <span className={styles.fieldHint}>无额外字段或素材槽位。</span>}
@@ -1799,18 +1868,17 @@ function TemplateOverview({
 }
 
 function RunDetailPanel({
-  detail, busy, onCopy, onCopyToDraft, onContinue, onCancel, onRefresh,
+  detail, userId, busy, onCopyToDraft, onContinue, onCancel, onRefresh,
 }: {
   detail: RunDetail;
+  userId: string;
   busy: boolean;
-  onCopy: () => void;
   onCopyToDraft: () => void;
-  onContinue: () => void;
+  onContinue: (prompt: string) => void;
   onCancel: () => void;
   onRefresh: () => void;
 }) {
   const { run, snapshot, tasks } = detail;
-  const prompt = run.prompt || snapshot.prompt;
   const owner = snapshot.owner;
   const failedRunSummary = run.error ? '可以复用当时输入，调整后再次处理。' : '失败原因暂未提供。';
   return (
@@ -1820,18 +1888,14 @@ function RunDetailPanel({
         <div className={styles.headerActions}>
           <button className={styles.quietButton} type="button" disabled={busy} onClick={onRefresh}>刷新状态</button>
           {run.status === 'queued' && <button className={`${styles.quietButton} ${styles.dangerButton}`} type="button" disabled={busy} onClick={onCancel}>取消排队任务</button>}
-          <button className={styles.quietButton} type="button" onClick={onCopy}>复制提示词</button>
-          <button className={styles.quietButton} type="button" disabled={busy} title="按历史快照中的输入创建新模块" onClick={onCopyToDraft}>复用输入</button>
-          {run.status === 'succeeded' && <button className={styles.primaryButton} type="button" disabled={!prompt || busy} onClick={onContinue}>继续生成</button>}
+          <button className={styles.quietButton} type="button" disabled={busy} title="按历史输入创建新模块，再生成新文案" onClick={onCopyToDraft}>复用输入再生成</button>
         </div>
       </div>
-      <div className={styles.ownerLine}><span className={`${styles.status} ${statusClass(run.status)}`}>{statusLabel(run.status)}</span><span>{run.mode === 'llm' ? 'AI整理' : '直接套用'}</span>{snapshot.templateVersion && <span>{snapshot.templateVersion.templateName} · V{snapshot.templateVersion.versionNumber || '未知'}</span>}{owner && <UserIdentityBadge size="sm" user={{ name: owner.displayName, username: owner.username }} />}</div>
+      <div className={styles.ownerLine}><span className={`${styles.status} ${statusClass(run.status)}`}>{statusLabel(run.status)}</span><span>{snapshot.sourceRunId ? '最终文案' : run.mode === 'llm' ? '文案生成' : '直接使用'}</span>{snapshot.templateVersion && <span>{snapshot.templateVersion.templateName} · V{snapshot.templateVersion.versionNumber || '未知'}</span>}{owner && <UserIdentityBadge size="sm" user={{ name: owner.displayName, username: owner.username, avatar_url: owner.avatarUrl }} />}</div>
+      {snapshot.sourceRunId && <a className={styles.calloutLink} href={`/template-studio?type=video&view=prompts&runId=${encodeURIComponent(snapshot.sourceRunId)}`}>查看原始文案</a>}
       {run.status === 'uncertain' && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status"><strong>结果待确认。</strong><span>目前不能确认上游是否已处理；请先刷新或联系管理员核对，不要直接重复提交。</span></div>}
-      {run.status === 'failed' && <div className={`${styles.callout} ${styles.calloutError}`} role="status"><strong>本次处理失败。</strong><span>{failedRunSummary}</span></div>}
-      <section className={styles.templateRecipe}>
-        <h3>历史提示词</h3>
-        <p className={styles.runPrompt}>{prompt || '这条记录没有可展示的提示词。'}</p>
-      </section>
+      {run.status === 'failed' && <div className={`${styles.callout} ${styles.calloutError}`} role="status"><strong>本次处理失败。</strong><span>{run.error || failedRunSummary}</span></div>}
+      <VideoPromptResult key={run.id} run={run} userId={userId} busy={busy} onContinue={onContinue} />
       <section className={styles.templateRecipe}>
         <h3>当时填写的内容</h3>
         {Object.entries(snapshot.input.values).map(([key, value]) => <div className={styles.slotRow} key={key}><span>{key}</span><span>{typeof value === 'string' ? value : JSON.stringify(value)}</span></div>)}

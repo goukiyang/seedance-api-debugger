@@ -6,6 +6,8 @@ import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/vid
 import { authorizeStudioAssets } from './assets';
 import { encodeCursor, makeFingerprint, parseCursor } from './common';
 import { getStudioCapabilities } from './capabilities';
+import { readVideoGlobalContext, readVideoModuleContext } from './context';
+import { publicRunSnapshot, visibleRunPrompt } from './projection';
 import { StudioError } from './errors';
 import { ensureStudioSnapshotSourceStillUsable } from './handoff';
 import {
@@ -28,15 +30,17 @@ import type {
 
 type RunWithOwner = Prisma.VideoStudioRunGetPayload<{ include: { owner: { select: { id: true; username: true; name: true; account_type: true } } } }>;
 
-function dto(row: { id: string; draft_id: string; request_id: string; source: string; mode: string; status: string; prompt: string | null; error_message: string | null; created_at: Date; updated_at: Date }, projection: { thumbnailUrl?: string | null; taskCount?: number } = {}): StudioRunDto {
+function dto(row: { id: string; draft_id: string; request_id: string; source: string; mode: string; status: string; prompt: string | null; snapshot_json: string; error_message: string | null; created_at: Date; updated_at: Date }, projection: { thumbnailUrl?: string | null; taskCount?: number } = {}): StudioRunDto {
+  const owner = decodeSnapshot(row.snapshot_json).owner;
   return {
+    owner: { displayName: owner.displayName, avatarUrl: owner.avatarUrl || null },
     id: row.id,
     draftId: row.draft_id,
     requestId: row.request_id,
     source: row.source as StudioRunDto['source'],
     mode: row.mode as StudioRunDto['mode'],
     status: row.status as StudioRunStatus,
-    prompt: row.prompt,
+    prompt: visibleRunPrompt(row),
     error: row.error_message,
     thumbnailUrl: projection.thumbnailUrl || null,
     taskCount: projection.taskCount || 0,
@@ -45,7 +49,7 @@ function dto(row: { id: string; draft_id: string; request_id: string; source: st
   };
 }
 
-function draftSnapshot(row: any, user: SessionUser): StudioRunSnapshot {
+function draftSnapshot(row: any, user: SessionUser, mode: 'direct' | 'llm'): StudioRunSnapshot {
   let template: StudioRunSnapshot['templateVersion'] = null;
   let recipe: StudioRunSnapshot['recipe'] = null;
   if (row.template_snapshot_json) {
@@ -58,11 +62,10 @@ function draftSnapshot(row: any, user: SessionUser): StudioRunSnapshot {
       throw new StudioError('草稿模板快照无法读取', 500, 'UNAVAILABLE');
     }
   }
-  const values = normalizeValues(JSON.parse(row.values_json), recipe);
-  const assets = normalizeAssets(JSON.parse(row.assets_json), recipe, true);
+  const values = normalizeValues(JSON.parse(row.values_json), recipe, { mode: mode === 'llm' ? 'draft' : 'strict' });
+  const assets = normalizeAssets(JSON.parse(row.assets_json), recipe, mode === 'direct');
   const parameters = normalizeParameters(JSON.parse(row.parameters_json));
   const prompt = [
-    recipe?.instruction,
     ...(recipe?.fields || []).flatMap((field) => values[field.key] === undefined ? [] : [`${field.label}: ${String(values[field.key])}`]),
     row.prompt?.trim(),
   ].filter((part): part is string => typeof part === 'string' && Boolean(part.trim())).join('\n\n');
@@ -75,7 +78,7 @@ function draftSnapshot(row: any, user: SessionUser): StudioRunSnapshot {
     prompt,
     parameters,
     assets,
-    owner: { userId: user.id, username: user.username, displayName: user.name || user.username, accountType: user.account_type },
+    owner: { userId: user.id, username: user.username, displayName: user.name || user.username, avatarUrl: user.avatar_url || null, accountType: user.account_type },
   };
 }
 
@@ -200,7 +203,14 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
   const draft = await prisma.videoStudioDraft.findFirst({ where: { id: input.draftId, owner_user_id: user.id } });
   if (!draft) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
   if (draft.revision !== input.revision) throw new StudioError('草稿内容已变化，请刷新后重新提交', 409, 'CONFLICT', { currentRevision: draft.revision });
-  const snapshot = draftSnapshot(draft, user);
+  const snapshot = draftSnapshot(draft, user, input.mode);
+  const [globalContext, moduleContext] = await Promise.all([
+    readVideoGlobalContext(), readVideoModuleContext(draft.id, snapshot.recipe?.instruction || ''),
+  ]);
+  snapshot.privateContext = { global: globalContext.context, module: moduleContext.context, globalRevision: globalContext.revision, moduleRevision: moduleContext.revision };
+  if (snapshot.prompt.length + globalContext.context.length + moduleContext.context.length > TEMPLATE_STUDIO_LIMITS.llmInput) {
+    throw new StudioError('上下文与本次输入合计过长，请缩短后再生成', 400, 'INVALID');
+  }
   if (snapshot.templateVersion?.templateSource === 'legacy') {
     throw new StudioError('旧版模板请在原生成流程中使用', 409, 'CONFLICT', {
       applyMode: 'legacy-route',
@@ -314,7 +324,7 @@ export async function getStudioRun(user: SessionUser, id: string): Promise<Studi
     };
   }));
   const thumbnails = await projectRunList([{ id: row.id }], user.id);
-  return { run: dto(row, thumbnails.get(row.id)), snapshot, tasks: runTasks };
+  return { run: dto(row, thumbnails.get(row.id)), snapshot: publicRunSnapshot(snapshot), tasks: runTasks };
 }
 
 export async function cancelStudioRun(user: SessionUser, id: string) {

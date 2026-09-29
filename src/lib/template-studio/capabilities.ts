@@ -27,6 +27,7 @@ export async function getStudioCapabilities(user: SessionUser): Promise<StudioCa
       : '文字模型服务未配置或已停用。';
 
   return {
+    billingLabel: '文案不扣本站点数；上游文字费用由平台承担。视频生成另行计费。',
     llmEnabled,
     llmReason,
     canManageTemplates,

@@ -4,6 +4,7 @@ import { serializeGenerationTemplate, TEMPLATE_INCLUDE } from '@/lib/templates/w
 import type { SessionUser } from '@/lib/auth/session';
 import { encodeCursor, parseCursor } from './common';
 import { StudioError } from './errors';
+import { publicRecipe } from './projection';
 import { normalizeDescription, normalizeGroupName, normalizeName, normalizeRecipe, parseJsonRecord } from './validation';
 import type {
   CreateStudioTemplateRequest,
@@ -51,7 +52,7 @@ function serializeStudioTemplate(row: any, user: SessionUser): StudioTemplateDto
     applyMode: 'studio-draft',
     applyUrl: null,
     version: row.published_version ? versionSummary(row.published_version) : null,
-    recipe: visibleRecipe ? parseRecipe(visibleRecipe) : null,
+    recipe: visibleRecipe ? (canManage ? parseRecipe(visibleRecipe) : publicRecipe(parseRecipe(visibleRecipe))) : null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };

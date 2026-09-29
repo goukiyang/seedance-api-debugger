@@ -97,8 +97,8 @@
 .prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; margin: 10px 0 6px; }
 .resultActions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .resultMeta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; margin: 0 0 8px; color: #adb6bd; font-size: 12px; line-height: 1.35; }
-.resultMeta span:first-child { color: #d8f4ed; font-weight: 800; cursor: help; }
-.resultOwner { display: flex; min-width: 0; margin-bottom: 8px; }
+.resultMeta > span[title] { color: #d8f4ed; font-weight: 800; cursor: help; }
+.resultOwner { display: inline-flex; min-width: 0; max-width: 120px; }
 .resultOwner :global(.user-identity-badge) { max-width: 100%; }
 .resultOwner :global(.user-identity-name) { color: #dce2e7; }
 .resultActions button { padding: 5px 8px; font-size: 13px; }
