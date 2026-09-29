@@ -1,9 +1,9 @@
 # 视频提示词模板工单
 
-- 文档版本：1.0.0
+- 文档版本：1.1.0
 - 日期：2026-09-30
 - 项目：video-api-debugger / SD2
-- 状态：实施中。2026-09-30已核对线上v0.23.0 / 5492284与当前分支一致，尚未发布本单改动。
+- 状态：已部署v0.24.0，待用户手动验收。发布源码ea44dcb，部署检查已完成，未进行生成或浏览器功能验收。
 - 正式入口：https://sd2.youdooart.com/template-studio?type=video
 - 已核对源码位置：`/Users/gouki-youdoo/.codex/worktrees/banana-image-channel/video-api-debugger`
 - 当前所见分支：`codex/studio-result-identity-20260929`。执行前重新核对实际有效源码、生产版本和其他线程改动，不能按历史路径盲目发布。
@@ -57,11 +57,11 @@
 | 编号 | 内容 | 完成标准 | 状态 |
 | --- | --- | --- | --- |
 | VP01 | 对齐当前图片规则与视频链路 | 明确两层上下文的作用域、编辑权限、保存行为及可复用入口；列清与本单有冲突的旧行为 | 已完成源码核对 |
-| VP02 | 两层上下文设置与持久化 | 有真实可用入口，手动保存且刷新保留；视频与图片隔离，用户/模板边界正确 | 实施中 |
-| VP03 | 文案输入和生成结果界面 | 一个主要输入框和“生成文案”按钮；草稿可恢复；结果可编辑、复制、重生成且保留历史 | 实施中 |
-| VP04 | 服务端调用及安全投影 | 真正接到现有文字 worker，后台组合上下文；普通接口不返回内部原文；异常状态明确且请求防重 | 实施中 |
-| VP05 | 视频后续衔接 | 使用用户最终编辑文本，不误用旧生成结果；不自动创建视频；保留源文案关联和返回入口 | 实施中 |
-| VP06 | 发布与手动验收交接 | 必要构建/版本/健康检查、远端提交和回退保护完成；回执写“已部署，待用户手动验收” | 未开始 |
+| VP02 | 两层上下文设置与持久化 | 有真实可用入口，手动保存且刷新保留；视频与图片隔离，用户/模板边界正确 | 已实现部署，待用户手动验收 |
+| VP03 | 文案输入和生成结果界面 | 一个主要输入框和“生成文案”按钮；草稿可恢复；结果可编辑、复制、重生成且保留历史 | 已实现部署，待用户手动验收 |
+| VP04 | 服务端调用及安全投影 | 真正接到现有文字 worker，后台组合上下文；普通接口不返回内部原文；异常状态明确且请求防重 | 已实现部署，待用户手动验收 |
+| VP05 | 视频后续衔接 | 使用用户最终编辑文本，不误用旧生成结果；不自动创建视频；保留源文案关联和返回入口 | 已实现部署，待用户手动验收 |
+| VP06 | 发布与手动验收交接 | 必要构建/版本/健康检查、远端提交和回退保护完成；回执写“已部署，待用户手动验收” | 发布检查及交接完成，功能待用户手动验收 |
 
 顺序：VP01 → VP02/VP03 → VP04 → VP05 → VP06。先完成本批修改及配套，再统一发布必需检查；不要边改边发小补丁。
 
@@ -81,7 +81,7 @@
 | `tasks/todo/2026-09-29-unified-image-video-template-workbench.md` | 历史方案及实现记录，仅用于追溯；与本单冲突时按最新已确认的简化需求执行 |
 | `docs/materials/index.md` | 既有资料入口；本单无新增媒体归档 |
 
-开源备选：Vercel AI SDK（https://github.com/vercel/ai）提供文字及结构化结果能力。本单优先复用项目现有接口，不安装或替换 SDK；此前仅查看仓库说明，未完成其源码、许可证及运行兼容性核验，不宣称已验证可用。
+开源参考：已阅读[Vercel AI SDK结构化输出实现](https://github.com/vercel/ai/blob/main/packages/ai/src/generate-text/output.ts)的JSON解析和类型校验思路。本单复用项目现有接口，不安装或复制SDK，不宣称已验证SDK运行兼容性。
 
 ## 7. 手动验收清单
 
@@ -117,3 +117,47 @@
 - 开源：已阅读Vercel AI SDK的`packages/ai/src/generate-text/output.ts`中JSON解析与类型校验实现。仅借鉴结构化输出校验思路，继续复用现有Musk调用与worker，不安装/复制SDK实现。
 - 安全：输出严格单字段JSON；命中内部规则连续片段时拦截，不返回原始输出。此规则不能保证识别所有转述/编码泄露，上下文不得含密钥，真实权限和生成验收留给用户。普通API白名单投影与后续交接要做静态全链核对。
 - Git计划：沿用`codex/studio-result-identity-20260929`，聚焦本单文件及头像同行补充，保护现有工单；候选版本0.24.0。统一候选构建后推送origin，保留v0.23.0回退tag与服务器构建；按已核对部署流程发布，无迁移、无媒体覆盖。默认不浏览器验收、不派审查线程。
+
+## 10. 发布回执（2026-09-30）
+
+已部署，待用户手动验收。VP01–VP06逐项状态见第5节，手动检查范围见第7节。
+
+- 入口：https://sd2.youdooart.com/template-studio?type=video 。版本`0.24.0`，源码`ea44dcbb5926fca3b9c3d59cf5cee13381843963`，BUILD_ID `oYs1ViC2yre1Yw_BHj7Lp`。
+- 实现提交`72c303b`及同批修正`ea44dcb`已推送`origin/codex/studio-result-identity-20260929`，远端HEAD已核对。回退tag `rollback/2026-09-30-before-video-prompts`已推送，指向`5492284173c0516a20d67dd2dd38d2c92274ab13`（v0.23.0）。
+- 发布检查：`npx tsc --noEmit`、`git diff --check`通过；服务器`NEXT_DIST_DIR=.next-prod-candidate npm run build`及内置检查通过。原有img lint警告不作为功能通过证据。
+- 运行检查：`sd2-gray`、`sd2-image-studio`、`sd2-template-prompts`三个服务active；公网`/api/release`返回0.24.0，公网config/login/模板chunk `page-983b9b18f30c4e55.js`均200，源站config为200，`.deployed-commit`与发布源码一致。
+- 持久数据：schema未变，无数据库迁移，上传/视频/storage持久目录链接与可写权限已检查；构建使用数据库快照，快照完整性检查通过，不覆盖线上业务库。
+- 授权配置：新增`TEMPLATE_STUDIO_TEXT_ENABLED=true`，开启既有文字worker。沿用线上已配置的`gpt-5.5`与既有线路，不改模型、密钥或视频费用；文案不扣本站点数，上游费用由平台承担。启用前没有排队/运行中的文字任务，本轮未发起付费调用。
+- 更新提示：沿用已有ReleaseNotice，版本唯一来源及本次摘要同步；旧客户端发现/稍后/刷新等实际交互未执行浏览器验收。
+
+### 文件与实现
+
+以下路径相对于本工单顶部的源码目录。
+
+| 文件 | 本轮修改 |
+| --- | --- |
+| `src/lib/template-studio/context.ts`（新增） | 独立视频通用配置、按draft隔离的模块配置、继承与复制、权限及冲突保护；复用PlatformSetting |
+| `src/app/api/template-studio/context/route.ts`（新增） | 现有登录保护下的设置读写，普通响应不暴露无权读取的规则 |
+| `src/components/template-studio/VideoContextEditor.tsx`（新增） | 两层规则手动保存弹窗，复制上下文仅管理员 |
+| `src/components/template-studio/VideoPromptResult.tsx`（新增） | 可编辑结果、个人编辑草稿恢复、复制最终文本、状态反馈与后续入口 |
+| `src/components/template-studio/VideoTemplateWorkbench.tsx` | 本次需求主输入、生成/直接使用、轮询与防重恢复、模块历史、上下文入口、最终文本交接；保留侧栏结构与滚动 |
+| `src/components/template-studio/template-studio.module.css` | 输入/结果布局、同一行身份信息、可折叠附加参数 |
+| `src/lib/template-studio/projection.ts`（新增） | 普通接口安全投影、历史直接提示词保护、内部规则复述检查 |
+| `src/lib/template-studio/templates.ts`、`drafts.ts` | 模板/草稿投影、服务端保留真实配置、复制模块上下文，不改历史数据 |
+| `src/lib/template-studio/runs.ts`、`types.ts` | 私有版本快照、输入/素材校验、结果及身份投影、保留原幂等链路 |
+| `src/lib/template-studio/worker.ts` | 服务端分离规则和本次输入、结构化结果与复述拦截，不返回被拦截原始输出 |
+| `src/lib/template-studio/handoff.ts`、`src/app/api/template-studio/runs/[id]/handoff/route.ts` | 最终编辑文本保存为幂等的新修订，原记录不覆盖，授权后交接，不创建视频或冻结视频点数 |
+| `src/lib/template-studio/capabilities.ts` | 服务能力及平台承担文字费用文案 |
+| `src/app/image-studio/studio.tsx`、`studio.module.css` | 图片结果头像和姓名并入模型信息行；视频结果身份同样不独占一行 |
+| `package.json`、`package-lock.json`、`src/lib/release.ts` | 版本0.24.0与更新摘要，未增改依赖 |
+| `docs/handoffs/video-prompt-template-work-order.md`、`tasks/todo.md` | 目标、授权、VP状态、发布证据和风险回写 |
+
+[本轮统一代码差异](https://github.com/goukiyang/seedance-api-debugger/compare/de7b793c78d8af3a25128786e8cc21737a443d66...ea44dcbb5926fca3b9c3d59cf5cee13381843963)。本节发布回执属于随后文档提交，不重新部署或抬应用版本。
+
+### 回退与剩余风险
+
+- 服务器回退目录：`/srv/video-api-debugger/backups/video-prompts-ea44dcbb5926fca3b9c3d59cf5cee13381843963`，包含旧source/live-build、原发布提交和开关原状态（absent）。回退旧代码前必须先停文字worker并关闭/恢复文字开关为原先未启用状态；旧代码没有本轮隐私保护，不能保留开关开启直接回退。不得用整库恢复覆盖上线后的业务记录。
+- 已静态核对模板、草稿、运行、历史及handoff投影，管理权限沿用原规则；真实普通用户权限、生成成功/失败/未知响应、刷新恢复、最终文案一致性及侧栏/头像实际布局尚未验收。
+- 原文复述拦截不能保证识别所有改写、编码或语义泄露，重复常用规则也可能误拦截；上下文绝不能存密钥。若手动验收发现泄露，应立即关闭文字功能并处理，不以本次构建通过否定风险。
+- 现有文字调用只收到素材类型/用途描述，并未接入真正读图；不自动发起视频任务。模块修改只影响当前模块，不更新共享模板定义。
+- 费用开关是用户明确授权的唯一生产配置写入；无新模型、迁移、生产资料覆盖、付费测试或权限扩大。守门员保留“缺少真实功能证据”的提醒，按项目规则由用户手动验收；无本轮分类误判。
