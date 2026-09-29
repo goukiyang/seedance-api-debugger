@@ -808,7 +808,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     finally { deleteLock.current = false; setDeleting(false); }
   }
   async function copyTaskContext(task: StudioTask) {
-    if (!task.snapshot?.sourceAvailable) return;
+    if (!isAdmin || !task.snapshot?.sourceAvailable) return;
     setCopyFeedback({ id: task.id, text: '复制中…' });
     const copied = await copyStudioText(copyStudioTaskText(task));
     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
@@ -1045,7 +1045,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
             {task.asset && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
             {task.asset && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
             {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="重新生成" aria-label="重新生成" onClick={() => restoreTask(task)}><RefreshCw size={15} /></button>}
-            {task.snapshot?.sourceAvailable && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
+            {isAdmin && task.snapshot?.sourceAvailable && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
           </div>
           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
         </article>)}</div>

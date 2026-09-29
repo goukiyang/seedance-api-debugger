@@ -208,7 +208,7 @@ export async function claimStudioTask() {
   return changed.count ? { ...candidate, status: 'running', lease_token: leaseToken } : null;
 }
 
-export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string) {
+export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string, isAdmin = false) {
   if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const rows = await prisma.imageStudioTask.findMany({ where: { owner_id: ownerId, deleted_at: null,
     ...(moduleId ? moduleId === defaultStudioModuleId(ownerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] } : { module_id: moduleId } : {}) },
@@ -231,7 +231,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     providerCostUsd: task.provider_cost_usd,
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,
     createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
-    snapshot: publicStudioSnapshot(task, assetById),
+    snapshot: publicStudioSnapshot(task, assetById, isAdmin),
     asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
   })), nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
@@ -279,7 +279,7 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
   return { tasks: items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
-function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>) {
+function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean) {
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
   const snapshotReferences = Array.isArray(parsed.referenceImages) ? parsed.referenceImages : [];
@@ -320,8 +320,8 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
     aspectRatioSource: typeof parsed.aspectRatioSource === 'string' ? parsed.aspectRatioSource : 'model-default',
     resolution: typeof parsed.resolution === 'string' ? parsed.resolution : null,
     outputSize: typeof parsed.outputSize === 'string' ? parsed.outputSize : task.output_size,
-    globalContext: typeof parsed.globalContext === 'string' ? parsed.globalContext : '',
-    moduleContext: typeof parsed.moduleContext === 'string' ? parsed.moduleContext : '',
+    globalContext: isAdmin && typeof parsed.globalContext === 'string' ? parsed.globalContext : '',
+    moduleContext: isAdmin && typeof parsed.moduleContext === 'string' ? parsed.moduleContext : '',
     unitCredits,
     sourceAvailable,
     referenceImages,
