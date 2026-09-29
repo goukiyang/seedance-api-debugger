@@ -3,7 +3,8 @@ import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudio
 import { uploadAsset } from '@/lib/assets/storage';
 import { claimStudioTask, finishStudioTask } from './tasks';
 import { requestStudioImages, StudioProviderError } from './provider';
-import { normalizeStudioImage, readStudioImage } from './media';
+import { normalizeStudioImage, normalizeGeneratedStudioImage, readStudioImage, StudioImageDeliveryError } from './media';
+import { MAX_STUDIO_GENERATED_BASE64 } from './limits';
 import { completeToolFlowTask } from '@/lib/tools/toolflow-runtime';
 
 export async function processStudioTask(generate: typeof requestStudioImages = requestStudioImages) {
@@ -30,8 +31,10 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
       prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
       count: 1, images, size: task.output_size || undefined, ratio: task.aspect_ratio, quality: task.quality, signal: AbortSignal.timeout(300000) });
     stage = 'normalize';
-    if (result.images[0].length > 28 * 1024 * 1024) throw new Error('生成图片过大');
-    const bytes = await normalizeStudioImage(Buffer.from(result.images[0], 'base64'));
+    if (result.images[0].length > MAX_STUDIO_GENERATED_BASE64) {
+      throw new StudioImageDeliveryError('generated_base64_size_limit', result.images[0].length);
+    }
+    const bytes = await normalizeGeneratedStudioImage(Buffer.from(result.images[0], 'base64'));
     stage = 'save';
     const asset = await uploadAsset(bytes, `image-${task.id}.png`, 'image/png', task.owner_id);
     stage = 'settle';
@@ -39,8 +42,11 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
     await completeToolFlowTask(task.id);
   } catch (error) {
     const detail = error instanceof StudioProviderError ? error : null;
+    const mediaError = error instanceof StudioImageDeliveryError ? error : null;
     console.error('[image-studio]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage,
-      code: detail?.code || 'processing_failed', httpStatus: detail?.status, elapsedMs: Date.now() - started }));
+      code: detail?.code || mediaError?.code || 'processing_failed', imageBytes: mediaError?.bytes,
+      model: task.model, outputSize: task.output_size,
+      httpStatus: detail?.status, elapsedMs: Date.now() - started }));
     const deliveryFailed = detail?.stage === 'download' || ['normalize', 'save', 'settle'].includes(stage);
     await finishStudioTask(task, providerStarted ? 'uncertain' : 'failed', { error: providerStarted
       ? deliveryFailed

@@ -2,6 +2,7 @@
 
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
 |---|---|---|---|---|---|
+| 2026-09-29 | baPro 4K 保存失败 / codex-clipboard-9d91fe74-e132-4ec2-a2cc-8b23064f474e.png | 用户本轮截图 / SD2 | 上游已返回但本站未交付；B01根因调查、B02模板自动保存、B03左栏同步反馈 | [原图](2026-09-29-banana-delivery/codex-clipboard-9d91fe74-e132-4ec2-a2cc-8b23064f474e.png) | 原始截图，无替代；已阅、归档cmp一致；不代表修复后验收 |
 | 2026-09-29 | sidebar-layout-fixture.png | 本轮Playwright / SD2 S01 | 两份真实CSS Module，合成侧栏与标题；用于核对不遮挡标题，不含用户提示词 | [布局截图](2026-09-29-sidebar/sidebar-layout-fixture.png) | 候选0.20.4，已打开核对；可再生辅助图不逐项hash，不替代线上证据 |
 | 2026-09-29 | 分组侧栏整理 / codex-clipboard-7f1d54ac-22df-4c68-ac05-41b6042e98c7.png | 用户本轮截图 / SD2 | 红框标记侧栏，标题遮挡、白色滚动条；保留侧栏与页面上下滚动，S01参考 | [原图](2026-09-29-sidebar/codex-clipboard-7f1d54ac-22df-4c68-ac05-41b6042e98c7.png) | 原始v0.20.3画面；图像已阅，复制cmp一致，不替代修复后验收 |
 | 2026-09-29 | banner-layout-fixture.png | 本轮Playwright / SD2 B01 | 真实CSS、合成图片，桌面横幅180px与下方工作区；不含用户私有内容，不替代线上截图 | [布局截图](2026-09-29-banner/banner-layout-fixture.png) | 候选0.20.3，已打开核对；可再生辅助截图不单独计算hash |

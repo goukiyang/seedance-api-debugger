@@ -1,6 +1,6 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
 import { readStudioImage } from './media';
-import { MAX_REFERENCE_IMAGES } from './limits';
+import { MAX_REFERENCE_IMAGES, MAX_STUDIO_GENERATED_BASE64 } from './limits';
 import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
 
 export type StudioImageInput = { bytes: Uint8Array; mimeType: string };
@@ -64,7 +64,7 @@ export async function requestStudioImages(params: {
   const images: string[] = [];
   for (const item of value.data) {
     if (typeof item?.b64_json === 'string' && item.b64_json.length) {
-      if (item.b64_json.length > 28 * 1024 * 1024) throw new StudioProviderError('response', 'image_too_large', response.status);
+      if (item.b64_json.length > MAX_STUDIO_GENERATED_BASE64) throw new StudioProviderError('response', 'image_too_large', response.status);
       images.push(item.b64_json);
     } else if (typeof item?.url === 'string' && item.url.length) {
       try {

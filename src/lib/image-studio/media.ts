@@ -6,6 +6,7 @@ import sharp from 'sharp';
 import { createHash, randomUUID } from 'node:crypto';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
+import { MAX_STUDIO_GENERATED_BYTES } from './limits';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -71,7 +72,7 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
     const file = await fs.realpath(path.resolve(process.cwd(), 'public', local.replace(/^\/+/, '')));
     if (!file.startsWith(`${root}${path.sep}`)) throw new Error('素材路径无效');
     const stat = await fs.stat(file);
-    if (stat.size > MAX_BYTES || !stat.isFile()) throw new Error('图片文件过大');
+    if (stat.size > MAX_STUDIO_GENERATED_BYTES || !stat.isFile()) throw new Error('图片文件过大');
     return fs.readFile(file);
   }
   const parsed = new URL(url);
@@ -91,7 +92,7 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
       let bytes = 0;
       response.on('data', chunk => {
         bytes += chunk.length;
-        if (bytes > MAX_BYTES) request.destroy(new Error('图片文件过大'));
+        if (bytes > MAX_STUDIO_GENERATED_BYTES) request.destroy(new Error('图片文件过大'));
         else chunks.push(chunk);
       });
       response.on('end', () => resolve(Buffer.concat(chunks)));
@@ -107,5 +108,31 @@ export async function normalizeStudioImage(bytes: Buffer) {
   if (!bytes.length || bytes.length > MAX_BYTES) throw new Error('图片文件大小无效');
   const png = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false }).png().toBuffer();
   if (png.length > MAX_BYTES) throw new Error('图片转换后超过 20MB，请压缩后重试');
+  return png;
+}
+
+export class StudioImageDeliveryError extends Error {
+  constructor(public code: string, public bytes: number) {
+    super(code);
+    this.name = 'StudioImageDeliveryError';
+  }
+}
+
+// Generated 4K images must not inherit the reference-upload 20MB ceiling.
+// Keep full resolution and lossless PNG; never silently downscale paid output.
+export async function normalizeGeneratedStudioImage(bytes: Buffer) {
+  if (!bytes.length || bytes.length > MAX_STUDIO_GENERATED_BYTES) {
+    throw new StudioImageDeliveryError('generated_input_size_limit', bytes.length);
+  }
+  let png: Buffer;
+  try {
+    png = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false })
+      .png({ compressionLevel: 6 }).toBuffer();
+  } catch {
+    throw new StudioImageDeliveryError('generated_image_decode_failed', bytes.length);
+  }
+  if (png.length > MAX_STUDIO_GENERATED_BYTES) {
+    throw new StudioImageDeliveryError('generated_png_size_limit', png.length);
+  }
   return png;
 }
