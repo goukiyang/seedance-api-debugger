@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { MAX_STUDIO_GENERATED_BYTES } from './limits';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -75,11 +76,41 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
     if (stat.size > MAX_STUDIO_GENERATED_BYTES || !stat.isFile()) throw new Error('图片文件过大');
     return fs.readFile(file);
   }
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || isPrivateNetworkHost(parsed.hostname)) throw new Error('图片地址不安全');
+  for (let attempt = 0; ; attempt++) {
+    try { return await downloadStudioImage(url, signal, 0); }
+    catch (error) {
+      const failure = classifyStudioDownloadError(error);
+      if (attempt >= 1 || !failure.retryable || signal?.aborted) throw failure;
+      try { await delay(1000, undefined, { signal }); }
+      catch { throw new StudioImageDownloadError('download_aborted'); }
+    }
+  }
+}
+
+export class StudioImageDownloadError extends Error {
+  constructor(public code: string, public status?: number, public retryable = false) {
+    super(code);
+    this.name = 'StudioImageDownloadError';
+  }
+}
+
+function classifyStudioDownloadError(error: unknown): StudioImageDownloadError {
+  if (error instanceof StudioImageDownloadError) return error;
+  const code = (error as NodeJS.ErrnoException)?.code;
+  if (code === 'ABORT_ERR') return new StudioImageDownloadError('download_aborted');
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return new StudioImageDownloadError('download_dns_failed', undefined, true);
+  if (code === 'ETIMEDOUT') return new StudioImageDownloadError('download_timeout', undefined, true);
+  if (code && /CERT|TLS|SSL/.test(code)) return new StudioImageDownloadError('download_tls_failed');
+  return new StudioImageDownloadError('download_network_failed', undefined, true);
+}
+
+async function downloadStudioImage(url: string, signal: AbortSignal | undefined, redirects: number): Promise<Buffer> {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new StudioImageDownloadError('download_invalid_url'); }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || isPrivateNetworkHost(parsed.hostname)) throw new StudioImageDownloadError('download_unsafe_url');
   const addresses = await lookup(parsed.hostname, { all: true, family: 4 });
   if (!addresses.length || addresses.some(entry => isPrivateNetworkHost(entry.address)
-    || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(entry.address))) throw new Error('图片地址不可访问');
+    || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(entry.address))) throw new StudioImageDownloadError('download_unsafe_address');
   // Pin the vetted address so DNS cannot change between validation and download.
   return new Promise((resolve, reject) => {
     const request = https.get(parsed, {
@@ -87,18 +118,34 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
       family: 4, signal,
       lookup: (_hostname, _options, callback) => callback(null, addresses[0].address, addresses[0].family),
     }, response => {
-      if (response.statusCode !== 200) { response.resume(); reject(new Error('图片读取失败')); return; }
+      const status = response.statusCode || 0;
+      if ([301, 302, 303, 307, 308].includes(status)) {
+        const location = response.headers.location;
+        response.destroy();
+        if (!location || redirects >= 3) { reject(new StudioImageDownloadError('download_redirect_limit', status)); return; }
+        let next: string;
+        try { next = new URL(location, parsed).href; }
+        catch { reject(new StudioImageDownloadError('download_invalid_url')); return; }
+        // Every hop is revalidated and DNS-pinned; never forward API credentials.
+        resolve(downloadStudioImage(next, signal, redirects + 1));
+        return;
+      }
+      if (status !== 200) { response.destroy(); reject(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); return; }
       const chunks: Buffer[] = [];
       let bytes = 0;
       response.on('data', chunk => {
         bytes += chunk.length;
-        if (bytes > MAX_STUDIO_GENERATED_BYTES) request.destroy(new Error('图片文件过大'));
+        if (bytes > MAX_STUDIO_GENERATED_BYTES) request.destroy(new StudioImageDownloadError('download_size_limit'));
         else chunks.push(chunk);
       });
-      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('end', () => {
+        if (!response.complete || !bytes) reject(new StudioImageDownloadError('download_incomplete', status, true));
+        else resolve(Buffer.concat(chunks));
+      });
+      response.on('aborted', () => reject(new StudioImageDownloadError('download_incomplete', status, true)));
       response.on('error', reject);
     });
-    const timer = setTimeout(() => request.destroy(new Error('图片读取超时')), 30000);
+    const timer = setTimeout(() => request.destroy(new StudioImageDownloadError('download_timeout', undefined, true)), 60000);
     request.on('close', () => clearTimeout(timer));
     request.on('error', reject);
   });

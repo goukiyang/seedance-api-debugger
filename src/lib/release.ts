@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新增删除模板；生成参数自动保存；复制上下文仅管理员可用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '改善生成图片下载，支持安全跳转和有限重试；下载失败原因单独提示。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

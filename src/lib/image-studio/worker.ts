@@ -49,7 +49,9 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
       httpStatus: detail?.status, elapsedMs: Date.now() - started }));
     const deliveryFailed = detail?.stage === 'download' || ['normalize', 'save', 'settle'].includes(stage);
     await finishStudioTask(task, providerStarted ? 'uncertain' : 'failed', { error: providerStarted
-      ? deliveryFailed
+      ? detail?.stage === 'download'
+        ? `图片服务已返回链接，但下载未完成（${detail.code}${detail.status ? `，HTTP ${detail.status}` : ''}）。冻结积分已释放；重新生成会再次请求上游。`
+        : deliveryFailed
         ? '图片服务已返回结果，但图片保存失败，冻结积分已释放。请联系管理员；重新生成会再次请求上游。'
         : '本次未能交付图片，冻结积分已释放。上游结果未确认，重试会新建生成任务。'
       : '参考图或图片服务暂不可用，冻结积分已释放。' });
