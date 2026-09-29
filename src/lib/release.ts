@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板标题旁新增删除按钮，确认后移除模板，保留已生成图片。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新增删除模板按钮；模型、质量与分辨率自动保存，可直接生成。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

@@ -499,12 +499,9 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality, resolution, groupName, bannerAssetId: banner?.id || null, referenceIds: images.map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null };
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
-  const savedConfig = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
-  const automaticSnapshot = JSON.stringify({ ...moduleDraft, context: savedModuleContext,
-    model: savedConfig.model, quality: savedConfig.quality, resolution: savedConfig.resolution });
+  const automaticSnapshot = JSON.stringify({ ...moduleDraft, context: savedModuleContext });
   const automaticDirty = automaticSnapshot !== moduleSaved;
-  const settingsDirty = moduleContext !== savedModuleContext || moduleModel !== savedConfig.model
-    || quality !== savedConfig.quality || resolution !== savedConfig.resolution;
+  const settingsDirty = moduleContext !== savedModuleContext;
   const sourceSharingBlocked = Boolean(module.sourcePresetId && module.sourcePresetShared === false);
 
   useEffect(() => {
@@ -712,7 +709,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
 
   async function submit(retryTask?: StudioTask) {
     if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing) return;
-    if (settingsDirty || dirty) { setError('请先手动保存设置，再生成图片。'); return; }
+    if (settingsDirty || dirty) { setError('上下文或积分规则尚未保存，请先保存这些设置。'); return; }
     let submitModuleRevision = moduleRevision;
     if (!pendingSubmission && moduleDirty) {
       const savedRevision = await saveModule();
