@@ -11,6 +11,7 @@ import { imageOutputSize, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } f
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD } from './model-catalog';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
+import { displayUserName } from '@/lib/users/display';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -221,7 +222,11 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, owner_id: ownerId, status: 'active' },
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
+  const owner = items.length ? await prisma.user.findUnique({ where: { id: ownerId },
+    select: { id: true, name: true, username: true, avatar_url: true } }) : null;
+  const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
   return { tasks: items.map(task => ({ id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
+    owner: publicOwner,
     prompt: task.prompt, model: task.model, quality: task.quality, status: task.status, error: task.error, unitCredits: task.unit_credits,
     providerCostUsd: task.provider_cost_usd,
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,

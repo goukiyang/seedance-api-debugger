@@ -102,8 +102,8 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<ActiveDrag | null>(null);
   const capturedClickRef = useRef<CapturedClick | null>(null);
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [{ scale, offset }, setView] = useState({ scale: 1, offset: { x: 0, y: 0 } });
+  const zoomPointRef = useRef<{ x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
@@ -115,12 +115,35 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   const activeAlt = showReference && comparison ? comparison.alt : alt;
 
   const resetView = useCallback(() => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
+    setView({ scale: 1, offset: { x: 0, y: 0 } });
+    zoomPointRef.current = null;
   }, []);
 
-  const zoomAtCenter = useCallback((factor: number) => {
-    setScale((current) => clampScale(current * factor));
+  const zoomAtPoint = useCallback((factor: number, point: { x: number; y: number }) => {
+    // Scale and translation must use the same previous frame, including batched wheel events.
+    setView(current => {
+      const nextScale = clampScale(current.scale * factor);
+      const ratio = nextScale / current.scale;
+      return { scale: nextScale, offset: {
+        x: point.x - (point.x - current.offset.x) * ratio,
+        y: point.y - (point.y - current.offset.y) * ratio,
+      } };
+    });
+  }, []);
+
+  const zoomFromControls = useCallback((factor: number) => {
+    zoomAtPoint(factor, zoomPointRef.current || { x: 0, y: 0 });
+  }, [zoomAtPoint]);
+
+  const rememberZoomPoint = useCallback((clientX: number, clientY: number) => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const pane = document.elementFromPoint(clientX, clientY)?.closest('[data-image-preview-pane]');
+    const surface = pane && stage.contains(pane) ? pane : stage;
+    const rect = surface.getBoundingClientRect();
+    const point = { x: clientX - rect.left - rect.width / 2, y: clientY - rect.top - rect.height / 2 };
+    zoomPointRef.current = point;
+    return point;
   }, []);
 
   useEffect(() => {
@@ -168,8 +191,8 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
       if (event.key === 'Escape') onClose();
       if (event.key === 'ArrowLeft' && hasNavigation) onPrevious?.();
       if (event.key === 'ArrowRight' && hasNavigation) onNext?.();
-      if (event.key === '+' || event.key === '=') zoomAtCenter(SCALE_STEP);
-      if (event.key === '-') zoomAtCenter(1 / SCALE_STEP);
+      if (event.key === '+' || event.key === '=') zoomFromControls(SCALE_STEP);
+      if (event.key === '-') zoomFromControls(1 / SCALE_STEP);
       if (event.key === '0') resetView();
     };
 
@@ -177,7 +200,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [hasNavigation, onClose, onNext, onPrevious, resetView, zoomAtCenter]);
+  }, [hasNavigation, onClose, onNext, onPrevious, resetView, zoomFromControls]);
 
   useEffect(() => {
     resetView();
@@ -188,22 +211,12 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   }, [resetView, previewKey, src, comparison?.src]);
 
   const handleWheel = useCallback((event: WheelEvent) => {
-    const stage = stageRef.current;
-    if (!stage || !event.deltaY) return;
-
-    const rect = stage.getBoundingClientRect();
-    const cursorX = event.clientX - rect.left - rect.width / 2;
-    const cursorY = event.clientY - rect.top - rect.height / 2;
+    if (!event.deltaY) return;
+    const point = rememberZoomPoint(event.clientX, event.clientY);
+    if (!point) return;
     const factor = event.deltaY < 0 ? SCALE_STEP : 1 / SCALE_STEP;
-    const nextScale = clampScale(scale * factor);
-    const ratio = nextScale / scale;
-
-    setScale(nextScale);
-    setOffset((current) => ({
-      x: cursorX - (cursorX - current.x) * ratio,
-      y: cursorY - (cursorY - current.y) * ratio,
-    }));
-  }, [scale]);
+    zoomAtPoint(factor, point);
+  }, [rememberZoomPoint, zoomAtPoint]);
 
   useEffect(() => {
     // React delegates wheel listeners as passive; cancel the native event before it reaches the page.
@@ -247,6 +260,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
   }, [scale]);
 
   const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    rememberZoomPoint(event.clientX, event.clientY);
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
 
@@ -254,8 +268,8 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
     const deltaY = event.clientY - drag.y;
     const moved = drag.moved || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > DRAG_THRESHOLD;
     dragRef.current = { ...drag, x: event.clientX, y: event.clientY, moved };
-    setOffset((current) => ({ x: current.x + deltaX, y: current.y + deltaY }));
-  }, []);
+    setView(current => ({ ...current, offset: { x: current.offset.x + deltaX, y: current.offset.y + deltaY } }));
+  }, [rememberZoomPoint]);
 
   const finishDrag = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
@@ -347,10 +361,10 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
           {comparison && comparisonMode && <button type="button" data-image-preview-direction onClick={() => { setComparisonAxis((current) => current === 'horizontal' ? 'vertical' : 'horizontal'); resetView(); }} title={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'} aria-label={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'}>
             {comparisonAxis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}<span className={styles.actionLabel}>{comparisonLayoutLabel}</span>
           </button>}
-          <button type="button" onClick={() => zoomAtCenter(1 / SCALE_STEP)} title="缩小" aria-label="缩小图片">
+          <button type="button" onClick={() => zoomFromControls(1 / SCALE_STEP)} title="缩小" aria-label="缩小图片">
             <ZoomOut size={16} />
           </button>
-          <button type="button" onClick={() => zoomAtCenter(SCALE_STEP)} title="放大" aria-label="放大图片">
+          <button type="button" onClick={() => zoomFromControls(SCALE_STEP)} title="放大" aria-label="放大图片">
             <ZoomIn size={16} />
           </button>
           <button type="button" onClick={resetView} title="还原" aria-label="还原图片大小">

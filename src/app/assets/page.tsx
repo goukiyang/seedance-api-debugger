@@ -9,6 +9,7 @@ import {
   downloadBulkVideoZip,
 } from '@/lib/video/download-client';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { IMAGE_STUDIO_MODEL_SHORT_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
@@ -348,6 +349,8 @@ function formatResolution(value: string | null) {
 function formatModelShortLabel(value: string | null) {
   const normalized = value?.trim();
   if (!normalized) return '';
+  const imageLabel = IMAGE_STUDIO_MODEL_SHORT_LABELS[normalized as ImageStudioModel];
+  if (imageLabel) return imageLabel;
 
   const seedanceVersion = normalized.match(/seedance[\s-]*(\d+)(?:[.\s-]*(\d+))?/i);
   if (seedanceVersion) {

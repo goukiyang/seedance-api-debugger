@@ -19,11 +19,11 @@ export const IMAGE_STUDIO_MODEL_LABELS: Record<ImageStudioModel, string> = {
 };
 
 export const IMAGE_STUDIO_MODEL_SHORT_LABELS: Record<ImageStudioModel, string> = {
-  'gemini-3.1-flash-image-preview': 'B2',
-  'gemini-3-pro-image-preview': 'BP',
-  'gpt-image-2': 'GI2',
-  'gpt-image-2.5-flare': 'FL',
-  'gpt-image-2.5-sunburst': 'SB',
+  'gemini-3.1-flash-image-preview': 'ba2',
+  'gemini-3-pro-image-preview': 'baPro',
+  'gpt-image-2': 'img2',
+  'gpt-image-2.5-flare': 'img2.5-F',
+  'gpt-image-2.5-sunburst': 'img2.5-S',
 };
 
 // Provider USD cost is deliberately separate from the site's credit price.

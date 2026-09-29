@@ -97,6 +97,65 @@ async function emptyStagePoint(page: any) {
   return point;
 }
 
+async function checkCursorZoom(page: any, image: any, label: string) {
+  const before = await image.boundingBox();
+  assert.ok(before);
+  const point = { x: Math.round(before.x + before.width * 0.37), y: Math.round(before.y + before.height * 0.41) };
+  const pixel = { x: (point.x - before.x) / before.width, y: (point.y - before.y) / before.height };
+  let phase = 'wheel in';
+  const assertAnchor = async () => {
+    const after = await image.boundingBox();
+    assert.ok(after);
+    assert.ok(Math.abs(after.x + after.width * pixel.x - point.x) < 0.25, `${label} ${phase}: horizontal cursor anchor drifted: ${JSON.stringify({ before, after, point })}`);
+    assert.ok(Math.abs(after.y + after.height * pixel.y - point.y) < 0.25, `${label} ${phase}: vertical cursor anchor drifted: ${JSON.stringify({ before, after, point })}`);
+  };
+  const waitWidth = async (expected: number) => {
+    await image.evaluate(async (element: HTMLElement, width: number) => {
+      for (let frame = 0; frame < 90; frame++) {
+        if (Math.abs(element.getBoundingClientRect().width - width) < 0.5) return;
+        await new Promise(requestAnimationFrame);
+      }
+      throw new Error(`Expected width ${width}, got ${element.getBoundingClientRect().width}`);
+    }, expected);
+  };
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.wheel(0, -100);
+  await waitWidth(before.width * 1.2);
+  await assertAnchor();
+  phase = 'wheel out';
+  await page.mouse.wheel(0, 100);
+  await waitWidth(before.width);
+  await assertAnchor();
+  phase = 'keyboard';
+  await page.keyboard.press('+');
+  await waitWidth(before.width * 1.2);
+  await assertAnchor();
+  phase = 'button';
+  await page.getByRole('button', { name: '缩小图片' }).click();
+  await waitWidth(before.width);
+  await assertAnchor();
+
+  // A single JS turn stresses React's batched native wheel updates without paid/network calls.
+  phase = 'batch';
+  await page.evaluate(({ x, y }: { x: number; y: number }) => {
+    const target = document.elementFromPoint(x, y)!;
+    for (let i = 0; i < 3; i++) target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: x, clientY: y, deltaY: -100 }));
+  }, point);
+  await waitWidth(before.width * 1.2 ** 3);
+  await assertAnchor();
+  for (const [deltaY, expectedScale] of [[-100, 6], [100, 0.5]]) {
+    phase = `clamp ${expectedScale}`;
+    await page.evaluate(({ x, y, delta }: { x: number; y: number; delta: number }) => {
+      const target = document.elementFromPoint(x, y)!;
+      for (let i = 0; i < 48; i++) target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: x, clientY: y, deltaY: delta }));
+    }, { ...point, delta: deltaY });
+    await waitWidth(before.width * expectedScale);
+    await assertAnchor();
+  }
+  await page.getByRole('button', { name: '还原图片大小' }).click();
+  log(`PASS ${label}: real-wheel, keyboard/button, batch and zoom limits keep cursor pixel fixed`);
+}
+
 async function main() {
   let browser: any;
   let context: any;
@@ -138,6 +197,7 @@ async function main() {
       const item = document.querySelector('[data-image-preview-stage] img') as HTMLImageElement | null;
       return Boolean(item?.complete && item.naturalWidth > 0);
     }, null, { timeout: timeoutMs });
+    await checkCursorZoom(page, image, 'single image');
     await page.getByRole('button', { name: '放大图片' }).click();
     await page.waitForFunction(() => document.querySelector('[data-image-preview-stage] img[alt="fixture"]')?.getAttribute('style')?.includes('scale(1.2)'), null, { timeout: timeoutMs });
     await image.evaluate(async (element: HTMLElement) => Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => undefined))));
@@ -181,6 +241,8 @@ async function main() {
       await preview.waitFor({ state: 'visible', timeout: timeoutMs });
       await page.getByRole('button', { name: '对比参考图' }).click();
       if (vertical) await page.getByRole('button', { name: '切换上下对比' }).click();
+      await checkCursorZoom(page, page.locator('[data-image-preview-pane="reference"] img'), `${vertical ? 'vertical' : 'horizontal'} reference`);
+      await checkCursorZoom(page, page.locator('[data-image-preview-pane="result"] img'), `${vertical ? 'vertical' : 'horizontal'} result`);
       await page.getByRole('button', { name: '放大图片' }).click();
       const reference = page.locator('[data-image-preview-pane="reference"] img');
       await reference.evaluate(async (element: HTMLElement) => Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => undefined))));
