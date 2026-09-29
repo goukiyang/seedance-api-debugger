@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生成按钮旁直接显示不能提交的原因和处理办法，明确缺少的输入与素材。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复设置读取失败误报及反复重读；重试只读取，不再意外保存设置。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

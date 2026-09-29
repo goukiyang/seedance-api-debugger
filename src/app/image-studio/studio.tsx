@@ -432,7 +432,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   settingsReload: number; onReloadSettings: () => void;
   ratios: RatioPreferences;
 }) {
-  const [draftContext, setDraftContext] = useState('');
+  const [draftContext, setDraftContext] = useState(settings?.context || '');
   const [saveStatus, setSaveStatus] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [prompt, setPrompt] = useState(module.prompt);
@@ -506,6 +506,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const fileInput = useRef<HTMLInputElement>(null);
   const bannerFileInput = useRef<HTMLInputElement>(null);
   const [globalPrices, setGlobalPrices] = useState<Record<string, number | null>>(settings?.prices || module.prices);
+  const fallbackPrices = useRef(module.prices);
+  fallbackPrices.current = module.prices;
   const currentDraft = useRef({ context: draftContext, prices: globalPrices });
   currentDraft.current = { context: draftContext, prices: globalPrices };
   const dirty = Boolean(isFirst && isAdmin && settings && (
@@ -657,7 +659,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
 
   const loadSettings = useCallback(async () => {
     if (saving.current) {
-      setSettingsError('正在保存，请保存完成后重新读取');
+      setSaveStatus('正在保存，请保存完成后重新读取');
       return;
     }
     const request = ++settingsRequest.current;
@@ -667,17 +669,17 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
       const value: SettingsValue = await readResponse(await fetch('/api/image-studio/settings', { cache: 'no-store' }));
       if (request !== settingsRequest.current) return;
       if (JSON.stringify(currentDraft.current) !== draftBeforeLoad) {
-        setSettingsError('读取期间有新的修改，已保留草稿。请保存当前修改或重新读取');
+        setSaveStatus('读取期间有新的修改，已保留草稿。请保存当前修改或重新读取');
         return;
       }
-      setSettings(value); setDraftContext(value.context || ''); setGlobalPrices(value.prices || module.prices); setSaveStatus('');
+      setSettings(value); setDraftContext(value.context || ''); setGlobalPrices(value.prices || fallbackPrices.current); setSaveStatus('');
     } catch (e) { if (request === settingsRequest.current) setSettingsError(e instanceof Error ? e.message : '读取失败'); }
-  }, [setSettings, module.prices]);
+  }, [setSettings]);
   useEffect(() => {
     if (!isFirst) return;
-    if (globalDirty.current) { setSettingsError('通用设置已更新，请先保存当前修改或重新读取'); return; }
+    if (globalDirty.current) { setSaveStatus('当前通用设置草稿已保留，未自动覆盖。'); return; }
     void loadSettings();
-  }, [isFirst, loadSettings, settingsReload, module.prices]);
+  }, [isFirst, loadSettings, settingsReload]);
 
   const saveSettings = useCallback(async () => {
     if (!settings || !isFirst || !isAdmin || saving.current) return;
@@ -865,7 +867,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     : moduleSaving ? '正在保存模板，请稍候。'
     : ratioEditing ? '图片比例尚未确认，请先完成比例设置。'
     : pendingSubmission ? ''
-    : settingsError ? '生成设置读取失败，请重试读取设置或刷新页面。'
+    : settingsError ? `设置暂不可用：${settingsError}`
     : !settings ? '正在读取生成设置，请稍候；长时间无变化请刷新页面。'
     : !selectedProviderReady ? '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。'
     : !(settings.contextConfigured || moduleContextConfigured) ? '缺少上下文要求，请填写并保存模板上下文，或请管理员配置通用上下文。'
@@ -1020,6 +1022,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         </div>
         <button type="button" className={styles.generate} disabled={Boolean(generationBlocker)} title={generationBlocker || undefined} aria-describedby={generationBlocker ? `generation-blocker-${module.id}` : undefined} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
         {generationBlocker && <p id={`generation-blocker-${module.id}`} role="status" className={styles.error}>{generationBlocker}</p>}
+        {settingsError && <button type="button" onClick={() => { if (!dirty || window.confirm('重新读取会替换未保存的通用设置，是否继续？')) void loadSettings(); }}><RefreshCw size={16} />重新读取设置</button>}
         {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={images.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
@@ -1172,7 +1175,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         <p role="status">{dirty ? '设置未保存' : saveStatus || '已保存'}</p>
         <button type="button" disabled={!dirty || saving.current} onClick={() => void saveSettings()}><Save size={16} />保存设置</button>
       </>}
-      {settingsError && <div role="alert" className={styles.error}>{settingsError}<button type="button" onClick={() => { if (settings) void saveSettings(); else void loadSettings(); }}><RefreshCw size={16} />重试</button>
+      {settingsError && <div role="alert" className={styles.error}>{settingsError}<button type="button" onClick={() => { if (!dirty || window.confirm('重新读取会替换未保存的通用设置，是否继续？')) void loadSettings(); }}><RefreshCw size={16} />重试读取</button>
         {settings && <button type="button" onClick={() => {
           if (!dirty || window.confirm('重新读取会替换当前未保存的上下文，确定继续吗？')) void loadSettings();
         }}>重新读取</button>}
