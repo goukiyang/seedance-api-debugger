@@ -125,6 +125,7 @@ async function copyStudioText(value: string) {
 export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
   const [modules, setModules] = useState<StudioModule[]>([]);
   const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName'>>>([]);
+  const removedModuleIds = useRef(new Set<string>());
   const hydratingIds = useRef(new Set<string>());
   const [hydrating, setHydrating] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -202,10 +203,10 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     listLock.current = true; setLoading(true); setError('');
     try {
       const data = await readResponse(await fetch(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`, { cache: 'no-store' }));
-      if (Array.isArray(data.directory)) setDirectory(data.directory);
+      if (Array.isArray(data.directory)) setDirectory(data.directory.filter((item: StudioModule) => !removedModuleIds.current.has(item.id)));
       setModules(current => {
         const ids = new Set(current.map(item => item.id));
-        return [...current, ...data.modules.filter((item: StudioModule) => !ids.has(item.id))]
+        return [...current, ...data.modules.filter((item: StudioModule) => !ids.has(item.id) && !removedModuleIds.current.has(item.id))]
           .sort((a, b) => Number(b.id === `default-${userId}`) - Number(a.id === `default-${userId}`)
             || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
       });
@@ -223,7 +224,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       const data = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(requested.join(','))}`, { cache: 'no-store' }));
       setModules(current => {
         const existing = new Set(current.map(item => item.id));
-        return [...current, ...data.modules.filter((item: StudioModule) => !existing.has(item.id))];
+        return [...current, ...data.modules.filter((item: StudioModule) => !existing.has(item.id) && !removedModuleIds.current.has(item.id))];
       });
       setError('');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '模块读取失败，请重试'); }
@@ -390,6 +391,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     })}</div><div className={styles.pagination} aria-label="模板封面分页"><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模板</button>}</section>}
     <div hidden={coverView}>
     {modules.map(module => <ImageStudioBlock key={module.id} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} isFirst={module.id === visibleModules[0]?.id} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
+      onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
       userId={userId} settings={settings} setSettings={setSettings} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => setActive(module.id)}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? { ...next, name: item.name, groupName: item.groupName } : item)); }}
       globalSettingsOpen={globalSettingsOpen && module.id === visibleModules[0]?.id} onCloseGlobal={() => setGlobalSettingsOpen(false)}
@@ -408,7 +410,8 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   </main>;
 }
 
-function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadataChange, groups, onDeleteGroup, onToggleSharing, sharingId, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
+function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
+  onModuleDelete: (id: string) => void;
   hidden: boolean; onMetadataChange: (id: string, name: string, groupName: string, followGroup?: boolean) => void;
   isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule) => Promise<void>; sharingId: string | null; settings: SettingsValue | null;
   setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
@@ -436,6 +439,8 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const [moduleRevision, setModuleRevision] = useState(module.revision);
   const revisionRef = useRef(module.revision);
   const [moduleSaving, setModuleSaving] = useState(false);
+  const [moduleDeleting, setModuleDeleting] = useState(false);
+  const moduleDeleteLock = useRef(false);
   const [moduleContext, setModuleContext] = useState(module.context || '');
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
@@ -522,7 +527,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   }, []);
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true) {
-    if (moduleSaveLock.current || uploading || bannerUploading) return false;
+    if (moduleSaveLock.current || moduleDeleteLock.current || uploading || bannerUploading) return false;
     moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
     const snapshot = { ...(manualSettings ? moduleDraft : JSON.parse(automaticSnapshot) as typeof moduleDraft), reproduceFromTaskId: reproduceTaskId || null };
     const contextSnapshot = snapshot.context;
@@ -544,6 +549,19 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     setPrompt(''); setModuleContext(''); setCount(1); setReferenceLimit(MAX_REFERENCE_IMAGES); setAspectRatio('auto'); setModuleModel(nextModel);
     setQuality(defaultImageStudioQuality(nextModel)); setResolution(defaultImageResolution(nextModel)); setGroupName('未分组'); setReproduceSourceTaskId(null);
     setModuleSaveError('');
+  }
+
+  async function deleteModule() {
+    if (moduleDeleteLock.current || moduleSaveLock.current || submitting || uploading || bannerUploading) return;
+    if (!window.confirm(`删除模板“${name}”？模板配置将移除，已生成图片仍保留在资产库，不退积分；模板库中的共享原件不受影响。`)) return;
+    moduleDeleteLock.current = true; setModuleDeleting(true); setError('');
+    try {
+      await readResponse(await fetch('/api/image-studio/modules', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: module.id, revision: revisionRef.current }) }));
+      try { localStorage.removeItem(draftKey); sessionStorage.removeItem(pendingKey); } catch { /* Optional browser cache. */ }
+      onModuleDelete(module.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '删除失败，请重试'); }
+    finally { moduleDeleteLock.current = false; setModuleDeleting(false); }
   }
 
   async function saveAsPreset() {
@@ -596,15 +614,16 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
 
   const saveAutomatically = useRef(() => {});
   saveAutomatically.current = () => {
+    if (moduleDeleteLock.current) return;
     autoSaveAttempt.current = automaticSnapshot;
     void saveModule(reproduceSourceTaskId, revisionRef.current, false);
   };
   useEffect(() => {
-    if (!draftLoaded || !automaticDirty || moduleSaving || uploading || bannerUploading || submitting || pendingSubmission
+    if (!draftLoaded || !automaticDirty || moduleSaving || moduleDeleting || uploading || bannerUploading || submitting || pendingSubmission
       || !name.trim() || !Number.isInteger(count) || count < 1 || count > 8 || autoSaveAttempt.current === automaticSnapshot) return;
     const timer = window.setTimeout(() => saveAutomatically.current(), 500);
     return () => window.clearTimeout(timer);
-  }, [draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, uploading, bannerUploading, submitting, pendingSubmission, name, count]);
+  }, [draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, moduleDeleting, uploading, bannerUploading, submitting, pendingSubmission, name, count]);
 
   function closeSettings() {
     if (dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
@@ -692,7 +711,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   useEffect(() => () => { if (downloadReady) URL.revokeObjectURL(downloadReady.url); }, [downloadReady]);
 
   async function submit(retryTask?: StudioTask) {
-    if (!settings || submitLock.current || ratioEditing) return;
+    if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing) return;
     if (settingsDirty || dirty) { setError('请先手动保存设置，再生成图片。'); return; }
     let submitModuleRevision = moduleRevision;
     if (!pendingSubmission && moduleDirty) {
@@ -912,6 +931,9 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
         <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : settingsDirty ? '设置未保存' : '已保存'}</span>
         <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>
+        <button type="button" title={module.id === `default-${userId}` ? '默认模板需要保留' : '删除模板'} aria-label={`删除模板：${name}`}
+          disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
+          onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : '删除模板'}</button>
       </div>
     </header>
     <div className={`${styles.moduleBanner} ${banner?.originalUrl ? styles.moduleBannerHasImage : ''}`}>

@@ -106,6 +106,20 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
       ...directory.map(item => ({ id: item.id, name: item.name, groupName: item.group_name || '未分组' })),
     ] } : {}) };
 }
+export async function deleteStudioModule(ownerId: string, id: unknown, revision: unknown) {
+  if (!validStudioModuleId(id, ownerId) || !Number.isInteger(revision)) throw new StudioModuleError('模板参数无效');
+  if (id === defaultStudioModuleId(ownerId)) throw new StudioModuleError('默认模板需要保留，请删除其他模板');
+  await prisma.$transaction(async tx => {
+    const current = await tx.imageStudioModule.findFirst({ where: { id, owner_id: ownerId } });
+    if (!current) return;
+    if (current.revision !== revision) throw new StudioModuleError('模板已更新，请刷新后再删除', 409);
+    const pending = await tx.imageStudioTask.count({ where: { owner_id: ownerId, module_id: id, status: { in: ['queued', 'running'] } } });
+    if (pending) throw new StudioModuleError('模板还有生成中的任务，请完成后再删除', 409);
+    // Tasks and assets have independent ownership and remain available in assets.
+    await tx.imageStudioModule.deleteMany({ where: { id, owner_id: ownerId, revision: current.revision } });
+  });
+}
+
 export async function saveStudioModule(ownerId: string, body: Record<string, unknown>, createOnly = false, isAdmin = false, forcedSourcePresetId?: string, sourceIdentity?: ImageStudioIdentity) {
   if (!body || !validStudioModuleId(body.id, ownerId)) throw new StudioModuleError('模块编号无效');
   const id = body.id;

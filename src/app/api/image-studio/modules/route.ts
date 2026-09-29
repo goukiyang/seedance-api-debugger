@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { listStudioModules, saveStudioModule, StudioModuleError } from '@/lib/image-studio/modules';
+import { listStudioModules, saveStudioModule, deleteStudioModule, StudioModuleError } from '@/lib/image-studio/modules';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 
 export const dynamic = 'force-dynamic';
@@ -27,3 +27,18 @@ async function save(request: NextRequest, createOnly: boolean) {
 }
 export const POST = (request: NextRequest) => save(request, true);
 export const PUT = (request: NextRequest) => save(request, false);
+
+export async function DELETE(request: NextRequest) {
+  const user = await getSession();
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权操作图片模板' }, { status: 403 });
+  try {
+    const body = await request.json();
+    await deleteStudioModule(user.id, body?.id, body?.revision);
+    return NextResponse.json({ deleted: true });
+  } catch (error) {
+    if (error instanceof StudioModuleError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof SyntaxError) return NextResponse.json({ error: '模板参数无效' }, { status: 400 });
+    return NextResponse.json({ error: '删除未确认，请重试' }, { status: 503 });
+  }
+}
