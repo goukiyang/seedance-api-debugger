@@ -9,12 +9,14 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| B01 | 修复 banner 过大 | 横幅高度受控，不挤走下面内容，验证上线 | 进行中 |
+| B01 | 修复 banner 过大 | 横幅高度受控，不挤走下面内容，验证上线 | 已完成 |
 
 - 用户在`/template-studio?type=image`标记模块banner过大；浏览器标记截图仅在会话中可见，无可访问附件路径，未声称已归档原文件。来源为本轮浏览器标注，主题：横幅过高，后续可按B01检索；证据中的私有内容不复制到公开资料。
 - 原因：图片100%宽度、auto高度且无上限，横幅高度随容器宽和图片比例增长。只把已有图片横幅限制为桌面180px、手机120px，使用原有contain完整等比显示（[MDN依据](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/object-fit)）；空态保持96px，图片、模板、上下文、上传/删除逻辑与页面结构不改。不引入新库。
 - 从0.20.2生产代码接续，候选0.20.3；统一验证真实CSS下桌面/宽屏/手机的横竖方图、按钮边界和工作区位置，旧UI脚本、类型/lint、候选构建、公网资源及登录态DOM。保留0.20.2回退，不改生产数据库或调用模型。
 - 统一测试首轮发现新脚本的TS类型缺失和tsx回调序列化`__name`问题，集中修正脚本后布局9/9通过：桌面1617/2560横幅180px、手机390横幅120px，图片contain、两按钮容器内无重叠、无横向溢出、工作区间距24px；[合成截图](../docs/materials/2026-09-29-banner/banner-layout-fixture.png)已查看。旧UI smoke和lint通过，lint仅既存警告；未改产品行为去迁就测试。
+- `npx tsc --noEmit`复测通过；产品提交`ca6b4176e37c87bd3cc8c5bb6103f2cf1a7dd374`及回退标签`rollback/2026-09-29-before-banner-height`→`f2f6558`远端已核对。归档SHA256 `b639b052da1614bae3ad34608773dfe0e5f991cc5dc7be0281415d1b8f50ec2a`两端一致；隔离数据库副本构建成功，v0.20.3 / BUILD_ID `IqD4sIESqRrsbQn9GBDLc`已上线，三服务active，源站与公网config/release/login及登录页13静态资源通过。旧构建保留于服务器`backups/banner-height-ca6b4176e37c87bd3cc8c5bb6103f2cf1a7dd374/live-build`；更新通知复用原ReleaseNotice（代码核对），未新增提醒机制，真实旧客户端弹窗本轮未单独复测。
+- 登录态Chrome独立窗口实测用户标记模块`module-default-cmpipakyk001nmt1wx4t7wxzg`：桌面1200×753 banner180px/图片178px，contain，workspace top502px、banner bottom478px；手机390×844 banner120px/图片118px，contain，workspace top730.8px、banner bottom706.8px，均留24px间距。浏览器release API200/0.20.3与真实新尺寸相符；未单独读页面内版本标记。因局部截图工具需要整页语义快照，避免采集私有内容，本轮视觉截图仅用真实CSS合成图，线上以目标DOM尺寸为证，不声称已有生产截图。自有会话已停止，无业务写入或付费调用。
 
 ## P01 图片拖动误关闭（2026-09-29）
 
