@@ -124,6 +124,9 @@ async function copyStudioText(value: string) {
 
 export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
   const [modules, setModules] = useState<StudioModule[]>([]);
+  const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName'>>>([]);
+  const hydratingIds = useRef(new Set<string>());
+  const [hydrating, setHydrating] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -199,6 +202,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     listLock.current = true; setLoading(true); setError('');
     try {
       const data = await readResponse(await fetch(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`, { cache: 'no-store' }));
+      if (Array.isArray(data.directory)) setDirectory(data.directory);
       setModules(current => {
         const ids = new Set(current.map(item => item.id));
         return [...current, ...data.modules.filter((item: StudioModule) => !ids.has(item.id))]
@@ -210,6 +214,21 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     finally { listLock.current = false; setLoading(false); }
   }, [userId]);
   useEffect(() => { void loadModules(); }, [loadModules]);
+  const hydrateModules = useCallback(async (ids: string[]) => {
+    const requested = ids.filter(id => !hydratingIds.current.has(id)).slice(0, 12);
+    if (!requested.length) return;
+    requested.forEach(id => hydratingIds.current.add(id));
+    setHydrating(true);
+    try {
+      const data = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(requested.join(','))}`, { cache: 'no-store' }));
+      setModules(current => {
+        const existing = new Set(current.map(item => item.id));
+        return [...current, ...data.modules.filter((item: StudioModule) => !existing.has(item.id))];
+      });
+      setError('');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '模块读取失败，请重试'); }
+    finally { requested.forEach(id => hydratingIds.current.delete(id)); setHydrating(hydratingIds.current.size > 0); }
+  }, []);
   async function createModule() {
     if (createLock.current) return;
     createLock.current = true; setCreating(true); setError('');
@@ -276,18 +295,28 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       setError(e instanceof Error ? e.message : '共享状态保存失败，请重试');
     } finally { setPresetSharingId(null); }
   }
-  const groupedModules = useMemo(() => modules.reduce<Record<string, StudioModule[]>>((groups, item) => {
+  const navigation = useMemo(() => {
+    const items = new Map(directory.map(item => [item.id, item]));
+    modules.forEach(item => items.set(item.id, { id: item.id, name: item.name, groupName: item.groupName }));
+    return [...items.values()];
+  }, [directory, modules]);
+  const groupedModules = useMemo(() => navigation.reduce<Record<string, typeof navigation>>((groups, item) => {
     const group = item.groupName || '未分组';
     (groups[group] ||= []).push(item);
     return groups;
-  }, {}), [modules]);
+  }, {}), [navigation]);
   const updateModuleMetadata = useCallback((id: string, name: string, groupName: string, followGroup = false) => {
     setModules(current => current.map(item => item.id === id && (item.name !== name || item.groupName !== groupName)
       ? { ...item, name, groupName } : item));
     if (followGroup) setSelectedGroup(groupName);
   }, []);
-  const groups = useMemo(() => Array.from(new Set([...DEFAULT_GROUPS, ...modules.map(item => item.groupName).filter(Boolean)])), [modules]);
+  const groups = useMemo(() => Array.from(new Set([...DEFAULT_GROUPS, ...navigation.map(item => item.groupName).filter(Boolean)])), [navigation]);
   const visibleModules = useMemo(() => selectedGroup ? modules.filter(item => item.groupName === selectedGroup) : modules, [modules, selectedGroup]);
+  const missingGroupModules = useMemo(() => (groupedModules[selectedGroup] || []).filter(item => !modules.some(module => module.id === item.id)), [groupedModules, selectedGroup, modules]);
+  useEffect(() => {
+    const firstPage = (groupedModules[selectedGroup] || []).slice(0, 12);
+    void hydrateModules(firstPage.filter(item => !modules.some(module => module.id === item.id)).map(item => item.id));
+  }, [selectedGroup, groupedModules, modules, hydrateModules]);
   const coverPageSize = coverColumns * 3;
   const coverPageCount = Math.max(1, Math.ceil(modules.length / coverPageSize));
   const visibleCoverModules = useMemo(() => modules.slice(coverPage * coverPageSize, (coverPage + 1) * coverPageSize), [coverPage, coverPageSize, modules]);
@@ -303,7 +332,16 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   }, [groups, groupedModules]);
   async function deleteGroup(group: string) {
     if (DEFAULT_GROUPS.includes(group)) return;
-    const targets = modules.filter(item => item.groupName === group);
+    // Read unloaded members too; deleting a group must not omit later pages.
+    const targets = [...modules.filter(item => item.groupName === group)];
+    const unloaded = (groupedModules[group] || []).filter(item => !targets.some(target => target.id === item.id));
+    try {
+      for (let offset = 0; offset < unloaded.length; offset += 12) {
+        const ids = unloaded.slice(offset, offset + 12).map(item => item.id);
+        const data = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(ids.join(','))}`, { cache: 'no-store' }));
+        targets.push(...data.modules);
+      }
+    } catch { setError('分组内容未能完整读取，请重试'); return; }
     if (!targets.length || !window.confirm(`删除分组“${group}”？其中的模块会移到“未分组”，图片和生成结果不会删除。`)) return;
     try {
       const replacements: StudioModule[] = [];
@@ -316,6 +354,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       }
       const replacementById = new Map(replacements.map(item => [item.id, item]));
       setModules(current => current.map(item => replacementById.get(item.id) || item));
+      setDirectory(current => current.map(item => replacementById.has(item.id) ? { ...item, groupName: '未分组' } : item));
       setSelectedGroup('未分组');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '删除分组失败，请重试');
@@ -330,10 +369,12 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
           setCoverView(false); setSelectedGroup(group); setActive(items[0]?.id || '');
         }}><span>{group}</span><small>{items.length}</small></button>
         <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={styles.moduleRailChild} onClick={() => {
-          setCoverView(false); setSelectedGroup(group); setActive(item.id); requestAnimationFrame(() => document.getElementById(`module-${item.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+          setCoverView(false); setSelectedGroup(group); setActive(item.id);
+          void (async () => { if (!modules.some(module => module.id === item.id)) await hydrateModules([item.id]);
+            requestAnimationFrame(() => document.getElementById(`module-${item.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })); })();
         }}>{item.name}</button>)}</div>
       </div>)}
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => setCoverView(true)}>全部封面<small>{modules.length}</small></button>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => setCoverView(true)}>全部封面<small>{navigation.length}</small></button>
     </aside>
     <div className={styles.content}>
     <header className={styles.header}><div><h1>{coverView ? '模板封面' : '图片生成'}</h1><p className={styles.muted}>{coverView ? '所有模板的 3:4 封面预览' : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
@@ -354,8 +395,8 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       globalSettingsOpen={globalSettingsOpen && module.id === visibleModules[0]?.id} onCloseGlobal={() => setGlobalSettingsOpen(false)}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       settingsReload={settingsReload} onReloadSettings={() => setSettingsReload(current => current + 1)} />)}
-    {loading && <p role="status">正在读取模块…</p>}
-    {cursor && <button disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模块</button>}
+    {(loading || hydrating) && <p role="status">正在读取模块…</p>}
+    {missingGroupModules.length > 0 && <button disabled={hydrating} onClick={() => void hydrateModules(missingGroupModules.slice(0, 12).map(item => item.id))}>加载更多模块（{missingGroupModules.length}）</button>}
     {visibleModules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
     </div>
     </div>

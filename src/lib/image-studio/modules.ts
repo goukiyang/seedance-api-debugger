@@ -78,10 +78,10 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     createdAt: row.created_at, updatedAt: row.updated_at,
     images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : []; }) };
 }
-export async function listStudioModules(ownerId: string, cursor?: string, isAdmin = false) {
+export async function listStudioModules(ownerId: string, cursor?: string, isAdmin = false, requestedIds?: string[]) {
   const settings = await getImageStudioSettings();
   const defaultId = defaultStudioModuleId(ownerId);
-  const rows = await prisma.imageStudioModule.findMany({ where: { owner_id: ownerId, id: { not: defaultId } },
+  const rows = await prisma.imageStudioModule.findMany({ where: { owner_id: ownerId, id: { not: defaultId, ...(requestedIds ? { in: requestedIds } : {}) } },
     orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 13, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const sourceIds = rows.map(row => row.source_preset_id).filter((id): id is string => Boolean(id));
   const sourceRows = sourceIds.length ? await prisma.imageStudioPreset.findMany({ where: { id: { in: sourceIds } }, select: { id: true, owner_id: true, scope: true, is_shared: true } }) : [];
@@ -91,11 +91,20 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   // the authoritative check for whether a new generation may start.
   const visible = rows.slice(0, 12);
   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined)));
-  if (!cursor) {
+  if (!cursor && (!requestedIds || requestedIds.includes(defaultId))) {
     const first = await prisma.imageStudioModule.findFirst({ where: { id: defaultId, owner_id: ownerId } });
     modules.unshift(await moduleDTO(first || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: MAX_REFERENCE_IMAGES, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(first), isAdmin, first?.source_preset_id ? sourceById.get(first.source_preset_id) : undefined));
   }
-  return { modules, nextCursor: rows.length > 12 ? visible[visible.length - 1].id : null };
+  // Navigation must describe all saved modules, not just the first content page.
+  const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
+    where: { owner_id: ownerId }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+    select: { id: true, name: true, group_name: true },
+  }) : undefined;
+  return { modules, nextCursor: rows.length > 12 ? visible[visible.length - 1].id : null,
+    ...(directory ? { directory: [
+      ...(directory.some(item => item.id === defaultId) ? [] : [{ id: defaultId, name: '模块 1', groupName: '未分组' }]),
+      ...directory.map(item => ({ id: item.id, name: item.name, groupName: item.group_name || '未分组' })),
+    ] } : {}) };
 }
 export async function saveStudioModule(ownerId: string, body: Record<string, unknown>, createOnly = false, isAdmin = false, forcedSourcePresetId?: string, sourceIdentity?: ImageStudioIdentity) {
   if (!body || !validStudioModuleId(body.id, ownerId)) throw new StudioModuleError('模块编号无效');

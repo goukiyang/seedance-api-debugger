@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复4K图片保存限制；模板内容自动保存、分组即时同步，设置改为手动保存。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复刷新后新分组和模板不显示；左栏显示完整目录，模块内容按需加载。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

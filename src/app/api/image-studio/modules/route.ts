@@ -8,7 +8,10 @@ export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片模板' }, { status: 403 });
-  try { return NextResponse.json(await listStudioModules(user.id, request.nextUrl.searchParams.get('cursor') || undefined, user.role === 'admin'), { headers: { 'Cache-Control': 'no-store' } }); }
+  const idsValue = request.nextUrl.searchParams.get('ids');
+  const ids = idsValue ? [...new Set(idsValue.split(','))] : undefined;
+  if (ids && (ids.length > 12 || ids.some(id => !id || id.length > 100))) return NextResponse.json({ error: '模块读取参数无效' }, { status: 400 });
+  try { return NextResponse.json(await listStudioModules(user.id, request.nextUrl.searchParams.get('cursor') || undefined, user.role === 'admin', ids), { headers: { 'Cache-Control': 'no-store' } }); }
   catch { return NextResponse.json({ error: '模块读取失败，请重试' }, { status: 503 }); }
 }
 async function save(request: NextRequest, createOnly: boolean) {
