@@ -9,6 +9,7 @@ import { getStudioCapabilities } from './capabilities';
 import { readVideoGlobalContext, readVideoModuleContext } from './context';
 import { publicRunSnapshot, visibleRunPrompt } from './projection';
 import { StudioError } from './errors';
+import { isStudioTextModel } from './text-models';
 import { ensureStudioSnapshotSourceStillUsable } from './handoff';
 import {
   normalizeAssets,
@@ -30,9 +31,11 @@ import type {
 
 type RunWithOwner = Prisma.VideoStudioRunGetPayload<{ include: { owner: { select: { id: true; username: true; name: true; account_type: true } } } }>;
 
-function dto(row: { id: string; draft_id: string; request_id: string; source: string; mode: string; status: string; prompt: string | null; snapshot_json: string; error_message: string | null; created_at: Date; updated_at: Date }, projection: { thumbnailUrl?: string | null; taskCount?: number } = {}): StudioRunDto {
-  const owner = decodeSnapshot(row.snapshot_json).owner;
+function dto(row: { id: string; draft_id: string; request_id: string; source: string; mode: string; model?: string | null; status: string; prompt: string | null; snapshot_json: string; error_message: string | null; created_at: Date; updated_at: Date }, projection: { thumbnailUrl?: string | null; taskCount?: number } = {}): StudioRunDto {
+  const snapshot = decodeSnapshot(row.snapshot_json);
+  const owner = snapshot.owner;
   return {
+    llmModel: snapshot.llmModel || row.model || null,
     owner: { displayName: owner.displayName, avatarUrl: owner.avatarUrl || null },
     id: row.id,
     draftId: row.draft_id,
@@ -111,9 +114,12 @@ function responseStatus(run: { mode: string; status: string }) {
   return run.mode === 'llm' && (run.status === 'queued' || run.status === 'running') ? 202 : 200;
 }
 
-function assertIdempotentSemantics(run: { draft_id: string; draft_revision: number; mode: string }, input: CreateStudioRunRequest) {
+function assertIdempotentSemantics(run: { draft_id: string; draft_revision: number; mode: string; snapshot_json: string; model: string | null }, input: CreateStudioRunRequest) {
   if (run.draft_id !== input.draftId || run.draft_revision !== input.revision || run.mode !== input.mode) {
     throw new StudioError('requestId 已用于不同的草稿修订或运行模式', 409, 'CONFLICT');
+  }
+  if (input.llmModel !== undefined && input.llmModel !== (decodeSnapshot(run.snapshot_json).llmModel || run.model)) {
+    throw new StudioError('这次请求已使用另一个文案模型，请先查看原记录，不要重复提交', 409, 'CONFLICT');
   }
 }
 
@@ -194,6 +200,9 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
   if (!input || typeof input.draftId !== 'string' || !Number.isInteger(input.revision) || input.revision < 1
     || typeof input.requestId !== 'string' || !input.requestId.trim() || input.requestId.length > 120
     || !['direct', 'llm'].includes(input.mode)) throw new StudioError('运行参数无效', 400, 'INVALID');
+  if (input.llmModel !== undefined && (input.mode !== 'llm' || !isStudioTextModel(input.llmModel))) {
+    throw new StudioError('请选择列表中的文案模型', 400, 'INVALID');
+  }
   const requestId = input.requestId.trim();
   const existingBeforeValidation = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
   if (existingBeforeValidation) {
@@ -219,15 +228,15 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
   }
   await authorizeStudioAssets(user, snapshot.assets);
   await ensureStudioSnapshotSourceStillUsable(user, snapshot);
-  const fingerprint = makeFingerprint({ draftId: input.draftId, revision: input.revision, mode: input.mode, snapshot });
-
   if (input.mode === 'llm') {
     const acceptedSince = new Date(Date.now() - TEMPLATE_STUDIO_LIMITS.llmRequestWindowMs);
     const accepted = await prisma.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', created_at: { gte: acceptedSince } } });
     if (accepted >= TEMPLATE_STUDIO_LIMITS.llmRequestsPerUserWindow) throw new StudioError('AI 整理提交较频繁，请稍后再试', 429, 'RATE_LIMITED');
     const capabilities = await getStudioCapabilities(user);
     if (!capabilities.llmEnabled) throw new StudioError(capabilities.llmReason || 'AI 整理当前不可用', 503, 'UNAVAILABLE');
+    snapshot.llmModel = input.llmModel ?? capabilities.defaultLlmModel;
   }
+  const fingerprint = makeFingerprint({ draftId: input.draftId, revision: input.revision, mode: input.mode, snapshot });
 
   try {
     const run = await prisma.$transaction(async (tx) => {
@@ -253,6 +262,7 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
           request_fingerprint: fingerprint,
           source: draft.template_source,
           mode: input.mode,
+          model: snapshot.llmModel || null,
           status: input.mode === 'direct' ? 'succeeded' : 'queued',
           delivery_state: input.mode === 'direct' ? 'not_sent' : 'not_sent',
           prompt: input.mode === 'direct' ? snapshot.prompt : null,

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
 import type { SessionUser } from '@/lib/auth/session';
 import type { StudioCapabilitiesResponse } from './types';
+import { isStudioTextModel, STUDIO_TEXT_MODELS } from './text-models';
 
 export const TEMPLATE_STUDIO_TEXT_ENABLED_KEY = 'TEMPLATE_STUDIO_TEXT_ENABLED';
 
@@ -27,6 +28,8 @@ export async function getStudioCapabilities(user: SessionUser): Promise<StudioCa
       : '文字模型服务未配置或已停用。';
 
   return {
+    defaultLlmModel: isStudioTextModel(musk.default_model) ? musk.default_model : 'gpt-5.5',
+    llmModels: STUDIO_TEXT_MODELS,
     billingLabel: '文案不扣本站点数；上游文字费用由平台承担。视频生成另行计费。',
     llmEnabled,
     llmReason,

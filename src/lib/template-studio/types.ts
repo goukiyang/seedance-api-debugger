@@ -170,6 +170,7 @@ export type UpdateStudioDraftRequest = {
 };
 
 export type StudioRunSnapshot = {
+  llmModel?: string;
   privateContext?: { global: string; module: string; globalRevision: number; moduleRevision: number };
   sourceRunId?: string;
   input: {
@@ -193,6 +194,7 @@ export type StudioRunSnapshot = {
 };
 
 export type StudioRunDto = {
+  llmModel?: string | null;
   owner?: { displayName: string; avatarUrl: string | null };
   id: string;
   draftId: string;
@@ -279,6 +281,7 @@ export type StudioAdminRunDetailResponse = {
 };
 
 export type CreateStudioRunRequest = {
+  llmModel?: string;
   draftId: string;
   revision: number;
   requestId: string;
@@ -306,6 +309,8 @@ export type StudioRunDetailResponse = {
 export type CancelStudioRunRequest = { action: 'cancel' };
 
 export type StudioCapabilitiesResponse = {
+  defaultLlmModel: string;
+  llmModels: ReadonlyArray<{ id: string; label: string }>;
   billingLabel: string;
   llmEnabled: boolean;
   llmReason: string | null;

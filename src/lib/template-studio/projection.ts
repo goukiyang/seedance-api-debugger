@@ -36,6 +36,7 @@ export function visibleRunPrompt(row: { prompt: string | null; mode: string; sna
 
 export function publicRunSnapshot(snapshot: StudioRunSnapshot): StudioRunSnapshot {
   return {
+    ...(snapshot.llmModel ? { llmModel: snapshot.llmModel } : {}),
     input: snapshot.input,
     templateVersion: snapshot.templateVersion,
     recipe: publicRecipe(snapshot.recipe),

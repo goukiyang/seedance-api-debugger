@@ -10,6 +10,7 @@ import { parseWorkerSnapshot, workerSafeUsage } from './runs';
 import { TEMPLATE_STUDIO_TEXT_ENABLED_KEY } from './capabilities';
 import { TEMPLATE_STUDIO_LIMITS } from './validation';
 import { containsPrivateContext } from './projection';
+import { isStudioTextModel } from './text-models';
 
 const LEASE_MS = 90_000;
 const MUSK_TIMEOUT_MS = 45_000;
@@ -150,6 +151,12 @@ export async function processStudioPromptOnce() {
       await markTerminal(run.id, token, 'failed', 'AI 整理当前未启用或服务未就绪，未提交上游。', 'not_sent');
       return true;
     }
+    if (snapshot.llmModel !== undefined && !isStudioTextModel(snapshot.llmModel)) {
+      await markTerminal(run.id, token, 'failed', '所选文案模型已不可用，请重新选择。未提交上游。', 'not_sent');
+      return true;
+    }
+    // Freeze the submitted model; legacy queued tasks retain the previous default-model behavior.
+    const selectedSettings = { ...settings, default_model: snapshot.llmModel || settings.default_model };
 
     const send = await updateRun(run.id, token, { delivery_state: 'not_sent' }, {
       delivery_state: 'sending', lease_expires_at: new Date(Date.now() + LEASE_MS),
@@ -157,7 +164,7 @@ export async function processStudioPromptOnce() {
     if (send.count !== 1) return true;
     sent = true;
     const completion = await createMuskChatCompletion({
-      settings,
+      settings: selectedSettings,
       timeoutMs: MUSK_TIMEOUT_MS,
       temperature: 0.2,
       messages: [
@@ -172,7 +179,7 @@ export async function processStudioPromptOnce() {
       ],
     });
     const receipt = await updateRun(run.id, token, { delivery_state: 'sending' }, {
-      delivery_state: 'response_received', model: completion.model?.slice(0, 100) || null,
+      delivery_state: 'response_received', model: completion.model?.slice(0, 100) || selectedSettings.default_model,
       usage_json: JSON.stringify(workerSafeUsage(completion.usage)),
     });
     if (receipt.count !== 1) return true;

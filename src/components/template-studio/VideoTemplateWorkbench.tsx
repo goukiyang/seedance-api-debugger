@@ -36,6 +36,7 @@ import type {
 import styles from './template-studio.module.css';
 import VideoContextEditor from './VideoContextEditor';
 import VideoPromptResult from './VideoPromptResult';
+import { isStudioTextModel, studioTextModelLabel, STUDIO_TEXT_MODELS } from '@/lib/template-studio/text-models';
 
 type Props = { userId: string };
 type StudioView = 'templates' | 'prompts' | 'results';
@@ -354,8 +355,28 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const [newTemplateGroup, setNewTemplateGroup] = useState('');
   const [newTemplateInstruction, setNewTemplateInstruction] = useState('');
   const [createTemplateBusy, setCreateTemplateBusy] = useState(false);
-  const [pendingRun, setPendingRun] = useState<{ requestId: string; draftId: string; revision: number; mode: 'direct' | 'llm'; inputSignature: string } | null>(null);
+  const [pendingRun, setPendingRun] = useState<{ requestId: string; draftId: string; revision: number; mode: 'direct' | 'llm'; llmModel?: string; inputSignature: string } | null>(null);
   const [requestUnknown, setRequestUnknown] = useState(false);
+  const modelScope = `sd2-video-text-model:${userId}:${routedDraftId || 'new'}`;
+  const [modelChoice, setModelChoice] = useState<{ scope: string; value: string } | null>(null);
+  const [modelRecovery, setModelRecovery] = useState<{ scope: string; value: string } | null>(null);
+  const defaultLlmModel = capabilities?.defaultLlmModel || 'gpt-5.5';
+  const llmModel = requestUnknown && pendingRun?.draftId === routedDraftId && pendingRun.llmModel
+    ? pendingRun.llmModel
+    : modelChoice?.scope === modelScope ? modelChoice.value : defaultLlmModel;
+  useEffect(() => {
+    try {
+      const value = localStorage.getItem(modelScope);
+      setModelRecovery(isStudioTextModel(value) ? { scope: modelScope, value } : null);
+    } catch { setModelRecovery(null); }
+  }, [modelScope]);
+  function chooseLlmModel(value: string) {
+    if (!isStudioTextModel(value)) return;
+    setModelChoice({ scope: modelScope, value });
+    setModelRecovery(null);
+    try { localStorage.setItem(modelScope, value); }
+    catch { setNotice('本机无法保留模型选择，本次生成仍可使用。'); }
+  }
   const submitting = useRef(false);
   const pendingKey = `sd2-video-pending:${userId}`;
   useEffect(() => {
@@ -1100,12 +1121,12 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     const current = draftRef.current;
     if (!current || current.id !== activeDraft.id) { submitting.current = false; setWorking(false); return; }
     const inputSignature = JSON.stringify({ name: current.name, groupName: current.groupName, prompt: current.prompt, values: current.values, assets: current.assets, parameters: current.parameters });
-    if (reuseRequest && (!pendingRun || pendingRun.inputSignature !== inputSignature || pendingRun.draftId !== current.id || pendingRun.mode !== mode)) {
+    if (reuseRequest && (!pendingRun || pendingRun.inputSignature !== inputSignature || pendingRun.draftId !== current.id || pendingRun.mode !== mode || (pendingRun.llmModel && pendingRun.llmModel !== llmModel))) {
       setNotice('当前内容已变化，请先查询原请求；不能按旧请求号提交新内容。'); submitting.current = false; setWorking(false); return;
     }
     const operation = reuseRequest && pendingRun
       ? pendingRun
-      : { requestId: crypto.randomUUID(), draftId: current.id, revision: current.revision, mode, inputSignature };
+      : { requestId: crypto.randomUUID(), draftId: current.id, revision: current.revision, mode, ...(mode === 'llm' ? { llmModel } : {}), inputSignature };
     const routeAtStart = currentRouteKeyRef.current;
     setPendingRun(operation);
     setRequestUnknown(false);
@@ -1118,6 +1139,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         revision: operation.revision,
         requestId: operation.requestId,
         mode: operation.mode,
+        ...(operation.llmModel ? { llmModel: operation.llmModel } : {}),
       };
       const response = await requestJson<CreateStudioRunResponse>(`${API}/runs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -1696,6 +1718,15 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                     <section className={styles.sectionRule}>
                       <div className={styles.sectionTitle}><span>文案生成</span><span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span></div>
                       {fieldErrors.length > 0 && <span className={styles.fieldError}>还有 {fieldErrors.length} 项模板输入未完成。</span>}
+                      <div className={styles.textModelField}>
+                        <div className={styles.field}>
+                          <label htmlFor="studio-text-model">文案模型</label>
+                          <select id="studio-text-model" value={llmModel} disabled={working || requestUnknown || !capabilities?.llmEnabled} onChange={event => chooseLlmModel(event.target.value)}>
+                            {(capabilities?.llmModels || STUDIO_TEXT_MODELS).map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                          </select>
+                        </div>
+                        {modelRecovery?.scope === modelScope && modelRecovery.value !== llmModel && <button className={styles.quietButton} type="button" disabled={working || requestUnknown} title={studioTextModelLabel(modelRecovery.value)} onClick={() => chooseLlmModel(modelRecovery.value)}>恢复上次模型</button>}
+                      </div>
                       <div className={styles.promptTools}>
                         <button className={styles.primaryButton} type="button" disabled={Boolean(llmBlocker)} title={llmBlocker || undefined} onClick={() => void submitRun('llm')}><Sparkles size={15} />生成文案</button>
                         <button className={styles.quietButton} type="button" disabled={Boolean(directBlocker)} title={directBlocker || undefined} onClick={() => void submitRun('direct')}><Check size={15} />直接使用输入</button>

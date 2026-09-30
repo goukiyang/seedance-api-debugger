@@ -215,6 +215,8 @@
 .assetActions .iconButton { width: 29px; min-width: 29px; min-height: 29px; }
 .assetEmpty { padding: 14px 10px; border: 1px dashed var(--line); color: var(--muted); font-size: 12px; text-align: center; }
 .promptTools { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.textModelField { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-bottom: 12px; min-width: 0; }
+.textModelField > .field { width: 220px; max-width: 100%; }
 .saveState { min-height: 19px; color: var(--muted); font-size: 11px; }
 .saveState[data-tone="success"] { color: oklch(0.8 0.13 150); }
 .saveState[data-tone="error"] { color: oklch(0.79 0.14 25); }

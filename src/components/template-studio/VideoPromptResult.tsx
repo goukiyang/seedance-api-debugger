@@ -5,6 +5,7 @@ import { Copy, Film, History, RotateCcw, Sparkles } from 'lucide-react';
 import type { StudioRunDto } from '@/lib/template-studio/types';
 import styles from './template-studio.module.css';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { studioTextModelLabel } from '@/lib/template-studio/text-models';
 
 export default function VideoPromptResult({ run, userId, busy, onContinue, onRegenerate, onHistory }: {
   run: StudioRunDto; userId: string; busy: boolean;
@@ -28,7 +29,7 @@ export default function VideoPromptResult({ run, userId, busy, onContinue, onReg
     catch { setMessage('本机无法保存草稿，离开前请复制文案'); }
   }
   return <section className={styles.resultPanel} aria-label="文案结果">
-    <div className={styles.resultMetadata}><h3>文案结果</h3>{run.owner && <UserIdentityBadge size="sm" user={{ name: run.owner.displayName, avatar_url: run.owner.avatarUrl }} />}<span className={styles.saveState}>{run.status === 'queued' ? '排队中' : run.status === 'running' ? '生成中' : run.status === 'succeeded' ? '已完成' : run.status === 'uncertain' ? '结果待确认' : run.status === 'cancelled' ? '已取消' : '失败'}</span></div>
+    <div className={styles.resultMetadata}><h3>文案结果</h3>{run.owner && <UserIdentityBadge size="sm" user={{ name: run.owner.displayName, avatar_url: run.owner.avatarUrl }} />}{run.llmModel && <span className={styles.fieldHint}>{studioTextModelLabel(run.llmModel)}</span>}<span className={styles.saveState}>{run.status === 'queued' ? '排队中' : run.status === 'running' ? '生成中' : run.status === 'succeeded' ? '已完成' : run.status === 'uncertain' ? '结果待确认' : run.status === 'cancelled' ? '已取消' : '失败'}</span></div>
     {run.status === 'failed' && <p role="alert" className={styles.fieldError}>{run.error || '本次文案生成失败，请检查后重试。'}</p>}
     {run.status === 'uncertain' && <p role="alert" className={styles.fieldError}>结果尚未确认，系统不会重复提交。请先查看历史或联系管理员核对。</p>}
     {run.status === 'succeeded' && !run.prompt && <p role="alert" className={styles.fieldError}>此历史文案无法安全展示，请复用输入重新生成。</p>}
