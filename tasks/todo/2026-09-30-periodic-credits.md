@@ -8,11 +8,11 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| CQ02 | 点数基础修复 | 冻结、账户展示、零额度及来源解析一致 | 进行中 |
-| CQ03 | 模块与成员规则 | 独立配置、冲突检查、版本与生效时间明确 | 进行中 |
-| CQ04 | 自动刷新与结算 | 防重复、可补发、跨周期任务正确结算 | 进行中 |
-| CQ05 | 管理页与用户展示 | 配置、执行记录、余额来源和流水可找回 | 进行中 |
-| CQ06 | 发布交接 | 构建、备份回退、Git与部署检查完成 | 未开始 |
+| CQ02 | 点数基础修复 | 冻结、账户展示、零额度及来源解析一致 | 已完成实现及发布，待手动验收 |
+| CQ03 | 模块与成员规则 | 独立配置、冲突检查、版本与生效时间明确 | 已完成实现及发布，待手动验收 |
+| CQ04 | 自动刷新与结算 | 防重复、可补发、跨周期任务正确结算 | 已完成实现及发布，待手动验收 |
+| CQ05 | 管理页与用户展示 | 配置、执行记录、余额来源和流水可找回 | 已完成实现及发布，待手动验收 |
+| CQ06 | 发布交接 | 构建、备份回退、Git与部署检查完成 | 已完成 |
 
 当前有效源码 `/Users/gouki-youdoo/.codex/worktrees/banana-image-channel/video-api-debugger`，分支 `codex/periodic-credits-20260930`，从线上 7391a07 后的文档提交 cfded4e 开始。点赞收藏候选保留在 `codex/content-reactions-20260930`，不随本次发布。线上已核对版本 0.25.0，本次新功能候选 0.26.0；未发布的其他候选随后需重新定号。
 
@@ -53,4 +53,21 @@
 
 - Luna XHigh 的管理页回执已收，主控复核并修正待生效版本与草稿区分、补发重试计数提示。另补月度配置变更保留原始日历锚点，避免二月后刷新日漂移。
 - 统一类型检查首轮发现流水名称重复，集中修复后通过；日历修正随最终候选构建再统一检查。尚未执行功能验收、浏览器或付费调用。
-- 其余 Git、服务器构建和部署证据待补齐。
+- 已部署 **v0.26.0**，入口：用户管理 → 周期额度，https://sd2.youdooart.com/admin/users/quotas 。代码 `cb9f66dd4dcabc07609a2d40e62d459dc8db315c`，BUILD_ID `q9e8iznlVsvzuC1GfjnnV`。
+- `npx tsc --noEmit`、`git diff --cached --check`、发布脚本 `bash -n`、服务器候选 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 及内置检查通过。候选与线上 schema 完全相同；本次无迁移、依赖变动、规则启用或付费生成。
+- 四服务 active：sd2-gray、sd2-image-studio、sd2-template-prompts、sd2-periodic-credits。新进程心跳 `2026-09-30T06:05:49.136Z`，规则目录数量0，确认未替用户配置发放。
+- 公网 release=0.26.0，公网 config/login 及源站 config=200，X-SD2-Origin=server-42-193。管理页匿名请求307到本站登录，未操作登录页面；该检查只证明受保护入口可达，不冒充功能验收。
+- 新页面 JS `page-ae95f44ff0142f46.js` 和 CSS `97b79046018e19e9.css` 公网200，JS包含周期额度接口及发布控件。版本提醒沿用现有 ReleaseNotice：数字版本比较、稍后去重、账户页手动检查、刷新确认；本轮仅源码核对，未执行浏览器验收。
+- 分支和回退 tag `rollback/2026-09-30-before-periodic-credits` 已推远端并核对；tag指向7391a07/v0.25.0。服务器备份 `/srv/video-api-debugger/backups/periodic-credits-cb9f66dd4dcabc07609a2d40e62d459dc8db315c` 保存 source、live-build、build.db和pre-switch.db；两份数据库备份完整性检查ok，未覆盖生产库。切换保护已核对上传/视频/storage持久目录。
+- [统一代码差异](https://github.com/goukiyang/seedance-api-debugger/compare/7391a07e982dc21edf702c5bcf793868a0f484af...cb9f66dd4dcabc07609a2d40e62d459dc8db315c)。仅本轮点数模块，不包含另分支点赞收藏。
+
+### 文件回执
+
+- `src/lib/credits/periodic-types.ts`：周期、月底、适用对象及不可变周期快照；`periodic.ts`：配置版本、成员归属、防重复发放、冲突、日志、后台心跳；`policy.ts`：统一冻结/结算、过期来源保护、零额度语义与余额汇总。
+- `src/app/admin/users/quotas/{page.tsx,QuotaManager.tsx,quotas.module.css}`：管理员入口、规则草稿/发布/暂停/恢复/归档、名单分页、执行记录和重试；`src/app/api/admin/credits/periodic/route.ts`：管理员限定接口、请求来源检查和安全错误。
+- `src/app/admin/users/AdminUsersClient.tsx`：新入口与旧策略说明、空值/零值区分；`src/app/api/admin/users/route.ts`：跨期冻结展示；`[id]/route.ts`、`[id]/disable/route.ts`、`[id]/enable/route.ts`、`bulk-profile/route.ts`：成员资格同步；`merge/route.ts`：有周期归属的账号禁止自动合并。
+- `src/app/account/page.tsx`、`src/app/api/me/credits/route.ts`：个人余额来源与下次刷新；`src/app/admin/points/{page.tsx,AdminPointsClient.tsx}`：全量冻结、本月流水、周期额度筛选。
+- `src/lib/image-studio/tasks.ts`、`src/lib/tools/toolflow-runtime.ts`、`src/lib/tasks/seedance-draft-upgrade.ts`：为冻结/结算流水补来源字段，不改生成参数、价格或Provider。
+- `scripts/process-periodic-credits.ts`、`scripts/sd2-periodic-credits.service`：后台分批刷新与服务配置；`package.json`、`package-lock.json`、`src/lib/release.ts`：版本和更新摘要，无依赖新增；`.gitignore`、`tsconfig.json`：隔离候选构建；`tasks/todo.md`及本子计划、hygiene-log：任务与回执。
+
+守门员：本次触及用户点数及管理权限边界，按用户明确实现授权处理；未扩大访问权限，未启用实际发放，无生产数据覆盖。功能手验尚未完成；暂停/归档不恢复旧每日策略、受管账号合并限制及回退兼容边界继续有效。无分级误判。
