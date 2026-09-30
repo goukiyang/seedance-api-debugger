@@ -6,9 +6,9 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| DT01 | 下载超时根因 | 核对代码与线上记录，按证据修复 | 修复及离线诊断完成，待部署 |
-| DT02 | 状态颜色与提示 | 正常等待不报红，真实失败保留明确提示 | 代码完成，待部署及用户手动验收 |
-| DT03 | 发布 | 构建、Git、回退保护及线上检查完成 | 进行中 |
+| DT01 | 下载超时根因 | 核对代码与线上记录，按证据修复 | 已修复部署；历史网络卡点证据缺口保留 |
+| DT02 | 状态颜色与提示 | 正常等待不报红，真实失败保留明确提示 | 已部署，待用户手动验收 |
+| DT03 | 发布 | 构建、Git、回退保护及线上检查完成 | 已完成 |
 
 - 用户要求排查 download_timeout 和正常提交报红。线上 v0.26.0：任务 `14d76a2510c8…-0`，img2.5-S，2880x2880，20:10:57 创建；worker 记录下载阶段超时，总耗时 288301ms。旧日志没有连接、响应与字节进度，无法断言历史那次具体卡在上游哪个网络环节；历史返回链接未持久保存，本轮不能凭空恢复图片，也不付费重生成。
 - 代码根因：每次下载有固定60秒墙钟中断，即使持续有数据；生成和下载还共用5分钟信号。改为独立下载最多3分钟（含最多一次GET重试/重定向），DNS10秒、连接20秒、等响应60秒、传输无进展60秒；收到数据延长空闲时限但不延长总时限。整个worker网络处理最多8分钟，预留原10分钟租约内结算时间。重试只下载，绝不重新调用生成POST。
@@ -16,6 +16,10 @@
 - 状态扫描覆盖图片模板、视频模板及普通视频生成器：图片提交/上传/保存/读取，视频文案排队/处理/配置读取改为明确progress状态；缺少输入为普通提示，需处理的条件为警告，真实错误保留红色。视频生成器按实际命中的阻塞项决定颜色，不按文字或无关并发上传状态猜测。保留禁用、防重复提交和原布局。执行线程Bacon使用GPT-6 Luna XHigh完成5个UI文件，主控复核并补齐普通生成器优先级及按钮旁提示。
 - 参考并已读 [Undici HTTP/1下载实现](https://github.com/nodejs/undici/blob/main/lib/dispatcher/client-h1.js) 中按数据刷新body timeout的做法；独立实现，不复制代码、不引入依赖。只进行本次排查所需离线诊断及发布检查，不做付费生成或浏览器验收；上线后交用户手动验收。
 - 统一检查：`npx tsc --noEmit`、`git diff --check`、`node --import tsx scripts/image-studio-provider-smoke.ts`及`image-studio-download-smoke.ts`通过。离线模拟真实下载函数的持续传输、断流、总时限、连接超时、重试IP切换及DNS内网拦截；检查生成/下载独立信号、单次生成POST及日志脱敏。不代表真实上游线路或付费生成已经验收。候选版本v0.26.1，复用现有ReleaseNotice及同源版本检查/稍后提醒，不另建升级机制。
+- 发布完成：v0.26.1，源码`9477c462066a809c2c5842552cfca752b642eeef`，BUILD_ID `4zx1K8D1I6Vm7yv0TovRS`。服务器候选构建/内置检查通过，公网release=0.26.1、config/login=200且来源server-42-193；图片共享chunk `4369-b533fe409d1e5d07.js`、视频模板chunk `page-df3287851080be52.js`及视频生成器共享chunk `420-aed674b54916a69c.js`均可达并包含新状态标记。普通生成页入口chunk只加载共享组件，最初在入口chunk查标记未命中，按构建清单找到共享chunk后已核对，不属于线上漏发。四个既有服务均active/running、NRestarts=0；源站config=200。
+- Git分支和回退tag `rollback/2026-09-30-before-download-status`已推送核对，回退指向兼容周期额度的v0.26.0 `cb9f66d`。服务器保留`/srv/video-api-debugger/backups/download-status-9477c462066a809c2c5842552cfca752b642eeef`的旧source/live-build及DB快照；回退只恢复代码，不恢复整库。归档SHA-256两端一致`3058605002549e01966ed1ded8912f49cc446baceedc930ec612d5b8149a1a12`，解压/同步排除.env和运行媒体；无数据库迁移或历史数据覆盖。发布窗口已登记开始/完成。
+- 文件：`src/lib/image-studio/media.ts`分阶段下载/限时/安全诊断；`provider.ts`分离下载信号并传递诊断；`worker.ts`限定任务网络总时长及安全日志；`src/app/image-studio/studio.tsx`与`studio.module.css`图片状态；`src/components/template-studio/VideoTemplateWorkbench.tsx`与`template-studio.module.css`视频模板状态；`src/components/GenerationComposer.tsx`普通视频生成器；两个`scripts/image-studio-*-smoke.ts`离线诊断；`package.json`、`package-lock.json`和`src/lib/release.ts`版本/摘要；本todo留痕。依赖未变化。
+- 入口：https://sd2.youdooart.com/template-studio 。[统一代码差异](https://github.com/goukiyang/seedance-api-debugger/compare/dfe719e724704a7b86c55e3b96f565c8cd0e1311...9477c462066a809c2c5842552cfca752b642eeef)。守门员：本次涉及共享外链下载与状态UI，保留网络安全、积分及数据边界；无越界，无分级/归类误判。未执行浏览器、付费生成或用户功能验收，历史失败图片未恢复；本次不能承诺所有上游网络超时彻底消失。
 
 - [x] 周期额度模块 CQ02–CQ06 已部署 v0.26.0，待用户手动验收：[实施与发布记录](todo/2026-09-30-periodic-credits.md)。
 
