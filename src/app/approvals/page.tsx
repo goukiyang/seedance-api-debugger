@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { showVideoCardManagementUi } from '@/lib/navigation';
 
 type ApprovalUser = {
   id: string;
@@ -350,7 +351,9 @@ export default function ApprovalsPage() {
                     ) : approval.project_id || '-'}
                     {approval.videoCard && (
                       <div className="text-gray text-sm">
-                        <Link className="link" href={`/projects/${approval.videoCard.project_id}/video-cards/${approval.videoCard.id}`}>{approval.videoCard.title}</Link>
+                        {showVideoCardManagementUi ? (
+                          <Link className="link" href={`/projects/${approval.videoCard.project_id}/video-cards/${approval.videoCard.id}`}>{approval.videoCard.title}</Link>
+                        ) : approval.videoCard.title}
                       </div>
                     )}
                   </td>

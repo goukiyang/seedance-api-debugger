@@ -40,11 +40,14 @@ function isPreviewableItem(item: ReactionListItem | undefined): item is Reaction
   return isPreviewableContent(item?.content);
 }
 
-function CollectionThumbnail({ content }: { content: ContentSummary }) {
+function CollectionThumbnail({ content, preferPreviewImage }: { content: ContentSummary; preferPreviewImage?: boolean }) {
+  const thumbnailUrl = preferPreviewImage && content.category === 'image'
+    ? content.previewUrl || content.thumbnailUrl
+    : content.thumbnailUrl;
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [content.thumbnailUrl]);
+  useEffect(() => setFailed(false), [thumbnailUrl]);
   if (failed) return <span>预览暂不可用，收藏仍保留</span>;
-  if (content.thumbnailUrl) return <img src={content.thumbnailUrl} loading="lazy" alt={content.title} onError={() => setFailed(true)} />;
+  if (thumbnailUrl) return <img src={thumbnailUrl} loading="lazy" alt={content.title} onError={() => setFailed(true)} />;
   return content.category === 'audio' ? <Music size={30} /> : <ImageIcon size={30} />;
 }
 
@@ -93,17 +96,17 @@ function AccountContentLookup({ contentKey }: { contentKey: string }) {
   return <>{error && <p role="alert">{error}</p>}{content && <ContentPreview content={content} close={() => setContent(null)} />}</>;
 }
 
-export default function ContentCollections({ action }: { action: ReactionAction }) {
+export default function ContentCollections({ action, mediaClassName, preferPreviewImageThumbnails = false }: { action: ReactionAction; mediaClassName?: string; preferPreviewImageThumbnails?: boolean }) {
   const { user } = useAppSession();
   const params = useSearchParams();
   const category = params.get('category');
   const query = params.get('q');
   const content = params.get('content');
   if (!user) return null;
-  return <AccountCollections key={JSON.stringify([user.id, action, category, query, content])} userId={user.id} action={action} urlCategory={category} urlQuery={query} hasContent={content !== null} />;
+  return <AccountCollections key={JSON.stringify([user.id, action, category, query, content])} userId={user.id} action={action} urlCategory={category} urlQuery={query} hasContent={content !== null} mediaClassName={mediaClassName} preferPreviewImageThumbnails={preferPreviewImageThumbnails} />;
 }
 
-function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent }: { action: ReactionAction; userId: string; urlCategory: string | null; urlQuery: string | null; hasContent: boolean }) {
+function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent, mediaClassName, preferPreviewImageThumbnails }: { action: ReactionAction; userId: string; urlCategory: string | null; urlQuery: string | null; hasContent: boolean; mediaClassName?: string; preferPreviewImageThumbnails: boolean }) {
   const router = useRouter();
   const [category, setCategory] = useState<ContentCategory | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -416,7 +419,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
     {storageWarning && <p role="status">{storageWarning}</p>}
     {message && <p role="status">{message}</p>}
     <div className={styles.grid}>{items.map((item, index) => <article className={styles.card} key={item.key} data-remember-scroll-anchor={index < MAX_RESTORED_ITEMS ? item.key : undefined}>
-      <button className={styles.media} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} /> : '内容已不可用'}</button>
+      <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
       <div className={styles.body}><h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
         {item.content?.versionLabel && <span className={styles.muted}>版本：{item.content.versionLabel}</span>}
         <div className={styles.actions}><ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)} />

@@ -5,6 +5,7 @@ import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudio
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
+import { getStudioModuleFixedReferences, parseStudioFixedReferences, removeStudioModuleFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, StudioFixedReferenceError } from './fixed-references';
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
 export class StudioModuleError extends Error {
@@ -45,7 +46,9 @@ type StudioModuleRow = {
 
 async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string }) {
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
-  const assetIds = [...ids, ...(row.banner_asset_id ? [row.banner_asset_id] : [])];
+  const protectedSource = !isAdmin && Boolean(row.source_preset_id) && sourcePreset?.owner_id !== ownerId;
+  const fixedReferences = await getStudioModuleFixedReferences(ownerId, row.id);
+  const assetIds = [...ids, ...fixedReferences.map(reference => reference.assetId), ...(row.banner_asset_id ? [row.banner_asset_id] : [])];
   const assets = await prisma.asset.findMany({ where: { id: { in: assetIds }, owner_id: ownerId, status: 'active', type: 'image' },
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const generation = resolveStudioModuleGenerationConfig(row, settings);
@@ -72,18 +75,26 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: row.source_preset_id || null,
     sourcePresetShared: row.source_preset_id ? Boolean(sourcePreset && (sourcePreset.owner_id === ownerId || sourcePreset.is_shared)) : null,
     sourcePresetCanManageSharing: Boolean(sourcePreset && isAdmin && sourcePreset.scope === 'admin' && sourcePreset.owner_id === ownerId),
-    // The module is already restricted to ownerId. A user's own context is safe
-    // to return, while the separate global context remains admin-only.
-    contextConfigured: Boolean(row.context.trim()), context: row.context,
+    contextEditable: !protectedSource,
+    contextConfigured: Boolean(row.context.trim()), context: protectedSource ? '' : row.context,
     createdAt: row.created_at, updatedAt: row.updated_at,
-    images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : []; }) };
+    images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : []; }),
+    fixedReferences: fixedReferences.map(reference => {
+      const asset = assets.find(item => item.id === reference.assetId);
+      const available = Boolean(asset);
+      return { id: reference.assetId, originalUrl: available ? studioTemplateAssetUrl(reference.assetId) : null,
+        thumbnailUrl: available ? studioTemplateAssetUrl(reference.assetId, true) : null,
+        width: asset?.width || null, height: asset?.height || null, note: protectedSource ? '' : reference.note, available };
+    }) };
 }
 export async function listStudioModules(ownerId: string, cursor?: string, isAdmin = false, requestedIds?: string[]) {
   const settings = await getImageStudioSettings();
   const defaultId = defaultStudioModuleId(ownerId);
   const rows = await prisma.imageStudioModule.findMany({ where: { owner_id: ownerId, id: { not: defaultId, ...(requestedIds ? { in: requestedIds } : {}) } },
     orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 13, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
-  const sourceIds = rows.map(row => row.source_preset_id).filter((id): id is string => Boolean(id));
+  const includeDefault = !cursor && (!requestedIds || requestedIds.includes(defaultId));
+  const defaultRow = includeDefault ? await prisma.imageStudioModule.findFirst({ where: { id: defaultId, owner_id: ownerId } }) : null;
+  const sourceIds = [...rows, ...(defaultRow ? [defaultRow] : [])].map(row => row.source_preset_id).filter((id): id is string => Boolean(id));
   const sourceRows = sourceIds.length ? await prisma.imageStudioPreset.findMany({ where: { id: { in: sourceIds } }, select: { id: true, owner_id: true, scope: true, is_shared: true } }) : [];
   const sourceById = new Map(sourceRows.map(row => [row.id, row]));
   // Keep an old personal copy visible after sharing is turned off so its
@@ -91,9 +102,8 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   // the authoritative check for whether a new generation may start.
   const visible = rows.slice(0, 12);
   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined)));
-  if (!cursor && (!requestedIds || requestedIds.includes(defaultId))) {
-    const first = await prisma.imageStudioModule.findFirst({ where: { id: defaultId, owner_id: ownerId } });
-    modules.unshift(await moduleDTO(first || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: MAX_REFERENCE_IMAGES, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(first), isAdmin, first?.source_preset_id ? sourceById.get(first.source_preset_id) : undefined));
+  if (includeDefault) {
+    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: MAX_REFERENCE_IMAGES, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined));
   }
   // Navigation must describe all saved modules, not just the first content page.
   const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
@@ -116,6 +126,7 @@ export async function deleteStudioModule(ownerId: string, id: unknown, revision:
     const pending = await tx.imageStudioTask.count({ where: { owner_id: ownerId, module_id: id, status: { in: ['queued', 'running'] } } });
     if (pending) throw new StudioModuleError('模板还有生成中的任务，请完成后再删除', 409);
     // Tasks and assets have independent ownership and remain available in assets.
+    await removeStudioModuleFixedReferences(ownerId, id, tx);
     await tx.imageStudioModule.deleteMany({ where: { id, owner_id: ownerId, revision: current.revision } });
   });
 }
@@ -146,6 +157,11 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   const referenceLimitValue = createOnly ? MAX_REFERENCE_IMAGES : body.referenceLimit;
   const referenceLimit = referenceLimitValue === undefined ? MAX_REFERENCE_IMAGES : Number(referenceLimitValue);
   const ids = createOnly ? [] : body.referenceIds;
+  let fixedReferences: ReturnType<typeof parseStudioFixedReferences> | undefined;
+  if (body.fixedReferences !== undefined) {
+    try { fixedReferences = parseStudioFixedReferences(body.fixedReferences); }
+    catch (error) { throw new StudioModuleError((error as Error).message); }
+  }
   const revision = createOnly ? 0 : body.revision;
   if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof prompt !== 'string' || prompt.length > 20000
     || !Number.isInteger(count) || Number(count) < 1 || Number(count) > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES
@@ -156,8 +172,21 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     if (current && current.owner_id !== ownerId) throw new StudioModuleError('无权修改这个模块', 403);
     if (current && createOnly) return current;
     if ((current?.revision || 0) !== revision) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对；当前草稿仍在本页', 409);
+    let protectedSource = false;
+    if (current?.source_preset_id && !isAdmin) {
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id }, select: { owner_id: true } });
+      protectedSource = !source || source.owner_id !== ownerId;
+      if (protectedSource) {
+        const currentFixedReferences = fixedReferences === undefined ? [] : await getStudioModuleFixedReferences(ownerId, id, tx);
+        const contextMatches = body.context === undefined || body.context === current.context;
+        const fixedReferencesMatch = fixedReferences === undefined || (fixedReferences.length === currentFixedReferences.length
+          && fixedReferences.every((reference, index) => reference.assetId === currentFixedReferences[index].assetId && reference.note === currentFixedReferences[index].note));
+        if (!contextMatches || !fixedReferencesMatch) throw new StudioModuleError('共享模板的内部上下文和固定参考图只能由创建者修改', 403);
+        fixedReferences = undefined;
+      }
+    }
     const assets = await tx.asset.count({ where: { id: { in: ids as string[] }, owner_id: ownerId, type: 'image', status: 'active' } });
-    if (assets !== new Set(ids).size) throw new StudioModuleError('参考图片已不可用或无权使用', 403);
+    if (assets !== new Set(ids as string[]).size) throw new StudioModuleError('参考图片已不可用或无权使用', 403);
     if (reproduceFromTaskId) {
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId, snapshot_json: { not: null } }, select: { id: true } });
       if (!source) throw new StudioModuleError('历史生成记录不存在或无权复现', 403);
@@ -177,7 +206,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       ...(bannerAssetId !== undefined ? { banner_asset_id: bannerAssetId } : {}),
       ...(reproduceFromTaskId !== undefined ? { reproduce_task_id: reproduceFromTaskId } : {}),
       ...(forcedSourcePresetId !== undefined ? { source_preset_id: forcedSourcePresetId } : {}),
-      ...(typeof body.context === 'string' ? { context: body.context } : {}) };
+      ...(typeof body.context === 'string' && !protectedSource ? { context: body.context } : {}) };
     if (bannerAssetId) {
       const banner = await tx.asset.findFirst({ where: { id: bannerAssetId, owner_id: ownerId, type: 'image', status: 'active' }, select: { id: true } });
       if (!banner) throw new StudioModuleError('banner 图片不存在或无权使用', 403);
@@ -194,6 +223,13 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
         if (!changed.count) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对', 409);
         return tx.imageStudioModule.findUniqueOrThrow({ where: { id } });
       })();
+    if (fixedReferences) {
+      try { await setStudioModuleFixedReferences(ownerId, id, fixedReferences, tx); }
+      catch (error) {
+        if (error instanceof StudioFixedReferenceError) throw new StudioModuleError(error.message, error.status);
+        throw error;
+      }
+    }
     // An administrator's bound module is the canonical source for the shared
     // preset. Personal copies created from that preset stay independent.
     if (isAdmin && current?.source_preset_id) {
@@ -205,6 +241,13 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
           reference_limit: saved.reference_limit, aspect_ratio: saved.aspect_ratio,
           banner_asset_id: saved.banner_asset_id, reference_ids: saved.reference_ids,
         } });
+        if (fixedReferences) {
+          try { await setStudioPresetFixedReferences(ownerId, current.source_preset_id, fixedReferences, tx); }
+          catch (error) {
+            if (error instanceof StudioFixedReferenceError) throw new StudioModuleError(error.message, error.status);
+            throw error;
+          }
+        }
       }
     }
     return saved;

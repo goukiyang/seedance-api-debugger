@@ -1,9 +1,39 @@
 .controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
 .controls button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 32px; height: 32px; padding: 4px 7px; border: 1px solid var(--border, #394449); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; letter-spacing: 0; }
-.controls button[aria-pressed="true"] { color: #f3bb64; background: #f3bb6414; }
+.controls button[aria-pressed="true"] { color: #ff6677; background: #ff66771c; border-color: #ff66775c; }
 .controls button:disabled { opacity: .45; cursor: default; }
 .controls button:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
 .error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #ffb3a7; }
+.busy { display: inline-flex; align-items: center; gap: 4px; color: #f3d68c; font-size: 11px; white-space: nowrap; }
+.busyIcon { animation: reaction-busy-spin .8s linear infinite; }
+.overlayControls { flex-wrap: nowrap; padding: 3px; border-radius: 7px; background: transparent; }
+.overlayControls button:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
+.overlayControls:hover button,
+.overlayControls:focus-within button,
+[data-reaction-surface]:hover .overlayControls button,
+[data-reaction-surface]:focus-within .overlayControls button,
+.overlayControls .error button { opacity: 1; }
+.overlayControls:hover,
+.overlayControls:focus-within,
+[data-reaction-surface]:hover .overlayControls,
+[data-reaction-surface]:focus-within .overlayControls,
+.overlayControls:has(button[aria-pressed="true"]),
+.overlayControls:has(.busy),
+.overlayControls:has(.error) { background: rgb(12 17 19 / 76%); }
+.overlayControls:hover button,
+.overlayControls:focus-within button,
+[data-reaction-surface]:hover .overlayControls button,
+[data-reaction-surface]:focus-within .overlayControls button,
+.overlayControls .error button { pointer-events: auto; }
+.overlayControls .error,
+.overlayControls .busy { opacity: 1; }
+.overlayControls .error { max-width: min(52vw, 320px); overflow-wrap: anywhere; white-space: normal; }
+.overlayControls .error button { flex: 0 0 auto; }
+@media (hover: none), (pointer: coarse) {
+  .overlayControls { background: rgb(12 17 19 / 76%); }
+  .overlayControls button { opacity: 1 !important; pointer-events: auto; }
+}
+@keyframes reaction-busy-spin { to { transform: rotate(360deg); } }
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
 .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
 .toolbar input { min-width: 180px; max-width: 100%; padding: 8px; background: transparent; color: inherit; border: 1px solid #394449; border-radius: 5px; }

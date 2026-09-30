@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowRight, Music2, RotateCcw, X } from 'lucide-react';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import type { SafeImagePreviewDetails } from '@/components/ZoomableImagePreview';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { useMediaPreviewState } from '@/lib/hooks/use-media-preview-state';
 import styles from './MediaPreview.module.css';
@@ -17,6 +18,8 @@ export type MediaPreviewProps = {
   poster?: string;
   contentKey?: ContentKey;
   previewKey?: string;
+  safeDetails?: SafeImagePreviewDetails;
+  /** Caller-provided status/reactions/file metadata only; remove prompts before passing. */
   details?: ReactNode;
   notice?: ReactNode;
   onClose: () => void;
@@ -38,10 +41,11 @@ export default function MediaPreview(props: MediaPreviewProps) {
     return (
       <ZoomableImagePreview
         src={props.src}
-        alt={props.title || '图片'}
+        alt="图片预览"
         title={props.title}
         previewKey={props.previewKey}
         contentKey={props.contentKey}
+        safeDetails={props.safeDetails}
         details={props.details}
         notice={props.notice}
         hasNavigation={props.hasNavigation}
@@ -57,7 +61,6 @@ export default function MediaPreview(props: MediaPreviewProps) {
 function MediaFilePreview({
   src,
   type,
-  title,
   poster,
   contentKey,
   previewKey,
@@ -85,7 +88,7 @@ function MediaFilePreview({
   const [loadError, setLoadError] = useState<string | null>(src.trim() ? null : '没有可用的媒体地址。');
   const lastPreviewStateKeyRef = useRef<string | null>(null);
   const mediaName = type === 'video' ? '视频' : '音频';
-  const titleText = title || (type === 'video' ? '视频预览' : '音频预览');
+  const titleText = type === 'video' ? '视频预览' : '音频预览';
 
   const classifyMediaError = useCallback(async (media: HTMLVideoElement | HTMLAudioElement) => {
     if (activeSourceRef.current !== src) return;
@@ -323,8 +326,10 @@ function MediaFilePreview({
       onContextMenu={event => event.preventDefault()}
     >
       <div ref={toolbarRef} className={styles.toolbar}>
-        {contentKey && <ContentReactions contentKey={contentKey} />}
-        <strong className={styles.title} title={titleText}>{titleText}</strong>
+        <div className={styles.leading}>
+          {contentKey && <ContentReactions contentKey={contentKey} />}
+          <strong className={styles.title}>{titleText}</strong>
+        </div>
         <div className={styles.actions}>
           {hasNavigation && onPrevious && <button type="button" onClick={onPrevious} title="上一项" aria-label="上一项"><ArrowLeft size={16} /></button>}
           {hasNavigation && onNext && <button type="button" onClick={onNext} title="下一项" aria-label="下一项"><ArrowRight size={16} /></button>}

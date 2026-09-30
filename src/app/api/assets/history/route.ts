@@ -67,6 +67,35 @@ export async function GET(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
+    const searchParams = request.nextUrl.searchParams;
+    if (searchParams.has('assetIds')) {
+      if (['page', 'limit', 'source', 'type'].some((key) => searchParams.has(key))) {
+        return NextResponse.json({ error: 'assetIds 查询不能与分页或其他筛选条件同时使用' }, { status: 400 });
+      }
+      const requestedIds = searchParams.getAll('assetIds').flatMap((value) => value.split(',')).map((id) => id.trim());
+      const assetIds = Array.from(new Set(requestedIds));
+      if (requestedIds.length === 0 || requestedIds.length > 80 || assetIds.some((id) => !id)) {
+        return NextResponse.json({ error: 'assetIds 查询最多支持 80 个有效素材编号' }, { status: 400 });
+      }
+
+      const assets = await prisma.asset.findMany({
+        where: { id: { in: assetIds }, owner_id: user.id, status: 'active', type: 'image' },
+        select: {
+          id: true,
+          type: true,
+          original_url: true,
+          thumbnail_url: true,
+          file_name: true,
+          mime_type: true,
+          width: true,
+          height: true,
+          file_size: true,
+          created_at: true,
+        },
+      });
+      return NextResponse.json({ assets: assets.map(serializeAsset) });
+    }
+
     const page = clampPage(request.nextUrl.searchParams.get('page'));
     const limit = clampLimit(request.nextUrl.searchParams.get('limit'));
     const type = parseHistoryAssetType(request.nextUrl.searchParams.get('type'));

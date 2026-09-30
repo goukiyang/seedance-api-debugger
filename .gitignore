@@ -64,3 +64,5 @@ public/uploads/*
 # Runtime generated videos and thumbnails
 public/videos/*
 public/videos/thumbnails/*
+# Local user feedback contains private prompts; never publish these originals.
+/docs/materials/2026-09-30-template-ui/

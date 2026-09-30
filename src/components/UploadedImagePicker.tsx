@@ -3,10 +3,12 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Eye } from 'lucide-react';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import { UploadedImagePickerAlbums } from '@/components/UploadedImagePickerAlbums';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
 import type { AssetType } from '@/types';
@@ -24,11 +26,12 @@ interface UploadedAssetItem {
   createdAt: string;
 }
 
+/** Picker selections carry Asset.id values; they are never ReferenceImage.id values. */
 export type UploadedAssetSelection = {
   id: string;
   type: AssetType;
   originalUrl?: string;
-  thumbnailUrl?: string;
+  thumbnailUrl?: string | null;
   fileName?: string;
   width?: number | null;
   height?: number | null;
@@ -41,6 +44,8 @@ interface Props {
   open: boolean;
   currentCount: number;
   currentAssetIds: string[];
+  /** Mount inside an existing native dialog so the picker stays in its top layer. */
+  portalContainer?: Element | null;
   onClose: () => void;
   onUploadFile: (file: File, onProgress?: UploadProgressHandler) => Promise<string>;
   onConfirm: (assetIds: string[], assets?: UploadedAssetSelection[]) => Promise<void>;
@@ -135,14 +140,16 @@ export function UploadedImagePicker({
   open,
   currentCount,
   currentAssetIds,
+  portalContainer,
   onClose,
   onUploadFile,
   onConfirm,
 }: Props) {
   const [items, setItems] = useState<UploadedAssetItem[]>([]);
-  const [source, setSource] = useState('all');
+  const [source, setSource] = useState<'all' | 'generated' | 'uploaded' | 'albums'>('all');
   const loadSequence = useRef(0);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
+  const [selectedAssetsById, setSelectedAssetsById] = useState<Record<string, UploadedAssetSelection>>({});
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -152,9 +159,19 @@ export function UploadedImagePicker({
   const [error, setError] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<UploadedAssetItem | null>(null);
   const [pendingAttach, setPendingAttach] = useState<PendingPickerAttach | null>(null);
+  const [confirmFailed, setConfirmFailed] = useState(false);
+  const [nativeDialogContainer, setNativeDialogContainer] = useState<Element | null>(null);
+  const [portalResolutionComplete, setPortalResolutionComplete] = useState(false);
+  const previewReturnDialog = useRef<HTMLDialogElement | null>(null);
+  const openRef = useRef(open);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  openRef.current = open;
 
   const currentAssetIdSet = useMemo(() => new Set(currentAssetIds), [currentAssetIds]);
+  const selectedAssets = useMemo(
+    () => selectedAssetIds.map((id) => selectedAssetsById[id]).filter((asset): asset is UploadedAssetSelection => Boolean(asset)),
+    [selectedAssetIds, selectedAssetsById],
+  );
   void currentCount;
 
   const loadPage = useCallback(async (targetPage: number, mode: 'replace' | 'append' = 'replace') => {
@@ -164,7 +181,7 @@ export function UploadedImagePicker({
     try {
       const params = new URLSearchParams({
         type: imageOnly ? 'image' : 'all',
-        source: imageOnly ? source : 'all',
+        source: imageOnly && source !== 'albums' ? source : 'all',
         page: String(targetPage),
         limit: String(PAGE_SIZE),
       });
@@ -191,22 +208,87 @@ export function UploadedImagePicker({
   }, [imageOnly, source]);
 
   useEffect(() => {
-    if (!open) return;
-    setSelectedAssetIds([]);
-    setPreviewAsset(null);
-    setUploadProgress(null);
-    setPendingAttach(null);
-    setItems([]);
-    void loadPage(1, 'replace');
-    return () => { loadSequence.current++; };
-  }, [loadPage, open]);
+    if (!open) {
+      setPortalResolutionComplete(false);
+      setNativeDialogContainer(null);
+      return;
+    }
+    if (portalContainer) {
+      setNativeDialogContainer(null);
+      setPortalResolutionComplete(true);
+      return;
+    }
+    const openDialogs = Array.from(document.querySelectorAll('dialog[open]'));
+    const modalDialog = openDialogs.find((dialog) => {
+      try {
+        return dialog.matches(':modal');
+      } catch {
+        return false;
+      }
+    });
+    setNativeDialogContainer(modalDialog || null);
+    setPortalResolutionComplete(true);
+  }, [open, portalContainer]);
 
   useEffect(() => {
     if (!open) return;
+    setSelectedAssetIds([]);
+    setSelectedAssetsById({});
+    setPreviewAsset(null);
+    setUploadProgress(null);
+    setPendingAttach(null);
+    setConfirmFailed(false);
+    setItems([]);
+    return () => { loadSequence.current++; };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (source === 'albums') {
+      loadSequence.current++;
+      setLoading(false);
+      return;
+    }
+    void loadPage(1, 'replace');
+    return () => { loadSequence.current++; };
+  }, [loadPage, open, source]);
+
+  useEffect(() => {
+    if (!open) return;
+    const portalRoot = portalContainer || nativeDialogContainer;
+    const dialog = portalRoot instanceof HTMLDialogElement ? portalRoot : portalRoot?.closest('dialog');
+    if (dialog) {
+      const handleDialogKeyDown = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (previewAsset) setPreviewAsset(null);
+        else onClose();
+      };
+      const handleDialogCancel = (event: Event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (previewAsset) {
+          setPreviewAsset(null);
+          return;
+        }
+        onClose();
+      };
+      dialog.addEventListener('keydown', handleDialogKeyDown, true);
+      dialog.addEventListener('cancel', handleDialogCancel, true);
+      return () => {
+        dialog.removeEventListener('keydown', handleDialogKeyDown, true);
+        dialog.removeEventListener('cancel', handleDialogCancel, true);
+      };
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
       if (previewAsset) {
-        event.stopImmediatePropagation();
         setPreviewAsset(null);
         return;
       }
@@ -214,19 +296,45 @@ export function UploadedImagePicker({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open, previewAsset]);
+  }, [nativeDialogContainer, onClose, open, portalContainer, previewAsset]);
+
+  useEffect(() => {
+    const portalRoot = portalContainer || nativeDialogContainer;
+    const dialog = portalRoot instanceof HTMLDialogElement ? portalRoot : portalRoot?.closest('dialog');
+    if (previewAsset) {
+      if (dialog?.open && dialog.matches(':modal')) {
+        previewReturnDialog.current = dialog;
+        dialog.close();
+      }
+      return;
+    }
+    const dialogToRestore = previewReturnDialog.current;
+    if (dialogToRestore) {
+      previewReturnDialog.current = null;
+      if (openRef.current && dialogToRestore.isConnected && !dialogToRestore.open) dialogToRestore.showModal();
+    }
+  }, [nativeDialogContainer, open, portalContainer, previewAsset]);
 
   if (!open) return null;
 
-  const toggleAsset = (assetId: string) => {
+  const toggleAsset = (assetId: string, asset?: UploadedAssetSelection) => {
     if (currentAssetIdSet.has(assetId)) return;
-    if (!selectedAssetIds.includes(assetId) && maxSelection !== undefined && selectedAssetIds.length >= maxSelection) {
+    const isSelected = selectedAssetIds.includes(assetId);
+    if (!isSelected && maxSelection !== undefined && selectedAssetIds.length >= maxSelection) {
       setError(`最多还能选择 ${maxSelection} 张图片`); return;
     }
     setSelectedAssetIds((current) => {
       if (current.includes(assetId)) return current.filter((id) => id !== assetId);
       return [...current, assetId];
     });
+    setSelectedAssetsById((current) => {
+      const next = { ...current };
+      if (isSelected) delete next[assetId];
+      else if (asset) next[assetId] = asset;
+      return next;
+    });
+    setConfirmFailed(false);
+    setError(null);
   };
 
   const handleUploadClick = () => {
@@ -251,6 +359,7 @@ export function UploadedImagePicker({
     await onConfirm(assetIds, assets);
     setPendingAttach(null);
     setSelectedAssetIds([]);
+    setSelectedAssetsById({});
     onClose();
   };
 
@@ -346,6 +455,12 @@ export function UploadedImagePicker({
       if (!res.ok) throw new Error(data.error || data.message || '删除历史素材失败');
       setItems((current) => current.filter((item) => item.id !== asset.id));
       setSelectedAssetIds((current) => current.filter((id) => id !== asset.id));
+      setSelectedAssetsById((current) => {
+        const next = { ...current };
+        delete next[asset.id];
+        return next;
+      });
+      setConfirmFailed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : '删除历史素材失败');
     } finally {
@@ -357,23 +472,25 @@ export function UploadedImagePicker({
     if (selectedAssetIds.length === 0) return;
     setLoading(true);
     setError(null);
+    setConfirmFailed(false);
     try {
-      const itemById = new Map(items.map((item) => [item.id, item]));
       const selectedAssets = selectedAssetIds
-        .map((id) => itemById.get(id))
-        .filter((item): item is UploadedAssetItem => Boolean(item))
-        .map((item) => ({ id: item.id, type: item.type, originalUrl: item.originalUrl, thumbnailUrl: item.thumbnailUrl ?? undefined, fileName: item.fileName, width: item.width, height: item.height }));
+        .map((id) => selectedAssetsById[id])
+        .filter((item): item is UploadedAssetSelection => Boolean(item));
+      if (selectedAssets.length !== selectedAssetIds.length) throw new Error('图片信息暂时不可用，请重新选择后重试。');
       await onConfirm(selectedAssetIds, selectedAssets);
       setSelectedAssetIds([]);
+      setSelectedAssetsById({});
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : '加入参考素材失败');
+      setConfirmFailed(true);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
+  const pickerContent = (
     <div className="uploaded-picker-backdrop" onClick={onClose}>
       <div className="uploaded-picker" onClick={(event) => event.stopPropagation()}>
         <input
@@ -395,7 +512,7 @@ export function UploadedImagePicker({
 
         {error && <div className="uploaded-picker-error">{error}</div>}
         {imageOnly && <div className="uploaded-picker-actions" role="tablist" aria-label="图片来源">
-          {[['all', '全部'], ['generated', '已生成'], ['uploaded', '已上传']].map(([value, label]) => <button key={value} className={source === value ? 'uploaded-picker-confirm' : 'uploaded-picker-cancel'} type="button" role="tab" aria-selected={source === value} disabled={uploading} onClick={() => setSource(value)}>{label}</button>)}
+          {([['all', '全部'], ['generated', '已生成'], ['uploaded', '已上传'], ['albums', '我的图集']] as const).map(([value, label]) => <button key={value} className={source === value ? 'uploaded-picker-confirm' : 'uploaded-picker-cancel'} type="button" role="tab" aria-selected={source === value} disabled={uploading} onClick={() => setSource(value)}>{label}</button>)}
         </div>}
         {pendingAttach && (
           <div className="uploaded-picker-attach-retry">
@@ -416,7 +533,15 @@ export function UploadedImagePicker({
         )}
 
         <div className="uploaded-picker-body">
-          {loading && items.length === 0 ? (
+          {imageOnly && source === 'albums' ? (
+            <UploadedImagePickerAlbums
+              selectedAssetIds={selectedAssetIds}
+              selectedAssets={selectedAssets}
+              currentAssetIds={currentAssetIds}
+              maxSelection={maxSelection}
+              onToggleAsset={(asset) => toggleAsset(asset.id, asset)}
+            />
+          ) : loading && items.length === 0 ? (
             <div className="uploaded-picker-empty">读取中...</div>
           ) : items.length === 0 ? (
             <div className="uploaded-picker-empty">
@@ -451,7 +576,7 @@ export function UploadedImagePicker({
                             setPreviewAsset(item);
                             return;
                           }
-                          toggleAsset(item.id);
+                          toggleAsset(item.id, { id: item.id, type: item.type, originalUrl: item.originalUrl, thumbnailUrl: item.thumbnailUrl ?? undefined, fileName: item.fileName, width: item.width, height: item.height });
                         }}
                         disabled={item.type !== 'image' && inWorkspace}
                         title={previewTitle}
@@ -470,7 +595,7 @@ export function UploadedImagePicker({
                       <button
                         type="button"
                         className="uploaded-picker-card-state"
-                        onClick={() => toggleAsset(item.id)}
+                        onClick={() => toggleAsset(item.id, { id: item.id, type: item.type, originalUrl: item.originalUrl, thumbnailUrl: item.thumbnailUrl ?? undefined, fileName: item.fileName, width: item.width, height: item.height })}
                         disabled={inWorkspace}
                       >
                         {inWorkspace ? '已在参考区' : selected ? '已选择' : '选择'}
@@ -501,7 +626,7 @@ export function UploadedImagePicker({
         <div className="uploaded-picker-footer">
           <span>{imageOnly ? `已选 ${selectedAssetIds.length} 张${maxSelection !== undefined ? `，最多 ${maxSelection} 张` : ''}` : `已选 ${selectedAssetIds.length} 个；生成前会检查图片、视频、音频各自上限`}</span>
           <div className="uploaded-picker-actions">
-            {hasMore && (
+            {hasMore && source !== 'albums' && (
               <button
                 type="button"
                 className="uploaded-picker-more"
@@ -521,7 +646,7 @@ export function UploadedImagePicker({
               onClick={() => { void handleConfirm(); }}
               disabled={selectedAssetIds.length === 0 || loading || uploading}
             >
-              加入参考区
+              {imageOnly ? confirmFailed ? '重试使用所选图片' : '使用所选图片' : '加入参考区'}
             </button>
           </div>
         </div>
@@ -547,4 +672,9 @@ export function UploadedImagePicker({
       </div>
     </div>
   );
+
+  if (!open) return null;
+  if (!portalContainer && !portalResolutionComplete) return null;
+  const target = portalContainer || nativeDialogContainer;
+  return target ? createPortal(pickerContent, target) : pickerContent;
 }

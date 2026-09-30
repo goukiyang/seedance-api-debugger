@@ -1,13 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, MouseEvent, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Image as ImageIcon, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { useMediaPreviewState, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
+import { useImageReadProgress } from '@/lib/hooks/use-image-read-progress';
 
 export type ImageComparisonSource = {
   src: string;
@@ -17,6 +18,7 @@ export type ImageComparisonSource = {
 };
 
 export type ImagePreviewMetadata = {
+  /** Legacy input only. Never rendered by the preview. */
   context?: string;
   model?: string;
   quality?: string;
@@ -24,6 +26,8 @@ export type ImagePreviewMetadata = {
   resolution?: string;
   time?: string;
 };
+
+export type SafeImagePreviewDetails = Omit<ImagePreviewMetadata, 'context'> & { width?: number; height?: number };
 
 type ZoomableImagePreviewProps = {
   src: string;
@@ -33,7 +37,9 @@ type ZoomableImagePreviewProps = {
   previewKey?: string;
   contentKey?: ContentKey;
   metadata?: ImagePreviewMetadata;
+  safeDetails?: SafeImagePreviewDetails;
   comparison?: ImageComparisonSource;
+  /** Caller-provided status/reactions/file metadata only; remove prompts before passing. */
   details?: ReactNode;
   notice?: ReactNode;
   hasNavigation?: boolean;
@@ -46,6 +52,32 @@ const MIN_SCALE = 0.5;
 const MAX_SCALE = 24;
 const SCALE_STEP = 1.2;
 const DRAG_THRESHOLD = 5;
+
+type IntrinsicSize = { width: number; height: number };
+
+function safeImageLabel(title?: string, fileName?: string) {
+  const trimmedTitle = title?.trim();
+  if (trimmedTitle && /^(?:生成结果|图片预览)\s+\d{1,5}$/.test(trimmedTitle)) return trimmedTitle;
+  const trimmedFileName = fileName?.trim();
+  if (trimmedFileName && /^(?:IMG[_-]\d{3,10}|(?:image|output|result)[_-]\d{1,8})\.(?:png|jpe?g|webp|avif|gif)$/i.test(trimmedFileName)) return trimmedFileName;
+  return '图片预览';
+}
+
+function safeMetadataValue(value?: string) {
+  const text = value?.trim();
+  if (!text || text.length > 32 || /[<>\r\n,;!?]/.test(text) || text.split(/\s+/).length > 3) return undefined;
+  return text;
+}
+
+function safeMetadataTime(value?: string) {
+  const text = value?.trim();
+  if (!text || text.length > 32 || !/^[\d年月日时分秒TtZz:./+\- ]+$/.test(text)) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}T/i.test(text)) {
+    const date = new Date(text);
+    return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : undefined;
+  }
+  return text;
+}
 
 type ActiveDrag = {
   pointerId: number;
@@ -81,47 +113,87 @@ function clampRestoredScale(value: number) {
   return Math.min(1_000_000, Math.max(MIN_SCALE, value));
 }
 
-function displaySource(src: string, mode: 'preview' | 'thumbnail') {
+function displaySource(src: string, mode: 'preview' | 'thumbnail' | 'original') {
   if (!/^\/api\/image-studio\/(?:assets|template-assets)\//.test(src)) return src;
   const url = new URL(src, 'https://sd2.youdooart.com');
   url.searchParams.delete('thumbnail');
   url.searchParams.delete('preview');
-  url.searchParams.set(mode, '1');
+  if (mode !== 'original') url.searchParams.set(mode, '1');
   return `${url.pathname}${url.search}`;
 }
 
-function PreviewImage({ src, alt, original, className, style, onReady }: { src: string; alt: string; original: boolean; className: string; style: CSSProperties; onReady?: () => void }) {
+function parseImageDimensions(value?: string): IntrinsicSize | undefined {
+  const match = value?.trim().match(/^(\d{2,5})\s*[x×]\s*(\d{2,5})$/i);
+  if (!match) return undefined;
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
+function formatImageBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; value >= 1024 && index < units.length; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
+}
+
+function PreviewImage({ src, alt, original, className, style, onReady }: { src: string; alt: string; original: boolean; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize) => void }) {
   const image = useRef<HTMLImageElement>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   const [attempt, setAttempt] = useState(0);
   const [loadedKey, setLoadedKey] = useState('');
   const [failedKey, setFailedKey] = useState('');
-  const displaySrc = original ? src : displaySource(src, 'preview');
+  const displaySrc = displaySource(src, original ? 'original' : 'preview');
   const thumbnail = displaySource(src, 'thumbnail');
   const key = `${displaySrc}:${attempt}`;
+  const currentKeyRef = useRef(key);
+  currentKeyRef.current = key;
+  const readResult = useImageReadProgress(displaySrc, attempt);
+  const readProgress = readResult.progress;
+  const imageSrc = readResult.imageSrc || undefined;
   const loaded = loadedKey === key;
-  const failed = failedKey === key;
+  const unsupported = readProgress.phase === 'unsupported';
+  const failed = failedKey === key || unsupported;
   useEffect(() => {
+    if (loaded || unsupported) return;
     if (image.current?.complete && image.current.naturalWidth > 0) {
       setLoadedKey(key);
+      onReadyRef.current?.({ width: image.current.naturalWidth, height: image.current.naturalHeight });
       return;
     }
-    if (loaded) return;
+    if (readProgress.phase === 'reading') return;
     const timer = window.setTimeout(() => setFailedKey(key), 30000);
     return () => window.clearTimeout(timer);
-  }, [key, loaded]);
+  }, [key, loaded, readProgress.phase, unsupported]);
+  const progressLabel = readProgress.phase === 'unsupported'
+    ? readProgress.message || '该来源不是图片，未读取文件内容'
+    : readProgress.phase === 'unavailable'
+      ? readProgress.message || '当前来源无法提供读取进度'
+      : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
     {thumbnail !== src && !loaded && <img src={thumbnail} alt="" aria-hidden="true" className={className} style={style} draggable={false} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img ref={image} key={key} src={displaySrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
-      onLoad={() => { setLoadedKey(key); setFailedKey(''); onReady?.(); }} onError={() => setFailedKey(key)} />
+    {imageSrc && <img ref={image} key={key} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
+      onLoad={event => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); onReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
     {!loaded && <div className={styles.imageStatus} role="status">
-      <span>{failed ? '图片未能加载' : original ? '原图加载中' : '高清预览加载中'}</span>
-      {failed && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setAttempt(value => value + 1); }}><RotateCcw size={16} /></button>}
+      <span>{failed ? (unsupported ? progressLabel : '图片未能加载') : `${alt} · ${original ? '完整原图' : '高清预览'} · ${progressLabel}`}</span>
+      {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
+      {!failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
+        <progress className={styles.imageProgress} max={100} value={readProgress.percent} aria-label={`${alt}读取进度 ${readProgress.percent}%`} />
+        {readProgress.totalBytes != null && <span>{readProgress.percent}% · {formatImageBytes(readProgress.loadedBytes)} / {formatImageBytes(readProgress.totalBytes)}</span>}
+      </>}
+      {!failed && readProgress.phase === 'reading' && readProgress.percent == null && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
+      {!failed && readProgress.phase === 'decoding' && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
+      {failed && !unsupported && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setAttempt(value => value + 1); }}><RotateCcw size={16} /></button>}
     </div>}
   </>;
 }
 
-export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, contentKey, metadata, comparison, details, notice, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, fileName, title, previewKey, contentKey, metadata, safeDetails, comparison, details, notice, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -142,9 +214,16 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
   const [comparisonMode, setComparisonMode] = useState(false);
   const [comparisonAxis, setComparisonAxis] = useState<'horizontal' | 'vertical'>('horizontal');
   const [showReference, setShowReference] = useState(false);
+  const [dimensionsBySource, setDimensionsBySource] = useState<Record<string, IntrinsicSize>>({});
+  const dimensionsTooltipId = useId();
 
   const activeSrc = showReference && comparison ? comparison.src : src;
-  const activeAlt = showReference && comparison ? comparison.alt : alt;
+  const generatedComparisonThumbnail = comparison ? displaySource(comparison.src, 'thumbnail') : undefined;
+  const comparisonThumbnail = comparison?.thumbnailSrc && comparison.thumbnailSrc !== comparison.src
+    ? comparison.thumbnailSrc
+    : generatedComparisonThumbnail !== comparison?.src ? generatedComparisonThumbnail : undefined;
+  const imageTitle = safeImageLabel(title, fileName);
+  const activeAlt = showReference && comparison ? '参考图' : imageTitle;
 
   const resetView = useCallback(() => {
     setView({ scale: 1, offset: { x: 0, y: 0 } });
@@ -540,9 +619,28 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
   }, [onClose]);
 
   const comparisonLayoutLabel = comparisonAxis === 'horizontal' ? '左右' : '上下';
-  const handleImageReady = useCallback(() => {
-    if (zoomMode === 'width' || zoomMode === 'actual') applyZoomMode(zoomMode, false);
-  }, [applyZoomMode, zoomMode]);
+  const handleImageReady = useCallback((imageSrc: string) => (size: IntrinsicSize) => {
+    setDimensionsBySource(current => current[imageSrc]?.width === size.width && current[imageSrc]?.height === size.height
+      ? current
+      : { ...current, [imageSrc]: size });
+    if (imageSrc === (comparisonMode ? src : activeSrc) && (zoomMode === 'width' || zoomMode === 'actual')) applyZoomMode(zoomMode, false);
+  }, [activeSrc, applyZoomMode, comparisonMode, src, zoomMode]);
+
+  const visibleMetadata = {
+    model: safeMetadataValue(safeDetails?.model ?? metadata?.model),
+    quality: safeMetadataValue(safeDetails?.quality ?? metadata?.quality),
+    ratio: safeMetadataValue(safeDetails?.ratio ?? metadata?.ratio),
+    resolution: safeMetadataValue(safeDetails?.resolution ?? metadata?.resolution),
+    time: safeMetadataTime(safeDetails?.time ?? metadata?.time),
+  };
+  const dimensionsSource = comparisonMode ? src : activeSrc;
+  const suppliedDimensions = dimensionsSource !== src ? undefined : safeDetails?.width && safeDetails.height && safeDetails.width > 0 && safeDetails.height > 0
+    ? { width: safeDetails.width, height: safeDetails.height }
+    : parseImageDimensions(safeDetails?.resolution ?? metadata?.resolution);
+  const measuredDimensions = dimensionsBySource[dimensionsSource];
+  const sourceUsesResizedPreview = /^\/api\/image-studio\/(?:assets|template-assets)\//.test(dimensionsSource) && !showOriginal;
+  const visibleDimensions = suppliedDimensions || (!sourceUsesResizedPreview ? measuredDimensions : undefined);
+  const hasVisibleMetadata = Object.values(visibleMetadata).some(Boolean) || Boolean(visibleDimensions);
 
   const preview = (
     <div
@@ -551,7 +649,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
       data-media-preview="sd2-media-preview"
       role="dialog"
       aria-modal="true"
-      aria-label={title || fileName || alt || '图片预览'}
+      aria-label={imageTitle}
       tabIndex={-1}
       onClick={handleBackdropClick}
       onPointerDown={(event) => event.stopPropagation()}
@@ -565,9 +663,10 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
       onKeyUp={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div ref={toolbarRef} className={styles.toolbar}>
-        {contentKey && <ContentReactions contentKey={contentKey} />}
-        {comparison && <button
+      <div ref={toolbarRef} className={styles.toolbar} data-has-comparison={comparison ? 'true' : undefined} data-has-metadata={hasVisibleMetadata ? 'true' : undefined}>
+        <div className={styles.leading}>
+          {contentKey && <ContentReactions contentKey={contentKey} />}
+          {comparison && <button
           type="button"
           className={`${styles.referenceThumb} ${showReference ? styles.referenceThumbActive : ''}`}
           onClick={(event) => {
@@ -580,26 +679,27 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
           title={showReference ? '查看生成图' : '查看参考图'}
           aria-label={showReference ? '查看生成图' : '查看参考图'}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={comparison.thumbnailSrc || comparison.src} alt="参考图缩略图" draggable={false} />
-        </button>}
-        <div className={styles.title}>
-          <strong>{title || fileName || alt}</strong>
-          <span>{comparisonMode ? `${comparisonLayoutLabel}对比 · ` : ''}{Math.round(scale * 100)}%</span>
-          {metadata && <div className={styles.metadata}>
-            {(metadata.model || metadata.quality || metadata.ratio || metadata.resolution || metadata.time) && <span>{[metadata.model, metadata.quality, metadata.ratio, metadata.resolution, metadata.time].filter(Boolean).join(' · ')}</span>}
-          </div>}
-        </div>
-        <div className={styles.actions}>
-          {displaySource(activeSrc, 'preview') !== activeSrc && <button type="button" aria-pressed={showOriginal} onClick={() => { interactedRef.current = true; setShowOriginal(value => !value); }} title={showOriginal ? '切换高清预览' : '加载完整原图'}><span className={styles.actionLabel}>{showOriginal ? '原图' : '高清预览'}</span></button>}
-          {hasNavigation && onPrevious && <button type="button" onClick={onPrevious} title="上一张" aria-label="上一张生成图片"><ArrowLeft size={16} /></button>}
-          {hasNavigation && onNext && <button type="button" onClick={onNext} title="下一张" aria-label="下一张生成图片"><ArrowRight size={16} /></button>}
-          {comparison && <button type="button" data-image-preview-compare aria-pressed={comparisonMode} onClick={() => { interactedRef.current = true; setComparisonMode((current) => !current); resetView(); }} title={comparisonMode ? '退出对比' : '对比参考图'} aria-label={comparisonMode ? '退出对比' : '对比参考图'}>
-            <ArrowLeftRight size={16} /><span className={styles.actionLabel}>对比</span>
+            {comparisonThumbnail
+              ? <img src={comparisonThumbnail} alt="" aria-hidden="true" draggable={false} />
+              : <ImageIcon className={styles.referenceThumbFallback} size={18} aria-hidden="true" />}
           </button>}
-          {comparison && comparisonMode && <button type="button" data-image-preview-direction onClick={() => { interactedRef.current = true; setComparisonAxis((current) => current === 'horizontal' ? 'vertical' : 'horizontal'); resetView(); }} title={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'} aria-label={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'}>
+          <div className={styles.title}>
+            <strong>{imageTitle}</strong>
+            <span>{comparisonMode ? `${comparisonLayoutLabel}对比 · ` : ''}{Math.round(scale * 100)}%</span>
+          </div>
+        </div>
+        {comparison && <div className={styles.comparisonActions}>
+          <button type="button" data-image-preview-compare aria-pressed={comparisonMode} onClick={() => { interactedRef.current = true; setComparisonMode(current => !current); resetView(); }} title={comparisonMode ? '退出对比' : '对比参考图'} aria-label={comparisonMode ? '退出对比' : '对比参考图'}>
+            <ArrowLeftRight size={16} /><span className={styles.actionLabel}>对比</span>
+          </button>
+          {comparisonMode && <button type="button" data-image-preview-direction onClick={() => { interactedRef.current = true; setComparisonAxis(current => current === 'horizontal' ? 'vertical' : 'horizontal'); resetView(); }} title={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'} aria-label={comparisonAxis === 'horizontal' ? '切换上下对比' : '切换左右对比'}>
             {comparisonAxis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}<span className={styles.actionLabel}>{comparisonLayoutLabel}</span>
           </button>}
+        </div>}
+        <div className={styles.actions}>
+          {displaySource(activeSrc, 'preview') !== displaySource(activeSrc, 'original') && <button type="button" aria-pressed={showOriginal} onClick={() => { interactedRef.current = true; setShowOriginal(value => !value); }} title={showOriginal ? '切换高清预览' : '加载完整原图'}><span className={styles.actionLabel}>{showOriginal ? '原图' : '高清预览'}</span></button>}
+          {hasNavigation && onPrevious && <button type="button" onClick={onPrevious} title="上一张" aria-label="上一张生成图片"><ArrowLeft size={16} /></button>}
+          {hasNavigation && onNext && <button type="button" onClick={onNext} title="下一张" aria-label="下一张生成图片"><ArrowRight size={16} /></button>}
           <label className={styles.zoomMode}>
             <span className={styles.srOnly}>显示比例</span>
             <select aria-label="显示比例" value={zoomMode} onChange={event => applyZoomMode(event.target.value as MediaPreviewZoomMode)}>
@@ -622,6 +722,20 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
             <X size={16} />
           </button>
         </div>
+        {hasVisibleMetadata && <div className={styles.metadata}>
+          <div className={styles.metadataValues}>
+            {visibleMetadata.model && <span>{visibleMetadata.model}</span>}
+            {visibleMetadata.quality && <span>{visibleMetadata.quality}</span>}
+            {visibleMetadata.ratio && <span>{visibleMetadata.ratio}</span>}
+            {(visibleMetadata.resolution || visibleDimensions) && <span className={styles.dimensionHint}>
+              <span tabIndex={0} aria-describedby={dimensionsTooltipId}>
+                {visibleMetadata.resolution && !parseImageDimensions(visibleMetadata.resolution) ? visibleMetadata.resolution : '尺寸'}
+              </span>
+              <span id={dimensionsTooltipId} className={styles.dimensionTooltip} role="tooltip">{visibleDimensions ? `原始尺寸：${visibleDimensions.width} × ${visibleDimensions.height} 像素` : '原始尺寸暂不可用'}</span>
+            </span>}
+          </div>
+          {visibleMetadata.time && <time className={styles.metadataTime}>{visibleMetadata.time}</time>}
+        </div>}
         {notice != null && <div className={styles.notice}>{notice}</div>}
         {details != null && <details className={styles.detailDisclosure}>
           <summary>详情</summary>
@@ -648,14 +762,14 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
           <div className={styles.comparePane} data-image-preview-pane="reference">
             <span className={styles.compareLabel}>参考图</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <PreviewImage src={comparison.src} alt={comparison.alt} original={showOriginal} className={styles.compareImage}
+            <PreviewImage src={comparison.src} alt="参考图" original={showOriginal} className={styles.compareImage}
               style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} />
           </div>
           <div className={styles.comparePane} data-image-preview-pane="result">
             <span className={styles.compareLabel}>生成图</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <PreviewImage src={src} alt={alt} original={showOriginal} className={styles.compareImage}
-              style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onReady={handleImageReady} />
+            <PreviewImage src={src} alt="生成图" original={showOriginal} className={styles.compareImage}
+              style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onReady={handleImageReady(src)} />
           </div>
         </div> : <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -667,7 +781,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, co
             style={{
               transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
             }}
-            onReady={handleImageReady}
+            onReady={handleImageReady(activeSrc)}
           />
         </>}
       </div>

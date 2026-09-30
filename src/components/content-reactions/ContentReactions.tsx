@@ -90,8 +90,9 @@ export async function writeReaction(userId: string, key: ContentKey, action: Rea
   }
 }
 
-export default function ContentReactions({ contentKey, initialState, onChange, disabled = false }: {
+export default function ContentReactions({ contentKey, initialState, onChange, disabled = false, overlay = false }: {
   contentKey: ContentKey; initialState?: ReactionState; disabled?: boolean;
+  overlay?: boolean;
   onChange?: (state: ReactionState, action: ReactionAction, active: boolean) => void;
 }) {
   const { user } = useAppSession();
@@ -116,9 +117,10 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
     const active = action === 'like' ? !state.liked : !state.favorited;
     try { const next = await writeReaction(userId, contentKey, action, active, state); if (next) onChange?.(next, action, active); } catch { /* Error is retained with a retry action. */ }
   }
-  return <span className={styles.controls} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions>
+  return <span className={`${styles.controls} ${overlay ? styles.overlayControls : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
     <button type="button" title={state?.liked ? '取消点赞' : '点赞'} aria-label={state?.liked ? '取消点赞' : '点赞'} aria-pressed={state?.liked || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.liked)} onClick={() => void act('like')}><Heart size={16} fill={state?.liked ? 'currentColor' : 'none'} />{state?.likeCount !== null && state?.likeCount !== undefined && <span>{state.likeCount}</span>}</button>
     <button type="button" title={state?.favorited ? '取消收藏' : '收藏'} aria-label={state?.favorited ? '取消收藏' : '收藏'} aria-pressed={state?.favorited || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.favorited)} onClick={() => void act('favorite')}><Bookmark size={16} fill={state?.favorited ? 'currentColor' : 'none'} /></button>
+    {entry.busy && <span className={styles.busy} role="status"><RefreshCw size={13} className={styles.busyIcon} />保存中</span>}
     {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label="重试点赞收藏" title="重试" onClick={() => {
       const retry = state && pending.get(cacheKey(userId, state.key));
       if (retry && state) void writeReaction(userId, contentKey, retry.action, retry.active, state).then(next => { if (next) onChange?.(next, retry.action, retry.active); }).catch(() => {}); else schedule(userId, contentKey);

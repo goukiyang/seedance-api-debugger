@@ -2,6 +2,7 @@ import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { readStudioImage, readStudioThumbnail, readStudioPreview } from '@/lib/image-studio/media';
 import { canViewStudioPreset, canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { getStudioPresetsFixedReferences } from '@/lib/image-studio/fixed-references';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,8 +14,18 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
   if (!asset) return new Response('Not found', { status: 404 });
   if (asset.owner_id !== user.id) {
     if (!canUseCompanyTemplates(user)) return new Response('Not found', { status: 404 });
-    const presets = await prisma.imageStudioPreset.findMany({ where: { OR: [{ banner_asset_id: asset.id }, { reference_ids: { contains: `\"${asset.id}\"` } }] }, select: { owner_id: true, scope: true, is_shared: true } });
-    if (!presets.some(preset => canViewStudioPreset(user, preset))) return new Response('Not found', { status: 404 });
+    const presets = await prisma.imageStudioPreset.findMany({ where: { OR: [{ owner_id: user.id }, { is_shared: true }] }, select: { id: true, owner_id: true, scope: true, is_shared: true, banner_asset_id: true, reference_ids: true } });
+    const visiblePresets = presets.filter(preset => canViewStudioPreset(user, preset));
+    const explicitAsset = visiblePresets.some(preset => preset.banner_asset_id === asset.id
+      || (() => { try { const ids = JSON.parse(preset.reference_ids); return Array.isArray(ids) && ids.includes(asset.id); } catch { return false; } })());
+    let fixedAsset = false;
+    if (!explicitAsset) {
+      try {
+        const fixedByPreset = await getStudioPresetsFixedReferences(user, visiblePresets);
+        fixedAsset = Array.from(fixedByPreset.values()).some(references => references.some(reference => reference.assetId === asset.id));
+      } catch { return new Response('Not found', { status: 404 }); }
+    }
+    if (!explicitAsset && !fixedAsset) return new Response('Not found', { status: 404 });
   }
   try {
     const thumbnail = new URL(_request.url).searchParams.get('thumbnail') === '1';

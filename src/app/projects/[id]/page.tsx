@@ -11,6 +11,7 @@ import MediaPreview from '@/components/MediaPreview';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
+import { showVideoCardManagementUi } from '@/lib/navigation';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 
 interface ProjectDetail {
@@ -736,8 +737,11 @@ export default function ProjectDetailPage() {
             </p>
           </div>
           {permissions.can_generate ? (
-            <a href="#project-video-cards" className="btn btn-primary">
-              选择视频卡生成
+            <a
+              href={showVideoCardManagementUi ? '#project-video-cards' : `/generate?project_id=${encodeURIComponent(project.id)}`}
+              className="btn btn-primary"
+            >
+              {showVideoCardManagementUi ? '选择视频卡生成' : '进入生成'}
             </a>
           ) : (
             <span className="text-gray text-sm">当前状态或权限不可生成</span>
@@ -805,6 +809,7 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {showVideoCardManagementUi && (
       <div className="card" id="project-video-cards">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
@@ -929,6 +934,7 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </div>
+      )}
 
       <div className="card">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
@@ -1178,7 +1184,9 @@ export default function ProjectDetailPage() {
                   <td>{task.local_status}</td>
                   <td>
                     {task.video_card ? (
-                      <Link className="link" href={`/projects/${project.id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                      showVideoCardManagementUi ? (
+                        <Link className="link" href={`/projects/${project.id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                      ) : task.video_card.title
                     ) : (
                       <span className="text-gray">历史未归档</span>
                     )}

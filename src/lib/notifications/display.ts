@@ -1,3 +1,5 @@
+import { showVideoCardManagementUi } from '@/lib/navigation';
+
 export interface NotificationActorSummary {
   id: string;
   name: string | null;
@@ -98,7 +100,9 @@ export function notificationTone(notification: Pick<AppNotification, 'status' | 
 
 export function notificationHref(notification: AppNotification) {
   if (notification.videoCard?.id && notification.videoCard.project_id) {
-    return `/projects/${notification.videoCard.project_id}/video-cards/${notification.videoCard.id}`;
+    return showVideoCardManagementUi
+      ? `/projects/${notification.videoCard.project_id}/video-cards/${notification.videoCard.id}`
+      : `/projects/${notification.videoCard.project_id}`;
   }
   if (notification.project?.id) return `/projects/${notification.project.id}`;
   if (notification.approval?.id) return '/approvals';
@@ -106,13 +110,15 @@ export function notificationHref(notification: AppNotification) {
   const metadata = parseNotificationMetadata(notification.metadata_json);
   const videoCardId = typeof metadata.video_card_id === 'string' ? metadata.video_card_id : null;
   if (videoCardId && notification.project?.id) {
-    return `/projects/${notification.project.id}/video-cards/${videoCardId}`;
+    return showVideoCardManagementUi
+      ? `/projects/${notification.project.id}/video-cards/${videoCardId}`
+      : `/projects/${notification.project.id}`;
   }
   return '/notifications';
 }
 
 export function notificationActionLabel(notification: AppNotification) {
-  if (notification.videoCard?.id) return '打开视频卡';
+  if (notification.videoCard?.id) return showVideoCardManagementUi ? '打开视频卡' : '打开项目';
   if (notification.project?.id) return '打开项目';
   if (notification.approval?.id) return '查看审批';
   return '查看详情';

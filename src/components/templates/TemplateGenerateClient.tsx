@@ -22,6 +22,7 @@ import ComposerTopbar from '@/components/ComposerTopbar';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
+import { showVideoCardManagementUi } from '@/lib/navigation';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
@@ -1166,7 +1167,7 @@ export function TemplateGenerateClient() {
                 })}
               </div>
             </div>
-            {selectedVideoCard && (
+            {showVideoCardManagementUi && selectedVideoCard && (
               <Link href={`/projects/${selectedVideoCard.project_id || selectedProjectId}/video-cards/${selectedVideoCard.id}`}>查看视频卡</Link>
             )}
             <form onSubmit={handleCreateVideoCard}>

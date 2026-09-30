@@ -14,16 +14,23 @@
 
 .toolbar {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  min-height: 58px;
-  max-height: 44dvh;
-  padding: 10px 14px;
+  gap: 6px 10px;
+  min-height: 0;
+  max-height: 38dvh;
+  padding: 6px 12px;
   overflow-y: auto;
   border-bottom: 1px solid oklch(0.92 0 0 / 0.16);
   background: oklch(0.18 0 0 / 0.94);
   overscroll-behavior: contain;
+}
+
+.leading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .title {
@@ -40,6 +47,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .actions button {
@@ -188,9 +200,9 @@
 @media (max-width: 640px) {
   .toolbar {
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-    max-height: 46dvh;
-    padding: 8px 10px;
+    gap: 6px;
+    max-height: 42dvh;
+    padding: 6px 8px;
   }
 
   .actions {
@@ -206,6 +218,10 @@
     flex-basis: 40px;
     width: 40px;
     height: 40px;
+  }
+
+  .leading {
+    grid-row: 1;
   }
 
   .title {

@@ -12,6 +12,7 @@ import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from './model-catalog';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { displayUserName } from '@/lib/users/display';
+import { getStudioModuleFixedReferences, parseStudioFixedReferences, type StudioFixedReference } from './fixed-references';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -24,7 +25,6 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (!Number.isInteger(body.count) || Number(body.count) < 1 || Number(body.count) > 8) throw new StudioError('生成张数必须为 1 到 8');
   if (!Number.isInteger(body.revision)) throw new StudioError('请刷新生成设置');
   if (!Array.isArray(body.referenceIds) || body.referenceIds.length > MAX_REFERENCE_IMAGES || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError(`最多使用 ${MAX_REFERENCE_IMAGES} 张有效参考图`);
-  if (!body.prompt.trim() && !body.referenceIds.length) throw new StudioError('请添加参考图片或填写画面描述');
   let aspectRatio: string | undefined;
   try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
   catch (error) { throw new StudioError((error as Error).message); }
@@ -42,6 +42,18 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
   return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds: body.referenceIds as string[], ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
+}
+
+function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] {
+  if (!Array.isArray(value)) throw new StudioError('历史固定参考图快照无效', 409);
+  const references = value.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new StudioError('历史固定参考图快照无效', 409);
+    const record = item as Record<string, unknown>;
+    if (typeof record.id !== 'string' || !record.id) throw new StudioError('历史固定参考图快照无效', 409);
+    return { assetId: record.id, note: typeof record.note === 'string' ? record.note : '' };
+  });
+  try { return parseStudioFixedReferences(references); }
+  catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>) {
@@ -73,8 +85,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
     const workspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
+    const reproduceFromTaskId = input.reproduceFromTaskId || workspace?.reproduce_task_id || undefined;
     let sourcePresetId = workspace?.source_preset_id || null;
-    if (workspace?.source_preset_id) {
+    if (reproduceFromTaskId) sourcePresetId = null;
+    if (!reproduceFromTaskId && workspace?.source_preset_id) {
       const source = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
       if (!source || !canViewStudioPreset(identity, source)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
     }
@@ -90,47 +104,70 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
     let snapshotGlobalContext = settings.context;
     let snapshotModuleContext = workspace?.context || '';
-    let context = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
-    let referenceIds = input.referenceIds;
-    const reproduceFromTaskId = input.reproduceFromTaskId || workspace?.reproduce_task_id || undefined;
+    let baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
+    let fixedReferences: StudioFixedReference[] = [];
+    const referenceIds = input.referenceIds;
     if (reproduceFromTaskId) {
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId }, select: { source_preset_id: true, snapshot_json: true } });
       if (!source?.snapshot_json) throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       try {
-        const sourceSnapshot = JSON.parse(source.snapshot_json) as { globalContext?: unknown; moduleContext?: unknown; referenceImages?: unknown; sourcePresetId?: unknown };
+        const sourceSnapshot = JSON.parse(source.snapshot_json) as { globalContext?: unknown; moduleContext?: unknown; fixedReferenceImages?: unknown; sourcePresetId?: unknown };
         const historicalSourcePresetId = source.source_preset_id || (typeof sourceSnapshot.sourcePresetId === 'string' ? sourceSnapshot.sourcePresetId : null);
-        if (!sourcePresetId && historicalSourcePresetId) sourcePresetId = historicalSourcePresetId;
         if (historicalSourcePresetId) {
           const historicalSource = await tx.imageStudioPreset.findUnique({ where: { id: historicalSourcePresetId }, select: { owner_id: true, scope: true, is_shared: true } });
           if (!historicalSource || !canViewStudioPreset(identity, historicalSource)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
+          sourcePresetId = historicalSourcePresetId;
         }
         const sourceContext = [sourceSnapshot.globalContext, sourceSnapshot.moduleContext]
           .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
           .map(value => value.trim()).join('\n\n---\n模块上下文：\n');
-        if (!sourceContext) throw new Error('empty_context');
-        context = sourceContext;
+        fixedReferences = Array.isArray(sourceSnapshot.fixedReferenceImages)
+          ? parseHistoricalFixedReferences(sourceSnapshot.fixedReferenceImages)
+          : [];
+        if (!sourceContext && !fixedReferences.length && !referenceIds.length) throw new Error('empty_context');
+        baseContext = sourceContext;
         snapshotGlobalContext = typeof sourceSnapshot.globalContext === 'string' ? sourceSnapshot.globalContext : '';
         snapshotModuleContext = typeof sourceSnapshot.moduleContext === 'string' ? sourceSnapshot.moduleContext : '';
       } catch (error) {
         if (error instanceof StudioError) throw error;
         throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       }
+    } else if (workspace) {
+      fixedReferences = await getStudioModuleFixedReferences(ownerId, workspace.id, tx);
     }
-    if (!context) throw new StudioError('请先设置当前模块的上下文', 409);
+    if (fixedReferences.length + referenceIds.length > MAX_REFERENCE_IMAGES) {
+      throw new StudioError(`固定参考图与本次参考图合计不能超过 ${MAX_REFERENCE_IMAGES} 张`);
+    }
+    if (!input.prompt && !fixedReferences.length && !referenceIds.length) throw new StudioError('请添加参考图片或填写画面描述');
+    const fixedIds = fixedReferences.map(reference => reference.assetId);
+    const orderedReferenceIds = [...fixedIds, ...referenceIds];
+    const referenceInstructions = orderedReferenceIds.map((_, index) => {
+      const fixed = index < fixedReferences.length ? fixedReferences[index] : null;
+      return fixed
+        ? `第 ${index + 1} 张：固定参考图；备注（JSON 字符串）：${JSON.stringify(fixed.note)}`
+        : `第 ${index + 1} 张：本次参考图`;
+    }).join('\n');
+    const context = [baseContext.trim(), referenceInstructions ? `参考图顺序与备注（编号与实际发送次序一致）：\n${referenceInstructions}` : '']
+      .filter(Boolean).join('\n\n---\n');
+    if (!context && !orderedReferenceIds.length) throw new StudioError('请先设置模块上下文或添加参考图片', 409);
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
     if (active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
-    const references = await tx.asset.findMany({ where: { id: { in: referenceIds }, owner_id: ownerId, status: 'active', type: 'image' },
+    const uniqueReferenceIds = Array.from(new Set(orderedReferenceIds));
+    const references = await tx.asset.findMany({ where: { id: { in: uniqueReferenceIds }, owner_id: ownerId, status: 'active', type: 'image' },
       select: { id: true, original_url: true, thumbnail_url: true, file_name: true, mime_type: true, width: true, height: true, file_size: true, hash: true } });
-    if (references.length !== new Set(referenceIds).size) throw new StudioError('参考图不存在或无权使用', 403);
+    if (references.length !== uniqueReferenceIds.length) throw new StudioError('固定参考图或本次参考图已不可用，或当前账号无权使用', 403);
     const referencesById = new Map(references.map(reference => [reference.id, reference]));
-    const referenceSnapshot = referenceIds.map(id => {
+    const referenceSnapshot = orderedReferenceIds.map((id, index) => {
       const reference = referencesById.get(id);
       return { id, originalUrl: reference ? studioTemplateAssetUrl(id) : null, thumbnailUrl: reference ? studioTemplateAssetUrl(id, true) : null,
         fileName: reference?.file_name || null, mimeType: reference?.mime_type || null, width: reference?.width || null,
-        height: reference?.height || null, fileSize: reference?.file_size || null, hash: reference?.hash || null };
+        height: reference?.height || null, fileSize: reference?.file_size || null, hash: reference?.hash || null,
+        ...(index < fixedReferences.length ? { note: fixedReferences[index].note } : {}) };
     });
+    const fixedReferenceSnapshot = referenceSnapshot.slice(0, fixedReferences.length);
+    const transientReferenceSnapshot = referenceSnapshot.slice(fixedReferences.length);
     const requestedAspectRatio = input.aspectRatio || 'auto';
-    const firstReference = referenceIds.map(id => referencesById.get(id)).find(reference => reference?.width && reference?.height) || null;
+    const firstReference = orderedReferenceIds.map(id => referencesById.get(id)).find(reference => reference?.width && reference?.height) || null;
     const ratioResolution = resolveStudioAspectRatio(requestedAspectRatio, firstReference);
     const aspectRatio = ratioResolution.requested;
     const resolvedAspectRatio = ratioResolution.resolved;
@@ -140,6 +177,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const snapshot = JSON.stringify({
       version: 1,
       referenceImages: referenceSnapshot,
+      fixedReferenceImages: fixedReferenceSnapshot,
+      transientReferenceImages: transientReferenceSnapshot,
       globalContext: snapshotGlobalContext,
       moduleContext: snapshotModuleContext,
       moduleId: workspace?.id || moduleId || null,
@@ -171,7 +210,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         quality: generation.quality,
         provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
-        reference_ids: JSON.stringify(referenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
+        reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       } });
       if (freeze) await tx.creditLedger.create({ data: {
         user_id: ownerId, type: 'task_freeze', amount: -price,
@@ -290,32 +329,40 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
 function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean) {
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
-  const snapshotReferences = Array.isArray(parsed.referenceImages) ? parsed.referenceImages : [];
-  const sourceAvailable = typeof task.snapshot_json === 'string' && task.snapshot_json.length > 0
-    && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string'
-    && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim());
   const fallbackReferences = (() => {
     try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset ? studioTemplateAssetUrl(id) : null, thumbnailUrl: asset ? studioTemplateAssetUrl(id, true) : null, width: asset?.width || null, height: asset?.height || null }; }); }
     catch { return []; }
   })();
-  const referenceImages = (snapshotReferences.length ? snapshotReferences : fallbackReferences)
-    .map(item => {
+  const snapshotReferences = Array.isArray(parsed.referenceImages) && parsed.referenceImages.length ? parsed.referenceImages : fallbackReferences;
+  const snapshotFixedReferences = Array.isArray(parsed.fixedReferenceImages) ? parsed.fixedReferenceImages : [];
+  const snapshotTransientReferences = Array.isArray(parsed.transientReferenceImages)
+    ? parsed.transientReferenceImages
+    : snapshotFixedReferences.length ? [] : snapshotReferences;
+  const mapReference = (item: unknown) => {
       if (!item || typeof item !== 'object') return null;
       const record = item as Record<string, unknown>;
       if (typeof record.id !== 'string') return null;
+      const asset = assets.get(record.id);
       return {
         id: record.id,
-        originalUrl: studioTemplateAssetUrl(record.id),
-        thumbnailUrl: studioTemplateAssetUrl(record.id, true),
+        originalUrl: asset ? studioTemplateAssetUrl(record.id) : null,
+        thumbnailUrl: asset ? studioTemplateAssetUrl(record.id, true) : null,
         fileName: typeof record.fileName === 'string' ? record.fileName : null,
         mimeType: typeof record.mimeType === 'string' ? record.mimeType : null,
-        width: typeof record.width === 'number' ? record.width : null,
-        height: typeof record.height === 'number' ? record.height : null,
+        width: typeof record.width === 'number' ? record.width : asset?.width || null,
+        height: typeof record.height === 'number' ? record.height : asset?.height || null,
         fileSize: typeof record.fileSize === 'number' ? record.fileSize : null,
         hash: typeof record.hash === 'string' ? record.hash : null,
+        ...(typeof record.note === 'string' ? { note: isAdmin ? record.note : '' } : {}),
+        available: Boolean(asset),
       };
-    })
-    .filter((item): item is NonNullable<typeof item> => item !== null);
+    };
+  const referenceImages = snapshotReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
+  const fixedReferenceImages = snapshotFixedReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
+  const transientReferenceImages = snapshotTransientReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
+  const sourceAvailable = typeof task.snapshot_json === 'string' && task.snapshot_json.length > 0
+    && ((typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string'
+      && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim())) || referenceImages.length > 0);
   const count = Number.isInteger(parsed.count) && Number(parsed.count) >= 1 && Number(parsed.count) <= 8 ? Number(parsed.count) : 1;
   const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
   return {
@@ -333,6 +380,8 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
     unitCredits,
     sourceAvailable,
     referenceImages,
+    fixedReferenceImages,
+    transientReferenceImages,
   };
 }
 

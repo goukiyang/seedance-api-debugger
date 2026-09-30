@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Profiler, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
+import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, Maximize2, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
   downloadBulkVideoZip,
@@ -19,6 +19,7 @@ import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import MediaPreview from '@/components/MediaPreview';
+import assetStyles from './assets.module.css';
 import {
   createAssetLibraryCacheKey,
   deleteAssetLibraryCacheForUser,
@@ -104,6 +105,8 @@ type AssetLibraryItem = {
   prompt: string | null;
   thumbnailUrl: string | null;
   previewUrl: string | null;
+  width?: number | null;
+  height?: number | null;
   downloadUrl: string | null;
   fileSize: number | null;
   duration: number | null;
@@ -346,15 +349,64 @@ function mediaFallbackLabel(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'st
   return statusLabel(item.status);
 }
 
+function assetMediaAspectRatio(item: Pick<AssetLibraryItem, 'ratio' | 'width' | 'height' | 'resolution'>) {
+  const { width, height } = item;
+  if (Number.isFinite(width) && Number.isFinite(height) && width && height && width > 0 && height > 0) {
+    return `${width} / ${height}`;
+  }
+
+  const ratio = item.ratio?.trim();
+  const pair = ratio?.match(/^(\d+(?:\.\d+)?)\s*(?::|\/|x|×)\s*(\d+(?:\.\d+)?)$/i);
+  if (pair) {
+    const ratioWidth = Number(pair[1]);
+    const ratioHeight = Number(pair[2]);
+    if (Number.isFinite(ratioWidth) && Number.isFinite(ratioHeight) && ratioWidth > 0 && ratioHeight > 0) {
+      return `${ratioWidth} / ${ratioHeight}`;
+    }
+  }
+
+  const numericRatio = Number(ratio);
+  if (Number.isFinite(numericRatio) && numericRatio > 0) return `${numericRatio} / 1`;
+  const resolution = item.resolution?.match(/(\d{2,5})\s*(?:x|×)\s*(\d{2,5})/i);
+  return resolution ? `${Number(resolution[1])} / ${Number(resolution[2])}` : null;
+}
+
 function AssetLibraryThumbnail({ item }: { item: AssetLibraryItem }) {
   const hasCover = Boolean(item.thumbnailUrl && (item.kind === 'image' || item.thumbnailUrl !== item.previewUrl));
   const [failed, setFailed] = useState(!hasCover);
+  const [useCheckedPreview, setUseCheckedPreview] = useState(false);
 
   if (failed || !hasCover) {
     return <span className="asset-card-empty">{mediaFallbackLabel(item)}</span>;
   }
 
-  return <img src={item.thumbnailUrl as string} alt={item.title} loading="lazy" onError={() => setFailed(true)} />;
+  const previewUrl = useCheckedPreview && item.kind === 'image' && item.source === 'asset'
+    ? `/api/content-reactions/media?key=${encodeURIComponent(item.id)}&variant=preview`
+    : item.thumbnailUrl as string;
+
+  return <img
+    src={previewUrl}
+    alt={item.title}
+    loading="lazy"
+    onLoad={(event) => {
+      if (useCheckedPreview || item.kind !== 'image' || item.source !== 'asset' || !item.previewUrl || item.thumbnailUrl === item.previewUrl) return;
+      const width = item.width;
+      const height = item.height;
+      const naturalWidth = event.currentTarget.naturalWidth;
+      const naturalHeight = event.currentTarget.naturalHeight;
+      if (!width || !height || !naturalWidth || !naturalHeight) return;
+      const sourceRatio = width / height;
+      const thumbnailRatio = naturalWidth / naturalHeight;
+      if (Math.abs(thumbnailRatio / sourceRatio - 1) > 0.03) setUseCheckedPreview(true);
+    }}
+    onError={() => {
+      if (!useCheckedPreview && item.kind === 'image' && item.source === 'asset' && item.previewUrl && item.thumbnailUrl !== item.previewUrl) {
+        setUseCheckedPreview(true);
+        return;
+      }
+      setFailed(true);
+    }}
+  />;
 }
 
 function isAssetPreviewItem(item: AssetLibraryItem) {
@@ -682,6 +734,7 @@ function AssetsPageContent() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [anchorId, setAnchorId] = useState<AssetLibraryItemId | null>(null);
   const [activeItem, setActiveItem] = useState<AssetLibraryItem | null>(null);
+  const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
   const [restoredPreview, setRestoredPreview] = useState<ContentSummary | null>(null);
   const [previewNextPage, setPreviewNextPage] = useState<number | null>(null);
   const [previewNavigationMessage, setPreviewNavigationMessage] = useState('');
@@ -755,6 +808,10 @@ function AssetsPageContent() {
       : activeItem?.source === 'asset' && activeItem.assetId && activeItem.previewUrl
         ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${activeItem.assetId}`)}&variant=preview`
         : activeItem?.previewUrl;
+  const activeDetailMediaSrc = activePreviewSrc || activeItem?.thumbnailUrl || null;
+  const activePreviewAspectRatio = activeItem?.kind === 'audio'
+    ? '16 / 6'
+    : activeItem ? assetMediaAspectRatio(activeItem) || '16 / 10' : '16 / 10';
   const activeItemCostBreakdown = activeItem ? formatAssetCostBreakdown(activeItem) : null;
 
   const groupedItems = useMemo(() => {
@@ -791,7 +848,7 @@ function AssetsPageContent() {
     setPreviewNavigationRetryable(false);
   }, []);
 
-  const openAssetItem = useCallback((item: AssetLibraryItem) => {
+  const selectAssetItem = useCallback((item: AssetLibraryItem) => {
     clearPreviewSequence();
     previewPages.current.set(page, {
       items: displayItems,
@@ -800,6 +857,7 @@ function AssetsPageContent() {
     previewSequence.current = displayItems.filter(isAssetPreviewItem);
     previewNextPageRef.current = pagination?.has_more ? page + 1 : null;
     setPreviewNextPage(previewNextPageRef.current);
+    setMediaPreviewOpen(false);
     activateAssetPreviewItem(item);
   }, [activateAssetPreviewItem, clearPreviewSequence, displayItems, page, pagination]);
 
@@ -807,6 +865,7 @@ function AssetsPageContent() {
     previewRestoreGeneration.current += 1;
     clearPreviewSequence();
     setActiveItem(null);
+    setMediaPreviewOpen(false);
     setRestoredPreview(null);
     if (user?.id) {
       try { localStorage.removeItem(assetPreviewStorageKey(user.id)); } catch {}
@@ -857,6 +916,7 @@ function AssetsPageContent() {
     previewRestoreGeneration.current += 1;
     clearPreviewSequence();
     setActiveItem(null);
+    setMediaPreviewOpen(false);
     setRestoredPreview(null);
   }, [clearPreviewSequence, user?.id]);
 
@@ -1157,7 +1217,7 @@ function AssetsPageContent() {
       }
       return;
     }
-    openAssetItem(item);
+    selectAssetItem(item);
   };
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, item: AssetLibraryItem) => {
@@ -1169,7 +1229,7 @@ function AssetsPageContent() {
     }
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    openAssetItem(item);
+    selectAssetItem(item);
   };
 
   const handleSelectView = (nextView: AssetView) => {
@@ -1654,6 +1714,7 @@ function AssetsPageContent() {
     ? rectFromPoints({ x: marquee.startX, y: marquee.startY }, { x: marquee.currentX, y: marquee.currentY })
     : null;
 
+  const activeItemPrompt = activeItem?.prompt ? <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div> : null;
   const activeItemDetails = activeItem ? <>
     {activeItemCostBreakdown && <div className="asset-detail-cost-panel" aria-label="扣费金额">
       <div><span>美金扣费</span><strong>{activeItemCostBreakdown.usd}</strong></div>
@@ -1669,7 +1730,6 @@ function AssetsPageContent() {
       <div><dt>创建时间</dt><dd>{formatDateTime(activeItem.createdAt)}</dd></div>
       <div><dt>完成时间</dt><dd>{formatDateTime(activeItem.completedAt)}</dd></div>
     </dl>
-    {activeItem.prompt && <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div>}
     <div className="asset-detail-actions">
       {(activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
       {activeItem.taskId && <Link href={`/tasks/${activeItem.taskId}`}>打开任务详情</Link>}
@@ -1814,7 +1874,7 @@ function AssetsPageContent() {
       </section>
 
       <ContentLookup />
-      {isReactionView && <ContentCollections key={assetView} action={assetView === 'favorites' ? 'favorite' : 'like'} />}
+      {isReactionView && <ContentCollections key={assetView} action={assetView === 'favorites' ? 'favorite' : 'like'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
       {!isReactionView && <>
       <section className="asset-library-filter-bar">
         {isEnhanceView ? (
@@ -2165,6 +2225,7 @@ function AssetsPageContent() {
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
                 const enhanceStateLabel = item.isEnhanceTask ? '超分结果' : '';
+                const mediaAspectRatio = assetMediaAspectRatio(item);
                 return (
                   <div
                     key={item.id}
@@ -2194,7 +2255,10 @@ function AssetsPageContent() {
                         {selected ? '✓' : ''}
                       </button>
                     )}
-                    <span className="asset-card-media">
+                    <span
+                      className={`asset-card-media ${assetStyles.cardMedia} ${mediaAspectRatio ? assetStyles.cardMediaWithRatio : assetStyles.cardMediaUnknownRatio}`}
+                      style={mediaAspectRatio ? { aspectRatio: mediaAspectRatio } : undefined}
+                    >
                       {item.kind === 'audio' ? (
                         <span className="asset-card-audio-placeholder">
                           <span>音频</span>
@@ -2225,7 +2289,7 @@ function AssetsPageContent() {
                           className="asset-card-hover-button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            openAssetItem(item);
+                            selectAssetItem(item);
                           }}
                         >
                           <Eye size={16} aria-hidden="true" />
@@ -2364,7 +2428,7 @@ function AssetsPageContent() {
         />
       )}
 
-      {activeItem && !activePreviewSrc && (
+      {activeItem && !mediaPreviewOpen && (
         <aside className="asset-detail-drawer" aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
@@ -2375,11 +2439,61 @@ function AssetsPageContent() {
               <X size={18} />
             </button>
           </div>
-          <p>{mediaFallbackLabel(activeItem)}</p>
+          <div
+            className={`asset-detail-preview ${assetStyles.detailPreview}`}
+            style={{ aspectRatio: activePreviewAspectRatio }}
+          >
+            {activeItem.isEnhanceTask && (
+              <span className="asset-detail-preview-badge">
+                <Sparkles size={12} aria-hidden="true" />
+                超分
+              </span>
+            )}
+            {activeItem.kind === 'video' && activePreviewSrc ? (
+              <>
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                <video
+                  src={activePreviewSrc}
+                  controls
+                  preload="metadata"
+                  poster={activeItem.thumbnailUrl || undefined}
+                />
+                <button
+                  type="button"
+                  className={assetStyles.detailPreviewExpand}
+                  onClick={() => setMediaPreviewOpen(true)}
+                  aria-label="放大预览视频"
+                  title="放大预览"
+                >
+                  <Maximize2 size={16} aria-hidden="true" />
+                </button>
+              </>
+            ) : activeItem.kind === 'audio' && activePreviewSrc ? (
+              <div className="asset-detail-audio-player">
+                <span>音频素材</span>
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                <audio src={activePreviewSrc} controls preload="metadata" />
+              </div>
+            ) : activeItem.kind === 'image' && activePreviewSrc ? (
+              <button
+                type="button"
+                className={assetStyles.detailPreviewImageButton}
+                onClick={() => setMediaPreviewOpen(true)}
+                aria-label="放大预览图片"
+              >
+                <img src={activePreviewSrc} alt="资产预览" />
+              </button>
+            ) : activeDetailMediaSrc ? (
+              <img src={activeDetailMediaSrc} alt="资产预览" />
+            ) : (
+              <div>{mediaFallbackLabel(activeItem)}</div>
+            )}
+          </div>
+          {activeItemPrompt}
           {activeItemDetails}
         </aside>
       )}
-      {activeItem && activePreviewSrc && <MediaPreview
+      {activeItem && mediaPreviewOpen && activePreviewSrc && <MediaPreview
         src={activePreviewSrc}
         type={activeItem.kind}
         title={activeItem.title}
@@ -2393,7 +2507,7 @@ function AssetsPageContent() {
         hasNavigation={canMovePreviewPrevious || canMovePreviewNext}
         onPrevious={canMovePreviewPrevious ? () => moveActiveItem(-1) : undefined}
         onNext={canMovePreviewNext ? () => moveActiveItem(1) : undefined}
-        onClose={closeAssetPreview}
+        onClose={() => setMediaPreviewOpen(false)}
       />}
       {!activeItem && restoredPreview && <MediaPreview
         src={restoredPreview.previewUrl as string}

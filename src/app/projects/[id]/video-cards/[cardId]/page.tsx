@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import EnhanceVideoAction from '@/components/EnhanceVideoAction';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { showVideoCardManagementUi } from '@/lib/navigation';
 import { formatAmountMicrosWithFixedCny } from '@/lib/costs/currency';
 
 interface VideoCardSummary {
@@ -142,6 +143,7 @@ function formatOfficialCost(totals?: Array<{ currency: string; amount_micros: nu
 
 export default function VideoCardDetailPage() {
   const params = useParams<{ id: string; cardId: string }>();
+  const router = useRouter();
   const projectId = params.id;
   const videoCardId = params.cardId;
   const returnTo = `/projects/${projectId}/video-cards/${videoCardId}`;
@@ -208,8 +210,12 @@ export default function VideoCardDetailPage() {
   }, [projectId, videoCardId]);
 
   useEffect(() => {
+    if (!showVideoCardManagementUi) {
+      router.replace(`/projects/${encodeURIComponent(projectId)}`);
+      return;
+    }
     void loadVideoCard();
-  }, [loadVideoCard]);
+  }, [loadVideoCard, projectId, router]);
 
   const patchVideoCard = async (payload: Record<string, unknown>, successMessage: string, taskId?: string) => {
     setError('');
@@ -287,6 +293,8 @@ export default function VideoCardDetailPage() {
       setBranchBusy(false);
     }
   };
+
+  if (!showVideoCardManagementUi) return <div className="card" aria-busy="true"><p className="text-gray">正在返回项目...</p></div>;
 
   if (loading) return <div className="card"><p className="text-gray">加载中...</p></div>;
 

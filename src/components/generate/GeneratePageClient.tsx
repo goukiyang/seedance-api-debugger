@@ -23,6 +23,7 @@ import {
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
+import { showVideoCardManagementUi } from '@/lib/navigation';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import {
   normalizeGenerationDefaults,
@@ -2348,7 +2349,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                     </option>
                   ))}
                 </select>
-                {selectedVideoCard && (
+                {showVideoCardManagementUi && selectedVideoCard && (
                   <Link
                     className="composer-video-card-link"
                     href={`/projects/${selectedVideoCard.project_id || selectedProjectId}/video-cards/${selectedVideoCard.id}`}

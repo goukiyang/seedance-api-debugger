@@ -14,6 +14,7 @@ export interface NavGroup {
 }
 
 export const showLegacyVideoWorkbenchEntry = false;
+export const showVideoCardManagementUi = false;
 
 export const shellRoutes = [
   '/workbench',
@@ -63,9 +64,8 @@ const shellRoutePrefixes = [
 
 export const topbarQuickItems: NavItem[] = [
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
-  { label: '图片生成', href: '/image-studio', prefixMatch: true },
   { label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
-  { label: '模板工作台', href: '/template-studio?type=video', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
+  { label: '模板工作台', href: '/template-studio', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
   { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
@@ -78,8 +78,7 @@ export const userNavGroups: NavGroup[] = [
     title: '创作',
     items: [
       { label: '生成视频', href: '/generate', match: ['/generate'], externalHidden: true },
-      { label: '图片生成', href: '/image-studio' },
-      { label: '模板工作台', href: '/template-studio?type=video', match: ['/template-studio'], prefixMatch: true, externalHidden: true },
+      { label: '模板工作台', href: '/template-studio', match: ['/template-studio'], prefixMatch: true, externalHidden: true },
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true, externalHidden: true },
       { label: '动画模板', href: '/templates', prefixMatch: true, externalHidden: true },

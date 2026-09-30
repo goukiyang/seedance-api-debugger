@@ -1,7 +1,13 @@
 # 项目资料索引
 
+2026-09-30模板体验四张原始反馈仅保存在本机对应目录，已加入Git忽略；下表这些链接为本地资料入口，公开仓库和服务器发布包不包含原图（截图含用户提示词）。
+
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
 |---|---|---|---|---|---|
+| 2026-09-30 | 卡片排版 / codex-clipboard-00779972-0ec6-4ede-b74e-8a019ca30935.png | 用户截图 / SD2 | UI01：头像、时间、尺寸、点赞收藏位置 | [原图](2026-09-30-template-ui/codex-clipboard-00779972-0ec6-4ede-b74e-8a019ca30935.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
+| 2026-09-30 | 参考图次序 / codex-clipboard-db1bf647-05e4-4a0f-80fa-3a10e96359cd.png | 用户截图 / SD2 | RF01/RF02：拖动顺序、固定参考图备注与生成编号 | [原图](2026-09-30-template-ui/codex-clipboard-db1bf647-05e4-4a0f-80fa-3a10e96359cd.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
+| 2026-09-30 | 添加图片菜单 / codex-clipboard-4ca838a8-941f-4f6b-a445-c7d6abb52e13.png | 用户截图 / SD2 | UI02：紧凑上下菜单，点击外部关闭 | [原图](2026-09-30-template-ui/codex-clipboard-4ca838a8-941f-4f6b-a445-c7d6abb52e13.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
+| 2026-09-30 | 预览工具栏 / codex-clipboard-7ed8351e-3ca9-4e3a-ad69-f01119fb08c5.png | 用户截图 / SD2 | UI02：不展示提示词、对比工具居中；含用户原始文本，不公开发布 | [原图](2026-09-30-template-ui/codex-clipboard-7ed8351e-3ca9-4e3a-ad69-f01119fb08c5.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
 | 2026-09-29 | 生成被手动保存拦截 / codex-clipboard-dff3e760-f727-4220-95d1-909b0ee4ca91.png | 用户截图 / SD2 | B06：模型、质量、分辨率应自动保存，不要求先手动保存才能生成 | [原图](2026-09-29-generation-save/codex-clipboard-dff3e760-f727-4220-95d1-909b0ee4ca91.png) | 原始反馈，已阅、cmp归档一致；非修复验收 |
 | 2026-09-29 | baPro 4K 保存失败 / codex-clipboard-9d91fe74-e132-4ec2-a2cc-8b23064f474e.png | 用户本轮截图 / SD2 | 上游已返回但本站未交付；B01根因调查、B02模板自动保存、B03左栏同步反馈 | [原图](2026-09-29-banana-delivery/codex-clipboard-9d91fe74-e132-4ec2-a2cc-8b23064f474e.png) | 原始截图，无替代；已阅、归档cmp一致；不代表修复后验收 |
 | 2026-09-29 | sidebar-layout-fixture.png | 本轮Playwright / SD2 S01 | 两份真实CSS Module，合成侧栏与标题；用于核对不遮挡标题，不含用户提示词 | [布局截图](2026-09-29-sidebar/sidebar-layout-fixture.png) | 候选0.20.4，已打开核对；可再生辅助图不逐项hash，不替代线上证据 |

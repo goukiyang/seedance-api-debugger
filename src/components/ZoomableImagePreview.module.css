@@ -12,15 +12,30 @@
 
 .toolbar {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas: "leading compare actions";
+  gap: 5px 10px;
   align-items: center;
-  min-height: 56px;
-  max-height: 44dvh;
+  min-height: 0;
+  max-height: 38dvh;
   overflow-y: auto;
-  padding: 10px 14px;
+  padding: 6px 12px;
   border-bottom: 1px solid oklch(0.92 0 0 / 0.18);
   background: oklch(0.18 0 0 / 0.82);
+}
+
+.toolbar[data-has-metadata="true"] {
+  grid-template-areas:
+    "leading compare actions"
+    "metadata metadata metadata";
+}
+
+.leading {
+  grid-area: leading;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .referenceThumb {
@@ -48,10 +63,16 @@
   border-radius: 4px;
 }
 
+.referenceThumbFallback {
+  display: block;
+  margin: 0 auto;
+  color: oklch(0.78 0 0);
+}
+
 .title {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .title strong {
@@ -69,25 +90,124 @@
 }
 
 .metadata {
-  display: grid;
-  max-width: min(72vw, 900px);
-  gap: 2px;
-  overflow: hidden;
+  grid-area: metadata;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: oklch(0.78 0 0);
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.2;
 }
 
-.metadata span {
+.metadataValues {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: visible;
+}
+
+.metadataValues > span {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 22ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.metadataTime {
+  flex: 0 0 auto;
+  max-width: min(32ch, 42vw);
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.dimensionHint {
+  position: relative;
+  overflow: visible !important;
+  cursor: help;
+  outline: none;
+}
+
+.dimensionHint > span:first-child:focus-visible {
+  outline: 2px solid oklch(0.76 0.14 170);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.dimensionTooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  width: max-content;
+  max-width: min(240px, 70vw);
+  padding: 5px 7px;
+  border: 1px solid oklch(0.9 0 0 / 0.2);
+  border-radius: 5px;
+  background: oklch(0.1 0 0 / 0.98);
+  color: oklch(0.97 0 0);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 3px);
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+
+.dimensionHint:hover .dimensionTooltip,
+.dimensionHint:focus-within .dimensionTooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .actions {
+  grid-area: actions;
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   gap: 6px;
   align-items: center;
+  overflow-x: auto;
+  padding: 2px;
+  overscroll-behavior-x: contain;
+}
+
+.comparisonActions {
+  grid-area: compare;
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.comparisonActions button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid oklch(0.88 0 0 / 0.28);
+  border-radius: 7px;
+  background: oklch(0.28 0 0 / 0.86);
+  color: oklch(0.96 0 0);
+  cursor: pointer;
+}
+
+.comparisonActions button:hover {
+  border-color: oklch(0.76 0.14 170 / 0.68);
+  background: oklch(0.35 0.04 170 / 0.88);
+}
+
+.comparisonActions button:focus-visible {
+  outline: 2px solid oklch(0.76 0.14 170);
+  outline-offset: 2px;
 }
 
 .actions button {
@@ -200,13 +320,28 @@
   left: 12px;
   z-index: 3;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  max-width: calc(100% - 24px);
   padding: 6px 10px;
   border-radius: 6px;
   background: #151a1de6;
   color: #eef0f2;
   font-size: 12px;
+  pointer-events: none;
+}
+
+.imageStatus > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.imageProgress {
+  flex: 1 1 100%;
+  width: min(180px, 48vw);
+  height: 6px;
+  accent-color: #70cfbd;
 }
 
 .imageStatus button {
@@ -219,6 +354,7 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .loadingState {
@@ -331,16 +467,38 @@
 
 @media (max-width: 640px) {
   .toolbar {
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 8px;
-    max-height: 48dvh;
-    padding: 8px 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "leading actions";
+    gap: 6px 8px;
+    max-height: 42dvh;
+    padding: 6px 8px;
+  }
+
+  .toolbar[data-has-comparison="true"] {
+    grid-template-areas:
+      "leading actions"
+      "compare compare";
+  }
+
+  .toolbar[data-has-metadata="true"] {
+    grid-template-areas:
+      "leading actions"
+      "metadata metadata";
+  }
+
+  .toolbar[data-has-comparison="true"][data-has-metadata="true"] {
+    grid-template-areas:
+      "leading actions"
+      "compare compare"
+      "metadata metadata";
+  }
+
+  .comparisonActions {
+    justify-self: center;
   }
 
   .actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-    max-width: 100%;
+    max-width: min(48vw, 420px);
     overflow-x: auto;
     padding: 2px;
     overscroll-behavior-x: contain;
@@ -362,6 +520,10 @@
 
   .detailContent {
     max-height: 18dvh;
+  }
+
+  .metadata {
+    font-size: 10px;
   }
 
 }
