@@ -3,7 +3,9 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Eye } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
+import MediaPreview from '@/components/MediaPreview';
 import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/ShareAlbumDialog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
@@ -80,6 +82,13 @@ function isImageItem(image: ReferenceImageItem) {
   return !image.asset?.type || image.asset.type === 'image';
 }
 
+function AlbumDetailThumbnail({ image, alt }: { image: ReferenceImageItem; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [image.thumbnail_url]);
+  if (failed || !image.thumbnail_url) return <div className="album-image-media-placeholder">暂无封面</div>;
+  return <img src={image.thumbnail_url} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
+}
+
 function formatUploadProgressDetail(files: File[], file: File, index: number, progress: UploadProgressSnapshot) {
   const itemText = files.length > 1 ? `第 ${index + 1}/${files.length} 个：${file.name}` : file.name;
   if (progress.percent != null) return itemText;
@@ -90,6 +99,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
+  const [previewImage, setPreviewImage] = useState<ReferenceImageItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadFeedback, setUploadFeedback] = useState<AlbumUploadFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = useState<AlbumUploadProgress | null>(null);
@@ -401,15 +411,14 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
                         prev.includes(image.id) ? prev.filter((id) => id !== image.id) : [...prev, image.id].slice(0, 9)
                       ))}
                     >
-                      {isImageItem(image) ? (
-                        <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
-                      ) : image.asset?.type === 'video' && canPreviewOriginalMedia ? (
-                        <video src={image.thumbnail_url || image.image_url} muted playsInline preload="metadata" />
+                      {isImageItem(image) || canPreviewOriginalMedia ? (
+                        <AlbumDetailThumbnail image={image} alt={image.asset?.file_name || `${typeLabel}封面`} />
                       ) : (
                         <div className="album-image-media-placeholder">{typeLabel}</div>
                       )}
                     </button>
                     <div className="album-image-meta">
+                      {(isImageItem(image) || canPreviewOriginalMedia) && <button type="button" title={`预览${typeLabel}`} aria-label={`预览${image.asset?.file_name || `${typeLabel} ${image.sort_order + 1}`}`} onClick={() => setPreviewImage(image)}><Eye size={15} /></button>}
                       <ContentReactions contentKey={`reference_image:${image.id}`} />
                       <span>{typeLabel} {image.sort_order + 1}</span>
                       {album.permissions.copy && (
@@ -430,6 +439,16 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
               })
             )}
           </div>
+          {previewImage && <MediaPreview
+            src={`/api/reference-images/${encodeURIComponent(previewImage.id)}/content?variant=preview`}
+            type={isImageItem(previewImage) ? 'image' : previewImage.asset?.type === 'video' ? 'video' : 'audio'}
+            title={previewImage.asset?.file_name || `${mediaTypeLabel(previewImage.asset?.type)} ${previewImage.sort_order + 1}`}
+            poster={previewImage.thumbnail_url || undefined}
+            contentKey={`reference_image:${previewImage.id}`}
+            previewKey={previewImage.id}
+            details={<div><span>{mediaTypeLabel(previewImage.asset?.type)}</span>{previewImage.asset?.file_size != null && <span>{previewImage.asset.file_size} 字节</span>}</div>}
+            onClose={() => setPreviewImage(null)}
+          />}
           <ShareAlbumDialog
             open={Boolean(shareDialogAlbum)}
             album={shareDialogAlbum}

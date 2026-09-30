@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     if (variant === 'download' && !resolved.summary.downloadUrl) throw new ReactionError('无权下载原件', 403);
     const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
     if (variant === 'preview' && !resolved.summary.previewUrl) throw new ReactionError('无权预览原件', 403);
-    if (resolved.source.referenceId && !(variant === 'preview' && resolved.summary.category !== 'image' && resolved.source.canPreviewOriginal)) return NextResponse.redirect(new URL(`/api/reference-images/${resolved.source.referenceId}/content?variant=${variant === 'download' ? 'original' : 'thumbnail'}`, request.url), { status: 302, headers });
+    if (resolved.source.referenceId) return NextResponse.redirect(new URL(`/api/reference-images/${resolved.source.referenceId}/content?variant=${variant === 'download' ? 'original' : variant}`, request.url), { status: 302, headers });
     if (resolved.summary.category === 'image') {
       const bytes = variant === 'thumbnail' ? await readStudioThumbnail(resolved.source.thumbnail || resolved.source.url) : variant === 'preview' ? await readStudioPreview(resolved.source.url) : await readStudioImage(resolved.source.url, request.signal);
       return new NextResponse(new Uint8Array(bytes), { headers: { ...headers, 'Content-Type': variant === 'download' ? 'application/octet-stream' : 'image/webp', ...(variant === 'download' ? { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(resolved.summary.title).replace(/'/g, '%27')}` } : {}) } });
@@ -23,6 +23,7 @@ export async function GET(request: Request) {
       const bytes = await readStudioThumbnail(resolved.source.thumbnail);
       return new NextResponse(new Uint8Array(bytes), { headers: { ...headers, 'Content-Type': 'image/webp' } });
     }
+    if (variant === 'thumbnail') throw new ReactionError('暂无封面', 404);
     // Existing public media may remain externally reachable; reactions do not grant or revoke old URLs.
     const target = new URL(resolved.source.url, request.url);
     if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password || isPrivateNetworkHost(target.hostname)) throw new ReactionError('媒体地址暂不可用', 503);

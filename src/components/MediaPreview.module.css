@@ -1,0 +1,231 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow: hidden;
+  background: oklch(0.1 0 0 / 0.96);
+  color: oklch(0.97 0 0);
+  overscroll-behavior: none;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  max-height: 44dvh;
+  padding: 10px 14px;
+  overflow-y: auto;
+  border-bottom: 1px solid oklch(0.92 0 0 / 0.16);
+  background: oklch(0.18 0 0 / 0.94);
+  overscroll-behavior: contain;
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  color: oklch(0.97 0 0);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actions button {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid oklch(0.88 0 0 / 0.27);
+  border-radius: 7px;
+  background: oklch(0.29 0 0 / 0.92);
+  color: inherit;
+  cursor: pointer;
+}
+
+.actions button:hover {
+  border-color: oklch(0.78 0.13 165 / 0.75);
+  background: oklch(0.35 0.04 165 / 0.92);
+}
+
+.actions button:focus-visible,
+.detailDisclosure summary:focus-visible,
+.error button:focus-visible {
+  outline: 2px solid oklch(0.78 0.13 165);
+  outline-offset: 2px;
+}
+
+.notice {
+  grid-column: 1 / -1;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.detailDisclosure {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: oklch(0.88 0 0);
+  font-size: 12px;
+}
+
+.detailDisclosure summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.detailContent {
+  max-height: 22dvh;
+  padding: 8px 0 2px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.stage {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  padding: 12px;
+  overflow: hidden;
+  background: oklch(0.08 0 0);
+}
+
+.video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(100%, calc(100vw - 24px));
+  max-height: min(100%, calc(100dvh - var(--media-toolbar-height, 58px) - 24px));
+  object-fit: contain;
+  background: oklch(0.04 0 0);
+}
+
+.audioStage {
+  padding: 24px;
+}
+
+.audioShell {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  width: min(100%, 640px);
+  padding: clamp(24px, 6vw, 56px);
+  border: 1px solid oklch(0.9 0 0 / 0.14);
+  border-radius: 8px;
+  background: oklch(0.16 0 0);
+  text-align: center;
+}
+
+.audioMark {
+  color: oklch(0.78 0.13 165);
+}
+
+.audioShell strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.audio {
+  width: min(100%, 560px);
+}
+
+.status,
+.error {
+  position: absolute;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  padding: 9px 12px;
+  transform: translateX(-50%);
+  border: 1px solid oklch(0.9 0 0 / 0.14);
+  border-radius: 6px;
+  background: oklch(0.18 0 0 / 0.96);
+  color: oklch(0.95 0 0);
+  font-size: 12px;
+  text-align: center;
+}
+
+.error {
+  flex-direction: column;
+  bottom: 50%;
+  transform: translate(-50%, 50%);
+}
+
+.error button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid oklch(0.88 0 0 / 0.27);
+  border-radius: 6px;
+  background: oklch(0.29 0 0);
+  color: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    max-height: 46dvh;
+    padding: 8px 10px;
+  }
+
+  .actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 2px;
+    overscroll-behavior-x: contain;
+  }
+
+  .actions button {
+    flex-basis: 40px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .title {
+    grid-row: 1;
+  }
+
+  .detailContent {
+    max-height: 18dvh;
+  }
+
+  .stage {
+    padding: 8px;
+  }
+
+  .audioStage {
+    padding: 14px;
+  }
+
+  .audioShell {
+    gap: 14px;
+    padding: 24px 16px;
+  }
+}

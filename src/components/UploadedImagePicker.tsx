@@ -3,7 +3,9 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { Eye } from 'lucide-react';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
@@ -13,7 +15,7 @@ interface UploadedAssetItem {
   id: string;
   type: AssetType;
   originalUrl: string;
-  thumbnailUrl: string;
+  thumbnailUrl: string | null;
   fileName: string;
   mimeType: string;
   width: number | null;
@@ -73,6 +75,16 @@ type PendingPickerAttach = {
 
 const PAGE_SIZE = 40;
 const HISTORY_INVALID_JSON_MESSAGE = '历史素材服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
+
+function UploadedAssetThumbnail({ item }: { item: UploadedAssetItem }) {
+  const [failed, setFailed] = useState(false);
+  const src = item.type === 'image'
+    ? item.thumbnailUrl || item.originalUrl
+    : item.thumbnailUrl && item.thumbnailUrl !== item.originalUrl ? item.thumbnailUrl : null;
+  useEffect(() => setFailed(false), [src]);
+  if (!src || failed) return <span className="uploaded-picker-media-placeholder">{item.type === 'image' ? '预览不可用' : `${assetTypeLabel(item.type)} · 暂无封面`}</span>;
+  return <img src={src} alt={item.fileName} loading="lazy" onError={() => setFailed(true)} />;
+}
 
 function isSupportedReferenceFile(file: File) {
   return file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/');
@@ -350,7 +362,7 @@ export function UploadedImagePicker({
       const selectedAssets = selectedAssetIds
         .map((id) => itemById.get(id))
         .filter((item): item is UploadedAssetItem => Boolean(item))
-        .map((item) => ({ id: item.id, type: item.type, originalUrl: item.originalUrl, thumbnailUrl: item.thumbnailUrl, fileName: item.fileName, width: item.width, height: item.height }));
+        .map((item) => ({ id: item.id, type: item.type, originalUrl: item.originalUrl, thumbnailUrl: item.thumbnailUrl ?? undefined, fileName: item.fileName, width: item.width, height: item.height }));
       await onConfirm(selectedAssetIds, selectedAssets);
       setSelectedAssetIds([]);
       onClose();
@@ -445,14 +457,16 @@ export function UploadedImagePicker({
                         title={previewTitle}
                         aria-label={`${previewTitle}${item.fileName}`}
                       >
-                        {item.type === 'video' ? (
-                          <video src={item.originalUrl} muted playsInline preload="metadata" />
-                        ) : item.type === 'audio' ? (
-                          <span className="uploaded-picker-media-placeholder">音频</span>
-                        ) : (
-                          <img src={item.thumbnailUrl} alt={item.fileName} />
-                        )}
+                        <UploadedAssetThumbnail item={item} />
                       </button>
+                      <button
+                        type="button"
+                        title={`预览${assetTypeLabel(item.type)}`}
+                        aria-label={`预览${item.fileName}`}
+                        disabled={item.type !== 'image' && !item.originalUrl}
+                        onClick={() => setPreviewAsset(item)}
+                        style={{ alignItems: 'center', background: 'rgba(17, 24, 39, .76)', border: 0, borderRadius: 4, color: 'white', cursor: 'pointer', display: 'inline-flex', padding: 6, position: 'absolute', right: 8, top: 8 }}
+                      ><Eye size={16} /></button>
                       <button
                         type="button"
                         className="uploaded-picker-card-state"
@@ -514,12 +528,22 @@ export function UploadedImagePicker({
         {previewAsset?.type === 'image' && (
           <ZoomableImagePreview
             contentKey={`asset:${previewAsset.id}`}
-            src={previewAsset.originalUrl || previewAsset.thumbnailUrl}
+            src={`/api/content-reactions/media?key=${encodeURIComponent(`asset:${previewAsset.id}`)}&variant=preview`}
             alt={previewAsset.fileName}
             fileName={previewAsset.fileName}
             onClose={() => setPreviewAsset(null)}
-          />
+        />
         )}
+        {previewAsset && previewAsset.type !== 'image' && <MediaPreview
+          src={`/api/content-reactions/media?key=${encodeURIComponent(`asset:${previewAsset.id}`)}&variant=preview`}
+          type={previewAsset.type}
+          title={previewAsset.fileName}
+          poster={previewAsset.thumbnailUrl && previewAsset.thumbnailUrl !== previewAsset.originalUrl ? previewAsset.thumbnailUrl : undefined}
+          contentKey={`asset:${previewAsset.id}`}
+          previewKey={previewAsset.id}
+          details={<div><span>{assetTypeLabel(previewAsset.type)}</span><span>{formatBytes(previewAsset.fileSize)}</span></div>}
+          onClose={() => setPreviewAsset(null)}
+        />}
       </div>
     </div>
   );

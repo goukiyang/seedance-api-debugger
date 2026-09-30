@@ -1,14 +1,26 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CanvasReactions from '@/components/content-reactions/CanvasReactions';
+import MediaPreview from '@/components/MediaPreview';
+import type { ContentKey } from '@/lib/content-reactions/types';
+
+type CanvasMediaPreview = {
+  contentKey: ContentKey;
+  src: string;
+  type: 'image' | 'video' | 'audio';
+  title: string;
+};
 
 export default function CanvasFrame({ documentId }: { documentId?: string }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const initialDocumentId = useRef(documentId);
   const dirty = useRef(false);
+  const previewRequest = useRef(0);
+  const [preview, setPreview] = useState<CanvasMediaPreview | null>(null);
   useEffect(() => {
     let internalUrlSync = false;
+    let alive = true;
     let lastLocation = { url: location.href, state: window.history.state };
     let approvedUrl: string | null = null;
     const hasChanges = () => {
@@ -27,6 +39,65 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     };
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
+      if (event.data?.type === 'sd2-canvas-preview-request') {
+        const contentKey = event.data.contentKey;
+        if (typeof contentKey !== 'string' || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(contentKey)) return;
+
+        const requestedContentKey = contentKey as ContentKey;
+        const requestId = ++previewRequest.current;
+        setPreview(null);
+        void (async () => {
+          const response = await fetch(`/api/content-reactions/content?key=${encodeURIComponent(requestedContentKey)}`, {
+            cache: 'no-store',
+            credentials: 'same-origin',
+          });
+          const payload = await response.json().catch(() => null);
+          const content = payload?.content;
+          const resolvedContentKey = content?.key;
+          const isExpectedKey = resolvedContentKey === requestedContentKey
+            || (requestedContentKey.startsWith('reference_image:')
+              && typeof resolvedContentKey === 'string'
+              && /^asset:[a-zA-Z0-9_-]+$/.test(resolvedContentKey));
+          if (!response.ok || !isExpectedKey) throw new Error('unavailable');
+          if (!['image', 'video', 'audio'].includes(content.category) || typeof content.previewUrl !== 'string') {
+            throw new Error('unavailable');
+          }
+
+          const previewUrl = new URL(content.previewUrl, window.location.origin);
+          const canonicalContentKey = resolvedContentKey as ContentKey;
+          const [contentType, contentId] = canonicalContentKey.split(':');
+          if (contentType === 'video_task' && content.category !== 'video') throw new Error('unavailable');
+          const isTaskPreview = contentType === 'video_task'
+            && previewUrl.origin === window.location.origin
+            && previewUrl.pathname === `/api/video/play/${encodeURIComponent(contentId)}`
+            && !previewUrl.search
+            && !previewUrl.hash;
+          const previewParams = Array.from(previewUrl.searchParams.keys());
+          const isContentMediaPreview = contentType !== 'video_task'
+            && previewUrl.origin === window.location.origin
+            && previewUrl.pathname === '/api/content-reactions/media'
+            && previewUrl.searchParams.get('key') === canonicalContentKey
+            && previewUrl.searchParams.get('variant') === 'preview'
+            && previewParams.length === 2
+            && !previewUrl.hash;
+          if (!isTaskPreview && !isContentMediaPreview) throw new Error('unavailable');
+          if (!alive || requestId !== previewRequest.current) return;
+
+          setPreview({
+            contentKey: canonicalContentKey,
+            src: `${previewUrl.pathname}${previewUrl.search}`,
+            type: content.category,
+            title: typeof content.title === 'string' ? content.title : '画布媒体',
+          });
+        })().catch(() => {
+          if (!alive || requestId !== previewRequest.current) return;
+          frame.current?.contentWindow?.postMessage({
+            type: 'sd2-canvas-preview-error',
+            contentKey,
+          }, window.location.origin);
+        });
+        return;
+      }
       if (event.data?.type === 'sd2-canvas-dirty' && typeof event.data.dirty === 'boolean') {
         dirty.current = event.data.dirty;
         return;
@@ -81,6 +152,8 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     navigation?.addEventListener('navigateerror', clearApproval);
     navigation?.addEventListener('navigatesuccess', clearApproval);
     return () => {
+      alive = false;
+      previewRequest.current += 1;
       window.removeEventListener('message', onMessage);
       window.removeEventListener('beforeunload', onBeforeUnload);
       document.removeEventListener('click', onClick, true);
@@ -92,5 +165,18 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       navigation?.removeEventListener('navigatesuccess', clearApproval);
     };
   }, []);
-  return <><iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen" /><CanvasReactions frame={frame} /></>;
+  return <>
+    <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen" />
+    <CanvasReactions frame={frame} />
+    {preview && (
+      <MediaPreview
+        src={preview.src}
+        type={preview.type}
+        title={preview.title}
+        contentKey={preview.contentKey}
+        previewKey={preview.contentKey}
+        onClose={() => setPreview(null)}
+      />
+    )}
+  </>;
 }

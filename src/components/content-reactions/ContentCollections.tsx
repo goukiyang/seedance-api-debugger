@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Copy, Download, ExternalLink, Image as ImageIcon, Music, X, Undo2, RefreshCw, RotateCcw } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
-import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import MediaPreview from '@/components/MediaPreview';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import ContentReactions, { writeReaction } from './ContentReactions';
 import type { ContentCategory, ContentKey, ContentSummary, ReactionAction, ReactionListItem, ReactionListResponse, ReactionState } from '@/lib/content-reactions/types';
@@ -15,6 +15,7 @@ const categories: Array<[ContentCategory | 'all', string]> = [['all', '全部'],
 const noCounts = { all: 0, image: 0, video: 0, audio: 0, template: 0, prompt: 0 };
 const MAX_RESTORED_ITEMS = 240;
 export const reactionEntryStorageKey = (userId: string) => `sd2-reaction-entry:${encodeURIComponent(userId)}`;
+const reactionPreviewStorageKey = (scope: string) => `reaction-preview:${scope}`;
 function readRememberedCount(key: string) {
   for (const name of ['sessionStorage', 'localStorage'] as const) {
     try {
@@ -31,6 +32,14 @@ async function readContent(key: ContentKey) {
   return data as { content: ContentSummary; prompt?: string };
 }
 
+function isPreviewableContent(content: ContentSummary | null | undefined): content is ContentSummary & { previewUrl: string } {
+  return Boolean(content?.previewUrl && ['image', 'video', 'audio'].includes(content.category));
+}
+
+function isPreviewableItem(item: ReactionListItem | undefined): item is ReactionListItem & { content: ContentSummary } {
+  return isPreviewableContent(item?.content);
+}
+
 function CollectionThumbnail({ content }: { content: ContentSummary }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [content.thumbnailUrl]);
@@ -39,14 +48,30 @@ function CollectionThumbnail({ content }: { content: ContentSummary }) {
   return content.category === 'audio' ? <Music size={30} /> : <ImageIcon size={30} />;
 }
 
-export function ContentPreview({ content, close }: { content: ContentSummary; close: () => void }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => { const key = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, [close]);
-  if (content.category === 'image' && content.previewUrl) return <ZoomableImagePreview src={content.previewUrl} alt={content.title} contentKey={content.key} onClose={close} />;
-  return <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="媒体预览" onClick={event => { if (event.target === event.currentTarget) close(); }}><div className={styles.preview}>
-    <div className={styles.actions}><button autoFocus type="button" className={styles.command} onClick={close} title="关闭" aria-label="关闭"><X size={18} /></button><ContentReactions contentKey={content.key} /></div>
-    {failed ? <p role="status">媒体暂时无法访问，请稍后重试。收藏仍保留。</p> : content.category === 'video' ? <video src={content.previewUrl || undefined} controls autoPlay onError={() => setFailed(true)} /> : content.category === 'audio' ? <audio src={content.previewUrl || undefined} controls autoPlay onError={() => setFailed(true)} /> : <p>{content.title}</p>}
-  </div></div>;
+export function ContentPreview({ content, close, onPrevious, onNext, hasNavigation, navigationMessage, onRetryNavigation }: {
+  content: ContentSummary;
+  close: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  hasNavigation?: boolean;
+  navigationMessage?: string;
+  onRetryNavigation?: () => void;
+}) {
+  if (!content.previewUrl || !['image', 'video', 'audio'].includes(content.category)) return null;
+  return <MediaPreview
+    src={content.previewUrl}
+    type={content.category as 'image' | 'video' | 'audio'}
+    title={content.title}
+    poster={content.thumbnailUrl || undefined}
+    contentKey={content.key}
+    previewKey={content.key}
+    details={<ContentReactions contentKey={content.key} />}
+    notice={navigationMessage ? <div role="status">{navigationMessage}{onRetryNavigation && <button type="button" onClick={onRetryNavigation}>继续查找</button>}</div> : undefined}
+    hasNavigation={hasNavigation}
+    onPrevious={onPrevious}
+    onNext={onNext}
+    onClose={close}
+  />;
 }
 
 export function ContentLookup() {
@@ -85,6 +110,8 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
   const [search, setSearch] = useState('');
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [items, setItems] = useState<ReactionListItem[]>([]);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const [counts, setCounts] = useState(noCounts);
   const [total, setTotal] = useState(0);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -94,12 +121,19 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
   const [resetRevision, setResetRevision] = useState(0);
   const [storageWarning, setStorageWarning] = useState('');
   const [error, setError] = useState('');
+  const [previewNavigationMessage, setPreviewNavigationMessage] = useState('');
+  const [previewNavigationRetryable, setPreviewNavigationRetryable] = useState(false);
   const [message, setMessage] = useState('');
   const [preview, setPreview] = useState<ContentSummary | null>(null);
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
   const [undo, setUndo] = useState<{ item: ReactionListItem; state: ReactionState } | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const sequence = useRef(0);
+  const previewNavigationSequence = useRef(0);
   const lock = useRef(false);
+  const cursorRef = useRef<string | null>(null);
+  const previewRestoreAttempted = useRef(false);
   const targetCount = useRef(24);
   const loadedCount = useRef(0);
   const lifetime = useRef(0);
@@ -112,7 +146,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
   const identity = `${scope}:${JSON.stringify([category, search])}`;
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; lifetime.current++; sequence.current++; lock.current = false; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; lifetime.current++; sequence.current++; previewNavigationSequence.current++; lock.current = false; }; }, []);
   useEffect(() => {
     const stop = () => { interacted.current = true; };
     const key = (event: KeyboardEvent) => { if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)) stop(); };
@@ -146,7 +180,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
   const resetScroll = useRememberedScroll(`reactions:${identity}`, loaded && loadedIdentity === identity && restorationComplete, { localFallback: true, skipRestore: explicitPosition.current || interacted.current });
   useEffect(() => { if (!preferencesReady) return; const timer = setTimeout(() => setSearch(query.trim()), 250); return () => clearTimeout(timer); }, [query, preferencesReady]);
   const load = useCallback(async (next?: string) => {
-    if (!mounted.current || !preferencesReady || (next && lock.current)) return;
+    if (!mounted.current || !preferencesReady || (next && lock.current)) return [] as ReactionListItem[];
     const serial = ++sequence.current;
     lock.current = true; setLoading(true); setError('');
     try {
@@ -155,19 +189,47 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
       const response = await fetch(`/api/content-reactions?${params}`, { cache: 'no-store' });
       const data: ReactionListResponse & { error?: string } = await response.json();
       if (!response.ok) throw new Error(data.error || '列表读取失败');
-      if (serial !== sequence.current || currentIdentity.current !== identity) return;
+      if (serial !== sequence.current || currentIdentity.current !== identity) return [] as ReactionListItem[];
+      const incoming = next ? data.items.filter(item => !itemsRef.current.some(existing => existing.key === item.key)) : data.items;
       setItems(current => next ? [...current, ...data.items.filter(item => !current.some(existing => existing.key === item.key))] : data.items);
-      setCounts(data.counts); setTotal(data.total); setCursor(data.nextCursor); setLoaded(true); setLoadedIdentity(identity);
-    } catch (e) { if (serial === sequence.current && currentIdentity.current === identity) setError(e instanceof Error ? e.message : '列表读取失败'); }
+      setCounts(data.counts); setTotal(data.total); cursorRef.current = data.nextCursor; setCursor(data.nextCursor); setLoaded(true); setLoadedIdentity(identity);
+      return incoming;
+    } catch (e) { if (serial === sequence.current && currentIdentity.current === identity) setError(e instanceof Error ? e.message : '列表读取失败'); return [] as ReactionListItem[]; }
     finally { if (serial === sequence.current && currentIdentity.current === identity) { lock.current = false; setLoading(false); } }
   }, [action, category, search, identity, preferencesReady]);
   useEffect(() => {
-    setItems([]); setLoaded(false); setLoadedIdentity(''); setCursor(null); setUndo(null); setPreview(null); setCounts(noCounts); setTotal(0); setMessage(''); setError('');
+    setItems([]); setLoaded(false); setLoadedIdentity(''); cursorRef.current = null; setCursor(null); setUndo(null); setCounts(noCounts); setTotal(0); setMessage(''); setError('');
     targetCount.current = explicitPosition.current || resetRevision ? 24 : readRememberedCount(`reaction-count:${identity}`);
     restorePagesLeft.current = 9;
     void load();
     return () => { lifetime.current++; sequence.current++; lock.current = false; };
   }, [identity, load, resetRevision]);
+  useEffect(() => {
+    if (!preferencesReady || previewRestoreAttempted.current) return;
+    previewRestoreAttempted.current = true;
+    if (explicitPosition.current || hasContent) return;
+    let savedKey: string | null = null;
+    const storageKey = reactionPreviewStorageKey(scope);
+    try { savedKey = localStorage.getItem(storageKey); } catch {}
+    if (!savedKey || savedKey.length > 512) return;
+    const request = ++previewNavigationSequence.current;
+    void readContent(savedKey as ContentKey).then(data => {
+      if (request !== previewNavigationSequence.current || currentIdentity.current !== identity || interacted.current || previewRef.current) return;
+      if (isPreviewableContent(data.content)) {
+        setPreview(data.content);
+      } else {
+        try { if (localStorage.getItem(storageKey) === savedKey) localStorage.removeItem(storageKey); } catch {}
+      }
+    }).catch(error => {
+      if (request !== previewNavigationSequence.current || currentIdentity.current !== identity) return;
+      const status = (error as { status?: number }).status;
+      if ([401, 403, 404].includes(status || 0)) {
+        try { if (localStorage.getItem(storageKey) === savedKey) localStorage.removeItem(storageKey); } catch {}
+      } else {
+        setError('上次打开的媒体暂时无法核验，列表仍可正常使用。');
+      }
+    });
+  }, [hasContent, identity, preferencesReady, scope]);
   useEffect(() => {
     if (!loaded || loadedIdentity !== identity || loading || error) return;
     if (cursor && items.length < targetCount.current && restorePagesLeft.current > 0) { restorePagesLeft.current--; void load(cursor); return; }
@@ -182,9 +244,26 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
     const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) void load(cursor); }, { rootMargin: '350px' });
     observer.observe(element); return () => observer.disconnect();
   }, [cursor, loading, error, load, loadedIdentity, identity, items.length, restorationComplete]);
+  const revalidatePreview = useCallback(async () => {
+    const active = previewRef.current;
+    if (!active) return;
+    try {
+      const data = await readContent(active.key);
+      if (currentIdentity.current === identity && previewRef.current?.key === active.key) setPreview(data.content);
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      if (currentIdentity.current === identity && previewRef.current?.key === active.key && [401, 403, 404].includes(status || 0)) {
+        previewNavigationSequence.current++;
+        setPreview(null);
+        try { if (localStorage.getItem(reactionPreviewStorageKey(scope)) === active.key) localStorage.removeItem(reactionPreviewStorageKey(scope)); } catch {}
+      } else if (currentIdentity.current === identity && previewRef.current?.key === active.key) {
+        setError('预览权限暂未确认，内容仍保持打开；可以稍后刷新重试。');
+      }
+    }
+  }, [identity, scope]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
-    const refresh = () => { if (document.visibilityState === 'visible') { targetCount.current = Math.min(MAX_RESTORED_ITEMS, Math.max(24, targetCount.current, loadedCount.current)); restorePagesLeft.current = 9; setPreview(null); void load(); } };
+    const refresh = () => { if (document.visibilityState === 'visible') { targetCount.current = Math.min(MAX_RESTORED_ITEMS, Math.max(24, targetCount.current, loadedCount.current)); restorePagesLeft.current = 9; void load(); void revalidatePreview(); } };
     const changed = (event: Event) => {
       if ((event as CustomEvent).detail?.userId !== userId) return;
       clearTimeout(timer); timer = setTimeout(refresh, 200);
@@ -192,25 +271,99 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
     window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', refresh);
     window.addEventListener('sd2-reactions-changed', changed);
     return () => { clearTimeout(timer); window.removeEventListener('sd2-reactions-changed', changed); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
-  }, [load, userId]);
+  }, [load, revalidatePreview, userId]);
   function currentOperation() {
     const revision = lifetime.current;
     return () => mounted.current && revision === lifetime.current && currentIdentity.current === identity;
   }
-  async function open(item: ReactionListItem, copy = false) {
+  async function open(item: ReactionListItem, copy = false, navigation?: { sequence: number; fromKey: ContentKey }): Promise<'opened' | 'unavailable' | 'failed' | 'stale'> {
+    const requestSequence = navigation?.sequence ?? ++previewNavigationSequence.current;
     const current = currentOperation();
+    const navigationIsCurrent = () => previewNavigationSequence.current === requestSequence
+      && (!navigation || previewRef.current?.key === navigation.fromKey);
     try {
       const data = await readContent(item.key);
-      if (!current()) return;
-      if (copy && data.prompt) { await navigator.clipboard.writeText(data.prompt); if (current()) setMessage('已复制文案'); }
-      else if (data.content.previewUrl) setPreview(data.content);
-      else router.push(data.content.href);
+      if (!current() || !navigationIsCurrent()) return 'stale';
+      if (copy && data.prompt) { await navigator.clipboard.writeText(data.prompt); if (current() && navigationIsCurrent()) setMessage('已复制文案'); return 'opened'; }
+      else if (isPreviewableContent(data.content)) {
+        setPreviewNavigationMessage('');
+        setPreviewNavigationRetryable(false);
+        setPreview(data.content);
+        try { localStorage.setItem(reactionPreviewStorageKey(scope), item.key); } catch { setStorageWarning('预览可正常使用，但浏览器未允许记住上次打开的媒体。'); }
+        return 'opened';
+      }
+      else if (navigation) {
+        setItems(currentItems => currentItems.map(row => row.key === item.key ? { ...row, content: null, state: { ...row.state, available: false, likeCount: null } } : row));
+        return 'unavailable';
+      } else { router.push(data.content.href); return 'opened'; }
     } catch (e) {
-      if (!current()) return;
-      if ((e as { status?: number }).status === 404) {
+      if (!current() || !navigationIsCurrent()) return 'stale';
+      const status = (e as { status?: number }).status;
+      if (status === 404 || (navigation && status === 403)) {
         setItems(current => current.map(row => row.key === item.key ? { ...row, content: null, state: { ...row.state, available: false, likeCount: null } } : row));
+        if (navigation) return 'unavailable';
       }
       setError(e instanceof Error ? e.message : '内容暂不可用');
+      if (navigation) {
+        setPreviewNavigationMessage('目标媒体暂时无法核验，当前预览保持打开；可以重试。');
+        setPreviewNavigationRetryable(true);
+        return 'failed';
+      }
+      return 'failed';
+    }
+    return 'unavailable';
+  }
+  async function navigatePreview(direction: -1 | 1) {
+    const active = previewRef.current;
+    if (!active) return;
+    const request = ++previewNavigationSequence.current;
+    setPreviewNavigationMessage('');
+    setPreviewNavigationRetryable(false);
+    const navigation = { sequence: request, fromKey: active.key };
+    const isCurrent = () => previewNavigationSequence.current === request && previewRef.current?.key === active.key;
+    const currentItems = itemsRef.current;
+    const index = currentItems.findIndex(item => item.key === active.key);
+    if (index < 0) return;
+    const tryCandidates = async (candidates: ReactionListItem[]) => {
+      for (const candidate of candidates) {
+        if (!isPreviewableItem(candidate) || !isCurrent()) continue;
+        const result = await open(candidate, false, navigation);
+        if (!isCurrent() || result === 'stale') return 'stale';
+        if (result === 'opened' || result === 'failed') return result;
+      }
+      return 'empty';
+    };
+    if (direction < 0) {
+      const result = await tryCandidates(currentItems.slice(0, index).reverse());
+      if (result === 'failed' || result === 'stale') return;
+      return;
+    }
+    const loadedResult = await tryCandidates(currentItems.slice(index + 1));
+    if (loadedResult === 'opened' || loadedResult === 'failed' || loadedResult === 'stale') return;
+    let nextCursor = cursorRef.current;
+    let pagesScanned = 0;
+    while (nextCursor && isCurrent() && pagesScanned < 3) {
+      const requestedCursor = nextCursor;
+      setPreviewNavigationMessage('正在读取后续内容…');
+      const nextItems = await load(requestedCursor);
+      if (!isCurrent()) return;
+      pagesScanned += 1;
+      const result = await tryCandidates(nextItems);
+      if (result === 'opened' || result === 'failed' || result === 'stale') return;
+      nextCursor = cursorRef.current;
+      if (nextCursor === requestedCursor) {
+        setPreviewNavigationMessage('下一批内容读取失败，当前预览保持打开；可以重试加载后继续。');
+        setPreviewNavigationRetryable(true);
+        setError('下一批内容读取失败，当前预览保持打开；可以重试加载后继续。');
+        return;
+      }
+    }
+    if (isCurrent()) {
+      const canContinue = cursorRef.current !== null;
+      setPreviewNavigationMessage(canContinue
+        ? `已检查 ${pagesScanned} 页，暂未找到可预览媒体；可继续查找。`
+        : '后续没有可预览的图片、视频或音频。');
+      setPreviewNavigationRetryable(canContinue);
     }
   }
   async function sendMediaToGeneration(item: ReactionListItem) {
@@ -237,6 +390,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
   }
   function resetPreferences() {
     lifetime.current++; sequence.current++; lock.current = false;
+    previewNavigationSequence.current++;
     resetScroll();
     let cleared = true;
     for (const name of ['sessionStorage', 'localStorage'] as const) {
@@ -244,12 +398,12 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
         const storage = window[name];
         const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
         keys.forEach(key => {
-          if (key && (key === `reaction-filters:${scope}` || key.startsWith(`reaction-count:${scope}:`) || key.startsWith(`sd2-scroll:reactions:${scope}:`) || key === reactionEntryStorageKey(userId))) storage.removeItem(key);
+          if (key && (key === `reaction-filters:${scope}` || key.startsWith(`reaction-count:${scope}:`) || key.startsWith(`sd2-scroll:reactions:${scope}:`) || key === reactionEntryStorageKey(userId) || key === reactionPreviewStorageKey(scope))) storage.removeItem(key);
         });
       } catch { cleared = false; }
     }
     try { localStorage.setItem(`reaction-filters:${scope}`, JSON.stringify({ version: 1, category: 'all', query: '' })); } catch { cleared = false; }
-    setCategory('all'); setQuery(''); setSearch(''); setPreview(null); setUndo(null); setResetRevision(value => value + 1);
+    setCategory('all'); setQuery(''); setSearch(''); setUndo(null); setPreview(null); previewRef.current = null; setPreviewNavigationMessage(''); setPreviewNavigationRetryable(false); setResetRevision(value => value + 1);
     const location = new URL(window.location.href);
     location.searchParams.delete('category'); location.searchParams.delete('q');
     window.history.replaceState(window.history.state, '', location);
@@ -257,7 +411,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
   }
   if (!preferencesReady) return <p role="status">正在读取…</p>;
   return <section aria-label={action === 'favorite' ? '我的收藏' : '我赞过的'}>
-    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索收藏内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>{action === 'favorite' ? '最近收藏' : '最近点赞'} · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => void load()}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留收藏）" title="重置筛选和浏览位置（保留收藏）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
+    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索收藏内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>{action === 'favorite' ? '最近收藏' : '最近点赞'} · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留收藏）" title="重置筛选和浏览位置（保留收藏）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
     {error && <p role="alert">{error}<button className={styles.command} type="button" onClick={() => void load(cursor || undefined)}>重试</button></p>}
     {storageWarning && <p role="status">{storageWarning}</p>}
     {message && <p role="status">{message}</p>}
@@ -281,6 +435,27 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent 
       if (!current()) return;
       if (!response.ok) throw new Error(data.error || '撤销失败');
       await writeReaction(userId, undo.item.key, action, true, data.states[undo.item.key]); if (!current()) return; setUndo(null); void load(); } catch (e) { if (current()) setError(e instanceof Error ? e.message : '撤销失败'); } }}><Undo2 size={15} /> 撤销</button><button className={styles.command} type="button" aria-label="关闭撤销提示" onClick={() => setUndo(null)}><X size={14} /></button></div>}
-    {preview && <ContentPreview content={preview} close={() => setPreview(null)} />}
+    {preview && (() => {
+      const index = items.findIndex(item => item.key === preview.key);
+      const canPrevious = index > 0 && items.slice(0, index).some(isPreviewableItem);
+      const canNext = index >= 0 && (items.slice(index + 1).some(isPreviewableItem) || Boolean(cursor));
+      const closePreview = () => {
+        previewNavigationSequence.current++;
+        setPreview(null);
+        previewRef.current = null;
+        setPreviewNavigationMessage('');
+        setPreviewNavigationRetryable(false);
+        try { localStorage.removeItem(reactionPreviewStorageKey(scope)); } catch {}
+      };
+      return <ContentPreview
+        content={preview}
+        close={closePreview}
+        hasNavigation={canPrevious || canNext}
+        onPrevious={canPrevious ? () => void navigatePreview(-1) : undefined}
+        onNext={canNext ? () => void navigatePreview(1) : undefined}
+        navigationMessage={previewNavigationMessage}
+        onRetryNavigation={previewNavigationRetryable ? () => void navigatePreview(1) : undefined}
+      />;
+    })()}
   </section>;
 }

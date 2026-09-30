@@ -2,7 +2,9 @@
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Eye } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 
 type AlbumScope = 'mine' | 'project' | 'shared' | 'public';
@@ -73,6 +75,14 @@ function selectionTypeFromItem(image: ReferenceImageItem): ReferenceAlbumSelecti
   if (image.asset?.type === 'video') return 'video';
   if (image.asset?.type === 'audio') return 'audio';
   return 'image';
+}
+
+function AlbumThumbnail({ image }: { image: ReferenceImageItem }) {
+  const [failed, setFailed] = useState(false);
+  const src = image.thumbnail_url || `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=thumbnail`;
+  useEffect(() => setFailed(false), [src]);
+  if (failed || !src) return <div className="album-picker-media-placeholder">暂无封面</div>;
+  return <img src={src} alt={image.asset?.file_name || '素材封面'} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 export function ReferenceAlbumPicker({
@@ -235,7 +245,8 @@ export function ReferenceAlbumPicker({
               const isAlreadyInWorkspace = currentReferenceImageIdSet.has(image.id);
               const typeLabel = mediaTypeLabel(image.asset?.type);
               const isImage = isImageItem(image);
-              const isVideo = image.asset?.type === 'video';
+              const previewSrc = `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=preview`;
+              const title = image.asset?.file_name || `${typeLabel} ${image.sort_order + 1}`;
               return (
                 <article
                   key={image.id}
@@ -249,15 +260,11 @@ export function ReferenceAlbumPicker({
                     className="album-picker-image-preview"
                     onClick={() => setPreviewImage(image)}
                     title={isImage ? '放大查看' : `预览${typeLabel}`}
-                    aria-label={`${isImage ? '放大查看' : `预览${typeLabel}`}${image.asset?.file_name || `${typeLabel} ${image.sort_order + 1}`}`}
+                    aria-label={`${isImage ? '放大查看' : `预览${typeLabel}`}${title}`}
+                    style={{ position: 'relative' }}
                   >
-                    {isImage ? (
-                      <img src={image.thumbnail_url} alt={image.asset?.file_name || '参考图'} />
-                    ) : isVideo ? (
-                      <video src={image.thumbnail_url || image.image_url} muted playsInline preload="metadata" />
-                    ) : (
-                      <div className="album-picker-media-placeholder">音频</div>
-                    )}
+                    <AlbumThumbnail image={image} />
+                    <span aria-hidden="true" style={{ alignItems: 'center', background: 'rgba(17, 24, 39, .76)', borderRadius: 4, color: 'white', display: 'inline-flex', padding: 4, position: 'absolute', right: 7, top: 7 }}><Eye size={14} /></span>
                   </button>
                   <ContentReactions contentKey={`reference_image:${image.id}`} />
                   <label className="album-picker-image-select">
@@ -293,24 +300,23 @@ export function ReferenceAlbumPicker({
         {previewImage && isImageItem(previewImage) && (
           <ZoomableImagePreview
             contentKey={`reference_image:${previewImage.id}`}
-            src={previewImage.image_url || previewImage.thumbnail_url}
+            src={`/api/reference-images/${encodeURIComponent(previewImage.id)}/content?variant=preview`}
             alt={previewImage.asset?.file_name || '参考图'}
             fileName={previewImage.asset?.file_name || `图 ${previewImage.sort_order + 1}`}
             onClose={() => setPreviewImage(null)}
           />
         )}
         {previewImage && !isImageItem(previewImage) && (
-          <div className="album-media-preview-backdrop" onClick={() => setPreviewImage(null)}>
-            <div className="album-media-preview-modal" onClick={(event) => event.stopPropagation()}>
-              <button type="button" className="album-media-preview-close" onClick={() => setPreviewImage(null)}>×</button>
-              <strong>{previewImage.asset?.file_name || `${mediaTypeLabel(previewImage.asset?.type)} ${previewImage.sort_order + 1}`}</strong>
-              {previewImage.asset?.type === 'video' ? (
-                <video src={previewImage.thumbnail_url || previewImage.image_url} controls playsInline />
-              ) : (
-                <audio src={previewImage.thumbnail_url || previewImage.image_url} controls />
-              )}
-            </div>
-          </div>
+          <MediaPreview
+            src={`/api/reference-images/${encodeURIComponent(previewImage.id)}/content?variant=preview`}
+            type={previewImage.asset?.type === 'video' ? 'video' : 'audio'}
+            title={previewImage.asset?.file_name || `${mediaTypeLabel(previewImage.asset?.type)} ${previewImage.sort_order + 1}`}
+            poster={previewImage.thumbnail_url || undefined}
+            contentKey={`reference_image:${previewImage.id}`}
+            previewKey={previewImage.id}
+            details={<div><span>{mediaTypeLabel(previewImage.asset?.type)}</span>{previewImage.asset?.file_size != null && <span>{previewImage.asset.file_size} 字节</span>}</div>}
+            onClose={() => setPreviewImage(null)}
+          />
         )}
       </div>
     </div>

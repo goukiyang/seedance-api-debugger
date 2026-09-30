@@ -12,11 +12,13 @@ import {
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import ContentCollections, { ContentLookup, reactionEntryStorageKey } from '@/components/content-reactions/ContentCollections';
+import type { ContentSummary } from '@/lib/content-reactions/types';
 import { IMAGE_STUDIO_MODEL_SHORT_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+import MediaPreview from '@/components/MediaPreview';
 import {
   createAssetLibraryCacheKey,
   deleteAssetLibraryCacheForUser,
@@ -148,6 +150,11 @@ type Pagination = {
   total: number;
   total_pages: number;
   has_more: boolean;
+};
+
+type AssetPreviewPage = {
+  items: AssetLibraryItem[];
+  nextPage: number | null;
 };
 
 type AssetLibraryUploadProgress = {
@@ -333,9 +340,39 @@ function statusLabel(status: string) {
 
 function mediaFallbackLabel(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'status'>) {
   if (item.kind === 'video' && item.source === 'asset') return '视频素材';
-  if (item.kind === 'video' && item.status === 'succeeded') return '暂无截图';
+  if (item.kind === 'video') return '暂无封面';
+  if (item.kind === 'audio') return '音频素材';
   if (item.kind === 'image' && item.source === 'asset') return '图片素材';
   return statusLabel(item.status);
+}
+
+function AssetLibraryThumbnail({ item }: { item: AssetLibraryItem }) {
+  const hasCover = Boolean(item.thumbnailUrl && (item.kind === 'image' || item.thumbnailUrl !== item.previewUrl));
+  const [failed, setFailed] = useState(!hasCover);
+
+  if (failed || !hasCover) {
+    return <span className="asset-card-empty">{mediaFallbackLabel(item)}</span>;
+  }
+
+  return <img src={item.thumbnailUrl as string} alt={item.title} loading="lazy" onError={() => setFailed(true)} />;
+}
+
+function isAssetPreviewItem(item: AssetLibraryItem) {
+  if (item.kind === 'video' && item.source === 'video_task') {
+    return Boolean(item.taskId && item.previewAvailable);
+  }
+  return Boolean(item.previewUrl && ['image', 'video', 'audio'].includes(item.kind));
+}
+
+function assetPreviewStorageKey(userId: string) {
+  return `sd2-asset-preview:${encodeURIComponent(userId)}`;
+}
+
+async function readRememberedPreview(contentKey: string): Promise<ContentSummary> {
+  const response = await fetch(`/api/content-reactions/content?key=${encodeURIComponent(contentKey)}`, { cache: 'no-store' });
+  const data = await response.json();
+  if (!response.ok) throw Object.assign(new Error(data.error || '内容暂不可用'), { status: response.status });
+  return data.content as ContentSummary;
 }
 
 function formatDuration(seconds: number | null) {
@@ -454,37 +491,6 @@ function deliveryStageClassName(stage: VideoDeliveryStage | null | undefined) {
   if (stage.key === 'failed') return 'asset-card-delivery-stage is-failed';
   if (stage.key === 'preparing') return 'asset-card-delivery-stage is-preparing';
   return 'asset-card-delivery-stage';
-}
-
-function aspectRatioFromDimensions(width: number, height: number) {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
-  return `${Math.round(width)} / ${Math.round(height)}`;
-}
-
-function parseStoredAspectRatio(value: string | null) {
-  const normalized = value?.trim();
-  if (!normalized) return null;
-  const pair = normalized.match(/^(\d+(?:\.\d+)?)\s*(?::|\/|x|X|×)\s*(\d+(?:\.\d+)?)$/);
-  if (pair) return aspectRatioFromDimensions(Number(pair[1]), Number(pair[2]));
-  const decimal = Number(normalized);
-  if (Number.isFinite(decimal) && decimal > 0) return `${decimal} / 1`;
-  return null;
-}
-
-function parseResolutionAspectRatio(value: string | null) {
-  const normalized = value?.trim();
-  if (!normalized) return null;
-  const pair = normalized.match(/(\d{2,5})\s*(?:x|X|×)\s*(\d{2,5})/);
-  return pair ? aspectRatioFromDimensions(Number(pair[1]), Number(pair[2])) : null;
-}
-
-function getAssetPreviewAspectRatio(item: Pick<AssetLibraryItem, 'ratio' | 'resolution'>) {
-  return parseStoredAspectRatio(item.ratio) || parseResolutionAspectRatio(item.resolution);
-}
-
-function isPortraitAspectRatio(value: string | null) {
-  const pair = value?.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
-  return pair ? Number(pair[1]) < Number(pair[2]) : false;
 }
 
 function formatDateTime(value: string | null) {
@@ -676,7 +682,10 @@ function AssetsPageContent() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [anchorId, setAnchorId] = useState<AssetLibraryItemId | null>(null);
   const [activeItem, setActiveItem] = useState<AssetLibraryItem | null>(null);
-  const [detailMediaAspectRatio, setDetailMediaAspectRatio] = useState<string | null>(null);
+  const [restoredPreview, setRestoredPreview] = useState<ContentSummary | null>(null);
+  const [previewNextPage, setPreviewNextPage] = useState<number | null>(null);
+  const [previewNavigationMessage, setPreviewNavigationMessage] = useState('');
+  const [previewNavigationRetryable, setPreviewNavigationRetryable] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [movePanelOpen, setMovePanelOpen] = useState(false);
   const [bulkTarget, setBulkTarget] = useState<AssetBulkTarget>(() => readSavedAssetBulkTarget());
@@ -709,6 +718,11 @@ function AssetsPageContent() {
   const marqueeFrameRef = useRef<number | null>(null);
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const previewRestoreGeneration = useRef(0);
+  const previewNavigationGeneration = useRef(0);
+  const previewPages = useRef(new Map<number, AssetPreviewPage>());
+  const previewSequence = useRef<AssetLibraryItem[]>([]);
+  const previewNextPageRef = useRef<number | null>(null);
 
   const isAdmin = user?.role === 'admin';
   const isEnhanceView = assetView === 'enhance';
@@ -734,10 +748,13 @@ function AssetsPageContent() {
     .filter((item) => item.source === 'reference_image' && item.referenceImageId)
     .map((item) => item.referenceImageId as string);
   const manageableProjects = projects.filter((project) => project.can_manage_project);
-  const activePreviewAspectRatio = activeItem
-    ? activeItem.kind === 'audio' ? '16 / 6' : detailMediaAspectRatio || getAssetPreviewAspectRatio(activeItem) || '16 / 10'
-    : '16 / 10';
-  const activePreviewIsPortrait = isPortraitAspectRatio(activePreviewAspectRatio);
+  const activePreviewSrc = activeItem?.source === 'video_task' && activeItem.taskId && activeItem.previewAvailable
+    ? `/api/video/play/${encodeURIComponent(activeItem.taskId)}`
+    : activeItem?.source === 'reference_image' && activeItem.referenceImageId
+      ? `/api/reference-images/${encodeURIComponent(activeItem.referenceImageId)}/content?variant=preview`
+      : activeItem?.source === 'asset' && activeItem.assetId && activeItem.previewUrl
+        ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${activeItem.assetId}`)}&variant=preview`
+        : activeItem?.previewUrl;
   const activeItemCostBreakdown = activeItem ? formatAssetCostBreakdown(activeItem) : null;
 
   const groupedItems = useMemo(() => {
@@ -751,6 +768,50 @@ function AssetsPageContent() {
     });
     return Array.from(groups.values());
   }, [items, groupBy]);
+  const displayItems = useMemo(() => groupedItems.flatMap((group) => group.items), [groupedItems]);
+
+  const activateAssetPreviewItem = useCallback((item: AssetLibraryItem) => {
+    previewRestoreGeneration.current += 1;
+    setPreviewNavigationMessage('');
+    setPreviewNavigationRetryable(false);
+    setRestoredPreview(null);
+    setActiveItem(item);
+    if (user?.id) {
+      try { localStorage.setItem(assetPreviewStorageKey(user.id), item.id); } catch {}
+    }
+  }, [user?.id]);
+
+  const clearPreviewSequence = useCallback(() => {
+    previewNavigationGeneration.current += 1;
+    previewPages.current.clear();
+    previewSequence.current = [];
+    previewNextPageRef.current = null;
+    setPreviewNextPage(null);
+    setPreviewNavigationMessage('');
+    setPreviewNavigationRetryable(false);
+  }, []);
+
+  const openAssetItem = useCallback((item: AssetLibraryItem) => {
+    clearPreviewSequence();
+    previewPages.current.set(page, {
+      items: displayItems,
+      nextPage: pagination?.has_more ? page + 1 : null,
+    });
+    previewSequence.current = displayItems.filter(isAssetPreviewItem);
+    previewNextPageRef.current = pagination?.has_more ? page + 1 : null;
+    setPreviewNextPage(previewNextPageRef.current);
+    activateAssetPreviewItem(item);
+  }, [activateAssetPreviewItem, clearPreviewSequence, displayItems, page, pagination]);
+
+  const closeAssetPreview = useCallback(() => {
+    previewRestoreGeneration.current += 1;
+    clearPreviewSequence();
+    setActiveItem(null);
+    setRestoredPreview(null);
+    if (user?.id) {
+      try { localStorage.removeItem(assetPreviewStorageKey(user.id)); } catch {}
+    }
+  }, [clearPreviewSequence, user?.id]);
 
   const clearSelection = () => {
     setSelectedIds([]);
@@ -770,7 +831,7 @@ function AssetsPageContent() {
 
   const resetForFilterChange = () => {
     setPage(1);
-    setActiveItem(null);
+    closeAssetPreview();
     clearSelection();
   };
 
@@ -788,6 +849,16 @@ function AssetsPageContent() {
     if (isAssetType(requestedType)) setType(requestedType);
     void refreshUser();
   }, [refreshUser]);
+
+  const previousPreviewOwnerId = useRef<string | null>(user?.id || null);
+  useEffect(() => {
+    if (previousPreviewOwnerId.current === (user?.id || null)) return;
+    previousPreviewOwnerId.current = user?.id || null;
+    previewRestoreGeneration.current += 1;
+    clearPreviewSequence();
+    setActiveItem(null);
+    setRestoredPreview(null);
+  }, [clearPreviewSequence, user?.id]);
 
   useEffect(() => {
     if (!hasLoadedUser || loadingUser || user || userLoadError) return;
@@ -981,6 +1052,35 @@ function AssetsPageContent() {
   }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
 
   useEffect(() => {
+    if (!user?.id || hasExplicitContent || isReactionView) return;
+    let cancelled = false;
+    const generation = previewRestoreGeneration.current;
+    const key = assetPreviewStorageKey(user.id);
+    let savedId: string | null = null;
+    try { savedId = localStorage.getItem(key); } catch {}
+    if (!savedId || savedId.length > 512) return;
+    void readRememberedPreview(savedId).then((content) => {
+      if (cancelled || generation !== previewRestoreGeneration.current || activeItem || !content.previewUrl
+        || !['image', 'video', 'audio'].includes(content.category)) {
+        if (!cancelled && generation === previewRestoreGeneration.current && (!content.previewUrl || !['image', 'video', 'audio'].includes(content.category))) {
+          try { if (localStorage.getItem(key) === savedId) localStorage.removeItem(key); } catch {}
+        }
+        return;
+      }
+      setRestoredPreview(content);
+    }).catch((error) => {
+      if (cancelled || generation !== previewRestoreGeneration.current) return;
+      const status = (error as { status?: number }).status;
+      if ([401, 403, 404].includes(status || 0)) {
+        try { if (localStorage.getItem(key) === savedId) localStorage.removeItem(key); } catch {}
+      } else {
+        setError('上次打开的媒体暂时无法核验，列表仍可正常使用。');
+      }
+    });
+    return () => { cancelled = true; };
+  }, [activeItem, hasExplicitContent, isReactionView, user?.id]);
+
+  useEffect(() => {
     marqueeStateRef.current = marquee;
   }, [marquee]);
 
@@ -989,10 +1089,6 @@ function AssetsPageContent() {
       window.cancelAnimationFrame(marqueeFrameRef.current);
     }
   }, []);
-
-  useEffect(() => {
-    setDetailMediaAspectRatio(null);
-  }, [activeItem?.id]);
 
   useEffect(() => {
     if (!moveProjectId) {
@@ -1061,7 +1157,7 @@ function AssetsPageContent() {
       }
       return;
     }
-    setActiveItem(item);
+    openAssetItem(item);
   };
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, item: AssetLibraryItem) => {
@@ -1073,7 +1169,7 @@ function AssetsPageContent() {
     }
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    setActiveItem(item);
+    openAssetItem(item);
   };
 
   const handleSelectView = (nextView: AssetView) => {
@@ -1558,6 +1654,126 @@ function AssetsPageContent() {
     ? rectFromPoints({ x: marquee.startX, y: marquee.startY }, { x: marquee.currentX, y: marquee.currentY })
     : null;
 
+  const activeItemDetails = activeItem ? <>
+    {activeItemCostBreakdown && <div className="asset-detail-cost-panel" aria-label="扣费金额">
+      <div><span>美金扣费</span><strong>{activeItemCostBreakdown.usd}</strong></div>
+      <div><span>人民币扣费</span><strong>{activeItemCostBreakdown.cny}</strong></div>
+      <small>{activeItemCostBreakdown.rate}</small>
+    </div>}
+    <dl className="asset-detail-list">
+      <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
+      {shouldShowDeliveryStage(activeItem) && <div><dt>稳定下载</dt><dd>{activeItem.deliveryStage?.label || '-'}</dd></div>}
+      <div><dt>项目</dt><dd>{activeItem.project?.name || '未归属项目'}</dd></div>
+      {isAdmin && <div><dt>用户</dt><dd><UserIdentityBadge user={activeItem.owner} size="sm" subtitle={activeItem.owner?.subtitle || null} className="asset-detail-user" /></dd></div>}
+      <div><dt>规格</dt><dd>{formatAssetSpec(activeItem) || '-'}</dd></div>
+      <div><dt>创建时间</dt><dd>{formatDateTime(activeItem.createdAt)}</dd></div>
+      <div><dt>完成时间</dt><dd>{formatDateTime(activeItem.completedAt)}</dd></div>
+    </dl>
+    {activeItem.prompt && <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div>}
+    <div className="asset-detail-actions">
+      {(activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
+      {activeItem.taskId && <Link href={`/tasks/${activeItem.taskId}`}>打开任务详情</Link>}
+      {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady && activeItem.previewAvailable && (
+        <button type="button" onClick={() => void prepareStableDownload(activeItem.taskId as string)} disabled={preparingDownloadTaskId === activeItem.taskId}>
+          {preparingDownloadTaskId === activeItem.taskId ? '提交中...' : activeItem.deliveryStage?.key === 'failed' ? '重试稳定下载' : '准备稳定下载'}
+        </button>
+      )}
+      {activeItem.downloadable && (!isFastPathAssetVideo(activeItem) || activeItem.stableDownloadReady) && (
+        <button type="button" onClick={() => { if (activeItem.taskId) void downloadTaskIds([activeItem.taskId]); }}>下载视频</button>
+      )}
+    </div>
+  </> : null;
+  const loadedPreviewItems = previewSequence.current;
+  const activeIndex = activeItem ? loadedPreviewItems.findIndex((item) => item.id === activeItem.id) : -1;
+  const canMovePreviewPrevious = activeIndex > 0;
+  const canMovePreviewNext = activeIndex >= 0 && (activeIndex < loadedPreviewItems.length - 1 || previewNextPage !== null);
+  const moveActiveItem = async (direction: -1 | 1) => {
+    if (!activeItem) return;
+    const sourceId = activeItem.id;
+    const request = ++previewNavigationGeneration.current;
+    const isCurrent = () => request === previewNavigationGeneration.current;
+    setPreviewNavigationMessage('');
+    setPreviewNavigationRetryable(false);
+
+    let sequence = previewSequence.current;
+    let index = sequence.findIndex((item) => item.id === sourceId);
+    if (index < 0) return;
+    if (direction < 0) {
+      if (index > 0) activateAssetPreviewItem(sequence[index - 1]);
+      return;
+    }
+    if (index < sequence.length - 1) {
+      activateAssetPreviewItem(sequence[index + 1]);
+      return;
+    }
+
+    let pageToRead = previewNextPageRef.current;
+    let pagesScanned = 0;
+    while (pageToRead !== null && pagesScanned < 3 && isCurrent()) {
+      let cachedPage = previewPages.current.get(pageToRead);
+      if (!cachedPage) {
+        setPreviewNavigationMessage('正在读取后续内容…');
+        const normalizedKeyword = keyword.trim();
+        const pageParams = new URLSearchParams({
+          scope,
+          type: requestType,
+          status,
+          sort,
+          group_by: groupBy,
+          page: String(pageToRead),
+          limit: '60',
+        });
+        pageParams.set('include_uploads', showUploadedAssets ? 'true' : 'false');
+        pageParams.set('include_generated', 'true');
+        if (enhanceFilter !== 'none') pageParams.set('enhance', enhanceFilter);
+        if (scope === 'project' && projectId) pageParams.set('project_id', projectId);
+        if (scope === 'user' && ownerUserId) pageParams.set('owner_user_id', ownerUserId);
+        if (normalizedKeyword) pageParams.set('keyword', normalizedKeyword);
+        try {
+          const response = await fetch(`/api/assets/library?${pageParams.toString()}`, { cache: 'no-store' });
+          const data = await response.json();
+          if (!isCurrent()) return;
+          if (!response.ok) throw new Error(data.error || data.message || '资产加载失败');
+          const pagePagination = (data.pagination || null) as Pagination | null;
+          cachedPage = {
+            items: (Array.isArray(data.items) ? data.items : []) as AssetLibraryItem[],
+            nextPage: pagePagination?.has_more ? (pagePagination.page || pageToRead) + 1 : null,
+          };
+          previewPages.current.set(pageToRead, cachedPage);
+        } catch {
+          if (!isCurrent()) return;
+          setPreviewNavigationMessage('下一页暂时读取失败，当前预览保持打开；可以重试。');
+          setPreviewNavigationRetryable(true);
+          return;
+        }
+      }
+      if (!isCurrent()) return;
+      const knownIds = new Set(previewSequence.current.map((item) => item.id));
+      const nextMedia = cachedPage.items.filter((item) => isAssetPreviewItem(item) && !knownIds.has(item.id));
+      sequence = [...previewSequence.current, ...nextMedia];
+      previewSequence.current = sequence;
+      previewNextPageRef.current = cachedPage.nextPage;
+      setPreviewNextPage(cachedPage.nextPage);
+      pagesScanned += 1;
+
+      index = sequence.findIndex((item) => item.id === sourceId);
+      const next = sequence.slice(index + 1).find(isAssetPreviewItem);
+      if (next) {
+        activateAssetPreviewItem(next);
+        return;
+      }
+      pageToRead = cachedPage.nextPage;
+    }
+
+    if (isCurrent()) {
+      const canContinue = previewNextPageRef.current !== null;
+      setPreviewNavigationMessage(canContinue
+        ? `已检查 ${pagesScanned} 页，暂未找到可预览媒体；可继续查找。`
+        : '后续没有可预览的图片、视频或音频。');
+      setPreviewNavigationRetryable(canContinue);
+    }
+  };
+
   return (
     <div className="asset-library-page">
       <header className="asset-library-header">
@@ -1984,10 +2200,8 @@ function AssetsPageContent() {
                           <span>音频</span>
                           <small>{item.fileSize ? formatAssetUploadBytes(item.fileSize) : '参考音频'}</small>
                         </span>
-                      ) : item.thumbnailUrl ? (
-                        <img src={item.thumbnailUrl} alt={item.title} loading="lazy" />
                       ) : (
-                        <span className="asset-card-empty">{mediaFallbackLabel(item)}</span>
+                        <AssetLibraryThumbnail key={`${item.source}:${item.thumbnailUrl || ''}:${item.previewUrl || ''}`} item={item} />
                       )}
                       {(cnyCostBadge || enhanceStateLabel) && (
                         <span className="asset-card-top-right-badges">
@@ -2011,7 +2225,7 @@ function AssetsPageContent() {
                           className="asset-card-hover-button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            setActiveItem(item);
+                            openAssetItem(item);
                           }}
                         >
                           <Eye size={16} aria-hidden="true" />
@@ -2150,145 +2364,47 @@ function AssetsPageContent() {
         />
       )}
 
-      {activeItem && (
+      {activeItem && !activePreviewSrc && (
         <aside className="asset-detail-drawer" aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
               <span>{activeItem.isEnhanceTask ? '超分视频资产' : activeItem.kind === 'video' ? '视频资产' : activeItem.kind === 'audio' ? '音频资产' : '图片资产'}</span>
               <h2>{shortText(activeItem.title, '资产详情', 42)}</h2>
             </div>
-            <button type="button" onClick={() => setActiveItem(null)} aria-label="关闭详情">
+            <button type="button" onClick={closeAssetPreview} aria-label="关闭详情">
               <X size={18} />
             </button>
           </div>
-          <div
-            className={`asset-detail-preview asset-detail-preview-${activeItem.kind} ${activePreviewIsPortrait ? 'is-portrait' : ''}`}
-          >
-            {activeItem.isEnhanceTask && (
-              <span className="asset-detail-preview-badge">
-                <Sparkles size={12} aria-hidden="true" />
-                超分
-              </span>
-            )}
-            {activeItem.kind === 'video' && activeItem.previewUrl ? (
-              <video
-                src={activeItem.previewUrl}
-                controls
-                preload="metadata"
-                poster={activeItem.thumbnailUrl || undefined}
-                onLoadedMetadata={(event) => {
-                  const ratio = aspectRatioFromDimensions(
-                    event.currentTarget.videoWidth,
-                    event.currentTarget.videoHeight,
-                  );
-                  if (ratio) setDetailMediaAspectRatio(ratio);
-                }}
-              />
-            ) : activeItem.kind === 'audio' && activeItem.previewUrl ? (
-              <div className="asset-detail-audio-player">
-                <span>音频素材</span>
-                <audio src={activeItem.previewUrl} controls preload="metadata" />
-              </div>
-            ) : activeItem.thumbnailUrl ? (
-              <img
-                src={activeItem.thumbnailUrl}
-                alt={activeItem.title}
-                onLoad={(event) => {
-                  const ratio = aspectRatioFromDimensions(
-                    event.currentTarget.naturalWidth,
-                    event.currentTarget.naturalHeight,
-                  );
-                  if (ratio) setDetailMediaAspectRatio(ratio);
-                }}
-              />
-            ) : (
-              <div>{mediaFallbackLabel(activeItem)}</div>
-            )}
-          </div>
-          {activeItemCostBreakdown && (
-            <div className="asset-detail-cost-panel" aria-label="扣费金额">
-              <div>
-                <span>美金扣费</span>
-                <strong>{activeItemCostBreakdown.usd}</strong>
-              </div>
-              <div>
-                <span>人民币扣费</span>
-                <strong>{activeItemCostBreakdown.cny}</strong>
-              </div>
-              <small>{activeItemCostBreakdown.rate}</small>
-            </div>
-          )}
-          <dl className="asset-detail-list">
-            <div>
-              <dt>状态</dt>
-              <dd>{statusLabel(activeItem.status)}</dd>
-            </div>
-            {shouldShowDeliveryStage(activeItem) && (
-              <div>
-                <dt>稳定下载</dt>
-                <dd>{activeItem.deliveryStage?.label || '-'}</dd>
-              </div>
-            )}
-            <div>
-              <dt>项目</dt>
-              <dd>{activeItem.project?.name || '未归属项目'}</dd>
-            </div>
-            {isAdmin && (
-              <div>
-                <dt>用户</dt>
-                <dd>
-                  <UserIdentityBadge
-                    user={activeItem.owner}
-                    size="sm"
-                    subtitle={activeItem.owner?.subtitle || null}
-                    className="asset-detail-user"
-                  />
-                </dd>
-              </div>
-            )}
-            <div>
-              <dt>规格</dt>
-              <dd>{formatAssetSpec(activeItem) || '-'}</dd>
-            </div>
-            <div>
-              <dt>创建时间</dt>
-              <dd>{formatDateTime(activeItem.createdAt)}</dd>
-            </div>
-            <div>
-              <dt>完成时间</dt>
-              <dd>{formatDateTime(activeItem.completedAt)}</dd>
-            </div>
-          </dl>
-          {activeItem.prompt && (
-            <div className="asset-detail-prompt">
-              <span>Prompt</span>
-              <p>{activeItem.prompt}</p>
-            </div>
-          )}
-          <div className="asset-detail-actions">
-            {(activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
-            {activeItem.taskId && (
-              <Link href={`/tasks/${activeItem.taskId}`}>打开任务详情</Link>
-            )}
-            {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady && activeItem.previewAvailable && (
-              <button
-                type="button"
-                onClick={() => void prepareStableDownload(activeItem.taskId as string)}
-                disabled={preparingDownloadTaskId === activeItem.taskId}
-              >
-                {preparingDownloadTaskId === activeItem.taskId ? '提交中...' : activeItem.deliveryStage?.key === 'failed' ? '重试稳定下载' : '准备稳定下载'}
-              </button>
-            )}
-            {activeItem.downloadable && (!isFastPathAssetVideo(activeItem) || activeItem.stableDownloadReady) && (
-              <button type="button" onClick={() => {
-                if (activeItem.taskId) void downloadTaskIds([activeItem.taskId]);
-              }}>
-                下载视频
-              </button>
-            )}
-          </div>
+          <p>{mediaFallbackLabel(activeItem)}</p>
+          {activeItemDetails}
         </aside>
       )}
+      {activeItem && activePreviewSrc && <MediaPreview
+        src={activePreviewSrc}
+        type={activeItem.kind}
+        title={activeItem.title}
+        poster={activeItem.source === 'reference_image' && activeItem.referenceImageId
+          ? `/api/reference-images/${encodeURIComponent(activeItem.referenceImageId)}/content?variant=thumbnail`
+          : activeItem.thumbnailUrl || undefined}
+        contentKey={activeItem.id}
+        previewKey={activeItem.id}
+        details={activeItemDetails}
+        notice={previewNavigationMessage ? <div role="status">{previewNavigationMessage}{previewNavigationRetryable && <button type="button" onClick={() => void moveActiveItem(1)}>继续查找</button>}</div> : undefined}
+        hasNavigation={canMovePreviewPrevious || canMovePreviewNext}
+        onPrevious={canMovePreviewPrevious ? () => moveActiveItem(-1) : undefined}
+        onNext={canMovePreviewNext ? () => moveActiveItem(1) : undefined}
+        onClose={closeAssetPreview}
+      />}
+      {!activeItem && restoredPreview && <MediaPreview
+        src={restoredPreview.previewUrl as string}
+        type={restoredPreview.category as 'image' | 'video' | 'audio'}
+        title={restoredPreview.title}
+        poster={restoredPreview.thumbnailUrl || undefined}
+        contentKey={restoredPreview.key}
+        previewKey={restoredPreview.key}
+        details={<ContentReactions contentKey={restoredPreview.key} />}
+        onClose={closeAssetPreview}
+      />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
+import MediaPreview from '@/components/MediaPreview';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -855,11 +856,13 @@ export default function TaskDetailPage() {
   const [copyingLink, setCopyingLink] = useState(false);
   const [browserDownloading, setBrowserDownloading] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [showSingleResultPreview, setShowSingleResultPreview] = useState(false);
   const [enhanceSourceTask, setEnhanceSourceTask] = useState<VideoTask | null>(null);
   const [enhanceSourceLoading, setEnhanceSourceLoading] = useState(false);
   const [enhanceSourceLoadError, setEnhanceSourceLoadError] = useState<string | null>(null);
   const sourceCompareVideoRef = useRef<HTMLVideoElement | null>(null);
   const enhancedCompareVideoRef = useRef<HTMLVideoElement | null>(null);
+  const singleResultVideoRef = useRef<HTMLVideoElement | null>(null);
   const compareStageRef = useRef<HTMLDivElement | null>(null);
   const compareSyncingRef = useRef(false);
   const [isCompareFullscreen, setIsCompareFullscreen] = useState(false);
@@ -1047,6 +1050,29 @@ export default function TaskDetailPage() {
     document.body.classList.toggle('compare-fullscreen-open', isCompareFullscreen);
     return () => document.body.classList.remove('compare-fullscreen-open');
   }, [isCompareFullscreen]);
+
+  useEffect(() => {
+    const stage = compareStageRef.current;
+    if (!stage) return;
+
+    const measureAvailableHeight = () => {
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const availableHeight = Math.min(900, viewportHeight, Math.max(360, Math.floor(viewportHeight * 0.72)));
+      const value = `${Math.floor(availableHeight)}px`;
+      if (stage.style.getPropertyValue('--task-result-available-height') !== value) {
+        stage.style.setProperty('--task-result-available-height', value);
+      }
+    };
+
+    measureAvailableHeight();
+    window.addEventListener('resize', measureAvailableHeight);
+    window.visualViewport?.addEventListener('resize', measureAvailableHeight);
+
+    return () => {
+      window.removeEventListener('resize', measureAvailableHeight);
+      window.visualViewport?.removeEventListener('resize', measureAvailableHeight);
+    };
+  }, [task?.id, isCompareFullscreen]);
 
   // Auto polling
   useEffect(() => {
@@ -1791,7 +1817,7 @@ export default function TaskDetailPage() {
 
               <div
                 ref={compareStageRef}
-                className={`task-result-stage ${showEnhanceCompare ? 'task-result-compare-stage' : ''} ${isCompareFullscreen ? 'is-compare-fullscreen' : ''}`}
+                className={`task-result-stage ${showEnhanceCompare ? 'task-result-compare-stage' : ''} ${hasResultVideo && !showEnhanceCompare ? 'is-single-media' : ''} ${isCompareFullscreen ? 'is-compare-fullscreen' : ''}`}
               >
                 {hasResultVideo ? (
                   showEnhanceCompare ? (
@@ -1851,6 +1877,7 @@ export default function TaskDetailPage() {
                     </>
                   ) : (
                     <video
+                      ref={singleResultVideoRef}
                       key={videoSrc}
                       controls
                       playsInline
@@ -1874,7 +1901,32 @@ export default function TaskDetailPage() {
                     </span>
                   </div>
                 )}
+                {hasResultVideo && !showEnhanceCompare && (
+                  <button
+                    type="button"
+                    className="task-compare-fullscreen-button task-single-preview-button"
+                    onClick={() => {
+                      singleResultVideoRef.current?.pause();
+                      setShowSingleResultPreview(true);
+                    }}
+                    aria-label="全屏预览任务结果"
+                  >
+                    <Maximize2 size={15} aria-hidden="true" />
+                    全屏预览
+                  </button>
+                )}
               </div>
+
+              {showSingleResultPreview && hasResultVideo && !showEnhanceCompare && (
+                <MediaPreview
+                  src={videoSrc}
+                  type="video"
+                  title="任务生成视频"
+                  contentKey={`video_task:${task.id}`}
+                  previewKey={`video_task:${task.id}`}
+                  onClose={() => setShowSingleResultPreview(false)}
+                />
+              )}
 
               {enhanceSourceNotice && (
                 <div className="task-result-storage-row task-result-compare-notice">

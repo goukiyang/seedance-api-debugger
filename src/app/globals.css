@@ -3048,13 +3048,33 @@ a {
   width: 100%;
 }
 
+.task-result-stage.is-single-media {
+  aspect-ratio: auto;
+  display: grid;
+  height: min(var(--task-result-available-height, 70vh), 900px);
+  min-height: 0;
+  place-items: center;
+}
+
+.task-result-stage.is-single-media > video {
+  height: auto;
+  max-height: 100%;
+  max-width: 100%;
+  width: auto;
+}
+
 .task-result-compare-stage {
   aspect-ratio: auto;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
-  min-height: 360px;
   position: relative;
+}
+
+.task-result-compare-stage:not(.is-compare-fullscreen) {
+  grid-template-rows: minmax(0, 1fr);
+  height: min(var(--task-result-available-height, 70vh), 900px);
+  min-height: 0;
 }
 
 .task-compare-fullscreen-button {
@@ -3093,12 +3113,13 @@ a {
   display: grid;
   place-items: center;
   min-width: 0;
-  min-height: 320px;
+  min-height: 0;
   background: #0f172a;
 }
 
 .task-compare-video-panel video {
-  max-height: 64vh;
+  height: 100%;
+  max-height: 100%;
 }
 
 .task-compare-badge {
@@ -3137,7 +3158,8 @@ body.compare-fullscreen-open {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   height: 100vh;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   padding: 52px 16px 16px;
   width: 100vw;
   z-index: 9999;
@@ -3157,7 +3179,8 @@ body.compare-fullscreen-open {
 .task-result-compare-stage.is-compare-fullscreen .task-compare-video-panel,
 .task-result-compare-stage:fullscreen .task-compare-video-panel,
 .task-result-compare-stage:-webkit-full-screen .task-compare-video-panel {
-  min-height: calc(100vh - 68px);
+  height: 100%;
+  min-height: 0;
 }
 
 .task-result-compare-stage.is-compare-fullscreen .task-compare-video-panel video,
@@ -4760,6 +4783,11 @@ body.compare-fullscreen-open {
     grid-template-columns: 1fr;
   }
 
+  .task-result-compare-stage:not(.is-compare-fullscreen) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
   .task-result-compare-stage.is-compare-fullscreen,
   .task-result-compare-stage:fullscreen,
   .task-result-compare-stage:-webkit-full-screen {
@@ -4768,7 +4796,7 @@ body.compare-fullscreen-open {
   }
 
   .task-compare-video-panel {
-    min-height: 220px;
+    min-height: 0;
   }
 
   .task-result-compare-stage.is-compare-fullscreen .task-compare-video-panel,

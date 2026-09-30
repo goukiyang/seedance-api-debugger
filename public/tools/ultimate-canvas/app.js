@@ -37,6 +37,13 @@
     }
 
     window.showCanvasNotice = showCanvasNotice;
+    window.addEventListener('message', event => {
+        if (event.origin !== window.location.origin || event.source !== window.parent) return;
+        if (event.data?.type !== 'sd2-canvas-preview-error'
+            || typeof event.data.contentKey !== 'string'
+            || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(event.data.contentKey)) return;
+        showCanvasNotice('这条媒体目前无法预览，请确认仍有查看权限。', 'warn');
+    });
 
     const canvasRuntime = {
         bootstrap: null,
@@ -3983,7 +3990,7 @@
         const attributes = `data-task-id="${escapeHtml(actions.taskId)}" data-node-id="${escapeHtml(node.id)}" data-card-id="${escapeHtml(actions.cardId)}"`;
         return `<div class="generation-popover-list generation-task-action-menu">
             <a href="${escapeHtml(actions.detailUrl)}" target="_blank" rel="noreferrer">\u4efb\u52a1\u8be6\u60c5</a>
-            ${actions.previewUrl ? `<a href="${escapeHtml(actions.previewUrl)}" target="_blank" rel="noreferrer">\u9884\u89c8</a>` : ''}
+            ${actions.previewUrl ? `<button type="button" data-canvas-media-preview data-content-key="${escapeHtml(`video_task:${actions.taskId}`)}">\u9884\u89c8</button><a href="${escapeHtml(actions.previewUrl)}" target="_blank" rel="noreferrer">\u65b0\u6807\u7b7e\u6253\u5f00</a>` : ''}
             ${actions.downloadUrl ? `<a href="${escapeHtml(actions.downloadUrl)}" target="_blank" rel="noreferrer">\u4e0b\u8f7d</a>` : ''}
             ${actions.canRetry ? `<button type="button" data-generated-task-retry="${escapeHtml(actions.taskId)}" data-node-id="${escapeHtml(node.id)}" data-card-id="${escapeHtml(actions.cardId)}">${escapeHtml(videoCardUiText.retryTask)}</button>` : ''}
             ${actions.canMarkVersion ? `
@@ -3997,10 +4004,15 @@
         if (node?.type !== 'image') return null;
         const data = node.data || {};
         const result = data.generationResult || {};
+        const assetId = data.assetId || data.asset_id;
+        const referenceImageId = data.referenceImageId || data.reference_image_id;
+        const contentKey = assetId ? `asset:${assetId}`
+            : referenceImageId ? `reference_image:${referenceImageId}` : '';
         const imageUrl = data.originalUrl || overrides.imageUrl || data.imageUrl || data.previewImage
             || result.original_url || result.originalUrl || result.image_url || result.imageUrl;
         if (!imageUrl) return null;
         return {
+            contentKey: /^(asset|reference_image):[a-zA-Z0-9_-]+$/.test(contentKey) ? contentKey : '',
             imageUrl,
             downloadUrl: data.imageDownloadUrl || overrides.downloadUrl || data.originalUrl
                 || result.download_url || result.downloadUrl || imageUrl
@@ -4030,6 +4042,7 @@
         const actions = actionModel || imageResultActionsForNode(node);
         if (!actions) return '';
         return `<div class="generation-popover-list generation-task-action-menu">
+            ${actions.contentKey ? `<button type="button" data-canvas-media-preview data-content-key="${escapeHtml(actions.contentKey)}">\u9884\u89c8</button>` : ''}
             <a data-generated-image-action="open" href="${escapeHtml(actions.imageUrl)}" target="_blank" rel="noreferrer">打开原图</a>
             <a data-generated-image-action="download" href="${escapeHtml(actions.downloadUrl)}" download>下载</a>
             <button type="button" data-generated-image-action="regenerate" data-node-id="${escapeHtml(node.id)}">再次生成</button>
@@ -5009,6 +5022,19 @@
     engine.onViewportChanged = closeGenerationPopover;
 
     document.addEventListener('click', event => {
+        const previewAction = event.target.closest('[data-canvas-media-preview]');
+        if (previewAction) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeGenerationPopover();
+            const contentKey = previewAction.dataset.contentKey || '';
+            if (!/^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(contentKey)) {
+                showCanvasNotice('这条媒体没有可追溯的内容编号，暂不能在画布内预览。', 'warn');
+                return;
+            }
+            window.parent.postMessage({ type: 'sd2-canvas-preview-request', contentKey }, window.location.origin);
+            return;
+        }
         const actionElement = event.target.closest('[data-generated-image-action]');
         if (!actionElement) return;
         const action = actionElement.dataset.generatedImageAction;

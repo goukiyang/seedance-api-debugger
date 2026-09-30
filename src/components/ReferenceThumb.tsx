@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import type { ContentKey } from '@/lib/content-reactions/types';
 
 interface Props {
   asset: WorkspaceAssetItem;
@@ -11,11 +12,19 @@ interface Props {
   frameRole?: FrameRole;
   onRemove: (assetId: string) => void;
   onReplace: (assetId: string) => void;
-  onPreview: (url: string, type?: WorkspaceAssetItem['type']) => void;
+  onPreview: (src: string, type?: WorkspaceAssetItem['type'], title?: string, poster?: string, contentKey?: ContentKey) => void;
 }
 
 export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameRole, onRemove, onReplace, onPreview }: Props) {
   const src = asset.thumbnailUrl || asset.originalUrl;
+  const contentKey: ContentKey | undefined = asset.referenceImageId
+    ? `reference_image:${asset.referenceImageId}`
+    : asset.assetId ? `asset:${asset.assetId}` : undefined;
+  const previewSrc = asset.referenceImageId
+    ? `/api/reference-images/${encodeURIComponent(asset.referenceImageId)}/content?variant=preview`
+    : asset.assetId
+      ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.assetId}`)}&variant=preview`
+      : '';
   const fallbackSrc = asset.thumbnailUrl && asset.originalUrl && asset.thumbnailUrl !== asset.originalUrl
     ? asset.originalUrl
     : null;
@@ -27,7 +36,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
   const isImage = asset.type === 'image';
   const isVideo = asset.type === 'video';
   const isAudio = asset.type === 'audio';
-  const canZoomPreview = asset.type === 'image' && Boolean(asset.originalUrl || imageSrc);
+  const canZoomPreview = asset.type === 'image' && Boolean(previewSrc);
   const mediaLabel = isVideo ? '视频' : isAudio ? '音频' : '素材';
 
   useEffect(() => {
@@ -42,12 +51,12 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
         type="button"
         className="ref-thumb-img-btn"
         onClick={() => {
-          if (!imageSrc || imageFailed) return;
+          if (isImage && (!imageSrc || imageFailed)) return;
           if (canZoomPreview) {
             setPreviewOpen(true);
             return;
           }
-          onPreview(imageSrc, asset.type);
+          if (previewSrc && contentKey) onPreview(previewSrc, asset.type, asset.fileName || `素材 ${index + 1}`, asset.thumbnailUrl || undefined, contentKey);
         }}
       >
         {isImage && imageSrc && !imageFailed ? (
@@ -66,14 +75,8 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
               setImageFailed(true);
             }}
           />
-        ) : isVideo && asset.originalUrl ? (
-          <video
-            src={asset.originalUrl}
-            className="ref-thumb-video"
-            muted
-            playsInline
-            preload="metadata"
-          />
+        ) : isVideo && asset.thumbnailUrl && asset.thumbnailUrl !== asset.originalUrl && !imageFailed ? (
+          <img src={asset.thumbnailUrl} alt={`视频${index + 1}`} className="ref-thumb-video" loading="lazy" onError={() => setImageFailed(true)} />
         ) : isAudio ? (
           <div className="ref-thumb-media-placeholder">
             <span>音频</span>
@@ -135,11 +138,12 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       >
         ×
       </button>
-      {previewOpen && canZoomPreview && (
+      {previewOpen && canZoomPreview && contentKey && (
         <ZoomableImagePreview
-          src={asset.originalUrl || imageSrc}
+          src={previewSrc}
           alt={`图${index + 1}`}
           fileName={asset.fileName || `图${index + 1}`}
+          contentKey={contentKey}
           onClose={() => setPreviewOpen(false)}
         />
       )}

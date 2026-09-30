@@ -7,7 +7,7 @@
   background: oklch(0.11 0 0 / 0.92);
   color: oklch(0.97 0 0);
   overscroll-behavior: none;
-  touch-action: none;
+  touch-action: auto;
 }
 
 .toolbar {
@@ -16,6 +16,8 @@
   gap: 12px;
   align-items: center;
   min-height: 56px;
+  max-height: 44dvh;
+  overflow-y: auto;
   padding: 10px 14px;
   border-bottom: 1px solid oklch(0.92 0 0 / 0.18);
   background: oklch(0.18 0 0 / 0.82);
@@ -120,17 +122,76 @@
   outline-offset: 2px;
 }
 
+.zoomMode select {
+  min-width: 104px;
+  max-width: 140px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid oklch(0.88 0 0 / 0.28);
+  border-radius: 6px;
+  background: oklch(0.28 0 0 / 0.86);
+  color: oklch(0.96 0 0);
+  font: inherit;
+  font-size: 12px;
+}
+
+.zoomMode select:focus-visible,
+.detailDisclosure summary:focus-visible {
+  outline: 2px solid oklch(0.76 0.14 170);
+  outline-offset: 2px;
+}
+
+.notice {
+  grid-column: 1 / -1;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.detailDisclosure {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: oklch(0.9 0 0);
+  font-size: 12px;
+}
+
+.detailDisclosure summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.detailContent {
+  max-height: 22dvh;
+  overflow: auto;
+  padding: 8px 0 2px;
+  overscroll-behavior: contain;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
 .stage {
   min-height: 0;
   overflow: hidden;
   position: relative;
-  cursor: grab;
+  cursor: default;
   touch-action: none;
   user-select: none;
 }
 
 .stageDragging {
   cursor: grabbing;
+}
+
+.stage[data-zoomed="true"]:not(.stageDragging) {
+  cursor: grab;
 }
 
 .imageStatus {
@@ -196,8 +257,8 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  max-width: min(92vw, 1400px);
-  max-height: calc(100dvh - 92px);
+  max-width: min(calc(100vw - 24px), 1400px);
+  max-height: calc(100dvh - var(--image-toolbar-height, 56px) - 24px);
   object-fit: contain;
   transform-origin: center;
   will-change: transform;
@@ -272,11 +333,17 @@
   .toolbar {
     grid-template-columns: auto minmax(0, 1fr);
     gap: 8px;
+    max-height: 48dvh;
+    padding: 8px 10px;
   }
 
   .actions {
     grid-column: 1 / -1;
-    justify-content: space-between;
+    justify-content: flex-start;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 2px;
+    overscroll-behavior-x: contain;
   }
 
   .actions button {
@@ -287,6 +354,14 @@
   .actions button:has(.actionLabel) {
     width: auto;
     padding: 0 8px;
+  }
+
+  .zoomMode select {
+    height: 38px;
+  }
+
+  .detailContent {
+    max-height: 18dvh;
   }
 
 }

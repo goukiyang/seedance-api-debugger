@@ -933,7 +933,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     : !prompt.trim() && !images.length ? { message: '请填写补充提示词，或添加至少一张参考图。', tone: 'info' }
     : !Number.isInteger(count) || count < 1 || count > 8 ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
-  const previewableTasks = tasks.filter(task => Boolean(task.asset));
+  const previewableTasks = tasks.filter(task => Boolean(task.asset?.id));
   function openTaskPreview(task: StudioTask) { setPreview(studioTaskPreviewState(task)); }
   function movePreview(direction: -1 | 1) {
     if (!preview?.taskId || previewableTasks.length < 2) return;
@@ -1058,7 +1058,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
           event.preventDefault(); void addImages(Array.from(event.dataTransfer.files));
         }}>
           {images.map((asset, index) => <div key={`${asset.id}-${index}`} className={styles.reference}>
-            <button type="button" className={styles.preview} onClick={() => asset.originalUrl && setPreview({ src: asset.originalUrl, alt: `参考图 ${index + 1}`, fileName: asset.fileName })} aria-label={`预览参考图 ${index + 1}`}>
+            <button type="button" className={styles.preview} onClick={() => asset.originalUrl && setPreview({ contentKey: asset.id ? `asset:${asset.id}` : undefined, src: asset.originalUrl, alt: `参考图 ${index + 1}`, fileName: asset.fileName })} aria-label={`预览参考图 ${index + 1}`} disabled={!asset.originalUrl}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img decoding="async" src={asset.thumbnailUrl || undefined} alt={`参考图 ${index + 1}`} />
             </button>
@@ -1240,6 +1240,6 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
       </div>}
     </dialog>}
     {!settings && settingsError && <p role="alert" className={styles.error}>{settingsError}<button onClick={() => void loadSettings()}>重试</button></p>}
-    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} metadata={preview.metadata} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); setSelected([]); setDownloadMode(false); }} />}
+    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} metadata={preview.metadata} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => setPreview(null)} />}
   </section>;
 }

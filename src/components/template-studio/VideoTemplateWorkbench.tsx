@@ -4,10 +4,11 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Archive, ArrowDown, ArrowUp, Check, CircleAlert, Film, FolderOpen,
+  Archive, ArrowDown, ArrowUp, Check, CircleAlert, Eye, Film, FolderOpen,
   Image as ImageIcon, ImagePlus, LoaderCircle, Plus, Save, Search, Settings, Sparkles, Trash2, X,
 } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import MediaPreview from '@/components/MediaPreview';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import { uploadFileAsAsset, type UploadProgressHandler } from '@/lib/http/file-upload';
@@ -1917,6 +1918,13 @@ function TemplateOverview({
   );
 }
 
+function RunTaskPoster({ src }: { src: string | null }) {
+  const [failed, setFailed] = useState(!src);
+  useEffect(() => setFailed(!src), [src]);
+  if (failed || !src) return <div className={styles.assetEmpty}>暂无截图/预览不可用</div>;
+  return <img src={src} alt="视频任务缩略图" loading="lazy" onError={() => setFailed(true)} style={{ display: 'block', width: 'min(360px, 100%)', aspectRatio: '16 / 9', objectFit: 'cover', background: 'oklch(0.13 0.006 170)' }} />;
+}
+
 function RunDetailPanel({
   detail, userId, busy, onCopyToDraft, onContinue, onCancel, onRefresh,
 }: {
@@ -1929,6 +1937,9 @@ function RunDetailPanel({
   onRefresh: () => void;
 }) {
   const { run, snapshot, tasks } = detail;
+  const [previewTask, setPreviewTask] = useState<RunDetail['tasks'][number] | null>(null);
+  const playableTasks = tasks.filter((task) => Boolean(task.playUrl));
+  const activePreviewIndex = previewTask ? playableTasks.findIndex((task) => task.taskId === previewTask.taskId) : -1;
   const owner = snapshot.owner;
   const failedRunSummary = run.error ? '可以复用当时输入，调整后再次处理。' : '失败原因暂未提供。';
   return (
@@ -1955,15 +1966,31 @@ function RunDetailPanel({
         <h3>相关视频任务</h3>
         {tasks.map((task) => (
           <article className={styles.runCard} key={task.taskId}>
-            {task.thumbnailUrl ? <img src={task.thumbnailUrl} alt="视频任务缩略图" loading="lazy" style={{ display: 'block', width: 'min(360px, 100%)', aspectRatio: '16 / 9', objectFit: 'cover', background: 'oklch(0.13 0.006 170)' }} /> : <div className={styles.assetEmpty}>暂无截图/预览不可用</div>}
+            <RunTaskPoster key={task.thumbnailUrl || 'no-cover'} src={task.thumbnailUrl} />
             {task.status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.taskId}`} />}
             <div className={styles.taskRow}><span>任务状态</span><span>{statusLabel(task.status)}</span></div>
             {task.deliveryStatus && <div className={styles.taskRow}><span>交付状态</span><span>{statusLabel(task.deliveryStatus)}</span></div>}
-            <div className={styles.taskRow}><span>{formatDate(task.createdAt)}</span><a href={task.playUrl || task.downloadUrl || `/tasks/${encodeURIComponent(task.taskId)}`} target={task.playUrl || task.downloadUrl ? '_blank' : undefined} rel={task.playUrl || task.downloadUrl ? 'noreferrer' : undefined}>{task.playUrl ? '打开视频' : task.downloadUrl ? '下载视频' : '查看任务'}</a></div>
+            <div className={styles.taskRow}><span>{formatDate(task.createdAt)}</span><span className={styles.promptTools}>
+              {task.playUrl && <button className={styles.iconButton} type="button" title="预览视频" aria-label={`预览任务 ${task.taskId}`} onClick={() => setPreviewTask(task)}><Eye size={16} /></button>}
+              <a href={task.playUrl || task.downloadUrl || `/tasks/${encodeURIComponent(task.taskId)}`} target={task.playUrl || task.downloadUrl ? '_blank' : undefined} rel={task.playUrl || task.downloadUrl ? 'noreferrer' : undefined}>{task.playUrl ? '打开视频' : task.downloadUrl ? '下载视频' : '查看任务'}</a>
+            </span></div>
           </article>
         ))}
         {tasks.length === 0 && <div className={styles.assetEmpty}>还没有关联视频任务。</div>}
       </section>
+      {previewTask?.playUrl && <MediaPreview
+        src={previewTask.playUrl}
+        type="video"
+        title="视频任务预览"
+        poster={previewTask.thumbnailUrl || undefined}
+        contentKey={`video_task:${previewTask.taskId}`}
+        previewKey={previewTask.taskId}
+        details={<div><span>{statusLabel(previewTask.status)}</span>{previewTask.status === 'succeeded' && <ContentReactions contentKey={`video_task:${previewTask.taskId}`} />}</div>}
+        hasNavigation={playableTasks.length > 1}
+        onPrevious={activePreviewIndex > 0 ? () => setPreviewTask(playableTasks[activePreviewIndex - 1]) : undefined}
+        onNext={activePreviewIndex >= 0 && activePreviewIndex < playableTasks.length - 1 ? () => setPreviewTask(playableTasks[activePreviewIndex + 1]) : undefined}
+        onClose={() => setPreviewTask(null)}
+      />}
     </>
   );
 }

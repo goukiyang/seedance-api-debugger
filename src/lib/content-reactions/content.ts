@@ -88,7 +88,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
       const canPreviewOriginal = download || Boolean(reusableReferenceId);
       if (asset.type !== 'image' && !canPreviewOriginal) media.previewUrl = null;
       if (asset.type === 'video' && !asset.thumbnail_url) media.thumbnailUrl = null;
-      return { summary: media, source: { url: asset.original_url, thumbnail: asset.thumbnail_url, referenceId, canPreviewOriginal } };
+      return { summary: media, source: { url: asset.original_url, thumbnail: asset.thumbnail_url, referenceId: download ? referenceId : reusableReferenceId || referenceId, canPreviewOriginal } };
     }
     if (type === 'video_task') {
       const task = await prisma.videoTask.findUnique({ where: { id } });

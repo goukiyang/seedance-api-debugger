@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { Eye } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
+import MediaPreview from '@/components/MediaPreview';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
@@ -86,6 +88,8 @@ interface VideoCardSummary {
   official_cost_totals: Array<{ currency: string; amount_minor: number; amount_micros: number }>;
   resolution_distribution: Record<string, number>;
 }
+
+type ProjectVideoPreviewTask = { id: string; prompt: string; local_status: string; thumbnail_url?: string | null };
 
 interface VideoCardPreviewTask {
   id: string;
@@ -400,10 +404,12 @@ function ledgerOwnerUser(ledger: CostLedgerItem) {
   return ledger.task ? taskOwnerUser(ledger.task) : ledger.user;
 }
 
-function safeVideoSrc(url?: string | null): string | null {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return url;
-  return null;
+function ProjectVideoPoster({ src, alt }: { src?: string | null; alt: string }) {
+  const [failed, setFailed] = useState(!src);
+  if (failed || !src) {
+    return <span className="task-video-thumbnail-placeholder">暂无截图/预览不可用</span>;
+  }
+  return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />;
 }
 
 function providerTaskIdLabel(ledger: CostLedgerItem): string {
@@ -430,6 +436,7 @@ export default function ProjectDetailPage() {
     role: '',
   });
   const [loading, setLoading] = useState(true);
+  const [activePreviewTask, setActivePreviewTask] = useState<ProjectVideoPreviewTask | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [memberUserId, setMemberUserId] = useState('');
@@ -871,16 +878,11 @@ export default function ProjectDetailPage() {
           <div className="video-card-grid">
             {videoCards.map((card) => {
               const previewTask = videoCardPreviewTask(card);
-              const previewUrl = safeVideoSrc(previewTask?.local_video_path || previewTask?.result_video_url);
               const summary = card.summary;
               return (
                 <article key={card.id} className="video-card-item">
                   <div className="video-card-preview">
-                    {previewUrl ? (
-                      <video src={previewUrl} muted preload="metadata" />
-                    ) : (
-                      <span>{card.is_fallback ? '历史' : '待生成'}</span>
-                    )}
+                    <ProjectVideoPoster key={previewTask?.thumbnail_url || 'no-cover'} src={previewTask?.thumbnail_url} alt={`${card.title}视频封面`} />
                     {isEnhanceTask(previewTask) ? (
                       <span className="task-video-thumbnail-enhance-badge">超分</span>
                     ) : null}
@@ -907,7 +909,10 @@ export default function ProjectDetailPage() {
                       <span>点数 {summary?.charged_credits ?? 0}</span>
                       <span>官方 {formatCostTotals(summary?.official_cost_totals)}</span>
                     </div>
-                    <div className="video-card-actions">
+                  <div className="video-card-actions">
+                      {previewTask?.preview_available && <button className="btn btn-secondary" type="button" onClick={() => setActivePreviewTask(previewTask)} aria-label={`预览${card.title}`} title="预览视频">
+                        <Eye size={16} aria-hidden="true" />预览
+                      </button>}
                       <Link className="btn btn-secondary" href={`/projects/${project.id}/video-cards/${card.id}`}>
                         查看视频卡
                       </Link>
@@ -1182,7 +1187,10 @@ export default function ProjectDetailPage() {
                   <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
                   <td>{costStatusLabel(task.provider_cost_status)}</td>
                   <td>{new Date(task.created_at).toLocaleString('zh-CN')}</td>
-                  <td><Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>详情</Link></td>
+                  <td>
+                    {task.preview_available && <button type="button" className="link" onClick={() => setActivePreviewTask(task)} aria-label={`预览任务 ${task.id}`} title="预览视频"><Eye size={15} aria-hidden="true" /></button>}
+                    {' '}<Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>详情</Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1344,6 +1352,17 @@ export default function ProjectDetailPage() {
           </p>
         </div>
       )}
+
+      {activePreviewTask && <MediaPreview
+        src={`/api/video/play/${encodeURIComponent(activePreviewTask.id)}`}
+        type="video"
+        title={activePreviewTask.prompt || '项目视频'}
+        poster={activePreviewTask.thumbnail_url || undefined}
+        contentKey={`video_task:${activePreviewTask.id}`}
+        previewKey={activePreviewTask.id}
+        details={<div><p>{activePreviewTask.local_status}</p>{activePreviewTask.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${activePreviewTask.id}`} />}</div>}
+        onClose={() => setActivePreviewTask(null)}
+      />}
 
       {pendingProjectAction && project && (
         <ProjectActionConfirmModal

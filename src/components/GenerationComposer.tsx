@@ -20,6 +20,7 @@ import { ComposerActionBar, type ComposerProviderStatus, type ComposerSelectOpti
 import { ErrorTranslator } from '@/components/ErrorTranslator';
 import { ReferenceAlbumPicker, type ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
+import MediaPreview from '@/components/MediaPreview';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
@@ -28,6 +29,7 @@ import type { GenerationDefaults } from '@/lib/preferences/generation';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import type { StudioAssetRole, StudioGenerationHandoff } from '@/lib/template-studio/types';
+import type { ContentKey } from '@/lib/content-reactions/types';
 import {
   formatUnsupportedStudioParameters,
   getMissingRequiredStudioAssetSlot,
@@ -43,6 +45,14 @@ import {
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
+
+type ReferencePreviewRequest = {
+  src: string;
+  type: WorkspaceAssetItem['type'];
+  title: string;
+  poster?: string;
+  contentKey?: ContentKey;
+};
 const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
 const TEMPLATE_MODIFIERS = ['更科技', '更快节奏', '更品牌', '更产品', '更情绪化', '更克制'];
@@ -513,7 +523,7 @@ export function GenerationComposer({
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
-  const [previewMedia, setPreviewMedia] = useState<{ url: string; type?: WorkspaceAssetItem['type'] } | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [showUploadedImagePicker, setShowUploadedImagePicker] = useState(false);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
@@ -1411,8 +1421,9 @@ export function GenerationComposer({
     await refreshReferenceAlbums();
   }, [workspace, refreshReferenceAlbums]);
 
-  const handlePreview = useCallback((url: string, type?: WorkspaceAssetItem['type']) => {
-    setPreviewMedia({ url, type });
+  const handlePreview = useCallback((src: string, type?: WorkspaceAssetItem['type'], title?: string, poster?: string, contentKey?: ContentKey) => {
+    if (!type) return;
+    setPreviewMedia({ src, type, title: title || '参考素材', poster, contentKey });
   }, []);
 
   const resolvePendingMentionRequest = useCallback((insertText: string | null) => {
@@ -2142,29 +2153,15 @@ export function GenerationComposer({
         />
       </div>
 
-      {/* 预览弹窗 */}
-      {previewMedia && (
-        <div
-          className="composer-preview-backdrop"
-          onClick={() => setPreviewMedia(null)}
-        >
-          <div className="composer-preview-content" onClick={(e) => e.stopPropagation()}>
-            <button
-              className="composer-preview-close"
-              onClick={() => setPreviewMedia(null)}
-            >
-              ×
-            </button>
-            {previewMedia.type === 'video' || previewMedia.url.match(/\.(mp4|mov|webm)(\?|$)/i) ? (
-              <video src={previewMedia.url} controls autoPlay className="composer-preview-media" />
-            ) : previewMedia.type === 'audio' || previewMedia.url.match(/\.(mp3|wav|ogg|m4a|aac|flac)(\?|$)/i) ? (
-              <audio src={previewMedia.url} controls autoPlay className="composer-preview-media" />
-            ) : (
-              <img src={previewMedia.url} alt="预览" className="composer-preview-media" />
-            )}
-          </div>
-        </div>
-      )}
+      {previewMedia && <MediaPreview
+        src={previewMedia.src}
+        type={previewMedia.type}
+        title={previewMedia.title}
+        poster={previewMedia.poster}
+        contentKey={previewMedia.contentKey}
+        previewKey={previewMedia.contentKey}
+        onClose={() => setPreviewMedia(null)}
+      />}
 
       <ReferenceAlbumPicker
         open={showAlbumPicker}
