@@ -6,12 +6,15 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| M01 | 文案模型选择 | 下拉选择随任务传到后台，保留费用提示，部署后交用户手动验收 | 进行中 |
+| M01 | 文案模型选择 | 下拉选择随任务传到后台，保留费用提示，部署后交用户手动验收 | 已部署v0.25.0，待用户手动验收 |
 
 - 用户指定新增GPT-5.6 Luna/Sol与GPT-6 Luna/Sol/Astra，保留GPT-5.5；不包含Terra或图片模型。复用当前页面的原生select，不引入依赖、不新建页面、不修改后台全局默认。文案费用继续由平台承担，无付费测试。
 - 前后端共用受控模型列表，选择进入请求、幂等核对和运行快照，worker使用任务中的模型；新任务排队后不跟随全局默认变化，旧任务兼容原逻辑。结果显示所选模型，不污染后续视频model参数。
 - 模型选择按用户/模块保存本机临时草稿，刷新先默认、可点“恢复上次模型”；不覆盖模板默认值。请求结果不明时锁定模型并沿用原请求号核对，禁止换模型重投同一请求。
-- 候选v0.25.0，发布必需检查后自动部署；模型生成、响应格式及页面交互由用户手动验收。
+- 已部署v0.25.0：源码`7391a07e982dc21edf702c5bcf793868a0f484af`，BUILD_ID `00VuqIBYW9eo3OgHo1vS_`；`npx tsc --noEmit`、`git diff --check`、服务器候选构建及内置检查通过。公网release=0.25.0，config/login均200，模板chunk `page-fbe0b56a353e6653.js`可达且包含下拉控件及5个新增模型ID，源站config=200，三服务active。未执行浏览器、模型生成或自动功能验收，沿用文字调用45秒超时及JSON输出约束，各模型的实际兼容性由用户手动验收。
+- 代码与`rollback/2026-09-30-before-text-model-select`已推送核对（回退到ea44dcb/v0.24.0）；服务器备份`/srv/video-api-debugger/backups/text-model-select-7391a07e982dc21edf702c5bcf793868a0f484af`保留旧source/live-build。上线前文字队列为空，无schema/配置/密钥/历史数据修改；回退前需停止接收新文字任务并处理排队任务，避免旧worker忽略新增模型选择，不恢复整库。
+- 修改文件：`src/lib/template-studio/text-models.ts`集中受控列表和显示名；`capabilities.ts`下发选项及默认值；`types.ts`/`projection.ts`提供安全模型字段；`runs.ts`保存选择并核对重复请求；`worker.ts`按任务模型调用；`VideoTemplateWorkbench.tsx`下拉、临时恢复与请求传参；`VideoPromptResult.tsx`结果同行显示模型；`template-studio.module.css`复用现有控件布局；`package.json`/`package-lock.json`及`src/lib/release.ts`更新单一版本与摘要；本todo登记。无新依赖、无功能越界；未验证项不冒充通过。
+- [统一代码差异](https://github.com/goukiyang/seedance-api-debugger/compare/851dac289f424e6d7ea526b5ed260281776dcdd2...7391a07e982dc21edf702c5bcf793868a0f484af)。入口：https://sd2.youdooart.com/template-studio?type=video ，模块“文案生成”区域的“文案模型”。
 
 - 2026-09-30 VP01–VP06 视频文案模板已部署v0.24.0，待用户手动验收：[固定工单及逐项回执](../docs/handoffs/video-prompt-template-work-order.md#10-发布回执2026-09-30)。复用现有模板页、文字worker和配置存储；两层上下文安全投影、文案可编辑、最终文本交接；费用开关获用户明确授权启用，平台承担文字费用。源码ea44dcb、远端及回退tag已核对，候选构建/服务/公网版本检查通过，未做生成或浏览器验收。图片/视频结果头像姓名不独占一行。B11由本单实现，剩余风险见工单。
 

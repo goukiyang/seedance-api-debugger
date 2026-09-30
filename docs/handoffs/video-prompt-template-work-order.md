@@ -1,9 +1,10 @@
 # 视频提示词模板工单
 
-- 文档版本：1.1.0
+- 文档版本：1.1.1
 - 日期：2026-09-30
 - 项目：video-api-debugger / SD2
 - 状态：已部署v0.24.0，待用户手动验收。发布源码ea44dcb，部署检查已完成，未进行生成或浏览器功能验收。
+- 后续更新：2026-09-30 M01已部署v0.25.0，视频文案增加GPT-5.5、5.6 Luna/Sol、6 Luna/Sol/Astra下拉选项，保留前述功能；详见[固定todo的M01回执](../../tasks/todo.md#m01-视频文案模型选择2026-09-30)。本单模型查询时“尚无下拉”的记录属于更新前状态，不代表当前页面。
 - 正式入口：https://sd2.youdooart.com/template-studio?type=video
 - 已核对源码位置：`/Users/gouki-youdoo/.codex/worktrees/banana-image-channel/video-api-debugger`
 - 当前所见分支：`codex/studio-result-identity-20260929`。执行前重新核对实际有效源码、生产版本和其他线程改动，不能按历史路径盲目发布。
