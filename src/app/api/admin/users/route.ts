@@ -69,14 +69,14 @@ export async function GET(request: NextRequest) {
       credit_buckets: {
         where: {
           source_type: 'daily_quota',
-          status: 'active',
-          OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+          OR: [{ frozen_amount: { gt: 0 } }, { status: 'active', OR: [{ expires_at: null }, { expires_at: { gt: now } }] }],
         },
         select: {
           amount_total: true,
           amount_remaining: true,
           frozen_amount: true,
           expires_at: true,
+          status: true,
         },
       },
     },
@@ -87,10 +87,11 @@ export async function GET(request: NextRequest) {
     users: users.map((user) => ({
       ...user,
       credit_quota: {
-        daily_total: user.credit_buckets.reduce((total, bucket) => total + bucket.amount_total, 0),
-        daily_remaining: user.credit_buckets.reduce((total, bucket) => total + bucket.amount_remaining, 0),
+        daily_total: user.credit_buckets.filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now)).reduce((total, bucket) => total + bucket.amount_total, 0),
+        daily_remaining: user.credit_buckets.filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now)).reduce((total, bucket) => total + bucket.amount_remaining, 0),
         daily_frozen: user.credit_buckets.reduce((total, bucket) => total + bucket.frozen_amount, 0),
         daily_expires_at: user.credit_buckets
+          .filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now))
           .map((bucket) => bucket.expires_at)
           .filter(Boolean)
           .sort((a, b) => Number(a) - Number(b))[0] || null,

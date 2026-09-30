@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -17,6 +17,7 @@
     "test:toolflow": "tsx scripts/toolflow-smoke.ts",
     "test:template-studio": "node scripts/template-studio-release-check.mjs",
     "template:prompts": "node --import tsx scripts/process-template-prompts.ts",
+    "credits:refresh": "node --import tsx scripts/process-periodic-credits.ts",
     "video:finalize-pending": "tsx scripts/finalize-pending-videos.ts",
     "video:deliver-public": "tsx scripts/process-video-delivery-jobs.ts",
     "video:delivery-metrics": "tsx scripts/video-delivery-metrics.ts",

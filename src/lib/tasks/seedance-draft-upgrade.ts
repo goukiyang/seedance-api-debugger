@@ -224,7 +224,7 @@ async function settleDraftUpgradeFailure(input: {
         frozen_after: settlement.frozenAfter,
         related_task_id: task.id,
         reason: `Draft 升级提交失败，返还 ${settlement.refundedAmount} 点`,
-        metadata_json: JSON.stringify({ error_code: input.errorCode }),
+        metadata_json: JSON.stringify({ error_code: input.errorCode, allocations: settlement.allocations, expired_closed: settlement.expiredClosedAmount }),
       },
     });
     await recordTaskCostSettlement(tx, failedTask, 'failed', input.userId);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { refreshQuotaMembership } from '@/lib/credits/periodic';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
 
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id }, data: { status: 'active' } });
+    await refreshQuotaMembership(tx, id);
     await tx.operationLog.create({
       data: {
         operator_id: admin.id,

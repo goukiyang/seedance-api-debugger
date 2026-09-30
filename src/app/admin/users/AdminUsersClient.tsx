@@ -66,7 +66,8 @@ interface CreditPolicy {
     timezone: 'Asia/Shanghai';
     internal_default: number;
     external_default: number;
-    profile_overrides: Record<string, number>;
+    profile_overrides: Record<string, number | null>;
+    profile_override_version?: number;
     valid_hours: number;
     clear_unused_on_expire: boolean;
   };
@@ -150,14 +151,15 @@ const CREDIT_POLICY_DEFAULT: CreditPolicy = {
     internal_default: 0,
     external_default: 0,
     profile_overrides: {
-      core_video: 0,
-      core_animation: 0,
-      core_design: 0,
-      noncore_planning: 0,
-      noncore_ops: 0,
-      noncore_pm: 0,
-      other: 0,
+      core_video: null,
+      core_animation: null,
+      core_design: null,
+      noncore_planning: null,
+      noncore_ops: null,
+      noncore_pm: null,
+      other: null,
     },
+    profile_override_version: 2,
     valid_hours: 24,
     clear_unused_on_expire: true,
   },
@@ -300,10 +302,12 @@ function normalizeCreditPolicy(value: unknown): CreditPolicy {
       external_default: numberOrZero(daily.external_default),
       profile_overrides: {
         ...CREDIT_POLICY_DEFAULT.daily_quota.profile_overrides,
-        ...Object.fromEntries(Object.entries(overrides).map(([key, amount]) => [key, numberOrZero(amount)])),
+        ...Object.fromEntries(Object.entries(overrides).map(([key, amount]) => [key,
+          amount == null || (daily.profile_override_version !== 2 && numberOrZero(amount) === 0) ? null : numberOrZero(amount)])),
       },
+      profile_override_version: 2,
       valid_hours: Math.min(168, Math.max(1, Number(daily.valid_hours) || 24)),
-      clear_unused_on_expire: daily.clear_unused_on_expire !== false,
+      clear_unused_on_expire: true,
     },
   };
 }
@@ -323,7 +327,7 @@ function estimateDailyQuota(policy: CreditPolicy, user: Pick<AdminUser, 'role' |
   if (!policy.daily_quota.enabled || user.role === 'admin') return 0;
   if (user.account_type === 'external') return policy.daily_quota.external_default;
   const override = policy.daily_quota.profile_overrides[user.user_profile || 'other'];
-  return override && override > 0 ? override : policy.daily_quota.internal_default;
+  return override == null ? policy.daily_quota.internal_default : override;
 }
 
 function buildEditUserForm(user: AdminUser): EditUserForm {
@@ -567,14 +571,14 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     }));
   };
 
-  const updateDailyOverride = (profile: string, amount: number) => {
+  const updateDailyOverride = (profile: string, amount: number | null) => {
     setCreditPolicy((current) => ({
       ...current,
       daily_quota: {
         ...current.daily_quota,
         profile_overrides: {
           ...current.daily_quota.profile_overrides,
-          [profile]: numberOrZero(amount),
+          [profile]: amount == null ? null : numberOrZero(amount),
         },
       },
     }));
@@ -1157,6 +1161,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
               <p>筛选结果 {filteredUsers.length} 人 · 当前页 {currentUserPage}/{userTotalPages}</p>
             </div>
             <div className="admin-users-list-actions">
+              <Link className="admin-users-button admin-users-button-secondary" href="/admin/users/quotas">周期额度</Link>
               <button type="button" className="admin-users-button admin-users-button-secondary" onClick={toggleFilteredSelection}>
                 {allFilteredSelected ? '取消全选' : '全选结果'}
               </button>
@@ -1492,7 +1497,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                       onChange={(event) => updateDailyPolicy({ valid_hours: Math.min(168, Math.max(1, Number(event.target.value) || 24)) })}
                     />
                   </div>
-                  <p className="admin-users-hint">每日额度按上海时间懒发放；过期未使用清零，已冻结额度等任务结算后关闭或返还。</p>
+                  <p className="admin-users-hint">旧每日额度：按上海时间发放，有效小时不是刷新间隔。已纳入周期额度的用户不再领取旧每日额度。岗位留空使用默认值，填0表示不发放。</p>
                   <div className="admin-users-policy-grid">
                     {USER_PROFILE_OPTIONS.map((option) => (
                       <label key={option.value}>
@@ -1501,8 +1506,9 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                           style={inputStyle}
                           type="number"
                           min="0"
-                          value={creditPolicy.daily_quota.profile_overrides[option.value] || 0}
-                          onChange={(event) => updateDailyOverride(option.value, Number(event.target.value))}
+                          placeholder="使用默认"
+                          value={creditPolicy.daily_quota.profile_overrides[option.value] ?? ''}
+                          onChange={(event) => updateDailyOverride(option.value, event.target.value === '' ? null : Number(event.target.value))}
                         />
                       </label>
                     ))}
@@ -1755,7 +1761,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>单人点数操作</h3>
-                  <p>只影响长期余额；每日固定额度由策略自动发放和过期清零。</p>
+                  <p>只影响长期余额；周期额度独立发放和到期，不会被本次修改覆盖。</p>
                 </div>
               </div>
               <div className="admin-users-form-grid">

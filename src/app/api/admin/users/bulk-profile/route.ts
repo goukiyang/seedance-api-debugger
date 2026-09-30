@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { refreshQuotaMembership } from '@/lib/credits/periodic';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
 import {
@@ -106,6 +107,7 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        await refreshQuotaMembership(tx, user.id);
         updatedUsers.push(updated);
       }
 

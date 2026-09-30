@@ -178,6 +178,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         balance_before: freeze.balance_before, balance_after: freeze.balance_after,
         frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after,
         related_task_id: id, idempotency_key: `image-studio:freeze:${id}`, reason: '图片生成冻结积分',
+        metadata_json: JSON.stringify({ allocations: freeze.allocations }),
       } });
     }
   }, { timeout: 15000 });
@@ -201,6 +202,7 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
       frozen_before: settlement.frozenBefore, frozen_after: settlement.frozenAfter,
       related_task_id: task.id, idempotency_key: `image-studio:settle:${task.id}`,
       reason: status === 'succeeded' ? '图片已保存，结算积分' : '图片未交付，释放冻结积分',
+      metadata_json: JSON.stringify({ allocations: settlement.allocations, expired_closed: settlement.expiredClosedAmount }),
     } });
   }, { timeout: 15000 });
 }

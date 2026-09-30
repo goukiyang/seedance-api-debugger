@@ -79,10 +79,10 @@ function ledgerTypeLabel(type: string) {
     task_success_deduct: '成功扣除',
     task_failed_refund: '失败返还',
     manual_refund: '手动退款',
-    periodic_grant: '周期发放',
     new_user_initial_grant: '新用户初始',
     daily_quota_grant: '每日额度发放',
-    daily_quota_expire: '每日额度过期',
+    periodic_grant: '周期额度发放',
+    daily_quota_expire: '周期额度到期',
     expired_refund_closed: '过期返还关闭',
   };
   return labels[type] || type;
@@ -255,7 +255,7 @@ export default function AdminPointsClient({
         <div className="stat-card">
           <span className="stat-label">本月已用</span>
           <strong className="stat-value">{formatNumber(stats.monthly_used)}</strong>
-          <span className="stat-sub">用户账户累计</span>
+          <span className="stat-sub">北京时间本月成功扣点流水</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">今日流水</span>
@@ -313,6 +313,8 @@ export default function AdminPointsClient({
               <option value="system_adjust">系统修正</option>
               <option value="new_user_initial_grant">新用户初始</option>
               <option value="daily_quota_grant">每日额度发放</option>
+              <option value="periodic_grant">周期额度发放</option>
+              <option value="daily_quota_expire">周期额度到期</option>
               <option value="expired_refund_closed">过期返还关闭</option>
             </select>
           </label>

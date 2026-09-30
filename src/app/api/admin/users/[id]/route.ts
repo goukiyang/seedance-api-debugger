@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { refreshQuotaMembership } from '@/lib/credits/periodic';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
 import type { SessionUser } from '@/lib/auth/session';
@@ -261,6 +262,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
     });
 
+    await refreshQuotaMembership(tx, id);
     return user;
   });
 
@@ -295,6 +297,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       where: { id },
       data: { status: 'deleted' },
     });
+    await refreshQuotaMembership(tx, id);
 
     await tx.operationLog.create({
       data: {

@@ -24,7 +24,7 @@ export default async function AdminPointsPage({
   if (!user) redirect('/login');
   if (user.role !== 'admin') redirect('/generate');
 
-  const [accountSummary, accountCount, ledgerToday] = await Promise.all([
+  const [accountSummary, accountCount, ledgerToday, quotaSummary, usedMonth] = await Promise.all([
     prisma.creditAccount.aggregate({
       _sum: {
         balance: true,
@@ -37,6 +37,11 @@ export default async function AdminPointsPage({
     prisma.creditLedger.count({
       where: { created_at: { gte: getTodayStart() } },
     }),
+    prisma.creditBucket.aggregate({ _sum: { frozen_amount: true } }),
+    prisma.creditLedger.aggregate({ where: { type: 'task_success_deduct', created_at: { gte: (() => {
+      const local = new Date(Date.now() + 8 * 3600000);
+      return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - 8 * 3600000);
+    })() } }, _sum: { amount: true } }),
   ]);
 
   return (
@@ -44,8 +49,8 @@ export default async function AdminPointsPage({
       stats={{
         user_count: accountCount,
         total_balance: accountSummary._sum.balance || 0,
-        total_frozen: accountSummary._sum.frozen_credits || 0,
-        monthly_used: accountSummary._sum.monthly_used || 0,
+        total_frozen: (accountSummary._sum.frozen_credits || 0) + (quotaSummary._sum.frozen_amount || 0),
+        monthly_used: Math.max(0, -(usedMonth._sum.amount || 0)),
         total_used: accountSummary._sum.total_used || 0,
         ledger_today: ledgerToday,
       }}

@@ -1,5 +1,6 @@
 import type { Prisma, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { syncPeriodicQuota, periodicUserState, refreshQuotaMembership } from './periodic';
 
 export const CREDIT_POLICY_KEY = 'credit_policy_v1';
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -18,7 +19,8 @@ export type CreditPolicy = {
     timezone: 'Asia/Shanghai';
     internal_default: number;
     external_default: number;
-    profile_overrides: Record<string, number>;
+    profile_overrides: Record<string, number | null>;
+    profile_override_version?: number;
     valid_hours: number;
     clear_unused_on_expire: boolean;
   };
@@ -30,6 +32,7 @@ export type CreditFreezeAllocation = {
   source_type: 'daily_quota' | 'balance';
   amount: number;
   bucket_id?: string;
+  policy_key?: string | null;
   quota_date?: string | null;
   expires_at?: string | null;
 };
@@ -51,14 +54,15 @@ export const DEFAULT_CREDIT_POLICY: CreditPolicy = {
     internal_default: 0,
     external_default: 0,
     profile_overrides: {
-      core_video: 0,
-      core_animation: 0,
-      core_design: 0,
-      noncore_planning: 0,
-      noncore_ops: 0,
-      noncore_pm: 0,
-      other: 0,
+      core_video: null,
+      core_animation: null,
+      core_design: null,
+      noncore_planning: null,
+      noncore_ops: null,
+      noncore_pm: null,
+      other: null,
     },
+    profile_override_version: 2,
     valid_hours: 24,
     clear_unused_on_expire: true,
   },
@@ -93,10 +97,12 @@ function normalizePolicy(value: unknown): CreditPolicy {
       external_default: numberOrZero(daily.external_default),
       profile_overrides: {
         ...DEFAULT_CREDIT_POLICY.daily_quota.profile_overrides,
-        ...Object.fromEntries(Object.entries(overrides).map(([key, amount]) => [key, numberOrZero(amount)])),
+        ...Object.fromEntries(Object.entries(overrides).map(([key, amount]) => [key,
+          amount == null || (daily.profile_override_version !== 2 && numberOrZero(amount) === 0) ? null : numberOrZero(amount)])),
       },
+      profile_override_version: 2,
       valid_hours: Math.min(168, Math.max(1, Number(daily.valid_hours) || 24)),
-      clear_unused_on_expire: daily.clear_unused_on_expire !== false,
+      clear_unused_on_expire: true,
     },
   };
 }
@@ -150,7 +156,7 @@ function resolveDailyQuotaAmount(policy: CreditPolicy, user: CreditPolicyUser) {
   if (user.role === 'admin') return 0;
   if (user.account_type === 'external') return policy.daily_quota.external_default;
   const override = policy.daily_quota.profile_overrides[user.user_profile || 'other'];
-  return override && override > 0 ? override : policy.daily_quota.internal_default;
+  return override == null ? policy.daily_quota.internal_default : override;
 }
 
 function shanghaiDateKey(now = new Date()) {
@@ -198,6 +204,7 @@ export async function grantInitialCredits(
   source: 'self_register' | 'feishu_auto_create' | 'admin_create',
   options: { amount?: number; operatorId?: string; reason?: string } = {},
 ) {
+  await refreshQuotaMembership(tx, user.id);
   const policy = await getCreditPolicy(tx);
   const amount = options.amount ?? resolveInitialGrantAmount(policy, user, source);
   if (!Number.isFinite(amount) || amount <= 0) return { amount: 0 };
@@ -269,7 +276,7 @@ export async function expireUserCreditBuckets(tx: Tx, userId: string, now = new 
       where: { id: bucket.id },
       data: {
         amount_remaining: 0,
-        status: bucket.frozen_amount > 0 ? 'expired' : 'expired',
+        status: 'expired',
       },
     });
 
@@ -282,10 +289,11 @@ export async function expireUserCreditBuckets(tx: Tx, userId: string, now = new 
         balance_after: account.balance,
         frozen_before: totalFrozen,
         frozen_after: totalFrozen,
-        reason: `每日配额过期清零 ${bucket.amount_remaining} 点`,
+        reason: `周期额度到期，清除未使用的 ${bucket.amount_remaining} 点`,
         idempotency_key: `daily_quota_expire:${bucket.id}`,
         metadata_json: JSON.stringify({
           bucket_id: bucket.id,
+          policy_key: bucket.policy_key,
           quota_date: bucket.quota_date,
           expires_at: bucket.expires_at?.toISOString() || null,
         }),
@@ -297,11 +305,18 @@ export async function expireUserCreditBuckets(tx: Tx, userId: string, now = new 
 export async function ensureDailyQuotaBucket(tx: Tx, user: CreditPolicyUser, now = new Date()) {
   await expireUserCreditBuckets(tx, user.id, now);
 
+  const freshUser = await tx.user.findUnique({ where: { id: user.id } });
+  if (!freshUser) throw new Error('用户不存在');
+  const periodic = await syncPeriodicQuota(tx, freshUser, now);
+  if (periodic.managed) return null;
+  if (freshUser.expires_at && freshUser.expires_at <= now) return null;
+
   const policy = await getCreditPolicy(tx);
-  const amount = resolveDailyQuotaAmount(policy, user);
+  const amount = resolveDailyQuotaAmount(policy, freshUser);
   if (amount <= 0) return null;
 
   const { quotaDate, expiresAt } = quotaWindow(now, policy.daily_quota.valid_hours);
+  if (expiresAt <= now) return null;
   const idempotencyKey = `daily_quota:${user.id}:${quotaDate}`;
   const existing = await tx.creditBucket.findUnique({ where: { idempotency_key: idempotencyKey } });
   if (existing) return existing;
@@ -351,31 +366,49 @@ export async function ensureDailyQuotaBucket(tx: Tx, user: CreditPolicyUser, now
 
 export async function getCreditSummary(tx: Tx, user: CreditPolicyUser, now = new Date()) {
   await ensureDailyQuotaBucket(tx, user, now);
-  const account = await ensureCreditAccount(tx, user.id);
+  return readCreditSummary(tx, user.id, now);
+}
+
+export async function readCreditSummary(tx: Tx | typeof prisma, userId: string, now = new Date()) {
+  const stored = await tx.creditAccount.findUnique({ where: { user_id: userId } });
+  const account = stored || { balance: 0, frozen_credits: 0, monthly_used: 0, total_used: 0, updated_at: null };
   const buckets = await tx.creditBucket.findMany({
     where: {
-      user_id: user.id,
+      user_id: userId,
       source_type: 'daily_quota',
-      status: 'active',
-      OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+      OR: [{ frozen_amount: { gt: 0 } }, { status: 'active', OR: [{ expires_at: null }, { expires_at: { gt: now } }] }],
     },
   });
-  const dailyRemaining = buckets.reduce((total, bucket) => total + bucket.amount_remaining, 0);
+  const usable = buckets.filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now));
+  const dailyRemaining = usable.reduce((total, bucket) => total + bucket.amount_remaining, 0);
   const dailyFrozen = buckets.reduce((total, bucket) => total + bucket.frozen_amount, 0);
   const longAvailable = Math.max(0, account.balance - account.frozen_credits);
+  const local = new Date(now.getTime() + SHANGHAI_OFFSET_MS);
+  const monthStart = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - SHANGHAI_OFFSET_MS);
+  const used = await tx.creditLedger.aggregate({ where: { user_id: userId, type: 'task_success_deduct', created_at: { gte: monthStart, lte: now } }, _sum: { amount: true } });
 
   return {
-    account,
+    account: { ...account, monthly_used: Math.max(0, -(used._sum.amount || 0)) },
     daily_remaining: dailyRemaining,
     daily_frozen: dailyFrozen,
-    daily_total: buckets.reduce((total, bucket) => total + bucket.amount_total, 0),
-    daily_expires_at: buckets
+    daily_total: usable.reduce((total, bucket) => total + bucket.amount_total, 0),
+    daily_expires_at: usable
       .map((bucket) => bucket.expires_at)
       .filter((value): value is Date => Boolean(value))
       .sort((a, b) => a.getTime() - b.getTime())[0] || null,
     long_available: longAvailable,
     available: longAvailable + dailyRemaining,
     frozen_credits: account.frozen_credits + dailyFrozen,
+    buckets: buckets.map(bucket => {
+      let name = '每日额度';
+      if (bucket.policy_key?.startsWith('periodic:')) {
+        try { name = JSON.parse(bucket.metadata_json || '{}').rule_name || '周期额度'; } catch { name = '周期额度'; }
+      }
+      return { id: bucket.id, name, total: bucket.amount_total,
+        remaining: usable.includes(bucket) ? bucket.amount_remaining : 0, frozen: bucket.frozen_amount,
+        expires_at: bucket.expires_at, expired: !!bucket.expires_at && bucket.expires_at <= now };
+    }),
+    periodic: await periodicUserState(tx as Tx, userId),
   };
 }
 
@@ -385,9 +418,10 @@ export async function allocateTaskCredits(
   amount: number,
   taskId: string,
 ) {
-  await ensureDailyQuotaBucket(tx, user);
-  const account = await ensureCreditAccount(tx, user.id);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('冻结点数必须为有效正数');
   const now = new Date();
+  await ensureDailyQuotaBucket(tx, user, now);
+  const account = await ensureCreditAccount(tx, user.id);
   const activeBuckets = await tx.creditBucket.findMany({
     where: {
       user_id: user.id,
@@ -420,6 +454,7 @@ export async function allocateTaskCredits(
     allocations.push({
       source_type: 'daily_quota',
       bucket_id: bucket.id,
+      policy_key: bucket.policy_key,
       amount: used,
       quota_date: bucket.quota_date,
       expires_at: bucket.expires_at?.toISOString() || null,
@@ -453,23 +488,18 @@ export async function allocateTaskCredits(
 
 function parseFreezeSnapshot(value: string | null | undefined, fallbackAmount: number): CreditFreezeAllocation[] {
   if (value) {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) {
-        return parsed
-          .map((item) => ({
-            source_type: item?.source_type === 'daily_quota' ? 'daily_quota' as const : 'balance' as const,
-            bucket_id: typeof item?.bucket_id === 'string' ? item.bucket_id : undefined,
-            amount: Number(item?.amount) || 0,
-            quota_date: typeof item?.quota_date === 'string' ? item.quota_date : null,
-            expires_at: typeof item?.expires_at === 'string' ? item.expires_at : null,
-          }))
-          .filter((item) => item.amount > 0);
-      }
-    } catch {
-      // Fall back to legacy balance settlement below.
+      parsed = JSON.parse(value);
+    } catch { throw new Error('冻结来源记录损坏，已停止结算，请核对'); }
+    if (!Array.isArray(parsed) || parsed.some(item => !item || !['daily_quota', 'balance'].includes(item.source_type)
+      || !Number.isFinite(item.amount) || item.amount <= 0 || (item.source_type === 'daily_quota' && typeof item.bucket_id !== 'string'))) {
+      throw new Error('冻结来源未知，已停止结算，请核对');
     }
+    if (Math.abs(parsed.reduce((sum, item) => sum + item.amount, 0) - fallbackAmount) > 0.00001) throw new Error('冻结金额不一致，已停止结算');
+    return parsed;
   }
+  // Only historical tasks without a snapshot may fall back to the long-term account.
   return fallbackAmount > 0 ? [{ source_type: 'balance', amount: fallbackAmount }] : [];
 }
 
@@ -502,9 +532,9 @@ export async function settleTaskCredits(
       continue;
     }
 
-    if (!allocation.bucket_id) continue;
+    if (!allocation.bucket_id) throw new Error('冻结来源缺少额度编号');
     const bucket = await tx.creditBucket.findUnique({ where: { id: allocation.bucket_id } });
-    if (!bucket) continue;
+    if (!bucket || bucket.user_id !== input.userId || bucket.frozen_amount + 0.00001 < allocation.amount) throw new Error('冻结额度归属或金额异常，已停止结算');
 
     const release = Math.min(bucket.frozen_amount, allocation.amount);
     bucketReleasedAmount += release;
@@ -558,7 +588,7 @@ export async function settleTaskCredits(
         frozen_before: totalFrozenBefore,
         frozen_after: totalFrozenAfter,
         related_task_id: input.taskId,
-        reason: `任务失败时每日配额已过期，关闭 ${expiredClosedAmount} 点返还`,
+        reason: `任务失败时原周期额度已过期，关闭 ${expiredClosedAmount} 点返还`,
         metadata_json: JSON.stringify({ allocations }),
       },
     });

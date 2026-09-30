@@ -34,9 +34,11 @@
     ".next/types/**/*.ts",
     ".next-prod/types/**/*.ts",
     ".next-dev/types/**/*.ts",
-    ".next-prod-candidate/types/**/*.ts"
+    ".next-prod-candidate/types/**/*.ts",
+    ".next-credits-candidate/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".next-reactions-candidate"
   ]
 }

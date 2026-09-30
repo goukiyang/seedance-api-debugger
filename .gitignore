@@ -8,6 +8,8 @@
 .next-dev/
 .next-prod/
 .next-prod-candidate/
+.next-credits-candidate/
+.next-reactions-candidate/
 .next-prod-prev/
 .next.bad-*/
 out/

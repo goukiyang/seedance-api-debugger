@@ -5,6 +5,7 @@ import { getFeatureProfileLabel, getUserProfileLabel } from '@/lib/users/profile
 import { isSyntheticFeishuEmail } from '@/lib/users/display';
 import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { readCreditSummary } from '@/lib/credits/policy';
 
 function formatDate(value: Date | null) {
   if (!value) return '无';
@@ -29,16 +30,8 @@ export default async function AccountPage() {
   const user = await getSession();
   if (!user) redirect('/login');
 
-  const creditAccount = await prisma.creditAccount.findUnique({
-    where: { user_id: user.id },
-    select: {
-      balance: true,
-      frozen_credits: true,
-      total_used: true,
-      monthly_used: true,
-      updated_at: true,
-    },
-  });
+  const summary = await readCreditSummary(prisma, user.id);
+  const creditAccount = summary.account;
 
   const emailText = isSyntheticFeishuEmail(user.email) ? '未绑定真实邮箱' : user.email;
 
@@ -92,16 +85,16 @@ export default async function AccountPage() {
           <div className="info-item">
             <span className="info-label">可用积分</span>
             <span className="info-value">
-              {creditAccount ? Math.max(0, creditAccount.balance - creditAccount.frozen_credits) : 0}
+              {summary.available}
             </span>
           </div>
           <div className="info-item">
-            <span className="info-label">总余额</span>
+            <span className="info-label">长期余额</span>
             <span className="info-value">{creditAccount?.balance ?? 0}</span>
           </div>
           <div className="info-item">
             <span className="info-label">冻结积分</span>
-            <span className="info-value">{creditAccount?.frozen_credits ?? 0}</span>
+            <span className="info-value">{summary.frozen_credits}</span>
           </div>
           <div className="info-item">
             <span className="info-label">本月已用</span>
@@ -116,6 +109,12 @@ export default async function AccountPage() {
             <span className="info-value">{formatDate(creditAccount?.updated_at ?? null)}</span>
           </div>
         </div>
+        <h3 className="section-title mt-4">周期额度</h3>
+        {summary.periodic?.next_refresh && <p>下次刷新：{formatDate(new Date(summary.periodic.next_refresh))}</p>}
+        {summary.buckets.length === 0 ? <p className="text-gray">当前没有可用或待结算的周期额度</p> :
+          <div className="table-container"><table className="table"><thead><tr><th>来源</th><th>本期额度</th><th>可用</th><th>生成中占用</th><th>到期时间</th></tr></thead>
+            <tbody>{summary.buckets.map(bucket => <tr key={bucket.id}><td>{bucket.name}{bucket.expired ? '（已到期，等待任务结算）' : ''}</td>
+              <td>{bucket.total}</td><td>{bucket.remaining}</td><td>{bucket.frozen}</td><td>{formatDate(bucket.expires_at)}</td></tr>)}</tbody></table></div>}
       </div>
     </div>
   );

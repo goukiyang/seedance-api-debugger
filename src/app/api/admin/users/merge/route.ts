@@ -153,6 +153,11 @@ export async function POST(request: NextRequest) {
   if (sourceUserIds.length > MAX_SOURCE_USERS) return errorJson(`单次最多合并 ${MAX_SOURCE_USERS} 个账号`, 400);
   if (!reason) return errorJson('合并原因必填', 400);
 
+  const protectedIds = [targetUserId, ...sourceUserIds];
+  const quotaMembership = await prisma.platformSetting.count({ where: { key: { in: protectedIds.map(id => `periodic_credit_user:${id}`) } } });
+  const unsettledQuota = await prisma.creditBucket.count({ where: { user_id: { in: protectedIds }, OR: [{ amount_remaining: { gt: 0 } }, { frozen_amount: { gt: 0 } }] } });
+  if (quotaMembership || unsettledQuota) return errorJson('所选账号有周期额度或额度归属记录，暂不支持自动合并。请先核对额度与生成任务，避免丢点或重复领点。', 409);
+
   const [targetUser, sourceUsers] = await Promise.all([
     prisma.user.findUnique({ where: { id: targetUserId } }),
     prisma.user.findMany({ where: { id: { in: sourceUserIds } } }),
@@ -170,6 +175,9 @@ export async function POST(request: NextRequest) {
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    const membership = await tx.platformSetting.count({ where: { key: { in: protectedIds.map(id => `periodic_credit_user:${id}`) } } });
+    const quota = await tx.creditBucket.count({ where: { user_id: { in: protectedIds }, OR: [{ amount_remaining: { gt: 0 } }, { frozen_amount: { gt: 0 } }] } });
+    if (membership || quota) return { quota_conflict: true as const };
     const counts = {
       video_tasks: 0,
       owned_tasks: 0,
@@ -568,5 +576,6 @@ export async function POST(request: NextRequest) {
     };
   });
 
+  if ('quota_conflict' in result) return errorJson('合并期间额度状态发生变化，已停止合并，请重新读取账号。', 409);
   return NextResponse.json(result);
 }

@@ -349,6 +349,7 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
       related_task_id: id,
       idempotency_key: `image-studio:freeze:${id}`,
       reason: '工具流图片节点冻结积分',
+      metadata_json: JSON.stringify({ allocations: freeze.allocations }),
     } });
   }
   return { id, unitCredits };
@@ -592,6 +593,7 @@ async function cancelQueuedTask(tx: Tx, task: { id: string; owner_id: string; un
     related_task_id: task.id,
     idempotency_key: `image-studio:settle:${task.id}`,
     reason: '取消工具流，释放冻结积分',
+    metadata_json: JSON.stringify({ allocations: settlement.allocations, expired_closed: settlement.expiredClosedAmount }),
   } });
 }
 

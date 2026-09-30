@@ -26,6 +26,8 @@ export async function GET(request: NextRequest) {
     available: summary.available,
     monthly_used: account.monthly_used,
     total_used: account.total_used,
+    quota_buckets: summary.buckets,
+    periodic: summary.periodic,
     daily_quota: {
       total: summary.daily_total,
       remaining: summary.daily_remaining,
