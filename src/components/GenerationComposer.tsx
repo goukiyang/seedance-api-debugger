@@ -711,7 +711,12 @@ export function GenerationComposer({
     ? null
     : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。${lockedSettings?.duration ? '请切换支持该时长的模型，或修改视频卡时长。' : '请重新选择时长，或切换支持该时长的模型。'}确认前不会提交或扣点。`;
 
-  const submitBlocker = useMemo(() => {
+  const hasUploadingMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'uploading');
+  const hasFailedMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'failed');
+  const isRestoringStudioSettings = Boolean(studioHandoff && !studioSettingsReady);
+
+  const submitBlockerState = useMemo(() => {
+    const reason = (() => {
     if (durationBlocker) return durationBlocker;
     if (studioHandoff && lockedSettings?.ratio && ratio !== lockedSettings.ratio) {
       return `模板比例 ${ratio} 与当前视频卡锁定比例 ${lockedSettings.ratio} 不一致`;
@@ -728,11 +733,9 @@ export function GenerationComposer({
     }
 
     // 检查上传状态
-    const hasUploading = Object.values(workspace.uploadStatuses).some((s) => s === 'uploading');
-    if (hasUploading) return '素材上传中，请稍候';
+    if (hasUploadingMaterial) return { message: '素材上传中，请稍候', tone: 'progress' as const };
 
-    const hasFailed = Object.values(workspace.uploadStatuses).some((s) => s === 'failed');
-    if (hasFailed) return '存在上传失败的素材，请移除后重试';
+    if (hasFailedMaterial) return '存在上传失败的素材，请移除后重试';
 
     if (workspace.pendingWorkspaceAttach) {
       return '素材已上传成功，但加入参考区失败，请先重试加入参考区。';
@@ -742,7 +745,7 @@ export function GenerationComposer({
       return referenceMediaPreflightBlocker;
     }
 
-    if (studioHandoff && !studioSettingsReady) return '正在恢复模板参数与模型能力，请稍候';
+    if (isRestoringStudioSettings) return { message: '正在恢复模板参数与模型能力，请稍候', tone: 'progress' as const };
     if (studioHandoff && studioUnsupportedReason) return studioUnsupportedReason;
     if (studioHandoff) {
       const materialCompatibilityError = getStudioMaterialCompatibilityError({
@@ -807,7 +810,10 @@ export function GenerationComposer({
       return seedanceDraft.message;
     }
     return null;
-  }, [durationBlocker, prompt, workspace.uploadStatuses, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, studioSettingsReady, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel]);
+    })();
+    return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
+  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel]);
+  const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
@@ -824,14 +830,14 @@ export function GenerationComposer({
       };
     }
     if (submitBlocker) {
-      const isUploading = submitBlocker.includes('上传中');
-      return { message: submitBlocker, tone: isUploading ? 'progress' as const : 'error' as const };
+      const tone = submitBlockerState?.tone || 'error';
+      return { message: submitBlocker, tone };
     }
     if (submitDisabledReason) {
       return { message: submitDisabledReason, tone: 'hint' as const };
     }
     return { message: null, tone: 'ok' as const };
-  }, [isSubmitting, durationBlocker, mentionNotice, prompt, submitBlocker, submitDisabledReason]);
+  }, [isSubmitting, durationBlocker, mentionNotice, prompt, submitBlocker, submitDisabledReason, submitBlockerState]);
 
   const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
 
@@ -2078,7 +2084,7 @@ export function GenerationComposer({
         )}
 
         {/* 参数栏 */}
-        {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || '请先确认1080p审批已通过。'}</p>}
+        {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || '请先确认1080p审批已通过。'}</p>}
         <ComposerActionBar
           generationMode={generationMode}
           ratio={ratio}

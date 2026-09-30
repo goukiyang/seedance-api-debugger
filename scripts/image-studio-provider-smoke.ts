@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { requestStudioImages, StudioProviderError } from '../src/lib/image-studio/provider';
-import { readStudioImage } from '../src/lib/image-studio/media';
+import { readStudioImage, StudioImageDownloadError } from '../src/lib/image-studio/media';
 import { normalizeStudioRatio, ratioFromImageDimensions, resolveStudioAspectRatio, STUDIO_RATIOS, studioRatioSize } from '../src/lib/image-studio/ratios';
 import { defaultImageResolution, imageOutputSize, imageResolutionOptions, isValidImageDimension, normalizeImageResolution } from '../src/lib/image-generation/resolution';
 
@@ -90,6 +90,30 @@ async function main() {
     downloads++; assert.equal(signal, params.signal); return Buffer.from('image');
   });
   assert.deepEqual(linked.images, ['aW1hZ2U=']); assert.equal(downloads, 1);
+  const generationController = new AbortController();
+  const deliveryController = new AbortController();
+  let generationCalls = 0;
+  const independent = await requestStudioImages({ ...params, signal: generationController.signal, downloadSignal: deliveryController.signal }, async () => {
+    generationCalls++;
+    generationController.abort();
+    return linkResponse();
+  }, async (_url, signal) => {
+    assert.equal(signal, deliveryController.signal);
+    assert.equal(signal?.aborted, false, 'completed generation deadline must not cancel image delivery');
+    return Buffer.from('image');
+  });
+  assert.equal(independent.images.length, 1);
+  assert.equal(generationCalls, 1, 'delivery must not resubmit paid generation');
+  const diagnostics = { phase: 'body' as const, attempt: 2, redirects: 0, receivedBytes: 1024, elapsedMs: 120000, httpStatus: 200 };
+  await assert.rejects(requestStudioImages(params, linkResponse, async () => {
+    throw new StudioImageDownloadError('download_body_timeout', 200, true, diagnostics);
+  }), error => {
+    assert.ok(error instanceof StudioProviderError);
+    assert.equal(error.code, 'download_body_timeout');
+    assert.deepEqual(error.diagnostics, diagnostics);
+    assert.ok(!JSON.stringify(error).includes('private=not-logged'));
+    return true;
+  });
   await assert.rejects(requestStudioImages(params, linkResponse, async () => { throw new Error('secret URL or key'); }), error => {
     assert.ok(error instanceof StudioProviderError && error.stage === 'download' && !error.message.includes('secret')); return true;
   });

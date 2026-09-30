@@ -76,19 +76,30 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
     if (stat.size > MAX_STUDIO_GENERATED_BYTES || !stat.isFile()) throw new Error('图片文件过大');
     return fs.readFile(file);
   }
+  const started = Date.now();
+  const deadline = AbortSignal.timeout(180000);
+  const downloadSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  const metrics: StudioDownloadDiagnostics = { phase: 'dns', attempt: 1, redirects: 0, receivedBytes: 0, elapsedMs: 0 };
   for (let attempt = 0; ; attempt++) {
-    try { return await downloadStudioImage(url, signal, 0); }
+    metrics.attempt = attempt + 1;
+    try { return await downloadStudioImage(url, downloadSignal, 0, metrics); }
     catch (error) {
-      const failure = classifyStudioDownloadError(error);
-      if (attempt >= 1 || !failure.retryable || signal?.aborted) throw failure;
-      try { await delay(1000, undefined, { signal }); }
-      catch { throw new StudioImageDownloadError('download_aborted'); }
+      const failure = deadline.aborted ? new StudioImageDownloadError('download_total_timeout')
+        : signal?.aborted ? new StudioImageDownloadError('download_aborted') : classifyStudioDownloadError(error);
+      failure.diagnostics = { ...metrics, elapsedMs: Date.now() - started };
+      if (attempt >= 1 || !failure.retryable || downloadSignal.aborted) throw failure;
+      try { await delay(1000, undefined, { signal: downloadSignal }); }
+      catch { throw new StudioImageDownloadError(deadline.aborted ? 'download_total_timeout' : 'download_aborted', undefined, false, failure.diagnostics); }
     }
   }
 }
 
+export type StudioDownloadDiagnostics = {
+  phase: 'dns' | 'connect' | 'headers' | 'body';
+  attempt: number; redirects: number; receivedBytes: number; expectedBytes?: number; elapsedMs: number; httpStatus?: number;
+};
 export class StudioImageDownloadError extends Error {
-  constructor(public code: string, public status?: number, public retryable = false) {
+  constructor(public code: string, public status?: number, public retryable = false, public diagnostics?: StudioDownloadDiagnostics) {
     super(code);
     this.name = 'StudioImageDownloadError';
   }
@@ -104,50 +115,94 @@ function classifyStudioDownloadError(error: unknown): StudioImageDownloadError {
   return new StudioImageDownloadError('download_network_failed', undefined, true);
 }
 
-async function downloadStudioImage(url: string, signal: AbortSignal | undefined, redirects: number): Promise<Buffer> {
+function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) { pending.catch(() => {}); reject(signal.reason); return; }
+    signal.addEventListener('abort', abort, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
+async function downloadStudioImage(url: string, signal: AbortSignal, redirects: number, metrics: StudioDownloadDiagnostics): Promise<Buffer> {
+  signal.throwIfAborted();
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new StudioImageDownloadError('download_invalid_url'); }
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password || isPrivateNetworkHost(parsed.hostname)) throw new StudioImageDownloadError('download_unsafe_url');
-  const addresses = await lookup(parsed.hostname, { all: true, family: 4 });
+  metrics.phase = 'dns'; metrics.redirects = redirects; metrics.receivedBytes = 0;
+  metrics.expectedBytes = undefined; metrics.httpStatus = undefined;
+  const dnsDeadline = AbortSignal.timeout(10000);
+  let addresses;
+  try { addresses = await abortable(lookup(parsed.hostname, { all: true, family: 4 }), AbortSignal.any([signal, dnsDeadline])); }
+  catch (error) {
+    if (dnsDeadline.aborted && !signal.aborted) throw new StudioImageDownloadError('download_dns_timeout', undefined, true);
+    throw error;
+  }
+  signal.throwIfAborted();
   if (!addresses.length || addresses.some(entry => isPrivateNetworkHost(entry.address)
     || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(entry.address))) throw new StudioImageDownloadError('download_unsafe_address');
   // Pin the vetted address so DNS cannot change between validation and download.
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clearTimer = () => { if (timer) clearTimeout(timer); };
+    const fail = (error: unknown) => { if (!settled) { settled = true; clearTimer(); reject(error); } };
+    const address = addresses[(metrics.attempt - 1) % addresses.length];
+    metrics.phase = 'connect';
     const request = https.get(parsed, {
       // The vetted lookup returns one IPv4 address, not an auto-family address list.
       family: 4, signal,
-      lookup: (_hostname, _options, callback) => callback(null, addresses[0].address, addresses[0].family),
+      lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
     }, response => {
+      if (settled) { response.destroy(); return; }
       const status = response.statusCode || 0;
+      clearTimer(); metrics.httpStatus = status;
       if ([301, 302, 303, 307, 308].includes(status)) {
         const location = response.headers.location;
         response.destroy();
-        if (!location || redirects >= 3) { reject(new StudioImageDownloadError('download_redirect_limit', status)); return; }
+        if (!location || redirects >= 3) { fail(new StudioImageDownloadError('download_redirect_limit', status)); return; }
         let next: string;
         try { next = new URL(location, parsed).href; }
-        catch { reject(new StudioImageDownloadError('download_invalid_url')); return; }
+        catch { fail(new StudioImageDownloadError('download_invalid_url')); return; }
         // Every hop is revalidated and DNS-pinned; never forward API credentials.
-        resolve(downloadStudioImage(next, signal, redirects + 1));
+        settled = true;
+        resolve(downloadStudioImage(next, signal, redirects + 1, metrics));
         return;
       }
-      if (status !== 200) { response.destroy(); reject(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); return; }
+      if (status !== 200) { fail(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); response.destroy(); return; }
+      metrics.phase = 'body';
+      const length = Number(response.headers['content-length']);
+      if (Number.isSafeInteger(length) && length >= 0) metrics.expectedBytes = length;
+      if (length > MAX_STUDIO_GENERATED_BYTES) { fail(new StudioImageDownloadError('download_size_limit', status)); response.destroy(); return; }
       const chunks: Buffer[] = [];
       let bytes = 0;
+      armTimer(60000, 'download_body_timeout');
       response.on('data', chunk => {
+        if (settled) return;
         bytes += chunk.length;
-        if (bytes > MAX_STUDIO_GENERATED_BYTES) request.destroy(new StudioImageDownloadError('download_size_limit'));
-        else chunks.push(chunk);
+        metrics.receivedBytes = bytes;
+        if (bytes > MAX_STUDIO_GENERATED_BYTES) { fail(new StudioImageDownloadError('download_size_limit', status)); request.destroy(); }
+        else { chunks.push(chunk); armTimer(60000, 'download_body_timeout'); }
       });
       response.on('end', () => {
-        if (!response.complete || !bytes) reject(new StudioImageDownloadError('download_incomplete', status, true));
-        else resolve(Buffer.concat(chunks));
+        if (!response.complete || !bytes) fail(new StudioImageDownloadError('download_incomplete', status, true));
+        else if (!settled) { settled = true; clearTimer(); resolve(Buffer.concat(chunks)); }
       });
-      response.on('aborted', () => reject(new StudioImageDownloadError('download_incomplete', status, true)));
-      response.on('error', reject);
+      response.on('aborted', () => fail(new StudioImageDownloadError('download_incomplete', status, true)));
+      response.on('error', fail);
     });
-    const timer = setTimeout(() => request.destroy(new StudioImageDownloadError('download_timeout', undefined, true)), 60000);
-    request.on('close', () => clearTimeout(timer));
-    request.on('error', reject);
+    function armTimer(ms: number, code: string) {
+      clearTimer();
+      if (settled) return;
+      timer = setTimeout(() => { fail(new StudioImageDownloadError(code, metrics.httpStatus, true)); request.destroy(); }, ms);
+    }
+    armTimer(20000, 'download_connect_timeout');
+    request.once('socket', socket => {
+      const connected = () => { if (!settled && metrics.phase === 'connect') { metrics.phase = 'headers'; armTimer(60000, 'download_headers_timeout'); } };
+      if (request.reusedSocket) connected(); else socket.once('secureConnect', connected);
+    });
+    request.on('close', clearTimer);
+    request.on('error', fail);
   });
 }
 

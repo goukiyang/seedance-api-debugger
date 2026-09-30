@@ -44,7 +44,9 @@ type ResultTab = 'prompt' | 'video';
 type StatusFilter = '' | StudioRunStatus;
 type TemplateFilters = { search: string; group: string };
 type RunFilters = { templateId: string; from: string; to: string; status: StatusFilter };
-type SaveState = { label: string; tone?: 'success' | 'warning' | 'error' };
+type FeedbackTone = 'progress' | 'info' | 'success' | 'warning' | 'error';
+type FeedbackMessage = { message: string; tone: FeedbackTone };
+type SaveState = { label: string; tone?: FeedbackTone };
 type RunDetail = StudioRunDetailResponse;
 
 const API = '/api/template-studio';
@@ -732,7 +734,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     if (savingDraftIds.current.has(candidate.id) || currentUserId.current !== userId || currentDraftId.current !== candidate.id) return false;
     if (blockedSaveSignature.current === `${candidate.id}:${candidate.revision}`) return false;
     savingDraftIds.current.add(candidate.id);
-    if (currentDraftId.current === candidate.id) setSaveState({ label: '正在保存' });
+    if (currentDraftId.current === candidate.id) setSaveState({ label: '正在保存', tone: 'progress' });
     const payload: UpdateStudioDraftRequest = {
       name: candidate.name,
       groupName: candidate.groupName,
@@ -761,7 +763,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         setConflict(false);
         setRecoveryAvailable(changedWhileSaving);
         setAuthExpired(false);
-        setSaveState(changedWhileSaving ? { label: '有新改动，继续保存' } : { label: manual ? '已保存' : '自动保存完成', tone: 'success' });
+        setSaveState(changedWhileSaving ? { label: '有新改动，继续保存', tone: 'info' } : { label: manual ? '已保存' : '自动保存完成', tone: 'success' });
       }
       setDrafts((current) => current.map((item) => item.id === saved.id ? { ...item, name: saved.name, groupName: saved.groupName, revision: saved.revision, updatedAt: saved.updatedAt } : item));
       return !changedWhileSaving;
@@ -1475,16 +1477,25 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
 
   const fieldErrors = activeDraft?.recipe?.fields.map((field) => ({ field, message: fieldError(field, fieldValue(activeDraft.values, field)) })).filter((item) => item.message) || [];
   const missingSlots = missingAssetSlots(activeDraft?.recipe || null, activeDraft?.assets || []);
-  const inputBlocker = working ? '正在处理，请等待本次操作完成。'
-    : assetBusy ? '素材还在处理，请等待素材加入后继续。'
-    : authExpired ? '登录已失效，请重新登录；当前草稿保留。'
-    : conflict ? '草稿与服务器版本冲突，请先处理页面上的版本冲突提示。'
-    : pendingRun && requestUnknown ? '上次提交结果尚未确认，请先点击“查询这次请求”，避免重复提交。'
-    : '';
-  const directBlocker = inputBlocker || (fieldErrors.length ? '请补齐模板输入。' : missingSlots.length ? `请添加必填素材：${missingSlots.map(slot => slot.label).join('、')}` : activeDraft && !composeDraftPrompt(activeDraft) ? '请先填写本次需求。' : '');
-  const llmBlocker = inputBlocker || (moduleRun && ['queued', 'running', 'uncertain'].includes(moduleRun.status)
-    ? moduleRun.status === 'uncertain' ? '上一条文案结果待确认，请先联系管理员核对，避免重复费用。' : '已有文案正在处理，请等待结果或在历史中取消排队。'
-    : !capabilities?.llmEnabled ? capabilityError || capabilities?.llmReason || '正在读取文字服务配置，请稍候。' : activeDraft && !composeDraftPrompt(activeDraft) ? '请先填写本次需求。' : '');
+  const inputBlocker: FeedbackMessage | null = working ? { message: '正在处理，请等待本次操作完成。', tone: 'progress' }
+    : assetBusy ? { message: '素材还在处理，请等待素材加入后继续。', tone: 'progress' }
+    : authExpired ? { message: '登录已失效，请重新登录；当前草稿保留。', tone: 'warning' }
+    : conflict ? { message: '草稿与服务器版本冲突，请先处理页面上的版本冲突提示。', tone: 'warning' }
+    : pendingRun && requestUnknown ? { message: '上次提交结果尚未确认，请先点击“查询这次请求”，避免重复提交。', tone: 'warning' }
+    : null;
+  const directBlocker: FeedbackMessage | null = inputBlocker || (fieldErrors.length
+    ? { message: '请补齐模板输入。', tone: 'warning' }
+    : missingSlots.length ? { message: `请添加必填素材：${missingSlots.map(slot => slot.label).join('、')}`, tone: 'warning' }
+    : activeDraft && !composeDraftPrompt(activeDraft) ? { message: '请先填写本次需求。', tone: 'info' } : null);
+  const llmBlocker: FeedbackMessage | null = inputBlocker || (moduleRun && ['queued', 'running', 'uncertain'].includes(moduleRun.status)
+    ? moduleRun.status === 'uncertain'
+      ? { message: '上一条文案结果待确认，请先联系管理员核对，避免重复费用。', tone: 'warning' }
+      : { message: '已有文案正在处理，请等待结果或在历史中取消排队。', tone: 'progress' }
+    : !capabilities
+      ? capabilityError ? { message: capabilityError, tone: 'error' } : { message: '正在读取文字服务配置，请稍候。', tone: 'progress' }
+      : !capabilities.llmEnabled
+        ? capabilityError ? { message: capabilityError, tone: 'error' } : { message: capabilities.llmReason || '当前暂不可生成文案。', tone: 'warning' }
+        : activeDraft && !composeDraftPrompt(activeDraft) ? { message: '请先填写本次需求。', tone: 'info' } : null);
   const assetIds = activeDraft?.assets.map((item) => item.assetId) || [];
   const loginNext = `/template-studio?${searchParams.toString()}`;
 
@@ -1502,7 +1513,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         </nav>
         <div className={styles.headerActions}>
           {capabilities?.canManageTemplates && <button type="button" className={styles.quietButton} onClick={() => setContextEditor({})}><Settings size={15} />通用上下文</button>}
-          <span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span>
+          <span className={styles.saveState} role="status" data-tone={saveState.tone}>{saveState.label}</span>
           <button className={styles.primaryButton} type="button" onClick={() => void createBlankDraft()} disabled={working}>
             <Plus size={16} aria-hidden="true" /> 新建空白模块
           </button>
@@ -1537,7 +1548,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                   {!templateBusy && templates.length === 0 && <div className={styles.emptyState}><Film size={21} /><strong>还没有可用模板</strong><span>可以先新建空白模块，写下提示词并保存。</span></div>}
                 </div>
                 {templateCursor && <div className={styles.loadMore}><button className={styles.quietButton} type="button" disabled={templateBusy} onClick={() => void loadTemplates(true)}>{templateBusy ? '正在读取' : '加载更多模板'}</button></div>}
-                {templateBusy && templates.length === 0 && <div className={styles.saveState}>正在加载模板…</div>}
+                {templateBusy && templates.length === 0 && <div className={styles.saveState} role="status" data-tone="progress">正在加载模板…</div>}
               </section>
               <section className={styles.sidebarSection} aria-label="我的模块">
                 <div className={styles.sectionHeading}><h2>我的模块</h2><button className={styles.iconButton} type="button" title="刷新模块" aria-label="刷新模块" onClick={() => void loadDrafts()}><FolderOpen size={15} /></button></div>
@@ -1585,7 +1596,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                 {!runBusy && promptRuns.length === 0 && !runError && <div className={styles.emptyState}><CircleAlert size={20} /><strong>暂无匹配记录</strong><span>可以清除部分筛选条件后再查。</span></div>}
               </div>
               {runCursor && <div className={styles.loadMore}><button className={styles.quietButton} type="button" disabled={runBusy} onClick={() => void loadRuns(true)}>{runBusy ? '正在读取' : '加载更多记录'}</button></div>}
-              {runBusy && runs.length === 0 && <div className={styles.saveState}>正在读取记录…</div>}
+              {runBusy && runs.length === 0 && <div className={styles.saveState} role="status" data-tone="progress">正在读取记录…</div>}
             </section>
           )}
         </aside>
@@ -1716,7 +1727,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                     </section>
                     </details>
                     <section className={styles.sectionRule}>
-                      <div className={styles.sectionTitle}><span>文案生成</span><span className={styles.saveState} data-tone={saveState.tone}>{saveState.label}</span></div>
+                      <div className={styles.sectionTitle}><span>文案生成</span><span className={styles.saveState} aria-hidden="true" data-tone={saveState.tone}>{saveState.label}</span></div>
                       {fieldErrors.length > 0 && <span className={styles.fieldError}>还有 {fieldErrors.length} 项模板输入未完成。</span>}
                       <div className={styles.textModelField}>
                         <div className={styles.field}>
@@ -1728,14 +1739,14 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                         {modelRecovery?.scope === modelScope && modelRecovery.value !== llmModel && <button className={styles.quietButton} type="button" disabled={working || requestUnknown} title={studioTextModelLabel(modelRecovery.value)} onClick={() => chooseLlmModel(modelRecovery.value)}>恢复上次模型</button>}
                       </div>
                       <div className={styles.promptTools}>
-                        <button className={styles.primaryButton} type="button" disabled={Boolean(llmBlocker)} title={llmBlocker || undefined} onClick={() => void submitRun('llm')}><Sparkles size={15} />生成文案</button>
-                        <button className={styles.quietButton} type="button" disabled={Boolean(directBlocker)} title={directBlocker || undefined} onClick={() => void submitRun('direct')}><Check size={15} />直接使用输入</button>
+                        <button className={styles.primaryButton} type="button" disabled={Boolean(llmBlocker)} title={llmBlocker?.message} onClick={() => void submitRun('llm')}><Sparkles size={15} />生成文案</button>
+                        <button className={styles.quietButton} type="button" disabled={Boolean(directBlocker)} title={directBlocker?.message} onClick={() => void submitRun('direct')}><Check size={15} />直接使用输入</button>
                         {capabilities && !capabilities.llmEnabled && <span className={styles.fieldHint}>{capabilities.llmReason || 'AI整理当前不可用；可以继续手写和直接套用。'}</span>}
                         {capabilityError && <span className={styles.fieldHint}>{capabilityError}</span>}
                       </div>
                       {capabilities?.billingLabel && <p className={styles.fieldHint}>{capabilities.billingLabel}</p>}
-                      {directBlocker && <p role="status" className={styles.fieldError}>直接套用：{directBlocker}</p>}
-                      {llmBlocker && <p role="status" className={styles.fieldError}>生成文案：{llmBlocker}</p>}
+                      {directBlocker && <p role="status" className={styles.blockerStatus} data-tone={directBlocker.tone}>直接套用：{directBlocker.message}</p>}
+                      {llmBlocker && <p role="status" className={styles.blockerStatus} data-tone={llmBlocker.tone}>生成文案：{llmBlocker.message}</p>}
                       {pendingRun && requestUnknown && (
                         <div className={`${styles.callout} ${styles.calloutWarning}`} role="alert">
                           <span>这次请求的结果还未确认。先查询，未查到后才能按原请求号重试。</span>

@@ -13,6 +13,8 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
   let providerStarted = false;
   let stage = 'prepare';
   const started = Date.now();
+  // Leave settlement time before the existing ten-minute task lease expires.
+  const taskSignal = AbortSignal.timeout(480000);
   try {
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
@@ -22,14 +24,16 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
     for (const id of JSON.parse(task.reference_ids) as string[]) {
       const asset = await prisma.asset.findFirst({ where: { id, owner_id: task.owner_id, status: 'active', type: 'image' } });
       if (!asset) throw new Error('参考图已不可用');
-      images.push({ bytes: await normalizeStudioImage(await readStudioImage(asset.original_url)), mimeType: 'image/png' });
+      images.push({ bytes: await normalizeStudioImage(await readStudioImage(asset.original_url, taskSignal)), mimeType: 'image/png' });
     }
+    taskSignal.throwIfAborted();
     providerStarted = true;
     stage = 'provider';
     const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
       provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk',
       prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
-      count: 1, images, size: task.output_size || undefined, ratio: task.aspect_ratio, quality: task.quality, signal: AbortSignal.timeout(300000) });
+      count: 1, images, size: task.output_size || undefined, ratio: task.aspect_ratio, quality: task.quality,
+      signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]), downloadSignal: taskSignal });
     stage = 'normalize';
     if (result.images[0].length > MAX_STUDIO_GENERATED_BASE64) {
       throw new StudioImageDeliveryError('generated_base64_size_limit', result.images[0].length);
@@ -46,7 +50,7 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
     console.error('[image-studio]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage,
       code: detail?.code || mediaError?.code || 'processing_failed', imageBytes: mediaError?.bytes,
       model: task.model, outputSize: task.output_size,
-      httpStatus: detail?.status, elapsedMs: Date.now() - started }));
+      httpStatus: detail?.status, download: detail?.diagnostics, elapsedMs: Date.now() - started }));
     const deliveryFailed = detail?.stage === 'download' || ['normalize', 'save', 'settle'].includes(stage);
     await finishStudioTask(task, providerStarted ? 'uncertain' : 'failed', { error: providerStarted
       ? detail?.stage === 'download'

@@ -126,6 +126,12 @@
 .coverDescription strong { display: -webkit-box; overflow: hidden; font-size: 22px; font-weight: 850; line-height: 1.1; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .coverDescription small { display: -webkit-box; overflow: hidden; color: #adb6bd; font-size: 12px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .error { color: #ffb4ab; font-size: 14px; overflow-wrap: anywhere; }
+.generationFeedback { font-size: 14px; overflow-wrap: anywhere; }
+.generationFeedback[data-tone="progress"] { color: #a4f2df; }
+.generationFeedback[data-tone="info"] { color: #adb6bd; }
+.generationFeedback[data-tone="success"] { color: #8ce5d2; }
+.generationFeedback[data-tone="warning"] { color: #f5c76b; }
+.generationFeedback[data-tone="error"] { color: #ffb4ab; }
 .dialog { box-sizing: border-box; margin: auto; width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
 .dialog > p { margin: 16px 0; line-height: 1.6; }
 .dialog::backdrop { background: rgb(0 0 0 / 65%); }

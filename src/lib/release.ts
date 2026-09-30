@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '用户管理新增周期额度：按岗位或成员独立设置刷新周期，支持发布、暂停及补齐漏发；账户统一显示周期额度和跨期冻结点数。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '改善图片下载超时处理，生成与下载分别计时；提交、排队等正常进度不再显示为红色错误。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

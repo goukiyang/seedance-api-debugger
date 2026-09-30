@@ -1,5 +1,5 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
-import { readStudioImage, StudioImageDownloadError } from './media';
+import { readStudioImage, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
 import { MAX_REFERENCE_IMAGES, MAX_STUDIO_GENERATED_BASE64 } from './limits';
 import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
 
@@ -11,7 +11,7 @@ const GEMINI_IMAGE_MODELS = new Set([
 ]);
 
 export class StudioProviderError extends Error {
-  constructor(public stage: 'request' | 'response' | 'download', public code: string, public status?: number) {
+  constructor(public stage: 'request' | 'response' | 'download', public code: string, public status?: number, public diagnostics?: StudioDownloadDiagnostics) {
     super(`图片服务处理失败（${code}）`);
     this.name = 'StudioProviderError';
   }
@@ -23,6 +23,7 @@ export async function requestStudioImages(params: {
   provider?: 'musk' | 'ai_media_vip';
   quality?: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string;
+  downloadSignal?: AbortSignal;
   size?: string;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
@@ -69,9 +70,9 @@ export async function requestStudioImages(params: {
     } else if (typeof item?.url === 'string' && item.url.length) {
       try {
         if (new URL(item.url).protocol !== 'https:') throw new StudioImageDownloadError('download_unsafe_url');
-        images.push((await readImage(item.url, params.signal)).toString('base64'));
+        images.push((await readImage(item.url, params.downloadSignal || params.signal)).toString('base64'));
       } catch (error) {
-        throw new StudioProviderError('download', error instanceof StudioImageDownloadError ? error.code : 'download_invalid_or_unreadable', error instanceof StudioImageDownloadError ? error.status : undefined);
+        throw new StudioProviderError('download', error instanceof StudioImageDownloadError ? error.code : 'download_invalid_or_unreadable', error instanceof StudioImageDownloadError ? error.status : undefined, error instanceof StudioImageDownloadError ? error.diagnostics : undefined);
       }
     } else {
       throw new StudioProviderError('response', 'unsupported_output', response.status);

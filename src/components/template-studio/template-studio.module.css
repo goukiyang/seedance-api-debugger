@@ -218,9 +218,17 @@
 .textModelField { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-bottom: 12px; min-width: 0; }
 .textModelField > .field { width: 220px; max-width: 100%; }
 .saveState { min-height: 19px; color: var(--muted); font-size: 11px; }
+.saveState[data-tone="progress"] { color: var(--accent); }
+.saveState[data-tone="info"] { color: var(--muted); }
 .saveState[data-tone="success"] { color: oklch(0.8 0.13 150); }
 .saveState[data-tone="error"] { color: oklch(0.79 0.14 25); }
 .saveState[data-tone="warning"] { color: oklch(0.82 0.13 80); }
+.blockerStatus { font-size: 12px; }
+.blockerStatus[data-tone="progress"] { color: var(--accent); }
+.blockerStatus[data-tone="info"] { color: var(--muted); }
+.blockerStatus[data-tone="success"] { color: oklch(0.8 0.13 150); }
+.blockerStatus[data-tone="warning"] { color: oklch(0.82 0.13 80); }
+.blockerStatus[data-tone="error"] { color: oklch(0.79 0.14 25); }
 .callout { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--panel); font-size: 12px; line-height: 1.5; }
 .callout strong { color: var(--text); }
 .calloutLink { display: inline-flex; align-items: center; min-height: 34px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); text-decoration: none; background: var(--panel); }
