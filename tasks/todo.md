@@ -422,14 +422,14 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| UI01 | 结果卡片排版 | 尺寸悬停显示、头像和时间同行、红色点赞收藏固定在图左上 | 实现完成，待发布/手动验收 |
-| RF01 | 模块参考图与图库 | 固定图/备注持久化与生成编号一致；上传、粘贴、选库及个人相册管理闭环 | 实现完成，待发布/手动验收 |
-| RF02 | 参考图拖动排序 | 顺序可保存，与生成时编号一致 | 实现完成，待发布/手动验收 |
-| UI02 | 紧凑上传弹窗与预览工具栏 | 上传菜单上下排列，空白关闭；预览不显示提示词，对比按钮居中 | 实现完成，待发布/手动验收 |
-| NV01 | 入口隐藏与上次现场恢复 | 隐藏视频卡相关入口，移除独立图片生成导航，模板工作台按账号恢复上次类别与位置 | 实现完成，待统一候选检查 |
-| AP01 | 资产非横屏预览与侧栏 | 资产卡片、播放及右侧详情栏完整显示竖/方图；恢复点卡片查看详情、点媒体放大 | 实现完成，待发布/手动验收 |
-| UP01 | 上传取消与大图读取进度 | 上传进度删除含义待确认；大图按真实字节显示进度，无总长度不造百分比，关闭取消读取 | 大图进度实现完成；上传删除含义受阻待确认 |
-| RL01 | 发布 | 聚焦提交推送、回退保护、必要构建与健康检查、自动部署；用户手动验收 | 统一发布检查中 |
+| UI01 | 结果卡片排版 | 尺寸悬停显示、头像和时间同行、红色点赞收藏固定在图左上 | 已部署v0.29.0，待用户手动验收 |
+| RF01 | 模块参考图与图库 | 固定图/备注持久化与生成编号一致；上传、粘贴、选库及个人相册管理闭环 | 已部署v0.29.0，待用户手动验收 |
+| RF02 | 参考图拖动排序 | 顺序可保存，与生成时编号一致 | 已部署v0.29.0，待用户手动验收 |
+| UI02 | 紧凑上传弹窗与预览工具栏 | 上传菜单上下排列，空白关闭；预览不显示提示词，对比按钮居中 | 已部署v0.29.0，待用户手动验收 |
+| NV01 | 入口隐藏与上次现场恢复 | 隐藏视频卡相关入口，移除独立图片生成导航，模板工作台按账号恢复上次类别与位置 | 已部署v0.29.0，待用户手动验收 |
+| AP01 | 资产非横屏预览与侧栏 | 资产卡片、播放及右侧详情栏完整显示竖/方图；恢复点卡片查看详情、点媒体放大 | 已部署v0.29.0，待用户手动验收 |
+| UP01 | 上传取消与大图读取进度 | 上传进度删除含义待确认；大图按真实字节显示进度，无总长度不造百分比，关闭取消读取 | 大图进度已部署；上传删除含义受阻待确认 |
+| RL01 | 发布 | 聚焦提交推送、回退保护、必要构建与健康检查、自动部署；用户手动验收 | 发布检查完成；功能待用户手动验收 |
 
 资料：[本轮四张界面反馈](../docs/materials/index.md)。复用现有上传进度、资产选择/私人参考相册、指针排序模式与模板权限；不新增第三方依赖，不迁移数据库，不付费生成，不删除视频卡历史数据。功能效果交用户手动验收，不用构建或发布健康代替功能验收。
 
@@ -447,3 +447,25 @@
 - 隐藏视频卡管理入口、详情直达及相关跳转，保留生成流程必要归属选择/创建，不删除卡数据。只保留模板工作台导航，旧图片入口保留兼容跳转；按账号恢复最近类别/条目，显式链接优先。清除入口复用现有页面控件。
 - GPT-6 Luna XHigh内部执行线程完成导航、后端、图库、预览和资产部分；主控完成模块UI、图号关联、隐私判断及整合。线程归属记录一度混淆，已纠正并冻结收口，没有因此发布重叠版本。功能/浏览器/付费生成均不执行，仅统一发布必需检查；最终交用户手动验收。
 - 发布前核对远端仓库为PUBLIC，本轮四张用户原始截图含私密提示词，因此只本地归档并Git忽略，不进入源包；未改变仓库权限或重写历史。历史已公开文件不在本轮回收范围，不能承诺历史副本撤销。
+
+#### 发布回执（2026-10-01）
+
+- 已部署v0.29.0，源码`07ace35bf6bd80ceab7079b3fbc8cb39211b8a02`，BUILD_ID `xTV61MMDXN797AjCO62oH`。入口：[资产](https://sd2.youdooart.com/assets)、[模板工作台](https://sd2.youdooart.com/template-studio)。[38文件统一差异](https://github.com/goukiyang/seedance-api-debugger/compare/b08a00a21fd813cc0c5afdb68b986a596e401368...07ace35bf6bd80ceab7079b3fbc8cb39211b8a02)。资料和回执后续提交不再升级版本或重启。
+- `git diff --check`通过；统一TypeScript检查首次发现任务页三处JSX括号错误，修正后汇总4处Set展开及2处正则标记与旧编译目标不兼容，一并改为兼容写法后通过。服务器首候选Lint发现3个保留变量名`module`，未切换，统一改名后同版本重建成功。最终候选`NEXT_DIST_DIR=.next-prod-candidate npm run build`退出0，保留既有img/CSS等非阻断警告。没有降低编译规则，没有新增依赖或数据库迁移。
+- 本机请求公网release=0.29.0；服务器源站/公网config及login=200，来源server-42-193；四服务active，运行媒体三个软链接保持。模板chunk `app/template-studio/page-8fce2aac3c8b9580.js`、预览chunk `9382-7d9c7bdeccba988a.js`、资产chunk `app/assets/page-ac646cbf8d1d79be.js`、资产CSS `c1433d02cf72f1df.css`公网200且SHA-256与运行构建一致。重启后第一次健康探测早于端口就绪，随后有界重试通过；未回滚。
+- Git：实现提交`2ab9c4b`及兼容修正`07ace35`已推送当前分支。回退标签`rollback/2026-10-01-before-template-ui`已推送，指向旧运行版0.28.0/697e2c3。源包两端SHA-256一致`8a8b7df481f2372cff12ec2f1696c5fc003fa39b41444f7c49dac566c5657ae6`，用户原始反馈图不在归档中。服务器`/srv/video-api-debugger/backups/template-ui-07ace35bf6bd80ceab7079b3fbc8cb39211b8a02`保留旧source/live-build及完整性通过的DB快照；构建使用快照，不写生产数据。回退仅切代码/构建，不整库覆盖。发布窗口开始、失败重建、完成均已登记。
+- 版本来源仍为package.json，现有ReleaseNotice提供自动发现、稍后提醒去重和账户页手动重查；本轮摘要更新，无自动强刷。未用浏览器验收旧客户端弹窗或页面交互，所有功能效果待用户手动验收。上传进度条“删除”尚未确认是取消移除上传还是隐藏进度，所以该部分原样保留；大图真实读取进度已上线。
+- 手验重点：固定图备注随拖动准确编号、固定+临时总数与历史复现；共享模块普通账号不泄漏上下文；私人图集创建/加入/选回；右侧详情与竖/方媒体、缩放与关闭返回；已点赞收藏红色常显、鼠标和键盘尺寸提示；模板上次类别/位置和旧图片入口。未付费生成、未做业务回归或浏览器验收。
+- 守门员：涉及现有共享上下文的保密收紧，静态核对列表/模块/任务/素材返回，不扩大权限。曾误把缺失侧栏理解为左侧及执行线程归属映射混淆，已纠正、记录既有误判日志，错误左导航改动未发布。资料含提示词的公开发布风险已通过本地归档/Git忽略处理。
+
+| 文件组 | 本轮作用 |
+|---|---|
+| `src/app/image-studio/studio.tsx`、`studio.module.css`、`reference-grid.tsx` | 卡片位置、固定图/备注、图号、排序、紧凑上传菜单与模块编辑保护 |
+| `src/lib/image-studio/fixed-references.ts`、`modules.ts`、`presets.ts`、`tasks.ts`、`src/app/api/image-studio/template-assets/[assetId]/route.ts` | 固定图存储、事务修订、共享复制、历史快照、发送顺序与上下文保密 |
+| `src/components/UploadedImagePicker.tsx`、`UploadedImagePickerAlbums.tsx`、`UploadedImagePickerAlbums.module.css`、`src/app/api/assets/history/route.ts` | 私人图集、有限ID查询、分页选择、嵌套弹窗返回 |
+| `src/components/ZoomableImagePreview.tsx`/`.module.css`、`MediaPreview.tsx`/`.module.css`、`src/lib/hooks/use-image-read-progress.ts` | 安全标题、居中对比、真实读取、尺寸提示、原生读取回退 |
+| `src/components/content-reactions/ContentReactions.tsx`、`reactions.module.css`、`ContentCollections.tsx` | 红色浮层、选中常显、收藏媒体不裁切 |
+| `src/app/assets/page.tsx`、`assets.module.css` | 恢复右侧详情，比例容器、老图片封面回退，原导航不动 |
+| `src/lib/navigation.ts`、`src/components/template-studio/TemplateStudioShell.tsx`、`src/app/image-studio/page.tsx` | 统一入口、账号隔离恢复、旧地址兼容 |
+| `src/app/projects/[id]/page.tsx`、`video-cards/[cardId]/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/approvals/page.tsx`、`src/components/generate/GeneratePageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`、`src/lib/notifications/display.ts` | 隐藏视频卡管理和直达，保留生成归属和原数据 |
+| `package.json`、`package-lock.json`、`src/lib/release.ts`、`.gitignore`、`docs/materials/index.md`、`tasks/todo.md` | 版本/升级摘要、敏感截图本地归档与完整交接 |
