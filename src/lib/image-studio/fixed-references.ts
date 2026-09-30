@@ -70,20 +70,20 @@ async function writeSetting(client: FixedReferenceClient, key: string, ownerId: 
 }
 
 export async function getStudioModuleFixedReferences(ownerId: string, moduleId: string, client: FixedReferenceClient = prisma) {
-  const module = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
-  if (!module) return [];
+  const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
+  if (!workspace) return [];
   return readSetting(client, moduleKey(moduleId), ownerId);
 }
 
 export async function setStudioModuleFixedReferences(ownerId: string, moduleId: string, references: StudioFixedReference[], client: FixedReferenceClient = prisma) {
-  const module = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
-  if (!module) throw new StudioFixedReferenceError('模块不存在或无权使用', 403);
+  const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
+  if (!workspace) throw new StudioFixedReferenceError('模块不存在或无权使用', 403);
   await writeSetting(client, moduleKey(moduleId), ownerId, references);
 }
 
 export async function removeStudioModuleFixedReferences(ownerId: string, moduleId: string, client: FixedReferenceClient = prisma) {
-  const module = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
-  if (!module) throw new StudioFixedReferenceError('模块不存在或无权使用', 403);
+  const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
+  if (!workspace) throw new StudioFixedReferenceError('模块不存在或无权使用', 403);
   await client.platformSetting.deleteMany({ where: { key: moduleKey(moduleId) } });
 }
 
