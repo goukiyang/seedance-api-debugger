@@ -23,6 +23,62 @@
 
 - [x] 周期额度模块 CQ02–CQ06 已部署 v0.26.0，待用户手动验收：[实施与发布记录](todo/2026-09-30-periodic-credits.md)。
 
+### LF01–LF06 全站点赞收藏（2026-09-30）
+
+2026-09-30续办：用户引用“备份后新增两张表并上线”的确认请求，明确“继续落地点赞系统”。本轮据此执行既有点赞+收藏范围的生产备份、两表新增与发布，不覆盖旧数据；“踩、每文件备注、Agent后台只读查询”为随后提出的新目标，目前仅研究，尚未定稿，不混入此版。开源研究已读Open WebUI反馈模型/许可与Langfuse评分接口/许可，后续设计优先扩展本体系，保留作者、内容版本及访问边界，不将个人意见视为团队定论，不把Agent读取权限等同管理员全权；新范围须另行形成实施计划。未安装上述系统。
+
+本次从现网v0.26.1（下载/提示修复）及文档提交cee70f1上续接，保留周期额度。仅选入旧功能提交4c2fa2f，不整支覆盖；旧候选v0.26.0未发布，本次按新增功能升v0.27.0。执行分支`codex/content-reactions-live-20260930`，源码目录沿用下述路径；主控负责迁移发布，GPT-6 Luna XHigh/Bacon处理两个模板UI文件合并，其他改动由主控核对。无付费生成、无自动浏览器/功能验收。
+
+目标：全站统一标记，资产页集中找回，不复制资产。点赞每人每内容一次、总数对有权访问者可见；收藏仅自己可见，不返回收藏总数或收藏人。不改点数、所有权、共享或保留期，不做排行榜/奖励/通知。项目与画布工作入口、失败/临时产物和内部上下文不是标记对象。
+
+- 本轮追加工作现场恢复：遵循2026-09-30新规则，仅收藏/点赞页记住按账号隔离的分类、搜索、条目位置和有界加载数量；当前标签记录优先、关闭重开有本地备份，显式链接优先。图标重置不删收藏。资产通用入口仅恢复上次收藏/点赞页签，切出即清除该入口记忆，其他旧资产设置不做全站改造。共享滚动hook默认行为保持原样，仅新列表启用长期恢复。回载最多240项，正常下拉加载不受该上限限制；账号切换或旧请求迟到不回填原账号内容。不记录媒体URL/内部上下文、不恢复任何生成或写入动作；媒体播放位置不在本次增量实现范围。
+- 预发布：本地Prisma客户端生成和TypeScript、差异检查通过；未改本地数据库。候选v0.27.0沿用既有ReleaseNotice，版本取自package.json，保留稍后、手动检查及刷新确认。服务器候选构建、生产副本迁移演练与正式备份切换仍待执行，完成证据另记本节回执。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| LF01 | 内容与入口清单 | 明确各类内容编号、权限和返回入口 | 已完成，清单见下 |
+| LF02 | 统一后台记录 | 独立存储、幂等写入、取消与最小留痕 | 进行中：代码完成，待生产迁移与手动验收 |
+| LF03 | 全站按钮接入 | 共用组件、状态同步、不干扰原操作 | 进行中：已接入清单内入口，待上线与手动验收 |
+| LF04 | 资产展示页 | 收藏/赞过可筛选、搜索、分批找回及使用 | 进行中：代码完成，待上线与手动验收 |
+| LF05 | 权限与失效处理 | 撤权不泄露，失效占位可移除 | 进行中：权限代码已核对，实际效果待手动验收 |
+| LF06 | 发布交接 | 迁移授权、备份回退、发布检查及手动验收交接 | 进行中：已获本次两表新增及上线授权 |
+
+- 源码：`/Users/gouki-youdoo/.codex/worktrees/banana-image-channel/video-api-debugger`；分支`codex/content-reactions-20260930`，开始时线上v0.25.0/7391a07。生产入口保持sd2.youdooart.com。
+- 存储：新增ContentReaction和ContentReactionEvent，只含用户ID、类型化内容编号、布尔标记、版本/时间、操作请求指纹，不存原图/原文/上下文。唯一约束防重复，明确设置true/false而非toggle，版本冲突与相同requestId核对；允许撤权后删除自己的标记，不允许凭收藏扩大访问。
+- 迁移：使用已审阅的新增表SQL，不执行db:push或整库迁移。现已获本次授权，执行前数据库备份/完整性检查、校验仅新增两表；候选构建使用副本。回退恢复旧代码但保留新增表及新记录，不恢复整库覆盖运行期数据。
+- 内容映射：图片生成每张已有asset_id，上传/工具入库产物用asset；reference_image带asset_id时归一到同一asset，不能按URL合并。视频统一video_task；图片模板分别image_template（共享preset）和image_module（个人模块）；视频模板video_template、video_draft（个人模块）、legacy_template；具体保存文案prompt（VideoStudioRun）。旧Seedance官方素材seedance_asset按现有内部权限，不抓上游数据。无稳定独立业务编号的临时节点不伪造资产。
+- 访问：复用任务/项目权限、图集view/use/download差异、图片模板租户共享边界、视频模板与文案私有投影。收藏列表只显示当次授权的摘要，不持久化私密快照；不可用项不含标题原文/头像/媒体URL；媒体再次访问、下载、模板应用、文案交接均重新鉴权。网络/离线与删除区分，不自动取消收藏。
+- 页面：统一React按钮用于卡片/详情/预览，隔离click/pointer/keyboard，列表/同页/其他标签页失效刷新。资产页加“我的收藏/我赞过的”，图片/视频/音频/模板/提示词筛选、全口径计数、批量加载、浏览恢复、取消撤销。画布复用同一后台协议及真实产物编号。
+- 开源：采用已讨论的多态收藏与唯一约束思路，独立实现，不搬GPL/AGPL代码或引入完整书签服务。本轮web工具读取失败后，已通过公开源码地址实际读取Discourse的[bookmark.rb](https://github.com/discourse/discourse/blob/main/app/models/bookmark.rb)及[post_bookmarkable.rb](https://github.com/discourse/discourse/blob/main/app/services/post_bookmarkable.rb)：参考多态类型、用户/目标唯一约束、列表及创建时分别检查权限。未安装或运行Discourse；沿用项目现有Prisma、权限helper与lucide控件。
+- 风险：历史公开直链无法因收藏权限自动撤销，不能承诺收回已下载文件；本功能不延长媒体寿命。必要静态/候选构建、迁移与发布安全检查保留，不付费生成，不主动浏览器/功能验收；最终交用户手动验收，未通过不标功能完成。
+
+#### LF 内容及返回入口
+
+| 内容 | 唯一编号 / 权限 | 已接入入口 / 找回后的入口 |
+|---|---|---|
+| 已保存图片、视频、音频 | `asset:id`；所有者/管理员或现有图集分享、模板素材可见权限 | 资产卡及详情、上传历史选择器、图片模板结果与大图、画布有assetId的节点；按原权限预览/下载/带到生成 |
+| 参考素材 | `reference_image:id`，有asset_id先归一为asset；沿用图集view/use/download区分 | 图集详情、图集选择器及大图；返回`/collections/:albumId` |
+| 成功视频任务 | `video_task:id`；任务/项目权限+保留状态 | 普通生成、模板生成、任务列表/详情、项目任务列表、视频卡任务、超分列表、后台产出、模板文案关联视频、画布视频节点；返回`/tasks/:id` |
+| 图片共享模板 / 个人模块 | `image_template:id` / `image_module:id`；共享租户边界与个人所有权，来源撤权不可用 | 模板库/模块标题；收藏共享模板只打开当前模板库并置顶该模板，明确点击应用才创建个人模块；个人模块按moduleId打开 |
+| 视频及旧模板 / 个人模块 | `video_template:id`、`legacy_template:id`、`video_draft:id`；内部用户+现有模板可见性/归属/状态 | 视频模板侧栏/详情、模块侧栏/详情、旧模板详情；返回原模板页，不自动生成视频 |
+| 已保存文案结果 | `prompt:VideoStudioRun.id`；仅本人成功且安全投影的具体版本，原模板撤权/停用不可用 | 文案结果与历史详情；未保存编辑不可标记；从资产页重新鉴权后复制，或打开原结果继续编辑/带到生成 |
+| 旧Seedance官方素材 | `seedance_asset:id`；现有内部账号边界，排除已删除 | 旧素材面板；只读本地保存记录，不为点赞收藏调用上游 |
+
+边界：项目/画布本体、节点草稿、没有独立持久业务编号的画布文本不在首期内容对象范围内；后台点数/成本/审计列表不是收藏对象。画布已入库媒体使用原asset/task/reference编号，绝不按网址创建另一条记录。收藏保留记录不等于媒体备份。
+
+#### LF 既有实现与历史候选检查（非本次上线结论）
+
+- `prisma/schema.prisma`、`prisma/migrations/20260930120000_content_reactions/migration.sql`：两张独立记录表、唯一约束和列表索引。`scripts/migrate-content-reactions.mjs`：默认只输出计划；显式apply时先备份、校验完整性，再事务新增表；既有表结构不一致或部分存在即停止；重复执行只核对，不覆盖。仅在原库已有Prisma迁移记录表时登记本次迁移。
+- `src/lib/content-reactions/types.ts`定义跨页协议；`content.ts`集中编号归一、权限及安全摘要；`service.ts`处理本人状态、精确列表计数、游标、显式设置/乐观版本锁/请求去重；`http.ts`负责会话、活动账号、同源写入和脱敏报错。
+- `src/app/api/content-reactions/route.ts`为列表/写入；`state/route.ts`批量状态；`content/route.ts`重新鉴权后打开/复制；`media/route.ts`重新鉴权后预览/下载。所有新响应私有且no-store，不输出收藏总数/收藏人/上下文快照；旧公开直链仍有上述限制。
+- `src/components/content-reactions/ContentReactions.tsx`共用按钮、批量请求、同页/跨页缓存和标签页失效更新，隔离点击/指针/键盘；不确定结果重试同一请求号。`ContentCollections.tsx`负责分类/搜索/完整计数/分批加载/筛选和浏览位置恢复/取消撤销/预览与再次使用，不持久保存私密内容。`CanvasReactions.tsx`在现有同源iframe节点挂载同一React控件，不另做后台；`reactions.module.css`为紧凑操作区与列表样式。
+- 页面接入文件：`src/app/assets/page.tsx`、`src/app/image-studio/studio.tsx`、`src/app/template-studio/page.tsx`、`src/app/tasks/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/projects/[id]/page.tsx`、`src/app/projects/[id]/video-cards/[cardId]/page.tsx`、`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/admin/outputs/AdminOutputsClient.tsx`、`src/app/tools/ultimate-canvas/CanvasFrame.tsx`。分别新增当前内容的共用按钮/资产页页签/受控返回参数，保留既有生成与侧栏滚动流程。
+- 组件接入文件：`src/components/generate/GeneratePageClient.tsx`、`src/components/generate/EnhanceVideoPageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`、`src/components/templates/TemplateLibraryClient.tsx`、`src/components/template-studio/VideoTemplateWorkbench.tsx`、`src/components/template-studio/VideoPromptResult.tsx`、`src/components/UploadedImagePicker.tsx`、`src/components/ReferenceAlbumPicker.tsx`、`src/components/SeedanceAssetPanel.tsx`、`src/components/ZoomableImagePreview.tsx`。只关联真实持久编号，不改模型、点数或上传逻辑。
+- `package.json`/`package-lock.json`只更新应用版本为候选v0.26.0，无依赖变动；`src/lib/release.ts`更新用户可见摘要，沿用已有升级弹窗/稍后/手动检查机制，未声称验证弹窗效果；`.gitignore`/`tsconfig.json`登记隔离候选构建目录；本todo维护同一任务清单。
+- 检查进度：Prisma客户端生成、TypeScript与diff检查通过；离线迁移安全演练通过（临时库、原哨兵记录保留、两张新表、备份/数据库完整性、重复执行及外键结构核对）。首轮发现的Map/Set旧编译目标问题、普通函数误用use前缀、nullable预览字段和备份命令输入问题已整批修正。最终候选构建`NEXT_DIST_DIR=.next-reactions-candidate npm run build`退出0，BUILD_ID `hsUkStM5aqeF49VxOpjsU`；仍有img/CSS等非阻断警告。不确定写入期间锁住另一操作，只可重试原请求，避免断网后误写。未调用生成、未扣费、未执行浏览器或自动功能验收。
+- 生产仍为v0.25.0/7391a07，已重新只读确认。本轮尚未修改生产数据库、服务或发布目录；不能把本地实现说成上线。待授权后先按release-window-coordination登记窗口并重新核对当前线上代码，再从本轮commit归档创建候选目录，复制依赖后在候选中生成Prisma客户端、仅在数据库副本应用新增表并构建；通过后备份生产库、执行指定新增表SQL、同步源代码与生成客户端、保留旧构建并切换服务，核对公网release/config/login与新静态产物。失败恢复旧代码/构建/客户端，不恢复整库、不删除已产生的点赞收藏。
+- 待手动验收：跨页面/多标签同步、多图逐张标记、取消撤销、搜索全口径计数、图集view/use/download差异、撤权删除占位和隐藏上下文、离线媒体提示、模板当前版本、编辑后文案版本、鼠标/键盘/手机与画布拖动、刷新位置恢复。列表按权限逐项解析，超大个人收藏集的服务端查询耗时未做压测；恢复加载上限当前为240项，超过时可继续分批加载但不保证回到原像素位置。
+
 ### M01 视频文案模型选择（2026-09-30）
 
 | 编号 | 任务 | 完成标准 | 状态 |

@@ -1,4 +1,5 @@
 'use client';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -422,6 +423,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {asset.status === 'Active' && <ContentReactions contentKey={`seedance_asset:${asset.localId}`} />}
                     <button
                       onClick={() => handleGetDetail(asset.localId)}
                       style={{ fontSize: 10, padding: '2px 8px', backgroundColor: 'rgba(37,99,235,0.2)', border: '1px solid rgba(37,99,235,0.4)', borderRadius: 6, color: '#60a5fa', cursor: 'pointer' }}

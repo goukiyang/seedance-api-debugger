@@ -1,4 +1,5 @@
 'use client';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -438,6 +439,7 @@ export function TemplateLibraryClient() {
               </div>
 
               <div className="template-library-preview-actions">
+                {selectedView.template.status === 'active' && <ContentReactions contentKey={`legacy_template:${selectedView.template.id}`} />}
                 <button type="button" className="is-primary" onClick={handleUseTemplate}>
                   <PlayCircle size={17} aria-hidden="true" />
                   使用此模板

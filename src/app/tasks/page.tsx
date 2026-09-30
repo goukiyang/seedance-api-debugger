@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isExternalUser } from '@/lib/access/external-role';
@@ -459,6 +460,7 @@ export default function TasksPage() {
                     </div>
 
                     <div className="tasks-card-actions">
+                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                       <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
                         查看详情
                       </Link>

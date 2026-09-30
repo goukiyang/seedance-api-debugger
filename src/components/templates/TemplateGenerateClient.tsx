@@ -7,6 +7,7 @@ import { Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import {
   H3_AUTO_CHECK_MIN_GAP_MS,
@@ -1315,6 +1316,7 @@ export function TemplateGenerateClient() {
                           查看链路
                         </Link>
                       )}
+                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                     </article>
                   );
                 })}

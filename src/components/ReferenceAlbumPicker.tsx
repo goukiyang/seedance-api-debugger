@@ -1,4 +1,5 @@
 'use client';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useEffect, useMemo, useState } from 'react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
@@ -258,6 +259,7 @@ export function ReferenceAlbumPicker({
                       <div className="album-picker-media-placeholder">音频</div>
                     )}
                   </button>
+                  <ContentReactions contentKey={`reference_image:${image.id}`} />
                   <label className="album-picker-image-select">
                     <input
                       type="checkbox"
@@ -290,6 +292,7 @@ export function ReferenceAlbumPicker({
         </div>
         {previewImage && isImageItem(previewImage) && (
           <ZoomableImagePreview
+            contentKey={`reference_image:${previewImage.id}`}
             src={previewImage.image_url || previewImage.thumbnail_url}
             alt={previewImage.asset?.file_name || '参考图'}
             fileName={previewImage.asset?.file_name || `图 ${previewImage.sort_order + 1}`}
