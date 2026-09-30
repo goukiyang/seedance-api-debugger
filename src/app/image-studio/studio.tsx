@@ -19,6 +19,7 @@ function studioUploadProgress(file: File, index: number, count: number, progress
 }
 import { ZoomableImagePreview, type ImagePreviewMetadata } from '@/components/ZoomableImagePreview';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import styles from './studio.module.css';
 import { RatioPicker } from './ratio-picker';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
@@ -30,7 +31,7 @@ type StudioSnapshot = { prompt: string; model: string; quality?: string; resolut
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number } | null };
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
 type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
-type ImagePreviewState = { taskId?: string; src: string; alt: string; title?: string; fileName?: string; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
+type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; src: string; alt: string; title?: string; fileName?: string; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 const models = IMAGE_STUDIO_MODELS;
 const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
@@ -69,6 +70,7 @@ function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
   const quality = IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动';
   return {
     taskId: task.id,
+    contentKey: task.asset?.id ? `asset:${task.asset.id}` : undefined,
     src: task.asset?.original_url || '',
     alt: task.prompt || '参考图生成结果',
     title: task.prompt || '参考图生成结果',
@@ -258,6 +260,24 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     } catch (cause) { setError(cause instanceof Error ? cause.message : '模块读取失败，请重试'); }
     finally { requested.forEach(id => hydratingIds.current.delete(id)); setHydrating(hydratingIds.current.size > 0); }
   }, []);
+  const routedContentHandled = useRef(false);
+  useEffect(() => {
+    if (routedContentHandled.current || loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const moduleId = params.get('moduleId');
+    const presetId = params.get('presetId');
+    if (moduleId) {
+      const target = directory.find(item => item.id === moduleId);
+      if (target) {
+        routedContentHandled.current = true;
+        setCoverView(false); setSelectedGroup(target.groupName || '未分组'); setActive(moduleId);
+        void hydrateModules([moduleId]);
+      }
+    } else if (presetId) {
+      routedContentHandled.current = true;
+      void openPresetLibrary();
+    }
+  }, [directory, loading, hydrateModules]);
   async function createModule() {
     if (createLock.current) return;
     createLock.current = true; setCreating(true); setError('');
@@ -272,7 +292,12 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   }
   async function openPresetLibrary() {
     setPresetDialogOpen(true); setPresetsLoading(true); setPresetsError('');
-    try { const result = await readResponse(await fetch('/api/image-studio/presets', { cache: 'no-store' })); setPresets(result.presets); }
+    try { const result = await readResponse(await fetch('/api/image-studio/presets', { cache: 'no-store' }));
+      const requested = new URLSearchParams(window.location.search).get('presetId');
+      const sorted = [...result.presets].sort((a, b) => Number(b.id === requested) - Number(a.id === requested));
+      setPresets(sorted);
+      if (requested && !sorted.some(item => item.id === requested)) setPresetsError('收藏的模板已不可用或不再共享');
+    }
     catch (e) { setPresetsError(e instanceof Error ? e.message : '模板读取失败'); }
     finally { setPresetsLoading(false); }
   }
@@ -436,7 +461,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     <dialog ref={presetDialog} className={styles.dialog} onCancel={() => setPresetDialogOpen(false)}>
       <header className={styles.header}><h2>模板库</h2><button type="button" aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
-      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><div className={styles.presetActions}>{preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={presetSharingId === preset.id} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}<button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></div></article>)}</div>}
+      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><div className={styles.presetActions}><ContentReactions contentKey={`image_template:${preset.id}`} />{preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={presetSharingId === preset.id} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}<button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></div></article>)}</div>}
     </dialog>
   </main>;
 }
@@ -986,6 +1011,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
     <header className={styles.header}>
       <div className={styles.moduleTitleRow}>
+        {module.saved && <ContentReactions contentKey={`image_module:${module.id}`} />}
         {nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
         {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{module.sourcePresetShared === true ? '共享给同事' : '仅自己可见'}</button>}
       </div>
@@ -1117,6 +1143,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
             {task.asset?.width && task.asset.height && <><span>·</span><span>{task.asset.width} × {task.asset.height}</span></>}
           </div>
           <div className={styles.resultActions}><time className={styles.muted} title={formatStudioAbsoluteTime(task.createdAt)} dateTime={task.createdAt}>{formatStudioRelativeTime(task.createdAt)}</time><div className={styles.resultCommands}>
+            {task.asset?.id && task.status === 'succeeded' && <ContentReactions contentKey={`asset:${task.asset.id}`} />}
             {task.asset && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
             {task.asset && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
             {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="重新生成" aria-label="重新生成" onClick={() => restoreTask(task)}><RefreshCw size={15} /></button>}
@@ -1212,6 +1239,6 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
       </div>}
     </dialog>}
     {!settings && settingsError && <p role="alert" className={styles.error}>{settingsError}<button onClick={() => void loadSettings()}>重试</button></p>}
-    {preview && <ZoomableImagePreview src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} metadata={preview.metadata} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); setSelected([]); setDownloadMode(false); }} />}
+    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} metadata={preview.metadata} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); setSelected([]); setDownloadMode(false); }} />}
   </section>;
 }

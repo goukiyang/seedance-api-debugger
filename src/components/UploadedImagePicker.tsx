@@ -1,4 +1,5 @@
 'use client';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
@@ -462,6 +463,7 @@ export function UploadedImagePicker({
                       </button>
                     </div>
                     <div className="uploaded-picker-card-meta">
+                      <ContentReactions contentKey={`asset:${item.id}`} />
                       <strong title={item.fileName}>{item.fileName}</strong>
                       <span>{assetTypeLabel(item.type)} · {dimensions} · {formatBytes(item.fileSize)} · {formatDate(item.createdAt)}</span>
                     </div>
@@ -511,6 +513,7 @@ export function UploadedImagePicker({
         </div>
         {previewAsset?.type === 'image' && (
           <ZoomableImagePreview
+            contentKey={`asset:${previewAsset.id}`}
             src={previewAsset.originalUrl || previewAsset.thumbnailUrl}
             alt={previewAsset.fileName}
             fileName={previewAsset.fileName}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import CanvasReactions from '@/components/content-reactions/CanvasReactions';
 
 export default function CanvasFrame({ documentId }: { documentId?: string }) {
   const frame = useRef<HTMLIFrameElement>(null);
@@ -91,5 +92,5 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       navigation?.removeEventListener('navigatesuccess', clearApproval);
     };
   }, []);
-  return <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen" />;
+  return <><iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen" /><CanvasReactions frame={frame} /></>;
 }

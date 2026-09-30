@@ -9,6 +9,8 @@ import {
   downloadBulkVideoZip,
 } from '@/lib/video/download-client';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
+import ContentCollections, { ContentLookup } from '@/components/content-reactions/ContentCollections';
 import { IMAGE_STUDIO_MODEL_SHORT_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
@@ -26,7 +28,7 @@ import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency'
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
 
 type AssetScope = 'history' | 'project' | 'user';
-type AssetView = AssetScope | 'enhance';
+type AssetView = AssetScope | 'enhance' | 'favorites' | 'likes';
 type AssetType = 'all' | 'video' | 'image' | 'audio' | 'reference';
 type AssetStatus = 'all' | 'succeeded' | 'running' | 'submitted' | 'failed' | 'cancelled' | 'hidden';
 type AssetSort = 'created_desc' | 'created_asc' | 'completed_desc' | 'project' | 'user' | 'duration';
@@ -171,6 +173,8 @@ type AssetCardRectSnapshot = {
 const assetViewTabs: Array<{ id: AssetView; label: string; adminOnly?: boolean; tone?: 'enhance' }> = [
   { id: 'history', label: '生产历史' },
   { id: 'project', label: '按项目' },
+  { id: 'favorites', label: '我的收藏' },
+  { id: 'likes', label: '我赞过的' },
   { id: 'user', label: '按用户查看', adminOnly: true },
   { id: 'enhance', label: '视频超分', tone: 'enhance' },
 ];
@@ -615,6 +619,10 @@ function AssetsPageContent() {
     refreshUser,
   } = useAppSession();
   const [assetView, setAssetView] = useState<AssetView>('history');
+  useEffect(() => {
+    const view = new URLSearchParams(window.location.search).get('view');
+    if (view === 'favorites' || view === 'likes') setAssetView(view);
+  }, []);
   const [type, setType] = useState<AssetType>('video');
   const [status, setStatus] = useState<AssetStatus>('succeeded');
   const [sort, setSort] = useState<AssetSort>('created_desc');
@@ -676,7 +684,8 @@ function AssetsPageContent() {
 
   const isAdmin = user?.role === 'admin';
   const isEnhanceView = assetView === 'enhance';
-  const scope: AssetScope = isEnhanceView ? 'history' : assetView;
+  const isReactionView = assetView === 'favorites' || assetView === 'likes';
+  const scope: AssetScope = isEnhanceView || isReactionView ? 'history' : assetView as AssetScope;
   const requestType: AssetType = isEnhanceView ? 'video' : type;
   const enhanceFilter = isEnhanceView ? 'all' : 'none';
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -1041,6 +1050,9 @@ function AssetsPageContent() {
 
   const handleSelectView = (nextView: AssetView) => {
     setAssetView(nextView);
+    const location = new URL(window.location.href);
+    location.searchParams.set('view', nextView);
+    window.history.replaceState(window.history.state, '', location);
     if (nextView !== 'project') setProjectId('');
     if (nextView !== 'user') setOwnerUserId('');
     if (nextView === 'enhance') {
@@ -1554,6 +1566,9 @@ function AssetsPageContent() {
         ))}
       </section>
 
+      <ContentLookup />
+      {isReactionView && <ContentCollections key={assetView} action={assetView === 'favorites' ? 'favorite' : 'like'} />}
+      {!isReactionView && <>
       <section className="asset-library-filter-bar">
         {isEnhanceView ? (
           <div className="asset-library-view-chip">
@@ -1974,6 +1989,7 @@ function AssetsPageContent() {
                       </span>
                     </span>
                     <div className="asset-card-meta">
+                      {(item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={item.id} />}
                       <div className="asset-card-title-row">
                         <strong>{shortText(item.title, '未命名资产', 34)}</strong>
                         {item.canEnhanceVideo && (
@@ -2089,6 +2105,7 @@ function AssetsPageContent() {
           </div>
         )}
       </main>
+      </>}
 
       {marqueeRect && (
         <div
@@ -2218,6 +2235,7 @@ function AssetsPageContent() {
             </div>
           )}
           <div className="asset-detail-actions">
+            {(activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
             {activeItem.taskId && (
               <Link href={`/tasks/${activeItem.taskId}`}>打开任务详情</Link>
             )}

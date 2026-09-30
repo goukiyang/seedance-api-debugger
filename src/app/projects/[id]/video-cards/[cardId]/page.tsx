@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import EnhanceVideoAction from '@/components/EnhanceVideoAction';
@@ -524,6 +525,7 @@ export default function VideoCardDetailPage() {
                     </div>
                     {permissions.can_manage && (
                       <div className="video-card-task-actions">
+                        {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                         {task.version_role !== 'candidate' && task.version_role !== 'current_best' && task.version_role !== 'final' && (
                           <button
                             className="btn btn-secondary"

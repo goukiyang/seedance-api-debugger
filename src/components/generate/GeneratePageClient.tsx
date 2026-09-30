@@ -7,6 +7,7 @@ import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetC
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
@@ -2640,6 +2641,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           {reusingTaskId === task.id ? '回填中...' : '重新生成'}
                         </button>
                       )}
+                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                     </article>
                   );
                 })}

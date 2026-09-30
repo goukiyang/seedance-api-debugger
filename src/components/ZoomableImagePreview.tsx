@@ -5,6 +5,8 @@ import type { CSSProperties, MouseEvent, PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import styles from './ZoomableImagePreview.module.css';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
+import type { ContentKey } from '@/lib/content-reactions/types';
 
 export type ImageComparisonSource = {
   src: string;
@@ -28,6 +30,7 @@ type ZoomableImagePreviewProps = {
   fileName?: string;
   title?: string;
   previewKey?: string;
+  contentKey?: ContentKey;
   metadata?: ImagePreviewMetadata;
   comparison?: ImageComparisonSource;
   hasNavigation?: boolean;
@@ -97,7 +100,7 @@ function PreviewImage({ src, alt, original, className, style }: { src: string; a
   </>;
 }
 
-export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, metadata, comparison, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, contentKey, metadata, comparison, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<ActiveDrag | null>(null);
@@ -329,6 +332,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, me
       onContextMenu={(event) => event.preventDefault()}
     >
       <div className={styles.toolbar}>
+        {contentKey && <ContentReactions contentKey={contentKey} />}
         {comparison && <button
           type="button"
           className={`${styles.referenceThumb} ${showReference ? styles.referenceThumbActive : ''}`}

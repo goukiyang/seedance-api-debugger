@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
@@ -1167,6 +1168,7 @@ export default function ProjectDetailPage() {
 	                    </Link>
 	                    {isEnhanceTask(task) && <span className="task-enhance-chip">视频超分</span>}
 	                    <span className="text-gray text-sm">{task.id.slice(0, 10)}...</span>
+                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
 	                  </td>
                   <td>{task.local_status}</td>
                   <td>

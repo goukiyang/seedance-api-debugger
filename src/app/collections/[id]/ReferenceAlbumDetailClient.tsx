@@ -1,4 +1,5 @@
 'use client';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -409,6 +410,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
                       )}
                     </button>
                     <div className="album-image-meta">
+                      <ContentReactions contentKey={`reference_image:${image.id}`} />
                       <span>{typeLabel} {image.sort_order + 1}</span>
                       {album.permissions.copy && (
                         <button

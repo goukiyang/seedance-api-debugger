@@ -1,4 +1,5 @@
 'use client';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -2070,6 +2071,7 @@ export default function TaskDetailPage() {
                 <p>{inputChips.join(' · ') || '无参数记录'}{referenceSummaryItems.length > 0 ? ` · ${referenceSummaryItems.join(' · ')}` : ''}</p>
               </div>
               <div className="task-action-row">
+                {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                 {task.prompt && (
                   <button className="btn btn-secondary" type="button" onClick={handleCopyPrompt}>
                     <Copy size={16} aria-hidden="true" />

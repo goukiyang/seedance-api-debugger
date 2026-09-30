@@ -211,6 +211,8 @@ model VideoDeliveryJob {
 // ============================================================================
 
 model User {
+  content_reactions      ContentReaction[]
+  content_reaction_events ContentReactionEvent[]
   id                    String    @id @default(cuid())
   name                  String
   username              String    @unique
@@ -432,6 +434,42 @@ model PlatformSetting {
   updated_at DateTime @updatedAt
 
   @@index([key])
+}
+
+// References only. Content access is resolved from the original business object on every request.
+model ContentReaction {
+  id           String   @id @default(cuid())
+  user_id      String
+  content_key  String
+  category     String
+  liked        Boolean  @default(false)
+  favorited    Boolean  @default(false)
+  liked_at     DateTime?
+  favorited_at DateTime?
+  version      Int      @default(1)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, content_key])
+  @@index([content_key, liked])
+  @@index([user_id, favorited, favorited_at])
+  @@index([user_id, liked, liked_at])
+}
+
+model ContentReactionEvent {
+  id           String   @id @default(cuid())
+  user_id      String
+  request_id   String
+  content_key  String
+  action       String
+  active       Boolean
+  fingerprint  String
+  created_at   DateTime @default(now())
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, request_id])
+  @@index([user_id, created_at])
 }
 
 model GenerationTemplate {
