@@ -128,6 +128,7 @@
 - 运行检查：`sd2-gray`、`sd2-image-studio`、`sd2-template-prompts`三个服务active；公网`/api/release`返回0.24.0，公网config/login/模板chunk `page-983b9b18f30c4e55.js`均200，源站config为200，`.deployed-commit`与发布源码一致。
 - 持久数据：schema未变，无数据库迁移，上传/视频/storage持久目录链接与可写权限已检查；构建使用数据库快照，快照完整性检查通过，不覆盖线上业务库。
 - 授权配置：新增`TEMPLATE_STUDIO_TEXT_ENABLED=true`，开启既有文字worker。沿用线上已配置的`gpt-5.5`与既有线路，不改模型、密钥或视频费用；文案不扣本站点数，上游费用由平台承担。启用前没有排队/运行中的文字任务，本轮未发起付费调用。
+- 2026-09-30只读模型查询：生产既有线路`api.muskapis.com`的`GET /v1/models`返回200，共38个模型ID，其中GPT文字模型7个：`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-astra`、`gpt-6-luna`、`gpt-6-sol`。另4个GPT图片ID不计入文字模型。网站当前默认仍为`gpt-5.5`，未提供普通用户逐次选择这7个模型的功能；清单仅代表该账号线路当时列出，不代表逐个完成生成/JSON格式兼容/费用验证，也不代表OpenAI官方型号认证。未发起生成、未切模型，使用前重新查询。
 - 更新提示：沿用已有ReleaseNotice，版本唯一来源及本次摘要同步；旧客户端发现/稍后/刷新等实际交互未执行浏览器验收。
 
 ### 文件与实现
