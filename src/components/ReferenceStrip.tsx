@@ -7,11 +7,8 @@ import { ReferenceThumb } from '@/components/ReferenceThumb';
 import { AddReferenceCard } from '@/components/AddReferenceCard';
 import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
 import {
-  SEEDANCE_REFERENCE_AUDIO_LIMIT,
-  SEEDANCE_REFERENCE_IMAGE_LIMIT,
-  SEEDANCE_REFERENCE_VIDEO_LIMIT,
-  isReferenceMediaTooSmall,
-  referenceMediaTooSmallMessage,
+  seedanceReferenceMediaCapabilities,
+  validateSeedanceReferenceMediaPreflight,
 } from '@/lib/provider/reference-media-policy';
 
 interface Props {
@@ -24,6 +21,7 @@ interface Props {
   onPreview: (url: string, type?: WorkspaceAssetItem['type']) => void;
   onOpenHistory?: () => void;
   generationMode?: string;
+  model?: string | null;
   loading?: boolean;
 }
 
@@ -99,8 +97,10 @@ export function ReferenceStrip({
   onPreview,
   onOpenHistory,
   generationMode,
+  model,
   loading = false,
 }: Props) {
+  const mediaLimits = seedanceReferenceMediaCapabilities(model);
   const [orderedAssets, setOrderedAssets] = useState<WorkspaceAssetItem[]>(assets);
   const [draggedKey, setDraggedKey] = useState<string | null>(null);
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
@@ -399,17 +399,15 @@ export function ReferenceStrip({
           const isDragging = draggedKey === itemKey;
           const isInsertBefore = dragInsertIndex === idx && !isDragging;
           const isInsertAfter = dragInsertIndex === displayAssets.length && idx === displayAssets.length - 1;
-          const isLowResolution = (asset.type === 'image' || asset.type === 'video')
-            && isReferenceMediaTooSmall(asset.width, asset.height);
-          const lowResolutionTitle = isLowResolution
-            ? referenceMediaTooSmallMessage({
-                kind: asset.type as 'image' | 'video',
-                name: asset.fileName,
-                width: asset.width,
-                height: asset.height,
-                index: idx,
+          const mediaItem = { name: asset.fileName, width: asset.width, height: asset.height, index: idx };
+          const mediaIssue = asset.type === 'image' || asset.type === 'video'
+            ? validateSeedanceReferenceMediaPreflight({
+                model: model || undefined, metadataValidation: 'known-only',
+                ...(asset.type === 'image' ? { images: [mediaItem] } : { videos: [mediaItem] }),
               })
-            : undefined;
+            : null;
+          const isLowResolution = Boolean(mediaIssue);
+          const lowResolutionTitle = mediaIssue?.message;
 
           return (
             <div
@@ -485,8 +483,8 @@ export function ReferenceStrip({
       {/* 图号说明 */}
       <span className="ref-strip-count">
         {assets.length === 0
-          ? `参考图最多 ${SEEDANCE_REFERENCE_IMAGE_LIMIT} 张，视频/音频各最多 ${SEEDANCE_REFERENCE_VIDEO_LIMIT}/${SEEDANCE_REFERENCE_AUDIO_LIMIT} 个`
-          : `图 ${referenceCounts.image}/${SEEDANCE_REFERENCE_IMAGE_LIMIT} · 视频 ${referenceCounts.video}/${SEEDANCE_REFERENCE_VIDEO_LIMIT} · 音频 ${referenceCounts.audio}/${SEEDANCE_REFERENCE_AUDIO_LIMIT}`}
+          ? `参考图最多 ${mediaLimits.imageLimit} 张，视频/音频各最多 ${mediaLimits.videoLimit}/${mediaLimits.audioLimit} 个`
+          : `图 ${referenceCounts.image}/${mediaLimits.imageLimit} · 视频 ${referenceCounts.video}/${mediaLimits.videoLimit} · 音频 ${referenceCounts.audio}/${mediaLimits.audioLimit}`}
       </span>
     </div>
   );

@@ -1,8 +1,12 @@
 import type { GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { isVolcengineIpModelId } from '@/lib/integrations/volcengine-ip-models';
 import { isSeedanceVideoDuration, isSeedanceVideoModelId } from '@/lib/provider/seedance-models';
 
 export const GENERATION_DEFAULTS_PREFERENCE_KEY = 'generation_defaults_v1';
+const IP_GENERATION_DEFAULTS_PREFERENCE_KEY = 'generation_defaults_ip_v1';
+
+export type GenerationSurface = 'normal' | 'ip';
 
 export type GenerationSeedMode = 'random';
 
@@ -51,6 +55,20 @@ export const DEFAULT_GENERATION_DEFAULTS: GenerationDefaults = {
   projectId: null,
 };
 
+export function generationDefaultsPreferenceKey(surface: GenerationSurface = 'normal'): string {
+  return surface === 'ip' ? IP_GENERATION_DEFAULTS_PREFERENCE_KEY : GENERATION_DEFAULTS_PREFERENCE_KEY;
+}
+
+function isGenerationSurface(value: unknown): value is GenerationSurface {
+  return value === 'ip' || value === 'normal';
+}
+
+function isModelForSurface(value: unknown, surface: GenerationSurface): value is string {
+  if (typeof value !== 'string') return false;
+  if (surface === 'ip') return isVolcengineIpModelId(value);
+  return isSeedanceVideoModelId(value);
+}
+
 function isGenerationMode(value: unknown): value is GenerationMode {
   return typeof value === 'string' && GENERATION_MODES.includes(value as GenerationMode);
 }
@@ -67,7 +85,11 @@ function optionalProjectId(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-export function normalizeGenerationDefaults(value: unknown): GenerationDefaults {
+export function normalizeGenerationDefaults(
+  value: unknown,
+  surface: GenerationSurface = 'normal',
+): GenerationDefaults {
+  const normalizedSurface = isGenerationSurface(surface) ? surface : 'normal';
   const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
 
   const generationMode = record.generationMode ?? record.generation_mode;
@@ -75,7 +97,7 @@ export function normalizeGenerationDefaults(value: unknown): GenerationDefaults 
   const returnLastFrame = record.returnLastFrame ?? record.return_last_frame;
   const seedMode = record.seedMode ?? record.seed_mode;
   const projectId = record.projectId ?? record.project_id;
-  const model = typeof record.model === 'string' && isSeedanceVideoModelId(record.model)
+  const model = isModelForSurface(record.model, normalizedSurface)
     ? record.model
     : null;
 
@@ -97,17 +119,23 @@ export function normalizeGenerationDefaults(value: unknown): GenerationDefaults 
   };
 }
 
-export function parseStoredGenerationDefaults(valueJson: string | null | undefined) {
+export function parseStoredGenerationDefaults(
+  valueJson: string | null | undefined,
+  surface: GenerationSurface = 'normal',
+) {
   if (!valueJson) return null;
   try {
-    return normalizeGenerationDefaults(JSON.parse(valueJson));
+    return normalizeGenerationDefaults(JSON.parse(valueJson), surface);
   } catch {
     return null;
   }
 }
 
-export function serializeGenerationDefaults(settings: GenerationDefaults): string {
-  const normalized = normalizeGenerationDefaults(settings);
+export function serializeGenerationDefaults(
+  settings: GenerationDefaults,
+  surface: GenerationSurface = 'normal',
+): string {
+  const normalized = normalizeGenerationDefaults(settings, surface);
   const stored: StoredGenerationDefaults = {
     model: normalized.model,
     generation_mode: normalized.generationMode,

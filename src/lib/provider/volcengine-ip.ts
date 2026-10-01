@@ -10,6 +10,8 @@ import {
   getVolcengineIpApiSettings,
   isVolcengineIpApiReady,
 } from '@/lib/integrations/volcengine-ip';
+import { seedanceReferenceMediaCapabilities } from '@/lib/provider/reference-media-policy';
+import { SEEDANCE_2_5_IP_MODEL_ID } from '@/lib/provider/seedance-models';
 
 export const VOLCENGINE_IP_VIDEO_PROVIDER = 'volcengine_ark';
 
@@ -44,6 +46,8 @@ export type VolcengineIpCreatePayload = {
   watermark?: boolean;
   service_tier?: string;
   execution_expires_after?: number;
+  output_format?: 'mp4';
+  omni_reference_task_type?: 'reference';
 };
 
 type NormalizedVolcengineIpError = {
@@ -126,19 +130,34 @@ export function volcengineRequestErrorToStatus(
   error: unknown,
 ): ProviderStatusResponse | null {
   if (!(error instanceof VolcengineIpRequestError)) return null;
-  if (error.normalized.retryable) return null;
+  const explicitTaskId = pickNestedString(error.raw, [
+    ['id'],
+    ['task_id'],
+    ['data', 'id'],
+    ['data', 'task_id'],
+    ['result', 'id'],
+    ['result', 'task_id'],
+    ['task', 'id'],
+    ['task', 'task_id'],
+  ]);
+  if (explicitTaskId !== providerTaskId) return null;
 
+  const explicitStatus = pickNestedString(error.raw, [
+    ['status'],
+    ['provider_status'],
+    ['data', 'status'],
+    ['data', 'provider_status'],
+    ['result', 'status'],
+    ['result', 'provider_status'],
+    ['task', 'status'],
+  ]);
+  if (!explicitStatus) return null;
+
+  const status = parseVolcengineIpStatusResponse(error.raw, providerTaskId);
+  if (!['succeeded', 'failed', 'cancelled'].includes(status.local_status)) return null;
   return {
-    provider_task_id: providerTaskId,
-    provider_status: 'failed',
-    local_status: 'failed',
-    error_message: error.normalized.providerMessage || error.normalized.userMessage,
-    raw: error.raw || {
-      error: {
-        code: error.normalized.code,
-        message: error.normalized.providerMessage || error.normalized.userMessage,
-      },
-    },
+    ...status,
+    error_message: status.error_message || error.normalized.providerMessage || error.normalized.userMessage,
   };
 }
 
@@ -151,15 +170,22 @@ function addUrlItems(
   type: 'image_url' | 'video_url' | 'audio_url',
   urls: string[] | undefined,
   role?: string,
-  limit?: number,
+  limit = Number.POSITIVE_INFINITY,
 ) {
-  for (const rawUrl of (urls || []).slice(0, limit || urls?.length || 0)) {
-    const url = rawUrl.trim();
-    if (!url) continue;
+  const usableUrls = (urls || []).map((rawUrl) => rawUrl.trim()).filter(Boolean);
+  if (usableUrls.length > limit) {
+    const kind = type === 'image_url' ? '参考图' : type === 'video_url' ? '参考视频' : '参考音频';
+    throw new Error(`${kind}数量超过当前模型上限 ${limit}，请减少素材后再提交。`);
+  }
+  for (const url of usableUrls) {
     if (type === 'image_url') content.push({ type, image_url: { url }, role });
     if (type === 'video_url') content.push({ type, video_url: { url }, role });
     if (type === 'audio_url') content.push({ type, audio_url: { url }, role });
   }
+}
+
+function hasUsableUrl(urls: string[] | undefined) {
+  return Boolean(urls?.some((url) => url.trim()));
 }
 
 export function buildVolcengineIpCreatePayload(
@@ -170,6 +196,22 @@ export function buildVolcengineIpCreatePayload(
 
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error('火山 IP 生成缺少提示词');
+
+  const capabilities = seedanceReferenceMediaCapabilities(model);
+  const isSeedance25Ip = model === SEEDANCE_2_5_IP_MODEL_ID;
+  if (isSeedance25Ip) {
+    if (input.duration !== undefined && (!Number.isInteger(input.duration) || input.duration < 4 || input.duration > 30)) {
+      throw new Error('Seedance 2.5 生成时长须为 4-30 秒的整数。');
+    }
+    if (input.resolution !== undefined && !['480p', '720p', '1080p'].includes(input.resolution)) {
+      throw new Error('Seedance 2.5 仅支持 480p、720p 或 1080p 分辨率。');
+    }
+  }
+
+  if (input.generation_mode !== 'all_in_one_reference'
+    && (hasUsableUrl(input.reference_video_urls) || hasUsableUrl(input.reference_audio_urls))) {
+    throw new Error('首尾帧和智能多帧模式不支持参考视频或音频，请切换到全能参考模式。');
+  }
 
   const mediaContent: VolcengineIpContentItem[] = [];
 
@@ -188,33 +230,41 @@ export function buildVolcengineIpCreatePayload(
         'image_url',
         input.frame_image_base64_data?.length ? input.frame_image_base64_data : input.frame_image_urls,
         'reference_image',
-        9,
+        capabilities.imageLimit,
       );
       break;
     case 'all_in_one_reference':
-    default:
       addUrlItems(
         mediaContent,
         'image_url',
         input.reference_image_base64_data?.length ? input.reference_image_base64_data : input.reference_image_urls,
         'reference_image',
-        9,
+        capabilities.imageLimit,
       );
-      addUrlItems(mediaContent, 'video_url', input.reference_video_urls, 'reference_video', 3);
-      addUrlItems(mediaContent, 'audio_url', input.reference_audio_urls, 'reference_audio', 3);
+      addUrlItems(mediaContent, 'video_url', input.reference_video_urls, 'reference_video', capabilities.videoLimit);
+      addUrlItems(mediaContent, 'audio_url', input.reference_audio_urls, 'reference_audio', capabilities.audioLimit);
       break;
+    default:
+      throw new Error('火山 IP 生成模式无效。');
   }
 
   // 火山官方示例以文本项开头，再跟参考素材；这里按官方顺序生成 content。
   const content: VolcengineIpContentItem[] = [{ type: 'text', text: prompt }, ...mediaContent];
 
   const payload: VolcengineIpCreatePayload = { model, content };
+  if (isSeedance25Ip) {
+    payload.output_format = 'mp4';
+    if (input.generation_mode !== 'first_last_frame' && mediaContent.length > 0) {
+      payload.omni_reference_task_type = 'reference';
+    }
+  }
   const clientRequestId = (input.client_request_id || input.clientRequestId || '').trim();
 
   if (input.callback_url) payload.callback_url = input.callback_url;
   if (clientRequestId) payload.client_request_id = clientRequestId;
   if (input.duration !== undefined) payload.duration = input.duration;
   if (input.ratio) payload.ratio = input.ratio;
+  if (isSeedance25Ip && input.generation_mode === 'first_last_frame') payload.ratio = 'adaptive';
   if (input.resolution) payload.resolution = input.resolution;
   if (input.seed !== undefined && input.seed >= 0) payload.seed = input.seed;
   if (input.generate_audio !== undefined) payload.generate_audio = input.generate_audio;

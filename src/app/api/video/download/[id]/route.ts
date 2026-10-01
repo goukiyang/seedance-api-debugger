@@ -9,6 +9,7 @@ import { assertCanViewTask } from '@/lib/projects/permissions';
 import { cacheTaskVideoToLocal } from '@/lib/video/local-cache';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
+import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import { localPublicVideoPath } from '@/lib/video/thumbnail';
 
 export const dynamic = 'force-dynamic';
@@ -171,6 +172,16 @@ export async function POST(
         { success: false, error: 'Task not completed', message: `Task status is ${task.local_status}` },
         { status: 400 }
       );
+    }
+
+    if (task.provider === 'volcengine_ark') {
+      await prisma.videoTask.updateMany({
+        where: { id: task.id, OR: [{ delivery_status: null }, { delivery_status: { not: 'running' } }] },
+        data: { delivery_status: 'pending', delivery_attempts: 0, delivery_started_at: null, delivery_error: null },
+      });
+      startTaskLocalization(task.id, { initialDelayMs: 0, cacheTimeoutMs: 180_000 });
+      return NextResponse.json({ success: false, error: 'STABLE_DOWNLOAD_PREPARING',
+        message: '正在重新保存已有视频，不会重新生成或再次扣点。', stable_download_ready: false }, { status: 202 });
     }
 
     if (isVideoDeliveryFastPathTask(task) && !task.local_video_path) {

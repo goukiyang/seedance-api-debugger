@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from 'react';
 import Link from 'next/link';
-import { Archive, Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
+import { Archive, Check, ChevronDown, Folder, Plus, Trash2, RefreshCw } from 'lucide-react';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
@@ -29,7 +29,7 @@ import {
   normalizeGenerationDefaults,
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
-import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
+import { VOLCENGINE_IP_MODEL_OPTIONS, volcengineIpModelLabel } from '@/lib/integrations/volcengine-ip-models';
 import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 import type { StudioGenerationHandoff } from '@/lib/template-studio/types';
@@ -70,6 +70,8 @@ type CreateTaskResponse = CreateResponse & {
   error?: string;
   message?: string;
   code?: string;
+  error_code?: string;
+  submission_unconfirmed?: boolean;
   existing_task_id?: string;
   _debug?: object | null;
 };
@@ -142,7 +144,9 @@ interface TaskItem {
   result_last_frame_url: string | null;
   local_video_path: string | null;
   error_message?: string | null;
-  delivery_stage?: { key?: string | null } | null;
+  error_code?: string | null;
+  delivery_error?: string | null;
+  delivery_stage?: { key?: string | null; label?: string } | null;
   stable_download_ready?: boolean | null;
   preview_available?: boolean | null;
   retry_after_ms?: number | null;
@@ -189,7 +193,10 @@ interface PolledTask {
   result_last_frame_url?: string | null;
   local_video_path?: string | null;
   error_message: string | null;
-  delivery_stage?: { key?: string | null } | null;
+  error_code?: string | null;
+  delivery_error?: string | null;
+  model?: string | null;
+  delivery_stage?: { key?: string | null; label?: string } | null;
   stable_download_ready?: boolean | null;
   preview_available?: boolean | null;
   retry_after_ms?: number | null;
@@ -392,7 +399,7 @@ function mergePollingTaskIds(incomingIds: string[], currentIds: string[]): strin
 }
 
 function shouldContinuePollingStableDelivery(task: Pick<PolledTask, 'local_status' | 'delivery_stage' | 'stable_download_ready' | 'retry_after_ms'>, isIpSurface: boolean) {
-  if (isIpSurface || task.local_status !== 'succeeded') return false;
+  if (task.local_status !== 'succeeded') return false;
   if (task.delivery_stage?.key === 'ready' || task.delivery_stage?.key === 'failed') return false;
   return task.delivery_stage?.key === 'preparing'
     || (task.stable_download_ready === false && Boolean(task.retry_after_ms));
@@ -406,22 +413,22 @@ function isRecentEnhanceTask(task: Pick<TaskItem, 'provider' | 'generation_mode'
   return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
 }
 
-function generationPreferenceStorageKey(userId: string) {
-  return `${GENERATION_PREFERENCE_STORAGE_PREFIX}${userId}`;
+function generationPreferenceStorageKey(userId: string, surface: 'normal' | 'ip') {
+  return `${GENERATION_PREFERENCE_STORAGE_PREFIX}${userId}${surface === 'ip' ? ':ip' : ''}`;
 }
 
-function readLocalGenerationDefaults(userId: string): GenerationDefaults | null {
+function readLocalGenerationDefaults(userId: string, surface: 'normal' | 'ip'): GenerationDefaults | null {
   try {
-    const raw = window.localStorage.getItem(generationPreferenceStorageKey(userId));
-    return raw ? normalizeGenerationDefaults(JSON.parse(raw)) : null;
+    const raw = window.localStorage.getItem(generationPreferenceStorageKey(userId, surface));
+    return raw ? normalizeGenerationDefaults(JSON.parse(raw), surface) : null;
   } catch {
     return null;
   }
 }
 
-function writeLocalGenerationDefaults(userId: string, settings: GenerationDefaults) {
+function writeLocalGenerationDefaults(userId: string, settings: GenerationDefaults, surface: 'normal' | 'ip') {
   try {
-    window.localStorage.setItem(generationPreferenceStorageKey(userId), JSON.stringify(settings));
+    window.localStorage.setItem(generationPreferenceStorageKey(userId, surface), JSON.stringify(settings));
   } catch {
     // 偏好缓存失败不影响生成。
   }
@@ -502,6 +509,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [error, setError] = useState<string | null>(null);
   const [errorDebug, setErrorDebug] = useState<object | null>(null);
   const [generationDefaults, setGenerationDefaults] = useState<GenerationDefaults | null>(null);
+  const [generationDefaultsReady, setGenerationDefaultsReady] = useState(false);
+  const preferenceWriteQueue = useRef<Promise<unknown>>(Promise.resolve());
 
   // ---- Recent Tasks ----
   const [recentTasks, setRecentTasks] = useState<TaskItem[]>([]);
@@ -511,6 +520,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [recentTasksLoadingMore, setRecentTasksLoadingMore] = useState(false);
   const [recentTasksError, setRecentTasksError] = useState('');
   const [deletingRecentTaskId, setDeletingRecentTaskId] = useState<string | null>(null);
+  const [retryingDeliveryId, setRetryingDeliveryId] = useState<string | null>(null);
   const recentTasksSentinelRef = useRef<HTMLDivElement | null>(null);
   const recentTasksLoadingRef = useRef(false);
   const recentTasksPageRef = useRef(0);
@@ -770,7 +780,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   useEffect(() => {
     if (!currentUser?.id) return;
     let cancelled = false;
-    const localFallback = readLocalGenerationDefaults(currentUser.id);
+    setGenerationDefaultsReady(false);
+    const preferenceSurface = isIpSurface ? 'ip' : 'normal';
+    const localFallback = readLocalGenerationDefaults(currentUser.id, preferenceSurface);
 
     const applySettings = (settings: GenerationDefaults | null) => {
       if (!settings || cancelled) return;
@@ -778,23 +790,26 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (settings.projectId) {
         window.localStorage.setItem(PROJECT_STORAGE_KEY, settings.projectId);
       }
-      writeLocalGenerationDefaults(currentUser.id, settings);
+      writeLocalGenerationDefaults(currentUser.id, settings, preferenceSurface);
     };
 
-    fetch('/api/me/preferences/generation', { cache: 'no-store' })
+    fetch(`/api/me/preferences/generation?surface=${preferenceSurface}`, { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
-        const settings = data?.settings ? normalizeGenerationDefaults(data.settings) : localFallback;
+        const settings = data?.settings ? normalizeGenerationDefaults(data.settings, preferenceSurface) : localFallback;
         applySettings(settings);
       })
       .catch(() => {
         applySettings(localFallback);
+      })
+      .finally(() => {
+        if (!cancelled) setGenerationDefaultsReady(true);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, isIpSurface]);
 
   useEffect(() => {
     if (isIpSurface) return;
@@ -1204,11 +1219,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const res = await fetch(`/api/tasks/${taskId}/reuse`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
         },
+        body: JSON.stringify({ surface: isIpSurface ? 'ip' : 'normal' }),
       });
       const data = await readJsonResponse<{
         draft: {
+          provider?: string | null;
           model?: string | null;
           task_id: string;
           prompt?: string;
@@ -1226,11 +1244,15 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         };
         skipped_references?: number;
         restored_references?: number;
+        inputWarnings?: string[];
         error?: string;
         message?: string;
       }>(res);
       if (!res.ok) {
         throw new Error(data.message || data.error || '复用任务失败');
+      }
+      if ((data.draft.provider === 'volcengine_ark') !== isIpSurface) {
+        throw new Error('任务属于另一生成入口，请在对应入口复用，未替换当前生成参数。');
       }
       setReuseDraft({
         model: data.draft.model || null,
@@ -1253,11 +1275,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const restored = data.restored_references || 0;
       setReuseMessage(
         skipped > 0
-          ? `已回填旧任务，恢复 ${restored} 张参考图，${skipped} 张未能恢复`
-          : `已回填旧任务，恢复 ${restored} 张参考图`,
+          ? `已回填旧任务，恢复 ${restored} 项素材，${skipped} 项未能恢复。${data.inputWarnings?.join(' ') || ''}`
+          : `已回填旧任务，恢复 ${restored} 项素材。${data.inputWarnings?.join(' ') || ''}`,
       );
       if (options.clearUrl) {
-        window.history.replaceState(null, '', '/generate');
+        window.history.replaceState(null, '', isIpSurface ? '/generate/ip' : '/generate');
       }
       if (options.scrollToComposer !== false) {
         requestAnimationFrame(() => {
@@ -1273,7 +1295,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setReuseLoading(false);
       setReusingTaskId(null);
     }
-  }, []);
+  }, [isIpSurface]);
 
   useEffect(() => {
     const reuseTaskId = new URLSearchParams(window.location.search).get('reuse_task_id');
@@ -1486,6 +1508,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                   ...task,
                   local_status: data.local_status,
                   error_message: data.error_message ?? task.error_message ?? null,
+                  error_code: data.error_code,
+                  delivery_error: data.delivery_error,
+                  model: data.model ?? task.model,
                   public_video_url: data.public_video_url ?? task.public_video_url,
                   result_video_url: data.result_video_url,
                   result_last_frame_url: data.result_last_frame_url ?? task.result_last_frame_url,
@@ -1572,17 +1597,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
     setGenerationDefaults(settings);
     if (currentUser?.id) {
-      writeLocalGenerationDefaults(currentUser.id, settings);
+      writeLocalGenerationDefaults(currentUser.id, settings, isIpSurface ? 'ip' : 'normal');
     }
 
-    fetch('/api/me/preferences/generation', {
+    preferenceWriteQueue.current = preferenceWriteQueue.current.catch(() => undefined).then(() => fetch('/api/me/preferences/generation', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings }),
-    }).catch(() => {
+      body: JSON.stringify({ settings, surface: isIpSurface ? 'ip' : 'normal' }),
+    })).catch(() => {
       // 偏好保存失败不影响生成任务。
     });
-  }, [currentUser?.id, selectedProjectId]);
+  }, [currentUser?.id, selectedProjectId, isIpSurface]);
 
   const handleSubmit = useCallback(async (params: GenerationSubmitParams) => {
     const explicitlyStartingNew = forceNewGenerationRef.current;
@@ -1609,7 +1634,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     const requestedModel = selectedH3Model
       ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id || ''
       : params.model || '';
-    const durationModel = isIpSurface || selectedH3Model ? null : requestedModel;
+    const durationModel = selectedH3Model ? null : requestedModel;
     if (!isSeedanceVideoDuration(params.duration, durationModel)) {
       setError(`当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，请重新选择时长后提交。当前时长未自动修改，也未扣点。`);
       setSubmitting(false);
@@ -1717,20 +1742,22 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         }
       };
       const recoverAcceptedRequest = async (key: string) => {
-        if (!params.templateStudioRunId) return null;
+        if (!params.templateStudioRunId && !isIpSurface) return null;
         const query = new URLSearchParams({ idempotency_key: key });
-        query.set('template_studio_run_id', params.templateStudioRunId);
-        const response = await fetch(`/api/template-studio-video-handoff?${query.toString()}`, { cache: 'no-store' });
+        if (params.templateStudioRunId) query.set('template_studio_run_id', params.templateStudioRunId);
+        const endpoint = isIpSurface ? '/api/ip/tasks/request-status' : '/api/template-studio-video-handoff';
+        const response = await fetch(`${endpoint}?${query.toString()}`, { cache: 'no-store' });
         const payload = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
         if (!response.ok) throw new Error(payload.message || payload.error || '无法确认上次请求是否已受理');
         return payload.task || null;
       };
       const acceptRecoveredTask = (task: CreateTaskResponse, currentPayloadChanged = false) => {
-        sessionStorage.removeItem(requestStorageKey);
-        setUnconfirmedGenerationRequest(currentPayloadChanged);
-        unconfirmedGenerationParamsRef.current = currentPayloadChanged ? params : null;
-        setResult(task);
-        setError(currentPayloadChanged
+        const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true;
+        if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
+        setUnconfirmedGenerationRequest(currentPayloadChanged || unconfirmed);
+        unconfirmedGenerationParamsRef.current = currentPayloadChanged || unconfirmed ? params : null;
+        setResult(unconfirmed ? null : task);
+        setError(unconfirmed ? (task.message || '上游受理结果待确认，请勿重复生成，联系管理员核对。') : currentPayloadChanged
           ? `上次请求已受理为任务 ${task.id}，但当前内容与原请求不同。请先核对该任务；如仍要生成当前内容，再明确新建任务。`
           : null);
         setPolledResult(null);
@@ -1786,6 +1813,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
 
       const data = await readJsonResponse<CreateTaskResponse>(res);
+
+      if (res.ok && (data.error_code === 'IP_SUBMISSION_UNCONFIRMED' || data.submission_unconfirmed === true)) {
+        acceptRecoveredTask(data);
+        return;
+      }
 
       if (!res.ok) {
         setErrorDebug(data._debug || null);
@@ -2468,6 +2500,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           key={`${studioHandoff?.runId || 'standard'}:${studioWorkspaceTabId || 'workspace'}`}
           collections={collections}
           initialSettings={generationDefaults}
+          preferencesReady={generationDefaultsReady}
+          onSettingsChange={saveGenerationDefaults}
           lockedSettings={selectedVideoCardLockedSettings}
           reuseDraft={reuseDraft}
           studioHandoff={studioHandoff}
@@ -2497,7 +2531,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           providerStatus={h3MachineStatus}
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}
-          allowExtendedSeedanceDuration={!isIpSurface}
+          allowExtendedSeedanceDuration
           onModelChange={handleGenerationModelChange}
           auxiliaryLabel="LoRA"
           auxiliaryOptions={activeH3LoraOptions}
@@ -2580,6 +2614,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                             </div>
                           )}
                           <div className="composer-task-card-meta">
+                            {isIpSurface && task.model && <span>{volcengineIpModelLabel(task.model)}</span>}
                             {task.is_draft && (
                               <span className="composer-task-card-enhance-chip">
                                 样片 Draft
@@ -2596,19 +2631,44 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                               </span>
                             )}
                             <span className={`composer-task-card-status ${task.local_status}`}>
-                              {task.local_status === 'submitted' ? '排队中' :
+                              {task.error_code === 'IP_SUBMISSION_UNCONFIRMED' ? '提交待确认' :
+                                task.error_code === 'IP_CANCEL_UNCONFIRMED' ? '取消待确认' :
+                                task.local_status === 'submitted' ? '排队中' :
                                 task.local_status === 'running' ? '生成中' :
-                                task.local_status === 'succeeded' ? '已完成' :
+                                task.local_status === 'succeeded' ? (task.delivery_stage?.label || '已生成') :
                                 task.local_status === 'failed' ? '失败' : task.local_status}
                             </span>
                           </div>
-                          {task.local_status === 'failed' && taskErrorMessage && (
+                          {(task.local_status === 'failed' || task.error_code?.startsWith('IP_')) && taskErrorMessage && (
                             <div className="composer-task-card-error" title={taskErrorMessage}>
                               {taskErrorMessage}
                             </div>
                           )}
                         </div>
                       </Link>
+                      {isIpSurface && task.local_status === 'succeeded' && task.delivery_stage?.key === 'failed' && (
+                        <button
+                          type="button"
+                          className="composer-task-card-reuse"
+                          title="重新保存已有视频，不重新生成、不扣点"
+                          disabled={retryingDeliveryId === task.id}
+                          onClick={async () => {
+                            setRetryingDeliveryId(task.id);
+                            try {
+                              const response = await fetch(`/api/video/download/${task.id}`, { method: 'POST' });
+                              const data = await response.json();
+                              if (!response.ok) throw new Error(data.message || data.error || '重试保存失败');
+                              setActivePollingTaskIds((current) => [task.id, ...current.filter((id) => id !== task.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+                              setRecentTasks((current) => current.map((item) => item.id === task.id
+                                ? { ...item, delivery_stage: { key: 'preparing', label: '正在重新保存' } } : item));
+                            } catch (error) {
+                              setRecentTasksError(error instanceof Error ? error.message : '重试保存失败');
+                            } finally {
+                              setRetryingDeliveryId(null);
+                            }
+                          }}
+                        ><RefreshCw size={14} aria-hidden="true" /> {retryingDeliveryId === task.id ? '正在提交' : '重试保存'}</button>
+                      )}
                       {task.is_draft ? (
                         <button
                           type="button"
@@ -2632,16 +2692,16 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                         >
                           查看超分结果
                         </Link>
-                      ) : (
+                      ) : !isExternalIpUser ? (
                         <button
                           type="button"
                           className="composer-task-card-reuse"
-                          disabled={reuseLoading}
+                          disabled={reuseLoading || task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.error_code === 'IP_CANCEL_UNCONFIRMED'}
                           onClick={() => loadReusableTask(task.id)}
                         >
                           {reusingTaskId === task.id ? '回填中...' : '重新生成'}
                         </button>
-                      )}
+                      ) : null}
                       {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                     </article>
                   );

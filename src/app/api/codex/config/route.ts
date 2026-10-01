@@ -13,6 +13,7 @@ import {
 } from '@/lib/provider/seedance-models';
 import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
 import { normalizeSeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
+import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
       endpoints: {
         upload_asset: '/api/codex/assets/upload',
         create_video: '/api/codex/video/create',
+        create_ip_video: '/api/ip/tasks/create',
         draft_upgrade: '/api/codex/video/draft-upgrade',
         create_video_direct: '/api/tasks/create',
         estimate_video: '/api/tasks/estimate',
@@ -50,6 +52,7 @@ export async function GET(request: NextRequest) {
         header: 'Authorization',
       },
       supported_settings: {
+        ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities(), draft: false, edit: false, extend: false },
         omni_reference_task_type: editPilot.enabled ? ['edit'] : [],
         request_cost_ceiling: { field: 'max_estimated_cost', unit: 'credits', enforced_before_freeze: true },
         video_edit_constraints: {

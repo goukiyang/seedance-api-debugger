@@ -23,6 +23,8 @@ type LocalizationResultSnapshot = {
     local_status: string | null;
     local_video_path: string | null;
     result_video_url: string | null;
+    provider?: string;
+    public_video_url?: string | null;
   } | null;
   cacheResult?: { success: boolean; error?: string } | undefined;
   thumbnailResult?: { success: boolean; error?: string } | undefined;
@@ -47,7 +49,7 @@ export function shouldContinueLocalization(
 
   const cacheReady = Boolean(task.local_video_path) || result.cacheResult?.success === true;
   const thumbnailReady = result.thumbnailResult?.success === true;
-  return !cacheReady || !thumbnailReady;
+  return !cacheReady || !thumbnailReady || (task.provider === 'volcengine_ark' && !task.public_video_url);
 }
 
 async function runTaskLocalization(taskId: string, options: RunnerOptions) {

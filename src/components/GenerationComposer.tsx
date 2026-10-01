@@ -23,9 +23,10 @@ import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/U
 import MediaPreview from '@/components/MediaPreview';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
+import { seedanceReferenceMediaCapabilities, validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
 import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
+import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
 import type { StudioAssetRole, StudioGenerationHandoff } from '@/lib/template-studio/types';
@@ -37,7 +38,7 @@ import {
   mapStudioVideoParameters,
 } from '@/lib/template-studio-video-handoff';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
-import { Bot, FileJson, Settings2 } from 'lucide-react';
+import { Bot, FileJson, Settings2, RotateCcw } from 'lucide-react';
 import {
   GENERATION_PROMPT_LIMIT_MESSAGE,
   MAX_GENERATION_PROMPT_CHARS,
@@ -381,6 +382,8 @@ function createModuleBuilderDraft(params: {
 interface Props {
   collections: AssetCollection[];
   initialSettings?: GenerationDefaults | null;
+  preferencesReady?: boolean;
+  onSettingsChange?: (settings: Omit<GenerationDefaults, 'projectId' | 'seedMode'>) => void;
   lockedSettings?: {
     sourceLabel: string;
     ratio?: VideoRatio | null;
@@ -477,6 +480,8 @@ interface Props {
 export function GenerationComposer({
   collections,
   initialSettings,
+  preferencesReady = false,
+  onSettingsChange,
   lockedSettings,
   onCollectionLoad,
   onCollectionSave,
@@ -522,6 +527,7 @@ export function GenerationComposer({
   const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
+  const settingsTouchedRef = React.useRef(false);
   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
   const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
@@ -658,6 +664,7 @@ export function GenerationComposer({
   }, [studioHandoff, studioCorrectedParameters, modelOptions, auxiliaryOptions, selectedProvider]);
 
   const markStudioParameterCorrected = useCallback((field: string) => {
+    settingsTouchedRef.current = true;
     setStudioCorrectedParameters((current) => current.includes(field) ? current : [...current, field]);
   }, []);
 
@@ -687,6 +694,8 @@ export function GenerationComposer({
 
   const referenceMediaPreflightBlocker = useMemo(() => {
     const issue = validateSeedanceReferenceMediaPreflight({
+      model: selectedModel,
+      metadataValidation: 'known-only',
       images: workspace.assets
         .filter((asset) => asset.type === 'image')
         .map((asset) => ({
@@ -714,7 +723,7 @@ export function GenerationComposer({
         })),
     });
     return issue?.message || null;
-  }, [workspace.assets]);
+  }, [workspace.assets, selectedModel]);
 
   const durationModel = allowExtendedSeedanceDuration && selectedProvider === 'seedance' ? selectedModel : null;
   const durationBlocker = isSeedanceVideoDuration(duration, durationModel)
@@ -728,6 +737,18 @@ export function GenerationComposer({
   const submitBlockerState = useMemo(() => {
     const reason = (() => {
     if (durationBlocker) return durationBlocker;
+    if (reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)) {
+      return '原任务模型目前不可选，已保留原参数，请明确选择可用模型后再生成。';
+    }
+    if (isVolcengineIpModelId(selectedModel) && !volcengineIpModelResolutions(selectedModel).includes(resolution)) {
+      return '当前模型不支持所选清晰度，请切换模型或重新选择清晰度。';
+    }
+    if (isVolcengineIpModelId(selectedModel) && generationMode !== 'all_in_one_reference' && workspace.assets.some((asset) => asset.type !== 'image')) {
+      return '当前模式不能使用视频或音频参考，请切换全能参考模式或移除这些素材。';
+    }
+    if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
+      return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
+    }
     if (studioHandoff && lockedSettings?.ratio && ratio !== lockedSettings.ratio) {
       return `模板比例 ${ratio} 与当前视频卡锁定比例 ${lockedSettings.ratio} 不一致`;
     }
@@ -822,7 +843,7 @@ export function GenerationComposer({
     return null;
     })();
     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
-  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel]);
+  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
   const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
@@ -1057,13 +1078,13 @@ export function GenerationComposer({
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
     setDuration(reuseDraft.duration);
-    if (reuseDraft.model && modelOptions.some((option) => option.id === reuseDraft.model)) {
+    if (reuseDraft.model) {
       setSelectedModel(reuseDraft.model);
       onModelChange?.(reuseDraft.model);
     }
     setResolution(reuseDraft.resolution);
     setSeed(reuseDraft.seed);
-    setGenerateAudio(true);
+    setGenerateAudio(reuseDraft.generateAudio);
     setReturnLastFrame(reuseDraft.returnLastFrame);
     setWatermark(reuseDraft.watermark);
     setResolutionApprovalConfirmed(
@@ -1073,7 +1094,7 @@ export function GenerationComposer({
   }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange]);
 
   useEffect(() => {
-    if (!initialSettings || appliedInitialSettingsRef.current || reuseDraft || studioHandoff) return;
+    if (!initialSettings || appliedInitialSettingsRef.current || settingsTouchedRef.current || reuseDraft || studioHandoff) return;
     appliedInitialSettingsRef.current = true;
     setGenerationMode(initialSettings.generationMode);
     setRatio(initialSettings.ratio);
@@ -1117,14 +1138,30 @@ export function GenerationComposer({
       return;
     }
     if (!modelOptions.some((option) => option.id === selectedModel)) {
+      if (reuseDraft?.model === selectedModel) return;
       setSelectedModel(fallbackModel);
       onModelChange?.(fallbackModel);
     }
-  }, [modelOptions, onModelChange, selectedModel, studioHandoff, studioSettingsReady]);
+  }, [modelOptions, onModelChange, selectedModel, studioHandoff, studioSettingsReady, reuseDraft?.model]);
 
   // ============================================================================
   // Handlers
   // ============================================================================
+
+  useEffect(() => {
+    if (!preferencesReady || !onSettingsChange || studioHandoff || isRestoringStudioSettings) return;
+    const timeout = setTimeout(() => onSettingsChange({
+      model: selectedModel || null,
+      generationMode,
+      ratio,
+      duration,
+      resolution,
+      generateAudio,
+      returnLastFrame,
+      watermark,
+    }), 400);
+    return () => clearTimeout(timeout);
+  }, [preferencesReady, onSettingsChange, studioHandoff, isRestoringStudioSettings, selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark]);
 
   const handleSubmit = useCallback(async () => {
     if (submitBlocker || submitDisabledReason || isSubmitting) return;
@@ -1574,10 +1611,10 @@ export function GenerationComposer({
       const ok = window.confirm('切换图集会替换当前参考素材列表，确定继续？');
       if (!ok) return;
     }
-    await workspace.loadReferenceAlbum(albumId);
+    await workspace.loadReferenceAlbum(albumId, seedanceReferenceMediaCapabilities(selectedModel).imageLimit);
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(albumName);
-  }, [workspace]);
+  }, [workspace, selectedModel]);
 
   const handleSaveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
     if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考素材');
@@ -1929,6 +1966,7 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
             <ReferenceStrip
+              model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
               onUpload={workspace.uploadAsset}
@@ -1958,6 +1996,7 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
             <ReferenceStrip
+              model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
               onUpload={workspace.uploadAsset}
@@ -2095,6 +2134,30 @@ export function GenerationComposer({
         )}
 
         {/* 参数栏 */}
+        {onSettingsChange && !studioHandoff && (
+          <button
+            type="button"
+            className="composer-result-reset"
+            title="重置生成参数，保留提示词和素材"
+            aria-label="重置生成参数，保留提示词和素材"
+            disabled={!preferencesReady || isSubmitting}
+            onClick={() => {
+              settingsTouchedRef.current = true;
+              setGenerationMode(DEFAULT_GENERATION_MODE);
+              setSelectedModel(modelOptions[0]?.id || '');
+              onModelChange?.(modelOptions[0]?.id || '');
+              setRatio(lockedSettings?.ratio || DEFAULT_RATIO);
+              setDuration(lockedSettings?.duration || DEFAULT_DURATION);
+              setResolution(lockedSettings?.resolution || DEFAULT_RESOLUTION);
+              setSeed(-1);
+              setGenerateAudio(true);
+              setReturnLastFrame(false);
+              setWatermark(false);
+              setResolutionApprovalConfirmed(false);
+              setDraftMode(false);
+            }}
+          ><RotateCcw size={16} aria-hidden="true" /></button>
+        )}
         {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || '请先确认1080p审批已通过。'}</p>}
         <ComposerActionBar
           generationMode={generationMode}
@@ -2114,7 +2177,9 @@ export function GenerationComposer({
           }}
           providerStatus={providerStatus}
           modelLabel={modelLabel}
-          modelOptions={modelOptions}
+          modelOptions={reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)
+            ? [...modelOptions, { id: selectedModel, label: '原模型不可用', detail: selectedModel, disabled: true }]
+            : modelOptions}
           selectedModel={selectedModel}
           durationModel={durationModel}
           onModelChange={(model) => {

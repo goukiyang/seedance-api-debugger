@@ -57,12 +57,12 @@ export function videoDeliveryStageForTask(task: VideoDeliveryStageTask): VideoDe
     };
   }
 
-  if (hasPreview(task)) {
+  if (hasPreview(task) || task.delivery_status === 'pending' || task.delivery_status === 'running') {
     return {
       key: 'preparing',
       label: '已生成，正在准备稳定下载',
       stableDownloadReady: false,
-      previewAvailable: true,
+      previewAvailable: hasPreview(task),
     };
   }
 

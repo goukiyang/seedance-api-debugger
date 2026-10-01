@@ -71,6 +71,9 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         provider: true,
+        model: true,
+        provider_status: true,
+        error_code: true,
         provider_task_id: true,
         prompt: true,
         generation_mode: true,
@@ -79,6 +82,7 @@ export async function GET(request: NextRequest) {
         resolution: true,
         local_status: true,
         delivery_status: true,
+        delivery_error: true,
         local_video_path: true,
         public_video_url: true,
         public_video_storage_provider: true,

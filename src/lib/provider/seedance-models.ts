@@ -10,12 +10,17 @@ export type SeedanceVideoModelOption = {
 
 export const SEEDANCE_2_0_MODEL_ID = 'dreamina-seedance-2-0-260128';
 export const SEEDANCE_2_5_MODEL_ID = 'dreamina-seedance-2-5-260628';
+export const SEEDANCE_2_5_IP_MODEL_ID = 'doubao-seedance-2-5-260628';
 export const DEFAULT_SEEDANCE_VIDEO_MODEL_ID = SEEDANCE_2_0_MODEL_ID;
+
+export function isSeedance25Model(model?: string | null): boolean {
+  return model === SEEDANCE_2_5_MODEL_ID || model === SEEDANCE_2_5_IP_MODEL_ID;
+}
 
 // Official model capability, not a reference-media or edit-pilot duration limit.
 // https://seed.bytedance.com/zh/seedance2_5 (verified 2026-09-28)
 export function seedanceVideoMaxDuration(model?: string | null): number {
-  return model === SEEDANCE_2_5_MODEL_ID ? 30 : 15;
+  return isSeedance25Model(model) ? 30 : 15;
 }
 
 export function seedanceVideoDurationOptions(model?: string | null): VideoDuration[] {
@@ -35,7 +40,7 @@ export function seedanceVideoDurationCapabilities() {
 }
 
 export function seedanceRatioFollowsFirstFrame(model: string | null | undefined, mode: string): boolean {
-  return model === SEEDANCE_2_5_MODEL_ID && mode === 'first_last_frame';
+  return isSeedance25Model(model) && mode === 'first_last_frame';
 }
 
 export const SEEDANCE_VIDEO_MODEL_OPTIONS: SeedanceVideoModelOption[] = [
@@ -57,6 +62,9 @@ const MODEL_IDS = new Set(SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => option.id
 
 function findSeedanceVideoModelOption(value: string | null | undefined): SeedanceVideoModelOption | null {
   const requested = typeof value === 'string' ? value.trim() : '';
+  if (requested === SEEDANCE_2_5_IP_MODEL_ID) {
+    return SEEDANCE_VIDEO_MODEL_OPTIONS.find((option) => option.id === SEEDANCE_2_5_MODEL_ID) || null;
+  }
   if (!requested) {
     return SEEDANCE_VIDEO_MODEL_OPTIONS.find((option) => option.id === DEFAULT_SEEDANCE_VIDEO_MODEL_ID) || null;
   }
@@ -72,6 +80,7 @@ export function isSeedanceVideoModelId(value: string): boolean {
 }
 
 export function seedanceVideoModelLabel(modelId: string): string {
+  if (modelId === SEEDANCE_2_5_IP_MODEL_ID) return 'Seedance 2.5';
   return SEEDANCE_VIDEO_MODEL_OPTIONS.find((option) => option.id === modelId)?.label || modelId;
 }
 

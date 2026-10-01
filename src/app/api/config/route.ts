@@ -4,6 +4,7 @@ import { getAiMediaKitApiSettings, safeAiMediaKitConfigDto } from '@/lib/integra
 import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
 import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
 import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-models';
+import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,7 @@ export async function GET() {
     model: config.model,
     model_options: config.model_options,
     duration_by_model: seedanceVideoDurationCapabilities(),
+    ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities(), draft: false, edit: false, extend: false },
     api_key_configured: isApiKeyConfigured(),
     seedance_draft: seedanceDraftCapability(),
     aimediakit_enhance_video: {

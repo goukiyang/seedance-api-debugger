@@ -76,6 +76,8 @@ function serializeTaskForIpStatus<T extends {
   public_video_file_size?: number | null;
   public_video_cached_at?: Date | null;
   error_message: string | null;
+  error_code?: string | null;
+  delivery_error?: string | null;
   project_id: string | null;
   video_card_id: string | null;
   template_id?: string | null;
@@ -134,6 +136,8 @@ function serializeTaskForIpStatus<T extends {
     public_video_file_size: visibleTask.public_video_file_size ?? null,
     public_video_cached_at: visibleTask.public_video_cached_at ?? null,
     error_message: safeVolcengineIpUserMessage(visibleTask.error_message),
+    error_code: visibleTask.error_code ?? null,
+    delivery_error: visibleTask.delivery_error ?? null,
     project_id: visibleTask.project_id,
     video_card_id: visibleTask.video_card_id,
     template_id: visibleTask.template_id ?? null,

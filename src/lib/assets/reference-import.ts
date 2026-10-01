@@ -292,9 +292,13 @@ export async function ensureWorkspaceImageAssetsHaveReferenceImages(
 }
 
 export async function importReferenceImageUrlsToSite(
-  context: ReferenceImportContext & { urls: string[] },
+  context: ReferenceImportContext & { urls: string[]; maxImages?: number },
 ): Promise<ImportedReferenceImage[]> {
-  const urls = uniquePreserveOrder(context.urls).slice(0, 9);
+  const maxImages = context.maxImages ?? 9;
+  const urls = uniquePreserveOrder(context.urls);
+  if (urls.length > maxImages) {
+    throw new ReferenceImportError(`单次生成最多选择 ${maxImages} 张参考图`, 400, 'reference_image_count_exceeded');
+  }
   const imported: ImportedReferenceImage[] = [];
 
   for (let index = 0; index < urls.length; index += 1) {

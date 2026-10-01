@@ -119,6 +119,10 @@ async function main() {
   const select = {
     id: true,
     provider_task_id: true,
+    error_code: true,
+    provider: true,
+    public_video_url: true,
+    delivery_attempts: true,
     local_status: true,
     local_video_path: true,
     result_video_url: true,
@@ -156,6 +160,7 @@ async function main() {
       ? await prisma.videoTask.findMany({
           where: {
             provider_task_id: null,
+            OR: [{ error_code: null }, { error_code: { not: 'IP_SUBMISSION_UNCONFIRMED' } }],
             local_status: 'submitted',
             frozen_cost: { gt: 0 },
             created_at: { lte: new Date(Date.now() - orphanMinAgeMinutes * 60 * 1000) },
@@ -175,7 +180,15 @@ async function main() {
           where: {
             provider_task_id: { not: null },
             local_status: 'succeeded',
-            local_video_path: null,
+            AND: [{ OR: [
+              { provider: { not: 'volcengine_ark' } },
+              { delivery_attempts: null },
+              { delivery_attempts: { lt: 6 } },
+            ] }],
+            OR: [
+              { local_video_path: null },
+              { provider: 'volcengine_ark', public_video_url: null },
+            ],
             result_video_url: { not: null },
             created_at: { gte: new Date(Date.now() - missingLocalMaxAgeDays * 24 * 60 * 60 * 1000) },
           },

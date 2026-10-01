@@ -247,7 +247,6 @@ async function recordOfficialProviderCharge(
   await prisma.$transaction(async (tx) => {
     const freshTask = await tx.videoTask.findUnique({ where: { id: taskId } });
     if (!freshTask) return;
-
     await recordProviderReportedCharge(tx, freshTask, charge, createdBy || null);
   });
 }
@@ -261,6 +260,8 @@ export async function settleTask(
   await prisma.$transaction(async (tx) => {
     const freshTask = await tx.videoTask.findUnique({ where: { id: taskId } });
     if (!freshTask) return;
+    if (freshTask.provider === 'volcengine_ark'
+      && (freshTask.local_status !== terminalStatus || (freshTask.frozen_cost ?? 0) <= 0)) return;
 
     const effectiveFrozenAmount = Math.max(0, Number(freshTask.frozen_cost ?? frozenAmount ?? 0));
     if (effectiveFrozenAmount <= 0) {
@@ -400,6 +401,23 @@ async function cacheAndMaybeThumbnail(
   let taskForThumbnail = task;
 
   if (options.cacheOnSuccess && task.local_status === 'succeeded' && (task.result_video_url || task.local_video_path)) {
+    const trackIpDelivery = task.provider === 'volcengine_ark' && !task.public_video_url;
+    if (trackIpDelivery) {
+      const claimed = await prisma.videoTask.updateMany({ where: {
+        id: task.id,
+        public_video_url: null,
+        AND: [
+          { OR: [{ delivery_attempts: null }, { delivery_attempts: { lt: 6 } }] },
+          { OR: [{ delivery_status: null }, { delivery_status: { not: 'running' } }, { delivery_started_at: { lt: new Date(Date.now() - 10 * 60_000) } }] },
+          { OR: [{ delivery_started_at: null }, { delivery_started_at: { lt: new Date(Date.now() - 30_000) } }] },
+        ],
+      }, data: {
+        delivery_status: 'running', delivery_started_at: new Date(), delivery_error: null,
+        delivery_attempts: (task.delivery_attempts || 0) + 1,
+      } });
+      if (!claimed.count) return { cacheResult, thumbnailResult, publicDeliveryResult };
+    }
+    try {
     cacheResult = await withLocalCacheSlot(() => cacheTaskVideoToLocal({
       id: task.id,
       provider: task.provider,
@@ -408,7 +426,7 @@ async function cacheAndMaybeThumbnail(
       result_video_url: task.result_video_url,
       result_last_frame_url: task.result_last_frame_url,
       local_video_path: task.local_video_path,
-    }, { timeoutMs: options.cacheTimeoutMs }));
+    }, { timeoutMs: task.model === 'doubao-seedance-2-5-260628' ? Math.max(options.cacheTimeoutMs || 0, 180_000) : options.cacheTimeoutMs }));
 
     if (cacheResult.success && cacheResult.local_video_path) {
       taskForThumbnail = {
@@ -442,6 +460,22 @@ async function cacheAndMaybeThumbnail(
         error: cacheResult.error,
         status: cacheResult.status,
       });
+    }
+    if (trackIpDelivery) {
+      const ready = publicDeliveryResult?.success === true;
+      await prisma.videoTask.update({ where: { id: task.id }, data: {
+        delivery_status: ready ? 'succeeded' : 'failed',
+        delivery_completed_at: ready ? new Date() : null,
+        delivery_error: ready ? null : '视频已生成，但保存未完成。可重试保存，不会重新生成或再次扣点。',
+      } });
+    }
+    } catch (error) {
+      if (trackIpDelivery) {
+        await prisma.videoTask.update({ where: { id: task.id }, data: {
+          delivery_status: 'failed', delivery_error: '视频保存遇到问题，可重试保存，不会重新生成或再次扣点。',
+        } });
+      }
+      throw error;
     }
   }
 
@@ -502,6 +536,17 @@ async function persistProviderStatusError(taskId: string, task: VideoTask, error
   // 任务一旦已经进入终态，后续成本记录、缓存或缩略图失败不能再把它打回 running。
   if (isTerminalLocalStatus(latestTask.local_status)) {
     return latestTask;
+  }
+
+  if (latestTask.provider === 'volcengine_ark') {
+    await prisma.videoTask.updateMany({
+      where: { id: taskId, local_status: latestTask.local_status, updated_at: latestTask.updated_at },
+      data: {
+        provider_status: 'unknown',
+        raw_status_response: JSON.stringify({ error: errorMessage }),
+      },
+    });
+    return await prisma.videoTask.findUnique({ where: { id: taskId } }) || latestTask;
   }
 
   return prisma.videoTask.update({
@@ -581,6 +626,10 @@ export async function finalizeVideoTaskStatus(
 
   try {
     const statusResult = await getProviderTaskStatus(task);
+    if (task.provider === 'volcengine_ark' && isTerminalLocalStatus(task.local_status)
+      && statusResult.local_status !== task.local_status) {
+      return { task, statusRefreshed: false, terminal: true, skippedReason: 'terminal_status_preserved' };
+    }
 
     const updateData: Prisma.VideoTaskUncheckedUpdateInput = {
       provider_status: statusResult.provider_status,
@@ -620,7 +669,9 @@ export async function finalizeVideoTaskStatus(
       });
       updateData.error_message = userFacingError.message;
       updateData.error_code = userFacingError.code;
-    } else if (statusResult.local_status === 'succeeded') {
+    } else if (statusResult.local_status === 'succeeded'
+      || (task.provider === 'volcengine_ark' && (task.error_code === 'IP_SUBMISSION_UNCONFIRMED'
+        || (task.error_code === 'IP_CANCEL_UNCONFIRMED' && isTerminalLocalStatus(statusResult.local_status))))) {
       updateData.error_message = null;
       updateData.error_code = null;
     }
@@ -634,6 +685,14 @@ export async function finalizeVideoTaskStatus(
       && isH3InternalOutputUrl(statusResult.result_video_url);
 
     if (!hasVideoTaskUpdateChanges(task, updateData)) {
+      if (task.provider === 'volcengine_ark' && isTerminalLocalStatus(task.local_status)) {
+        if (shouldSettleTerminalCosts(task)) {
+          await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, task.local_status);
+        }
+        const localResult = await cacheAndMaybeThumbnail(task, { cacheOnSuccess, generateThumbnail, cacheTimeoutMs });
+        return { task: await prisma.videoTask.findUnique({ where: { id: taskId } }) || task,
+          statusRefreshed: true, terminal: true, ...localResult };
+      }
       if (shouldDeferH3Settlement) {
         const localResult = await cacheAndMaybeThumbnail(task, { cacheOnSuccess, generateThumbnail, cacheTimeoutMs });
         if (localResult.cacheResult?.success !== true) {
@@ -670,10 +729,18 @@ export async function finalizeVideoTaskStatus(
       };
     }
 
-    await prisma.videoTask.update({
-      where: { id: taskId },
-      data: updateData,
-    });
+    if (task.provider === 'volcengine_ark') {
+      const changed = await prisma.videoTask.updateMany({
+        where: { id: taskId, local_status: task.local_status, updated_at: task.updated_at },
+        data: updateData,
+      });
+      if (!changed.count) {
+        const current = await prisma.videoTask.findUnique({ where: { id: taskId } });
+        return { task: current, statusRefreshed: false, terminal: isTerminalLocalStatus(current?.local_status || null), skippedReason: 'concurrent_status_change' };
+      }
+    } else {
+      await prisma.videoTask.update({ where: { id: taskId }, data: updateData });
+    }
 
     if (isTerminal && !shouldDeferH3Settlement && shouldSettleTerminalCosts(task)) {
       await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, statusResult.local_status);

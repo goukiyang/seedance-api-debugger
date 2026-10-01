@@ -69,7 +69,12 @@ export async function mediaPreviewResponse(request: Request, source: string, fal
     stream.once('close', () => request.signal.removeEventListener('abort', abort));
     return new NextResponse(Readable.toWeb(stream) as ReadableStream<Uint8Array>, { status: range ? 206 : 200, headers: responseHeaders });
   }
-  return remotePreview(request, source, contentType, AbortSignal.any([request.signal, AbortSignal.timeout(600000)]), 0);
+  return fetchPublicMedia(request, source, contentType);
+}
+
+// Public-only transport: pinned DNS and every redirect are checked; no cookies or authorization are forwarded.
+export function fetchPublicMedia(request: Request, source: string, fallbackMime: string) {
+  return remotePreview(request, source, fallbackMime, AbortSignal.any([request.signal, AbortSignal.timeout(600000)]), 0);
 }
 
 async function remotePreview(request: Request, source: string, fallbackMime: string, signal: AbortSignal, redirects: number): Promise<NextResponse> {

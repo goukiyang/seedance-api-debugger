@@ -21,6 +21,7 @@ export interface CreateSnapshotInput {
   promptRaw: string;
   input: Omit<CreateVideoInput, 'prompt'> & { prompt: string };
   providerPayloadJson?: string;
+  contentOverride?: unknown;
 }
 
 /**
@@ -36,10 +37,12 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
   // 构建 content 数组（用于调试）
   let contentJson: string | null = null;
   if (input.workspaceId) {
-    const content = buildContentArray({
-      ...input.input,
-      prompt: promptRendered,
-    } as CreateVideoInput);
+    const content = input.contentOverride !== undefined
+      ? input.contentOverride
+      : buildContentArray({
+          ...input.input,
+          prompt: promptRendered,
+        } as CreateVideoInput);
     contentJson = JSON.stringify(content, null, 2);
   }
 

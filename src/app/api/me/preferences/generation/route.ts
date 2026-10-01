@@ -4,15 +4,20 @@ import { AuthError } from '@/lib/auth/session';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { getProjectAccess } from '@/lib/projects/permissions';
 import {
-  GENERATION_DEFAULTS_PREFERENCE_KEY,
+  generationDefaultsPreferenceKey,
   normalizeGenerationDefaults,
   parseStoredGenerationDefaults,
   serializeGenerationDefaults,
+  type GenerationSurface,
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
 import type { SessionUser } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
+
+function requestSurface(value: string | null | undefined): GenerationSurface {
+  return value === 'ip' ? 'ip' : 'normal';
+}
 
 function isMissingPreferenceTable(error: unknown) {
   return Boolean(
@@ -44,18 +49,19 @@ function authError(error: unknown) {
 export async function GET(request: NextRequest) {
   try {
     const user = await getSessionUser(request);
+    const surface = requestSurface(request.nextUrl.searchParams.get('surface'));
     try {
       const row = await prisma.userPreference.findUnique({
         where: {
           user_id_key: {
             user_id: user.id,
-            key: GENERATION_DEFAULTS_PREFERENCE_KEY,
+            key: generationDefaultsPreferenceKey(surface),
           },
         },
         select: { value_json: true, updated_at: true },
       });
 
-      const parsed = parseStoredGenerationDefaults(row?.value_json);
+      const parsed = parseStoredGenerationDefaults(row?.value_json, surface);
       const settings = parsed ? await stripInaccessibleProject(user, parsed) : null;
       return NextResponse.json({
         settings,
@@ -84,24 +90,26 @@ export async function PATCH(request: NextRequest) {
   try {
     const user = await getSessionUser(request);
     const body = await request.json().catch(() => ({}));
+    const surface = requestSurface((body as { surface?: unknown }).surface as string | undefined);
     const settings = await stripInaccessibleProject(
       user,
-      normalizeGenerationDefaults((body as { settings?: unknown }).settings ?? body),
+      normalizeGenerationDefaults((body as { settings?: unknown }).settings ?? body, surface),
     );
-    const valueJson = serializeGenerationDefaults(settings);
+    const preferenceKey = generationDefaultsPreferenceKey(surface);
+    const valueJson = serializeGenerationDefaults(settings, surface);
 
     try {
       await prisma.userPreference.upsert({
         where: {
           user_id_key: {
             user_id: user.id,
-            key: GENERATION_DEFAULTS_PREFERENCE_KEY,
+            key: preferenceKey,
           },
         },
         update: { value_json: valueJson },
         create: {
           user_id: user.id,
-          key: GENERATION_DEFAULTS_PREFERENCE_KEY,
+          key: preferenceKey,
           value_json: valueJson,
         },
       });

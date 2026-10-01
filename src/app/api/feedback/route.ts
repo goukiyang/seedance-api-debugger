@@ -3,8 +3,6 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
-const MAX_IMAGES = 3;
-
 function text(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -14,8 +12,7 @@ function cleanImageUrls(value: unknown) {
   return value
     .filter((item): item is string => typeof item === 'string')
     .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, MAX_IMAGES);
+    .filter(Boolean);
 }
 
 export async function POST(request: NextRequest) {
@@ -29,10 +26,6 @@ export async function POST(request: NextRequest) {
     if (!content) {
       return NextResponse.json({ error: '请输入反馈内容' }, { status: 400 });
     }
-    if (Array.isArray(body.imageUrls) && body.imageUrls.length > MAX_IMAGES) {
-      return NextResponse.json({ error: '最多上传 3 张图片' }, { status: 400 });
-    }
-
     const user = await getSession();
     userId = user?.id || null;
     const feedback = await prisma.feedback.create({

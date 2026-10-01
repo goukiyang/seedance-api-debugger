@@ -71,7 +71,7 @@ export interface UseWorkspaceResult {
   retryPendingAttach: () => Promise<void>;
   addAssets: (assetIds: string[]) => Promise<void>;
   addReferenceImages: (referenceImageIds: string[]) => Promise<void>;
-  loadReferenceAlbum: (albumId: string) => Promise<void>;
+  loadReferenceAlbum: (albumId: string, maxImages?: number) => Promise<void>;
   saveCurrentAsReferenceAlbum: (name: string) => Promise<string>;
   createReferenceAlbum: (name: string) => Promise<string>;
   clearAssets: () => Promise<void>;
@@ -304,7 +304,7 @@ export function useWorkspace(): UseWorkspaceResult {
     }
   }, [fetchWorkspace]);
 
-  const loadReferenceAlbum = useCallback(async (albumId: string) => {
+  const loadReferenceAlbum = useCallback(async (albumId: string, maxImages = 9) => {
     setLoading(true);
     try {
       const detailRes = await fetch(`/api/reference-albums/${albumId}`);
@@ -314,8 +314,10 @@ export function useWorkspace(): UseWorkspaceResult {
       if (!detailRes.ok) throw new Error(detail.error || detail.message || '读取图集失败');
       const referenceImageIds = (detail.images || [])
         .map((image) => image.id)
-        .filter((id): id is string => Boolean(id))
-        .slice(0, 9);
+        .filter((id): id is string => Boolean(id));
+      if (referenceImageIds.length > maxImages) {
+        throw new Error(`当前模型最多使用 ${maxImages} 张参考图。图集有 ${referenceImageIds.length} 项，请从素材选择器按需选择，现有素材未被替换。`);
+      }
       const res = await fetch('/api/workspace/assets', {
         method: 'POST',
         headers: {

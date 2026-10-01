@@ -1,42 +1,158 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 
 type UploadItem = {
   id: string;
-  file: File;
-  previewUrl: string;
+  file?: File;
+  previewUrl?: string;
   assetId?: string;
   imageUrl?: string;
   uploading: boolean;
   error?: string;
 };
 
-const MAX_IMAGES = 3;
 const MAX_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const FEEDBACK_DRAFT_PREFIX = 'feedback-widget:draft:v1:';
+
+type FeedbackDraft = {
+  content: string;
+  uploads: UploadItem[];
+};
+
+function revokePreviewUrl(url?: string) {
+  if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+function feedbackDraftKey(userId: string | null) {
+  return `${FEEDBACK_DRAFT_PREFIX}${userId ? `user:${encodeURIComponent(userId)}` : 'guest'}`;
+}
+
+function isRestorableImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.trim() || value.startsWith('//')) return false;
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function readFeedbackDraft(key: string): FeedbackDraft {
+  try {
+    const value = localStorage.getItem(key);
+    if (!value) return { content: '', uploads: [] };
+    const parsed = JSON.parse(value) as { version?: unknown; content?: unknown; uploads?: unknown };
+    if (parsed.version !== 1) return { content: '', uploads: [] };
+    const uploads = Array.isArray(parsed.uploads)
+      ? parsed.uploads.flatMap((item: unknown): UploadItem[] => {
+        if (!item || typeof item !== 'object') return [];
+        const upload = item as { id?: unknown; assetId?: unknown; imageUrl?: unknown };
+        if (typeof upload.id !== 'string' || typeof upload.assetId !== 'string' || !isRestorableImageUrl(upload.imageUrl)) return [];
+        return [{ id: upload.id, assetId: upload.assetId, imageUrl: upload.imageUrl, previewUrl: upload.imageUrl, uploading: false }];
+      })
+      : [];
+    return { content: typeof parsed.content === 'string' ? parsed.content : '', uploads };
+  } catch {
+    return { content: '', uploads: [] };
+  }
+}
 
 export default function FeedbackWidget() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState('');
   const [uploads, setUploads] = useState<UploadItem[]>([]);
+  const [draftKey, setDraftKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const uploadsRef = useRef<UploadItem[]>([]);
+  const contentRef = useRef('');
+  const draftKeyRef = useRef<string | null>(null);
+  const contentEditedRef = useRef(false);
+  const draftIdentityReadyRef = useRef(false);
+  const submittingRef = useRef(false);
+  const activeUploadsRef = useRef(new Set<string>());
 
   const hidden = useMemo(() => pathname === '/login' || pathname.startsWith('/admin'), [pathname]);
+
+  const replaceUploads = useCallback((update: React.SetStateAction<UploadItem[]>) => {
+    const next = typeof update === 'function' ? update(uploadsRef.current) : update;
+    uploadsRef.current = next;
+    setUploads(next);
+  }, []);
+
+  const updateContent = useCallback((value: string) => {
+    contentRef.current = value;
+    setContent(value);
+  }, []);
 
   useEffect(() => {
     uploadsRef.current = uploads;
   }, [uploads]);
 
   useEffect(() => () => {
-    uploadsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    uploadsRef.current.forEach((item) => revokePreviewUrl(item.previewUrl));
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    draftIdentityReadyRef.current = false;
+    fetch('/api/auth/me', { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Unable to resolve feedback draft account');
+        return response.json() as Promise<{ user?: { id?: unknown } | null }>;
+      })
+      .then((data) => {
+        draftIdentityReadyRef.current = true;
+        const userId = typeof data.user?.id === 'string' ? data.user.id : null;
+        const nextKey = feedbackDraftKey(userId);
+        if (draftKeyRef.current === nextKey) return;
+
+        const draft = readFeedbackDraft(nextKey);
+        const currentUploads = uploadsRef.current;
+        if (draftKeyRef.current) {
+          currentUploads.forEach((item) => revokePreviewUrl(item.previewUrl));
+          replaceUploads(draft.uploads);
+          contentEditedRef.current = false;
+          updateContent(draft.content);
+        } else {
+          const currentAssetKeys = new Set(currentUploads.flatMap((item) => [item.assetId, item.imageUrl].filter(Boolean)));
+          const restoredUploads = draft.uploads.filter((item) => !currentAssetKeys.has(item.assetId) && !currentAssetKeys.has(item.imageUrl));
+          replaceUploads([...restoredUploads, ...currentUploads]);
+          if (!contentEditedRef.current) updateContent(draft.content);
+        }
+
+        draftKeyRef.current = nextKey;
+        setDraftKey(nextKey);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) draftIdentityReadyRef.current = true;
+      });
+    return () => controller.abort();
+  }, [pathname, replaceUploads, updateContent]);
+
+  useEffect(() => {
+    if (!draftKey) return;
+    const persistedUploads = uploads.flatMap((item) => (
+      item.assetId && item.imageUrl
+        ? [{ id: item.id, assetId: item.assetId, imageUrl: item.imageUrl }]
+        : []
+    ));
+    try {
+      if (!content && persistedUploads.length === 0) {
+        localStorage.removeItem(draftKey);
+        return;
+      }
+      localStorage.setItem(draftKey, JSON.stringify({ version: 1, content, uploads: persistedUploads }));
+    } catch {
+      // Draft persistence is best-effort; feedback submission remains available.
+    }
+  }, [content, draftKey, uploads]);
 
   useEffect(() => {
     if (hidden) setOpen(false);
@@ -45,14 +161,16 @@ export default function FeedbackWidget() {
   if (hidden) return null;
 
   const removeUpload = (id: string) => {
-    setUploads((current) => {
+    replaceUploads((current) => {
       const target = current.find((item) => item.id === id);
-      if (target) URL.revokeObjectURL(target.previewUrl);
+      if (target) revokePreviewUrl(target.previewUrl);
       return current.filter((item) => item.id !== id);
     });
   };
 
   const uploadFile = async (item: UploadItem) => {
+    if (!item.file || activeUploadsRef.current.has(item.id)) return;
+    activeUploadsRef.current.add(item.id);
     try {
       const asset = await uploadFileAsAsset(item.file, {
         invalidJsonMessage: '反馈截图上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
@@ -61,38 +179,36 @@ export default function FeedbackWidget() {
       if (!asset.id || !imageUrl) {
         throw new Error('图片上传成功，但没有返回可提交的图片地址。');
       }
-      setUploads((current) => current.map((upload) => (
+      replaceUploads((current) => current.map((upload) => (
         upload.id === item.id
           ? { ...upload, uploading: false, assetId: asset.id, imageUrl, error: asset.warning || undefined }
           : upload
       )));
     } catch (err) {
-      setUploads((current) => current.map((upload) => (
+      replaceUploads((current) => current.map((upload) => (
         upload.id === item.id
           ? { ...upload, uploading: false, error: err instanceof Error ? err.message : '图片上传失败，请移除后重试。' }
           : upload
       )));
+    } finally {
+      activeUploadsRef.current.delete(item.id);
     }
   };
 
-  const onFiles = (files: FileList | null) => {
+  const onFiles = (files: File[] | FileList | null) => {
     setError('');
     if (!files) return;
-    const remaining = MAX_IMAGES - uploads.length;
-    if (remaining <= 0) {
-      setError('最多上传 3 张图片');
-      return;
-    }
 
-    const next = Array.from(files).slice(0, remaining);
+    const next = Array.from(files);
     const validItems: UploadItem[] = [];
+    let firstValidationError = '';
     for (const file of next) {
       if (!ALLOWED_TYPES.includes(file.type)) {
-        setError('仅支持 jpg、jpeg、png、webp 图片');
+        firstValidationError ||= '仅支持 jpg、jpeg、png、webp 图片';
         continue;
       }
       if (file.size > MAX_SIZE) {
-        setError('单张图片不能超过 5MB');
+        firstValidationError ||= '单张图片不能超过 5MB';
         continue;
       }
       validItems.push({
@@ -103,46 +219,71 @@ export default function FeedbackWidget() {
       });
     }
 
+    if (firstValidationError) setError(firstValidationError);
     if (validItems.length) {
-      setUploads((current) => [...current, ...validItems]);
+      replaceUploads((current) => [...current, ...validItems]);
       validItems.forEach(uploadFile);
     }
   };
 
   const retryUpload = (id: string) => {
-    const item = uploads.find((upload) => upload.id === id);
+    const item = uploadsRef.current.find((upload) => upload.id === id);
     if (!item) return;
-    setUploads((current) => current.map((upload) => (
+    if (!item.file) {
+      setError('当前图片无法重试，请移除后重新选择。');
+      return;
+    }
+    replaceUploads((current) => current.map((upload) => (
       upload.id === id ? { ...upload, uploading: true, error: undefined } : upload
     )));
     uploadFile(item);
   };
 
+  const onPaste = (event: React.ClipboardEvent<HTMLElement>) => {
+    const imageFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .flatMap((item) => {
+        const file = item.getAsFile();
+        return file ? [file] : [];
+      });
+    if (!imageFiles.length) return;
+    if (!event.clipboardData.getData('text/plain')) event.preventDefault();
+    onFiles(imageFiles);
+  };
+
   const submit = async () => {
+    if (submittingRef.current) return;
+    if (!draftIdentityReadyRef.current) {
+      setError('正在恢复反馈草稿，请稍候再提交。');
+      return;
+    }
     setError('');
     setMessage('');
-    const imageUrls = uploads.filter((item) => item.imageUrl).map((item) => item.imageUrl as string);
-    const uploadedAssetIds = uploads.filter((item) => item.assetId).map((item) => item.assetId as string);
-    if (!content.trim()) {
+    const submittedContent = contentRef.current;
+    const submittedUploads = [...uploadsRef.current];
+    if (!submittedContent.trim()) {
       setError('请输入反馈内容');
       return;
     }
-    if (uploads.some((item) => item.uploading)) {
+    if (submittedUploads.some((item) => item.uploading)) {
       setError('图片仍在上传，请稍候');
       return;
     }
-    if (uploads.some((item) => !item.imageUrl)) {
+    if (submittedUploads.some((item) => !item.imageUrl || !item.assetId)) {
       setError('有图片上传失败，请移除或重试后再提交');
       return;
     }
 
+    const imageUrls = submittedUploads.map((item) => item.imageUrl as string);
+    const uploadedAssetIds = submittedUploads.map((item) => item.assetId as string);
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const response = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          content,
+          content: submittedContent,
           imageUrls,
           uploadedAssetIds,
           pageUrl: window.location.href,
@@ -152,9 +293,15 @@ export default function FeedbackWidget() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '提交失败，请稍后重试。');
       setMessage('已收到反馈，谢谢。');
-      setContent('');
-      uploads.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      setUploads([]);
+      const submittedIds = new Set(submittedUploads.map((item) => item.id));
+      const submittedPreviewUrls = new Set(submittedUploads.map((item) => item.previewUrl).filter(Boolean));
+      const remainingUploads = uploadsRef.current.filter((item) => !submittedIds.has(item.id));
+      submittedPreviewUrls.forEach((url) => revokePreviewUrl(url));
+      replaceUploads(remainingUploads);
+      if (contentRef.current === submittedContent) {
+        contentEditedRef.current = false;
+        updateContent('');
+      }
       window.setTimeout(() => {
         setMessage('');
         setOpen(false);
@@ -163,6 +310,7 @@ export default function FeedbackWidget() {
       const reason = err instanceof Error ? err.message : '提交失败，请稍后重试。';
       setError(imageUrls.length > 0 ? `截图已上传成功，但反馈提交失败：${reason}` : reason);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -174,7 +322,7 @@ export default function FeedbackWidget() {
   return (
     <div style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 60 }}>
       {open && (
-        <section style={{
+        <section onPaste={onPaste} style={{
           width: 360,
           maxWidth: 'calc(100vw - 48px)',
           maxHeight: 520,
@@ -199,7 +347,10 @@ export default function FeedbackWidget() {
 
           <textarea
             value={content}
-            onChange={(event) => setContent(event.target.value)}
+            onChange={(event) => {
+              contentEditedRef.current = true;
+              updateContent(event.target.value);
+            }}
             placeholder="请输入你的反馈"
             rows={5}
             style={{
@@ -224,14 +375,13 @@ export default function FeedbackWidget() {
             border: '1px dashed rgba(255,255,255,0.22)',
             borderRadius: 8,
             color: 'rgba(255,255,255,0.72)',
-            cursor: uploads.length >= MAX_IMAGES ? 'not-allowed' : 'pointer',
+            cursor: 'pointer',
           }}>
-            上传图片（最多 3 张）
+            上传图片，或在反馈窗口粘贴
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
               multiple
-              disabled={uploads.length >= MAX_IMAGES}
               onChange={(event) => {
                 onFiles(event.target.files);
                 event.currentTarget.value = '';
@@ -244,7 +394,7 @@ export default function FeedbackWidget() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 12 }}>
               {uploads.map((item) => (
                 <div key={item.id} style={{ position: 'relative' }}>
-                  <img src={item.previewUrl} alt="反馈图片预览" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8 }} />
+                  <img src={item.previewUrl || item.imageUrl} alt="反馈图片预览" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8 }} />
                   <button type="button" onClick={() => removeUpload(item.id)} aria-label="移除图片" style={{ ...iconButtonStyle, position: 'absolute', top: 4, right: 4 }}>×</button>
                   <div style={{ marginTop: 4, minHeight: 18, color: item.error ? '#fca5a5' : 'rgba(255,255,255,0.58)', fontSize: 11 }}>
                     {item.uploading ? '上传中' : item.error ? item.error : '已上传'}
