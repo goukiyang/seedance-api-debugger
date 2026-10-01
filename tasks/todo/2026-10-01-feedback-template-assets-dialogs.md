@@ -214,5 +214,17 @@
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | N1 | 隐藏视频卡相关内容 | 隐藏对应入口和展示，不删除数据 | 进行中：普通展示已隐藏，必要选择/新建入口待确认 |
-| N2 | 按新设计调整图片模板 | 三个独立图片区、数量提示、添加和移除操作一致 | 进行中：实现完成，类型检查通过，待发布及用户手动验收 |
-| N3 | 发布交付 | 构建、推送、回退保护和正式站检查完成 | 进行中 |
+| N2 | 按新设计调整图片模板 | 三个独立图片区、数量提示、添加和移除操作一致 | 进行中：v0.32.1已部署，待用户手动验收实际效果 |
+| N3 | 发布交付 | 构建、推送、回退保护和正式站检查完成 | 已完成：候选构建、Git与回退标签、公网版本/资源一致 |
+
+### v0.32.1 部署与修改记录
+
+- 2026-10-01 22:15 CST，正式入口 `https://sd2.youdooart.com/template-studio?type=image` 已部署，待用户手动验收。应用提交 `241f83de2166c4bb04304b7f1809e9ab25a340fb` 已推送；远端回退标签 `rollback/2026-10-01-before-image-layout` 指向 v0.32.0 `6c21477eaf67173cdc40e2d5e539bcf79f90ae5c`。
+- `git diff --check`、`npx tsc --noEmit --incremental false` 及服务器 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 成功；构建包括类型/lint检查。既有 globals.css 的 start/end 兼容性及构建缓存警告未扩大处理，不影响构建完成。
+- 正式 BUILD_ID `oXz2zS34uKafiG0hH-ZRh`；网页与图片worker均 active/running、Result=success、NRestarts=0；两个视频交付timer保持active。服务器本机 `/api/config` 200；公网 `/api/config`、`/api/release`、`/login` 200且来源头 `server-42-193`。图片/模板/项目/任务/生成入口共28份前端文件哈希与实际构建一致，并检出风格图片上限控件。首次本机curl因旧临时输出文件权限失败，改用本轮唯一文件名后返回200且退出0，未修改权限。
+- 源码包上传前后SHA256一致；构建使用独立数据库副本且quick_check通过。旧构建与源码位于 `/srv/video-api-debugger/backups/image-layout-241f83de2166c4bb04304b7f1809e9ab25a340fb/`。同步排除密钥、运行依赖、数据库、storage与上传媒体，未迁移或覆盖生产数据；未修改登录、点数、Provider、付费生成或上传业务逻辑。
+- 延用现有 `ReleaseNotice.tsx` 的新版本检测、稍后去重、手动检查和刷新确认，更新唯一版本来源与摘要；没有浏览器操作、功能回归、付费生成或独立审核，不宣称布局/提醒交互已真实验收。
+- 修改文件与内容：`src/app/image-studio/studio.tsx` 三分区、数量设置/计数、固定图展示和草稿恢复；`studio.module.css` 方形网格、标题、添加/移除/角色图标布局；`reference-grid.tsx` 素材网格与紧凑角色按钮；`style-groups-view.tsx` 封面方块和图片数量约束；`src/lib/image-studio/reference-policy.ts` 保存/校验风格图片和普通参考独立上限，兼容旧策略。
+- 视频卡展示涉及五处：`src/app/projects/[id]/page.tsx` 隐藏历史任务视频卡列；`src/app/tasks/[id]/page.tsx` 隐藏身份栏、摘要和高级区视频卡内容；`src/components/generate/GeneratePageClient.tsx` 与 `src/components/templates/TemplateGenerateClient.tsx` 移除结果卡的视频卡名称；`src/components/generate/EnhanceVideoPageClient.tsx` 移除候选摘要中的视频卡文案。普通生成/模板生成的选择新建、任务移动的目标归属仍保留，审批页相关业务也未改，待用户明确后续边界。
+- 配套：`package.json`、`package-lock.json` 仅同步0.32.1版本，不增删升级依赖；`src/lib/release.ts` 更新摘要；`.gitignore` 排除本轮私有设计原图；`docs/materials/index.md` 登记原图入口及校验；本工单登记范围、缺口和发布证据。统一diff：`/tmp/sd2-v0.32.1-unified.diff`。
+- 守门员：界面实现与部署（L3）；start/finish检查已执行，真实效果层按项目规则交用户手动验收。本轮无新增人为分级/归类误判；工具关键词分类不用于扩大任务范围。N1不因已部署而标全部完成。
