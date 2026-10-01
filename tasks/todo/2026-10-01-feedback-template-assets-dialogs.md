@@ -124,3 +124,10 @@
 - 本轮应用变更共 61 个文件。核心入口：`src/lib/image-studio/{protected-assets,style-groups,fixed-references,modules,presets,tasks,worker}.ts` 与对应 API 负责权限和服务端引用；`src/app/image-studio/{studio,reference-grid,style-groups-view}.tsx` 和样式负责选组、备注及紧凑参考图；`src/app/assets/{page.tsx,assets.module.css}` 负责画框；`src/components/useDialogDismiss.ts` 与上述弹窗清单中的组件负责安全关闭；`RelativeTime.tsx`/CSS 负责近时展示；`ReleaseNotice.tsx`、`src/lib/release.ts`、package 两文件负责升级提醒与唯一版本；隔离脚本负责权限证据。
 - 完整文件路径及逐文件统一 diff：本机 `/tmp/sd2-v0.31.0-unified.diff`；正式实现与规则入口以本工单为准，旧工作区只保留历史规划副本和本工单链接。
 - 守门员 finish 已执行：按实际内容权限范围为 L4；Git/发布层有证据，真实页面层依项目要求交用户手动验收。自身分级误判记录：无。三条反馈保留原状态，不提前归档。
+
+## 2026-10-01 新反馈补充：风格组整体备注
+
+- 来源：用户在新反馈澄清中明确要求“风格组里面还需要有一个位置是可以写整体这个风格组的备注。绑定这些素材一起纳入上下文。”关联反馈 `cmupd4h950057hzta4g2nyu5j`。
+- 已确认：风格组提供独立的整体备注编辑位置，与单张素材备注区分；整体备注随组内素材绑定保存，选用该组时一并纳入生成上下文，不能只作界面说明而不传入生成。
+- 沿用既有组内容权限，不因新增整体备注扩大可见范围。具体实现及实际生效尚未核对，本节仅记录需求，不代表已实现或上线。
+- 本次补充不视为确认此前未保存草稿生成、清空图片范围、快捷按钮/键盘键及关闭图片生成语义等其他待澄清项。
