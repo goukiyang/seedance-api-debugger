@@ -42,3 +42,5 @@ Git Plan：以线上提交 241f83de2166c4bb04304b7f1809e9ab25a340fb 新建隔离
 实现已完成；6个画布JavaScript入口的`node --check`和`git diff --check`通过。候选v0.33.0；开工线上提交241f83de2166c4bb04304b7f1809e9ab25a340fb，发布前只读复核仍一致。隔离分支codex/canvas-liblib-layout；守门员等价检查L3，涉及画布及既有模板链路，不扩大账号权限或执行真实生成。子任务守门员自动分类误报general/L0，不能代替主线L3判断。
 
 原始资料仅本地归档，Git与发布包排除参考图。未新增依赖、数据库结构、密钥或计费规则。前端既有ReleaseNotice沿用，摘要与package.json单一版本源同步；支持手动检查、稍后去重及刷新确认，未自动操作旧客户端验收。
+
+首次候选caa3e33构建停在类型检查，正式服务未切换；同版完整TypeScript检查仅发现styles/route.ts最近使用数组unknown值缺少字符串窄化。整批补齐后继续v0.33.0候选构建，不重复升号。服务器发布管理使用既有root SSH密钥连接；普通gouki的sudo未授权，没有修改sudo规则或增加权限。

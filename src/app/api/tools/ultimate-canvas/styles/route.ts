@@ -31,7 +31,8 @@ function decodeRecentIds(params: URLSearchParams) {
     values = raw.split(',');
   }
   if (values.length > 60 || values.some(value => typeof value !== 'string')) throw new Error('最近使用记录无效');
-  return Array.from(new Set(values.filter((value): value is string => /^image_template:[A-Za-z0-9_-]{1,160}$/.test(value))));
+  return Array.from(new Set(values.filter((value): value is string => typeof value === 'string'
+    && /^image_template:[A-Za-z0-9_-]{1,160}$/.test(value))));
 }
 
 function encodeCursor(scope: string, id: string) {
