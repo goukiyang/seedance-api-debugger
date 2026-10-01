@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片模板区分主图与辅助参考，可分别设置数量；未保存的参数和上下文可直接生成。支持一键清空本次辅助参考，风格组整体备注随素材使用，多张主图仍可与主图一对比。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片模板按主图、风格组、参考图分区，使用方形缩略图与独立数量设置；风格组显示封面和名称。隐藏视频卡相关展示，保留已有生成记录。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

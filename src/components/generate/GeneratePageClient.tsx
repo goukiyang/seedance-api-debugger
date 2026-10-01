@@ -2602,9 +2602,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                               {truncatePrompt(task.prompt)}
                             </span>
                           </div>
-                          <div className="composer-task-card-video-card">
-                            {task.video_card ? task.video_card.title : '历史未归档视频卡'}
-                          </div>
                           {(task.generation_template || task.selected_agent_plan_key) && (
                             <div className="composer-task-card-template">
                               {task.generation_template ? `${task.generation_template.name} ${task.generation_template.version}` : '模板生成'}

@@ -45,8 +45,8 @@ const models = IMAGE_STUDIO_MODELS;
 const fixedReferencePayload = (items: FixedStudioReference[]) => items.map(item => ({ assetId: item.id, note: item.note || '' }));
 const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
 function moduleReferencePolicy(module: StudioModule): StudioReferencePolicy {
-  return module.referencePolicy || { primaryIds: module.images.flatMap(image => image.id ? [image.id] : []), primaryMin: 0,
-    primaryMax: module.referenceLimit || MAX_REFERENCE_IMAGES, auxiliaryMax: MAX_REFERENCE_IMAGES, useFixedReferences: true };
+  return module.referencePolicy ? { styleMax: MAX_REFERENCE_IMAGES, referenceMax: MAX_REFERENCE_IMAGES, ...module.referencePolicy } : { primaryIds: module.images.flatMap(image => image.id ? [image.id] : []), primaryMin: 0,
+    primaryMax: module.referenceLimit || MAX_REFERENCE_IMAGES, auxiliaryMax: MAX_REFERENCE_IMAGES, styleMax: MAX_REFERENCE_IMAGES, referenceMax: MAX_REFERENCE_IMAGES, useFixedReferences: true };
 }
 async function readResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
@@ -465,6 +465,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || MAX_REFERENCE_IMAGES)));
   const [primaryMin, setPrimaryMin] = useState(module.referencePolicy?.primaryMin ?? 0);
   const [auxiliaryLimit, setAuxiliaryLimit] = useState(module.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES);
+  const [styleLimit, setStyleLimit] = useState(module.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES);
+  const [referenceImageLimit, setReferenceImageLimit] = useState(module.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES);
   const [useFixedReferences, setUseFixedReferences] = useState(module.referencePolicy?.useFixedReferences ?? true);
   const [aspectRatio, setAspectRatio] = useState(module.aspectRatio || 'auto');
   const [moduleModel, setModuleModel] = useState(module.model);
@@ -547,7 +549,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
-  const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, useFixedReferences };
+  const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
   const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality, resolution, groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
@@ -575,10 +577,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     : useFixedReferences ? fixedReferences : [];
   const activeFixedCount = activeTemplateCount + activeStyles.reduce((total, group) => total + group.referenceCount, 0);
   const auxiliaryCount = activeFixedCount + auxiliaryImages.length;
+  const styleImageCount = activeStyles.reduce((total, group) => total + group.referenceCount, 0);
+  const ordinaryReferenceCount = activeTemplateCount + auxiliaryImages.length;
   const effectiveReferences = [...images, ...auxiliaryImages, ...activeFixedReferences];
   const effectiveReferenceCount = auxiliaryCount + images.length;
   const currentReferenceCap = Math.min(referenceLimit, Math.max(0, MAX_REFERENCE_IMAGES - auxiliaryCount));
-  const currentAuxiliaryCap = Math.max(0, Math.min(auxiliaryLimit - activeFixedCount, MAX_REFERENCE_IMAGES - images.length - activeFixedCount));
+  const currentAuxiliaryCap = Math.max(0, Math.min(referenceImageLimit - activeTemplateCount, auxiliaryLimit - activeFixedCount, MAX_REFERENCE_IMAGES - images.length - activeFixedCount));
+  const currentStyleCap = Math.max(0, Math.min(styleLimit, auxiliaryLimit - ordinaryReferenceCount, MAX_REFERENCE_IMAGES - images.length - ordinaryReferenceCount));
   const sourceSharingBlocked = Boolean(module.sourcePresetId && module.sourcePresetShared === false);
 
   useEffect(() => {
@@ -629,6 +634,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setImages(module.images.filter(image => baseline.referencePolicy.primaryIds.includes(image.id || '')));
     setAuxiliaryImages(module.images.filter(image => !baseline.referencePolicy.primaryIds.includes(image.id || '')));
     setPrimaryMin(baseline.referencePolicy.primaryMin); setAuxiliaryLimit(baseline.referencePolicy.auxiliaryMax); setUseFixedReferences(baseline.referencePolicy.useFixedReferences);
+    setStyleLimit(baseline.referencePolicy.styleMax ?? MAX_REFERENCE_IMAGES); setReferenceImageLimit(baseline.referencePolicy.referenceMax ?? MAX_REFERENCE_IMAGES);
     setFixedReferences(savedFixedReferences); setModuleContext(savedModuleContext); setStyleGroups(module.styleGroups || []); setReproduceSourceTaskId(null);
     setModuleSaveError('');
   }
@@ -728,6 +734,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           if (Number.isInteger(policy.primaryMin) && policy.primaryMin >= 0 && policy.primaryMin <= policy.primaryMax) setPrimaryMin(policy.primaryMin);
         }
         if (policy && Number.isInteger(policy.auxiliaryMax) && policy.auxiliaryMax >= 0 && policy.auxiliaryMax <= MAX_REFERENCE_IMAGES) setAuxiliaryLimit(policy.auxiliaryMax);
+        if (policy && Number.isInteger(policy.styleMax) && policy.styleMax >= 0 && policy.styleMax <= MAX_REFERENCE_IMAGES) setStyleLimit(policy.styleMax);
+        if (policy && Number.isInteger(policy.referenceMax) && policy.referenceMax >= 0 && policy.referenceMax <= MAX_REFERENCE_IMAGES) setReferenceImageLimit(policy.referenceMax);
         if (policy && typeof policy.useFixedReferences === 'boolean') setUseFixedReferences(policy.useFixedReferences);
         if (contextEditable && typeof saved.context === 'string') setModuleContext(saved.context.slice(0, 20000));
         if (restoredFixed) setFixedReferences(restoredFixed);
@@ -827,7 +835,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   async function submit(retryTask?: StudioTask) {
     if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
-    if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
+    if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
     }
@@ -879,6 +887,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setAuxiliaryImages(transient.filter(image => image && !primaryIds.includes(image.id || '')));
     setReferenceLimit(snapshot.referencePolicy?.primaryMax ?? Math.max(1, transient.length));
     setPrimaryMin(snapshot.referencePolicy?.primaryMin ?? 0); setAuxiliaryLimit(snapshot.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES);
+    setStyleLimit(snapshot.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES); setReferenceImageLimit(snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES);
     setUseFixedReferences(snapshot.referencePolicy?.useFixedReferences ?? true);
     setReproductionReferences(snapshot.fixedReferenceImages || []);
     setReproductionFixedCount(snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0);
@@ -976,6 +985,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     : activeStyles.some(group => group.unavailable) ? { message: '已选风格组不可用，请移除或重新选择。', tone: 'error' }
     : images.length < primaryMin ? { message: `这个模板至少需要 ${primaryMin} 张主图，当前 ${images.length} 张。`, tone: 'warning' }
     : images.length > referenceLimit ? { message: `主图最多 ${referenceLimit} 张，请移除多余主图或调整上限。`, tone: 'warning' }
+    : styleImageCount > styleLimit ? { message: `风格组最多传入 ${styleLimit} 张图片，当前 ${styleImageCount} 张。请调整上限或移除风格组。`, tone: 'warning' }
+    : ordinaryReferenceCount > referenceImageLimit ? { message: `参考图最多 ${referenceImageLimit} 张，当前 ${ordinaryReferenceCount} 张（含启用的模板固定图）。`, tone: 'warning' }
     : auxiliaryCount > auxiliaryLimit ? { message: `辅助参考最多 ${auxiliaryLimit} 张，当前 ${auxiliaryCount} 张（包含模板图和风格组）。`, tone: 'warning' }
     : effectiveReferenceCount > MAX_REFERENCE_IMAGES ? { message: `当前通道最多传入 ${MAX_REFERENCE_IMAGES} 张图片，已选主图 ${images.length} 张、辅助参考 ${auxiliaryCount} 张，请减少辅助参考。`, tone: 'warning' }
     : !prompt.trim() && !effectiveReferenceCount && !hasContext ? { message: '请填写画面要求，或添加主图。', tone: 'info' }
@@ -1026,7 +1037,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setAuxiliaryImages(current => current.filter((_, position) => position !== index));
       setImages(current => [...current, image]);
     } else {
-      if (auxiliaryCount >= auxiliaryLimit) { setError('辅助参考已达到数量上限，请先调整上限。'); return; }
+      if (auxiliaryCount >= auxiliaryLimit || ordinaryReferenceCount >= referenceImageLimit) { setError('参考图已达到数量上限，请先调整上限。'); return; }
       setImages(current => current.filter((_, position) => position !== index));
       setAuxiliaryImages(current => [...current, image]);
     }
@@ -1133,44 +1144,63 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     <div className={styles.workspace}>
       <section className={styles.inputs} aria-label="生成参数">
         {reproduceSourceTaskId && <p role="status" className={styles.muted}>历史复现模式：沿用当时的参考图，合并当前通用与模块上下文；不会自动提交或扣积分。<button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button></p>}
-        <div className={styles.imageSectionHeading}><strong>主图</strong><span className={styles.referenceLimitControl}>最多
-          <select aria-label="主图数量上限" value={referenceLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => {
-            const next = Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(event.target.value)));
-            if (next < images.length || next < primaryMin) { setError('上限不能低于当前主图数量或最少要求，请先调整。'); return; }
-            setReferenceLimit(next);
-          }}>{Array.from({ length: MAX_REFERENCE_IMAGES }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value} 张</option>)}</select>
-          <em>{images.length} 张已选</em>
-        </span></div>
-        <div onDragOver={event => event.preventDefault()} onDrop={event => {
-          event.preventDefault(); void addImages(Array.from(event.dataTransfer.files));
-        }}>
-          <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" onChangeRole={(image, index) => changeImageRole(image, index, false)} compact disabled={uploading || submitting || Boolean(pendingSubmission)}>
-            {images.length < currentReferenceCap && <button type="button" className={styles.add} disabled={uploading || submitting || Boolean(pendingSubmission)} onClick={() => openImageSource('reference')}><ImagePlus size={24} />{uploading ? '上传中' : '添加主图'}</button>}
-          </StudioReferenceGrid>
-        </div>
-        <div className={styles.auxiliarySection}>
-          <div className={styles.imageSectionHeading}><strong>辅助参考</strong><button type="button" title="清空本次全部辅助参考，保留主图和文字上下文" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空</button></div>
-          <div className={styles.referenceLimits}><label>最多 <select aria-label="辅助参考数量上限" value={auxiliaryLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setAuxiliaryLimit(Number(event.target.value))}>
-            {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
-          </select></label><span>{auxiliaryCount} 张已选</span></div>
-          <label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
-          {activeFixedReferences.length > 0 && isAdmin && <div className={styles.fixedReferenceStrip}>{activeFixedReferences.map((image, index) => <figure key={`${image.id}-${index}`}>
-            {image.thumbnailUrl && <img src={image.thumbnailUrl} alt={`固定参考 ${index + 1}`} loading="lazy" />}<figcaption>{index < activeTemplateCount ? `模板${String.fromCharCode(65 + index)}` : `风格${index - activeTemplateCount + 1}`}</figcaption>
-          </figure>)}</div>}
-          {activeFixedCount > 0 && <p className={styles.muted}>模板与风格组：{activeFixedCount} 张</p>}
-          <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages}
+        <section className={styles.materialSection} aria-label="主图">
+          <header className={styles.materialHeading}><h3>主图</h3>
+            <select aria-label="主图数量上限" value={referenceLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => {
+              const next = Number(event.target.value);
+              if (next < images.length || next < primaryMin) { setError('上限不能低于当前主图数量或最少要求，请先调整。'); return; }
+              setReferenceLimit(next);
+            }}>{Array.from({ length: MAX_REFERENCE_IMAGES }, (_, index) => index + 1).map(value => <option key={value} value={value}>最多 {value} 张</option>)}</select>
+            <span>已选 <b>{images.length} 张</b></span>
+          </header>
+          <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
+            <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
+              onChangeRole={(image, index) => changeImageRole(image, index, false)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
+              <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap}
+                title={images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : '添加主图'}</span></button>
+            </StudioReferenceGrid>
+          </div>
+        </section>
+        <section className={styles.materialSection} aria-label="风格组">
+          <header className={styles.materialHeading}><h3>风格组</h3>
+            <select aria-label="风格图片数量上限" value={styleLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setStyleLimit(Number(event.target.value))}>
+              {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
+            </select><span>已选 <b>{activeStyles.length} 组</b><small>共 {styleImageCount} 张</small></span>
+          </header>
+          <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages} tiles maxReferences={currentStyleCap}
             disabled={uploading || submitting || Boolean(pendingSubmission)}
             onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }} />
+        </section>
+        <section className={styles.materialSection} aria-label="参考图">
+          <header className={styles.materialHeading}><h3>参考图</h3>
+            <select aria-label="参考图数量上限" value={referenceImageLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setReferenceImageLimit(Number(event.target.value))}>
+              {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
+            </select><span>已选 <b>{ordinaryReferenceCount} 张</b></span>
+          </header>
           <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files), false, false, true); }}
             onPaste={event => {
               const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
               if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, false, false, true); }
-            }} tabIndex={0} aria-label="辅助参考图片">
-            <StudioReferenceGrid items={auxiliaryImages} onChange={setAuxiliaryImages} onPreview={previewReference} labels="auxiliary" compact onChangeRole={(image, index) => changeImageRole(image, index, true)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
-              {auxiliaryImages.length < currentAuxiliaryCap && <button type="button" className={styles.add} disabled={uploading || submitting || Boolean(pendingSubmission)} onClick={() => openImageSource('auxiliary')}><ImagePlus size={20} />添加参考</button>}
+            }} tabIndex={0} aria-label="参考图片">
+            <StudioReferenceGrid items={auxiliaryImages} onChange={setAuxiliaryImages} onPreview={previewReference} labels="auxiliary" compact materialTiles onChangeRole={(image, index) => changeImageRole(image, index, true)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
+              {isAdmin && activeFixedReferences.slice(0, activeTemplateCount).map((image, index) => <div className={styles.styleTile} key={`fixed-${image.id}-${index}`}>
+                <button type="button" className={styles.styleTilePreview} disabled={!image.originalUrl} onClick={() => previewReference(image, index + 1)} aria-label={`预览模板固定图${index + 1}`}>
+                  <ImagePlus size={24} />{image.thumbnailUrl && <img src={image.thumbnailUrl} alt={`模板固定图${index + 1}`} />}
+                  <span className={styles.styleTileName}>模板{String.fromCharCode(65 + index)}</span>
+                </button>
+                {fixedEditable && !reproduceSourceTaskId && <button type="button" className={styles.materialRemove} disabled={uploading || submitting || Boolean(pendingSubmission)}
+                  title="移除本次固定参考图" aria-label={`移除模板固定图${index + 1}`} onClick={() => changeFixedReferences(fixedReferences.filter((_, position) => position !== index))}><X size={14} /></button>}
+              </div>)}
+              {!isAdmin && activeTemplateCount > 0 && <div className={styles.hiddenReferenceTile}><ImagePlus size={22} /><span>模板固定图</span><b>{activeTemplateCount} 张</b></div>}
+              <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || auxiliaryImages.length >= currentAuxiliaryCap}
+                title={auxiliaryImages.length >= currentAuxiliaryCap ? '已达到可用图片数量上限' : '添加参考图'} onClick={() => openImageSource('auxiliary')}><Plus size={24} /><span>添加参考图</span></button>
             </StudioReferenceGrid>
           </div>
+          {(fixedReferences.length > 0 || Boolean(module.fixedReferenceCount) || reproductionFixedCount > styleImageCount) && <label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>}
           <input ref={auxiliaryFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), false, false, true); event.target.value = ''; }} />
+        </section>
+        <div className={styles.materialFooter}><span>本次图片 {effectiveReferenceCount} / {MAX_REFERENCE_IMAGES} 张</span>
+          <button type="button" title="清空本次风格组和参考图，保留主图与文字" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={14} />清空参考</button>
         </div>
         {uploadProgress && <UploadProgressIndicator {...uploadProgress} />}
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => {
@@ -1327,7 +1357,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           if (next < primaryMin || next < images.length) { setError('主图上限不能低于最少要求或已选张数。'); return; }
           setReferenceLimit(next);
         }}>{Array.from({ length: MAX_REFERENCE_IMAGES }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value} 张</option>)}</select></label>
-        <label>辅助参考最多 <select aria-label="模板辅助参考最多张数" value={auxiliaryLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setAuxiliaryLimit(Number(event.target.value))}>
+        <label>风格图片最多 <select aria-label="模板风格图片最多张数" value={styleLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setStyleLimit(Number(event.target.value))}>
+          {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
+        </select></label>
+        <label>参考图最多 <select aria-label="模板参考图最多张数" value={referenceImageLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setReferenceImageLimit(Number(event.target.value))}>
+          {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
+        </select></label>
+        <label>辅助参考总上限 <select aria-label="模板辅助参考总上限" value={auxiliaryLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setAuxiliaryLimit(Number(event.target.value))}>
           {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
         </select></label>
       </div>
@@ -1341,7 +1377,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </StudioReferenceGrid>
       </div>
       <input ref={fixedFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), false, true); event.target.value = ''; }} /></>}
-      <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages}
+      <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages} maxReferences={currentStyleCap}
         disabled={uploading || submitting || Boolean(pendingSubmission)}
         onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }} />
       {uploadProgress && <UploadProgressIndicator {...uploadProgress} />}

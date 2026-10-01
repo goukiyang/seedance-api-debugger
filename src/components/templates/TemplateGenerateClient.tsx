@@ -1287,9 +1287,6 @@ export function TemplateGenerateClient() {
                             </time>
                             <span className="composer-task-card-prompt-text">{truncatePrompt(task.prompt)}</span>
                           </div>
-                          <div className="composer-task-card-video-card">
-                            {task.video_card ? task.video_card.title : '未归档视频卡'}
-                          </div>
                           <div className="composer-task-card-template">
                             {task.generation_template ? `${task.generation_template.name} ${task.generation_template.version}` : '模板生成'}
                             {task.selected_agent_plan_key ? ` · 方案 ${task.selected_agent_plan_key}` : ''}

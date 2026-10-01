@@ -60,6 +60,34 @@
 .referenceToggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
 .page .referenceToggle input { width: 16px; height: 16px; margin: 0; accent-color: #8ce5d2; }
 .imageSectionHeading .referenceLimitControl { flex-wrap: wrap; }
+.materialSection { min-width: 0; padding: 14px 0 16px; border-bottom: 1px solid #353a3e; }
+.materialSection:first-of-type { padding-top: 0; }
+.materialHeading { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 8px; min-height: 38px; margin-bottom: 10px; }
+.materialHeading h3 { margin: 4px 0 0; font-size: 15px; line-height: 1.4; font-weight: 700; letter-spacing: 0; }
+.page .materialHeading select { width: 84px; min-width: 0; padding: 5px 6px; font-size: 11px; }
+.materialHeading > span { align-self: center; font-size: 11px; color: #aeb6bc; white-space: nowrap; text-align: right; }
+.materialHeading b { color: #7db9e5; font-weight: 600; }
+.materialHeading small { display: block; margin-top: 2px; font-size: 10px; }
+.materialGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: none; align-items: start; }
+.materialGrid .referenceItem { position: relative; border-width: 1px; }
+.materialGrid .reference { overflow: hidden; border-radius: 5px; background: #101416; }
+.materialGrid.referencesCompact .referenceNumber { left: 3px; bottom: 3px; max-width: calc(100% - 30px); font-size: 10px; }
+.page .materialGrid .referenceGrip { padding: 2px; top: 3px; left: 3px; opacity: 0; }
+.materialGrid .referenceItem:hover .referenceGrip, .materialGrid .referenceItem:focus-within .referenceGrip { opacity: 1; }
+.page .materialGrid .remove, .page .materialRemove { position: absolute; top: 4px; right: 4px; z-index: 2; width: 22px; height: 22px; padding: 2px; border: 0; border-radius: 50%; background: #141719e8; color: #e8ecef; }
+.page .materialRole { position: absolute; z-index: 1; bottom: 4px; right: 4px; width: 22px; height: 22px; padding: 2px; border: 0; background: #141719e8; }
+.page .materialAdd { display: flex; flex-direction: column; aspect-ratio: 1; width: 100%; min-width: 0; padding: 8px 2px; border: 1px dashed #485158; border-radius: 5px; background: transparent; color: #c1c8ce; font-size: 11px; line-height: 1.3; }
+.materialAdd span { max-width: 100%; overflow-wrap: anywhere; }
+.styleGroupsTiles { min-width: 0; margin: 0; }
+.styleTile { position: relative; min-width: 0; aspect-ratio: 1; overflow: hidden; border-radius: 5px; background: #101416; }
+.page .styleTilePreview { display: flex; position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 1px solid #3f484f; border-radius: 5px; background: #101416; overflow: hidden; }
+.styleTilePreview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.styleTileName { position: absolute; inset: auto 0 0; display: block; padding: 5px 4px; font-size: 10px; line-height: 1.3; color: #e8ecef; background: #101416e8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hiddenReferenceTile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; aspect-ratio: 1; min-width: 0; padding: 4px; border: 1px solid #3f484f; border-radius: 5px; color: #b5bec5; font-size: 10px; text-align: center; }
+.materialFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 10px; color: #aeb6bc; font-size: 11px; }
+.page .materialFooter button { padding: 5px 7px; font-size: 11px; }
+@media (hover: none) { .page .materialGrid .referenceGrip { opacity: 1; } }
+@media (max-width: 420px) { .materialHeading { gap: 6px; } .materialHeading h3 { font-size: 14px; } .page .materialHeading select { width: 78px; } }
 .page textarea, .page input:not([type=file]), .page select { box-sizing: border-box; border: 1px solid #465057; border-radius: 6px; padding: 10px; background: #171c1f; color: #eef0f2; font: inherit; max-width: 100%; }
 .page textarea { width: 100%; resize: vertical; min-height: 120px; line-height: 1.6; }
 .references { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

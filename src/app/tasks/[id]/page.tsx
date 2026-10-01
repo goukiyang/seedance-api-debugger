@@ -1804,11 +1804,13 @@ export default function TaskDetailPage() {
                 <UserIdentityBadge user={taskOwner} subtitle="生成者" />
                 <div className="task-result-origin-meta">
                   <span>项目：{task.project?.name || '未归属项目'}</span>
-                  <span>
-                    视频卡：{task.video_card ? (
-                      showVideoCardManagementUi ? <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link> : task.video_card.title
-                    ) : '历史未归档'}
-                  </span>
+                  {showVideoCardManagementUi && (
+                    <span>
+                      视频卡：{task.video_card ? (
+                        <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                      ) : '历史未归档'}
+                    </span>
+                  )}
                   {templateLabel && <span>模板：{templateLabel}</span>}
                   {task.selected_agent_plan_key && <span>方案：{task.selected_agent_plan_key}</span>}
                   <span>来源：{taskSourceText}</span>
@@ -2066,14 +2068,16 @@ export default function TaskDetailPage() {
                 <div><span>点数扣除</span><strong>{taskCreditText}</strong></div>
                 <div><span>视频保存</span><strong>{resultStorageText}</strong></div>
                 <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
-                <div>
-                  <span>视频卡</span>
-                  <strong>
-                    {task.video_card ? (
-                      showVideoCardManagementUi ? <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link> : task.video_card.title
-                    ) : '历史未归档'}
-                  </strong>
-                </div>
+                {showVideoCardManagementUi && (
+                  <div>
+                    <span>视频卡</span>
+                    <strong>
+                      {task.video_card ? (
+                        <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                      ) : '历史未归档'}
+                    </strong>
+                  </div>
+                )}
                 {templateLabel && <div><span>模板</span><strong>{templateLabel}</strong></div>}
                 {task.selected_agent_plan_key && <div><span>Agent 方案</span><strong>{task.selected_agent_plan_key}</strong></div>}
                 {typeof task.prompt_user_edited === 'boolean' && (
@@ -2308,14 +2312,16 @@ export default function TaskDetailPage() {
                   <strong><Link className="link" href={agentRunHref}>查看链路</Link></strong>
                 </div>
               )}
-              <div>
-                <span>视频卡</span>
-                <strong>
-                  {task.video_card ? (
-                    showVideoCardManagementUi ? <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link> : task.video_card.title
-                  ) : '历史未归档'}
-                </strong>
-              </div>
+              {showVideoCardManagementUi && (
+                <div>
+                  <span>视频卡</span>
+                  <strong>
+                    {task.video_card ? (
+                      <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
+                    ) : '历史未归档'}
+                  </strong>
+                </div>
+              )}
             </div>
 
             {h3RuntimeMeta && (

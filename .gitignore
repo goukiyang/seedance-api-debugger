@@ -66,3 +66,4 @@ public/videos/*
 public/videos/thumbnails/*
 # Local user feedback contains private prompts; never publish these originals.
 /docs/materials/2026-09-30-template-ui/
+/docs/materials/2026-10-01-image-template-redesign/

@@ -20,9 +20,9 @@ async function responseValue(response: Response) {
   return value;
 }
 
-export function StudioStyleGroups({ userId, selected, onChange, currentImages, disabled }: {
+export function StudioStyleGroups({ userId, selected, onChange, currentImages, disabled, tiles = false, maxReferences = MAX_REFERENCE_IMAGES }: {
   userId: string; selected: StudioStyleSummary[]; onChange: (groups: StudioStyleSummary[]) => void;
-  currentImages: UploadedAssetPayload[]; disabled?: boolean;
+  currentImages: UploadedAssetPayload[]; disabled?: boolean; tiles?: boolean; maxReferences?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState<StudioStyleSummary[]>([]);
@@ -129,9 +129,17 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   function changeReferences(references: FixedStudioReference[]) {
     setDraft(current => current ? { ...current, references, coverAssetId: references.some(ref => ref.id === current.coverAssetId) ? current.coverAssetId : references[0]?.id || '' } : current);
   }
-  return <div className={styles.styleGroups}>
-    <div className={styles.header}><strong>风格组</strong><button type="button" disabled={disabled} onClick={() => { setOpen(true); void load(); }}><Layers size={16} />选择风格组</button></div>
-    {selected.length > 0 && <div className={styles.styleSelection}>{selected.map(group => <div key={group.id} className={styles.styleSelected}>
+  const selectedCount = selected.reduce((total, group) => total + group.referenceCount, 0);
+  const openSelector = () => { setOpen(true); void load(); };
+  return <div className={tiles ? styles.styleGroupsTiles : styles.styleGroups}>
+    {!tiles && <div className={styles.header}><strong>风格组</strong><button type="button" disabled={disabled} onClick={openSelector}><Layers size={16} />选择风格组</button></div>}
+    {tiles ? <div className={styles.materialGrid}>{selected.map(group => <div key={group.id} className={styles.styleTile}>
+      <button type="button" className={styles.styleTilePreview} disabled={disabled} onClick={openSelector} aria-label={`查看风格组${group.name}`} title={`${group.name} · ${group.referenceCount} 张${group.unavailable ? ' · 不可用' : ''}`}>
+        <Layers size={24} aria-hidden="true" />{group.coverUrl && <img src={group.coverUrl} alt={`${group.name}封面`} onError={event => { event.currentTarget.hidden = true; }} />}
+        <span className={styles.styleTileName}>{group.unavailable ? '风格组不可用' : group.name}</span>
+      </button>
+      <button type="button" className={styles.materialRemove} title="移除风格组" aria-label={`移除${group.name}`} disabled={disabled} onClick={() => onChange(selected.filter(item => item.id !== group.id))}><X size={14} /></button>
+    </div>)}<button type="button" className={styles.materialAdd} disabled={disabled} onClick={openSelector}><Plus size={24} /><span>选择风格组</span></button></div> : selected.length > 0 && <div className={styles.styleSelection}>{selected.map(group => <div key={group.id} className={styles.styleSelected}>
       {group.coverUrl && <img src={group.coverUrl} alt={`${group.name}封面`} />}
       <span>{group.name}</span><button type="button" title="移除风格组" aria-label={`移除${group.name}`} disabled={disabled} onClick={() => onChange(selected.filter(item => item.id !== group.id))}><X size={14} /></button>
     </div>)}</div>}
@@ -145,11 +153,12 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
       {!draft && error && <p role="alert" className={styles.error}>{error}<button type="button" onClick={() => void load()}>重新读取</button></p>}
       <div className={styles.styleGrid}>{groups.map(group => {
         const used = selected.some(item => item.id === group.id);
+        const exceedsLimit = !used && (selectedCount + group.referenceCount > maxReferences || selected.length >= MAX_REFERENCE_IMAGES);
         return <article key={group.id} className={styles.styleCard}>
           <div className={styles.styleCover}>{group.coverUrl && <img src={group.coverUrl} alt={`${group.name}封面`} loading="lazy" />}</div>
           <strong title={group.name}>{group.name}</strong>
           <div className={styles.styleActions}>
-            <button type="button" disabled={disabled || busy} aria-pressed={used} onClick={() => onChange(used ? selected.filter(item => item.id !== group.id) : [...selected, group])}>{used ? <Check size={16} /> : <Plus size={16} />}{used ? '已使用' : '使用'}</button>
+            <button type="button" disabled={disabled || busy || exceedsLimit} title={exceedsLimit ? `可选风格图片上限 ${maxReferences} 张，已选 ${selectedCount} 张` : undefined} aria-pressed={used} onClick={() => onChange(used ? selected.filter(item => item.id !== group.id) : [...selected, group])}>{used ? <Check size={16} /> : <Plus size={16} />}{used ? '已使用' : '使用'}</button>
             {group.canManage && <><button type="button" disabled={busy} title="编辑风格组" aria-label={`编辑${group.name}`} onClick={() => edit(group)}><Pencil size={16} /></button>
               <button type="button" disabled={busy} title="删除风格组" aria-label={`删除${group.name}`} onClick={() => void remove(group)}><Trash2 size={16} /></button>
               <input type="checkbox" aria-label={`选择${group.name}用于合并`} checked={mergeIds.includes(group.id)} disabled={busy} onChange={event => setMergeIds(current => event.target.checked ? [...current, group.id] : current.filter(id => id !== group.id))} /></>}

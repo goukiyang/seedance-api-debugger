@@ -7,6 +7,8 @@ export type StudioReferencePolicy = {
   primaryMin: number;
   primaryMax: number;
   auxiliaryMax: number;
+  styleMax?: number;
+  referenceMax?: number;
   useFixedReferences: boolean;
 };
 
@@ -35,6 +37,8 @@ export function defaultStudioReferencePolicy(transientIds: string[], primaryMax:
     primaryMin: 0,
     primaryMax: boundedPrimaryMax(primaryMax),
     auxiliaryMax: MAX_REFERENCE_IMAGES,
+    styleMax: MAX_REFERENCE_IMAGES,
+    referenceMax: MAX_REFERENCE_IMAGES,
     useFixedReferences: true,
   };
 }
@@ -43,6 +47,9 @@ export function validateStudioReferenceCounts(policy: StudioReferencePolicy, tra
   const ids = orderedUnique(transientIds);
   const primaryCount = ids.filter(id => policy.primaryIds.includes(id)).length;
   const auxiliaryCount = ids.length - primaryCount + (policy.useFixedReferences ? fixedCount : 0) + styleCount;
+  const referenceCount = auxiliaryCount - styleCount;
+  if (styleCount > (policy.styleMax ?? MAX_REFERENCE_IMAGES)) throw new StudioReferencePolicyError(`风格组中的图片最多使用 ${policy.styleMax ?? MAX_REFERENCE_IMAGES} 张`);
+  if (referenceCount > (policy.referenceMax ?? MAX_REFERENCE_IMAGES)) throw new StudioReferencePolicyError(`参考图最多使用 ${policy.referenceMax ?? MAX_REFERENCE_IMAGES} 张（含启用的模板固定图）`);
   if ((requireMinimum && primaryCount < policy.primaryMin) || primaryCount > policy.primaryMax) {
     throw new StudioReferencePolicyError(`主图数量须为 ${policy.primaryMin} 到 ${policy.primaryMax} 张`);
   }
@@ -54,7 +61,7 @@ function parsePolicyShape(value: unknown): StudioReferencePolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioReferencePolicyError('参考图角色设置无效');
   const record = value as Record<string, unknown>;
   const expected = ['primaryIds', 'primaryMin', 'primaryMax', 'auxiliaryMax', 'useFixedReferences'];
-  if (Object.keys(record).some(key => !expected.includes(key)) || expected.some(key => !Object.prototype.hasOwnProperty.call(record, key))) {
+  if (Object.keys(record).some(key => ![...expected, 'styleMax', 'referenceMax'].includes(key)) || expected.some(key => !Object.prototype.hasOwnProperty.call(record, key))) {
     throw new StudioReferencePolicyError('参考图角色设置无效');
   }
   if (!Array.isArray(record.primaryIds) || record.primaryIds.length > MAX_REFERENCE_IMAGES
@@ -65,6 +72,7 @@ function parsePolicyShape(value: unknown): StudioReferencePolicy {
     || Number(record.primaryMin) > Number(record.primaryMax)
     || !Number.isInteger(record.auxiliaryMax) || Number(record.auxiliaryMax) < 0 || Number(record.auxiliaryMax) > MAX_REFERENCE_IMAGES
     || typeof record.useFixedReferences !== 'boolean'
+    || ['styleMax', 'referenceMax'].some(key => record[key] !== undefined && (!Number.isInteger(record[key]) || Number(record[key]) < 0 || Number(record[key]) > MAX_REFERENCE_IMAGES))
     || record.primaryIds.length > Number(record.primaryMax)) {
     throw new StudioReferencePolicyError('参考图角色数量或范围无效');
   }
@@ -73,6 +81,8 @@ function parsePolicyShape(value: unknown): StudioReferencePolicy {
     primaryMin: Number(record.primaryMin),
     primaryMax: Number(record.primaryMax),
     auxiliaryMax: Number(record.auxiliaryMax),
+    ...(record.styleMax === undefined ? {} : { styleMax: Number(record.styleMax) }),
+    ...(record.referenceMax === undefined ? {} : { referenceMax: Number(record.referenceMax) }),
     useFixedReferences: record.useFixedReferences,
   };
 }

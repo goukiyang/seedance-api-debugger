@@ -1134,7 +1134,7 @@ export default function ProjectDetailPage() {
 
       <div className="card">
         <h2 className="section-title">历史 / 调试任务</h2>
-        <p className="text-gray text-sm mb-4">生成记录已按视频卡归档；这里保留最近任务明细，便于排查旧任务和成本账本。</p>
+        <p className="text-gray text-sm mb-4">这里保留最近任务明细，便于排查旧任务和成本账本。</p>
         {tasks.length === 0 ? (
           <p className="text-gray">暂无生成任务</p>
         ) : (
@@ -1144,7 +1144,7 @@ export default function ProjectDetailPage() {
 	                <th>截图</th>
 	                <th>任务</th>
 	                <th>状态</th>
-                <th>视频卡</th>
+                {showVideoCardManagementUi && <th>视频卡</th>}
                 <th>创建者</th>
                 <th>点数</th>
                 <th>成本状态</th>
@@ -1182,15 +1182,15 @@ export default function ProjectDetailPage() {
                       {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
 	                  </td>
                   <td>{task.local_status}</td>
-                  <td>
-                    {task.video_card ? (
-                      showVideoCardManagementUi ? (
+                  {showVideoCardManagementUi && (
+                    <td>
+                      {task.video_card ? (
                         <Link className="link" href={`/projects/${project.id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
-                      ) : task.video_card.title
-                    ) : (
-                      <span className="text-gray">历史未归档</span>
-                    )}
-                  </td>
+                      ) : (
+                        <span className="text-gray">历史未归档</span>
+                      )}
+                    </td>
+                  )}
                   <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>
                   <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
                   <td>{costStatusLabel(task.provider_cost_status)}</td>

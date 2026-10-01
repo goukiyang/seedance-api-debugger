@@ -64,7 +64,6 @@ function canEnhance(task: EnhanceTaskCandidate) {
 function taskSubtitle(task: EnhanceTaskCandidate) {
   const parts = [
     task.project?.name || '未归属项目',
-    task.video_card?.title || '没有视频卡',
     task.duration ? `${task.duration} 秒` : '时长未知',
     task.resolution || null,
   ].filter(Boolean);
@@ -168,7 +167,7 @@ export default function EnhanceVideoPageClient() {
         {loadState !== 'loading' && eligibleTasks.length === 0 && (
           <div className="enhance-video-empty">
             <strong>没有可直接超分的视频</strong>
-            <span>需要成功任务、可播放视频、视频卡和视频时长。</span>
+            <span>需要成功任务、可播放视频和视频时长。</span>
             <div>
               <Link href="/generate" className="btn btn-primary">去生成视频</Link>
               <Link href="/tasks" className="btn btn-secondary">查看任务</Link>

@@ -8,9 +8,9 @@ import styles from './studio.module.css';
 
 export type FixedStudioReference = UploadedAssetPayload & { note: string; available?: boolean };
 
-export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole }: {
+export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false }: {
   items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
-  disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
+  disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointer: number; index: number; x: number; y: number; moved: boolean; target: number } | null>(null);
@@ -48,7 +48,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
     onChange(next);
   };
   const reset = () => { drag.current = null; setTargetIndex(null); setSourceIndex(null); };
-  return <><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''}`}>
+  return <><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''} ${materialTiles ? styles.materialGrid : ''}`}>
     {items.map((item, index) => <div key={`${item.id}-${index}`} data-reference-index={index}
       className={`${styles.referenceItem} ${targetIndex === index ? styles.referenceDropTarget : ''}`}
       data-dragging={sourceIndex === index || undefined}
@@ -96,9 +96,9 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
         onClick={() => { setNoteDraft((item as unknown as FixedStudioReference).note || ''); setNoteError(''); setNoteIndex(index); }}>
         <MessageSquare size={14} />{(item as unknown as FixedStudioReference).note ? '已备注' : '备注'}
       </button>}
-      {onChangeRole && <button type="button" data-reference-note className={styles.referenceNoteButton} disabled={disabled}
+      {onChangeRole && <button type="button" data-reference-note className={materialTiles ? styles.materialRole : styles.referenceNoteButton} disabled={disabled}
         title={labels === 'primary' ? '改为辅助参考' : '设为主图'} aria-label={`${label(index)}${labels === 'primary' ? '改为辅助参考' : '设为主图'}`}
-        onClick={() => onChangeRole(item, index)}>{labels === 'primary' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}{labels === 'primary' ? '设为参考' : '设为主图'}</button>}
+        onClick={() => onChangeRole(item, index)}>{labels === 'primary' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}{!materialTiles && (labels === 'primary' ? '设为参考' : '设为主图')}</button>}
     </div>)}
     {children}
   </div>
