@@ -14,6 +14,7 @@ export default function ImageShareButton({ contentKey, userId, disabled }: { con
   const [feedback, setFeedback] = useState('');
   const [attempt, setAttempt] = useState(0);
   const lock = useRef(false);
+  const sequence = useRef(0);
   const identity = `${userId}:${contentKey}`;
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
@@ -25,10 +26,11 @@ export default function ImageShareButton({ contentKey, userId, disabled }: { con
     const controller = new AbortController();
     const load = () => {
       if (lock.current) return;
+      const requestId = ++sequence.current;
       void fetch(`/api/image-shares?key=${encodeURIComponent(contentKey)}`, { cache: 'no-store', signal: controller.signal })
         .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || '分享状态读取失败'); return data as ShareState; })
-        .then(data => { if (!controller.signal.aborted) { setState(data); setError(''); } })
-        .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '分享状态读取失败'); });
+        .then(data => { if (!controller.signal.aborted && requestId === sequence.current) { setState(data); setError(''); } })
+        .catch(reason => { if (!controller.signal.aborted && requestId === sequence.current) setError(reason instanceof Error ? reason.message : '分享状态读取失败'); });
     };
     load();
     window.addEventListener('sd2-image-shares-changed', load);
@@ -41,7 +43,7 @@ export default function ImageShareButton({ contentKey, userId, disabled }: { con
     if (!state || lock.current) return;
     const active = !state.shared;
     if (active && !window.confirm('分享后，所有已登录的站内用户都能在公共图集看到这张图片。不会分享提示词或参考图。确定分享吗？')) return;
-    lock.current = true; setBusy(true); setError(''); setFeedback('');
+    lock.current = true; sequence.current += 1; setBusy(true); setError(''); setFeedback('');
     try {
       const response = await fetch('/api/image-shares', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: contentKey, active }) });
       const data = await response.json();

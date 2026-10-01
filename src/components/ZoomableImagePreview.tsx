@@ -658,7 +658,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
     >
       <div ref={toolbarRef} className={styles.toolbar} data-has-comparison={comparison ? 'true' : undefined} data-has-metadata={hasVisibleMetadata ? 'true' : undefined}>
         <div className={styles.leading}>
-          {contentKey && <ContentReactions contentKey={contentKey} />}
+          {contentKey && <ContentReactions contentKey={contentKey} imageSharing={!showReference || comparisonMode} />}
           {comparison && <button
           type="button"
           className={`${styles.referenceThumb} ${showReference ? styles.referenceThumbActive : ''}`}
@@ -692,7 +692,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
         <div className={styles.actions}>
           <button type="button" disabled={copyState?.busy} title="复制图片" aria-label="复制图片" onClick={() => {
             const copySrc = displaySource(comparisonMode ? src : activeSrc, showOriginal ? 'original' : 'preview');
-            setCopyState({ src: copySrc, busy: true });
+            setCopyState({ src: copySrc, busy: true, message: '正在复制图片…' });
             void copyImage(copySrc).then(() => setCopyState({ src: copySrc, success: true, message: '图片已复制' }))
               .catch(error => setCopyState({ src: copySrc, message: error instanceof Error && error.name !== 'NotAllowedError' ? error.message : '浏览器未允许复制，请使用图片右键菜单' }));
           }}>{copyState?.success && copyState.src === displaySource(comparisonMode ? src : activeSrc, showOriginal ? 'original' : 'preview') ? <Check size={16} /> : <Copy size={16} />}</button>
