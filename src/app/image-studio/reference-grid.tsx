@@ -1,16 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { GripVertical, MessageSquare, Save, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, GripVertical, MessageSquare, Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
 import styles from './studio.module.css';
 
 export type FixedStudioReference = UploadedAssetPayload & { note: string; available?: boolean };
 
-export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote }: {
+export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole }: {
   items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
-  disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; labels?: 'image' | 'template' | 'style'; onSaveNote?: (items: T[]) => Promise<boolean>;
+  disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointer: number; index: number; x: number; y: number; moved: boolean; target: number } | null>(null);
@@ -22,7 +22,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteError, setNoteError] = useState('');
   const noteDialog = useRef<HTMLDialogElement>(null);
-  const label = (index: number) => labels === 'template' ? `模板${String.fromCharCode(65 + index)}` : `${labels === 'style' ? '风格' : '图'} ${offset + index + 1}`;
+  const label = (index: number) => labels === 'template' ? `模板${String.fromCharCode(65 + index)}` : `${labels === 'style' ? '风格' : labels === 'primary' ? '主图' : labels === 'auxiliary' ? '参考图' : '图'} ${offset + index + 1}`;
   const originalNote = noteIndex === null ? '' : (items[noteIndex] as unknown as FixedStudioReference)?.note || '';
   const closeNote = () => {
     if (noteBusy || (noteDraft !== originalNote && !window.confirm('备注尚未保存，放弃这次修改？'))) return;
@@ -96,6 +96,9 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
         onClick={() => { setNoteDraft((item as unknown as FixedStudioReference).note || ''); setNoteError(''); setNoteIndex(index); }}>
         <MessageSquare size={14} />{(item as unknown as FixedStudioReference).note ? '已备注' : '备注'}
       </button>}
+      {onChangeRole && <button type="button" data-reference-note className={styles.referenceNoteButton} disabled={disabled}
+        title={labels === 'primary' ? '改为辅助参考' : '设为主图'} aria-label={`${label(index)}${labels === 'primary' ? '改为辅助参考' : '设为主图'}`}
+        onClick={() => onChangeRole(item, index)}>{labels === 'primary' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}{labels === 'primary' ? '设为参考' : '设为主图'}</button>}
     </div>)}
     {children}
   </div>

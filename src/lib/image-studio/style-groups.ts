@@ -7,11 +7,12 @@ import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioVisibleAssetWhere } from './protected-assets';
 
 const PREFIX = 'studio_style_group_v1:';
+const MAX_STYLE_GROUP_NOTE_LENGTH = 8000;
 const selectionKey = (moduleId: string) => `studio_style_selection_v1:${moduleId}`;
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset' | 'imageStudioModule' | 'imageStudioPreset'>;
 export type StudioStyleGroup = {
   id: string; ownerId: string; name: string; coverAssetId: string; references: StudioFixedReference[];
-  revision: number; deleted?: boolean;
+  revision: number; note?: string; deleted?: boolean;
 };
 export class StudioStyleError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -26,7 +27,9 @@ function decode(value: string): StudioStyleGroup {
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed.id !== 'string' || typeof parsed.ownerId !== 'string' || typeof parsed.name !== 'string'
-      || typeof parsed.coverAssetId !== 'string' || !Number.isInteger(parsed.revision)) throw new Error();
+      || typeof parsed.coverAssetId !== 'string' || !Number.isInteger(parsed.revision)
+      || (parsed.note !== undefined && typeof parsed.note !== 'string')) throw new Error();
+    // Preserve an absent note as absent so the legacy JSON compare-and-swap stays byte-shape compatible.
     return { ...parsed, references: parseStudioFixedReferences(parsed.references) };
   } catch { throw new StudioStyleError('风格组暂时无法读取', 503); }
 }
@@ -52,7 +55,7 @@ export async function studioStyleDTO(user: ImageStudioIdentity, group: StudioSty
   return { id: group.id, name: group.name, revision: group.revision, canManage,
     coverUrl: `/api/image-studio/style-groups/${group.id}/cover?revision=${group.revision}`,
     referenceCount: group.references.length,
-    ...(canManage ? { coverAssetId: group.coverAssetId, references: group.references.map(ref => {
+    ...(canManage ? { note: group.note ?? '', coverAssetId: group.coverAssetId, references: group.references.map(ref => {
       const asset = byId.get(ref.assetId);
       return { id: ref.assetId, note: ref.note, available: Boolean(asset), width: asset?.width || null, height: asset?.height || null,
         originalUrl: asset ? `/api/image-studio/style-groups/${group.id}/assets/${ref.assetId}` : null,
@@ -107,6 +110,10 @@ export async function saveStudioStyleGroup(user: ImageStudioIdentity, body: Reco
   identity(user);
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   if (!name || name.length > 80) throw new StudioStyleError('风格组名称须为 1–80 字');
+  if (body.note !== undefined && typeof body.note !== 'string') throw new StudioStyleError('风格组整体备注内容无效');
+  if (typeof body.note === 'string' && body.note.length > MAX_STYLE_GROUP_NOTE_LENGTH) {
+    throw new StudioStyleError(`风格组整体备注最多 ${MAX_STYLE_GROUP_NOTE_LENGTH} 字，请缩短后再保存`);
+  }
   const id = body.id == null ? randomUUID() : String(body.id);
   return prisma.$transaction(async tx => {
     const current = body.id == null ? null : await getStudioStyleGroup(user, id, tx);
@@ -117,6 +124,12 @@ export async function saveStudioStyleGroup(user: ImageStudioIdentity, body: Reco
     const mergeIds = body.mergeIds === undefined ? [] : parseStudioStyleIds(body.mergeIds);
     const merge = await resolveStudioStyleReferences(user, mergeIds, tx);
     if (merge.groups.some(group => !canManageStudioStyle(user, group))) throw new StudioStyleError('只有管理员或创建者能合并风格组内容', 403);
+    const note = body.note === undefined ? current?.note || '' : body.note as string;
+    const mergedNote = [note, ...merge.groups.flatMap(group => group.note?.trim() ? [`【${group.name}】\n${group.note}`] : [])]
+      .filter(part => part.length > 0).join('\n\n');
+    if (mergedNote.length > MAX_STYLE_GROUP_NOTE_LENGTH) {
+      throw new StudioStyleError(`合并后的整体备注超过 ${MAX_STYLE_GROUP_NOTE_LENGTH} 字，请先缩短相关组备注后再合并`);
+    }
     references = [...references, ...merge.references];
     if (!references.length || references.length > MAX_REFERENCE_IMAGES) throw new StudioStyleError(`风格组须包含 1–${MAX_REFERENCE_IMAGES} 张图片`);
     const coverAssetId = typeof body.coverAssetId === 'string' ? body.coverAssetId : references[0].assetId;
@@ -127,7 +140,8 @@ export async function saveStudioStyleGroup(user: ImageStudioIdentity, body: Reco
     const assets = await tx.asset.findMany({ where: { id: { in: ids }, type: 'image', status: 'active', AND: [visible,
       ...(user.role === 'admin' ? [] : [{ OR: [{ owner_id: user.id }, { id: { in: Array.from(existingIds) } }] }]) ] }, select: { id: true } });
     if (assets.length !== ids.length) throw new StudioStyleError('组内图片不存在或无权查看', 403);
-    const group: StudioStyleGroup = { id, ownerId: current?.ownerId || user.id, name, coverAssetId, references, revision: (current?.revision || 0) + 1 };
+    const group: StudioStyleGroup = { id, ownerId: current?.ownerId || user.id, name, coverAssetId, references,
+      ...(mergedNote ? { note: mergedNote } : {}), revision: (current?.revision || 0) + 1 };
     const valueJson = JSON.stringify(group);
     if (current) {
       const changed = await tx.platformSetting.updateMany({ where: { key: `${PREFIX}${id}`, value_json: JSON.stringify(current) }, data: { value_json: valueJson, updated_by: user.id } });

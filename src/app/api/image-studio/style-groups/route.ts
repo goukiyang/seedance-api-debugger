@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { deleteStudioStyleGroup, listStudioStyleGroups, saveStudioStyleGroup, StudioStyleError } from '@/lib/image-studio/style-groups';
+import { deleteStudioStyleGroup, getStudioStyleGroup, listStudioStyleGroups, parseStudioStyleIds, saveStudioStyleGroup, StudioStyleError, studioStyleDTO } from '@/lib/image-studio/style-groups';
 
 export const dynamic = 'force-dynamic';
 function failure(error: unknown) {
@@ -11,7 +11,23 @@ function failure(error: unknown) {
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  try { return NextResponse.json(await listStudioStyleGroups(user, request.nextUrl.searchParams.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } }); }
+  try {
+    const selectedIds = request.nextUrl.searchParams.get('ids');
+    if (selectedIds !== null) {
+      const ids = parseStudioStyleIds(selectedIds ? selectedIds.split(',') : []);
+      const groups = await Promise.all(ids.map(async id => {
+        try { return await studioStyleDTO(user, await getStudioStyleGroup(user, id)); }
+        catch (error) {
+          if (error instanceof StudioStyleError && (error.status === 404 || error.status === 409)) {
+            return { id, name: '风格组不可用', referenceCount: 0, canManage: false, coverUrl: null, unavailable: true };
+          }
+          throw error;
+        }
+      }));
+      return NextResponse.json({ groups, nextCursor: null }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    return NextResponse.json(await listStudioStyleGroups(user, request.nextUrl.searchParams.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
+  }
   catch (error) { return failure(error); }
 }
 export async function POST(request: NextRequest) {

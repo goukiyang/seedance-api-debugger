@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Check, Combine, ImagePlus, Layers, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -11,8 +11,8 @@ import { StudioReferenceGrid, type FixedStudioReference } from './reference-grid
 import styles from './studio.module.css';
 
 export type StudioStyleSummary = { id: string; name: string; revision?: number; coverUrl: string | null; canManage: boolean;
-  referenceCount: number; references?: FixedStudioReference[]; coverAssetId?: string; unavailable?: boolean };
-type Draft = { id?: string; revision?: number; name: string; coverAssetId: string; references: FixedStudioReference[] };
+  referenceCount: number; references?: FixedStudioReference[]; coverAssetId?: string; note?: string; unavailable?: boolean };
+type Draft = { id?: string; revision?: number; name: string; coverAssetId: string; note: string; references: FixedStudioReference[] };
 
 async function responseValue(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应'); });
@@ -36,6 +36,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   const [picker, setPicker] = useState(false);
   const [preview, setPreview] = useState<UploadedAssetPayload | null>(null);
   const [uploading, setUploading] = useState(false);
+  const noteFieldId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const editor = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -69,7 +70,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
     if (group && !group.canManage) return;
     const refs = group ? group.references || [] : currentImages.map(image => ({ ...image, note: '', available: true }));
     const next: Draft = { ...(group ? { id: group.id, revision: group.revision } : {}), name: group?.name || '',
-      coverAssetId: group?.coverAssetId || refs[0]?.id || '', references: refs };
+      coverAssetId: group?.coverAssetId || refs[0]?.id || '', note: group?.note || '', references: refs };
     setDraft(next); setSavedDraft(JSON.stringify(next)); setError('');
   }
   function reflect(group: StudioStyleSummary) {
@@ -165,6 +166,9 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
       <header className={styles.header}><h2>{draft?.id ? '编辑风格组' : '新建风格组'}</h2><button type="button" aria-label="关闭风格组编辑" disabled={busy || uploading} onClick={closeEditor}><X size={20} /></button></header>
       {draft && <>
         <label className={styles.label}>名称<input autoFocus maxLength={80} disabled={busy} value={draft.name} onChange={event => setDraft(current => current ? { ...current, name: event.target.value } : current)} /></label>
+        <label className={styles.label} htmlFor={noteFieldId}>整体备注 <span>选填 · {draft.note.length}/8000</span></label>
+        <textarea id={noteFieldId} aria-label="风格组整体备注" rows={5} maxLength={8000} disabled={busy} value={draft.note}
+          placeholder="补充这组风格的整体说明" onChange={event => setDraft(current => current ? { ...current, note: event.target.value } : current)} />
         <label className={styles.label}>封面<select value={draft.coverAssetId} disabled={busy} onChange={event => setDraft(current => current ? { ...current, coverAssetId: event.target.value } : current)}>
           {!draft.references.length && <option value="">请先添加图片</option>}{draft.references.map((ref, index) => <option key={`${ref.id}-${index}`} value={ref.id}>风格 {index + 1}</option>)}
         </select></label>

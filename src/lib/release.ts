@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '改善新图片的下载恢复：下载中断后继续获取同一张原图，不会自动再次付费生成。恢复仍失败或链接过期时释放冻结积分；已发生且没有保存链接的旧任务不能自动找回。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片模板区分主图与辅助参考，可分别设置数量；未保存的参数和上下文可直接生成。支持一键清空本次辅助参考，风格组整体备注随素材使用，多张主图仍可与主图一对比。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

@@ -8,6 +8,7 @@ import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, parseStudioFixedReferences, removeStudioModuleFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, StudioFixedReferenceError } from './fixed-references';
 import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds, studioStyleDTO, StudioStyleError } from './style-groups';
 import { studioVisibleAssetWhere } from './protected-assets';
+import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudioModuleReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
 export class StudioModuleError extends Error {
@@ -74,6 +75,14 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const generation = resolveStudioModuleGenerationConfig(row, settings);
   const quality = normalizeImageStudioQuality(generation.model, row.quality);
+  const referenceLimit = Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES));
+  const visibleTransientIds = ids.filter(id => assets.some(asset => asset.id === id));
+  let referencePolicy;
+  try { referencePolicy = await getStudioModuleReferencePolicy(ownerId, row.id, visibleTransientIds, referenceLimit); }
+  catch (error) {
+    if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
+    throw error;
+  }
   const latestTask = row.id.startsWith('default-') ? null : await prisma.imageStudioTask.findFirst({
     where: { module_id: row.id, owner_id: ownerId, status: 'succeeded', deleted_at: null, asset_id: { not: null } },
     orderBy: { finished_at: 'desc' },
@@ -84,12 +93,16 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     : null;
   let representativeReference: string | null = null;
   try {
-    const parsed = latestTask?.snapshot_json ? JSON.parse(latestTask.snapshot_json) as { referenceImages?: Array<{ id?: unknown }> } : null;
-    const referenceImages = Array.isArray(parsed?.referenceImages) ? parsed.referenceImages : [];
-    if (isAdmin && referenceImages.length === 1 && typeof referenceImages[0]?.id === 'string') representativeReference = studioTemplateAssetUrl(referenceImages[0].id, true);
+    const parsed = latestTask?.snapshot_json ? JSON.parse(latestTask.snapshot_json) as {
+      primaryReferenceImages?: Array<{ id?: unknown }>;
+      transientReferenceImages?: Array<{ id?: unknown }>;
+      referenceImages?: Array<{ id?: unknown }>;
+    } : null;
+    const representative = parsed?.primaryReferenceImages?.[0] ?? parsed?.transientReferenceImages?.[0] ?? parsed?.referenceImages?.[0];
+    if (isAdmin && typeof representative?.id === 'string') representativeReference = studioTemplateAssetUrl(representative.id, true);
   } catch { representativeReference = null; }
   const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
-  return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)), aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
+  return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
     model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id, true), width: banner.width, height: banner.height } : null,
     cover: latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: representativeReference } : null,
     prices: generation.prices, unitCredits: generation.prices[generation.model],
@@ -152,6 +165,7 @@ export async function deleteStudioModule(ownerId: string, id: unknown, revision:
     // Tasks and assets have independent ownership and remain available in assets.
     await removeStudioModuleFixedReferences(ownerId, id, tx);
     await tx.platformSetting.deleteMany({ where: { key: `studio_style_selection_v1:${id}` } });
+    await removeStudioModuleReferencePolicy(ownerId, id, tx);
     await tx.imageStudioModule.deleteMany({ where: { id, owner_id: ownerId, revision: current.revision } });
   });
 }
@@ -182,6 +196,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   const referenceLimitValue = createOnly ? MAX_REFERENCE_IMAGES : body.referenceLimit;
   const referenceLimit = referenceLimitValue === undefined ? MAX_REFERENCE_IMAGES : Number(referenceLimitValue);
   const ids = createOnly ? [] : body.referenceIds;
+  let referencePolicy: StudioReferencePolicy | undefined;
   let fixedReferences: ReturnType<typeof parseStudioFixedReferences> | undefined;
   if (body.fixedReferences !== undefined) {
     if (!isAdmin) throw new StudioModuleError('固定模板图只能由管理员修改', 403);
@@ -192,7 +207,16 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof prompt !== 'string' || prompt.length > 20000
     || !Number.isInteger(count) || Number(count) < 1 || Number(count) > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES
     || !Number.isInteger(revision) || Number(revision) < 0
-    || !Array.isArray(ids) || ids.length > referenceLimit || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${referenceLimit} 张）`);
+    || !Array.isArray(ids) || ids.length > MAX_REFERENCE_IMAGES || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
+  if (body.referencePolicy !== undefined) {
+    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids as string[]); }
+    catch (error) {
+      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
+      throw error;
+    }
+  } else if ((ids as string[]).length > referenceLimit) {
+    throw new StudioModuleError(`旧版保存请求最多支持 ${referenceLimit} 张参考图`);
+  }
   const row = await prisma.$transaction(async tx => {
     const identity = sourceIdentity || await tx.user.findUniqueOrThrow({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
     const current = await tx.imageStudioModule.findUnique({ where: { id } });
@@ -261,14 +285,22 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
         throw error;
       }
     }
+    if (referencePolicy) {
+      try { await setStudioModuleReferencePolicy(ownerId, id, referencePolicy, ids as string[], tx); }
+      catch (error) {
+        if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
+        throw error;
+      }
+    }
     try {
       if (body.styleGroupIds !== undefined) await setStudioModuleStyleIds(identity, id, body.styleGroupIds, tx);
       const selectedIds = body.styleGroupIds === undefined ? await getStudioModuleStyleIds(ownerId, id, tx) : parseStudioStyleIds(body.styleGroupIds);
       const selected = await resolveStudioStyleReferences(identity, selectedIds, tx);
       const fixed = await getStudioModuleFixedReferences(ownerId, id, tx);
-      if (fixed.length + selected.references.length + ids.length > MAX_REFERENCE_IMAGES) throw new StudioModuleError(`模板、风格组与本次参考图合计不能超过 ${MAX_REFERENCE_IMAGES} 张`);
+      const effectivePolicy = referencePolicy || await getStudioModuleReferencePolicy(ownerId, id, ids as string[], referenceLimit, tx);
+      validateStudioReferenceCounts(effectivePolicy, ids as string[], fixed.length, selected.references.length);
     } catch (error) {
-      if (error instanceof StudioStyleError) throw new StudioModuleError(error.message, error.status);
+      if (error instanceof StudioStyleError || error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
       throw error;
     }
     // An administrator's bound module is the canonical source for the shared
@@ -286,6 +318,13 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
           try { await setStudioPresetFixedReferences(ownerId, current.source_preset_id, fixedReferences, tx); }
           catch (error) {
             if (error instanceof StudioFixedReferenceError) throw new StudioModuleError(error.message, error.status);
+            throw error;
+          }
+        }
+        if (referencePolicy) {
+          try { await setStudioPresetReferencePolicy(ownerId, current.source_preset_id, referencePolicy, ids as string[], tx); }
+          catch (error) {
+            if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
             throw error;
           }
         }
