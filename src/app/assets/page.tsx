@@ -15,10 +15,12 @@ import ContentCollections, { ContentLookup, reactionEntryStorageKey } from '@/co
 import type { ContentSummary } from '@/lib/content-reactions/types';
 import { IMAGE_STUDIO_MODEL_SHORT_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import { RelativeTime } from '@/components/RelativeTime';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import MediaPreview from '@/components/MediaPreview';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import assetStyles from './assets.module.css';
 import {
   createAssetLibraryCacheKey,
@@ -354,7 +356,6 @@ function assetMediaAspectRatio(item: Pick<AssetLibraryItem, 'ratio' | 'width' | 
   if (Number.isFinite(width) && Number.isFinite(height) && width && height && width > 0 && height > 0) {
     return `${width} / ${height}`;
   }
-
   const ratio = item.ratio?.trim();
   const pair = ratio?.match(/^(\d+(?:\.\d+)?)\s*(?::|\/|x|×)\s*(\d+(?:\.\d+)?)$/i);
   if (pair) {
@@ -364,7 +365,6 @@ function assetMediaAspectRatio(item: Pick<AssetLibraryItem, 'ratio' | 'width' | 
       return `${ratioWidth} / ${ratioHeight}`;
     }
   }
-
   const numericRatio = Number(ratio);
   if (Number.isFinite(numericRatio) && numericRatio > 0) return `${numericRatio} / 1`;
   const resolution = item.resolution?.match(/(\d{2,5})\s*(?:x|×)\s*(\d{2,5})/i);
@@ -543,16 +543,6 @@ function deliveryStageClassName(stage: VideoDeliveryStage | null | undefined) {
   if (stage.key === 'failed') return 'asset-card-delivery-stage is-failed';
   if (stage.key === 'preparing') return 'asset-card-delivery-stage is-preparing';
   return 'asset-card-delivery-stage';
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function timestampMs(value: string | null) {
@@ -765,6 +755,10 @@ function AssetsPageContent() {
   const [assetUploadProgress, setAssetUploadProgress] = useState<AssetLibraryUploadProgress | null>(null);
 
   const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
+  const detailDrawerRef = useRef<HTMLElement>(null);
+  const movePanelRef = useRef<HTMLElement>(null);
+  const moveAlbumTriggerRef = useRef<HTMLButtonElement>(null);
+  const moveProjectTriggerRef = useRef<HTMLButtonElement>(null);
   const cardRectSnapshot = useRef<AssetCardRectSnapshot[]>([]);
   const marqueeStateRef = useRef<MarqueeState | null>(null);
   const marqueePointRef = useRef<{ x: number; y: number } | null>(null);
@@ -871,6 +865,20 @@ function AssetsPageContent() {
       try { localStorage.removeItem(assetPreviewStorageKey(user.id)); } catch {}
     }
   }, [clearPreviewSequence, user?.id]);
+
+  useDialogDismiss({
+    open: Boolean(activeItem && !mediaPreviewOpen),
+    dialogRef: detailDrawerRef,
+    onDismiss: closeAssetPreview,
+    modal: false,
+  });
+  useDialogDismiss({
+    open: movePanelOpen && selectedIds.length > 0,
+    dialogRef: movePanelRef,
+    branchRefs: [moveAlbumTriggerRef, moveProjectTriggerRef],
+    onDismiss: () => setMovePanelOpen(false),
+    modal: false,
+  });
 
   const clearSelection = () => {
     setSelectedIds([]);
@@ -1727,8 +1735,8 @@ function AssetsPageContent() {
       <div><dt>项目</dt><dd>{activeItem.project?.name || '未归属项目'}</dd></div>
       {isAdmin && <div><dt>用户</dt><dd><UserIdentityBadge user={activeItem.owner} size="sm" subtitle={activeItem.owner?.subtitle || null} className="asset-detail-user" /></dd></div>}
       <div><dt>规格</dt><dd>{formatAssetSpec(activeItem) || '-'}</dd></div>
-      <div><dt>创建时间</dt><dd>{formatDateTime(activeItem.createdAt)}</dd></div>
-      <div><dt>完成时间</dt><dd>{formatDateTime(activeItem.completedAt)}</dd></div>
+      <div><dt>创建时间</dt><dd>{activeItem.createdAt ? <RelativeTime value={activeItem.createdAt} /> : '-'}</dd></div>
+      <div><dt>完成时间</dt><dd>{activeItem.completedAt ? <RelativeTime value={activeItem.completedAt} /> : '-'}</dd></div>
     </dl>
     <div className="asset-detail-actions">
       {(activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
@@ -2095,6 +2103,7 @@ function AssetsPageContent() {
               加入工作区（{reusableImageItems.length}/{selectedIds.length}）
             </button>
             <button
+              ref={moveAlbumTriggerRef}
               type="button"
               onClick={() => {
                 rememberBulkTarget('album');
@@ -2106,6 +2115,7 @@ function AssetsPageContent() {
               加入图集
             </button>
             <button
+              ref={moveProjectTriggerRef}
               type="button"
               onClick={() => {
                 rememberBulkTarget('video_project');
@@ -2121,7 +2131,7 @@ function AssetsPageContent() {
       )}
 
       {movePanelOpen && selectedIds.length > 0 && bulkTarget === 'video_project' && (
-        <section className="asset-library-move-panel">
+        <section ref={movePanelRef} className="asset-library-move-panel">
           <div>
             <strong>移动视频任务</strong>
             <span>需要选择目标项目和该项目下的视频卡。</span>
@@ -2145,7 +2155,7 @@ function AssetsPageContent() {
       )}
 
       {movePanelOpen && selectedIds.length > 0 && bulkTarget === 'album' && (
-        <section className="asset-library-move-panel asset-library-album-panel">
+        <section ref={movePanelRef} className="asset-library-move-panel asset-library-album-panel">
           <div>
             <strong>加入参考图集</strong>
             <span>只复制图片引用，不删除原资产；仅显示你可编辑的图集。</span>
@@ -2225,7 +2235,6 @@ function AssetsPageContent() {
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
                 const enhanceStateLabel = item.isEnhanceTask ? '超分结果' : '';
-                const mediaAspectRatio = assetMediaAspectRatio(item);
                 return (
                   <div
                     key={item.id}
@@ -2256,8 +2265,7 @@ function AssetsPageContent() {
                       </button>
                     )}
                     <span
-                      className={`asset-card-media ${assetStyles.cardMedia} ${mediaAspectRatio ? assetStyles.cardMediaWithRatio : assetStyles.cardMediaUnknownRatio}`}
-                      style={mediaAspectRatio ? { aspectRatio: mediaAspectRatio } : undefined}
+                      className={`asset-card-media ${assetStyles.cardMedia} ${item.kind === 'image' ? assetStyles.cardMediaImage : item.kind === 'video' ? assetStyles.cardMediaVideo : assetStyles.cardMediaUnknownRatio}`}
                     >
                       {item.kind === 'audio' ? (
                         <span className="asset-card-audio-placeholder">
@@ -2429,7 +2437,7 @@ function AssetsPageContent() {
       )}
 
       {activeItem && !mediaPreviewOpen && (
-        <aside className="asset-detail-drawer" aria-label="资产详情">
+        <aside ref={detailDrawerRef} className="asset-detail-drawer" aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
               <span>{activeItem.isEnhanceTask ? '超分视频资产' : activeItem.kind === 'video' ? '视频资产' : activeItem.kind === 'audio' ? '音频资产' : '图片资产'}</span>

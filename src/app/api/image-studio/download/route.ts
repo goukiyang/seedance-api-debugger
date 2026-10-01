@@ -4,6 +4,7 @@ import { ZipFile } from 'yazl';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { readStudioImage } from '@/lib/image-studio/media';
+import { studioVisibleAssetWhere } from '@/lib/image-studio/protected-assets';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,10 +16,11 @@ export async function GET(request: NextRequest) {
   const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: ids }, owner_id: user.id, status: 'succeeded', deleted_at: null } });
   if (tasks.length !== ids.length) return NextResponse.json({ error: '部分图片不可下载或无权访问' }, { status: 403 });
   try {
+    const visible = await studioVisibleAssetWhere(user);
     const files: Array<{ name: string; bytes: Buffer }> = [];
     for (const id of ids) {
       const task = tasks.find(item => item.id === id)!;
-      const asset = await prisma.asset.findFirst({ where: { id: task.asset_id!, owner_id: user.id, status: 'active' } });
+      const asset = await prisma.asset.findFirst({ where: { id: task.asset_id!, owner_id: user.id, status: 'active', AND: [visible] } });
       if (!asset) throw new Error('图片文件不可用');
       files.push({ name: `image-${task.id.slice(0, 10)}-${task.ordinal}.png`, bytes: await readStudioImage(asset.original_url) });
     }

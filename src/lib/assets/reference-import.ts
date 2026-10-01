@@ -6,6 +6,7 @@ import { addAssetToWorkspace } from '@/lib/assets/workspace';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 
 const CODEX_REFERENCE_ALBUM_NAME = 'Codex API 参考图';
 const WORKSPACE_REFERENCE_ALBUM_NAME = '生成工作台参考图';
@@ -201,6 +202,7 @@ async function ensureReferenceImageForAsset(
   context: ReferenceImportContext,
   asset: Pick<Asset, 'id' | 'type' | 'original_url' | 'thumbnail_url' | 'file_name'>,
 ): Promise<ImportedReferenceImage> {
+  if (!await canReadStudioAsset(context.user, asset)) throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
   const { referenceImage } = await ensureReferenceImageRecord(context, asset);
   const workspaceAssetId = await addAssetToWorkspace(
     context.workspaceId,

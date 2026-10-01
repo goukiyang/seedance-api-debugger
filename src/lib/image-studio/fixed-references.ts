@@ -54,10 +54,6 @@ async function readSetting(client: FixedReferenceClient, key: string, ownerId: s
 }
 
 async function writeSetting(client: FixedReferenceClient, key: string, ownerId: string, references: StudioFixedReference[]) {
-  if (!references.length) {
-    await client.platformSetting.deleteMany({ where: { key } });
-    return;
-  }
   const assetIds = Array.from(new Set(references.map(reference => reference.assetId)));
   const assets = await client.asset.findMany({ where: { id: { in: assetIds }, owner_id: ownerId, status: 'active', type: 'image' }, select: { id: true } });
   if (assets.length !== assetIds.length) throw new StudioFixedReferenceError('固定参考图不存在或无权使用', 403);
@@ -70,8 +66,17 @@ async function writeSetting(client: FixedReferenceClient, key: string, ownerId: 
 }
 
 export async function getStudioModuleFixedReferences(ownerId: string, moduleId: string, client: FixedReferenceClient = prisma) {
-  const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
+  const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true, source_preset_id: true } });
   if (!workspace) return [];
+  if (workspace.source_preset_id) {
+    const source = await client.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id }, select: { id: true, owner_id: true } });
+    // Shared copies keep a server-side binding instead of granting ownership of hidden images.
+    if (source) {
+      if (source.owner_id !== ownerId) return readSetting(client, presetKey(source.id), source.owner_id);
+      const own = await client.platformSetting.findUnique({ where: { key: moduleKey(moduleId) }, select: { value_json: true } });
+      return own ? decodeSetting(own.value_json, ownerId) : readSetting(client, presetKey(source.id), source.owner_id);
+    }
+  }
   return readSetting(client, moduleKey(moduleId), ownerId);
 }
 

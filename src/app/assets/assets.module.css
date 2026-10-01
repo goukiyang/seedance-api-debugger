@@ -2,22 +2,10 @@
   max-block-size: min(360px, 60vh);
 }
 
-:global(.asset-library-page) .cardMedia.cardMediaWithRatio > img,
-:global(.asset-library-page) .cardMedia.cardMediaWithRatio > video {
-  position: absolute;
-  inset: 0;
-  display: block;
-  inline-size: 100%;
-  block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  object-fit: contain;
-}
-
-:global(.asset-library-page) .cardMedia.cardMediaUnknownRatio {
-  aspect-ratio: 16 / 9;
-}
-
+:global(.asset-library-page) .cardMedia.cardMediaImage > img,
+:global(.asset-library-page) .cardMedia.cardMediaImage > video,
+:global(.asset-library-page) .cardMedia.cardMediaVideo > img,
+:global(.asset-library-page) .cardMedia.cardMediaVideo > video,
 :global(.asset-library-page) .cardMedia.cardMediaUnknownRatio > img,
 :global(.asset-library-page) .cardMedia.cardMediaUnknownRatio > video {
   position: absolute;
@@ -28,6 +16,17 @@
   min-inline-size: 0;
   min-block-size: 0;
   object-fit: contain;
+}
+
+:global(.asset-library-page) .cardMedia.cardMediaImage {
+  aspect-ratio: 1 / 1;
+  background: oklch(0.08 0.004 250);
+}
+
+:global(.asset-library-page) .cardMedia.cardMediaVideo,
+:global(.asset-library-page) .cardMedia.cardMediaUnknownRatio {
+  aspect-ratio: 16 / 9;
+  background: oklch(0.08 0.004 250);
 }
 
 :global(.asset-library-page) .collectionMedia {

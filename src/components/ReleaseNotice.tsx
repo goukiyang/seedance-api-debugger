@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { release, newerRelease } from '@/lib/release';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './CreditRequestDialog.module.css';
 
 export default function ReleaseNotice() {
@@ -41,12 +42,13 @@ export default function ReleaseNotice() {
   }, [check]);
   useEffect(() => { if (target) dialog.current?.showModal(); }, [target]);
   const later = () => { try { if (target) localStorage.setItem('sd2:release:later', target.version); } catch { /* Optional persistence. */ } setTarget(null); };
+  useDialogDismiss({ open: Boolean(target), dialogRef: dialog, nativeDialog: true, onDismiss: later });
   return <>
     {pathname === '/account' && <footer style={{ padding: '16px 24px', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
       <span>SD2 v{release.version}</span><button className="btn btn-secondary" disabled={checking} onClick={() => void check(true)}>{checking ? '检查中…' : '检查更新'}</button><span role="status">{message}</span>
     </footer>}
-    {target && createPortal(<dialog ref={dialog} className={styles.dialog} onCancel={(e) => { e.preventDefault(); later(); }} aria-labelledby="release-title">
-      <header className={styles.header}><h2 id="release-title" style={{ fontWeight: 700 }}>发现新版本</h2></header>
+    {target && createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby="release-title">
+      <header className={styles.header}><h2 id="release-title" style={{ fontWeight: 700, fontSize: 20 }}>发现新版本</h2></header>
       <div className={styles.body}><p>v{target.version}</p><p>{target.summary}</p>
         <p>刷新前请保存当前未提交的内容。</p>
         <div className={styles.actions}><button className="btn btn-primary" onClick={() => { if (window.confirm('刷新会关闭当前页面，未提交的内容可能丢失。确认已保存并刷新？')) window.location.reload(); }}>立即刷新</button><button className="btn btn-secondary" onClick={later}>稍后</button></div>

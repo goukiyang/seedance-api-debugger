@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import type {
   SerializedGenerationTemplate,
   SerializedTemplateAsset,
@@ -100,6 +101,9 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
   const [contextCardsSaveStatus, setContextCardsSaveStatus] = useState<ContextCardsSaveStatus>('idle');
   const [contextCardsSaveError, setContextCardsSaveError] = useState('');
   const initialCardsJsonRef = useRef('');
+  const dialogRef = useRef<HTMLElement>(null);
+  const shellRef = useRef<HTMLElement | null>(null);
+  const backdropRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!template) return;
@@ -194,6 +198,29 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
     return draftText || cleanText(data.draft?.summary) || cleanText(userInput);
   };
 
+  const requestClose = () => {
+    if (saving) return;
+    const cardsDirty = JSON.stringify(contextCards) !== initialCardsJsonRef.current;
+    const fieldsDirty = Boolean(template && (
+      name !== template.name
+      || description !== (template.description || '')
+      || status !== template.status
+      || version !== template.version
+    ));
+    if ((cardsDirty || fieldsDirty) && !window.confirm('模板修改尚未全部保存，确定关闭？')) return;
+    onClose();
+  };
+
+  useDialogDismiss({
+    open: open && variant !== 'inline' && Boolean(template && payload),
+    dialogRef,
+    dismissSurfaceRef: shellRef,
+    isDismissTarget: (target) => target === backdropRef.current || target === shellRef.current,
+    onDismiss: requestClose,
+    dismissOnOutside: !saving,
+    dismissOnEscape: !saving,
+  });
+
   if (!open || !template || !payload) return null;
 
   const editorActions = (
@@ -257,15 +284,15 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
 
   if (variant === 'card') {
     return (
-      <section className="template-card-modal-shell" role="dialog" aria-modal="true" aria-label="上下文卡片三级编辑弹窗">
-        <button type="button" className="template-card-modal-backdrop" aria-label="关闭卡片编辑" onClick={onClose} />
-        <aside className="template-card-modal">
+      <section ref={(element) => { shellRef.current = element; }} className="template-card-modal-shell">
+        <button ref={backdropRef} type="button" className="template-card-modal-backdrop" aria-label="关闭卡片编辑" data-dialog-dismiss-surface onClick={(event) => { if (event.detail === 0) requestClose(); }} />
+        <aside ref={dialogRef} className="template-card-modal" role="dialog" aria-modal="true" aria-label="上下文卡片三级编辑弹窗">
           <header className="template-card-modal-head">
             <div>
               <span>上下文卡片三级弹窗</span>
               <h2>{template.name}</h2>
             </div>
-            <button type="button" onClick={onClose}>关闭</button>
+            <button type="button" onClick={requestClose}>关闭</button>
           </header>
           <section className="template-card-route-workspace" aria-label="上下文卡片编辑">
             {workspaceContent}
@@ -276,9 +303,9 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
   }
 
   return (
-    <div className="template-drawer-shell" role="dialog" aria-modal="true" aria-label="模板上下文卡片编辑">
-      <button type="button" className="template-drawer-backdrop" aria-label="关闭模板编辑" onClick={onClose} />
-      <aside className="template-drawer">
+    <div ref={(element) => { shellRef.current = element; }} className="template-drawer-shell">
+      <button ref={backdropRef} type="button" className="template-drawer-backdrop" aria-label="关闭模板编辑" data-dialog-dismiss-surface onClick={(event) => { if (event.detail === 0) requestClose(); }} />
+      <aside ref={dialogRef} className="template-drawer" role="dialog" aria-modal="true" aria-label="模板上下文卡片编辑">
         {workspaceContent}
       </aside>
     </div>

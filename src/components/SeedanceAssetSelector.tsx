@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 
 // ============================================================================
 // Types
@@ -118,9 +119,18 @@ function AssetGrid({
   onSelect: (asset: SeedanceAssetRecord) => void;
   onClose: () => void;
 }) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [assets, setAssets] = useState<SeedanceAssetRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useDialogDismiss({
+    open: true,
+    dialogRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: onClose,
+  });
 
   useEffect(() => {
     fetch('/api/assets/list')
@@ -137,19 +147,14 @@ function AssetGrid({
   }, []);
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        style={{ background: 'rgba(0,0,0,0.6)' }}
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+    <div ref={backdropRef} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
         <div
-          className="bg-[#1a1a2e] rounded-xl border border-white/10 shadow-2xl pointer-events-auto w-full max-w-2xl max-h-[70vh] flex flex-col"
-          onClick={(e) => e.stopPropagation()}
+          ref={dialogRef}
+          className="bg-[#1a1a2e] rounded-xl border border-white/10 shadow-2xl w-full max-w-2xl max-h-[70vh] flex flex-col"
+          role="dialog"
+          aria-modal="true"
+          aria-label="选择 Seedance 资产作为参考图"
+          onClick={(event) => event.stopPropagation()}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
@@ -210,8 +215,7 @@ function AssetGrid({
             )}
           </div>
         </div>
-      </div>
-    </>
+    </div>
   );
 }
 

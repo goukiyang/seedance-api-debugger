@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import MediaPreview from '@/components/MediaPreview';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import { uploadFileAsAsset, type UploadProgressHandler } from '@/lib/http/file-upload';
@@ -221,6 +222,10 @@ function clearTemplateRecovery(userId: string, templateId: string) {
   try { window.localStorage.removeItem(templateRecoveryKey(userId, templateId)); } catch { /* Recovery is best-effort. */ }
 }
 
+function templateEditSignature(template: StudioTemplateDto) {
+  return JSON.stringify({ name: template.name, description: template.description, groupName: template.groupName, recipe: template.recipe });
+}
+
 function readTemplateRecovery(userId: string, templateId: string): StudioTemplateDto | null {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(templateRecoveryKey(userId, templateId)) || 'null') as StudioTemplateDto | null;
@@ -351,10 +356,16 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const [templateDetail, setTemplateDetail] = useState<StudioTemplateDetailResponse | null>(null);
   const [templateDetailBusy, setTemplateDetailBusy] = useState(false);
   const [templateEdit, setTemplateEdit] = useState<StudioTemplateDto | null>(null);
+  const templateEditBaseline = useRef<string | null>(null);
+  const templateEditBackdropRef = useRef<HTMLDivElement>(null);
+  const templateEditDialogRef = useRef<HTMLElement>(null);
   const [templateConflict, setTemplateConflict] = useState<{ id: string; source: StudioTemplateDto['source'] } | null>(null);
   const [templateRecoveryAvailable, setTemplateRecoveryAvailable] = useState(false);
   const [templateEditBusy, setTemplateEditBusy] = useState(false);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+  const createTemplateBackdropRef = useRef<HTMLDivElement>(null);
+  const createTemplateDialogRef = useRef<HTMLElement>(null);
+  const createTemplateDraftRef = useRef<string | null>(null);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateGroup, setNewTemplateGroup] = useState('');
   const [newTemplateInstruction, setNewTemplateInstruction] = useState('');
@@ -407,6 +418,22 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     : templates.find((item) => item.id === routedTemplateId)?.source || 'studio';
   const activeTemplate = useMemo(() => templates.find((item) => item.id === routedTemplateId && item.source === routedTemplateSource) || null, [routedTemplateId, routedTemplateSource, templates]);
   const activeDraft = draft?.id === routedDraftId ? draft : null;
+  useDialogDismiss({
+    open: Boolean(templateEdit),
+    dialogRef: templateEditDialogRef,
+    dismissSurfaceRef: templateEditBackdropRef,
+    onDismiss: closeTemplateEditor,
+    dismissOnOutside: !templateEditBusy,
+    dismissOnEscape: !templateEditBusy,
+  });
+  useDialogDismiss({
+    open: createTemplateOpen && Boolean(activeDraft),
+    dialogRef: createTemplateDialogRef,
+    dismissSurfaceRef: createTemplateBackdropRef,
+    onDismiss: () => setCreateTemplateOpen(false),
+    dismissOnOutside: !createTemplateBusy,
+    dismissOnEscape: !createTemplateBusy,
+  });
   const activeRunDetail = runDetail?.run.id === routedRunId ? runDetail : null;
   const moduleRun = activeDraft && activeRunDetail && activeRunDetail.run.draftId === activeDraft.id ? activeRunDetail.run
     : runs.find(item => item.draftId === activeDraft?.id && (!routedRunId || item.id === routedRunId));
@@ -1256,10 +1283,35 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     });
   }
 
+  function beginTemplateEdit(template: StudioTemplateDto) {
+    const recovery = readTemplateRecovery(userId, template.id);
+    templateEditBaseline.current = templateEditSignature(template);
+    setTemplateEdit(recovery || template);
+    setTemplateRecoveryAvailable(false);
+  }
+
+  function closeTemplateEditor() {
+    if (!templateEdit || templateEditBusy) return;
+    const dirty = templateEditBaseline.current === null
+      || templateEditSignature(templateEdit) !== templateEditBaseline.current;
+    if (dirty) {
+      saveTemplateRecovery(userId, templateEdit);
+      setTemplateRecoveryAvailable(true);
+      if (!window.confirm('当前模板编辑尚未保存。关闭后会保留为本机草稿，可稍后恢复。是否关闭？')) return;
+    } else {
+      clearTemplateRecovery(userId, templateEdit.id);
+      setTemplateRecoveryAvailable(false);
+    }
+    templateEditBaseline.current = null;
+    setTemplateEdit(null);
+  }
+
   function restoreTemplateEdit() {
     if (!routedTemplateId) return;
     const local = readTemplateRecovery(userId, routedTemplateId);
     if (!local) { setTemplateRecoveryAvailable(false); return; }
+    const baseline = templates.find((item) => item.id === local.id && item.source === local.source);
+    templateEditBaseline.current = baseline ? templateEditSignature(baseline) : null;
     setTemplateEdit(local);
     setTemplateRecoveryAvailable(false);
   }
@@ -1280,7 +1332,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           : [latest.template, ...current];
       });
       setTemplateDetail(latest);
-      if (templateEdit?.id === templateConflict.id) setTemplateEdit(null);
+      if (templateEdit?.id === templateConflict.id) {
+        templateEditBaseline.current = null;
+        setTemplateEdit(null);
+      }
       clearTemplateRecovery(userId, latest.template.id);
       setTemplateRecoveryAvailable(false);
       setTemplateConflict(null);
@@ -1314,6 +1369,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       });
       const saved = 'template' in response ? response.template : response;
       setTemplates((current) => current.map((item) => item.id === saved.id ? saved : item));
+      templateEditBaseline.current = null;
       setTemplateEdit(null);
       setTemplateConflict(null);
       clearTemplateRecovery(userId, saved.id);
@@ -1405,6 +1461,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       const template = 'template' in response ? response.template : response;
       setTemplates((current) => [template, ...current.filter((item) => item.id !== template.id)]);
       setCreateTemplateOpen(false);
+      createTemplateDraftRef.current = null;
+      setNewTemplateName('');
+      setNewTemplateGroup('');
+      setNewTemplateInstruction('');
       setNotice('已另存为个人模板。');
       navigate({ type: 'video', view: 'templates', templateId: null, templateSource: null, runId: null }, true);
     } catch (error) {
@@ -1636,7 +1696,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       const id = activeDraft.id;
                       void requestJson<{ context?: string }>(`${API}/context?draftId=${encodeURIComponent(id)}`).then(value => {
                         if (currentDraftId.current !== id) return;
-                        setNewTemplateName(activeDraft.name); setNewTemplateGroup(activeDraft.groupName); setNewTemplateInstruction(value.context || ''); setCreateTemplateOpen(true);
+                        if (createTemplateDraftRef.current !== id) {
+                          createTemplateDraftRef.current = id;
+                          setNewTemplateName(activeDraft.name);
+                          setNewTemplateGroup(activeDraft.groupName);
+                          setNewTemplateInstruction(value.context || '');
+                        }
+                        setCreateTemplateOpen(true);
                       }).catch(error => setNotice(messageForFailure(error)));
                     }}>另存为个人模板</button>}
                   </div>
@@ -1795,7 +1861,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                 conflict={templateConflict?.id === activeTemplate.id && templateConflict.source === activeTemplate.source}
                 onReloadConflict={() => void reloadConflictedTemplate()}
                 onApply={() => void applyTemplate(activeTemplate)}
-                onEdit={() => { setTemplateConflict(null); setTemplateEdit(activeTemplate); }}
+                onEdit={() => { setTemplateConflict(null); beginTemplateEdit(activeTemplate); }}
                 onPublish={() => void publishTemplate(activeTemplate)}
                 onArchive={() => void archiveTemplate(activeTemplate)}
                 onBack={() => navigate({ templateId: null, templateSource: null })}
@@ -1828,8 +1894,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       {pickerOpen && activeDraft && <UploadedImagePicker open currentCount={activeDraft.assets.length} currentAssetIds={assetIds} onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
 
       {templateEdit && (
-        <div className={styles.dialogBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { clearTemplateRecovery(userId, templateEdit.id); setTemplateRecoveryAvailable(false); setTemplateEdit(null); } }}>
-          <section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
+        <div ref={templateEditBackdropRef} className={styles.dialogBackdrop} role="presentation" onClick={(event) => event.stopPropagation()}>
+          <section ref={templateEditDialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
             <h2 id="template-edit-title">编辑模板草稿</h2>
             {templateConflict?.id === templateEdit.id && <div className={`${styles.callout} ${styles.calloutWarning}`} role="alert"><span>服务器上的模板已更新。当前输入仍保留；重新载入会放弃这些编辑。</span><button className={styles.quietButton} type="button" disabled={templateEditBusy} onClick={() => void reloadConflictedTemplate()}>载入最新版本</button></div>}
             <div className={styles.field}><label htmlFor="studio-template-name">模板名称</label><input id="studio-template-name" value={templateEdit.name} maxLength={120} onChange={(event) => setTemplateEdit((current) => current ? { ...current, name: event.target.value } : current)} /></div>
@@ -1837,21 +1903,21 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
             <div className={styles.field}><label htmlFor="studio-template-description">说明</label><textarea id="studio-template-description" value={templateEdit.description || ''} maxLength={500} onChange={(event) => setTemplateEdit((current) => current ? { ...current, description: event.target.value } : current)} /></div>
             <div className={styles.field}><label htmlFor="studio-template-instruction">固定要求</label><textarea id="studio-template-instruction" value={templateEdit.recipe?.instruction || ''} maxLength={5000} onChange={(event) => setTemplateEdit((current) => current ? { ...current, recipe: { ...(current.recipe || { fields: [], assetSlots: [], defaultParameters: {} }), instruction: event.target.value } } : current)} /></div>
             <span className={styles.fieldHint}>字段、素材槽位和推荐参数沿用当前配方；修改配方结构由现有模板维护权限控制。</span>
-            <div className={styles.dialogFooter}><button className={styles.quietButton} type="button" onClick={() => { clearTemplateRecovery(userId, templateEdit.id); setTemplateRecoveryAvailable(false); setTemplateEdit(null); }}>取消</button><button className={styles.primaryButton} type="button" disabled={templateEditBusy || Boolean(templateConflict?.id === templateEdit.id) || !templateEdit.name.trim()} onClick={() => void saveTemplateEdit()}>{templateEditBusy ? '保存中' : '保存模板草稿'}</button></div>
+            <div className={styles.dialogFooter}><button className={styles.quietButton} type="button" disabled={templateEditBusy} onClick={closeTemplateEditor}>取消</button><button className={styles.primaryButton} type="button" disabled={templateEditBusy || Boolean(templateConflict?.id === templateEdit.id) || !templateEdit.name.trim()} onClick={() => void saveTemplateEdit()}>{templateEditBusy ? '保存中' : '保存模板草稿'}</button></div>
           </section>
         </div>
       )}
       {contextEditor && <VideoContextEditor key={contextEditor.draftId || 'global'} draftId={contextEditor.draftId} onClose={() => setContextEditor(null)} />}
 
       {createTemplateOpen && activeDraft && (
-        <div className={styles.dialogBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateTemplateOpen(false); }}>
-          <section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="template-create-title">
+        <div ref={createTemplateBackdropRef} className={styles.dialogBackdrop} role="presentation" onClick={(event) => event.stopPropagation()}>
+          <section ref={createTemplateDialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="template-create-title">
             <h2 id="template-create-title">另存为个人模板</h2>
             <p className={styles.fieldHint}>只保存到当前账号；不会发布给其他人，也不会复制素材的所有权。</p>
             <div className={styles.field}><label htmlFor="studio-new-template-name">模板名称</label><input id="studio-new-template-name" value={newTemplateName} maxLength={120} onChange={(event) => setNewTemplateName(event.target.value)} /></div>
             <div className={styles.field}><label htmlFor="studio-new-template-group">用途分组</label><input id="studio-new-template-group" value={newTemplateGroup} maxLength={80} onChange={(event) => setNewTemplateGroup(event.target.value)} /></div>
             <div className={styles.field}><label htmlFor="studio-new-template-instruction">固定要求 · 必填</label><textarea id="studio-new-template-instruction" value={newTemplateInstruction} maxLength={5000} onChange={(event) => setNewTemplateInstruction(event.target.value)} placeholder="用于说明套用此模板时始终遵循的要求" /></div>
-            <div className={styles.dialogFooter}><button className={styles.quietButton} type="button" onClick={() => setCreateTemplateOpen(false)}>取消</button><button className={styles.primaryButton} type="button" disabled={createTemplateBusy || !newTemplateInstruction.trim()} onClick={() => void createPersonalTemplate()}>{createTemplateBusy ? '正在保存' : '保存个人模板'}</button></div>
+            <div className={styles.dialogFooter}><button className={styles.quietButton} type="button" disabled={createTemplateBusy} onClick={() => setCreateTemplateOpen(false)}>取消</button><button className={styles.primaryButton} type="button" disabled={createTemplateBusy || !newTemplateInstruction.trim()} onClick={() => void createPersonalTemplate()}>{createTemplateBusy ? '正在保存' : '保存个人模板'}</button></div>
           </section>
         </div>
       )}

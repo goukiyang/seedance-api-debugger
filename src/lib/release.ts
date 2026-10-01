@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复切换模板时通用上下文草稿异常，清空前增加确认；现有和新建图片模板、历史任务重新生成都会合并当前通用上下文，保留模板自己的内容。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新增可复用风格组，管理员和创建者可管理内容，同事通过封面选用；模板固定图对普通用户隐藏但仍参与生成。参考图更紧凑，备注可单独保存；资产缩略图完整显示，弹窗支持安全点击空白关闭。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { readStudioImage, readStudioThumbnail, readStudioPreview } from '@/lib/image-studio/media';
 import { canViewStudioPreset, canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getStudioPresetsFixedReferences } from '@/lib/image-studio/fixed-references';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,7 +13,8 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
   if (!user) return new Response('Not found', { status: 404 });
   const asset = await prisma.asset.findFirst({ where: { id: params.assetId, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true } });
   if (!asset) return new Response('Not found', { status: 404 });
-  if (asset.owner_id !== user.id) {
+  if (!await canReadStudioAsset(user, asset)) return new Response('Not found', { status: 404 });
+  if (asset.owner_id !== user.id && !(user.role === 'admin' && canUseCompanyTemplates(user))) {
     if (!canUseCompanyTemplates(user)) return new Response('Not found', { status: 404 });
     const presets = await prisma.imageStudioPreset.findMany({ where: { OR: [{ owner_id: user.id }, { is_shared: true }] }, select: { id: true, owner_id: true, scope: true, is_shared: true, banner_asset_id: true, reference_ids: true } });
     const visiblePresets = presets.filter(preset => canViewStudioPreset(user, preset));

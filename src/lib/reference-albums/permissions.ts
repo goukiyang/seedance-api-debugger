@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import type { SessionUser } from '@/lib/auth/session';
 import { getProjectAccess } from '@/lib/projects/permissions';
+import { canReadStudioAsset, studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
 
 export type AlbumPermissionKey =
   | 'view'
@@ -190,19 +191,24 @@ export async function canShareAlbum(user: SessionUser, album: NonNullable<AlbumR
 }
 
 export async function canUseAlbumImage(user: SessionUser, image: NonNullable<ImageRecord>) {
-  return (await getAlbumAccess(user, image.album)).permissions.use;
+  return (await canReadImageContents(user, image)) && (await getAlbumAccess(user, image.album)).permissions.use;
 }
 
 export async function canCopyAlbumImage(user: SessionUser, image: NonNullable<ImageRecord>) {
-  return (await getAlbumAccess(user, image.album)).permissions.copy;
+  return (await canReadImageContents(user, image)) && (await getAlbumAccess(user, image.album)).permissions.copy;
 }
 
 export async function canDownloadOriginal(user: SessionUser, image: NonNullable<ImageRecord>) {
-  return (await getAlbumAccess(user, image.album)).permissions.download;
+  return (await canReadImageContents(user, image)) && (await getAlbumAccess(user, image.album)).permissions.download;
 }
 
 export async function canViewReferenceImage(user: SessionUser, image: NonNullable<ImageRecord>) {
-  return (await getAlbumAccess(user, image.album)).permissions.view;
+  return (await canReadImageContents(user, image)) && (await getAlbumAccess(user, image.album)).permissions.view;
+}
+
+async function canReadImageContents(user: SessionUser, image: NonNullable<ImageRecord>) {
+  const hidden = await studioHiddenAssetUrls(user);
+  return !hidden.includes(image.url) && (!image.asset || !hidden.includes(image.asset.original_url));
 }
 
 export async function assertCanViewAlbum(user: SessionUser, albumId: string) {
@@ -262,9 +268,8 @@ export function uniquePreserveOrder(values: string[]) {
 }
 
 export async function canUseDirectAsset(user: SessionUser, assetId: string) {
-  if (user.role === 'admin') return true;
-  const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { owner_id: true } });
-  return asset?.owner_id === user.id;
+  const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { owner_id: true, original_url: true } });
+  return Boolean(asset && (user.role === 'admin' || asset.owner_id === user.id) && await canReadStudioAsset(user, asset));
 }
 
 function mergePermissions(a: AlbumPermissions, b: AlbumPermissions): AlbumPermissions {

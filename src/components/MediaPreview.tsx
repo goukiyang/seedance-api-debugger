@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowRight, Music2, RotateCcw, X } from 'lucide-react';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -9,6 +9,7 @@ import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import type { SafeImagePreviewDetails } from '@/components/ZoomableImagePreview';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { useMediaPreviewState } from '@/lib/hooks/use-media-preview-state';
+import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './MediaPreview.module.css';
 
 export type MediaPreviewProps = {
@@ -74,11 +75,11 @@ function MediaFilePreview({
   const backdropRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const mountPointRef = useRef<HTMLSpanElement>(null);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
   const errorProbeRef = useRef<AbortController | null>(null);
   const activeSourceRef = useRef(src);
   activeSourceRef.current = src;
-  const backgroundClickRef = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | null>(null);
   const interactedRef = useRef(false);
   const restoredKeyRef = useRef<string | null>(null);
   const previewState = useMediaPreviewState(previewKey, contentKey, src);
@@ -89,6 +90,15 @@ function MediaFilePreview({
   const lastPreviewStateKeyRef = useRef<string | null>(null);
   const mediaName = type === 'video' ? '视频' : '音频';
   const titleText = type === 'video' ? '视频预览' : '音频预览';
+
+  useDialogDismiss({
+    open: Boolean(portalRoot),
+    dialogRef: backdropRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: onClose,
+    isDismissTarget: (target) => target === backdropRef.current || target === stageRef.current,
+    initialFocusRef: backdropRef,
+  });
 
   const classifyMediaError = useCallback(async (media: HTMLVideoElement | HTMLAudioElement) => {
     if (activeSourceRef.current !== src) return;
@@ -157,7 +167,12 @@ function MediaFilePreview({
   }, [previewState.key]);
 
   useEffect(() => {
-    setPortalRoot(document.body);
+    const dialog = mountPointRef.current?.closest('dialog[open]');
+    try {
+      setPortalRoot(dialog?.matches(':modal') ? dialog as HTMLElement : document.body);
+    } catch {
+      setPortalRoot(document.body);
+    }
   }, []);
 
   useEffect(() => {
@@ -173,22 +188,17 @@ function MediaFilePreview({
 
   useEffect(() => {
     if (!portalRoot) return;
-    const active = document.activeElement;
-    const focused = active instanceof HTMLElement ? active : null;
     const elements = [document.documentElement, document.body];
     const previous = elements.map(element => ({ overflow: element.style.overflow, overscrollBehavior: element.style.overscrollBehavior }));
     elements.forEach(element => {
       element.style.overflow = 'hidden';
       element.style.overscrollBehavior = 'none';
     });
-    const focusFrame = window.requestAnimationFrame(() => backdropRef.current?.focus({ preventScroll: true }));
     return () => {
-      window.cancelAnimationFrame(focusFrame);
       elements.forEach((element, index) => {
         element.style.overflow = previous[index].overflow;
         element.style.overscrollBehavior = previous[index].overscrollBehavior;
       });
-      if (focused?.isConnected) focused.focus({ preventScroll: true });
     };
   }, [portalRoot]);
 
@@ -227,34 +237,7 @@ function MediaFilePreview({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Tab') {
-        const focusable = Array.from(backdropRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, video[controls], audio[controls], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])',
-        ) || []).filter(element => element.getClientRects().length > 0 && window.getComputedStyle(element).visibility !== 'hidden');
-        if (!focusable.length) {
-          event.preventDefault();
-          backdropRef.current?.focus({ preventScroll: true });
-          return;
-        }
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === backdropRef.current
-          || !backdropRef.current?.contains(document.activeElement))) {
-          event.preventDefault();
-          last.focus({ preventScroll: true });
-        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === backdropRef.current
-          || !backdropRef.current?.contains(document.activeElement))) {
-          event.preventDefault();
-          first.focus({ preventScroll: true });
-        }
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        onClose();
-        return;
-      }
+      if (!isTopmostDialogLayer(backdropRef.current)) return;
       if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), button, a[href], summary, video[controls], audio[controls]')) return;
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       const navigate = event.key === 'ArrowLeft' ? onPrevious : onNext;
@@ -265,33 +248,7 @@ function MediaFilePreview({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [hasNavigation, onClose, onNext, onPrevious]);
-
-  const handleBackdropClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    if (event.target === event.currentTarget) onClose();
-  }, [onClose]);
-
-  const handleStagePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    backgroundClickRef.current = (event.pointerType === 'touch' || event.button === 0) && event.target === event.currentTarget
-      ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
-      : null;
-  }, []);
-
-  const handleStagePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const candidate = backgroundClickRef.current;
-    if (candidate?.pointerId === event.pointerId && Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) > 5) {
-      candidate.moved = true;
-    }
-  }, []);
-
-  const handleStagePointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const candidate = backgroundClickRef.current;
-    backgroundClickRef.current = null;
-    if (!candidate || candidate.pointerId !== event.pointerId || event.type !== 'pointerup' || candidate.moved
-      || Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) > 5) return;
-    if (document.elementFromPoint(event.clientX, event.clientY) === stageRef.current) onClose();
-  }, [onClose]);
+  }, [hasNavigation, onNext, onPrevious]);
 
   const resetPlayback = useCallback(() => {
     interactedRef.current = true;
@@ -318,7 +275,10 @@ function MediaFilePreview({
       aria-modal="true"
       aria-label={titleText}
       tabIndex={-1}
-      onClick={handleBackdropClick}
+      onClick={event => {
+        event.stopPropagation();
+        if (event.detail === 0 && event.target === event.currentTarget && isTopmostDialogLayer(backdropRef.current)) onClose();
+      }}
       onPointerDown={event => event.stopPropagation()}
       onPointerMove={event => event.stopPropagation()}
       onPointerUp={event => event.stopPropagation()}
@@ -346,10 +306,6 @@ function MediaFilePreview({
       <div
         ref={stageRef}
         className={`${styles.stage} ${type === 'audio' ? styles.audioStage : ''}`}
-        onPointerDown={handleStagePointerDown}
-        onPointerMove={handleStagePointerMove}
-        onPointerUp={handleStagePointerEnd}
-        onPointerCancel={handleStagePointerEnd}
       >
         {type === 'video' ? (
           /* eslint-disable-next-line jsx-a11y/media-has-caption */
@@ -406,6 +362,8 @@ function MediaFilePreview({
     </div>
   );
 
-  if (!portalRoot) return null;
-  return createPortal(preview, portalRoot);
+  return <>
+    <span ref={mountPointRef} hidden aria-hidden="true" />
+    {portalRoot ? createPortal(preview, portalRoot) : null}
+  </>;
 }

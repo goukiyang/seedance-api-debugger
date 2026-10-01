@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { AssetCollection } from '@/types';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 
 interface ReferenceAlbumOption {
   id: string;
@@ -50,6 +51,32 @@ export function ImageSetToolbar({
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [dialogName, setDialogName] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const loadMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const loadMenuRef = useRef<HTMLDivElement>(null);
+  const saveDialogBackdropRef = useRef<HTMLDivElement>(null);
+  const saveDialogRef = useRef<HTMLDivElement>(null);
+  const newDialogBackdropRef = useRef<HTMLDivElement>(null);
+  const newDialogRef = useRef<HTMLDivElement>(null);
+
+  useDialogDismiss({
+    open: showLoadMenu,
+    dialogRef: loadMenuRef,
+    branchRefs: [loadMenuTriggerRef],
+    onDismiss: () => setShowLoadMenu(false),
+    modal: false,
+  });
+  useDialogDismiss({
+    open: showSaveDialog,
+    dialogRef: saveDialogRef,
+    dismissSurfaceRef: saveDialogBackdropRef,
+    onDismiss: () => setShowSaveDialog(false),
+  });
+  useDialogDismiss({
+    open: showNewDialog,
+    dialogRef: newDialogRef,
+    dismissSurfaceRef: newDialogBackdropRef,
+    onDismiss: () => setShowNewDialog(false),
+  });
 
   const currentCollection = collections.find((c) => c.id === currentCollectionId);
   const visibleReferenceAlbums = referenceAlbums.filter((album) => album.image_count > 0);
@@ -86,6 +113,7 @@ export function ImageSetToolbar({
         {/* 左侧：当前图集 */}
         <div className="composer-toolbar-left">
           <button
+            ref={loadMenuTriggerRef}
             type="button"
             className="composer-toolbar-current-set"
             onClick={() => setShowLoadMenu(!showLoadMenu)}
@@ -101,8 +129,8 @@ export function ImageSetToolbar({
 
           {showLoadMenu && (
             <>
-              <div className="composer-toolbar-dropdown-backdrop" onClick={() => setShowLoadMenu(false)} />
-              <div className="composer-toolbar-dropdown">
+              <div className="composer-toolbar-dropdown-backdrop" />
+              <div ref={loadMenuRef} className="composer-toolbar-dropdown">
                 <div className="composer-toolbar-dropdown-title">选择图集</div>
                 {onReferenceAlbumLoad ? (
                   visibleReferenceAlbums.length === 0 ? (
@@ -183,8 +211,8 @@ export function ImageSetToolbar({
 
       {/* 保存当前素材为图集对话框 */}
       {showSaveDialog && (
-        <div className="composer-dialog-backdrop" onClick={() => setShowSaveDialog(false)}>
-          <div className="composer-dialog" onClick={(e) => e.stopPropagation()}>
+        <div ref={saveDialogBackdropRef} className="composer-dialog-backdrop">
+          <div ref={saveDialogRef} className="composer-dialog">
             <div className="composer-dialog-title">保存当前素材为图集</div>
             <input
               type="text"
@@ -214,8 +242,8 @@ export function ImageSetToolbar({
 
       {/* 创建空图集对话框 */}
       {showNewDialog && (
-        <div className="composer-dialog-backdrop" onClick={() => setShowNewDialog(false)}>
-          <div className="composer-dialog" onClick={(e) => e.stopPropagation()}>
+        <div ref={newDialogBackdropRef} className="composer-dialog-backdrop">
+          <div ref={newDialogRef} className="composer-dialog">
             <div className="composer-dialog-title">创建空图集</div>
             <input
               type="text"

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Copy, Save, X } from 'lucide-react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './template-studio.module.css';
 
 type ContextValue = { context?: string; revision: number; canEdit: boolean; canCopy: boolean; configured: boolean };
@@ -11,6 +12,8 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const url = `/api/template-studio/context${draftId ? `?draftId=${encodeURIComponent(draftId)}` : ''}`;
   useEffect(() => {
     const controller = new AbortController();
@@ -38,8 +41,16 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
     if (value?.canEdit && text !== (value.context || '') && !window.confirm('上下文尚未保存，确定关闭？')) return;
     onClose();
   }
-  return <div className={styles.dialogBackdrop}>
-    <section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="video-context-title">
+  useDialogDismiss({
+    open: true,
+    dialogRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: close,
+    dismissOnOutside: !busy,
+    dismissOnEscape: !busy,
+  });
+  return <div ref={backdropRef} className={styles.dialogBackdrop}>
+    <section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="video-context-title">
       <div className={styles.sectionHeading}><h2 id="video-context-title">{draftId ? '模块上下文' : '通用上下文'}</h2><button type="button" className={styles.iconButton} aria-label="关闭" title="关闭" disabled={busy} onClick={close}><X size={16} /></button></div>
       <p className={styles.fieldHint}>{draftId ? '只用于当前模块。保存后影响后续文案，已有记录不变。' : '用于视频文案，不影响图片。仅管理员可修改。'}</p>
       {value?.canEdit ? <div className={styles.field}><label htmlFor="video-context-text">固定规则</label><textarea id="video-context-text" rows={12} maxLength={12000} value={text} onChange={event => setText(event.target.value)} /></div>

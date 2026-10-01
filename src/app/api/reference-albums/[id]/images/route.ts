@@ -10,6 +10,7 @@ import {
   getReferenceImageByIdForAccess,
 } from '@/lib/reference-albums/permissions';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,7 +26,7 @@ export async function GET(
 
     await assertCanViewAlbum(user, params.id);
     const images = await prisma.referenceImage.findMany({
-      where: { album_id: params.id, status: 'active' },
+      where: { album_id: params.id, status: 'active', AND: [await studioVisibleReferenceWhere(user)] },
       orderBy: { sort_order: 'asc' },
       include: { asset: { select: { id: true, type: true, file_name: true, width: true, height: true, file_size: true, mime_type: true } } },
     });

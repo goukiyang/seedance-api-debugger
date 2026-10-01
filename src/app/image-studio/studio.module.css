@@ -54,6 +54,13 @@
 .page textarea, .page input:not([type=file]), .page select { box-sizing: border-box; border: 1px solid #465057; border-radius: 6px; padding: 10px; background: #171c1f; color: #eef0f2; font: inherit; max-width: 100%; }
 .page textarea { width: 100%; resize: vertical; min-height: 120px; line-height: 1.6; }
 .references { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.referencesCompact { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.referencesCompact .referenceNumber { left: 4px; top: auto; bottom: 4px; padding: 2px 4px; font-size: 11px; max-width: calc(100% - 8px); }
+.page .referencesCompact .referenceGrip { left: 3px; top: 3px; bottom: auto; padding: 3px; }
+.page .referencesCompact .remove { right: 3px; top: 3px; width: 24px; height: 24px; padding: 3px; }
+.page .referenceNoteButton { width: 100%; min-width: 0; padding: 5px 2px; font-size: 11px; gap: 3px; margin-top: 3px; }
+.dialog.noteDialog { width: min(420px, calc(100vw - 32px)); }
+.noteDialog h3 { font-size: 18px; margin: 0; }
 .referenceItem { min-width: 0; border: 2px solid transparent; border-radius: 6px; }
 .referenceItem[data-dragging] { opacity: .6; }
 .referenceDropTarget { border-color: #72dcca; }
@@ -65,6 +72,22 @@
 .fixedReferenceStrip { display: flex; flex-wrap: wrap; gap: 6px; }
 .fixedReferenceStrip figure { margin: 0; width: 62px; text-align: center; font-size: 12px; }
 .fixedReferenceStrip img { width: 62px; height: 62px; object-fit: contain; background: #080a0b; border-radius: 4px; }
+.styleGroups { margin: 16px 0; }
+.styleSelection { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.styleSelected { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.styleSelected img { width: 40px; height: 40px; object-fit: contain; background: #080a0b; border-radius: 4px; }
+.styleSelected span { overflow-wrap: anywhere; font-size: 13px; }
+.dialog.styleDialog { width: min(760px, calc(100vw - 32px)); }
+.styleGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 12px; margin: 16px 0; }
+.styleCard { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 10px; border: 1px solid #465057; border-radius: 6px; }
+.styleCard > strong { font-size: 14px; overflow-wrap: anywhere; line-height: 1.4; }
+.styleCover { aspect-ratio: 1; min-width: 0; background: #080a0b; }
+.styleCover img { width: 100%; height: 100%; object-fit: contain; }
+.styleActions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.page .styleActions button { padding: 6px; }
+.styleActions input[type=checkbox] { width: 18px; height: 18px; }
+.styleDialog > .counts { margin: 12px 0; }
+.styleDialog .referencesCompact { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 440px; }
 .dialog.sourceDialog { width: min(320px, calc(100vw - 32px)); padding: 18px; }
 .sourceDialog header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .sourceDialog h3 { margin: 0; font-size: 18px; }

@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 
 type PermissionKey = 'view' | 'use' | 'copy' | 'download' | 'viewSource' | 'edit';
 type PermissionPreset = 'view' | 'generate' | 'edit' | 'custom';
@@ -95,6 +96,8 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
 
   const shareCount = shares.length;
   const permissionSummary = useMemo(() => formatPermissions(draftPermissions), [draftPermissions]);
@@ -179,6 +182,15 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
       setPublicFolderId(publicFolders[0].id);
     }
   }, [defaultProjectId, open, publicFolderId, publicFolders, targetId, targetType]);
+
+  useDialogDismiss({
+    open: open && Boolean(album),
+    dialogRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: onClose,
+    dismissOnOutside: savingKey === null,
+    dismissOnEscape: savingKey === null,
+  });
 
   if (!open || !album) return null;
 
@@ -357,14 +369,8 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   };
 
   return (
-    <div
-      className="share-dialog-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section className="share-dialog" role="dialog" aria-modal="true" aria-label={`共享 ${album.name}`}>
+    <div ref={backdropRef} className="share-dialog-backdrop" role="presentation">
+      <section ref={dialogRef} className="share-dialog" role="dialog" aria-modal="true" aria-label={`共享 ${album.name}`}>
         <div className="share-dialog-head">
           <div>
             <span>共享图集</span>

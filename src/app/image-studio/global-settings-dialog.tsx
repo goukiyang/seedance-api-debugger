@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { RefreshCw, Save, X } from 'lucide-react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 import type { useStudioSettings } from './use-studio-settings';
 import styles from './studio.module.css';
@@ -10,15 +11,16 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
   open: boolean; onClose: () => void; editor: ReturnType<typeof useStudioSettings>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const backdropStart = useRef(false);
   useEffect(() => {
     if (open) dialog.current?.showModal();
     else dialog.current?.close();
   }, [open]);
   const close = () => {
+    if (editor.saving) return;
     if (editor.dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
     onClose();
   };
+  useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
   const reload = () => {
     if (!editor.dirty || window.confirm('重新读取会替换未保存的通用设置，是否继续？')) void editor.controller.load(true);
   };
@@ -27,10 +29,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
       && !window.confirm('确定清空通用上下文？这会影响所有模板之后的新生成，模板自己的上下文会保留。')) return;
     void editor.controller.save();
   };
-  return <dialog ref={dialog} className={styles.dialog}
-    onCancel={event => { event.preventDefault(); close(); }}
-    onPointerDown={event => { backdropStart.current = event.target === event.currentTarget; }}
-    onClick={event => { if (backdropStart.current && event.target === event.currentTarget) close(); backdropStart.current = false; }}>
+  return <dialog ref={dialog} className={styles.dialog}>
     <header className={styles.header}><h2>通用上下文</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
     {editor.draft && <>
       <label className={styles.label} htmlFor="studio-context">通用上下文</label>

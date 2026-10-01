@@ -48,10 +48,18 @@ export async function middleware(request: NextRequest) {
   if (redirectUrl) return NextResponse.redirect(redirectUrl, 308);
 
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith('/uploads/assets/') || pathname.startsWith('/uploads/thumbs/')) {
+  let mediaPath = pathname;
+  if (pathname === '/_next/image') {
+    try {
+      const source = new URL(request.nextUrl.searchParams.get('url') || '', request.nextUrl.origin);
+      if (source.origin === request.nextUrl.origin) mediaPath = source.pathname;
+    } catch { /* An invalid image URL is rejected by Next's image handler. */ }
+  }
+  try { mediaPath = decodeURIComponent(mediaPath); } catch { return NextResponse.json({ error: '图片地址无效' }, { status: 400 }); }
+  if (mediaPath.startsWith('/uploads/')) {
     const internalOrigin = `http://127.0.0.1:${process.env.PORT || '3302'}`;
     const accessUrl = new URL('/api/image-studio/upload-access', internalOrigin);
-    accessUrl.searchParams.set('path', pathname);
+    accessUrl.searchParams.set('path', mediaPath);
     const accessResponse = await fetch(accessUrl, {
       cache: 'no-store',
       headers: {
@@ -62,6 +70,9 @@ export async function middleware(request: NextRequest) {
     if (accessResponse.status !== 204) {
       return NextResponse.json({ error: '图片不存在或无权访问' }, { status: accessResponse.status === 404 ? 404 : 503 });
     }
+    const response = NextResponse.next();
+    response.headers.set('Cache-Control', 'private, no-store');
+    return response;
   }
   const needsAuth = PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   if (!needsAuth) return NextResponse.next();
@@ -76,6 +87,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico).*)',
+    '/((?!_next/static|favicon.ico).*)',
   ],
 };

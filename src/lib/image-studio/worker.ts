@@ -21,8 +21,10 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
     const settings = await getImageGenerationSettingsForModel(task.model);
     if (!isStudioImageGenerationProvider(settings.provider) || !isImageGenerationApiReady(settings)) throw new Error('图片专用 API 暂不可用');
     const images = [];
+    const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) : {};
+    const owners: Record<string, string> = snapshot.authorizedReferenceOwners || {};
     for (const id of JSON.parse(task.reference_ids) as string[]) {
-      const asset = await prisma.asset.findFirst({ where: { id, owner_id: task.owner_id, status: 'active', type: 'image' } });
+      const asset = await prisma.asset.findFirst({ where: { id, owner_id: owners[id] || task.owner_id, status: 'active', type: 'image' } });
       if (!asset) throw new Error('参考图已不可用');
       images.push({ bytes: await normalizeStudioImage(await readStudioImage(asset.original_url, taskSignal)), mimeType: 'image/png' });
     }

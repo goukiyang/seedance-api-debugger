@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isExternalUser } from '@/lib/access/external-role';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
@@ -189,6 +190,17 @@ export default function TasksPage() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const bulkDownloadBackdropRef = useRef<HTMLDivElement>(null);
+  const bulkDownloadDialogRef = useRef<HTMLDivElement>(null);
+
+  useDialogDismiss({
+    open: bulkConfirmOpen,
+    dialogRef: bulkDownloadDialogRef,
+    dismissSurfaceRef: bulkDownloadBackdropRef,
+    onDismiss: () => setBulkConfirmOpen(false),
+    dismissOnOutside: !bulkDownloading,
+    dismissOnEscape: !bulkDownloading,
+  });
 
   const selectedSet = new Set(selectedTaskIds);
   const downloadableTasks = tasks.filter(isTaskDownloadable);
@@ -500,14 +512,14 @@ export default function TasksPage() {
       </div>
 
       {bulkConfirmOpen && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="批量下载视频">
-          <div className="modal-panel bulk-download-modal">
+        <div ref={bulkDownloadBackdropRef} className="modal-overlay" role="presentation">
+          <div ref={bulkDownloadDialogRef} className="modal-panel bulk-download-modal" role="dialog" aria-modal="true" aria-label="批量下载视频">
             <div className="modal-header">
               <div>
                 <h2>批量下载视频</h2>
                 <p>将选中的已完成视频打包为 ZIP</p>
               </div>
-              <button className="modal-close" type="button" onClick={() => setBulkConfirmOpen(false)} aria-label="关闭">
+              <button className="modal-close" type="button" onClick={() => setBulkConfirmOpen(false)} disabled={bulkDownloading} aria-label="关闭">
                 ×
               </button>
             </div>
@@ -525,7 +537,7 @@ export default function TasksPage() {
               ZIP 内会包含视频文件和 manifest.csv。外链过期的视频会先尝试刷新并缓存，失败项会写入 manifest。
             </p>
             <div className="modal-actions">
-              <button className="btn btn-secondary" type="button" onClick={() => setBulkConfirmOpen(false)}>
+              <button className="btn btn-secondary" type="button" onClick={() => setBulkConfirmOpen(false)} disabled={bulkDownloading}>
                 取消
               </button>
               <button

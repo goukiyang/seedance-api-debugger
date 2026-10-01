@@ -9,6 +9,7 @@ import { fileExists, thumbnailFilePath } from '@/lib/video/thumbnail';
 import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
 import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
+import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 
 export const dynamic = 'force-dynamic';
 
@@ -560,6 +561,7 @@ async function loadVideoItems(options: {
 }
 
 async function loadAssetItems(options: {
+  user: SessionUser;
   userId: string;
   role: 'admin' | 'user';
   type: string;
@@ -586,6 +588,8 @@ async function loadAssetItems(options: {
   const where: PrismaTypes.AssetWhereInput = {
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
   };
+  const hiddenUrls = await studioHiddenAssetUrls(options.user);
+  if (hiddenUrls.length) where.original_url = { notIn: hiddenUrls };
   if (options.type === 'image') where.type = 'image';
   else if (options.type === 'video') where.type = 'video';
   else if (options.type === 'audio') where.type = 'audio';
@@ -628,6 +632,7 @@ async function loadAssetItems(options: {
         ? Prisma.sql`AND asset."owner_id" = ${options.ownerUserId}`
         : Prisma.empty;
     const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
+    const privacyFilter = hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty;
     const generatedFilter = Prisma.sql`AND EXISTS (
       SELECT 1 FROM "ImageStudioTask" generated_task
       WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'
@@ -637,14 +642,14 @@ async function loadAssetItems(options: {
         SELECT asset."id", asset."original_url", asset."thumbnail_url", asset."file_name", asset."type", asset."status",
           asset."width", asset."height", asset."file_size", asset."created_at", asset."owner_id"
         FROM "Asset" asset
-        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter}
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
         ORDER BY asset."created_at" DESC
         LIMIT ${options.take}
       `),
       prisma.$queryRaw<Array<{ count: bigint | number }>>(Prisma.sql`
         SELECT COUNT(DISTINCT asset."id") AS count
         FROM "Asset" asset
-        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter}
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
       `),
     ]);
     assets = generatedAssets;
@@ -714,6 +719,7 @@ async function loadReferenceItems(options: {
 
   const where: Prisma.ReferenceImageWhereInput = {
     status: options.status === 'hidden' ? 'deleted' : 'active',
+    AND: [await studioVisibleReferenceWhere(options.user)],
   };
   if (options.projectId) {
     where.project_id = options.projectId;
@@ -801,6 +807,7 @@ export async function GET(request: NextRequest) {
       }),
       (includeUploads || includeGenerated)
         ? loadAssetItems({
+          user,
           userId: user.id,
           role: user.role,
           type,

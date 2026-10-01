@@ -9,6 +9,8 @@ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { UploadedImagePickerAlbums } from '@/components/UploadedImagePickerAlbums';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { RelativeTime } from '@/components/RelativeTime';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
 import type { AssetType } from '@/types';
@@ -113,12 +115,6 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
-}
-
 function buildPickerUploadProgress(
   file: File,
   fileIndex: number,
@@ -163,9 +159,21 @@ export function UploadedImagePicker({
   const [nativeDialogContainer, setNativeDialogContainer] = useState<Element | null>(null);
   const [portalResolutionComplete, setPortalResolutionComplete] = useState(false);
   const previewReturnDialog = useRef<HTMLDialogElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const openRef = useRef(open);
   const fileInputRef = useRef<HTMLInputElement>(null);
   openRef.current = open;
+
+  useDialogDismiss({
+    open: open && portalResolutionComplete,
+    dialogRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: () => {
+      if (previewAsset) setPreviewAsset(null);
+      else onClose();
+    },
+  });
 
   const currentAssetIdSet = useMemo(() => new Set(currentAssetIds), [currentAssetIds]);
   const selectedAssets = useMemo(
@@ -252,51 +260,6 @@ export function UploadedImagePicker({
     void loadPage(1, 'replace');
     return () => { loadSequence.current++; };
   }, [loadPage, open, source]);
-
-  useEffect(() => {
-    if (!open) return;
-    const portalRoot = portalContainer || nativeDialogContainer;
-    const dialog = portalRoot instanceof HTMLDialogElement ? portalRoot : portalRoot?.closest('dialog');
-    if (dialog) {
-      const handleDialogKeyDown = (event: KeyboardEvent) => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        if (previewAsset) setPreviewAsset(null);
-        else onClose();
-      };
-      const handleDialogCancel = (event: Event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        if (previewAsset) {
-          setPreviewAsset(null);
-          return;
-        }
-        onClose();
-      };
-      dialog.addEventListener('keydown', handleDialogKeyDown, true);
-      dialog.addEventListener('cancel', handleDialogCancel, true);
-      return () => {
-        dialog.removeEventListener('keydown', handleDialogKeyDown, true);
-        dialog.removeEventListener('cancel', handleDialogCancel, true);
-      };
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      if (previewAsset) {
-        setPreviewAsset(null);
-        return;
-      }
-      onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nativeDialogContainer, onClose, open, portalContainer, previewAsset]);
 
   useEffect(() => {
     const portalRoot = portalContainer || nativeDialogContainer;
@@ -491,8 +454,8 @@ export function UploadedImagePicker({
   };
 
   const pickerContent = (
-    <div className="uploaded-picker-backdrop" onClick={onClose}>
-      <div className="uploaded-picker" onClick={(event) => event.stopPropagation()}>
+    <div ref={backdropRef} className="uploaded-picker-backdrop">
+      <div ref={dialogRef} className="uploaded-picker" role="dialog" aria-modal="true" aria-label={imageOnly ? '选择图片' : '添加参考素材'}>
         <input
           ref={fileInputRef}
           type="file"
@@ -604,7 +567,7 @@ export function UploadedImagePicker({
                     <div className="uploaded-picker-card-meta">
                       <ContentReactions contentKey={`asset:${item.id}`} />
                       <strong title={item.fileName}>{item.fileName}</strong>
-                      <span>{assetTypeLabel(item.type)} · {dimensions} · {formatBytes(item.fileSize)} · {formatDate(item.createdAt)}</span>
+                      <span>{assetTypeLabel(item.type)} · {dimensions} · {formatBytes(item.fileSize)} · <RelativeTime value={item.createdAt} /></span>
                     </div>
                     {item.type === 'image' && !selectionOnly && (
                       <button

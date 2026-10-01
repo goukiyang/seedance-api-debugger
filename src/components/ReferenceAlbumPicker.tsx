@@ -1,11 +1,12 @@
 'use client';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Eye } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 
 type AlbumScope = 'mine' | 'project' | 'shared' | 'public';
 
@@ -100,6 +101,15 @@ export function ReferenceAlbumPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<ReferenceImageItem | null>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useDialogDismiss({
+    open,
+    dialogRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: onClose,
+  });
 
   void currentCount;
   const currentReferenceImageIdSet = useMemo(
@@ -178,8 +188,8 @@ export function ReferenceAlbumPicker({
   };
 
   return (
-    <div className="album-picker-backdrop" onClick={onClose}>
-      <div className="album-picker" onClick={(event) => event.stopPropagation()}>
+    <div ref={backdropRef} className="album-picker-backdrop">
+      <div ref={dialogRef} className="album-picker" role="dialog" aria-modal="true" aria-label="选择参考素材">
         <div className="album-picker-header">
           <div>
             <h3>选择参考素材</h3>

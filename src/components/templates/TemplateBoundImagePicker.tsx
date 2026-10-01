@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { RelativeTime } from '@/components/RelativeTime';
 import { uploadFileToHistory, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { TemplateContextCardBoundImage } from '@/lib/templates/workbench';
@@ -82,12 +84,6 @@ const SCOPES: Array<{ value: AlbumScope; label: string }> = [
 const PICKER_INVALID_JSON_MESSAGE = '图片选择服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const UPLOAD_INVALID_JSON_MESSAGE = '图片上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
-}
-
 function buildPickerUploadProgress(file: File, progress: UploadProgressSnapshot): PickerUploadProgress {
   return {
     label: progress.label,
@@ -109,6 +105,17 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
   const [pendingUploadedImage, setPendingUploadedImage] = useState<TemplateContextCardBoundImage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useDialogDismiss({
+    open,
+    dialogRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: onClose,
+    dismissOnOutside: !uploading,
+    dismissOnEscape: !uploading,
+  });
 
   const selectedAlbum = useMemo(
     () => albums.find((album) => album.id === selectedAlbumId) || null,
@@ -293,8 +300,8 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
   };
 
   return (
-    <div className="template-bound-image-backdrop" onClick={onClose}>
-      <div className="template-bound-image-picker" onClick={(event) => event.stopPropagation()}>
+    <div ref={backdropRef} className="template-bound-image-backdrop">
+      <div ref={dialogRef} className="template-bound-image-picker" role="dialog" aria-modal="true" aria-label="选择绑定图片">
         <input
           ref={uploadInputRef}
           type="file"
@@ -402,17 +409,19 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
               const selected = currentImage?.asset_id === image.id || currentImage?.id === image.id;
               const dimensions = image.width && image.height ? `${image.width}x${image.height}` : '未知尺寸';
               return (
-                <button
-                  key={image.id}
-                  type="button"
-                  className={selected ? 'is-selected' : ''}
-                  onClick={() => chooseHistoryImage(image)}
-                >
-                  <img src={image.thumbnailUrl} alt={image.fileName} />
-                  <strong>{image.fileName}</strong>
-                  <span>{dimensions} · {formatDate(image.createdAt)}</span>
-                  {selected && <em>已绑定</em>}
-                </button>
+                <div key={image.id} style={{ alignContent: 'start', background: 'rgba(2, 6, 23, 0.28)', border: selected ? '1px solid rgba(96, 165, 250, 0.6)' : '1px solid rgba(148, 163, 184, 0.16)', borderRadius: 10, boxShadow: selected ? '0 0 0 2px rgba(37, 99, 235, 0.16)' : undefined, color: 'rgba(226, 232, 240, 0.9)', display: 'grid', gap: 7, minWidth: 0, overflow: 'hidden', padding: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => chooseHistoryImage(image)}
+                    style={{ background: 'transparent', border: 0, borderRadius: 0, boxShadow: 'none', color: 'inherit', display: 'grid', gap: 7, minWidth: 0, overflow: 'hidden', padding: 0, position: 'relative', textAlign: 'left' }}
+                  >
+                    <img src={image.thumbnailUrl} alt={image.fileName} />
+                    <strong>{image.fileName}</strong>
+                    <span>{dimensions}</span>
+                    {selected && <em>已绑定</em>}
+                  </button>
+                  <RelativeTime value={image.createdAt} />
+                </div>
               );
             })}
           </div>

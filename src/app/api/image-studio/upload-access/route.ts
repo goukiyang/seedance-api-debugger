@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates, canViewStudioPreset, isExplicitPresetAsset } from '@/lib/image-studio/access';
+import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,6 +15,8 @@ export async function GET(request: NextRequest) {
   }
 
   const pathname = request.nextUrl.searchParams.get('path') || '';
+  const user = await getSession();
+  if ((await studioHiddenAssetUrls(user)).includes(pathname)) return new NextResponse(null, { status: 404 });
   if (!pathname.startsWith('/uploads/assets/') && !pathname.startsWith('/uploads/thumbs/')) {
     return new NextResponse(null, { status: 204 });
   }
@@ -24,10 +27,9 @@ export async function GET(request: NextRequest) {
   });
   if (!assets.length) return new NextResponse(null, { status: 204 });
 
-  const user = await getSession();
   if (!user) return new NextResponse(null, { status: 404 });
   if (!canUseCompanyTemplates(user)) return new NextResponse(null, { status: 404 });
-  if (assets.some(asset => asset.owner_id === user.id)) return new NextResponse(null, { status: 204 });
+  if (user.role === 'admin' || assets.some(asset => asset.owner_id === user.id)) return new NextResponse(null, { status: 204 });
 
   const generatedTasks = await prisma.imageStudioTask.findMany({
     where: { asset_id: { in: assets.map(asset => asset.id) }, owner_id: user.id, status: 'succeeded', deleted_at: null },

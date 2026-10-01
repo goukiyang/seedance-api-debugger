@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import type { CSSProperties, MouseEvent, PointerEvent, ReactNode } from 'react';
+import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Image as ImageIcon, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import styles from './ZoomableImagePreview.module.css';
@@ -9,6 +9,8 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { useMediaPreviewState, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
 import { useImageReadProgress } from '@/lib/hooks/use-image-read-progress';
+import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
+import { RelativeTime } from '@/components/RelativeTime';
 
 export type ImageComparisonSource = {
   src: string;
@@ -209,6 +211,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
   const zoomPointRef = useRef<{ x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const portalAnchorRef = useRef<HTMLSpanElement>(null);
   const [zoomMode, setZoomMode] = useState<MediaPreviewZoomMode>('fit');
   const [showOriginal, setShowOriginal] = useState(false);
   const [comparisonMode, setComparisonMode] = useState(false);
@@ -216,6 +219,21 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
   const [showReference, setShowReference] = useState(false);
   const [dimensionsBySource, setDimensionsBySource] = useState<Record<string, IntrinsicSize>>({});
   const dimensionsTooltipId = useId();
+
+  useDialogDismiss({
+    open: Boolean(portalRoot),
+    dialogRef: backdropRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: onClose,
+    initialFocusRef: backdropRef,
+    isDismissTarget: (target) => {
+      if (target === backdropRef.current || target === stageRef.current) return true;
+      const element = target instanceof Element ? target : null;
+      const pane = element?.closest('[data-image-preview-pane]');
+      if (!pane || !stageRef.current?.contains(pane)) return false;
+      return !element?.closest('[data-image-preview-image], button, a[href], input, textarea, select, summary');
+    },
+  });
 
   const activeSrc = showReference && comparison ? comparison.src : src;
   const generatedComparisonThumbnail = comparison ? displaySource(comparison.src, 'thumbnail') : undefined;
@@ -324,7 +342,12 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
   }, []);
 
   useEffect(() => {
-    setPortalRoot(document.body);
+    const nativeDialog = portalAnchorRef.current?.closest('dialog[open]');
+    try {
+      setPortalRoot(nativeDialog?.matches(':modal') ? nativeDialog as HTMLElement : document.body);
+    } catch {
+      setPortalRoot(document.body);
+    }
   }, []);
 
   useEffect(() => {
@@ -339,13 +362,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
   }, [portalRoot]);
 
   useEffect(() => {
-    backdropRef.current?.focus({ preventScroll: true });
-  }, [portalRoot]);
-
-  useEffect(() => {
     const elements = [document.documentElement, document.body];
     const previous = elements.map(element => ({ overflow: element.style.overflow, overscrollBehavior: element.style.overscrollBehavior }));
-    const focused = document.activeElement;
     elements.forEach(element => {
       element.style.overflow = 'hidden';
       element.style.overscrollBehavior = 'none';
@@ -355,40 +373,12 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
         element.style.overflow = previous[index].overflow;
         element.style.overscrollBehavior = previous[index].overscrollBehavior;
       });
-      if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
     };
   }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Tab') {
-        const focusable = Array.from(backdropRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])',
-        ) || []).filter(element => element.getClientRects().length > 0 && window.getComputedStyle(element).visibility !== 'hidden');
-        if (!focusable.length) {
-          event.preventDefault();
-          backdropRef.current?.focus({ preventScroll: true });
-          return;
-        }
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === backdropRef.current
-          || !backdropRef.current?.contains(document.activeElement))) {
-          event.preventDefault();
-          last.focus({ preventScroll: true });
-        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === backdropRef.current
-          || !backdropRef.current?.contains(document.activeElement))) {
-          event.preventDefault();
-          first.focus({ preventScroll: true });
-        }
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        onClose();
-        return;
-      }
+      if (!isTopmostDialogLayer(backdropRef.current)) return;
       if (event.target instanceof Element && event.target.closest('select, input, textarea, [contenteditable]:not([contenteditable="false"]), button, a[href], summary, video[controls], audio[controls]')) return;
       const handled = (event.key === 'ArrowLeft' && hasNavigation && Boolean(onPrevious))
         || (event.key === 'ArrowRight' && hasNavigation && Boolean(onNext))
@@ -410,7 +400,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [hasNavigation, onClose, onNext, onPrevious, resetView, zoomFromControls]);
+  }, [hasNavigation, onNext, onPrevious, resetView, zoomFromControls]);
 
   const sourceIdentity = JSON.stringify([previewKey || '', src, comparison?.src || '']);
   useEffect(() => {
@@ -441,7 +431,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
   useEffect(() => {
     // React delegates wheel listeners as passive; cancel the native event before it reaches the page.
     const wheel = (event: WheelEvent) => {
-      if (!(event.target instanceof Node) || !stageRef.current?.contains(event.target)) return;
+      if (!isTopmostDialogLayer(backdropRef.current)
+        || !(event.target instanceof Node) || !stageRef.current?.contains(event.target)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       handleWheel(event);
@@ -599,7 +590,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
       }
       setDragging(Boolean(remaining && scale > 1));
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-      if (closeFromBackground) onClose();
+      if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) onClose();
       return;
     }
     const drag = dragRef.current;
@@ -610,13 +601,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
         event.currentTarget.releasePointerCapture(drag.pointerId);
       }
     }
-    if (closeFromBackground) onClose();
+    if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) onClose();
   }, [onClose, scale]);
-
-  const handleBackdropClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    if (event.target === event.currentTarget) onClose();
-  }, [onClose]);
 
   const comparisonLayoutLabel = comparisonAxis === 'horizontal' ? '左右' : '上下';
   const handleImageReady = useCallback((imageSrc: string) => (size: IntrinsicSize) => {
@@ -633,6 +619,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
     resolution: safeMetadataValue(safeDetails?.resolution ?? metadata?.resolution),
     time: safeMetadataTime(safeDetails?.time ?? metadata?.time),
   };
+  const rawMetadataTime = safeDetails?.time ?? metadata?.time;
+  const validMetadataTime = rawMetadataTime && Number.isFinite(Date.parse(rawMetadataTime));
   const dimensionsSource = comparisonMode ? src : activeSrc;
   const suppliedDimensions = dimensionsSource !== src ? undefined : safeDetails?.width && safeDetails.height && safeDetails.width > 0 && safeDetails.height > 0
     ? { width: safeDetails.width, height: safeDetails.height }
@@ -651,7 +639,10 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
       aria-modal="true"
       aria-label={imageTitle}
       tabIndex={-1}
-      onClick={handleBackdropClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (event.detail === 0 && event.target === event.currentTarget && isTopmostDialogLayer(backdropRef.current)) onClose();
+      }}
       onPointerDown={(event) => event.stopPropagation()}
       onPointerMove={(event) => event.stopPropagation()}
       onPointerUp={(event) => event.stopPropagation()}
@@ -734,7 +725,9 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
               <span id={dimensionsTooltipId} className={styles.dimensionTooltip} role="tooltip">{visibleDimensions ? `原始尺寸：${visibleDimensions.width} × ${visibleDimensions.height} 像素` : '原始尺寸暂不可用'}</span>
             </span>}
           </div>
-          {visibleMetadata.time && <time className={styles.metadataTime}>{visibleMetadata.time}</time>}
+          {visibleMetadata.time && <span className={styles.metadataTime}>
+            {validMetadataTime ? <RelativeTime value={rawMetadataTime!} /> : visibleMetadata.time}
+          </span>}
         </div>}
         {notice != null && <div className={styles.notice}>{notice}</div>}
         {details != null && <details className={styles.detailDisclosure}>
@@ -788,6 +781,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
     </div>
   );
 
-  if (!portalRoot) return null;
-  return createPortal(preview, portalRoot);
+  return <>
+    <span ref={portalAnchorRef} hidden />
+    {portalRoot && createPortal(preview, portalRoot)}
+  </>;
 }

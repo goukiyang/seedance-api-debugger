@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,11 +15,12 @@ export async function DELETE(
 
     const asset = await prisma.asset.findUnique({
       where: { id: params.id },
-      select: { id: true, owner_id: true, type: true, status: true },
+      select: { id: true, owner_id: true, type: true, status: true, original_url: true },
     });
     if (!asset || asset.type !== 'image') {
       return NextResponse.json({ error: '图片不存在' }, { status: 404 });
     }
+    if (!await canReadStudioAsset(user, asset)) return NextResponse.json({ error: '图片不存在' }, { status: 404 });
     if (asset.owner_id !== user.id && user.role !== 'admin') {
       return NextResponse.json({ error: '无权删除此图片' }, { status: 403 });
     }

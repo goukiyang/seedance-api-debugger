@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { applyStudioPreset, canUseCompanyTemplates, listStudioPresets, saveStudioPreset, setStudioPresetSharing } from '@/lib/image-studio/presets';
 import { StudioModuleError } from '@/lib/image-studio/modules';
+import { StudioStyleError } from '@/lib/image-studio/style-groups';
 
 export const dynamic = 'force-dynamic';
 export async function GET() {
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(await saveStudioPreset(user, body));
   } catch (error) {
-    if (error instanceof StudioModuleError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof StudioModuleError || error instanceof StudioStyleError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: '模板操作失败，请重试' }, { status: 503 });
   }
 }

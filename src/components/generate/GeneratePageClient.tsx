@@ -12,6 +12,7 @@ import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import {
   H3_AUTO_CHECK_MIN_GAP_MS,
   buildH3MachineStatus,
@@ -498,6 +499,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const surfaceConfig = GENERATE_SURFACE_CONFIG[surface];
   const isIpSurface = surface === 'ip';
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
+  const projectPickerMenuRef = useRef<HTMLDivElement>(null);
+  const projectRemovalBackdropRef = useRef<HTMLDivElement>(null);
+  const projectRemovalDialogRef = useRef<HTMLDivElement>(null);
   const appliedPreferenceProjectRef = useRef(false);
 
   // ---- Collections ----
@@ -607,6 +611,25 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [pendingProjectRemoval, setPendingProjectRemoval] = useState<PendingProjectRemoval | null>(null);
+
+  useDialogDismiss({
+    open: projectPickerOpen,
+    dialogRef: projectPickerMenuRef,
+    branchRefs: [projectPickerRef],
+    modal: false,
+    onDismiss: () => {
+      setProjectPickerOpen(false);
+      setProjectCreateOpen(false);
+    },
+  });
+  useDialogDismiss({
+    open: Boolean(pendingProjectRemoval),
+    dialogRef: projectRemovalDialogRef,
+    dismissSurfaceRef: projectRemovalBackdropRef,
+    onDismiss: () => setPendingProjectRemoval(null),
+    dismissOnOutside: !projectBusy,
+    dismissOnEscape: !projectBusy,
+  });
 	  const [videoCards, setVideoCards] = useState<VideoCardOption[]>([]);
 	  const [selectedVideoCardId, setSelectedVideoCardId] = useState('');
 	  const [videoBranches, setVideoBranches] = useState<VideoBranchOption[]>([]);
@@ -1030,30 +1053,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     appliedPreferenceProjectRef.current = true;
     setSelectedProjectId(preferred.id);
   }, [generationDefaults?.projectId, projects, reuseDraft?.projectId]);
-
-  useEffect(() => {
-    if (!projectPickerOpen) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!projectPickerRef.current?.contains(event.target as Node)) {
-        setProjectPickerOpen(false);
-        setProjectCreateOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setProjectPickerOpen(false);
-        setProjectCreateOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [projectPickerOpen]);
 
   const handleCreateProject = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2139,7 +2138,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                 </button>
 
                 {projectPickerOpen && (
-                  <div className="composer-project-menu" role="dialog" aria-label="项目列表">
+                  <div ref={projectPickerMenuRef} className="composer-project-menu" role="dialog" aria-label="项目列表">
                     <div className="composer-project-menu-head">
                       <div>
                         <span className="composer-project-menu-title">项目列表</span>
@@ -2285,8 +2284,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         )}
 
         {pendingProjectRemoval && (
-          <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={`${projectRemovalLabel(pendingProjectRemoval.project)}项目确认`}>
-            <div className="modal-panel project-removal-modal">
+          <div ref={projectRemovalBackdropRef} className="modal-overlay" role="presentation">
+            <div ref={projectRemovalDialogRef} className="modal-panel project-removal-modal" role="dialog" aria-modal="true" aria-label={`${projectRemovalLabel(pendingProjectRemoval.project)}项目确认`}>
               <div className="modal-header">
                 <div>
                   <h2>

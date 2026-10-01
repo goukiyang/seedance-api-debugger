@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 
 type UploadItem = {
@@ -77,8 +78,20 @@ export default function FeedbackWidget() {
   const draftIdentityReadyRef = useRef(false);
   const submittingRef = useRef(false);
   const activeUploadsRef = useRef(new Set<string>());
+  const panelRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const hidden = useMemo(() => pathname === '/login' || pathname.startsWith('/admin'), [pathname]);
+
+  useDialogDismiss({
+    open: open && !hidden,
+    dialogRef: panelRef,
+    branchRefs: [triggerRef],
+    modal: false,
+    dismissOnOutside: !submitting,
+    dismissOnEscape: !submitting,
+    onDismiss: () => setOpen(false),
+  });
 
   const replaceUploads = useCallback((update: React.SetStateAction<UploadItem[]>) => {
     const next = typeof update === 'function' ? update(uploadsRef.current) : update;
@@ -322,7 +335,7 @@ export default function FeedbackWidget() {
   return (
     <div style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 60 }}>
       {open && (
-        <section onPaste={onPaste} style={{
+        <section ref={panelRef} onPaste={onPaste} style={{
           width: 360,
           maxWidth: 'calc(100vw - 48px)',
           maxHeight: 520,
@@ -342,7 +355,7 @@ export default function FeedbackWidget() {
                 告诉我们哪里不好用，支持截图上传。
               </p>
             </div>
-            <button type="button" onClick={() => setOpen(false)} aria-label="收起反馈" style={iconButtonStyle}>×</button>
+            <button type="button" onClick={() => setOpen(false)} disabled={submitting} aria-label="收起反馈" style={iconButtonStyle}>×</button>
           </div>
 
           <textarea
@@ -423,7 +436,7 @@ export default function FeedbackWidget() {
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-            <button type="button" onClick={() => setOpen(false)} style={secondaryButtonStyle}>取消</button>
+            <button type="button" onClick={() => setOpen(false)} disabled={submitting} style={secondaryButtonStyle}>取消</button>
             <button type="button" onClick={submit} disabled={submitting} style={primaryButtonStyle}>
               {submitting ? '提交中' : '提交'}
             </button>
@@ -432,7 +445,9 @@ export default function FeedbackWidget() {
       )}
 
       <button
+        ref={triggerRef}
         type="button"
+        disabled={submitting}
         onClick={() => setOpen((value) => !value)}
         aria-label="反馈"
         title="反馈"

@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserName } from '@/lib/users/display';
 
@@ -124,9 +125,22 @@ export default function AdminProjectsClient() {
   const [mergeConfirmed, setMergeConfirmed] = useState(false);
   const [mergePreview, setMergePreview] = useState<MergePreview | null>(null);
   const [mergeLoading, setMergeLoading] = useState(false);
+  const mergeShellRef = useRef<HTMLDivElement>(null);
+  const mergeBackdropRef = useRef<HTMLDivElement>(null);
+  const mergeDialogRef = useRef<HTMLElement>(null);
   const [mergeError, setMergeError] = useState('');
   const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+
+  useDialogDismiss({
+    open: mergeOpen,
+    dialogRef: mergeDialogRef,
+    dismissSurfaceRef: mergeShellRef,
+    onDismiss: () => setMergeOpen(false),
+    dismissOnOutside: !mergeLoading,
+    dismissOnEscape: !mergeLoading,
+    isDismissTarget: (target) => target === mergeShellRef.current || target === mergeBackdropRef.current,
+  });
 
   const loadProjects = async () => {
     setLoading(true);
@@ -502,15 +516,15 @@ export default function AdminProjectsClient() {
       </div>
 
       {mergeOpen && (
-        <div className="admin-projects-drawer-shell" role="dialog" aria-modal="true" aria-label="项目合并">
-          <button className="admin-projects-drawer-backdrop" type="button" aria-label="关闭" onClick={() => setMergeOpen(false)} />
-          <aside className="admin-projects-drawer">
+        <div ref={mergeShellRef} className="admin-projects-drawer-shell" role="presentation">
+          <div ref={mergeBackdropRef} className="admin-projects-drawer-backdrop" aria-hidden="true" />
+          <aside ref={mergeDialogRef} className="admin-projects-drawer" role="dialog" aria-modal="true" aria-label="项目合并">
             <header>
               <div>
                 <span>项目合并</span>
                 <h2>把历史测试项目收进一个项目</h2>
               </div>
-              <button className="btn btn-secondary" type="button" onClick={() => setMergeOpen(false)}>关闭</button>
+              <button className="btn btn-secondary" type="button" onClick={() => setMergeOpen(false)} disabled={mergeLoading}>关闭</button>
             </header>
 
             {mergeError && <p className="text-red">{mergeError}</p>}

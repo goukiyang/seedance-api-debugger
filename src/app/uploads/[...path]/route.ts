@@ -4,6 +4,7 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
+import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -43,6 +44,8 @@ function contentTypeFor(filePath: string) {
 }
 
 async function generatedAssetAccess(pathname: string) {
+  const user = await getSession();
+  if ((await studioHiddenAssetUrls(user)).includes(pathname)) return { generated: true, allowed: false };
   const assets = await prisma.asset.findMany({
     where: { original_url: pathname },
     select: { id: true },
@@ -55,7 +58,6 @@ async function generatedAssetAccess(pathname: string) {
   });
   if (!generatedTasks.length) return { generated: false, allowed: true };
 
-  const user = await getSession();
   if (!user) return { generated: true, allowed: false };
   if (user.role === 'admin') return { generated: true, allowed: true };
 

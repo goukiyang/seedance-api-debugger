@@ -5,6 +5,7 @@ import { assertCanViewTask } from '@/lib/projects/permissions';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { getReferenceImageByIdForAccess, getAlbumAccess } from '@/lib/reference-albums/permissions';
 import { canUseCompanyTemplates, canViewStudioPreset, isExplicitPresetAsset } from '@/lib/image-studio/access';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { visibleRunPrompt } from '@/lib/template-studio/projection';
 import { getStudioTemplate } from '@/lib/template-studio/templates';
 import { StudioError } from '@/lib/template-studio/errors';
@@ -58,6 +59,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
     if (type === 'asset') {
       const asset = await prisma.asset.findUnique({ where: { id } });
       if (!asset || asset.status !== 'active' || !['image', 'video', 'audio'].includes(asset.type)) return null;
+      if (!await canReadStudioAsset(user, asset)) return null;
       let allowed = asset.owner_id === user.id || user.role === 'admin';
       let download = allowed;
       let referenceId: string | undefined;

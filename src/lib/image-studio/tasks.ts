@@ -13,6 +13,8 @@ import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QU
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { displayUserName } from '@/lib/users/display';
 import { getStudioModuleFixedReferences, parseStudioFixedReferences, type StudioFixedReference } from './fixed-references';
+import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, StudioStyleError } from './style-groups';
+import { studioVisibleAssetWhere } from './protected-assets';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -105,12 +107,16 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let snapshotGlobalContext = settings.context;
     let snapshotModuleContext = workspace?.context || '';
     let fixedReferences: StudioFixedReference[] = [];
+    let styleGroupIds: string[] = [];
+    let styleGroupSnapshot: Array<{ id: string; name: string; revision: number; referenceCount: number }> = [];
+    let templateFixedCount = 0;
+    let historicalReferenceOwners: Record<string, string> = {};
     const referenceIds = input.referenceIds;
     if (reproduceFromTaskId) {
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId }, select: { source_preset_id: true, snapshot_json: true } });
       if (!source?.snapshot_json) throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       try {
-        const sourceSnapshot = JSON.parse(source.snapshot_json) as { globalContext?: unknown; moduleContext?: unknown; fixedReferenceImages?: unknown; sourcePresetId?: unknown };
+        const sourceSnapshot = JSON.parse(source.snapshot_json) as { globalContext?: unknown; moduleContext?: unknown; fixedReferenceImages?: unknown; sourcePresetId?: unknown; styleGroupIds?: unknown; styleGroups?: typeof styleGroupSnapshot; templateFixedCount?: unknown; authorizedReferenceOwners?: unknown };
         const historicalSourcePresetId = source.source_preset_id || (typeof sourceSnapshot.sourcePresetId === 'string' ? sourceSnapshot.sourcePresetId : null);
         if (historicalSourcePresetId) {
           const historicalSource = await tx.imageStudioPreset.findUnique({ where: { id: historicalSourcePresetId }, select: { owner_id: true, scope: true, is_shared: true } });
@@ -120,15 +126,31 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         fixedReferences = Array.isArray(sourceSnapshot.fixedReferenceImages)
           ? parseHistoricalFixedReferences(sourceSnapshot.fixedReferenceImages)
           : [];
+        styleGroupIds = sourceSnapshot.styleGroupIds === undefined ? [] : parseStudioStyleIds(sourceSnapshot.styleGroupIds);
+        const styles = await resolveStudioStyleReferences(identity, styleGroupIds, tx);
+        styleGroupSnapshot = Array.isArray(sourceSnapshot.styleGroups) ? sourceSnapshot.styleGroups : styles.groups.map(group => ({ id: group.id, name: group.name, revision: group.revision, referenceCount: group.references.length }));
+        templateFixedCount = Number.isInteger(sourceSnapshot.templateFixedCount) ? Number(sourceSnapshot.templateFixedCount) : fixedReferences.length;
+        if (sourceSnapshot.authorizedReferenceOwners && typeof sourceSnapshot.authorizedReferenceOwners === 'object') historicalReferenceOwners = sourceSnapshot.authorizedReferenceOwners as Record<string, string>;
         if (!workspace) {
           snapshotModuleContext = typeof sourceSnapshot.moduleContext === 'string' ? sourceSnapshot.moduleContext : '';
         }
       } catch (error) {
         if (error instanceof StudioError) throw error;
+        if (error instanceof StudioStyleError) throw new StudioError(error.message, error.status);
         throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       }
     } else if (workspace) {
       fixedReferences = await getStudioModuleFixedReferences(ownerId, workspace.id, tx);
+      templateFixedCount = fixedReferences.length;
+      try {
+        styleGroupIds = await getStudioModuleStyleIds(ownerId, workspace.id, tx);
+        const styles = await resolveStudioStyleReferences(identity, styleGroupIds, tx);
+        styleGroupSnapshot = styles.groups.map(group => ({ id: group.id, name: group.name, revision: group.revision, referenceCount: group.references.length }));
+        fixedReferences = [...fixedReferences, ...styles.references];
+      } catch (error) {
+        if (error instanceof StudioStyleError) throw new StudioError(error.message, error.status);
+        throw error;
+      }
     }
     const baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     if (fixedReferences.length + referenceIds.length > MAX_REFERENCE_IMAGES) {
@@ -140,8 +162,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const referenceInstructions = orderedReferenceIds.map((_, index) => {
       const fixed = index < fixedReferences.length ? fixedReferences[index] : null;
       return fixed
-        ? `第 ${index + 1} 张：固定参考图；备注（JSON 字符串）：${JSON.stringify(fixed.note)}`
-        : `第 ${index + 1} 张：本次参考图`;
+        ? `第 ${index + 1} 张：${index < templateFixedCount ? `模板${String.fromCharCode(65 + index)}` : `风格${index - templateFixedCount + 1}`}；备注（JSON 字符串）：${JSON.stringify(fixed.note)}`
+        : `第 ${index + 1} 张：图 ${index - fixedReferences.length + 1}（本次参考图）`;
     }).join('\n');
     const context = [baseContext.trim(), referenceInstructions ? `参考图顺序与备注（编号与实际发送次序一致）：\n${referenceInstructions}` : '']
       .filter(Boolean).join('\n\n---\n');
@@ -149,9 +171,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
     if (active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
     const uniqueReferenceIds = Array.from(new Set(orderedReferenceIds));
-    const references = await tx.asset.findMany({ where: { id: { in: uniqueReferenceIds }, owner_id: ownerId, status: 'active', type: 'image' },
-      select: { id: true, original_url: true, thumbnail_url: true, file_name: true, mime_type: true, width: true, height: true, file_size: true, hash: true } });
+    const visibleTransient = await tx.asset.count({ where: { id: { in: Array.from(new Set(referenceIds)) }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
+    if (visibleTransient !== new Set(referenceIds).size) throw new StudioError('本次参考图已不可用或无权查看', 403);
+    const references = await tx.asset.findMany({ where: { id: { in: uniqueReferenceIds }, status: 'active', type: 'image',
+      OR: [{ owner_id: ownerId }, { id: { in: fixedIds } }] },
+      select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, file_name: true, mime_type: true, width: true, height: true, file_size: true, hash: true } });
     if (references.length !== uniqueReferenceIds.length) throw new StudioError('固定参考图或本次参考图已不可用，或当前账号无权使用', 403);
+    if (reproduceFromTaskId && references.some(ref => fixedIds.includes(ref.id) && ref.owner_id !== (historicalReferenceOwners[ref.id] || ownerId))) throw new StudioError('历史参考图归属已变化，请重新选择风格组或模板', 403);
     const referencesById = new Map(references.map(reference => [reference.id, reference]));
     const referenceSnapshot = orderedReferenceIds.map((id, index) => {
       const reference = referencesById.get(id);
@@ -174,6 +200,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       version: 1,
       referenceImages: referenceSnapshot,
       fixedReferenceImages: fixedReferenceSnapshot,
+      templateFixedCount,
+      styleGroupIds, styleGroups: styleGroupSnapshot,
+      authorizedReferenceOwners: Object.fromEntries(references.map(ref => [ref.id, ref.owner_id])),
       transientReferenceImages: transientReferenceSnapshot,
       globalContext: snapshotGlobalContext,
       moduleContext: snapshotModuleContext,
@@ -262,7 +291,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   const referenceIds = Array.from(new Set(items.flatMap(item => {
     try { return JSON.parse(item.reference_ids) as string[]; } catch { return []; }
   })));
-  const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, owner_id: ownerId, status: 'active' },
+  const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, ...(isAdmin ? {} : { owner_id: ownerId }), status: 'active' },
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
   const owner = items.length ? await prisma.user.findUnique({ where: { id: ownerId },
@@ -273,7 +302,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     prompt: task.prompt, model: task.model, quality: task.quality, status: task.status, error: task.error, unitCredits: task.unit_credits,
     providerCostUsd: task.provider_cost_usd,
     aspectRatio: task.aspect_ratio, outputSize: task.output_size,
-    createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: JSON.parse(task.reference_ids) as string[],
+    createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: publicStudioSnapshot(task, assetById, isAdmin).transientReferenceImages.map(image => image.id),
     snapshot: publicStudioSnapshot(task, assetById, isAdmin),
     asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
   })), nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
@@ -322,7 +351,7 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
   return { tasks: items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
-function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean) {
+export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean) {
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
   const fallbackReferences = (() => {
@@ -353,12 +382,12 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
         available: Boolean(asset),
       };
     };
-  const referenceImages = snapshotReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
-  const fixedReferenceImages = snapshotFixedReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
+  const referenceImages = (isAdmin ? snapshotReferences : snapshotTransientReferences).map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
+  const fixedReferenceImages = (isAdmin ? snapshotFixedReferences : []).map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
   const transientReferenceImages = snapshotTransientReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
   const sourceAvailable = typeof task.snapshot_json === 'string' && task.snapshot_json.length > 0
     && ((typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string'
-      && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim())) || referenceImages.length > 0);
+      && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim())) || snapshotReferences.length > 0);
   const count = Number.isInteger(parsed.count) && Number(parsed.count) >= 1 && Number(parsed.count) <= 8 ? Number(parsed.count) : 1;
   const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
   return {
@@ -377,6 +406,14 @@ function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'pro
     sourceAvailable,
     referenceImages,
     fixedReferenceImages,
+    fixedReferenceCount: snapshotFixedReferences.length,
+    templateFixedCount: typeof parsed.templateFixedCount === 'number' ? parsed.templateFixedCount : snapshotFixedReferences.length,
+    styleGroupIds: Array.isArray(parsed.styleGroupIds) ? parsed.styleGroupIds.filter(id => typeof id === 'string') : [],
+    styleGroups: Array.isArray(parsed.styleGroups) ? parsed.styleGroups.flatMap(value => {
+      if (!value || typeof value !== 'object' || typeof value.id !== 'string' || typeof value.name !== 'string') return [];
+      return [{ id: value.id, name: value.name, referenceCount: typeof value.referenceCount === 'number' ? value.referenceCount : 0,
+        coverUrl: `/api/image-studio/style-groups/${value.id}/cover`, canManage: false as const }];
+    }) : [],
     transientReferenceImages,
   };
 }

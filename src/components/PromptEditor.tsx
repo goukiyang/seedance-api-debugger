@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, ImagePlus, Maximize2, X } from 'lucide-react';
 import { PromptMentionPopover, type PromptMentionCandidate } from '@/components/PromptMentionPopover';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import {
   detectMentionAtCursor,
   replaceMentionRange,
@@ -68,6 +69,8 @@ export function PromptEditor({
 }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const expandedBackdropRef = useRef<HTMLDivElement>(null);
+  const expandedDialogRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(value);
   const [mentionState, setMentionState] = useState<{
@@ -287,6 +290,13 @@ export function PromptEditor({
     setMentionState(null);
   }, [draft, value]);
 
+  useDialogDismiss({
+    open: expanded,
+    dialogRef: expandedDialogRef,
+    dismissSurfaceRef: expandedBackdropRef,
+    onDismiss: closeExpanded,
+  });
+
   const commitExpanded = useCallback(() => {
     if (draft.length > MAX_GENERATION_PROMPT_CHARS) {
       setLimitNotice(promptLimitMessage(draft.length));
@@ -325,18 +335,6 @@ export function PromptEditor({
       textarea.setSelectionRange(cursor, cursor);
     });
   }, [expanded]);
-
-  useEffect(() => {
-    if (!expanded) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeExpanded();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closeExpanded, expanded]);
 
   const referenceButtons = useMemo(() => {
     if (!hasReferences) {
@@ -436,8 +434,8 @@ export function PromptEditor({
       </div>
 
       {expanded && (
-        <div className="composer-prompt-expanded-overlay" role="dialog" aria-modal="true" aria-label="提示词编辑">
-          <div className="composer-prompt-expanded-panel">
+        <div ref={expandedBackdropRef} className="composer-prompt-expanded-overlay" role="presentation" onClick={(event) => event.stopPropagation()}>
+          <div ref={expandedDialogRef} className="composer-prompt-expanded-panel" role="dialog" aria-modal="true" aria-label="提示词编辑">
             <div className="composer-prompt-expanded-head">
               <div>
                 <span>提示词编辑</span>

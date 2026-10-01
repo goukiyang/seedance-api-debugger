@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Download } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
@@ -116,6 +117,17 @@ export default function ProjectsPage() {
   const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
   const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+  const downloadBackdropRef = useRef<HTMLDivElement>(null);
+  const downloadDialogRef = useRef<HTMLDivElement>(null);
+
+  useDialogDismiss({
+    open: Boolean(downloadProject),
+    dialogRef: downloadDialogRef,
+    dismissSurfaceRef: downloadBackdropRef,
+    onDismiss: () => setDownloadProject(null),
+    dismissOnOutside: !downloadProject || downloadingProjectId !== downloadProject.id,
+    dismissOnEscape: !downloadProject || downloadingProjectId !== downloadProject.id,
+  });
 
   useEffect(() => {
     if (!hasLoadedUser && !loadingUser) void refreshUser();
@@ -503,14 +515,14 @@ export default function ProjectsPage() {
       </div>
 
       {downloadProject && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="下载项目视频包">
-          <div className="modal-panel bulk-download-modal">
+        <div ref={downloadBackdropRef} className="modal-overlay" role="presentation">
+          <div ref={downloadDialogRef} className="modal-panel bulk-download-modal" role="dialog" aria-modal="true" aria-label="下载项目视频包">
             <div className="modal-header">
               <div>
                 <h2>下载项目视频包</h2>
                 <p>{projectDisplayName(downloadProject)}</p>
               </div>
-              <button className="modal-close" type="button" onClick={() => setDownloadProject(null)} aria-label="关闭">
+              <button className="modal-close" type="button" onClick={() => setDownloadProject(null)} disabled={downloadingProjectId === downloadProject.id} aria-label="关闭">
                 ×
               </button>
             </div>
@@ -534,7 +546,7 @@ export default function ProjectsPage() {
               </p>
             )}
             <div className="modal-actions">
-              <button className="btn btn-secondary" type="button" onClick={() => setDownloadProject(null)}>
+              <button className="btn btn-secondary" type="button" onClick={() => setDownloadProject(null)} disabled={downloadingProjectId === downloadProject.id}>
                 取消
               </button>
               <button

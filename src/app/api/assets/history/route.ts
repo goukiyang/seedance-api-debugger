@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth/session';
 import type { AssetType } from '@/types';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { Prisma } from '@prisma/client';
+import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,6 +67,8 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const hiddenUrls = await studioHiddenAssetUrls(user);
+    const visibleWhere = hiddenUrls.length ? { original_url: { notIn: hiddenUrls } } : {};
 
     const searchParams = request.nextUrl.searchParams;
     if (searchParams.has('assetIds')) {
@@ -79,7 +82,7 @@ export async function GET(request: NextRequest) {
       }
 
       const assets = await prisma.asset.findMany({
-        where: { id: { in: assetIds }, owner_id: user.id, status: 'active', type: 'image' },
+        where: { id: { in: assetIds }, owner_id: user.id, status: 'active', type: 'image', ...visibleWhere },
         select: {
           id: true,
           type: true,
@@ -105,7 +108,8 @@ export async function GET(request: NextRequest) {
     let sourceTotal: number | undefined;
     if (type === 'image' && (source === 'generated' || source === 'uploaded')) {
       const generated = Prisma.sql`(EXISTS (SELECT 1 FROM ImageStudioTask t WHERE t.asset_id = a.id AND t.owner_id = ${user.id} AND t.status = 'succeeded') OR CASE WHEN json_valid(a.metadata_json) THEN json_extract(a.metadata_json, '$.source') IN ('image_generation_api', 'workspace_generation') ELSE 0 END)`;
-      const condition = Prisma.sql`a.owner_id = ${user.id} AND a.status = 'active' AND a.type = 'image' AND ${source === 'generated' ? generated : Prisma.sql`NOT COALESCE(${generated}, 0)`}`;
+      const privacy = hiddenUrls.length ? Prisma.sql`AND a.original_url NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty;
+      const condition = Prisma.sql`a.owner_id = ${user.id} AND a.status = 'active' AND a.type = 'image' ${privacy} AND ${source === 'generated' ? generated : Prisma.sql`NOT COALESCE(${generated}, 0)`}`;
       const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT a.id FROM Asset a WHERE ${condition} ORDER BY a.created_at DESC LIMIT ${limit} OFFSET ${skip}`);
       const totals = await prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`SELECT COUNT(*) AS total FROM Asset a WHERE ${condition}`);
       sourceIds = rows.map(row => row.id);
@@ -114,6 +118,7 @@ export async function GET(request: NextRequest) {
 
     const where = {
       owner_id: user.id,
+      ...visibleWhere,
       status: 'active',
       ...(type === 'all' ? {} : { type }),
       ...(sourceIds ? { id: { in: sourceIds } } : {}),

@@ -1,5 +1,8 @@
 'use client';
 
+import { useRef } from 'react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+
 type ProjectActionKind = 'archive' | 'restore' | 'delete';
 
 type ProjectActionConfirmModalProps = {
@@ -37,12 +40,23 @@ export default function ProjectActionConfirmModal({
   onCancel,
   onConfirm,
 }: ProjectActionConfirmModalProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogDismiss({
+    open: true,
+    dialogRef: panelRef,
+    dismissSurfaceRef: overlayRef,
+    onDismiss: onCancel,
+    dismissOnOutside: !busy,
+    dismissOnEscape: !busy,
+  });
+
   const copy = ACTION_COPY[action];
   const confirmClassName = action === 'restore' ? 'btn btn-primary' : 'btn btn-danger';
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={`${copy.title}确认`}>
-      <div className="modal-panel project-removal-modal">
+    <div ref={overlayRef} className="modal-overlay" role="dialog" aria-modal="true" aria-label={`${copy.title}确认`}>
+      <div ref={panelRef} className="modal-panel project-removal-modal">
         <div className="modal-header">
           <div>
             <h2>{copy.title}</h2>
