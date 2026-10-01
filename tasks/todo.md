@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [ ] 2026-10-01：十月一日反馈：模板参考图、资产缩略图与弹窗行为，正文见 `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`。
 - [ ] 2026-09-28：[抽帧动画工作台接入：上下游闭环与风险补齐](todo/2026-09-28-animation-workbench-integration.md)。方案已核对；网站实现未启动。
 - [ ] 2026-09-22：Seedance 2.5 Draft 到 1080p 直出，正文见 `tasks/todo/2026-09-22-seedance-draft-1080p.md`。
 
@@ -42,4 +43,5 @@
 - `tasks/todo/2026-09-22-canvas-toolflow.md`：画布工具流基础能力
 - `tasks/todo/2026-09-22-seedance-draft-1080p.md`：Seedance 2.5 Draft 到 1080p 直出
 - `tasks/todo/2026-09-28-animation-workbench-integration.md`：抽帧动画工作台接入：上下游闭环与风险补齐
+- `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`：十月一日反馈：模板参考图、资产缩略图与弹窗行为
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
