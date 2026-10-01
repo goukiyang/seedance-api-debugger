@@ -5,7 +5,7 @@
 | 项目 | video-api-debugger（SD2） |
 | 正式版本来源 | `package.json` 与正式站发布信息；执行前重新锁定版本 |
 | 目标路径 | `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`；正式站 `https://sd2.youdooart.com/image-studio` |
-| 状态 | T1 已条件恢复，T2-T4 实现及定向验证完成；v0.30.1 待候选构建及发布，实际功能待用户手动验收 |
+| 状态 | v0.30.1 已部署，T1-T5工程交付完成；实际功能待用户手动验收 |
 | 风险/验证等级 | L4：线上全局设置、现有模板内容和生成行为；候选发布检查后由用户手动验收 |
 | 最后更新 | 2026-10-01 |
 
@@ -30,7 +30,7 @@
 - [x] T2. 修正 `studio.tsx` 的全局设置加载/自动保存：首次完整读取之前不允许写；切换分组、首模板更换、请求迟到或价格变化时不能用初始空草稿覆盖服务器；明确区分用户主动清空与系统初始化空值；保留草稿、冲突提示和失败重试。后台接口必要时增加防误清空与可审计的变更记录，但不要禁止管理员有意清空。
 - [x] T3. 在 `tasks.ts` 统一最终上下文组合：新任务始终使用当前全局设置，并叠加所属模板/模块已有上下文；新建、应用、共享模板和复现历史任务均覆盖。旧任务快照保持原样供查看；复现生成的新快照应记录实际使用的当前全局与模板内容。确认无需把全局文案写入每条模板记录，避免重复/过期。
 - [x] T4. 对照现有测试模式补定向回归：慢 GET + 切组/首组件变化不会写空；管理员主动清空仍可保存；旧模板含上下文、新模板空/非空上下文、应用模板、复现历史任务都得到正确组合；普通用户读不到通用上下文原文，revision 冲突不丢草稿。禁止真实付费生成。
-- [ ] T5. 聚焦提交/推送；依项目服务器发布流程做候选构建、版本/回退点、服务健康及公网版本与静态资源检查后部署。不要将功能验收写为通过；上线回执为“已部署，待用户手动验收”。
+- [x] T5. 聚焦提交/推送；依项目服务器发布流程做候选构建、版本/回退点、服务健康及公网版本与静态资源检查后部署。不要将功能验收写为通过；上线回执为“已部署，待用户手动验收”。
 
 ## 验收与停止条件
 
@@ -54,7 +54,7 @@
 - 全部实现及脚本完成后统一验证：`image-studio-settings-smoke.ts` 与 `image-studio-global-context-smoke.ts` 在各自独立 `/tmp/sd2-image-studio-test-context-*-20261001.db` 通过；覆盖慢/迟到GET、模板切换状态归属、价格更新不写context、主动清空、冲突保留/重试、保存期间新编辑、普通用户payload不含原文、当前global/module组合、模板应用及历史快照不变。没有worker或付费网络生成。
 - `tsc --noEmit --pretty false`、`git diff --check`通过；限定修改文件的Next lint通过，仅原有`img`提示。修正本轮新增的账号依赖提示后，相关hook lint与类型检查复核通过。首次隔离库初始化因空文件未预建报Schema engine error，按现有测试脚本预建空文件后初始化通过，未触及生产库；这不是业务测试失败。
 - 沿用已有ReleaseNotice：单一版本源、五分钟/回前台检查、手动检查、稍后去重、刷新确认均在原入口；标题5字、20px加粗，摘要已更新。未操作旧客户端验证弹窗，仍交用户手动验收。
-- 生产恢复后续只读核对与候选构建/正式发布待完成；不把定向控制器测试冒充真实浏览器功能验收。
+- 北京时间10:27发布后只读复核：通用设置仍为revision22、34字，全文与批准原文一致。候选构建、正式发布与公网检查已完成；不把定向控制器测试冒充真实浏览器功能验收。
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
@@ -62,4 +62,27 @@
 | T2 | 修复加载与自动保存 | 未读完不写空，保留主动清空和冲突草稿 | 已完成：实现与定向验证 |
 | T3 | 统一生成上下文 | 每次新生成使用当前通用内容，旧快照不变 | 已完成：实现与定向验证 |
 | T4 | 定向非付费验证 | 覆盖加载竞态、合并规则及读取权限 | 已完成：两组隔离测试通过 |
-| T5 | Git 与正式发布 | 候选构建、回退保护及公网检查完成 | 进行中：准备候选发布 |
+| T5 | Git 与正式发布 | 候选构建、回退保护及公网检查完成 | 已完成：已部署，待用户手动功能验收 |
+
+## 发布与回退
+
+- v0.30.1 应用提交 `e3913697cd665d7028f575d0a09146037caf913a` 已推送至 `codex/content-reactions-live-20260930` 并用远端引用核对；回退标签 `rollback/2026-10-01-before-global-context` 已推送，指向 v0.30.0 应用提交 `eac5f13cab8468c95d580d18780583d7d0090635`。文档后续收尾提交不改变应用版本。
+- 从该提交归档，上传前后SHA256一致：`0d6c6ca8fd4807011138724669effe6d3670090a49007c777a2263bd9b18c943`。候选在独立发布目录、数据库副本上执行 `NEXT_DIST_DIR=.next-prod-candidate npm run build`，退出0，内置类型/检查通过；保留既有非阻断图片/CSS等提示。未迁移数据库或更改依赖。
+- 正式 BUILD_ID `cfta86Yh9vcU-VrAigLNH`；源站与公网release均0.30.1，config/login均200，公网来源 `server-42-193`。构建清单中的 `/_next/static/chunks/app/template-studio/page-035f5adeeda0b036.js` 公网200，SHA256与服务器一致（`0e8cba6a4ffcb92ef1f46f69532ba0ea861dc5753b5a48ffa5c502f456296078`），含新读取/清空保护标记。
+- `sd2-gray`、`sd2-image-studio`、`sd2-template-prompts`、`sd2-periodic-credits` 四个服务均active/running，NRestarts=0；uploads/videos/storage仍指向原 `/data/video-api-debugger/var-lib/` 目录。切换后首次源站探测早于服务就绪，随后有界重试成功；未回滚。
+- 旧源码/构建保留在 `/srv/video-api-debugger/backups/context-e3913697cd665d7028f575d0a09146037caf913a/`，旧构建子目录 `live-build`；代码回退不恢复整库，不撤销已批准的文案恢复。发布窗口 `context-20261001-e391369` 已登记开始/完成。
+- 守门员start/finish已做，自动L3按实际生产数据与权限边界校正为L4，误判记录有。范围未扩大；仅授权设置行恢复，没有改模板原文、历史快照、登录、点数或生产素材。
+- 待用户手验：刷新/切组/重开通用上下文保持，主动修改/清空与确认；模板已有内容仍在；旧客户端更新提醒与页面交互。未运行浏览器或付费模型；当次原清空请求的触发动作仍未取证。
+
+## 本轮文件与统一差异
+
+- `src/app/image-studio/studio.tsx`：移除随首模板变化的通用草稿，接页面级编辑状态与弹窗。
+- `src/app/image-studio/settings-controller.ts`：异步读取/保存、迟到响应、价格独立提交与草稿冲突保护。
+- `src/app/image-studio/use-studio-settings.ts`：账号范围、React订阅、前台可用性刷新和离页未保存提醒。
+- `src/app/image-studio/global-settings-dialog.tsx`：统一通用设置弹窗、清空确认和失败重试。
+- `src/app/api/image-studio/settings/route.ts`、`src/lib/image-studio/settings.ts`：读取脱敏、可选context、事务内防误清空及revision条件更新。
+- `src/lib/image-studio/tasks.ts`：新任务实时合并当前通用/模块内容，保留旧快照。
+- `scripts/image-studio-settings-smoke.ts`、`scripts/image-studio-global-context-smoke.ts`：两组非付费隔离测试；`scripts/image-studio-integration-smoke.ts`仅同步历史复现预期，本轮未扩跑该完整脚本。
+- `package.json`、`package-lock.json`：仅版本元数据；`src/lib/release.ts`：同一产物更新摘要。
+- `tasks/todo.md`、本工单、`docs/materials/index.md`：入口、恢复及发布证据、受限备份索引。原目标目录同步工单及索引，不提交其无关脏改。
+- [本轮应用提交统一diff](https://github.com/goukiyang/seedance-api-debugger/commit/e3913697cd665d7028f575d0a09146037caf913a)。本机可用 `git diff bd15a144df352af8e983b16c8d1ed65a3f951617 e3913697cd665d7028f575d0a09146037caf913a` 查看相同差异。
