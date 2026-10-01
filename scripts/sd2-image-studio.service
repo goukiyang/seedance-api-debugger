@@ -12,7 +12,7 @@ EnvironmentFile=/srv/video-api-debugger/app/.env
 ExecStart=/usr/bin/env DATABASE_URL=file:/data/video-api-debugger/var-lib/dev.db node --import tsx scripts/process-image-studio.ts
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=420
+TimeoutStopSec=660
 KillSignal=SIGTERM
 
 [Install]

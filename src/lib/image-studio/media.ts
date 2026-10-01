@@ -97,6 +97,7 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
 export type StudioDownloadDiagnostics = {
   phase: 'dns' | 'connect' | 'headers' | 'body';
   attempt: number; redirects: number; receivedBytes: number; expectedBytes?: number; elapsedMs: number; httpStatus?: number;
+  host?: string;
 };
 export class StudioImageDownloadError extends Error {
   constructor(public code: string, public status?: number, public retryable = false, public diagnostics?: StudioDownloadDiagnostics) {
@@ -105,7 +106,7 @@ export class StudioImageDownloadError extends Error {
   }
 }
 
-function classifyStudioDownloadError(error: unknown): StudioImageDownloadError {
+export function classifyStudioDownloadError(error: unknown): StudioImageDownloadError {
   if (error instanceof StudioImageDownloadError) return error;
   const code = (error as NodeJS.ErrnoException)?.code;
   if (code === 'ABORT_ERR') return new StudioImageDownloadError('download_aborted');
@@ -125,10 +126,28 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 async function downloadStudioImage(url: string, signal: AbortSignal, redirects: number, metrics: StudioDownloadDiagnostics): Promise<Buffer> {
+  const response = await openStudioImageStream(url, signal, metrics, {}, redirects);
+  if (response.statusCode !== 200) { response.destroy(); throw new StudioImageDownloadError('download_http_error', response.statusCode); }
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of response) {
+    bytes += chunk.length;
+    metrics.receivedBytes = bytes;
+    if (bytes > MAX_STUDIO_GENERATED_BYTES) { response.destroy(); throw new StudioImageDownloadError('download_size_limit', response.statusCode); }
+    chunks.push(Buffer.from(chunk));
+  }
+  if (!response.complete || !bytes || (metrics.expectedBytes !== undefined && bytes !== metrics.expectedBytes)) throw new StudioImageDownloadError('download_incomplete', response.statusCode, true);
+  return Buffer.concat(chunks);
+}
+
+// Shared SSRF boundary for memory reads and recoverable file downloads.
+export async function openStudioImageStream(url: string, signal: AbortSignal, metrics: StudioDownloadDiagnostics,
+  headers: Record<string, string> = {}, redirects = 0): Promise<import('node:http').IncomingMessage> {
   signal.throwIfAborted();
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new StudioImageDownloadError('download_invalid_url'); }
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password || isPrivateNetworkHost(parsed.hostname)) throw new StudioImageDownloadError('download_unsafe_url');
+  metrics.host = parsed.hostname;
   metrics.phase = 'dns'; metrics.redirects = redirects; metrics.receivedBytes = 0;
   metrics.expectedBytes = undefined; metrics.httpStatus = undefined;
   const dnsDeadline = AbortSignal.timeout(10000);
@@ -151,7 +170,7 @@ async function downloadStudioImage(url: string, signal: AbortSignal, redirects: 
     metrics.phase = 'connect';
     const request = https.get(parsed, {
       // The vetted lookup returns one IPv4 address, not an auto-family address list.
-      family: 4, signal,
+      family: 4, signal, headers,
       lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
     }, response => {
       if (settled) { response.destroy(); return; }
@@ -166,30 +185,17 @@ async function downloadStudioImage(url: string, signal: AbortSignal, redirects: 
         catch { fail(new StudioImageDownloadError('download_invalid_url')); return; }
         // Every hop is revalidated and DNS-pinned; never forward API credentials.
         settled = true;
-        resolve(downloadStudioImage(next, signal, redirects + 1, metrics));
+        resolve(openStudioImageStream(next, signal, metrics, headers, redirects + 1));
         return;
       }
-      if (status !== 200) { fail(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); response.destroy(); return; }
+      if (status !== 200 && status !== 206) { fail(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); response.destroy(); return; }
       metrics.phase = 'body';
       const length = Number(response.headers['content-length']);
       if (Number.isSafeInteger(length) && length >= 0) metrics.expectedBytes = length;
       if (length > MAX_STUDIO_GENERATED_BYTES) { fail(new StudioImageDownloadError('download_size_limit', status)); response.destroy(); return; }
-      const chunks: Buffer[] = [];
-      let bytes = 0;
-      armTimer(60000, 'download_body_timeout');
-      response.on('data', chunk => {
-        if (settled) return;
-        bytes += chunk.length;
-        metrics.receivedBytes = bytes;
-        if (bytes > MAX_STUDIO_GENERATED_BYTES) { fail(new StudioImageDownloadError('download_size_limit', status)); request.destroy(); }
-        else { chunks.push(chunk); armTimer(60000, 'download_body_timeout'); }
-      });
-      response.on('end', () => {
-        if (!response.complete || !bytes) fail(new StudioImageDownloadError('download_incomplete', status, true));
-        else if (!settled) { settled = true; clearTimer(); resolve(Buffer.concat(chunks)); }
-      });
-      response.on('aborted', () => fail(new StudioImageDownloadError('download_incomplete', status, true)));
-      response.on('error', fail);
+      response.setTimeout(60000, () => response.destroy(new StudioImageDownloadError('download_body_timeout', status, true)));
+      settled = true;
+      resolve(response);
     });
     function armTimer(ms: number, code: string) {
       clearTimer();

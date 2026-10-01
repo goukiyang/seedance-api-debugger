@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mock } from 'node:test';
 import https from 'node:https';
 import dns from 'node:dns/promises';
+import { PassThrough } from 'node:stream';
 import { readStudioImage, StudioImageDownloadError } from '../src/lib/image-studio/media';
 
 // Offline transport fixture: exercise production deadlines without paid requests or real DNS.
@@ -22,20 +23,26 @@ async function main() {
     requests++;
     options.lookup('', {}, (_error: unknown, address: string) => pinned.push(address));
     const request = new EventEmitter() as EventEmitter & { destroy: () => void; reusedSocket: boolean };
-    const response = new EventEmitter() as EventEmitter & { statusCode: number; headers: Record<string, string>; complete: boolean; destroy: () => void };
+    const response = new PassThrough() as PassThrough & { statusCode: number; headers: Record<string, string>; complete: boolean; setTimeout: (ms: number, callback: () => void) => void };
+    let idle: ReturnType<typeof realTimeout> | undefined;
+    let idleMs = 0;
+    let onIdle = () => {};
+    const rearm = () => { if (idle) clearTimeout(idle); if (idleMs) idle = realTimeout(onIdle, idleMs / 100); };
+    response.setTimeout = (ms, callback) => { idleMs = ms; onIdle = callback; rearm(); };
     const timers: ReturnType<typeof realTimeout>[] = [];
     let closed = false;
     const close = () => {
       if (closed) return;
       closed = true;
       timers.forEach(clearTimeout);
+      if (idle) clearTimeout(idle);
       options.signal.removeEventListener('abort', abort);
       request.emit('close');
     };
-    const abort = () => { request.emit('error', Object.assign(new Error('aborted'), { code: 'ABORT_ERR' })); close(); };
+    const abort = () => { const error = Object.assign(new Error('aborted'), { code: 'ABORT_ERR' }); request.emit('error', error); response.destroy(error); close(); };
     request.destroy = close;
     request.reusedSocket = false;
-    response.destroy = close;
+    response.once('close', close);
     response.statusCode = 200;
     response.headers = {};
     response.complete = false;
@@ -47,15 +54,15 @@ async function main() {
       if (mode === 'connect') return;
       socket.emit('secureConnect');
       onResponse(response);
-      response.emit('data', Buffer.from('x'));
+      response.write(Buffer.from('x')); rearm();
       if (mode === 'stall') return;
       const count = mode === 'total' ? 10 : 3;
       for (let index = 1; index <= count; index++) {
         timers.push(realTimeout(() => {
-          response.emit('data', Buffer.from('x'));
+          response.write(Buffer.from('x')); rearm();
           if (mode === 'flow' && index === count) {
             response.complete = true;
-            response.emit('end');
+            response.end();
             close();
           }
         }, index * 300));

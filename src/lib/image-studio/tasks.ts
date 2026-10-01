@@ -250,13 +250,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
 }
 
 export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; error?: string; usage?: unknown } = {}) {
-  await prisma.$transaction(async tx => {
+  return prisma.$transaction(async tx => {
     const changed = await tx.imageStudioTask.updateMany({
       where: { id: task.id, status: 'running', lease_token: task.lease_token },
-      data: { status, asset_id: data.assetId, error: data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
+      data: { status, asset_id: data.assetId, error: status === 'succeeded' ? null : data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
         lease_until: null, lease_token: null, finished_at: new Date() },
     });
-    if (!changed.count || task.unit_credits === 0) return;
+    if (!changed.count) return false;
+    if (task.unit_credits === 0) return true;
     const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id,
       terminalStatus: status, frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot });
     await tx.creditLedger.create({ data: {
@@ -268,6 +269,7 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
       reason: status === 'succeeded' ? '图片已保存，结算积分' : '图片未交付，释放冻结积分',
       metadata_json: JSON.stringify({ allocations: settlement.allocations, expired_closed: settlement.expiredClosedAmount }),
     } });
+    return true;
   }, { timeout: 15000 });
 }
 
