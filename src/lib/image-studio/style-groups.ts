@@ -86,8 +86,8 @@ export async function resolveStudioStyleReferences(user: ImageStudioIdentity, id
 }
 export async function setStudioModuleStyleIds(user: ImageStudioIdentity, moduleId: string, value: unknown, client: Client = prisma) {
   const ids = parseStudioStyleIds(value);
-  const module = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id }, select: { id: true } });
-  if (!module) throw new StudioStyleError('模板不存在或无权修改', 403);
+  const studioModule = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id }, select: { id: true } });
+  if (!studioModule) throw new StudioStyleError('模板不存在或无权修改', 403);
   await resolveStudioStyleReferences(user, ids, client);
   const valueJson = JSON.stringify({ ownerId: user.id, ids });
   await client.platformSetting.upsert({ where: { key: selectionKey(moduleId) },
