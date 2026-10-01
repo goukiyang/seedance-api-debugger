@@ -22,7 +22,7 @@
 
 - Toonflow 官方 MIT 仓库 https://github.com/HBAI-Ltd/Toonflow-app ，固定 tag v2.0.2，提交 ec8f54597bf6e6114ed56b832f9052cd6f735311。源码路径 `/Volumes/Data/Tools/ai-video-trial-20261001/sources/Toonflow-app`；已读关键实现，未安装该源码依赖或执行生成。第三方依赖与素材仍须单独核许可。
 - SD2 读取 `codex/gpt-image-studio` 当前工作区。已有未提交内容保留；不能把该分支或固定待办的历史状态冒充当前线上实况。
-- 实际使用 landing-execution、model-task-routing、product-design-philosophy、integrate-external-code、codegraph、graphify。SD2 复用既有 CodeGraph 索引并回到源码核验；Toonflow 无现成索引，回退定向检索；Graphify 图谱缺失，未生成，不声称图谱扫描完成。
+- 首轮使用 landing-execution、model-task-routing、product-design-philosophy、integrate-external-code、codegraph、graphify。SD2 复用既有 CodeGraph 索引并回到源码核验；Toonflow 当时无索引，先回退源码检索。用户随后授权建立 Toonflow CodeGraph，现已完成，见末节。Graphify 未生成，不混称两种工具。
 - 原始来源为上游代码；无本轮用户附件。下列源码路径相对各自仓库，后续实施须重读，不以本报告替代原文。
 
 ## 功能地图
@@ -82,3 +82,21 @@ SD2：
 - 守门员：未修改登录、点数、Provider、上传或数据库；无分级误判。既有脏改不纳入本轮记录提交。
 - 后续实施前重新锁定当前代码和线上版本，优先解决现有普通画布计费/持久任务边界。最小闭环应证明：确认前不扣费；跨用户访问被拒；重复请求不重复生成；结果关联正确项目/节点；刷新后可恢复；费用与任务状态一致；失败有可理解的恢复路径。按项目规则由用户手动功能验收，部署检查与功能验收分开。
 - 本记录是方案依据，不是实施工单或已批准重构。下一步由用户选择试用独立工具，或确认最小 AI 画布融合范围。
+
+## Toonflow CodeGraph 建图补充
+
+来源：2026-10-01 用户确认使用 CodeGraph 后指令“开整”。仅授权本地建图和关键依赖核对，不授权融合业务实施。
+
+| 编号 | 任务内容 | 完成标准 | 状态 |
+|---|---|---|---|
+| C1 | 建立并使用 Toonflow 代码地图 | 索引可查询，核对关键依赖并补充融合记录 | 已完成 |
+
+- 实际运行工具为已安装 CodeGraph CLI 0.9.3，未安装或升级依赖。当地工具源码参考库为 0.9.4，两者不可混称；0.9.3 CLI 不提供 callers/callees 子命令，已改用现有 CodeGraph MCP 成功查询，未修改工具配置。
+- 索引位置：`/Volumes/Data/Tools/ai-video-trial-20261001/sources/Toonflow-app/.codegraph/codegraph.db`，对应 Toonflow v2.0.2 / `ec8f54597bf6e6114ed56b832f9052cd6f735311`。执行 `codegraph init -i <root>` 成功；最终 `codegraph status <root>` 报告 398 文件、5,566 节点、11,779 关系，11.07 MB，状态 up to date。数字采用最终 status 口径，不采用解析阶段计数。
+- 已运行 CLI context 和 MCP explore/callers/callees，不只是创建空目录；guard 返回 CODEGRAPH_READY。已加入 `~/.codex/codegraph/projects.txt` 便于后续复用与维护，但没有新增自动任务或声称持续后台更新。
+- 图谱定位并经源码确认：`useCanvasTools` 使用 `useVueFlow`、`useNodeToolsContext`、`createCanvasQueries`，所以适合借鉴操作协议并为 SD2 编写适配，不宜直接搬整个组件。
+- 图谱定位并经源码确认：`createAgentToolContext` 在 `apps/server/src/agent/tools/index.ts:14` 将 image/video/audio 统一交给服务端 `generateMedia`；`generation.ts:129` 负责供应商、参考素材和结果写入。另有前端 `useNodeAi` 内部同名 `generateMedia`，实际通过 HTTP 请求服务器，不能误认为前端直接调用服务端函数。
+- 图谱定位并经源码确认：`createAgentTools`、`createTeamRunner` 都调用 `loadTool`；后者动态加载可信服务端插件。融合时应只开放明确允许的工具，不把任意插件安装权限交给普通用户。
+- 新增关键适配点：`packages/providers/types.d.ts:155` 约定生成接口返回最终媒体数组、不能返回任务 ID，轮询由 Provider 内部处理；对接 SD2 持久任务时须明确任务 ID、等待/恢复和产物回传，不能只替换接口地址就宣称接通。
+- 限制：静态图谱按名称匹配会聚合同名符号，部分关联可能误命中；398 文件是可索引范围，不是整个仓库所有文件数量。关键结论均回到源码核对；建图不证明运行正确、线上生效或完整功能可用。
+- 范围检查：Toonflow Git 状态只有新增 `.codegraph/`，业务文件未改；索引仅留本地，不向上游仓库推送。不运行构建、浏览器、生成或部署。融合建议不变：保留 SD2 主画布与正式数据源，优先接受控 AI 操作和现有任务链。
