@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布新增风格广场与文本快捷创作栏，优化输入面板和左右连接菜单。文本生成可选模板页同款六种模型，全站通用规则与节点专属规则分开保存。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '放大图片支持右键和顶部按钮复制，收藏旁可将自己的图片分享给站内用户。修复模板页已保存草稿仍反复提示离开的问题。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

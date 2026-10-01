@@ -4,6 +4,7 @@
 
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
 |---|---|---|---|---|---|
+| 2026-10-01 | 模板页离开提示卡住 / codex-clipboard-82847ded-af54-436a-9efc-ab996c8d467c.png | 用户附件 / video-api-debugger | 模板页持续出现“仍有内容正在保存或设置尚未保存，确定离开吗”；本轮同时要求放大图复制与主动分享给站内用户，截图用于定位保存保护误报，不代表修复验收 | [原图](2026-10-01-media-copy-share/codex-clipboard-82847ded-af54-436a-9efc-ab996c8d467c.png) | 原始反馈，无替代；PNG已阅，归档cmp一致；仅本机保存，不公开发布 |
 | 2026-10-01 | 文本快捷创作栏 / codex-clipboard-c2111cf4-3b3d-4c82-adad-29c73afe99ee.png | 用户附件 / video-api-debugger | 单击文本节点显示生成角色图及创作快捷栏；配套区分通用规则与节点规则，模型复用模板页文案选项 | [原图](2026-10-01-canvas-quick-actions/codex-clipboard-c2111cf4-3b3d-4c82-adad-29c73afe99ee.png)；[工单](../../tasks/todo/2026-10-01-canvas-liblib-layout.md) | 原始参考，无替代；已阅，归档cmp一致；另一张规则弹窗标注无原始文件路径，未归档 |
 | 2026-10-01 | Liblib 画布四张浏览器标注 / 原文件名未提供 | 用户本轮标注 / video-api-debugger | 输入面板布局、左侧添加上下文、风格广场、右侧引用节点生成；本轮设计参考，不是本站已有能力证明 | [原参考页](https://www.liblib.tv/canvas?guideSource=home-feature-grid&spaceId=10349539&projectId=c92d851aa47f417784e1da218ba99a12)；[实施工单](../../tasks/todo/2026-10-01-canvas-liblib-layout.md) | 原始版本，无替代；四图可见已阅，工具未提供文件路径/导出句柄，本机原图归档和完整性校验未完成 |
 | 2026-10-01 | 图片模板三分区设计 / codex-clipboard-7314f721-9c47-4f34-881f-6513dce6877d.png | 用户本轮附件 / video-api-debugger | 主图、风格组、参考图三个区域，方形缩略图、封面名称、右上角移除、数量及添加控件；本轮实施依据，截图样例数不作为真实数据 | [原图](2026-10-01-image-template-redesign/codex-clipboard-7314f721-9c47-4f34-881f-6513dce6877d.png)；[工单](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md) | 原始版本，替代上一版合并辅助参考区域的视觉设计；已阅、归档cmp一致；原图仅本机保存，不公开发布 |

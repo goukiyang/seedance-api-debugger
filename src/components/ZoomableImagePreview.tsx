@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Image as ImageIcon, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Image as ImageIcon, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { copyImage } from '@/lib/media/copy-image';
 import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
@@ -217,6 +218,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
   const [comparisonMode, setComparisonMode] = useState(false);
   const [comparisonAxis, setComparisonAxis] = useState<'horizontal' | 'vertical'>('horizontal');
   const [showReference, setShowReference] = useState(false);
+  const [copyState, setCopyState] = useState<{ src: string; busy?: boolean; message?: string; success?: boolean } | null>(null);
   const [dimensionsBySource, setDimensionsBySource] = useState<Record<string, IntrinsicSize>>({});
   const dimensionsTooltipId = useId();
 
@@ -652,7 +654,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
       onDoubleClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
       onKeyUp={(event) => event.stopPropagation()}
-      onContextMenu={(event) => event.preventDefault()}
+      onContextMenu={(event) => event.stopPropagation()}
     >
       <div ref={toolbarRef} className={styles.toolbar} data-has-comparison={comparison ? 'true' : undefined} data-has-metadata={hasVisibleMetadata ? 'true' : undefined}>
         <div className={styles.leading}>
@@ -688,6 +690,12 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
           </button>}
         </div>}
         <div className={styles.actions}>
+          <button type="button" disabled={copyState?.busy} title="复制图片" aria-label="复制图片" onClick={() => {
+            const copySrc = displaySource(comparisonMode ? src : activeSrc, showOriginal ? 'original' : 'preview');
+            setCopyState({ src: copySrc, busy: true });
+            void copyImage(copySrc).then(() => setCopyState({ src: copySrc, success: true, message: '图片已复制' }))
+              .catch(error => setCopyState({ src: copySrc, message: error instanceof Error && error.name !== 'NotAllowedError' ? error.message : '浏览器未允许复制，请使用图片右键菜单' }));
+          }}>{copyState?.success && copyState.src === displaySource(comparisonMode ? src : activeSrc, showOriginal ? 'original' : 'preview') ? <Check size={16} /> : <Copy size={16} />}</button>
           {displaySource(activeSrc, 'preview') !== displaySource(activeSrc, 'original') && <button type="button" aria-pressed={showOriginal} onClick={() => { interactedRef.current = true; setShowOriginal(value => !value); }} title={showOriginal ? '切换高清预览' : '加载完整原图'}><span className={styles.actionLabel}>{showOriginal ? '原图' : '高清预览'}</span></button>}
           {hasNavigation && onPrevious && <button type="button" onClick={onPrevious} title="上一张" aria-label="上一张生成图片"><ArrowLeft size={16} /></button>}
           {hasNavigation && onNext && <button type="button" onClick={onNext} title="下一张" aria-label="下一张生成图片"><ArrowRight size={16} /></button>}
@@ -729,6 +737,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
             {validMetadataTime ? <RelativeTime value={rawMetadataTime!} /> : visibleMetadata.time}
           </span>}
         </div>}
+        {copyState?.message && copyState.src === displaySource(comparisonMode ? src : activeSrc, showOriginal ? 'original' : 'preview') && <div className={styles.notice} role="status">{copyState.message}</div>}
         {notice != null && <div className={styles.notice}>{notice}</div>}
         {details != null && <details className={styles.detailDisclosure}>
           <summary>详情</summary>
@@ -748,7 +757,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
         onLostPointerCapture={finishDrag}
         onAuxClick={(event) => event.preventDefault()}
         onDoubleClick={() => { interactedRef.current = true; resetView(); }}
-        onContextMenu={(event) => event.preventDefault()}
+        onContextMenu={(event) => event.stopPropagation()}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {comparison && comparisonMode ? <div className={`${styles.compareFrame} ${comparisonAxis === 'vertical' ? styles.compareVertical : styles.compareHorizontal}`} data-image-preview-compare-frame>

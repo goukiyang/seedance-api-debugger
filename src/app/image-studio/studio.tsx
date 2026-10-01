@@ -8,6 +8,8 @@ import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
+import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
+import { copyImage } from '@/lib/media/copy-image';
 
 function studioUploadProgress(file: File, index: number, count: number, progress: UploadProgressSnapshot) {
   const transferring = ['raw', 'proxy', 'storage', 'multipart'].includes(progress.phase);
@@ -521,6 +523,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [pendingSubmission, setPendingSubmission] = useState<Record<string, unknown> | null>(null);
   const [reproduceSourceTaskId, setReproduceSourceTaskId] = useState<string | null>(module.reproduceFromTaskId || null);
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const [persistedDraftSignature, setPersistedDraftSignature] = useState<string | null>(null);
   const [draftRestoring, setDraftRestoring] = useState(false);
   const draftRestoreSequence = useRef(0);
   const blockedDraftSignature = useRef<string | null>(null);
@@ -559,6 +562,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
   const automaticDirty = automaticSnapshot !== moduleSaved;
+  const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
+  useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft);
   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
   function closeModuleDialog() {
     if (moduleSaving || uploading || bannerUploading) return;
@@ -772,7 +777,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     try { localStorage.setItem(draftKey, JSON.stringify({ schemaVersion: 2, prompt, count, referenceLimit, referencePolicy, aspectRatio, resolution,
       images: [...images, ...auxiliaryImages].map(image => ({ id: image.id })), context: contextEditable ? moduleContext : undefined,
       fixedReferences: fixedEditable ? fixedReferences.map(image => ({ id: image.id, note: image.note })) : undefined,
-      styleGroupIds: styleGroups.map(group => group.id), model: moduleModel, quality, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision })); }
+      styleGroupIds: styleGroups.map(group => group.id), model: moduleModel, quality, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision }));
+      setPersistedDraftSignature(generationDraft); }
     catch { setError('临时草稿未能保存到浏览器，请勿刷新；当前内容仍可生成或另存为。'); }
   }, [draftLoaded, draftRestoring, recoverableDraft, draftKey, generationDraft, reproduceSourceTaskId, moduleRevision, contextEditable, fixedEditable]);
 
@@ -953,12 +959,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setCopyFeedback({ id: task.id, text: '复制中…' });
     let copied = false;
     try {
-      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('当前浏览器不支持复制图片');
-      const response = await fetch(imageUrl);
-      if (!response.ok) throw new Error('图片读取失败');
-      const blob = await response.blob();
-      if (!blob.size) throw new Error('图片为空');
-      await navigator.clipboard.write([new ClipboardItem({ [blob.type || 'image/png']: blob })]);
+      await copyImage(imageUrl);
       copied = true;
     } catch {
       copied = false;
@@ -1000,25 +1001,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + previewableTasks.length) % previewableTasks.length;
     setPreview(studioTaskPreviewState(previewableTasks[nextIndex]));
   }
-
-  useEffect(() => {
-    if (!unsavedContext && !moduleDirty && !moduleSaving) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
-    const guardNavigation = (event: MouseEvent) => {
-      const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
-      if (!(link instanceof HTMLAnchorElement) || link.target === '_blank' || link.hasAttribute('download')) return;
-      if (link.href === window.location.href || link.hash && link.pathname === window.location.pathname) return;
-      if (!window.confirm('仍有内容正在保存或设置尚未保存，确定离开吗？')) {
-        event.preventDefault(); event.stopPropagation();
-      }
-    };
-    window.addEventListener('beforeunload', warn);
-    document.addEventListener('click', guardNavigation, true);
-    return () => {
-      window.removeEventListener('beforeunload', warn);
-      document.removeEventListener('click', guardNavigation, true);
-    };
-  }, [unsavedContext, moduleDirty, moduleSaving]);
 
   function changeFixedReferences(next: FixedStudioReference[]) {
     if (!fixedEditable) return;
