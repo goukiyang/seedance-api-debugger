@@ -382,9 +382,9 @@ function meaningfulContent(raw: string) {
 // Duplication copies configuration, not output history, private previews or live tasks.
 function duplicateSnapshot(snapshot: Snapshot): Snapshot {
   const configKeys = new Set(['title', 'prompt', 'description', 'context', 'savedContext', 'contextRules',
-    'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'quality', 'ratio', 'size', 'resolution',
+    'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'textModel', 'quality', 'ratio', 'size', 'resolution',
     'count', 'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
-    'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode']);
+    'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle']);
   const remap = new Map(snapshot.canvas.nodes.map(node => [node.id, `node-${randomUUID()}`]));
   return {
     schema: 'ultimate_canvas.v1', schemaVersion: 2,
@@ -413,7 +413,7 @@ function withoutLiveTasks(snapshot: Snapshot): Snapshot {
   const runtimeKeys = new Set([
     'taskid', 'taskids', 'providertaskid', 'providertaskids', 'upstreamtaskid',
     'imagetaskid', 'videotaskid', 'studiotaskid', 'imagestudiotaskid',
-    'runid', 'runids', 'flowrunid', 'toolflowrunid', 'batchid', 'batchids',
+    'runid', 'runids', 'flowrunid', 'toolflowrunid', 'batchid', 'batchids', 'stylejob',
     'requestid', 'mutationid', 'idempotencykey', 'submissionid',
     'documentid', 'canvasdocumentid', 'activegenerationnodeid',
     'generationresult', 'generationerror', 'generationprogress',

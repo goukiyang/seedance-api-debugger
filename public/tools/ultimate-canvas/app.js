@@ -111,6 +111,26 @@
         markChanged(reason = 'toolflow_change') { scheduleCanvasSave(reason); },
     };
 
+    const canvasStyles = window.UltimateCanvasStyles.create({
+        request: requestJson,
+        getNode: nodeId => engine.nodes.get(nodeId),
+        context: () => ({ userId: canvasRuntime.bootstrap?.user?.id, projectId: canvasRuntime.selectedProjectId,
+            cardId: canvasRuntime.selectedVideoCardId, documentId: canvasRuntime.documentId,
+            writable: canvasRuntime.documentWritable && !canvasRuntime.contextSwitching }),
+        setPrompt: (nodeId, prompt) => {
+            const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+            const input = nodeEl && promptInputFor(nodeEl, 'image');
+            if (input) input.value = prompt || '';
+        },
+        render: renderGenerationNodeControls, save: scheduleCanvasSave, flush: flushCanvasSave,
+        notice: showCanvasNotice,
+        status: (nodeId, status, message) => setNodeGenerationStatus(document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`), status, message),
+        apply: (nodeId, payload, result) => {
+            const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+            if (nodeEl) applyGenerationResult(nodeEl, payload, result);
+        }
+    });
+
     function backendEndpoint(candidate, fallback, policy = 'canvas') {
         return window.UltimateCanvasBackendContract.resolveApiEndpoint(
             candidate,
@@ -817,6 +837,9 @@
                 }
 
                 if (payload.kind === 'image') {
+                    if (engine.nodes.get(payload.nodeId)?.data?.canvasStyle) {
+                        return canvasStyles.generate(payload, promptWithConnectedText(payload));
+                    }
                     const descriptor = window.UltimateCanvasGenerationNodes.imageRequest({
                         projectId: canvasRuntime.selectedProjectId,
                         cardId: canvasRuntime.selectedVideoCardId,
@@ -826,7 +849,7 @@
                         workspaceKey: canvasWorkspaceKey(),
                         requestId: payload.requestId,
                         mode: payload.mode,
-                        prompt: payload.prompt,
+                        prompt: promptWithConnectedText(payload),
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
@@ -858,7 +881,7 @@
                         workspaceKey: canvasWorkspaceKey(),
                         requestId: payload.requestId,
                         mode: payload.mode,
-                        prompt: payload.prompt,
+                        prompt: promptWithConnectedText(payload),
                         promptUserEdited: true,
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
@@ -1532,8 +1555,16 @@
 
     function updateGenerationLabels(data) {
         const caps = data?.capabilities || {};
-        document.querySelectorAll('.model-selector span:nth-child(2)').forEach(el => {
-            el.textContent = caps.text?.model || 'GPT-5.5';
+        document.querySelectorAll('[data-text-model]').forEach(select => {
+            const node = engine.nodes.get(select.closest('.canvas-node')?.dataset.nodeId);
+            const selected = node?.data?.textModel || caps.text?.model || 'gpt-5.5';
+            const models = [...(caps.text?.model_options || [])];
+            if (!models.some(item => item.value === selected)) models.unshift({ value: selected, label: selected });
+            select.disabled = !caps.text?.enabled;
+            const key = JSON.stringify(models);
+            if (select.dataset.optionsKey === key && select.value === selected) return;
+            select.replaceChildren(...models.map(item => new Option(item.label, item.value, false, item.value === selected)));
+            select.dataset.optionsKey = key;
         });
         document.querySelectorAll('.node-type-image .video-model-info span:nth-child(2)').forEach(el => {
             el.textContent = caps.image?.model || caps.image?.label || '图形生成';
@@ -1547,11 +1578,19 @@
     function updateGenerationNodeModelLabel(nodeEl, node) {
         const imageSelect = nodeEl?.querySelector('[data-generation-image-model]');
         if (imageSelect && node?.type === 'image') {
+            if (node.data?.canvasStyle) {
+                const style = node.data.canvasStyle;
+                imageSelect.replaceChildren(new Option(style.modelLabel || style.model, style.model));
+                imageSelect.disabled = true;
+                imageSelect.title = '使用风格模板的模型；移除风格后可自由选择';
+                return;
+            }
             const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
             const options = capability.model_options || [{ value: capability.model, label: capability.label || capability.model }];
             const selected = node.data?.imageSettings?.model || capability.model;
             imageSelect.innerHTML = options.filter(item => item.value).map(item => `<option value="${escapeHtml(item.value)}"${item.value === selected ? ' selected' : ''}>${escapeHtml(item.label || item.value)}</option>`).join('');
             imageSelect.disabled = !capability.enabled || !options.length;
+            imageSelect.title = '';
             return;
         }
         const label = nodeEl?.querySelector('.video-model-info span:nth-child(2)');
@@ -2335,8 +2374,12 @@
     }
 
     function hasUnsavedCanvasChanges() {
+        const rules = document.querySelector('[data-context-rules-modal]');
+        const rulesDirty = rules && (rules._saving
+            || rules.querySelector('[data-context-rules-textarea]').value !== rules._nodeInitial
+            || rules.querySelector('[data-global-rules-textarea]').value !== rules._globalInitial);
         return canvasRuntime.documentDirty || canvasRuntime.saveState === 'saving'
-            || Boolean(canvasRuntime.failedSaveRequest) || canvasRuntime.documentOperation;
+            || Boolean(canvasRuntime.failedSaveRequest) || canvasRuntime.documentOperation || Boolean(rulesDirty);
     }
 
     function updateDocumentInteraction() {
@@ -2435,7 +2478,7 @@
             if (Array.isArray(value)) return value.map(clean);
             if (!value || typeof value !== 'object') return value;
             return Object.fromEntries(Object.entries(value)
-                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost)$/i.test(key))
+                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob)$/i.test(key))
                 .map(([key, item]) => [key, key === 'generationStatus' ? 'idle' : clean(item)]));
         };
         return JSON.stringify(clean(JSON.parse(raw)));
@@ -2896,6 +2939,7 @@
             }
             if (node.type === 'image') {
                 syncImageModeButtons(nodeEl, node.data?.mode || 'text-to-image');
+                if (node.data?.styleJob) void canvasStyles.resume(node.id);
             }
             if ((node.type === 'text' || node.type === 'script') && node.data?.generatedText) {
                 applyTextGenerationResult(nodeEl, {
@@ -3090,7 +3134,7 @@
         engine.addNode = (...args) => {
             const nodeId = originalAddNode(...args);
             refreshContextRulesButtons();
-            renderGenerationNodeControls(nodeId);
+            updateGenerationLabels(canvasRuntime.bootstrap);
             scheduleCanvasSave('node_add');
             return nodeId;
         };
@@ -3351,6 +3395,15 @@
     function generationSettingsForNode(node) {
         if (!node) return {};
         if (node.type === 'image') {
+            if (node.data?.canvasStyle) {
+                const style = node.data.canvasStyle;
+                const first = availableGenerationReferenceItems(node.id).find(item => item.width > 0 && item.height > 0);
+                const ratio = window.UltimateCanvasGenerationInteractions.resolveImageRatio(style.aspectRatio || 'auto', first, '1:1');
+                return { model: style.model, quality: style.quality, ratio: ratio.resolved, requestedRatio: style.aspectRatio,
+                    ratioSource: ratio.source, resolution: style.resolution,
+                    size: window.UltimateCanvasGenerationInteractions.imageSizeForRatio(ratio.resolved, style.resolution),
+                    count: style.count, maximumCount: style.count, sizeOptions: [style.resolution] };
+            }
             const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
             const current = node.data?.imageSettings || {};
             const model = current.model || capability.model;
@@ -3671,7 +3724,7 @@
         const referenceCount = availableGenerationReferenceItems(nodeId).length;
         const modeState = generationModeState(node, referenceCount);
         const mode = modeState.selected;
-        const interactionReadiness = window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
+        const interactionReadiness = node.data?.canvasStyle ? { ready: true } : window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
             node.type,
             modeState.capability,
             node.data || {},
@@ -3711,8 +3764,41 @@
             const spec = nodeEl.querySelector('[data-generation-spec]');
             const cost = nodeEl.querySelector('[data-generation-cost]');
             if (cost) cost.hidden = true;
-            window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
-            if (spec) spec.textContent = `${settings.ratio}${settings.ratioSource === 'reference' ? '（跟随原图）' : ''} · ${settings.resolution} · ${settings.size} · ${settings.count}张`;
+            const style = node.data?.canvasStyle;
+            const styleJob = node.data?.styleJob;
+            const modelLine = nodeEl.querySelector('.video-model-info');
+            let stylePrice = nodeEl.querySelector('[data-style-price]');
+            if (!stylePrice) {
+                stylePrice = document.createElement('span');
+                stylePrice.className = 'cost-label';
+                stylePrice.dataset.stylePrice = '';
+                nodeEl.querySelector('.video-footer-right')?.prepend(stylePrice);
+            }
+            stylePrice.hidden = !style;
+            if (style) {
+                window.UltimateCanvasNodePricing?.dispose(node.id);
+                modelLine?.classList.remove('has-canvas-node-price');
+                const select = nodeEl.querySelector('[data-generation-image-model]');
+                if (select) select.hidden = false;
+                stylePrice.textContent = Number.isFinite(style.unitCredits) ? `${style.unitCredits * style.count} 点` : '报价待确认';
+                stylePrice.title = '按应用风格时的报价；价格变化时会停止提交';
+                if (submit && !submit.classList.contains('is-loading')) submit.disabled = Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
+            } else window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
+            if (spec) spec.textContent = `${style?.aspectRatio === 'auto' ? '跟随参考' : settings.ratio} · ${style?.quality || settings.resolution}${style?.quality ? ` · ${settings.resolution}` : ''} · ${settings.count}张`;
+            const styleLabel = nodeEl.querySelector('[data-generation-style-label]');
+            if (styleLabel) styleLabel.textContent = style?.name || '风格';
+            nodeEl.querySelector('[data-generation-command="style-gallery"]')?.classList.toggle('is-active', Boolean(style));
+            const clearStyle = nodeEl.querySelector('[data-generation-command="clear-style"]');
+            if (clearStyle) { clearStyle.hidden = !style; clearStyle.disabled = Boolean(styleJob); }
+            const refreshStyle = nodeEl.querySelector('[data-generation-command="refresh-style"]');
+            if (refreshStyle) refreshStyle.hidden = !styleJob;
+            if (promptInput) promptInput.readOnly = Boolean(styleJob);
+            nodeEl.querySelectorAll('[data-generation-popover]').forEach(button => {
+                button.disabled = Boolean(style);
+                if (style) button.title = '使用风格模板的生成参数；移除风格后可调整';
+                else button.removeAttribute('title');
+            });
+            if (style && existingStatus?.dataset.interactionInvalid === 'true') existingStatus.remove();
         } else {
             const spec = nodeEl.querySelector('[data-generation-spec]');
             if (spec) {
@@ -4151,7 +4237,8 @@
             prompt: prompt || node.data?.prompt || node.data?.description || '',
             contextRules,
             context_rules: contextRules,
-            model: nodeEl.querySelector('[data-generation-image-model] option:checked')?.textContent.trim() || nodeEl.querySelector('.video-model-info, .model-selector')?.textContent.trim() || '',
+            model: ['text', 'script'].includes(kind) ? (node.data?.textModel || canvasRuntime.bootstrap?.capabilities?.text?.model || 'gpt-5.5')
+                : nodeEl.querySelector('[data-generation-image-model] option:checked')?.textContent.trim() || nodeEl.querySelector('.video-model-info')?.textContent.trim() || '',
             spec: nodeEl.querySelector('[data-generation-spec]')?.textContent.trim() || '',
             sourceNodes: nodeSourcePayloads(nodeId),
             referenceImageIds: generationReferenceImageIds(nodeId),
@@ -4161,6 +4248,13 @@
             source: node.data?.source || '',
             title: node.data?.title || ''
         };
+    }
+
+    function promptWithConnectedText(payload) {
+        const context = (payload.sourceNodes || []).filter(source => ['text', 'script'].includes(source.type))
+            .map(source => source.data?.generatedText || source.data?.prompt || source.data?.description || '')
+            .filter(value => typeof value === 'string' && value.trim());
+        return [payload.prompt, ...context].filter(Boolean).join('\n\n');
     }
 
     function setSubmitLoading(button, loading) {
@@ -4521,7 +4615,8 @@
 
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         const generationNode = payload.nodeId ? engine.nodes.get(payload.nodeId) : null;
-        if (generationNode && ['image', 'video'].includes(generationNode.type)) {
+        const selectedStyle = generationNode?.data?.canvasStyle;
+        if (generationNode && !selectedStyle && ['image', 'video'].includes(generationNode.type)) {
             const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
                 generationNode.type,
                 capabilities[generationNode.type]
@@ -4568,6 +4663,12 @@
         }
 
         if (payload.kind === 'image') {
+            if (selectedStyle) {
+                if (selectedStyle.appliedBy !== canvasRuntime.bootstrap?.user?.id) return { ready: false, message: '请为当前账号重新应用风格。' };
+                if (hasCurrentGenerationSubmission(payload.nodeId)) return { ready: false, message: '当前风格任务正在处理中。' };
+                if (generationNode.data.styleJob && generationNode.data.styleJob.state !== 'unconfirmed') return { ready: false, message: '请等待当前任务完成，或点击查看生成状态。' };
+                return { ready: true };
+            }
             if (!capabilities.image?.enabled) {
                 return {
                     ready: false,
@@ -4667,9 +4768,15 @@
             response: Promise.resolve().then(() => api.generate(payload)),
             captured: capturedContext,
             current: () => currentGenerationContext(payload.nodeId),
-            onSuccess: result => applyGenerationResult(nodeEl, payload, result),
+            onSuccess: result => applyGenerationResult(nodeEl, result?.canvasStylePayload || payload, result),
             onError: error => {
                 const node = engine.nodes.get(payload.nodeId);
+                if (node?.data?.styleJob) {
+                    setNodeGenerationStatus(nodeEl, 'warn', error?.message || '任务状态未确认，请查看生成状态；不会重新生成。');
+                    scheduleCanvasSave('style_generation_status_unknown');
+                    showCanvasNotice(error?.message || '任务状态未确认，请查看生成状态。', 'warn');
+                    return;
+                }
                 if (node) {
                     node.data = {
                         ...node.data,
@@ -4888,6 +4995,9 @@
         if (!node || !['image', 'video'].includes(node.type)) return;
 
         const action = command.dataset.generationCommand;
+        if (action === 'style-gallery') { closeGenerationPopover(); engine._hideAddMenu(); void canvasStyles.open(nodeId); return; }
+        if (action === 'clear-style') { canvasStyles.clear(nodeId); return; }
+        if (action === 'refresh-style') { void canvasStyles.resume(nodeId); return; }
         if (action === 'optimize-prompt' && node.type === 'video') {
             optimizeVideoPrompt(nodeEl, node, command);
             return;
@@ -5014,6 +5124,7 @@
     });
     engine.onNodeSelected = nodeId => {
         closeGenerationPopover();
+        if (engine.nodes.get(nodeId)?.type === 'text') updateGenerationLabels(canvasRuntime.bootstrap);
         if (canvasRuntime.referenceSelection && nodeId !== canvasRuntime.referenceSelection.targetNodeId) {
             selectCanvasReference(nodeId);
         }
@@ -5263,16 +5374,21 @@
                 <section class="context-rules-modal" role="dialog" aria-modal="true" aria-label="LLM 上下文规则">
                     <header class="context-rules-modal-header">
                         <div>
-                            <span>LLM 上下文规则</span>
+                            <span>文本生成规则</span>
                             <strong>${escapeHtml(ctx.label)}</strong>
                         </div>
                         <button class="context-rules-close" data-context-rules-close title="关闭">×</button>
                     </header>
+                    <div class="context-rules-tabs" role="tablist" aria-label="规则范围">
+                        <button type="button" role="tab" data-rules-tab="node" aria-selected="true">节点专属</button>
+                        <button type="button" role="tab" data-rules-tab="global" aria-selected="false">全站通用</button>
+                    </div>
                     <div class="context-rules-modal-body">
                         <main class="context-rules-editor">
                             <label>
-                                <span>影响本节点 LLM 的规则文本</span>
-                                <textarea data-context-rules-textarea placeholder="写清这条文本节点生成时必须遵守的上下文规则，例如品牌语气、禁用表达、输出格式、角色设定或必须保留的信息。">${escapeHtml(ctx.rules)}</textarea>
+                                <span data-rules-editor-label>仅用于当前文本节点</span>
+                                <textarea data-context-rules-textarea maxlength="4000" placeholder="角色设定、输出格式或必须保留的信息">${escapeHtml(ctx.rules)}</textarea>
+                                <textarea data-global-rules-textarea maxlength="4000" placeholder="所有画布文本生成都要遵守的规则" hidden disabled></textarea>
                             </label>
                             <div class="context-rules-preview">
                                 <span>当前用户输入</span>
@@ -5285,46 +5401,93 @@
                                 <strong>仅管理员可编辑</strong>
                             </div>
                             <div>
-                                <span>保存</span>
-                                <strong>随画布自动保存</strong>
+                                <span>作用范围</span>
+                                <strong data-rules-scope>仅当前文本节点</strong>
                             </div>
                             <div>
                                 <span>生效</span>
-                                <strong>生成时写入 LLM 上下文</strong>
+                                <strong>保存后，下次生成生效</strong>
                             </div>
                         </aside>
                     </div>
+                    <p class="context-rules-status" data-rules-status role="status">全站通用规则读取中</p>
                     <footer class="context-rules-modal-footer">
                         <button class="context-rules-secondary" data-context-rules-clear>清空规则</button>
                         <button class="context-rules-secondary" data-context-rules-cancel>取消</button>
-                        <button class="context-rules-primary" data-context-rules-save>保存规则</button>
+                        <button class="context-rules-primary" data-context-rules-save>保存节点规则</button>
                     </footer>
                 </section>
             </div>
         `;
     }
 
-    function closeContextRulesModal() {
-        document.querySelector('[data-context-rules-modal]')?.remove();
+    function closeContextRulesModal(force = false) {
+        const modal = document.querySelector('[data-context-rules-modal]');
+        if (modal?._saving) return false;
+        if (!force && modal && (modal.querySelector('[data-context-rules-textarea]').value !== modal._nodeInitial
+            || modal.querySelector('[data-global-rules-textarea]').value !== modal._globalInitial)
+            && !window.confirm('规则有未保存修改，确定关闭吗？')) return false;
+        modal?.remove();
         document.body.classList.remove('context-rules-modal-open');
+        window.parent.postMessage({ type: 'sd2-canvas-style-gallery', open: false }, window.location.origin);
+        modal?._returnFocus?.focus?.();
+        return true;
     }
 
-    function openContextRulesModal(nodeEl) {
+    async function openContextRulesModal(nodeEl) {
         if (!isCanvasAdmin()) {
             showCanvasNotice('只有管理员可以编辑 LLM 上下文规则。', 'warn');
             return;
         }
         const ctx = contextRulesContextFor(nodeEl);
         if (!ctx) return;
-        closeContextRulesModal();
+        if (!closeContextRulesModal()) return;
         document.body.insertAdjacentHTML('beforeend', buildContextRulesModal(ctx));
         document.body.classList.add('context-rules-modal-open');
+        const modal = document.querySelector('[data-context-rules-modal]');
+        modal._nodeInitial = ctx.rules;
+        modal._globalInitial = '';
+        modal._scope = 'node';
+        modal._returnFocus = nodeEl.querySelector('[data-context-rules-open]');
+        window.parent.postMessage({ type: 'sd2-canvas-style-gallery', open: true }, window.location.origin);
         const textarea = document.querySelector('[data-context-rules-textarea]');
         textarea?.focus();
         textarea?.setSelectionRange?.(textarea.value.length, textarea.value.length);
+        try {
+            const settings = await requestJson('/api/tools/ultimate-canvas/text-settings', { cache: 'no-store' });
+            if (!modal.isConnected) return;
+            modal._globalRevision = settings.revision;
+            modal._globalInitial = settings.context || '';
+            const global = modal.querySelector('[data-global-rules-textarea]');
+            global.value = modal._globalInitial;
+            global.disabled = false;
+            modal.querySelector('[data-rules-status]').textContent = '通用规则与专属规则同时生效；冲突时通用规则优先。';
+        } catch (error) {
+            if (modal.isConnected) modal.querySelector('[data-rules-status]').textContent = `${error.message}；关闭重开可重试，节点规则仍可保存。`;
+        }
     }
 
-    function saveContextRulesModal(modal) {
+    async function saveContextRulesModal(modal) {
+        if (modal._saving) return;
+        const status = modal.querySelector('[data-rules-status]');
+        if (modal._scope === 'global') {
+            if (!Number.isInteger(modal._globalRevision)) { status.textContent = '通用规则未读取成功，请关闭重开后重试。'; return; }
+            if (!window.confirm('这会影响全站所有画布后续的文本生成。确认保存通用规则？')) return;
+            modal._saving = true;
+            const button = modal.querySelector('[data-context-rules-save]');
+            button.disabled = true;
+            modal.querySelector('[data-global-rules-textarea]').disabled = true;
+            try {
+                const context = normalizeContextRules(modal.querySelector('[data-global-rules-textarea]').value);
+                const saved = await patchJson('/api/tools/ultimate-canvas/text-settings', { context, revision: modal._globalRevision, confirmClear: !context });
+                modal._globalRevision = saved.revision;
+                modal._globalInitial = context;
+                modal.querySelector('[data-global-rules-textarea]').value = context;
+                status.textContent = '通用规则已保存，全站画布下次文本生成生效。';
+            } catch (error) { status.textContent = error.message; }
+            finally { modal._saving = false; button.disabled = false; modal.querySelector('[data-global-rules-textarea]').disabled = false; }
+            return;
+        }
         const nodeId = modal.dataset.nodeId;
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         const node = engine.nodes.get(nodeId);
@@ -5337,7 +5500,16 @@
         };
         refreshContextRulesButtons();
         scheduleCanvasSave('context_rules_change');
-        showCanvasNotice(rules ? '上下文规则已保存' : '上下文规则已清空', 'info');
+        modal._saving = true;
+        modal.querySelector('[data-context-rules-textarea]').disabled = true;
+        try {
+            const saved = await flushCanvasSave('context_rules_change', true);
+            if (!saved) { status.textContent = '节点规则尚未保存到服务器，请重试。'; return; }
+            modal._nodeInitial = rules;
+            modal.querySelector('[data-context-rules-textarea]').value = rules;
+            status.textContent = '节点专属规则已保存，仅当前节点下次生成生效。';
+        } catch (error) { status.textContent = error.message || '节点规则保存失败，请重试。'; }
+        finally { modal._saving = false; modal.querySelector('[data-context-rules-textarea]').disabled = false; }
     }
 
     function closePromptModal() {
@@ -5429,18 +5601,30 @@
 
         const contextRulesModal = e.target.closest('[data-context-rules-modal]');
         if (contextRulesModal) {
+            if (e.target === contextRulesModal) { closeContextRulesModal(); return; }
+            const tab = e.target.closest('[data-rules-tab]');
+            if (tab) {
+                contextRulesModal._scope = tab.dataset.rulesTab;
+                const global = tab.dataset.rulesTab === 'global';
+                contextRulesModal.querySelectorAll('[data-rules-tab]').forEach(button => button.setAttribute('aria-selected', String(button === tab)));
+                contextRulesModal.querySelector('[data-context-rules-textarea]').hidden = global;
+                contextRulesModal.querySelector('[data-global-rules-textarea]').hidden = !global;
+                contextRulesModal.querySelector('[data-rules-editor-label]').textContent = global ? '所有画布的文本生成共同遵守' : '仅用于当前文本节点';
+                contextRulesModal.querySelector('[data-rules-scope]').textContent = global ? '全站所有画布的文本节点' : '仅当前文本节点';
+                contextRulesModal.querySelector('[data-context-rules-save]').textContent = global ? '保存全站规则' : '保存节点规则';
+                return;
+            }
             if (e.target.closest('[data-context-rules-close], [data-context-rules-cancel]')) {
                 closeContextRulesModal();
                 return;
             }
             if (e.target.closest('[data-context-rules-clear]')) {
-                const textarea = contextRulesModal.querySelector('[data-context-rules-textarea]');
-                if (textarea) textarea.value = '';
+                const textarea = contextRulesModal.querySelector(contextRulesModal._scope === 'global' ? '[data-global-rules-textarea]' : '[data-context-rules-textarea]');
+                if (textarea && !textarea.disabled && !contextRulesModal._saving) textarea.value = '';
                 return;
             }
             if (e.target.closest('[data-context-rules-save]')) {
-                saveContextRulesModal(contextRulesModal);
-                closeContextRulesModal();
+                await saveContextRulesModal(contextRulesModal);
                 return;
             }
         }
@@ -5527,6 +5711,68 @@
         }
     }
 
+    engine.onAddMenuOpening = menu => {
+        const connection = menu._pendingConnection;
+        const owner = connection && engine.nodes.get(connection.nodeId);
+        const incoming = connection?.role === 'input';
+        const capabilities = canvasRuntime.bootstrap?.capabilities || {};
+        const icon = window.UltimateCanvasIcons;
+        const rows = [
+            ['text', '文本', 'Text'], ['image', '图片', 'ImagePlus'], ['video', '视频', 'Video'],
+            ['video-compose', '智能剪辑', 'Scissors'], ['director', '导演台', 'Clapperboard'],
+            ['frame-analysis', '逐帧拉片', 'Film'], ['audio', '音频', 'AudioLines'], ['script', '脚本', 'ScrollText']
+        ];
+        function unavailable(type) {
+            if (type === 'frame-analysis') return '逐帧拉片尚未接入';
+            if (type === 'video-compose') return '智能剪辑尚未接入';
+            if (connection && owner?.type.startsWith('flow-')) return '工具流节点只能连接工具流';
+            if (connection && ['video-compose', 'audio'].includes(type)) return '当前尚无对应生成接口，可从素材库添加已有素材';
+            if (connection && type === 'director') return '导演台请从画布加号独立添加';
+            if (incoming && ['image', 'video'].includes(owner?.type) && !['image', 'text', 'script'].includes(type)) return '此节点目前仅接收图片或文字上下文';
+            if (connection && !incoming && ['image', 'video'].includes(type) && !['image', 'text', 'script', 'director'].includes(owner?.type)) return '当前输出不能作为该节点的参考';
+            if (!incoming && ['image', 'video', 'text', 'script'].includes(type)) {
+                const capability = capabilities[type === 'script' ? 'text' : type];
+                if (!capability?.enabled) return capability?.message || '当前生成能力不可用';
+            }
+            return '';
+        }
+        const buttons = rows.map(([type, label, glyph]) => {
+            const reason = unavailable(type);
+            return `<button type="button" role="menuitem" class="menu-item" data-node-type="${type}" ${reason ? `disabled title="${escapeHtml(reason)}"` : ''}>${icon(glyph)}<span>${label}</span></button>`;
+        }).join('');
+        const canReference = incoming && ['image', 'video'].includes(owner?.type);
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-label', connection ? incoming ? '添加上下文' : '引用该节点生成' : '添加节点');
+        menu.innerHTML = `<div class="menu-section-title">${menu.getAttribute('aria-label')}</div>${buttons}
+            ${connection ? `<button type="button" role="menuitem" class="menu-item" data-action="reference-node" ${canReference ? '' : 'disabled title="请从接收图片的节点左侧选择已有参考"'}>${icon('Link')}<span>参考节点</span></button>` : ''}
+            ${!connection || owner?.type.startsWith('flow-') ? `<details><summary>工具流节点</summary>${[['flow-input', '输入'], ['flow-template', '图片模板'], ['flow-select', '结果筛选'], ['flow-confirm', '人工确认'], ['flow-output', '输出']].map(([type, label]) => `<button type="button" role="menuitem" class="menu-item" data-node-type="${type}">${icon('Layers')}<span>${label}</span></button>`).join('')}</details>` : ''}
+            ${!connection || incoming ? `<div class="menu-divider"></div><button type="button" class="menu-item" role="menuitem" data-action="upload">${icon('Upload')}<span>上传素材</span></button>` : ''}
+            ${!connection ? `<button type="button" class="menu-item" role="menuitem" data-action="from-history">${icon('History')}<span>生成历史</span></button>` : ''}`;
+    };
+
+    let addMenuOutsidePointer = null;
+    document.addEventListener('pointerdown', event => {
+        const menu = document.getElementById('add-node-menu');
+        addMenuOutsidePointer = menu && !menu.classList.contains('hidden') && !menu.contains(event.target)
+            && !event.target.closest('.node-connector') ? { x: event.clientX, y: event.clientY, id: event.pointerId } : null;
+    });
+    document.addEventListener('pointerup', event => {
+        const start = addMenuOutsidePointer;
+        addMenuOutsidePointer = null;
+        const menu = document.getElementById('add-node-menu');
+        if (start && start.id === event.pointerId && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6
+            && menu && !menu.contains(event.target) && !event.target.closest('.node-connector')) engine._hideAddMenu();
+    });
+    document.getElementById('add-node-menu')?.addEventListener('keydown', event => {
+        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        const options = [...event.currentTarget.querySelectorAll('button:not(:disabled)')].filter(item => item.getClientRects().length);
+        const current = options.indexOf(document.activeElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+            : (current + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+        event.preventDefault();
+        options[next]?.focus();
+    });
+
     // =====================
     // Floating Add-Node Menu (from toolbar "+" or double-click)
     // =====================
@@ -5563,13 +5809,13 @@
     // Menu item clicks
     document.getElementById('add-node-menu')?.addEventListener('click', (e) => {
         const item = e.target.closest('.menu-item');
-        if (!item) return;
+        if (!item || item.disabled) return;
 
         const type = item.dataset.nodeType;
         const action = item.dataset.action;
         const menu = document.getElementById('add-node-menu');
-        const cx = menu._canvasX || 400;
-        const cy = menu._canvasY || 300;
+        const cx = menu._canvasX ?? 400;
+        const cy = menu._canvasY ?? 300;
         const pendingConnection = menu._pendingConnection ? { ...menu._pendingConnection } : null;
 
         if (type) {
@@ -5582,8 +5828,17 @@
                 audio: { x: 175, y: 80 },
                 'video-compose': { x: 175, y: 120 }
             }[type] || { x: 100, y: 60 };
-            const newNodeId = engine.addNode(type, cx - placement.x, cy - placement.y);
+            const source = pendingConnection && engine.nodes.get(pendingConnection.nodeId);
+            const sourceEl = source && document.querySelector(`[data-node-id="${CSS.escape(source.id)}"] .node-card`);
+            const x = source ? pendingConnection.role === 'input' ? source.x - placement.x * 2 - 120
+                : source.x + (sourceEl?.offsetWidth || 624) + 120 : cx - placement.x;
+            const y = source ? source.y : cy - placement.y;
+            const newNodeId = engine.addNode(type, x, y);
             connectMenuNode(newNodeId, pendingConnection);
+        } else if (action === 'reference-node') {
+            engine._hideAddMenu();
+            if (pendingConnection?.role === 'input') startReferenceSelection(pendingConnection.nodeId);
+            return;
         } else if (action === 'upload') {
             triggerUpload(cx, cy, pendingConnection);
         } else if (action === 'from-history') {
@@ -5641,7 +5896,49 @@
     // =====================
     // Node Actions (inside text/image nodes)
     // =====================
+    document.addEventListener('change', event => {
+        const select = event.target.closest('[data-text-model]');
+        if (!select) return;
+        const node = engine.nodes.get(select.closest('.canvas-node')?.dataset.nodeId);
+        if (!node) return;
+        node.data = { ...node.data, textModel: select.value };
+        scheduleCanvasSave('text_model_change');
+    });
+    document.addEventListener('keydown', event => {
+        const modal = document.querySelector('[data-context-rules-modal]');
+        if (!modal) return;
+        if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeContextRulesModal(); }
+        if (event.key === 'Tab') {
+            const focusable = [...modal.querySelectorAll('button:not(:disabled), textarea:not(:disabled)')].filter(el => !el.hidden);
+            const first = focusable[0], last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        }
+    }, true);
     document.addEventListener('click', (e) => {
+        const quick = e.target.closest('[data-text-create]');
+        if (quick) {
+            const sourceEl = quick.closest('.canvas-node');
+            const source = engine.nodes.get(sourceEl?.dataset.nodeId);
+            if (!source || source.type !== 'text') return;
+            e.preventDefault();
+            if (quick.dataset.textCreate === 'write') { openPromptModal(sourceEl); return; }
+            const sourceText = sourceEl.querySelector('.node-text-content')?.textContent?.trim()
+                || source.data?.generatedText || promptValueFor(sourceEl, source);
+            if (!sourceText) { showCanvasNotice('先写入角色、场景或故事内容，再创建图片或视频。', 'warn'); openPromptModal(sourceEl); return; }
+            const video = quick.dataset.textCreate === 'video';
+            const purpose = quick.dataset.textCreate === 'character' ? '角色设定图' : '场景概念图';
+            const prompt = video ? '根据上游文本生成视频，保留故事中的角色、场景与动作。'
+                : `根据上游文本创作${purpose}，保持描述中的外观、服装、时代和视觉特征一致。`;
+            const id = engine.addNode(video ? 'video' : 'image', source.x + 680, source.y, {
+                title: video ? '故事视频' : purpose, prompt,
+                mode: video ? 'text-to-video' : 'text-to-image', sourceNodeId: source.id
+            });
+            engine._createConnection(source.id, id);
+            engine.selectNode(id);
+            scheduleCanvasSave('text_quick_create');
+            return;
+        }
         const action = e.target.closest('.node-action-row');
         if (!action) return;
 

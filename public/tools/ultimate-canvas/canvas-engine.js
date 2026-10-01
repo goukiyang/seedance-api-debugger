@@ -143,11 +143,11 @@ class CanvasEngine {
             if (e.target === this.container || e.target === this.canvas) {
                 this._deselectAll();
                 this._hideContextMenu();
-                this._hideAddMenu();
             }
         });
 
         document.addEventListener('keydown', (e) => {
+            if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
             if (e.key === 'Escape') {
                 this._hideContextMenu();
                 this._hideAddMenu();
@@ -161,6 +161,7 @@ class CanvasEngine {
         });
 
         window.addEventListener('keydown', (e) => {
+            if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
             if (e.key === ' ' && !['TEXTAREA', 'INPUT'].includes(document.activeElement.tagName) && !document.activeElement.isContentEditable) {
                 this.isSpacePressed = true;
                 this.container.style.cursor = 'grab';
@@ -299,12 +300,13 @@ class CanvasEngine {
             if (conn && conn !== startConnector) {
                 const pair = this._connectionPair(startConnector, conn);
                 if (pair && pair.fromId !== pair.toId) this._createConnection(pair.fromId, pair.toId);
-            } else if (!target?.closest('.canvas-node')) {
+            } else if (conn === startConnector || !target?.closest('.canvas-node')) {
                 const startId = startConnector?.closest('.canvas-node')?.dataset.nodeId;
                 if (startId) {
                     this._showAddMenu(e.clientX, e.clientY, {
                         connectNodeId: startId,
-                        connectRole: startConnector.classList.contains('input') ? 'input' : 'output'
+                        connectRole: startConnector.classList.contains('input') ? 'input' : 'output',
+                        anchor: startConnector
                     });
                 }
             }
@@ -375,6 +377,7 @@ class CanvasEngine {
     _showAddMenu(clientX, clientY, options = {}) {
         this._hideAddMenu();
         const menu = document.getElementById('add-node-menu');
+        if (!menu) return;
         menu.style.left = clientX + 'px';
         menu.style.top = clientY + 'px';
         menu.classList.remove('hidden');
@@ -387,6 +390,26 @@ class CanvasEngine {
             role: options.connectRole || 'output'
         } : null;
         menu.classList.toggle('connection-mode', Boolean(menu._pendingConnection));
+        menu._anchor = options.anchor || document.activeElement;
+        this.onAddMenuOpening?.(menu);
+        const bounds = menu.getBoundingClientRect();
+        menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8)) + 'px';
+        menu.style.top = Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8)) + 'px';
+        if (menu._pendingConnection) {
+            const connector = this.canvas.querySelector(`[data-node-id="${CSS.escape(options.connectNodeId)}"] .node-connector.${options.connectRole === 'input' ? 'input' : 'output'}`);
+            if (connector) {
+                const point = this._getConnectorPos(connector);
+                const menuBox = menu.getBoundingClientRect();
+                const endX = ((options.connectRole === 'input' ? menuBox.right : menuBox.left) - rect.left - this.offsetX) / this.scale;
+                const endY = (menuBox.top + 26 - rect.top - this.offsetY) / this.scale;
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.classList.add('connection-line', 'menu-connection-preview');
+                this._setPath(path, point.x, point.y, endX, endY);
+                this.svg.appendChild(path);
+                this.menuConnectionPreview = path;
+            }
+        }
+        menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
     }
     _hideAddMenu() {
         const menu = document.getElementById('add-node-menu');
@@ -394,6 +417,9 @@ class CanvasEngine {
         menu.classList.add('hidden');
         menu.classList.remove('connection-mode');
         menu._pendingConnection = null;
+        this.menuConnectionPreview?.remove();
+        this.menuConnectionPreview = null;
+        if (menu.contains(document.activeElement)) menu._anchor?.focus?.({ preventScroll: true });
     }
 
     // --- Nodes ---
@@ -531,6 +557,13 @@ class CanvasEngine {
             <div class="generation-result-region" data-generation-result-region></div>` : body;
 
         wrap.innerHTML = `
+            ${type === 'text' ? `<div class="text-creation-toolbar" role="toolbar" aria-label="文本快捷创作">
+                <button type="button" data-text-create="character">${window.UltimateCanvasIcons('ImagePlus')}生成角色图</button>
+                <button type="button" data-text-create="scene">${window.UltimateCanvasIcons('Image')}生成场景图</button>
+                <button type="button" data-text-create="video">${window.UltimateCanvasIcons('Video')}生成视频</button>
+                <button type="button" data-text-create="write">${window.UltimateCanvasIcons('Sparkles')}创作</button>
+                <button type="button" data-prompt-expand title="展开编辑" aria-label="展开编辑">${window.UltimateCanvasIcons('Maximize2')}</button>
+            </div>` : ''}
             <div class="node-label">${labelIcon} ${label}</div>
             <div class="node-card">
                 <div class="node-body">${generationBody}</div>
@@ -582,6 +615,18 @@ class CanvasEngine {
 
         // Connectors
         wrap.querySelectorAll('.node-connector').forEach(c => {
+            c.tabIndex = 0;
+            c.setAttribute('role', 'button');
+            c.setAttribute('aria-label', c.classList.contains('input') ? '添加上下文' : '引用该节点生成');
+            c.title = c.getAttribute('aria-label');
+            c.addEventListener('keydown', e => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = c.getBoundingClientRect();
+                this._showAddMenu(rect.right + 8, rect.top, { connectNodeId: id,
+                    connectRole: c.classList.contains('input') ? 'input' : 'output', anchor: c });
+            });
             c.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 this.isDrawingConnection = true;
@@ -798,9 +843,8 @@ class CanvasEngine {
                 <div class="node-input-footer">
                     <div class="node-input-left">
                         <div class="model-selector">
-                            <span class="model-icon">🧠</span>
-                            <span>GPT-5.5</span>
-                            <span class="chevron">▾</span>
+                            ${window.UltimateCanvasIcons('Sparkles')}
+                            <select data-text-model aria-label="文案模型"><option value="">加载模型</option></select>
                         </div>
                         <button class="context-rules-button" data-context-rules-open title="编辑影响本节点 LLM 上下文的规则">
                             <span>规则</span>
@@ -824,9 +868,10 @@ class CanvasEngine {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
                 <div class="generation-node-toolbar generation-editor-toolbar">
-                    <button type="button" class="generation-command" data-generation-command="select-reference">+ 参考</button>
-                    <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
-                    <button type="button" class="generation-command" data-generation-command="optimize-prompt">优化提示词</button>
+                    <button type="button" class="generation-command" data-generation-command="select-reference">${window.UltimateCanvasIcons('Plus')}参考</button>
+                    <button type="button" class="generation-command" disabled title="当前版本尚未接入画面标记">${window.UltimateCanvasIcons('MapPin')}标记</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="disconnect-references" title="清空参考" aria-label="清空参考">${window.UltimateCanvasIcons('Trash2')}</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="optimize-prompt" title="优化提示词" aria-label="优化提示词">${window.UltimateCanvasIcons('WandSparkles')}</button>
                     <button type="button" class="generation-command" data-generation-command="camera-presets" data-generation-popover="camera" aria-expanded="false">运镜</button>
                 </div>
                 <div class="generation-reference-list" data-generation-reference-list hidden></div>
@@ -859,8 +904,12 @@ class CanvasEngine {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
                 <div class="generation-node-toolbar generation-editor-toolbar image-generation-toolbar">
-                    <button type="button" class="generation-command" data-generation-command="select-reference">+ 参考</button>
-                    <button type="button" class="generation-command" data-generation-command="disconnect-references">清空参考</button>
+                    <button type="button" class="generation-command" data-generation-command="select-reference">${window.UltimateCanvasIcons('Plus')}参考</button>
+                    <button type="button" class="generation-command" disabled title="当前版本尚未接入画面标记">${window.UltimateCanvasIcons('MapPin')}标记</button>
+                    <button type="button" class="generation-command" data-generation-command="style-gallery" title="风格广场">${window.UltimateCanvasIcons('Palette')}<span data-generation-style-label>风格</span></button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="clear-style" title="移除风格" aria-label="移除风格" hidden>${window.UltimateCanvasIcons('X')}</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="refresh-style" title="查看生成状态" aria-label="查看生成状态" hidden>${window.UltimateCanvasIcons('RotateCcw')}</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="disconnect-references" title="清空参考" aria-label="清空参考">${window.UltimateCanvasIcons('Trash2')}</button>
                 </div>
                 <div class="generation-reference-list" data-generation-reference-list hidden></div>
                 <textarea class="image-props-textarea" placeholder="描述想要生成的图像，@ 引用素材"></textarea>

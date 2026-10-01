@@ -18,6 +18,7 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
   const dirty = useRef(false);
   const previewRequest = useRef(0);
   const [preview, setPreview] = useState<CanvasMediaPreview | null>(null);
+  const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
   useEffect(() => {
     let internalUrlSync = false;
     let alive = true;
@@ -39,6 +40,10 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     };
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
+      if (event.data?.type === 'sd2-canvas-style-gallery' && typeof event.data.open === 'boolean') {
+        setStyleGalleryOpen(event.data.open);
+        return;
+      }
       if (event.data?.type === 'sd2-canvas-preview-request') {
         const contentKey = event.data.contentKey;
         if (typeof contentKey !== 'string' || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(contentKey)) return;
@@ -166,7 +171,9 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     };
   }, []);
   return <>
-    <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen" />
+    <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
+      onLoad={() => setStyleGalleryOpen(false)}
+      style={styleGalleryOpen ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', zIndex: 10000, borderRadius: 0 } : undefined} />
     <CanvasReactions frame={frame} />
     {preview && (
       <MediaPreview

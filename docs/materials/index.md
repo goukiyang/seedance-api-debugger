@@ -1,9 +1,11 @@
 # 项目资料索引
 
-2026-09-30模板体验四张原始反馈仅保存在本机对应目录，已加入Git忽略；下表这些链接为本地资料入口，公开仓库和服务器发布包不包含原图（截图含用户提示词）。
+2026-09-30模板体验四张原始反馈及2026-10-01画布快捷创作参考图仅保存在本机对应目录，已加入Git忽略；下表这些链接为本地资料入口，公开仓库和服务器发布包不包含这些原图。
 
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
 |---|---|---|---|---|---|
+| 2026-10-01 | 文本快捷创作栏 / codex-clipboard-c2111cf4-3b3d-4c82-adad-29c73afe99ee.png | 用户附件 / video-api-debugger | 单击文本节点显示生成角色图及创作快捷栏；配套区分通用规则与节点规则，模型复用模板页文案选项 | [原图](2026-10-01-canvas-quick-actions/codex-clipboard-c2111cf4-3b3d-4c82-adad-29c73afe99ee.png)；[工单](../../tasks/todo/2026-10-01-canvas-liblib-layout.md) | 原始参考，无替代；已阅，归档cmp一致；另一张规则弹窗标注无原始文件路径，未归档 |
+| 2026-10-01 | Liblib 画布四张浏览器标注 / 原文件名未提供 | 用户本轮标注 / video-api-debugger | 输入面板布局、左侧添加上下文、风格广场、右侧引用节点生成；本轮设计参考，不是本站已有能力证明 | [原参考页](https://www.liblib.tv/canvas?guideSource=home-feature-grid&spaceId=10349539&projectId=c92d851aa47f417784e1da218ba99a12)；[实施工单](../../tasks/todo/2026-10-01-canvas-liblib-layout.md) | 原始版本，无替代；四图可见已阅，工具未提供文件路径/导出句柄，本机原图归档和完整性校验未完成 |
 | 2026-10-01 | 图片模板三分区设计 / codex-clipboard-7314f721-9c47-4f34-881f-6513dce6877d.png | 用户本轮附件 / video-api-debugger | 主图、风格组、参考图三个区域，方形缩略图、封面名称、右上角移除、数量及添加控件；本轮实施依据，截图样例数不作为真实数据 | [原图](2026-10-01-image-template-redesign/codex-clipboard-7314f721-9c47-4f34-881f-6513dce6877d.png)；[工单](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md) | 原始版本，替代上一版合并辅助参考区域的视觉设计；已阅、归档cmp一致；原图仅本机保存，不公开发布 |
 | 2026-10-01 | 图片模板通用上下文恢复工单 / 2026-10-01-image-studio-global-context.md | 用户授权，经同项目线程转交 / SD2 | 34字原文恢复、加载竞态、所有模板及历史重新生成合并；生产备份仅限服务器 | [工单及受限备份路径](../../tasks/todo/2026-10-01-image-studio-global-context.md) | 来源提交cd7ef9b；实施记录更新原工单，不替换原始恢复来源；批准原文与备份逐字一致、恢复前备份quick_check=ok；无媒体附件，整库不外传 |
 | 2026-10-01 | 模板工作室反馈截图 / fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png | 正式站反馈 cmuouhgw70027rl0hqo4d0ra0 / video-api-debugger | 固定图与本次参考图编号、备注、风格组及二级弹窗；用于原始需求核对 | [服务器原图](https://sd2.youdooart.com/uploads/assets/fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png)；[本机归档](/Volumes/Data/Projects/video-api-debugger-v12-full-todo/docs/materials/2026-10-01-feedback-template-assets-dialogs/fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png)；[工单](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md) | 原始版本，无替代；PNG 453x312已阅，SHA256与文件名一致；本机已归档，原件不上传公开Git，不代表功能验收 |

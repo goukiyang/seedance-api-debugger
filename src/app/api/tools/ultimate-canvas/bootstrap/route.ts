@@ -33,6 +33,7 @@ import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-models';
 import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
+import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -369,7 +370,8 @@ export async function GET(request: NextRequest) {
       text: {
         enabled: textReady,
         label: 'GPT-5.5 文本能力',
-        model: muskSettings.default_model || 'gpt-5.5',
+        model: isStudioTextModel(muskSettings.default_model) ? muskSettings.default_model : 'gpt-5.5',
+        model_options: STUDIO_TEXT_MODELS.map(model => ({ value: model.id, label: model.label })),
         endpoint: '/api/tools/ultimate-canvas/generate',
         billing: 'operation_log',
         message: textReady ? '可用' : '文本生成能力暂不可用，请稍后联系管理员',
