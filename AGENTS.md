@@ -54,6 +54,7 @@
 - 当前生产数据盘是 `/data`，`/var/lib/video-api-debugger`、`/var/log/video-api-debugger`、`/srv/video-api-debugger/releases`、`/srv/video-api-debugger/backups` 都应保持为指向 `/data/video-api-debugger/...` 的软链接；不要把数据库、上传素材、视频、缩略图、备份、发布 release 或 sd2 日志重新落回旧根盘。
 - 每次同步服务器源码后必须确认 `public/uploads`、`public/videos`、`storage` 是指向 `/data/video-api-debugger/var-lib` 的软链接，并确认 `public/uploads/assets`、`public/uploads/thumbs`、`public/videos/thumbnails`、`storage/backups` 存在且 `gouki` 可写；否则发布同步可能清空历史视频/封面，或让缩略图接口、上传、视频封面补偿和备份脚本在运行时失败。
 - `sd2-gray.service` 使用 `NEXT_DIST_DIR=.next-prod`。普通 `npm run build` 只会更新 `.next`，不代表线上生效；服务器生产构建必须用 `NEXT_DIST_DIR=.next-prod-candidate npm run build`，验证 `BUILD_ID` 和预期变更后，再把 `.next-prod-candidate` 切换成 `.next-prod`。
+- 图片队列由独立的 `sd2-image-studio.service` 长驻进程处理。涉及 `scripts/process-image-studio.ts` 或其加载的图片生成、下载、引用权限代码时，发布必须同时安全排空并重启该服务；网页服务重启不能证明图片处理代码已更新。停止等待时间须覆盖最长任务及结算余量，确认旧进程正常退出后再同步源码；保留服务配置回退点，核对新启动时间、源码与服务健康，不能为发布强杀已付费请求。背景与检查入口见 `tasks/todo/2026-10-01-image-download-timeout.md`（2026-10-01）。
 - 不得直接删除或原地构建 live `.next-prod`。切换前保留 `.next-prod-prev` 或等价回退目录；候选构建失败、候选内容不含预期变更、重启失败或公网仍是旧版本时，必须恢复上一版并停止报告。
 - 每次涉及 `sd2` 服务器部署、登录域名、nginx、systemd、构建目录、公开 API、用户可见页面或静态资源改动后，至少验证：
   - `ssh gouki@42.193.221.253 'systemctl is-active sd2-gray.service'`

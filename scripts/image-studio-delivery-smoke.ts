@@ -20,16 +20,17 @@ async function main() {
   const { finishStudioTask } = await import('../src/lib/image-studio/tasks');
   const bytes = await sharp({ create: { width: 16, height: 16, channels: 3, background: '#317e63' } }).png().toBuffer();
   const task = { id: 'delivery-fixture', owner_id: 'delivery-owner' };
-  let mode: 'slow' | 'interrupt' | 'resume' | 'ignore-range' | 'bad-range' | 'expired' = 'interrupt';
+  let mode: 'slow' | 'interrupt' | 'resume' | 'ignore-range' | 'bad-range' | 'expired' | 'slow-no-etag' | 'slow-ignore-range' = 'interrupt';
   let observedHeaders: Record<string, string> = {};
   function fixture(signal: AbortSignal, headers: Record<string, string> = {}) {
     observedHeaders = headers;
     if (mode === 'expired') throw new StudioImageDownloadError('download_http_error', 403);
     const offset = Number(headers.Range?.match(/\d+/)?.[0] || 0);
-    const resumed = offset > 0 && mode !== 'ignore-range';
+    const resumed = offset > 0 && mode !== 'ignore-range' && mode !== 'slow-ignore-range';
     const response = new PassThrough() as PassThrough & { statusCode: number; headers: Record<string, string>; complete: boolean; setTimeout: () => void };
     response.statusCode = resumed ? 206 : 200;
     response.headers = { etag: '"fixture-v1"', 'content-length': String(bytes.length - (resumed ? offset : 0)) };
+    if (mode === 'slow-no-etag') delete response.headers.etag;
     if (resumed) response.headers['content-range'] = `bytes ${mode === 'bad-range' ? 0 : offset}-${bytes.length - 1}/${bytes.length}`;
     response.complete = false;
     response.setTimeout = () => {};
@@ -41,7 +42,7 @@ async function main() {
       if (mode === 'interrupt') {
         response.write(bytes.subarray(0, bytes.length - 2));
         timers.push(setTimeout(() => response.destroy(Object.assign(new Error('reset'), { code: 'ECONNRESET' })), 10));
-      } else if (mode === 'slow') {
+      } else if (mode === 'slow' || mode === 'slow-no-etag' || mode === 'slow-ignore-range') {
         const middle = Math.floor(bytes.length / 2);
         response.write(bytes.subarray(0, middle));
         timers.push(setTimeout(() => { response.complete = true; response.end(bytes.subarray(middle)); }, 40));
@@ -89,6 +90,21 @@ async function main() {
     await assert.rejects(downloadStudioDelivery(timeout, AbortSignal.timeout(1000), open), /download_source_expired/);
     timeout.expiresAt = Date.now() + 1000; timeout.attempts = 6;
     await assert.rejects(downloadStudioDelivery(timeout, AbortSignal.timeout(1000), open), /download_retry_limit/);
+
+    for (const unsupported of ['slow-no-etag', 'slow-ignore-range'] as const) {
+      await discardStudioDelivery(task);
+      mode = unsupported;
+      let pending = await createStudioDelivery(task, 'https://fixture.invalid/slow-non-resumable', null);
+      for (let attempt = 0; attempt < 6; attempt++) {
+        pending = (await readStudioDelivery(task))!;
+        await assert.rejects(downloadStudioDelivery(pending, AbortSignal.timeout(1000), open, 20), /download_total_timeout/);
+        if (unsupported === 'slow-no-etag') assert.equal(observedHeaders.Range, undefined);
+        else if (attempt > 0) assert.equal(observedHeaders.Range, `bytes=${Math.floor(bytes.length / 2)}-`);
+        assert.equal((await fs.stat('storage/studio-delivery/delivery-fixture/image.part')).size, Math.floor(bytes.length / 2));
+      }
+      assert.equal(studioDeliveryCanRetry(pending), false);
+      console.log(`CONFIRMED LIMITATION: ${unsupported} repeats the same partial download until all six attempts are exhausted.`);
+    }
 
     await discardStudioDelivery(task);
     await prisma.user.create({ data: { id: task.owner_id, name: 'Fixture', username: 'delivery-owner', email: 'delivery@example.invalid', password_hash: 'not-a-password' } });
