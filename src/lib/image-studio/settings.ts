@@ -27,11 +27,26 @@ export async function getImageStudioSettings(): Promise<ImageStudioSettings> {
   return { ...value, prices: { ...DEFAULT_STUDIO_PRICES, ...value.prices } };
 }
 
-export async function saveImageStudioSettings(input: ImageStudioSettings, userId: string) {
+export function imageStudioSettingsPayload(settings: ImageStudioSettings, isAdmin: boolean) {
+  return {
+    model: settings.model, prices: settings.prices, revision: settings.revision,
+    contextConfigured: Boolean(settings.context.trim()),
+    ...(isAdmin ? { context: settings.context } : {}),
+  };
+}
+
+export class StudioSettingsClearConfirmationError extends Error {
+  constructor() { super('清空通用上下文需要明确确认，请刷新页面后重试'); }
+}
+
+export async function saveImageStudioSettings(input: ImageStudioSettings, userId: string, options: { confirmContextClear?: boolean } = {}) {
   return prisma.$transaction(async (tx) => {
     const row = await tx.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
     const currentRevision = row ? (JSON.parse(row.value_json) as ImageStudioSettings).revision : 0;
     if (currentRevision !== input.revision) return null;
+    if (row && (JSON.parse(row.value_json) as ImageStudioSettings).context.trim() && !input.context.trim() && options.confirmContextClear !== true) {
+      throw new StudioSettingsClearConfirmationError();
+    }
     const next = { context: input.context, model: input.model, prices: input.prices, revision: currentRevision + 1 };
     if (row) {
       const updated = await tx.platformSetting.updateMany({

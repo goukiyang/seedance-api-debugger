@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -23,11 +23,13 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 import styles from './studio.module.css';
 import { StudioReferenceGrid, type FixedStudioReference } from './reference-grid';
 import { RatioPicker } from './ratio-picker';
+import { useStudioSettings } from './use-studio-settings';
+import { StudioGlobalSettingsDialog } from './global-settings-dialog';
+import type { SettingsValue } from './settings-controller';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
-type SettingsValue = { context?: string; revision: number; contextConfigured?: boolean; providerReady: boolean; modelReady?: Record<string, boolean>; prices: Record<string, number | null> };
 type StudioSnapshot = { prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number } | null };
 type StudioModule = { id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string };
@@ -180,24 +182,9 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     }
   });
   const [coverColumns, setCoverColumns] = useState(4);
-  const [settings, setSettings] = useState<SettingsValue | null>(null);
+  const globalEditor = useStudioSettings(userId, isAdmin);
+  const settings = globalEditor.settings;
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
-  const [settingsReload, setSettingsReload] = useState(0);
-  useEffect(() => {
-    let disposed = false;
-    const refreshAvailability = async () => {
-      if (document.visibilityState !== 'visible') return;
-      try {
-        const response = await fetch('/api/image-studio/settings', { cache: 'no-store' });
-        if (!response.ok) return;
-        const value: SettingsValue = await response.json();
-        if (!disposed) setSettings(current => current ? { ...current, providerReady: value.providerReady, modelReady: value.modelReady } : current);
-      } catch { /* Preserve drafts and last-known availability on transient errors. */ }
-    };
-    window.addEventListener('focus', refreshAvailability);
-    document.addEventListener('visibilitychange', refreshAvailability);
-    return () => { disposed = true; window.removeEventListener('focus', refreshAvailability); document.removeEventListener('visibilitychange', refreshAvailability); };
-  }, []);
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [presets, setPresets] = useState<StudioPreset[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(false);
@@ -441,7 +428,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     <div className={styles.content}>
     <header className={styles.header}><div><h1>{coverView ? '模板封面' : '图片生成'}</h1><p className={styles.muted}>{coverView ? '所有模板的 3:4 封面预览' : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
       <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
-      {isAdmin && <button type="button" disabled={!settings} onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
+      {isAdmin && <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
     {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
     {coverView && <section className={styles.coverGrid} aria-label="模板封面"><div className={styles.coverGridInner}>{visibleCoverModules.map(module => {
@@ -451,13 +438,12 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       </button>;
     })}</div><div className={styles.pagination} aria-label="模板封面分页"><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模板</button>}</section>}
     <div hidden={coverView}>
-    {modules.map(module => <ImageStudioBlock key={module.id} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} isFirst={module.id === visibleModules[0]?.id} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
+    {modules.map(module => <ImageStudioBlock key={module.id} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
-      userId={userId} settings={settings} setSettings={setSettings} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => setActive(module.id)}
+      userId={userId} settings={settings} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => setActive(module.id)}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? { ...next, name: item.name, groupName: item.groupName } : item)); }}
-      globalSettingsOpen={globalSettingsOpen && module.id === visibleModules[0]?.id} onCloseGlobal={() => setGlobalSettingsOpen(false)}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
-      settingsReload={settingsReload} onReloadSettings={() => setSettingsReload(current => current + 1)} />)}
+      onReloadSettings={discard => { void globalEditor.controller.load(discard); }} />)}
     {(loading || hydrating) && <p role="status">正在读取模块…</p>}
     {missingGroupModules.length > 0 && <button disabled={hydrating} onClick={() => void hydrateModules(missingGroupModules.slice(0, 12).map(item => item.id))}>加载更多模块（{missingGroupModules.length}）</button>}
     {visibleModules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
@@ -468,24 +454,23 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
       {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><div className={styles.presetActions}><ContentReactions contentKey={`image_template:${preset.id}`} />{preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={presetSharingId === preset.id} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}<button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></div></article>)}</div>}
     </dialog>
+    {isAdmin && <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} />}
+    {!settings && globalEditor.error && <p role="alert" className={styles.error}>{globalEditor.error}<button onClick={() => void globalEditor.controller.load()}>重试读取设置</button></p>}
   </main>;
 }
 
-function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, setSettings, active, onActivate, onModuleChange, globalSettingsOpen, onCloseGlobal, settingsReload, onReloadSettings, ratios }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios }: {
   onModuleDelete: (id: string) => void;
   hidden: boolean; onMetadataChange: (id: string, name: string, groupName: string, followGroup?: boolean) => void;
-  isAdmin: boolean; isFirst: boolean; userId: string; module: StudioModule & { fixedReferences?: FixedStudioReference[]; contextEditable?: boolean }; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule) => Promise<void>; sharingId: string | null; settings: SettingsValue | null;
-  setSettings: Dispatch<SetStateAction<SettingsValue | null>>; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
-  globalSettingsOpen: boolean; onCloseGlobal: () => void;
-  settingsReload: number; onReloadSettings: () => void;
+  isAdmin: boolean; userId: string; module: StudioModule & { fixedReferences?: FixedStudioReference[]; contextEditable?: boolean }; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule) => Promise<void>; sharingId: string | null; settings: SettingsValue | null;
+  globalSettingsDirty: boolean; settingsError: string; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
+  onReloadSettings: (discardDraft?: boolean) => void;
   ratios: RatioPreferences;
 }) {
   const contextEditable = module.contextEditable !== false;
-  const [draftContext, setDraftContext] = useState(settings?.context || '');
   const [saveStatus, setSaveStatus] = useState('');
   const [recoverableDraft, setRecoverableDraft] = useState<Record<string, any> | null>(null);
   const [savedAsSignature, setSavedAsSignature] = useState('');
-  const [settingsError, setSettingsError] = useState('');
   const [prompt, setPrompt] = useState(module.prompt);
   const [count, setCount] = useState(module.count);
   const [referenceLimit, setReferenceLimit] = useState(Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || MAX_REFERENCE_IMAGES)));
@@ -556,24 +541,12 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
   const listLock = useRef(false);
   const loadedMore = useRef(false);
   const uploadLock = useRef(false);
-  const saving = useRef(false);
-  const dialog = useRef<HTMLDialogElement>(null);
   const moduleDialog = useRef<HTMLDialogElement>(null);
   const resumeModulePreview = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const fixedFileInput = useRef<HTMLInputElement>(null);
   const bannerFileInput = useRef<HTMLInputElement>(null);
-  const [globalPrices, setGlobalPrices] = useState<Record<string, number | null>>(settings?.prices || module.prices);
-  const fallbackPrices = useRef(module.prices);
-  fallbackPrices.current = module.prices;
-  const currentDraft = useRef({ context: draftContext, prices: globalPrices });
-  currentDraft.current = { context: draftContext, prices: globalPrices };
-  const dirty = Boolean(isFirst && isAdmin && settings && (
-    draftContext !== (settings.context || '') || JSON.stringify(globalPrices) !== JSON.stringify(settings.prices)
-  ));
-  const globalDirty = useRef(dirty);
-  const settingsRequest = useRef(0);
-  globalDirty.current = dirty;
+  const dirty = globalSettingsDirty;
   const unsavedContext = dirty || moduleContext !== savedModuleContext || fixedDirty;
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
@@ -602,7 +575,6 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     setModuleSaved(current => current ? JSON.stringify({ ...JSON.parse(current), groupName: module.groupName || '未分组' }) : current);
   }, [module.revision, module.groupName]);
 
-  useEffect(() => { if (globalSettingsOpen) dialog.current?.showModal(); }, [globalSettingsOpen]);
   useEffect(() => { if (deleteTarget) deleteDialog.current?.showModal(); else deleteDialog.current?.close(); }, [deleteTarget]);
   useEffect(() => { if (nameEditing) nameInput.current?.focus(); }, [nameEditing]);
 
@@ -723,57 +695,10 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
     return () => window.clearTimeout(timer);
   }, [draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, moduleDeleting, uploading, bannerUploading, submitting, pendingSubmission, name, count]);
 
-  function closeSettings() {
-    if (dirty && !window.confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？')) return;
-    dialog.current?.close();
-    onCloseGlobal();
-  }
-
   function changeGroup(value: string) {
     const next = value !== '__other__' ? value : window.prompt('输入新分组名称（最多 40 字）', '未命名分组')?.trim().slice(0, 40);
     if (next) { setGroupName(next); onMetadataChange(module.id, name, next, true); }
   }
-
-  const loadSettings = useCallback(async () => {
-    if (saving.current) {
-      setSaveStatus('正在保存，请保存完成后重新读取');
-      return;
-    }
-    const request = ++settingsRequest.current;
-    const draftBeforeLoad = JSON.stringify(currentDraft.current);
-    setSettingsError('');
-    try {
-      const value: SettingsValue = await readResponse(await fetch('/api/image-studio/settings', { cache: 'no-store' }));
-      if (request !== settingsRequest.current) return;
-      if (JSON.stringify(currentDraft.current) !== draftBeforeLoad) {
-        setSaveStatus('读取期间有新的修改，已保留草稿。请保存当前修改或重新读取');
-        return;
-      }
-      setSettings(value); setDraftContext(value.context || ''); setGlobalPrices(value.prices || fallbackPrices.current); setSaveStatus('');
-    } catch (e) { if (request === settingsRequest.current) setSettingsError(e instanceof Error ? e.message : '读取失败'); }
-  }, [setSettings]);
-  useEffect(() => {
-    if (!isFirst) return;
-    if (globalDirty.current) { setSaveStatus('当前通用设置草稿已保留，未自动覆盖。'); return; }
-    void loadSettings();
-  }, [isFirst, loadSettings, settingsReload]);
-
-  const saveSettings = useCallback(async () => {
-    if (!settings || !isFirst || !isAdmin || saving.current) return;
-    ++settingsRequest.current;
-    saving.current = true;
-    const snapshot = { context: currentDraft.current.context, prices: currentDraft.current.prices, revision: settings.revision };
-    setSaveStatus('正在保存'); setSettingsError('');
-    try {
-      const value: SettingsValue = await readResponse(await fetch('/api/image-studio/settings', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot),
-      }));
-      setSettings({ ...settings, ...value, contextConfigured: Boolean(value.context?.trim()) });
-      setSettingsError('');
-      setSaveStatus(JSON.stringify(currentDraft.current) === JSON.stringify({ context: snapshot.context, prices: snapshot.prices }) ? '已保存，下次生成生效' : '等待保存');
-    } catch (e) { setSaveStatus('未保存'); setSettingsError(e instanceof Error ? e.message : '保存失败'); }
-    finally { saving.current = false; }
-  }, [settings, isAdmin, isFirst, setSettings]);
 
   const loadTasks = useCallback(async (cursor?: string) => {
     if (listLock.current) return;
@@ -1126,7 +1051,7 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
         </div>
         <button type="button" className={styles.generate} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
         {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
-        {settingsError && <button type="button" onClick={() => { if (!dirty || window.confirm('重新读取会替换未保存的通用设置，是否继续？')) void loadSettings(); }}><RefreshCw size={16} />重新读取设置</button>}
+        {settingsError && <button type="button" onClick={() => { if (!dirty || window.confirm('重新读取会替换未保存的通用设置，是否继续？')) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
         {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
@@ -1290,31 +1215,6 @@ function ImageStudioBlock({ isAdmin, isFirst, userId, module, hidden, onMetadata
       <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>
-    {isAdmin && isFirst && <dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); closeSettings(); }}>
-      <header className={styles.header}><h2>通用上下文</h2><button type="button" title="关闭" aria-label="关闭设置" onClick={() => {
-        closeSettings();
-      }}><X size={20} /></button></header>
-      {settings && <>
-        <label className={styles.label} htmlFor="studio-context">通用上下文</label>
-        <textarea id="studio-context" rows={12} maxLength={20000} value={draftContext} onChange={event => setDraftContext(event.target.value)} />
-        <p className={styles.label}>通用模型积分规则</p>
-        {models.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
-          <input type="number" min={0} max={100000} step={1} placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={globalPrices[model] ?? ''} onChange={event => {
-            const next = event.target.value === '' ? null : Number(event.target.value);
-            setGlobalPrices(current => ({ ...current, [model]: next }));
-          }} />
-        </label>)}
-        <p className={styles.muted}>这组积分规则对所有模块生效。修改后点击保存才生效。</p>
-        <p role="status">{dirty ? '设置未保存' : saveStatus || '已保存'}</p>
-        <button type="button" disabled={!dirty || saving.current} onClick={() => void saveSettings()}><Save size={16} />保存设置</button>
-      </>}
-      {settingsError && <div role="alert" className={styles.error}>{settingsError}<button type="button" onClick={() => { if (!dirty || window.confirm('重新读取会替换未保存的通用设置，是否继续？')) void loadSettings(); }}><RefreshCw size={16} />重试读取</button>
-        {settings && <button type="button" onClick={() => {
-          if (!dirty || window.confirm('重新读取会替换当前未保存的上下文，确定继续吗？')) void loadSettings();
-        }}>重新读取</button>}
-      </div>}
-    </dialog>}
-    {!settings && settingsError && <p role="alert" className={styles.error}>{settingsError}<button onClick={() => void loadSettings()}>重试</button></p>}
     {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>;
 }

@@ -125,8 +125,8 @@ async function main() {
     prompt: 'changed prompt with a new reference', count: 1, aspectRatio: '5:3', referenceIds: [referenceTwo.id], revision: latest.revision,
   });
   const reproducedTask = await prisma.imageStudioTask.findFirstOrThrow({ where: { batch_id: reproducedBatch } });
-  assert.equal(reproducedTask.context, 'New context\n\n---\n模块上下文：\nModule context', 'reproduction must use the source snapshot context');
-  assert.equal(JSON.parse(reproducedTask.snapshot_json || '{}').moduleContext, 'Module context');
+  assert.equal(reproducedTask.context, 'New context\n\n---\n模块上下文：\nCurrent module context', 'reproduction must use current global and module context');
+  assert.equal(JSON.parse(reproducedTask.snapshot_json || '{}').moduleContext, 'Current module context');
   assert.deepEqual(JSON.parse(reproducedTask.reference_ids), [referenceTwo.id], 'reproduction must use the references currently selected by the user');
   const clearedModule = await saveStudioModule(user.id, { ...moduleBody, revision: changedModule.revision, context: 'Current module context', reproduceFromTaskId: null }, false, true);
   assert.equal(clearedModule.reproduceFromTaskId, null);

@@ -104,7 +104,6 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
     let snapshotGlobalContext = settings.context;
     let snapshotModuleContext = workspace?.context || '';
-    let baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     let fixedReferences: StudioFixedReference[] = [];
     const referenceIds = input.referenceIds;
     if (reproduceFromTaskId) {
@@ -118,16 +117,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           if (!historicalSource || !canViewStudioPreset(identity, historicalSource)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
           sourcePresetId = historicalSourcePresetId;
         }
-        const sourceContext = [sourceSnapshot.globalContext, sourceSnapshot.moduleContext]
-          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-          .map(value => value.trim()).join('\n\n---\n模块上下文：\n');
         fixedReferences = Array.isArray(sourceSnapshot.fixedReferenceImages)
           ? parseHistoricalFixedReferences(sourceSnapshot.fixedReferenceImages)
           : [];
-        if (!sourceContext && !fixedReferences.length && !referenceIds.length) throw new Error('empty_context');
-        baseContext = sourceContext;
-        snapshotGlobalContext = typeof sourceSnapshot.globalContext === 'string' ? sourceSnapshot.globalContext : '';
-        snapshotModuleContext = typeof sourceSnapshot.moduleContext === 'string' ? sourceSnapshot.moduleContext : '';
+        if (!workspace) {
+          snapshotModuleContext = typeof sourceSnapshot.moduleContext === 'string' ? sourceSnapshot.moduleContext : '';
+        }
       } catch (error) {
         if (error instanceof StudioError) throw error;
         throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
@@ -135,6 +130,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     } else if (workspace) {
       fixedReferences = await getStudioModuleFixedReferences(ownerId, workspace.id, tx);
     }
+    const baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     if (fixedReferences.length + referenceIds.length > MAX_REFERENCE_IMAGES) {
       throw new StudioError(`固定参考图与本次参考图合计不能超过 ${MAX_REFERENCE_IMAGES} 张`);
     }

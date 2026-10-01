@@ -4,6 +4,7 @@
 
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
 |---|---|---|---|---|---|
+| 2026-10-01 | 图片模板通用上下文恢复工单 / 2026-10-01-image-studio-global-context.md | 用户授权，经同项目线程转交 / SD2 | 34字原文恢复、加载竞态、所有模板及历史重新生成合并；生产备份仅限服务器 | [工单及受限备份路径](../../tasks/todo/2026-10-01-image-studio-global-context.md) | 来源提交cd7ef9b；实施记录更新原工单，不替换原始恢复来源；批准原文与备份逐字一致、恢复前备份quick_check=ok；无媒体附件，整库不外传 |
 | 2026-10-01 | 模板工作室反馈截图 / fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png | 正式站反馈 cmuouhgw70027rl0hqo4d0ra0 / video-api-debugger | 固定图与本次参考图编号、备注、风格组及二级弹窗；用于原始需求核对 | [服务器原图](https://sd2.youdooart.com/uploads/assets/fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png)；[本机归档](/Volumes/Data/Projects/video-api-debugger-v12-full-todo/docs/materials/2026-10-01-feedback-template-assets-dialogs/fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png)；[工单](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md) | 原始版本，无替代；PNG 453x312已阅，SHA256与文件名一致；本机已归档，原件不上传公开Git，不代表功能验收 |
 | 2026-09-30 | 卡片排版 / codex-clipboard-00779972-0ec6-4ede-b74e-8a019ca30935.png | 用户截图 / SD2 | UI01：头像、时间、尺寸、点赞收藏位置 | [原图](2026-09-30-template-ui/codex-clipboard-00779972-0ec6-4ede-b74e-8a019ca30935.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
 | 2026-09-30 | 参考图次序 / codex-clipboard-db1bf647-05e4-4a0f-80fa-3a10e96359cd.png | 用户截图 / SD2 | RF01/RF02：拖动顺序、固定参考图备注与生成编号 | [原图](2026-09-30-template-ui/codex-clipboard-db1bf647-05e4-4a0f-80fa-3a10e96359cd.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
