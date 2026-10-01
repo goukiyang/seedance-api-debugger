@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [x] 2026-10-01：Toonflow 功能地图与现有画布融合建议，正文见 `tasks/todo/2026-10-01-toonflow-capability-integration.md`；仅完成源码调研，融合实施未授权。
 - [ ] 2026-10-01：图片生成下载超时与结果找回，正文见 `tasks/todo/2026-10-01-image-download-timeout.md`。
 - [ ] 2026-10-01：图片模板通用上下文恢复与全局生效，正文见 `tasks/todo/2026-10-01-image-studio-global-context.md`。
 - [ ] 2026-10-01：十月一日反馈：模板参考图、资产缩略图与弹窗行为，正文见 `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`。
@@ -48,4 +49,5 @@
 - `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`：十月一日反馈：模板参考图、资产缩略图与弹窗行为
 - `tasks/todo/2026-10-01-image-download-timeout.md`：图片生成下载超时与结果找回
 - `tasks/todo/2026-10-01-image-studio-global-context.md`：图片模板通用上下文恢复与全局生效
+- `tasks/todo/2026-10-01-toonflow-capability-integration.md`：Toonflow 功能地图与现有画布融合建议
 - `tasks/todo/wallverse-audio-20260715.md`：WallVerse 第一组「世界迁移」声音闭环
