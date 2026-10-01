@@ -186,8 +186,18 @@
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | M1 | 统一主图与辅助参考设计 | 明确角色、模板指向、数量规则及待确认项，记录到现有工单 | 已完成：实施边界与兼容规则见本节 |
-| M2 | 实施生成与参考控制 | 未保存可生成、清空与关闭生效、整体备注随组使用、主图角色贯穿生成 | 进行中：实现已完成；发布检查后交用户手动验收实际行为 |
-| M3 | 发布交付 | 完成必要构建、提交推送、回退保护及正式站发布检查 | 进行中：统一发布检查 |
+| M2 | 实施生成与参考控制 | 未保存可生成、清空与关闭生效、整体备注随组使用、主图角色贯穿生成 | 进行中：v0.32.0 已实现并部署；实际页面与生成效果待用户手动验收 |
+| M3 | 发布交付 | 完成必要构建、提交推送、回退保护及正式站发布检查 | 已完成：类型、lint、候选构建、远端回退点及公网检查均通过 |
 
 - 首轮发布前类型检查、差异格式与部署脚本语法检查通过。源码集成核对发现停用固定图后的模板保存仍沿用旧计数、历史组未重验可用性、创建者恢复历史时上下文权限误拦，以及主辅角色只贴标签未完整解释用途；已集中修正，再统一复查。保存与生成共用数量校验；仅生成要求满足最少主图，模板可预设最少数量而不预存用户主图。历史快照只记录实际传入图片，停用固定图不被历史恢复重新加入。
 - 集中修正后 `tsc --noEmit --incremental false`、`npm run lint -- --quiet`、`git diff --check`、发布脚本 `bash -n` 全部通过。上线版本 `fb8ee0e` 是当前交付分支祖先；package 与锁文件仅同步0.32.0版本号，无依赖变动。真实功能、生成费用/效果和浏览器交互未验收。
+
+### v0.32.0 部署回执
+
+- 2026-10-01 20:05 CST：正式入口 `https://sd2.youdooart.com/template-studio?type=image` 已部署，待用户手动验收。应用提交 `6c21477eaf67173cdc40e2d5e539bcf79f90ae5c` 已推送；远端回退标签 `rollback/2026-10-01-before-primary-drafts` 指向 v0.31.1 `fb8ee0e3881e7fbc1b162ca66e5c531f6527566a`。
+- `NEXT_DIST_DIR=.next-prod-candidate npm run build` 成功，包含内置类型/lint检查；正式 BUILD_ID `8JRVuBWBpfeBGKj8Sqg0j`。`sd2-gray.service` 与 `sd2-image-studio.service` 均 active/running、Result=success、NRestarts=0；两个视频交付补偿 timer 保持 active。
+- 服务器本机 `/api/config` 200；公网 `/api/config`、`/api/release`、`/login` 均200，来源头为 `server-42-193`，版本0.32.0。图片/模板入口构建清单中的14份JS/CSS公网内容与实际构建SHA256相同，包含新辅助参考控件。不以静态文件一致代替真实交互验收。
+- 源码包SHA256上传前后一致；候选构建使用独立数据库副本，副本quick_check通过。没有运行生产数据库迁移、付费生成、浏览器操作、业务回归或独立审核。运行密钥、node_modules、媒体和storage均排除在源码同步外，持久存储链接保留；旧构建及源码位于 `/srv/video-api-debugger/backups/primary-draft-6c21477eaf67173cdc40e2d5e539bcf79f90ae5c/`。
+- 继续复用 `ReleaseNotice.tsx` 的数值版本比较、稍后去重、手动检查与刷新确认；本轮更新唯一版本来源及更新摘要。旧客户端提醒的真实操作和参数恢复效果仍待手动验收，不宣称已实测。
+- 逐文件变更：`src/lib/image-studio/reference-policy.ts` 新增统一角色/数量及模板策略存储；`tasks.ts` 处理草稿权限、实际图片顺序、组备注、任务快照及精确历史读取；`modules.ts`、`presets.ts` 保存/复制角色规则并保留兼容；`style-groups.ts` 保存与合并整体备注。`src/app/image-studio/studio.tsx` 实现主辅分区、草稿生成、清空、恢复和多图对比；`reference-grid.tsx` 实现角色标签/切换；`studio.module.css` 配套布局；`style-groups-view.tsx` 新增整体备注输入。两个API路由 `src/app/api/image-studio/{style-groups,tasks}/route.ts` 接通草稿恢复所需的定点查询；`package.json`、`package-lock.json`、`src/lib/release.ts` 同步版本及摘要；本工单登记决策与交付证据。
+- 完整统一diff：`/tmp/sd2-v0.32.0-unified.diff`。守门员finish已执行，识别发布/交付；权限边界采取源码核对，真实业务层按项目约定交用户手动验收。此前“新反馈来源”归类误判已登记全局固定复盘，本轮实施未新增误判。原反馈记录不提前归档。
