@@ -1745,6 +1745,16 @@
             if (opener?.isConnected) opener.focus();
         };
         document.body.append(dialog); dialog.showModal();
+        if (options.anchor && window.innerWidth > 640) {
+            const anchor = options.anchor.getBoundingClientRect();
+            const box = dialog.getBoundingClientRect();
+            dialog.style.position = 'fixed';
+            dialog.style.margin = '0';
+            dialog.style.right = 'auto';
+            dialog.style.bottom = 'auto';
+            dialog.style.left = Math.max(16, Math.min(anchor.left, window.innerWidth - box.width - 16)) + 'px';
+            dialog.style.top = Math.max(16, Math.min(anchor.bottom + 8, window.innerHeight - box.height - 16)) + 'px';
+        }
         window.parent.postMessage({ type: 'sd2-canvas-modal', open: true }, window.location.origin);
         return { dialog, close };
     }
@@ -1770,6 +1780,53 @@
                 const value = event.target.closest('[data-confirm-value]')?.dataset.confirmValue;
                 if (value) finish(value === 'true');
             });
+        });
+    }
+
+    function requestCanvasName(value) {
+        return new Promise(resolve => {
+            const id = 'canvas-name-' + crypto.randomUUID();
+            const finish = value => { layer.close(); resolve(value); };
+            const layer = openCanvasProductDialog({
+                className: 'canvas-confirm-dialog', labelledBy: id, anchor: document.activeElement,
+                onDismiss: () => finish(null),
+                content: `<div class="canvas-confirm-head"><strong id="${id}">画布名称</strong></div>
+                    <input class="canvas-name-input" data-canvas-name maxlength="120" aria-label="画布名称" value="${escapeHtml(value || '')}">
+                    <div class="canvas-confirm-actions"><button type="button" class="context-command" data-name-cancel>取消</button>
+                    <button type="button" class="context-primary-command" data-name-save>保存名称</button></div>`
+            });
+            const input = layer.dialog.querySelector('[data-canvas-name]');
+            const save = layer.dialog.querySelector('[data-name-save]');
+            const update = () => { save.disabled = !input.value.trim(); };
+            input.addEventListener('input', update);
+            layer.dialog.querySelector('[data-name-cancel]').onclick = () => finish(null);
+            save.onclick = () => { if (input.value.trim()) finish(input.value.trim()); };
+            input.addEventListener('keydown', event => { if (event.key === 'Enter' && input.value.trim()) finish(input.value.trim()); });
+            update(); input.focus(); input.select();
+        });
+    }
+
+    function requestCanvasBackup(backups) {
+        if (!backups.length) { showCanvasNotice('暂无可恢复的备份。', 'info'); return Promise.resolve(null); }
+        return new Promise(resolve => {
+            const id = 'canvas-backup-' + crypto.randomUUID();
+            const finish = value => { layer.close(); resolve(value); };
+            const layer = openCanvasProductDialog({
+                className: 'canvas-confirm-dialog', labelledBy: id, onDismiss: () => finish(null),
+                content: `<div class="canvas-confirm-head"><strong id="${id}">恢复备份</strong></div>
+                    <p>选择备份另存为恢复副本，不覆盖原画布；当前修改仍会先保存。</p>
+                    <div class="canvas-backup-list">${backups.map((backup, index) => `<label>
+                        <input type="radio" name="${id}" value="${index}" ${index === backups.length - 1 ? 'checked' : ''}>
+                        <span><strong>${escapeHtml(backup.request?.title || '未命名画布')}</strong>
+                        <small>${escapeHtml(backup.savedAt ? new Date(backup.savedAt).toLocaleString('zh-CN') : '时间未知')}</small></span></label>`).join('')}</div>
+                    <div class="canvas-confirm-actions"><button type="button" class="context-command" data-backup-cancel autofocus>取消</button>
+                    <button type="button" class="context-primary-command" data-backup-save>另存恢复</button></div>`
+            });
+            layer.dialog.querySelector('[data-backup-cancel]').onclick = () => finish(null);
+            layer.dialog.querySelector('[data-backup-save]').onclick = () => {
+                const selected = layer.dialog.querySelector('input:checked');
+                if (selected) finish(backups[Number(selected.value)]);
+            };
         });
     }
 
@@ -2737,11 +2794,8 @@
             } else if (event.target.closest('[data-canvas-recover-backup]')) {
                 await withDocumentOperation(async () => {
                     const backups = readConflictBackups();
-                    const choices = backups.map((item, index) => `${index + 1}. ${new Date(item.savedAt).toLocaleString()}`).join('\n');
-                    const selected = window.prompt(`选择要另存恢复的备份编号：\n${choices}`, String(backups.length));
-                    if (selected === null) return;
-                    const backup = backups[Number(selected) - 1];
-                    if (!backup) throw new Error('备份编号无效。');
+                    const backup = await requestCanvasBackup(backups);
+                    if (!backup) return;
                     if (canvasRuntime.documentWritable && !await flushCanvasSave('before_backup_recovery', true)) throw new Error('请先保存当前修改或另存副本。');
                     const copy = await createRecoveryCopy(backup, `${String(backup.request.title || '画布').slice(0, 108)}（恢复副本）`);
                     await openManagedDocumentNow(copy, { skipSave: true, skipDraft: true });
@@ -2756,7 +2810,7 @@
                 });
             } else if (event.target.closest('[data-canvas-rename]')) {
                 if (!canvasRuntime.documentWritable) return;
-                const title = window.prompt('画布名称', canvasRuntime.documentTitle);
+                const title = await requestCanvasName(canvasRuntime.documentTitle);
                 if (!title?.trim()) return;
                 canvasRuntime.documentTitle = title.trim().slice(0, 120);
                 renderRuntimeContextControls();
@@ -3017,7 +3071,8 @@
             } else if (node.data?.generationStatus === 'succeeded') {
                 setNodeGenerationStatus(nodeEl, 'success', '生成已完成');
             } else if (node.data?.generationStatus && node.data.generationStatus !== 'idle') {
-                setNodeGenerationStatus(nodeEl, 'loading', `任务${node.data.generationStatus}`);
+                const needsAction = ['unconfirmed', 'uncertain'].includes(node.data.generationStatus);
+                setNodeGenerationStatus(nodeEl, needsAction ? 'warn' : 'info', videoStageLabel(node.data.generationStatus));
             }
             if (node.type === 'image') {
                 syncImageModeButtons(nodeEl, node.data?.mode || 'text-to-image');
@@ -4394,6 +4449,8 @@
     function setSubmitLoading(button, loading) {
         button.disabled = loading;
         button.classList.toggle('is-loading', loading);
+        button.classList.add('sd2-loading-surface');
+        button.dataset.busy = String(loading);
         button.dataset.originalTitle ||= button.title || '';
         button.title = loading ? '接口调用中' : button.dataset.originalTitle;
     }
@@ -4403,6 +4460,11 @@
         const card = nodeEl.querySelector('.node-card');
         if (!card) return;
         let status = card.querySelector(':scope > .node-generation-status');
+        const placeholder = card.querySelector('.generated-result-placeholder');
+        if (placeholder) {
+            placeholder.classList.add('sd2-loading-surface');
+            placeholder.dataset.busy = String(Boolean(message) && state === 'loading');
+        }
         if (!message) {
             status?.remove();
             return;
@@ -4411,7 +4473,8 @@
             status = document.createElement('div');
             card.append(status);
         }
-        status.className = `node-generation-status ${state || 'info'}`;
+        status.className = `node-generation-status sd2-loading-surface ${state || 'info'}`;
+        status.dataset.busy = String(state === 'loading');
         status.textContent = message;
         status.title = message;
     }
@@ -4479,7 +4542,14 @@
         }
         if (status === 'failed') return task?.error_message || '视频生成失败，冻结点数会按后端规则释放。';
         if (status === 'cancelled') return '视频任务已取消。';
-        return `任务状态：${status}，正在等待生成结果。`;
+        return videoStageLabel(status);
+    }
+
+    function videoStageLabel(status) {
+        return ({ draft: '视频设置已保留，尚未生成', queued: '视频正在排队', submitted: '任务已提交，正在核对生成状态',
+            running: '视频正在生成', processing: '视频正在生成', pending: '任务等待处理',
+            unconfirmed: '提交结果待确认，请查询原请求；不会重复生成', uncertain: '提交结果待确认，请查询原请求；不会重复生成'
+        })[status] || '任务状态尚未确认，请读取任务状态';
     }
 
     function applyImageGenerationResult(nodeEl, payload, result) {
@@ -4587,7 +4657,7 @@
         fetchStatus: async (taskId, entry) => {
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(entry.nodeId)}"]`);
             const node = engine.nodes.get(entry.nodeId);
-            if (node?.data.taskId === taskId && node.data.videoSubmission?.state !== 'unconfirmed') setNodeGenerationStatus(nodeEl, 'loading', `视频生成中 · 第 ${entry.attempt} 次状态检查`);
+            if (node?.data.taskId === taskId && node.data.videoSubmission?.state !== 'unconfirmed') setNodeGenerationStatus(nodeEl, 'loading', '正在读取视频状态');
             const data = await requestJson(videoStatusUrl(taskId), {
                 cache: 'no-store',
                 policy: 'video-status'
@@ -4685,15 +4755,16 @@
         renderGenerationNodeControls(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         if (nextStatus === 'succeeded') {
+            const deliveryFailed = task?.delivery_stage?.key === 'failed';
             setNodeGenerationStatus(
                 nodeEl,
-                'success',
-                normalized.stableDownloadReady ? '视频生成完成，稳定下载已就绪' : '视频生成完成，正在准备稳定下载'
+                deliveryFailed ? 'warn' : normalized.stableDownloadReady ? 'success' : 'loading',
+                deliveryFailed ? '视频已生成，文件准备停止；请到任务详情重试准备文件' : normalized.stableDownloadReady ? '视频生成完成，稳定下载已就绪' : '视频生成完成，正在准备稳定下载'
             );
         }
         else if (nextStatus === 'failed') setNodeGenerationStatus(nodeEl, 'error', normalized.errorMessage || '视频生成失败');
         else if (nextStatus === 'cancelled') setNodeGenerationStatus(nodeEl, 'warn', '视频任务已取消');
-        else setNodeGenerationStatus(nodeEl, 'loading', `视频任务${nextStatus || '处理中'}`);
+        else setNodeGenerationStatus(nodeEl, ['queued', 'submitted', 'running', 'processing', 'pending'].includes(nextStatus) ? 'loading' : 'warn', videoStageLabel(nextStatus));
         if (nextStatus !== previousStatus || ['succeeded', 'failed', 'cancelled'].includes(nextStatus)) {
             scheduleCanvasSave('video_status');
         }
@@ -4743,8 +4814,11 @@
     async function recoverVideoSubmission(nodeId) {
         const node = engine.nodes.get(nodeId), submission = node?.data?.videoSubmission;
         if (!submission || submission.state !== 'unconfirmed') return;
+        if (node._submissionQueryBusy) return;
+        node._submissionQueryBusy = true;
         const captured = currentGenerationContext(nodeId);
         const el = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        setNodeGenerationStatus(el, 'loading', '正在查询原请求的受理结果');
         try {
             if (submission.userId !== canvasRuntime.bootstrap?.user?.id || submission.documentId !== canvasRuntime.documentId) throw Error('请在原账号、原画布中查询此请求。');
             if (!await flushCanvasSave('before_video_lookup')) throw Error('请先保存原请求，再查询受理状态。');
@@ -4760,6 +4834,12 @@
             await flushCanvasSave('video_lookup_accepted');
         } catch (error) {
             if (engine.nodes.get(nodeId) === node) setNodeGenerationStatus(el, 'warn', error.message || '查询失败，请保留原请求后重试。');
+        } finally {
+            node._submissionQueryBusy = false;
+            if (engine.nodes.get(nodeId) === node && node.data.videoSubmission === submission && submission.state === 'unconfirmed'
+                && el?.querySelector('.node-generation-status')?.dataset.busy === 'true') {
+                setNodeGenerationStatus(el, 'warn', '提交结果待确认，请稍后查询原请求；不会重复生成');
+            }
         }
     }
 
@@ -5705,12 +5785,17 @@
         `;
     }
 
-    function closeContextRulesModal(force = false) {
+    async function closeContextRulesModal(force = false) {
         const modal = document.querySelector('[data-context-rules-modal]');
-        if (modal?._saving) return false;
+        if (modal?._saving || modal?._closing) return false;
         if (!force && modal && (modal.querySelector('[data-context-rules-textarea]').value !== modal._nodeInitial
             || modal.querySelector('[data-global-rules-textarea]').value !== modal._globalInitial)
-            && !window.confirm('规则有未保存修改，确定关闭吗？')) return false;
+        ) {
+            modal._closing = true;
+            const accepted = await requestCanvasConfirmation({ title: '放弃修改', message: '规则有未保存修改，确定关闭吗？', confirmLabel: '放弃并关闭' });
+            modal._closing = false;
+            if (!accepted || !modal.isConnected) return false;
+        }
         modal?.remove();
         document.body.classList.remove('context-rules-modal-open');
         window.parent.postMessage({ type: 'sd2-canvas-style-gallery', open: false }, window.location.origin);
@@ -5725,7 +5810,7 @@
         }
         const ctx = contextRulesContextFor(nodeEl);
         if (!ctx) return;
-        if (!closeContextRulesModal()) return;
+        if (!await closeContextRulesModal()) return;
         document.body.insertAdjacentHTML('beforeend', buildContextRulesModal(ctx));
         document.body.classList.add('context-rules-modal-open');
         const modal = document.querySelector('[data-context-rules-modal]');
@@ -5756,9 +5841,12 @@
         const status = modal.querySelector('[data-rules-status]');
         if (modal._scope === 'global') {
             if (!Number.isInteger(modal._globalRevision)) { status.textContent = '通用规则未读取成功，请关闭重开后重试。'; return; }
-            if (!window.confirm('这会影响全站所有画布后续的文本生成。确认保存通用规则？')) return;
+            if (!await requestCanvasConfirmation({ title: '保存通用规则', message: '这会影响全站所有画布后续的文本生成。确认保存通用规则？', confirmLabel: '保存规则' })) return;
+            if (!modal.isConnected || modal._saving) return;
             modal._saving = true;
             const button = modal.querySelector('[data-context-rules-save]');
+            button.classList.add('sd2-loading-surface');
+            button.dataset.busy = 'true';
             button.disabled = true;
             modal.querySelector('[data-global-rules-textarea]').disabled = true;
             try {
@@ -5769,7 +5857,7 @@
                 modal.querySelector('[data-global-rules-textarea]').value = context;
                 status.textContent = '通用规则已保存，全站画布下次文本生成生效。';
             } catch (error) { status.textContent = error.message; }
-            finally { modal._saving = false; button.disabled = false; modal.querySelector('[data-global-rules-textarea]').disabled = false; }
+            finally { modal._saving = false; button.dataset.busy = 'false'; button.disabled = false; modal.querySelector('[data-global-rules-textarea]').disabled = false; }
             return;
         }
         const nodeId = modal.dataset.nodeId;
@@ -5785,6 +5873,10 @@
         refreshContextRulesButtons();
         scheduleCanvasSave('context_rules_change');
         modal._saving = true;
+        const saveButton = modal.querySelector('[data-context-rules-save]');
+        saveButton.classList.add('sd2-loading-surface');
+        saveButton.dataset.busy = 'true';
+        saveButton.disabled = true;
         modal.querySelector('[data-context-rules-textarea]').disabled = true;
         try {
             const saved = await flushCanvasSave('context_rules_change', true);
@@ -5793,7 +5885,7 @@
             modal.querySelector('[data-context-rules-textarea]').value = rules;
             status.textContent = '节点专属规则已保存，仅当前节点下次生成生效。';
         } catch (error) { status.textContent = error.message || '节点规则保存失败，请重试。'; }
-        finally { modal._saving = false; modal.querySelector('[data-context-rules-textarea]').disabled = false; }
+        finally { modal._saving = false; saveButton.dataset.busy = 'false'; saveButton.disabled = false; modal.querySelector('[data-context-rules-textarea]').disabled = false; }
     }
 
     function closePromptModal() {
@@ -6190,6 +6282,7 @@
     });
     document.addEventListener('keydown', event => {
         const modal = document.querySelector('[data-context-rules-modal]');
+        if (document.querySelector('dialog[open]')) return;
         if (!modal) return;
         if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeContextRulesModal(); }
         if (event.key === 'Tab') {

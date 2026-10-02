@@ -727,6 +727,11 @@ html, body {
 
 .canvas-product-dialog { margin: auto; color: var(--text-primary); max-height: calc(100dvh - 32px); max-width: calc(100vw - 32px); overflow: auto; }
 .canvas-product-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+.canvas-name-input { width: 100%; padding: 10px; margin-top: 14px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-default); border-radius: 6px; }
+.canvas-backup-list { display: grid; gap: 8px; max-height: 45dvh; overflow: auto; margin-top: 12px; }
+.canvas-backup-list label { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border-default); border-radius: 6px; }
+.canvas-backup-list span { min-width: 0; overflow-wrap: anywhere; }
+.canvas-backup-list small { display: block; margin-top: 4px; color: var(--text-secondary); }
 .canvas-plan-dialog { padding: 0; width: min(1080px, calc(100vw - 32px)); border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-panel); box-shadow: var(--shadow-lg); }
 .canvas-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-default); }
 .canvas-plan-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -1551,9 +1556,6 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
     cursor: wait;
     opacity: 0.72;
     pointer-events: none;
-}
-.submit-btn.is-loading svg {
-    animation: submitSpin 0.9s linear infinite;
 }
 
 .generated-action-row {

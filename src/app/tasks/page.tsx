@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Download } from 'lucide-react';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
+import { RelativeTime } from '@/components/RelativeTime';
+import { useProductDialog } from '@/components/useProductDialog';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -104,11 +107,6 @@ function parseJsonArray(value: string | null): string[] {
   }
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN');
-}
-
 function truncatePrompt(prompt: string, maxLen = 140): string {
   if (prompt.length <= maxLen) return prompt;
   return `${prompt.slice(0, maxLen)}...`;
@@ -179,6 +177,11 @@ function taskLoadErrorMessage(error: unknown) {
 }
 
 export default function TasksPage() {
+  const { confirm, productDialog } = useProductDialog();
+  const taskReadSequence = useRef(0);
+  const loadedPage = useRef<number | null>(null);
+  const loadedOwner = useRef<string | null>(null);
+  const [hasTaskData, setHasTaskData] = useState(false);
   const { user: currentUser, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
@@ -217,29 +220,48 @@ export default function TasksPage() {
 
   const fetchTasks = useCallback(async () => {
     if (!hasLoadedUser) return;
+    const sequence = ++taskReadSequence.current;
+    const owner = currentUser?.id || null;
+    if (loadedOwner.current !== owner) {
+      loadedOwner.current = owner;
+      loadedPage.current = null;
+      setTasks([]);
+      setSelectedTaskIds([]);
+      setPagination(null);
+      setHasTaskData(false);
+    }
     setLoading(true);
     try {
       const endpoint = externalUser ? '/api/ip/video/list' : '/api/video/list';
       const res = await fetch(`${endpoint}?page=${page}&limit=20`);
       const data = await res.json();
+      if (sequence !== taskReadSequence.current) return;
       if (!res.ok) throw new Error(data.message || data.error || '任务加载失败');
-      setTasks(data.tasks || []);
-      setSelectedTaskIds([]);
+      const rows: Task[] = data.tasks || [];
+      setTasks(rows);
+      const samePage = loadedPage.current === page;
+      setSelectedTaskIds(current => samePage
+        ? current.filter(id => rows.some(task => task.id === id && isTaskDownloadable(task))) : []);
+      loadedPage.current = page;
+      setHasTaskData(true);
+      setError('');
       setPagination(data.pagination || null);
     } catch (error) {
+      if (sequence !== taskReadSequence.current) return;
       console.error('Failed to fetch tasks:', error);
       setError(taskLoadErrorMessage(error));
     } finally {
-      setLoading(false);
+      if (sequence === taskReadSequence.current) setLoading(false);
     }
-  }, [externalUser, hasLoadedUser, page]);
+  }, [currentUser?.id, externalUser, hasLoadedUser, page]);
 
   useEffect(() => {
     void fetchTasks();
+    return () => { taskReadSequence.current += 1; };
   }, [fetchTasks]);
 
   const removeTask = async (task: Task) => {
-    if (!window.confirm('从我的任务列表移除此记录？管理员仍可在后台留存区审计和恢复。')) return;
+    if (deletingTaskId || !await confirm('从我的任务列表移除此记录？管理员仍可在后台留存区审计和恢复。', { title: '移除记录', confirmLabel: '移除', danger: true })) return;
 
     setDeletingTaskId(task.id);
     setMessage('');
@@ -309,7 +331,7 @@ export default function TasksPage() {
         description="查看生成进度、复用历史提示词和参考图。"
         actions={(
           <>
-          <button className="btn btn-secondary" onClick={fetchTasks}>
+          <button className="btn btn-secondary sd2-loading-surface" data-busy={loading} disabled={loading || Boolean(deletingTaskId)} onClick={() => void fetchTasks()}>
             刷新列表
           </button>
           <Link href={createTaskHref} className="btn btn-primary">
@@ -326,9 +348,13 @@ export default function TasksPage() {
       )}
 
       <div className="tasks-list-shell">
-        {loading ? (
-          <p className="text-gray">加载中...</p>
-        ) : tasks.length === 0 ? (
+        {loading && hasTaskData && <LoadingStatus>{loadedPage.current === page ? '正在更新任务列表' : `正在读取第 ${page} 页，暂时保留第 ${loadedPage.current} 页结果`}</LoadingStatus>}
+        {!loading && hasTaskData && loadedPage.current !== page && <p role="status">最新页未读取成功，当前仍显示第 {loadedPage.current} 页。请重试读取。</p>}
+        {loading && !hasTaskData ? (
+          <LoadingSkeleton label="正在读取任务" />
+        ) : error && !hasTaskData ? (
+          <button className="btn btn-secondary" type="button" onClick={() => void fetchTasks()}>重新读取</button>
+        ) : tasks.length === 0 && !loading && !error ? (
           <div className="tasks-empty">
             <h2>暂无任务</h2>
             <p>先创建一个视频任务，生成记录会出现在这里。</p>
@@ -344,7 +370,7 @@ export default function TasksPage() {
                 <input
                   type="checkbox"
                   checked={downloadableTasks.length > 0 && selectedDownloadableTasks.length === downloadableTasks.length}
-                  disabled={downloadableTasks.length === 0}
+                  disabled={downloadableTasks.length === 0 || loadedPage.current !== page}
                   onChange={(event) => toggleCurrentPageDownloadable(event.target.checked)}
                 />
                 <span>选择本页可下载视频</span>
@@ -357,7 +383,7 @@ export default function TasksPage() {
                 <button
                   className="btn btn-primary"
                   type="button"
-                  disabled={selectedDownloadableTasks.length === 0 || selectedTooMany}
+                  disabled={selectedDownloadableTasks.length === 0 || selectedTooMany || loading || bulkDownloading}
                   onClick={() => setBulkConfirmOpen(true)}
                   title={selectedTooMany ? `第一批最多支持 ${BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT} 个视频即时打包` : '将选中视频打包为 ZIP'}
                 >
@@ -414,7 +440,7 @@ export default function TasksPage() {
                         <input
                           type="checkbox"
                           checked={selectedSet.has(task.id)}
-                          disabled={!downloadable}
+                          disabled={!downloadable || loadedPage.current !== page}
                           onChange={(event) => toggleTaskSelection(task, event.target.checked)}
                         />
                       </label>
@@ -462,11 +488,11 @@ export default function TasksPage() {
                         </div>
                         <div>
                           <span>创建时间</span>
-                          <strong>{formatDate(task.created_at)}</strong>
+                          <strong><RelativeTime value={task.created_at} /></strong>
                         </div>
                         <div>
                           <span>完成时间</span>
-                          <strong>{formatDate(task.completed_at)}</strong>
+                          <strong>{task.completed_at ? <RelativeTime value={task.completed_at} /> : '-'}</strong>
                         </div>
                       </div>
                     </div>
@@ -485,7 +511,7 @@ export default function TasksPage() {
                       <button
                         type="button"
                         className="btn btn-secondary"
-                        disabled={deletingTaskId === task.id}
+                        disabled={Boolean(deletingTaskId) || loading}
                         onClick={() => void removeTask(task)}
                       >
                         {deletingTaskId === task.id ? '移除中...' : '从列表移除'}
@@ -553,6 +579,7 @@ export default function TasksPage() {
           </div>
         </div>
       )}
+      {productDialog}
     </div>
   );
 }

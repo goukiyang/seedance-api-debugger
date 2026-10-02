@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Archive, Copy, Pause, Play, Plus, RefreshCw, Save } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
+import { useProductDialog } from '@/components/useProductDialog';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { USER_PROFILE_OPTIONS } from '@/lib/users/profiles';
 import { quotaWindow, type QuotaConfig, type QuotaRule } from '@/lib/credits/periodic-types';
@@ -46,6 +48,7 @@ function localTime(value: string) {
   return Number.isFinite(d.getTime()) ? new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 16) : '';
 }
 export default function QuotaManager() {
+  const { confirm, productDialog } = useProductDialog();
   const [data, setData] = useState<View | null>(null);
   const [id, setId] = useState('');
   const [form, setForm] = useState<QuotaConfig | null>(null);
@@ -98,9 +101,9 @@ export default function QuotaManager() {
     return () => window.removeEventListener('beforeunload', handle);
   }, [dirty]);
 
-  function choose(rule?: QuotaRule, duplicate = false) {
+  async function choose(rule?: QuotaRule, duplicate = false) {
     if (busy || request.current) return;
-    if (dirty && !window.confirm('放弃尚未保存的草稿修改？')) return;
+    if (dirty && !await confirm('放弃尚未保存的草稿修改？')) return;
     const empty = blank();
     const next = rule ? { ...rule.draft, ...(duplicate ? { name: `${rule.draft.name} 副本`, anchor: empty.anchor } : {}) } : empty;
     setId(duplicate ? '' : rule?.id || '');
@@ -109,9 +112,9 @@ export default function QuotaManager() {
     setTab('settings'); setPage(1); setSearch(''); setAppliedSearch(''); setCursor(null); setRunResult(null);
     setLoadError(''); setActionError(''); setNotice('');
   }
-  function discardChanges() {
+  async function discardChanges() {
     if (!form || !dirty || blocked) return;
-    if (!window.confirm('放弃尚未保存的修改？')) return;
+    if (!await confirm('放弃尚未保存的修改？')) return;
     setForm(savedConfig);
     setActionError(''); setNotice('已放弃未保存的修改');
   }
@@ -126,12 +129,12 @@ export default function QuotaManager() {
       setActionError('有未保存的草稿修改，请先保存或放弃后再执行此操作。');
       return;
     }
-    if (action !== 'save' && !retry && !window.confirm(action === 'publish'
+    if (action !== 'save' && !retry && !await confirm(action === 'publish'
       ? `发布“${form?.name}”？每人每期 ${form?.amount} 点，最多 ${form?.max_members} 人，总额度上限 ${(form?.amount || 0) * (form?.max_members || 0)} 点。适用名单：${form ? audience(form) : '暂无'}。${form?.amount === 0 ? '当前为 0 点，不会发放点数。' : ''}预计 ${date(publishAt)} 开始生效。发布时会检查成员重叠与人数上限；不影响长期点数，已有旧额度的成员顺延到旧额度结束后的周期。`
       : action === 'run' ? '仅补齐本期尚未领取的成员，不重复发点；重试结果只统计本次检查。继续？'
         : action === 'pause' ? '暂停后不再续发额度；已发额度不会清零，仍按原有效期到期。'
           : action === 'archive' ? '归档后不能恢复，也不再续发；已发额度不会清零，仍按原有效期到期，历史记录保留。继续？'
-            : '恢复周期续发，不重新发放已领取额度。若成员与其他启用规则重叠，恢复会被拒绝，需先调整名单。继续？')) return;
+            : '恢复周期续发，不重新发放已领取额度。若成员与其他启用规则重叠，恢复会被拒绝，需先调整名单。继续？', { title: '确认额度操作', confirmLabel: action === 'archive' ? '归档' : '确认', danger: action === 'archive' })) return;
     const config = action === 'save' && form ? { ...form, name: form.name.trim() } : undefined;
     const body = retry ? request.current! : { action, id: id || undefined, config,
       expected_version: data.version, confirm: true, request_id: crypto.randomUUID(), ...(action === 'run' ? { cursor } : {}) };
@@ -198,6 +201,7 @@ export default function QuotaManager() {
   const blocked = busy || !!request.current;
   const archived = selected?.status === 'archived';
   return <div className={styles.root}>
+    {productDialog}
     <PageBanner title="周期额度" backHref="/admin/users" backLabel="用户管理" actions={<>
       <Link className="btn btn-secondary" href="/admin/points">点数流水</Link>
       <button className="btn btn-primary" onClick={() => choose()} disabled={blocked}><Plus size={16} />新建规则</button></>} />
@@ -207,9 +211,10 @@ export default function QuotaManager() {
     {actionError && <div className={styles.error} role="alert">{actionError}{request.current && <button className="btn btn-secondary" onClick={() => void mutate(String(request.current?.action), true)} disabled={busy}>重试原操作</button>}</div>}
     {request.current && !actionError && <div className={styles.error} role="alert">操作结果尚未确认，其他操作已锁定。可以安全重试原操作。<button className="btn btn-secondary" onClick={() => void mutate(String(request.current?.action), true)} disabled={busy}>重试原操作</button></div>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
+    {busy && <LoadingStatus>{request.current?.action === 'save' ? '正在保存草稿' : '正在执行已确认的操作，请等待结果'}</LoadingStatus>}
     <div className={styles.layout}>
       <aside className={styles.list} aria-label="额度规则">
-        {!data && <p>正在读取…</p>}
+        {loading && (data ? <LoadingStatus>正在更新额度规则</LoadingStatus> : <LoadingSkeleton label="正在读取额度规则" />)}
         {data?.rules.length === 0 && <p className={styles.muted}>暂无额度规则</p>}
         {data?.rules.map(rule => {
           const published = rule.revisions.length > 0;

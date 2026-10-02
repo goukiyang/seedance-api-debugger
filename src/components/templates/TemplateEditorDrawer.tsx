@@ -237,7 +237,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
               ? '卡片保存失败'
               : '卡片修改会自动保存'}
       </span>
-      <button type="button" className="is-primary" onClick={() => onSave(payload)} disabled={saving || !name.trim()}>
+      <button type="button" className="is-primary sd2-loading-surface" data-busy={saving} onClick={() => onSave(payload)} disabled={saving || !name.trim()}>
         {saving ? '保存中...' : '保存模板版本'}
       </button>
     </>

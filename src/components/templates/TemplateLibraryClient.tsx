@@ -1,4 +1,6 @@
 'use client';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
+import { RelativeTime } from '@/components/RelativeTime';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -134,12 +136,6 @@ function buildTemplateView(template: SerializedGenerationTemplate): TemplateView
     modules,
     searchText,
   };
-}
-
-function formatUpdatedAt(value: string | Date) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '未知时间';
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 }
 
 export function TemplateLibraryClient() {
@@ -313,13 +309,7 @@ export function TemplateLibraryClient() {
         </aside>
 
         <main className="template-library-main" aria-label="模板列表">
-          {loading && (
-            <div className="template-library-state">
-              <span className="template-library-spinner" aria-hidden="true" />
-              <strong>正在加载模板库</strong>
-              <p>读取可用模板、固定素材和规则摘要。</p>
-            </div>
-          )}
+          {loading && (templates.length ? <LoadingStatus>正在更新模板库</LoadingStatus> : <LoadingSkeleton label="正在读取模板库" grid />)}
 
           {!loading && error && (
             <div className="template-library-state is-error">
@@ -356,7 +346,7 @@ export function TemplateLibraryClient() {
             </div>
           )}
 
-          {!loading && !error && filteredViews.length > 0 && (
+          {filteredViews.length > 0 && (
             <div className="template-library-grid">
               {filteredViews.map((view) => {
                 const selected = selectedView?.template.id === view.template.id;
@@ -483,7 +473,7 @@ export function TemplateLibraryClient() {
               <div className="template-library-detail-block">
                 <span><Clock3 size={15} aria-hidden="true" /> 决策信息</span>
                 <p>
-                  {selectedView.activePromptsCount} 个提示词模块，更新于 {formatUpdatedAt(selectedView.template.updated_at)}。
+                  {selectedView.activePromptsCount} 个提示词模块，更新于 <RelativeTime value={String(selectedView.template.updated_at)} />。
                   {selectedView.template.temporal.enabled ? ` 已启用 ${selectedView.template.temporal.segment}s 分段。` : ' 未启用分段。'}
                 </p>
               </div>

@@ -6,6 +6,7 @@ type UploadProgressIndicatorProps = {
   percent?: number;
   variant?: 'dark' | 'light';
   className?: string;
+  busy?: boolean;
 };
 
 function formatPercent(percent: number | undefined) {
@@ -19,16 +20,18 @@ export function UploadProgressIndicator({
   percent,
   variant = 'dark',
   className = '',
+  busy = false,
 }: UploadProgressIndicatorProps) {
   const percentText = formatPercent(percent);
   const percentValue = percentText ? Math.max(0, Math.min(100, Math.round(percent || 0))) : undefined;
-  const classNames = ['upload-progress-indicator', `upload-progress-indicator-${variant}`, className]
+  const classNames = ['upload-progress-indicator', `upload-progress-indicator-${variant}`, busy ? 'sd2-loading-surface' : '', className]
     .filter(Boolean)
     .join(' ');
 
   return (
     <div
       className={classNames}
+      data-busy={busy}
       role={percentText ? 'progressbar' : 'status'}
       aria-live="polite"
       {...(percentText

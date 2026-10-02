@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
+import { useProductDialog } from '@/components/useProductDialog';
+import { RelativeTime } from '@/components/RelativeTime';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import PaginationControls from '@/components/PaginationControls';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import type { SessionUser } from '@/lib/auth/session';
@@ -346,6 +349,23 @@ function buildEditUserForm(user: AdminUser): EditUserForm {
 }
 
 export default function AdminUsersClient({ currentUser }: { currentUser: SessionUser }) {
+  const { confirm: requestConfirm, productDialog } = useProductDialog();
+  const actionLock = useRef(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const confirm: typeof requestConfirm = async (...args) => {
+    setActionBusy(false);
+    const accepted = await requestConfirm(...args);
+    if (accepted) setActionBusy(true);
+    return accepted;
+  };
+  const runUserAction = async (action: () => Promise<void>) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    setActionBusy(true);
+    try { await action(); }
+    catch (error) { setError(error instanceof Error ? error.message : '操作未完成，请重新读取确认结果'); }
+    finally { actionLock.current = false; setActionBusy(false); }
+  };
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [ledger, setLedger] = useState<LedgerRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -660,7 +680,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       : creditForm.type === 'deduct'
         ? `扣减 ${amount} 点长期余额`
         : `把长期余额修正为 ${amount} 点`;
-    const ok = window.confirm(`确认对 ${selectedUser.name} ${operationLabel}？`);
+    const ok = await confirm(`确认对 ${selectedUser.name} ${operationLabel}？`, { title: '确认点数操作', confirmLabel: '确认', danger: creditForm.type === 'deduct' });
     if (!ok) return;
 
     const res = await fetch('/api/admin/credits/adjust', {
@@ -727,7 +747,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
 
-    const ok = window.confirm(`确认给 ${selectedUsers.length} 个用户每人发放 ${amount} 点？总计 ${amount * selectedUserIds.length} 点。`);
+    const ok = await confirm(`确认给 ${selectedUsers.length} 个用户每人发放 ${amount} 点？总计 ${amount * selectedUserIds.length} 点。`);
     if (!ok) return;
 
     const res = await fetch('/api/admin/credits/bulk-grant', {
@@ -770,7 +790,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     const featureProfileText = bulkProfileForm.feature_profile_id === 'auto'
       ? `自动建议：${getFeatureProfileLabel(suggestedBulkFeatureProfileId)}`
       : getFeatureProfileLabel(bulkProfileForm.feature_profile_id);
-    const ok = window.confirm(`确认修改 ${selectedUserIds.length} 个用户？\n用户类型：${getUserProfileLabel(bulkProfileForm.user_profile)}\n能力档案：${featureProfileText}`);
+    const ok = await confirm(`确认修改 ${selectedUserIds.length} 个用户？\n用户类型：${getUserProfileLabel(bulkProfileForm.user_profile)}\n能力档案：${featureProfileText}`);
     if (!ok) return;
 
     const res = await fetch('/api/admin/users/bulk-profile', {
@@ -828,7 +848,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       '点数会以合并汇总流水转入保留账号，源账号原始流水保留用于审计。',
       `原因：${reason}`,
     ].join('\n');
-    if (!window.confirm(confirmText)) return;
+    if (!await confirm(confirmText, { title: '合并账号', confirmLabel: '合并', danger: true })) return;
 
     const res = await fetch('/api/admin/users/merge', {
       method: 'POST',
@@ -929,7 +949,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     const confirmText = sensitiveChanges.length > 0
       ? `确认保存 ${editingUser.name || editingUser.username} 的账户属性？\n${sensitiveChanges.join('\n')}\n\n原因：${reason}`
       : `确认保存 ${editingUser.name || editingUser.username} 的账户属性？\n原因：${reason}`;
-    if (!window.confirm(confirmText)) return;
+    if (!await confirm(confirmText)) return;
 
     const res = await fetch(`/api/admin/users/${editingUser.id}`, {
       method: 'PATCH',
@@ -987,7 +1007,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   const toggleUser = async (user: AdminUser) => {
     const action = user.status === 'active' ? 'disable' : 'enable';
     const label = action === 'disable' ? '禁用' : '启用';
-    const ok = window.confirm(`确认${label}用户 ${displayUserName(user)}？`);
+    const ok = await confirm(`确认${label}用户 ${displayUserName(user)}？`, { title: `${label}用户`, confirmLabel: label, danger: action === 'disable' });
     if (!ok) return;
     setError('');
     setMessage('');
@@ -1008,7 +1028,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
 
-    const ok = window.confirm(`确认删除用户 ${displayUserName(user)}？该操作会隐藏账号并阻止登录，但不会删除历史任务和点数流水。`);
+    const ok = await confirm(`确认删除用户 ${displayUserName(user)}？该操作会隐藏账号并阻止登录，但不会删除历史任务和点数流水。`, { title: '删除用户', confirmLabel: '删除', danger: true });
     if (!ok) return;
 
     setError('');
@@ -1028,6 +1048,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
 
   return (
     <main className="admin-users-page admin-users-workbench-page">
+      {productDialog}
       <PageBanner
         tone="dark"
         eyebrow="管理员后台"
@@ -1035,7 +1056,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
         description="/admin/points 已归并到本页；先定位用户和钱包状态，再进入创建、策略、批量、合并等低频操作。"
         actions={(
           <div className="admin-users-operator">
-            {currentUser.name} · {currentUser.email}
+            <UserIdentityBadge user={currentUser} size="sm" showEmail />
           </div>
         )}
       />
@@ -1193,6 +1214,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                 </tr>
               </thead>
               <tbody>
+                {loading && <tr><td colSpan={8}>{users.length ? <LoadingStatus>正在更新用户列表</LoadingStatus> : <LoadingSkeleton label="正在读取用户" />}</td></tr>}
                 {pagedUsers.map((user) => {
                   const wallet = getUserWallet(user);
                   const risks = getUserRiskTags(user);
@@ -1239,8 +1261,8 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                       </td>
                       <td>
                         <div className="admin-users-muted-stack">
-                          <span>{formatDate(user.last_login_at)}</span>
-                          <small>创建 {formatDate(user.created_at)}</small>
+                          <span>{user.last_login_at ? <RelativeTime value={user.last_login_at} /> : '-'}</span>
+                          <small>创建 <RelativeTime value={user.created_at} /></small>
                         </div>
                       </td>
                       <td>
@@ -1257,14 +1279,14 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                           <button type="button" className="admin-users-text-button" onClick={() => selectOnlyUser(user.id)}>
                             点数
                           </button>
-                          <button type="button" className="admin-users-text-button" onClick={() => toggleUser(user)}>
+                          <button type="button" className="admin-users-text-button" disabled={actionBusy} onClick={() => void runUserAction(() => toggleUser(user))}>
                             {user.status === 'active' ? '禁用' : '启用'}
                           </button>
                           <button
                             type="button"
                             className="admin-users-text-button is-danger"
-                            onClick={() => deleteUser(user)}
-                            disabled={user.id === currentUser.id}
+                            onClick={() => void runUserAction(() => deleteUser(user))}
+                            disabled={actionBusy || user.id === currentUser.id}
                           >
                             删除
                           </button>
@@ -1273,7 +1295,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                     </tr>
                   );
                 })}
-                {!loading && filteredUsers.length === 0 && (
+                {!loading && !error && filteredUsers.length === 0 && (
                   <tr>
                     <td colSpan={8} className="admin-users-empty">暂无匹配用户</td>
                   </tr>
@@ -1362,7 +1384,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                   <button type="button" className="admin-users-button admin-users-button-secondary" onClick={() => openEditUser(focusedUser)}>
                     编辑账户
                   </button>
-                  <button type="button" className="admin-users-button admin-users-button-secondary" onClick={() => toggleUser(focusedUser)}>
+                  <button type="button" className="admin-users-button admin-users-button-secondary" disabled={actionBusy} onClick={() => void runUserAction(() => toggleUser(focusedUser))}>
                     {focusedUser.status === 'active' ? '禁用账号' : '启用账号'}
                   </button>
                 </div>
@@ -1415,7 +1437,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'policy' && (
-            <form onSubmit={saveCreditPolicy} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => saveCreditPolicy(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>点数策略</h3>
@@ -1520,7 +1542,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
 
           {activeTool === 'edit' && (
             editingUser && editUserForm ? (
-              <form onSubmit={saveEditedUser} className="admin-users-tool-panel">
+              <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => saveEditedUser(event)); }} className="admin-users-tool-panel sd2-loading-surface">
                 <div className="admin-users-panel-title-row">
                   <div>
                     <h3>账户属性</h3>
@@ -1598,7 +1620,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'bulk_profile' && (
-            <form onSubmit={bulkUpdateProfiles} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => bulkUpdateProfiles(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>批量修改用户类型</h3>
@@ -1620,7 +1642,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'merge' && (
-            <form onSubmit={mergeUsers} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => mergeUsers(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>合并重复账号</h3>
@@ -1669,7 +1691,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'bulk_grant' && (
-            <form onSubmit={bulkGrantCredits} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => bulkGrantCredits(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>批量发放点数</h3>
@@ -1689,7 +1711,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'create' && (
-            <form onSubmit={createUser} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => createUser(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>创建用户</h3>
@@ -1757,7 +1779,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'credit' && (
-            <form onSubmit={adjustCredits} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => adjustCredits(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>单人点数操作</h3>

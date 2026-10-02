@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -2039,6 +2040,7 @@ function AssetsPageContent() {
           </div>
           {assetUploadProgress && (
             <UploadProgressIndicator
+              busy={assetUploading}
               label={assetUploadProgress.label}
               detail={assetUploadProgress.detail}
               percent={assetUploadProgress.percent}
@@ -2068,13 +2070,13 @@ function AssetsPageContent() {
       )}
 
       {syncingAssets && showingCachedAssets && !error && (
-        <div className="asset-library-sync-note" aria-live="polite">
+        <div className="asset-library-sync-note sd2-loading-surface" data-busy="true" aria-live="polite">
           正在同步最新资产，当前先显示上次加载内容。
         </div>
       )}
 
       {(bulkDownloading || readyVideoDownload) && (
-        <div className="asset-library-notice" role="status">
+        <div className="asset-library-notice sd2-loading-surface" data-busy={bulkDownloading} role="status">
           {bulkDownloading ? <span>{bulkDownloadStage}</span> : readyVideoDownload && (
             <a href={readyVideoDownload.url} download={readyVideoDownload.fileName}>
               <Download size={15} /> 保存视频包
@@ -2194,14 +2196,9 @@ function AssetsPageContent() {
         onPointerMove={handleGridPointerMove}
         onPointerUp={handleGridPointerUp}
       >
-        {loading && (
-          <div className="asset-library-empty">
-            <h2>正在加载资产</h2>
-            <p>正在读取可见视频、项目和权限信息。</p>
-          </div>
-        )}
+        {loading && (items.length ? <LoadingStatus>正在更新资产，暂时保留上次结果</LoadingStatus> : <LoadingSkeleton label="正在读取资产" grid />)}
 
-        {!loading && items.length === 0 && (
+        {!loading && !error && items.length === 0 && (
           <div className="asset-library-empty">
             <h2>暂无资产</h2>
             <p>{isEnhanceView ? '当前没有可超分视频或超分结果，完成视频生成后会自动出现在这里。' : '调整筛选条件，或先到生成页创建视频。'}</p>
@@ -2210,7 +2207,7 @@ function AssetsPageContent() {
         )}
 
         <Profiler id="AssetLibraryGrid" onRender={assetGridProfilerOnRender}>
-        {!loading && groupedItems.map((group) => (
+        {groupedItems.map((group) => (
           <section key={group.key} className="asset-library-group">
             <h2>
               {groupBy === 'user' ? (

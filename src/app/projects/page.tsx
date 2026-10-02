@@ -1,4 +1,5 @@
 'use client';
+import { RelativeTime } from '@/components/RelativeTime';
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -453,7 +454,7 @@ export default function ProjectsPage() {
                   {' · '}{projectBillingDescription(project)}
                 </span>
                 <span>可下载视频 {downloadableCount}</span>
-                <span>更新 {new Date(project.updated_at).toLocaleDateString('zh-CN')}</span>
+                <span>更新 <RelativeTime value={project.updated_at} /></span>
                 <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
                   <button
                     className="btn btn-secondary"

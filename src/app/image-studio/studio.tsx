@@ -1,4 +1,5 @@
 'use client';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import { useProductDialog } from '@/components/useProductDialog';
 
@@ -1233,7 +1234,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <div className={styles.materialFooter}><span>本次图片 {effectiveReferenceCount} / {MAX_REFERENCE_IMAGES} 张</span>
           <button type="button" title="清空本次风格组和参考图，保留主图与文字" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={14} />清空参考</button>
         </div>
-        {uploadProgress && <UploadProgressIndicator {...uploadProgress} />}
+        {uploadProgress && <UploadProgressIndicator busy {...uploadProgress} />}
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => {
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
         }} />
@@ -1244,7 +1245,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
         </div>
-        <button type="button" className={styles.generate} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission ? '查询这次提交' : '生成图片'}</button>
+        <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission ? '查询这次提交' : '生成图片'}</button>
         {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
         {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
         {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
@@ -1270,7 +1271,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <button type="button" onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
-          <button type="button" className={styles.primary} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存上下文</button>
+          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存上下文</button>
           <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={uploading || bannerUploading || submitting || (!recoverableDraft && (!contextEditable || !generationChanged || generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && generationChanged && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : '另存为'}</button>
         </div>
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
@@ -1287,7 +1288,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </div></header>
         {tasksError && <p role="alert" className={styles.error}>{tasksError}</p>}
         {downloadReady && <p role="status">文件已准备好。<a href={downloadReady.url} download={downloadReady.name}>再次保存</a></p>}
-        {loadingTasks && <p role="status">正在读取生成记录…</p>}
+        {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
         {!loadingTasks && !tasks.length && !tasksError && <div className={styles.empty}>暂无生成记录</div>}
         <div className={styles.grid}>{tasks.map(task => <article key={task.id} className={styles.result}>
           <div className={styles.resultMedia} data-reaction-surface>{task.asset ? <>
@@ -1300,7 +1301,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
             }} />}
-          </> : <div className={styles.taskState}>{['queued', 'running'].includes(task.status) && <LoaderCircle className={styles.spinner} size={24} />}
+          </> : <div className={`${styles.taskState} sd2-loading-surface`} data-busy={['queued', 'running'].includes(task.status)}>
             <span role="status">{studioTaskPhase(task)}</span>
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <span>{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</span>}
           </div>}<button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button></div>
@@ -1323,9 +1324,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           <div className={styles.resultActions}><div className={styles.resultCommands} data-needs-action={task.status === 'uncertain'}>
             {task.delivery?.recoveryAvailable && <button type="button" className={styles.recoveryAction} onClick={() => void loadTasks()}>查看原图恢复</button>}
             {task.asset && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
-            {task.asset && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
-            {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="恢复设置以重新生成，不会立即提交" aria-label="恢复设置以重新生成" onClick={() => restoreTask(task)}><RefreshCw size={15} />{task.status === 'uncertain' && '重新生成'}</button>}
-            {isAdmin && task.snapshot?.sourceAvailable && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
+            {task.asset && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
+            {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="恢复本次输入设置，不会提交生成或扣积分" aria-label="恢复设置" onClick={() => restoreTask(task)}><RefreshCw size={15} />恢复设置</button>}
+            {isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
           </div>
           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
           {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
@@ -1419,7 +1420,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages} maxReferences={currentStyleCap}
         disabled={uploading || submitting || Boolean(pendingSubmission)}
         onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }} />
-      {uploadProgress && <UploadProgressIndicator {...uploadProgress} />}
+      {uploadProgress && <UploadProgressIndicator busy {...uploadProgress} />}
       {error && <p role="status" className={styles.error}>{error}</p>}
       <div className={styles.modelQualityRow}>
         <label className={styles.compactField} htmlFor={`studio-module-model-${module.id}`}><strong>模块模型</strong>
@@ -1438,7 +1439,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </select>
         </label>
       </div>
-      {contextEditable && <button type="button" className={styles.primary} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存模板设置</button>}
+      {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存模板设置</button>}
       <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>

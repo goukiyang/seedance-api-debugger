@@ -1,4 +1,5 @@
 'use client';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -229,7 +230,7 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
             />
           </label>
           <div className="admin-template-builder-actions">
-            <button type="button" className={!builderDraft ? 'is-primary' : ''} onClick={generateTemplateDraft} disabled={builderBusy}>
+            <button data-busy={builderBusy} type="button" className={`sd2-loading-surface ${!builderDraft ? 'is-primary' : ''}`} onClick={generateTemplateDraft} disabled={builderBusy}>
               {builderBusy ? 'LLM 生成中...' : builderDraft ? '重新生成草稿' : '生成模板草稿'}
             </button>
             <button type="button" className={builderDraft ? 'is-primary' : ''} onClick={saveBuilderDraft} disabled={!builderDraft || builderBusy}>
@@ -256,7 +257,7 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
       <section className={detailWorkspaceMode ? 'admin-template-shell is-workspace' : 'admin-template-shell'}>
         {!detailWorkspaceMode && (
           <aside className="admin-template-list">
-            {loading && <div className="admin-template-state">读取模板中...</div>}
+            {loading && (templates.length ? <LoadingStatus>正在更新模板</LoadingStatus> : <LoadingSkeleton label="正在读取模板" />)}
             {!loading && error && <div className="admin-template-state is-error">{error}</div>}
             {!loading && !error && templates.length === 0 && (
               <div className="admin-template-state">
@@ -283,6 +284,8 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
         )}
 
         <main className={detailWorkspaceMode ? 'admin-template-workspace-detail' : 'admin-template-detail'}>
+          {detailWorkspaceMode && loading && (selectedTemplate ? <LoadingStatus>正在更新模板</LoadingStatus> : <LoadingSkeleton label="正在读取模板" />)}
+          {detailWorkspaceMode && error && <p role="alert">{error}</p>}
           {selectedTemplate ? (
             detailWorkspaceMode ? (
               <TemplateEditorDrawer

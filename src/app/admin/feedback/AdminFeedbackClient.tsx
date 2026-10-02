@@ -1,7 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
+import { useProductDialog } from '@/components/useProductDialog';
+import { RelativeTime } from '@/components/RelativeTime';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import PaginationControls from '@/components/PaginationControls';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 
@@ -69,6 +72,17 @@ function feedbackExportFilename(date = new Date()) {
 }
 
 export default function AdminFeedbackClient({ currentUser }: { currentUser: FeedbackUser }) {
+  const { confirm, productDialog } = useProductDialog();
+  const actionLock = useRef(false);
+  const readSequence = useRef(0);
+  const [actionBusy, setActionBusy] = useState(false);
+  const runFeedbackAction = async (action: () => Promise<void>) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    try { await action(); }
+    catch (error) { setError(error instanceof Error ? error.message : '操作未完成，请重新读取确认结果'); }
+    finally { actionLock.current = false; setActionBusy(false); }
+  };
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [active, setActive] = useState<FeedbackItem | null>(null);
@@ -86,6 +100,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const load = async (pageNumber = page) => {
+    const sequence = ++readSequence.current;
     setLoading(true);
     setError('');
     const params = new URLSearchParams();
@@ -99,6 +114,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
     try {
       const response = await fetch(`/api/admin/feedback?${params.toString()}`, { cache: 'no-store' });
       const data = await response.json();
+      if (sequence !== readSequence.current) return;
       if (!response.ok) throw new Error(data.error || '加载反馈失败');
       setItems(data.items || []);
       const total = Number(data.total || 0);
@@ -111,14 +127,15 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
       });
       setSelectedIds((current) => current.filter((id) => (data.items || []).some((item: FeedbackItem) => item.id === id)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载反馈失败');
+      if (sequence === readSequence.current) setError(err instanceof Error ? err.message : '加载反馈失败');
     } finally {
-      setLoading(false);
+      if (sequence === readSequence.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     void load(page);
+    return () => { readSequence.current += 1; };
   }, [status, hasImage]);
 
   useEffect(() => {
@@ -138,7 +155,8 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
       setError('请选择反馈');
       return;
     }
-    if (!window.confirm(`确认归档 ${ids.length} 条反馈？`)) return;
+    if (!await confirm(`确认归档 ${ids.length} 条反馈？`, { title: '归档反馈', confirmLabel: '归档' })) return;
+    setActionBusy(true);
     setError('');
     setMessage('');
     const response = await fetch('/api/admin/feedback/archive', {
@@ -158,6 +176,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
 
   const saveDetail = async () => {
     if (!active) return;
+    setActionBusy(true);
     setError('');
     const response = await fetch(`/api/admin/feedback/${active.id}`, {
       method: 'PATCH',
@@ -202,6 +221,8 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
 
   return (
     <main className="admin-users-page" style={{ minHeight: '100vh', background: '#101116', color: '#fff', padding: 24 }}>
+      {productDialog}
+      {actionBusy && <LoadingStatus>正在保存反馈操作</LoadingStatus>}
       <PageBanner
         tone="dark"
         eyebrow="管理员后台"
@@ -250,7 +271,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
       </section>
 
       <section style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-        <button type="button" onClick={() => archive(selectedIds)} style={secondaryButtonStyle}>批量归档</button>
+        <button type="button" disabled={actionBusy} onClick={() => void runFeedbackAction(() => archive(selectedIds))} style={secondaryButtonStyle}>批量归档</button>
         <button
           type="button"
           onClick={exportBatch}
@@ -307,22 +328,22 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
                     </td>
                     <td style={tdStyle}>{item.pathname || item.page_url || '-'}</td>
                     <td style={tdStyle}>{item.task_id || '-'}</td>
-                    <td style={tdStyle}>{new Date(item.created_at).toLocaleString('zh-CN')}</td>
+                    <td style={tdStyle}><RelativeTime value={item.created_at} /></td>
                     <td style={tdStyle}>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button type="button" onClick={() => setActive(item)} style={miniButtonStyle}>详情</button>
-                        <button type="button" onClick={() => archive([item.id])} style={miniButtonStyle}>归档</button>
+                        <button type="button" disabled={actionBusy} onClick={() => void runFeedbackAction(() => archive([item.id]))} style={miniButtonStyle}>归档</button>
                         <button type="button" onClick={() => exportSingle(item.id)} style={miniButtonStyle}>PDF</button>
                       </div>
                     </td>
                   </tr>
                 );
               })}
-              {!loading && items.length === 0 && (
+              {!loading && !error && items.length === 0 && (
                 <tr><td colSpan={9} style={{ ...tdStyle, textAlign: 'center', color: 'rgba(255,255,255,0.55)' }}>暂无反馈</td></tr>
               )}
               {loading && (
-                <tr><td colSpan={9} style={{ ...tdStyle, textAlign: 'center', color: 'rgba(255,255,255,0.55)' }}>加载中</td></tr>
+                <tr><td colSpan={9} style={tdStyle}>{items.length ? <LoadingStatus>正在更新反馈</LoadingStatus> : <LoadingSkeleton label="正在读取反馈" />}</td></tr>
               )}
             </tbody>
           </table>
@@ -365,7 +386,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
                   <option value="archived">已归档</option>
                 </select>
               </dd>
-              <dt style={dtStyle}>提交时间</dt><dd style={ddStyle}>{new Date(active.created_at).toLocaleString('zh-CN')}</dd>
+              <dt style={dtStyle}>提交时间</dt><dd style={ddStyle}><RelativeTime value={active.created_at} /></dd>
               <dt style={dtStyle}>管理员备注</dt>
               <dd style={ddStyle}>
                 <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={4} style={{ ...controlStyle, resize: 'vertical' }} />
@@ -383,9 +404,9 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
             )}
 
             <footer style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-              <button type="button" onClick={() => archive([active.id])} style={secondaryButtonStyle}>归档</button>
+              <button type="button" disabled={actionBusy} onClick={() => void runFeedbackAction(() => archive([active.id]))} style={secondaryButtonStyle}>归档</button>
               <button type="button" onClick={() => exportSingle(active.id)} style={secondaryButtonStyle}>下载 PDF</button>
-              <button type="button" onClick={saveDetail} style={primaryButtonStyle}>保存</button>
+              <button type="button" disabled={actionBusy} className="sd2-loading-surface" data-busy={actionBusy} onClick={() => void runFeedbackAction(saveDetail)} style={primaryButtonStyle}>保存</button>
             </footer>
           </section>
         </div>

@@ -2,6 +2,9 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
+import { useProductDialog } from '@/components/useProductDialog';
+import { RelativeTime } from '@/components/RelativeTime';
+import { LoadingSkeleton } from '@/components/LoadingState';
 import BananaImageChannel from './BananaImageChannel';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
@@ -296,6 +299,7 @@ function linkedUserSubtitle(config: CodexConfig) {
 }
 
 export default function AdminIntegrationsClient() {
+  const { confirm, productDialog } = useProductDialog();
   const [config, setConfig] = useState<CodexConfig>(EMPTY_CONFIG);
   const [muskConfig, setMuskConfig] = useState<MuskConfig>(EMPTY_MUSK_CONFIG);
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
@@ -774,7 +778,7 @@ export default function AdminIntegrationsClient() {
       return;
     }
     if ((h3QueueAction === 'cancel' || h3QueueAction === 'stop')
-      && !window.confirm(`确认执行 H3 ${h3QueueAction === 'cancel' ? '取消排队任务' : '停止运行任务'}？`)) {
+      && !await confirm(`确认执行 H3 ${h3QueueAction === 'cancel' ? '取消排队任务' : '停止运行任务'}？`, { title: '确认停止', confirmLabel: '确认', danger: true })) {
       return;
     }
     setH3QueueLoading(true);
@@ -859,7 +863,7 @@ export default function AdminIntegrationsClient() {
           description="统一维护火山 IP 生成、AI MediaKit 超分、Musk API、图形生成 API、Codex API 和外部工具调用 sd2 的后端配置。"
         />
         <div className="card">
-          <p className="text-gray">正在读取配置...</p>
+          <LoadingSkeleton label="正在读取配置" />
         </div>
       </div>
     );
@@ -867,6 +871,7 @@ export default function AdminIntegrationsClient() {
 
   return (
     <div className="admin-integrations-page">
+      {productDialog}
       <PageBanner
         eyebrow="管理后台"
         title="API 设置"
@@ -1048,7 +1053,7 @@ export default function AdminIntegrationsClient() {
           </div>
           <div>
             <span className="info-label">最近测试</span>
-            <strong>{h3Config.health?.checked_at ? new Date(h3Config.health.checked_at).toLocaleString() : '未测试'}</strong>
+            <strong>{h3Config.health?.checked_at ? <RelativeTime value={h3Config.health.checked_at} /> : '未测试'}</strong>
           </div>
           <div>
             <span className="info-label">提交任务</span>
@@ -1195,7 +1200,7 @@ export default function AdminIntegrationsClient() {
           >
             {h3Testing ? '正在测试' : '测试连接'}
           </button>
-          <button className="btn btn-primary" type="submit" disabled={h3Saving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={h3Saving} type="submit" disabled={h3Saving}>
             {h3Saving ? '正在保存' : '保存 H3 本地生成服务'}
           </button>
         </div>
@@ -1206,7 +1211,7 @@ export default function AdminIntegrationsClient() {
             {h3TestState.type === 'success' && (
               <span>
                 API {h3TestState.health_api || '-'} · Worker {h3TestState.worker || '-'} · ComfyUI {h3TestState.comfyui || '-'}
-                {h3TestState.tested_at ? ` · ${new Date(h3TestState.tested_at).toLocaleString('zh-CN')}` : ''}
+                {h3TestState.tested_at && <> · <RelativeTime value={h3TestState.tested_at} /></>}
               </span>
             )}
             {h3TestState.type === 'error' && <span>请确认 H3 API 公网地址、用户 token 和工作站服务状态。</span>}
@@ -1296,7 +1301,7 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 API Key
           </label>
-          <button className="btn btn-primary" type="submit" disabled={aiMediaKitSaving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={aiMediaKitSaving} type="submit" disabled={aiMediaKitSaving}>
             {aiMediaKitSaving ? '正在保存' : '保存 AI MediaKit 视频超分 API'}
           </button>
         </div>
@@ -1423,7 +1428,7 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 API Key
           </label>
-          <button className="btn btn-primary" type="submit" disabled={volcengineSaving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={volcengineSaving} type="submit" disabled={volcengineSaving}>
             {volcengineSaving ? '正在保存' : '保存火山 IP 生成 API'}
           </button>
         </div>
@@ -1529,7 +1534,7 @@ export default function AdminIntegrationsClient() {
           >
             {muskTesting ? '正在测试' : '测试连接'}
           </button>
-          <button className="btn btn-primary" type="submit" disabled={muskSaving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={muskSaving} type="submit" disabled={muskSaving}>
             {muskSaving ? '正在保存' : '保存 Musk API'}
           </button>
         </div>
@@ -1541,7 +1546,7 @@ export default function AdminIntegrationsClient() {
               <span>
                 {muskTestState.model || muskConfig.default_model}
                 {typeof muskTestState.latency_ms === 'number' ? ` · ${muskTestState.latency_ms}ms` : ''}
-                {muskTestState.tested_at ? ` · ${new Date(muskTestState.tested_at).toLocaleString('zh-CN')}` : ''}
+                {muskTestState.tested_at && <> · <RelativeTime value={muskTestState.tested_at} /></>}
               </span>
             )}
             {muskTestState.type === 'error' && <span>请先确认地址、模型和 API Key 已保存。</span>}
@@ -1828,7 +1833,7 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 API Key
           </label>
-          <button className="btn btn-primary" type="submit" disabled={imageSaving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={imageSaving} type="submit" disabled={imageSaving}>
             {imageSaving ? '正在保存' : '保存图形生成 API'}
           </button>
         </div>
@@ -1940,7 +1945,7 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 token
           </label>
-          <button className="btn btn-primary" type="submit" disabled={saving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={saving} type="submit" disabled={saving}>
             {saving ? '正在保存' : '保存配置'}
           </button>
         </div>

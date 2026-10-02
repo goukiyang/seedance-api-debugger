@@ -1,6 +1,8 @@
 'use client';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
+import { LoadingSkeleton } from '@/components/LoadingState';
+import { RelativeTime } from '@/components/RelativeTime';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -118,6 +120,7 @@ interface VideoTask {
   provider_payload_json: string | null;
   created_at: string;
   updated_at: string;
+  delivery_status?: string | null;
   completed_at: string | null;
 }
 
@@ -846,8 +849,21 @@ export default function TaskDetailPage() {
   // 下载状态
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState('');
+  const [downloadPhase, setDownloadPhase] = useState<'idle' | 'preparing' | 'ready' | 'failed'>('idle');
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [publicDeliveryPollStartedAt, setPublicDeliveryPollStartedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (downloadPhase !== 'preparing' || !task) return;
+    if (task.public_video_url || task.local_video_path) {
+      setDownloadPhase('ready');
+      setDownloadError(null);
+      setDownloadProgress('文件已准备好，可下载到设备');
+    } else if (task.delivery_status === 'failed' || ['failed', 'cancelled'].includes(task.local_status)) {
+      setDownloadPhase('failed');
+      setDownloadError('文件准备已停止，请刷新任务状态，或重试准备文件');
+    }
+  }, [task, downloadPhase]);
   
   // 视频预览错误状态
   const [videoError, setVideoError] = useState(false);
@@ -1172,6 +1188,7 @@ export default function TaskDetailPage() {
   };
 
   const handleRetry = async () => {
+    if (retrying) return;
     setRetrying(true);
     try {
       const res = await fetch(`/api/video/retry/${taskId}`, {
@@ -1181,10 +1198,10 @@ export default function TaskDetailPage() {
       if (res.ok) {
         router.push(taskDetailHref(data.id, returnTo));
       } else {
-        alert(`重试失败: ${data.message}`);
+        setOpenError(`重试失败: ${data.message || data.error || '请稍后重试'}`);
       }
     } catch (error) {
-      alert(`重试失败: ${error}`);
+      setOpenError(`重试失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setRetrying(false);
     }
@@ -1222,21 +1239,27 @@ export default function TaskDetailPage() {
 
   const downloadVideoToLocal = async (sourceTask: VideoTask): Promise<string | null> => {
     if (sourceTask.public_video_url) {
-      setDownloadProgress('稳定下载已就绪');
+      setDownloadPhase('ready');
+      setDownloadProgress('文件已准备好，可下载到设备');
       setDownloadError(null);
       return sourceTask.public_video_url;
     }
     if (sourceTask.local_video_path) {
+      setDownloadPhase('ready');
+      setDownloadProgress('文件已准备好，可下载到设备');
+      setDownloadError(null);
       return sourceTask.local_video_path;
     }
     if (!sourceTask.result_video_url) {
       const errorMsg = '当前任务没有可用的视频链接';
       setDownloadError(errorMsg);
+      setDownloadPhase('failed');
       setDownloadProgress(`下载失败: ${errorMsg}`);
       return null;
     }
 
     setDownloading(true);
+    setDownloadPhase('preparing');
     setDownloadProgress('正在准备稳定下载视频...');
     setDownloadError(null);
     setOpenError(null);
@@ -1259,7 +1282,8 @@ export default function TaskDetailPage() {
 
       if (res.ok && data.success && data.public_video_url) {
         const publicVideoUrl = data.public_video_url as string;
-        setDownloadProgress('稳定下载已就绪');
+        setDownloadPhase('ready');
+        setDownloadProgress('文件已准备好，可下载到设备');
         setTask((current) => (
           current ? { ...current, public_video_url: publicVideoUrl } : current
         ));
@@ -1270,10 +1294,11 @@ export default function TaskDetailPage() {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         const fileSizeMB = (data.file_size / 1024 / 1024).toFixed(2);
         
-        setDownloadProgress(`下载完成，文件大小: ${fileSizeMB} MB，耗时: ${elapsed}s`);
+        setDownloadPhase('ready');
+        setDownloadProgress(`文件已准备好，可下载到设备；${fileSizeMB} MB，准备耗时 ${elapsed}s`);
         
         if (data.already_exists) {
-          setDownloadProgress(`视频已存在于本地: ${fileSizeMB} MB`);
+          setDownloadProgress(`服务器文件已准备好，可下载到设备；${fileSizeMB} MB`);
         }
         
         const localVideoPath = data.local_video_path as string;
@@ -1284,12 +1309,14 @@ export default function TaskDetailPage() {
       } else {
         const errorMsg = data.message || data.error || '未知错误';
         setDownloadError(errorMsg);
+        setDownloadPhase('failed');
         setDownloadProgress(`下载失败: ${errorMsg}`);
         return null;
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       setDownloadError(errorMsg);
+      setDownloadPhase('failed');
       setDownloadProgress(`下载失败: ${errorMsg}`);
       return null;
     } finally {
@@ -1299,7 +1326,7 @@ export default function TaskDetailPage() {
 
   // 后端下载视频（支持进度追踪）
   const handleDownloadToLocal = async () => {
-    if (!task) return;
+    if (!task || downloading) return;
     await downloadVideoToLocal(task);
   };
 
@@ -1384,7 +1411,7 @@ export default function TaskDetailPage() {
       if (!downloadHref) {
         const preparedVideoPath = await downloadVideoToLocal(task);
         if (!preparedVideoPath) {
-          setOpenError('视频还没有可下载的文件。请刷新结果后重试，或重新生成。');
+          setOpenError('文件尚未准备好。请刷新任务状态后重试下载，不需要重新生成。');
           return;
         }
         downloadHref = preparedVideoPath.startsWith('http')
@@ -1497,7 +1524,7 @@ export default function TaskDetailPage() {
   if (loading) {
     return (
       <div className="card">
-        <p className="text-gray">加载中...</p>
+        <LoadingSkeleton label="正在读取任务详情" />
       </div>
     );
   }
@@ -1736,6 +1763,8 @@ export default function TaskDetailPage() {
 
   return (
     <div className="task-detail-page">
+      {taskLoadError && <div className="alert alert-warning" role="alert">最新状态读取失败：{taskLoadError}。可以重新刷新状态，现有结果仍保留。</div>}
+      {openError && <div className="alert alert-warning" role="alert">{openError}</div>}
       <div className="task-result-topbar">
         <Link href={returnTo} className="task-detail-back">
           <ArrowLeft size={16} aria-hidden="true" />
@@ -1951,10 +1980,6 @@ export default function TaskDetailPage() {
                   <span>请先刷新结果；如果对象存储未配置，系统会继续提供慢速备用链接。</span>
                 </div>
               )}
-              {openError && (
-                <div className="alert alert-warning">{openError}</div>
-              )}
-
               {task.result_last_frame_url && (
                 <details className="task-inline-details task-last-frame-details">
                   <summary>查看尾帧图片</summary>
@@ -2009,7 +2034,7 @@ export default function TaskDetailPage() {
                 {isPublicVideoPreparing && (
                   <button className="btn btn-secondary" onClick={handleDownloadToLocal} disabled={downloading}>
                     <Download size={16} aria-hidden="true" />
-                    {downloading ? '提交中...' : '准备稳定下载'}
+                    {downloading ? '准备中...' : '准备稳定下载'}
                   </button>
                 )}
                 {task.local_status === 'failed' && (
@@ -2021,7 +2046,7 @@ export default function TaskDetailPage() {
                 {downloadError && task.result_video_url && (
                   <button className="btn btn-secondary" onClick={handleDownloadToLocal} disabled={downloading}>
                     <Download size={16} aria-hidden="true" />
-                    {downloading ? '重试中...' : '重试保存'}
+                    {downloading ? '准备中...' : '重试准备文件'}
                   </button>
                 )}
                 {isProcessing && (
@@ -2040,12 +2065,13 @@ export default function TaskDetailPage() {
               </div>
 
               {(downloading || downloadProgress) && (
-                <div className="task-download-state">
+                <div className="task-download-state sd2-loading-surface" data-busy={downloadPhase === 'preparing' && (downloading || querying || autoPoll || publicDeliveryPollStartedAt !== null)} role="status">
                   <div className="task-download-meta">
-                    <span>{downloading ? '下载中' : '下载状态'}</span>
-                    <span>{downloadError ? '失败' : downloading ? '处理中' : '完成'}</span>
+                    <span>下载文件</span>
+                    <span>{downloadError || downloadPhase === 'failed' ? '准备停止' : downloadPhase === 'preparing' ? '正在准备' : downloadPhase === 'ready' ? '可下载' : '待准备'}</span>
                   </div>
                   <p className={downloadError ? 'task-download-error' : ''}>{downloadProgress}</p>
+                  {(downloadPhase === 'preparing' || downloadPhase === 'failed') && <button type="button" className="btn btn-secondary" disabled={querying} onClick={() => void queryStatus()}>{querying ? '读取中…' : '刷新任务状态'}</button>}
                 </div>
               )}
 
@@ -2061,7 +2087,7 @@ export default function TaskDetailPage() {
                 <span>实际扣费</span>
                 <strong>{resultChargeBadgeText || '待官方确认'}</strong>
                 <small title={taskCompletedTime.absolute}>
-                  {taskCompletedTimePrefix} {taskCompletedTime.relative}
+                  {taskCompletedTimePrefix} <RelativeTime value={task.completed_at || task.updated_at} />
                 </small>
               </div>
               <div className="task-decision-list">
@@ -2092,7 +2118,7 @@ export default function TaskDetailPage() {
                 )}
                 <div>
                   <span>{taskCompletedExactLabel}</span>
-                  <strong title={taskCompletedTime.absolute}>{taskCompletedTime.absolute}</strong>
+                  <strong><RelativeTime value={task.completed_at || task.updated_at} /></strong>
                 </div>
                 <div><span>Provider 状态</span><strong>{task.provider_status || '-'}</strong></div>
               </div>
@@ -2301,7 +2327,7 @@ export default function TaskDetailPage() {
               <div><span>任务 ID</span><strong title={task.id}>{shortId(task.id, 16)}</strong></div>
               <div><span>Provider ID</span><strong title={task.provider_task_id || ''}>{shortId(task.provider_task_id, 16)}</strong></div>
               <div><span>Provider 状态</span><strong>{task.provider_status || '-'}</strong></div>
-              <div><span>完成时间</span><strong>{formatTaskTime(task.completed_at).absolute}</strong></div>
+              <div><span>完成时间</span><strong>{task.completed_at ? <RelativeTime value={task.completed_at} /> : '时间待同步'}</strong></div>
               <div><span>视频来源</span><strong>{resultStorageText}</strong></div>
               <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
               {templateLabel && <div><span>模板</span><strong>{templateLabel}</strong></div>}
