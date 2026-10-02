@@ -529,6 +529,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [tasksError, setTasksError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [queryingSubmission, setQueryingSubmission] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<Record<string, unknown> | null>(null);
   const [reproduceSourceTaskId, setReproduceSourceTaskId] = useState<string | null>(module.reproduceFromTaskId || null);
   const [draftLoaded, setDraftLoaded] = useState(false);
@@ -853,8 +854,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   useEffect(() => () => { if (downloadReady) URL.revokeObjectURL(downloadReady.url); }, [downloadReady]);
 
   async function querySubmission() {
-    if (!pendingSubmission || submitLock.current) return;
-    submitLock.current = true; setSubmitting(true); setError('');
+    if (!pendingSubmission || submitLock.current || moduleDeleteLock.current) return;
+    submitLock.current = true; setQueryingSubmission(true); setSubmitting(true); setError('');
     try {
       const value = await readResponse(await fetch(`/api/image-studio/tasks?requestId=${encodeURIComponent(String(pendingSubmission.requestId))}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
       if (!Array.isArray(value.tasks) || !value.tasks.length) {
@@ -863,12 +864,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setPendingSubmission(null); localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey);
       await loadTasks();
     } catch (cause) { setError(cause instanceof Error ? cause.message : '查询暂不可用，原提交编号仍保留。'); }
-    finally { submitLock.current = false; setSubmitting(false); }
+    finally { submitLock.current = false; setSubmitting(false); setQueryingSubmission(false); }
   }
 
   async function submit(retryTask?: StudioTask) {
-    if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
     if (pendingSubmission) { await querySubmission(); return; }
+    if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
     if (reproduceSourceTaskId || tasks.some(task => task.status === 'uncertain')) {
       submitLock.current = true;
       let accepted = false;
@@ -1012,12 +1013,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
   const hasContext = Boolean((isAdmin ? globalContextDraft?.trim() : settings?.contextConfigured) || (contextEditable ? moduleContext.trim() : moduleContextConfigured));
   const ready = Boolean(selectedProviderReady && moduleUnitCredits !== null && settings && !settingsError);
-  const generationFeedback: StudioFeedback | null = sourceSharingBlocked ? { message: '该模板已停止共享，请换一个可用模板。', tone: 'error' }
+  const generationFeedback: StudioFeedback | null = queryingSubmission ? { message: '正在查询这次提交，不会再次生成。', tone: 'progress' }
+    : pendingSubmission ? submitting ? { message: '正在处理当前请求，请稍候再查询。', tone: 'progress' }
+      : moduleDeleting ? { message: '正在删除模板，请等待操作结束后再查询。', tone: 'progress' } : null
+    : sourceSharingBlocked ? { message: '该模板已停止共享，请换一个可用模板。', tone: 'error' }
     : submitting ? { message: '正在提交，请等待结果，不要重复点击。', tone: 'progress' }
     : uploading || bannerUploading ? { message: '图片还在上传或处理，请等待图片显示后再生成。', tone: 'progress' }
     : draftRestoring ? { message: '正在恢复上次使用的图片和设置。', tone: 'progress' }
     : ratioEditing ? { message: '图片比例尚未确认，请先完成比例设置。', tone: 'info' }
-    : pendingSubmission ? null
     : settingsError ? { message: `设置暂不可用：${settingsError}`, tone: 'error' }
     : !settings ? { message: '正在读取生成设置，请稍候；长时间无变化请刷新页面。', tone: 'progress' }
     : !selectedProviderReady ? { message: '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。', tone: 'warning' }
@@ -1241,7 +1244,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
         </div>
-        <button type="button" className={styles.generate} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void submit()}>{submitting ? pendingSubmission ? '正在查询' : '正在提交' : pendingSubmission ? '查询这次提交' : '生成图片'}</button>
+        <button type="button" className={styles.generate} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission ? '查询这次提交' : '生成图片'}</button>
         {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
         {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
         {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}

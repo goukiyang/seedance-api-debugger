@@ -9,12 +9,27 @@
 | 编号 | 本次任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | I1 | 图片交付恢复工单 | 写清现状、调整范围、异常恢复与人工验收，并归档参考文件 | 已完成；正文与原件归入项目，差异和复制检查通过 |
-| ID1 | 生成请求身份与防重复 | 复用本地请求编号；未确认受理不自动再生成；追踪上游请求而不冒充上游幂等 | 已实现并部署；待用户手动验收 |
+| ID1 | 生成请求身份与防重复 | 复用本地请求编号；未确认受理不自动再生成；追踪上游请求而不冒充上游幂等 | 进行中；定向修正查询入口，首候选已部署 |
 | ID2 | 输出检查点与下载恢复 | Base64 优先、同对象恢复、慢速非续传源有界等待；进程重启不重新生图 | 已实现并部署；待用户手动验收 |
 | ID3 | 完整图片与资产交付 | 完整解码、格式/尺寸/透明要求核验；资产发布和任务成功保持一致 | 已实现并部署；待用户手动验收 |
-| ID4 | 用户状态及发布交接 | 阶段与恢复动作清楚；发布保护到位；实际功能待用户手动验收 | 已实现并部署；待用户手动验收 |
+| ID4 | 用户状态及发布交接 | 阶段与恢复动作清楚；发布保护到位；实际功能待用户手动验收 | 进行中；定向修正同版重发及记录更新 |
 
 ### 本次执行计划与边界（2026-10-02）
+
+2026-10-02 定向收尾：Supervisor静态复核发现原请求查询被新生成的settings/共享/上传/比例/草稿条件挡住。本批仅修改 `studio.tsx`：pending优先直达只读查询、保留提交/删除锁、独立查询文案；所有新生成阻断及GET鉴权不变。原请求查询不会自动放弃ID或POST。ID1/ID4暂回进行中（首候选已部署，其余Review证据复用），ID2/ID3不重置。整批配套完成后统一候选构建并同版v0.36.0重发；保留80afb原版及0575619首候选回退，正常排空worker，无功能自动验收/生产DB写入。
+
+归档工具确切路径：`/tmp/sd2-image-delivery-v036-gate.mjs`（real `/private/tmp/sd2-image-delivery-v036-gate.mjs`）。这是本轮临时包装脚本，非全局shared skill；共用的 `release-recent-activity-check.mjs`、`release-registry-append.mjs` 没有修改。实际差异仅“工单归档”不要求live预约，所有其他action仍检查reservation，所有append仍检查confirmed。临时文件不在Git仓库、未提交；实际diff及node静态检查随收尾登记，不冒充全局工具已修。
+
+包装脚本检查：`node --check /tmp/sd2-image-delivery-v036-gate.mjs` 返回0；实际两行差异见 `/tmp/sd2-image-delivery-v036-gate.diff`（before文本按本轮先前已读原实现还原，不冒充Git历史）：
+
+```diff
+-if (!reservation.canProceed) throw Error(reservation.reason);
++if (action !== '工单归档' && !reservation.canProceed) throw Error(reservation.reason);
+-console.log(JSON.stringify({ action, runId, commit, appendConfirmed: true, reservationConfirmed: true, at: new Date().toISOString() }));
++console.log(JSON.stringify({ action, runId, commit, appendConfirmed: true, reservationConfirmed: action === '工单归档' ? 'not required: no live action' : true, at: new Date().toISOString() }));
+```
+
+该修改没有放宽live upload/switch/restart/complete：parent仅在部署开始/完成gate返回0后才能发送下一命令；append未confirmed、其他run冲突、live reservation不成立均抛错停止。本批复用原安全脚本，临时 `/tmp/sd2-image-delivery-v036-deploy.sh` 仅额外检查候选包含新查询文案，`bash -n` 返回0，未改排空/回退/live gate保护。没有为工具修正单独重跑部署或无关测试；本次部署只由ID1/ID4应用修正触发。
 
 - 唯一开发源：`/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger`，`codex/canvas-liblib-layout`，开工 HEAD `21e022166aa0588fc6c50ad19c44a0135c536551`，干净；正式根目录只归档。生产只读核对仍为 v0.35.0、源码 `80afb99c3f664949936961e86e6d91ba9d057725`、BUILD `ILxByLZ7_8R-4aPl4WWhH`，四个服务/计时器 active，图片 worker 停止等待 660 秒；当次 queued/running 数量为零。
 - 守门员 start 已执行；工具自动标签 L3 不覆盖真实链路判断，本轮等价守门员按 **L4**：付费结果、SSRF、持久检查点、租约和结算。按本项目明确边界，不派独立审核、不浏览器、不离线回归、不调用生成或写生产库；不把源码、构建和健康证明当功能验收。
