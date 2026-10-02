@@ -1,5 +1,10 @@
 # V1.2 剩余模块落地 Todo
 
+## 当前入口
+
+- [ ] 2026-10-02：SD2加载与体验优化工单，正文见 `tasks/todo/2026-10-02-loading-ux.md`。
+
+
 ## 2026-10-02 画布视频方案拆分实施
 
 - [唯一有效工单 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：用户已明确“落地”。SP1–SP3/SP5 实现中；SP4 现有视频产出无 Asset ID，结果资源标识待 supervisor 决策；SP6 未开始。不发布未闭环版本，不执行功能自动验收。仅用 `codex/canvas-liblib-layout` 应用源，本目录归档。
@@ -6539,3 +6544,14 @@ flowchart LR
 - 如果 Prisma 迁移或生成失败，停止，不改数据库归档状态。
 - 如果通知写入会影响点数事务一致性，停止，不归档通知反馈。
 - 如果视频/音频素材 URL 不是公网可访问，生成可能仍失败；第一版只打通链路，公网存储问题按上传链路另行处理。
+
+
+## Todo 子文档索引
+
+- `tasks/todo/2026-10-01-canvas-plan-split.md`：工单：画布按视频提示词格式拆分
+- `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`：十月一日反馈：模板参考图、资产缩略图与弹窗行为
+- `tasks/todo/2026-10-01-image-download-timeout.md`：图片生成下载超时与结果找回
+- [SD2加载与体验优化工单](todo/2026-10-02-loading-ux.md)：2026-10-02，v1.0.0；U1-U6涵盖下载状态、列表刷新、恢复文案、局部刷光、产品弹窗与近时。工单已交付，实施未开始，不继续扩大审查；附件见正文及资料索引。
+- `tasks/todo/2026-10-02-media-copy-share.md`：图片复制、站内分享与模板离开提醒
+- `tasks/todo/2026-10-02-template-primary-actions.md`：模板主操作与产品弹窗
+- `tasks/todo/2026-10-02-unified-resource-library.md`：统一创作资源库功能盘点与整合建议
