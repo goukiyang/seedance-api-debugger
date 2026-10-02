@@ -1,0 +1,395 @@
+{
+  "checkedAt": "2026-10-02T08:42:16.707Z",
+  "runId": "sd2-canvas-split-20261002-1790929333653",
+  "version": "0.35.0",
+  "build": "Ov3Td-2Mm5PA8AAm0Ym2N",
+  "commit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+  "routes": [
+    "/layout",
+    "/account/page",
+    "/login/page",
+    "/projects/[id]/page",
+    "/generate/page",
+    "/template-studio/page",
+    "/templates/page",
+    "/tools/ultimate-canvas/page"
+  ],
+  "files": [
+    {
+      "path": "static/chunks/webpack-6a09b37cdf4583bc.js",
+      "sha256": "8f4e161b303197a01a5beedb10e592ae56e378b8819b9592a7835bf8124181aa",
+      "publicSha256": "8f4e161b303197a01a5beedb10e592ae56e378b8819b9592a7835bf8124181aa",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+      "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+      "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/1890-7faa2453eb06933f.js",
+      "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+      "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+      "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+      "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+      "status": 200
+    },
+    {
+      "path": "static/css/67cc6969d4055c6d.css",
+      "sha256": "3cbc901ff662bfba8c33a7b317d820947ede9461269bdd885f441e241eb8d951",
+      "publicSha256": "3cbc901ff662bfba8c33a7b317d820947ede9461269bdd885f441e241eb8d951",
+      "status": 200
+    },
+    {
+      "path": "static/css/ea095be58e8c4d2c.css",
+      "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+      "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+      "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/3267-f71a53029cf7bb42.js",
+      "sha256": "46865a1fc13df2d1d93151301dc6e62551e3abcaeec5b9db314101e07781144a",
+      "publicSha256": "46865a1fc13df2d1d93151301dc6e62551e3abcaeec5b9db314101e07781144a",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/3461-4160763e155494a1.js",
+      "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+      "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5634-f2642b7944011576.js",
+      "sha256": "6c64fe7fdc8caeb0e435a5077102a8e08cc4a6a40fe60689988e5b91bf06e74b",
+      "publicSha256": "6c64fe7fdc8caeb0e435a5077102a8e08cc4a6a40fe60689988e5b91bf06e74b",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/layout-4813db389e2e403b.js",
+      "sha256": "1361095d664f03a2859bb3d4463a13e8634f2bb49e1d9d88f6826e6a1f6e97ec",
+      "publicSha256": "1361095d664f03a2859bb3d4463a13e8634f2bb49e1d9d88f6826e6a1f6e97ec",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/account/page-f5dbebd569a7b9c1.js",
+      "sha256": "ae20fe83427f77afa66fb10ef271ce38ba792da9698b8a837ca83426edbc4550",
+      "publicSha256": "ae20fe83427f77afa66fb10ef271ce38ba792da9698b8a837ca83426edbc4550",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/login/page-8c5af8381f662275.js",
+      "sha256": "882bc5d656eb73e0716edf2e2e5123cc343ef3c2f967a61b01b8a67358ccaffc",
+      "publicSha256": "882bc5d656eb73e0716edf2e2e5123cc343ef3c2f967a61b01b8a67358ccaffc",
+      "status": 200
+    },
+    {
+      "path": "static/css/d5b8b4fb6aa4b571.css",
+      "sha256": "7c92d15bb83b5941819a5e54d7cb3d5f0fc9185e1fb228e0f5636f78dab928bf",
+      "publicSha256": "7c92d15bb83b5941819a5e54d7cb3d5f0fc9185e1fb228e0f5636f78dab928bf",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/9966-fdeccf87a87fe4ba.js",
+      "sha256": "857a9f7dee95f0ec4f393273d88499ff135cf11c0be4ed151040f2883498ca58",
+      "publicSha256": "857a9f7dee95f0ec4f393273d88499ff135cf11c0be4ed151040f2883498ca58",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+      "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+      "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/7797-6cc256e1d9161e2e.js",
+      "sha256": "abb39b29e4981a55d06fefa4808dea393883516b8868e2297608d6a0c96eebe5",
+      "publicSha256": "abb39b29e4981a55d06fefa4808dea393883516b8868e2297608d6a0c96eebe5",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6670-7082efca1a6a1ace.js",
+      "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+      "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/projects/[id]/page-a192055892fd7879.js",
+      "sha256": "dc475e16c7f11e3b826f381f272e44ce1c2fe3754ad6ba01cda2cb1a52d77ea7",
+      "publicSha256": "dc475e16c7f11e3b826f381f272e44ce1c2fe3754ad6ba01cda2cb1a52d77ea7",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6581-3b6574c3c15f97b2.js",
+      "sha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
+      "publicSha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/9534-941febb297525b3b.js",
+      "sha256": "1b74b32b1075cbfc6445906215dbb9480ec4fa0bd6df453b449462e7278dcc74",
+      "publicSha256": "1b74b32b1075cbfc6445906215dbb9480ec4fa0bd6df453b449462e7278dcc74",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5246-0a4907f78de58f22.js",
+      "sha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
+      "publicSha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/2438-f84894b6f48bcb45.js",
+      "sha256": "7aca650ff5dfeb4f08fe1a77569c2f70e61f48caf364fc6ba6f1b7f54642346b",
+      "publicSha256": "7aca650ff5dfeb4f08fe1a77569c2f70e61f48caf364fc6ba6f1b7f54642346b",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5706-0a7f573e3e57cd6b.js",
+      "sha256": "72cc9d3ec80efa3b687bae68f0108fae879b6ed17cf197f4d153e96f012e6769",
+      "publicSha256": "72cc9d3ec80efa3b687bae68f0108fae879b6ed17cf197f4d153e96f012e6769",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/1657-6bcb0a9c9d32d98a.js",
+      "sha256": "8606382e6a9bb59b50550aaec4cd28e6e94ab5f6774b2c026e15cf3205051dc3",
+      "publicSha256": "8606382e6a9bb59b50550aaec4cd28e6e94ab5f6774b2c026e15cf3205051dc3",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/generate/page-e336165472ff43f9.js",
+      "sha256": "e06987f1bc9235619a093baf7910b32b433f7f77dff09a6970e5a85bcd8dfd14",
+      "publicSha256": "e06987f1bc9235619a093baf7910b32b433f7f77dff09a6970e5a85bcd8dfd14",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6370-4123e213528db92e.js",
+      "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+      "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/7088-88412d5126790725.js",
+      "sha256": "803a000a6285036717a9a5a9836650a7bbbd5987a7634ef6fbe75c0094c5d61c",
+      "publicSha256": "803a000a6285036717a9a5a9836650a7bbbd5987a7634ef6fbe75c0094c5d61c",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/template-studio/page-92e1291e9b8e018e.js",
+      "sha256": "f218ab26e92bfccfb6c31633b47fc4919173e933b56dcb15b023ff1904fd5d67",
+      "publicSha256": "f218ab26e92bfccfb6c31633b47fc4919173e933b56dcb15b023ff1904fd5d67",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/9830-ae2d092ef156bc2f.js",
+      "sha256": "e7ef19a0aeb90e795b203d5a064c68ff35ba517882e84b57d71714eedbd9e113",
+      "publicSha256": "e7ef19a0aeb90e795b203d5a064c68ff35ba517882e84b57d71714eedbd9e113",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/templates/page-5d2670a8c8e6bec5.js",
+      "sha256": "3aceaee26a984185496689b9fe7121a665e6c2a2ead6193a8409bdf0bbd09251",
+      "publicSha256": "3aceaee26a984185496689b9fe7121a665e6c2a2ead6193a8409bdf0bbd09251",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/tools/ultimate-canvas/page-43a61a68a1159093.js",
+      "sha256": "3ba1a91f219e955460ac0fa8b0a333e021a52dad1deb6c492beb4eb3af6df729",
+      "publicSha256": "3ba1a91f219e955460ac0fa8b0a333e021a52dad1deb6c492beb4eb3af6df729",
+      "status": 200
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "public/tools/ultimate-canvas/app.js",
+      "sha256": "f8bc15e2456cafa2083c36c06937baf1fad5bcb751f857508657f43d7a4014d1",
+      "localSha256": "f8bc15e2456cafa2083c36c06937baf1fad5bcb751f857508657f43d7a4014d1"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/backend-contract.js",
+      "sha256": "5035daa8ecfab2718c84914f471a9b746eab48a870bd4a656cf490e64f35a467",
+      "localSha256": "5035daa8ecfab2718c84914f471a9b746eab48a870bd4a656cf490e64f35a467"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/canvas-engine.js",
+      "sha256": "09aa7e4b670417e3caf81491ffa04deb469bd1dd3d6ef6322e3fd8b0ed47da67",
+      "localSha256": "09aa7e4b670417e3caf81491ffa04deb469bd1dd3d6ef6322e3fd8b0ed47da67"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/generation-node-workflow.js",
+      "sha256": "b149a126480f823c0abfc83acb13f717247970a25bbe1d3f4e034cfae6e4a531",
+      "localSha256": "b149a126480f823c0abfc83acb13f717247970a25bbe1d3f4e034cfae6e4a531"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/generation-task-coordinator.js",
+      "sha256": "80839425e6e19199d8af5a169c6a6f8fae5da62b655736d156bbe19085e3f817",
+      "localSha256": "80839425e6e19199d8af5a169c6a6f8fae5da62b655736d156bbe19085e3f817"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/icons.js",
+      "sha256": "a49353ffcb4426508fdc26138b22de2aac8403aa4174992cca1f05723d19fe78",
+      "localSha256": "a49353ffcb4426508fdc26138b22de2aac8403aa4174992cca1f05723d19fe78"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/index.html",
+      "sha256": "df23c4460209e0529a7c0b8f5e565280f47564accc0f05b736fa705800d5d662",
+      "localSha256": "df23c4460209e0529a7c0b8f5e565280f47564accc0f05b736fa705800d5d662"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/styles.css",
+      "sha256": "4996d73b033a40625999b8e2666279e83eebdeeb796dc17d4064875fd7e533aa",
+      "localSha256": "4996d73b033a40625999b8e2666279e83eebdeeb796dc17d4064875fd7e533aa"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/plan-split.js",
+      "sha256": "d308440fab7066b249362137a03f250d96f5a6f3ff78883676c668e856cc8694",
+      "localSha256": "d308440fab7066b249362137a03f250d96f5a6f3ff78883676c668e856cc8694"
+    },
+    {
+      "path": "public/tools/ultimate-canvas/plan-split-ui.js",
+      "sha256": "6757393935339c0a172cb15de2957ee716d2d7fdaa2e7b61b1de2389a2d1ba2a",
+      "localSha256": "6757393935339c0a172cb15de2957ee716d2d7fdaa2e7b61b1de2389a2d1ba2a"
+    }
+  ],
+  "checks": [
+    {
+      "path": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/api/release",
+      "status": 200,
+      "origin": "server-42-193",
+      "version": "0.35.0"
+    },
+    {
+      "path": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/tools/ultimate-canvas",
+      "status": 307,
+      "origin": "server-42-193",
+      "location": "https://sd2.youdooart.com/login?next=%2Ftools%2Fultimate-canvas"
+    },
+    {
+      "path": "/tools/ultimate-canvas/app.js",
+      "status": 307,
+      "origin": "server-42-193",
+      "location": "https://sd2.youdooart.com/login?next=%2Ftools%2Fultimate-canvas%2Fapp.js"
+    }
+  ],
+  "localChecks": {
+    "checks": [
+      {
+        "path": "/config",
+        "status": 200
+      },
+      {
+        "path": "/release",
+        "status": 200
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ],
+    "version": "0.35.0"
+  },
+  "services": [
+    {
+      "name": "sd2-gray.service",
+      "status": "active"
+    },
+    {
+      "name": "sd2-image-studio.service",
+      "status": "active"
+    },
+    {
+      "name": "sd2-video-delivery.timer",
+      "status": "active"
+    },
+    {
+      "name": "sd2-finalize-pending.timer",
+      "status": "active"
+    }
+  ],
+  "manualAcceptance": "pending; no browser, functional tests, paid generation or production DB writes",
+  "archive": {
+    "commit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "sha256": "f6ef71acac87249f16d129bab405c099896361fa590fe8e7b3dddb7d92a8e965",
+    "local": "/tmp/sd2-canvas-split-20261002-1790929333653.tar",
+    "remote": "/tmp/sd2-canvas-split-20261002-1790929333653.tar",
+    "release": "/srv/video-api-debugger/releases/3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "exclusionsConfirmed": true
+  },
+  "rollback": {
+    "commit": "7b6da8395f21ea2677d6dc418f253f8f75c4a71a",
+    "build": "QKD4tRwtUPLxCLCxFc9yU",
+    "tag": "rollback/sd2-before-v0.35.0-20261002",
+    "remoteTagVerified": true,
+    "sourceArchive": "/srv/video-api-debugger/releases/7b6da8395f21ea2677d6dc418f253f8f75c4a71a",
+    "liveBackup": "/srv/video-api-debugger/app/.next-prod-before-sd2-canvas-split-20261002-1790929333653",
+    "failureTrap": "restore source, build, marker and restart under flock"
+  },
+  "buildChecks": {
+    "local": {
+      "command": "NEXT_DIST_DIR=.next-prod-candidate npm run build",
+      "exitCode": 0,
+      "build": "Tg7yyD9-tNvke5gfLUVRP",
+      "log": "/tmp/sd2-canvas-split-local-build.log",
+      "environment": "Existing matching-lock dependencies reused; Prisma types regenerated in isolated local runtime; no install or database writes"
+    },
+    "server": {
+      "command": "NEXT_DIST_DIR=.next-prod-candidate npm run build",
+      "exitCode": 0,
+      "directory": "/srv/video-api-debugger/releases/3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+      "log": "/tmp/sd2-canvas-split-20261002-1790929333653-build.log"
+    },
+    "syntax": {
+      "command": "node --check",
+      "files": 8,
+      "exitCode": 0
+    },
+    "diff": {
+      "command": "git diff --check",
+      "exitCode": 0
+    },
+    "sourceReview": "Whole batch; no delegated reviewer or functional acceptance"
+  },
+  "releaseWindow": {
+    "registry": "/Volumes/Data/Projects/project-version-registry.md",
+    "runId": "sd2-canvas-split-20261002-1790929333653",
+    "uploadReservation": "2026-10-02T08:39:27.438Z",
+    "switchReservation": "2026-10-02T08:41:48.161Z",
+    "completed": "2026-10-02T08:43:01.195Z",
+    "eachAppendAndReservationConfirmed": true,
+    "serverFlock": "/srv/video-api-debugger/deploy.lock"
+  },
+  "git": {
+    "branch": "codex/canvas-liblib-layout",
+    "applicationCommit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "applicationRemoteVerified": true,
+    "startCommit": "20931f7fb4b5af9dc8886120cd03d64ee5f87c09",
+    "compare": "https://github.com/goukiyang/seedance-api-debugger/compare/20931f7fb4b5af9dc8886120cd03d64ee5f87c09...3f15a7cae69e97241ec3cf66493ff7bf6230d138"
+  },
+  "scope": {
+    "assetIdentity": "taskId + libraryItemId/contentKey video_task:<taskId>; DB assetId null",
+    "newEndpoint": "Read-only current-user/current-document/exact-request lookup",
+    "noDatabaseMigration": true,
+    "noProviderOrBillingChange": true,
+    "noDependencyVersionChange": true,
+    "legacyMissingRequestId": "Protected from resubmission; administrator reconciliation required"
+  }
+}
