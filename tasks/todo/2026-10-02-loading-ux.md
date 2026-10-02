@@ -2,7 +2,7 @@
 
 项目：video-api-debugger
 工单版本：v1.0.0
-状态：2026-10-02用户已明确授权U1-U6实施、提交推送与安全部署；整批实现进行中，尚未构建/部署，功能待用户手动验收
+状态：2026-10-02用户已明确授权U1-U6实施、提交推送与安全部署；源码实现、发布必需检查与部署已完成，v0.36.1已上线；功能待用户手动验收
 更新时间：2026-10-02
 正式项目目录：/Volumes/Data/Projects/video-api-debugger
 应用源码观察位置：/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger
@@ -31,12 +31,12 @@
 
 | 编号 | 优先级 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|---|
-| U1 | 高 | 修正视频下载阶段 | 接口 202 只显示准备文件，不出现“完成”；可下载依据真实就绪结果；失败提供下一步 | 进行中（源码已实现；发布检查中，未部署，人工未验收） |
-| U2 | 中 | 任务列表保留内容与正确重试 | 首次读取、刷新、失败、空列表分开；刷新保留旧内容，成功清旧错误，同页保留有效选择 | 进行中（源码已实现；发布检查中，未部署，人工未验收） |
-| U3 | 中 | 修正恢复入口和画布状态文案 | 恢复设置不冒充重新生成；画布用真实中文阶段，未知受理不冒充失败 | 进行中（源码已实现；发布检查中，未部署，人工未验收） |
-| U4 | 中 | 统一局部刷光及触发条件 | 下表场景开始/停止一致，尺寸稳定、防连点、减少动画；已有恢复与进度不被替换 | 进行中（源码已实现；发布检查中，未部署，人工未验收） |
-| U5 | 中 | 已盘点业务弹窗采用产品样式 | 复用共享弹窗；取消无副作用，未保存保护、外部/Esc关闭及焦点正常 | 进行中（源码已实现；发布检查中，未部署，人工未验收） |
-| U6 | 常规 | 已盘点记录复用近时展示 | 创建/更新时间用共享近时组件，点击可看准确时间；不改变日志、导出和截止时间 | 进行中（源码已实现；发布检查中，未部署，人工未验收） |
+| U1 | 高 | 修正视频下载阶段 | 接口 202 只显示准备文件，不出现“完成”；可下载依据真实就绪结果；失败提供下一步 | 实现与部署已完成；待用户手动验收 |
+| U2 | 中 | 任务列表保留内容与正确重试 | 首次读取、刷新、失败、空列表分开；刷新保留旧内容，成功清旧错误，同页保留有效选择 | 实现与部署已完成；待用户手动验收 |
+| U3 | 中 | 修正恢复入口和画布状态文案 | 恢复设置不冒充重新生成；画布用真实中文阶段，未知受理不冒充失败 | 实现与部署已完成；待用户手动验收 |
+| U4 | 中 | 统一局部刷光及触发条件 | 下表场景开始/停止一致，尺寸稳定、防连点、减少动画；已有恢复与进度不被替换 | 实现与部署已完成；待用户手动验收 |
+| U5 | 中 | 已盘点业务弹窗采用产品样式 | 复用共享弹窗；取消无副作用，未保存保护、外部/Esc关闭及焦点正常 | 实现与部署已完成；待用户手动验收 |
+| U6 | 常规 | 已盘点记录复用近时展示 | 创建/更新时间用共享近时组件，点击可看准确时间；不改变日志、导出和截止时间 | 实现与部署已完成；待用户手动验收 |
 
 ### U1 下载状态准确
 
@@ -118,7 +118,7 @@
 | 独立刷光样例 index.html，v1.0.0 | 已认可视觉与状态交互参考；非生产任务 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/index.html |
 | 样例检查脚本 check.cjs | 历史样例检查方法，未经新授权不执行功能测试 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/check.cjs |
 | desktop.png / dark.png / mobile.png | 桌面、暗色、手机布局参考 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/ |
-| interaction.webm | 本地模拟交互参考；查看其完整短片，未登记精确时间段，不作生产证据 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/interaction.webm |
+| interaction.webm | 本地模拟交互参考；查看其完整短片0–7.8秒（195帧/25fps，无音轨），不作生产证据 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/interaction.webm |
 | report.json | 既有样例检查结果，不替代正式功能验收 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/report.json |
 | 既有用户画布原图 | 样例原图来源与节点上下文，不代表真实生成结果 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png |
 | 图片原图恢复/模板弹窗工单 | 关联边界与避免重复开发 | /Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-image-download-timeout.md；/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-02-template-primary-actions.md |
@@ -140,7 +140,7 @@
 ## Git与收尾
 
 - 本轮聚焦提交实际UI实现及工单、固定索引的新增内容，保留tasks/todo.md既有未提交段落，不提交旧计划、素材原图、证据录像或worktrees。
-- 本轮应用拟交付v0.36.1兼容修正，仅一次升号；发布预约及线上漂移切换前重核。后续纯归档不重新构建或重启。
+- 本轮应用已交付v0.36.1兼容修正，仅一次升号；发布预约及线上漂移已在切换前重核。后续纯归档不重新构建或重启。
 - 历史W1文档交付已完成。当前交付沿用U1-U6，区分实现、发布检查、部署与人工待验收。
 
 ## 本轮实施记录（2026-10-02）
@@ -173,7 +173,27 @@
 | package.json / package-lock.json | 仅根版本0.36.1，依赖未变 |
 | src/lib/release.ts | 与包版本同源的用户可感知摘要，既有SemVer及ReleaseNotice能力保留 |
 | tasks/todo/2026-10-02-loading-ux.md | 当前授权、同一U表、逐文件记录与发布/人工边界 |
+| tasks/todo/2026-10-02-loading-ux.evidence.json | 本轮构建、源码/公网静态SHA、服务、HTTP、预约与正常排空的安全发布证据 |
+| tasks/todo.md | 固定当前入口登记本轮实现/部署及人工待验收，正式根目录仅精确提交本轮hunk |
+| docs/materials/index.md | 按主题登记原工单、既有原件与发布证据，保留历史来源；不公开图/视频 |
 
 开源参考：已读MUI官网和Skeleton.js实际实现，并核对仓库MIT许可；仅借鉴稳定占位与transform wave技术，不接入/安装/复制MUI组件。已有用户样例完整短片0–7.8秒、195帧/25fps、无音轨及桌面/暗色/手机参考证据复用，不冒充生产验收，不执行check.cjs。项目未发现独立减少动画设置；共享CSS遵循系统设置并支持宿主data-reduced-motion/data-motion属性，不新增设置项。
 
-发布检查进行中；最终commit、BUILD、归档SHA、服务/公网/回退证据部署后更新。无浏览器、DOM、截图、功能/离线回归、实际生成、生产DB写入；现有beforeunload、文件选择和浏览器保存属于平台语义保留。已盘点业务native框均替换，不声称全站无遗漏。
+发布检查及安全部署已完成，证据如下。无浏览器、DOM、截图、功能/离线回归、实际生成、生产DB写入；现有beforeunload、文件选择和浏览器保存属于平台语义保留。已盘点业务native框均替换，不声称全站无遗漏。
+
+### 发布与归档结果
+
+- 应用v0.36.1；精确源码提交 `8acaf46e5fcd93004fc55b3016d74060b6020361`（已推送并核对远端分支），生产BUILD `Ec6Hfe91C-vrdLDtYaCKN`；正式入口 https://sd2.youdooart.com 。最终纯记录提交另见固定版本登记，不改变运行源码或再次升号。
+- 统一检查：首轮本地候选构建收齐诊断后因7处RelativeTime默认导入不符既有命名导出失败；整批改正后 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 退出0，BUILD `LKqHa9qM1jXJDdKzrPLP1`。服务器同精确commit独立候选构建退出0，未原地构建live；既有img/hooks/autoprefixer警告未扩范围处理。差异检查及画布 `node --check` 均通过；未执行功能或离线回归。
+- 精确git archive排除env、依赖、构建、storage、uploads/videos、数据库/log、部署marker及私有materials原件；完成归档才计算SHA并上传。归档SHA256：`90c59f2d82102083361e260ad7a4ae1b3fbe0d74e41445ca102fc3d8e7c0fb66`。
+- 唯一runId `sd2-loading-ux-20261002T111707Z`；上传前11:20:03 UTC、切换/重启前11:26:20 UTC、全部公网检查后部署完成11:28:05 UTC的登记均确认退出0，同run续接。root flock锁与父进程PTTY确认严格按SWITCH/COMPLETE推进，非0不继续live动作。
+- 旧worker PID1188032，原启动18:21:57 CST；使用既有drain标记正常退出且ExecMainStatus=0，然后只读核对queued/running为0，才停止旧unit并同步切换。新worker PID1241475，2026-10-02 19:26:26 CST启动，ExecMainStatus=0；11分钟停止预算和unit SHA未变。无强杀、账本/生产数据库写入；本批worker源码无修改，与精确发布源SHA一致。
+- `sd2-gray.service`、`sd2-image-studio.service`、`sd2-video-delivery.timer`、`sd2-finalize-pending.timer` 均active。server源码24项SHA与本地一致（22项应用变动及2项未改worker入口）；15个入口manifest共40项公网静态均HTTP200、SHA与生产构建一致。
+- local/public config、release、login均HTTP200；公网来源标记 `X-SD2-Origin: server-42-193`，release返回0.36.1。共享loading.css公网200且SHA一致；image-studio、template-studio和canvas app.js匿名307按鉴权保留，不绕过，不把静态检查说成功能验收。
+- 检查脚本第一次公网核对因curl将动态路由文件名的方括号当范围语法退出3；仅在临时检查脚本中编码URL后统一发布核对通过，应用未再修改或构建。完整安全证据：[JSON](2026-10-02-loading-ux.evidence.json)。
+- 已推送并核对annotated回退标签 `rollback/2026-10-02-before-loading-ux-v0361`，指向旧正式源码 `afc4489cac533523832e317aa7e4d694d35434eb`；旧release保留，旧live BUILD `vNT0S5yAGwiHTBok0KVLe`保留在 `/srv/video-api-debugger/app/.next-prod-before-sd2-loading-ux-20261002T111707Z`。服务器单元与排空记录：`/srv/video-api-debugger/backups/sd2-loading-ux-20261002T111707Z/`。
+- 临时发布适配器：`/tmp/sd2-loading-ux-v0361-deploy.sh`、`/tmp/sd2-loading-ux-v0361-verify.mjs`；共享归档/预约脚本未修改，复用既有 `/tmp/sd2-image-delivery-v036-gate.mjs` 正确调用。仅纯“工单归档”不要求live预约，仍确认append；upload/switch/restart/complete均保留预约和非0停止。临时脚本不提交Git，不宣称修正过全局工具。
+- 既有ReleaseNotice、SemVer检测、稍后与手动检查入口经源码核对保留，用户点击才刷新；旧客户端提醒真实行为未做自动验收。守门员start/finish按前端L2/L3发布范围执行，无分级误判或高风险越界；本轮只记录实际读用的近时/发布技能，父侧已记录loading/landing，不重复。
+- 实现完成与发布检查/部署完成分开；U1-U6实际效果仍待人工。未解决的证据缺口：真实202→就绪/失败、列表切换/重试、刷新恢复与未知受理查询、弹窗取消/Esc/草稿焦点、小屏/减少动画、准确时间气泡及旧客户端升级，均未功能/浏览器测试。没有已知未实现的本单批准项，不宣称全站native弹窗或全站加载改造完成；关联旧图片事故未继续恢复。
+
+统一diff：应用及完整记录从 `ff2af12dbca63406383f7df3c58a5218c656d129` 起，精确运行源码终点 `8acaf46e5fcd93004fc55b3016d74060b6020361`；最终归档提交在版本登记与交回回执提供。正式原工单、固定todo、索引及JSON归入 `/Volumes/Data/Projects/video-api-debugger/`，既有August脏改与旧untracked记录保留。
