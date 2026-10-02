@@ -1,5 +1,10 @@
 # V1.2 剩余模块落地 Todo
 
+## 2026-10-02 资源库整合审查归档
+
+- [完整盘点、上下游与独立体验审查](todo/2026-10-02-unified-resource-library.md)：审查来源为`codex/canvas-liblib-layout`的d08e9df，不是本目录旧应用分支；3个代码问题、6处体验问题尚未整改。仅记录，不部署。
+- [资料索引](../docs/materials/index.md)：原图及相关历史工单正式归档入口。
+
 更新时间：2026-06-24
 
 来源：`/Volumes/Data/Downloads/Current/AI视频生成项目成本管理系统需求文档_完整细项版V1.2.md`
