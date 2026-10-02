@@ -56,7 +56,7 @@
 | W1 | 编写反馈优化工单 | 正式归档、附件齐全、范围清楚、提交推送 | 进行中：首稿bc2ac3a已推送，本轮正文/索引/证据齐备；视频标注原件仍待归档，不能称附件齐全 |
 | I1 | 主图缩略图放大 | 约增大30%，不影响其他图 | 代码/部署已完成，发布检查通过，待用户手动验收 |
 | I2 | 锁定后的添加入口 | 按既有数量规则隐藏，不改变限制 | 代码/部署已完成，发布检查通过，待用户手动验收 |
-| I3 | 手机和平板导航 | 组、模块可触达，桌面保留 | 代码/部署已完成，发布检查通过，待用户手动验收 |
+| I3 | 手机和平板导航 | 组、模块可触达，桌面保留；安全工作现场关闭重开恢复 | 导航已部署待手动；同交付持久化补齐代码已写，待最终候选构建发布 |
 | I4 | 视频秒数与比例不可改排查修复 | 比例/秒数/分辨率合法选项自由选择，不加业务锁，不改模型限制 | 代码/部署已完成：三参数业务锁及接口拒绝已撤销，推荐只初次/切卡带入；待用户手动验收 |
 | I5 | 模板上下文未修改关闭及同类误提醒 | 未改或改回原内容直接关闭，真正未保存修改保护保留 | 代码/部署已完成：规则字段/默认值正规化，关闭按打开时有效配置比较，保存后更新基准；待用户手动验收 |
 | I6 | 线上多任务待确认根因排查 | 明确线上产物及故障阶段，证据与未知分开，不重试/改数据 | 阶段排查完成：两条请求阶段网络/超时、回执无响应；底层网络/代理/上游原因无法追溯待查 |
@@ -80,7 +80,7 @@ I1-I5源码已写；I6故障阶段与日志缺口已记录，主控授权恢复�
 
 ReleaseNotice已读源码：同channel严格数字SemVer、更高版本才弹、稍后按origin/project版本去重、前台/5分钟检测、/account手动检测重新打开、刷新前ProductDialog确认、外部/Esc关闭、标题“发现新版本”6字加粗20px均已有；不新建平行机制，真实升级交互待用户手动确认。
 
-已读Radix NavigationMenu源文件NavigationMenuProvider value/onItemSelect、Primitive.nav aria-label及分组/焦点模式，已读React useEffect依赖与清理示例。实际方案用已有状态+原生select而非接入Radix复杂菜单（MIT公开项目只借鉴模式，不复制或装依赖）；MDN flex-shrink解释小屏flex挤压，但两级选择直接避免全部嵌套列表。源码阅读不是功能验证。导航长期返回模块由既有TemplateStudioShell账号隔离localStorage位置负责，组/当前模块/封面同标签恢复仍复用既有sessionStorage，不另建重复状态系统。
+已读Radix NavigationMenu源文件NavigationMenuProvider value/onItemSelect、Primitive.nav aria-label及分组/焦点模式，已读React useEffect依赖与清理示例。实际方案用已有状态+原生select而非接入Radix复杂菜单（MIT公开项目只借鉴模式，不复制或装依赖）；MDN flex-shrink解释小屏flex挤压，但两级选择直接避免全部嵌套列表。源码阅读不是功能验证。导航长期返回模块由既有TemplateStudioShell账号隔离localStorage位置负责，主控随后指出sessionStorage关闭标签页会丢失且独立页共享键会擦除coverView。现有Shell仅保存入口/模块链接，不能弥补；I3最小补齐仅templateWorkbench的localStorage键sd2-template-studio:image-view:v1:userId，首次兼容旧session状态，独立/image-studio仍原session键；恢复账号/surface就绪后才写，显式moduleId仍优先。不扩站改造。
 
 - [ ] I1：只在主图区约+30%、比例稳定、响应式换列；辅助/风格/固定图不放大。
 - [ ] I2：沿用有效上限隐藏满额添加位；保留删除、预览、排序、已有重新选图行为；合法余量恢复。
@@ -137,7 +137,11 @@ I5同类源码检查：settings-controller.ts的samePrices按键和值比较，�
 I6原件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png；来源用户本轮剪贴板图，父于10月3日归档，895x725 PNG sips可读，原件/复制SHA256均2fc4dcf6bbe59df8e36f836a1d1da658cd66c6f56f028ee50aee57769a5ccd02。复用父关键校验，不重复读取原图URL，不上传私人图片Git。此附件与未归档15s标注图不同。
 
 
-## 发布回执（2026-10-03北京时间01:12）
+## 同交付I3持久化补齐（2026-10-03）
+
+主控静态纠偏：只共享session键，关闭标签页不会恢复且独立图片页写入时省略coverView。确认Shell不保存这三项；仅studio.tsx增加模板图片surface/user的local持久键与旧session迁移，账号切换就绪前不写旧状态，无有效记录用默认值、显式模块链接优先。独立页存储行为不扩改；无依赖。保持v0.36.3，01:12健康运行产物作为额外回退，最终候选构建及最小公网检查后再切。
+
+## 发布回执（2026-10-03北京时间01:12，第一次整批发布）
 
 应用v0.36.3已部署，待用户手动验收。运行源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a；BUILD ytlmOyOpdCSahZQKCm07Y；分支codex/canvas-liblib-layout，远端已核对完整commit。回退标签rollback/2026-10-03-before-feedback-v0.36.3已推送，指向f6478176fb34cefa432318f38ac521693bbdd2f6。旧源码release及旧BUILD OlWyIuDDh1fBfDOaID4Tt保留，旧构建路径/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0363，保护记录/srv/video-api-debugger/backups/sd2-feedback-v0363。
 

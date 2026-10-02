@@ -156,21 +156,40 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const [active, setActive] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [coverView, setCoverView] = useState(false);
-  const [viewRestored, setViewRestored] = useState(false);
+  const viewStorageKey = templateWorkbench ? `sd2-template-studio:image-view:v1:${userId}` : `sd2-studio-view:${userId}`;
+  const [restoredViewKey, setRestoredViewKey] = useState('');
+  const viewRestored = restoredViewKey === viewStorageKey;
   useRememberedScroll(`image-studio:${userId}`, viewRestored);
   useEffect(() => {
+    const readView = (storage: Storage, key: string) => {
+      try {
+        const view = JSON.parse(storage.getItem(key) || 'null');
+        return view && typeof view === 'object' && !Array.isArray(view)
+          && (typeof view.group === 'string' || typeof view.active === 'string' || typeof view.coverView === 'boolean') ? view : null;
+      } catch { return null; }
+    };
+    let view = null;
     try {
-      const view = JSON.parse(sessionStorage.getItem(`sd2-studio-view:${userId}`) || 'null');
+      view = templateWorkbench ? readView(localStorage, viewStorageKey) : readView(sessionStorage, viewStorageKey);
+      if (templateWorkbench && !view) view = readView(sessionStorage, `sd2-studio-view:${userId}`);
+    } catch { /* Unavailable storage must not block editing. */ }
+    if (templateWorkbench) {
+      setSelectedGroup(typeof view?.group === 'string' ? view.group : '');
+      setActive(typeof view?.active === 'string' ? view.active : '');
+      setCoverView(typeof view?.coverView === 'boolean' ? view.coverView : false);
+    } else {
       if (typeof view?.group === 'string') setSelectedGroup(view.group);
       if (typeof view?.active === 'string') setActive(view.active);
-      if (templateWorkbench && typeof view?.coverView === 'boolean') setCoverView(view.coverView);
-    } catch {}
-    setViewRestored(true);
-  }, [userId, templateWorkbench]);
+    }
+    setRestoredViewKey(viewStorageKey);
+  }, [userId, templateWorkbench, viewStorageKey]);
   useEffect(() => {
     if (!viewRestored) return;
-    try { sessionStorage.setItem(`sd2-studio-view:${userId}`, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView } : {}) })); } catch {}
-  }, [viewRestored, userId, selectedGroup, active, coverView, templateWorkbench]);
+    try {
+      const storage = templateWorkbench ? localStorage : sessionStorage;
+      storage.setItem(viewStorageKey, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView } : {}) }));
+    } catch {}
+  }, [viewRestored, viewStorageKey, selectedGroup, active, coverView, templateWorkbench]);
   const [coverPage, setCoverPage] = useState(() => {
     if (typeof window === 'undefined') return 0;
     try {
