@@ -1,0 +1,252 @@
+{
+  "checkedAt": "2026-10-02T04:56:52.078Z",
+  "build": "QKD4tRwtUPLxCLCxFc9yU",
+  "commit": "7b6da8395f21ea2677d6dc418f253f8f75c4a71a",
+  "routes": [
+    "/layout",
+    "/login/page",
+    "/admin/templates/[id]/cards/[cardId]/page",
+    "/admin/templates/[id]/page",
+    "/admin/templates/page",
+    "/template-studio/page",
+    "/image-studio/page",
+    "/template-generate/page",
+    "/templates/page"
+  ],
+  "files": [
+    {
+      "path": "static/chunks/webpack-d402c1324792a661.js",
+      "sha256": "c1e1cce6af1db10877fe381b87380f200d74d7ee2f290a37282d60fb35c24998",
+      "publicSha256": "c1e1cce6af1db10877fe381b87380f200d74d7ee2f290a37282d60fb35c24998",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/fd9d1056-27419110457650f5.js",
+      "sha256": "da5aae89949f6c8fa05f88f84d6e0948c2cbfc3e5286ac327605a91725eb4f2f",
+      "publicSha256": "da5aae89949f6c8fa05f88f84d6e0948c2cbfc3e5286ac327605a91725eb4f2f",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/7023-664754926e282f55.js",
+      "sha256": "cd361bfd5a0d6a8bb1b7d5cfaf3b607a584fee81a70a644e9d2f0bed2cc96431",
+      "publicSha256": "cd361bfd5a0d6a8bb1b7d5cfaf3b607a584fee81a70a644e9d2f0bed2cc96431",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/main-app-ee499b548bcce660.js",
+      "sha256": "aa288ef2ecd198684672c539b8e54be3a633d9be8200ec1f1136932490e9eded",
+      "publicSha256": "aa288ef2ecd198684672c539b8e54be3a633d9be8200ec1f1136932490e9eded",
+      "status": 200
+    },
+    {
+      "path": "static/css/67cc6969d4055c6d.css",
+      "sha256": "3cbc901ff662bfba8c33a7b317d820947ede9461269bdd885f441e241eb8d951",
+      "publicSha256": "3cbc901ff662bfba8c33a7b317d820947ede9461269bdd885f441e241eb8d951",
+      "status": 200
+    },
+    {
+      "path": "static/css/ea095be58e8c4d2c.css",
+      "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/231-e45014024c7b55a3.js",
+      "sha256": "76bb2f35c4b5eed8ffd4b31182c2ae91251a94e64e46c275666b459532cce311",
+      "publicSha256": "76bb2f35c4b5eed8ffd4b31182c2ae91251a94e64e46c275666b459532cce311",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6866-e7f7c4b7e0abe9fc.js",
+      "sha256": "c48ca0e313ac2c8a9b76c12da7690bbcc3609e4eb15ebd1d99b294dd30e764ae",
+      "publicSha256": "c48ca0e313ac2c8a9b76c12da7690bbcc3609e4eb15ebd1d99b294dd30e764ae",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/7574-33e6f87ec3af17cf.js",
+      "sha256": "cadbd5af84079b09dfa2604eebba8ae2b9c8ff2e2a29d29c5dc25e84cb80da60",
+      "publicSha256": "cadbd5af84079b09dfa2604eebba8ae2b9c8ff2e2a29d29c5dc25e84cb80da60",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/7465-42859c0d0e3467d4.js",
+      "sha256": "46862a8e7f01750755cc7ebf6b212e20ed6f858b06c5de84399dc7aaea74464e",
+      "publicSha256": "46862a8e7f01750755cc7ebf6b212e20ed6f858b06c5de84399dc7aaea74464e",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/layout-7adc7f0dca502c90.js",
+      "sha256": "4bc5eec6bc93d46931cb6969e3dc019f9c03cea5e95d6ba59482eb6619fb0d31",
+      "publicSha256": "4bc5eec6bc93d46931cb6969e3dc019f9c03cea5e95d6ba59482eb6619fb0d31",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/login/page-f96afe13c01aac82.js",
+      "sha256": "3726b746f93ba4c07545ec60fda56f934e385fc6ab010e2afa00d7e546f84035",
+      "publicSha256": "3726b746f93ba4c07545ec60fda56f934e385fc6ab010e2afa00d7e546f84035",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5110-20267849350b05f5.js",
+      "sha256": "85d30b7dead1d1352119bca920d669ea9d7883ebba71877bf0dbfa2f07abd3eb",
+      "publicSha256": "85d30b7dead1d1352119bca920d669ea9d7883ebba71877bf0dbfa2f07abd3eb",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/2077-ea023505992645b7.js",
+      "sha256": "74423d410c2abee8205ffc34e30206aa808ace8eaceeb52f9561b99a2681dfc9",
+      "publicSha256": "74423d410c2abee8205ffc34e30206aa808ace8eaceeb52f9561b99a2681dfc9",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/2490-82c8be651ade0694.js",
+      "sha256": "e56017cc3e49bc9cdfbdf5bbf5a3502d24603a9cbad2814af7b7d0610cbca2f2",
+      "publicSha256": "e56017cc3e49bc9cdfbdf5bbf5a3502d24603a9cbad2814af7b7d0610cbca2f2",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/admin/templates/[id]/cards/[cardId]/page-26bb122c76fc97e2.js",
+      "sha256": "6b0631ab44b96b09ae5e821092562db11573e40e7aeb68562076069f8949868e",
+      "publicSha256": "6b0631ab44b96b09ae5e821092562db11573e40e7aeb68562076069f8949868e",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/admin/templates/[id]/page-f63edacf7180350f.js",
+      "sha256": "9c39e2a328b4225b33cf82370178267c57ba54a478224662dbc1839a82881536",
+      "publicSha256": "9c39e2a328b4225b33cf82370178267c57ba54a478224662dbc1839a82881536",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/admin/templates/page-103be7b1b98c1474.js",
+      "sha256": "ea4414c214c697bfbdd0b8e6619c4c2b584814fdd6fded37917bd44997cdf802",
+      "publicSha256": "ea4414c214c697bfbdd0b8e6619c4c2b584814fdd6fded37917bd44997cdf802",
+      "status": 200
+    },
+    {
+      "path": "static/css/d5b8b4fb6aa4b571.css",
+      "sha256": "7c92d15bb83b5941819a5e54d7cb3d5f0fc9185e1fb228e0f5636f78dab928bf",
+      "publicSha256": "7c92d15bb83b5941819a5e54d7cb3d5f0fc9185e1fb228e0f5636f78dab928bf",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/8738-bf6090bd61d0ed15.js",
+      "sha256": "1a75077f3f0f9afa7155010ffc4cf522bf07a2bfbaf57a4fc66bd1c1ed52e5bb",
+      "publicSha256": "1a75077f3f0f9afa7155010ffc4cf522bf07a2bfbaf57a4fc66bd1c1ed52e5bb",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4155-2a66044892f125ee.js",
+      "sha256": "9bdd04c3f79c718061ed670594212674907ac9995a0ee3f544483ec700263f25",
+      "publicSha256": "9bdd04c3f79c718061ed670594212674907ac9995a0ee3f544483ec700263f25",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/9382-1ecb74c52ec2e039.js",
+      "sha256": "54079512717a671c3e25bed7115676c5be8a451afb84972f320902405c400c97",
+      "publicSha256": "54079512717a671c3e25bed7115676c5be8a451afb84972f320902405c400c97",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4416-b8e419715b789751.js",
+      "sha256": "7545acd8fcca5c3865c4e3d26be974986b242b446d030cde9263d2185251c879",
+      "publicSha256": "7545acd8fcca5c3865c4e3d26be974986b242b446d030cde9263d2185251c879",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4310-e5c50a1c771967b1.js",
+      "sha256": "278b3b9489cae68fc4237e334c9666ecb14a87f1abed2acce184622086c538bb",
+      "publicSha256": "278b3b9489cae68fc4237e334c9666ecb14a87f1abed2acce184622086c538bb",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/template-studio/page-0768772b7b44da53.js",
+      "sha256": "4f704a7305b8a960f04b58094ee0765575a0cd54fa49ff6c4c95ca977977732b",
+      "publicSha256": "4f704a7305b8a960f04b58094ee0765575a0cd54fa49ff6c4c95ca977977732b",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/image-studio/page-ff636bef6bbde835.js",
+      "sha256": "165ef1bd4ba5c67b105bf3303d417a48ce645de6891e657699843dde53742fc0",
+      "publicSha256": "165ef1bd4ba5c67b105bf3303d417a48ce645de6891e657699843dde53742fc0",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4942-43e327776d2cc38e.js",
+      "sha256": "442b3229fc2835fd57f87bc931ad21fba4e8dbbaa4d51baa0be200848dfdfeb5",
+      "publicSha256": "442b3229fc2835fd57f87bc931ad21fba4e8dbbaa4d51baa0be200848dfdfeb5",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/8902-ba2011b94bc95176.js",
+      "sha256": "93f4e1c1ffed3967cea580943b469163bc15caf49245cfa7882d014285d0a6c5",
+      "publicSha256": "93f4e1c1ffed3967cea580943b469163bc15caf49245cfa7882d014285d0a6c5",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/2108-75fdc25c936149a0.js",
+      "sha256": "a106b25715942709f703267d1ecf66dd603c66e112ffeb6c3a6f0e5c092b22ee",
+      "publicSha256": "a106b25715942709f703267d1ecf66dd603c66e112ffeb6c3a6f0e5c092b22ee",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/template-generate/page-2577f67f4d980e3f.js",
+      "sha256": "4802b3d65ae06adfe918004ecbaedc07f8d661955cfd3e7dabc92a8a02f9276c",
+      "publicSha256": "4802b3d65ae06adfe918004ecbaedc07f8d661955cfd3e7dabc92a8a02f9276c",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/3402-6e5f8b4df68337f3.js",
+      "sha256": "03859f483b3d9f6bfb530a47bd50dba4aeba0638e933df2e0408b24b347dc650",
+      "publicSha256": "03859f483b3d9f6bfb530a47bd50dba4aeba0638e933df2e0408b24b347dc650",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/templates/page-a6b22a28936af838.js",
+      "sha256": "0035f7e4b57fc088f9d7ce135c64f3f7da0eda7c940bef1962ff9be7b2f98f49",
+      "publicSha256": "0035f7e4b57fc088f9d7ce135c64f3f7da0eda7c940bef1962ff9be7b2f98f49",
+      "status": 200
+    }
+  ],
+  "checks": [
+    {
+      "path": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/api/release",
+      "status": 200,
+      "origin": "server-42-193",
+      "version": "0.34.2"
+    },
+    {
+      "path": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/template-studio",
+      "status": 307,
+      "origin": "server-42-193",
+      "location": "/login?next=%2Ftemplate-studio"
+    },
+    {
+      "path": "/image-studio",
+      "status": 307,
+      "origin": "server-42-193",
+      "location": "/login?next=%2Fimage-studio"
+    },
+    {
+      "path": "/templates",
+      "status": 307,
+      "origin": "server-42-193",
+      "location": "https://sd2.youdooart.com/login?next=%2Ftemplates"
+    },
+    {
+      "path": "/template-generate",
+      "status": 200,
+      "origin": "server-42-193"
+    }
+  ],
+  "local": "{\"configStatus\":\"HTTP/1.1 200 OK\",\"release\":\"0.34.2\"}\nactive\nactive\nactive\nactive\n"
+}
