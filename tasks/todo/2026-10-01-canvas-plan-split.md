@@ -23,9 +23,9 @@
 | SP1 | 方案数据与来源 | 稳定拆分编号、原文版本、正文范围和明确参数来源可保存恢复 | 已实现并部署，待用户手动验收 |
 | SP2 | 固定格式识别与预览 | 按创意拆分；可校正边界；未识别内容不丢失 | 已实现并部署，待用户手动验收 |
 | SP3 | 创建独立视频节点 | 使用既有节点；每段整体要求只作用于本段；来源全文不进入请求 | 已实现并部署，待用户手动验收 |
-| SP4 | 单节点生成与结果 | 输入快照、任务、防重复、未知提交恢复、预览下载和选用闭环 | 已实现并部署，待用户手动验收 |
+| SP4 | 单节点生成与结果 | 输入快照、任务、防重复、未知提交恢复、预览下载和选用闭环 | 已实现并部署，含历史查询收尾修正；待用户手动验收 |
 | SP5 | 修改、恢复与撤销 | 草稿恢复、不覆盖手改、不自动重跑、撤销不误删任务资产 | 已实现并部署，待用户手动验收 |
-| SP6 | 发布与人工验收 | 构建、健康、版本、回退检查；实际功能由用户手动验收 | 发布检查及正式归档已完成；人工验收待用户 |
+| SP6 | 发布与人工验收 | 构建、健康、版本、回退检查；实际功能由用户手动验收 | 最终产物发布检查及正式归档已完成；人工验收待用户 |
 
 首版不做：AI 识别、镜头级拆分、角色/场景/道具提取、共享要求编辑器、批量生成、自动更新下游、自动选优、自动拼片、第二套生成与计费系统、画布引擎替换。本次已明确授权实施上述 SP1–SP6；未列范围仍须另行授权。
 
@@ -153,7 +153,7 @@
 | public/tools/ultimate-canvas/app.js | 现有保存/草稿接入、项目原生对话框、明确参数参考、请求发送前保存、未知请求只读找回、历史预览框架、旧任务回写保护 |
 | public/tools/ultimate-canvas/canvas-engine.js | 保存恢复拆分来源；文字编辑原生右键保留；文本菜单入口 |
 | public/tools/ultimate-canvas/generation-node-workflow.js | 前端按所选模型能力校验时长并明确传模型；不截短；保留完整标题编号/end |
-| public/tools/ultimate-canvas/generation-task-coordinator.js | 成功但文件未就绪继续查询，不重发生成 |
+| public/tools/ultimate-canvas/generation-task-coordinator.js | 当前及历史任务成功但文件未就绪继续查询，刷新恢复；历史不覆盖当前，不重发生成 |
 | public/tools/ultimate-canvas/backend-contract.js | 当前画布只读请求恢复路径白名单 |
 | public/tools/ultimate-canvas/index.html、styles.css、icons.js | 原品牌预览和主次按钮、响应布局及既有 Lucide 图标复用 |
 | src/app/tools/ultimate-canvas/CanvasFrame.tsx | 预览覆盖全站导航、复用产品离开保护；保留浏览器 beforeunload |
@@ -176,9 +176,9 @@
 
 既有更新提醒：源码核对 ReleaseNotice 的同频道 SemVer 严格更高才提醒、稍后持久去重、手动检查、用户点击才刷新及未保存产品确认均保留。本轮未打开旧客户端验证提醒行为，不能写成功能验收通过。
 
-## 13. 发布与正式闭环（2026-10-02）
+## 13. 首候选发布记录（保留，最终产物见第14节）
 
-- 应用：v0.35.0；源码 `3f15a7cae69e97241ec3cf66493ff7bf6230d138` 已提交、推送并核对远端。线上 BUILD_ID `Ov3Td-2Mm5PA8AAm0Ym2N`，`.deployed-commit` 对应同一源码。后续只有记录提交，不重建或重启应用。
+- 首候选：v0.35.0；源码 `3f15a7cae69e97241ec3cf66493ff7bf6230d138` 已提交、推送并核对远端。当时 BUILD_ID `Ov3Td-2Mm5PA8AAm0Ym2N`，`.deployed-commit` 对应同一源码；此产物及证据保留作中间回退点，最终正式产物见第14节。
 - 精确源码归档 SHA-256：`f6ef71acac87249f16d129bab405c099896361fa590fe8e7b3dddb7d92a8e965`；服务器归档 `/srv/video-api-debugger/releases/3f15a7cae69e97241ec3cf66493ff7bf6230d138`。排除环境文件、依赖、构建、运行目录、上传/视频、数据库、日志和部署标记；用户原图不在归档。
 - 候选在独立 release 目录以普通 gouki 构建 `.next-prod-candidate`，通过后才在 root `flock -n /srv/video-api-debugger/deploy.lock` 下同步源码、保留旧 live、切换并重启。失败 trap 保护旧源码、live、标记及服务；没有原地构建 live、改账户或权限。
 - 回退 tag `rollback/sd2-before-v0.35.0-20261002` 已推送、远端展开确认指向旧源码 `7b6da8395f21ea2677d6dc418f253f8f75c4a71a`，旧 BUILD `QKD4tRwtUPLxCLCxFc9yU`。旧源码 release 保留，旧 live 位于 `/srv/video-api-debugger/app/.next-prod-before-sd2-canvas-split-20261002-1790929333653`。
@@ -189,3 +189,15 @@
 - 统一源码 diff：[GitHub compare](https://github.com/goukiyang/seedance-api-debugger/compare/20931f7fb4b5af9dc8886120cd03d64ee5f87c09...3f15a7cae69e97241ec3cf66493ff7bf6230d138)。逐文件改动见第12节；新增 evidence.json 仅记录发布检查，不包含用户图或凭据。
 
 未验收/边界：没有执行浏览器、DOM、截图、自动功能回归、付费生成或生产数据库写入。第10节全部用户手动场景及真实旧客户端更新提醒仍待人工；代码和发布不冒充实际效果通过。历史旧节点若既无任务ID又无稳定请求ID，本批无法从不存在的字段安全找回，保持“提交结果待确认”并阻止重发，需管理员核对；入口 `public/tools/ultimate-canvas/app.js` 的 hydrateNodeViews/renderVideoResultHistory。新请求有稳定ID及最小只读恢复入口。浏览器 beforeunload/系统文件选择保留平台语义。没有明确未实现的本批代码项，也不宣称尚未手动验证的流程已达标。
+
+## 14. 同批收尾修正
+
+正式归档复核发现：当前节点开始新的生成后，旧结果若仍在准备文件，单任务轮询归属会停止更新该历史项。已补齐可选的历史任务查询模式，只用于当前画布；当前任务与历史记录分别更新，历史 loading/错误不得覆盖当前状态。刷新恢复也只查询未终止或文件未就绪的历史任务，不提交生成。修改限 app.js、generation-task-coordinator.js 及入口缓存标记。按同一交付的收尾修正保持 v0.35.0，不重复抬号；首候选源码/build/证据留在第13节，最终产物以下续记为准，发布前保留首候选以及原 v0.34.2 两个回退点。没有新增自动功能验收。
+
+最终正式应用：v0.35.0；源码 `80afb99c3f664949936961e86e6d91ba9d057725`，BUILD_ID `ILxByLZ7_8R-4aPl4WWhH`。精确归档 SHA-256 `0cd8a19b3005d23243ec8fbb784a750fa7417e790e90866e34cb4f3ddf8b3088`，release `/srv/video-api-debugger/releases/80afb99c3f664949936961e86e6d91ba9d057725`。版本未重复递增，入口变更了本批缓存标记；已打开首候选 v0.35.0 的客户端请手动刷新，同版本不会虚报新的升级提醒。
+
+收尾检查：8个脚本语法和整批差异检查通过；本地候选构建退出0，BUILD `qwUJPbSa-WdjXckIAUQqW`；服务器独立候选构建退出0，随后安全切换。最终4服务 active，本地/公网 config、release、login HTTP200，公网来源标记正常；公网32项静态和服务器10项画布源码 SHA 匹配最终产物。画布及 app.js 匿名307保护保持，未绕过。完整当前证据及首候选摘要在同一 evidence.json，首次完整证据另可由 Git 文档提交 `a54f1fcdb97ea3cad7f56480b7735ccd6ba6da47` 回看。
+
+同一 run 的收尾预约：上传前 `2026-10-02T08:59:51.669Z`，切换前 `09:01:45.784Z`，完成 `09:03:11.348Z`，每次 gate/append/重新确认都成功才继续。中间回退 tag `rollback/sd2-v0.35.0-before-history-closure-20261002` 已推送及远端展开核对，指向首候选3f15a7c；首候选 live 保留于 `/srv/video-api-debugger/app/.next-prod-before-sd2-canvas-split-20261002-1790929333653-80afb99c3f664949936961e86e6d91ba9d057725`。原 v0.34.2 的7b6da83 tag和QKD live仍保留不动。
+
+最后记录提交不再重建应用。最终源码 diff：[统一 compare](https://github.com/goukiyang/seedance-api-debugger/compare/20931f7fb4b5af9dc8886120cd03d64ee5f87c09...80afb99c3f664949936961e86e6d91ba9d057725)。SP1–SP5 已实现并部署待用户手动验收，SP6 最终发布与正式记录闭环；第10节人工场景及第13节未验收边界保持不变。

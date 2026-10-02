@@ -7,7 +7,7 @@
 
 ## 2026-10-02 画布视频方案拆分实施
 
-- [唯一有效工单 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：v0.35.0 已部署；SP1–SP5 已实现并部署待用户手动验收，SP6 发布检查及正式归档完成。真实产出库资源ID复用，assetId 如实 null，不创建 Asset；源码3f15a7c，BUILD Ov3Td-2Mm5PA8AAm0Ym2N，4服务/32公网静态/10源码一致。仅用 `codex/canvas-liblib-layout` 应用源，本目录完整归档。
+- [唯一有效工单 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：v0.35.0 最终产物已部署；SP1–SP5 含历史查询收尾修正已实现并部署待用户手动验收，SP6 发布检查及正式归档完成。真实资源ID复用，assetId 如实 null，不创建 Asset；源码80afb99，BUILD ILxByLZ7_8R-4aPl4WWhH，4服务/32公网静态/10源码一致；原版与中间候选均可回退。仅用 `codex/canvas-liblib-layout` 应用源，本目录完整归档。
 - [资料索引](../docs/materials/index.md)：复用原画布截图与历史 v1.0.0，不公开用户原图。
 
 ## 2026-10-02 模板主操作与产品弹窗
