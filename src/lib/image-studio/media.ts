@@ -188,7 +188,7 @@ export async function openStudioImageStream(url: string, signal: AbortSignal, me
         resolve(openStudioImageStream(next, signal, metrics, headers, redirects + 1));
         return;
       }
-      if (status !== 200 && status !== 206) { fail(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); response.destroy(); return; }
+      if (status !== 200 && status !== 206 && !(status === 416 && headers.Range)) { fail(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); response.destroy(); return; }
       metrics.phase = 'body';
       const length = Number(response.headers['content-length']);
       if (Number.isSafeInteger(length) && length >= 0) metrics.expectedBytes = length;
@@ -228,13 +228,19 @@ export class StudioImageDeliveryError extends Error {
 
 // Generated 4K images must not inherit the reference-upload 20MB ceiling.
 // Keep full resolution and lossless PNG; never silently downscale paid output.
-export async function normalizeGeneratedStudioImage(bytes: Buffer) {
+export type StudioOutputRequirements = { format?: string; size?: string; transparent?: boolean };
+export async function validateGeneratedStudioImage(bytes: Buffer, requirements: StudioOutputRequirements = {},
+  recordValidation?: (validation: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string; transparentPixels?: number }) => Promise<void>) {
   if (!bytes.length || bytes.length > MAX_STUDIO_GENERATED_BYTES) {
     throw new StudioImageDeliveryError('generated_input_size_limit', bytes.length);
   }
   let png: Buffer;
+  let metadata: sharp.Metadata;
   try {
-    png = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false })
+    metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata();
+    if (!['png', 'jpeg', 'webp', 'avif', 'tiff'].includes(metadata.format || '') || (metadata.pages || 1) !== 1) throw new Error('Unsupported output');
+    png = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' })
+      .timeout({ seconds: 45 })
       .png({ compressionLevel: 6 }).toBuffer();
   } catch {
     throw new StudioImageDeliveryError('generated_image_decode_failed', bytes.length);
@@ -242,5 +248,23 @@ export async function normalizeGeneratedStudioImage(bytes: Buffer) {
   if (png.length > MAX_STUDIO_GENERATED_BYTES) {
     throw new StudioImageDeliveryError('generated_png_size_limit', png.length);
   }
-  return png;
+  const validation = { originalFormat: metadata.format!, storedFormat: 'png', width: metadata.width!, height: metadata.height!, requestedSize: requirements.size, transparentPixels: undefined as number | undefined };
+  await recordValidation?.(validation);
+  if (requirements.format && metadata.format !== requirements.format) throw new StudioImageDeliveryError('generated_format_mismatch', bytes.length);
+  if (requirements.size && /^\d+x\d+$/.test(requirements.size)) {
+    const [width, height] = requirements.size.split('x').map(Number);
+    if (metadata.width !== width || metadata.height !== height) throw new StudioImageDeliveryError('generated_dimensions_mismatch', bytes.length);
+  }
+  if (requirements.transparent) {
+    if (!metadata.hasAlpha) throw new StudioImageDeliveryError('generated_alpha_missing', bytes.length);
+    const { data, info } = await sharp(png, { failOn: 'warning', limitInputPixels: 40_000_000 })
+      .timeout({ seconds: 45 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let transparentPixels = 0;
+    for (let i = info.channels - 1; i < data.length; i += info.channels) if (data[i] < 255) transparentPixels++;
+    validation.transparentPixels = transparentPixels;
+    await recordValidation?.(validation);
+    if (!transparentPixels) throw new StudioImageDeliveryError('generated_transparency_missing', bytes.length);
+  }
+  return { png, validation };
 }
+export async function normalizeGeneratedStudioImage(bytes: Buffer) { return (await validateGeneratedStudioImage(bytes)).png; }

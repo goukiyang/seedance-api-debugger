@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { ImageStudioTask } from '@prisma/client';
+import type { ImageStudioTask, Prisma } from '@prisma/client';
+import { studioDeliveryStatus } from './delivery';
 import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
@@ -359,6 +360,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const outputSize = imageOutputSize(generation.model, resolution, resolvedAspectRatio, imageApi.provider);
     const snapshot = JSON.stringify({
       version: 1,
+      requestId: input.requestId, batchId, inputFingerprint: fingerprint,
       referenceImages: referenceSnapshot,
       fixedReferenceImages: fixedReferenceSnapshot,
       templateFixedCount: actualTemplateFixedReferences.length,
@@ -413,14 +415,23 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   return batchId;
 }
 
-export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; error?: string; usage?: unknown } = {}) {
+export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}) {
   return prisma.$transaction(async tx => {
     const changed = await tx.imageStudioTask.updateMany({
-      where: { id: task.id, status: 'running', lease_token: task.lease_token },
+      where: { id: task.id, status: 'running', lease_token: task.lease_token, lease_until: { gt: new Date() } },
       data: { status, asset_id: data.assetId, error: status === 'succeeded' ? null : data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
         lease_until: null, lease_token: null, finished_at: new Date() },
     });
     if (!changed.count) return false;
+    if (status === 'succeeded' && data.preparedAsset) {
+      const prepared = data.preparedAsset;
+      if (prepared.owner_id !== task.owner_id || !prepared.hash || prepared.type !== 'image') throw new Error('Output ownership mismatch');
+      const asset = await tx.asset.upsert({ where: { owner_id_hash: { owner_id: task.owner_id, hash: prepared.hash } },
+        create: prepared, update: { thumbnail_url: prepared.thumbnail_url, width: prepared.width, height: prepared.height } });
+      if (asset.status !== 'active' || asset.mime_type !== 'image/png' || asset.original_url !== prepared.original_url
+        || !asset.thumbnail_url || asset.width !== prepared.width || asset.height !== prepared.height) throw new Error('Output asset unavailable');
+      await tx.imageStudioTask.update({ where: { id: task.id }, data: { asset_id: asset.id } });
+    }
     if (task.unit_credits === 0) return true;
     const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id,
       terminalStatus: status, frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot });
@@ -446,10 +457,12 @@ export async function claimStudioTask() {
   return changed.count ? { ...candidate, status: 'running', lease_token: leaseToken } : null;
 }
 
-export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string, isAdmin = false, taskId?: string) {
+export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string, isAdmin = false, taskId?: string, requestId?: string) {
   if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   if (taskId !== undefined && (typeof taskId !== 'string' || !taskId || taskId.length > 120)) throw new StudioError('历史生成记录无效');
+  if (requestId !== undefined && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new StudioError('提交编号无效');
   const where = { owner_id: ownerId, deleted_at: null,
+    ...(requestId ? { batch_id: createHash('sha256').update(`${ownerId}:${requestId}`).digest('hex') } : {}),
     ...(moduleId ? moduleId === defaultStudioModuleId(ownerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] } : { module_id: moduleId } : {}) };
   const rows = taskId !== undefined
     ? await prisma.imageStudioTask.findFirst({ where: { ...where, id: taskId } }).then(task => task ? [task] : [])
@@ -467,10 +480,12 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   const owner = items.length ? await prisma.user.findUnique({ where: { id: ownerId },
     select: { id: true, name: true, username: true, avatar_url: true } }) : null;
   const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
+  const deliveries = new Map(await Promise.all(items.map(async task => [task.id, await studioDeliveryStatus(task)] as const)));
   return { tasks: items.map(task => {
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
+      delivery: deliveries.get(task.id),
       prompt: task.prompt, model: task.model, quality: task.quality, status: task.status, error: task.error, unitCredits: task.unit_credits,
       providerCostUsd: task.provider_cost_usd,
       aspectRatio: task.aspect_ratio, outputSize: task.output_size,

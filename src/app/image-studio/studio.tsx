@@ -39,7 +39,12 @@ import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy'
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[] };
-type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number } | null };
+type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; snapshot?: StudioSnapshot; delivery?: { phase: string; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number } | null };
+function studioTaskPhase(task: StudioTask) {
+  const phase = task.delivery?.phase;
+  return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: task.asset ? '已完成' : '图片已移除' } as Record<string, string>)[phase || '']
+    || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
+}
 type StudioModule = { referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
 type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
@@ -655,7 +660,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     try {
       await readResponse(await fetch('/api/image-studio/modules', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: module.id, revision: revisionRef.current }) }));
-      try { localStorage.removeItem(draftKey); sessionStorage.removeItem(pendingKey); } catch { /* Optional browser cache. */ }
+      try { localStorage.removeItem(draftKey); localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch { /* Optional browser cache. */ }
       onModuleDelete(module.id);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '删除失败，请重试'); }
     finally { moduleDeleteLock.current = false; setModuleDeleting(false); }
@@ -772,8 +777,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         setRecoverableDraft(saved);
         void restoreTemporaryDraft(saved, true).finally(() => setDraftLoaded(true));
       } else setDraftLoaded(true);
-      const pending = JSON.parse(sessionStorage.getItem(pendingKey) || 'null');
-      if (pending && typeof pending.requestId === 'string') setPendingSubmission(pending);
+      const pending = JSON.parse(localStorage.getItem(pendingKey) || sessionStorage.getItem(pendingKey) || 'null');
+      if (pending && typeof pending.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(pending.requestId)) {
+        const identity = { requestId: pending.requestId };
+        setPendingSubmission(identity);
+        localStorage.setItem(pendingKey, JSON.stringify(identity)); sessionStorage.removeItem(pendingKey);
+      }
     } catch { setDraftLoaded(true); /* A damaged local draft must not block the page. */ }
   }, [draftKey, pendingKey, module.saved, module.revision, module.model, isAdmin]);
   useEffect(() => {
@@ -843,8 +852,30 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }, [loadTasks, visible]);
   useEffect(() => () => { if (downloadReady) URL.revokeObjectURL(downloadReady.url); }, [downloadReady]);
 
+  async function querySubmission() {
+    if (!pendingSubmission || submitLock.current) return;
+    submitLock.current = true; setSubmitting(true); setError('');
+    try {
+      const value = await readResponse(await fetch(`/api/image-studio/tasks?requestId=${encodeURIComponent(String(pendingSubmission.requestId))}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      if (!Array.isArray(value.tasks) || !value.tasks.length) {
+        setError('暂未查到这次提交，仍不能确认是否受理。请稍后查询或联系管理员，不会自动再生成。'); return;
+      }
+      setPendingSubmission(null); localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey);
+      await loadTasks();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '查询暂不可用，原提交编号仍保留。'); }
+    finally { submitLock.current = false; setSubmitting(false); }
+  }
+
   async function submit(retryTask?: StudioTask) {
     if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
+    if (pendingSubmission) { await querySubmission(); return; }
+    if (reproduceSourceTaskId || tasks.some(task => task.status === 'uncertain')) {
+      submitLock.current = true;
+      let accepted = false;
+      try { accepted = await confirm('这会新建图片生成任务，可能再次产生上游费用。恢复原图不会重新生成；确定按当前设置新建生成任务吗？', { title: '确认生成', confirmLabel: '新建生成任务' }); }
+      finally { submitLock.current = false; }
+      if (!accepted) return;
+    }
     if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
@@ -855,20 +886,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? globalContextDraft : undefined,
         fixedReferences: !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
         styleGroupIds: reproduceSourceTaskId ? undefined : styleGroups.map(group => group.id), referencePolicy } };
-    try { sessionStorage.setItem(pendingKey, JSON.stringify(payload)); } catch { /* The in-memory request ID still prevents duplicate retries. */ }
+    try {
+      const saved = JSON.stringify({ requestId: payload.requestId });
+      localStorage.setItem(pendingKey, saved);
+      if (localStorage.getItem(pendingKey) !== saved) throw new Error('Request identity not saved');
+    } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); return; }
     submitLock.current = true; setSubmitting(true); setError('');
     let ambiguous = true;
     try {
-      const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) onReloadSettings(); await readResponse(response); }
+      const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) });
+      if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) onReloadSettings(); await readResponse(response); }
       else {
-        await readResponse(response);
-        setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} await loadTasks();
+        const value = await readResponse(response);
+        if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
+        setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} await loadTasks();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交结果未确认');
       // Reuse the exact request ID after ambiguous transport failures.
-      setPendingSubmission(ambiguous ? payload : null);
+      setPendingSubmission(ambiguous ? { requestId: payload.requestId } : null);
     } finally { submitLock.current = false; setSubmitting(false); }
   }
 
@@ -1205,7 +1241,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
         </div>
-        <button type="button" className={styles.generate} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
+        <button type="button" className={styles.generate} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void submit()}>{submitting ? pendingSubmission ? '正在查询' : '正在提交' : pendingSubmission ? '查询这次提交' : '生成图片'}</button>
         {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
         {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
         {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
@@ -1236,8 +1272,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </div>
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
-        {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={async () => {
-          if ((await confirm('上次提交可能已成功，请先查看生成记录。确定放弃核对并开始新任务吗？', { title: '放弃核对', confirmLabel: '开始新任务' }))) { setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} }
+        {pendingSubmission && <p className={styles.muted}>提交结果待确认，只查询原请求，不会再次生成。<button type="button" disabled={submitting} onClick={async () => {
+          if ((await confirm('上次提交可能已受理。放弃核对后，再次生成会新建任务，可能再次产生上游费用。确定放弃核对吗？', { title: '放弃核对', confirmLabel: '放弃核对' }))) { setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} }
         }}>放弃核对</button></p>}
         {!ready && !settingsError && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
       </section>
@@ -1262,7 +1298,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
             }} />}
           </> : <div className={styles.taskState}>{['queued', 'running'].includes(task.status) && <LoaderCircle className={styles.spinner} size={24} />}
-            {task.status === 'queued' ? '等待生成' : task.status === 'running' ? '正在生成' : task.status === 'succeeded' ? '图片已移除' : '未能交付图片'}</div>}<button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button></div>
+            <span role="status">{studioTaskPhase(task)}</span>
+            {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <span>{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</span>}
+          </div>}<button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button></div>
           <div className={styles.resultHeading}>
             <p className={styles.prompt}>{name} · {task.ordinal}</p>
             <span className={styles.resultOwner} aria-label="生成者"><UserIdentityBadge user={task.owner} size="sm" className="asset-card-user" /></span>
@@ -1279,13 +1317,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             </div>
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
-          <div className={styles.resultActions}><div className={styles.resultCommands}>
+          <div className={styles.resultActions}><div className={styles.resultCommands} data-needs-action={task.status === 'uncertain'}>
+            {task.delivery?.recoveryAvailable && <button type="button" className={styles.recoveryAction} onClick={() => void loadTasks()}>查看原图恢复</button>}
             {task.asset && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
             {task.asset && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
-            {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="重新生成" aria-label="重新生成" onClick={() => restoreTask(task)}><RefreshCw size={15} /></button>}
+            {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="恢复设置以重新生成，不会立即提交" aria-label="恢复设置以重新生成" onClick={() => restoreTask(task)}><RefreshCw size={15} />{task.status === 'uncertain' && '重新生成'}</button>}
             {isAdmin && task.snapshot?.sourceAvailable && <button type="button" disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
           </div>
           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
+          {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
+          {(task.delivery?.upstreamRequestId || task.delivery?.validation) && <details className={styles.muted}><summary>交付详情</summary>
+            {task.delivery.upstreamRequestId && <p>上游请求编号：{task.delivery.upstreamRequestId}</p>}
+            {task.delivery.validation && <p>原图 {task.delivery.validation.originalFormat.toUpperCase()} · {task.delivery.validation.width} × {task.delivery.validation.height}；本站保存 PNG{task.delivery.validation.requestedSize ? `；请求 ${task.delivery.validation.requestedSize}` : ''}</p>}
+          </details>}
         </article>)}</div>
         {nextCursor && <button type="button" onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
       </section>

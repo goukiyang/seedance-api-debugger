@@ -4,6 +4,15 @@ import { MAX_REFERENCE_IMAGES, MAX_STUDIO_GENERATED_BASE64 } from './limits';
 import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
 
 export type StudioImageInput = { bytes: Uint8Array; mimeType: string };
+function safeUsage(value: unknown, depth = 0): unknown {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || depth > 3) return null;
+  return Object.fromEntries(Object.entries(value).slice(0, 40).flatMap(([key, item]) => {
+    if (!/^[a-zA-Z_]{1,60}$/.test(key)) return [];
+    const safe = safeUsage(item, depth + 1);
+    return safe === null ? [] : [[key, safe]];
+  }));
+}
 
 const GEMINI_IMAGE_MODELS = new Set([
   'gemini-3.1-flash-image-preview',
@@ -25,6 +34,8 @@ export async function requestStudioImages(params: {
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string;
   downloadSignal?: AbortSignal;
   deliverRemoteImage?: (url: string, usage: unknown) => Promise<Buffer>;
+  persistBase64Image?: (value: string, usage: unknown) => Promise<void>;
+  recordResponse?: (response: Response) => Promise<void>;
   size?: string;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
@@ -59,19 +70,37 @@ export async function requestStudioImages(params: {
   let response: Response;
   try { response = await fetcher(url, { method: 'POST', headers, body, signal: params.signal }); }
   catch { throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network'); }
+  await params.recordResponse?.(response);
   if (!response.ok) throw new StudioProviderError('request', 'http_error', response.status);
-  const value = await response.json().catch(() => { throw new StudioProviderError('response', 'invalid_json', response.status); });
+  // Bound a generation response before parsing; output is never printed or stored in the DB.
+  let value;
+  try {
+    if (!response.body) throw new Error('Empty response');
+    const chunks: Uint8Array[] = []; let length = 0;
+    const reader = response.body.getReader();
+    try {
+      for (;;) {
+        const next = await reader.read(); if (next.done) break;
+        length += next.value.byteLength;
+        if (length > params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024) throw new Error('Response too large');
+        chunks.push(next.value);
+      }
+    } finally { await reader.cancel().catch(() => {}); }
+    value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch { throw new StudioProviderError('response', 'invalid_or_oversize_response', response.status); }
   if (!Array.isArray(value?.data) || !value.data.length) throw new StudioProviderError('response', 'empty_output', response.status);
   if (value.data.length > params.count) throw new StudioProviderError('response', 'unexpected_count', response.status);
+  const usage = safeUsage(value.usage);
   const images: string[] = [];
   for (const item of value.data) {
     if (typeof item?.b64_json === 'string' && item.b64_json.length) {
       if (item.b64_json.length > MAX_STUDIO_GENERATED_BASE64) throw new StudioProviderError('response', 'image_too_large', response.status);
+      await params.persistBase64Image?.(item.b64_json, usage);
       images.push(item.b64_json);
     } else if (typeof item?.url === 'string' && item.url.length) {
       try {
         if (new URL(item.url).protocol !== 'https:') throw new StudioImageDownloadError('download_unsafe_url');
-        images.push((await (params.deliverRemoteImage ? params.deliverRemoteImage(item.url, value.usage ?? null)
+        images.push((await (params.deliverRemoteImage ? params.deliverRemoteImage(item.url, usage)
           : readImage(item.url, params.downloadSignal || params.signal))).toString('base64'));
       } catch (error) {
         throw new StudioProviderError('download', error instanceof StudioImageDownloadError ? error.code : 'download_invalid_or_unreadable', error instanceof StudioImageDownloadError ? error.status : undefined, error instanceof StudioImageDownloadError ? error.diagnostics : undefined, error instanceof StudioImageDownloadError && error.retryable);
@@ -80,7 +109,7 @@ export async function requestStudioImages(params: {
       throw new StudioProviderError('response', 'unsupported_output', response.status);
     }
   }
-  return { images, usage: value.usage ?? null };
+  return { images, usage };
 }
 
 async function requestGeminiStudioImages(params: {
@@ -123,5 +152,5 @@ async function requestGeminiStudioImages(params: {
     })
     .filter((image: unknown): image is string => typeof image === 'string' && image.length > 0);
   if (!images.length) throw new StudioProviderError('response', 'empty_output', response.status);
-  return { images: images.slice(0, params.count), usage: value.usageMetadata || value.usage || null };
+  return { images: images.slice(0, params.count), usage: safeUsage(value.usageMetadata || value.usage) };
 }

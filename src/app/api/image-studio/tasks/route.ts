@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
-  try { return NextResponse.json(await listStudioTasks(user.id, request.nextUrl.searchParams.get('cursor') || undefined, request.nextUrl.searchParams.get('moduleId') || undefined, user.role === 'admin', request.nextUrl.searchParams.get('taskId') || undefined), { headers: { 'Cache-Control': 'no-store' } }); }
+  try { return NextResponse.json(await listStudioTasks(user.id, request.nextUrl.searchParams.get('cursor') || undefined, request.nextUrl.searchParams.get('moduleId') || undefined, user.role === 'admin', request.nextUrl.searchParams.get('taskId') || undefined, request.nextUrl.searchParams.get('requestId') || undefined), { headers: { 'Cache-Control': 'no-store' } }); }
   catch { return NextResponse.json({ error: '生成记录读取失败，请重试' }, { status: 503 }); }
 }
 export async function POST(request: NextRequest) {
@@ -32,6 +32,6 @@ export async function POST(request: NextRequest) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: '提交内容无效' }, { status: 400 });
     if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof Error && error.message.startsWith('点数不足')) return NextResponse.json({ error: error.message }, { status: 409 });
-    return NextResponse.json({ error: '提交未确认，请点击重试提交，不要重复新建任务' }, { status: 503 });
+    return NextResponse.json({ error: '提交结果待确认，请查询这次提交，不要重复新建任务' }, { status: 503 });
   }
 }

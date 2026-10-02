@@ -190,6 +190,9 @@
 .resultOwner :global(.user-identity-name) { color: #dce2e7; }
 .resultActions button { padding: 5px 8px; font-size: 13px; }
 .resultCommands { display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity .16s ease; }
+.resultCommands:has(.recoveryAction), .resultCommands[data-needs-action="true"] { opacity: 1; }
+.page .recoveryAction { background: #79daca; color: #102721; border-color: #79daca; font-weight: 750; }
+.page .recoveryAction:hover:not(:disabled) { background: #98e7d9; }
 .result:hover .resultCommands, .result:focus-within .resultCommands { opacity: 1; }
 .copyFeedback { display: block; margin-top: 5px; color: #8ce5d2; font-size: 12px; }
 .deleteInline { color: #ffb4ab !important; border-color: #a44949 !important; }
