@@ -9,14 +9,26 @@
 | 编号 | 本次任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | I1 | 图片交付恢复工单 | 写清现状、调整范围、异常恢复与人工验收，并归档参考文件 | 已完成；正文与原件归入项目，差异和复制检查通过 |
-| ID1 | 生成请求身份与防重复 | 复用本地请求编号；未确认受理不自动再生成；追踪上游请求而不冒充上游幂等 | 进行中；定向修正查询入口，首候选已部署 |
+| ID1 | 生成请求身份与防重复 | 复用本地请求编号；未确认受理不自动再生成；追踪上游请求而不冒充上游幂等 | 已实现并部署最终修正；待用户手动验收 |
 | ID2 | 输出检查点与下载恢复 | Base64 优先、同对象恢复、慢速非续传源有界等待；进程重启不重新生图 | 已实现并部署；待用户手动验收 |
 | ID3 | 完整图片与资产交付 | 完整解码、格式/尺寸/透明要求核验；资产发布和任务成功保持一致 | 已实现并部署；待用户手动验收 |
-| ID4 | 用户状态及发布交接 | 阶段与恢复动作清楚；发布保护到位；实际功能待用户手动验收 | 进行中；定向修正同版重发及记录更新 |
+| ID4 | 用户状态及发布交接 | 阶段与恢复动作清楚；发布保护到位；实际功能待用户手动验收 | 已完成发布与归档；功能待用户手动验收 |
+
+### 最终定向修正与同版发布（2026-10-02）
+
+- ID1/ID4查询入口定向修正已实现并部署，待用户手动验收；ID2/ID3其余静态Review结论复用。唯一应用文件增量为 `src/app/image-studio/studio.tsx`：pending主按钮直达GET查询，submit兜底也先处理pending；查询只保留提交/删除锁，独立querying状态保证读取完成前一直显示“正在查询”，不受新生成设置/模型/素材/共享/比例/草稿/上传条件影响。新生成原阻断及GET当前owner鉴权未改，不自动丢弃未知ID、重POST或新收费。
+- 最终应用仍v0.36.0，本交付未重复抬号；正式源码 `afc4489cac533523832e317aa7e4d694d35434eb`，BUILD `vNT0S5yAGwiHTBok0KVLe`。本地候选 `Grm8WcWCNxA813egz2Xby`，日志 `/tmp/sd2-image-query-v036-local-build.log`；服务器独立候选/静态标记通过，日志 `/tmp/sd2-image-query-20261002T101312Z-build.log`，SHA256 `00b353d78f2237df3e376e0c133b710d61ed6e217cb10288eafc0ea7a97988d3`。两处构建返回0，保留既有非阻断warnings，无功能自动验收。
+- exact commit源包SHA256 `2c0b2078542c370f8fdfe7fb774e59920484fcca079757edbee32c8577abca8b`，归档完成才计算/上传；同一runId `sd2-image-query-20261002T101312Z` 上传/切换重启/完成登记均确认0。root flock至公网证据通过才释放；网页与worker精确源码一致。
+- 图片worker源码SHA `e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813`，与首候选一致；仍按精确发布保护正常排空PID1168023后才切换，新PID1188032于2026-10-02 18:21:57 CST启动，排空后queued/running为0，未强杀，unit前后SHA相等，480s/600s/660s执行/租约/停止预算未改。持久storage/uploads/videos及数据库排除保护保持。
+- 最终发布检查：本机和公网 config/release/login 200、X-SD2-Origin server-42-193，公网release 0.36.0；四项服务active；**25项新构建公网静态SHA、14个源码/worker文件SHA一致**。匿名image-studio/template-studio 307保留鉴权，不绕过。[证据JSON](2026-10-01-image-download-timeout.evidence.json) 顶层为本次最终产物，`firstCandidateEvidence` 只作首候选历史。
+- 两级回退已推送并核对：`rollback/2026-10-02-before-image-query-final-v036` ->0575619首候选（BUILD FjIMzHMxNLluQOLfmBc61），`rollback/2026-10-02-before-image-delivery-v036` ->80afb99原生产（BUILD ILxByLZ7_8R-4aPl4WWhH）。服务器两级release/live备份均保留；本次unit与排空记录 `/srv/video-api-debugger/backups/sd2-image-query-20261002T101312Z`，首候选构建备份 `/srv/video-api-debugger/app/.next-prod-before-sd2-image-query-20261002T101312Z`。
+- 完整应用/记录diff起点21e0221；本次定向代码diff起点3e89f04，终点afc4489。最终文档提交/远端复核记在正式项目版本登记，不因文档提交重建。源码与正式root完整工单/证据一致，主todo原August脏改与未跟踪记录原状保留。
+- 工具维护仅为下述临时gate包装脚本的两行archive例外：无全局技能修改、不在Git仓库、未提交；node静态检查0及实际diff已保存，live预约/append/non0停止保护保持。本次临时deploy脚本仅新增候选查询文案marker检查，bash语法检查0；未扩大工具重构。
+- 边界仍相同：旧图未恢复、上游查询/幂等未确证、透明请求未开放、已退款终态不自动领图/补扣。未执行浏览器、离线/功能回归、付费生成、生产DB写入或外发；真实效果与旧客户端更新弹窗由用户手动验收。start/finish等价L4守门员，未发生分级误判。
 
 ### 本次执行计划与边界（2026-10-02）
 
-2026-10-02 定向收尾：Supervisor静态复核发现原请求查询被新生成的settings/共享/上传/比例/草稿条件挡住。本批仅修改 `studio.tsx`：pending优先直达只读查询、保留提交/删除锁、独立查询文案；所有新生成阻断及GET鉴权不变。原请求查询不会自动放弃ID或POST。ID1/ID4暂回进行中（首候选已部署，其余Review证据复用），ID2/ID3不重置。整批配套完成后统一候选构建并同版v0.36.0重发；保留80afb原版及0575619首候选回退，正常排空worker，无功能自动验收/生产DB写入。
+2026-10-02 定向收尾：Supervisor静态复核发现原请求查询被新生成的settings/共享/上传/比例/草稿条件挡住。本批仅修改 `studio.tsx`：pending优先直达只读查询、保留提交/删除锁、独立查询文案；所有新生成阻断及GET鉴权不变。原请求查询不会自动放弃ID或POST。ID1/ID4最终修正已实现并部署，ID2/ID3历史完成与其余Review证据复用不重置。整批配套后统一候选构建并同版v0.36.0重发已完成；保留80afb原版及0575619首候选回退，正常排空worker，无功能自动验收/生产DB写入。
 
 归档工具确切路径：`/tmp/sd2-image-delivery-v036-gate.mjs`（real `/private/tmp/sd2-image-delivery-v036-gate.mjs`）。这是本轮临时包装脚本，非全局shared skill；共用的 `release-recent-activity-check.mjs`、`release-registry-append.mjs` 没有修改。实际差异仅“工单归档”不要求live预约，所有其他action仍检查reservation，所有append仍检查confirmed。临时文件不在Git仓库、未提交；实际diff及node静态检查随收尾登记，不冒充全局工具已修。
 
@@ -40,7 +52,7 @@
 - Git Plan：本分支聚焦应用提交和记录提交推 `origin`；部署前推送原生产 `80afb99` 的 annotated rollback tag。精确 git archive、候选构建、release-window 每次登记确认成功、root flock 与正常退出 worker 后才切源码/构建；任何失败保留或回退原源码/构建/unit，不覆盖 storage/DB/上传资料。正式旧分支只精准暂存本轮记录，保留原脏改与未跟踪文件。
 - 参考实际代码：已安装 sharp v0.34.5 `lib/input.js`（Apache-2.0）及项目安全流/原生 https；复核 [sharp 输入失败级别](https://sharp.pixelplumbing.com/api-constructor/) 和 [curl 官方续传说明](https://curl.se/docs/manpage.html)，只借鉴边界，不安装库、不执行参考脚本。无外部真实源站验证。
 
-### 本轮发布闭环与逐文件记录（2026-10-02）
+### 首候选发布闭环与完整逐文件记录（2026-10-02，历史保留）
 
 - 已部署，待用户手动验收：https://sd2.youdooart.com/template-studio 。应用 v0.36.0（兼容新增持久输出恢复，升 MINOR）；唯一源码提交 `05756192245111821ae7560b3aaf5041d119c693`，正式 BUILD `FjIMzHMxNLluQOLfmBc61`。源码分支及 annotated 回退标签已推送并核对远端；原生产 `80afb99c3f664949936961e86e6d91ba9d057725` 与 BUILD `ILxByLZ7_8R-4aPl4WWhH` 保留。
 - 回退标签：`rollback/2026-10-02-before-image-delivery-v036`；服务器旧 release 仍在，旧 live 构建 `/srv/video-api-debugger/app/.next-prod-before-sd2-image-delivery-20261002T095300Z`，unit/worker 前后状态及排空数量 `/srv/video-api-debugger/backups/sd2-image-delivery-20261002T095300Z`。图片 worker 由 PID180777 正常退出，排空后 queued/running 为0，新 PID1168023 于 2026-10-02 17:58:19 CST 启动；未强杀，unit 不变。
