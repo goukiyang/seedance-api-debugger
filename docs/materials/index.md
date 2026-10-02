@@ -2,13 +2,13 @@
 
 ## 模板工作台体验优化（2026-10-02）
 
-项目video-api-debugger；来源为用户纠正工作台范围、重新查源码后要求“写工单”。工单v1.0.0，WS1-WS7未实施，不授权改功能或部署；观察源码702c3aa，未做线上复现。关键词：template-studio、图片/视频工作台、状态、复用、刷光、模型、LoRA、模块封面、近时。不是生成页工单，不替代已交付加载、弹窗和图片恢复工单。
+项目video-api-debugger；历史工单v1.0.0已被2026-10-02用户明确WS1-WS7实施授权更新。源码、统一发布检查及安全部署已完成，v0.36.2；源码f647817、BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致，worker未重启，功能待人工验收；只调整/template-studio图片与视频工作台，独立图片页由默认门控保留，不改后台/权限/费用或Provider。
 
 | 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
 |---|---|---|---|
-| 模板工作台体验优化工单；2026-10-02-template-workbench-ux.md | 2026-10-02用户要求；v1.0.0 | 4项源码缺项、3项体验优化、固定WS编号、实施边界、人工验收、既有附件 | [完整正文](../../tasks/todo/2026-10-02-template-workbench-ux.md)；UTF-8可读，关键入口可访问，未实施 |
-| 加载样例与desktop/dark/mobile.png、interaction.webm | 原文件与版本沿用下方加载样例登记；非新附件 | WS3/WS4刷光参考，短片0-7.8秒，不作线上证据 | [样例](2026-10-02-loading-study/index.html)、[已有媒体](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/)；存在，媒体沿用已有校验，不公开Git |
-| 加载、模板弹窗与图片恢复历史工单 | 来源/版本与替代关系见各原条目 | 避免重复修改与越界恢复；不是本轮线上复现 | 路径完整列于新工单附件表；正文可读，其他历史附件缺口不冒充已补齐 |
+| 模板工作台体验优化工单；2026-10-02-template-workbench-ux.md | 用户先要求工单、后明确实施；v1.0.0 | WS1-WS7、逐文件实现、状态/目录缺口、当前进度与人工边界 | [完整正文](../../tasks/todo/2026-10-02-template-workbench-ux.md)、[发布证据](../../tasks/todo/2026-10-02-template-workbench-ux.evidence.json)；UTF-8/JSON可读，正式正文与开发树同步，已部署待人工 |
+| 加载样例与desktop/dark/mobile.png、interaction.webm | 既有认可样例，非新附件 | 刷光参考；0–7.8秒全部195帧父侧观察复用，不作生产验收 | [样例](2026-10-02-loading-study/index.html)、[已有媒体](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/)；关键入口可读，媒体沿用既有校验，不公开Git |
+| 加载、模板弹窗与图片恢复历史工单 | 已交付历史，不替代当前范围 | 保留既有状态、关闭/未保存保护及后台恢复边界 | 原文及已有附件路径完整列于本工单；已按需读用，不冒充旧附件全部补齐 |
 
 ## SD2加载与体验优化实施（2026-10-02）
 

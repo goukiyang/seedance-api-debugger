@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：2026-10-02，工单v1.0.0已交付，未实施；仅/template-studio图片与视频工作台，附件及验收边界见正文。
+- [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：v0.36.2已部署；WS1-WS7实现及发布检查完成，待用户手动验收。源码f647817，BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致；图片worker未重启。正式正文、既有附件与[发布证据](todo/2026-10-02-template-workbench-ux.evidence.json)归入主目录；无bulk视频契约按待确认，不新增后台。
 - [加载与体验优化 U1–U6](todo/2026-10-02-loading-ux.md)：v0.36.1已部署；源码实现、发布必需检查与安全部署完成，待用户手动验收。运行源码8acaf46，BUILD Ec6Hfe91C-vrdLDtYaCKN，4服务/40公网静态/24源码一致、图片worker正常排空；完整正文、既有附件入口与[发布证据](todo/2026-10-02-loading-ux.evidence.json)归入正式根目录。
 
 
@@ -6560,5 +6560,5 @@ flowchart LR
 - [SD2加载与体验优化工单](todo/2026-10-02-loading-ux.md)：2026-10-02，v1.0.0；U1-U6涵盖下载状态、列表刷新、恢复文案、局部刷光、产品弹窗与近时。工单已交付，实施未开始，不继续扩大审查；附件见正文及资料索引。
 - `tasks/todo/2026-10-02-media-copy-share.md`：图片复制、站内分享与模板离开提醒
 - `tasks/todo/2026-10-02-template-primary-actions.md`：模板主操作与产品弹窗
-- [模板工作台体验优化工单](todo/2026-10-02-template-workbench-ux.md)：2026-10-02，v1.0.0；WS1-WS7，未实施；文案/视频状态、复用按钮、刷新/恢复反馈、模型选择、称呼与近时，已有附件见正文。
+- [模板工作台体验优化工单](todo/2026-10-02-template-workbench-ux.md)：WS1-WS7已获实施授权，当前实现/发布进度以同一原工单及顶部入口为准；历史来源和已有附件保留。
 - `tasks/todo/2026-10-02-unified-resource-library.md`：统一创作资源库功能盘点与整合建议
