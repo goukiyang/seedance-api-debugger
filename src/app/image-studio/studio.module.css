@@ -1,5 +1,6 @@
 .page { position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
 .content { min-width: 0; }
+.mobileModuleNav { display: none; }
 .moduleRail { position: fixed; left: 0; top: var(--composer-topbar-height, 48px); bottom: 0; z-index: 15; box-sizing: border-box; width: 236px; max-height: none; overflow-y: auto; padding: 18px 14px; border: 0; border-right: 1px solid #2d383d; border-radius: 0; background: #151a1d; scrollbar-width: thin; scrollbar-color: #647179 transparent; scrollbar-gutter: stable; }
 .moduleRail:hover, .moduleRail:focus-within { scrollbar-color: #839098 transparent; }
 .moduleRail::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -95,6 +96,7 @@
 .page textarea { width: 100%; resize: vertical; min-height: 120px; line-height: 1.6; }
 .references { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .referencesCompact { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.primaryMaterials .materialGrid { grid-template-columns: repeat(3, minmax(0, calc(32.5% - 7.8px))); max-width: none; }
 .referencesCompact .referenceNumber { left: 4px; top: auto; bottom: 4px; padding: 2px 4px; font-size: 11px; max-width: calc(100% - 8px); }
 .page .referencesCompact .referenceGrip { left: 3px; top: 3px; bottom: auto; padding: 3px; }
 .page .referencesCompact .remove { right: 3px; top: 3px; width: 24px; height: 24px; padding: 3px; }
@@ -235,3 +237,16 @@
 .presetSharing[aria-checked="false"] { color: #adb6bd; background: #20262a; }
 @media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: var(--composer-topbar-height, 48px); bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
 @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } .modelQualityRow { grid-template-columns: 1fr; } .page .coverCard { grid-template-rows: minmax(0, 1fr) 122px; } .coverDescription strong { font-size: 20px; } .moduleBannerHasImage { block-size: 120px; } }
+@media (max-width: 1200px) {
+  .page.templateWorkbench { padding: 16px; }
+  .templateWorkbench .moduleRail { display: none; }
+  .templateWorkbench .mobileModuleNav { position: sticky; top: var(--composer-topbar-height, 48px); z-index: 15; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px; margin-bottom: 16px; background: #151a1d; border-bottom: 1px solid #2d383d; }
+  .mobileModuleNav label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+  .mobileModuleNav label > span { flex: 0 0 auto; }
+  .page .mobileModuleNav select { flex: 1 1 0; min-width: 0; width: 0; max-width: 100%; min-height: 44px; padding: 8px; font-size: 14px; text-overflow: ellipsis; }
+  .page .mobileModuleNav button { min-height: 44px; padding: 8px 10px; white-space: nowrap; }
+  .page .mobileModuleNav button[aria-pressed=true] { background: #203d38; border-color: #367d70; color: #b9f7e8; }
+  .mobileModulePicker { grid-column: 1 / -1; }
+  .templateWorkbench .module { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + 132px); }
+}
+@media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }

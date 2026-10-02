@@ -386,13 +386,14 @@ interface Props {
   initialSettings?: GenerationDefaults | null;
   preferencesReady?: boolean;
   onSettingsChange?: (settings: Omit<GenerationDefaults, 'projectId' | 'seedMode'>) => void;
-  lockedSettings?: {
-    sourceLabel: string;
+  videoCardDefaults?: {
+    id: string;
     ratio?: VideoRatio | null;
     duration?: VideoDuration | null;
     resolution?: VideoResolution | null;
   } | null;
   reuseDraft?: {
+    videoCardId?: string | null;
     model?: string | null;
     taskId: string;
     reuseKey: number;
@@ -484,7 +485,7 @@ export function GenerationComposer({
   initialSettings,
   preferencesReady = false,
   onSettingsChange,
-  lockedSettings,
+  videoCardDefaults,
   onCollectionLoad,
   onCollectionSave,
   onCollectionNew,
@@ -530,6 +531,7 @@ export function GenerationComposer({
   const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
+  const appliedVideoCardDefaultsRef = React.useRef<string | null>(null);
   const settingsTouchedRef = React.useRef(false);
   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
   const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
@@ -672,7 +674,6 @@ export function GenerationComposer({
   }, []);
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
-  const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
 
   useEffect(() => {
     if (!studioHandoff && selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
@@ -731,7 +732,7 @@ export function GenerationComposer({
   const durationModel = allowExtendedSeedanceDuration && selectedProvider === 'seedance' ? selectedModel : null;
   const durationBlocker = isSeedanceVideoDuration(duration, durationModel)
     ? null
-    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。${lockedSettings?.duration ? '请切换支持该时长的模型，或修改视频卡时长。' : '请重新选择时长，或切换支持该时长的模型。'}确认前不会提交或扣点。`;
+    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。请重新选择时长，或切换支持该时长的模型。确认前不会提交或扣点。`;
 
   const hasUploadingMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'uploading');
   const hasFailedMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'failed');
@@ -751,15 +752,6 @@ export function GenerationComposer({
     }
     if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
       return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
-    }
-    if (studioHandoff && lockedSettings?.ratio && ratio !== lockedSettings.ratio) {
-      return `模板比例 ${ratio} 与当前视频卡锁定比例 ${lockedSettings.ratio} 不一致`;
-    }
-    if (studioHandoff && lockedSettings?.duration && duration !== lockedSettings.duration) {
-      return `模板时长 ${duration}s 与当前视频卡锁定时长 ${lockedSettings.duration}s 不一致`;
-    }
-    if (studioHandoff && lockedSettings?.resolution && resolution !== lockedSettings.resolution) {
-      return `模板分辨率 ${resolution} 与当前视频卡锁定分辨率 ${lockedSettings.resolution} 不一致`;
     }
     if (!prompt.trim()) return '请填写提示词';
     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
@@ -846,7 +838,7 @@ export function GenerationComposer({
     return null;
     })();
     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
-  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
   const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
@@ -1115,17 +1107,16 @@ export function GenerationComposer({
   }, [initialSettings, reuseDraft, studioHandoff, modelOptions, onModelChange]);
 
   useEffect(() => {
-    if (!lockedSettings || studioHandoff) return;
-    if (lockedSettings.ratio) setRatio(lockedSettings.ratio);
-    if (lockedSettings.duration) setDuration(lockedSettings.duration);
-    if (lockedSettings.resolution) setResolution(lockedSettings.resolution);
-  }, [
-    lockedSettings?.sourceLabel,
-    lockedSettings?.ratio,
-    lockedSettings?.duration,
-    lockedSettings?.resolution,
-    studioHandoff,
-  ]);
+    if (!videoCardDefaults) { appliedVideoCardDefaultsRef.current = null; return; }
+    if (!preferencesReady || studioHandoff || appliedVideoCardDefaultsRef.current === videoCardDefaults.id) return;
+    const initializing = appliedVideoCardDefaultsRef.current === null;
+    appliedVideoCardDefaultsRef.current = videoCardDefaults.id;
+    // Card recommendations initialize a selection, never resynchronize over later edits.
+    if (reuseDraft?.videoCardId === videoCardDefaults.id || (initializing && (initialSettings || reuseDraft || settingsTouchedRef.current))) return;
+    if (videoCardDefaults.ratio) setRatio(videoCardDefaults.ratio);
+    if (videoCardDefaults.duration) setDuration(videoCardDefaults.duration);
+    if (videoCardDefaults.resolution) setResolution(videoCardDefaults.resolution);
+  }, [videoCardDefaults, preferencesReady, studioHandoff, reuseDraft, initialSettings]);
 
   useEffect(() => {
     if (!need1080pApproval) {
@@ -2150,9 +2141,9 @@ export function GenerationComposer({
               setGenerationMode(DEFAULT_GENERATION_MODE);
               setSelectedModel(modelOptions[0]?.id || '');
               onModelChange?.(modelOptions[0]?.id || '');
-              setRatio(lockedSettings?.ratio || DEFAULT_RATIO);
-              setDuration(lockedSettings?.duration || DEFAULT_DURATION);
-              setResolution(lockedSettings?.resolution || DEFAULT_RESOLUTION);
+              setRatio(DEFAULT_RATIO);
+              setDuration(DEFAULT_DURATION);
+              setResolution(DEFAULT_RESOLUTION);
               setSeed(-1);
               setGenerateAudio(true);
               setReturnLastFrame(false);
@@ -2214,10 +2205,6 @@ export function GenerationComposer({
             markStudioParameterCorrected('resolution');
             setResolution(value);
           }}
-          lockedRatio={Boolean(lockedSettings?.ratio)}
-          lockedDuration={Boolean(lockedSettings?.duration)}
-          lockedResolution={Boolean(lockedSettings?.resolution)}
-          lockReason={lockReason}
           compactControls={templateEnabled}
         />
       </div>

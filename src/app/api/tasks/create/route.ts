@@ -963,10 +963,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (videoCard.ratio_locked && videoCard.ratio && ratio !== videoCard.ratio) {
-    return errorJson(`此视频卡已锁定比例 ${videoCard.ratio}，变更比例需要先通过比例变更审批`, 403);
-  }
-
   let videoBranch: { id: string; title: string; status: string; is_primary: boolean } | null = null;
   if (requestedVideoBranchId) {
     const branch = await prisma.videoBranch.findUnique({

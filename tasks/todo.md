@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [主图导航及视频参数 I1-I6](todo/2026-10-02-feedback-primary-navigation.md)：v0.36.3 I1-I5源码整批已写，恢复统一检查及发布；I4取消三参数业务锁并同步接口窄改，I5按打开时有效内容保护关闭。I6两条request网络/超时阶段已明确，底层原因无法追溯待查，不改Provider/等待/重试/积分或DB。正式资料根目录/Volumes/Data/Projects/video-api-debugger；事故PNG已归档，视频标注原图仍待归档；功能待用户手动验收。
+
 - [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：v0.36.2已部署；WS1-WS7实现及发布检查完成，待用户手动验收。源码f647817，BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致；图片worker未重启。正式正文、既有附件与[发布证据](todo/2026-10-02-template-workbench-ux.evidence.json)归入主目录；无bulk视频契约按待确认，不新增后台。
 
 - [加载与体验优化 U1–U6](todo/2026-10-02-loading-ux.md)：v0.36.1已部署；源码实现、发布必需检查与安全部署完成，待用户手动验收。运行源码8acaf46，BUILD Ec6Hfe91C-vrdLDtYaCKN，4服务/40公网静态/24源码一致、图片worker正常排空；完整正文、既有附件入口与[发布证据](todo/2026-10-02-loading-ux.evidence.json)归入正式根目录。

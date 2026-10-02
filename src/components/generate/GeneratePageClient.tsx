@@ -2028,9 +2028,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	    ? projectMetaLabel(selectedProject)
 	    : '新建一个项目后即可保存任务、成本和结果。';
 	  const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
-	  const selectedVideoCardLockedSettings = selectedVideoCard
+	  const selectedVideoCardDefaults = selectedVideoCard
 	    ? {
-	        sourceLabel: selectedVideoCard.title,
+	        id: selectedVideoCard.id,
 	        ratio: asVideoRatio(selectedVideoCard.ratio),
 	        duration: asVideoDuration(selectedVideoCard.duration),
 	        resolution: asVideoResolution(selectedVideoCard.target_resolution),
@@ -2501,7 +2501,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           initialSettings={generationDefaults}
           preferencesReady={generationDefaultsReady}
           onSettingsChange={saveGenerationDefaults}
-          lockedSettings={selectedVideoCardLockedSettings}
+          videoCardDefaults={selectedVideoCardDefaults}
           reuseDraft={reuseDraft}
           studioHandoff={studioHandoff}
           selectedVideoCardId={selectedVideoCardId}
