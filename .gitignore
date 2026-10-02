@@ -3,6 +3,7 @@
 docs/materials/2026-10-02-unified-resource-library/
 docs/materials/2026-10-02-canvas-plan-split/*.png
 docs/materials/2026-10-02-loading-study/evidence/
+docs/materials/2026-10-02-image-delivery/
 .env
 .env.local
 .env.*.local
