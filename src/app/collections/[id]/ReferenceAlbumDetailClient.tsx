@@ -72,6 +72,8 @@ type PendingAlbumAttach = {
   fileNames: string[];
 };
 
+const GENERATION_ALBUM_SELECTION_LIMIT = 9;
+
 function mediaTypeLabel(type: string | null | undefined) {
   if (type === 'video') return '视频';
   if (type === 'audio') return '音频';
@@ -250,6 +252,20 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
     }
   };
 
+  const toggleGenerationSelection = (imageId: string) => {
+    if (selectedImageIds.includes(imageId)) {
+      setSelectedImageIds(selectedImageIds.filter((id) => id !== imageId));
+      setError(null);
+      return;
+    }
+    if (selectedImageIds.length >= GENERATION_ALBUM_SELECTION_LIMIT) {
+      setError(`一次最多选择 ${GENERATION_ALBUM_SELECTION_LIMIT} 个素材。请先取消一项再继续。`);
+      return;
+    }
+    setSelectedImageIds([...selectedImageIds, imageId]);
+    setError(null);
+  };
+
   const handleDeleteImage = async (imageId: string) => {
     if (!window.confirm('删除后历史任务仍会保留引用，新生成不能再使用。确定删除？')) return;
     const res = await fetch(`/api/reference-images/${imageId}`, { method: 'DELETE' });
@@ -369,6 +385,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             <span>范围：{album.visibility}</span>
             {album.can_share && <span>共享：{album.active_share_count || 0} 个对象</span>}
             <span>权限：{album.permissions.view ? '可查看' : ''} {album.permissions.use ? '可生成' : ''} {album.permissions.edit ? '可编辑' : ''}</span>
+            {album.permissions.use && <span>已选用于生成：{selectedImageIds.length}/{GENERATION_ALBUM_SELECTION_LIMIT}，还可选 {Math.max(0, GENERATION_ALBUM_SELECTION_LIMIT - selectedImageIds.length)} 个</span>}
           </div>
 
           <div className="album-detail-actions">
@@ -384,7 +401,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             )}
             {album.permissions.use && (
               <button type="button" onClick={handleUseForGeneration} disabled={selectedImageIds.length === 0 || loading}>
-                作为参考素材生成
+                作为参考素材生成（{selectedImageIds.length}/{GENERATION_ALBUM_SELECTION_LIMIT}）
               </button>
             )}
             {album.can_share && !['public', 'system'].includes(album.album_type) && (
@@ -407,9 +424,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
                     <button
                       type="button"
                       className="album-image-select"
-                      onClick={() => setSelectedImageIds((prev) => (
-                        prev.includes(image.id) ? prev.filter((id) => id !== image.id) : [...prev, image.id].slice(0, 9)
-                      ))}
+                      onClick={() => toggleGenerationSelection(image.id)}
                     >
                       {isImageItem(image) || canPreviewOriginalMedia ? (
                         <AlbumDetailThumbnail image={image} alt={image.asset?.file_name || `${typeLabel}封面`} />

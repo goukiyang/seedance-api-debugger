@@ -1,4 +1,5 @@
 import type { GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
+import { seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import type {
   StudioAssetInput,
   StudioGenerationHandoff,
@@ -49,11 +50,17 @@ const GENERATION_MODES = new Set<GenerationMode>([
 const VIDEO_RATIOS = new Set<VideoRatio>(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
 const VIDEO_RESOLUTIONS = new Set<VideoResolution>(['480p', '720p', '1080p']);
 
-function isVideoDuration(value: unknown): value is VideoDuration {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 4 && value <= 15;
+export function getStudioVideoDurationMax(parameters: Record<string, StudioJsonValue>): number {
+  if (parameters.provider === 'h3') return 15;
+  const model = typeof parameters.model === 'string' ? parameters.model.trim() : undefined;
+  return seedanceVideoMaxDuration(model);
 }
 
-function normalizeParameter(key: keyof StudioVideoGenerationParameters, value: StudioJsonValue): unknown {
+function isVideoDuration(value: unknown, maxDuration: number): value is VideoDuration {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 4 && value <= maxDuration;
+}
+
+function normalizeParameter(key: keyof StudioVideoGenerationParameters, value: StudioJsonValue, maxDuration: number): unknown {
   switch (key) {
     case 'provider':
       return value === 'seedance' || value === 'h3' ? value : undefined;
@@ -65,7 +72,7 @@ function normalizeParameter(key: keyof StudioVideoGenerationParameters, value: S
     case 'ratio':
       return typeof value === 'string' && VIDEO_RATIOS.has(value as VideoRatio) ? value : undefined;
     case 'duration':
-      return isVideoDuration(value) ? value : undefined;
+      return isVideoDuration(value, maxDuration) ? value : undefined;
     case 'resolution':
       return typeof value === 'string' && VIDEO_RESOLUTIONS.has(value as VideoResolution) ? value : undefined;
     case 'seed':
@@ -82,6 +89,7 @@ export function mapStudioVideoParameters(parameters: Record<string, StudioJsonVa
   const supported: StudioVideoGenerationParameters = {};
   const unsupported: Array<{ key: string; value: StudioJsonValue }> = [];
   const consumedKeys = new Set<string>();
+  const maxDuration = getStudioVideoDurationMax(parameters);
 
   for (const [canonicalKey, aliases] of Object.entries(PARAMETER_ALIASES) as Array<[
     keyof StudioVideoGenerationParameters,
@@ -89,7 +97,7 @@ export function mapStudioVideoParameters(parameters: Record<string, StudioJsonVa
   ]>) {
     const matches = aliases.filter((key) => Object.hasOwn(parameters, key));
     if (matches.length === 0) continue;
-    const normalized = matches.map((key) => ({ key, value: normalizeParameter(canonicalKey, parameters[key]) }));
+    const normalized = matches.map((key) => ({ key, value: normalizeParameter(canonicalKey, parameters[key], maxDuration) }));
     const first = normalized[0];
     if (normalized.some((item) => item.value === undefined || item.value !== first.value)) {
       for (const item of normalized) unsupported.push({ key: item.key, value: parameters[item.key] });

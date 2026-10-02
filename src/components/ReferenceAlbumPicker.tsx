@@ -52,8 +52,10 @@ interface Props {
   currentCount: number;
   currentReferenceImageIds?: string[];
   onClose: () => void;
-  onConfirm: (referenceImageIds: string[], assets?: ReferenceAlbumSelection[]) => Promise<void>;
+  onConfirm: (referenceImageIds: string[], assets?: ReferenceAlbumSelection[]) => Promise<ReferenceAlbumPickerConfirmResult>;
 }
+
+type ReferenceAlbumPickerConfirmResult = boolean | void | { success: boolean; message?: string };
 
 const SCOPES: Array<{ value: AlbumScope; label: string }> = [
   { value: 'mine', label: '我的图集' },
@@ -78,6 +80,14 @@ function selectionTypeFromItem(image: ReferenceImageItem): ReferenceAlbumSelecti
   return 'image';
 }
 
+function getConfirmFailure(result: ReferenceAlbumPickerConfirmResult) {
+  if (result === false) return '所选素材未能加入，请检查选择后重试。';
+  if (result && typeof result === 'object' && !result.success) {
+    return result.message || '所选素材未能加入，请检查选择后重试。';
+  }
+  return null;
+}
+
 function AlbumThumbnail({ image }: { image: ReferenceImageItem }) {
   const [failed, setFailed] = useState(false);
   const src = image.thumbnail_url || `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=thumbnail`;
@@ -98,6 +108,7 @@ export function ReferenceAlbumPicker({
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('');
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
+  const [selectedAssetsById, setSelectedAssetsById] = useState<Record<string, ReferenceAlbumSelection>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<ReferenceImageItem | null>(null);
@@ -111,6 +122,12 @@ export function ReferenceAlbumPicker({
     onDismiss: onClose,
   });
 
+  useEffect(() => {
+    if (open) return;
+    setSelectedImageIds([]);
+    setSelectedAssetsById({});
+  }, [open]);
+
   void currentCount;
   const currentReferenceImageIdSet = useMemo(
     () => new Set(currentReferenceImageIds.filter(Boolean)),
@@ -123,48 +140,66 @@ export function ReferenceAlbumPicker({
 
   useEffect(() => {
     if (!open) return;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/reference-albums?scope=${scope}`)
+    fetch(`/api/reference-albums?scope=${scope}`, { signal: controller.signal })
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
+        if (controller.signal.aborted) return;
         if (!ok) throw new Error(data.error || data.message || '图集读取失败');
         const list: AlbumItem[] = (data.albums || []).filter((album: AlbumItem) => album.image_count > 0);
         setAlbums(list);
         setSelectedAlbumId((prev) => (list.some((album) => album.id === prev) ? prev : list[0]?.id || ''));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : '图集读取失败'))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '图集读取失败'); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [open, scope]);
 
   useEffect(() => {
     if (!open || !selectedAlbumId) {
       setImages([]);
-      setSelectedImageIds([]);
       setPreviewImage(null);
       return;
     }
+    const controller = new AbortController();
+    setImages([]);
+    setPreviewImage(null);
     setLoading(true);
     setError(null);
-    fetch(`/api/reference-albums/${selectedAlbumId}`)
+    fetch(`/api/reference-albums/${selectedAlbumId}`, { signal: controller.signal })
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
+        if (controller.signal.aborted) return;
         if (!ok) throw new Error(data.error || data.message || '图集详情读取失败');
         setImages(data.images || []);
-        setSelectedImageIds([]);
         setPreviewImage(null);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : '图集详情读取失败'))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '图集详情读取失败'); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [open, selectedAlbumId]);
 
   if (!open) return null;
 
   const toggleImage = (imageId: string) => {
-    setSelectedImageIds((prev) => {
-      if (prev.includes(imageId)) return prev.filter((id) => id !== imageId);
-      return [...prev, imageId];
-    });
+    if (selectedImageIds.includes(imageId)) {
+      setSelectedImageIds(selectedImageIds.filter((id) => id !== imageId));
+      setSelectedAssetsById((current) => {
+        const next = { ...current };
+        delete next[imageId];
+        return next;
+      });
+      return;
+    }
+    const image = images.find((item) => item.id === imageId);
+    if (!image) return;
+    setSelectedImageIds([...selectedImageIds, imageId]);
+    setSelectedAssetsById((current) => ({
+      ...current,
+      [imageId]: { id: imageId, type: selectionTypeFromItem(image) },
+    }));
   };
 
   const handleConfirm = async () => {
@@ -172,13 +207,18 @@ export function ReferenceAlbumPicker({
     setLoading(true);
     setError(null);
     try {
-      const itemById = new Map(images.map((image) => [image.id, image]));
       const selectedAssets = selectedImageIds
-        .map((id) => itemById.get(id))
-        .filter((image): image is ReferenceImageItem => Boolean(image))
-        .map((image) => ({ id: image.id, type: selectionTypeFromItem(image) }));
-      await onConfirm(selectedImageIds, selectedAssets);
+        .map((id) => selectedAssetsById[id])
+        .filter((asset): asset is ReferenceAlbumSelection => Boolean(asset));
+      if (selectedAssets.length !== selectedImageIds.length) throw new Error('部分已选素材信息暂时不可用，请重新选择后重试。');
+      const result = await onConfirm(selectedImageIds, selectedAssets);
+      const failure = getConfirmFailure(result);
+      if (failure) {
+        setError(failure);
+        return;
+      }
       setSelectedImageIds([]);
+      setSelectedAssetsById({});
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : '加入工作台失败');

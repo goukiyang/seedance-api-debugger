@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import {
   attachAssetToSiteReferenceImage,
@@ -16,6 +16,7 @@ import {
 } from '@/lib/assets/reference-import';
 import { ensureSiteAssetPublicUrl } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 
 function referenceRoleForAssetType(type: string | null | undefined, requestedRole?: string | null) {
   if (type === 'video') return 'reference_video';
@@ -76,91 +77,76 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'assetId required' }, { status: 400 });
     }
 
-    if (referenceImageIds.length > 0) {
-      if (shouldReplace) {
-        await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+    // Validate the complete selection and prepare external URLs before taking
+    // the write lock. No workspace changes happen until every input is ready.
+    const references = [];
+    for (const referenceImageId of referenceImageIds) {
+      const image = await assertCanUseReferenceImage(user, referenceImageId);
+      if (!image.asset_id || !image.asset || image.asset.status === 'deleted') {
+        throw new ReferenceImportError(`参考素材不可用: ${referenceImageId}`, 400, 'reference_asset_unavailable');
       }
-      const workspaceAssetIds: string[] = [];
-      for (const referenceImageId of referenceImageIds) {
-        const image = await assertCanUseReferenceImage(user, referenceImageId);
-        if (!image.asset_id) {
-          return NextResponse.json({ error: `参考图缺少资产记录: ${referenceImageId}` }, { status: 400 });
-        }
-        await ensureNonImageAssetReadyForGeneration(image.asset_id, image.asset?.type);
-        const waId = await addAssetToWorkspace(
-          workspaceId,
-          image.asset_id,
-          referenceRoleForAssetType(image.asset?.type, role),
-          user.id,
-          { referenceImageId: image.id, allowSharedAsset: true },
-        );
-        workspaceAssetIds.push(waId);
-      }
-
-      await recordAssetUploadLog({
-        operatorId: user.id,
-        stage: 'mount',
-        status: 'succeeded',
-        assetId: referenceImageIds[0] || null,
-        durationMs: Date.now() - startedAt,
-        uploadMode: 'single',
-        totalParts: referenceImageIds.length,
-      });
-      return NextResponse.json({ success: true, workspaceAssetIds, workspaceId });
+      await ensureNonImageAssetReadyForGeneration(image.asset_id, image.asset.type);
+      references.push(image);
     }
-
-    if (shouldReplace) {
-      await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
-    }
-
-    const existingWorkspaceAssets = await prisma.workspaceAsset.findMany({
-      where: { workspace_id: workspaceId, asset_id: { in: assetIds } },
-      select: { asset_id: true },
-    });
-    const existingAssetIdSet = new Set(existingWorkspaceAssets.map((item) => item.asset_id));
-
-    const workspaceAssetIds: string[] = [];
-    const referenceImageIdsFromAssets: string[] = [];
-
+    const assets = [];
     for (const currentAssetId of assetIds) {
       const asset = await prisma.asset.findFirst({
         where: { id: currentAssetId, status: { not: 'deleted' } },
-        select: { id: true, type: true },
       });
       if (!asset) {
-        return NextResponse.json({ error: 'Asset not found or permission denied' }, { status: 404 });
+        throw new ReferenceImportError('素材不存在或已删除', 404, 'reference_asset_not_found');
       }
-
-      if (asset.type === 'image') {
-        const reference = await attachAssetToSiteReferenceImage(
-          {
-            user,
-            workspaceId,
-            sourceLabel: 'Web UI',
-            role: referenceRoleForAssetType(asset.type, role),
-            albumName: '生成工作台参考图',
-            albumDescription: '生成工作台自动归档的参考图',
-            metadataSource: 'workspace_upload',
-          },
-          asset.id,
-        );
-        workspaceAssetIds.push(reference.workspaceAssetId);
-        referenceImageIdsFromAssets.push(reference.referenceImageId);
-      } else {
-        await ensureNonImageAssetReadyForGeneration(asset.id, asset.type);
-        const waId = await addAssetToWorkspace(workspaceId, asset.id, referenceRoleForAssetType(asset.type, role), user.id);
-        workspaceAssetIds.push(waId);
+      const canUseOwnedAsset = asset.owner_id === user.id || (asset.type === 'image' && user.role === 'admin');
+      if (!canUseOwnedAsset || !await canReadStudioAsset(user, asset)) {
+        throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
       }
+      await ensureNonImageAssetReadyForGeneration(asset.id, asset.type);
+      assets.push(asset);
     }
+
+    const { workspaceAssetIds, referenceImageIdsFromAssets } = await prisma.$transaction(async (tx) => {
+      if (shouldReplace) await tx.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+      const workspaceAssetIds: string[] = [];
+      const referenceImageIdsFromAssets: string[] = [];
+      const mountedAssetIds = new Set<string>();
+      for (const image of references) {
+        const currentAssetId = image.asset_id!;
+        if (mountedAssetIds.has(currentAssetId)) continue;
+        workspaceAssetIds.push(await addAssetToWorkspace(
+          workspaceId, currentAssetId, referenceRoleForAssetType(image.asset?.type, role), user.id,
+          { referenceImageId: image.id, allowSharedAsset: true, db: tx },
+        ));
+        mountedAssetIds.add(currentAssetId);
+      }
+      for (const asset of assets) {
+        if (mountedAssetIds.has(asset.id)) continue;
+        if (asset.type === 'image') {
+          const reference = await attachAssetToSiteReferenceImage({
+            user, workspaceId, sourceLabel: 'Web UI',
+            role: referenceRoleForAssetType(asset.type, role),
+            albumName: '生成工作台参考图', albumDescription: '生成工作台自动归档的参考图',
+            metadataSource: 'workspace_upload', db: tx,
+          }, asset.id);
+          workspaceAssetIds.push(reference.workspaceAssetId);
+          referenceImageIdsFromAssets.push(reference.referenceImageId);
+        } else {
+          workspaceAssetIds.push(await addAssetToWorkspace(
+            workspaceId, asset.id, referenceRoleForAssetType(asset.type, role), user.id, { db: tx },
+          ));
+        }
+        mountedAssetIds.add(asset.id);
+      }
+      return { workspaceAssetIds, referenceImageIdsFromAssets };
+    });
 
     await recordAssetUploadLog({
       operatorId: user.id,
       stage: 'mount',
       status: 'succeeded',
-      assetId: assetIds[0] || null,
+      assetId: assetIds[0] || referenceImageIds[0] || null,
       durationMs: Date.now() - startedAt,
       uploadMode: 'single',
-      totalParts: assetIds.length,
+      totalParts: workspaceAssetIds.length,
     });
     return NextResponse.json({
       success: true,
@@ -169,8 +155,12 @@ export async function POST(request: NextRequest) {
       referenceImageId: referenceImageIdsFromAssets[0] || null,
       referenceImageIds: referenceImageIdsFromAssets,
       workspaceId,
+      count: workspaceAssetIds.length,
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof ReferenceImportError) {
       if (userId) {
         await recordAssetUploadLog({

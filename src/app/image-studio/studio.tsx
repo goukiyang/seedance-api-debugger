@@ -1029,17 +1029,23 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     if (moduleDialog.current?.open) { resumeModulePreview.current = true; moduleDialog.current.close(); }
     setPreview({ contentKey: asset.id ? `asset:${asset.id}` : undefined, src: asset.originalUrl, alt: `参考图 ${number}`, fileName: asset.fileName, width: asset.width || undefined, height: asset.height || undefined });
   }
-  const addImages = useCallback(async (files: File[], replaceSingle = false, fixed = false, auxiliary = false) => {
+  const addImages = useCallback(async (files: File[], fixed = false, auxiliary = false) => {
     if (uploadLock.current || submitting || pendingSubmission || !files.length) return;
     if (fixed && !fixedEditable) return;
     const cap = fixed ? MAX_REFERENCE_IMAGES : auxiliary ? currentAuxiliaryCap : currentReferenceCap;
     const existing = fixed ? fixedReferences.length : auxiliary ? auxiliaryImages.length : images.length;
-    const replacing = !fixed && !auxiliary && replaceSingle && cap === 1;
-    const uploadFiles = replacing ? files.slice(-1) : files;
+    const singleMain = !fixed && !auxiliary && referenceLimit === 1;
+    if (singleMain && files.length > 1) {
+      setError('主图上限为 1 张，请一次只选择一张图片。');
+      return;
+    }
+    const replacing = singleMain && existing > 0;
+    const uploadFiles = files;
     if (!cap || (!replacing && uploadFiles.length + existing > cap)) { setError(fixed ? `固定参考图最多 ${MAX_REFERENCE_IMAGES} 张` : auxiliary ? `本次可选辅助参考最多 ${cap} 张，模板和风格组已占 ${activeFixedCount} 张。` : `本次可选主图最多 ${cap} 张，请调整数量或减少辅助参考。`); return; }
     if (uploadFiles.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024)) {
       setError('请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
     }
+    if (replacing && !window.confirm(`确认用「${uploadFiles[0].name}」替换当前主图？上传成功前旧主图会保留；取消不会更改当前内容。`)) return;
     uploadLock.current = true; setUploading(true); setError('');
     try {
       for (let index = 0; index < uploadFiles.length; index++) {
@@ -1054,7 +1060,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       }
     } catch (e) { setError(e instanceof Error ? e.message : '上传失败'); }
     finally { uploadLock.current = false; setUploading(false); setUploadProgress(null); }
-  }, [images.length, auxiliaryImages.length, currentReferenceCap, currentAuxiliaryCap, fixedReferences.length, activeFixedCount, submitting, pendingSubmission, fixedEditable]);
+  }, [images.length, auxiliaryImages.length, currentReferenceCap, currentAuxiliaryCap, fixedReferences.length, activeFixedCount, submitting, pendingSubmission, fixedEditable, referenceLimit]);
 
   async function uploadBanner(file: File) {
     if (bannerUploading || submitting || pendingSubmission) return;
@@ -1078,7 +1084,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         .map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
       if (!files.length) return;
       event.preventDefault();
-      void addImages(files, referenceLimit === 1);
+      void addImages(files);
     };
     document.addEventListener('paste', paste);
     return () => document.removeEventListener('paste', paste);
@@ -1159,10 +1165,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
               {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
             </select><span>已选 <b>{ordinaryReferenceCount} 张</b></span>
           </header>
-          <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files), false, false, true); }}
+          <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files), false, true); }}
             onPaste={event => {
               const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
-              if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, false, false, true); }
+              if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, false, true); }
             }} tabIndex={0} aria-label="参考图片">
             <StudioReferenceGrid items={auxiliaryImages} onChange={setAuxiliaryImages} onPreview={previewReference} labels="auxiliary" compact materialTiles onChangeRole={(image, index) => changeImageRole(image, index, true)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
               {isAdmin && activeFixedReferences.slice(0, activeTemplateCount).map((image, index) => <div className={styles.styleTile} key={`fixed-${image.id}-${index}`}>
@@ -1179,7 +1185,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             </StudioReferenceGrid>
           </div>
           {(fixedReferences.length > 0 || Boolean(module.fixedReferenceCount) || reproductionFixedCount > styleImageCount) && <label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>}
-          <input ref={auxiliaryFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), false, false, true); event.target.value = ''; }} />
+          <input ref={auxiliaryFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), false, true); event.target.value = ''; }} />
         </section>
         <div className={styles.materialFooter}><span>本次图片 {effectiveReferenceCount} / {MAX_REFERENCE_IMAGES} 张</span>
           <button type="button" title="清空本次风格组和参考图，保留主图与文字" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={14} />清空参考</button>
@@ -1326,7 +1332,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     <dialog ref={moduleDialog} className={styles.dialog} onPaste={event => {
       if (!fixedEditable || assetPickerOpen || imageSourceDialog.current?.open) return;
       const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
-      if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, false, true); }
+      if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
     }}>
       <header className={styles.header}><h2>模块上下文</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
       {contextEditable ? <textarea aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => { if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。'); setModuleContext(event.target.value); setModuleSaveError(''); }} /> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
@@ -1352,13 +1358,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
-      <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files), false, true); }}>
+      <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files), true); }}>
         <StudioReferenceGrid items={fixedReferences} onChange={changeFixedReferences} onPreview={previewReference} compact labels="template" notes
           disabled={!fixedEditable || uploading || moduleSaving || submitting || Boolean(pendingSubmission)}>
           {fixedEditable && fixedReferences.length < MAX_REFERENCE_IMAGES && <button type="button" className={styles.add} disabled={uploading || moduleSaving || submitting || Boolean(pendingSubmission)} onClick={() => openImageSource('fixed')}><ImagePlus size={20} />添加图片</button>}
         </StudioReferenceGrid>
       </div>
-      <input ref={fixedFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), false, true); event.target.value = ''; }} /></>}
+      <input ref={fixedFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), true); event.target.value = ''; }} /></>}
       <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages} maxReferences={currentStyleCap}
         disabled={uploading || submitting || Boolean(pendingSubmission)}
         onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }} />

@@ -759,30 +759,20 @@
         if (!root || state.applying) return;
         if (state.searchTimer) window.clearTimeout(state.searchTimer);
         invalidateRequest();
-        const key = getStorageKey();
-        try {
-            if (key) localStorage.removeItem(key);
-        } catch {
-            showNotice('偏好未能清除。');
-            key && (state.storageResetFailed = true);
-        }
-        const fresh = defaults();
-        state.tab = fresh.tab;
-        state.query = fresh.query;
-        state.category = fresh.category;
-        state.model = fresh.model;
-        state.commercialOnly = fresh.commercialOnly;
-        state.recentIds = fresh.recentIds;
-        state.selectedId = '';
+        state.query = '';
+        state.category = '';
+        state.model = '';
+        state.commercialOnly = false;
         state.restoreScroll = null;
         ui.search.value = '';
         ui.commercial.checked = false;
         ui.model.value = '';
-        updateTabButtons();
         renderCategories(state.categories);
-        const preferencesSaved = !state.storageResetFailed && savePreferences();
+        ui.content.scrollTop = 0;
+        const preferencesSaved = savePreferences();
         showNotice(preferencesSaved ? '已恢复默认筛选。' : '本窗口已恢复默认筛选，偏好未能保存。', false);
-        setFilterAndLoad();
+        state.loadMoreError = false;
+        loadPage(false);
         ui.search.focus({ preventScroll: true });
     }
 

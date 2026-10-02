@@ -11,7 +11,8 @@ import UserIdentityBadge from '@/components/UserIdentityBadge';
 import MediaPreview from '@/components/MediaPreview';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
-import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
+import { UploadedImagePicker, type UploadedAssetSelection, type UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
+import { getStudioVideoDurationMax } from '@/lib/template-studio-video-handoff';
 import { uploadFileAsAsset, type UploadProgressHandler } from '@/lib/http/file-upload';
 import type {
   CreateStudioDraftRequest,
@@ -982,29 +983,39 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     setNotice('本机内容已另存为新模块；原草稿和历史记录未覆盖。');
   }
 
-  async function addAssets(selection: UploadedAssetSelection[], slotKey: string | null = null) {
-    if (!activeDraft || selection.length === 0) return;
+  async function addAssets(selection: UploadedAssetSelection[], slotKey: string | null = null): Promise<UploadedImagePickerConfirmResult> {
+    if (!activeDraft || selection.length === 0) return { success: false, message: '请先选择要加入的素材。' };
     const slot = activeDraft.recipe?.assetSlots.find((item) => item.key === slotKey) || null;
     if (slotKey && !slot) {
-      setNotice('这个素材槽位已变化，请重新打开模板。');
-      return;
+      return { success: false, message: '这个素材槽位已变化，请重新打开模板。' };
     }
     if (slot && selection.some((item) => !slot.types.includes(item.type))) {
-      setNotice(`${slot.label}不支持所选素材类型。`);
-      return;
+      return { success: false, message: `${slot.label}不支持所选素材类型，请调整选择后重试。` };
     }
     const existing = new Set(activeDraft.assets.map((item) => item.assetId));
-    const alreadyBound = slot ? activeDraft.assets.filter((item) => assetSlotKey(item) === slot.key).length : 0;
-    const capacity = slot?.maxItems == null ? selection.length : Math.max(0, slot.maxItems - alreadyBound);
     const uniqueSelection = selection.filter((item) => !existing.has(item.id));
-    const additions = uniqueSelection.slice(0, Math.min(capacity, Math.max(0, 12 - activeDraft.assets.length))).map((item) => ({
+    const alreadyBound = slot ? activeDraft.assets.filter((item) => assetSlotKey(item) === slot.key && item.role === slot.role && slot.types.includes(item.type)).length : 0;
+    const capacity = Math.max(0, Math.min(
+      12 - activeDraft.assets.length,
+      slot?.maxItems == null ? Number.MAX_SAFE_INTEGER : slot.maxItems - alreadyBound,
+    ));
+    if (uniqueSelection.length > capacity) {
+      return {
+        success: false,
+        message: `${slot?.label || '当前模块'}最多还能添加 ${capacity} 个素材，请减少选择后重试。`,
+      };
+    }
+    const additions = uniqueSelection.map((item) => ({
       assetId: item.id,
       role: slot?.role || 'reference',
       type: item.type,
       ...(slot ? { slotKey: slot.key } : {}),
     }));
+    if (additions.length !== uniqueSelection.length) {
+      return { success: false, message: '部分素材暂时无法加入，请重新选择后重试。' };
+    }
     if (additions.length) updateDraft((current) => ({ ...current, assets: [...current.assets, ...additions] }));
-    if (uniqueSelection.length > additions.length) setNotice(activeDraft.assets.length >= 12 ? '一个模块最多添加 12 个素材，未加入其余素材。' : `${slot?.label || '素材'}已达到数量上限，未加入其余素材。`);
+    return { success: true };
   }
 
   async function uploadFile(file: File, onProgress?: UploadProgressHandler) {
@@ -1497,6 +1508,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   }
 
   const recipeSlots = activeDraft?.recipe?.assetSlots || [];
+  const pickerSlot = activeDraft?.recipe?.assetSlots.find((item) => item.key === pickerSlotKey) || null;
+  const pickerSlotCount = pickerSlot && activeDraft
+    ? activeDraft.assets.filter((item) => assetSlotKey(item) === pickerSlot.key && item.role === pickerSlot.role && pickerSlot.types.includes(item.type)).length
+    : 0;
+  const pickerSelectionCapacity = activeDraft
+    ? Math.max(0, Math.min(12 - activeDraft.assets.length, pickerSlot?.maxItems == null ? Number.MAX_SAFE_INTEGER : pickerSlot.maxItems - pickerSlotCount))
+    : 0;
   const assetRows = activeDraft?.assets.map((asset, index) => ({ asset, index })) || [];
   const renderAssetRow = ({ asset, index }: { asset: StudioAssetInput; index: number }) => {
     const assignedSlotKey = assetSlotKey(asset);
@@ -1787,7 +1805,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                         <div className={styles.field}><label htmlFor="studio-param-provider">服务通道</label><select id="studio-param-provider" value={stringValue(activeDraft.parameters.provider ?? '')} onChange={(event) => updateParameter('provider', event.target.value || undefined)}><option value="">沿用生成页选择</option><option value="seedance">Seedance</option><option value="h3">H3</option></select></div>
                         <div className={styles.field}><label htmlFor="studio-param-mode">生成方式</label><select id="studio-param-mode" value={stringValue(activeDraft.parameters.generationMode ?? 'all_in_one_reference')} onChange={(event) => updateParameter('generationMode', event.target.value)}>{GENERATION_MODES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
                         <div className={styles.field}><label htmlFor="studio-param-ratio">画面比例</label><select id="studio-param-ratio" value={stringValue(activeDraft.parameters.ratio ?? '16:9')} onChange={(event) => updateParameter('ratio', event.target.value)}>{VIDEO_RATIOS.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
-                        <div className={styles.field}><label htmlFor="studio-param-duration">时长（秒）</label><input id="studio-param-duration" type="number" min={4} max={15} step={1} value={typeof activeDraft.parameters.duration === 'number' ? activeDraft.parameters.duration : 5} onChange={(event) => updateParameter('duration', event.target.value === '' ? undefined : Number(event.target.value))} /></div>
+                        <div className={styles.field}><label htmlFor="studio-param-duration">时长（秒）</label><input id="studio-param-duration" type="number" min={4} max={getStudioVideoDurationMax(activeDraft.parameters)} step={1} value={typeof activeDraft.parameters.duration === 'number' ? activeDraft.parameters.duration : 5} onChange={(event) => updateParameter('duration', event.target.value === '' ? undefined : Number(event.target.value))} /></div>
                         <div className={styles.field}><label htmlFor="studio-param-resolution">清晰度</label><select id="studio-param-resolution" value={stringValue(activeDraft.parameters.resolution ?? '480p')} onChange={(event) => updateParameter('resolution', event.target.value)}>{VIDEO_RESOLUTIONS.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
                         <div className={styles.field}><label htmlFor="studio-param-seed">随机种子</label><input id="studio-param-seed" type="number" min={-1} step={1} value={typeof activeDraft.parameters.seed === 'number' ? activeDraft.parameters.seed : -1} onChange={(event) => updateParameter('seed', event.target.value === '' ? undefined : Number(event.target.value))} /></div>
                         <div className={styles.field}><label htmlFor="studio-param-lora">H3 LoRA</label><input id="studio-param-lora" value={stringValue(activeDraft.parameters.h3LoraId ?? '')} onChange={(event) => updateParameter('h3LoraId', event.target.value || undefined)} placeholder="不指定" /></div>
@@ -1891,7 +1909,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         </main>
       </div>
 
-      {pickerOpen && activeDraft && <UploadedImagePicker open currentCount={activeDraft.assets.length} currentAssetIds={assetIds} onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
+      {pickerOpen && activeDraft && <UploadedImagePicker open currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerSlot?.types} onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
 
       {templateEdit && (
         <div ref={templateEditBackdropRef} className={styles.dialogBackdrop} role="presentation" onClick={(event) => event.stopPropagation()}>

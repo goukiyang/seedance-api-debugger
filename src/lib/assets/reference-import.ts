@@ -1,5 +1,5 @@
 import path from 'path';
-import type { Asset } from '@prisma/client';
+import type { Asset, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { addAssetToWorkspace } from '@/lib/assets/workspace';
@@ -40,6 +40,7 @@ type ReferenceImportContext = {
   albumDescription?: string;
   metadataSource?: string;
   allowSharedAsset?: boolean;
+  db?: Prisma.TransactionClient;
 };
 
 function normalizeReferenceUrl(rawUrl: string) {
@@ -88,8 +89,9 @@ async function getOrCreateReferenceAlbum(
   user: SessionUser,
   albumName = CODEX_REFERENCE_ALBUM_NAME,
   albumDescription = 'Codex 接口上传或导入的生成参考图',
+  db: Prisma.TransactionClient = prisma,
 ) {
-  const existing = await prisma.referenceAlbum.findFirst({
+  const existing = await db.referenceAlbum.findFirst({
     where: {
       owner_user_id: user.id,
       project_id: null,
@@ -101,7 +103,7 @@ async function getOrCreateReferenceAlbum(
   });
   if (existing) return existing;
 
-  return prisma.referenceAlbum.create({
+  return db.referenceAlbum.create({
     data: {
       owner_user_id: user.id,
       name: albumName,
@@ -117,6 +119,7 @@ async function ensureReferenceImageRecord(
   context: ReferenceImportContext,
   asset: Pick<Asset, 'id' | 'type' | 'original_url' | 'thumbnail_url' | 'file_name'>,
 ) {
+  const db = context.db || prisma;
   if (asset.type !== 'image') {
     throw new ReferenceImportError(`素材不是图片: ${asset.id}`, 400, 'reference_asset_not_image');
   }
@@ -130,8 +133,9 @@ async function ensureReferenceImageRecord(
     context.user,
     context.albumName,
     context.albumDescription,
+    db,
   );
-  const existing = await prisma.referenceImage.findFirst({
+  const existing = await db.referenceImage.findFirst({
     where: {
       album_id: album.id,
       asset_id: asset.id,
@@ -142,7 +146,7 @@ async function ensureReferenceImageRecord(
 
   let referenceImage = existing;
   if (referenceImage) {
-    referenceImage = await prisma.referenceImage.update({
+    referenceImage = await db.referenceImage.update({
       where: { id: referenceImage.id },
       data: {
         workspace_id: context.workspaceId,
@@ -157,11 +161,11 @@ async function ensureReferenceImageRecord(
       },
     });
   } else {
-    const currentMax = await prisma.referenceImage.aggregate({
+    const currentMax = await db.referenceImage.aggregate({
       where: { album_id: album.id },
       _max: { sort_order: true },
     });
-    referenceImage = await prisma.referenceImage.create({
+    referenceImage = await db.referenceImage.create({
       data: {
         album_id: album.id,
         workspace_id: context.workspaceId,
@@ -184,12 +188,12 @@ async function ensureReferenceImageRecord(
   }
 
   if (!album.cover_image_id) {
-    await prisma.referenceAlbum.update({
+    await db.referenceAlbum.update({
       where: { id: album.id },
       data: { cover_image_id: referenceImage.id },
     });
   } else {
-    await prisma.referenceAlbum.update({
+    await db.referenceAlbum.update({
       where: { id: album.id },
       data: { updated_at: new Date() },
     });
@@ -202,14 +206,14 @@ async function ensureReferenceImageForAsset(
   context: ReferenceImportContext,
   asset: Pick<Asset, 'id' | 'type' | 'original_url' | 'thumbnail_url' | 'file_name'>,
 ): Promise<ImportedReferenceImage> {
-  if (!await canReadStudioAsset(context.user, asset)) throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
+  if (!await canReadStudioAsset(context.user, asset, context.db || prisma)) throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
   const { referenceImage } = await ensureReferenceImageRecord(context, asset);
   const workspaceAssetId = await addAssetToWorkspace(
     context.workspaceId,
     asset.id,
     context.role || 'reference_image',
     context.user.id,
-    { referenceImageId: referenceImage.id, allowSharedAsset: true },
+    { referenceImageId: referenceImage.id, allowSharedAsset: true, db: context.db },
   );
 
   return {
@@ -237,8 +241,8 @@ export async function attachAssetToSiteReferenceImage(
   context: ReferenceImportContext,
   assetId: string,
 ): Promise<ImportedReferenceImage> {
-  const asset = await prisma.asset.findUnique({ where: { id: assetId } });
-  if (!asset) {
+  const asset = await (context.db || prisma).asset.findUnique({ where: { id: assetId } });
+  if (!asset || asset.status === 'deleted') {
     throw new ReferenceImportError(`素材不存在: ${assetId}`, 404, 'reference_asset_not_found');
   }
   if (!context.allowSharedAsset && asset.owner_id !== context.user.id && context.user.role !== 'admin') {

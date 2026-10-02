@@ -3,6 +3,7 @@
  */
 
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -126,17 +127,18 @@ export async function addAssetToWorkspace(
   assetId: string,
   role?: string,
   ownerId = 'default-user',
-  options?: { referenceImageId?: string; allowSharedAsset?: boolean },
+  options?: { referenceImageId?: string; allowSharedAsset?: boolean; db?: Prisma.TransactionClient },
 ): Promise<string> {
-  const asset = await prisma.asset.findFirst({
+  const db = options?.db || prisma;
+  const asset = await db.asset.findFirst({
     where: options?.allowSharedAsset || ownerId === 'default-user'
-      ? { id: assetId }
-      : { id: assetId, owner_id: ownerId },
+      ? { id: assetId, status: { not: 'deleted' } }
+      : { id: assetId, owner_id: ownerId, status: { not: 'deleted' } },
   });
   if (!asset) throw new Error('Asset not found or permission denied');
 
   // 检查是否已在工作区
-  const existing = await prisma.workspaceAsset.findUnique({
+  const existing = await db.workspaceAsset.findUnique({
     where: {
       workspace_id_asset_id: { workspace_id: workspaceId, asset_id: assetId },
     },
@@ -144,11 +146,11 @@ export async function addAssetToWorkspace(
 
   if (existing) {
     // 更新角色和排序
-    const maxOrder = await prisma.workspaceAsset.aggregate({
+    const maxOrder = await db.workspaceAsset.aggregate({
       where: { workspace_id: workspaceId },
       _max: { sort_order: true },
     });
-    await prisma.workspaceAsset.update({
+    await db.workspaceAsset.update({
       where: { id: existing.id },
       data: {
         sort_order: (maxOrder._max.sort_order ?? 0) + 1,
@@ -159,12 +161,12 @@ export async function addAssetToWorkspace(
     return existing.id;
   }
 
-  const maxOrder = await prisma.workspaceAsset.aggregate({
+  const maxOrder = await db.workspaceAsset.aggregate({
     where: { workspace_id: workspaceId },
     _max: { sort_order: true },
   });
 
-  return prisma.workspaceAsset.create({
+  return db.workspaceAsset.create({
     data: {
       id: uuidv4(),
       workspace_id: workspaceId,

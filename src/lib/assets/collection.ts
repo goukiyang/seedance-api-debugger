@@ -88,12 +88,10 @@ export async function loadCollectionIntoWorkspace(
 
   if (!collection) throw new Error('Collection not found');
 
-  // 清空现有工作区
-  await prisma.workspaceAsset.deleteMany({
-    where: { workspace_id: workspaceId },
-  });
+  if (collection.items.some((item) => item.asset.status === 'deleted')) {
+    throw new Error('图集中有已删除素材，原参考区已保留');
+  }
 
-  // 导入素材到工作区
   const items = collection.items.map((item, idx) => ({
     id: uuidv4(),
     workspace_id: workspaceId,
@@ -102,9 +100,10 @@ export async function loadCollectionIntoWorkspace(
     role: item.role,
   }));
 
-  if (items.length > 0) {
-    await prisma.workspaceAsset.createMany({ data: items });
-  }
+  await prisma.$transaction(async (tx) => {
+    await tx.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+    if (items.length > 0) await tx.workspaceAsset.createMany({ data: items });
+  });
 
   return { count: items.length };
 }

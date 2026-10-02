@@ -179,4 +179,35 @@
 
 守门员：本轮为明确授权的检查与独立体验审查；未修改业务/权限/上传/数据库、未部署，无新增分级归类误判。审查完成不等于整改完成。
 
+## 8. 审查问题落地（2026-10-02，用户“落地”）
+
+本批落实B1–B3与U1–U6，不迁移数据，不新增依赖，不扩展外部模板导入/商业授权/统计等候选能力，不把本批修复说成整个资源目录已合并。主线程处理素材接口与发布，执行者处理不重叠的界面与时长交接；全部修改完成后统一候选构建。按项目约定不自动操作浏览器、截图、功能回归或生成，上线后由用户手动验收。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| R1 | 修复3个代码问题 | 替换失败保留原素材、混选不漏项、时长按模型支持 | 代码完成，待构建及用户手动验收 |
+| R2 | 修复6处体验问题 | 选择不误丢、失败不误关、上限及替换结果明确 | 代码完成，待构建及用户手动验收 |
+| R3 | 发布与记录 | 构建及发布检查通过、可回退、正式页面更新 | 准备发布 |
+
+候选v0.34.1：当前正式服务源码6aee43e、BUILD_ID为77IZ_AigMl46PAmvaSjRF，审查分支3d6023a与其应用文件无差异。保护原有主目录未提交记录，不从主目录旧应用分支发布。包版本为唯一来源，本轮只改锁文件根版本信息，不改依赖。
+
+B1/B2采用项目已安装Prisma5.22.0的事务客户端，预先检查整组权限/素材并准备外部媒体URL，再统一保存工作区、参考记录及归档；任一步失败整组回退。旧集合加载也使用事务。已读取[对应版本事务源码](https://github.com/prisma/prisma/blob/5.22.0/packages/client/src/runtime/getPrismaClient.ts#L730)的提交/异常回滚实现；现有锁文件许可Apache-2.0，直接复用已有依赖，不引入当前Prisma8的新接口或做升级。
+
+实现清单：
+
+- `src/app/api/workspace/assets/route.ts`：整批预检、两种来源统一处理、去重与真实数量；失败返回保留现有输入。
+- `src/lib/assets/workspace.ts`、`reference-import.ts`：现有助手可使用同一事务客户端，工作区和参考归档共同回退；拒绝已删除素材，保留原权限规则。
+- `src/lib/assets/collection.ts`：旧图集加载事务替换，发现已删除素材时不清空原区。
+- `src/lib/template-studio-video-handoff.ts`、`src/components/template-studio/VideoTemplateWorkbench.tsx`：复用模型时长来源，Seedance2.5支持到30秒，其他原15秒模型保持限制；素材槽类型/剩余额度和明确失败结果。
+- `src/components/UploadedImagePicker.tsx`：上传合并已有选择，数量/类型校验、失败留窗重试；关闭/切换会话后不再自动加入，已上传文件仍留素材库。
+- `src/components/ReferenceAlbumPicker.tsx`：跨图集保留选择顺序，失败保留；切换图集撤销旧读取，避免迟到响应覆盖当前图集。
+- `src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`：显示选择上限、余量和超限反馈，保留既有9项规则。
+- `src/app/image-studio/studio.tsx`：粘贴、上传、拖入共用单主图替换确认；取消/上传失败保留旧主图，多图超限明确拒绝。
+- `public/tools/ultimate-canvas/style-gallery.js`：只重置筛选，不清最近记录和当前标签页，复用既有账号隔离保存。
+- `package.json`、`package-lock.json`、`src/lib/release.ts`：0.34.1与对应用户更新摘要；锁文件只改根版本，不改依赖。既有更新入口、数字版本比较、稍后去重和刷新前确认已源码核对，真实旧客户端提醒待用户验收。
+
+全部实现完成后统一`git diff --check`通过。回退tag`rollback/2026-10-02-before-resource-selection-0341`已推送并指向正式6aee43e，远端已核对。保留现有近时显示组件，不新增时间戳或改存储格式。
+
+发布检查及最终结果待完成后回写；未做业务运行验收，不提前写通过。
+
 [返回主待办](../todo.md)
