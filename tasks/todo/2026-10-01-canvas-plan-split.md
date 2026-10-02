@@ -3,7 +3,7 @@
 项目：video-api-debugger / SD2 无限画布
 更新：2026-10-02；文档版本：1.1.0
 目标入口：https://sd2.youdooart.com/tools/ultimate-canvas
-状态：方案补齐，尚未实施。此次“补”仅授权整理工单、归档及只读核对，不授权业务代码修改、生成、数据库写入或部署。
+状态：2026-10-02 用户已明确“落地”，按 v1.1.0 实施 SP1–SP6。当前应用实现中，尚未构建或部署；SP4 结果资源标识口径待 supervisor 决策。此前“补”仅文档的授权状态已被本次明确实施授权替代。
 正式项目根目录：/Volumes/Data/Projects/video-api-debugger
 
 ## 1. 当前结论与链路
@@ -20,14 +20,14 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| SP1 | 方案数据与来源 | 稳定拆分编号、原文版本、正文范围和明确参数来源可保存恢复 | 未开始 |
-| SP2 | 固定格式识别与预览 | 按创意拆分；可校正边界；未识别内容不丢失 | 未开始 |
-| SP3 | 创建独立视频节点 | 使用既有节点；每段整体要求只作用于本段；来源全文不进入请求 | 未开始 |
-| SP4 | 单节点生成与结果 | 输入快照、任务、防重复、未知提交恢复、预览下载和选用闭环 | 未开始 |
-| SP5 | 修改、恢复与撤销 | 草稿恢复、不覆盖手改、不自动重跑、撤销不误删任务资产 | 未开始 |
+| SP1 | 方案数据与来源 | 稳定拆分编号、原文版本、正文范围和明确参数来源可保存恢复 | 进行中（源码实现中，未检查） |
+| SP2 | 固定格式识别与预览 | 按创意拆分；可校正边界；未识别内容不丢失 | 进行中（源码实现中，未检查） |
+| SP3 | 创建独立视频节点 | 使用既有节点；每段整体要求只作用于本段；来源全文不进入请求 | 进行中（源码实现中，未检查） |
+| SP4 | 单节点生成与结果 | 输入快照、任务、防重复、未知提交恢复、预览下载和选用闭环 | 受阻（结果资源标识需确认，其余继续实现） |
+| SP5 | 修改、恢复与撤销 | 草稿恢复、不覆盖手改、不自动重跑、撤销不误删任务资产 | 进行中（源码实现中，未检查） |
 | SP6 | 发布与人工验收 | 构建、健康、版本、回退检查；实际功能由用户手动验收 | 未开始 |
 
-首版不做：AI 识别、镜头级拆分、角色/场景/道具提取、共享要求编辑器、批量生成、自动更新下游、自动选优、自动拼片、第二套生成与计费系统、画布引擎替换。未来实施须另有明确授权，不能把本工单归档当作开工授权。
+首版不做：AI 识别、镜头级拆分、角色/场景/道具提取、共享要求编辑器、批量生成、自动更新下游、自动选优、自动拼片、第二套生成与计费系统、画布引擎替换。本次已明确授权实施上述 SP1–SP6；未列范围仍须另行授权。
 
 ## 3. 提示词格式与识别规则
 
@@ -129,13 +129,41 @@
 
 停止条件：目标分支或实现归属不明、需要改计费/权限/数据库但未授权、无法防止未知受理重复生成、保存会丢原文、需要付费生成验证、生产候选构建失败或无安全回退。说明具体缺口，不降验收标准或转到旧域名。
 
-本次文档交付只检查正文、资料入口、关键原件复制一致性和文档差异；不构建应用、不测试业务、不操作浏览器、不部署。
+本次实施先完成整批修改，再统一执行静态源码和候选构建内置检查，以及发布必需检查；不主动执行功能验收、浏览器操作、付费生成或生产数据库写入。旧文档交付时未构建、未部署的记录仅代表当时状态。
 
 ## 11. 资料与交接
 
-资料索引：../../docs/materials/index.md。
-历史原方案 v1.0.0：../../docs/materials/2026-10-02-canvas-plan-split/2026-10-01-canvas-plan-split.md。用途：原讨论追溯，已被本文替代。
-用户画布原图：../../docs/materials/2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png。用途：原节点和上下游场景参考；原件本地保存，不公开 Git。
+资料索引：[正式索引](/Volumes/Data/Projects/video-api-debugger/docs/materials/index.md)。
+历史原方案 v1.0.0：[历史原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/2026-10-01-canvas-plan-split.md)。用途：原讨论追溯，已被本文替代。
+用户画布原图：[本地原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png)。用途：原节点和上下游场景参考；原件本地保存，不公开 Git。
 来源：用户 2026-10-01 原工单及截图、2026-10-02 本侧聊简化格式/交互/闭环讨论与“补”指令。
 
-转交执行对话时附本文及上述原件；只读取当前 v1.1.0 为有效规格。执行对话需另行得到实现授权后再改代码；交付按项目规则自动安全提交、推送、部署，实际功能待用户手动验收，明确未实现项及风险。
+转交执行对话时附本文及上述原件；只读取当前 v1.1.0 为有效规格。执行对话已得到本次明确“落地”授权；交付按项目规则自动安全提交、推送、部署，实际功能待用户手动验收，明确未实现项及风险。
+
+## 12. 当前实施记录（2026-10-02）
+
+唯一应用源：`/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger`，分支 `codex/canvas-liblib-layout`，开工提交 `20931f7fb4b5af9dc8886120cd03d64ee5f87c09`，开工干净。正式目录仅同步工单、固定 todo 和资料索引，不使用其旧应用分支。当前正式应用仍为 v0.34.2；本批候选计划为兼容新增 v0.35.0，尚未抬应用版本、构建、提交或部署。
+
+已写但未统一检查的范围：
+
+| 文件 | 本批内容 |
+|---|---|
+| public/tools/ultimate-canvas/plan-split.js | 固定标题编号/end 识别、原文字节范围、异常及时间轴诊断、来源修订哈希、容量和撤销签名 |
+| public/tools/ultimate-canvas/plan-split-ui.js | 单一预览、原文查看、分段与归属调整、创建防重复、右侧避让、来源提示和安全批次撤销 |
+| public/tools/ultimate-canvas/app.js | 现有保存/草稿接入、项目原生对话框、明确参数参考、请求发送前保存、未知请求只读找回、历史预览框架、旧任务回写保护 |
+| public/tools/ultimate-canvas/canvas-engine.js | 保存恢复拆分来源；文字编辑原生右键保留；文本菜单入口 |
+| public/tools/ultimate-canvas/generation-node-workflow.js | 前端按所选模型能力校验时长并明确传模型；不截短；保留完整标题编号/end |
+| public/tools/ultimate-canvas/generation-task-coordinator.js | 成功但文件未就绪继续查询，不重发生成 |
+| public/tools/ultimate-canvas/backend-contract.js | 当前画布只读请求恢复路径白名单 |
+| public/tools/ultimate-canvas/index.html、styles.css、icons.js | 原品牌预览和主次按钮、响应布局及既有 Lucide 图标复用 |
+| src/app/tools/ultimate-canvas/CanvasFrame.tsx | 预览覆盖全站导航、复用产品离开保护；保留浏览器 beforeunload |
+| src/app/api/tools/ultimate-canvas/video-submission/route.ts | 最小只读恢复：现有登录、画布编辑权限和任务查看权限；精确当前用户/画布/请求查询，不写库、不调用 Provider |
+| src/lib/canvas-documents.ts | 全画布复制来源内部节点 ID 映射，排除生成请求和结果任务，不改 schema 或权限规则 |
+
+待决策：`src/app/api/assets/library/route.ts` 的现有视频产出返回 `id: video_task:<任务ID>`、`taskId`，但 `assetId: null`；任务状态亦无数据库 Asset ID，未找到既有视频转 Asset 归档 helper。建议选用记录具体任务 ID 与该真实产出库资源标识，不虚构 Asset 行，沿现有下游输入交接。如必须数据库 Asset ID，则需要单独明确最小归档写入授权。已向 supervisor 提出，未收到决定；方案节点的生成与选用暂阻止，不能标 SP4 完成或发布未闭环批次。
+
+源码核对：现有提示词格式入口 `src/lib/templates/module-builder.ts:90` 已要求创意标题编号与结尾 (end)，未发现本次画布入口存在“禁用括号/end”的全局输出规则；未改上游 LLM 提示词指令。其“最多两个中文字符”与本工单“两字简称”口径不同的旧文本只按非标准项展示，不擅自改写原文。
+
+开源取舍：已阅读 [xyflow graph.ts 实现](https://github.com/xyflow/xyflow/blob/main/packages/system/src/utils/graph.ts) 的直接边关联和真实节点边界，以及 [MIT 许可证](https://github.com/xyflow/xyflow/blob/main/LICENSE)。仅参考方法，使用项目已有画布/保存/原生 dialog，不复制第三方引擎、不安装依赖。未宣称页面运行或功能验收通过。
+
+资料：沿用第11节本地用户原图，原件已确认 PNG 可读；本轮无新附件，未向 public 或 Git 复制用户图。守门员开工 L3（可见运行修改）；不触及 Provider、计费、鉴权中间件、数据库 schema、依赖或生产写入。最终统一检查、发布证据、Git/远端/回退与正式记录待闭环。

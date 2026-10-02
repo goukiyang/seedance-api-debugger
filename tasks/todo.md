@@ -1,5 +1,10 @@
 # V1.2 剩余模块落地 Todo
 
+## 2026-10-02 画布视频方案拆分实施
+
+- [唯一有效工单 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：用户已明确“落地”。SP1–SP3/SP5 实现中；SP4 现有视频产出无 Asset ID，结果资源标识待 supervisor 决策；SP6 未开始。不发布未闭环版本，不执行功能自动验收。仅用 `codex/canvas-liblib-layout` 应用源，本目录归档。
+- [资料索引](../docs/materials/index.md)：复用原画布截图与历史 v1.0.0，不公开用户原图。
+
 ## 2026-10-02 模板主操作与产品弹窗
 
 - [实施与发布工单](todo/2026-10-02-template-primary-actions.md)：v0.34.2已部署。G1/G2完成；G3代码已实现并部署待用户手动验收，G4构建、正式公网32项静态检查、回退及归档完成。源码仅用 codex/canvas-liblib-layout 工作树，不用本目录旧应用分支。
