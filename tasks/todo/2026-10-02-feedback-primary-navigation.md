@@ -8,7 +8,7 @@
 | 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
 | 实施/部署源 | /Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger；codex/canvas-liblib-layout；开工HEAD77e450138d06823ff92369c28bdc64ea9d09949e，干净 |
 | 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
-| 状态 | 工单先完成，直接实施I1-I4后整批发布，功能由用户手动验收 |
+| 状态 | I1-I5已部署v0.36.3，发布检查完成、待用户手动验收；I6故障阶段已明确，底层原因待查，视频原图原件仍待归档 |
 | 风险/验证等级 | 真实debug+UI守门员L3，生产切换按L4保护；旧general/L0不采纳；禁止主动浏览器/业务验收与独立审核线程 |
 | 创建/最后更新 | 2026-10-03，北京时间；文件名保留2026-10-02反馈日期 |
 
@@ -32,20 +32,20 @@
 - 主图四列materialGrid；达到currentReferenceCap后添加按钮仅disabled，仍可见。没有独立主图业务锁，按已设置有效数量上限解释；满额隐藏、删图后合法余量恢复，不新增业务锁。
 - 历史依据：[主图规则原文](2026-10-01-feedback-template-assets-dialogs.md)：独立编号、最少/最多、零主图兼容、总10张；辅助不能替代主图，视频首尾帧保持专用角色。
 - 小屏flex侧栏仍嵌套全部子模块竖列且按钮width100%，存在缩窄和高度占用风险；原截图是问题参考，非本轮复现验收。
-- I4已读源码：ComposerActionBar三chip分别disabled={ratioLocked/lockedDuration/lockedResolution}，不共用canSubmit、提示词或参考图gate。GeneratePageClient把所选视频卡ratio/duration/resolution全部交给lockedSettings，再由GenerationComposer按存在值禁用。Seedance2.0不是2.5跟随首帧比例规则；核对自动选中的fallback卡、ratio_locked及历史限制，先确认错误锁来源，不能随意解除真实交付锁。
+- I4已读源码：ComposerActionBar三chip分别disabled={ratioLocked/lockedDuration/lockedResolution}，不共用canSubmit、提示词或参考图gate。GeneratePageClient把所选视频卡ratio/duration/resolution全部交给lockedSettings，再由GenerationComposer按存在值禁用。Seedance2.0不是2.5跟随首帧比例规则；核对自动选中的fallback卡、ratio_locked及历史限制，原判断已被10月3日最新取消业务锁要求替代，实际模型能力限制保留。
 - 诊断入口：GenerationComposer.tsx、ComposerActionBar.tsx、ParamChip.tsx、generate/GeneratePageClient.tsx、VideoTemplateWorkbench.tsx、handoff及近期diff。最终原因和证据补在实施记录。
 
 ### I4阶段结论（2026-10-03）
 
 已确定代码原因：GeneratePageClient.tsx:2031-2036把视频卡存在的比例、时长、分辨率直接作为lockedSettings；GenerationComposer.tsx:2217-2219再按Boolean判锁；ComposerActionBar.tsx:309、337、365分别禁用三chip。loadVideoCards:983-991会自动选中一张可用视频卡。因此用户无需主动选卡，也可能被规格禁用。三chip不使用canSubmit/空提示词/无参考图作为disabled条件，Seedance2.0也不触发仅2.5首尾帧的比例跟随规则。
 
-权限边界证据：src/app/api/tasks/create/route.ts:966只在videoCard.ratio_locked为真且比例不一致时拒绝；当前UI却只要ratio有值就锁，未看ratio_locked。时长与分辨率的三chip锁没有对应的同类卡规格校验。修复方向：普通参数与真正交付锁分开，比例遵循ratio_locked、保留合法模型限制与1080p审批，时长/分辨率不因存在推荐规格误禁用；不改服务器规则。当前具体选中卡/ratio_locked未读生产数据，不宣称已复现或已恢复三个控件。
+权限边界证据：src/app/api/tasks/create/route.ts:966只在videoCard.ratio_locked为真且比例不一致时拒绝；当前UI却只要ratio有值就锁，未看ratio_locked。时长与分辨率的三chip锁没有对应的同类卡规格校验。历史修复方向曾保留ratio_locked，现已被最新明确要求替代：三个参数均在模型合法范围自由选择；撤销UI业务锁及tasks/create对应比例业务锁拒绝，保留模型限制、1080p审批和历史存储字段，无迁移或DB写。当前具体选中卡/ratio_locked未读生产数据，不宣称已复现或已恢复三个控件。
 
-阶段原因已向主控回报，用户随后明确恢复I1-I4完整实施与统一发布；已开始源码整批修改，发布尚未启动。工单正文/固定todo/索引已落盘；W1尚待聚焦Git，第三用户原截图由主控待归档。
+阶段原因已向主控回报，随后恢复并追加I5/I6；I1-I5现已部署，阶段历史不作当前状态。首稿正文/固定todo/索引bc2ac3a已推送；视频标注原图仍由主控待归档。
 
 ## 范围与禁区
 
-图片三项限定templateWorkbench/image Surface；保留独立/image-studio、video及桌面。I4只修视频参数UI控制/同步/状态误锁，不改Provider、计费、模型能力、登录、权限、DB、上传归属或后台。不装依赖、不付费生成、不浏览器控制/截图、不功能自动回归、不独立审核线程。生成按钮仍受合法输入检查。
+图片三项限定templateWorkbench/image Surface；保留独立/image-studio、video及桌面。I4修视频参数UI控制/同步并撤销生成接口相应比例业务锁校验；I5只查相关模板上下文/参数的有效内容dirty和共享关闭路径；I6仅日志、回执、SQLite mode=ro/query_only读，不改Provider、计费、模型能力、登录、权限、DB、上传归属或后台。不装依赖、不付费生成、不浏览器控制/截图、不功能自动回归、不独立审核线程。生成按钮仍受合法输入检查。
 
 复用既有组件、lucide、原生select、CSS、ProductDialog/useDialogDismiss与工作现场持久化。必要popup保留外部/Esc关闭、未保存保护，主操作明确；没有新增时间戳界面，不巡改近时。复用ReleaseNotice的严格SemVer、稍后去重、手动检测及刷新保护，不建平行更新系统。
 
@@ -53,24 +53,28 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| W1 | 编写反馈优化工单 | 正式归档、附件齐全、范围清楚、提交推送 | 进行中：正文/索引落盘，第三条截图原件待归档，待Git |
-| I1 | 主图缩略图放大 | 约增大30%，不影响其他图 | 未开始 |
-| I2 | 锁定后的添加入口 | 按既有数量规则隐藏，不改变限制 | 未开始 |
-| I3 | 手机和平板导航 | 组、模块可触达，桌面保留 | 未开始 |
-| I4 | 视频秒数与比例不可改排查修复 | 原因明确，合法选项可选，不改模型限制 | 进行中：扩充包括分辨率，定位disabled |
-| D1 | 发布更新 | 构建、版本、公网检查通过，待手动验收 | 未开始 |
+| W1 | 编写反馈优化工单 | 正式归档、附件齐全、范围清楚、提交推送 | 进行中：首稿bc2ac3a已推送，本轮正文/索引/证据齐备；视频标注原件仍待归档，不能称附件齐全 |
+| I1 | 主图缩略图放大 | 约增大30%，不影响其他图 | 代码/部署已完成，发布检查通过，待用户手动验收 |
+| I2 | 锁定后的添加入口 | 按既有数量规则隐藏，不改变限制 | 代码/部署已完成，发布检查通过，待用户手动验收 |
+| I3 | 手机和平板导航 | 组、模块可触达，桌面保留 | 代码/部署已完成，发布检查通过，待用户手动验收 |
+| I4 | 视频秒数与比例不可改排查修复 | 比例/秒数/分辨率合法选项自由选择，不加业务锁，不改模型限制 | 代码/部署已完成：三参数业务锁及接口拒绝已撤销，推荐只初次/切卡带入；待用户手动验收 |
+| I5 | 模板上下文未修改关闭及同类误提醒 | 未改或改回原内容直接关闭，真正未保存修改保护保留 | 代码/部署已完成：规则字段/默认值正规化，关闭按打开时有效配置比较，保存后更新基准；待用户手动验收 |
+| I6 | 线上多任务待确认根因排查 | 明确线上产物及故障阶段，证据与未知分开，不重试/改数据 | 阶段排查完成：两条请求阶段网络/超时、回执无响应；底层网络/代理/上游原因无法追溯待查 |
+| D1 | 发布更新 | 构建、版本、公网检查通过，待手动验收 | 已完成：服务器候选build及内置lint/types、自行Review、Git回退/公网检查完成；已部署待手动 |
 
-### 整批实现记录（2026-10-03，v0.36.3待发布）
+### 整批实现记录（2026-10-03，v0.36.3已部署待手动）
 
-I1-I4源码实现已完成，以上状态待统一发布检查后更新；未做功能验收。改动文件与内容：
+I1-I5源码已写；I6故障阶段与日志缺口已记录，主控授权恢复本批UI发布，不改Provider等待/重试/积分或DB。未做功能验收。首轮统一build成功，自行Review发现首次自动选卡推荐值可能覆盖已保存偏好、全部封面触控选中态不明显，已集中补齐；第二轮本地build已结束成功，新增范围补齐后本地编译成功，内置检查进程长期系统等待，安全终止；相同最终提交的服务器候选构建完成全部内置检查，未将本地中止冒充通过。改动文件与内容：
 
 | 文件（相对唯一源码） | 内容 |
 |---|---|
 | src/app/image-studio/studio.tsx | templateWorkbench主图区限定样式、满额不渲染添加位；小屏两级原生select及全部封面；桌面与小屏共用导航动作、当前模块高亮；既有会话状态增加封面视图，显式moduleId仍优先 |
 | src/app/image-studio/studio.module.css | 主图三列单格calc(32.5% - 7.8px)，相对原四列(100% - 24px)/4恰为1.3倍；800px下保持原360px网格上限；1200px以下仅模板图片工作台使用两行44px触控导航，避免嵌套列表撑高 |
 | src/components/template-studio/template-studio.module.css | 图片顶部栏1200px断点与小屏导航一致，视频样式不变 |
-| src/components/generate/GeneratePageClient.tsx | videoCardDefaults与lockedSettings分开，后者只有ratio_locked=true且合法比例时传入；duration/resolution不再冒充锁 |
-| src/components/GenerationComposer.tsx | 每个选中卡ID只带入一次推荐值，晚到推荐不覆盖已编辑参数，历史复用/工作台交接优先；真实锁仍单独同步，参数及默认偏好后续变化不会解除真实比例锁；可见原因说明；模型能力与1080p审批不改 |
+| src/components/generate/GeneratePageClient.tsx | 推荐默认值与锁已分离；ratio_locked控制分支已移除，三参数不再按卡规格禁用 |
+| src/components/GenerationComposer.tsx | 每个选中卡ID只带入一次推荐值，首次恢复已保存偏好/晚到推荐不覆盖已编辑参数，历史复用/工作台交接优先；业务锁同步/模板冲突gate/锁定说明/控件disabled已移除；默认值仅初次或切卡带入，不持续覆盖用户编辑；模型能力与1080p审批保持 |
+| src/app/api/tasks/create/route.ts | 仅删除videoCard.ratio_locked拒绝不同比例的4行；1080p审批、权限、模型校验、点数/Provider保持 |
+| src/app/image-studio/studio.tsx（I5） | 主图规则显式固定字段顺序/补缺默认，基准与当前分辨率质量统一正规化、初始图片按主图/辅助一致排序；弹窗按打开时有效配置比较，不把外部提示词/张数草稿混入关闭保护；真正修改仍产品确认，X/外部/Esc共享路径；草稿hydration完成后允许打开；保存成功更新打开基准，保存后继续修改仍保护 |
 | package.json、package-lock.json | 只同步根版本元数据PATCH0.36.3，无依赖变动 |
 | src/lib/release.ts | 与唯一package版本一致，更新用户可感知摘要，复用ReleaseNotice |
 
@@ -81,8 +85,9 @@ ReleaseNotice已读源码：同channel严格数字SemVer、更高版本才弹、
 - [ ] I1：只在主图区约+30%、比例稳定、响应式换列；辅助/风格/固定图不放大。
 - [ ] I2：沿用有效上限隐藏满额添加位；保留删除、预览、排序、已有重新选图行为；合法余量恢复。
 - [ ] I3：小屏分组/模块分层选择，当前高亮/计数和全部封面可达；不挤中文竖排或所有子模块占满高度，复用工作现场。
-- [ ] I4：定位三参数锁定原因，恢复合法选项；有效交付约束与模型限制保留，空提示词/参考图不得禁参数。
-- [ ] D1：整批后统一build内置lint/type、diff/源码边界、自行Review；聚焦commit/push/rollback、候选构建切换、公网检查及记录。
+- [ ] I4：定位三参数锁定原因，恢复合法选项；取消比例/时长/分辨率业务锁，模型限制保留，空提示词/参考图不得禁参数。
+- [ ] I5：打开未修改、修改后改回直接关闭；真正修改仍确认；字段顺序/默认初始化/对象实例不是dirty，相关全局设置与视频上下文按值比较无同类根因，未扩站巡改。
+- [x] D1：整批后统一build内置lint/type、diff/源码边界、自行Review；聚焦commit/push/rollback、候选构建切换、公网检查及记录。
 
 ## 资料与附件
 
@@ -101,17 +106,59 @@ ReleaseNotice已读源码：同channel严格数字SemVer、更高版本才弹、
 
 ## 发布检查与用户验收
 
-仅发布build内置lint/type、git diff --check、脚本语法、后端等价、版本来源一致及更新提醒源码检查。预计PATCH0.36.3，真实生产与并发锁复核后确定，同批不重复抬号。整体自行Verify→Review，非独立审查；项目手动边界优先。
+仅发布build内置lint/type、git diff --check、脚本语法、接口窄改审查及图片worker依赖不变、版本来源一致及更新提醒源码检查。预计PATCH0.36.3，真实生产与并发锁复核后确定，同批不重复抬号。整体自行Verify→Review，非独立审查；项目手动边界优先。
 
 服务器42.193.221.253 gouki；sd2-gray.service3302；/srv/video-api-debugger/app；archive commit到releases。排env/node_modules/.next*/storage/uploads/videos/DB/运行期。候选.next-prod-candidate，禁止原地构建live.next-prod，保留旧source/build回退。复用已有部署锁/登记；后端等价则图片worker不重启。版本/服务/公网失败停止或恢复旧版。
 
-用户手动检查：主图约+30%且其余图未变；满额添加位消失、删图后合法余量恢复；手机平板可选组/模块/全部封面、刷新保留现场；/generate三参数在模型支持及无真实交付锁时可选，空输入只禁生成按钮。已有更换/删除/预览/排序及更新提醒仍可用。工程发布检查不表示功能通过；反馈仍new。
+用户手动检查：主图约+30%且其余图未变；满额添加位消失、删图后合法余量恢复；手机平板可选组/模块/全部封面、刷新保留现场；/generate三参数在模型支持范围均可选，视频卡业务锁不生效，空输入只禁生成按钮。模块上下文未改或改回原值应直接关闭，真实改动仍确认；保存后继续编辑也保留保护，关闭按钮/外部/Esc一致。已有更换/删除/预览/排序及更新提醒仍可用。工程发布检查不表示功能通过；反馈仍new。
+
+I5同类源码检查：settings-controller.ts的samePrices按键和值比较，不依赖对象顺序；VideoContextEditor.tsx按context字符串比较并在加载后设基准，无该误提醒根因，未修改这些文件。I6建议未来仅在明确授权后保留脱敏的fetch底层错误码用于下一次协查；现有记录无法追溯，不为补证新生成。
 
 ## Git Plan与停止条件
 
 正式ROOT codex/mediakit-video-enhance开工419154173797a5d569708f40f8994af541bc2044，只归档工单/索引/todo自有hunk；旧August todo脏改和untracked保留。应用从77e450138d06823ff92369c28bdc64ea9d09949e聚焦实现，push已有origin，不force。正式正文不可只存worktree，可留应用副本。提交前复核remote/status，raw/原图/私人姓名不上传。
 
-生产漂移、并发锁冲突、构建失败、运行数据/权限风险、付费/DB/Provider等超授权时停相关动作，其他独立安全项继续。未知业务状态不授权解除真实锁；原件缺口不阻塞UI发布。无内部派工工具，不建侧栏任务绕过，由唯一lead统一处理共享文件。
+生产漂移、并发锁冲突、构建失败、运行数据/权限风险、付费/DB/Provider等超授权时停相关动作，其他独立安全项继续。最新明确取消视频三参数业务锁，不扩大到主图容量或真实模型限制；原件缺口不阻塞UI发布。无内部派工工具，不建侧栏任务绕过，由唯一lead统一处理共享文件。
+
+
+## 最新纠偏与I6事故证据（2026-10-03北京时间00:49核对）
+
+用户完整原文：“不要设置锁定；模版生成图片部分，点开模版上下文后没有修改关闭，又会反复提醒没有保存是否确认，这是不合理的，直接关闭就行了，同类问题排查;”。此指令替代旧ratio_locked保留结论；I2主图数量容量规则不取消。I5按打开时加载并正规化后的有效值判断变化，初始化、对象实例/键顺序、打开关闭、改后改回不算未保存；X/外部/Esc共享关闭，真实修改保留产品内保护。
+
+事故追加原文：“是不是我们今天改错了什么，导致生成失败，多个生成都这样”。截图为图片模板，主图1/1、其他0、总1/10，img2.5-S/最高/4K，“生成结果待确认”“冻结积分已释放”并不自动重复请求。截图仅问题证据，不能据此判定Provider失败。
+
+- 线上从本地和公网核对均v0.36.2，commit f6478176fb34cefa432318f38ac521693bbdd2f6，BUILD OlWyIuDDh1fBfDOaID4Tt；截至该事故核对时尚未切到本轮v0.36.3；后续发布结果见下方01:12回执。sd2-gray和图片worker active，worker于10月2日19:26:26启动，异常时未见重启。
+- 实际DB /data/video-api-debugger/var-lib/dev.db，以SQLite URI mode=ro加PRAGMA query_only=ON查询，无写入。两条gpt-image-2.5-sunburst/quality=max/2752x2960任务：ee2dca05…提交00:25:52，00:30:54待确认，日志request/network/301929ms；451f3ab2…排队创建00:26:16，实际提交00:30:56，00:35:56待确认，日志request/timeout/300046ms。省略任务ID只用于文字展示，完整ID在服务器原记录。
+- 两条request.json只保留提交标记，无returnedAt、HTTP status或upstreamRequestId；没有source.json或image.part，因此证据位于等待HTTP响应阶段，不是已知的响应schema解析、原图下载/校验/保存故障。请求已尝试，但不能证明上游未执行或生成失败，禁止自动重发。
+- 同日截至00:49相同模型7条：2待确认、4成功、1运行；异常之后4条已成功，其中3条同quality=max/2752x2960，不宣称全体失败或用户具体截图与某一ID一一匹配（截图未给ID）。
+- 服务器worker/provider/delivery/limits四个源码SHA与f647提交逐一一致；该路径最后修改为05756192245111821ae7560b3aaf5041d119c693（10月2日17:55，v0.36.0）。父提交已存在300000ms上游响应等待及480000ms执行上限，v0.36.0未缩短它；后续v0.36.1/0.36.2未更改四文件。本轮未发布修改不是此次事故原因的证据，不等于证明历史改动绝无相关性。
+- 确定结论：HTTP响应返回前的网络中断/等待超时；现有分类隐藏底层fetch异常，不能进一步断定网络链路、代理超时或上游慢响应。没有上游回执，不能宣称Provider故障。暂不改Provider、等待时长、账务、任务状态；若需进一步取底层错误/上游协查，须明确窄方案及风险交主控判断。事故排查阶段曾暂停所有生产切换；当前已按主控最新授权恢复I1-I5统一发布。
+
+I6原件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png；来源用户本轮剪贴板图，父于10月3日归档，895x725 PNG sips可读，原件/复制SHA256均2fc4dcf6bbe59df8e36f836a1d1da658cd66c6f56f028ee50aee57769a5ccd02。复用父关键校验，不重复读取原图URL，不上传私人图片Git。此附件与未归档15s标注图不同。
+
+
+## 发布回执（2026-10-03北京时间01:12）
+
+应用v0.36.3已部署，待用户手动验收。运行源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a；BUILD ytlmOyOpdCSahZQKCm07Y；分支codex/canvas-liblib-layout，远端已核对完整commit。回退标签rollback/2026-10-03-before-feedback-v0.36.3已推送，指向f6478176fb34cefa432318f38ac521693bbdd2f6。旧源码release及旧BUILD OlWyIuDDh1fBfDOaID4Tt保留，旧构建路径/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0363，保护记录/srv/video-api-debugger/backups/sd2-feedback-v0363。
+
+[统一diff](2026-10-02-feedback-primary-navigation.diff)、[发布证据JSON](2026-10-02-feedback-primary-navigation.evidence.json)正式根目录与应用树副本同步。证据为发布检查，不是功能验收；W1仍缺视频标注原件，I6底层原因未确认。
+
+| 实际命令/检查 | 结果 |
+|---|---|
+| npm run build（先前I1-I4两轮本地日志） | 两次exit0；范围随后变更，不冒充最新完整证明 |
+| npm run build > /tmp/sd2-feedback-v0363-batch-final-build.log | 新增I5后编译成功，lint/types阶段两个进程系统等待超过7分钟；安全TERM结束自有进程/接回session，无遗留，不称完整通过 |
+| git diff --check、git diff --cached --check；package/lock JSON根版本和依赖图对比；bash -n部署脚本、node --check核对脚本 | 通过，依赖图未变；除release元数据和明确取消比例锁API外，图片worker依赖/脚本/Prisma/登录Provider等未改 |
+| 自行Review实际11文件整批diff | 已核对I1/2范围、响应式级联、推荐初次/切卡与偏好优先、取消UI锁与API一致；补齐保存后继续编辑的基准刷新，检查全局设置/视频上下文按值比较无同根因；无独立reviewer、无浏览器/功能回归 |
+| git commit、git push origin应用分支和rollback标签、git ls-remote | fbb8243371398ad753b66d8ff02ff8a0a6b9d84a及rollback指向f6478176fb34cefa432318f38ac521693bbdd2f6远端可见；首稿正式ROOT bc2ac3a7aa6c4af193152e1f761f5f276d9036f9已推送 |
+| git archive最终提交；tar目录/敏感路径排除校验；scp到server /tmp | 首包卫生检查拦下旧资料图片，未上传；一次有界修正排除整个docs/materials后通过：1325项、29030400字节、SHA256 7251116efab10e01418e90f421262971be6ab7e64341232ceaf6dc1163d8c8cb；不含.env/运行目录/DB/私人资料 |
+| 现有发布活动登记和服务器flock，核对实际commit/BUILD | 通过；用已有root SSH密钥执行发布管理，不读取密码，gouki运行构建/应用；未改用户权限 |
+| release中NEXT_DIST_DIR=.next-prod-candidate npm run build | 完整exit0，内置lint/types通过，候选标记包括小屏导航/推荐默认值/模块设置关闭保护，新BUILD不同于旧版；只在candidate构建，不动live构建 |
+| API精确差异守卫及worker依赖核对 | 仅tasks/create旧比例锁4行删除，其他API及scripts/Prisma/src/lib（release.ts除外）与旧release一致；不能称全backend等价；worker PID1241475及启动时间/服务单元前后一致，不重启图片worker |
+| rsync排除运行数据、保留旧构建、切换/restart sd2-gray.service | 成功，storage/uploads/videos软链接和关键可写目录保持；本地就绪后才结束发布会话，失败自动恢复旧source/BUILD的trap保留 |
+| /tmp/sd2-feedback-v0363-verify.mjs核对本机+公网 | exit0：20源码SHA、27公网静态SHA一致；config/release/login均200、release0.36.3、X-SD2-Origin server-42-193；受保护/image-studio、/template-studio、/generate匿名307到登录，权限未扩大；共享CSS200一致；4服务/定时器active |
+| 发布COMPLETE握手/活动登记 | DEPLOY_COMPLETE，server会话exit0，发布锁已释放；停止额外功能验证，待用户手动验收 |
+
+未运行npm test/test:api、Playwright/DOM/浏览器/生成实验/独立审查；未安装依赖、改登录点数权限/Provider、DB写或任务重发；I4仅用户明确取消的接口业务锁4行。发布检查及更新提醒源码核对不能代替真实升级交互和功能验收。守门员真实debug+UI L3/生产保护L4；旧general/L0误分类由主控纠正并记录，本lead未使用低等级放行。
 
 ## 可复制交接正文
 
@@ -120,8 +167,8 @@ ReleaseNotice已读源码：同channel严格数字SemVer、更高版本才弹、
 项目video-api-debugger，目标https://sd2.youdooart.com/template-studio?type=image，I4确切目标https://sd2.youdooart.com/generate。
 正式工单：/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-02-feedback-primary-navigation.md。
 唯一源码：/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，不用正式ROOT旧应用或v12。
-附件feedback.json（完整原文）及48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg（导航参考）在/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/，仅本机不公开。10月3日视频原截图仅父会话可见、原件待归档，不伪造路径。
-先工单/索引，再整批I1主图约+30%、I2有效上限隐藏添加位、I3手机平板导航、I4比例/时长/分辨率错误禁用修复，不改模型限制。
+附件feedback.json（完整原文）及48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg（导航参考）在/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/，仅本机不公开。10月3日视频标注原图仅父会话可见、原件待归档，不伪造路径。事故PNG附件codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png（待确认排查证据）正式路径/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png，父已校验，私有不公开。
+先工单/索引，再整批I1主图约+30%、I2有效上限隐藏添加位、I3手机平板导航、I4三个参数取消业务锁、I5未修改上下文直接关闭；I6线上事故优先只读排查，不改模型限制。已部署v0.36.3、BUILD ytlmOyOpdCSahZQKCm07Y，I6底层原因无法追溯待查，视频标注原图仍缺。
 整批后统一发布build内置检查、自行Review，聚焦commit/push/rollback、候选服务器切换、公网版本/BUILD/静态可达。用户手动验收；不浏览器/截图/功能回归/付费生成/DB写/登录点数Provider权限变更/装依赖。
 构建/服务异常、漂移/锁冲突、数据权限风险即停或回退；回执含正式工单、逐文件内容/diff、原因、命令结果、版本commit/tag/BUILD、公网证据及未验收项。
 ```

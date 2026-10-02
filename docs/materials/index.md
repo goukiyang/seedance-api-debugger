@@ -2,13 +2,15 @@
 
 ## 主图导航与视频参数反馈工单（2026-10-03）
 
-项目video-api-debugger；2026-10-02后台两条原文见下节。2026-10-03用户授权“写完直接开改”，追加/generate比例、秒数、分辨率三个灰色点不开（Seedance2.0、首尾帧、空提示词/无参考图，1068x873）。I1-I4整批后一次发布；工单已写，尚未发布，反馈new不改。
+项目video-api-debugger；2026-10-02后台两条原文见下节。2026-10-03追加/generate三参数灰色，随后明确取消三参数业务锁（模型合法范围保留），新增I5模板上下文未修改关闭及同类误提醒，I6多任务待确认只读排查。I1-I5已部署v0.36.3，源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a、BUILD ytlmOyOpdCSahZQKCm07Y；[发布证据](../../tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](../../tasks/todo/2026-10-02-feedback-primary-navigation.diff)正式归档；4服务/27静态/20源码一致通过，功能待用户手动验收。I6故障阶段已明确、底层原因无法追溯待查；视频标注原件仍待归档，不称W1附件齐全，反馈new不改。
 
 | 资料/原名 | 来源/日期/版本 | 主题与用途 | 正式入口、关系与校验 |
 |---|---|---|---|
 | 主图与导航反馈优化；2026-10-02-feedback-primary-navigation.md | 后台原文/用户追加；2026-10-03创建；v1.0.0 | 主图约+30%、满额添加位、小屏导航、视频三参数误锁；边界/手动验收/附件/交接正文 | [正式工单](../../tasks/todo/2026-10-02-feedback-primary-navigation.md)；可读；历史规则见10月1日原文；工作树非唯一资料位置 |
 | feedback.json及48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 2026-10-02；快照v1.0.0/原图 | 两条原文与导航参考，不作验收图；无音视频 | 下节原路径/校验保留；工单有绝对路径；raw/原图不公开Git |
 | 视频三参数用户截图（原名未知） | 2026-10-03用户会话；原版本未知 | /generate三chip灰色；DOM/模型/输入事实完整记工单；非自动浏览器证据 | 仅父会话可见，无path/attachmentHandle；待主控导出到docs/materials/2026-10-03-feedback-video-parameters/；原件未归档/未校验，不伪造已保存 |
+| codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png | 2026-10-03用户剪贴板截图，原件/原名保留；父归档 | 图片模板img2.5-S最高4K多次待确认；用于I6故障阶段核对，不据图定Provider失败，与上条缺原件截图不同 | [原件](2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png)；895x725 PNG，父sips可读/复制SHA256一致2fc4dcf6bbe59df8e36f836a1d1da658cd66c6f56f028ee50aee57769a5ccd02，复用校验；私有不上传Git |
+| I4取消锁/I5未修改关闭/I6事故对话原文及只读结论 | 2026-10-03当前用户；工单v1.0.0补充 | 最新指令替代旧ratio_locked保留结论；两异常为request/network与request/timeout约300秒，无返回回执，异常后同模型有成功记录；底层网络/上游原因未确证 | [正式工单最新段](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#最新纠偏与i6事故证据2026-10-03北京时间0049核对)；原文、线上commit/BUILD及缺口已登记，无生产数据写入 |
 
 ## 当日后台反馈（2026-10-02）
 
