@@ -1,0 +1,1566 @@
+diff --git SOURCE/a/package-lock.json SOURCE/b/package-lock.json
+index 27b7df7..3c103d9 100644
+--- SOURCE/a/package-lock.json
++++ SOURCE/b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.36.2",
++  "version": "0.36.3",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "video-api-debugger",
+-      "version": "0.36.2",
++      "version": "0.36.3",
+       "dependencies": {
+         "@aws-sdk/client-s3": "^3.1041.0",
+         "@aws-sdk/s3-request-presigner": "^3.1041.0",
+diff --git SOURCE/a/package.json SOURCE/b/package.json
+index 19794d5..1c3c8a8 100644
+--- SOURCE/a/package.json
++++ SOURCE/b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.36.2",
++  "version": "0.36.3",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git SOURCE/a/src/app/api/tasks/create/route.ts SOURCE/b/src/app/api/tasks/create/route.ts
+index c7ba3ff..94e0e82 100644
+--- SOURCE/a/src/app/api/tasks/create/route.ts
++++ SOURCE/b/src/app/api/tasks/create/route.ts
+@@ -963,10 +963,6 @@ export async function POST(request: NextRequest) {
+     }
+   }
+ 
+-  if (videoCard.ratio_locked && videoCard.ratio && ratio !== videoCard.ratio) {
+-    return errorJson(`此视频卡已锁定比例 ${videoCard.ratio}，变更比例需要先通过比例变更审批`, 403);
+-  }
+-
+   let videoBranch: { id: string; title: string; status: string; is_primary: boolean } | null = null;
+   if (requestedVideoBranchId) {
+     const branch = await prisma.videoBranch.findUnique({
+diff --git SOURCE/a/src/app/image-studio/studio.module.css SOURCE/b/src/app/image-studio/studio.module.css
+index a9babaf..863e530 100644
+--- SOURCE/a/src/app/image-studio/studio.module.css
++++ SOURCE/b/src/app/image-studio/studio.module.css
+@@ -1,5 +1,6 @@
+ .page { position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
+ .content { min-width: 0; }
++.mobileModuleNav { display: none; }
+ .moduleRail { position: fixed; left: 0; top: var(--composer-topbar-height, 48px); bottom: 0; z-index: 15; box-sizing: border-box; width: 236px; max-height: none; overflow-y: auto; padding: 18px 14px; border: 0; border-right: 1px solid #2d383d; border-radius: 0; background: #151a1d; scrollbar-width: thin; scrollbar-color: #647179 transparent; scrollbar-gutter: stable; }
+ .moduleRail:hover, .moduleRail:focus-within { scrollbar-color: #839098 transparent; }
+ .moduleRail::-webkit-scrollbar { width: 8px; height: 8px; }
+@@ -95,6 +96,7 @@
+ .page textarea { width: 100%; resize: vertical; min-height: 120px; line-height: 1.6; }
+ .references { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+ .referencesCompact { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
++.primaryMaterials .materialGrid { grid-template-columns: repeat(3, minmax(0, calc(32.5% - 7.8px))); max-width: none; }
+ .referencesCompact .referenceNumber { left: 4px; top: auto; bottom: 4px; padding: 2px 4px; font-size: 11px; max-width: calc(100% - 8px); }
+ .page .referencesCompact .referenceGrip { left: 3px; top: 3px; bottom: auto; padding: 3px; }
+ .page .referencesCompact .remove { right: 3px; top: 3px; width: 24px; height: 24px; padding: 3px; }
+@@ -235,3 +237,16 @@
+ .presetSharing[aria-checked="false"] { color: #adb6bd; background: #20262a; }
+ @media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: var(--composer-topbar-height, 48px); bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
+ @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } .modelQualityRow { grid-template-columns: 1fr; } .page .coverCard { grid-template-rows: minmax(0, 1fr) 122px; } .coverDescription strong { font-size: 20px; } .moduleBannerHasImage { block-size: 120px; } }
++@media (max-width: 1200px) {
++  .page.templateWorkbench { padding: 16px; }
++  .templateWorkbench .moduleRail { display: none; }
++  .templateWorkbench .mobileModuleNav { position: sticky; top: var(--composer-topbar-height, 48px); z-index: 15; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px; margin-bottom: 16px; background: #151a1d; border-bottom: 1px solid #2d383d; }
++  .mobileModuleNav label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
++  .mobileModuleNav label > span { flex: 0 0 auto; }
++  .page .mobileModuleNav select { flex: 1 1 0; min-width: 0; width: 0; max-width: 100%; min-height: 44px; padding: 8px; font-size: 14px; text-overflow: ellipsis; }
++  .page .mobileModuleNav button { min-height: 44px; padding: 8px 10px; white-space: nowrap; }
++  .page .mobileModuleNav button[aria-pressed=true] { background: #203d38; border-color: #367d70; color: #b9f7e8; }
++  .mobileModulePicker { grid-column: 1 / -1; }
++  .templateWorkbench .module { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + 132px); }
++}
++@media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
+diff --git SOURCE/a/src/app/image-studio/studio.tsx SOURCE/b/src/app/image-studio/studio.tsx
+index 1987311..94f2a17 100644
+--- SOURCE/a/src/app/image-studio/studio.tsx
++++ SOURCE/b/src/app/image-studio/studio.tsx
+@@ -55,8 +55,11 @@ const models = IMAGE_STUDIO_MODELS;
+ const fixedReferencePayload = (items: FixedStudioReference[]) => items.map(item => ({ assetId: item.id, note: item.note || '' }));
+ const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
+ function moduleReferencePolicy(module: StudioModule): StudioReferencePolicy {
+-  return module.referencePolicy ? { styleMax: MAX_REFERENCE_IMAGES, referenceMax: MAX_REFERENCE_IMAGES, ...module.referencePolicy } : { primaryIds: module.images.flatMap(image => image.id ? [image.id] : []), primaryMin: 0,
+-    primaryMax: module.referenceLimit || MAX_REFERENCE_IMAGES, auxiliaryMax: MAX_REFERENCE_IMAGES, styleMax: MAX_REFERENCE_IMAGES, referenceMax: MAX_REFERENCE_IMAGES, useFixedReferences: true };
++  const policy = module.referencePolicy;
++  return { primaryIds: policy?.primaryIds ?? module.images.flatMap(image => image.id ? [image.id] : []),
++    primaryMin: policy?.primaryMin ?? 0, primaryMax: policy?.primaryMax ?? (module.referenceLimit || MAX_REFERENCE_IMAGES),
++    auxiliaryMax: policy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES, styleMax: policy?.styleMax ?? MAX_REFERENCE_IMAGES,
++    referenceMax: policy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: policy?.useFixedReferences ?? true };
+ }
+ async function readResponse(response: Response) {
+   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
+@@ -152,6 +155,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+   const [creating, setCreating] = useState(false);
+   const [active, setActive] = useState('');
+   const [selectedGroup, setSelectedGroup] = useState('');
++  const [coverView, setCoverView] = useState(false);
+   const [viewRestored, setViewRestored] = useState(false);
+   useRememberedScroll(`image-studio:${userId}`, viewRestored);
+   useEffect(() => {
+@@ -159,14 +163,14 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+       const view = JSON.parse(sessionStorage.getItem(`sd2-studio-view:${userId}`) || 'null');
+       if (typeof view?.group === 'string') setSelectedGroup(view.group);
+       if (typeof view?.active === 'string') setActive(view.active);
++      if (templateWorkbench && typeof view?.coverView === 'boolean') setCoverView(view.coverView);
+     } catch {}
+     setViewRestored(true);
+-  }, [userId]);
++  }, [userId, templateWorkbench]);
+   useEffect(() => {
+     if (!viewRestored) return;
+-    try { sessionStorage.setItem(`sd2-studio-view:${userId}`, JSON.stringify({ group: selectedGroup, active })); } catch {}
+-  }, [viewRestored, userId, selectedGroup, active]);
+-  const [coverView, setCoverView] = useState(false);
++    try { sessionStorage.setItem(`sd2-studio-view:${userId}`, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView } : {}) })); } catch {}
++  }, [viewRestored, userId, selectedGroup, active, coverView, templateWorkbench]);
+   const [coverPage, setCoverPage] = useState(() => {
+     if (typeof window === 'undefined') return 0;
+     try {
+@@ -406,21 +410,42 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+       void loadModules();
+     }
+   }
+-  return <>{productDialog}{(<main className={styles.page}>
++  const navigateToModule = (group: string, id: string) => {
++    setCoverView(false); setSelectedGroup(group); setActive(id);
++    void (async () => {
++      if (!modules.some(module => module.id === id)) await hydrateModules([id]);
++      requestAnimationFrame(() => document.getElementById(`module-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
++    })();
++  };
++  return <>{productDialog}{(<main className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
+     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label="分组快捷栏">
+       <div className={styles.moduleRailTitle}>分组快捷栏</div>
+       {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
+         <button type="button" className={selectedGroup === group ? styles.moduleRailActive : ''} aria-current={selectedGroup === group ? 'page' : undefined} onClick={() => {
+           setCoverView(false); setSelectedGroup(group); setActive(items[0]?.id || '');
+         }}><span>{group}</span><small>{items.length}</small></button>
+-        <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={styles.moduleRailChild} onClick={() => {
+-          setCoverView(false); setSelectedGroup(group); setActive(item.id);
+-          void (async () => { if (!modules.some(module => module.id === item.id)) await hydrateModules([item.id]);
+-            requestAnimationFrame(() => document.getElementById(`module-${item.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })); })();
+-        }}>{item.name}</button>)}</div>
++        <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
++          onClick={() => navigateToModule(group, item.id)}>{item.name}</button>)}</div>
+       </div>)}
+       <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => setCoverView(true)}>全部封面<small>{navigation.length}</small></button>
+     </aside>
++    {templateWorkbench && <nav className={styles.mobileModuleNav} aria-label="图片模块导航">
++      <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => {
++        const group = event.target.value;
++        const first = groupedModules[group]?.[0];
++        if (first) navigateToModule(group, first.id);
++      }}>
++        {!Object.keys(groupedModules).length && <option value="">暂无分组</option>}
++        {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length})</option>)}
++      </select></label>
++      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={() => setCoverView(true)}>全部封面 <small>{navigation.length}</small></button>
++      <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && groupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
++        if (event.target.value) navigateToModule(selectedGroup, event.target.value);
++      }}>
++        <option value="">{coverView ? '选择模块返回编辑' : '选择模块'}</option>
++        {(groupedModules[selectedGroup] || []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
++      </select></label>
++    </nav>}
+     <div className={styles.content}>
+     <header className={styles.header}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : templateWorkbench ? '图片模块' : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
+       <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
+@@ -506,7 +531,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
+   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
+   const [moduleSaveError, setModuleSaveError] = useState('');
+-  const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: module.quality || 'auto', resolution: module.resolution || defaultImageResolution(module.model), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module) }));
++  const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: normalizeImageStudioQuality(module.model, module.quality), resolution: normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: [...module.images.filter(image => moduleReferencePolicy(module).primaryIds.includes(image.id || '')), ...module.images.filter(image => !moduleReferencePolicy(module).primaryIds.includes(image.id || ''))].map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module) }));
+   const moduleSaveLock = useRef(false);
+   const restoredDraftKey = useRef('');
+   const autoSaveAttempt = useRef('');
+@@ -572,21 +597,31 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const draftKey = `sd2-image-studio-draft:${suffix}`;
+   const pendingKey = `sd2-image-studio-pending:${suffix}`;
+   const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
+-  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality, resolution, groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
++  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), resolution: normalizeImageResolution(moduleModel, resolution), groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
+   const moduleSaveSnapshot = { ...moduleDraft };
+   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
+   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
+-  const generationDraft = JSON.stringify({ prompt, count, referenceLimit, aspectRatio, resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds });
+-  const defaultGenerationDraft = JSON.stringify({ prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: baseline.resolution, referenceIds: baseline.referenceIds, model: baseline.model, quality: baseline.quality, referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
++  const generationDraft = JSON.stringify({ prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds });
++  const defaultGenerationDraft = JSON.stringify({ prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
+   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
+   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
+   const automaticDirty = automaticSnapshot !== moduleSaved;
+   const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
+   useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
+   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
++  const contextDialogSnapshot = JSON.stringify({ context: moduleContext, primaryMin, primaryMax: referenceLimit,
++    auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences,
++    fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: styleGroups.map(group => group.id),
++    model: moduleModel, resolution: normalizeImageResolution(moduleModel, resolution), quality: normalizeImageStudioQuality(moduleModel, quality) });
++  const contextDialogOpening = useRef('');
++  function openModuleDialog() {
++    if (!draftLoaded || draftRestoring) return;
++    contextDialogOpening.current = contextDialogSnapshot;
++    moduleDialog.current?.showModal();
++  }
+   async function closeModuleDialog() {
+     if (moduleSaving || uploading || bannerUploading) return;
+-    if (settingsDirty && !(await confirm('上下文或固定参考图尚未保存，确定关闭吗？当前草稿会保留。', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
++    if (settingsDirty && contextDialogSnapshot !== contextDialogOpening.current && !(await confirm('模块设置尚未保存，确定关闭吗？当前草稿会保留。', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+     moduleDialog.current?.close();
+   }
+   useDialogDismiss({ open: true, dialogRef: moduleDialog, nativeDialog: true, onDismiss: closeModuleDialog });
+@@ -641,6 +676,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
+       setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
+       setSavedFixedReferences(result.fixedReferences || fixedSnapshot);
++      if (manualSettings) contextDialogOpening.current = contextDialogSnapshot;
+       if (fixedOverride) setFixedReferences(result.fixedReferences || fixedOverride);
+       else if (manualSettings) setFixedReferences(current => JSON.stringify(fixedReferencePayload(current)) === JSON.stringify(fixedReferencePayload(fixedSnapshot)) ? result.fixedReferences || fixedSnapshot : current);
+       onModuleChange(result);
+@@ -1212,7 +1248,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+         </label>
+         {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
+         <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : settingsDirty ? '设置未保存' : '已保存'}</span>
+-        <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>
++        <button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button>
+         <button type="button" title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={`删除${templateWorkbench ? '模块' : '模板'}：${name}`}
+           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
+           onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : templateWorkbench ? '删除模块' : '删除模板'}</button>
+@@ -1233,7 +1269,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     <div className={styles.workspace}>
+       <section className={styles.inputs} aria-label="生成参数">
+         {reproduceSourceTaskId && <p role="status" className={styles.muted}>历史复现模式：沿用当时的参考图，合并当前通用与模块上下文；不会自动提交或扣积分。<button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button></p>}
+-        <section className={styles.materialSection} aria-label="主图">
++        <section className={`${styles.materialSection} ${templateWorkbench ? styles.primaryMaterials : ''}`} aria-label="主图">
+           <header className={styles.materialHeading}><h3>主图</h3>
+             <select aria-label="主图数量上限" value={referenceLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => {
+               const next = Number(event.target.value);
+@@ -1245,8 +1281,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+           <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
+             <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
+               onChangeRole={(image, index) => changeImageRole(image, index, false)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
+-              <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap}
+-                title={images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : '添加主图'}</span></button>
++              {(!templateWorkbench || images.length < currentReferenceCap) && <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap}
++                title={images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : '添加主图'}</span></button>}
+             </StudioReferenceGrid>
+           </div>
+         </section>
+diff --git SOURCE/a/src/components/GenerationComposer.tsx SOURCE/b/src/components/GenerationComposer.tsx
+index 468c672..a937e75 100644
+--- SOURCE/a/src/components/GenerationComposer.tsx
++++ SOURCE/b/src/components/GenerationComposer.tsx
+@@ -386,13 +386,14 @@ interface Props {
+   initialSettings?: GenerationDefaults | null;
+   preferencesReady?: boolean;
+   onSettingsChange?: (settings: Omit<GenerationDefaults, 'projectId' | 'seedMode'>) => void;
+-  lockedSettings?: {
+-    sourceLabel: string;
++  videoCardDefaults?: {
++    id: string;
+     ratio?: VideoRatio | null;
+     duration?: VideoDuration | null;
+     resolution?: VideoResolution | null;
+   } | null;
+   reuseDraft?: {
++    videoCardId?: string | null;
+     model?: string | null;
+     taskId: string;
+     reuseKey: number;
+@@ -484,7 +485,7 @@ export function GenerationComposer({
+   initialSettings,
+   preferencesReady = false,
+   onSettingsChange,
+-  lockedSettings,
++  videoCardDefaults,
+   onCollectionLoad,
+   onCollectionSave,
+   onCollectionNew,
+@@ -530,6 +531,7 @@ export function GenerationComposer({
+   const templateEnabled = templateMode === 'workbench';
+   const appliedReuseDraftRef = React.useRef<string | null>(null);
+   const appliedInitialSettingsRef = React.useRef(false);
++  const appliedVideoCardDefaultsRef = React.useRef<string | null>(null);
+   const settingsTouchedRef = React.useRef(false);
+   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
+   const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
+@@ -672,7 +674,6 @@ export function GenerationComposer({
+   }, []);
+ 
+   const need1080pApproval = require1080pApproval && resolution === '1080p';
+-  const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
+ 
+   useEffect(() => {
+     if (!studioHandoff && selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
+@@ -731,7 +732,7 @@ export function GenerationComposer({
+   const durationModel = allowExtendedSeedanceDuration && selectedProvider === 'seedance' ? selectedModel : null;
+   const durationBlocker = isSeedanceVideoDuration(duration, durationModel)
+     ? null
+-    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。${lockedSettings?.duration ? '请切换支持该时长的模型，或修改视频卡时长。' : '请重新选择时长，或切换支持该时长的模型。'}确认前不会提交或扣点。`;
++    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。请重新选择时长，或切换支持该时长的模型。确认前不会提交或扣点。`;
+ 
+   const hasUploadingMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'uploading');
+   const hasFailedMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'failed');
+@@ -752,15 +753,6 @@ export function GenerationComposer({
+     if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
+       return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
+     }
+-    if (studioHandoff && lockedSettings?.ratio && ratio !== lockedSettings.ratio) {
+-      return `模板比例 ${ratio} 与当前视频卡锁定比例 ${lockedSettings.ratio} 不一致`;
+-    }
+-    if (studioHandoff && lockedSettings?.duration && duration !== lockedSettings.duration) {
+-      return `模板时长 ${duration}s 与当前视频卡锁定时长 ${lockedSettings.duration}s 不一致`;
+-    }
+-    if (studioHandoff && lockedSettings?.resolution && resolution !== lockedSettings.resolution) {
+-      return `模板分辨率 ${resolution} 与当前视频卡锁定分辨率 ${lockedSettings.resolution} 不一致`;
+-    }
+     if (!prompt.trim()) return '请填写提示词';
+     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
+       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
+@@ -846,7 +838,7 @@ export function GenerationComposer({
+     return null;
+     })();
+     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
+-  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
++  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+   const submitBlocker = submitBlockerState?.message || null;
+ 
+   const composerStatus = useMemo(() => {
+@@ -1115,17 +1107,16 @@ export function GenerationComposer({
+   }, [initialSettings, reuseDraft, studioHandoff, modelOptions, onModelChange]);
+ 
+   useEffect(() => {
+-    if (!lockedSettings || studioHandoff) return;
+-    if (lockedSettings.ratio) setRatio(lockedSettings.ratio);
+-    if (lockedSettings.duration) setDuration(lockedSettings.duration);
+-    if (lockedSettings.resolution) setResolution(lockedSettings.resolution);
+-  }, [
+-    lockedSettings?.sourceLabel,
+-    lockedSettings?.ratio,
+-    lockedSettings?.duration,
+-    lockedSettings?.resolution,
+-    studioHandoff,
+-  ]);
++    if (!videoCardDefaults) { appliedVideoCardDefaultsRef.current = null; return; }
++    if (!preferencesReady || studioHandoff || appliedVideoCardDefaultsRef.current === videoCardDefaults.id) return;
++    const initializing = appliedVideoCardDefaultsRef.current === null;
++    appliedVideoCardDefaultsRef.current = videoCardDefaults.id;
++    // Card recommendations initialize a selection, never resynchronize over later edits.
++    if (reuseDraft?.videoCardId === videoCardDefaults.id || (initializing && (initialSettings || reuseDraft || settingsTouchedRef.current))) return;
++    if (videoCardDefaults.ratio) setRatio(videoCardDefaults.ratio);
++    if (videoCardDefaults.duration) setDuration(videoCardDefaults.duration);
++    if (videoCardDefaults.resolution) setResolution(videoCardDefaults.resolution);
++  }, [videoCardDefaults, preferencesReady, studioHandoff, reuseDraft, initialSettings]);
+ 
+   useEffect(() => {
+     if (!need1080pApproval) {
+@@ -2150,9 +2141,9 @@ export function GenerationComposer({
+               setGenerationMode(DEFAULT_GENERATION_MODE);
+               setSelectedModel(modelOptions[0]?.id || '');
+               onModelChange?.(modelOptions[0]?.id || '');
+-              setRatio(lockedSettings?.ratio || DEFAULT_RATIO);
+-              setDuration(lockedSettings?.duration || DEFAULT_DURATION);
+-              setResolution(lockedSettings?.resolution || DEFAULT_RESOLUTION);
++              setRatio(DEFAULT_RATIO);
++              setDuration(DEFAULT_DURATION);
++              setResolution(DEFAULT_RESOLUTION);
+               setSeed(-1);
+               setGenerateAudio(true);
+               setReturnLastFrame(false);
+@@ -2214,10 +2205,6 @@ export function GenerationComposer({
+             markStudioParameterCorrected('resolution');
+             setResolution(value);
+           }}
+-          lockedRatio={Boolean(lockedSettings?.ratio)}
+-          lockedDuration={Boolean(lockedSettings?.duration)}
+-          lockedResolution={Boolean(lockedSettings?.resolution)}
+-          lockReason={lockReason}
+           compactControls={templateEnabled}
+         />
+       </div>
+diff --git SOURCE/a/src/components/generate/GeneratePageClient.tsx SOURCE/b/src/components/generate/GeneratePageClient.tsx
+index 413dfee..44fe300 100644
+--- SOURCE/a/src/components/generate/GeneratePageClient.tsx
++++ SOURCE/b/src/components/generate/GeneratePageClient.tsx
+@@ -2028,9 +2028,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
+ 	    ? projectMetaLabel(selectedProject)
+ 	    : '新建一个项目后即可保存任务、成本和结果。';
+ 	  const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
+-	  const selectedVideoCardLockedSettings = selectedVideoCard
++	  const selectedVideoCardDefaults = selectedVideoCard
+ 	    ? {
+-	        sourceLabel: selectedVideoCard.title,
++	        id: selectedVideoCard.id,
+ 	        ratio: asVideoRatio(selectedVideoCard.ratio),
+ 	        duration: asVideoDuration(selectedVideoCard.duration),
+ 	        resolution: asVideoResolution(selectedVideoCard.target_resolution),
+@@ -2501,7 +2501,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
+           initialSettings={generationDefaults}
+           preferencesReady={generationDefaultsReady}
+           onSettingsChange={saveGenerationDefaults}
+-          lockedSettings={selectedVideoCardLockedSettings}
++          videoCardDefaults={selectedVideoCardDefaults}
+           reuseDraft={reuseDraft}
+           studioHandoff={studioHandoff}
+           selectedVideoCardId={selectedVideoCardId}
+diff --git SOURCE/a/src/components/template-studio/template-studio.module.css SOURCE/b/src/components/template-studio/template-studio.module.css
+index f0eb4b1..2b689bb 100644
+--- SOURCE/a/src/components/template-studio/template-studio.module.css
++++ SOURCE/b/src/components/template-studio/template-studio.module.css
+@@ -37,7 +37,7 @@
+ 
+ .headerTitle { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+ .imageHeader { padding-inline-start: 268px; }
+-@media (max-width: 1000px) { .imageHeader { padding-inline-start: 26px; } }
++@media (max-width: 1200px) { .imageHeader { padding-inline-start: 26px; } }
+ .headerTitle h1 { margin: 0; font-size: 19px; line-height: 1.2; font-weight: 750; }
+ .kicker { color: var(--muted); font-size: 12px; }
+ 
+diff --git SOURCE/a/src/lib/release.ts SOURCE/b/src/lib/release.ts
+index d26bc6f..818f573 100644
+--- SOURCE/a/src/lib/release.ts
++++ SOURCE/b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '模板工作台分开显示文案与视频状态；复用历史输入只新建模块。图片记录刷新和加载更多保留已有内容，恢复入口明确为查询状态；视频模型与LoRA按通道识别，模块称呼和记录时间更清楚。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '主图预览放大，满额隐藏添加入口；手机和平板可直接选择分组和模块。视频比例、时长和分辨率可按模型支持范围调整；模块上下文未修改可直接关闭。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);
+diff --git SOURCE/a/tasks/todo.md SOURCE/b/tasks/todo.md
+index 0d640d2..f18a3b7 100644
+--- SOURCE/a/tasks/todo.md
++++ SOURCE/b/tasks/todo.md
+@@ -2,6 +2,8 @@
+ 
+ ## 当前入口
+ 
++- [主图导航及视频参数 I1-I6](todo/2026-10-02-feedback-primary-navigation.md)：v0.36.3已部署，源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a、BUILD ytlmOyOpdCSahZQKCm07Y；I1-I5代码/部署完成待用户手动，D1候选内置检查/4服务/27公网静态/20源码一致通过；[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)。正式资料根目录/Volumes/Data/Projects/video-api-debugger；W1视频标注原图仍缺，I6底层网络/代理/上游原因无法追溯待查，不改Provider/等待/重试/积分或DB。
++
+ - [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：v0.36.2已部署；WS1-WS7实现及发布检查完成，待用户手动验收。源码f647817，BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致；图片worker未重启。正式正文、既有附件与[发布证据](todo/2026-10-02-template-workbench-ux.evidence.json)归入主目录；无bulk视频契约按待确认，不新增后台。
+ 
+ - [加载与体验优化 U1–U6](todo/2026-10-02-loading-ux.md)：v0.36.1已部署；源码实现、发布必需检查与安全部署完成，待用户手动验收。运行源码8acaf46，BUILD Ec6Hfe91C-vrdLDtYaCKN，4服务/40公网静态/24源码一致、图片worker正常排空；完整正文、既有附件入口与[发布证据](todo/2026-10-02-loading-ux.evidence.json)归入正式根目录。
+diff --git SOURCE/a/tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json SOURCE/b/tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json
+new file mode 100644
+index 0000000..a5c2900
+--- /dev/null
++++ SOURCE/b/tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json
+@@ -0,0 +1,346 @@
++{
++  "checkedAt": "2026-10-02T17:11:47.264Z",
++  "runId": "sd2-feedback-v0363",
++  "version": "0.36.3",
++  "commit": "fbb8243371398ad753b66d8ff02ff8a0a6b9d84a",
++  "build": "ytlmOyOpdCSahZQKCm07Y",
++  "routes": [
++    "/layout",
++    "/login/page",
++    "/generate/page",
++    "/template-studio/page"
++  ],
++  "files": [
++    {
++      "path": "static/chunks/webpack-5771f0fcaecd5647.js",
++      "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
++      "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/8344c0af-421bfd77be53e753.js",
++      "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
++      "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/1890-7faa2453eb06933f.js",
++      "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
++      "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/main-app-2d700b7ebb08890f.js",
++      "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
++      "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
++      "status": 200
++    },
++    {
++      "path": "static/css/993f560b06c7bc1f.css",
++      "sha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
++      "publicSha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
++      "status": 200
++    },
++    {
++      "path": "static/css/ea095be58e8c4d2c.css",
++      "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
++      "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
++      "status": 200
++    },
++    {
++      "path": "static/css/0cacfd9b992f5cee.css",
++      "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
++      "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
++      "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
++      "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/3267-3fbd97130dd04797.js",
++      "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
++      "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/3461-4160763e155494a1.js",
++      "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
++      "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5634-e38ba8b1a6c23a17.js",
++      "sha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
++      "publicSha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/layout-437ffd4f69fce15c.js",
++      "sha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
++      "publicSha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/login/page-777149980be08fee.js",
++      "sha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
++      "publicSha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
++      "status": 200
++    },
++    {
++      "path": "static/css/53c843adf00a1818.css",
++      "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
++      "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/6581-3b6574c3c15f97b2.js",
++      "sha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
++      "publicSha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5557-8807fd6738a80a57.js",
++      "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
++      "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/4881-0f4d34f12b6f2026.js",
++      "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
++      "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/6670-7082efca1a6a1ace.js",
++      "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
++      "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/9534-4ab68d9b9b67f606.js",
++      "sha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
++      "publicSha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5246-0a4907f78de58f22.js",
++      "sha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
++      "publicSha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5559-c83f34e4e3c28875.js",
++      "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
++      "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/3038-6771ee064baef388.js",
++      "sha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
++      "publicSha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/9041-e702e256458b9182.js",
++      "sha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
++      "publicSha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/generate/page-33833e63fb9a46ce.js",
++      "sha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
++      "publicSha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/6370-4123e213528db92e.js",
++      "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
++      "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5595-d1bcc5f90a86099c.js",
++      "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
++      "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/template-studio/page-090a5a57090036d9.js",
++      "sha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
++      "publicSha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
++      "status": 200
++    }
++  ],
++  "sourceFiles": [
++    {
++      "path": "src/app/api/tasks/create/route.ts",
++      "sha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414",
++      "localSha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414"
++    },
++    {
++      "path": "package-lock.json",
++      "sha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9",
++      "localSha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9"
++    },
++    {
++      "path": "package.json",
++      "sha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce",
++      "localSha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce"
++    },
++    {
++      "path": "src/app/image-studio/studio.tsx",
++      "sha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46",
++      "localSha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46"
++    },
++    {
++      "path": "src/app/image-studio/studio.module.css",
++      "sha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71",
++      "localSha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71"
++    },
++    {
++      "path": "src/components/GenerationComposer.tsx",
++      "sha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24",
++      "localSha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24"
++    },
++    {
++      "path": "src/components/generate/GeneratePageClient.tsx",
++      "sha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7",
++      "localSha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7"
++    },
++    {
++      "path": "src/components/ComposerActionBar.tsx",
++      "sha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a",
++      "localSha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a"
++    },
++    {
++      "path": "src/components/template-studio/TemplateStudioShell.tsx",
++      "sha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a",
++      "localSha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a"
++    },
++    {
++      "path": "src/components/template-studio/VideoTemplateWorkbench.tsx",
++      "sha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b",
++      "localSha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b"
++    },
++    {
++      "path": "src/components/template-studio/template-studio.module.css",
++      "sha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c",
++      "localSha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c"
++    },
++    {
++      "path": "src/lib/release.ts",
++      "sha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d",
++      "localSha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d"
++    },
++    {
++      "path": "src/components/RelativeTime.tsx",
++      "sha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd",
++      "localSha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd"
++    },
++    {
++      "path": "src/components/useDialogDismiss.ts",
++      "sha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb",
++      "localSha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb"
++    },
++    {
++      "path": "src/components/useProductDialog.tsx",
++      "sha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d",
++      "localSha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d"
++    },
++    {
++      "path": "src/components/ReleaseNotice.tsx",
++      "sha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5",
++      "localSha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5"
++    },
++    {
++      "path": "public/styles/loading.css",
++      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f",
++      "localSha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
++    },
++    {
++      "path": "src/components/LoadingState.tsx",
++      "sha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725",
++      "localSha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725"
++    },
++    {
++      "path": "src/lib/image-studio/worker.ts",
++      "sha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813",
++      "localSha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813"
++    },
++    {
++      "path": "scripts/process-image-studio.ts",
++      "sha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387",
++      "localSha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387"
++    }
++  ],
++  "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
++  "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
++  "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
++  "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
++  "checks": [
++    {
++      "path": "/api/config",
++      "status": 200,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/api/release",
++      "status": 200,
++      "origin": "server-42-193",
++      "version": "0.36.3"
++    },
++    {
++      "path": "/login",
++      "status": 200,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/image-studio",
++      "status": 307,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/template-studio",
++      "status": 307,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/generate",
++      "status": 307,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/styles/loading.css",
++      "status": 200,
++      "origin": "server-42-193",
++      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
++    }
++  ],
++  "local": {
++    "checks": [
++      {
++        "path": "/api/config",
++        "status": 200
++      },
++      {
++        "path": "/api/release",
++        "status": 200
++      },
++      {
++        "path": "/login",
++        "status": 200
++      }
++    ],
++    "services": [
++      "active",
++      "active",
++      "active",
++      "active"
++    ],
++    "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
++  },
++  "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes"
++}
+diff --git SOURCE/a/tasks/todo/2026-10-02-feedback-primary-navigation.md SOURCE/b/tasks/todo/2026-10-02-feedback-primary-navigation.md
+new file mode 100644
+index 0000000..30f8de5
+--- /dev/null
++++ SOURCE/b/tasks/todo/2026-10-02-feedback-primary-navigation.md
+@@ -0,0 +1,174 @@
++# 主图与导航反馈优化
++
++| 字段 | 内容 |
++|---|---|
++| 项目 | video-api-debugger |
++| 工单版本 | v1.0.0 |
++| 正式版本来源 | package.json、src/lib/release.ts、生产/api/release；开工v0.36.2，发布前重新锁定 |
++| 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
++| 实施/部署源 | /Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger；codex/canvas-liblib-layout；开工HEAD77e450138d06823ff92369c28bdc64ea9d09949e，干净 |
++| 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
++| 状态 | I1-I5已部署v0.36.3，发布检查完成、待用户手动验收；I6故障阶段已明确，底层原因待查，视频原图原件仍待归档 |
++| 风险/验证等级 | 真实debug+UI守门员L3，生产切换按L4保护；旧general/L0不采纳；禁止主动浏览器/业务验收与独立审核线程 |
++| 创建/最后更新 | 2026-10-03，北京时间；文件名保留2026-10-02反馈日期 |
++
++## 目标与完整原文
++
++用户先要求“写工单”，后明确“写完直接开改”。主图更容易看清，满额后不显示无效添加位，手机和平板能找组、模块和全部封面。追加视频比例、秒数、分辨率三个灰色控件，恢复合法选择，不改变模型限制。
++
++来源：正式SD2后台Feedback只读快照，2026-10-02 23:07北京时间读取，两条均new；不改状态、不写DB。raw仅私有本地保存，姓名不上传Git。
++
++| ID | 北京时间 | 页面 | 完整原文 | 附件 |
++|---|---|---|---|---|
++| cmuqyowne0027vg4vr3xyks6m | 2026-10-02 20:51:09 | /template-studio?type=image | 主图的。缩略图大小稍微大个30%左右。一旦锁定了。张数后面就不要再出现添加主图的这个图标。 | 无 |
++| cmuqyq5xo002fvg4vjhbp6aar | 2026-10-02 20:52:08 | /template-studio?type=image | 考虑一下手机平板的用户。这个导航条根本没法用。 | 1张原图 |
++
++2026-10-03对话追加：“等下，还有一个，为什么我现在改变不了视频生成页面的时间秒数和比例了？”随后：“灰色，点不开，”，及“左右加这个，这三个都用不了”。
++
++第三条用户截图/标注事实（由主控传递，不是本lead浏览器操作）：/generate，1068x873；Seedance2.0、首尾帧，提示词为空且无参考图；1:1、15s、480p三chip灰色，15s为button.composer-chip.composer-chip-disabled；精确selector为div.composer-action-bar:nth-of-type(5) > div.composer-chips:nth-of-type(1) > div.composer-chip-wrap:nth-of-type(4) > button.composer-chip.composer-chip-disabled。45点生成按钮也disabled、图集控件正常。用户未提供视频卡状态。原截图当前仅父会话可见，无path/attachmentHandle，主控尝试导出；尚未归档，不以新截图替代，不因缺原件阻塞修复。
++
++## 现状与根因判断
++
++- 主图四列materialGrid；达到currentReferenceCap后添加按钮仅disabled，仍可见。没有独立主图业务锁，按已设置有效数量上限解释；满额隐藏、删图后合法余量恢复，不新增业务锁。
++- 历史依据：[主图规则原文](2026-10-01-feedback-template-assets-dialogs.md)：独立编号、最少/最多、零主图兼容、总10张；辅助不能替代主图，视频首尾帧保持专用角色。
++- 小屏flex侧栏仍嵌套全部子模块竖列且按钮width100%，存在缩窄和高度占用风险；原截图是问题参考，非本轮复现验收。
++- I4已读源码：ComposerActionBar三chip分别disabled={ratioLocked/lockedDuration/lockedResolution}，不共用canSubmit、提示词或参考图gate。GeneratePageClient把所选视频卡ratio/duration/resolution全部交给lockedSettings，再由GenerationComposer按存在值禁用。Seedance2.0不是2.5跟随首帧比例规则；核对自动选中的fallback卡、ratio_locked及历史限制，原判断已被10月3日最新取消业务锁要求替代，实际模型能力限制保留。
++- 诊断入口：GenerationComposer.tsx、ComposerActionBar.tsx、ParamChip.tsx、generate/GeneratePageClient.tsx、VideoTemplateWorkbench.tsx、handoff及近期diff。最终原因和证据补在实施记录。
++
++### I4阶段结论（2026-10-03）
++
++已确定代码原因：GeneratePageClient.tsx:2031-2036把视频卡存在的比例、时长、分辨率直接作为lockedSettings；GenerationComposer.tsx:2217-2219再按Boolean判锁；ComposerActionBar.tsx:309、337、365分别禁用三chip。loadVideoCards:983-991会自动选中一张可用视频卡。因此用户无需主动选卡，也可能被规格禁用。三chip不使用canSubmit/空提示词/无参考图作为disabled条件，Seedance2.0也不触发仅2.5首尾帧的比例跟随规则。
++
++权限边界证据：src/app/api/tasks/create/route.ts:966只在videoCard.ratio_locked为真且比例不一致时拒绝；当前UI却只要ratio有值就锁，未看ratio_locked。时长与分辨率的三chip锁没有对应的同类卡规格校验。历史修复方向曾保留ratio_locked，现已被最新明确要求替代：三个参数均在模型合法范围自由选择；撤销UI业务锁及tasks/create对应比例业务锁拒绝，保留模型限制、1080p审批和历史存储字段，无迁移或DB写。当前具体选中卡/ratio_locked未读生产数据，不宣称已复现或已恢复三个控件。
++
++阶段原因已向主控回报，随后恢复并追加I5/I6；I1-I5现已部署，阶段历史不作当前状态。首稿正文/固定todo/索引bc2ac3a已推送；视频标注原图仍由主控待归档。
++
++## 范围与禁区
++
++图片三项限定templateWorkbench/image Surface；保留独立/image-studio、video及桌面。I4修视频参数UI控制/同步并撤销生成接口相应比例业务锁校验；I5只查相关模板上下文/参数的有效内容dirty和共享关闭路径；I6仅日志、回执、SQLite mode=ro/query_only读，不改Provider、计费、模型能力、登录、权限、DB、上传归属或后台。不装依赖、不付费生成、不浏览器控制/截图、不功能自动回归、不独立审核线程。生成按钮仍受合法输入检查。
++
++复用既有组件、lucide、原生select、CSS、ProductDialog/useDialogDismiss与工作现场持久化。必要popup保留外部/Esc关闭、未保存保护，主操作明确；没有新增时间戳界面，不巡改近时。复用ReleaseNotice的严格SemVer、稍后去重、手动检测及刷新保护，不建平行更新系统。
++
++## 任务对账
++
++| 编号 | 任务 | 完成标准 | 状态 |
++|---|---|---|---|
++| W1 | 编写反馈优化工单 | 正式归档、附件齐全、范围清楚、提交推送 | 进行中：首稿bc2ac3a已推送，本轮正文/索引/证据齐备；视频标注原件仍待归档，不能称附件齐全 |
++| I1 | 主图缩略图放大 | 约增大30%，不影响其他图 | 代码/部署已完成，发布检查通过，待用户手动验收 |
++| I2 | 锁定后的添加入口 | 按既有数量规则隐藏，不改变限制 | 代码/部署已完成，发布检查通过，待用户手动验收 |
++| I3 | 手机和平板导航 | 组、模块可触达，桌面保留 | 代码/部署已完成，发布检查通过，待用户手动验收 |
++| I4 | 视频秒数与比例不可改排查修复 | 比例/秒数/分辨率合法选项自由选择，不加业务锁，不改模型限制 | 代码/部署已完成：三参数业务锁及接口拒绝已撤销，推荐只初次/切卡带入；待用户手动验收 |
++| I5 | 模板上下文未修改关闭及同类误提醒 | 未改或改回原内容直接关闭，真正未保存修改保护保留 | 代码/部署已完成：规则字段/默认值正规化，关闭按打开时有效配置比较，保存后更新基准；待用户手动验收 |
++| I6 | 线上多任务待确认根因排查 | 明确线上产物及故障阶段，证据与未知分开，不重试/改数据 | 阶段排查完成：两条请求阶段网络/超时、回执无响应；底层网络/代理/上游原因无法追溯待查 |
++| D1 | 发布更新 | 构建、版本、公网检查通过，待手动验收 | 已完成：服务器候选build及内置lint/types、自行Review、Git回退/公网检查完成；已部署待手动 |
++
++### 整批实现记录（2026-10-03，v0.36.3已部署待手动）
++
++I1-I5源码已写；I6故障阶段与日志缺口已记录，主控授权恢复本批UI发布，不改Provider等待/重试/积分或DB。未做功能验收。首轮统一build成功，自行Review发现首次自动选卡推荐值可能覆盖已保存偏好、全部封面触控选中态不明显，已集中补齐；第二轮本地build已结束成功，新增范围补齐后本地编译成功，内置检查进程长期系统等待，安全终止；相同最终提交的服务器候选构建完成全部内置检查，未将本地中止冒充通过。改动文件与内容：
++
++| 文件（相对唯一源码） | 内容 |
++|---|---|
++| src/app/image-studio/studio.tsx | templateWorkbench主图区限定样式、满额不渲染添加位；小屏两级原生select及全部封面；桌面与小屏共用导航动作、当前模块高亮；既有会话状态增加封面视图，显式moduleId仍优先 |
++| src/app/image-studio/studio.module.css | 主图三列单格calc(32.5% - 7.8px)，相对原四列(100% - 24px)/4恰为1.3倍；800px下保持原360px网格上限；1200px以下仅模板图片工作台使用两行44px触控导航，避免嵌套列表撑高 |
++| src/components/template-studio/template-studio.module.css | 图片顶部栏1200px断点与小屏导航一致，视频样式不变 |
++| src/components/generate/GeneratePageClient.tsx | 推荐默认值与锁已分离；ratio_locked控制分支已移除，三参数不再按卡规格禁用 |
++| src/components/GenerationComposer.tsx | 每个选中卡ID只带入一次推荐值，首次恢复已保存偏好/晚到推荐不覆盖已编辑参数，历史复用/工作台交接优先；业务锁同步/模板冲突gate/锁定说明/控件disabled已移除；默认值仅初次或切卡带入，不持续覆盖用户编辑；模型能力与1080p审批保持 |
++| src/app/api/tasks/create/route.ts | 仅删除videoCard.ratio_locked拒绝不同比例的4行；1080p审批、权限、模型校验、点数/Provider保持 |
++| src/app/image-studio/studio.tsx（I5） | 主图规则显式固定字段顺序/补缺默认，基准与当前分辨率质量统一正规化、初始图片按主图/辅助一致排序；弹窗按打开时有效配置比较，不把外部提示词/张数草稿混入关闭保护；真正修改仍产品确认，X/外部/Esc共享路径；草稿hydration完成后允许打开；保存成功更新打开基准，保存后继续修改仍保护 |
++| package.json、package-lock.json | 只同步根版本元数据PATCH0.36.3，无依赖变动 |
++| src/lib/release.ts | 与唯一package版本一致，更新用户可感知摘要，复用ReleaseNotice |
++
++ReleaseNotice已读源码：同channel严格数字SemVer、更高版本才弹、稍后按origin/project版本去重、前台/5分钟检测、/account手动检测重新打开、刷新前ProductDialog确认、外部/Esc关闭、标题“发现新版本”6字加粗20px均已有；不新建平行机制，真实升级交互待用户手动确认。
++
++已读Radix NavigationMenu源文件NavigationMenuProvider value/onItemSelect、Primitive.nav aria-label及分组/焦点模式，已读React useEffect依赖与清理示例。实际方案用已有状态+原生select而非接入Radix复杂菜单（MIT公开项目只借鉴模式，不复制或装依赖）；MDN flex-shrink解释小屏flex挤压，但两级选择直接避免全部嵌套列表。源码阅读不是功能验证。导航长期返回模块由既有TemplateStudioShell账号隔离localStorage位置负责，组/当前模块/封面同标签恢复仍复用既有sessionStorage，不另建重复状态系统。
++
++- [ ] I1：只在主图区约+30%、比例稳定、响应式换列；辅助/风格/固定图不放大。
++- [ ] I2：沿用有效上限隐藏满额添加位；保留删除、预览、排序、已有重新选图行为；合法余量恢复。
++- [ ] I3：小屏分组/模块分层选择，当前高亮/计数和全部封面可达；不挤中文竖排或所有子模块占满高度，复用工作现场。
++- [ ] I4：定位三参数锁定原因，恢复合法选项；取消比例/时长/分辨率业务锁，模型限制保留，空提示词/参考图不得禁参数。
++- [ ] I5：打开未修改、修改后改回直接关闭；真正修改仍确认；字段顺序/默认初始化/对象实例不是dirty，相关全局设置与视频上下文按值比较无同类根因，未扩站巡改。
++- [x] D1：整批后统一build内置lint/type、diff/源码边界、自行Review；聚焦commit/push/rollback、候选构建切换、公网检查及记录。
++
++## 资料与附件
++
++| 原文件名 | 来源/用途 | 正式绝对路径 | 版本/校验 |
++|---|---|---|---|
++| feedback.json | 后台只读快照；两条完整原文/ID/时间 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/feedback.json | v1.0.0，完整JSON已读；私有本地 |
++| 48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 第二条反馈原导航截图 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 2584x1828、415273字节，已看且本地/服务器SHA与文件名相同，无变化复用校验；不公开 |
++| 2026-10-01-feedback-template-assets-dialogs.md | 主图/辅助/视频已确认历史边界 | /Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-feedback-template-assets-dialogs.md | 已按需读原文，历史v0.32.0/三分区记录，不巡查旧附件 |
++| 视频三参数标注截图（原名未知） | 2026-10-03用户会话，/generate三chip灰色；1068x873 | 待归档到/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-video-parameters/；目前无可访问原件路径 | 原件未归档/未校验；父负责导出；文字事实已登记，不用其他图替代 |
++
++无音视频附件；第一条无图不伪造。[唯一资料索引](../../docs/materials/index.md)。raw、姓名与图片不公开Git。
++
++## 方案依据与适配
++
++优先原生select/CSS，无依赖。已查官方[MDN flex-shrink](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/flex-shrink)、[React useEffect](https://react.dev/reference/react/useEffect)及[Radix NavigationMenu源码](https://github.com/radix-ui/primitives/blob/main/packages/react/navigation-menu/src/navigation-menu.tsx)，实际读用片段补在实施记录。只借鉴可访问性/状态同步，不移植库，不引入体积/安装/许可证接入。已读代码不等于功能验收。
++
++## 发布检查与用户验收
++
++仅发布build内置lint/type、git diff --check、脚本语法、接口窄改审查及图片worker依赖不变、版本来源一致及更新提醒源码检查。预计PATCH0.36.3，真实生产与并发锁复核后确定，同批不重复抬号。整体自行Verify→Review，非独立审查；项目手动边界优先。
++
++服务器42.193.221.253 gouki；sd2-gray.service3302；/srv/video-api-debugger/app；archive commit到releases。排env/node_modules/.next*/storage/uploads/videos/DB/运行期。候选.next-prod-candidate，禁止原地构建live.next-prod，保留旧source/build回退。复用已有部署锁/登记；后端等价则图片worker不重启。版本/服务/公网失败停止或恢复旧版。
++
++用户手动检查：主图约+30%且其余图未变；满额添加位消失、删图后合法余量恢复；手机平板可选组/模块/全部封面、刷新保留现场；/generate三参数在模型支持范围均可选，视频卡业务锁不生效，空输入只禁生成按钮。模块上下文未改或改回原值应直接关闭，真实改动仍确认；保存后继续编辑也保留保护，关闭按钮/外部/Esc一致。已有更换/删除/预览/排序及更新提醒仍可用。工程发布检查不表示功能通过；反馈仍new。
++
++I5同类源码检查：settings-controller.ts的samePrices按键和值比较，不依赖对象顺序；VideoContextEditor.tsx按context字符串比较并在加载后设基准，无该误提醒根因，未修改这些文件。I6建议未来仅在明确授权后保留脱敏的fetch底层错误码用于下一次协查；现有记录无法追溯，不为补证新生成。
++
++## Git Plan与停止条件
++
++正式ROOT codex/mediakit-video-enhance开工419154173797a5d569708f40f8994af541bc2044，只归档工单/索引/todo自有hunk；旧August todo脏改和untracked保留。应用从77e450138d06823ff92369c28bdc64ea9d09949e聚焦实现，push已有origin，不force。正式正文不可只存worktree，可留应用副本。提交前复核remote/status，raw/原图/私人姓名不上传。
++
++生产漂移、并发锁冲突、构建失败、运行数据/权限风险、付费/DB/Provider等超授权时停相关动作，其他独立安全项继续。最新明确取消视频三参数业务锁，不扩大到主图容量或真实模型限制；原件缺口不阻塞UI发布。无内部派工工具，不建侧栏任务绕过，由唯一lead统一处理共享文件。
++
++
++## 最新纠偏与I6事故证据（2026-10-03北京时间00:49核对）
++
++用户完整原文：“不要设置锁定；模版生成图片部分，点开模版上下文后没有修改关闭，又会反复提醒没有保存是否确认，这是不合理的，直接关闭就行了，同类问题排查;”。此指令替代旧ratio_locked保留结论；I2主图数量容量规则不取消。I5按打开时加载并正规化后的有效值判断变化，初始化、对象实例/键顺序、打开关闭、改后改回不算未保存；X/外部/Esc共享关闭，真实修改保留产品内保护。
++
++事故追加原文：“是不是我们今天改错了什么，导致生成失败，多个生成都这样”。截图为图片模板，主图1/1、其他0、总1/10，img2.5-S/最高/4K，“生成结果待确认”“冻结积分已释放”并不自动重复请求。截图仅问题证据，不能据此判定Provider失败。
++
++- 线上从本地和公网核对均v0.36.2，commit f6478176fb34cefa432318f38ac521693bbdd2f6，BUILD OlWyIuDDh1fBfDOaID4Tt；截至该事故核对时尚未切到本轮v0.36.3；后续发布结果见下方01:12回执。sd2-gray和图片worker active，worker于10月2日19:26:26启动，异常时未见重启。
++- 实际DB /data/video-api-debugger/var-lib/dev.db，以SQLite URI mode=ro加PRAGMA query_only=ON查询，无写入。两条gpt-image-2.5-sunburst/quality=max/2752x2960任务：ee2dca05…提交00:25:52，00:30:54待确认，日志request/network/301929ms；451f3ab2…排队创建00:26:16，实际提交00:30:56，00:35:56待确认，日志request/timeout/300046ms。省略任务ID只用于文字展示，完整ID在服务器原记录。
++- 两条request.json只保留提交标记，无returnedAt、HTTP status或upstreamRequestId；没有source.json或image.part，因此证据位于等待HTTP响应阶段，不是已知的响应schema解析、原图下载/校验/保存故障。请求已尝试，但不能证明上游未执行或生成失败，禁止自动重发。
++- 同日截至00:49相同模型7条：2待确认、4成功、1运行；异常之后4条已成功，其中3条同quality=max/2752x2960，不宣称全体失败或用户具体截图与某一ID一一匹配（截图未给ID）。
++- 服务器worker/provider/delivery/limits四个源码SHA与f647提交逐一一致；该路径最后修改为05756192245111821ae7560b3aaf5041d119c693（10月2日17:55，v0.36.0）。父提交已存在300000ms上游响应等待及480000ms执行上限，v0.36.0未缩短它；后续v0.36.1/0.36.2未更改四文件。本轮未发布修改不是此次事故原因的证据，不等于证明历史改动绝无相关性。
++- 确定结论：HTTP响应返回前的网络中断/等待超时；现有分类隐藏底层fetch异常，不能进一步断定网络链路、代理超时或上游慢响应。没有上游回执，不能宣称Provider故障。暂不改Provider、等待时长、账务、任务状态；若需进一步取底层错误/上游协查，须明确窄方案及风险交主控判断。事故排查阶段曾暂停所有生产切换；当前已按主控最新授权恢复I1-I5统一发布。
++
++I6原件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png；来源用户本轮剪贴板图，父于10月3日归档，895x725 PNG sips可读，原件/复制SHA256均2fc4dcf6bbe59df8e36f836a1d1da658cd66c6f56f028ee50aee57769a5ccd02。复用父关键校验，不重复读取原图URL，不上传私人图片Git。此附件与未归档15s标注图不同。
++
++
++## 发布回执（2026-10-03北京时间01:12）
++
++应用v0.36.3已部署，待用户手动验收。运行源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a；BUILD ytlmOyOpdCSahZQKCm07Y；分支codex/canvas-liblib-layout，远端已核对完整commit。回退标签rollback/2026-10-03-before-feedback-v0.36.3已推送，指向f6478176fb34cefa432318f38ac521693bbdd2f6。旧源码release及旧BUILD OlWyIuDDh1fBfDOaID4Tt保留，旧构建路径/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0363，保护记录/srv/video-api-debugger/backups/sd2-feedback-v0363。
++
++[统一diff](2026-10-02-feedback-primary-navigation.diff)、[发布证据JSON](2026-10-02-feedback-primary-navigation.evidence.json)正式根目录与应用树副本同步。证据为发布检查，不是功能验收；W1仍缺视频标注原件，I6底层原因未确认。
++
++| 实际命令/检查 | 结果 |
++|---|---|
++| npm run build（先前I1-I4两轮本地日志） | 两次exit0；范围随后变更，不冒充最新完整证明 |
++| npm run build > /tmp/sd2-feedback-v0363-batch-final-build.log | 新增I5后编译成功，lint/types阶段两个进程系统等待超过7分钟；安全TERM结束自有进程/接回session，无遗留，不称完整通过 |
++| git diff --check、git diff --cached --check；package/lock JSON根版本和依赖图对比；bash -n部署脚本、node --check核对脚本 | 通过，依赖图未变；除release元数据和明确取消比例锁API外，图片worker依赖/脚本/Prisma/登录Provider等未改 |
++| 自行Review实际11文件整批diff | 已核对I1/2范围、响应式级联、推荐初次/切卡与偏好优先、取消UI锁与API一致；补齐保存后继续编辑的基准刷新，检查全局设置/视频上下文按值比较无同根因；无独立reviewer、无浏览器/功能回归 |
++| git commit、git push origin应用分支和rollback标签、git ls-remote | fbb8243371398ad753b66d8ff02ff8a0a6b9d84a及rollback指向f6478176fb34cefa432318f38ac521693bbdd2f6远端可见；首稿正式ROOT bc2ac3a7aa6c4af193152e1f761f5f276d9036f9已推送 |
++| git archive最终提交；tar目录/敏感路径排除校验；scp到server /tmp | 首包卫生检查拦下旧资料图片，未上传；一次有界修正排除整个docs/materials后通过：1325项、29030400字节、SHA256 7251116efab10e01418e90f421262971be6ab7e64341232ceaf6dc1163d8c8cb；不含.env/运行目录/DB/私人资料 |
++| 现有发布活动登记和服务器flock，核对实际commit/BUILD | 通过；用已有root SSH密钥执行发布管理，不读取密码，gouki运行构建/应用；未改用户权限 |
++| release中NEXT_DIST_DIR=.next-prod-candidate npm run build | 完整exit0，内置lint/types通过，候选标记包括小屏导航/推荐默认值/模块设置关闭保护，新BUILD不同于旧版；只在candidate构建，不动live构建 |
++| API精确差异守卫及worker依赖核对 | 仅tasks/create旧比例锁4行删除，其他API及scripts/Prisma/src/lib（release.ts除外）与旧release一致；不能称全backend等价；worker PID1241475及启动时间/服务单元前后一致，不重启图片worker |
++| rsync排除运行数据、保留旧构建、切换/restart sd2-gray.service | 成功，storage/uploads/videos软链接和关键可写目录保持；本地就绪后才结束发布会话，失败自动恢复旧source/BUILD的trap保留 |
++| /tmp/sd2-feedback-v0363-verify.mjs核对本机+公网 | exit0：20源码SHA、27公网静态SHA一致；config/release/login均200、release0.36.3、X-SD2-Origin server-42-193；受保护/image-studio、/template-studio、/generate匿名307到登录，权限未扩大；共享CSS200一致；4服务/定时器active |
++| 发布COMPLETE握手/活动登记 | DEPLOY_COMPLETE，server会话exit0，发布锁已释放；停止额外功能验证，待用户手动验收 |
++
++未运行npm test/test:api、Playwright/DOM/浏览器/生成实验/独立审查；未安装依赖、改登录点数权限/Provider、DB写或任务重发；I4仅用户明确取消的接口业务锁4行。发布检查及更新提醒源码核对不能代替真实升级交互和功能验收。守门员真实debug+UI L3/生产保护L4；旧general/L0误分类由主控纠正并记录，本lead未使用低等级放行。
++
++## 可复制交接正文
++
++```text
++主图导航与视频参数修复
++项目video-api-debugger，目标https://sd2.youdooart.com/template-studio?type=image，I4确切目标https://sd2.youdooart.com/generate。
++正式工单：/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-02-feedback-primary-navigation.md。
++唯一源码：/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，不用正式ROOT旧应用或v12。
++附件feedback.json（完整原文）及48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg（导航参考）在/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/，仅本机不公开。10月3日视频标注原图仅父会话可见、原件待归档，不伪造路径。事故PNG附件codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png（待确认排查证据）正式路径/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png，父已校验，私有不公开。
++先工单/索引，再整批I1主图约+30%、I2有效上限隐藏添加位、I3手机平板导航、I4三个参数取消业务锁、I5未修改上下文直接关闭；I6线上事故优先只读排查，不改模型限制。已部署v0.36.3、BUILD ytlmOyOpdCSahZQKCm07Y，I6底层原因无法追溯待查，视频标注原图仍缺。
++整批后统一发布build内置检查、自行Review，聚焦commit/push/rollback、候选服务器切换、公网版本/BUILD/静态可达。用户手动验收；不浏览器/截图/功能回归/付费生成/DB写/登录点数Provider权限变更/装依赖。
++构建/服务异常、漂移/锁冲突、数据权限风险即停或回退；回执含正式工单、逐文件内容/diff、原因、命令结果、版本commit/tag/BUILD、公网证据及未验收项。
++```
+diff --git FORMAL/a/docs/materials/index.md FORMAL/b/docs/materials/index.md
+index 8826df3..842f22c 100644
+--- FORMAL/a/docs/materials/index.md
++++ FORMAL/b/docs/materials/index.md
+@@ -1,5 +1,17 @@
+ # 项目资料索引
+ 
++## 主图导航与视频参数反馈工单（2026-10-03）
++
++项目video-api-debugger；2026-10-02后台两条原文见下节。2026-10-03追加/generate三参数灰色，随后明确取消三参数业务锁（模型合法范围保留），新增I5模板上下文未修改关闭及同类误提醒，I6多任务待确认只读排查。I1-I5已部署v0.36.3，源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a、BUILD ytlmOyOpdCSahZQKCm07Y；[发布证据](../../tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](../../tasks/todo/2026-10-02-feedback-primary-navigation.diff)正式归档；4服务/27静态/20源码一致通过，功能待用户手动验收。I6故障阶段已明确、底层原因无法追溯待查；视频标注原件仍待归档，不称W1附件齐全，反馈new不改。
++
++| 资料/原名 | 来源/日期/版本 | 主题与用途 | 正式入口、关系与校验 |
++|---|---|---|---|
++| 主图与导航反馈优化；2026-10-02-feedback-primary-navigation.md | 后台原文/用户追加；2026-10-03创建；v1.0.0 | 主图约+30%、满额添加位、小屏导航、视频三参数误锁；边界/手动验收/附件/交接正文 | [正式工单](../../tasks/todo/2026-10-02-feedback-primary-navigation.md)；可读；历史规则见10月1日原文；工作树非唯一资料位置 |
++| feedback.json及48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 2026-10-02；快照v1.0.0/原图 | 两条原文与导航参考，不作验收图；无音视频 | 下节原路径/校验保留；工单有绝对路径；raw/原图不公开Git |
++| 视频三参数用户截图（原名未知） | 2026-10-03用户会话；原版本未知 | /generate三chip灰色；DOM/模型/输入事实完整记工单；非自动浏览器证据 | 仅父会话可见，无path/attachmentHandle；待主控导出到docs/materials/2026-10-03-feedback-video-parameters/；原件未归档/未校验，不伪造已保存 |
++| codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png | 2026-10-03用户剪贴板截图，原件/原名保留；父归档 | 图片模板img2.5-S最高4K多次待确认；用于I6故障阶段核对，不据图定Provider失败，与上条缺原件截图不同 | [原件](2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png)；895x725 PNG，父sips可读/复制SHA256一致2fc4dcf6bbe59df8e36f836a1d1da658cd66c6f56f028ee50aee57769a5ccd02，复用校验；私有不上传Git |
++| I4取消锁/I5未修改关闭/I6事故对话原文及只读结论 | 2026-10-03当前用户；工单v1.0.0补充 | 最新指令替代旧ratio_locked保留结论；两异常为request/network与request/timeout约300秒，无返回回执，异常后同模型有成功记录；底层网络/上游原因未确证 | [正式工单最新段](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#最新纠偏与i6事故证据2026-10-03北京时间0049核对)；原文、线上commit/BUILD及缺口已登记，无生产数据写入 |
++
+ ## 当日后台反馈（2026-10-02）
+ 
+ 项目video-api-debugger；2026-10-02 23:07北京时间从正式SD2生产Feedback表只读拉取，覆盖北京时间当天00:00至次日00:00全部状态，截至读取时共2条，均为new。仅整理资料，不实施、归档反馈或修改生产数据；本地记录v1.0.0，原文JSON和截图仅本机保留，不公开Git。无音视频附件。
+diff --git FORMAL/a/tasks/todo.md FORMAL/b/tasks/todo.md
+index 06f81da..a70e555 100644
+--- FORMAL/a/tasks/todo.md
++++ FORMAL/b/tasks/todo.md
+@@ -2,11 +2,12 @@
+ 
+ ## 当前入口
+ 
+-- [10月2日后台反馈原文与截图](../docs/materials/index.md#当日后台反馈2026-10-02)：截至23:07北京时间2条new；主图缩略图增大约30%及锁定张数后隐藏添加入口、手机/平板导航。完整JSON与1张原截图已归项目资料目录；仅拉取整理，未实施、未归档生产反馈。
++- [ ] 2026-10-02：主图与导航反馈优化，正文见 `tasks/todo/2026-10-02-feedback-primary-navigation.md`。
++- [主图导航及视频参数 I1-I6](todo/2026-10-02-feedback-primary-navigation.md)：v0.36.3已部署，源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a、BUILD ytlmOyOpdCSahZQKCm07Y；I1-I5代码/部署完成待用户手动，D1候选内置检查/4服务/27公网静态/20源码一致通过，[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)。I6故障阶段已明确，底层原因无法追溯待查，不改等待/重试或账务；I6原图已归档，视频标注原图仍待归档，W1不称附件齐全。
++- [10月2日后台反馈原文与截图](../docs/materials/index.md#当日后台反馈2026-10-02)：截至23:07北京时间2条new；主图缩略图增大约30%及锁定张数后隐藏添加入口、手机/平板导航。完整JSON与1张原截图已归项目资料目录；当前实施进度见本轮I1-I4工单，未归档生产反馈。
+ - [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：v0.36.2已部署；WS1-WS7实现及发布检查完成，待用户手动验收。源码f647817，BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致；图片worker未重启。正式正文、既有附件与[发布证据](todo/2026-10-02-template-workbench-ux.evidence.json)归入主目录；无bulk视频契约按待确认，不新增后台。
+ - [加载与体验优化 U1–U6](todo/2026-10-02-loading-ux.md)：v0.36.1已部署；源码实现、发布必需检查与安全部署完成，待用户手动验收。运行源码8acaf46，BUILD Ec6Hfe91C-vrdLDtYaCKN，4服务/40公网静态/24源码一致、图片worker正常排空；完整正文、既有附件入口与[发布证据](todo/2026-10-02-loading-ux.evidence.json)归入正式根目录。
+ 
+-
+ ## 2026-10-02 图片生成与原图恢复实施
+ 
+ - [图片下载超时与原图找回](todo/2026-10-01-image-download-timeout.md)：v1.1.0 ID1-ID4 已实现并部署 v0.36.0，待用户手动验收；最终源码afc4489、BUILD vNT0S5yAGwiHTBok0KVLe，4服务/25公网静态/14源码一致，原请求查询已从新生成条件解耦、worker正常排空、回退点和完整记录到位。I1及D1/D2/T1-T4历史保留，旧图未救回；上游查询/幂等未确证、透明请求未开放、已退款终态不自动领图。正式正文、参考原件与发布证据见资料索引。
+@@ -6558,6 +6559,7 @@ flowchart LR
+ - `tasks/todo/2026-10-01-canvas-plan-split.md`：工单：画布按视频提示词格式拆分
+ - `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`：十月一日反馈：模板参考图、资产缩略图与弹窗行为
+ - `tasks/todo/2026-10-01-image-download-timeout.md`：图片生成下载超时与结果找回
++- `tasks/todo/2026-10-02-feedback-primary-navigation.md`：主图与导航反馈优化
+ - [SD2加载与体验优化工单](todo/2026-10-02-loading-ux.md)：2026-10-02，v1.0.0；U1-U6涵盖下载状态、列表刷新、恢复文案、局部刷光、产品弹窗与近时。工单已交付，实施未开始，不继续扩大审查；附件见正文及资料索引。
+ - `tasks/todo/2026-10-02-media-copy-share.md`：图片复制、站内分享与模板离开提醒
+ - `tasks/todo/2026-10-02-template-primary-actions.md`：模板主操作与产品弹窗
+diff --git FORMAL/a/tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json FORMAL/b/tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json
+new file mode 100644
+index 0000000..a5c2900
+--- /dev/null
++++ FORMAL/b/tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json
+@@ -0,0 +1,346 @@
++{
++  "checkedAt": "2026-10-02T17:11:47.264Z",
++  "runId": "sd2-feedback-v0363",
++  "version": "0.36.3",
++  "commit": "fbb8243371398ad753b66d8ff02ff8a0a6b9d84a",
++  "build": "ytlmOyOpdCSahZQKCm07Y",
++  "routes": [
++    "/layout",
++    "/login/page",
++    "/generate/page",
++    "/template-studio/page"
++  ],
++  "files": [
++    {
++      "path": "static/chunks/webpack-5771f0fcaecd5647.js",
++      "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
++      "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/8344c0af-421bfd77be53e753.js",
++      "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
++      "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/1890-7faa2453eb06933f.js",
++      "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
++      "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/main-app-2d700b7ebb08890f.js",
++      "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
++      "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
++      "status": 200
++    },
++    {
++      "path": "static/css/993f560b06c7bc1f.css",
++      "sha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
++      "publicSha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
++      "status": 200
++    },
++    {
++      "path": "static/css/ea095be58e8c4d2c.css",
++      "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
++      "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
++      "status": 200
++    },
++    {
++      "path": "static/css/0cacfd9b992f5cee.css",
++      "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
++      "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
++      "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
++      "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/3267-3fbd97130dd04797.js",
++      "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
++      "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/3461-4160763e155494a1.js",
++      "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
++      "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5634-e38ba8b1a6c23a17.js",
++      "sha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
++      "publicSha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/layout-437ffd4f69fce15c.js",
++      "sha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
++      "publicSha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/login/page-777149980be08fee.js",
++      "sha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
++      "publicSha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
++      "status": 200
++    },
++    {
++      "path": "static/css/53c843adf00a1818.css",
++      "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
++      "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/6581-3b6574c3c15f97b2.js",
++      "sha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
++      "publicSha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5557-8807fd6738a80a57.js",
++      "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
++      "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/4881-0f4d34f12b6f2026.js",
++      "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
++      "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/6670-7082efca1a6a1ace.js",
++      "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
++      "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/9534-4ab68d9b9b67f606.js",
++      "sha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
++      "publicSha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5246-0a4907f78de58f22.js",
++      "sha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
++      "publicSha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5559-c83f34e4e3c28875.js",
++      "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
++      "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/3038-6771ee064baef388.js",
++      "sha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
++      "publicSha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/9041-e702e256458b9182.js",
++      "sha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
++      "publicSha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/generate/page-33833e63fb9a46ce.js",
++      "sha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
++      "publicSha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/6370-4123e213528db92e.js",
++      "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
++      "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/5595-d1bcc5f90a86099c.js",
++      "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
++      "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
++      "status": 200
++    },
++    {
++      "path": "static/chunks/app/template-studio/page-090a5a57090036d9.js",
++      "sha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
++      "publicSha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
++      "status": 200
++    }
++  ],
++  "sourceFiles": [
++    {
++      "path": "src/app/api/tasks/create/route.ts",
++      "sha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414",
++      "localSha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414"
++    },
++    {
++      "path": "package-lock.json",
++      "sha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9",
++      "localSha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9"
++    },
++    {
++      "path": "package.json",
++      "sha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce",
++      "localSha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce"
++    },
++    {
++      "path": "src/app/image-studio/studio.tsx",
++      "sha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46",
++      "localSha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46"
++    },
++    {
++      "path": "src/app/image-studio/studio.module.css",
++      "sha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71",
++      "localSha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71"
++    },
++    {
++      "path": "src/components/GenerationComposer.tsx",
++      "sha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24",
++      "localSha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24"
++    },
++    {
++      "path": "src/components/generate/GeneratePageClient.tsx",
++      "sha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7",
++      "localSha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7"
++    },
++    {
++      "path": "src/components/ComposerActionBar.tsx",
++      "sha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a",
++      "localSha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a"
++    },
++    {
++      "path": "src/components/template-studio/TemplateStudioShell.tsx",
++      "sha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a",
++      "localSha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a"
++    },
++    {
++      "path": "src/components/template-studio/VideoTemplateWorkbench.tsx",
++      "sha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b",
++      "localSha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b"
++    },
++    {
++      "path": "src/components/template-studio/template-studio.module.css",
++      "sha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c",
++      "localSha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c"
++    },
++    {
++      "path": "src/lib/release.ts",
++      "sha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d",
++      "localSha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d"
++    },
++    {
++      "path": "src/components/RelativeTime.tsx",
++      "sha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd",
++      "localSha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd"
++    },
++    {
++      "path": "src/components/useDialogDismiss.ts",
++      "sha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb",
++      "localSha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb"
++    },
++    {
++      "path": "src/components/useProductDialog.tsx",
++      "sha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d",
++      "localSha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d"
++    },
++    {
++      "path": "src/components/ReleaseNotice.tsx",
++      "sha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5",
++      "localSha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5"
++    },
++    {
++      "path": "public/styles/loading.css",
++      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f",
++      "localSha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
++    },
++    {
++      "path": "src/components/LoadingState.tsx",
++      "sha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725",
++      "localSha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725"
++    },
++    {
++      "path": "src/lib/image-studio/worker.ts",
++      "sha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813",
++      "localSha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813"
++    },
++    {
++      "path": "scripts/process-image-studio.ts",
++      "sha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387",
++      "localSha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387"
++    }
++  ],
++  "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
++  "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
++  "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
++  "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
++  "checks": [
++    {
++      "path": "/api/config",
++      "status": 200,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/api/release",
++      "status": 200,
++      "origin": "server-42-193",
++      "version": "0.36.3"
++    },
++    {
++      "path": "/login",
++      "status": 200,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/image-studio",
++      "status": 307,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/template-studio",
++      "status": 307,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/generate",
++      "status": 307,
++      "origin": "server-42-193"
++    },
++    {
++      "path": "/styles/loading.css",
++      "status": 200,
++      "origin": "server-42-193",
++      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
++    }
++  ],
++  "local": {
++    "checks": [
++      {
++        "path": "/api/config",
++        "status": 200
++      },
++      {
++        "path": "/api/release",
++        "status": 200
++      },
++      {
++        "path": "/login",
++        "status": 200
++      }
++    ],
++    "services": [
++      "active",
++      "active",
++      "active",
++      "active"
++    ],
++    "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
++  },
++  "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes"
++}
+diff --git FORMAL/a/tasks/todo/2026-10-02-feedback-primary-navigation.md FORMAL/b/tasks/todo/2026-10-02-feedback-primary-navigation.md
+new file mode 100644
+index 0000000..30f8de5
+--- /dev/null
++++ FORMAL/b/tasks/todo/2026-10-02-feedback-primary-navigation.md
+@@ -0,0 +1,174 @@
++# 主图与导航反馈优化
++
++| 字段 | 内容 |
++|---|---|
++| 项目 | video-api-debugger |
++| 工单版本 | v1.0.0 |
++| 正式版本来源 | package.json、src/lib/release.ts、生产/api/release；开工v0.36.2，发布前重新锁定 |
++| 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
++| 实施/部署源 | /Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger；codex/canvas-liblib-layout；开工HEAD77e450138d06823ff92369c28bdc64ea9d09949e，干净 |
++| 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
++| 状态 | I1-I5已部署v0.36.3，发布检查完成、待用户手动验收；I6故障阶段已明确，底层原因待查，视频原图原件仍待归档 |
++| 风险/验证等级 | 真实debug+UI守门员L3，生产切换按L4保护；旧general/L0不采纳；禁止主动浏览器/业务验收与独立审核线程 |
++| 创建/最后更新 | 2026-10-03，北京时间；文件名保留2026-10-02反馈日期 |
++
++## 目标与完整原文
++
++用户先要求“写工单”，后明确“写完直接开改”。主图更容易看清，满额后不显示无效添加位，手机和平板能找组、模块和全部封面。追加视频比例、秒数、分辨率三个灰色控件，恢复合法选择，不改变模型限制。
++
++来源：正式SD2后台Feedback只读快照，2026-10-02 23:07北京时间读取，两条均new；不改状态、不写DB。raw仅私有本地保存，姓名不上传Git。
++
++| ID | 北京时间 | 页面 | 完整原文 | 附件 |
++|---|---|---|---|---|
++| cmuqyowne0027vg4vr3xyks6m | 2026-10-02 20:51:09 | /template-studio?type=image | 主图的。缩略图大小稍微大个30%左右。一旦锁定了。张数后面就不要再出现添加主图的这个图标。 | 无 |
++| cmuqyq5xo002fvg4vjhbp6aar | 2026-10-02 20:52:08 | /template-studio?type=image | 考虑一下手机平板的用户。这个导航条根本没法用。 | 1张原图 |
++
++2026-10-03对话追加：“等下，还有一个，为什么我现在改变不了视频生成页面的时间秒数和比例了？”随后：“灰色，点不开，”，及“左右加这个，这三个都用不了”。
++
++第三条用户截图/标注事实（由主控传递，不是本lead浏览器操作）：/generate，1068x873；Seedance2.0、首尾帧，提示词为空且无参考图；1:1、15s、480p三chip灰色，15s为button.composer-chip.composer-chip-disabled；精确selector为div.composer-action-bar:nth-of-type(5) > div.composer-chips:nth-of-type(1) > div.composer-chip-wrap:nth-of-type(4) > button.composer-chip.composer-chip-disabled。45点生成按钮也disabled、图集控件正常。用户未提供视频卡状态。原截图当前仅父会话可见，无path/attachmentHandle，主控尝试导出；尚未归档，不以新截图替代，不因缺原件阻塞修复。
++
++## 现状与根因判断
++
++- 主图四列materialGrid；达到currentReferenceCap后添加按钮仅disabled，仍可见。没有独立主图业务锁，按已设置有效数量上限解释；满额隐藏、删图后合法余量恢复，不新增业务锁。
++- 历史依据：[主图规则原文](2026-10-01-feedback-template-assets-dialogs.md)：独立编号、最少/最多、零主图兼容、总10张；辅助不能替代主图，视频首尾帧保持专用角色。
++- 小屏flex侧栏仍嵌套全部子模块竖列且按钮width100%，存在缩窄和高度占用风险；原截图是问题参考，非本轮复现验收。
++- I4已读源码：ComposerActionBar三chip分别disabled={ratioLocked/lockedDuration/lockedResolution}，不共用canSubmit、提示词或参考图gate。GeneratePageClient把所选视频卡ratio/duration/resolution全部交给lockedSettings，再由GenerationComposer按存在值禁用。Seedance2.0不是2.5跟随首帧比例规则；核对自动选中的fallback卡、ratio_locked及历史限制，原判断已被10月3日最新取消业务锁要求替代，实际模型能力限制保留。
++- 诊断入口：GenerationComposer.tsx、ComposerActionBar.tsx、ParamChip.tsx、generate/GeneratePageClient.tsx、VideoTemplateWorkbench.tsx、handoff及近期diff。最终原因和证据补在实施记录。
++
++### I4阶段结论（2026-10-03）
++
++已确定代码原因：GeneratePageClient.tsx:2031-2036把视频卡存在的比例、时长、分辨率直接作为lockedSettings；GenerationComposer.tsx:2217-2219再按Boolean判锁；ComposerActionBar.tsx:309、337、365分别禁用三chip。loadVideoCards:983-991会自动选中一张可用视频卡。因此用户无需主动选卡，也可能被规格禁用。三chip不使用canSubmit/空提示词/无参考图作为disabled条件，Seedance2.0也不触发仅2.5首尾帧的比例跟随规则。
++
++权限边界证据：src/app/api/tasks/create/route.ts:966只在videoCard.ratio_locked为真且比例不一致时拒绝；当前UI却只要ratio有值就锁，未看ratio_locked。时长与分辨率的三chip锁没有对应的同类卡规格校验。历史修复方向曾保留ratio_locked，现已被最新明确要求替代：三个参数均在模型合法范围自由选择；撤销UI业务锁及tasks/create对应比例业务锁拒绝，保留模型限制、1080p审批和历史存储字段，无迁移或DB写。当前具体选中卡/ratio_locked未读生产数据，不宣称已复现或已恢复三个控件。
++
++阶段原因已向主控回报，随后恢复并追加I5/I6；I1-I5现已部署，阶段历史不作当前状态。首稿正文/固定todo/索引bc2ac3a已推送；视频标注原图仍由主控待归档。
++
++## 范围与禁区
++
++图片三项限定templateWorkbench/image Surface；保留独立/image-studio、video及桌面。I4修视频参数UI控制/同步并撤销生成接口相应比例业务锁校验；I5只查相关模板上下文/参数的有效内容dirty和共享关闭路径；I6仅日志、回执、SQLite mode=ro/query_only读，不改Provider、计费、模型能力、登录、权限、DB、上传归属或后台。不装依赖、不付费生成、不浏览器控制/截图、不功能自动回归、不独立审核线程。生成按钮仍受合法输入检查。
++
++复用既有组件、lucide、原生select、CSS、ProductDialog/useDialogDismiss与工作现场持久化。必要popup保留外部/Esc关闭、未保存保护，主操作明确；没有新增时间戳界面，不巡改近时。复用ReleaseNotice的严格SemVer、稍后去重、手动检测及刷新保护，不建平行更新系统。
++
++## 任务对账
++
++| 编号 | 任务 | 完成标准 | 状态 |
++|---|---|---|---|
++| W1 | 编写反馈优化工单 | 正式归档、附件齐全、范围清楚、提交推送 | 进行中：首稿bc2ac3a已推送，本轮正文/索引/证据齐备；视频标注原件仍待归档，不能称附件齐全 |
++| I1 | 主图缩略图放大 | 约增大30%，不影响其他图 | 代码/部署已完成，发布检查通过，待用户手动验收 |
++| I2 | 锁定后的添加入口 | 按既有数量规则隐藏，不改变限制 | 代码/部署已完成，发布检查通过，待用户手动验收 |
++| I3 | 手机和平板导航 | 组、模块可触达，桌面保留 | 代码/部署已完成，发布检查通过，待用户手动验收 |
++| I4 | 视频秒数与比例不可改排查修复 | 比例/秒数/分辨率合法选项自由选择，不加业务锁，不改模型限制 | 代码/部署已完成：三参数业务锁及接口拒绝已撤销，推荐只初次/切卡带入；待用户手动验收 |
++| I5 | 模板上下文未修改关闭及同类误提醒 | 未改或改回原内容直接关闭，真正未保存修改保护保留 | 代码/部署已完成：规则字段/默认值正规化，关闭按打开时有效配置比较，保存后更新基准；待用户手动验收 |
++| I6 | 线上多任务待确认根因排查 | 明确线上产物及故障阶段，证据与未知分开，不重试/改数据 | 阶段排查完成：两条请求阶段网络/超时、回执无响应；底层网络/代理/上游原因无法追溯待查 |
++| D1 | 发布更新 | 构建、版本、公网检查通过，待手动验收 | 已完成：服务器候选build及内置lint/types、自行Review、Git回退/公网检查完成；已部署待手动 |
++
++### 整批实现记录（2026-10-03，v0.36.3已部署待手动）
++
++I1-I5源码已写；I6故障阶段与日志缺口已记录，主控授权恢复本批UI发布，不改Provider等待/重试/积分或DB。未做功能验收。首轮统一build成功，自行Review发现首次自动选卡推荐值可能覆盖已保存偏好、全部封面触控选中态不明显，已集中补齐；第二轮本地build已结束成功，新增范围补齐后本地编译成功，内置检查进程长期系统等待，安全终止；相同最终提交的服务器候选构建完成全部内置检查，未将本地中止冒充通过。改动文件与内容：
++
++| 文件（相对唯一源码） | 内容 |
++|---|---|
++| src/app/image-studio/studio.tsx | templateWorkbench主图区限定样式、满额不渲染添加位；小屏两级原生select及全部封面；桌面与小屏共用导航动作、当前模块高亮；既有会话状态增加封面视图，显式moduleId仍优先 |
++| src/app/image-studio/studio.module.css | 主图三列单格calc(32.5% - 7.8px)，相对原四列(100% - 24px)/4恰为1.3倍；800px下保持原360px网格上限；1200px以下仅模板图片工作台使用两行44px触控导航，避免嵌套列表撑高 |
++| src/components/template-studio/template-studio.module.css | 图片顶部栏1200px断点与小屏导航一致，视频样式不变 |
++| src/components/generate/GeneratePageClient.tsx | 推荐默认值与锁已分离；ratio_locked控制分支已移除，三参数不再按卡规格禁用 |
++| src/components/GenerationComposer.tsx | 每个选中卡ID只带入一次推荐值，首次恢复已保存偏好/晚到推荐不覆盖已编辑参数，历史复用/工作台交接优先；业务锁同步/模板冲突gate/锁定说明/控件disabled已移除；默认值仅初次或切卡带入，不持续覆盖用户编辑；模型能力与1080p审批保持 |
++| src/app/api/tasks/create/route.ts | 仅删除videoCard.ratio_locked拒绝不同比例的4行；1080p审批、权限、模型校验、点数/Provider保持 |
++| src/app/image-studio/studio.tsx（I5） | 主图规则显式固定字段顺序/补缺默认，基准与当前分辨率质量统一正规化、初始图片按主图/辅助一致排序；弹窗按打开时有效配置比较，不把外部提示词/张数草稿混入关闭保护；真正修改仍产品确认，X/外部/Esc共享路径；草稿hydration完成后允许打开；保存成功更新打开基准，保存后继续修改仍保护 |
++| package.json、package-lock.json | 只同步根版本元数据PATCH0.36.3，无依赖变动 |
++| src/lib/release.ts | 与唯一package版本一致，更新用户可感知摘要，复用ReleaseNotice |
++
++ReleaseNotice已读源码：同channel严格数字SemVer、更高版本才弹、稍后按origin/project版本去重、前台/5分钟检测、/account手动检测重新打开、刷新前ProductDialog确认、外部/Esc关闭、标题“发现新版本”6字加粗20px均已有；不新建平行机制，真实升级交互待用户手动确认。
++
++已读Radix NavigationMenu源文件NavigationMenuProvider value/onItemSelect、Primitive.nav aria-label及分组/焦点模式，已读React useEffect依赖与清理示例。实际方案用已有状态+原生select而非接入Radix复杂菜单（MIT公开项目只借鉴模式，不复制或装依赖）；MDN flex-shrink解释小屏flex挤压，但两级选择直接避免全部嵌套列表。源码阅读不是功能验证。导航长期返回模块由既有TemplateStudioShell账号隔离localStorage位置负责，组/当前模块/封面同标签恢复仍复用既有sessionStorage，不另建重复状态系统。
++
++- [ ] I1：只在主图区约+30%、比例稳定、响应式换列；辅助/风格/固定图不放大。
++- [ ] I2：沿用有效上限隐藏满额添加位；保留删除、预览、排序、已有重新选图行为；合法余量恢复。
++- [ ] I3：小屏分组/模块分层选择，当前高亮/计数和全部封面可达；不挤中文竖排或所有子模块占满高度，复用工作现场。
++- [ ] I4：定位三参数锁定原因，恢复合法选项；取消比例/时长/分辨率业务锁，模型限制保留，空提示词/参考图不得禁参数。
++- [ ] I5：打开未修改、修改后改回直接关闭；真正修改仍确认；字段顺序/默认初始化/对象实例不是dirty，相关全局设置与视频上下文按值比较无同类根因，未扩站巡改。
++- [x] D1：整批后统一build内置lint/type、diff/源码边界、自行Review；聚焦commit/push/rollback、候选构建切换、公网检查及记录。
++
++## 资料与附件
++
++| 原文件名 | 来源/用途 | 正式绝对路径 | 版本/校验 |
++|---|---|---|---|
++| feedback.json | 后台只读快照；两条完整原文/ID/时间 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/feedback.json | v1.0.0，完整JSON已读；私有本地 |
++| 48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 第二条反馈原导航截图 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 2584x1828、415273字节，已看且本地/服务器SHA与文件名相同，无变化复用校验；不公开 |
++| 2026-10-01-feedback-template-assets-dialogs.md | 主图/辅助/视频已确认历史边界 | /Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-feedback-template-assets-dialogs.md | 已按需读原文，历史v0.32.0/三分区记录，不巡查旧附件 |
++| 视频三参数标注截图（原名未知） | 2026-10-03用户会话，/generate三chip灰色；1068x873 | 待归档到/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-video-parameters/；目前无可访问原件路径 | 原件未归档/未校验；父负责导出；文字事实已登记，不用其他图替代 |
++
++无音视频附件；第一条无图不伪造。[唯一资料索引](../../docs/materials/index.md)。raw、姓名与图片不公开Git。
++
++## 方案依据与适配
++
++优先原生select/CSS，无依赖。已查官方[MDN flex-shrink](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/flex-shrink)、[React useEffect](https://react.dev/reference/react/useEffect)及[Radix NavigationMenu源码](https://github.com/radix-ui/primitives/blob/main/packages/react/navigation-menu/src/navigation-menu.tsx)，实际读用片段补在实施记录。只借鉴可访问性/状态同步，不移植库，不引入体积/安装/许可证接入。已读代码不等于功能验收。
++
++## 发布检查与用户验收
++
++仅发布build内置lint/type、git diff --check、脚本语法、接口窄改审查及图片worker依赖不变、版本来源一致及更新提醒源码检查。预计PATCH0.36.3，真实生产与并发锁复核后确定，同批不重复抬号。整体自行Verify→Review，非独立审查；项目手动边界优先。
++
++服务器42.193.221.253 gouki；sd2-gray.service3302；/srv/video-api-debugger/app；archive commit到releases。排env/node_modules/.next*/storage/uploads/videos/DB/运行期。候选.next-prod-candidate，禁止原地构建live.next-prod，保留旧source/build回退。复用已有部署锁/登记；后端等价则图片worker不重启。版本/服务/公网失败停止或恢复旧版。
++
++用户手动检查：主图约+30%且其余图未变；满额添加位消失、删图后合法余量恢复；手机平板可选组/模块/全部封面、刷新保留现场；/generate三参数在模型支持范围均可选，视频卡业务锁不生效，空输入只禁生成按钮。模块上下文未改或改回原值应直接关闭，真实改动仍确认；保存后继续编辑也保留保护，关闭按钮/外部/Esc一致。已有更换/删除/预览/排序及更新提醒仍可用。工程发布检查不表示功能通过；反馈仍new。
++
++I5同类源码检查：settings-controller.ts的samePrices按键和值比较，不依赖对象顺序；VideoContextEditor.tsx按context字符串比较并在加载后设基准，无该误提醒根因，未修改这些文件。I6建议未来仅在明确授权后保留脱敏的fetch底层错误码用于下一次协查；现有记录无法追溯，不为补证新生成。
++
++## Git Plan与停止条件
++
++正式ROOT codex/mediakit-video-enhance开工419154173797a5d569708f40f8994af541bc2044，只归档工单/索引/todo自有hunk；旧August todo脏改和untracked保留。应用从77e450138d06823ff92369c28bdc64ea9d09949e聚焦实现，push已有origin，不force。正式正文不可只存worktree，可留应用副本。提交前复核remote/status，raw/原图/私人姓名不上传。
++
++生产漂移、并发锁冲突、构建失败、运行数据/权限风险、付费/DB/Provider等超授权时停相关动作，其他独立安全项继续。最新明确取消视频三参数业务锁，不扩大到主图容量或真实模型限制；原件缺口不阻塞UI发布。无内部派工工具，不建侧栏任务绕过，由唯一lead统一处理共享文件。
++
++
++## 最新纠偏与I6事故证据（2026-10-03北京时间00:49核对）
++
++用户完整原文：“不要设置锁定；模版生成图片部分，点开模版上下文后没有修改关闭，又会反复提醒没有保存是否确认，这是不合理的，直接关闭就行了，同类问题排查;”。此指令替代旧ratio_locked保留结论；I2主图数量容量规则不取消。I5按打开时加载并正规化后的有效值判断变化，初始化、对象实例/键顺序、打开关闭、改后改回不算未保存；X/外部/Esc共享关闭，真实修改保留产品内保护。
++
++事故追加原文：“是不是我们今天改错了什么，导致生成失败，多个生成都这样”。截图为图片模板，主图1/1、其他0、总1/10，img2.5-S/最高/4K，“生成结果待确认”“冻结积分已释放”并不自动重复请求。截图仅问题证据，不能据此判定Provider失败。
++
++- 线上从本地和公网核对均v0.36.2，commit f6478176fb34cefa432318f38ac521693bbdd2f6，BUILD OlWyIuDDh1fBfDOaID4Tt；截至该事故核对时尚未切到本轮v0.36.3；后续发布结果见下方01:12回执。sd2-gray和图片worker active，worker于10月2日19:26:26启动，异常时未见重启。
++- 实际DB /data/video-api-debugger/var-lib/dev.db，以SQLite URI mode=ro加PRAGMA query_only=ON查询，无写入。两条gpt-image-2.5-sunburst/quality=max/2752x2960任务：ee2dca05…提交00:25:52，00:30:54待确认，日志request/network/301929ms；451f3ab2…排队创建00:26:16，实际提交00:30:56，00:35:56待确认，日志request/timeout/300046ms。省略任务ID只用于文字展示，完整ID在服务器原记录。
++- 两条request.json只保留提交标记，无returnedAt、HTTP status或upstreamRequestId；没有source.json或image.part，因此证据位于等待HTTP响应阶段，不是已知的响应schema解析、原图下载/校验/保存故障。请求已尝试，但不能证明上游未执行或生成失败，禁止自动重发。
++- 同日截至00:49相同模型7条：2待确认、4成功、1运行；异常之后4条已成功，其中3条同quality=max/2752x2960，不宣称全体失败或用户具体截图与某一ID一一匹配（截图未给ID）。
++- 服务器worker/provider/delivery/limits四个源码SHA与f647提交逐一一致；该路径最后修改为05756192245111821ae7560b3aaf5041d119c693（10月2日17:55，v0.36.0）。父提交已存在300000ms上游响应等待及480000ms执行上限，v0.36.0未缩短它；后续v0.36.1/0.36.2未更改四文件。本轮未发布修改不是此次事故原因的证据，不等于证明历史改动绝无相关性。
++- 确定结论：HTTP响应返回前的网络中断/等待超时；现有分类隐藏底层fetch异常，不能进一步断定网络链路、代理超时或上游慢响应。没有上游回执，不能宣称Provider故障。暂不改Provider、等待时长、账务、任务状态；若需进一步取底层错误/上游协查，须明确窄方案及风险交主控判断。事故排查阶段曾暂停所有生产切换；当前已按主控最新授权恢复I1-I5统一发布。
++
++I6原件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png；来源用户本轮剪贴板图，父于10月3日归档，895x725 PNG sips可读，原件/复制SHA256均2fc4dcf6bbe59df8e36f836a1d1da658cd66c6f56f028ee50aee57769a5ccd02。复用父关键校验，不重复读取原图URL，不上传私人图片Git。此附件与未归档15s标注图不同。
++
++
++## 发布回执（2026-10-03北京时间01:12）
++
++应用v0.36.3已部署，待用户手动验收。运行源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a；BUILD ytlmOyOpdCSahZQKCm07Y；分支codex/canvas-liblib-layout，远端已核对完整commit。回退标签rollback/2026-10-03-before-feedback-v0.36.3已推送，指向f6478176fb34cefa432318f38ac521693bbdd2f6。旧源码release及旧BUILD OlWyIuDDh1fBfDOaID4Tt保留，旧构建路径/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0363，保护记录/srv/video-api-debugger/backups/sd2-feedback-v0363。
++
++[统一diff](2026-10-02-feedback-primary-navigation.diff)、[发布证据JSON](2026-10-02-feedback-primary-navigation.evidence.json)正式根目录与应用树副本同步。证据为发布检查，不是功能验收；W1仍缺视频标注原件，I6底层原因未确认。
++
++| 实际命令/检查 | 结果 |
++|---|---|
++| npm run build（先前I1-I4两轮本地日志） | 两次exit0；范围随后变更，不冒充最新完整证明 |
++| npm run build > /tmp/sd2-feedback-v0363-batch-final-build.log | 新增I5后编译成功，lint/types阶段两个进程系统等待超过7分钟；安全TERM结束自有进程/接回session，无遗留，不称完整通过 |
++| git diff --check、git diff --cached --check；package/lock JSON根版本和依赖图对比；bash -n部署脚本、node --check核对脚本 | 通过，依赖图未变；除release元数据和明确取消比例锁API外，图片worker依赖/脚本/Prisma/登录Provider等未改 |
++| 自行Review实际11文件整批diff | 已核对I1/2范围、响应式级联、推荐初次/切卡与偏好优先、取消UI锁与API一致；补齐保存后继续编辑的基准刷新，检查全局设置/视频上下文按值比较无同根因；无独立reviewer、无浏览器/功能回归 |
++| git commit、git push origin应用分支和rollback标签、git ls-remote | fbb8243371398ad753b66d8ff02ff8a0a6b9d84a及rollback指向f6478176fb34cefa432318f38ac521693bbdd2f6远端可见；首稿正式ROOT bc2ac3a7aa6c4af193152e1f761f5f276d9036f9已推送 |
++| git archive最终提交；tar目录/敏感路径排除校验；scp到server /tmp | 首包卫生检查拦下旧资料图片，未上传；一次有界修正排除整个docs/materials后通过：1325项、29030400字节、SHA256 7251116efab10e01418e90f421262971be6ab7e64341232ceaf6dc1163d8c8cb；不含.env/运行目录/DB/私人资料 |
++| 现有发布活动登记和服务器flock，核对实际commit/BUILD | 通过；用已有root SSH密钥执行发布管理，不读取密码，gouki运行构建/应用；未改用户权限 |
++| release中NEXT_DIST_DIR=.next-prod-candidate npm run build | 完整exit0，内置lint/types通过，候选标记包括小屏导航/推荐默认值/模块设置关闭保护，新BUILD不同于旧版；只在candidate构建，不动live构建 |
++| API精确差异守卫及worker依赖核对 | 仅tasks/create旧比例锁4行删除，其他API及scripts/Prisma/src/lib（release.ts除外）与旧release一致；不能称全backend等价；worker PID1241475及启动时间/服务单元前后一致，不重启图片worker |
++| rsync排除运行数据、保留旧构建、切换/restart sd2-gray.service | 成功，storage/uploads/videos软链接和关键可写目录保持；本地就绪后才结束发布会话，失败自动恢复旧source/BUILD的trap保留 |
++| /tmp/sd2-feedback-v0363-verify.mjs核对本机+公网 | exit0：20源码SHA、27公网静态SHA一致；config/release/login均200、release0.36.3、X-SD2-Origin server-42-193；受保护/image-studio、/template-studio、/generate匿名307到登录，权限未扩大；共享CSS200一致；4服务/定时器active |
++| 发布COMPLETE握手/活动登记 | DEPLOY_COMPLETE，server会话exit0，发布锁已释放；停止额外功能验证，待用户手动验收 |
++
++未运行npm test/test:api、Playwright/DOM/浏览器/生成实验/独立审查；未安装依赖、改登录点数权限/Provider、DB写或任务重发；I4仅用户明确取消的接口业务锁4行。发布检查及更新提醒源码核对不能代替真实升级交互和功能验收。守门员真实debug+UI L3/生产保护L4；旧general/L0误分类由主控纠正并记录，本lead未使用低等级放行。
++
++## 可复制交接正文
++
++```text
++主图导航与视频参数修复
++项目video-api-debugger，目标https://sd2.youdooart.com/template-studio?type=image，I4确切目标https://sd2.youdooart.com/generate。
++正式工单：/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-02-feedback-primary-navigation.md。
++唯一源码：/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，不用正式ROOT旧应用或v12。
++附件feedback.json（完整原文）及48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg（导航参考）在/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-feedback-template-workbench/，仅本机不公开。10月3日视频标注原图仅父会话可见、原件待归档，不伪造路径。事故PNG附件codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png（待确认排查证据）正式路径/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png，父已校验，私有不公开。
++先工单/索引，再整批I1主图约+30%、I2有效上限隐藏添加位、I3手机平板导航、I4三个参数取消业务锁、I5未修改上下文直接关闭；I6线上事故优先只读排查，不改模型限制。已部署v0.36.3、BUILD ytlmOyOpdCSahZQKCm07Y，I6底层原因无法追溯待查，视频标注原图仍缺。
++整批后统一发布build内置检查、自行Review，聚焦commit/push/rollback、候选服务器切换、公网版本/BUILD/静态可达。用户手动验收；不浏览器/截图/功能回归/付费生成/DB写/登录点数Provider权限变更/装依赖。
++构建/服务异常、漂移/锁冲突、数据权限风险即停或回退；回执含正式工单、逐文件内容/diff、原因、命令结果、版本commit/tag/BUILD、公网证据及未验收项。
++```
