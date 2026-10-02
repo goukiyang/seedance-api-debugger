@@ -5,6 +5,11 @@
 - [ ] 2026-10-02：SD2加载与体验优化工单，正文见 `tasks/todo/2026-10-02-loading-ux.md`。
 
 
+## 2026-10-02 图片生成与原图恢复实施
+
+- [图片下载超时与原图找回](todo/2026-10-01-image-download-timeout.md)：v1.1.0 ID1-ID4 已实现并部署 v0.36.0，待用户手动验收；源码0575619、BUILD FjIMzHMxNLluQOLfmBc61，4服务/25公网静态/14源码一致，worker正常排空、回退点和完整记录到位。I1及D1/D2/T1-T4历史保留，旧图未救回；上游查询/幂等未确证、透明请求未开放、已退款终态不自动领图。正式正文、参考原件与发布证据见资料索引。
+- [正式资料索引](../docs/materials/index.md)：用户参考脚本与历史协查原件仅本地保留，不公开Git；[发布证据](todo/2026-10-01-image-download-timeout.evidence.json)。
+
 ## 2026-10-02 画布视频方案拆分实施
 
 - [唯一有效工单 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：v0.35.0 最终产物已部署；SP1–SP5 含历史查询收尾修正已实现并部署待用户手动验收，SP6 发布检查及正式归档完成。真实资源ID复用，assetId 如实 null，不创建 Asset；源码80afb99，BUILD ILxByLZ7_8R-4aPl4WWhH，4服务/32公网静态/10源码一致；原版与中间候选均可回退。仅用 `codex/canvas-liblib-layout` 应用源，本目录完整归档。
