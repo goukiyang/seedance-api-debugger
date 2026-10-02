@@ -1,4 +1,6 @@
 'use client';
+
+import { useProductDialog } from '@/components/useProductDialog';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from 'react';
@@ -302,6 +304,7 @@ function runQuery(filters: RunFilters, cursor?: string | null) {
 }
 
 export default function VideoTemplateWorkbench({ userId }: Props) {
+  const { confirm, productDialog } = useProductDialog();
   const router = useRouter();
   const searchParams = useSearchParams();
   useRememberedScroll(`video-studio:${userId}:${searchParams.toString()}`);
@@ -1301,14 +1304,14 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     setTemplateRecoveryAvailable(false);
   }
 
-  function closeTemplateEditor() {
+  async function closeTemplateEditor() {
     if (!templateEdit || templateEditBusy) return;
     const dirty = templateEditBaseline.current === null
       || templateEditSignature(templateEdit) !== templateEditBaseline.current;
     if (dirty) {
       saveTemplateRecovery(userId, templateEdit);
       setTemplateRecoveryAvailable(true);
-      if (!window.confirm('当前模板编辑尚未保存。关闭后会保留为本机草稿，可稍后恢复。是否关闭？')) return;
+      if (!(await confirm('当前模板编辑尚未保存。关闭后会保留为本机草稿，可稍后恢复。是否关闭？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     } else {
       clearTemplateRecovery(userId, templateEdit.id);
       setTemplateRecoveryAvailable(false);
@@ -1329,7 +1332,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
 
   async function reloadConflictedTemplate() {
     if (!templateConflict) return;
-    if (templateEdit?.id === templateConflict.id && !window.confirm('重新载入会放弃当前模板编辑，是否继续？')) return;
+    if (templateEdit?.id === templateConflict.id && !(await confirm('重新载入会放弃当前模板编辑，是否继续？', { title: '重新载入', confirmLabel: '放弃修改并载入' }))) return;
     const routeAtStart = currentRouteKeyRef.current;
     setTemplateEditBusy(true);
     try {
@@ -1404,7 +1407,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
 
   async function publishTemplate(template: StudioTemplateDto) {
     if (!template.canPublish) return;
-    const confirmed = window.confirm(`发布「${template.name}」后，其他有权使用的内部成员可以应用此版本。`);
+    const confirmed = (await confirm(`发布「${template.name}」后，其他有权使用的内部成员可以应用此版本。`, { title: '发布模板', confirmLabel: '发布模板' }));
     if (!confirmed) return;
     setTemplateEditBusy(true);
     try {
@@ -1427,7 +1430,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
 
   async function archiveTemplate(template: StudioTemplateDto) {
     if (!template.canManage) return;
-    const confirmed = window.confirm(`停用「${template.name}」后，新用户将不能再应用它；已有历史记录保留。`);
+    const confirmed = (await confirm(`停用「${template.name}」后，新用户将不能再应用它；已有历史记录保留。`, { title: '停用模板', confirmLabel: '停用模板', danger: true }));
     if (!confirmed) return;
     setTemplateEditBusy(true);
     try {
@@ -1579,7 +1582,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const assetIds = activeDraft?.assets.map((item) => item.assetId) || [];
   const loginNext = `/template-studio?${searchParams.toString()}`;
 
-  return (
+  return <>{productDialog}{((
     <section className={styles.videoWorkbench} aria-label="视频模板工作区">
       <header className={styles.videoHeader}>
         <nav className={styles.viewTabs} aria-label="视频工作区" role="tablist">
@@ -1940,7 +1943,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         </div>
       )}
     </section>
-  );
+  ))}</>;
 }
 
 function TemplateOverview({

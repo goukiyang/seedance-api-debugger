@@ -1,5 +1,7 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import type {
@@ -93,6 +95,7 @@ function promptBlockToString(value: unknown) {
 }
 
 export function TemplateEditorDrawer({ open, template, saving = false, error, variant = 'drawer', cardId = null, onClose, onSave }: Props) {
+  const { confirm, productDialog } = useProductDialog();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('draft');
@@ -198,7 +201,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
     return draftText || cleanText(data.draft?.summary) || cleanText(userInput);
   };
 
-  const requestClose = () => {
+  const requestClose = async () => {
     if (saving) return;
     const cardsDirty = JSON.stringify(contextCards) !== initialCardsJsonRef.current;
     const fieldsDirty = Boolean(template && (
@@ -207,7 +210,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
       || status !== template.status
       || version !== template.version
     ));
-    if ((cardsDirty || fieldsDirty) && !window.confirm('模板修改尚未全部保存，确定关闭？')) return;
+    if ((cardsDirty || fieldsDirty) && !(await confirm('模板修改尚未全部保存，确定关闭？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     onClose();
   };
 
@@ -275,15 +278,15 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
   );
 
   if (variant === 'inline') {
-    return (
+    return <>{productDialog}{((
       <section className="template-inline-workspace" aria-label="模板上下文卡片编辑">
         {workspaceContent}
       </section>
-    );
+    ))}</>;
   }
 
   if (variant === 'card') {
-    return (
+    return <>{productDialog}{((
       <section ref={(element) => { shellRef.current = element; }} className="template-card-modal-shell">
         <button ref={backdropRef} type="button" className="template-card-modal-backdrop" aria-label="关闭卡片编辑" data-dialog-dismiss-surface onClick={(event) => { if (event.detail === 0) requestClose(); }} />
         <aside ref={dialogRef} className="template-card-modal" role="dialog" aria-modal="true" aria-label="上下文卡片三级编辑弹窗">
@@ -299,15 +302,15 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
           </section>
         </aside>
       </section>
-    );
+    ))}</>;
   }
 
-  return (
+  return <>{productDialog}{((
     <div ref={(element) => { shellRef.current = element; }} className="template-drawer-shell">
       <button ref={backdropRef} type="button" className="template-drawer-backdrop" aria-label="关闭模板编辑" data-dialog-dismiss-surface onClick={(event) => { if (event.detail === 0) requestClose(); }} />
       <aside ref={dialogRef} className="template-drawer" role="dialog" aria-modal="true" aria-label="模板上下文卡片编辑">
         {workspaceContent}
       </aside>
     </div>
-  );
+  ))}</>;
 }

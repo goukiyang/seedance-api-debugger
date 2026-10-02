@@ -1,5 +1,7 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, GripVertical, MessageSquare, Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -12,6 +14,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
   items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
   disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
 }) {
+  const { confirm, productDialog } = useProductDialog();
   const root = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointer: number; index: number; x: number; y: number; moved: boolean; target: number } | null>(null);
   const suppressClick = useRef(false);
@@ -24,8 +27,8 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
   const noteDialog = useRef<HTMLDialogElement>(null);
   const label = (index: number) => labels === 'template' ? `模板${String.fromCharCode(65 + index)}` : `${labels === 'style' ? '风格' : labels === 'primary' ? '主图' : labels === 'auxiliary' ? '参考图' : '图'} ${offset + index + 1}`;
   const originalNote = noteIndex === null ? '' : (items[noteIndex] as unknown as FixedStudioReference)?.note || '';
-  const closeNote = () => {
-    if (noteBusy || (noteDraft !== originalNote && !window.confirm('备注尚未保存，放弃这次修改？'))) return;
+  const closeNote = async () => {
+    if (noteBusy || (noteDraft !== originalNote && !(await confirm('备注尚未保存，放弃这次修改？', { title: '放弃修改', confirmLabel: '放弃修改' })))) return;
     setNoteIndex(null);
   };
   useEffect(() => { if (noteIndex === null) noteDialog.current?.close(); else noteDialog.current?.showModal(); }, [noteIndex]);
@@ -48,7 +51,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
     onChange(next);
   };
   const reset = () => { drag.current = null; setTargetIndex(null); setSourceIndex(null); };
-  return <><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''} ${materialTiles ? styles.materialGrid : ''}`}>
+  return <>{productDialog}{(<><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''} ${materialTiles ? styles.materialGrid : ''}`}>
     {items.map((item, index) => <div key={`${item.id}-${index}`} data-reference-index={index}
       className={`${styles.referenceItem} ${targetIndex === index ? styles.referenceDropTarget : ''}`}
       data-dragging={sourceIndex === index || undefined}
@@ -106,7 +109,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
       <header className={styles.header}><h3>{noteIndex === null ? '备注' : `${label(noteIndex)}备注`}</h3><button type="button" aria-label="关闭备注" disabled={noteBusy} onClick={closeNote}><X size={18} /></button></header>
       <textarea aria-label="参考图备注内容" rows={5} maxLength={2000} readOnly={disabled} disabled={noteBusy} value={noteDraft} onChange={event => setNoteDraft(event.target.value)} />
       {noteError && <p role="alert" className={styles.error}>{noteError}</p>}
-      {!disabled && <button type="button" disabled={noteBusy || noteDraft === originalNote} onClick={() => void saveNote()}><Save size={16} />{noteBusy ? '正在保存' : onSaveNote ? '保存备注' : '应用备注'}</button>}
+      {!disabled && <button type="button" className={styles.primary} disabled={noteBusy || noteDraft === originalNote} onClick={() => void saveNote()}><Save size={16} />{noteBusy ? '正在保存' : onSaveNote ? '保存备注' : '应用备注'}</button>}
     </dialog>
-  </>;
+  </>)}</>;
 }

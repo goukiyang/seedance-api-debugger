@@ -1,5 +1,7 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type {
   GenerationMode,
@@ -523,6 +525,7 @@ export function GenerationComposer({
     message: '供应商 Draft 能力尚未完成核验，暂不可用。',
   },
 }: Props) {
+  const { confirm, productDialog } = useProductDialog();
   const workspace = useWorkspace();
   const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
@@ -1431,11 +1434,11 @@ export function GenerationComposer({
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
     if (workspace.assets.length > 0) {
-      const ok = window.confirm('加载图集将替换当前素材，确定继续？');
+      const ok = await confirm('加载图集将替换当前素材，确定继续？', { title: '替换当前素材', confirmLabel: '加载并替换' });
       if (!ok) return;
     }
     await onCollectionLoad(collectionId);
-  }, [workspace.assets.length, onCollectionLoad]);
+  }, [workspace.assets.length, onCollectionLoad, confirm]);
 
   const handleSaveCollection = useCallback(async (name: string) => {
     await onCollectionSave(name);
@@ -1608,13 +1611,13 @@ export function GenerationComposer({
 
   const handleLoadReferenceAlbum = useCallback(async (albumId: string, albumName: string) => {
     if (workspace.assets.length > 0) {
-      const ok = window.confirm('切换图集会替换当前参考素材列表，确定继续？');
+      const ok = await confirm('切换图集会替换当前参考素材列表，确定继续？', { title: '替换参考素材', confirmLabel: '切换并替换' });
       if (!ok) return;
     }
     await workspace.loadReferenceAlbum(albumId, seedanceReferenceMediaCapabilities(selectedModel).imageLimit);
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(albumName);
-  }, [workspace, selectedModel]);
+  }, [workspace, selectedModel, confirm]);
 
   const handleSaveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
     if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考素材');
@@ -1638,6 +1641,7 @@ export function GenerationComposer({
 
   return (
     <>
+      {productDialog}
       <div className="generation-composer">
         {templateEnabled && (
         <section className="template-workbench" aria-label="模板驱动生成">

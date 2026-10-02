@@ -1,5 +1,7 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -225,6 +227,7 @@ function rememberVideoCard(projectId: string, videoCardId: string) {
 }
 
 export function TemplateGenerateClient() {
+  const { confirm, productDialog } = useProductDialog();
   const searchParams = useSearchParams();
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
   const recentTasksSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -663,7 +666,7 @@ export function TemplateGenerateClient() {
 
   const deleteRecentTask = useCallback(async (task: TaskItem) => {
     if (task.can_delete === false || deletingRecentTaskId) return;
-    const confirmed = window.confirm('从最近生成移除此记录？视频文件不会物理删除，管理员仍可在留存区审计和恢复。');
+    const confirmed = (await confirm('从最近生成移除此记录？视频文件不会物理删除，管理员仍可在留存区审计和恢复。', { title: '移除记录', confirmLabel: '移除记录', danger: true }));
     if (!confirmed) return;
 
     setDeletingRecentTaskId(task.id);
@@ -684,7 +687,7 @@ export function TemplateGenerateClient() {
     } finally {
       setDeletingRecentTaskId(null);
     }
-  }, [deletingRecentTaskId]);
+  }, [deletingRecentTaskId, confirm]);
 
   useEffect(() => {
     const sentinel = recentTasksSentinelRef.current;
@@ -1012,7 +1015,7 @@ export function TemplateGenerateClient() {
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
   const displayRecentTasks = useMemo(() => orderRecentTaskCards(recentTasks), [recentTasks]);
 
-  return (
+  return <>{productDialog}{((
     <div className="composer-page template-generate-page">
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
       <main className="composer-main template-generate-main">
@@ -1342,5 +1345,5 @@ export function TemplateGenerateClient() {
         )}
       </main>
     </div>
-  );
+  ))}</>;
 }

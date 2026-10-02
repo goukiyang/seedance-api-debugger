@@ -1,0 +1,21 @@
+.dialog { box-sizing: border-box; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid #465057; border-radius: 8px; background: #1a2023; color: #e6e8eb; box-shadow: 0 16px 48px rgb(0 0 0 / 35%); }
+.dialog::backdrop { background: rgb(8 12 13 / 64%); }
+.dialog[data-anchored=true]::backdrop { background: rgb(8 12 13 / 18%); }
+.dialog[data-anchored=true] { position: fixed; right: auto; bottom: auto; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.header h2 { margin: 0; font-size: 20px; font-weight: 750; }
+.dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 9px 14px; border: 1px solid #465057; border-radius: 6px; font: inherit; font-weight: 650; cursor: pointer; }
+.dialog .close { width: 36px; min-height: 36px; padding: 6px; color: #adb6bd; background: transparent; }
+.message { margin: 16px 0; color: #c6d0d5; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-line; }
+.input { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #465057; border-radius: 6px; background: #101315; color: #e6e8eb; font: inherit; }
+.actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+.dialog .secondary { background: #202629; color: #c6d0d5; }
+.dialog .primary { background: #79daca; border-color: #79daca; color: #102721; }
+.dialog .danger { background: #ab383e; border-color: #ce5961; color: #fff1f1; }
+.dialog .primary:hover:not(:disabled) { background: #98e7d9; }
+.dialog .secondary:hover, .dialog .close:hover { background: #30393d; }
+.dialog .danger:hover { background: #c3444c; }
+.dialog button:active:not(:disabled) { filter: brightness(.92); }
+.dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.dialog button:focus-visible, .input:focus-visible { outline: 2px solid #79daca; outline-offset: 3px; }
+@media (max-width: 639px) { .dialog { padding: 16px; } .actions button { flex: 1 1 100px; } }

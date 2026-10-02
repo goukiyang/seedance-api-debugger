@@ -39,7 +39,7 @@ export default function VideoPromptResult({ run, userId, busy, onContinue, onReg
     <div className={styles.promptTools}>
       {run.status === 'succeeded' && run.prompt && <ContentReactions contentKey={`prompt:${run.id}`} disabled={text !== run.prompt} />}
       <button className={styles.quietButton} type="button" disabled={!text} onClick={() => void navigator.clipboard.writeText(text).then(() => setMessage('已复制文案')).catch(() => setMessage('复制失败，请选择文本手动复制'))}><Copy size={15} />复制文案</button>
-      <button className={styles.quietButton} type="button" disabled={busy || run.status !== 'succeeded' || !text.trim() || !run.prompt} onClick={() => onContinue(text)}><Film size={15} />带到视频生成</button>
+      <button className={styles.primaryButton} type="button" disabled={busy || run.status !== 'succeeded' || !text.trim() || !run.prompt} onClick={() => onContinue(text)}><Film size={15} />带到视频生成</button>
       {onRegenerate && <button className={styles.quietButton} type="button" disabled={busy || ['queued', 'running', 'uncertain'].includes(run.status)} onClick={onRegenerate}><Sparkles size={15} />重新生成</button>}
       {onHistory && <button className={styles.iconButton} title="文案历史" aria-label="文案历史" type="button" onClick={onHistory}><History size={16} /></button>}
     </div>

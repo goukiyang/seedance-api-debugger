@@ -8289,9 +8289,9 @@ body.compare-fullscreen-open {
 }
 
 .template-llm-builder-buttons button.is-primary {
-  background: #2563eb;
-  border-color: rgba(147, 197, 253, 0.52);
-  color: #eff6ff;
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
 }
 
 .template-llm-builder-grid {
@@ -8463,16 +8463,16 @@ body.compare-fullscreen-open {
 }
 
 .template-plan-generate {
-  background: #2563eb;
-  border: 1px solid rgba(147, 197, 253, 0.5);
-  color: #eff6ff;
+  background: #79daca;
+  border: 1px solid #79daca;
+  color: #102721;
   min-height: 38px;
   padding: 8px 13px;
   width: fit-content;
 }
 
 .template-plan-generate:hover {
-  background: #1d4ed8;
+  background: #98e7d9;
 }
 
 .template-plan-generate:disabled {
@@ -8588,9 +8588,9 @@ body.compare-fullscreen-open {
 }
 
 .template-plan-card-actions button.is-primary {
-  background: rgba(37, 99, 235, 0.34);
-  border-color: rgba(147, 197, 253, 0.48);
-  color: rgba(239, 246, 255, 0.98);
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
 }
 
 .template-plan-key {
@@ -8844,9 +8844,9 @@ body.compare-fullscreen-open {
 }
 
 .template-drawer-head-actions .is-primary {
-  background: #2563eb;
-  border-color: rgba(147, 197, 253, 0.5);
-  color: #eff6ff;
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
 }
 
 .template-drawer-save-state {
@@ -8856,9 +8856,9 @@ body.compare-fullscreen-open {
 }
 
 .template-drawer-actions .is-primary {
-  background: #2563eb;
-  border-color: rgba(147, 197, 253, 0.48);
-  color: #eff6ff;
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
 }
 
 .template-drawer-save-state {
@@ -9577,13 +9577,13 @@ body.compare-fullscreen-open {
 
 .template-context-add,
 .admin-template-actions button,
-.admin-template-builder-actions button:first-child,
+.admin-template-builder-actions button.is-primary,
 .admin-template-detail-head a,
 .admin-template-detail-head button,
 .admin-template-publish-actions a:first-child {
-  background: #2563eb;
-  border-color: rgba(147, 197, 253, 0.5);
-  color: #eff6ff;
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
 }
 
 .template-context-card-list {
@@ -10179,9 +10179,9 @@ body.compare-fullscreen-open {
 }
 
 .template-context-editor-actions .is-primary {
-  background: #2563eb;
-  border-color: rgba(147, 197, 253, 0.5);
-  color: #eff6ff;
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
   flex: 1 1 140px;
 }
 
@@ -10272,14 +10272,14 @@ body.compare-fullscreen-open {
 }
 
 .template-bound-image-footer .template-bound-image-upload {
-  background: #2563eb;
-  border-color: rgba(147, 197, 253, 0.58);
-  color: #f8fbff;
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
 }
 
 .template-bound-image-footer .template-bound-image-upload:hover:not(:disabled) {
-  background: #1d4ed8;
-  border-color: rgba(191, 219, 254, 0.72);
+  background: #98e7d9;
+  border-color: #79daca;
 }
 
 .template-bound-image-head h3 {
@@ -11097,9 +11097,50 @@ body.compare-fullscreen-open {
 }
 
 .template-library-preview-actions button.is-primary {
-  background: oklch(0.55 0.18 255);
-  border-color: oklch(0.55 0.18 255);
-  color: oklch(0.99 0.003 255);
+  background: #79daca;
+  border-color: #79daca;
+  color: #102721;
+}
+
+.template-llm-builder-buttons button.is-primary,
+.template-plan-card-actions button.is-primary,
+.template-drawer-head-actions .is-primary,
+.template-drawer-actions .is-primary,
+.template-context-editor-actions .is-primary,
+.template-library-preview-actions button.is-primary,
+.admin-template-builder-actions button.is-primary {
+  min-height: 40px;
+  font-weight: 750;
+}
+
+:is(.template-llm-builder-buttons, .template-plan-card-actions, .template-drawer-head-actions, .template-drawer-actions, .template-context-editor-actions, .template-library-preview-actions, .admin-template-builder-actions) button.is-primary:hover:not(:disabled) {
+  background: #98e7d9;
+  color: #102721;
+}
+
+:is(.template-llm-builder-buttons, .template-plan-card-actions, .template-drawer-head-actions, .template-drawer-actions, .template-context-editor-actions, .template-library-preview-actions, .admin-template-builder-actions) button.is-primary:focus-visible {
+  outline: 2px solid #79daca;
+  outline-offset: 3px;
+}
+
+:is(.template-llm-builder-buttons, .template-plan-card-actions, .template-drawer-head-actions, .template-drawer-actions, .template-context-editor-actions, .template-library-preview-actions, .admin-template-builder-actions) button.is-primary:active:not(:disabled) {
+  background: #60c7b6;
+}
+
+.template-generate-page .composer-submit-btn {
+  background: #79daca;
+  color: #102721;
+  box-shadow: none;
+}
+
+.template-generate-page .composer-submit-btn:hover:not(:disabled) {
+  background: #98e7d9;
+  box-shadow: none;
+}
+
+.template-generate-page .composer-submit-btn:focus-visible {
+  outline: 2px solid #79daca;
+  outline-offset: 3px;
 }
 
 .template-library-facts,

@@ -1,5 +1,7 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
@@ -132,6 +134,7 @@ async function copyStudioText(value: string) {
 }
 
 export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
+  const { confirm, productDialog } = useProductDialog();
   const [modules, setModules] = useState<StudioModule[]>([]);
   const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName'>>>([]);
   const removedModuleIds = useRef(new Set<string>());
@@ -378,7 +381,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
         targets.push(...data.modules);
       }
     } catch { setError('分组内容未能完整读取，请重试'); return; }
-    if (!targets.length || !window.confirm(`删除分组“${group}”？其中的模块会移到“未分组”，图片和生成结果不会删除。`)) return;
+    if (!targets.length || !(await confirm(`删除分组“${group}”？其中的模块会移到“未分组”，图片和生成结果不会删除。`, { title: '删除分组', confirmLabel: '删除分组', danger: true }))) return;
     try {
       const replacements: StudioModule[] = [];
       for (const item of targets) {
@@ -397,7 +400,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       void loadModules();
     }
   }
-  return <main className={styles.page}>
+  return <>{productDialog}{(<main className={styles.page}>
     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label="分组快捷栏">
       <div className={styles.moduleRailTitle}>分组快捷栏</div>
       {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
@@ -443,7 +446,7 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
     </dialog>
     {isAdmin && <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} />}
     {!settings && globalEditor.error && <p role="alert" className={styles.error}>{globalEditor.error}<button onClick={() => void globalEditor.controller.load()}>重试读取设置</button></p>}
-  </main>;
+  </main>)}</>;
 }
 
 function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios }: {
@@ -454,6 +457,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   onReloadSettings: (discardDraft?: boolean) => void;
   ratios: RatioPreferences;
 }) {
+  const { confirm, prompt: askName, productDialog } = useProductDialog();
   const contextEditable = module.contextEditable !== false;
   const fixedEditable = isAdmin && module.fixedReferencesEditable !== false;
   const [styleGroups, setStyleGroups] = useState<StudioStyleSummary[]>(module.styleGroups || []);
@@ -563,11 +567,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
   const automaticDirty = automaticSnapshot !== moduleSaved;
   const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
-  useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft);
+  useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
-  function closeModuleDialog() {
+  async function closeModuleDialog() {
     if (moduleSaving || uploading || bannerUploading) return;
-    if (settingsDirty && !window.confirm('上下文或固定参考图尚未保存，确定关闭吗？当前草稿会保留。')) return;
+    if (settingsDirty && !(await confirm('上下文或固定参考图尚未保存，确定关闭吗？当前草稿会保留。', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     moduleDialog.current?.close();
   }
   useDialogDismiss({ open: true, dialogRef: moduleDialog, nativeDialog: true, onDismiss: closeModuleDialog });
@@ -630,8 +634,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     finally { moduleSaveLock.current = false; setModuleSaving(false); }
   }
 
-  function restoreDefaults() {
-    if (!window.confirm('恢复当前模板默认参数和参考图？上次临时草稿仍可恢复。')) return;
+  async function restoreDefaults() {
+    if (!(await confirm('恢复当前模板默认参数和参考图？上次临时草稿仍可恢复。', { title: '恢复默认', confirmLabel: '恢复默认' }))) return;
     try { const saved = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (saved) setRecoverableDraft(saved); } catch {}
     blockedDraftSignature.current = null;
     setPrompt(baseline.prompt); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
@@ -646,7 +650,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   async function deleteModule() {
     if (moduleDeleteLock.current || moduleSaveLock.current || submitting || uploading || bannerUploading) return;
-    if (!window.confirm(`删除模板“${name}”？模板配置将移除，已生成图片仍保留在资产库，不退积分；模板库中的共享原件不受影响。`)) return;
+    if (!(await confirm(`删除模板“${name}”？模板配置将移除，已生成图片仍保留在资产库，不退积分；模板库中的共享原件不受影响。`, { title: '删除模板', confirmLabel: '删除模板', danger: true }))) return;
     moduleDeleteLock.current = true; setModuleDeleting(true); setError('');
     try {
       await readResponse(await fetch('/api/image-studio/modules', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
@@ -659,7 +663,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   async function saveAsPreset() {
     if (!contextEditable) { setError('共享模板的内部上下文由创建者维护，不能另存内部配置；本次参数仍可直接生成。'); return; }
-    const presetName = window.prompt('模板名称', name);
+    const presetName = await askName('模板名称', name, { title: '另存为模板', confirmLabel: '保存模板', maxLength: 80 });
     if (!presetName?.trim()) return;
     try {
       await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -801,8 +805,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     return () => window.clearTimeout(timer);
   }, [draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, moduleDeleting, uploading, bannerUploading, submitting, pendingSubmission, name, count]);
 
-  function changeGroup(value: string) {
-    const next = value !== '__other__' ? value : window.prompt('输入新分组名称（最多 40 字）', '未命名分组')?.trim().slice(0, 40);
+  async function changeGroup(value: string) {
+    const next = value !== '__other__' ? value : (await askName('输入新分组名称（最多 40 字）', '未命名分组', { title: '创建分组', confirmLabel: '创建分组', maxLength: 40 }))?.trim().slice(0, 40);
     if (next) { setGroupName(next); onMetadataChange(module.id, name, next, true); }
   }
 
@@ -868,7 +872,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     } finally { submitLock.current = false; setSubmitting(false); }
   }
 
-  function restoreTask(task: StudioTask) {
+  async function restoreTask(task: StudioTask) {
     if (!task.snapshot) {
       setError('这条历史记录没有可恢复的完整设置，请按当前模块重新填写后生成。');
       return;
@@ -881,7 +885,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setError('当前仍在上传或保存模块，请完成后再恢复历史设置。');
       return;
     }
-    if (moduleDirty && !window.confirm('当前模块有未保存内容，恢复后会替换当前输入，但不会立即保存、提交或扣积分。确定继续吗？')) return;
+    if (moduleDirty && !(await confirm('当前模块有未保存内容，恢复后会替换当前输入，但不会立即保存、提交或扣积分。确定继续吗？', { title: '恢复历史设置', confirmLabel: '恢复设置' }))) return;
     const snapshot = task.snapshot;
     setPrompt(snapshot.prompt || '');
     setCount(Math.max(1, Math.min(8, snapshot.count || 1)));
@@ -1045,7 +1049,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     if (uploadFiles.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024)) {
       setError('请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
     }
-    if (replacing && !window.confirm(`确认用「${uploadFiles[0].name}」替换当前主图？上传成功前旧主图会保留；取消不会更改当前内容。`)) return;
+    if (replacing && !(await confirm(`确认用「${uploadFiles[0].name}」替换当前主图？上传成功前旧主图会保留；取消不会更改当前内容。`, { title: '替换主图', confirmLabel: '替换主图' }))) return;
     uploadLock.current = true; setUploading(true); setError('');
     try {
       for (let index = 0; index < uploadFiles.length; index++) {
@@ -1094,7 +1098,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     onActivate();
     if (draftRestoring) { draftRestoreSequence.current += 1; setDraftRestoring(false); }
   }
-  return <section ref={section} hidden={hidden} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
+  return <>{productDialog}{(<section ref={section} hidden={hidden} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
     onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
     <header className={styles.header}>
       <div className={styles.moduleTitleRow}>
@@ -1203,7 +1207,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </div>
         <button type="button" className={styles.generate} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void submit()}>{submitting ? '正在提交' : pendingSubmission ? '重试提交' : '生成图片'}</button>
         {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
-        {settingsError && <button type="button" onClick={() => { if (!dirty || window.confirm('重新读取会替换未保存的通用设置，是否继续？')) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
+        {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
         {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
@@ -1227,13 +1231,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <button type="button" onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
-          <button type="button" disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存上下文</button>
+          <button type="button" className={styles.primary} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存上下文</button>
           <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={uploading || bannerUploading || submitting || (!recoverableDraft && (!contextEditable || !generationChanged || generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && generationChanged && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : '另存为'}</button>
         </div>
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
-        {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={() => {
-          if (window.confirm('上次提交可能已成功，请先查看生成记录。确定放弃核对并开始新任务吗？')) { setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} }
+        {pendingSubmission && <p className={styles.muted}>将核对刚才的提交，不会重复创建同一批任务。<button type="button" disabled={submitting} onClick={async () => {
+          if ((await confirm('上次提交可能已成功，请先查看生成记录。确定放弃核对并开始新任务吗？', { title: '放弃核对', confirmLabel: '开始新任务' }))) { setPendingSubmission(null); try { sessionStorage.removeItem(pendingKey); } catch {} }
         }}>放弃核对</button></p>}
         {!ready && !settingsError && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
       </section>
@@ -1387,10 +1391,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </select>
         </label>
       </div>
-      {contextEditable && <button type="button" disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存模板设置</button>}
+      {contextEditable && <button type="button" className={styles.primary} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存模板设置</button>}
       <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>
     {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
-  </section>;
+  </section>)}</>;
 }

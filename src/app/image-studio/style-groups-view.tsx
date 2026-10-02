@@ -1,5 +1,7 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import { useEffect, useId, useRef, useState } from 'react';
 import { Check, Combine, ImagePlus, Layers, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
@@ -24,6 +26,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   userId: string; selected: StudioStyleSummary[]; onChange: (groups: StudioStyleSummary[]) => void;
   currentImages: UploadedAssetPayload[]; disabled?: boolean; tiles?: boolean; maxReferences?: number;
 }) {
+  const { confirm, prompt, productDialog } = useProductDialog();
   const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState<StudioStyleSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -60,8 +63,8 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
     } catch (cause) { if (current === request.current) setError(cause instanceof Error ? cause.message : '读取失败'); }
     finally { if (current === request.current) setLoading(false); }
   }
-  const closeEditor = () => {
-    if (busy || uploading || picker || (dirty && !window.confirm('风格组尚未保存，放弃这次修改？'))) return;
+  const closeEditor = async () => {
+    if (busy || uploading || picker || (dirty && !(await confirm('风格组尚未保存，放弃这次修改？', { title: '放弃修改', confirmLabel: '放弃修改' })))) return;
     setDraft(null); setError('');
   };
   useDialogDismiss({ open: open && !preview, dialogRef: dialog, nativeDialog: true, onDismiss: () => { if (!busy && !draft) setOpen(false); } });
@@ -88,7 +91,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
     finally { setBusy(false); }
   }
   async function remove(group: StudioStyleSummary) {
-    if (busy || !window.confirm(`删除风格组“${group.name}”？原始图片和生成记录保留，已选择该组的模板需要重新选择。`)) return;
+    if (busy || !(await confirm(`删除风格组“${group.name}”？原始图片和生成记录保留，已选择该组的模板需要重新选择。`, { title: '删除风格组', confirmLabel: '删除风格组', danger: true }))) return;
     setBusy(true); setError('');
     try {
       await responseValue(await fetch('/api/image-studio/style-groups', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: group.id, revision: group.revision }) }));
@@ -99,7 +102,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
     finally { setBusy(false); }
   }
   async function merge() {
-    const name = window.prompt('合并后的风格组名称（原组会保留）', '合并风格');
+    const name = await prompt('合并后的风格组名称（原组会保留）', '合并风格', { title: '合并风格组', confirmLabel: '合并风格组', maxLength: 80 });
     if (!name?.trim() || busy) return;
     setBusy(true); setError('');
     try {
@@ -131,7 +134,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   }
   const selectedCount = selected.reduce((total, group) => total + group.referenceCount, 0);
   const openSelector = () => { setOpen(true); void load(); };
-  return <div className={tiles ? styles.styleGroupsTiles : styles.styleGroups}>
+  return <>{productDialog}{(<div className={tiles ? styles.styleGroupsTiles : styles.styleGroups}>
     {!tiles && <div className={styles.header}><strong>风格组</strong><button type="button" disabled={disabled} onClick={openSelector}><Layers size={16} />选择风格组</button></div>}
     {tiles ? <div className={styles.materialGrid}>{selected.map(group => <div key={group.id} className={styles.styleTile}>
       <button type="button" className={styles.styleTilePreview} disabled={disabled} onClick={openSelector} aria-label={`查看风格组${group.name}`} title={`${group.name} · ${group.referenceCount} 张${group.unavailable ? ' · 不可用' : ''}`}>
@@ -189,7 +192,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void upload(Array.from(event.target.files || [])); event.target.value = ''; }} />
         {uploading && <p role="status">正在上传图片…</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
-        <div className={styles.resultActions}><button type="button" disabled={busy || uploading || !draft.name.trim() || !draft.references.length || !dirty} onClick={() => void save()}><Save size={16} />{busy ? '正在保存' : '保存风格组'}</button></div>
+        <div className={styles.resultActions}><button type="button" className={styles.primary} disabled={busy || uploading || !draft.name.trim() || !draft.references.length || !dirty} onClick={() => void save()}><Save size={16} />{busy ? '正在保存' : '保存风格组'}</button></div>
       </>}
     </dialog>
     {picker && draft && <UploadedImagePicker open imageOnly selectionOnly portalContainer={editor.current}
@@ -201,5 +204,5 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         changeReferences([...draft.references, ...refs]);
       }} />}
     {preview?.originalUrl && <ZoomableImagePreview src={preview.originalUrl} alt="风格参考图" title="风格参考图" previewKey={preview.id} onClose={() => setPreview(null)} />}
-  </div>;
+  </div>)}</>;
 }

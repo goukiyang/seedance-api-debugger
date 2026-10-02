@@ -229,10 +229,10 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
             />
           </label>
           <div className="admin-template-builder-actions">
-            <button type="button" onClick={generateTemplateDraft} disabled={builderBusy}>
+            <button type="button" className={!builderDraft ? 'is-primary' : ''} onClick={generateTemplateDraft} disabled={builderBusy}>
               {builderBusy ? 'LLM 生成中...' : builderDraft ? '重新生成草稿' : '生成模板草稿'}
             </button>
-            <button type="button" onClick={saveBuilderDraft} disabled={!builderDraft || builderBusy}>
+            <button type="button" className={builderDraft ? 'is-primary' : ''} onClick={saveBuilderDraft} disabled={!builderDraft || builderBusy}>
               保存草稿并编辑卡片
             </button>
             {builderAgentRunId && <Link href={`/admin/agent-runs/${builderAgentRunId}`}>查看链路</Link>}

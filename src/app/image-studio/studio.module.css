@@ -19,10 +19,13 @@
 .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
 .page h1 { font-size: 24px; margin: 0; }
 .page h2 { font-size: 18px; margin: 0; }
-.page button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #465057; border-radius: 6px; padding: 9px 12px; color: inherit; background: #202629; cursor: pointer; }
-.page button:disabled { opacity: .55; cursor: not-allowed; }
-.page button:not(:disabled):hover { background: #30393d; }
-.page button:focus-visible, .page input:focus-visible, .page textarea:focus-visible, .page select:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
+:where(.page, .dialog) button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #465057; border-radius: 6px; padding: 9px 12px; color: inherit; background: #202629; cursor: pointer; }
+:where(.page, .dialog) button:disabled { opacity: .55; cursor: not-allowed; }
+:where(.page, .dialog) :where(button:not(:disabled):hover) { background: #30393d; }
+:where(.page, .dialog) button:focus-visible, .page input:focus-visible, .page textarea:focus-visible, .page select:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
+.primary, .generate { min-height: 40px; border-color: #79daca; background: #79daca; color: #102721; font-weight: 750; }
+.primary:hover:not(:disabled), .generate:hover:not(:disabled) { background: #98e7d9; }
+.primary:active:not(:disabled), .generate:active:not(:disabled) { background: #60c7b6; }
 .workspace { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 32px; }
 .module { border-top: 1px solid #465057; padding: 28px 0; scroll-margin-top: 90px; }
 .module[data-active=true] { border-top-color: #79daca; }
@@ -146,10 +149,10 @@
 .compactField { display: grid; gap: 8px; min-width: 0; font-size: 14px; }
 .compactField strong { font-weight: 750; }
 .compactField select { width: 100%; }
-.page .generate { width: 100%; margin-top: 12px; background: #126f5d; }
+.page .generate { width: 100%; min-height: 44px; margin-top: 12px; }
 .moduleQuickActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid #2d383d; }
 .moduleQuickActions button { padding: 7px 9px; font-size: 12px; }
-.moduleQuickActions .saveReady { border-color: #79daca; color: #a4f2df; background: #123b33; }
+.moduleQuickActions .saveReady { border-color: #79daca; color: #a4f2df; }
 .outputs { min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 20px; }
 .result { min-width: 0; }
