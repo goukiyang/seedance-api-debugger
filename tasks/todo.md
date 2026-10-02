@@ -2,7 +2,7 @@
 
 ## 2026-10-02 资源库整合审查归档
 
-- [完整盘点、上下游与独立体验审查](todo/2026-10-02-unified-resource-library.md)：审查来源为`codex/canvas-liblib-layout`的d08e9df，不是本目录旧应用分支；3个代码问题、6处体验问题尚未整改。仅记录，不部署。
+- [完整盘点、上下游与独立体验审查](todo/2026-10-02-unified-resource-library.md)：审查后3个代码问题及6处体验问题已部署v0.34.1（源码81de84c，来自`codex/canvas-liblib-layout`，不是本目录旧应用分支）；发布检查完成，待用户手动验收。统一资源目录尚未合并，发布预约流程缺口见完整正文。
 - [资料索引](../docs/materials/index.md)：原图及相关历史工单正式归档入口。
 
 更新时间：2026-06-24
