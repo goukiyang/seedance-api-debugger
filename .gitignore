@@ -2,6 +2,7 @@
 # Local user reference attachment; not for public Git or deployment
 docs/materials/2026-10-02-unified-resource-library/
 docs/materials/2026-10-02-canvas-plan-split/*.png
+docs/materials/2026-10-02-loading-study/evidence/
 .env
 .env.local
 .env.*.local

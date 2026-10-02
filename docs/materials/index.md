@@ -1,5 +1,19 @@
 # 项目资料索引
 
+## 加载刷光独立样例（2026-10-02）
+
+项目：video-api-debugger。来源：用户要求统一 loading/生成中动效并独立测试。主题：刷光、骨架屏、按钮等待、阶段状态、减少动画。样例版本 v1.0.0，不接生产接口，不代表正式网站已经采用。
+
+| 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
+|---|---|---|---|
+| 独立交互样页 | 本轮打样；index.html；v1.0.0 | 首次加载、刷新保留原内容、提交、模拟上传和生成阶段；周期/亮度/主题可调，设置保存，真实系统减少动画偏好优先 | [样例](2026-10-02-loading-study/index.html)；Playwright 本地独立检查 PASS，桌面/390px截图已查看 |
+| 样例检查脚本 | check.cjs；2026-10-02 | 仅本地文件：动效、状态切换、防连点、恢复、390px 布局与减少动画；无真实生成或生产验收 | [脚本](2026-10-02-loading-study/check.cjs)；检查结果见同目录 evidence/report.json |
+| 参考原图 | 既有用户画布原图，未修改 | 作为列表及完成态样图，不冒充生成视频；沿用画布方案拆分资料归档 | [原件](2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png)；复用已核验原件 |
+
+设计借鉴 MUI Skeleton wave 的变换刷光与减少动画处理；已阅读官方文档及 Skeleton.js 实现，未引入 MUI 依赖或复制其组件。来源：https://mui.com/material-ui/react-skeleton/ 与 https://github.com/mui/material-ui/blob/master/packages/mui-material/src/Skeleton/Skeleton.js 。样例仅本地打开，未公开发布用户原图。
+
+L1：加载动效独立打样，已完成。完成标准：可交互比较各状态，桌面/手机布局及减少动画模式检查通过。证据：同目录 evidence/report.json、desktop.png、dark.png、mobile.png 与 interaction.webm；仅本地保留。发现并修复完成态预览图越界遮挡，整批复测通过；无真实任务请求、无 JavaScript 错误、无外部网络请求。风险分级 L1：隔离样例，没有业务接口、权限或数据变化；未做线上功能验收或部署。
+
 ## 画布视频方案拆分（2026-10-02）
 
 项目：video-api-debugger。来源：用户原工单、画布截图、本侧聊提示词格式及简化讨论。主题：方案拆分、提示词、视频节点、参数继承、任务恢复、结果选用。此次仅补文档，未实施。

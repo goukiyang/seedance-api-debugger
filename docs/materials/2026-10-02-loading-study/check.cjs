@@ -1,0 +1,55 @@
+const { chromium } = require('/Users/gouki-youdoo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const assert = require('node:assert/strict');
+(async () => {
+  const out = path.join(__dirname, 'evidence'); fs.mkdirSync(out, { recursive: true });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ viewport: { width: 1360, height: 1050 }, recordVideo: { dir: out, size: { width: 1360, height: 1050 } } });
+    const page = await context.newPage(); const errors = []; const network = [];
+    page.setDefaultTimeout(7000);
+    page.on('pageerror', e => errors.push(e.message)); page.on('request', r => { if (/^https?:/.test(r.url())) network.push(r.url()); });
+    await page.goto(pathToFileURL(path.join(__dirname, 'index.html')).href);
+    await page.locator('#viewport').waitFor();
+    assert.equal(await page.locator('#first-sample').getAttribute('aria-busy'), 'true');
+    const before = await page.locator('#viewport').evaluate(el => getComputedStyle(el, '::after').transform);
+    await page.waitForTimeout(650);
+    const after = await page.locator('#viewport').evaluate(el => getComputedStyle(el, '::after').transform);
+    assert.notEqual(before, after, 'sweep must move');
+    assert(await page.locator('#refresh-list img').first().evaluate(el => el.complete && el.naturalWidth > 0));
+    await page.screenshot({ path: path.join(out, 'desktop.png'), fullPage: true });
+    await page.locator('#submit').click();
+    await page.locator('#submit').evaluate(el => el.click());
+    assert.equal(await page.evaluate(() => window.demo.submitCount), 1);
+    await page.waitForTimeout(1700); assert.equal(await page.locator('#submit-status').textContent(), '模拟任务已受理');
+    await page.locator('#stage').selectOption('failed'); assert.equal(await page.locator('#viewport').evaluate(el => el.classList.contains('shine')), false);
+    await page.locator('#retry').click(); assert.equal(await page.locator('#stage').inputValue(), 'generating');
+    await page.locator('#stage').selectOption('preparing'); assert.equal(await page.locator('#stage-title').textContent(), '生成已完成');
+    await page.locator('#complete').click(); assert.equal(await page.locator('#upload-progress').getAttribute('aria-valuenow'), '100');
+    assert(await page.locator('#result-img').evaluate(el => {
+      const image = el.getBoundingClientRect(), parent = el.parentElement.getBoundingClientRect();
+      return image.top >= parent.top && image.left >= parent.left && image.bottom <= parent.bottom + 1;
+    }), 'completion image stays inside viewport');
+    assert(await page.locator('#result-img').evaluate(el => el.complete && el.naturalWidth > 0));
+    await page.locator('#preview').click(); assert(await page.locator('#preview-dialog').evaluate(el => el.open));
+    await page.keyboard.press('Escape'); assert.equal(await page.locator('#preview-dialog').evaluate(el => el.open), false);
+    await page.locator('#theme').selectOption('dark');
+    await page.locator('#replay').click(); await page.screenshot({ path: path.join(out, 'dark.png'), fullPage: true });
+    await page.reload(); assert.equal(await page.locator('#theme').inputValue(), 'dark'); assert.equal(await page.evaluate(() => window.demo.submitCount), 0);
+    await page.locator('#reset').click(); await page.locator('#reduce').check();
+    assert.equal(await page.locator('#viewport').evaluate(el => getComputedStyle(el, '::after').animationName), 'none');
+    await page.locator('#reduce').uncheck(); await page.emulateMedia({ reducedMotion: 'reduce' });
+    assert.equal(await page.locator('#viewport').evaluate(el => getComputedStyle(el, '::after').animationName), 'none');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile overflow');
+    await page.screenshot({ path: path.join(out, 'mobile.png'), fullPage: true });
+    assert.equal(errors.length, 0); assert.equal(network.length, 0, 'sample must not make network requests');
+    const video = page.video(); await context.close(); const videoPath = await video.path();
+    fs.renameSync(videoPath, path.join(out, 'interaction.webm'));
+    const report = { result: 'PASS', checks: ['moving sweep', 'existing content preserved', 'submit duplicate lock', 'failure/retry', 'file preparation', 'completion stops shimmer', 'preview/Escape', 'theme persistence without task replay', 'manual/system reduced motion', '390px no overflow', 'images loaded', 'no JS errors', 'no network requests'], errors, network };
+    fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report));
+  } finally { await browser.close(); }
+})().catch(e => { console.error(e); process.exitCode = 1; });
