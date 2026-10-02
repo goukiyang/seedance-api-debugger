@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import type { Asset } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
 
     // Validate the complete selection and prepare external URLs before taking
     // the write lock. No workspace changes happen until every input is ready.
-    const references = [];
+    const references: Array<Awaited<ReturnType<typeof assertCanUseReferenceImage>>> = [];
     for (const referenceImageId of referenceImageIds) {
       const image = await assertCanUseReferenceImage(user, referenceImageId);
       if (!image.asset_id || !image.asset || image.asset.status === 'deleted') {
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest) {
       await ensureNonImageAssetReadyForGeneration(image.asset_id, image.asset.type);
       references.push(image);
     }
-    const assets = [];
+    const assets: Asset[] = [];
     for (const currentAssetId of assetIds) {
       const asset = await prisma.asset.findFirst({
         where: { id: currentAssetId, status: { not: 'deleted' } },

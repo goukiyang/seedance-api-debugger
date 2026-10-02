@@ -433,7 +433,7 @@ export function UploadedImagePicker({
       if (attachableIds.length > 0) {
         const selectionById = new Map(selectedAssets.map((item) => [item.id, item]));
         uploadedSelections.forEach((item) => selectionById.set(item.id, item));
-        const combinedIds = [...new Set([...selectedAssetIds, ...attachableIds])]
+        const combinedIds = Array.from(new Set([...selectedAssetIds, ...attachableIds]))
           .filter((id) => !currentAssetIdSet.has(id));
         const combinedSelections = combinedIds
           .map((id) => selectionById.get(id))
