@@ -4,15 +4,15 @@
 
 补充工单版本：1.1.0。来源：用户提供 `Untitled-1(1).md` 后明确选择 B“SD2 正式图片生成、下载与恢复流程”，最初要求仅写工单。2026-10-02 用户已明确“执行”：现按 ID1-ID4 实施并安全提交、推送和部署；不授权付费生成、功能自动验收、生产数据库写入或账本政策变更。下方历史授权与证据保留原时态。
 
-有效目标：https://sd2.youdooart.com/template-studio 。正式资料及工单根目录：/Volumes/Data/Projects/video-api-debugger。以下为新的实施建议，历史 D1/D2/T1-T4 的记录和证据保留，不把它们重置成全部未做，也不把历史发布当成本次改动已实现。
+有效目标：https://sd2.youdooart.com/template-studio 。正式资料及工单根目录：/Volumes/Data/Projects/video-api-debugger。以下为本次有效实施范围，历史 D1/D2/T1-T4 的记录和证据保留，不把它们重置成全部未做，也不把历史发布当成本次改动已实现。
 
 | 编号 | 本次任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | I1 | 图片交付恢复工单 | 写清现状、调整范围、异常恢复与人工验收，并归档参考文件 | 已完成；正文与原件归入项目，差异和复制检查通过 |
-| ID1 | 生成请求身份与防重复 | 复用本地请求编号；未确认受理不自动再生成；追踪上游请求而不冒充上游幂等 | 进行中 |
-| ID2 | 输出检查点与下载恢复 | Base64 优先、同对象恢复、慢速非续传源有界等待；进程重启不重新生图 | 进行中 |
-| ID3 | 完整图片与资产交付 | 完整解码、格式/尺寸/透明要求核验；资产发布和任务成功保持一致 | 进行中 |
-| ID4 | 用户状态及发布交接 | 阶段与恢复动作清楚；发布保护到位；实际功能待用户手动验收 | 进行中 |
+| ID1 | 生成请求身份与防重复 | 复用本地请求编号；未确认受理不自动再生成；追踪上游请求而不冒充上游幂等 | 已实现并部署；待用户手动验收 |
+| ID2 | 输出检查点与下载恢复 | Base64 优先、同对象恢复、慢速非续传源有界等待；进程重启不重新生图 | 已实现并部署；待用户手动验收 |
+| ID3 | 完整图片与资产交付 | 完整解码、格式/尺寸/透明要求核验；资产发布和任务成功保持一致 | 已实现并部署；待用户手动验收 |
+| ID4 | 用户状态及发布交接 | 阶段与恢复动作清楚；发布保护到位；实际功能待用户手动验收 | 已实现并部署；待用户手动验收 |
 
 ### 本次执行计划与边界（2026-10-02）
 
@@ -25,9 +25,42 @@
 - Git Plan：本分支聚焦应用提交和记录提交推 `origin`；部署前推送原生产 `80afb99` 的 annotated rollback tag。精确 git archive、候选构建、release-window 每次登记确认成功、root flock 与正常退出 worker 后才切源码/构建；任何失败保留或回退原源码/构建/unit，不覆盖 storage/DB/上传资料。正式旧分支只精准暂存本轮记录，保留原脏改与未跟踪文件。
 - 参考实际代码：已安装 sharp v0.34.5 `lib/input.js`（Apache-2.0）及项目安全流/原生 https；复核 [sharp 输入失败级别](https://sharp.pixelplumbing.com/api-constructor/) 和 [curl 官方续传说明](https://curl.se/docs/manpage.html)，只借鉴边界，不安装库、不执行参考脚本。无外部真实源站验证。
 
+### 本轮发布闭环与逐文件记录（2026-10-02）
+
+- 已部署，待用户手动验收：https://sd2.youdooart.com/template-studio 。应用 v0.36.0（兼容新增持久输出恢复，升 MINOR）；唯一源码提交 `05756192245111821ae7560b3aaf5041d119c693`，正式 BUILD `FjIMzHMxNLluQOLfmBc61`。源码分支及 annotated 回退标签已推送并核对远端；原生产 `80afb99c3f664949936961e86e6d91ba9d057725` 与 BUILD `ILxByLZ7_8R-4aPl4WWhH` 保留。
+- 回退标签：`rollback/2026-10-02-before-image-delivery-v036`；服务器旧 release 仍在，旧 live 构建 `/srv/video-api-debugger/app/.next-prod-before-sd2-image-delivery-20261002T095300Z`，unit/worker 前后状态及排空数量 `/srv/video-api-debugger/backups/sd2-image-delivery-20261002T095300Z`。图片 worker 由 PID180777 正常退出，排空后 queued/running 为0，新 PID1168023 于 2026-10-02 17:58:19 CST 启动；未强杀，unit 不变。
+- 精确归档 SHA256：`e9b6e15bf496e3a08f3551fa0b4c96c4307cb953ee2d7ba0d25b1c52b8863410`。源包排除环境文件、依赖、构建、storage、上传、视频、DB、日志、标记及私有参考/协查原件。上传前、切换前和完成登记均成功确认返回0，同一 runId `sd2-image-delivery-20261002T095300Z`；root flock 持有至公网检查通过。
+- 本地最终构建日志 `/tmp/sd2-image-delivery-v036-local-build-final.log`；服务器独立候选日志 `/tmp/sd2-image-delivery-20261002T095300Z-build.log`，SHA256 `a7497ab261f7cbaef09a1b748169a512ea72bb1aff19be981edead113df27fd0`；均返回0。完整发布检查详见[逐文件证据](2026-10-01-image-download-timeout.evidence.json)：本机/公网 config、release、login 200，来源 server-42-193；4服务/计时器 active；25项公网静态 SHA 与运行构建一致，14个源码/worker文件与本地一致，unit前后SHA相等。
+- 匿名 image-studio/template-studio 307 是保留鉴权，不绕过、不冒充页面验收。第一次证据汇总的嵌入换行转义失败只影响记录脚本；修正后统一必要发布检查通过，无应用改号/重建或功能测试。storage/uploads/videos 持久软链保持原路径，未执行迁移、生产库写入或付费生成。
+- 更新提醒沿用既有 ReleaseNotice：源码已核对同项目 SemVer、稍后去重、手动检查、用户点击才刷新和共享草稿保护；本轮摘要同步 v0.36.0，旧客户端真实弹窗尚待人工验证。
+- 统一 diff：[GitHub 应用与记录差异](https://github.com/goukiyang/seedance-api-debugger/compare/21e022166aa0588fc6c50ad19c44a0135c536551...codex/canvas-liblib-layout)。固定起点21e0221，最终记录提交见正式根目录/开发树 Git 与版本登记；应用运行仍精确指向0575619，不因文档提交重建。
+- 仍未解决/未验证：历史原图没有可访问旧源，未救回；真实源站 Range/ETag、慢源、重启交付和页面功能仅有源码实现，未做功能验收；上游查询/幂等未确证，不虚构协议；透明请求无受支持UI/端点证明，未开放默认；已退款终态不自动领图、补扣或改成功，只保留受限私有检查点供管理员协查。无身份/权限、价格、端点、账本政策、schema或依赖变更，无本轮分级/归类误判记录。
+
+| 实际文件 | 本轮改动 |
+|---|---|
+| src/lib/image-studio/limits.ts | 集中下载一次延长、恢复与检查点保留预算；480秒执行不变 |
+| src/lib/image-studio/delivery.ts | 原子私有POST/输出检查点、Base64校验、同对象续传/416/200边界、租约与进度、受限清理 |
+| src/lib/image-studio/provider.ts | 响应大小上限、有效Base64优先落盘、真实响应编号、安全usage；既有端点参数不变 |
+| src/lib/image-studio/media.ts | sharp完整解码、截断/尺寸/原格式核验；条件透明像素检查工具但不新增透明请求 |
+| src/lib/image-studio/output.ts | 新增生成结果原子文件发布与缩略图准备；不独立提交资产行 |
+| src/lib/image-studio/tasks.ts | 请求身份/完整输入快照、精确只读查询；资产、任务成功和既有结算在同一有效租约事务 |
+| src/lib/image-studio/worker.ts | 一次POST，下载/校验/保存重启只恢复同图；失租约禁止写入结算；终态与退款事实不改 |
+| src/app/api/image-studio/tasks/route.ts | 原所有权范围内精确requestId查询及未知提交文案 |
+| src/app/image-studio/studio.tsx | 安全持久请求编号、刷新只查询、真实阶段/字节、原图恢复查询与新付费确认分开 |
+| src/app/image-studio/studio.module.css | 必要恢复动作常驻可见，沿用暗色青绿色主次层级 |
+| package.json | 唯一应用版本0.36.0，无依赖变化 |
+| package-lock.json | 仅根版本元数据0.36.0，无依赖变化 |
+| src/lib/release.ts | 用户能感知的下载恢复更新摘要 |
+| tasks/todo/2026-10-01-image-download-timeout.md | 完整有效规格、原编号、逐文件记录、真实边界和发布回退证据；历史不重置 |
+| tasks/todo/2026-10-01-image-download-timeout.evidence.json | 持久逐项版本/构建/静态/源码/worker/回退发布证据，无私有输入 |
+| tasks/todo.md | 当前图片恢复实施/发布入口与人工验收缺口；正式目录只精确暂存本轮hunk |
+| docs/materials/index.md | 当前有效工单、原件用途及发布证据登记，私有原件不公开Git |
+
+`TemplateStudioShell.tsx` 复用当前 ImageStudio，不平行改造；`scripts/process-image-studio.ts` 及服务unit未改，仅纳入一致性与排空检查。canvas闭环文件未改。正式主目录与开发树完整工单、证据双份一致，原参考资料继续只在正式资料目录保存。
+
 ### A. 调整方向
 
-实施阶段记录：整批 ID1-ID4 代码已写；本地最终候选 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 返回0（BUILD `eRoLgrTBvmXSGxUeW2_w-`），内置类型/编译检查通过，保留既有 lint/CSS 提示，未运行功能测试。`git diff --check`、依赖元数据差异检查、部署脚本 `bash -n` 通过。整批源码复核后统一修正了执行时间耗尽后的同图恢复与新付费请求确认，再整批构建；未触及 canvas、鉴权、Provider 端点、价格、账本政策或 schema。发布尚未开始，不能冒充已上线。
+实施阶段记录：整批 ID1-ID4 代码已写；本地最终候选 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 返回0（BUILD `eRoLgrTBvmXSGxUeW2_w-`），内置类型/编译检查通过，保留既有 lint/CSS 提示，未运行功能测试。`git diff --check`、依赖元数据差异检查、部署脚本 `bash -n` 通过。整批源码复核后统一修正了执行时间耗尽后的同图恢复与新付费请求确认，再整批构建；未触及 canvas、鉴权、Provider 端点、价格、账本政策或 schema。v0.36.0 已部署，发布检查与正式归档已完成，功能待用户手动验收。
 
 本批实际文件：`src/lib/image-studio/{provider,delivery,media,worker,tasks,limits}.ts`、新增 `src/lib/image-studio/output.ts`；`src/app/api/image-studio/tasks/route.ts`、`src/app/image-studio/studio.tsx` 与 `studio.module.css`；`package.json`、`package-lock.json` 仅根版本元数据、`src/lib/release.ts` 用户更新摘要；既有工单及固定 todo/资料索引配套。`TemplateStudioShell.tsx` 已复用 `ImageStudio`，无需平行修改；worker 脚本/unit 保持现有480秒执行/660秒正常退出配套，本次部署使用原生 drain 标记先等旧进程正常退出，不发送强杀。回退时新worker同样先排空；若新协议恢复中任务尚存，保留检查点并暂停旧worker，不让旧代码误清新原图。
 
@@ -125,7 +158,7 @@ HTTP成功、文件大小匹配和图片头可读都不等于完整图片。复�
 
 只在受影响区域用轻量刷光，复用独立样例的运动语言可作为后续视觉参考，不把本工单扩为全站动效改造。关键恢复按钮常驻可见、主次分明，业务确认使用项目共享弹窗而非浏览器confirm；Esc和外部空白只取消最上层。刷新和离开可恢复任务，不自动执行生成。记录列表保留最左侧缩略图和人物头像；缺截图时稳定占位，时间按近时显示且可查看准确时间。
 
-未来实现授权后，先整批实现ID1-ID4及关联配套，再按项目规定执行发布必需构建、版本一致性、回退、服务和公网检查。网页服务与 `sd2-image-studio.service` 图片worker均需匹配新源码；排空或保护活跃任务、保存storage检查点和数据库，不借升级清空原恢复资料。正式入口只用sd2.youdooart.com，不用旧Mac链路；功能由用户手动验收，本工单本身不授权自动生成调试、浏览器验收或离线回归。
+用户现已授权执行，本轮整批实现ID1-ID4及关联配套后，统一执行了项目发布必需构建、版本一致性、回退、服务和公网检查；下列人工用例仍未自动运行。网页服务与 `sd2-image-studio.service` 图片worker均需匹配新源码；排空或保护活跃任务、保存storage检查点和数据库，不借升级清空原恢复资料。正式入口只用sd2.youdooart.com，不用旧Mac链路；功能由用户手动验收，本工单本身不授权自动生成调试、浏览器验收或离线回归。
 
 ### H. 人工验收及停止条件
 

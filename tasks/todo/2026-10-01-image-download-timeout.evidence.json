@@ -1,0 +1,344 @@
+{
+  "checkedAt": "2026-10-02T09:59:04.572Z",
+  "runId": "sd2-image-delivery-20261002T095300Z",
+  "version": "0.36.0",
+  "commit": "05756192245111821ae7560b3aaf5041d119c693",
+  "build": "FjIMzHMxNLluQOLfmBc61",
+  "routes": [
+    "/layout",
+    "/login/page",
+    "/image-studio/page",
+    "/templates/page",
+    "/tools/ultimate-canvas/page",
+    "/template-studio/page"
+  ],
+  "files": [
+    {
+      "path": "static/chunks/webpack-6a09b37cdf4583bc.js",
+      "sha256": "8f4e161b303197a01a5beedb10e592ae56e378b8819b9592a7835bf8124181aa",
+      "publicSha256": "8f4e161b303197a01a5beedb10e592ae56e378b8819b9592a7835bf8124181aa",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+      "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+      "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/1890-7faa2453eb06933f.js",
+      "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+      "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+      "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+      "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+      "status": 200
+    },
+    {
+      "path": "static/css/3c72abd670eb6b58.css",
+      "sha256": "21bbe67a03c30bcd5a0f84573126be08834b538c6ee68582015e45ef9baa8b64",
+      "publicSha256": "21bbe67a03c30bcd5a0f84573126be08834b538c6ee68582015e45ef9baa8b64",
+      "status": 200
+    },
+    {
+      "path": "static/css/ea095be58e8c4d2c.css",
+      "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+      "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+      "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/3267-f71a53029cf7bb42.js",
+      "sha256": "46865a1fc13df2d1d93151301dc6e62551e3abcaeec5b9db314101e07781144a",
+      "publicSha256": "46865a1fc13df2d1d93151301dc6e62551e3abcaeec5b9db314101e07781144a",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/3461-4160763e155494a1.js",
+      "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+      "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5634-44ee9d3700409a89.js",
+      "sha256": "5437ad171d3952d542f21eda87b0e36484800e886d24729ff64206eb8e7e346d",
+      "publicSha256": "5437ad171d3952d542f21eda87b0e36484800e886d24729ff64206eb8e7e346d",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/layout-d15a03298fe047f1.js",
+      "sha256": "a48e10ad58a91d9a82d541bd857eaa68bb8354b11702780f0cf686a61c630397",
+      "publicSha256": "a48e10ad58a91d9a82d541bd857eaa68bb8354b11702780f0cf686a61c630397",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/login/page-74a2f828d6aaf4f6.js",
+      "sha256": "d92d7cde9b0ca4078665833bdf8863810d3cab9b4aca847b971665570909e3a4",
+      "publicSha256": "d92d7cde9b0ca4078665833bdf8863810d3cab9b4aca847b971665570909e3a4",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/image-studio/page-3fa89fc62b82c2c0.js",
+      "sha256": "1fc1806c0ea673332417e93e07d07c0694288d05bfe3e70d4197f6099234b0f4",
+      "publicSha256": "1fc1806c0ea673332417e93e07d07c0694288d05bfe3e70d4197f6099234b0f4",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/9830-ae2d092ef156bc2f.js",
+      "sha256": "e7ef19a0aeb90e795b203d5a064c68ff35ba517882e84b57d71714eedbd9e113",
+      "publicSha256": "e7ef19a0aeb90e795b203d5a064c68ff35ba517882e84b57d71714eedbd9e113",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+      "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+      "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/7797-6cc256e1d9161e2e.js",
+      "sha256": "abb39b29e4981a55d06fefa4808dea393883516b8868e2297608d6a0c96eebe5",
+      "publicSha256": "abb39b29e4981a55d06fefa4808dea393883516b8868e2297608d6a0c96eebe5",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/9534-941febb297525b3b.js",
+      "sha256": "1b74b32b1075cbfc6445906215dbb9480ec4fa0bd6df453b449462e7278dcc74",
+      "publicSha256": "1b74b32b1075cbfc6445906215dbb9480ec4fa0bd6df453b449462e7278dcc74",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/templates/page-7b33132df17e82e7.js",
+      "sha256": "075b74cfd461261896a5df9120f451afb6b943ccd2ca7c83fcb59aeae0ca759b",
+      "publicSha256": "075b74cfd461261896a5df9120f451afb6b943ccd2ca7c83fcb59aeae0ca759b",
+      "status": 200
+    },
+    {
+      "path": "static/css/d5b8b4fb6aa4b571.css",
+      "sha256": "7c92d15bb83b5941819a5e54d7cb3d5f0fc9185e1fb228e0f5636f78dab928bf",
+      "publicSha256": "7c92d15bb83b5941819a5e54d7cb3d5f0fc9185e1fb228e0f5636f78dab928bf",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6670-7082efca1a6a1ace.js",
+      "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+      "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/tools/ultimate-canvas/page-57ff09f6b55f9700.js",
+      "sha256": "6d6d57aa296adf5a1bdb48cefb153d31b316812e028f99125534137814243a04",
+      "publicSha256": "6d6d57aa296adf5a1bdb48cefb153d31b316812e028f99125534137814243a04",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6370-4123e213528db92e.js",
+      "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+      "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/2438-f84894b6f48bcb45.js",
+      "sha256": "7aca650ff5dfeb4f08fe1a77569c2f70e61f48caf364fc6ba6f1b7f54642346b",
+      "publicSha256": "7aca650ff5dfeb4f08fe1a77569c2f70e61f48caf364fc6ba6f1b7f54642346b",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/7088-88412d5126790725.js",
+      "sha256": "803a000a6285036717a9a5a9836650a7bbbd5987a7634ef6fbe75c0094c5d61c",
+      "publicSha256": "803a000a6285036717a9a5a9836650a7bbbd5987a7634ef6fbe75c0094c5d61c",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/template-studio/page-f1912a68edb8d31c.js",
+      "sha256": "0d6f53e116fc50671286a64106693e3605909ab3350c3834ff46c409f671db39",
+      "publicSha256": "0d6f53e116fc50671286a64106693e3605909ab3350c3834ff46c409f671db39",
+      "status": 200
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "src/lib/image-studio/limits.ts",
+      "sha256": "136f07619ee123e018025f48d347e1a98fa5f603d4725896cfaae13c224321ab",
+      "localSha256": "136f07619ee123e018025f48d347e1a98fa5f603d4725896cfaae13c224321ab"
+    },
+    {
+      "path": "src/lib/image-studio/delivery.ts",
+      "sha256": "d1ee0c79b98b36409b5e6f9cd3db8d544b01dac227c491fef9decf8ff003be80",
+      "localSha256": "d1ee0c79b98b36409b5e6f9cd3db8d544b01dac227c491fef9decf8ff003be80"
+    },
+    {
+      "path": "src/lib/image-studio/provider.ts",
+      "sha256": "19e6eff0f43270450a0c6f45e00e53fabd0caee522034a3892a7ab4b58d82a29",
+      "localSha256": "19e6eff0f43270450a0c6f45e00e53fabd0caee522034a3892a7ab4b58d82a29"
+    },
+    {
+      "path": "src/lib/image-studio/media.ts",
+      "sha256": "7f5da5535e974d484072d7243478c27a94e6944d8c805c7da8acc2e88fd57d91",
+      "localSha256": "7f5da5535e974d484072d7243478c27a94e6944d8c805c7da8acc2e88fd57d91"
+    },
+    {
+      "path": "src/lib/image-studio/output.ts",
+      "sha256": "79296da5892de6a163d6c18040acac6dce2c51094bf85fce58b01a9ad93b4453",
+      "localSha256": "79296da5892de6a163d6c18040acac6dce2c51094bf85fce58b01a9ad93b4453"
+    },
+    {
+      "path": "src/lib/image-studio/tasks.ts",
+      "sha256": "c39e4e614a562a62e65aab615b82f93f87698345a4b80b83855f8bab37d72033",
+      "localSha256": "c39e4e614a562a62e65aab615b82f93f87698345a4b80b83855f8bab37d72033"
+    },
+    {
+      "path": "src/lib/image-studio/worker.ts",
+      "sha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813",
+      "localSha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813"
+    },
+    {
+      "path": "src/app/api/image-studio/tasks/route.ts",
+      "sha256": "45b98a8ff6ae9702e0adbad185667928800b6ebed5e903f3734326b205541aae",
+      "localSha256": "45b98a8ff6ae9702e0adbad185667928800b6ebed5e903f3734326b205541aae"
+    },
+    {
+      "path": "src/app/image-studio/studio.tsx",
+      "sha256": "aec8b2bbfb0224279ff77de091115bf826e433d7bca285e4e6395ffc6513894e",
+      "localSha256": "aec8b2bbfb0224279ff77de091115bf826e433d7bca285e4e6395ffc6513894e"
+    },
+    {
+      "path": "src/app/image-studio/studio.module.css",
+      "sha256": "13ef5c9b979d9d07fb26f08f287402e327acca23ec45c3e13ef90caddf973ec1",
+      "localSha256": "13ef5c9b979d9d07fb26f08f287402e327acca23ec45c3e13ef90caddf973ec1"
+    },
+    {
+      "path": "src/lib/release.ts",
+      "sha256": "401888ac33f65a39be588acacef0e0859d686694f446317236aa96a59e3d33ad",
+      "localSha256": "401888ac33f65a39be588acacef0e0859d686694f446317236aa96a59e3d33ad"
+    },
+    {
+      "path": "package.json",
+      "sha256": "08f8625fde44371716a9515230d1f2f525bec9fa71e5c89e539ed0a57e864463",
+      "localSha256": "08f8625fde44371716a9515230d1f2f525bec9fa71e5c89e539ed0a57e864463"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "2b17edd09cf4b3bfdfa3764f85b2e1be6e9b915786726d1fbe72c290f85ac901",
+      "localSha256": "2b17edd09cf4b3bfdfa3764f85b2e1be6e9b915786726d1fbe72c290f85ac901"
+    },
+    {
+      "path": "scripts/process-image-studio.ts",
+      "sha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387",
+      "localSha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387"
+    }
+  ],
+  "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+  "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+  "checks": [
+    {
+      "path": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/api/release",
+      "status": 200,
+      "origin": "server-42-193",
+      "version": "0.36.0"
+    },
+    {
+      "path": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/image-studio",
+      "status": 307,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/template-studio",
+      "status": 307,
+      "origin": "server-42-193"
+    }
+  ],
+  "local": {
+    "checks": [
+      {
+        "path": "/api/config",
+        "status": 200
+      },
+      {
+        "path": "/api/release",
+        "status": 200
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ],
+    "services": [
+      "active",
+      "active",
+      "active",
+      "active"
+    ],
+    "worker": "TimeoutStopUSec=11min\nMainPID=1168023\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 17:58:19 CST\n"
+  },
+  "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
+  "release": {
+    "sourceCommit": "05756192245111821ae7560b3aaf5041d119c693",
+    "startCommit": "21e022166aa0588fc6c50ad19c44a0135c536551",
+    "rollbackCommit": "80afb99c3f664949936961e86e6d91ba9d057725",
+    "rollbackTag": "rollback/2026-10-02-before-image-delivery-v036",
+    "archiveSha256": "e9b6e15bf496e3a08f3551fa0b4c96c4307cb953ee2d7ba0d25b1c52b8863410",
+    "releaseDirectory": "/srv/video-api-debugger/releases/05756192245111821ae7560b3aaf5041d119c693",
+    "previousBuild": "ILxByLZ7_8R-4aPl4WWhH",
+    "previousBuildDirectory": "/srv/video-api-debugger/app/.next-prod-before-sd2-image-delivery-20261002T095300Z",
+    "serverRecordDirectory": "/srv/video-api-debugger/backups/sd2-image-delivery-20261002T095300Z",
+    "localBuild": {
+      "log": "/tmp/sd2-image-delivery-v036-local-build-final.log",
+      "build": "eRoLgrTBvmXSGxUeW2_w-",
+      "exitCode": 0
+    },
+    "serverBuild": {
+      "log": "/tmp/sd2-image-delivery-20261002T095300Z-build.log",
+      "sha256": "a7497ab261f7cbaef09a1b748169a512ea72bb1aff19be981edead113df27fd0",
+      "exitCode": 0
+    },
+    "completedAt": "2026-10-02T09:59:26.292Z",
+    "sshDeployExitCode": 0,
+    "registryEveryGateConfirmed": true
+  },
+  "workerDrain": {
+    "oldPID": 180777,
+    "newPID": 1168023,
+    "normalExit": true,
+    "remainingQueuedAndRunning": 0,
+    "noForceKill": true,
+    "unitChanged": false,
+    "executionSeconds": 480,
+    "leaseSeconds": 600,
+    "stopSeconds": 660
+  },
+  "runtimePreserved": {
+    "storage": "/data/video-api-debugger/var-lib/storage",
+    "uploads": "/data/video-api-debugger/var-lib/uploads",
+    "videos": "/data/video-api-debugger/var-lib/videos",
+    "databaseExcluded": true
+  },
+  "boundaries": {
+    "oldImagesRecovered": false,
+    "rangeAndETagSourceVerified": false,
+    "upstreamQueryAndIdempotencyConfirmed": false,
+    "transparentRequestSupported": false,
+    "refundedTerminalAutoClaim": false,
+    "noDependencyChanges": true,
+    "noAuthOrSchemaOrBillingPolicyChanges": true
+  },
+  "recordToolCorrection": "First evidence aggregation failed only on embedded newline escaping; corrected and necessary release checks passed. No application rebuild or functional tests."
+}

@@ -1,5 +1,17 @@
 # 项目资料索引
 
+## 图片生成与原图恢复补充（2026-10-02）
+
+项目：video-api-debugger。主题：GPT图片、生成幂等、Base64、原图续传、完整校验、透明输出、任务交付。2026-10-02用户由仅工单改为明确执行；有效v1.1.0 ID1-ID4已实现并部署v0.36.0，待人工。源码0575619、BUILD FjIMzHMxNLluQOLfmBc61，4服务/25公网静态/14源码一致，worker正常排空；无付费生成、功能/离线/浏览器验收、生产库写入。原图仍未救回，透明请求无确证不开放、已退款终态不自动领图。
+
+| 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
+|---|---|---|---|
+| 原图恢复补充工单 | 2026-10-02用户明确执行，v1.1.0；历史记录保留 | ID1-ID4逐文件实现、发布、回退及人工验收缺口 | [有效正文](../../tasks/todo/2026-10-01-image-download-timeout.md)、[发布证据](../../tasks/todo/2026-10-01-image-download-timeout.evidence.json)；正文/证据与正式主目录一致 |
+| 用户参考脚本 | Untitled-1(1).md；/Volumes/Data/Downloads/Current/Untitled-1(1).md；2026-10-02接收，版本未知 | 一次生成、Base64优先、同图恢复；原件未执行、不公开Git | [正式本地原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-image-delivery/Untitled-1(1).md)；沿用归档cmp/可读证据 |
+| 历史官方协查回执 | 2026-10-01-image-download-api-receipt.md，v1.0.0；2026-10-02正式归档 | 真实历史请求与费用证据，仅本地参考，不重复外发 | [正式本地原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-image-delivery/2026-10-01-image-download-api-receipt.md)；沿用归档cmp/可读证据 |
+
+旧问题截图仍无可访问原件；不以新发布证明旧图已恢复，不复制私有原件到公开Git。
+
 ## 画布视频方案拆分（2026-10-02）
 
 当前唯一有效规格为 v1.1.0，v0.35.0 已部署；SP1–SP5 已实现并部署待人工，SP6 发布检查/正式归档完成，见[原工单](../../tasks/todo/2026-10-01-canvas-plan-split.md)及[逐文件发布证据](../../tasks/todo/2026-10-01-canvas-plan-split.evidence.json)。正式归档目录为 `/Volumes/Data/Projects/video-api-debugger`，本工作树不复制用户原图到公开 Git。
