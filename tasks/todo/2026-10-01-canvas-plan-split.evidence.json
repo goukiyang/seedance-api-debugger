@@ -1,18 +1,18 @@
 {
-  "checkedAt": "2026-10-02T08:42:16.707Z",
+  "checkedAt": "2026-10-02T09:02:09.227Z",
   "runId": "sd2-canvas-split-20261002-1790929333653",
   "version": "0.35.0",
-  "build": "Ov3Td-2Mm5PA8AAm0Ym2N",
-  "commit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+  "build": "ILxByLZ7_8R-4aPl4WWhH",
+  "commit": "80afb99c3f664949936961e86e6d91ba9d057725",
   "routes": [
     "/layout",
     "/account/page",
     "/login/page",
     "/projects/[id]/page",
     "/generate/page",
+    "/tools/ultimate-canvas/page",
     "/template-studio/page",
-    "/templates/page",
-    "/tools/ultimate-canvas/page"
+    "/templates/page"
   ],
   "files": [
     {
@@ -76,21 +76,21 @@
       "status": 200
     },
     {
-      "path": "static/chunks/app/layout-4813db389e2e403b.js",
-      "sha256": "1361095d664f03a2859bb3d4463a13e8634f2bb49e1d9d88f6826e6a1f6e97ec",
-      "publicSha256": "1361095d664f03a2859bb3d4463a13e8634f2bb49e1d9d88f6826e6a1f6e97ec",
+      "path": "static/chunks/app/layout-319cb3e466536a4e.js",
+      "sha256": "064ec2062851d1581e065b36119b48fd66fa02a7153c61fed239b480b0ed75c9",
+      "publicSha256": "064ec2062851d1581e065b36119b48fd66fa02a7153c61fed239b480b0ed75c9",
       "status": 200
     },
     {
-      "path": "static/chunks/app/account/page-f5dbebd569a7b9c1.js",
-      "sha256": "ae20fe83427f77afa66fb10ef271ce38ba792da9698b8a837ca83426edbc4550",
-      "publicSha256": "ae20fe83427f77afa66fb10ef271ce38ba792da9698b8a837ca83426edbc4550",
+      "path": "static/chunks/app/account/page-943680248008b39b.js",
+      "sha256": "fe833a86cd658163b2de942e6b9cfbf94a9fd1cff1fa56b2def3eb6a6c169557",
+      "publicSha256": "fe833a86cd658163b2de942e6b9cfbf94a9fd1cff1fa56b2def3eb6a6c169557",
       "status": 200
     },
     {
-      "path": "static/chunks/app/login/page-8c5af8381f662275.js",
-      "sha256": "882bc5d656eb73e0716edf2e2e5123cc343ef3c2f967a61b01b8a67358ccaffc",
-      "publicSha256": "882bc5d656eb73e0716edf2e2e5123cc343ef3c2f967a61b01b8a67358ccaffc",
+      "path": "static/chunks/app/login/page-e31d8f9411a2cad6.js",
+      "sha256": "25f9fe61d23bdecbd6897b32c4f1ea60f561487475bb6283ef242d7566e124ca",
+      "publicSha256": "25f9fe61d23bdecbd6897b32c4f1ea60f561487475bb6283ef242d7566e124ca",
       "status": 200
     },
     {
@@ -124,9 +124,9 @@
       "status": 200
     },
     {
-      "path": "static/chunks/app/projects/[id]/page-a192055892fd7879.js",
-      "sha256": "dc475e16c7f11e3b826f381f272e44ce1c2fe3754ad6ba01cda2cb1a52d77ea7",
-      "publicSha256": "dc475e16c7f11e3b826f381f272e44ce1c2fe3754ad6ba01cda2cb1a52d77ea7",
+      "path": "static/chunks/app/projects/[id]/page-cb94bf0c705a752b.js",
+      "sha256": "519cf206b240a25925364b70a55c1fbf9e5f2c0d1ef4ddb903c2c8bde09f9598",
+      "publicSha256": "519cf206b240a25925364b70a55c1fbf9e5f2c0d1ef4ddb903c2c8bde09f9598",
       "status": 200
     },
     {
@@ -160,15 +160,21 @@
       "status": 200
     },
     {
-      "path": "static/chunks/1657-6bcb0a9c9d32d98a.js",
-      "sha256": "8606382e6a9bb59b50550aaec4cd28e6e94ab5f6774b2c026e15cf3205051dc3",
-      "publicSha256": "8606382e6a9bb59b50550aaec4cd28e6e94ab5f6774b2c026e15cf3205051dc3",
+      "path": "static/chunks/9001-60710c44c31e79b4.js",
+      "sha256": "937fb00a11a5e01448ac1ab0896cd4dd424b6e275a31e74f485621a862685f6d",
+      "publicSha256": "937fb00a11a5e01448ac1ab0896cd4dd424b6e275a31e74f485621a862685f6d",
       "status": 200
     },
     {
-      "path": "static/chunks/app/generate/page-e336165472ff43f9.js",
-      "sha256": "e06987f1bc9235619a093baf7910b32b433f7f77dff09a6970e5a85bcd8dfd14",
-      "publicSha256": "e06987f1bc9235619a093baf7910b32b433f7f77dff09a6970e5a85bcd8dfd14",
+      "path": "static/chunks/app/generate/page-e46d754e652000d0.js",
+      "sha256": "95fb640e594625fa26a2bf6609cde37149f82200ec5a92333733e87ec81aca0b",
+      "publicSha256": "95fb640e594625fa26a2bf6609cde37149f82200ec5a92333733e87ec81aca0b",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/tools/ultimate-canvas/page-672e1a33345b8c55.js",
+      "sha256": "67ca63e11f14ce61587605bfbe58ea63efdd1e45aa4c4d3fe8e297776af6abcc",
+      "publicSha256": "67ca63e11f14ce61587605bfbe58ea63efdd1e45aa4c4d3fe8e297776af6abcc",
       "status": 200
     },
     {
@@ -184,9 +190,9 @@
       "status": 200
     },
     {
-      "path": "static/chunks/app/template-studio/page-92e1291e9b8e018e.js",
-      "sha256": "f218ab26e92bfccfb6c31633b47fc4919173e933b56dcb15b023ff1904fd5d67",
-      "publicSha256": "f218ab26e92bfccfb6c31633b47fc4919173e933b56dcb15b023ff1904fd5d67",
+      "path": "static/chunks/app/template-studio/page-5b5c826adb6bd3f1.js",
+      "sha256": "30acc1e21dc9ff9aec803a213bf749eff6c716b05b9b74f313bb0c5c16836e21",
+      "publicSha256": "30acc1e21dc9ff9aec803a213bf749eff6c716b05b9b74f313bb0c5c16836e21",
       "status": 200
     },
     {
@@ -196,23 +202,17 @@
       "status": 200
     },
     {
-      "path": "static/chunks/app/templates/page-5d2670a8c8e6bec5.js",
-      "sha256": "3aceaee26a984185496689b9fe7121a665e6c2a2ead6193a8409bdf0bbd09251",
-      "publicSha256": "3aceaee26a984185496689b9fe7121a665e6c2a2ead6193a8409bdf0bbd09251",
-      "status": 200
-    },
-    {
-      "path": "static/chunks/app/tools/ultimate-canvas/page-43a61a68a1159093.js",
-      "sha256": "3ba1a91f219e955460ac0fa8b0a333e021a52dad1deb6c492beb4eb3af6df729",
-      "publicSha256": "3ba1a91f219e955460ac0fa8b0a333e021a52dad1deb6c492beb4eb3af6df729",
+      "path": "static/chunks/app/templates/page-2bdede92b76184dc.js",
+      "sha256": "60f84c5e5e213fb95ba14f82df0d76461f672e6196c5064ca4921731f203fbe2",
+      "publicSha256": "60f84c5e5e213fb95ba14f82df0d76461f672e6196c5064ca4921731f203fbe2",
       "status": 200
     }
   ],
   "sourceFiles": [
     {
       "path": "public/tools/ultimate-canvas/app.js",
-      "sha256": "f8bc15e2456cafa2083c36c06937baf1fad5bcb751f857508657f43d7a4014d1",
-      "localSha256": "f8bc15e2456cafa2083c36c06937baf1fad5bcb751f857508657f43d7a4014d1"
+      "sha256": "92522ba1f837e4443cc1b5c388653bed70bea36a116048c178ba6cc200a2bdf0",
+      "localSha256": "92522ba1f837e4443cc1b5c388653bed70bea36a116048c178ba6cc200a2bdf0"
     },
     {
       "path": "public/tools/ultimate-canvas/backend-contract.js",
@@ -231,8 +231,8 @@
     },
     {
       "path": "public/tools/ultimate-canvas/generation-task-coordinator.js",
-      "sha256": "80839425e6e19199d8af5a169c6a6f8fae5da62b655736d156bbe19085e3f817",
-      "localSha256": "80839425e6e19199d8af5a169c6a6f8fae5da62b655736d156bbe19085e3f817"
+      "sha256": "dbfcec485cd871839f915ce7425f6cbbff072cc378e3f511cc51456f51d90aea",
+      "localSha256": "dbfcec485cd871839f915ce7425f6cbbff072cc378e3f511cc51456f51d90aea"
     },
     {
       "path": "public/tools/ultimate-canvas/icons.js",
@@ -241,8 +241,8 @@
     },
     {
       "path": "public/tools/ultimate-canvas/index.html",
-      "sha256": "df23c4460209e0529a7c0b8f5e565280f47564accc0f05b736fa705800d5d662",
-      "localSha256": "df23c4460209e0529a7c0b8f5e565280f47564accc0f05b736fa705800d5d662"
+      "sha256": "f9a0ec6f73c791e0943062b3bfc6b9db2b7f89aea19a56e569eab1e596b988db",
+      "localSha256": "f9a0ec6f73c791e0943062b3bfc6b9db2b7f89aea19a56e569eab1e596b988db"
     },
     {
       "path": "public/tools/ultimate-canvas/styles.css",
@@ -327,11 +327,11 @@
   ],
   "manualAcceptance": "pending; no browser, functional tests, paid generation or production DB writes",
   "archive": {
-    "commit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
-    "sha256": "f6ef71acac87249f16d129bab405c099896361fa590fe8e7b3dddb7d92a8e965",
-    "local": "/tmp/sd2-canvas-split-20261002-1790929333653.tar",
-    "remote": "/tmp/sd2-canvas-split-20261002-1790929333653.tar",
-    "release": "/srv/video-api-debugger/releases/3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "commit": "80afb99c3f664949936961e86e6d91ba9d057725",
+    "sha256": "0cd8a19b3005d23243ec8fbb784a750fa7417e790e90866e34cb4f3ddf8b3088",
+    "local": "/tmp/sd2-canvas-split-20261002-1790929333653-80afb99c3f664949936961e86e6d91ba9d057725.tar",
+    "remote": "/tmp/sd2-canvas-split-20261002-1790929333653-80afb99c3f664949936961e86e6d91ba9d057725.tar",
+    "release": "/srv/video-api-debugger/releases/80afb99c3f664949936961e86e6d91ba9d057725",
     "exclusionsConfirmed": true
   },
   "rollback": {
@@ -343,19 +343,45 @@
     "liveBackup": "/srv/video-api-debugger/app/.next-prod-before-sd2-canvas-split-20261002-1790929333653",
     "failureTrap": "restore source, build, marker and restart under flock"
   },
+  "intermediateRollback": {
+    "commit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "build": "Ov3Td-2Mm5PA8AAm0Ym2N",
+    "tag": "rollback/sd2-v0.35.0-before-history-closure-20261002",
+    "remoteTagVerified": true,
+    "sourceArchive": "/srv/video-api-debugger/releases/3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "liveBackup": "/srv/video-api-debugger/app/.next-prod-before-sd2-canvas-split-20261002-1790929333653-80afb99c3f664949936961e86e6d91ba9d057725"
+  },
+  "firstCandidate": {
+    "commit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "build": "Ov3Td-2Mm5PA8AAm0Ym2N",
+    "archiveSha256": "f6ef71acac87249f16d129bab405c099896361fa590fe8e7b3dddb7d92a8e965",
+    "version": "0.35.0",
+    "staticMatches": 32,
+    "sourceMatches": 10,
+    "releaseWindow": {
+      "registry": "/Volumes/Data/Projects/project-version-registry.md",
+      "runId": "sd2-canvas-split-20261002-1790929333653",
+      "uploadReservation": "2026-10-02T08:39:27.438Z",
+      "switchReservation": "2026-10-02T08:41:48.161Z",
+      "completed": "2026-10-02T08:43:01.195Z",
+      "eachAppendAndReservationConfirmed": true,
+      "serverFlock": "/srv/video-api-debugger/deploy.lock"
+    },
+    "fullEvidenceGitCommit": "a54f1fcdb97ea3cad7f56480b7735ccd6ba6da47"
+  },
   "buildChecks": {
     "local": {
       "command": "NEXT_DIST_DIR=.next-prod-candidate npm run build",
       "exitCode": 0,
-      "build": "Tg7yyD9-tNvke5gfLUVRP",
-      "log": "/tmp/sd2-canvas-split-local-build.log",
+      "build": "qwUJPbSa-WdjXckIAUQqW",
+      "log": "/tmp/sd2-canvas-split-local-closure-build.log",
       "environment": "Existing matching-lock dependencies reused; Prisma types regenerated in isolated local runtime; no install or database writes"
     },
     "server": {
       "command": "NEXT_DIST_DIR=.next-prod-candidate npm run build",
       "exitCode": 0,
-      "directory": "/srv/video-api-debugger/releases/3f15a7cae69e97241ec3cf66493ff7bf6230d138",
-      "log": "/tmp/sd2-canvas-split-20261002-1790929333653-build.log"
+      "directory": "/srv/video-api-debugger/releases/80afb99c3f664949936961e86e6d91ba9d057725",
+      "log": "/tmp/sd2-canvas-split-20261002-1790929333653-80afb99c3f664949936961e86e6d91ba9d057725-build.log"
     },
     "syntax": {
       "command": "node --check",
@@ -371,18 +397,19 @@
   "releaseWindow": {
     "registry": "/Volumes/Data/Projects/project-version-registry.md",
     "runId": "sd2-canvas-split-20261002-1790929333653",
-    "uploadReservation": "2026-10-02T08:39:27.438Z",
-    "switchReservation": "2026-10-02T08:41:48.161Z",
-    "completed": "2026-10-02T08:43:01.195Z",
+    "uploadReservation": "2026-10-02T08:59:51.669Z",
+    "switchReservation": "2026-10-02T09:01:45.784Z",
+    "completed": "2026-10-02T09:03:11.348Z",
     "eachAppendAndReservationConfirmed": true,
-    "serverFlock": "/srv/video-api-debugger/deploy.lock"
+    "serverFlock": "/srv/video-api-debugger/deploy.lock",
+    "sameRunContinuation": true
   },
   "git": {
     "branch": "codex/canvas-liblib-layout",
-    "applicationCommit": "3f15a7cae69e97241ec3cf66493ff7bf6230d138",
+    "applicationCommit": "80afb99c3f664949936961e86e6d91ba9d057725",
     "applicationRemoteVerified": true,
     "startCommit": "20931f7fb4b5af9dc8886120cd03d64ee5f87c09",
-    "compare": "https://github.com/goukiyang/seedance-api-debugger/compare/20931f7fb4b5af9dc8886120cd03d64ee5f87c09...3f15a7cae69e97241ec3cf66493ff7bf6230d138"
+    "compare": "https://github.com/goukiyang/seedance-api-debugger/compare/20931f7fb4b5af9dc8886120cd03d64ee5f87c09...80afb99c3f664949936961e86e6d91ba9d057725"
   },
   "scope": {
     "assetIdentity": "taskId + libraryItemId/contentKey video_task:<taskId>; DB assetId null",
@@ -390,6 +417,8 @@
     "noDatabaseMigration": true,
     "noProviderOrBillingChange": true,
     "noDependencyVersionChange": true,
-    "legacyMissingRequestId": "Protected from resubmission; administrator reconciliation required"
-  }
+    "legacyMissingRequestId": "Protected from resubmission; administrator reconciliation required",
+    "historyClosure": "Preparing historical tasks continue querying and restore separately; never overwrite current task or resubmit"
+  },
+  "sameDeliveryVersion": "v0.35.0 retained; final build replaces intermediate candidate; loaded intermediate clients should manually refresh"
 }
