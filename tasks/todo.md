@@ -2,10 +2,11 @@
 
 ## 当前入口
 
-- [10月2日后台反馈原文与截图](../docs/materials/index.md#当日后台反馈2026-10-02)：截至23:07北京时间2条new；主图缩略图增大约30%及锁定张数后隐藏添加入口、手机/平板导航。完整JSON与1张原截图已归项目资料目录；仅拉取整理，未实施、未归档生产反馈。
+- [ ] 2026-10-02：主图与导航反馈优化，正文见 `tasks/todo/2026-10-02-feedback-primary-navigation.md`。
+- [主图导航及视频参数 I1-I4](todo/2026-10-02-feedback-primary-navigation.md)：2026-10-03工单v1.0.0已写，用户明确写完开改；W1待Git/第三截图归档，I1-I3待实现，I4三灰色参数定位，D1待整批发布；功能待手动验收。
+- [10月2日后台反馈原文与截图](../docs/materials/index.md#当日后台反馈2026-10-02)：截至23:07北京时间2条new；主图缩略图增大约30%及锁定张数后隐藏添加入口、手机/平板导航。完整JSON与1张原截图已归项目资料目录；当前实施进度见本轮I1-I4工单，未归档生产反馈。
 - [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：v0.36.2已部署；WS1-WS7实现及发布检查完成，待用户手动验收。源码f647817，BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致；图片worker未重启。正式正文、既有附件与[发布证据](todo/2026-10-02-template-workbench-ux.evidence.json)归入主目录；无bulk视频契约按待确认，不新增后台。
 - [加载与体验优化 U1–U6](todo/2026-10-02-loading-ux.md)：v0.36.1已部署；源码实现、发布必需检查与安全部署完成，待用户手动验收。运行源码8acaf46，BUILD Ec6Hfe91C-vrdLDtYaCKN，4服务/40公网静态/24源码一致、图片worker正常排空；完整正文、既有附件入口与[发布证据](todo/2026-10-02-loading-ux.evidence.json)归入正式根目录。
-
 
 ## 2026-10-02 图片生成与原图恢复实施
 
@@ -6558,6 +6559,7 @@ flowchart LR
 - `tasks/todo/2026-10-01-canvas-plan-split.md`：工单：画布按视频提示词格式拆分
 - `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`：十月一日反馈：模板参考图、资产缩略图与弹窗行为
 - `tasks/todo/2026-10-01-image-download-timeout.md`：图片生成下载超时与结果找回
+- `tasks/todo/2026-10-02-feedback-primary-navigation.md`：主图与导航反馈优化
 - [SD2加载与体验优化工单](todo/2026-10-02-loading-ux.md)：2026-10-02，v1.0.0；U1-U6涵盖下载状态、列表刷新、恢复文案、局部刷光、产品弹窗与近时。工单已交付，实施未开始，不继续扩大审查；附件见正文及资料索引。
 - `tasks/todo/2026-10-02-media-copy-share.md`：图片复制、站内分享与模板离开提醒
 - `tasks/todo/2026-10-02-template-primary-actions.md`：模板主操作与产品弹窗
