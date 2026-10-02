@@ -49,7 +49,7 @@
         function register(taskId, nodeId) {
             if (!taskId || !nodeId) return;
             const ownedTaskId = ownedByNode.get(nodeId);
-            if (ownedTaskId && ownedTaskId !== taskId) {
+            if (!options.allowTaskHistory && ownedTaskId && ownedTaskId !== taskId) {
                 const ownedEntry = active.get(ownedTaskId);
                 active.delete(ownedTaskId);
                 if (ownedEntry && ownedByNode.get(ownedEntry.nodeId) === ownedTaskId) {

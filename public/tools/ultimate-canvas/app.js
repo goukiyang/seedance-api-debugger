@@ -928,7 +928,6 @@
                         input: structuredClone(descriptor.payload), generationPayload: structuredClone(payload) };
                     node.data.videoSubmission = submission;
                     canvasRuntime.unsentVideoRequests.set(payload.nodeId, submission);
-                    if (node.data.taskId) stopVideoPolling(node.data.taskId, node.id);
                     node.data.generationStatus = 'unconfirmed';
                     scheduleCanvasSave('video_before_submit');
                     cacheCanvasDraft(canvasSaveSnapshot('video_before_submit'));
@@ -3078,6 +3077,9 @@
                     pollVideoTask(node.data.taskId, node.id);
                 }
             }
+            if (node.type === 'video') (node.data.videoHistory || []).forEach(item => {
+                if (!['failed', 'cancelled'].includes(item.status) && !(item.status === 'succeeded' && item.stableDownloadReady)) pollVideoTask(item.taskId, node.id);
+            });
         });
         return recoveredTasklessVideoStatus;
     }
@@ -4581,9 +4583,11 @@
     }
 
     canvasRuntime.pollingCoordinator = window.UltimateCanvasGenerationTaskCoordinator.createGenerationTaskCoordinator({
+        allowTaskHistory: true,
         fetchStatus: async (taskId, entry) => {
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(entry.nodeId)}"]`);
-            setNodeGenerationStatus(nodeEl, 'loading', `视频生成中 · 第 ${entry.attempt} 次状态检查`);
+            const node = engine.nodes.get(entry.nodeId);
+            if (node?.data.taskId === taskId && node.data.videoSubmission?.state !== 'unconfirmed') setNodeGenerationStatus(nodeEl, 'loading', `视频生成中 · 第 ${entry.attempt} 次状态检查`);
             const data = await requestJson(videoStatusUrl(taskId), {
                 cache: 'no-store',
                 policy: 'video-status'
@@ -4598,10 +4602,17 @@
             } else if (entry.attempt >= 120) {
                 stopVideoPolling(entry.taskId);
                 const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
-                setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
+                if (engine.nodes.get(nodeId)?.data.taskId === entry.taskId) setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
             }
         },
         onError: (taskId, nodeId, errorCount, error, entry) => {
+            const node = engine.nodes.get(nodeId);
+            if (node?.data.taskId !== taskId || node.data.videoSubmission?.state === 'unconfirmed') {
+                const item = node?.data.videoHistory?.find(result => result.taskId === taskId);
+                if (item) { item.lookupError = true; renderVideoResultHistory(nodeId); scheduleCanvasSave('video_history_query_error'); }
+                if (entry.attempt >= 120) stopVideoPolling(taskId, nodeId);
+                return;
+            }
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
             setNodeGenerationStatus(nodeEl, 'warn', `状态读取失败，正在自动重试（${errorCount}）`);
             if (errorCount === 3) {
@@ -4629,13 +4640,19 @@
     function applyVideoTaskStatus(nodeId, task) {
         const node = engine.nodes.get(nodeId);
         const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(task);
-        if (!node || !normalized.taskId || node.data.taskId !== normalized.taskId || node.data.videoSubmission?.state === 'unconfirmed') return;
+        if (!node || !normalized.taskId) return;
+        const history = node.data.videoHistory || [];
+        const previousResult = history.find(item => item.taskId === normalized.taskId);
+        if (previousResult) {
+            const before = JSON.stringify(previousResult);
+            Object.assign(previousResult, normalized, { contentKey: `video_task:${normalized.taskId}`, lookupError: false });
+            if (JSON.stringify(previousResult) !== before) scheduleCanvasSave('video_history_status');
+            renderVideoResultHistory(nodeId);
+        }
+        if (node.data.taskId !== normalized.taskId || node.data.videoSubmission?.state === 'unconfirmed') return;
         const previousStatus = node.data?.generationStatus;
         const nextStatus = normalized.status || previousStatus;
         const preview = normalized.thumbnailUrl || videoPreviewForTask(task);
-        const history = node.data.videoHistory || [];
-        const previousResult = history.find(item => item.taskId === normalized.taskId);
-        if (previousResult) Object.assign(previousResult, normalized, { contentKey: `video_task:${normalized.taskId}` });
         node.data = {
             ...node.data,
             taskId: normalized.taskId,
@@ -4764,7 +4781,7 @@
                 + (canvasRuntime.unsentVideoRequests.get(nodeId) === node.data.videoSubmission ? '<button type="button" data-video-request-send>保存并发送原请求</button>' : '')
                 + '<details><summary>原请求输入</summary><p>' + escapeHtml([node.data.videoSubmission.input.model, node.data.videoSubmission.input.ratio, node.data.videoSubmission.input.duration + '秒'].join(' · ')) + '</p><pre>' + escapeHtml(node.data.videoSubmission.input.prompt) + '</pre></details>' : '')
             + (history.length ? '<details data-video-history-expanded ' + (node.data.videoHistoryOpen ? 'open' : '') + '><summary>生成记录 ' + history.length + ' · 预览：' + resultLabel(node.data.previewVideoTaskId || node.data.taskId) + ' · 选用：' + resultLabel(node.data.selectedVideoResult?.taskId) + '</summary>'
-                + visible.map((item, index) => '<div class="canvas-video-history-row"><img alt="' + (item.thumbnailUrl ? '视频截图' : '暂无截图') + '" ' + (item.thumbnailUrl ? 'src="' + escapeHtml(item.thumbnailUrl) + '"' : '') + '><span>结果 ' + (history.length - visible.length + index + 1) + ' · ' + escapeHtml(item.status === 'succeeded' ? item.stableDownloadReady ? '文件就绪' : '文件准备中' : item.status || '查询中') + '</span><button type="button" data-video-history-preview="' + escapeHtml(item.taskId) + '" ' + (!item.previewAvailable ? 'disabled' : '') + '>预览</button>'
+                + visible.map((item, index) => '<div class="canvas-video-history-row"><img alt="' + (item.thumbnailUrl ? '视频截图' : '暂无截图') + '" ' + (item.thumbnailUrl ? 'src="' + escapeHtml(item.thumbnailUrl) + '"' : '') + '><span>结果 ' + (history.length - visible.length + index + 1) + ' · ' + escapeHtml(item.status === 'succeeded' ? item.stableDownloadReady ? '文件就绪' : '文件准备中' : item.status || '查询中') + (item.lookupError ? ' · 查询暂时失败，刷新可继续' : '') + '</span><button type="button" data-video-history-preview="' + escapeHtml(item.taskId) + '" ' + (!item.previewAvailable ? 'disabled' : '') + '>预览</button>'
                     + (item.downloadUrl ? '<a download href="' + escapeHtml(item.downloadUrl) + '">下载</a>' : '')
                     + '<button type="button" data-video-history-select="' + escapeHtml(item.taskId) + '" ' + (!canvasRuntime.documentWritable || item.status !== 'succeeded' || !item.stableDownloadReady ? 'disabled' : '') + '>' + (node.data.selectedVideoResult?.taskId === item.taskId ? '已选用' : '选用此结果') + '</button></div>').join('')
                 + (history.length > limit ? '<button type="button" data-video-history-more>更多记录</button>' : '') + '</details>' : '');
