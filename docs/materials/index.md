@@ -2,11 +2,11 @@
 
 ## 模板工作台体验优化（2026-10-02）
 
-项目video-api-debugger；历史工单v1.0.0已被2026-10-02用户明确WS1-WS7实施授权更新。整批源码实现已完成，待统一发布检查与安全部署，人工未验收；只调整/template-studio图片与视频工作台，独立图片页由默认门控保留，不改后台/权限/费用或Provider。
+项目video-api-debugger；历史工单v1.0.0已被2026-10-02用户明确WS1-WS7实施授权更新。源码、统一发布检查及安全部署已完成，v0.36.2；源码f647817、BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致，worker未重启，功能待人工验收；只调整/template-studio图片与视频工作台，独立图片页由默认门控保留，不改后台/权限/费用或Provider。
 
 | 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
 |---|---|---|---|
-| 模板工作台体验优化工单；2026-10-02-template-workbench-ux.md | 用户先要求工单、后明确实施；v1.0.0 | WS1-WS7、逐文件实现、状态/目录缺口、当前进度与人工边界 | [完整正文](../../tasks/todo/2026-10-02-template-workbench-ux.md)；UTF-8可读，正式正文与开发树同步，待发布 |
+| 模板工作台体验优化工单；2026-10-02-template-workbench-ux.md | 用户先要求工单、后明确实施；v1.0.0 | WS1-WS7、逐文件实现、状态/目录缺口、当前进度与人工边界 | [完整正文](../../tasks/todo/2026-10-02-template-workbench-ux.md)、[发布证据](../../tasks/todo/2026-10-02-template-workbench-ux.evidence.json)；UTF-8/JSON可读，正式正文与开发树同步，已部署待人工 |
 | 加载样例与desktop/dark/mobile.png、interaction.webm | 既有认可样例，非新附件 | 刷光参考；0–7.8秒全部195帧父侧观察复用，不作生产验收 | [样例](2026-10-02-loading-study/index.html)、[已有媒体](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/)；关键入口可读，媒体沿用既有校验，不公开Git |
 | 加载、模板弹窗与图片恢复历史工单 | 已交付历史，不替代当前范围 | 保留既有状态、关闭/未保存保护及后台恢复边界 | 原文及已有附件路径完整列于本工单；已按需读用，不冒充旧附件全部补齐 |
 

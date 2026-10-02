@@ -2,7 +2,7 @@
 
 项目：video-api-debugger
 工单版本：v1.0.0
-状态：2026-10-02用户明确授权WS1-WS7实施、提交推送与安全部署；整批源码、统一本地候选构建及源码差异复核已完成，待服务器候选与部署，功能待用户手动验收
+状态：2026-10-02用户明确授权WS1-WS7实施、提交推送与安全部署；源码实现、统一发布必需检查和安全部署已完成，v0.36.2已上线；功能待用户手动验收
 更新时间：2026-10-02
 正式项目目录：/Volumes/Data/Projects/video-api-debugger
 观察源码目录：/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger
@@ -33,13 +33,13 @@
 
 | 编号 | 优先级 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|---|
-| WS1 | 高 | 视频结果使用真实视频状态 | 文案与视频状态分开；无视频、生成中、多任务混合、失败和未知均不冒充完成 | 源码实现已完成；待统一构建/部署，人工未验收 |
-| WS2 | 中 | 历史输入复用按钮名实一致 | 标明创建模块，点击只复用历史输入，不自动生成或扣费 | 源码实现已完成；待统一构建/部署，人工未验收 |
-| WS3 | 中 | 图片记录刷新及加载更多反馈 | 用户操作期间局部刷光，保留旧内容；成功/失败停止，错误可重试，避免重复请求 | 源码实现已完成；待统一构建/部署，人工未验收 |
-| WS4 | 中 | 原图恢复入口对应真实动作 | 仅查状态就称刷新恢复状态，不冒充打开详情或启动恢复 | 源码实现已完成；待统一构建/部署，人工未验收 |
-| WS5 | 中 | 模型与LoRA选择可识别 | 复用已有选项源，显示名称与适用通道；旧值保留、不可用原因可见 | 源码实现已完成；待统一构建/部署，人工未验收 |
-| WS6 | 常规 | 模块、模板和封面称呼统一 | 工作现场叫模块，可复用配置叫模板，banner叫模块封面；共享对象明确 | 源码实现已完成；待统一构建/部署，人工未验收 |
-| WS7 | 常规 | 视频记录时间复用近时组件 | 默认近时，点击/轻点看准确时间；保持列表点击、键盘和外部关闭语义 | 源码实现已完成；待统一构建/部署，人工未验收 |
+| WS1 | 高 | 视频结果使用真实视频状态 | 文案与视频状态分开；无视频、生成中、多任务混合、失败和未知均不冒充完成 | 实现与部署已完成；发布检查通过，待用户手动验收 |
+| WS2 | 中 | 历史输入复用按钮名实一致 | 标明创建模块，点击只复用历史输入，不自动生成或扣费 | 实现与部署已完成；发布检查通过，待用户手动验收 |
+| WS3 | 中 | 图片记录刷新及加载更多反馈 | 用户操作期间局部刷光，保留旧内容；成功/失败停止，错误可重试，避免重复请求 | 实现与部署已完成；发布检查通过，待用户手动验收 |
+| WS4 | 中 | 原图恢复入口对应真实动作 | 仅查状态就称刷新恢复状态，不冒充打开详情或启动恢复 | 实现与部署已完成；发布检查通过，待用户手动验收 |
+| WS5 | 中 | 模型与LoRA选择可识别 | 复用已有选项源，显示名称与适用通道；旧值保留、不可用原因可见 | 实现与部署已完成；发布检查通过，待用户手动验收 |
+| WS6 | 常规 | 模块、模板和封面称呼统一 | 工作现场叫模块，可复用配置叫模板，banner叫模块封面；共享对象明确 | 实现与部署已完成；发布检查通过，待用户手动验收 |
+| WS7 | 常规 | 视频记录时间复用近时组件 | 默认近时，点击/轻点看准确时间；保持列表点击、键盘和外部关闭语义 | 实现与部署已完成；发布检查通过，待用户手动验收 |
 
 ### WS1 文案与视频结果分开
 
@@ -142,7 +142,7 @@
 - 已修复或源码发生变化时，先重核对应WS，不重复修改，不把历史行号当永久定位；范围变化保留编号并解释。
 - 缺少有效源码、模型目录、关联状态或权限语义时明确缺口，不使用旧分支或假数据代替。
 - 需要后台恢复、计费/权限变更、生产写库、依赖安装或付费验证时停止该越界动作并请求相应授权；继续不依赖它的安全工作。
-- 正式根目录保留同一完整工单及索引。当前整批源码实现已完成，待统一发布检查与部署；未做功能/浏览器验收或独立审核。历史文档交付记录保留，不冒充当前授权状态。
+- 正式根目录保留同一完整工单及索引。当前整批源码实现、发布必需检查与安全部署已完成；未做功能/浏览器验收或独立审核。历史文档交付记录保留，不冒充当前授权状态。
 
 ## 当前实施记录
 
@@ -170,3 +170,24 @@
 第二轮统一本地候选构建返回0（含内置lint/type检查），BUILD yjy-j_yw5-4g5Ik8CkEhx；日志/tmp/sd2-template-workbench-v0362-local-build-final.log，SHA256 6ab423b9bc619dcfbebe53fd4068fc23462ce40f464593c3da5b5a6e2e4a7f6c。整批source/diff复核及git diff --check通过，后台API、image-studio worker、scripts与prisma无差异，依赖版本无变化，tsconfig未产生差异；没有运行功能/离线/浏览器/付费验收。
 
 服务器发布保护：本轮UI-only临时脚本/tmp/sd2-template-workbench-v0362-deploy.sh保留root flock、旧source/live回退与每次非0停止；候选release与旧release/现场完整后台依赖源码一致才允许切换，图片worker不重启，核对PID/启动时间和unit前后完全一致。全局归档/部署工具未修改，沿用/tmp/sd2-image-delivery-v036-gate.mjs已正确区分纯归档与live预约的已有调用方式。bash -n和发布证据脚本node --check返回0。
+
+服务器候选阶段记录（已闭环，保留真实过程）：源包SHA256 99402b8b56f410e42c9b0e14d8614f10f056e919a8edb51c8264b1d15f6f500c；源码提交f6478176fb34cefa432318f38ac521693bbdd2f6、原生产annotated回退标签rollback/2026-10-02-before-template-workbench-v0362已推送并ls-remote核对。runId sd2-template-workbench-20261002T143320Z，上传及同run续跑预约均confirmed、exit0；候选服务器构建进行中，尚未切换live。
+
+首次服务器预检查返回1：现场prisma/dev.db是运行文件，不属于归档源码，比较误报差异。synced=0、moved=0，原源码/BUILD及服务未改变；只修正临时部署adapter的源码比较排除db/sqlite/log，与源包排除保持一致，不改业务代码/DB。失败候选和检查记录保留在服务器同run的-precheck路径，未删除；再次预约确认0后续跑。此项不是功能回归或旧图恢复，未重复抬版本。
+
+### 最终发布与正式交接（2026-10-02）
+
+- 已部署，待用户手动验收：https://sd2.youdooart.com/template-studio 。应用v0.36.2（兼容体验修正PATCH），运行源码f6478176fb34cefa432318f38ac521693bbdd2f6，正式BUILD OlWyIuDDh1fBfDOaID4Tt；文档提交不重建、不再次抬号。全文与[发布证据](2026-10-02-template-workbench-ux.evidence.json)归入正式根目录。
+- 本地最终构建返回0（首轮Map诊断及修正保留上文）；服务器独立候选构建返回0，日志/tmp/sd2-template-workbench-20261002T143320Z-build.log，SHA256 4ead89763eb16b9ee2aaea530f561d0d74b28d03f69c735f4e589d058b39a2a4。候选中实际命中“用此输入新建模块”“刷新恢复状态”“全部文案状态”，不是界面验收。整批diff/source复核和差异检查通过，没有依赖或tsconfig变更。
+- 上传、同run预检查续跑、切换与完成4次gate均appendConfirmed/reservationConfirmed且exit0，root flock持续持有到公网证据通过；完成脚本最终返回0。临时adapter源SHA256 d9f86b389b68a207cbe26358901066b4242e82f41ff39f835b30510c44886e6e与服务器相等；归档SHA见上文，不存在未完成archive就hash/upload的竞态。
+- 公网和本机config/release/login均200，公网X-SD2-Origin为server-42-193、release版本0.36.2；目标template-studio及独立image-studio匿名307保留鉴权，不绕过。21项相关manifest静态SHA与live构建一致，15项源码/共享组件/worker源码与本地一致，4服务/计时器active；详见JSON逐项记录。
+- UI-only切换只重启sd2-gray.service。图片worker全后台依赖源码与旧release/现场一致（源码比较排除运行db/sqlite/log，不访问或改数据库）；PID1241475、启动2026-10-02 19:26:26 CST及ExecMainStatus0前后完全一致，worker unit SHA相同，未停止/重启/强杀，未动队列或费用。storage/uploads/videos软链仍指向/data/video-api-debugger/var-lib/{storage,uploads,videos}，持久文件不覆盖。
+- 回退标签rollback/2026-10-02-before-template-workbench-v0362已推送，annotated目标8acaf46e5fcd93004fc55b3016d74060b6020361经ls-remote核对。服务器旧release与旧BUILD Ec6Hfe91C-vrdLDtYaCKN保留；旧live构建/srv/video-api-debugger/app/.next-prod-before-sd2-template-workbench-20261002T143320Z，unit/worker记录/srv/video-api-debugger/backups/sd2-template-workbench-20261002T143320Z。首次预检查停止候选及记录另有-precheck备份，不删除。
+- 当前正式根目录旧应用分支仅保存4个记录入口，不当源码；原August29行脏todo与未跟踪旧计划/backups/hygiene/worktrees保留，todo只精确暂存本轮2个hunk。开发树与正式根目录工单/JSON一致，原样例/截图/0–7.8秒视频仅本地原件，不公开Git。
+- 守门员start/finish按实际UI均为L3-visible-runtime；工具默认“real-result”不覆盖项目用户手动验收边界。分级误判：有，首次read-only意图机械L0已在实施前纠正并写入/Users/gouki-youdoo/.codex/classification-misjudgment-log.md；没有借误判减检查。已记录实际产品/极简/impeccable/近时/发布技能用法，父侧landing/model usage不重复。
+- 更新提醒源码沿用既有数字SemVer、短标题、手动检查、稍后去重、明确点击刷新及草稿保护；版本唯一来源与当前摘要一致。旧客户端弹窗、键盘/触控、动画与视觉布局未自动验收，待人工；无功能/离线/浏览器/实际生成测试、生产写库、权限/Provider/账本/依赖变更。
+- 未实现/受限：未新增批量视频状态API。现有正向任务数量只用于存在性，未查询记录明确待确认，详情按真实任务状态/交付展示；无N+1或全量历史扫描。LoRA无可用目录时只保留已知编号高级入口，不制造候选；服务真实可用性待人工。WS2新建模块只复用输入，无自动文案/视频任务或扣费。独立/image-studio所有本轮变化默认false，/generate未修改。
+- 临时发布配套实际路径：/tmp/sd2-template-workbench-v0362-deploy.sh（UI-only后台一致/运行文件排除/worker保持/回退）、/tmp/sd2-template-workbench-v0362-verify.mjs（本批精确版本、21静态、15源码、服务证据）；bash -n/node --check通过，临时文件不属于Git，未提交。共用gate与全局部署工具无改动，本轮仅使用已有正确调用。
+- 统一diff固定起点702c3aa5de63b1a677a3967d9727060f9bf0e90c，终点为本轮最终记录提交；[应用与全部记录差异](https://github.com/goukiyang/seedance-api-debugger/compare/702c3aa5de63b1a677a3967d9727060f9bf0e90c...codex/canvas-liblib-layout)。最终记录提交/正式记录提交与远端核对追加版本登记，运行源码保持f647817。
+
+配套新增记录文件：tasks/todo/2026-10-02-template-workbench-ux.evidence.json，仅发布元数据、hash、状态和回退入口，不含私人输入；其余实际文件及逐文件变化见上表，固定todo/资料索引同步本次真实授权与结果。
