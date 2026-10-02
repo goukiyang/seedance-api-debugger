@@ -345,6 +345,7 @@ class CanvasEngine {
     }
 
     _onContextMenu(e) {
+        if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
         e.preventDefault();
         const nodeEl = e.target.closest('.canvas-node');
         this._showContextMenu(e.clientX, e.clientY, nodeEl ? nodeEl.dataset.nodeId : null);
@@ -443,6 +444,7 @@ class CanvasEngine {
     serialize() {
         return {
             version: 1,
+            planSplits: this.planSplits || window.UltimateCanvasPlanSplit?.empty(),
             viewport: {
                 scale: this.scale,
                 offsetX: this.offsetX,
@@ -465,6 +467,7 @@ class CanvasEngine {
     }
 
     restore(snapshot = {}) {
+        this.planSplits = snapshot.planSplits || window.UltimateCanvasPlanSplit?.empty();
         this.canvas.querySelectorAll('.canvas-node').forEach(node => {
             this.nodeResizeObserver?.unobserve(node);
             node.remove();
@@ -1380,6 +1383,7 @@ class CanvasEngine {
         m.style.left = x+'px'; m.style.top = y+'px';
         if (nodeId) {
             m.innerHTML = `
+                ${['text', 'script'].includes(this.nodes.get(nodeId)?.type) ? '<div class="context-menu-item" data-action="split-plans" data-nid="' + nodeId + '">拆分视频方案</div><div class="context-menu-divider"></div>' : ''}
                 <div class="context-menu-item" data-action="dup" data-nid="${nodeId}">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     复制节点</div>
@@ -1403,6 +1407,7 @@ class CanvasEngine {
             const cx = (x - rect.left - this.offsetX)/this.scale;
             const cy = (y - rect.top - this.offsetY)/this.scale;
             if (a==='del') this.deleteNode(nid);
+            else if (a==='split-plans') this.onPlanSplit?.(nid);
             else if (a==='dup') { const d = this.nodes.get(nid); if(d) this.addNode(d.type,d.x+30,d.y+30); }
             else if (a==='add-text') this.addNode('text',cx,cy);
             else if (a==='add-image') this.addNode('image',cx,cy);

@@ -17,9 +17,7 @@
         if (status !== 'succeeded') return false;
         const deliveryStageKey = result?.delivery_stage?.key || result?.deliveryStage?.key || '';
         if (deliveryStageKey === 'failed' || deliveryStageKey === 'ready') return false;
-        return deliveryStageKey === 'preparing'
-            || (numberOrNull(result?.retry_after_ms ?? result?.retryAfterMs) !== null
-                && (result?.stable_download_ready === false || result?.stableDownloadReady === false));
+        return !(result?.stable_download_ready === true || result?.stableDownloadReady === true || result?.public_video_url);
     }
 
     function createGenerationTaskCoordinator(options) {

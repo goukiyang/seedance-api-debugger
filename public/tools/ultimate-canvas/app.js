@@ -97,6 +97,7 @@
         generationPopover: null,
         referenceSelection: null,
         videoEstimates: new Map(),
+        unsentVideoRequests: new Map(),
         pendingGenerationSubmissions: window.UltimateCanvasGenerationInteractions.createGenerationSubmissionTracker()
     };
 
@@ -110,6 +111,34 @@
         get bootstrap() { return canvasRuntime.bootstrap; },
         markChanged(reason = 'toolflow_change') { scheduleCanvasSave(reason); },
     };
+
+    const planSplit = window.UltimateCanvasPlanSplitUI.create({
+        engine, dialog: openCanvasProductDialog, confirm: requestCanvasConfirmation,
+        sourceText: nodeId => {
+            const node = engine.nodes.get(nodeId);
+            const el = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+            return el?.querySelector('.node-text-content')?.textContent
+                ?? node?.data?.generatedText ?? node?.data?.prompt ?? node?.data?.description ?? '';
+        },
+        writable: () => canvasRuntime.documentWritable && !canvasRuntime.contextSwitching,
+        bindings: node => {
+            const explicit = node?.data?.videoSettings || {};
+            const settings = node?.type === 'video' ? generationSettingsForNode(node) : { ...explicit };
+            const card = selectedVideoCard();
+            if (!settings.model && canvasRuntime.bootstrap?.capabilities?.video?.model) settings.model = canvasRuntime.bootstrap.capabilities.video.model;
+            if (!settings.ratio && card?.ratio) settings.ratio = card.ratio;
+            if (!settings.duration && card?.duration) settings.duration = card.duration;
+            if (!settings.resolution) settings.resolution = canvasRuntime.bootstrap?.capabilities?.video?.interaction?.resolutions?.includes('720p') ? '720p' : undefined;
+            return { settings, references: node ? generationReferenceItems(node.id) : [],
+                contextRules: contextRulesForNode({ type: 'video', data: {} }),
+                cardId: canvasRuntime.selectedVideoCardId, branchId: canvasRuntime.selectedVideoBranchId,
+                label: `模型：${settings.model || '待选择'}（${explicit.model ? '来源节点' : '当前画布'}） · 时长：${settings.duration || '待选择'}秒（${explicit.duration ? '来源节点' : '视频卡'}） · 比例：${settings.ratio || '待选择'}（${explicit.ratio ? '来源节点' : '视频卡'}） · 分辨率：${settings.resolution || '待选择'}（${explicit.resolution ? '来源节点' : '当前画布'}）` };
+        },
+        notice: showCanvasNotice, save: scheduleCanvasSave, flush: flushCanvasSave,
+        cache: () => cacheCanvasDraft(canvasSaveSnapshot('plan_split_draft')),
+        snapshot: canvasDocumentPayload, render: renderAllGenerationNodeControls
+    });
+    engine.onPlanSplit = nodeId => { void planSplit.open(nodeId); };
 
     const canvasStyles = window.UltimateCanvasStyles.create({
         request: requestJson,
@@ -798,7 +827,7 @@
 
     function durationFromContext() {
         const duration = Number(selectedVideoCard()?.duration || 5);
-        return Number.isFinite(duration) ? Math.max(4, Math.min(15, duration)) : 5;
+        return Number.isFinite(duration) ? duration : 5;
     }
 
     function resolutionFromContext() {
@@ -872,6 +901,11 @@
                 }
 
                 if (payload.kind === 'video') {
+                    const context = currentGenerationContext(payload.nodeId);
+                    const node = engine.nodes.get(payload.nodeId);
+                    const prior = node?.data?.videoSubmission;
+                    const unsent = prior?.requestId === payload.requestId && canvasRuntime.unsentVideoRequests.get(payload.nodeId) === prior;
+                    if (!node || (prior?.state === 'unconfirmed' && !unsent)) throw Error('提交结果待确认，请查询已有请求；不会重复提交。');
                     const descriptor = window.UltimateCanvasGenerationNodes.videoRequest({
                         projectId: canvasRuntime.selectedProjectId,
                         cardId: canvasRuntime.selectedVideoCardId,
@@ -887,6 +921,24 @@
                         settings: payload.settings || {}
                     });
                     descriptor.url = backendEndpoint(capabilities.video?.endpoint, descriptor.url, 'video');
+                    if (unsent) descriptor.payload = structuredClone(prior.input);
+                    const submission = unsent ? prior : { requestId: payload.requestId, state: 'unconfirmed',
+                        userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
+                        projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
+                        input: structuredClone(descriptor.payload), generationPayload: structuredClone(payload) };
+                    node.data.videoSubmission = submission;
+                    canvasRuntime.unsentVideoRequests.set(payload.nodeId, submission);
+                    if (node.data.taskId) stopVideoPolling(node.data.taskId, node.id);
+                    node.data.generationStatus = 'unconfirmed';
+                    scheduleCanvasSave('video_before_submit');
+                    cacheCanvasDraft(canvasSaveSnapshot('video_before_submit'));
+                    // This persisted uncertainty barrier precedes the POST, including a crash between the two.
+                    if (!await flushCanvasSave('video_before_submit')) {
+                        throw Error('请求未发送：完整输入尚未安全保存，请保留草稿并重试保存。');
+                    }
+                    if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(context, currentGenerationContext(payload.nodeId))
+                        || node.data.videoSubmission !== submission) throw Error('画布已切换，请在原画布查询此请求；不会提交。');
+                    canvasRuntime.unsentVideoRequests.delete(payload.nodeId);
                     const data = await requestJson(descriptor.url, {
                         method: descriptor.method,
                         payload: descriptor.payload,
@@ -1599,7 +1651,8 @@
         if (node.type === 'image') {
             label.textContent = capabilities.image?.model || capabilities.image?.label || '图形生成';
         } else if (node.type === 'video') {
-            label.textContent = capabilities.video?.model || capabilities.video?.label || '默认视频 API';
+            const model = generationSettingsForNode(node).model;
+            label.textContent = capabilities.video?.model_options?.find(item => item.value === model)?.label || model || '待选择模型';
         }
     }
 
@@ -1664,41 +1717,60 @@
         canvasRuntime.contextEpoch += 1;
     }
 
+    function openCanvasProductDialog(options) {
+        const opener = document.activeElement;
+        const dialog = document.createElement('dialog');
+        dialog.className = `canvas-product-dialog ${options.className || ''}`;
+        dialog.setAttribute('aria-labelledby', options.labelledBy);
+        dialog.innerHTML = options.content;
+        let down = null, dismissing = false;
+        const outside = event => {
+            const box = dialog.getBoundingClientRect();
+            return event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom;
+        };
+        const dismiss = async () => {
+            if (dismissing || document.querySelectorAll('dialog[open]')[document.querySelectorAll('dialog[open]').length - 1] !== dialog) return;
+            dismissing = true;
+            try { await options.onDismiss?.(); } finally { dismissing = false; }
+        };
+        dialog.addEventListener('cancel', event => { event.preventDefault(); void dismiss(); });
+        dialog.addEventListener('keydown', event => { event.stopPropagation(); });
+        dialog.addEventListener('pointerdown', event => { down = outside(event) ? { x: event.clientX, y: event.clientY } : null; });
+        dialog.addEventListener('pointerup', event => {
+            if (down && outside(event) && Math.hypot(event.clientX - down.x, event.clientY - down.y) < 6) void dismiss();
+            down = null;
+        });
+        const close = () => {
+            dialog.close(); dialog.remove();
+            window.parent.postMessage({ type: 'sd2-canvas-modal', open: !!document.querySelector('dialog[open]') }, window.location.origin);
+            if (opener?.isConnected) opener.focus();
+        };
+        document.body.append(dialog); dialog.showModal();
+        window.parent.postMessage({ type: 'sd2-canvas-modal', open: true }, window.location.origin);
+        return { dialog, close };
+    }
+
     function requestCanvasConfirmation(options = {}) {
         return new Promise(resolve => {
-            document.querySelector('[data-canvas-confirm]')?.remove();
-            const overlay = document.createElement('div');
-            overlay.className = 'canvas-confirm-overlay';
-            overlay.dataset.canvasConfirm = 'true';
-            overlay.innerHTML = `
-                <div class="canvas-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="canvas-confirm-title">
+            const id = `canvas-confirm-${crypto.randomUUID()}`;
+            const finish = value => { layer.close(); resolve(value); };
+            const layer = openCanvasProductDialog({ className: 'canvas-confirm-dialog', labelledBy: id,
+                onDismiss: () => finish(false), content: `
                     <div class="canvas-confirm-head">
-                        <strong id="canvas-confirm-title">${escapeHtml(options.title || '确认操作')}</strong>
+                        <strong id="${id}">${escapeHtml(options.title || '确认操作')}</strong>
                         <button type="button" class="canvas-confirm-close" data-confirm-value="false" aria-label="关闭">×</button>
                     </div>
                     <p>${escapeHtml(options.message || '请确认是否继续。')}</p>
                     ${options.detail ? `<div class="canvas-confirm-detail">${escapeHtml(options.detail)}</div>` : ''}
                     <div class="canvas-confirm-actions">
-                        <button type="button" class="context-command" data-confirm-value="false">取消</button>
+                        <button type="button" class="context-command" data-confirm-value="false" autofocus>取消</button>
                         <button type="button" class="context-primary-command ${options.danger ? 'danger' : ''}" data-confirm-value="true">${escapeHtml(options.confirmLabel || '确认')}</button>
                     </div>
-                </div>`;
-            const finish = value => {
-                overlay.remove();
-                document.removeEventListener('keydown', onKeyDown);
-                resolve(value);
-            };
-            const onKeyDown = event => {
-                if (event.key === 'Escape') finish(false);
-            };
-            overlay.addEventListener('click', event => {
+                ` });
+            layer.dialog.addEventListener('click', event => {
                 const value = event.target.closest('[data-confirm-value]')?.dataset.confirmValue;
                 if (value) finish(value === 'true');
-                else if (event.target === overlay) finish(false);
             });
-            document.addEventListener('keydown', onKeyDown);
-            document.body.appendChild(overlay);
-            overlay.querySelector('[data-confirm-value="true"]')?.focus();
         });
     }
 
@@ -2094,6 +2166,14 @@
                 confirmLabel: videoCardUiText.retryTask
             }).then(confirmed => {
                 if (!confirmed) return null;
+                const nodeId = videoTaskRetry.dataset.nodeId;
+                const node = engine.nodes.get(nodeId);
+                if (node?.data?.planSource || node?.data?.videoSubmission) {
+                    const el = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+                    const submit = el?.querySelector('[data-generation-submit]');
+                    if (el && submit) return submitNodeGeneration(el, submit);
+                    return null;
+                }
                 return retryVideoTask(
                     taskId,
                     videoTaskRetry.dataset.nodeId || '',
@@ -2400,7 +2480,8 @@
         window.addEventListener(type, event => {
             const target = event.target instanceof Element ? event.target : null;
             const busy = canvasRuntime.documentOperation || canvasRuntime.contextSwitching || canvasRuntime.documentRestoring;
-            if (target?.closest('[data-canvas-confirm]')) return;
+            if (target?.closest('[data-canvas-confirm], .canvas-product-dialog[open]')) return;
+            if (!busy && target?.closest('[data-plan-open], [data-plan-view-source], [data-video-history-preview], [data-video-history-more]')) return;
             if (target?.closest('#ultimate-canvas-documents') && !busy) return;
             const editorEvent = target?.closest('#canvas-workspace, .generation-popover, [data-prompt-editor], [data-context-rules-editor]');
             const shortcut = ['keydown', 'paste', 'drop'].includes(type) && !target?.closest('#header-bar, #canvas-save-recovery');
@@ -2445,11 +2526,13 @@
 
     function cacheCanvasDraft(snapshot) {
         const key = draftStorageKey();
-        if (!key || !snapshot?.request) return;
+        if (!key || !snapshot?.request) return false;
         try {
             localStorage.setItem(key, JSON.stringify({ baseRevision: canvasRuntime.documentRevision, savedAt: Date.now(), request: snapshot.request }));
+            return true;
         } catch {
             showCanvasNotice('本地草稿空间不足，请保持页面打开并保存到服务器。', 'warn');
+            return false;
         }
     }
 
@@ -2478,7 +2561,7 @@
             if (Array.isArray(value)) return value.map(clean);
             if (!value || typeof value !== 'object') return value;
             return Object.fromEntries(Object.entries(value)
-                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob)$/i.test(key))
+                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob|videoSubmission|videoSubmissionLegacy|videoHistory|selectedVideoResult|previewVideoTaskId|generationPayload)$/i.test(key))
                 .map(([key, item]) => [key, key === 'generationStatus' ? 'idle' : clean(item)]));
         };
         return JSON.stringify(clean(JSON.parse(raw)));
@@ -2719,7 +2802,8 @@
         node.data = {
             ...node.data,
             title: node.data?.title || label,
-            prompt: prompt || node.data?.prompt || '',
+            prompt: ['text', 'script', 'video', 'image'].includes(node.type) ? prompt : prompt || node.data?.prompt || '',
+            ...(['text', 'script'].includes(node.type) && node.data?.generatedText !== undefined ? { generatedText: prompt } : {}),
             contextRules,
             mode: node.type === 'video'
                 ? (generationModeMap[tabText] || node.data?.mode || 'text-to-video')
@@ -2920,15 +3004,14 @@
     function hydrateNodeViews() {
         let recoveredTasklessVideoStatus = false;
         engine.nodes.forEach((node) => {
-            const recoveredNode = window.UltimateCanvasGenerationInteractions
-                .recoverTasklessNonterminalVideoNode(node);
-            if (recoveredNode) recoveredTasklessVideoStatus = true;
+            if (node.type === 'video' && !node.data?.taskId && !node.data?.videoSubmission
+                && ['submitted', 'running', 'queued', 'processing'].includes(node.data?.generationStatus)) {
+                node.data.generationStatus = 'unconfirmed';
+                node.data.videoSubmissionLegacy = true;
+                recoveredTasklessVideoStatus = true;
+            }
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
             if (!nodeEl) return;
-            if (recoveredNode) {
-                nodeEl.querySelector('.node-generation-status')?.remove();
-                nodeEl.querySelector('[data-generation-submit]')?.classList.remove('is-loading');
-            }
             renderGenerationNodeControls(node.id);
             if (node.data?.generationStatus === 'failed') {
                 setNodeGenerationStatus(nodeEl, 'error', node.data.generationError || '上次生成失败，输入和素材已保留');
@@ -3125,6 +3208,11 @@
                     scheduleCanvasSave('recover_taskless_video_status');
                 }
                 if (canvasRuntime.documentDirty) scheduleCanvasSave('draft_recovery');
+                if (canvasRuntime.documentLoaded && canvasRuntime.documentWritable) {
+                    engine.nodes.forEach(node => {
+                        if (node.data?.videoSubmission?.state === 'unconfirmed') void recoverVideoSubmission(node.id);
+                    });
+                }
             }
         }
     }
@@ -3184,7 +3272,18 @@
     }
 
     document.addEventListener('input', (event) => {
-        if (event.target.closest('.canvas-node')) scheduleCanvasSave('node_input');
+        const nodeEl = event.target.closest('.canvas-node');
+        if (nodeEl) {
+            scheduleCanvasSave('node_input');
+            const node = engine.nodes.get(nodeEl.dataset.nodeId);
+            if (node?.type === 'video' && event.target.matches('.video-props-textarea')) {
+                syncNodeDataFromDom(node.id, node);
+                renderGenerationNodeControls(node.id);
+            }
+            if (['text', 'script'].includes(node?.type)) engine.nodes.forEach(item => {
+                if (item.data?.planSource?.sourceNodeId === node.id) planSplit.renderNode(item.id);
+            });
+        }
     });
 
     function canvasCenter() {
@@ -3436,7 +3535,10 @@
         }
         if (node.type === 'video') {
             const current = node.data?.videoSettings || {};
+            if (node.data?.planSource) return { ...current };
             return {
+                ...current,
+                model: current.model || canvasRuntime.bootstrap?.capabilities?.video?.model,
                 ratio: current.ratio || ratioFromContext(),
                 duration: Number(current.duration || durationFromContext()),
                 resolution: current.resolution || resolutionFromContext(),
@@ -3449,7 +3551,7 @@
     }
 
     function videoEstimateSignature(settings) {
-        return `${canvasRuntime.bootstrap?.capabilities?.video?.model || ''}:${settings.resolution}:${settings.duration}`;
+        return `${settings.model || ''}:${settings.resolution}:${settings.duration}`;
     }
 
     function scheduleVideoEstimate(nodeId) {
@@ -3469,7 +3571,7 @@
             const url = new URL(endpoint, window.location.origin);
             url.searchParams.set('resolution', settings.resolution);
             url.searchParams.set('duration', String(settings.duration));
-            const model = canvasRuntime.bootstrap?.capabilities?.video?.model;
+            const model = settings.model;
             if (model) url.searchParams.set('model', model);
             try {
                 const data = await requestJson(url.toString(), {
@@ -3501,7 +3603,7 @@
 
     function generationReferenceItems(nodeId) {
         const seen = new Set();
-        return engine.connections
+        const connected = engine.connections
             .filter(connection => connection.to === nodeId)
             .map((connection, index) => ({ node: engine.nodes.get(connection.from), index }))
             .filter(item => item.node?.type === 'image')
@@ -3522,7 +3624,8 @@
                     available: Boolean(referenceImageId)
                 };
             })
-            .filter(item => {
+            ;
+        return [...(engine.nodes.get(nodeId)?.data?.planReferences || []), ...connected].filter(item => {
                 const key = item.referenceImageId || `node:${item.nodeId}`;
                 if (seen.has(key)) return false;
                 seen.add(key);
@@ -3676,7 +3779,10 @@
     }
 
     function removeGenerationReference(targetNodeId, sourceNodeId) {
-        if (!engine.disconnectNodes(sourceNodeId, targetNodeId)) return false;
+        const node = engine.nodes.get(targetNodeId);
+        if (node?.data?.planReferences?.some(item => item.nodeId === sourceNodeId)) {
+            node.data.planReferences = node.data.planReferences.filter(item => item.nodeId !== sourceNodeId);
+        } else if (!engine.disconnectNodes(sourceNodeId, targetNodeId)) return false;
         syncReferenceSelection();
         renderGenerationNodeControls(targetNodeId);
         renderReferenceSelectionStatus();
@@ -3712,6 +3818,8 @@
     }
 
     function renderGenerationNodeControls(nodeId) {
+        planSplit.renderNode(nodeId);
+        renderVideoResultHistory(nodeId);
         const node = engine.nodes.get(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         if (!node || !nodeEl || !['image', 'video'].includes(node.type)) return;
@@ -3732,6 +3840,12 @@
             nodeMode,
             { transientPending: hasCurrentGenerationSubmission(nodeId) }
         );
+        if (node.type === 'video' && (node.data?.planSource || node.data?.videoSubmission || node.data?.videoSubmissionLegacy)) {
+            const readiness = generationReadiness({ kind: 'video', nodeId, mode: nodeMode,
+                prompt: promptInput?.value ?? node.data?.prompt ?? '', settings,
+                referenceImageIds: generationReferenceImageIds(nodeId) });
+            if (!readiness.ready) Object.assign(interactionReadiness, readiness);
+        }
         updateGenerationNodeModelLabel(nodeEl, node);
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
         const modeLabel = nodeEl.querySelector('[data-generation-mode-label]');
@@ -3802,7 +3916,7 @@
         } else {
             const spec = nodeEl.querySelector('[data-generation-spec]');
             if (spec) {
-                spec.textContent = `${settings.ratio} · ${settings.resolution} · ${settings.duration}s${settings.generateAudio ? ' · 声音' : ''}`;
+                spec.textContent = `${settings.ratio || '画幅待选择'} · ${settings.resolution || '分辨率待选择'} · ${settings.duration ? settings.duration + '秒' : '时长待选择'}${settings.generateAudio ? ' · 声音' : ''}`;
             }
             const cost = nodeEl.querySelector('[data-generation-cost]');
             const estimate = canvasRuntime.videoEstimates.get(nodeId);
@@ -3816,7 +3930,7 @@
                         ? `预计 ${estimate.estimatedCost} 点`
                         : '提交后由后台计算';
             }
-            scheduleVideoEstimate(nodeId);
+            if (settings.model && settings.duration && settings.resolution) scheduleVideoEstimate(nodeId);
         }
 
         const references = generationReferenceItems(nodeId);
@@ -3905,7 +4019,7 @@
         return `<section class="generation-choice-section generation-duration-section" data-generation-choice-section="duration">
             <div class="generation-duration-heading">
                 <h3>时长</h3>
-                <output data-generation-duration-output>${escapeHtml(`${activeDuration}s`)}</output>
+                <output data-generation-duration-output>${escapeHtml(selectedIndex >= 0 ? `${activeDuration}s` : `${selected || '待选择'}秒（需重新选择）`)}</output>
             </div>
             <input type="range" class="generation-duration-slider" min="0" max="${durations.length - 1}" step="1" value="${activeIndex}"
                 data-generation-duration-slider data-generation-duration-values="${escapeHtml(durations.join(','))}"
@@ -3966,8 +4080,10 @@
             </div>`;
         }
         return `<div class="generation-popover-spec" data-generation-settings="video">
+            ${generationChoiceGroup('model', '模型', (canvasRuntime.bootstrap?.capabilities?.video?.model_options || []).map(item => item.value), settings.model,
+                value => canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === value)?.label || value)}
             ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
-            ${generationDurationSlider(capability.durations, settings.duration)}
+            ${generationDurationSlider(canvasRuntime.bootstrap?.capabilities?.video?.interaction?.duration_by_model?.[settings.model] || [], settings.duration)}
             ${generationChoiceGroup('resolution', '分辨率', capability.resolutions, settings.resolution)}
             ${capability.supportsAudio ? generationChoiceGroup('generateAudio', '生成声音', [true, false], settings.generateAudio, value => value ? '开启' : '关闭') : ''}
             ${capability.supportsLastFrame ? generationChoiceGroup('returnLastFrame', '返回尾帧', [true, false], settings.returnLastFrame, value => value ? '开启' : '关闭') : ''}
@@ -3991,12 +4107,14 @@
                 }
             };
         } else if (node.type === 'video') {
-            const allowed = new Set(['ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark']);
+            const allowed = new Set(['model', 'ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark']);
             if (!allowed.has(name)) return false;
             const booleanValue = rawValue === 'true';
             node.data = {
                 ...node.data,
                 videoSettings: {
+                    ...current,
+                    model: name === 'model' ? rawValue : current.model,
                     ratio: name === 'ratio' ? rawValue : current.ratio,
                     duration: name === 'duration' ? Number(rawValue) : current.duration,
                     resolution: name === 'resolution' ? rawValue : current.resolution,
@@ -4005,6 +4123,7 @@
                     watermark: name === 'watermark' ? booleanValue : current.watermark
                 }
             };
+            if (node.data.planSource) node.data.planParameterSource = `${node.data.planParameterSource || ''}；${name} 已由此节点手动选择：${rawValue}`;
         } else return false;
         renderGenerationNodeControls(node.id);
         scheduleCanvasSave(`${node.type}_settings_change`);
@@ -4202,14 +4321,26 @@
             .map(node => ({
                 id: node.id,
                 type: node.type,
-                data: node.data || {}
+                data: node.type === 'video' && node.data?.selectedVideoResult ? {
+                    ...node.data, taskId: node.data.selectedVideoResult.taskId,
+                    libraryItemId: node.data.selectedVideoResult.libraryItemId,
+                    assetId: node.data.selectedVideoResult.assetId,
+                    source: 'video_task',
+                    prompt: node.data.videoHistory?.find(item => item.taskId === node.data.selectedVideoResult.taskId)?.input?.prompt || node.data.prompt,
+                    contentKey: node.data.selectedVideoResult.contentKey,
+                    videoPreviewUrl: node.data.selectedVideoResult.playUrl,
+                    videoDownloadUrl: node.data.selectedVideoResult.downloadUrl,
+                    resultVideoUrl: node.data.selectedVideoResult.resultVideoUrl,
+                    thumbnailUrl: node.data.selectedVideoResult.thumbnailUrl,
+                    generationStatus: 'succeeded'
+                } : node.data || {}
             }));
     }
 
     function collectNodePrompt(nodeEl, type) {
-        if (type === 'video') return textFrom(nodeEl, '.video-props-textarea');
+        if (type === 'video') return nodeEl.querySelector('.video-props-textarea')?.value ?? '';
         if (type === 'image') return textFrom(nodeEl, '.image-props-textarea');
-        return nodeEl.querySelector('.node-text-content')?.textContent.trim()
+        return nodeEl.querySelector('.node-text-content')?.textContent
             || textFrom(nodeEl, '.node-input-textarea');
     }
 
@@ -4240,7 +4371,7 @@
             model: ['text', 'script'].includes(kind) ? (node.data?.textModel || canvasRuntime.bootstrap?.capabilities?.text?.model || 'gpt-5.5')
                 : nodeEl.querySelector('[data-generation-image-model] option:checked')?.textContent.trim() || nodeEl.querySelector('.video-model-info')?.textContent.trim() || '',
             spec: nodeEl.querySelector('[data-generation-spec]')?.textContent.trim() || '',
-            sourceNodes: nodeSourcePayloads(nodeId),
+            sourceNodes: node.data?.planSource ? [] : nodeSourcePayloads(nodeId),
             referenceImageIds: generationReferenceImageIds(nodeId),
             settings: generationSettingsForNode(node),
             cameraPresets: node.data?.cameraPresets || [],
@@ -4251,6 +4382,7 @@
     }
 
     function promptWithConnectedText(payload) {
+        if (engine.nodes.get(payload.nodeId)?.data?.planSource) return payload.prompt;
         const context = (payload.sourceNodes || []).filter(source => ['text', 'script'].includes(source.type))
             .map(source => source.data?.generatedText || source.data?.prompt || source.data?.description || '')
             .filter(value => typeof value === 'string' && value.trim());
@@ -4497,10 +4629,13 @@
     function applyVideoTaskStatus(nodeId, task) {
         const node = engine.nodes.get(nodeId);
         const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(task);
-        if (!node || !normalized.taskId) return;
+        if (!node || !normalized.taskId || node.data.taskId !== normalized.taskId || node.data.videoSubmission?.state === 'unconfirmed') return;
         const previousStatus = node.data?.generationStatus;
         const nextStatus = normalized.status || previousStatus;
         const preview = normalized.thumbnailUrl || videoPreviewForTask(task);
+        const history = node.data.videoHistory || [];
+        const previousResult = history.find(item => item.taskId === normalized.taskId);
+        if (previousResult) Object.assign(previousResult, normalized, { contentKey: `video_task:${normalized.taskId}` });
         node.data = {
             ...node.data,
             taskId: normalized.taskId,
@@ -4551,14 +4686,22 @@
         const node = engine.nodes.get(payload.nodeId);
         const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoCreate(result);
         if (!node || !normalized.taskId) throw new Error('视频任务创建响应缺少任务 ID。');
+        if (node.data.videoSubmission?.requestId !== payload.requestId) return;
+        syncNodeDataFromDom(node.id, node);
+        node.data.videoSubmission.state = 'accepted';
+        node.data.videoSubmission.taskId = normalized.taskId;
+        const history = node.data.videoHistory ||= [];
+        if (!history.some(item => item.taskId === normalized.taskId)) history.push({ taskId: normalized.taskId,
+            requestId: payload.requestId, input: node.data.videoSubmission.input, status: normalized.status,
+            contentKey: `video_task:${normalized.taskId}` });
         node.data = {
             ...node.data,
-            prompt: payload.prompt,
             videoCardId: canvasRuntime.selectedVideoCardId,
             videoBranchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
-            videoSettings: payload.settings || generationSettingsForNode(node),
             taskId: normalized.taskId,
             providerTaskId: normalized.providerTaskId || null,
+            videoPreviewUrl: '', videoDownloadUrl: '', thumbnailUrl: '', resultVideoUrl: '', resultLastFrameUrl: '',
+            stableDownloadReady: false, previewAvailable: false, previewVideoTaskId: null,
             frozenCost: normalized.frozenCost || null,
             generationPayload: payload,
             generationResult: result,
@@ -4579,6 +4722,106 @@
         pollVideoTask(normalized.taskId, payload.nodeId);
         scheduleCanvasSave('video_generation');
     }
+
+    async function recoverVideoSubmission(nodeId) {
+        const node = engine.nodes.get(nodeId), submission = node?.data?.videoSubmission;
+        if (!submission || submission.state !== 'unconfirmed') return;
+        const captured = currentGenerationContext(nodeId);
+        const el = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        try {
+            if (submission.userId !== canvasRuntime.bootstrap?.user?.id || submission.documentId !== canvasRuntime.documentId) throw Error('请在原账号、原画布中查询此请求。');
+            if (!await flushCanvasSave('before_video_lookup')) throw Error('请先保存原请求，再查询受理状态。');
+            const query = new URLSearchParams({ document_id: submission.documentId, node_id: nodeId, request_id: submission.requestId });
+            const result = await requestJson(`/api/tools/ultimate-canvas/video-submission?${query}`, { cache: 'no-store' });
+            if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(captured, currentGenerationContext(nodeId))
+                || node.data.videoSubmission !== submission) return;
+            if (!result.task?.id) {
+                setNodeGenerationStatus(el, 'warn', '提交结果待确认：暂未找到任务，不代表未受理。可稍后再次查询，不会重复生成。');
+                return;
+            }
+            applyVideoGenerationResult(el, submission.generationPayload, { task_id: result.task.id, local_status: result.task.local_status });
+            await flushCanvasSave('video_lookup_accepted');
+        } catch (error) {
+            if (engine.nodes.get(nodeId) === node) setNodeGenerationStatus(el, 'warn', error.message || '查询失败，请保留原请求后重试。');
+        }
+    }
+
+    function renderVideoResultHistory(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        const el = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (node?.type !== 'video' || !el) return;
+        const history = node.data.videoHistory || [];
+        const limit = node.data.videoHistoryVisible || 20;
+        const visible = history.slice(-limit);
+        const resultLabel = taskId => { const index = history.findIndex(item => item.taskId === taskId); return index < 0 ? '未选择' : '结果 ' + (index + 1); };
+        const pending = node.data.videoSubmission?.state === 'unconfirmed' || node.data.videoSubmissionLegacy;
+        let panel = el.querySelector('[data-video-result-history]');
+        if (!pending && !history.length) { panel?.remove(); return; }
+        if (!panel) { panel = document.createElement('section'); panel.dataset.videoResultHistory = ''; panel.className = 'canvas-video-history'; el.querySelector('[data-generation-editor]')?.append(panel); }
+        panel.innerHTML = (pending ? node.data.videoSubmissionLegacy
+            ? '<p>历史提交结果待确认，但旧记录缺少稳定请求编号。请先由管理员核对原任务；不会自动重发。</p>'
+            : '<p>提交结果待确认。原请求保留，不会自动重新发送。</p><button type="button" data-video-request-lookup>查询原请求</button>'
+                + (canvasRuntime.unsentVideoRequests.get(nodeId) === node.data.videoSubmission ? '<button type="button" data-video-request-send>保存并发送原请求</button>' : '')
+                + '<details><summary>原请求输入</summary><p>' + escapeHtml([node.data.videoSubmission.input.model, node.data.videoSubmission.input.ratio, node.data.videoSubmission.input.duration + '秒'].join(' · ')) + '</p><pre>' + escapeHtml(node.data.videoSubmission.input.prompt) + '</pre></details>' : '')
+            + (history.length ? '<details data-video-history-expanded ' + (node.data.videoHistoryOpen ? 'open' : '') + '><summary>生成记录 ' + history.length + ' · 预览：' + resultLabel(node.data.previewVideoTaskId || node.data.taskId) + ' · 选用：' + resultLabel(node.data.selectedVideoResult?.taskId) + '</summary>'
+                + visible.map((item, index) => '<div class="canvas-video-history-row"><img alt="' + (item.thumbnailUrl ? '视频截图' : '暂无截图') + '" ' + (item.thumbnailUrl ? 'src="' + escapeHtml(item.thumbnailUrl) + '"' : '') + '><span>结果 ' + (history.length - visible.length + index + 1) + ' · ' + escapeHtml(item.status === 'succeeded' ? item.stableDownloadReady ? '文件就绪' : '文件准备中' : item.status || '查询中') + '</span><button type="button" data-video-history-preview="' + escapeHtml(item.taskId) + '" ' + (!item.previewAvailable ? 'disabled' : '') + '>预览</button>'
+                    + (item.downloadUrl ? '<a download href="' + escapeHtml(item.downloadUrl) + '">下载</a>' : '')
+                    + '<button type="button" data-video-history-select="' + escapeHtml(item.taskId) + '" ' + (!canvasRuntime.documentWritable || item.status !== 'succeeded' || !item.stableDownloadReady ? 'disabled' : '') + '>' + (node.data.selectedVideoResult?.taskId === item.taskId ? '已选用' : '选用此结果') + '</button></div>').join('')
+                + (history.length > limit ? '<button type="button" data-video-history-more>更多记录</button>' : '') + '</details>' : '');
+        const expanded = panel.querySelector('[data-video-history-expanded]');
+        if (expanded) expanded.ontoggle = () => {
+            if (expanded.isConnected && node.data.videoHistoryOpen !== expanded.open) {
+                node.data.videoHistoryOpen = expanded.open;
+                if (canvasRuntime.documentWritable) scheduleCanvasSave('video_history_view');
+            }
+        };
+    }
+    document.addEventListener('click', async event => {
+        const target = event.target.closest('[data-video-request-lookup], [data-video-request-send], [data-video-history-preview], [data-video-history-select], [data-video-history-more]');
+        const nodeId = target?.closest('.canvas-node')?.dataset.nodeId;
+        if (!target || !nodeId) return;
+        event.preventDefault();
+        if (target.hasAttribute('data-video-request-lookup')) { void recoverVideoSubmission(nodeId); return; }
+        const node = engine.nodes.get(nodeId);
+        if (target.hasAttribute('data-video-history-more')) {
+            node.data.videoHistoryVisible = (node.data.videoHistoryVisible || 20) + 20;
+            if (canvasRuntime.documentWritable) scheduleCanvasSave('video_history_expand');
+            renderVideoResultHistory(nodeId); return;
+        }
+        if (target.hasAttribute('data-video-request-send')) {
+            if (canvasRuntime.unsentVideoRequests.get(nodeId) === node?.data?.videoSubmission) {
+                await submitNodeGeneration(target.closest('.canvas-node'), target, structuredClone(node.data.videoSubmission.generationPayload));
+            }
+            return;
+        }
+        const taskId = target.dataset.videoHistoryPreview || target.dataset.videoHistorySelect;
+        const result = node?.data?.videoHistory?.find(item => item.taskId === taskId);
+        if (!result) return;
+        if (target.dataset.videoHistoryPreview && result.previewAvailable) {
+            node.data.previewVideoTaskId = taskId;
+            window.parent.postMessage({ type: 'sd2-canvas-preview-request', contentKey: result.contentKey }, window.location.origin);
+            scheduleCanvasSave('video_history_preview');
+        } else if (target.dataset.videoHistorySelect && canvasRuntime.documentWritable && result.status === 'succeeded' && result.stableDownloadReady) {
+            const captured = currentGenerationContext(nodeId);
+            target.disabled = true;
+            try {
+                const key = `video_task:${taskId}`;
+                const data = await requestJson(`/api/content-reactions/content?key=${encodeURIComponent(key)}`, { cache: 'no-store' });
+                const content = data.content;
+                if (content?.key !== key || content.category !== 'video'
+                    || content.previewUrl !== `/api/video/play/${taskId}` || content.downloadUrl !== `/api/video/download/${taskId}`) throw Error('产出已不可用或无权选用。');
+                if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(captured, currentGenerationContext(nodeId))) return;
+                node.data.selectedVideoResult = { taskId, libraryItemId: key, contentKey: key, assetId: null,
+                    requestId: result.requestId, playUrl: content.previewUrl, downloadUrl: content.downloadUrl,
+                    thumbnailUrl: content.thumbnailUrl || '', resultVideoUrl: result.resultVideoUrl || '' };
+                scheduleCanvasSave('video_result_select');
+                cacheCanvasDraft(canvasSaveSnapshot('video_result_select'));
+                if (!await flushCanvasSave('video_result_select')) throw Error('选用已保存在本地，但服务器尚未同步，请重试保存。');
+                showCanvasNotice('已选用此结果供现有下游输入使用；没有重新生成。');
+            } catch (error) { showCanvasNotice(error.message || '选用失败，原结果保留。', 'warn'); }
+            finally { if (engine.nodes.get(nodeId) === node) renderGenerationNodeControls(nodeId); }
+        }
+    });
 
     function applyGenerationResult(nodeEl, payload, result) {
         const node = engine.nodes.get(payload.nodeId);
@@ -4615,6 +4858,17 @@
 
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         const generationNode = payload.nodeId ? engine.nodes.get(payload.nodeId) : null;
+        if (payload.kind === 'video' && (generationNode?.data?.videoSubmissionLegacy || (generationNode?.data?.videoSubmission?.state === 'unconfirmed'
+            && !(payload.requestId === generationNode.data.videoSubmission.requestId && canvasRuntime.unsentVideoRequests.get(payload.nodeId) === generationNode.data.videoSubmission)))) {
+            return { ready: false, message: '提交结果待确认，请查询已有请求；不会重复生成。' };
+        }
+        if (payload.kind === 'video' && generationNode?.data?.planSource) {
+            const meta = generationNode.data.planSource;
+            const report = window.UltimateCanvasPlanSplit.inspect(payload.prompt, payload.settings, {
+                boundary: meta.boundaryConfirmed, timeline: meta.timelineConfirmed });
+            if (!meta.boundaryConfirmed) return { ready: false, message: '请先确认此方案的边界。' };
+            if (report.errors.length) return { ready: false, message: report.errors[0] };
+        }
         const selectedStyle = generationNode?.data?.canvasStyle;
         if (generationNode && !selectedStyle && ['image', 'video'].includes(generationNode.type)) {
             const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
@@ -4651,6 +4905,9 @@
         }
         if (!card.can_generate) {
             return { ready: false, message: canvasRuntime.bootstrap?.context?.generation_blocked_reason || '当前视频卡不能继续生成，请切换或新建视频卡。' };
+        }
+        if (generationNode?.data?.planSource && generationNode.data.videoCardId && generationNode.data.videoCardId !== card.id) {
+            return { ready: false, message: '此方案保留原视频卡归属，请切换到该视频卡后生成，不会自动改归属。' };
         }
         if (payload.kind === 'text' || payload.kind === 'script') {
             if (!capabilities.text?.enabled) {
@@ -4701,6 +4958,7 @@
                 projectId: project.id,
                 cardId: card.id,
                 referenceImageIds: payload.referenceImageIds || [],
+                capabilities: capabilities.video,
                 settings: payload.settings || {}
             });
             if (!validation.valid) return { ready: false, message: validation.message };
@@ -4732,9 +4990,9 @@
         ));
     }
 
-    async function submitNodeGeneration(nodeEl, button) {
+    async function submitNodeGeneration(nodeEl, button, savedPayload) {
         const api = window.CanvasGenerationAPI;
-        const payload = collectGenerationPayload(nodeEl);
+        const payload = savedPayload || collectGenerationPayload(nodeEl);
         if (!api || !payload) return;
 
         const readiness = generationReadiness(payload);
@@ -4744,6 +5002,7 @@
         }
 
         const submittingNode = engine.nodes.get(payload.nodeId);
+        if (payload.kind === 'video') payload.requestId ||= crypto.randomUUID();
         const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(
             currentGenerationContext(payload.nodeId)
         );
@@ -4771,6 +5030,12 @@
             onSuccess: result => applyGenerationResult(nodeEl, result?.canvasStylePayload || payload, result),
             onError: error => {
                 const node = engine.nodes.get(payload.nodeId);
+                if (payload.kind === 'video' && node?.data?.videoSubmission?.requestId === payload.requestId) {
+                    setNodeGenerationStatus(nodeEl, 'warn', '提交结果待确认。请查询原请求；不会自动重复生成。');
+                    scheduleCanvasSave('video_submission_unknown');
+                    showCanvasNotice(error?.message || '提交结果待确认，请查询原请求。', 'warn');
+                    return;
+                }
                 if (node?.data?.styleJob) {
                     setNodeGenerationStatus(nodeEl, 'warn', error?.message || '任务状态未确认，请查看生成状态；不会重新生成。');
                     scheduleCanvasSave('style_generation_status_unknown');
@@ -4964,6 +5229,8 @@
     function disconnectGenerationReferences(nodeId) {
         const references = generationReferenceItems(nodeId);
         if (!references.length) return false;
+        const node = engine.nodes.get(nodeId);
+        if (node?.data?.planReferences) node.data.planReferences = [];
         references.forEach(item => engine.disconnectNodes(item.nodeId, nodeId));
         renderGenerationNodeControls(nodeId);
         scheduleCanvasSave('generation_references_clear');

@@ -384,15 +384,36 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
   const configKeys = new Set(['title', 'prompt', 'description', 'context', 'savedContext', 'contextRules',
     'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'textModel', 'quality', 'ratio', 'size', 'resolution',
     'count', 'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
-    'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle']);
+    'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle',
+    'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId']);
   const remap = new Map(snapshot.canvas.nodes.map(node => [node.id, `node-${randomUUID()}`]));
+  const plans = object(snapshot.canvas.planSplits)
+    ? JSON.parse(JSON.stringify(snapshot.canvas.planSplits)) as ObjectValue : null;
+  if (plans && object(plans.sources)) {
+    for (const value of Object.values(plans.sources)) {
+      if (object(value)) value.nodeId = remap.get(String(value.nodeId)) || null;
+    }
+  }
+  if (plans && object(plans.operations)) {
+    for (const value of Object.values(plans.operations)) {
+      if (!object(value)) continue;
+      value.nodeIds = Array.isArray(value.nodeIds) ? value.nodeIds.map(old => remap.get(String(old))).filter(Boolean) : [];
+      if (object(value.baselines)) value.baselines = Object.fromEntries(Object.entries(value.baselines)
+        .filter(([old]) => remap.has(old)).map(([old, content]) => [remap.get(old)!, content]));
+    }
+  }
   return {
     schema: 'ultimate_canvas.v1', schemaVersion: 2,
     context: { project_id: object(snapshot.context) ? snapshot.context.project_id : null },
     canvas: {
       version: 1, viewport: snapshot.canvas.viewport, selectedNodeId: null,
+      ...(plans ? { planSplits: plans } : {}),
       nodes: snapshot.canvas.nodes.map(node => {
         const data = Object.fromEntries(Object.entries(node.data).filter(([key]) => configKeys.has(key)));
+        if (object(data.planSource)) data.planSource = { ...data.planSource,
+          sourceNodeId: remap.get(String(data.planSource.sourceNodeId)) || null };
+        if (Array.isArray(data.planReferences)) data.planReferences = data.planReferences.map(item => object(item)
+          ? { ...item, nodeId: remap.get(String(item.nodeId)) || item.nodeId } : item);
         if (node.type === 'flow-input') {
           data.assetIds = node.data.assetIds || node.data.asset_ids || [];
           data.asset_ids = data.assetIds;
@@ -417,6 +438,7 @@ function withoutLiveTasks(snapshot: Snapshot): Snapshot {
     'requestid', 'mutationid', 'idempotencykey', 'submissionid',
     'documentid', 'canvasdocumentid', 'activegenerationnodeid',
     'generationresult', 'generationerror', 'generationprogress',
+    'videosubmission', 'videosubmissionlegacy', 'videohistory', 'selectedvideoresult', 'generationpayload', 'previewvideotaskid',
     'taskstatus', 'runstatus', 'batchstatus', 'statusendpoint', 'pollingurl', 'pollurl',
   ]);
   const mediaKeys = new Set([

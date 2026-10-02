@@ -80,11 +80,16 @@
                 ? '首尾帧模式至少需要一张已入库图片作为首帧。'
                 : '当前视频模式至少需要一张已入库参考图。');
         }
-        const ratio = clean(settings.ratio || '16:9');
-        const duration = Number(settings.duration || 5);
-        const resolution = clean(settings.resolution || '720p').toLowerCase();
+        const ratio = clean(settings.ratio);
+        const duration = Number(settings.duration);
+        const resolution = clean(settings.resolution).toLowerCase();
+        const model = clean(settings.model);
+        const durations = input.capabilities?.interaction?.duration_by_model?.[model];
+        if (!model || !Array.isArray(durations)) errors.push('请选择当前可用的视频模型。');
+        if (clean(input.prompt).length > 20000) errors.push('单个视频方案超过2万字，请调整分段。');
         if (!RATIOS.has(ratio)) errors.push('视频比例无效。');
-        if (!Number.isInteger(duration) || duration < 4 || duration > 15) errors.push('视频时长必须是 4 到 15 秒的整数。');
+        if (!Number.isInteger(duration) || !durations?.includes(duration)) errors.push('时长不在所选模型的能力范围内，请明确重新选择；不会自动截短。');
+        if ((input.referenceImageIds || []).length > mode.maximumReferences) errors.push('参考图数量超过当前模式上限，请明确移除多余图片。');
         if (!RESOLUTIONS.has(resolution)) errors.push('视频分辨率无效。');
         return { valid: errors.length === 0, errors, message: errors[0] || '' };
     }
@@ -126,11 +131,10 @@
         const modeName = VIDEO_MODES[input.mode] ? input.mode : 'text-to-video';
         const mode = videoMode(modeName);
         const settings = input.settings || {};
-        const ratio = RATIOS.has(clean(settings.ratio)) ? clean(settings.ratio) : '16:9';
-        const duration = Math.max(4, Math.min(15, Math.floor(Number(settings.duration) || 5)));
-        const requestedResolution = clean(settings.resolution || '720p').toLowerCase();
-        const resolution = RESOLUTIONS.has(requestedResolution) ? requestedResolution : '720p';
-        const prompt = clean(input.prompt);
+        const ratio = clean(settings.ratio);
+        const duration = Number(settings.duration);
+        const resolution = clean(settings.resolution).toLowerCase();
+        const prompt = typeof input.prompt === 'string' ? input.prompt : '';
         const requestId = clean(input.requestId);
         const nodeId = clean(input.nodeId);
         return {
@@ -138,6 +142,7 @@
             method: 'POST',
             payload: {
                 prompt,
+                model: clean(settings.model),
                 generation_mode: mode.generationMode,
                 ratio,
                 duration,
@@ -203,13 +208,11 @@
         const task = result.task && typeof result.task === 'object' ? result.task : result;
         const taskId = task.task_id || task.id || '';
         const status = task.local_status || task.status || 'submitted';
-        const succeeded = status === 'succeeded';
         const stableDownloadReady = task.stable_download_ready === true
             || task.stableDownloadReady === true
             || Boolean(task.public_video_url);
         const previewAvailable = task.preview_available === true
             || task.previewAvailable === true
-            || succeeded
             || Boolean(task.result_video_url || task.local_video_path || task.result_last_frame_url);
         const fallbackThumbnailUrl = previewAvailable && taskId
             ? `/api/video/thumbnail/${encodeURIComponent(taskId)}`

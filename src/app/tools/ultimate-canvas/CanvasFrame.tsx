@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import CanvasReactions from '@/components/content-reactions/CanvasReactions';
 import MediaPreview from '@/components/MediaPreview';
+import { useProductDialog } from '@/components/useProductDialog';
 import type { ContentKey } from '@/lib/content-reactions/types';
 
 type CanvasMediaPreview = {
@@ -19,6 +20,7 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
   const previewRequest = useRef(0);
   const [preview, setPreview] = useState<CanvasMediaPreview | null>(null);
   const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
+  const { confirm, productDialog } = useProductDialog();
   useEffect(() => {
     let internalUrlSync = false;
     let alive = true;
@@ -31,16 +33,21 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       } catch { return dirty.current; }
     };
     const clearApproval = () => { approvedUrl = null; };
-    const confirmLeave = (destination: string) => {
+    let deciding = false;
+    const requestLeave = async (destination: string) => {
       if (!hasChanges()) return true;
       if (approvedUrl === destination) return true;
-      if (!window.confirm('画布仍有未保存内容或正在处理的操作。确定离开吗？')) return false;
-      approvedUrl = destination;
-      return true;
+      if (deciding) return false;
+      deciding = true;
+      try {
+        if (!await confirm('画布仍有未保存内容或正在处理的操作。确定离开吗？', { title: '离开画布', confirmLabel: '仍然离开' }) || !alive) return false;
+        approvedUrl = destination;
+        return true;
+      } finally { deciding = false; }
     };
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
-      if (event.data?.type === 'sd2-canvas-style-gallery' && typeof event.data.open === 'boolean') {
+      if (['sd2-canvas-style-gallery', 'sd2-canvas-modal'].includes(event.data?.type) && typeof event.data.open === 'boolean') {
         setStyleGalleryOpen(event.data.open);
         return;
       }
@@ -127,7 +134,10 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       const destination = new URL(anchor.href, window.location.href);
       if (destination.pathname === location.pathname && destination.search === location.search) return;
       clearApproval();
-      if (!confirmLeave(destination.href)) { event.preventDefault(); event.stopImmediatePropagation(); }
+      if (hasChanges()) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        void requestLeave(destination.href).then(approved => { if (approved && alive) location.assign(destination.href); });
+      }
     };
     // Chromium's navigation event also covers back/forward and programmatic SPA navigation.
     type NavigationEvent = Event & { canIntercept: boolean; destination: { url: string }; hashChange: boolean };
@@ -135,16 +145,21 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     const onNavigate = (event: Event) => {
       const next = event as NavigationEvent;
       if (internalUrlSync || !event.cancelable || next.hashChange || next.destination.url === location.href) return;
-      if (!confirmLeave(next.destination.url)) { event.preventDefault(); event.stopImmediatePropagation(); }
+      if (hasChanges() && approvedUrl !== next.destination.url) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        void requestLeave(next.destination.url).then(approved => { if (approved && alive) location.assign(next.destination.url); });
+      }
     };
     const onPopState = (event: PopStateEvent) => {
       if (navigation) return;
       clearApproval();
-      if (!confirmLeave(location.href)) {
+      if (hasChanges()) {
+        const destination = location.href;
         event.stopImmediatePropagation();
         internalUrlSync = true;
         try { window.history.pushState(lastLocation.state, '', lastLocation.url); }
         finally { internalUrlSync = false; }
+        void requestLeave(destination).then(approved => { if (approved && alive) location.assign(destination); });
       } else lastLocation = { url: location.href, state: window.history.state };
     };
     window.addEventListener('message', onMessage);
@@ -169,12 +184,13 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       navigation?.removeEventListener('navigateerror', clearApproval);
       navigation?.removeEventListener('navigatesuccess', clearApproval);
     };
-  }, []);
+  }, [confirm]);
   return <>
     <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
       onLoad={() => setStyleGalleryOpen(false)}
       style={styleGalleryOpen ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', zIndex: 10000, borderRadius: 0 } : undefined} />
     <CanvasReactions frame={frame} />
+    {productDialog}
     {preview && (
       <MediaPreview
         src={preview.src}

@@ -1,5 +1,15 @@
 # 项目资料索引
 
+## 画布视频方案拆分（2026-10-02）
+
+当前唯一有效规格为 v1.1.0，用户已明确“落地”；SP4 复用真实产出库资源ID的口径已确认，整批实现进入统一检查，进度见[原工单](../../tasks/todo/2026-10-01-canvas-plan-split.md)。正式归档目录为 `/Volumes/Data/Projects/video-api-debugger`，本工作树不复制用户原图到公开 Git。
+
+| 接收日期 | 资料与来源 | 主题与用途 | 正式入口 | 版本与校验 |
+|---|---|---|---|---|
+| 2026-10-02 | 用户原工单与后续明确“落地” | 固定文本格式、一个创意一个现有视频节点、恢复与结果交接 | [正式工单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-canvas-plan-split.md) | v1.1.0；完整已读，取代 v1.0.0 |
+| 2026-10-01 | 历史原工单 2026-10-01-canvas-plan-split.md | 原作追溯，不作为实现规格 | [历史原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/2026-10-01-canvas-plan-split.md) | v1.0.0；复用既有归档 |
+| 2026-10-02 | 用户画布截图 codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png | 原节点与上下游场景；无本轮新附件 | [本地原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png) | PNG 已阅、可读；复用已核验原件；未公开 |
+
 2026-09-30模板体验四张原始反馈、2026-10-01画布快捷创作参考图及2026-10-02统一资源库参考图仅保存在本机对应目录，已加入Git忽略；下表这些链接为本地资料入口，公开仓库和服务器发布包不包含这些原图。
 
 | 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |

@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [画布视频方案拆分 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：SP1–SP5 整批源码已写，进入统一检查；SP4 已确认复用产出库资源ID，assetId 如实 null，不创建 Asset。候选 v0.35.0，SP6 发布与归档进行中，实际功能由用户手动验收。正式全文归档于 `/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-canvas-plan-split.md`。
+
 - [模板主操作与产品弹窗](todo/2026-10-02-template-primary-actions.md)：v0.34.2已部署；G1/G2完成，G3代码已实现并部署待用户手动验收，G4构建、正式公网32项静态检查、回退及归档完成。
 
 - [统一创作资源库功能盘点与整合建议](todo/2026-10-02-unified-resource-library.md)：I1–I3盘点、A1–A4审查完成；3个代码问题及6处体验问题已部署v0.34.1，R3发布检查完成，R1/R2待用户手动验收。统一资源目录仍待后续批次；正式正文和原图已归入项目主目录，发布预约流程缺口已如实登记。

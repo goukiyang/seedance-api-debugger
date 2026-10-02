@@ -725,6 +725,54 @@ html, body {
 .canvas-confirm-detail { margin-top: 10px; padding: 9px 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font-size: 11px; }
 .canvas-confirm-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
 
+.canvas-product-dialog { margin: auto; color: var(--text-primary); max-height: calc(100dvh - 32px); max-width: calc(100vw - 32px); overflow: auto; }
+.canvas-product-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+.canvas-plan-dialog { padding: 0; width: min(1080px, calc(100vw - 32px)); border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-panel); box-shadow: var(--shadow-lg); }
+.canvas-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-default); }
+.canvas-plan-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.canvas-plan-grid { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: min(580px, 65dvh); }
+.canvas-plan-grid aside { overflow: auto; border-right: 1px solid var(--border-default); padding: 12px; }
+.canvas-plan-grid main { min-width: 0; overflow: auto; padding: 16px 20px; }
+.canvas-plan-dialog button:not(.context-primary-command) { border: 1px solid var(--border-default); border-radius: 5px; padding: 7px 10px; background: var(--bg-input); color: var(--text-primary); cursor: pointer; }
+.canvas-plan-dialog button:hover:not(:disabled) { border-color: var(--text-secondary); }
+.canvas-plan-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.canvas-plan-dialog button:focus-visible, .canvas-plan-dialog input:focus-visible, .canvas-plan-dialog select:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 2px; }
+.canvas-plan-dialog .plan-icon { width: 32px; height: 32px; display: inline-grid; place-items: center; padding: 0; }
+.canvas-plan-dialog [data-plan-down] svg { transform: rotate(180deg); }
+.plan-list-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 6px; margin-bottom: 8px; }
+.plan-list-row button { text-align: left; overflow-wrap: anywhere; }
+.plan-list-row.active button { border-color: var(--accent-teal); }
+.plan-list-row small { display: block; color: #fcd34d; }
+.canvas-plan-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.7; color: var(--text-primary); margin: 8px 0 16px; user-select: text; }
+.canvas-plan-dialog h3 { font-size: 13px; color: var(--text-secondary); margin: 12px 0 0; }
+.plan-bound-values, .plan-version { font-size: 12px; color: var(--text-secondary); line-height: 1.6; overflow-wrap: anywhere; }
+.plan-version { padding: 8px 20px; }
+.plan-warning { color: #fcd34d; font-size: 12px; line-height: 1.6; margin: 8px 0; }
+.canvas-plan-dialog label { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; margin: 8px 12px 8px 0; }
+.canvas-plan-dialog input[type="checkbox"] { accent-color: var(--accent-teal); }
+.canvas-plan-dialog select, .canvas-plan-dialog input[type="number"] { background: var(--bg-input); border: 1px solid var(--border-default); color: var(--text-primary); border-radius: 4px; padding: 5px; min-width: 0; max-width: 100%; }
+.canvas-plan-dialog input[type="number"] { width: 72px; }
+.plan-adjust { padding: 8px 0; }
+.plan-adjust textarea { display: block; width: 100%; min-height: 160px; resize: vertical; border: 1px solid var(--border-default); background: var(--bg-input); color: var(--text-primary); padding: 8px; }
+.canvas-plan-dialog details { margin: 12px 0; }
+.canvas-plan-dialog summary { cursor: pointer; font-size: 12px; }
+.plan-status { min-height: 20px; padding: 0 20px; margin: 8px 0; font-size: 12px; color: #fcd34d; }
+.canvas-plan-actions { border-top: 1px solid var(--border-default); display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; }
+.canvas-plan-actions .context-primary-command { min-height: 36px; padding: 8px 18px; border-radius: 5px; font-weight: 600; }
+.plan-source-line, .canvas-video-history { font-size: 11px; line-height: 1.5; padding: 8px 0; overflow-wrap: anywhere; }
+.plan-source-line > span { margin-left: 8px; color: var(--text-secondary); }
+.canvas-video-history pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 240px; overflow: auto; }
+.canvas-video-history-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border-default); }
+.canvas-video-history-row img { width: 64px; height: 40px; object-fit: cover; background: var(--bg-input); font-size: 9px; }
+@media (max-width: 640px) {
+    .canvas-plan-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); }
+    .canvas-plan-grid { grid-template-columns: minmax(100px, 28%) minmax(0, 1fr); height: 65dvh; }
+    .canvas-plan-grid aside { padding: 6px; }
+    .canvas-plan-grid main { padding: 10px; }
+    .canvas-plan-head, .canvas-plan-actions { padding: 12px; }
+    .canvas-video-history-row { grid-template-columns: 64px minmax(0, 1fr) auto; }
+}
+
 .node-generation-status {
     position: absolute;
     right: 10px;
