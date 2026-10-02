@@ -2,26 +2,26 @@
 
 项目：video-api-debugger
 工单版本：v1.0.0
-状态：工单已交付，实施未开始；用户本轮仅要求写工单
+状态：2026-10-02用户已明确授权U1-U6实施、提交推送与安全部署；源码实现、发布必需检查与部署已完成，v0.36.1已上线；功能待用户手动验收
 更新时间：2026-10-02
 正式项目目录：/Volumes/Data/Projects/video-api-debugger
 应用源码观察位置：/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger
-源码观察提交：20931f7fb4b5af9dc8886120cd03d64ee5f87c09；同时读取了当时工作区，行号仅作定位
-正式版本来源：执行时核对应用既有版本来源与 https://sd2.youdooart.com/api/config；本轮未查线上
+源码观察提交：20931f7fb4b5af9dc8886120cd03d64ee5f87c09；历史定位不作为本次发布来源
+实施源码起点：ff2af12dbca63406383f7df3c58a5218c656d129；分支codex/canvas-liblib-layout。开工服务器源码afc4489cac533523832e317aa7e4d694d35434eb，BUILD vNT0S5yAGwiHTBok0KVLe，4服务active；发布前再次核对漂移。
 开工重新锁定版本：是；上述开发源码不能冒充当前生产源码
-风险/验证等级：本轮文档 L1；后续前端状态与交互实施预估 L2，触及业务副作用时重新判断
+风险/验证等级：前端状态交互L2/L3，守门员start已执行；仅发布必需静态/构建/运行证据。用户明确禁止自动功能验收、浏览器、真实生成和生产库写入。
 
 ## 目标
 
 先让等待、完成和失败说准确，再把已盘点位置统一成用户认可的局部刷光。保留已有内容和工作现场，让用户知道发生了什么、下一步能做什么。
 
-来源：2026-10-02 用户要求盘点 SD2 加载与体验，并确认“这些就够了。写工单”。本工单只收纳已发现的范围，不要求继续全项目无遗漏审查，不代表线上问题已复现。
+来源：2026-10-02 用户要求盘点 SD2 加载与体验，并确认“这些就够了。写工单”。该句为历史来源；随后用户明确执行U1-U6。本工单只收纳已发现的范围，不要求继续全项目无遗漏审查，不代表线上问题已复现。
 
 ## 范围与禁区
 
 - 范围：任务列表与详情、画布节点和恢复弹窗、图片工作台、资产库、模板读取，以及已盘点的项目和后台页面的等待、确认框与时间展示。
 - 不做：新增生成引擎、全局换库、数据库迁移、权限/登录/计费/Provider 改造、性能架构重构、付费生成或旧域名部署。上传下载只改前端反馈，不顺带改传输链路。
-- 本轮只交付工单；后续获得实施指令后按项目规则提交、推送、候选构建和部署，用户手动功能验收。不自动派审核线程、操作浏览器或执行功能回归。
+- 本轮已获实施授权，按项目规则提交、推送、候选构建和部署，用户手动功能验收。不自动派审核线程、操作浏览器或执行功能回归。
 - 既有图片原图恢复归属 [下载超时工单](2026-10-01-image-download-timeout.md) ID1-ID4；本单只使用其真实状态，不重复开发恢复链路。模板弹窗优先核对 [已交付工单](2026-10-02-template-primary-actions.md)，已完成项不重复修改。
 - 正式根目录保存工单与附件；本目录旧应用分支不能作为当前前端修改来源。执行前确认当前有效源码与并行改动，禁止覆盖主线程内容。
 
@@ -31,12 +31,12 @@
 
 | 编号 | 优先级 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|---|
-| U1 | 高 | 修正视频下载阶段 | 接口 202 只显示准备文件，不出现“完成”；可下载依据真实就绪结果；失败提供下一步 | 未开始 |
-| U2 | 中 | 任务列表保留内容与正确重试 | 首次读取、刷新、失败、空列表分开；刷新保留旧内容，成功清旧错误，同页保留有效选择 | 未开始 |
-| U3 | 中 | 修正恢复入口和画布状态文案 | 恢复设置不冒充重新生成；画布用真实中文阶段，未知受理不冒充失败 | 未开始 |
-| U4 | 中 | 统一局部刷光及触发条件 | 下表场景开始/停止一致，尺寸稳定、防连点、减少动画；已有恢复与进度不被替换 | 未开始 |
-| U5 | 中 | 已盘点业务弹窗采用产品样式 | 复用共享弹窗；取消无副作用，未保存保护、外部/Esc关闭及焦点正常 | 未开始 |
-| U6 | 常规 | 已盘点记录复用近时展示 | 创建/更新时间用共享近时组件，点击可看准确时间；不改变日志、导出和截止时间 | 未开始 |
+| U1 | 高 | 修正视频下载阶段 | 接口 202 只显示准备文件，不出现“完成”；可下载依据真实就绪结果；失败提供下一步 | 实现与部署已完成；待用户手动验收 |
+| U2 | 中 | 任务列表保留内容与正确重试 | 首次读取、刷新、失败、空列表分开；刷新保留旧内容，成功清旧错误，同页保留有效选择 | 实现与部署已完成；待用户手动验收 |
+| U3 | 中 | 修正恢复入口和画布状态文案 | 恢复设置不冒充重新生成；画布用真实中文阶段，未知受理不冒充失败 | 实现与部署已完成；待用户手动验收 |
+| U4 | 中 | 统一局部刷光及触发条件 | 下表场景开始/停止一致，尺寸稳定、防连点、减少动画；已有恢复与进度不被替换 | 实现与部署已完成；待用户手动验收 |
+| U5 | 中 | 已盘点业务弹窗采用产品样式 | 复用共享弹窗；取消无副作用，未保存保护、外部/Esc关闭及焦点正常 | 实现与部署已完成；待用户手动验收 |
+| U6 | 常规 | 已盘点记录复用近时展示 | 创建/更新时间用共享近时组件，点击可看准确时间；不改变日志、导出和截止时间 | 实现与部署已完成；待用户手动验收 |
 
 ### U1 下载状态准确
 
@@ -118,16 +118,16 @@
 | 独立刷光样例 index.html，v1.0.0 | 已认可视觉与状态交互参考；非生产任务 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/index.html |
 | 样例检查脚本 check.cjs | 历史样例检查方法，未经新授权不执行功能测试 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/check.cjs |
 | desktop.png / dark.png / mobile.png | 桌面、暗色、手机布局参考 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/ |
-| interaction.webm | 本地模拟交互参考；查看其完整短片，未登记精确时间段，不作生产证据 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/interaction.webm |
+| interaction.webm | 本地模拟交互参考；查看其完整短片0–7.8秒（195帧/25fps，无音轨），不作生产证据 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/interaction.webm |
 | report.json | 既有样例检查结果，不替代正式功能验收 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-loading-study/evidence/report.json |
 | 既有用户画布原图 | 样例原图来源与节点上下文，不代表真实生成结果 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png |
 | 图片原图恢复/模板弹窗工单 | 关联边界与避免重复开发 | /Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-image-download-timeout.md；/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-02-template-primary-actions.md |
 
 ## 验证与停止条件
 
-本轮只验证工单可读、链接/关键附件存在、索引登记和聚焦差异；不运行构建、浏览器、业务测试或生产接口。旧样例证据明确作为历史参考。
+历史仅文档阶段的检查已完成。本轮实施完成后统一做发布必需检查；不运行浏览器、业务测试或付费生成。旧样例证据仍仅作为参考。
 
-后续实施：整批完成后执行项目要求的候选构建及内置检查；同一版本汇总问题再整批修正。不默认运行test:api、真实生成、浏览器截图或自动功能验收。发布须保护持久数据与回退构建，核对运行版本、BUILD_ID、服务健康、正式公网config/login及必要静态文件；源码提交不能冒充线上生效。
+本轮实施：整批完成后执行项目要求的候选构建及内置检查；同一版本汇总问题再整批修正。不默认运行test:api、真实生成、浏览器截图或自动功能验收。发布须保护持久数据与回退构建，核对运行版本、BUILD_ID、服务健康、正式公网config/login及必要静态文件；源码提交不能冒充线上生效。
 
 用户手动验收目标入口：https://sd2.youdooart.com 的任务列表/详情、画布、图片工作台、资产、模板及本单实际改动后台页。实际路由开工按代码核对，不猜不存在的地址。
 
@@ -139,6 +139,61 @@
 
 ## Git与收尾
 
-- 本轮只提交工单及固定索引的新增内容，保留tasks/todo.md既有未提交段落，不提交旧计划、素材原图、证据录像或worktrees。
-- 后续实施的实际分支、正式版本与发布预约需开工重核；文档版本不升级应用，也不重启网站。
-- W1交付标准：工单正文、附件、范围和验收标准齐全，项目索引可找到。实施仍为未开始。
+- 本轮聚焦提交实际UI实现及工单、固定索引的新增内容，保留tasks/todo.md既有未提交段落，不提交旧计划、素材原图、证据录像或worktrees。
+- 本轮应用已交付v0.36.1兼容修正，仅一次升号；发布预约及线上漂移已在切换前重核。后续纯归档不重新构建或重启。
+- 历史W1文档交付已完成。当前交付沿用U1-U6，区分实现、发布检查、部署与人工待验收。
+
+## 本轮实施记录（2026-10-02）
+
+用户本轮明确U1-U6执行并安全提交推送部署，替代历史“仅文档”授权状态；不继续已closed图片恢复后台工单。实际源码仅来自上述canvas-liblib-layout工作树，正式根目录仅同步工单、todo和资料索引。版本按既有行为的兼容修正采用v0.36.1，不新增生成能力或依赖。
+
+逐文件修改（路径相对于实际源码工作树，正式根目录同名旧应用文件不是本轮源码）：
+
+| 文件 | 修改 |
+|---|---|
+| public/styles/loading.css | React与画布共享的局部低亮度刷光，2.4秒/65%扫过、固定裁剪、覆盖不拦点击、系统/宿主减少动画属性 |
+| src/components/LoadingState.tsx | 共享列表/卡片骨架和局部状态；无假百分比或延迟结果 |
+| src/app/layout.tsx | 打包同一共享CSS，画布直接引用同一源文件 |
+| src/app/tasks/page.tsx | 首载/刷新/错误/空态分开，保留旧列表与同页有效选择；读取序号防迟到覆盖，账号隔离；产品移除确认、共享近时 |
+| src/app/tasks/[id]/page.tsx | 下载准备/可下载/停止显式阶段，202不完成，依任务真实文件就绪更新；错误内联、准备区域动效、共享记录时间 |
+| src/app/image-studio/studio.tsx | 恢复设置名称；首载/刷新和实际生成占位、复制/上传/保存局部动效；既有请求查询隔离与恢复状态未改 |
+| src/app/assets/page.tsx | 原缓存与请求保护保留，仅调整首载/刷新/失败反馈及上传/下载局部动效 |
+| src/components/UploadProgressIndicator.tsx | 可选busy属性，仅指定的图片/资产入口启用；保留真实字节百分比及原默认行为 |
+| src/components/templates/TemplateLibraryClient.tsx | 模板读取骨架、刷新保留内容；更新记录使用共享近时 |
+| src/components/templates/AdminTemplatesClient.tsx | 模板列表/详情读取局部反馈、既有操作按钮刷光 |
+| src/components/templates/TemplateEditorDrawer.tsx | 既有保存按钮局部刷光，保留共享关闭/未保存保护 |
+| src/app/projects/page.tsx | 项目更新时间共享近时，保留期限与其他行为 |
+| src/app/admin/feedback/AdminFeedbackClient.tsx | 归档产品确认、局部读取/保存反馈、操作防连点；提交时间共享近时 |
+| src/app/admin/users/AdminUsersClient.tsx | 既有用户操作产品确认、前端操作锁与局部反馈；创建/最近登录近时；流水保持准确时间 |
+| src/app/admin/users/quotas/QuotaManager.tsx | 草稿退出和已有额度操作产品确认，局部读取/操作反馈；请求身份、策略、期限与日志不变 |
+| src/app/admin/integrations/AdminIntegrationsClient.tsx | 已盘点停止确认、配置读取/保存动效、测试记录近时；未执行测试连接或变更协议 |
+| public/tools/ultimate-canvas/app.js | 中文真实阶段、查询未知受理仅主动查询busy，恢复不假忙；备份可识别列表另存恢复、命名锚定/小屏居中、规则关闭/保存共享native dialog底座 |
+| public/tools/ultimate-canvas/styles.css | 备份/命名沿原品牌补充样式，生成按钮旧旋转不再和刷光叠加 |
+| public/tools/ultimate-canvas/index.html | 引用共享CSS并刷新改动脚本/样式的缓存版本 |
+| package.json / package-lock.json | 仅根版本0.36.1，依赖未变 |
+| src/lib/release.ts | 与包版本同源的用户可感知摘要，既有SemVer及ReleaseNotice能力保留 |
+| tasks/todo/2026-10-02-loading-ux.md | 当前授权、同一U表、逐文件记录与发布/人工边界 |
+| tasks/todo/2026-10-02-loading-ux.evidence.json | 本轮构建、源码/公网静态SHA、服务、HTTP、预约与正常排空的安全发布证据 |
+| tasks/todo.md | 固定当前入口登记本轮实现/部署及人工待验收，正式根目录仅精确提交本轮hunk |
+| docs/materials/index.md | 按主题登记原工单、既有原件与发布证据，保留历史来源；不公开图/视频 |
+
+开源参考：已读MUI官网和Skeleton.js实际实现，并核对仓库MIT许可；仅借鉴稳定占位与transform wave技术，不接入/安装/复制MUI组件。已有用户样例完整短片0–7.8秒、195帧/25fps、无音轨及桌面/暗色/手机参考证据复用，不冒充生产验收，不执行check.cjs。项目未发现独立减少动画设置；共享CSS遵循系统设置并支持宿主data-reduced-motion/data-motion属性，不新增设置项。
+
+发布检查及安全部署已完成，证据如下。无浏览器、DOM、截图、功能/离线回归、实际生成、生产DB写入；现有beforeunload、文件选择和浏览器保存属于平台语义保留。已盘点业务native框均替换，不声称全站无遗漏。
+
+### 发布与归档结果
+
+- 应用v0.36.1；精确源码提交 `8acaf46e5fcd93004fc55b3016d74060b6020361`（已推送并核对远端分支），生产BUILD `Ec6Hfe91C-vrdLDtYaCKN`；正式入口 https://sd2.youdooart.com 。最终纯记录提交另见固定版本登记，不改变运行源码或再次升号。
+- 统一检查：首轮本地候选构建收齐诊断后因7处RelativeTime默认导入不符既有命名导出失败；整批改正后 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 退出0，BUILD `LKqHa9qM1jXJDdKzrPLP1`。服务器同精确commit独立候选构建退出0，未原地构建live；既有img/hooks/autoprefixer警告未扩范围处理。差异检查及画布 `node --check` 均通过；未执行功能或离线回归。
+- 精确git archive排除env、依赖、构建、storage、uploads/videos、数据库/log、部署marker及私有materials原件；完成归档才计算SHA并上传。归档SHA256：`90c59f2d82102083361e260ad7a4ae1b3fbe0d74e41445ca102fc3d8e7c0fb66`。
+- 唯一runId `sd2-loading-ux-20261002T111707Z`；上传前11:20:03 UTC、切换/重启前11:26:20 UTC、全部公网检查后部署完成11:28:05 UTC的登记均确认退出0，同run续接。root flock锁与父进程PTTY确认严格按SWITCH/COMPLETE推进，非0不继续live动作。
+- 旧worker PID1188032，原启动18:21:57 CST；使用既有drain标记正常退出且ExecMainStatus=0，然后只读核对queued/running为0，才停止旧unit并同步切换。新worker PID1241475，2026-10-02 19:26:26 CST启动，ExecMainStatus=0；11分钟停止预算和unit SHA未变。无强杀、账本/生产数据库写入；本批worker源码无修改，与精确发布源SHA一致。
+- `sd2-gray.service`、`sd2-image-studio.service`、`sd2-video-delivery.timer`、`sd2-finalize-pending.timer` 均active。server源码24项SHA与本地一致（22项应用变动及2项未改worker入口）；15个入口manifest共40项公网静态均HTTP200、SHA与生产构建一致。
+- local/public config、release、login均HTTP200；公网来源标记 `X-SD2-Origin: server-42-193`，release返回0.36.1。共享loading.css公网200且SHA一致；image-studio、template-studio和canvas app.js匿名307按鉴权保留，不绕过，不把静态检查说成功能验收。
+- 检查脚本第一次公网核对因curl将动态路由文件名的方括号当范围语法退出3；仅在临时检查脚本中编码URL后统一发布核对通过，应用未再修改或构建。完整安全证据：[JSON](2026-10-02-loading-ux.evidence.json)。
+- 已推送并核对annotated回退标签 `rollback/2026-10-02-before-loading-ux-v0361`，指向旧正式源码 `afc4489cac533523832e317aa7e4d694d35434eb`；旧release保留，旧live BUILD `vNT0S5yAGwiHTBok0KVLe`保留在 `/srv/video-api-debugger/app/.next-prod-before-sd2-loading-ux-20261002T111707Z`。服务器单元与排空记录：`/srv/video-api-debugger/backups/sd2-loading-ux-20261002T111707Z/`。
+- 临时发布适配器：`/tmp/sd2-loading-ux-v0361-deploy.sh`、`/tmp/sd2-loading-ux-v0361-verify.mjs`；共享归档/预约脚本未修改，复用既有 `/tmp/sd2-image-delivery-v036-gate.mjs` 正确调用。仅纯“工单归档”不要求live预约，仍确认append；upload/switch/restart/complete均保留预约和非0停止。临时脚本不提交Git，不宣称修正过全局工具。
+- 既有ReleaseNotice、SemVer检测、稍后与手动检查入口经源码核对保留，用户点击才刷新；旧客户端提醒真实行为未做自动验收。守门员start/finish按前端L2/L3发布范围执行，无分级误判或高风险越界；本轮只记录实际读用的近时/发布技能，父侧已记录loading/landing，不重复。
+- 实现完成与发布检查/部署完成分开；U1-U6实际效果仍待人工。未解决的证据缺口：真实202→就绪/失败、列表切换/重试、刷新恢复与未知受理查询、弹窗取消/Esc/草稿焦点、小屏/减少动画、准确时间气泡及旧客户端升级，均未功能/浏览器测试。没有已知未实现的本单批准项，不宣称全站native弹窗或全站加载改造完成；关联旧图片事故未继续恢复。
+
+统一diff：应用及完整记录从 `ff2af12dbca63406383f7df3c58a5218c656d129` 起，精确运行源码终点 `8acaf46e5fcd93004fc55b3016d74060b6020361`；最终归档提交在版本登记与交回回执提供。正式原工单、固定todo、索引及JSON归入 `/Volumes/Data/Projects/video-api-debugger/`，既有August脏改与旧untracked记录保留。
