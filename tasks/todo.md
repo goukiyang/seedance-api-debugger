@@ -3,7 +3,7 @@
 ## 当前入口
 
 - [ ] 2026-10-02：主图与导航反馈优化，正文见 `tasks/todo/2026-10-02-feedback-primary-navigation.md`。
-- [主图导航及视频参数 I1-I6](todo/2026-10-02-feedback-primary-navigation.md)：v0.36.3已部署，源码fbb8243371398ad753b66d8ff02ff8a0a6b9d84a、BUILD ytlmOyOpdCSahZQKCm07Y；I1-I5代码/部署完成待用户手动，D1候选内置检查/4服务/27公网静态/20源码一致通过，[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)。I6故障阶段已明确，底层原因无法追溯待查，不改等待/重试或账务；I6原图已归档，视频标注原图仍待归档，W1不称附件齐全。
+- [主图导航及视频参数 I1-I6](todo/2026-10-02-feedback-primary-navigation.md)：v0.36.3已部署，最新运行源码8315f02776290cda1c0f1e7286856d193f95dfca、BUILD TIe6lesNJcjyQirM3FMpx；I1-I5代码/部署完成待用户手动，I3模板工作现场按surface/user本地持久化并迁移旧session记录。D1最新候选内置检查/4服务/20相关公网静态/2变更源码一致通过，首次整批27静态/20源码证据作为历史保留；[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)。正式资料根目录/Volumes/Data/Projects/video-api-debugger；W1视频标注原图仍待归档，不称附件齐全；I6故障阶段明确，底层网络/代理/上游原因无法追溯待查，不改Provider/等待/重试/积分或DB。
 - [10月2日后台反馈原文与截图](../docs/materials/index.md#当日后台反馈2026-10-02)：截至23:07北京时间2条new；主图缩略图增大约30%及锁定张数后隐藏添加入口、手机/平板导航。完整JSON与1张原截图已归项目资料目录；当前实施进度见本轮I1-I4工单，未归档生产反馈。
 - [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：v0.36.2已部署；WS1-WS7实现及发布检查完成，待用户手动验收。源码f647817，BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致；图片worker未重启。正式正文、既有附件与[发布证据](todo/2026-10-02-template-workbench-ux.evidence.json)归入主目录；无bulk视频契约按待确认，不新增后台。
 - [加载与体验优化 U1–U6](todo/2026-10-02-loading-ux.md)：v0.36.1已部署；源码实现、发布必需检查与安全部署完成，待用户手动验收。运行源码8acaf46，BUILD Ec6Hfe91C-vrdLDtYaCKN，4服务/40公网静态/24源码一致、图片worker正常排空；完整正文、既有附件入口与[发布证据](todo/2026-10-02-loading-ux.evidence.json)归入正式根目录。
