@@ -312,7 +312,7 @@
     },
     "completedAt": "2026-10-02T09:59:26.292Z",
     "sshDeployExitCode": 0,
-    "registryEveryGateConfirmed": true
+    "registryEveryLiveGateConfirmed": true
   },
   "workerDrain": {
     "oldPID": 180777,
@@ -340,5 +340,5 @@
     "noDependencyChanges": true,
     "noAuthOrSchemaOrBillingPolicyChanges": true
   },
-  "recordToolCorrection": "First evidence aggregation failed only on embedded newline escaping; corrected and necessary release checks passed. No application rebuild or functional tests."
+  "recordToolCorrection": "First evidence aggregation failed only on embedded newline escaping; corrected and necessary release checks passed. No application rebuild or functional tests. After deployment and docs push, the archive-only append succeeded but an unnecessary live-reservation check had expired and returned nonzero. No later live action occurred; the stored archive row was read back and confirmed, and the archive-only helper no longer requires a deployment reservation."
 }

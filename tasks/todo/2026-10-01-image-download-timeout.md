@@ -58,6 +58,8 @@
 
 `TemplateStudioShell.tsx` 复用当前 ImageStudio，不平行改造；`scripts/process-image-studio.ts` 及服务unit未改，仅纳入一致性与排空检查。canvas闭环文件未改。正式主目录与开发树完整工单、证据双份一致，原参考资料继续只在正式资料目录保存。
 
+归档登记补记：部署已经完成且两个记录提交推送后，“工单归档”追加本身成功，但共用工具多余检查五分钟前的部署预约而返回非0。后续没有任何live动作；已回读确认归档条目，工具仅对不涉及live的归档跳过预约。上传/切换/重启/完成各次发布gate均返回0，不把此记录工具错误隐去或混作部署失败。
+
 ### A. 调整方向
 
 实施阶段记录：整批 ID1-ID4 代码已写；本地最终候选 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 返回0（BUILD `eRoLgrTBvmXSGxUeW2_w-`），内置类型/编译检查通过，保留既有 lint/CSS 提示，未运行功能测试。`git diff --check`、依赖元数据差异检查、部署脚本 `bash -n` 通过。整批源码复核后统一修正了执行时间耗尽后的同图恢复与新付费请求确认，再整批构建；未触及 canvas、鉴权、Provider 端点、价格、账本政策或 schema。v0.36.0 已部署，发布检查与正式归档已完成，功能待用户手动验收。
