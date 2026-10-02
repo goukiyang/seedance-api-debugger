@@ -2,7 +2,7 @@
 
 ## 画布视频方案拆分（2026-10-02）
 
-当前唯一有效规格为 v1.1.0，用户已明确“落地”；SP4 复用真实产出库资源ID的口径已确认，整批实现进入统一检查，进度见[原工单](../../tasks/todo/2026-10-01-canvas-plan-split.md)。正式归档目录为 `/Volumes/Data/Projects/video-api-debugger`，本工作树不复制用户原图到公开 Git。
+当前唯一有效规格为 v1.1.0，v0.35.0 已部署；SP1–SP5 已实现并部署待人工，SP6 发布检查/正式归档完成，见[原工单](../../tasks/todo/2026-10-01-canvas-plan-split.md)及[逐文件发布证据](../../tasks/todo/2026-10-01-canvas-plan-split.evidence.json)。正式归档目录为 `/Volumes/Data/Projects/video-api-debugger`，本工作树不复制用户原图到公开 Git。
 
 | 接收日期 | 资料与来源 | 主题与用途 | 正式入口 | 版本与校验 |
 |---|---|---|---|---|

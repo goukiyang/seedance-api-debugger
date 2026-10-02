@@ -3,7 +3,7 @@
 项目：video-api-debugger / SD2 无限画布
 更新：2026-10-02；文档版本：1.1.0
 目标入口：https://sd2.youdooart.com/tools/ultimate-canvas
-状态：2026-10-02 用户已明确“落地”，按 v1.1.0 实施 SP1–SP6。SP1–SP5 整批源码与配套已写，进入统一检查，尚未部署。Supervisor 已确认使用既有产出库真实视频资源标识，数据库 assetId 如实 null，不创建 Asset 行。此前“补”仅文档的授权状态已被本次明确实施授权替代。
+状态：2026-10-02 按 v1.1.0 实施 SP1–SP6，v0.35.0 已部署。SP1–SP5 代码已实现并部署，待用户手动验收；SP6 发布检查和正式归档完成，人工验收待用户。既有产出库资源ID已按 Supervisor 决策复用，数据库 assetId 如实 null，不创建 Asset 行。此前“补”仅文档的授权状态已被本次明确“落地”替代。
 正式项目根目录：/Volumes/Data/Projects/video-api-debugger
 
 ## 1. 当前结论与链路
@@ -20,12 +20,12 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| SP1 | 方案数据与来源 | 稳定拆分编号、原文版本、正文范围和明确参数来源可保存恢复 | 进行中（源码实现中，未检查） |
-| SP2 | 固定格式识别与预览 | 按创意拆分；可校正边界；未识别内容不丢失 | 进行中（源码实现中，未检查） |
-| SP3 | 创建独立视频节点 | 使用既有节点；每段整体要求只作用于本段；来源全文不进入请求 | 进行中（源码实现中，未检查） |
-| SP4 | 单节点生成与结果 | 输入快照、任务、防重复、未知提交恢复、预览下载和选用闭环 | 进行中（口径已确认，源码完成待统一检查） |
-| SP5 | 修改、恢复与撤销 | 草稿恢复、不覆盖手改、不自动重跑、撤销不误删任务资产 | 进行中（源码实现中，未检查） |
-| SP6 | 发布与人工验收 | 构建、健康、版本、回退检查；实际功能由用户手动验收 | 未开始 |
+| SP1 | 方案数据与来源 | 稳定拆分编号、原文版本、正文范围和明确参数来源可保存恢复 | 已实现并部署，待用户手动验收 |
+| SP2 | 固定格式识别与预览 | 按创意拆分；可校正边界；未识别内容不丢失 | 已实现并部署，待用户手动验收 |
+| SP3 | 创建独立视频节点 | 使用既有节点；每段整体要求只作用于本段；来源全文不进入请求 | 已实现并部署，待用户手动验收 |
+| SP4 | 单节点生成与结果 | 输入快照、任务、防重复、未知提交恢复、预览下载和选用闭环 | 已实现并部署，待用户手动验收 |
+| SP5 | 修改、恢复与撤销 | 草稿恢复、不覆盖手改、不自动重跑、撤销不误删任务资产 | 已实现并部署，待用户手动验收 |
+| SP6 | 发布与人工验收 | 构建、健康、版本、回退检查；实际功能由用户手动验收 | 发布检查及正式归档已完成；人工验收待用户 |
 
 首版不做：AI 识别、镜头级拆分、角色/场景/道具提取、共享要求编辑器、批量生成、自动更新下游、自动选优、自动拼片、第二套生成与计费系统、画布引擎替换。本次已明确授权实施上述 SP1–SP6；未列范围仍须另行授权。
 
@@ -142,9 +142,9 @@
 
 ## 12. 当前实施记录（2026-10-02）
 
-唯一应用源：`/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger`，分支 `codex/canvas-liblib-layout`，开工提交 `20931f7fb4b5af9dc8886120cd03d64ee5f87c09`，开工干净。正式目录仅同步工单、固定 todo 和资料索引，不使用其旧应用分支。正式应用复核仍为 v0.34.2；本批已按兼容新增更新候选版本 v0.35.0，仅 package 和 lock 根版本改变，依赖不变。统一检查与部署进行中。
+唯一应用源：`/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger`，分支 `codex/canvas-liblib-layout`，开工提交 `20931f7fb4b5af9dc8886120cd03d64ee5f87c09`，开工干净。正式目录仅同步工单、固定 todo 和资料索引，不使用其旧应用分支。发布前再次确认线上为 v0.34.2，旧源码 `7b6da8395f21ea2677d6dc418f253f8f75c4a71a`；本批兼容新增升级 v0.35.0，仅 package 和 lock 根版本改变，依赖不变。现已完成统一构建、源码复核及安全发布。
 
-已写但未统一检查的范围：
+已实现、统一检查并部署的范围（不代表功能验收）：
 
 | 文件 | 本批内容 |
 |---|---|
@@ -162,16 +162,30 @@
 | package.json、package-lock.json、src/lib/release.ts | v0.35.0 单一版本来源和用户可感知摘要；保持既有 SemVer 更新检测和站内更新弹窗 |
 | tasks/todo.md、tasks/todo/2026-10-01-canvas-plan-split.md、docs/materials/index.md | 同编号原工单、明确资源ID口径、进度与正式资料入口 |
 
-已决策：Supervisor 核对 `src/app/api/assets/library/route.ts:237..245` 和 `src/app/assets/page.tsx:44`，确认复用真实视频产出库资源ID。选用快照保存 taskId、libraryItemId/contentKey、assetId:null、预览/下载路径和生成请求关联；选用前调用既有只读 `/api/content-reactions/content` 检查资源身份及查看权限，下游沿既有 sourceNodes 视频引用交接。没有 Asset 写入、付费任务或绕过权限。已解除阻塞和临时生成禁用，仍须整批源码、构建及发布检查。
+已决策并实现：Supervisor 核对 `src/app/api/assets/library/route.ts:237..245` 和 `src/app/assets/page.tsx:44`，确认复用真实视频产出库资源ID。选用快照保存 taskId、libraryItemId/contentKey、assetId:null、预览/下载路径和生成请求关联；选用前调用既有只读 `/api/content-reactions/content` 检查资源身份及查看权限，下游沿既有 sourceNodes 视频引用交接。没有 Asset 写入、付费任务或绕过权限。阻塞已解除，源码、构建及发布检查已完成；实际交接行为待用户手动验收。
 
 源码核对：现有提示词格式入口 `src/lib/templates/module-builder.ts:90` 已要求创意标题编号与结尾 (end)，未发现本次画布入口存在“禁用括号/end”的全局输出规则；未改上游 LLM 提示词指令。其“最多两个中文字符”与本工单“两字简称”口径不同的旧文本只按非标准项展示，不擅自改写原文。
 
 开源取舍：已阅读 [xyflow graph.ts 实现](https://github.com/xyflow/xyflow/blob/main/packages/system/src/utils/graph.ts) 的直接边关联和真实节点边界，以及 [MIT 许可证](https://github.com/xyflow/xyflow/blob/main/LICENSE)。仅参考方法，使用项目已有画布/保存/原生 dialog，不复制第三方引擎、不安装依赖。未宣称页面运行或功能验收通过。
 
-资料：沿用第11节本地用户原图，原件已确认 PNG 可读；本轮无新附件，未向 public 或 Git 复制用户图。守门员开工 L3（可见运行修改）；不触及 Provider、计费、鉴权中间件、数据库 schema、依赖或生产写入。最终统一检查、发布证据、Git/远端/回退与正式记录待闭环。
+资料：沿用第11节本地用户原图，原件已确认 PNG 可读；本轮无新附件，未向 public 或 Git 复制用户图。守门员 start/finish 为 L3（可见运行修改），真实功能证据按项目规则留待人工；无自身分类误判记录。不触及 Provider、计费、鉴权中间件、数据库 schema、依赖版本或生产写入。
 
 统一源码检查：8个本批画布脚本 `node --check` 和 `git diff --check` 通过；整批源码复核含原文边界、持久保存后才发送、只读恢复的账号/画布/请求范围、旧任务保护和真实资源选用。没有自动运行解析器样本或功能回归。
 
 本地候选构建：`NEXT_DIST_DIR=.next-prod-candidate npm run build` 完成（退出0），BUILD_ID `Tg7yyD9-tNvke5gfLUVRP`。最初工作树缺少依赖；复用锁文件一致的既有依赖并隔离重新生成 Prisma 类型后通过，没有安装/升级依赖、改 schema 或写数据库。既有 Hook/img/CSS 警告未当成本批功能错误，也未借此扩大修改。服务器将从精确提交重新构建，正式 BUILD_ID 以服务器产物为准。
 
 既有更新提醒：源码核对 ReleaseNotice 的同频道 SemVer 严格更高才提醒、稍后持久去重、手动检查、用户点击才刷新及未保存产品确认均保留。本轮未打开旧客户端验证提醒行为，不能写成功能验收通过。
+
+## 13. 发布与正式闭环（2026-10-02）
+
+- 应用：v0.35.0；源码 `3f15a7cae69e97241ec3cf66493ff7bf6230d138` 已提交、推送并核对远端。线上 BUILD_ID `Ov3Td-2Mm5PA8AAm0Ym2N`，`.deployed-commit` 对应同一源码。后续只有记录提交，不重建或重启应用。
+- 精确源码归档 SHA-256：`f6ef71acac87249f16d129bab405c099896361fa590fe8e7b3dddb7d92a8e965`；服务器归档 `/srv/video-api-debugger/releases/3f15a7cae69e97241ec3cf66493ff7bf6230d138`。排除环境文件、依赖、构建、运行目录、上传/视频、数据库、日志和部署标记；用户原图不在归档。
+- 候选在独立 release 目录以普通 gouki 构建 `.next-prod-candidate`，通过后才在 root `flock -n /srv/video-api-debugger/deploy.lock` 下同步源码、保留旧 live、切换并重启。失败 trap 保护旧源码、live、标记及服务；没有原地构建 live、改账户或权限。
+- 回退 tag `rollback/sd2-before-v0.35.0-20261002` 已推送、远端展开确认指向旧源码 `7b6da8395f21ea2677d6dc418f253f8f75c4a71a`，旧 BUILD `QKD4tRwtUPLxCLCxFc9yU`。旧源码 release 保留，旧 live 位于 `/srv/video-api-debugger/app/.next-prod-before-sd2-canvas-split-20261002-1790929333653`。
+- 发布登记：runId `sd2-canvas-split-20261002-1790929333653`；上传前 `2026-10-02T08:39:27.438Z`、切换前 `08:41:48.161Z`，完成 `08:43:01.195Z`，均在固定 registry 中写入并重新确认成功。非0停止，不忽略 append 返回码；同 run 延续不绕过其他 run。
+- 发布检查：本地和服务器候选构建退出0；4服务 gray/image-studio/video-delivery.timer/finalize-pending.timer 均 active。本机服务器端 config/release/login HTTP200；公网 config/release/login HTTP200，`X-SD2-Origin: server-42-193`，公网 version 为0.35.0。32项必要 Next 静态文件 SHA 与当前 build 一致，10项画布源码 SHA 与本批源一致。
+- 画布页及 app.js 匿名访问307到正式登录页；保留鉴权，没有绕过。此证据仅证明受保护资源和发布链路，不代表登录画面或功能正常。
+- 持久证据：[发布 JSON](2026-10-01-canvas-plan-split.evidence.json)，含逐文件 SHA、路径、构建命令/结果、发布预约和回退证据。服务器 build 日志 `/tmp/sd2-canvas-split-20261002-1790929333653-build.log`，本地构建日志 `/tmp/sd2-canvas-split-local-build.log`；工单和证据完整归入正式根目录。
+- 统一源码 diff：[GitHub compare](https://github.com/goukiyang/seedance-api-debugger/compare/20931f7fb4b5af9dc8886120cd03d64ee5f87c09...3f15a7cae69e97241ec3cf66493ff7bf6230d138)。逐文件改动见第12节；新增 evidence.json 仅记录发布检查，不包含用户图或凭据。
+
+未验收/边界：没有执行浏览器、DOM、截图、自动功能回归、付费生成或生产数据库写入。第10节全部用户手动场景及真实旧客户端更新提醒仍待人工；代码和发布不冒充实际效果通过。历史旧节点若既无任务ID又无稳定请求ID，本批无法从不存在的字段安全找回，保持“提交结果待确认”并阻止重发，需管理员核对；入口 `public/tools/ultimate-canvas/app.js` 的 hydrateNodeViews/renderVideoResultHistory。新请求有稳定ID及最小只读恢复入口。浏览器 beforeunload/系统文件选择保留平台语义。没有明确未实现的本批代码项，也不宣称尚未手动验证的流程已达标。

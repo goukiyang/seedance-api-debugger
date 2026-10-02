@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [画布视频方案拆分 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：SP1–SP5 整批源码已写，进入统一检查；SP4 已确认复用产出库资源ID，assetId 如实 null，不创建 Asset。候选 v0.35.0，SP6 发布与归档进行中，实际功能由用户手动验收。正式全文归档于 `/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-canvas-plan-split.md`。
+- [画布视频方案拆分 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：v0.35.0 已部署；SP1–SP5 已实现并部署待用户手动验收，SP6 发布检查及正式归档完成。真实产出库资源ID复用，assetId 如实 null，不创建 Asset；源码3f15a7c，BUILD Ov3Td-2Mm5PA8AAm0Ym2N，4服务/32公网静态/10源码一致。正式全文与证据归入 `/Volumes/Data/Projects/video-api-debugger/tasks/todo/`。
 
 - [模板主操作与产品弹窗](todo/2026-10-02-template-primary-actions.md)：v0.34.2已部署；G1/G2完成，G3代码已实现并部署待用户手动验收，G4构建、正式公网32项静态检查、回退及归档完成。
 
