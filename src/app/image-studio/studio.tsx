@@ -139,7 +139,7 @@ async function copyStudioText(value: string) {
   } catch { return false; }
 }
 
-export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
+export default function ImageStudio({ isAdmin, userId, templateWorkbench = false }: { isAdmin: boolean; userId: string; templateWorkbench?: boolean }) {
   const { confirm, productDialog } = useProductDialog();
   const [modules, setModules] = useState<StudioModule[]>([]);
   const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName'>>>([]);
@@ -422,19 +422,19 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
       <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => setCoverView(true)}>全部封面<small>{navigation.length}</small></button>
     </aside>
     <div className={styles.content}>
-    <header className={styles.header}><div><h1>{coverView ? '模板封面' : '图片生成'}</h1><p className={styles.muted}>{coverView ? '所有模板的 3:4 封面预览' : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
+    <header className={styles.header}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : templateWorkbench ? '图片模块' : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
       <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
       {isAdmin && <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
     {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
-    {coverView && <section className={styles.coverGrid} aria-label="模板封面"><div className={styles.coverGridInner}>{visibleCoverModules.map(module => {
+    {coverView && <section className={styles.coverGrid} aria-label={templateWorkbench ? '模块封面' : '模板封面'}><div className={styles.coverGridInner}>{visibleCoverModules.map(module => {
       return <button key={module.id} type="button" className={styles.coverCard} onClick={() => { setCoverView(false); setSelectedGroup(module.groupName || '未分组'); setActive(module.id); requestAnimationFrame(() => document.getElementById(`module-${module.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })); }}>
         <TemplateCoverVisual module={module} />
         <span className={styles.coverDescription}><strong title={module.name}>{module.name}</strong><small>{module.prompt.trim() ? module.prompt.trim().slice(0, 96) : `以${module.name}为主题，按当前参考图和模型设置生成图片。`}</small></span>
       </button>;
-    })}</div><div className={styles.pagination} aria-label="模板封面分页"><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>加载更多模板</button>}</section>}
+    })}</div><div className={styles.pagination} aria-label={templateWorkbench ? '模块封面分页' : '模板封面分页'}><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>{templateWorkbench ? '加载更多模块' : '加载更多模板'}</button>}</section>}
     <div hidden={coverView}>
-    {modules.map(module => <ImageStudioBlock key={module.id} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
+    {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
       userId={userId} settings={settings} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => setActive(module.id)}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? { ...next, name: item.name, groupName: item.groupName } : item)); }}
@@ -455,7 +455,8 @@ export default function ImageStudio({ isAdmin, userId }: { isAdmin: boolean; use
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench }: {
+  templateWorkbench: boolean;
   onModuleDelete: (id: string) => void;
   hidden: boolean; onMetadataChange: (id: string, name: string, groupName: string, followGroup?: boolean) => void;
   isAdmin: boolean; userId: string; module: StudioModule & { fixedReferences?: FixedStudioReference[]; contextEditable?: boolean }; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule) => Promise<void>; sharingId: string | null; settings: SettingsValue | null;
@@ -529,6 +530,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [tasksError, setTasksError] = useState('');
+  const [taskReadAction, setTaskReadAction] = useState<'idle' | 'initial' | 'refresh' | 'more'>('initial');
+  const [taskRetryCursor, setTaskRetryCursor] = useState<string | undefined>();
+  const taskReadScope = `${userId}:${module.id}`;
+  const taskReadScopeRef = useRef(taskReadScope);
+  taskReadScopeRef.current = taskReadScope;
+  const taskReadRequest = useRef<{ scope: string; controller: AbortController; action: 'initial' | 'refresh' | 'silent' } | null>(null);
+  const taskReadLoaded = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [queryingSubmission, setQueryingSubmission] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<Record<string, unknown> | null>(null);
@@ -642,7 +650,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }
 
   async function restoreDefaults() {
-    if (!(await confirm('恢复当前模板默认参数和参考图？上次临时草稿仍可恢复。', { title: '恢复默认', confirmLabel: '恢复默认' }))) return;
+    if (!(await confirm(templateWorkbench ? '恢复当前模块默认参数和参考图？上次临时草稿仍可恢复。' : '恢复当前模板默认参数和参考图？上次临时草稿仍可恢复。', { title: '恢复默认', confirmLabel: '恢复默认' }))) return;
     try { const saved = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (saved) setRecoverableDraft(saved); } catch {}
     blockedDraftSignature.current = null;
     setPrompt(baseline.prompt); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
@@ -657,7 +665,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   async function deleteModule() {
     if (moduleDeleteLock.current || moduleSaveLock.current || submitting || uploading || bannerUploading) return;
-    if (!(await confirm(`删除模板“${name}”？模板配置将移除，已生成图片仍保留在资产库，不退积分；模板库中的共享原件不受影响。`, { title: '删除模板', confirmLabel: '删除模板', danger: true }))) return;
+    const objectName = templateWorkbench ? '模块' : '模板';
+    if (!(await confirm(`删除${objectName}“${name}”？${objectName}配置将移除，已生成图片仍保留在资产库，不退积分；模板库中的共享原件不受影响。`, { title: `删除${objectName}`, confirmLabel: `删除${objectName}`, danger: true }))) return;
     moduleDeleteLock.current = true; setModuleDeleting(true); setError('');
     try {
       await readResponse(await fetch('/api/image-studio/modules', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
@@ -821,7 +830,46 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     if (next) { setGroupName(next); onMetadataChange(module.id, name, next, true); }
   }
 
-  const loadTasks = useCallback(async (cursor?: string) => {
+  const loadTasks = useCallback(async (cursor?: string, action: 'initial' | 'refresh' | 'silent' = 'refresh') => {
+    if (templateWorkbench) {
+      const scope = `${userId}:${module.id}`;
+      if (action === 'initial' && taskReadLoaded.current) action = 'silent';
+      if (taskReadRequest.current?.scope === scope && (taskReadRequest.current.action !== 'silent' || action === 'silent')) return;
+      taskReadRequest.current?.controller.abort();
+      const request = { scope, controller: new AbortController(), action };
+      taskReadRequest.current = request;
+      const currentRequest = () => taskReadRequest.current === request && taskReadScopeRef.current === scope && !request.controller.signal.aborted;
+      if (action !== 'silent') {
+        setTaskReadAction(cursor ? 'more' : action);
+        setLoadingTasks(action === 'initial');
+        setTasksError('');
+        setTaskRetryCursor(cursor);
+      }
+      try {
+        const query = new URLSearchParams({ moduleId: module.id });
+        if (cursor) query.set('cursor', cursor);
+        const result = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: request.controller.signal }));
+        if (!currentRequest()) return;
+        taskReadLoaded.current = true;
+        setTasks(current => {
+          const fresh: StudioTask[] = result.tasks.filter((task: StudioTask) => !deletedIds.current.has(task.id));
+          const ids = new Set(fresh.map(task => task.id));
+          const previous = current.filter(task => !ids.has(task.id) && !deletedIds.current.has(task.id));
+          return cursor ? [...previous, ...fresh] : loadedMore.current ? [...fresh, ...previous] : fresh;
+        });
+        if (cursor || !loadedMore.current) setNextCursor(result.nextCursor);
+        if (cursor) loadedMore.current = true;
+        setTasksError('');
+      } catch (cause) {
+        if (currentRequest()) setTasksError(cause instanceof Error ? cause.message : '读取记录失败，已有图片仍保留');
+      } finally {
+        if (taskReadRequest.current === request) {
+          taskReadRequest.current = null;
+          if (taskReadScopeRef.current === scope && !request.controller.signal.aborted) { setLoadingTasks(false); setTaskReadAction('idle'); }
+        }
+      }
+      return;
+    }
     if (listLock.current) return;
     listLock.current = true;
     try {
@@ -839,16 +887,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setTasksError('');
     } catch (e) { setTasksError(e instanceof Error ? e.message : '读取记录失败'); }
     finally { listLock.current = false; setLoadingTasks(false); }
-  }, [module.id]);
-  useEffect(() => { if (visible) void loadTasks(); }, [visible, loadTasks]);
+  }, [module.id, userId, templateWorkbench]);
+  useEffect(() => {
+    if (!templateWorkbench) return;
+    setTasks([]); setSelected([]); setPreview(null); setNextCursor(null); setTasksError('');
+    setLoadingTasks(true); setTaskReadAction('initial'); loadedMore.current = false; taskReadLoaded.current = false;
+    return () => {
+      const request = taskReadRequest.current;
+      if (request?.scope === taskReadScope) { request.controller.abort(); taskReadRequest.current = null; }
+    };
+  }, [taskReadScope, templateWorkbench]);
+  useEffect(() => { if (visible) void loadTasks(undefined, 'initial'); }, [visible, loadTasks]);
   const hasPending = tasks.some(task => task.status === 'queued' || task.status === 'running');
   useEffect(() => {
     if (!visible) return;
-    const timer = setInterval(() => { if (!document.hidden) void loadTasks(); }, hasPending ? 5000 : 15000);
+    const timer = setInterval(() => { if (!document.hidden) void loadTasks(undefined, 'silent'); }, hasPending ? 5000 : 15000);
     return () => clearInterval(timer);
   }, [hasPending, loadTasks, visible]);
   useEffect(() => {
-    const refresh = () => { if (!document.hidden && visible) void loadTasks(); };
+    const refresh = () => { if (!document.hidden && visible) void loadTasks(undefined, 'silent'); };
     document.addEventListener('visibilitychange', refresh);
     return () => document.removeEventListener('visibilitychange', refresh);
   }, [loadTasks, visible]);
@@ -1144,7 +1201,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       <div className={styles.moduleTitleRow}>
         {module.saved && <ContentReactions contentKey={`image_module:${module.id}`} />}
         {nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
-        {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{module.sourcePresetShared === true ? '共享给同事' : '仅自己可见'}</button>}
+        {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} title={templateWorkbench ? '只改变原模板的共享，不会发布当前模块草稿' : undefined} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{templateWorkbench ? (module.sourcePresetShared === true ? '原模板已共享' : '共享原模板') : (module.sourcePresetShared === true ? '共享给同事' : '仅自己可见')}</button>}
       </div>
       <div className={styles.counts}>
         <label className={styles.moduleGroupControl}>分组
@@ -1156,20 +1213,20 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
         <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : settingsDirty ? '设置未保存' : '已保存'}</span>
         <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>
-        <button type="button" title={module.id === `default-${userId}` ? '默认模板需要保留' : '删除模板'} aria-label={`删除模板：${name}`}
+        <button type="button" title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={`删除${templateWorkbench ? '模块' : '模板'}：${name}`}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
-          onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : '删除模板'}</button>
+          onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : templateWorkbench ? '删除模块' : '删除模板'}</button>
       </div>
     </header>
     <div className={`${styles.moduleBanner} ${banner?.originalUrl ? styles.moduleBannerHasImage : ''}`}>
       {banner?.originalUrl ? <>
         {/* 固定 banner 高度并完整等比显示图片，不裁切。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt="模块 banner" />
-        <span className={styles.bannerLabel}>模块 banner</span>
+        <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt={templateWorkbench ? '模块封面' : '模块 banner'} />
+        <span className={styles.bannerLabel}>{templateWorkbench ? '模块封面' : '模块 banner'}</span>
         <button type="button" className={styles.bannerReplace} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}>{bannerUploading ? '上传中' : '更换图片'}</button>
-        <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label="移除模块 banner"><X size={16} /></button>
-      </> : <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : '添加模块 banner'}</button>}
+        <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label={templateWorkbench ? '移除模块封面' : '移除模块 banner'}><X size={16} /></button>
+      </> : <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : templateWorkbench ? '添加模块封面' : '添加模块 banner'}</button>}
     </div>
     <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void uploadBanner(file); event.target.value = ''; }} />
     {bannerProgress && <UploadProgressIndicator {...bannerProgress} />}
@@ -1271,8 +1328,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <button type="button" onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
-          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存上下文</button>
-          <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={uploading || bannerUploading || submitting || (!recoverableDraft && (!contextEditable || !generationChanged || generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && generationChanged && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : '另存为'}</button>
+          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存设置' : '保存上下文'}</button>
+          <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={uploading || bannerUploading || submitting || (!recoverableDraft && (!contextEditable || !generationChanged || generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && generationChanged && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : templateWorkbench ? '另存为模板' : '另存为'}</button>
         </div>
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -1284,11 +1341,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       <section className={styles.outputs} aria-label="生成结果">
         <header className={styles.header}><h2>生成结果</h2><div className={styles.counts}>
           {!downloadMode ? <button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(true); }}><Download size={16} />下载</button> : <div className={styles.downloadModeBar}><span>已选 {selected.length} 张</span><button type="button" disabled={!selected.length || downloadBusy} onClick={() => void download(selected)}>{downloadBusy ? '准备中' : '确认下载'}</button><button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(false); }}>取消</button></div>}
-          <button type="button" title="刷新记录" aria-label="刷新记录" onClick={() => void loadTasks()}><RefreshCw size={16} /></button>
+          <button type="button" title="刷新记录" aria-label="刷新记录" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}><RefreshCw size={16} /></button>
         </div></header>
-        {tasksError && <p role="alert" className={styles.error}>{tasksError}</p>}
+        {tasksError && <p role="alert" className={styles.error}>{tasksError}{templateWorkbench && <button type="button" disabled={taskReadAction !== 'idle'} onClick={() => void loadTasks(taskRetryCursor)}>重试读取记录</button>}</p>}
         {downloadReady && <p role="status">文件已准备好。<a href={downloadReady.url} download={downloadReady.name}>再次保存</a></p>}
         {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
+        {templateWorkbench && taskReadAction === 'refresh' && <LoadingStatus>正在刷新记录，已有图片仍保留</LoadingStatus>}
         {!loadingTasks && !tasks.length && !tasksError && <div className={styles.empty}>暂无生成记录</div>}
         <div className={styles.grid}>{tasks.map(task => <article key={task.id} className={styles.result}>
           <div className={styles.resultMedia} data-reaction-surface>{task.asset ? <>
@@ -1322,7 +1380,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
           <div className={styles.resultActions}><div className={styles.resultCommands} data-needs-action={task.status === 'uncertain'}>
-            {task.delivery?.recoveryAvailable && <button type="button" className={styles.recoveryAction} onClick={() => void loadTasks()}>查看原图恢复</button>}
+            {task.delivery?.recoveryAvailable && <button type="button" className={`${styles.recoveryAction} ${templateWorkbench ? 'sd2-loading-surface' : ''}`} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button>}
             {task.asset && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
             {task.asset && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
             {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="恢复本次输入设置，不会提交生成或扣积分" aria-label="恢复设置" onClick={() => restoreTask(task)}><RefreshCw size={15} />恢复设置</button>}
@@ -1335,7 +1393,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             {task.delivery.validation && <p>原图 {task.delivery.validation.originalFormat.toUpperCase()} · {task.delivery.validation.width} × {task.delivery.validation.height}；本站保存 PNG{task.delivery.validation.requestedSize ? `；请求 ${task.delivery.validation.requestedSize}` : ''}</p>}
           </details>}
         </article>)}</div>
-        {nextCursor && <button type="button" onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
+        {templateWorkbench && taskReadAction === 'more' && <LoadingStatus>正在读取更多记录</LoadingStatus>}
+        {nextCursor && <button type="button" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'more'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
       </section>
     </div>
     <dialog ref={imageSourceDialog} className={`${styles.dialog} ${styles.sourceDialog}`} aria-label="添加图片">
@@ -1439,7 +1498,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </select>
         </label>
       </div>
-      {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />保存模板设置</button>}
+      {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
       <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>

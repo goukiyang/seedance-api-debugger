@@ -288,7 +288,7 @@ export default function TemplateStudioShell({
 
       {activeType === 'image' ? (
         <div className={styles.imageSurface} role="tabpanel">
-          <ImageStudio isAdmin={isAdmin} userId={userId} />
+          <ImageStudio isAdmin={isAdmin} userId={userId} templateWorkbench />
         </div>
       ) : (
         <div role="tabpanel">

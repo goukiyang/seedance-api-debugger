@@ -163,6 +163,7 @@
 .runListContent { display: grid; min-width: 0; gap: 6px; }
 .listItemTitle { overflow: hidden; font-size: 13px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .listItemMeta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--muted); font-size: 11px; }
+.recordTime { display: block; padding: 3px 10px; color: var(--muted); font-size: 11px; }
 .owner { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 11px; }
 .owner :global(.user-identity-badge) { min-width: 0; }
 .owner :global(.user-identity-avatar) { width: 20px; height: 20px; flex-basis: 20px; }

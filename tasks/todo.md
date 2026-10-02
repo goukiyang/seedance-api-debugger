@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [模板工作台体验优化 WS1-WS7](todo/2026-10-02-template-workbench-ux.md)：用户明确实施；整批源码已实现，待统一候选构建/安全部署，人工未验收。仅/template-studio，独立图片页门控保留，已有附件及缺口见同一原工单。
+
 - [加载与体验优化 U1–U6](todo/2026-10-02-loading-ux.md)：v0.36.1已部署；源码实现、发布必需检查与安全部署完成，待用户手动验收。运行源码8acaf46，BUILD Ec6Hfe91C-vrdLDtYaCKN，4服务/40公网静态/24源码一致、图片worker正常排空；完整正文、既有附件入口与[发布证据](todo/2026-10-02-loading-ux.evidence.json)归入正式根目录。
 
 - [画布视频方案拆分 v1.1.0](todo/2026-10-01-canvas-plan-split.md)：v0.35.0 最终产物已部署；SP1–SP5 含历史查询收尾修正已实现并部署待用户手动验收，SP6 发布检查及正式归档完成。真实资源ID复用，assetId 如实 null，不创建 Asset；源码80afb99，BUILD ILxByLZ7_8R-4aPl4WWhH，4服务/32公网静态/10源码一致；原版与中间候选均可回退。全文与证据归入 `/Volumes/Data/Projects/video-api-debugger/tasks/todo/`。

@@ -10,6 +10,10 @@ import {
   Image as ImageIcon, ImagePlus, LoaderCircle, Plus, Save, Search, Settings, Sparkles, Trash2, X,
 } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { RelativeTime } from '@/components/RelativeTime';
+import { normalizeH3VideoConfig, h3DisabledReason, type H3VideoConfig } from '@/components/H3MachineStatus';
+import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 import MediaPreview from '@/components/MediaPreview';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
@@ -184,9 +188,31 @@ function statusClass(status: string) {
   return '';
 }
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+function videoTaskStage(task: RunDetail['tasks'][number]) {
+  if (task.status === 'failed') return { key: 'failed', label: '生成失败' };
+  if (task.status === 'cancelled') return { key: 'cancelled', label: '已取消' };
+  if (task.status === 'queued' || task.status === 'submitted') return { key: 'queued', label: '排队中' };
+  if (task.status === 'running') return { key: 'running', label: '生成中' };
+  if (task.status !== 'succeeded') return { key: 'unknown', label: '视频状态待确认' };
+  const delivery = videoDeliveryStageForTask({ local_status: task.status, delivery_status: task.deliveryStatus, result_video_url: task.playUrl });
+  if (delivery.key === 'ready') return { key: 'ready', label: '视频文件已就绪' };
+  if (delivery.key === 'failed') return { key: 'stopped', label: '视频已生成，文件准备失败' };
+  if (delivery.key === 'preparing') return { key: 'preparing', label: '视频已生成，文件准备中' };
+  return { key: 'unknown', label: '视频已生成，文件状态待确认' };
+}
+
+function videoSummary(run: StudioRunDto, detail?: RunDetail | null) {
+  if (!detail || detail.run.id !== run.id || detail.run.taskCount !== run.taskCount) {
+    return run.taskCount === 0 ? '尚未生成视频' : '视频状态待确认，请打开记录查询';
+  }
+  if (!detail.tasks.length) return '尚未生成视频';
+  const labels: Record<string, string> = { ready: '文件就绪', preparing: '文件准备中', stopped: '文件准备失败', queued: '排队中', running: '生成中', failed: '生成失败', cancelled: '已取消', unknown: '状态待确认' };
+  const counts = new Map<string, number>();
+  for (const task of detail.tasks) {
+    const key = videoTaskStage(task).key;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return Array.from(counts).map(([key, count]) => `${count}个${labels[key]}`).join('，');
 }
 
 function requestKey(userId: string, draftId: string) {
@@ -350,6 +376,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const [detailError, setDetailError] = useState('');
   const [capabilities, setCapabilities] = useState<StudioCapabilitiesResponse | null>(null);
   const [capabilityError, setCapabilityError] = useState('');
+  const [videoConfig, setVideoConfig] = useState<H3VideoConfig | null>(null);
+  const [videoCatalogError, setVideoCatalogError] = useState('');
+  const [videoCatalogBusy, setVideoCatalogBusy] = useState(false);
+  const [videoCatalogRevision, setVideoCatalogRevision] = useState(0);
+  const videoCatalogScope = useRef(userId);
+  const draftCreationLock = useRef(false);
+  const [copyingRunId, setCopyingRunId] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState('');
   const [contextEditor, setContextEditor] = useState<{ draftId?: string } | null>(null);
@@ -422,6 +455,12 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     : templates.find((item) => item.id === routedTemplateId)?.source || 'studio';
   const activeTemplate = useMemo(() => templates.find((item) => item.id === routedTemplateId && item.source === routedTemplateSource) || null, [routedTemplateId, routedTemplateSource, templates]);
   const activeDraft = draft?.id === routedDraftId ? draft : null;
+  const videoProvider = stringValue(activeDraft?.parameters.provider ?? '');
+  const savedVideoModel = stringValue(activeDraft?.parameters.model ?? '');
+  const savedLora = stringValue(activeDraft?.parameters.h3LoraId ?? '');
+  const videoModelOptions = videoProvider === 'seedance' ? SEEDANCE_VIDEO_MODEL_OPTIONS
+    : videoProvider === 'h3' && videoConfig?.ready ? [{ id: 'h3', label: 'H3 本地模型' }] : [];
+  const loraOptions = videoProvider === 'h3' && videoConfig?.ready ? videoConfig.lora_options : [];
   useDialogDismiss({
     open: Boolean(templateEdit),
     dialogRef: templateEditDialogRef,
@@ -518,6 +557,26 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     });
     return () => { cancelled = true; };
   }, [handleAuthExpired, userId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (videoCatalogScope.current !== userId) {
+      videoCatalogScope.current = userId;
+      setVideoConfig(null);
+    }
+    setVideoCatalogBusy(true);
+    setVideoCatalogError('');
+    void requestJson<{ h3_video?: unknown }>('/api/config', { signal: controller.signal }).then(value => {
+      if (controller.signal.aborted || currentUserId.current !== userId) return;
+      if (!isRecord(value.h3_video) || !Array.isArray(value.h3_video.lora_options) || !Array.isArray(value.h3_video.preset_options)) throw new Error('模型目录返回不完整');
+      const config = normalizeH3VideoConfig(value.h3_video);
+      if (!config) throw new Error('模型目录返回不完整');
+      setVideoConfig(config);
+    }).catch(() => {
+      if (!controller.signal.aborted && currentUserId.current === userId) setVideoCatalogError('视频选项目录读取失败，已有选择仍保留。');
+    }).finally(() => { if (!controller.signal.aborted) setVideoCatalogBusy(false); });
+    return () => controller.abort();
+  }, [userId, videoCatalogRevision]);
 
   const loadTemplates = useCallback(async (append = false) => {
     const sequence = ++templateSequence.current;
@@ -857,6 +916,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   }
 
   async function createDraft(input: CreateStudioDraftRequest = {}) {
+    if (draftCreationLock.current) return null;
+    draftCreationLock.current = true;
     const startRoute = currentRouteKeyRef.current;
     setWorking(true);
     setNotice('');
@@ -892,7 +953,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       handleAuthExpired(error);
       setNotice(messageForFailure(error));
       return null;
-    } finally { setWorking(false); }
+    } finally { draftCreationLock.current = false; setWorking(false); }
   }
 
   async function createBlankDraft() {
@@ -1256,9 +1317,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   }
 
   async function copyRunToDraft(detail: RunDetail) {
-    const created = await createDraft({ fromRunId: detail.run.id });
-    if (!created) return;
-    setNotice('已按这次记录的历史输入创建新模块；提示词记录保持独立。');
+    if (draftCreationLock.current) return;
+    setCopyingRunId(detail.run.id);
+    try {
+      const created = await createDraft({ fromRunId: detail.run.id });
+      if (!created) return;
+      setNotice('已用历史输入新建模块，尚未生成或扣费；接下来可编辑并主动生成文案。');
+    } finally { setCopyingRunId(null); }
   }
 
   async function openRun(run: StudioRunDto) {
@@ -1641,8 +1706,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                   {drafts.map((item) => (
                     <div key={item.id} style={{ display: 'grid', minWidth: 0 }}><button type="button" className={styles.listItem} aria-current={item.id === routedDraftId} onClick={() => navigate({ type: 'video', view: 'templates', draftId: item.id, moduleId: item.id, runId: null, templateId: null, templateSource: null })}>
                       <span className={styles.listItemTitle}>{item.name || '未命名模块'}</span>
-                      <span className={styles.listItemMeta}><span>{item.groupName || '未分组'}</span><span>修订 {item.revision}</span><span>{formatDate(item.updatedAt)}</span></span>
-                    </button><ContentReactions contentKey={`video_draft:${item.id}`} /></div>
+                      <span className={styles.listItemMeta}><span>{item.groupName || '未分组'}</span><span>修订 {item.revision}</span></span>
+                    </button><span className={styles.recordTime}><RelativeTime value={item.updatedAt} /></span><ContentReactions contentKey={`video_draft:${item.id}`} /></div>
                   ))}
                   {!draftBusy && drafts.length === 0 && <span className={styles.saveState}>保存的模块会显示在这里。</span>}
                 </div>
@@ -1653,9 +1718,9 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
             <section className={styles.sidebarSection} aria-label={view === 'prompts' ? '提示词历史筛选' : '视频结果筛选'}>
               <div className={styles.sectionHeading}><h2>{view === 'prompts' ? '我的提示词' : '视频结果'}</h2><button className={styles.iconButton} type="button" title="重新载入" aria-label="重新载入" onClick={() => void loadRuns()}><LoaderCircle size={15} /></button></div>
               <div className={styles.filterRow}>
-                <label className={styles.visuallyHidden} htmlFor="studio-run-status">任务状态</label>
+                <label className={styles.visuallyHidden} htmlFor="studio-run-status">文案状态</label>
                 <select id="studio-run-status" value={runFilters.status} onChange={(event) => setRunFilters((current) => ({ ...current, status: statusFilter(event.target.value) }))}>
-                  {RUN_STATUSES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  {RUN_STATUSES.map((option) => <option key={option.value} value={option.value}>{option.value ? `文案：${option.label}` : '全部文案状态'}</option>)}
                 </select>
                 <label className={styles.visuallyHidden} htmlFor="studio-run-template">按模板筛选</label>
                 <select id="studio-run-template" value={runFilters.templateId} onChange={(event) => setRunFilters((current) => ({ ...current, templateId: event.target.value }))}>
@@ -1673,10 +1738,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
               {runError && <div className={styles.calloutError}>{runError}<button type="button" className={styles.quietButton} onClick={() => void loadRuns()}>重试</button></div>}
               <div className={styles.list}>
                 {promptRuns.map((run) => (
-                  <button key={run.id} type="button" className={`${styles.listItem} ${styles.runListItem}`} aria-current={run.id === routedRunId} onClick={() => void openRun(run)}>
+                  <div key={run.id}>
+                  <button type="button" className={`${styles.listItem} ${styles.runListItem}`} aria-current={run.id === routedRunId} onClick={() => void openRun(run)}>
                     {run.thumbnailUrl ? <img className={styles.runThumb} src={run.thumbnailUrl} alt="视频结果缩略图" loading="lazy" /> : <span className={styles.runThumbPlaceholder}>暂无截图/预览不可用</span>}
-                    <span className={styles.runListContent}><span className={styles.listItemTitle}>{run.prompt?.trim().slice(0, 72) || (run.mode === 'llm' ? '提示词整理记录' : '直接使用记录')}</span><span className={styles.listItemMeta}><span className={`${styles.status} ${statusClass(run.status)}`}>{statusLabel(run.status)}</span><span>{formatDate(run.createdAt)}</span>{run.taskCount > 0 && <span>{run.taskCount} 个任务</span>}</span></span>
+                    <span className={styles.runListContent}><span className={styles.listItemTitle}>{run.prompt?.trim().slice(0, 72) || (run.mode === 'llm' ? '提示词整理记录' : '直接使用记录')}</span><span className={styles.listItemMeta}><span className={`${styles.status} ${statusClass(run.status)}`}>文案{statusLabel(run.status)}</span></span>{view === 'results' && <span className={styles.listItemMeta}>{videoSummary(run, activeRunDetail)}</span>}</span>
                   </button>
+                  <span className={styles.recordTime}><RelativeTime value={run.createdAt} /></span>
+                  </div>
                 ))}
                 {!runBusy && promptRuns.length === 0 && !runError && <div className={styles.emptyState}><CircleAlert size={20} /><strong>暂无匹配记录</strong><span>可以清除部分筛选条件后再查。</span></div>}
               </div>
@@ -1804,15 +1872,32 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                     <section className={styles.sectionRule} aria-label="生成参数">
                       <div className={styles.sectionTitle}><span>生成参数</span><span className={styles.fieldHint}>将随草稿与历史快照保存</span></div>
                       <div className={styles.parameterGrid}>
-                        <div className={styles.field}><label htmlFor="studio-param-model">模型</label><input id="studio-param-model" value={stringValue(activeDraft.parameters.model ?? '')} onChange={(event) => updateParameter('model', event.target.value || undefined)} placeholder="沿用生成页选择" /></div>
-                        <div className={styles.field}><label htmlFor="studio-param-provider">服务通道</label><select id="studio-param-provider" value={stringValue(activeDraft.parameters.provider ?? '')} onChange={(event) => updateParameter('provider', event.target.value || undefined)}><option value="">沿用生成页选择</option><option value="seedance">Seedance</option><option value="h3">H3</option></select></div>
+                        <div className={styles.field}><label htmlFor="studio-param-provider">服务通道</label><select id="studio-param-provider" value={videoProvider} onChange={(event) => updateParameter('provider', event.target.value || undefined)}><option value="">沿用生成页选择</option><option value="seedance">Seedance</option><option value="h3">H3</option>{videoProvider && !['seedance', 'h3'].includes(videoProvider) && <option value={videoProvider} disabled>已保存通道：{videoProvider}（暂不可识别）</option>}</select></div>
+                        <div className={styles.field}><label htmlFor="studio-param-model">视频模型</label><select id="studio-param-model" value={savedVideoModel} onChange={(event) => updateParameter('model', event.target.value || undefined)}>
+                          <option value="">沿用生成页选择</option>
+                          {savedVideoModel && !videoModelOptions.some(option => option.id === savedVideoModel) && <option value={savedVideoModel} disabled>已保存：{savedVideoModel}（当前不可选，值保留）</option>}
+                          {videoModelOptions.map(option => <option key={option.id} value={option.id} disabled={videoProvider === 'h3' && (videoCatalogBusy || Boolean(videoCatalogError))}>{option.label} · {videoProvider === 'h3' ? 'H3通道' : 'Seedance通道'}</option>)}
+                        </select>{!videoProvider && <span className={styles.fieldHint}>选定通道后才显示适用模型；现有值不会自动改写。</span>}
+                        {savedVideoModel && !videoModelOptions.some(option => option.id === savedVideoModel) && <span className={styles.fieldHint}>此模型不在当前可用目录中；仍保留原编号，请确认通道或重新选择。</span>}
+                        </div>
                         <div className={styles.field}><label htmlFor="studio-param-mode">生成方式</label><select id="studio-param-mode" value={stringValue(activeDraft.parameters.generationMode ?? 'all_in_one_reference')} onChange={(event) => updateParameter('generationMode', event.target.value)}>{GENERATION_MODES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
                         <div className={styles.field}><label htmlFor="studio-param-ratio">画面比例</label><select id="studio-param-ratio" value={stringValue(activeDraft.parameters.ratio ?? '16:9')} onChange={(event) => updateParameter('ratio', event.target.value)}>{VIDEO_RATIOS.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
                         <div className={styles.field}><label htmlFor="studio-param-duration">时长（秒）</label><input id="studio-param-duration" type="number" min={4} max={getStudioVideoDurationMax(activeDraft.parameters)} step={1} value={typeof activeDraft.parameters.duration === 'number' ? activeDraft.parameters.duration : 5} onChange={(event) => updateParameter('duration', event.target.value === '' ? undefined : Number(event.target.value))} /></div>
                         <div className={styles.field}><label htmlFor="studio-param-resolution">清晰度</label><select id="studio-param-resolution" value={stringValue(activeDraft.parameters.resolution ?? '480p')} onChange={(event) => updateParameter('resolution', event.target.value)}>{VIDEO_RESOLUTIONS.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
                         <div className={styles.field}><label htmlFor="studio-param-seed">随机种子</label><input id="studio-param-seed" type="number" min={-1} step={1} value={typeof activeDraft.parameters.seed === 'number' ? activeDraft.parameters.seed : -1} onChange={(event) => updateParameter('seed', event.target.value === '' ? undefined : Number(event.target.value))} /></div>
-                        <div className={styles.field}><label htmlFor="studio-param-lora">H3 LoRA</label><input id="studio-param-lora" value={stringValue(activeDraft.parameters.h3LoraId ?? '')} onChange={(event) => updateParameter('h3LoraId', event.target.value || undefined)} placeholder="不指定" /></div>
+                        <div className={styles.field}><label htmlFor="studio-param-lora">H3 LoRA</label><select id="studio-param-lora" value={savedLora} onChange={(event) => updateParameter('h3LoraId', event.target.value || undefined)}>
+                          <option value="">不指定</option>
+                          {savedLora && !loraOptions.some(option => option.id === savedLora) && <option value={savedLora} disabled>已保存：{savedLora}（当前不可选，值保留）</option>}
+                          {loraOptions.map(option => <option key={option.id} value={option.id} disabled={videoCatalogBusy || Boolean(videoCatalogError)}>{option.label} · H3通道</option>)}
+                        </select>
+                        {videoProvider !== 'h3' && <span className={styles.fieldHint}>LoRA仅适用于H3通道，已保存编号仍保留。</span>}
+                        {videoProvider === 'h3' && !videoCatalogBusy && !videoCatalogError && !videoConfig?.ready && <span className={styles.fieldHint}>{h3DisabledReason(videoConfig)}；旧值未清除。</span>}
+                        {savedLora && !loraOptions.some(option => option.id === savedLora) && <span className={styles.fieldHint}>当前目录无法确认此编号，未自动替换。</span>}
+                        {videoProvider === 'h3' && !loraOptions.length && <details><summary>高级：LoRA编号</summary><input aria-label="LoRA编号" value={savedLora} onChange={event => updateParameter('h3LoraId', event.target.value || undefined)} placeholder="不指定" /><span className={styles.fieldHint}>目录尚不可用，可保留或填写已知编号；不代表服务已可用。</span></details>}
+                        </div>
                       </div>
+                      {videoCatalogBusy && <span className={styles.fieldHint} role="status">正在读取视频选项目录…</span>}
+                      {videoCatalogError && <div className={styles.calloutWarning} role="alert">{videoCatalogError}<button type="button" className={styles.quietButton} onClick={() => setVideoCatalogRevision(value => value + 1)}>重试读取选项</button></div>}
                       <div className={styles.parameterToggles}>
                         {([['generateAudio', '生成音频'], ['returnLastFrame', '返回尾帧'], ['watermark', '添加水印'], ['draft', '样片模式']] as const).map(([key, label]) => <label className={styles.owner} key={key}><input type="checkbox" checked={Boolean(activeDraft.parameters[key])} onChange={(event) => updateParameter(key, event.target.checked)} />{label}</label>)}
                       </div>
@@ -1860,7 +1945,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       <div className={styles.resultPanel}>
                         {(runs.filter((run) => run.draftId === activeDraft.id)).map((run) => (
                           <article className={styles.runCard} key={run.id}>
-                            <div className={styles.runCardHeader}><span className={`${styles.status} ${statusClass(run.status)}`}>{statusLabel(run.status)}</span><span className={styles.saveState}>{formatDate(run.createdAt)}</span></div>
+                            <div className={styles.runCardHeader}><span className={`${styles.status} ${statusClass(run.status)}`}>文案{statusLabel(run.status)}</span><RelativeTime value={run.createdAt} /></div>
+                            <p className={styles.fieldHint}>{videoSummary(run, activeRunDetail)}</p>
                             <p className={styles.runPrompt}>{run.prompt || (run.status === 'uncertain' ? '上游结果待核对，请先查询记录。' : '尚无可展示的提示词结果。')}</p>
                             <div className={styles.promptTools}>
                               <button className={styles.listAction} type="button" onClick={() => void openRun(run)}>查看记录</button>
@@ -1868,7 +1954,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                             </div>
                           </article>
                         ))}
-                        {!runs.some((run) => run.draftId === activeDraft.id) && <div className={styles.emptyState}><Film size={20} /><strong>还没有视频结果</strong><span>直接套用或完成提示词整理后，历史状态会保留在这里。</span></div>}
+                        {!runs.some((run) => run.draftId === activeDraft.id) && <div className={styles.emptyState}><Film size={20} /><strong>还没有关联记录</strong><span>文案记录与视频生成分开；继续到生成页后才会提交视频。</span></div>}
                       </div>
                     )}
                   </section>
@@ -1895,7 +1981,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
               <RunDetailPanel
                 userId={userId}
                 detail={activeRunDetail}
-                busy={working}
+                busy={working || detailBusy}
+                copying={copyingRunId === activeRunDetail.run.id}
                 onCopyToDraft={() => void copyRunToDraft(activeRunDetail)}
                 onContinue={text => void continueGeneration(activeRunDetail.run, text)}
                 onCancel={() => void cancelRun(activeRunDetail.run)}
@@ -1994,7 +2081,7 @@ function TemplateOverview({
           <h3>版本记录</h3>
           {detail?.versions.map((version) => (
             <div className={styles.slotRow} key={version.id}>
-              <span>V{version.number} · {formatDate(version.createdAt)}</span>
+              <span>V{version.number} · <RelativeTime value={version.createdAt} /></span>
               {version.createdBy && <UserIdentityBadge size="sm" user={{ name: version.createdBy.displayName, avatar_url: version.createdBy.avatarUrl }} />}
             </div>
           ))}
@@ -2013,11 +2100,12 @@ function RunTaskPoster({ src }: { src: string | null }) {
 }
 
 function RunDetailPanel({
-  detail, userId, busy, onCopyToDraft, onContinue, onCancel, onRefresh,
+  detail, userId, busy, copying, onCopyToDraft, onContinue, onCancel, onRefresh,
 }: {
   detail: RunDetail;
   userId: string;
   busy: boolean;
+  copying: boolean;
   onCopyToDraft: () => void;
   onContinue: (prompt: string) => void;
   onCancel: () => void;
@@ -2032,14 +2120,14 @@ function RunDetailPanel({
   return (
     <>
       <div className={styles.contentHeader}>
-        <div><h2>{run.mode === 'llm' ? '提示词记录' : '直接使用记录'}</h2><p>{snapshot.input.name || '未命名模块'} · 修订记录 {run.id.slice(0, 8)} · {formatDate(run.createdAt)}</p></div>
+        <div><h2>{run.mode === 'llm' ? '提示词记录' : '直接使用记录'}</h2><p>{snapshot.input.name || '未命名模块'} · 修订记录 {run.id.slice(0, 8)} · <RelativeTime value={run.createdAt} /></p></div>
         <div className={styles.headerActions}>
           <button className={styles.quietButton} type="button" disabled={busy} onClick={onRefresh}>刷新状态</button>
           {run.status === 'queued' && <button className={`${styles.quietButton} ${styles.dangerButton}`} type="button" disabled={busy} onClick={onCancel}>取消排队任务</button>}
-          <button className={styles.quietButton} type="button" disabled={busy} title="按历史输入创建新模块，再生成新文案" onClick={onCopyToDraft}>复用输入再生成</button>
+          <button className={`${styles.quietButton} sd2-loading-surface`} data-busy={copying} type="button" disabled={busy} title="只新建模块并复用输入，不自动生成或扣费" onClick={onCopyToDraft}>{copying ? '正在新建模块' : '用此输入新建模块'}</button>
         </div>
       </div>
-      <div className={styles.ownerLine}><span className={`${styles.status} ${statusClass(run.status)}`}>{statusLabel(run.status)}</span><span>{snapshot.sourceRunId ? '最终文案' : run.mode === 'llm' ? '文案生成' : '直接使用'}</span>{snapshot.templateVersion && <span>{snapshot.templateVersion.templateName} · V{snapshot.templateVersion.versionNumber || '未知'}</span>}{owner && <UserIdentityBadge size="sm" user={{ name: owner.displayName, username: owner.username, avatar_url: owner.avatarUrl }} />}</div>
+      <div className={styles.ownerLine}><span className={`${styles.status} ${statusClass(run.status)}`}>文案{statusLabel(run.status)}</span><span>{snapshot.sourceRunId ? '最终文案' : run.mode === 'llm' ? '文案生成' : '直接使用'}</span>{snapshot.templateVersion && <span>{snapshot.templateVersion.templateName} · V{snapshot.templateVersion.versionNumber || '未知'}</span>}{owner && <UserIdentityBadge size="sm" user={{ name: owner.displayName, username: owner.username, avatar_url: owner.avatarUrl }} />}</div>
       {snapshot.sourceRunId && <a className={styles.calloutLink} href={`/template-studio?type=video&view=prompts&runId=${encodeURIComponent(snapshot.sourceRunId)}`}>查看原始文案</a>}
       {run.status === 'uncertain' && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status"><strong>结果待确认。</strong><span>目前不能确认上游是否已处理；请先刷新或联系管理员核对，不要直接重复提交。</span></div>}
       {run.status === 'failed' && <div className={`${styles.callout} ${styles.calloutError}`} role="status"><strong>本次处理失败。</strong><span>{run.error || failedRunSummary}</span></div>}
@@ -2051,13 +2139,13 @@ function RunDetailPanel({
       </section>
       <section className={styles.templateRecipe}>
         <h3>相关视频任务</h3>
+        <p className={styles.fieldHint}>{videoSummary(run, detail)}</p>
         {tasks.map((task) => (
           <article className={styles.runCard} key={task.taskId}>
             <RunTaskPoster key={task.thumbnailUrl || 'no-cover'} src={task.thumbnailUrl} />
             {task.status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.taskId}`} />}
-            <div className={styles.taskRow}><span>任务状态</span><span>{statusLabel(task.status)}</span></div>
-            {task.deliveryStatus && <div className={styles.taskRow}><span>交付状态</span><span>{statusLabel(task.deliveryStatus)}</span></div>}
-            <div className={styles.taskRow}><span>{formatDate(task.createdAt)}</span><span className={styles.promptTools}>
+            <div className={styles.taskRow}><span>视频状态</span><span>{videoTaskStage(task).label}</span></div>
+            <div className={styles.taskRow}><RelativeTime value={task.createdAt} /><span className={styles.promptTools}>
               {task.playUrl && <button className={styles.iconButton} type="button" title="预览视频" aria-label={`预览任务 ${task.taskId}`} onClick={() => setPreviewTask(task)}><Eye size={16} /></button>}
               <a href={task.playUrl || task.downloadUrl || `/tasks/${encodeURIComponent(task.taskId)}`} target={task.playUrl || task.downloadUrl ? '_blank' : undefined} rel={task.playUrl || task.downloadUrl ? 'noreferrer' : undefined}>{task.playUrl ? '打开视频' : task.downloadUrl ? '下载视频' : '查看任务'}</a>
             </span></div>
@@ -2072,7 +2160,7 @@ function RunDetailPanel({
         poster={previewTask.thumbnailUrl || undefined}
         contentKey={`video_task:${previewTask.taskId}`}
         previewKey={previewTask.taskId}
-        details={<div><span>{statusLabel(previewTask.status)}</span>{previewTask.status === 'succeeded' && <ContentReactions contentKey={`video_task:${previewTask.taskId}`} />}</div>}
+        details={<div><span>{videoTaskStage(previewTask).label}</span>{previewTask.status === 'succeeded' && <ContentReactions contentKey={`video_task:${previewTask.taskId}`} />}</div>}
         hasNavigation={playableTasks.length > 1}
         onPrevious={activePreviewIndex > 0 ? () => setPreviewTask(playableTasks[activePreviewIndex - 1]) : undefined}
         onNext={activePreviewIndex >= 0 && activePreviewIndex < playableTasks.length - 1 ? () => setPreviewTask(playableTasks[activePreviewIndex + 1]) : undefined}
