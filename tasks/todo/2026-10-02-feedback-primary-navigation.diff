@@ -1,64 +1,77 @@
 diff --git a/package-lock.json b/package-lock.json
-index 27b7df7..abf4571 100644
+index 27b7df7..7569463 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -1,12 +1,12 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.8",
++  "version": "0.36.10",
    "lockfileVersion": 3,
    "requires": true,
    "packages": {
      "": {
        "name": "video-api-debugger",
 -      "version": "0.36.2",
-+      "version": "0.36.8",
++      "version": "0.36.10",
        "dependencies": {
          "@aws-sdk/client-s3": "^3.1041.0",
          "@aws-sdk/s3-request-presigner": "^3.1041.0",
 diff --git a/package.json b/package.json
-index 19794d5..00be561 100644
+index 19794d5..68f1cec 100644
 --- a/package.json
 +++ b/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.8",
++  "version": "0.36.10",
    "private": true,
    "scripts": {
      "dev": "NEXT_DIST_DIR=.next-dev next dev",
 diff --git a/src/app/api/assets/library/route.ts b/src/app/api/assets/library/route.ts
-index 88846aa..bfd9c4d 100644
+index 88846aa..ea5812b 100644
 --- a/src/app/api/assets/library/route.ts
 +++ b/src/app/api/assets/library/route.ts
-@@ -65,6 +65,7 @@ type LibraryItem = {
+@@ -10,6 +10,7 @@ import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/vid
+ import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
+ import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
+ import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
++import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+ 
+ export const dynamic = 'force-dynamic';
+ 
+@@ -65,6 +66,8 @@ type LibraryItem = {
    providerFinalAmountMinor: number | null;
    providerOfficialAmountMicros: number | null;
    providerFinalAmountMicros: number | null;
 +  chargedCredits: number | null;
++  normalChargeEstimate: NormalVideoChargeEstimate | null;
    videoCardId: string | null;
    isEnhanceTask: boolean;
    canEnhanceVideo: boolean;
-@@ -193,6 +194,7 @@ async function serializeTask(task: {
+@@ -193,6 +196,11 @@ async function serializeTask(task: {
    provider_final_amount_minor: number | null;
    provider_official_amount_micros: number | null;
    provider_final_amount_micros: number | null;
 +  actual_cost: number | null;
++  is_draft: boolean;
++  reference_video_urls: string | null;
++  provider_usage_snapshot: string | null;
++  raw_status_response: string | null;
    params_json: string | null;
    retention_status: string;
    created_at: Date;
-@@ -202,7 +204,7 @@ async function serializeTask(task: {
+@@ -202,7 +210,7 @@ async function serializeTask(task: {
    project: LibraryProject | null;
    owner: LibraryUser | null;
    user: LibraryUser | null;
 -}): Promise<LibraryItem> {
-+}, viewer: SessionUser): Promise<LibraryItem> {
++}, viewer: SessionUser, normalRates: ReadonlyMap<string, number>): Promise<LibraryItem> {
    const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
    const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
    const deliveryStage = videoDeliveryStageForTask(task);
-@@ -259,6 +261,10 @@ async function serializeTask(task: {
+@@ -259,6 +267,13 @@ async function serializeTask(task: {
      providerFinalAmountMinor: task.provider_final_amount_minor,
      providerOfficialAmountMicros: task.provider_official_amount_micros,
      providerFinalAmountMicros: task.provider_final_amount_micros,
@@ -66,42 +79,75 @@ index 88846aa..bfd9c4d 100644
 +      && ['succeeded', 'failed', 'cancelled'].includes(task.local_status)
 +      && task.actual_cost !== null && Number.isFinite(task.actual_cost) && task.actual_cost >= 0
 +      ? task.actual_cost : null,
++    normalChargeEstimate: task.local_status === 'succeeded'
++      && (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
++      ? estimateNormalVideoCharge(task, normalRates) : null,
      videoCardId: task.video_card_id,
      isEnhanceTask,
      canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
-@@ -325,6 +331,7 @@ function serializeAsset(asset: {
+@@ -325,6 +340,8 @@ function serializeAsset(asset: {
      providerFinalAmountMinor: null,
      providerOfficialAmountMicros: null,
      providerFinalAmountMicros: null,
 +    chargedCredits: null,
++    normalChargeEstimate: null,
      videoCardId: null,
      isEnhanceTask: false,
      canEnhanceVideo: false,
-@@ -386,6 +393,7 @@ function serializeReferenceImage(image: {
+@@ -386,6 +403,8 @@ function serializeReferenceImage(image: {
      providerFinalAmountMinor: null,
      providerOfficialAmountMicros: null,
      providerFinalAmountMicros: null,
 +    chargedCredits: null,
++    normalChargeEstimate: null,
      videoCardId: null,
      isEnhanceTask: false,
      canEnhanceVideo: false,
-@@ -540,6 +548,7 @@ async function loadVideoItems(options: {
+@@ -540,6 +559,11 @@ async function loadVideoItems(options: {
          provider_final_amount_minor: true,
          provider_official_amount_micros: true,
          provider_final_amount_micros: true,
 +        actual_cost: true,
++        is_draft: true,
++        reference_video_urls: true,
++        provider_usage_snapshot: true,
++        raw_status_response: true,
          params_json: true,
          retention_status: true,
          created_at: true,
-@@ -555,7 +564,7 @@ async function loadVideoItems(options: {
+@@ -554,8 +578,15 @@ async function loadVideoItems(options: {
+     prisma.videoTask.count({ where }),
    ]);
  
++  const unbilledTasks = tasks.filter((task) => task.local_status === 'succeeded'
++    && (user.role === 'admin' || task.user?.id === user.id || task.owner?.id === user.id)
++    && task.provider_final_amount_micros === null && task.provider_official_amount_micros === null
++    && task.provider_final_amount_minor === null && task.provider_official_amount_minor === null);
++  let normalRates: ReadonlyMap<string, number> = new Map();
++  try { normalRates = await loadNormalVideoChargeRates(unbilledTasks); }
++  catch { console.warn('[AssetCosts] Ordinary billing rate lookup unavailable'); }
    return {
 -    items: await Promise.all(tasks.map(serializeTask)),
-+    items: await Promise.all(tasks.map((task) => serializeTask(task, user))),
++    items: await Promise.all(tasks.map((task) => serializeTask(task, user, normalRates))),
      total,
    };
  }
+diff --git a/src/app/api/release/route.ts b/src/app/api/release/route.ts
+index e1ecec9..b98158f 100644
+--- a/src/app/api/release/route.ts
++++ b/src/app/api/release/route.ts
+@@ -1,4 +1,10 @@
+ import { NextResponse } from 'next/server';
+ import { release } from '@/lib/release';
++import { getSession } from '@/lib/auth/session';
+ export const dynamic = 'force-dynamic';
+-export function GET() { return NextResponse.json(release, { headers: { 'Cache-Control': 'no-store' } }); }
++export async function GET() {
++  const user = await getSession();
++  return NextResponse.json({ ...release, summary: user?.account_type === 'internal' ? release.summary : '' }, {
++    headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' },
++  });
++}
 diff --git a/src/app/api/tasks/create/route.ts b/src/app/api/tasks/create/route.ts
 index c7ba3ff..94e0e82 100644
 --- a/src/app/api/tasks/create/route.ts
@@ -118,18 +164,27 @@ index c7ba3ff..94e0e82 100644
    if (requestedVideoBranchId) {
      const branch = await prisma.videoBranch.findUnique({
 diff --git a/src/app/assets/page.tsx b/src/app/assets/page.tsx
-index b5b7e1d..6c20f90 100644
+index b5b7e1d..df09982 100644
 --- a/src/app/assets/page.tsx
 +++ b/src/app/assets/page.tsx
-@@ -123,6 +123,7 @@ type AssetLibraryItem = {
+@@ -32,6 +32,7 @@ import {
+ import { cacheSafeAssetUrl } from '@/lib/assets/library-cache-policy';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
+ import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
++import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+ import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
+ 
+ type AssetScope = 'history' | 'project' | 'user';
+@@ -123,6 +124,8 @@ type AssetLibraryItem = {
    providerFinalAmountMinor: number | null;
    providerOfficialAmountMicros: number | null;
    providerFinalAmountMicros: number | null;
 +  chargedCredits: number | null;
++  normalChargeEstimate: NormalVideoChargeEstimate | null;
    videoCardId: string | null;
    isEnhanceTask: boolean;
    canEnhanceVideo: boolean;
-@@ -471,6 +472,14 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
+@@ -471,6 +474,14 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
    return parts.join(' · ');
  }
  
@@ -144,7 +199,19 @@ index b5b7e1d..6c20f90 100644
  function formatCnyCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
    if (item.kind !== 'video' || item.source !== 'video_task') return '';
    if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return '';
-@@ -1732,6 +1741,7 @@ function AssetsPageContent() {
+@@ -1725,6 +1736,11 @@ function AssetsPageContent() {
+ 
+   const activeItemPrompt = activeItem?.prompt ? <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div> : null;
+   const activeItemDetails = activeItem ? <>
++    {!activeItemCostBreakdown && activeItem.normalChargeEstimate && <div className="asset-detail-cost-panel" aria-label="按普通费率估算扣费">
++      <div><span>按普通费率估算</span><strong>约 {costAmountToCnyEstimate({ amount_micros: activeItem.normalChargeEstimate.amountMicros, currency: 'USD' })}</strong></div>
++      <div><span>美元金额</span><strong>{formatUsdDetailAmount(activeItem.normalChargeEstimate.amountMicros / 1_000_000, 6)}</strong></div>
++      <small>同模型、同参考类型；{activeItem.normalChargeEstimate.completionTokens.toLocaleString('zh-CN')} Token × ${activeItem.normalChargeEstimate.usdPerMillionTokens.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}/百万 Token。{usdToCnyRateText()}</small>
++    </div>}
+     {activeItemCostBreakdown && <div className="asset-detail-cost-panel" aria-label="扣费金额">
+       <div><span>美金扣费</span><strong>{activeItemCostBreakdown.usd}</strong></div>
+       <div><span>人民币扣费</span><strong>{activeItemCostBreakdown.cny}</strong></div>
+@@ -1732,6 +1748,7 @@ function AssetsPageContent() {
      </div>}
      <dl className="asset-detail-list">
        <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
@@ -152,15 +219,17 @@ index b5b7e1d..6c20f90 100644
        {shouldShowDeliveryStage(activeItem) && <div><dt>稳定下载</dt><dd>{activeItem.deliveryStage?.label || '-'}</dd></div>}
        <div><dt>项目</dt><dd>{activeItem.project?.name || '未归属项目'}</dd></div>
        {isAdmin && <div><dt>用户</dt><dd><UserIdentityBadge user={activeItem.owner} size="sm" subtitle={activeItem.owner?.subtitle || null} className="asset-detail-user" /></dd></div>}
-@@ -2228,6 +2238,7 @@ function AssetsPageContent() {
+@@ -2228,6 +2245,9 @@ function AssetsPageContent() {
                  const duration = formatDuration(item.duration);
                  const specText = formatAssetSpec(item);
                  const cnyCostBadge = formatCnyCostBadge(item);
-+                const costBadge = cnyCostBadge || formatChargedCredits(item);
++                const estimate = item.normalChargeEstimate;
++                const estimatedCash = estimate ? costAmountToCnyEstimate({ amount_micros: estimate.amountMicros, currency: estimate.currency }) : '';
++                const costBadge = cnyCostBadge || (estimatedCash ? `约 ${estimatedCash}` : item.kind === 'video' && item.source === 'video_task' && item.status === 'succeeded' ? '扣费待确认' : '');
                  const enhanceMenuOpen = enhanceMenuItemId === item.id;
                  const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                  const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
-@@ -2272,11 +2283,11 @@ function AssetsPageContent() {
+@@ -2272,11 +2292,11 @@ function AssetsPageContent() {
                        ) : (
                          <AssetLibraryThumbnail key={`${item.source}:${item.thumbnailUrl || ''}:${item.previewUrl || ''}`} item={item} />
                        )}
@@ -171,7 +240,7 @@ index b5b7e1d..6c20f90 100644
 -                            <span className="asset-card-badge asset-card-cost-badge">
 -                              {cnyCostBadge}
 +                          {costBadge && (
-+                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : '实际扣除的站内点数，不是现金金额'}>
++                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : estimatedCash ? '按普通生成相同模型、相同参考类型的费率估算扣费；尚无此任务现金账单' : '缺少现金账单、计费用量或普通生成费率，暂无法确认扣费金额'}>
 +                              {costBadge}
                              </span>
                            )}
@@ -253,7 +322,7 @@ index a9babaf..cdf1e2b 100644
 +}
 +@media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
 diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
-index 1987311..8768514 100644
+index 1987311..0b8901e 100644
 --- a/src/app/image-studio/studio.tsx
 +++ b/src/app/image-studio/studio.tsx
 @@ -2,6 +2,7 @@
@@ -404,7 +473,7 @@ index 1987311..8768514 100644
    const moduleSaveLock = useRef(false);
    const restoredDraftKey = useRef('');
    const autoSaveAttempt = useRef('');
-@@ -561,6 +606,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -561,32 +606,47 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
    const loadedMore = useRef(false);
    const uploadLock = useRef(false);
    const moduleDialog = useRef<HTMLDialogElement>(null);
@@ -416,7 +485,11 @@ index 1987311..8768514 100644
    const resumeModulePreview = useRef(false);
    const fileInput = useRef<HTMLInputElement>(null);
    const auxiliaryFileInput = useRef<HTMLInputElement>(null);
-@@ -572,21 +622,31 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const fixedFileInput = useRef<HTMLInputElement>(null);
+   const bannerFileInput = useRef<HTMLInputElement>(null);
+   const dirty = globalSettingsDirty;
+-  const unsavedContext = dirty || moduleContext !== savedModuleContext || fixedDirty;
+   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
    const draftKey = `sd2-image-studio-draft:${suffix}`;
    const pendingKey = `sd2-image-studio-pending:${suffix}`;
    const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
@@ -433,7 +506,9 @@ index 1987311..8768514 100644
    const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
    const automaticDirty = automaticSnapshot !== moduleSaved;
    const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
-   useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
+-  useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
++  // Recoverable browser drafts are not lost on refresh; failed persistence still blocks exit.
++  useUnsavedNavigation(dirty || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
    const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
 +  const contextDialogSnapshot = JSON.stringify({ context: moduleContext, primaryMin, primaryMax: referenceLimit,
 +    auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences,
@@ -766,6 +841,56 @@ index 54683ea..a784294 100644
  .dialog::backdrop { background: rgb(8 12 13 / 64%); }
  .dialog[data-anchored=true]::backdrop { background: rgb(8 12 13 / 18%); }
  .dialog[data-anchored=true] { position: fixed; right: auto; bottom: auto; }
+diff --git a/src/components/ReleaseNotice.tsx b/src/components/ReleaseNotice.tsx
+index 7212f1a..f107022 100644
+--- a/src/components/ReleaseNotice.tsx
++++ b/src/components/ReleaseNotice.tsx
+@@ -1,16 +1,15 @@
+ 'use client';
+ 
+-import { useProductDialog } from '@/components/useProductDialog';
+-
+ import { useCallback, useEffect, useRef, useState } from 'react';
+ import { usePathname } from 'next/navigation';
+ import { createPortal } from 'react-dom';
+ import { release, newerRelease } from '@/lib/release';
+ import { useDialogDismiss } from '@/components/useDialogDismiss';
++import { useAppSession } from '@/lib/context/AppSessionContext';
+ import styles from './CreditRequestDialog.module.css';
+ 
+ export default function ReleaseNotice() {
+-  const { confirm, productDialog } = useProductDialog();
++  const { user } = useAppSession();
+   const pathname = usePathname();
+   const dialog = useRef<HTMLDialogElement>(null);
+   const [target, setTarget] = useState<typeof release | null>(null);
+@@ -47,16 +46,21 @@ export default function ReleaseNotice() {
+   useEffect(() => { if (target) dialog.current?.showModal(); }, [target]);
+   const later = () => { try { if (target) localStorage.setItem('sd2:release:later', target.version); } catch { /* Optional persistence. */ } setTarget(null); };
+   useDialogDismiss({ open: Boolean(target), dialogRef: dialog, nativeDialog: true, onDismiss: later });
+-  return <>{productDialog}{(<>
++  return <>
+     {pathname === '/account' && <footer style={{ padding: '16px 24px', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+       <span>SD2 v{release.version}</span><button className="btn btn-secondary" disabled={checking} onClick={() => void check(true)}>{checking ? '检查中…' : '检查更新'}</button><span role="status">{message}</span>
+     </footer>}
+     {target && createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby="release-title">
+       <header className={styles.header}><h2 id="release-title" style={{ fontWeight: 700, fontSize: 20 }}>发现新版本</h2></header>
+-      <div className={styles.body}><p>v{target.version}</p><p>{target.summary}</p>
+-        <p>刷新前请保存当前未提交的内容。</p>
+-        <div className={styles.actions}><button className="btn btn-primary" onClick={async () => { if ((await confirm('刷新会关闭当前页面，未提交的内容可能丢失。确认已保存并刷新？', { title: '刷新页面', confirmLabel: '已保存，刷新' }))) window.location.reload(); }}>立即刷新</button><button className="btn btn-secondary" onClick={later}>稍后</button></div>
++      <div className={styles.body}><p>v{target.version}</p>
++        {user?.account_type === 'internal' && target.summary && <p>{target.summary}</p>}
++        <p>新版本已就绪，可刷新后使用。</p>
++        <div className={styles.actions}><button className="btn btn-primary" onClick={() => {
++          // Real unsaved changes retain the page's native exit guard, without stacked dialogs.
++          dialog.current?.close();
++          window.location.reload();
++        }}>立即刷新</button><button className="btn btn-secondary" onClick={later}>稍后</button></div>
+       </div>
+     </dialog>, document.body)}
+-  </>)}</>;
++  </>;
+ }
 diff --git a/src/components/generate/GeneratePageClient.tsx b/src/components/generate/GeneratePageClient.tsx
 index 413dfee..44fe300 100644
 --- a/src/components/generate/GeneratePageClient.tsx
@@ -961,7 +1086,7 @@ index 8bff328..381f3b5 100644
    }, []);
    const confirm = useCallback(async (message: string, options: Options = {}) => (await ask(message, options)) !== null, [ask]);
 diff --git a/src/lib/assets/library-cache.ts b/src/lib/assets/library-cache.ts
-index 91782fa..844cac7 100644
+index 91782fa..347b478 100644
 --- a/src/lib/assets/library-cache.ts
 +++ b/src/lib/assets/library-cache.ts
 @@ -3,7 +3,7 @@ const STORE_NAME = 'asset_library_pages';
@@ -969,10 +1094,118 @@ index 91782fa..844cac7 100644
  const CACHE_TTL_MS = 5 * 60_000;
  
 -export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 2;
-+export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 3;
++export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 4;
  
  type AssetLibraryCacheKeyInput = {
    view?: string;
+diff --git a/src/lib/costs/normal-video-charge.ts b/src/lib/costs/normal-video-charge.ts
+new file mode 100644
+index 0000000..f1e067b
+--- /dev/null
++++ b/src/lib/costs/normal-video-charge.ts
+@@ -0,0 +1,102 @@
++import { prisma } from '@/lib/prisma';
++
++export type NormalVideoChargeEstimate = {
++  amountMicros: number;
++  currency: 'USD';
++  completionTokens: number;
++  usdPerMillionTokens: number;
++};
++
++type ChargeTask = {
++  provider: string;
++  model: string;
++  reference_video_urls: string | null;
++  is_draft: boolean;
++};
++type ChargeGroup = { model: string; referenceVideo: boolean; key: string };
++
++function objectFromJson(value: string | null) {
++  try {
++    const parsed: unknown = value ? JSON.parse(value) : null;
++    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
++      ? parsed as Record<string, unknown> : null;
++  } catch { return null; }
++}
++
++function chargeGroup(task: ChargeTask): ChargeGroup | null {
++  if (!['seedance', 'volcengine_ark'].includes(task.provider) || task.is_draft) return null;
++  const model = task.model === 'doubao-seedance-2-0-260128' ? 'dreamina-seedance-2-0-260128'
++    : task.model === 'doubao-seedance-2-5-260628' ? 'dreamina-seedance-2-5-260628' : task.model;
++  if (!['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-5-260628'].includes(model)) return null;
++  let referenceVideo = false;
++  if (task.reference_video_urls?.trim()) {
++    try {
++      const urls: unknown = JSON.parse(task.reference_video_urls);
++      if (!Array.isArray(urls) || urls.some((url) => typeof url !== 'string')) return null;
++      referenceVideo = urls.some((url: string) => Boolean(url.trim()));
++    } catch { return null; }
++  }
++  return { model, referenceVideo, key: `${model}:${referenceVideo}` };
++}
++
++export function completionTokensFromSnapshot(usageJson: string | null, statusJson: string | null) {
++  const usage = objectFromJson(usageJson);
++  const status = objectFromJson(statusJson);
++  const data = status?.data;
++  const nestedUsage = status?.usage ?? (data && typeof data === 'object' ? (data as Record<string, unknown>).usage : null);
++  const tokens = usage?.completion_tokens ?? (nestedUsage && typeof nestedUsage === 'object'
++    ? (nestedUsage as Record<string, unknown>).completion_tokens : null);
++  return typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
++}
++
++export async function loadNormalVideoChargeRates(tasks: ChargeTask[]) {
++  const groups = new Map<string, ChargeGroup>();
++  for (const task of tasks) { const group = chargeGroup(task); if (group) groups.set(group.key, group); }
++  const rates = new Map<string, number>();
++  // Use the latest matching confirmed ordinary bill, not a points-to-cash conversion.
++  await Promise.all(Array.from(groups.values()).map(async (group) => {
++    const bills = await prisma.videoTask.findMany({
++      where: {
++        provider: 'seedance', model: group.model, is_draft: false, local_status: 'succeeded',
++        provider_cost_currency: 'USD', provider_cost_status: { in: ['official_confirmed', 'reconciled'] },
++        provider_usage_snapshot: { not: null },
++        ...(group.referenceVideo
++          ? { reference_video_urls: { not: null, notIn: ['', '[]'] } }
++          : { OR: [{ reference_video_urls: null }, { reference_video_urls: { in: ['', '[]'] } }] }),
++      },
++      orderBy: [{ provider_cost_confirmed_at: 'desc' }, { created_at: 'desc' }], take: 8,
++      select: {
++        provider: true, model: true, is_draft: true, reference_video_urls: true,
++        provider_final_amount_micros: true, provider_official_amount_micros: true,
++        provider_final_amount_minor: true, provider_official_amount_minor: true,
++        provider_usage_snapshot: true,
++        provider_cost_snapshot: true,
++      },
++    });
++    for (const bill of bills) {
++      if (chargeGroup(bill)?.key !== group.key) continue;
++      if (objectFromJson(bill.provider_cost_snapshot)?.source !== 'provider_get_result') continue;
++      const tokens = completionTokensFromSnapshot(bill.provider_usage_snapshot, null);
++      const minor = bill.provider_final_amount_minor ?? bill.provider_official_amount_minor;
++      const micros = bill.provider_final_amount_micros ?? bill.provider_official_amount_micros
++        ?? (minor !== null ? minor * 10_000 : null);
++      if (!tokens || micros === null || !Number.isSafeInteger(micros) || micros <= 0) continue;
++      rates.set(group.key, micros / tokens);
++      break;
++    }
++  }));
++  return rates;
++}
++
++export function estimateNormalVideoCharge(task: ChargeTask & {
++  provider_usage_snapshot: string | null;
++  raw_status_response: string | null;
++}, rates: ReadonlyMap<string, number>): NormalVideoChargeEstimate | null {
++  const group = chargeGroup(task);
++  const tokens = completionTokensFromSnapshot(task.provider_usage_snapshot, task.raw_status_response);
++  const rate = group ? rates.get(group.key) : null;
++  if (!tokens || !rate || !Number.isFinite(rate) || rate <= 0) return null;
++  const amountMicros = Math.round(tokens * rate);
++  if (!Number.isSafeInteger(amountMicros) || amountMicros <= 0) return null;
++  return { amountMicros, currency: 'USD', completionTokens: tokens, usdPerMillionTokens: rate };
++}
 diff --git a/src/lib/image-studio/limits.ts b/src/lib/image-studio/limits.ts
 index 9e9a2e2..8dff1d1 100644
 --- a/src/lib/image-studio/limits.ts
@@ -1136,14 +1369,14 @@ index bffd9e1..e44e405 100644
          if (error instanceof StudioReferencePolicyError) throw new StudioError(error.message, error.status);
          throw error;
 diff --git a/src/lib/release.ts b/src/lib/release.ts
-index d26bc6f..d43628f 100644
+index d26bc6f..593e504 100644
 --- a/src/lib/release.ts
 +++ b/src/lib/release.ts
 @@ -1,6 +1,6 @@
  import packageInfo from '../../package.json';
  
 -export const release = { version: packageInfo.version, channel: 'production', summary: '模板工作台分开显示文案与视频状态；复用历史输入只新建模块。图片记录刷新和加载更多保留已有内容，恢复入口明确为查询状态；视频模型与LoRA按通道识别，模块称呼和记录时间更清楚。' };
-+export const release = { version: packageInfo.version, channel: 'production', summary: '资产视频封面补充实际扣点显示；现金金额和站内点数明确区分。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '刷新更新不再重复确认；已保留的模板草稿不再误报丢失；外部账号不显示具体更新内容。' };
  export function newerRelease(remote: string, local: string) {
    const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
    const a = parse(remote), b = parse(local);

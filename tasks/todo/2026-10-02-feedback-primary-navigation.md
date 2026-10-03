@@ -353,3 +353,59 @@ v0.36.7运行源码8f481400ecfbbcd8b50d021117e77f933221f731，BUILD hdFoauPtV4mw
 只重启sd2-gray；图片worker PID1241475、启动时间2026-10-02 19:26:26 CST、状态/单元一致。源站127.0.0.1:3302 config/release/login各200；公网config/release/login/assets各200、X-SD2-Origin server-42-193，release=0.36.8。assets原有匿名公开页面壳为200，真实数据仍走原鉴权API；首次核对脚本错误沿用template-studio的307预期，读取原middleware确认后修正检查预期，未改页面权限。最终19个相关公网静态文件与服务器哈希一致，7个源码（6个本轮应用文件加C1组件）本地/服务器一致，4服务或timer均active。
 
 发布进程COMPLETE握手实际结束0，公网验证完成后登记部署完成。只读费用诊断摘要并入[发布证据](2026-10-02-feedback-primary-navigation.evidence.json)，C1/P1/T1及之前交付保留previousDelivery历史；[统一diff](2026-10-02-feedback-primary-navigation.diff)覆盖原批次至本次运行源码。不运行浏览器/业务回归、付费请求或DB写入，不称用户验收通过。现金账单仍未知而非0元；无扩大任务权限，守门员L3，未把关键词“生成”误当本轮队列改造。
+
+### C2金额显示续办（2026-10-03）
+
+用户明确纠正：“不要只显示分数,要显示扣费,费率跟普通生成一致”。此要求替代v0.36.8封面仅以点数补缺的结果，保留C2编号，不能把旧版已部署当成新目标完成。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| C2 | 外部视频封面标价 | 按普通生成费率显示扣费金额，区分实际扣费与估算 | 7应用文件及发布检查完成，已部署v0.36.9，待用户手动验收 |
+
+证据：普通生成现金来自Provider返回的actual_cost/currency，不是3点/秒折算；pricing_snapshot只有站内点数规则，PlatformSetting未找到现金费率配置。数据库只读核对普通账单/用量：模型2.0不含参考视频1481条样本为7 USD/百万生成Token，含视频样本约4.3；2.5不含视频约10.7、含视频约6.4。另有历史7.7样本及金额微单位舍入，不把统计数硬编码成永久费率。目标账号成功视频真实completion_tokens已有216900、281700、260100等，现金字段仍null。
+
+实现：新增normal-video-charge.ts，用项目现有Prisma findMany/select/orderBy/take及JSON.parse，最多4组×8条，取同模型/是否使用参考视频的最新已确认普通Provider账单，要求source=provider_get_result、有有效生成Token和正金额，剔除Draft/陌生模型/损坏JSON/不安全数值。金额按目标视频真实生成用量乘普通账单有效费率推算；不按时长/点数猜现金、不用其他供应商价目表、不硬编码7或汇率。币种/汇率展示复用currency.ts，cash公式只用于显示估算，不修改官方金额或账本。
+
+assets/library新增最小normalChargeEstimate投影，仅管理员或任务本人/所有者可见，原始状态/参考URL/普通账单原文不发送客户端；只有成功任务且无现金金额时查费率，故障降级为扣费待确认不抹掉资产。封面已有现金记录优先，否则显示“约 ¥…”并注明按普通费率估算；详情显示美元估算/用量/费率/同一汇率，实际点数移留详情，不再当封面费用。上传视频、未完成任务不造价；缺记录/用量/匹配费率则待确认。缓存投影schema4，偏好和滚动不变。
+
+应用7文件：src/lib/costs/normal-video-charge.ts、src/app/api/assets/library/route.ts、src/app/assets/page.tsx、src/lib/assets/library-cache.ts及package.json/lock、src/lib/release.ts。候选0.36.9；保持既有ReleaseNotice单一来源、数字SemVer/稍后去重/手动更新，更新及卡片浏览器交互留用户手动。保持原生成/冻结/结算/退款/Provider/worker/权限/Prisma结构、依赖不变，不创建现金扣款或回写旧账单。
+
+开源/已有实现取舍：复用当前Prisma 5生成客户端与既有金额格式化；[官方读取指南](https://www.prisma.io/docs/orm/fundamentals/reading-data)现行示例已为新版API，未照搬、不升级依赖，以项目实际类型及候选build核对兼容。产品/极简/Impeccable只调整原费用badge与详情，不新增设置/弹窗。用户纠正后费用目标与实现范围已明确，沿用原连续执行和发布链，不重派前包曾发布证据不足/长等待的执行链。
+
+守门员首次intent的“只读投影”被误归readonly/L0；在编辑前重述真实UI/deploy目标，重新start为L3，仍保留完整发布检查。纠正已记/Users/gouki-youdoo/.codex/classification-misjudgment-log.md。本轮数据库查询用sqlite3 -readonly、PRAGMA query_only；没有付费生成/DB写入/浏览器或自动功能验收。首次只读辅助查询Config表名不正确，按Prisma核对到PlatformSetting后查询其key，不读设置值/凭据。
+
+#### C2金额发布回执
+
+v0.36.9运行源码527d925ae1943557d164858f0a74cc7e1fd62c85，BUILD gbpec82z8F5gOaOcQAm6y；两次聚焦应用提交均已推送，rollback/2026-10-03-before-asset-cash-v0.36.9远端确认，指向98c11b5/v0.36.8。首次候选构建发现ES5目标不支持Map.values直接展开，替换Array.from后同版本重新构建通过；失败候选未同步或切换live。最终归档SHA256 9c1f054a68f7a483606c03707afa607143d239eab4340cb0551d72412de7576c，完整包两端一致且排除运行/私人资料。
+
+候选内置lint/types/build通过；19公网静态与服务器一致、8源码本地/服务器一致，config/release/login/assets均200、X-SD2-Origin server-42-193，源站三入口200。四服务/timer active，只重启sd2-gray；图片worker PID1241475、单元/启动时间不变。回退构建/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0369-r2和记录/srv/video-api-debugger/backups/sd2-feedback-v0369-r2保留。原SSH连接超时后，通过仍等待的部署进程stdin接续COMPLETE，不重发/重启部署；进程结束、服务及运行commit再次核对，发布完成登记已写。
+
+只读同模型2.0、无参考视频普通账单216900生成Token/1518300微美元对应7美元/百万Token；目标10秒视频同用量估算$1.5183，人民币仅沿用既有汇率显示，并非新增现金实扣。其余真实用量281700、260100分别估算$1.9719、$1.8207。没有现金账本回写或新生成；真实封面/交互仍待用户手动验收。
+
+## C3/C4更新刷新与外部提醒（2026-10-03）
+
+用户截图指出更新刷新反复跳出不同确认；随后明确外部人员仍接收新版提醒，但不显示具体更新内容。附件[原图](../../docs/materials/2026-10-03-feedback-update-confirm/codex-clipboard-f7c8cdb3-42b3-4827-b629-1f66ea539939.png)，来源、校验及版本见[资料索引](../../docs/materials/index.md#更新刷新重复提醒与外部摘要)。不从截图推断用户修改过，也不控制浏览器执行验收。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| C2 | 外部视频封面标价 | 按普通生成费率显示扣费金额，区分实际扣费与估算 | 已部署v0.36.9，待用户手动验收 |
+| C3 | 更新刷新提醒 | 无修改直接刷新；有真实未保存修改才提醒，不叠重复确认 | 已部署v0.36.10，待用户手动验收 |
+| C4 | 外部新版提醒 | 外部仍收到提醒及刷新入口，但不显示具体更新内容 | 已部署v0.36.10，待用户手动验收 |
+
+根因：ReleaseNotice每次更新按钮无条件调用产品确认，reload之后又触发原生beforeunload，造成三层堆叠；模板上下文已安全存入可恢复浏览器草稿，仍以与服务端模板不同为“离开会丢失”，把未正式保存与不能恢复混为一谈。
+
+实现：ReleaseNotice去掉额外确认，先关闭更新层再reload；真正未保存的全局设置、未完成保存/上传和写入浏览器失败的草稿继续原离开保护。已成功持久化的模板上下文/固定图草稿不再额外阻塞离开，手动模板保存、关闭编辑保护与草稿恢复逻辑不改。画布、配额的真实未保存原生保护不删除。采用现有原生平台离开语义，无新增依赖或全局强制取消beforeunload。
+
+C4前端复用AppSession：仅明确internal展示摘要，external/未知不显示；release接口复用getSession，仅internal返回摘要，外部或匿名返回空摘要，Cache-Control private,no-store及Vary Cookie防账号缓存混用。仍返回版本/渠道、保留SemVer检测/稍后去重/手动检查/刷新入口；不改鉴权实现、账号类型、权限或账务。
+
+应用文件：ReleaseNotice.tsx（单层更新及身份展示）、api/release/route.ts（按现有身份筛摘要）、image-studio/studio.tsx（真实丢失与持久草稿区分）、package.json/lock及release.ts（单一0.36.10版本摘要）。范围内API仅release投影；C2现金展示、其他API、费用、Provider、worker、Prisma和依赖保留。按交互模式库复用现有对话框和退出规则；守门员L3，本轮未新增归类误判。发布只做候选构建、源包/静态/版本/健康/持久资产/回退检查，功能由用户手动验收。
+
+### C3/C4发布回执
+
+v0.36.10运行源码b26f9d216949c3601d2cc36d050e6fc922422ab1，BUILD MFC_yPnyTMuIibuxAwjsx；6应用文件聚焦提交及推送完成，rollback/2026-10-03-before-update-notice-v0.36.10已远端确认，指向健康v0.36.9/527d925。源包SHA256 1068a9a163a248ad0efab8aecf8711a142a1b55d98842fe17d30dcf5c7dd36c0，完整打包后校验/上传；不含密钥、私人原图、DB或运行资产。
+
+服务器候选build内置lint/types完成；保留既有img/CSS警告，未扩大整改。候选确认旧重复刷新文本不存在，C1复制粘贴/P1弹窗样式/C2现金估算标记保留。发布登记/flock、旧运行commit/BUILD守卫及rsync排除、持久软链接可写检查均执行。仅重启sd2-gray，图片worker PID1241475、单元/启动时间/状态未变。回退构建/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v03610和记录/srv/video-api-debugger/backups/sd2-feedback-v03610保留。
+
+公网config/release/login/assets均200，release=0.36.10、X-SD2-Origin server-42-193；匿名release摘要为空，private,no-store与身份相关Vary响应头核对。源站三入口200，4服务/timer active。layout/assets/image-studio/template-studio共23个相关公网静态与服务器哈希一致，8源码（6变更加C1/C2延续）本地/服务器一致。COMPLETE握手实际结束0，发布完成登记已写；首次登记被敏感词检查拒绝，去掉无须记录的响应头名称后只记录发布结果，未输出凭据或绕过账号权限。
+
+正式原图仅本地保留，已加入本仓库私有exclude；资料索引/固定todo/统一diff/结构化证据同步，保留v0.36.9及更早发布和T1真实测试历史。没有自动浏览器操作、截图/功能验收、付费生成、DB写入或新审核线程；外部/内部实际弹窗、取消刷新、草稿恢复及费用封面待用户手动验收。C2官方现金账单依旧缺失，金额估算注明，不冒充实扣；此前生成502未宣称恢复。L3闭环执行，C3/C4无新增误判或越界；C2曾有归类误判已纠正记录。
