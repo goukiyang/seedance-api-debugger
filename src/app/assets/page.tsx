@@ -32,6 +32,7 @@ import {
 import { cacheSafeAssetUrl } from '@/lib/assets/library-cache-policy';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
+import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
 
 type AssetScope = 'history' | 'project' | 'user';
@@ -124,6 +125,7 @@ type AssetLibraryItem = {
   providerOfficialAmountMicros: number | null;
   providerFinalAmountMicros: number | null;
   chargedCredits: number | null;
+  normalChargeEstimate: NormalVideoChargeEstimate | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -1734,6 +1736,11 @@ function AssetsPageContent() {
 
   const activeItemPrompt = activeItem?.prompt ? <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div> : null;
   const activeItemDetails = activeItem ? <>
+    {!activeItemCostBreakdown && activeItem.normalChargeEstimate && <div className="asset-detail-cost-panel" aria-label="按普通费率估算扣费">
+      <div><span>按普通费率估算</span><strong>约 {costAmountToCnyEstimate({ amount_micros: activeItem.normalChargeEstimate.amountMicros, currency: 'USD' })}</strong></div>
+      <div><span>美元金额</span><strong>{formatUsdDetailAmount(activeItem.normalChargeEstimate.amountMicros / 1_000_000, 6)}</strong></div>
+      <small>同模型、同参考类型；{activeItem.normalChargeEstimate.completionTokens.toLocaleString('zh-CN')} Token × ${activeItem.normalChargeEstimate.usdPerMillionTokens.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}/百万 Token。{usdToCnyRateText()}</small>
+    </div>}
     {activeItemCostBreakdown && <div className="asset-detail-cost-panel" aria-label="扣费金额">
       <div><span>美金扣费</span><strong>{activeItemCostBreakdown.usd}</strong></div>
       <div><span>人民币扣费</span><strong>{activeItemCostBreakdown.cny}</strong></div>
@@ -2238,7 +2245,9 @@ function AssetsPageContent() {
                 const duration = formatDuration(item.duration);
                 const specText = formatAssetSpec(item);
                 const cnyCostBadge = formatCnyCostBadge(item);
-                const costBadge = cnyCostBadge || formatChargedCredits(item);
+                const estimate = item.normalChargeEstimate;
+                const estimatedCash = estimate ? costAmountToCnyEstimate({ amount_micros: estimate.amountMicros, currency: estimate.currency }) : '';
+                const costBadge = cnyCostBadge || (estimatedCash ? `约 ${estimatedCash}` : item.kind === 'video' && item.source === 'video_task' && item.status === 'succeeded' ? '扣费待确认' : '');
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
@@ -2286,7 +2295,7 @@ function AssetsPageContent() {
                       {(costBadge || enhanceStateLabel) && (
                         <span className="asset-card-top-right-badges">
                           {costBadge && (
-                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : '实际扣除的站内点数，不是现金金额'}>
+                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : estimatedCash ? '按普通生成相同模型、相同参考类型的费率估算扣费；尚无此任务现金账单' : '缺少现金账单、计费用量或普通生成费率，暂无法确认扣费金额'}>
                               {costBadge}
                             </span>
                           )}
