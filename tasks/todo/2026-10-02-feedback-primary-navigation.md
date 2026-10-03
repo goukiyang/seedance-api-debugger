@@ -300,3 +300,29 @@ capabilities.ts明确文案不扣本站点数、上游文字费用由平台承�
 共6次、全部成功、零重试、上游报告1265 tokens。实际扣费金额接口没有返回，不编造金额；返回模型名仅表示供应商响应声明，不据此核实其内部路由。源码hash与服务器运行文件一致，运行仍v0.36.6、commit f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0、BUILD zLCFc71j3c0EpKfW2zQ7I。
 
 隔离临时诊断进程抑制Prisma启动的可写pragma配置，并先启用query_only；仅调用既有设置读取和生成适配器，密钥在应用进程内正常使用，不输出/复制/导出，不写业务任务、点数、配置或DB。不重启或发布应用，临时执行文件已删除；无新增产品代码/依赖。诊断输出只存模型名、结果、耗时、usage和必要运行坐标，已并入[固定发布证据textConnectivity](2026-10-02-feedback-primary-navigation.evidence.json)。本次证明短请求真实连通和产出格式可被文案流程接受，不证明长文案质量、队列处理或浏览器按钮全流程；这些未做。守门员真实客户端L3范围，已明确授权、无新增误判。
+
+## C1上下文复制粘贴（2026-10-03）
+
+用户原文：“给模版上下文输入框上方增加一个复制和粘贴按键”。本轮没有新附件；复用已有模块上下文截图[资料索引](../../docs/materials/index.md#模板保存与最新生成异常2026-10-03)，不假定ambient任务URL就是上下文编辑器位置。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| C1 | 上下文复制、粘贴 | 按钮位于输入框上方，可复制全文、粘贴剪贴板内容 | 8文件实现及发布检查完成，v0.36.7已部署，待用户手动验收 |
+
+范围：图片模板模块上下文及同类通用上下文，视频模板模块/通用上下文；不扩展旧版上下文卡片路由、生成提示词、素材剪贴板上传或其他文本框。新增共享ContextClipboardActions及CSS，被3个编辑入口复用。复制读取当前未保存全文，不修改编辑内容；粘贴按原光标/选区插入文字，不默认覆盖全文，并调用与原输入相同的编辑函数。复制/粘贴在输入框上方靠右，Lucide图标加短文字，带可访问名称/焦点/忙碌/错误反馈；视频原有底部复制按钮移到上方，不重复。
+
+只在已有允许编辑上下文的入口显示，复制仍尊重视频canCopy；不更改服务端权限。保留图片20000和视频12000现有限制；超过上限整体拒绝，不静默截断。不读图或触发生成，不自动保存；现有安全临时草稿恢复、手动保存、真实修改退出和历史复现规则不改。粘贴得到完全相同文本不调用修改函数、不退出复现模式；异步读取后如果输入已变、弹窗关闭/卸载或编辑被禁用，不覆盖新内容。空剪贴板与浏览器拒绝读取明确反馈，保留普通手动粘贴入口。
+
+复用项目navigator.clipboard.writeText做法，新增原生readText，不装依赖。已核对[MDN Clipboard.readText](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/readText)的用户触发、HTTPS及权限拒绝/空文本语义；直接采用浏览器接口，无需新增Clipboard库。系统权限仍由浏览器处理，不绕过。单个共享UI包直接实施并自行Review，复用上一包明确交接延误证据；无独立审核或浏览器自动验收。
+
+实际8应用文件：ContextClipboardActions.tsx/CSS实现工具栏与安全异步处理；studio.tsx及global-settings-dialog.tsx接入图片模块/通用上下文；VideoContextEditor.tsx接入视频并移除底部重复按钮；package.json/lock仅同步0.36.7（对既有复制/粘贴能力的兼容UI增强，不新增业务流程），release.ts短摘要。ReleaseNotice及既有SemVer检测/稍后去重/手动检查继续使用单一版本源，未做更新弹窗交互验收。后台API、Provider、积分、worker、数据库和持久资产不改。
+
+### C1发布回执
+
+v0.36.7运行源码8f481400ecfbbcd8b50d021117e77f933221f731，BUILD hdFoauPtV4mwfhsevAtTe；分支codex/canvas-liblib-layout及rollback/2026-10-03-before-context-clipboard-v0.36.7已推送/远端确认，回退指向上一健康f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0。精确归档排除env、DB、私人素材和运行资产，完整包SHA256 9c5ca8a90f86f137416ba9c7b02700155e43d1cdfdfa489e8105a4677023fa94。
+
+发布检查：源码Review、git diff/cached --check、bash -n/node --check通过；服务器不可变release中NEXT_DIST_DIR=.next-prod-candidate npm run build完成，含lint/types。仅既有img性能警告，未扩大到无关整改。候选含复制/粘贴及更新摘要，旧P1定位标记保留，R1重复生成确认未恢复。活动登记/服务器flock、旧commit和BUILD保护、持久资产排除及可写软链接核对实际执行；只重启sd2-gray，worker PID1241475/单元/启动时间不变。
+
+服务器及公网config/release/login均200，公网v0.36.7及X-SD2-Origin server-42-193正确；template-studio匿名307仅证明原鉴权边界，不能当页面效果验收。8个改动源码与20个相关公网静态SHA一致，4服务/定时器active。旧构建/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0367和保护记录/srv/video-api-debugger/backups/sd2-feedback-v0367保留，COMPLETE握手exit0。累计[应用diff](2026-10-02-feedback-primary-navigation.diff)及[证据](2026-10-02-feedback-primary-navigation.evidence.json)已更新，T1历史实测保留但本轮不重跑。
+
+既有资料、固定todo与索引同步登记；原图不重复复制、不上传。无新生成、DB写入、费用、依赖、权限/Provider变化；C1浏览器剪贴板权限、按钮位置和实际粘贴未自动验收，待用户手动；守门员L3、无新增误判或越界。未解决的历史生成502问题与C1不混称恢复。
