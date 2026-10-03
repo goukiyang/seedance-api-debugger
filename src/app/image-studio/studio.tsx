@@ -983,13 +983,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   async function submit(retryTask?: StudioTask) {
     if (pendingSubmission) { await querySubmission(); return; }
     if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
-    if (reproduceSourceTaskId || tasks.some(task => task.status === 'uncertain')) {
-      submitLock.current = true;
-      let accepted = false;
-      try { accepted = await confirm('这会新建图片生成任务，可能再次产生上游费用。恢复原图不会重新生成；确定按当前设置新建生成任务吗？', { title: '确认生成', confirmLabel: '新建生成任务' }); }
-      finally { submitLock.current = false; }
-      if (!accepted) return;
-    }
     if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
