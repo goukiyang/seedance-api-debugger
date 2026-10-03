@@ -438,3 +438,48 @@ v0.36.10运行源码b26f9d216949c3601d2cc36d050e6fc922422ab1，BUILD MFC_yPnyTMu
 开源核对：已读[React Router官方导航保护示例](https://reactrouter.com/how-to/navigation-blocking)、[useBlocker实际实现](https://raw.githubusercontent.com/remix-run/react-router/main/packages/react-router/lib/hooks.tsx)和[MIT许可](https://raw.githubusercontent.com/remix-run/react-router/main/LICENSE.md)。借鉴显式阻止、取消、继续状态及自己的产品确认界面；官方明确useBlocker不处理硬刷新，不能直接安装它解决本题。项目为Next.js，推荐少量适配既有共享hook，不增加React Router依赖或迁移路由；此处是设计参考，不是已验证的新实现。
 
 后续验收边界：无修改、恢复原值、可恢复草稿、真实未保存、上传/保存进行中、取消后继续编辑、稍后去重/手动重开、外部摘要隐藏、刷新失败及实际加载版本/现场恢复。实施获授权后按项目发布检查上线，功能由用户手动验收；本次仅文档差异与入口检查、聚焦提交推送，不构建、不发布、不操作浏览器、不升级应用版本。
+
+### C3全站网站风格确认方案（2026-10-03）
+
+用户追加原话：“包含最后弹出的确认画面要用网站风格的ui，不要用系统弹窗，排查同类问题，全站”。沿用上一条“给修改方案”的范围，方案v1.1.0补充v1.0.0，不是已实施应用。开工表格曾误把部署列为完成标准，已在任何应用编辑前向用户澄清，纠正如下；未构建、发布或操作浏览器。既有C3/C4状态不改，截图仍复用本节原件及同图来源。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| U1 | 全站确认弹窗统一 | 全站同类源码排查、网站风格最终确认及保护边界写入方案；代替本轮误列的部署标准 | 排查及方案已完成；应用未实施，实机未验收 |
+
+本轮使用只读explorer全站搜索src与相关public脚本、定向读取；主线程复核原始命中、共享产品弹窗、更新入口及画布保护，不是独立功能审核。对象为实际生产源码工作树d91df95，运行应用6d2f390/v0.37.0；不以正式资料根旧源码代替生产代码。
+
+#### 全站源码排查清单
+
+发现14处window.confirm、7处window.prompt，合计21处、13个文件；未发现window.alert。以下行号来自本次未改动的源码，仅业务系统弹窗，不把已经使用网站confirm/prompt的同名函数算成系统弹窗。
+
+| 文件（相对实际源码根） | 行号 | 业务确认/输入数量及用途 |
+|---|---|---|
+| src/components/PromptEditor.tsx | 286 | 1确认，放弃提示词编辑 |
+| src/components/SeedanceAssetPanel.tsx | 164 | 1确认，彻底删除官方资产 |
+| src/components/ShareAlbumDialog.tsx | 333、353 | 2确认，撤回或关闭共享 |
+| src/components/AccountMenu.tsx | 71 | 1确认，清除本地画布草稿后退出 |
+| src/components/CreditRequestDialog.tsx | 138、141 | 1确认、1输入，撤回申请及拒绝理由 |
+| src/components/generate/GeneratePageClient.tsx | 1396 | 1确认，移除最近生成记录 |
+| src/components/content-reactions/ImageShareButton.tsx | 45 | 1确认，公开分享图片 |
+| src/app/collections/[id]/ReferenceAlbumDetailClient.tsx | 270、304、327 | 2确认、1输入，删除及重命名 |
+| src/app/collections/ReferenceAlbumsClient.tsx | 295、316、335、361、450 | 2确认、3输入，文件夹/图集命名、删除及拒绝理由 |
+| src/app/projects/[id]/page.tsx | 603 | 1确认，移除成员 |
+| src/app/projects/[id]/video-cards/[cardId]/page.tsx | 243 | 1确认，视频卡封板 |
+| src/app/approvals/page.tsx | 205 | 1输入，审批理由 |
+| public/tools/ultimate-canvas/toolflow-workflow.js | 333 | 1输入，工作流名称 |
+
+另有5个离开保护入口：use-unsaved-navigation.ts:11/44、image-studio/use-studio-settings.ts:33、admin/users/quotas/QuotaManager.tsx:98、tools/ultimate-canvas/CanvasFrame.tsx:126、public/tools/ultimate-canvas/app.js:2828。画布iframe已有宿主负责、独立打开才由子页提醒的分工，保留，不能取消真实未保存保护。直接整页刷新3处：ReleaseNotice.tsx:61、ErrorTranslator.tsx:789、agent/AgentRunTraceActions.tsx:18。后两处也纳入站内刷新保护接入范围，区别数据刷新与整页刷新，不为了统一增加无风险确认。
+
+#### 统一修改设计与顺序
+
+1. 最终业务确认采用网站自己的背景、字体、按钮、间距及主次层级：复用useProductDialog.tsx、ProductDialog.module.css、useDialogDismiss.ts。普通小输入靠触发入口；关键删除、共享范围改变等在清晰网站对话框中显示对象、影响与取消。安全取消获得初始焦点，关闭/Esc/外部点击等效取消，回到原触发按钮。普通成功和可修复错误留在原页面，不新增确认弹窗。
+2. 更新沿用v1.0.0单窗口设计：无真实丢失直接刷新；真实丢失在原更新窗口内出现最终网站风格确认，确认后仅放行本次刷新，不再接浏览器重复确认。统一接入上述独立保护入口，取消或失败恢复保护；未保存内容类别和进行中操作不能用一个无条件dirty替代。外部摘要隐藏及稍后去重保留。
+3. 批量替换21处业务系统调用，等待用户明确结果才执行原操作；取消不发送、不保存、不删除、不分享、不审批。后端接口、权限、金额、资产删除语义和审批规则不改变。已用网站弹窗的任务、模板、管理页面复用，不再做另一套。
+4. 共享文字输入补充与原业务匹配的可留空、必填、字数及输入类型能力：现有prompt把空白当不可提交，ReferenceAlbumsClient拒绝理由原本允许留空，必须保留空串与取消null的区别；申请拒绝等原本必填仍必填，不机械统一为默认120字，不静默截断。已有弹窗内的撤回/拒绝尽量在原面板切换确认/理由状态，不再叠大窗口；嵌套必需时仅顶层响应Esc与外部点击。
+5. 画布是非React脚本，复用其已有网站命名/确认能力或小适配，不直接套React hook，不安装新的UI库。待实施时核对实际可调用入口及iframe边界，避免子页和宿主重复提醒。
+6. 整批改完后统一检查原生业务调用清单已清空、取消语义、空值/必填、进行中防重复、焦点与小屏/边缘位置。按项目约定只执行发布必需构建/版本/健康/回退检查后上线，功能显示与操作效果留用户手动验收；本轮不执行上述未来实施和上线步骤。
+
+平台边界：网站不能替换浏览器关闭标签页、地址栏刷新产生的beforeunload对话框的文字或外观；文件选择、剪贴板等权限、人机验证同样归平台。站内按钮流程可以用产品UI先作决定并针对本次放行，不靠全局删除保护伪装已统一。依据[MDN beforeunload说明及实际事件处理示例](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)，推荐只对真实未保存内容挂保护；不引入新依赖。此前已读React Router实际实现及MIT许可只作为取消/继续状态参考，不处理硬刷新。
+
+证据与缺口：上述21处是源码字面搜索和定向读取命中，不宣称动态别名调用穷尽或线上实机全站通过；共享组件已有不等于每个旧入口已迁移。当前方案目标完成，应用版本仍0.37.0，未改高风险业务及生产数据。守门员start按实际语义L0方案/代码只读，关键词命中deploy/chrome不扩展授权；本轮范围误判已纠正并记录classification-misjudgment-log.md。
