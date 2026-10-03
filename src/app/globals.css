@@ -6565,6 +6565,11 @@ body.compare-fullscreen-open {
   letter-spacing: 0;
 }
 
+.composer-topbar-version {
+  font-size: 0.5em;
+  font-weight: 400;
+}
+
 .composer-topbar-nav {
   display: flex;
   gap: 6px;
