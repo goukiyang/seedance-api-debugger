@@ -8,7 +8,7 @@
 | 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
 | 实施/部署源 | /Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger；codex/canvas-liblib-layout；开工HEAD77e450138d06823ff92369c28bdc64ea9d09949e，干净 |
 | 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
-| 状态 | I1-I5历史已部署；N1/N2已部署v0.36.4、待用户手动验收；G1明确最新上游HTTP 502、内部原因未知，未修复 |
+| 状态 | I1-I5及N1/N2历史已部署；R1图片生成重复确认已部署v0.36.5、待用户手动验收；G1明确上游HTTP 502、内部原因未知，未修复 |
 | 风险/验证等级 | 真实debug+UI守门员L3，生产切换按L4保护；旧general/L0不采纳；禁止主动浏览器/业务验收与独立审核线程 |
 | 创建/最后更新 | 2026-10-03，北京时间；文件名保留2026-10-02反馈日期 |
 
@@ -230,3 +230,25 @@ N1/N2运行源码0fcea7dd2a91a5de427a1e1c9934c176e146fb9a，BUILD 0I77QmnNWDzJgl
 公网及服务器config/release/login均200，公网release0.36.4及X-SD2-Origin server-42-193正确；受保护template-studio匿名307符合现有权限。9个源码SHA及20个相关静态SHA一致；4服务/定时器active。COMPLETE握手exit0、发布锁正常释放。[统一diff](2026-10-02-feedback-primary-navigation.diff)/[发布证据](2026-10-02-feedback-primary-navigation.evidence.json)保留此前交付并加入本轮。既有更新检测、同渠道SemVer、稍后去重、手动检查及刷新确认源码核对，未做更新弹窗实际操作验收。
 
 未做浏览器/截图/功能回归/付费生成/DB写或独立审查。G1是只读故障定位，不是502恢复；内部原因和上游是否执行未知。守门员首general/L0已纠正debug+ui+deploy/L3，生产切换继续回退/数据保护，误判记入全局日志。
+
+## R1图片生成重复确认（2026-10-03）
+
+用户原文：“不要老是反复提醒我！！我不需要这个提醒，因为我根本没有修改过任何！”。截图为“确认生成”，不是未保存关闭提醒。正式原件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-confirm/codex-clipboard-f5514b6f-ae53-432d-bb56-8ddb68123c16.png；来源用户剪贴板，795x751可读、原件副本SHA256一致29f2362016356ef7c8b548065296dc564b02188e19982bf5cb6164065465eb3f；索引已登记，私有不上传Git或公网。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| R1 | 去掉图片生成重复确认 | 点击生成直接提交，不再弹出截图中的提醒；原请求未确认时只查询、不重发及防重复提交保护保留 | 代码和发布检查完成，v0.36.5已部署、待用户手动验收；未执行生成或浏览器功能验收 |
+
+根因：ImageStudioBlock.submit只要reproduceSourceTaskId存在，或任意历史任务status=uncertain，就弹“新建生成任务”确认，与用户是否修改无关；历史记录保留导致每次触发。取消该确认，不加“已看过”标记或隐藏费用/状态，也不依赖dirty做另一层误判。保留pendingSubmission查询原请求、submitLock/moduleDeleteLock、请求编号持久化与后端幂等、输入校验；恢复设置本身不生成。真实未保存关闭保护、删除及主动放弃核对确认不改，不批量取消全站弹窗。
+
+本轮唯一UI修改studio.tsx删除7行，其余package.json/lock仅0.36.5版本、release.ts用户更新摘要。无需新组件/开源依赖或DB改动；直接复用现有同步提交锁和同一requestId查询保护。本轮直接完成并自行Review；未修改Provider、点数、后台任务数据或自动重试生成。
+
+### R1发布回执
+
+已部署v0.36.5，运行源码47d3528c3a2b5715e81cfb4a64626c1d39abf938，BUILD jecj9uPdtiWkqyM2f-FR7。应用分支codex/canvas-liblib-layout已push及远端核对；回退标签rollback/2026-10-03-before-generation-confirm-v0.36.5已推送，指向上一健康0fcea7dd2a91a5de427a1e1c9934c176e146fb9a。旧构建/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0365、保护记录/srv/video-api-debugger/backups/sd2-feedback-v0365保留。
+
+实际发布检查：git diff/cached --check及完整4文件Review通过；版本与依赖图仅版本变化；发布bash/node语法核对通过。git archive精确提交排除docs/materials、env、DB、运行资产；SHA256 1c8393f3d9f1c82a52667f9e3acbf5bd7fd32666732a20d559060b566a584784。服务器release内NEXT_DIST_DIR=.next-prod-candidate npm run build完整通过，含lint/types；候选static/chunks已不存在“这会新建图片生成任务”字符串，摘要符合本次更新。既有升级检测/弹窗仍用单一版本源、同渠道SemVer、稍后去重及刷新前确认，未做真实更新交互验收。
+
+发布活动登记/flock和旧commit/BUILD守卫实际执行；API/scripts/Prisma、Provider/worker、鉴权/成本/点数未变。源码同步保护持久目录，gouki构建，root仅已有发布管理；只重启sd2-gray，worker PID1241475/启动时间/单元前后不变。SCP及首次只读核对连接被关闭，按既有SSH重新建立非复用连接后上传和核对成功，未改变账号或权限；非代码/构建失败。
+
+本机和公网config/release/login 200，公网v0.36.5及X-SD2-Origin server-42-193正确；template-studio匿名307符合已有权限。4个改动源码SHA、20个相关公网静态SHA一致，4服务/定时器active；COMPLETE握手exit0并释放发布锁。[证据](2026-10-02-feedback-primary-navigation.evidence.json)保留此前交付层，[统一diff](2026-10-02-feedback-primary-navigation.diff)更新本轮累计应用差异。未执行浏览器/截图/生成实验/自动功能回归/独立审核，未写DB/账务；发布检查不等于用户功能验收。守门员L3、本轮无新增误判或越界。

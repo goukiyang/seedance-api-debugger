@@ -1,31 +1,31 @@
 diff --git a/package-lock.json b/package-lock.json
-index 27b7df7..0fb496e 100644
+index 27b7df7..f0fe23f 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -1,12 +1,12 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.4",
++  "version": "0.36.5",
    "lockfileVersion": 3,
    "requires": true,
    "packages": {
      "": {
        "name": "video-api-debugger",
 -      "version": "0.36.2",
-+      "version": "0.36.4",
++      "version": "0.36.5",
        "dependencies": {
          "@aws-sdk/client-s3": "^3.1041.0",
          "@aws-sdk/s3-request-presigner": "^3.1041.0",
 diff --git a/package.json b/package.json
-index 19794d5..38603bc 100644
+index 19794d5..600b78c 100644
 --- a/package.json
 +++ b/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.4",
++  "version": "0.36.5",
    "private": true,
    "scripts": {
      "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -91,7 +91,7 @@ index a9babaf..cdf1e2b 100644
 +}
 +@media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
 diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
-index 1987311..9cff3a0 100644
+index 1987311..fa8bb5b 100644
 --- a/src/app/image-studio/studio.tsx
 +++ b/src/app/image-studio/studio.tsx
 @@ -35,7 +35,7 @@ import { StudioGlobalSettingsDialog } from './global-settings-dialog';
@@ -278,7 +278,21 @@ index 1987311..9cff3a0 100644
        if (fixedOverride) setFixedReferences(result.fixedReferences || fixedOverride);
        else if (manualSettings) setFixedReferences(current => JSON.stringify(fixedReferencePayload(current)) === JSON.stringify(fixedReferencePayload(fixedSnapshot)) ? result.fixedReferences || fixedSnapshot : current);
        onModuleChange(result);
-@@ -1212,7 +1267,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -928,13 +983,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   async function submit(retryTask?: StudioTask) {
+     if (pendingSubmission) { await querySubmission(); return; }
+     if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
+-    if (reproduceSourceTaskId || tasks.some(task => task.status === 'uncertain')) {
+-      submitLock.current = true;
+-      let accepted = false;
+-      try { accepted = await confirm('这会新建图片生成任务，可能再次产生上游费用。恢复原图不会重新生成；确定按当前设置新建生成任务吗？', { title: '确认生成', confirmLabel: '新建生成任务' }); }
+-      finally { submitLock.current = false; }
+-      if (!accepted) return;
+-    }
+     if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
+       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
+       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
+@@ -1212,7 +1260,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
          </label>
          {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
          <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : settingsDirty ? '设置未保存' : '已保存'}</span>
@@ -287,7 +301,7 @@ index 1987311..9cff3a0 100644
          <button type="button" title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={`删除${templateWorkbench ? '模块' : '模板'}：${name}`}
            disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
            onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : templateWorkbench ? '删除模块' : '删除模板'}</button>
-@@ -1233,7 +1288,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1233,7 +1281,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
      <div className={styles.workspace}>
        <section className={styles.inputs} aria-label="生成参数">
          {reproduceSourceTaskId && <p role="status" className={styles.muted}>历史复现模式：沿用当时的参考图，合并当前通用与模块上下文；不会自动提交或扣积分。<button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button></p>}
@@ -296,7 +310,7 @@ index 1987311..9cff3a0 100644
            <header className={styles.materialHeading}><h3>主图</h3>
              <select aria-label="主图数量上限" value={referenceLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => {
                const next = Number(event.target.value);
-@@ -1245,8 +1300,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1245,8 +1293,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
            <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
              <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
                onChangeRole={(image, index) => changeImageRole(image, index, false)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
@@ -307,7 +321,7 @@ index 1987311..9cff3a0 100644
              </StudioReferenceGrid>
            </div>
          </section>
-@@ -1466,6 +1521,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1466,6 +1514,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
            {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
          </select></label>
        </div>
@@ -319,7 +333,7 @@ index 1987311..9cff3a0 100644
        <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
          <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
        {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
-@@ -1498,9 +1558,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1498,9 +1551,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
            </select>
          </label>
        </div>
@@ -662,14 +676,14 @@ index bffd9e1..e44e405 100644
          if (error instanceof StudioReferencePolicyError) throw new StudioError(error.message, error.status);
          throw error;
 diff --git a/src/lib/release.ts b/src/lib/release.ts
-index d26bc6f..781bb19 100644
+index d26bc6f..08adf25 100644
 --- a/src/lib/release.ts
 +++ b/src/lib/release.ts
 @@ -1,6 +1,6 @@
  import packageInfo from '../../package.json';
  
 -export const release = { version: packageInfo.version, channel: 'production', summary: '模板工作台分开显示文案与视频状态；复用历史输入只新建模块。图片记录刷新和加载更多保留已有内容，恢复入口明确为查询状态；视频模型与LoRA按通道识别，模块称呼和记录时间更清楚。' };
-+export const release = { version: packageInfo.version, channel: 'production', summary: '模块保存按钮移到数量设置下方；新建图片模块和模板默认最多选 1 张主图，已有设置不变。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '生成图片不再反复弹出新建任务确认；保留防重复提交和原请求查询保护。' };
  export function newerRelease(remote: string, local: string) {
    const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
    const a = parse(remote), b = parse(local);
