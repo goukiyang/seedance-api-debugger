@@ -617,3 +617,21 @@ D2补充核对：AdminUsersClient quickView初值all、筛选初值all；过滤�
 服务/公网/回退：sd2-gray.service active，本地/api/config 200、本地/api/release 0.37.4，公网/api/config、/api/release、/login、/assets均200且来源server-42-193，匿名摘要空且private/no-store，login含同一BUILD；9份线上应用源码SHA匹配commit。仅受影响共享入口及局部模块路由33份去重静态中12份新/改变资源公网200且SHA与产物一致，21份路径和内容不变复用旧证据，不重复全站40资源检查。回退tag rollback/2026-10-04-before-dark-ui-v0.37.4已推送，解引用为1c9930c3185bc9f0f61094873ad92444c4dbdadf；旧源码releases/1c9930c3185bc9f0f61094873ad92444c4dbdadf及旧BUILD J3lGF2j4oXVNQCRQ_lYos保留在.next-prod-before-sd2-d1-v0374-b127209，更早回退不删。worker前后unit、MainPID1241475、启动时间和ExecMainStatus相同，未重启/排空/强杀；既有视频timer active。storage/uploads/videos软链、关键子目录写权限和env元信息不变，未读env/DB内容、未写DB/迁移、未付费。
 
 正式根本机[本轮允许范围统一diff](../../docs/materials/2026-10-04-dark-ui-periodic-list/implementation-v0.37.4.diff)、[部署证据JSON](../../docs/materials/2026-10-04-dark-ui-periodic-list/deployment-v0.37.4.json)可访问，私有且不Git/archive。正式根只同步本工单与资料索引，不覆盖旧src及原dirty。守门员finish按实际中文修改/提交/推送/部署意图识别L3-visible-runtime，项目真实结果层遵循用户手动验收例外，未自动浏览器/DOM/截图/业务功能测试，不冒充视觉效果通过。无分类误判，无范围外业务修改，无发布阻塞。遗留：D1真实暗色对比/页面/弹窗效果待用户手动；D2具体列表待答；本轮无附件原件缺口，历史C5-C8截图原件及系统双击边界不被本轮抹去。
+
+### P1播放时隐藏封面按钮（2026-10-04）
+
+用户原文：“单击播放后，封面不要出现播放按键”。本轮新文字需求，无附件，文本v1，不替代既有D1或C5-C8记录。实际源码开工干净f535246，生产复核b127209/v0.37.4/BUILD ZgKKw-0pLsNEIe24xVMJt，sd2-gray.service active；正式根原dirty保护。守门员start实际修改样式/提交推送/部署中文intent识别L3-visible-runtime，按项目规则用户手动验收，不自动浏览器/截图/功能测试或审核线程。本补丁单包，沿用现有发布链路，PATCH0.37.5同一交付不重抬。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| P1 | 播放时隐藏封面按钮 | 播放期间hover/focus均不显示中央按钮；保留点击、键盘、等待和错误反馈，完成构建与部署检查 | 已部署0.37.5，待用户手动验收 |
+
+根因：InlineVideoCover.module.css原.stage[data-playing]隐藏规则被后面的.stage:hover/.stage:focus-within同优先级opacity:1覆盖，鼠标留在封面时按钮再次出现。修共享组件：移除这条覆盖，隐藏条件明确排除data-starting/data-error；TSX只增加现有starting/error的显示状态属性，不改播放/暂停/重试处理。默认/暂停图标仍显示，等待spinner与错误retry/notice保留；透明全幅button、键盘focus-visible边框、aria-label/aria-busy及单击暂停/继续不变。全量引用检索当前仅assets非选择模式视频卡使用，共用实现已统一，不改素材选择器、其他视频控件、独立查看、反应、互斥或进度恢复。D1配色/C5-C8/U1保持，D2具体列表仍待答，未改额度/权限/数据或依赖。
+
+整批发布前检查：本地npm run build退出0，含内置lint/types，仅既有警告；git diff --check通过，允许范围7文件及锁文件仅根版本两处变化核对通过。self Review核对透明button/focus ring/aria-label/等待/重试节点与播放处理均保留，源码只两处显示改动；编译CSS含[data-playing]:not([data-starting]):not([data-error])且opacity:0，没有hover/focus强制显示覆盖，不添加照抄CSS测试。延用已有归档隐私排除、reservation/flock、候选构建/回退、数据/worker保护链路，仅补本次标记与layout/assets影响静态核对；脚本bash -n、node --check通过。未执行浏览器/功能验收。
+
+正式交付：北京时间2026-10-04 06:53:11发布v0.37.5，应用提交da4e2852632a4ca217d6b98c93954b7ca512617c，BUILD FkdpYXAklqREmAjtSKyog，入口https://sd2.youdooart.com/assets。5份应用文件仅InlineVideoCover.tsx/module.css、package.json/package-lock.json、src/lib/release.ts；另2份本工单/资料索引，共7份允许范围。应用分支及rollback/2026-10-04-before-playing-cover-v0.37.5已推送且ls-remote可见，tag解引用为健康0.37.4的b12720988c80376194444d98320e163b62f35ca8；独立git archive排除env、materials、storage/uploads/videos、数据库及运行产物，SHA256 74b1da4d9c1f6e467bfffcab9fa738ed590d4b66d255d9fd4ea48ee16f658417服务器核对一致。reservation与flock实际启用，候选含本次显示条件及D1/C5-C8/U1保留标记，NEXT_DIST_DIR=.next-prod-candidate npm run build退出0含内置lint/types，仅既有警告，失败守旧/自动回退机制保持。
+
+运行与公网：sd2-gray.service active，本地config 200/release 0.37.5；公网config/release/login/assets均200且X-SD2-Origin=server-42-193，匿名摘要空、private/no-store，login含同一BUILD。5份线上应用源码SHA与commit一致；仅layout/assets影响范围20份去重静态中4份新/改变资源公网200且SHA一致，16份路径及内容未变复用0.37.4，不重跑全站静态或浏览器/业务测试；新CSS含排除等待/错误的播放中opacity:0，JS含对应显示属性。旧0.37.4源码releases/b12720988c80376194444d98320e163b62f35ca8、旧BUILD ZgKKw-0pLsNEIe24xVMJt在.next-prod-before-sd2-p1-v0375-da4e285保留，更早回退不删。worker unit、MainPID1241475、启动时间及ExecMainStatus前后一致，未重启/排空/强杀，视频timers active；数据软链/关键目录写权限及env元信息不变，未读env/DB内容、未写DB、付费或变权限。
+
+正式根本机[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.5.diff)、[0.37.5发布证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.5.json)可访问，仍私有不Git/archive；既有媒体主题资料复用，不新建说明/设计文档。正式根只同步两份记录，原dirty/未跟踪资料保持，不部署正式根旧src。守门员start/finish实际P1 UI/运行意图均L3-visible-runtime，无归类误判，真实结果层按项目用户手动验收例外不自动执行；通用上线授权提示由本轮明确授权满足。发布阻塞无；实际hover/focus、点击暂停/继续、等待/重试效果待用户手动，D2具体列表仍待答，原截图缺口与OS双击时序边界保持。
