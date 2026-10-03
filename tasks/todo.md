@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [模板保存与主图默认 N1/N2、最新生成异常 G1](todo/2026-10-02-feedback-primary-navigation.md#图片模块保存位置主图默认与g1诊断2026-10-03)：N1/N2已部署v0.36.4，源码0fcea7dd2a91a5de427a1e1c9934c176e146fb9a、BUILD 0I77QmnNWDzJglbNdkjLN，20公网静态/9源码一致及4服务active；用户手动验收待办。N1保存按钮数量设置下方靠右留白，N2新建/缺省主图最多1张、已有设置不覆盖。G1只读明确最新3条10-12秒HTTP 502无图，接口内部原因未知、不重发；[本轮附件索引](../docs/materials/index.md#模板保存与最新生成异常2026-10-03)。后续待办：待确认状态应清楚展示已有HTTP错误事实，不改变未知受理和退款保护。
 - [ ] 2026-10-02：主图与导航反馈优化，正文见 `tasks/todo/2026-10-02-feedback-primary-navigation.md`。
 - [主图导航及视频参数 I1-I6](todo/2026-10-02-feedback-primary-navigation.md)：v0.36.3已部署，最新运行源码8315f02776290cda1c0f1e7286856d193f95dfca、BUILD TIe6lesNJcjyQirM3FMpx；I1-I5代码/部署完成待用户手动，I3模板工作现场按surface/user本地持久化并迁移旧session记录。D1最新候选内置检查/4服务/20相关公网静态/2变更源码一致通过，首次整批27静态/20源码证据作为历史保留；[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)。正式资料根目录/Volumes/Data/Projects/video-api-debugger；W1视频标注原图仍待归档，不称附件齐全；I6故障阶段明确，底层网络/代理/上游原因无法追溯待查，不改Provider/等待/重试/积分或DB。
 - [10月2日后台反馈原文与截图](../docs/materials/index.md#当日后台反馈2026-10-02)：截至23:07北京时间2条new；主图缩略图增大约30%及锁定张数后隐藏添加入口、手机/平板导航。完整JSON与1张原截图已归项目资料目录；当前实施进度见本轮I1-I4工单，未归档生产反馈。
