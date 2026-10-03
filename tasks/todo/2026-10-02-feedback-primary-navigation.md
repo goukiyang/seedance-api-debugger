@@ -513,3 +513,72 @@ ReleaseNotice在同一窗口展示具体未保存内容或保存/上传状态；
 - 守门员finish按实际中文修改/提交/推送/部署意图识别L3-visible-runtime；local/build/Git/runtime证据具备，real-result按项目用户手动验收约定不自动执行，不能称功能验收通过。本实施轮无归类误判，不重复start；历史方案纠偏记录保留。正式根仅同步本工单和资料索引，原有dirty主todo及其他未跟踪资料不覆盖、不提交。
 
 验收缺口：网站更新最终确认、取消/失败后继续编辑、上传结束重新判断、小屏及焦点等实际行为待用户手动；地址栏刷新、关闭页签和系统权限仍为必要原生平台例外。无未解决实施或发布阻塞。
+
+### C5-C7导航与媒体封面交互（2026-10-03）
+
+本轮是用户新需求，不是U1补验收；已授权修改、同类统一、聚焦提交推送及常规安全部署。实际源码根/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，开工f881e06；重新核对正式运行39010f7/v0.37.1/BUILD weh6ZSLi1ojK25-2vyXQm，正式资料根64a4856及原dirty保持。PATCH目标0.37.2，不用正式根旧源码部署，U1网站确认及同窗口更新保护保留。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| C5 | 顶部导航固定 | 页面滚动时顶部导航不移出视野 | 已部署v0.37.3，待用户手动验收 |
+| C6 | 封面点击与查看 | 模板图片单击恢复配置双击放大；资产视频单击播放独立查看靠右 | 已部署v0.37.3，待用户手动验收 |
+| C7 | 点赞收藏统一 | 封面左上角悬停出现键盘触屏也可操作 | 已部署v0.37.3，待用户手动验收 |
+| C8 | 顶部版本号样式 | 版本文字为当前约一半且正常字重，品牌名不变 | 已部署v0.37.3，待用户手动验收 |
+
+用户原文及标记：Comment1为https://sd2.youdooart.com/template-studio，1068x871，target html>body>div.shell-root>header.composer-topbar：“顶部固定不会应为鼠标滚轮受影响往上跑”。Comment2同页target article.studio_result__rzOwd:nth-of-type(1)>div.studio_resultMedia__GcG6u>button.studio_preview__dd3Dz>img：“单击不再是放大图片，改为双击才是查看图片，鼠标移动上去的时候，会弹出双击放大 的文字提示气泡；单击改为恢复该图的配置贴到左侧生成设置处”。主请求：“资产管理页面，单击封面，不再是查看，而是点击播放，查看按键，单独做一个按键放在配置右边，靠右对齐；点赞和收藏，应该都在封面，缩略图的左上角，鼠标移动上去才会出现；排查下同类问题，统一修改”。截图显示v0.37.0，只作为用户实际旧客户端证据，不认定0.37.1回退。
+
+附件：浏览器评论截图1/2，来源本轮用户浏览器标记，用途为C5滚动导航及C6图片封面交互定位；原文件名/本地路径未提供，待补持久原件。当前没有可访问的原件路径，未归档，不猜旧PNG为本图，也不自动截屏代替原件；不因此阻塞已授权实现。文本记录v1，与U1原图不是替代关系，资料索引已登记缺口。
+
+实现及同类范围：共享ComposerTopbar改为视口固定，shell按ResizeObserver测得的真实高度留位；不按截图高度写特殊布局。image-studio与template-studio共用结果封面单击延迟恢复、双击仅预览，网站气泡“ 双击放大 ”，保留恢复按钮及独立查看用于键盘/触屏；跨卡片、切模块、卸载、路由及新输入取消待执行单击。恢复仍调用原restoreTask，保持当前模块、快照参考图分组和历史primaryMax，不提交生成、不扣费；只有原真实moduleDirty时弹网站保护。
+
+资产视频卡仅用既有合法play/preview源卡片内静音点击播放/暂停，不自动播放；缺源/错误明确提示及重试。互斥播放、过滤/切页/卸载停止，进度复用账号/内容隔离的useMediaPreviewState，下次恢复到暂停，原筛选/滚动/详情返回上下文保留。查看按钮在配置行最右端，图片仍按图片语义查看，选择模式及组合键选择不变。费用保持右上，反应位于左上，overlay不触发封面或生成。
+
+C7统一媒体卡片：资产、图片结果、任务缩略图共享TaskVideoThumbnail（tasks/admin outputs/projects/video-card/generate/template-generate/enhance）、模板视频关联任务、收藏/赞过中的图片视频音频、ResourceLibraryPicker及ReferenceAlbumPicker/图集详情。共享overlay支持hover/focus-within、触屏常显；对象key、数量、选中、pending、错误与禁用沿用原实现，按钮stopPropagation保留，链接不包住反应按钮。素材选择器单击仍选择，不换成播放/恢复，预览仍独立。模块、模板、视频草稿、文案等非媒体反应不迁到结果；完整详情/预览工具栏保留。官方资产注册的44px身份缩略图属管理行，不扩成媒体封面卡或无界改布局。
+
+依据：已读[MDN dblclick实际示例及事件顺序](https://developer.mozilla.org/en-US/docs/Web/API/Element/dblclick_event)和[WAI网站气泡模式](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/)，双击在两次click之后，采用可取消待执行点击，网站气泡有tooltip/aria-describedby及Esc；复用本项目媒体位置和反应实现，不安装新组件包。工具无原生内部worker入口，唯一lead执行可分包实现，不建用户线程或自动审核。
+
+发布边界：整批实现与记录后统一构建内置检查、self Review、归档/源/静态一致性、发布窗口与flock、回退、服务健康和数据保护；不浏览器操作/截图、自动功能回归、付费生成、DB写入、改权限/API/Provider/worker或依赖。效果待用户手动验收；本次diff与发布证据将归正式根私有docs/materials/2026-10-03-media-cover-interactions/，不公开素材。
+
+统一self Review修正：最初450ms单击窗口不能覆盖较慢的系统双击设置，本批改为1000ms保守有界窗口，任何第二次pointerdown均提前取消尚未执行的恢复，第二次click/detail>1不执行恢复；独立恢复按钮与键盘detail=0仍即时操作。浏览器未提供可靠读取系统双击间隔的接口，超过该窗口才发生第二击仍可能已经完成首击恢复，不能宣称任意OS设置下绝对双击不恢复；不回滚左侧新输入，不取消真实保护。播放用每卡请求序列忽略迟到拒绝，活动ID仅在仍等于本卡时清除；等待可取消，切卡/过滤/卸载会暂停，不影响另一卡的新播放。窄屏顶栏允许换行，ResizeObserver同步真实高度，不用固定截图尺寸。
+
+#### C5-C7正式发布与收尾（2026-10-04）
+
+本轮接收与开始记录为2026-10-03；正式发布完成于北京时间2026-10-04 00:10:42（登记ISO为2026-10-03T16:10:42.496Z），不因换日重抬应用版本。应用提交fb630d8c824e2fe4b868ae8146e861c5f761ee6d已推送codex/canvas-liblib-layout，唯一版本0.37.2，正式BUILD zCelY_zSjwH6rS-xpfzLN。入口：[模板工作台](https://sd2.youdooart.com/template-studio)、[资产管理](https://sd2.youdooart.com/assets)。后续记录提交仅同步工单/索引，不重新构建、重启或登记另一份应用发布。
+
+实际27个应用文件及核心内容：
+
+- src/components/ComposerTopbar.tsx、src/app/globals.css：视口固定顶栏、真实高度留位、媒体反应与查看行布局。
+- src/components/ResultImageCover.tsx、ResultImageCover.module.css：有界单击恢复/双击预览分流、全局待执行取消、网站气泡和键盘入口。
+- src/components/InlineVideoCover.tsx、InlineVideoCover.module.css：合法源静音点击播放/暂停、进度恢复、请求序列防迟到回调、真实等待/错误状态。
+- src/app/image-studio/studio.tsx、studio.module.css：接原restoreTask与预览，保留历史参数/脏草稿保护，独立查看，结果反应左上。
+- src/app/assets/page.tsx：视频卡内播放互斥、过滤停止、原选择与详情语义保留，查看靠右。
+- src/components/content-reactions/reactions.module.css、ContentCollections.tsx：共享hover/focus/触屏反应覆盖层及媒体收藏封面位置，非媒体对象不迁移。
+- src/components/TaskVideoThumbnail.tsx、src/app/tasks/page.tsx、src/app/admin/outputs/AdminOutputsClient.tsx、src/app/projects/[id]/page.tsx、src/app/projects/[id]/video-cards/[cardId]/page.tsx、src/components/generate/EnhanceVideoPageClient.tsx、GeneratePageClient.tsx、src/components/templates/TemplateGenerateClient.tsx：原有反应迁至对应缩略图，原可用条件不变，反应按钮不嵌入导航链接。
+- src/components/template-studio/VideoTemplateWorkbench.tsx、ResourceLibraryPicker.tsx、ResourceLibraryPicker.module.css、ReferenceAlbumPicker.tsx、src/app/collections/[id]/ReferenceAlbumDetailClient.tsx：关联媒体/选择器同类覆盖层，选择仍选择，预览独立，选用顺序和费用不遮挡。
+- package.json、package-lock.json、src/lib/release.ts：PATCH单一来源及本次用户可感知摘要，依赖不变。
+
+发布检查：整批完成后本地npm run build退出0；统一self Review汇总修正后同一0.37.2再次npm run build退出0；服务器NEXT_DIST_DIR=.next-prod-candidate npm run build退出0，均含内置lint/类型检查，仅既有警告。git diff --check通过，部署脚本bash -n及公网检查脚本node --check通过。self Review核对取消/事件分流、跨卡/切模块待执行取消、单卡迟到回调、键盘/触屏入口、原恢复参数与对象key、旧资源选择器及U1刷新保护保留；不把源码推断当浏览器功能通过。
+
+Git/archive/运行证据：回退tag rollback/2026-10-04-before-media-cover-v0.37.2已推送，解引用为原运行39010f71e0dbb68b6557ffc31dc07976bd2da859。git archive明确排除env、私有materials、历史public/uploads/videos及数据库/运行数据，归档SHA256 df2337770d19783ebd008fd070762602f759dd37029c37f22f3c0761b6af421d经服务器核对。初次归档安全扫描发现仓库历史跟踪资料/视频而在上传前拒绝，改为明确排除后再归档，没有外发这些资料。发布窗口reservation与服务器flock实际启用；候选标记符合预期后切换，不原地build live，不server git pull。27份线上修改源码SHA与应用commit一致。
+
+服务与公网：sd2-gray.service active；服务器本地/api/config 200、/api/release为0.37.2；公网/api/config、/api/release、/login、/assets均200且X-SD2-Origin=server-42-193；匿名release summary空且private/no-store，login包含同一BUILD。受影响路由共38份去重JS/CSS中20份新/改变资源公网200且SHA与产物一致，18份路径及内容均未变，复用前轮证据不重复下载。双击气泡、卡内播放、固定顶栏、查看行及既有单窗口更新标记均在公网新资源。详见正式根本机[发布证据](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.2.json)、[本轮允许范围统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.2.diff)；目录私有，不Git或部署。
+
+回退与数据保护：旧源码/srv/video-api-debugger/releases/39010f71e0dbb68b6557ffc31dc07976bd2da859及旧BUILD weh6ZSLi1ojK25-2vyXQm保留，构建目录/srv/video-api-debugger/app/.next-prod-before-sd2-c567-v0372-fb630d8；两份更早before-resource及before-sd2-u1回退构建未删除。候选失败不碰live，切换后异常脚本恢复旧源码/构建。worker前后unit、MainPID1241475、ActiveEnterTimestamp及ExecMainStatus相同，未排空/重启/强杀；两个既有视频timer active。storage/public/uploads/public/videos软链及关键子目录写权限、env元信息不变，未读env或DB内容，无DB写入/迁移、付费生成、后端/API/权限/Provider/worker改动。
+
+收尾：正式根只同步本工单及docs/materials/index.md，原dirty tasks/todo.md与其他未跟踪资料保持，不复制正式根旧src部署。守门员按实际中文修改/提交/推送/部署意图识别L3-visible-runtime；real-result按用户手动验收规则不自动执行。本轮无归类误判。未解决发布阻塞：无。仍待用户手动确认滚动/小屏顶栏、单/双击、脏草稿取消与左侧设置、播放/暂停/失败恢复、反应悬停与触屏；1000ms窗口的系统双击边界及截图原件缺口已如实保留，地址栏刷新/关闭的原生保护等U1平台例外不变。
+
+#### C8最新补充（2026-10-04）
+
+用户浏览器comment，页面https://sd2.youdooart.com/template-studio，target .composer-topbar-version：“版本号用小一倍字体，不要加粗”。截图显示v0.37.1，仅是旧客户端参考，不据此认定已经发布的v0.37.2回退。浏览器评论截图3（C8），原文件名/本地路径未提供，待补持久原件；聊天可见不冒充已归档或已核验，不套用C5/C6或旧PNG。
+
+收到C8时v0.37.2已正式切换且公网/回退保护完成，因此本补丁升PATCH0.37.3，不复用已经交付的0.37.2号。品牌原字号15px、字重700；只对既有版本span增加0.5em（当前7.5px）及font-weight:400，品牌名称/字号、价格徽标、顶栏真实测高布局不改。版本仍package单源，更新检测、稍后去重、手动再开和U1刷新保护保留；仅同步版本及本次摘要，不引入依赖。C5-C7仍属本轮交付，未缩成仅字体任务。整批补丁之后只做构建内置检查及安全发布，效果待用户手动。
+
+#### C8正式发布与本轮最终对账（2026-10-04）
+
+北京时间2026-10-04 00:25:53正式发布v0.37.3，应用提交1c9930c3185bc9f0f61094873ad92444c4dbdadf已推送codex/canvas-liblib-layout，BUILD J3lGF2j4oXVNQCRQ_lYos。C5-C7在已发布0.37.2基础上保留，固定表C5-C8完整保留，均待用户手动。C8应用只改src/app/globals.css、package.json、package-lock.json、src/lib/release.ts四文件；另有本工单和资料索引记录，不改品牌名称、业务接口或依赖。
+
+本地npm run build、服务器NEXT_DIST_DIR=.next-prod-candidate npm run build均退出0，含内置lint/类型检查，仅既有警告；git diff --check、bash -n、node --check通过。编译CSS明确包含.composer-topbar-version{font-size:.5em;font-weight:400}，C5-C7/U1相关候选标记保留；四份线上补丁源码SHA与提交一致。公网/api/config、/api/release、/login、/assets均200且X-SD2-Origin=server-42-193，匿名release为0.37.3、summary空、private/no-store，login含同一BUILD；本地config 200、release版本一致、sd2-gray.service active。仅检查共享顶栏及模板工作台受影响静态：4份新/改变JS/CSS公网200且SHA与产物一致，17份路径/内容未变复用0.37.2证据，不重复浏览器/业务回归或无关全站下载。
+
+发布窗口reservation与flock实际启用，无并发活动；独立归档排除私有资料及运行数据，SHA256 24d4fd0e659d36d08334bc581f4b9f759789ac9a224b8308cc766f61e1669887经服务器核对。回退tag rollback/2026-10-04-before-topbar-version-v0.37.3已推送并指向健康0.37.2的fb630d8c824e2fe4b868ae8146e861c5f761ee6d；旧BUILD zCelY_zSjwH6rS-xpfzLN位于/srv/video-api-debugger/app/.next-prod-before-sd2-c8-v0373-1c9930c，旧源码/srv/video-api-debugger/releases/fb630d8c824e2fe4b868ae8146e861c5f761ee6d。0.37.1及更早回退构建不删。worker前后unit、MainPID1241475、启动时间及状态相同，未重启/排空/强杀；视频timer active。数据软链、关键子目录权限和env元信息保持，未读env/DB内容、未迁移或写DB、未付费生成。
+
+正式根本机[最终C5-C8统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.3.diff)、[0.37.3发布证据](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.3.json)可访问；0.37.2证据/差异保留。守门员finish实际中文intent识别ui/deploy/git，L3-visible-runtime，非general，无阻塞提醒；real-result遵循项目明确手动验收例外，不自动操作浏览器/截图/功能测试，不冒充真实画面通过。无归类误判，无范围外业务修改，无未解决发布卡点；截图1/2/3持久原件缺失及1000ms系统双击边界仍登记，平台原生离开保护例外不变。正式根仅同步两份记录，原有dirty和未跟踪资料保持；记录提交不再次升级、发布或重启。
