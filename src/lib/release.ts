@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生成图片不再反复弹出新建任务确认；保留防重复提交和原请求查询保护。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '小确认框和命名框靠近触发按钮，不再跑到角落；小屏和输入键盘弹出时自动避让。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

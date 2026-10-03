@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './ProductDialog.module.css';
 
-type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number };
+type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number; anchor?: HTMLElement | null };
 type Request = Options & { message: string; value?: string; anchor: HTMLElement | null };
 
 function ProductDialog({ request, onResolve }: { request: Request; onResolve: (value: string | null) => void }) {
@@ -16,7 +16,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   const titleId = useId();
   const descriptionId = useId();
   const [value, setValue] = useState(request.value || '');
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; anchored: boolean } | null>(null);
   const naming = request.value !== undefined;
   useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, initialFocusRef: naming ? input : cancel, onDismiss: () => onResolve(null) });
   useEffect(() => {
@@ -24,20 +24,49 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
     (naming ? input.current : cancel.current)?.focus({ preventScroll: true });
     const place = () => {
       const panel = dialog.current;
-      if (!naming || !request.anchor?.isConnected || window.innerWidth < 640 || !panel) { setPosition(null); return; }
-      const rect = request.anchor.getBoundingClientRect();
-      const width = panel.offsetWidth, height = panel.offsetHeight, gap = 8, margin = 16;
-      if (rect.bottom < margin || rect.top > window.innerHeight - margin || height > window.innerHeight - 2 * margin) { setPosition(null); return; }
-      const top = rect.bottom + gap + height <= window.innerHeight - margin ? rect.bottom + gap : rect.top - gap - height;
-      setPosition({ left: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)), top: Math.max(margin, Math.min(top, window.innerHeight - height - margin)) });
+      if (!panel) return;
+      const viewport = window.visualViewport;
+      const gap = 8, margin = 16;
+      const viewportWidth = viewport?.width ?? window.innerWidth;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const leftEdge = (viewport?.offsetLeft ?? 0) + margin;
+      const topEdge = (viewport?.offsetTop ?? 0) + margin;
+      const rightEdge = leftEdge + viewportWidth - 2 * margin;
+      const bottomEdge = topEdge + viewportHeight - 2 * margin;
+      panel.style.setProperty('--product-dialog-width', `${Math.min(440, Math.max(0, viewportWidth - 2 * margin))}px`);
+      panel.style.setProperty('--product-dialog-height', `${Math.max(0, viewportHeight - 2 * margin)}px`);
+      const width = panel.offsetWidth, height = panel.offsetHeight;
+      const clampLeft = (left: number) => Math.max(leftEdge, Math.min(left, rightEdge - width));
+      const clampTop = (top: number) => Math.max(topEdge, Math.min(top, bottomEdge - height));
+      const rect = request.anchor?.isConnected ? request.anchor.getBoundingClientRect() : null;
+      let next = { left: leftEdge + (rightEdge - leftEdge - width) / 2, top: topEdge + (bottomEdge - topEdge - height) / 2, anchored: false };
+      if (rect && rect.width > 0 && rect.height > 0 && rect.bottom > topEdge && rect.top < bottomEdge && rect.right > leftEdge && rect.left < rightEdge) {
+        // Flip around the control before falling back to the visible viewport center.
+        if (rect.bottom + gap + height <= bottomEdge) next = { left: clampLeft(rect.left), top: rect.bottom + gap, anchored: true };
+        else if (rect.top - gap - height >= topEdge) next = { left: clampLeft(rect.left), top: rect.top - gap - height, anchored: true };
+        else if (rect.right + gap + width <= rightEdge) next = { left: rect.right + gap, top: clampTop(rect.top), anchored: true };
+        else if (rect.left - gap - width >= leftEdge) next = { left: rect.left - gap - width, top: clampTop(rect.top), anchored: true };
+      }
+      setPosition(previous => previous?.left === next.left && previous.top === next.top && previous.anchored === next.anchored ? previous : next);
     };
     place();
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
-    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+    window.visualViewport?.addEventListener('resize', place);
+    window.visualViewport?.addEventListener('scroll', place);
+    const observer = new ResizeObserver(place);
+    if (dialog.current) observer.observe(dialog.current);
+    if (request.anchor?.isConnected) observer.observe(request.anchor);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      window.visualViewport?.removeEventListener('resize', place);
+      window.visualViewport?.removeEventListener('scroll', place);
+      observer.disconnect();
+    };
   }, [naming, request.anchor]);
-  return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position)}
-    style={position ? { left: position.left, top: position.top, margin: 0 } : undefined}
+  return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position?.anchored)}
+    style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto', margin: 0 } : undefined}
     aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}>
     <form onSubmit={event => { event.preventDefault(); if (!naming || value.trim()) onResolve(naming ? value.trim() : 'yes'); }}>
       <header className={styles.header}><h2 id={titleId}>{request.title || (naming ? '命名' : '确认操作')}</h2>
@@ -54,6 +83,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
 
 export function useProductDialog() {
   const [request, setRequest] = useState<Request | null>(null);
+  const trigger = useRef<HTMLElement | null>(null);
   const resolver = useRef<((value: string | null) => void) | null>(null);
   const resolve = useCallback((value: string | null) => {
     const pending = resolver.current;
@@ -62,12 +92,26 @@ export function useProductDialog() {
     pending?.(value);
   }, []);
   useEffect(() => () => { resolver.current?.(null); resolver.current = null; }, []);
+  useEffect(() => {
+    let clearTrigger: ReturnType<typeof setTimeout> | undefined;
+    const rememberTrigger = (event: MouseEvent) => {
+      const element = event.target instanceof Element ? event.target.closest<HTMLElement>('button, [role="button"], a[href], input[type="submit"], summary') : null;
+      trigger.current = element;
+      // Only use this click for its own action, never an unrelated later request.
+      clearTimeout(clearTrigger);
+      clearTrigger = setTimeout(() => { if (trigger.current === element) trigger.current = null; }, 0);
+    };
+    document.addEventListener('click', rememberTrigger, true);
+    return () => { document.removeEventListener('click', rememberTrigger, true); clearTimeout(clearTrigger); };
+  }, []);
   const ask = useCallback((message: string, options: Options, value?: string) => {
     // A repeated trigger never replaces or affirms an already open decision.
     if (resolver.current) return Promise.resolve(null);
     return new Promise<string | null>(done => {
       resolver.current = done;
-      setRequest({ ...options, message, value, anchor: document.activeElement instanceof HTMLElement ? document.activeElement : null });
+      const focused = document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest<HTMLElement>('button, [role="button"], a[href], input, textarea, select, summary') : null;
+      setRequest({ ...options, message, value, anchor: options.anchor !== undefined ? options.anchor : trigger.current || focused });
     });
   }, []);
   const confirm = useCallback(async (message: string, options: Options = {}) => (await ask(message, options)) !== null, [ask]);

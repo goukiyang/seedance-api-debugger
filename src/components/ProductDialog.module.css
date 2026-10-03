@@ -1,4 +1,4 @@
-.dialog { box-sizing: border-box; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid #465057; border-radius: 8px; background: #1a2023; color: #e6e8eb; box-shadow: 0 16px 48px rgb(0 0 0 / 35%); }
+.dialog { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: var(--product-dialog-width, min(440px, calc(100vw - 32px))); max-height: var(--product-dialog-height, calc(100dvh - 32px)); overflow: auto; padding: 20px; border: 1px solid #465057; border-radius: 8px; background: #1a2023; color: #e6e8eb; box-shadow: 0 16px 48px rgb(0 0 0 / 35%); }
 .dialog::backdrop { background: rgb(8 12 13 / 64%); }
 .dialog[data-anchored=true]::backdrop { background: rgb(8 12 13 / 18%); }
 .dialog[data-anchored=true] { position: fixed; right: auto; bottom: auto; }
