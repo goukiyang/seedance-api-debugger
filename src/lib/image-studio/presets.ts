@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { prisma } from '@/lib/prisma';
-import { MAX_REFERENCE_IMAGES } from './limits';
+import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODELS, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
 import { normalizeStudioRatio } from './ratios';
 import { saveStudioModule, StudioModuleError, validStudioModuleId } from './modules';
@@ -64,7 +64,7 @@ export async function listStudioPresets(user: ImageStudioIdentity) {
       id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: canSeeContext ? row.context : '', revision: row.updated_at.toISOString(),
       isShared: row.is_shared,
       canManageSharing: canManageStudioPreset(user, row),
-      model: row.model, quality: normalizeImageStudioQuality(row.model, row.quality), resolution: normalizeImageResolution(row.model, row.resolution || defaultImageResolution(row.model)), count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)), referencePolicy,
+      model: row.model, quality: normalizeImageStudioQuality(row.model, row.quality), resolution: normalizeImageResolution(row.model, row.resolution || defaultImageResolution(row.model)), count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || DEFAULT_STUDIO_PRIMARY_MAX)), referencePolicy,
       aspectRatio: row.aspect_ratio, contextConfigured: Boolean(row.context.trim()),
       images: ids.map(toPayload).filter((item): item is NonNullable<ReturnType<typeof toPayload>> => Boolean(item)),
       fixedReferenceCount: (fixedByPreset.get(row.id) || []).length,
@@ -94,9 +94,18 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const context = typeof body.context === 'string' ? body.context : '';
   const model = typeof body.model === 'string' && IMAGE_STUDIO_MODELS.includes(body.model as never) ? body.model : '';
   const count = Number(body.count);
-  const referenceLimit = body.referenceLimit === undefined ? MAX_REFERENCE_IMAGES : Number(body.referenceLimit);
   const ids = parseIds(body.referenceIds);
   let referencePolicy: StudioReferencePolicy | undefined;
+  if (body.referencePolicy !== undefined) {
+    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids); }
+    catch (error) {
+      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
+      throw error;
+    }
+  }
+  const referenceLimit = body.referenceLimit === undefined
+    ? referencePolicy?.primaryMax ?? DEFAULT_STUDIO_PRIMARY_MAX
+    : Number(body.referenceLimit);
   let fixedReferences: StudioFixedReference[] | undefined;
   if (body.fixedReferences !== undefined) {
     if (!isAdmin) throw new StudioModuleError('固定模板图只能由管理员修改', 403);
@@ -104,13 +113,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     catch (error) { throw new StudioModuleError((error as Error).message); }
   }
   if (!name || name.length > 80 || prompt.length > 20000 || context.length > 20000 || groupName.length > 40 || !model || !Number.isInteger(count) || count < 1 || count > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES || ids.length > MAX_REFERENCE_IMAGES) throw new StudioModuleError('模板内容无效');
-  if (body.referencePolicy !== undefined) {
-    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids); }
-    catch (error) {
-      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
-      throw error;
-    }
-  } else if (ids.length > referenceLimit) {
+  if (!referencePolicy && ids.length > referenceLimit) {
     throw new StudioModuleError(`旧版保存请求最多支持 ${referenceLimit} 张参考图`);
   }
   const aspectRatio = normalizeStudioRatio(body.aspectRatio);

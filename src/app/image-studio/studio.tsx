@@ -35,7 +35,7 @@ import { StudioGlobalSettingsDialog } from './global-settings-dialog';
 import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view';
 import type { SettingsValue } from './settings-controller';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
-import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
@@ -57,7 +57,7 @@ const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
 function moduleReferencePolicy(module: StudioModule): StudioReferencePolicy {
   const policy = module.referencePolicy;
   return { primaryIds: policy?.primaryIds ?? module.images.flatMap(image => image.id ? [image.id] : []),
-    primaryMin: policy?.primaryMin ?? 0, primaryMax: policy?.primaryMax ?? (module.referenceLimit || MAX_REFERENCE_IMAGES),
+    primaryMin: policy?.primaryMin ?? 0, primaryMax: policy?.primaryMax ?? (module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX),
     auxiliaryMax: policy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES, styleMax: policy?.styleMax ?? MAX_REFERENCE_IMAGES,
     referenceMax: policy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: policy?.useFixedReferences ?? true };
 }
@@ -519,7 +519,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [savedAsSignature, setSavedAsSignature] = useState('');
   const [prompt, setPrompt] = useState(module.prompt);
   const [count, setCount] = useState(module.count);
-  const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || MAX_REFERENCE_IMAGES)));
+  const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX)));
   const [primaryMin, setPrimaryMin] = useState(module.referencePolicy?.primaryMin ?? 0);
   const [auxiliaryLimit, setAuxiliaryLimit] = useState(module.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES);
   const [styleLimit, setStyleLimit] = useState(module.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES);
@@ -1521,6 +1521,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
         </select></label>
       </div>
+      <div className={styles.moduleSettingsActions}>
+        <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
+        {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
+      </div>
+      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
       <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
@@ -1553,9 +1558,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </select>
         </label>
       </div>
-      {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
-      <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
-      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
     </dialog>
     {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>)}</>;

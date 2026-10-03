@@ -17,6 +17,7 @@ import { getStudioModuleFixedReferences, parseStudioFixedReferences, type Studio
 import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, StudioStyleError } from './style-groups';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { defaultStudioReferencePolicy, getStudioModuleReferencePolicy, mapStudioReferencePolicy, parseStudioReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
+import { DEFAULT_STUDIO_PRIMARY_MAX } from './limits';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -284,7 +285,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       referencePolicy = defaultStudioReferencePolicy(referenceIds, workspace?.reference_limit);
     } else {
       try {
-        referencePolicy = await getStudioModuleReferencePolicy(ownerId, typeof moduleId === 'string' ? moduleId : defaultStudioModuleId(ownerId), referenceIds, workspace?.reference_limit);
+        referencePolicy = await getStudioModuleReferencePolicy(ownerId, typeof moduleId === 'string' ? moduleId : defaultStudioModuleId(ownerId), referenceIds, workspace?.reference_limit ?? DEFAULT_STUDIO_PRIMARY_MAX);
       } catch (error) {
         if (error instanceof StudioReferencePolicyError) throw new StudioError(error.message, error.status);
         throw error;

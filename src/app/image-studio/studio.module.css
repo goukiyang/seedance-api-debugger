@@ -61,6 +61,9 @@
 .referenceLimits { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0; font-size: 12px; }
 .referenceLimits label { display: inline-flex; align-items: center; gap: 6px; }
 .referenceLimits select { width: auto; min-width: 60px; padding: 5px 7px !important; }
+.moduleSettingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; margin: 22px 0 26px; padding-top: 16px; border-top: 1px solid #2d383d; }
+.moduleSettingsActions > p { min-width: 0; margin: 0; color: #adb6bd; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.moduleSettingsActions > button { min-width: 150px; margin-left: auto; white-space: nowrap; }
 .referenceToggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
 .page .referenceToggle input { width: 16px; height: 16px; margin: 0; accent-color: #8ce5d2; }
 .imageSectionHeading .referenceLimitControl { flex-wrap: wrap; }

@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
 import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, type ImageResolution } from './model-catalog';
-import { MAX_REFERENCE_IMAGES } from './limits';
+import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, parseStudioFixedReferences, removeStudioModuleFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, StudioFixedReferenceError } from './fixed-references';
@@ -75,7 +75,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const generation = resolveStudioModuleGenerationConfig(row, settings);
   const quality = normalizeImageStudioQuality(generation.model, row.quality);
-  const referenceLimit = Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES));
+  const referenceLimit = Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || DEFAULT_STUDIO_PRIMARY_MAX));
   const visibleTransientIds = ids.filter(id => assets.some(asset => asset.id === id));
   let referencePolicy;
   try { referencePolicy = await getStudioModuleReferencePolicy(ownerId, row.id, visibleTransientIds, referenceLimit); }
@@ -140,7 +140,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   const visible = rows.slice(0, 12);
   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined, identity)));
   if (includeDefault) {
-    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: MAX_REFERENCE_IMAGES, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity));
+    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: DEFAULT_STUDIO_PRIMARY_MAX, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity));
   }
   // Navigation must describe all saved modules, not just the first content page.
   const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
@@ -193,10 +193,23 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   const name = createOnly ? '未命名模块' : body.name;
   const prompt = createOnly ? '' : body.prompt;
   const count = createOnly ? 1 : body.count;
-  const referenceLimitValue = createOnly ? MAX_REFERENCE_IMAGES : body.referenceLimit;
-  const referenceLimit = referenceLimitValue === undefined ? MAX_REFERENCE_IMAGES : Number(referenceLimitValue);
   const ids = createOnly ? [] : body.referenceIds;
+  if (!Array.isArray(ids) || ids.length > MAX_REFERENCE_IMAGES || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
   let referencePolicy: StudioReferencePolicy | undefined;
+  if (!createOnly && body.referencePolicy !== undefined) {
+    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids as string[]); }
+    catch (error) {
+      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
+      throw error;
+    }
+  }
+  const savedModuleLimit = !createOnly && body.referenceLimit === undefined && !referencePolicy
+    ? await prisma.imageStudioModule.findFirst({ where: { id, owner_id: ownerId }, select: { reference_limit: true } })
+    : null;
+  const referenceLimitValue = createOnly ? DEFAULT_STUDIO_PRIMARY_MAX
+    : body.referenceLimit !== undefined ? body.referenceLimit
+      : referencePolicy?.primaryMax ?? savedModuleLimit?.reference_limit ?? DEFAULT_STUDIO_PRIMARY_MAX;
+  const referenceLimit = Number(referenceLimitValue);
   let fixedReferences: ReturnType<typeof parseStudioFixedReferences> | undefined;
   if (body.fixedReferences !== undefined) {
     if (!isAdmin) throw new StudioModuleError('固定模板图只能由管理员修改', 403);
@@ -206,15 +219,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   const revision = createOnly ? 0 : body.revision;
   if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof prompt !== 'string' || prompt.length > 20000
     || !Number.isInteger(count) || Number(count) < 1 || Number(count) > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES
-    || !Number.isInteger(revision) || Number(revision) < 0
-    || !Array.isArray(ids) || ids.length > MAX_REFERENCE_IMAGES || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
-  if (body.referencePolicy !== undefined) {
-    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids as string[]); }
-    catch (error) {
-      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
-      throw error;
-    }
-  } else if ((ids as string[]).length > referenceLimit) {
+    || !Number.isInteger(revision) || Number(revision) < 0) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
+  if (!referencePolicy && (ids as string[]).length > referenceLimit) {
     throw new StudioModuleError(`旧版保存请求最多支持 ${referenceLimit} 张参考图`);
   }
   const row = await prisma.$transaction(async tx => {
