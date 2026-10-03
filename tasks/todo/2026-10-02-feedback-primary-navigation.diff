@@ -1,31 +1,31 @@
 diff --git a/package-lock.json b/package-lock.json
-index 27b7df7..bdc4bc0 100644
+index 27b7df7..f391272 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -1,12 +1,12 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.6",
++  "version": "0.36.7",
    "lockfileVersion": 3,
    "requires": true,
    "packages": {
      "": {
        "name": "video-api-debugger",
 -      "version": "0.36.2",
-+      "version": "0.36.6",
++      "version": "0.36.7",
        "dependencies": {
          "@aws-sdk/client-s3": "^3.1041.0",
          "@aws-sdk/s3-request-presigner": "^3.1041.0",
 diff --git a/package.json b/package.json
-index 19794d5..947370d 100644
+index 19794d5..538a9af 100644
 --- a/package.json
 +++ b/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.6",
++  "version": "0.36.7",
    "private": true,
    "scripts": {
      "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -44,6 +44,36 @@ index c7ba3ff..94e0e82 100644
    let videoBranch: { id: string; title: string; status: string; is_primary: boolean } | null = null;
    if (requestedVideoBranchId) {
      const branch = await prisma.videoBranch.findUnique({
+diff --git a/src/app/image-studio/global-settings-dialog.tsx b/src/app/image-studio/global-settings-dialog.tsx
+index 835e734..ea2adab 100644
+--- a/src/app/image-studio/global-settings-dialog.tsx
++++ b/src/app/image-studio/global-settings-dialog.tsx
+@@ -1,6 +1,7 @@
+ 'use client';
+ 
+ import { useProductDialog } from '@/components/useProductDialog';
++import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+ 
+ import { useEffect, useRef } from 'react';
+ import { RefreshCw, Save, X } from 'lucide-react';
+@@ -14,6 +15,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
+ }) {
+   const { confirm, productDialog } = useProductDialog();
+   const dialog = useRef<HTMLDialogElement>(null);
++  const contextInput = useRef<HTMLTextAreaElement>(null);
+   useEffect(() => {
+     if (open) dialog.current?.showModal();
+     else dialog.current?.close();
+@@ -36,7 +38,8 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
+     <header className={styles.header}><h2>通用上下文</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
+     {editor.draft && <>
+       <label className={styles.label} htmlFor="studio-context">通用上下文</label>
+-      <textarea id="studio-context" rows={12} maxLength={20000} disabled={editor.loading}
++      <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={editor.controller.editContext} maxLength={20000} disabled={editor.loading || editor.saving || !open} />
++      <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={editor.loading}
+         value={editor.draft.context} onChange={event => editor.controller.editContext(event.target.value)} />
+       <p className={styles.label}>通用模型积分规则</p>
+       {IMAGE_STUDIO_MODELS.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
 diff --git a/src/app/image-studio/studio.module.css b/src/app/image-studio/studio.module.css
 index a9babaf..cdf1e2b 100644
 --- a/src/app/image-studio/studio.module.css
@@ -91,10 +121,18 @@ index a9babaf..cdf1e2b 100644
 +}
 +@media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
 diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
-index 1987311..fa8bb5b 100644
+index 1987311..8768514 100644
 --- a/src/app/image-studio/studio.tsx
 +++ b/src/app/image-studio/studio.tsx
-@@ -35,7 +35,7 @@ import { StudioGlobalSettingsDialog } from './global-settings-dialog';
+@@ -2,6 +2,7 @@
+ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
+ 
+ import { useProductDialog } from '@/components/useProductDialog';
++import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+ 
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
+@@ -35,7 +36,7 @@ import { StudioGlobalSettingsDialog } from './global-settings-dialog';
  import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view';
  import type { SettingsValue } from './settings-controller';
  import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
@@ -103,7 +141,7 @@ index 1987311..fa8bb5b 100644
  import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
  import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
  
-@@ -55,8 +55,11 @@ const models = IMAGE_STUDIO_MODELS;
+@@ -55,8 +56,11 @@ const models = IMAGE_STUDIO_MODELS;
  const fixedReferencePayload = (items: FixedStudioReference[]) => items.map(item => ({ assetId: item.id, note: item.note || '' }));
  const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
  function moduleReferencePolicy(module: StudioModule): StudioReferencePolicy {
@@ -117,7 +155,7 @@ index 1987311..fa8bb5b 100644
  }
  async function readResponse(response: Response) {
    const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
-@@ -152,21 +155,41 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+@@ -152,21 +156,41 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
    const [creating, setCreating] = useState(false);
    const [active, setActive] = useState('');
    const [selectedGroup, setSelectedGroup] = useState('');
@@ -167,7 +205,7 @@ index 1987311..fa8bb5b 100644
    const [coverPage, setCoverPage] = useState(() => {
      if (typeof window === 'undefined') return 0;
      try {
-@@ -406,21 +429,42 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+@@ -406,21 +430,42 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
        void loadModules();
      }
    }
@@ -216,7 +254,7 @@ index 1987311..fa8bb5b 100644
      <div className={styles.content}>
      <header className={styles.header}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : templateWorkbench ? '图片模块' : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
        <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
-@@ -475,7 +519,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -475,7 +520,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
    const [savedAsSignature, setSavedAsSignature] = useState('');
    const [prompt, setPrompt] = useState(module.prompt);
    const [count, setCount] = useState(module.count);
@@ -225,7 +263,7 @@ index 1987311..fa8bb5b 100644
    const [primaryMin, setPrimaryMin] = useState(module.referencePolicy?.primaryMin ?? 0);
    const [auxiliaryLimit, setAuxiliaryLimit] = useState(module.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES);
    const [styleLimit, setStyleLimit] = useState(module.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES);
-@@ -506,7 +550,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -506,7 +551,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
    const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
    const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
    const [moduleSaveError, setModuleSaveError] = useState('');
@@ -234,7 +272,19 @@ index 1987311..fa8bb5b 100644
    const moduleSaveLock = useRef(false);
    const restoredDraftKey = useRef('');
    const autoSaveAttempt = useRef('');
-@@ -572,21 +616,31 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -561,6 +606,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const loadedMore = useRef(false);
+   const uploadLock = useRef(false);
+   const moduleDialog = useRef<HTMLDialogElement>(null);
++  const moduleContextInput = useRef<HTMLTextAreaElement>(null);
++  const changeModuleContext = (value: string) => {
++    if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。');
++    setModuleContext(value); setModuleSaveError('');
++  };
+   const resumeModulePreview = useRef(false);
+   const fileInput = useRef<HTMLInputElement>(null);
+   const auxiliaryFileInput = useRef<HTMLInputElement>(null);
+@@ -572,21 +622,31 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
    const draftKey = `sd2-image-studio-draft:${suffix}`;
    const pendingKey = `sd2-image-studio-pending:${suffix}`;
    const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
@@ -270,7 +320,7 @@ index 1987311..fa8bb5b 100644
      moduleDialog.current?.close();
    }
    useDialogDismiss({ open: true, dialogRef: moduleDialog, nativeDialog: true, onDismiss: closeModuleDialog });
-@@ -641,6 +695,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -641,6 +701,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
        setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
        setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
        setSavedFixedReferences(result.fixedReferences || fixedSnapshot);
@@ -278,7 +328,7 @@ index 1987311..fa8bb5b 100644
        if (fixedOverride) setFixedReferences(result.fixedReferences || fixedOverride);
        else if (manualSettings) setFixedReferences(current => JSON.stringify(fixedReferencePayload(current)) === JSON.stringify(fixedReferencePayload(fixedSnapshot)) ? result.fixedReferences || fixedSnapshot : current);
        onModuleChange(result);
-@@ -928,13 +983,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -928,13 +989,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
    async function submit(retryTask?: StudioTask) {
      if (pendingSubmission) { await querySubmission(); return; }
      if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
@@ -292,7 +342,7 @@ index 1987311..fa8bb5b 100644
      if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
        || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
        setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
-@@ -1212,7 +1260,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1212,7 +1266,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
          </label>
          {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
          <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : settingsDirty ? '设置未保存' : '已保存'}</span>
@@ -301,7 +351,7 @@ index 1987311..fa8bb5b 100644
          <button type="button" title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={`删除${templateWorkbench ? '模块' : '模板'}：${name}`}
            disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
            onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : templateWorkbench ? '删除模块' : '删除模板'}</button>
-@@ -1233,7 +1281,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1233,7 +1287,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
      <div className={styles.workspace}>
        <section className={styles.inputs} aria-label="生成参数">
          {reproduceSourceTaskId && <p role="status" className={styles.muted}>历史复现模式：沿用当时的参考图，合并当前通用与模块上下文；不会自动提交或扣积分。<button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button></p>}
@@ -310,7 +360,7 @@ index 1987311..fa8bb5b 100644
            <header className={styles.materialHeading}><h3>主图</h3>
              <select aria-label="主图数量上限" value={referenceLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => {
                const next = Number(event.target.value);
-@@ -1245,8 +1293,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1245,8 +1299,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
            <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
              <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
                onChangeRole={(image, index) => changeImageRole(image, index, false)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
@@ -321,7 +371,19 @@ index 1987311..fa8bb5b 100644
              </StudioReferenceGrid>
            </div>
          </section>
-@@ -1466,6 +1514,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1446,7 +1500,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
+     }}>
+       <header className={styles.header}><h2>模块上下文</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
+-      {contextEditable ? <textarea aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => { if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。'); setModuleContext(event.target.value); setModuleSaveError(''); }} /> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
++      {contextEditable ? <>
++        <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />
++        <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => changeModuleContext(event.target.value)} />
++      </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
+       <div className={styles.referenceLimits}>
+         <label>主图最少 <select aria-label="主图最少张数" value={primaryMin} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setPrimaryMin(Number(event.target.value))}>
+           {Array.from({ length: referenceLimit + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
+@@ -1466,6 +1523,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
            {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
          </select></label>
        </div>
@@ -333,7 +395,7 @@ index 1987311..fa8bb5b 100644
        <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
          <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
        {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
-@@ -1498,9 +1551,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+@@ -1498,9 +1560,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
            </select>
          </label>
        </div>
@@ -343,6 +405,93 @@ index 1987311..fa8bb5b 100644
      </dialog>
      {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
    </section>)}</>;
+diff --git a/src/components/ContextClipboardActions.module.css b/src/components/ContextClipboardActions.module.css
+new file mode 100644
+index 0000000..f550177
+--- /dev/null
++++ b/src/components/ContextClipboardActions.module.css
+@@ -0,0 +1,8 @@
++.bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px 12px; flex-wrap: wrap; min-width: 0; margin: 8px 0; }
++.actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
++.message { flex: 1 1 180px; min-width: 0; color: #adb6bd; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
++.bar .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 10px; border: 1px solid #465057; border-radius: 6px; background: #202629; color: #c6d0d5; font: inherit; font-size: 13px; cursor: pointer; }
++.bar .button:hover:not(:disabled) { background: #30393d; }
++.bar .button:active:not(:disabled) { filter: brightness(.92); }
++.bar .button:focus-visible { outline: 2px solid #79daca; outline-offset: 3px; }
++.bar .button:disabled { opacity: .5; cursor: not-allowed; }
+diff --git a/src/components/ContextClipboardActions.tsx b/src/components/ContextClipboardActions.tsx
+new file mode 100644
+index 0000000..127b381
+--- /dev/null
++++ b/src/components/ContextClipboardActions.tsx
+@@ -0,0 +1,67 @@
++'use client';
++
++import { useEffect, useRef, useState, type RefObject } from 'react';
++import { ClipboardPaste, Copy } from 'lucide-react';
++import styles from './ContextClipboardActions.module.css';
++
++type Props = {
++  value: string;
++  textareaRef: RefObject<HTMLTextAreaElement>;
++  onPaste(value: string): void;
++  maxLength: number;
++  disabled?: boolean;
++  canCopy?: boolean;
++};
++
++export function ContextClipboardActions(props: Props) {
++  const { value, textareaRef, maxLength, disabled = false, canCopy = true } = props;
++  const latest = useRef(props);
++  latest.current = props;
++  const mounted = useRef(true);
++  const working = useRef(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
++
++  async function copy() {
++    if (working.current || disabled || !canCopy || !value) return;
++    working.current = true; setBusy(true); setMessage('');
++    try { await navigator.clipboard.writeText(value); if (mounted.current) setMessage('已复制'); }
++    catch { if (mounted.current) setMessage('复制失败，请重试'); }
++    finally { working.current = false; if (mounted.current) setBusy(false); }
++  }
++
++  async function paste(button: HTMLButtonElement) {
++    const input = textareaRef.current;
++    if (working.current || disabled || !input || input.disabled || input.readOnly) return;
++    const start = input.selectionStart, end = input.selectionEnd;
++    working.current = true; setBusy(true); setMessage('');
++    try {
++      const text = await navigator.clipboard.readText();
++      if (!mounted.current || input !== textareaRef.current || !input.getClientRects().length) return;
++      if (latest.current.disabled || input.disabled || input.readOnly) return;
++      if (latest.current.value !== value) { setMessage('内容已变化，请重新粘贴'); return; }
++      if (!text) { setMessage('剪贴板中没有文本'); return; }
++      const next = value.slice(0, start) + text + value.slice(end);
++      if (next.length > maxLength) { setMessage(`上下文最多 ${maxLength} 字，未粘贴`); return; }
++      if (next === value) { setMessage('内容未变化'); return; }
++      latest.current.onPaste(next);
++      setMessage('已粘贴');
++      requestAnimationFrame(() => {
++        if (!mounted.current || input !== textareaRef.current || input.value !== next) return;
++        if (document.activeElement !== button && document.activeElement !== input) return;
++        input.focus({ preventScroll: true });
++        input.setSelectionRange(start + text.length, start + text.length);
++      });
++    } catch { if (mounted.current) setMessage('无法读取剪贴板，请在输入框内粘贴'); }
++    finally { working.current = false; if (mounted.current) setBusy(false); }
++  }
++
++  return <div className={styles.bar} aria-busy={busy}>
++    {message && <span className={styles.message} role="status">{message}</span>}
++    <div className={styles.actions}>
++      {canCopy && <button type="button" className={styles.button} title="复制上下文全文" aria-label="复制上下文全文" disabled={disabled || busy || !value} onClick={() => void copy()}><Copy size={15} />复制</button>}
++      <button type="button" className={styles.button} title="粘贴文本" aria-label="粘贴文本到上下文" disabled={disabled || busy} onClick={event => void paste(event.currentTarget)}><ClipboardPaste size={15} />粘贴</button>
++    </div>
++  </div>;
++}
 diff --git a/src/components/GenerationComposer.tsx b/src/components/GenerationComposer.tsx
 index 468c672..a937e75 100644
 --- a/src/components/GenerationComposer.tsx
@@ -510,6 +659,45 @@ index 413dfee..44fe300 100644
            reuseDraft={reuseDraft}
            studioHandoff={studioHandoff}
            selectedVideoCardId={selectedVideoCardId}
+diff --git a/src/components/template-studio/VideoContextEditor.tsx b/src/components/template-studio/VideoContextEditor.tsx
+index fdf47b5..ef6d846 100644
+--- a/src/components/template-studio/VideoContextEditor.tsx
++++ b/src/components/template-studio/VideoContextEditor.tsx
+@@ -1,9 +1,10 @@
+ 'use client';
+ 
+ import { useProductDialog } from '@/components/useProductDialog';
++import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+ 
+ import { useEffect, useRef, useState } from 'react';
+-import { Copy, Save, X } from 'lucide-react';
++import { Save, X } from 'lucide-react';
+ import { useDialogDismiss } from '@/components/useDialogDismiss';
+ import styles from './template-studio.module.css';
+ 
+@@ -17,6 +18,7 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
+   const [message, setMessage] = useState('');
+   const backdropRef = useRef<HTMLDivElement>(null);
+   const dialogRef = useRef<HTMLElement>(null);
++  const contextInput = useRef<HTMLTextAreaElement>(null);
+   const url = `/api/template-studio/context${draftId ? `?draftId=${encodeURIComponent(draftId)}` : ''}`;
+   useEffect(() => {
+     const controller = new AbortController();
+@@ -56,11 +58,12 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
+     <section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="video-context-title">
+       <div className={styles.sectionHeading}><h2 id="video-context-title">{draftId ? '模块上下文' : '通用上下文'}</h2><button type="button" className={styles.iconButton} aria-label="关闭" title="关闭" disabled={busy} onClick={close}><X size={16} /></button></div>
+       <p className={styles.fieldHint}>{draftId ? '只用于当前模块。保存后影响后续文案，已有记录不变。' : '用于视频文案，不影响图片。仅管理员可修改。'}</p>
+-      {value?.canEdit ? <div className={styles.field}><label htmlFor="video-context-text">固定规则</label><textarea id="video-context-text" rows={12} maxLength={12000} value={text} onChange={event => setText(event.target.value)} /></div>
++      {value?.canEdit ? <div className={styles.field}><label htmlFor="video-context-text">固定规则</label>
++        <ContextClipboardActions value={text} textareaRef={contextInput} onPaste={setText} maxLength={12000} disabled={busy} canCopy={value.canCopy} />
++        <textarea ref={contextInput} id="video-context-text" rows={12} maxLength={12000} value={text} onChange={event => setText(event.target.value)} /></div>
+         : <p>{value ? (value.configured ? '固定规则已配置，将由后台应用；当前账号无权查看或修改。' : '尚未配置固定规则，当前账号无权修改。') : '正在读取…'}</p>}
+       {message && <p role="status">{message}</p>}
+       <div className={styles.dialogFooter}>
+-        {value?.canEdit && value.canCopy && <button type="button" className={styles.quietButton} onClick={() => void navigator.clipboard.writeText(text).then(() => setMessage('已复制上下文')).catch(() => setMessage('复制失败，请重试'))}><Copy size={15} />复制上下文</button>}
+         {value?.canEdit && <button type="button" className={styles.primaryButton} disabled={busy || text === (value.context || '')} onClick={() => void save()}><Save size={15} />{busy ? '保存中' : '保存上下文'}</button>}
+       </div>
+     </section>
 diff --git a/src/components/template-studio/template-studio.module.css b/src/components/template-studio/template-studio.module.css
 index f0eb4b1..2b689bb 100644
 --- a/src/components/template-studio/template-studio.module.css
@@ -803,14 +991,14 @@ index bffd9e1..e44e405 100644
          if (error instanceof StudioReferencePolicyError) throw new StudioError(error.message, error.status);
          throw error;
 diff --git a/src/lib/release.ts b/src/lib/release.ts
-index d26bc6f..88f92a1 100644
+index d26bc6f..f3d4e1a 100644
 --- a/src/lib/release.ts
 +++ b/src/lib/release.ts
 @@ -1,6 +1,6 @@
  import packageInfo from '../../package.json';
  
 -export const release = { version: packageInfo.version, channel: 'production', summary: '模板工作台分开显示文案与视频状态；复用历史输入只新建模块。图片记录刷新和加载更多保留已有内容，恢复入口明确为查询状态；视频模型与LoRA按通道识别，模块称呼和记录时间更清楚。' };
-+export const release = { version: packageInfo.version, channel: 'production', summary: '小确认框和命名框靠近触发按钮，不再跑到角落；小屏和输入键盘弹出时自动避让。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '模板上下文输入框上方新增复制、粘贴按钮；粘贴保留原有编辑和保存方式。' };
  export function newerRelease(remote: string, local: string) {
    const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
    const a = parse(remote), b = parse(local);
