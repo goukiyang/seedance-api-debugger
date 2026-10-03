@@ -98,6 +98,7 @@ L1：加载动效独立打样，已完成。完成标准：可交互比较各状
 |---|---|---|---|
 | 功能盘点、审查及落地清单 | 用户要求；本轮侧聊更新；审查d08e9df，发布81de84c/v0.34.1 | I1–I3盘点、A1–A4审查及B1–B3/U1–U6实现与发布证据；待用户手动验收，统一目录未合并；含发布预约流程缺口 | [完整正文](../../tasks/todo/2026-10-02-unified-resource-library.md)；与侧聊副本cmp一致、可读 |
 | 风格广场原图 | 用户截图；原文件名codex-clipboard-c227fe09-9c94-47d3-9259-224ace6380d7.png；2026-10-02接收 | 分类、收藏/最近、商业授权与选用流程参考；PNG原件，未修改；不公开Git | [原图](2026-10-02-unified-resource-library/codex-clipboard-c227fe09-9c94-47d3-9259-224ace6380d7.png)；与已核验来源cmp一致、PNG可读 |
+| 同图新增素材库入口设计反馈 | 2026-10-03用户剪贴板；本次原文件名codex-clipboard-fdeeedfb-713b-4667-8d6d-e6b73cca8e4e.png，原件v1；与上方原图完全相同，复用、不建重复副本 | 项目video-api-debugger；关键词直接开库、库内上传、分类、收藏、最近、搜索；新需求不替代旧参考图。入口直接库及库内上传为用户明确要求，其余为设计建议；[完整设计v1.1.0](../../tasks/todo/2026-10-02-unified-resource-library.md#9-统一添加入口与素材库设计2026-10-03) | [复用原图](2026-10-02-unified-resource-library/codex-clipboard-c227fe09-9c94-47d3-9259-224ace6380d7.png)；两份来源SHA256一致60f976ac3aafc8e52dd4e24f590f4cc0f89fe37c5fa6eb9705c4479cc4e349b4，PNG可读，仅本地保留；本轮未改应用 |
 | 模板素材与弹窗反馈 | 2026-10-01历史工单，来自同一侧聊工作树 | 固定素材权限和三分区边界；不是本次新bug | [历史原文](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md)；副本一致，关联旧附件未逐项复核 |
 | 图片下载超时 | 2026-10-01历史工单 | 原图失效、慢速源站与恢复缺口 | [历史原文](../../tasks/todo/2026-10-01-image-download-timeout.md)；副本一致 |
 | 复制分享及离开提醒 | 2026-10-02历史工单，v0.34.0 | 已部署能力及待用户验收边界 | [历史原文](../../tasks/todo/2026-10-02-media-copy-share.md)；副本一致 |
