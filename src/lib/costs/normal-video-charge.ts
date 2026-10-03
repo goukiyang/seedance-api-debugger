@@ -54,7 +54,7 @@ export async function loadNormalVideoChargeRates(tasks: ChargeTask[]) {
   for (const task of tasks) { const group = chargeGroup(task); if (group) groups.set(group.key, group); }
   const rates = new Map<string, number>();
   // Use the latest matching confirmed ordinary bill, not a points-to-cash conversion.
-  await Promise.all([...groups.values()].map(async (group) => {
+  await Promise.all(Array.from(groups.values()).map(async (group) => {
     const bills = await prisma.videoTask.findMany({
       where: {
         provider: 'seedance', model: group.model, is_draft: false, local_status: 'succeeded',
