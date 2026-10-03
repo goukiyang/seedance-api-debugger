@@ -65,6 +65,7 @@ type LibraryItem = {
   providerFinalAmountMinor: number | null;
   providerOfficialAmountMicros: number | null;
   providerFinalAmountMicros: number | null;
+  chargedCredits: number | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -193,6 +194,7 @@ async function serializeTask(task: {
   provider_final_amount_minor: number | null;
   provider_official_amount_micros: number | null;
   provider_final_amount_micros: number | null;
+  actual_cost: number | null;
   params_json: string | null;
   retention_status: string;
   created_at: Date;
@@ -202,7 +204,7 @@ async function serializeTask(task: {
   project: LibraryProject | null;
   owner: LibraryUser | null;
   user: LibraryUser | null;
-}): Promise<LibraryItem> {
+}, viewer: SessionUser): Promise<LibraryItem> {
   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
   const deliveryStage = videoDeliveryStageForTask(task);
@@ -259,6 +261,10 @@ async function serializeTask(task: {
     providerFinalAmountMinor: task.provider_final_amount_minor,
     providerOfficialAmountMicros: task.provider_official_amount_micros,
     providerFinalAmountMicros: task.provider_final_amount_micros,
+    chargedCredits: (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
+      && ['succeeded', 'failed', 'cancelled'].includes(task.local_status)
+      && task.actual_cost !== null && Number.isFinite(task.actual_cost) && task.actual_cost >= 0
+      ? task.actual_cost : null,
     videoCardId: task.video_card_id,
     isEnhanceTask,
     canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
@@ -325,6 +331,7 @@ function serializeAsset(asset: {
     providerFinalAmountMinor: null,
     providerOfficialAmountMicros: null,
     providerFinalAmountMicros: null,
+    chargedCredits: null,
     videoCardId: null,
     isEnhanceTask: false,
     canEnhanceVideo: false,
@@ -386,6 +393,7 @@ function serializeReferenceImage(image: {
     providerFinalAmountMinor: null,
     providerOfficialAmountMicros: null,
     providerFinalAmountMicros: null,
+    chargedCredits: null,
     videoCardId: null,
     isEnhanceTask: false,
     canEnhanceVideo: false,
@@ -540,6 +548,7 @@ async function loadVideoItems(options: {
         provider_final_amount_minor: true,
         provider_official_amount_micros: true,
         provider_final_amount_micros: true,
+        actual_cost: true,
         params_json: true,
         retention_status: true,
         created_at: true,
@@ -555,7 +564,7 @@ async function loadVideoItems(options: {
   ]);
 
   return {
-    items: await Promise.all(tasks.map(serializeTask)),
+    items: await Promise.all(tasks.map((task) => serializeTask(task, user))),
     total,
   };
 }

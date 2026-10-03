@@ -123,6 +123,7 @@ type AssetLibraryItem = {
   providerFinalAmountMinor: number | null;
   providerOfficialAmountMicros: number | null;
   providerFinalAmountMicros: number | null;
+  chargedCredits: number | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -469,6 +470,14 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
     parts.push(formatAssetUploadBytes(item.fileSize || 0) || '音频素材');
   }
   return parts.join(' · ');
+}
+
+function formatChargedCredits(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'chargedCredits'>) {
+  if (item.kind !== 'video' || item.source !== 'video_task') return '';
+  const amount = item.chargedCredits;
+  if (amount === null || amount === undefined || !Number.isFinite(amount) || amount < 0) return '';
+  if (amount > 0 && amount < 0.01) return '< 0.01 点';
+  return `${amount.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 点`;
 }
 
 function formatCnyCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
@@ -1732,6 +1741,7 @@ function AssetsPageContent() {
     </div>}
     <dl className="asset-detail-list">
       <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
+      {formatChargedCredits(activeItem) && <div><dt>实际扣点</dt><dd>{formatChargedCredits(activeItem)}</dd></div>}
       {shouldShowDeliveryStage(activeItem) && <div><dt>稳定下载</dt><dd>{activeItem.deliveryStage?.label || '-'}</dd></div>}
       <div><dt>项目</dt><dd>{activeItem.project?.name || '未归属项目'}</dd></div>
       {isAdmin && <div><dt>用户</dt><dd><UserIdentityBadge user={activeItem.owner} size="sm" subtitle={activeItem.owner?.subtitle || null} className="asset-detail-user" /></dd></div>}
@@ -2228,6 +2238,7 @@ function AssetsPageContent() {
                 const duration = formatDuration(item.duration);
                 const specText = formatAssetSpec(item);
                 const cnyCostBadge = formatCnyCostBadge(item);
+                const costBadge = cnyCostBadge || formatChargedCredits(item);
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
@@ -2272,11 +2283,11 @@ function AssetsPageContent() {
                       ) : (
                         <AssetLibraryThumbnail key={`${item.source}:${item.thumbnailUrl || ''}:${item.previewUrl || ''}`} item={item} />
                       )}
-                      {(cnyCostBadge || enhanceStateLabel) && (
+                      {(costBadge || enhanceStateLabel) && (
                         <span className="asset-card-top-right-badges">
-                          {cnyCostBadge && (
-                            <span className="asset-card-badge asset-card-cost-badge">
-                              {cnyCostBadge}
+                          {costBadge && (
+                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : '实际扣除的站内点数，不是现金金额'}>
+                              {costBadge}
                             </span>
                           )}
                           {enhanceStateLabel && (

@@ -3,7 +3,7 @@ const STORE_NAME = 'asset_library_pages';
 const DB_VERSION = 1;
 const CACHE_TTL_MS = 5 * 60_000;
 
-export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 2;
+export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 3;
 
 type AssetLibraryCacheKeyInput = {
   view?: string;
