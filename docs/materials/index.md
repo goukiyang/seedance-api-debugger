@@ -179,3 +179,13 @@ L1：加载动效独立打样，已完成。完成标准：可交互比较各状
 ### 播放时隐藏封面按钮
 
 2026-10-04，项目video-api-debugger，来源为用户文字需求“单击播放后，封面不要出现播放按键”；原文件名不适用，无新附件，文本v2交付补充。关键词：P1、视频封面、播放按钮、悬停、键盘聚焦、等待与错误反馈。原文、根因、共用引用和实现范围见[固定工单P1](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#p1播放时隐藏封面按钮2026-10-04)，正文可读；移除播放期间hover/focus强制显示覆盖，保留透明点击区及等待/重试。北京时间06:53:11已发布0.37.5，应用da4e285/BUILD FkdpYXAklqREmAjtSKyog，待用户手动，不冒称视觉验收。正式根本机[本轮统一diff](2026-10-03-media-cover-interactions/implementation-v0.37.5.diff)、[0.37.5部署证据](2026-10-03-media-cover-interactions/deployment-v0.37.5.json)可读、对应同一应用提交，私有不Git/archive，旧版本证据保留。D1配色与C5-C8/U1保持，D2仍待具体列表确认；本轮无新附件，不冒用历史截图。
+
+### 历史恢复、查看与版本字号
+
+2026-10-04，项目video-api-debugger，来源用户本轮R1/R2文字及R3浏览器评论，文本v1；关键词R1直接恢复、R2无文字Eye查看、去重复入口、R3版本字号增加50%。原文、范围和实施见[固定工单R1-R3](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#r1-r3历史恢复查看与版本字号2026-10-04)，正文可读；只取消历史恢复专用确认，其他安全/付费/退出保护保留，PATCH0.37.6待整批构建及安全发布。当前资料补充不替代C5-C8/P1旧图与旧记录。
+
+关键用户原件已查看可读，按原文件名归档在正式根/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions，源路径/var/folders/lt/cl_ckbmn1jl2wwj44t43qm6h0000gn/T/加各原名；均私有、不Git/archive：
+- [codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png](2026-10-03-media-cover-interactions/codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png)：接收2026-10-04，用户本轮clipboard，R1恢复历史设置弹窗证据，原件v1非替代旧PNG，39476字节，源/归档SHA256 16480b548d9736ec65f9d0c2cbea6361253cf958ef54d6f3bf1d12f4115e4361一致。
+- [codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png](2026-10-03-media-cover-interactions/codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png)：接收2026-10-04，用户本轮clipboard，R2恢复按钮及重复查看操作行证据，原件v1非替代旧PNG，22347字节，源/归档SHA256 09c884786253ebb0a1a44683764aa07bbbfa740941c3242b88aa009910a6ef55一致。
+
+R3浏览器标记图仅聊天像素，原文件名/本地路径未提供，待补持久原件，可读/完整性未核验，不拿上述两PNG冒充。历史OS双击1000ms边界仍在，D2具体列表仍待确认。

@@ -1037,7 +1037,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setError('当前仍在上传或保存模块，请完成后再恢复历史设置。');
       return;
     }
-    if (moduleDirty && !(await confirm('当前模块有未保存内容，恢复后会替换当前输入，但不会立即保存、提交或扣积分。确定继续吗？', { title: '恢复历史设置', confirmLabel: '恢复设置' }))) return;
     const snapshot = task.snapshot;
     setPrompt(snapshot.prompt || '');
     setCount(Math.max(1, Math.min(8, snapshot.count || 1)));
@@ -1439,9 +1438,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             {task.delivery?.recoveryAvailable && <button type="button" className={`${styles.recoveryAction} ${templateWorkbench ? 'sd2-loading-surface' : ''}`} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button>}
             {task.asset && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
             {task.asset && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
-            {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="恢复本次输入设置，不会提交生成或扣积分" aria-label="恢复设置" onClick={() => restoreTask(task)}><RefreshCw size={15} />恢复设置</button>}
+            {task.asset && <button type="button" className={styles.viewResult} title="查看图片" aria-label="查看图片" aria-describedby={`studio-preview-${task.id}`} onClick={event => { event.stopPropagation(); openTaskPreview(task); }} onDoubleClick={event => event.stopPropagation()}><Eye size={15} /><span id={`studio-preview-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>查看图片</span></button>}
             {isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
-            {task.asset && <button type="button" className={styles.viewResult} onClick={() => openTaskPreview(task)} title="查看图片"><Eye size={15} />查看</button>}
           </div>
           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
           {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}

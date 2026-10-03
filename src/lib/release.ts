@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '视频封面播放时隐藏中央按钮，保留点击暂停、继续播放以及等待和错误提示。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '历史图片设置直接恢复，原恢复按钮改为查看图标并去掉重复入口，顶栏版本号放大50%。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);
