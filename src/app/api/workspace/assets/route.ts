@@ -49,17 +49,24 @@ export async function POST(request: NextRequest) {
     userId = user.id;
 
     const body = await request.json();
+    const selection: Array<{ assetId?: string; referenceImageId?: string }> | null = body.selection === undefined ? null : body.selection;
+    if (body.selection !== undefined && (!Array.isArray(selection) || selection.length > 80 || selection.some(item => !item ||
+      Boolean(item.assetId) === Boolean(item.referenceImageId) ||
+      typeof (item.assetId || item.referenceImageId) !== 'string' ||
+      !/^[a-zA-Z0-9_-]+$/.test((item.assetId || item.referenceImageId)!)))) {
+      return NextResponse.json({ error: '所选素材编号无效' }, { status: 400 });
+    }
     const { assetId, role } = body;
     const shouldReplace = body.replace === true;
     const assetIds = uniquePreserveOrder(
-      Array.isArray(body.assetIds)
+      selection ? selection.flatMap(item => item.assetId ? [item.assetId] : []) : Array.isArray(body.assetIds)
         ? body.assetIds
         : Array.isArray(body.asset_ids)
           ? body.asset_ids
           : (assetId ? [assetId] : []),
     );
     const referenceImageIds = uniquePreserveOrder(
-      Array.isArray(body.referenceImageIds)
+      selection ? selection.flatMap(item => item.referenceImageId ? [item.referenceImageId] : []) : Array.isArray(body.referenceImageIds)
         ? body.referenceImageIds
         : Array.isArray(body.reference_image_ids)
           ? body.reference_image_ids
@@ -106,6 +113,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { workspaceAssetIds, referenceImageIdsFromAssets } = await prisma.$transaction(async (tx) => {
+      const previous = selection && !shouldReplace ? await tx.workspaceAsset.findMany({ where: { workspace_id: workspaceId }, select: { id: true, asset_id: true, sort_order: true } }) : [];
+      const previouslyMounted = new Map(previous.map(item => [item.asset_id, item.id]));
       if (shouldReplace) await tx.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
       const workspaceAssetIds: string[] = [];
       const referenceImageIdsFromAssets: string[] = [];
@@ -113,6 +122,7 @@ export async function POST(request: NextRequest) {
       for (const image of references) {
         const currentAssetId = image.asset_id!;
         if (mountedAssetIds.has(currentAssetId)) continue;
+        if (selection && previouslyMounted.has(currentAssetId)) { workspaceAssetIds.push(previouslyMounted.get(currentAssetId)!); mountedAssetIds.add(currentAssetId); continue; }
         workspaceAssetIds.push(await addAssetToWorkspace(
           workspaceId, currentAssetId, referenceRoleForAssetType(image.asset?.type, role), user.id,
           { referenceImageId: image.id, allowSharedAsset: true, db: tx },
@@ -121,6 +131,7 @@ export async function POST(request: NextRequest) {
       }
       for (const asset of assets) {
         if (mountedAssetIds.has(asset.id)) continue;
+        if (selection && previouslyMounted.has(asset.id)) { workspaceAssetIds.push(previouslyMounted.get(asset.id)!); mountedAssetIds.add(asset.id); continue; }
         if (asset.type === 'image') {
           const reference = await attachAssetToSiteReferenceImage({
             user, workspaceId, sourceLabel: 'Web UI',
@@ -136,6 +147,16 @@ export async function POST(request: NextRequest) {
           ));
         }
         mountedAssetIds.add(asset.id);
+      }
+      if (selection) {
+        const beforeIds = new Set(previous.map(item => item.id));
+        const referenceAssets = new Map(references.map(image => [image.id, image.asset_id!]));
+        const attached = await tx.workspaceAsset.findMany({ where: { workspace_id: workspaceId, id: { in: workspaceAssetIds } }, select: { id: true, asset_id: true } });
+        const byAsset = new Map(attached.map(item => [item.asset_id, item.id]));
+        const ordered = uniquePreserveOrder(selection.map(item => byAsset.get(item.referenceImageId ? referenceAssets.get(item.referenceImageId)! : item.assetId!) || ''));
+        let nextOrder = previous.reduce((max, item) => Math.max(max, item.sort_order), 0) + 1;
+        for (const id of ordered) if (!beforeIds.has(id)) await tx.workspaceAsset.update({ where: { id }, data: { sort_order: nextOrder++ } });
+        return { workspaceAssetIds: ordered, referenceImageIdsFromAssets };
       }
       return { workspaceAssetIds, referenceImageIdsFromAssets };
     });

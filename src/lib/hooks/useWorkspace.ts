@@ -71,6 +71,7 @@ export interface UseWorkspaceResult {
   retryPendingAttach: () => Promise<void>;
   addAssets: (assetIds: string[]) => Promise<void>;
   addReferenceImages: (referenceImageIds: string[]) => Promise<void>;
+  addLibrarySelection: (selection: Array<{ assetId?: string; referenceImageId?: string }>) => Promise<void>;
   loadReferenceAlbum: (albumId: string, maxImages?: number) => Promise<void>;
   saveCurrentAsReferenceAlbum: (name: string) => Promise<string>;
   createReferenceAlbum: (name: string) => Promise<string>;
@@ -278,6 +279,17 @@ export function useWorkspace(): UseWorkspaceResult {
       setLoading(false);
       throw err;
     }
+  }, [fetchWorkspace]);
+
+  const addLibrarySelection = useCallback(async (selection: Array<{ assetId?: string; referenceImageId?: string }>) => {
+    if (!selection.length) return;
+    setLoading(true);
+    try {
+      const response = await fetch('/api/workspace/assets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tab-id': tabIdRef.current }, body: JSON.stringify({ selection }) });
+      const data = await readJsonResponse<ApiMessageResponse>(response, { invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE });
+      if (!response.ok) throw new Error(data.error || data.message || '加入参考素材失败');
+      await fetchWorkspace();
+    } catch (err) { setError(err instanceof Error ? err.message : '加入参考素材失败'); setLoading(false); throw err; }
   }, [fetchWorkspace]);
 
   const addReferenceImages = useCallback(async (referenceImageIds: string[]) => {
@@ -502,6 +514,7 @@ export function useWorkspace(): UseWorkspaceResult {
     retryPendingAttach,
     addAssets,
     addReferenceImages,
+    addLibrarySelection,
     loadReferenceAlbum,
     saveCurrentAsReferenceAlbum,
     createReferenceAlbum,

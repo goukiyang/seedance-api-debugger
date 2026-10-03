@@ -20,7 +20,8 @@ import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar, type ComposerProviderStatus, type ComposerSelectOption } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
-import { ReferenceAlbumPicker, type ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
+import type { ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
+import type { PickerItem } from '@/lib/assets/picker-types';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import MediaPreview from '@/components/MediaPreview';
 import { calculateEstimatedCostClient } from '@/lib/pricing-client';
@@ -2219,21 +2220,33 @@ export function GenerationComposer({
         onClose={() => setPreviewMedia(null)}
       />}
 
-      <ReferenceAlbumPicker
-        open={showAlbumPicker}
-        currentCount={workspace.assets.length}
-        currentReferenceImageIds={currentReferenceImageIds}
-        onClose={() => handleMentionPickerClose('album')}
-        onConfirm={handleAddReferenceImages}
-      />
-
       <UploadedImagePicker
-        open={showUploadedImagePicker}
+        open={showUploadedImagePicker || showAlbumPicker}
+        target="workspace"
+        title={generationMode === 'first_last_frame' ? '添加首尾帧素材' : '添加视频参考素材'}
+        confirmLabel="添加到视频参考区"
+        purpose={`video-${generationMode}`}
+        acceptedTypes={generationMode === 'all_in_one_reference' ? ['image', 'video', 'audio'] : ['image']}
+        typeLimits={{
+          image: Math.max(0, (generationMode === 'first_last_frame' ? 2 : seedanceReferenceMediaCapabilities(selectedModel).imageLimit) - workspace.assets.filter(a => a.type === 'image').length),
+          video: Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).videoLimit - workspace.assets.filter(a => a.type === 'video').length),
+          audio: Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).audioLimit - workspace.assets.filter(a => a.type === 'audio').length),
+        }}
         currentCount={workspace.assets.length}
         currentAssetIds={workspace.assets.map((asset) => asset.assetId)}
-        onClose={() => handleMentionPickerClose('history')}
+        currentReferenceImageIds={currentReferenceImageIds}
+        onClose={() => { handleMentionPickerClose('history'); handleMentionPickerClose('album'); }}
         onUploadFile={workspace.uploadAssetToHistory}
         onConfirm={handleAddUploadedAssets}
+        onConfirmSelection={async (items: PickerItem[]) => {
+          const newItems = items.filter(item => !workspace.assets.some(a => a.assetId === item.assetId || a.referenceImageId && a.referenceImageId === item.referenceImageId));
+          const labelList = newItems.filter(item => item.type === 'image').map((_, index) => `图片${imageReferenceAssets.length + index + 1}`);
+          const next = appendReferenceMarkers(prompt, labelList);
+          if (next.length > MAX_GENERATION_PROMPT_CHARS) throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
+          await workspace.addLibrarySelection(newItems.map(item => item.referenceImageId ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId }));
+          if (pendingMentionRequestRef.current) resolvePendingMentionRequest(formatReferenceTokens(labelList) || null);
+          else setPrompt(current => appendReferenceMarkers(current, labelList));
+        }}
       />
 
       {templateEnabled && (

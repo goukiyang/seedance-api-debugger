@@ -1999,7 +1999,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         </main>
       </div>
 
-      {pickerOpen && activeDraft && <UploadedImagePicker open currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerSlot?.types} onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
+      {pickerOpen && activeDraft && <UploadedImagePicker open target="assets" title="添加模板素材" confirmLabel="添加到模板素材区" purpose={`video-template-${pickerSlotKey || 'all'}`} currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerSlot?.types} onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
 
       {templateEdit && (
         <div ref={templateEditBackdropRef} className={styles.dialogBackdrop} role="presentation" onClick={(event) => event.stopPropagation()}>

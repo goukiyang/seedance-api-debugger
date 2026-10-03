@@ -195,9 +195,12 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         <div className={styles.resultActions}><button type="button" className={styles.primary} disabled={busy || uploading || !draft.name.trim() || !draft.references.length || !dirty} onClick={() => void save()}><Save size={16} />{busy ? '正在保存' : '保存风格组'}</button></div>
       </>}
     </dialog>
-    {picker && draft && <UploadedImagePicker open imageOnly selectionOnly portalContainer={editor.current}
+    {picker && draft && <UploadedImagePicker open imageOnly portalContainer={editor.current} title="添加风格参考图" confirmLabel="添加到风格组" purpose="style-group"
       currentCount={draft.references.length} currentAssetIds={draft.references.flatMap(ref => ref.id ? [ref.id] : [])} maxSelection={MAX_REFERENCE_IMAGES - draft.references.length}
-      onClose={() => setPicker(false)} onUploadFile={async () => { throw new Error('请使用上传图片入口'); }}
+      onClose={() => setPicker(false)} onUploadFile={async (file, onProgress) => {
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) throw new Error('请使用 20MB 以内的 PNG、JPG 或 WebP 图片');
+        setUploading(true); try { return await uploadFileAsAsset(file, { onProgress }); } finally { setUploading(false); }
+      }}
       onConfirm={async (_ids, assets) => {
         const refs = (assets || []).filter(asset => asset.type === 'image').map(asset => ({ ...asset, note: '', available: true }));
         if (refs.length !== _ids.length || draft.references.length + refs.length > MAX_REFERENCE_IMAGES) throw new Error('选择图片数量无效');

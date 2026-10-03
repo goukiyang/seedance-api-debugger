@@ -560,10 +560,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [uploading, setUploading] = useState(false);
   const [imageSourceTarget, setImageSourceTarget] = useState<'reference' | 'auxiliary' | 'banner' | 'fixed'>('reference');
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
-  const imageSourceDialog = useRef<HTMLDialogElement>(null);
   function openImageSource(target: 'reference' | 'auxiliary' | 'banner' | 'fixed') {
     setImageSourceTarget(target);
-    imageSourceDialog.current?.showModal();
+    setAssetPickerOpen(true);
   }
   const [uploadProgress, setUploadProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
   const [bannerProgress, setBannerProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
@@ -650,7 +649,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     moduleDialog.current?.close();
   }
   useDialogDismiss({ open: true, dialogRef: moduleDialog, nativeDialog: true, onDismiss: closeModuleDialog });
-  useDialogDismiss({ open: true, dialogRef: imageSourceDialog, nativeDialog: true, onDismiss: () => imageSourceDialog.current?.close() });
   useDialogDismiss({ open: Boolean(deleteTarget), dialogRef: deleteDialog, nativeDialog: true, onDismiss: () => { if (!deleting) setDeleteTarget(null); } });
   const activeStyles = reproduceSourceTaskId ? reproductionStyles : styleGroups;
   const activeTemplateCount = useFixedReferences ? (reproduceSourceTaskId
@@ -1299,8 +1297,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
             <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
               onChangeRole={(image, index) => changeImageRole(image, index, false)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
-              {(!templateWorkbench || images.length < currentReferenceCap) && <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap}
-                title={images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : '添加主图'}</span></button>}
+              {(!templateWorkbench || images.length < currentReferenceCap || referenceLimit === 1) && <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap && referenceLimit !== 1 || currentReferenceCap === 0}
+                title={referenceLimit === 1 && images.length ? '替换主图' : images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : referenceLimit === 1 && images.length ? '替换主图' : '添加主图'}</span></button>}
             </StudioReferenceGrid>
           </div>
         </section>
@@ -1451,20 +1449,23 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {nextCursor && <button type="button" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'more'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
       </section>
     </div>
-    <dialog ref={imageSourceDialog} className={`${styles.dialog} ${styles.sourceDialog}`} aria-label="添加图片">
-      <header><h3>添加图片</h3><button type="button" aria-label="关闭" onClick={() => imageSourceDialog.current?.close()}><X size={18} /></button></header>
-      <div className={styles.sourceActions}>
-        <button type="button" onClick={() => { imageSourceDialog.current?.close(); (imageSourceTarget === 'banner' ? bannerFileInput : imageSourceTarget === 'fixed' ? fixedFileInput : imageSourceTarget === 'auxiliary' ? auxiliaryFileInput : fileInput).current?.click(); }}><ImagePlus size={18} />上传图片</button>
-        <button type="button" onClick={() => { imageSourceDialog.current?.close(); setAssetPickerOpen(true); }}><ImagePlus size={18} />从资产库选择</button>
-      </div>
-    </dialog>
-    {assetPickerOpen && <UploadedImagePicker open imageOnly selectionOnly
+    {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio"
+      title={imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加固定参考图' : imageSourceTarget === 'auxiliary' ? '添加参考图' : referenceLimit === 1 && images.length ? '替换主图' : '添加主图'}
+      confirmLabel={imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加到固定参考区' : imageSourceTarget === 'auxiliary' ? '添加到参考区' : referenceLimit === 1 && images.length ? '替换主图' : '添加到主图'}
+      purpose={imageSourceTarget}
       portalContainer={imageSourceTarget === 'fixed' ? moduleDialog.current : undefined}
       currentCount={imageSourceTarget === 'banner' ? 0 : imageSourceTarget === 'fixed' ? fixedReferences.length : imageSourceTarget === 'auxiliary' ? auxiliaryImages.length : images.length}
       currentAssetIds={imageSourceTarget === 'banner' ? [] : (imageSourceTarget === 'fixed' ? fixedReferences : imageSourceTarget === 'auxiliary' ? auxiliaryImages : images).flatMap(image => image.id ? [image.id] : [])}
-      maxSelection={imageSourceTarget === 'banner' ? 1 : imageSourceTarget === 'fixed' ? MAX_REFERENCE_IMAGES - fixedReferences.length : imageSourceTarget === 'auxiliary' ? Math.max(0, currentAuxiliaryCap - auxiliaryImages.length) : Math.max(0, currentReferenceCap - images.length)}
+      maxSelection={imageSourceTarget === 'banner' ? 1 : imageSourceTarget === 'fixed' ? MAX_REFERENCE_IMAGES - fixedReferences.length : imageSourceTarget === 'auxiliary' ? Math.max(0, currentAuxiliaryCap - auxiliaryImages.length) : referenceLimit === 1 && currentReferenceCap > 0 ? 1 : Math.max(0, currentReferenceCap - images.length)}
       onClose={() => setAssetPickerOpen(false)}
-      onUploadFile={async () => { throw new Error('请从上传图片入口上传'); }}
+      onUploadFile={async (file, onProgress) => {
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) throw new Error('请使用 20MB 以内的 PNG、JPG 或 WebP 图片');
+        if (submitting || pendingSubmission || uploading || bannerUploading) throw new Error('当前操作尚未结束，请稍后上传');
+        if (imageSourceTarget === 'fixed' && !fixedEditable) throw new Error('当前不能编辑固定参考图');
+        setUploading(true);
+        try { return await uploadFileAsAsset(file, { onProgress }); }
+        finally { setUploading(false); }
+      }}
       onConfirm={async (_ids, assets) => {
         if (submitting || pendingSubmission || uploading || bannerUploading) throw new Error('当前操作尚未结束，请稍后选择');
         const picked = (assets || []).filter(asset => asset.type === 'image' && asset.originalUrl);
@@ -1473,6 +1474,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           if (picked.length !== 1) throw new Error('请选择一张图片');
           setBanner(picked[0]);
         } else if (imageSourceTarget === 'fixed') {
+          if (!fixedEditable) throw new Error('当前不能编辑固定参考图');
           const additions = picked.filter(asset => !fixedReferences.some(image => image.id === asset.id));
           if (fixedReferences.length + additions.length > MAX_REFERENCE_IMAGES) throw new Error(`固定参考图最多 ${MAX_REFERENCE_IMAGES} 张`);
           changeFixedReferences([...fixedReferences, ...additions.map(asset => ({ ...asset, note: '', available: true }))]);
@@ -1484,8 +1486,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         } else {
           if (picked.some(asset => auxiliaryImages.some(image => image.id === asset.id))) throw new Error('这张图片已是辅助参考；需要改作主图时，请使用参考图上的上移按钮。');
           const additions = picked.filter(asset => !images.some(image => image.id === asset.id));
-          if (images.length + additions.length > currentReferenceCap) throw new Error(`本次最多选择 ${currentReferenceCap} 张主图`);
-          setImages(current => [...current, ...additions]);
+          if ((referenceLimit === 1 ? additions.length : images.length + additions.length) > currentReferenceCap) throw new Error(`本次最多选择 ${currentReferenceCap} 张主图`);
+          setImages(current => referenceLimit === 1 ? additions : [...current, ...additions]);
         }
       }} />}
     <dialog ref={deleteDialog} className={styles.dialog} aria-labelledby={`delete-title-${module.id}`}>
@@ -1495,7 +1497,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       <div className={styles.resultActions}><button type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : '确认删除'}</button></div>
     </dialog>
     <dialog ref={moduleDialog} className={styles.dialog} onPaste={event => {
-      if (!fixedEditable || assetPickerOpen || imageSourceDialog.current?.open) return;
+      if (!fixedEditable || assetPickerOpen) return;
       const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
     }}>

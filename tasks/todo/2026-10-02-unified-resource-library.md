@@ -349,4 +349,25 @@ B1/B2采用项目已安装Prisma5.22.0的事务客户端，预先检查整组权
 
 原始文件/Users/gouki-youdoo/.codex/generated_images/019e979b-bb0f-7fa2-ac37-9ed600c33760/exec-7c52b3b7-463f-4bd6-9fe9-541358411200.png保留。正式归档1448x1086 PNG可读，原件与归档SHA256一致a4765abe61c2639916511d57ad42b9dec6dea5e34cd788b7c81d6edb8e647aca；已内联展示、索引登记，原图仅本地保存，不上传Git或部署。应用仍v0.36.10。
 
+## 10. 最新设计实施与发布（2026-10-03）
+
+项目：video-api-debugger。用户明确批准按§9、§9.9/9.10和v2原图直接实施并发布。真实应用源为`/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger`、`codex/canvas-liblib-layout`；正式根`/Volumes/Data/Projects/video-api-debugger`只同步本工单、资料索引及交付记录，不从旧应用发布。版本唯一来源`package.json`，本次新增兼容能力交付v0.37.0。最后更新：2026-10-03；实现、自查完成，准备服务器候选发布。
+
+附件：[已批准视频参考素材库v2](../../docs/materials/2026-10-03-unified-resource-library/video-reference-library-design-v2.png)，用于窗口布局及分类层级；原件只在正式根本机保存，不上传Git或部署。设计正文§9.9是分类依据，示意项目名、素材、时长不作为真实数据。资料索引入口[固定索引](../../docs/materials/index.md)。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| L1 | 统一素材库窗口 | 图片、视频参考入口直接开库，库内上传，类型与来源分开 | 实现完成，待用户手动验收 |
+| L2 | 接入真实资料 | 图集、项目、搜索、收藏和最近使用可选用，保留权限与数量限制 | 部分完成，use-only图片残余见下文；待手动验收 |
+| L3 | 发布与回退保护 | 构建通过，推送并部署正式站，新版本可获取 | 进行中，本地构建通过 |
+
+- 整批路径：共享轻量选择器→只读数据投影→调用方ID/顺序适配→唯一版本和记录→统一候选构建及内置检查→self Review→聚焦Git及安全切换→公网版本/静态资源/服务健康核对。工具没有内部worker派遣/容量入口，不创建侧栏任务或嵌套lead，唯一lead直接完成各包。
+- 守门员start已由上级完成，等级L3-visible-runtime。仅运行build内置发布检查；real-result跳过，用户手动验收。发布按L4数据保护：预约失败停止，保留旧release和运行构建，不原地构建，不覆盖.env/数据库/上传/视频/storage，不重启图片worker、不强杀付费队列。
+- 首次实际线上核对：`.deployed-commit=b26f9d216949c3601d2cc36d050e6fc922422ab1`，v0.36.10，BUILD_ID=`MFC_yPnyTMuIibuxAwjsx`，sd2-gray.service active，数据软链指向/data。指定源HEAD2fe7bf8干净，后续提交仅设计记录，应用代码与live一致。
+- Git Plan：只提交上述指定worktree里的本批源码、版本与记录；推送原分支及清晰rollback tag。正式根保护dirty tasks/todo.md与untracked，仅精确暂存本轮docs差异，不整文件暂存主todo。
+- 真实通路边界：视频工作区保留Asset/ReferenceImage原ID挂载；图片工作台和模板编辑器接收本人Asset。本人task-only生成视频经既有授权下载GET→正常上传→Asset挂载；无可下载文件时明确禁选，不触发下载POST或交付队列。共享/公共他人图片只有原图下载权限时经既有original端点→正常上传→本人Asset；仅授权use但不允许download的图集仍可在视频参考区用ReferenceImage，图片工作台显示逐项兼容原因并禁选，不能静默过滤。此残余需要图片生成管线支持use-only引用，不在本轮扩大生成/鉴权/Provider规则。用户点击添加产生正常上传Asset，不由Codex测试写生产数据。
+- 已复用本站ContentReactions、MediaPreview、ZoomableImagePreview、RelativeTime、useDialogDismiss、uploadFileAsAsset及工作区挂载事务；此前已读MIT许可Uppy Dashboard源码只作流程参考，不安装新依赖。没有假分类、商用标记、热度、名称或数量。
+- Verify→self Review：`npm run build`首次发现本项目ES5默认目标下Map iterator展开不兼容，统一改为Array.from；复验exit0（含lint/类型/静态产物内置检查），现有CSS/图片及Hook警告不冒充失败或清零。源码复查覆盖完整调用链、权限投影、顺序事务、上传及账号隔离；最后账号切换保护随最终服务器candidate再次统一构建。复用现有预览的native-dialog portal，不关闭下层编辑弹窗。
+- 整合重点：只在用户确认添加时下载/正常上传。已导入Asset在当前窗口缓存，最终attach失败的重试仅复查该Asset，不再次GET原文件或upload；元信息读取失败也先缓存已上传ID。选中项、来源和收藏沿用原资源key/identity，调用方只收到独立适配后的Asset或原ReferenceImage；最近使用仅在调用方确认成功后登记，本机、账号隔离、有界60项，不冒充云同步。不同调用用途偏好隔离，首尾帧/模型各类数量、模板slot、默认主图1与custommax原规则不统一成死数字。
+
 [返回主待办](../todo.md)
