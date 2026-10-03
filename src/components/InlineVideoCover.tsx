@@ -39,7 +39,7 @@ export function InlineVideoCover({ src, contentKey, title, active, onActivate, o
     catch { if (sequence === playSequence.current) { setError('视频未能播放，点击重试或使用查看按钮。'); onPause(); } }
     finally { if (sequence === playSequence.current) { playRequested.current = false; setStarting(false); } }
   }
-  return <span className={styles.stage} data-playing={playing || undefined} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+  return <span className={styles.stage} data-playing={playing || undefined} data-starting={starting || undefined} data-error={Boolean(error) || undefined} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
     <span className={styles.poster} hidden={started && !error}>{children}</span>
     {src && <video ref={video} src={src} playsInline preload="none" muted className={styles.video} hidden={!started || Boolean(error)}
       onLoadedMetadata={event => {

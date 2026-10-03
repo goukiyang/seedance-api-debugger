@@ -7,8 +7,7 @@
 .toggle:disabled { cursor: default; }
 .icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: rgb(16 22 25 / 76%); }
 .toggle:hover .icon { background: rgb(35 48 52 / 90%); }
-.stage[data-playing] .icon { opacity: 0; }
-.stage:hover .icon, .stage:focus-within .icon { opacity: 1; }
+.stage[data-playing]:not([data-starting]):not([data-error]) .icon { opacity: 0; }
 .spinner { animation: playback-spin 1s linear infinite; }
 @keyframes playback-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

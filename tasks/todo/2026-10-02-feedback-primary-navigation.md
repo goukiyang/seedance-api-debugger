@@ -617,3 +617,15 @@ D2补充核对：AdminUsersClient quickView初值all、筛选初值all；过滤�
 服务/公网/回退：sd2-gray.service active，本地/api/config 200、本地/api/release 0.37.4，公网/api/config、/api/release、/login、/assets均200且来源server-42-193，匿名摘要空且private/no-store，login含同一BUILD；9份线上应用源码SHA匹配commit。仅受影响共享入口及局部模块路由33份去重静态中12份新/改变资源公网200且SHA与产物一致，21份路径和内容不变复用旧证据，不重复全站40资源检查。回退tag rollback/2026-10-04-before-dark-ui-v0.37.4已推送，解引用为1c9930c3185bc9f0f61094873ad92444c4dbdadf；旧源码releases/1c9930c3185bc9f0f61094873ad92444c4dbdadf及旧BUILD J3lGF2j4oXVNQCRQ_lYos保留在.next-prod-before-sd2-d1-v0374-b127209，更早回退不删。worker前后unit、MainPID1241475、启动时间和ExecMainStatus相同，未重启/排空/强杀；既有视频timer active。storage/uploads/videos软链、关键子目录写权限和env元信息不变，未读env/DB内容、未写DB/迁移、未付费。
 
 正式根本机[本轮允许范围统一diff](../../docs/materials/2026-10-04-dark-ui-periodic-list/implementation-v0.37.4.diff)、[部署证据JSON](../../docs/materials/2026-10-04-dark-ui-periodic-list/deployment-v0.37.4.json)可访问，私有且不Git/archive。正式根只同步本工单与资料索引，不覆盖旧src及原dirty。守门员finish按实际中文修改/提交/推送/部署意图识别L3-visible-runtime，项目真实结果层遵循用户手动验收例外，未自动浏览器/DOM/截图/业务功能测试，不冒充视觉效果通过。无分类误判，无范围外业务修改，无发布阻塞。遗留：D1真实暗色对比/页面/弹窗效果待用户手动；D2具体列表待答；本轮无附件原件缺口，历史C5-C8截图原件及系统双击边界不被本轮抹去。
+
+### P1播放时隐藏封面按钮（2026-10-04）
+
+用户原文：“单击播放后，封面不要出现播放按键”。本轮新文字需求，无附件，文本v1，不替代既有D1或C5-C8记录。实际源码开工干净f535246，生产复核b127209/v0.37.4/BUILD ZgKKw-0pLsNEIe24xVMJt，sd2-gray.service active；正式根原dirty保护。守门员start实际修改样式/提交推送/部署中文intent识别L3-visible-runtime，按项目规则用户手动验收，不自动浏览器/截图/功能测试或审核线程。本补丁单包，沿用现有发布链路，PATCH0.37.5同一交付不重抬。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| P1 | 播放时隐藏封面按钮 | 播放期间hover/focus均不显示中央按钮；保留点击、键盘、等待和错误反馈，完成构建与部署检查 | 实现与本地构建完成，待正式发布 |
+
+根因：InlineVideoCover.module.css原.stage[data-playing]隐藏规则被后面的.stage:hover/.stage:focus-within同优先级opacity:1覆盖，鼠标留在封面时按钮再次出现。修共享组件：移除这条覆盖，隐藏条件明确排除data-starting/data-error；TSX只增加现有starting/error的显示状态属性，不改播放/暂停/重试处理。默认/暂停图标仍显示，等待spinner与错误retry/notice保留；透明全幅button、键盘focus-visible边框、aria-label/aria-busy及单击暂停/继续不变。全量引用检索当前仅assets非选择模式视频卡使用，共用实现已统一，不改素材选择器、其他视频控件、独立查看、反应、互斥或进度恢复。D1配色/C5-C8/U1保持，D2具体列表仍待答，未改额度/权限/数据或依赖。
+
+整批发布前检查：本地npm run build退出0，含内置lint/types，仅既有警告；git diff --check通过，允许范围7文件及锁文件仅根版本两处变化核对通过。self Review核对透明button/focus ring/aria-label/等待/重试节点与播放处理均保留，源码只两处显示改动；编译CSS含[data-playing]:not([data-starting]):not([data-error])且opacity:0，没有hover/focus强制显示覆盖，不添加照抄CSS测试。延用已有归档隐私排除、reservation/flock、候选构建/回退、数据/worker保护链路，仅补本次标记与layout/assets影响静态核对；脚本bash -n、node --check通过。未执行浏览器/功能验收。
