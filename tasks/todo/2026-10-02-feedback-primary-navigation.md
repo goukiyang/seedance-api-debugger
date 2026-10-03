@@ -520,10 +520,10 @@ ReleaseNotice在同一窗口展示具体未保存内容或保存/上传状态；
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| C5 | 顶部导航固定 | 页面滚动时顶部导航不移出视野 | 已部署v0.37.2，待用户手动验收 |
-| C6 | 封面点击与查看 | 模板图片单击恢复配置双击放大；资产视频单击播放独立查看靠右 | 已部署v0.37.2，待用户手动验收 |
-| C7 | 点赞收藏统一 | 封面左上角悬停出现键盘触屏也可操作 | 已部署v0.37.2，待用户手动验收 |
-| C8 | 顶部版本号样式 | 版本文字为当前约一半且正常字重，品牌名不变 | 进行中，v0.37.3独立补丁 |
+| C5 | 顶部导航固定 | 页面滚动时顶部导航不移出视野 | 已部署v0.37.3，待用户手动验收 |
+| C6 | 封面点击与查看 | 模板图片单击恢复配置双击放大；资产视频单击播放独立查看靠右 | 已部署v0.37.3，待用户手动验收 |
+| C7 | 点赞收藏统一 | 封面左上角悬停出现键盘触屏也可操作 | 已部署v0.37.3，待用户手动验收 |
+| C8 | 顶部版本号样式 | 版本文字为当前约一半且正常字重，品牌名不变 | 已部署v0.37.3，待用户手动验收 |
 
 用户原文及标记：Comment1为https://sd2.youdooart.com/template-studio，1068x871，target html>body>div.shell-root>header.composer-topbar：“顶部固定不会应为鼠标滚轮受影响往上跑”。Comment2同页target article.studio_result__rzOwd:nth-of-type(1)>div.studio_resultMedia__GcG6u>button.studio_preview__dd3Dz>img：“单击不再是放大图片，改为双击才是查看图片，鼠标移动上去的时候，会弹出双击放大 的文字提示气泡；单击改为恢复该图的配置贴到左侧生成设置处”。主请求：“资产管理页面，单击封面，不再是查看，而是点击播放，查看按键，单独做一个按键放在配置右边，靠右对齐；点赞和收藏，应该都在封面，缩略图的左上角，鼠标移动上去才会出现；排查下同类问题，统一修改”。截图显示v0.37.0，只作为用户实际旧客户端证据，不认定0.37.1回退。
 
@@ -572,3 +572,13 @@ Git/archive/运行证据：回退tag rollback/2026-10-04-before-media-cover-v0.3
 用户浏览器comment，页面https://sd2.youdooart.com/template-studio，target .composer-topbar-version：“版本号用小一倍字体，不要加粗”。截图显示v0.37.1，仅是旧客户端参考，不据此认定已经发布的v0.37.2回退。浏览器评论截图3（C8），原文件名/本地路径未提供，待补持久原件；聊天可见不冒充已归档或已核验，不套用C5/C6或旧PNG。
 
 收到C8时v0.37.2已正式切换且公网/回退保护完成，因此本补丁升PATCH0.37.3，不复用已经交付的0.37.2号。品牌原字号15px、字重700；只对既有版本span增加0.5em（当前7.5px）及font-weight:400，品牌名称/字号、价格徽标、顶栏真实测高布局不改。版本仍package单源，更新检测、稍后去重、手动再开和U1刷新保护保留；仅同步版本及本次摘要，不引入依赖。C5-C7仍属本轮交付，未缩成仅字体任务。整批补丁之后只做构建内置检查及安全发布，效果待用户手动。
+
+#### C8正式发布与本轮最终对账（2026-10-04）
+
+北京时间2026-10-04 00:25:53正式发布v0.37.3，应用提交1c9930c3185bc9f0f61094873ad92444c4dbdadf已推送codex/canvas-liblib-layout，BUILD J3lGF2j4oXVNQCRQ_lYos。C5-C7在已发布0.37.2基础上保留，固定表C5-C8完整保留，均待用户手动。C8应用只改src/app/globals.css、package.json、package-lock.json、src/lib/release.ts四文件；另有本工单和资料索引记录，不改品牌名称、业务接口或依赖。
+
+本地npm run build、服务器NEXT_DIST_DIR=.next-prod-candidate npm run build均退出0，含内置lint/类型检查，仅既有警告；git diff --check、bash -n、node --check通过。编译CSS明确包含.composer-topbar-version{font-size:.5em;font-weight:400}，C5-C7/U1相关候选标记保留；四份线上补丁源码SHA与提交一致。公网/api/config、/api/release、/login、/assets均200且X-SD2-Origin=server-42-193，匿名release为0.37.3、summary空、private/no-store，login含同一BUILD；本地config 200、release版本一致、sd2-gray.service active。仅检查共享顶栏及模板工作台受影响静态：4份新/改变JS/CSS公网200且SHA与产物一致，17份路径/内容未变复用0.37.2证据，不重复浏览器/业务回归或无关全站下载。
+
+发布窗口reservation与flock实际启用，无并发活动；独立归档排除私有资料及运行数据，SHA256 24d4fd0e659d36d08334bc581f4b9f759789ac9a224b8308cc766f61e1669887经服务器核对。回退tag rollback/2026-10-04-before-topbar-version-v0.37.3已推送并指向健康0.37.2的fb630d8c824e2fe4b868ae8146e861c5f761ee6d；旧BUILD zCelY_zSjwH6rS-xpfzLN位于/srv/video-api-debugger/app/.next-prod-before-sd2-c8-v0373-1c9930c，旧源码/srv/video-api-debugger/releases/fb630d8c824e2fe4b868ae8146e861c5f761ee6d。0.37.1及更早回退构建不删。worker前后unit、MainPID1241475、启动时间及状态相同，未重启/排空/强杀；视频timer active。数据软链、关键子目录权限和env元信息保持，未读env/DB内容、未迁移或写DB、未付费生成。
+
+正式根本机[最终C5-C8统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.3.diff)、[0.37.3发布证据](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.3.json)可访问；0.37.2证据/差异保留。守门员finish实际中文intent识别ui/deploy/git，L3-visible-runtime，非general，无阻塞提醒；real-result遵循项目明确手动验收例外，不自动操作浏览器/截图/功能测试，不冒充真实画面通过。无归类误判，无范围外业务修改，无未解决发布卡点；截图1/2/3持久原件缺失及1000ms系统双击边界仍登记，平台原生离开保护例外不变。正式根仅同步两份记录，原有dirty和未跟踪资料保持；记录提交不再次升级、发布或重启。
