@@ -1,12 +1,14 @@
 {
-  "checkedAt": "2026-10-03T07:27:02.066Z",
-  "runId": "sd2-feedback-v0368",
-  "version": "0.36.8",
-  "commit": "98c11b5337741971920a33fddbca68aadaf5d063",
-  "build": "CWKSe5rWo_nZxeVGNUjzV",
+  "checkedAt": "2026-10-03T08:18:18.122Z",
+  "runId": "sd2-feedback-v03610",
+  "version": "0.36.10",
+  "commit": "b26f9d216949c3601d2cc36d050e6fc922422ab1",
+  "build": "MFC_yPnyTMuIibuxAwjsx",
   "routes": [
     "/layout",
-    "/assets/page"
+    "/assets/page",
+    "/image-studio/page",
+    "/template-studio/page"
   ],
   "files": [
     {
@@ -34,9 +36,9 @@
       "status": 200
     },
     {
-      "path": "static/css/ff3bba0a15376c9d.css",
-      "sha256": "92ed5e015166b9ad754c5816486b44e3942a7202a0104f729fde0d952ed7e376",
-      "publicSha256": "92ed5e015166b9ad754c5816486b44e3942a7202a0104f729fde0d952ed7e376",
+      "path": "static/css/224a41bb9243512c.css",
+      "sha256": "2a6d788c54485aa914581683643e6555ddf70154b9d4d09b60ac48855583c350",
+      "publicSha256": "2a6d788c54485aa914581683643e6555ddf70154b9d4d09b60ac48855583c350",
       "status": 200
     },
     {
@@ -70,15 +72,15 @@
       "status": 200
     },
     {
-      "path": "static/chunks/5634-edaa30349530caa8.js",
-      "sha256": "907ec86d6e18d97227fb8ef27c4b10832e044d2a34c5ae1e39d0e1e51fec42eb",
-      "publicSha256": "907ec86d6e18d97227fb8ef27c4b10832e044d2a34c5ae1e39d0e1e51fec42eb",
+      "path": "static/chunks/5634-a94bb59b664b31b1.js",
+      "sha256": "bf179b8394f6271ff3d6974c5c48f5e5c383ba9406c1a0a32d2fb77e40093127",
+      "publicSha256": "bf179b8394f6271ff3d6974c5c48f5e5c383ba9406c1a0a32d2fb77e40093127",
       "status": 200
     },
     {
-      "path": "static/chunks/app/layout-6aa7a910aeb13000.js",
-      "sha256": "61a3168fd7882322423ecfc80cf01b36a649a3a50e12d455395c6a7ee6880172",
-      "publicSha256": "61a3168fd7882322423ecfc80cf01b36a649a3a50e12d455395c6a7ee6880172",
+      "path": "static/chunks/app/layout-b935bc57034fc934.js",
+      "sha256": "fcdc2a684d2d9ebf78a50147a84082ce0da599063ea43b6b9d5e7d4ec93f88ca",
+      "publicSha256": "fcdc2a684d2d9ebf78a50147a84082ce0da599063ea43b6b9d5e7d4ec93f88ca",
       "status": 200
     },
     {
@@ -118,42 +120,71 @@
       "status": 200
     },
     {
-      "path": "static/chunks/app/assets/page-e1b9b7eeef4dd354.js",
-      "sha256": "e09ac2ab2ab4ac832869ab75a6182584f74ade66f7a54adf108aceeb331fcb8f",
-      "publicSha256": "e09ac2ab2ab4ac832869ab75a6182584f74ade66f7a54adf108aceeb331fcb8f",
+      "path": "static/chunks/app/assets/page-4d3347df52a5c14b.js",
+      "sha256": "28154b963f967ae7d7b30e9f94924dedb526e1fe02269cc04f7ac6680eb25252",
+      "publicSha256": "28154b963f967ae7d7b30e9f94924dedb526e1fe02269cc04f7ac6680eb25252",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/image-studio/page-3fa89fc62b82c2c0.js",
+      "sha256": "1fc1806c0ea673332417e93e07d07c0694288d05bfe3e70d4197f6099234b0f4",
+      "publicSha256": "1fc1806c0ea673332417e93e07d07c0694288d05bfe3e70d4197f6099234b0f4",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/9657-67e9d28df3162f84.js",
+      "sha256": "fd11165a00cded7efeaf56c78a6ee8a3f55d7c82ed885eca8af2287696bbc310",
+      "publicSha256": "fd11165a00cded7efeaf56c78a6ee8a3f55d7c82ed885eca8af2287696bbc310",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5559-c83f34e4e3c28875.js",
+      "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+      "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/template-studio/page-c84c23e11268e9ca.js",
+      "sha256": "0e0532056872885da1d76d4f5f0a3a364a3c4b697d84d90f99ab60e4dbef36fe",
+      "publicSha256": "0e0532056872885da1d76d4f5f0a3a364a3c4b697d84d90f99ab60e4dbef36fe",
       "status": 200
     }
   ],
   "sourceFiles": [
     {
       "path": "package.json",
-      "sha256": "f201ebd839e67045f7ceefc16cc4a62de864b4defef13ff48e9c1b70ad80d3e5",
-      "localSha256": "f201ebd839e67045f7ceefc16cc4a62de864b4defef13ff48e9c1b70ad80d3e5"
+      "sha256": "e03d543bd4f0e6e99df63de40ed15daea3816195a87d26773f2bc88c3d0d6e2e",
+      "localSha256": "e03d543bd4f0e6e99df63de40ed15daea3816195a87d26773f2bc88c3d0d6e2e"
     },
     {
       "path": "package-lock.json",
-      "sha256": "e37cd433ed0af4226c11b52df2cd1b2579f12ff09e86bbe5134992281d30cc16",
-      "localSha256": "e37cd433ed0af4226c11b52df2cd1b2579f12ff09e86bbe5134992281d30cc16"
+      "sha256": "6b0137b8a34a29c9472d3983e4e8afcd431fe870020c2ce10893512631e3ce8f",
+      "localSha256": "6b0137b8a34a29c9472d3983e4e8afcd431fe870020c2ce10893512631e3ce8f"
     },
     {
-      "path": "src/app/api/assets/library/route.ts",
-      "sha256": "77a2cbaf74735b9d9bdf8191c47b3aa0900c5fa1ca3ffbcbbef38578a144534e",
-      "localSha256": "77a2cbaf74735b9d9bdf8191c47b3aa0900c5fa1ca3ffbcbbef38578a144534e"
+      "path": "src/app/api/release/route.ts",
+      "sha256": "7a51bde5ccef72688d3533a74747f478880616f258e4c48f2af4c261339e536d",
+      "localSha256": "7a51bde5ccef72688d3533a74747f478880616f258e4c48f2af4c261339e536d"
     },
     {
-      "path": "src/app/assets/page.tsx",
-      "sha256": "2f16a6f5e1309525734e5a0c83870febea351f7b3738375ef6f396720758f128",
-      "localSha256": "2f16a6f5e1309525734e5a0c83870febea351f7b3738375ef6f396720758f128"
+      "path": "src/app/image-studio/studio.tsx",
+      "sha256": "9debe1b8f64cb2d30e766b90c694daa0ff5a0191600658be2e008262c73d4e76",
+      "localSha256": "9debe1b8f64cb2d30e766b90c694daa0ff5a0191600658be2e008262c73d4e76"
     },
     {
-      "path": "src/lib/assets/library-cache.ts",
-      "sha256": "cb2124a3460433c63ae5c3e2a05f7eefb2057aaebfe3075bd92e93970456a715",
-      "localSha256": "cb2124a3460433c63ae5c3e2a05f7eefb2057aaebfe3075bd92e93970456a715"
+      "path": "src/components/ReleaseNotice.tsx",
+      "sha256": "b005b52442973ad5f26a06bbb3244e6e601319f8acba9455558f3f86514b1115",
+      "localSha256": "b005b52442973ad5f26a06bbb3244e6e601319f8acba9455558f3f86514b1115"
     },
     {
       "path": "src/lib/release.ts",
-      "sha256": "b443541077f02a62ecd2631cb211c3c74e09877f8185b7aa33cc9d2ef4212ba8",
-      "localSha256": "b443541077f02a62ecd2631cb211c3c74e09877f8185b7aa33cc9d2ef4212ba8"
+      "sha256": "767a8d80440eade81b140dee7da8e6c76edcb1c72cc05f48907f195d910db477",
+      "localSha256": "767a8d80440eade81b140dee7da8e6c76edcb1c72cc05f48907f195d910db477"
+    },
+    {
+      "path": "src/lib/costs/normal-video-charge.ts",
+      "sha256": "a909adeb6e058891758778ad31944f0908880939f36445aaaadda14dd2eff0af",
+      "localSha256": "a909adeb6e058891758778ad31944f0908880939f36445aaaadda14dd2eff0af"
     },
     {
       "path": "src/components/ContextClipboardActions.tsx",
@@ -175,7 +206,8 @@
       "path": "/api/release",
       "status": 200,
       "origin": "server-42-193",
-      "version": "0.36.8"
+      "version": "0.36.10",
+      "summaryHidden": true
     },
     {
       "path": "/login",
@@ -211,30 +243,28 @@
     ],
     "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
   },
-  "manualAcceptance": "pending; C2 limited read-only production price diagnosis; no functional/browser acceptance, paid generation or production DB writes",
-  "scopeNote": "C2 asset video settled-credit badge deployed; real browser card acceptance pending; C1 clipboard and historical T1 six-model connectivity not rerun",
-  "priceDiagnosis": {
-    "source": "sqlite3 -readonly; PRAGMA query_only=ON; targeted user-provided account only",
-    "matchedUsers": 1,
-    "accountType": "external",
-    "taskCount": 8,
-    "provider": "volcengine_ark",
-    "succeeded": 7,
-    "failed": 1,
-    "actualCreditsByRecentTask": [
-      30,
-      39,
-      36,
-      0,
-      36,
-      36,
-      36,
-      30
+  "manualAcceptance": "pending; C3 single refresh and recoverable draft; C4 external release summary hidden; no functional/browser acceptance, paid generation or production DB writes",
+  "scopeNote": "C2 monetary display and C3/C4 update UX deployed; manual acceptance pending; external authenticated browser not automatically tested",
+  "normalRateDiagnosis": {
+    "mode": "read-only",
+    "model": "2.0",
+    "hasReferenceVideo": false,
+    "source": "provider_get_result",
+    "ordinaryAmountMicros": 1518300,
+    "ordinaryCompletionTokens": 216900,
+    "usdPerMillionTokens": 7,
+    "targetCompletionTokens": [
+      216900,
+      281700,
+      260100
     ],
-    "cashCurrencyAndOfficialFinalAmounts": "all null",
-    "uploadedVideos": 0,
-    "uploadedImages": 4,
-    "scope": "No prompt, media URLs or credentials collected; no production writes or generated requests"
+    "estimatedUsd": [
+      1.5183,
+      1.9719,
+      1.8207
+    ],
+    "cashBillStillMissing": true,
+    "ledgerWrites": false
   },
   "textConnectivity": {
     "startedAt": "2026-10-03T05:34:51.658Z",
@@ -342,14 +372,14 @@
     ]
   },
   "previousDelivery": {
-    "checkedAt": "2026-10-03T07:09:02.313Z",
-    "runId": "sd2-feedback-v0367",
-    "version": "0.36.7",
-    "commit": "8f481400ecfbbcd8b50d021117e77f933221f731",
-    "build": "hdFoauPtV4mwfhsevAtTe",
+    "checkedAt": "2026-10-03T08:01:34.540Z",
+    "runId": "sd2-feedback-v0369-r2",
+    "version": "0.36.9",
+    "commit": "527d925ae1943557d164858f0a74cc7e1fd62c85",
+    "build": "gbpec82z8F5gOaOcQAm6y",
     "routes": [
       "/layout",
-      "/template-studio/page"
+      "/assets/page"
     ],
     "files": [
       {
@@ -413,15 +443,15 @@
         "status": 200
       },
       {
-        "path": "static/chunks/5634-0ee1b89124ff67a4.js",
-        "sha256": "12a852cf541f72d9a274bf6acfb9e732c291d1da5b6531041ad168d7381a6dd7",
-        "publicSha256": "12a852cf541f72d9a274bf6acfb9e732c291d1da5b6531041ad168d7381a6dd7",
+        "path": "static/chunks/5634-9f28500d662d346e.js",
+        "sha256": "0a83e8bec8094132a4b8c66f757dacf1106063c6cef46dd41316744c047ae229",
+        "publicSha256": "0a83e8bec8094132a4b8c66f757dacf1106063c6cef46dd41316744c047ae229",
         "status": 200
       },
       {
-        "path": "static/chunks/app/layout-58fda8c34e0ab94c.js",
-        "sha256": "de28275d91d445e90a07b8b775582cdf4fc20bf28e9612b15a8f33f6acf9a4be",
-        "publicSha256": "de28275d91d445e90a07b8b775582cdf4fc20bf28e9612b15a8f33f6acf9a4be",
+        "path": "static/chunks/app/layout-5e9b195d8fac6840.js",
+        "sha256": "79905b6c7381753c0b44205d1abd56082240afea1feda9e9d67c9661a33347fd",
+        "publicSha256": "79905b6c7381753c0b44205d1abd56082240afea1feda9e9d67c9661a33347fd",
         "status": 200
       },
       {
@@ -431,9 +461,9 @@
         "status": 200
       },
       {
-        "path": "static/chunks/9657-67e9d28df3162f84.js",
-        "sha256": "fd11165a00cded7efeaf56c78a6ee8a3f55d7c82ed885eca8af2287696bbc310",
-        "publicSha256": "fd11165a00cded7efeaf56c78a6ee8a3f55d7c82ed885eca8af2287696bbc310",
+        "path": "static/chunks/6581-3b6574c3c15f97b2.js",
+        "sha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
+        "publicSha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
         "status": 200
       },
       {
@@ -455,64 +485,58 @@
         "status": 200
       },
       {
-        "path": "static/chunks/5559-c83f34e4e3c28875.js",
-        "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-        "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-        "status": 200
-      },
-      {
         "path": "static/chunks/5595-d1bcc5f90a86099c.js",
         "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
         "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
         "status": 200
       },
       {
-        "path": "static/chunks/app/template-studio/page-08780209ae114dba.js",
-        "sha256": "1a61a320408b5415c21a41f048b29191cea26089134f79f5d0c84398547f9bf7",
-        "publicSha256": "1a61a320408b5415c21a41f048b29191cea26089134f79f5d0c84398547f9bf7",
+        "path": "static/chunks/app/assets/page-5599a1fa8bbe251e.js",
+        "sha256": "1f658c7afb50c33657c5ef77643a04e4860f9f0bd333e687ce7c9f80eaf78a6a",
+        "publicSha256": "1f658c7afb50c33657c5ef77643a04e4860f9f0bd333e687ce7c9f80eaf78a6a",
         "status": 200
       }
     ],
     "sourceFiles": [
       {
         "path": "package.json",
-        "sha256": "cdbf31f174beebb087fd2550ea7910560cbbc3954b6449ec38c2d57ecda98ae7",
-        "localSha256": "cdbf31f174beebb087fd2550ea7910560cbbc3954b6449ec38c2d57ecda98ae7"
+        "sha256": "ca9e4a4835889200f17d6bac56b0dcb3210f5546c814f8c715c61ab2a38d13de",
+        "localSha256": "ca9e4a4835889200f17d6bac56b0dcb3210f5546c814f8c715c61ab2a38d13de"
       },
       {
         "path": "package-lock.json",
-        "sha256": "7234cbcf04a472584a31aec0b4fc6214840cd45283027e6d7bc71150331faacd",
-        "localSha256": "7234cbcf04a472584a31aec0b4fc6214840cd45283027e6d7bc71150331faacd"
+        "sha256": "4d530bcdc2c8e905b5ff3a572adf51ce4904d5c04e67a8ef2841d8556e5a30a0",
+        "localSha256": "4d530bcdc2c8e905b5ff3a572adf51ce4904d5c04e67a8ef2841d8556e5a30a0"
+      },
+      {
+        "path": "src/app/api/assets/library/route.ts",
+        "sha256": "a5c2af1becc5531fb907b9980e8a22fb5a7726964fa1754f4f214cb9ed20ee79",
+        "localSha256": "a5c2af1becc5531fb907b9980e8a22fb5a7726964fa1754f4f214cb9ed20ee79"
+      },
+      {
+        "path": "src/app/assets/page.tsx",
+        "sha256": "fcc58a079f2af7168379056e825e282481ca369b7340e312f0f96434e50c292d",
+        "localSha256": "fcc58a079f2af7168379056e825e282481ca369b7340e312f0f96434e50c292d"
+      },
+      {
+        "path": "src/lib/assets/library-cache.ts",
+        "sha256": "ff4e2f770b82457f9de33d6e551378a4d4e659a63cc5760c8db0812c845caf9d",
+        "localSha256": "ff4e2f770b82457f9de33d6e551378a4d4e659a63cc5760c8db0812c845caf9d"
+      },
+      {
+        "path": "src/lib/costs/normal-video-charge.ts",
+        "sha256": "a909adeb6e058891758778ad31944f0908880939f36445aaaadda14dd2eff0af",
+        "localSha256": "a909adeb6e058891758778ad31944f0908880939f36445aaaadda14dd2eff0af"
+      },
+      {
+        "path": "src/lib/release.ts",
+        "sha256": "b7fd7f4f7b787802bc2194a522d943cd747fa26079045c35145779826dd8e9bd",
+        "localSha256": "b7fd7f4f7b787802bc2194a522d943cd747fa26079045c35145779826dd8e9bd"
       },
       {
         "path": "src/components/ContextClipboardActions.tsx",
         "sha256": "52b59343692c5cb710a97394de5684cb295dd63c37d51dd5adcfb2a7312604ad",
         "localSha256": "52b59343692c5cb710a97394de5684cb295dd63c37d51dd5adcfb2a7312604ad"
-      },
-      {
-        "path": "src/components/ContextClipboardActions.module.css",
-        "sha256": "3543673c3bc8b70a41f05f92d6c9955f89127735ce45c5b4565d0e425312139d",
-        "localSha256": "3543673c3bc8b70a41f05f92d6c9955f89127735ce45c5b4565d0e425312139d"
-      },
-      {
-        "path": "src/app/image-studio/studio.tsx",
-        "sha256": "6dc58d8f6be8c0a174798c1d233c3012c0109f4bf453676e3ef0586981bf2f13",
-        "localSha256": "6dc58d8f6be8c0a174798c1d233c3012c0109f4bf453676e3ef0586981bf2f13"
-      },
-      {
-        "path": "src/app/image-studio/global-settings-dialog.tsx",
-        "sha256": "cdf634b4b93cb4883949d894211c9fdc72f9972bcacec28d59721c30c5e2a3b0",
-        "localSha256": "cdf634b4b93cb4883949d894211c9fdc72f9972bcacec28d59721c30c5e2a3b0"
-      },
-      {
-        "path": "src/components/template-studio/VideoContextEditor.tsx",
-        "sha256": "9d5059f5d06babc60a18c50531690555a2c2db6ba9a13be3f20070f0f22844b8",
-        "localSha256": "9d5059f5d06babc60a18c50531690555a2c2db6ba9a13be3f20070f0f22844b8"
-      },
-      {
-        "path": "src/lib/release.ts",
-        "sha256": "4ca7e4228d7ebfb4298acd20396a4be346c4af2ad567aff2506d7fb0c5ad7f71",
-        "localSha256": "4ca7e4228d7ebfb4298acd20396a4be346c4af2ad567aff2506d7fb0c5ad7f71"
       }
     ],
     "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
@@ -529,7 +553,7 @@
         "path": "/api/release",
         "status": 200,
         "origin": "server-42-193",
-        "version": "0.36.7"
+        "version": "0.36.9"
       },
       {
         "path": "/login",
@@ -537,8 +561,8 @@
         "origin": "server-42-193"
       },
       {
-        "path": "/template-studio",
-        "status": 307,
+        "path": "/assets",
+        "status": 200,
         "origin": "server-42-193"
       }
     ],
@@ -565,8 +589,29 @@
       ],
       "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
     },
-    "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes for C1",
-    "scopeNote": "C1 context clipboard toolbar deployed, real browser/clipboard acceptance pending. Historical T1 six-model connectivity preserved; not rerun in C1.",
+    "manualAcceptance": "pending; C2 ordinary-rate monetary display; rate and usage diagnosis only; no functional/browser acceptance, paid generation or production DB writes",
+    "scopeNote": "C2 monetary display deployed; C3/C4 implementation pending publication; no browser or functional acceptance",
+    "normalRateDiagnosis": {
+      "mode": "read-only",
+      "model": "2.0",
+      "hasReferenceVideo": false,
+      "source": "provider_get_result",
+      "ordinaryAmountMicros": 1518300,
+      "ordinaryCompletionTokens": 216900,
+      "usdPerMillionTokens": 7,
+      "targetCompletionTokens": [
+        216900,
+        281700,
+        260100
+      ],
+      "estimatedUsd": [
+        1.5183,
+        1.9719,
+        1.8207
+      ],
+      "cashBillStillMissing": true,
+      "ledgerWrites": false
+    },
     "textConnectivity": {
       "startedAt": "2026-10-03T05:34:51.658Z",
       "completedAt": "2026-10-03T05:35:18.114Z",
@@ -673,20 +718,20 @@
       ]
     },
     "previousDelivery": {
-      "checkedAt": "2026-10-03T03:25:50.278Z",
-      "runId": "sd2-feedback-v0366",
-      "version": "0.36.6",
-      "commit": "f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0",
-      "build": "zLCFc71j3c0EpKfW2zQ7I",
+      "checkedAt": "2026-10-03T07:27:02.066Z",
+      "runId": "sd2-feedback-v0368",
+      "version": "0.36.8",
+      "commit": "98c11b5337741971920a33fddbca68aadaf5d063",
+      "build": "CWKSe5rWo_nZxeVGNUjzV",
       "routes": [
         "/layout",
-        "/template-studio/page"
+        "/assets/page"
       ],
       "files": [
         {
-          "path": "static/chunks/webpack-5771f0fcaecd5647.js",
-          "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-          "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+          "path": "static/chunks/webpack-232528f1f7dfc22b.js",
+          "sha256": "a50134ff590e7a41e08b2dd2835fbb6f6a01bf07402855da1ffb72a31da32302",
+          "publicSha256": "a50134ff590e7a41e08b2dd2835fbb6f6a01bf07402855da1ffb72a31da32302",
           "status": 200
         },
         {
@@ -708,9 +753,9 @@
           "status": 200
         },
         {
-          "path": "static/css/620bed7ff078ffe8.css",
-          "sha256": "95881d2fdb7fc6a4628bf98784bc558f70f5093bc4a3e215995edea63056a2c2",
-          "publicSha256": "95881d2fdb7fc6a4628bf98784bc558f70f5093bc4a3e215995edea63056a2c2",
+          "path": "static/css/ff3bba0a15376c9d.css",
+          "sha256": "92ed5e015166b9ad754c5816486b44e3942a7202a0104f729fde0d952ed7e376",
+          "publicSha256": "92ed5e015166b9ad754c5816486b44e3942a7202a0104f729fde0d952ed7e376",
           "status": 200
         },
         {
@@ -744,15 +789,15 @@
           "status": 200
         },
         {
-          "path": "static/chunks/5634-bf5e722251fc5590.js",
-          "sha256": "7a0b8830b5a4cd6e2f7e8371f2b7c4b5a580ffcd462a36e0f2a5fe4e313ec4f8",
-          "publicSha256": "7a0b8830b5a4cd6e2f7e8371f2b7c4b5a580ffcd462a36e0f2a5fe4e313ec4f8",
+          "path": "static/chunks/5634-edaa30349530caa8.js",
+          "sha256": "907ec86d6e18d97227fb8ef27c4b10832e044d2a34c5ae1e39d0e1e51fec42eb",
+          "publicSha256": "907ec86d6e18d97227fb8ef27c4b10832e044d2a34c5ae1e39d0e1e51fec42eb",
           "status": 200
         },
         {
-          "path": "static/chunks/app/layout-5c4837a3f4e1a2ab.js",
-          "sha256": "46e462baa0a530a44e54161a46cbcf7b7ca5ed239a60d0b7a6780e62314cfef2",
-          "publicSha256": "46e462baa0a530a44e54161a46cbcf7b7ca5ed239a60d0b7a6780e62314cfef2",
+          "path": "static/chunks/app/layout-6aa7a910aeb13000.js",
+          "sha256": "61a3168fd7882322423ecfc80cf01b36a649a3a50e12d455395c6a7ee6880172",
+          "publicSha256": "61a3168fd7882322423ecfc80cf01b36a649a3a50e12d455395c6a7ee6880172",
           "status": 200
         },
         {
@@ -762,9 +807,9 @@
           "status": 200
         },
         {
-          "path": "static/chunks/6370-4123e213528db92e.js",
-          "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-          "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+          "path": "static/chunks/6581-3b6574c3c15f97b2.js",
+          "sha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
+          "publicSha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
           "status": 200
         },
         {
@@ -786,49 +831,53 @@
           "status": 200
         },
         {
-          "path": "static/chunks/5559-c83f34e4e3c28875.js",
-          "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-          "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-          "status": 200
-        },
-        {
           "path": "static/chunks/5595-d1bcc5f90a86099c.js",
           "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
           "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
           "status": 200
         },
         {
-          "path": "static/chunks/app/template-studio/page-59808f05bf2a2fe6.js",
-          "sha256": "52f360eb38aed9252adff4494d0c55a66715be0792aa5cf9ee60d7ac4303b9dd",
-          "publicSha256": "52f360eb38aed9252adff4494d0c55a66715be0792aa5cf9ee60d7ac4303b9dd",
+          "path": "static/chunks/app/assets/page-e1b9b7eeef4dd354.js",
+          "sha256": "e09ac2ab2ab4ac832869ab75a6182584f74ade66f7a54adf108aceeb331fcb8f",
+          "publicSha256": "e09ac2ab2ab4ac832869ab75a6182584f74ade66f7a54adf108aceeb331fcb8f",
           "status": 200
         }
       ],
       "sourceFiles": [
         {
           "path": "package.json",
-          "sha256": "5752ca60d19a80e18c8b0d86f0c9f3c346fb08dd71558bb821b5a029f95bfdf9",
-          "localSha256": "5752ca60d19a80e18c8b0d86f0c9f3c346fb08dd71558bb821b5a029f95bfdf9"
+          "sha256": "f201ebd839e67045f7ceefc16cc4a62de864b4defef13ff48e9c1b70ad80d3e5",
+          "localSha256": "f201ebd839e67045f7ceefc16cc4a62de864b4defef13ff48e9c1b70ad80d3e5"
         },
         {
           "path": "package-lock.json",
-          "sha256": "bf08689f28d630bf60ceac41d57e4fe2342a6cfd9f2968c04263f0da5cc96a98",
-          "localSha256": "bf08689f28d630bf60ceac41d57e4fe2342a6cfd9f2968c04263f0da5cc96a98"
+          "sha256": "e37cd433ed0af4226c11b52df2cd1b2579f12ff09e86bbe5134992281d30cc16",
+          "localSha256": "e37cd433ed0af4226c11b52df2cd1b2579f12ff09e86bbe5134992281d30cc16"
         },
         {
-          "path": "src/components/useProductDialog.tsx",
-          "sha256": "027fde71b5b4b68be9d6b3466e7de319231179e60a5736607a5397e44edd3e58",
-          "localSha256": "027fde71b5b4b68be9d6b3466e7de319231179e60a5736607a5397e44edd3e58"
+          "path": "src/app/api/assets/library/route.ts",
+          "sha256": "77a2cbaf74735b9d9bdf8191c47b3aa0900c5fa1ca3ffbcbbef38578a144534e",
+          "localSha256": "77a2cbaf74735b9d9bdf8191c47b3aa0900c5fa1ca3ffbcbbef38578a144534e"
         },
         {
-          "path": "src/components/ProductDialog.module.css",
-          "sha256": "ea85ba52c7fd6de13722c3b318ca438555091894b6bba9d1016e26d140b8a37c",
-          "localSha256": "ea85ba52c7fd6de13722c3b318ca438555091894b6bba9d1016e26d140b8a37c"
+          "path": "src/app/assets/page.tsx",
+          "sha256": "2f16a6f5e1309525734e5a0c83870febea351f7b3738375ef6f396720758f128",
+          "localSha256": "2f16a6f5e1309525734e5a0c83870febea351f7b3738375ef6f396720758f128"
+        },
+        {
+          "path": "src/lib/assets/library-cache.ts",
+          "sha256": "cb2124a3460433c63ae5c3e2a05f7eefb2057aaebfe3075bd92e93970456a715",
+          "localSha256": "cb2124a3460433c63ae5c3e2a05f7eefb2057aaebfe3075bd92e93970456a715"
         },
         {
           "path": "src/lib/release.ts",
-          "sha256": "b5aa9cc578789b1e77d4c68a1d45a59f3b971a7aa015c204d723985bec5fab50",
-          "localSha256": "b5aa9cc578789b1e77d4c68a1d45a59f3b971a7aa015c204d723985bec5fab50"
+          "sha256": "b443541077f02a62ecd2631cb211c3c74e09877f8185b7aa33cc9d2ef4212ba8",
+          "localSha256": "b443541077f02a62ecd2631cb211c3c74e09877f8185b7aa33cc9d2ef4212ba8"
+        },
+        {
+          "path": "src/components/ContextClipboardActions.tsx",
+          "sha256": "52b59343692c5cb710a97394de5684cb295dd63c37d51dd5adcfb2a7312604ad",
+          "localSha256": "52b59343692c5cb710a97394de5684cb295dd63c37d51dd5adcfb2a7312604ad"
         }
       ],
       "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
@@ -845,7 +894,7 @@
           "path": "/api/release",
           "status": 200,
           "origin": "server-42-193",
-          "version": "0.36.6"
+          "version": "0.36.8"
         },
         {
           "path": "/login",
@@ -853,8 +902,8 @@
           "origin": "server-42-193"
         },
         {
-          "path": "/template-studio",
-          "status": 307,
+          "path": "/assets",
+          "status": 200,
           "origin": "server-42-193"
         }
       ],
@@ -881,989 +930,30 @@
         ],
         "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
       },
-      "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
-      "scopeNote": "P1 deployed; UI manually pending. T1 six actual upstream GPT connectivity requests succeeded, one per model, no retries, no queue/browser end-to-end test.",
-      "previousDelivery": {
-        "checkedAt": "2026-10-03T03:01:18.024Z",
-        "runId": "sd2-feedback-v0365",
-        "version": "0.36.5",
-        "commit": "47d3528c3a2b5715e81cfb4a64626c1d39abf938",
-        "build": "jecj9uPdtiWkqyM2f-FR7",
-        "routes": [
-          "/layout",
-          "/template-studio/page"
+      "manualAcceptance": "pending; C2 limited read-only production price diagnosis; no functional/browser acceptance, paid generation or production DB writes",
+      "scopeNote": "C2 asset video settled-credit badge deployed; real browser card acceptance pending; C1 clipboard and historical T1 six-model connectivity not rerun",
+      "priceDiagnosis": {
+        "source": "sqlite3 -readonly; PRAGMA query_only=ON; targeted user-provided account only",
+        "matchedUsers": 1,
+        "accountType": "external",
+        "taskCount": 8,
+        "provider": "volcengine_ark",
+        "succeeded": 7,
+        "failed": 1,
+        "actualCreditsByRecentTask": [
+          30,
+          39,
+          36,
+          0,
+          36,
+          36,
+          36,
+          30
         ],
-        "files": [
-          {
-            "path": "static/chunks/webpack-5771f0fcaecd5647.js",
-            "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-            "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/8344c0af-421bfd77be53e753.js",
-            "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-            "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/1890-7faa2453eb06933f.js",
-            "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-            "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/main-app-2d700b7ebb08890f.js",
-            "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-            "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-            "status": 200
-          },
-          {
-            "path": "static/css/e2e433bba23c2938.css",
-            "sha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
-            "publicSha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
-            "status": 200
-          },
-          {
-            "path": "static/css/ea095be58e8c4d2c.css",
-            "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-            "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-            "status": 200
-          },
-          {
-            "path": "static/css/0cacfd9b992f5cee.css",
-            "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-            "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
-            "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-            "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/3267-3fbd97130dd04797.js",
-            "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-            "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/3461-4160763e155494a1.js",
-            "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-            "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/5634-3ae1b8496d8006c1.js",
-            "sha256": "aaf99ea6a0727bfa00703af411aad03b218d36c2233f1d70b954c85854f13935",
-            "publicSha256": "aaf99ea6a0727bfa00703af411aad03b218d36c2233f1d70b954c85854f13935",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/app/layout-fac4662428f22c13.js",
-            "sha256": "8be01cc871dab3344795ef1627aa91ccb8e535ba37d179f3140d4d046b429a39",
-            "publicSha256": "8be01cc871dab3344795ef1627aa91ccb8e535ba37d179f3140d4d046b429a39",
-            "status": 200
-          },
-          {
-            "path": "static/css/53c843adf00a1818.css",
-            "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-            "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/6370-4123e213528db92e.js",
-            "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-            "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/5557-8807fd6738a80a57.js",
-            "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-            "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/4881-0f4d34f12b6f2026.js",
-            "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-            "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/6670-7082efca1a6a1ace.js",
-            "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-            "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/5559-c83f34e4e3c28875.js",
-            "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-            "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/5595-d1bcc5f90a86099c.js",
-            "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-            "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-            "status": 200
-          },
-          {
-            "path": "static/chunks/app/template-studio/page-ea4f6dbfd20c5013.js",
-            "sha256": "d4bd7f5aab4c56f9c31787741d5e059d2ee54e4449af44f5f74ac7a0712a400d",
-            "publicSha256": "d4bd7f5aab4c56f9c31787741d5e059d2ee54e4449af44f5f74ac7a0712a400d",
-            "status": 200
-          }
-        ],
-        "sourceFiles": [
-          {
-            "path": "package.json",
-            "sha256": "c4d7cabb2759cf54329260fe53f178fae7a7116e6c802a844b43ed7d9d0980ed",
-            "localSha256": "c4d7cabb2759cf54329260fe53f178fae7a7116e6c802a844b43ed7d9d0980ed"
-          },
-          {
-            "path": "package-lock.json",
-            "sha256": "6e7b9ad1aac5776860ace0e577acd639e614910b2f96ce059d38924f987f85af",
-            "localSha256": "6e7b9ad1aac5776860ace0e577acd639e614910b2f96ce059d38924f987f85af"
-          },
-          {
-            "path": "src/app/image-studio/studio.tsx",
-            "sha256": "ea4d4cc339365d6fb41c686488af69bf66344d5a5da04381b48e2d0018cec2a6",
-            "localSha256": "ea4d4cc339365d6fb41c686488af69bf66344d5a5da04381b48e2d0018cec2a6"
-          },
-          {
-            "path": "src/lib/release.ts",
-            "sha256": "7809b9656e958de243d3375691aa57473fc303485fb7185f2f3abec731e0c82c",
-            "localSha256": "7809b9656e958de243d3375691aa57473fc303485fb7185f2f3abec731e0c82c"
-          }
-        ],
-        "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-        "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-        "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-        "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-        "checks": [
-          {
-            "path": "/api/config",
-            "status": 200,
-            "origin": "server-42-193"
-          },
-          {
-            "path": "/api/release",
-            "status": 200,
-            "origin": "server-42-193",
-            "version": "0.36.5"
-          },
-          {
-            "path": "/login",
-            "status": 200,
-            "origin": "server-42-193"
-          },
-          {
-            "path": "/template-studio",
-            "status": 307,
-            "origin": "server-42-193"
-          }
-        ],
-        "local": {
-          "checks": [
-            {
-              "path": "/api/config",
-              "status": 200
-            },
-            {
-              "path": "/api/release",
-              "status": 200
-            },
-            {
-              "path": "/login",
-              "status": 200
-            }
-          ],
-          "services": [
-            "active",
-            "active",
-            "active",
-            "active"
-          ],
-          "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
-        },
-        "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
-        "previousDelivery": {
-          "checkedAt": "2026-10-03T02:23:03.914Z",
-          "runId": "sd2-feedback-v0364",
-          "version": "0.36.4",
-          "commit": "0fcea7dd2a91a5de427a1e1c9934c176e146fb9a",
-          "build": "0I77QmnNWDzJglbNdkjLN",
-          "routes": [
-            "/layout",
-            "/template-studio/page"
-          ],
-          "files": [
-            {
-              "path": "static/chunks/webpack-5771f0fcaecd5647.js",
-              "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-              "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/8344c0af-421bfd77be53e753.js",
-              "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-              "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/1890-7faa2453eb06933f.js",
-              "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-              "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/main-app-2d700b7ebb08890f.js",
-              "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-              "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-              "status": 200
-            },
-            {
-              "path": "static/css/e2e433bba23c2938.css",
-              "sha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
-              "publicSha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
-              "status": 200
-            },
-            {
-              "path": "static/css/ea095be58e8c4d2c.css",
-              "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-              "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-              "status": 200
-            },
-            {
-              "path": "static/css/0cacfd9b992f5cee.css",
-              "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-              "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
-              "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-              "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/3267-3fbd97130dd04797.js",
-              "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-              "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/3461-4160763e155494a1.js",
-              "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-              "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/5634-f51f117535665262.js",
-              "sha256": "cd3d91525ab4e25c4688c37ef45ffb06ece431dde3e04489ff6c05bcfdc115ba",
-              "publicSha256": "cd3d91525ab4e25c4688c37ef45ffb06ece431dde3e04489ff6c05bcfdc115ba",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/app/layout-8bd55d3f90897d11.js",
-              "sha256": "fae32f40bcb669d70888257e3ed49b397d996ee9e869f2130b57b843ecaa772c",
-              "publicSha256": "fae32f40bcb669d70888257e3ed49b397d996ee9e869f2130b57b843ecaa772c",
-              "status": 200
-            },
-            {
-              "path": "static/css/53c843adf00a1818.css",
-              "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-              "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/6370-4123e213528db92e.js",
-              "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-              "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/5557-8807fd6738a80a57.js",
-              "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-              "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/4881-0f4d34f12b6f2026.js",
-              "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-              "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/6670-7082efca1a6a1ace.js",
-              "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-              "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/5559-c83f34e4e3c28875.js",
-              "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-              "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/5595-d1bcc5f90a86099c.js",
-              "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-              "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-              "status": 200
-            },
-            {
-              "path": "static/chunks/app/template-studio/page-26972d3d1408a78c.js",
-              "sha256": "36e0be5e6f46617575858c652882944cc9b0e0dfb3441c033327ce0749acc3e3",
-              "publicSha256": "36e0be5e6f46617575858c652882944cc9b0e0dfb3441c033327ce0749acc3e3",
-              "status": 200
-            }
-          ],
-          "sourceFiles": [
-            {
-              "path": "package.json",
-              "sha256": "8f5f96ad1e1d8f2c5de6416c16adaa64c46fd9e853a7f0cee50e1ddc0f58c3a5",
-              "localSha256": "8f5f96ad1e1d8f2c5de6416c16adaa64c46fd9e853a7f0cee50e1ddc0f58c3a5"
-            },
-            {
-              "path": "package-lock.json",
-              "sha256": "f5c64dd0ddf656420f35c70e752876a66118cde578639d017cb52df42d7df6a7",
-              "localSha256": "f5c64dd0ddf656420f35c70e752876a66118cde578639d017cb52df42d7df6a7"
-            },
-            {
-              "path": "src/app/image-studio/studio.tsx",
-              "sha256": "3f569d66650894f02d090fd1ae3a4d571b32785d65714dde0a458120e9447b25",
-              "localSha256": "3f569d66650894f02d090fd1ae3a4d571b32785d65714dde0a458120e9447b25"
-            },
-            {
-              "path": "src/app/image-studio/studio.module.css",
-              "sha256": "7d30b225ff99609b5171f42b918f0747c476f959a67773572e1edd3917dcf2e5",
-              "localSha256": "7d30b225ff99609b5171f42b918f0747c476f959a67773572e1edd3917dcf2e5"
-            },
-            {
-              "path": "src/lib/image-studio/limits.ts",
-              "sha256": "4dd90d77c21d95588617bf1b7fffec626f478703f21d2513f01b1592ff2d06d5",
-              "localSha256": "4dd90d77c21d95588617bf1b7fffec626f478703f21d2513f01b1592ff2d06d5"
-            },
-            {
-              "path": "src/lib/image-studio/modules.ts",
-              "sha256": "de222f89b5950c45bcb758028a56fd4a35547c99b22cd4c620ddfb036478f88d",
-              "localSha256": "de222f89b5950c45bcb758028a56fd4a35547c99b22cd4c620ddfb036478f88d"
-            },
-            {
-              "path": "src/lib/image-studio/presets.ts",
-              "sha256": "d291a4d2478d80b90c2d1b519cf3edf8a74cf8a7814f26f37021a95732245525",
-              "localSha256": "d291a4d2478d80b90c2d1b519cf3edf8a74cf8a7814f26f37021a95732245525"
-            },
-            {
-              "path": "src/lib/image-studio/tasks.ts",
-              "sha256": "ef61913bcbb4714c057e59afddd1ae971d20abfcede41c10ad59660575ca98f9",
-              "localSha256": "ef61913bcbb4714c057e59afddd1ae971d20abfcede41c10ad59660575ca98f9"
-            },
-            {
-              "path": "src/lib/release.ts",
-              "sha256": "347263e77e8217dd586662e4a8f6c3491a9dc1187cce56db5a1d83e46962ff25",
-              "localSha256": "347263e77e8217dd586662e4a8f6c3491a9dc1187cce56db5a1d83e46962ff25"
-            }
-          ],
-          "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-          "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-          "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-          "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-          "checks": [
-            {
-              "path": "/api/config",
-              "status": 200,
-              "origin": "server-42-193"
-            },
-            {
-              "path": "/api/release",
-              "status": 200,
-              "origin": "server-42-193",
-              "version": "0.36.4"
-            },
-            {
-              "path": "/login",
-              "status": 200,
-              "origin": "server-42-193"
-            },
-            {
-              "path": "/template-studio",
-              "status": 307,
-              "origin": "server-42-193"
-            }
-          ],
-          "local": {
-            "checks": [
-              {
-                "path": "/api/config",
-                "status": 200
-              },
-              {
-                "path": "/api/release",
-                "status": 200
-              },
-              {
-                "path": "/login",
-                "status": 200
-              }
-            ],
-            "services": [
-              "active",
-              "active",
-              "active",
-              "active"
-            ],
-            "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
-          },
-          "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
-          "previousDelivery": {
-            "checkedAt": "2026-10-02T17:27:25.207Z",
-            "runId": "sd2-feedback-v0363-view",
-            "version": "0.36.3",
-            "commit": "8315f02776290cda1c0f1e7286856d193f95dfca",
-            "build": "TIe6lesNJcjyQirM3FMpx",
-            "routes": [
-              "/layout",
-              "/template-studio/page"
-            ],
-            "files": [
-              {
-                "path": "static/chunks/webpack-5771f0fcaecd5647.js",
-                "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-                "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/8344c0af-421bfd77be53e753.js",
-                "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-                "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/1890-7faa2453eb06933f.js",
-                "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-                "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/main-app-2d700b7ebb08890f.js",
-                "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-                "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-                "status": 200
-              },
-              {
-                "path": "static/css/993f560b06c7bc1f.css",
-                "sha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
-                "publicSha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
-                "status": 200
-              },
-              {
-                "path": "static/css/ea095be58e8c4d2c.css",
-                "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-                "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-                "status": 200
-              },
-              {
-                "path": "static/css/0cacfd9b992f5cee.css",
-                "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-                "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
-                "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-                "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/3267-3fbd97130dd04797.js",
-                "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-                "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/3461-4160763e155494a1.js",
-                "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-                "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/5634-e38ba8b1a6c23a17.js",
-                "sha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
-                "publicSha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/app/layout-6a7da8a12acb25f2.js",
-                "sha256": "31036bee20d63d6ac84da52a09ecf531dbe26056918f8623b5daef4d84081ea2",
-                "publicSha256": "31036bee20d63d6ac84da52a09ecf531dbe26056918f8623b5daef4d84081ea2",
-                "status": 200
-              },
-              {
-                "path": "static/css/53c843adf00a1818.css",
-                "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-                "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/6370-4123e213528db92e.js",
-                "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-                "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/5557-8807fd6738a80a57.js",
-                "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-                "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/4881-0f4d34f12b6f2026.js",
-                "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-                "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/6670-7082efca1a6a1ace.js",
-                "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-                "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/5559-c83f34e4e3c28875.js",
-                "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-                "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/5595-d1bcc5f90a86099c.js",
-                "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-                "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-                "status": 200
-              },
-              {
-                "path": "static/chunks/app/template-studio/page-0f212581e7393399.js",
-                "sha256": "7372e079519ab2cb5b2e761c1ddf294f05834008241fef17622e241cb98b5770",
-                "publicSha256": "7372e079519ab2cb5b2e761c1ddf294f05834008241fef17622e241cb98b5770",
-                "status": 200
-              }
-            ],
-            "sourceFiles": [
-              {
-                "path": "package.json",
-                "sha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce",
-                "localSha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce"
-              },
-              {
-                "path": "src/app/image-studio/studio.tsx",
-                "sha256": "6a60e051222f8a917fcf182ed8d8fe96144425e385ba9a42962a095cab2a1295",
-                "localSha256": "6a60e051222f8a917fcf182ed8d8fe96144425e385ba9a42962a095cab2a1295"
-              }
-            ],
-            "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-            "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-            "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-            "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-            "checks": [
-              {
-                "path": "/api/config",
-                "status": 200,
-                "origin": "server-42-193"
-              },
-              {
-                "path": "/api/release",
-                "status": 200,
-                "origin": "server-42-193",
-                "version": "0.36.3"
-              },
-              {
-                "path": "/login",
-                "status": 200,
-                "origin": "server-42-193"
-              },
-              {
-                "path": "/template-studio",
-                "status": 307,
-                "origin": "server-42-193"
-              }
-            ],
-            "local": {
-              "checks": [
-                {
-                  "path": "/api/config",
-                  "status": 200
-                },
-                {
-                  "path": "/api/release",
-                  "status": 200
-                },
-                {
-                  "path": "/login",
-                  "status": 200
-                }
-              ],
-              "services": [
-                "active",
-                "active",
-                "active",
-                "active"
-              ],
-              "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
-            },
-            "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
-            "firstBatch": {
-              "checkedAt": "2026-10-02T17:11:47.264Z",
-              "runId": "sd2-feedback-v0363",
-              "version": "0.36.3",
-              "commit": "fbb8243371398ad753b66d8ff02ff8a0a6b9d84a",
-              "build": "ytlmOyOpdCSahZQKCm07Y",
-              "routes": [
-                "/layout",
-                "/login/page",
-                "/generate/page",
-                "/template-studio/page"
-              ],
-              "files": [
-                {
-                  "path": "static/chunks/webpack-5771f0fcaecd5647.js",
-                  "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-                  "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/8344c0af-421bfd77be53e753.js",
-                  "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-                  "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/1890-7faa2453eb06933f.js",
-                  "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-                  "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/main-app-2d700b7ebb08890f.js",
-                  "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-                  "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
-                  "status": 200
-                },
-                {
-                  "path": "static/css/993f560b06c7bc1f.css",
-                  "sha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
-                  "publicSha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
-                  "status": 200
-                },
-                {
-                  "path": "static/css/ea095be58e8c4d2c.css",
-                  "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-                  "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
-                  "status": 200
-                },
-                {
-                  "path": "static/css/0cacfd9b992f5cee.css",
-                  "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-                  "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
-                  "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-                  "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/3267-3fbd97130dd04797.js",
-                  "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-                  "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/3461-4160763e155494a1.js",
-                  "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-                  "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/5634-e38ba8b1a6c23a17.js",
-                  "sha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
-                  "publicSha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/app/layout-437ffd4f69fce15c.js",
-                  "sha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
-                  "publicSha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/app/login/page-777149980be08fee.js",
-                  "sha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
-                  "publicSha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
-                  "status": 200
-                },
-                {
-                  "path": "static/css/53c843adf00a1818.css",
-                  "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-                  "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/6581-3b6574c3c15f97b2.js",
-                  "sha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
-                  "publicSha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/5557-8807fd6738a80a57.js",
-                  "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-                  "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/4881-0f4d34f12b6f2026.js",
-                  "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-                  "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/6670-7082efca1a6a1ace.js",
-                  "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-                  "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/9534-4ab68d9b9b67f606.js",
-                  "sha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
-                  "publicSha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/5246-0a4907f78de58f22.js",
-                  "sha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
-                  "publicSha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/5559-c83f34e4e3c28875.js",
-                  "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-                  "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/3038-6771ee064baef388.js",
-                  "sha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
-                  "publicSha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/9041-e702e256458b9182.js",
-                  "sha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
-                  "publicSha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/app/generate/page-33833e63fb9a46ce.js",
-                  "sha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
-                  "publicSha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/6370-4123e213528db92e.js",
-                  "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-                  "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/5595-d1bcc5f90a86099c.js",
-                  "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-                  "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
-                  "status": 200
-                },
-                {
-                  "path": "static/chunks/app/template-studio/page-090a5a57090036d9.js",
-                  "sha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
-                  "publicSha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
-                  "status": 200
-                }
-              ],
-              "sourceFiles": [
-                {
-                  "path": "src/app/api/tasks/create/route.ts",
-                  "sha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414",
-                  "localSha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414"
-                },
-                {
-                  "path": "package-lock.json",
-                  "sha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9",
-                  "localSha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9"
-                },
-                {
-                  "path": "package.json",
-                  "sha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce",
-                  "localSha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce"
-                },
-                {
-                  "path": "src/app/image-studio/studio.tsx",
-                  "sha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46",
-                  "localSha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46"
-                },
-                {
-                  "path": "src/app/image-studio/studio.module.css",
-                  "sha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71",
-                  "localSha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71"
-                },
-                {
-                  "path": "src/components/GenerationComposer.tsx",
-                  "sha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24",
-                  "localSha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24"
-                },
-                {
-                  "path": "src/components/generate/GeneratePageClient.tsx",
-                  "sha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7",
-                  "localSha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7"
-                },
-                {
-                  "path": "src/components/ComposerActionBar.tsx",
-                  "sha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a",
-                  "localSha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a"
-                },
-                {
-                  "path": "src/components/template-studio/TemplateStudioShell.tsx",
-                  "sha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a",
-                  "localSha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a"
-                },
-                {
-                  "path": "src/components/template-studio/VideoTemplateWorkbench.tsx",
-                  "sha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b",
-                  "localSha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b"
-                },
-                {
-                  "path": "src/components/template-studio/template-studio.module.css",
-                  "sha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c",
-                  "localSha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c"
-                },
-                {
-                  "path": "src/lib/release.ts",
-                  "sha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d",
-                  "localSha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d"
-                },
-                {
-                  "path": "src/components/RelativeTime.tsx",
-                  "sha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd",
-                  "localSha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd"
-                },
-                {
-                  "path": "src/components/useDialogDismiss.ts",
-                  "sha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb",
-                  "localSha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb"
-                },
-                {
-                  "path": "src/components/useProductDialog.tsx",
-                  "sha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d",
-                  "localSha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d"
-                },
-                {
-                  "path": "src/components/ReleaseNotice.tsx",
-                  "sha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5",
-                  "localSha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5"
-                },
-                {
-                  "path": "public/styles/loading.css",
-                  "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f",
-                  "localSha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
-                },
-                {
-                  "path": "src/components/LoadingState.tsx",
-                  "sha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725",
-                  "localSha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725"
-                },
-                {
-                  "path": "src/lib/image-studio/worker.ts",
-                  "sha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813",
-                  "localSha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813"
-                },
-                {
-                  "path": "scripts/process-image-studio.ts",
-                  "sha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387",
-                  "localSha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387"
-                }
-              ],
-              "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-              "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
-              "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-              "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
-              "checks": [
-                {
-                  "path": "/api/config",
-                  "status": 200,
-                  "origin": "server-42-193"
-                },
-                {
-                  "path": "/api/release",
-                  "status": 200,
-                  "origin": "server-42-193",
-                  "version": "0.36.3"
-                },
-                {
-                  "path": "/login",
-                  "status": 200,
-                  "origin": "server-42-193"
-                },
-                {
-                  "path": "/image-studio",
-                  "status": 307,
-                  "origin": "server-42-193"
-                },
-                {
-                  "path": "/template-studio",
-                  "status": 307,
-                  "origin": "server-42-193"
-                },
-                {
-                  "path": "/generate",
-                  "status": 307,
-                  "origin": "server-42-193"
-                },
-                {
-                  "path": "/styles/loading.css",
-                  "status": 200,
-                  "origin": "server-42-193",
-                  "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
-                }
-              ],
-              "local": {
-                "checks": [
-                  {
-                    "path": "/api/config",
-                    "status": 200
-                  },
-                  {
-                    "path": "/api/release",
-                    "status": 200
-                  },
-                  {
-                    "path": "/login",
-                    "status": 200
-                  }
-                ],
-                "services": [
-                  "active",
-                  "active",
-                  "active",
-                  "active"
-                ],
-                "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
-              },
-              "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes"
-            },
-            "scopeNote": "Same delivery 0.36.3; final source change only template image view persistence; firstBatch evidence retained for unchanged I1-I5; no browser or functional acceptance."
-          },
-          "scopeNote": "N1/N2 deployment only; G1 readonly upstream HTTP502 diagnosis, root cause unresolved; no functional acceptance"
-        },
-        "scopeNote": "R1 repeated image generation confirmation removed; no function/browser acceptance or paid generation"
+        "cashCurrencyAndOfficialFinalAmounts": "all null",
+        "uploadedVideos": 0,
+        "uploadedImages": 4,
+        "scope": "No prompt, media URLs or credentials collected; no production writes or generated requests"
       },
       "textConnectivity": {
         "startedAt": "2026-10-03T05:34:51.658Z",
@@ -1969,6 +1059,1637 @@
             }
           }
         ]
+      },
+      "previousDelivery": {
+        "checkedAt": "2026-10-03T07:09:02.313Z",
+        "runId": "sd2-feedback-v0367",
+        "version": "0.36.7",
+        "commit": "8f481400ecfbbcd8b50d021117e77f933221f731",
+        "build": "hdFoauPtV4mwfhsevAtTe",
+        "routes": [
+          "/layout",
+          "/template-studio/page"
+        ],
+        "files": [
+          {
+            "path": "static/chunks/webpack-232528f1f7dfc22b.js",
+            "sha256": "a50134ff590e7a41e08b2dd2835fbb6f6a01bf07402855da1ffb72a31da32302",
+            "publicSha256": "a50134ff590e7a41e08b2dd2835fbb6f6a01bf07402855da1ffb72a31da32302",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+            "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+            "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/1890-7faa2453eb06933f.js",
+            "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+            "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+            "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+            "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+            "status": 200
+          },
+          {
+            "path": "static/css/ff3bba0a15376c9d.css",
+            "sha256": "92ed5e015166b9ad754c5816486b44e3942a7202a0104f729fde0d952ed7e376",
+            "publicSha256": "92ed5e015166b9ad754c5816486b44e3942a7202a0104f729fde0d952ed7e376",
+            "status": 200
+          },
+          {
+            "path": "static/css/ea095be58e8c4d2c.css",
+            "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+            "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+            "status": 200
+          },
+          {
+            "path": "static/css/0cacfd9b992f5cee.css",
+            "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+            "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+            "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+            "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/3267-3fbd97130dd04797.js",
+            "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+            "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/3461-4160763e155494a1.js",
+            "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+            "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/5634-0ee1b89124ff67a4.js",
+            "sha256": "12a852cf541f72d9a274bf6acfb9e732c291d1da5b6531041ad168d7381a6dd7",
+            "publicSha256": "12a852cf541f72d9a274bf6acfb9e732c291d1da5b6531041ad168d7381a6dd7",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/app/layout-58fda8c34e0ab94c.js",
+            "sha256": "de28275d91d445e90a07b8b775582cdf4fc20bf28e9612b15a8f33f6acf9a4be",
+            "publicSha256": "de28275d91d445e90a07b8b775582cdf4fc20bf28e9612b15a8f33f6acf9a4be",
+            "status": 200
+          },
+          {
+            "path": "static/css/53c843adf00a1818.css",
+            "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+            "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/9657-67e9d28df3162f84.js",
+            "sha256": "fd11165a00cded7efeaf56c78a6ee8a3f55d7c82ed885eca8af2287696bbc310",
+            "publicSha256": "fd11165a00cded7efeaf56c78a6ee8a3f55d7c82ed885eca8af2287696bbc310",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/5557-8807fd6738a80a57.js",
+            "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+            "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+            "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+            "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/6670-7082efca1a6a1ace.js",
+            "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+            "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/5559-c83f34e4e3c28875.js",
+            "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+            "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/5595-d1bcc5f90a86099c.js",
+            "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+            "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+            "status": 200
+          },
+          {
+            "path": "static/chunks/app/template-studio/page-08780209ae114dba.js",
+            "sha256": "1a61a320408b5415c21a41f048b29191cea26089134f79f5d0c84398547f9bf7",
+            "publicSha256": "1a61a320408b5415c21a41f048b29191cea26089134f79f5d0c84398547f9bf7",
+            "status": 200
+          }
+        ],
+        "sourceFiles": [
+          {
+            "path": "package.json",
+            "sha256": "cdbf31f174beebb087fd2550ea7910560cbbc3954b6449ec38c2d57ecda98ae7",
+            "localSha256": "cdbf31f174beebb087fd2550ea7910560cbbc3954b6449ec38c2d57ecda98ae7"
+          },
+          {
+            "path": "package-lock.json",
+            "sha256": "7234cbcf04a472584a31aec0b4fc6214840cd45283027e6d7bc71150331faacd",
+            "localSha256": "7234cbcf04a472584a31aec0b4fc6214840cd45283027e6d7bc71150331faacd"
+          },
+          {
+            "path": "src/components/ContextClipboardActions.tsx",
+            "sha256": "52b59343692c5cb710a97394de5684cb295dd63c37d51dd5adcfb2a7312604ad",
+            "localSha256": "52b59343692c5cb710a97394de5684cb295dd63c37d51dd5adcfb2a7312604ad"
+          },
+          {
+            "path": "src/components/ContextClipboardActions.module.css",
+            "sha256": "3543673c3bc8b70a41f05f92d6c9955f89127735ce45c5b4565d0e425312139d",
+            "localSha256": "3543673c3bc8b70a41f05f92d6c9955f89127735ce45c5b4565d0e425312139d"
+          },
+          {
+            "path": "src/app/image-studio/studio.tsx",
+            "sha256": "6dc58d8f6be8c0a174798c1d233c3012c0109f4bf453676e3ef0586981bf2f13",
+            "localSha256": "6dc58d8f6be8c0a174798c1d233c3012c0109f4bf453676e3ef0586981bf2f13"
+          },
+          {
+            "path": "src/app/image-studio/global-settings-dialog.tsx",
+            "sha256": "cdf634b4b93cb4883949d894211c9fdc72f9972bcacec28d59721c30c5e2a3b0",
+            "localSha256": "cdf634b4b93cb4883949d894211c9fdc72f9972bcacec28d59721c30c5e2a3b0"
+          },
+          {
+            "path": "src/components/template-studio/VideoContextEditor.tsx",
+            "sha256": "9d5059f5d06babc60a18c50531690555a2c2db6ba9a13be3f20070f0f22844b8",
+            "localSha256": "9d5059f5d06babc60a18c50531690555a2c2db6ba9a13be3f20070f0f22844b8"
+          },
+          {
+            "path": "src/lib/release.ts",
+            "sha256": "4ca7e4228d7ebfb4298acd20396a4be346c4af2ad567aff2506d7fb0c5ad7f71",
+            "localSha256": "4ca7e4228d7ebfb4298acd20396a4be346c4af2ad567aff2506d7fb0c5ad7f71"
+          }
+        ],
+        "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+        "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+        "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+        "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+        "checks": [
+          {
+            "path": "/api/config",
+            "status": 200,
+            "origin": "server-42-193"
+          },
+          {
+            "path": "/api/release",
+            "status": 200,
+            "origin": "server-42-193",
+            "version": "0.36.7"
+          },
+          {
+            "path": "/login",
+            "status": 200,
+            "origin": "server-42-193"
+          },
+          {
+            "path": "/template-studio",
+            "status": 307,
+            "origin": "server-42-193"
+          }
+        ],
+        "local": {
+          "checks": [
+            {
+              "path": "/api/config",
+              "status": 200
+            },
+            {
+              "path": "/api/release",
+              "status": 200
+            },
+            {
+              "path": "/login",
+              "status": 200
+            }
+          ],
+          "services": [
+            "active",
+            "active",
+            "active",
+            "active"
+          ],
+          "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
+        },
+        "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes for C1",
+        "scopeNote": "C1 context clipboard toolbar deployed, real browser/clipboard acceptance pending. Historical T1 six-model connectivity preserved; not rerun in C1.",
+        "textConnectivity": {
+          "startedAt": "2026-10-03T05:34:51.658Z",
+          "completedAt": "2026-10-03T05:35:18.114Z",
+          "target": "sd2.youdooart.com production text integration",
+          "commit": "f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0",
+          "build": "zLCFc71j3c0EpKfW2zQ7I",
+          "sourceHashes": {
+            "src/lib/integrations/musk.ts": "0e9cc6c613897b38ed93d01ecca7d9b15e565f7187366d9d7bd50f3a510aaeec",
+            "src/lib/template-studio/text-models.ts": "15e8320666463cb35f12e609eb1765e103ad06a2dcb80098a6912710148ee08f"
+          },
+          "requestsPerModel": 1,
+          "retries": 0,
+          "timeoutMs": 45000,
+          "temperature": 0.2,
+          "responseFormat": "json_object; production helper",
+          "scope": "real upstream connectivity and prompt JSON parsing; not browser/queue end-to-end",
+          "databaseMode": "query_only; no task/credit/config writes",
+          "actualMoneyCharged": "not returned by completion; unknown",
+          "results": [
+            {
+              "model": "gpt-5.5",
+              "label": "GPT-5.5",
+              "outcome": "succeeded",
+              "latencyMs": 3022,
+              "returnedModel": "gpt-5.5",
+              "outputCharacters": 20,
+              "formatValid": true,
+              "usage": {
+                "prompt_tokens": 339,
+                "completion_tokens": 37,
+                "total_tokens": 376
+              }
+            },
+            {
+              "model": "gpt-5.6-luna",
+              "label": "GPT-5.6 Luna",
+              "outcome": "succeeded",
+              "latencyMs": 3451,
+              "returnedModel": "gpt-5.6-luna",
+              "outputCharacters": 20,
+              "formatValid": true,
+              "usage": {
+                "prompt_tokens": 43,
+                "completion_tokens": 13,
+                "total_tokens": 56
+              }
+            },
+            {
+              "model": "gpt-5.6-sol",
+              "label": "GPT-5.6 Sol",
+              "outcome": "succeeded",
+              "latencyMs": 11806,
+              "returnedModel": "gpt-5.6-sol",
+              "outputCharacters": 20,
+              "formatValid": true,
+              "usage": {
+                "prompt_tokens": 339,
+                "completion_tokens": 10,
+                "total_tokens": 349
+              }
+            },
+            {
+              "model": "gpt-6-luna",
+              "label": "GPT-6 Luna",
+              "outcome": "succeeded",
+              "latencyMs": 2353,
+              "returnedModel": "gpt-6-luna",
+              "outputCharacters": 20,
+              "formatValid": true,
+              "usage": {
+                "prompt_tokens": 66,
+                "completion_tokens": 13,
+                "total_tokens": 79
+              }
+            },
+            {
+              "model": "gpt-6-sol",
+              "label": "GPT-6 Sol",
+              "outcome": "succeeded",
+              "latencyMs": 3040,
+              "returnedModel": "gpt-6-sol",
+              "outputCharacters": 20,
+              "formatValid": true,
+              "usage": {
+                "prompt_tokens": 339,
+                "completion_tokens": 10,
+                "total_tokens": 349
+              }
+            },
+            {
+              "model": "gpt-6-astra",
+              "label": "GPT-6 Astra",
+              "outcome": "succeeded",
+              "latencyMs": 2783,
+              "returnedModel": "gpt-6-astra",
+              "outputCharacters": 20,
+              "formatValid": true,
+              "usage": {
+                "prompt_tokens": 43,
+                "completion_tokens": 13,
+                "total_tokens": 56
+              }
+            }
+          ]
+        },
+        "previousDelivery": {
+          "checkedAt": "2026-10-03T03:25:50.278Z",
+          "runId": "sd2-feedback-v0366",
+          "version": "0.36.6",
+          "commit": "f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0",
+          "build": "zLCFc71j3c0EpKfW2zQ7I",
+          "routes": [
+            "/layout",
+            "/template-studio/page"
+          ],
+          "files": [
+            {
+              "path": "static/chunks/webpack-5771f0fcaecd5647.js",
+              "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+              "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+              "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+              "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/1890-7faa2453eb06933f.js",
+              "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+              "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+              "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+              "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+              "status": 200
+            },
+            {
+              "path": "static/css/620bed7ff078ffe8.css",
+              "sha256": "95881d2fdb7fc6a4628bf98784bc558f70f5093bc4a3e215995edea63056a2c2",
+              "publicSha256": "95881d2fdb7fc6a4628bf98784bc558f70f5093bc4a3e215995edea63056a2c2",
+              "status": 200
+            },
+            {
+              "path": "static/css/ea095be58e8c4d2c.css",
+              "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+              "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+              "status": 200
+            },
+            {
+              "path": "static/css/0cacfd9b992f5cee.css",
+              "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+              "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+              "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+              "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/3267-3fbd97130dd04797.js",
+              "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+              "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/3461-4160763e155494a1.js",
+              "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+              "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/5634-bf5e722251fc5590.js",
+              "sha256": "7a0b8830b5a4cd6e2f7e8371f2b7c4b5a580ffcd462a36e0f2a5fe4e313ec4f8",
+              "publicSha256": "7a0b8830b5a4cd6e2f7e8371f2b7c4b5a580ffcd462a36e0f2a5fe4e313ec4f8",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/app/layout-5c4837a3f4e1a2ab.js",
+              "sha256": "46e462baa0a530a44e54161a46cbcf7b7ca5ed239a60d0b7a6780e62314cfef2",
+              "publicSha256": "46e462baa0a530a44e54161a46cbcf7b7ca5ed239a60d0b7a6780e62314cfef2",
+              "status": 200
+            },
+            {
+              "path": "static/css/53c843adf00a1818.css",
+              "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+              "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/6370-4123e213528db92e.js",
+              "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+              "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/5557-8807fd6738a80a57.js",
+              "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+              "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+              "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+              "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/6670-7082efca1a6a1ace.js",
+              "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+              "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/5559-c83f34e4e3c28875.js",
+              "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+              "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/5595-d1bcc5f90a86099c.js",
+              "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+              "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+              "status": 200
+            },
+            {
+              "path": "static/chunks/app/template-studio/page-59808f05bf2a2fe6.js",
+              "sha256": "52f360eb38aed9252adff4494d0c55a66715be0792aa5cf9ee60d7ac4303b9dd",
+              "publicSha256": "52f360eb38aed9252adff4494d0c55a66715be0792aa5cf9ee60d7ac4303b9dd",
+              "status": 200
+            }
+          ],
+          "sourceFiles": [
+            {
+              "path": "package.json",
+              "sha256": "5752ca60d19a80e18c8b0d86f0c9f3c346fb08dd71558bb821b5a029f95bfdf9",
+              "localSha256": "5752ca60d19a80e18c8b0d86f0c9f3c346fb08dd71558bb821b5a029f95bfdf9"
+            },
+            {
+              "path": "package-lock.json",
+              "sha256": "bf08689f28d630bf60ceac41d57e4fe2342a6cfd9f2968c04263f0da5cc96a98",
+              "localSha256": "bf08689f28d630bf60ceac41d57e4fe2342a6cfd9f2968c04263f0da5cc96a98"
+            },
+            {
+              "path": "src/components/useProductDialog.tsx",
+              "sha256": "027fde71b5b4b68be9d6b3466e7de319231179e60a5736607a5397e44edd3e58",
+              "localSha256": "027fde71b5b4b68be9d6b3466e7de319231179e60a5736607a5397e44edd3e58"
+            },
+            {
+              "path": "src/components/ProductDialog.module.css",
+              "sha256": "ea85ba52c7fd6de13722c3b318ca438555091894b6bba9d1016e26d140b8a37c",
+              "localSha256": "ea85ba52c7fd6de13722c3b318ca438555091894b6bba9d1016e26d140b8a37c"
+            },
+            {
+              "path": "src/lib/release.ts",
+              "sha256": "b5aa9cc578789b1e77d4c68a1d45a59f3b971a7aa015c204d723985bec5fab50",
+              "localSha256": "b5aa9cc578789b1e77d4c68a1d45a59f3b971a7aa015c204d723985bec5fab50"
+            }
+          ],
+          "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+          "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+          "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+          "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+          "checks": [
+            {
+              "path": "/api/config",
+              "status": 200,
+              "origin": "server-42-193"
+            },
+            {
+              "path": "/api/release",
+              "status": 200,
+              "origin": "server-42-193",
+              "version": "0.36.6"
+            },
+            {
+              "path": "/login",
+              "status": 200,
+              "origin": "server-42-193"
+            },
+            {
+              "path": "/template-studio",
+              "status": 307,
+              "origin": "server-42-193"
+            }
+          ],
+          "local": {
+            "checks": [
+              {
+                "path": "/api/config",
+                "status": 200
+              },
+              {
+                "path": "/api/release",
+                "status": 200
+              },
+              {
+                "path": "/login",
+                "status": 200
+              }
+            ],
+            "services": [
+              "active",
+              "active",
+              "active",
+              "active"
+            ],
+            "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
+          },
+          "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
+          "scopeNote": "P1 deployed; UI manually pending. T1 six actual upstream GPT connectivity requests succeeded, one per model, no retries, no queue/browser end-to-end test.",
+          "previousDelivery": {
+            "checkedAt": "2026-10-03T03:01:18.024Z",
+            "runId": "sd2-feedback-v0365",
+            "version": "0.36.5",
+            "commit": "47d3528c3a2b5715e81cfb4a64626c1d39abf938",
+            "build": "jecj9uPdtiWkqyM2f-FR7",
+            "routes": [
+              "/layout",
+              "/template-studio/page"
+            ],
+            "files": [
+              {
+                "path": "static/chunks/webpack-5771f0fcaecd5647.js",
+                "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+                "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/1890-7faa2453eb06933f.js",
+                "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+                "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                "status": 200
+              },
+              {
+                "path": "static/css/e2e433bba23c2938.css",
+                "sha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
+                "publicSha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
+                "status": 200
+              },
+              {
+                "path": "static/css/ea095be58e8c4d2c.css",
+                "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                "status": 200
+              },
+              {
+                "path": "static/css/0cacfd9b992f5cee.css",
+                "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+                "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/3267-3fbd97130dd04797.js",
+                "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/3461-4160763e155494a1.js",
+                "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/5634-3ae1b8496d8006c1.js",
+                "sha256": "aaf99ea6a0727bfa00703af411aad03b218d36c2233f1d70b954c85854f13935",
+                "publicSha256": "aaf99ea6a0727bfa00703af411aad03b218d36c2233f1d70b954c85854f13935",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/app/layout-fac4662428f22c13.js",
+                "sha256": "8be01cc871dab3344795ef1627aa91ccb8e535ba37d179f3140d4d046b429a39",
+                "publicSha256": "8be01cc871dab3344795ef1627aa91ccb8e535ba37d179f3140d4d046b429a39",
+                "status": 200
+              },
+              {
+                "path": "static/css/53c843adf00a1818.css",
+                "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/6370-4123e213528db92e.js",
+                "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/5557-8807fd6738a80a57.js",
+                "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+                "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/6670-7082efca1a6a1ace.js",
+                "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/5559-c83f34e4e3c28875.js",
+                "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/5595-d1bcc5f90a86099c.js",
+                "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                "status": 200
+              },
+              {
+                "path": "static/chunks/app/template-studio/page-ea4f6dbfd20c5013.js",
+                "sha256": "d4bd7f5aab4c56f9c31787741d5e059d2ee54e4449af44f5f74ac7a0712a400d",
+                "publicSha256": "d4bd7f5aab4c56f9c31787741d5e059d2ee54e4449af44f5f74ac7a0712a400d",
+                "status": 200
+              }
+            ],
+            "sourceFiles": [
+              {
+                "path": "package.json",
+                "sha256": "c4d7cabb2759cf54329260fe53f178fae7a7116e6c802a844b43ed7d9d0980ed",
+                "localSha256": "c4d7cabb2759cf54329260fe53f178fae7a7116e6c802a844b43ed7d9d0980ed"
+              },
+              {
+                "path": "package-lock.json",
+                "sha256": "6e7b9ad1aac5776860ace0e577acd639e614910b2f96ce059d38924f987f85af",
+                "localSha256": "6e7b9ad1aac5776860ace0e577acd639e614910b2f96ce059d38924f987f85af"
+              },
+              {
+                "path": "src/app/image-studio/studio.tsx",
+                "sha256": "ea4d4cc339365d6fb41c686488af69bf66344d5a5da04381b48e2d0018cec2a6",
+                "localSha256": "ea4d4cc339365d6fb41c686488af69bf66344d5a5da04381b48e2d0018cec2a6"
+              },
+              {
+                "path": "src/lib/release.ts",
+                "sha256": "7809b9656e958de243d3375691aa57473fc303485fb7185f2f3abec731e0c82c",
+                "localSha256": "7809b9656e958de243d3375691aa57473fc303485fb7185f2f3abec731e0c82c"
+              }
+            ],
+            "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+            "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+            "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+            "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+            "checks": [
+              {
+                "path": "/api/config",
+                "status": 200,
+                "origin": "server-42-193"
+              },
+              {
+                "path": "/api/release",
+                "status": 200,
+                "origin": "server-42-193",
+                "version": "0.36.5"
+              },
+              {
+                "path": "/login",
+                "status": 200,
+                "origin": "server-42-193"
+              },
+              {
+                "path": "/template-studio",
+                "status": 307,
+                "origin": "server-42-193"
+              }
+            ],
+            "local": {
+              "checks": [
+                {
+                  "path": "/api/config",
+                  "status": 200
+                },
+                {
+                  "path": "/api/release",
+                  "status": 200
+                },
+                {
+                  "path": "/login",
+                  "status": 200
+                }
+              ],
+              "services": [
+                "active",
+                "active",
+                "active",
+                "active"
+              ],
+              "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
+            },
+            "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
+            "previousDelivery": {
+              "checkedAt": "2026-10-03T02:23:03.914Z",
+              "runId": "sd2-feedback-v0364",
+              "version": "0.36.4",
+              "commit": "0fcea7dd2a91a5de427a1e1c9934c176e146fb9a",
+              "build": "0I77QmnNWDzJglbNdkjLN",
+              "routes": [
+                "/layout",
+                "/template-studio/page"
+              ],
+              "files": [
+                {
+                  "path": "static/chunks/webpack-5771f0fcaecd5647.js",
+                  "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                  "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+                  "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                  "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/1890-7faa2453eb06933f.js",
+                  "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                  "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+                  "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                  "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                  "status": 200
+                },
+                {
+                  "path": "static/css/e2e433bba23c2938.css",
+                  "sha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
+                  "publicSha256": "fec3401d03e9a82ae4abc03a102e12ea7384ae858d729454ddb96d7630954efb",
+                  "status": 200
+                },
+                {
+                  "path": "static/css/ea095be58e8c4d2c.css",
+                  "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                  "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                  "status": 200
+                },
+                {
+                  "path": "static/css/0cacfd9b992f5cee.css",
+                  "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                  "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+                  "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                  "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/3267-3fbd97130dd04797.js",
+                  "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                  "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/3461-4160763e155494a1.js",
+                  "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                  "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/5634-f51f117535665262.js",
+                  "sha256": "cd3d91525ab4e25c4688c37ef45ffb06ece431dde3e04489ff6c05bcfdc115ba",
+                  "publicSha256": "cd3d91525ab4e25c4688c37ef45ffb06ece431dde3e04489ff6c05bcfdc115ba",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/app/layout-8bd55d3f90897d11.js",
+                  "sha256": "fae32f40bcb669d70888257e3ed49b397d996ee9e869f2130b57b843ecaa772c",
+                  "publicSha256": "fae32f40bcb669d70888257e3ed49b397d996ee9e869f2130b57b843ecaa772c",
+                  "status": 200
+                },
+                {
+                  "path": "static/css/53c843adf00a1818.css",
+                  "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                  "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/6370-4123e213528db92e.js",
+                  "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                  "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/5557-8807fd6738a80a57.js",
+                  "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                  "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+                  "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                  "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/6670-7082efca1a6a1ace.js",
+                  "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                  "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/5559-c83f34e4e3c28875.js",
+                  "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                  "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/5595-d1bcc5f90a86099c.js",
+                  "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                  "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                  "status": 200
+                },
+                {
+                  "path": "static/chunks/app/template-studio/page-26972d3d1408a78c.js",
+                  "sha256": "36e0be5e6f46617575858c652882944cc9b0e0dfb3441c033327ce0749acc3e3",
+                  "publicSha256": "36e0be5e6f46617575858c652882944cc9b0e0dfb3441c033327ce0749acc3e3",
+                  "status": 200
+                }
+              ],
+              "sourceFiles": [
+                {
+                  "path": "package.json",
+                  "sha256": "8f5f96ad1e1d8f2c5de6416c16adaa64c46fd9e853a7f0cee50e1ddc0f58c3a5",
+                  "localSha256": "8f5f96ad1e1d8f2c5de6416c16adaa64c46fd9e853a7f0cee50e1ddc0f58c3a5"
+                },
+                {
+                  "path": "package-lock.json",
+                  "sha256": "f5c64dd0ddf656420f35c70e752876a66118cde578639d017cb52df42d7df6a7",
+                  "localSha256": "f5c64dd0ddf656420f35c70e752876a66118cde578639d017cb52df42d7df6a7"
+                },
+                {
+                  "path": "src/app/image-studio/studio.tsx",
+                  "sha256": "3f569d66650894f02d090fd1ae3a4d571b32785d65714dde0a458120e9447b25",
+                  "localSha256": "3f569d66650894f02d090fd1ae3a4d571b32785d65714dde0a458120e9447b25"
+                },
+                {
+                  "path": "src/app/image-studio/studio.module.css",
+                  "sha256": "7d30b225ff99609b5171f42b918f0747c476f959a67773572e1edd3917dcf2e5",
+                  "localSha256": "7d30b225ff99609b5171f42b918f0747c476f959a67773572e1edd3917dcf2e5"
+                },
+                {
+                  "path": "src/lib/image-studio/limits.ts",
+                  "sha256": "4dd90d77c21d95588617bf1b7fffec626f478703f21d2513f01b1592ff2d06d5",
+                  "localSha256": "4dd90d77c21d95588617bf1b7fffec626f478703f21d2513f01b1592ff2d06d5"
+                },
+                {
+                  "path": "src/lib/image-studio/modules.ts",
+                  "sha256": "de222f89b5950c45bcb758028a56fd4a35547c99b22cd4c620ddfb036478f88d",
+                  "localSha256": "de222f89b5950c45bcb758028a56fd4a35547c99b22cd4c620ddfb036478f88d"
+                },
+                {
+                  "path": "src/lib/image-studio/presets.ts",
+                  "sha256": "d291a4d2478d80b90c2d1b519cf3edf8a74cf8a7814f26f37021a95732245525",
+                  "localSha256": "d291a4d2478d80b90c2d1b519cf3edf8a74cf8a7814f26f37021a95732245525"
+                },
+                {
+                  "path": "src/lib/image-studio/tasks.ts",
+                  "sha256": "ef61913bcbb4714c057e59afddd1ae971d20abfcede41c10ad59660575ca98f9",
+                  "localSha256": "ef61913bcbb4714c057e59afddd1ae971d20abfcede41c10ad59660575ca98f9"
+                },
+                {
+                  "path": "src/lib/release.ts",
+                  "sha256": "347263e77e8217dd586662e4a8f6c3491a9dc1187cce56db5a1d83e46962ff25",
+                  "localSha256": "347263e77e8217dd586662e4a8f6c3491a9dc1187cce56db5a1d83e46962ff25"
+                }
+              ],
+              "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+              "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+              "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+              "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+              "checks": [
+                {
+                  "path": "/api/config",
+                  "status": 200,
+                  "origin": "server-42-193"
+                },
+                {
+                  "path": "/api/release",
+                  "status": 200,
+                  "origin": "server-42-193",
+                  "version": "0.36.4"
+                },
+                {
+                  "path": "/login",
+                  "status": 200,
+                  "origin": "server-42-193"
+                },
+                {
+                  "path": "/template-studio",
+                  "status": 307,
+                  "origin": "server-42-193"
+                }
+              ],
+              "local": {
+                "checks": [
+                  {
+                    "path": "/api/config",
+                    "status": 200
+                  },
+                  {
+                    "path": "/api/release",
+                    "status": 200
+                  },
+                  {
+                    "path": "/login",
+                    "status": 200
+                  }
+                ],
+                "services": [
+                  "active",
+                  "active",
+                  "active",
+                  "active"
+                ],
+                "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
+              },
+              "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
+              "previousDelivery": {
+                "checkedAt": "2026-10-02T17:27:25.207Z",
+                "runId": "sd2-feedback-v0363-view",
+                "version": "0.36.3",
+                "commit": "8315f02776290cda1c0f1e7286856d193f95dfca",
+                "build": "TIe6lesNJcjyQirM3FMpx",
+                "routes": [
+                  "/layout",
+                  "/template-studio/page"
+                ],
+                "files": [
+                  {
+                    "path": "static/chunks/webpack-5771f0fcaecd5647.js",
+                    "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                    "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+                    "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                    "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/1890-7faa2453eb06933f.js",
+                    "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                    "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+                    "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                    "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/css/993f560b06c7bc1f.css",
+                    "sha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
+                    "publicSha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/css/ea095be58e8c4d2c.css",
+                    "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                    "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/css/0cacfd9b992f5cee.css",
+                    "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                    "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+                    "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                    "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/3267-3fbd97130dd04797.js",
+                    "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                    "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/3461-4160763e155494a1.js",
+                    "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                    "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/5634-e38ba8b1a6c23a17.js",
+                    "sha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
+                    "publicSha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/app/layout-6a7da8a12acb25f2.js",
+                    "sha256": "31036bee20d63d6ac84da52a09ecf531dbe26056918f8623b5daef4d84081ea2",
+                    "publicSha256": "31036bee20d63d6ac84da52a09ecf531dbe26056918f8623b5daef4d84081ea2",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/css/53c843adf00a1818.css",
+                    "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                    "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/6370-4123e213528db92e.js",
+                    "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                    "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/5557-8807fd6738a80a57.js",
+                    "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                    "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+                    "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                    "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/6670-7082efca1a6a1ace.js",
+                    "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                    "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/5559-c83f34e4e3c28875.js",
+                    "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                    "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/5595-d1bcc5f90a86099c.js",
+                    "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                    "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                    "status": 200
+                  },
+                  {
+                    "path": "static/chunks/app/template-studio/page-0f212581e7393399.js",
+                    "sha256": "7372e079519ab2cb5b2e761c1ddf294f05834008241fef17622e241cb98b5770",
+                    "publicSha256": "7372e079519ab2cb5b2e761c1ddf294f05834008241fef17622e241cb98b5770",
+                    "status": 200
+                  }
+                ],
+                "sourceFiles": [
+                  {
+                    "path": "package.json",
+                    "sha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce",
+                    "localSha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce"
+                  },
+                  {
+                    "path": "src/app/image-studio/studio.tsx",
+                    "sha256": "6a60e051222f8a917fcf182ed8d8fe96144425e385ba9a42962a095cab2a1295",
+                    "localSha256": "6a60e051222f8a917fcf182ed8d8fe96144425e385ba9a42962a095cab2a1295"
+                  }
+                ],
+                "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+                "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+                "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+                "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+                "checks": [
+                  {
+                    "path": "/api/config",
+                    "status": 200,
+                    "origin": "server-42-193"
+                  },
+                  {
+                    "path": "/api/release",
+                    "status": 200,
+                    "origin": "server-42-193",
+                    "version": "0.36.3"
+                  },
+                  {
+                    "path": "/login",
+                    "status": 200,
+                    "origin": "server-42-193"
+                  },
+                  {
+                    "path": "/template-studio",
+                    "status": 307,
+                    "origin": "server-42-193"
+                  }
+                ],
+                "local": {
+                  "checks": [
+                    {
+                      "path": "/api/config",
+                      "status": 200
+                    },
+                    {
+                      "path": "/api/release",
+                      "status": 200
+                    },
+                    {
+                      "path": "/login",
+                      "status": 200
+                    }
+                  ],
+                  "services": [
+                    "active",
+                    "active",
+                    "active",
+                    "active"
+                  ],
+                  "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
+                },
+                "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
+                "firstBatch": {
+                  "checkedAt": "2026-10-02T17:11:47.264Z",
+                  "runId": "sd2-feedback-v0363",
+                  "version": "0.36.3",
+                  "commit": "fbb8243371398ad753b66d8ff02ff8a0a6b9d84a",
+                  "build": "ytlmOyOpdCSahZQKCm07Y",
+                  "routes": [
+                    "/layout",
+                    "/login/page",
+                    "/generate/page",
+                    "/template-studio/page"
+                  ],
+                  "files": [
+                    {
+                      "path": "static/chunks/webpack-5771f0fcaecd5647.js",
+                      "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                      "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+                      "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                      "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/1890-7faa2453eb06933f.js",
+                      "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                      "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+                      "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                      "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/css/993f560b06c7bc1f.css",
+                      "sha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
+                      "publicSha256": "8bdcd58d28cfdab1939c37b9becfc59bfa438473ff66f0167eccf56e96905561",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/css/ea095be58e8c4d2c.css",
+                      "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                      "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/css/0cacfd9b992f5cee.css",
+                      "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                      "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+                      "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                      "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/3267-3fbd97130dd04797.js",
+                      "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                      "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/3461-4160763e155494a1.js",
+                      "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                      "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/5634-e38ba8b1a6c23a17.js",
+                      "sha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
+                      "publicSha256": "77e8e6b0fae2f55ee11f2ea20083f466a185155312fbc2a9ff3a77997db59d89",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/app/layout-437ffd4f69fce15c.js",
+                      "sha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
+                      "publicSha256": "d90f12868159f867b12f7aff130178d55c58b3ed1fc93229dbfd94c9d2bf95d6",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/app/login/page-777149980be08fee.js",
+                      "sha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
+                      "publicSha256": "de13880b645b36b8cd9db792fd0901b85875abdf1d86eed27037caf15b27f6c9",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/css/53c843adf00a1818.css",
+                      "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                      "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/6581-3b6574c3c15f97b2.js",
+                      "sha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
+                      "publicSha256": "ae07a63f9e03d04f432c74ba6651d5e3c158b4cd4482e82a815c4696e041a95f",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/5557-8807fd6738a80a57.js",
+                      "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                      "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+                      "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                      "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/6670-7082efca1a6a1ace.js",
+                      "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                      "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/9534-4ab68d9b9b67f606.js",
+                      "sha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
+                      "publicSha256": "36f9abc488852ea67cbcd5d0d3856500a3091b246fc60dad396c85797964d3bf",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/5246-0a4907f78de58f22.js",
+                      "sha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
+                      "publicSha256": "d2f1cbb1f95743f748d40fe4b82b9e7782d4d10194c4c8917c3adbe32a1c29a0",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/5559-c83f34e4e3c28875.js",
+                      "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                      "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/3038-6771ee064baef388.js",
+                      "sha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
+                      "publicSha256": "3120433a7c39956041b2a5fe2188d2926353e2cfbc9cbcd9ba8ada0eaac60c36",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/9041-e702e256458b9182.js",
+                      "sha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
+                      "publicSha256": "1f8a2018d9947935f6c6f78bb5395039e2c207f3078622cefb8ef5a7e02e155e",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/app/generate/page-33833e63fb9a46ce.js",
+                      "sha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
+                      "publicSha256": "7fdfc3a8861d777a3ee1eb03e15b16f5806daff605584224ff5dd6cecf554ca9",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/6370-4123e213528db92e.js",
+                      "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                      "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/5595-d1bcc5f90a86099c.js",
+                      "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                      "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+                      "status": 200
+                    },
+                    {
+                      "path": "static/chunks/app/template-studio/page-090a5a57090036d9.js",
+                      "sha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
+                      "publicSha256": "334e9c628f1dd4833bf8206a11ebb5642101a2244b5ef80f854586e5f3d76b39",
+                      "status": 200
+                    }
+                  ],
+                  "sourceFiles": [
+                    {
+                      "path": "src/app/api/tasks/create/route.ts",
+                      "sha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414",
+                      "localSha256": "de93287fa962020aaa085e753d21025e20bfad2bdb71ac402fdbbe8158cc4414"
+                    },
+                    {
+                      "path": "package-lock.json",
+                      "sha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9",
+                      "localSha256": "3eb82a3b008dcab346b33c8f69003c43ed7bcad5126e3976e8b3326b14045ca9"
+                    },
+                    {
+                      "path": "package.json",
+                      "sha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce",
+                      "localSha256": "a16c4f0c8d11740ca79200de2de0d2056edfce4bc7d719fecb8fa94c0815edce"
+                    },
+                    {
+                      "path": "src/app/image-studio/studio.tsx",
+                      "sha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46",
+                      "localSha256": "7438e65194d348a13050670cfebe72346ff9835c362d344801cb00a118b74d46"
+                    },
+                    {
+                      "path": "src/app/image-studio/studio.module.css",
+                      "sha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71",
+                      "localSha256": "8fe918df950665d544f7139b3df422748e2a874f04230117b7b0867f841f3a71"
+                    },
+                    {
+                      "path": "src/components/GenerationComposer.tsx",
+                      "sha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24",
+                      "localSha256": "3e08083025cd183f5c1185b7333acc4687c06183dc703664270bfad551e82b24"
+                    },
+                    {
+                      "path": "src/components/generate/GeneratePageClient.tsx",
+                      "sha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7",
+                      "localSha256": "5ae2feb9c8df99e5e4e6302066bc681ed4f0b5bb7fdea118eac1279ccc6980b7"
+                    },
+                    {
+                      "path": "src/components/ComposerActionBar.tsx",
+                      "sha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a",
+                      "localSha256": "e7b40d2c54b75703feef47625cbe76a2f7ae9a5b643f54390c10202f40b4eb2a"
+                    },
+                    {
+                      "path": "src/components/template-studio/TemplateStudioShell.tsx",
+                      "sha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a",
+                      "localSha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a"
+                    },
+                    {
+                      "path": "src/components/template-studio/VideoTemplateWorkbench.tsx",
+                      "sha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b",
+                      "localSha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b"
+                    },
+                    {
+                      "path": "src/components/template-studio/template-studio.module.css",
+                      "sha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c",
+                      "localSha256": "5b8b15a99a9d77ca032e556a138f221602664e9425c5366fd08ca2ac9a53719c"
+                    },
+                    {
+                      "path": "src/lib/release.ts",
+                      "sha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d",
+                      "localSha256": "1d58dedf6c17a019d17f06aba76523e3e59a78874b6d7f11d942c765d3acfa1d"
+                    },
+                    {
+                      "path": "src/components/RelativeTime.tsx",
+                      "sha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd",
+                      "localSha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd"
+                    },
+                    {
+                      "path": "src/components/useDialogDismiss.ts",
+                      "sha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb",
+                      "localSha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb"
+                    },
+                    {
+                      "path": "src/components/useProductDialog.tsx",
+                      "sha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d",
+                      "localSha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d"
+                    },
+                    {
+                      "path": "src/components/ReleaseNotice.tsx",
+                      "sha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5",
+                      "localSha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5"
+                    },
+                    {
+                      "path": "public/styles/loading.css",
+                      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f",
+                      "localSha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
+                    },
+                    {
+                      "path": "src/components/LoadingState.tsx",
+                      "sha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725",
+                      "localSha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725"
+                    },
+                    {
+                      "path": "src/lib/image-studio/worker.ts",
+                      "sha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813",
+                      "localSha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813"
+                    },
+                    {
+                      "path": "scripts/process-image-studio.ts",
+                      "sha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387",
+                      "localSha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387"
+                    }
+                  ],
+                  "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+                  "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+                  "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+                  "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+                  "checks": [
+                    {
+                      "path": "/api/config",
+                      "status": 200,
+                      "origin": "server-42-193"
+                    },
+                    {
+                      "path": "/api/release",
+                      "status": 200,
+                      "origin": "server-42-193",
+                      "version": "0.36.3"
+                    },
+                    {
+                      "path": "/login",
+                      "status": 200,
+                      "origin": "server-42-193"
+                    },
+                    {
+                      "path": "/image-studio",
+                      "status": 307,
+                      "origin": "server-42-193"
+                    },
+                    {
+                      "path": "/template-studio",
+                      "status": 307,
+                      "origin": "server-42-193"
+                    },
+                    {
+                      "path": "/generate",
+                      "status": 307,
+                      "origin": "server-42-193"
+                    },
+                    {
+                      "path": "/styles/loading.css",
+                      "status": 200,
+                      "origin": "server-42-193",
+                      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
+                    }
+                  ],
+                  "local": {
+                    "checks": [
+                      {
+                        "path": "/api/config",
+                        "status": 200
+                      },
+                      {
+                        "path": "/api/release",
+                        "status": 200
+                      },
+                      {
+                        "path": "/login",
+                        "status": 200
+                      }
+                    ],
+                    "services": [
+                      "active",
+                      "active",
+                      "active",
+                      "active"
+                    ],
+                    "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
+                  },
+                  "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes"
+                },
+                "scopeNote": "Same delivery 0.36.3; final source change only template image view persistence; firstBatch evidence retained for unchanged I1-I5; no browser or functional acceptance."
+              },
+              "scopeNote": "N1/N2 deployment only; G1 readonly upstream HTTP502 diagnosis, root cause unresolved; no functional acceptance"
+            },
+            "scopeNote": "R1 repeated image generation confirmation removed; no function/browser acceptance or paid generation"
+          },
+          "textConnectivity": {
+            "startedAt": "2026-10-03T05:34:51.658Z",
+            "completedAt": "2026-10-03T05:35:18.114Z",
+            "target": "sd2.youdooart.com production text integration",
+            "commit": "f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0",
+            "build": "zLCFc71j3c0EpKfW2zQ7I",
+            "sourceHashes": {
+              "src/lib/integrations/musk.ts": "0e9cc6c613897b38ed93d01ecca7d9b15e565f7187366d9d7bd50f3a510aaeec",
+              "src/lib/template-studio/text-models.ts": "15e8320666463cb35f12e609eb1765e103ad06a2dcb80098a6912710148ee08f"
+            },
+            "requestsPerModel": 1,
+            "retries": 0,
+            "timeoutMs": 45000,
+            "temperature": 0.2,
+            "responseFormat": "json_object; production helper",
+            "scope": "real upstream connectivity and prompt JSON parsing; not browser/queue end-to-end",
+            "databaseMode": "query_only; no task/credit/config writes",
+            "actualMoneyCharged": "not returned by completion; unknown",
+            "results": [
+              {
+                "model": "gpt-5.5",
+                "label": "GPT-5.5",
+                "outcome": "succeeded",
+                "latencyMs": 3022,
+                "returnedModel": "gpt-5.5",
+                "outputCharacters": 20,
+                "formatValid": true,
+                "usage": {
+                  "prompt_tokens": 339,
+                  "completion_tokens": 37,
+                  "total_tokens": 376
+                }
+              },
+              {
+                "model": "gpt-5.6-luna",
+                "label": "GPT-5.6 Luna",
+                "outcome": "succeeded",
+                "latencyMs": 3451,
+                "returnedModel": "gpt-5.6-luna",
+                "outputCharacters": 20,
+                "formatValid": true,
+                "usage": {
+                  "prompt_tokens": 43,
+                  "completion_tokens": 13,
+                  "total_tokens": 56
+                }
+              },
+              {
+                "model": "gpt-5.6-sol",
+                "label": "GPT-5.6 Sol",
+                "outcome": "succeeded",
+                "latencyMs": 11806,
+                "returnedModel": "gpt-5.6-sol",
+                "outputCharacters": 20,
+                "formatValid": true,
+                "usage": {
+                  "prompt_tokens": 339,
+                  "completion_tokens": 10,
+                  "total_tokens": 349
+                }
+              },
+              {
+                "model": "gpt-6-luna",
+                "label": "GPT-6 Luna",
+                "outcome": "succeeded",
+                "latencyMs": 2353,
+                "returnedModel": "gpt-6-luna",
+                "outputCharacters": 20,
+                "formatValid": true,
+                "usage": {
+                  "prompt_tokens": 66,
+                  "completion_tokens": 13,
+                  "total_tokens": 79
+                }
+              },
+              {
+                "model": "gpt-6-sol",
+                "label": "GPT-6 Sol",
+                "outcome": "succeeded",
+                "latencyMs": 3040,
+                "returnedModel": "gpt-6-sol",
+                "outputCharacters": 20,
+                "formatValid": true,
+                "usage": {
+                  "prompt_tokens": 339,
+                  "completion_tokens": 10,
+                  "total_tokens": 349
+                }
+              },
+              {
+                "model": "gpt-6-astra",
+                "label": "GPT-6 Astra",
+                "outcome": "succeeded",
+                "latencyMs": 2783,
+                "returnedModel": "gpt-6-astra",
+                "outputCharacters": 20,
+                "formatValid": true,
+                "usage": {
+                  "prompt_tokens": 43,
+                  "completion_tokens": 13,
+                  "total_tokens": 56
+                }
+              }
+            ]
+          }
+        }
       }
     }
   }
