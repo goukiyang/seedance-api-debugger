@@ -617,7 +617,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const fixedFileInput = useRef<HTMLInputElement>(null);
   const bannerFileInput = useRef<HTMLInputElement>(null);
   const dirty = globalSettingsDirty;
-  const unsavedContext = dirty || moduleContext !== savedModuleContext || fixedDirty;
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
@@ -632,7 +631,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
   const automaticDirty = automaticSnapshot !== moduleSaved;
   const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
-  useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
+  // Recoverable browser drafts are not lost on refresh; failed persistence still blocks exit.
+  useUnsavedNavigation(dirty || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
   const contextDialogSnapshot = JSON.stringify({ context: moduleContext, primaryMin, primaryMax: referenceLimit,
     auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences,

@@ -1,16 +1,15 @@
 'use client';
 
-import { useProductDialog } from '@/components/useProductDialog';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { release, newerRelease } from '@/lib/release';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 import styles from './CreditRequestDialog.module.css';
 
 export default function ReleaseNotice() {
-  const { confirm, productDialog } = useProductDialog();
+  const { user } = useAppSession();
   const pathname = usePathname();
   const dialog = useRef<HTMLDialogElement>(null);
   const [target, setTarget] = useState<typeof release | null>(null);
@@ -47,16 +46,21 @@ export default function ReleaseNotice() {
   useEffect(() => { if (target) dialog.current?.showModal(); }, [target]);
   const later = () => { try { if (target) localStorage.setItem('sd2:release:later', target.version); } catch { /* Optional persistence. */ } setTarget(null); };
   useDialogDismiss({ open: Boolean(target), dialogRef: dialog, nativeDialog: true, onDismiss: later });
-  return <>{productDialog}{(<>
+  return <>
     {pathname === '/account' && <footer style={{ padding: '16px 24px', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
       <span>SD2 v{release.version}</span><button className="btn btn-secondary" disabled={checking} onClick={() => void check(true)}>{checking ? '检查中…' : '检查更新'}</button><span role="status">{message}</span>
     </footer>}
     {target && createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby="release-title">
       <header className={styles.header}><h2 id="release-title" style={{ fontWeight: 700, fontSize: 20 }}>发现新版本</h2></header>
-      <div className={styles.body}><p>v{target.version}</p><p>{target.summary}</p>
-        <p>刷新前请保存当前未提交的内容。</p>
-        <div className={styles.actions}><button className="btn btn-primary" onClick={async () => { if ((await confirm('刷新会关闭当前页面，未提交的内容可能丢失。确认已保存并刷新？', { title: '刷新页面', confirmLabel: '已保存，刷新' }))) window.location.reload(); }}>立即刷新</button><button className="btn btn-secondary" onClick={later}>稍后</button></div>
+      <div className={styles.body}><p>v{target.version}</p>
+        {user?.account_type === 'internal' && target.summary && <p>{target.summary}</p>}
+        <p>新版本已就绪，可刷新后使用。</p>
+        <div className={styles.actions}><button className="btn btn-primary" onClick={() => {
+          // Real unsaved changes retain the page's native exit guard, without stacked dialogs.
+          dialog.current?.close();
+          window.location.reload();
+        }}>立即刷新</button><button className="btn btn-secondary" onClick={later}>稍后</button></div>
       </div>
     </dialog>, document.body)}
-  </>)}</>;
+  </>;
 }
