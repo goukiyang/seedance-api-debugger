@@ -1,0 +1,8 @@
+.bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px 12px; flex-wrap: wrap; min-width: 0; margin: 8px 0; }
+.actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.message { flex: 1 1 180px; min-width: 0; color: #adb6bd; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.bar .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 10px; border: 1px solid #465057; border-radius: 6px; background: #202629; color: #c6d0d5; font: inherit; font-size: 13px; cursor: pointer; }
+.bar .button:hover:not(:disabled) { background: #30393d; }
+.bar .button:active:not(:disabled) { filter: brightness(.92); }
+.bar .button:focus-visible { outline: 2px solid #79daca; outline-offset: 3px; }
+.bar .button:disabled { opacity: .5; cursor: not-allowed; }

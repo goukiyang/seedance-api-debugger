@@ -1,9 +1,10 @@
 'use client';
 
 import { useProductDialog } from '@/components/useProductDialog';
+import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Save, X } from 'lucide-react';
+import { Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './template-studio.module.css';
 
@@ -17,6 +18,7 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
   const [message, setMessage] = useState('');
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const contextInput = useRef<HTMLTextAreaElement>(null);
   const url = `/api/template-studio/context${draftId ? `?draftId=${encodeURIComponent(draftId)}` : ''}`;
   useEffect(() => {
     const controller = new AbortController();
@@ -56,11 +58,12 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
     <section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="video-context-title">
       <div className={styles.sectionHeading}><h2 id="video-context-title">{draftId ? '模块上下文' : '通用上下文'}</h2><button type="button" className={styles.iconButton} aria-label="关闭" title="关闭" disabled={busy} onClick={close}><X size={16} /></button></div>
       <p className={styles.fieldHint}>{draftId ? '只用于当前模块。保存后影响后续文案，已有记录不变。' : '用于视频文案，不影响图片。仅管理员可修改。'}</p>
-      {value?.canEdit ? <div className={styles.field}><label htmlFor="video-context-text">固定规则</label><textarea id="video-context-text" rows={12} maxLength={12000} value={text} onChange={event => setText(event.target.value)} /></div>
+      {value?.canEdit ? <div className={styles.field}><label htmlFor="video-context-text">固定规则</label>
+        <ContextClipboardActions value={text} textareaRef={contextInput} onPaste={setText} maxLength={12000} disabled={busy} canCopy={value.canCopy} />
+        <textarea ref={contextInput} id="video-context-text" rows={12} maxLength={12000} value={text} onChange={event => setText(event.target.value)} /></div>
         : <p>{value ? (value.configured ? '固定规则已配置，将由后台应用；当前账号无权查看或修改。' : '尚未配置固定规则，当前账号无权修改。') : '正在读取…'}</p>}
       {message && <p role="status">{message}</p>}
       <div className={styles.dialogFooter}>
-        {value?.canEdit && value.canCopy && <button type="button" className={styles.quietButton} onClick={() => void navigator.clipboard.writeText(text).then(() => setMessage('已复制上下文')).catch(() => setMessage('复制失败，请重试'))}><Copy size={15} />复制上下文</button>}
         {value?.canEdit && <button type="button" className={styles.primaryButton} disabled={busy || text === (value.context || '')} onClick={() => void save()}><Save size={15} />{busy ? '保存中' : '保存上下文'}</button>}
       </div>
     </section>

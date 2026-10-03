@@ -1,6 +1,7 @@
 'use client';
 
 import { useProductDialog } from '@/components/useProductDialog';
+import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useEffect, useRef } from 'react';
 import { RefreshCw, Save, X } from 'lucide-react';
@@ -14,6 +15,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
 }) {
   const { confirm, productDialog } = useProductDialog();
   const dialog = useRef<HTMLDialogElement>(null);
+  const contextInput = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (open) dialog.current?.showModal();
     else dialog.current?.close();
@@ -36,7 +38,8 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
     <header className={styles.header}><h2>通用上下文</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
     {editor.draft && <>
       <label className={styles.label} htmlFor="studio-context">通用上下文</label>
-      <textarea id="studio-context" rows={12} maxLength={20000} disabled={editor.loading}
+      <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={editor.controller.editContext} maxLength={20000} disabled={editor.loading || editor.saving || !open} />
+      <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={editor.loading}
         value={editor.draft.context} onChange={event => editor.controller.editContext(event.target.value)} />
       <p className={styles.label}>通用模型积分规则</p>
       {IMAGE_STUDIO_MODELS.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分

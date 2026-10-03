@@ -2,6 +2,7 @@
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import { useProductDialog } from '@/components/useProductDialog';
+import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
@@ -605,6 +606,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const loadedMore = useRef(false);
   const uploadLock = useRef(false);
   const moduleDialog = useRef<HTMLDialogElement>(null);
+  const moduleContextInput = useRef<HTMLTextAreaElement>(null);
+  const changeModuleContext = (value: string) => {
+    if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。');
+    setModuleContext(value); setModuleSaveError('');
+  };
   const resumeModulePreview = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const auxiliaryFileInput = useRef<HTMLInputElement>(null);
@@ -1494,7 +1500,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
     }}>
       <header className={styles.header}><h2>模块上下文</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
-      {contextEditable ? <textarea aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => { if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。'); setModuleContext(event.target.value); setModuleSaveError(''); }} /> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
+      {contextEditable ? <>
+        <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />
+        <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => changeModuleContext(event.target.value)} />
+      </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
       <div className={styles.referenceLimits}>
         <label>主图最少 <select aria-label="主图最少张数" value={primaryMin} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setPrimaryMin(Number(event.target.value))}>
           {Array.from({ length: referenceLimit + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
