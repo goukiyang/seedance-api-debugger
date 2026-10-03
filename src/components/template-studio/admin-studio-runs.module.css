@@ -19,7 +19,7 @@
 
 .filterLabel {
   align-items: center;
-  color: #39414a;
+  color: var(--text-secondary);
   display: flex;
   font-size: 13px;
   font-weight: 650;
@@ -34,10 +34,10 @@
 
 .selectWrap select {
   appearance: none;
-  background: #fff;
-  border: 1px solid #cbd2d9;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  color: #20262d;
+  color: var(--text-primary);
   font: inherit;
   min-height: 38px;
   min-width: 160px;
@@ -45,7 +45,7 @@
 }
 
 .selectWrap svg {
-  color: #65717c;
+  color: var(--text-secondary);
   pointer-events: none;
   position: absolute;
   right: 10px;
@@ -53,16 +53,16 @@
 
 .resultCount,
 .sectionHeading > span {
-  color: #68737d;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
 .reviewNotice,
 .errorNotice {
   align-items: flex-start;
-  background: #f5f7f8;
+  background: var(--bg-input);
   border-left: 3px solid #75838e;
-  color: #3f4a53;
+  color: var(--text-secondary);
   display: flex;
   font-size: 13px;
   gap: 9px;
@@ -75,19 +75,19 @@
 
 .errorNotice {
   align-items: center;
-  background: #fff5f3;
+  background: var(--tone-danger-bg);
   border-color: #bd3b2d;
-  color: #7a2019;
+  color: var(--tone-danger-text);
   justify-content: space-between;
 }
 
 .errorNotice button,
 .detailToolbar button {
   align-items: center;
-  background: #fff;
-  border: 1px solid #cbd2d9;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   border-radius: 5px;
-  color: #39414a;
+  color: var(--text-secondary);
   cursor: pointer;
   display: inline-flex;
   gap: 7px;
@@ -104,14 +104,14 @@
 
 .runList,
 .taskList {
-  border-bottom: 1px solid #d9dfe4;
-  border-top: 1px solid #d9dfe4;
+  border-bottom: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-color);
   min-width: 0;
 }
 
 .runRow {
   align-items: center;
-  border-top: 1px solid #e5e9ec;
+  border-top: 1px solid var(--border-color);
   display: grid;
   gap: 14px;
   grid-template-columns: 92px minmax(190px, 1.25fr) minmax(130px, .8fr) minmax(130px, .8fr) 90px 116px;
@@ -120,9 +120,9 @@
 }
 
 .runHeader {
-  background: #f5f7f8;
+  background: var(--bg-input);
   border-top: 0;
-  color: #53606a;
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 700;
   min-height: 38px;
@@ -135,10 +135,10 @@
 .thumbnailFallback {
   align-items: center;
   aspect-ratio: 16 / 9;
-  background: #e9edf0;
-  border: 1px solid #d4dbe0;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  color: #65717c;
+  color: var(--text-secondary);
   display: flex;
   height: auto;
   justify-content: center;
@@ -161,28 +161,28 @@
 .runIdentity strong,
 .statusCell strong,
 .taskRow strong {
-  color: #20262d;
+  color: var(--text-primary);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
 .runIdentity small,
 .statusCell small,
-.taskRow small { color: #68737d; font-size: 12px; }
-.runIdentity code { color: #77828c; font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.taskRow small { color: var(--text-secondary); font-size: 12px; }
+.runIdentity code { color: var(--text-secondary); font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
 .runIdentity :global(.user-identity-badge) { min-width: 0; }
 
-.status { background: #f0f2f4; border-radius: 4px; color: #39414a; font-size: 12px; font-style: normal; font-weight: 700; padding: 4px 7px; width: fit-content; }
-.statusUnknown { background: #fff1cc; color: #684b00; }
-.statusFailed { background: #fde4e1; color: #82291f; }
+.status { background: var(--bg-hover); border-radius: 4px; color: var(--text-secondary); font-size: 12px; font-style: normal; font-weight: 700; padding: 4px 7px; width: fit-content; }
+.statusUnknown { background: var(--tone-warning-bg); color: var(--tone-warning-text); }
+.statusFailed { background: var(--tone-danger-bg); color: var(--tone-danger-text); }
 .runRow time,
-.taskRow time { color: #45515b; font-size: 12px; }
-.taskCount { color: #45515b; font-size: 13px; }
+.taskRow time { color: var(--text-secondary); font-size: 12px; }
+.taskCount { color: var(--text-secondary); font-size: 13px; }
 
 .detailLink,
 .backLink {
   align-items: center;
-  color: #145f91;
+  color: var(--tone-info-text);
   display: inline-flex;
   font-size: 12px;
   font-weight: 700;
@@ -193,14 +193,14 @@
 
 .detailLink:hover,
 .backLink:hover { text-decoration: underline; }
-.emptyState { color: #68737d; font-size: 13px; margin: 0; padding: 22px 10px; }
+.emptyState { color: var(--text-secondary); font-size: 13px; margin: 0; padding: 22px 10px; }
 
 .loadMore {
   align-items: center;
-  background: #fff;
-  border: 1px solid #cbd2d9;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   border-radius: 5px;
-  color: #26323a;
+  color: var(--text-primary);
   cursor: pointer;
   display: inline-flex;
   gap: 8px;
@@ -211,12 +211,12 @@
 }
 
 .loadMore:disabled { cursor: wait; opacity: .65; }
-.backLink { color: #53606a; font-size: 13px; }
+.backLink { color: var(--text-secondary); font-size: 13px; }
 
 .detailToolbar button:disabled { cursor: wait; opacity: .6; }
 .detailHead {
   align-items: center;
-  border-bottom: 1px solid #d9dfe4;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
@@ -225,17 +225,17 @@
 }
 
 .detailHead > div { display: grid; gap: 6px; min-width: 0; }
-.eyebrow { color: #69747e; font-size: 12px; font-weight: 700; }
-.detailHead h2 { color: #20262d; font-size: 22px; line-height: 1.25; margin: 0; }
-.detailHead code { color: #77828c; font-size: 11px; overflow-wrap: anywhere; }
+.eyebrow { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.detailHead h2 { color: var(--text-primary); font-size: 22px; line-height: 1.25; margin: 0; }
+.detailHead code { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
 .detailHead :global(.user-identity-badge) { margin-left: auto; }
 
 .manualReview {
   align-items: flex-start;
-  background: #fff4da;
-  border: 1px solid #e2c77d;
+  background: var(--tone-warning-bg);
+  border: 1px solid var(--tone-warning-border);
   border-radius: 5px;
-  color: #4b3b12;
+  color: var(--tone-warning-text);
   display: flex;
   gap: 12px;
   padding: 14px;
@@ -246,24 +246,24 @@
 .manualReview p { font-size: 13px; line-height: 1.5; margin: 6px 0 0; }
 
 .runFacts {
-  border-bottom: 1px solid #e1e6e9;
-  border-top: 1px solid #e1e6e9;
+  border-bottom: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-color);
   display: grid;
   gap: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
 }
 
-.runFacts > div { border-bottom: 1px solid #edf0f2; min-width: 0; padding: 12px 13px; }
-.runFacts dt { color: #707b85; font-size: 12px; margin-bottom: 5px; }
-.runFacts dd { color: #26323a; font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.runFacts > div { border-bottom: 1px solid var(--border-color); min-width: 0; padding: 12px 13px; }
+.runFacts dt { color: var(--text-secondary); font-size: 12px; margin-bottom: 5px; }
+.runFacts dd { color: var(--text-primary); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
 
 .tasksSection { display: grid; gap: 10px; min-width: 0; }
 .sectionHeading { justify-content: flex-start; }
-.sectionHeading h3 { color: #26323a; font-size: 16px; margin: 0; }
+.sectionHeading h3 { color: var(--text-primary); font-size: 16px; margin: 0; }
 .taskRow {
   align-items: center;
-  border-top: 1px solid #e5e9ec;
+  border-top: 1px solid var(--border-color);
   display: grid;
   gap: 14px;
   grid-template-columns: 112px minmax(120px, 1fr) minmax(140px, .9fr) minmax(120px, .7fr) 90px;
@@ -271,10 +271,10 @@
   padding: 11px 10px;
 }
 
-.taskHeader { background: #f5f7f8; border-top: 0; color: #53606a; font-size: 12px; font-weight: 700; min-height: 36px; padding-bottom: 7px; padding-top: 7px; }
+.taskHeader { background: var(--bg-input); border-top: 0; color: var(--text-secondary); font-size: 12px; font-weight: 700; min-height: 36px; padding-bottom: 7px; padding-top: 7px; }
 .taskRow > span:not(.thumbnailCell) { display: grid; gap: 4px; min-width: 0; }
 .mediaLinks { align-items: flex-start; display: flex !important; flex-wrap: wrap; gap: 9px !important; }
-.mediaLinks a { color: #145f91; font-size: 12px; font-weight: 650; }
+.mediaLinks a { color: var(--tone-info-text); font-size: 12px; font-weight: 650; }
 
 @media (max-width: 760px) {
   .runHeader,
@@ -291,8 +291,8 @@
   .runRow time,
   .taskCount,
   .runRow > .detailLink { grid-column: 2; }
-  .runRow time::before { color: #7a858e; content: '创建：'; }
-  .taskCount::before { color: #7a858e; content: '关联视频：'; }
+  .runRow time::before { color: var(--text-secondary); content: '创建：'; }
+  .taskCount::before { color: var(--text-secondary); content: '关联视频：'; }
   .detailLink { margin-top: 2px; }
   .runFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .taskRow {
@@ -305,7 +305,7 @@
   .taskRow > span:not(.thumbnailCell),
   .taskRow > time,
   .taskRow > .detailLink { grid-column: 2; }
-  .taskRow time::before { color: #7a858e; content: '创建：'; }
+  .taskRow time::before { color: var(--text-secondary); content: '创建：'; }
   .detailHead h2 { font-size: 19px; }
 }
 

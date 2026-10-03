@@ -7,7 +7,7 @@
 
 .tools {
   align-items: start;
-  border-bottom: 1px solid #e4e9f2;
+  border-bottom: 1px solid var(--border-color);
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -24,7 +24,7 @@
 
 .createForm h4,
 .addForm h4 {
-  color: #172033;
+  color: var(--text-primary);
   font-size: 14px;
   margin: 0;
 }
@@ -38,17 +38,17 @@
 
 .createForm label > span,
 .addForm label > span {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
 .createForm input,
 .addForm select {
-  background: #fbfcfe;
-  border: 1px solid #d7dde8;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   box-sizing: border-box;
-  color: #172033;
+  color: var(--text-primary);
   font: inherit;
   min-height: 36px;
   min-width: 0;
@@ -65,7 +65,7 @@
 }
 
 .addForm p {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
   margin: 0;
@@ -77,9 +77,9 @@
 .backButton,
 .loadMore {
   align-items: center;
-  border: 1px solid #d7dde8;
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  color: #243044;
+  color: var(--text-primary);
   cursor: pointer;
   display: inline-flex;
   font: inherit;
@@ -108,7 +108,7 @@
 
 .detailHeader {
   align-items: center;
-  border-bottom: 1px solid #e4e9f2;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   flex-wrap: wrap;
   gap: 10px 14px;
@@ -116,7 +116,7 @@
 }
 
 .backButton {
-  background: #fbfcfe;
+  background: var(--bg-panel);
   flex: 0 0 auto;
 }
 
@@ -129,15 +129,15 @@
 }
 
 .detailTitle strong {
-  color: #172033;
+  color: var(--text-primary);
   font-size: 14px;
   overflow-wrap: anywhere;
 }
 
 .detailTitle > span {
-  background: #eef4ff;
+  background: var(--tone-info-bg);
   border-radius: 4px;
-  color: #1d4ed8;
+  color: var(--tone-info-text);
   flex: 0 0 auto;
   font-size: 11px;
   padding: 3px 6px;
@@ -145,7 +145,7 @@
 
 .manageLink,
 .albumRow > a {
-  color: #1d4ed8;
+  color: var(--tone-info-text);
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
@@ -164,7 +164,7 @@
 
 .albumRow {
   align-items: center;
-  border-bottom: 1px solid #e9edf4;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   gap: 12px;
   justify-content: space-between;
@@ -176,7 +176,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: #243044;
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   flex: 1;
@@ -189,11 +189,11 @@
 }
 
 .albumOpen:hover .albumName {
-  color: #1d4ed8;
+  color: var(--tone-info-text);
 }
 
 .albumName {
-  color: #172033;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
   min-width: 0;
@@ -201,7 +201,7 @@
 }
 
 .albumCount {
-  color: #64748b;
+  color: var(--text-secondary);
   flex: 0 0 auto;
   font-size: 12px;
   margin-left: auto;
@@ -209,7 +209,7 @@
 
 .imageSummary {
   align-items: baseline;
-  color: #475569;
+  color: var(--text-secondary);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -224,8 +224,8 @@
 }
 
 .imageItem {
-  background: #fbfcfe;
-  border: 1px solid #e4e9f2;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   display: flex;
   flex-direction: column;
@@ -241,11 +241,11 @@
 }
 
 .imageItem.inParent {
-  background: #f1f5f9;
+  background: var(--bg-hover);
 }
 
 .imageToggle {
-  background: #eef2f7;
+  background: var(--bg-hover);
   border: 0;
   border-radius: 4px;
   color: #f8fafc;
@@ -290,7 +290,7 @@
 }
 
 .imageItem > strong {
-  color: #334155;
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 500;
   overflow: hidden;
@@ -299,8 +299,8 @@
 }
 
 .unavailableItem {
-  background: #f8fafc;
-  color: #64748b;
+  background: var(--bg-input);
+  color: var(--text-secondary);
 }
 
 .unavailableItem > span {
@@ -311,8 +311,8 @@
 
 .unavailableMedia {
   align-items: center;
-  background: #e9edf4;
-  color: #64748b;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
   display: flex;
   font-size: 12px;
   justify-content: center;
@@ -321,7 +321,7 @@
 .status,
 .empty {
   align-items: center;
-  color: #64748b;
+  color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -332,7 +332,7 @@
 }
 
 .empty strong {
-  color: #334155;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
@@ -345,10 +345,10 @@
 .error,
 .retryRow {
   align-items: center;
-  background: #fff7f5;
-  border: 1px solid #f2c9c1;
+  background: var(--tone-danger-bg);
+  border: 1px solid var(--tone-danger-border);
   border-radius: 6px;
-  color: #9f3025;
+  color: var(--tone-danger-text);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -359,14 +359,14 @@
 
 .error button,
 .retryRow button {
-  background: #fbfcfe;
+  background: var(--bg-panel);
   flex: 0 0 auto;
 }
 
 .retryRow {
-  background: #f8fafc;
-  border-color: #d7dde8;
-  color: #334155;
+  background: var(--bg-input);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
 }
 
 .errorText,
@@ -378,20 +378,20 @@
 }
 
 .errorText {
-  color: #9f3025;
+  color: var(--tone-danger-text);
 }
 
 .successText {
-  color: #166534;
+  color: var(--tone-success-text);
 }
 
 .selectionHint {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 .loadMore {
   align-self: center;
-  background: #f1f5f9;
+  background: var(--bg-hover);
   margin-top: 8px;
 }
 

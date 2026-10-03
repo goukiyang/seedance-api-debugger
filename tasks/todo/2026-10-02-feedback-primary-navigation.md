@@ -582,3 +582,26 @@ Git/archive/运行证据：回退tag rollback/2026-10-04-before-media-cover-v0.3
 发布窗口reservation与flock实际启用，无并发活动；独立归档排除私有资料及运行数据，SHA256 24d4fd0e659d36d08334bc581f4b9f759789ac9a224b8308cc766f61e1669887经服务器核对。回退tag rollback/2026-10-04-before-topbar-version-v0.37.3已推送并指向健康0.37.2的fb630d8c824e2fe4b868ae8146e861c5f761ee6d；旧BUILD zCelY_zSjwH6rS-xpfzLN位于/srv/video-api-debugger/app/.next-prod-before-sd2-c8-v0373-1c9930c，旧源码/srv/video-api-debugger/releases/fb630d8c824e2fe4b868ae8146e861c5f761ee6d。0.37.1及更早回退构建不删。worker前后unit、MainPID1241475、启动时间及状态相同，未重启/排空/强杀；视频timer active。数据软链、关键子目录权限和env元信息保持，未读env/DB内容、未迁移或写DB、未付费生成。
 
 正式根本机[最终C5-C8统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.3.diff)、[0.37.3发布证据](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.3.json)可访问；0.37.2证据/差异保留。守门员finish实际中文intent识别ui/deploy/git，L3-visible-runtime，非general，无阻塞提醒；real-result遵循项目明确手动验收例外，不自动操作浏览器/截图/功能测试，不冒充真实画面通过。无归类误判，无范围外业务修改，无未解决发布卡点；截图1/2/3持久原件缺失及1000ms系统双击边界仍登记，平台原生离开保护例外不变。正式根仅同步两份记录，原有dirty和未跟踪资料保持；记录提交不再次升级、发布或重启。
+
+### D1-D2深夜配色与周期额度列表（2026-10-04）
+
+用户原文D1：“深夜模式要搞彻底点，还有很多白页面”。追加D2：“设定为周期额度的角色，不要从用户列表里面剔除”。本轮均为文字需求，无新附件；文本v1，不替代C5-C8历史资料。本轮实际源码根/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，开工干净5c47592；正式根100998c及无关dirty保持。已重新核对运行1c9930c/v0.37.3/BUILD J3lGF2j4oXVNQCRQ_lYos及sd2-gray.service active；预计同一交付PATCH0.37.4，尚未改版本或部署。parent已完成L3 start，本执行者不重复start。当前工具无原生worker入口，唯一lead整批实施，不建侧栏或自动审核。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| D1 | 深夜模式完整化 | 同类页面和组件沿用深夜配色，完成构建与部署检查；真实视觉由用户手动验收 | 整批实现及本地构建完成，待正式发布 |
+| D2 | 周期额度用户列表保留 | 周期额度用户仍在用户列表显示，额度规则不变，构建与发布检查；用户手动功能验收 | 待确认具体列表，调查已完成，未改额度规则 |
+
+调查证据：当前src/public全量文字检索未检出主题切换、深夜模式选择器、主题保存键、data-theme或prefers-color-scheme入口；ClientLayout/AppShell/AccountMenu/ComposerTopbar及个人页没有此入口。当前是部分工作台固定暗色与旧页固定浅色混用，不把外部浏览器模式当成已实现的网站主题。白页主要源头为globals.css中的body/card/input/table/outputs/shell及旧页面类；UploadedImagePickerAlbums.module.css、template-studio/admin-studio-runs.module.css、templates/template-entry.module.css、RelativeTime.module.css还有浅色表面和深色文字；cutout有局部浅色背景，需区分媒体检查底与UI。已有CSS变量主要是顶栏高度和图表系列色，不是全站主题tokens。已询问用户深夜模式实际入口或是否指补齐既有默认暗色风格，不能猜新增主题选择器或全局反色。
+
+D2普通/admin/users入口的api/admin/users/route.ts GET仅where.status not deleted，lite分支同样；AdminUsersClient filteredUsers按明确quickView、账号类型、岗位、功能类型、状态及搜索筛选，无周期额度managed排除。已发现另一具体列表问题：QuotaManager“指定或排除成员”与“适用成员”都使用quotaAdminView返回的data.people；periodic.ts:quotaAdminView在已有selected规则时复用userWhere，包含岗位/指定成员匹配和exclude_ids notIn，导致候选列表会隐藏不匹配或已排除的人。该条件同时用于真实发放及人数统计，不能直接删除或改变userWhere额度语义。已询问D2所指普通用户管理还是周期额度候选成员，未擅改普通列表权限、适用名单或周期规则。
+
+已确认的D1执行口径：parent明确当前默认暗色工作台即本轮目标，不再等待主题入口答复；补齐旧白UI，不新增主题开关，不假装浅色/其他模式已存在。原调查中的主题询问已由此口径解决。D2仍只待具体列表答复，不阻塞D1按0.37.4交付，不替换或删除真实发放的userWhere。
+
+D1整批实施：globals.css新增默认暗色表面/文字/边框及信息/成功/警告/错误共享tokens，统一body、卡片、页面导航、表格、弹窗抽屉、表单菜单、空/加载/错误状态、项目/预算、资产/任务、管理与模板旧UI；补齐原生表单color-scheme与明确输入背景。迁移仅颜色声明，不改选择器、布局或业务事件；局部上传图集选择器、管理员模板运行记录、模板入口与近时气泡接共享tokens，cutout仅上传区和通知UI配色。既有画布iframe已暗色，主站壳统一而iframe作品不改。图片/视频像素、透明检查底、开关旋钮/品牌标志保留，打印使用浅纸面tokens，PDF导出代码不动。package与锁文件只同步PATCH版本0.37.4，release沿原单源更新摘要，更新提醒和退出保护保留。
+
+D2补充核对：AdminUsersClient quickView初值all、筛选初值all；过滤依赖只有filters/quickView/users，未接周期规则selected/managed，当前没有savedfilter恢复逻辑。普通GET保留权限和原正常筛选，本轮不猜改。待parent确认普通用户管理还是周期额度候选成员后，再按实际对象实施独立显示投影，不扩权限或改发放名单。
+
+安全边界：只做已确认的默认暗色样式；不改变认证/可见权限、点数扣费、周期重置、账本、成员/角色数据、Provider、上传或依赖，保存设置不变。媒体像素、画布作品、导出纸面不强制改色，不全局星号背景覆盖或invert。C5-C8/U1/资源库保持。无浏览器/DOM/截图/自动功能回归，整批后仅必要构建内置检查、源码自查及安全发布检查，真实效果待用户手动。
+
+整批本地检查：npm run build退出0，含内置lint与类型检查，仅既有警告。git diff --check通过；源码自查用PostCSS结构对比确认2748条原规则选择器及非颜色属性不变，检查底/旋钮/品牌保护规则完全一致；初次对比因原CSS含重复height声明误报，调整为有序属性比对后通过，未因此改源代码。允许范围11文件核对通过，锁文件除根及根包版本外内容不变，未加依赖。共享旧白背景迁移及剩余任务选择框/模板管理表面/计数徽标完成，原亮色主按钮及状态图表色保留，不把白色文字或高亮主操作误判白页。服务器重新核对仍为1c9930c/0.37.3/J3lGF2j4oXVNQCRQ_lYos，worker1241475及启动时间不变；发布脚本延用原flock/回退/数据排除，新增候选暗tokens核对，bash -n与node --check通过。真实视觉尚未验收。

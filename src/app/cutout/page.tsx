@@ -455,10 +455,10 @@ export default function CutoutPage() {
           onPaste={onPaste}
           onClick={triggerUploadInput}
           style={{
-            border: '1px dashed #94a3b8',
+            border: '1px dashed var(--border-color)',
             borderRadius: 10,
             padding: '24px',
-            background: '#f8fafc',
+            background: 'var(--bg-input)',
             cursor: 'pointer',
           }}
         >
@@ -575,23 +575,23 @@ export default function CutoutPage() {
           style={{
             backgroundColor:
               notice.type === 'error'
-                ? '#fee2e2'
+                ? 'var(--tone-danger-bg)'
                 : notice.type === 'ok'
-                  ? '#d1fae5'
-                  : '#dbeafe',
+                  ? 'var(--tone-success-bg)'
+                  : 'var(--tone-info-bg)',
             color:
               notice.type === 'error'
-                ? '#991b1b'
+                ? 'var(--tone-danger-text)'
                 : notice.type === 'ok'
-                  ? '#065f46'
-                  : '#1e3a8a',
+                  ? 'var(--tone-success-text)'
+                  : 'var(--tone-info-text)',
             border: '1px solid',
             borderColor:
               notice.type === 'error'
-                ? '#fecaca'
+                ? 'var(--tone-danger-border)'
                 : notice.type === 'ok'
-                  ? '#a7f3d0'
-                  : '#bfdbfe',
+                  ? 'var(--tone-success-border)'
+                  : 'var(--tone-info-border)',
           }}
         >
           {notice.text}
