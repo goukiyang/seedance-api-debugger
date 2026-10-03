@@ -208,7 +208,7 @@
     "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
   },
   "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
-  "scopeNote": "P1 shared small dialog positioning deployed; real UI manual acceptance pending. T1 text options scope/expense awaiting clarification; no paid calls.",
+  "scopeNote": "P1 deployed; UI manually pending. T1 six actual upstream GPT connectivity requests succeeded, one per model, no retries, no queue/browser end-to-end test.",
   "previousDelivery": {
     "checkedAt": "2026-10-03T03:01:18.024Z",
     "runId": "sd2-feedback-v0365",
@@ -1190,5 +1190,110 @@
       "scopeNote": "N1/N2 deployment only; G1 readonly upstream HTTP502 diagnosis, root cause unresolved; no functional acceptance"
     },
     "scopeNote": "R1 repeated image generation confirmation removed; no function/browser acceptance or paid generation"
+  },
+  "textConnectivity": {
+    "startedAt": "2026-10-03T05:34:51.658Z",
+    "completedAt": "2026-10-03T05:35:18.114Z",
+    "target": "sd2.youdooart.com production text integration",
+    "commit": "f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0",
+    "build": "zLCFc71j3c0EpKfW2zQ7I",
+    "sourceHashes": {
+      "src/lib/integrations/musk.ts": "0e9cc6c613897b38ed93d01ecca7d9b15e565f7187366d9d7bd50f3a510aaeec",
+      "src/lib/template-studio/text-models.ts": "15e8320666463cb35f12e609eb1765e103ad06a2dcb80098a6912710148ee08f"
+    },
+    "requestsPerModel": 1,
+    "retries": 0,
+    "timeoutMs": 45000,
+    "temperature": 0.2,
+    "responseFormat": "json_object; production helper",
+    "scope": "real upstream connectivity and prompt JSON parsing; not browser/queue end-to-end",
+    "databaseMode": "query_only; no task/credit/config writes",
+    "actualMoneyCharged": "not returned by completion; unknown",
+    "results": [
+      {
+        "model": "gpt-5.5",
+        "label": "GPT-5.5",
+        "outcome": "succeeded",
+        "latencyMs": 3022,
+        "returnedModel": "gpt-5.5",
+        "outputCharacters": 20,
+        "formatValid": true,
+        "usage": {
+          "prompt_tokens": 339,
+          "completion_tokens": 37,
+          "total_tokens": 376
+        }
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "label": "GPT-5.6 Luna",
+        "outcome": "succeeded",
+        "latencyMs": 3451,
+        "returnedModel": "gpt-5.6-luna",
+        "outputCharacters": 20,
+        "formatValid": true,
+        "usage": {
+          "prompt_tokens": 43,
+          "completion_tokens": 13,
+          "total_tokens": 56
+        }
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "label": "GPT-5.6 Sol",
+        "outcome": "succeeded",
+        "latencyMs": 11806,
+        "returnedModel": "gpt-5.6-sol",
+        "outputCharacters": 20,
+        "formatValid": true,
+        "usage": {
+          "prompt_tokens": 339,
+          "completion_tokens": 10,
+          "total_tokens": 349
+        }
+      },
+      {
+        "model": "gpt-6-luna",
+        "label": "GPT-6 Luna",
+        "outcome": "succeeded",
+        "latencyMs": 2353,
+        "returnedModel": "gpt-6-luna",
+        "outputCharacters": 20,
+        "formatValid": true,
+        "usage": {
+          "prompt_tokens": 66,
+          "completion_tokens": 13,
+          "total_tokens": 79
+        }
+      },
+      {
+        "model": "gpt-6-sol",
+        "label": "GPT-6 Sol",
+        "outcome": "succeeded",
+        "latencyMs": 3040,
+        "returnedModel": "gpt-6-sol",
+        "outputCharacters": 20,
+        "formatValid": true,
+        "usage": {
+          "prompt_tokens": 339,
+          "completion_tokens": 10,
+          "total_tokens": 349
+        }
+      },
+      {
+        "model": "gpt-6-astra",
+        "label": "GPT-6 Astra",
+        "outcome": "succeeded",
+        "latencyMs": 2783,
+        "returnedModel": "gpt-6-astra",
+        "outputCharacters": 20,
+        "formatValid": true,
+        "usage": {
+          "prompt_tokens": 43,
+          "completion_tokens": 13,
+          "total_tokens": 56
+        }
+      }
+    ]
   }
 }

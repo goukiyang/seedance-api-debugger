@@ -260,7 +260,7 @@ N1/N2运行源码0fcea7dd2a91a5de427a1e1c9934c176e146fb9a，BUILD 0I77QmnNWDzJgl
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
 | P1 | 统一弹窗定位 | 不落角落，小确认框靠近触发按钮且不超出屏幕 | 代码及发布检查完成，v0.36.6已部署；实际页面待用户手动验收 |
-| T1 | 测试文案类选项 | 核对明确范围内各选项是否可通，区分真实调用和静态检查 | 2026-10-03新增，文案生成模型或文字按钮含义待确认；真实生成费用/积分上限未明确，不付费试跑 |
+| T1 | 测通文案 GPT 模型 | 6 个模型逐个真实调用并记录结果 | 已完成，6/6返回有效prompt JSON；每个一次、零重试；不是浏览器/队列全流程验收 |
 
 确认范围：统一useProductDialog消费者的短确认框与命名框，包括生成器、图片/视频模板、任务和管理操作使用的共享入口；完整设置、多字段编辑和升级说明保留原有居中窗口。不取消真实修改退出或删除确认，不改生成请求、模型参数、收费、权限或数据库。
 
@@ -280,8 +280,23 @@ git diff/cached --check、bash -n/node --check通过；服务器不可变release
 
 服务器和公网config/release/login均200，公网0.36.6及X-SD2-Origin server-42-193正确；受保护template-studio匿名307仅证明原权限仍生效。5改动源码SHA、20相关公网静态SHA一致，4服务/定时器active。[累计diff](2026-10-02-feedback-primary-navigation.diff)和[证据](2026-10-02-feedback-primary-navigation.evidence.json)保留历史交付。不做浏览器/截图/生成/自动回归或DB写入，不把部署检查说成弹窗位置功能验收；守门员L3、无新增误判及越界。
 
-### T1不收费核对与缺口
+### T1静态核对与真实测试结果
 
 文案生成模型清单当前为GPT-5.5、GPT-5.6 Luna、GPT-5.6 Sol、GPT-6 Luna、GPT-6 Sol、GPT-6 Astra，共6项。源文件text-models.ts提供列表与合法性判定，VideoTemplateWorkbench提交llmModel，runs.ts校验并冻结请求参数，worker.ts按snapshot.llmModel传到createMuskChatCompletion的model字段，没有发现选择后强制改成同一模型的静态路径。共同要求json_object格式和message.content；静态对应一致不证明上游支持全部模型或能真实生成。
 
-capabilities.ts明确文案不扣本站点数、上游文字费用由平台承担，仍不能视作无费用。已向用户异步确认“文案生成模型”还是“文字按钮/下拉选项”，同时请求实际生成可接受费用或积分上限；尚未收到答案。不发付费请求、不修改生成/点数/Provider逻辑；T1未执行通断试跑，不称全通。用户确认后按同一小输入逐项记录成功/明确拒绝/结果未知，未知不自动重试；暂不引入新测试后台。
+capabilities.ts明确文案不扣本站点数、上游文字费用由平台承担，仍有上游费用。用户随后纠正“是指文案类gpt模型测通”，并在明确费用和各一次短请求说明后要求“直接执行啊，你在搞什么？”。该指令作为本轮六次小请求执行授权，不再重复询问；不扩展为自动重试、图片/视频生成或无限测试。
+
+2026-10-03北京时间13:34:51-13:35:18，在正式服务器使用运行版createMuskChatCompletion和STUDIO_TEXT_MODELS，temperature=0.2、json_object、45秒超时，与文案worker调用参数一致；各模型一次顺序请求，避免测试自身并发导致限流误判。用户已等待且前包交接曾延误，本轮由主控直接完成单个诊断包。固定短测试要求返回单字段prompt JSON，无用户素材或私有模板上下文外发。
+
+| 模型 | 本次结果 | 耗时 | 返回模型名 | 总tokens |
+|---|---|---|---|---|
+| GPT-5.5 | 成功，有效prompt JSON | 3022ms | gpt-5.5 | 376 |
+| GPT-5.6 Luna | 成功，有效prompt JSON | 3451ms | gpt-5.6-luna | 56 |
+| GPT-5.6 Sol | 成功，有效prompt JSON | 11806ms | gpt-5.6-sol | 349 |
+| GPT-6 Luna | 成功，有效prompt JSON | 2353ms | gpt-6-luna | 79 |
+| GPT-6 Sol | 成功，有效prompt JSON | 3040ms | gpt-6-sol | 349 |
+| GPT-6 Astra | 成功，有效prompt JSON | 2783ms | gpt-6-astra | 56 |
+
+共6次、全部成功、零重试、上游报告1265 tokens。实际扣费金额接口没有返回，不编造金额；返回模型名仅表示供应商响应声明，不据此核实其内部路由。源码hash与服务器运行文件一致，运行仍v0.36.6、commit f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0、BUILD zLCFc71j3c0EpKfW2zQ7I。
+
+隔离临时诊断进程抑制Prisma启动的可写pragma配置，并先启用query_only；仅调用既有设置读取和生成适配器，密钥在应用进程内正常使用，不输出/复制/导出，不写业务任务、点数、配置或DB。不重启或发布应用，临时执行文件已删除；无新增产品代码/依赖。诊断输出只存模型名、结果、耗时、usage和必要运行坐标，已并入[固定发布证据textConnectivity](2026-10-02-feedback-primary-navigation.evidence.json)。本次证明短请求真实连通和产出格式可被文案流程接受，不证明长文案质量、队列处理或浏览器按钮全流程；这些未做。守门员真实客户端L3范围，已明确授权、无新增误判。
