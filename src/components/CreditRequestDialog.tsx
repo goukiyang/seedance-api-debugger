@@ -7,6 +7,7 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { canRequestCredits, CREDIT_GRANT_AMOUNTS } from '@/lib/credits/request-rules';
 import UserIdentityBadge from './UserIdentityBadge';
 import styles from './CreditRequestDialog.module.css';
+import { useDialogDismiss } from './useDialogDismiss';
 
 type RequestRow = {
   id: string; user_id: string; approver_id: string; status: string; purpose: string; amount: number | null;
@@ -29,6 +30,10 @@ export default function CreditRequestDialog({ autoOpen = false }: { autoOpen?: b
   const [loading, setLoading] = useState(false);
   const [confirmation, setConfirmation] = useState<{ requestId: string; confirmationNonce: string; amount: number; available: number } | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const [decision, setDecision] = useState<{ action: 'withdraw' | 'reject'; item: RequestRow } | null>(null);
+  const [decisionReason, setDecisionReason] = useState('');
+  const safeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (decision) safeButton.current?.focus({ preventScroll: true }); }, [decision]);
   const epoch = useRef(0);
   const loadingRef = useRef(false);
   const load = useCallback(async (cursor?: string, replace = false) => {
@@ -73,7 +78,9 @@ export default function CreditRequestDialog({ autoOpen = false }: { autoOpen?: b
     return () => window.removeEventListener('focus', refresh);
   }, [user, refreshCredits]);
 
-  const close = () => { if (busy) return; setOpen(false); setView('summary'); setConfirmation(null); dialog.current?.close(); };
+  const close = () => { if (busy) return; setOpen(false); setView('summary'); setConfirmation(null); setDecision(null); dialog.current?.close(); };
+  useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
+  useEffect(() => { setDecision(null); setDecisionReason(''); }, [user?.id]);
   async function act(body: Record<string, unknown>) {
     if (busy) return;
     const current = epoch.current;
@@ -87,7 +94,7 @@ export default function CreditRequestDialog({ autoOpen = false }: { autoOpen?: b
       if (body.action === 'prepare' && result.confirmationNonce) {
         setConfirmation({ requestId: String(body.requestId), confirmationNonce: result.confirmationNonce, amount: result.amount, available: result.available });
       } else {
-        setConfirmation(null); setView('summary');
+        setConfirmation(null); setDecision(null); setView('summary');
         if (body.action === 'submit') setPurpose('');
         setNotice(result.message || '申请已保存，等待审批');
       }
@@ -106,14 +113,30 @@ export default function CreditRequestDialog({ autoOpen = false }: { autoOpen?: b
     </button>
     {open && createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby="credit-request-title" onCancel={(event) => { event.preventDefault(); close(); }}>
       <header className={styles.header}>
-        {(view === 'apply' || confirmation) && <button type="button" aria-label="返回积分" title="返回积分" disabled={busy} onClick={() => { setView('summary'); setConfirmation(null); }}><ArrowLeft size={18} /></button>}
-        <h2 id="credit-request-title">{confirmation ? '确认发放' : view === 'apply' ? '申请积分' : '我的积分'}</h2>
+        {(view === 'apply' || confirmation || decision) && <button type="button" aria-label="返回积分" title="返回积分" disabled={busy} onClick={() => { setView('summary'); setConfirmation(null); setDecision(null); }}><ArrowLeft size={18} /></button>}
+        <h2 id="credit-request-title">{decision ? decision.action === 'withdraw' ? '撤回申请' : '不予发放' : confirmation ? '确认发放' : view === 'apply' ? '申请积分' : '我的积分'}</h2>
         <button type="button" aria-label="关闭" title="关闭" disabled={busy} onClick={close}><X size={20} /></button>
       </header>
       <div className={styles.body}>
         {error && <p role="alert" className={styles.error}>{error}</p>}
         {notice && <p role="status">{notice}</p>}
-        {confirmation ? <>
+        {decision ? <form onSubmit={(event) => {
+          event.preventDefault();
+          if (decision.action === 'reject' && (!decisionReason.trim() || decisionReason.trim().length > 300)) return;
+          void act({ action: decision.action, requestId: decision.item.id, ...(decision.action === 'reject' ? { reason: decisionReason } : {}) });
+        }}>
+          <UserIdentityBadge user={decision.item.requester} size="sm" />
+          <p>{decision.item.purpose}</p>
+          {decision.action === 'withdraw' ? <p>确认撤回这条积分申请？</p> : <>
+            <label htmlFor="credit-decision-reason">不予发放的原因</label>
+            <textarea id="credit-decision-reason" rows={4} value={decisionReason} disabled={busy} required onChange={event => setDecisionReason(event.target.value)} />
+            {decisionReason.trim().length > 300 && <p role="alert" className={styles.error}>最多 300 字，请缩短后再提交。</p>}
+          </>}
+          <div className={styles.actions}>
+            <button ref={safeButton} type="button" className="btn btn-secondary" disabled={busy} onClick={() => setDecision(null)}>取消</button>
+            <button type="submit" className="btn btn-danger" disabled={busy || (decision.action === 'reject' && (!decisionReason.trim() || decisionReason.trim().length > 300))}>{busy ? '处理中…' : decision.action === 'withdraw' ? '确认撤回' : '确认不予发放'}</button>
+          </div>
+        </form> : confirmation ? <>
           <p>当前可用 {confirmation.available} 点，本次增加 <strong>{confirmation.amount} 点</strong>个人长期积分。</p>
           <button className="btn btn-primary" disabled={busy} onClick={() => void act({ action: 'confirm', ...confirmation })}>{busy ? '处理中…' : '确认发放'}</button>
         </> : view === 'apply' ? <form onSubmit={(event) => { event.preventDefault(); void act({ action: 'submit', purpose }); }}>
@@ -135,10 +158,10 @@ export default function CreditRequestDialog({ autoOpen = false }: { autoOpen?: b
             <small>{new Date(item.created_at).toLocaleString('zh-CN')}{item.decision_reason ? ` · ${item.decision_reason}` : ''}</small>
             {item.deliveries.some((delivery) => delivery.status === 'retry') && <p className={styles.error}>飞书通知暂未送达，系统会重试。申请状态不受影响。</p>}
             {item.status === 'pending' && <div className={styles.actions}>
-              {item.user_id === user.id && <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { if (window.confirm('确认撤回这条积分申请？')) void act({ action: 'withdraw', requestId: item.id }); }}>撤回申请</button>}
+              {item.user_id === user.id && <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { setDecision({ action: 'withdraw', item }); setError(''); setNotice(''); }}>撤回申请</button>}
               {data?.canApprove && data.enabled && item.approver_id === user.id && <>
                 {CREDIT_GRANT_AMOUNTS.map((amount) => <button type="button" key={amount} className="btn btn-secondary" disabled={busy} onClick={() => void act({ action: 'prepare', requestId: item.id, amount })}>发放 {amount}</button>)}
-                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { const reason = window.prompt('请填写不予发放的原因'); if (reason?.trim()) void act({ action: 'reject', requestId: item.id, reason }); }}>不予发放</button>
+                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { setDecision({ action: 'reject', item }); setDecisionReason(''); setError(''); setNotice(''); }}>不予发放</button>
               </>}
             </div>}
           </li>)}</ul>

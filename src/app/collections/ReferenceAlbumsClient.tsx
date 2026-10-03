@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -86,6 +87,7 @@ const TABS: Array<{ value: Scope; label: string }> = [
 const ALBUMS_PAGE_SIZE = 12;
 
 export default function ReferenceAlbumsClient() {
+  const { confirm, prompt, productDialog } = useProductDialog();
   const [scope, setScope] = useState<Scope>('mine');
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -292,7 +294,7 @@ export default function ReferenceAlbumsClient() {
   };
 
   const handleRenameFolder = async (folder: PublicFolder) => {
-    const nextName = window.prompt('输入新的公共文件夹名称', folder.name)?.trim();
+    const nextName = (await prompt('输入新的公共文件夹名称', folder.name, { title: '文件夹名称', maxLength: null }))?.trim();
     if (!nextName || nextName === folder.name) return;
     setActionFolderId(folder.id);
     setError(null);
@@ -313,7 +315,7 @@ export default function ReferenceAlbumsClient() {
   };
 
   const handleDeleteFolder = async (folder: PublicFolder) => {
-    const confirmed = window.confirm(`删除公共文件夹「${folder.name}」？只有空文件夹可以删除。`);
+    const confirmed = await confirm(`删除公共文件夹「${folder.name}」？只有空文件夹可以删除。`, { title: '删除文件夹', confirmLabel: '删除文件夹', danger: true });
     if (!confirmed) return;
     setActionFolderId(folder.id);
     setError(null);
@@ -332,7 +334,7 @@ export default function ReferenceAlbumsClient() {
   };
 
   const handleRenameAlbum = async (album: AlbumItem) => {
-    const nextName = window.prompt('输入新的图集名称', album.name)?.trim();
+    const nextName = (await prompt('输入新的图集名称', album.name, { title: '图集名称', maxLength: null }))?.trim();
     if (!nextName || nextName === album.name) return;
 
     setActionAlbumId(album.id);
@@ -358,7 +360,7 @@ export default function ReferenceAlbumsClient() {
   };
 
   const handleDeleteAlbum = async (album: AlbumItem) => {
-    const confirmed = window.confirm(`删除图集「${album.name}」？图集会从列表隐藏，历史任务引用的参考图仍会保留。`);
+    const confirmed = await confirm(`删除图集「${album.name}」？图集会从列表隐藏，历史任务引用的参考图仍会保留。`, { title: '删除图集', confirmLabel: '删除图集', danger: true });
     if (!confirmed) return;
 
     setActionAlbumId(album.id);
@@ -447,7 +449,7 @@ export default function ReferenceAlbumsClient() {
 
   const handleReviewSubmission = async (submission: PublicSubmission, action: 'approve' | 'reject') => {
     const reviewNoteInput = action === 'reject'
-      ? window.prompt('填写拒绝原因，可留空')
+      ? await prompt('填写拒绝原因，可留空', '', { title: '拒绝原因', confirmLabel: '确认拒绝', allowEmpty: true, multiline: true, maxLength: null })
       : '';
     if (reviewNoteInput === null) return;
     const reviewNote = reviewNoteInput.trim();
@@ -473,6 +475,7 @@ export default function ReferenceAlbumsClient() {
 
   return (
     <div>
+      {productDialog}
       <PageBanner
         eyebrow="参考资产"
         title="参考图集"

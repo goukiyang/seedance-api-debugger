@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Archive, Copy, Pause, Play, Plus, RefreshCw, Save } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import { useProductDialog } from '@/components/useProductDialog';
+import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { USER_PROFILE_OPTIONS } from '@/lib/users/profiles';
@@ -95,11 +96,8 @@ export default function QuotaManager() {
     finally { if (seq === sequence.current) setLoading(false); }
   }, [id, tab, page, appliedSearch]);
   useEffect(() => { void load(); return () => { sequence.current++; }; }, [load]);
-  useEffect(() => {
-    const handle = (event: BeforeUnloadEvent) => { if (dirty || request.current) { event.preventDefault(); event.returnValue = ''; } };
-    window.addEventListener('beforeunload', handle);
-    return () => window.removeEventListener('beforeunload', handle);
-  }, [dirty]);
+  usePageExitRisk({ unsaved: [dirty ? '额度草稿' : '', !busy && request.current ? '尚未确认结果的额度操作' : ''].filter(Boolean),
+    busy: busy ? ['额度操作正在处理'] : [], revision: JSON.stringify(form) });
 
   async function choose(rule?: QuotaRule, duplicate = false) {
     if (busy || request.current) return;

@@ -330,7 +330,7 @@
     async function saveFlow() {
         const current = currentFlow();
         const guidedName = panel()?.querySelector('[data-toolflow-name]')?.value?.trim();
-        const name = guidedName || current?.name || window.prompt('工作流名称', '我的图片工作流');
+        const name = guidedName || current?.name || await window.UltimateCanvasRuntime.requestName('我的图片工作流', { title: '工作流名称', maxLength: null });
         if (!name) return;
         if (state.mode === 'guided' && !state.guidedSteps.some(step => step.kind === 'template')) {
             notice('请先添加至少一个生图模板。', 'warn');

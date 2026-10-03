@@ -631,7 +631,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const automaticDirty = automaticSnapshot !== moduleSaved;
   const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
   // Recoverable browser drafts are not lost on refresh; failed persistence still blocks exit.
-  useUnsavedNavigation(dirty || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
+  useUnsavedNavigation(dirty || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm, {
+    unsaved: [automaticDirty ? '模板名称、分组或封面' : '', unpersistedDraft ? '尚未存入浏览器的图片草稿' : ''].filter(Boolean),
+    busy: [moduleSaving ? '模板正在保存' : '', uploading ? '参考素材正在上传' : '', bannerUploading ? '封面正在上传' : ''].filter(Boolean),
+    revision: automaticSnapshot + generationDraft,
+  });
   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
   const contextDialogSnapshot = JSON.stringify({ context: moduleContext, primaryMin, primaryMax: referenceLimit,
     auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences,

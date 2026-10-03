@@ -1,18 +1,11 @@
 'use client';
 
 import { useEffect, useId } from 'react';
+import { cancelPageExit, getPageExitRisk, runApprovedPageExit, usePageExitRisk } from './page-exit-guard';
 
 type ConfirmNavigation = (message: string, options: { title: string; confirmLabel: string }) => Promise<boolean>;
 const pending = new Map<string, ConfirmNavigation>();
-let approved = false;
 let deciding = false;
-function resetApproval() { approved = false; deciding = false; }
-
-function beforeUnload(event: BeforeUnloadEvent) {
-  if (!pending.size || approved) return;
-  event.preventDefault();
-  event.returnValue = '';
-}
 
 async function navigate(event: MouseEvent) {
   if (!pending.size || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -28,30 +21,30 @@ async function navigate(event: MouseEvent) {
   if (!confirm) return;
   deciding = true;
   try {
-    if (!await confirm('仍有设置未保存或文件正在上传，确定离开吗？', { title: '离开页面', confirmLabel: '放弃并离开' })) return;
-    // Only this explicit decision permits the captured destination to load.
-    approved = true;
-    window.location.assign(href);
+    const risk = getPageExitRisk();
+    if (risk.busy.length) {
+      await confirm(`${risk.busy.join('、')}，请完成后再离开。`, { title: '操作进行中', confirmLabel: '返回等待' });
+      return;
+    }
+    if (risk.unsaved.length && !await confirm(`${risk.unsaved.join('、')}尚未保存，确定放弃并离开吗？`, { title: '离开页面', confirmLabel: '放弃并离开' })) return;
+    runApprovedPageExit(() => window.location.assign(href), risk.signature);
   } finally { deciding = false; }
 }
 
-export function useUnsavedNavigation(unsaved: boolean, confirm: ConfirmNavigation) {
+export function useUnsavedNavigation(unsaved: boolean, confirm: ConfirmNavigation, details?: { unsaved: string[]; busy: string[]; revision?: string }) {
   const id = useId();
+  usePageExitRisk(details || { unsaved: unsaved ? ['当前设置'] : [], busy: [] });
   useEffect(() => {
     if (!unsaved) return;
     if (!pending.size) {
       document.addEventListener('click', navigate, true);
-      window.addEventListener('beforeunload', beforeUnload);
-      window.addEventListener('pageshow', resetApproval);
     }
     pending.set(id, confirm);
     return () => {
       pending.delete(id);
       if (!pending.size) {
         document.removeEventListener('click', navigate, true);
-        window.removeEventListener('beforeunload', beforeUnload);
-        window.removeEventListener('pageshow', resetApproval);
-        resetApproval();
+        cancelPageExit();
       }
     };
   }, [id, unsaved, confirm]);

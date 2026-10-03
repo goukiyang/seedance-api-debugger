@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -67,6 +68,7 @@ function formatTime(value?: string | null) {
 }
 
 export default function ApprovalsPage() {
+  const { prompt, productDialog } = useProductDialog();
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -202,7 +204,7 @@ export default function ApprovalsPage() {
     setError('');
     setMessage('');
     const label = action === 'approve' ? '通过' : '拒绝';
-    const decisionReason = window.prompt(`${label}审批：${typeLabel(approval.type)}`, action === 'approve' ? '审批通过' : '审批拒绝');
+    const decisionReason = await prompt(`${label}审批：${typeLabel(approval.type)}`, action === 'approve' ? '审批通过' : '审批拒绝', { title: '审批理由', confirmLabel: `确认${label}`, allowEmpty: true, multiline: true, maxLength: null });
     if (decisionReason === null) return;
     const res = await fetch(`/api/approvals/${approval.id}`, {
       method: 'PATCH',
@@ -220,6 +222,7 @@ export default function ApprovalsPage() {
 
   return (
     <div>
+      {productDialog}
       <PageBanner
         eyebrow="审批中心"
         title="成本与规格审批"

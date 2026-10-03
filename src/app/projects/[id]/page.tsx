@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -418,6 +419,7 @@ function providerTaskIdLabel(ledger: CostLedgerItem): string {
 }
 
 export default function ProjectDetailPage() {
+  const { confirm, productDialog } = useProductDialog();
   const params = useParams<{ id: string }>();
   const projectId = params.id;
   const projectReturnTo = `/projects/${projectId}`;
@@ -600,7 +602,7 @@ export default function ProjectDetailPage() {
     if (!project) return;
     setError('');
     setMessage('');
-    if (!window.confirm('确定移除此项目成员吗？')) return;
+    if (!await confirm('确定移除此项目成员吗？', { title: '移除成员', confirmLabel: '移除成员', danger: true })) return;
     const res = await fetch(`/api/projects/${projectId}/members/${userId}`, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) {
@@ -703,6 +705,7 @@ export default function ProjectDetailPage() {
 
   return (
     <div>
+      {productDialog}
       <PageBanner
         eyebrow="项目详情"
         title={projectDisplayName(project)}

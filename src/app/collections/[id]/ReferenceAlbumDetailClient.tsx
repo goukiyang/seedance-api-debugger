@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import Link from 'next/link';
@@ -98,6 +99,7 @@ function formatUploadProgressDetail(files: File[], file: File, index: number, pr
 }
 
 export default function ReferenceAlbumDetailClient({ albumId }: { albumId: string }) {
+  const { confirm, prompt, productDialog } = useProductDialog();
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
@@ -267,7 +269,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   };
 
   const handleDeleteImage = async (imageId: string) => {
-    if (!window.confirm('删除后历史任务仍会保留引用，新生成不能再使用。确定删除？')) return;
+    if (!await confirm('删除后历史任务仍会保留引用，新生成不能再使用。确定删除？', { title: '删除参考图', confirmLabel: '删除', danger: true })) return;
     const res = await fetch(`/api/reference-images/${imageId}`, { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -301,7 +303,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
 
   const handleRenameAlbum = async () => {
     if (!album) return;
-    const nextName = window.prompt('输入新的图集名称', album.name)?.trim();
+    const nextName = (await prompt('输入新的图集名称', album.name, { title: '图集名称', maxLength: null }))?.trim();
     if (!nextName || nextName === album.name) return;
 
     setLoading(true);
@@ -324,7 +326,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
 
   const handleDeleteAlbum = async () => {
     if (!album) return;
-    const confirmed = window.confirm(`删除图集「${album.name}」？图集会从列表隐藏，历史任务引用的参考图仍会保留。`);
+    const confirmed = await confirm(`删除图集「${album.name}」？图集会从列表隐藏，历史任务引用的参考图仍会保留。`, { title: '删除图集', confirmLabel: '删除图集', danger: true });
     if (!confirmed) return;
 
     setLoading(true);
@@ -344,6 +346,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
 
   return (
     <div>
+      {productDialog}
       <PageBanner
         backHref="/collections"
         backLabel="返回参考图集"

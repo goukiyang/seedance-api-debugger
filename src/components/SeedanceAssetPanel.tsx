@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -38,6 +39,7 @@ function buildAssetUploadProgress(file: File, progress: UploadProgressSnapshot):
 }
 
 export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
+  const { confirm, productDialog } = useProductDialog();
   const [assets, setAssets] = useState<LocalAssetRecord[]>([]);
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
@@ -161,7 +163,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
 
   // 彻底删除官方资产
   const handleProviderDelete = useCallback(async (localId: string) => {
-    const ok = window.confirm('确认彻底删除官方 Seedance 资产？此操作不可撤销。');
+    const ok = await confirm('确认彻底删除官方 Seedance 资产？此操作不可撤销。', { title: '删除官方资产', confirmLabel: '彻底删除', danger: true });
     if (!ok) return;
     setActionMsg(null);
     try {
@@ -177,7 +179,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
     } catch {
       setActionMsg('❌ 网络错误');
     }
-  }, [detailId, loadAssets]);
+  }, [detailId, loadAssets, confirm]);
 
   // 本地上传 + 创建 Seedance Asset
   const handleLocalUpload = useCallback(async () => {
@@ -271,6 +273,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
       maxHeight: '70vh', display: 'flex', flexDirection: 'column',
     }}>
+      {productDialog}
       {/* 标题栏 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: 'white' }}>Seedance 资产管理（测试）</div>

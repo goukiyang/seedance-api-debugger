@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -45,6 +46,7 @@ export default function AccountMenu({
   variant = 'shell',
   onSessionClear,
 }: AccountMenuProps) {
+  const { confirm, productDialog } = useProductDialog();
   const [loggingOut, setLoggingOut] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
@@ -68,7 +70,7 @@ export default function AccountMenu({
         if (key?.startsWith('sd2:canvas-draft:') || key?.startsWith('sd2:canvas-conflict:')) canvasDraftKeys.push(key);
       }
     } catch { /* Storage may be unavailable in restricted browser sessions. */ }
-    if (canvasDraftKeys.length && !window.confirm('这台设备有未同步的画布草稿。退出会清除这些本地草稿，服务器已保存内容不受影响。确认退出？')) return;
+    if (canvasDraftKeys.length && !await confirm('这台设备有未同步的画布草稿。退出会清除这些本地草稿，服务器已保存内容不受影响。确认退出？', { title: '退出账号', confirmLabel: '清除草稿并退出', danger: true })) return;
     setLoggingOut(true);
 
     try {
@@ -102,6 +104,7 @@ export default function AccountMenu({
 
   return (
     <div className={className}>
+      {productDialog}
       <Link href="/account" className="account-menu-name" title="进入个人页">
         <span className="account-menu-avatar" style={{ backgroundColor: fallbackColor }} aria-hidden="true">
           {avatarUrl && !avatarFailed ? (

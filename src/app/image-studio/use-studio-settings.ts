@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { createStudioSettingsController, studioSettingsDirty } from './settings-controller';
+import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 
 async function readSettingsResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
@@ -30,11 +31,6 @@ export function useStudioSettings(userId: string, isAdmin: boolean) {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [controller]);
-  useEffect(() => {
-    if (!dirty && !state.saving) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty, state.saving]);
+  usePageExitRisk({ unsaved: dirty ? ['图片通用设置'] : [], busy: state.saving ? ['通用设置正在保存'] : [], revision: JSON.stringify(state.draft) });
   return { ...state, dirty, controller };
 }

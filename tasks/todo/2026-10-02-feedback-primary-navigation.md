@@ -483,3 +483,19 @@ v0.36.10运行源码b26f9d216949c3601d2cc36d050e6fc922422ab1，BUILD MFC_yPnyTMu
 平台边界：网站不能替换浏览器关闭标签页、地址栏刷新产生的beforeunload对话框的文字或外观；文件选择、剪贴板等权限、人机验证同样归平台。站内按钮流程可以用产品UI先作决定并针对本次放行，不靠全局删除保护伪装已统一。依据[MDN beforeunload说明及实际事件处理示例](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)，推荐只对真实未保存内容挂保护；不引入新依赖。此前已读React Router实际实现及MIT许可只作为取消/继续状态参考，不处理硬刷新。
 
 证据与缺口：上述21处是源码字面搜索和定向读取命中，不宣称动态别名调用穷尽或线上实机全站通过；共享组件已有不等于每个旧入口已迁移。当前方案目标完成，应用版本仍0.37.0，未改高风险业务及生产数据。守门员start按实际语义L0方案/代码只读，关键词命中deploy/chrome不扩展授权；本轮范围误判已纠正并记录classification-misjudgment-log.md。
+
+### U1全站网站确认实施（2026-10-03）
+
+用户已明确“改”，批准以上v1.1.0方案实施、提交推送及正式服务器部署；本节替代上一节的“未实施”当前状态，历史排查及原文保留。实际生产源码根为/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，分支codex/canvas-liblib-layout，开工HEAD9165a58；运行6d2f390/v0.37.0/BUILD JmPs7-sSzCKO0_LJ_YKrJ已重新只读核对。正式资料根旧源码不参与部署，无关主todo及未跟踪资料不提交。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| U1 | 全站确认弹窗统一 | 网站UI无重复确认+构建+正式部署检查，实际效果由用户手动验收 | 整批实现完成，统一发布检查进行中 |
+
+应用实现：上述21处业务confirm/prompt迁移为已有useProductDialog与画布网站命名入口；积分撤回/拒绝在原窗口切换状态，不叠新大框。取消/null与允许空理由/空串分开；积分拒绝必填且300字，图集/文件夹和普通审批保持原接口已有长度语义，不套120字或静默截断。危险确认初始取消焦点，顶层Esc/外部安全关闭及附近定位复用既有useDialogDismiss。
+
+新增共享page-exit-guard只汇总页面真实丢失和进行中状态：图片通用设置、未持久图片草稿、模板自动保存字段、额度草稿/未确认请求、画布规则和未持久画布。画布浏览器草稿须与当前序列的完整document_json、标题、baseRevision吻合才当可恢复；刚编辑尚未缓存、缓存失败仍保护。iframe宿主汇总，独立画布保留原生关闭保护；素材上传仅记录实际进行中计数，上传接口与请求不变。
+
+ReleaseNotice在同一窗口展示具体未保存内容或保存/上传状态；无丢失直接刷新，进行中不刷新，结束后重新判断，最终确认只针对当前风险签名放行本次刷新。500ms有界批准、beforeunload消费、pageshow/pagehide、input/pointerdown/keydown、卸载与失败复位共同防止永久批准；内容变化也使签名失效。更新不执行代保存，稍后/手动再开/外部及未知摘要隐藏/数字SemVer均保留。ErrorTranslator及AgentRunTraceActions同一刷新gate；自动刷新遇风险暂停，不自动放弃。浏览器地址栏刷新/关闭页签、系统权限仍为原生平台例外，不能换皮。
+
+不改API、鉴权、点数、Provider、worker或数据库，不安装依赖，package锁仅同步PATCH0.37.1。当前工具未提供原生内部worker入口，未创建侧栏线程或自动审核；唯一lead直接完成分包实施与统一Verify/self Review。只做发布必需构建内置检查和源码/静态/健康/回退证据，无浏览器、业务回归或付费生成；用户手动验收边界有效。复用已读React Router useBlocker/MIT的取消与继续思想，不安装其包。原图及同图来源复用[固定私有附件](../../docs/materials/2026-10-03-feedback-update-confirm/codex-clipboard-f7c8cdb3-42b3-4827-b629-1f66ea539939.png)，用途为重复确认参考，不公开Git/部署；统一diff将留同目录。

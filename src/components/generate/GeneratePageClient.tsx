@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from 'react';
 import Link from 'next/link';
@@ -496,6 +497,7 @@ function asVideoResolution(value?: string | null): VideoResolution | null {
 // ============================================================================
 
 export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientProps) {
+  const { confirm, productDialog } = useProductDialog();
   const surfaceConfig = GENERATE_SURFACE_CONFIG[surface];
   const isIpSurface = surface === 'ip';
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
@@ -1393,7 +1395,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   const deleteRecentTask = useCallback(async (task: TaskItem) => {
     if (isIpSurface || task.can_delete === false || deletingRecentTaskId) return;
-    const confirmed = window.confirm('从最近生成移除此记录？视频文件不会物理删除，管理员仍可在留存区审计和恢复。');
+    const confirmed = await confirm('从最近生成移除此记录？视频文件不会物理删除，管理员仍可在留存区审计和恢复。', { title: '移除记录', confirmLabel: '移除记录', danger: true });
     if (!confirmed) return;
 
     setDeletingRecentTaskId(task.id);
@@ -1414,7 +1416,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     } finally {
       setDeletingRecentTaskId(null);
     }
-  }, [deletingRecentTaskId, isIpSurface]);
+  }, [deletingRecentTaskId, isIpSurface, confirm]);
 
   const upgradeDraftTask = useCallback(async (task: TaskItem) => {
     if (isIpSurface || !task.is_draft || task.local_status !== 'succeeded' || !seedanceDraftCapability.upgrade_enabled || draftUpgradeTaskId) return;
@@ -2063,6 +2065,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   return (
     <div className={`composer-page${isIpSurface ? ' composer-page-ip' : ''}`}>
+      {productDialog}
       {/* ===== 顶部导航栏 ===== */}
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
 

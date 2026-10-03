@@ -5,6 +5,7 @@ import CanvasReactions from '@/components/content-reactions/CanvasReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { useProductDialog } from '@/components/useProductDialog';
 import type { ContentKey } from '@/lib/content-reactions/types';
+import { cancelPageExit, getPageExitRisk, registerPageExitRisk, runApprovedPageExit, type PageExitRisk } from '@/lib/hooks/page-exit-guard';
 
 type CanvasMediaPreview = {
   contentKey: ContentKey;
@@ -26,22 +27,41 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     let alive = true;
     let lastLocation = { url: location.href, state: window.history.state };
     let approvedUrl: string | null = null;
+    let approvedSignature: string | null = null;
+    let approvalTimer: ReturnType<typeof setTimeout> | undefined;
     const hasChanges = () => {
       try {
         const child = frame.current?.contentWindow as (Window & { UltimateCanvasHasUnsavedChanges?: () => boolean }) | null;
         return child?.UltimateCanvasHasUnsavedChanges?.() ?? dirty.current;
       } catch { return dirty.current; }
     };
-    const clearApproval = () => { approvedUrl = null; };
+    const unregisterRisk = registerPageExitRisk('ultimate-canvas', () => {
+      try {
+        const child = frame.current?.contentWindow as (Window & { UltimateCanvasGetExitRisk?: () => PageExitRisk }) | null;
+        return child?.UltimateCanvasGetExitRisk?.() ?? { unsaved: hasChanges() ? ['画布内容'] : [], busy: [] };
+      } catch { return { unsaved: hasChanges() ? ['画布内容'] : [], busy: [] }; }
+    });
+    const clearApproval = () => { approvedUrl = null; approvedSignature = null; clearTimeout(approvalTimer); cancelPageExit(); };
+    const leave = (destination: string) => {
+      if (!alive || !approvedSignature) return;
+      if (!runApprovedPageExit(() => location.assign(destination), approvedSignature)) clearApproval();
+    };
     let deciding = false;
     const requestLeave = async (destination: string) => {
-      if (!hasChanges()) return true;
       if (approvedUrl === destination) return true;
       if (deciding) return false;
       deciding = true;
       try {
-        if (!await confirm('画布仍有未保存内容或正在处理的操作。确定离开吗？', { title: '离开画布', confirmLabel: '仍然离开' }) || !alive) return false;
+        const risk = getPageExitRisk();
+        if (risk.busy.length) {
+          await confirm(`${risk.busy.join('、')}，请完成后再离开。`, { title: '操作进行中', confirmLabel: '返回等待' });
+          return false;
+        }
+        if (risk.unsaved.length && (!await confirm(`${risk.unsaved.join('、')}尚未保存，确定放弃并离开吗？`, { title: '离开画布', confirmLabel: '放弃并离开', danger: true }) || !alive)) return false;
+        if (getPageExitRisk().signature !== risk.signature) return false;
         approvedUrl = destination;
+        approvedSignature = risk.signature;
+        approvalTimer = setTimeout(clearApproval, 500);
         return true;
       } finally { deciding = false; }
     };
@@ -123,10 +143,6 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
         lastLocation = { url: url.href, state: window.history.state };
       } finally { internalUrlSync = false; }
     };
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (approvedUrl) { clearApproval(); return; }
-      if (hasChanges()) { event.preventDefault(); event.returnValue = ''; }
-    };
     const onClick = (event: MouseEvent) => {
       const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null;
       if (!(anchor instanceof HTMLAnchorElement) || anchor.hasAttribute('download')
@@ -136,7 +152,7 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       clearApproval();
       if (hasChanges()) {
         event.preventDefault(); event.stopImmediatePropagation();
-        void requestLeave(destination.href).then(approved => { if (approved && alive) location.assign(destination.href); });
+        void requestLeave(destination.href).then(approved => { if (approved) leave(destination.href); });
       }
     };
     // Chromium's navigation event also covers back/forward and programmatic SPA navigation.
@@ -147,7 +163,7 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       if (internalUrlSync || !event.cancelable || next.hashChange || next.destination.url === location.href) return;
       if (hasChanges() && approvedUrl !== next.destination.url) {
         event.preventDefault(); event.stopImmediatePropagation();
-        void requestLeave(next.destination.url).then(approved => { if (approved && alive) location.assign(next.destination.url); });
+        void requestLeave(next.destination.url).then(approved => { if (approved) leave(next.destination.url); });
       }
     };
     const onPopState = (event: PopStateEvent) => {
@@ -159,14 +175,15 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
         internalUrlSync = true;
         try { window.history.pushState(lastLocation.state, '', lastLocation.url); }
         finally { internalUrlSync = false; }
-        void requestLeave(destination).then(approved => { if (approved && alive) location.assign(destination); });
+        void requestLeave(destination).then(approved => { if (approved) leave(destination); });
       } else lastLocation = { url: location.href, state: window.history.state };
     };
     window.addEventListener('message', onMessage);
-    window.addEventListener('beforeunload', onBeforeUnload);
     document.addEventListener('click', onClick, true);
     document.addEventListener('pointerdown', clearApproval, true);
     document.addEventListener('keydown', clearApproval, true);
+    document.addEventListener('input', clearApproval, true);
+    window.addEventListener('pageshow', clearApproval);
     window.addEventListener('popstate', onPopState, true);
     navigation?.addEventListener('navigate', onNavigate);
     navigation?.addEventListener('navigateerror', clearApproval);
@@ -175,10 +192,13 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       alive = false;
       previewRequest.current += 1;
       window.removeEventListener('message', onMessage);
-      window.removeEventListener('beforeunload', onBeforeUnload);
+      unregisterRisk();
+      clearApproval();
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('pointerdown', clearApproval, true);
       document.removeEventListener('keydown', clearApproval, true);
+      document.removeEventListener('input', clearApproval, true);
+      window.removeEventListener('pageshow', clearApproval);
       window.removeEventListener('popstate', onPopState, true);
       navigation?.removeEventListener('navigate', onNavigate);
       navigation?.removeEventListener('navigateerror', clearApproval);

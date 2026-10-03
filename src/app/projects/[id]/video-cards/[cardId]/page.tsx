@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
@@ -142,6 +143,7 @@ function formatOfficialCost(totals?: Array<{ currency: string; amount_micros: nu
 }
 
 export default function VideoCardDetailPage() {
+  const { confirm, productDialog } = useProductDialog();
   const params = useParams<{ id: string; cardId: string }>();
   const router = useRouter();
   const projectId = params.id;
@@ -240,7 +242,7 @@ export default function VideoCardDetailPage() {
   };
 
   const sealVideoCard = async () => {
-    if (!window.confirm('封板后默认不能继续在此视频卡下生成，确定封板吗？')) return;
+    if (!await confirm('封板后默认不能继续在此视频卡下生成，确定封板吗？', { title: '视频卡封板', confirmLabel: '确认封板' })) return;
     setSealing(true);
     await patchVideoCard({ seal: true }, '视频卡已封板');
     setSealing(false);
@@ -314,6 +316,7 @@ export default function VideoCardDetailPage() {
 
   return (
     <div>
+      {productDialog}
       <PageBanner
         eyebrow="视频卡"
         title={videoCard.title}

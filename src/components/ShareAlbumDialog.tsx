@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -77,6 +78,7 @@ const PRESETS: Array<{ value: PermissionPreset; label: string; description: stri
 ];
 
 export default function ShareAlbumDialog({ open, album, onClose, onChanged }: ShareAlbumDialogProps) {
+  const { confirm, productDialog } = useProductDialog();
   const [shares, setShares] = useState<ShareItem[]>([]);
   const [targetType, setTargetType] = useState<ShareTargetType>('project');
   const [targetId, setTargetId] = useState('');
@@ -330,7 +332,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
   const revokeShare = async (share: ShareItem) => {
     const label = share.grantee?.label || share.grantee_id;
-    if (!window.confirm(`取消共享给「${label}」？对方将不能继续访问这个图集。`)) return;
+    if (!await confirm(`取消共享给「${label}」？对方将不能继续访问这个图集。`, { title: '取消共享', confirmLabel: '取消共享', danger: true })) return;
 
     setSavingKey(`share-${share.id}`);
     setError(null);
@@ -350,7 +352,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
   const revokeAllShares = async () => {
     if (shares.length === 0) return;
-    if (!window.confirm(`关闭「${album.name}」的全部共享？所有被授权对象都会失去访问权限。`)) return;
+    if (!await confirm(`关闭「${album.name}」的全部共享？所有被授权对象都会失去访问权限。`, { title: '关闭全部共享', confirmLabel: '关闭共享', danger: true })) return;
 
     setSavingKey('revoke-all');
     setError(null);
@@ -370,6 +372,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
   return (
     <div ref={backdropRef} className="share-dialog-backdrop" role="presentation">
+      {productDialog}
       <section ref={dialogRef} className="share-dialog" role="dialog" aria-modal="true" aria-label={`共享 ${album.name}`}>
         <div className="share-dialog-head">
           <div>

@@ -1,4 +1,6 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
+import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, ImagePlus, Maximize2, X } from 'lucide-react';
@@ -67,12 +69,14 @@ export function PromptEditor({
   mentionCandidates = [],
   onMentionSelect,
 }: Props) {
+  const { confirm, productDialog } = useProductDialog();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const expandedBackdropRef = useRef<HTMLDivElement>(null);
   const expandedDialogRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(value);
+  usePageExitRisk({ unsaved: expanded && draft !== value ? ['展开编辑中的提示词'] : [], busy: [], revision: draft });
   const [mentionState, setMentionState] = useState<{
     target: 'main' | 'expanded';
     range: PromptMentionRange;
@@ -281,14 +285,14 @@ export function PromptEditor({
     setMentionState(null);
   }, [value]);
 
-  const closeExpanded = useCallback(() => {
+  const closeExpanded = useCallback(async () => {
     if (draft !== value) {
-      const ok = window.confirm('放弃本次提示词编辑？');
+      const ok = await confirm('放弃本次提示词编辑？', { title: '放弃编辑', confirmLabel: '放弃修改', danger: true });
       if (!ok) return;
     }
     setExpanded(false);
     setMentionState(null);
-  }, [draft, value]);
+  }, [draft, value, confirm]);
 
   useDialogDismiss({
     open: expanded,
@@ -384,6 +388,7 @@ export function PromptEditor({
 
   return (
     <div className="composer-prompt-editor">
+      {productDialog}
       <textarea
         ref={textareaRef}
         className="composer-prompt-textarea"

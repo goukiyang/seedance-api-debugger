@@ -1,4 +1,5 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useRef, useState } from 'react';
 import { Share2, RefreshCw } from 'lucide-react';
@@ -8,6 +9,7 @@ import styles from './reactions.module.css';
 type ShareState = { canShare: boolean; shared: boolean; href?: string };
 
 export default function ImageShareButton({ contentKey, userId, disabled }: { contentKey: ContentKey; userId: string; disabled: boolean }) {
+  const { confirm, productDialog } = useProductDialog();
   const [state, setState] = useState<ShareState | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -42,7 +44,8 @@ export default function ImageShareButton({ contentKey, userId, disabled }: { con
   async function toggle() {
     if (!state || lock.current) return;
     const active = !state.shared;
-    if (active && !window.confirm('分享后，所有已登录的站内用户都能在公共图集看到这张图片。不会分享提示词或参考图。确定分享吗？')) return;
+    if (active && !await confirm('分享后，所有已登录的站内用户都能在公共图集看到这张图片。不会分享提示词或参考图。确定分享吗？', { title: '公开分享图片', confirmLabel: '确认分享' })) return;
+    if (lock.current || currentIdentity.current !== identity) return;
     lock.current = true; sequence.current += 1; setBusy(true); setError(''); setFeedback('');
     try {
       const response = await fetch('/api/image-shares', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: contentKey, active }) });
@@ -55,6 +58,7 @@ export default function ImageShareButton({ contentKey, userId, disabled }: { con
     } finally { lock.current = false; if (currentIdentity.current === identity) setBusy(false); }
   }
   return <>
+      {productDialog}
     <button type="button" title={state?.shared ? '取消站内分享' : '分享给站内用户'} aria-label={state?.shared ? '取消站内分享' : '分享给站内用户'} aria-pressed={state?.shared || false} disabled={disabled || busy || !state} onClick={() => void toggle()}><Share2 size={16} /></button>
     {busy && <span className={styles.busy} role="status">保存中</span>}
     {feedback && <span className={styles.muted} role="status">{feedback}{state?.shared && state.href && <> · <a href={state.href}>查看</a></>}</span>}

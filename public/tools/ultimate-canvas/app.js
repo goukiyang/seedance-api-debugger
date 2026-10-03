@@ -57,6 +57,7 @@
         documentDirty: false,
         editSequence: 0,
         documentOperation: false,
+        uploadsInFlight: 0,
         saveConflict: false,
         pendingCopy: null,
         flushPromise: null,
@@ -110,6 +111,7 @@
         get historyItems() { return canvasRuntime.historyItems; },
         get bootstrap() { return canvasRuntime.bootstrap; },
         markChanged(reason = 'toolflow_change') { scheduleCanvasSave(reason); },
+        requestName: requestCanvasName,
     };
 
     const planSplit = window.UltimateCanvasPlanSplitUI.create({
@@ -1783,15 +1785,15 @@
         });
     }
 
-    function requestCanvasName(value) {
+    function requestCanvasName(value, options = {}) {
         return new Promise(resolve => {
             const id = 'canvas-name-' + crypto.randomUUID();
             const finish = value => { layer.close(); resolve(value); };
             const layer = openCanvasProductDialog({
                 className: 'canvas-confirm-dialog', labelledBy: id, anchor: document.activeElement,
                 onDismiss: () => finish(null),
-                content: `<div class="canvas-confirm-head"><strong id="${id}">画布名称</strong></div>
-                    <input class="canvas-name-input" data-canvas-name maxlength="120" aria-label="画布名称" value="${escapeHtml(value || '')}">
+                content: `<div class="canvas-confirm-head"><strong id="${id}">${escapeHtml(options.title || '画布名称')}</strong></div>
+                    <input class="canvas-name-input" data-canvas-name ${options.maxLength === null ? '' : 'maxlength="120"'} aria-label="${escapeHtml(options.title || '画布名称')}" value="${escapeHtml(value || '')}">
                     <div class="canvas-confirm-actions"><button type="button" class="context-command" data-name-cancel>取消</button>
                     <button type="button" class="context-primary-command" data-name-save>保存名称</button></div>`
             });
@@ -2518,6 +2520,39 @@
             || Boolean(canvasRuntime.failedSaveRequest) || canvasRuntime.documentOperation || Boolean(rulesDirty);
     }
 
+    function canvasExitRisk() {
+        const rules = document.querySelector('[data-context-rules-modal]');
+        const busy = [
+            canvasRuntime.saveState === 'saving' ? '画布正在保存' : '',
+            canvasRuntime.documentOperation || canvasRuntime.contextSwitching || canvasRuntime.documentRestoring ? '画布操作正在处理' : '',
+            canvasRuntime.uploadsInFlight ? '画布素材正在上传' : '',
+            rules?._saving ? '画布规则正在保存' : ''
+        ].filter(Boolean);
+        const unsaved = [];
+        if (rules && (rules.querySelector('[data-context-rules-textarea]').value !== rules._nodeInitial
+            || rules.querySelector('[data-global-rules-textarea]').value !== rules._globalInitial)) unsaved.push('画布规则');
+        let recoverable = false;
+        let snapshot;
+        let contentSignature = '';
+        try {
+            snapshot = canvasSaveSnapshot('exit_check');
+            const cached = JSON.parse(localStorage.getItem(draftStorageKey()) || 'null');
+            const content = raw => {
+                const value = JSON.parse(raw);
+                // The save timestamp changes on every snapshot without changing the recoverable content.
+                delete value.savedAt;
+                return JSON.stringify(value);
+            };
+            if (snapshot?.request) contentSignature = content(snapshot.request.document_json);
+            recoverable = !!canvasRuntime.documentId && !!snapshot?.request && cached?.baseRevision === canvasRuntime.documentRevision
+                && typeof cached.request?.document_json === 'string' && content(cached.request.document_json) === contentSignature
+                && cached.request?.title === snapshot.request.title;
+        } catch { /* Unavailable storage is not proof of a recoverable draft. */ }
+        if ((canvasRuntime.documentDirty || canvasRuntime.failedSaveRequest) && !recoverable) unsaved.push('未存入浏览器的画布内容');
+        return { unsaved, busy, revision: JSON.stringify([canvasRuntime.editSequence, canvasRuntime.documentTitle, contentSignature,
+            rules?.querySelector('[data-context-rules-textarea]')?.value, rules?.querySelector('[data-global-rules-textarea]')?.value]) };
+    }
+
     function updateDocumentInteraction() {
         const busy = canvasRuntime.documentOperation || canvasRuntime.contextSwitching || canvasRuntime.documentRestoring;
         const locked = busy || !canvasRuntime.documentWritable;
@@ -2827,9 +2862,11 @@
     }, true);
     window.addEventListener('beforeunload', event => {
         // The React host owns the prompt when embedded, avoiding a second iframe prompt.
-        if (window.parent === window && hasUnsavedCanvasChanges()) { event.preventDefault(); event.returnValue = ''; }
+        const risk = canvasExitRisk();
+        if (window.parent === window && (risk.unsaved.length || risk.busy.length)) { event.preventDefault(); event.returnValue = ''; }
     });
     window.UltimateCanvasHasUnsavedChanges = hasUnsavedCanvasChanges;
+    window.UltimateCanvasGetExitRisk = canvasExitRisk;
     window.addEventListener('online', () => {
         if (canvasRuntime.saveState === 'offline') void flushCanvasSave('reconnect');
     });
@@ -3501,10 +3538,10 @@
         if (canvasRuntime.documentId) formData.set('canvas_document_id', canvasRuntime.documentId);
         if (canvasNodeId) formData.set('canvas_node_id', canvasNodeId);
         if (role) formData.set('role', role);
-        return requestJson('/api/tools/ultimate-canvas/upload', {
-            method: 'POST',
-            body: formData
-        });
+        canvasRuntime.uploadsInFlight += 1;
+        try {
+            return await requestJson('/api/tools/ultimate-canvas/upload', { method: 'POST', body: formData });
+        } finally { canvasRuntime.uploadsInFlight -= 1; }
     }
 
     function createUploadedNode(uploadResult, cx, cy, pendingConnection = null, requestedNodeId = '') {

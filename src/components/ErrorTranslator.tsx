@@ -9,6 +9,8 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { useProductDialog } from './useProductDialog';
+import { getPageExitRisk, refreshPage } from '@/lib/hooks/page-exit-guard';
 import { isProviderFirstFrameRatioError, providerReferenceNumberFromError } from '@/lib/provider/error-message';
 
 // ---- Types ----
@@ -731,6 +733,17 @@ function DiagnosticsPanel({ debugInfo }: { debugInfo: DebugInfo }) {
 // ---- Main Component ----
 
 export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }: Props) {
+  const { confirm, productDialog } = useProductDialog();
+  const [refreshError, setRefreshError] = useState('');
+  const reload = async () => {
+    const risk = getPageExitRisk();
+    if (risk.busy.length) {
+      await confirm(`${risk.busy.join('、')}，请完成后再刷新。`, { title: '操作进行中', confirmLabel: '返回等待' });
+      return;
+    }
+    if (risk.unsaved.length && !await confirm(`${risk.unsaved.join('、')}尚未保存，刷新会丢失这些修改。`, { title: '未保存内容', confirmLabel: '放弃修改并刷新', danger: true })) return;
+    if (!refreshPage(risk.signature)) setRefreshError('内容状态已变化，请重新确认后刷新。');
+  };
   const translated = translateError(error, debugInfo);
   const [showAllDebug, setShowAllDebug] = useState(false);
 
@@ -765,6 +778,8 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
 
   return (
     <div className="error-translate">
+      {productDialog}
+      {refreshError && <p role="alert">{refreshError}</p>}
       <div className="error-translate-title">{translated.title}</div>
       <div className="error-translate-reasons">
         <div>可能原因：</div>
@@ -786,7 +801,7 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
           }
           if (action.action === 'reload') {
             return (
-              <button key={i} className="btn btn-sm btn-primary" onClick={() => { window.location.reload(); }}>
+              <button key={i} className="btn btn-sm btn-primary" onClick={() => { void reload(); }}>
                 {action.label}
               </button>
             );
