@@ -1,34 +1,107 @@
 diff --git a/package-lock.json b/package-lock.json
-index 27b7df7..f391272 100644
+index 27b7df7..abf4571 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -1,12 +1,12 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.7",
++  "version": "0.36.8",
    "lockfileVersion": 3,
    "requires": true,
    "packages": {
      "": {
        "name": "video-api-debugger",
 -      "version": "0.36.2",
-+      "version": "0.36.7",
++      "version": "0.36.8",
        "dependencies": {
          "@aws-sdk/client-s3": "^3.1041.0",
          "@aws-sdk/s3-request-presigner": "^3.1041.0",
 diff --git a/package.json b/package.json
-index 19794d5..538a9af 100644
+index 19794d5..00be561 100644
 --- a/package.json
 +++ b/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.7",
++  "version": "0.36.8",
    "private": true,
    "scripts": {
      "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/src/app/api/assets/library/route.ts b/src/app/api/assets/library/route.ts
+index 88846aa..bfd9c4d 100644
+--- a/src/app/api/assets/library/route.ts
++++ b/src/app/api/assets/library/route.ts
+@@ -65,6 +65,7 @@ type LibraryItem = {
+   providerFinalAmountMinor: number | null;
+   providerOfficialAmountMicros: number | null;
+   providerFinalAmountMicros: number | null;
++  chargedCredits: number | null;
+   videoCardId: string | null;
+   isEnhanceTask: boolean;
+   canEnhanceVideo: boolean;
+@@ -193,6 +194,7 @@ async function serializeTask(task: {
+   provider_final_amount_minor: number | null;
+   provider_official_amount_micros: number | null;
+   provider_final_amount_micros: number | null;
++  actual_cost: number | null;
+   params_json: string | null;
+   retention_status: string;
+   created_at: Date;
+@@ -202,7 +204,7 @@ async function serializeTask(task: {
+   project: LibraryProject | null;
+   owner: LibraryUser | null;
+   user: LibraryUser | null;
+-}): Promise<LibraryItem> {
++}, viewer: SessionUser): Promise<LibraryItem> {
+   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
+   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
+   const deliveryStage = videoDeliveryStageForTask(task);
+@@ -259,6 +261,10 @@ async function serializeTask(task: {
+     providerFinalAmountMinor: task.provider_final_amount_minor,
+     providerOfficialAmountMicros: task.provider_official_amount_micros,
+     providerFinalAmountMicros: task.provider_final_amount_micros,
++    chargedCredits: (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
++      && ['succeeded', 'failed', 'cancelled'].includes(task.local_status)
++      && task.actual_cost !== null && Number.isFinite(task.actual_cost) && task.actual_cost >= 0
++      ? task.actual_cost : null,
+     videoCardId: task.video_card_id,
+     isEnhanceTask,
+     canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
+@@ -325,6 +331,7 @@ function serializeAsset(asset: {
+     providerFinalAmountMinor: null,
+     providerOfficialAmountMicros: null,
+     providerFinalAmountMicros: null,
++    chargedCredits: null,
+     videoCardId: null,
+     isEnhanceTask: false,
+     canEnhanceVideo: false,
+@@ -386,6 +393,7 @@ function serializeReferenceImage(image: {
+     providerFinalAmountMinor: null,
+     providerOfficialAmountMicros: null,
+     providerFinalAmountMicros: null,
++    chargedCredits: null,
+     videoCardId: null,
+     isEnhanceTask: false,
+     canEnhanceVideo: false,
+@@ -540,6 +548,7 @@ async function loadVideoItems(options: {
+         provider_final_amount_minor: true,
+         provider_official_amount_micros: true,
+         provider_final_amount_micros: true,
++        actual_cost: true,
+         params_json: true,
+         retention_status: true,
+         created_at: true,
+@@ -555,7 +564,7 @@ async function loadVideoItems(options: {
+   ]);
+ 
+   return {
+-    items: await Promise.all(tasks.map(serializeTask)),
++    items: await Promise.all(tasks.map((task) => serializeTask(task, user))),
+     total,
+   };
+ }
 diff --git a/src/app/api/tasks/create/route.ts b/src/app/api/tasks/create/route.ts
 index c7ba3ff..94e0e82 100644
 --- a/src/app/api/tasks/create/route.ts
@@ -44,6 +117,65 @@ index c7ba3ff..94e0e82 100644
    let videoBranch: { id: string; title: string; status: string; is_primary: boolean } | null = null;
    if (requestedVideoBranchId) {
      const branch = await prisma.videoBranch.findUnique({
+diff --git a/src/app/assets/page.tsx b/src/app/assets/page.tsx
+index b5b7e1d..6c20f90 100644
+--- a/src/app/assets/page.tsx
++++ b/src/app/assets/page.tsx
+@@ -123,6 +123,7 @@ type AssetLibraryItem = {
+   providerFinalAmountMinor: number | null;
+   providerOfficialAmountMicros: number | null;
+   providerFinalAmountMicros: number | null;
++  chargedCredits: number | null;
+   videoCardId: string | null;
+   isEnhanceTask: boolean;
+   canEnhanceVideo: boolean;
+@@ -471,6 +472,14 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
+   return parts.join(' · ');
+ }
+ 
++function formatChargedCredits(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'chargedCredits'>) {
++  if (item.kind !== 'video' || item.source !== 'video_task') return '';
++  const amount = item.chargedCredits;
++  if (amount === null || amount === undefined || !Number.isFinite(amount) || amount < 0) return '';
++  if (amount > 0 && amount < 0.01) return '< 0.01 点';
++  return `${amount.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 点`;
++}
++
+ function formatCnyCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
+   if (item.kind !== 'video' || item.source !== 'video_task') return '';
+   if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return '';
+@@ -1732,6 +1741,7 @@ function AssetsPageContent() {
+     </div>}
+     <dl className="asset-detail-list">
+       <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
++      {formatChargedCredits(activeItem) && <div><dt>实际扣点</dt><dd>{formatChargedCredits(activeItem)}</dd></div>}
+       {shouldShowDeliveryStage(activeItem) && <div><dt>稳定下载</dt><dd>{activeItem.deliveryStage?.label || '-'}</dd></div>}
+       <div><dt>项目</dt><dd>{activeItem.project?.name || '未归属项目'}</dd></div>
+       {isAdmin && <div><dt>用户</dt><dd><UserIdentityBadge user={activeItem.owner} size="sm" subtitle={activeItem.owner?.subtitle || null} className="asset-detail-user" /></dd></div>}
+@@ -2228,6 +2238,7 @@ function AssetsPageContent() {
+                 const duration = formatDuration(item.duration);
+                 const specText = formatAssetSpec(item);
+                 const cnyCostBadge = formatCnyCostBadge(item);
++                const costBadge = cnyCostBadge || formatChargedCredits(item);
+                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
+                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
+                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
+@@ -2272,11 +2283,11 @@ function AssetsPageContent() {
+                       ) : (
+                         <AssetLibraryThumbnail key={`${item.source}:${item.thumbnailUrl || ''}:${item.previewUrl || ''}`} item={item} />
+                       )}
+-                      {(cnyCostBadge || enhanceStateLabel) && (
++                      {(costBadge || enhanceStateLabel) && (
+                         <span className="asset-card-top-right-badges">
+-                          {cnyCostBadge && (
+-                            <span className="asset-card-badge asset-card-cost-badge">
+-                              {cnyCostBadge}
++                          {costBadge && (
++                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : '实际扣除的站内点数，不是现金金额'}>
++                              {costBadge}
+                             </span>
+                           )}
+                           {enhanceStateLabel && (
 diff --git a/src/app/image-studio/global-settings-dialog.tsx b/src/app/image-studio/global-settings-dialog.tsx
 index 835e734..ea2adab 100644
 --- a/src/app/image-studio/global-settings-dialog.tsx
@@ -828,6 +960,19 @@ index 8bff328..381f3b5 100644
      });
    }, []);
    const confirm = useCallback(async (message: string, options: Options = {}) => (await ask(message, options)) !== null, [ask]);
+diff --git a/src/lib/assets/library-cache.ts b/src/lib/assets/library-cache.ts
+index 91782fa..844cac7 100644
+--- a/src/lib/assets/library-cache.ts
++++ b/src/lib/assets/library-cache.ts
+@@ -3,7 +3,7 @@ const STORE_NAME = 'asset_library_pages';
+ const DB_VERSION = 1;
+ const CACHE_TTL_MS = 5 * 60_000;
+ 
+-export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 2;
++export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 3;
+ 
+ type AssetLibraryCacheKeyInput = {
+   view?: string;
 diff --git a/src/lib/image-studio/limits.ts b/src/lib/image-studio/limits.ts
 index 9e9a2e2..8dff1d1 100644
 --- a/src/lib/image-studio/limits.ts
@@ -991,14 +1136,14 @@ index bffd9e1..e44e405 100644
          if (error instanceof StudioReferencePolicyError) throw new StudioError(error.message, error.status);
          throw error;
 diff --git a/src/lib/release.ts b/src/lib/release.ts
-index d26bc6f..f3d4e1a 100644
+index d26bc6f..d43628f 100644
 --- a/src/lib/release.ts
 +++ b/src/lib/release.ts
 @@ -1,6 +1,6 @@
  import packageInfo from '../../package.json';
  
 -export const release = { version: packageInfo.version, channel: 'production', summary: '模板工作台分开显示文案与视频状态；复用历史输入只新建模块。图片记录刷新和加载更多保留已有内容，恢复入口明确为查询状态；视频模型与LoRA按通道识别，模块称呼和记录时间更清楚。' };
-+export const release = { version: packageInfo.version, channel: 'production', summary: '模板上下文输入框上方新增复制、粘贴按钮；粘贴保留原有编辑和保存方式。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '资产视频封面补充实际扣点显示；现金金额和站内点数明确区分。' };
  export function newerRelease(remote: string, local: string) {
    const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
    const a = parse(remote), b = parse(local);

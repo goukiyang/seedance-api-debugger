@@ -326,3 +326,30 @@ v0.36.7运行源码8f481400ecfbbcd8b50d021117e77f933221f731，BUILD hdFoauPtV4mw
 服务器及公网config/release/login均200，公网v0.36.7及X-SD2-Origin server-42-193正确；template-studio匿名307仅证明原鉴权边界，不能当页面效果验收。8个改动源码与20个相关公网静态SHA一致，4服务/定时器active。旧构建/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0367和保护记录/srv/video-api-debugger/backups/sd2-feedback-v0367保留，COMPLETE握手exit0。累计[应用diff](2026-10-02-feedback-primary-navigation.diff)及[证据](2026-10-02-feedback-primary-navigation.evidence.json)已更新，T1历史实测保留但本轮不重跑。
 
 既有资料、固定todo与索引同步登记；原图不重复复制、不上传。无新生成、DB写入、费用、依赖、权限/Provider变化；C1浏览器剪贴板权限、按钮位置和实际粘贴未自动验收，待用户手动；守门员L3、无新增误判或越界。未解决的历史生成502问题与C1不混称恢复。
+
+## C2外部账号视频封面费用（2026-10-03）
+
+用户反馈资产管理页外部账号sg_lmy的视频封面没有标价。没有新附件；目标为正式/assets，不切旧入口。只读核对用户提供的邮箱命中唯一external/active账号，其8条近期本站任务均使用volcengine_ark：7成功、1失败，7成功的实际扣点为30、39、36、36、36、36、30，失败为0；现金币种及官方/最终minor、micros字段均null。该账号只有4张上传图片，没有上传视频。证据来自sqlite3 -readonly加PRAGMA query_only，不取提示词、密钥、原始请求或私人媒体，不写DB。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| C1 | 上下文复制、粘贴 | 按钮位于输入框上方，可复制全文、粘贴剪贴板内容 | 已部署v0.36.7，待手动验收 |
+| C2 | 外部视频封面标价 | 有价格的视频正常显示；未知价格不编造 | 6应用文件及发布检查完成，已部署v0.36.8，待用户手动验收 |
+
+根因：assets/page.tsx仅在视频任务有USD官方现金字段时展示费用，assets/library只投影该组字段，忽略已结算实际扣点。actual_cost经现有finalizer/credits结算逻辑确认是站内点数，不能当现金或按当前费率倒推历史现金价格。
+
+修复边界：已有现金标记不变，没有现金时用真实已结算扣点补封面；详情增加实际扣点。read-only library选择actual_cost并仅向管理员或该任务本人/所有者返回chargedCredits，运行中/未记录/非法数值返回null，图片/上传视频/参考图不造费用。0点保留，小于0.01的正数显示小于0.01点；不从estimated/frozen值冒充实际扣费。原资产权限、账務、Provider、生成/重试、Prisma、依赖不变。缓存schema升3避免旧投影缺字段，偏好/滚动/筛选不变。
+
+实际应用文件：src/app/api/assets/library/route.ts（只读投影）、src/app/assets/page.tsx（原封面badge及详情）、src/lib/assets/library-cache.ts（缓存投影版本）、package.json/lock与src/lib/release.ts（0.36.8及真实摘要）。沿用现有卡片/费用组件，不另加收费模块；[Intl.NumberFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat)原生格式化即可，无新增依赖。采用产品/极简/Impeccable轻量检查，不做无关视觉重构；本轮单一紧耦合显示链路直接完成，沿用既有发布流程，不重派曾有发布证据不完整/长等待的执行链。
+
+发布检查仅候选build内置lint/types、源包/新静态/版本/服务/持久资源/回退。用户指定范围的只读价格诊断已做，不自动跑浏览器、业务生成、付费/积分测试或迁移。更新提醒沿用ReleaseNotice数字SemVer与稍后去重、手动再检查的单一入口；真实卡片和更新弹窗待用户手动。未把cash未知说成0元，也不声称历史生成502已恢复。
+
+### C2发布回执
+
+已部署v0.36.8，运行源码98c11b5337741971920a33fddbca68aadaf5d063，BUILD_ID CWKSe5rWo_nZxeVGNUjzV；入口https://sd2.youdooart.com/assets。应用6文件提交/推送及回退tag rollback/2026-10-03-before-asset-cost-v0.36.8已ls-remote确认，回退指向已运行v0.36.7的8f481400ecfbbcd8b50d021117e77f933221f731。最终源包SHA256 f68fb0d9d693cba398854afcc83a1745fb8fcb97956973520156919f17824a64，两端一致、tar完整与敏感/运行文件排除核对；打包尚未完成时的辅助副本不用于发布，最终重新上传完整已校验源包。
+
+服务器flock、发布登记与旧commit/BUILD守卫已执行，候选作为gouki构建，内置lint/type/compile通过，仅保留原img性能警告。API只允许assets/library/route.ts只读投影变化，其余API、scripts、Prisma、Provider/worker、鉴权、成本/积分目录与运行版一致；rsync排除密钥/数据库/媒体/运行构建，持久软链接及上传目录可写检查通过。旧构建保留/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0368，部署记录/srv/video-api-debugger/backups/sd2-feedback-v0368。
+
+只重启sd2-gray；图片worker PID1241475、启动时间2026-10-02 19:26:26 CST、状态/单元一致。源站127.0.0.1:3302 config/release/login各200；公网config/release/login/assets各200、X-SD2-Origin server-42-193，release=0.36.8。assets原有匿名公开页面壳为200，真实数据仍走原鉴权API；首次核对脚本错误沿用template-studio的307预期，读取原middleware确认后修正检查预期，未改页面权限。最终19个相关公网静态文件与服务器哈希一致，7个源码（6个本轮应用文件加C1组件）本地/服务器一致，4服务或timer均active。
+
+发布进程COMPLETE握手实际结束0，公网验证完成后登记部署完成。只读费用诊断摘要并入[发布证据](2026-10-02-feedback-primary-navigation.evidence.json)，C1/P1/T1及之前交付保留previousDelivery历史；[统一diff](2026-10-02-feedback-primary-navigation.diff)覆盖原批次至本次运行源码。不运行浏览器/业务回归、付费请求或DB写入，不称用户验收通过。现金账单仍未知而非0元；无扩大任务权限，守门员L3，未把关键词“生成”误当本轮队列改造。
