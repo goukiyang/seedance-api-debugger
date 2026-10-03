@@ -350,3 +350,32 @@ B1/B2采用项目已安装Prisma5.22.0的事务客户端，预先检查整组权
 原始文件/Users/gouki-youdoo/.codex/generated_images/019e979b-bb0f-7fa2-ac37-9ed600c33760/exec-7c52b3b7-463f-4bd6-9fe9-541358411200.png保留。正式归档1448x1086 PNG可读，原件与归档SHA256一致a4765abe61c2639916511d57ad42b9dec6dea5e34cd788b7c81d6edb8e647aca；已内联展示、索引登记，原图仅本地保存，不上传Git或部署。应用仍v0.36.10。
 
 [返回主待办](../todo.md)
+
+## 10. 最新设计实施与发布（2026-10-03）
+
+项目：video-api-debugger。用户明确批准按§9、§9.9/9.10和v2原图直接实施并发布。真实应用源为`/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger`、`codex/canvas-liblib-layout`；正式根`/Volumes/Data/Projects/video-api-debugger`只同步本工单、资料索引及交付记录，不从旧应用发布。版本唯一来源`package.json`，本次新增兼容能力交付v0.37.0。最后更新：2026-10-03；已部署，待用户手动验收；L2兼容残余保留，不包装全通。
+
+附件：[已批准视频参考素材库v2](../../docs/materials/2026-10-03-unified-resource-library/video-reference-library-design-v2.png)，用于窗口布局及分类层级；原件只在正式根本机保存，不上传Git或部署。设计正文§9.9是分类依据，示意项目名、素材、时长不作为真实数据。资料索引入口[固定索引](../../docs/materials/index.md)。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| L1 | 统一素材库窗口 | 图片、视频参考入口直接开库，库内上传，类型与来源分开 | 实现完成，待用户手动验收 |
+| L2 | 接入真实资料 | 图集、项目、搜索、收藏和最近使用可选用，保留权限与数量限制 | 部分完成，use-only图片残余见下文；待手动验收 |
+| L3 | 发布与回退保护 | 构建通过，推送并部署正式站，新版本可获取 | 已完成，发布检查通过；不代替手动功能验收 |
+
+- 整批路径：共享轻量选择器→只读数据投影→调用方ID/顺序适配→唯一版本和记录→统一候选构建及内置检查→self Review→聚焦Git及安全切换→公网版本/静态资源/服务健康核对。工具没有内部worker派遣/容量入口，不创建侧栏任务或嵌套lead，唯一lead直接完成各包。
+- 守门员start已由上级完成，等级L3-visible-runtime。仅运行build内置发布检查；real-result跳过，用户手动验收。发布按L4数据保护：预约失败停止，保留旧release和运行构建，不原地构建，不覆盖.env/数据库/上传/视频/storage，不重启图片worker、不强杀付费队列。
+- 首次实际线上核对：`.deployed-commit=b26f9d216949c3601d2cc36d050e6fc922422ab1`，v0.36.10，BUILD_ID=`MFC_yPnyTMuIibuxAwjsx`，sd2-gray.service active，数据软链指向/data。指定源HEAD2fe7bf8干净，后续提交仅设计记录，应用代码与live一致。
+- Git Plan：只提交上述指定worktree里的本批源码、版本与记录；推送原分支及清晰rollback tag。正式根保护dirty tasks/todo.md与untracked，仅精确暂存本轮docs差异，不整文件暂存主todo。
+- 真实通路边界：视频工作区保留Asset/ReferenceImage原ID挂载；图片工作台和模板编辑器接收本人Asset。本人task-only生成视频经既有授权下载GET→正常上传→Asset挂载；无可下载文件时明确禁选，不触发下载POST或交付队列。共享/公共他人图片只有原图下载权限时经既有original端点→正常上传→本人Asset；仅授权use但不允许download的图集仍可在视频参考区用ReferenceImage，图片工作台显示逐项兼容原因并禁选，不能静默过滤。此残余需要图片生成管线支持use-only引用，不在本轮扩大生成/鉴权/Provider规则。用户点击添加产生正常上传Asset，不由Codex测试写生产数据。
+- 已复用本站ContentReactions、MediaPreview、ZoomableImagePreview、RelativeTime、useDialogDismiss、uploadFileAsAsset及工作区挂载事务；此前已读MIT许可Uppy Dashboard源码只作流程参考，不安装新依赖。没有假分类、商用标记、热度、名称或数量。
+- Verify→self Review：`npm run build`首次发现本项目ES5默认目标下Map iterator展开不兼容，统一改为Array.from；复验exit0（含lint/类型/静态产物内置检查），现有CSS/图片及Hook警告不冒充失败或清零。源码复查覆盖完整调用链、权限投影、顺序事务、上传及账号隔离；最后账号切换保护随最终服务器candidate再次统一构建。复用现有预览的native-dialog portal，不关闭下层编辑弹窗。
+- 整合重点：只在用户确认添加时下载/正常上传。已导入Asset在当前窗口缓存，最终attach失败的重试仅复查该Asset，不再次GET原文件或upload；元信息读取失败也先缓存已上传ID。选中项、来源和收藏沿用原资源key/identity，调用方只收到独立适配后的Asset或原ReferenceImage；最近使用仅在调用方确认成功后登记，本机、账号隔离、有界60项，不冒充云同步。不同调用用途偏好隔离，首尾帧/模型各类数量、模板slot、默认主图1与custommax原规则不统一成死数字。
+- 实际源码文件：`ResourceLibraryPicker.tsx/.module.css`与`UploadedImagePicker.tsx`共享窗口和旧入口兼容；`src/lib/assets/picker-types.ts`资源契约；`src/app/api/assets/picker/route.ts`权限内只读全范围搜索/分页/收藏/本人生成视频投影；`src/app/api/workspace/assets/route.ts`+`src/lib/hooks/useWorkspace.ts`原ID混合有序挂载；`GenerationComposer.tsx`+`template-studio/VideoTemplateWorkbench.tsx`模型/用途/slot适配；`image-studio/studio.tsx`+`style-groups-view.tsx`主图/参考/固定/封面/风格上传；`package.json/package-lock.json/src/lib/release.ts`唯一版本和摘要（锁文件只改版本，无依赖变动）；本工单、主todo与资料索引为记录。
+- 应用发布commit：`6d2f390aca3df0e5e730f0adc511652a87938b70`，Git分支已推送并ls-remote确认。远端annotated tag `rollback/2026-10-03-before-unified-resource-library` peeled到`b26f9d216949c3601d2cc36d050e6fc922422ab1`，未force push。完整[应用统一diff](https://github.com/goukiyang/seedance-api-debugger/commit/6d2f390aca3df0e5e730f0adc511652a87938b70)；正式根本机[机械统一diff](../../docs/materials/2026-10-03-unified-resource-library/implementation-v0.37.0.diff)仅含本批14个应用文件，不含文档、旧代码或无关改动（与私有素材目录一同本地保留，不重复上传Git）。
+- 候选发布：归档tar SHA256 `aaa60284b8d45151614c259b5eec2e5de0f36a99c3e5525309c70e7192252b5f`本地/服务器一致；归档无.env/上传/视频/storage/DB/私有v2原图。隔离release `/srv/video-api-debugger/releases/6d2f390aca3df0e5e730f0adc511652a87938b70`，`NEXT_DIST_DIR=.next-prod-candidate npm run build` exit0（最终完整源码），仅内置检查，日志`/tmp/sd2-resource-candidate-6d2f390.log`。预约runId `sd2-unified-resource-20261003-6d2f390` 开始/完成均confirmed，切换前所有权已复核。
+- 线上证据：`https://sd2.youdooart.com`，`.deployed-commit=6d2f390aca3df0e5e730f0adc511652a87938b70`，release v0.37.0，BUILD `JmPs7-sSzCKO0_LJ_YKrJ`。服务active，127.0.0.1:3302/api/config与公网/api/config、/api/release、/login及新静态均200；公网X-SD2-Origin=server-42-193。登录HTML含新BUILD。`/_next/static/chunks/3482-70ab1c18ac09bcb6.js`含共享picker标记，与服务器文件cmp相同，SHA256 `0ad2648441430c676d9f6bc9443109bb221dcb81ebaac0d55bd23c0452f9dfa7`。匿名/外部release摘要仍隐藏；未进行浏览器或业务API功能验收。
+- 回退/数据：旧构建`/srv/video-api-debugger/app/.next-prod-before-resource-6d2f390`；旧源码安全快照`/srv/video-api-debugger/releases/b26f9d2-pre-resource-6d2f390`及原b26f9d2 release保留。uploads/videos/storage指向/data持久目录，gouki可写子目录已核对，.env inode/权限元信息未变；无DB命令、迁移或生产覆盖。imageworker PID1241475、2026-10-02 19:26:26启动时间均未变，付费队列未触碰。仅网站服务正常停止/切换/启动，首次启动探测连接拒绝由既有curl重试恢复，全部最终检查exit0，未触发回退。
+- 守门员finish已登记L3-visible-runtime；第一次英文复合intent未命中回退general/L0，已按中文实际目标纠正并记录classification-misjudgment-log，不借此降级。real-result明确skip：项目由用户手动验收；构建、Git和上线不等于功能验收。记录收尾commit仅docs，不抬应用版本或再次部署。
+
+[返回主待办](../todo.md)
