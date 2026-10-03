@@ -5,7 +5,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
+import { Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
@@ -28,6 +28,7 @@ function studioUploadProgress(file: File, index: number, count: number, progress
 import { ZoomableImagePreview, type ImagePreviewMetadata } from '@/components/ZoomableImagePreview';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
+import { ResultImageCover } from '@/components/ResultImageCover';
 import styles from './studio.module.css';
 import { StudioReferenceGrid, type FixedStudioReference } from './reference-grid';
 import { RatioPicker } from './ratio-picker';
@@ -1406,11 +1407,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {!loadingTasks && !tasks.length && !tasksError && <div className={styles.empty}>暂无生成记录</div>}
         <div className={styles.grid}>{tasks.map(task => <article key={task.id} className={styles.result}>
           <div className={styles.resultMedia} data-reaction-surface>{task.asset ? <>
-            {task.asset.id && <div className={styles.resultReactions}><ContentReactions contentKey={`asset:${task.asset.id}`} overlay /></div>}
-            <button type="button" className={styles.preview} aria-label="预览生成图片" onClick={() => openTaskPreview(task)}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img decoding="async" src={task.asset.thumbnail_url || undefined} alt={`生成结果 ${task.ordinal}`} loading="lazy" />
-            </button>
+            {task.asset.id && <ContentReactions contentKey={`asset:${task.asset.id}`} overlay />}
+            <ResultImageCover src={task.asset.thumbnail_url || undefined} alt={`生成结果 ${task.ordinal}`}
+              restoreDisabled={!task.snapshot || submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission) || !active}
+              onRestore={() => void restoreTask(task)} onPreview={() => openTaskPreview(task)} />
             {downloadMode && <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
@@ -1441,6 +1441,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             {task.asset && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
             {task.snapshot && <button type="button" disabled={submitting || uploading || moduleSaving || ratioEditing || Boolean(pendingSubmission)} title="恢复本次输入设置，不会提交生成或扣积分" aria-label="恢复设置" onClick={() => restoreTask(task)}><RefreshCw size={15} />恢复设置</button>}
             {isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
+            {task.asset && <button type="button" className={styles.viewResult} onClick={() => openTaskPreview(task)} title="查看图片"><Eye size={15} />查看</button>}
           </div>
           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
           {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}

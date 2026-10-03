@@ -2578,7 +2578,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           <Trash2 size={14} aria-hidden="true" />
                         </button>
                       )}
-                      <Link href={taskDetailHref(task.id, generationReturnTo)} className="composer-task-card-link">
+                      <div className="composer-task-card-link">
 	                        <TaskVideoThumbnail
 	                          taskId={task.id}
 	                          thumbnailUrl={task.thumbnail_url}
@@ -2595,8 +2595,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	                          generationMode={task.generation_mode}
 	                          size="card"
 	                          className="composer-task-card-preview"
+                              href={taskDetailHref(task.id, generationReturnTo)}
+                              reactions={task.local_status === 'succeeded'}
 	                        />
-                        <div className="composer-task-card-body">
+                        <Link href={taskDetailHref(task.id, generationReturnTo)} className="composer-task-card-body">
                           <div className="composer-task-card-prompt" title={`${formatAbsoluteTime(task.created_at)} · ${task.prompt}`}>
                             <time className="composer-task-card-prompt-time" dateTime={task.created_at}>
                               {formatRecentTaskTime(task.created_at)}
@@ -2643,8 +2645,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                               {taskErrorMessage}
                             </div>
                           )}
-                        </div>
-                      </Link>
+                        </Link>
+                      </div>
                       {isIpSurface && task.local_status === 'succeeded' && task.delivery_stage?.key === 'failed' && (
                         <button
                           type="button"
@@ -2701,7 +2703,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           {reusingTaskId === task.id ? '回填中...' : '重新生成'}
                         </button>
                       ) : null}
-                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                     </article>
                   );
                 })}

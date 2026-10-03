@@ -305,6 +305,7 @@ export function ReferenceAlbumPicker({
                     checked ? 'selected' : '',
                   ].filter(Boolean).join(' ')}
                 >
+                  <div className="media-reaction-cover" data-reaction-surface>
                   <button
                     type="button"
                     className="album-picker-image-preview"
@@ -316,7 +317,8 @@ export function ReferenceAlbumPicker({
                     <AlbumThumbnail image={image} />
                     <span aria-hidden="true" style={{ alignItems: 'center', background: 'rgba(17, 24, 39, .76)', borderRadius: 4, color: 'white', display: 'inline-flex', padding: 4, position: 'absolute', right: 7, top: 7 }}><Eye size={14} /></span>
                   </button>
-                  <ContentReactions contentKey={`reference_image:${image.id}`} />
+                  <ContentReactions contentKey={`reference_image:${image.id}`} overlay />
+                  </div>
                   <label className="album-picker-image-select">
                     <input
                       type="checkbox"

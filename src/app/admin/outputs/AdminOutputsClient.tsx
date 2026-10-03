@@ -1,5 +1,4 @@
 'use client';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -255,6 +254,7 @@ function OutputFramePreview({ output }: { output: OutputItem }) {
       href={taskDetailHref(output.id, '/admin/outputs')}
       size="medium"
       className="outputs-preview"
+      reactions={output.local_status === 'succeeded' && ['active', 'retained'].includes(output.retention_status)}
     />
   );
 }
@@ -527,7 +527,6 @@ export default function AdminOutputsClient() {
                   <OutputFramePreview output={output} />
 
                   <div className="outputs-item-main">
-                    {output.local_status === 'succeeded' && ['active', 'retained'].includes(output.retention_status) && <ContentReactions contentKey={`video_task:${output.id}`} />}
                     <div className="outputs-item-kicker">
                       {output.is_draft ? (
                         <span className="status-badge status-badge-enhance">

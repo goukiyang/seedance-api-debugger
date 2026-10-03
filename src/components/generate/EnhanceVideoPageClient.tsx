@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, CheckCircle2, RefreshCcw, Sparkles } from 'lucide-react';
 import EnhanceVideoAction from '@/components/EnhanceVideoAction';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 
@@ -195,9 +194,9 @@ export default function EnhanceVideoPageClient() {
                   generationMode={task.generation_mode}
                   href={taskDetailHref(task.id, '/generate/enhance')}
                   size="card"
+                  reactions
                 />
                 <div className="enhance-video-card-body">
-                  <ContentReactions contentKey={`video_task:${task.id}`} />
                   <div>
                     <Link href={taskDetailHref(task.id, '/generate/enhance')} className="enhance-video-card-title">
                       {task.prompt || '未命名视频'}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import {
   buildTaskThumbnailResetKey,
   buildTaskThumbnailView,
@@ -29,6 +30,7 @@ type Props = {
   size?: ThumbnailSize;
   className?: string;
   overlay?: ReactNode;
+  reactions?: boolean;
 };
 
 export function TaskVideoThumbnail({
@@ -50,6 +52,7 @@ export function TaskVideoThumbnail({
   size = 'compact',
   className = '',
   overlay,
+  reactions = false,
 }: Props) {
   const [failed, setFailed] = useState(false);
   const [retryAttempt, setRetryAttempt] = useState(0);
@@ -139,13 +142,8 @@ export function TaskVideoThumbnail({
     </>
   );
 
-  if (href) {
-    return (
-      <Link href={href} className={classNames}>
-        {inner}
-      </Link>
-    );
-  }
-
-  return <span className={classNames}>{inner}</span>;
+  return <span className={classNames} data-reaction-surface>
+    {href ? <Link href={href} className="task-video-thumbnail-link">{inner}</Link> : inner}
+    {reactions && <ContentReactions contentKey={`video_task:${taskId}`} overlay />}
+  </span>;
 }

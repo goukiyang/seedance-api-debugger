@@ -2142,8 +2142,10 @@ function RunDetailPanel({
         <p className={styles.fieldHint}>{videoSummary(run, detail)}</p>
         {tasks.map((task) => (
           <article className={styles.runCard} key={task.taskId}>
-            <RunTaskPoster key={task.thumbnailUrl || 'no-cover'} src={task.thumbnailUrl} />
-            {task.status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.taskId}`} />}
+            <div className="media-reaction-cover" data-reaction-surface style={{ width: 'min(360px, 100%)' }}>
+              <RunTaskPoster key={task.thumbnailUrl || 'no-cover'} src={task.thumbnailUrl} />
+              {task.status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.taskId}`} overlay />}
+            </div>
             <div className={styles.taskRow}><span>视频状态</span><span>{videoTaskStage(task).label}</span></div>
             <div className={styles.taskRow}><RelativeTime value={task.createdAt} /><span className={styles.promptTools}>
               {task.playUrl && <button className={styles.iconButton} type="button" title="预览视频" aria-label={`预览任务 ${task.taskId}`} onClick={() => setPreviewTask(task)}><Eye size={16} /></button>}

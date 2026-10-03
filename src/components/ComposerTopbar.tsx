@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useRef } from 'react';
 import AccountMenu, { type AccountMenuUser } from './AccountMenu';
 import NotificationBell from './NotificationBell';
 import CreditRequestDialog from './CreditRequestDialog';
@@ -33,9 +34,20 @@ export default function ComposerTopbar({
   onSessionClear,
 }: ComposerTopbarProps) {
   const pathname = usePathname();
+  const header = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = header.current;
+    const shell = element?.parentElement;
+    if (!element || !shell) return;
+    const update = () => shell.style.setProperty('--composer-topbar-height', `${element.getBoundingClientRect().height}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <header className="composer-topbar">
+    <header ref={header} className="composer-topbar">
       <div className="composer-topbar-left">
         <Link href="/" className="composer-topbar-logo" aria-label={`Seedance 2.0 v${release.version}`}>Seedance 2.0 <span className="composer-topbar-version">v{release.version}</span></Link>
         <nav className="composer-topbar-nav" aria-label="快捷入口">

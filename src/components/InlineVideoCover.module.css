@@ -1,0 +1,15 @@
+.stage, .poster { position: absolute; inset: 0; display: grid; place-items: center; }
+.poster[hidden], .video[hidden] { display: none; }
+.poster img, .video { width: 100%; height: 100%; object-fit: contain; }
+.video { position: absolute; inset: 0; }
+.toggle { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0; background: transparent; color: #eef4f1; cursor: pointer; }
+.toggle:focus-visible { outline: 2px solid #79daca; outline-offset: -3px; }
+.toggle:disabled { cursor: default; }
+.icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: rgb(16 22 25 / 76%); }
+.toggle:hover .icon { background: rgb(35 48 52 / 90%); }
+.stage[data-playing] .icon { opacity: 0; }
+.stage:hover .icon, .stage:focus-within .icon { opacity: 1; }
+.spinner { animation: playback-spin 1s linear infinite; }
+@keyframes playback-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+.notice { position: absolute; bottom: 6px; left: 6px; right: 6px; padding: 4px 6px; background: rgb(16 22 25 / 90%); color: #eef4f1; font-size: 11px; overflow-wrap: anywhere; pointer-events: none; }

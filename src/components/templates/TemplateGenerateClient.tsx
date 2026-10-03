@@ -9,7 +9,6 @@ import { Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import {
   H3_AUTO_CHECK_MIN_GAP_MS,
@@ -1265,7 +1264,7 @@ export function TemplateGenerateClient() {
                           <Trash2 size={14} aria-hidden="true" />
                         </button>
                       )}
-                      <Link href={taskDetailHref(task.id, '/template-generate')} className="composer-task-card-link">
+                      <div className="composer-task-card-link">
                         <TaskVideoThumbnail
                           taskId={task.id}
                           thumbnailUrl={task.thumbnail_url}
@@ -1282,8 +1281,10 @@ export function TemplateGenerateClient() {
                           generationMode={task.generation_mode}
                           size="card"
                           className="composer-task-card-preview"
+                          href={taskDetailHref(task.id, '/template-generate')}
+                          reactions={task.local_status === 'succeeded'}
                         />
-                        <div className="composer-task-card-body">
+                        <Link href={taskDetailHref(task.id, '/template-generate')} className="composer-task-card-body">
                           <div className="composer-task-card-prompt" title={`${formatAbsoluteTime(task.created_at)} · ${task.prompt}`}>
                             <time className="composer-task-card-prompt-time" dateTime={task.created_at}>
                               {formatRecentTaskTime(task.created_at)}
@@ -1310,14 +1311,13 @@ export function TemplateGenerateClient() {
                               {taskErrorMessage}
                             </div>
                           )}
-                        </div>
-                      </Link>
+                        </Link>
+                      </div>
                       {currentUser?.role === 'admin' && task.agent_run_id && (
                         <Link className="composer-task-card-trace" href={`/admin/agent-runs/${task.agent_run_id}`}>
                           查看链路
                         </Link>
                       )}
-                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                     </article>
                   );
                 })}

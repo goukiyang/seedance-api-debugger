@@ -521,6 +521,7 @@ export default function VideoCardDetailPage() {
                     href={taskDetailHref(task.id, returnTo)}
                     size="medium"
                     className="video-card-task-preview"
+                    reactions={permissions.can_manage && task.local_status === 'succeeded'}
                   />
                   <div className="video-card-task-body">
                     <div className="video-card-task-head">
@@ -536,7 +537,6 @@ export default function VideoCardDetailPage() {
                     </div>
                     {permissions.can_manage && (
                       <div className="video-card-task-actions">
-                        {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                         {task.version_role !== 'candidate' && task.version_role !== 'current_best' && task.version_role !== 'final' && (
                           <button
                             className="btn btn-secondary"

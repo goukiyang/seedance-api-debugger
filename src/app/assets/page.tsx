@@ -21,6 +21,7 @@ import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import MediaPreview from '@/components/MediaPreview';
+import { InlineVideoCover } from '@/components/InlineVideoCover';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import assetStyles from './assets.module.css';
 import {
@@ -420,6 +421,12 @@ function isAssetPreviewItem(item: AssetLibraryItem) {
   return Boolean(item.previewUrl && ['image', 'video', 'audio'].includes(item.kind));
 }
 
+function assetPlaybackSource(item: AssetLibraryItem) {
+  if (item.source === 'video_task') return item.taskId && item.previewAvailable ? `/api/video/play/${encodeURIComponent(item.taskId)}` : null;
+  if (item.source === 'asset' && item.assetId && item.previewUrl) return `/api/content-reactions/media?key=${encodeURIComponent(`asset:${item.assetId}`)}&variant=preview`;
+  return item.previewUrl;
+}
+
 function assetPreviewStorageKey(userId: string) {
   return `sd2-asset-preview:${encodeURIComponent(userId)}`;
 }
@@ -739,6 +746,8 @@ function AssetsPageContent() {
   const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
   const [restoredPreview, setRestoredPreview] = useState<ContentSummary | null>(null);
   const [previewNextPage, setPreviewNextPage] = useState<number | null>(null);
+  const [playingItemId, setPlayingItemId] = useState<string | null>(null);
+  useEffect(() => { setPlayingItemId(null); }, [assetView, type, status, sort, groupBy, projectId, ownerUserId, keyword, page, selectionMode]);
   const [previewNavigationMessage, setPreviewNavigationMessage] = useState('');
   const [previewNavigationRetryable, setPreviewNavigationRetryable] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
@@ -2283,8 +2292,18 @@ function AssetsPageContent() {
                     )}
                     <span
                       className={`asset-card-media ${assetStyles.cardMedia} ${item.kind === 'image' ? assetStyles.cardMediaImage : item.kind === 'video' ? assetStyles.cardMediaVideo : assetStyles.cardMediaUnknownRatio}`}
+                      data-reaction-surface
+                      onClickCapture={event => {
+                        if ((event.target as Element).closest('[data-content-reactions]')) return;
+                        if (selectionMode || event.shiftKey || event.metaKey || event.ctrlKey) {
+                          event.preventDefault(); event.stopPropagation(); handleCardClick(event, item);
+                        }
+                      }}
                     >
-                      {item.kind === 'audio' ? (
+                      {item.kind === 'video' && !selectionMode ? <InlineVideoCover key={`${item.id}:${assetPlaybackSource(item)}`} src={assetPlaybackSource(item)} contentKey={item.id} title={item.title}
+                        active={playingItemId === item.id && !activeItem} onActivate={() => setPlayingItemId(item.id)} onPause={() => setPlayingItemId(current => current === item.id ? null : current)}>
+                        <AssetLibraryThumbnail item={item} />
+                      </InlineVideoCover> : item.kind === 'audio' ? (
                         <span className="asset-card-audio-placeholder">
                           <span>音频</span>
                           <small>{item.fileSize ? formatAssetUploadBytes(item.fileSize) : '参考音频'}</small>
@@ -2308,22 +2327,9 @@ function AssetsPageContent() {
                         </span>
                       )}
                       {duration && <span className="asset-card-duration">{duration}</span>}
-                      <span className="asset-card-hover">
-                        <button
-                          type="button"
-                          className="asset-card-hover-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            selectAssetItem(item);
-                          }}
-                        >
-                          <Eye size={16} aria-hidden="true" />
-                          查看
-                        </button>
-                      </span>
+                      {(item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={item.id} overlay />}
                     </span>
                     <div className="asset-card-meta">
-                      {(item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={item.id} />}
                       <div className="asset-card-title-row">
                         <strong>{shortText(item.title, '未命名资产', 34)}</strong>
                         {item.canEnhanceVideo && (
@@ -2408,7 +2414,9 @@ function AssetsPageContent() {
                           {item.deliveryStage?.label}
                         </span>
                       )}
-                      {specText && <span className="asset-card-spec">{specText}</span>}
+                      <div className="asset-card-config-row">{specText && <span className="asset-card-spec">{specText}</span>}
+                        <button type="button" className="asset-card-view" title="查看资产详情" onClick={event => { event.stopPropagation(); selectAssetItem(item); }}><Eye size={15} />查看</button>
+                      </div>
                       {isAdmin && item.owner && (
                         <UserIdentityBadge
                           user={item.owner}

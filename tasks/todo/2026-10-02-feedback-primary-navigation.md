@@ -513,3 +513,29 @@ ReleaseNotice在同一窗口展示具体未保存内容或保存/上传状态；
 - 守门员finish按实际中文修改/提交/推送/部署意图识别L3-visible-runtime；local/build/Git/runtime证据具备，real-result按项目用户手动验收约定不自动执行，不能称功能验收通过。本实施轮无归类误判，不重复start；历史方案纠偏记录保留。正式根仅同步本工单和资料索引，原有dirty主todo及其他未跟踪资料不覆盖、不提交。
 
 验收缺口：网站更新最终确认、取消/失败后继续编辑、上传结束重新判断、小屏及焦点等实际行为待用户手动；地址栏刷新、关闭页签和系统权限仍为必要原生平台例外。无未解决实施或发布阻塞。
+
+### C5-C7导航与媒体封面交互（2026-10-03）
+
+本轮是用户新需求，不是U1补验收；已授权修改、同类统一、聚焦提交推送及常规安全部署。实际源码根/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，开工f881e06；重新核对正式运行39010f7/v0.37.1/BUILD weh6ZSLi1ojK25-2vyXQm，正式资料根64a4856及原dirty保持。PATCH目标0.37.2，不用正式根旧源码部署，U1网站确认及同窗口更新保护保留。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| C5 | 顶部导航固定 | 页面滚动时顶部导航不移出视野 | 整批实现完成，发布检查进行中 |
+| C6 | 封面点击与查看 | 模板图片单击恢复配置双击放大；资产视频单击播放独立查看靠右 | 整批实现完成，发布检查进行中 |
+| C7 | 点赞收藏统一 | 封面左上角悬停出现键盘触屏也可操作 | 整批实现完成，发布检查进行中 |
+
+用户原文及标记：Comment1为https://sd2.youdooart.com/template-studio，1068x871，target html>body>div.shell-root>header.composer-topbar：“顶部固定不会应为鼠标滚轮受影响往上跑”。Comment2同页target article.studio_result__rzOwd:nth-of-type(1)>div.studio_resultMedia__GcG6u>button.studio_preview__dd3Dz>img：“单击不再是放大图片，改为双击才是查看图片，鼠标移动上去的时候，会弹出双击放大 的文字提示气泡；单击改为恢复该图的配置贴到左侧生成设置处”。主请求：“资产管理页面，单击封面，不再是查看，而是点击播放，查看按键，单独做一个按键放在配置右边，靠右对齐；点赞和收藏，应该都在封面，缩略图的左上角，鼠标移动上去才会出现；排查下同类问题，统一修改”。截图显示v0.37.0，只作为用户实际旧客户端证据，不认定0.37.1回退。
+
+附件：浏览器评论截图1/2，来源本轮用户浏览器标记，用途为C5滚动导航及C6图片封面交互定位；原文件名/本地路径未提供，待补持久原件。当前没有可访问的原件路径，未归档，不猜旧PNG为本图，也不自动截屏代替原件；不因此阻塞已授权实现。文本记录v1，与U1原图不是替代关系，资料索引已登记缺口。
+
+实现及同类范围：共享ComposerTopbar改为视口固定，shell按ResizeObserver测得的真实高度留位；不按截图高度写特殊布局。image-studio与template-studio共用结果封面单击延迟恢复、双击仅预览，网站气泡“ 双击放大 ”，保留恢复按钮及独立查看用于键盘/触屏；跨卡片、切模块、卸载、路由及新输入取消待执行单击。恢复仍调用原restoreTask，保持当前模块、快照参考图分组和历史primaryMax，不提交生成、不扣费；只有原真实moduleDirty时弹网站保护。
+
+资产视频卡仅用既有合法play/preview源卡片内静音点击播放/暂停，不自动播放；缺源/错误明确提示及重试。互斥播放、过滤/切页/卸载停止，进度复用账号/内容隔离的useMediaPreviewState，下次恢复到暂停，原筛选/滚动/详情返回上下文保留。查看按钮在配置行最右端，图片仍按图片语义查看，选择模式及组合键选择不变。费用保持右上，反应位于左上，overlay不触发封面或生成。
+
+C7统一媒体卡片：资产、图片结果、任务缩略图共享TaskVideoThumbnail（tasks/admin outputs/projects/video-card/generate/template-generate/enhance）、模板视频关联任务、收藏/赞过中的图片视频音频、ResourceLibraryPicker及ReferenceAlbumPicker/图集详情。共享overlay支持hover/focus-within、触屏常显；对象key、数量、选中、pending、错误与禁用沿用原实现，按钮stopPropagation保留，链接不包住反应按钮。素材选择器单击仍选择，不换成播放/恢复，预览仍独立。模块、模板、视频草稿、文案等非媒体反应不迁到结果；完整详情/预览工具栏保留。官方资产注册的44px身份缩略图属管理行，不扩成媒体封面卡或无界改布局。
+
+依据：已读[MDN dblclick实际示例及事件顺序](https://developer.mozilla.org/en-US/docs/Web/API/Element/dblclick_event)和[WAI网站气泡模式](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/)，双击在两次click之后，采用可取消待执行点击，网站气泡有tooltip/aria-describedby及Esc；复用本项目媒体位置和反应实现，不安装新组件包。工具无原生内部worker入口，唯一lead执行可分包实现，不建用户线程或自动审核。
+
+发布边界：整批实现与记录后统一构建内置检查、self Review、归档/源/静态一致性、发布窗口与flock、回退、服务健康和数据保护；不浏览器操作/截图、自动功能回归、付费生成、DB写入、改权限/API/Provider/worker或依赖。效果待用户手动验收；本次diff与发布证据将归正式根私有docs/materials/2026-10-03-media-cover-interactions/，不公开素材。
+
+统一self Review修正：最初450ms单击窗口不能覆盖较慢的系统双击设置，本批改为1000ms保守有界窗口，任何第二次pointerdown均提前取消尚未执行的恢复，第二次click/detail>1不执行恢复；独立恢复按钮与键盘detail=0仍即时操作。浏览器未提供可靠读取系统双击间隔的接口，超过该窗口才发生第二击仍可能已经完成首击恢复，不能宣称任意OS设置下绝对双击不恢复；不回滚左侧新输入，不取消真实保护。播放用每卡请求序列忽略迟到拒绝，活动ID仅在仍等于本卡时清除；等待可取消，切卡/过滤/卸载会暂停，不影响另一卡的新播放。窄屏顶栏允许换行，ResizeObserver同步真实高度，不用固定截图尺寸。

@@ -424,6 +424,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
                 const canPreviewOriginalMedia = album.permissions.use || album.permissions.download;
                 return (
                   <div key={image.id} className={`album-image-card ${selected ? 'selected' : ''}`}>
+                    <div className="media-reaction-cover" data-reaction-surface>
                     <button
                       type="button"
                       className="album-image-select"
@@ -435,9 +436,10 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
                         <div className="album-image-media-placeholder">{typeLabel}</div>
                       )}
                     </button>
+                    <ContentReactions contentKey={`reference_image:${image.id}`} overlay />
+                    </div>
                     <div className="album-image-meta">
                       {(isImageItem(image) || canPreviewOriginalMedia) && <button type="button" title={`预览${typeLabel}`} aria-label={`预览${image.asset?.file_name || `${typeLabel} ${image.sort_order + 1}`}`} onClick={() => setPreviewImage(image)}><Eye size={15} /></button>}
-                      <ContentReactions contentKey={`reference_image:${image.id}`} />
                       <span>{typeLabel} {image.sort_order + 1}</span>
                       {album.permissions.copy && (
                         <button

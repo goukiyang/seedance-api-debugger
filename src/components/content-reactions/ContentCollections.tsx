@@ -419,10 +419,13 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     {storageWarning && <p role="status">{storageWarning}</p>}
     {message && <p role="status">{message}</p>}
     <div className={styles.grid}>{items.map((item, index) => <article className={styles.card} key={item.key} data-remember-scroll-anchor={index < MAX_RESTORED_ITEMS ? item.key : undefined}>
-      <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
+      <div className="media-reaction-cover" data-reaction-surface>
+        <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
+        {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active) => changed(item, state, act, active)} />}
+      </div>
       <div className={styles.body}><h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
         {item.content?.versionLabel && <span className={styles.muted}>版本：{item.content.versionLabel}</span>}
-        <div className={styles.actions}><ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)} />
+        <div className={styles.actions}>{!['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)} />}
           {item.content && <button className={styles.command} type="button" onClick={() => void open(item)}><ExternalLink size={15} /> {item.content.actionLabel}</button>}
           {item.content?.downloadUrl && <a className={styles.command} title="下载" aria-label="下载" href={item.content.downloadUrl}><Download size={16} /></a>}
           {item.content && item.category === 'prompt' && <button className={styles.command} title="复制文案" aria-label="复制文案" type="button" onClick={() => void open(item, true)}><Copy size={16} /></button>}

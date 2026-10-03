@@ -8,7 +8,6 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { useProductDialog } from '@/components/useProductDialog';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -432,6 +431,7 @@ export default function TasksPage() {
                         href={taskDetailHref(task.id, '/tasks')}
                         size="medium"
                         className="tasks-preview"
+                        reactions={task.local_status === 'succeeded'}
                       />
                       <label
                         className="tasks-card-select"
@@ -498,7 +498,6 @@ export default function TasksPage() {
                     </div>
 
                     <div className="tasks-card-actions">
-                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                       <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
                         查看详情
                       </Link>

@@ -6,8 +6,7 @@
 .error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #ffb3a7; }
 .busy { display: inline-flex; align-items: center; gap: 4px; color: #f3d68c; font-size: 11px; white-space: nowrap; }
 .busyIcon { animation: reaction-busy-spin .8s linear infinite; }
-.overlayControls { flex-wrap: nowrap; padding: 3px; border-radius: 7px; background: transparent; }
-.overlayControls button:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
+.overlayControls { position: absolute; top: 6px; left: 6px; z-index: 4; max-width: calc(100% - 12px); flex-wrap: wrap; padding: 3px; border-radius: 7px; background: transparent; opacity: 0; pointer-events: none; }
 .overlayControls:hover button,
 .overlayControls:focus-within button,
 [data-reaction-surface]:hover .overlayControls button,
@@ -20,6 +19,12 @@
 .overlayControls:has(button[aria-pressed="true"]),
 .overlayControls:has(.busy),
 .overlayControls:has(.error) { background: rgb(12 17 19 / 76%); }
+.overlayControls:hover,
+.overlayControls:focus-within,
+[data-reaction-surface]:hover .overlayControls,
+[data-reaction-surface]:focus-within .overlayControls,
+.overlayControls:has(.busy),
+.overlayControls:has(.error) { opacity: 1; pointer-events: auto; }
 .overlayControls:hover button,
 .overlayControls:focus-within button,
 [data-reaction-surface]:hover .overlayControls button,
@@ -30,7 +35,7 @@
 .overlayControls .error { max-width: min(52vw, 320px); overflow-wrap: anywhere; white-space: normal; }
 .overlayControls .error button { flex: 0 0 auto; }
 @media (hover: none), (pointer: coarse) {
-  .overlayControls { background: rgb(12 17 19 / 76%); }
+  .overlayControls { background: rgb(12 17 19 / 76%); opacity: 1; pointer-events: auto; }
   .overlayControls button { opacity: 1 !important; pointer-events: auto; }
 }
 @keyframes reaction-busy-spin { to { transform: rotate(360deg); } }

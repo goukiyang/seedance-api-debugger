@@ -1174,6 +1174,7 @@ export default function ProjectDetailPage() {
 	                      isEnhanceTask={isEnhanceTask(task)}
 	                      href={taskDetailHref(task.id, projectReturnTo)}
 	                      size="compact"
+                          reactions={task.local_status === 'succeeded'}
 	                    />
 	                  </td>
 	                  <td>
@@ -1182,7 +1183,6 @@ export default function ProjectDetailPage() {
 	                    </Link>
 	                    {isEnhanceTask(task) && <span className="task-enhance-chip">视频超分</span>}
 	                    <span className="text-gray text-sm">{task.id.slice(0, 10)}...</span>
-                      {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
 	                  </td>
                   <td>{task.local_status}</td>
                   {showVideoCardManagementUi && (
