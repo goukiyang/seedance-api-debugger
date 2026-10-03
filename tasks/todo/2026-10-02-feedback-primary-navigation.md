@@ -252,3 +252,36 @@ N1/N2运行源码0fcea7dd2a91a5de427a1e1c9934c176e146fb9a，BUILD 0I77QmnNWDzJgl
 发布活动登记/flock和旧commit/BUILD守卫实际执行；API/scripts/Prisma、Provider/worker、鉴权/成本/点数未变。源码同步保护持久目录，gouki构建，root仅已有发布管理；只重启sd2-gray，worker PID1241475/启动时间/单元前后不变。SCP及首次只读核对连接被关闭，按既有SSH重新建立非复用连接后上传和核对成功，未改变账号或权限；非代码/构建失败。
 
 本机和公网config/release/login 200，公网v0.36.5及X-SD2-Origin server-42-193正确；template-studio匿名307符合已有权限。4个改动源码SHA、20个相关公网静态SHA一致，4服务/定时器active；COMPLETE握手exit0并释放发布锁。[证据](2026-10-02-feedback-primary-navigation.evidence.json)保留此前交付层，[统一diff](2026-10-02-feedback-primary-navigation.diff)更新本轮累计应用差异。未执行浏览器/截图/生成实验/自动功能回归/独立审核，未写DB/账务；发布检查不等于用户功能验收。守门员L3、本轮无新增误判或越界。
+
+## P1统一弹窗定位（2026-10-03）
+
+用户原文：“而且，弹窗不要弹角落，要弹就弹在触发按键范围附近，这个你排查下，一起统一修改”。复用R1正式PNG作为角落位置证据，原名、来源与可读性校验见上方R1及[索引](../../docs/materials/index.md#弹窗位置反馈)，不重复复制或公开原图。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| P1 | 统一弹窗定位 | 不落角落，小确认框靠近触发按钮且不超出屏幕 | 代码及发布检查完成，v0.36.6已部署；实际页面待用户手动验收 |
+| T1 | 测试文案类选项 | 核对明确范围内各选项是否可通，区分真实调用和静态检查 | 2026-10-03新增，文案生成模型或文字按钮含义待确认；真实生成费用/积分上限未明确，不付费试跑 |
+
+确认范围：统一useProductDialog消费者的短确认框与命名框，包括生成器、图片/视频模板、任务和管理操作使用的共享入口；完整设置、多字段编辑和升级说明保留原有居中窗口。不取消真实修改退出或删除确认，不改生成请求、模型参数、收费、权限或数据库。
+
+根因：globals.css通用margin:0覆盖浏览器dialog默认居中；ProductDialog.module.css未明确margin:auto/inset；useProductDialog的!naming条件排除了确认框，并在640px以下不定位。改为明确固定定位/居中兜底，短确认与命名都按实际点击控件/键盘焦点或显式anchor定位。点击捕获仅用于自身事件，不复用无关旧按钮；无可见触发对象时居中。
+
+放置顺序下方、上方、右侧、左侧；都放不下才居中。按钮间隔8px、视口留白16px，宽高限制跟随visualViewport，响应滚动/缩放、键盘可见区变化及控件/弹窗尺寸变化。复用useDialogDismiss最上层关闭、取消返回值与安全初始焦点，关闭不提交；工作现场存储不改。
+
+已读取[Radix Popper实际源码](https://github.com/radix-ui/primitives/blob/main/packages/react/popper/src/popper.tsx)，其固定定位、offset/flip/shift/size及autoUpdate模式适合本问题。项目无同类直接依赖，本轮借鉴定位原则扩展既有原生dialog，不新增包、不复制库。浏览器验收按项目手动规则，T1新增测试单独确认具体范围。
+
+应用5文件：useProductDialog.tsx定位/触发对象；ProductDialog.module.css居中及可见区尺寸；package.json/package-lock.json仅0.36.6版本；release.ts用户摘要。既有ReleaseNotice同渠道SemVer/稍后去重/手动检查继续源码核对，不冒充更新交互验收。前执行包交接后长时间无进展且未完成发布，本轮共享小包直接实施并自行Review，不派独立审核或用户侧聊。
+
+### P1发布回执
+
+运行v0.36.6，源码f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0，BUILD zLCFc71j3c0EpKfW2zQ7I；应用分支及rollback/2026-10-03-before-dialog-position-v0.36.6已推送，回退指向47d3528c3a2b5715e81cfb4a64626c1d39abf938。归档SHA256 ac92769399da368db75240992dd394426dde3ae54c5fabdc5420b501ba585ac8；排除env、DB、私人附件及运行资产。曾在归档命令仍运行时过早读到半成品，等待exit0后重新列出完整包并重新计算SHA，上传只使用完成包；无构建或生产故障。
+
+git diff/cached --check、bash -n/node --check通过；服务器不可变release内NEXT_DIST_DIR=.next-prod-candidate npm run build及其lint/types通过。候选含共享定位CSS标记和本轮摘要、已删除R1生成确认仍未恢复。发布登记/flock/旧commit及BUILD保护真实执行，只重启sd2-gray；持久资产软链接和目录可写保护通过，worker PID1241475、启动时间及服务单元前后不变。旧构建/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0366及/srv/video-api-debugger/backups/sd2-feedback-v0366保护记录保留；COMPLETE握手exit0。
+
+服务器和公网config/release/login均200，公网0.36.6及X-SD2-Origin server-42-193正确；受保护template-studio匿名307仅证明原权限仍生效。5改动源码SHA、20相关公网静态SHA一致，4服务/定时器active。[累计diff](2026-10-02-feedback-primary-navigation.diff)和[证据](2026-10-02-feedback-primary-navigation.evidence.json)保留历史交付。不做浏览器/截图/生成/自动回归或DB写入，不把部署检查说成弹窗位置功能验收；守门员L3、无新增误判及越界。
+
+### T1不收费核对与缺口
+
+文案生成模型清单当前为GPT-5.5、GPT-5.6 Luna、GPT-5.6 Sol、GPT-6 Luna、GPT-6 Sol、GPT-6 Astra，共6项。源文件text-models.ts提供列表与合法性判定，VideoTemplateWorkbench提交llmModel，runs.ts校验并冻结请求参数，worker.ts按snapshot.llmModel传到createMuskChatCompletion的model字段，没有发现选择后强制改成同一模型的静态路径。共同要求json_object格式和message.content；静态对应一致不证明上游支持全部模型或能真实生成。
+
+capabilities.ts明确文案不扣本站点数、上游文字费用由平台承担，仍不能视作无费用。已向用户异步确认“文案生成模型”还是“文字按钮/下拉选项”，同时请求实际生成可接受费用或积分上限；尚未收到答案。不发付费请求、不修改生成/点数/Provider逻辑；T1未执行通断试跑，不称全通。用户确认后按同一小输入逐项记录成功/明确拒绝/结果未知，未知不自动重试；暂不引入新测试后台。
