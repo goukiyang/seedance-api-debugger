@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [D1统一素材库入口设计](todo/2026-10-02-unified-resource-library.md#9-统一添加入口与素材库设计2026-10-03)：设计v1.1.0已完成；添加区直接开库、库内上传，整合素材库/收藏/最近、搜索、真实分类、数量与权限适配；保留主图/参考/风格不同用途。完整正文及新截图来源别名已归档，[资料索引](../docs/materials/index.md#统一创作资源库2026-10-02)。本轮只交设计和代码映射，未改应用、未部署；生产v0.36.10不变。
 - [C3/C4更新提醒](todo/2026-10-02-feedback-primary-navigation.md#c3c4更新刷新与外部提醒2026-10-03)：已部署v0.36.10，源码b26f9d216949c3601d2cc36d050e6fc922422ab1、BUILD MFC_yPnyTMuIibuxAwjsx；去掉无条件刷新二次确认，安全存入浏览器的模板草稿不误报丢失，真正保存/上传未完成及保存失败仍保护。外部保留版本提醒及刷新入口，不展示/返回更新摘要；23公网静态/8源码一致，4服务active，待用户手动验收。[原图索引](../docs/materials/index.md#更新刷新重复提醒与外部摘要)、[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
 - [C2外部视频扣费金额](todo/2026-10-02-feedback-primary-navigation.md#c2金额显示续办2026-10-03)：已部署v0.36.9，源码527d925ae1943557d164858f0a74cc7e1fd62c85、BUILD gbpec82z8F5gOaOcQAm6y；同普通生成账单模型/参考类型费率×真实生成用量显示金额，实扣优先、估算注明；19公网静态/8源码一致及4服务active，待用户手动；无现金账务回写或权限修改。[资料](../docs/materials/index.md#外部账号视频封面费用)、[diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
 - [C1上下文复制粘贴](todo/2026-10-02-feedback-primary-navigation.md#c1上下文复制粘贴2026-10-03)：已部署v0.36.7，源码8f481400ecfbbcd8b50d021117e77f933221f731、BUILD hdFoauPtV4mwfhsevAtTe；图片/视频模板及同类通用上下文框上方增加复制全文、按光标/选区粘贴按钮，权限/字数/保存保护不变；20公网静态/8源码一致、4服务active，待用户手动验收。[资料](../docs/materials/index.md#模板上下文复制粘贴)、[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
