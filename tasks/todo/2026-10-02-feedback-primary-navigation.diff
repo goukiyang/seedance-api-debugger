@@ -1,31 +1,31 @@
 diff --git a/package-lock.json b/package-lock.json
-index 27b7df7..f0fe23f 100644
+index 27b7df7..bdc4bc0 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -1,12 +1,12 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.5",
++  "version": "0.36.6",
    "lockfileVersion": 3,
    "requires": true,
    "packages": {
      "": {
        "name": "video-api-debugger",
 -      "version": "0.36.2",
-+      "version": "0.36.5",
++      "version": "0.36.6",
        "dependencies": {
          "@aws-sdk/client-s3": "^3.1041.0",
          "@aws-sdk/s3-request-presigner": "^3.1041.0",
 diff --git a/package.json b/package.json
-index 19794d5..600b78c 100644
+index 19794d5..947370d 100644
 --- a/package.json
 +++ b/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "video-api-debugger",
 -  "version": "0.36.2",
-+  "version": "0.36.5",
++  "version": "0.36.6",
    "private": true,
    "scripts": {
      "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -475,6 +475,16 @@ index 468c672..a937e75 100644
            compactControls={templateEnabled}
          />
        </div>
+diff --git a/src/components/ProductDialog.module.css b/src/components/ProductDialog.module.css
+index 54683ea..a784294 100644
+--- a/src/components/ProductDialog.module.css
++++ b/src/components/ProductDialog.module.css
+@@ -1,4 +1,4 @@
+-.dialog { box-sizing: border-box; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid #465057; border-radius: 8px; background: #1a2023; color: #e6e8eb; box-shadow: 0 16px 48px rgb(0 0 0 / 35%); }
++.dialog { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: var(--product-dialog-width, min(440px, calc(100vw - 32px))); max-height: var(--product-dialog-height, calc(100dvh - 32px)); overflow: auto; padding: 20px; border: 1px solid #465057; border-radius: 8px; background: #1a2023; color: #e6e8eb; box-shadow: 0 16px 48px rgb(0 0 0 / 35%); }
+ .dialog::backdrop { background: rgb(8 12 13 / 64%); }
+ .dialog[data-anchored=true]::backdrop { background: rgb(8 12 13 / 18%); }
+ .dialog[data-anchored=true] { position: fixed; right: auto; bottom: auto; }
 diff --git a/src/components/generate/GeneratePageClient.tsx b/src/components/generate/GeneratePageClient.tsx
 index 413dfee..44fe300 100644
 --- a/src/components/generate/GeneratePageClient.tsx
@@ -513,6 +523,123 @@ index f0eb4b1..2b689bb 100644
  .headerTitle h1 { margin: 0; font-size: 19px; line-height: 1.2; font-weight: 750; }
  .kicker { color: var(--muted); font-size: 12px; }
  
+diff --git a/src/components/useProductDialog.tsx b/src/components/useProductDialog.tsx
+index 8bff328..381f3b5 100644
+--- a/src/components/useProductDialog.tsx
++++ b/src/components/useProductDialog.tsx
+@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
+ import { useDialogDismiss } from '@/components/useDialogDismiss';
+ import styles from './ProductDialog.module.css';
+ 
+-type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number };
++type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number; anchor?: HTMLElement | null };
+ type Request = Options & { message: string; value?: string; anchor: HTMLElement | null };
+ 
+ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (value: string | null) => void }) {
+@@ -16,7 +16,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
+   const titleId = useId();
+   const descriptionId = useId();
+   const [value, setValue] = useState(request.value || '');
+-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
++  const [position, setPosition] = useState<{ left: number; top: number; anchored: boolean } | null>(null);
+   const naming = request.value !== undefined;
+   useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, initialFocusRef: naming ? input : cancel, onDismiss: () => onResolve(null) });
+   useEffect(() => {
+@@ -24,20 +24,49 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
+     (naming ? input.current : cancel.current)?.focus({ preventScroll: true });
+     const place = () => {
+       const panel = dialog.current;
+-      if (!naming || !request.anchor?.isConnected || window.innerWidth < 640 || !panel) { setPosition(null); return; }
+-      const rect = request.anchor.getBoundingClientRect();
+-      const width = panel.offsetWidth, height = panel.offsetHeight, gap = 8, margin = 16;
+-      if (rect.bottom < margin || rect.top > window.innerHeight - margin || height > window.innerHeight - 2 * margin) { setPosition(null); return; }
+-      const top = rect.bottom + gap + height <= window.innerHeight - margin ? rect.bottom + gap : rect.top - gap - height;
+-      setPosition({ left: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)), top: Math.max(margin, Math.min(top, window.innerHeight - height - margin)) });
++      if (!panel) return;
++      const viewport = window.visualViewport;
++      const gap = 8, margin = 16;
++      const viewportWidth = viewport?.width ?? window.innerWidth;
++      const viewportHeight = viewport?.height ?? window.innerHeight;
++      const leftEdge = (viewport?.offsetLeft ?? 0) + margin;
++      const topEdge = (viewport?.offsetTop ?? 0) + margin;
++      const rightEdge = leftEdge + viewportWidth - 2 * margin;
++      const bottomEdge = topEdge + viewportHeight - 2 * margin;
++      panel.style.setProperty('--product-dialog-width', `${Math.min(440, Math.max(0, viewportWidth - 2 * margin))}px`);
++      panel.style.setProperty('--product-dialog-height', `${Math.max(0, viewportHeight - 2 * margin)}px`);
++      const width = panel.offsetWidth, height = panel.offsetHeight;
++      const clampLeft = (left: number) => Math.max(leftEdge, Math.min(left, rightEdge - width));
++      const clampTop = (top: number) => Math.max(topEdge, Math.min(top, bottomEdge - height));
++      const rect = request.anchor?.isConnected ? request.anchor.getBoundingClientRect() : null;
++      let next = { left: leftEdge + (rightEdge - leftEdge - width) / 2, top: topEdge + (bottomEdge - topEdge - height) / 2, anchored: false };
++      if (rect && rect.width > 0 && rect.height > 0 && rect.bottom > topEdge && rect.top < bottomEdge && rect.right > leftEdge && rect.left < rightEdge) {
++        // Flip around the control before falling back to the visible viewport center.
++        if (rect.bottom + gap + height <= bottomEdge) next = { left: clampLeft(rect.left), top: rect.bottom + gap, anchored: true };
++        else if (rect.top - gap - height >= topEdge) next = { left: clampLeft(rect.left), top: rect.top - gap - height, anchored: true };
++        else if (rect.right + gap + width <= rightEdge) next = { left: rect.right + gap, top: clampTop(rect.top), anchored: true };
++        else if (rect.left - gap - width >= leftEdge) next = { left: rect.left - gap - width, top: clampTop(rect.top), anchored: true };
++      }
++      setPosition(previous => previous?.left === next.left && previous.top === next.top && previous.anchored === next.anchored ? previous : next);
+     };
+     place();
+     window.addEventListener('resize', place);
+     window.addEventListener('scroll', place, true);
+-    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
++    window.visualViewport?.addEventListener('resize', place);
++    window.visualViewport?.addEventListener('scroll', place);
++    const observer = new ResizeObserver(place);
++    if (dialog.current) observer.observe(dialog.current);
++    if (request.anchor?.isConnected) observer.observe(request.anchor);
++    return () => {
++      window.removeEventListener('resize', place);
++      window.removeEventListener('scroll', place, true);
++      window.visualViewport?.removeEventListener('resize', place);
++      window.visualViewport?.removeEventListener('scroll', place);
++      observer.disconnect();
++    };
+   }, [naming, request.anchor]);
+-  return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position)}
+-    style={position ? { left: position.left, top: position.top, margin: 0 } : undefined}
++  return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position?.anchored)}
++    style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto', margin: 0 } : undefined}
+     aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}>
+     <form onSubmit={event => { event.preventDefault(); if (!naming || value.trim()) onResolve(naming ? value.trim() : 'yes'); }}>
+       <header className={styles.header}><h2 id={titleId}>{request.title || (naming ? '命名' : '确认操作')}</h2>
+@@ -54,6 +83,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
+ 
+ export function useProductDialog() {
+   const [request, setRequest] = useState<Request | null>(null);
++  const trigger = useRef<HTMLElement | null>(null);
+   const resolver = useRef<((value: string | null) => void) | null>(null);
+   const resolve = useCallback((value: string | null) => {
+     const pending = resolver.current;
+@@ -62,12 +92,26 @@ export function useProductDialog() {
+     pending?.(value);
+   }, []);
+   useEffect(() => () => { resolver.current?.(null); resolver.current = null; }, []);
++  useEffect(() => {
++    let clearTrigger: ReturnType<typeof setTimeout> | undefined;
++    const rememberTrigger = (event: MouseEvent) => {
++      const element = event.target instanceof Element ? event.target.closest<HTMLElement>('button, [role="button"], a[href], input[type="submit"], summary') : null;
++      trigger.current = element;
++      // Only use this click for its own action, never an unrelated later request.
++      clearTimeout(clearTrigger);
++      clearTrigger = setTimeout(() => { if (trigger.current === element) trigger.current = null; }, 0);
++    };
++    document.addEventListener('click', rememberTrigger, true);
++    return () => { document.removeEventListener('click', rememberTrigger, true); clearTimeout(clearTrigger); };
++  }, []);
+   const ask = useCallback((message: string, options: Options, value?: string) => {
+     // A repeated trigger never replaces or affirms an already open decision.
+     if (resolver.current) return Promise.resolve(null);
+     return new Promise<string | null>(done => {
+       resolver.current = done;
+-      setRequest({ ...options, message, value, anchor: document.activeElement instanceof HTMLElement ? document.activeElement : null });
++      const focused = document.activeElement instanceof HTMLElement
++        ? document.activeElement.closest<HTMLElement>('button, [role="button"], a[href], input, textarea, select, summary') : null;
++      setRequest({ ...options, message, value, anchor: options.anchor !== undefined ? options.anchor : trigger.current || focused });
+     });
+   }, []);
+   const confirm = useCallback(async (message: string, options: Options = {}) => (await ask(message, options)) !== null, [ask]);
 diff --git a/src/lib/image-studio/limits.ts b/src/lib/image-studio/limits.ts
 index 9e9a2e2..8dff1d1 100644
 --- a/src/lib/image-studio/limits.ts
@@ -676,14 +803,14 @@ index bffd9e1..e44e405 100644
          if (error instanceof StudioReferencePolicyError) throw new StudioError(error.message, error.status);
          throw error;
 diff --git a/src/lib/release.ts b/src/lib/release.ts
-index d26bc6f..08adf25 100644
+index d26bc6f..88f92a1 100644
 --- a/src/lib/release.ts
 +++ b/src/lib/release.ts
 @@ -1,6 +1,6 @@
  import packageInfo from '../../package.json';
  
 -export const release = { version: packageInfo.version, channel: 'production', summary: '模板工作台分开显示文案与视频状态；复用历史输入只新建模块。图片记录刷新和加载更多保留已有内容，恢复入口明确为查询状态；视频模型与LoRA按通道识别，模块称呼和记录时间更清楚。' };
-+export const release = { version: packageInfo.version, channel: 'production', summary: '生成图片不再反复弹出新建任务确认；保留防重复提交和原请求查询保护。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '小确认框和命名框靠近触发按钮，不再跑到角落；小屏和输入键盘弹出时自动避让。' };
  export function newerRelease(remote: string, local: string) {
    const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
    const a = parse(remote), b = parse(local);
