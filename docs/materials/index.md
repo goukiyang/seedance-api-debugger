@@ -155,3 +155,5 @@ L1：加载动效独立打样，已完成。完成标准：可交互比较各状
 ### 统一素材库批准实施
 
 2026-10-03用户最新明确要求“按照最新的设计落地”，项目video-api-debugger，资料版本v1.2.0设计，应用交付v0.37.0；关键词：L1–L3、统一素材库、库内上传、类型/来源分离、真实项目图集、收藏、最近选用、全范围搜索、有序选中、候选发布。正式根原图[video-reference-library-design-v2.png](2026-10-03-unified-resource-library/video-reference-library-design-v2.png)用于桌面布局，1448x1086 PNG已有可读/一致性证据，本轮已view_image，不重复哈希；原件仍私有，不Git上传或部署，无新附件。v2替代视觉v1，§9.9分类设计v1.2.0有效。[固定工单§10](../../tasks/todo/2026-10-02-unified-resource-library.md#10-最新设计实施与发布2026-10-03)记录源码、授权边界、发布检查及手动验收缺口；正式根只同步记录，不覆盖旧应用或无关dirty todo。
+
+同日已部署v0.37.0，应用6d2f390/BUILD JmPs7-sSzCKO0_LJ_YKrJ，候选内置检查、self Review、远端回退tag、公网版本/新静态/健康与持久数据保护有据；待用户手动验收。L2部分完成：use-only且无原图下载权限的共享/公共图片暂不支持图片工作台，窗口逐项解释并禁选；本人task-only视频已有正常下载GET→上传适配，不启动交付队列。正式根本机[统一代码差异](2026-10-03-unified-resource-library/implementation-v0.37.0.diff)仅含本批14个应用文件，原图不变，差异可读；Git中使用工单所列commit入口，不重复上传私有素材目录。
