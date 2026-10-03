@@ -589,7 +589,7 @@ Git/archive/运行证据：回退tag rollback/2026-10-04-before-media-cover-v0.3
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| D1 | 深夜模式完整化 | 同类页面和组件沿用深夜配色，完成构建与部署检查；真实视觉由用户手动验收 | 整批实现及本地构建完成，待正式发布 |
+| D1 | 深夜模式完整化 | 同类页面和组件沿用深夜配色，完成构建与部署检查；真实视觉由用户手动验收 | 已部署0.37.4，待用户手动验收 |
 | D2 | 周期额度用户列表保留 | 周期额度用户仍在用户列表显示，额度规则不变，构建与发布检查；用户手动功能验收 | 待确认具体列表，调查已完成，未改额度规则 |
 
 调查证据：当前src/public全量文字检索未检出主题切换、深夜模式选择器、主题保存键、data-theme或prefers-color-scheme入口；ClientLayout/AppShell/AccountMenu/ComposerTopbar及个人页没有此入口。当前是部分工作台固定暗色与旧页固定浅色混用，不把外部浏览器模式当成已实现的网站主题。白页主要源头为globals.css中的body/card/input/table/outputs/shell及旧页面类；UploadedImagePickerAlbums.module.css、template-studio/admin-studio-runs.module.css、templates/template-entry.module.css、RelativeTime.module.css还有浅色表面和深色文字；cutout有局部浅色背景，需区分媒体检查底与UI。已有CSS变量主要是顶栏高度和图表系列色，不是全站主题tokens。已询问用户深夜模式实际入口或是否指补齐既有默认暗色风格，不能猜新增主题选择器或全局反色。
@@ -605,3 +605,15 @@ D2补充核对：AdminUsersClient quickView初值all、筛选初值all；过滤�
 安全边界：只做已确认的默认暗色样式；不改变认证/可见权限、点数扣费、周期重置、账本、成员/角色数据、Provider、上传或依赖，保存设置不变。媒体像素、画布作品、导出纸面不强制改色，不全局星号背景覆盖或invert。C5-C8/U1/资源库保持。无浏览器/DOM/截图/自动功能回归，整批后仅必要构建内置检查、源码自查及安全发布检查，真实效果待用户手动。
 
 整批本地检查：npm run build退出0，含内置lint与类型检查，仅既有警告。git diff --check通过；源码自查用PostCSS结构对比确认2748条原规则选择器及非颜色属性不变，检查底/旋钮/品牌保护规则完全一致；初次对比因原CSS含重复height声明误报，调整为有序属性比对后通过，未因此改源代码。允许范围11文件核对通过，锁文件除根及根包版本外内容不变，未加依赖。共享旧白背景迁移及剩余任务选择框/模板管理表面/计数徽标完成，原亮色主按钮及状态图表色保留，不把白色文字或高亮主操作误判白页。服务器重新核对仍为1c9930c/0.37.3/J3lGF2j4oXVNQCRQ_lYos，worker1241475及启动时间不变；发布脚本延用原flock/回退/数据排除，新增候选暗tokens核对，bash -n与node --check通过。真实视觉尚未验收。
+
+#### D1正式交付与D2保留（2026-10-04）
+
+北京时间2026-10-04 01:50:27发布完成：应用b12720988c80376194444d98320e163b62f35ca8，v0.37.4，BUILD ZgKKw-0pLsNEIe24xVMJt，正式入口https://sd2.youdooart.com。D1按已确认默认暗工作台整批交付，不新造主题设置；D2尚未收到具体列表答复，调查完成但未改列表或额度规则，不标完成、不删固定表。普通用户GET与quickView证据及候选名单复用发放筛选的歧义留在本节，后续只能按明确对象修显示投影。
+
+变更文件：src/app/globals.css为共享页面/旧UI暗色及打印纸面tokens；src/components/UploadedImagePickerAlbums.module.css为图集选择/错误/空态；src/components/template-studio/admin-studio-runs.module.css为管理列表与详情表面/文字/状态；src/components/RelativeTime.module.css为准确时间气泡；src/app/templates/template-entry.module.css为模板返回入口；src/app/cutout/page.tsx仅上传区/通知样式；package.json、package-lock.json与src/lib/release.ts同步版本和用户摘要；本工单与docs/materials/index.md同步真实范围、调查和证据。共9份应用文件、2份记录，没有修改D2 API/credits，媒体交互、资源库、原生退出保护及单窗口更新逻辑保持。
+
+发布检查：本地与服务器NEXT_DIST_DIR=.next-prod-candidate npm run build均退出0且含lint/types，仅既有警告；候选包含暗色tokens、语义状态、固定顶栏/半字号、单/双击与原单窗口刷新等保留标记。发布reservation与flock实际启用，切换前无其他发布活动；从应用commit独立git archive，排除env、整个私有materials、storage、历史uploads/videos、数据库与运行期产物，SHA256 477de077926d7acc55862d4e666a72ddb4fadcce13609f32bc7ead93c9bfd738服务器核对一致。首次Git分支推送被remote rejected failed拒绝，未改源码或force；一次普通重试成功，branch及tag已用ls-remote核对。候选失败/异常自动恢复原源码与构建机制保持，不原地build live、不server git pull。
+
+服务/公网/回退：sd2-gray.service active，本地/api/config 200、本地/api/release 0.37.4，公网/api/config、/api/release、/login、/assets均200且来源server-42-193，匿名摘要空且private/no-store，login含同一BUILD；9份线上应用源码SHA匹配commit。仅受影响共享入口及局部模块路由33份去重静态中12份新/改变资源公网200且SHA与产物一致，21份路径和内容不变复用旧证据，不重复全站40资源检查。回退tag rollback/2026-10-04-before-dark-ui-v0.37.4已推送，解引用为1c9930c3185bc9f0f61094873ad92444c4dbdadf；旧源码releases/1c9930c3185bc9f0f61094873ad92444c4dbdadf及旧BUILD J3lGF2j4oXVNQCRQ_lYos保留在.next-prod-before-sd2-d1-v0374-b127209，更早回退不删。worker前后unit、MainPID1241475、启动时间和ExecMainStatus相同，未重启/排空/强杀；既有视频timer active。storage/uploads/videos软链、关键子目录写权限和env元信息不变，未读env/DB内容、未写DB/迁移、未付费。
+
+正式根本机[本轮允许范围统一diff](../../docs/materials/2026-10-04-dark-ui-periodic-list/implementation-v0.37.4.diff)、[部署证据JSON](../../docs/materials/2026-10-04-dark-ui-periodic-list/deployment-v0.37.4.json)可访问，私有且不Git/archive。正式根只同步本工单与资料索引，不覆盖旧src及原dirty。守门员finish按实际中文修改/提交/推送/部署意图识别L3-visible-runtime，项目真实结果层遵循用户手动验收例外，未自动浏览器/DOM/截图/业务功能测试，不冒充视觉效果通过。无分类误判，无范围外业务修改，无发布阻塞。遗留：D1真实暗色对比/页面/弹窗效果待用户手动；D2具体列表待答；本轮无附件原件缺口，历史C5-C8截图原件及系统双击边界不被本轮抹去。
