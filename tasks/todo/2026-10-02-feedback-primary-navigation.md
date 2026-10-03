@@ -483,3 +483,33 @@ v0.36.10运行源码b26f9d216949c3601d2cc36d050e6fc922422ab1，BUILD MFC_yPnyTMu
 平台边界：网站不能替换浏览器关闭标签页、地址栏刷新产生的beforeunload对话框的文字或外观；文件选择、剪贴板等权限、人机验证同样归平台。站内按钮流程可以用产品UI先作决定并针对本次放行，不靠全局删除保护伪装已统一。依据[MDN beforeunload说明及实际事件处理示例](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)，推荐只对真实未保存内容挂保护；不引入新依赖。此前已读React Router实际实现及MIT许可只作为取消/继续状态参考，不处理硬刷新。
 
 证据与缺口：上述21处是源码字面搜索和定向读取命中，不宣称动态别名调用穷尽或线上实机全站通过；共享组件已有不等于每个旧入口已迁移。当前方案目标完成，应用版本仍0.37.0，未改高风险业务及生产数据。守门员start按实际语义L0方案/代码只读，关键词命中deploy/chrome不扩展授权；本轮范围误判已纠正并记录classification-misjudgment-log.md。
+
+### U1全站网站确认实施（2026-10-03）
+
+用户已明确“改”，批准以上v1.1.0方案实施、提交推送及正式服务器部署；本节替代上一节的“未实施”当前状态，历史排查及原文保留。实际生产源码根为/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，分支codex/canvas-liblib-layout，开工HEAD9165a58；运行6d2f390/v0.37.0/BUILD JmPs7-sSzCKO0_LJ_YKrJ已重新只读核对。正式资料根旧源码不参与部署，无关主todo及未跟踪资料不提交。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| U1 | 全站确认弹窗统一 | 网站UI无重复确认+构建+正式部署检查，实际效果由用户手动验收 | 已部署v0.37.1，待用户手动验收 |
+
+应用实现：上述21处业务confirm/prompt迁移为已有useProductDialog与画布网站命名入口；积分撤回/拒绝在原窗口切换状态，不叠新大框。取消/null与允许空理由/空串分开；积分拒绝必填且300字，图集/文件夹和普通审批保持原接口已有长度语义，不套120字或静默截断。危险确认初始取消焦点，顶层Esc/外部安全关闭及附近定位复用既有useDialogDismiss。
+
+新增共享page-exit-guard只汇总页面真实丢失和进行中状态：图片通用设置、未持久图片草稿、模板自动保存字段、额度草稿/未确认请求、画布规则和未持久画布。画布浏览器草稿须与当前序列的完整document_json、标题、baseRevision吻合才当可恢复；刚编辑尚未缓存、缓存失败仍保护。iframe宿主汇总，独立画布保留原生关闭保护；素材上传仅记录实际进行中计数，上传接口与请求不变。
+
+ReleaseNotice在同一窗口展示具体未保存内容或保存/上传状态；无丢失直接刷新，进行中不刷新，结束后重新判断，最终确认只针对当前风险签名放行本次刷新。500ms有界批准、beforeunload消费、pageshow/pagehide、input/pointerdown/keydown、卸载与失败复位共同防止永久批准；内容变化也使签名失效。更新不执行代保存，稍后/手动再开/外部及未知摘要隐藏/数字SemVer均保留。ErrorTranslator及AgentRunTraceActions同一刷新gate；自动刷新遇风险暂停，不自动放弃。浏览器地址栏刷新/关闭页签、系统权限仍为原生平台例外，不能换皮。
+
+不改API、鉴权、点数、Provider、worker或数据库，不安装依赖，package锁仅同步PATCH0.37.1。当前工具未提供原生内部worker入口，未创建侧栏线程或自动审核；唯一lead直接完成分包实施与统一Verify/self Review。只做发布必需构建内置检查和源码/静态/健康/回退证据，无浏览器、业务回归或付费生成；用户手动验收边界有效。复用已读React Router useBlocker/MIT的取消与继续思想，不安装其包。原图及同图来源复用[固定私有附件](../../docs/materials/2026-10-03-feedback-update-confirm/codex-clipboard-f7c8cdb3-42b3-4827-b629-1f66ea539939.png)，用途为重复确认参考，不公开Git/部署；统一diff将留同目录。
+
+#### 本次正式发布证据
+
+- 应用提交39010f71e0dbb68b6557ffc31dc07976bd2da859已推送codex/canvas-liblib-layout；版本0.37.1，正式BUILD weh6ZSLi1ojK25-2vyXQm，入口[正式素材页](https://sd2.youdooart.com/assets)。后续记录提交不改变运行应用提交，也不再次升级、构建或重启。
+- 28个应用文件：package.json、package-lock.json仅同步版本；page-exit-guard.ts新增有界刷新批准；use-unsaved-navigation、use-studio-settings、studio、QuotaManager、CanvasFrame接入真实草稿/进行中保护；ReleaseNotice、ErrorTranslator、AgentRunTraceActions统一整页刷新入口；useProductDialog、ProductDialog.module.css补齐输入语义与稳定边界；PromptEditor、SeedanceAssetPanel、ShareAlbumDialog、AccountMenu、CreditRequestDialog、GeneratePageClient、ImageShareButton、ReferenceAlbumsClient、ReferenceAlbumDetailClient、projects/[id]/page、projects/[id]/video-cards/[cardId]/page、approvals/page迁移原业务弹窗；画布app.js及toolflow-workflow.js复用网站命名及恢复判定；release.ts维护本次摘要。
+- 统一Verify：本地npm run build和服务器NEXT_DIST_DIR=.next-prod-candidate npm run build均退出0，内置lint/类型检查完成，仅既有警告。两份画布脚本node --check、git diff --check通过。TypeScript解析565份源码及画布脚本，未检出原生业务confirm/prompt/alert；不是动态业务功能验收。
+- self Review核对取消不执行原业务、null与空串区分、原接口/权限/金额不变，危险操作取消焦点、旧素材库/上下文粘贴/main1默认不回退。发现画布snapshot的savedAt每次变化会干扰可恢复判断，统一修正为仅忽略该时间字段，内容/标题/baseRevision仍完整比较。批准绑定当前风险签名，取消、动作抛错、未离开超时、新编辑及页面复位恢复保护；未进行浏览器实机验证。
+- 发布窗口登记与服务器flock实际启用；git archive归档SHA256 8877f2de54d8699101353ae3ea6666565ed94dff5ace7f48dad9c749c17e473f经服务器核对，28份线上修改源码SHA与提交相同。候选完整构建后第一次旧脚本错误检查不存在的源码注释，在源码同步/切换之前停止，旧运行未触碰；针对性改为检查编译后的private/no-store与internal保护标记，核对归档内容后复用同一候选，不重复构建。匿名画布脚本原有登录保护返回307，发布检查按既有middleware核对login/next，不扩大公开权限。
+- 正式sd2-gray.service健康；/api/config、/api/release、/login、/assets均200，X-SD2-Origin为server-42-193；匿名release为0.37.1且summary为空、private/no-store，login包含同一BUILD。40份相关页面JS/CSS公网200及SHA与服务器产物一致，单窗口刷新标记及0.37.0资源选择器标记保留；画布两脚本线上源码SHA相同、匿名307正确，登录后实际加载留用户手动验收。详见正式根本机[部署检查证据](../../docs/materials/2026-10-03-feedback-update-confirm/deployment-v0.37.1.json)、[允许范围统一diff](../../docs/materials/2026-10-03-feedback-update-confirm/implementation-v0.37.1.diff)。证据及原图目录保持私有，不进Git或部署归档。
+- 回退tag rollback/2026-10-03-before-product-dialogs-v0.37.1已推送并指向原运行6d2f390aca3df0e5e730f0adc511652a87938b70；原BUILD JmPs7-sSzCKO0_LJ_YKrJ保留在/srv/video-api-debugger/app/.next-prod-before-sd2-u1-v0371-39010f7，旧.next-prod-before-resource-6d2f390不删除。回退源码位于/srv/video-api-debugger/releases/6d2f390aca3df0e5e730f0adc511652a87938b70，本次worker前后证据位于/srv/video-api-debugger/backups/sd2-u1-v0371-39010f7。候选失败不动live，切换后失败脚本可恢复旧源码与构建。
+- sd2-image-studio.service的MainPID1241475、启动时间及unit前后相同，未排空/重启/强杀worker；sd2-video-delivery.timer与sd2-finalize-pending.timer均active。storage、public/uploads、public/videos数据软链与关键子目录写权限保持；env仅核对元信息及链接，未读内容，无DB写入或迁移。
+- 守门员finish按实际中文修改/提交/推送/部署意图识别L3-visible-runtime；local/build/Git/runtime证据具备，real-result按项目用户手动验收约定不自动执行，不能称功能验收通过。本实施轮无归类误判，不重复start；历史方案纠偏记录保留。正式根仅同步本工单和资料索引，原有dirty主todo及其他未跟踪资料不覆盖、不提交。
+
+验收缺口：网站更新最终确认、取消/失败后继续编辑、上传结束重新判断、小屏及焦点等实际行为待用户手动；地址栏刷新、关闭页签和系统权限仍为必要原生平台例外。无未解决实施或发布阻塞。
