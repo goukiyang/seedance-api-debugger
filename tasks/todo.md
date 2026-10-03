@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [P1弹窗定位与T1文案选项测试](todo/2026-10-02-feedback-primary-navigation.md#p1统一弹窗定位2026-10-03)：P1已部署v0.36.6，源码f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0、BUILD zLCFc71j3c0EpKfW2zQ7I；共享短确认/命名框靠近按钮并避让，完整设置不改，20公网静态/5源码一致、4服务active；待用户手动验收。T1找到6个文案模型、静态模型传递一致，含义及真实试跑费用上限待确认，未付费调用、不称全通。[资料](../docs/materials/index.md#弹窗位置反馈)、[diff](todo/2026-10-02-feedback-primary-navigation.diff)。
+- [P1弹窗定位与T1文案选项测试](todo/2026-10-02-feedback-primary-navigation.md#p1统一弹窗定位2026-10-03)：P1已部署v0.36.6，源码f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0、BUILD zLCFc71j3c0EpKfW2zQ7I；共享短确认/命名框靠近按钮并避让，完整设置不改，20公网静态/5源码一致、4服务active；待用户手动验收。T1经用户明确执行后已真实测试6个文案GPT模型，6/6短请求成功并返回有效prompt JSON，各一次、零重试；1265 tokens，实际费用未返回，不含浏览器/队列全流程测试。[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)、[资料](../docs/materials/index.md#弹窗位置反馈)、[diff](todo/2026-10-02-feedback-primary-navigation.diff)。
 - [R1图片生成重复确认](todo/2026-10-02-feedback-primary-navigation.md#r1图片生成重复确认2026-10-03)：已部署v0.36.5，源码47d3528c3a2b5715e81cfb4a64626c1d39abf938、BUILD jecj9uPdtiWkqyM2f-FR7；删除任意旧待确认任务/复现来源触发每次生成确认的7行条件，保留同步锁、requestId及未确认原请求只查询保护。候选build及20公网静态/4源码一致、4服务active；未运行生成或浏览器功能验收，待用户手动。[原图索引](../docs/materials/index.md#图片生成重复确认反馈)、[diff](todo/2026-10-02-feedback-primary-navigation.diff)。
 - [模板保存与主图默认 N1/N2、最新生成异常 G1](todo/2026-10-02-feedback-primary-navigation.md#图片模块保存位置主图默认与g1诊断2026-10-03)：N1/N2已部署v0.36.4，源码0fcea7dd2a91a5de427a1e1c9934c176e146fb9a、BUILD 0I77QmnNWDzJglbNdkjLN，20公网静态/9源码一致及4服务active；用户手动验收待办。N1保存按钮数量设置下方靠右留白，N2新建/缺省主图最多1张、已有设置不覆盖。G1只读明确最新3条10-12秒HTTP 502无图，接口内部原因未知、不重发；[本轮附件索引](../docs/materials/index.md#模板保存与最新生成异常2026-10-03)。后续待办：待确认状态应清楚展示已有HTTP错误事实，不改变未知受理和退款保护。
 - [ ] 2026-10-02：主图与导航反馈优化，正文见 `tasks/todo/2026-10-02-feedback-primary-navigation.md`。
