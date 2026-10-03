@@ -1,5 +1,27 @@
 # 项目资料索引
 
+## 主图导航与视频参数反馈工单（2026-10-03）
+
+项目video-api-debugger；2026-10-02后台两条原文见下节。2026-10-03追加/generate三参数灰色，随后明确取消三参数业务锁（模型合法范围保留），新增I5模板上下文未修改关闭及同类误提醒，I6多任务待确认只读排查。I1-I5已部署v0.36.3，最新运行源码8315f02776290cda1c0f1e7286856d193f95dfca、BUILD TIe6lesNJcjyQirM3FMpx；I3模板导航状态按surface/user本地持久化、迁移旧session记录；[发布证据](../../tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](../../tasks/todo/2026-10-02-feedback-primary-navigation.diff)正式归档；最新候选内置检查及4服务/20相关静态/2变更源码一致通过，首次27静态/20源码证据为历史，功能待用户手动验收。I6故障阶段已明确、底层原因无法追溯待查；视频标注原件仍待归档，不称W1附件齐全，反馈new不改。
+
+| 资料/原名 | 来源/日期/版本 | 主题与用途 | 正式入口、关系与校验 |
+|---|---|---|---|
+| 主图与导航反馈优化；2026-10-02-feedback-primary-navigation.md | 后台原文/用户追加；2026-10-03创建；v1.0.0 | 主图约+30%、满额添加位、小屏导航、视频三参数误锁；边界/手动验收/附件/交接正文 | [正式工单](../../tasks/todo/2026-10-02-feedback-primary-navigation.md)；可读；历史规则见10月1日原文；工作树非唯一资料位置 |
+| feedback.json及48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 2026-10-02；快照v1.0.0/原图 | 两条原文与导航参考，不作验收图；无音视频 | 下节原路径/校验保留；工单有绝对路径；raw/原图不公开Git |
+| 视频三参数用户截图（原名未知） | 2026-10-03用户会话；原版本未知 | /generate三chip灰色；DOM/模型/输入事实完整记工单；非自动浏览器证据 | 仅父会话可见，无path/attachmentHandle；待主控导出到docs/materials/2026-10-03-feedback-video-parameters/；原件未归档/未校验，不伪造已保存 |
+| codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png | 2026-10-03用户剪贴板截图，原件/原名保留；父归档 | 图片模板img2.5-S最高4K多次待确认；用于I6故障阶段核对，不据图定Provider失败，与上条缺原件截图不同 | [原件](2026-10-03-feedback-generation-results/codex-clipboard-4f833484-e649-4fac-9224-20a130ea6102.png)；895x725 PNG，父sips可读/复制SHA256一致2fc4dcf6bbe59df8e36f836a1d1da658cd66c6f56f028ee50aee57769a5ccd02，复用校验；私有不上传Git |
+| I4取消锁/I5未修改关闭/I6事故对话原文及只读结论 | 2026-10-03当前用户；工单v1.0.0补充 | 最新指令替代旧ratio_locked保留结论；两异常为request/network与request/timeout约300秒，无返回回执，异常后同模型有成功记录；底层网络/上游原因未确证 | [正式工单最新段](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#最新纠偏与i6事故证据2026-10-03北京时间0049核对)；原文、线上commit/BUILD及缺口已登记，无生产数据写入 |
+
+## 当日后台反馈（2026-10-02）
+
+项目video-api-debugger；2026-10-02 23:07北京时间从正式SD2生产Feedback表只读拉取，覆盖北京时间当天00:00至次日00:00全部状态，截至读取时共2条，均为new。仅整理资料，不实施、归档反馈或修改生产数据；本地记录v1.0.0，原文JSON和截图仅本机保留，不公开Git。无音视频附件。
+
+| 资料与原文件名 | 来源/日期/版本 | 主题、摘要及用途 | 正式入口、关系与校验 |
+|---|---|---|---|
+| 反馈原文汇总；feedback.json | 正式SD2后台Feedback，2026-10-02接收；v1.0.0首次快照 | 两条图片模板工作台意见；保留反馈ID、原文、准确时间、页面、状态及附件地址，供后续需求核对，不代表问题已复现 | [原文](2026-10-02-feedback-template-workbench/feedback.json)；JSON可读；不替代历史工单或自动授权实施 |
+| cmuqyowne0027vg4vr3xyks6m；无附件 | 2026-10-02 20:51:09北京时间；new | 主图缩略图增大约30%；锁定张数后不再显示添加主图图标。来源/template-studio?type=image | 完整原文见上述JSON；需求已收到，尚未实施；关联历史主图规则需另行核对 |
+| cmuqyq5xo002fvg4vjhbp6aar；48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg | 2026-10-02 20:52:08北京时间；new；原名/原件保留 | 手机与平板导航条难以使用，截图为问题参考，供后续核对小屏导航，不作修复验收证据 | [截图](2026-10-02-feedback-template-workbench/48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg)；来源https://sd2.youdooart.com/uploads/assets/48c4aa41c3bae255821ef8a6f972e91b9422054cd2744fdc16f0250a4d0b56b4.jpg；本地与服务器SHA256一致且等于文件名，415273字节、2584×1828 JPEG已打开核对；未复现或验收生产页面 |
+
 ## 模板工作台体验优化（2026-10-02）
 
 项目video-api-debugger；历史工单v1.0.0已被2026-10-02用户明确WS1-WS7实施授权更新。源码、统一发布检查及安全部署已完成，v0.36.2；源码f647817、BUILD OlWyIuDDh1fBfDOaID4Tt，4服务/21公网静态/15源码一致，worker未重启，功能待人工验收；只调整/template-studio图片与视频工作台，独立图片页由默认门控保留，不改后台/权限/费用或Provider。
@@ -26,49 +48,69 @@
 
 | 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
 |---|---|---|---|
-| 原图恢复补充工单 | 2026-10-02用户明确执行，v1.1.0；历史记录保留 | ID1-ID4逐文件实现、发布、回退及人工验收缺口 | [有效正文](../../tasks/todo/2026-10-01-image-download-timeout.md)、[发布证据](../../tasks/todo/2026-10-01-image-download-timeout.evidence.json)；正文/证据与正式主目录一致 |
-| 用户参考脚本 | Untitled-1(1).md；/Volumes/Data/Downloads/Current/Untitled-1(1).md；2026-10-02接收，版本未知 | 一次生成、Base64优先、同图恢复；原件未执行、不公开Git | [正式本地原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-image-delivery/Untitled-1(1).md)；沿用归档cmp/可读证据 |
-| 历史官方协查回执 | 2026-10-01-image-download-api-receipt.md，v1.0.0；2026-10-02正式归档 | 真实历史请求与费用证据，仅本地参考，不重复外发 | [正式本地原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-image-delivery/2026-10-01-image-download-api-receipt.md)；沿用归档cmp/可读证据 |
+| 原图恢复补充工单 | 既有下载超时工单顶部更新；2026-10-02补充v1.1.0，用户确认执行 | ID1-ID4逐文件实现、未知受理/同图恢复/校验/状态、发布回退与人工验收；旧记录保留 | [有效正文](../../tasks/todo/2026-10-01-image-download-timeout.md)、[发布证据](../../tasks/todo/2026-10-01-image-download-timeout.evidence.json)；UTF-8/JSON可读，完整正文与开发树一致 |
+| 用户参考脚本 | Untitled-1(1).md；来源/Volumes/Data/Downloads/Current/Untitled-1(1).md；2026-10-02接收，版本未知 | 一次生图、Base64优先、URL GET恢复、校验后交付；脚本有已注明局限，未执行，不公开Git | [原件](2026-10-02-image-delivery/Untitled-1(1).md)；复制后cmp核对、文本可读 |
+| 历史官方协查回执 | 2026-10-01-image-download-api-receipt.md；v1.0.0；2026-10-02从canvas-liblib-layout工作树归档 | 两次上游请求、消费匹配、下载超时证据及协查事项；只作历史参考，不公开Git，不重复外发 | [原件](2026-10-02-image-delivery/2026-10-01-image-download-api-receipt.md)；复制cmp一致、正文可读 |
 
-旧问题截图仍无可访问原件；不以新发布证明旧图已恢复，不复制私有原件到公开Git。
+历史问题截图原件仍无可访问入口，不用其他截图替代；协查回执原件已归档并修正工单链接，不把它说成全部历史附件齐备。已核对本轮服务/版本/静态发布，未恢复旧图、未回写账本；源码与发布检查不等于真实交付功能验收。
+
+## 模板主操作与产品弹窗（2026-10-02）
+
+项目：video-api-debugger。来源：用户“同时修改并部署模板相关页面”、已确认暗色青绿色设计与现有源码。主题：主按钮、模板、保存、生成、产品弹窗、未保存保护、发布；本轮无新附件。
+
+| 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
+|---|---|---|---|
+| 模板主操作与产品弹窗 | 2026-10-02 用户授权；实施记录，已部署 v0.34.2 | G1–G4任务、入口覆盖、取消/草稿保护、构建、远端回退及32项公网静态证据；已有原图及历史反馈入口包含在正文中 | [完整正文](../../tasks/todo/2026-10-02-template-primary-actions.md)、[发布证据](../../tasks/todo/2026-10-02-template-primary-actions.evidence.json)；UTF-8/JSON可读，应用工作树副本同步；待用户手动验收 |
+
+## 加载刷光独立样例（2026-10-02）
+
+项目：video-api-debugger。来源：用户要求统一 loading/生成中动效并独立测试。主题：刷光、骨架屏、按钮等待、阶段状态、减少动画。样例版本 v1.0.0，不接生产接口，不代表正式网站已经采用。
+
+| 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
+|---|---|---|---|
+| 独立交互样页 | 本轮打样；index.html；v1.0.0 | 首次加载、刷新保留原内容、提交、模拟上传和生成阶段；周期/亮度/主题可调，设置保存，真实系统减少动画偏好优先 | [样例](2026-10-02-loading-study/index.html)；Playwright 本地独立检查 PASS，桌面/390px截图已查看 |
+| 样例检查脚本 | check.cjs；2026-10-02 | 仅本地文件：动效、状态切换、防连点、恢复、390px 布局与减少动画；无真实生成或生产验收 | [脚本](2026-10-02-loading-study/check.cjs)；检查结果见同目录 evidence/report.json |
+| 参考原图 | 既有用户画布原图，未修改 | 作为列表及完成态样图，不冒充生成视频；沿用画布方案拆分资料归档 | [原件](2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png)；复用已核验原件 |
+
+设计借鉴 MUI Skeleton wave 的变换刷光与减少动画处理；已阅读官方文档及 Skeleton.js 实现，未引入 MUI 依赖或复制其组件。来源：https://mui.com/material-ui/react-skeleton/ 与 https://github.com/mui/material-ui/blob/master/packages/mui-material/src/Skeleton/Skeleton.js 。样例仅本地打开，未公开发布用户原图。
+
+L1：加载动效独立打样，已完成。完成标准：可交互比较各状态，桌面/手机布局及减少动画模式检查通过。证据：同目录 evidence/report.json、desktop.png、dark.png、mobile.png 与 interaction.webm；仅本地保留。发现并修复完成态预览图越界遮挡，整批复测通过；无真实任务请求、无 JavaScript 错误、无外部网络请求。风险分级 L1：隔离样例，没有业务接口、权限或数据变化；未做线上功能验收或部署。
+
+2026-10-02 用户认可上述loading样例，并要求处理既有技能和触发条件。已更新全局 /Users/gouki-youdoo/.codex/skills/loading-state-design/SKILL.md 为v1.1.0，统一局部刷光参考、异步等待自然触发、真实阶段和授权边界；配套可复用CSS及结构/链接/独立CSS检查通过。S1“更新加载状态技能”已完成：触发条件、刷光规范、真实状态和授权边界清楚，结构校验通过。认可样例及技能更新不代表本项目正式页面已接入，也不授权全站批量替换；样例自身仍为v1.0.0。技能完整规范留在技能内，此处只登记来源与项目认可事实。
 
 ## 画布视频方案拆分（2026-10-02）
 
-当前唯一有效规格为 v1.1.0，v0.35.0 已部署；SP1–SP5 已实现并部署待人工，SP6 发布检查/正式归档完成，见[原工单](../../tasks/todo/2026-10-01-canvas-plan-split.md)及[逐文件发布证据](../../tasks/todo/2026-10-01-canvas-plan-split.evidence.json)。正式归档目录为 `/Volumes/Data/Projects/video-api-debugger`，本工作树不复制用户原图到公开 Git。
+项目：video-api-debugger。来源：用户原工单、画布截图、本侧聊提示词格式及简化讨论。主题：方案拆分、提示词、视频节点、参数继承、任务恢复、结果选用。v0.35.0 已部署；SP1–SP5 已实现并部署待人工，SP6 发布检查与正式归档完成；assetId 如实 null，不创建 Asset。完整发布与回退记录见[原工单](../../tasks/todo/2026-10-01-canvas-plan-split.md)，逐文件 SHA 和检查见[发布证据](../../tasks/todo/2026-10-01-canvas-plan-split.evidence.json)。
 
-| 接收日期 | 资料与来源 | 主题与用途 | 正式入口 | 版本与校验 |
-|---|---|---|---|---|
-| 2026-10-02 | 用户原工单与后续明确“落地” | 固定文本格式、一个创意一个现有视频节点、恢复与结果交接 | [正式工单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-canvas-plan-split.md) | v1.1.0；完整已读，取代 v1.0.0 |
-| 2026-10-01 | 历史原工单 2026-10-01-canvas-plan-split.md | 原作追溯，不作为实现规格 | [历史原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/2026-10-01-canvas-plan-split.md) | v1.0.0；复用既有归档 |
-| 2026-10-02 | 用户画布截图 codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png | 原节点与上下游场景；无本轮新附件 | [本地原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png) | PNG 已阅、可读；复用已核验原件；未公开 |
+| 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
+|---|---|---|---|
+| 当前简化工单 | 2026-10-02 用户“补”后明确“落地”；v1.1.0 | 固定格式、单方案单视频节点、预览调整、保存、防重复、任务结果与人工验收；替代旧复杂首版；实际实施进度留原工单 | [有效正文](../../tasks/todo/2026-10-01-canvas-plan-split.md)；UTF-8 可读，关键原图复用已核验原件 |
+| 历史原方案 | 2026-10-01 侧聊文件；原文件名 2026-10-01-canvas-plan-split.md；v1.0.0 | 原始结构化/AI/方案组设计，保留来源，已被 v1.1.0 替代，不作为当前实施规格 | [历史原件](2026-10-02-canvas-plan-split/2026-10-01-canvas-plan-split.md)；复制后 cmp 核对 |
+| 用户画布原图 | 原文件名 codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png；2026-10-02 归档 | 原节点及上下游场景参考；保留原名、未修改；本地资料，不公开 Git | [图片原件](2026-10-02-canvas-plan-split/codex-clipboard-1f20d528-af7d-4e00-b5b5-e1d90892de90.png)；复制后 cmp 核对，PNG 可读 |
 
-2026-09-30模板体验四张原始反馈、2026-10-01画布快捷创作参考图及2026-10-02统一资源库参考图仅保存在本机对应目录，已加入Git忽略；下表这些链接为本地资料入口，公开仓库和服务器发布包不包含这些原图。
+原始来源目录：/Users/gouki-youdoo/.codex/visualizations/2026/10/01/01a0f7f9-21b0-79c2-abe7-9c479680591d/canvas-plan-split/。历史原件与当前工单分别保存，归档不授权实施或部署。
 
-| 接收日期 | 名称与原文件名 | 来源/项目 | 主题与用途 | 路径 | 版本与校验 |
-|---|---|---|---|---|---|
-| 2026-10-02 | 统一素材与风格库参考 / codex-clipboard-c227fe09-9c94-47d3-9259-224ace6380d7.png | 用户附件 / video-api-debugger | 盘点并规划整合素材库、视频生成、模板导入及风格广场；截图可见广场/收藏/最近使用、分类、搜索、商用筛选、作者和作品卡，不作为本站实现证据 | [原图](2026-10-02-unified-resource-library/codex-clipboard-c227fe09-9c94-47d3-9259-224ace6380d7.png)；[功能清单与建议](../../tasks/todo/2026-10-02-unified-resource-library.md) | 原始参考，无替代；PNG已阅，归档cmp一致；仅本机保存、不公开发布 |
-| 2026-10-01 | 模板页离开提示卡住 / codex-clipboard-82847ded-af54-436a-9efc-ab996c8d467c.png | 用户附件 / video-api-debugger | 模板页持续出现“仍有内容正在保存或设置尚未保存，确定离开吗”；本轮同时要求放大图复制与主动分享给站内用户，截图用于定位保存保护误报，不代表修复验收 | [原图](2026-10-01-media-copy-share/codex-clipboard-82847ded-af54-436a-9efc-ab996c8d467c.png)；[工单](../../tasks/todo/2026-10-02-media-copy-share.md) | 原始反馈，无替代；PNG已阅，归档cmp一致；仅本机保存，不公开发布 |
-| 2026-10-01 | 文本快捷创作栏 / codex-clipboard-c2111cf4-3b3d-4c82-adad-29c73afe99ee.png | 用户附件 / video-api-debugger | 单击文本节点显示生成角色图及创作快捷栏；配套区分通用规则与节点规则，模型复用模板页文案选项 | [原图](2026-10-01-canvas-quick-actions/codex-clipboard-c2111cf4-3b3d-4c82-adad-29c73afe99ee.png)；[工单](../../tasks/todo/2026-10-01-canvas-liblib-layout.md) | 原始参考，无替代；已阅，归档cmp一致；另一张规则弹窗标注无原始文件路径，未归档 |
-| 2026-10-01 | Liblib 画布四张浏览器标注 / 原文件名未提供 | 用户本轮标注 / video-api-debugger | 输入面板布局、左侧添加上下文、风格广场、右侧引用节点生成；本轮设计参考，不是本站已有能力证明 | [原参考页](https://www.liblib.tv/canvas?guideSource=home-feature-grid&spaceId=10349539&projectId=c92d851aa47f417784e1da218ba99a12)；[实施工单](../../tasks/todo/2026-10-01-canvas-liblib-layout.md) | 原始版本，无替代；四图可见已阅，工具未提供文件路径/导出句柄，本机原图归档和完整性校验未完成 |
-| 2026-10-01 | 图片模板三分区设计 / codex-clipboard-7314f721-9c47-4f34-881f-6513dce6877d.png | 用户本轮附件 / video-api-debugger | 主图、风格组、参考图三个区域，方形缩略图、封面名称、右上角移除、数量及添加控件；本轮实施依据，截图样例数不作为真实数据 | [原图](2026-10-01-image-template-redesign/codex-clipboard-7314f721-9c47-4f34-881f-6513dce6877d.png)；[工单](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md) | 原始版本，替代上一版合并辅助参考区域的视觉设计；已阅、归档cmp一致；原图仅本机保存，不公开发布 |
-| 2026-10-01 | 图片模板通用上下文恢复工单 / 2026-10-01-image-studio-global-context.md | 用户授权，经同项目线程转交 / SD2 | 34字原文恢复、加载竞态、所有模板及历史重新生成合并；生产备份仅限服务器 | [工单及受限备份路径](../../tasks/todo/2026-10-01-image-studio-global-context.md) | 来源提交cd7ef9b；实施记录更新原工单，不替换原始恢复来源；批准原文与备份逐字一致、恢复前备份quick_check=ok；无媒体附件，整库不外传 |
-| 2026-10-01 | 模板工作室反馈截图 / fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png | 正式站反馈 cmuouhgw70027rl0hqo4d0ra0 / video-api-debugger | 固定图与本次参考图编号、备注、风格组及二级弹窗；用于原始需求核对 | [服务器原图](https://sd2.youdooart.com/uploads/assets/fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png)；[本机归档](/Volumes/Data/Projects/video-api-debugger-v12-full-todo/docs/materials/2026-10-01-feedback-template-assets-dialogs/fba4516163fba728d73f4e84c339c7a28f70f7c884578c52e257aa687abfac47.png)；[工单](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md) | 原始版本，无替代；PNG 453x312已阅，SHA256与文件名一致；本机已归档，原件不上传公开Git，不代表功能验收 |
-| 2026-09-30 | 卡片排版 / codex-clipboard-00779972-0ec6-4ede-b74e-8a019ca30935.png | 用户截图 / SD2 | UI01：头像、时间、尺寸、点赞收藏位置 | [原图](2026-09-30-template-ui/codex-clipboard-00779972-0ec6-4ede-b74e-8a019ca30935.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
-| 2026-09-30 | 参考图次序 / codex-clipboard-db1bf647-05e4-4a0f-80fa-3a10e96359cd.png | 用户截图 / SD2 | RF01/RF02：拖动顺序、固定参考图备注与生成编号 | [原图](2026-09-30-template-ui/codex-clipboard-db1bf647-05e4-4a0f-80fa-3a10e96359cd.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
-| 2026-09-30 | 添加图片菜单 / codex-clipboard-4ca838a8-941f-4f6b-a445-c7d6abb52e13.png | 用户截图 / SD2 | UI02：紧凑上下菜单，点击外部关闭 | [原图](2026-09-30-template-ui/codex-clipboard-4ca838a8-941f-4f6b-a445-c7d6abb52e13.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
-| 2026-09-30 | 预览工具栏 / codex-clipboard-7ed8351e-3ca9-4e3a-ad69-f01119fb08c5.png | 用户截图 / SD2 | UI02：不展示提示词、对比工具居中；含用户原始文本，不公开发布 | [原图](2026-09-30-template-ui/codex-clipboard-7ed8351e-3ca9-4e3a-ad69-f01119fb08c5.png) | 原始反馈，无替代；已阅，已归档，cmp与原件一致；非功能验收 |
-| 2026-09-29 | 生成被手动保存拦截 / codex-clipboard-dff3e760-f727-4220-95d1-909b0ee4ca91.png | 用户截图 / SD2 | B06：模型、质量、分辨率应自动保存，不要求先手动保存才能生成 | [原图](2026-09-29-generation-save/codex-clipboard-dff3e760-f727-4220-95d1-909b0ee4ca91.png) | 原始反馈，已阅、cmp归档一致；非修复验收 |
-| 2026-09-29 | baPro 4K 保存失败 / codex-clipboard-9d91fe74-e132-4ec2-a2cc-8b23064f474e.png | 用户本轮截图 / SD2 | 上游已返回但本站未交付；B01根因调查、B02模板自动保存、B03左栏同步反馈 | [原图](2026-09-29-banana-delivery/codex-clipboard-9d91fe74-e132-4ec2-a2cc-8b23064f474e.png) | 原始截图，无替代；已阅、归档cmp一致；不代表修复后验收 |
-| 2026-09-29 | sidebar-layout-fixture.png | 本轮Playwright / SD2 S01 | 两份真实CSS Module，合成侧栏与标题；用于核对不遮挡标题，不含用户提示词 | [布局截图](2026-09-29-sidebar/sidebar-layout-fixture.png) | 候选0.20.4，已打开核对；可再生辅助图不逐项hash，不替代线上证据 |
-| 2026-09-29 | 分组侧栏整理 / codex-clipboard-7f1d54ac-22df-4c68-ac05-41b6042e98c7.png | 用户本轮截图 / SD2 | 红框标记侧栏，标题遮挡、白色滚动条；保留侧栏与页面上下滚动，S01参考 | [原图](2026-09-29-sidebar/codex-clipboard-7f1d54ac-22df-4c68-ac05-41b6042e98c7.png) | 原始v0.20.3画面；图像已阅，复制cmp一致，不替代修复后验收 |
-| 2026-09-29 | banner-layout-fixture.png | 本轮Playwright / SD2 B01 | 真实CSS、合成图片，桌面横幅180px与下方工作区；不含用户私有内容，不替代线上截图 | [布局截图](2026-09-29-banner/banner-layout-fixture.png) | 候选0.20.3，已打开核对；可再生辅助截图不单独计算hash |
-| 2026-09-29 | 浏览器标注1：模块banner过大（原文件名未提供） | 用户浏览器标注 / SD2 | 图片横幅撑满首屏；B01尺寸修复的原始反馈，不用于更改模板内容 | 本轮对话附件；页面 https://sd2.youdooart.com/template-studio?type=image ，实现记录 [B01](../../tasks/todo.md#b01-模块-banner-高度2026-09-29) | 截图可见已阅，未提供可访问本地文件路径，无法复制归档；不声称文件完整性校验已完成 |
-| 2026-09-29 | template-studio-desktop.png / template-studio-mobile.png | 本轮隔离Playwright验收 / SD2模板工作台 | 两大类、草稿、字段与首尾素材槽的桌面1440/手机390布局；仅本地合成账号与素材，不是生产截图 | [桌面](2026-09-29-template-studio/template-studio-desktop.png)、[手机](2026-09-29-template-studio/template-studio-mobile.png) | 候选0.20.0，BUILD_ID `o7mFYXUrhzPNCN16exgqn`；来自通过运行artifact `sYphBd`，已打开核对；辅助截图未逐项计算哈希，不替代线上验收 |
-| 2026-09-25 | 模型积分挤压换行 / codex-clipboard-50e75a81-d98a-4bf3-bb2a-26d3da01999b.png | 用户截图 / SD2画布 | 下拉菜单模型与积分分列，积分小字右对齐；移除底部重复计费说明 | [原图](2026-09-25-model-price/codex-clipboard-50e75a81-d98a-4bf3-bb2a-26d3da01999b.png) | 原始版本；图像已阅，cmp一致 |
-| 2026-09-25 | 画布重复顶部信息 / codex-clipboard-7439a5b1-4633-4c5a-9bed-60bf08c52a1a.png | 用户本轮截图 / SD2 | 移除画布第二行重复名称、余额、账号及占位入口；顶部增加图片生成入口 | [原图](2026-09-25-canvas-header/codex-clipboard-7439a5b1-4633-4c5a-9bed-60bf08c52a1a.png) | 原始版本，无替代；图像已阅，cmp一致 |
-| 2026-09-29 | img2.5-S保存失败 / codex-clipboard-14bb28f9-1ffc-4b55-8826-df6e6696eb6c.png | 用户本轮截图 / SD2 | 2K超高参考图生成未交付；用于定位下载阶段错误，关联B08 | [原图](2026-09-29-image-download/codex-clipboard-14bb28f9-1ffc-4b55-8826-df6e6696eb6c.png) | 原始版本，无替代；图像已阅，归档一致 |
-| 2026-09-16 | 参考素材缺少选择入口 / codex-clipboard-72580c2d-35f5-46f8-a2b2-23b8f044c765.png | 用户本轮截图 / SD2 | 生成页参考素材弹窗；复现选择入口不明显，核对复选框修复 | [原图](2026-09-16-reference-picker/codex-clipboard-72580c2d-35f5-46f8-a2b2-23b8f044c765.png) | 原始版本，无替代；图像已阅，cmp归档一致 |
-| 2026-09-16 | verified-selection-v0.2.1.png | 本轮真实Chrome验收 / SD2 | 两张素材选中、复选框及顺序显示 | [验收截图](2026-09-16-reference-picker/verified-selection-v0.2.1.png) | v0.2.1结果证据，不替代用户原图；已打开核对 |
-| 2026-09-23 | 上传接口返回页面内容 / codex-clipboard-50db8914-4c81-4fb9-b90f-6649b40e1047.jpg | 用户本轮截图 / SD2 image-studio | 添加参考素材时普通上传接口失败，记录真实客户端错误表现并用于线上复现 | [原图](2026-09-23-image-studio-upload/codex-clipboard-50db8914-4c81-4fb9-b90f-6649b40e1047.jpg) | 原始版本；SHA256 `62a091c5567654ca7962b0b566fede6e546198399d88311496e37bbbf40b97a3`；已归档，待与真实网络响应对照 |
-| 2026-09-23 | verified-upload-v0.12.2.png | 本轮 Xiaobo Chrome 登录态验收 / SD2 image-studio | 普通上传接口返回 JSON 200，参考素材区出现新缩略图并可继续使用；不触发付费生成 | [验收截图](2026-09-23-image-studio-upload/verified-upload-v0.12.2.png) | v0.12.2 线上证据；SHA256 `fd26577c7d8ded31f5c057d1da734130976c23ce62adc8b568d03dc28bb040f7`；已打开核对 |
-| 2026-09-24 | 上传目录权限错误 / codex-clipboard-5c9156e6-166d-4226-b1d7-4a03ea6a942e.jpg | 用户本轮截图 / SD2 | 添加参考素材时出现 `EACCES mkdir /srv/video-api-debugger/app/public/uploads/assets`，并伴随缩略图加载失败；用于核对线上持久化目录修复 | [原图](2026-09-24-image-upload-permission/codex-clipboard-5c9156e6-166d-4226-b1d7-4a03ea6a942e.jpg) | 原始版本；SHA256 `15cf67af7da6e5c216fdfc2739ee0b37390fefcdb1c7cfaed1397730b1fe3be2`；已归档，未覆盖 2026-09-23 原图 |
+## 统一创作资源库（2026-10-02）
+
+项目：video-api-debugger。来源：用户本轮风格广场截图、本站源码及既有工单。主题：素材库、图集、图片/视频模板、风格、生成交接、用户体验。
+
+| 资料 | 来源与版本 | 内容及用途 | 正式入口与校验 |
+|---|---|---|---|
+| 功能盘点、审查及落地清单 | 用户要求；本轮侧聊更新；审查d08e9df，发布81de84c/v0.34.1 | I1–I3盘点、A1–A4审查及B1–B3/U1–U6实现与发布证据；待用户手动验收，统一目录未合并；含发布预约流程缺口 | [完整正文](../../tasks/todo/2026-10-02-unified-resource-library.md)；与侧聊副本cmp一致、可读 |
+| 风格广场原图 | 用户截图；原文件名codex-clipboard-c227fe09-9c94-47d3-9259-224ace6380d7.png；2026-10-02接收 | 分类、收藏/最近、商业授权与选用流程参考；PNG原件，未修改；不公开Git | [原图](2026-10-02-unified-resource-library/codex-clipboard-c227fe09-9c94-47d3-9259-224ace6380d7.png)；与已核验来源cmp一致、PNG可读 |
+| 模板素材与弹窗反馈 | 2026-10-01历史工单，来自同一侧聊工作树 | 固定素材权限和三分区边界；不是本次新bug | [历史原文](../../tasks/todo/2026-10-01-feedback-template-assets-dialogs.md)；副本一致，关联旧附件未逐项复核 |
+| 图片下载超时 | 2026-10-01历史工单 | 原图失效、慢速源站与恢复缺口 | [历史原文](../../tasks/todo/2026-10-01-image-download-timeout.md)；副本一致 |
+| 复制分享及离开提醒 | 2026-10-02历史工单，v0.34.0 | 已部署能力及待用户验收边界 | [历史原文](../../tasks/todo/2026-10-02-media-copy-share.md)；副本一致 |
+
+本索引只覆盖本次归档，不冒充全项目资料已收齐。完整正文从侧聊工作树复制到正式根目录；历史原文保留版本，不替代当前应用源码。旧工单关联附件中已有5个缺失入口仍未恢复，不能将历史文档归档理解为全部旧附件已校验。
+
+## 模板保存与最新生成异常（2026-10-03）
+
+项目：video-api-debugger。来源：用户本轮剪贴板截图及明确确认。主题：保存按钮、主图最多1张、待确认、HTTP 502。原件仅本地保存，不公开Git或部署；完整要求及实施进度见[既有工单](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#图片模块保存位置主图默认与g1诊断2026-10-03)。
+
+| 原文件名 | 摘要、用途与版本 | 正式入口与校验 |
+|---|---|---|
+| codex-clipboard-03172503-81ea-4c23-a3cd-35b17c7ad922.png | 2026-10-03用户截图；保存按钮在表单底部紧贴选项；N1位置参考。N2已确认默认主图最多1张，不是结果张数；原件v1，无替代关系 | [原件](2026-10-03-feedback-template-save-default/codex-clipboard-03172503-81ea-4c23-a3cd-35b17c7ad922.png)；737x936 PNG可读；原件/副本SHA256一致a7ab662013168aa6958ff9ed67dcf66eb65190210a76f417510e19e0c3b985d4 |
+| codex-clipboard-9f700e16-f9d4-4e3c-a789-503a78fa5a19.png | 2026-10-03用户最新截图；两条img2.5-S最高4K结果待确认；G1只读诊断参考，更新事故时段、不替代凌晨原图；原件v1 | [原件](2026-10-03-feedback-generation-results/codex-clipboard-9f700e16-f9d4-4e3c-a789-503a78fa5a19.png)；572x470 PNG可读；原件/副本SHA256一致b91dcb90d0b60b33cc8fa287050a2d8b01c1f356d08e8290a35886c7b13789b0 |
+
+10:04-10:06北京时间只读核对：本批3条请求10-12秒后收到生成接口HTTP 502、无原图；队列未重启，配置9月22日后未更新。本轮未重发、不修改任务/账务/Provider；502内部原因未知。截图不含任务ID，不将截图与某条任务强行一一对应。

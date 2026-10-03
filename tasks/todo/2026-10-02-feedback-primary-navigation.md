@@ -3,12 +3,12 @@
 | 字段 | 内容 |
 |---|---|
 | 项目 | video-api-debugger |
-| 工单版本 | v1.0.0 |
+| 工单版本 | v1.0.1 |
 | 正式版本来源 | package.json、src/lib/release.ts、生产/api/release；开工v0.36.2，发布前重新锁定 |
 | 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
 | 实施/部署源 | /Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger；codex/canvas-liblib-layout；开工HEAD77e450138d06823ff92369c28bdc64ea9d09949e，干净 |
 | 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
-| 状态 | I1-I5已部署v0.36.3，发布检查完成、待用户手动验收；I6故障阶段已明确，底层原因待查，视频原图原件仍待归档 |
+| 状态 | I1-I5历史已部署；N1/N2已部署v0.36.4、待用户手动验收；G1明确最新上游HTTP 502、内部原因未知，未修复 |
 | 风险/验证等级 | 真实debug+UI守门员L3，生产切换按L4保护；旧general/L0不采纳；禁止主动浏览器/业务验收与独立审核线程 |
 | 创建/最后更新 | 2026-10-03，北京时间；文件名保留2026-10-02反馈日期 |
 
@@ -186,3 +186,47 @@ W1视频标注原件仍待归档；I6仅故障阶段明确、底层网络/代理
 整批后统一发布build内置检查、自行Review，聚焦commit/push/rollback、候选服务器切换、公网版本/BUILD/静态可达。用户手动验收；不浏览器/截图/功能回归/付费生成/DB写/登录点数Provider权限变更/装依赖。
 构建/服务异常、漂移/锁冲突、数据权限风险即停或回退；回执含正式工单、逐文件内容/diff、原因、命令结果、版本commit/tag/BUILD、公网证据及未验收项。
 ```
+
+## 图片模块保存位置、主图默认与G1诊断（2026-10-03）
+
+用户确认N2含义为“默认主图最多1张”，不是生成结果张数。N1/N2仅作用于图片模板工作台设置；用户已有明确保存的主图上限与策略不覆盖。G1为主控独立只读调查，本执行包不改生成接口、Provider、积分/账务或数据库，也不重发任务。
+
+| 编号 | 本轮范围 | 完成标准 | 当前记录 |
+|---|---|---|---|
+| N1 | 模块上下文设置的保存按钮 | 移至主图最少/最多、风格/参考/辅助上限之后的独立操作区，右对齐、与选项留白；仍调用原手动保存，保留真实保存中/错误/重试状态；不遮盖页面 | 代码/发布检查及部署完成，v0.36.4待用户手动验收；无浏览器或功能验收 |
+| N2 | 新建/缺省主图最多数量 | 新模块、新模板与确实无有效已存上限时默认1；主图最少仍为0；总上限10、风格/参考/辅助限制不变；已有有效保存值不变 | 代码/发布检查及部署完成，v0.36.4待用户手动验收；无DB写入、迁移或批量回填 |
+| G1 | 最新“生成结果待确认”现象 | 分清已确认事实与未知根因，不重发、不改Provider/账务/任务数据 | 主控只读证据已收到，HTTP 502 阶段已明确，内部原因及上游是否执行未知；未修复、未声称由本轮UI引起 |
+
+### N1/N2实现边界
+
+保存按钮位于数量设置区下方，单独成行并靠右；采用模块对话框内正常文档流，不做视口悬浮或遮挡表单。保留已有主按钮样式、Save图标、saveModule提交函数、moduleSaving/错误和重试状态，未改变外部/Esc关闭及未保存保护。新建模块/模板和默认模块不存在有效存储值时主图最多1张；已有模块/模板行中有效reference_limit及已存referencePolicy.primaryMax继续优先，临时草稿仍按已有恢复逻辑处理。未修改primaryMin 0、MAX_REFERENCE_IMAGES 10、风格/参考/辅助默认和已保存值；不操作数据库。
+
+### G1只读诊断（北京时间2026-10-03，最新）
+
+- 10:04-10:06北京时间主控以SQLite mode=ro/query_only=ON及白名单日志只读核对：近3小时3条 gpt-image-2.5-sunburst、quality=max、2752x2960任务创建于09:59:36、09:59:54、10:00:18，随后请求分别耗时11568ms、9902ms、11426ms返回HTTP 502。均为uncertain，无asset、source.json、image.part及upstreamRequestID。worker PID 1241475自2026-10-02 19:26:26持续active、期间未重启。截图无ID，不强行匹配某条任务。
+- 过去24小时同模型5条成功、5条uncertain；最新成功记录同为max/2752x2960，00:45:47创建、00:49:32完成。安全只读配置查询仅提取provider=musk、base_url=https://api.muskapis.com/与更新时间；setting.updated_at为9月22日12:14:08；未读取api_key。
+- 服务器provider/worker SHA分别为19e6eff0f43270450a0c6f45e00e53fabd0caee522034a3892a7ab4b58d82a29及e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813，与本地一致；这两文件在10月2日17:55之后未改。故障发生时运行v0.36.3；N1/N2尚未发布，后续v0.36.4的limits只增加默认主图常量、不改变生成等待时长。
+- 可确认：这3次请求收到HTTP 502且没有原图产物。不可推断502内部原因、上游是否已执行，也不能证明由今天的UI改动引起。旧“生成结果待确认”提示未清楚说明502事实，列为后续文案待办；本轮不改Provider、不查写账务/任务数据、不自动重发或生成。
+
+### 本轮附件
+
+| 原文件名 | 来源、用途 | 正式路径 | 版本/可读性/完整性 |
+|---|---|---|---|
+| codex-clipboard-03172503-81ea-4c23-a3cd-35b17c7ad922.png | 2026-10-03用户截图；图片模块保存按钮和主图默认设置参考 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-template-save-default/codex-clipboard-03172503-81ea-4c23-a3cd-35b17c7ad922.png | 原名保留；737x936；父侧sips可读；原件/归档SHA256均a7ab662013168aa6958ff9ed67dcf66eb65190210a76f417510e19e0c3b985d4；复用校验，不公开Git |
+| codex-clipboard-9f700e16-f9d4-4e3c-a789-503a78fa5a19.png | 2026-10-03用户最新截图；G1结果待确认诊断参考 | /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-feedback-generation-results/codex-clipboard-9f700e16-f9d4-4e3c-a789-503a78fa5a19.png | 原名保留；572x470；父侧sips可读；原件/归档SHA256均b91dcb90d0b60b33cc8fa287050a2d8b01c1f356d08e8290a35886c7b13789b0；复用校验，不公开Git |
+
+完整资料入口同步见[项目资料索引](../../docs/materials/index.md)。新截图与诊断不改变之前I6历史结论的时间范围；G1为更新后的事实，根因仍待确认。
+
+### v0.36.4发布回执
+
+N1/N2运行源码0fcea7dd2a91a5de427a1e1c9934c176e146fb9a，BUILD 0I77QmnNWDzJglbNdkjLN。源码分支codex/canvas-liblib-layout已push/ls-remote确认；rollback/2026-10-03-before-template-save-v0.36.4已推送，指向上一健康8315f02776290cda1c0f1e7286856d193f95dfca。既有正式入口https://sd2.youdooart.com/template-studio?type=image，已部署、待用户手动验收。
+
+实际9个应用文件：studio.tsx/CSS移动保存行并留白；limits.ts统一默认1常量，modules.ts/presets.ts/tasks.ts同步新建与缺省入口、保留明确已存上限/历史复现；package.json/package-lock.json仅同步版本、不改依赖；release.ts更新用户摘要。主图最少0、总上限10、生成count及Provider/worker/点数/登录权限不改。Review补齐非法referenceIds先校验，避免策略解析抛出非业务错误。
+
+发布检查：git diff/cached --check通过；依赖未升级；bash -n/node --check发布脚本通过；精确commit归档已排除docs/materials、env、DB、运行资产，SHA256 e4de09674d56ce0295b7137c30dfd66a74c1f40a0872715d4823e19108d1fb13。服务器release内NEXT_DIST_DIR=.next-prod-candidate npm run build完整通过，含lint/types；无需本地重复build或自动回归。候选包含保存布局和发布摘要后才切换。
+
+实际执行发布活动登记及服务器flock，候选源校验API/scripts/Prisma和Provider/worker/鉴权/成本/点数路径未变；rsync保护持久软链接、uploads/storage/videos可写目录。旧构建保留/srv/video-api-debugger/app/.next-prod-before-sd2-feedback-v0364，记录/srv/video-api-debugger/backups/sd2-feedback-v0364。只重启sd2-gray，图片worker PID1241475/启动时间/单元前后一致。
+
+公网及服务器config/release/login均200，公网release0.36.4及X-SD2-Origin server-42-193正确；受保护template-studio匿名307符合现有权限。9个源码SHA及20个相关静态SHA一致；4服务/定时器active。COMPLETE握手exit0、发布锁正常释放。[统一diff](2026-10-02-feedback-primary-navigation.diff)/[发布证据](2026-10-02-feedback-primary-navigation.evidence.json)保留此前交付并加入本轮。既有更新检测、同渠道SemVer、稍后去重、手动检查及刷新确认源码核对，未做更新弹窗实际操作验收。
+
+未做浏览器/截图/功能回归/付费生成/DB写或独立审查。G1是只读故障定位，不是502恢复；内部原因和上游是否执行未知。守门员首general/L0已纠正debug+ui+deploy/L3，生产切换继续回退/数据保护，误判记入全局日志。
