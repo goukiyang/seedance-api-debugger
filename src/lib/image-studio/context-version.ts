@@ -64,7 +64,7 @@ export async function snapshotModuleContextVersion(snapshotJson: string | null):
   let snapshot: Record<string, unknown>;
   try { snapshot = JSON.parse(snapshotJson || '{}'); } catch { return { code: null, state: 'missing' }; }
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return { code: null, state: 'missing' };
-  if (typeof snapshot.moduleContext !== 'string' || typeof snapshot.globalContext !== 'string') return { code: null, state: 'missing' };
+  if (typeof snapshot.moduleContext !== 'string') return { code: null, state: 'missing' };
   if (snapshot.moduleContextVersionRule === MODULE_CONTEXT_VERSION_RULE && validContextVersion(snapshot.moduleContextVersion)) {
     return { code: snapshot.moduleContextVersion, state: 'ready' };
   }
