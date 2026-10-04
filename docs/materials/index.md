@@ -257,3 +257,11 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 首批样板v1.0.0已做，待用户确认；线上未替换、未铺量，当前应用v0.38.0不变。已确认的长期方式为3–5代表样板→用户确认→批量制作，保留按类型选择构图。用户本轮仅提供文字，无新附件；本轮从已有四个模板任务取八份原图/真实生成结果，以及内置imagegen制作四幅设计板。设计板有重绘与比例精度限制，仅供选构图，真实比较以原图预览为准，不用重绘伪造质量变化。
 
 正式根私有[真实原图预览](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-04-template-cover-banner-pilot/preview-v1.html)及[素材与精确prompt清单](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-04-template-cover-banner-pilot/manifest-v1.json)为唯一交付入口，两个工作区均指向正式根，不复制原件到worktree。清单逐组保存原文件名、来源/任务对应、八原图可访问路径与SHA256、四设计板及生成器原件路径、提示词、已查参考和验证缺口。原始图片已打开可读，八份尺寸与元数据一致、SHA256匹配内容哈希文件名；脚本语法和裁切边界静态检查通过，未做浏览器/视觉功能验收。版本v1.0.0，首次样板，无替代关系；原图及生成器原件保留，不覆盖线上资产。本轮完整执行边界和确认门槛见[固定工单V1](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#v1封面与banner试做2026-10-04)。
+
+### Q1/Q2模板快捷设置与历史封面上下文（2026-10-04）
+
+- 资料名称/原文件名：模板设置与历史复现提示截图；`codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png`。来源：用户本轮提供；接收日期：2026-10-04；来源路径：`/var/folders/lt/cl_ckbmn1jl2wwj44t43qm6h0000gn/T/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png`。
+- 项目/主题/用途：video-api-debugger；模板快捷设置、另存为模板、恢复默认、历史生成封面上下文。作为 Q1/Q2 实施参考截图，画面可读地显示“恢复默认/保存设置/另存为模板”及退出历史复现模式后的上下文提示；不是实现或发布证据。
+- 正式归档：[原始截图](2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png)，正式路径：`/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png`。PNG 566×216、29,327 字节；已打开可读，源与副本逐字节比较一致，SHA-256 均为 `b4a88859c4791c715259ae98e6163b49749a3fd88150954697df3f5e419378a6`。
+- 版本/关系：首次归档，截图对应的应用版本未知；保留原文件名，不覆盖或替代既有附件。此 Q1/Q2 记录与封面/banner V1 样板任务分开，V1 状态及资料不变。
+- 当前工单：[Q1/Q2固定记录](../../tasks/todo/2026-10-02-feedback-primary-navigation.md)。v0.39.0已实现并部署快捷模板入口与原上下文恢复，待用户手动功能验收；该截图只作需求参考，不当作成功证据。正式根私有[统一diff](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/implementation-v0.39.0.diff)及[发布检查证据](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/deployment-v0.39.0.json)登记应用commit54f67d1、BUILDoxKFErSV4OZB-19N8xJKh、三个公网入口及15份静态文件检查；原图和证据不上传Git。
