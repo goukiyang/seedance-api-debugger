@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [头像受控随机生成器 V1](todo/2026-10-04-controlled-avatar-generator.md)：2026-10-04，工单v1.0.0；原30节需求及12条补充已整理，优先1/3/4/5/6/9；仅方案、实施未开始，不改应用、不发生成、不部署。[资料索引](../docs/materials/index.md#头像受控随机生成器-v1-需求2026-10-04)。
 - [D1统一素材库实施与发布](todo/2026-10-02-unified-resource-library.md#10-最新设计实施与发布2026-10-03)：按设计v1.2.0与v2原图实施；图片/视频参考直接开库，库内上传、类型/来源分离，真实图集/项目、全范围搜索、收藏、最近选用与顺序添加接通。v0.37.0已部署正式站（应用源码6d2f390，来自codex/canvas-liblib-layout，本目录仅同步记录）；构建/远端/公网/回退证据见工单，待用户手动验收。L2部分完成：use-only且无原图下载权限的共享/公共图片不能用于图片工作台，明确禁选；视频参考保留原ReferenceImage适配。[资料索引](../docs/materials/index.md#统一素材库批准实施)。
 - [C3/C4更新提醒](todo/2026-10-02-feedback-primary-navigation.md#c3c4更新刷新与外部提醒2026-10-03)：已部署v0.36.10，源码b26f9d216949c3601d2cc36d050e6fc922422ab1、BUILD MFC_yPnyTMuIibuxAwjsx；去掉无条件刷新二次确认，安全存入浏览器的模板草稿不误报丢失，真正保存/上传未完成及保存失败仍保护。外部保留版本提醒及刷新入口，不展示/返回更新摘要；23公网静态/8源码一致，4服务active，待用户手动验收。[原图索引](../docs/materials/index.md#更新刷新重复提醒与外部摘要)、[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
 - [C2外部视频扣费金额](todo/2026-10-02-feedback-primary-navigation.md#c2金额显示续办2026-10-03)：已部署v0.36.9，源码527d925ae1943557d164858f0a74cc7e1fd62c85、BUILD gbpec82z8F5gOaOcQAm6y；同普通生成账单模型/参考类型费率×真实生成用量显示金额，实扣优先、估算注明；19公网静态/8源码一致及4服务active，待用户手动；无现金账务回写或权限修改。[资料](../docs/materials/index.md#外部账号视频封面费用)、[diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
@@ -6572,3 +6573,4 @@ flowchart LR
 - `tasks/todo/2026-10-02-template-primary-actions.md`：模板主操作与产品弹窗
 - [模板工作台体验优化工单](todo/2026-10-02-template-workbench-ux.md)：WS1-WS7已获实施授权，当前实现/发布进度以同一原工单及顶部入口为准；历史来源和已有附件保留。
 - `tasks/todo/2026-10-02-unified-resource-library.md`：统一创作资源库功能盘点与整合建议
+- [头像受控随机生成器 V1 工单](todo/2026-10-04-controlled-avatar-generator.md)：2026-10-04，文档v1.0.0；方案与任务已整理，实施未开始；正文与来源见资料索引。
