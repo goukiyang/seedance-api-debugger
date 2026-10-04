@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '素材标题更紧凑，点击结果立即套用并显示来源；模板新结果用蓝点提醒并记住已看状态，支持的图片模型可选择4:1。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '另存模板后可在默认旁快捷套用；点击历史生成图片会恢复当时的上下文提示词，不混入当前上下文。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

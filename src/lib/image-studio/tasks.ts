@@ -236,9 +236,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           historicalReferenceOwners = Object.fromEntries(Object.entries(sourceSnapshot.authorizedReferenceOwners as Record<string, unknown>)
             .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
         }
-        if (!workspace && input.draft?.moduleContext === undefined) {
-          snapshotModuleContext = typeof sourceSnapshot.moduleContext === 'string' ? sourceSnapshot.moduleContext : '';
+        if (typeof sourceSnapshot.globalContext !== 'string' || typeof sourceSnapshot.moduleContext !== 'string') {
+          throw new StudioError('这条旧记录没有保存完整上下文，无法完整复现；请退出历史复现后使用当前设置', 409);
         }
+        // Reproduction must use the recorded contexts, including deliberately empty ones.
+        snapshotGlobalContext = sourceSnapshot.globalContext;
+        snapshotModuleContext = sourceSnapshot.moduleContext;
       } catch (error) {
         if (error instanceof StudioError) throw error;
         if (error instanceof StudioStyleError) throw new StudioError(error.message, error.status);
@@ -623,6 +626,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
     moduleContext: isAdmin && typeof parsed.moduleContext === 'string' ? parsed.moduleContext : '',
     unitCredits,
     sourceAvailable,
+    contextAvailable: typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',
+    contextConfigured: Boolean((typeof parsed.globalContext === 'string' && parsed.globalContext.trim()) || (typeof parsed.moduleContext === 'string' && parsed.moduleContext.trim())),
     referenceImages,
     fixedReferenceImages,
     primaryReferenceImages,

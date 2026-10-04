@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './ProductDialog.module.css';
 
-type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number | null; allowEmpty?: boolean; multiline?: boolean; anchor?: HTMLElement | null };
+type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number | null; allowEmpty?: boolean; multiline?: boolean; anchor?: HTMLElement | null; onSubmit?: (value: string) => Promise<void> };
 type Request = Options & { message: string; value?: string; anchor: HTMLElement | null };
 
 function ProductDialog({ request, onResolve }: { request: Request; onResolve: (value: string | null) => void }) {
@@ -16,11 +16,24 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   const titleId = useId();
   const descriptionId = useId();
   const [value, setValue] = useState(request.value || '');
+  const busy = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const dismiss = () => { if (!busy.current) onResolve(null); };
   const [position, setPosition] = useState<{ left: number; top: number; anchored: boolean } | null>(null);
   const naming = request.value !== undefined;
   const maxLength = request.maxLength === undefined ? 120 : request.maxLength;
   const valid = !naming || ((request.allowEmpty || Boolean(value.trim())) && (maxLength === null || value.trim().length <= maxLength));
-  useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, initialFocusRef: naming ? input : cancel, onDismiss: () => onResolve(null) });
+  useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, initialFocusRef: naming ? input : cancel, onDismiss: dismiss });
+  async function submit() {
+    if (!valid || busy.current) return;
+    const result = naming ? value.trim() : 'yes';
+    if (!request.onSubmit) { onResolve(result); return; }
+    busy.current = true; setSaving(true); setError('');
+    try { await request.onSubmit(result); onResolve(result); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败，请重试'); }
+    finally { busy.current = false; setSaving(false); }
+  }
   useEffect(() => {
     dialog.current?.showModal();
     (naming ? input.current : cancel.current)?.focus({ preventScroll: true });
@@ -70,17 +83,18 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position?.anchored)}
     style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto', margin: 0 } : undefined}
     aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}>
-    <form onSubmit={event => { event.preventDefault(); if (valid) onResolve(naming ? value.trim() : 'yes'); }}>
+    <form onSubmit={event => { event.preventDefault(); void submit(); }} aria-busy={saving}>
       <header className={styles.header}><h2 id={titleId}>{request.title || (naming ? '命名' : '确认操作')}</h2>
-        <button type="button" className={styles.close} onClick={() => onResolve(null)} aria-label="关闭" title="关闭"><X size={18} /></button></header>
+        <button type="button" className={styles.close} disabled={saving} onClick={dismiss} aria-label="关闭" title="关闭"><X size={18} /></button></header>
       <p id={descriptionId} className={styles.message}>{request.message}</p>
       {naming && (request.multiline
-        ? <textarea ref={input as React.RefObject<HTMLTextAreaElement>} className={styles.input} aria-label={request.message} rows={4} value={value} onChange={event => setValue(event.target.value)} />
-        : <input ref={input as React.RefObject<HTMLInputElement>} className={styles.input} aria-label={request.message} value={value} onChange={event => setValue(event.target.value)} />)}
+        ? <textarea ref={input as React.RefObject<HTMLTextAreaElement>} disabled={saving} className={styles.input} aria-label={request.message} rows={4} value={value} onChange={event => setValue(event.target.value)} />
+        : <input ref={input as React.RefObject<HTMLInputElement>} disabled={saving} className={styles.input} aria-label={request.message} value={value} onChange={event => setValue(event.target.value)} />)}
       {naming && maxLength !== null && value.trim().length > maxLength && <p role="alert" className={styles.message}>最多 {maxLength} 字，请缩短后再提交。</p>}
+      {error && <p role="alert" className={styles.message}>{error}</p>}
       <footer className={styles.actions}>
-        <button ref={cancel} type="button" className={styles.secondary} onClick={() => onResolve(null)}>取消</button>
-        <button type="submit" className={request.danger ? styles.danger : styles.primary} disabled={!valid}>{request.confirmLabel || (naming ? '保存名称' : '继续')}</button>
+        <button ref={cancel} type="button" disabled={saving} className={styles.secondary} onClick={dismiss}>取消</button>
+        <button type="submit" className={request.danger ? styles.danger : styles.primary} disabled={!valid || saving}>{saving ? '保存中…' : request.confirmLabel || (naming ? '保存名称' : '继续')}</button>
       </footer>
     </form>
   </dialog>, document.body);
