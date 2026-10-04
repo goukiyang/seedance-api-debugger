@@ -182,7 +182,7 @@ L1：加载动效独立打样，已完成。完成标准：可交互比较各状
 
 ### 历史恢复、查看与版本字号
 
-2026-10-04，项目video-api-debugger，来源用户本轮R1/R2文字及R3浏览器评论，文本v1；关键词R1直接恢复、R2无文字Eye查看、去重复入口、R3版本字号增加50%。原文、范围和实施见[固定工单R1-R3](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#r1-r3历史恢复查看与版本字号2026-10-04)，正文可读；只取消历史恢复专用确认，其他安全/付费/退出保护保留，PATCH0.37.6待整批构建及安全发布。当前资料补充不替代C5-C8/P1旧图与旧记录。
+2026-10-04，项目video-api-debugger，来源用户本轮R1/R2文字及R3浏览器评论，文本v2交付补充；关键词R1直接恢复、R2无文字Eye查看、去重复入口、R3版本字号增加50%。原文、范围和实施见[固定工单R1-R3](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#r1-r3历史恢复查看与版本字号2026-10-04)，正文可读；只取消历史恢复专用确认，其他安全/付费/退出保护保留。北京时间08:00:29已发布0.37.6，应用2cb3e9b/BUILD 9OIK8DVopn89g3Quh4LRG，R1-R3均待用户手动验收。当前资料补充不替代C5-C8/P1旧图与旧记录。正式根本机[本轮统一diff](2026-10-03-media-cover-interactions/implementation-v0.37.6.diff)、[0.37.6部署证据JSON](2026-10-03-media-cover-interactions/deployment-v0.37.6.json)可访问、对应本次提交，私有不Git/archive；候选构建及发布检查、一次标记误报守旧与证据复用详见工单。
 
 关键用户原件已查看可读，按原文件名归档在正式根/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions，源路径/var/folders/lt/cl_ckbmn1jl2wwj44t43qm6h0000gn/T/加各原名；均私有、不Git/archive：
 - [codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png](2026-10-03-media-cover-interactions/codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png)：接收2026-10-04，用户本轮clipboard，R1恢复历史设置弹窗证据，原件v1非替代旧PNG，39476字节，源/归档SHA256 16480b548d9736ec65f9d0c2cbea6361253cf958ef54d6f3bf1d12f4115e4361一致。
