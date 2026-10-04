@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { settingsReturnTarget } from '@/lib/navigation/settings-return';
+import { useUnsavedNavigation } from './use-unsaved-navigation';
 
-export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: boolean, fallback: string) {
+export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: boolean, fallback: string, confirm: Parameters<typeof useUnsavedNavigation>[1]) {
   const router = useRouter();
   const snapshots = Object.fromEntries(Object.entries(drafts).map(([key, value]) => [key, JSON.stringify(value)]));
   const baseline = useRef<Record<string, string> | null>(null);
@@ -13,6 +14,10 @@ export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: bo
   const [completed, setCompleted] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const signature = JSON.stringify(snapshots);
+  const dirty = Boolean(baseline.current && Object.keys(snapshots).some(key => snapshots[key] !== baseline.current![key]));
+  useUnsavedNavigation(dirty || busy, confirm, {
+    unsaved: dirty ? ['后台设置'] : [], busy: busy ? ['设置正在保存'] : [],
+  });
 
   useEffect(() => {
     if (!ready) return;

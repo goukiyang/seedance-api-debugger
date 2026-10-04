@@ -350,7 +350,8 @@ export default function AdminIntegrationsClient() {
     mediakit: { config: aiMediaKitConfig, entered: Boolean(aiMediaKitApiKey), clearAiMediaKitApiKey },
     h3: { config: h3Config, apiEntered: Boolean(h3ApiToken), adminEntered: Boolean(h3AdminToken), clearH3ApiToken, clearH3AdminToken },
     banana: bananaDirty,
-  }, !loading, '/admin');
+    operations: { muskTesting, h3Testing, h3QueueLoading },
+  }, !loading, '/admin', confirm);
 
   const statusText = useMemo(() => {
     if (config.ready) return '已启用，可被 Codex 调用';

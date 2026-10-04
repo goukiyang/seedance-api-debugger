@@ -18,7 +18,7 @@ export function settingsReturnTarget(fallback: string) {
     try {
       const target = new URL(candidate, here.origin);
       if (target.origin !== here.origin || target.pathname === here.pathname
-        || !/^\/(admin|generate|template-studio|image-studio|projects|assets|tasks)(\/|$)/.test(target.pathname)) continue;
+        || !/^\/(admin|generate|template-studio|template-generate|templates|image-studio|projects|video-cards|assets|tasks|tools|workbench|collections|cutout|account|points|dashboard|notifications|approvals|help|config|videos)(\/|$)/.test(target.pathname)) continue;
       return target.pathname + target.search + target.hash;
     } catch { /* Invalid or external origins fall back to the owning page. */ }
   }
