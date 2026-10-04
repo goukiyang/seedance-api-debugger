@@ -197,3 +197,9 @@ R3浏览器标记图仅聊天像素，原文件名/本地路径未提供，待�
 本轮浏览器标记截图2张仅聊天像素，原文件名及本地路径未提供，待补持久原件，未归档或核验复制完整性：S2风格组dialog target dialog.studio_styleDialog，S3主图select target materialHeading select，页面template-studio/1068x871/v0.37.6，适用本轮卡片与紧凑控件要求，不当作线上回退证据。既有[R1恢复原图](2026-10-03-media-cover-interactions/codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png)和[R2操作行原图](2026-10-03-media-cover-interactions/codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png)保持私有、可读且前轮hash已核，仅参考保持前修，不冒充本轮原件或自动截图。
 
 收尾追加“每模板12张/3行、超出翻页、宽屏与开源方案”文字为独立设计咨询，2026-10-04，原文件名不适用，无附件；parent另行只读研究，本批未实施分页，也未因此增加应用版本。D2仍待具体列表；OS双击时序和外来预裁素材边界仍登记。
+
+### 模板结果分页方案（T1研究建议）
+
+2026-10-04，项目video-api-debugger，来源用户设计咨询及parent本轮只读开源研究汇总，原文件名不适用，无新附件，建议v1，不替代S1-S3或历史实现记录。关键词T1、模板结果、每页12张、3行/宽屏、容器查询、cursor/真实count、Mantine、TanStack Query、页缓存、分页状态恢复。完整原话、当前接口/布局证据、建议边界及官方/原始代码/MIT链接见[固定工单T1](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#t1模板结果分页方案2026-10-04仅研究建议)，正文可读。
+
+parent核对现网源为auto-fill/min220/gap20、每批24/cursor与追加/静默刷新，没有真实总页；建议固定每页最多12，按结果区宽度2/3/4/6列，不暗增数量，不承诺窄区3行。受控页码、紧凑条、保留旧页数据和预读等仅开源模式参考；复用现PaginationControls/fetch/状态存储，不安装新整套库，真实count缺项需后续获准再实施。只读研究已完成，建议未批准实施、未接入/功能验证，本轮不改分页代码、接口或0.37.7版本/服务。Jev doctor由parent已核deferred cloud_disabled/not_authorized，无API调用，本lead不重复或开启付费。资料链接可定位原文，外部内容核对来源为parent，不冒称本lead重复读码验证；无附件复制校验项。
