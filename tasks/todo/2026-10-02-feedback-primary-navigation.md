@@ -717,3 +717,24 @@ parent实际核对：当前结果.grid为auto-fill、最小220px、gap20px，用
 优先复用项目PaginationControls.tsx、fetch/AbortController和既有状态存储；真实count确有需要时再经授权扩展只读分页接口。不为小网格安装Mantine/MUI/TanStack全套或虚拟列表，仅借鉴模式，未复制或验证新依赖。parent已核Jev doctor为deferred cloud_disabled/not_authorized，无API调用；本lead不重复检查、不因方案比较开启服务或付费。
 
 开源/官方依据（parent已读，链接按其汇总保留）：[Mantine Pagination](https://mantine.dev/core/pagination/)、[use-pagination源码](https://github.com/mantinedev/mantine/blob/master/packages/%40mantine/hooks/src/use-pagination/use-pagination.ts)、[Pagination样式源码](https://github.com/mantinedev/mantine/blob/master/packages/%40mantine/core/src/components/Pagination/Pagination.module.css)、[TanStack React分页示例](https://github.com/TanStack/query/blob/main/examples/react/pagination/src/pages/index.tsx)、[TanStack分页文档](https://tanstack.com/query/latest/docs/framework/react/guides/paginated-queries)、[MDN容器查询](https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Containment/Container_queries)、[Mantine MIT](https://github.com/mantinedev/mantine/blob/master/LICENSE)、[TanStack Query MIT](https://github.com/TanStack/query/blob/main/LICENSE)。未新建说明文档；正式工单和索引同步聚焦提交，T1不是本次已实现功能。
+
+
+### U2封面点击体验排查（2026-10-04，仅判断与建议）
+
+用户反馈：点击生图模板的生成图片封面体感很差，好像没动静；要求判断原因和更好的做法。本轮只读代码排查和方案比较，不修改应用，不执行浏览器点击/生图/API功能测试，不升级或部署。公网api/release读取为0.37.7，与现有发布记录一致；实际生产源codex/canvas-liblib-layout起始干净。守门员start/finish为L0研究及固定记录，无归类误判。Jev沿用上一轮doctor的deferred/cloud_disabled_or_not_authorized缺口，不重复启用或外发。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| U2 | 封面点击体验排查 | 找到“没动静”的原因，给出不影响双击查看的改进方案 | 已完成代码排查与建议，交互改进未实施 |
+
+确定的代码原因：ResultImageCover.tsx:36用1000ms定时器区分鼠标单击与双击；等待期未设置pending/pressed反馈。19-23行捕获document pointerdown/keydown并取消待执行恢复，等待时点左侧或别处会取消，不应取消这些保护后让陈旧恢复覆盖新输入。33行restoreDisabled直接return，但button无对应禁用原因提示；包括无snapshot、提交/上传/保存、比例编辑、待确认提交和模块未active，不可把全部无反应都归为延时。keyboard detail=0即时恢复，不受1秒延时。
+
+studio.tsx:1027 restoreTask直接批量写当前状态，无网络请求，不是此路径等待上游生图。成功却setError长句，在1391行左侧设置区底部以role=alert/.error显示；CSS error为#ffb4ab。1410封面未传入当前恢复结果ID或已套用状态，只有鼠标悬停“ 双击放大 ”提示。因此恢复同一配置、设置区离开视野或忙碌拦截时，点击效果更难判断。以上为代码证据，不声称已量测真实浏览器延迟、渲染成本或复现每次点击。
+
+建议v1共同部分：按下立即显示轻量局部边框反馈，不先冒称已套用；恢复完成以真实成功状态在封面/卡片非反应按钮位置显示勾选和“已套用”，左侧设置顶部显示来源，同步恢复原参数。不弹确认、不自动生成或扣费、不自动跳页/强制滚动、不弹右下角重复提醒。成功与错误状态分开，不污染既有错误；忙碌和无快照的阻止原因就地可见且不降低保护。重复套用同一配置仍有反馈；编辑参数后不能继续冒称完全一致，应清除已套用或标来源已修改。选择反馈不混用下载多选状态，点赞/收藏/删除/复制/查看控件继续隔离事件。
+
+两种时序不能同时保证：A保留已确认双击只预览、不恢复，单击先有待执行反馈，现有等待完成才恢复；可评估约300-400ms候选但不能用固定短阈值保证所有OS慢速双击不恢复，未定阈值/未实施。B最快方案单击释放即恢复并显示真实状态，双击继续放大，独立Eye查看保持纯预览；由于原生dblclick在两次click之后，双击也会先套用配置。这是对旧“双击预览不恢复”语义的改变，须明确接受后才落地，不默改。推荐先补所有状态反馈；若优先即时套用，采用B并明确取舍，而非只缩短timer假称无副作用。撤销如引入仅针对本次恢复且保护之后的新输入，不默认扩大本轮功能。
+
+官方/开源依据：[MDN dblclick](https://developer.mozilla.org/en-US/docs/Web/API/Element/dblclick_event)说明事件在两次click之后；[React Aria GridList](https://react-aria.adobe.com/GridList)官方API及公开图片网格React示例明确分开data-pressed/data-selected/data-disabled，作为反馈模式参考。已读公开示例代码与API，不声称读取底层交互源码：历史raw路径usePress/useSelectableItem已失效404；未安装/复制新库。React Spectrum仓库LICENSE为Apache-2.0，只借鉴模式，无接入或真实运行验证。沿用现有组件即可，不为局部反馈引入全套列表库。
+
+本轮无新增附件，文字来源为用户当前对话，既有R1/R2原图与S2/S3标记图缺口保持。只更新本工单与资料索引并同步正式根/生产源，聚焦提交推送；应用版本0.37.7不变。遗留：真实浏览器响应时序与视觉尚未验证，A/B时序取舍尚未获实施确认，T1分页也仍只是研究方案。
