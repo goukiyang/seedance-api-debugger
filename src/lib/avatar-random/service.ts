@@ -55,6 +55,7 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
     if (!source && action==='styling') throw new StudioError('保持此人需要其已完成的原图参考；原基准不会自动替换');
     const asset = await prisma.asset.findFirst({ where: { id: baselineId, owner_id: owner, status: 'active', type: 'image' } });
     if (!asset && action==='styling') throw new StudioError('人物原图已不可用，请重新选择');
+    if (baselineId && (!source || !asset)) throw new StudioError('原身份基准已不可用，人物草稿和历史仍保留；不能丢弃参考图后冒充保持同人',409);
     if(source&&asset) referenceIds.push(baselineId);
   }
   const historyRows = await prisma.platformSetting.findMany({ where: { key: { startsWith: `avatar:v1:${owner}:plan:` } }, orderBy: { created_at: 'desc' }, take: 30 });
