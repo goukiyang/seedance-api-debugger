@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '历史图片设置直接恢复，原恢复按钮改为查看图标并去掉重复入口，顶栏版本号放大50%。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '资产视频封面和播放完整显示，风格组点击卡片直接选用，主图等数量控件与标题等高。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

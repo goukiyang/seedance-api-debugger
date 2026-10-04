@@ -4,8 +4,8 @@
 
 :global(.asset-library-page) .cardMedia.cardMediaImage > img,
 :global(.asset-library-page) .cardMedia.cardMediaImage > video,
-:global(.asset-library-page) .cardMedia.cardMediaVideo > img,
-:global(.asset-library-page) .cardMedia.cardMediaVideo > video,
+:global(.asset-library-page) .cardMedia.cardMediaVideo img,
+:global(.asset-library-page) .cardMedia.cardMediaVideo video:not([hidden]),
 :global(.asset-library-page) .cardMedia.cardMediaUnknownRatio > img,
 :global(.asset-library-page) .cardMedia.cardMediaUnknownRatio > video {
   position: absolute;
@@ -16,6 +16,7 @@
   min-inline-size: 0;
   min-block-size: 0;
   object-fit: contain;
+  object-position: center;
 }
 
 :global(.asset-library-page) .cardMedia.cardMediaImage {

@@ -189,3 +189,9 @@ L1：加载动效独立打样，已完成。完成标准：可交互比较各状
 - [codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png](2026-10-03-media-cover-interactions/codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png)：接收2026-10-04，用户本轮clipboard，R2恢复按钮及重复查看操作行证据，原件v1非替代旧PNG，22347字节，源/归档SHA256 09c884786253ebb0a1a44683764aa07bbbfa740941c3242b88aa009910a6ef55一致。
 
 R3浏览器标记图仅聊天像素，原文件名/本地路径未提供，待补持久原件，可读/完整性未核验，不拿上述两PNG冒充。历史OS双击1000ms边界仍在，D2具体列表仍待确认。
+
+### 视频比例、风格卡片与数量控件
+
+2026-10-04，项目video-api-debugger，用户文字与浏览器评论，文本v1，关键词S1视频contain固定外框/竖屏黑边、S2卡片选用/取消与管理事件隔离、S3标题行高/主图风格组参考图数量select。原文、真实源码证据及范围见[固定工单S1-S3](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#s1-s3视频比例风格卡片与数量控件2026-10-04)，正文可读；同交付PATCH0.37.7待整批构建及安全发布，不替代R1-R3和历史资料。用户已确认外框不变，不裁剪拉伸，不改数量/选中/保存业务。
+
+本轮浏览器标记截图2张仅聊天像素，原文件名及本地路径未提供，待补持久原件，未归档或核验复制完整性：S2风格组dialog target dialog.studio_styleDialog，S3主图select target materialHeading select，页面template-studio/1068x871/v0.37.6，适用本轮卡片与紧凑控件要求，不当作线上回退证据。既有[R1恢复原图](2026-10-03-media-cover-interactions/codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png)和[R2操作行原图](2026-10-03-media-cover-interactions/codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png)保持私有、可读且前轮hash已核，仅参考保持前修，不冒充本轮原件或自动截图。

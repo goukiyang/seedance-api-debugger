@@ -3,7 +3,7 @@
 import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { Check, Combine, ImagePlus, Layers, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import { Combine, ImagePlus, Layers, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -157,15 +157,23 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
       <div className={styles.styleGrid}>{groups.map(group => {
         const used = selected.some(item => item.id === group.id);
         const exceedsLimit = !used && (selectedCount + group.referenceCount > maxReferences || selected.length >= MAX_REFERENCE_IMAGES);
-        return <article key={group.id} className={styles.styleCard}>
-          <div className={styles.styleCover}>{group.coverUrl && <img src={group.coverUrl} alt={`${group.name}封面`} loading="lazy" />}</div>
-          <strong title={group.name}>{group.name}</strong>
-          <div className={styles.styleActions}>
-            <button type="button" disabled={disabled || busy || exceedsLimit} title={exceedsLimit ? `可选风格图片上限 ${maxReferences} 张，已选 ${selectedCount} 张` : undefined} aria-pressed={used} onClick={() => onChange(used ? selected.filter(item => item.id !== group.id) : [...selected, group])}>{used ? <Check size={16} /> : <Plus size={16} />}{used ? '已使用' : '使用'}</button>
-            {group.canManage && <><button type="button" disabled={busy} title="编辑风格组" aria-label={`编辑${group.name}`} onClick={() => edit(group)}><Pencil size={16} /></button>
+        const selectionDisabled = Boolean(disabled || busy || exceedsLimit);
+        const toggleSelection = () => {
+          if (!selectionDisabled) onChange(used ? selected.filter(item => item.id !== group.id) : [...selected, group]);
+        };
+        return <article key={group.id} className={styles.styleCard} data-selected={used || undefined} data-disabled={selectionDisabled || undefined}
+          title={exceedsLimit ? `可选风格图片上限 ${maxReferences} 张，已选 ${selectedCount} 张` : undefined}
+          onClick={event => { if (!(event.target as Element).closest('button, input, label')) toggleSelection(); }}>
+          <button type="button" className={styles.styleSelect} disabled={selectionDisabled} aria-pressed={used} aria-label={`${used ? '取消选用' : '选用'}风格组${group.name}`}
+            onClick={event => { event.stopPropagation(); toggleSelection(); }}>
+            <span className={styles.styleCover}>{group.coverUrl && <img src={group.coverUrl} alt={`${group.name}封面`} loading="lazy" />}</span>
+            <strong title={group.name}>{group.name}</strong>
+          </button>
+          {group.canManage && <div className={styles.styleActions} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+            <button type="button" disabled={busy} title="编辑风格组" aria-label={`编辑${group.name}`} onClick={() => edit(group)}><Pencil size={16} /></button>
               <button type="button" disabled={busy} title="删除风格组" aria-label={`删除${group.name}`} onClick={() => void remove(group)}><Trash2 size={16} /></button>
-              <input type="checkbox" aria-label={`选择${group.name}用于合并`} checked={mergeIds.includes(group.id)} disabled={busy} onChange={event => setMergeIds(current => event.target.checked ? [...current, group.id] : current.filter(id => id !== group.id))} /></>}
-          </div>
+              <input type="checkbox" aria-label={`选择${group.name}用于合并`} checked={mergeIds.includes(group.id)} disabled={busy} onChange={event => setMergeIds(current => event.target.checked ? [...current, group.id] : current.filter(id => id !== group.id))} />
+          </div>}
         </article>;
       })}</div>
       {cursor && <button type="button" disabled={loading} onClick={() => void load(cursor)}>加载更多</button>}

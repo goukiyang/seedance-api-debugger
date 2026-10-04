@@ -69,9 +69,9 @@
 .imageSectionHeading .referenceLimitControl { flex-wrap: wrap; }
 .materialSection { min-width: 0; padding: 14px 0 16px; border-bottom: 1px solid #353a3e; }
 .materialSection:first-of-type { padding-top: 0; }
-.materialHeading { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 8px; min-height: 38px; margin-bottom: 10px; }
-.materialHeading h3 { margin: 4px 0 0; font-size: 15px; line-height: 1.4; font-weight: 700; letter-spacing: 0; }
-.page .materialHeading select { width: 84px; min-width: 0; padding: 5px 6px; font-size: 11px; }
+.materialHeading { --material-heading-font-size: 15px; --material-heading-line-height: 1.4; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 8px; min-height: 38px; margin-bottom: 10px; }
+.materialHeading h3 { margin: 4px 0 0; font-size: var(--material-heading-font-size); line-height: var(--material-heading-line-height); font-weight: 700; letter-spacing: 0; }
+.page .materialHeading select { box-sizing: border-box; width: 84px; min-width: 0; height: calc(var(--material-heading-font-size) * var(--material-heading-line-height)); min-height: 0; margin-top: 4px; padding: 0 6px; font-size: 11px; line-height: 1; }
 .materialHeading > span { align-self: center; font-size: 11px; color: #aeb6bc; white-space: nowrap; text-align: right; }
 .materialHeading b { color: #7db9e5; font-weight: 600; }
 .materialHeading small { display: block; margin-top: 2px; font-size: 10px; }
@@ -94,7 +94,7 @@
 .materialFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 10px; color: #aeb6bc; font-size: 11px; }
 .page .materialFooter button { padding: 5px 7px; font-size: 11px; }
 @media (hover: none) { .page .materialGrid .referenceGrip { opacity: 1; } }
-@media (max-width: 420px) { .materialHeading { gap: 6px; } .materialHeading h3 { font-size: 14px; } .page .materialHeading select { width: 78px; } }
+@media (max-width: 420px) { .materialHeading { --material-heading-font-size: 14px; gap: 6px; } .page .materialHeading select { width: 78px; padding-inline: 3px; } }
 .page textarea, .page input:not([type=file]), .page select { box-sizing: border-box; border: 1px solid #465057; border-radius: 6px; padding: 10px; background: #171c1f; color: #eef0f2; font: inherit; max-width: 100%; }
 .page textarea { width: 100%; resize: vertical; min-height: 120px; line-height: 1.6; }
 .references { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -125,7 +125,12 @@
 .dialog.styleDialog { width: min(760px, calc(100vw - 32px)); }
 .styleGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 12px; margin: 16px 0; }
 .styleCard { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 10px; border: 1px solid #465057; border-radius: 6px; }
-.styleCard > strong { font-size: 14px; overflow-wrap: anywhere; line-height: 1.4; }
+.styleCard:not([data-disabled]) { cursor: pointer; }
+.styleCard[data-selected] { border-color: #79daca; background: #123b33; }
+.styleCard:has(.styleSelect:focus-visible) { outline: 2px solid #79daca; outline-offset: 2px; }
+.dialog .styleSelect { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-items: start; gap: 8px; width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; }
+.dialog .styleSelect:not(:disabled):hover { background: transparent; }
+.styleSelect > strong { font-size: 14px; overflow-wrap: anywhere; line-height: 1.4; }
 .styleCover { aspect-ratio: 1; min-width: 0; background: #080a0b; }
 .styleCover img { width: 100%; height: 100%; object-fit: contain; }
 .styleActions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
