@@ -21,7 +21,7 @@ type Props = {
   variant?: 'drawer' | 'inline' | 'card';
   cardId?: string | null;
   onClose: () => void;
-  onSave: (payload: Record<string, unknown>) => Promise<void>;
+  onSave: (payload: Record<string, unknown>) => Promise<boolean>;
 };
 
 type ContextCardsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -107,6 +107,8 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
   const dialogRef = useRef<HTMLElement>(null);
   const shellRef = useRef<HTMLElement | null>(null);
   const backdropRef = useRef<HTMLButtonElement>(null);
+  const saveLock = useRef(false);
+  const [manualSaving, setManualSaving] = useState(false);
 
   useEffect(() => {
     if (!template) return;
@@ -202,7 +204,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
   };
 
   const requestClose = async () => {
-    if (saving) return;
+    if (saving || saveLock.current) return;
     const cardsDirty = JSON.stringify(contextCards) !== initialCardsJsonRef.current;
     const fieldsDirty = Boolean(template && (
       name !== template.name
@@ -213,6 +215,17 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
     if ((cardsDirty || fieldsDirty) && !(await confirm('模板修改尚未全部保存，确定关闭？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     onClose();
   };
+  const save = async () => {
+    if (!payload || saving || saveLock.current || contextCardsSaveStatus === 'saving') return;
+    saveLock.current = true;
+    setManualSaving(true);
+    try {
+      if (await onSave(payload)) {
+        initialCardsJsonRef.current = JSON.stringify(contextCards);
+        if (variant !== 'inline') onClose();
+      }
+    } finally { saveLock.current = false; setManualSaving(false); }
+  };
 
   useDialogDismiss({
     open: open && variant !== 'inline' && Boolean(template && payload),
@@ -220,8 +233,8 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
     dismissSurfaceRef: shellRef,
     isDismissTarget: (target) => target === backdropRef.current || target === shellRef.current,
     onDismiss: requestClose,
-    dismissOnOutside: !saving,
-    dismissOnEscape: !saving,
+    dismissOnOutside: !saving && !manualSaving,
+    dismissOnEscape: !saving && !manualSaving,
   });
 
   if (!open || !template || !payload) return null;
@@ -237,8 +250,8 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
               ? '卡片保存失败'
               : '卡片修改会自动保存'}
       </span>
-      <button type="button" className="is-primary sd2-loading-surface" data-busy={saving} onClick={() => onSave(payload)} disabled={saving || !name.trim()}>
-        {saving ? '保存中...' : '保存模板版本'}
+      <button type="button" className="is-primary sd2-loading-surface" data-busy={saving || manualSaving} onClick={() => void save()} disabled={saving || manualSaving || contextCardsSaveStatus === 'saving' || !name.trim()}>
+        {saving || manualSaving ? '保存中...' : '保存模板版本'}
       </button>
     </>
   );
@@ -251,7 +264,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
             <span>模板工作台</span>
             <h2>{template.name}</h2>
           </div>
-          {variant === 'drawer' && <button type="button" onClick={onClose}>关闭</button>}
+          {variant === 'drawer' && <button type="button" disabled={saving || manualSaving} onClick={requestClose}>关闭</button>}
           {variant === 'inline' && (
             <div className="template-drawer-head-actions">
               {editorActions}
@@ -262,6 +275,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
 
       {error && <div className="template-drawer-error">{error}</div>}
 
+      <fieldset disabled={saving || manualSaving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <TemplateContextCardsPanel
         cards={contextCards}
         saveStatus={contextCardsSaveStatus}
@@ -271,9 +285,10 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
         editorMode={variant === 'card' ? 'card-page' : 'overview'}
         editingCardId={cardId}
         backHref={`/admin/templates/${template.id}`}
-        onChange={setContextCards}
+        onChange={cards => { if (!saveLock.current && !saving) setContextCards(cards); }}
         onRewriteCard={rewriteContextCard}
       />
+      </fieldset>
     </>
   );
 

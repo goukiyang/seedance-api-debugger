@@ -675,6 +675,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: styleGroups.map(group => group.id),
     model: moduleModel, resolution: normalizeImageResolution(moduleModel, resolution), quality: normalizeImageStudioQuality(moduleModel, quality) });
   const contextDialogOpening = useRef('');
+  const latestSettingsDraft = useRef('');
+  latestSettingsDraft.current = JSON.stringify({ moduleDraft, fixedReferences: fixedReferencePayload(fixedReferences) });
+  async function saveModuleSettings() {
+    const submitted = latestSettingsDraft.current;
+    const result = await saveModule();
+    if (result !== false && latestSettingsDraft.current === submitted) moduleDialog.current?.close();
+  }
   function openModuleDialog() {
     if (!draftLoaded || draftRestoring) return;
     contextDialogOpening.current = contextDialogSnapshot;
@@ -732,6 +739,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     try {
       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: module.id, revision: revisionOverride, ...snapshot, context: contextEditable ? contextSnapshot : undefined, fixedReferences: fixedEditable && (manualSettings || fixedOverride) ? fixedReferencePayload(fixedSnapshot) : undefined }) }));
+      if (!Number.isInteger(result.revision) || result.revision <= revisionOverride) throw new Error('保存结果尚未确认，当前草稿已保留，请核对后重试');
       revisionRef.current = result.revision;
       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
       setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
@@ -1596,9 +1604,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </div>
       <div className={styles.moduleSettingsActions}>
         <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
-        {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
+        {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
       </div>
-      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
+      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button disabled={moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button></p>}
       <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>

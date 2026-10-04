@@ -19,7 +19,12 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const contextInput = useRef<HTMLTextAreaElement>(null);
+  const saveLock = useRef(false);
+  const latestText = useRef(text);
+  latestText.current = text;
   const url = `/api/template-studio/context${draftId ? `?draftId=${encodeURIComponent(draftId)}` : ''}`;
+  const latestUrl = useRef(url);
+  latestUrl.current = url;
   useEffect(() => {
     const controller = new AbortController();
     void fetch(url, { cache: 'no-store', signal: controller.signal }).then(async response => {
@@ -31,15 +36,22 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
     return () => controller.abort();
   }, [url]);
   async function save() {
-    if (!value?.canEdit || busy) return;
+    if (!value?.canEdit || busy || saveLock.current) return;
+    saveLock.current = true;
+    const submitted = text;
+    const target = url;
     setBusy(true); setMessage('');
     try {
-      const response = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: text, revision: value.revision }) });
+      const response = await fetch(target, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: submitted, revision: value.revision }) });
       const data = await response.json();
       if (!response.ok) throw new Error(response.status < 500 ? data.error : '保存失败，编辑仍保留，请重试');
-      setValue(data); setMessage('已保存');
+      if (typeof data.context !== 'string' || !Number.isInteger(data.revision) || data.revision <= value.revision) throw new Error('保存结果尚未确认，当前输入已保留，请核对后重试');
+      if (latestUrl.current !== target) return;
+      setValue(data);
+      if (latestText.current === submitted) onClose();
+      else setMessage('已保存提交的内容，还有新的修改未保存');
     } catch (error) { setMessage(error instanceof Error ? error.message : '保存失败'); }
-    finally { setBusy(false); }
+    finally { saveLock.current = false; setBusy(false); }
   }
   async function close() {
     if (busy) return;

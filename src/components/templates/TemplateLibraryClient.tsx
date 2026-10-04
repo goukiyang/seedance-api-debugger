@@ -223,7 +223,7 @@ export function TemplateLibraryClient() {
   }, [router, selectedView]);
 
   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
-    if (!selectedView) return;
+    if (!selectedView) return false;
     setSavingTemplate(true);
     setSaveError(null);
     try {
@@ -233,11 +233,12 @@ export function TemplateLibraryClient() {
         body: JSON.stringify(payload),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || data.error || '模板保存失败');
+      if (!response.ok || !data.template?.id) throw new Error(data.message || data.error || '模板保存结果尚未确认');
       await loadTemplates(data.template?.id || selectedView.template.id);
-      setDrawerOpen(false);
+      return true;
     } catch (saveTemplateError) {
       setSaveError(saveTemplateError instanceof Error ? saveTemplateError.message : '模板保存失败');
+      return false;
     } finally {
       setSavingTemplate(false);
     }

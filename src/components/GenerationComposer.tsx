@@ -1404,7 +1404,7 @@ export function GenerationComposer({
   }, []);
 
   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
-    if (!selectedTemplate) return;
+    if (!selectedTemplate) return false;
     setTemplateSaveBusy(true);
     setTemplateSaveError(null);
     try {
@@ -1414,11 +1414,12 @@ export function GenerationComposer({
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.error || '模板保存失败');
+      if (!res.ok || !data.template?.id) throw new Error(data.message || data.error || '模板保存结果尚未确认');
       await loadTemplates(data.template?.id || selectedTemplate.id);
-      setTemplateDrawerOpen(false);
+      return true;
     } catch (error) {
       setTemplateSaveError(error instanceof Error ? error.message : '模板保存失败');
+      return false;
     } finally {
       setTemplateSaveBusy(false);
     }

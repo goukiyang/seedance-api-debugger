@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import { useProductDialog } from '@/components/useProductDialog';
+import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import BananaImageChannel from './BananaImageChannel';
@@ -340,6 +341,16 @@ export default function AdminIntegrationsClient() {
   const [h3QueueDirection, setH3QueueDirection] = useState<'top' | 'up' | 'down' | 'bottom'>('top');
   const [h3QueueReason, setH3QueueReason] = useState('');
   const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
+  const [bananaDirty, setBananaDirty] = useState(false);
+  const settingsSubmit = useSettingsPageSubmit({
+    codex: { config, entered: Boolean(token), clearToken },
+    musk: { config: muskConfig, entered: Boolean(muskApiKey), clearMuskApiKey },
+    image: { config: imageConfig, entered: Boolean(imageApiKey), clearImageApiKey },
+    volcengine: { config: volcengineConfig, entered: Boolean(volcengineApiKey), clearVolcengineApiKey },
+    mediakit: { config: aiMediaKitConfig, entered: Boolean(aiMediaKitApiKey), clearAiMediaKitApiKey },
+    h3: { config: h3Config, apiEntered: Boolean(h3ApiToken), adminEntered: Boolean(h3AdminToken), clearH3ApiToken, clearH3AdminToken },
+    banana: bananaDirty,
+  }, !loading, '/admin');
 
   const statusText = useMemo(() => {
     if (config.ready) return '已启用，可被 Codex 调用';
@@ -462,6 +473,8 @@ export default function AdminIntegrationsClient() {
 
   const saveMuskConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setMuskSaving(true);
     setSubmitState(null);
     setMuskTestState(null);
@@ -479,7 +492,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -487,10 +500,12 @@ export default function AdminIntegrationsClient() {
       setMuskApiKey('');
       setClearMuskApiKey(false);
       setSubmitState({ type: 'success', message: 'Musk API 配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setMuskSaving(false);
+      settingsSubmit.finish('musk', saved);
     }
   };
 
@@ -532,6 +547,8 @@ export default function AdminIntegrationsClient() {
 
   const saveImageConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setImageSaving(true);
     setSubmitState(null);
 
@@ -559,7 +576,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -567,10 +584,12 @@ export default function AdminIntegrationsClient() {
       setImageApiKey('');
       setClearImageApiKey(false);
       setSubmitState({ type: 'success', message: '图形生成 API 配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setImageSaving(false);
+      settingsSubmit.finish('image', saved);
     }
   };
 
@@ -610,6 +629,8 @@ export default function AdminIntegrationsClient() {
 
   const saveVolcengineConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setVolcengineSaving(true);
     setSubmitState(null);
 
@@ -626,7 +647,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -634,15 +655,19 @@ export default function AdminIntegrationsClient() {
       setVolcengineApiKey('');
       setClearVolcengineApiKey(false);
       setSubmitState({ type: 'success', message: '火山 IP 生成 API 配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setVolcengineSaving(false);
+      settingsSubmit.finish('volcengine', saved);
     }
   };
 
   const saveAiMediaKitConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setAiMediaKitSaving(true);
     setSubmitState(null);
 
@@ -658,7 +683,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -666,15 +691,19 @@ export default function AdminIntegrationsClient() {
       setAiMediaKitApiKey('');
       setClearAiMediaKitApiKey(false);
       setSubmitState({ type: 'success', message: 'AI MediaKit 视频超分 API 配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setAiMediaKitSaving(false);
+      settingsSubmit.finish('mediakit', saved);
     }
   };
 
   const saveH3Config = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setH3Saving(true);
     setSubmitState(null);
     setH3TestState(null);
@@ -695,7 +724,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -705,10 +734,12 @@ export default function AdminIntegrationsClient() {
       setClearH3ApiToken(false);
       setClearH3AdminToken(false);
       setSubmitState({ type: 'success', message: 'H3 本地生成服务配置已保存。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setH3Saving(false);
+      settingsSubmit.finish('h3', saved);
     }
   };
 
@@ -813,6 +844,8 @@ export default function AdminIntegrationsClient() {
 
   const saveConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setSaving(true);
     setSubmitState(null);
 
@@ -829,7 +862,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -837,10 +870,12 @@ export default function AdminIntegrationsClient() {
       setToken('');
       setClearToken(false);
       setSubmitState({ type: 'success', message: 'Codex 接口配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setSaving(false);
+      settingsSubmit.finish('codex', saved);
     }
   };
 
@@ -870,8 +905,9 @@ export default function AdminIntegrationsClient() {
   }
 
   return (
-    <div className="admin-integrations-page">
+    <fieldset disabled={settingsSubmit.busy} className="admin-integrations-page" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       {productDialog}
+      {settingsSubmit.notice && <p role="status">{settingsSubmit.notice}</p>}
       <PageBanner
         eyebrow="管理后台"
         title="API 设置"
@@ -1554,7 +1590,7 @@ export default function AdminIntegrationsClient() {
         )}
       </form>
 
-      <BananaImageChannel />
+      <BananaImageChannel onDirtyChange={setBananaDirty} onSaveStart={settingsSubmit.start} onSaveFinish={saved => settingsSubmit.finish('banana', saved)} />
 
       <form className="card codex-config-form" onSubmit={saveImageConfig}>
         <div className="codex-config-head">
@@ -1951,6 +1987,6 @@ export default function AdminIntegrationsClient() {
         </div>
 
       </form>
-    </div>
+    </fieldset>
   );
 }

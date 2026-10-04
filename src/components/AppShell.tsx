@@ -8,9 +8,11 @@ import FeedbackWidget from './FeedbackWidget';
 import templateStudioStyles from './template-studio/template-studio.module.css';
 import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { rememberSettingsOrigin } from '@/lib/navigation/settings-return';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  useEffect(() => { rememberSettingsOrigin(); }, [pathname]);
   const {
     user,
     credits,

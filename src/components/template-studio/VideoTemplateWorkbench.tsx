@@ -399,6 +399,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const [templateConflict, setTemplateConflict] = useState<{ id: string; source: StudioTemplateDto['source'] } | null>(null);
   const [templateRecoveryAvailable, setTemplateRecoveryAvailable] = useState(false);
   const [templateEditBusy, setTemplateEditBusy] = useState(false);
+  const templateSaveLock = useRef(false);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
   const createTemplateBackdropRef = useRef<HTMLDivElement>(null);
   const createTemplateDialogRef = useRef<HTMLElement>(null);
@@ -1432,7 +1433,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   }
 
   async function saveTemplateEdit() {
-    if (!templateEdit) return;
+    if (!templateEdit || templateEditBusy || templateSaveLock.current) return;
+    templateSaveLock.current = true;
     setTemplateEditBusy(true);
     try {
       const body: UpdateStudioTemplateRequest = {
@@ -1447,6 +1449,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const saved = 'template' in response ? response.template : response;
+      if (!saved?.id || !Number.isInteger(saved.revision) || saved.revision <= templateEdit.revision) throw new Error('保存结果尚未确认，当前编辑已保留，请核对后重试');
       setTemplates((current) => current.map((item) => item.id === saved.id ? saved : item));
       templateEditBaseline.current = null;
       setTemplateEdit(null);
@@ -1467,7 +1470,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       }
       setNotice(messageForFailure(error));
     }
-    finally { setTemplateEditBusy(false); }
+    finally { templateSaveLock.current = false; setTemplateEditBusy(false); }
   }
 
   async function publishTemplate(template: StudioTemplateDto) {
@@ -2006,10 +2009,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           <section ref={templateEditDialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
             <h2 id="template-edit-title">编辑模板草稿</h2>
             {templateConflict?.id === templateEdit.id && <div className={`${styles.callout} ${styles.calloutWarning}`} role="alert"><span>服务器上的模板已更新。当前输入仍保留；重新载入会放弃这些编辑。</span><button className={styles.quietButton} type="button" disabled={templateEditBusy} onClick={() => void reloadConflictedTemplate()}>载入最新版本</button></div>}
-            <div className={styles.field}><label htmlFor="studio-template-name">模板名称</label><input id="studio-template-name" value={templateEdit.name} maxLength={120} onChange={(event) => setTemplateEdit((current) => current ? { ...current, name: event.target.value } : current)} /></div>
-            <div className={styles.field}><label htmlFor="studio-template-group-name">用途分组</label><input id="studio-template-group-name" value={templateEdit.groupName} maxLength={80} onChange={(event) => setTemplateEdit((current) => current ? { ...current, groupName: event.target.value } : current)} /></div>
-            <div className={styles.field}><label htmlFor="studio-template-description">说明</label><textarea id="studio-template-description" value={templateEdit.description || ''} maxLength={500} onChange={(event) => setTemplateEdit((current) => current ? { ...current, description: event.target.value } : current)} /></div>
-            <div className={styles.field}><label htmlFor="studio-template-instruction">固定要求</label><textarea id="studio-template-instruction" value={templateEdit.recipe?.instruction || ''} maxLength={5000} onChange={(event) => setTemplateEdit((current) => current ? { ...current, recipe: { ...(current.recipe || { fields: [], assetSlots: [], defaultParameters: {} }), instruction: event.target.value } } : current)} /></div>
+            <div className={styles.field}><label htmlFor="studio-template-name">模板名称</label><input id="studio-template-name" disabled={templateEditBusy} value={templateEdit.name} maxLength={120} onChange={(event) => setTemplateEdit((current) => current ? { ...current, name: event.target.value } : current)} /></div>
+            <div className={styles.field}><label htmlFor="studio-template-group-name">用途分组</label><input id="studio-template-group-name" disabled={templateEditBusy} value={templateEdit.groupName} maxLength={80} onChange={(event) => setTemplateEdit((current) => current ? { ...current, groupName: event.target.value } : current)} /></div>
+            <div className={styles.field}><label htmlFor="studio-template-description">说明</label><textarea id="studio-template-description" disabled={templateEditBusy} value={templateEdit.description || ''} maxLength={500} onChange={(event) => setTemplateEdit((current) => current ? { ...current, description: event.target.value } : current)} /></div>
+            <div className={styles.field}><label htmlFor="studio-template-instruction">固定要求</label><textarea id="studio-template-instruction" disabled={templateEditBusy} value={templateEdit.recipe?.instruction || ''} maxLength={5000} onChange={(event) => setTemplateEdit((current) => current ? { ...current, recipe: { ...(current.recipe || { fields: [], assetSlots: [], defaultParameters: {} }), instruction: event.target.value } } : current)} /></div>
             <span className={styles.fieldHint}>字段、素材槽位和推荐参数沿用当前配方；修改配方结构由现有模板维护权限控制。</span>
             <div className={styles.dialogFooter}><button className={styles.quietButton} type="button" disabled={templateEditBusy} onClick={closeTemplateEditor}>取消</button><button className={styles.primaryButton} type="button" disabled={templateEditBusy || Boolean(templateConflict?.id === templateEdit.id) || !templateEdit.name.trim()} onClick={() => void saveTemplateEdit()}>{templateEditBusy ? '保存中' : '保存模板草稿'}</button></div>
           </section>

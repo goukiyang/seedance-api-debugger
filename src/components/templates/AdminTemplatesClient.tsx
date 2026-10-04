@@ -119,7 +119,7 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
   const issues = publishIssues(selectedTemplate);
 
   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
-    if (!selectedTemplate) return;
+    if (!selectedTemplate) return false;
     setSaving(true);
     setSaveError(null);
     try {
@@ -129,11 +129,12 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
         body: JSON.stringify(payload),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || data.message || '模板保存失败');
+      if (!response.ok || !data.template?.id) throw new Error(data.error || data.message || '模板保存结果尚未确认');
       await loadTemplates(data.template?.id || selectedTemplate.id);
-      if (!detailWorkspaceMode) setDrawerOpen(false);
+      return true;
     } catch (saveTemplateError) {
       setSaveError(saveTemplateError instanceof Error ? saveTemplateError.message : '模板保存失败');
+      return false;
     } finally {
       setSaving(false);
     }

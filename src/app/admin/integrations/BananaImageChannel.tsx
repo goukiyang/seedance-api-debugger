@@ -1,38 +1,48 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Save } from 'lucide-react';
 
 type Config = { enabled: boolean; ready: boolean; base_url: string; api_key_configured: boolean };
 const endpoint = '/api/admin/integrations/banana-image';
 
-export default function BananaImageChannel() {
+export default function BananaImageChannel({ onDirtyChange, onSaveStart, onSaveFinish }: {
+  onDirtyChange(dirty: boolean): void; onSaveStart(): boolean; onSaveFinish(saved: boolean): void;
+}) {
   const [config, setConfig] = useState<Config | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [clearKey, setClearKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
+  const baseline = useRef('');
+  const signature = JSON.stringify(config);
+  useEffect(() => { onDirtyChange(Boolean(config && (signature !== baseline.current || apiKey || clearKey))); }, [signature, apiKey, clearKey, config, onDirtyChange]);
   const load = async () => {
     try {
       const response = await fetch(endpoint, { cache: 'no-store' });
       const data = await response.json();
       if (!response.ok || !data.config) throw new Error(data.error || '读取通道失败');
+      baseline.current = JSON.stringify(data.config);
       setConfig(data.config); setNotice(null);
     } catch { setNotice({ error: true, text: '读取 Banana 通道失败，请重试' }); }
   };
   useEffect(() => { void load(); }, []);
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!config || saving) return;
+    if (!config || saving || !onSaveStart()) return;
+    let saved = false;
     setSaving(true); setNotice(null);
     try {
       const response = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: config.enabled, base_url: config.base_url, api_key: apiKey, clear_api_key: clearKey }) });
       const data = await response.json();
       if (!response.ok || !data.config) throw new Error(data.error || '保存失败，请重试');
+      baseline.current = JSON.stringify(data.config);
       setConfig(data.config); setApiKey(''); setClearKey(false);
+      onDirtyChange(false);
+      saved = true;
       setNotice({ error: false, text: data.config.ready ? '已保存，新发起的 Banana 请求将使用此通道。' : '已保存，Banana 通道未启用。' });
     } catch (error) { setNotice({ error: true, text: error instanceof Error ? error.message : '保存失败，请重试' }); }
-    finally { setSaving(false); }
+    finally { setSaving(false); onSaveFinish(saved); }
   };
   return <form id="banana-image-channel" className="card codex-config-form" onSubmit={save}>
     <div className="codex-config-head">

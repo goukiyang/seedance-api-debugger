@@ -79,7 +79,7 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
       update({ draft: { ...state.draft, prices: { ...state.draft.prices, [model]: price } }, status: '设置未保存' });
     },
     async save() {
-      if (!isAdmin || !state.settings || !state.draft || state.loading || state.saving || !studioSettingsDirty(state)) return;
+      if (!isAdmin || !state.settings || !state.draft || state.loading || state.saving || !studioSettingsDirty(state)) return false;
       ++readSequence;
       const contextChanged = state.draft.context !== state.settings.context;
       const payload: SettingsWrite = { revision: state.settings.revision, prices: { ...state.draft.prices },
@@ -87,13 +87,17 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
       const baseline = state.settings;
       update({ saving: true, error: '', status: '正在保存' });
       try {
-        const value = { ...baseline, ...await transport.write(payload) };
-        validate(value);
+        const saved = await transport.write(payload);
+        validate(saved);
+        if (saved.revision <= baseline.revision) throw new Error('保存结果尚未确认，当前输入已保留，请重新读取核对');
+        const value = { ...baseline, ...saved };
         value.contextConfigured = Boolean(value.context?.trim());
         update({ settings: value, saving: false });
         update({ status: studioSettingsDirty(state) ? '有新的修改尚未保存' : '已保存，下次生成生效' });
+        return !studioSettingsDirty(state);
       } catch (error) {
         update({ saving: false, status: '未保存', error: error instanceof Error ? error.message : '保存失败，请重试' });
+        return false;
       }
     },
   };
