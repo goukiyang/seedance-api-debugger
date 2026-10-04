@@ -812,8 +812,8 @@ git archive上传包SHA256 6b166a2f0685e30001614471ce5c3c0d15659aa410a3e8b9d756e
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| Q1 | 快捷模板入口 | 另存后出现对应按钮，点击可套用 | 进行中：已实现，发布检查中 |
-| Q2 | 完整恢复历史配置 | 恢复当时设置及上下文，不自动生成或扣费 | 进行中：已实现，发布检查中 |
+| Q1 | 快捷模板入口 | 另存后出现对应按钮，点击可套用 | 已实现并部署，待用户手动验收 |
+| Q2 | 完整恢复历史配置 | 恢复当时设置及上下文，不自动生成或扣费 | 已实现并部署，待用户手动验收 |
 
 实现与发布信息由Codex填写，不要求用户补充技术信息。本轮v0.39.0：另存后将自己的模板持久关联到当前模块，在恢复默认旁显示快捷按钮；旧记录沿用仍存在的来源关联，缺失关联的旧模板可在模板库明确加入当前快捷区，不猜关联或批量修改生产数据。快捷套用先确认参考图可用再替换临时设置，不新建模块、不请求生成；另存命名弹窗实际保存成功后关闭，失败保留名称及错误。
 
@@ -821,4 +821,10 @@ git archive上传包SHA256 6b166a2f0685e30001614471ce5c3c0d15659aa410a3e8b9d756e
 
 改动范围：image-studio页面/CSS、preset API与既有模板存储逻辑、模块源模板状态投影、任务历史上下文选择、共享产品弹窗可选异步保存、版本单一来源及固定记录。依赖清单未变化，不改Provider、worker、鉴权、积分/支付实现，不执行数据库迁移或直接生产数据写入。既有新版提醒按实际版本检测，外部不返回内部摘要；本轮代码核对保留该实现，交互未自动验收。参考[Radix异步提交成功后关闭](https://www.radix-ui.com/primitives/docs/components/dialog#close-after-asynchronous-form-submission)，只借鉴共享弹窗控制方式，未安装组件库。
 
-当前统一构建与发布检查中；首次构建发现新局部变量命名和Set迭代与项目编译设置不兼容，已按现有写法修正，待最终构建结果。按项目用户手动验收约定，不操作浏览器、不自动功能/生成测试或派审核线程。旧V1封面/banner样板任务及其状态保持不变，线上封面不替换不铺量。守门员按L3可见页面发布检查处理；工具将“不要自动验收”误命中验收关键词，不据此扩大测试授权，真实功能效果待用户手动确认。
+本地最终npm run build及服务器隔离候选NEXT_DIST_DIR=.next-prod-candidate npm run build通过，包含内置lint/type检查；原有图片/Hook/CSS警告保留，不扩大清理。此前新局部变量命名与Set迭代编译兼容问题均已修正。首次候选内容检查误将服务端模块限定在API入口目录，安全停在切换前；已只读核对实际共享chunk位置，修正检查范围并验证10个变更源码文件与固定commit一致，复用同一已成功候选，未补改产品或重复升级版本。
+
+已部署v0.39.0：应用commit `54f67d1668ea0bd23d96630860e6c8bd2e651f15`、BUILD `oxKFErSV4OZB-19N8xJKh`，唯一代码源仍为canvas-liblib-layout工作区。git archive源包SHA256 `c8b5e0e397948aec761e72c5b3edbf2a86ba3ec24f013392f479d848bae4cb87`，发布窗口检查并认领后上线；切换前因认领过期重新认领，实际切换前再次确认。正式入口[模板工作台](https://sd2.youdooart.com/template-studio)，公网config/release/login均200且X-SD2-Origin=server-42-193，release显示0.39.0、匿名内部摘要为空；目标页面15份前端文件SHA256与服务器运行文件一致且含两项新内容。源站config200、web/图片worker/两个补偿timer均active。worker PID1241475及2026-10-02启动时间不变，env/数据库inode及持久媒体symlink保护检查通过，未重启worker或执行数据库写入命令。
+
+应用提交及`rollback/2026-10-04-before-template-quick-context-v0.39.0`标签均已推远端，回退指向部署前138a2c70493ff91a87feab1de4a6aebd76f2c0fa；服务器旧运行构建保留于`/srv/video-api-debugger/app/.next-prod-before-sd2-q12-v0390-54f67d1`。完整[统一diff](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/implementation-v0.39.0.diff)及[发布检查证据](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/deployment-v0.39.0.json)仅存正式根私有目录，不Git上传图片或证据。
+
+按项目用户手动验收约定，不操作浏览器、不自动功能/生成测试或派审核线程；构建/静态可达性不冒充点击流程、刷新恢复或真实生成验证。下一步用户检查另存后出现快捷按钮、刷新仍在、快捷套用与历史原上下文完整复现；旧无关联模板从库中明确加入，旧无完整上下文记录不能完整恢复。旧V1封面/banner样板任务及其状态保持不变，线上封面不替换不铺量。守门员按L3可见页面发布检查处理；工具将“不要自动验收”误命中验收关键词，不据此扩大测试授权，真实功能效果待用户手动确认。本轮无越界，无自身分级误判。
