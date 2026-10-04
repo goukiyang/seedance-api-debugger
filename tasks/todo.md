@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [模板上下文及设置模板管理 UI1-UI3 / CTX1-CTX4](todo/2026-10-04-template-context-version-code.md)：2026-10-04 v0.40.0已部署；移除交付详情、模板改名/更新/归档、生成按钮移至主图上方、原文稳定五位码及历史标签。源码116ee2a，BUILD irfPSW4cqY4pqCko6De9P；发布检查通过，待用户手动验收。曾因worker SQLite超时回退，未人工重启worker，最终PID稳定；经过、风险、14源码/15公网静态证据与统一diff见工单第11节。[资料索引](../docs/materials/index.md#模板上下文五位版本码2026-10-04)。
 - [设置保存成功关闭统一修正 S1/S2](todo/2026-10-04-settings-save-close.md)：2026-10-04 v0.39.1已部署；图片/视频上下文、模板编辑弹窗及后台 API 设置统一成功退出、失败留输入，多表单与新草稿保护。源码9c8a9ac（codex/settings-save-close-20261004），衔接v0.39.0保留原新版功能，构建/17源码/19新公网静态/4服务检查通过；待用户手动功能验收。[统一diff](todo/2026-10-04-settings-save-close.diff)、[证据](todo/2026-10-04-settings-save-close.evidence.json)。
 - [头像受控随机生成器 V1](todo/2026-10-04-controlled-avatar-generator.md)：2026-10-04，工单v1.0.1；保留原30节需求及12条补充，优先1/3/4/5/6/9；7.1补充工具→人物生成、参考区快捷入口、我的素材及回到原任务的嫁接建议。仅方案、实施未开始，不改应用、不发生成、不部署。[资料索引](../docs/materials/index.md#头像受控随机生成器-v1-需求2026-10-04)。
 - [D1统一素材库实施与发布](todo/2026-10-02-unified-resource-library.md#10-最新设计实施与发布2026-10-03)：按设计v1.2.0与v2原图实施；图片/视频参考直接开库，库内上传、类型/来源分离，真实图集/项目、全范围搜索、收藏、最近选用与顺序添加接通。v0.37.0已部署正式站（应用源码6d2f390，来自codex/canvas-liblib-layout，本目录仅同步记录）；构建/远端/公网/回退证据见工单，待用户手动验收。L2部分完成：use-only且无原图下载权限的共享/公共图片不能用于图片工作台，明确禁选；视频参考保留原ReferenceImage适配。[资料索引](../docs/materials/index.md#统一素材库批准实施)。
