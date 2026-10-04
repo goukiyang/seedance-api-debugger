@@ -665,3 +665,37 @@ D2补充核对：AdminUsersClient quickView初值all、筛选初值all；过滤�
 正式sd2-gray.service active，本地config 200/release 0.37.6；公网config/release/login/assets均200且X-SD2-Origin=server-42-193，匿名summary空且private/no-store，login含同一BUILD。6份线上应用源码SHA对应commit；layout/template-studio/generate-ip范围27份去重静态中7份新/改变JS/CSS公网200且SHA一致，20份路径/内容未变复用0.37.5，不重复未改静态或全站浏览器/业务回归。新CSS含版本0.75em/400，新JS含单一图片查看控制；候选专用恢复确认句已不存在，原忙碌提示保留。旧源码releases/da4e2852632a4ca217d6b98c93954b7ca512617c及旧BUILD FkdpYXAklqREmAjtSKyog在.next-prod-before-sd2-r123-v0376-2cb3e9b保留，更早回退不删。图片worker前后unit/MainPID1241475/启动时间/状态一致，未重启/排空/强杀；既有视频timers active。storage/uploads/videos软链、关键子目录写权限和env元信息保持，未读env/DB内容，未写DB、付费或扩权限。
 
 正式根本机[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.6.diff)、[0.37.6部署证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.6.json)归入既有私有媒体主题，不Git/archive；两张原图入口见本节。正式根只同步本工单与资料索引，不覆盖src和原dirty。守门员start/finish实际意图均L3-visible-runtime，无阻塞警告、无归类误判；真实结果层按项目明确手动验收例外未自动执行，不把上线说成功能通过。R1/R2实际恢复/查看和R3字号效果待用户手动；R3标记截图原件缺口、1000ms OS双击边界及D2具体列表待确认均保留。无未解决发布卡点，无范围外业务修改。
+
+### S1-S3视频比例、风格卡片与数量控件（2026-10-04）
+
+用户明确“合并上面一条一起修改”。已确认S1：资产视频封面外框尺寸不变，真实比例完整显示不裁剪不拉伸，竖屏上下顶满、左右黑边，封面和点击播放一致。S2浏览器评论：“别留使用按键，点击区域就是选择使用，边框等颜色做区分即可”。S3：“高度限制一下，不要超过‘主图’标题”。真实目标template-studio及共享image-studio同类主图/风格组/参考图materialHeading，不全站机械缩小select。开工实际源干净94de3877、分支codex/canvas-liblib-layout，生产2cb3e9b/v0.37.6/BUILD 9OIK8DVopn89g3Quh4LRG及服务active已重新核对；正式根55ca1c7及原dirty保留。守门员start实际界面/发布意图识别L3-visible-runtime，无阻塞提醒；当前工具无原生worker入口，单lead整批实施，不建侧栏或自动审核。兼容PATCH0.37.7单一交付。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| S1 | 视频完整显示 | 外框不变，封面与播放均按真实比例完整居中显示 | 已部署0.37.7，待用户手动验收 |
+| S2 | 风格卡片直接选用 | 去掉使用按钮，点击卡片选用或取消，管理控件独立 | 已部署0.37.7，待用户手动验收 |
+| S3 | 数量控件压高 | 标题行内控件不高于标题，选项与保存规则不变 | 已部署0.37.7，待用户手动验收 |
+
+源码调查及实现：AssetLibraryThumbnail只输出原thumbnail img，无视频内联fit覆盖；现有视频缩略图生成器src/lib/video/thumbnail.ts及assets/video-thumbnail.ts使用ffmpeg scale=360:-2，无裁剪。InlineVideoCover封面img处在绝对定位的grid poster内但自身未绝对满框，资产contain规则原来又只匹配直接子级。只补共享poster img/video绝对inset0、尺寸100%、min-size0、contain/center；assets.module.css视频选择器覆盖内层和直接img/video，视频外框16/9、最大高度/列布局及暗黑底保留。选择模式仍只选择，普通模式播放；未换源、未预加载新视频、未改thumbnail API/后端或补造预裁像素。历史外来已裁缩略图无法用CSS还原，实际素材需用户手动确认。
+
+风格组复用原used/selectedCount/exceedsLimit/disabled/busy/MAX_REFERENCE_IMAGES逻辑和onChange追加/过滤顺序，把cover+名称变原生无按钮外观选择区，卡片空白同样切换；删除单独“使用”按钮，selected边框/底色直接来自真实selected，aria-pressed及Enter/Space原生键盘可达，focus-visible边框保留。管理编辑/删除/合并checkbox位于独立兄弟区域，click/keydown停止冒泡，不嵌套按钮、不误选用，不自动关dialog；原保存/删除确认、管理权限、分页、错误及限额不改。共享materialHeading以标题font-size/line-height变量约束select高度，desktop21px、420px以下随标题变19.6px；min-height0、padding上下0并对齐标题，手机减少横padding保留选项文本，数量范围/value/onChange/disabled和系统原生下拉候选不改。
+
+R1直接恢复/R2单一查看图标/R3版本0.75em400、D1暗色/P1播放隐藏/C5-C8/U1、资源库保留；D2仍待具体列表，未改额度规则。只触7份应用UI/版本文件及本工单/索引，不改权限、Provider、点数、DB、上传、依赖、worker。整批后统一发布必需构建内置lint/types、源码自查、版本/健康/改变静态及回退/持久数据检查，不做浏览器、DOM、自动截图、业务功能/API测试，实际效果由用户手动。
+
+附件来源：用户本轮浏览器标记截图S2风格组target dialog.studio_styleDialog、S3主图数量select target materialHeading select，均1068x871、template-studio v0.37.6参考。只在聊天可见，原文件名/本地路径未提供，待补持久原件，可读/复制完整性未核验；不以自动截图或R1/R2旧PNG冒充。既有相关原图仍可访问：[R1历史恢复](../../docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png)、[R2操作行](../../docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png)，仅作为前轮保持参考，非本轮标记原件。本轮统一diff/部署JSON继续归正式私有媒体主题，不Git/archive，不新建说明文档。
+
+整批源码自查：9份允许文件，package/lock除版本字段外完全相同；assets/page.tsx、studio.tsx、InlineVideoCover.tsx、ResultImageCover、ReleaseNotice及globals.css原样，原恢复参数/限额/播放互斥/进度/版本0.75em400和安全退出保持。风格选择区前的API/保存/删除/编辑保护代码原样，toggle复用原追加/过滤和限额公式。首次整批本地build退出0后，将自查汇总的两个CSS边界同批收紧：视频后代规则排除[hidden]，不覆盖原封面/视频显隐；卡片选择区显式minmax网格和stretch/start，消除继承button居中影响。无业务测试或浏览器视觉验收，不因修整批升级新版本，最终统一重构建后发布。
+
+最终整批本地npm run build退出0，含内置lint/types，仅既有警告；git diff --check通过。编译CSS包含满框contain/center、标题行高变量、真实selected边框底色及保留0.75em/400版本字号；视频外框规则、从.toggle起全部播放/等待/错误/焦点样式与原提交相同。发布脚本bash -n与node --check通过，复用reservation/flock、独立archive、候选构建/切换/回退与数据/worker保护，额外明确database/runtime目录排除，不读取凭据或DB内容；仅补layout/assets/template-studio受影响静态核对，不全站扩测。
+
+#### S1-S3正式交付（2026-10-04）
+
+北京时间14:07:40完成发布v0.37.7，应用bce703383e8749e4366ed5e70b9d863a70e6fcd9，BUILD p7KYo9xeDmtuYO7YZCc9y，入口https://sd2.youdooart.com/assets及https://sd2.youdooart.com/template-studio。7份应用文件：assets/assets.module.css覆盖普通/选择模式的视频内层；InlineVideoCover.module.css满框contain/center且保留隐藏/播放状态；image-studio/style-groups-view.tsx卡片选用与独立管理事件；studio.module.css真实选中/键盘和同类数量标题行高；package.json/package-lock.json/src/lib/release.ts只同步版本摘要；另本工单/索引，共9份允许文件。未修改assets/page.tsx、studio.tsx或后端业务。应用提交与rollback/2026-10-04-before-video-style-v0.37.7已推送且ls-remote核对，tag解引用为健康0.37.6的2cb3e9b840c89aedbc02b13cd6be0ce2add4ae0f。
+
+独立git archive排除env、整个materials、storage/uploads/videos、数据库/database/runtime及构建运行产物，SHA256 ef60a4f03b70355c8ed20c682493baf462ef078a74d5b8d7436f766fa7eb5f48服务器核对一致；实际reservation/flock启用，无并发发布。服务器NEXT_DIST_DIR=.next-prod-candidate npm run build退出0含内置lint/types，仅既有警告，候选含本次选用/数量/满框标记及R1-R3/D1/P1/U1保持标记，失败守旧/自动回退机制保持，不原地build live、不server git pull。候选检查无未解决失败。
+
+sd2-gray.service active，本地config 200/release 0.37.7；公网config/release/login/assets均200且X-SD2-Origin=server-42-193，匿名summary为空、private/no-store，login含同一BUILD；7份线上应用源码SHA对应commit。仅layout/assets/template-studio影响范围23份去重JS/CSS中5份新/改变静态公网200且SHA一致，18份路径和内容未变复用0.37.6；新产物含满框contain/center、卡片取消选用和共享标题行高变量，不重跑全站未改静态或浏览器功能。旧源码releases/2cb3e9b840c89aedbc02b13cd6be0ce2add4ae0f及旧BUILD 9OIK8DVopn89g3Quh4LRG在.next-prod-before-sd2-s123-v0377-bce7033保留，更早回退不删。图片worker前后unit/MainPID1241475/启动时间/状态相同，未重启/排空/强杀；视频timers active。数据软链、关键子目录写权限及env元信息保持，未读取env/DB内容，未写DB或改变费用/权限/Provider/依赖。
+
+正式根本机[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.7.diff)、[0.37.7部署证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.7.json)归既有私有媒体目录，不Git/archive；本轮标记原件缺口和前轮相关附件入口见本节。正式根只同步两份记录，不覆盖src或原dirty；记录聚焦提交推送，不再次发版或重启。守门员start/finish真实界面/部署意图均L3-visible-runtime，无阻塞提醒、无归类误判；真实视觉/交互按项目规则待用户手动，未自动浏览器/DOM/截图/业务功能验收。无范围外业务修改、无未解决发布阻塞；S2/S3原件待补，历史外来已裁缩略图不能CSS还原、1000ms OS双击边界及D2列表待确认保留。
+
+发布收尾期间新增“每模板图片缩略图12个（3行），超出翻页，考虑宽屏，查开源最优解”仅为设计咨询，由parent单独只读研究；本次S1-S3不加入分页代码或新版本，不等待该咨询，不冒称分页已实施。
