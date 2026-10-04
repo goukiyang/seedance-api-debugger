@@ -699,3 +699,21 @@ sd2-gray.service active，本地config 200/release 0.37.7；公网config/release
 正式根本机[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.7.diff)、[0.37.7部署证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.7.json)归既有私有媒体目录，不Git/archive；本轮标记原件缺口和前轮相关附件入口见本节。正式根只同步两份记录，不覆盖src或原dirty；记录聚焦提交推送，不再次发版或重启。守门员start/finish真实界面/部署意图均L3-visible-runtime，无阻塞提醒、无归类误判；真实视觉/交互按项目规则待用户手动，未自动浏览器/DOM/截图/业务功能验收。无范围外业务修改、无未解决发布阻塞；S2/S3原件待补，历史外来已裁缩略图不能CSS还原、1000ms OS双击边界及D2列表待确认保留。
 
 发布收尾期间新增“每模板图片缩略图12个（3行），超出翻页，考虑宽屏，查开源最优解”仅为设计咨询，由parent单独只读研究；本次S1-S3不加入分页代码或新版本，不等待该咨询，不冒称分页已实施。
+
+### T1模板结果分页方案（2026-10-04，仅研究建议）
+
+用户原话：每模板图片缩略图12个（3行），超出翻页，考虑宽屏，要求查开源最优解。来源为parent本轮只读设计/开源研究汇总，建议v1，未获实施批准；本lead只将其归入既有记录，不重复研究，不修改分页代码或接口，不安装依赖，不额外升级/构建/重启。S1-S3原清单及0.37.7已部署状态不变。本条为文字资料，无新附件；前述S2/S3浏览器标记原件缺口保留。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| T1 | 模板结果分页方案 | 记录真实布局/接口限制、开源依据及建议，区分研究与实施 | 已记录研究建议v1，未批准实施 |
+
+parent实际核对：当前结果.grid为auto-fill、最小220px、gap20px，用户截图结果区为2列；listStudioTasks接口每批24/cursor，loadTasks追加数据且有后台静默刷新，没有真实total/总页数。已读Mantine PaginationRoot/use-pagination/Pagination.module.css原始实现，含受控页码、clamp、siblings/ellipsis及容器<=400px紧凑页码；已读TanStack Query分页实际React示例，含保留旧数据、页缓存、预读下一页和hasMore才前进；核对MDN容器查询文档及两项目MIT许可证。以上为parent源码/文档核对，本项目未接入、未做功能验证，不把开源示例行为说成当前网站已具备。
+
+建议v1：固定pageSize=12，每页最多12张，不随resize改变。3行只对应4列；按结果区实际宽度而非显示器规格安排列数，窄区2列×6行、适中3列×4行、常规4列×3行、超宽6列×2行，避免5列余下空行，卡片最小约220px/间距20px，手机另适配最小宽度。大屏不暗增18/24张，缩窗不翻页。若坚持所有桌面最多3行，需另确认每页min(12,列数×3)替代方案，会改变每页数量，当前未批准。
+
+底部分页条沿网站风格，箭头加少量页码/省略号，显示真实范围/总数；窄屏箭头+当前/总页，但只有后台真实count可用时才显示总页。当前cursor可先做前后页/当前页，不用“已加载数量”伪造总数。缓存上一/当前/下一页，返回不闪空；按账号/模板独立记页码和首图锚点，切模板恢复有效位置；新任务不抢正在浏览的旧页，只提示可回第一页看新结果。删除末页安全回邻页，读取失败保留旧图并可重试；跨页批量勾选和下载最多8张规则不静默改变。
+
+优先复用项目PaginationControls.tsx、fetch/AbortController和既有状态存储；真实count确有需要时再经授权扩展只读分页接口。不为小网格安装Mantine/MUI/TanStack全套或虚拟列表，仅借鉴模式，未复制或验证新依赖。parent已核Jev doctor为deferred cloud_disabled/not_authorized，无API调用；本lead不重复检查、不因方案比较开启服务或付费。
+
+开源/官方依据（parent已读，链接按其汇总保留）：[Mantine Pagination](https://mantine.dev/core/pagination/)、[use-pagination源码](https://github.com/mantinedev/mantine/blob/master/packages/%40mantine/hooks/src/use-pagination/use-pagination.ts)、[Pagination样式源码](https://github.com/mantinedev/mantine/blob/master/packages/%40mantine/core/src/components/Pagination/Pagination.module.css)、[TanStack React分页示例](https://github.com/TanStack/query/blob/main/examples/react/pagination/src/pages/index.tsx)、[TanStack分页文档](https://tanstack.com/query/latest/docs/framework/react/guides/paginated-queries)、[MDN容器查询](https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Containment/Container_queries)、[Mantine MIT](https://github.com/mantinedev/mantine/blob/master/LICENSE)、[TanStack Query MIT](https://github.com/TanStack/query/blob/main/LICENSE)。未新建说明文档；正式工单和索引同步聚焦提交，T1不是本次已实现功能。
