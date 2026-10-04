@@ -44,15 +44,16 @@ import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-st
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
-type StudioSnapshot = { referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[] };
+type StudioSnapshot = { referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot; delivery?: { phase: string; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number } | null };
 function studioTaskPhase(task: StudioTask) {
   const phase = task.delivery?.phase;
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: task.asset ? '已完成' : '图片已移除' } as Record<string, string>)[phase || '']
     || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
 }
-type StudioModule = { referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
-type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
+type StudioModule = { referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
+type StudioPreset = { id: string; name: string; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
+type QuickStudioPreset = StudioPreset & { prompt: string; context: string; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[] };
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
 type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; src: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
@@ -219,8 +220,10 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const presetApplyLock = useRef(false);
   const [presetApplying, setPresetApplying] = useState(false);
   const [presetSharingId, setPresetSharingId] = useState<string | null>(null);
+  const [quickPresetVersion, setQuickPresetVersion] = useState(0);
+  const [quickLinkingId, setQuickLinkingId] = useState<string | null>(null);
   useEffect(() => { if (presetDialogOpen) presetDialog.current?.showModal(); else presetDialog.current?.close(); }, [presetDialogOpen]);
-  useDialogDismiss({ open: presetDialogOpen, dialogRef: presetDialog, nativeDialog: true, onDismiss: () => setPresetDialogOpen(false) });
+  useDialogDismiss({ open: presetDialogOpen, dialogRef: presetDialog, nativeDialog: true, onDismiss: () => { if (!quickLinkingId && !presetApplying) setPresetDialogOpen(false); } });
   const [customRatios, setCustomRatios] = useState<string[]>([]);
   const [ratiosBusy, setRatiosBusy] = useState(false);
   const [ratiosError, setRatiosError] = useState('');
@@ -346,6 +349,17 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       setPresetsError(e instanceof Error ? e.message : '共享状态保存失败，请重试');
     } finally { setPresetSharingId(null); }
   }
+  async function addPresetShortcut(preset: StudioPreset) {
+    if (!active || quickLinkingId || !preset.ownedByViewer) return;
+    setQuickLinkingId(preset.id); setPresetsError('');
+    try {
+      await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add-quick', moduleId: active, presetId: preset.id }) }));
+      setQuickPresetVersion(current => current + 1); setPresetDialogOpen(false);
+    } catch (cause) { setPresetsError(cause instanceof Error ? cause.message : '快捷模板添加失败'); }
+    finally { setQuickLinkingId(null); }
+  }
+
   async function toggleModuleSharing(module: StudioModule) {
     if (!module.sourcePresetCanManageSharing || !module.sourcePresetId || presetSharingId) return;
     const next = module.sourcePresetShared !== true;
@@ -493,7 +507,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
       userId={userId} settings={settings} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => setActive(module.id)}
-      viewToken={requestedView.viewerId === userId && requestedView.moduleId === module.id ? requestedView.token : 0} onResultsViewed={attention.markViewed} onResultsAvailable={attention.refresh}
+      quickPresetVersion={quickPresetVersion} viewToken={requestedView.viewerId === userId && requestedView.moduleId === module.id ? requestedView.token : 0} onResultsViewed={attention.markViewed} onResultsAvailable={attention.refresh}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? { ...next, name: item.name, groupName: item.groupName } : item)); }}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       onReloadSettings={discard => { void globalEditor.controller.load(discard); }} />)}
@@ -503,17 +517,18 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     </div>
     </div>
     <dialog ref={presetDialog} className={styles.dialog}>
-      <header className={styles.header}><h2>模板库</h2><button type="button" aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
+      <header className={styles.header}><h2>模板库</h2><button type="button" disabled={Boolean(quickLinkingId) || presetApplying} aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
-      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><div className={styles.presetActions}><ContentReactions contentKey={`image_template:${preset.id}`} />{preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={presetSharingId === preset.id} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}<button type="button" disabled={presetApplying} onClick={() => void applyPreset(preset)}>新建并应用</button></div></article>)}</div>}
+      {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}><div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model} · 应用后生成自己的配置</span></div><div className={styles.presetActions}><ContentReactions contentKey={`image_template:${preset.id}`} />{preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={presetSharingId === preset.id} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}{preset.ownedByViewer && active && <button type="button" disabled={Boolean(quickLinkingId) || presetApplying} onClick={() => void addPresetShortcut(preset)}>{quickLinkingId === preset.id ? '添加中…' : '加入当前模块快捷'}</button>}<button type="button" disabled={presetApplying || Boolean(quickLinkingId)} onClick={() => void applyPreset(preset)}>新建并应用</button></div></article>)}</div>}
     </dialog>
     {isAdmin && <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} />}
     {!settings && globalEditor.error && <p role="alert" className={styles.error}>{globalEditor.error}<button onClick={() => void globalEditor.controller.load()}>重试读取设置</button></p>}
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, viewToken, onResultsViewed, onResultsAvailable }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onResultsAvailable }: {
   templateWorkbench: boolean;
+  quickPresetVersion: number;
   onModuleDelete: (id: string) => void;
   hidden: boolean; onMetadataChange: (id: string, name: string, groupName: string, followGroup?: boolean) => void;
   isAdmin: boolean; userId: string; module: StudioModule & { fixedReferences?: FixedStudioReference[]; contextEditable?: boolean }; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule) => Promise<void>; sharingId: string | null; settings: SettingsValue | null;
@@ -529,6 +544,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [reproductionFixedCount, setReproductionFixedCount] = useState(module.reproductionState?.fixedReferenceCount || 0);
   const [reproductionStyles, setReproductionStyles] = useState<StudioStyleSummary[]>(module.reproductionState?.styleGroups || []);
   const [saveStatus, setSaveStatus] = useState('');
+  const [quickPresets, setQuickPresets] = useState<QuickStudioPreset[]>([]);
+  const [quickPresetsError, setQuickPresetsError] = useState('');
+  const [quickPresetsLoading, setQuickPresetsLoading] = useState(false);
+  const [quickPresetApplying, setQuickPresetApplying] = useState<string | null>(null);
+  const [presetSaving, setPresetSaving] = useState(false);
+  const quickPresetLock = useRef(false);
+  const presetSaveLock = useRef(false);
   const [recoverableDraft, setRecoverableDraft] = useState<Record<string, any> | null>(null);
   const [savedAsSignature, setSavedAsSignature] = useState('');
   const [prompt, setPrompt] = useState(module.prompt);
@@ -609,6 +631,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [queryingSubmission, setQueryingSubmission] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<Record<string, unknown> | null>(null);
   const [reproduceSourceTaskId, setReproduceSourceTaskId] = useState<string | null>(module.reproduceFromTaskId || null);
+  const [reproductionGlobalContext, setReproductionGlobalContext] = useState<string | null>(null);
+  const [reproductionContextConfigured, setReproductionContextConfigured] = useState(false);
   const [appliedSource, setAppliedSource] = useState<{ taskId: string; label: string; signature: string; modified: boolean } | null>(null);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [persistedDraftSignature, setPersistedDraftSignature] = useState<string | null>(null);
@@ -644,6 +668,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
+  const effectiveGlobalContext = reproduceSourceTaskId && reproductionGlobalContext !== null ? reproductionGlobalContext : globalContextDraft;
   const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
   const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), resolution: normalizeImageResolution(moduleModel, resolution), groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
   const moduleSaveSnapshot = { ...moduleDraft };
@@ -651,7 +676,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const generationInputs = { prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
-  const restorationSignature = JSON.stringify({ inputs: generationInputs, source: reproduceSourceTaskId, references: reproductionReferences, fixedCount: reproductionFixedCount, styles: reproductionStyles, globalContext: globalContextDraft });
+  const restorationSignature = JSON.stringify({ inputs: generationInputs, source: reproduceSourceTaskId, references: reproductionReferences, fixedCount: reproductionFixedCount, styles: reproductionStyles, globalContext: effectiveGlobalContext });
   const sourceApplied = Boolean(appliedSource && !appliedSource.modified && appliedSource.signature === restorationSignature);
   useEffect(() => {
     if (appliedSource && !appliedSource.modified && appliedSource.signature !== restorationSignature) {
@@ -664,9 +689,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const automaticDirty = automaticSnapshot !== moduleSaved;
   const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
   // Recoverable browser drafts are not lost on refresh; failed persistence still blocks exit.
-  useUnsavedNavigation(dirty || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm, {
+  useUnsavedNavigation(dirty || automaticDirty || moduleSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || unpersistedDraft, confirm, {
     unsaved: [automaticDirty ? '模板名称、分组或封面' : '', unpersistedDraft ? '尚未存入浏览器的图片草稿' : ''].filter(Boolean),
-    busy: [moduleSaving ? '模板正在保存' : '', uploading ? '参考素材正在上传' : '', bannerUploading ? '封面正在上传' : ''].filter(Boolean),
+    busy: [moduleSaving || presetSaving ? '模板正在保存' : '', quickPresetApplying ? '快捷模板正在套用' : '', uploading ? '参考素材正在上传' : '', bannerUploading ? '封面正在上传' : ''].filter(Boolean),
     revision: automaticSnapshot + generationDraft,
   });
   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
@@ -710,7 +735,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const currentReferenceCap = Math.min(referenceLimit, Math.max(0, MAX_REFERENCE_IMAGES - auxiliaryCount));
   const currentAuxiliaryCap = Math.max(0, Math.min(referenceImageLimit - activeTemplateCount, auxiliaryLimit - activeFixedCount, MAX_REFERENCE_IMAGES - images.length - activeFixedCount));
   const currentStyleCap = Math.max(0, Math.min(styleLimit, auxiliaryLimit - ordinaryReferenceCount, MAX_REFERENCE_IMAGES - images.length - ordinaryReferenceCount));
-  const sourceSharingBlocked = Boolean(module.sourcePresetId && module.sourcePresetShared === false);
+  const sourceSharingBlocked = Boolean(module.sourcePresetId && module.sourcePresetShared === false && !module.sourcePresetOwnedByViewer);
 
   useEffect(() => {
     // Group removal updates modules in the parent without remounting editors.
@@ -731,7 +756,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }, []);
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[]) {
-    if (moduleSaveLock.current || moduleDeleteLock.current || uploading || bannerUploading) return false;
+    if (moduleSaveLock.current || moduleDeleteLock.current || presetSaveLock.current || quickPresetLock.current || uploading || bannerUploading) return false;
     moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
     const snapshot = { ...(manualSettings ? moduleDraft : JSON.parse(automaticSnapshot) as typeof moduleDraft), context: manualSettings ? moduleContext : savedModuleContext, reproduceFromTaskId: manualSettings ? reproduceTaskId || null : baseline.reproduceFromTaskId };
     const contextSnapshot = snapshot.context;
@@ -754,6 +779,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }
 
   async function restoreDefaults() {
+    if (quickPresetLock.current || presetSaveLock.current || submitting || pendingSubmission || moduleSaving || uploading || bannerUploading || draftRestoring) return;
     if (!(await confirm(templateWorkbench ? '恢复当前模块默认参数和参考图？上次临时草稿仍可恢复。' : '恢复当前模板默认参数和参考图？上次临时草稿仍可恢复。', { title: '恢复默认', confirmLabel: '恢复默认' }))) return;
     try { const saved = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (saved) setRecoverableDraft(saved); } catch {}
     blockedDraftSignature.current = null;
@@ -764,6 +790,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setPrimaryMin(baseline.referencePolicy.primaryMin); setAuxiliaryLimit(baseline.referencePolicy.auxiliaryMax); setUseFixedReferences(baseline.referencePolicy.useFixedReferences);
     setStyleLimit(baseline.referencePolicy.styleMax ?? MAX_REFERENCE_IMAGES); setReferenceImageLimit(baseline.referencePolicy.referenceMax ?? MAX_REFERENCE_IMAGES);
     setFixedReferences(savedFixedReferences); setModuleContext(savedModuleContext); setStyleGroups(module.styleGroups || []); setReproduceSourceTaskId(null);
+    setReproductionGlobalContext(null); setAppliedSource(null);
     setModuleSaveError('');
   }
 
@@ -783,19 +810,51 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   async function saveAsPreset() {
     if (!contextEditable) { setError('共享模板的内部上下文由创建者维护，不能另存内部配置；本次参数仍可直接生成。'); return; }
-    const presetName = await askName('模板名称', name, { title: '另存为模板', confirmLabel: '保存模板', maxLength: 80 });
-    if (!presetName?.trim()) return;
+    if (presetSaveLock.current || quickPresetLock.current || moduleSaving || draftRestoring || submitting || pendingSubmission) return;
+    await askName('模板名称', name, { title: '另存为模板', confirmLabel: '保存模板', maxLength: 80, onSubmit: async presetName => {
+      presetSaveLock.current = true; setPresetSaving(true);
+      try {
+        const created = await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          scope: isAdmin ? 'admin' : 'creator', name: presetName, groupName, prompt, context: moduleContext, model: moduleModel, quality, resolution,
+          count, referenceLimit, referencePolicy, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: moduleDraft.referenceIds, sourceModuleId: module.id,
+          fixedReferences: fixedEditable ? fixedReferencePayload(reproduceSourceTaskId ? reproductionReferences.slice(0, Math.max(0, reproductionFixedCount - reproductionStyles.reduce((total, group) => total + group.referenceCount, 0))) : fixedReferences) : undefined,
+          styleGroupIds: (reproduceSourceTaskId ? reproductionStyles : styleGroups).map(group => group.id),
+        }) }));
+        onModuleChange({ ...module, sourcePresetId: created.id, sourcePresetShared: false, sourcePresetOwnedByViewer: true, sourcePresetCanManageSharing: isAdmin });
+        setSaveStatus('模板已保存'); setSavedAsSignature(generationDraft);
+        void loadQuickPresets();
+      } finally { presetSaveLock.current = false; setPresetSaving(false); }
+    } });
+  }
+
+  const loadQuickPresets = useCallback(async () => {
+    setQuickPresetsLoading(true); setQuickPresetsError('');
     try {
-      await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        scope: isAdmin ? 'admin' : 'creator', name: presetName.trim(), groupName, prompt, context: moduleContext, model: moduleModel, quality, resolution,
-        count, referenceLimit, referencePolicy, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: moduleDraft.referenceIds, sourceModuleId: isAdmin ? module.id : undefined,
-        fixedReferences: fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
-        styleGroupIds: styleGroups.map(group => group.id),
-      }) }));
-      setSaveStatus('模板已保存');
-      setSavedAsSignature(generationDraft);
-      window.setTimeout(() => setSaveStatus(''), 2200);
-    } catch (e) { setError(e instanceof Error ? e.message : '模板保存失败'); }
+      const result = await readResponse(await fetch(`/api/image-studio/presets?moduleId=${encodeURIComponent(module.id)}`, { cache: 'no-store' }));
+      setQuickPresets(result.presets || []);
+      return result.presets as QuickStudioPreset[];
+    } catch (cause) { setQuickPresetsError(cause instanceof Error ? cause.message : '快捷模板读取失败'); return null; }
+    finally { setQuickPresetsLoading(false); }
+  }, [module.id, userId]);
+  useEffect(() => { if (active && module.saved) void loadQuickPresets(); }, [active, module.saved, quickPresetVersion, loadQuickPresets]);
+
+  async function applyQuickPreset(preset: QuickStudioPreset) {
+    if (quickPresetLock.current || presetSaveLock.current || !draftLoaded || draftRestoring || submitting || pendingSubmission || uploading || bannerUploading || moduleSaving || moduleDeleting || ratioEditing) return;
+    quickPresetLock.current = true; setQuickPresetApplying(preset.id); setError('');
+    const sequence = draftRestoreSequence.current;
+    setDraftRestoring(true);
+    try {
+      const available = await loadQuickPresets();
+      if (!available || sequence !== draftRestoreSequence.current) return;
+      const current = available.find(item => item.id === preset.id);
+      if (!current) throw new Error('这个快捷模板已不可用，请重新选择。');
+      if (!current.referencesAvailable) throw new Error('快捷模板中的部分参考图已不可用，当前设置未被替换。');
+      const policy = current.referencePolicy || moduleReferencePolicy({ ...module, images: current.images, referenceLimit: current.referenceLimit, referencePolicy: undefined });
+      const restored = await restoreTemporaryDraft({ ...current, images: current.images.map(image => ({ id: image.id })),
+        referencePolicy: policy, fixedReferences: current.fixedReferences, reproduceSourceTaskId: null });
+      if (restored) { setAppliedSource(null); setReproductionGlobalContext(null); setSaveStatus(`已套用：${current.name}`); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '快捷模板套用失败'); }
+    finally { quickPresetLock.current = false; setQuickPresetApplying(null); setDraftRestoring(false); }
   }
 
   async function restoreTemporaryDraft(saved = recoverableDraft, automatic = false) {
@@ -839,14 +898,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             const history = await readResponse(await fetch(`/api/image-studio/tasks?moduleId=${encodeURIComponent(module.id)}&taskId=${encodeURIComponent(saved.reproduceSourceTaskId)}`, { cache: 'no-store' }));
             restoredTask = history.tasks?.find((task: StudioTask) => task.id === saved.reproduceSourceTaskId);
             if (!restoredTask?.snapshot?.sourceAvailable) throw new Error('这份草稿的历史来源已不可用，当前模板未被替换。');
+            if (restoredTask.snapshot.contextAvailable === false) throw new Error('这条旧记录没有保存完整上下文，当前设置未被替换。');
             recoveredFixedCount = restoredTask.snapshot.fixedReferenceCount || 0;
             recoveredStyles = restoredTask.snapshot.styleGroups || [];
           }
         } catch (cause) {
           if (sequence === draftRestoreSequence.current) { blockedDraftSignature.current = generationDraft; setError(cause instanceof Error ? cause.message : '草稿参考图读取失败，请重试'); setRecoverableDraft(saved); setDraftRestoring(false); }
-          return;
+          return false;
         }
-        if (sequence !== draftRestoreSequence.current) return;
+        if (sequence !== draftRestoreSequence.current) return false;
         if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 20000));
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
         if (Number.isInteger(saved.referenceLimit) && saved.referenceLimit >= 1 && saved.referenceLimit <= MAX_REFERENCE_IMAGES) setReferenceLimit(saved.referenceLimit);
@@ -874,13 +934,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         if (Object.prototype.hasOwnProperty.call(saved, 'reproduceSourceTaskId')) {
           setReproduceSourceTaskId(typeof saved.reproduceSourceTaskId === 'string' && saved.reproduceSourceTaskId.length <= 120 ? saved.reproduceSourceTaskId : null);
           setReproductionReferences(isAdmin ? restoredTask?.snapshot?.fixedReferenceImages || [] : []);
+          setReproductionGlobalContext(isAdmin && restoredTask?.snapshot?.contextAvailable ? restoredTask.snapshot.globalContext ?? '' : null);
+          setReproductionContextConfigured(restoredTask?.snapshot?.contextConfigured === true);
+          if (isAdmin && restoredTask?.snapshot?.contextAvailable) setModuleContext(restoredTask.snapshot.moduleContext ?? '');
         }
       }
       setRecoverableDraft(null);
       blockedDraftSignature.current = null;
       setSavedAsSignature('');
       setDraftRestoring(false);
-      if (!automatic) setError('已恢复本次草稿，尚未提交生成。');
+      if (!automatic) setSaveStatus('已恢复设置');
+      return true;
   }
   useEffect(() => {
     if (restoredDraftKey.current === draftKey) return;
@@ -924,10 +988,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   };
   useEffect(() => {
     if (!draftLoaded || !automaticDirty || moduleSaving || moduleDeleting || uploading || bannerUploading || submitting || pendingSubmission
-      || !name.trim() || !Number.isInteger(count) || count < 1 || count > 8 || autoSaveAttempt.current === automaticSnapshot) return;
+      || presetSaving || quickPresetApplying || draftRestoring || !name.trim() || !Number.isInteger(count) || count < 1 || count > 8 || autoSaveAttempt.current === automaticSnapshot) return;
     const timer = window.setTimeout(() => saveAutomatically.current(), 500);
     return () => window.clearTimeout(timer);
-  }, [draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, moduleDeleting, uploading, bannerUploading, submitting, pendingSubmission, name, count]);
+  }, [draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, moduleDeleting, uploading, bannerUploading, submitting, pendingSubmission, presetSaving, quickPresetApplying, draftRestoring, name, count]);
 
   async function changeGroup(value: string) {
     const next = value !== '__other__' ? value : (await askName('输入新分组名称（最多 40 字）', '未命名分组', { title: '创建分组', confirmLabel: '创建分组', maxLength: 40 }))?.trim().slice(0, 40);
@@ -1042,7 +1106,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   async function submit(retryTask?: StudioTask) {
     if (pendingSubmission) { await querySubmission(); return; }
-    if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
+    if (!settings || submitLock.current || moduleDeleteLock.current || quickPresetLock.current || presetSaveLock.current || ratioEditing || draftRestoring) return;
     if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
@@ -1050,7 +1114,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     const payload = pendingSubmission || { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
       moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings.revision,
       referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
-      draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? globalContextDraft : undefined,
+      draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
         fixedReferences: !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
         styleGroupIds: reproduceSourceTaskId ? undefined : styleGroups.map(group => group.id), referencePolicy } };
     const ratioIssue = studioFourToOneIssue(payload.aspectRatio, settings.modelFourToOne?.[payload.model] === true);
@@ -1079,8 +1143,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   function restoreDisabledReason(task: StudioTask) {
     if (!task.snapshot) return '这条记录没有完整设置，不能套用。';
+    if (task.snapshot.contextAvailable === false) return '这条旧记录没有保存完整上下文，无法完整恢复。';
     if (!active) return '请先打开此模板，再套用设置。';
     if (!draftLoaded || draftRestoring) return '草稿正在恢复，请稍后套用。';
+    if (quickPresetLock.current || presetSaveLock.current) return '快捷模板正在保存或套用，请稍后。';
     if (pendingSubmission) return '上次提交尚未确认，请先核对生成记录。';
     if (submitting || submitLock.current) return '正在提交，请稍后套用。';
     if (uploading || bannerUploading || uploadLock.current) return '正在上传，请完成后套用。';
@@ -1112,6 +1178,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setReproductionReferences(snapshot.fixedReferenceImages || []);
     setReproductionFixedCount(snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0);
     setReproductionStyles(snapshot.styleGroups || []);
+    const nextContext = isAdmin && snapshot.contextAvailable ? snapshot.moduleContext ?? '' : moduleContext;
+    const nextGlobalContext = isAdmin && snapshot.contextAvailable ? snapshot.globalContext ?? '' : globalContextDraft;
+    if (isAdmin && snapshot.contextAvailable) setModuleContext(nextContext);
+    setReproductionGlobalContext(isAdmin && snapshot.contextAvailable ? nextGlobalContext ?? '' : null);
+    setReproductionContextConfigured(snapshot.contextConfigured === true);
     if (typeof snapshot.model === 'string' && snapshot.model) setModuleModel(snapshot.model);
     if (typeof snapshot.quality === 'string') setQuality(normalizeImageStudioQuality(snapshot.model || moduleModel, snapshot.quality));
     setReproduceSourceTaskId(snapshot.sourceAvailable ? task.id : null);
@@ -1122,16 +1193,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       referenceMax: snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: snapshot.referencePolicy?.useFixedReferences ?? true };
     const nextImages = [...transient.filter(image => image && primaryIds.includes(image.id || '')), ...transient.filter(image => image && !primaryIds.includes(image.id || ''))];
     const signature = JSON.stringify({ inputs: { ...generationInputs, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
-      aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy },
+      aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext },
       source: snapshot.sourceAvailable ? task.id : null, references: snapshot.fixedReferenceImages || [],
-      fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], globalContext: globalContextDraft });
+      fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], globalContext: nextGlobalContext });
     setAppliedSource({ taskId: task.id, label: `${module.name} · ${task.ordinal}`, signature, modified: false });
     return null;
   }
 
   function exitReproductionMode(message = '已退出历史复现模式，接下来会使用当前模块上下文。') {
     setReproduceSourceTaskId(null);
-    setError(message);
+    setReproductionGlobalContext(null);
+    setError(''); setSaveStatus(message);
   }
 
   async function download(ids: string[]) {
@@ -1194,13 +1266,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
   const selectedFourToOne = settings?.modelFourToOne?.[moduleModel] === true;
   const ratioIssue = studioFourToOneIssue(aspectRatio, selectedFourToOne);
-  const hasContext = Boolean((isAdmin ? globalContextDraft?.trim() : settings?.contextConfigured) || (contextEditable ? moduleContext.trim() : moduleContextConfigured));
+  const hasContext = reproduceSourceTaskId ? reproductionContextConfigured : Boolean((isAdmin ? effectiveGlobalContext?.trim() : settings?.contextConfigured) || (contextEditable ? moduleContext.trim() : moduleContextConfigured));
   const ready = Boolean(selectedProviderReady && moduleUnitCredits !== null && settings && !settingsError);
   const generationFeedback: StudioFeedback | null = queryingSubmission ? { message: '正在查询这次提交，不会再次生成。', tone: 'progress' }
     : pendingSubmission ? submitting ? { message: '正在处理当前请求，请稍候再查询。', tone: 'progress' }
       : moduleDeleting ? { message: '正在删除模板，请等待操作结束后再查询。', tone: 'progress' } : null
     : sourceSharingBlocked ? { message: '该模板已停止共享，请换一个可用模板。', tone: 'error' }
     : submitting ? { message: '正在提交，请等待结果，不要重复点击。', tone: 'progress' }
+    : quickPresetApplying || presetSaving ? { message: quickPresetApplying ? '正在套用快捷模板。' : '正在保存快捷模板。', tone: 'progress' }
     : uploading || bannerUploading ? { message: '图片还在上传或处理，请等待图片显示后再生成。', tone: 'progress' }
     : draftRestoring ? { message: '正在恢复上次使用的图片和设置。', tone: 'progress' }
     : ratioEditing ? { message: '图片比例尚未确认，请先完成比例设置。', tone: 'info' }
@@ -1361,6 +1434,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {(appliedSource || reproduceSourceTaskId) && <p role="status" className={styles.appliedSource}>
           {appliedSource ? <>来自：{appliedSource.label}<span>{sourceApplied ? '已套用' : '来源已修改'}</span></> : '历史复现'}
           <span>不自动生成</span>
+          {reproduceSourceTaskId && <span>沿用原上下文</span>}
           {reproduceSourceTaskId && <button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button>}
         </p>}
         <section className={`${styles.materialSection} ${templateWorkbench ? styles.primaryMaterials : ''}`} aria-label="主图">
@@ -1457,10 +1531,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.some(option => option !== 'auto') && <p className={styles.muted}>当前模型不支持质量档位，按模型默认质量生成。</p>}
         <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
-          <button type="button" onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
-          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存设置' : '保存上下文'}</button>
-          <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={uploading || bannerUploading || submitting || (!recoverableDraft && (!contextEditable || !generationChanged || generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && generationChanged && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : templateWorkbench ? '另存为模板' : '另存为'}</button>
+          <div className={styles.quickPresetRow}>
+            <button type="button" disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || uploading || bannerUploading} onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
+            <div className={styles.quickPresetChoices} aria-label="已保存快捷模板">
+              {quickPresets.map(preset => <button type="button" key={preset.id} title={`套用：${preset.name}`} className="sd2-loading-surface" data-busy={quickPresetApplying === preset.id}
+                disabled={!draftLoaded || draftRestoring || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || moduleSaving || moduleDeleting || ratioEditing}
+                onClick={() => void applyQuickPreset(preset)}>{preset.name}</button>)}
+            </div>
+          </div>
+          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存设置' : '保存上下文'}</button>
+          <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || (!recoverableDraft && (!contextEditable || !generationChanged || generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && generationChanged && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : templateWorkbench ? '另存为模板' : '另存为'}</button>
         </div>
+        {quickPresetsLoading && <p role="status" className={styles.muted}>正在读取快捷模板…</p>}
+        {quickPresetsError && <p role="alert" className={styles.error}>{quickPresetsError}<button type="button" disabled={quickPresetsLoading} onClick={() => void loadQuickPresets()}>重试</button></p>}
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
         {pendingSubmission && <p className={styles.muted}>提交结果待确认，只查询原请求，不会再次生成。<button type="button" disabled={submitting} onClick={async () => {
