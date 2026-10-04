@@ -47,7 +47,7 @@ export function randomAvatar(rules: AvatarRules, constraints: AvatarConstraints,
   const fields: Record<string, AvatarField> = {}; const warnings: string[] = []; let counter = 0;
   const draw = (pool: string[]) => pool[createHash('sha256').update(`${AVATAR_RULE_VERSION}:${seed}:${counter++}`).digest().readUInt32BE(0) % pool.length];
   for (const [key, initialPool] of Object.entries(catalog)) {
-    let explicit = constraints.explicit[key];
+    let explicit: AvatarField | undefined = constraints.explicit[key];
     const choice = rules.choices[key];
     if (explicit && choice && explicit.value !== choice && rules.choiceSources?.[key] !== 'config' && (rules.choiceEditedAt?.[key] || 0) > (rules.descriptionEditedAt || 0)) explicit = undefined;
     const userChoice = choice && rules.choiceSources?.[key] !== 'config';
@@ -93,8 +93,9 @@ export function randomAvatar(rules: AvatarRules, constraints: AvatarConstraints,
     if (['无明显标记', '不戴眼镜', '无饰品'].includes(field.value)) continue;
     if (details.some(d => d.value === field.value)) continue;
     if (field.source === 'random' && (!previous||!only||key===only) && details.filter(d => d.prominence !== 'micro').length >= budget) { fields[key] = { ...field, value: catalog[key][0] }; continue; }
-    const location: Record<string,{position:string;side:'left'|'right'|'none';kind:'natural'|'trace'|'accessory'}> = { '右眉浅旧伤':{position:'眉部',side:'right',kind:'trace'},'左侧脸颊小痣':{position:'脸颊',side:'left',kind:'natural'},'手表':{position:'手腕',side:'none',kind:'accessory'},'小耳钉':{position:'耳垂',side:'none',kind:'accessory'},'细项链':{position:'颈部',side:'none',kind:'accessory'} };
-    details.push({ ...field, kind: key === 'feature' ? 'natural' : 'accessory', side: 'none', position: key === 'feature' ? '脸部（位置未指定）' : key === 'glasses' ? '眼部' : '随饰品对应位置', ...location[field.value], prominence: details.some(d => d.prominence === 'main') ? 'secondary' : 'main' });
+    const location: Partial<Record<string,{position:string;side:'left'|'right'|'none';kind:'natural'|'trace'|'accessory'}>> = { '右眉浅旧伤':{position:'眉部',side:'right',kind:'trace'},'左侧脸颊小痣':{position:'脸颊',side:'left',kind:'natural'},'手表':{position:'手腕',side:'none',kind:'accessory'},'小耳钉':{position:'耳垂',side:'none',kind:'accessory'},'细项链':{position:'颈部',side:'none',kind:'accessory'} };
+    const resolvedLocation = location[field.value] || {kind:key === 'feature' ? 'natural' as const : 'accessory' as const,side:'none' as const,position:key === 'feature' ? '脸部（位置未指定）' : key === 'glasses' ? '眼部' : '随饰品对应位置'};
+    details.push({ ...field, ...resolvedLocation, prominence: details.some(d => d.prominence === 'main') ? 'secondary' : 'main' });
   }
   for(const [key,field] of Object.entries(fields)){const excluded=constraints.explicit[key]?.excluded;if(excluded?.length)fields[key]={...field,excluded};}
   if(details.filter(d=>d.prominence!=='micro').length>budget) warnings.push('明确指定的特征超过默认预算，已全部保留；不会再增加随机记忆点');
