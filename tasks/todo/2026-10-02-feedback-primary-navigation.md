@@ -635,3 +635,33 @@ D2补充核对：AdminUsersClient quickView初值all、筛选初值all；过滤�
 运行与公网：sd2-gray.service active，本地config 200/release 0.37.5；公网config/release/login/assets均200且X-SD2-Origin=server-42-193，匿名摘要空、private/no-store，login含同一BUILD。5份线上应用源码SHA与commit一致；仅layout/assets影响范围20份去重静态中4份新/改变资源公网200且SHA一致，16份路径及内容未变复用0.37.4，不重跑全站静态或浏览器/业务测试；新CSS含排除等待/错误的播放中opacity:0，JS含对应显示属性。旧0.37.4源码releases/b12720988c80376194444d98320e163b62f35ca8、旧BUILD ZgKKw-0pLsNEIe24xVMJt在.next-prod-before-sd2-p1-v0375-da4e285保留，更早回退不删。worker unit、MainPID1241475、启动时间及ExecMainStatus前后一致，未重启/排空/强杀，视频timers active；数据软链/关键目录写权限及env元信息不变，未读env/DB内容、未写DB、付费或变权限。
 
 正式根本机[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.5.diff)、[0.37.5发布证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.5.json)可访问，仍私有不Git/archive；既有媒体主题资料复用，不新建说明/设计文档。正式根只同步两份记录，原dirty/未跟踪资料保持，不部署正式根旧src。守门员start/finish实际P1 UI/运行意图均L3-visible-runtime，无归类误判，真实结果层按项目用户手动验收例外不自动执行；通用上线授权提示由本轮明确授权满足。发布阻塞无；实际hover/focus、点击暂停/继续、等待/重试效果待用户手动，D2具体列表仍待答，原截图缺口与OS双击时序边界保持。
+
+### R1-R3历史恢复、查看与版本字号（2026-10-04）
+
+用户原文R1：“恢复设置不需要弹出，默认恢复”；R2：“恢复按键变查看按键，且不需要文字”；浏览器评论R3，generate/ip顶部版本：“版本号再大50%”。本轮授权只取消历史设置恢复的专用确认，不取消全站未保存、生成付费或安全离开保护。开工实际源码干净8fe29047，生产重新核对da4e285/v0.37.5/BUILD FkdpYXAklqREmAjtSKyog，服务active、图片worker MainPID1241475；正式根e7480ee及原无关dirty保留。守门员start真实修改/提交推送/部署意图识别L3-visible-runtime，默认用户手动验收。当前无原生worker工具，单一lead整批连续处理，未创建侧栏任务或自动审核线程。本次兼容PATCH0.37.6，同交付不重复升级。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| R1 | 历史设置直接恢复 | 不弹专用确认，参数与忙碌保护不变 | 已部署0.37.6，待用户手动验收 |
+| R2 | 结果查看图标 | 原位置改为无文字查看，无重复或无效入口 | 已部署0.37.6，待用户手动验收 |
+| R3 | 顶栏版本字号 | 增大50%，正常字重、品牌不变 | 已部署0.37.6，待用户手动验收 |
+
+整批实现：共享image-studio/studio.tsx只删除restoreTask内moduleDirty的“恢复历史设置”确认；原snapshot恢复模型/数量/比例/质量/参考图分组和policy/历史primaryMax/sourceId逻辑不改，pendingSubmission/uploading/moduleSaving及封面submitting/ratioEditing/active保护保留，不保存或生成扣费。原恢复按钮位置改task.asset条件下Eye图标查看，复用openTaskPreview；去掉后方重复查看，保留可访问名称、现有气泡样式和稳定32px尺寸，click/dblclick停止冒泡，不触发封面恢复。共享template-studio同样生效。封面单击恢复/双击预览及1000ms有界分流不改，任意OS双击间隔下不能保证绝对分流，历史边界仍有效。globals.css共享版本span从0.5em变0.75em，即增加50%，字重400、品牌和顶栏测高不改。package/lock仅版本字段，release摘要引用原单源；D1/P1/C5-C8/U1与资源库保留。D2具体列表仍待确认，未触额度规则、权限、DB、Provider、worker、依赖。
+
+本轮关键原图均已查看可读并按原名私有归档正式根，不替代旧图：
+- [R1恢复弹窗原图codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png](../../docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png)，来源用户本轮本地clipboard，39476字节，源与副本SHA256 16480b548d9736ec65f9d0c2cbea6361253cf958ef54d6f3bf1d12f4115e4361一致。
+- [R2操作行原图codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png](../../docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png)，来源用户本轮本地clipboard，22347字节，源与副本SHA256 09c884786253ebb0a1a44683764aa07bbbfa740941c3242b88aa009910a6ef55一致。
+
+原始来源路径均为/var/folders/lt/cl_ckbmn1jl2wwj44t43qm6h0000gn/T/加原文件名；正式可访问目录/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions。R3浏览器标记图仅聊天像素，原文件名和本地路径未提供，待补持久原件，未冒用上述两图。附件/private统一diff/部署JSON不Git或archive。整批后仅构建内置lint/types、源码自查及发布必需版本/健康/静态/回退/持久数据检查，不做浏览器、DOM、截图或业务功能/API验收；全部实际效果待用户手动。
+
+整批发布前检查：npm run build退出0，包含内置lint/类型检查，仅既有图片/依赖及CSS兼容警告；git diff --check通过。源码自查核对允许范围8文件，package/lock除根版本字段外不变；restoreTask删除一行专用确认后与原函数完整相同，既有快照参数和忙碌保护保留；ResultImageCover、InlineVideoCover及ReleaseNotice源码未变。图标查看仅task.asset条件下且只有一个入口，点击与双击停止冒泡，封面键盘单击仍即时恢复。共享template-studio直接引用ImageStudio，image-studio原入口仍正常重定向，不改鉴权和路径。发布脚本复用既有安全链路，仅适配0.37.6、字号及查看标记，bash -n/node --check通过。真实视觉/交互未自动验收。
+
+#### R1-R3正式交付（2026-10-04）
+
+北京时间08:00:29发布完成：应用2cb3e9b840c89aedbc02b13cd6be0ce2add4ae0f，v0.37.6，BUILD 9OIK8DVopn89g3Quh4LRG，入口https://sd2.youdooart.com/template-studio及https://sd2.youdooart.com/generate/ip。6份应用文件为studio.tsx历史恢复/图标查看、studio.module.css固定图标尺寸/现有气泡显现、globals.css版本字号，以及package.json/package-lock.json/src/lib/release.ts版本和摘要；另2份本工单与资料索引，共8份允许范围。应用commit及独立rollback/2026-10-04-before-history-view-v0.37.6已推送且ls-remote核对，tag解引用为健康0.37.5的da4e2852632a4ca217d6b98c93954b7ca512617c。独立git archive排除env、整个materials、storage/uploads/videos、数据库/运行产物；SHA256 d48bc0d5735c53dcba1f406b692d11a353379f5a212b8420b25e85220a2ebb71经服务器核对，附件未进入Git/archive。
+
+候选NEXT_DIST_DIR=.next-prod-candidate npm run build退出0含内置lint/types，仅既有警告。首次候选标记检查以“恢复历史设置”泛词误命中仍应保留的上传/保存忙碌提示，退出93且synced=0/moved=0，正式仍0.37.5健康；查明误报后只将检查收窄为被删除确认的完整风险句，未再改应用或抬版本。重用同一已成功候选，归档逐文件内容、worker unit/状态重新核对一致，全部必要检查通过后切换。reservation与服务器flock实际启用，切换前无并发活动；失败守旧与自动恢复源码/build机制保持，不原地build live、不server git pull。
+
+正式sd2-gray.service active，本地config 200/release 0.37.6；公网config/release/login/assets均200且X-SD2-Origin=server-42-193，匿名summary空且private/no-store，login含同一BUILD。6份线上应用源码SHA对应commit；layout/template-studio/generate-ip范围27份去重静态中7份新/改变JS/CSS公网200且SHA一致，20份路径/内容未变复用0.37.5，不重复未改静态或全站浏览器/业务回归。新CSS含版本0.75em/400，新JS含单一图片查看控制；候选专用恢复确认句已不存在，原忙碌提示保留。旧源码releases/da4e2852632a4ca217d6b98c93954b7ca512617c及旧BUILD FkdpYXAklqREmAjtSKyog在.next-prod-before-sd2-r123-v0376-2cb3e9b保留，更早回退不删。图片worker前后unit/MainPID1241475/启动时间/状态一致，未重启/排空/强杀；既有视频timers active。storage/uploads/videos软链、关键子目录写权限和env元信息保持，未读env/DB内容，未写DB、付费或扩权限。
+
+正式根本机[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.37.6.diff)、[0.37.6部署证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.37.6.json)归入既有私有媒体主题，不Git/archive；两张原图入口见本节。正式根只同步本工单与资料索引，不覆盖src和原dirty。守门员start/finish实际意图均L3-visible-runtime，无阻塞警告、无归类误判；真实结果层按项目明确手动验收例外未自动执行，不把上线说成功能通过。R1/R2实际恢复/查看和R3字号效果待用户手动；R3标记截图原件缺口、1000ms OS双击边界及D2具体列表待确认均保留。无未解决发布卡点，无范围外业务修改。
