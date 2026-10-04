@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [设置保存成功关闭统一修正 S1/S2](todo/2026-10-04-settings-save-close.md)：2026-10-04 已授权排查并实施；图片/视频上下文、模板编辑弹窗及后台 API 设置统一成功退出、失败留输入，多表单与新草稿保护。隔离分支实施中，自动发布后待用户手动验收。
 - [头像受控随机生成器 V1](todo/2026-10-04-controlled-avatar-generator.md)：2026-10-04，工单v1.0.0；原30节需求及12条补充已整理，优先1/3/4/5/6/9；仅方案、实施未开始，不改应用、不发生成、不部署。[资料索引](../docs/materials/index.md#头像受控随机生成器-v1-需求2026-10-04)。
 - [D1统一素材库实施与发布](todo/2026-10-02-unified-resource-library.md#10-最新设计实施与发布2026-10-03)：按设计v1.2.0与v2原图实施；图片/视频参考直接开库，库内上传、类型/来源分离，真实图集/项目、全范围搜索、收藏、最近选用与顺序添加接通。v0.37.0已部署正式站（应用源码6d2f390，来自codex/canvas-liblib-layout，本目录仅同步记录）；构建/远端/公网/回退证据见工单，待用户手动验收。L2部分完成：use-only且无原图下载权限的共享/公共图片不能用于图片工作台，明确禁选；视频参考保留原ReferenceImage适配。[资料索引](../docs/materials/index.md#统一素材库批准实施)。
 - [C3/C4更新提醒](todo/2026-10-02-feedback-primary-navigation.md#c3c4更新刷新与外部提醒2026-10-03)：已部署v0.36.10，源码b26f9d216949c3601d2cc36d050e6fc922422ab1、BUILD MFC_yPnyTMuIibuxAwjsx；去掉无条件刷新二次确认，安全存入浏览器的模板草稿不误报丢失，真正保存/上传未完成及保存失败仍保护。外部保留版本提醒及刷新入口，不展示/返回更新摘要；23公网静态/8源码一致，4服务active，待用户手动验收。[原图索引](../docs/materials/index.md#更新刷新重复提醒与外部摘要)、[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
