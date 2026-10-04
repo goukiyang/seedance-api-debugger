@@ -11,6 +11,8 @@
 
 ## 最近状态
 
+- 2026-10-05：用户明确授权激活既有 `gouki` 并设置其提供的密码，供新站knowledge复用。服务器既有ID `cmp5ehrp4000b28co0que3h5p`由deleted恢复active，角色保持user、未升级为SD2全站管理员，未改其它用户/点数/角色/账号期限；复用线上password helper，原账号恢复字段备份仅服务器root私有0700/0600，不记录明文密码、不复制生产库。SD2 PID3913765未重启、代码和版本不变；仅专属knowledge配置绑定owner并重启该服务，新站实际登录与会话200、匿名知识库401，隔离会话已退出。此为账号管理与新站登录结果，不是SD2全站功能验收或新构建发布；完整正式入口见 `/Volumes/Data/Projects/media-link-intake-mobile/tasks/todo.md` 的 `ML-ACCOUNT-ACTIVATE-20261005`，安全结果见其 `data/diagnostics/ML-ACCOUNT-ACTIVATE-20261005/`。
+
 - 2026-07-28：原主 todo 完整迁移到 `tasks/todo/archive-2026-07-28-main.md`；备份见 `tasks/todo/backups/todo-20260728-232548.md`。
 - 迁移前大小：7667 行，546944 字节。未直接删除原文内容。
 
