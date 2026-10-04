@@ -1,0 +1,60 @@
+{
+  "material_version": "1.0.0",
+  "project": "video-api-debugger",
+  "received_date": "2026-10-04",
+  "source": "用户在项目对话提供的微信公众号文章链接",
+  "original_filename": null,
+  "original_url": "https://mp.weixin.qq.com/s/Tr6hAKdY-AJw1vK8c63n7Q",
+  "observed_title": "GPT Image 2.5 做 Seedance 2.5 角色脸型库：20 张提示词全公开，附 220 张完整版",
+  "observed_author": "远见明察",
+  "displayed_publication_time": "2026年9月11日 01:55",
+  "publication_timezone": "文章显示未注明时区",
+  "keywords": ["脸型库", "结构组合", "人物差异", "身份与风格分离", "稳定参考图", "角色复用"],
+  "reading_evidence": {
+    "method": "网页工具未能打开，使用已连接Chrome的BrowserSkill临时阅读页；没有同站用户页签，未借用或改动其他工作页签，阅读会话已关闭",
+    "verified": "标题、作者、方法章节、示例取样、身份/风格分层、参考图复用流程与文末说明已读取",
+    "limits": "20个公开示例只抽样比较文本；未取得220型完整版，未检查全部图片差异，未运行文中模型/生图流程；Chrome具体profile与xiaobo映射未确认，不据此声称已验证xiaobo登录态",
+    "archive_boundary": "保存用户给定原链接、出处及自有分析，不复制整篇文章、提示词库或配图；第三方素材复用授权未知"
+  },
+  "article_method_summary": "以脸部结构及细部特征建立人物差异，将身份内容与视觉呈现分开；先确定人物，再使用参考素材延续角色。作者还讨论可控自然纹理、镜头与姿势约束及多角度设定。",
+  "existing_plan_matches": [
+    "分离人物身份与造型，DNA与模型适配解耦",
+    "结构关联采样、特征预算、明确部位和人物自身左右",
+    "DNA Seed不冒充生图身份锁；保持此人使用参考图"
+  ],
+  "codex_suggestions_not_approved_requirements": [
+    "在已有硬条件内，先选择脸长宽、颧骨、下颌等可行结构组合，再抽五官及小特征；批次优先覆盖不同可行组合，不将气质或职业绑定一种脸",
+    "同批候选用相近距离、角度与照明便于比较，默认头肩像、脸部可读、手和头发不挡关键部位；明确用户构图或背景要求优先",
+    "把身份、造型与镜头/画风内部拆层；换风格不改核心五官，但首版仍不增加大批风格按钮",
+    "为收藏人物记录用户认可的基准参考图及版本和固定身份摘要；后续变体不自动替换基准图，避免不断以上一张变体作为唯一参考的累积漂移",
+    "验收分别看不同人物是否视觉有差异、同一人物变体是否保持关键特征，DNA字段不同不能直接算图片不同；当前仍由用户手动验收",
+    "多角度设定图/角色素材包留角色复用扩展，按需要和另行确认费用生成，不默认每位候选增加四视图"
+  ],
+  "not_to_copy": [
+    "不把文章的演员式审美、古风或性别刻板印象设为普通头像默认值",
+    "不要求每人都有痣或伤疤，保留原方案0个明显特征及用户排除条件",
+    "毫米级文字标记不是图像模型的定位保证，单个标记也不能保证人物唯一",
+    "作者提及的模型型号、平台相似度65%规则、强制两轮换风格及必然成败均未独立核实，不当作项目规则",
+    "不因参考文章而改方案D、添加首页脸型族分类、领取完整版、发评论、付费生成或实施功能"
+  ],
+  "primary_technical_references": [
+    {
+      "name": "IP-Adapter",
+      "url": "https://github.com/tencent-ailab/IP-Adapter",
+      "source_code": "https://github.com/tencent-ailab/IP-Adapter/blob/main/ip_adapter/ip_adapter.py",
+      "read_scope": "ImageProjModel、IPAdapter初始化、get_image_embeds、set_scale及generate参数入口",
+      "license": "仓库代码Apache-2.0；其他模型权重/数据许可需另查",
+      "use": "参考图编码与文字条件分开的实际开源实现，可借鉴模型适配边界；不是我们已接入的闭源模型SDK",
+      "integration_limit": "Python/PyTorch/扩散模型与权重运行环境，不直接塞入Next.js，不为本轮安装；先复用正式站已有参考图API",
+      "maintenance_status": "仓库及源码当前可访问；未审核近期维护节奏和部署安全性，未推荐本轮生产接入",
+      "runtime_verification": "未安装、未运行、未验证在本项目适用"
+    },
+    {
+      "name": "Diffusers Reproducibility",
+      "url": "https://huggingface.co/docs/diffusers/using-diffusers/reusing_seeds",
+      "read_scope": "Generator、初始噪声、随机状态与跨平台复现限制",
+      "use": "区分控制随机过程与保存具体人物身份，不能将固定Seed作为同人效果验收"
+    }
+  ],
+  "decision_status": "只读参考分析；建议尚未成为批准需求；工单与应用版本未变，无生图、功能测试、生产数据写入或部署"
+}

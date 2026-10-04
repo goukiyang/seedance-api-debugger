@@ -18,6 +18,15 @@
 - 开源资料：已读取[seedrandom源码](https://github.com/davidbau/seedrandom/blob/released/seedrandom.js)及[包信息](https://github.com/davidbau/seedrandom/blob/released/package.json)，MIT，可独立Seed随机，不解决人脸约束；已读取[Zod解析实现](https://github.com/colinhacks/zod/blob/main/packages/zod/src/v4/core/parse.ts)及[许可证](https://github.com/colinhacks/zod/blob/main/LICENSE)，MIT，可校验结构，语义冲突仍需业务规则；[DiceBear官方文档](https://www.dicebear.com/integrations/javascript/)仅作Seed+选项思路参考，图形头像不代替真人摄影输出。本次未安装、接入或运行这些组件。
 - 用途与校验：供后续范围核对、数据设计、实施和手动验收读取；按“受控随机/三对象/四位候选/优先级”可检索。本节及两份原文可读性、工单/资料入口在交付前核对；无图片、视频或音频附件需归档。Jev本地doctor返回deferred/未授权，未外传需求或调用其云判断。本次意见由主控分析，不称独立审核或功能验收。
 
+### 微信脸型库参考（2026-10-04）
+
+- 资料名称：《GPT Image 2.5 做 Seedance 2.5 角色脸型库：20 张提示词全公开，附 220 张完整版》；作者远见明察，页面显示2026-09-11 01:55（时区未注明），接收日期2026-10-04。来源为用户提供[原文链接](https://mp.weixin.qq.com/s/Tr6hAKdY-AJw1vK8c63n7Q)，原文件名不适用。
+- 正式登记：[出处、阅读范围及对照建议](2026-10-04-controlled-avatar-generator/wechat-face-library-reference.json)，资料v1.0.0；本条是外部方法参考，不替代原30节需求、12条补充或工单，建议未批准。只保存链接、出处和自有分析，不复制作者整篇正文/提示词库/配图。
+- 主题/用途：人物差异、骨相组合、身份/造型/镜头分层、基准参考图、同人复用；用于完善受控随机头像方案的候选差异与人物保存判断，不自动扩展首版范围。
+- 摘要与建议：已有方案覆盖结构关联、特征预算和参考图；可再考虑结构组合分层抽样、统一头像取景、稳定基准图及版本、固定身份摘要，用户手动分别检查不同人的差异和同人的保留。多角度角色素材包留后续按需能力，不默认增加候选生成费用或常驻分类按钮。
+- 边界/校验：Chrome正文方法及示例已读取，公开20例只抽样，220型完整版未获取；无生图和全图差异验证。毫米级定位、平台65%相似阈值、文中型号及绝对成败说法未独立核实，不写硬规则；不强制人人有疤/痣，不改变用户明确条件。JSON与入口在交付前核对可读；无用户附件原件缺失，无作者素材商用授权证据。
+- 技术核对：[IP-Adapter仓库及实际源码](https://github.com/tencent-ailab/IP-Adapter/blob/main/ip_adapter/ip_adapter.py)已读，代码Apache-2.0，只借鉴图文条件分离，不新增Python模型链路；[Diffusers复现文档](https://huggingface.co/docs/diffusers/using-diffusers/reusing_seeds)支持区分随机复现和身份保存。未安装或运行；更多限制见正式登记。
+
 ## 主图导航与视频参数反馈工单（2026-10-03）
 
 项目video-api-debugger；2026-10-02后台两条原文见下节。2026-10-03追加/generate三参数灰色，随后明确取消三参数业务锁（模型合法范围保留），新增I5模板上下文未修改关闭及同类误提醒，I6多任务待确认只读排查。I1-I5已部署v0.36.3，最新运行源码8315f02776290cda1c0f1e7286856d193f95dfca、BUILD TIe6lesNJcjyQirM3FMpx；I3模板导航状态按surface/user本地持久化、迁移旧session记录；[发布证据](../../tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](../../tasks/todo/2026-10-02-feedback-primary-navigation.diff)正式归档；最新候选内置检查及4服务/20相关静态/2变更源码一致通过，首次27静态/20源码证据为历史，功能待用户手动验收。I6故障阶段已明确、底层原因无法追溯待查；视频标注原件仍待归档，不称W1附件齐全，反馈new不改。
