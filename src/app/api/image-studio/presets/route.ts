@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { applyStudioPreset, canUseCompanyTemplates, linkStudioQuickPreset, listStudioPresets, saveStudioPreset, setStudioPresetSharing } from '@/lib/image-studio/presets';
+import { applyStudioPreset, canUseCompanyTemplates, linkStudioQuickPreset, listStudioPresets, manageStudioPreset, saveStudioPreset, setStudioPresetSharing } from '@/lib/image-studio/presets';
 import { StudioModuleError } from '@/lib/image-studio/modules';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 
@@ -23,6 +23,8 @@ export async function POST(request: NextRequest) {
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用共享模板' }, { status: 403 });
   try {
     const body = await request.json();
+    if (body.action === 'rename' || body.action === 'delete') return NextResponse.json(await manageStudioPreset(user, String(body.presetId || ''), body.revision, body.action, body.name));
+    if (body.action === 'replace') return NextResponse.json(await saveStudioPreset(user, body, true));
     if (body.action === 'add-quick') return NextResponse.json(await linkStudioQuickPreset(user, String(body.moduleId || ''), String(body.presetId || '')));
     if (body.action === 'apply') return NextResponse.json(await applyStudioPreset(user, String(body.presetId || '')));
     if (body.action === 'set-sharing') {

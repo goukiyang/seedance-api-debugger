@@ -1,4 +1,6 @@
 import { prisma } from '@/lib/prisma';
+import { resolveModuleContextVersion } from './context-version';
+import { studioPresetArchived } from './preset-lifecycle';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
 import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, type ImageResolution } from './model-catalog';
@@ -109,12 +111,13 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: row.source_preset_id || null,
     sourcePresetShared: row.source_preset_id ? Boolean(sourcePreset?.is_shared) : null,
     sourcePresetOwnedByViewer: Boolean(sourcePreset && sourcePreset.owner_id === ownerId),
-    sourcePresetCanManageSharing: Boolean(sourcePreset && isAdmin && sourcePreset.scope === 'admin' && sourcePreset.owner_id === ownerId),
+    sourcePresetCanManageSharing: Boolean(sourcePreset && isAdmin && sourcePreset.scope === 'admin' && sourcePreset.owner_id === ownerId && !(await studioPresetArchived(sourcePreset.id))),
     contextEditable: !protectedSource,
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
     fixedReferenceCount: fixedReferences.length,
     styleGroupIds, styleGroups, reproductionState,
     contextConfigured: Boolean(row.context.trim()), context: protectedSource ? '' : row.context,
+    moduleContextVersion: await resolveModuleContextVersion(row.context).catch(() => null),
     createdAt: row.created_at, updatedAt: row.updated_at,
     images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : []; }),
     fixedReferences: (isAdmin ? fixedReferences : []).map(reference => {
@@ -314,7 +317,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     // preset. Personal copies created from that preset stay independent.
     if (isAdmin && current?.source_preset_id) {
       const source = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id }, select: { owner_id: true, scope: true } });
-      if (source?.owner_id === ownerId && source.scope === 'admin') {
+      if (source?.owner_id === ownerId && source.scope === 'admin' && !(await studioPresetArchived(current.source_preset_id, tx))) {
         await tx.imageStudioPreset.update({ where: { id: current.source_preset_id }, data: {
           name: saved.name, group_name: saved.group_name, prompt: saved.prompt, context: saved.context,
           model: saved.model || 'gemini-3.1-flash-image-preview', quality: saved.quality, resolution: saved.resolution, count: saved.count,

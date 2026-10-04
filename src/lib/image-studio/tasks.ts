@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { bindModuleContextVersion, MODULE_CONTEXT_VERSION_RULE, snapshotModuleContextVersion, withContextVersionRetry } from './context-version';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { studioDeliveryStatus } from './delivery';
 import { prisma } from '@/lib/prisma';
@@ -131,7 +132,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   }
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
-  await prisma.$transaction(async tx => {
+  await withContextVersionRetry(() => prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
       if (duplicate.fingerprint !== fingerprint) throw new StudioError('提交编号冲突', 409);
@@ -364,6 +365,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (ratioIssue) throw new StudioError(ratioIssue);
     const resolution = normalizeImageResolution(generation.model, input.resolution || generation.resolution, imageApi.provider);
     const outputSize = imageOutputSize(generation.model, resolution, resolvedAspectRatio, imageApi.provider);
+    const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
     const snapshot = JSON.stringify({
       version: 1,
       requestId: input.requestId, batchId, inputFingerprint: fingerprint,
@@ -378,6 +380,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       transientReferenceImages: transientReferenceSnapshot,
       globalContext: snapshotGlobalContext,
       moduleContext: snapshotModuleContext,
+      moduleContextVersion, moduleContextVersionRule: MODULE_CONTEXT_VERSION_RULE,
       moduleId: workspace?.id || moduleId || null,
       sourcePresetId,
       reproducedFromTaskId: reproduceFromTaskId || null,
@@ -417,7 +420,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         metadata_json: JSON.stringify({ allocations: freeze.allocations }),
       } });
     }
-  }, { timeout: 15000 });
+  }, { timeout: 15000 }));
   return batchId;
 }
 
@@ -487,6 +490,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     select: { id: true, name: true, username: true, avatar_url: true } }) : null;
   const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
   const deliveries = new Map(await Promise.all(items.map(async task => [task.id, await studioDeliveryStatus(task)] as const)));
+  const contextVersions = new Map(await Promise.all(items.map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
   return { tasks: items.map(task => {
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
@@ -496,7 +500,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
       providerCostUsd: task.provider_cost_usd,
       aspectRatio: task.aspect_ratio, outputSize: task.output_size,
       createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: snapshot.transientReferenceImages.map(image => image.id),
-      snapshot,
+      snapshot: { ...snapshot, moduleContextVersion: contextVersions.get(task.id)?.code ?? null, moduleContextVersionState: contextVersions.get(task.id)?.state ?? 'missing' },
       asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
     };
   }), ...(taskId !== undefined ? {} : { nextCursor: rows.length > 24 ? items[items.length - 1].id : null }) };

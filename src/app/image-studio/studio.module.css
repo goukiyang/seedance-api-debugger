@@ -164,6 +164,18 @@
 .compactField strong { font-weight: 750; }
 .compactField select { width: 100%; }
 .page .generate { width: 100%; min-height: 44px; margin-top: 12px; }
+.generationToolbar { margin-bottom: 16px; }
+.generationToolbar .generate { margin-top: 0; }
+.contextEntry, .contextVersion { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.contextVersion { min-width: 6.5ch; font-size: 12px; color: var(--text-secondary, #a1afb4); }
+.contextVersion small { font: inherit; }
+.page .contextCode { display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; min-height: 24px; border: 0; border-radius: 0; background: transparent; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.contextCode > span { min-width: 5ch; }
+.contextEditorTools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; font-size: 12px; }
+.contextEditorTools > span { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.contextEditorTools > div { flex: 1 1 180px; margin: 0; }
+.presetSource { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; font-size: 13px; }
+.presetSource select { min-width: 0; max-width: 100%; flex: 1 1 160px; }
 .moduleQuickActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid #2d383d; }
 .moduleQuickActions button { padding: 7px 9px; font-size: 12px; }
 .moduleQuickActions .saveReady { border-color: #79daca; color: #a4f2df; }

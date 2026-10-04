@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { deleteStudioResult, listStudioTasks, StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { ContextVersionError } from '@/lib/image-studio/context-version';
 
 export const dynamic = 'force-dynamic';
 export async function DELETE(request: NextRequest) {
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ batchId }, { status: 202 });
   } catch (error) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: '提交内容无效' }, { status: 400 });
-    if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof StudioError || error instanceof ContextVersionError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof Error && error.message.startsWith('点数不足')) return NextResponse.json({ error: error.message }, { status: 409 });
     return NextResponse.json({ error: '提交结果待确认，请查询这次提交，不要重复新建任务' }, { status: 503 });
   }
