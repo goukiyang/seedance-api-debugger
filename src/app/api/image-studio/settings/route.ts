@@ -3,6 +3,7 @@ import { getSession, AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { getImageStudioSettings, saveImageStudioSettings, imageStudioSettingsPayload, StudioSettingsClearConfirmationError, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/settings';
 import { getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,8 @@ export async function GET() {
       return [model, isStudioImageGenerationProvider(api.provider) && isImageGenerationApiReady(api)];
     }));
     const providerReady = Object.values(modelReady).some(Boolean);
-    return NextResponse.json({ ...imageStudioSettingsPayload(settings, user.role === 'admin'), providerReady, modelReady }, { headers: { 'Cache-Control': 'no-store' } });
+    const modelFourToOne = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, supportsStudioFourToOne(model, selectImageGenerationSettings(channels, model).provider)]));
+    return NextResponse.json({ ...imageStudioSettingsPayload(settings, user.role === 'admin'), providerReady, modelReady, modelFourToOne }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json({ error: '读取设置失败，请重试' }, { status: 503 });
   }

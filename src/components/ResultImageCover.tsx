@@ -1,43 +1,33 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { useId, useState } from 'react';
+import { Check } from 'lucide-react';
 import styles from './ResultImageCover.module.css';
 
-// Scope delayed single clicks to one result and cancel them before a double-click preview.
-let cancelPendingClick: (() => void) | undefined;
-export function ResultImageCover({ src, alt, restoreDisabled, onRestore, onPreview }: {
-  src?: string; alt: string; restoreDisabled: boolean; onRestore: () => void; onPreview: () => void;
+export function ResultImageCover({ src, alt, disabledReason, applied, onRestore, onPreview }: {
+  src?: string; alt: string; disabledReason: string; applied: boolean; onRestore: () => string | null; onPreview: () => void;
 }) {
   const tooltipId = useId();
-  const pathname = usePathname();
-  const timer = useRef<ReturnType<typeof setTimeout>>();
-  const restore = useRef(onRestore);
-  restore.current = onRestore;
   const [hintDismissed, setHintDismissed] = useState(false);
-  const cancel = useCallback(() => { clearTimeout(timer.current); timer.current = undefined; if (cancelPendingClick === cancel) cancelPendingClick = undefined; }, []);
-  useEffect(() => {
-    const onPointer = () => { if (timer.current) cancel(); };
-    document.addEventListener('pointerdown', onPointer, true);
-    document.addEventListener('keydown', cancel, true);
-    return () => { cancel(); document.removeEventListener('pointerdown', onPointer, true); document.removeEventListener('keydown', cancel, true); };
-  }, [cancel, pathname, src, tooltipId]);
-  useEffect(() => { if (restoreDisabled) cancel(); }, [cancel, restoreDisabled]);
-  return <button type="button" className={styles.cover} data-result-cover={tooltipId}
-    aria-label={`恢复${alt}的设置`} aria-describedby={tooltipId}
+  const [feedback, setFeedback] = useState<{ text: string; attempt: number } | null>(null);
+  return <button type="button" className={styles.cover} data-result-cover={tooltipId} data-applied={applied || undefined}
+    aria-label={`套用${alt}的设置`} aria-disabled={Boolean(disabledReason)} aria-describedby={`${tooltipId} ${tooltipId}-status`}
     onMouseEnter={() => setHintDismissed(false)} onFocus={() => setHintDismissed(false)}
     onKeyDown={event => { if (event.key === 'Escape') setHintDismissed(true); }}
     onClick={event => {
       event.stopPropagation();
-      cancelPendingClick?.(); cancel();
-      if (event.detail > 1 || restoreDisabled) return;
-      if (event.detail === 0) { restore.current(); return; }
-      cancelPendingClick = cancel;
-      timer.current = setTimeout(() => { if (cancelPendingClick === cancel) { cancel(); restore.current(); } }, 1000);
+      if (event.detail > 1) return;
+      const reason = disabledReason || onRestore();
+      setFeedback(previous => ({ text: reason || (applied ? '已再次套用' : '已套用'), attempt: (previous?.attempt || 0) + 1 }));
     }}
-    onDoubleClick={event => { event.stopPropagation(); cancelPendingClick?.(); cancel(); onPreview(); }}>
+    onDoubleClick={event => { event.stopPropagation(); onPreview(); }}>
     {/* eslint-disable-next-line @next/next/no-img-element */}
     <img decoding="async" src={src} alt={alt} loading="lazy" />
-    {!hintDismissed && <span id={tooltipId} role="tooltip" className={styles.hint}>双击放大</span>}
+    {!hintDismissed && <span id={tooltipId} role="tooltip" className={styles.hint}>{disabledReason || '双击放大'}</span>}
+    {applied && <span className={styles.applied}><Check size={13} />已套用</span>}
+    <span id={`${tooltipId}-status`} role="status" className={feedback?.text && feedback.text !== '已套用' && feedback.text !== '已再次套用' ? styles.feedback : styles.status}>
+      {feedback && <span key={feedback.attempt}>{feedback.text}</span>}
+    </span>
+    {applied && feedback?.text === '已再次套用' && <span key={feedback.attempt} className={styles.repeat}>已再次套用</span>}
   </button>;
 }

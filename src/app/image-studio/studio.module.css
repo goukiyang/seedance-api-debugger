@@ -67,14 +67,18 @@
 .referenceToggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
 .page .referenceToggle input { width: 16px; height: 16px; margin: 0; accent-color: #8ce5d2; }
 .imageSectionHeading .referenceLimitControl { flex-wrap: wrap; }
-.materialSection { min-width: 0; padding: 14px 0 16px; border-bottom: 1px solid #353a3e; }
+.materialSection { min-width: 0; padding: 8px 0 10px; border-bottom: 1px solid #353a3e; }
 .materialSection:first-of-type { padding-top: 0; }
-.materialHeading { --material-heading-font-size: 15px; --material-heading-line-height: 1.4; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 8px; min-height: 38px; margin-bottom: 10px; }
-.materialHeading h3 { margin: 4px 0 0; font-size: var(--material-heading-font-size); line-height: var(--material-heading-line-height); font-weight: 700; letter-spacing: 0; }
-.page .materialHeading select { box-sizing: border-box; width: 84px; min-width: 0; height: calc(var(--material-heading-font-size) * var(--material-heading-line-height)); min-height: 0; margin-top: 4px; padding: 0 6px; font-size: 11px; line-height: 1; }
-.materialHeading > span { align-self: center; font-size: 11px; color: #aeb6bc; white-space: nowrap; text-align: right; }
+.materialHeading { --material-heading-font-size: 15px; --material-heading-line-height: 1.4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+.materialHeading h3 { flex: 1 1 auto; margin: 0; white-space: nowrap; font-size: var(--material-heading-font-size); line-height: var(--material-heading-line-height); font-weight: 700; letter-spacing: 0; }
+.page .materialHeading select { box-sizing: border-box; flex: 0 0 auto; width: 84px; min-width: 0; height: calc(var(--material-heading-font-size) * var(--material-heading-line-height)); min-height: 0; margin-top: 0; padding: 0 6px; font-size: 11px; line-height: 1; }
+.materialHeading > span { flex: 0 0 auto; margin-left: auto; font-size: 11px; color: #aeb6bc; white-space: nowrap; text-align: right; }
 .materialHeading b { color: #7db9e5; font-weight: 600; }
-.materialHeading small { display: block; margin-top: 2px; font-size: 10px; }
+.appliedSource { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 8px; color: #bcdfd5; font-size: 12px; overflow-wrap: anywhere; }
+.appliedSource span { color: #aeb6bc; }
+.unreadDot { display: inline-block; flex: 0 0 8px; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: #57acff; vertical-align: middle; box-shadow: 0 0 0 1px #173c5d; }
+.navLabel, .coverDescription .navLabel { display: flex; align-items: center; min-width: 0; }
+.navName { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .materialGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: none; align-items: start; }
 .materialGrid .referenceItem { position: relative; border-width: 1px; }
 .materialGrid .reference { overflow: hidden; border-radius: 5px; background: #101416; }

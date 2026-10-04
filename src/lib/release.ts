@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '资产视频封面和播放完整显示，风格组点击卡片直接选用，主图等数量控件与标题等高。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '素材标题更紧凑，点击结果立即套用并显示来源；模板新结果用蓝点提醒并记住已看状态，支持的图片模型可选择4:1。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

@@ -12,6 +12,14 @@ export function isGeminiImageModel(model: string) {
   return GEMINI_MODELS.has(model);
 }
 
+export function supportsStudioFourToOne(model: string, provider?: string) {
+  return model === 'gemini-3.1-flash-image-preview' && provider !== 'ai_media_vip';
+}
+
+export function studioFourToOneIssue(ratio: string, supported: boolean) {
+  return ratio === '4:1' && !supported ? '当前模型或通道不支持4:1，请使用支持4:1的 Banana 2 原生通道，或选择其他比例。' : '';
+}
+
 export function imageResolutionOptions(model: string, provider?: string): ImageResolution[] {
   if (model === 'gemini-3.1-flash-image-preview') return [...FLASH_RESOLUTIONS];
   if (model === 'gemini-3-pro-image-preview') return [...PRO_RESOLUTIONS];
@@ -31,6 +39,8 @@ export function normalizeImageResolution(model: string, value: unknown, provider
 }
 
 export function imageOutputSize(model: string, resolution: unknown, ratio: string, provider?: string): string {
+  const issue = studioFourToOneIssue(ratio, supportsStudioFourToOne(model, provider));
+  if (issue) throw new Error(issue);
   const normalized = normalizeImageResolution(model, resolution, provider);
   return isGeminiImageModel(model) && provider !== 'ai_media_vip'
     ? normalized

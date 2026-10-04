@@ -8,7 +8,7 @@ import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudio
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
-import { imageOutputSize, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
+import { imageOutputSize, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, supportsStudioFourToOne, studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from './model-catalog';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
@@ -357,6 +357,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const aspectRatio = ratioResolution.requested;
     const resolvedAspectRatio = ratioResolution.resolved;
     const aspectRatioSource = ratioResolution.source;
+    const ratioIssue = studioFourToOneIssue(resolvedAspectRatio, supportsStudioFourToOne(generation.model, imageApi.provider));
+    if (ratioIssue) throw new StudioError(ratioIssue);
     const resolution = normalizeImageResolution(generation.model, input.resolution || generation.resolution, imageApi.provider);
     const outputSize = imageOutputSize(generation.model, resolution, resolvedAspectRatio, imageApi.provider);
     const snapshot = JSON.stringify({
