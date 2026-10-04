@@ -192,6 +192,8 @@ R3浏览器标记图仅聊天像素，原文件名/本地路径未提供，待�
 
 ### 视频比例、风格卡片与数量控件
 
-2026-10-04，项目video-api-debugger，用户文字与浏览器评论，文本v1，关键词S1视频contain固定外框/竖屏黑边、S2卡片选用/取消与管理事件隔离、S3标题行高/主图风格组参考图数量select。原文、真实源码证据及范围见[固定工单S1-S3](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#s1-s3视频比例风格卡片与数量控件2026-10-04)，正文可读；同交付PATCH0.37.7待整批构建及安全发布，不替代R1-R3和历史资料。用户已确认外框不变，不裁剪拉伸，不改数量/选中/保存业务。
+2026-10-04，项目video-api-debugger，用户文字与浏览器评论，文本v2交付补充，关键词S1视频contain固定外框/竖屏黑边、S2卡片选用/取消与管理事件隔离、S3标题行高/主图风格组参考图数量select。原文、真实源码证据及范围见[固定工单S1-S3](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#s1-s3视频比例风格卡片与数量控件2026-10-04)，正文可读；北京时间14:07:40已发布0.37.7，应用bce7033/BUILD p7KYo9xeDmtuYO7YZCc9y，S1-S3均待用户手动验收，不替代R1-R3和历史资料。用户已确认外框不变，不裁剪拉伸，不改数量/选中/保存业务。正式根本机[本轮统一diff](2026-10-03-media-cover-interactions/implementation-v0.37.7.diff)、[0.37.7部署证据JSON](2026-10-03-media-cover-interactions/deployment-v0.37.7.json)可访问且对应同一应用提交，私有不Git/archive；检查与回退证据见工单。
 
 本轮浏览器标记截图2张仅聊天像素，原文件名及本地路径未提供，待补持久原件，未归档或核验复制完整性：S2风格组dialog target dialog.studio_styleDialog，S3主图select target materialHeading select，页面template-studio/1068x871/v0.37.6，适用本轮卡片与紧凑控件要求，不当作线上回退证据。既有[R1恢复原图](2026-10-03-media-cover-interactions/codex-clipboard-bf8b8e0b-ce42-4ded-9a04-3db19b540822.png)和[R2操作行原图](2026-10-03-media-cover-interactions/codex-clipboard-f479bf73-86c9-44cc-9d9c-ff24143aa971.png)保持私有、可读且前轮hash已核，仅参考保持前修，不冒充本轮原件或自动截图。
+
+收尾追加“每模板12张/3行、超出翻页、宽屏与开源方案”文字为独立设计咨询，2026-10-04，原文件名不适用，无附件；parent另行只读研究，本批未实施分页，也未因此增加应用版本。D2仍待具体列表；OS双击时序和外来预裁素材边界仍登记。
