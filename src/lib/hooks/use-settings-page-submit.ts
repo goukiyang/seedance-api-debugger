@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { settingsReturnTarget } from '@/lib/navigation/settings-return';
 import { useUnsavedNavigation } from './use-unsaved-navigation';
 
-export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: boolean, fallback: string, confirm: Parameters<typeof useUnsavedNavigation>[1]) {
+export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: boolean, fallback: string, confirm: Parameters<typeof useUnsavedNavigation>[1], working = false) {
   const router = useRouter();
   const snapshots = Object.fromEntries(Object.entries(drafts).map(([key, value]) => [key, JSON.stringify(value)]));
   const baseline = useRef<Record<string, string> | null>(null);
@@ -15,8 +15,8 @@ export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: bo
   const [notice, setNotice] = useState('');
   const signature = JSON.stringify(snapshots);
   const dirty = Boolean(baseline.current && Object.keys(snapshots).some(key => snapshots[key] !== baseline.current![key]));
-  useUnsavedNavigation(dirty || busy, confirm, {
-    unsaved: dirty ? ['后台设置'] : [], busy: busy ? ['设置正在保存'] : [],
+  useUnsavedNavigation(dirty || busy || working, confirm, {
+    unsaved: dirty ? ['后台设置'] : [], busy: busy ? ['设置正在保存'] : working ? ['通道操作正在进行'] : [],
   });
 
   useEffect(() => {
@@ -35,9 +35,9 @@ export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: bo
   }, [completed, fallback, ready, router, signature]);
 
   return {
-    busy, notice,
+    busy: busy || working, notice,
     start() {
-      if (!ready || lock.current) return false;
+      if (!ready || lock.current || working) return false;
       lock.current = true; setBusy(true); setNotice('');
       return true;
     },
