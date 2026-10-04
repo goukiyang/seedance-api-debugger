@@ -787,3 +787,21 @@ git archive上传包SHA256 6b166a2f0685e30001614471ce5c3c0d15659aa410a3e8b9d756e
 旧源码releases/bce703383e8749e4366ed5e70b9d863a70e6fcd9及旧BUILD p7KYo9xeDmtuYO7YZCc9y在.next-prod-before-sd2-u345-v0380-138a2c7保留，更早.next-prod-before-resource-6d2f390不删除。图片worker unit/MainPID1241475/启动时间2026-10-02 19:26:26 CST/状态前后相同，未重启/排空/强杀，视频timers active。storage/uploads/videos软链、关键写权限和env元信息保持，不读取env/DB内容、不DB写或迁移、费用/权限/Provider协议及依赖不改；个人已读更新仅本条授权的私有fs store。
 
 正式根[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.38.0.diff)、[部署证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.38.0.json)归既有私有目录，不Git/archive；source/formal只同步本工单与索引，正式根旧src及原无关dirty保留，记录聚焦提交推送，不再构建/重启。guardian start/finish实际L3-visible-runtime，最终无阻塞警告、无本轮分级误判；项目手动验收覆盖默认浏览器/功能验证要求，未自动浏览器/DOM/截图、业务API或付费生成。真实交互、窄屏视觉、个人已读跨设备和4:1实际生成待用户手动；U5截图原件缺口、其他通道4:1限制及T1未批准/D2待确认保留，无未解决发布阻塞。U4已获准双击先套用再查看，旧1000ms OS分流边界不再适用于本批实现。
+
+### V1封面与banner试做（2026-10-04）
+
+用户原话：“尝试重新做封面和banner，全身图细节看不清无法对比，挑不同形式3到5个模板试做，确认再铺量，后面固定采用这样方式。”
+
+本轮选四类代表样板：转写实（推荐）、极简Q版化、转成线稿、草稿转成稿（高完成度），分别试脸部左右对比、结果大图、驾驶舱结构对比、上下对比加肩甲/手部局部。原图排版预览的封面3:4、banner4:1为本轮建议，尚未获用户批准；不都放全身，不伪造模板生成效果。已确认的长期流程是先做3–5个代表样板，用户确认后才铺量；具体构图不默认推广到全部类型。后续新增类型或改版同样先样板再确认。
+
+样板v1.0.0已交付：[真实原图预览](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-04-template-cover-banner-pilot/preview-v1.html)、[素材来源和完整提示词清单](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-04-template-cover-banner-pilot/manifest-v1.json)。四幅内置imagegen排版候选及八份原始图片均私有归档在同目录；原文件名、生成器原件路径、模板/任务对应和每条精确prompt见清单。生成式样张可能重绘细节，且部分板内比例不精确，不能作为正式上传素材或真实生图效果证明；比较以未修改原始图片的HTML预览为准。HTML仅通过SVG viewBox与CSS排版缩放，未重写图片像素；可打开原图与原始生成结果。线上未替换、未铺量，应用v0.38.0不变。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| V1 | 封面与banner试做 | 4个样板能看清细节、便于对比；确认前不批量替换 | 样板已做，待用户确认 |
+
+来源核对：只读服务器数据库元数据投影筛选已有杨波模块的代表任务及对应资产路径/尺寸，未读取提示词、上下文、邮箱、凭据或完整用户表，未写数据库。scp复制八份对应原图/实际结果，文件名保留，已逐图查看可读；本地SHA256均匹配内容哈希文件名，sips八份尺寸与资产元数据一致。私有素材仅存正式根，不上传Git或服务器、不复制整套到生产源；此处绝对入口在两个工作区均指向同一原件。用户本轮提供的是文字需求，没有新上传附件。
+
+已读MIT开源[img-comparison-slider](https://github.com/sneas/img-comparison-slider)及其[真实样式实现](https://raw.githubusercontent.com/sneas/img-comparison-slider/master/packages/img-comparison-slider/src/styles.scss)，参考相同显示区域的前后对比方式；同时读取[MDN焦点定位](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/object-position)。本轮只借鉴展示原则，未安装依赖、未实现滑动对比控件。node核对脚本语法、四样板定义、八原图存在、全部裁切框不越界、四设计板存在和JSON格式通过；不把这些检查说成视觉或功能验收。open_in_codex文件展示返回queued，未声称用户已经看到。按项目约定未操作浏览器或自动截图/功能验收，裁切选择、小屏和真实使用效果待用户确认。
+
+守门员识别为L2私有视觉样板与固定记录，无生产写入、扣费/权限变化或应用发布，不触生成worker。原无关dirty保留；本轮只精确提交两份固定记录，完整素材与HTML/JSON仍私有。记录辅助执行者停止后由主线程收尾，避免并发写同一记录；无分级误判。确认前不继续批量，下一步等待用户指出保留或调整的版式。
