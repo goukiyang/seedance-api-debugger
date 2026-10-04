@@ -745,10 +745,10 @@ U3用户原话：“上下缝隙不要留那么大，减少字数还是恩阳”
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| U3 | 素材区标题收紧 | 减少上下空隙，数量说明简短清楚，小屏不重叠 | 进行中 |
-| U4 | 封面点击方案落地 | 单击立即套用、状态就地可见，双击和独立查看可用 | 进行中 |
-| U5 | 模板未读蓝点 | 新结果有蓝点，点开读取后消失，已看状态可恢复 | 进行中 |
-| U6 | 图片比例4:1 | 可选择、保存，提交时保持正确比例并遵守模型限制 | 进行中 |
+| U3 | 素材区标题收紧 | 减少上下空隙，数量说明简短清楚，小屏不重叠 | 已部署，待用户手动验收 |
+| U4 | 封面点击方案落地 | 单击立即套用、状态就地可见，双击和独立查看可用 | 已部署，待用户手动验收 |
+| U5 | 模板未读蓝点 | 新结果有蓝点，点开读取后消失，已看状态可恢复 | 已部署，待用户手动验收 |
+| U6 | 图片比例4:1 | 可选择、保存，提交时保持正确比例并遵守模型限制 | 已部署，待用户手动验收 |
 
 用户新增U5原话：“增加红点系统，生成还未看的，在这块增加 一个小蓝点，点击后消失”。最新完整交接已补齐，以本次明确规则为准：template-studio左侧模板条目名称旁显示小圆蓝点，分组仅汇总有未读子项；生成成功且有本网站可读完整结果才计入，queued/不确定/失败不计入。必须用户明确点击该模板并成功读取结果才标此次实际读到的版本已读；后台轮询、已有active状态、列表刷新不算再次查看。点分组最多清实际打开首项，不能清其他子项；当前模板后来完成的新图再次亮，不按createdAt高水位。手机组选/模板选和全部封面保留等价提示，不重构导航。新增兼容能力与U3/U4同批v0.38.0，不先交付0.37.8，不重复抬号。
 
@@ -775,3 +775,15 @@ U6用户2026-10-04新增：“图片比例增加4:1选项”，与U3-U5同批v0.
 整批首轮本地构建在类型检查发现Set展开不兼容当前编译target，汇总后改为Array.from，不改tsconfig或依赖；与U6和个人回执首次起点边界同批修正。首次基线不包含请求开始后才完成的图，后续新完成仍未读；跨账号旧POST的finally不影响新账号请求时序。全部U3-U6完成后统一重构建、自查与安全候选发布，不提前发布前三项或再次抬版本。
 
 整批最终本地npm run build退出0，含lint/types；git diff --check通过。保留既有img/hooks警告及新use-result-attention的cleanup ref提示；该Set引用从未替换，cleanup按当前账号取消与清空，源码已核不导致跨账号回执覆盖，未为无关警告改编译设置或扩回归。19份允许文件，package/lock除三处版本值外完全相同，worker/provider/delivery/media、src/lib/auth/credits/integrations、prisma/scripts及视频播放、ReleaseNotice/退出保护、globals.css原样。旧worker原生生成路径4:1直接传递，输出校验40,000,000像素上限覆盖官方最大8192×2048，不强制缩回方图，不需worker重启；未付费生成验证。发布脚本bash -n/node --check通过，只允许新增attention及settings GET能力布尔字段的API差异；既有更新摘要外部隐藏保持，统一候选/回退/公网新静态检查继续执行。
+
+#### U3-U6正式交付（2026-10-04）
+
+北京时间15:31收尾核对：四项同批发布v0.38.0，应用138a2c70493ff91a87feab1de4a6aebd76f2c0fa，BUILD F5HwWnLy0uFMi_KGPDBdN，正式入口https://sd2.youdooart.com/template-studio。应用commit已推origin/codex/canvas-liblib-layout且ls-remote一致；rollback/2026-10-04-before-material-result-v0.38.0已推远端，解引用为原健康0.37.7 bce703383e8749e4366ed5e70b9d863a70e6fcd9。不曾交付0.37.8或先发前三项，不因中途U6/检查修正重抬版本。19份允许文件：studio.tsx/module.css、ResultImageCover.tsx/module.css、ratio-picker.tsx、settings-controller.ts、use-result-attention.ts、attention/route.ts、settings/route.ts、result-attention.ts、viewer-receipts.ts、ratios.ts、tasks.ts、image-generation/resolution.ts、package.json/package-lock.json/release.ts及本工单/索引。
+
+git archive上传包SHA256 6b166a2f0685e30001614471ce5c3c0d15659aa410a3e8b9d756edbb3d88c479，服务器校验一致，排除env、整个materials、storage/uploads/videos、DB/database/runtime和构建产物。现有发布reservation/flock启用，无并发；独立releases/138a2c70493ff91a87feab1de4a6aebd76f2c0fa内NEXT_DIST_DIR=.next-prod-candidate npm run build退出0且包含四项标记，内置lint/types通过，警告如上，不原地构建live。仅网站gray服务停启切换，候选失败守旧/切换失败自动回退保护保持。rsync提示受排除的materials非空未删除，私有目录保留；服务重启最初一次本地连接未就绪，既有健康等待随后成功，不是未解决故障。
+
+本地config 200、release 0.38.0、sd2-gray.service active；公网config/release/login均200，X-SD2-Origin=server-42-193，匿名release summary为空/private no-store，login包含同一BUILD。template-studio匿名307指向/login?next=%2Ftemplate-studio，沿原中间件保护，不扩公开访问。17份应用源码SHA对应同一commit；layout/image-studio/template-studio影响范围22份JS/CSS中6份新静态公网200及SHA匹配，16份路径/内容未变复用原产物证据。素材标题、即时套用、未读蓝点、4:1限制/尺寸四项标记全部可在对应新产物核对。首次公网静态检查的4:1组合文字条件误报：限制文字与尺寸被拆到两个chunk，乘号又被编译为\\xd7；按实际编译格式汇总跨文件标记后统一复核通过，没有改应用或再次发版。
+
+旧源码releases/bce703383e8749e4366ed5e70b9d863a70e6fcd9及旧BUILD p7KYo9xeDmtuYO7YZCc9y在.next-prod-before-sd2-u345-v0380-138a2c7保留，更早.next-prod-before-resource-6d2f390不删除。图片worker unit/MainPID1241475/启动时间2026-10-02 19:26:26 CST/状态前后相同，未重启/排空/强杀，视频timers active。storage/uploads/videos软链、关键写权限和env元信息保持，不读取env/DB内容、不DB写或迁移、费用/权限/Provider协议及依赖不改；个人已读更新仅本条授权的私有fs store。
+
+正式根[本轮统一diff](../../docs/materials/2026-10-03-media-cover-interactions/implementation-v0.38.0.diff)、[部署证据JSON](../../docs/materials/2026-10-03-media-cover-interactions/deployment-v0.38.0.json)归既有私有目录，不Git/archive；source/formal只同步本工单与索引，正式根旧src及原无关dirty保留，记录聚焦提交推送，不再构建/重启。guardian start/finish实际L3-visible-runtime，最终无阻塞警告、无本轮分级误判；项目手动验收覆盖默认浏览器/功能验证要求，未自动浏览器/DOM/截图、业务API或付费生成。真实交互、窄屏视觉、个人已读跨设备和4:1实际生成待用户手动；U5截图原件缺口、其他通道4:1限制及T1未批准/D2待确认保留，无未解决发布阻塞。U4已获准双击先套用再查看，旧1000ms OS分流边界不再适用于本批实现。
