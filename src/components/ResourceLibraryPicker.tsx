@@ -66,7 +66,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [returnAvailable,setReturnAvailable]=useState(false);
   const avatarCurrent = useRef({avatarTarget,onAvatarApplied,onAvatarConfirm,returnKey,currentAssetIds}); avatarCurrent.current={avatarTarget,onAvatarApplied,onAvatarConfirm,returnKey,currentAssetIds};
   useEffect(()=>{avatarTicket.current='';setReturnAvailable(false);if(returnKey){const ticket=stored<string>(returnKey,'');if(typeof ticket==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(ticket)){avatarTicket.current=ticket;setReturnAvailable(true);}}},[returnKey]);
-  useEffect(()=>{setRemovedItem(null);if(!user)return;const saved=stored<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>|null>(`sd2:library-undo:${user.id}`,null);if(saved&&typeof saved.assetId==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(saved.assetId)&&typeof saved.fileName==='string'&&typeof saved.identity==='string')setRemovedItem({...saved,canRemoveFromLibrary:true});},[user?.id]);
+  useEffect(()=>{setRemovedItem(null);if(!user)return;const saved=stored<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>|null>(`sd2:library-undo:${user.id}`,null);if(saved&&typeof saved.fileName==='string'){const identity=saved.identity??(saved.assetId?`asset:${saved.assetId}`:'');if(typeof identity==='string'&&/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(identity))setRemovedItem({...saved,identity,canRemoveFromLibrary:true});}},[user?.id]);
   useEffect(()=>{
     const receive=async(event:MessageEvent)=>{
       if(event.origin!==location.origin||avatarWindow.current&&event.source!==avatarWindow.current||event.data?.type!=='sd2:avatar-return'||event.data.ticketId!==avatarTicket.current||locked.current||!active.current)return;
@@ -185,14 +185,14 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   };
   const change = (patch: Partial<Preferences>) => { restoring.current = false; body.current?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
   const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
-    if (!item.canRemoveFromLibrary || !item.assetId || locked.current) return;
+    if (!item.canRemoveFromLibrary || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(item.identity) || locked.current) return;
     if (!restore && !(await askConfirm(`从我的素材库删除“${item.fileName}”？可以撤销。底层文件、已经添加到任务或图集的引用、已共享内容仍保留；这不是彻底删除。`, { title: '删除素材', confirmLabel: '从我的素材库删除', danger: true }))) return;
     locked.current = true; setBusy(true); setError('');
     try {
-      const response = await fetch('/api/assets/library/removal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: item.assetId, removed: !restore }) });
+      const response = await fetch('/api/assets/library/removal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity: item.identity, assetId: item.assetId, removed: !restore }) });
       const data = await readJsonResponse<{ error?: string }>(response);
       if (!response.ok) throw new Error(data.error || '操作未确认');
-      if (!restore) { setItems(old => old.filter(i => i.assetId !== item.assetId)); setSelected(old => old.filter(i => i.assetId !== item.assetId)); imports.current.delete(item.identity); }
+      if (!restore) { setItems(old => old.filter(i => i.identity !== item.identity)); setSelected(old => old.filter(i => i.identity !== item.identity)); imports.current.delete(item.identity); }
       setRemovedItem(restore ? null : item);if(user){try{if(restore)localStorage.removeItem(`sd2:library-undo:${user.id}`);else localStorage.setItem(`sd2:library-undo:${user.id}`,JSON.stringify({assetId:item.assetId,identity:item.identity,fileName:item.fileName,canRemoveFromLibrary:true}));}catch{setNotice('删除已确认；本机无法记住撤销入口，请在关闭窗口前撤销。');}} setEpoch(v => v + 1);
     } catch (e) { setError(e instanceof Error ? e.message : '操作失败'); }
     finally { locked.current = false; setBusy(false); }

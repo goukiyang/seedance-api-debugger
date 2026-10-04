@@ -8,7 +8,7 @@ import { getAlbumAccess } from '@/lib/reference-albums/permissions';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import type { PickerAlbum, PickerItem, PickerScope } from '@/lib/assets/picker-types';
-import { removedLibraryAssetIds } from '@/lib/assets/library-removal';
+import { removedLibraryResources } from '@/lib/assets/library-removal';
 
 export const dynamic = 'force-dynamic';
 const scopes: PickerScope[] = ['mine', 'project', 'shared', 'public'];
@@ -37,7 +37,8 @@ export async function GET(request: NextRequest) {
     const limit = 40;
     const projects = await getAccessibleProjectIds(user);
     const hidden = await studioHiddenAssetUrls(user);
-    const removed = new Set(await removedLibraryAssetIds(user.id));
+    const removals = await removedLibraryResources(user.id);
+    const removed = new Set(Object.entries(removals).flatMap(([kind, ids]) => ids.map(id => `${kind}:${id}`)));
     const visibleRefs = await studioVisibleReferenceWhere(user);
     const now = new Date();
     const candidates = await prisma.referenceAlbum.findMany({
@@ -78,13 +79,15 @@ export async function GET(request: NextRequest) {
       ...(q ? { file_name: { contains: q } } : {}),
     };
     const refWhere: Prisma.ReferenceImageWhereInput = {
-      album_id: { in: permittedAlbums }, status: 'active', AND: [visibleRefs],
-      asset: { is: { status: 'active', type: { in: imageStudio ? ['image'] : types } } },
+      album_id: { in: permittedAlbums }, status: 'active', AND: [visibleRefs, { OR: [
+        { asset: { is: { status: 'active', type: { in: imageStudio ? ['image'] : types } } } },
+        ...(imageStudio || types.includes('image') ? [{ asset_id: null }] : []),
+      ] }],
       ...(q ? { OR: [{ asset: { file_name: { contains: q } } }, { album: { name: { contains: q } } }] } : {}),
     };
     const [assets, references, generatedTasks, favorites, videoTasks] = await Promise.all([
       scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
-      prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
+      prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, owner_user_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
       prisma.imageStudioTask.findMany({ where: { owner_id: user.id, status: 'succeeded', asset_id: { not: null } }, select: { asset_id: true } }),
       p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, favorited: true }, select: { content_key: true } }) : Promise.resolve([]),
       !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId ? prisma.videoTask.findMany({ where: {
@@ -106,7 +109,21 @@ export async function GET(request: NextRequest) {
       type: a.type as PickerItem['type'], originalUrl: '', thumbnailUrl: null,
       fileName: a.file_name, width: null, height: null, duration: null, createdAt: a.created_at.toISOString(), source: assetSource(a) }));
     for (const ref of references) {
-      const a = ref.asset!;
+      const a = ref.asset;
+      if (!a) {
+        items.push({ key: `reference_image:${ref.id}`, identity: `reference_image:${ref.id}`, id: ref.id,
+          referenceImageId: ref.id, type: 'image', fileName: `参考图-${ref.id}`,
+          originalUrl: `/api/reference-images/${ref.id}/content?variant=preview`,
+          thumbnailUrl: `/api/reference-images/${ref.id}/content?variant=thumbnail`,
+          width: null, height: null, duration: null, createdAt: ref.created_at.toISOString(),
+          source: ref.source_type === 'generated' ? 'generated' : ref.source_type === 'upload' ? 'uploaded' : 'other',
+          canRemoveFromLibrary: scope === 'mine' && ref.owner_user_id === user.id,
+          ...(assetOnly ? downloadableAlbums.has(ref.album_id)
+            ? { importUrl: `/api/reference-images/${ref.id}/content?variant=original` }
+            : { unavailableReason: '当前用途需要本人素材；此图集未授权原图下载，暂不能添加，可在视频参考区直接使用' } : {}),
+        });
+        continue;
+      }
       const needsImport = assetOnly && a.owner_id !== user.id;
       items.push({ key: `asset:${a.id}`, identity: `asset:${a.id}`, id: assetOnly ? a.id : ref.id,
         assetId: a.id, ...(!assetOnly || needsImport ? { referenceImageId: ref.id } : {}),
@@ -120,7 +137,7 @@ export async function GET(request: NextRequest) {
       const ready = Boolean(task.local_video_path || task.public_video_url);
       items.push({ key: `video_task:${task.id}`, identity: `video_task:${task.id}`, id: task.id, type: 'video',
         originalUrl: `/api/video/play/${task.id}`, thumbnailUrl: `/api/video/thumbnail/${task.id}`, fileName: `seedance-${task.id}.mp4`,
-        width: null, height: null, duration: task.duration, createdAt: task.created_at.toISOString(), source: 'generated',
+        width: null, height: null, duration: task.duration, createdAt: task.created_at.toISOString(), source: 'generated', canRemoveFromLibrary: true,
         ...(ready ? { importUrl: `/api/video/download/${task.id}` } : { unavailableReason: '视频还没有可下载文件，暂不能添加；请在生成记录中完成保存后再选用' }) });
     }
     const favoriteKeys = new Set(favorites.map(f => f.content_key));
@@ -128,7 +145,7 @@ export async function GET(request: NextRequest) {
     const source = p.get('source');
     const dedup = new Map<string, PickerItem>();
     for (const item of items) {
-      if (item.assetId && removed.has(item.assetId) && scope === 'mine') continue;
+      if (removed.has(item.identity) && scope === 'mine') continue;
       if (source && source !== 'all' && item.source !== source) continue;
       if (p.get('view') === 'favorites' && !favoriteKeys.has(item.key) && !favoriteKeys.has(`reference_image:${item.referenceImageId}`)) continue;
       if (p.has('keys') && !keys.includes(item.key) && !keys.includes(`reference_image:${item.referenceImageId}`)) continue;

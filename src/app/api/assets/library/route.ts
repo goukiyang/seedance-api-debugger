@@ -10,7 +10,7 @@ import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/vid
 import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
-import { removedLibraryAssetIds } from '@/lib/assets/library-removal';
+import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 
 export const dynamic = 'force-dynamic';
@@ -469,6 +469,7 @@ async function loadVideoItems(options: {
   page: number;
   limit: number;
   includeForMerge: boolean;
+  removedIds: string[];
 }) {
   const user = options.user;
 
@@ -482,6 +483,10 @@ async function loadVideoItems(options: {
     includeDeleted,
   });
   const filters: Prisma.VideoTaskWhereInput[] = [];
+  if (options.removedIds.length) filters.push({ NOT: {
+    id: { in: options.removedIds },
+    OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],
+  } });
 
   if (options.scope === 'user') {
     if (user.role !== 'admin') {
@@ -605,6 +610,7 @@ async function loadAssetItems(options: {
   includeUploads: boolean;
   includeGenerated: boolean;
   take: number;
+  removedIds: string[];
 }) {
   if (options.enhance !== 'none') {
     return { items: [] as LibraryItem[], total: 0 };
@@ -620,8 +626,8 @@ async function loadAssetItems(options: {
   const where: PrismaTypes.AssetWhereInput = {
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
   };
-  const removedIds = await removedLibraryAssetIds(options.userId);
-  if (removedIds.length && options.status !== 'hidden') where.id = { notIn: removedIds };
+  const removedIds = options.removedIds;
+  if (removedIds.length) where.NOT = { id: { in: removedIds }, owner_id: options.userId };
   const hiddenUrls = await studioHiddenAssetUrls(options.user);
   if (hiddenUrls.length) where.original_url = { notIn: hiddenUrls };
   if (options.type === 'image') where.type = 'image';
@@ -666,7 +672,7 @@ async function loadAssetItems(options: {
         ? Prisma.sql`AND asset."owner_id" = ${options.ownerUserId}`
         : Prisma.empty;
     const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
-    const privacyFilter = Prisma.sql`${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length && options.status !== 'hidden' ? Prisma.sql`AND asset."id" NOT IN (${Prisma.join(removedIds)})` : Prisma.empty}`;
+    const privacyFilter = Prisma.sql`${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length ? Prisma.sql`AND NOT (asset."id" IN (${Prisma.join(removedIds)}) AND asset."owner_id" = ${options.userId})` : Prisma.empty}`;
     const generatedFilter = Prisma.sql`AND EXISTS (
       SELECT 1 FROM "ImageStudioTask" generated_task
       WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'
@@ -740,6 +746,8 @@ async function loadReferenceItems(options: {
   ownerUserId: string | null;
   keyword: string | null;
   take: number;
+  removedIds: string[];
+  removedAssetIds: string[];
 }) {
   if (options.enhance !== 'none') {
     return { items: [] as LibraryItem[], total: 0 };
@@ -753,7 +761,13 @@ async function loadReferenceItems(options: {
 
   const where: Prisma.ReferenceImageWhereInput = {
     status: options.status === 'hidden' ? 'deleted' : 'active',
-    AND: [await studioVisibleReferenceWhere(options.user)],
+    AND: [await studioVisibleReferenceWhere(options.user), { NOT: {
+      owner_user_id: options.user.id,
+      OR: [
+        { id: { in: options.removedIds }, asset_id: null },
+        { asset_id: { in: options.removedAssetIds }, asset: { owner_id: options.user.id } },
+      ],
+    } }],
   };
   if (options.projectId) {
     where.project_id = options.projectId;
@@ -818,6 +832,9 @@ export async function GET(request: NextRequest) {
     const includeUploads = searchParams.get('include_uploads') === 'true';
     const includeGenerated = searchParams.get('include_generated') === 'true';
     const includeForMerge = type === 'all';
+    // Private library preferences must not alter project/shared or admin audit views.
+    const removed = scope === 'history' && !projectId && status !== 'hidden'
+      ? await removedLibraryResources(user.id) : { asset: [], video_task: [], reference_image: [] };
 
     if (scope === 'user' && user.role !== 'admin') {
       return NextResponse.json({ error: '权限不足' }, { status: 403 });
@@ -838,6 +855,7 @@ export async function GET(request: NextRequest) {
         page,
         limit,
         includeForMerge,
+        removedIds: removed.video_task,
       }),
       (includeUploads || includeGenerated)
         ? loadAssetItems({
@@ -853,6 +871,7 @@ export async function GET(request: NextRequest) {
           includeUploads,
           includeGenerated,
           take: includeForMerge ? takeForMerge : limit,
+          removedIds: removed.asset,
         })
         : Promise.resolve({ items: [] as LibraryItem[], total: 0 }),
       loadReferenceItems({
@@ -865,6 +884,8 @@ export async function GET(request: NextRequest) {
         ownerUserId,
         keyword,
         take: includeForMerge ? takeForMerge : limit,
+        removedIds: removed.reference_image,
+        removedAssetIds: removed.asset,
       }),
     ]);
 
