@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [模板上下文及设置模板管理 UI1-UI3 / CTX1-CTX4](todo/2026-10-04-template-context-version-code.md)：2026-10-04 v0.40.0已部署；移除交付详情、模板改名/更新/归档、生成按钮移至主图上方、原文稳定五位码及历史标签。源码116ee2a，BUILD irfPSW4cqY4pqCko6De9P；发布检查通过，待用户手动验收。曾因worker SQLite超时回退，未人工重启worker，最终PID稳定；经过、风险、14源码/15公网静态证据与统一diff见工单第11节。[资料索引](../docs/materials/index.md#模板上下文五位版本码2026-10-04)。
 - [设置保存成功关闭统一修正 S1/S2](todo/2026-10-04-settings-save-close.md)：2026-10-04 v0.39.1已部署；图片/视频上下文、模板编辑弹窗及后台 API 设置统一成功退出、失败留输入，多表单与新草稿保护。源码9c8a9ac（codex/settings-save-close-20261004），衔接v0.39.0保留原新版功能，构建/17源码/19新公网静态/4服务检查通过；待用户手动功能验收。[统一diff](todo/2026-10-04-settings-save-close.diff)、[证据](todo/2026-10-04-settings-save-close.evidence.json)。
 - [D1统一素材库实施与发布](todo/2026-10-02-unified-resource-library.md#10-最新设计实施与发布2026-10-03)：按设计v1.2.0与v2原图实施；图片/视频参考直接开库，库内上传、类型/来源分离，真实图集/项目、全范围搜索、收藏、最近选用与顺序添加接通。v0.37.0已部署正式站（应用源码6d2f390，来自codex/canvas-liblib-layout，本目录仅同步记录）；构建/远端/公网/回退证据见工单，待用户手动验收。L2部分完成：use-only且无原图下载权限的共享/公共图片不能用于图片工作台，明确禁选；视频参考保留原ReferenceImage适配。[资料索引](../docs/materials/index.md#统一素材库批准实施)。
 - [C3/C4更新提醒](todo/2026-10-02-feedback-primary-navigation.md#c3c4更新刷新与外部提醒2026-10-03)：已部署v0.36.10，源码b26f9d216949c3601d2cc36d050e6fc922422ab1、BUILD MFC_yPnyTMuIibuxAwjsx；去掉无条件刷新二次确认，安全存入浏览器的模板草稿不误报丢失，真正保存/上传未完成及保存失败仍保护。外部保留版本提醒及刷新入口，不展示/返回更新摘要；23公网静态/8源码一致，4服务active，待用户手动验收。[原图索引](../docs/materials/index.md#更新刷新重复提醒与外部摘要)、[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。

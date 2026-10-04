@@ -7,7 +7,7 @@
 工单路径：/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-04-template-context-version-code.md
 目标页面：https://sd2.youdooart.com/template-studio?type=image
 登记日期：2026-10-04（Asia/Shanghai）
-状态：实施中，整批实现后统一候选构建与发布检查；功能由用户手动验收
+状态：v0.40.0 已实现并部署，发布检查通过；功能待用户手动验收，首次切换/回退异常如实记录见第 11 节
 
 本轮授权更新（2026-10-04）：用户明确要求“落地实现”，并授权 UI1-UI3、CTX1-CTX4 的实现、聚焦 Git 与可回退服务器部署。下文“本轮只整理工单／仅文档／不实施／不发布”是原工单签发时的历史边界，已被本次明确授权替代；其他原文、权限、历史、Provider、计费与手动验收边界仍有效。
 实际应用源：/Volumes/Data/Projects/video-api-debugger/worktrees/template-context-controls-20261004，分支 codex/template-context-controls-20261004。应用唯一版本来源 package.json，本轮兼容能力升级 v0.40.0；不发布旧 canvas 源、不改封面试验。
@@ -73,13 +73,13 @@
 
 | 编号 | 任务 | 完成标准 | 当前状态 |
 |---|---|---|---|
-| UI1 | 移除交付详情 | 结果卡不再显示该区块 | 进行中 |
-| UI2 | 设置模板管理 | 已保存设置可改名、更新、删除 | 进行中 |
-| UI3 | 生成按钮前移 | 放到主图上方，保留原提交规则 | 进行中 |
-| CTX1 | 稳定五位码 | 原文相同同码，改回原文复用旧码 | 进行中 |
-| CTX2 | 显示与复制 | 入口、编辑框、结果行显示正确版本 | 进行中 |
-| CTX3 | 历史对应 | 版本跟随原上下文，不改旧结果 | 进行中 |
-| CTX4 | 发布交付 | 构建、回退及上线检查完成 | 未开始 |
+| UI1 | 移除交付详情 | 结果卡不再显示该区块 | 进行中：实现与部署完成，待手动验收 |
+| UI2 | 设置模板管理 | 已保存设置可改名、更新、删除 | 进行中：实现与部署完成，待手动验收 |
+| UI3 | 生成按钮前移 | 放到主图上方，保留原提交规则 | 进行中：实现与部署完成，待手动验收 |
+| CTX1 | 稳定五位码 | 原文相同同码，改回原文复用旧码 | 进行中：实现与部署完成，待手动验收 |
+| CTX2 | 显示与复制 | 入口、编辑框、结果行显示正确版本 | 进行中：实现与部署完成，待手动验收 |
+| CTX3 | 历史对应 | 版本跟随原上下文，不改旧结果 | 进行中：实现与部署完成，待手动验收 |
+| CTX4 | 发布交付 | 构建、回退及上线检查完成 | 已完成：发布检查见第 11 节 |
 
 CTX1先确定编码语义和安全存储契约；CTX2与CTX3可在边界隔离时并行实施，再统一集成。此处是后续工作包建议，本轮不派子agent、不开启其他任务或向主线程发送消息。
 
@@ -134,3 +134,53 @@ CTX1先确定编码语义和安全存储契约；CTX2与CTX3可在边界隔离�
 附件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png，仅现有布局参考，无新码设计/实施证明。
 回执：按CTX1-CTX4逐项报告真实实现、检查、Git/发布与待手动验收状态，说明应用版本、实际入口、回退点、缺失旧快照处理及未做项；不能将工单完成说成产品完成。
 ```
+
+## 11. 本批实施与发布记录（2026-10-04）
+
+### 实际交付与证据
+
+- 应用版本 v0.40.0；实际应用源码 `116ee2a82c1c3541c10c751674433d4958ffb54f`；最终 BUILD `irfPSW4cqY4pqCko6De9P`。代码来源分支 `codex/template-context-controls-20261004`，已有 Q1/Q2 与 v0.39.1 保存成功关闭全部保留。后续固定记录提交不改变应用版本、线上源码标识或构建。
+- 正式入口 https://sd2.youdooart.com/template-studio?type=image 。最终候选完整源码与 Git archive 一致；14 份变更源码逐字节哈希一致；公网 `/api/config`、`/api/release`、`/login` 均 200 且来源 `server-42-193`，公开版本为 0.40.0；目标页面 15 份静态文件逐份 SHA-256 一致。没有自动操作 DOM、截图、调用生成或功能验收。
+- 正式根私有：[部署检查 JSON](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/deployment-v0.40.0.json)、[统一应用 diff](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/implementation-v0.40.0.diff)、[最终候选构建日志](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/build-v0.40.0.log)、[首次切换及回退证据](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/deployment-v0.40.0-first-switch.json)。原始附件、这些日志/JSON/diff 不上传 Git 或发布源码包；工作树同样引用正式根，不复制私有素材。
+- 最终源码归档 SHA-256 `7f51cf4bbbfc60c5dd21fc473a9a0585ed8f813f5295b524353e09236d8d22e3`；候选路径 `/srv/video-api-debugger/releases/116ee2a82c1c3541c10c751674433d4958ffb54f`；发布检查目录 `/srv/video-api-debugger/backups/sd2-template-context-v0400-4d4d63e-116ee2a82c1c3541c10c751674433d4958ffb54f`。
+- 远端已推送回退 tag `rollback/2026-10-04-before-template-context-v0.40.0`，解析目标 `9c8a9ac9af5894f552e8b9d0d30b95cb47442c15`（v0.39.1）。原源码发布目录存在，运行构建保护在 `/srv/video-api-debugger/app/.next-prod-before-sd2-template-context-v0400-4d4d63e`，BUILD `Bh-CIEFvI5EM3Y7NndzrU`。已真实执行过一次源码/构建回退，不只是创建 tag。
+- 最终四服务 `sd2-gray.service`、`sd2-image-studio.service`、`sd2-video-delivery.timer`、`sd2-finalize-pending.timer` 均 active；三个数据软链仍指向 `/data/video-api-debugger/var-lib`，原环境文件属性及持久目录写权限通过发布脚本检查。未读取环境值、未直接执行生产 SQL、迁移或回填；未人工重启图片 worker。
+
+### 逐文件改动
+
+以下相对实际应用工作树；应用统一差异为 live 9c8a9ac 到最终 116ee2a，14 文件。固定记录另外同步两个根的本工单、`tasks/todo.md` 当前入口和 `docs/materials/index.md` 本条；正式根其他待办脏改及 V1 私有资料原样保留。
+
+| 文件 | 本轮内容 |
+|---|---|
+| src/lib/image-studio/context-version.ts | 原文 SHA-256、五位混合码、双唯一键原子登记、64 次分配尝试/5 次事务重试；同文复用、旧快照标签、只读已有映射、新写入队列及 SQLite 先写后读。 |
+| src/lib/image-studio/preset-lifecycle.ts | 原模板归档元数据读取，不删除原模板或历史来源。 |
+| src/lib/image-studio/presets.ts | 模板列表过滤归档；所有者/revision 校验的改名、覆盖、归档；拒绝归档后的管理/关联/套用；历史另存取原快照并保持来源权限；列表标签不泄露原文。 |
+| src/lib/image-studio/modules.ts | 模块原文标签；归档来源不被默认同步改写，保留历史配置；管理权限投影保持既有边界。 |
+| src/lib/image-studio/tasks.ts | 生成事务绑定有效原文及标签规则；旧记录在现有可见范围内惰性解析，不重写任务；requestId、Provider 格式及积分身份不变。 |
+| src/app/api/image-studio/context-version/route.ts | 已登录/原模块与本人任务范围内解析；只返回 code/state；非管理员不能提交外来共享隐藏上下文。 |
+| src/app/api/image-studio/presets/route.ts | 接入 rename/replace/delete，复用现有身份/权限与安全错误响应。 |
+| src/app/api/image-studio/tasks/route.ts | 生成时版本分配错误安全返回；其他动作不变。 |
+| src/app/image-studio/context-version-label.tsx | 小号等宽码及独立复制按钮；450ms 防抖、IME 完成、取消请求/最新响应隔离、失败重试；错误不伪装旧码。 |
+| src/app/image-studio/studio.tsx | 删结果卡技术交付区，保留进度/错误/恢复；快捷入口旁管理模板与可见编辑/更新/删除；选择当前模块草稿覆盖，站内确认/失败保留；生成按钮及成本/状态移到主图上方；入口/编辑器/结果三处标签。 |
+| src/app/image-studio/studio.module.css | 紧凑标签行、模板管理操作、选择来源换行及主图上方生成布局。 |
+| package.json | 唯一应用版本从 0.39.1 升至 0.40.0。 |
+| package-lock.json | 仅同步根版本字段；依赖、安装及解析内容未变。 |
+| src/lib/release.ts | 对应本批用户可感知摘要；复用既有版本提醒与稍后/刷新保护，不新增平行更新系统。 |
+
+### 检查与发布实际经过
+
+1. 实施后 `git diff --check` 通过，唯一 lead 做实际代码差异 Review；未派独立审核 agent。初版 `4d4d63e` 候选构建通过，但 stdin 已关闭导致等待确认失败，未切换线上。
+2. 主管窄范围审查指出“模块版本标签只依赖 moduleContext”。`73b3b2f` 修正旧标签缺失条件；Q1 完整历史复现的 moduleContext + globalContext 条件不变。该候选构建成功（BUILD `wSxZWasOMWEh-wrO2cs_h`），第一次 SSH 等待输入通道断连，确认未切换后结束旧控制进程；改为有时限的独立确认文件与 keepalive，复用该候选，不重复抬版本。
+3. 73b3b2f 曾实际切换且公网版本/源码/静态检查通过。收尾服务检查发现 23:26:01 原 worker PID 1241475 在 updateMany 上遇 SQLite 查询超时并退出，systemd 自动拉起四次；这是真实日志证据，不是 Review 推测。立即恢复 9c8a9ac / v0.39.1 / 原 BUILD，只停止/启动网站，不重启 worker、不改 DB。23:29:58 回退后又发生一次自动退出，23:30:03 起 PID 3909309，原因未确认，不把它硬归为新标签代码。
+4. `116ee2a` 收敛新增标签写入：已登记映射只读，新映射及生成快照登记事务在同进程串行；先占位取得写锁再读取映射，占位只在事务内可见，失败整体回滚。双唯一键、全局原文稳定、有限重试和权限契约不变。不修改 Provider、worker、账务或数据库结构。该修正针对并发写争用风险；没有获准业务复现，不能声称已证明所有超时因果。
+5. 修正后候选 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 退出 0，Next.js 内置 lint/type 通过（保留已有 img 优化等警告）；`bash -n` 发布脚本通过；归档、候选全源码、受保护路径及版本字段核对通过。最终切换至 116ee2a / BUILD irfPSW4cqY4pqCko6De9P；公网 3 入口、14 源码及 15 静态文件一致。新候选与最新应用代码一致，未用旧候选冒充修正。
+6. `node /tmp/sd2-template-context-gate.mjs reserve` 在上传/切换前返回 canProceed=true，无其他发布；远端 `flock` 保护切换；最终完成登记在健康收尾后执行。关键命令及结果存证在上述 JSON/日志：`git ls-remote --heads`、`git ls-remote --tags`；服务 is-active/show；.deployed-commit/BUILD_ID；仅公开 GET/static 字节读取。未运行 test:api、db:push、浏览器、截图、自动回归或收费生成。
+7. worker 的“不得人工重启”已遵守，但“原 PID 全程不变”没有达成：首次异常后自动替换，不能隐去。最终切换前后/收尾 PID 3909309、启动时间 23:30:03 一致，unit 哈希不变；继续以运行健康证据记录，未冒称自动重启从未发生。
+
+### 手动验收与剩余不确定性
+
+功能未自动验收。UI1-UI3、CTX1-CTX3 已实现并发布，等待用户按第 7 节原清单手动检查。补充：自己的已保存模板改名、选择正确模块当前草稿覆盖、取消/失败/过期 revision 保留输入；删除确认只移除配置入口，不删除产出或原历史配置；外来共享项只读；旧快照只有 moduleContext 仍有标签，但完整原上下文复现仍需两份上下文。快速关联刷新/重开保持，旧自有模板可关联。
+
+剩余风险是本次 worker 超时与回退后一次自动退出的完整因果未通过业务复现证明；最终服务与新产物正常不等于生成、扣费、历史恢复或 UI 效果通过。用户若手动发现生成/保存异常，应优先查正式服务器日志与当前版本，不盲目重发生成。无新独立重构、回收站、封面/banner 替换或依赖变更。守门员：L3 持久化/所有权与服务保护；无风险分级误判记录，无活动子 worker，发布命令会话完成后交回。
+
+写争用判断采用 [SQLite 官方事务说明](https://www.sqlite.org/lang_transaction.html#read_transactions_versus_write_transactions)（只允许一个写事务，先读后写可能升级失败）与 [WAL 并发说明](https://www.sqlite.org/wal.html#concurrency)；不新增库、不执行生产 PRAGMA。已有实现与正式日志为主要依据，外部文档不能替代本项目运行证据。
