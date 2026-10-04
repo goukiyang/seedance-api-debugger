@@ -1,0 +1,23 @@
+{
+  "version": "0.41.0",
+  "commit": "3e55c6609920e6e81253f087f59307eca9327293",
+  "build": "HCmFzUDsnr43fQC62KZlg",
+  "url": "https://sd2.youdooart.com",
+  "releaseTag": "release/0.41.0-avatar-generator-20261005",
+  "rollbackTag": "rollback/2026-10-05-before-avatar-generator-0.41.0",
+  "rollbackCommit": "116ee2a82c1c3541c10c751674433d4958ffb54f",
+  "rollbackBuild": "irfPSW4cqY4pqCko6De9P",
+  "archiveSha256": "fa21b0ad0f78a3bbec6cc1ceef2ac29e13ac3e111b8dc6a7316e3ae18ac8466e",
+  "candidateBuild": "success, existing server dependencies, no install",
+  "publicEvidence": "sd2-avatar-public-proof.json",
+  "independentPublicEvidence": "public-from-local.json",
+  "runtimeEvidence": "sd2-avatar-runtime-proof.json",
+  "p5StaticEvidence": "sd2-avatar-p5-static-proof.json",
+  "sourceDiff": "source.diff",
+  "functionalAcceptance": "not executed; user manual acceptance required",
+  "P1": "implemented and deployed; manual acceptance pending",
+  "P2": "implemented and deployed; manual acceptance pending",
+  "P3": "in progress; owned Asset deployed, owned video_task and reference_image without Asset pending 0.41.1 correction",
+  "P4": "0.41.0 published and rollback protected; correction release pending",
+  "P5": "implemented and deployed; manual acceptance pending"
+}

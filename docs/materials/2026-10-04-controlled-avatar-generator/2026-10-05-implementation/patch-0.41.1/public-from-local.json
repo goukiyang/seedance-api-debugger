@@ -1,0 +1,28 @@
+{
+  "checkedAt": "2026-10-04T18:44:10.904Z",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193",
+      "version": "0.41.1",
+      "channel": "production"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/_next/static/chunks/3482-c33222a36047e2d4.js",
+      "status": 200,
+      "origin": "server-42-193",
+      "sha256": "fcaf9a5e0fc0d3b7f8f6d0a31f0205210feea2d50aa86402481cb7ae21538734"
+    }
+  ]
+}

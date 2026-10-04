@@ -1,0 +1,50 @@
+{
+  "checkedAt": "2026-10-04T18:43:18.956Z",
+  "deployedCommit": "2b1c4cfea7d0eeb9e99e0cf0b712056742c59536",
+  "version": "0.41.1",
+  "build": "TVyNICHldwYntu2SSA7Po",
+  "rollbackCommit": "3e55c6609920e6e81253f087f59307eca9327293",
+  "rollbackSource": "/srv/video-api-debugger/releases/3e55c6609920e6e81253f087f59307eca9327293-avatar-rollback",
+  "rollbackBuild": "HCmFzUDsnr43fQC62KZlg",
+  "services": [
+    {
+      "name": "sd2-gray.service",
+      "MainPID": "4071644",
+      "NRestarts": "0",
+      "ExecMainStatus": "0",
+      "WorkingDirectory": "/srv/video-api-debugger/app",
+      "User": "gouki",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    {
+      "name": "sd2-image-studio.service",
+      "MainPID": "4043738",
+      "NRestarts": "0",
+      "ExecMainStatus": "0",
+      "WorkingDirectory": "/srv/video-api-debugger/app",
+      "User": "gouki",
+      "ActiveState": "active",
+      "SubState": "running"
+    }
+  ],
+  "links": [
+    {
+      "path": "storage",
+      "isSymlink": true,
+      "target": "/data/video-api-debugger/var-lib/storage"
+    },
+    {
+      "path": "public/uploads",
+      "isSymlink": true,
+      "target": "/data/video-api-debugger/var-lib/uploads"
+    },
+    {
+      "path": "public/videos",
+      "isSymlink": true,
+      "target": "/data/video-api-debugger/var-lib/videos"
+    }
+  ],
+  "drainCleared": true,
+  "workerUninterrupted": true
+}

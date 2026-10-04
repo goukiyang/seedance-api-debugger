@@ -1,0 +1,29 @@
+{
+  "checkedAt": "2026-10-04T18:09:55.519Z",
+  "vantage": "local-workspace-to-public-domain",
+  "checks": [
+    {
+      "path": "/api/release",
+      "status": 200,
+      "origin": "server-42-193",
+      "version": "0.41.0",
+      "channel": "production"
+    },
+    {
+      "path": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/api/health",
+      "status": 200,
+      "origin": "server-42-193",
+      "ok": true
+    },
+    {
+      "path": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    }
+  ]
+}

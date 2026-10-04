@@ -1,0 +1,49 @@
+{
+  "commit": "3e55c6609920e6e81253f087f59307eca9327293",
+  "version": "0.41.0",
+  "build": "HCmFzUDsnr43fQC62KZlg",
+  "checkedAt": "2026-10-04T18:08:56.886Z",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/chunks/app/tools/avatar-studio/page-467079acf88565c1.js",
+      "status": 200,
+      "sha256": "1ef2cbf3f1a1d5b384d41fa9b67ff873fe389d367d0c33fc2f165d8d97eb6ece",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/image-studio/page",
+      "file": "static/chunks/app/image-studio/page-3fa89fc62b82c2c0.js",
+      "status": 200,
+      "sha256": "1fc1806c0ea673332417e93e07d07c0694288d05bfe3e70d4197f6099234b0f4",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/login/page",
+      "file": "static/chunks/app/login/page-5393c500b46ede1d.js",
+      "status": 200,
+      "sha256": "2afa73934282cdb425e05aecaba565504134997fdf8f0162c18b547204674432",
+      "matchesCandidate": true
+    }
+  ]
+}

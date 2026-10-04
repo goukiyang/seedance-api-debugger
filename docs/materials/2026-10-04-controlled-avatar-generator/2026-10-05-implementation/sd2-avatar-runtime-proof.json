@@ -1,0 +1,47 @@
+{
+  "checkedAt": "2026-10-04T18:12:09.997Z",
+  "deployedCommit": "3e55c6609920e6e81253f087f59307eca9327293",
+  "version": "0.41.0",
+  "build": "HCmFzUDsnr43fQC62KZlg",
+  "rollbackBuild": "irfPSW4cqY4pqCko6De9P",
+  "services": [
+    {
+      "name": "sd2-gray.service",
+      "MainPID": "4043663",
+      "NRestarts": "0",
+      "ExecMainStatus": "0",
+      "WorkingDirectory": "/srv/video-api-debugger/app",
+      "User": "gouki",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    {
+      "name": "sd2-image-studio.service",
+      "MainPID": "4043738",
+      "NRestarts": "0",
+      "ExecMainStatus": "0",
+      "WorkingDirectory": "/srv/video-api-debugger/app",
+      "User": "gouki",
+      "ActiveState": "active",
+      "SubState": "running"
+    }
+  ],
+  "links": [
+    {
+      "path": "storage",
+      "isSymlink": true,
+      "target": "/data/video-api-debugger/var-lib/storage"
+    },
+    {
+      "path": "public/uploads",
+      "isSymlink": true,
+      "target": "/data/video-api-debugger/var-lib/uploads"
+    },
+    {
+      "path": "public/videos",
+      "isSymlink": true,
+      "target": "/data/video-api-debugger/var-lib/videos"
+    }
+  ],
+  "drainCleared": true
+}
