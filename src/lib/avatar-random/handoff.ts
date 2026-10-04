@@ -11,9 +11,9 @@ type Ticket = { id: string; target: AvatarReturnTarget; fingerprint: string; exp
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 async function destination(user: SessionUser, target: AvatarReturnTarget, tx: Prisma.TransactionClient | typeof prisma = prisma) {
   if(target.kind==='image-module'){
-    const module=await tx.imageStudioModule.findFirst({where:{id:target.id,owner_id:user.id}});
-    if(!module && target.id!==`default-${user.id}` || module && module.revision!==target.revision)throw new StudioError('原图片模板版本已变化，请重新选择',409);
-    return {fingerprint:hash([target.id,module?.revision??target.revision,module?.updated_at??null]),assetIds:target.currentAssetIds,imageCount:target.currentAssetIds.length,draft:null};
+    const imageModule=await tx.imageStudioModule.findFirst({where:{id:target.id,owner_id:user.id}});
+    if(!imageModule && target.id!==`default-${user.id}` || imageModule && imageModule.revision!==target.revision)throw new StudioError('原图片模板版本已变化，请重新选择',409);
+    return {fingerprint:hash([target.id,imageModule?.revision??target.revision,imageModule?.updated_at??null]),assetIds:target.currentAssetIds,imageCount:target.currentAssetIds.length,draft:null};
   }
   if (target.kind === 'workspace') {
     const workspace = await tx.workspace.findFirst({ where: { id: target.id, owner_id: user.id, status: 'active' } });
