@@ -57,10 +57,12 @@ export async function GET(request: NextRequest) {
     });
     const albums: PickerAlbum[] = [];
     const downloadableAlbums = new Set<string>();
+    const usableAlbumIds: string[] = [];
     const scopeAlbumIds: string[] = [];
     for (const album of candidates) {
       const access = await getAlbumAccess(user, album);
       if (!access.permissions.view || !access.permissions.use) continue;
+      usableAlbumIds.push(album.id);
       if (access.permissions.download) downloadableAlbums.add(album.id);
       const memberships: PickerScope[] = [];
       if (album.owner_user_id === user.id && album.album_type === 'personal') memberships.push('mine');
@@ -79,11 +81,15 @@ export async function GET(request: NextRequest) {
       ...(q ? { file_name: { contains: q } } : {}),
     };
     const refWhere: Prisma.ReferenceImageWhereInput = {
-      album_id: { in: permittedAlbums }, status: 'active', AND: [visibleRefs, { OR: [
+      status: 'active', AND: [visibleRefs, { OR: [
+        { album_id: { in: permittedAlbums } },
+        ...(scope === 'mine' && !albumId && !projectId
+          ? [{ owner_user_id: user.id, asset_id: null, album_id: { in: usableAlbumIds } }] : []),
+      ] }, { OR: [
         { asset: { is: { status: 'active', type: { in: imageStudio ? ['image'] : types } } } },
         ...(imageStudio || types.includes('image') ? [{ asset_id: null }] : []),
       ] }],
-      ...(q ? { OR: [{ asset: { file_name: { contains: q } } }, { album: { name: { contains: q } } }] } : {}),
+      ...(q ? { OR: [{ asset: { file_name: { contains: q } } }, { album: { name: { contains: q } } }, { id: { contains: q } }] } : {}),
     };
     const [assets, references, generatedTasks, favorites, videoTasks] = await Promise.all([
       scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
