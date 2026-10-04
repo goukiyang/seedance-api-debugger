@@ -13,7 +13,20 @@ export class ContextVersionError extends Error {
   constructor(message = '模块上下文版本暂时无法读取，请重试', public status = 503) { super(message); }
 }
 
+const allocationState = globalThis as typeof globalThis & {
+  studioContextWriter?: Promise<void>;
+};
+
 export async function withContextVersionRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = allocationState.studioContextWriter ?? Promise.resolve();
+  let release!: () => void;
+  allocationState.studioContextWriter = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try { return await retryContextVersion(operation); }
+  finally { release(); }
+}
+
+async function retryContextVersion<T>(operation: () => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < 5; attempt++) {
     try { return await operation(); }
     catch (error) {
@@ -30,8 +43,10 @@ export async function withContextVersionRetry<T>(operation: () => Promise<T>): P
 // Both unique reservations commit together; a losing concurrent transaction retries as a whole.
 export async function bindModuleContextVersion(raw: string, tx: Prisma.TransactionClient): Promise<string> {
   const hash = createHash('sha256').update(raw, 'utf8').digest('hex');
-  const existing = await tx.platformSetting.findUnique({ where: { key: hashKey(hash) } });
-  if (existing) {
+  // Acquire SQLite's writer before reading a new mapping; the placeholder cannot escape this transaction.
+  const existing = await tx.platformSetting.upsert({ where: { key: hashKey(hash) },
+    create: { key: hashKey(hash), value_json: JSON.stringify({ code: null }) }, update: { key: hashKey(hash) } });
+  if (JSON.parse(existing.value_json).code !== null) {
     const value = JSON.parse(existing.value_json);
     if (!validContextVersion(value.code)) throw new ContextVersionError();
     const reverse = await tx.platformSetting.findUnique({ where: { key: codeKey(value.code) } });
@@ -43,18 +58,29 @@ export async function bindModuleContextVersion(raw: string, tx: Prisma.Transacti
     if (!validContextVersion(code)) continue;
     if (await tx.platformSetting.findUnique({ where: { key: codeKey(code) }, select: { id: true } })) continue;
     await tx.platformSetting.create({ data: { key: codeKey(code), value_json: JSON.stringify({ hash }) } });
-    await tx.platformSetting.create({ data: { key: hashKey(hash), value_json: JSON.stringify({ code }) } });
+    await tx.platformSetting.update({ where: { key: hashKey(hash) }, data: { value_json: JSON.stringify({ code }) } });
     return code;
   }
   throw new ContextVersionError('模块上下文版本码分配已达重试上限，请联系管理员');
 }
 
 const pending = new Map<string, Promise<string>>();
+async function readModuleContextVersion(hash: string): Promise<string | null> {
+  const stored = await prisma.platformSetting.findUnique({ where: { key: hashKey(hash) } });
+  if (!stored) return null;
+  const value = JSON.parse(stored.value_json);
+  if (!validContextVersion(value.code)) throw new ContextVersionError();
+  const reverse = await prisma.platformSetting.findUnique({ where: { key: codeKey(value.code) } });
+  if (!reverse || JSON.parse(reverse.value_json).hash !== hash) throw new ContextVersionError();
+  return value.code;
+}
+
 export function resolveModuleContextVersion(raw: string): Promise<string> {
   const hash = createHash('sha256').update(raw, 'utf8').digest('hex');
   const existing = pending.get(hash);
   if (existing) return existing;
-  const operation = withContextVersionRetry(() => prisma.$transaction(tx => bindModuleContextVersion(raw, tx)))
+  const operation = readModuleContextVersion(hash).then(code => code ??
+    withContextVersionRetry(() => prisma.$transaction(tx => bindModuleContextVersion(raw, tx))))
     .finally(() => pending.delete(hash));
   pending.set(hash, operation);
   return operation;
